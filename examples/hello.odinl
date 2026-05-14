@@ -1,0 +1,8 @@
+(package main)
+
+(import "core:fmt")
+
+(proc main [] void
+  (fmt.println "hello from odin-clj")
+  (let x int 41)
+  (fmt.println (+ x 1)))
