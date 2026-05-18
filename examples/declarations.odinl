@@ -24,6 +24,18 @@
     .Not-Found "not found"
     :else "unknown"))
 
+(proc endpoint-summary [] -> string
+  (let [endpoint (Endpoint {:path "/health" :status .OK})
+        {:path path :status status} endpoint]
+    (if (== status .OK)
+      path
+      "")))
+
+(proc shorthand-status-code [] -> int
+  (let [endpoint (Endpoint {:path "/health" :status .Not-Found})
+        {:status} endpoint]
+    (status-code status)))
+
 (proc main []
   (let [endpoint (Endpoint {:path "/health" :status .OK})]
     (fmt.println (status-label (:status endpoint)))))
@@ -37,4 +49,10 @@
 
   (status-label .Not-Found)
   ;; => not found
+
+  (endpoint-summary)
+  ;; => /health
+
+  (shorthand-status-code)
+  ;; => 404
 )

@@ -32,7 +32,11 @@ These forms return owned values in normal OdinL code:
 (keep f xs)
 (mapcat f xs)
 (concat xs ys)
+(into [dynamic]int xs)
+(interpose sep xs)
+(interleave xs ys)
 (reverse xs)
+(shuffle pick xs)
 (sort xs)
 (sort-by f xs)
 (sort-by :field xs)
@@ -162,6 +166,23 @@ dynamic array because they compact and resize the existing storage:
   (into! xs more)
   (len xs))
 ```
+
+## Allocator Scopes
+
+`with-allocator` temporarily changes `context.allocator` for a lexical block:
+
+```clojure
+(with-allocator [allocator context.temp_allocator]
+  (let [xs (make [dynamic]int)]
+    (defer (delete xs))
+    ...))
+```
+
+The generated Odin stores the old allocator, assigns the requested allocator,
+and restores the old allocator with `defer`. Defers created inside the body run
+before the restore defer, so local `delete` calls still use the scoped
+allocator. Values returned from the block transfer ownership to the caller, so
+the caller must delete them with the matching allocator discipline.
 
 ## Returning Owned Values
 

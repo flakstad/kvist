@@ -663,6 +663,7 @@ The intended v0.1 scope is deliberately small:
 
 - flat vector destructuring for multi-return bindings
 - `_` allowed for ignored positions
+- flat struct-field destructuring in `let`
 - no generalized nested destructuring yet
 - no protocol-driven binding sugar in the core language
 
@@ -679,8 +680,7 @@ Examples:
 This keeps the core language explicit while leaving room for later macro-based
 binding abstractions such as `when-bind`.
 
-Later destructuring should still lower to obvious Odin assignments. Struct
-field destructuring is the likely next step because it is only field access:
+Struct field destructuring lowers to obvious Odin assignments:
 
 ```clojure
 (let [{:name name
@@ -695,11 +695,13 @@ name := user.name
 age := user.age
 ```
 
-Shorthand such as `{ :name :age }` may also be reasonable if it expands to
-same-named locals. Map destructuring is a separate question because Odin map
-lookup has presence semantics, not Clojure nil-as-missing semantics. It should
-not be added until the generated code can stay explicit about whether lookup
-failure is allowed.
+Shorthand such as `{:name :age}` expands to same-named locals. The compiler may
+introduce a temporary so the source expression is evaluated once before fields
+are pulled out.
+
+Map destructuring is a separate question because Odin map lookup has presence
+semantics, not Clojure nil-as-missing semantics. It should not be added until
+the generated code can stay explicit about whether lookup failure is allowed.
 
 ### `do`
 
@@ -1554,21 +1556,35 @@ runtime facility.
 
 ### `with-*` forms
 
-Allocator-oriented `with-*` forms are a strong candidate for macros rather than
-primitive language forms.
+Allocator-oriented `with-*` forms should behave like macro-expanded resource
+scopes over ordinary Odin. `with-allocator` is supported directly while the
+general macro system is still pending.
 
-Examples of the shape worth exploring later:
+The implemented shape is:
 
 ```clojure
-(with-arena [arena (make-arena allocator)]
-  ...)
-
 (with-allocator [allocator some-allocator-expr]
   ...)
 ```
 
-These are attractive because they can expand into combinations of existing core
-forms such as:
+It lowers to the moral equivalent of:
+
+```odin
+{
+    allocator := some_allocator_expr
+    old_allocator := context.allocator
+    context.allocator = allocator
+    defer context.allocator = old_allocator
+    ...
+}
+```
+
+This is intentionally simple: the allocator value is visible, the old allocator
+is restored by `defer`, and ordinary `delete` calls in the body run before the
+allocator is restored.
+
+Other `with-*` forms are still attractive because they can expand into
+combinations of existing core forms such as:
 
 - `let`
 - `defer`
@@ -1585,11 +1601,16 @@ ordinary explicit Odin-shaped control flow.
 For example, allocator helpers should keep ownership visible:
 
 ```clojure
+(with-allocator [allocator context.temp_allocator]
+  (let [buffer (make [dynamic]int)]
+    (defer (delete buffer))
+    ...))
+
 (with-arena [arena (make-arena allocator)]
   (work (:allocator arena)))
 ```
 
-should expand to the moral equivalent of:
+An arena helper should expand to the moral equivalent of:
 
 ```clojure
 (let [arena (make-arena allocator)]

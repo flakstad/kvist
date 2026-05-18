@@ -32,6 +32,9 @@
 (proc negative [x: int] -> int
   (- x))
 
+(proc pick-first [n: int] -> int
+  0)
+
 (proc square-even [x: int] -> [value: int, ok: bool]
   (if (even? x)
     (return (* x x) true)
@@ -148,6 +151,25 @@
     (defer (delete reversed))
     (first reversed)))
 
+(proc interposed-total [] -> int
+  (let [xs (new []int [1 2 3])
+        separated (interpose 10 xs)]
+    (defer (delete separated))
+    (reduce add 0 separated)))
+
+(proc interleaved-total [] -> int
+  (let [xs (new []int [1 2 3])
+        ys (new []int [10 20])
+        joined (interleave xs ys)]
+    (defer (delete joined))
+    (reduce add 0 joined)))
+
+(proc shuffled-first [] -> int
+  (let [xs (new []int [1 2 3 4])
+        shuffled (shuffle pick-first xs)]
+    (defer (delete shuffled))
+    (first shuffled)))
+
 (proc sorted-second [] -> int
   (let [xs (new []int [4 1 3 2])
         sorted (sort xs)]
@@ -214,6 +236,12 @@
     (defer (delete xs))
     (into! xs more)
     (reduce add 0 xs)))
+
+(proc copied-total [] -> int
+  (let [xs (new []int [1 2 3])
+        copied (into [dynamic]int xs)]
+    (defer (delete copied))
+    (reduce add 0 copied)))
 
 (proc distinct-total [] -> int
   (let [xs (new []int [1 2 2 3 3])
@@ -308,6 +336,15 @@
   (concat-reversed-first)
   ;; => 4
 
+  (interposed-total)
+  ;; => 26
+
+  (interleaved-total)
+  ;; => 33
+
+  (shuffled-first)
+  ;; => 2
+
   (sorted-second)
   ;; => 2
 
@@ -340,6 +377,9 @@
 
   (appended-total)
   ;; => 10
+
+  (copied-total)
+  ;; => 6
 
   (distinct-total)
   ;; => 6

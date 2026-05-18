@@ -1003,6 +1003,86 @@ main :: proc() {
 }
 
 @(test)
+compile_struct_field_destructuring :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(struct User {
+  :name string
+  :age int
+})
+
+(proc main []
+  (let [user (User {:name "Ada" :age 36})
+        {:name user-name :age user-age} user
+        {:age} user]
+    (return)))`
+
+    output, err, ok := odinl.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    expected := `package main
+
+User :: struct {
+    name: string,
+    age: int,
+}
+
+main :: proc() {
+    user := User{name = "Ada", age = 36}
+    odinl_destructure_1 := user
+    user_name := odinl_destructure_1.name
+    user_age := odinl_destructure_1.age
+    odinl_destructure_2 := user
+    age := odinl_destructure_2.age
+    return
+}
+`
+    testing.expect_value(t, output, expected)
+}
+
+@(test)
+compile_with_allocator_scope :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(proc main []
+  (with-allocator [allocator context.temp_allocator]
+    (let [buffer (make [dynamic]int)]
+      (defer (delete buffer))
+      (into! buffer (new []int [1 2]))
+      (return))))`
+
+    output, err, ok := odinl.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    expected := `package main
+
+main :: proc() {
+    {
+        allocator := context.temp_allocator
+        odinl_old_allocator_1 := context.allocator
+        context.allocator = allocator
+        defer context.allocator = odinl_old_allocator_1
+        buffer := make([dynamic]int)
+        defer delete(buffer)
+        append(&(buffer), ..[]int{1, 2})
+        return
+    }
+}
+`
+    testing.expect_value(t, output, expected)
+}
+
+@(test)
 compile_proc_types_and_literals :: proc(t: ^testing.T) {
     source := `(package main)
 
@@ -1272,6 +1352,9 @@ compile_additional_sequence_helpers :: proc(t: ^testing.T) {
 (proc neg [x: int] -> int
   (- x))
 
+(proc pick-first [n: int] -> int
+  0)
+
 (proc main []
   (let [xs (new []int [1 2 3])
         mutable (new [dynamic]int [1 2 3])
@@ -1281,7 +1364,11 @@ compile_additional_sequence_helpers :: proc(t: ^testing.T) {
         kept (keep keep-even xs)
         flattened (mapcat pair xs)
         joined (concat without-evens ys)
+        copied (into [dynamic]int xs)
+        interposed (interpose 0 xs)
+        interleaved (interleave xs ys)
         reversed (reverse joined)
+        shuffled (shuffle pick-first joined)
         sorted (sort joined)
         descending (sort-by neg joined)
         threaded-flat (->> xs
@@ -1298,7 +1385,11 @@ compile_additional_sequence_helpers :: proc(t: ^testing.T) {
     (defer (delete kept))
     (defer (delete flattened))
     (defer (delete joined))
+    (defer (delete copied))
+    (defer (delete interposed))
+    (defer (delete interleaved))
     (defer (delete reversed))
+    (defer (delete shuffled))
     (defer (delete sorted))
     (defer (delete descending))
     (defer (delete threaded-flat))
@@ -1327,7 +1418,11 @@ compile_additional_sequence_helpers :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "kept := odinl_keep(keep_even, (xs)[:])"), true)
     testing.expect_value(t, strings.contains(output, "flattened := odinl_mapcat(pair, (xs)[:])"), true)
     testing.expect_value(t, strings.contains(output, "joined := odinl_concat((without_evens)[:], (ys)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "copied := odinl_into([dynamic]int, (xs)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "interposed := odinl_interpose(0, (xs)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "interleaved := odinl_interleave((xs)[:], (ys)[:])"), true)
     testing.expect_value(t, strings.contains(output, "reversed := odinl_reverse((joined)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "shuffled := odinl_shuffle(pick_first, (joined)[:])"), true)
     testing.expect_value(t, strings.contains(output, "sorted := odinl_sort((joined)[:])"), true)
     testing.expect_value(t, strings.contains(output, "descending := odinl_sort_by(neg, (joined)[:])"), true)
     testing.expect_value(t, strings.contains(output, "odinl_thread_1 := odinl_mapcat(pair, (xs)[:])"), true)
@@ -1351,6 +1446,10 @@ compile_additional_sequence_helpers :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "odinl_map_indexed :: proc(f: proc(i: int, x: $T) -> $U, xs: []T) -> [dynamic]U"), true)
     testing.expect_value(t, strings.contains(output, "odinl_keep :: proc(f: proc(x: $T) -> ($U, bool), xs: []T) -> [dynamic]U"), true)
     testing.expect_value(t, strings.contains(output, "odinl_mapcat :: proc(f: proc(x: $T) -> []$U, xs: []T) -> [dynamic]U"), true)
+    testing.expect_value(t, strings.contains(output, "odinl_into :: proc($Out: typeid, xs: []$T) -> Out"), true)
+    testing.expect_value(t, strings.contains(output, "odinl_interpose :: proc(sep: $T, xs: []T) -> [dynamic]T"), true)
+    testing.expect_value(t, strings.contains(output, "odinl_interleave :: proc(xs, ys: []$T) -> [dynamic]T"), true)
+    testing.expect_value(t, strings.contains(output, "odinl_shuffle :: proc(pick: proc(n: int) -> int, xs: []$T) -> [dynamic]T"), true)
     testing.expect_value(t, strings.contains(output, "odinl_sort :: proc(xs: []$T) -> [dynamic]T"), true)
     testing.expect_value(t, strings.contains(output, "odinl_sort_by :: proc(f: proc(x: $T) -> $K, xs: []T) -> [dynamic]T"), true)
     testing.expect_value(t, strings.contains(output, "odinl_reverse_in_place :: proc(xs: []$T)"), true)

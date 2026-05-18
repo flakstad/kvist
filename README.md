@@ -111,8 +111,8 @@ The CLI can also invoke Odin for generated files directly:
 
 The examples cover control flow, collection literals, procedure values,
 core sequence helpers over scalars and structs, pointer/raw interop,
-source-level procedure directives, named returns, and flat multi-return
-destructuring.
+source-level procedure directives, named returns, flat multi-return
+destructuring, and struct-field destructuring.
 
 The compiler implementation is in Odin under `src/odinl`; the CLI entry point
 is `cmd/odinl/main.odin`.
@@ -530,7 +530,10 @@ foreign_call :: proc(handle: Foreign_Handle) ---
 - `(union Name {:variant Type ...})`
 - `(proc name [arg: type, ...] -> return-type body...)`
 - top-level and statement `(odin "...")` raw escape hatches
-- `(let [binding value ...] body...)` scoped expression/block
+- `(let [binding value ...] body...)` scoped expression/block, including
+  multi-return and struct-field destructuring
+- `(with-allocator [allocator expr] body...)` scoped `context.allocator`
+  override with `defer` restoration
 - `(set! place expr)` -> `place = expr`
 - final expression in a non-void proc emits `return <expr>`
 - `(if test then else)`
@@ -545,7 +548,8 @@ foreign_call :: proc(handle: Foreign_Handle) ---
   `(find pred xs)`, `(some? pred xs)`, `(every? pred xs)`, `(first xs)`,
   `(second xs)`, `(last xs)`, `(nth xs n)`, `(rest xs)`, `(empty? xs)`,
   `(remove pred xs)`, `(map-indexed f xs)`, `(keep f xs)`, `(mapcat f xs)`,
-  `(concat xs ys)`, `(reverse xs)`, `(sort xs)`, `(sort-by f xs)`,
+  `(concat xs ys)`, `(into [dynamic]T xs)`, `(interpose sep xs)`,
+  `(interleave xs ys)`, `(reverse xs)`, `(shuffle pick xs)`, `(sort xs)`, `(sort-by f xs)`,
   `(sort-by :field xs)`, mutating `(reverse! xs)`, `(sort! xs)`,
   `(sort-by! f xs)`, `(sort-by! :field xs)`, `(map! f xs)`,
   `(map-indexed! f xs)`, `(filter! pred xs)`, `(filter! :field xs)`,

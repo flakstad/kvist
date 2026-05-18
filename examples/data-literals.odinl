@@ -28,6 +28,13 @@
     (defer (delete buffer))
     (count buffer)))
 
+(proc temp-buffer-len [] -> int
+  (with-allocator [allocator context.temp_allocator]
+    (let [buffer (make [dynamic]int)]
+      (defer (delete buffer))
+      (into! buffer (new []int [1 2]))
+      (count buffer))))
+
 (proc lookup-two [] -> int
   (let [lookup (new map[string]int {"one" 1 "two" 2})]
     (defer (delete lookup))
@@ -54,6 +61,9 @@
 
   (empty-buffer-len)
   ;; => 0
+
+  (temp-buffer-len)
+  ;; => 2
 
   (lookup-two)
   ;; => 2

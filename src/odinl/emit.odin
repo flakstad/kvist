@@ -20,8 +20,12 @@ Emitter_Features :: struct {
     core_keep:        bool,
     core_mapcat:      bool,
     core_concat:      bool,
+    core_into:        bool,
+    core_interpose:   bool,
+    core_interleave:  bool,
     core_reverse:     bool,
     core_reverse_in_place: bool,
+    core_shuffle:     bool,
     core_map_in_place: bool,
     core_map_indexed_in_place: bool,
     core_filter_in_place: bool,
@@ -180,6 +184,24 @@ mark_core_concat :: proc(e: ^Emitter) {
     }
 }
 
+mark_core_into :: proc(e: ^Emitter) {
+    if e.features != nil {
+        e.features.core_into = true
+    }
+}
+
+mark_core_interpose :: proc(e: ^Emitter) {
+    if e.features != nil {
+        e.features.core_interpose = true
+    }
+}
+
+mark_core_interleave :: proc(e: ^Emitter) {
+    if e.features != nil {
+        e.features.core_interleave = true
+    }
+}
+
 mark_core_reverse :: proc(e: ^Emitter) {
     if e.features != nil {
         e.features.core_reverse = true
@@ -189,6 +211,12 @@ mark_core_reverse :: proc(e: ^Emitter) {
 mark_core_reverse_in_place :: proc(e: ^Emitter) {
     if e.features != nil {
         e.features.core_reverse_in_place = true
+    }
+}
+
+mark_core_shuffle :: proc(e: ^Emitter) {
+    if e.features != nil {
+        e.features.core_shuffle = true
     }
 }
 
@@ -802,12 +830,59 @@ emit_thread_step :: proc(e: ^Emitter, current: string, step: CST_Form, thread_la
             mark_core_concat(e)
             return emit_call_text("odinl_concat", []string{slice_all_expr_text(current), slice_all_expr_text(rhs)}), {}, true
         }
+        if thread_last && head.text == "into" {
+            if len(step.items) != 2 {
+                return "", Compile_Error{message = "into thread step expects one dynamic array type argument", span = step.span}, false
+            }
+            type_text, err_type, ok_type := parse_type_text(step.items[1])
+            if !ok_type {
+                return "", err_type, false
+            }
+            if !type_text_is_dynamic_array(type_text) {
+                return "", Compile_Error{message = "into currently expects a dynamic array type", span = step.items[1].span}, false
+            }
+            mark_core_into(e)
+            return emit_call_text("odinl_into", []string{type_text, slice_all_expr_text(current)}), {}, true
+        }
+        if thread_last && head.text == "interpose" {
+            if len(step.items) != 2 {
+                return "", Compile_Error{message = "interpose thread step expects one separator argument", span = step.span}, false
+            }
+            sep, err_sep, ok_sep := emit_expr(e, step.items[1])
+            if !ok_sep {
+                return "", err_sep, false
+            }
+            mark_core_interpose(e)
+            return emit_call_text("odinl_interpose", []string{sep, slice_all_expr_text(current)}), {}, true
+        }
+        if thread_last && head.text == "interleave" {
+            if len(step.items) != 2 {
+                return "", Compile_Error{message = "interleave thread step expects one collection argument", span = step.span}, false
+            }
+            lhs, err_lhs, ok_lhs := emit_expr(e, step.items[1])
+            if !ok_lhs {
+                return "", err_lhs, false
+            }
+            mark_core_interleave(e)
+            return emit_call_text("odinl_interleave", []string{slice_all_expr_text(lhs), slice_all_expr_text(current)}), {}, true
+        }
         if thread_last && head.text == "reverse" {
             if len(step.items) != 1 {
                 return "", Compile_Error{message = "reverse thread step expects no arguments", span = step.span}, false
             }
             mark_core_reverse(e)
             return emit_call_text("odinl_reverse", []string{slice_all_expr_text(current)}), {}, true
+        }
+        if thread_last && head.text == "shuffle" {
+            if len(step.items) != 2 {
+                return "", Compile_Error{message = "shuffle thread step expects one picker function argument", span = step.span}, false
+            }
+            pick, err_pick, ok_pick := emit_expr(e, step.items[1])
+            if !ok_pick {
+                return "", err_pick, false
+            }
+            mark_core_shuffle(e)
+            return emit_call_text("odinl_shuffle", []string{pick, slice_all_expr_text(current)}), {}, true
         }
         if thread_last && head.text == "sort" {
             if len(step.items) != 1 {
@@ -1052,8 +1127,11 @@ thread_step_result_kind :: proc(step: CST_Form, thread_last: bool) -> Thread_Res
         if thread_last && (head.text == "map" || head.text == "filter" ||
                            head.text == "remove" || head.text == "map-indexed" ||
                            head.text == "keep" || head.text == "mapcat" ||
-                           head.text == "concat" ||
-                           head.text == "reverse" || head.text == "sort" ||
+                           head.text == "concat" || head.text == "into" ||
+                           head.text == "interpose" ||
+                           head.text == "interleave" ||
+                           head.text == "reverse" || head.text == "shuffle" ||
+                           head.text == "sort" ||
                            head.text == "sort-by" || head.text == "zipmap" ||
                            head.text == "index-by" || head.text == "group-by" ||
                            head.text == "frequencies" || head.text == "distinct" ||
@@ -1142,6 +1220,7 @@ owned_sequence_head :: proc(name: string) -> bool {
     switch name {
     case "map", "filter", "remove", "map-indexed", "keep", "mapcat",
          "concat", "reverse", "sort", "sort-by",
+         "into", "interpose", "interleave", "shuffle",
          "partition", "partition-all", "partition-by",
          "zipmap", "index-by", "group-by", "frequencies",
          "distinct", "distinct-by",
@@ -1255,6 +1334,16 @@ emit_binding_assignment :: proc(e: ^Emitter, binding: Binding, value: string) {
         }
         fmt.sbprintf(&line_builder, " := %s", value)
         emit_prefixed_expr(e, "", strings.clone(strings.to_string(line_builder)))
+    } else if binding.is_field_destructure {
+        e.temp_counter += 1
+        target := fmt.tprintf("odinl_destructure_%d", e.temp_counter)
+        emit_prefixed_expr(e, fmt.tprintf("%s := ", target), value)
+        for field in binding.fields {
+            if field.name == "_" {
+                continue
+            }
+            emit_prefixed_expr(e, fmt.tprintf("%s := ", field.name), fmt.tprintf("%s.%s", target, field.field))
+        }
     } else if binding.is_typed {
         emit_prefixed_expr(e, fmt.tprintf("%s: %s = ", binding.name, binding.ty), value)
     } else {
@@ -1335,6 +1424,10 @@ field_from_keyword :: proc(form: CST_Form) -> (field: string, ok: bool) {
 
 field_type_expr_text :: proc(collection, field: string) -> string {
     return fmt.tprintf("type_of((%s)[0].%s)", collection, field)
+}
+
+type_text_is_dynamic_array :: proc(text: string) -> bool {
+    return len(text) >= 9 && text[:9] == "[dynamic]"
 }
 
 emit_map_callback_call :: proc(e: ^Emitter, callback: CST_Form, collection: string) -> (string, Compile_Error, bool) {
@@ -1917,6 +2010,25 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         return emit_call_text("append", []string{address_of_expr_text(target), fmt.tprintf("..%s", slice_all_expr_text(collection))}), {}, true
     }
 
+    if head.text == "into" {
+        if len(form.items) != 3 {
+            return "", Compile_Error{message = "into expects dynamic array type and collection", span = form.span}, false
+        }
+        type_text, err_type, ok_type := parse_type_text(form.items[1])
+        if !ok_type {
+            return "", err_type, false
+        }
+        if !type_text_is_dynamic_array(type_text) {
+            return "", Compile_Error{message = "into currently expects a dynamic array type", span = form.items[1].span}, false
+        }
+        collection, err_collection, ok_collection := emit_expr(e, form.items[2])
+        if !ok_collection {
+            return "", err_collection, false
+        }
+        mark_core_into(e)
+        return emit_call_text("odinl_into", []string{type_text, slice_all_expr_text(collection)}), {}, true
+    }
+
     if head.text == "concat" {
         if len(form.items) != 3 {
             return "", Compile_Error{message = "concat expects two collections", span = form.span}, false
@@ -1933,6 +2045,38 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         return emit_call_text("odinl_concat", []string{slice_all_expr_text(lhs), slice_all_expr_text(rhs)}), {}, true
     }
 
+    if head.text == "interpose" {
+        if len(form.items) != 3 {
+            return "", Compile_Error{message = "interpose expects separator and collection", span = form.span}, false
+        }
+        sep, err_sep, ok_sep := emit_expr(e, form.items[1])
+        if !ok_sep {
+            return "", err_sep, false
+        }
+        collection, err_collection, ok_collection := emit_expr(e, form.items[2])
+        if !ok_collection {
+            return "", err_collection, false
+        }
+        mark_core_interpose(e)
+        return emit_call_text("odinl_interpose", []string{sep, slice_all_expr_text(collection)}), {}, true
+    }
+
+    if head.text == "interleave" {
+        if len(form.items) != 3 {
+            return "", Compile_Error{message = "interleave expects two collections", span = form.span}, false
+        }
+        lhs, err_lhs, ok_lhs := emit_expr(e, form.items[1])
+        if !ok_lhs {
+            return "", err_lhs, false
+        }
+        rhs, err_rhs, ok_rhs := emit_expr(e, form.items[2])
+        if !ok_rhs {
+            return "", err_rhs, false
+        }
+        mark_core_interleave(e)
+        return emit_call_text("odinl_interleave", []string{slice_all_expr_text(lhs), slice_all_expr_text(rhs)}), {}, true
+    }
+
     if head.text == "reverse" {
         if len(form.items) != 2 {
             return "", Compile_Error{message = "reverse expects collection", span = form.span}, false
@@ -1943,6 +2087,22 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         }
         mark_core_reverse(e)
         return emit_call_text("odinl_reverse", []string{slice_all_expr_text(collection)}), {}, true
+    }
+
+    if head.text == "shuffle" {
+        if len(form.items) != 3 {
+            return "", Compile_Error{message = "shuffle expects picker function and collection", span = form.span}, false
+        }
+        pick, err_pick, ok_pick := emit_expr(e, form.items[1])
+        if !ok_pick {
+            return "", err_pick, false
+        }
+        collection, err_collection, ok_collection := emit_expr(e, form.items[2])
+        if !ok_collection {
+            return "", err_collection, false
+        }
+        mark_core_shuffle(e)
+        return emit_call_text("odinl_shuffle", []string{pick, slice_all_expr_text(collection)}), {}, true
     }
 
     if head.text == "reverse!" {
@@ -2492,13 +2652,62 @@ emit_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) 
     return "", Compile_Error{message = "unsupported expression", span = form.span}, false
 }
 
+Binding_Field :: struct {
+    field: string,
+    name:  string,
+}
+
 Binding :: struct {
     is_destructure: bool,
+    is_field_destructure: bool,
     name:           string,
     pattern:        [dynamic]string,
+    fields:         [dynamic]Binding_Field,
     is_typed:       bool,
     ty:             string,
     value:          CST_Form,
+}
+
+parse_field_destructure_binding :: proc(form: CST_Form) -> (fields: [dynamic]Binding_Field, err: Compile_Error, ok: bool) {
+    if len(form.items) == 0 {
+        return fields, Compile_Error{message = "field destructuring expects at least one field", span = form.span}, false
+    }
+
+    all_keywords := true
+    for item in form.items {
+        if item.kind != .Keyword {
+            all_keywords = false
+            break
+        }
+    }
+    if all_keywords {
+        for item in form.items {
+            name := map_name(item.text[1:])
+            append(&fields, Binding_Field{field = name, name = name})
+        }
+        return fields, {}, true
+    }
+
+    if len(form.items)%2 != 0 {
+        return fields, Compile_Error{message = "field destructuring expects field/local pairs", span = form.span}, false
+    }
+    i := 0
+    for i < len(form.items) {
+        key := form.items[i]
+        local := form.items[i+1]
+        if key.kind != .Keyword {
+            return fields, Compile_Error{message = "field destructuring expects keyword fields", span = key.span}, false
+        }
+        if local.kind != .Symbol {
+            return fields, Compile_Error{message = "field destructuring expects symbol locals", span = local.span}, false
+        }
+        append(&fields, Binding_Field{
+            field = map_name(key.text[1:]),
+            name = map_name(local.text),
+        })
+        i += 2
+    }
+    return fields, {}, true
 }
 
 parse_let_bindings :: proc(form: CST_Form) -> (bindings: [dynamic]Binding, err: Compile_Error, ok: bool) {
@@ -2523,6 +2732,20 @@ parse_let_bindings :: proc(form: CST_Form) -> (bindings: [dynamic]Binding, err: 
             append(&bindings, Binding{
                 is_destructure = true,
                 pattern = names,
+                value = form.items[i+1],
+            })
+            i += 2
+        case .Brace:
+            if i+1 >= len(form.items) {
+                return bindings, Compile_Error{message = "field destructuring binding missing value", span = target.span}, false
+            }
+            fields, err_fields, ok_fields := parse_field_destructure_binding(target)
+            if !ok_fields {
+                return bindings, err_fields, false
+            }
+            append(&bindings, Binding{
+                is_field_destructure = true,
+                fields = fields,
                 value = form.items[i+1],
             })
             i += 2
@@ -2670,6 +2893,43 @@ emit_cond_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns:
         i += 2
     }
 
+    return {}, true
+}
+
+emit_with_allocator_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Return_Spec) -> (Compile_Error, bool) {
+    if len(form.items) < 3 {
+        return Compile_Error{message = "with-allocator expects binding vector and body", span = form.span}, false
+    }
+    binding := form.items[1]
+    if binding.kind != .Vector || len(binding.items) != 2 || binding.items[0].kind != .Symbol {
+        return Compile_Error{message = "with-allocator expects [name allocator] binding", span = binding.span}, false
+    }
+    allocator_name := map_name(binding.items[0].text)
+    allocator_expr, err_allocator, ok_allocator := emit_expr(e, binding.items[1])
+    if !ok_allocator {
+        return err_allocator, false
+    }
+
+    e.temp_counter += 1
+    old_allocator := fmt.tprintf("odinl_old_allocator_%d", e.temp_counter)
+    emit_line(e, "{")
+    e.indent += 1
+    emit_prefixed_expr(e, fmt.tprintf("%s := ", allocator_name), allocator_expr)
+    emit_line(e, fmt.tprintf("%s := context.allocator", old_allocator))
+    emit_line(e, fmt.tprintf("context.allocator = %s", allocator_name))
+    emit_line(e, fmt.tprintf("defer context.allocator = %s", old_allocator))
+
+    body: [dynamic]CST_Form
+    for item in form.items[2:] {
+        append(&body, item)
+    }
+    err_body, ok_body := emit_body_forms(e, body[:], returns_when_final(last_in_proc, returns))
+    if !ok_body {
+        return err_body, false
+    }
+
+    e.indent -= 1
+    emit_line(e, "}")
     return {}, true
 }
 
@@ -2970,6 +3230,8 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
         return emit_if_like(e, "if", form, last_in_proc, returns)
     case "cond":
         return emit_cond_stmt(e, form, last_in_proc, returns)
+    case "with-allocator":
+        return emit_with_allocator_stmt(e, form, last_in_proc, returns)
     case "switch":
         return emit_switch_stmt(e, form, last_in_proc, returns)
     case "return":
@@ -3620,6 +3882,58 @@ emit_core_concat_helper :: proc(e: ^Emitter) {
     emit_line(e, "}")
 }
 
+emit_core_into_helper :: proc(e: ^Emitter) {
+    emit_line(e, "odinl_into :: proc($Out: typeid, xs: []$T) -> Out {")
+    e.indent += 1
+    emit_line(e, "out := make(Out, 0, len(xs))")
+    emit_line(e, "append(&out, ..xs)")
+    emit_line(e, "return out")
+    e.indent -= 1
+    emit_line(e, "}")
+}
+
+emit_core_interpose_helper :: proc(e: ^Emitter) {
+    emit_line(e, "odinl_interpose :: proc(sep: $T, xs: []T) -> [dynamic]T {")
+    e.indent += 1
+    emit_line(e, "out := make([dynamic]T)")
+    emit_line(e, "if len(xs) == 0 {")
+    e.indent += 1
+    emit_line(e, "return out")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "append(&out, xs[0])")
+    emit_line(e, "for x in xs[1:] {")
+    e.indent += 1
+    emit_line(e, "append(&out, sep)")
+    emit_line(e, "append(&out, x)")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "return out")
+    e.indent -= 1
+    emit_line(e, "}")
+}
+
+emit_core_interleave_helper :: proc(e: ^Emitter) {
+    emit_line(e, "odinl_interleave :: proc(xs, ys: []$T) -> [dynamic]T {")
+    e.indent += 1
+    emit_line(e, "n := len(xs)")
+    emit_line(e, "if len(ys) < n {")
+    e.indent += 1
+    emit_line(e, "n = len(ys)")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "out := make([dynamic]T, 0, n*2)")
+    emit_line(e, "for i := 0; i < n; i += 1 {")
+    e.indent += 1
+    emit_line(e, "append(&out, xs[i])")
+    emit_line(e, "append(&out, ys[i])")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "return out")
+    e.indent -= 1
+    emit_line(e, "}")
+}
+
 emit_core_reverse_helper :: proc(e: ^Emitter) {
     emit_line(e, "odinl_reverse :: proc(xs: []$T) -> [dynamic]T {")
     e.indent += 1
@@ -3643,6 +3957,22 @@ emit_core_reverse_in_place_helper :: proc(e: ^Emitter) {
     emit_line(e, "xs[i], xs[j] = xs[j], xs[i]")
     e.indent -= 1
     emit_line(e, "}")
+    e.indent -= 1
+    emit_line(e, "}")
+}
+
+emit_core_shuffle_helper :: proc(e: ^Emitter) {
+    emit_line(e, "odinl_shuffle :: proc(pick: proc(n: int) -> int, xs: []$T) -> [dynamic]T {")
+    e.indent += 1
+    emit_line(e, "out := make([dynamic]T, 0, len(xs))")
+    emit_line(e, "append(&out, ..xs)")
+    emit_line(e, "for i := len(out)-1; i > 0; i -= 1 {")
+    e.indent += 1
+    emit_line(e, "j := pick(i+1)")
+    emit_line(e, "out[i], out[j] = out[j], out[i]")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "return out")
     e.indent -= 1
     emit_line(e, "}")
 }
@@ -4374,8 +4704,10 @@ core_helpers_needed :: proc(features: Emitter_Features) -> bool {
            features.core_take_while || features.core_drop_while ||
            features.core_find || features.core_some || features.core_every ||
            features.core_remove || features.core_map_indexed || features.core_keep ||
-           features.core_mapcat || features.core_concat ||
+           features.core_mapcat || features.core_concat || features.core_into ||
+           features.core_interpose || features.core_interleave ||
            features.core_reverse || features.core_reverse_in_place ||
+           features.core_shuffle ||
            features.core_map_in_place || features.core_map_indexed_in_place ||
            features.core_filter_in_place || features.core_remove_in_place ||
            features.core_keep_in_place ||
@@ -4487,6 +4819,18 @@ emit_core_helpers :: proc(e: ^Emitter, features: Emitter_Features) {
         emit_core_helper_separator(e, &emitted)
         emit_core_concat_helper(e)
     }
+    if features.core_into {
+        emit_core_helper_separator(e, &emitted)
+        emit_core_into_helper(e)
+    }
+    if features.core_interpose {
+        emit_core_helper_separator(e, &emitted)
+        emit_core_interpose_helper(e)
+    }
+    if features.core_interleave {
+        emit_core_helper_separator(e, &emitted)
+        emit_core_interleave_helper(e)
+    }
     if features.core_reverse {
         emit_core_helper_separator(e, &emitted)
         emit_core_reverse_helper(e)
@@ -4494,6 +4838,10 @@ emit_core_helpers :: proc(e: ^Emitter, features: Emitter_Features) {
     if features.core_reverse_in_place {
         emit_core_helper_separator(e, &emitted)
         emit_core_reverse_in_place_helper(e)
+    }
+    if features.core_shuffle {
+        emit_core_helper_separator(e, &emitted)
+        emit_core_shuffle_helper(e)
     }
     if features.core_sort {
         emit_core_helper_separator(e, &emitted)
