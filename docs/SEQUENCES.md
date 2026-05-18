@@ -40,6 +40,7 @@ These helpers are already in scope and should remain small:
 (keep f xs)
 (mapcat f xs)
 (concat xs ys)
+(merge a b)
 (into [dynamic]T xs)
 (interpose sep xs)
 (interleave xs ys)
@@ -49,6 +50,7 @@ These helpers are already in scope and should remain small:
 (sort-by f xs)
 (sort-by :field xs)
 (reverse! xs)
+(shuffle! pick xs)
 (sort! xs)
 (sort-by! f xs)
 (sort-by! :field xs)
@@ -60,6 +62,7 @@ These helpers are already in scope and should remain small:
 (remove! :field xs)
 (keep! f xs)
 (into! target xs)
+(merge! target source)
 (split-at n xs)
 (partition n xs)
 (partition-all n xs)
@@ -95,13 +98,15 @@ These helpers are already in scope and should remain small:
 (rest xs)
 (empty? xs)
 (count xs)
+(get m k default)
 (contains? collection key)
 ```
 
 The access and trimming helpers use the direct Odin representation where
 possible. `first`, `second`, `last`, and `nth` lower to indexing. `empty?`
 lowers to `len`. `rest`, `take`, `drop`, `take-while`, and `drop-while` return
-non-owning slice views.
+non-owning slice views. Three-argument `get` is a map helper: it uses Odin's
+comma-ok lookup and returns the supplied default when the key is absent.
 
 Builder helpers such as `map`, `filter`, `remove`, `map-indexed`, `keep`,
 `mapcat`, `concat`, `into`, `interpose`, `interleave`, `reverse`, `shuffle`,
@@ -110,8 +115,10 @@ dynamic arrays. `into` is currently only for explicit dynamic-array targets,
 for example `(into [dynamic]int xs)`. `distinct` and `distinct-by` also
 return owned dynamic arrays and use a temporary `map[key]bool` internally, so
 the value or key must be valid as an Odin map key. `zipmap`, `index-by`, and
-`frequencies` return owned maps. `group-by` returns an owned map whose values
-are owned dynamic arrays; delete each group before deleting the map.
+`frequencies` return owned maps. `merge` returns an owned map that combines two
+input maps, with right-hand values replacing duplicate keys. `group-by` returns
+an owned map whose values are owned dynamic arrays; delete each group before
+deleting the map.
 `partition`, `partition-all`, and `partition-by` return owned dynamic arrays of
 borrowed slice chunks. `keep` is Odin-shaped: the callback returns `(value,
 ok)`, and only `ok` values are appended. `mapcat` is also Odin-shaped: the
@@ -192,8 +199,9 @@ For hot paths, prefer one of these shapes:
 
 - use slice-view helpers such as `take`, `drop`, `rest`, and `split-at` when a
   borrowed view is enough;
-- use bang helpers such as `sort!`, `reverse!`, `map!`, `filter!`, `remove!`,
-  `keep!`, and `into!` when mutating existing storage is the right Odin choice;
+- use bang helpers such as `sort!`, `reverse!`, `shuffle!`, `map!`, `filter!`,
+  `remove!`, `keep!`, `into!`, and `merge!` when mutating existing storage is the
+  right Odin choice;
 - write an explicit `each` loop when one pass and no intermediate collection is
   needed;
 - later, use transducer-style lowering once it exists to fuse pipelines into one
@@ -202,10 +210,9 @@ For hot paths, prefer one of these shapes:
 ## Completion Before Transducers
 
 The eager sequence library is close to complete enough for ordinary code. The
-remaining pre-transducer work should stay small and direct:
-
-- broaden `into!` beyond dynamic arrays only when the target representation
-  stays obvious, such as a direct map merge.
+remaining pre-transducer work should stay small and direct. Dynamic-array append
+is covered by `into!`; map merge is covered by explicit `merge` and `merge!`.
+Avoid broadening these into a polymorphic collection protocol.
 
 Avoid helpers that imply lazy sequence semantics, nil-as-empty behavior, or a
 collection protocol. Prefer an explicit loop in user code when a helper's
@@ -216,20 +223,15 @@ lowering would be surprising.
 These are valuable, but each needs one deliberate design choice before
 implementation:
 
-```clojure
-(into! target xs)
-```
-
 The main questions are:
 
 - `into` currently constructs an owned dynamic array from a borrowed collection,
   and `into!` currently means dynamic-array append lowering directly to
-  `append(&target, ..xs)`. Maps could later merge key/value pairs, and sets
+  `append(&target, ..xs)`. Map combination is explicit `merge`/`merge!`. Sets
   would first need a concrete Odin representation. Treat this as explicit eager
   construction or mutation, not a polymorphic collection protocol.
-- `shuffle` is implemented with an explicit picker callback. A later
-  `shuffle!` would be reasonable if in-place randomization becomes common
-  enough to justify another bang helper.
+- `shuffle` and `shuffle!` are implemented with an explicit picker callback. The
+  caller owns the randomness policy; OdinL only performs the swaps.
 - `distinct` and `distinct-by` are implemented with temporary `map[key]bool`
   storage. Broader set-like helpers should keep using ordinary Odin map-backed
   representations unless a better concrete Odin shape appears.
@@ -347,11 +349,12 @@ Sequence helpers need an explicit ownership story:
 - Slice-view helpers such as `rest`, `take`, `drop`, `take-while`,
   `drop-while`, and `split-at` do not own data and must not be deleted.
 - Dynamic-array helpers such as `map`, `filter`, `remove`, `map-indexed`,
-  `keep`, `mapcat`, `concat`, `reverse`, `sort`, and `sort-by` allocate and
-  return owned dynamic arrays.
+  `keep`, `mapcat`, `concat`, `reverse`, `shuffle`, `sort`, and `sort-by`
+  allocate and return owned dynamic arrays.
 - Chunking helpers `partition`, `partition-all`, and `partition-by` allocate the
   outer dynamic array, but their slice chunks borrow the input collection.
-- `zipmap`, `index-by`, and `frequencies` allocate and return owned maps.
+- `merge`, `zipmap`, `index-by`, and `frequencies` allocate and return owned
+  maps.
 - `group-by` allocates an owned map and one owned dynamic array per key. Delete
   the groups, then delete the map.
 - Owned helper results must be bound or returned. Nested owned results such as

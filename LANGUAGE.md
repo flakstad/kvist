@@ -830,7 +830,11 @@ Mutation remains explicit.
 ```clojure
 (get xs 0)
 (get table key)
+(get table key default-value)
 ```
+
+The three-argument form is map-oriented and lowers to a tiny helper using Odin's
+ordinary comma-ok map lookup. It returns `default-value` when the key is absent.
 
 ### Keyword field access
 
@@ -911,7 +915,10 @@ The intended surface style can still be familiar:
 (map-indexed attach-index xs)
 (keep maybe-useful xs)
 (concat xs ys)
+(merge defaults overrides)
 (reverse xs)
+(shuffle pick xs)
+(shuffle! pick xs)
 (split-at 2 xs)
 (partition 2 xs)
 (partition-all 3 xs)
@@ -1526,6 +1533,11 @@ Useful editor commands later:
 - eval buffer/package context
 - macroexpand form
 - show lowered Odin
+
+The current CLI supports the last item directly through `odinl expand
+file.odinl FORM`, which emits the generated scratch Odin for the selected form
+without running it. This is a lowering preview, not a real macro expansion
+phase yet.
 
 The development model should become richer without becoming stateful. Tooling
 may support tap-style inspection, rerun watches, and disk-backed saved values,

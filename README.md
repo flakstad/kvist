@@ -102,6 +102,12 @@ Generate a scratch runner for one selected form with:
 ./odinl eval examples/higher-order.odinl '(reduce add 0 (new []int [1 2 3]))'
 ```
 
+Inspect the generated scratch Odin without running it with:
+
+```sh
+./odinl expand examples/higher-order.odinl '(reduce add 0 (new []int [1 2 3]))'
+```
+
 The CLI can also invoke Odin for generated files directly:
 
 ```sh
@@ -548,13 +554,13 @@ foreign_call :: proc(handle: Foreign_Handle) ---
   `(find pred xs)`, `(some? pred xs)`, `(every? pred xs)`, `(first xs)`,
   `(second xs)`, `(last xs)`, `(nth xs n)`, `(rest xs)`, `(empty? xs)`,
   `(remove pred xs)`, `(map-indexed f xs)`, `(keep f xs)`, `(mapcat f xs)`,
-  `(concat xs ys)`, `(into [dynamic]T xs)`, `(interpose sep xs)`,
+  `(concat xs ys)`, `(merge a b)`, `(into [dynamic]T xs)`, `(interpose sep xs)`,
   `(interleave xs ys)`, `(reverse xs)`, `(shuffle pick xs)`, `(sort xs)`, `(sort-by f xs)`,
-  `(sort-by :field xs)`, mutating `(reverse! xs)`, `(sort! xs)`,
-  `(sort-by! f xs)`, `(sort-by! :field xs)`, `(map! f xs)`,
+  `(sort-by :field xs)`, mutating `(reverse! xs)`, `(shuffle! pick xs)`,
+  `(sort! xs)`, `(sort-by! f xs)`, `(sort-by! :field xs)`, `(map! f xs)`,
   `(map-indexed! f xs)`, `(filter! pred xs)`, `(filter! :field xs)`,
   `(remove! pred xs)`, `(remove! :field xs)`, `(keep! f xs)`,
-  `(into! target xs)`,
+  `(into! target xs)`, `(merge! target source)`,
   `(split-at n xs)`,
   `(partition n xs)`, `(partition-all n xs)`, `(partition-by f xs)`,
   `(partition-by :field xs)`, `(zipmap keys vals)`, `(index-by f xs)`,
@@ -566,7 +572,7 @@ foreign_call :: proc(handle: Foreign_Handle) ---
 - keywords can stand in for field callbacks in those helpers, e.g. `(map :name users)`,
   `(index-by :id users)`, `(group-by :status users)`, `(partition-by :status users)`,
   `(sort-by :age users)`, and `(filter :verified users)`
-- `(:field value)`, `(get value key)`, `(-> value steps...)`, and `(->> value steps...)`
+- `(:field value)`, `(get value key)`, `(get map key default)`, `(-> value steps...)`, and `(->> value steps...)`
 - `(^ ptr)` and `(& place)`
 - numbers, booleans, `nil`, and `(nil? value)`
 - calls: `(foo a b)` -> `foo(a, b)`

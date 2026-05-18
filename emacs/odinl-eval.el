@@ -54,6 +54,7 @@
     (define-key map (kbd "C-c C-a") #'odinl-run-buffer)
     (define-key map (kbd "C-c C-b") #'odinl-build-buffer)
     (define-key map (kbd "C-c C-v") #'odinl-check-buffer)
+    (define-key map (kbd "C-c C-m") #'odinl-expand-form-at-point)
     (define-key map (kbd "C-c C-s") #'odinl-toggle-show-generated)
     (define-key map (kbd "C-c C-z") #'odinl-switch-to-result)
     map)
@@ -383,6 +384,33 @@ non-nil, run `odin check' instead of `odin run'.  DISPLAY may be `inline',
         (delete-file generated)))))
 
 ;;;###autoload
+(defun odinl-expand-form-at-point (&optional no-print)
+  "Show generated Odin for the form at point.
+With prefix argument NO-PRINT, lower the form as a statement."
+  (interactive "P")
+  (setq odinl--last-source-buffer (current-buffer))
+  (let* ((bounds (odinl--form-bounds-at-point))
+         (form (buffer-substring-no-properties (car bounds) (cdr bounds)))
+         (source (odinl--source-temp-file))
+         (generated-buffer (odinl--prepare-buffer odinl-generated-buffer-name))
+         (result-buffer (odinl--prepare-buffer odinl-result-buffer-name))
+         (args (append (list "expand" source form)
+                       (when no-print (list "--no-print"))))
+         (root (file-name-as-directory (odinl--project-root))))
+    (unwind-protect
+        (let* ((default-directory root)
+               (exit-code (odinl--call (odinl--executable) args generated-buffer))
+               (result (with-current-buffer generated-buffer
+                         (buffer-substring-no-properties (point-min) (point-max)))))
+          (if (zerop exit-code)
+              (progn
+                (display-buffer generated-buffer)
+                (message "odinl expand: ok"))
+            (odinl--display-output result-buffer result exit-code)))
+      (when (file-exists-p source)
+        (delete-file source)))))
+
+;;;###autoload
 (defun odinl-eval-form-at-point (&optional no-print)
   "Evaluate the OdinL form at point and show the result inline.
 With prefix argument NO-PRINT, treat the form as a statement."
@@ -565,6 +593,7 @@ With prefix argument NO-PRINT, treat the form as a statement."
   (local-set-key (kbd "C-c C-a") #'odinl-run-buffer)
   (local-set-key (kbd "C-c C-b") #'odinl-build-buffer)
   (local-set-key (kbd "C-c C-v") #'odinl-check-buffer)
+  (local-set-key (kbd "C-c C-m") #'odinl-expand-form-at-point)
   (local-set-key (kbd "C-c C-s") #'odinl-toggle-show-generated)
   (local-set-key (kbd "C-c C-z") #'odinl-switch-to-result))
 

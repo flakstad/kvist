@@ -20,12 +20,16 @@ Emitter_Features :: struct {
     core_keep:        bool,
     core_mapcat:      bool,
     core_concat:      bool,
+    core_merge:       bool,
+    core_merge_in_place: bool,
+    core_get_or_default: bool,
     core_into:        bool,
     core_interpose:   bool,
     core_interleave:  bool,
     core_reverse:     bool,
     core_reverse_in_place: bool,
     core_shuffle:     bool,
+    core_shuffle_in_place: bool,
     core_map_in_place: bool,
     core_map_indexed_in_place: bool,
     core_filter_in_place: bool,
@@ -184,6 +188,24 @@ mark_core_concat :: proc(e: ^Emitter) {
     }
 }
 
+mark_core_merge :: proc(e: ^Emitter) {
+    if e.features != nil {
+        e.features.core_merge = true
+    }
+}
+
+mark_core_merge_in_place :: proc(e: ^Emitter) {
+    if e.features != nil {
+        e.features.core_merge_in_place = true
+    }
+}
+
+mark_core_get_or_default :: proc(e: ^Emitter) {
+    if e.features != nil {
+        e.features.core_get_or_default = true
+    }
+}
+
 mark_core_into :: proc(e: ^Emitter) {
     if e.features != nil {
         e.features.core_into = true
@@ -217,6 +239,12 @@ mark_core_reverse_in_place :: proc(e: ^Emitter) {
 mark_core_shuffle :: proc(e: ^Emitter) {
     if e.features != nil {
         e.features.core_shuffle = true
+    }
+}
+
+mark_core_shuffle_in_place :: proc(e: ^Emitter) {
+    if e.features != nil {
+        e.features.core_shuffle_in_place = true
     }
 }
 
@@ -1124,6 +1152,9 @@ thread_step_result_kind :: proc(step: CST_Form, thread_last: bool) -> Thread_Res
         if head.kind != .Symbol {
             return .Unknown
         }
+        if head.text == "merge" {
+            return .Owned
+        }
         if thread_last && (head.text == "map" || head.text == "filter" ||
                            head.text == "remove" || head.text == "map-indexed" ||
                            head.text == "keep" || head.text == "mapcat" ||
@@ -1219,7 +1250,7 @@ thread_return_error :: proc(form: CST_Form) -> (Compile_Error, bool) {
 owned_sequence_head :: proc(name: string) -> bool {
     switch name {
     case "map", "filter", "remove", "map-indexed", "keep", "mapcat",
-         "concat", "reverse", "sort", "sort-by",
+         "concat", "merge", "reverse", "sort", "sort-by",
          "into", "interpose", "interleave", "shuffle",
          "partition", "partition-all", "partition-by",
          "zipmap", "index-by", "group-by", "frequencies",
@@ -1865,8 +1896,8 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
     }
 
     if head.text == "get" {
-        if len(form.items) != 3 {
-            return "", Compile_Error{message = "get expects collection and key", span = form.span}, false
+        if len(form.items) != 3 && len(form.items) != 4 {
+            return "", Compile_Error{message = "get expects collection, key, and optional default", span = form.span}, false
         }
         target, err_target, ok_target := emit_expr(e, form.items[1])
         if !ok_target {
@@ -1875,6 +1906,14 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         key, err_key, ok_key := emit_expr(e, form.items[2])
         if !ok_key {
             return "", err_key, false
+        }
+        if len(form.items) == 4 {
+            default_value, err_default, ok_default := emit_expr(e, form.items[3])
+            if !ok_default {
+                return "", err_default, false
+            }
+            mark_core_get_or_default(e)
+            return emit_call_text("odinl_get_or_default", []string{target, key, default_value}), {}, true
         }
         return fmt.tprintf("%s[%s]", target, key), {}, true
     }
@@ -2010,6 +2049,22 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         return emit_call_text("append", []string{address_of_expr_text(target), fmt.tprintf("..%s", slice_all_expr_text(collection))}), {}, true
     }
 
+    if head.text == "merge!" {
+        if len(form.items) != 3 {
+            return "", Compile_Error{message = "merge! expects target map and source map", span = form.span}, false
+        }
+        target, err_target, ok_target := emit_expr(e, form.items[1])
+        if !ok_target {
+            return "", err_target, false
+        }
+        source, err_source, ok_source := emit_expr(e, form.items[2])
+        if !ok_source {
+            return "", err_source, false
+        }
+        mark_core_merge_in_place(e)
+        return emit_call_text("odinl_merge_in_place", []string{address_of_expr_text(target), source}), {}, true
+    }
+
     if head.text == "into" {
         if len(form.items) != 3 {
             return "", Compile_Error{message = "into expects dynamic array type and collection", span = form.span}, false
@@ -2043,6 +2098,22 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         }
         mark_core_concat(e)
         return emit_call_text("odinl_concat", []string{slice_all_expr_text(lhs), slice_all_expr_text(rhs)}), {}, true
+    }
+
+    if head.text == "merge" {
+        if len(form.items) != 3 {
+            return "", Compile_Error{message = "merge expects two maps", span = form.span}, false
+        }
+        lhs, err_lhs, ok_lhs := emit_expr(e, form.items[1])
+        if !ok_lhs {
+            return "", err_lhs, false
+        }
+        rhs, err_rhs, ok_rhs := emit_expr(e, form.items[2])
+        if !ok_rhs {
+            return "", err_rhs, false
+        }
+        mark_core_merge(e)
+        return emit_call_text("odinl_merge", []string{lhs, rhs}), {}, true
     }
 
     if head.text == "interpose" {
@@ -2115,6 +2186,22 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         }
         mark_core_reverse_in_place(e)
         return emit_call_text("odinl_reverse_in_place", []string{slice_all_expr_text(collection)}), {}, true
+    }
+
+    if head.text == "shuffle!" {
+        if len(form.items) != 3 {
+            return "", Compile_Error{message = "shuffle! expects picker function and collection", span = form.span}, false
+        }
+        pick, err_pick, ok_pick := emit_expr(e, form.items[1])
+        if !ok_pick {
+            return "", err_pick, false
+        }
+        collection, err_collection, ok_collection := emit_expr(e, form.items[2])
+        if !ok_collection {
+            return "", err_collection, false
+        }
+        mark_core_shuffle_in_place(e)
+        return emit_call_text("odinl_shuffle_in_place", []string{pick, slice_all_expr_text(collection)}), {}, true
     }
 
     if head.text == "sort" {
@@ -3882,6 +3969,51 @@ emit_core_concat_helper :: proc(e: ^Emitter) {
     emit_line(e, "}")
 }
 
+emit_core_merge_helper :: proc(e: ^Emitter) {
+    emit_line(e, "odinl_merge :: proc(lhs, rhs: map[$K]$V) -> map[K]V {")
+    e.indent += 1
+    emit_line(e, "out := make(map[K]V)")
+    emit_line(e, "for key, value in lhs {")
+    e.indent += 1
+    emit_line(e, "out[key] = value")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "for key, value in rhs {")
+    e.indent += 1
+    emit_line(e, "out[key] = value")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "return out")
+    e.indent -= 1
+    emit_line(e, "}")
+}
+
+emit_core_merge_in_place_helper :: proc(e: ^Emitter) {
+    emit_line(e, "odinl_merge_in_place :: proc(target: ^map[$K]$V, source: map[K]V) {")
+    e.indent += 1
+    emit_line(e, "for key, value in source {")
+    e.indent += 1
+    emit_line(e, "target^[key] = value")
+    e.indent -= 1
+    emit_line(e, "}")
+    e.indent -= 1
+    emit_line(e, "}")
+}
+
+emit_core_get_or_default_helper :: proc(e: ^Emitter) {
+    emit_line(e, "odinl_get_or_default :: proc(m: map[$K]$V, key: K, default: V) -> V {")
+    e.indent += 1
+    emit_line(e, "value, ok := m[key]")
+    emit_line(e, "if ok {")
+    e.indent += 1
+    emit_line(e, "return value")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "return default")
+    e.indent -= 1
+    emit_line(e, "}")
+}
+
 emit_core_into_helper :: proc(e: ^Emitter) {
     emit_line(e, "odinl_into :: proc($Out: typeid, xs: []$T) -> Out {")
     e.indent += 1
@@ -3973,6 +4105,19 @@ emit_core_shuffle_helper :: proc(e: ^Emitter) {
     e.indent -= 1
     emit_line(e, "}")
     emit_line(e, "return out")
+    e.indent -= 1
+    emit_line(e, "}")
+}
+
+emit_core_shuffle_in_place_helper :: proc(e: ^Emitter) {
+    emit_line(e, "odinl_shuffle_in_place :: proc(pick: proc(n: int) -> int, xs: []$T) {")
+    e.indent += 1
+    emit_line(e, "for i := len(xs)-1; i > 0; i -= 1 {")
+    e.indent += 1
+    emit_line(e, "j := pick(i+1)")
+    emit_line(e, "xs[i], xs[j] = xs[j], xs[i]")
+    e.indent -= 1
+    emit_line(e, "}")
     e.indent -= 1
     emit_line(e, "}")
 }
@@ -4704,10 +4849,13 @@ core_helpers_needed :: proc(features: Emitter_Features) -> bool {
            features.core_take_while || features.core_drop_while ||
            features.core_find || features.core_some || features.core_every ||
            features.core_remove || features.core_map_indexed || features.core_keep ||
-           features.core_mapcat || features.core_concat || features.core_into ||
+           features.core_mapcat || features.core_concat ||
+           features.core_merge || features.core_merge_in_place ||
+           features.core_get_or_default ||
+           features.core_into ||
            features.core_interpose || features.core_interleave ||
            features.core_reverse || features.core_reverse_in_place ||
-           features.core_shuffle ||
+           features.core_shuffle || features.core_shuffle_in_place ||
            features.core_map_in_place || features.core_map_indexed_in_place ||
            features.core_filter_in_place || features.core_remove_in_place ||
            features.core_keep_in_place ||
@@ -4819,6 +4967,18 @@ emit_core_helpers :: proc(e: ^Emitter, features: Emitter_Features) {
         emit_core_helper_separator(e, &emitted)
         emit_core_concat_helper(e)
     }
+    if features.core_merge {
+        emit_core_helper_separator(e, &emitted)
+        emit_core_merge_helper(e)
+    }
+    if features.core_merge_in_place {
+        emit_core_helper_separator(e, &emitted)
+        emit_core_merge_in_place_helper(e)
+    }
+    if features.core_get_or_default {
+        emit_core_helper_separator(e, &emitted)
+        emit_core_get_or_default_helper(e)
+    }
     if features.core_into {
         emit_core_helper_separator(e, &emitted)
         emit_core_into_helper(e)
@@ -4842,6 +5002,10 @@ emit_core_helpers :: proc(e: ^Emitter, features: Emitter_Features) {
     if features.core_shuffle {
         emit_core_helper_separator(e, &emitted)
         emit_core_shuffle_helper(e)
+    }
+    if features.core_shuffle_in_place {
+        emit_core_helper_separator(e, &emitted)
+        emit_core_shuffle_in_place_helper(e)
     }
     if features.core_sort {
         emit_core_helper_separator(e, &emitted)

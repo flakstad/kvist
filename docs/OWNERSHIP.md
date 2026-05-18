@@ -131,6 +131,7 @@ Bang helpers mutate existing storage and do not create owned results:
 
 ```clojure
 (reverse! xs)
+(shuffle! pick xs)
 (sort! xs)
 (sort-by! f xs)
 (sort-by! :field xs)
@@ -142,6 +143,7 @@ Bang helpers mutate existing storage and do not create owned results:
 (remove! :field xs)
 (keep! f xs)
 (into! target xs)
+(merge! target source)
 ```
 
 Use them when mutation is the right Odin choice. They do not need `delete`
@@ -208,7 +210,9 @@ The same rule applies to owned maps:
   (zipmap names ages))
 ```
 
-The caller deletes the returned map.
+The caller deletes the returned map. `(merge left right)` follows the same rule:
+it returns a new owned map, while `(merge! target source)` mutates an existing
+map and does not create an owned result.
 
 `group-by` returns an owned map with owned dynamic-array values. Clean up both
 levels:

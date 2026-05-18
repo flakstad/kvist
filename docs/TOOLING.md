@@ -46,7 +46,7 @@ Initial commands should mirror the useful `odineval` and `cluck` workflows:
 - eval current top-level form
 - check form at point without running
 - run/check current generated buffer
-- show generated Odin for debugging
+- expand form at point into generated Odin for debugging
 - clear inline results
 - switch to result buffer
 
@@ -70,6 +70,7 @@ tooling entry points:
 - check or run generated Odin with `odinl check` / `odinl run`
 - evaluate a selected expression/form with surrounding file context using
   `odinl eval`
+- inspect the generated scratch Odin for a selected form with `odinl expand`
 - optionally write generated Odin for editor inspection with `--generated`
 
 The current `--map` output is declaration-level only. Eval forms do carry an
@@ -85,6 +86,8 @@ runtime facility:
 - expansion happens before ordinary lowering to Odin;
 - macro expansion output must still be inspectable OdinL/Odin-shaped code;
 - editor tooling should provide `macroexpand` for the form at point;
+- until a real macro phase exists, `odinl expand` is a lowering preview for the
+  selected form in file context, not a semantic macro expander;
 - diagnostics should keep enough source information to point through expansion
   where practical;
 - macros must not introduce a hidden stateful REPL or dynamic runtime world.

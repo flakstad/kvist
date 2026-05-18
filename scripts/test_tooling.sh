@@ -70,6 +70,21 @@ eval_output=$(./odinl eval examples/higher-order.odinl '(reduce add 0 (new []int
 assert_eq "6" "$eval_output" "eval output"
 assert_file_nonempty "$tmp_dir/eval.odin" "eval generated output"
 
+printf 'tooling: expand command\n'
+./odinl expand examples/data-literals.odinl '(temp-buffer-len)' -o "$tmp_dir/expand.odin"
+assert_file_nonempty "$tmp_dir/expand.odin" "expand generated output"
+if ! grep -q 'context.allocator = allocator' "$tmp_dir/expand.odin"; then
+    printf 'failed: expand output did not include with-allocator lowering\n' >&2
+    cat "$tmp_dir/expand.odin" >&2
+    exit 1
+fi
+if ! grep -q 'fmt.println(temp_buffer_len())' "$tmp_dir/expand.odin"; then
+    printf 'failed: expand output did not include eval print wrapper\n' >&2
+    cat "$tmp_dir/expand.odin" >&2
+    exit 1
+fi
+odin check "$tmp_dir/expand.odin" -file
+
 printf 'tooling: eval main command\n'
 main_eval_output=$(./odinl eval examples/hello.odinl '(main)')
 assert_eq "hello from odinl" "$main_eval_output" "eval main output"
@@ -94,6 +109,7 @@ assert_eq "4" "$(./odinl eval examples/sequence-helpers.odinl '(concat-reversed-
 assert_eq "26" "$(./odinl eval examples/sequence-helpers.odinl '(interposed-total)')" "interposed-total"
 assert_eq "33" "$(./odinl eval examples/sequence-helpers.odinl '(interleaved-total)')" "interleaved-total"
 assert_eq "2" "$(./odinl eval examples/sequence-helpers.odinl '(shuffled-first)')" "shuffled-first"
+assert_eq "2" "$(./odinl eval examples/sequence-helpers.odinl '(shuffled-in-place-first)')" "shuffled-in-place-first"
 assert_eq "2" "$(./odinl eval examples/sequence-helpers.odinl '(sorted-second)')" "sorted-second"
 assert_eq "4" "$(./odinl eval examples/sequence-helpers.odinl '(descending-first)')" "descending-first"
 assert_eq "1" "$(./odinl eval examples/sequence-helpers.odinl '(sorted-in-place-first)')" "sorted-in-place-first"
@@ -118,6 +134,9 @@ assert_eq "36" "$(./odinl eval examples/sequences.odinl '(age-for-ada)')" "age-f
 assert_eq "3" "$(./odinl eval examples/sequences.odinl '(status-run-count)')" "status-run-count"
 assert_eq "2" "$(./odinl eval examples/sequences.odinl '(active-status-group-count)')" "active-status-group-count"
 assert_eq "2" "$(./odinl eval examples/data-literals.odinl '(temp-buffer-len)')" "temp-buffer-len"
+assert_eq "-1" "$(./odinl eval examples/data-literals.odinl '(lookup-missing-default)')" "lookup-missing-default"
+assert_eq "51" "$(./odinl eval examples/data-literals.odinl '(merged-lookup-total)')" "merged-lookup-total"
+assert_eq "51" "$(./odinl eval examples/data-literals.odinl '(merge-in-place-total)')" "merge-in-place-total"
 assert_eq "Lin" "$(./odinl eval examples/sequences.odinl '(youngest-user-name)')" "youngest-user-name"
 assert_eq "Lin" "$(./odinl eval examples/sequences.odinl '(youngest-user-name-in-place)')" "youngest-user-name-in-place"
 
@@ -204,9 +223,17 @@ if command -v emacs >/dev/null 2>&1; then
                                           (cons \"C-c C-i\" (quote odinl-insert-form-result))
                                           (cons \"C-c C-k\" (quote odinl-eval-buffer))
                                           (cons \"C-c C-v\" (quote odinl-check-buffer))
-                                          (cons \"C-c C-b\" (quote odinl-build-buffer))))
+                                          (cons \"C-c C-b\" (quote odinl-build-buffer))
+                                          (cons \"C-c C-m\" (quote odinl-expand-form-at-point))))
                      (unless (eq (key-binding (kbd (car binding))) (cdr binding))
                        (error \"Missing binding %s\" (car binding))))
+                   (goto-char (point-min))
+                   (search-forward \"(add 1 2)\")
+                   (call-interactively (quote odinl-expand-form-at-point))
+                   (with-current-buffer odinl-generated-buffer-name
+                     (goto-char (point-min))
+                     (unless (search-forward \"fmt.println(add(1, 2))\" nil t)
+                       (error \"Expected generated eval wrapper\")))
                    (goto-char (point-min))
                    (search-forward \"(add 1 2)\")
                    (call-interactively (quote odinl-insert-form-result))

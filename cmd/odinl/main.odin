@@ -14,10 +14,11 @@ print_usage :: proc() {
     fmt.println("  odinl check <input.odinl> [--generated output.odin]")
     fmt.println("  odinl run <input.odinl> [--generated output.odin]")
     fmt.println("  odinl eval <input.odinl> <form> [--no-print] [--check] [--generated output.odin]")
+    fmt.println("  odinl expand <input.odinl> <form> [--no-print] [-o output.odin]")
 }
 
 is_command :: proc(text: string) -> bool {
-    return text == "compile" || text == "build" || text == "check" || text == "run" || text == "eval"
+    return text == "compile" || text == "build" || text == "check" || text == "run" || text == "eval" || text == "expand"
 }
 
 read_source_or_exit :: proc(path: string) -> string {
@@ -425,6 +426,38 @@ parse_eval_command :: proc() {
     os.exit(eval_command(input, eval_source, generated_path, no_print, check_only))
 }
 
+parse_expand_command :: proc() {
+    if len(os.args) < 4 {
+        print_usage()
+        os.exit(2)
+    }
+    input := os.args[2]
+    eval_source := os.args[3]
+    output_path := ""
+    no_print := false
+
+    i := 4
+    for i < len(os.args) {
+        switch os.args[i] {
+        case "-o":
+            if i+1 >= len(os.args) {
+                print_usage()
+                os.exit(2)
+            }
+            output_path = os.args[i+1]
+            i += 2
+        case "--no-print":
+            no_print = true
+            i += 1
+        case:
+            print_usage()
+            os.exit(2)
+        }
+    }
+
+    compile_eval_emit_command(input, eval_source, output_path, no_print)
+}
+
 main :: proc() {
     if len(os.args) < 2 {
         print_usage()
@@ -447,5 +480,7 @@ main :: proc() {
         parse_run_or_check_command("run")
     case "eval":
         parse_eval_command()
+    case "expand":
+        parse_expand_command()
     }
 }

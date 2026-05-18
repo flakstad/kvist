@@ -1397,6 +1397,7 @@ compile_additional_sequence_helpers :: proc(t: ^testing.T) {
     (reverse! xs)
     (sort! xs)
     (sort-by! neg xs)
+    (shuffle! pick-first xs)
     (map! neg mutable)
     (map-indexed! add-index mutable)
     (filter! even? mutable)
@@ -1434,6 +1435,7 @@ compile_additional_sequence_helpers :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "odinl_reverse_in_place((xs)[:])"), true)
     testing.expect_value(t, strings.contains(output, "odinl_sort_in_place((xs)[:])"), true)
     testing.expect_value(t, strings.contains(output, "odinl_sort_by_in_place(neg, (xs)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "odinl_shuffle_in_place(pick_first, (xs)[:])"), true)
     testing.expect_value(t, strings.contains(output, "odinl_map_in_place(neg, (mutable)[:])"), true)
     testing.expect_value(t, strings.contains(output, "odinl_map_indexed_in_place(add_index, (mutable)[:])"), true)
     testing.expect_value(t, strings.contains(output, "odinl_filter_in_place(even_p, &(mutable))"), true)
@@ -1453,6 +1455,7 @@ compile_additional_sequence_helpers :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "odinl_sort :: proc(xs: []$T) -> [dynamic]T"), true)
     testing.expect_value(t, strings.contains(output, "odinl_sort_by :: proc(f: proc(x: $T) -> $K, xs: []T) -> [dynamic]T"), true)
     testing.expect_value(t, strings.contains(output, "odinl_reverse_in_place :: proc(xs: []$T)"), true)
+    testing.expect_value(t, strings.contains(output, "odinl_shuffle_in_place :: proc(pick: proc(n: int) -> int, xs: []$T)"), true)
     testing.expect_value(t, strings.contains(output, "odinl_sort_in_place :: proc(xs: []$T)"), true)
     testing.expect_value(t, strings.contains(output, "odinl_sort_by_in_place :: proc(f: proc(x: $T) -> $K, xs: []T)"), true)
     testing.expect_value(t, strings.contains(output, "odinl_map_in_place :: proc(f: proc(x: $T) -> T, xs: []T)"), true)
@@ -1550,7 +1553,10 @@ compile_map_constructing_sequence_helpers :: proc(t: ^testing.T) {
         by-group (group-by identity xs)
         threaded (->> xs
                       (group-by identity))
-        counts (frequencies xs)]
+        counts (frequencies xs)
+        base (new map[string]int {"a" 1 "b" 2})
+        overrides (new map[string]int {"b" 20 "c" 30})
+        merged (merge base overrides)]
     (defer (delete by-value))
     (defer
       (each [_ group by-group]
@@ -1561,6 +1567,10 @@ compile_map_constructing_sequence_helpers :: proc(t: ^testing.T) {
         (delete group))
       (delete threaded))
     (defer (delete counts))
+    (defer (delete base))
+    (defer (delete overrides))
+    (defer (delete merged))
+    (merge! base overrides)
     (return)))`
 
     output, err, ok := odinl.compile_source(source)
@@ -1575,9 +1585,13 @@ compile_map_constructing_sequence_helpers :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "by_group := odinl_group_by(identity, (xs)[:])"), true)
     testing.expect_value(t, strings.contains(output, "threaded := odinl_group_by(identity, (xs)[:])"), true)
     testing.expect_value(t, strings.contains(output, "counts := odinl_frequencies((xs)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "merged := odinl_merge(base, overrides)"), true)
+    testing.expect_value(t, strings.contains(output, "odinl_merge_in_place(&(base), overrides)"), true)
     testing.expect_value(t, strings.contains(output, "odinl_index_by :: proc(f: proc(x: $T) -> $K, xs: []T) -> map[K]T"), true)
     testing.expect_value(t, strings.contains(output, "odinl_group_by :: proc(f: proc(x: $T) -> $K, xs: []T) -> map[K][dynamic]T"), true)
     testing.expect_value(t, strings.contains(output, "odinl_frequencies :: proc(xs: []$T) -> map[T]int"), true)
+    testing.expect_value(t, strings.contains(output, "odinl_merge :: proc(lhs, rhs: map[$K]$V) -> map[K]V"), true)
+    testing.expect_value(t, strings.contains(output, "odinl_merge_in_place :: proc(target: ^map[$K]$V, source: map[K]V)"), true)
 }
 
 @(test)
@@ -2177,8 +2191,9 @@ compile_compact_type_spellings_inside_vectors :: proc(t: ^testing.T) {
 
 (proc first [xs: []int, lookup: map[string]int] -> int
   (let [buffer: [dynamic]int (make [dynamic]int)
-        fixed: [3]int (new [3]int [1 2 3])]
-    (get xs 0)))`
+        fixed: [3]int (new [3]int [1 2 3])
+        from-map (get lookup "missing" -1)]
+    (+ (get xs 0) from-map)))`
 
     output, err, ok := odinl.compile_source(source)
     testing.expect_value(t, ok, true)
@@ -2193,7 +2208,16 @@ compile_compact_type_spellings_inside_vectors :: proc(t: ^testing.T) {
 first :: proc(xs: []int, lookup: map[string]int) -> int {
     buffer: [dynamic]int = make([dynamic]int)
     fixed: [3]int = [3]int{1, 2, 3}
-    return xs[0]
+    from_map := odinl_get_or_default(lookup, "missing", -1)
+    return (xs[0]) + (from_map)
+}
+
+odinl_get_or_default :: proc(m: map[$K]$V, key: K, default: V) -> V {
+    value, ok := m[key]
+    if ok {
+        return value
+    }
+    return default
 }
 `
     testing.expect_value(t, output, expected)
