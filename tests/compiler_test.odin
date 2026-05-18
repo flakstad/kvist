@@ -139,6 +139,90 @@ main :: proc() {
 }
 
 @(test)
+compile_eval_source_can_load_declaration_form :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(struct Greeting {
+  :message string
+})`
+
+    output, err, ok := odinl.compile_eval_source(source, `(struct Greeting {
+  :message string
+})`)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    expected := `package main
+
+Greeting :: struct {
+    message: string,
+}
+
+main :: proc() {
+}
+`
+    testing.expect_value(t, output, expected)
+}
+
+@(test)
+compile_eval_source_deduplicates_import_declaration_form :: proc(t: ^testing.T) {
+    source := `(package main)
+(import "core:fmt")
+
+(proc main []
+  (fmt.println "hello"))`
+
+    output, err, ok := odinl.compile_eval_source(source, `(import "core:fmt")`)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    expected := `package main
+
+import "core:fmt"
+
+main :: proc() {
+}
+`
+    testing.expect_value(t, output, expected)
+}
+
+@(test)
+compile_eval_source_can_load_main_proc_declaration_form :: proc(t: ^testing.T) {
+    source := `(package main)
+(import "core:fmt")
+
+(proc main []
+  (fmt.println "hello"))`
+
+    output, err, ok := odinl.compile_eval_source(source, `(proc main []
+  (fmt.println "hello"))`)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    expected := `package main
+
+import "core:fmt"
+
+main :: proc() {
+    fmt.println("hello")
+}
+`
+    testing.expect_value(t, output, expected)
+}
+
+@(test)
 compile_eval_source_reports_eval_origin :: proc(t: ^testing.T) {
     source := `(package main)
 
@@ -160,6 +244,32 @@ compile_eval_source_reports_eval_origin :: proc(t: ^testing.T) {
   ^
 `
     testing.expect_value(t, formatted, expected)
+}
+
+@(test)
+compile_eval_source_map_marks_eval_runner :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(proc add [a: int, b: int] -> int
+  (+ a b))`
+
+    result, err, ok := odinl.compile_eval_source_with_map(source, "(add 1 2)")
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+
+    found_eval_entry := false
+    for entry in result.source_map {
+        if entry.source_span.source == .Eval {
+            found_eval_entry = true
+            break
+        }
+    }
+    testing.expect_value(t, found_eval_entry, true)
 }
 
 @(test)

@@ -14,7 +14,7 @@ This directory contains lightweight Emacs support for OdinL.
 mode, adds OdinL-specific font-locking, and uses Clojure-like 2-space
 indentation for OdinL source.
 
-`odinl-eval` shells out to the `odinl` CLI for eval, check, and run commands.
+`odinl-eval` shells out to the `odinl` CLI for eval, build, check, and run commands.
 The CLI generates temporary Odin and invokes Odin itself. Build the local
 compiler first:
 
@@ -25,9 +25,13 @@ odin build cmd/odinl
 Default keys:
 
 - `C-c C-e`: eval form at point inline
+- `C-c C-p`: eval form at point in the result buffer
+- `C-c C-i`: eval form at point and insert a `;; =>` comment
 - `C-c C-c`: eval current top-level form inline
-- `C-c C-r`: eval selected region inline
-- `C-c C-k`: check generated Odin for form at point
+- `C-c C-r`: eval selected region in the result buffer
+- `C-c C-x`: eval the enclosing `(comment ...)` body inline
+- `C-c C-k`: eval the whole buffer
+- `C-c C-b`: compile buffer and run `odin build` on generated Odin
 - `C-c C-v`: compile buffer and run `odin check` on generated Odin
 - `C-c C-a`: compile buffer and run generated Odin
 - `C-c C-s`: toggle display of generated Odin

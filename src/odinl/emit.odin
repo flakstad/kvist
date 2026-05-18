@@ -1699,7 +1699,7 @@ make_println_form :: proc(value: CST_Form) -> CST_Form {
     }
 }
 
-emit_eval_program :: proc(program: IR_Program, eval_form: CST_Form, no_print: bool) -> (string, Compile_Error, bool) {
+emit_eval_program_with_source_map :: proc(program: IR_Program, eval_form: CST_Form, no_print: bool) -> (Emit_Result, Compile_Error, bool) {
     decls: [dynamic]IR_Decl
     append(&decls, IR_Decl{
         kind = .Package,
@@ -1750,5 +1750,104 @@ emit_eval_program :: proc(program: IR_Program, eval_form: CST_Form, no_print: bo
         },
     })
 
-    return emit_decls(decls[:])
+    return emit_decls_with_source_map(decls[:])
+}
+
+decl_name :: proc(decl: IR_Decl) -> string {
+    #partial switch decl.kind {
+    case .Const:
+        return decl.const_decl.name
+    case .Struct:
+        return decl.struct_decl.name
+    case .Enum:
+        return decl.enum_decl.name
+    case .Union:
+        return decl.union_decl.name
+    case .Proc:
+        return decl.proc_decl.name
+    }
+    return ""
+}
+
+decl_matches :: proc(a, b: IR_Decl) -> bool {
+    if a.kind != b.kind {
+        return false
+    }
+    if a.kind == .Import {
+        return a.import_decl.path == b.import_decl.path &&
+               a.import_decl.alias == b.import_decl.alias &&
+               a.import_decl.has_alias == b.import_decl.has_alias
+    }
+    a_name := decl_name(a)
+    if a_name == "" {
+        return false
+    }
+    return a_name == decl_name(b)
+}
+
+emit_eval_decl_program_with_source_map :: proc(program: IR_Program, eval_decl: IR_Decl) -> (Emit_Result, Compile_Error, bool) {
+    decls: [dynamic]IR_Decl
+    append(&decls, IR_Decl{
+        kind = .Package,
+        span = eval_decl.span,
+        package_name = "main",
+    })
+
+    found_eval_decl := eval_decl.kind == .Ignored ||
+                       eval_decl.kind == .Package
+    if eval_decl.kind == .Import {
+        for decl in program.decls {
+            if decl_matches(decl, eval_decl) {
+                found_eval_decl = true
+                break
+            }
+        }
+        if !found_eval_decl {
+            append(&decls, eval_decl)
+        }
+    }
+
+    for decl, idx in program.decls {
+        if decl.kind == .Package {
+            continue
+        }
+        if proc_decl_is_main(decl) && !proc_decl_is_main(eval_decl) {
+            continue
+        }
+        if decl.kind == .Raw && idx+1 < len(program.decls) && proc_decl_is_main(program.decls[idx+1]) {
+            if !proc_decl_is_main(eval_decl) &&
+               (raw_is_proc_directive(decl.raw_text) || raw_attaches_to_next_decl(decl.raw_text)) {
+                continue
+            }
+        }
+        if decl_matches(decl, eval_decl) {
+            found_eval_decl = true
+        }
+        append(&decls, decl)
+    }
+
+    if !found_eval_decl && eval_decl.kind != .Import {
+        append(&decls, eval_decl)
+    }
+
+    if !proc_decl_is_main(eval_decl) {
+        append(&decls, IR_Decl{
+            kind = .Proc,
+            span = eval_decl.span,
+            proc_decl = Proc_Decl{
+                name = "main",
+            },
+        })
+    }
+
+    return emit_decls_with_source_map(decls[:])
+}
+
+emit_eval_program :: proc(program: IR_Program, eval_form: CST_Form, no_print: bool) -> (string, Compile_Error, bool) {
+    result, err, ok := emit_eval_program_with_source_map(program, eval_form, no_print)
+    if !ok {
+        return "", err, false
+    }
+    defer delete(result.source_map)
+    return result.output, {}, true
 }
