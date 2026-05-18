@@ -1,0 +1,21 @@
+// Exercises raw Odin escapes, pointer dereference, address-of, mutation, and field access.
+(package main)
+(import "core:fmt")
+
+(odin "Handle :: distinct rawptr")
+
+(struct Counter {
+  :value int
+})
+
+(proc bump! [x: ^int]
+  (set! (^ x) (+ (^ x) 1)))
+
+(proc counter-value [counter: ^Counter] -> int
+  (:value (^ counter)))
+
+(proc main []
+  (let [counter (Counter {:value 41})]
+    (bump! (& (:value counter)))
+    (fmt.println (counter-value (& counter)))
+    (odin "_ = Handle(nil)")))

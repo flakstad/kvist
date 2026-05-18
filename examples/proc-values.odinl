@@ -1,0 +1,30 @@
+// Exercises proc types, proc literals, callbacks, thread-first, nil?, and bang/predicate names.
+(package main)
+(import "core:fmt")
+
+(struct Request {
+  :path string
+})
+
+(proc apply-pred [pred: proc [x: int] -> bool, x: int] -> bool
+  (pred x))
+
+(proc greater-than? [threshold: int, x: int] -> bool
+  (> x threshold))
+
+(proc path-len [req: Request] -> int
+  (-> req :path len))
+
+(proc maybe-path-len [req: ^Request] -> int
+  (if (nil? req)
+    0
+    (path-len (^ req))))
+
+(proc main []
+  (let [pred: proc [x: int] -> bool (proc [x: int] -> bool
+                                         (greater-than? 10 x))
+        req (Request {:path "/users"})]
+    (fmt.println (apply-pred pred 12))
+    (fmt.println (#force_inline greater-than? 3 5))
+    (fmt.println (path-len req))
+    (fmt.println (maybe-path-len (& req)))))

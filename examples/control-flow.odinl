@@ -1,0 +1,40 @@
+// Exercises conditionals, value switches, grouped cases, loops, and name mapping.
+(package main)
+(import "core:fmt")
+
+(enum Method [
+  Get
+  Head
+  Post
+  Delete
+])
+
+(proc read-method? [method: Method] -> bool
+  (switch method
+    [.Get .Head] true
+    :else false))
+
+(proc method-name [method: Method] -> string
+  (switch method
+    .Get "GET"
+    .Head "HEAD"
+    .Post "POST"
+    :else "OTHER"))
+
+(proc classify [n: int] -> string
+  (cond
+    (< n 0) "negative"
+    (== n 0) "zero"
+    :else "positive"))
+
+(proc sum [xs: []int] -> int
+  (let [total 0]
+    (each x xs
+      (set! total (+ total x)))
+    total))
+
+(proc main []
+  (let [xs (new []int [1 2 3])]
+    (fmt.println (method-name .Get))
+    (fmt.println (classify (sum xs)))
+    (fmt.println (read-method? .Head))))

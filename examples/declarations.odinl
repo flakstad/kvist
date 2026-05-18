@@ -1,0 +1,28 @@
+// Exercises doc comments, import aliases, constants, explicit enums, and structs.
+(package main)
+(import fmt "core:fmt")
+
+// Default port for examples.
+(const default-port int 8080)
+
+(enum Http-Status {
+  :OK 200
+  :Not-Found 404
+})
+
+(struct Endpoint {
+  :path string
+  :status Http-Status
+})
+
+(proc status-code [status: Http-Status] -> int
+  (switch status
+    .OK 200
+    .Not-Found 404
+    :else 0))
+
+(proc main []
+  (let [endpoint (Endpoint {:path "/health" :status .OK})]
+    (fmt.println default-port)
+    (fmt.println (:path endpoint))
+    (fmt.println (status-code (:status endpoint)))))

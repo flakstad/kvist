@@ -1,0 +1,33 @@
+// Exercises structs, field access, typed collection literals, map lookup, and make.
+(package main)
+(import "core:fmt")
+
+(struct User {
+  :name string
+  :age int
+})
+
+(struct State {
+  :values []int
+  :fixed [3]int
+  :buffer [dynamic]int
+  :lookup map[string]int
+})
+
+(proc main []
+  (let [user (User {:name "Ada" :age 36})
+        values (new []int [1 2 3])
+        fixed (new [3]int [5 8 13])
+        buffer-literal (new [dynamic]int [21 34])
+        buffer (make [dynamic]int)
+        lookup (new map[string]int {"one" 1 "two" 2})]
+    (fmt.println (:name user))
+    (fmt.println (get values 0))
+    (fmt.println (get fixed 1))
+    (fmt.println (get buffer-literal 0))
+    (fmt.println (get lookup "two"))
+    (when (in "one" lookup)
+      (fmt.println "lookup has one"))
+    (when (not-in "missing" lookup)
+      (fmt.println "lookup is missing key"))
+    (fmt.println (len buffer))))
