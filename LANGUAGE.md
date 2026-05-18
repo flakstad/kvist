@@ -679,6 +679,28 @@ Examples:
 This keeps the core language explicit while leaving room for later macro-based
 binding abstractions such as `when-bind`.
 
+Later destructuring should still lower to obvious Odin assignments. Struct
+field destructuring is the likely next step because it is only field access:
+
+```clojure
+(let [{:name name
+       :age age} user]
+  ...)
+```
+
+should lower as if written:
+
+```odin
+name := user.name
+age := user.age
+```
+
+Shorthand such as `{ :name :age }` may also be reasonable if it expands to
+same-named locals. Map destructuring is a separate question because Odin map
+lookup has presence semantics, not Clojure nil-as-missing semantics. It should
+not be added until the generated code can stay explicit about whether lookup
+failure is allowed.
+
 ### `do`
 
 ```clojure
@@ -1503,10 +1525,21 @@ Useful editor commands later:
 - macroexpand form
 - show lowered Odin
 
+The development model should become richer without becoming stateful. Tooling
+may support tap-style inspection, rerun watches, and disk-backed saved values,
+but those features should be explicit editor/CLI workflows around generated
+Odin. A fresh process should be able to reproduce the same result from source
+files and saved data files.
+
+See `docs/TOOLING.md` for the current plan around tap-style inspection,
+file-backed dev values, watches, and Emacs integration.
+
 ## Macros
 
 Because OdinL is a Lisp, macros are likely an important later feature. But they
-should arrive only after the core surface language is stable.
+should arrive only after the core surface language is stable. They are now one
+of the next major design areas after the direct compiler surface and eager
+sequence library are in good shape.
 
 The intended macro direction is:
 
@@ -1548,6 +1581,25 @@ surface sugar over a small explicit core, it does not need to be primitive.
 The important constraint is that `with-*` forms should not smuggle in a hidden
 runtime or fake dynamic binding model. If they exist, they should expand into
 ordinary explicit Odin-shaped control flow.
+
+For example, allocator helpers should keep ownership visible:
+
+```clojure
+(with-arena [arena (make-arena allocator)]
+  (work (:allocator arena)))
+```
+
+should expand to the moral equivalent of:
+
+```clojure
+(let [arena (make-arena allocator)]
+  (defer (destroy-arena arena))
+  (work (:allocator arena)))
+```
+
+The exact Odin allocator API names should come from real Odin practice when the
+macro is designed. The language rule is simpler: expansion may save typing, but
+it must not hide allocation, cleanup, or which allocator is being passed.
 
 Possible macro-friendly targets include:
 

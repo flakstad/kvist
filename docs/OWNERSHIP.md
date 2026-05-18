@@ -52,6 +52,7 @@ These forms return owned values in normal OdinL code:
 (repeat n x)
 (repeatedly n f)
 (iterate n f x)
+(cycle n xs)
 ```
 
 Use `defer delete` for local owned values:
@@ -97,6 +98,8 @@ These are scalar values, plain values, or borrowed views:
 (every? pred xs)
 (reduce f init xs)
 (empty? xs)
+(count xs)
+(contains? collection key)
 ```
 
 `split-at` returns two borrowed slices:
@@ -107,6 +110,16 @@ These are scalar values, plain values, or borrowed views:
 ```
 
 Do not delete `front` or `back`.
+
+`distinct` and `distinct-by` return owned dynamic arrays. They use temporary
+maps internally and clean those maps inside the helper, but the returned dynamic
+array belongs to the caller:
+
+```clojure
+(let [users (distinct-by :id rows)]
+  (defer (delete users))
+  ...)
+```
 
 ## Mutating Helpers
 
@@ -124,6 +137,7 @@ Bang helpers mutate existing storage and do not create owned results:
 (remove! pred xs)
 (remove! :field xs)
 (keep! f xs)
+(into! target xs)
 ```
 
 Use them when mutation is the right Odin choice. They do not need `delete`
@@ -140,6 +154,12 @@ dynamic array because they compact and resize the existing storage:
 (let [xs (new [dynamic]int [1 2 3 4])]
   (defer (delete xs))
   (filter! even? xs)
+  (len xs))
+
+(let [xs (new [dynamic]int [1 2])
+      more (new []int [3 4])]
+  (defer (delete xs))
+  (into! xs more)
   (len xs))
 ```
 

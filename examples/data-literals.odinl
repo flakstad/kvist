@@ -26,7 +26,7 @@
 (proc empty-buffer-len [] -> int
   (let [buffer (make [dynamic]int)]
     (defer (delete buffer))
-    (len buffer)))
+    (count buffer)))
 
 (proc lookup-two [] -> int
   (let [lookup (new map[string]int {"one" 1 "two" 2})]
@@ -36,7 +36,7 @@
 (proc lookup-has-one? [] -> bool
   (let [lookup (new map[string]int {"one" 1 "two" 2})]
     (defer (delete lookup))
-    (in? lookup "one")))
+    (contains? lookup "one")))
 
 (proc fixed-middle [] -> int
   (let [fixed (new [3]int [5 8 13])]

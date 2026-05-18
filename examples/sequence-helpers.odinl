@@ -110,6 +110,18 @@
     (defer (delete xs))
     (last xs)))
 
+(proc cycled-total [] -> int
+  (let [base (new []int [1 2 3])
+        xs (cycle 5 base)]
+    (defer (delete xs))
+    (reduce add 0 xs)))
+
+(proc counted-cycle [] -> int
+  (let [base (new []int [1 2])
+        xs (cycle 5 base)]
+    (defer (delete xs))
+    (count xs)))
+
 (proc trimmed-sum [] -> int
   (let [xs (new []int [1 2 3 4 5])
         head (take 3 xs)
@@ -196,6 +208,25 @@
     (keep! square-even xs)
     (first xs)))
 
+(proc appended-total [] -> int
+  (let [xs (new [dynamic]int [1 2])
+        more (new []int [3 4])]
+    (defer (delete xs))
+    (into! xs more)
+    (reduce add 0 xs)))
+
+(proc distinct-total [] -> int
+  (let [xs (new []int [1 2 2 3 3])
+        unique (distinct xs)]
+    (defer (delete unique))
+    (reduce add 0 unique)))
+
+(proc first-per-parity-count [] -> int
+  (let [xs (new []int [1 3 2 4 5])
+        unique (distinct-by parity xs)]
+    (defer (delete unique))
+    (count unique)))
+
 (proc ragged-chunk-size [] -> int
   (let [xs (new []int [1 2 3 4 5])
         chunks (partition-all 2 xs)]
@@ -262,6 +293,12 @@
   (iterated-last)
   ;; => 8
 
+  (cycled-total)
+  ;; => 9
+
+  (counted-cycle)
+  ;; => 5
+
   (trimmed-sum)
   ;; => 13
 
@@ -300,6 +337,15 @@
 
   (kept-in-place-first)
   ;; => 4
+
+  (appended-total)
+  ;; => 10
+
+  (distinct-total)
+  ;; => 6
+
+  (first-per-parity-count)
+  ;; => 2
 
   (ragged-chunk-size)
   ;; => 1

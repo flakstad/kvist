@@ -39,13 +39,17 @@ Emitter_Features :: struct {
     core_index_by:    bool,
     core_group_by:    bool,
     core_frequencies: bool,
+    core_distinct:    bool,
+    core_distinct_by: bool,
     core_range:       bool,
     core_repeat:      bool,
     core_repeatedly:  bool,
     core_iterate:     bool,
+    core_cycle:       bool,
     map_fields:       [dynamic]string,
     index_by_fields:  [dynamic]string,
     group_by_fields:  [dynamic]string,
+    distinct_by_fields: [dynamic]string,
     partition_by_fields: [dynamic]string,
     sort_by_fields:   [dynamic]string,
     sort_by_in_place_fields: [dynamic]string,
@@ -290,6 +294,18 @@ mark_core_frequencies :: proc(e: ^Emitter) {
     }
 }
 
+mark_core_distinct :: proc(e: ^Emitter) {
+    if e.features != nil {
+        e.features.core_distinct = true
+    }
+}
+
+mark_core_distinct_by :: proc(e: ^Emitter) {
+    if e.features != nil {
+        e.features.core_distinct_by = true
+    }
+}
+
 mark_core_range :: proc(e: ^Emitter) {
     if e.features != nil {
         e.features.core_range = true
@@ -311,6 +327,12 @@ mark_core_repeatedly :: proc(e: ^Emitter) {
 mark_core_iterate :: proc(e: ^Emitter) {
     if e.features != nil {
         e.features.core_iterate = true
+    }
+}
+
+mark_core_cycle :: proc(e: ^Emitter) {
+    if e.features != nil {
+        e.features.core_cycle = true
     }
 }
 
@@ -338,6 +360,12 @@ mark_core_index_by_field :: proc(e: ^Emitter, field: string) {
 mark_core_group_by_field :: proc(e: ^Emitter, field: string) {
     if e.features != nil {
         append_unique_string(&e.features.group_by_fields, field)
+    }
+}
+
+mark_core_distinct_by_field :: proc(e: ^Emitter, field: string) {
+    if e.features != nil {
+        append_unique_string(&e.features.distinct_by_fields, field)
     }
 }
 
@@ -849,6 +877,30 @@ emit_thread_step :: proc(e: ^Emitter, current: string, step: CST_Form, thread_la
             mark_core_frequencies(e)
             return emit_call_text("odinl_frequencies", []string{slice_all_expr_text(current)}), {}, true
         }
+        if thread_last && head.text == "distinct" {
+            if len(step.items) != 1 {
+                return "", Compile_Error{message = "distinct thread step expects no arguments", span = step.span}, false
+            }
+            mark_core_distinct(e)
+            return emit_call_text("odinl_distinct", []string{slice_all_expr_text(current)}), {}, true
+        }
+        if thread_last && head.text == "distinct-by" {
+            if len(step.items) != 2 {
+                return "", Compile_Error{message = "distinct-by thread step expects one key function argument", span = step.span}, false
+            }
+            return emit_distinct_by_callback_call(e, step.items[1], slice_all_expr_text(current))
+        }
+        if thread_last && head.text == "cycle" {
+            if len(step.items) != 2 {
+                return "", Compile_Error{message = "cycle thread step expects one count argument", span = step.span}, false
+            }
+            count, err_count, ok_count := emit_expr(e, step.items[1])
+            if !ok_count {
+                return "", err_count, false
+            }
+            mark_core_cycle(e)
+            return emit_call_text("odinl_cycle", []string{count, slice_all_expr_text(current)}), {}, true
+        }
         if thread_last && head.text == "reduce" {
             if len(step.items) != 3 {
                 return "", Compile_Error{message = "reduce thread step expects function and initial value", span = step.span}, false
@@ -919,11 +971,14 @@ emit_thread_step :: proc(e: ^Emitter, current: string, step: CST_Form, thread_la
             }
             return fmt.tprintf("(%s)[%s:%s]", current, start, end), {}, true
         }
-        if thread_last && (head.text == "first" || head.text == "second" || head.text == "last" || head.text == "rest" || head.text == "empty?") {
+        if thread_last && (head.text == "first" || head.text == "second" || head.text == "last" || head.text == "rest" || head.text == "empty?" || head.text == "count") {
             if len(step.items) != 1 {
                 return "", Compile_Error{message = fmt.tprintf("%s thread step expects no arguments", head.text), span = step.span}, false
             }
             collection := slice_all_expr_text(current)
+            if head.text == "count" {
+                return fmt.tprintf("len(%s)", collection), {}, true
+            }
             if head.text == "first" {
                 return fmt.tprintf("(%s)[0]", collection), {}, true
             }
@@ -1001,7 +1056,8 @@ thread_step_result_kind :: proc(step: CST_Form, thread_last: bool) -> Thread_Res
                            head.text == "reverse" || head.text == "sort" ||
                            head.text == "sort-by" || head.text == "zipmap" ||
                            head.text == "index-by" || head.text == "group-by" ||
-                           head.text == "frequencies") {
+                           head.text == "frequencies" || head.text == "distinct" ||
+                           head.text == "distinct-by" || head.text == "cycle") {
             return .Owned
         }
         if thread_last && (head.text == "partition" || head.text == "partition-all" || head.text == "partition-by") {
@@ -1017,7 +1073,7 @@ thread_step_result_kind :: proc(step: CST_Form, thread_last: bool) -> Thread_Res
                            head.text == "some?" || head.text == "every?" ||
                            head.text == "first" || head.text == "second" ||
                            head.text == "last" || head.text == "nth" ||
-                           head.text == "empty?") {
+                           head.text == "empty?" || head.text == "count") {
             return .Scalar
         }
     }
@@ -1088,7 +1144,8 @@ owned_sequence_head :: proc(name: string) -> bool {
          "concat", "reverse", "sort", "sort-by",
          "partition", "partition-all", "partition-by",
          "zipmap", "index-by", "group-by", "frequencies",
-         "range", "repeat", "repeatedly", "iterate":
+         "distinct", "distinct-by",
+         "range", "repeat", "repeatedly", "iterate", "cycle":
         return true
     }
     return false
@@ -1329,6 +1386,22 @@ emit_group_by_callback_call :: proc(e: ^Emitter, callback: CST_Form, collection:
     }
     mark_core_group_by(e)
     return emit_call_text("odinl_group_by", []string{f, collection}), {}, true
+}
+
+emit_distinct_by_callback_call :: proc(e: ^Emitter, callback: CST_Form, collection: string) -> (string, Compile_Error, bool) {
+    if field, ok_field := field_from_keyword(callback); ok_field {
+        mark_core_distinct_by_field(e, field)
+        return emit_call_text(
+            fmt.tprintf("odinl_distinct_by_field_%s", field),
+            []string{field_type_expr_text(collection, field), collection},
+        ), {}, true
+    }
+    f, err_f, ok_f := emit_expr(e, callback)
+    if !ok_f {
+        return "", err_f, false
+    }
+    mark_core_distinct_by(e)
+    return emit_call_text("odinl_distinct_by", []string{f, collection}), {}, true
 }
 
 emit_partition_by_callback_call :: proc(e: ^Emitter, callback: CST_Form, collection: string) -> (string, Compile_Error, bool) {
@@ -1583,9 +1656,9 @@ emit_operator_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Erro
         return fmt.tprintf("(%s) %s (%s)", lhs, op, rhs), {}, true
     }
 
-    if op == "in?" {
+    if op == "in?" || op == "contains?" {
         if len(form.items) != 3 {
-            return "", Compile_Error{message = "in? expects exactly two arguments", span = form.span}, false
+            return "", Compile_Error{message = fmt.tprintf("%s expects exactly two arguments", op), span = form.span}, false
         }
         collection, err_collection, ok_collection := emit_expr(e, form.items[1])
         if !ok_collection {
@@ -1829,6 +1902,21 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         return emit_call_text("odinl_keep_in_place", []string{f, address_of_expr_text(collection)}), {}, true
     }
 
+    if head.text == "into!" {
+        if len(form.items) != 3 {
+            return "", Compile_Error{message = "into! expects target and collection", span = form.span}, false
+        }
+        target, err_target, ok_target := emit_expr(e, form.items[1])
+        if !ok_target {
+            return "", err_target, false
+        }
+        collection, err_collection, ok_collection := emit_expr(e, form.items[2])
+        if !ok_collection {
+            return "", err_collection, false
+        }
+        return emit_call_text("append", []string{address_of_expr_text(target), fmt.tprintf("..%s", slice_all_expr_text(collection))}), {}, true
+    }
+
     if head.text == "concat" {
         if len(form.items) != 3 {
             return "", Compile_Error{message = "concat expects two collections", span = form.span}, false
@@ -2001,6 +2089,29 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         return emit_call_text("odinl_frequencies", []string{slice_all_expr_text(collection)}), {}, true
     }
 
+    if head.text == "distinct" {
+        if len(form.items) != 2 {
+            return "", Compile_Error{message = "distinct expects collection", span = form.span}, false
+        }
+        collection, err_collection, ok_collection := emit_expr(e, form.items[1])
+        if !ok_collection {
+            return "", err_collection, false
+        }
+        mark_core_distinct(e)
+        return emit_call_text("odinl_distinct", []string{slice_all_expr_text(collection)}), {}, true
+    }
+
+    if head.text == "distinct-by" {
+        if len(form.items) != 3 {
+            return "", Compile_Error{message = "distinct-by expects key function and collection", span = form.span}, false
+        }
+        collection, err_collection, ok_collection := emit_expr(e, form.items[2])
+        if !ok_collection {
+            return "", err_collection, false
+        }
+        return emit_distinct_by_callback_call(e, form.items[1], slice_all_expr_text(collection))
+    }
+
     if head.text == "range" {
         if len(form.items) < 2 || len(form.items) > 4 {
             return "", Compile_Error{message = "range expects end, start/end, or start/end/step", span = form.span}, false
@@ -2089,6 +2200,22 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         return emit_call_text("odinl_iterate", []string{count, f, init}), {}, true
     }
 
+    if head.text == "cycle" {
+        if len(form.items) != 3 {
+            return "", Compile_Error{message = "cycle expects count and collection", span = form.span}, false
+        }
+        count, err_count, ok_count := emit_expr(e, form.items[1])
+        if !ok_count {
+            return "", err_count, false
+        }
+        collection, err_collection, ok_collection := emit_expr(e, form.items[2])
+        if !ok_collection {
+            return "", err_collection, false
+        }
+        mark_core_cycle(e)
+        return emit_call_text("odinl_cycle", []string{count, slice_all_expr_text(collection)}), {}, true
+    }
+
     if head.text == "reduce" {
         if len(form.items) != 4 {
             return "", Compile_Error{message = "reduce expects function, initial value, and collection", span = form.span}, false
@@ -2155,7 +2282,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         return emit_predicate_callback_call(e, "odinl_every_p", form.items[1], collection, mark_core_every, mark_core_every_field)
     }
 
-    if head.text == "first" || head.text == "second" || head.text == "last" || head.text == "rest" || head.text == "empty?" {
+    if head.text == "first" || head.text == "second" || head.text == "last" || head.text == "rest" || head.text == "empty?" || head.text == "count" {
         if len(form.items) != 2 {
             return "", Compile_Error{message = fmt.tprintf("%s expects collection", head.text), span = form.span}, false
         }
@@ -2164,6 +2291,9 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
             return "", err_collection, false
         }
         collection = slice_all_expr_text(collection)
+        if head.text == "count" {
+            return fmt.tprintf("len(%s)", collection), {}, true
+        }
         if head.text == "first" {
             return fmt.tprintf("(%s)[0]", collection), {}, true
         }
@@ -3839,6 +3969,74 @@ emit_core_frequencies_helper :: proc(e: ^Emitter) {
     emit_line(e, "}")
 }
 
+emit_core_distinct_helper :: proc(e: ^Emitter) {
+    emit_line(e, "odinl_distinct :: proc(xs: []$T) -> [dynamic]T {")
+    e.indent += 1
+    emit_line(e, "out := make([dynamic]T)")
+    emit_line(e, "seen := make(map[T]bool)")
+    emit_line(e, "defer delete(seen)")
+    emit_line(e, "for x in xs {")
+    e.indent += 1
+    emit_line(e, "if seen[x] {")
+    e.indent += 1
+    emit_line(e, "continue")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "seen[x] = true")
+    emit_line(e, "append(&out, x)")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "return out")
+    e.indent -= 1
+    emit_line(e, "}")
+}
+
+emit_core_distinct_by_helper :: proc(e: ^Emitter) {
+    emit_line(e, "odinl_distinct_by :: proc(f: proc(x: $T) -> $K, xs: []T) -> [dynamic]T {")
+    e.indent += 1
+    emit_line(e, "out := make([dynamic]T)")
+    emit_line(e, "seen := make(map[K]bool)")
+    emit_line(e, "defer delete(seen)")
+    emit_line(e, "for x in xs {")
+    e.indent += 1
+    emit_line(e, "key := f(x)")
+    emit_line(e, "if seen[key] {")
+    e.indent += 1
+    emit_line(e, "continue")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "seen[key] = true")
+    emit_line(e, "append(&out, x)")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "return out")
+    e.indent -= 1
+    emit_line(e, "}")
+}
+
+emit_core_distinct_by_field_helper :: proc(e: ^Emitter, field: string) {
+    emit_line(e, fmt.tprintf("odinl_distinct_by_field_%s :: proc($Key: typeid, xs: []$T) -> [dynamic]T %s", field, "{"))
+    e.indent += 1
+    emit_line(e, "out := make([dynamic]T)")
+    emit_line(e, "seen := make(map[Key]bool)")
+    emit_line(e, "defer delete(seen)")
+    emit_line(e, "for x in xs {")
+    e.indent += 1
+    emit_line(e, fmt.tprintf("key := x.%s", field))
+    emit_line(e, "if seen[key] {")
+    e.indent += 1
+    emit_line(e, "continue")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "seen[key] = true")
+    emit_line(e, "append(&out, x)")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "return out")
+    e.indent -= 1
+    emit_line(e, "}")
+}
+
 emit_core_range_helper :: proc(e: ^Emitter) {
     emit_line(e, "odinl_range :: proc(start, end, step: int) -> [dynamic]int {")
     e.indent += 1
@@ -3922,6 +4120,25 @@ emit_core_iterate_helper :: proc(e: ^Emitter) {
     e.indent += 1
     emit_line(e, "append(&out, value)")
     emit_line(e, "value = f(value)")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "return out")
+    e.indent -= 1
+    emit_line(e, "}")
+}
+
+emit_core_cycle_helper :: proc(e: ^Emitter) {
+    emit_line(e, "odinl_cycle :: proc(n: int, xs: []$T) -> [dynamic]T {")
+    e.indent += 1
+    emit_line(e, "out := make([dynamic]T)")
+    emit_line(e, "if n <= 0 || len(xs) == 0 {")
+    e.indent += 1
+    emit_line(e, "return out")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "for i in 0..<n {")
+    e.indent += 1
+    emit_line(e, "append(&out, xs[i%len(xs)])")
     e.indent -= 1
     emit_line(e, "}")
     emit_line(e, "return out")
@@ -4169,10 +4386,13 @@ core_helpers_needed :: proc(features: Emitter_Features) -> bool {
            features.core_zipmap ||
            features.core_index_by || features.core_group_by ||
            features.core_frequencies ||
+           features.core_distinct || features.core_distinct_by ||
            features.core_range || features.core_repeat ||
            features.core_repeatedly || features.core_iterate ||
+           features.core_cycle ||
            len(features.map_fields) > 0 || len(features.index_by_fields) > 0 ||
            len(features.group_by_fields) > 0 ||
+           len(features.distinct_by_fields) > 0 ||
            len(features.partition_by_fields) > 0 ||
            len(features.sort_by_fields) > 0 ||
            len(features.sort_by_in_place_fields) > 0 ||
@@ -4343,6 +4563,18 @@ emit_core_helpers :: proc(e: ^Emitter, features: Emitter_Features) {
         emit_core_helper_separator(e, &emitted)
         emit_core_frequencies_helper(e)
     }
+    if features.core_distinct {
+        emit_core_helper_separator(e, &emitted)
+        emit_core_distinct_helper(e)
+    }
+    if features.core_distinct_by {
+        emit_core_helper_separator(e, &emitted)
+        emit_core_distinct_by_helper(e)
+    }
+    for field in features.distinct_by_fields {
+        emit_core_helper_separator(e, &emitted)
+        emit_core_distinct_by_field_helper(e, field)
+    }
     if features.core_range {
         emit_core_helper_separator(e, &emitted)
         emit_core_range_helper(e)
@@ -4358,6 +4590,10 @@ emit_core_helpers :: proc(e: ^Emitter, features: Emitter_Features) {
     if features.core_iterate {
         emit_core_helper_separator(e, &emitted)
         emit_core_iterate_helper(e)
+    }
+    if features.core_cycle {
+        emit_core_helper_separator(e, &emitted)
+        emit_core_cycle_helper(e)
     }
     if features.core_reduce {
         emit_core_helper_separator(e, &emitted)

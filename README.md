@@ -31,6 +31,7 @@ The non-goals are just as important:
 - no Clojure data model
 - no persistent collections
 - no seq abstraction
+- no lazy sequences or unbounded sequence producers
 - no runtime library unless Odin interop absolutely needs a helper
 - no semantic gap between source and generated Odin
 
@@ -549,12 +550,15 @@ foreign_call :: proc(handle: Foreign_Handle) ---
   `(sort-by! f xs)`, `(sort-by! :field xs)`, `(map! f xs)`,
   `(map-indexed! f xs)`, `(filter! pred xs)`, `(filter! :field xs)`,
   `(remove! pred xs)`, `(remove! :field xs)`, `(keep! f xs)`,
+  `(into! target xs)`,
   `(split-at n xs)`,
   `(partition n xs)`, `(partition-all n xs)`, `(partition-by f xs)`,
   `(partition-by :field xs)`, `(zipmap keys vals)`, `(index-by f xs)`,
   `(index-by :field xs)`, `(group-by f xs)`, `(group-by :field xs)`,
-  and `(frequencies xs)`, plus bounded producers
-  `(range ...)`, `(repeat n x)`, `(repeatedly n f)`, and `(iterate n f x)`
+  `(frequencies xs)`, `(distinct xs)`, `(distinct-by f xs)`,
+  and `(distinct-by :field xs)`, plus bounded producers
+  `(range ...)`, `(repeat n x)`, `(repeatedly n f)`, `(iterate n f x)`,
+  and `(cycle n xs)`
 - keywords can stand in for field callbacks in those helpers, e.g. `(map :name users)`,
   `(index-by :id users)`, `(group-by :status users)`, `(partition-by :status users)`,
   `(sort-by :age users)`, and `(filter :verified users)`
@@ -565,8 +569,8 @@ foreign_call :: proc(handle: Foreign_Handle) ---
 - operators: `(+ a b)`, `(<= i 10)`, `(and a b)`, etc. emit infix
 
 Current pragmatic Odin conveniences beyond the original core target include
-`(in? collection key)`, `(break)`, `(continue)`, and directive expression
-wrappers like `(#force_inline call arg)`.
+`(in? collection key)`, `(contains? collection key)`, `(count xs)`, `(break)`,
+`(continue)`, and directive expression wrappers like `(#force_inline call arg)`.
 
 This is deliberately incomplete. Add only forms that map cleanly to Odin.
 
