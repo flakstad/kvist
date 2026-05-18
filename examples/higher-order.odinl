@@ -15,10 +15,9 @@
   (let [xs (new []int [1 2 3 4])
         mapped (map inc xs)
         evens (filter even? mapped)
-        total (->> xs
-                   (map inc)
-                   (filter even?)
-                   (reduce add 0))]
+        total (reduce add 0 evens)]
+    (defer (delete mapped))
+    (defer (delete evens))
     (fmt.println (get mapped 0))
     (fmt.println (len evens))
     (fmt.println total)))

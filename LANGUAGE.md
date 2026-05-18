@@ -883,12 +883,26 @@ The intended surface style can still be familiar:
 (map job-to-be-done xs)
 (filter useful? xs)
 (reduce combine init xs)
+(take 10 xs)
+(drop 2 xs)
+(first xs)
+(second xs)
+(nth xs 2)
+(rest xs)
+(find ready? xs)
+(some? archived? xs)
+(every? valid? xs)
+(->> users
+     (filter :verified)
+     (map :name))
 ```
 
 These are now core eager helpers that lower to generated generic Odin
-procedures in the same output file. The broader collection-processing model is
-still intentionally not locked down yet. In particular, OdinL should not
-prematurely commit to:
+procedures in the same output file. Keywords used as callbacks in these helpers
+lower to generated field-specific helper procedures; they are shorthand for
+field access, not a general callable keyword/map-lookup abstraction. The broader
+collection-processing model is still intentionally not locked down yet. In
+particular, OdinL should not prematurely commit to:
 
 - `*-into` helper families
 - seq semantics
@@ -937,6 +951,10 @@ about Odin's no-capturing-closures model.
 `into`, transducers, and collection-building conventions are better treated as a
 separate future design project once the core language, procedure types, and
 allocation model are more settled.
+
+See `docs/SEQUENCES.md` for the current sequence helper roadmap. The short
+version is: helpers should be eager, Odin-shaped, and explicit about whether
+they return slice views or owned dynamic arrays.
 
 ## Literals and Construction
 

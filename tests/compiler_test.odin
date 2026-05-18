@@ -1,6 +1,7 @@
 package tests
 
 import "base:runtime"
+import "core:strings"
 import "core:testing"
 import odinl "../src/odinl"
 
@@ -56,6 +57,7 @@ compile_all_examples :: proc(t: ^testing.T) {
         "examples/interop-directives.odinl",
         "examples/pointers-and-raw.odinl",
         "examples/proc-values.odinl",
+        "examples/sequences.odinl",
         "examples/unions.odinl",
     }
 
@@ -1050,11 +1052,10 @@ compile_core_higher_order_helpers_and_slice_exprs :: proc(t: ^testing.T) {
         mapped (map inc xs)
         tail (slice mapped 1)
         evens (filter even? mapped)
-        total (->> xs
-                   (map inc)
-                   (filter even?)
-                   (reduce add 0))
+        total (reduce add 0 evens)
         middle (slice mapped 0 1)]
+    (defer (delete mapped))
+    (defer (delete evens))
     (return)))`
 
     output, err, ok := odinl.compile_source(source)
@@ -1084,8 +1085,10 @@ main :: proc() {
     mapped := odinl_map(inc, (xs)[:])
     tail := (mapped)[1:]
     evens := odinl_filter(even_p, (mapped)[:])
-    total := odinl_reduce(add, 0, (odinl_filter(even_p, (odinl_map(inc, (xs)[:]))[:]))[:])
+    total := odinl_reduce(add, 0, (evens)[:])
     middle := (mapped)[0:1]
+    defer delete(mapped)
+    defer delete(evens)
     return
 }
 
@@ -1113,6 +1116,120 @@ odinl_reduce :: proc(f: proc(acc: $U, x: $T) -> U, init: U, xs: []T) -> U {
         acc = f(acc, x)
     }
     return acc
+}
+`
+    testing.expect_value(t, output, expected)
+}
+
+@(test)
+compile_sequence_trim_helpers_as_slice_views :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(proc keep? [x: int] -> bool
+  (< x 4))
+
+(proc main []
+  (let [xs (new []int [1 2 3 4])
+        prefix (take 2 xs)
+        suffix (drop 1 xs)
+        small-prefix (take-while keep? xs)
+        large-suffix (drop-while keep? xs)]
+    (return)))`
+
+    output, err, ok := odinl.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "prefix := odinl_take(2, (xs)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "suffix := odinl_drop(1, (xs)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "small_prefix := odinl_take_while(keep_p, (xs)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "large_suffix := odinl_drop_while(keep_p, (xs)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "odinl_take :: proc(n: int, xs: []$T) -> []T"), true)
+    testing.expect_value(t, strings.contains(output, "return xs[:limit]"), true)
+    testing.expect_value(t, strings.contains(output, "odinl_drop :: proc(n: int, xs: []$T) -> []T"), true)
+    testing.expect_value(t, strings.contains(output, "return xs[start:]"), true)
+    testing.expect_value(t, strings.contains(output, "odinl_take_while :: proc(pred: proc(x: $T) -> bool, xs: []T) -> []T"), true)
+    testing.expect_value(t, strings.contains(output, "return xs[:i]"), true)
+    testing.expect_value(t, strings.contains(output, "odinl_drop_while :: proc(pred: proc(x: $T) -> bool, xs: []T) -> []T"), true)
+    testing.expect_value(t, strings.contains(output, "return xs[i:]"), true)
+}
+
+@(test)
+compile_keyword_callbacks_for_sequence_helpers :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(struct User {
+  :name string
+  :verified bool
+})
+
+(proc main []
+  (let [users (new []User [(User {:name "Ada" :verified true})
+                           (User {:name "Lin" :verified false})])
+        names (map :name users)
+        verified (filter :verified users)
+        [first ok] (find :verified users)
+        any? (some? :verified users)
+        all? (every? :verified verified)]
+    (return)))`
+
+    output, err, ok := odinl.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "names := odinl_map_field_name(type_of(((users)[:])[0].name), (users)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "verified := odinl_filter_field_verified((users)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "first, ok := odinl_find_field_verified((users)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "any_p := odinl_some_p_field_verified((users)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "all_p := odinl_every_p_field_verified((verified)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "odinl_map_field_name :: proc($Field_Type: typeid, xs: []$T) -> [dynamic]Field_Type"), true)
+    testing.expect_value(t, strings.contains(output, "odinl_filter_field_verified :: proc(xs: []$T) -> [dynamic]T"), true)
+    testing.expect_value(t, strings.contains(output, "odinl_find_field_verified :: proc(xs: []$T) -> (value: T, ok: bool)"), true)
+    testing.expect_value(t, strings.contains(output, "odinl_some_p_field_verified :: proc(xs: []$T) -> bool"), true)
+    testing.expect_value(t, strings.contains(output, "odinl_every_p_field_verified :: proc(xs: []$T) -> bool"), true)
+}
+
+@(test)
+compile_sequence_indexing_helpers :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(proc main []
+  (let [xs (new []int [10 20 30])
+        a (first xs)
+        b (second xs)
+        c (nth xs 2)
+        tail (rest xs)
+        threaded (->> xs
+                      (rest)
+                      (first))]
+    (return)))`
+
+    output, err, ok := odinl.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    expected := `package main
+
+main :: proc() {
+    xs := []int{10, 20, 30}
+    a := ((xs)[:])[0]
+    b := ((xs)[:])[1]
+    c := ((xs)[:])[2]
+    tail := ((xs)[:])[1:]
+    threaded := ((((xs)[:])[1:])[:])[0]
+    return
 }
 `
     testing.expect_value(t, output, expected)

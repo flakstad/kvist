@@ -109,7 +109,7 @@ The CLI can also invoke Odin for generated files directly:
 ```
 
 The examples cover control flow, collection literals, procedure values,
-map/filter/reduce-style higher-order helpers, pointer/raw interop,
+core sequence helpers over scalars and structs, pointer/raw interop,
 source-level procedure directives, named returns, and flat multi-return
 destructuring.
 
@@ -118,6 +118,8 @@ is `cmd/odinl/main.odin`.
 
 Tooling notes for the post-compiler Emacs/eval work are in
 [docs/TOOLING.md](docs/TOOLING.md).
+The eager sequence helper direction is documented in
+[docs/SEQUENCES.md](docs/SEQUENCES.md).
 Emacs support is in [emacs/odinl-mode.el](emacs/odinl-mode.el) and
 [emacs/odinl-eval.el](emacs/odinl-eval.el).
 
@@ -535,7 +537,12 @@ foreign_call :: proc(handle: Foreign_Handle) ---
 - `(do body...)`
 - `(new Type literal)` typed composite literals
 - `(make Type args...)` runtime/allocator-backed construction
-- `(map f xs)`, `(filter pred xs)`, and `(reduce f init xs)` core eager helpers
+- `(map f xs)`, `(filter pred xs)`, `(reduce f init xs)`, `(take n xs)`,
+  `(drop n xs)`, `(take-while pred xs)`, `(drop-while pred xs)`,
+  `(find pred xs)`, `(some? pred xs)`, `(every? pred xs)`, `(first xs)`,
+  `(second xs)`, `(nth xs n)`, and `(rest xs)` core sequence helpers
+- keywords can stand in for field callbacks in those helpers, e.g. `(map :name users)`
+  and `(filter :verified users)`
 - `(:field value)`, `(get value key)`, `(-> value steps...)`, and `(->> value steps...)`
 - `(^ ptr)` and `(& place)`
 - numbers, booleans, `nil`, and `(nil? value)`
