@@ -2,9 +2,12 @@ package main
 
 import "core:fmt"
 import "core:os"
+import "core:slice"
 import "core:strconv"
 import "core:strings"
 import odinl "../../src/odinl"
+
+CACHE_DIR :: ".odinl-cache"
 
 print_usage :: proc() {
     fmt.println("usage:")
@@ -13,13 +16,16 @@ print_usage :: proc() {
     fmt.println("  odinl build <input.odinl> [--generated output.odin]")
     fmt.println("  odinl check <input.odinl> [--generated output.odin]")
     fmt.println("  odinl run <input.odinl> [--generated output.odin]")
-    fmt.println("  odinl eval <input.odinl> <form> [--no-print] [--check] [--generated output.odin]")
+    fmt.println("  odinl eval <input.odinl> <form> [--no-print] [--check] [--generated output.odin] [--save name]")
     fmt.println("  odinl expand <input.odinl> <form> [--no-print] [-o output.odin]")
     fmt.println("  odinl macroexpand <input.odinl> <form> [-o output.odinl]")
+    fmt.println("  odinl cache path <name>")
+    fmt.println("  odinl cache list")
+    fmt.println("  odinl cache rm <name>")
 }
 
 is_command :: proc(text: string) -> bool {
-    return text == "compile" || text == "build" || text == "check" || text == "run" || text == "eval" || text == "expand" || text == "macroexpand"
+    return text == "compile" || text == "build" || text == "check" || text == "run" || text == "eval" || text == "expand" || text == "macroexpand" || text == "cache"
 }
 
 read_source_or_exit :: proc(path: string) -> string {
@@ -36,6 +42,129 @@ write_output_or_exit :: proc(path, output: string) {
     if write_err != nil {
         fmt.eprintln("failed to write output: ", path)
         os.exit(1)
+    }
+}
+
+cache_key_valid :: proc(name: string) -> bool {
+    if name == "" || name == "." || name == ".." {
+        return false
+    }
+    for ch in transmute([]byte)name {
+        if (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
+           (ch >= '0' && ch <= '9') || ch == '_' || ch == '-' || ch == '.' {
+            continue
+        }
+        return false
+    }
+    return true
+}
+
+cache_dir_or_exit :: proc() -> string {
+    env_dir, found := os.lookup_env("ODINL_CACHE_DIR", context.allocator)
+    if found {
+        if env_dir != "" {
+            return env_dir
+        }
+        delete(env_dir)
+    }
+    return strings.clone(CACHE_DIR)
+}
+
+cache_path_in_dir_or_exit :: proc(dir, name: string) -> string {
+    if !cache_key_valid(name) {
+        fmt.eprintln("invalid cache name: ", name)
+        os.exit(2)
+    }
+    path, join_err := os.join_path({dir, name}, context.allocator)
+    if join_err != nil {
+        fmt.eprintln("failed to build cache path")
+        os.exit(1)
+    }
+    return path
+}
+
+ensure_cache_dir_or_exit :: proc(dir: string) {
+    err := os.make_directory_all(dir)
+    if err != nil {
+        fmt.eprintln("failed to create cache directory: ", dir)
+        os.exit(1)
+    }
+}
+
+save_stdout_to_cache_or_exit :: proc(name: string, stdout: []byte) {
+    dir := cache_dir_or_exit()
+    defer delete(dir)
+    ensure_cache_dir_or_exit(dir)
+    path := cache_path_in_dir_or_exit(dir, name)
+    defer delete(path)
+    write_err := os.write_entire_file(path, stdout)
+    if write_err != nil {
+        fmt.eprintln("failed to write cache value: ", path)
+        os.exit(1)
+    }
+}
+
+cache_command :: proc() {
+    if len(os.args) < 3 {
+        print_usage()
+        os.exit(2)
+    }
+
+    switch os.args[2] {
+    case "path":
+        if len(os.args) != 4 {
+            print_usage()
+            os.exit(2)
+        }
+        dir := cache_dir_or_exit()
+        defer delete(dir)
+        path := cache_path_in_dir_or_exit(dir, os.args[3])
+        defer delete(path)
+        fmt.println(path)
+    case "list":
+        if len(os.args) != 3 {
+            print_usage()
+            os.exit(2)
+        }
+        dir := cache_dir_or_exit()
+        defer delete(dir)
+        if !os.exists(dir) {
+            return
+        }
+        entries, err := os.read_directory_by_path(dir, -1, context.allocator)
+        if err != nil {
+            fmt.eprintln("failed to read cache directory: ", dir)
+            os.exit(1)
+        }
+        defer os.file_info_slice_delete(entries, context.allocator)
+        slice.sort_by(entries, proc(a, b: os.File_Info) -> bool {
+            return a.name < b.name
+        })
+        for entry in entries {
+            if entry.type == .Regular {
+                fmt.println(entry.name)
+            }
+        }
+    case "rm":
+        if len(os.args) != 4 {
+            print_usage()
+            os.exit(2)
+        }
+        dir := cache_dir_or_exit()
+        defer delete(dir)
+        path := cache_path_in_dir_or_exit(dir, os.args[3])
+        defer delete(path)
+        if !os.exists(path) {
+            return
+        }
+        err := os.remove(path)
+        if err != nil {
+            fmt.eprintln("failed to remove cache value: ", path)
+            os.exit(1)
+        }
+    case:
+        print_usage()
+        os.exit(2)
     }
 }
 
@@ -108,7 +237,7 @@ remap_odin_output_locations :: proc(output, generated_path, source_path, source,
     return strings.clone(strings.to_string(builder))
 }
 
-run_odin_file :: proc(command, generated_path, source_path, source, eval_source: string, source_map: []odinl.Source_Map_Entry) -> int {
+run_odin_file :: proc(command, generated_path, source_path, source, eval_source, save_name: string, source_map: []odinl.Source_Map_Entry) -> int {
     working_dir, generated_file := os.split_path(generated_path)
     if working_dir == "" {
         working_dir = "."
@@ -135,6 +264,9 @@ run_odin_file :: proc(command, generated_path, source_path, source, eval_source:
         return 1
     }
     if state.exited {
+        if state.exit_code == 0 && save_name != "" {
+            save_stdout_to_cache_or_exit(save_name, stdout)
+        }
         return state.exit_code
     }
     return 1
@@ -264,12 +396,35 @@ run_generated_command :: proc(input, generated_path, odin_command: string) -> in
     }
     defer cleanup_generated(path, temp_dir, generated_path)
 
-    return run_odin_file(odin_command, path, input, data, "", result.source_map[:])
+    return run_odin_file(odin_command, path, input, data, "", "", result.source_map[:])
 }
 
-eval_command :: proc(input, eval_source, generated_path: string, no_print, check_only: bool) -> int {
+eval_command :: proc(input, eval_source, generated_path, save_name: string, no_print, check_only: bool) -> int {
+    if check_only && save_name != "" {
+        fmt.eprintln("--save cannot be used with --check")
+        return 2
+    }
     if !no_print && !check_only && strings.trim_space(eval_source) == "(main)" {
-        return run_generated_command(input, generated_path, "run")
+        data := read_source_or_exit(input)
+        defer delete(transmute([]byte)data)
+
+        result, err, ok := odinl.compile_source_with_map(data)
+        if !ok {
+            formatted := odinl.format_compile_error(input, data, err)
+            fmt.eprint(formatted)
+            delete(formatted)
+            os.exit(1)
+        }
+        defer delete(result.output)
+        defer delete(result.source_map)
+
+        path, temp_dir, path_ok := write_generated_for_execution(result.output, generated_path)
+        if !path_ok {
+            return 1
+        }
+        defer cleanup_generated(path, temp_dir, generated_path)
+
+        return run_odin_file("run", path, input, data, "", save_name, result.source_map[:])
     }
 
     data := read_source_or_exit(input)
@@ -295,7 +450,7 @@ eval_command :: proc(input, eval_source, generated_path: string, no_print, check
     if check_only {
         odin_command = "check"
     }
-    return run_odin_file(odin_command, path, input, data, eval_source, result.source_map[:])
+    return run_odin_file(odin_command, path, input, data, eval_source, save_name, result.source_map[:])
 }
 
 parse_legacy_compile :: proc() {
@@ -419,6 +574,7 @@ parse_eval_command :: proc() {
     input := os.args[2]
     eval_source := os.args[3]
     generated_path := ""
+    save_name := ""
     no_print := false
     check_only := false
 
@@ -438,13 +594,20 @@ parse_eval_command :: proc() {
         case "--check":
             check_only = true
             i += 1
+        case "--save":
+            if i+1 >= len(os.args) {
+                print_usage()
+                os.exit(2)
+            }
+            save_name = os.args[i+1]
+            i += 2
         case:
             print_usage()
             os.exit(2)
         }
     }
 
-    os.exit(eval_command(input, eval_source, generated_path, no_print, check_only))
+    os.exit(eval_command(input, eval_source, generated_path, save_name, no_print, check_only))
 }
 
 parse_expand_command :: proc() {
@@ -533,5 +696,7 @@ main :: proc() {
         parse_expand_command()
     case "macroexpand":
         parse_macroexpand_command()
+    case "cache":
+        cache_command()
     }
 }

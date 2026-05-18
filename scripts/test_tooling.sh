@@ -70,10 +70,32 @@ eval_output=$(./odinl eval examples/higher-order.odinl '(reduce add 0 (new []int
 assert_eq "6" "$eval_output" "eval output"
 assert_file_nonempty "$tmp_dir/eval.odin" "eval generated output"
 
+printf 'tooling: eval tap output\n'
+tap_output=$(./odinl eval examples/tap.odinl '(tap> :answer 42)')
+tap_expected=$(printf 'answer: 42\n42')
+assert_eq "$tap_expected" "$tap_output" "tap eval output"
+
+printf 'tooling: eval save cache\n'
+cache_dir="$tmp_dir/cache"
+saved_output=$(ODINL_CACHE_DIR="$cache_dir" ./odinl eval examples/higher-order.odinl '(reduce add 0 (new []int [1 2 3]))' --save sum)
+assert_eq "6" "$saved_output" "saved eval output"
+saved_path=$(ODINL_CACHE_DIR="$cache_dir" ./odinl cache path sum)
+assert_eq "$cache_dir/sum" "$saved_path" "cache path"
+assert_eq "6" "$(cat "$saved_path")" "saved cache content"
+assert_eq "sum" "$(ODINL_CACHE_DIR="$cache_dir" ./odinl cache list)" "cache list"
+ODINL_CACHE_DIR="$cache_dir" ./odinl cache rm sum
+assert_eq "" "$(ODINL_CACHE_DIR="$cache_dir" ./odinl cache list)" "cache list after rm"
+
 printf 'tooling: eval file-backed dev helpers\n'
 cat > "$tmp_dir/dev-io.odinl" <<'EOF'
 (package main)
+(import json "core:encoding/json")
 (import os "core:os")
+
+(struct Note {
+  :title string
+  :body string
+})
 
 (proc write-read-count [path: string] -> int
   (let [write-err (spit path "odinl")]
@@ -85,9 +107,22 @@ cat > "$tmp_dir/dev-io.odinl" <<'EOF'
           (do
             (defer (delete data))
             (len data)))))))
+
+(proc save-note-json [path: string] -> bool
+  (let [note (Note {:title "hello" :body "odinl"})
+        [marshal-err write-err] (save-json path note)]
+    (and (== marshal-err nil)
+         (== write-err nil))))
 EOF
 file_eval_output=$(./odinl eval "$tmp_dir/dev-io.odinl" "(write-read-count \"$tmp_dir/odinl-cache.txt\")")
 assert_eq "5" "$file_eval_output" "file-backed eval output"
+json_eval_output=$(./odinl eval "$tmp_dir/dev-io.odinl" "(save-note-json \"$tmp_dir/odinl-note.json\")")
+assert_eq "true" "$json_eval_output" "json save eval output"
+if ! grep -q '"title":"hello"' "$tmp_dir/odinl-note.json"; then
+    printf 'failed: save-json did not write expected JSON\n' >&2
+    cat "$tmp_dir/odinl-note.json" >&2
+    exit 1
+fi
 
 printf 'tooling: expand command\n'
 ./odinl expand examples/data-literals.odinl '(temp-buffer-len)' -o "$tmp_dir/expand.odin"
@@ -181,6 +216,9 @@ assert_eq "3" "$(./odinl eval examples/sequences.odinl '(status-run-count)')" "s
 assert_eq "2" "$(./odinl eval examples/sequences.odinl '(active-status-group-count)')" "active-status-group-count"
 assert_eq "2" "$(./odinl eval examples/data-literals.odinl '(temp-buffer-len)')" "temp-buffer-len"
 assert_eq "3" "$(./odinl eval examples/data-literals.odinl '(temp-scoped-buffer-len)')" "temp-scoped-buffer-len"
+tap_age_output=$(./odinl eval examples/tap.odinl '(inspected-age)')
+tap_age_expected=$(printf 'user: User{name = "Ada", age = 36}\nage: 36\n36')
+assert_eq "$tap_age_expected" "$tap_age_output" "inspected-age"
 assert_eq "-1" "$(./odinl eval examples/data-literals.odinl '(lookup-missing-default)')" "lookup-missing-default"
 assert_eq "51" "$(./odinl eval examples/data-literals.odinl '(merged-lookup-total)')" "merged-lookup-total"
 assert_eq "51" "$(./odinl eval examples/data-literals.odinl '(merge-in-place-total)')" "merge-in-place-total"
@@ -248,7 +286,7 @@ if command -v emacs >/dev/null 2>&1; then
     rm -f emacs/odinl-mode.elc emacs/odinl-eval.elc
 
     printf 'tooling: emacs keybindings and eval comment\n'
-    emacs -Q --batch --eval \
+    ODINL_CACHE_DIR="$tmp_dir/emacs-cache" emacs -Q --batch --eval \
         "(progn
            (defvar clojure-mode-map (make-sparse-keymap))
            (defvar cider-mode nil)
@@ -272,7 +310,11 @@ if command -v emacs >/dev/null 2>&1; then
                                           (cons \"C-c C-v\" (quote odinl-check-buffer))
                                           (cons \"C-c C-b\" (quote odinl-build-buffer))
                                           (cons \"C-c C-m\" (quote odinl-expand-form-at-point))
-                                          (cons \"C-c M-m\" (quote odinl-macroexpand-form-at-point))))
+                                          (cons \"C-c M-m\" (quote odinl-macroexpand-form-at-point))
+                                          (cons \"C-c C-w\" (quote odinl-save-form-result))
+                                          (cons \"C-c C-l\" (quote odinl-cache-list))
+                                          (cons \"C-c C-o\" (quote odinl-cache-open))
+                                          (cons \"C-c C-d\" (quote odinl-cache-rm))))
                      (unless (eq (key-binding (kbd (car binding))) (cdr binding))
                        (error \"Missing binding %s\" (car binding))))
                    (goto-char (point-min))
@@ -301,6 +343,24 @@ if command -v emacs >/dev/null 2>&1; then
                    (goto-char (point-min))
                    (unless (search-forward \";; => 3\" nil t)
                      (error \"Expected inserted eval comment\"))
+                   (goto-char (point-min))
+                   (search-forward \"(add 1 2)\")
+                   (odinl-save-form-result \"emacs-sum\")
+                   (let ((cache-path (expand-file-name \"emacs-sum\" \"$tmp_dir/emacs-cache\")))
+                     (unless (file-exists-p cache-path)
+                       (error \"Expected saved eval cache file\"))
+                     (with-temp-buffer
+                       (insert-file-contents cache-path)
+                       (unless (equal (buffer-string) \"3\\n\")
+                         (error \"Expected saved eval cache content\"))))
+                   (odinl-cache-list)
+                   (let ((cache-list (with-current-buffer odinl-result-buffer-name
+                                       (buffer-substring-no-properties (point-min) (point-max)))))
+                     (unless (string-match-p \"emacs-sum\" cache-list)
+                       (error \"Expected saved eval cache listing\")))
+                   (odinl-cache-rm \"emacs-sum\")
+                   (when (file-exists-p (expand-file-name \"emacs-sum\" \"$tmp_dir/emacs-cache\"))
+                     (error \"Expected removed eval cache file\"))
                    (goto-char (point-min))
                    (search-forward \"(main)\")
                    (call-interactively (quote odinl-insert-form-result))

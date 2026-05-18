@@ -47,6 +47,9 @@
 
 (defvar odinl--last-source-buffer nil)
 
+(defvar odinl-cache-name-history nil
+  "Minibuffer history for OdinL cache names.")
+
 (defvar odinl-eval-mode-map
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "C-c C-e") #'odinl-eval-form-at-point)
@@ -62,6 +65,10 @@
     (define-key map (kbd "C-c C-m") #'odinl-expand-form-at-point)
     (define-key map (kbd "C-c M-m") #'odinl-macroexpand-form-at-point)
     (define-key map (kbd "C-c C-s") #'odinl-toggle-show-generated)
+    (define-key map (kbd "C-c C-w") #'odinl-save-form-result)
+    (define-key map (kbd "C-c C-l") #'odinl-cache-list)
+    (define-key map (kbd "C-c C-o") #'odinl-cache-open)
+    (define-key map (kbd "C-c C-d") #'odinl-cache-rm)
     (define-key map (kbd "C-c C-z") #'odinl-switch-to-result)
     map)
   "Keymap for `odinl-eval-mode'.")
@@ -140,6 +147,24 @@
         (setq-local truncate-lines nil)
         (setq-local word-wrap t)
         (visual-line-mode 1)))))
+
+(defun odinl--cache-name-prompt (prompt)
+  "Read a cache name using PROMPT."
+  (read-string prompt nil 'odinl-cache-name-history))
+
+(defun odinl--cache-command (args &optional display)
+  "Run `odinl cache' with ARGS.
+When DISPLAY is non-nil, show command output in the result buffer."
+  (let* ((output-buffer (odinl--prepare-buffer odinl-result-buffer-name))
+         (root (file-name-as-directory (odinl--project-root)))
+         (default-directory root)
+         (exit-code (odinl--call (odinl--executable) (append (list "cache") args) output-buffer))
+         (result (with-current-buffer output-buffer
+                   (buffer-substring-no-properties (point-min) (point-max)))))
+    (if (or display (not (zerop exit-code)))
+        (odinl--display-output output-buffer result exit-code)
+      (odinl--message-result result exit-code))
+    (cons exit-code result)))
 
 (defun odinl--sexp-bounds-near-point ()
   "Return bounds for the list at or immediately before point."
@@ -314,15 +339,14 @@
   "Return non-nil when TEXT is Odin's diagnostic for printing a void call."
   (string-match-p "call does not return a value and cannot be used as a value" text))
 
-(defun odinl--main-call-form-p (form)
-  "Return non-nil when FORM is a direct `(main)' call."
-  (string-match-p "\\`[[:space:]]*(main[[:space:]]*)[[:space:]]*\\'" form))
-
-(defun odinl--eval-string (form &optional no-print check-only display bounds)
+(defun odinl--eval-string (form &optional no-print check-only display bounds save-name)
   "Evaluate FORM via generated Odin.
 When NO-PRINT is non-nil, treat FORM as a statement.  When CHECK-ONLY is
 non-nil, run `odin check' instead of `odin run'.  DISPLAY may be `inline',
-`comment', or `buffer'."
+`comment', or `buffer'.  SAVE-NAME stores successful stdout in the OdinL
+CLI cache."
+  (when (and check-only save-name)
+    (user-error "Cannot save a check-only OdinL eval"))
   (setq odinl--last-source-buffer (current-buffer))
   (let* ((source-buffer (current-buffer))
          (source (odinl--source-temp-file))
@@ -332,6 +356,7 @@ non-nil, run `odin check' instead of `odin run'.  DISPLAY may be `inline',
          (args (append (list "eval" source form)
                        (when no-print (list "--no-print"))
                        (when check-only (list "--check"))
+                       (when save-name (list "--save" save-name))
                        (when generated (list "--generated" generated))))
          (root (file-name-as-directory (odinl--project-root)))
          (display (or display 'buffer)))
@@ -344,11 +369,9 @@ non-nil, run `odin check' instead of `odin run'.  DISPLAY may be `inline',
                      (not check-only)
                      (not (zerop exit-code))
                      (odinl--void-value-error-p result))
-            (setq args (if (odinl--main-call-form-p form)
-                           (append (list "run" source)
-                                   (when generated (list "--generated" generated)))
-                         (append (list "eval" source form "--no-print")
-                                 (when generated (list "--generated" generated)))))
+            (setq args (append (list "eval" source form "--no-print")
+                               (when save-name (list "--save" save-name))
+                               (when generated (list "--generated" generated))))
             (setq exit-code (odinl--call (odinl--executable) args output-buffer))
             (setq result (with-current-buffer output-buffer
                            (buffer-substring-no-properties (point-min) (point-max)))))
@@ -491,6 +514,24 @@ With prefix argument NO-PRINT, treat the form as a statement."
      bounds)))
 
 ;;;###autoload
+(defun odinl-save-form-result (name &optional no-print)
+  "Evaluate the OdinL form at point and save stdout to cache NAME.
+With prefix argument NO-PRINT, treat the form as a statement."
+  (interactive (list (odinl--cache-name-prompt "Save OdinL eval output as: ")
+                     current-prefix-arg))
+  (let* ((bounds (odinl--form-bounds-at-point))
+         (form (buffer-substring-no-properties (car bounds) (cdr bounds))))
+    (when (odinl--declaration-form-string-p form)
+      (user-error "Declaration forms can be checked, but their eval output cannot be saved"))
+    (odinl--eval-string
+     form
+     (or no-print odinl-default-no-print)
+     nil
+     'inline
+     bounds
+     name)))
+
+;;;###autoload
 (defun odinl-eval-region (beg end &optional no-print)
   "Evaluate the OdinL region from BEG to END.
 With prefix argument NO-PRINT, treat the region as a statement."
@@ -596,6 +637,43 @@ With prefix argument NO-PRINT, treat the form as a statement."
   (message "odinl-show-generated: %s" odinl-show-generated))
 
 ;;;###autoload
+(defun odinl-cache-list ()
+  "List names in the OdinL eval cache."
+  (interactive)
+  (odinl--cache-command (list "list") t))
+
+;;;###autoload
+(defun odinl-cache-path (name)
+  "Show the cache file path for NAME."
+  (interactive (list (odinl--cache-name-prompt "OdinL cache name: ")))
+  (let* ((result (odinl--cache-command (list "path" name)))
+         (exit-code (car result))
+         (path (string-trim (cdr result))))
+    (when (zerop exit-code)
+      (kill-new path)
+      (message "%s" path))))
+
+;;;###autoload
+(defun odinl-cache-open (name)
+  "Open the cache file for NAME."
+  (interactive (list (odinl--cache-name-prompt "Open OdinL cache name: ")))
+  (let* ((result (odinl--cache-command (list "path" name)))
+         (exit-code (car result))
+         (path (string-trim (cdr result))))
+    (when (zerop exit-code)
+      (if (file-exists-p path)
+          (find-file-other-window path)
+        (user-error "No cached value named %s" name)))))
+
+;;;###autoload
+(defun odinl-cache-rm (name)
+  "Remove cached value NAME."
+  (interactive (list (odinl--cache-name-prompt "Remove OdinL cache name: ")))
+  (let ((result (odinl--cache-command (list "rm" name))))
+    (when (zerop (car result))
+      (message "Removed OdinL cache value: %s" name))))
+
+;;;###autoload
 (defun odinl-switch-to-result ()
   "Display the OdinL result buffer."
   (interactive)
@@ -633,6 +711,10 @@ With prefix argument NO-PRINT, treat the form as a statement."
   (local-set-key (kbd "C-c C-m") #'odinl-expand-form-at-point)
   (local-set-key (kbd "C-c M-m") #'odinl-macroexpand-form-at-point)
   (local-set-key (kbd "C-c C-s") #'odinl-toggle-show-generated)
+  (local-set-key (kbd "C-c C-w") #'odinl-save-form-result)
+  (local-set-key (kbd "C-c C-l") #'odinl-cache-list)
+  (local-set-key (kbd "C-c C-o") #'odinl-cache-open)
+  (local-set-key (kbd "C-c C-d") #'odinl-cache-rm)
   (local-set-key (kbd "C-c C-z") #'odinl-switch-to-result))
 
 (add-hook 'odinl-mode-hook #'odinl-setup-mode-keys)

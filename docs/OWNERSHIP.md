@@ -14,6 +14,10 @@ The practical rule is:
 - Plain structs, enums, numbers, booleans, strings, fixed arrays, and ordinary
   slice views do not need deletion.
 
+`tap>` prints and returns its value. It does not allocate an owned result by
+itself, but ownership passes through it: `(tap> (map f xs))` is still an owned
+result and must be bound or returned.
+
 ## Delete These
 
 These forms return owned values in normal OdinL code:
@@ -124,10 +128,17 @@ These are scalar values, plain values, or borrowed views:
 (count xs)
 (contains? collection key)
 (spit path data)
+(save-json path value)
+(tap> value)
+(tap> :label value)
 ```
 
 `spit` lowers to `os.write_entire_file(path, data)` and returns `os.Error`. It
 does not allocate an owned result.
+
+`save-json` returns `(marshal_err: json.Marshal_Error, write_err: os.Error)`.
+It allocates temporary JSON bytes internally and deletes them before returning,
+so callers only handle the errors.
 
 `split-at` returns two borrowed slices:
 

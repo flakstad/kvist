@@ -60,6 +60,7 @@ compile_all_examples :: proc(t: ^testing.T) {
         "examples/proc-values.odinl",
         "examples/sequence-helpers.odinl",
         "examples/sequences.odinl",
+        "examples/tap.odinl",
         "examples/unions.odinl",
     }
 
@@ -1039,6 +1040,83 @@ compile_file_dev_helpers :: proc(t: ^testing.T) {
 }
 
 @(test)
+compile_save_json_helper :: proc(t: ^testing.T) {
+    source := `(package main)
+(import json "core:encoding/json")
+(import os "core:os")
+
+(struct User {
+  :name string
+  :age int
+})
+
+(proc save-user [path: string, user: User] -> bool
+  (let [[marshal-err write-err] (save-json path user)]
+    (and (== marshal-err nil)
+         (== write-err nil))))`
+
+    output, err, ok := odinl.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, `import json "core:encoding/json"`), true)
+    testing.expect_value(t, strings.contains(output, `import os "core:os"`), true)
+    testing.expect_value(t, strings.contains(output, "marshal_err, write_err := odinl_save_json(path, user)"), true)
+    testing.expect_value(t, strings.contains(output, "odinl_save_json :: proc(path: string, value: $T) -> (marshal_err: json.Marshal_Error, write_err: os.Error)"), true)
+    testing.expect_value(t, strings.contains(output, "data, marshal_err = json.marshal(value)"), true)
+    testing.expect_value(t, strings.contains(output, "defer delete(data)"), true)
+    testing.expect_value(t, strings.contains(output, "write_err = os.write_entire_file(path, data)"), true)
+}
+
+@(test)
+compile_tap_helper :: proc(t: ^testing.T) {
+    source := `(package main)
+(import "core:fmt")
+
+(proc main []
+  (let [answer (tap> :answer 42)
+        owned (tap> "owned" (new [dynamic]int [1 2 3]))]
+    (defer (delete owned))
+    (fmt.println answer)))`
+
+    output, err, ok := odinl.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "answer := odinl_tap_labeled(\"answer\", 42)"), true)
+    testing.expect_value(t, strings.contains(output, "owned := odinl_tap_labeled(\"owned\", [dynamic]int{1, 2, 3})"), true)
+    testing.expect_value(t, strings.contains(output, "odinl_tap :: proc(value: $T) -> T"), true)
+    testing.expect_value(t, strings.contains(output, "odinl_tap_labeled :: proc(label: string, value: $T) -> T"), true)
+    testing.expect_value(t, strings.contains(output, "fmt.print(label)"), true)
+    testing.expect_value(t, strings.contains(output, "fmt.println(value)"), true)
+}
+
+@(test)
+reject_tap_thread_step_for_now :: proc(t: ^testing.T) {
+    source := `(package main)
+(import "core:fmt")
+
+(proc main []
+  (let [answer (-> 41
+                   (+ 1)
+                   (tap> :answer))]
+    (fmt.println answer)))`
+
+    _, err, ok := odinl.compile_source(source)
+    testing.expect_value(t, ok, false)
+    defer delete(err.message)
+    testing.expect_value(t, err.message, "tap> is not supported as a thread step yet; bind the value before tapping")
+}
+
+@(test)
 compile_struct_field_destructuring :: proc(t: ^testing.T) {
     source := `(package main)
 
@@ -1963,7 +2041,7 @@ reject_discarded_owned_sequence_result :: proc(t: ^testing.T) {
     _, err, ok := odinl.compile_source(source)
     testing.expect_value(t, ok, false)
     defer delete(err.message)
-    testing.expect_value(t, err.message, "owned sequence result must be bound or returned; nested owned results would leak")
+    testing.expect_value(t, err.message, "owned result must be bound or returned; nested owned results would leak")
 }
 
 @(test)
@@ -1979,7 +2057,22 @@ reject_nested_owned_sequence_result :: proc(t: ^testing.T) {
     _, err, ok := odinl.compile_source(source)
     testing.expect_value(t, ok, false)
     defer delete(err.message)
-    testing.expect_value(t, err.message, "owned sequence result must be bound or returned; nested owned results would leak")
+    testing.expect_value(t, err.message, "owned result must be bound or returned; nested owned results would leak")
+}
+
+@(test)
+reject_discarded_slurp_result :: proc(t: ^testing.T) {
+    source := `(package main)
+(import os "core:os")
+
+(proc main []
+  (slurp "cache.json")
+  (return))`
+
+    _, err, ok := odinl.compile_source(source)
+    testing.expect_value(t, ok, false)
+    defer delete(err.message)
+    testing.expect_value(t, err.message, "owned result must be bound or returned; nested owned results would leak")
 }
 
 @(test)

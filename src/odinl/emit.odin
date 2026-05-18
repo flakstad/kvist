@@ -56,6 +56,8 @@ Emitter_Features :: struct {
     core_repeatedly:  bool,
     core_iterate:     bool,
     core_cycle:       bool,
+    core_save_json:   bool,
+    core_tap:         bool,
     map_fields:       [dynamic]string,
     index_by_fields:  [dynamic]string,
     group_by_fields:  [dynamic]string,
@@ -403,6 +405,18 @@ mark_core_iterate :: proc(e: ^Emitter) {
 mark_core_cycle :: proc(e: ^Emitter) {
     if e.features != nil {
         e.features.core_cycle = true
+    }
+}
+
+mark_core_save_json :: proc(e: ^Emitter) {
+    if e.features != nil {
+        e.features.core_save_json = true
+    }
+}
+
+mark_core_tap :: proc(e: ^Emitter) {
+    if e.features != nil {
+        e.features.core_tap = true
     }
 }
 
@@ -828,6 +842,9 @@ emit_thread_step :: proc(e: ^Emitter, current: string, step: CST_Form, thread_la
         }
         if head.kind != .Symbol {
             return "", Compile_Error{message = "thread list step expects symbol or keyword head", span = head.span}, false
+        }
+        if head.text == "tap>" {
+            return "", Compile_Error{message = "tap> is not supported as a thread step yet; bind the value before tapping", span = step.span}, false
         }
         if thread_last && (head.text == "map" || head.text == "filter" || head.text == "remove") {
             if len(step.items) != 2 {
@@ -1273,7 +1290,7 @@ thread_return_error :: proc(form: CST_Form) -> (Compile_Error, bool) {
     return {}, false
 }
 
-owned_sequence_head :: proc(name: string) -> bool {
+owned_result_head :: proc(name: string) -> bool {
     switch name {
     case "map", "filter", "remove", "map-indexed", "keep", "mapcat",
          "concat", "merge", "reverse", "sort", "sort-by",
@@ -1288,11 +1305,14 @@ owned_sequence_head :: proc(name: string) -> bool {
     return false
 }
 
-form_is_owned_sequence_result :: proc(form: CST_Form) -> bool {
+form_is_owned_result :: proc(form: CST_Form) -> bool {
     if form.kind != .List || len(form.items) == 0 || form.items[0].kind != .Symbol {
         return false
     }
-    if owned_sequence_head(form.items[0].text) {
+    if form.items[0].text == "tap>" && (len(form.items) == 2 || len(form.items) == 3) {
+        return form_is_owned_result(form.items[len(form.items)-1])
+    }
+    if owned_result_head(form.items[0].text) {
         return true
     }
     if is_thread_form(form, true) || is_thread_form(form, false) {
@@ -1302,11 +1322,24 @@ form_is_owned_sequence_result :: proc(form: CST_Form) -> bool {
     return false
 }
 
-owned_sequence_usage_error :: proc(form: CST_Form, allow_root_owned: bool) -> (Compile_Error, bool) {
-    if form_is_owned_sequence_result(form) {
+owned_result_usage_error :: proc(form: CST_Form, allow_root_owned: bool) -> (Compile_Error, bool) {
+    if form.kind == .List && len(form.items) > 0 &&
+       form.items[0].kind == .Symbol && form.items[0].text == "tap>" &&
+       (len(form.items) == 2 || len(form.items) == 3) &&
+       form_is_owned_result(form) {
         if !allow_root_owned {
             return Compile_Error{
-                message = "owned sequence result must be bound or returned; nested owned results would leak",
+                message = "owned result must be bound or returned; nested owned results would leak",
+                span = form.span,
+            }, true
+        }
+        return owned_result_usage_error(form.items[len(form.items)-1], true)
+    }
+
+    if form_is_owned_result(form) {
+        if !allow_root_owned {
+            return Compile_Error{
+                message = "owned result must be bound or returned; nested owned results would leak",
                 span = form.span,
             }, true
         }
@@ -1328,7 +1361,7 @@ owned_sequence_usage_error :: proc(form: CST_Form, allow_root_owned: bool) -> (C
                 start = 2
             } else if head == "new" {
                 start = 2
-            } else if allow_root_owned && form_is_owned_sequence_result(form) {
+            } else if allow_root_owned && form_is_owned_result(form) {
                 start = 1
             }
         }
@@ -1336,7 +1369,7 @@ owned_sequence_usage_error :: proc(form: CST_Form, allow_root_owned: bool) -> (C
             start = len(form.items)
         }
         for item in form.items[start:] {
-            err_item, bad_item := owned_sequence_usage_error(item, false)
+            err_item, bad_item := owned_result_usage_error(item, false)
             if bad_item {
                 return err_item, true
             }
@@ -1509,7 +1542,7 @@ form_is_owned_allocation_result :: proc(form: CST_Form) -> bool {
 }
 
 form_is_owned_temp_escape_result :: proc(form: CST_Form) -> bool {
-    return form_is_owned_sequence_result(form) || form_is_owned_allocation_result(form)
+    return form_is_owned_result(form) || form_is_owned_allocation_result(form)
 }
 
 with_temp_allocator_escape_error :: proc(body: []CST_Form, last_in_proc: bool, returns: Return_Spec) -> (Compile_Error, bool) {
@@ -2030,6 +2063,51 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
             return "", err_data, false
         }
         return emit_call_text("os.write_entire_file", []string{path, data}), {}, true
+    }
+
+    if head.text == "save-json" {
+        if len(form.items) != 3 {
+            return "", Compile_Error{message = "save-json expects path and value", span = form.span}, false
+        }
+        path, err_path, ok_path := emit_expr(e, form.items[1])
+        if !ok_path {
+            return "", err_path, false
+        }
+        value, err_value, ok_value := emit_expr(e, form.items[2])
+        if !ok_value {
+            return "", err_value, false
+        }
+        mark_core_save_json(e)
+        return emit_call_text("odinl_save_json", []string{path, value}), {}, true
+    }
+
+    if head.text == "tap>" {
+        if len(form.items) != 2 && len(form.items) != 3 {
+            return "", Compile_Error{message = "tap> expects value or label and value", span = form.span}, false
+        }
+        mark_core_tap(e)
+        if len(form.items) == 2 {
+            value, err_value, ok_value := emit_expr(e, form.items[1])
+            if !ok_value {
+                return "", err_value, false
+            }
+            return emit_call_text("odinl_tap", []string{value}), {}, true
+        }
+
+        label_form := form.items[1]
+        label: string
+        if label_form.kind == .Keyword {
+            label = fmt.tprintf("\"%s\"", label_form.text[1:])
+        } else if label_form.kind == .String {
+            label = label_form.text
+        } else {
+            return "", Compile_Error{message = "tap> label must be a keyword or string literal", span = label_form.span}, false
+        }
+        value, err_value, ok_value := emit_expr(e, form.items[2])
+        if !ok_value {
+            return "", err_value, false
+        }
+        return emit_call_text("odinl_tap_labeled", []string{label, value}), {}, true
     }
 
     if head.text == "map" || head.text == "filter" || head.text == "remove" {
@@ -3415,7 +3493,7 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
                     return err_thread, false
                 }
             } else {
-                err_owned, bad_owned := owned_sequence_usage_error(binding.value, true)
+                err_owned, bad_owned := owned_result_usage_error(binding.value, true)
                 if bad_owned {
                     return err_owned, false
                 }
@@ -3494,7 +3572,7 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
             if bad_thread_return {
                 return err_thread_return, false
             }
-            err_owned, bad_owned := owned_sequence_usage_error(form.items[1], true)
+            err_owned, bad_owned := owned_result_usage_error(form.items[1], true)
             if bad_owned {
                 return err_owned, false
             }
@@ -3512,7 +3590,7 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
             if idx > 0 {
                 strings.write_string(&line_builder, ", ")
             }
-            err_owned, bad_owned := owned_sequence_usage_error(item, true)
+            err_owned, bad_owned := owned_result_usage_error(item, true)
             if bad_owned {
                 return err_owned, false
             }
@@ -3583,7 +3661,7 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
         if !ok_lhs {
             return err_lhs, false
         }
-        err_owned, bad_owned := owned_sequence_usage_error(form.items[2], true)
+        err_owned, bad_owned := owned_result_usage_error(form.items[2], true)
         if bad_owned {
             return err_owned, false
         }
@@ -3618,7 +3696,7 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
         }
         name := map_name(name_form.text)
         value := map_name(value_form.text)
-        err_owned, bad_owned := owned_sequence_usage_error(coll_form, false)
+        err_owned, bad_owned := owned_result_usage_error(coll_form, false)
         if bad_owned {
             return err_owned, false
         }
@@ -3683,7 +3761,7 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
         return {}, true
     case:
         allow_root_owned := last_in_proc && returns.kind != .None
-        err_owned, bad_owned := owned_sequence_usage_error(form, allow_root_owned)
+        err_owned, bad_owned := owned_result_usage_error(form, allow_root_owned)
         if bad_owned {
             return err_owned, false
         }
@@ -4812,6 +4890,41 @@ emit_core_cycle_helper :: proc(e: ^Emitter) {
     emit_line(e, "}")
 }
 
+emit_core_save_json_helper :: proc(e: ^Emitter) {
+    emit_line(e, "odinl_save_json :: proc(path: string, value: $T) -> (marshal_err: json.Marshal_Error, write_err: os.Error) {")
+    e.indent += 1
+    emit_line(e, "data: []byte")
+    emit_line(e, "data, marshal_err = json.marshal(value)")
+    emit_line(e, "if marshal_err != nil {")
+    e.indent += 1
+    emit_line(e, "return")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "defer delete(data)")
+    emit_line(e, "write_err = os.write_entire_file(path, data)")
+    emit_line(e, "return")
+    e.indent -= 1
+    emit_line(e, "}")
+}
+
+emit_core_tap_helper :: proc(e: ^Emitter) {
+    emit_line(e, "odinl_tap :: proc(value: $T) -> T {")
+    e.indent += 1
+    emit_line(e, "fmt.println(value)")
+    emit_line(e, "return value")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_raw_newline(e)
+    emit_line(e, "odinl_tap_labeled :: proc(label: string, value: $T) -> T {")
+    e.indent += 1
+    emit_line(e, "fmt.print(label)")
+    emit_line(e, "fmt.print(\": \")")
+    emit_line(e, "fmt.println(value)")
+    emit_line(e, "return value")
+    e.indent -= 1
+    emit_line(e, "}")
+}
+
 emit_core_reduce_helper :: proc(e: ^Emitter) {
     emit_line(e, "odinl_reduce :: proc(f: proc(acc: $U, x: $T) -> U, init: U, xs: []T) -> U {")
     e.indent += 1
@@ -5061,7 +5174,8 @@ core_helpers_needed :: proc(features: Emitter_Features) -> bool {
            features.core_distinct || features.core_distinct_by ||
            features.core_range || features.core_repeat ||
            features.core_repeatedly || features.core_iterate ||
-           features.core_cycle ||
+           features.core_cycle || features.core_save_json ||
+           features.core_tap ||
            len(features.map_fields) > 0 || len(features.index_by_fields) > 0 ||
            len(features.group_by_fields) > 0 ||
            len(features.distinct_by_fields) > 0 ||
@@ -5306,6 +5420,14 @@ emit_core_helpers :: proc(e: ^Emitter, features: Emitter_Features) {
     if features.core_cycle {
         emit_core_helper_separator(e, &emitted)
         emit_core_cycle_helper(e)
+    }
+    if features.core_save_json {
+        emit_core_helper_separator(e, &emitted)
+        emit_core_save_json_helper(e)
+    }
+    if features.core_tap {
+        emit_core_helper_separator(e, &emitted)
+        emit_core_tap_helper(e)
     }
     if features.core_reduce {
         emit_core_helper_separator(e, &emitted)

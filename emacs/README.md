@@ -34,8 +34,23 @@ Default keys:
 - `C-c C-b`: compile buffer and run `odin build` on generated Odin
 - `C-c C-v`: compile buffer and run `odin check` on generated Odin
 - `C-c C-a`: compile buffer and run generated Odin
+- `C-c C-m`: expand form at point into generated Odin
+- `C-c M-m`: macroexpand form at point into OdinL
 - `C-c C-s`: toggle display of generated Odin
+- `C-c C-w`: eval form at point and save stdout to the OdinL cache
+- `C-c C-l`: list saved OdinL cache values
+- `C-c C-o`: open a saved OdinL cache value
+- `C-c C-d`: remove a saved OdinL cache value
 - `C-c C-z`: switch to the result buffer
 
 Use a prefix argument with eval commands to treat the form/region as statements
 instead of printing the expression result.
+
+Saved eval values use the CLI cache:
+
+```sh
+odinl eval file.odinl FORM --save NAME
+odinl cache list
+odinl cache path NAME
+odinl cache rm NAME
+```

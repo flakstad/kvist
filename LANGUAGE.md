@@ -1012,9 +1012,14 @@ OdinL supports the first small piece of a disk-backed iterative workflow with
 thin `core:os` forms:
 
 ```clojure
+(import json "core:encoding/json")
 (import os "core:os")
 
 (spit "tmp/users.json" text)
+(let [[marshal-err write-err] (save-json "tmp/users.json" users)]
+  (and (== marshal-err nil)
+       (== write-err nil)))
+
 (let [[data err] (slurp "tmp/users.json")]
   (if (!= err nil)
     0
@@ -1026,7 +1031,11 @@ thin `core:os` forms:
 `spit` lowers to `os.write_entire_file(path, data)` and returns `os.Error`.
 `slurp` lowers to `os.read_entire_file(path, context.allocator)` and returns
 owned `[]byte` plus `os.Error`. The caller must delete the bytes when keeping
-the value local, or return them to transfer ownership.
+the value local, or return them to transfer ownership. `save-json` lowers
+through a generated helper that marshals with `json.marshal`, deletes the
+temporary JSON bytes, and writes with `os.write_entire_file`; JSON loading
+remains explicit until OdinL has a clear convention for deep cleanup of values
+allocated by `json.unmarshal`.
 
 ## Literals and Construction
 
@@ -1568,6 +1577,18 @@ may support tap-style inspection, rerun watches, and disk-backed saved values,
 but those features should be explicit editor/CLI workflows around generated
 Odin. A fresh process should be able to reproduce the same result from source
 files and saved data files.
+
+The first tap form is deliberately simple:
+
+```clojure
+(tap> value)
+(tap> :label value)
+```
+
+It lowers through generated helpers that call `fmt.print` / `fmt.println` and
+return the tapped value. The `core:fmt` import is explicit. `tap>` is not
+currently a thread step because owned threaded pipelines need a more precise
+ownership design.
 
 See `docs/TOOLING.md` for the current plan around tap-style inspection,
 file-backed dev values, watches, and Emacs integration.

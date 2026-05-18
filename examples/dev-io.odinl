@@ -1,9 +1,20 @@
 // Small file-backed development helpers.
 (package main)
+(import json "core:encoding/json")
 (import os "core:os")
+
+(struct Note {
+  :title string
+  :body string
+})
 
 (proc save-note [path: string, text: string] -> os.Error
   (spit path text))
+
+(proc save-note-json [path: string, note: Note] -> bool
+  (let [[marshal-err write-err] (save-json path note)]
+    (and (== marshal-err nil)
+         (== write-err nil))))
 
 (proc note-byte-count [path: string] -> int
   (let [[data err] (slurp path)]
@@ -25,6 +36,9 @@
 
   (save-note "tmp/odinl-note.txt" "hello")
   ;; => nil
+
+  (save-note-json "tmp/odinl-note.json" (Note {:title "hello" :body "from OdinL"}))
+  ;; => true
 
   (note-byte-count "tmp/odinl-note.txt")
   ;; => 5

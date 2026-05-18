@@ -116,18 +116,31 @@ Useful workflows to design:
 ### Tap
 
 A tap system should help inspect values during eval and normal runs without
-changing program semantics. Possible spellings:
+changing program semantics. The initial spelling is:
 
 ```clojure
 (tap> value)
 (tap> :label value)
 ```
 
-The likely implementation is a tiny generated helper or explicit tooling hook
-that prints or writes a tagged representation to a known file/socket/stdout
-channel. It should be opt-in and obvious in generated Odin. It should not depend
-on a global dynamic tap registry unless that registry is just a normal explicit
-Odin value.
+This currently lowers through tiny generated helpers that print to stdout with
+`fmt` and return the tapped value. Source files must import `core:fmt`
+explicitly. That is intentionally modest: it works in normal runs and editor
+evals, it is visible in the generated Odin, and it does not depend on a hidden
+global tap registry.
+
+`tap>` is not supported as a `->` / `->>` thread step yet. Bind the value first
+when ownership matters:
+
+```clojure
+(let [active (filter active? users)]
+  (defer (delete active))
+  (tap> :active-count (len active))
+  ...)
+```
+
+A richer tap sink can come later as an explicit CLI/editor option or ordinary
+Odin value, not as ambient language state.
 
 ### Watches
 
@@ -171,13 +184,27 @@ path)` lowers to `os.read_entire_file(path, context.allocator)` and returns
 owned `[]byte` plus `os.Error`; callers delete the bytes or return them to
 transfer ownership.
 
-For structured data, require explicit format and type decisions rather than
-inventing a universal printer/reader:
+Saving JSON can also stay boring:
 
 ```clojure
-(dev/save-json "users" users)
-(dev/load-json []User "users")
+(import json "core:encoding/json")
+(import os "core:os")
+
+(let [[marshal-err write-err] (save-json "tmp/users.json" users)]
+  (and (== marshal-err nil)
+       (== write-err nil)))
 ```
+
+`save-json` lowers through a generated `odinl_save_json` helper that calls
+`json.marshal`, defers deletion of the temporary JSON bytes, and writes them
+with `os.write_entire_file`.
+
+For structured data, continue to require explicit format and type decisions
+rather than inventing a universal printer/reader. Loading JSON is intentionally
+still explicit for now. Odin's JSON unmarshal allocates strings, slices, dynamic
+arrays, and maps inside the destination value according to that destination
+type, so a convenient load helper needs a clear deep-cleanup convention before
+it can be production quality.
 
 These helpers should lean on Odin's existing core libraries:
 
@@ -210,25 +237,49 @@ if err == nil {
 }
 ```
 
-The JSON helper names are placeholders. The design constraint is the important
-part: serialization should be explicit, file-backed, and reproducible from a
-fresh process. The editor can make the workflow feel REPL-like by remembering
-recent paths and commands, but the compiled Odin should remain ordinary.
+The JSON load helper name is a placeholder. The design constraint is the
+important part: serialization should be explicit, file-backed, and reproducible
+from a fresh process. The editor can make the workflow feel REPL-like by
+remembering recent paths and commands, but the compiled Odin should remain
+ordinary.
 
 JSON should be the first supported structured format because users can inspect
 and edit it. CBOR is a reasonable later option for larger caches. Odin's custom
 marshalers/unmarshalers should remain available for special types rather than
 OdinL inventing a parallel serialization protocol.
 
-### CLI Shape
+### CLI Cache
+
+The CLI has a small text cache for eval output:
+
+```sh
+odinl eval file.odinl FORM --save NAME
+odinl cache path NAME
+odinl cache list
+odinl cache rm NAME
+```
+
+The default cache directory is project-local `.odinl-cache`, which is gitignored.
+Set `ODINL_CACHE_DIR` when editor tooling or tests need an isolated cache. Cache
+names are simple file names: letters, digits, `_`, `-`, and `.` only. `--save`
+writes the exact stdout from a successful eval run to the named cache file and
+still prints stdout normally.
+
+This is intentionally text-oriented. For structured values, prefer explicit
+`spit`, `slurp`, and `save-json` in OdinL source so ownership and format choices
+stay visible.
+
+The Emacs tooling exposes this through ordinary CLI calls:
+
+- `odinl-save-form-result` (`C-c C-w`) evals a form and saves stdout with
+  `odinl eval --save`;
+- `odinl-cache-list` (`C-c C-l`) lists saved cache names;
+- `odinl-cache-open` (`C-c C-o`) opens a saved cache file;
+- `odinl-cache-rm` (`C-c C-d`) removes a saved cache file.
 
 Useful future `odinl` commands or flags:
 
-- `odinl eval file.odinl FORM --save NAME`
 - `odinl eval file.odinl FORM --tap`
-- `odinl cache list`
-- `odinl cache path NAME`
-- `odinl cache rm NAME`
 - `odinl watch file.odinl FORM`
 
 The exact CLI can change, but it should keep the source of truth on disk so a

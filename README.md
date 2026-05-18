@@ -577,8 +577,11 @@ foreign_call :: proc(handle: Foreign_Handle) ---
   and `(distinct-by :field xs)`, plus bounded producers
   `(range ...)`, `(repeat n x)`, `(repeatedly n f)`, `(iterate n f x)`,
   and `(cycle n xs)`
-- file-backed dev helpers `(slurp path)` and `(spit path data)`, which require
-  `(import os "core:os")` and lower directly to `core:os`
+- file-backed dev helpers `(slurp path)`, `(spit path data)`, and
+  `(save-json path value)`, which require explicit `core:os`/`core:encoding/json`
+  imports and lower directly to Odin core calls
+- `(tap> value)` and `(tap> :label value)` for explicit stdout inspection;
+  require `core:fmt` and return the tapped value
 - keywords can stand in for field callbacks in those helpers, e.g. `(map :name users)`,
   `(index-by :id users)`, `(group-by :status users)`, `(partition-by :status users)`,
   `(sort-by :age users)`, and `(filter :verified users)`
