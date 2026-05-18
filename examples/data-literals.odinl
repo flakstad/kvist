@@ -1,6 +1,7 @@
 // Exercises structs, field access, typed collection literals, map lookup, and make.
 (package main)
 (import "core:fmt")
+(import runtime "base:runtime")
 
 (struct User {
   :name string
@@ -33,6 +34,13 @@
     (let [buffer (make [dynamic]int)]
       (defer (delete buffer))
       (into! buffer (new []int [1 2]))
+      (count buffer))))
+
+(proc temp-scoped-buffer-len [] -> int
+  (with-temp-allocator [allocator]
+    (let [buffer (make [dynamic]int)]
+      (defer (delete buffer))
+      (into! buffer (new []int [1 2 3]))
       (count buffer))))
 
 (proc lookup-two [] -> int
@@ -86,6 +94,9 @@
 
   (temp-buffer-len)
   ;; => 2
+
+  (temp-scoped-buffer-len)
+  ;; => 3
 
   (lookup-two)
   ;; => 2

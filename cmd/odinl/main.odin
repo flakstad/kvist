@@ -15,10 +15,11 @@ print_usage :: proc() {
     fmt.println("  odinl run <input.odinl> [--generated output.odin]")
     fmt.println("  odinl eval <input.odinl> <form> [--no-print] [--check] [--generated output.odin]")
     fmt.println("  odinl expand <input.odinl> <form> [--no-print] [-o output.odin]")
+    fmt.println("  odinl macroexpand <input.odinl> <form> [-o output.odinl]")
 }
 
 is_command :: proc(text: string) -> bool {
-    return text == "compile" || text == "build" || text == "check" || text == "run" || text == "eval" || text == "expand"
+    return text == "compile" || text == "build" || text == "check" || text == "run" || text == "eval" || text == "expand" || text == "macroexpand"
 }
 
 read_source_or_exit :: proc(path: string) -> string {
@@ -208,6 +209,26 @@ compile_eval_emit_command :: proc(input, eval_source, output_path: string, no_pr
     defer delete(transmute([]byte)data)
 
     output, err, ok := odinl.compile_eval_source(data, eval_source, no_print)
+    if !ok {
+        formatted := odinl.format_eval_compile_error(input, data, eval_source, err)
+        fmt.eprint(formatted)
+        delete(formatted)
+        os.exit(1)
+    }
+    defer delete(output)
+
+    if output_path != "" {
+        write_output_or_exit(output_path, output)
+    } else {
+        fmt.print(output)
+    }
+}
+
+macroexpand_command :: proc(input, eval_source, output_path: string) {
+    data := read_source_or_exit(input)
+    defer delete(transmute([]byte)data)
+
+    output, err, ok := odinl.macroexpand_source(eval_source)
     if !ok {
         formatted := odinl.format_eval_compile_error(input, data, eval_source, err)
         fmt.eprint(formatted)
@@ -458,6 +479,34 @@ parse_expand_command :: proc() {
     compile_eval_emit_command(input, eval_source, output_path, no_print)
 }
 
+parse_macroexpand_command :: proc() {
+    if len(os.args) < 4 {
+        print_usage()
+        os.exit(2)
+    }
+    input := os.args[2]
+    eval_source := os.args[3]
+    output_path := ""
+
+    i := 4
+    for i < len(os.args) {
+        switch os.args[i] {
+        case "-o":
+            if i+1 >= len(os.args) {
+                print_usage()
+                os.exit(2)
+            }
+            output_path = os.args[i+1]
+            i += 2
+        case:
+            print_usage()
+            os.exit(2)
+        }
+    }
+
+    macroexpand_command(input, eval_source, output_path)
+}
+
 main :: proc() {
     if len(os.args) < 2 {
         print_usage()
@@ -482,5 +531,7 @@ main :: proc() {
         parse_eval_command()
     case "expand":
         parse_expand_command()
+    case "macroexpand":
+        parse_macroexpand_command()
     }
 }

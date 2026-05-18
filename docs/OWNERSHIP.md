@@ -50,6 +50,8 @@ These forms return owned values in normal OdinL code:
 (group-by f xs)
 (group-by :field xs)
 (frequencies xs)
+(keys m)
+(vals m)
 (range end)
 (range start end)
 (range start end step)
@@ -57,6 +59,7 @@ These forms return owned values in normal OdinL code:
 (repeatedly n f)
 (iterate n f x)
 (cycle n xs)
+(slurp path)
 ```
 
 Use `defer delete` for local owned values:
@@ -77,6 +80,22 @@ array. The chunks inside are borrowed slices and must not be deleted:
   (defer (delete chunks))
   (first (get chunks 0)))
 ```
+
+`slurp` lowers to `os.read_entire_file(path, context.allocator)`. It returns
+owned bytes plus an `os.Error`, so delete the bytes once the successful read is
+no longer needed:
+
+```clojure
+(let [[data err] (slurp path)]
+  (if (!= err nil)
+    0
+    (do
+      (defer (delete data))
+      (len data))))
+```
+
+If a proc returns the bytes from `slurp`, ownership transfers to the caller and
+the callee must not delete them.
 
 ## Do Not Delete These
 
@@ -104,7 +123,11 @@ These are scalar values, plain values, or borrowed views:
 (empty? xs)
 (count xs)
 (contains? collection key)
+(spit path data)
 ```
+
+`spit` lowers to `os.write_entire_file(path, data)` and returns `os.Error`. It
+does not allocate an owned result.
 
 `split-at` returns two borrowed slices:
 
@@ -185,6 +208,23 @@ and restores the old allocator with `defer`. Defers created inside the body run
 before the restore defer, so local `delete` calls still use the scoped
 allocator. Values returned from the block transfer ownership to the caller, so
 the caller must delete them with the matching allocator discipline.
+
+`with-temp-allocator` additionally starts and ends Odin's default temp allocator
+scope:
+
+```clojure
+(import runtime "base:runtime")
+
+(with-temp-allocator [allocator]
+  (let [xs (make [dynamic]int)]
+    (defer (delete xs))
+    ...))
+```
+
+This form still emits ordinary Odin calls to `runtime.default_temp_allocator_*`.
+The runtime import is explicit, and any owned values that escape the block must
+not borrow storage from the ended temp scope. OdinL rejects obvious direct
+escapes such as returning `(map f xs)` from a `with-temp-allocator` body.
 
 ## Returning Owned Values
 

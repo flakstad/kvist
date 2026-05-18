@@ -52,6 +52,7 @@ compile_all_examples :: proc(t: ^testing.T) {
         "examples/control-flow.odinl",
         "examples/data-literals.odinl",
         "examples/declarations.odinl",
+        "examples/dev-io.odinl",
         "examples/hello.odinl",
         "examples/higher-order.odinl",
         "examples/interop-directives.odinl",
@@ -1003,6 +1004,41 @@ main :: proc() {
 }
 
 @(test)
+compile_file_dev_helpers :: proc(t: ^testing.T) {
+    source := `(package main)
+(import os "core:os")
+
+(proc read-file [path: string] -> [data: []byte, err: os.Error]
+  (slurp path))
+
+(proc write-text [path: string, text: string] -> os.Error
+  (spit path text))
+
+(proc read-count [path: string] -> int
+  (let [[data err] (slurp path)]
+    (if (!= err nil)
+      0
+      (do
+        (defer (delete data))
+        (len data)))))`
+
+    output, err, ok := odinl.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, `import os "core:os"`), true)
+    testing.expect_value(t, strings.contains(output, "read_file :: proc(path: string) -> (data: []byte, err: os.Error)"), true)
+    testing.expect_value(t, strings.contains(output, "return os.read_entire_file(path, context.allocator)"), true)
+    testing.expect_value(t, strings.contains(output, "return os.write_entire_file(path, text)"), true)
+    testing.expect_value(t, strings.contains(output, "data, err := os.read_entire_file(path, context.allocator)"), true)
+    testing.expect_value(t, strings.contains(output, "defer delete(data)"), true)
+}
+
+@(test)
 compile_struct_field_destructuring :: proc(t: ^testing.T) {
     source := `(package main)
 
@@ -1078,6 +1114,132 @@ main :: proc() {
         return
     }
 }
+`
+    testing.expect_value(t, output, expected)
+}
+
+@(test)
+compile_with_temp_allocator_scope :: proc(t: ^testing.T) {
+    source := `(package main)
+(import runtime "base:runtime")
+
+(proc main []
+  (with-temp-allocator [allocator]
+    (let [buffer (make [dynamic]int)]
+      (defer (delete buffer))
+      (into! buffer (new []int [1 2]))
+      (return))))`
+
+    output, err, ok := odinl.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    expected := `package main
+
+import runtime "base:runtime"
+
+main :: proc() {
+    {
+        odinl_temp_scope_1 := runtime.default_temp_allocator_temp_begin()
+        defer runtime.default_temp_allocator_temp_end(odinl_temp_scope_1)
+        allocator := context.temp_allocator
+        odinl_old_allocator_2 := context.allocator
+        context.allocator = allocator
+        defer context.allocator = odinl_old_allocator_2
+        buffer := make([dynamic]int)
+        defer delete(buffer)
+        append(&(buffer), ..[]int{1, 2})
+        return
+    }
+}
+`
+    testing.expect_value(t, output, expected)
+}
+
+@(test)
+reject_returning_owned_result_from_with_temp_allocator :: proc(t: ^testing.T) {
+    source := `(package main)
+(import runtime "base:runtime")
+
+(proc inc [x: int] -> int
+  (+ x 1))
+
+(proc bad [xs: []int] -> [dynamic]int
+  (with-temp-allocator [allocator]
+    (map inc xs)))`
+
+    _, err, ok := odinl.compile_source(source)
+    testing.expect_value(t, ok, false)
+    defer delete(err.message)
+    testing.expect_value(t, err.message, "owned value cannot escape with-temp-allocator; allocate it outside the temp scope or copy it before returning")
+}
+
+@(test)
+reject_returning_slurp_result_from_with_temp_allocator :: proc(t: ^testing.T) {
+    source := `(package main)
+(import os "core:os")
+(import runtime "base:runtime")
+
+(proc bad [path: string] -> [data: []byte, err: os.Error]
+  (with-temp-allocator [allocator]
+    (slurp path)))`
+
+    _, err, ok := odinl.compile_source(source)
+    testing.expect_value(t, ok, false)
+    defer delete(err.message)
+    testing.expect_value(t, err.message, "owned value cannot escape with-temp-allocator; allocate it outside the temp scope or copy it before returning")
+}
+
+@(test)
+macroexpand_with_allocator_scope :: proc(t: ^testing.T) {
+    output, err, ok := odinl.macroexpand_source(`(with-allocator [allocator context.temp_allocator]
+  (let [buffer (make [dynamic]int)]
+    (defer (delete buffer))
+    (into! buffer (new []int [1 2]))))`)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    expected := `(do
+  (let [allocator context.temp_allocator
+        odinl-old-allocator-1 context.allocator]
+    (set! context.allocator allocator)
+    (defer (do
+      (set! context.allocator odinl-old-allocator-1)))
+    (let [buffer (make [dynamic]int)] (defer (delete buffer)) (into! buffer (new []int [1 2])))))
+`
+    testing.expect_value(t, output, expected)
+}
+
+@(test)
+macroexpand_with_temp_allocator_scope :: proc(t: ^testing.T) {
+    output, err, ok := odinl.macroexpand_source(`(with-temp-allocator [allocator]
+  (let [buffer (make [dynamic]int)]
+    (defer (delete buffer))
+    (into! buffer (new []int [1 2]))))`)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    expected := `(do
+  (let [odinl-temp-scope-1 (runtime.default-temp-allocator-temp-begin)
+        allocator context.temp-allocator
+        odinl-old-allocator-1 context.allocator]
+    (set! context.allocator allocator)
+    (defer (do
+      (set! context.allocator odinl-old-allocator-1)
+      (runtime.default-temp-allocator-temp-end odinl-temp-scope-1)))
+    (let [buffer (make [dynamic]int)] (defer (delete buffer)) (into! buffer (new []int [1 2])))))
 `
     testing.expect_value(t, output, expected)
 }
@@ -1556,7 +1718,12 @@ compile_map_constructing_sequence_helpers :: proc(t: ^testing.T) {
         counts (frequencies xs)
         base (new map[string]int {"a" 1 "b" 2})
         overrides (new map[string]int {"b" 20 "c" 30})
-        merged (merge base overrides)]
+        merged (merge base overrides)
+        key-list (keys base)
+        value-list (vals overrides)
+        key-count (->> merged
+                       (keys)
+                       (count))]
     (defer (delete by-value))
     (defer
       (each [_ group by-group]
@@ -1570,6 +1737,10 @@ compile_map_constructing_sequence_helpers :: proc(t: ^testing.T) {
     (defer (delete base))
     (defer (delete overrides))
     (defer (delete merged))
+    (defer (delete key-list))
+    (defer (delete value-list))
+    (when (== key-count 0)
+      (return))
     (merge! base overrides)
     (return)))`
 
@@ -1586,12 +1757,19 @@ compile_map_constructing_sequence_helpers :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "threaded := odinl_group_by(identity, (xs)[:])"), true)
     testing.expect_value(t, strings.contains(output, "counts := odinl_frequencies((xs)[:])"), true)
     testing.expect_value(t, strings.contains(output, "merged := odinl_merge(base, overrides)"), true)
+    testing.expect_value(t, strings.contains(output, "key_list := odinl_keys(base)"), true)
+    testing.expect_value(t, strings.contains(output, "value_list := odinl_vals(overrides)"), true)
+    testing.expect_value(t, strings.contains(output, "odinl_thread_1 := odinl_keys(merged)"), true)
+    testing.expect_value(t, strings.contains(output, "defer delete(odinl_thread_1)"), true)
+    testing.expect_value(t, strings.contains(output, "key_count := len((odinl_thread_1)[:])"), true)
     testing.expect_value(t, strings.contains(output, "odinl_merge_in_place(&(base), overrides)"), true)
     testing.expect_value(t, strings.contains(output, "odinl_index_by :: proc(f: proc(x: $T) -> $K, xs: []T) -> map[K]T"), true)
     testing.expect_value(t, strings.contains(output, "odinl_group_by :: proc(f: proc(x: $T) -> $K, xs: []T) -> map[K][dynamic]T"), true)
     testing.expect_value(t, strings.contains(output, "odinl_frequencies :: proc(xs: []$T) -> map[T]int"), true)
     testing.expect_value(t, strings.contains(output, "odinl_merge :: proc(lhs, rhs: map[$K]$V) -> map[K]V"), true)
     testing.expect_value(t, strings.contains(output, "odinl_merge_in_place :: proc(target: ^map[$K]$V, source: map[K]V)"), true)
+    testing.expect_value(t, strings.contains(output, "odinl_keys :: proc(m: map[$K]$V) -> [dynamic]K"), true)
+    testing.expect_value(t, strings.contains(output, "odinl_vals :: proc(m: map[$K]$V) -> [dynamic]V"), true)
 }
 
 @(test)

@@ -1,0 +1,39 @@
+// Small file-backed development helpers.
+(package main)
+(import os "core:os")
+
+(proc save-note [path: string, text: string] -> os.Error
+  (spit path text))
+
+(proc note-byte-count [path: string] -> int
+  (let [[data err] (slurp path)]
+    (if (!= err nil)
+      0
+      (do
+        (defer (delete data))
+        (len data)))))
+
+(proc load-note [path: string] -> [data: []byte, err: os.Error]
+  ;; Ownership of data transfers to the caller.
+  (slurp path))
+
+(proc main []
+  (return))
+
+(comment
+  ;; These forms are meant for editor eval against a scratch file path:
+
+  (save-note "tmp/odinl-note.txt" "hello")
+  ;; => nil
+
+  (note-byte-count "tmp/odinl-note.txt")
+  ;; => 5
+
+  (let [[data err] (load-note "tmp/odinl-note.txt")]
+    (if (!= err nil)
+      0
+      (do
+        (defer (delete data))
+        (len data))))
+  ;; => 5
+)

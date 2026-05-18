@@ -47,6 +47,8 @@ Emitter_Features :: struct {
     core_index_by:    bool,
     core_group_by:    bool,
     core_frequencies: bool,
+    core_keys:        bool,
+    core_vals:        bool,
     core_distinct:    bool,
     core_distinct_by: bool,
     core_range:       bool,
@@ -347,6 +349,18 @@ mark_core_group_by :: proc(e: ^Emitter) {
 mark_core_frequencies :: proc(e: ^Emitter) {
     if e.features != nil {
         e.features.core_frequencies = true
+    }
+}
+
+mark_core_keys :: proc(e: ^Emitter) {
+    if e.features != nil {
+        e.features.core_keys = true
+    }
+}
+
+mark_core_vals :: proc(e: ^Emitter) {
+    if e.features != nil {
+        e.features.core_vals = true
     }
 }
 
@@ -980,6 +994,17 @@ emit_thread_step :: proc(e: ^Emitter, current: string, step: CST_Form, thread_la
             mark_core_frequencies(e)
             return emit_call_text("odinl_frequencies", []string{slice_all_expr_text(current)}), {}, true
         }
+        if thread_last && (head.text == "keys" || head.text == "vals") {
+            if len(step.items) != 1 {
+                return "", Compile_Error{message = fmt.tprintf("%s thread step expects no arguments", head.text), span = step.span}, false
+            }
+            if head.text == "keys" {
+                mark_core_keys(e)
+                return emit_call_text("odinl_keys", []string{current}), {}, true
+            }
+            mark_core_vals(e)
+            return emit_call_text("odinl_vals", []string{current}), {}, true
+        }
         if thread_last && head.text == "distinct" {
             if len(step.items) != 1 {
                 return "", Compile_Error{message = "distinct thread step expects no arguments", span = step.span}, false
@@ -1165,7 +1190,8 @@ thread_step_result_kind :: proc(step: CST_Form, thread_last: bool) -> Thread_Res
                            head.text == "sort" ||
                            head.text == "sort-by" || head.text == "zipmap" ||
                            head.text == "index-by" || head.text == "group-by" ||
-                           head.text == "frequencies" || head.text == "distinct" ||
+                           head.text == "frequencies" || head.text == "keys" ||
+                           head.text == "vals" || head.text == "distinct" ||
                            head.text == "distinct-by" || head.text == "cycle") {
             return .Owned
         }
@@ -1253,9 +1279,10 @@ owned_sequence_head :: proc(name: string) -> bool {
          "concat", "merge", "reverse", "sort", "sort-by",
          "into", "interpose", "interleave", "shuffle",
          "partition", "partition-all", "partition-by",
-         "zipmap", "index-by", "group-by", "frequencies",
+         "zipmap", "index-by", "group-by", "frequencies", "keys", "vals",
          "distinct", "distinct-by",
-         "range", "repeat", "repeatedly", "iterate", "cycle":
+         "range", "repeat", "repeatedly", "iterate", "cycle",
+         "slurp":
         return true
     }
     return false
@@ -1459,6 +1486,56 @@ field_type_expr_text :: proc(collection, field: string) -> string {
 
 type_text_is_dynamic_array :: proc(text: string) -> bool {
     return len(text) >= 9 && text[:9] == "[dynamic]"
+}
+
+type_text_is_map :: proc(text: string) -> bool {
+    return len(text) >= 4 && text[:4] == "map["
+}
+
+form_is_owned_allocation_result :: proc(form: CST_Form) -> bool {
+    if form.kind != .List || len(form.items) < 2 || form.items[0].kind != .Symbol {
+        return false
+    }
+    head := form.items[0].text
+    if head != "make" && head != "new" {
+        return false
+    }
+    type_text, _, ok_type := parse_type_text(form.items[1])
+    if !ok_type {
+        return false
+    }
+    defer delete(type_text)
+    return type_text_is_dynamic_array(type_text) || type_text_is_map(type_text)
+}
+
+form_is_owned_temp_escape_result :: proc(form: CST_Form) -> bool {
+    return form_is_owned_sequence_result(form) || form_is_owned_allocation_result(form)
+}
+
+with_temp_allocator_escape_error :: proc(body: []CST_Form, last_in_proc: bool, returns: Return_Spec) -> (Compile_Error, bool) {
+    for item in body {
+        if item.kind == .List && len(item.items) > 0 && item.items[0].kind == .Symbol && item.items[0].text == "return" {
+            for returned in item.items[1:] {
+                if form_is_owned_temp_escape_result(returned) {
+                    return Compile_Error{
+                        message = "owned value cannot escape with-temp-allocator; allocate it outside the temp scope or copy it before returning",
+                        span = returned.span,
+                    }, true
+                }
+            }
+        }
+    }
+
+    if last_in_proc && returns.kind != .None && len(body) > 0 {
+        final_form := body[len(body)-1]
+        if form_is_owned_temp_escape_result(final_form) {
+            return Compile_Error{
+                message = "owned value cannot escape with-temp-allocator; allocate it outside the temp scope or copy it before returning",
+                span = final_form.span,
+            }, true
+        }
+    }
+    return {}, false
 }
 
 emit_map_callback_call :: proc(e: ^Emitter, callback: CST_Form, collection: string) -> (string, Compile_Error, bool) {
@@ -1929,6 +2006,32 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         return fmt.tprintf("(%s) == nil", target), {}, true
     }
 
+    if head.text == "slurp" {
+        if len(form.items) != 2 {
+            return "", Compile_Error{message = "slurp expects path", span = form.span}, false
+        }
+        path, err_path, ok_path := emit_expr(e, form.items[1])
+        if !ok_path {
+            return "", err_path, false
+        }
+        return emit_call_text("os.read_entire_file", []string{path, "context.allocator"}), {}, true
+    }
+
+    if head.text == "spit" {
+        if len(form.items) != 3 {
+            return "", Compile_Error{message = "spit expects path and data", span = form.span}, false
+        }
+        path, err_path, ok_path := emit_expr(e, form.items[1])
+        if !ok_path {
+            return "", err_path, false
+        }
+        data, err_data, ok_data := emit_expr(e, form.items[2])
+        if !ok_data {
+            return "", err_data, false
+        }
+        return emit_call_text("os.write_entire_file", []string{path, data}), {}, true
+    }
+
     if head.text == "map" || head.text == "filter" || head.text == "remove" {
         if len(form.items) != 3 {
             return "", Compile_Error{message = fmt.tprintf("%s expects function and collection", head.text), span = form.span}, false
@@ -2114,6 +2217,22 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         }
         mark_core_merge(e)
         return emit_call_text("odinl_merge", []string{lhs, rhs}), {}, true
+    }
+
+    if head.text == "keys" || head.text == "vals" {
+        if len(form.items) != 2 {
+            return "", Compile_Error{message = fmt.tprintf("%s expects map", head.text), span = form.span}, false
+        }
+        source, err_source, ok_source := emit_expr(e, form.items[1])
+        if !ok_source {
+            return "", err_source, false
+        }
+        if head.text == "keys" {
+            mark_core_keys(e)
+            return emit_call_text("odinl_keys", []string{source}), {}, true
+        }
+        mark_core_vals(e)
+        return emit_call_text("odinl_vals", []string{source}), {}, true
     }
 
     if head.text == "interpose" {
@@ -3020,6 +3139,48 @@ emit_with_allocator_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool
     return {}, true
 }
 
+emit_with_temp_allocator_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Return_Spec) -> (Compile_Error, bool) {
+    if len(form.items) < 3 {
+        return Compile_Error{message = "with-temp-allocator expects binding vector and body", span = form.span}, false
+    }
+    binding := form.items[1]
+    if binding.kind != .Vector || len(binding.items) != 1 || binding.items[0].kind != .Symbol {
+        return Compile_Error{message = "with-temp-allocator expects [name] binding", span = binding.span}, false
+    }
+    allocator_name := map_name(binding.items[0].text)
+
+    e.temp_counter += 1
+    temp_scope := fmt.tprintf("odinl_temp_scope_%d", e.temp_counter)
+    e.temp_counter += 1
+    old_allocator := fmt.tprintf("odinl_old_allocator_%d", e.temp_counter)
+
+    emit_line(e, "{")
+    e.indent += 1
+    emit_line(e, fmt.tprintf("%s := runtime.default_temp_allocator_temp_begin()", temp_scope))
+    emit_line(e, fmt.tprintf("defer runtime.default_temp_allocator_temp_end(%s)", temp_scope))
+    emit_line(e, fmt.tprintf("%s := context.temp_allocator", allocator_name))
+    emit_line(e, fmt.tprintf("%s := context.allocator", old_allocator))
+    emit_line(e, fmt.tprintf("context.allocator = %s", allocator_name))
+    emit_line(e, fmt.tprintf("defer context.allocator = %s", old_allocator))
+
+    body: [dynamic]CST_Form
+    for item in form.items[2:] {
+        append(&body, item)
+    }
+    err_escape, bad_escape := with_temp_allocator_escape_error(body[:], last_in_proc, returns)
+    if bad_escape {
+        return err_escape, false
+    }
+    err_body, ok_body := emit_body_forms(e, body[:], returns_when_final(last_in_proc, returns))
+    if !ok_body {
+        return err_body, false
+    }
+
+    e.indent -= 1
+    emit_line(e, "}")
+    return {}, true
+}
+
 is_type_switch_subject :: proc(form: CST_Form) -> bool {
     return form.kind == .Vector && len(form.items) == 2 && form.items[0].kind == .Symbol
 }
@@ -3165,7 +3326,7 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
         if !ok_expr {
             return err_expr, false
         }
-        if last_in_proc && returns.kind == .Single {
+        if last_in_proc && returns.kind != .None {
             emit_prefixed_expr(e, "return ", expr)
         } else {
             emit_prefixed_expr(e, "", expr)
@@ -3182,7 +3343,7 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
         if !ok_expr {
             return err_expr, false
         }
-        if last_in_proc && returns.kind == .Single {
+        if last_in_proc && returns.kind != .None {
             emit_prefixed_expr(e, "return ", expr)
         } else {
             emit_prefixed_expr(e, "", expr)
@@ -3195,7 +3356,7 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
         return Compile_Error{message = "unsupported statement head", span = head.span}, false
     }
 
-    if last_in_proc && returns.kind == .Single {
+    if last_in_proc && returns.kind != .None {
         err_thread_return, bad_thread_return := thread_return_error(form)
         if bad_thread_return {
             return err_thread_return, false
@@ -3231,7 +3392,7 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
         for item in form.items[2:] {
             append(&body, item)
         }
-        if last_in_proc && returns.kind == .Single {
+        if last_in_proc && returns.kind != .None {
             err_let_return, bad_let_return := let_return_error(bindings[:], body[:])
             if bad_let_return {
                 return err_let_return, false
@@ -3319,6 +3480,8 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
         return emit_cond_stmt(e, form, last_in_proc, returns)
     case "with-allocator":
         return emit_with_allocator_stmt(e, form, last_in_proc, returns)
+    case "with-temp-allocator":
+        return emit_with_temp_allocator_stmt(e, form, last_in_proc, returns)
     case "switch":
         return emit_switch_stmt(e, form, last_in_proc, returns)
     case "return":
@@ -3519,7 +3682,7 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
         emit_prefixed_expr(e, "", raw)
         return {}, true
     case:
-        allow_root_owned := last_in_proc && returns.kind == .Single
+        allow_root_owned := last_in_proc && returns.kind != .None
         err_owned, bad_owned := owned_sequence_usage_error(form, allow_root_owned)
         if bad_owned {
             return err_owned, false
@@ -3528,7 +3691,7 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
         if !ok_expr {
             return err_expr, false
         }
-        if last_in_proc && returns.kind == .Single {
+        if last_in_proc && returns.kind != .None {
             emit_prefixed_expr(e, "return ", expr)
         } else {
             emit_prefixed_expr(e, "", expr)
@@ -4512,6 +4675,34 @@ emit_core_distinct_by_field_helper :: proc(e: ^Emitter, field: string) {
     emit_line(e, "}")
 }
 
+emit_core_keys_helper :: proc(e: ^Emitter) {
+    emit_line(e, "odinl_keys :: proc(m: map[$K]$V) -> [dynamic]K {")
+    e.indent += 1
+    emit_line(e, "out := make([dynamic]K, 0, len(m))")
+    emit_line(e, "for k in m {")
+    e.indent += 1
+    emit_line(e, "append(&out, k)")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "return out")
+    e.indent -= 1
+    emit_line(e, "}")
+}
+
+emit_core_vals_helper :: proc(e: ^Emitter) {
+    emit_line(e, "odinl_vals :: proc(m: map[$K]$V) -> [dynamic]V {")
+    e.indent += 1
+    emit_line(e, "out := make([dynamic]V, 0, len(m))")
+    emit_line(e, "for _, v in m {")
+    e.indent += 1
+    emit_line(e, "append(&out, v)")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "return out")
+    e.indent -= 1
+    emit_line(e, "}")
+}
+
 emit_core_range_helper :: proc(e: ^Emitter) {
     emit_line(e, "odinl_range :: proc(start, end, step: int) -> [dynamic]int {")
     e.indent += 1
@@ -4866,6 +5057,7 @@ core_helpers_needed :: proc(features: Emitter_Features) -> bool {
            features.core_zipmap ||
            features.core_index_by || features.core_group_by ||
            features.core_frequencies ||
+           features.core_keys || features.core_vals ||
            features.core_distinct || features.core_distinct_by ||
            features.core_range || features.core_repeat ||
            features.core_repeatedly || features.core_iterate ||
@@ -5074,6 +5266,14 @@ emit_core_helpers :: proc(e: ^Emitter, features: Emitter_Features) {
     if features.core_frequencies {
         emit_core_helper_separator(e, &emitted)
         emit_core_frequencies_helper(e)
+    }
+    if features.core_keys {
+        emit_core_helper_separator(e, &emitted)
+        emit_core_keys_helper(e)
+    }
+    if features.core_vals {
+        emit_core_helper_separator(e, &emitted)
+        emit_core_vals_helper(e)
     }
     if features.core_distinct {
         emit_core_helper_separator(e, &emitted)

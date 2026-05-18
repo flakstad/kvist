@@ -74,6 +74,8 @@ These helpers are already in scope and should remain small:
 (group-by f xs)
 (group-by :field xs)
 (frequencies xs)
+(keys m)
+(vals m)
 (distinct xs)
 (distinct-by f xs)
 (distinct-by :field xs)
@@ -116,9 +118,9 @@ for example `(into [dynamic]int xs)`. `distinct` and `distinct-by` also
 return owned dynamic arrays and use a temporary `map[key]bool` internally, so
 the value or key must be valid as an Odin map key. `zipmap`, `index-by`, and
 `frequencies` return owned maps. `merge` returns an owned map that combines two
-input maps, with right-hand values replacing duplicate keys. `group-by` returns
-an owned map whose values are owned dynamic arrays; delete each group before
-deleting the map.
+input maps, with right-hand values replacing duplicate keys. `keys` and `vals`
+return owned dynamic arrays copied from a map. `group-by` returns an owned map
+whose values are owned dynamic arrays; delete each group before deleting the map.
 `partition`, `partition-all`, and `partition-by` return owned dynamic arrays of
 borrowed slice chunks. `keep` is Odin-shaped: the callback returns `(value,
 ok)`, and only `ok` values are appended. `mapcat` is also Odin-shaped: the
@@ -355,6 +357,7 @@ Sequence helpers need an explicit ownership story:
   outer dynamic array, but their slice chunks borrow the input collection.
 - `merge`, `zipmap`, `index-by`, and `frequencies` allocate and return owned
   maps.
+- `keys` and `vals` allocate and return owned dynamic arrays copied from a map.
 - `group-by` allocates an owned map and one owned dynamic array per key. Delete
   the groups, then delete the map.
 - Owned helper results must be bound or returned. Nested owned results such as

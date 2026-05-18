@@ -925,6 +925,8 @@ The intended surface style can still be familiar:
 (zipmap names ages)
 (index-by key-fn xs)
 (frequencies xs)
+(keys m)
+(vals m)
 (range 10)
 (repeat 3 "odin")
 (repeatedly 3 make-value)
@@ -1003,6 +1005,28 @@ allocation model are more settled.
 See `docs/SEQUENCES.md` for the current sequence helper roadmap. The short
 version is: helpers should be eager, Odin-shaped, and explicit about whether
 they return slice views or owned dynamic arrays.
+
+### File-backed development values
+
+OdinL supports the first small piece of a disk-backed iterative workflow with
+thin `core:os` forms:
+
+```clojure
+(import os "core:os")
+
+(spit "tmp/users.json" text)
+(let [[data err] (slurp "tmp/users.json")]
+  (if (!= err nil)
+    0
+    (do
+      (defer (delete data))
+      (len data))))
+```
+
+`spit` lowers to `os.write_entire_file(path, data)` and returns `os.Error`.
+`slurp` lowers to `os.read_entire_file(path, context.allocator)` and returns
+owned `[]byte` plus `os.Error`. The caller must delete the bytes when keeping
+the value local, or return them to transfer ownership.
 
 ## Literals and Construction
 
@@ -1534,10 +1558,10 @@ Useful editor commands later:
 - macroexpand form
 - show lowered Odin
 
-The current CLI supports the last item directly through `odinl expand
-file.odinl FORM`, which emits the generated scratch Odin for the selected form
-without running it. This is a lowering preview, not a real macro expansion
-phase yet.
+The current CLI supports both inspection levels. `odinl macroexpand file.odinl
+FORM` shows frontend expansion for macro-like forms such as `with-allocator`.
+`odinl expand file.odinl FORM` emits the generated scratch Odin for the selected
+form without running it.
 
 The development model should become richer without becoming stateful. Tooling
 may support tap-style inspection, rerun watches, and disk-backed saved values,
@@ -1569,7 +1593,8 @@ runtime facility.
 ### `with-*` forms
 
 Allocator-oriented `with-*` forms should behave like macro-expanded resource
-scopes over ordinary Odin. `with-allocator` is supported directly while the
+scopes over ordinary Odin. `with-allocator` and `with-temp-allocator` are
+supported directly and are inspectable through `odinl macroexpand` while the
 general macro system is still pending.
 
 The implemented shape is:
@@ -1595,6 +1620,35 @@ This is intentionally simple: the allocator value is visible, the old allocator
 is restored by `defer`, and ordinary `delete` calls in the body run before the
 allocator is restored.
 
+For Odin's temporary allocator, use:
+
+```clojure
+(import runtime "base:runtime")
+
+(with-temp-allocator [allocator]
+  ...)
+```
+
+It lowers to the moral equivalent of:
+
+```odin
+{
+    temp_scope := runtime.default_temp_allocator_temp_begin()
+    defer runtime.default_temp_allocator_temp_end(temp_scope)
+    allocator := context.temp_allocator
+    old_allocator := context.allocator
+    context.allocator = allocator
+    defer context.allocator = old_allocator
+    ...
+}
+```
+
+The explicit `base:runtime` import is intentional for now. The generated Odin
+uses Odin's normal temp allocator API directly instead of hiding it behind an
+OdinL runtime. Owned values allocated in this scope must not escape it; the
+compiler rejects obvious direct returns of owned helper results from
+`with-temp-allocator`.
+
 Other `with-*` forms are still attractive because they can expand into
 combinations of existing core forms such as:
 
@@ -1614,6 +1668,11 @@ For example, allocator helpers should keep ownership visible:
 
 ```clojure
 (with-allocator [allocator context.temp_allocator]
+  (let [buffer (make [dynamic]int)]
+    (defer (delete buffer))
+    ...))
+
+(with-temp-allocator [allocator]
   (let [buffer (make [dynamic]int)]
     (defer (delete buffer))
     ...))

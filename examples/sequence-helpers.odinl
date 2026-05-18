@@ -83,6 +83,17 @@
     (defer (delete by-name))
     (len by-name)))
 
+(proc key-value-count [] -> int
+  (let [names (new []string ["Ada" "Lin" "Grace"])
+        ages (new []int [36 17 45])
+        ages-by-name (zipmap names ages)
+        name-keys (keys ages-by-name)
+        age-values (vals ages-by-name)]
+    (defer (delete ages-by-name))
+    (defer (delete name-keys))
+    (defer (delete age-values))
+    (+ (count name-keys) (count age-values))))
+
 (proc even-group-count [] -> int
   (let [xs (new []int [1 2 3 4 6])
         groups (group-by parity xs)
@@ -311,6 +322,9 @@
 
   (indexed-name-count)
   ;; => 3
+
+  (key-value-count)
+  ;; => 6
 
   (even-group-count)
   ;; => 3

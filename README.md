@@ -108,6 +108,12 @@ Inspect the generated scratch Odin without running it with:
 ./odinl expand examples/higher-order.odinl '(reduce add 0 (new []int [1 2 3]))'
 ```
 
+Inspect frontend macro-style expansion before Odin lowering with:
+
+```sh
+./odinl macroexpand examples/data-literals.odinl '(with-allocator [allocator context.temp_allocator] (temp-buffer-len))'
+```
+
 The CLI can also invoke Odin for generated files directly:
 
 ```sh
@@ -540,6 +546,8 @@ foreign_call :: proc(handle: Foreign_Handle) ---
   multi-return and struct-field destructuring
 - `(with-allocator [allocator expr] body...)` scoped `context.allocator`
   override with `defer` restoration
+- `(with-temp-allocator [allocator] body...)` scoped `context.temp_allocator`
+  override with temp allocator reset; requires `base:runtime`
 - `(set! place expr)` -> `place = expr`
 - final expression in a non-void proc emits `return <expr>`
 - `(if test then else)`
@@ -565,10 +573,12 @@ foreign_call :: proc(handle: Foreign_Handle) ---
   `(partition n xs)`, `(partition-all n xs)`, `(partition-by f xs)`,
   `(partition-by :field xs)`, `(zipmap keys vals)`, `(index-by f xs)`,
   `(index-by :field xs)`, `(group-by f xs)`, `(group-by :field xs)`,
-  `(frequencies xs)`, `(distinct xs)`, `(distinct-by f xs)`,
+  `(frequencies xs)`, `(keys m)`, `(vals m)`, `(distinct xs)`, `(distinct-by f xs)`,
   and `(distinct-by :field xs)`, plus bounded producers
   `(range ...)`, `(repeat n x)`, `(repeatedly n f)`, `(iterate n f x)`,
   and `(cycle n xs)`
+- file-backed dev helpers `(slurp path)` and `(spit path data)`, which require
+  `(import os "core:os")` and lower directly to `core:os`
 - keywords can stand in for field callbacks in those helpers, e.g. `(map :name users)`,
   `(index-by :id users)`, `(group-by :status users)`, `(partition-by :status users)`,
   `(sort-by :age users)`, and `(filter :verified users)`

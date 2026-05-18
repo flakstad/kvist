@@ -21,6 +21,11 @@
   :type 'string
   :group 'odinl)
 
+(defcustom odinl-macroexpand-buffer-name "*OdinL Macroexpand*"
+  "Buffer name used to show OdinL macro expansion output."
+  :type 'string
+  :group 'odinl)
+
 (defcustom odinl-inline-result-prefix "=> "
   "Prefix used for inline OdinL eval overlays."
   :type 'string
@@ -55,6 +60,7 @@
     (define-key map (kbd "C-c C-b") #'odinl-build-buffer)
     (define-key map (kbd "C-c C-v") #'odinl-check-buffer)
     (define-key map (kbd "C-c C-m") #'odinl-expand-form-at-point)
+    (define-key map (kbd "C-c M-m") #'odinl-macroexpand-form-at-point)
     (define-key map (kbd "C-c C-s") #'odinl-toggle-show-generated)
     (define-key map (kbd "C-c C-z") #'odinl-switch-to-result)
     map)
@@ -138,9 +144,18 @@
 (defun odinl--sexp-bounds-near-point ()
   "Return bounds for the list at or immediately before point."
   (save-excursion
-    (skip-chars-backward " \t\n")
+    (skip-chars-forward " \t")
     (cond
+     ((eq (char-after) ?\()
+      (let ((beg (point)))
+        (cons beg (scan-sexps beg 1))))
      ((eq (char-before) ?\))
+      (let ((end (point)))
+        (backward-sexp 1)
+        (cons (point) end)))
+     ((progn
+        (skip-chars-backward " \t\n")
+        (eq (char-before) ?\)))
       (let ((end (point)))
         (backward-sexp 1)
         (cons (point) end)))
@@ -149,9 +164,6 @@
         (forward-char 1)
         (backward-sexp 1)
         (cons (point) end)))
-     ((eq (char-after) ?\()
-      (let ((beg (point)))
-        (cons beg (scan-sexps beg 1))))
      (t nil))))
 
 (defun odinl--form-bounds-at-point ()
@@ -411,6 +423,31 @@ With prefix argument NO-PRINT, lower the form as a statement."
         (delete-file source)))))
 
 ;;;###autoload
+(defun odinl-macroexpand-form-at-point ()
+  "Show OdinL macro expansion for the form at point."
+  (interactive)
+  (setq odinl--last-source-buffer (current-buffer))
+  (let* ((bounds (odinl--form-bounds-at-point))
+         (form (buffer-substring-no-properties (car bounds) (cdr bounds)))
+         (source (odinl--source-temp-file))
+         (macro-buffer (odinl--prepare-buffer odinl-macroexpand-buffer-name))
+         (result-buffer (odinl--prepare-buffer odinl-result-buffer-name))
+         (args (list "macroexpand" source form))
+         (root (file-name-as-directory (odinl--project-root))))
+    (unwind-protect
+        (let* ((default-directory root)
+               (exit-code (odinl--call (odinl--executable) args macro-buffer))
+               (result (with-current-buffer macro-buffer
+                         (buffer-substring-no-properties (point-min) (point-max)))))
+          (if (zerop exit-code)
+              (progn
+                (display-buffer macro-buffer)
+                (message "odinl macroexpand: ok"))
+            (odinl--display-output result-buffer result exit-code)))
+      (when (file-exists-p source)
+        (delete-file source)))))
+
+;;;###autoload
 (defun odinl-eval-form-at-point (&optional no-print)
   "Evaluate the OdinL form at point and show the result inline.
 With prefix argument NO-PRINT, treat the form as a statement."
@@ -594,6 +631,7 @@ With prefix argument NO-PRINT, treat the form as a statement."
   (local-set-key (kbd "C-c C-b") #'odinl-build-buffer)
   (local-set-key (kbd "C-c C-v") #'odinl-check-buffer)
   (local-set-key (kbd "C-c C-m") #'odinl-expand-form-at-point)
+  (local-set-key (kbd "C-c M-m") #'odinl-macroexpand-form-at-point)
   (local-set-key (kbd "C-c C-s") #'odinl-toggle-show-generated)
   (local-set-key (kbd "C-c C-z") #'odinl-switch-to-result))
 
