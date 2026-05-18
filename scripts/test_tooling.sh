@@ -74,6 +74,26 @@ printf 'tooling: eval main command\n'
 main_eval_output=$(./odinl eval examples/hello.odinl '(main)')
 assert_eq "hello from odinl" "$main_eval_output" "eval main output"
 
+printf 'tooling: sequence example evals\n'
+assert_eq "2" "$(./odinl eval examples/sequence-helpers.odinl '(split-front-length)')" "split-front-length"
+assert_eq "4" "$(./odinl eval examples/sequence-helpers.odinl '(first-kept-square)')" "first-kept-square"
+assert_eq "45" "$(./odinl eval examples/sequence-helpers.odinl '(age-for-grace)')" "age-for-grace"
+assert_eq "2" "$(./odinl eval examples/sequence-helpers.odinl '(chunk-count)')" "chunk-count"
+assert_eq "2" "$(./odinl eval examples/sequence-helpers.odinl '(repeated-two-count)')" "repeated-two-count"
+assert_eq "3" "$(./odinl eval examples/sequence-helpers.odinl '(indexed-name-count)')" "indexed-name-count"
+assert_eq "10" "$(./odinl eval examples/sequence-helpers.odinl '(range-total)')" "range-total"
+assert_eq "3" "$(./odinl eval examples/sequence-helpers.odinl '(repeated-answer-count)')" "repeated-answer-count"
+assert_eq "odin" "$(./odinl eval examples/sequence-helpers.odinl '(repeated-word-last)')" "repeated-word-last"
+assert_eq "8" "$(./odinl eval examples/sequence-helpers.odinl '(iterated-last)')" "iterated-last"
+assert_eq "13" "$(./odinl eval examples/sequence-helpers.odinl '(trimmed-sum)')" "trimmed-sum"
+assert_eq "40" "$(./odinl eval examples/sequence-helpers.odinl '(rest-second-empty-score)')" "rest-second-empty-score"
+assert_eq "4" "$(./odinl eval examples/sequence-helpers.odinl '(concat-reversed-first)')" "concat-reversed-first"
+assert_eq "1" "$(./odinl eval examples/sequence-helpers.odinl '(ragged-chunk-size)')" "ragged-chunk-size"
+assert_eq "4" "$(./odinl eval examples/sequence-helpers.odinl '(run-count)')" "run-count"
+assert_eq "4" "$(./odinl eval examples/sequence-helpers.odinl '(threaded-first)')" "threaded-first"
+assert_eq "36" "$(./odinl eval examples/sequences.odinl '(age-for-ada)')" "age-for-ada"
+assert_eq "3" "$(./odinl eval examples/sequences.odinl '(status-run-count)')" "status-run-count"
+
 printf 'tooling: eval check command\n'
 ./odinl eval examples/higher-order.odinl '(reduce add 0 (new []int [1 2 3]))' --check
 

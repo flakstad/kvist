@@ -38,7 +38,18 @@ These helpers are already in scope and should remain small:
 (split-at n xs)
 (partition n xs)
 (partition-all n xs)
+(partition-by f xs)
+(partition-by :field xs)
 (zipmap keys vals)
+(index-by f xs)
+(index-by :field xs)
+(frequencies xs)
+(range end)
+(range start end)
+(range start end step)
+(repeat n x)
+(repeatedly n f)
+(iterate n f x)
 (take n xs)
 (drop n xs)
 (take-while pred xs)
@@ -60,16 +71,19 @@ lowers to `len`. `rest`, `take`, `drop`, `take-while`, and `drop-while` return
 non-owning slice views.
 
 Builder helpers such as `map`, `filter`, `remove`, `map-indexed`, `keep`,
-`concat`, and `reverse` return owned dynamic arrays. `zipmap` returns an owned
-map. `partition` and `partition-all` return owned dynamic arrays of borrowed
-slice chunks. `keep` is Odin-shaped: the callback returns `(value, ok)`, and
-only `ok` values are appended.
+`concat`, `reverse`, `range`, `repeat`, `repeatedly`, and `iterate` return
+owned dynamic arrays. `zipmap`, `index-by`, and `frequencies` return owned maps.
+`partition`, `partition-all`, and `partition-by` return owned dynamic arrays of
+borrowed slice chunks. `keep` is Odin-shaped: the callback returns `(value, ok)`,
+and only `ok` values are appended.
 
 Keyword callbacks are field-access shorthand in the supported higher-order
 helpers:
 
 ```clojure
 (map :name users)
+(index-by :id users)
+(partition-by :status users)
 (filter :verified users)
 (remove :archived users)
 (->> users
@@ -80,28 +94,13 @@ helpers:
 This means "call the field accessor" for structs and struct-like values. It is
 not general keyword-as-function map lookup.
 
-## Near-Term Additions
-
-These fit the current eager model well:
-
-```clojure
-```
-
-Expected lowering:
-
-- `split-at` should return two slices when the input is sliceable, because that
-  is the direct Odin representation and does not allocate.
-
 ## Useful Additions After That
 
 These are valuable, but each needs one deliberate design choice before
 implementation:
 
 ```clojure
-(partition-by f xs)
-(frequencies xs)
 (group-by f xs)
-(index-by f xs)
 (mapcat f xs)
 (sort xs)
 (sort-by f xs)
@@ -119,22 +118,12 @@ The main questions are:
 
 ## Bounded Producers
 
-Clojure's producer functions lean on laziness. OdinL should use explicit bounds:
+Producer helpers are eager and bounded. The amount of work and allocation is
+visible in the call:
 
-```clojure
-(range end)
-(range start end)
-(range start end step)
-(repeat n x)
-(repeatedly n f)
-(iterate n f x)
-```
-
-These are acceptable as eager constructors because the amount of work and
-allocation is visible in the call.
-
-Avoid unbounded forms such as plain `cycle`, `repeat`, `repeatedly`, or
-`iterate`. If a cyclic helper is ever added, it should be bounded:
+Avoid unbounded forms such as plain `cycle`, unbounded `repeat`, unbounded
+`repeatedly`, or unbounded `iterate`. If a cyclic helper is ever added, it
+should be bounded:
 
 ```clojure
 (cycle n xs)
@@ -234,9 +223,12 @@ Sequence helpers need an explicit ownership story:
   `drop-while`, and `split-at` do not own data and must not be deleted.
 - Dynamic-array helpers such as `map`, `filter`, `remove`, `map-indexed`,
   `keep`, `concat`, and `reverse` allocate and return owned dynamic arrays.
-- Chunking helpers `partition` and `partition-all` allocate the outer dynamic
-  array, but its slice chunks borrow the input collection.
-- `zipmap` allocates and returns an owned map.
+- Chunking helpers `partition`, `partition-all`, and `partition-by` allocate the
+  outer dynamic array, but their slice chunks borrow the input collection.
+- `zipmap`, `index-by`, and `frequencies` allocate and return owned maps.
+- Owned helper results must be bound or returned. Nested owned results such as
+  `(first (map f xs))` are rejected because there is no visible place to delete
+  the intermediate dynamic array.
 - Examples that use allocating helpers should show `defer delete(...)` when the
   result lives beyond a trivial expression.
 - Future helper docs should clearly mark whether a helper returns a view or an

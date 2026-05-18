@@ -61,6 +61,25 @@
     (defer (delete active-names))
     name))
 
+(proc age-for-ada [] -> int
+  (let [users (new []User [(User {:name "Ada" :age 36 :status .Active :verified true})
+                           (User {:name "Lin" :age 17 :status .Paused :verified false})
+                           (User {:name "Grace" :age 45 :status .Active :verified true})
+                           (User {:name "Edsger" :age 72 :status .Archived :verified false})])
+        users-by-name (index-by :name users)
+        ada (get users-by-name "Ada")]
+    (defer (delete users-by-name))
+    (:age ada)))
+
+(proc status-run-count [] -> int
+  (let [users (new []User [(User {:name "Ada" :age 36 :status .Active :verified true})
+                           (User {:name "Grace" :age 45 :status .Active :verified true})
+                           (User {:name "Lin" :age 17 :status .Paused :verified false})
+                           (User {:name "Edsger" :age 72 :status .Archived :verified false})])
+        status-runs (partition-by :status users)]
+    (defer (delete status-runs))
+    (len status-runs)))
+
 (proc third-user-name [] -> string
   (let [users (new []User [(User {:name "Ada" :age 36 :status .Active :verified true})
                            (User {:name "Lin" :age 17 :status .Paused :verified false})
@@ -101,6 +120,12 @@
 
   (first-active-name)
   ;; => Ada
+
+  (age-for-ada)
+  ;; => 36
+
+  (status-run-count)
+  ;; => 3
 
   (third-user-name)
   ;; => Grace

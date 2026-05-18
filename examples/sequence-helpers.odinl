@@ -5,8 +5,26 @@
 (proc even? [x: int] -> bool
   (== (% x 2) 0))
 
+(proc small? [x: int] -> bool
+  (< x 4))
+
 (proc add-index [i: int, x: int] -> int
   (+ i x))
+
+(proc add [acc: int, x: int] -> int
+  (+ acc x))
+
+(proc identity-int [x: int] -> int
+  x)
+
+(proc name-key [name: string] -> string
+  name)
+
+(proc next-answer [] -> int
+  42)
+
+(proc double [x: int] -> int
+  (* x 2))
 
 (proc square-even [x: int] -> [value: int, ok: bool]
   (if (even? x)
@@ -37,6 +55,76 @@
     (defer (delete chunks))
     (len chunks)))
 
+(proc repeated-two-count [] -> int
+  (let [xs (new []int [1 2 2 3])
+        counts (frequencies xs)]
+    (defer (delete counts))
+    (get counts 2)))
+
+(proc indexed-name-count [] -> int
+  (let [names (new []string ["Ada" "Lin" "Grace"])
+        by-name (index-by name-key names)]
+    (defer (delete by-name))
+    (len by-name)))
+
+(proc range-total [] -> int
+  (let [xs (range 1 5)]
+    (defer (delete xs))
+    (reduce add 0 xs)))
+
+(proc repeated-answer-count [] -> int
+  (let [xs (repeatedly 3 next-answer)]
+    (defer (delete xs))
+    (len xs)))
+
+(proc repeated-word-last [] -> string
+  (let [xs (repeat 3 "odin")]
+    (defer (delete xs))
+    (last xs)))
+
+(proc iterated-last [] -> int
+  (let [xs (iterate 4 double 1)]
+    (defer (delete xs))
+    (last xs)))
+
+(proc trimmed-sum [] -> int
+  (let [xs (new []int [1 2 3 4 5])
+        head (take 3 xs)
+        tail (drop 2 xs)
+        smalls (take-while small? xs)
+        bigs (drop-while small? xs)]
+    (+ (+ (last head) (first tail))
+       (+ (len smalls) (first bigs)))))
+
+(proc rest-second-empty-score [] -> int
+  (let [xs (new []int [10 20 30])
+        tail (rest xs)
+        empty-tail (drop 3 xs)]
+    (if (empty? empty-tail)
+      (+ (first tail) (second xs))
+      0)))
+
+(proc concat-reversed-first [] -> int
+  (let [xs (new []int [1 2])
+        ys (new []int [3 4])
+        joined (concat xs ys)
+        reversed (reverse joined)]
+    (defer (delete joined))
+    (defer (delete reversed))
+    (first reversed)))
+
+(proc ragged-chunk-size [] -> int
+  (let [xs (new []int [1 2 3 4 5])
+        chunks (partition-all 2 xs)]
+    (defer (delete chunks))
+    (len (last chunks))))
+
+(proc run-count [] -> int
+  (let [xs (new []int [1 1 2 2 2 3 1])
+        runs (partition-by identity-int xs)]
+    (defer (delete runs))
+    (len runs)))
+
 (proc threaded-first [] -> int
   (let [xs (new []int [1 2 3 4])
         threaded (->> xs
@@ -61,6 +149,39 @@
 
   (chunk-count)
   ;; => 2
+
+  (repeated-two-count)
+  ;; => 2
+
+  (indexed-name-count)
+  ;; => 3
+
+  (range-total)
+  ;; => 10
+
+  (repeated-answer-count)
+  ;; => 3
+
+  (repeated-word-last)
+  ;; => odin
+
+  (iterated-last)
+  ;; => 8
+
+  (trimmed-sum)
+  ;; => 13
+
+  (rest-second-empty-score)
+  ;; => 40
+
+  (concat-reversed-first)
+  ;; => 4
+
+  (ragged-chunk-size)
+  ;; => 1
+
+  (run-count)
+  ;; => 4
 
   (threaded-first)
   ;; => 4

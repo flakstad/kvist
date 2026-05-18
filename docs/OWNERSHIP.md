@@ -34,7 +34,18 @@ These forms return owned values in normal OdinL code:
 (reverse xs)
 (partition n xs)
 (partition-all n xs)
+(partition-by f xs)
+(partition-by :field xs)
 (zipmap keys vals)
+(index-by f xs)
+(index-by :field xs)
+(frequencies xs)
+(range end)
+(range start end)
+(range start end step)
+(repeat n x)
+(repeatedly n f)
+(iterate n f x)
 ```
 
 Use `defer delete` for local owned values:
@@ -47,8 +58,8 @@ Use `defer delete` for local owned values:
   ...)
 ```
 
-For `partition` and `partition-all`, delete the outer dynamic array. The chunks
-inside are borrowed slices and must not be deleted:
+For `partition`, `partition-all`, and `partition-by`, delete the outer dynamic
+array. The chunks inside are borrowed slices and must not be deleted:
 
 ```clojure
 (let [chunks (partition 2 xs)]
@@ -116,6 +127,29 @@ The same rule applies to owned maps:
 ```
 
 The caller deletes the returned map.
+
+## Do Not Hide Owned Intermediates
+
+Owned helper results should be visible as a binding or a return value:
+
+```clojure
+(let [names (map :name users)]
+  (defer (delete names))
+  (first names))
+```
+
+This is rejected because the intermediate dynamic array has no visible owner:
+
+```clojure
+(first (map :name users))
+```
+
+Return the owned result directly when ownership should pass to the caller:
+
+```clojure
+(proc user-names [users: []User] -> [dynamic]string
+  (map :name users))
+```
 
 ## Borrowed Views Must Not Escape Their Backing Storage
 
