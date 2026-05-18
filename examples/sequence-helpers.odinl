@@ -17,6 +17,9 @@
 (proc identity-int [x: int] -> int
   x)
 
+(proc parity [x: int] -> int
+  (% x 2))
+
 (proc name-key [name: string] -> string
   name)
 
@@ -26,10 +29,20 @@
 (proc double [x: int] -> int
   (* x 2))
 
+(proc negative [x: int] -> int
+  (- x))
+
 (proc square-even [x: int] -> [value: int, ok: bool]
   (if (even? x)
     (return (* x x) true)
     (return 0 false)))
+
+(struct Segment {
+  :values []int
+})
+
+(proc segment-values [segment: Segment] -> []int
+  (:values segment))
 
 (proc split-front-length [] -> int
   (let [xs (new []int [1 2 3 4])
@@ -66,6 +79,16 @@
         by-name (index-by name-key names)]
     (defer (delete by-name))
     (len by-name)))
+
+(proc even-group-count [] -> int
+  (let [xs (new []int [1 2 3 4 6])
+        groups (group-by parity xs)
+        evens (get groups 0)]
+    (defer
+      (each [_ group groups]
+        (delete group))
+      (delete groups))
+    (len evens)))
 
 (proc range-total [] -> int
   (let [xs (range 1 5)]
@@ -113,6 +136,66 @@
     (defer (delete reversed))
     (first reversed)))
 
+(proc sorted-second [] -> int
+  (let [xs (new []int [4 1 3 2])
+        sorted (sort xs)]
+    (defer (delete sorted))
+    (second sorted)))
+
+(proc descending-first [] -> int
+  (let [xs (new []int [4 1 3 2])
+        sorted (sort-by negative xs)]
+    (defer (delete sorted))
+    (first sorted)))
+
+(proc sorted-in-place-first [] -> int
+  (let [xs (new [dynamic]int [4 1 3 2])]
+    (defer (delete xs))
+    (sort! xs)
+    (first xs)))
+
+(proc reversed-in-place-first [] -> int
+  (let [xs (new [dynamic]int [1 2 3 4])]
+    (defer (delete xs))
+    (reverse! xs)
+    (first xs)))
+
+(proc descending-in-place-first [] -> int
+  (let [xs (new [dynamic]int [4 1 3 2])]
+    (defer (delete xs))
+    (sort-by! negative xs)
+    (first xs)))
+
+(proc doubled-in-place-total [] -> int
+  (let [xs (new [dynamic]int [1 2 3])]
+    (defer (delete xs))
+    (map! double xs)
+    (reduce add 0 xs)))
+
+(proc indexed-in-place-second [] -> int
+  (let [xs (new [dynamic]int [1 2 3])]
+    (defer (delete xs))
+    (map-indexed! add-index xs)
+    (second xs)))
+
+(proc filtered-in-place-count [] -> int
+  (let [xs (new [dynamic]int [1 2 3 4])]
+    (defer (delete xs))
+    (filter! even? xs)
+    (len xs)))
+
+(proc removed-in-place-first [] -> int
+  (let [xs (new [dynamic]int [1 2 3 4])]
+    (defer (delete xs))
+    (remove! even? xs)
+    (first xs)))
+
+(proc kept-in-place-first [] -> int
+  (let [xs (new [dynamic]int [1 2 3 4])]
+    (defer (delete xs))
+    (keep! square-even xs)
+    (first xs)))
+
 (proc ragged-chunk-size [] -> int
   (let [xs (new []int [1 2 3 4 5])
         chunks (partition-all 2 xs)]
@@ -124,6 +207,14 @@
         runs (partition-by identity-int xs)]
     (defer (delete runs))
     (len runs)))
+
+(proc flattened-total [] -> int
+  (let [segments (new []Segment [(Segment {:values (new []int [1 2])})
+                                 (Segment {:values (new []int [3])})
+                                 (Segment {:values (new []int [4 5])})])
+        values (mapcat segment-values segments)]
+    (defer (delete values))
+    (reduce add 0 values)))
 
 (proc threaded-first [] -> int
   (let [xs (new []int [1 2 3 4])
@@ -156,6 +247,9 @@
   (indexed-name-count)
   ;; => 3
 
+  (even-group-count)
+  ;; => 3
+
   (range-total)
   ;; => 10
 
@@ -177,11 +271,44 @@
   (concat-reversed-first)
   ;; => 4
 
+  (sorted-second)
+  ;; => 2
+
+  (descending-first)
+  ;; => 4
+
+  (sorted-in-place-first)
+  ;; => 1
+
+  (reversed-in-place-first)
+  ;; => 4
+
+  (descending-in-place-first)
+  ;; => 4
+
+  (doubled-in-place-total)
+  ;; => 12
+
+  (indexed-in-place-second)
+  ;; => 3
+
+  (filtered-in-place-count)
+  ;; => 2
+
+  (removed-in-place-first)
+  ;; => 1
+
+  (kept-in-place-first)
+  ;; => 4
+
   (ragged-chunk-size)
   ;; => 1
 
   (run-count)
   ;; => 4
+
+  (flattened-total)
+  ;; => 15
 
   (threaded-first)
   ;; => 4

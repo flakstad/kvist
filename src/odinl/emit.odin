@@ -18,14 +18,26 @@ Emitter_Features :: struct {
     core_remove:      bool,
     core_map_indexed: bool,
     core_keep:        bool,
+    core_mapcat:      bool,
     core_concat:      bool,
     core_reverse:     bool,
+    core_reverse_in_place: bool,
+    core_map_in_place: bool,
+    core_map_indexed_in_place: bool,
+    core_filter_in_place: bool,
+    core_remove_in_place: bool,
+    core_keep_in_place: bool,
+    core_sort:        bool,
+    core_sort_by:     bool,
+    core_sort_in_place: bool,
+    core_sort_by_in_place: bool,
     core_split_at:    bool,
     core_partition:   bool,
     core_partition_all: bool,
     core_partition_by: bool,
     core_zipmap:      bool,
     core_index_by:    bool,
+    core_group_by:    bool,
     core_frequencies: bool,
     core_range:       bool,
     core_repeat:      bool,
@@ -33,9 +45,14 @@ Emitter_Features :: struct {
     core_iterate:     bool,
     map_fields:       [dynamic]string,
     index_by_fields:  [dynamic]string,
+    group_by_fields:  [dynamic]string,
     partition_by_fields: [dynamic]string,
+    sort_by_fields:   [dynamic]string,
+    sort_by_in_place_fields: [dynamic]string,
     filter_fields:    [dynamic]string,
+    filter_in_place_fields: [dynamic]string,
     remove_fields:    [dynamic]string,
+    remove_in_place_fields: [dynamic]string,
     take_while_fields: [dynamic]string,
     drop_while_fields: [dynamic]string,
     find_fields:      [dynamic]string,
@@ -147,6 +164,12 @@ mark_core_keep :: proc(e: ^Emitter) {
     }
 }
 
+mark_core_mapcat :: proc(e: ^Emitter) {
+    if e.features != nil {
+        e.features.core_mapcat = true
+    }
+}
+
 mark_core_concat :: proc(e: ^Emitter) {
     if e.features != nil {
         e.features.core_concat = true
@@ -156,6 +179,66 @@ mark_core_concat :: proc(e: ^Emitter) {
 mark_core_reverse :: proc(e: ^Emitter) {
     if e.features != nil {
         e.features.core_reverse = true
+    }
+}
+
+mark_core_reverse_in_place :: proc(e: ^Emitter) {
+    if e.features != nil {
+        e.features.core_reverse_in_place = true
+    }
+}
+
+mark_core_map_in_place :: proc(e: ^Emitter) {
+    if e.features != nil {
+        e.features.core_map_in_place = true
+    }
+}
+
+mark_core_map_indexed_in_place :: proc(e: ^Emitter) {
+    if e.features != nil {
+        e.features.core_map_indexed_in_place = true
+    }
+}
+
+mark_core_filter_in_place :: proc(e: ^Emitter) {
+    if e.features != nil {
+        e.features.core_filter_in_place = true
+    }
+}
+
+mark_core_remove_in_place :: proc(e: ^Emitter) {
+    if e.features != nil {
+        e.features.core_remove_in_place = true
+    }
+}
+
+mark_core_keep_in_place :: proc(e: ^Emitter) {
+    if e.features != nil {
+        e.features.core_keep_in_place = true
+    }
+}
+
+mark_core_sort :: proc(e: ^Emitter) {
+    if e.features != nil {
+        e.features.core_sort = true
+    }
+}
+
+mark_core_sort_by :: proc(e: ^Emitter) {
+    if e.features != nil {
+        e.features.core_sort_by = true
+    }
+}
+
+mark_core_sort_in_place :: proc(e: ^Emitter) {
+    if e.features != nil {
+        e.features.core_sort_in_place = true
+    }
+}
+
+mark_core_sort_by_in_place :: proc(e: ^Emitter) {
+    if e.features != nil {
+        e.features.core_sort_by_in_place = true
     }
 }
 
@@ -192,6 +275,12 @@ mark_core_zipmap :: proc(e: ^Emitter) {
 mark_core_index_by :: proc(e: ^Emitter) {
     if e.features != nil {
         e.features.core_index_by = true
+    }
+}
+
+mark_core_group_by :: proc(e: ^Emitter) {
+    if e.features != nil {
+        e.features.core_group_by = true
     }
 }
 
@@ -246,9 +335,27 @@ mark_core_index_by_field :: proc(e: ^Emitter, field: string) {
     }
 }
 
+mark_core_group_by_field :: proc(e: ^Emitter, field: string) {
+    if e.features != nil {
+        append_unique_string(&e.features.group_by_fields, field)
+    }
+}
+
 mark_core_partition_by_field :: proc(e: ^Emitter, field: string) {
     if e.features != nil {
         append_unique_string(&e.features.partition_by_fields, field)
+    }
+}
+
+mark_core_sort_by_field :: proc(e: ^Emitter, field: string) {
+    if e.features != nil {
+        append_unique_string(&e.features.sort_by_fields, field)
+    }
+}
+
+mark_core_sort_by_in_place_field :: proc(e: ^Emitter, field: string) {
+    if e.features != nil {
+        append_unique_string(&e.features.sort_by_in_place_fields, field)
     }
 }
 
@@ -258,9 +365,21 @@ mark_core_filter_field :: proc(e: ^Emitter, field: string) {
     }
 }
 
+mark_core_filter_in_place_field :: proc(e: ^Emitter, field: string) {
+    if e.features != nil {
+        append_unique_string(&e.features.filter_in_place_fields, field)
+    }
+}
+
 mark_core_remove_field :: proc(e: ^Emitter, field: string) {
     if e.features != nil {
         append_unique_string(&e.features.remove_fields, field)
+    }
+}
+
+mark_core_remove_in_place_field :: proc(e: ^Emitter, field: string) {
+    if e.features != nil {
+        append_unique_string(&e.features.remove_in_place_fields, field)
     }
 }
 
@@ -625,7 +744,7 @@ emit_thread_step :: proc(e: ^Emitter, current: string, step: CST_Form, thread_la
             }
             return emit_predicate_callback_call(e, "odinl_filter", step.items[1], collection, mark_core_filter, mark_core_filter_field)
         }
-        if thread_last && (head.text == "map-indexed" || head.text == "keep") {
+        if thread_last && (head.text == "map-indexed" || head.text == "keep" || head.text == "mapcat") {
             if len(step.items) != 2 {
                 return "", Compile_Error{message = fmt.tprintf("%s thread step expects one function argument", head.text), span = step.span}, false
             }
@@ -636,6 +755,10 @@ emit_thread_step :: proc(e: ^Emitter, current: string, step: CST_Form, thread_la
             if head.text == "map-indexed" {
                 mark_core_map_indexed(e)
                 return emit_call_text("odinl_map_indexed", []string{f, slice_all_expr_text(current)}), {}, true
+            }
+            if head.text == "mapcat" {
+                mark_core_mapcat(e)
+                return emit_call_text("odinl_mapcat", []string{f, slice_all_expr_text(current)}), {}, true
             }
             mark_core_keep(e)
             return emit_call_text("odinl_keep", []string{f, slice_all_expr_text(current)}), {}, true
@@ -657,6 +780,19 @@ emit_thread_step :: proc(e: ^Emitter, current: string, step: CST_Form, thread_la
             }
             mark_core_reverse(e)
             return emit_call_text("odinl_reverse", []string{slice_all_expr_text(current)}), {}, true
+        }
+        if thread_last && head.text == "sort" {
+            if len(step.items) != 1 {
+                return "", Compile_Error{message = "sort thread step expects no arguments", span = step.span}, false
+            }
+            mark_core_sort(e)
+            return emit_call_text("odinl_sort", []string{slice_all_expr_text(current)}), {}, true
+        }
+        if thread_last && head.text == "sort-by" {
+            if len(step.items) != 2 {
+                return "", Compile_Error{message = "sort-by thread step expects one key function argument", span = step.span}, false
+            }
+            return emit_sort_by_callback_call(e, step.items[1], slice_all_expr_text(current))
         }
         if thread_last && (head.text == "split-at" || head.text == "partition" || head.text == "partition-all") {
             if len(step.items) != 2 {
@@ -699,6 +835,12 @@ emit_thread_step :: proc(e: ^Emitter, current: string, step: CST_Form, thread_la
                 return "", Compile_Error{message = "index-by thread step expects one key function argument", span = step.span}, false
             }
             return emit_index_by_callback_call(e, step.items[1], slice_all_expr_text(current))
+        }
+        if thread_last && head.text == "group-by" {
+            if len(step.items) != 2 {
+                return "", Compile_Error{message = "group-by thread step expects one key function argument", span = step.span}, false
+            }
+            return emit_group_by_callback_call(e, step.items[1], slice_all_expr_text(current))
         }
         if thread_last && head.text == "frequencies" {
             if len(step.items) != 1 {
@@ -854,9 +996,12 @@ thread_step_result_kind :: proc(step: CST_Form, thread_last: bool) -> Thread_Res
         }
         if thread_last && (head.text == "map" || head.text == "filter" ||
                            head.text == "remove" || head.text == "map-indexed" ||
-                           head.text == "keep" || head.text == "concat" ||
-                           head.text == "reverse" || head.text == "zipmap" ||
-                           head.text == "index-by" || head.text == "frequencies") {
+                           head.text == "keep" || head.text == "mapcat" ||
+                           head.text == "concat" ||
+                           head.text == "reverse" || head.text == "sort" ||
+                           head.text == "sort-by" || head.text == "zipmap" ||
+                           head.text == "index-by" || head.text == "group-by" ||
+                           head.text == "frequencies") {
             return .Owned
         }
         if thread_last && (head.text == "partition" || head.text == "partition-all" || head.text == "partition-by") {
@@ -939,9 +1084,10 @@ thread_return_error :: proc(form: CST_Form) -> (Compile_Error, bool) {
 
 owned_sequence_head :: proc(name: string) -> bool {
     switch name {
-    case "map", "filter", "remove", "map-indexed", "keep",
-         "concat", "reverse", "partition", "partition-all", "partition-by",
-         "zipmap", "index-by", "frequencies",
+    case "map", "filter", "remove", "map-indexed", "keep", "mapcat",
+         "concat", "reverse", "sort", "sort-by",
+         "partition", "partition-all", "partition-by",
+         "zipmap", "index-by", "group-by", "frequencies",
          "range", "repeat", "repeatedly", "iterate":
         return true
     }
@@ -1119,6 +1265,10 @@ slice_all_expr_text :: proc(text: string) -> string {
     return fmt.tprintf("(%s)[:]", text)
 }
 
+address_of_expr_text :: proc(text: string) -> string {
+    return fmt.tprintf("&(%s)", text)
+}
+
 field_from_keyword :: proc(form: CST_Form) -> (field: string, ok: bool) {
     if form.kind != .Keyword || len(form.text) < 2 {
         return "", false
@@ -1164,6 +1314,23 @@ emit_index_by_callback_call :: proc(e: ^Emitter, callback: CST_Form, collection:
     return emit_call_text("odinl_index_by", []string{f, collection}), {}, true
 }
 
+emit_group_by_callback_call :: proc(e: ^Emitter, callback: CST_Form, collection: string) -> (string, Compile_Error, bool) {
+    if field, ok_field := field_from_keyword(callback); ok_field {
+        mark_core_group_by_field(e, field)
+        return emit_call_text(
+            fmt.tprintf("odinl_group_by_field_%s", field),
+            []string{field_type_expr_text(collection, field), collection},
+        ), {}, true
+    }
+
+    f, err_f, ok_f := emit_expr(e, callback)
+    if !ok_f {
+        return "", err_f, false
+    }
+    mark_core_group_by(e)
+    return emit_call_text("odinl_group_by", []string{f, collection}), {}, true
+}
+
 emit_partition_by_callback_call :: proc(e: ^Emitter, callback: CST_Form, collection: string) -> (string, Compile_Error, bool) {
     if field, ok_field := field_from_keyword(callback); ok_field {
         mark_core_partition_by_field(e, field)
@@ -1179,6 +1346,52 @@ emit_partition_by_callback_call :: proc(e: ^Emitter, callback: CST_Form, collect
     }
     mark_core_partition_by(e)
     return emit_call_text("odinl_partition_by", []string{f, collection}), {}, true
+}
+
+emit_sort_by_callback_call :: proc(e: ^Emitter, callback: CST_Form, collection: string) -> (string, Compile_Error, bool) {
+    if field, ok_field := field_from_keyword(callback); ok_field {
+        mark_core_sort_by_field(e, field)
+        return emit_call_text(
+            fmt.tprintf("odinl_sort_by_field_%s", field),
+            []string{field_type_expr_text(collection, field), collection},
+        ), {}, true
+    }
+
+    f, err_f, ok_f := emit_expr(e, callback)
+    if !ok_f {
+        return "", err_f, false
+    }
+    mark_core_sort_by(e)
+    return emit_call_text("odinl_sort_by", []string{f, collection}), {}, true
+}
+
+emit_sort_by_in_place_callback_call :: proc(e: ^Emitter, callback: CST_Form, collection: string) -> (string, Compile_Error, bool) {
+    if field, ok_field := field_from_keyword(callback); ok_field {
+        mark_core_sort_by_in_place_field(e, field)
+        return emit_call_text(fmt.tprintf("odinl_sort_by_in_place_field_%s", field), []string{collection}), {}, true
+    }
+
+    f, err_f, ok_f := emit_expr(e, callback)
+    if !ok_f {
+        return "", err_f, false
+    }
+    mark_core_sort_by_in_place(e)
+    return emit_call_text("odinl_sort_by_in_place", []string{f, collection}), {}, true
+}
+
+emit_dynamic_predicate_in_place_callback_call :: proc(e: ^Emitter, helper_name: string, callback: CST_Form, collection: string, mark_helper: proc(^Emitter), mark_field: proc(^Emitter, string)) -> (string, Compile_Error, bool) {
+    collection_ptr := address_of_expr_text(collection)
+    if field, ok_field := field_from_keyword(callback); ok_field {
+        mark_field(e, field)
+        return emit_call_text(fmt.tprintf("%s_field_%s", helper_name, field), []string{collection_ptr}), {}, true
+    }
+
+    pred, err_pred, ok_pred := emit_expr(e, callback)
+    if !ok_pred {
+        return "", err_pred, false
+    }
+    mark_helper(e)
+    return emit_call_text(helper_name, []string{pred, collection_ptr}), {}, true
 }
 
 emit_predicate_callback_call :: proc(e: ^Emitter, helper_name: string, callback: CST_Form, collection: string, mark_helper: proc(^Emitter), mark_field: proc(^Emitter, string)) -> (string, Compile_Error, bool) {
@@ -1529,7 +1742,53 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         return emit_predicate_callback_call(e, "odinl_filter", form.items[1], collection, mark_core_filter, mark_core_filter_field)
     }
 
-    if head.text == "map-indexed" || head.text == "keep" {
+    if head.text == "map!" {
+        if len(form.items) != 3 {
+            return "", Compile_Error{message = "map! expects function and collection", span = form.span}, false
+        }
+        f, err_f, ok_f := emit_expr(e, form.items[1])
+        if !ok_f {
+            return "", err_f, false
+        }
+        collection, err_collection, ok_collection := emit_expr(e, form.items[2])
+        if !ok_collection {
+            return "", err_collection, false
+        }
+        mark_core_map_in_place(e)
+        return emit_call_text("odinl_map_in_place", []string{f, slice_all_expr_text(collection)}), {}, true
+    }
+
+    if head.text == "map-indexed!" {
+        if len(form.items) != 3 {
+            return "", Compile_Error{message = "map-indexed! expects function and collection", span = form.span}, false
+        }
+        f, err_f, ok_f := emit_expr(e, form.items[1])
+        if !ok_f {
+            return "", err_f, false
+        }
+        collection, err_collection, ok_collection := emit_expr(e, form.items[2])
+        if !ok_collection {
+            return "", err_collection, false
+        }
+        mark_core_map_indexed_in_place(e)
+        return emit_call_text("odinl_map_indexed_in_place", []string{f, slice_all_expr_text(collection)}), {}, true
+    }
+
+    if head.text == "filter!" || head.text == "remove!" {
+        if len(form.items) != 3 {
+            return "", Compile_Error{message = fmt.tprintf("%s expects predicate and dynamic array", head.text), span = form.span}, false
+        }
+        collection, err_collection, ok_collection := emit_expr(e, form.items[2])
+        if !ok_collection {
+            return "", err_collection, false
+        }
+        if head.text == "remove!" {
+            return emit_dynamic_predicate_in_place_callback_call(e, "odinl_remove_in_place", form.items[1], collection, mark_core_remove_in_place, mark_core_remove_in_place_field)
+        }
+        return emit_dynamic_predicate_in_place_callback_call(e, "odinl_filter_in_place", form.items[1], collection, mark_core_filter_in_place, mark_core_filter_in_place_field)
+    }
+
+    if head.text == "map-indexed" || head.text == "keep" || head.text == "mapcat" {
         if len(form.items) != 3 {
             return "", Compile_Error{message = fmt.tprintf("%s expects function and collection", head.text), span = form.span}, false
         }
@@ -1546,8 +1805,28 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
             mark_core_map_indexed(e)
             return emit_call_text("odinl_map_indexed", []string{f, collection}), {}, true
         }
+        if head.text == "mapcat" {
+            mark_core_mapcat(e)
+            return emit_call_text("odinl_mapcat", []string{f, collection}), {}, true
+        }
         mark_core_keep(e)
         return emit_call_text("odinl_keep", []string{f, collection}), {}, true
+    }
+
+    if head.text == "keep!" {
+        if len(form.items) != 3 {
+            return "", Compile_Error{message = "keep! expects function and dynamic array", span = form.span}, false
+        }
+        f, err_f, ok_f := emit_expr(e, form.items[1])
+        if !ok_f {
+            return "", err_f, false
+        }
+        collection, err_collection, ok_collection := emit_expr(e, form.items[2])
+        if !ok_collection {
+            return "", err_collection, false
+        }
+        mark_core_keep_in_place(e)
+        return emit_call_text("odinl_keep_in_place", []string{f, address_of_expr_text(collection)}), {}, true
     }
 
     if head.text == "concat" {
@@ -1576,6 +1855,64 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         }
         mark_core_reverse(e)
         return emit_call_text("odinl_reverse", []string{slice_all_expr_text(collection)}), {}, true
+    }
+
+    if head.text == "reverse!" {
+        if len(form.items) != 2 {
+            return "", Compile_Error{message = "reverse! expects collection", span = form.span}, false
+        }
+        collection, err_collection, ok_collection := emit_expr(e, form.items[1])
+        if !ok_collection {
+            return "", err_collection, false
+        }
+        mark_core_reverse_in_place(e)
+        return emit_call_text("odinl_reverse_in_place", []string{slice_all_expr_text(collection)}), {}, true
+    }
+
+    if head.text == "sort" {
+        if len(form.items) != 2 {
+            return "", Compile_Error{message = "sort expects collection", span = form.span}, false
+        }
+        collection, err_collection, ok_collection := emit_expr(e, form.items[1])
+        if !ok_collection {
+            return "", err_collection, false
+        }
+        mark_core_sort(e)
+        return emit_call_text("odinl_sort", []string{slice_all_expr_text(collection)}), {}, true
+    }
+
+    if head.text == "sort!" {
+        if len(form.items) != 2 {
+            return "", Compile_Error{message = "sort! expects collection", span = form.span}, false
+        }
+        collection, err_collection, ok_collection := emit_expr(e, form.items[1])
+        if !ok_collection {
+            return "", err_collection, false
+        }
+        mark_core_sort_in_place(e)
+        return emit_call_text("odinl_sort_in_place", []string{slice_all_expr_text(collection)}), {}, true
+    }
+
+    if head.text == "sort-by" {
+        if len(form.items) != 3 {
+            return "", Compile_Error{message = "sort-by expects key function and collection", span = form.span}, false
+        }
+        collection, err_collection, ok_collection := emit_expr(e, form.items[2])
+        if !ok_collection {
+            return "", err_collection, false
+        }
+        return emit_sort_by_callback_call(e, form.items[1], slice_all_expr_text(collection))
+    }
+
+    if head.text == "sort-by!" {
+        if len(form.items) != 3 {
+            return "", Compile_Error{message = "sort-by! expects key function and collection", span = form.span}, false
+        }
+        collection, err_collection, ok_collection := emit_expr(e, form.items[2])
+        if !ok_collection {
+            return "", err_collection, false
+        }
+        return emit_sort_by_in_place_callback_call(e, form.items[1], slice_all_expr_text(collection))
     }
 
     if head.text == "split-at" || head.text == "partition" || head.text == "partition-all" {
@@ -1639,6 +1976,17 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
             return "", err_collection, false
         }
         return emit_index_by_callback_call(e, form.items[1], slice_all_expr_text(collection))
+    }
+
+    if head.text == "group-by" {
+        if len(form.items) != 3 {
+            return "", Compile_Error{message = "group-by expects key function and collection", span = form.span}, false
+        }
+        collection, err_collection, ok_collection := emit_expr(e, form.items[2])
+        if !ok_collection {
+            return "", err_collection, false
+        }
+        return emit_group_by_callback_call(e, form.items[1], slice_all_expr_text(collection))
     }
 
     if head.text == "frequencies" {
@@ -2606,7 +2954,9 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
     case "each":
         body_start := 3
         name_form: CST_Form
+        value_form: CST_Form
         coll_form: CST_Form
+        has_value := false
         if len(form.items) >= 4 && form.items[1].kind == .Symbol {
             name_form = form.items[1]
             coll_form = form.items[2]
@@ -2614,10 +2964,18 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
             name_form = form.items[1].items[0]
             coll_form = form.items[1].items[1]
             body_start = 2
+        } else if len(form.items) >= 3 && form.items[1].kind == .Vector && len(form.items[1].items) == 3 &&
+                  form.items[1].items[0].kind == .Symbol && form.items[1].items[1].kind == .Symbol {
+            name_form = form.items[1].items[0]
+            value_form = form.items[1].items[1]
+            coll_form = form.items[1].items[2]
+            has_value = true
+            body_start = 2
         } else {
-            return Compile_Error{message = "each expects [name collection] and body", span = form.span}, false
+            return Compile_Error{message = "each expects [name collection] or [key value collection] and body", span = form.span}, false
         }
         name := map_name(name_form.text)
+        value := map_name(value_form.text)
         err_owned, bad_owned := owned_sequence_usage_error(coll_form, false)
         if bad_owned {
             return err_owned, false
@@ -2629,6 +2987,10 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
         emit_indent(e)
         strings.write_string(&e.builder, "for ")
         strings.write_string(&e.builder, name)
+        if has_value {
+            strings.write_string(&e.builder, ", ")
+            strings.write_string(&e.builder, value)
+        }
         strings.write_string(&e.builder, " in ")
         strings.write_string(&e.builder, coll)
         strings.write_string(&e.builder, " {")
@@ -2909,6 +3271,46 @@ emit_core_filter_field_helper :: proc(e: ^Emitter, field: string) {
     emit_line(e, "}")
 }
 
+emit_core_filter_in_place_helper :: proc(e: ^Emitter) {
+    emit_line(e, "odinl_filter_in_place :: proc(pred: proc(x: $T) -> bool, xs: ^[dynamic]T) {")
+    e.indent += 1
+    emit_line(e, "data := xs^")
+    emit_line(e, "write := 0")
+    emit_line(e, "for x in data {")
+    e.indent += 1
+    emit_line(e, "if pred(x) {")
+    e.indent += 1
+    emit_line(e, "data[write] = x")
+    emit_line(e, "write += 1")
+    e.indent -= 1
+    emit_line(e, "}")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "resize(xs, write)")
+    e.indent -= 1
+    emit_line(e, "}")
+}
+
+emit_core_filter_in_place_field_helper :: proc(e: ^Emitter, field: string) {
+    emit_line(e, fmt.tprintf("odinl_filter_in_place_field_%s :: proc(xs: ^[dynamic]$T) %s", field, "{"))
+    e.indent += 1
+    emit_line(e, "data := xs^")
+    emit_line(e, "write := 0")
+    emit_line(e, "for x in data {")
+    e.indent += 1
+    emit_line(e, fmt.tprintf("if x.%s %s", field, "{"))
+    e.indent += 1
+    emit_line(e, "data[write] = x")
+    emit_line(e, "write += 1")
+    e.indent -= 1
+    emit_line(e, "}")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "resize(xs, write)")
+    e.indent -= 1
+    emit_line(e, "}")
+}
+
 emit_core_remove_helper :: proc(e: ^Emitter) {
     emit_line(e, "odinl_remove :: proc(pred: proc(x: $T) -> bool, xs: []T) -> [dynamic]T {")
     e.indent += 1
@@ -2945,6 +3347,46 @@ emit_core_remove_field_helper :: proc(e: ^Emitter, field: string) {
     emit_line(e, "}")
 }
 
+emit_core_remove_in_place_helper :: proc(e: ^Emitter) {
+    emit_line(e, "odinl_remove_in_place :: proc(pred: proc(x: $T) -> bool, xs: ^[dynamic]T) {")
+    e.indent += 1
+    emit_line(e, "data := xs^")
+    emit_line(e, "write := 0")
+    emit_line(e, "for x in data {")
+    e.indent += 1
+    emit_line(e, "if !pred(x) {")
+    e.indent += 1
+    emit_line(e, "data[write] = x")
+    emit_line(e, "write += 1")
+    e.indent -= 1
+    emit_line(e, "}")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "resize(xs, write)")
+    e.indent -= 1
+    emit_line(e, "}")
+}
+
+emit_core_remove_in_place_field_helper :: proc(e: ^Emitter, field: string) {
+    emit_line(e, fmt.tprintf("odinl_remove_in_place_field_%s :: proc(xs: ^[dynamic]$T) %s", field, "{"))
+    e.indent += 1
+    emit_line(e, "data := xs^")
+    emit_line(e, "write := 0")
+    emit_line(e, "for x in data {")
+    e.indent += 1
+    emit_line(e, fmt.tprintf("if !x.%s %s", field, "{"))
+    e.indent += 1
+    emit_line(e, "data[write] = x")
+    emit_line(e, "write += 1")
+    e.indent -= 1
+    emit_line(e, "}")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "resize(xs, write)")
+    e.indent -= 1
+    emit_line(e, "}")
+}
+
 emit_core_map_indexed_helper :: proc(e: ^Emitter) {
     emit_line(e, "odinl_map_indexed :: proc(f: proc(i: int, x: $T) -> $U, xs: []T) -> [dynamic]U {")
     e.indent += 1
@@ -2955,6 +3397,30 @@ emit_core_map_indexed_helper :: proc(e: ^Emitter) {
     e.indent -= 1
     emit_line(e, "}")
     emit_line(e, "return out")
+    e.indent -= 1
+    emit_line(e, "}")
+}
+
+emit_core_map_in_place_helper :: proc(e: ^Emitter) {
+    emit_line(e, "odinl_map_in_place :: proc(f: proc(x: $T) -> T, xs: []T) {")
+    e.indent += 1
+    emit_line(e, "for i in 0..<len(xs) {")
+    e.indent += 1
+    emit_line(e, "xs[i] = f(xs[i])")
+    e.indent -= 1
+    emit_line(e, "}")
+    e.indent -= 1
+    emit_line(e, "}")
+}
+
+emit_core_map_indexed_in_place_helper :: proc(e: ^Emitter) {
+    emit_line(e, "odinl_map_indexed_in_place :: proc(f: proc(i: int, x: $T) -> T, xs: []T) {")
+    e.indent += 1
+    emit_line(e, "for i in 0..<len(xs) {")
+    e.indent += 1
+    emit_line(e, "xs[i] = f(i, xs[i])")
+    e.indent -= 1
+    emit_line(e, "}")
     e.indent -= 1
     emit_line(e, "}")
 }
@@ -2971,6 +3437,41 @@ emit_core_keep_helper :: proc(e: ^Emitter) {
     emit_line(e, "append(&out, value)")
     e.indent -= 1
     emit_line(e, "}")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "return out")
+    e.indent -= 1
+    emit_line(e, "}")
+}
+
+emit_core_keep_in_place_helper :: proc(e: ^Emitter) {
+    emit_line(e, "odinl_keep_in_place :: proc(f: proc(x: $T) -> (T, bool), xs: ^[dynamic]T) {")
+    e.indent += 1
+    emit_line(e, "data := xs^")
+    emit_line(e, "write := 0")
+    emit_line(e, "for x in data {")
+    e.indent += 1
+    emit_line(e, "value, ok := f(x)")
+    emit_line(e, "if ok {")
+    e.indent += 1
+    emit_line(e, "data[write] = value")
+    emit_line(e, "write += 1")
+    e.indent -= 1
+    emit_line(e, "}")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "resize(xs, write)")
+    e.indent -= 1
+    emit_line(e, "}")
+}
+
+emit_core_mapcat_helper :: proc(e: ^Emitter) {
+    emit_line(e, "odinl_mapcat :: proc(f: proc(x: $T) -> []$U, xs: []T) -> [dynamic]U {")
+    e.indent += 1
+    emit_line(e, "out := make([dynamic]U)")
+    emit_line(e, "for x in xs {")
+    e.indent += 1
+    emit_line(e, "append(&out, ..f(x))")
     e.indent -= 1
     emit_line(e, "}")
     emit_line(e, "return out")
@@ -2999,6 +3500,124 @@ emit_core_reverse_helper :: proc(e: ^Emitter) {
     e.indent -= 1
     emit_line(e, "}")
     emit_line(e, "return out")
+    e.indent -= 1
+    emit_line(e, "}")
+}
+
+emit_core_reverse_in_place_helper :: proc(e: ^Emitter) {
+    emit_line(e, "odinl_reverse_in_place :: proc(xs: []$T) {")
+    e.indent += 1
+    emit_line(e, "for i := 0; i < len(xs)/2; i += 1 {")
+    e.indent += 1
+    emit_line(e, "j := len(xs)-1-i")
+    emit_line(e, "xs[i], xs[j] = xs[j], xs[i]")
+    e.indent -= 1
+    emit_line(e, "}")
+    e.indent -= 1
+    emit_line(e, "}")
+}
+
+emit_core_sort_helper :: proc(e: ^Emitter) {
+    emit_line(e, "odinl_sort :: proc(xs: []$T) -> [dynamic]T {")
+    e.indent += 1
+    emit_line(e, "out := make([dynamic]T, 0, len(xs))")
+    emit_line(e, "append(&out, ..xs)")
+    emit_line(e, "for i := 1; i < len(out); i += 1 {")
+    e.indent += 1
+    emit_line(e, "for j := i; j > 0 && out[j] < out[j-1]; j -= 1 {")
+    e.indent += 1
+    emit_line(e, "out[j], out[j-1] = out[j-1], out[j]")
+    e.indent -= 1
+    emit_line(e, "}")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "return out")
+    e.indent -= 1
+    emit_line(e, "}")
+}
+
+emit_core_sort_in_place_helper :: proc(e: ^Emitter) {
+    emit_line(e, "odinl_sort_in_place :: proc(xs: []$T) {")
+    e.indent += 1
+    emit_line(e, "for i := 1; i < len(xs); i += 1 {")
+    e.indent += 1
+    emit_line(e, "for j := i; j > 0 && xs[j] < xs[j-1]; j -= 1 {")
+    e.indent += 1
+    emit_line(e, "xs[j], xs[j-1] = xs[j-1], xs[j]")
+    e.indent -= 1
+    emit_line(e, "}")
+    e.indent -= 1
+    emit_line(e, "}")
+    e.indent -= 1
+    emit_line(e, "}")
+}
+
+emit_core_sort_by_helper :: proc(e: ^Emitter) {
+    emit_line(e, "odinl_sort_by :: proc(f: proc(x: $T) -> $K, xs: []T) -> [dynamic]T {")
+    e.indent += 1
+    emit_line(e, "out := make([dynamic]T, 0, len(xs))")
+    emit_line(e, "append(&out, ..xs)")
+    emit_line(e, "for i := 1; i < len(out); i += 1 {")
+    e.indent += 1
+    emit_line(e, "for j := i; j > 0 && f(out[j]) < f(out[j-1]); j -= 1 {")
+    e.indent += 1
+    emit_line(e, "out[j], out[j-1] = out[j-1], out[j]")
+    e.indent -= 1
+    emit_line(e, "}")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "return out")
+    e.indent -= 1
+    emit_line(e, "}")
+}
+
+emit_core_sort_by_in_place_helper :: proc(e: ^Emitter) {
+    emit_line(e, "odinl_sort_by_in_place :: proc(f: proc(x: $T) -> $K, xs: []T) {")
+    e.indent += 1
+    emit_line(e, "for i := 1; i < len(xs); i += 1 {")
+    e.indent += 1
+    emit_line(e, "for j := i; j > 0 && f(xs[j]) < f(xs[j-1]); j -= 1 {")
+    e.indent += 1
+    emit_line(e, "xs[j], xs[j-1] = xs[j-1], xs[j]")
+    e.indent -= 1
+    emit_line(e, "}")
+    e.indent -= 1
+    emit_line(e, "}")
+    e.indent -= 1
+    emit_line(e, "}")
+}
+
+emit_core_sort_by_field_helper :: proc(e: ^Emitter, field: string) {
+    emit_line(e, fmt.tprintf("odinl_sort_by_field_%s :: proc($Key: typeid, xs: []$T) -> [dynamic]T %s", field, "{"))
+    e.indent += 1
+    emit_line(e, "out := make([dynamic]T, 0, len(xs))")
+    emit_line(e, "append(&out, ..xs)")
+    emit_line(e, "for i := 1; i < len(out); i += 1 {")
+    e.indent += 1
+    emit_line(e, fmt.tprintf("for j := i; j > 0 && out[j].%s < out[j-1].%s; j -= 1 %s", field, field, "{"))
+    e.indent += 1
+    emit_line(e, "out[j], out[j-1] = out[j-1], out[j]")
+    e.indent -= 1
+    emit_line(e, "}")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "return out")
+    e.indent -= 1
+    emit_line(e, "}")
+}
+
+emit_core_sort_by_in_place_field_helper :: proc(e: ^Emitter, field: string) {
+    emit_line(e, fmt.tprintf("odinl_sort_by_in_place_field_%s :: proc(xs: []$T) %s", field, "{"))
+    e.indent += 1
+    emit_line(e, "for i := 1; i < len(xs); i += 1 {")
+    e.indent += 1
+    emit_line(e, fmt.tprintf("for j := i; j > 0 && xs[j].%s < xs[j-1].%s; j -= 1 %s", field, field, "{"))
+    e.indent += 1
+    emit_line(e, "xs[j], xs[j-1] = xs[j-1], xs[j]")
+    e.indent -= 1
+    emit_line(e, "}")
+    e.indent -= 1
+    emit_line(e, "}")
     e.indent -= 1
     emit_line(e, "}")
 }
@@ -3165,6 +3784,40 @@ emit_core_index_by_field_helper :: proc(e: ^Emitter, field: string) {
     emit_line(e, "for x in xs {")
     e.indent += 1
     emit_line(e, fmt.tprintf("out[x.%s] = x", field))
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "return out")
+    e.indent -= 1
+    emit_line(e, "}")
+}
+
+emit_core_group_by_helper :: proc(e: ^Emitter) {
+    emit_line(e, "odinl_group_by :: proc(f: proc(x: $T) -> $K, xs: []T) -> map[K][dynamic]T {")
+    e.indent += 1
+    emit_line(e, "out := make(map[K][dynamic]T)")
+    emit_line(e, "for x in xs {")
+    e.indent += 1
+    emit_line(e, "key := f(x)")
+    emit_line(e, "group := out[key]")
+    emit_line(e, "append(&group, x)")
+    emit_line(e, "out[key] = group")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "return out")
+    e.indent -= 1
+    emit_line(e, "}")
+}
+
+emit_core_group_by_field_helper :: proc(e: ^Emitter, field: string) {
+    emit_line(e, fmt.tprintf("odinl_group_by_field_%s :: proc($Key: typeid, xs: []$T) -> map[Key][dynamic]T %s", field, "{"))
+    e.indent += 1
+    emit_line(e, "out := make(map[Key][dynamic]T)")
+    emit_line(e, "for x in xs {")
+    e.indent += 1
+    emit_line(e, fmt.tprintf("key := x.%s", field))
+    emit_line(e, "group := out[key]")
+    emit_line(e, "append(&group, x)")
+    emit_line(e, "out[key] = group")
     e.indent -= 1
     emit_line(e, "}")
     emit_line(e, "return out")
@@ -3504,17 +4157,29 @@ core_helpers_needed :: proc(features: Emitter_Features) -> bool {
            features.core_take_while || features.core_drop_while ||
            features.core_find || features.core_some || features.core_every ||
            features.core_remove || features.core_map_indexed || features.core_keep ||
-           features.core_concat || features.core_reverse ||
+           features.core_mapcat || features.core_concat ||
+           features.core_reverse || features.core_reverse_in_place ||
+           features.core_map_in_place || features.core_map_indexed_in_place ||
+           features.core_filter_in_place || features.core_remove_in_place ||
+           features.core_keep_in_place ||
+           features.core_sort || features.core_sort_by ||
+           features.core_sort_in_place || features.core_sort_by_in_place ||
            features.core_split_at || features.core_partition ||
            features.core_partition_all || features.core_partition_by ||
            features.core_zipmap ||
-           features.core_index_by || features.core_frequencies ||
+           features.core_index_by || features.core_group_by ||
+           features.core_frequencies ||
            features.core_range || features.core_repeat ||
            features.core_repeatedly || features.core_iterate ||
            len(features.map_fields) > 0 || len(features.index_by_fields) > 0 ||
+           len(features.group_by_fields) > 0 ||
            len(features.partition_by_fields) > 0 ||
+           len(features.sort_by_fields) > 0 ||
+           len(features.sort_by_in_place_fields) > 0 ||
            len(features.filter_fields) > 0 ||
+           len(features.filter_in_place_fields) > 0 ||
            len(features.remove_fields) > 0 ||
+           len(features.remove_in_place_fields) > 0 ||
            len(features.take_while_fields) > 0 || len(features.drop_while_fields) > 0 ||
            len(features.find_fields) > 0 || len(features.some_fields) > 0 ||
            len(features.every_fields) > 0
@@ -3550,6 +4215,14 @@ emit_core_helpers :: proc(e: ^Emitter, features: Emitter_Features) {
         emit_core_helper_separator(e, &emitted)
         emit_core_filter_field_helper(e, field)
     }
+    if features.core_filter_in_place {
+        emit_core_helper_separator(e, &emitted)
+        emit_core_filter_in_place_helper(e)
+    }
+    for field in features.filter_in_place_fields {
+        emit_core_helper_separator(e, &emitted)
+        emit_core_filter_in_place_field_helper(e, field)
+    }
     if features.core_remove {
         emit_core_helper_separator(e, &emitted)
         emit_core_remove_helper(e)
@@ -3558,13 +4231,37 @@ emit_core_helpers :: proc(e: ^Emitter, features: Emitter_Features) {
         emit_core_helper_separator(e, &emitted)
         emit_core_remove_field_helper(e, field)
     }
+    if features.core_remove_in_place {
+        emit_core_helper_separator(e, &emitted)
+        emit_core_remove_in_place_helper(e)
+    }
+    for field in features.remove_in_place_fields {
+        emit_core_helper_separator(e, &emitted)
+        emit_core_remove_in_place_field_helper(e, field)
+    }
     if features.core_map_indexed {
         emit_core_helper_separator(e, &emitted)
         emit_core_map_indexed_helper(e)
     }
+    if features.core_map_in_place {
+        emit_core_helper_separator(e, &emitted)
+        emit_core_map_in_place_helper(e)
+    }
+    if features.core_map_indexed_in_place {
+        emit_core_helper_separator(e, &emitted)
+        emit_core_map_indexed_in_place_helper(e)
+    }
     if features.core_keep {
         emit_core_helper_separator(e, &emitted)
         emit_core_keep_helper(e)
+    }
+    if features.core_keep_in_place {
+        emit_core_helper_separator(e, &emitted)
+        emit_core_keep_in_place_helper(e)
+    }
+    if features.core_mapcat {
+        emit_core_helper_separator(e, &emitted)
+        emit_core_mapcat_helper(e)
     }
     if features.core_concat {
         emit_core_helper_separator(e, &emitted)
@@ -3573,6 +4270,34 @@ emit_core_helpers :: proc(e: ^Emitter, features: Emitter_Features) {
     if features.core_reverse {
         emit_core_helper_separator(e, &emitted)
         emit_core_reverse_helper(e)
+    }
+    if features.core_reverse_in_place {
+        emit_core_helper_separator(e, &emitted)
+        emit_core_reverse_in_place_helper(e)
+    }
+    if features.core_sort {
+        emit_core_helper_separator(e, &emitted)
+        emit_core_sort_helper(e)
+    }
+    if features.core_sort_by {
+        emit_core_helper_separator(e, &emitted)
+        emit_core_sort_by_helper(e)
+    }
+    if features.core_sort_in_place {
+        emit_core_helper_separator(e, &emitted)
+        emit_core_sort_in_place_helper(e)
+    }
+    if features.core_sort_by_in_place {
+        emit_core_helper_separator(e, &emitted)
+        emit_core_sort_by_in_place_helper(e)
+    }
+    for field in features.sort_by_fields {
+        emit_core_helper_separator(e, &emitted)
+        emit_core_sort_by_field_helper(e, field)
+    }
+    for field in features.sort_by_in_place_fields {
+        emit_core_helper_separator(e, &emitted)
+        emit_core_sort_by_in_place_field_helper(e, field)
     }
     if features.core_split_at {
         emit_core_helper_separator(e, &emitted)
@@ -3605,6 +4330,14 @@ emit_core_helpers :: proc(e: ^Emitter, features: Emitter_Features) {
     for field in features.index_by_fields {
         emit_core_helper_separator(e, &emitted)
         emit_core_index_by_field_helper(e, field)
+    }
+    if features.core_group_by {
+        emit_core_helper_separator(e, &emitted)
+        emit_core_group_by_helper(e)
+    }
+    for field in features.group_by_fields {
+        emit_core_helper_separator(e, &emitted)
+        emit_core_group_by_field_helper(e, field)
     }
     if features.core_frequencies {
         emit_core_helper_separator(e, &emitted)

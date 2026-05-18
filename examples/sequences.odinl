@@ -80,6 +80,38 @@
     (defer (delete status-runs))
     (len status-runs)))
 
+(proc active-status-group-count [] -> int
+  (let [users (new []User [(User {:name "Ada" :age 36 :status .Active :verified true})
+                           (User {:name "Lin" :age 17 :status .Paused :verified false})
+                           (User {:name "Grace" :age 45 :status .Active :verified true})
+                           (User {:name "Edsger" :age 72 :status .Archived :verified false})])
+        by-status (group-by :status users)
+        active-users (get by-status .Active)]
+    (defer
+      (each [_ group by-status]
+        (delete group))
+      (delete by-status))
+    (len active-users)))
+
+(proc youngest-user-name [] -> string
+  (let [users (new []User [(User {:name "Ada" :age 36 :status .Active :verified true})
+                           (User {:name "Lin" :age 17 :status .Paused :verified false})
+                           (User {:name "Grace" :age 45 :status .Active :verified true})
+                           (User {:name "Edsger" :age 72 :status .Archived :verified false})])
+        by-age (sort-by :age users)
+        name (:name (first by-age))]
+    (defer (delete by-age))
+    name))
+
+(proc youngest-user-name-in-place [] -> string
+  (let [users (new [dynamic]User [(User {:name "Ada" :age 36 :status .Active :verified true})
+                                  (User {:name "Lin" :age 17 :status .Paused :verified false})
+                                  (User {:name "Grace" :age 45 :status .Active :verified true})
+                                  (User {:name "Edsger" :age 72 :status .Archived :verified false})])]
+    (defer (delete users))
+    (sort-by! :age users)
+    (:name (first users))))
+
 (proc third-user-name [] -> string
   (let [users (new []User [(User {:name "Ada" :age 36 :status .Active :verified true})
                            (User {:name "Lin" :age 17 :status .Paused :verified false})
@@ -126,6 +158,15 @@
 
   (status-run-count)
   ;; => 3
+
+  (active-status-group-count)
+  ;; => 2
+
+  (youngest-user-name)
+  ;; => Lin
+
+  (youngest-user-name-in-place)
+  ;; => Lin
 
   (third-user-name)
   ;; => Grace

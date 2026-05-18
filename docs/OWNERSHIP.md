@@ -30,8 +30,12 @@ These forms return owned values in normal OdinL code:
 (remove pred xs)
 (map-indexed f xs)
 (keep f xs)
+(mapcat f xs)
 (concat xs ys)
 (reverse xs)
+(sort xs)
+(sort-by f xs)
+(sort-by :field xs)
 (partition n xs)
 (partition-all n xs)
 (partition-by f xs)
@@ -39,6 +43,8 @@ These forms return owned values in normal OdinL code:
 (zipmap keys vals)
 (index-by f xs)
 (index-by :field xs)
+(group-by f xs)
+(group-by :field xs)
 (frequencies xs)
 (range end)
 (range start end)
@@ -102,6 +108,41 @@ These are scalar values, plain values, or borrowed views:
 
 Do not delete `front` or `back`.
 
+## Mutating Helpers
+
+Bang helpers mutate existing storage and do not create owned results:
+
+```clojure
+(reverse! xs)
+(sort! xs)
+(sort-by! f xs)
+(sort-by! :field xs)
+(map! f xs)
+(map-indexed! f xs)
+(filter! pred xs)
+(filter! :field xs)
+(remove! pred xs)
+(remove! :field xs)
+(keep! f xs)
+```
+
+Use them when mutation is the right Odin choice. They do not need `delete`
+because they do not allocate a result, but the value they mutate may still need
+deletion if it is an owned dynamic array. Length-changing helpers require a
+dynamic array because they compact and resize the existing storage:
+
+```clojure
+(let [xs (new [dynamic]int [3 1 2])]
+  (defer (delete xs))
+  (sort! xs)
+  (first xs))
+
+(let [xs (new [dynamic]int [1 2 3 4])]
+  (defer (delete xs))
+  (filter! even? xs)
+  (len xs))
+```
+
 ## Returning Owned Values
 
 If a proc returns an owned value, do not delete it locally:
@@ -127,6 +168,18 @@ The same rule applies to owned maps:
 ```
 
 The caller deletes the returned map.
+
+`group-by` returns an owned map with owned dynamic-array values. Clean up both
+levels:
+
+```clojure
+(let [groups (group-by :status users)]
+  (defer
+    (each [_ group groups]
+      (delete group))
+    (delete groups))
+  ...)
+```
 
 ## Do Not Hide Owned Intermediates
 

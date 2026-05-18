@@ -33,8 +33,23 @@ These helpers are already in scope and should remain small:
 (reduce f init xs)
 (map-indexed f xs)
 (keep f xs)
+(mapcat f xs)
 (concat xs ys)
 (reverse xs)
+(sort xs)
+(sort-by f xs)
+(sort-by :field xs)
+(reverse! xs)
+(sort! xs)
+(sort-by! f xs)
+(sort-by! :field xs)
+(map! f xs)
+(map-indexed! f xs)
+(filter! pred xs)
+(filter! :field xs)
+(remove! pred xs)
+(remove! :field xs)
+(keep! f xs)
 (split-at n xs)
 (partition n xs)
 (partition-all n xs)
@@ -43,6 +58,8 @@ These helpers are already in scope and should remain small:
 (zipmap keys vals)
 (index-by f xs)
 (index-by :field xs)
+(group-by f xs)
+(group-by :field xs)
 (frequencies xs)
 (range end)
 (range start end)
@@ -71,11 +88,24 @@ lowers to `len`. `rest`, `take`, `drop`, `take-while`, and `drop-while` return
 non-owning slice views.
 
 Builder helpers such as `map`, `filter`, `remove`, `map-indexed`, `keep`,
-`concat`, `reverse`, `range`, `repeat`, `repeatedly`, and `iterate` return
-owned dynamic arrays. `zipmap`, `index-by`, and `frequencies` return owned maps.
-`partition`, `partition-all`, and `partition-by` return owned dynamic arrays of
-borrowed slice chunks. `keep` is Odin-shaped: the callback returns `(value, ok)`,
-and only `ok` values are appended.
+`mapcat`, `concat`, `reverse`, `range`, `repeat`, `repeatedly`, and `iterate`
+return owned dynamic arrays. `zipmap`, `index-by`, and `frequencies` return
+owned maps. `group-by` returns an owned map whose values are owned dynamic
+arrays; delete each group before deleting the map. `partition`, `partition-all`,
+and `partition-by` return owned dynamic arrays of borrowed slice chunks. `keep`
+is Odin-shaped: the callback returns `(value, ok)`, and only `ok` values are
+appended. `mapcat` is also Odin-shaped: the callback returns a borrowed slice,
+and `mapcat` appends those values into one owned dynamic array.
+
+`sort` and `sort-by` copy before sorting. They do not mutate the input
+collection, and their result is owned.
+
+Bang helpers are explicitly mutating statement forms. `reverse!`, `sort!`,
+`sort-by!`, `map!`, and `map-indexed!` mutate the passed slice or dynamic array
+in place and do not return an owned value. `filter!`, `remove!`, and `keep!`
+resize the collection, so they require an owned dynamic array binding. `keep!`
+uses an Odin-shaped callback returning `(value, ok)` and writes kept values back
+into the same dynamic array; the value type must match the array element type.
 
 Keyword callbacks are field-access shorthand in the supported higher-order
 helpers:
@@ -83,7 +113,10 @@ helpers:
 ```clojure
 (map :name users)
 (index-by :id users)
+(group-by :status users)
 (partition-by :status users)
+(sort-by :age users)
+(sort-by! :age users)
 (filter :verified users)
 (remove :archived users)
 (->> users
@@ -94,25 +127,50 @@ helpers:
 This means "call the field accessor" for structs and struct-like values. It is
 not general keyword-as-function map lookup.
 
+## Allocation And Performance
+
+The default sequence helpers prefer clear ownership over minimum allocation. A
+chain of owned helpers allocates at each owned step:
+
+```clojure
+(->> users
+     (filter active?)
+     (map :name)
+     (sort))
+```
+
+That pipeline builds a filtered dynamic array, then a mapped dynamic array, then
+a sorted copy. In a `let` binding, OdinL emits cleanup for owned threaded
+intermediates, but the allocation and copy costs are still real.
+
+This is intentional for the non-bang helpers:
+
+- non-bang helpers do not mutate their inputs;
+- allocations are visible in the generated Odin;
+- ownership is either returned to the caller or bound where it can be deleted.
+
+For hot paths, prefer one of these shapes:
+
+- use slice-view helpers such as `take`, `drop`, `rest`, and `split-at` when a
+  borrowed view is enough;
+- use bang helpers such as `sort!`, `reverse!`, `map!`, `filter!`, `remove!`,
+  and `keep!` when mutating existing storage is the right Odin choice;
+- write an explicit `each` loop when one pass and no intermediate collection is
+  needed;
+- later, use transducer-style lowering once it exists to fuse pipelines into one
+  loop and one final allocation.
+
 ## Useful Additions After That
 
 These are valuable, but each needs one deliberate design choice before
 implementation:
 
 ```clojure
-(group-by f xs)
-(mapcat f xs)
-(sort xs)
-(sort-by f xs)
 (shuffle rng xs)
 ```
 
-The main questions are:
+The main question is:
 
-- Should grouping helpers require explicit allocator arguments, use
-  `context.allocator`, or follow the default dynamic-array helper convention?
-- Should `sort` copy before sorting, or should there be a separate in-place
-  helper?
 - `shuffle` should probably require an explicit random source rather than hide
   one.
 
@@ -222,10 +280,13 @@ Sequence helpers need an explicit ownership story:
 - Slice-view helpers such as `rest`, `take`, `drop`, `take-while`,
   `drop-while`, and `split-at` do not own data and must not be deleted.
 - Dynamic-array helpers such as `map`, `filter`, `remove`, `map-indexed`,
-  `keep`, `concat`, and `reverse` allocate and return owned dynamic arrays.
+  `keep`, `mapcat`, `concat`, `reverse`, `sort`, and `sort-by` allocate and
+  return owned dynamic arrays.
 - Chunking helpers `partition`, `partition-all`, and `partition-by` allocate the
   outer dynamic array, but their slice chunks borrow the input collection.
 - `zipmap`, `index-by`, and `frequencies` allocate and return owned maps.
+- `group-by` allocates an owned map and one owned dynamic array per key. Delete
+  the groups, then delete the map.
 - Owned helper results must be bound or returned. Nested owned results such as
   `(first (map f xs))` are rejected because there is no visible place to delete
   the intermediate dynamic array.
