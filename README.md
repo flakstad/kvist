@@ -120,6 +120,8 @@ Tooling notes for the post-compiler Emacs/eval work are in
 [docs/TOOLING.md](docs/TOOLING.md).
 The eager sequence helper direction is documented in
 [docs/SEQUENCES.md](docs/SEQUENCES.md).
+Ownership and deletion rules are documented in
+[docs/OWNERSHIP.md](docs/OWNERSHIP.md).
 Emacs support is in [emacs/odinl-mode.el](emacs/odinl-mode.el) and
 [emacs/odinl-eval.el](emacs/odinl-eval.el).
 
@@ -540,7 +542,10 @@ foreign_call :: proc(handle: Foreign_Handle) ---
 - `(map f xs)`, `(filter pred xs)`, `(reduce f init xs)`, `(take n xs)`,
   `(drop n xs)`, `(take-while pred xs)`, `(drop-while pred xs)`,
   `(find pred xs)`, `(some? pred xs)`, `(every? pred xs)`, `(first xs)`,
-  `(second xs)`, `(nth xs n)`, and `(rest xs)` core sequence helpers
+  `(second xs)`, `(last xs)`, `(nth xs n)`, `(rest xs)`, `(empty? xs)`,
+  `(remove pred xs)`, `(map-indexed f xs)`, `(keep f xs)`, `(concat xs ys)`,
+  `(reverse xs)`, `(split-at n xs)`, `(partition n xs)`,
+  `(partition-all n xs)`, and `(zipmap keys vals)` core sequence helpers
 - keywords can stand in for field callbacks in those helpers, e.g. `(map :name users)`
   and `(filter :verified users)`
 - `(:field value)`, `(get value key)`, `(-> value steps...)`, and `(->> value steps...)`

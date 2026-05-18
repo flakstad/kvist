@@ -26,7 +26,15 @@
 
 (proc main []
   (let [endpoint (Endpoint {:path "/health" :status .OK})]
-    (fmt.println default-port)
-    (fmt.println (:path endpoint))
-    (fmt.println (status-code (:status endpoint)))
     (fmt.println (status-label (:status endpoint)))))
+
+(comment
+  default-port
+  ;; => 8080
+
+  (status-code .OK)
+  ;; => 200
+
+  (status-label .Not-Found)
+  ;; => not found
+)

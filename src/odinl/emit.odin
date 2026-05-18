@@ -15,8 +15,18 @@ Emitter_Features :: struct {
     core_find:        bool,
     core_some:        bool,
     core_every:       bool,
+    core_remove:      bool,
+    core_map_indexed: bool,
+    core_keep:        bool,
+    core_concat:      bool,
+    core_reverse:     bool,
+    core_split_at:    bool,
+    core_partition:   bool,
+    core_partition_all: bool,
+    core_zipmap:      bool,
     map_fields:       [dynamic]string,
     filter_fields:    [dynamic]string,
+    remove_fields:    [dynamic]string,
     take_while_fields: [dynamic]string,
     drop_while_fields: [dynamic]string,
     find_fields:      [dynamic]string,
@@ -30,9 +40,18 @@ Emitter :: struct {
     unions:                    [dynamic]Union_Decl,
     features:                  ^Emitter_Features,
     line:                      int,
+    temp_counter:              int,
     attach_next_decl:          bool,
     pending_prefix_directives: [dynamic]string,
     pending_suffix_directives: [dynamic]string,
+}
+
+Thread_Result_Kind :: enum {
+    Unknown,
+    Owned,
+    Owned_Borrowing,
+    View,
+    Scalar,
 }
 
 mark_dynamic_literals :: proc(e: ^Emitter) {
@@ -101,6 +120,60 @@ mark_core_every :: proc(e: ^Emitter) {
     }
 }
 
+mark_core_remove :: proc(e: ^Emitter) {
+    if e.features != nil {
+        e.features.core_remove = true
+    }
+}
+
+mark_core_map_indexed :: proc(e: ^Emitter) {
+    if e.features != nil {
+        e.features.core_map_indexed = true
+    }
+}
+
+mark_core_keep :: proc(e: ^Emitter) {
+    if e.features != nil {
+        e.features.core_keep = true
+    }
+}
+
+mark_core_concat :: proc(e: ^Emitter) {
+    if e.features != nil {
+        e.features.core_concat = true
+    }
+}
+
+mark_core_reverse :: proc(e: ^Emitter) {
+    if e.features != nil {
+        e.features.core_reverse = true
+    }
+}
+
+mark_core_split_at :: proc(e: ^Emitter) {
+    if e.features != nil {
+        e.features.core_split_at = true
+    }
+}
+
+mark_core_partition :: proc(e: ^Emitter) {
+    if e.features != nil {
+        e.features.core_partition = true
+    }
+}
+
+mark_core_partition_all :: proc(e: ^Emitter) {
+    if e.features != nil {
+        e.features.core_partition_all = true
+    }
+}
+
+mark_core_zipmap :: proc(e: ^Emitter) {
+    if e.features != nil {
+        e.features.core_zipmap = true
+    }
+}
+
 append_unique_string :: proc(items: ^[dynamic]string, value: string) {
     for item in items^ {
         if item == value {
@@ -119,6 +192,12 @@ mark_core_map_field :: proc(e: ^Emitter, field: string) {
 mark_core_filter_field :: proc(e: ^Emitter, field: string) {
     if e.features != nil {
         append_unique_string(&e.features.filter_fields, field)
+    }
+}
+
+mark_core_remove_field :: proc(e: ^Emitter, field: string) {
+    if e.features != nil {
+        append_unique_string(&e.features.remove_fields, field)
     }
 }
 
@@ -470,7 +549,7 @@ emit_thread_step :: proc(e: ^Emitter, current: string, step: CST_Form, thread_la
         if head.kind != .Symbol {
             return "", Compile_Error{message = "thread list step expects symbol or keyword head", span = head.span}, false
         }
-        if thread_last && (head.text == "map" || head.text == "filter") {
+        if thread_last && (head.text == "map" || head.text == "filter" || head.text == "remove") {
             if len(step.items) != 2 {
                 return "", Compile_Error{message = fmt.tprintf("%s thread step expects one function argument", head.text), span = step.span}, false
             }
@@ -478,7 +557,73 @@ emit_thread_step :: proc(e: ^Emitter, current: string, step: CST_Form, thread_la
             if head.text == "map" {
                 return emit_map_callback_call(e, step.items[1], collection)
             }
+            if head.text == "remove" {
+                return emit_predicate_callback_call(e, "odinl_remove", step.items[1], collection, mark_core_remove, mark_core_remove_field)
+            }
             return emit_predicate_callback_call(e, "odinl_filter", step.items[1], collection, mark_core_filter, mark_core_filter_field)
+        }
+        if thread_last && (head.text == "map-indexed" || head.text == "keep") {
+            if len(step.items) != 2 {
+                return "", Compile_Error{message = fmt.tprintf("%s thread step expects one function argument", head.text), span = step.span}, false
+            }
+            f, err_f, ok_f := emit_expr(e, step.items[1])
+            if !ok_f {
+                return "", err_f, false
+            }
+            if head.text == "map-indexed" {
+                mark_core_map_indexed(e)
+                return emit_call_text("odinl_map_indexed", []string{f, slice_all_expr_text(current)}), {}, true
+            }
+            mark_core_keep(e)
+            return emit_call_text("odinl_keep", []string{f, slice_all_expr_text(current)}), {}, true
+        }
+        if thread_last && head.text == "concat" {
+            if len(step.items) != 2 {
+                return "", Compile_Error{message = "concat thread step expects one collection argument", span = step.span}, false
+            }
+            rhs, err_rhs, ok_rhs := emit_expr(e, step.items[1])
+            if !ok_rhs {
+                return "", err_rhs, false
+            }
+            mark_core_concat(e)
+            return emit_call_text("odinl_concat", []string{slice_all_expr_text(current), slice_all_expr_text(rhs)}), {}, true
+        }
+        if thread_last && head.text == "reverse" {
+            if len(step.items) != 1 {
+                return "", Compile_Error{message = "reverse thread step expects no arguments", span = step.span}, false
+            }
+            mark_core_reverse(e)
+            return emit_call_text("odinl_reverse", []string{slice_all_expr_text(current)}), {}, true
+        }
+        if thread_last && (head.text == "split-at" || head.text == "partition" || head.text == "partition-all") {
+            if len(step.items) != 2 {
+                return "", Compile_Error{message = fmt.tprintf("%s thread step expects one count argument", head.text), span = step.span}, false
+            }
+            count, err_count, ok_count := emit_expr(e, step.items[1])
+            if !ok_count {
+                return "", err_count, false
+            }
+            if head.text == "split-at" {
+                mark_core_split_at(e)
+                return emit_call_text("odinl_split_at", []string{count, slice_all_expr_text(current)}), {}, true
+            }
+            if head.text == "partition" {
+                mark_core_partition(e)
+                return emit_call_text("odinl_partition", []string{count, slice_all_expr_text(current)}), {}, true
+            }
+            mark_core_partition_all(e)
+            return emit_call_text("odinl_partition_all", []string{count, slice_all_expr_text(current)}), {}, true
+        }
+        if thread_last && head.text == "zipmap" {
+            if len(step.items) != 2 {
+                return "", Compile_Error{message = "zipmap thread step expects one key collection argument", span = step.span}, false
+            }
+            keys, err_keys, ok_keys := emit_expr(e, step.items[1])
+            if !ok_keys {
+                return "", err_keys, false
+            }
+            mark_core_zipmap(e)
+            return emit_call_text("odinl_zipmap", []string{slice_all_expr_text(keys), slice_all_expr_text(current)}), {}, true
         }
         if thread_last && head.text == "reduce" {
             if len(step.items) != 3 {
@@ -550,7 +695,7 @@ emit_thread_step :: proc(e: ^Emitter, current: string, step: CST_Form, thread_la
             }
             return fmt.tprintf("(%s)[%s:%s]", current, start, end), {}, true
         }
-        if thread_last && (head.text == "first" || head.text == "second" || head.text == "rest") {
+        if thread_last && (head.text == "first" || head.text == "second" || head.text == "last" || head.text == "rest" || head.text == "empty?") {
             if len(step.items) != 1 {
                 return "", Compile_Error{message = fmt.tprintf("%s thread step expects no arguments", head.text), span = step.span}, false
             }
@@ -560,6 +705,12 @@ emit_thread_step :: proc(e: ^Emitter, current: string, step: CST_Form, thread_la
             }
             if head.text == "second" {
                 return fmt.tprintf("(%s)[1]", collection), {}, true
+            }
+            if head.text == "last" {
+                return fmt.tprintf("(%s)[len(%s)-1]", collection, collection), {}, true
+            }
+            if head.text == "empty?" {
+                return fmt.tprintf("len(%s) == 0", collection), {}, true
             }
             return fmt.tprintf("(%s)[1:]", collection), {}, true
         }
@@ -592,6 +743,202 @@ emit_thread_step :: proc(e: ^Emitter, current: string, step: CST_Form, thread_la
         return "", Compile_Error{message = "unsupported thread step", span = step.span}, false
     }
     return "", Compile_Error{message = "unsupported thread step", span = step.span}, false
+}
+
+thread_temp_name :: proc(e: ^Emitter) -> string {
+    e.temp_counter += 1
+    return fmt.tprintf("odinl_thread_%d", e.temp_counter)
+}
+
+thread_step_result_kind :: proc(step: CST_Form, thread_last: bool) -> Thread_Result_Kind {
+    #partial switch step.kind {
+    case .Keyword:
+        return .Scalar
+    case .Symbol:
+        if thread_last && step.text == "slice" {
+            return .View
+        }
+        return .Unknown
+    case .List:
+        if len(step.items) == 0 {
+            return .Unknown
+        }
+        head := step.items[0]
+        if head.kind == .Keyword {
+            return .Scalar
+        }
+        if head.kind != .Symbol {
+            return .Unknown
+        }
+        if thread_last && (head.text == "map" || head.text == "filter" ||
+                           head.text == "remove" || head.text == "map-indexed" ||
+                           head.text == "keep" || head.text == "concat" ||
+                           head.text == "reverse" || head.text == "zipmap") {
+            return .Owned
+        }
+        if thread_last && (head.text == "partition" || head.text == "partition-all") {
+            return .Owned_Borrowing
+        }
+        if thread_last && (head.text == "take" || head.text == "drop" ||
+                           head.text == "take-while" || head.text == "drop-while" ||
+                           head.text == "slice" || head.text == "rest" ||
+                           head.text == "split-at") {
+            return .View
+        }
+        if thread_last && (head.text == "reduce" || head.text == "find" ||
+                           head.text == "some?" || head.text == "every?" ||
+                           head.text == "first" || head.text == "second" ||
+                           head.text == "last" || head.text == "nth" ||
+                           head.text == "empty?") {
+            return .Scalar
+        }
+    }
+    return .Unknown
+}
+
+is_thread_form :: proc(form: CST_Form, thread_last: bool) -> bool {
+    if form.kind != .List || len(form.items) == 0 || form.items[0].kind != .Symbol {
+        return false
+    }
+    if thread_last {
+        return form.items[0].text == "->>"
+    }
+    return form.items[0].text == "->"
+}
+
+thread_form_has_allocating_intermediate :: proc(form: CST_Form, thread_last: bool) -> bool {
+    if !is_thread_form(form, thread_last) || len(form.items) < 3 {
+        return false
+    }
+    for step, idx in form.items[2:] {
+        last_step := idx == len(form.items[2:])-1
+        kind := thread_step_result_kind(step, thread_last)
+        if !last_step && (kind == .Owned || kind == .Owned_Borrowing) {
+            return true
+        }
+    }
+    return false
+}
+
+thread_form_final_kind :: proc(form: CST_Form, thread_last: bool) -> Thread_Result_Kind {
+    if !is_thread_form(form, thread_last) || len(form.items) < 3 {
+        return .Unknown
+    }
+    return thread_step_result_kind(form.items[len(form.items)-1], thread_last)
+}
+
+thread_form_final_view_borrows_owned_intermediate :: proc(form: CST_Form, thread_last: bool) -> bool {
+    if !is_thread_form(form, thread_last) || len(form.items) < 3 {
+        return false
+    }
+    final_kind := thread_form_final_kind(form, thread_last)
+    if final_kind != .View && final_kind != .Owned_Borrowing {
+        return false
+    }
+    for step in form.items[2:len(form.items)-1] {
+        kind := thread_step_result_kind(step, thread_last)
+        if kind == .Owned || kind == .Owned_Borrowing {
+            return true
+        }
+    }
+    return false
+}
+
+thread_return_error :: proc(form: CST_Form) -> (Compile_Error, bool) {
+    if thread_form_has_allocating_intermediate(form, true) || thread_form_has_allocating_intermediate(form, false) {
+        return Compile_Error{
+            message = "threaded return has an allocating intermediate; bind the pipeline with let so OdinL can emit cleanup",
+            span = form.span,
+        }, true
+    }
+    return {}, false
+}
+
+returned_binding_name :: proc(form: CST_Form) -> (string, bool) {
+    if form.kind == .Symbol {
+        return map_name(form.text), true
+    }
+    if form.kind == .List && len(form.items) == 2 &&
+       form.items[0].kind == .Symbol && form.items[0].text == "return" &&
+       form.items[1].kind == .Symbol {
+        return map_name(form.items[1].text), true
+    }
+    return "", false
+}
+
+let_return_error :: proc(bindings: []Binding, body: []CST_Form) -> (Compile_Error, bool) {
+    if len(body) == 0 {
+        return {}, false
+    }
+    returned_name, ok_name := returned_binding_name(body[len(body)-1])
+    if !ok_name {
+        return {}, false
+    }
+    for binding in bindings {
+        if binding.name != returned_name {
+            continue
+        }
+        if thread_form_final_view_borrows_owned_intermediate(binding.value, true) ||
+           thread_form_final_view_borrows_owned_intermediate(binding.value, false) {
+            return Compile_Error{
+                message = "cannot return a threaded slice view that borrows from an owned intermediate; return an owned result or keep the pipeline local",
+                span = binding.value.span,
+            }, true
+        }
+    }
+    return {}, false
+}
+
+emit_binding_assignment :: proc(e: ^Emitter, binding: Binding, value: string) {
+    if binding.is_destructure {
+        line_builder := strings.builder_make()
+        defer strings.builder_destroy(&line_builder)
+        for name, idx in binding.pattern {
+            if idx > 0 {
+                strings.write_string(&line_builder, ", ")
+            }
+            strings.write_string(&line_builder, name)
+        }
+        fmt.sbprintf(&line_builder, " := %s", value)
+        emit_prefixed_expr(e, "", strings.clone(strings.to_string(line_builder)))
+    } else if binding.is_typed {
+        emit_prefixed_expr(e, fmt.tprintf("%s: %s = ", binding.name, binding.ty), value)
+    } else {
+        emit_prefixed_expr(e, fmt.tprintf("%s := ", binding.name), value)
+    }
+}
+
+emit_thread_binding_assignment :: proc(e: ^Emitter, binding: Binding, thread_last: bool) -> (Compile_Error, bool) {
+    form := binding.value
+    if len(form.items) < 3 {
+        return Compile_Error{message = fmt.tprintf("%s expects an initial expression and at least one step", form.items[0].text), span = form.span}, false
+    }
+
+    current, err_current, ok_current := emit_expr(e, form.items[1])
+    if !ok_current {
+        return err_current, false
+    }
+
+    for step, idx in form.items[2:] {
+        next, err_step, ok_step := emit_thread_step(e, current, step, thread_last)
+        if !ok_step {
+            return err_step, false
+        }
+
+        kind := thread_step_result_kind(step, thread_last)
+        last_step := idx == len(form.items[2:])-1
+        if (kind == .Owned || kind == .Owned_Borrowing) && !last_step {
+            temp := thread_temp_name(e)
+            emit_prefixed_expr(e, fmt.tprintf("%s := ", temp), next)
+            emit_line(e, fmt.tprintf("defer delete(%s)", temp))
+            current = temp
+        } else {
+            current = next
+        }
+    }
+
+    emit_binding_assignment(e, binding, current)
+    return {}, true
 }
 
 emit_thread_expr :: proc(e: ^Emitter, form: CST_Form, thread_last: bool = false) -> (string, Compile_Error, bool) {
@@ -979,7 +1326,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         return fmt.tprintf("(%s) == nil", target), {}, true
     }
 
-    if head.text == "map" || head.text == "filter" {
+    if head.text == "map" || head.text == "filter" || head.text == "remove" {
         if len(form.items) != 3 {
             return "", Compile_Error{message = fmt.tprintf("%s expects function and collection", head.text), span = form.span}, false
         }
@@ -991,7 +1338,100 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         if head.text == "map" {
             return emit_map_callback_call(e, form.items[1], collection)
         }
+        if head.text == "remove" {
+            return emit_predicate_callback_call(e, "odinl_remove", form.items[1], collection, mark_core_remove, mark_core_remove_field)
+        }
         return emit_predicate_callback_call(e, "odinl_filter", form.items[1], collection, mark_core_filter, mark_core_filter_field)
+    }
+
+    if head.text == "map-indexed" || head.text == "keep" {
+        if len(form.items) != 3 {
+            return "", Compile_Error{message = fmt.tprintf("%s expects function and collection", head.text), span = form.span}, false
+        }
+        f, err_f, ok_f := emit_expr(e, form.items[1])
+        if !ok_f {
+            return "", err_f, false
+        }
+        collection, err_collection, ok_collection := emit_expr(e, form.items[2])
+        if !ok_collection {
+            return "", err_collection, false
+        }
+        collection = slice_all_expr_text(collection)
+        if head.text == "map-indexed" {
+            mark_core_map_indexed(e)
+            return emit_call_text("odinl_map_indexed", []string{f, collection}), {}, true
+        }
+        mark_core_keep(e)
+        return emit_call_text("odinl_keep", []string{f, collection}), {}, true
+    }
+
+    if head.text == "concat" {
+        if len(form.items) != 3 {
+            return "", Compile_Error{message = "concat expects two collections", span = form.span}, false
+        }
+        lhs, err_lhs, ok_lhs := emit_expr(e, form.items[1])
+        if !ok_lhs {
+            return "", err_lhs, false
+        }
+        rhs, err_rhs, ok_rhs := emit_expr(e, form.items[2])
+        if !ok_rhs {
+            return "", err_rhs, false
+        }
+        mark_core_concat(e)
+        return emit_call_text("odinl_concat", []string{slice_all_expr_text(lhs), slice_all_expr_text(rhs)}), {}, true
+    }
+
+    if head.text == "reverse" {
+        if len(form.items) != 2 {
+            return "", Compile_Error{message = "reverse expects collection", span = form.span}, false
+        }
+        collection, err_collection, ok_collection := emit_expr(e, form.items[1])
+        if !ok_collection {
+            return "", err_collection, false
+        }
+        mark_core_reverse(e)
+        return emit_call_text("odinl_reverse", []string{slice_all_expr_text(collection)}), {}, true
+    }
+
+    if head.text == "split-at" || head.text == "partition" || head.text == "partition-all" {
+        if len(form.items) != 3 {
+            return "", Compile_Error{message = fmt.tprintf("%s expects count and collection", head.text), span = form.span}, false
+        }
+        count, err_count, ok_count := emit_expr(e, form.items[1])
+        if !ok_count {
+            return "", err_count, false
+        }
+        collection, err_collection, ok_collection := emit_expr(e, form.items[2])
+        if !ok_collection {
+            return "", err_collection, false
+        }
+        collection = slice_all_expr_text(collection)
+        if head.text == "split-at" {
+            mark_core_split_at(e)
+            return emit_call_text("odinl_split_at", []string{count, collection}), {}, true
+        }
+        if head.text == "partition" {
+            mark_core_partition(e)
+            return emit_call_text("odinl_partition", []string{count, collection}), {}, true
+        }
+        mark_core_partition_all(e)
+        return emit_call_text("odinl_partition_all", []string{count, collection}), {}, true
+    }
+
+    if head.text == "zipmap" {
+        if len(form.items) != 3 {
+            return "", Compile_Error{message = "zipmap expects key and value collections", span = form.span}, false
+        }
+        keys, err_keys, ok_keys := emit_expr(e, form.items[1])
+        if !ok_keys {
+            return "", err_keys, false
+        }
+        values, err_values, ok_values := emit_expr(e, form.items[2])
+        if !ok_values {
+            return "", err_values, false
+        }
+        mark_core_zipmap(e)
+        return emit_call_text("odinl_zipmap", []string{slice_all_expr_text(keys), slice_all_expr_text(values)}), {}, true
     }
 
     if head.text == "reduce" {
@@ -1060,7 +1500,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         return emit_predicate_callback_call(e, "odinl_every_p", form.items[1], collection, mark_core_every, mark_core_every_field)
     }
 
-    if head.text == "first" || head.text == "second" || head.text == "rest" {
+    if head.text == "first" || head.text == "second" || head.text == "last" || head.text == "rest" || head.text == "empty?" {
         if len(form.items) != 2 {
             return "", Compile_Error{message = fmt.tprintf("%s expects collection", head.text), span = form.span}, false
         }
@@ -1074,6 +1514,12 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         }
         if head.text == "second" {
             return fmt.tprintf("(%s)[1]", collection), {}, true
+        }
+        if head.text == "last" {
+            return fmt.tprintf("(%s)[len(%s)-1]", collection, collection), {}, true
+        }
+        if head.text == "empty?" {
+            return fmt.tprintf("len(%s) == 0", collection), {}, true
         }
         return fmt.tprintf("(%s)[1:]", collection), {}, true
     }
@@ -1617,6 +2063,13 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
         return Compile_Error{message = "unsupported statement head", span = head.span}, false
     }
 
+    if last_in_proc && returns.kind == .Single {
+        err_thread_return, bad_thread_return := thread_return_error(form)
+        if bad_thread_return {
+            return err_thread_return, false
+        }
+    }
+
     switch head.text {
     case "comment":
         return {}, true
@@ -1642,36 +2095,39 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
         if !ok_bind {
             return err_bind, false
         }
+        body: [dynamic]CST_Form
+        for item in form.items[2:] {
+            append(&body, item)
+        }
+        if last_in_proc && returns.kind == .Single {
+            err_let_return, bad_let_return := let_return_error(bindings[:], body[:])
+            if bad_let_return {
+                return err_let_return, false
+            }
+        }
         scoped := !last_in_proc
         if scoped {
             emit_line(e, "{")
             e.indent += 1
         }
         for binding in bindings {
-            value, err_value, ok_value := emit_expr(e, binding.value)
-            if !ok_value {
-                return err_value, false
-            }
-            if binding.is_destructure {
-                line_builder := strings.builder_make()
-                defer strings.builder_destroy(&line_builder)
-                for name, idx in binding.pattern {
-                    if idx > 0 {
-                        strings.write_string(&line_builder, ", ")
-                    }
-                    strings.write_string(&line_builder, name)
+            if is_thread_form(binding.value, true) {
+                err_thread, ok_thread := emit_thread_binding_assignment(e, binding, true)
+                if !ok_thread {
+                    return err_thread, false
                 }
-                fmt.sbprintf(&line_builder, " := %s", value)
-                emit_prefixed_expr(e, "", strings.clone(strings.to_string(line_builder)))
-            } else if binding.is_typed {
-                emit_prefixed_expr(e, fmt.tprintf("%s: %s = ", binding.name, binding.ty), value)
+            } else if is_thread_form(binding.value, false) {
+                err_thread, ok_thread := emit_thread_binding_assignment(e, binding, false)
+                if !ok_thread {
+                    return err_thread, false
+                }
             } else {
-                emit_prefixed_expr(e, fmt.tprintf("%s := ", binding.name), value)
+                value, err_value, ok_value := emit_expr(e, binding.value)
+                if !ok_value {
+                    return err_value, false
+                }
+                emit_binding_assignment(e, binding, value)
             }
-        }
-        body: [dynamic]CST_Form
-        for item in form.items[2:] {
-            append(&body, item)
         }
         err_body, ok_body := emit_body_forms(e, body[:], returns_when_final(last_in_proc, returns))
         if !ok_body {
@@ -1733,6 +2189,10 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
             return {}, true
         }
         if len(form.items) == 2 {
+            err_thread_return, bad_thread_return := thread_return_error(form.items[1])
+            if bad_thread_return {
+                return err_thread_return, false
+            }
             value, err_value, ok_value := emit_expr(e, form.items[1])
             if !ok_value {
                 return err_value, false
@@ -2117,6 +2577,183 @@ emit_core_filter_field_helper :: proc(e: ^Emitter, field: string) {
     emit_line(e, "}")
 }
 
+emit_core_remove_helper :: proc(e: ^Emitter) {
+    emit_line(e, "odinl_remove :: proc(pred: proc(x: $T) -> bool, xs: []T) -> [dynamic]T {")
+    e.indent += 1
+    emit_line(e, "out := make([dynamic]T)")
+    emit_line(e, "for x in xs {")
+    e.indent += 1
+    emit_line(e, "if !pred(x) {")
+    e.indent += 1
+    emit_line(e, "append(&out, x)")
+    e.indent -= 1
+    emit_line(e, "}")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "return out")
+    e.indent -= 1
+    emit_line(e, "}")
+}
+
+emit_core_remove_field_helper :: proc(e: ^Emitter, field: string) {
+    emit_line(e, fmt.tprintf("odinl_remove_field_%s :: proc(xs: []$T) -> [dynamic]T %s", field, "{"))
+    e.indent += 1
+    emit_line(e, "out := make([dynamic]T)")
+    emit_line(e, "for x in xs {")
+    e.indent += 1
+    emit_line(e, fmt.tprintf("if !x.%s %s", field, "{"))
+    e.indent += 1
+    emit_line(e, "append(&out, x)")
+    e.indent -= 1
+    emit_line(e, "}")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "return out")
+    e.indent -= 1
+    emit_line(e, "}")
+}
+
+emit_core_map_indexed_helper :: proc(e: ^Emitter) {
+    emit_line(e, "odinl_map_indexed :: proc(f: proc(i: int, x: $T) -> $U, xs: []T) -> [dynamic]U {")
+    e.indent += 1
+    emit_line(e, "out := make([dynamic]U)")
+    emit_line(e, "for x, i in xs {")
+    e.indent += 1
+    emit_line(e, "append(&out, f(i, x))")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "return out")
+    e.indent -= 1
+    emit_line(e, "}")
+}
+
+emit_core_keep_helper :: proc(e: ^Emitter) {
+    emit_line(e, "odinl_keep :: proc(f: proc(x: $T) -> ($U, bool), xs: []T) -> [dynamic]U {")
+    e.indent += 1
+    emit_line(e, "out := make([dynamic]U)")
+    emit_line(e, "for x in xs {")
+    e.indent += 1
+    emit_line(e, "value, ok := f(x)")
+    emit_line(e, "if ok {")
+    e.indent += 1
+    emit_line(e, "append(&out, value)")
+    e.indent -= 1
+    emit_line(e, "}")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "return out")
+    e.indent -= 1
+    emit_line(e, "}")
+}
+
+emit_core_concat_helper :: proc(e: ^Emitter) {
+    emit_line(e, "odinl_concat :: proc(xs, ys: []$T) -> [dynamic]T {")
+    e.indent += 1
+    emit_line(e, "out := make([dynamic]T, 0, len(xs)+len(ys))")
+    emit_line(e, "append(&out, ..xs)")
+    emit_line(e, "append(&out, ..ys)")
+    emit_line(e, "return out")
+    e.indent -= 1
+    emit_line(e, "}")
+}
+
+emit_core_reverse_helper :: proc(e: ^Emitter) {
+    emit_line(e, "odinl_reverse :: proc(xs: []$T) -> [dynamic]T {")
+    e.indent += 1
+    emit_line(e, "out := make([dynamic]T, 0, len(xs))")
+    emit_line(e, "for i := len(xs)-1; i >= 0; i -= 1 {")
+    e.indent += 1
+    emit_line(e, "append(&out, xs[i])")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "return out")
+    e.indent -= 1
+    emit_line(e, "}")
+}
+
+emit_core_split_at_helper :: proc(e: ^Emitter) {
+    emit_line(e, "odinl_split_at :: proc(n: int, xs: []$T) -> (left: []T, right: []T) {")
+    e.indent += 1
+    emit_line(e, "mid := n")
+    emit_line(e, "if mid < 0 {")
+    e.indent += 1
+    emit_line(e, "mid = 0")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "if mid > len(xs) {")
+    e.indent += 1
+    emit_line(e, "mid = len(xs)")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "return xs[:mid], xs[mid:]")
+    e.indent -= 1
+    emit_line(e, "}")
+}
+
+emit_core_partition_helper :: proc(e: ^Emitter) {
+    emit_line(e, "odinl_partition :: proc(n: int, xs: []$T) -> [dynamic][]T {")
+    e.indent += 1
+    emit_line(e, "out := make([dynamic][]T)")
+    emit_line(e, "if n <= 0 {")
+    e.indent += 1
+    emit_line(e, "return out")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "for start := 0; start+n <= len(xs); start += n {")
+    e.indent += 1
+    emit_line(e, "append(&out, xs[start:start+n])")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "return out")
+    e.indent -= 1
+    emit_line(e, "}")
+}
+
+emit_core_partition_all_helper :: proc(e: ^Emitter) {
+    emit_line(e, "odinl_partition_all :: proc(n: int, xs: []$T) -> [dynamic][]T {")
+    e.indent += 1
+    emit_line(e, "out := make([dynamic][]T)")
+    emit_line(e, "if n <= 0 {")
+    e.indent += 1
+    emit_line(e, "return out")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "for start := 0; start < len(xs); start += n {")
+    e.indent += 1
+    emit_line(e, "end := start+n")
+    emit_line(e, "if end > len(xs) {")
+    e.indent += 1
+    emit_line(e, "end = len(xs)")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "append(&out, xs[start:end])")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "return out")
+    e.indent -= 1
+    emit_line(e, "}")
+}
+
+emit_core_zipmap_helper :: proc(e: ^Emitter) {
+    emit_line(e, "odinl_zipmap :: proc(keys: []$K, values: []$V) -> map[K]V {")
+    e.indent += 1
+    emit_line(e, "out := make(map[K]V)")
+    emit_line(e, "limit := len(keys)")
+    emit_line(e, "if limit > len(values) {")
+    e.indent += 1
+    emit_line(e, "limit = len(values)")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "for i in 0..<limit {")
+    e.indent += 1
+    emit_line(e, "out[keys[i]] = values[i]")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "return out")
+    e.indent -= 1
+    emit_line(e, "}")
+}
+
 emit_core_reduce_helper :: proc(e: ^Emitter) {
     emit_line(e, "odinl_reduce :: proc(f: proc(acc: $U, x: $T) -> U, init: U, xs: []T) -> U {")
     e.indent += 1
@@ -2344,7 +2981,12 @@ core_helpers_needed :: proc(features: Emitter_Features) -> bool {
            features.core_take || features.core_drop ||
            features.core_take_while || features.core_drop_while ||
            features.core_find || features.core_some || features.core_every ||
+           features.core_remove || features.core_map_indexed || features.core_keep ||
+           features.core_concat || features.core_reverse ||
+           features.core_split_at || features.core_partition ||
+           features.core_partition_all || features.core_zipmap ||
            len(features.map_fields) > 0 || len(features.filter_fields) > 0 ||
+           len(features.remove_fields) > 0 ||
            len(features.take_while_fields) > 0 || len(features.drop_while_fields) > 0 ||
            len(features.find_fields) > 0 || len(features.some_fields) > 0 ||
            len(features.every_fields) > 0
@@ -2379,6 +3021,46 @@ emit_core_helpers :: proc(e: ^Emitter, features: Emitter_Features) {
     for field in features.filter_fields {
         emit_core_helper_separator(e, &emitted)
         emit_core_filter_field_helper(e, field)
+    }
+    if features.core_remove {
+        emit_core_helper_separator(e, &emitted)
+        emit_core_remove_helper(e)
+    }
+    for field in features.remove_fields {
+        emit_core_helper_separator(e, &emitted)
+        emit_core_remove_field_helper(e, field)
+    }
+    if features.core_map_indexed {
+        emit_core_helper_separator(e, &emitted)
+        emit_core_map_indexed_helper(e)
+    }
+    if features.core_keep {
+        emit_core_helper_separator(e, &emitted)
+        emit_core_keep_helper(e)
+    }
+    if features.core_concat {
+        emit_core_helper_separator(e, &emitted)
+        emit_core_concat_helper(e)
+    }
+    if features.core_reverse {
+        emit_core_helper_separator(e, &emitted)
+        emit_core_reverse_helper(e)
+    }
+    if features.core_split_at {
+        emit_core_helper_separator(e, &emitted)
+        emit_core_split_at_helper(e)
+    }
+    if features.core_partition {
+        emit_core_helper_separator(e, &emitted)
+        emit_core_partition_helper(e)
+    }
+    if features.core_partition_all {
+        emit_core_helper_separator(e, &emitted)
+        emit_core_partition_all_helper(e)
+    }
+    if features.core_zipmap {
+        emit_core_helper_separator(e, &emitted)
+        emit_core_zipmap_helper(e)
     }
     if features.core_reduce {
         emit_core_helper_separator(e, &emitted)

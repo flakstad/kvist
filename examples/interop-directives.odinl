@@ -14,3 +14,11 @@
   (let [[value ok] (query-answer)]
     (when ok
       (fmt.println value))))
+
+(comment
+  (hidden-answer)
+  ;; => 42
+
+  (query-answer)
+  ;; => 42
+)

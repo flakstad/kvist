@@ -11,13 +11,38 @@
 (proc add [acc: int, x: int] -> int
   (+ acc x))
 
-(proc main []
+(proc mapped-first [] -> int
+  (let [xs (new []int [1 2 3 4])
+        mapped (map inc xs)]
+    (defer (delete mapped))
+    (first mapped)))
+
+(proc even-count [] -> int
   (let [xs (new []int [1 2 3 4])
         mapped (map inc xs)
-        evens (filter even? mapped)
-        total (reduce add 0 evens)]
+        evens (filter even? mapped)]
     (defer (delete mapped))
     (defer (delete evens))
-    (fmt.println (get mapped 0))
-    (fmt.println (len evens))
-    (fmt.println total)))
+    (len evens)))
+
+(proc threaded-total [] -> int
+  (let [xs (new []int [1 2 3 4])
+        total (->> xs
+                   (map inc)
+                   (filter even?)
+                   (reduce add 0))]
+    total))
+
+(proc main []
+  (fmt.println (threaded-total)))
+
+(comment
+  (mapped-first)
+  ;; => 2
+
+  (even-count)
+  ;; => 2
+
+  (threaded-total)
+  ;; => 6
+)

@@ -29,7 +29,16 @@ These helpers are already in scope and should remain small:
 ```clojure
 (map f xs)
 (filter pred xs)
+(remove pred xs)
 (reduce f init xs)
+(map-indexed f xs)
+(keep f xs)
+(concat xs ys)
+(reverse xs)
+(split-at n xs)
+(partition n xs)
+(partition-all n xs)
+(zipmap keys vals)
 (take n xs)
 (drop n xs)
 (take-while pred xs)
@@ -39,13 +48,22 @@ These helpers are already in scope and should remain small:
 (every? pred xs)
 (first xs)
 (second xs)
+(last xs)
 (nth xs n)
 (rest xs)
+(empty? xs)
 ```
 
 The access and trimming helpers use the direct Odin representation where
-possible. `first`, `second`, and `nth` lower to indexing. `rest`, `take`,
-`drop`, `take-while`, and `drop-while` return non-owning slice views.
+possible. `first`, `second`, `last`, and `nth` lower to indexing. `empty?`
+lowers to `len`. `rest`, `take`, `drop`, `take-while`, and `drop-while` return
+non-owning slice views.
+
+Builder helpers such as `map`, `filter`, `remove`, `map-indexed`, `keep`,
+`concat`, and `reverse` return owned dynamic arrays. `zipmap` returns an owned
+map. `partition` and `partition-all` return owned dynamic arrays of borrowed
+slice chunks. `keep` is Odin-shaped: the callback returns `(value, ok)`, and
+only `ok` values are appended.
 
 Keyword callbacks are field-access shorthand in the supported higher-order
 helpers:
@@ -53,6 +71,7 @@ helpers:
 ```clojure
 (map :name users)
 (filter :verified users)
+(remove :archived users)
 (->> users
      (filter :verified)
      (map :name))
@@ -66,22 +85,10 @@ not general keyword-as-function map lookup.
 These fit the current eager model well:
 
 ```clojure
-(last xs)
-(empty? xs)
-(remove pred xs)
-(map-indexed f xs)
-(keep f xs)
-(split-at n xs)
-(concat xs ys)
-(reverse xs)
 ```
 
 Expected lowering:
 
-- `last`, `empty?`, and simple access helpers lower to indexing, slicing, and
-  `len`.
-- `remove`, `map-indexed`, `keep`, `concat`, and `reverse` lower to generic
-  helpers that allocate dynamic arrays.
 - `split-at` should return two slices when the input is sliceable, because that
   is the direct Odin representation and does not allocate.
 
@@ -91,10 +98,7 @@ These are valuable, but each needs one deliberate design choice before
 implementation:
 
 ```clojure
-(partition n xs)
-(partition-all n xs)
 (partition-by f xs)
-(zipmap keys vals)
 (frequencies xs)
 (group-by f xs)
 (index-by f xs)
@@ -106,7 +110,6 @@ implementation:
 
 The main questions are:
 
-- Should chunking helpers return slice views or allocated nested arrays?
 - Should grouping helpers require explicit allocator arguments, use
   `context.allocator`, or follow the default dynamic-array helper convention?
 - Should `sort` copy before sorting, or should there be a separate in-place
@@ -178,8 +181,7 @@ The hard part is ownership. If a thread step allocates and its result is passed
 directly into the next step, the compiler must not lose the only handle to that
 owned value.
 
-The immediate production-style recommendation is to bind owned intermediate
-results explicitly:
+Production-style code can always bind owned intermediate results explicitly:
 
 ```clojure
 (let [active-users (filter active? users)
@@ -192,8 +194,8 @@ results explicitly:
 
 This is slightly noisier, but it is honest and emits obvious Odin.
 
-The desired later lowering for an allocating threaded expression in statement
-position is to generate named temporaries and cleanup for owned intermediates:
+For threaded pipelines in `let` bindings, OdinL lowers allocating intermediate
+steps to named temporaries and emits cleanup for those generated temporaries:
 
 ```odin
 odinl_tmp_1 := odinl_filter(active_p, users[:])
@@ -203,12 +205,12 @@ defer delete(odinl_tmp_2)
 active_names := odinl_take(10, odinl_tmp_2[:])
 ```
 
-This should only happen where the compiler is emitting statements and has a
-real scope for the generated `defer`s. In pure expression position, automatic
-cleanup is much harder to make correct without hidden control flow. The compiler
-should either keep the current expression lowering for non-allocating steps or
-eventually reject/warn on allocating threaded expressions that cannot be cleaned
-up.
+This only happens where the compiler is emitting statements and has a real scope
+for the generated `defer`s. In pure expression position, automatic cleanup is
+much harder to make correct without hidden control flow. For now, returning a
+threaded pipeline with allocating intermediates is rejected; bind the pipeline in
+`let` so the compiler can emit cleanup, or return the final owned value directly
+from a non-pipelined allocation.
 
 Transducers would improve this by compiling a composed transformation into one
 loop and one owned result:
@@ -229,9 +231,12 @@ still owned and must be deleted or returned to transfer ownership.
 Sequence helpers need an explicit ownership story:
 
 - Slice-view helpers such as `rest`, `take`, `drop`, `take-while`,
-  `drop-while`, and likely `split-at` do not own data and must not be deleted.
-- Dynamic-array helpers such as `map`, `filter`, `remove`, and `reverse`
-  allocate and return owned dynamic arrays.
+  `drop-while`, and `split-at` do not own data and must not be deleted.
+- Dynamic-array helpers such as `map`, `filter`, `remove`, `map-indexed`,
+  `keep`, `concat`, and `reverse` allocate and return owned dynamic arrays.
+- Chunking helpers `partition` and `partition-all` allocate the outer dynamic
+  array, but its slice chunks borrow the input collection.
+- `zipmap` allocates and returns an owned map.
 - Examples that use allocating helpers should show `defer delete(...)` when the
   result lives beyond a trivial expression.
 - Future helper docs should clearly mark whether a helper returns a view or an
@@ -240,3 +245,6 @@ Sequence helpers need an explicit ownership story:
 This is a documentation and examples requirement, not just an implementation
 detail. OdinL should help make Odin ownership easier to see, not easier to
 forget.
+
+See `docs/OWNERSHIP.md` for the broader ownership rules used by examples and
+tooling.

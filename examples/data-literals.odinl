@@ -14,20 +14,53 @@
   :lookup map[string]int
 })
 
+(proc user-name [] -> string
+  (let [user (User {:name "Ada" :age 36})]
+    (:name user)))
+
+(proc dynamic-first [] -> int
+  (let [buffer-literal (new [dynamic]int [21 34])]
+    (defer (delete buffer-literal))
+    (first buffer-literal)))
+
+(proc empty-buffer-len [] -> int
+  (let [buffer (make [dynamic]int)]
+    (defer (delete buffer))
+    (len buffer)))
+
+(proc lookup-two [] -> int
+  (let [lookup (new map[string]int {"one" 1 "two" 2})]
+    (defer (delete lookup))
+    (get lookup "two")))
+
+(proc lookup-has-one? [] -> bool
+  (let [lookup (new map[string]int {"one" 1 "two" 2})]
+    (defer (delete lookup))
+    (in? lookup "one")))
+
+(proc fixed-middle [] -> int
+  (let [fixed (new [3]int [5 8 13])]
+    (get fixed 1)))
+
 (proc main []
-  (let [user (User {:name "Ada" :age 36})
-        values (new []int [1 2 3])
-        fixed (new [3]int [5 8 13])
-        buffer-literal (new [dynamic]int [21 34])
-        buffer (make [dynamic]int)
-        lookup (new map[string]int {"one" 1 "two" 2})]
-    (fmt.println (:name user))
-    (fmt.println (get values 0))
-    (fmt.println (get fixed 1))
-    (fmt.println (get buffer-literal 0))
-    (fmt.println (get lookup "two"))
-    (when (in? lookup "one")
-      (fmt.println "lookup has one"))
-    (when (not (in? lookup "missing"))
-      (fmt.println "lookup is missing key"))
-    (fmt.println (len buffer))))
+  (fmt.println (lookup-two)))
+
+(comment
+  (user-name)
+  ;; => Ada
+
+  (dynamic-first)
+  ;; => 21
+
+  (empty-buffer-len)
+  ;; => 0
+
+  (lookup-two)
+  ;; => 2
+
+  (lookup-has-one?)
+  ;; => true
+
+  (fixed-middle)
+  ;; => 8
+)

@@ -30,44 +30,84 @@
 (proc add-age [total: int, user: User] -> int
   (+ total (:age user)))
 
-(proc main []
+(proc active-count [] -> int
+  (let [users (new []User [(User {:name "Ada" :age 36 :status .Active :verified true})
+                           (User {:name "Lin" :age 17 :status .Paused :verified false})
+                           (User {:name "Grace" :age 45 :status .Active :verified true})
+                           (User {:name "Edsger" :age 72 :status .Archived :verified false})])
+        active-users (filter active? users)]
+    (defer (delete active-users))
+    (len active-users)))
+
+(proc active-age-total [] -> int
   (let [users (new []User [(User {:name "Ada" :age 36 :status .Active :verified true})
                            (User {:name "Lin" :age 17 :status .Paused :verified false})
                            (User {:name "Grace" :age 45 :status .Active :verified true})
                            (User {:name "Edsger" :age 72 :status .Archived :verified false})])
         active-users (filter active? users)
-        verified-users (filter :verified users)
-        first-active (take 1 active-users)
-        remaining-active (drop 1 active-users)
-        tail-users (rest users)
-        first-user (first users)
-        second-user (second users)
-        third-user (nth users 2)
-        threaded-third (->> users
-                            (rest)
-                            (second))
-        young-prefix (take-while young? users)
-        after-young-prefix (drop-while young? users)
-        active-names-all (map :name active-users)
-        active-names (take 2 active-names-all)
-        active-age-total (reduce add-age 0 active-users)
-        [first-adult found?] (find adult? users)
-        [first-verified verified-found?] (find :verified users)
-        has-archived? (some? archived? users)
-        has-verified? (some? :verified users)
-        active-users-adults? (every? adult? active-users)]
+        total (reduce add-age 0 active-users)]
     (defer (delete active-users))
-    (defer (delete verified-users))
-    (defer (delete active-names-all))
-    (fmt.println (len active-users))
-    (fmt.println (len verified-users))
-    (fmt.println (get active-names 0))
-    (fmt.println active-age-total)
-    (fmt.println found? (:name first-adult))
-    (fmt.println verified-found? (:name first-verified))
-    (fmt.println has-archived? active-users-adults?)
-    (fmt.println has-verified?)
-    (fmt.println (len first-active) (len remaining-active))
-    (fmt.println (:name first-user) (:name second-user) (:name third-user) (:name threaded-third))
-    (fmt.println (len tail-users))
-    (fmt.println (len young-prefix) (:name (get after-young-prefix 0)))))
+    total))
+
+(proc first-active-name [] -> string
+  (let [users (new []User [(User {:name "Ada" :age 36 :status .Active :verified true})
+                           (User {:name "Lin" :age 17 :status .Paused :verified false})
+                           (User {:name "Grace" :age 45 :status .Active :verified true})
+                           (User {:name "Edsger" :age 72 :status .Archived :verified false})])
+        active-users (filter active? users)
+        active-names (map :name active-users)
+        name (first active-names)]
+    (defer (delete active-users))
+    (defer (delete active-names))
+    name))
+
+(proc third-user-name [] -> string
+  (let [users (new []User [(User {:name "Ada" :age 36 :status .Active :verified true})
+                           (User {:name "Lin" :age 17 :status .Paused :verified false})
+                           (User {:name "Grace" :age 45 :status .Active :verified true})
+                           (User {:name "Edsger" :age 72 :status .Archived :verified false})])]
+    (:name (nth users 2))))
+
+(proc all-active-users-adults? [] -> bool
+  (let [users (new []User [(User {:name "Ada" :age 36 :status .Active :verified true})
+                           (User {:name "Lin" :age 17 :status .Paused :verified false})
+                           (User {:name "Grace" :age 45 :status .Active :verified true})
+                           (User {:name "Edsger" :age 72 :status .Archived :verified false})])
+        active-users (filter active? users)
+        all-adults? (every? adult? active-users)]
+    (defer (delete active-users))
+    all-adults?))
+
+(proc first-adult-name [] -> string
+  (let [users (new []User [(User {:name "Ada" :age 36 :status .Active :verified true})
+                           (User {:name "Lin" :age 17 :status .Paused :verified false})
+                           (User {:name "Grace" :age 45 :status .Active :verified true})
+                           (User {:name "Edsger" :age 72 :status .Archived :verified false})])
+        [first-adult _] (find adult? users)]
+    (:name first-adult)))
+
+(proc main []
+  (fmt.println (active-count)))
+
+(comment
+  (:name (User {:name "Ada" :age 36 :status .Active :verified true}))
+  ;; => Ada
+
+  (active-count)
+  ;; => 2
+
+  (active-age-total)
+  ;; => 81
+
+  (first-active-name)
+  ;; => Ada
+
+  (third-user-name)
+  ;; => Grace
+
+  (all-active-users-adults?)
+  ;; => true
+
+  (first-adult-name)
+  ;; => Ada
+)

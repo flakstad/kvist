@@ -24,7 +24,15 @@
   (let [pred: proc [x: int] -> bool (proc [x: int] -> bool
                                          (greater-than? 10 x))
         req (Request {:path "/users"})]
-    (fmt.println (apply-pred pred 12))
-    (fmt.println (#force_inline greater-than? 3 5))
-    (fmt.println (path-len req))
-    (fmt.println (maybe-path-len (& req)))))
+    (fmt.println (apply-pred pred 12))))
+
+(comment
+  (greater-than? 3 5)
+  ;; => true
+
+  (path-len (Request {:path "/users"}))
+  ;; => 6
+
+  (maybe-path-len nil)
+  ;; => 0
+)

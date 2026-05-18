@@ -2,12 +2,20 @@
 (package main)
 (import "core:fmt")
 
+;; This is a greeting
 (struct Greeting {
   :message string
 })
 
 (proc main []
-  (let [g (Greeting {
-            :message "hello from odinl"
-          })]
+  (let [g (Greeting { :message "hello from odinl" })]
     (fmt.println (:message g))))
+
+(comment
+
+  (-> (Greeting { :message "hello!" })
+      :message
+      len)
+  ;; => 6
+
+)

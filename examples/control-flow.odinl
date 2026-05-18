@@ -35,6 +35,18 @@
 
 (proc main []
   (let [xs (new []int [1 2 3])]
-    (fmt.println (method-name .Get))
-    (fmt.println (classify (sum xs)))
-    (fmt.println (read-method? .Head))))
+    (fmt.println (classify (sum xs)))))
+
+(comment
+  (method-name .Get)
+  ;; => GET
+
+  (read-method? .Head)
+  ;; => true
+
+  (classify -1)
+  ;; => negative
+
+  (sum [1 2 3 4 5 6])
+  ;; => 21
+)

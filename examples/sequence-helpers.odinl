@@ -1,0 +1,67 @@
+// Exercises additional eager sequence helpers and ownership cleanup.
+(package main)
+(import "core:fmt")
+
+(proc even? [x: int] -> bool
+  (== (% x 2) 0))
+
+(proc add-index [i: int, x: int] -> int
+  (+ i x))
+
+(proc square-even [x: int] -> [value: int, ok: bool]
+  (if (even? x)
+    (return (* x x) true)
+    (return 0 false)))
+
+(proc split-front-length [] -> int
+  (let [xs (new []int [1 2 3 4])
+        [front _] (split-at 2 xs)]
+    (len front)))
+
+(proc first-kept-square [] -> int
+  (let [xs (new []int [1 2 3 4])
+        kept (keep square-even xs)]
+    (defer (delete kept))
+    (first kept)))
+
+(proc age-for-grace [] -> int
+  (let [names (new []string ["Ada" "Lin" "Grace"])
+        ages (new []int [36 17 45])
+        ages-by-name (zipmap names ages)]
+    (defer (delete ages-by-name))
+    (get ages-by-name "Grace")))
+
+(proc chunk-count [] -> int
+  (let [xs (new []int [1 2 3 4])
+        chunks (partition 2 xs)]
+    (defer (delete chunks))
+    (len chunks)))
+
+(proc threaded-first [] -> int
+  (let [xs (new []int [1 2 3 4])
+        threaded (->> xs
+                      (remove even?)
+                      (map-indexed add-index)
+                      (reverse))]
+    (defer (delete threaded))
+    (first threaded)))
+
+(proc main []
+  (fmt.println (age-for-grace)))
+
+(comment
+  (split-front-length)
+  ;; => 2
+
+  (first-kept-square)
+  ;; => 4
+
+  (age-for-grace)
+  ;; => 45
+
+  (chunk-count)
+  ;; => 2
+
+  (threaded-first)
+  ;; => 4
+)
