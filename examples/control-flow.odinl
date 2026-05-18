@@ -29,7 +29,7 @@
 
 (proc sum [xs: []int] -> int
   (let [total 0]
-    (each x xs
+    (each [x xs]
       (set! total (+ total x)))
     total))
 

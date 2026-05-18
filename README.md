@@ -98,7 +98,7 @@ Run CLI and Emacs-tooling integration checks with:
 Generate a scratch runner for one selected form with:
 
 ```sh
-./odinl eval examples/higher-order.odinl '(reduce-int (new [dynamic]int [1 2 3]) 0 add)'
+./odinl eval examples/higher-order.odinl '(reduce add 0 (new []int [1 2 3]))'
 ```
 
 The CLI can also invoke Odin for generated files directly:
@@ -464,7 +464,7 @@ everything into parens:
 ```clojure
 @(private)
 (proc route-add [(router ^Router) (method Method) (route Route)]
-  (when (not-in method router.routes)
+  (when (not (in? router.routes method))
     (set! (get router.routes method)
           (make [dynamic]Route router.allocator)))
   (append (& (get router.routes method)) route))
@@ -531,18 +531,19 @@ foreign_call :: proc(handle: Foreign_Handle) ---
 - `(if test then else)`
 - `(when test body...)`
 - `(for test body...)`
-- `(each name collection body...)`
+- `(each [name collection] body...)`
 - `(do body...)`
 - `(new Type literal)` typed composite literals
 - `(make Type args...)` runtime/allocator-backed construction
-- `(:field value)`, `(get value key)`, and `(-> value steps...)`
+- `(map f xs)`, `(filter pred xs)`, and `(reduce f init xs)` core eager helpers
+- `(:field value)`, `(get value key)`, `(-> value steps...)`, and `(->> value steps...)`
 - `(^ ptr)` and `(& place)`
 - numbers, booleans, `nil`, and `(nil? value)`
 - calls: `(foo a b)` -> `foo(a, b)`
 - operators: `(+ a b)`, `(<= i 10)`, `(and a b)`, etc. emit infix
 
 Current pragmatic Odin conveniences beyond the original core target include
-`(in ...)`, `(not-in ...)`, `(break)`, `(continue)`, and directive expression
+`(in? collection key)`, `(break)`, `(continue)`, and directive expression
 wrappers like `(#force_inline call arg)`.
 
 This is deliberately incomplete. Add only forms that map cleanly to Odin.

@@ -1,25 +1,6 @@
-// Exercises procedure values through explicit map/filter/reduce-style loops.
+// Exercises core generic map/filter/reduce helpers.
 (package main)
 (import "core:fmt")
-
-(proc map-int [xs: []int, f: proc [x: int] -> int] -> [dynamic]int
-  (let [out (make [dynamic]int)]
-    (each x xs
-      (append (& out) (f x)))
-    out))
-
-(proc filter-int [xs: [dynamic]int, pred: proc [x: int] -> bool] -> [dynamic]int
-  (let [out (make [dynamic]int)]
-    (each x xs
-      (when (pred x)
-        (append (& out) x)))
-    out))
-
-(proc reduce-int [xs: [dynamic]int, init: int, f: proc [acc: int, x: int] -> int] -> int
-  (let [acc init]
-    (each x xs
-      (set! acc (f acc x)))
-    acc))
 
 (proc inc [x: int] -> int
   (+ x 1))
@@ -32,9 +13,12 @@
 
 (proc main []
   (let [xs (new []int [1 2 3 4])
-        mapped (map-int xs inc)
-        evens (filter-int mapped even?)
-        total (reduce-int evens 0 add)]
+        mapped (map inc xs)
+        evens (filter even? mapped)
+        total (->> xs
+                   (map inc)
+                   (filter even?)
+                   (reduce add 0))]
     (fmt.println (get mapped 0))
     (fmt.println (len evens))
     (fmt.println total)))

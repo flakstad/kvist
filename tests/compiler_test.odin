@@ -694,10 +694,10 @@ compile_operator_forms :: proc(t: ^testing.T) {
       (- b a))))
 
 (proc has-key [lookup: map[string]int, key: string] -> bool
-  (in key lookup))
+  (in? lookup key))
 
 (proc missing-key [lookup: map[string]int, key: string] -> bool
-  (not-in key lookup))`
+  (not (in? lookup key)))`
 
     output, err, ok := odinl.compile_source(source)
     testing.expect_value(t, ok, true)
@@ -830,7 +830,7 @@ implicit_returns_only_apply_to_final_nested_blocks :: proc(t: ^testing.T) {
 
 (proc total [xs: []int] -> int
   (let [sum 0]
-    (each x xs
+    (each [x xs]
       (set! sum (+ sum x))
       (trace sum))
     sum))`
@@ -881,7 +881,7 @@ compile_break_and_continue_forms :: proc(t: ^testing.T) {
 
 (proc first-positive [xs: []int] -> int
   (let [result 0]
-    (each x xs
+    (each [x xs]
       (when (< x 0)
         (continue))
       (when (> x 0)
@@ -1027,6 +1027,92 @@ main :: proc() {
         41
     )
     return
+}
+`
+    testing.expect_value(t, output, expected)
+}
+
+@(test)
+compile_core_higher_order_helpers_and_slice_exprs :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(proc inc [x: int] -> int
+  (+ x 1))
+
+(proc even? [x: int] -> bool
+  (== (% x 2) 0))
+
+(proc add [acc: int, x: int] -> int
+  (+ acc x))
+
+(proc main []
+  (let [xs (new []int [1 2 3 4])
+        mapped (map inc xs)
+        tail (slice mapped 1)
+        evens (filter even? mapped)
+        total (->> xs
+                   (map inc)
+                   (filter even?)
+                   (reduce add 0))
+        middle (slice mapped 0 1)]
+    (return)))`
+
+    output, err, ok := odinl.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    expected := `package main
+
+inc :: proc(x: int) -> int {
+    return (x) + (1)
+}
+
+even_p :: proc(x: int) -> bool {
+    return ((x) % (2)) == (0)
+}
+
+add :: proc(acc: int, x: int) -> int {
+    return (acc) + (x)
+}
+
+main :: proc() {
+    xs := []int{1, 2, 3, 4}
+    mapped := odinl_map(inc, (xs)[:])
+    tail := (mapped)[1:]
+    evens := odinl_filter(even_p, (mapped)[:])
+    total := odinl_reduce(add, 0, (odinl_filter(even_p, (odinl_map(inc, (xs)[:]))[:]))[:])
+    middle := (mapped)[0:1]
+    return
+}
+
+odinl_map :: proc(f: proc(x: $T) -> $U, xs: []T) -> [dynamic]U {
+    out := make([dynamic]U)
+    for x in xs {
+        append(&out, f(x))
+    }
+    return out
+}
+
+odinl_filter :: proc(pred: proc(x: $T) -> bool, xs: []T) -> [dynamic]T {
+    out := make([dynamic]T)
+    for x in xs {
+        if pred(x) {
+            append(&out, x)
+        }
+    }
+    return out
+}
+
+odinl_reduce :: proc(f: proc(acc: $U, x: $T) -> U, init: U, xs: []T) -> U {
+    acc := init
+    for x in xs {
+        acc = f(acc, x)
+    }
+    return acc
 }
 `
     testing.expect_value(t, output, expected)

@@ -66,12 +66,16 @@ run_output=$(./odinl run examples/hello.odinl)
 assert_eq "hello from odinl" "$run_output" "run output"
 
 printf 'tooling: eval command\n'
-eval_output=$(./odinl eval examples/higher-order.odinl '(reduce-int (new [dynamic]int [1 2 3]) 0 add)' --generated "$tmp_dir/eval.odin")
+eval_output=$(./odinl eval examples/higher-order.odinl '(reduce add 0 (new []int [1 2 3]))' --generated "$tmp_dir/eval.odin")
 assert_eq "6" "$eval_output" "eval output"
 assert_file_nonempty "$tmp_dir/eval.odin" "eval generated output"
 
+printf 'tooling: eval main command\n'
+main_eval_output=$(./odinl eval examples/hello.odinl '(main)')
+assert_eq "hello from odinl" "$main_eval_output" "eval main output"
+
 printf 'tooling: eval check command\n'
-./odinl eval examples/higher-order.odinl '(reduce-int (new [dynamic]int [1 2 3]) 0 add)' --check
+./odinl eval examples/higher-order.odinl '(reduce add 0 (new []int [1 2 3]))' --check
 
 printf 'tooling: eval declaration form\n'
 cat > "$tmp_dir/decl-eval.odinl" <<'EOF'
@@ -101,7 +105,7 @@ if ! grep -q 'examples/higher-order.odinl:<eval>:1:1 Error: Cannot convert' "$tm
 fi
 
 printf 'tooling: legacy eval compile path\n'
-./odinl examples/higher-order.odinl --eval '(reduce-int (new [dynamic]int [1 2 3]) 0 add)' -o "$tmp_dir/legacy-eval.odin"
+./odinl examples/higher-order.odinl --eval '(reduce add 0 (new []int [1 2 3]))' -o "$tmp_dir/legacy-eval.odin"
 legacy_output=$(odin run "$tmp_dir/legacy-eval.odin" -file)
 assert_eq "6" "$legacy_output" "legacy eval output"
 
@@ -145,7 +149,7 @@ if command -v emacs >/dev/null 2>&1; then
              (unwind-protect
                  (progn
                    (with-temp-file file
-                     (insert \"(package main)\\n(import \\\"core:fmt\\\")\\n\\n(proc add [a: int, b: int] -> int\\n  (+ a b))\\n\\n(comment\\n  (add 1 2))\\n\"))
+                     (insert \"(package main)\\n(import \\\"core:fmt\\\")\\n\\n(proc add [a: int, b: int] -> int\\n  (+ a b))\\n\\n(proc main []\\n  (fmt.println \\\"from main\\\"))\\n\\n(comment\\n  (add 1 2)\\n  (main))\\n\"))
                    (find-file file)
                    (odinl-mode)
                    (dolist (binding (list (cons \"C-c C-e\" (quote odinl-eval-form-at-point))
@@ -161,7 +165,13 @@ if command -v emacs >/dev/null 2>&1; then
                    (call-interactively (quote odinl-insert-form-result))
                    (goto-char (point-min))
                    (unless (search-forward \";; => 3\" nil t)
-                     (error \"Expected inserted eval comment\")))
+                     (error \"Expected inserted eval comment\"))
+                   (goto-char (point-min))
+                   (search-forward \"(main)\")
+                   (call-interactively (quote odinl-insert-form-result))
+                   (goto-char (point-min))
+                   (unless (search-forward \";; => from main\" nil t)
+                     (error \"Expected inserted void-call eval comment\")))
                (ignore-errors (kill-buffer (current-buffer)))
                (delete-file file))))"
 else

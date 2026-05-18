@@ -509,7 +509,7 @@ The planned core expression forms are:
 - `set!`
 - `get`
 - keyword field access: `(:field expr)`
-- threading: `->`
+- threading: `->` and `->>`
 - `return`
 - `defer`
 - `for`
@@ -848,7 +848,7 @@ Loops and cleanup remain explicit statements/forms:
 (for (< i 10)
   (fmt.println i))
 
-(each x xs
+(each [x xs]
   (fmt.println x))
 
 (defer (free thing))
@@ -885,10 +885,11 @@ The intended surface style can still be familiar:
 (reduce combine init xs)
 ```
 
-But the collection-processing model is intentionally not locked down yet. In
-particular, OdinL should not prematurely commit to:
+These are now core eager helpers that lower to generated generic Odin
+procedures in the same output file. The broader collection-processing model is
+still intentionally not locked down yet. In particular, OdinL should not
+prematurely commit to:
 
-- eager collection helpers as the final abstraction
 - `*-into` helper families
 - seq semantics
 - lazy semantics
@@ -1167,7 +1168,7 @@ surface syntax.
 The compiler also currently supports a few mechanically lowered forms that were
 not part of the original expected-core list:
 
-- `(in key collection)` and `(not-in key collection)`
+- `(in? collection key)`, composed with `(not ...)` for absence checks
 - `(break)` and `(continue)`
 - directive expression wrappers such as `(#force_inline query-iter (& q))`
 

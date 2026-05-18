@@ -297,6 +297,14 @@
   (display-buffer output-buffer)
   (message "odinl exited %s" exit-code))
 
+(defun odinl--void-value-error-p (text)
+  "Return non-nil when TEXT is Odin's diagnostic for printing a void call."
+  (string-match-p "call does not return a value and cannot be used as a value" text))
+
+(defun odinl--main-call-form-p (form)
+  "Return non-nil when FORM is a direct `(main)' call."
+  (string-match-p "\\`[[:space:]]*(main[[:space:]]*)[[:space:]]*\\'" form))
+
 (defun odinl--eval-string (form &optional no-print check-only display bounds)
   "Evaluate FORM via generated Odin.
 When NO-PRINT is non-nil, treat FORM as a statement.  When CHECK-ONLY is
@@ -319,6 +327,18 @@ non-nil, run `odin check' instead of `odin run'.  DISPLAY may be `inline',
                (exit-code (odinl--call (odinl--executable) args output-buffer))
                (result (with-current-buffer output-buffer
                          (buffer-substring-no-properties (point-min) (point-max)))))
+          (when (and (not no-print)
+                     (not check-only)
+                     (not (zerop exit-code))
+                     (odinl--void-value-error-p result))
+            (setq args (if (odinl--main-call-form-p form)
+                           (append (list "run" source)
+                                   (when generated (list "--generated" generated)))
+                         (append (list "eval" source form "--no-print")
+                                 (when generated (list "--generated" generated)))))
+            (setq exit-code (odinl--call (odinl--executable) args output-buffer))
+            (setq result (with-current-buffer output-buffer
+                           (buffer-substring-no-properties (point-min) (point-max)))))
           (odinl--show-generated generated)
           (pcase display
             ('inline

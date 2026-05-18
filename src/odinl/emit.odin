@@ -5,6 +5,9 @@ import "core:strings"
 
 Emitter_Features :: struct {
     dynamic_literals: bool,
+    core_map:         bool,
+    core_filter:      bool,
+    core_reduce:      bool,
 }
 
 Emitter :: struct {
@@ -21,6 +24,24 @@ Emitter :: struct {
 mark_dynamic_literals :: proc(e: ^Emitter) {
     if e.features != nil {
         e.features.dynamic_literals = true
+    }
+}
+
+mark_core_map :: proc(e: ^Emitter) {
+    if e.features != nil {
+        e.features.core_map = true
+    }
+}
+
+mark_core_filter :: proc(e: ^Emitter) {
+    if e.features != nil {
+        e.features.core_filter = true
+    }
+}
+
+mark_core_reduce :: proc(e: ^Emitter) {
+    if e.features != nil {
+        e.features.core_reduce = true
     }
 }
 
@@ -317,11 +338,14 @@ emit_call_text :: proc(name: string, arg_texts: []string) -> string {
     return strings.clone(strings.to_string(builder))
 }
 
-emit_thread_step :: proc(e: ^Emitter, current: string, step: CST_Form) -> (string, Compile_Error, bool) {
+emit_thread_step :: proc(e: ^Emitter, current: string, step: CST_Form, thread_last: bool) -> (string, Compile_Error, bool) {
     #partial switch step.kind {
     case .Keyword:
         return fmt.tprintf("%s.%s", current, map_name(step.text[1:])), {}, true
     case .Symbol:
+        if thread_last && step.text == "slice" {
+            return slice_all_expr_text(current), {}, true
+        }
         args: [dynamic]string
         append(&args, current)
         return emit_call_text(map_name(step.text), args[:]), {}, true
@@ -339,14 +363,71 @@ emit_thread_step :: proc(e: ^Emitter, current: string, step: CST_Form) -> (strin
         if head.kind != .Symbol {
             return "", Compile_Error{message = "thread list step expects symbol or keyword head", span = head.span}, false
         }
+        if thread_last && (head.text == "map" || head.text == "filter") {
+            if len(step.items) != 2 {
+                return "", Compile_Error{message = fmt.tprintf("%s thread step expects one function argument", head.text), span = step.span}, false
+            }
+            f, err_f, ok_f := emit_expr(e, step.items[1])
+            if !ok_f {
+                return "", err_f, false
+            }
+            collection := slice_all_expr_text(current)
+            if head.text == "map" {
+                mark_core_map(e)
+                return emit_call_text("odinl_map", []string{f, collection}), {}, true
+            } else {
+                mark_core_filter(e)
+                return emit_call_text("odinl_filter", []string{f, collection}), {}, true
+            }
+        }
+        if thread_last && head.text == "reduce" {
+            if len(step.items) != 3 {
+                return "", Compile_Error{message = "reduce thread step expects function and initial value", span = step.span}, false
+            }
+            f, err_f, ok_f := emit_expr(e, step.items[1])
+            if !ok_f {
+                return "", err_f, false
+            }
+            init, err_init, ok_init := emit_expr(e, step.items[2])
+            if !ok_init {
+                return "", err_init, false
+            }
+            mark_core_reduce(e)
+            return emit_call_text("odinl_reduce", []string{f, init, slice_all_expr_text(current)}), {}, true
+        }
+        if thread_last && head.text == "slice" {
+            if len(step.items) > 3 {
+                return "", Compile_Error{message = "slice thread step expects optional start and end", span = step.span}, false
+            }
+            if len(step.items) == 1 {
+                return slice_all_expr_text(current), {}, true
+            }
+            start, err_start, ok_start := emit_expr(e, step.items[1])
+            if !ok_start {
+                return "", err_start, false
+            }
+            if len(step.items) == 2 {
+                return fmt.tprintf("(%s)[%s:]", current, start), {}, true
+            }
+            end, err_end, ok_end := emit_expr(e, step.items[2])
+            if !ok_end {
+                return "", err_end, false
+            }
+            return fmt.tprintf("(%s)[%s:%s]", current, start, end), {}, true
+        }
         args: [dynamic]string
-        append(&args, current)
+        if !thread_last {
+            append(&args, current)
+        }
         for arg in step.items[1:] {
             arg_text, err_arg, ok_arg := emit_expr(e, arg)
             if !ok_arg {
                 return "", err_arg, false
             }
             append(&args, arg_text)
+        }
+        if thread_last {
+            append(&args, current)
         }
         return emit_call_text(map_name(head.text), args[:]), {}, true
     case:
@@ -355,7 +436,7 @@ emit_thread_step :: proc(e: ^Emitter, current: string, step: CST_Form) -> (strin
     return "", Compile_Error{message = "unsupported thread step", span = step.span}, false
 }
 
-emit_thread_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) {
+emit_thread_expr :: proc(e: ^Emitter, form: CST_Form, thread_last: bool = false) -> (string, Compile_Error, bool) {
     if len(form.items) < 3 {
         return "", Compile_Error{message = "-> expects an initial expression and at least one step", span = form.span}, false
     }
@@ -366,13 +447,20 @@ emit_thread_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error,
     }
 
     for step in form.items[2:] {
-        next, err_step, ok_step := emit_thread_step(e, current, step)
+        next, err_step, ok_step := emit_thread_step(e, current, step, thread_last)
         if !ok_step {
             return "", err_step, false
         }
         current = next
     }
     return current, {}, true
+}
+
+slice_all_expr_text :: proc(text: string) -> string {
+    if len(text) >= 2 && text[0] == '[' && text[1] == ']' {
+        return text
+    }
+    return fmt.tprintf("(%s)[:]", text)
 }
 
 emit_proc_literal_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) {
@@ -550,6 +638,21 @@ emit_operator_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Erro
         return fmt.tprintf("(%s) %s (%s)", lhs, op, rhs), {}, true
     }
 
+    if op == "in?" {
+        if len(form.items) != 3 {
+            return "", Compile_Error{message = "in? expects exactly two arguments", span = form.span}, false
+        }
+        collection, err_collection, ok_collection := emit_expr(e, form.items[1])
+        if !ok_collection {
+            return "", err_collection, false
+        }
+        key, err_key, ok_key := emit_expr(e, form.items[2])
+        if !ok_key {
+            return "", err_key, false
+        }
+        return fmt.tprintf("(%s) in (%s)", key, collection), {}, true
+    }
+
     if op == "in" || op == "not-in" {
         if len(form.items) != 3 {
             return "", Compile_Error{message = fmt.tprintf("%s expects exactly two arguments", op), span = form.span}, false
@@ -676,6 +779,74 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         return fmt.tprintf("(%s) == nil", target), {}, true
     }
 
+    if head.text == "map" || head.text == "filter" {
+        if len(form.items) != 3 {
+            return "", Compile_Error{message = fmt.tprintf("%s expects function and collection", head.text), span = form.span}, false
+        }
+        f, err_f, ok_f := emit_expr(e, form.items[1])
+        if !ok_f {
+            return "", err_f, false
+        }
+        collection, err_collection, ok_collection := emit_expr(e, form.items[2])
+        if !ok_collection {
+            return "", err_collection, false
+        }
+        collection = slice_all_expr_text(collection)
+        if head.text == "map" {
+            mark_core_map(e)
+            return emit_call_text("odinl_map", []string{f, collection}), {}, true
+        } else {
+            mark_core_filter(e)
+            return emit_call_text("odinl_filter", []string{f, collection}), {}, true
+        }
+    }
+
+    if head.text == "reduce" {
+        if len(form.items) != 4 {
+            return "", Compile_Error{message = "reduce expects function, initial value, and collection", span = form.span}, false
+        }
+        f, err_f, ok_f := emit_expr(e, form.items[1])
+        if !ok_f {
+            return "", err_f, false
+        }
+        init, err_init, ok_init := emit_expr(e, form.items[2])
+        if !ok_init {
+            return "", err_init, false
+        }
+        collection, err_collection, ok_collection := emit_expr(e, form.items[3])
+        if !ok_collection {
+            return "", err_collection, false
+        }
+        collection = slice_all_expr_text(collection)
+        mark_core_reduce(e)
+        return emit_call_text("odinl_reduce", []string{f, init, collection}), {}, true
+    }
+
+    if head.text == "slice" {
+        if len(form.items) < 2 || len(form.items) > 4 {
+            return "", Compile_Error{message = "slice expects collection, optional start, and optional end", span = form.span}, false
+        }
+        target, err_target, ok_target := emit_expr(e, form.items[1])
+        if !ok_target {
+            return "", err_target, false
+        }
+        if len(form.items) == 2 {
+            return fmt.tprintf("(%s)[:]", target), {}, true
+        }
+        start, err_start, ok_start := emit_expr(e, form.items[2])
+        if !ok_start {
+            return "", err_start, false
+        }
+        if len(form.items) == 3 {
+            return fmt.tprintf("(%s)[%s:]", target, start), {}, true
+        }
+        end, err_end, ok_end := emit_expr(e, form.items[3])
+        if !ok_end {
+            return "", err_end, false
+        }
+        return fmt.tprintf("(%s)[%s:%s]", target, start, end), {}, true
+    }
+
     if head.text == "^" {
         if len(form.items) != 2 {
             return "", Compile_Error{message = "^ expects one pointer expression", span = form.span}, false
@@ -700,6 +871,10 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
 
     if head.text == "->" {
         return emit_thread_expr(e, form)
+    }
+
+    if head.text == "->>" {
+        return emit_thread_expr(e, form, true)
     }
 
     if head.text == "new" {
@@ -1375,11 +1550,21 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
         emit_line(e, fmt.tprintf("%s = %s", lhs, rhs))
         return {}, true
     case "each":
-        if len(form.items) < 4 || form.items[1].kind != .Symbol {
-            return Compile_Error{message = "each expects name, collection, and body", span = form.span}, false
+        body_start := 3
+        name_form: CST_Form
+        coll_form: CST_Form
+        if len(form.items) >= 4 && form.items[1].kind == .Symbol {
+            name_form = form.items[1]
+            coll_form = form.items[2]
+        } else if len(form.items) >= 3 && form.items[1].kind == .Vector && len(form.items[1].items) == 2 && form.items[1].items[0].kind == .Symbol {
+            name_form = form.items[1].items[0]
+            coll_form = form.items[1].items[1]
+            body_start = 2
+        } else {
+            return Compile_Error{message = "each expects [name collection] and body", span = form.span}, false
         }
-        name := map_name(form.items[1].text)
-        coll, err_coll, ok_coll := emit_expr(e, form.items[2])
+        name := map_name(name_form.text)
+        coll, err_coll, ok_coll := emit_expr(e, coll_form)
         if !ok_coll {
             return err_coll, false
         }
@@ -1392,7 +1577,7 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
         emit_raw_newline(e)
         e.indent += 1
         body: [dynamic]CST_Form
-        for item in form.items[3:] {
+        for item in form.items[body_start:] {
             append(&body, item)
         }
         err_body, ok_body := emit_body_forms(e, body[:], Return_Spec{kind = .None})
@@ -1597,6 +1782,75 @@ emit_decl :: proc(e: ^Emitter, decl: IR_Decl) -> (Compile_Error, bool) {
     return {}, true
 }
 
+emit_core_map_helper :: proc(e: ^Emitter) {
+    emit_line(e, "odinl_map :: proc(f: proc(x: $T) -> $U, xs: []T) -> [dynamic]U {")
+    e.indent += 1
+    emit_line(e, "out := make([dynamic]U)")
+    emit_line(e, "for x in xs {")
+    e.indent += 1
+    emit_line(e, "append(&out, f(x))")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "return out")
+    e.indent -= 1
+    emit_line(e, "}")
+}
+
+emit_core_filter_helper :: proc(e: ^Emitter) {
+    emit_line(e, "odinl_filter :: proc(pred: proc(x: $T) -> bool, xs: []T) -> [dynamic]T {")
+    e.indent += 1
+    emit_line(e, "out := make([dynamic]T)")
+    emit_line(e, "for x in xs {")
+    e.indent += 1
+    emit_line(e, "if pred(x) {")
+    e.indent += 1
+    emit_line(e, "append(&out, x)")
+    e.indent -= 1
+    emit_line(e, "}")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "return out")
+    e.indent -= 1
+    emit_line(e, "}")
+}
+
+emit_core_reduce_helper :: proc(e: ^Emitter) {
+    emit_line(e, "odinl_reduce :: proc(f: proc(acc: $U, x: $T) -> U, init: U, xs: []T) -> U {")
+    e.indent += 1
+    emit_line(e, "acc := init")
+    emit_line(e, "for x in xs {")
+    e.indent += 1
+    emit_line(e, "acc = f(acc, x)")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "return acc")
+    e.indent -= 1
+    emit_line(e, "}")
+}
+
+emit_core_helpers :: proc(e: ^Emitter, features: Emitter_Features) {
+    if !(features.core_map || features.core_filter || features.core_reduce) {
+        return
+    }
+
+    emit_raw_newline(e)
+    if features.core_map {
+        emit_core_map_helper(e)
+    }
+    if features.core_filter {
+        if features.core_map {
+            emit_raw_newline(e)
+        }
+        emit_core_filter_helper(e)
+    }
+    if features.core_reduce {
+        if features.core_map || features.core_filter {
+            emit_raw_newline(e)
+        }
+        emit_core_reduce_helper(e)
+    }
+}
+
 emit_decls :: proc(decls: []IR_Decl) -> (string, Compile_Error, bool) {
     result, err, ok := emit_decls_with_source_map(decls)
     return result.output, err, ok
@@ -1641,6 +1895,7 @@ emit_decls_with_source_map :: proc(decls: []IR_Decl) -> (Emit_Result, Compile_Er
             e.line += 1
         }
     }
+    emit_core_helpers(&e, features)
     if features.dynamic_literals {
         output_builder := strings.builder_make()
         defer strings.builder_destroy(&output_builder)

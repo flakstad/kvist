@@ -246,6 +246,10 @@ run_generated_command :: proc(input, generated_path, odin_command: string) -> in
 }
 
 eval_command :: proc(input, eval_source, generated_path: string, no_print, check_only: bool) -> int {
+    if !no_print && !check_only && strings.trim_space(eval_source) == "(main)" {
+        return run_generated_command(input, generated_path, "run")
+    }
+
     data := read_source_or_exit(input)
     defer delete(transmute([]byte)data)
 

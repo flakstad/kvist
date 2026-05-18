@@ -16,13 +16,17 @@
 })
 
 (proc status-code [status: Http-Status] -> int
+  (int status))
+
+(proc status-label [status: Http-Status] -> string
   (switch status
-    .OK 200
-    .Not-Found 404
-    :else 0))
+    .OK "ok"
+    .Not-Found "not found"
+    :else "unknown"))
 
 (proc main []
   (let [endpoint (Endpoint {:path "/health" :status .OK})]
     (fmt.println default-port)
     (fmt.println (:path endpoint))
-    (fmt.println (status-code (:status endpoint)))))
+    (fmt.println (status-code (:status endpoint)))
+    (fmt.println (status-label (:status endpoint)))))
