@@ -55,6 +55,10 @@ These forms return owned values in normal OdinL code:
 (index-by :field xs)
 (group-by f xs)
 (group-by :field xs)
+(count-by f xs)
+(count-by :field xs)
+(sum-by key-f value-f xs)
+(sum-by :key-field :value-field xs)
 (frequencies xs)
 (keys m)
 (vals m)
@@ -291,6 +295,14 @@ The same rule applies to owned maps:
 The caller deletes the returned map. `(merge left right)` follows the same rule:
 it returns a new owned map, while `(merge! target source)` mutates an existing
 map and does not create an owned result.
+
+Aggregate helpers such as `count-by` and `sum-by` also return owned maps:
+
+```clojure
+(let [totals (sum-by :region :amount orders)]
+  (defer (delete totals))
+  ...)
+```
 
 `group-by` returns an owned map with owned dynamic-array values. Clean up both
 levels:

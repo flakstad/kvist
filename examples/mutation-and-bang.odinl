@@ -1,0 +1,81 @@
+// Exercises struct field updates, pointer mutation, and in-place sequence helpers.
+(package main)
+(import "core:fmt")
+
+(struct Order {
+  :id int
+  :amount int
+  :discount int
+  :status int
+})
+
+(proc settled? [order: Order] -> bool
+  (== (:status order) 3))
+
+(proc settle-order [order: Order] -> Order
+  (let [updated order]
+    (when (and (== (:status updated) 2)
+               (> (:amount updated) 100))
+      (set! (:amount updated) (- (:amount updated) (:discount updated)))
+      (set! (:discount updated) 0)
+      (set! (:status updated) 3))
+    updated))
+
+(proc settle-order! [order: ^Order]
+  (when (and (== (:status (deref order)) 2)
+             (> (:amount (deref order)) 100))
+    (set! (:amount (deref order)) (- (:amount (deref order)) (:discount (deref order))))
+    (set! (:discount (deref order)) 0)
+    (set! (:status (deref order)) 3)))
+
+(proc order-score [orders: []Order] -> int
+  (let [total 0]
+    (each [order orders]
+      (set! total (+ total (:amount order)))
+      (set! total (+ total (:status order))))
+    total))
+
+(proc sample-orders [] -> [dynamic]Order
+  (new [dynamic]Order [(Order {:id 1 :amount 80 :discount 5 :status 1})
+                       (Order {:id 2 :amount 250 :discount 20 :status 2})
+                       (Order {:id 3 :amount 140 :discount 10 :status 2})
+                       (Order {:id 4 :amount 90 :discount 0 :status 3})]))
+
+(proc map-bang-score [] -> int
+  (let [orders (sample-orders)]
+    (defer (delete orders))
+    (map! settle-order orders)
+    (order-score (slice orders))))
+
+(proc filter-bang-count [] -> int
+  (let [orders (sample-orders)]
+    (defer (delete orders))
+    (map! settle-order orders)
+    (filter! settled? orders)
+    (count orders)))
+
+(proc pointer-update-score [] -> int
+  (let [orders (sample-orders)]
+    (defer (delete orders))
+    (each [_ idx orders]
+      (settle-order! (addr (get orders idx))))
+    (order-score (slice orders))))
+
+(proc main []
+  (fmt.println (map-bang-score))
+  (fmt.println (filter-bang-count))
+  (fmt.println (pointer-update-score)))
+
+(comment
+  ;; map! replaces each struct value with the returned updated struct.
+  (map-bang-score)
+  ;; => 513
+
+  ;; filter! compacts a dynamic array after mutation.
+  (filter-bang-count)
+  ;; => 3
+
+  ;; Pointer-style updates mutate fields on array elements directly.
+  (pointer-update-score)
+  ;; => 513
+)

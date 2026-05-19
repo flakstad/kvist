@@ -239,12 +239,20 @@ remap_odin_output_locations :: proc(output, generated_path, source_path, source,
 }
 
 run_odin_file :: proc(command, generated_path, source_path, source, eval_source, save_name: string, source_map: []odinl.Source_Map_Entry) -> int {
-    working_dir, generated_file := os.split_path(generated_path)
+    source_dir, _ := os.split_path(source_path)
+    working_dir := source_dir
     if working_dir == "" {
         working_dir = "."
     }
 
-    args := [?]string{"odin", command, generated_file, "-file"}
+    generated_abs, abs_err := os.get_absolute_path(generated_path, context.allocator)
+    if abs_err != nil {
+        fmt.eprintln("failed to resolve generated path: ", generated_path)
+        return 1
+    }
+    defer delete(generated_abs)
+
+    args := [?]string{"odin", command, generated_abs, "-file"}
     state, stdout, stderr, err := os.process_exec(
         os.Process_Desc{command = args[:], working_dir = working_dir},
         context.allocator,
@@ -256,7 +264,7 @@ run_odin_file :: proc(command, generated_path, source_path, source, eval_source,
         fmt.print(string(stdout))
     }
     if len(stderr) > 0 {
-        mapped_stderr := remap_odin_output_locations(string(stderr), generated_path, source_path, source, eval_source, source_map)
+        mapped_stderr := remap_odin_output_locations(string(stderr), generated_abs, source_path, source, eval_source, source_map)
         defer delete(mapped_stderr)
         fmt.eprint(mapped_stderr)
     }

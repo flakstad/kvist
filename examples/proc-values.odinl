@@ -18,7 +18,7 @@
 (proc maybe-path-len [req: ^Request] -> int
   (if (nil? req)
     0
-    (path-len (^ req))))
+    (path-len (deref req))))
 
 (proc main []
   (let [pred: proc [x: int] -> bool (proc [x: int] -> bool

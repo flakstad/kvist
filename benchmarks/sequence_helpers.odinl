@@ -1,0 +1,656 @@
+// Runtime benchmark for generated eager sequence helpers.
+(package main)
+(import "core:fmt")
+(import mem "core:mem")
+(import time "core:time")
+
+(odin "N :: 50_000
+REPS :: 80
+SORT_N :: 5_000
+SORT_REPS :: 5
+ORDER_N :: 75_000
+ORDER_REPS :: 40")
+
+(proc inc [x: int] -> int
+  (+ x 1))
+
+(proc triple [x: int] -> int
+  (* x 3))
+
+(proc even? [x: int] -> bool
+  (== (% x 2) 0))
+
+(proc divisible-by-three? [x: int] -> bool
+  (== (% x 3) 0))
+
+(proc identity-int [x: int] -> int
+  x)
+
+(proc bucket [x: int] -> int
+  (% x 1024))
+
+(proc negative [x: int] -> int
+  (- x))
+
+(struct Sort-Item {
+  :value int
+  :score int
+})
+
+(struct Order {
+  :account int
+  :amount int
+  :discount int
+  :status int
+  :region int
+})
+
+(struct Region-Report {
+  :region int
+  :revenue int
+  :count int
+})
+
+(odin "make_sort_items :: proc(n: int) -> [dynamic]Sort_Item {
+    out := make([dynamic]Sort_Item, 0, n)
+    for i in 0..<n {
+        append(&out, Sort_Item{value = i, score = n-i})
+    }
+    return out
+}
+
+make_orders :: proc(n: int) -> [dynamic]Order {
+    out := make([dynamic]Order, 0, n)
+    for i in 0..<n {
+        append(&out, Order{
+            account = i % 4096,
+            amount = 25 + (i*37)%1500,
+            discount = (i*11)%90,
+            status = i % 5,
+            region = i % 12,
+        })
+    }
+    return out
+}")
+
+(proc add [acc: int, x: int] -> int
+  (+ acc x))
+
+(proc paid-large? [order: Order] -> bool
+  (and (== (:status order) 2)
+       (> (:amount order) 500)))
+
+(proc order-net [order: Order] -> int
+  (- (:amount order) (:discount order)))
+
+(proc settled? [order: Order] -> bool
+  (== (:status order) 3))
+
+(proc settle-order [order: Order] -> Order
+  (let [updated order]
+    (when (and (== (:status updated) 2)
+               (> (:amount updated) 500))
+      (set! (:amount updated) (- (:amount updated) (:discount updated)))
+      (set! (:discount updated) 0)
+      (set! (:status updated) 3))
+    updated))
+
+(proc settle-order! [order: ^Order]
+  (when (and (== (:status (^ order)) 2)
+             (> (:amount (^ order)) 500))
+    (set! (:amount (^ order)) (- (:amount (^ order)) (:discount (^ order))))
+    (set! (:discount (^ order)) 0)
+    (set! (:status (^ order)) 3)))
+
+(proc orders-checksum [orders: []Order] -> int
+  (let [total 0]
+    (each [order orders]
+      (set! total (+ total (:amount order)))
+      (set! total (+ total (:status order))))
+    total))
+
+(proc report-checksum [rows: []Region-Report] -> int
+  (let [total 0]
+    (each [row rows]
+      (set! total (+ total (:revenue row)))
+      (set! total (+ total (* (:region row) 31)))
+      (set! total (+ total (:count row))))
+    total))
+
+(proc build-report-rows [revenue-by-region: map[int]int, count-by-region: map[int]int] -> [dynamic]Region-Report
+  (let [rows (make [dynamic]Region-Report)]
+    (each [region revenue revenue-by-region]
+      (append (& rows)
+              (Region-Report {:region region
+                              :revenue revenue
+                              :count (get count-by-region region 0)})))
+    (sort-by! :revenue rows)
+    rows))
+
+(proc report [name: string, elapsed: time.Duration, checksum: int, track: ^mem.Tracking-Allocator]
+  (fmt.printfln "%-16s %9.3f ms allocs=%8v total=%10v peak=%9v live=%v checksum=%v"
+                name
+                (time.duration_milliseconds elapsed)
+                track.total_allocation_count
+                track.total_memory_allocated
+                track.peak_memory_allocated
+                track.current_memory_allocated
+                checksum))
+
+(proc bench-range [reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (for (< i reps)
+      (let [xs (range 0 N)]
+        (set! checksum (+ checksum (last xs)))
+        (delete xs))
+      (set! i (+ i 1)))
+    checksum))
+
+(proc bench-map [xs: []int, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (for (< i reps)
+      (let [mapped (map inc xs)]
+        (set! checksum (+ checksum (last mapped)))
+        (delete mapped))
+      (set! i (+ i 1)))
+    checksum))
+
+(proc bench-filter [xs: []int, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (for (< i reps)
+      (let [filtered (filter even? xs)]
+        (set! checksum (+ checksum (count filtered)))
+        (delete filtered))
+      (set! i (+ i 1)))
+    checksum))
+
+(proc bench-take-nth [xs: []int, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (for (< i reps)
+      (let [sampled (take-nth 3 xs)]
+        (set! checksum (+ checksum (last sampled)))
+        (delete sampled))
+      (set! i (+ i 1)))
+    checksum))
+
+(proc bench-partition-all [xs: []int, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (for (< i reps)
+      (let [chunks (partition-all 8 xs)]
+        (set! checksum (+ checksum (count chunks)))
+        (delete chunks))
+      (set! i (+ i 1)))
+    checksum))
+
+(proc bench-distinct [xs: []int, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (for (< i reps)
+      (let [unique (distinct xs)]
+        (set! checksum (+ checksum (count unique)))
+        (delete unique))
+      (set! i (+ i 1)))
+    checksum))
+
+(proc bench-zipmap [keys: []int, values: []int, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (for (< i reps)
+      (let [lookup (zipmap keys values)]
+        (set! checksum (+ checksum (len lookup)))
+        (delete lookup))
+      (set! i (+ i 1)))
+    checksum))
+
+(proc bench-frequencies [xs: []int, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (for (< i reps)
+      (let [counts (frequencies xs)]
+        (set! checksum (+ checksum (get counts 1024 0)))
+        (delete counts))
+      (set! i (+ i 1)))
+    checksum))
+
+(proc bench-index-by [xs: []int, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (for (< i reps)
+      (let [indexed (index-by identity-int xs)]
+        (set! checksum (+ checksum (len indexed)))
+        (delete indexed))
+      (set! i (+ i 1)))
+    checksum))
+
+(proc bench-group-by [xs: []int, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (for (< i reps)
+      (let [groups (group-by bucket xs)]
+        (set! checksum (+ checksum (len groups)))
+        (each [_ group groups]
+          (delete group))
+        (delete groups))
+      (set! i (+ i 1)))
+    checksum))
+
+(proc bench-merge [lhs: map[int]int, rhs: map[int]int, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (for (< i reps)
+      (let [merged (merge lhs rhs)]
+        (set! checksum (+ checksum (len merged)))
+        (delete merged))
+      (set! i (+ i 1)))
+    checksum))
+
+(proc bench-sort [xs: []int, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (for (< i reps)
+      (let [sorted (sort xs)]
+        (set! checksum (+ checksum (first sorted)))
+        (delete sorted))
+      (set! i (+ i 1)))
+    checksum))
+
+(proc bench-sort-by [xs: []int, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (for (< i reps)
+      (let [sorted (sort-by negative xs)]
+        (set! checksum (+ checksum (first sorted)))
+        (delete sorted))
+      (set! i (+ i 1)))
+    checksum))
+
+(proc bench-sort-by-field [xs: []Sort-Item, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (for (< i reps)
+      (let [sorted (sort-by :score xs)]
+        (set! checksum (+ checksum (:value (first sorted))))
+        (delete sorted))
+      (set! i (+ i 1)))
+    checksum))
+
+(proc bench-pipeline-map-filter-reduce [xs: []int, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (for (< i reps)
+      (let [mapped (map inc xs)
+            filtered (filter even? mapped)
+            total (reduce add 0 filtered)]
+        (set! checksum (+ checksum total))
+        (delete mapped)
+        (delete filtered))
+      (set! i (+ i 1)))
+    checksum))
+
+(proc bench-pipeline-threaded [xs: []int, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (for (< i reps)
+      (let [total (->> xs
+                       (map inc)
+                       (filter even?)
+                       (reduce add 0))]
+        (set! checksum (+ checksum total)))
+      (set! i (+ i 1)))
+    checksum))
+
+(proc bench-pipeline-loop [xs: []int, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (for (< i reps)
+      (let [total 0]
+        (each [x xs]
+          (let [y (+ x 1)]
+            (when (== (% y 2) 0)
+              (set! total (+ total y)))))
+        (set! checksum (+ checksum total)))
+      (set! i (+ i 1)))
+    checksum))
+
+(proc bench-pipeline-bang-copy [xs: []int, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (for (< i reps)
+      (let [work (map inc xs)
+            total 0]
+        (filter! even? work)
+        (set! total (reduce add 0 work))
+        (set! checksum (+ checksum total))
+        (delete work))
+      (set! i (+ i 1)))
+    checksum))
+
+(proc bench-pipeline-filter-map-take [xs: []int, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (for (< i reps)
+      (let [filtered (filter divisible-by-three? xs)
+            mapped (map triple filtered)
+            head (take 100 mapped)]
+        (set! checksum (+ checksum (reduce add 0 head)))
+        (delete filtered)
+        (delete mapped))
+      (set! i (+ i 1)))
+    checksum))
+
+(proc bench-pipeline-filter-map-take-loop [xs: []int, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (for (< i reps)
+      (let [total 0
+            taken 0]
+        (each [x xs]
+          (when (== (% x 3) 0)
+            (set! total (+ total (* x 3)))
+            (set! taken (+ taken 1))
+            (when (== taken 100)
+              (break))))
+        (set! checksum (+ checksum total)))
+      (set! i (+ i 1)))
+    checksum))
+
+(proc bench-pipeline-sort-map [xs: []int, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (for (< i reps)
+      (let [sorted (sort xs)
+            mapped (map inc sorted)]
+        (set! checksum (+ checksum (first mapped)))
+        (delete sorted)
+        (delete mapped))
+      (set! i (+ i 1)))
+    checksum))
+
+(proc bench-pipeline-sort-loop [xs: []int, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (for (< i reps)
+      (let [sorted (sort xs)]
+        (set! checksum (+ checksum (+ (first sorted) 1)))
+        (delete sorted))
+      (set! i (+ i 1)))
+    checksum))
+
+(proc bench-orders-revenue [orders: []Order, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (for (< i reps)
+      (let [paid (filter paid-large? orders)
+            net (map order-net paid)
+            total (reduce add 0 net)]
+        (set! checksum (+ checksum total))
+        (delete paid)
+        (delete net))
+      (set! i (+ i 1)))
+    checksum))
+
+(proc bench-orders-revenue-threaded [orders: []Order, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (for (< i reps)
+      (let [total (->> orders
+                       (filter paid-large?)
+                       (map order-net)
+                       (reduce add 0))]
+        (set! checksum (+ checksum total)))
+      (set! i (+ i 1)))
+    checksum))
+
+(proc bench-orders-revenue-loop [orders: []Order, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (for (< i reps)
+      (let [total 0]
+        (each [order orders]
+          (when (and (== (:status order) 2)
+                     (> (:amount order) 500))
+            (set! total (+ total (- (:amount order) (:discount order))))))
+        (set! checksum (+ checksum total)))
+      (set! i (+ i 1)))
+    checksum))
+
+(proc bench-orders-update-map! [orders: []Order, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (for (< i reps)
+      (map! settle-order orders)
+      (set! checksum (+ checksum (orders-checksum orders)))
+      (set! i (+ i 1)))
+    checksum))
+
+(proc bench-orders-update-filter! [orders: []Order, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (for (< i reps)
+      (let [work (map settle-order orders)]
+        (filter! settled? work)
+        (set! checksum (+ checksum (orders-checksum (slice work))))
+        (delete work))
+      (set! i (+ i 1)))
+    checksum))
+
+(proc bench-orders-update-pointer-loop [orders: []Order, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (for (< i reps)
+      (each [_ idx orders]
+        (settle-order! (& (get orders idx))))
+      (set! checksum (+ checksum (orders-checksum orders)))
+      (set! i (+ i 1)))
+    checksum))
+
+(proc bench-report-eager [orders: []Order, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (for (< i reps)
+      (let [settled (map settle-order orders)
+            paid (filter settled? settled)
+            groups (group-by :region paid)
+            rows (make [dynamic]Region-Report)]
+        (each [region group groups]
+          (let [revenue 0]
+            (each [order group]
+              (set! revenue (+ revenue (:amount order))))
+            (append (& rows)
+                    (Region-Report {:region region
+                                    :revenue revenue
+                                    :count (len group)}))))
+        (sort-by! :revenue rows)
+        (set! checksum (+ checksum (report-checksum (slice rows))))
+        (delete settled)
+        (delete paid)
+        (each [_ group groups]
+          (delete group))
+        (delete groups)
+        (delete rows))
+      (set! i (+ i 1)))
+    checksum))
+
+(proc bench-report-bang [orders: []Order, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (for (< i reps)
+      (let [work (map settle-order orders)
+            rows (make [dynamic]Region-Report)]
+        (filter! settled? work)
+        (let [groups (group-by :region work)]
+          (each [region group groups]
+            (let [revenue 0]
+              (each [order group]
+                (set! revenue (+ revenue (:amount order))))
+              (append (& rows)
+                      (Region-Report {:region region
+                                      :revenue revenue
+                                      :count (len group)}))))
+          (sort-by! :revenue rows)
+          (set! checksum (+ checksum (report-checksum (slice rows))))
+          (each [_ group groups]
+            (delete group))
+          (delete groups))
+        (delete work)
+        (delete rows))
+      (set! i (+ i 1)))
+    checksum))
+
+(proc bench-report-loop [orders: []Order, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (for (< i reps)
+      (let [revenue-by-region (make map[int]int)
+            count-by-region (make map[int]int)]
+        (each [order orders]
+          (let [settled (settle-order order)]
+            (when (settled? settled)
+              (set! (get revenue-by-region (:region settled))
+                    (+ (get revenue-by-region (:region settled))
+                       (:amount settled)))
+              (set! (get count-by-region (:region settled))
+                    (+ (get count-by-region (:region settled))
+                       1)))))
+        (let [rows (build-report-rows revenue-by-region count-by-region)]
+          (set! checksum (+ checksum (report-checksum (slice rows))))
+          (delete rows))
+        (delete revenue-by-region)
+        (delete count-by-region))
+      (set! i (+ i 1)))
+    checksum))
+
+(proc run-one [name: string, checksum: int, start: time.Tick, track: ^mem.Tracking-Allocator]
+  (report name (time.tick_since start) checksum track))
+
+(proc main []
+  (fmt.printfln "N=%v REPS=%v SORT_N=%v SORT_REPS=%v ORDER_N=%v ORDER_REPS=%v"
+                N REPS SORT_N SORT_REPS ORDER_N ORDER_REPS)
+  (let [old-allocator context.allocator
+        track: mem.Tracking-Allocator (odin "mem.Tracking_Allocator{}")
+        xs (range 0 N)
+        ys (range N (* N 2))
+        sort-base (range 0 SORT_N)
+        sort-xs (reverse sort-base)
+        sort-items (make-sort-items SORT_N)
+        orders (make-orders ORDER_N)
+        orders-map (make-orders ORDER_N)
+        orders-filter (make-orders ORDER_N)
+        orders-ptr (make-orders ORDER_N)
+        lhs (zipmap xs xs)
+        rhs (zipmap ys ys)]
+    (mem.tracking_allocator_init (& track) old-allocator old-allocator)
+    (defer (mem.tracking_allocator_destroy (& track)))
+    (defer
+      (delete xs)
+      (delete ys)
+      (delete sort-base)
+      (delete sort-xs)
+      (delete sort-items)
+      (delete orders)
+      (delete orders-map)
+      (delete orders-filter)
+      (delete orders-ptr)
+      (delete lhs)
+      (delete rhs))
+    (set! context.allocator (mem.tracking_allocator (& track)))
+    (defer (odin "context.allocator = old_allocator"))
+
+    (mem.tracking_allocator_reset (& track))
+    (let [start (time.tick_now)]
+      (run-one "range" (bench-range REPS) start (& track)))
+    (mem.tracking_allocator_reset (& track))
+    (let [start (time.tick_now)]
+      (run-one "map" (bench-map (slice xs) REPS) start (& track)))
+    (mem.tracking_allocator_reset (& track))
+    (let [start (time.tick_now)]
+      (run-one "filter" (bench-filter (slice xs) REPS) start (& track)))
+    (mem.tracking_allocator_reset (& track))
+    (let [start (time.tick_now)]
+      (run-one "take-nth" (bench-take-nth (slice xs) REPS) start (& track)))
+    (mem.tracking_allocator_reset (& track))
+    (let [start (time.tick_now)]
+      (run-one "partition-all" (bench-partition-all (slice xs) REPS) start (& track)))
+    (mem.tracking_allocator_reset (& track))
+    (let [start (time.tick_now)]
+      (run-one "distinct" (bench-distinct (slice xs) REPS) start (& track)))
+    (mem.tracking_allocator_reset (& track))
+    (let [start (time.tick_now)]
+      (run-one "zipmap" (bench-zipmap (slice xs) (slice ys) REPS) start (& track)))
+    (mem.tracking_allocator_reset (& track))
+    (let [start (time.tick_now)]
+      (run-one "frequencies" (bench-frequencies (slice xs) REPS) start (& track)))
+    (mem.tracking_allocator_reset (& track))
+    (let [start (time.tick_now)]
+      (run-one "index-by" (bench-index-by (slice xs) REPS) start (& track)))
+    (mem.tracking_allocator_reset (& track))
+    (let [start (time.tick_now)]
+      (run-one "group-by" (bench-group-by (slice xs) REPS) start (& track)))
+    (mem.tracking_allocator_reset (& track))
+    (let [start (time.tick_now)]
+      (run-one "merge" (bench-merge lhs rhs REPS) start (& track)))
+    (mem.tracking_allocator_reset (& track))
+    (let [start (time.tick_now)]
+      (run-one "sort" (bench-sort (slice sort-xs) SORT_REPS) start (& track)))
+    (mem.tracking_allocator_reset (& track))
+    (let [start (time.tick_now)]
+      (run-one "sort-by" (bench-sort-by (slice sort-base) SORT_REPS) start (& track)))
+    (mem.tracking_allocator_reset (& track))
+    (let [start (time.tick_now)]
+      (run-one "sort-by-field" (bench-sort-by-field (slice sort-items) SORT_REPS) start (& track)))
+    (mem.tracking_allocator_reset (& track))
+    (let [start (time.tick_now)]
+      (run-one "pipe-map-filter" (bench-pipeline-map-filter-reduce (slice xs) REPS) start (& track)))
+    (mem.tracking_allocator_reset (& track))
+    (let [start (time.tick_now)]
+      (run-one "pipe-threaded" (bench-pipeline-threaded (slice xs) REPS) start (& track)))
+    (mem.tracking_allocator_reset (& track))
+    (let [start (time.tick_now)]
+      (run-one "pipe-loop" (bench-pipeline-loop (slice xs) REPS) start (& track)))
+    (mem.tracking_allocator_reset (& track))
+    (let [start (time.tick_now)]
+      (run-one "pipe-bang-copy" (bench-pipeline-bang-copy (slice xs) REPS) start (& track)))
+    (mem.tracking_allocator_reset (& track))
+    (let [start (time.tick_now)]
+      (run-one "pipe-filter-map" (bench-pipeline-filter-map-take (slice xs) REPS) start (& track)))
+    (mem.tracking_allocator_reset (& track))
+    (let [start (time.tick_now)]
+      (run-one "pipe-filter-loop" (bench-pipeline-filter-map-take-loop (slice xs) REPS) start (& track)))
+    (mem.tracking_allocator_reset (& track))
+    (let [start (time.tick_now)]
+      (run-one "pipe-sort-map" (bench-pipeline-sort-map (slice sort-xs) SORT_REPS) start (& track)))
+    (mem.tracking_allocator_reset (& track))
+    (let [start (time.tick_now)]
+      (run-one "pipe-sort-loop" (bench-pipeline-sort-loop (slice sort-xs) SORT_REPS) start (& track)))
+    (mem.tracking_allocator_reset (& track))
+    (let [start (time.tick_now)]
+      (run-one "orders-revenue" (bench-orders-revenue (slice orders) ORDER_REPS) start (& track)))
+    (mem.tracking_allocator_reset (& track))
+    (let [start (time.tick_now)]
+      (run-one "orders-threaded" (bench-orders-revenue-threaded (slice orders) ORDER_REPS) start (& track)))
+    (mem.tracking_allocator_reset (& track))
+    (let [start (time.tick_now)]
+      (run-one "orders-loop" (bench-orders-revenue-loop (slice orders) ORDER_REPS) start (& track)))
+    (mem.tracking_allocator_reset (& track))
+    (let [start (time.tick_now)]
+      (run-one "orders-map!" (bench-orders-update-map! (slice orders-map) ORDER_REPS) start (& track)))
+    (mem.tracking_allocator_reset (& track))
+    (let [start (time.tick_now)]
+      (run-one "orders-filter!" (bench-orders-update-filter! (slice orders-filter) ORDER_REPS) start (& track)))
+    (mem.tracking_allocator_reset (& track))
+    (let [start (time.tick_now)]
+      (run-one "orders-ptr-loop" (bench-orders-update-pointer-loop (slice orders-ptr) ORDER_REPS) start (& track)))
+    (mem.tracking_allocator_reset (& track))
+    (let [start (time.tick_now)]
+      (run-one "report-eager" (bench-report-eager (slice orders) ORDER_REPS) start (& track)))
+    (mem.tracking_allocator_reset (& track))
+    (let [start (time.tick_now)]
+      (run-one "report-bang" (bench-report-bang (slice orders) ORDER_REPS) start (& track)))
+    (mem.tracking_allocator_reset (& track))
+    (let [start (time.tick_now)]
+      (run-one "report-loop" (bench-report-loop (slice orders) ORDER_REPS) start (& track)))))

@@ -334,7 +334,7 @@ if command -v emacs >/dev/null 2>&1; then
              (unwind-protect
                  (progn
                    (with-temp-file file
-                     (insert \"(package main)\\n(import \\\"core:fmt\\\")\\n\\n// Adds two ints.\\n(proc add [a: int, b: int] -> int\\n  (+ a b))\\n\\n(proc main []\\n  (fmt.println \\\"from main\\\"))\\n\\n(comment\\n  (add 1 2)\\n  (with-allocator [allocator context.temp_allocator]\\n    (add 2 1))\\n  (main))\\n\"))
+                     (insert \"(package main)\\n(import \\\"core:fmt\\\")\\n\\n// Adds two ints.\\n(proc add [a: int, b: int] -> int\\n  (+ a b))\\n\\n(proc add-two [a: int, b: int] -> int\\n  (add a b))\\n\\n(proc main []\\n  (fmt.println \\\"from main\\\"))\\n\\n(comment\\n  (add 1 2)\\n  (add-two 1 2)\\n  (with-allocator [allocator context.temp_allocator]\\n    (add 2 1))\\n  (main))\\n\"))
                    (find-file file)
                    (odinl-mode)
                    (unless (eq (key-binding (kbd \"M-.\")) (quote xref-find-definitions))
@@ -366,6 +366,20 @@ if command -v emacs >/dev/null 2>&1; then
                    (let ((defs (xref-backend-definitions (quote odinl) \"add\")))
                      (unless defs
                        (error \"Expected xref definition for add\")))
+                   (goto-char (point-min))
+                   (search-forward \"(add-two 1 2)\")
+                   (backward-char 7)
+                   (unless (equal (odinl--identifier-at-point) \"add-two\")
+                     (error \"Expected add-two identifier, got: %S\" (odinl--identifier-at-point)))
+                   (let ((defs (xref-backend-definitions (quote odinl) (odinl--identifier-at-point))))
+                     (unless defs
+                       (error \"Expected xref definition for same-file hyphenated proc\")))
+                   (let ((defs (xref-backend-definitions (quote odinl) \"map\")))
+                     (unless (and defs (string-match-p \"src/odinl/emit\\\\.odin\" (format \"%S\" defs)))
+                       (error \"Expected implementation xref for OdinL helper map, got: %S\" defs)))
+                   (let ((defs (xref-backend-definitions (quote odinl) \"proc\")))
+                     (unless (and defs (string-match-p \"src/odinl/parse\\\\.odin\" (format \"%S\" defs)))
+                       (error \"Expected implementation xref for OdinL form proc, got: %S\" defs)))
                    (let ((defs (xref-backend-definitions (quote odinl) \"fmt.println\")))
                      (unless defs
                        (error \"Expected xref definition for fmt.println\")))

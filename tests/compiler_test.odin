@@ -65,6 +65,7 @@ compile_all_examples :: proc(t: ^testing.T) {
         "examples/sequences.odinl",
         "examples/tap.odinl",
         "examples/unions.odinl",
+        "examples/vendor-raylib.odinl",
         "examples/vendor-stb-easy-font.odinl",
     }
 
@@ -193,6 +194,55 @@ add :: proc(a: int, b: int) -> int {
 
 main :: proc() {
     fmt.println(add(1, 2))
+}
+`
+    testing.expect_value(t, output, expected)
+}
+
+@(test)
+compile_eval_source_prints_block_forms_as_statements :: proc(t: ^testing.T) {
+    source := `(package main)
+(import os "core:os")
+
+(proc load-note [path: string] -> [data: []byte, err: os.Error]
+  (slurp path))`
+
+    output, err, ok := odinl.compile_eval_source(source, `(let [[data err] (load-note "tmp/odinl-note.txt")]
+  (if (!= err nil)
+    0
+    (do
+      (defer (delete data))
+      (len data))))`)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    expected := `package main
+
+import fmt "core:fmt"
+
+import os "core:os"
+
+load_note :: proc(path: string) -> (data: []byte, err: os.Error) {
+    return os.read_entire_file(path, context.allocator)
+}
+
+main :: proc() {
+    {
+        data, err := load_note("tmp/odinl-note.txt")
+        if (err) != (nil) {
+            fmt.println(0)
+        }
+        else {
+            {
+                defer delete(data)
+                fmt.println(len(data))
+            }
+        }
+    }
 }
 `
     testing.expect_value(t, output, expected)
@@ -1658,7 +1708,7 @@ main :: proc() {
 }
 
 odinl_map :: proc(f: proc(x: $T) -> $U, xs: []T) -> [dynamic]U {
-    out := make([dynamic]U)
+    out := make([dynamic]U, 0, len(xs))
     for x in xs {
         append(&out, f(x))
     }
@@ -1666,7 +1716,7 @@ odinl_map :: proc(f: proc(x: $T) -> $U, xs: []T) -> [dynamic]U {
 }
 
 odinl_filter :: proc(pred: proc(x: $T) -> bool, xs: []T) -> [dynamic]T {
-    out := make([dynamic]T)
+    out := make([dynamic]T, 0, len(xs))
     for x in xs {
         if pred(x) {
             append(&out, x)
@@ -1911,7 +1961,8 @@ compile_additional_sequence_helpers :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "reversed := odinl_reverse((joined)[:])"), true)
     testing.expect_value(t, strings.contains(output, "shuffled := odinl_shuffle(pick_first, (joined)[:])"), true)
     testing.expect_value(t, strings.contains(output, "sorted := odinl_sort((joined)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "descending := odinl_sort_by(neg, (joined)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "descending := odinl_sort_by_callback_neg((joined)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "import odinl_slice \"core:slice\""), true)
     testing.expect_value(t, strings.contains(output, "sampled := odinl_take_nth(2, (joined)[:])"), true)
     testing.expect_value(t, strings.contains(output, "odinl_thread_1 := odinl_mapcat(pair, (xs)[:])"), true)
     testing.expect_value(t, strings.contains(output, "defer delete(odinl_thread_1)"), true)
@@ -1924,7 +1975,7 @@ compile_additional_sequence_helpers :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "threaded_sample := odinl_map(neg, (odinl_thread_3)[:])"), true)
     testing.expect_value(t, strings.contains(output, "odinl_reverse_in_place((xs)[:])"), true)
     testing.expect_value(t, strings.contains(output, "odinl_sort_in_place((xs)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_sort_by_in_place(neg, (xs)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "odinl_sort_by_in_place_callback_neg((xs)[:])"), true)
     testing.expect_value(t, strings.contains(output, "odinl_shuffle_in_place(pick_first, (xs)[:])"), true)
     testing.expect_value(t, strings.contains(output, "odinl_map_in_place(neg, (mutable)[:])"), true)
     testing.expect_value(t, strings.contains(output, "odinl_map_indexed_in_place(add_index, (mutable)[:])"), true)
@@ -1943,12 +1994,15 @@ compile_additional_sequence_helpers :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "odinl_interleave :: proc(xs, ys: []$T) -> [dynamic]T"), true)
     testing.expect_value(t, strings.contains(output, "odinl_shuffle :: proc(pick: proc(n: int) -> int, xs: []$T) -> [dynamic]T"), true)
     testing.expect_value(t, strings.contains(output, "odinl_sort :: proc(xs: []$T) -> [dynamic]T"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_sort_by :: proc(f: proc(x: $T) -> $K, xs: []T) -> [dynamic]T"), true)
+    testing.expect_value(t, strings.contains(output, "odinl_slice.sort(out[:])"), true)
+    testing.expect_value(t, strings.contains(output, "odinl_sort_by_callback_neg :: proc(xs: []$T) -> [dynamic]T"), true)
+    testing.expect_value(t, strings.contains(output, "return neg(a) < neg(b)"), true)
     testing.expect_value(t, strings.contains(output, "odinl_take_nth :: proc(n: int, xs: []$T) -> [dynamic]T"), true)
     testing.expect_value(t, strings.contains(output, "odinl_reverse_in_place :: proc(xs: []$T)"), true)
     testing.expect_value(t, strings.contains(output, "odinl_shuffle_in_place :: proc(pick: proc(n: int) -> int, xs: []$T)"), true)
     testing.expect_value(t, strings.contains(output, "odinl_sort_in_place :: proc(xs: []$T)"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_sort_by_in_place :: proc(f: proc(x: $T) -> $K, xs: []T)"), true)
+    testing.expect_value(t, strings.contains(output, "odinl_slice.sort(xs)"), true)
+    testing.expect_value(t, strings.contains(output, "odinl_sort_by_in_place_callback_neg :: proc(xs: []$T)"), true)
     testing.expect_value(t, strings.contains(output, "odinl_map_in_place :: proc(f: proc(x: $T) -> T, xs: []T)"), true)
     testing.expect_value(t, strings.contains(output, "odinl_map_indexed_in_place :: proc(f: proc(i: int, x: $T) -> T, xs: []T)"), true)
     testing.expect_value(t, strings.contains(output, "odinl_filter_in_place :: proc(pred: proc(x: $T) -> bool, xs: ^[dynamic]T)"), true)
@@ -2038,12 +2092,17 @@ compile_map_constructing_sequence_helpers :: proc(t: ^testing.T) {
 (proc identity [x: int] -> int
   x)
 
+(proc amount [x: int] -> int
+  x)
+
 (proc main []
   (let [xs (new []int [1 2 2 3])
         by-value (index-by identity xs)
         by-group (group-by identity xs)
+        by-count (count-by identity xs)
+        by-sum (sum-by identity amount xs)
         threaded (->> xs
-                      (group-by identity))
+                      (count-by identity))
         counts (frequencies xs)
         base (new map[string]int {"a" 1 "b" 2})
         overrides (new map[string]int {"b" 20 "c" 30})
@@ -2058,10 +2117,9 @@ compile_map_constructing_sequence_helpers :: proc(t: ^testing.T) {
       (each [_ group by-group]
         (delete group))
       (delete by-group))
-    (defer
-      (each [_ group threaded]
-        (delete group))
-      (delete threaded))
+    (defer (delete by-count))
+    (defer (delete by-sum))
+    (defer (delete threaded))
     (defer (delete counts))
     (defer (delete base))
     (defer (delete overrides))
@@ -2083,7 +2141,9 @@ compile_map_constructing_sequence_helpers :: proc(t: ^testing.T) {
 
     testing.expect_value(t, strings.contains(output, "by_value := odinl_index_by(identity, (xs)[:])"), true)
     testing.expect_value(t, strings.contains(output, "by_group := odinl_group_by(identity, (xs)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "threaded := odinl_group_by(identity, (xs)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "by_count := odinl_count_by(identity, (xs)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "by_sum := odinl_sum_by(identity, amount, (xs)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "threaded := odinl_count_by(identity, (xs)[:])"), true)
     testing.expect_value(t, strings.contains(output, "counts := odinl_frequencies((xs)[:])"), true)
     testing.expect_value(t, strings.contains(output, "merged := odinl_merge(base, overrides)"), true)
     testing.expect_value(t, strings.contains(output, "key_list := odinl_keys(base)"), true)
@@ -2094,6 +2154,8 @@ compile_map_constructing_sequence_helpers :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "odinl_merge_in_place(&(base), overrides)"), true)
     testing.expect_value(t, strings.contains(output, "odinl_index_by :: proc(f: proc(x: $T) -> $K, xs: []T) -> map[K]T"), true)
     testing.expect_value(t, strings.contains(output, "odinl_group_by :: proc(f: proc(x: $T) -> $K, xs: []T) -> map[K][dynamic]T"), true)
+    testing.expect_value(t, strings.contains(output, "odinl_count_by :: proc(f: proc(x: $T) -> $K, xs: []T) -> map[K]int"), true)
+    testing.expect_value(t, strings.contains(output, "odinl_sum_by :: proc(key_f: proc(x: $T) -> $K, value_f: proc(x: T) -> $V, xs: []T) -> map[K]V"), true)
     testing.expect_value(t, strings.contains(output, "odinl_frequencies :: proc(xs: []$T) -> map[T]int"), true)
     testing.expect_value(t, strings.contains(output, "odinl_merge :: proc(lhs, rhs: map[$K]$V) -> map[K]V"), true)
     testing.expect_value(t, strings.contains(output, "odinl_merge_in_place :: proc(target: ^map[$K]$V, source: map[K]V)"), true)
@@ -2150,20 +2212,23 @@ compile_keyword_callbacks_for_sequence_helpers :: proc(t: ^testing.T) {
 
 (struct User {
   :name string
+  :amount int
   :verified bool
 })
 
 (proc main []
-  (let [users (new []User [(User {:name "Ada" :verified true})
-                           (User {:name "Lin" :verified false})])
+  (let [users (new []User [(User {:name "Ada" :amount 10 :verified true})
+                           (User {:name "Lin" :amount 20 :verified false})])
         names (map :name users)
         by-name (index-by :name users)
         by-verified (group-by :verified users)
+        count-by-verified (count-by :verified users)
+        sum-by-verified (sum-by :verified :amount users)
         groups (partition-by :verified users)
         distinct-names (distinct-by :name users)
         sorted (sort-by :name users)
-        mutated (new [dynamic]User [(User {:name "Ada" :verified true})
-                                    (User {:name "Lin" :verified false})])
+        mutated (new [dynamic]User [(User {:name "Ada" :amount 10 :verified true})
+                                    (User {:name "Lin" :amount 20 :verified false})])
         verified (filter :verified users)
         unverified (remove :verified users)
         [first ok] (find :verified users)
@@ -2189,6 +2254,8 @@ compile_keyword_callbacks_for_sequence_helpers :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "names := odinl_map_field_name(type_of(((users)[:])[0].name), (users)[:])"), true)
     testing.expect_value(t, strings.contains(output, "by_name := odinl_index_by_field_name(type_of(((users)[:])[0].name), (users)[:])"), true)
     testing.expect_value(t, strings.contains(output, "by_verified := odinl_group_by_field_verified(type_of(((users)[:])[0].verified), (users)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "count_by_verified := odinl_count_by_field_verified(type_of(((users)[:])[0].verified), (users)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "sum_by_verified := odinl_sum_by_fields_verified_amount(type_of(((users)[:])[0].verified), type_of(((users)[:])[0].amount), (users)[:])"), true)
     testing.expect_value(t, strings.contains(output, "groups := odinl_partition_by_field_verified(type_of(((users)[:])[0].verified), (users)[:])"), true)
     testing.expect_value(t, strings.contains(output, "distinct_names := odinl_distinct_by_field_name(type_of(((users)[:])[0].name), (users)[:])"), true)
     testing.expect_value(t, strings.contains(output, "sorted := odinl_sort_by_field_name(type_of(((users)[:])[0].name), (users)[:])"), true)
@@ -2203,10 +2270,14 @@ compile_keyword_callbacks_for_sequence_helpers :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "odinl_map_field_name :: proc($Field_Type: typeid, xs: []$T) -> [dynamic]Field_Type"), true)
     testing.expect_value(t, strings.contains(output, "odinl_index_by_field_name :: proc($Key: typeid, xs: []$T) -> map[Key]T"), true)
     testing.expect_value(t, strings.contains(output, "odinl_group_by_field_verified :: proc($Key: typeid, xs: []$T) -> map[Key][dynamic]T"), true)
+    testing.expect_value(t, strings.contains(output, "odinl_count_by_field_verified :: proc($Key: typeid, xs: []$T) -> map[Key]int"), true)
+    testing.expect_value(t, strings.contains(output, "odinl_sum_by_fields_verified_amount :: proc($Key: typeid, $Value: typeid, xs: []$T) -> map[Key]Value"), true)
     testing.expect_value(t, strings.contains(output, "odinl_partition_by_field_verified :: proc($Key: typeid, xs: []$T) -> [dynamic][]T"), true)
     testing.expect_value(t, strings.contains(output, "odinl_distinct_by_field_name :: proc($Key: typeid, xs: []$T) -> [dynamic]T"), true)
     testing.expect_value(t, strings.contains(output, "odinl_sort_by_field_name :: proc($Key: typeid, xs: []$T) -> [dynamic]T"), true)
+    testing.expect_value(t, strings.contains(output, "odinl_slice.sort_by(out[:], proc(a, b: T) -> bool"), true)
     testing.expect_value(t, strings.contains(output, "odinl_sort_by_in_place_field_name :: proc(xs: []$T)"), true)
+    testing.expect_value(t, strings.contains(output, "odinl_slice.sort_by(xs, proc(a, b: T) -> bool"), true)
     testing.expect_value(t, strings.contains(output, "odinl_filter_in_place_field_verified :: proc(xs: ^[dynamic]$T)"), true)
     testing.expect_value(t, strings.contains(output, "odinl_remove_in_place_field_verified :: proc(xs: ^[dynamic]$T)"), true)
     testing.expect_value(t, strings.contains(output, "odinl_filter_field_verified :: proc(xs: []$T) -> [dynamic]T"), true)
@@ -2532,13 +2603,13 @@ compile_pointer_deref_and_address_of :: proc(t: ^testing.T) {
 })
 
 (proc ptr-value [x: ^int] -> int
-  (^ x))
+  (deref x))
 
 (proc bump [x: ^int]
-  (set! (^ x) (+ (^ x) 1)))
+  (set! (deref x) (+ (deref x) 1)))
 
 (proc borrow-name [p: ^Person] -> ^string
-  (& (:name (^ p))))`
+  (addr (:name (deref p))))`
 
     output, err, ok := odinl.compile_source(source)
     testing.expect_value(t, ok, true)
@@ -2555,15 +2626,15 @@ Person :: struct {
 }
 
 ptr_value :: proc(x: ^int) -> int {
-    return (x)^
+    return x^
 }
 
 bump :: proc(x: ^int) {
-    (x)^ = ((x)^) + (1)
+    x^ = (x^) + (1)
 }
 
 borrow_name :: proc(p: ^Person) -> ^string {
-    return &((p)^.name)
+    return &(p^.name)
 }
 `
     testing.expect_value(t, output, expected)
@@ -2619,7 +2690,7 @@ compile_lisp_predicate_and_bang_identifier_names :: proc(t: ^testing.T) {
   (> x threshold))
 
 (proc bump! [x: ^int]
-  (set! (^ x) (+ (^ x) 1)))
+  (set! (deref x) (+ (deref x) 1)))
 
 (proc main []
   (let [x 1]
@@ -2640,7 +2711,7 @@ greater_than_p :: proc(threshold: int, x: int) -> bool {
 }
 
 bump_bang :: proc(x: ^int) {
-    (x)^ = ((x)^) + (1)
+    x^ = (x^) + (1)
 }
 
 main :: proc() {
@@ -2664,7 +2735,7 @@ compile_odin_shaped_type_spellings :: proc(t: ^testing.T) {
 })
 
 (proc values [state: ^Raw-Types] -> []int
-  (:values (^ state)))
+  (:values (deref state)))
 
 (proc main []
   (let [values (new []int [1 2 3])
@@ -2693,7 +2764,7 @@ Raw_Types :: struct {
 }
 
 values :: proc(state: ^Raw_Types) -> []int {
-    return (state)^.values
+    return state^.values
 }
 
 main :: proc() {

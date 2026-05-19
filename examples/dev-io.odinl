@@ -1,4 +1,8 @@
-// Small file-backed development helpers.
+// File-backed development helpers.
+//
+// This example is for the "I computed/downloaded something once, now I want to
+// reuse it in later evals" workflow. There is no hidden REPL state here:
+// values are saved to ordinary files, then later eval calls read those files.
 (package main)
 (import json "core:encoding/json")
 (import os "core:os")
@@ -12,13 +16,29 @@
   :n int
 })
 
+// The examples below write under ./tmp. Odin's write helpers do not create
+// parent directories, so production code should create the directory first or
+// surface that error. Here we keep the directory policy explicit and boring.
+(proc ensure-dev-dir [] -> os.Error
+  (let [err (os.make_directory_all "tmp")]
+    (if (and (!= err nil)
+             (not (os.is_directory "tmp")))
+      err
+      nil)))
+
 (proc save-note [path: string, text: string] -> os.Error
-  (spit path text))
+  (let [dir-err (ensure-dev-dir)]
+    (if (!= dir-err nil)
+      dir-err
+      (spit path text))))
 
 (proc save-note-json [path: string, note: Note] -> bool
-  (let [[marshal-err write-err] (save-json path note)]
-    (and (== marshal-err nil)
-         (== write-err nil))))
+  (let [dir-err (ensure-dev-dir)]
+    (if (!= dir-err nil)
+      false
+      (let [[marshal-err write-err] (save-json path note)]
+        (and (== marshal-err nil)
+             (== write-err nil))))))
 
 (proc note-byte-count [path: string] -> int
   (let [[data err] (slurp path)]
@@ -33,9 +53,12 @@
   (slurp path))
 
 (proc save-count-json [path: string, n: int] -> bool
-  (let [[marshal-err write-err] (save-json path (Count {:n n}))]
-    (and (== marshal-err nil)
-         (== write-err nil))))
+  (let [dir-err (ensure-dev-dir)]
+    (if (!= dir-err nil)
+      false
+      (let [[marshal-err write-err] (save-json path (Count {:n n}))]
+        (and (== marshal-err nil)
+             (== write-err nil))))))
 
 (proc load-count-json [path: string] -> int
   (let [[count read-err unmarshal-err] (load-json Count path)]
@@ -48,11 +71,17 @@
   (return))
 
 (comment
-  ;; These forms are meant for editor eval against a scratch file path:
+  ;; These forms are meant for editor eval. They deliberately use real files,
+  ;; so the result survives across separate odinl eval processes.
+
+  (ensure-dev-dir)
+  ;; => nil
 
   (save-note "tmp/odinl-note.txt" "hello")
   ;; => nil
 
+  ;; JSON is useful for typed cached dev data: save a real struct, then reload
+  ;; it in a later eval without recomputing the original value.
   (save-note-json "tmp/odinl-note.json" (Note {:title "hello" :body "from OdinL"}))
   ;; => true
 

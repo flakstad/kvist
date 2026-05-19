@@ -73,6 +73,10 @@ These helpers are already in scope and should remain small:
 (index-by :field xs)
 (group-by f xs)
 (group-by :field xs)
+(count-by f xs)
+(count-by :field xs)
+(sum-by key-f value-f xs)
+(sum-by :key-field :value-field xs)
 (frequencies xs)
 (keys m)
 (vals m)
@@ -125,11 +129,12 @@ the value or key must be valid as an Odin map key. `zipmap`, `index-by`, and
 input maps, with right-hand values replacing duplicate keys. `keys` and `vals`
 return owned dynamic arrays copied from a map. `group-by` returns an owned map
 whose values are owned dynamic arrays; delete each group before deleting the map.
-`partition`, `partition-all`, and `partition-by` return owned dynamic arrays of
-borrowed slice chunks. `keep` is Odin-shaped: the callback returns `(value,
-ok)`, and only `ok` values are appended. `mapcat` is also Odin-shaped: the
-callback returns a borrowed slice, and `mapcat` appends those values into one
-owned dynamic array.
+`count-by` and `sum-by` return owned maps for common aggregate cases where the
+grouped items themselves are not needed. `partition`, `partition-all`, and
+`partition-by` return owned dynamic arrays of borrowed slice chunks. `keep` is
+Odin-shaped: the callback returns `(value, ok)`, and only `ok` values are
+appended. `mapcat` is also Odin-shaped: the callback returns a borrowed slice,
+and `mapcat` appends those values into one owned dynamic array.
 
 `sort` and `sort-by` copy before sorting. They do not mutate the input
 collection, and their result is owned.
@@ -165,6 +170,8 @@ helpers:
 (map :name users)
 (index-by :id users)
 (group-by :status users)
+(count-by :status users)
+(sum-by :region :amount orders)
 (partition-by :status users)
 (distinct-by :id users)
 (sort-by :age users)
@@ -210,8 +217,100 @@ For hot paths, prefer one of these shapes:
   right Odin choice;
 - write an explicit `each` loop when one pass and no intermediate collection is
   needed;
-- later, use transducer-style lowering once it exists to fuse pipelines into one
-  loop and one final allocation.
+- avoid `group-by` when only aggregate totals are needed. Use `count-by` or
+  `sum-by` for simple aggregate maps, or accumulate directly into maps for
+  custom stateful aggregates.
+
+The useful distinction is not "helpers versus loops". It is whether the
+intermediate collection is a real value in the program.
+
+Use eager helpers when the intermediate value has meaning:
+
+```clojure
+(let [settled (map settle-order orders)
+      paid (filter settled? settled)
+      groups (group-by :region paid)]
+  ...)
+```
+
+Use bang helpers when you own a working buffer:
+
+```clojure
+(let [work (map settle-order orders)]
+  (filter! settled? work)
+  ...)
+```
+
+Use aggregate helpers when grouped slices would be waste:
+
+```clojure
+(let [work (map settle-order orders)]
+  (filter! settled? work)
+  (let [revenue-by-region (sum-by :region :amount work)
+        count-by-region (count-by :region work)]
+    ...))
+```
+
+Use an explicit loop when even those aggregate maps are just implementation
+detail before a scalar result, or when the update needs custom state:
+
+```clojure
+(let [revenue-by-region (make map[int]int)
+      count-by-region (make map[int]int)]
+  (each [order orders]
+    (let [settled (settle-order order)]
+      (when (settled? settled)
+        (set! (get revenue-by-region (:region settled))
+              (+ (get revenue-by-region (:region settled))
+                 (:amount settled)))
+        (set! (get count-by-region (:region settled))
+              (+ (get count-by-region (:region settled))
+                 1))))))
+```
+
+That loop is not a failure of the helper library. It is ordinary Odin-shaped
+code for a stateful aggregate.
+
+The benchmark suite includes direct Odin comparisons for these cases:
+
+```sh
+./scripts/bench_sequence_helpers.sh
+BASE_REF=main ./scripts/bench_sequence_helpers.sh
+./scripts/bench_aggregate_helpers.sh
+```
+
+The important benchmark patterns are:
+
+- `pipe-map-filter`: eager `map -> filter -> reduce`; clear but allocates two
+  intermediates.
+- `pipe-bang-copy`: one owned working copy plus `filter!`; less allocation, but
+  still not a fused reduction.
+- `pipe-loop`: explicit loop; no allocation and close to direct Odin.
+- `report-eager`: materialized report pipeline with `map`, `filter`, `group-by`,
+  and `sort-by!`.
+- `report-bang`: mutable working buffer before grouping.
+- `report-loop`: direct aggregate maps and final report rows only.
+
+At the time of writing, the report benchmark shows the intended shape:
+
+```text
+report-eager  materializes settled orders, paid orders, groups, and rows
+report-bang   materializes one working order buffer, groups, and rows
+report-loop   accumulates maps directly and materializes final rows only
+```
+
+`report-loop` is the fastest and least allocating version because the workload
+only needs per-region totals, not actual grouped order slices. `count-by` and
+`sum-by` cover the common middle ground where aggregate maps are meaningful
+outputs. If a caller needs to inspect the grouped orders themselves, `group-by`
+is still the right helper.
+
+The `examples/orders-report.odinl` example also includes an
+`aggregate-helper-report-score` variant that uses `sum-by` and `count-by`. The
+focused aggregate benchmark compares that shape with the grouped version and a
+direct aggregate loop. Its expected result is lower allocation than `group-by`,
+but still slower and more allocating than the direct fused loop because
+settling, filtering, summing, and counting remain separate passes.
 
 ## Completion Before Transducers
 
@@ -360,8 +459,8 @@ Sequence helpers need an explicit ownership story:
   `take-nth` allocate and return owned dynamic arrays.
 - Chunking helpers `partition`, `partition-all`, and `partition-by` allocate the
   outer dynamic array, but their slice chunks borrow the input collection.
-- `merge`, `zipmap`, `index-by`, and `frequencies` allocate and return owned
-  maps.
+- `merge`, `zipmap`, `index-by`, `count-by`, `sum-by`, and `frequencies`
+  allocate and return owned maps.
 - `keys` and `vals` allocate and return owned dynamic arrays copied from a map.
 - `group-by` allocates an owned map and one owned dynamic array per key. Delete
   the groups, then delete the map.

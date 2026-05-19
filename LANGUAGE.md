@@ -857,6 +857,37 @@ Important semantic note: keyword field access is not map lookup. It denotes
 static named field selection and should be a compile-time error when used
 against a type that does not support that field.
 
+### Pointer dereference and address-of
+
+Pointer types keep Odin spelling in type position:
+
+```clojure
+^Order
+^[dynamic]Order
+```
+
+In expression position, prefer the readable aliases:
+
+```clojure
+(deref order)
+(addr (:amount order))
+```
+
+These lower to Odin pointer dereference and address-of:
+
+```odin
+order^
+&(order.amount)
+```
+
+The operator forms are still available when the direct Odin punctuation is
+clearer:
+
+```clojure
+(^ order)
+(& (:amount order))
+```
+
 ### Threading
 
 Field-heavy code should compose naturally with `->`:
@@ -1281,6 +1312,8 @@ not part of the original expected-core list:
 
 - `(in? collection key)`, composed with `(not ...)` for absence checks
 - `(break)` and `(continue)`
+- `(deref x)` / `(^ x)` for pointer dereference
+- `(addr x)` / `(& x)` for address-of
 - directive expression wrappers such as `(#force_inline query-iter (& q))`
 
 These are intentionally small Odin conveniences, not new semantic layers.

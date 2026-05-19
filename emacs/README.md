@@ -17,8 +17,9 @@ indentation for OdinL source.
 It also registers an xref backend and completion-at-point function. `M-.`
 jumps to definitions indexed by `odinl symbols`, including current-file
 declarations and simple imported Odin package definitions like `fmt.println`.
-Completion includes OdinL forms, sequence helpers, current-file declarations,
-and imported package members.
+For OdinL language forms and sequence helpers, `M-.` jumps to the compiler
+implementation. Completion includes OdinL forms, sequence helpers, current-file
+declarations, and imported package members.
 
 `C-c C-.` shows docs for the symbol at point without jumping. OdinL docs come
 from contiguous `//`, `;`, or `/* ... */` comments immediately preceding a

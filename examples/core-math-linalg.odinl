@@ -1,4 +1,8 @@
 // Host interop with core math, random, and linalg packages.
+//
+// These calls are intentionally plain. OdinL does not wrap the math packages:
+// scalar math, vector construction, linalg helpers, and rand calls lower to the
+// same Odin APIs you would call in a normal Odin file.
 (package main)
 (import "core:fmt")
 (import math "core:math")
@@ -6,12 +10,16 @@
 (import linalg "core:math/linalg")
 
 (proc rounded-root [] -> int
+  ;; math.sqrt and math.round are ordinary numeric procs. Casts stay explicit so
+  ;; the generated Odin keeps the same type story as hand-written Odin.
   (int (math.round (math.sqrt (f64 25.0)))))
 
 (proc clamped-score [x: int] -> int
   (math.clamp x 0 10))
 
 (proc vector-dot [] -> f32
+  ;; linalg.Vector3f32 is a fixed array type. The new form builds the Odin array
+  ;; literal directly; there is no heap ownership to clean up here.
   (let [a (new linalg.Vector3f32 [1.0 2.0 3.0])
         b (new linalg.Vector3f32 [4.0 5.0 6.0])]
     (linalg.dot a b)))
@@ -21,6 +29,8 @@
     (linalg.length v)))
 
 (proc bounded-random [] -> int
+  ;; Randomness stays an Odin concern. This uses the default rand context just
+  ;; like hand-written Odin using core:math/rand would.
   (rand.int_max 10))
 
 (proc main []
@@ -30,6 +40,9 @@
                (vector-length)))
 
 (comment
+  ;; Each small proc is safe to eval independently from Emacs. The main proc is
+  ;; only a smoke test; the interesting examples are the forms below.
+
   (rounded-root)
   ;; => 5
 

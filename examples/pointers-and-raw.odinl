@@ -9,15 +9,15 @@
 })
 
 (proc bump! [x: ^int]
-  (set! (^ x) (+ (^ x) 1)))
+  (set! (deref x) (+ (deref x) 1)))
 
 (proc counter-value [counter: ^Counter] -> int
-  (:value (^ counter)))
+  (:value (deref counter)))
 
 (proc counter-after-bump [] -> int
   (let [counter (Counter {:value 41})]
-    (bump! (& (:value counter)))
-    (counter-value (& counter))))
+    (bump! (addr (:value counter)))
+    (counter-value (addr counter))))
 
 (proc main []
   (fmt.println (counter-after-bump)))

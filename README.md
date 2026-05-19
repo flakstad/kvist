@@ -124,7 +124,27 @@ The CLI can also invoke Odin for generated files directly:
 The examples cover control flow, collection literals, procedure values,
 core sequence helpers over scalars and structs, pointer/raw interop,
 source-level procedure directives, named returns, flat multi-return
-destructuring, and struct-field destructuring.
+destructuring, struct-field destructuring, in-place mutation, and a small
+order-report workload that compares eager helpers, bang helpers, and explicit
+aggregate loops.
+
+Run the sequence/helper benchmark suite with:
+
+```sh
+./scripts/bench_sequence_helpers.sh
+```
+
+Set `BASE_REF` to compare the current compiler against a specific revision:
+
+```sh
+BASE_REF=main ./scripts/bench_sequence_helpers.sh
+```
+
+For the current-only aggregate helper comparison against direct Odin, run:
+
+```sh
+./scripts/bench_aggregate_helpers.sh
+```
 
 The compiler implementation is in Odin under `src/odinl`; the CLI entry point
 is `cmd/odinl/main.odin`.
@@ -573,7 +593,9 @@ foreign_call :: proc(handle: Foreign_Handle) ---
   `(partition n xs)`, `(partition-all n xs)`, `(partition-by f xs)`,
   `(partition-by :field xs)`, `(zipmap keys vals)`, `(index-by f xs)`,
   `(index-by :field xs)`, `(group-by f xs)`, `(group-by :field xs)`,
-  `(frequencies xs)`, `(keys m)`, `(vals m)`, `(distinct xs)`, `(distinct-by f xs)`,
+  `(count-by f xs)`, `(count-by :field xs)`, `(sum-by key-f value-f xs)`,
+  `(sum-by :key-field :value-field xs)`, `(frequencies xs)`, `(keys m)`,
+  `(vals m)`, `(distinct xs)`, `(distinct-by f xs)`,
   and `(distinct-by :field xs)`, plus bounded producers
   `(range ...)`, `(repeat n x)`, `(repeatedly n f)`, `(iterate n f x)`,
   and `(cycle n xs)`
@@ -583,7 +605,8 @@ foreign_call :: proc(handle: Foreign_Handle) ---
 - `(tap> value)` and `(tap> :label value)` for explicit stdout inspection;
   require `core:fmt` and return the tapped value
 - keywords can stand in for field callbacks in those helpers, e.g. `(map :name users)`,
-  `(index-by :id users)`, `(group-by :status users)`, `(partition-by :status users)`,
+  `(index-by :id users)`, `(group-by :status users)`, `(count-by :status users)`,
+  `(sum-by :region :amount orders)`, `(partition-by :status users)`,
   `(sort-by :age users)`, and `(filter :verified users)`
 - `(:field value)`, `(get value key)`, `(get map key default)`, `(-> value steps...)`, and `(->> value steps...)`
 - `(^ ptr)` and `(& place)`

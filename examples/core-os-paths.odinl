@@ -1,4 +1,8 @@
 // Host interop with core:os path and file helpers.
+//
+// This example keeps the Odin API visible. OdinL is only changing call syntax:
+// paths are cleaned by core:os, file bytes are owned slices from core:os, and
+// callers still delete those slices when they are done.
 (package main)
 (import "core:fmt")
 (import os "core:os")
@@ -19,8 +23,20 @@
         (defer (delete cwd))
         (len (os.base cwd))))))
 
+(proc ensure-demo-dir [] -> os.Error
+  ;; write_entire_file does not create parent directories. Treat an existing
+  ;; tmp directory as success and surface any real filesystem error.
+  (let [err (os.make_directory_all "tmp")]
+    (if (and (!= err nil)
+             (not (os.is_directory "tmp")))
+      err
+      nil)))
+
 (proc write-demo-file [path: string] -> os.Error
-  (os.write_entire_file path "hello from core:os"))
+  (let [dir-err (ensure-demo-dir)]
+    (if (!= dir-err nil)
+      dir-err
+      (os.write_entire_file path "hello from core:os"))))
 
 (proc read-demo-length [path: string] -> int
   (let [[data err] (os.read_entire_file path context.allocator)]
@@ -37,12 +53,18 @@
   (fmt.println (clean-base-length) (cwd-base-length)))
 
 (comment
+  ;; clean_path allocates a cleaned path string because we pass an allocator.
+  ;; The proc deletes it before returning, so callers only get a scalar length.
   (clean-base-length)
   ;; => 11
 
+  ;; get_working_directory also allocates. This is the common pattern for Odin
+  ;; APIs that return owned data: handle the error, defer delete, then use it.
   (cwd-base-length)
   ;; => length of the current checkout directory name
 
+  ;; The file helpers write under ./tmp relative to this source file during
+  ;; odinl eval. Creating the directory is part of the example on purpose.
   (write-demo-file "tmp/odinl-core-os.txt")
   ;; => nil
 

@@ -1,4 +1,8 @@
 // Host interop with a vendor package: vendor:stb/easy_font.
+//
+// vendor:stb/easy_font is small and terminal-safe, so it is a good first vendor
+// example. It exposes Odin structs/arrays and simple procs; OdinL calls them
+// directly instead of adding an abstraction layer.
 (package main)
 (import "core:fmt")
 (import easy "vendor:stb/easy_font")
@@ -10,6 +14,9 @@
   (easy.height "OdinL"))
 
 (proc quad-count [] -> int
+  ;; easy.print writes quads into caller-provided storage. That is an important
+  ;; Odin pattern: allocate or reserve the buffer at the call site, pass a slice
+  ;; to the library, and use the returned count.
   (let [color (new easy.Color [255 255 255 255])
         quads (new [128]easy.Quad [])]
     (easy.print (f32 0) (f32 0) "OdinL" color (slice quads))))
@@ -18,6 +25,9 @@
   (fmt.println (text-width) (text-height) (quad-count)))
 
 (comment
+  ;; These are safe to eval in a terminal. They do not open a window or allocate
+  ;; long-lived resources.
+
   (text-width)
   ;; => width in stb_easy_font units
 

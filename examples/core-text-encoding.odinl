@@ -1,4 +1,9 @@
 // Host interop with core text, parsing, encoding, and crypto packages.
+//
+// This file shows the ordinary Odin shape for string work: some helpers return
+// plain booleans or integers, while encoding/parsing helpers may return owned
+// slices plus errors. Owned slices are deleted in the same proc that consumes
+// them unless ownership is deliberately returned to the caller.
 (package main)
 (import "core:fmt")
 (import strings "core:strings")
@@ -12,6 +17,8 @@
        (strings.contains line "active=true")))
 
 (proc word-count [] -> int
+  ;; strings.fields allocates the slice of string fields. We delete it before
+  ;; returning because callers only need the count.
   (let [[words err] (strings.fields "  Ada  Lin   Grace  ")]
     (if (!= err nil)
       0
@@ -24,6 +31,8 @@
     (if ok value 0)))
 
 (proc base64-roundtrip-length [] -> int
+  ;; base64.encode and base64.decode allocate owned []byte values. The raw Odin
+  ;; transmute is explicit because Odin distinguishes string from byte slices.
   (let [text "odinl"
         [encoded encode-err] (base64.encode (odin "transmute([]byte)text"))]
     (if (!= encode-err nil)
@@ -38,6 +47,8 @@
               (len decoded))))))))
 
 (proc sha256-hex-length [] -> int
+  ;; sha2 uses an explicit context, update, and final call. hex.encode then
+  ;; allocates the printable digest bytes, which this proc deletes locally.
   (let [text "odinl"
         ctx (sha2.Context_256 {})
         digest (new [32]byte [])]
@@ -59,6 +70,9 @@
                (sha256-hex-length)))
 
 (comment
+  ;; These examples are useful for learning the host APIs because the Odin
+  ;; package names and result ownership are still visible at the call site.
+
   (useful-line? "user:Ada active=true")
   ;; => true
 

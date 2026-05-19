@@ -29,6 +29,9 @@
     (defer (delete buffer))
     (count buffer)))
 
+// with-allocator temporarily changes context.allocator for the body. This is
+// useful when a whole operation should allocate from a caller-provided allocator.
+// The dynamic array still owns storage and is still deleted explicitly.
 (proc temp-buffer-len [] -> int
   (with-allocator [allocator context.temp_allocator]
     (let [buffer (make [dynamic]int)]
@@ -36,6 +39,9 @@
       (into! buffer (new []int [1 2]))
       (count buffer))))
 
+// with-temp-allocator starts Odin's temp allocator scope and ends it at block
+// exit. This is good for scratch work that cannot escape the block. OdinL
+// rejects obvious attempts to return owned values allocated inside this scope.
 (proc temp-scoped-buffer-len [] -> int
   (with-temp-allocator [allocator]
     (let [buffer (make [dynamic]int)]
@@ -83,15 +89,20 @@
   (fmt.println (lookup-two)))
 
 (comment
+  ;; Struct construction is just Odin struct construction in parens.
   (user-name)
   ;; => Ada
 
+  ;; A dynamic array literal owns storage. Bind it and delete it in the same
+  ;; scope unless you are returning ownership to the caller.
   (dynamic-first)
   ;; => 21
 
   (empty-buffer-len)
   ;; => 0
 
+  ;; Allocator examples are deliberately small. Use C-c C-m to expand one and
+  ;; inspect the generated Odin when learning the ownership rules.
   (temp-buffer-len)
   ;; => 2
 

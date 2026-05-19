@@ -83,6 +83,18 @@
     (defer (delete counts))
     (get counts 2)))
 
+(proc count-by-parity-total [] -> int
+  (let [xs (new []int [1 2 3 4 6])
+        counts (count-by parity xs)]
+    (defer (delete counts))
+    (+ (get counts 0) (get counts 1))))
+
+(proc sum-by-parity-total [] -> int
+  (let [xs (new []int [1 2 3 4 6])
+        sums (sum-by parity identity-int xs)]
+    (defer (delete sums))
+    (+ (get sums 0) (get sums 1))))
+
 (proc indexed-name-count [] -> int
   (let [names (new []string ["Ada" "Lin" "Grace"])
         by-name (index-by name-key names)]
@@ -340,6 +352,12 @@
 
   (repeated-two-count)
   ;; => 2
+
+  (count-by-parity-total)
+  ;; => 5
+
+  (sum-by-parity-total)
+  ;; => 16
 
   (indexed-name-count)
   ;; => 3

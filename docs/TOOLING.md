@@ -129,6 +129,11 @@ explicitly. That is intentionally modest: it works in normal runs and editor
 evals, it is visible in the generated Odin, and it does not depend on a hidden
 global tap registry.
 
+In practice, `tap>` is the expression-friendly version of adding a temporary
+print line: wrap a value, see it, and keep passing the same value onward. It is
+especially useful inside a threaded pipeline or nested expression where adding a
+separate statement would force a local binding just for inspection.
+
 `tap>` also works as a `->` / `->>` thread step:
 
 ```clojure
@@ -158,6 +163,12 @@ This is an editor/CLI workflow, not a hidden language runtime. A watch should be
 described as "rerun this form when these files change", not "maintain live
 mutable REPL state".
 
+A future watch command should be explicit about what it reruns. It can be useful
+for repeatedly checking a form, rerunning a saved-data transformation, or
+refreshing inline eval output while editing. It should not silently manage a web
+server lifecycle by default; explicit run/restart commands are clearer for that
+kind of process.
+
 ### Disk-Backed Dev Values
 
 The important iterative workflow is:
@@ -186,6 +197,12 @@ lowers to `os.write_entire_file(path, data)` and returns `os.Error`. `(slurp
 path)` lowers to `os.read_entire_file(path, context.allocator)` and returns
 owned `[]byte` plus `os.Error`; callers delete the bytes or return them to
 transfer ownership.
+
+`odinl eval` runs generated scratch code from the source file's directory, so
+relative dev paths such as `tmp/users.json` are stable across separate eval
+processes. Odin's file-writing calls do not create parent directories; examples
+that write under `tmp` should create that directory explicitly and treat the
+returned error as ordinary program data.
 
 Saving JSON can also stay boring:
 
