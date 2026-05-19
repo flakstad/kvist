@@ -940,6 +940,7 @@ The intended surface style can still be familiar:
 (drop 2 xs)
 (butlast xs)
 (drop-last 2 xs)
+(take-nth 2 xs)
 (first xs)
 (second xs)
 (last xs)

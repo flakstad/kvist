@@ -1,0 +1,47 @@
+// Host interop with core math, random, and linalg packages.
+(package main)
+(import "core:fmt")
+(import math "core:math")
+(import rand "core:math/rand")
+(import linalg "core:math/linalg")
+
+(proc rounded-root [] -> int
+  (int (math.round (math.sqrt (f64 25.0)))))
+
+(proc clamped-score [x: int] -> int
+  (math.clamp x 0 10))
+
+(proc vector-dot [] -> f32
+  (let [a (new linalg.Vector3f32 [1.0 2.0 3.0])
+        b (new linalg.Vector3f32 [4.0 5.0 6.0])]
+    (linalg.dot a b)))
+
+(proc vector-length [] -> f32
+  (let [v (new linalg.Vector3f32 [3.0 4.0 0.0])]
+    (linalg.length v)))
+
+(proc bounded-random [] -> int
+  (rand.int_max 10))
+
+(proc main []
+  (fmt.println (rounded-root)
+               (clamped-score 42)
+               (vector-dot)
+               (vector-length)))
+
+(comment
+  (rounded-root)
+  ;; => 5
+
+  (clamped-score 42)
+  ;; => 10
+
+  (vector-dot)
+  ;; => 32
+
+  (vector-length)
+  ;; => 5
+
+  (bounded-random)
+  ;; => an int in [0, 10)
+)

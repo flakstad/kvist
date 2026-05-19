@@ -50,6 +50,9 @@ main :: proc() {
 compile_all_examples :: proc(t: ^testing.T) {
     examples := [?]string{
         "examples/control-flow.odinl",
+        "examples/core-math-linalg.odinl",
+        "examples/core-os-paths.odinl",
+        "examples/core-text-encoding.odinl",
         "examples/data-literals.odinl",
         "examples/declarations.odinl",
         "examples/dev-io.odinl",
@@ -62,6 +65,7 @@ compile_all_examples :: proc(t: ^testing.T) {
         "examples/sequences.odinl",
         "examples/tap.odinl",
         "examples/unions.odinl",
+        "examples/vendor-stb-easy-font.odinl",
     }
 
     for path in examples {
@@ -110,6 +114,57 @@ main :: proc() {
 }
 `
     testing.expect_value(t, output, expected)
+}
+
+@(test)
+symbols_source_indexes_top_level_forms :: proc(t: ^testing.T) {
+    source := `(package main)
+(import strings "core:strings")
+
+/*
+ * A user record.
+ * Owned by caller.
+ */
+(struct User {
+  :name string
+  :active bool
+})
+
+(enum Status [
+  Active
+  Archived
+])
+
+(union Value {
+  :i int
+  :s string
+})
+
+(const max-age int 120)
+
+// Returns true for active users.
+// Used by sequence examples.
+(proc active? [user: User] -> bool
+  (:active user))`
+
+    output, err, ok := odinl.symbols_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "kind\tname\tline\tcolumn\tdetail\tdoc\n"), true)
+    testing.expect_value(t, strings.contains(output, "import\tstrings\t2\t9\tcore:strings\t\n"), true)
+    testing.expect_value(t, strings.contains(output, "struct\tUser\t8\t9\t\tA user record.\\nOwned by caller.\n"), true)
+    testing.expect_value(t, strings.contains(output, "field\tUser.name\t9\t3\tUser\t\n"), true)
+    testing.expect_value(t, strings.contains(output, "enum\tStatus\t13\t7\t\t\n"), true)
+    testing.expect_value(t, strings.contains(output, "variant\tStatus.Active\t14\t3\tStatus\t\n"), true)
+    testing.expect_value(t, strings.contains(output, "union\tValue\t18\t8\t\t\n"), true)
+    testing.expect_value(t, strings.contains(output, "variant\tValue.i\t19\t3\tValue\t\n"), true)
+    testing.expect_value(t, strings.contains(output, "const\tmax-age\t23\t8\t\t\n"), true)
+    testing.expect_value(t, strings.contains(output, "proc\tactive?\t27\t7\t\tReturns true for active users.\\nUsed by sequence examples.\n"), true)
 }
 
 @(test)
@@ -353,6 +408,32 @@ reader_converts_semicolon_doc_comments :: proc(t: ^testing.T) {
     testing.expect_value(t, len(forms), 1)
     testing.expect_value(t, len(forms[0].doc_lines), 1)
     testing.expect_value(t, forms[0].doc_lines[0], "// Lisp doc.")
+}
+
+@(test)
+reader_converts_block_doc_comments :: proc(t: ^testing.T) {
+    old_allocator := context.allocator
+    temp_scope := runtime.default_temp_allocator_temp_begin()
+    defer runtime.default_temp_allocator_temp_end(temp_scope)
+    context.allocator = context.temp_allocator
+    defer context.allocator = old_allocator
+
+    source := `/*
+ * Block doc.
+ * Second line.
+ */
+(const answer 42)`
+
+    forms, err, ok := odinl.read_top_forms(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+
+    testing.expect_value(t, len(forms), 1)
+    testing.expect_value(t, len(forms[0].doc_lines), 1)
+    testing.expect_value(t, forms[0].doc_lines[0], "Block doc.\nSecond line.")
 }
 
 @(test)
@@ -1770,12 +1851,16 @@ compile_additional_sequence_helpers :: proc(t: ^testing.T) {
         shuffled (shuffle pick-first joined)
         sorted (sort joined)
         descending (sort-by neg joined)
+        sampled (take-nth 2 joined)
         threaded-flat (->> xs
                            (mapcat pair)
                            (filter even?))
         threaded-sorted (->> xs
                              (sort)
                              (filter even?))
+        threaded-sample (->> xs
+                             (take-nth 2)
+                             (map neg))
         tail-last (last joined)
         no-items? (empty? (drop 3 xs))]
     (defer (delete mutable))
@@ -1791,8 +1876,10 @@ compile_additional_sequence_helpers :: proc(t: ^testing.T) {
     (defer (delete shuffled))
     (defer (delete sorted))
     (defer (delete descending))
+    (defer (delete sampled))
     (defer (delete threaded-flat))
     (defer (delete threaded-sorted))
+    (defer (delete threaded-sample))
     (reverse! xs)
     (sort! xs)
     (sort-by! neg xs)
@@ -1825,12 +1912,16 @@ compile_additional_sequence_helpers :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "shuffled := odinl_shuffle(pick_first, (joined)[:])"), true)
     testing.expect_value(t, strings.contains(output, "sorted := odinl_sort((joined)[:])"), true)
     testing.expect_value(t, strings.contains(output, "descending := odinl_sort_by(neg, (joined)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "sampled := odinl_take_nth(2, (joined)[:])"), true)
     testing.expect_value(t, strings.contains(output, "odinl_thread_1 := odinl_mapcat(pair, (xs)[:])"), true)
     testing.expect_value(t, strings.contains(output, "defer delete(odinl_thread_1)"), true)
     testing.expect_value(t, strings.contains(output, "threaded_flat := odinl_filter(even_p, (odinl_thread_1)[:])"), true)
     testing.expect_value(t, strings.contains(output, "odinl_thread_2 := odinl_sort((xs)[:])"), true)
     testing.expect_value(t, strings.contains(output, "defer delete(odinl_thread_2)"), true)
     testing.expect_value(t, strings.contains(output, "threaded_sorted := odinl_filter(even_p, (odinl_thread_2)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "odinl_thread_3 := odinl_take_nth(2, (xs)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "defer delete(odinl_thread_3)"), true)
+    testing.expect_value(t, strings.contains(output, "threaded_sample := odinl_map(neg, (odinl_thread_3)[:])"), true)
     testing.expect_value(t, strings.contains(output, "odinl_reverse_in_place((xs)[:])"), true)
     testing.expect_value(t, strings.contains(output, "odinl_sort_in_place((xs)[:])"), true)
     testing.expect_value(t, strings.contains(output, "odinl_sort_by_in_place(neg, (xs)[:])"), true)
@@ -1853,6 +1944,7 @@ compile_additional_sequence_helpers :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "odinl_shuffle :: proc(pick: proc(n: int) -> int, xs: []$T) -> [dynamic]T"), true)
     testing.expect_value(t, strings.contains(output, "odinl_sort :: proc(xs: []$T) -> [dynamic]T"), true)
     testing.expect_value(t, strings.contains(output, "odinl_sort_by :: proc(f: proc(x: $T) -> $K, xs: []T) -> [dynamic]T"), true)
+    testing.expect_value(t, strings.contains(output, "odinl_take_nth :: proc(n: int, xs: []$T) -> [dynamic]T"), true)
     testing.expect_value(t, strings.contains(output, "odinl_reverse_in_place :: proc(xs: []$T)"), true)
     testing.expect_value(t, strings.contains(output, "odinl_shuffle_in_place :: proc(pick: proc(n: int) -> int, xs: []$T)"), true)
     testing.expect_value(t, strings.contains(output, "odinl_sort_in_place :: proc(xs: []$T)"), true)

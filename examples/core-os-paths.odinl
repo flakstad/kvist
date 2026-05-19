@@ -1,0 +1,54 @@
+// Host interop with core:os path and file helpers.
+(package main)
+(import "core:fmt")
+(import os "core:os")
+
+(proc clean-base-length [] -> int
+  (let [[clean err] (os.clean_path "./tmp/../examples/hello.odinl" context.allocator)]
+    (if (!= err nil)
+      0
+      (do
+        (defer (delete clean))
+        (len (os.base clean))))))
+
+(proc cwd-base-length [] -> int
+  (let [[cwd err] (os.get_working_directory context.allocator)]
+    (if (!= err nil)
+      0
+      (do
+        (defer (delete cwd))
+        (len (os.base cwd))))))
+
+(proc write-demo-file [path: string] -> os.Error
+  (os.write_entire_file path "hello from core:os"))
+
+(proc read-demo-length [path: string] -> int
+  (let [[data err] (os.read_entire_file path context.allocator)]
+    (if (!= err nil)
+      0
+      (do
+        (defer (delete data))
+        (len data)))))
+
+(proc remove-demo-file [path: string] -> os.Error
+  (os.remove path))
+
+(proc main []
+  (fmt.println (clean-base-length) (cwd-base-length)))
+
+(comment
+  (clean-base-length)
+  ;; => 11
+
+  (cwd-base-length)
+  ;; => length of the current checkout directory name
+
+  (write-demo-file "tmp/odinl-core-os.txt")
+  ;; => nil
+
+  (read-demo-length "tmp/odinl-core-os.txt")
+  ;; => 18
+
+  (remove-demo-file "tmp/odinl-core-os.txt")
+  ;; => nil
+)

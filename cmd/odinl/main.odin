@@ -19,13 +19,14 @@ print_usage :: proc() {
     fmt.println("  odinl eval <input.odinl> <form> [--no-print] [--check] [--generated output.odin] [--save name]")
     fmt.println("  odinl expand <input.odinl> <form> [--no-print] [-o output.odin]")
     fmt.println("  odinl macroexpand <input.odinl> <form> [-o output.odinl]")
+    fmt.println("  odinl symbols <input.odinl>")
     fmt.println("  odinl cache path <name>")
     fmt.println("  odinl cache list")
     fmt.println("  odinl cache rm <name>")
 }
 
 is_command :: proc(text: string) -> bool {
-    return text == "compile" || text == "build" || text == "check" || text == "run" || text == "eval" || text == "expand" || text == "macroexpand" || text == "cache"
+    return text == "compile" || text == "build" || text == "check" || text == "run" || text == "eval" || text == "expand" || text == "macroexpand" || text == "symbols" || text == "cache"
 }
 
 read_source_or_exit :: proc(path: string) -> string {
@@ -376,6 +377,21 @@ macroexpand_command :: proc(input, eval_source, output_path: string) {
     }
 }
 
+symbols_command :: proc(input: string) {
+    data := read_source_or_exit(input)
+    defer delete(transmute([]byte)data)
+
+    output, err, ok := odinl.symbols_source(data)
+    if !ok {
+        formatted := odinl.format_compile_error(input, data, err)
+        fmt.eprint(formatted)
+        delete(formatted)
+        os.exit(1)
+    }
+    defer delete(output)
+    fmt.print(output)
+}
+
 run_generated_command :: proc(input, generated_path, odin_command: string) -> int {
     data := read_source_or_exit(input)
     defer delete(transmute([]byte)data)
@@ -670,6 +686,14 @@ parse_macroexpand_command :: proc() {
     macroexpand_command(input, eval_source, output_path)
 }
 
+parse_symbols_command :: proc() {
+    if len(os.args) != 3 {
+        print_usage()
+        os.exit(2)
+    }
+    symbols_command(os.args[2])
+}
+
 main :: proc() {
     if len(os.args) < 2 {
         print_usage()
@@ -696,6 +720,8 @@ main :: proc() {
         parse_expand_command()
     case "macroexpand":
         parse_macroexpand_command()
+    case "symbols":
+        parse_symbols_command()
     case "cache":
         cache_command()
     }

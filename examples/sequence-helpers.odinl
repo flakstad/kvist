@@ -157,6 +157,12 @@
         without-two (drop-last 2 xs)]
     (+ (last init) (len without-two))))
 
+(proc every-other-total [] -> int
+  (let [xs (new []int [1 2 3 4 5])
+        sampled (take-nth 2 xs)]
+    (defer (delete sampled))
+    (reduce add 0 sampled)))
+
 (proc rest-second-empty-score [] -> int
   (let [xs (new []int [10 20 30])
         tail (rest xs)
@@ -367,6 +373,9 @@
 
   (tail-trim-score)
   ;; => 7
+
+  (every-other-total)
+  ;; => 9
 
   (rest-second-empty-score)
   ;; => 40

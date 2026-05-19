@@ -11,6 +11,7 @@ Emitter_Features :: struct {
     core_take:        bool,
     core_drop:        bool,
     core_drop_last:   bool,
+    core_take_nth:    bool,
     core_take_while:  bool,
     core_drop_while:  bool,
     core_find:        bool,
@@ -137,6 +138,12 @@ mark_core_drop :: proc(e: ^Emitter) {
 mark_core_drop_last :: proc(e: ^Emitter) {
     if e.features != nil {
         e.features.core_drop_last = true
+    }
+}
+
+mark_core_take_nth :: proc(e: ^Emitter) {
+    if e.features != nil {
+        e.features.core_take_nth = true
     }
 }
 
@@ -1125,6 +1132,17 @@ emit_thread_step :: proc(e: ^Emitter, current: string, step: CST_Form, thread_la
             mark_core_drop_last(e)
             return emit_call_text("odinl_drop_last", []string{"1", slice_all_expr_text(current)}), {}, true
         }
+        if thread_last && head.text == "take-nth" {
+            if len(step.items) != 2 {
+                return "", Compile_Error{message = "take-nth thread step expects one count argument", span = step.span}, false
+            }
+            count, err_count, ok_count := emit_expr(e, step.items[1])
+            if !ok_count {
+                return "", err_count, false
+            }
+            mark_core_take_nth(e)
+            return emit_call_text("odinl_take_nth", []string{count, slice_all_expr_text(current)}), {}, true
+        }
         if thread_last && (head.text == "take-while" || head.text == "drop-while" || head.text == "find" || head.text == "some?" || head.text == "every?") {
             if len(step.items) != 2 {
                 return "", Compile_Error{message = fmt.tprintf("%s thread step expects one predicate argument", head.text), span = step.span}, false
@@ -1262,7 +1280,8 @@ thread_step_result_kind :: proc(step: CST_Form, thread_last: bool) -> Thread_Res
                            head.text == "index-by" || head.text == "group-by" ||
                            head.text == "frequencies" || head.text == "keys" ||
                            head.text == "vals" || head.text == "distinct" ||
-                           head.text == "distinct-by" || head.text == "cycle") {
+                           head.text == "distinct-by" || head.text == "cycle" ||
+                           head.text == "take-nth") {
             return .Owned
         }
         if thread_last && (head.text == "partition" || head.text == "partition-all" || head.text == "partition-by") {
@@ -1376,7 +1395,7 @@ owned_result_head :: proc(name: string) -> bool {
          "partition", "partition-all", "partition-by",
          "zipmap", "index-by", "group-by", "frequencies", "keys", "vals",
          "distinct", "distinct-by",
-         "range", "repeat", "repeatedly", "iterate", "cycle",
+         "range", "repeat", "repeatedly", "iterate", "cycle", "take-nth",
          "slurp", "load-json":
         return true
     }
@@ -2817,6 +2836,22 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         }
         mark_core_drop_last(e)
         return emit_call_text("odinl_drop_last", []string{count, slice_all_expr_text(collection)}), {}, true
+    }
+
+    if head.text == "take-nth" {
+        if len(form.items) != 3 {
+            return "", Compile_Error{message = "take-nth expects count and collection", span = form.span}, false
+        }
+        count, err_count, ok_count := emit_expr(e, form.items[1])
+        if !ok_count {
+            return "", err_count, false
+        }
+        collection, err_collection, ok_collection := emit_expr(e, form.items[2])
+        if !ok_collection {
+            return "", err_collection, false
+        }
+        mark_core_take_nth(e)
+        return emit_call_text("odinl_take_nth", []string{count, slice_all_expr_text(collection)}), {}, true
     }
 
     if head.text == "take-while" || head.text == "drop-while" || head.text == "find" || head.text == "some?" || head.text == "every?" {
@@ -5230,6 +5265,25 @@ emit_core_drop_last_helper :: proc(e: ^Emitter) {
     emit_line(e, "}")
 }
 
+emit_core_take_nth_helper :: proc(e: ^Emitter) {
+    emit_line(e, "odinl_take_nth :: proc(n: int, xs: []$T) -> [dynamic]T {")
+    e.indent += 1
+    emit_line(e, "out := make([dynamic]T)")
+    emit_line(e, "if n <= 0 {")
+    e.indent += 1
+    emit_line(e, "return out")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "for i := 0; i < len(xs); i += n {")
+    e.indent += 1
+    emit_line(e, "append(&out, xs[i])")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "return out")
+    e.indent -= 1
+    emit_line(e, "}")
+}
+
 emit_core_take_while_helper :: proc(e: ^Emitter) {
     emit_line(e, "odinl_take_while :: proc(pred: proc(x: $T) -> bool, xs: []T) -> []T {")
     e.indent += 1
@@ -5403,7 +5457,7 @@ emit_core_every_field_helper :: proc(e: ^Emitter, field: string) {
 core_helpers_needed :: proc(features: Emitter_Features) -> bool {
     return features.core_map || features.core_filter || features.core_reduce ||
            features.core_take || features.core_drop ||
-           features.core_drop_last ||
+           features.core_drop_last || features.core_take_nth ||
            features.core_take_while || features.core_drop_while ||
            features.core_find || features.core_some || features.core_every ||
            features.core_remove || features.core_map_indexed || features.core_keep ||
@@ -5702,6 +5756,10 @@ emit_core_helpers :: proc(e: ^Emitter, features: Emitter_Features) {
     if features.core_drop_last {
         emit_core_helper_separator(e, &emitted)
         emit_core_drop_last_helper(e)
+    }
+    if features.core_take_nth {
+        emit_core_helper_separator(e, &emitted)
+        emit_core_take_nth_helper(e)
     }
     if features.core_take_while {
         emit_core_helper_separator(e, &emitted)

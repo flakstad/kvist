@@ -1,0 +1,29 @@
+// Host interop with a vendor package: vendor:stb/easy_font.
+(package main)
+(import "core:fmt")
+(import easy "vendor:stb/easy_font")
+
+(proc text-width [] -> int
+  (easy.width "OdinL"))
+
+(proc text-height [] -> int
+  (easy.height "OdinL"))
+
+(proc quad-count [] -> int
+  (let [color (new easy.Color [255 255 255 255])
+        quads (new [128]easy.Quad [])]
+    (easy.print (f32 0) (f32 0) "OdinL" color (slice quads))))
+
+(proc main []
+  (fmt.println (text-width) (text-height) (quad-count)))
+
+(comment
+  (text-width)
+  ;; => width in stb_easy_font units
+
+  (text-height)
+  ;; => height in stb_easy_font units
+
+  (quad-count)
+  ;; => number of generated glyph quads
+)

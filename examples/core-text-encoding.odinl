@@ -1,0 +1,76 @@
+// Host interop with core text, parsing, encoding, and crypto packages.
+(package main)
+(import "core:fmt")
+(import strings "core:strings")
+(import strconv "core:strconv")
+(import base64 "core:encoding/base64")
+(import hex "core:encoding/hex")
+(import sha2 "core:crypto/sha2")
+
+(proc useful-line? [line: string] -> bool
+  (and (strings.has_prefix line "user:")
+       (strings.contains line "active=true")))
+
+(proc word-count [] -> int
+  (let [[words err] (strings.fields "  Ada  Lin   Grace  ")]
+    (if (!= err nil)
+      0
+      (do
+        (defer (delete words))
+        (len words)))))
+
+(proc parsed-score [] -> int
+  (let [[value ok] (strconv.parse_int "42")]
+    (if ok value 0)))
+
+(proc base64-roundtrip-length [] -> int
+  (let [text "odinl"
+        [encoded encode-err] (base64.encode (odin "transmute([]byte)text"))]
+    (if (!= encode-err nil)
+      0
+      (do
+        (defer (delete encoded))
+        (let [[decoded decode-err] (base64.decode encoded)]
+          (if (!= decode-err nil)
+            0
+            (do
+              (defer (delete decoded))
+              (len decoded))))))))
+
+(proc sha256-hex-length [] -> int
+  (let [text "odinl"
+        ctx (sha2.Context_256 {})
+        digest (new [32]byte [])]
+    (sha2.init_256 (& ctx))
+    (sha2.update (& ctx) (odin "transmute([]byte)text"))
+    (sha2.final (& ctx) (slice digest))
+    (let [[encoded err] (hex.encode (slice digest))]
+      (if (!= err nil)
+        0
+        (do
+          (defer (delete encoded))
+          (len encoded))))))
+
+(proc main []
+  (fmt.println (useful-line? "user:Ada active=true")
+               (word-count)
+               (parsed-score)
+               (base64-roundtrip-length)
+               (sha256-hex-length)))
+
+(comment
+  (useful-line? "user:Ada active=true")
+  ;; => true
+
+  (word-count)
+  ;; => 3
+
+  (parsed-score)
+  ;; => 42
+
+  (base64-roundtrip-length)
+  ;; => 5
+
+  (sha256-hex-length)
+  ;; => 64
+)

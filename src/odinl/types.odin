@@ -21,6 +21,7 @@ Token_Kind :: enum {
     R_Brace,
     Discard,
     Line_Comment,
+    Block_Comment,
     String,
     Number,
     Bool,

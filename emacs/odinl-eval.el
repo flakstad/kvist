@@ -6,11 +6,6 @@
 (require 'subr-x)
 (require 'odinl-mode)
 
-(defcustom odinl-command "odinl"
-  "Fallback OdinL executable used when no local checkout binary is found."
-  :type 'string
-  :group 'odinl)
-
 (defcustom odinl-result-buffer-name "*OdinL Eval*"
   "Buffer name used for OdinL eval output."
   :type 'string
@@ -87,31 +82,6 @@
   "Clear OdinL overlays before the next command in this buffer."
   (add-hook 'pre-command-hook #'odinl-clear-inline-results nil t))
 
-(defun odinl--project-root (&optional start)
-  "Return a likely OdinL project root for START or the current buffer."
-  (let* ((path (cond
-                ((bufferp start) (or (buffer-file-name start) default-directory))
-                ((stringp start) start)
-                ((buffer-file-name) (buffer-file-name))
-                (t default-directory)))
-         (dir (if (and path (file-directory-p path))
-                  path
-                (file-name-directory (expand-file-name path)))))
-    (or (locate-dominating-file dir "cmd/odinl/main.odin")
-        (locate-dominating-file dir "LANGUAGE.md")
-        (locate-dominating-file dir ".git")
-        dir)))
-
-(defun odinl--executable (&optional start)
-  "Return the OdinL executable to use for START."
-  (let* ((root (file-name-as-directory (odinl--project-root start)))
-         (local (expand-file-name "odinl" root))
-         (fallback (executable-find odinl-command)))
-    (cond
-     ((file-executable-p local) local)
-     (fallback fallback)
-     (t (error "Could not find odinl executable; run `odin build cmd/odinl'")))))
-
 (defun odinl--prepare-buffer (name)
   "Create and clear buffer NAME."
   (let ((buffer (get-buffer-create name)))
@@ -124,15 +94,6 @@
         (setq-local word-wrap t)
         (visual-line-mode 1)))
     buffer))
-
-(defun odinl--source-temp-file ()
-  "Write current buffer to a temporary .odinl file near the source file."
-  (unless buffer-file-name
-    (user-error "OdinL eval requires a file-backed buffer"))
-  (let* ((dir (file-name-directory (expand-file-name buffer-file-name)))
-         (temp (make-temp-file (expand-file-name ".odinl-eval-" dir) nil ".odinl")))
-    (write-region (point-min) (point-max) temp nil 'silent)
-    temp))
 
 (defun odinl--call (program args output-buffer)
   "Call PROGRAM with ARGS, writing output to OUTPUT-BUFFER."

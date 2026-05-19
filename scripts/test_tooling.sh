@@ -34,6 +34,19 @@ assert_file_nonempty "$tmp_dir/hello.odin" "compile output"
 assert_file_nonempty "$tmp_dir/hello.map" "compile source map"
 odin check "$tmp_dir/hello.odin" -file
 
+printf 'tooling: symbols command\n'
+./odinl symbols examples/sequences.odinl > "$tmp_dir/symbols.tsv"
+if ! grep -q "$(printf 'proc\tactive-count')" "$tmp_dir/symbols.tsv"; then
+    printf 'failed: symbols output did not include active-count proc\n' >&2
+    cat "$tmp_dir/symbols.tsv" >&2
+    exit 1
+fi
+if ! grep -q "$(printf 'field\tUser.name')" "$tmp_dir/symbols.tsv"; then
+    printf 'failed: symbols output did not include User.name field\n' >&2
+    cat "$tmp_dir/symbols.tsv" >&2
+    exit 1
+fi
+
 printf 'tooling: check command\n'
 ./odinl check examples/hello.odinl --generated "$tmp_dir/check.odin"
 assert_file_nonempty "$tmp_dir/check.odin" "check generated output"
@@ -321,12 +334,51 @@ if command -v emacs >/dev/null 2>&1; then
              (unwind-protect
                  (progn
                    (with-temp-file file
-                     (insert \"(package main)\\n(import \\\"core:fmt\\\")\\n\\n(proc add [a: int, b: int] -> int\\n  (+ a b))\\n\\n(proc main []\\n  (fmt.println \\\"from main\\\"))\\n\\n(comment\\n  (add 1 2)\\n  (with-allocator [allocator context.temp_allocator]\\n    (add 2 1))\\n  (main))\\n\"))
+                     (insert \"(package main)\\n(import \\\"core:fmt\\\")\\n\\n// Adds two ints.\\n(proc add [a: int, b: int] -> int\\n  (+ a b))\\n\\n(proc main []\\n  (fmt.println \\\"from main\\\"))\\n\\n(comment\\n  (add 1 2)\\n  (with-allocator [allocator context.temp_allocator]\\n    (add 2 1))\\n  (main))\\n\"))
                    (find-file file)
                    (odinl-mode)
+                   (unless (eq (key-binding (kbd \"M-.\")) (quote xref-find-definitions))
+                     (error \"Missing M-. xref binding\"))
+                   (let ((symbols (odinl--symbols)))
+                     (unless (seq-find (lambda (sym) (equal (plist-get sym :name) \"add\")) symbols)
+                       (error \"Expected add in odinl symbols: %S\" symbols)))
+                   (let ((docs (odinl--symbol-doc-candidates \"add\")))
+                     (unless (and docs (equal (plist-get (car docs) :doc) \"Adds two ints.\"))
+                       (error \"Expected add docs, got: %S\" docs)))
+                   (let ((docs (odinl--symbol-doc-candidates \"fmt.println\")))
+                     (unless docs
+                       (error \"Expected fmt.println docs\")))
+                   (with-temp-buffer
+                     (insert \"/*\\n * Block docs.\\n * More docs.\\n */\\nthing :: proc() {}\\n\")
+                     (goto-char (point-min))
+                     (search-forward \"thing ::\")
+                     (let ((doc (odinl--preceding-odin-doc (line-beginning-position))))
+                       (unless (equal doc \"Block docs.\\nMore docs.\")
+                         (error \"Expected block docs, got: %S\" doc))))
+                   (goto-char (point-min))
+                   (search-forward \"add [\")
+                   (backward-word)
+                   (call-interactively (quote odinl-doc-at-point))
+                   (let ((doc-text (with-current-buffer odinl-doc-buffer-name
+                                     (buffer-substring-no-properties (point-min) (point-max)))))
+                     (unless (string-match-p \"Adds two ints\" doc-text)
+                       (error \"Expected displayed add docs, got: %s\" doc-text)))
+                   (let ((defs (xref-backend-definitions (quote odinl) \"add\")))
+                     (unless defs
+                       (error \"Expected xref definition for add\")))
+                   (let ((defs (xref-backend-definitions (quote odinl) \"fmt.println\")))
+                     (unless defs
+                       (error \"Expected xref definition for fmt.println\")))
+                   (let ((candidates (odinl--completion-candidates)))
+                     (unless (and (member \"add\" candidates)
+                                  (member \"proc\" candidates)
+                                  (member \"map\" candidates)
+                                  (member \"fmt.println\" candidates))
+                       (error \"Expected completion candidates, got: %S\" candidates)))
                    (dolist (binding (list (cons \"C-c C-e\" (quote odinl-eval-form-at-point))
                                           (cons \"C-c C-c\" (quote odinl-eval-top-level-form))
                                           (cons \"C-c C-i\" (quote odinl-insert-form-result))
+                                          (cons \"C-c C-.\" (quote odinl-doc-at-point))
                                           (cons \"C-c C-k\" (quote odinl-eval-buffer))
                                           (cons \"C-c C-v\" (quote odinl-check-buffer))
                                           (cons \"C-c C-b\" (quote odinl-build-buffer))

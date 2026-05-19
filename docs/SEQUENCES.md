@@ -90,6 +90,7 @@ These helpers are already in scope and should remain small:
 (drop n xs)
 (butlast xs)
 (drop-last n xs)
+(take-nth n xs)
 (take-while pred xs)
 (drop-while pred xs)
 (find pred xs)
@@ -115,9 +116,9 @@ comma-ok lookup and returns the supplied default when the key is absent.
 
 Builder helpers such as `map`, `filter`, `remove`, `map-indexed`, `keep`,
 `mapcat`, `concat`, `into`, `interpose`, `interleave`, `reverse`, `shuffle`,
-`range`, `repeat`, `repeatedly`, `iterate`, and bounded `cycle` return owned
-dynamic arrays. `into` is currently only for explicit dynamic-array targets,
-for example `(into [dynamic]int xs)`. `distinct` and `distinct-by` also
+`range`, `repeat`, `repeatedly`, `iterate`, bounded `cycle`, and `take-nth`
+return owned dynamic arrays. `into` is currently only for explicit dynamic-array
+targets, for example `(into [dynamic]int xs)`. `distinct` and `distinct-by` also
 return owned dynamic arrays and use a temporary `map[key]bool` internally, so
 the value or key must be valid as an Odin map key. `zipmap`, `index-by`, and
 `frequencies` return owned maps. `merge` returns an owned map that combines two
@@ -355,8 +356,8 @@ Sequence helpers need an explicit ownership story:
   `take-while`, `drop-while`, and `split-at` do not own data and must not be
   deleted.
 - Dynamic-array helpers such as `map`, `filter`, `remove`, `map-indexed`,
-  `keep`, `mapcat`, `concat`, `reverse`, `shuffle`, `sort`, and `sort-by`
-  allocate and return owned dynamic arrays.
+  `keep`, `mapcat`, `concat`, `reverse`, `shuffle`, `sort`, `sort-by`, and
+  `take-nth` allocate and return owned dynamic arrays.
 - Chunking helpers `partition`, `partition-all`, and `partition-by` allocate the
   outer dynamic array, but their slice chunks borrow the input collection.
 - `merge`, `zipmap`, `index-by`, and `frequencies` allocate and return owned

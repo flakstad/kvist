@@ -119,6 +119,19 @@ tokenize_with_origin :: proc(source: string, source_kind: Source_Kind) -> (token
             append(&tokens, make_token(.Line_Comment, source[start:i], start, i, source_kind))
             continue
         }
+        if ch == '/' && i+1 < len(source) && source[i+1] == '*' {
+            start := i
+            i += 2
+            for i+1 < len(source) && !(source[i] == '*' && source[i+1] == '/') {
+                i += 1
+            }
+            if i+1 >= len(source) {
+                return tokens, Compile_Error{message = "unterminated block comment", span = make_span(start, len(source), source_kind)}, false
+            }
+            i += 2
+            append(&tokens, make_token(.Block_Comment, source[start:i], start, i, source_kind))
+            continue
+        }
         start := i
         if ch == '[' {
             end, ok_type := scan_compact_bracket_type(source, start)
@@ -244,7 +257,7 @@ parse_container :: proc(tokens: []Token, index: ^int, open_kind, close_kind: Tok
             }
             continue
         }
-        if tokens[index^].kind == .Line_Comment {
+        if tokens[index^].kind == .Line_Comment || tokens[index^].kind == .Block_Comment {
             index^ += 1
             continue
         }
@@ -296,7 +309,7 @@ parse_form :: proc(tokens: []Token, index: ^int) -> (form: CST_Form, err: Compil
     case .Keyword:
         index^ += 1
         return CST_Form{kind = .Keyword, text = token.text, span = token.span}, {}, true
-    case .Line_Comment:
+    case .Line_Comment, .Block_Comment:
         index^ += 1
         return parse_form(tokens, index)
     case .Discard:
@@ -316,7 +329,69 @@ parse_form :: proc(tokens: []Token, index: ^int) -> (form: CST_Form, err: Compil
 
 is_doc_comment :: proc(text: string) -> bool {
     return len(text) >= 2 && text[0] == '/' && text[1] == '/' ||
+           len(text) >= 2 && text[0] == '/' && text[1] == '*' ||
            len(text) >= 1 && text[0] == ';'
+}
+
+trim_doc_text :: proc(text: string) -> string {
+    start := 0
+    end := len(text)
+    for start < end && (text[start] == ' ' || text[start] == '\t' || text[start] == '\r') {
+        start += 1
+    }
+    for end > start && (text[end-1] == ' ' || text[end-1] == '\t' || text[end-1] == '\r') {
+        end -= 1
+    }
+    return text[start:end]
+}
+
+block_doc_line_text :: proc(line: string) -> string {
+    text := trim_doc_text(line)
+    if len(text) > 0 && text[0] == '*' {
+        text = text[1:]
+        text = trim_doc_text(text)
+    }
+    return text
+}
+
+block_doc_comment_text :: proc(text: string) -> string {
+    if len(text) < 4 {
+        return text
+    }
+
+    body := text[2:len(text)-2]
+    builder := strings.builder_make()
+    defer strings.builder_destroy(&builder)
+    seen_content := false
+    pending_blank := false
+    start := 0
+    for start <= len(body) {
+        end := start
+        for end < len(body) && body[end] != '\n' {
+            end += 1
+        }
+        line := block_doc_line_text(body[start:end])
+        if len(line) == 0 {
+            if seen_content {
+                pending_blank = true
+            }
+        } else {
+            if seen_content {
+                strings.write_byte(&builder, '\n')
+            }
+            if pending_blank {
+                strings.write_byte(&builder, '\n')
+            }
+            strings.write_string(&builder, line)
+            seen_content = true
+            pending_blank = false
+        }
+        if end >= len(body) {
+            break
+        }
+        start = end + 1
+    }
+    return strings.clone(strings.to_string(builder))
 }
 
 doc_comment_text :: proc(text: string) -> string {
@@ -326,6 +401,9 @@ doc_comment_text :: proc(text: string) -> string {
         strings.write_string(&builder, "//")
         strings.write_string(&builder, text[1:])
         return strings.clone(strings.to_string(builder))
+    }
+    if len(text) >= 2 && text[0] == '/' && text[1] == '*' {
+        return block_doc_comment_text(text)
     }
     return text
 }
@@ -355,7 +433,7 @@ read_top_forms_with_origin :: proc(source: string, source_kind: Source_Kind) -> 
     pending_docs: [dynamic]string
     last_doc_end := 0
     for index < len(tokens) && tokens[index].kind != .EOF {
-        if tokens[index].kind == .Line_Comment {
+        if tokens[index].kind == .Line_Comment || tokens[index].kind == .Block_Comment {
             if is_doc_comment(tokens[index].text) {
                 append(&pending_docs, doc_comment_text(tokens[index].text))
                 last_doc_end = tokens[index].span.end

@@ -33,6 +33,7 @@ These forms return owned values in normal OdinL code:
 (map f xs)
 (filter pred xs)
 (remove pred xs)
+(take-nth n xs)
 (map-indexed f xs)
 (keep f xs)
 (mapcat f xs)
