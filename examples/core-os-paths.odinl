@@ -39,12 +39,13 @@
       (os.write_entire_file path "hello from core:os"))))
 
 (proc read-demo-length [path: string] -> int
-  (let [[data err] (os.read_entire_file path context.allocator)]
-    (if (!= err nil)
-      0
-      (do
-        (defer (delete data))
-        (len data)))))
+  ;; if-ok is for Odin APIs whose second return value is an error. It checks
+  ;; for the zero error value and keeps the owned data cleanup local.
+  (if-ok [data err (os.read_entire_file path context.allocator)]
+    (do
+      (defer (delete data))
+      (len data))
+    0))
 
 (proc remove-demo-file [path: string] -> os.Error
   (os.remove path))

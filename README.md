@@ -155,6 +155,7 @@ The eager sequence helper direction is documented in
 [docs/SEQUENCES.md](docs/SEQUENCES.md).
 Ownership and deletion rules are documented in
 [docs/OWNERSHIP.md](docs/OWNERSHIP.md).
+The runnable example guide is in [examples/README.md](examples/README.md).
 Emacs support is in [emacs/odinl-mode.el](emacs/odinl-mode.el) and
 [emacs/odinl-eval.el](emacs/odinl-eval.el).
 

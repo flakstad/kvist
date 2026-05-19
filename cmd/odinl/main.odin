@@ -250,6 +250,16 @@ remap_odin_output_locations :: proc(output, generated_path, source_path, source,
     return strings.clone(strings.to_string(builder))
 }
 
+cleanup_odin_output_arg :: proc(out_path, out_arg: string) {
+    if out_path != "" {
+        _ = os.remove(out_path)
+        delete(out_path)
+    }
+    if out_arg != "" {
+        delete(out_arg)
+    }
+}
+
 run_odin_file :: proc(command, generated_path, source_path, source, eval_source, save_name: string, source_map: []odinl.Source_Map_Entry) -> int {
     source_dir, _ := os.split_path(source_path)
     working_dir := source_dir
@@ -264,7 +274,17 @@ run_odin_file :: proc(command, generated_path, source_path, source, eval_source,
     }
     defer delete(generated_abs)
 
-    args := [?]string{"odin", command, generated_abs, "-file"}
+    args := make([dynamic]string, 0, 5)
+    defer delete(args)
+    append(&args, "odin", command, generated_abs, "-file")
+    out_path := ""
+    out_arg := ""
+    if command == "build" || command == "run" {
+        out_path = strings.clone(fmt.tprintf("%s.bin", generated_abs))
+        out_arg = strings.clone(fmt.tprintf("-out:%s", out_path))
+        append(&args, out_arg)
+    }
+    defer cleanup_odin_output_arg(out_path, out_arg)
     state, stdout, stderr, err := os.process_exec(
         os.Process_Desc{command = args[:], working_dir = working_dir},
         context.allocator,

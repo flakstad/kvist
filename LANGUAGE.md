@@ -685,21 +685,54 @@ Examples:
 This keeps the core language explicit while leaving room for later macro-based
 binding abstractions.
 
-`when-ok` is the first such compiler-defined binding macro. It is deliberately
-Odin-shaped: it is for multi-return procs that return a value and an explicit
-boolean success flag. It does not add Clojure truthiness.
+`when-let` and `if-let` are deliberately Odin-shaped binding macros: they are
+for multi-return procs that return a value and an explicit boolean such as
+`ok`, `found`, `present`, or `valid`. They do not add Clojure truthiness.
 
 ```clojure
-(when-ok [value ok (query)]
+(when-let [value found (query)]
   (use value))
+
+(if-let [value found (query)]
+  (use value)
+  fallback)
 ```
 
-It expands to:
+They expand to destructuring `let` plus a direct boolean test:
 
 ```clojure
-(let [[value ok] (query)]
-  (when ok
+(let [[value found] (query)]
+  (when found
     (use value)))
+
+(let [[value found] (query)]
+  (if found
+    (use value)
+    fallback))
+```
+
+For Odin error-style returns, use `when-ok` and `if-ok`. They have the same
+binding shape but check whether the second return value equals Odin's zero
+value `{}`:
+
+```clojure
+(if-ok [data err (read-text path)]
+  (do
+    (defer (delete data))
+    (len data))
+  0)
+```
+
+This is intentionally separate from `if-let`: boolean success values and error
+values are different Odin conventions and should stay visible in source.
+
+```clojure
+(let [[data err] (read-text path)]
+  (if (== err {})
+    (do
+      (defer (delete data))
+      (len data))
+    0))
 ```
 
 Struct field destructuring lowers to obvious Odin assignments:

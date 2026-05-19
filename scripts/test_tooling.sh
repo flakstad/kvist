@@ -310,6 +310,27 @@ assert_eq "3" "$(./odinl eval examples/sequences.odinl '(status-run-count)')" "s
 assert_eq "2" "$(./odinl eval examples/sequences.odinl '(active-status-group-count)')" "active-status-group-count"
 assert_eq "2" "$(./odinl eval examples/data-literals.odinl '(temp-buffer-len)')" "temp-buffer-len"
 assert_eq "3" "$(./odinl eval examples/data-literals.odinl '(temp-scoped-buffer-len)')" "temp-scoped-buffer-len"
+assert_eq "1500" "$(./odinl eval examples/core-time-slice.odinl '(duration-ms)')" "duration-ms"
+assert_eq "2" "$(./odinl eval examples/core-time-slice.odinl '(fixed-date-weekday)')" "fixed-date-weekday"
+assert_eq "10" "$(./odinl eval examples/core-time-slice.odinl '(fixed-date-string-length)')" "fixed-date-string-length"
+assert_eq "17" "$(./odinl eval examples/core-time-slice.odinl '(min-max-score)')" "min-max-score"
+assert_eq "2" "$(./odinl eval examples/core-time-slice.odinl '(search-score)')" "search-score"
+parallel_eval_output=$(
+    printf '%s\n' \
+        '(duration-ms)' \
+        '(fixed-date-weekday)' \
+        '(fixed-date-string-length)' \
+        '(min-max-score)' \
+        '(search-score)' |
+        xargs -P 5 -I FORM ./odinl eval examples/core-time-slice.odinl FORM |
+        sort
+)
+parallel_eval_expected=$(printf '10\n1500\n17\n2\n2')
+assert_eq "$parallel_eval_expected" "$parallel_eval_output" "parallel eval output"
+assert_eq "parsed 1" "$(./odinl eval examples/error-handling.odinl "(parse-label \"one\")")" "parse-label"
+assert_eq "not parsed" "$(./odinl eval examples/error-handling.odinl "(parse-label \"missing\")")" "parse-label-missing"
+assert_eq "3" "$(./odinl eval examples/error-handling.odinl "(parsed-total \"one\" \"two\")")" "parsed-total"
+assert_eq "0" "$(./odinl eval examples/error-handling.odinl "(read-byte-count \"tmp/does-not-exist.txt\")")" "read-byte-count-missing"
 tap_age_output=$(./odinl eval examples/tap.odinl '(inspected-age)')
 tap_age_expected=$(printf 'user: User{name = "Ada", age = 36}\nage: 36\n36')
 assert_eq "$tap_age_expected" "$tap_age_output" "inspected-age"
@@ -403,7 +424,7 @@ if command -v emacs >/dev/null 2>&1; then
              (unwind-protect
                  (progn
                    (with-temp-file file
-                     (insert \"(package main)\\n(import \\\"core:fmt\\\")\\n\\n// Adds two ints.\\n(proc add [a: int, b: int] -> int\\n  (+ a b))\\n\\n(proc add-two [a: int, b: int] -> int\\n  (add a b))\\n\\n(proc main []\\n  (fmt.println \\\"from main\\\"))\\n\\n(comment\\n  (add 1 2)\\n  (add-two 1 2)\\n  (with-allocator [allocator context.temp_allocator]\\n    (add 2 1))\\n  (main))\\n\"))
+                     (insert \"(package main)\\n(import \\\"core:fmt\\\")\\n\\n// Adds two ints.\\n(proc add [a: int, b: int] -> int\\n  (+ a b))\\n\\n(proc add-two [a: int, b: int] -> int\\n  (add a b))\\n\\n(proc main []\\n  (fmt.println \\\"from main\\\"))\\n\\n(comment\\n  (add 1 2)\\n  (add-two 1 2)\\n  (with-allocator [allocator context.temp_allocator]\\n    (add 2 1))\\n  (if-ok [value err (read)] value 0)\\n  (main))\\n\"))
                    (find-file file)
                    (odinl-mode)
                    (setq odinl-test-source-buffer (current-buffer))
@@ -431,6 +452,9 @@ if command -v emacs >/dev/null 2>&1; then
                    (let ((docs (odinl--symbol-doc-candidates \"fmt.println\")))
                      (unless docs
                        (error \"Expected fmt.println docs\")))
+                   (let ((docs (odinl--symbol-doc-candidates \"if-ok\")))
+                     (unless (and docs (string-match-p \"Odin error result\" (plist-get (car docs) :doc)))
+                       (error \"Expected if-ok built-in docs, got: %S\" docs)))
                    (with-temp-buffer
                      (insert \"/*\\n * Block docs.\\n * More docs.\\n */\\nthing :: proc() {}\\n\")
                      (goto-char (point-min))
@@ -473,6 +497,13 @@ if command -v emacs >/dev/null 2>&1; then
                                      (buffer-substring-no-properties (point-min) (point-max)))))
                      (unless (string-match-p \"Adds two ints\" doc-text)
                        (error \"Expected displayed add docs, got: %s\" doc-text)))
+                   (goto-char (point-min))
+                   (search-forward \"if-ok\")
+                   (call-interactively (quote odinl-doc-at-point))
+                   (let ((doc-text (with-current-buffer odinl-doc-buffer-name
+                                     (buffer-substring-no-properties (point-min) (point-max)))))
+                     (unless (string-match-p \"Odin error result\" doc-text)
+                       (error \"Expected displayed if-ok docs, got: %s\" doc-text)))
                    (let ((defs (xref-backend-definitions (quote odinl) \"add\")))
                      (unless defs
                        (error \"Expected xref definition for add\")))

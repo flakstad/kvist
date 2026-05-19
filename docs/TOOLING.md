@@ -118,9 +118,17 @@ macroexpand output is still a preview format, not the final source formatter.
 
 Good first macro candidates are resource-scope and repetition helpers that
 clearly expand to existing forms, such as allocator setup/teardown,
-`with-*`-style cleanup, and repetitive check/error propagation. `when-ok` is
-the first explicit multi-return convenience macro: it expands `[value ok expr]`
-to a destructuring `let` plus `when ok`.
+`with-*`-style cleanup, and repetitive check/error propagation. The initial
+multi-return convenience macros are:
+
+- `when-let` and `if-let` for `[value bool expr]`, expanding to destructuring
+  `let` plus a direct boolean condition;
+- `when-ok` and `if-ok` for `[value err expr]`, expanding to destructuring
+  `let` plus `(== err {})`.
+
+The bool/error distinction is intentional. Odin procs commonly report success
+with either an explicit bool or a zero-valued error object, and OdinL keeps that
+choice visible instead of inventing a general truthiness rule.
 
 ## Data-Oriented Iteration
 
