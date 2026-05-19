@@ -34,7 +34,7 @@
     "let" "do" "if" "when" "cond" "switch" "set!" "return" "defer"
     "for" "each" "comment" "new" "make" "get" "nil?" "in" "not-in"
     "break" "continue" "with-allocator" "with-temp-allocator"
-    "with-delete" "slurp" "spit" "save-json" "load-json" "tap>"
+    "with-delete" "when-ok" "slurp" "spit" "tap>"
     "->" "->>")
   "OdinL special forms and syntactic heads.")
 
@@ -55,12 +55,84 @@
   (append odinl-special-forms odinl-core-helpers)
   "Static OdinL completions.")
 
+(defun odinl--inside-string-on-line-p (pos)
+  "Return non-nil if POS is inside a simple string on its current line."
+  (save-excursion
+    (goto-char pos)
+    (let ((line-start (line-beginning-position))
+          (in-string nil)
+          (escaped nil))
+      (goto-char line-start)
+      (while (< (point) pos)
+        (let ((ch (char-after)))
+          (cond
+           (escaped
+            (setq escaped nil))
+           ((= ch ?\\)
+            (setq escaped t))
+           ((= ch ?\")
+            (setq in-string (not in-string)))))
+        (forward-char 1))
+      in-string)))
+
+(defun odinl--match-line-comment (limit)
+  "Search for an Odin `//' comment before LIMIT."
+  (let (match)
+    (while (and (not match) (search-forward "//" limit t))
+      (let ((beg (match-beginning 0)))
+        (unless (odinl--inside-string-on-line-p beg)
+          (let ((end (min (line-beginning-position 2) limit)))
+            (set-match-data (list beg end))
+            (put-text-property beg end 'face 'font-lock-comment-face)
+            (put-text-property beg end 'font-lock-face 'font-lock-comment-face)
+            (goto-char end)
+            (setq match t)))))
+    (unless match
+      (goto-char limit))
+    match))
+
+(defun odinl--match-block-comment (limit)
+  "Search for an Odin `/* */' comment before LIMIT."
+  (let (match)
+    (while (and (not match) (search-forward "/*" limit t))
+      (let ((beg (match-beginning 0)))
+        (unless (odinl--inside-string-on-line-p beg)
+          (let ((end (if (search-forward "*/" limit t)
+                         (point)
+                       limit)))
+            (set-match-data (list beg end))
+            (add-text-properties beg end '(font-lock-multiline t))
+            (put-text-property beg end 'face 'font-lock-comment-face)
+            (put-text-property beg end 'font-lock-face 'font-lock-comment-face)
+            (goto-char end)
+            (setq match t)))))
+    (unless match
+      (goto-char limit))
+    match))
+
 (defconst odinl-font-lock-keywords
-  `((,(regexp-opt odinl-special-forms 'symbols) . font-lock-keyword-face)
+  `((odinl--match-line-comment (0 font-lock-comment-face override))
+    (odinl--match-block-comment (0 font-lock-comment-face override))
+    (,(regexp-opt odinl-special-forms 'symbols) . font-lock-keyword-face)
     ("\\_<#[[:alnum:]_][[:alnum:]_-]*\\_>" . font-lock-preprocessor-face)
     ("\\_<\\.[[:alnum:]_][[:alnum:]_?!-]*\\_>" . font-lock-constant-face)
     (":[[:alnum:]_][[:alnum:]_?!-]*" . font-lock-builtin-face))
   "Extra font-lock rules for `odinl-mode'.")
+
+(defun odinl--make-syntax-table ()
+  "Return a fresh syntax table for `odinl-mode'."
+  (let ((table (copy-syntax-table clojure-mode-syntax-table)))
+    ;; Keep Clojure/Lisp comments, and also recognize Odin comments.
+    (modify-syntax-entry ?\; "< b" table)
+    (modify-syntax-entry ?/ ". 124b" table)
+    (modify-syntax-entry ?* ". 23" table)
+    (modify-syntax-entry ?\n "> b" table)
+    table))
+
+(defvar odinl-mode-syntax-table (odinl--make-syntax-table)
+  "Syntax table for `odinl-mode'.")
+
+(setq odinl-mode-syntax-table (odinl--make-syntax-table))
 
 (defun odinl--put-indent (symbol spec)
   "Install OdinL indentation SPEC for SYMBOL."
@@ -397,6 +469,7 @@
     ("with-allocator" . ("src/odinl/emit.odin" "emit_with_allocator_stmt :: proc" "odinl form"))
     ("with-temp-allocator" . ("src/odinl/emit.odin" "emit_with_temp_allocator_stmt :: proc" "odinl form"))
     ("with-delete" . ("src/odinl/emit.odin" "emit_with_delete_stmt :: proc" "odinl form"))
+    ("when-ok" . ("src/odinl/macroexpand.odin" "expand_when_ok_form :: proc" "odinl form"))
     ("slurp" . ("src/odinl/emit.odin" "if head.text == \"slurp\"" "odinl form"))
     ("spit" . ("src/odinl/emit.odin" "if head.text == \"spit\"" "odinl form"))
     ("save-json" . ("src/odinl/emit.odin" "if head.text == \"save-json\"" "odinl form"))
@@ -619,10 +692,15 @@
 ;;;###autoload
 (define-derived-mode odinl-mode clojure-mode "OdinL"
   "Major mode for editing OdinL source files."
+  :syntax-table odinl-mode-syntax-table
+  (set-syntax-table odinl-mode-syntax-table)
   (setq-local clojure-indent-style 'align-arguments)
   (setq-local clojure-align-forms-automatically nil)
   (setq-local lisp-body-indent odinl-indent-offset)
   (setq-local indent-tabs-mode nil)
+  (setq-local comment-start ";;")
+  (setq-local comment-start-skip
+              "\\(\\(^\\|[^\\\\\n]\\)\\(\\\\\\\\\\)*\\)\\(;+\\|//+\\|/\\*+\\|#|\\) *")
   (add-hook 'xref-backend-functions #'odinl--xref-backend nil t)
   (add-hook 'completion-at-point-functions #'odinl-completion-at-point nil t)
   (font-lock-add-keywords nil odinl-font-lock-keywords)

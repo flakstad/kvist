@@ -65,8 +65,6 @@ Emitter_Features :: struct {
     core_repeatedly:  bool,
     core_iterate:     bool,
     core_cycle:       bool,
-    core_save_json:   bool,
-    core_load_json:   bool,
     core_tap:         bool,
     map_fields:       [dynamic]string,
     index_by_fields:  [dynamic]string,
@@ -95,6 +93,7 @@ Emitter :: struct {
     indent:                    int,
     unions:                    [dynamic]Union_Decl,
     features:                  ^Emitter_Features,
+    source_map:                ^[dynamic]Source_Map_Entry,
     line:                      int,
     temp_counter:              int,
     attach_next_decl:          bool,
@@ -446,18 +445,6 @@ mark_core_cycle :: proc(e: ^Emitter) {
     }
 }
 
-mark_core_save_json :: proc(e: ^Emitter) {
-    if e.features != nil {
-        e.features.core_save_json = true
-    }
-}
-
-mark_core_load_json :: proc(e: ^Emitter) {
-    if e.features != nil {
-        e.features.core_load_json = true
-    }
-}
-
 mark_core_tap :: proc(e: ^Emitter) {
     if e.features != nil {
         e.features.core_tap = true
@@ -630,6 +617,37 @@ emit_raw_newline :: proc(e: ^Emitter) {
     e.line += 1
 }
 
+record_source_map :: proc(e: ^Emitter, start_line, end_line: int, span: Span) {
+    record_source_map_columns(e, start_line, end_line, 0, 0, span)
+}
+
+record_source_map_columns :: proc(e: ^Emitter, start_line, end_line, start_column, end_column: int, span: Span) {
+    if e.source_map == nil {
+        return
+    }
+    if end_line < start_line {
+        return
+    }
+    append(e.source_map, Source_Map_Entry{
+        generated_start_line   = start_line,
+        generated_end_line     = end_line,
+        generated_start_column = start_column,
+        generated_end_column   = end_column,
+        source_span            = span,
+    })
+}
+
+indent_column :: proc(e: ^Emitter) -> int {
+    return e.indent*4 + 1
+}
+
+single_line_span_end_column :: proc(start_column: int, text: string) -> int {
+    if len(text) == 0 {
+        return start_column
+    }
+    return start_column + len(text) - 1
+}
+
 contains_newline :: proc(text: string) -> bool {
     for ch in text {
         if ch == '\n' {
@@ -685,6 +703,30 @@ emit_prefixed_expr :: proc(e: ^Emitter, prefix, expr: string) {
     strings.write_string(&e.builder, expr[start:])
     strings.write_byte(&e.builder, '\n')
     e.line += 1
+}
+
+emit_prefixed_expr_mapped :: proc(e: ^Emitter, prefix, expr: string, span: Span) {
+    start_line := e.line
+    start_column := 0
+    end_column := 0
+    if !contains_newline(expr) {
+        start_column = indent_column(e) + len(prefix)
+        end_column = single_line_span_end_column(start_column, expr)
+    }
+    emit_prefixed_expr(e, prefix, expr)
+    record_source_map_columns(e, start_line, e.line - 1, start_column, end_column, span)
+}
+
+emit_line_mapped :: proc(e: ^Emitter, text: string, span: Span) {
+    start_line := e.line
+    emit_line(e, text)
+    record_source_map(e, start_line, e.line - 1, span)
+}
+
+record_current_line_fragment_map :: proc(e: ^Emitter, prefix_len: int, text: string, span: Span) {
+    start_column := indent_column(e) + prefix_len
+    end_column := single_line_span_end_column(start_column, text)
+    record_source_map_columns(e, e.line, e.line, start_column, end_column, span)
 }
 
 surround_with_braces :: proc(prefix, inner: string) -> string {
@@ -1471,7 +1513,7 @@ owned_result_head :: proc(name: string) -> bool {
          "frequencies", "keys", "vals",
          "distinct", "distinct-by",
          "range", "repeat", "repeatedly", "iterate", "cycle", "take-nth",
-         "slurp", "load-json":
+         "slurp":
         return true
     }
     return false
@@ -1596,11 +1638,11 @@ emit_binding_assignment :: proc(e: ^Emitter, binding: Binding, value: string) {
             strings.write_string(&line_builder, name)
         }
         fmt.sbprintf(&line_builder, " := %s", value)
-        emit_prefixed_expr(e, "", strings.clone(strings.to_string(line_builder)))
+        emit_prefixed_expr_mapped(e, "", strings.clone(strings.to_string(line_builder)), binding.value.span)
     } else if binding.is_field_destructure {
         e.temp_counter += 1
         target := fmt.tprintf("odinl_destructure_%d", e.temp_counter)
-        emit_prefixed_expr(e, fmt.tprintf("%s := ", target), value)
+        emit_prefixed_expr_mapped(e, fmt.tprintf("%s := ", target), value, binding.value.span)
         for field in binding.fields {
             if field.name == "_" {
                 continue
@@ -1608,9 +1650,9 @@ emit_binding_assignment :: proc(e: ^Emitter, binding: Binding, value: string) {
             emit_prefixed_expr(e, fmt.tprintf("%s := ", field.name), fmt.tprintf("%s.%s", target, field.field))
         }
     } else if binding.is_typed {
-        emit_prefixed_expr(e, fmt.tprintf("%s: %s = ", binding.name, binding.ty), value)
+        emit_prefixed_expr_mapped(e, fmt.tprintf("%s: %s = ", binding.name, binding.ty), value, binding.value.span)
     } else {
-        emit_prefixed_expr(e, fmt.tprintf("%s := ", binding.name), value)
+        emit_prefixed_expr_mapped(e, fmt.tprintf("%s := ", binding.name), value, binding.value.span)
     }
 }
 
@@ -2341,38 +2383,6 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
             return "", err_data, false
         }
         return emit_call_text("os.write_entire_file", []string{path, data}), {}, true
-    }
-
-    if head.text == "save-json" {
-        if len(form.items) != 3 {
-            return "", Compile_Error{message = "save-json expects path and value", span = form.span}, false
-        }
-        path, err_path, ok_path := emit_expr(e, form.items[1])
-        if !ok_path {
-            return "", err_path, false
-        }
-        value, err_value, ok_value := emit_expr(e, form.items[2])
-        if !ok_value {
-            return "", err_value, false
-        }
-        mark_core_save_json(e)
-        return emit_call_text("odinl_save_json", []string{path, value}), {}, true
-    }
-
-    if head.text == "load-json" {
-        if len(form.items) != 3 {
-            return "", Compile_Error{message = "load-json expects type and path", span = form.span}, false
-        }
-        type_text, err_type, ok_type := parse_type_text(form.items[1])
-        if !ok_type {
-            return "", err_type, false
-        }
-        path, err_path, ok_path := emit_expr(e, form.items[2])
-        if !ok_path {
-            return "", err_path, false
-        }
-        mark_core_load_json(e)
-        return emit_call_text("odinl_load_json", []string{type_text, path}), {}, true
     }
 
     if head.text == "tap>" {
@@ -3426,10 +3436,12 @@ parse_let_bindings :: proc(form: CST_Form) -> (bindings: [dynamic]Binding, err: 
 emit_body_forms :: proc(e: ^Emitter, body: []CST_Form, returns: Return_Spec) -> (Compile_Error, bool) {
     for form, idx in body {
         last := idx == len(body)-1
+        start_line := e.line
         err_stmt, ok_stmt := emit_stmt(e, form, last, returns)
         if !ok_stmt {
             return err_stmt, false
         }
+        record_source_map(e, start_line, e.line - 1, form.span)
     }
     return {}, true
 }
@@ -3452,6 +3464,7 @@ emit_if_like :: proc(e: ^Emitter, head: string, form: CST_Form, last_in_proc: bo
     emit_indent(e)
     strings.write_string(&e.builder, "if ")
     strings.write_string(&e.builder, test)
+    record_current_line_fragment_map(e, len("if "), test, form.items[1].span)
     strings.write_string(&e.builder, " {")
     emit_raw_newline(e)
     e.indent += 1
@@ -3512,8 +3525,10 @@ emit_cond_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns:
             emit_indent(e)
             if i == 1 {
                 strings.write_string(&e.builder, "if ")
+                record_current_line_fragment_map(e, len("if "), test, test_form.span)
             } else {
                 strings.write_string(&e.builder, "else if ")
+                record_current_line_fragment_map(e, len("else if "), test, test_form.span)
             }
             strings.write_string(&e.builder, test)
             strings.write_string(&e.builder, " {")
@@ -3552,7 +3567,7 @@ emit_with_allocator_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool
     old_allocator := fmt.tprintf("odinl_old_allocator_%d", e.temp_counter)
     emit_line(e, "{")
     e.indent += 1
-    emit_prefixed_expr(e, fmt.tprintf("%s := ", allocator_name), allocator_expr)
+    emit_prefixed_expr_mapped(e, fmt.tprintf("%s := ", allocator_name), allocator_expr, binding.items[1].span)
     emit_line(e, fmt.tprintf("%s := context.allocator", old_allocator))
     emit_line(e, fmt.tprintf("context.allocator = %s", allocator_name))
     emit_line(e, fmt.tprintf("defer context.allocator = %s", old_allocator))
@@ -3690,7 +3705,7 @@ emit_with_delete_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, r
         if !ok_value {
             return err_value, false
         }
-        emit_prefixed_expr(e, fmt.tprintf("%s := ", binding_name), value)
+        emit_prefixed_expr_mapped(e, fmt.tprintf("%s := ", binding_name), value, value_form.span)
         emit_line(e, fmt.tprintf("defer delete(%s)", binding_name))
         i += 2
     }
@@ -3793,12 +3808,18 @@ emit_switch_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, return
         strings.write_string(&e.builder, binding_name)
         strings.write_string(&e.builder, " in ")
         strings.write_string(&e.builder, subject)
+        record_current_line_fragment_map(e, len("switch ") + len(binding_name) + len(" in "), subject, form.items[1].items[1].span)
     } else {
         subject, err_subject, ok_subject := emit_expr(e, form.items[1])
         if !ok_subject {
             return err_subject, false
         }
         strings.write_string(&e.builder, subject)
+        prefix_len := len("switch ")
+        if !type_switch && (force_partial || switch_has_else_clause(form)) {
+            prefix_len = len("#partial switch ")
+        }
+        record_current_line_fragment_map(e, prefix_len, subject, form.items[1].span)
     }
     strings.write_string(&e.builder, " {")
     emit_raw_newline(e)
@@ -3827,7 +3848,7 @@ emit_switch_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, return
         if !ok_label {
             return err_label, false
         } else {
-            emit_line(e, label)
+            emit_line_mapped(e, label, clause.span)
         }
 
         e.indent += 1
@@ -3851,9 +3872,9 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
             return err_expr, false
         }
         if last_in_proc && returns.kind != .None {
-            emit_prefixed_expr(e, "return ", expr)
+            emit_prefixed_expr_mapped(e, "return ", expr, form.span)
         } else {
-            emit_prefixed_expr(e, "", expr)
+            emit_prefixed_expr_mapped(e, "", expr, form.span)
         }
         return {}, true
     }
@@ -3868,9 +3889,9 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
             return err_expr, false
         }
         if last_in_proc && returns.kind != .None {
-            emit_prefixed_expr(e, "return ", expr)
+            emit_prefixed_expr_mapped(e, "return ", expr, form.span)
         } else {
-            emit_prefixed_expr(e, "", expr)
+            emit_prefixed_expr_mapped(e, "", expr, form.span)
         }
         return {}, true
     }
@@ -3885,6 +3906,22 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
         if bad_thread_return {
             return err_thread_return, false
         }
+    }
+
+    switch builtin_macro_kind(head.text) {
+    case .With_Allocator:
+        return emit_with_allocator_stmt(e, form, last_in_proc, returns)
+    case .With_Temp_Allocator:
+        return emit_with_temp_allocator_stmt(e, form, last_in_proc, returns)
+    case .With_Delete:
+        return emit_with_delete_stmt(e, form, last_in_proc, returns)
+    case .When_Ok:
+        expanded, err_expand, ok_expand := expand_when_ok_form(form)
+        if !ok_expand {
+            return err_expand, false
+        }
+        return emit_stmt(e, expanded, last_in_proc, returns)
+    case .None:
     }
 
     switch head.text {
@@ -3984,6 +4021,7 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
         emit_indent(e)
         strings.write_string(&e.builder, "if ")
         strings.write_string(&e.builder, test)
+        record_current_line_fragment_map(e, len("if "), test, form.items[1].span)
         strings.write_string(&e.builder, " {")
         emit_raw_newline(e)
         e.indent += 1
@@ -4002,12 +4040,6 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
         return emit_if_like(e, "if", form, last_in_proc, returns)
     case "cond":
         return emit_cond_stmt(e, form, last_in_proc, returns)
-    case "with-allocator":
-        return emit_with_allocator_stmt(e, form, last_in_proc, returns)
-    case "with-temp-allocator":
-        return emit_with_temp_allocator_stmt(e, form, last_in_proc, returns)
-    case "with-delete":
-        return emit_with_delete_stmt(e, form, last_in_proc, returns)
     case "switch":
         return emit_switch_stmt(e, form, last_in_proc, returns)
     case "return":
@@ -4028,7 +4060,7 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
             if !ok_value {
                 return err_value, false
             }
-            emit_prefixed_expr(e, "return ", value)
+            emit_prefixed_expr_mapped(e, "return ", value, form.items[1].span)
             return {}, true
         }
         line_builder := strings.builder_make()
@@ -4048,7 +4080,7 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
             }
             strings.write_string(&line_builder, value)
         }
-        emit_line(e, strings.clone(strings.to_string(line_builder)))
+        emit_line_mapped(e, strings.clone(strings.to_string(line_builder)), form.items[1].span)
         return {}, true
     case "break":
         if len(form.items) != 1 {
@@ -4076,7 +4108,7 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
                     if !ok_expr {
                         return err_expr, false
                     }
-                    emit_line(e, fmt.tprintf("defer %s", expr))
+                    emit_prefixed_expr_mapped(e, "defer ", expr, deferred.span)
                     return {}, true
                 }
             } else {
@@ -4084,7 +4116,7 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
                 if !ok_expr {
                     return err_expr, false
                 }
-                emit_line(e, fmt.tprintf("defer %s", expr))
+                emit_prefixed_expr_mapped(e, "defer ", expr, deferred.span)
                 return {}, true
             }
         }
@@ -4117,7 +4149,13 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
         if !ok_rhs {
             return err_rhs, false
         }
-        emit_line(e, fmt.tprintf("%s = %s", lhs, rhs))
+        emit_indent(e)
+        strings.write_string(&e.builder, lhs)
+        record_current_line_fragment_map(e, 0, lhs, form.items[1].span)
+        strings.write_string(&e.builder, " = ")
+        strings.write_string(&e.builder, rhs)
+        record_current_line_fragment_map(e, len(lhs) + len(" = "), rhs, form.items[2].span)
+        emit_raw_newline(e)
         return {}, true
     case "each":
         body_start := 3
@@ -4161,6 +4199,12 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
         }
         strings.write_string(&e.builder, " in ")
         strings.write_string(&e.builder, coll)
+        prefix_len := len("for ") + len(name)
+        if has_value {
+            prefix_len += len(", ") + len(value)
+        }
+        prefix_len += len(" in ")
+        record_current_line_fragment_map(e, prefix_len, coll, coll_form.span)
         strings.write_string(&e.builder, " {")
         emit_raw_newline(e)
         e.indent += 1
@@ -4186,6 +4230,7 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
         emit_indent(e)
         strings.write_string(&e.builder, "for ")
         strings.write_string(&e.builder, cond)
+        record_current_line_fragment_map(e, len("for "), cond, form.items[1].span)
         strings.write_string(&e.builder, " {")
         emit_raw_newline(e)
         e.indent += 1
@@ -4218,9 +4263,9 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
             return err_expr, false
         }
         if last_in_proc && returns.kind != .None {
-            emit_prefixed_expr(e, "return ", expr)
+            emit_prefixed_expr_mapped(e, "return ", expr, form.span)
         } else {
-            emit_prefixed_expr(e, "", expr)
+            emit_prefixed_expr_mapped(e, "", expr, form.span)
         }
         return {}, true
     }
@@ -4233,9 +4278,9 @@ emit_eval_print_expr :: proc(e: ^Emitter, form: CST_Form) -> (Compile_Error, boo
             return err_value, false
         }
         temp := eval_temp_name(e)
-        emit_prefixed_expr(e, fmt.tprintf("%s := ", temp), value)
+        emit_prefixed_expr_mapped(e, fmt.tprintf("%s := ", temp), value, form.span)
         emit_line(e, fmt.tprintf("defer delete(%s)", temp))
-        emit_line(e, fmt.tprintf("fmt.println(%s)", temp))
+        emit_line_mapped(e, fmt.tprintf("fmt.println(%s)", temp), form.span)
         return {}, true
     }
 
@@ -4243,7 +4288,7 @@ emit_eval_print_expr :: proc(e: ^Emitter, form: CST_Form) -> (Compile_Error, boo
     if !ok_value {
         return err_value, false
     }
-    emit_line(e, fmt.tprintf("fmt.println(%s)", value))
+    emit_line_mapped(e, fmt.tprintf("fmt.println(%s)", value), form.span)
     return {}, true
 }
 
@@ -5548,40 +5593,6 @@ emit_core_cycle_helper :: proc(e: ^Emitter) {
     emit_line(e, "}")
 }
 
-emit_core_save_json_helper :: proc(e: ^Emitter) {
-    emit_line(e, "odinl_save_json :: proc(path: string, value: $T) -> (marshal_err: json.Marshal_Error, write_err: os.Error) {")
-    e.indent += 1
-    emit_line(e, "data: []byte")
-    emit_line(e, "data, marshal_err = json.marshal(value)")
-    emit_line(e, "if marshal_err != nil {")
-    e.indent += 1
-    emit_line(e, "return")
-    e.indent -= 1
-    emit_line(e, "}")
-    emit_line(e, "defer delete(data)")
-    emit_line(e, "write_err = os.write_entire_file(path, data)")
-    emit_line(e, "return")
-    e.indent -= 1
-    emit_line(e, "}")
-}
-
-emit_core_load_json_helper :: proc(e: ^Emitter) {
-    emit_line(e, "odinl_load_json :: proc($T: typeid, path: string) -> (value: T, read_err: os.Error, unmarshal_err: json.Unmarshal_Error) {")
-    e.indent += 1
-    emit_line(e, "data: []byte")
-    emit_line(e, "data, read_err = os.read_entire_file(path, context.allocator)")
-    emit_line(e, "if read_err != nil {")
-    e.indent += 1
-    emit_line(e, "return")
-    e.indent -= 1
-    emit_line(e, "}")
-    emit_line(e, "defer delete(data)")
-    emit_line(e, "unmarshal_err = json.unmarshal(data, &value)")
-    emit_line(e, "return")
-    e.indent -= 1
-    emit_line(e, "}")
-}
-
 emit_core_tap_helper :: proc(e: ^Emitter) {
     emit_line(e, "odinl_tap :: proc(value: $T) -> T {")
     e.indent += 1
@@ -5889,7 +5900,7 @@ core_helpers_needed :: proc(features: Emitter_Features) -> bool {
            features.core_distinct || features.core_distinct_by ||
            features.core_range || features.core_repeat ||
            features.core_repeatedly || features.core_iterate ||
-           features.core_cycle || features.core_save_json || features.core_load_json ||
+           features.core_cycle ||
            features.core_tap ||
            len(features.map_fields) > 0 || len(features.index_by_fields) > 0 ||
            len(features.group_by_fields) > 0 ||
@@ -6164,14 +6175,6 @@ emit_core_helpers :: proc(e: ^Emitter, features: Emitter_Features) {
         emit_core_helper_separator(e, &emitted)
         emit_core_cycle_helper(e)
     }
-    if features.core_save_json {
-        emit_core_helper_separator(e, &emitted)
-        emit_core_save_json_helper(e)
-    }
-    if features.core_load_json {
-        emit_core_helper_separator(e, &emitted)
-        emit_core_load_json_helper(e)
-    }
     if features.core_tap {
         emit_core_helper_separator(e, &emitted)
         emit_core_tap_helper(e)
@@ -6314,6 +6317,7 @@ emit_decls_with_source_map :: proc(decls: []IR_Decl) -> (Emit_Result, Compile_Er
     e := Emitter{
         builder  = strings.builder_make(),
         features = &features,
+        source_map = &result.source_map,
         line     = 1,
     }
     defer strings.builder_destroy(&e.builder)
@@ -6376,6 +6380,7 @@ emit_eval_decls_with_source_map :: proc(decls: []IR_Decl, eval_form: CST_Form, n
     e := Emitter{
         builder  = strings.builder_make(),
         features = &features,
+        source_map = &result.source_map,
         line     = 1,
     }
     defer strings.builder_destroy(&e.builder)

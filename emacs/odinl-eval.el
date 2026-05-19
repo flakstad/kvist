@@ -4,6 +4,7 @@
 ;; maintain hidden runtime state.
 
 (require 'subr-x)
+(require 'compile)
 (require 'odinl-mode)
 
 (defcustom odinl-result-buffer-name "*OdinL Eval*"
@@ -44,6 +45,21 @@
 
 (defvar odinl-cache-name-history nil
   "Minibuffer history for OdinL cache names.")
+
+(defconst odinl--compilation-error-regexp
+  '("^\\([^:\n]+\\.odinl\\):\\(?:<eval>:\\)?\\([0-9]+\\):\\([0-9]+\\)\\(?::\\| \\)"
+    1 2 3)
+  "Compilation regexp for OdinL and OdinL eval diagnostics.")
+
+(defun odinl--install-compilation-regexp ()
+  "Install OdinL diagnostic matching for `compilation-mode'."
+  (unless (assq 'odinl compilation-error-regexp-alist-alist)
+    (add-to-list 'compilation-error-regexp-alist-alist
+                 (cons 'odinl odinl--compilation-error-regexp)))
+  (unless (memq 'odinl compilation-error-regexp-alist)
+    (add-to-list 'compilation-error-regexp-alist 'odinl)))
+
+(odinl--install-compilation-regexp)
 
 (defvar odinl-eval-mode-map
   (let ((map (make-sparse-keymap)))
@@ -95,7 +111,52 @@
         (visual-line-mode 1)))
     buffer))
 
-(defun odinl--call (program args output-buffer)
+(defun odinl--prepare-diagnostic-buffer (name)
+  "Create and clear diagnostic buffer NAME."
+  (let ((buffer (get-buffer-create name)))
+    (with-current-buffer buffer
+      (let ((inhibit-read-only t)
+            (buffer-read-only nil))
+        (erase-buffer)
+        (compilation-mode)
+        (setq-local compilation-directory default-directory)
+        (setq-local truncate-lines nil)
+        (setq-local word-wrap t)
+        (visual-line-mode 1)))
+    buffer))
+
+(defun odinl--diagnostic-buffer-p (text)
+  "Return non-nil when TEXT looks like OdinL compiler diagnostics."
+  (string-match-p "\\.odinl:\\(?:<eval>:\\)?[0-9]+:[0-9]+\\(?::\\| \\)" text))
+
+(defun odinl--finish-output-buffer (diagnostic)
+  "Put the current output buffer in the right display mode.
+When DIAGNOSTIC is non-nil, use `compilation-mode'."
+  (goto-char (point-min))
+  (if diagnostic
+      (progn
+        (compilation-mode)
+        (setq-local compilation-directory default-directory)
+        (setq next-error-last-buffer (current-buffer)))
+    (special-mode))
+  (setq-local truncate-lines nil)
+  (setq-local word-wrap t)
+  (visual-line-mode 1))
+
+(defun odinl--remap-output-source-path (text temp-source source-buffer)
+  "Replace TEMP-SOURCE diagnostic paths in TEXT with SOURCE-BUFFER's file."
+  (if (and temp-source
+           (buffer-live-p source-buffer)
+           (buffer-file-name source-buffer))
+      (replace-regexp-in-string
+       (regexp-quote (expand-file-name temp-source))
+       (expand-file-name (buffer-file-name source-buffer))
+       text
+       t
+       t)
+    text))
+
+(defun odinl--call (program args output-buffer &optional diagnostic)
   "Call PROGRAM with ARGS, writing output to OUTPUT-BUFFER."
   (with-current-buffer output-buffer
     (let ((inhibit-read-only t)
@@ -103,11 +164,7 @@
       (erase-buffer)
       (prog1
           (apply #'call-process program nil t nil args)
-        (goto-char (point-min))
-        (special-mode)
-        (setq-local truncate-lines nil)
-        (setq-local word-wrap t)
-        (visual-line-mode 1)))))
+        (odinl--finish-output-buffer diagnostic)))))
 
 (defun odinl--cache-name-prompt (prompt)
   "Read a cache name using PROMPT."
@@ -277,7 +334,7 @@ When DISPLAY is non-nil, show command output in the result buffer."
                           (if (zerop exit-code) "" (format "<exit %s> " exit-code))
                           single-line)))))))
 
-(defun odinl--display-output (output-buffer text exit-code)
+(defun odinl--display-output (output-buffer text exit-code &optional diagnostic)
   "Display TEXT in OUTPUT-BUFFER with EXIT-CODE."
   (with-current-buffer output-buffer
     (let ((inhibit-read-only t)
@@ -288,11 +345,7 @@ When DISPLAY is non-nil, show command output in the result buffer."
         (insert text)
         (unless (string-suffix-p "\n" text)
           (insert "\n")))
-      (goto-char (point-min))
-      (special-mode)
-      (setq-local truncate-lines nil)
-      (setq-local word-wrap t)
-      (visual-line-mode 1)))
+      (odinl--finish-output-buffer (or diagnostic (odinl--diagnostic-buffer-p text)))))
   (display-buffer output-buffer)
   (message "odinl exited %s" exit-code))
 
@@ -313,7 +366,7 @@ CLI cache."
          (source (odinl--source-temp-file))
          (generated (when odinl-show-generated
                       (make-temp-file "odinl-eval-" nil ".odin")))
-         (output-buffer (odinl--prepare-buffer odinl-result-buffer-name))
+         (output-buffer (odinl--prepare-diagnostic-buffer odinl-result-buffer-name))
          (args (append (list "eval" source form)
                        (when no-print (list "--no-print"))
                        (when check-only (list "--check"))
@@ -323,7 +376,7 @@ CLI cache."
          (display (or display 'buffer)))
     (unwind-protect
         (let* ((default-directory root)
-               (exit-code (odinl--call (odinl--executable) args output-buffer))
+               (exit-code (odinl--call (odinl--executable) args output-buffer t))
                (result (with-current-buffer output-buffer
                          (buffer-substring-no-properties (point-min) (point-max)))))
           (when (and (not no-print)
@@ -333,9 +386,10 @@ CLI cache."
             (setq args (append (list "eval" source form "--no-print")
                                (when save-name (list "--save" save-name))
                                (when generated (list "--generated" generated))))
-            (setq exit-code (odinl--call (odinl--executable) args output-buffer))
+            (setq exit-code (odinl--call (odinl--executable) args output-buffer t))
             (setq result (with-current-buffer output-buffer
                            (buffer-substring-no-properties (point-min) (point-max)))))
+          (setq result (odinl--remap-output-source-path result source source-buffer))
           (odinl--show-generated generated)
           (pcase display
             ('inline
@@ -354,18 +408,20 @@ CLI cache."
 (defun odinl--buffer-command (command)
   "Run OdinL buffer COMMAND, one of build, check, or run."
   (setq odinl--last-source-buffer (current-buffer))
-  (let* ((source (odinl--source-temp-file))
+  (let* ((source-buffer (current-buffer))
+         (source (odinl--source-temp-file))
          (generated (when odinl-show-generated
                       (make-temp-file "odinl-buffer-" nil ".odin")))
-         (output-buffer (odinl--prepare-buffer odinl-result-buffer-name))
+         (output-buffer (odinl--prepare-diagnostic-buffer odinl-result-buffer-name))
          (root (file-name-as-directory (odinl--project-root))))
     (unwind-protect
         (let* ((default-directory root)
                (args (append (list command source)
                              (when generated (list "--generated" generated))))
-               (exit-code (odinl--call (odinl--executable) args output-buffer))
+               (exit-code (odinl--call (odinl--executable) args output-buffer t))
                (result (with-current-buffer output-buffer
                          (buffer-substring-no-properties (point-min) (point-max)))))
+          (setq result (odinl--remap-output-source-path result source source-buffer))
           (odinl--show-generated generated)
           (if (zerop exit-code)
               (let ((trimmed (odinl--trim-output result)))
@@ -373,7 +429,7 @@ CLI cache."
                          (if (string-empty-p trimmed)
                              (format "odinl %s: ok" command)
                            trimmed)))
-            (odinl--display-output output-buffer result exit-code)))
+            (odinl--display-output output-buffer result exit-code t)))
       (when (file-exists-p source)
         (delete-file source))
       (when (and generated (file-exists-p generated))

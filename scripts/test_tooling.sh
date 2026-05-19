@@ -64,11 +64,54 @@ if ./odinl check "$tmp_dir/bad.odinl" >"$tmp_dir/bad-check.out" 2>"$tmp_dir/bad-
     printf 'failed: bad check unexpectedly succeeded\n' >&2
     exit 1
 fi
-if ! grep -q "$tmp_dir/bad.odinl:4:1 Error: Cannot convert" "$tmp_dir/bad-check.err"; then
+if ! grep -q "$tmp_dir/bad.odinl:5:16 Error: Cannot convert" "$tmp_dir/bad-check.err"; then
     printf 'failed: bad check diagnostic did not map back to .odinl\n' >&2
     cat "$tmp_dir/bad-check.err" >&2
     exit 1
 fi
+cat > "$tmp_dir/bad-statements.odinl" <<'EOF'
+(package main)
+
+(proc main []
+  (return))
+
+(proc if-test [] -> int
+  (if "bad"
+    1
+    0))
+
+(proc when-test []
+  (when "bad"
+    (return)))
+
+(proc set-test []
+  (let [x 1]
+    (set! x "bad")))
+
+(proc each-test []
+  (each [x 123]
+    (return)))
+
+(proc return-test [] -> int
+  (return "bad"))
+EOF
+if ./odinl check "$tmp_dir/bad-statements.odinl" >"$tmp_dir/bad-statements.out" 2>"$tmp_dir/bad-statements.err"; then
+    printf 'failed: bad statement check unexpectedly succeeded\n' >&2
+    exit 1
+fi
+for expected in \
+    "$tmp_dir/bad-statements.odinl:7:7 Error: Non-boolean condition" \
+    "$tmp_dir/bad-statements.odinl:12:9 Error: Non-boolean condition" \
+    "$tmp_dir/bad-statements.odinl:17:13 Error: Cannot convert" \
+    "$tmp_dir/bad-statements.odinl:20:12 Error: Cannot iterate" \
+    "$tmp_dir/bad-statements.odinl:24:11 Error: Cannot convert"
+do
+    if ! grep -q "$expected" "$tmp_dir/bad-statements.err"; then
+        printf 'failed: bad statement diagnostic did not map to expected source location: %s\n' "$expected" >&2
+        cat "$tmp_dir/bad-statements.err" >&2
+        exit 1
+    fi
+done
 
 printf 'tooling: build command\n'
 ./odinl build examples/hello.odinl --generated "$tmp_dir/build.odin"
@@ -127,28 +170,39 @@ cat > "$tmp_dir/dev-io.odinl" <<'EOF'
 
 (proc save-note-json [path: string] -> bool
   (let [note (Note {:title "hello" :body "odinl"})
-        [marshal-err write-err] (save-json path note)]
-    (and (== marshal-err nil)
-         (== write-err nil))))
+        [data marshal-err] (json.marshal note)]
+    (if (!= marshal-err nil)
+      false
+      (do
+        (defer (delete data))
+        (== (spit path data) nil)))))
 
 (proc save-count-json [path: string, n: int] -> bool
-  (let [[marshal-err write-err] (save-json path (Count {:n n}))]
-    (and (== marshal-err nil)
-         (== write-err nil))))
+  (let [[data marshal-err] (json.marshal (Count {:n n}))]
+    (if (!= marshal-err nil)
+      false
+      (do
+        (defer (delete data))
+        (== (spit path data) nil)))))
 
 (proc load-count-json [path: string] -> int
-  (let [[count read-err unmarshal-err] (load-json Count path)]
-    (if (or (!= read-err nil)
-            (!= unmarshal-err nil))
+  (let [[data read-err] (slurp path)]
+    (if (!= read-err nil)
       0
-      (:n count))))
+      (do
+        (defer (delete data))
+        (let [count (Count {})
+              unmarshal-err (json.unmarshal data (& count))]
+          (if (!= unmarshal-err nil)
+            0
+            (:n count)))))))
 EOF
 file_eval_output=$(./odinl eval "$tmp_dir/dev-io.odinl" "(write-read-count \"$tmp_dir/odinl-cache.txt\")")
 assert_eq "5" "$file_eval_output" "file-backed eval output"
 json_eval_output=$(./odinl eval "$tmp_dir/dev-io.odinl" "(save-note-json \"$tmp_dir/odinl-note.json\")")
 assert_eq "true" "$json_eval_output" "json save eval output"
 if ! grep -q '"title":"hello"' "$tmp_dir/odinl-note.json"; then
-    printf 'failed: save-json did not write expected JSON\n' >&2
+    printf 'failed: explicit json.marshal did not write expected JSON\n' >&2
     cat "$tmp_dir/odinl-note.json" >&2
     exit 1
 fi
@@ -173,8 +227,9 @@ fi
 odin check "$tmp_dir/expand.odin" -file
 
 printf 'tooling: macroexpand command\n'
-./odinl macroexpand examples/data-literals.odinl '(with-allocator [allocator context.temp_allocator] (let [buffer (make [dynamic]int)] (defer (delete buffer))))' -o "$tmp_dir/macroexpand.odinl"
+./odinl macroexpand examples/data-literals.odinl '(with-allocator [allocator context.temp_allocator] (let [buffer (make [dynamic]int)] (defer (delete buffer))))' -o "$tmp_dir/macroexpand.odinl" --map "$tmp_dir/macroexpand.map"
 assert_file_nonempty "$tmp_dir/macroexpand.odinl" "macroexpand output"
+assert_file_nonempty "$tmp_dir/macroexpand.map" "macroexpand source map"
 if ! grep -q '(set! context.allocator allocator)' "$tmp_dir/macroexpand.odinl"; then
     printf 'failed: macroexpand output did not include allocator set\n' >&2
     cat "$tmp_dir/macroexpand.odinl" >&2
@@ -183,6 +238,11 @@ fi
 if ! grep -q 'odinl-old-allocator-1 context.allocator' "$tmp_dir/macroexpand.odinl"; then
     printf 'failed: macroexpand output did not include old allocator binding\n' >&2
     cat "$tmp_dir/macroexpand.odinl" >&2
+    exit 1
+fi
+if ! grep -q '^2 2 ' "$tmp_dir/macroexpand.map"; then
+    printf 'failed: macroexpand source map did not include allocator expression line\n' >&2
+    cat "$tmp_dir/macroexpand.map" >&2
     exit 1
 fi
 ./odinl macroexpand examples/data-literals.odinl '(with-temp-allocator [allocator] (let [buffer (make [dynamic]int)] (defer (delete buffer))))' -o "$tmp_dir/macroexpand-temp.odinl"
@@ -288,6 +348,15 @@ if ! grep -q 'examples/higher-order.odinl:<eval>:1:1 Error: Cannot convert' "$tm
     cat "$tmp_dir/bad-eval-check.err" >&2
     exit 1
 fi
+if ./odinl eval examples/higher-order.odinl '(let [x: int "bad"] x)' --check >"$tmp_dir/bad-eval-let-check.out" 2>"$tmp_dir/bad-eval-let-check.err"; then
+    printf 'failed: bad eval let check unexpectedly succeeded\n' >&2
+    exit 1
+fi
+if ! grep -q 'examples/higher-order.odinl:<eval>:1:14 Error: Cannot convert' "$tmp_dir/bad-eval-let-check.err"; then
+    printf 'failed: bad eval let check diagnostic did not point at binding value\n' >&2
+    cat "$tmp_dir/bad-eval-let-check.err" >&2
+    exit 1
+fi
 
 printf 'tooling: legacy eval compile path\n'
 ./odinl examples/higher-order.odinl --eval '(reduce add 0 (new []int [1 2 3]))' -o "$tmp_dir/legacy-eval.odin"
@@ -337,6 +406,20 @@ if command -v emacs >/dev/null 2>&1; then
                      (insert \"(package main)\\n(import \\\"core:fmt\\\")\\n\\n// Adds two ints.\\n(proc add [a: int, b: int] -> int\\n  (+ a b))\\n\\n(proc add-two [a: int, b: int] -> int\\n  (add a b))\\n\\n(proc main []\\n  (fmt.println \\\"from main\\\"))\\n\\n(comment\\n  (add 1 2)\\n  (add-two 1 2)\\n  (with-allocator [allocator context.temp_allocator]\\n    (add 2 1))\\n  (main))\\n\"))
                    (find-file file)
                    (odinl-mode)
+                   (setq odinl-test-source-buffer (current-buffer))
+                   (let ((diagnostic-buffer (odinl--prepare-diagnostic-buffer odinl-result-buffer-name)))
+                     (with-current-buffer diagnostic-buffer
+                       (let ((inhibit-read-only t)
+                             (buffer-read-only nil))
+                         (insert file \":6:4 Error: simulated diagnostic\\n\")
+                         (insert file \":<eval>:1:14 Error: simulated eval diagnostic\\n\")
+                         (odinl--finish-output-buffer t))
+                       (unless (eq major-mode (quote compilation-mode))
+                         (error \"Expected OdinL diagnostic buffer to use compilation-mode\"))
+                       (goto-char (point-min))
+                       (let ((msg (compilation-next-error 1)))
+                         (unless msg
+                           (error \"Expected compilation-next-error to find OdinL diagnostic\")))))
                    (unless (eq (key-binding (kbd \"M-.\")) (quote xref-find-definitions))
                      (error \"Missing M-. xref binding\"))
                    (let ((symbols (odinl--symbols)))
@@ -355,6 +438,33 @@ if command -v emacs >/dev/null 2>&1; then
                      (let ((doc (odinl--preceding-odin-doc (line-beginning-position))))
                        (unless (equal doc \"Block docs.\\nMore docs.\")
                          (error \"Expected block docs, got: %S\" doc))))
+                   (with-temp-buffer
+                     (odinl-mode)
+                     (insert \";; semi\\nafter-semi\\n// slash\\nafter-slash\\n(code) /* block\\nmore */ tail\\n\")
+                     (font-lock-ensure)
+                     (goto-char (point-min))
+                     (search-forward \"semi\")
+                     (unless (nth 4 (syntax-ppss))
+                       (error \"Expected ;; to be comment syntax\"))
+                     (search-forward \"after-semi\")
+                     (when (nth 4 (syntax-ppss))
+                       (error \"Expected ;; comment to end at newline\"))
+                     (search-forward \"slash\")
+                     (unless (nth 4 (syntax-ppss))
+                       (error \"Expected // to be comment syntax\"))
+                     (unless (eq (get-text-property (point) (quote face)) (quote font-lock-comment-face))
+                       (error \"Expected // to use comment face\"))
+                     (search-forward \"after-slash\")
+                     (when (nth 4 (syntax-ppss))
+                       (error \"Expected // comment to end at newline\"))
+                     (search-forward \"block\")
+                     (unless (nth 4 (syntax-ppss))
+                       (error \"Expected /* */ to be comment syntax\"))
+                     (unless (eq (get-text-property (point) (quote face)) (quote font-lock-comment-face))
+                       (error \"Expected /* */ to use comment face\"))
+                     (search-forward \"tail\")
+                     (when (nth 4 (syntax-ppss))
+                       (error \"Expected block comment to end\")))
                    (goto-char (point-min))
                    (search-forward \"add [\")
                    (backward-word)
@@ -448,6 +558,43 @@ if command -v emacs >/dev/null 2>&1; then
                    (odinl-cache-rm \"emacs-sum\")
                    (when (file-exists-p (expand-file-name \"emacs-sum\" \"$tmp_dir/emacs-cache\"))
                      (error \"Expected removed eval cache file\"))
+                   (let ((source-buffer odinl-test-source-buffer))
+                     (set-buffer source-buffer)
+                     (goto-char (point-min))
+                     (search-forward \"(+ a b)\")
+                     (delete-region (line-beginning-position) (line-end-position))
+                     (insert \"  (+ a \\\"bad\\\"))\")
+                     (save-buffer)
+                     (call-interactively (quote odinl-check-buffer))
+                     (with-current-buffer odinl-result-buffer-name
+                       (unless (eq major-mode (quote compilation-mode))
+                         (error \"Expected failed check buffer to use compilation-mode\"))
+                       (goto-char (point-min))
+                       (unless (search-forward \".odinl:\" nil t)
+                         (error \"Expected failed check to contain OdinL diagnostic\"))
+                       (goto-char (point-min))
+                       (unless (search-forward \"Cannot convert\" nil t)
+                         (error \"Expected failed check to report the intended type error\"))
+                       (goto-char (point-min))
+                       (unless (compilation-next-error 1)
+                         (error \"Expected failed check diagnostic to be navigable\")))
+                     (set-buffer source-buffer)
+                     (goto-char (point-min))
+                     (next-error)
+                     (unless (equal (current-buffer) source-buffer)
+                       (error \"Expected next-error from source to stay in OdinL source buffer\"))
+                     (unless (= (line-number-at-pos) 6)
+                       (error \"Expected next-error from source to jump to diagnostic line, got %s\"
+                              (line-number-at-pos)))
+                     (unless (eq next-error-last-buffer (get-buffer odinl-result-buffer-name))
+                       (error \"Expected OdinL result buffer to be the active next-error buffer\"))
+                     (set-buffer source-buffer)
+                     (goto-char (point-min))
+                     (search-forward \"(+ a \\\"bad\\\")\")
+                     (delete-region (line-beginning-position) (line-end-position))
+                     (insert \"  (+ a b))\")
+                     (save-buffer))
+                   (set-buffer odinl-test-source-buffer)
                    (goto-char (point-min))
                    (search-forward \"(main)\")
                    (call-interactively (quote odinl-insert-form-result))

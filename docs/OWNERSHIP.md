@@ -70,7 +70,6 @@ These forms return owned values in normal OdinL code:
 (iterate n f x)
 (cycle n xs)
 (slurp path)
-(load-json Type path)
 ```
 
 Use `defer delete` for local owned values:
@@ -108,11 +107,11 @@ no longer needed:
 If a proc returns the bytes from `slurp`, ownership transfers to the caller and
 the callee must not delete them.
 
-`load-json` returns `(value, read_err, unmarshal_err)`. The helper deletes the
-temporary file bytes it reads, but a successfully decoded value may contain
-strings, slices, dynamic arrays, or maps allocated by Odin's JSON package. The
-caller owns those decoded allocations and must clean them up according to the
-decoded type.
+Data marshalling is explicit host interop, not OdinL core. For JSON, call
+`json.marshal` and `json.unmarshal` directly. `json.marshal` returns owned
+bytes that must be deleted after writing. `json.unmarshal` may allocate strings,
+slices, dynamic arrays, or maps inside the destination value; the caller owns
+those decoded allocations and must clean them up according to the decoded type.
 
 ## Do Not Delete These
 
@@ -143,17 +142,12 @@ These are scalar values, plain values, or borrowed views:
 (count xs)
 (contains? collection key)
 (spit path data)
-(save-json path value)
 (tap> value)
 (tap> :label value)
 ```
 
 `spit` lowers to `os.write_entire_file(path, data)` and returns `os.Error`. It
 does not allocate an owned result.
-
-`save-json` returns `(marshal_err: json.Marshal_Error, write_err: os.Error)`.
-It allocates temporary JSON bytes internally and deletes them before returning,
-so callers only handle the errors.
 
 `split-at` returns two borrowed slices:
 

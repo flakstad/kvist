@@ -99,12 +99,60 @@ format_source_map :: proc(entries: []Source_Map_Entry) -> string {
 }
 
 source_map_entry_for_generated_line :: proc(entries: []Source_Map_Entry, line: int) -> (Source_Map_Entry, bool) {
+    return source_map_entry_for_generated_location(entries, line, 0)
+}
+
+source_map_entry_for_generated_location :: proc(entries: []Source_Map_Entry, line, column: int) -> (Source_Map_Entry, bool) {
+    best: Source_Map_Entry
+    found := false
+    best_column_constrained := false
+    best_generated_width := 0
+    best_column_width := 0
+    best_source_width := 0
     for entry in entries {
-        if line >= entry.generated_start_line && line <= entry.generated_end_line {
-            return entry, true
+        if line < entry.generated_start_line || line > entry.generated_end_line {
+            continue
+        }
+        column_constrained := column > 0 && entry.generated_start_column > 0
+        if column_constrained {
+            if column < entry.generated_start_column {
+                continue
+            }
+            if entry.generated_end_column > 0 && column > entry.generated_end_column {
+                continue
+            }
+        }
+        generated_width := entry.generated_end_line - entry.generated_start_line
+        column_width := 0
+        if entry.generated_start_column > 0 && entry.generated_end_column > 0 {
+            column_width = entry.generated_end_column - entry.generated_start_column
+        }
+        source_width := entry.source_span.end - entry.source_span.start
+        if !found ||
+           (column_constrained && !best_column_constrained) ||
+           (column_constrained == best_column_constrained &&
+            column_constrained && column_width < best_column_width) ||
+           (column_constrained == best_column_constrained &&
+            column_width == best_column_width &&
+            generated_width < best_generated_width) ||
+           (column_constrained == best_column_constrained &&
+            column_width == best_column_width &&
+            generated_width == best_generated_width &&
+            source_width < best_source_width) ||
+           (!column_constrained && !best_column_constrained &&
+            generated_width < best_generated_width) ||
+           (!column_constrained && !best_column_constrained &&
+            generated_width == best_generated_width &&
+            source_width < best_source_width) {
+            best = entry
+            found = true
+            best_column_constrained = column_constrained
+            best_generated_width = generated_width
+            best_column_width = column_width
+            best_source_width = source_width
         }
     }
-    return {}, false
+    return best, found
 }
 
 compile_source :: proc(source: string) -> (output: string, err: Compile_Error, ok: bool) {

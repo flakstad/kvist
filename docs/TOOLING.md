@@ -73,9 +73,17 @@ tooling entry points:
 - inspect the generated scratch Odin for a selected form with `odinl expand`
 - optionally write generated Odin for editor inspection with `--generated`
 
-The current `--map` output is declaration-level only. Eval forms do carry an
-origin marker, so compiler errors in selected eval text can be reported against
-`file:<eval>:line:column` instead of the surrounding file.
+The current `--map` output is line-oriented. Declarations are still the fallback
+mapping, but emitted body forms, binding assignments, conditions, loop
+collections, return values, and assignment values carry narrower source spans
+where the generated line has a clear OdinL origin. Internally, diagnostic
+remapping also uses generated columns when Odin reports them. Eval forms carry
+an origin marker, so compiler errors in selected eval text can be reported
+against `file:<eval>:line:column` instead of the surrounding file.
+
+The Emacs result buffer should treat remapped OdinL diagnostics as
+`compilation-mode` output. That keeps errors clickable and lets ordinary Emacs
+commands such as `next-error` / `M-g n` navigate back into `.odinl` source.
 
 ## Near-Term Language Tooling
 
@@ -90,13 +98,29 @@ runtime facility:
   built-in macro-like forms such as `with-allocator` and
   `with-temp-allocator` and cleanup forms such as `with-delete`, while
   `odinl expand` remains the generated-Odin lowering preview;
+- `odinl macroexpand file.odinl FORM --map output.map` writes a simple
+  line-oriented expansion map so generated macroexpand lines can be related
+  back to the original macro call, binding values, and body forms;
 - diagnostics should keep enough source information to point through expansion
   where practical;
 - macros must not introduce a hidden stateful REPL or dynamic runtime world.
 
+The current implementation has a small compiler-defined macro registry rather
+than user-defined macros. The registry is shared by `odinl macroexpand` and the
+normal emitter so supported macro-like forms have one explicit classification
+point. For now, normal compilation still lowers these forms directly where that
+keeps ownership checks precise; a later expansion phase can move more of that
+lowering into frontend form rewriting once diagnostics and ownership rules stay
+equally clear. `odinl macroexpand` expands nested compiler-defined macro forms
+inside ordinary wrapper forms and `with-*` bodies, so resource-scope previews
+show the shape of stacked cleanup/resource helpers. Formatting of recursive
+macroexpand output is still a preview format, not the final source formatter.
+
 Good first macro candidates are resource-scope and repetition helpers that
 clearly expand to existing forms, such as allocator setup/teardown,
-`with-*`-style cleanup, and repetitive check/error propagation.
+`with-*`-style cleanup, and repetitive check/error propagation. `when-ok` is
+the first explicit multi-return convenience macro: it expands `[value ok expr]`
+to a destructuring `let` plus `when ok`.
 
 ## Data-Oriented Iteration
 
@@ -210,25 +234,31 @@ Saving JSON can also stay boring:
 (import json "core:encoding/json")
 (import os "core:os")
 
-(let [[marshal-err write-err] (save-json "tmp/users.json" users)]
-  (and (== marshal-err nil)
-       (== write-err nil)))
+(let [[data marshal-err] (json.marshal user)]
+  (if (!= marshal-err nil)
+    false
+    (do
+      (defer (delete data))
+      (== (spit "tmp/users.json" data) nil))))
 
-(let [[users read-err unmarshal-err] (load-json []User "tmp/users.json")]
-  ...)
+(let [[data read-err] (slurp "tmp/users.json")]
+  (if (!= read-err nil)
+    false
+    (do
+      (defer (delete data))
+      (let [user (User {})
+            unmarshal-err (json.unmarshal data (& user))]
+        (== unmarshal-err nil)))))
 ```
 
-`save-json` lowers through a generated `odinl_save_json` helper that calls
-`json.marshal`, defers deletion of the temporary JSON bytes, and writes them
-with `os.write_entire_file`.
-
 For structured data, continue to require explicit format and type decisions
-rather than inventing a universal printer/reader. `load-json` requires the
-destination type at the call site and returns `(value, read_err,
-unmarshal_err)`. Odin's JSON unmarshal can allocate strings, slices, dynamic
-arrays, and maps inside the destination value according to that destination
-type, so callers still own any allocations inside a successfully decoded value.
-For allocation-heavy decoded values, keep cleanup explicit in the calling code.
+rather than inventing a universal printer/reader. JSON is ordinary host
+interop: source files import `core:encoding/json` and call `json.marshal` /
+`json.unmarshal` explicitly. Odin's JSON unmarshal can allocate strings,
+slices, dynamic arrays, and maps inside the destination value according to that
+destination type, so callers still own any allocations inside a successfully
+decoded value. For allocation-heavy decoded values, keep cleanup explicit in the
+calling code.
 
 These helpers should lean on Odin's existing core libraries:
 
@@ -289,8 +319,8 @@ writes the exact stdout from a successful eval run to the named cache file and
 still prints stdout normally.
 
 This is intentionally text-oriented. For structured values, prefer explicit
-`spit`, `slurp`, and `save-json` in OdinL source so ownership and format choices
-stay visible.
+`spit`, `slurp`, `json.marshal`, and `json.unmarshal` in OdinL source so
+ownership and format choices stay visible.
 
 The Emacs tooling exposes this through ordinary CLI calls:
 

@@ -173,9 +173,11 @@ IR_Program :: struct {
 }
 
 Source_Map_Entry :: struct {
-    generated_start_line: int,
-    generated_end_line:   int,
-    source_span:          Span,
+    generated_start_line:   int,
+    generated_end_line:     int,
+    generated_start_column: int,
+    generated_end_column:   int,
+    source_span:            Span,
 }
 
 Emit_Result :: struct {
@@ -186,4 +188,12 @@ Emit_Result :: struct {
 Compile_Error :: struct {
     message: string,
     span:    Span,
+}
+
+Builtin_Macro_Kind :: enum {
+    None,
+    With_Allocator,
+    With_Temp_Allocator,
+    With_Delete,
+    When_Ok,
 }

@@ -33,6 +33,23 @@
       (set! total (+ total x)))
     total))
 
+(proc lookup-method [name: string] -> [method: Method, ok: bool]
+  (cond
+    (== name "GET") (return .Get true)
+    (== name "HEAD") (return .Head true)
+    (== name "POST") (return .Post true)
+    (== name "DELETE") (return .Delete true)
+    :else (return .Get false)))
+
+// when-ok is a compiler-defined macro for Odin-style value/ok returns. It
+// expands to ordinary multi-return destructuring plus (when ok ...).
+(proc method-score [name: string] -> int
+  (let [score 0]
+    (when-ok [method ok (lookup-method name)]
+      (when (read-method? method)
+        (set! score 10)))
+    score))
+
 (proc main []
   (let [xs (new []int [1 2 3])]
     (fmt.println (classify (sum xs)))))
@@ -49,4 +66,10 @@
 
   (sum [1 2 3 4 5 6])
   ;; => 21
+
+  (method-score "HEAD")
+  ;; => 10
+
+  (method-score "POST")
+  ;; => 0
 )

@@ -34,6 +34,10 @@ compiler first:
 odin build cmd/odinl
 ```
 
+When the CLI reports OdinL diagnostics, the result buffer uses
+`compilation-mode`, so standard Emacs navigation such as `next-error` / `M-g n`
+can jump back to the reported `.odinl` source location.
+
 Default keys:
 
 - `M-.`: go to definition

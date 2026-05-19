@@ -539,14 +539,25 @@ main :: proc() {
 }
 `
     testing.expect_value(t, result.output, expected)
-    testing.expect_value(t, len(result.source_map), 3)
-    testing.expect_value(t, result.source_map[0].generated_start_line, 1)
-    testing.expect_value(t, result.source_map[0].generated_end_line, 1)
-    testing.expect_value(t, result.source_map[1].generated_start_line, 3)
-    testing.expect_value(t, result.source_map[1].generated_end_line, 3)
-    testing.expect_value(t, result.source_map[2].generated_start_line, 5)
-    testing.expect_value(t, result.source_map[2].generated_end_line, 7)
-    testing.expect_value(t, result.source_map[1].source_span.start > result.source_map[0].source_span.start, true)
+    testing.expect_value(t, len(result.source_map) >= 4, true)
+    package_entry, found_package := odinl.source_map_entry_for_generated_line(result.source_map[:], 1)
+    testing.expect_value(t, found_package, true)
+    testing.expect_value(t, package_entry.source_span.start, 0)
+
+    const_entry, found_const := odinl.source_map_entry_for_generated_line(result.source_map[:], 3)
+    testing.expect_value(t, found_const, true)
+    testing.expect_value(t, const_entry.source_span.start > package_entry.source_span.start, true)
+
+    proc_entry, found_proc := odinl.source_map_entry_for_generated_line(result.source_map[:], 5)
+    testing.expect_value(t, found_proc, true)
+    proc_line, _, _, _ := odinl.source_position(source, proc_entry.source_span.start)
+    testing.expect_value(t, proc_line, 5)
+
+    return_entry, found_return := odinl.source_map_entry_for_generated_line(result.source_map[:], 6)
+    testing.expect_value(t, found_return, true)
+    return_line, return_column, _, _ := odinl.source_position(source, return_entry.source_span.start)
+    testing.expect_value(t, return_line, 6)
+    testing.expect_value(t, return_column, 3)
 }
 
 @(test)
@@ -568,13 +579,26 @@ compile_source_map_accounts_for_feature_line_and_multiline_raw :: proc(t: ^testi
     defer delete(result.output)
     defer delete(result.source_map)
 
-    testing.expect_value(t, len(result.source_map), 3)
-    testing.expect_value(t, result.source_map[0].generated_start_line, 2)
-    testing.expect_value(t, result.source_map[0].generated_end_line, 2)
-    testing.expect_value(t, result.source_map[1].generated_start_line, 4)
-    testing.expect_value(t, result.source_map[1].generated_end_line, 5)
-    testing.expect_value(t, result.source_map[2].generated_start_line, 7)
-    testing.expect_value(t, result.source_map[2].generated_end_line, 10)
+    testing.expect_value(t, len(result.source_map) >= 5, true)
+    package_entry, found_package := odinl.source_map_entry_for_generated_line(result.source_map[:], 2)
+    testing.expect_value(t, found_package, true)
+    testing.expect_value(t, package_entry.source_span.start, 0)
+
+    raw_entry, found_raw := odinl.source_map_entry_for_generated_line(result.source_map[:], 4)
+    testing.expect_value(t, found_raw, true)
+    raw_line, _, _, _ := odinl.source_position(source, raw_entry.source_span.start)
+    testing.expect_value(t, raw_line, 3)
+
+    proc_entry, found_proc := odinl.source_map_entry_for_generated_line(result.source_map[:], 7)
+    testing.expect_value(t, found_proc, true)
+    proc_line, _, _, _ := odinl.source_position(source, proc_entry.source_span.start)
+    testing.expect_value(t, proc_line, 5)
+
+    binding_entry, found_binding := odinl.source_map_entry_for_generated_line(result.source_map[:], 8)
+    testing.expect_value(t, found_binding, true)
+    binding_line, binding_column, _, _ := odinl.source_position(source, binding_entry.source_span.start)
+    testing.expect_value(t, binding_line, 6)
+    testing.expect_value(t, binding_column > 0, true)
 }
 
 @(test)
@@ -585,6 +609,18 @@ format_declaration_source_map :: proc(t: ^testing.T) {
             generated_end_line = 3,
             source_span = odinl.Span{start = 10, end = 20},
         },
+        {
+            generated_start_line = 2,
+            generated_end_line = 2,
+            source_span = odinl.Span{start = 30, end = 35},
+        },
+        {
+            generated_start_line = 2,
+            generated_end_line = 2,
+            generated_start_column = 8,
+            generated_end_column = 12,
+            source_span = odinl.Span{start = 40, end = 45},
+        },
     }
 
     formatted := odinl.format_source_map(entries[:])
@@ -592,12 +628,22 @@ format_declaration_source_map :: proc(t: ^testing.T) {
 
     expected := `generated_start generated_end source_start source_end
 1 3 10 20
+2 2 30 35
+2 2 40 45
 `
     testing.expect_value(t, formatted, expected)
 
     entry, found := odinl.source_map_entry_for_generated_line(entries[:], 2)
     testing.expect_value(t, found, true)
-    testing.expect_value(t, entry.source_span.start, 10)
+    testing.expect_value(t, entry.source_span.start, 30)
+
+    column_entry, column_found := odinl.source_map_entry_for_generated_location(entries[:], 2, 9)
+    testing.expect_value(t, column_found, true)
+    testing.expect_value(t, column_entry.source_span.start, 40)
+
+    fallback_entry, fallback_found := odinl.source_map_entry_for_generated_location(entries[:], 2, 2)
+    testing.expect_value(t, fallback_found, true)
+    testing.expect_value(t, fallback_entry.source_span.start, 30)
 
     _, missing := odinl.source_map_entry_for_generated_line(entries[:], 4)
     testing.expect_value(t, missing, false)
@@ -1136,6 +1182,44 @@ main :: proc() {
 }
 
 @(test)
+compile_when_ok_macro :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(proc query [] -> [value: int, ok: bool]
+  (return 42 true))
+
+(proc main []
+  (when-ok [value ok (query)]
+    (when (> value 40)
+      (return))))`
+
+    output, err, ok := odinl.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    expected := `package main
+
+query :: proc() -> (value: int, ok: bool) {
+    return 42, true
+}
+
+main :: proc() {
+    value, ok := query()
+    if ok {
+        if (value) > (40) {
+            return
+        }
+    }
+}
+`
+    testing.expect_value(t, output, expected)
+}
+
+@(test)
 compile_file_dev_helpers :: proc(t: ^testing.T) {
     source := `(package main)
 (import os "core:os")
@@ -1171,7 +1255,7 @@ compile_file_dev_helpers :: proc(t: ^testing.T) {
 }
 
 @(test)
-compile_save_json_helper :: proc(t: ^testing.T) {
+compile_json_interop_is_explicit :: proc(t: ^testing.T) {
     source := `(package main)
 (import json "core:encoding/json")
 (import os "core:os")
@@ -1182,9 +1266,21 @@ compile_save_json_helper :: proc(t: ^testing.T) {
 })
 
 (proc save-user [path: string, user: User] -> bool
-  (let [[marshal-err write-err] (save-json path user)]
-    (and (== marshal-err nil)
-         (== write-err nil))))`
+  (let [[data marshal-err] (json.marshal user)]
+    (if (!= marshal-err nil)
+      false
+      (do
+        (defer (delete data))
+        (== (spit path data) nil)))))
+
+(proc load-user [path: string] -> [user: User, ok: bool]
+  (let [[data read-err] (slurp path)]
+    (if (!= read-err nil)
+      (return user false)
+      (do
+        (defer (delete data))
+        (let [unmarshal-err (json.unmarshal data (& user))]
+          (return user (== unmarshal-err nil)))))))`
 
     output, err, ok := odinl.compile_source(source)
     testing.expect_value(t, ok, true)
@@ -1196,43 +1292,13 @@ compile_save_json_helper :: proc(t: ^testing.T) {
 
     testing.expect_value(t, strings.contains(output, `import json "core:encoding/json"`), true)
     testing.expect_value(t, strings.contains(output, `import os "core:os"`), true)
-    testing.expect_value(t, strings.contains(output, "marshal_err, write_err := odinl_save_json(path, user)"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_save_json :: proc(path: string, value: $T) -> (marshal_err: json.Marshal_Error, write_err: os.Error)"), true)
-    testing.expect_value(t, strings.contains(output, "data, marshal_err = json.marshal(value)"), true)
+    testing.expect_value(t, strings.contains(output, "data, marshal_err := json.marshal(user)"), true)
+    testing.expect_value(t, strings.contains(output, "return (os.write_entire_file(path, data)) == (nil)"), true)
+    testing.expect_value(t, strings.contains(output, "data, read_err := os.read_entire_file(path, context.allocator)"), true)
+    testing.expect_value(t, strings.contains(output, "unmarshal_err := json.unmarshal(data, &user)"), true)
     testing.expect_value(t, strings.contains(output, "defer delete(data)"), true)
-    testing.expect_value(t, strings.contains(output, "write_err = os.write_entire_file(path, data)"), true)
-}
-
-@(test)
-compile_load_json_helper :: proc(t: ^testing.T) {
-    source := `(package main)
-(import json "core:encoding/json")
-(import os "core:os")
-
-(struct Count {
-  :n int
-})
-
-(proc load-count [path: string] -> [value: Count, ok: bool]
-  (let [[value read-err unmarshal-err] (load-json Count path)]
-    (return value (and (== read-err nil)
-                       (== unmarshal-err nil)))))`
-
-    output, err, ok := odinl.compile_source(source)
-    testing.expect_value(t, ok, true)
-    if !ok {
-        testing.expect_value(t, err.message, "")
-        return
-    }
-    defer delete(output)
-
-    testing.expect_value(t, strings.contains(output, `import json "core:encoding/json"`), true)
-    testing.expect_value(t, strings.contains(output, `import os "core:os"`), true)
-    testing.expect_value(t, strings.contains(output, "value, read_err, unmarshal_err := odinl_load_json(Count, path)"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_load_json :: proc($T: typeid, path: string) -> (value: T, read_err: os.Error, unmarshal_err: json.Unmarshal_Error)"), true)
-    testing.expect_value(t, strings.contains(output, "data, read_err = os.read_entire_file(path, context.allocator)"), true)
-    testing.expect_value(t, strings.contains(output, "defer delete(data)"), true)
-    testing.expect_value(t, strings.contains(output, "unmarshal_err = json.unmarshal(data, &value)"), true)
+    testing.expect_value(t, strings.contains(output, "odinl_save_json"), false)
+    testing.expect_value(t, strings.contains(output, "odinl_load_json"), false)
 }
 
 @(test)
@@ -1600,6 +1666,100 @@ macroexpand_with_delete_multiple_bindings :: proc(t: ^testing.T) {
     (count ys)))
 `
     testing.expect_value(t, output, expected)
+}
+
+@(test)
+macroexpand_expands_nested_builtin_macro_body :: proc(t: ^testing.T) {
+    output, err, ok := odinl.macroexpand_source(`(with-allocator [allocator context.temp_allocator]
+  (with-delete [xs (new [dynamic]int [1 2])]
+    (count xs)))`)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    expected := `(do
+  (let [allocator context.temp_allocator
+        odinl-old-allocator-1 context.allocator]
+    (set! context.allocator allocator)
+    (defer (do
+      (set! context.allocator odinl-old-allocator-1)))
+    (do
+      (let [xs (new [dynamic]int [1 2])]
+        (defer (delete xs))
+        (count xs)))))
+`
+    testing.expect_value(t, output, expected)
+}
+
+@(test)
+macroexpand_recurses_through_ordinary_forms :: proc(t: ^testing.T) {
+    output, err, ok := odinl.macroexpand_source(`(let [n 1]
+  (with-delete [xs (new [dynamic]int [1 2])]
+    (count xs)))`)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    expected := `(let [n 1] (do
+  (let [xs (new [dynamic]int [1 2])]
+    (defer (delete xs))
+    (count xs))))
+`
+    testing.expect_value(t, output, expected)
+}
+
+@(test)
+macroexpand_when_ok :: proc(t: ^testing.T) {
+    output, err, ok := odinl.macroexpand_source(`(when-ok [value ok (query)]
+  (fmt.println value))`)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    expected := `(let [[value ok] (query)] (when ok (fmt.println value)))
+`
+    testing.expect_value(t, output, expected)
+}
+
+@(test)
+macroexpand_source_map_marks_generated_lines :: proc(t: ^testing.T) {
+    source := `(with-delete [xs (map inc users) ys (filter even? xs)]
+  (count ys))`
+    result, err, ok := odinl.macroexpand_source_with_map(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+
+    testing.expect_value(t, len(result.source_map), 6)
+
+    xs_value_start := strings.index(source, "(map inc users)")
+    ys_value_start := strings.index(source, "(filter even? xs)")
+    body_start := strings.index(source, "(count ys)")
+
+    xs_entry, xs_found := odinl.source_map_entry_for_generated_line(result.source_map[:], 2)
+    testing.expect_value(t, xs_found, true)
+    testing.expect_value(t, xs_entry.source_span.start, xs_value_start)
+
+    ys_entry, ys_found := odinl.source_map_entry_for_generated_line(result.source_map[:], 3)
+    testing.expect_value(t, ys_found, true)
+    testing.expect_value(t, ys_entry.source_span.start, ys_value_start)
+
+    body_entry, body_found := odinl.source_map_entry_for_generated_line(result.source_map[:], 6)
+    testing.expect_value(t, body_found, true)
+    testing.expect_value(t, body_entry.source_span.start, body_start)
 }
 
 @(test)
