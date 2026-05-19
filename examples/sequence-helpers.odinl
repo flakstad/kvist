@@ -58,6 +58,12 @@
     (defer (delete kept))
     (first kept)))
 
+(proc with-delete-total [] -> int
+  (let [xs (new []int [1 2 3])]
+    (with-delete [doubled (map double xs)
+                  evens (filter even? doubled)]
+      (reduce add 0 evens))))
+
 (proc age-for-grace [] -> int
   (let [names (new []string ["Ada" "Lin" "Grace"])
         ages (new []int [36 17 45])
@@ -144,6 +150,12 @@
         bigs (drop-while small? xs)]
     (+ (+ (last head) (first tail))
        (+ (len smalls) (first bigs)))))
+
+(proc tail-trim-score [] -> int
+  (let [xs (new []int [1 2 3 4 5])
+        init (butlast xs)
+        without-two (drop-last 2 xs)]
+    (+ (last init) (len without-two))))
 
 (proc rest-second-empty-score [] -> int
   (let [xs (new []int [10 20 30])
@@ -311,6 +323,9 @@
   (first-kept-square)
   ;; => 4
 
+  (with-delete-total)
+  ;; => 12
+
   (age-for-grace)
   ;; => 45
 
@@ -349,6 +364,9 @@
 
   (trimmed-sum)
   ;; => 13
+
+  (tail-trim-score)
+  ;; => 7
 
   (rest-second-empty-score)
   ;; => 40

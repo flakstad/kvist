@@ -16,7 +16,8 @@ The practical rule is:
 
 `tap>` prints and returns its value. It does not allocate an owned result by
 itself, but ownership passes through it: `(tap> (map f xs))` is still an owned
-result and must be bound or returned.
+result and must be bound or returned. The same is true in threaded code:
+`(->> xs (map f) (tap> :mapped))` still returns an owned dynamic array.
 
 ## Delete These
 
@@ -64,6 +65,7 @@ These forms return owned values in normal OdinL code:
 (iterate n f x)
 (cycle n xs)
 (slurp path)
+(load-json Type path)
 ```
 
 Use `defer delete` for local owned values:
@@ -101,6 +103,12 @@ no longer needed:
 If a proc returns the bytes from `slurp`, ownership transfers to the caller and
 the callee must not delete them.
 
+`load-json` returns `(value, read_err, unmarshal_err)`. The helper deletes the
+temporary file bytes it reads, but a successfully decoded value may contain
+strings, slices, dynamic arrays, or maps allocated by Odin's JSON package. The
+caller owns those decoded allocations and must clean them up according to the
+decoded type.
+
 ## Do Not Delete These
 
 These are scalar values, plain values, or borrowed views:
@@ -117,6 +125,8 @@ These are scalar values, plain values, or borrowed views:
 (rest xs)
 (take n xs)
 (drop n xs)
+(butlast xs)
+(drop-last n xs)
 (take-while pred xs)
 (drop-while pred xs)
 (split-at n xs)
@@ -236,6 +246,22 @@ This form still emits ordinary Odin calls to `runtime.default_temp_allocator_*`.
 The runtime import is explicit, and any owned values that escape the block must
 not borrow storage from the ended temp scope. OdinL rejects obvious direct
 escapes such as returning `(map f xs)` from a `with-temp-allocator` body.
+
+`with-delete` is the small cleanup helper for local owned values:
+
+```clojure
+(with-delete [active (filter active? users)]
+  (count active))
+
+(with-delete [active (filter active? users)
+              names (map :name active)]
+  (count names))
+```
+
+It lowers to a scope with bindings and matching `defer delete(...)` calls. Use
+it when the owned values are local to the body. Do not return a bound value from
+the body; if ownership should pass to the caller, return the owned expression
+directly without `with-delete`.
 
 ## Returning Owned Values
 

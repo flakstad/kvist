@@ -17,8 +17,27 @@
     (defer (delete xs))
     (len xs)))
 
+(proc plus-one [x: int] -> int
+  (+ x 1))
+
+(proc even? [x: int] -> bool
+  (== (% x 2) 0))
+
+(proc add [acc: int, x: int] -> int
+  (+ acc x))
+
+(proc inspected-thread-total [] -> int
+  (let [xs (new []int [1 2 3 4])
+        total (->> xs
+                   (map plus-one)
+                   (tap> :mapped)
+                   (filter even?)
+                   (reduce add 0))]
+    total))
+
 (proc main []
-  (fmt.println (inspected-age)))
+  (fmt.println (inspected-age))
+  (fmt.println (inspected-thread-total)))
 
 (comment
   (inspected-age)
@@ -31,4 +50,9 @@
   ;; prints:
   ;; numbers: [1, 2, 3]
   ;; => 3
+
+  (inspected-thread-total)
+  ;; prints:
+  ;; mapped: [2, 3, 4, 5]
+  ;; => 6
 )

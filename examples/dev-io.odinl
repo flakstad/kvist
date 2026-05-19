@@ -8,6 +8,10 @@
   :body string
 })
 
+(struct Count {
+  :n int
+})
+
 (proc save-note [path: string, text: string] -> os.Error
   (spit path text))
 
@@ -28,6 +32,18 @@
   ;; Ownership of data transfers to the caller.
   (slurp path))
 
+(proc save-count-json [path: string, n: int] -> bool
+  (let [[marshal-err write-err] (save-json path (Count {:n n}))]
+    (and (== marshal-err nil)
+         (== write-err nil))))
+
+(proc load-count-json [path: string] -> int
+  (let [[count read-err unmarshal-err] (load-json Count path)]
+    (if (or (!= read-err nil)
+            (!= unmarshal-err nil))
+      0
+      (:n count))))
+
 (proc main []
   (return))
 
@@ -39,6 +55,12 @@
 
   (save-note-json "tmp/odinl-note.json" (Note {:title "hello" :body "from OdinL"}))
   ;; => true
+
+  (save-count-json "tmp/odinl-count.json" 42)
+  ;; => true
+
+  (load-count-json "tmp/odinl-count.json")
+  ;; => 42
 
   (note-byte-count "tmp/odinl-note.txt")
   ;; => 5

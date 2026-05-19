@@ -97,6 +97,10 @@ cat > "$tmp_dir/dev-io.odinl" <<'EOF'
   :body string
 })
 
+(struct Count {
+  :n int
+})
+
 (proc write-read-count [path: string] -> int
   (let [write-err (spit path "odinl")]
     (if (!= write-err nil)
@@ -113,6 +117,18 @@ cat > "$tmp_dir/dev-io.odinl" <<'EOF'
         [marshal-err write-err] (save-json path note)]
     (and (== marshal-err nil)
          (== write-err nil))))
+
+(proc save-count-json [path: string, n: int] -> bool
+  (let [[marshal-err write-err] (save-json path (Count {:n n}))]
+    (and (== marshal-err nil)
+         (== write-err nil))))
+
+(proc load-count-json [path: string] -> int
+  (let [[count read-err unmarshal-err] (load-json Count path)]
+    (if (or (!= read-err nil)
+            (!= unmarshal-err nil))
+      0
+      (:n count))))
 EOF
 file_eval_output=$(./odinl eval "$tmp_dir/dev-io.odinl" "(write-read-count \"$tmp_dir/odinl-cache.txt\")")
 assert_eq "5" "$file_eval_output" "file-backed eval output"
@@ -123,6 +139,10 @@ if ! grep -q '"title":"hello"' "$tmp_dir/odinl-note.json"; then
     cat "$tmp_dir/odinl-note.json" >&2
     exit 1
 fi
+count_save_output=$(./odinl eval "$tmp_dir/dev-io.odinl" "(save-count-json \"$tmp_dir/odinl-count.json\" 42)")
+assert_eq "true" "$count_save_output" "json count save eval output"
+count_load_output=$(./odinl eval "$tmp_dir/dev-io.odinl" "(load-count-json \"$tmp_dir/odinl-count.json\")")
+assert_eq "42" "$count_load_output" "json load eval output"
 
 printf 'tooling: expand command\n'
 ./odinl expand examples/data-literals.odinl '(temp-buffer-len)' -o "$tmp_dir/expand.odin"
@@ -172,6 +192,7 @@ assert_eq "hello from odinl" "$main_eval_output" "eval main output"
 printf 'tooling: sequence example evals\n'
 assert_eq "2" "$(./odinl eval examples/sequence-helpers.odinl '(split-front-length)')" "split-front-length"
 assert_eq "4" "$(./odinl eval examples/sequence-helpers.odinl '(first-kept-square)')" "first-kept-square"
+assert_eq "12" "$(./odinl eval examples/sequence-helpers.odinl '(with-delete-total)')" "with-delete-total"
 assert_eq "45" "$(./odinl eval examples/sequence-helpers.odinl '(age-for-grace)')" "age-for-grace"
 assert_eq "2" "$(./odinl eval examples/sequence-helpers.odinl '(chunk-count)')" "chunk-count"
 assert_eq "2" "$(./odinl eval examples/sequence-helpers.odinl '(repeated-two-count)')" "repeated-two-count"

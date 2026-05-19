@@ -88,6 +88,8 @@ These helpers are already in scope and should remain small:
 (cycle n xs)
 (take n xs)
 (drop n xs)
+(butlast xs)
+(drop-last n xs)
 (take-while pred xs)
 (drop-while pred xs)
 (find pred xs)
@@ -106,8 +108,9 @@ These helpers are already in scope and should remain small:
 
 The access and trimming helpers use the direct Odin representation where
 possible. `first`, `second`, `last`, and `nth` lower to indexing. `empty?`
-lowers to `len`. `rest`, `take`, `drop`, `take-while`, and `drop-while` return
-non-owning slice views. Three-argument `get` is a map helper: it uses Odin's
+lowers to `len`. `rest`, `take`, `drop`, `butlast`, `drop-last`, `take-while`,
+and `drop-while` return non-owning slice views. Three-argument `get` is a map
+helper: it uses Odin's
 comma-ok lookup and returns the supplied default when the key is absent.
 
 Builder helpers such as `map`, `filter`, `remove`, `map-indexed`, `keep`,
@@ -199,8 +202,8 @@ This is intentional for the non-bang helpers:
 
 For hot paths, prefer one of these shapes:
 
-- use slice-view helpers such as `take`, `drop`, `rest`, and `split-at` when a
-  borrowed view is enough;
+- use slice-view helpers such as `take`, `drop`, `butlast`, `drop-last`,
+  `rest`, and `split-at` when a borrowed view is enough;
 - use bang helpers such as `sort!`, `reverse!`, `shuffle!`, `map!`, `filter!`,
   `remove!`, `keep!`, `into!`, and `merge!` when mutating existing storage is the
   right Odin choice;
@@ -348,8 +351,9 @@ still owned and must be deleted or returned to transfer ownership.
 
 Sequence helpers need an explicit ownership story:
 
-- Slice-view helpers such as `rest`, `take`, `drop`, `take-while`,
-  `drop-while`, and `split-at` do not own data and must not be deleted.
+- Slice-view helpers such as `rest`, `take`, `drop`, `butlast`, `drop-last`,
+  `take-while`, `drop-while`, and `split-at` do not own data and must not be
+  deleted.
 - Dynamic-array helpers such as `map`, `filter`, `remove`, `map-indexed`,
   `keep`, `mapcat`, `concat`, `reverse`, `shuffle`, `sort`, and `sort-by`
   allocate and return owned dynamic arrays.

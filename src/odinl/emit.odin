@@ -10,6 +10,7 @@ Emitter_Features :: struct {
     core_reduce:      bool,
     core_take:        bool,
     core_drop:        bool,
+    core_drop_last:   bool,
     core_take_while:  bool,
     core_drop_while:  bool,
     core_find:        bool,
@@ -57,6 +58,7 @@ Emitter_Features :: struct {
     core_iterate:     bool,
     core_cycle:       bool,
     core_save_json:   bool,
+    core_load_json:   bool,
     core_tap:         bool,
     map_fields:       [dynamic]string,
     index_by_fields:  [dynamic]string,
@@ -129,6 +131,12 @@ mark_core_take :: proc(e: ^Emitter) {
 mark_core_drop :: proc(e: ^Emitter) {
     if e.features != nil {
         e.features.core_drop = true
+    }
+}
+
+mark_core_drop_last :: proc(e: ^Emitter) {
+    if e.features != nil {
+        e.features.core_drop_last = true
     }
 }
 
@@ -411,6 +419,12 @@ mark_core_cycle :: proc(e: ^Emitter) {
 mark_core_save_json :: proc(e: ^Emitter) {
     if e.features != nil {
         e.features.core_save_json = true
+    }
+}
+
+mark_core_load_json :: proc(e: ^Emitter) {
+    if e.features != nil {
+        e.features.core_load_json = true
     }
 }
 
@@ -844,7 +858,23 @@ emit_thread_step :: proc(e: ^Emitter, current: string, step: CST_Form, thread_la
             return "", Compile_Error{message = "thread list step expects symbol or keyword head", span = head.span}, false
         }
         if head.text == "tap>" {
-            return "", Compile_Error{message = "tap> is not supported as a thread step yet; bind the value before tapping", span = step.span}, false
+            if len(step.items) > 2 {
+                return "", Compile_Error{message = "tap> thread step expects optional label", span = step.span}, false
+            }
+            mark_core_tap(e)
+            if len(step.items) == 1 {
+                return emit_call_text("odinl_tap", []string{current}), {}, true
+            }
+            label_form := step.items[1]
+            label := ""
+            if label_form.kind == .Keyword {
+                label = fmt.tprintf("\"%s\"", label_form.text[1:])
+            } else if label_form.kind == .String {
+                label = label_form.text
+            } else {
+                return "", Compile_Error{message = "tap> label must be a keyword or string literal", span = label_form.span}, false
+            }
+            return emit_call_text("odinl_tap_labeled", []string{label, current}), {}, true
         }
         if thread_last && (head.text == "map" || head.text == "filter" || head.text == "remove") {
             if len(step.items) != 2 {
@@ -1077,6 +1107,24 @@ emit_thread_step :: proc(e: ^Emitter, current: string, step: CST_Form, thread_la
                 return emit_call_text("odinl_drop", []string{count, slice_all_expr_text(current)}), {}, true
             }
         }
+        if thread_last && head.text == "drop-last" {
+            if len(step.items) != 2 {
+                return "", Compile_Error{message = "drop-last thread step expects one count argument", span = step.span}, false
+            }
+            count, err_count, ok_count := emit_expr(e, step.items[1])
+            if !ok_count {
+                return "", err_count, false
+            }
+            mark_core_drop_last(e)
+            return emit_call_text("odinl_drop_last", []string{count, slice_all_expr_text(current)}), {}, true
+        }
+        if thread_last && head.text == "butlast" {
+            if len(step.items) != 1 {
+                return "", Compile_Error{message = "butlast thread step expects no arguments", span = step.span}, false
+            }
+            mark_core_drop_last(e)
+            return emit_call_text("odinl_drop_last", []string{"1", slice_all_expr_text(current)}), {}, true
+        }
         if thread_last && (head.text == "take-while" || head.text == "drop-while" || head.text == "find" || head.text == "some?" || head.text == "every?") {
             if len(step.items) != 2 {
                 return "", Compile_Error{message = fmt.tprintf("%s thread step expects one predicate argument", head.text), span = step.span}, false
@@ -1174,6 +1222,11 @@ thread_temp_name :: proc(e: ^Emitter) -> string {
     return fmt.tprintf("odinl_thread_%d", e.temp_counter)
 }
 
+is_tap_thread_step :: proc(step: CST_Form) -> bool {
+    return step.kind == .List && len(step.items) > 0 &&
+           step.items[0].kind == .Symbol && step.items[0].text == "tap>"
+}
+
 thread_step_result_kind :: proc(step: CST_Form, thread_last: bool) -> Thread_Result_Kind {
     #partial switch step.kind {
     case .Keyword:
@@ -1216,6 +1269,7 @@ thread_step_result_kind :: proc(step: CST_Form, thread_last: bool) -> Thread_Res
             return .Owned_Borrowing
         }
         if thread_last && (head.text == "take" || head.text == "drop" ||
+                           head.text == "drop-last" || head.text == "butlast" ||
                            head.text == "take-while" || head.text == "drop-while" ||
                            head.text == "slice" || head.text == "rest" ||
                            head.text == "split-at") {
@@ -1232,6 +1286,15 @@ thread_step_result_kind :: proc(step: CST_Form, thread_last: bool) -> Thread_Res
     return .Unknown
 }
 
+thread_steps_after_include_non_tap :: proc(steps: []CST_Form, idx: int) -> bool {
+    for step in steps[idx+1:] {
+        if !is_tap_thread_step(step) {
+            return true
+        }
+    }
+    return false
+}
+
 is_thread_form :: proc(form: CST_Form, thread_last: bool) -> bool {
     if form.kind != .List || len(form.items) == 0 || form.items[0].kind != .Symbol {
         return false
@@ -1246,12 +1309,17 @@ thread_form_has_allocating_intermediate :: proc(form: CST_Form, thread_last: boo
     if !is_thread_form(form, thread_last) || len(form.items) < 3 {
         return false
     }
-    for step, idx in form.items[2:] {
-        last_step := idx == len(form.items[2:])-1
+    steps := form.items[2:]
+    current_kind := Thread_Result_Kind.Unknown
+    for step, idx in steps {
         kind := thread_step_result_kind(step, thread_last)
-        if !last_step && (kind == .Owned || kind == .Owned_Borrowing) {
+        if is_tap_thread_step(step) {
+            kind = current_kind
+        }
+        if (kind == .Owned || kind == .Owned_Borrowing) && thread_steps_after_include_non_tap(steps, idx) {
             return true
         }
+        current_kind = kind
     }
     return false
 }
@@ -1260,7 +1328,14 @@ thread_form_final_kind :: proc(form: CST_Form, thread_last: bool) -> Thread_Resu
     if !is_thread_form(form, thread_last) || len(form.items) < 3 {
         return .Unknown
     }
-    return thread_step_result_kind(form.items[len(form.items)-1], thread_last)
+    current_kind := Thread_Result_Kind.Unknown
+    for step in form.items[2:] {
+        if is_tap_thread_step(step) {
+            continue
+        }
+        current_kind = thread_step_result_kind(step, thread_last)
+    }
+    return current_kind
 }
 
 thread_form_final_view_borrows_owned_intermediate :: proc(form: CST_Form, thread_last: bool) -> bool {
@@ -1272,6 +1347,9 @@ thread_form_final_view_borrows_owned_intermediate :: proc(form: CST_Form, thread
         return false
     }
     for step in form.items[2:len(form.items)-1] {
+        if is_tap_thread_step(step) {
+            continue
+        }
         kind := thread_step_result_kind(step, thread_last)
         if kind == .Owned || kind == .Owned_Borrowing {
             return true
@@ -1299,7 +1377,7 @@ owned_result_head :: proc(name: string) -> bool {
          "zipmap", "index-by", "group-by", "frequencies", "keys", "vals",
          "distinct", "distinct-by",
          "range", "repeat", "repeatedly", "iterate", "cycle",
-         "slurp":
+         "slurp", "load-json":
         return true
     }
     return false
@@ -1453,15 +1531,21 @@ emit_thread_binding_assignment :: proc(e: ^Emitter, binding: Binding, thread_las
         return err_current, false
     }
 
-    for step, idx in form.items[2:] {
+    steps := form.items[2:]
+    current_kind := Thread_Result_Kind.Unknown
+    for step, idx in steps {
         next, err_step, ok_step := emit_thread_step(e, current, step, thread_last)
         if !ok_step {
             return err_step, false
         }
 
         kind := thread_step_result_kind(step, thread_last)
-        last_step := idx == len(form.items[2:])-1
-        if (kind == .Owned || kind == .Owned_Borrowing) && !last_step {
+        tap_step := is_tap_thread_step(step)
+        if tap_step {
+            kind = current_kind
+        }
+        if !tap_step && (kind == .Owned || kind == .Owned_Borrowing) &&
+           thread_steps_after_include_non_tap(steps, idx) {
             temp := thread_temp_name(e)
             emit_prefixed_expr(e, fmt.tprintf("%s := ", temp), next)
             emit_line(e, fmt.tprintf("defer delete(%s)", temp))
@@ -1469,6 +1553,7 @@ emit_thread_binding_assignment :: proc(e: ^Emitter, binding: Binding, thread_las
         } else {
             current = next
         }
+        current_kind = kind
     }
 
     emit_binding_assignment(e, binding, current)
@@ -2079,6 +2164,22 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         }
         mark_core_save_json(e)
         return emit_call_text("odinl_save_json", []string{path, value}), {}, true
+    }
+
+    if head.text == "load-json" {
+        if len(form.items) != 3 {
+            return "", Compile_Error{message = "load-json expects type and path", span = form.span}, false
+        }
+        type_text, err_type, ok_type := parse_type_text(form.items[1])
+        if !ok_type {
+            return "", err_type, false
+        }
+        path, err_path, ok_path := emit_expr(e, form.items[2])
+        if !ok_path {
+            return "", err_path, false
+        }
+        mark_core_load_json(e)
+        return emit_call_text("odinl_load_json", []string{type_text, path}), {}, true
     }
 
     if head.text == "tap>" {
@@ -2702,6 +2803,22 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         return emit_call_text("odinl_drop", []string{count, collection}), {}, true
     }
 
+    if head.text == "drop-last" {
+        if len(form.items) != 3 {
+            return "", Compile_Error{message = "drop-last expects count and collection", span = form.span}, false
+        }
+        count, err_count, ok_count := emit_expr(e, form.items[1])
+        if !ok_count {
+            return "", err_count, false
+        }
+        collection, err_collection, ok_collection := emit_expr(e, form.items[2])
+        if !ok_collection {
+            return "", err_collection, false
+        }
+        mark_core_drop_last(e)
+        return emit_call_text("odinl_drop_last", []string{count, slice_all_expr_text(collection)}), {}, true
+    }
+
     if head.text == "take-while" || head.text == "drop-while" || head.text == "find" || head.text == "some?" || head.text == "every?" {
         if len(form.items) != 3 {
             return "", Compile_Error{message = fmt.tprintf("%s expects predicate and collection", head.text), span = form.span}, false
@@ -2726,7 +2843,9 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         return emit_predicate_callback_call(e, "odinl_every_p", form.items[1], collection, mark_core_every, mark_core_every_field)
     }
 
-    if head.text == "first" || head.text == "second" || head.text == "last" || head.text == "rest" || head.text == "empty?" || head.text == "count" {
+    if head.text == "first" || head.text == "second" || head.text == "last" ||
+       head.text == "rest" || head.text == "butlast" ||
+       head.text == "empty?" || head.text == "count" {
         if len(form.items) != 2 {
             return "", Compile_Error{message = fmt.tprintf("%s expects collection", head.text), span = form.span}, false
         }
@@ -2749,6 +2868,10 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         }
         if head.text == "empty?" {
             return fmt.tprintf("len(%s) == 0", collection), {}, true
+        }
+        if head.text == "butlast" {
+            mark_core_drop_last(e)
+            return emit_call_text("odinl_drop_last", []string{"1", collection}), {}, true
         }
         return fmt.tprintf("(%s)[1:]", collection), {}, true
     }
@@ -3259,6 +3382,98 @@ emit_with_temp_allocator_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc:
     return {}, true
 }
 
+with_delete_names_contains :: proc(binding_names: []string, name: string) -> bool {
+    for binding_name in binding_names {
+        if binding_name == name {
+            return true
+        }
+    }
+    return false
+}
+
+with_delete_return_error :: proc(body: []CST_Form, binding_names: []string, last_in_proc: bool, returns: Return_Spec) -> (Compile_Error, bool) {
+    for item in body {
+        if item.kind != .List || len(item.items) == 0 || item.items[0].kind != .Symbol || item.items[0].text != "return" {
+            continue
+        }
+        for returned in item.items[1:] {
+            if returned.kind == .Symbol && with_delete_names_contains(binding_names, map_name(returned.text)) {
+                return Compile_Error{
+                    message = "with-delete binding cannot be returned; return it without with-delete or copy it before returning",
+                    span = returned.span,
+                }, true
+            }
+        }
+    }
+    if last_in_proc && returns.kind != .None && len(body) > 0 {
+        final_form := body[len(body)-1]
+        if final_form.kind == .Symbol && with_delete_names_contains(binding_names, map_name(final_form.text)) {
+            return Compile_Error{
+                message = "with-delete binding cannot be returned; return it without with-delete or copy it before returning",
+                span = final_form.span,
+            }, true
+        }
+    }
+    return {}, false
+}
+
+emit_with_delete_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Return_Spec) -> (Compile_Error, bool) {
+    if len(form.items) < 3 {
+        return Compile_Error{message = "with-delete expects binding vector and body", span = form.span}, false
+    }
+    binding := form.items[1]
+    if binding.kind != .Vector || len(binding.items) < 2 || len(binding.items)%2 != 0 {
+        return Compile_Error{message = "with-delete expects [name value ...] bindings", span = binding.span}, false
+    }
+
+    binding_names: [dynamic]string
+    i := 0
+    for i < len(binding.items) {
+        if binding.items[i].kind != .Symbol {
+            return Compile_Error{message = "with-delete binding name must be a symbol", span = binding.items[i].span}, false
+        }
+        append(&binding_names, map_name(binding.items[i].text))
+        i += 2
+    }
+
+    body: [dynamic]CST_Form
+    for item in form.items[2:] {
+        append(&body, item)
+    }
+    err_return, bad_return := with_delete_return_error(body[:], binding_names[:], last_in_proc, returns)
+    if bad_return {
+        return err_return, false
+    }
+
+    emit_line(e, "{")
+    e.indent += 1
+    i = 0
+    for i < len(binding.items) {
+        binding_name := binding_names[i/2]
+        value_form := binding.items[i+1]
+        err_owned, bad_owned := owned_result_usage_error(value_form, true)
+        if bad_owned {
+            return err_owned, false
+        }
+        value, err_value, ok_value := emit_expr(e, value_form)
+        if !ok_value {
+            return err_value, false
+        }
+        emit_prefixed_expr(e, fmt.tprintf("%s := ", binding_name), value)
+        emit_line(e, fmt.tprintf("defer delete(%s)", binding_name))
+        i += 2
+    }
+
+    err_body, ok_body := emit_body_forms(e, body[:], returns_when_final(last_in_proc, returns))
+    if !ok_body {
+        return err_body, false
+    }
+
+    e.indent -= 1
+    emit_line(e, "}")
+    return {}, true
+}
+
 is_type_switch_subject :: proc(form: CST_Form) -> bool {
     return form.kind == .Vector && len(form.items) == 2 && form.items[0].kind == .Symbol
 }
@@ -3560,6 +3775,8 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
         return emit_with_allocator_stmt(e, form, last_in_proc, returns)
     case "with-temp-allocator":
         return emit_with_temp_allocator_stmt(e, form, last_in_proc, returns)
+    case "with-delete":
+        return emit_with_delete_stmt(e, form, last_in_proc, returns)
     case "switch":
         return emit_switch_stmt(e, form, last_in_proc, returns)
     case "return":
@@ -4907,6 +5124,23 @@ emit_core_save_json_helper :: proc(e: ^Emitter) {
     emit_line(e, "}")
 }
 
+emit_core_load_json_helper :: proc(e: ^Emitter) {
+    emit_line(e, "odinl_load_json :: proc($T: typeid, path: string) -> (value: T, read_err: os.Error, unmarshal_err: json.Unmarshal_Error) {")
+    e.indent += 1
+    emit_line(e, "data: []byte")
+    emit_line(e, "data, read_err = os.read_entire_file(path, context.allocator)")
+    emit_line(e, "if read_err != nil {")
+    e.indent += 1
+    emit_line(e, "return")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "defer delete(data)")
+    emit_line(e, "unmarshal_err = json.unmarshal(data, &value)")
+    emit_line(e, "return")
+    e.indent -= 1
+    emit_line(e, "}")
+}
+
 emit_core_tap_helper :: proc(e: ^Emitter) {
     emit_line(e, "odinl_tap :: proc(value: $T) -> T {")
     e.indent += 1
@@ -4973,6 +5207,25 @@ emit_core_drop_helper :: proc(e: ^Emitter) {
     e.indent -= 1
     emit_line(e, "}")
     emit_line(e, "return xs[start:]")
+    e.indent -= 1
+    emit_line(e, "}")
+}
+
+emit_core_drop_last_helper :: proc(e: ^Emitter) {
+    emit_line(e, "odinl_drop_last :: proc(n: int, xs: []$T) -> []T {")
+    e.indent += 1
+    emit_line(e, "end := len(xs) - n")
+    emit_line(e, "if end < 0 {")
+    e.indent += 1
+    emit_line(e, "end = 0")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "if end > len(xs) {")
+    e.indent += 1
+    emit_line(e, "end = len(xs)")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "return xs[:end]")
     e.indent -= 1
     emit_line(e, "}")
 }
@@ -5150,6 +5403,7 @@ emit_core_every_field_helper :: proc(e: ^Emitter, field: string) {
 core_helpers_needed :: proc(features: Emitter_Features) -> bool {
     return features.core_map || features.core_filter || features.core_reduce ||
            features.core_take || features.core_drop ||
+           features.core_drop_last ||
            features.core_take_while || features.core_drop_while ||
            features.core_find || features.core_some || features.core_every ||
            features.core_remove || features.core_map_indexed || features.core_keep ||
@@ -5174,7 +5428,7 @@ core_helpers_needed :: proc(features: Emitter_Features) -> bool {
            features.core_distinct || features.core_distinct_by ||
            features.core_range || features.core_repeat ||
            features.core_repeatedly || features.core_iterate ||
-           features.core_cycle || features.core_save_json ||
+           features.core_cycle || features.core_save_json || features.core_load_json ||
            features.core_tap ||
            len(features.map_fields) > 0 || len(features.index_by_fields) > 0 ||
            len(features.group_by_fields) > 0 ||
@@ -5425,6 +5679,10 @@ emit_core_helpers :: proc(e: ^Emitter, features: Emitter_Features) {
         emit_core_helper_separator(e, &emitted)
         emit_core_save_json_helper(e)
     }
+    if features.core_load_json {
+        emit_core_helper_separator(e, &emitted)
+        emit_core_load_json_helper(e)
+    }
     if features.core_tap {
         emit_core_helper_separator(e, &emitted)
         emit_core_tap_helper(e)
@@ -5440,6 +5698,10 @@ emit_core_helpers :: proc(e: ^Emitter, features: Emitter_Features) {
     if features.core_drop {
         emit_core_helper_separator(e, &emitted)
         emit_core_drop_helper(e)
+    }
+    if features.core_drop_last {
+        emit_core_helper_separator(e, &emitted)
+        emit_core_drop_last_helper(e)
     }
     if features.core_take_while {
         emit_core_helper_separator(e, &emitted)

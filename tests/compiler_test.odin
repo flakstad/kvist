@@ -1073,6 +1073,38 @@ compile_save_json_helper :: proc(t: ^testing.T) {
 }
 
 @(test)
+compile_load_json_helper :: proc(t: ^testing.T) {
+    source := `(package main)
+(import json "core:encoding/json")
+(import os "core:os")
+
+(struct Count {
+  :n int
+})
+
+(proc load-count [path: string] -> [value: Count, ok: bool]
+  (let [[value read-err unmarshal-err] (load-json Count path)]
+    (return value (and (== read-err nil)
+                       (== unmarshal-err nil)))))`
+
+    output, err, ok := odinl.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, `import json "core:encoding/json"`), true)
+    testing.expect_value(t, strings.contains(output, `import os "core:os"`), true)
+    testing.expect_value(t, strings.contains(output, "value, read_err, unmarshal_err := odinl_load_json(Count, path)"), true)
+    testing.expect_value(t, strings.contains(output, "odinl_load_json :: proc($T: typeid, path: string) -> (value: T, read_err: os.Error, unmarshal_err: json.Unmarshal_Error)"), true)
+    testing.expect_value(t, strings.contains(output, "data, read_err = os.read_entire_file(path, context.allocator)"), true)
+    testing.expect_value(t, strings.contains(output, "defer delete(data)"), true)
+    testing.expect_value(t, strings.contains(output, "unmarshal_err = json.unmarshal(data, &value)"), true)
+}
+
+@(test)
 compile_tap_helper :: proc(t: ^testing.T) {
     source := `(package main)
 (import "core:fmt")
@@ -1100,20 +1132,50 @@ compile_tap_helper :: proc(t: ^testing.T) {
 }
 
 @(test)
-reject_tap_thread_step_for_now :: proc(t: ^testing.T) {
+compile_tap_thread_steps :: proc(t: ^testing.T) {
     source := `(package main)
 (import "core:fmt")
 
-(proc main []
-  (let [answer (-> 41
-                   (+ 1)
-                   (tap> :answer))]
-    (fmt.println answer)))`
+(proc inc [x: int] -> int
+  (+ x 1))
 
-    _, err, ok := odinl.compile_source(source)
-    testing.expect_value(t, ok, false)
-    defer delete(err.message)
-    testing.expect_value(t, err.message, "tap> is not supported as a thread step yet; bind the value before tapping")
+(proc even? [x: int] -> bool
+  (== (% x 2) 0))
+
+(proc add [acc: int, x: int] -> int
+  (+ acc x))
+
+(proc main []
+  (let [xs (new []int [1 2 3 4])
+        answer (-> 41
+                   inc
+                   (tap> :answer))
+        mapped (->> xs
+                    (map inc)
+                    (tap> :mapped))
+        total (->> xs
+                   (map inc)
+                   (tap> "mapped")
+                   (filter even?)
+                   (reduce add 0))]
+    (defer (delete mapped))
+    (fmt.println answer total)))`
+
+    output, err, ok := odinl.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "answer := odinl_tap_labeled(\"answer\", inc(41))"), true)
+    testing.expect_value(t, strings.contains(output, "mapped := odinl_tap_labeled(\"mapped\", odinl_map(inc, (xs)[:]))"), true)
+    testing.expect_value(t, strings.contains(output, "odinl_thread_1 := odinl_map(inc, (xs)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "defer delete(odinl_thread_1)"), true)
+    testing.expect_value(t, strings.contains(output, "odinl_thread_2 := odinl_filter(even_p, (odinl_tap_labeled(\"mapped\", odinl_thread_1))[:])"), true)
+    testing.expect_value(t, strings.contains(output, "defer delete(odinl_thread_2)"), true)
+    testing.expect_value(t, strings.contains(output, "total := odinl_reduce(add, 0, (odinl_thread_2)[:])"), true)
 }
 
 @(test)
@@ -1239,6 +1301,53 @@ main :: proc() {
 }
 
 @(test)
+compile_with_delete_scope :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(proc inc [x: int] -> int
+  (+ x 1))
+
+(proc even? [x: int] -> bool
+  (== (% x 2) 0))
+
+(proc add [acc: int, x: int] -> int
+  (+ acc x))
+
+(proc total [xs: []int] -> int
+  (with-delete [mapped (map inc xs)
+                filtered (filter even? mapped)]
+    (reduce add 0 filtered)))`
+
+    output, err, ok := odinl.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "mapped := odinl_map(inc, (xs)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "defer delete(mapped)"), true)
+    testing.expect_value(t, strings.contains(output, "filtered := odinl_filter(even_p, (mapped)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "defer delete(filtered)"), true)
+    testing.expect_value(t, strings.contains(output, "return odinl_reduce(add, 0, (filtered)[:])"), true)
+}
+
+@(test)
+reject_returning_with_delete_binding :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(proc owned [] -> [dynamic]int
+  (with-delete [xs (new [dynamic]int [1 2])]
+    xs))`
+
+    _, err, ok := odinl.compile_source(source)
+    testing.expect_value(t, ok, false)
+    defer delete(err.message)
+    testing.expect_value(t, err.message, "with-delete binding cannot be returned; return it without with-delete or copy it before returning")
+}
+
+@(test)
 reject_returning_owned_result_from_with_temp_allocator :: proc(t: ^testing.T) {
     source := `(package main)
 (import runtime "base:runtime")
@@ -1318,6 +1427,46 @@ macroexpand_with_temp_allocator_scope :: proc(t: ^testing.T) {
       (set! context.allocator odinl-old-allocator-1)
       (runtime.default-temp-allocator-temp-end odinl-temp-scope-1)))
     (let [buffer (make [dynamic]int)] (defer (delete buffer)) (into! buffer (new []int [1 2])))))
+`
+    testing.expect_value(t, output, expected)
+}
+
+@(test)
+macroexpand_with_delete_scope :: proc(t: ^testing.T) {
+    output, err, ok := odinl.macroexpand_source(`(with-delete [xs (map inc users)]
+  (count xs))`)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    expected := `(do
+  (let [xs (map inc users)]
+    (defer (delete xs))
+    (count xs)))
+`
+    testing.expect_value(t, output, expected)
+}
+
+@(test)
+macroexpand_with_delete_multiple_bindings :: proc(t: ^testing.T) {
+    output, err, ok := odinl.macroexpand_source(`(with-delete [xs (map inc users) ys (filter even? xs)]
+  (count ys))`)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    expected := `(do
+  (let [xs (map inc users)
+        ys (filter even? xs)]
+    (defer (delete xs))
+    (defer (delete ys))
+    (count ys)))
 `
     testing.expect_value(t, output, expected)
 }
@@ -1467,8 +1616,13 @@ compile_sequence_trim_helpers_as_slice_views :: proc(t: ^testing.T) {
   (let [xs (new []int [1 2 3 4])
         prefix (take 2 xs)
         suffix (drop 1 xs)
+        without-last (butlast xs)
+        without-two (drop-last 2 xs)
         small-prefix (take-while keep? xs)
-        large-suffix (drop-while keep? xs)]
+        large-suffix (drop-while keep? xs)
+        threaded-count (->> xs
+                            (drop-last 1)
+                            (count))]
     (return)))`
 
     output, err, ok := odinl.compile_source(source)
@@ -1481,12 +1635,17 @@ compile_sequence_trim_helpers_as_slice_views :: proc(t: ^testing.T) {
 
     testing.expect_value(t, strings.contains(output, "prefix := odinl_take(2, (xs)[:])"), true)
     testing.expect_value(t, strings.contains(output, "suffix := odinl_drop(1, (xs)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "without_last := odinl_drop_last(1, (xs)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "without_two := odinl_drop_last(2, (xs)[:])"), true)
     testing.expect_value(t, strings.contains(output, "small_prefix := odinl_take_while(keep_p, (xs)[:])"), true)
     testing.expect_value(t, strings.contains(output, "large_suffix := odinl_drop_while(keep_p, (xs)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "threaded_count := len((odinl_drop_last(1, (xs)[:]))[:])"), true)
     testing.expect_value(t, strings.contains(output, "odinl_take :: proc(n: int, xs: []$T) -> []T"), true)
     testing.expect_value(t, strings.contains(output, "return xs[:limit]"), true)
     testing.expect_value(t, strings.contains(output, "odinl_drop :: proc(n: int, xs: []$T) -> []T"), true)
     testing.expect_value(t, strings.contains(output, "return xs[start:]"), true)
+    testing.expect_value(t, strings.contains(output, "odinl_drop_last :: proc(n: int, xs: []$T) -> []T"), true)
+    testing.expect_value(t, strings.contains(output, "return xs[:end]"), true)
     testing.expect_value(t, strings.contains(output, "odinl_take_while :: proc(pred: proc(x: $T) -> bool, xs: []T) -> []T"), true)
     testing.expect_value(t, strings.contains(output, "return xs[:i]"), true)
     testing.expect_value(t, strings.contains(output, "odinl_drop_while :: proc(pred: proc(x: $T) -> bool, xs: []T) -> []T"), true)

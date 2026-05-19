@@ -552,6 +552,11 @@ rule applies.
 This is an important design constraint: avoid growing the special-form set
 casually.
 
+The current implementation also recognizes a few built-in macro-like resource
+forms before the general macro system exists: `with-allocator`,
+`with-temp-allocator`, and `with-delete`. They are intentionally scoped cleanup
+forms that lower to ordinary Odin blocks with `defer`.
+
 ### Ordinary calls
 
 Any list whose head is not a special form and not a dedicated syntactic head
@@ -933,6 +938,8 @@ The intended surface style can still be familiar:
 (iterate 4 step initial)
 (take 10 xs)
 (drop 2 xs)
+(butlast xs)
+(drop-last 2 xs)
 (first xs)
 (second xs)
 (last xs)
@@ -1020,6 +1027,9 @@ thin `core:os` forms:
   (and (== marshal-err nil)
        (== write-err nil)))
 
+(let [[users read-err unmarshal-err] (load-json []User "tmp/users.json")]
+  ...)
+
 (let [[data err] (slurp "tmp/users.json")]
   (if (!= err nil)
     0
@@ -1033,9 +1043,10 @@ thin `core:os` forms:
 owned `[]byte` plus `os.Error`. The caller must delete the bytes when keeping
 the value local, or return them to transfer ownership. `save-json` lowers
 through a generated helper that marshals with `json.marshal`, deletes the
-temporary JSON bytes, and writes with `os.write_entire_file`; JSON loading
-remains explicit until OdinL has a clear convention for deep cleanup of values
-allocated by `json.unmarshal`.
+temporary JSON bytes, and writes with `os.write_entire_file`. `load-json`
+lowers through a generated helper that reads the file, defers deleting the file
+bytes, and unmarshals into the explicit destination type. The caller owns any
+data allocated inside a successfully decoded value.
 
 ## Literals and Construction
 
@@ -1586,9 +1597,20 @@ The first tap form is deliberately simple:
 ```
 
 It lowers through generated helpers that call `fmt.print` / `fmt.println` and
-return the tapped value. The `core:fmt` import is explicit. `tap>` is not
-currently a thread step because owned threaded pipelines need a more precise
-ownership design.
+return the tapped value. The `core:fmt` import is explicit. `tap>` can also be
+used as a `->` / `->>` step, where it is a pass-through expression:
+
+```clojure
+(->> users
+     (filter :active)
+     (tap> :active-users)
+     (map :name))
+```
+
+Ownership passes through `tap>`. If a tapped threaded value is an owned final
+result, the caller or local binding still owns it. If a tapped owned value is an
+intermediate, OdinL emits the same cleanup it would for the underlying pipeline
+step.
 
 See `docs/TOOLING.md` for the current plan around tap-style inspection,
 file-backed dev values, watches, and Emacs integration.
@@ -1670,6 +1692,31 @@ OdinL runtime. Owned values allocated in this scope must not escape it; the
 compiler rejects obvious direct returns of owned helper results from
 `with-temp-allocator`.
 
+For the common "bind owned value, delete at scope exit" shape, use:
+
+```clojure
+(with-delete [active (filter active? users)]
+  ...)
+
+(with-delete [active (filter active? users)
+              names (map :name active)]
+  ...)
+```
+
+It lowers to the moral equivalent of:
+
+```odin
+{
+    active := odinl_filter(active_p, users[:])
+    defer delete(active)
+    ...
+}
+```
+
+This is intentionally not an ownership transfer form. Do not return the bound
+values from the body; return them directly without `with-delete`, or copy the data
+into a different owned result first.
+
 Other `with-*` forms are still attractive because they can expand into
 combinations of existing core forms such as:
 
@@ -1697,6 +1744,9 @@ For example, allocator helpers should keep ownership visible:
   (let [buffer (make [dynamic]int)]
     (defer (delete buffer))
     ...))
+
+(with-delete [buffer (make [dynamic]int)]
+  ...)
 
 (with-arena [arena (make-arena allocator)]
   (work (:allocator arena)))

@@ -19,7 +19,8 @@
   '("package" "import" "const" "struct" "enum" "union" "proc" "odin"
     "let" "do" "if" "when" "cond" "switch" "set!" "return" "defer"
     "for" "each" "comment" "new" "make" "get" "nil?" "in" "not-in"
-    "break" "continue" "->")
+    "break" "continue" "with-allocator" "with-temp-allocator"
+    "with-delete" "slurp" "spit" "save-json" "load-json" "tap>" "->")
   "OdinL special forms and syntactic heads.")
 
 (defconst odinl-font-lock-keywords
@@ -55,6 +56,9 @@
                    (for . 1)
                    (each . 2)
                    (comment . 0)
+                   (with-allocator . 1)
+                   (with-temp-allocator . 1)
+                   (with-delete . 1)
                    (new . 1)
                    (make . 1)))
     (odinl--put-indent (car entry) (cdr entry))))

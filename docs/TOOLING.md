@@ -88,8 +88,8 @@ runtime facility:
 - editor tooling should provide `macroexpand` for the form at point;
 - `odinl macroexpand` is the frontend expansion view; it currently handles
   built-in macro-like forms such as `with-allocator` and
-  `with-temp-allocator`, while `odinl expand` remains the generated-Odin
-  lowering preview;
+  `with-temp-allocator` and cleanup forms such as `with-delete`, while
+  `odinl expand` remains the generated-Odin lowering preview;
 - diagnostics should keep enough source information to point through expansion
   where practical;
 - macros must not introduce a hidden stateful REPL or dynamic runtime world.
@@ -129,15 +129,18 @@ explicitly. That is intentionally modest: it works in normal runs and editor
 evals, it is visible in the generated Odin, and it does not depend on a hidden
 global tap registry.
 
-`tap>` is not supported as a `->` / `->>` thread step yet. Bind the value first
-when ownership matters:
+`tap>` also works as a `->` / `->>` thread step:
 
 ```clojure
-(let [active (filter active? users)]
-  (defer (delete active))
-  (tap> :active-count (len active))
-  ...)
+(->> users
+     (filter active?)
+     (tap> :active)
+     (map :name))
 ```
+
+The step is ownership-transparent. A tapped owned final value remains owned by
+the binding or caller. A tapped owned intermediate is still cleaned up by the
+threaded `let` lowering before later steps run.
 
 A richer tap sink can come later as an explicit CLI/editor option or ordinary
 Odin value, not as ambient language state.
@@ -193,6 +196,9 @@ Saving JSON can also stay boring:
 (let [[marshal-err write-err] (save-json "tmp/users.json" users)]
   (and (== marshal-err nil)
        (== write-err nil)))
+
+(let [[users read-err unmarshal-err] (load-json []User "tmp/users.json")]
+  ...)
 ```
 
 `save-json` lowers through a generated `odinl_save_json` helper that calls
@@ -200,11 +206,12 @@ Saving JSON can also stay boring:
 with `os.write_entire_file`.
 
 For structured data, continue to require explicit format and type decisions
-rather than inventing a universal printer/reader. Loading JSON is intentionally
-still explicit for now. Odin's JSON unmarshal allocates strings, slices, dynamic
+rather than inventing a universal printer/reader. `load-json` requires the
+destination type at the call site and returns `(value, read_err,
+unmarshal_err)`. Odin's JSON unmarshal can allocate strings, slices, dynamic
 arrays, and maps inside the destination value according to that destination
-type, so a convenient load helper needs a clear deep-cleanup convention before
-it can be production quality.
+type, so callers still own any allocations inside a successfully decoded value.
+For allocation-heavy decoded values, keep cleanup explicit in the calling code.
 
 These helpers should lean on Odin's existing core libraries:
 
@@ -225,7 +232,7 @@ if err == nil {
 }
 ```
 
-A JSON load can read bytes and unmarshal into an explicitly requested type:
+A JSON load reads bytes and unmarshals into an explicitly requested type:
 
 ```odin
 data, err := os.read_entire_file(path, context.allocator)
@@ -237,11 +244,10 @@ if err == nil {
 }
 ```
 
-The JSON load helper name is a placeholder. The design constraint is the
-important part: serialization should be explicit, file-backed, and reproducible
-from a fresh process. The editor can make the workflow feel REPL-like by
-remembering recent paths and commands, but the compiled Odin should remain
-ordinary.
+The design constraint is the important part: serialization should be explicit,
+file-backed, and reproducible from a fresh process. The editor can make the
+workflow feel REPL-like by remembering recent paths and commands, but the
+compiled Odin should remain ordinary.
 
 JSON should be the first supported structured format because users can inspect
 and edit it. CBOR is a reasonable later option for larger caches. Odin's custom
