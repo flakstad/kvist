@@ -40,7 +40,7 @@
       (count buffer))))
 
 // with-temp-allocator starts Odin's temp allocator scope and ends it at block
-// exit. This is good for scratch work that cannot escape the block. OdinL
+// exit. This is good for scratch work that cannot escape the block. Kvist
 // rejects obvious attempts to return owned values allocated inside this scope.
 (proc temp-scoped-buffer-len [] -> int
   (with-temp-allocator [allocator]

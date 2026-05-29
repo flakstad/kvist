@@ -5,24 +5,24 @@ import "core:os"
 import "core:slice"
 import "core:strconv"
 import "core:strings"
-import odinl "../../src/odinl"
+import kvist "../../src/kvist"
 
-CACHE_DIR :: ".odinl-cache"
+CACHE_DIR :: ".kvist-cache"
 
 print_usage :: proc() {
     fmt.println("usage:")
-    fmt.println("  odinl <input.odinl> [-o output.odin] [--map output.map] [--eval form] [--no-print]")
-    fmt.println("  odinl compile <input.odinl> [-o output.odin] [--map output.map]")
-    fmt.println("  odinl build <input.odinl> [--generated output.odin]")
-    fmt.println("  odinl check <input.odinl> [--generated output.odin]")
-    fmt.println("  odinl run <input.odinl> [--generated output.odin]")
-    fmt.println("  odinl eval <input.odinl> <form> [--no-print] [--check] [--generated output.odin] [--save name]")
-    fmt.println("  odinl expand <input.odinl> <form> [--no-print] [-o output.odin]")
-    fmt.println("  odinl macroexpand <input.odinl> <form> [-o output.odinl] [--map output.map]")
-    fmt.println("  odinl symbols <input.odinl>")
-    fmt.println("  odinl cache path <name>")
-    fmt.println("  odinl cache list")
-    fmt.println("  odinl cache rm <name>")
+    fmt.println("  kvist <input.kvist> [-o output.odin] [--map output.map] [--eval form] [--no-print]")
+    fmt.println("  kvist compile <input.kvist> [-o output.odin] [--map output.map]")
+    fmt.println("  kvist build <input.kvist> [--generated output.odin]")
+    fmt.println("  kvist check <input.kvist> [--generated output.odin]")
+    fmt.println("  kvist run <input.kvist> [--generated output.odin]")
+    fmt.println("  kvist eval <input.kvist> <form> [--no-print] [--check] [--generated output.odin] [--save name]")
+    fmt.println("  kvist expand <input.kvist> <form> [--no-print] [-o output.odin]")
+    fmt.println("  kvist macroexpand <input.kvist> <form> [-o output.kvist] [--map output.map]")
+    fmt.println("  kvist symbols <input.kvist>")
+    fmt.println("  kvist cache path <name>")
+    fmt.println("  kvist cache list")
+    fmt.println("  kvist cache rm <name>")
 }
 
 is_command :: proc(text: string) -> bool {
@@ -61,7 +61,7 @@ cache_key_valid :: proc(name: string) -> bool {
 }
 
 cache_dir_or_exit :: proc() -> string {
-    env_dir, found := os.lookup_env("ODINL_CACHE_DIR", context.allocator)
+    env_dir, found := os.lookup_env("KVIST_CACHE_DIR", context.allocator)
     if found {
         if env_dir != "" {
             return env_dir
@@ -209,7 +209,7 @@ parse_generated_location :: proc(line, generated_path: string) -> (line_no, colu
     return parsed_line, parsed_column, open_index + 1 + close_offset, true
 }
 
-remap_odin_output_locations :: proc(output, generated_path, source_path, source, eval_source: string, source_map: []odinl.Source_Map_Entry) -> string {
+remap_odin_output_locations :: proc(output, generated_path, source_path, source, eval_source: string, source_map: []kvist.Source_Map_Entry) -> string {
     if generated_path == "" || source_path == "" || len(source_map) == 0 {
         return strings.clone(output)
     }
@@ -228,12 +228,12 @@ remap_odin_output_locations :: proc(output, generated_path, source_path, source,
 
         generated_line, generated_column, close_index, ok_location := parse_generated_location(line, generated_path)
         if ok_location {
-            if entry, found := odinl.source_map_entry_for_generated_location(source_map, generated_line, generated_column); found {
+            if entry, found := kvist.source_map_entry_for_generated_location(source_map, generated_line, generated_column); found {
                 if entry.source_span.source == .Eval {
-                    source_line, source_column, _, _ := odinl.source_position(eval_source, entry.source_span.start)
+                    source_line, source_column, _, _ := kvist.source_position(eval_source, entry.source_span.start)
                     fmt.sbprintf(&builder, "%s:<eval>:%d:%d", source_path, source_line, source_column)
                 } else {
-                    source_line, source_column, _, _ := odinl.source_position(source, entry.source_span.start)
+                    source_line, source_column, _, _ := kvist.source_position(source, entry.source_span.start)
                     fmt.sbprintf(&builder, "%s:%d:%d", source_path, source_line, source_column)
                 }
                 strings.write_string(&builder, line[close_index+1:])
@@ -260,7 +260,7 @@ cleanup_odin_output_arg :: proc(out_path, out_arg: string) {
     }
 }
 
-run_odin_file :: proc(command, generated_path, source_path, source, eval_source, save_name: string, source_map: []odinl.Source_Map_Entry) -> int {
+run_odin_file :: proc(command, generated_path, source_path, source, eval_source, save_name: string, source_map: []kvist.Source_Map_Entry) -> int {
     source_dir, _ := os.split_path(source_path)
     working_dir := source_dir
     if working_dir == "" {
@@ -319,7 +319,7 @@ write_generated_for_execution :: proc(output, requested_path: string) -> (path, 
         return requested_path, "", true
     }
 
-    dir, dir_err := os.make_directory_temp("", "odinl-*", context.allocator)
+    dir, dir_err := os.make_directory_temp("", "kvist-*", context.allocator)
     if dir_err != nil {
         fmt.eprintln("failed to create temporary directory")
         return "", "", false
@@ -354,9 +354,9 @@ compile_file_command :: proc(input, output_path, map_path: string) {
     data := read_source_or_exit(input)
     defer delete(transmute([]byte)data)
 
-    result, err, ok := odinl.compile_source_with_map(data)
+    result, err, ok := kvist.compile_source_with_map(data)
     if !ok {
-        formatted := odinl.format_compile_error(input, data, err)
+        formatted := kvist.format_compile_error(input, data, err)
         fmt.eprint(formatted)
         delete(formatted)
         os.exit(1)
@@ -371,7 +371,7 @@ compile_file_command :: proc(input, output_path, map_path: string) {
     }
 
     if map_path != "" {
-        map_output := odinl.format_source_map(result.source_map[:])
+        map_output := kvist.format_source_map(result.source_map[:])
         write_output_or_exit(map_path, map_output)
         delete(map_output)
     }
@@ -381,9 +381,9 @@ compile_eval_emit_command :: proc(input, eval_source, output_path: string, no_pr
     data := read_source_or_exit(input)
     defer delete(transmute([]byte)data)
 
-    output, err, ok := odinl.compile_eval_source(data, eval_source, no_print)
+    output, err, ok := kvist.compile_eval_source(data, eval_source, no_print)
     if !ok {
-        formatted := odinl.format_eval_compile_error(input, data, eval_source, err)
+        formatted := kvist.format_eval_compile_error(input, data, eval_source, err)
         fmt.eprint(formatted)
         delete(formatted)
         os.exit(1)
@@ -401,9 +401,9 @@ macroexpand_command :: proc(input, eval_source, output_path, map_path: string) {
     data := read_source_or_exit(input)
     defer delete(transmute([]byte)data)
 
-    result, err, ok := odinl.macroexpand_source_with_map(eval_source)
+    result, err, ok := kvist.macroexpand_source_with_map(eval_source)
     if !ok {
-        formatted := odinl.format_eval_compile_error(input, data, eval_source, err)
+        formatted := kvist.format_eval_compile_error(input, data, eval_source, err)
         fmt.eprint(formatted)
         delete(formatted)
         os.exit(1)
@@ -418,7 +418,7 @@ macroexpand_command :: proc(input, eval_source, output_path, map_path: string) {
     }
 
     if map_path != "" {
-        map_output := odinl.format_source_map(result.source_map[:])
+        map_output := kvist.format_source_map(result.source_map[:])
         write_output_or_exit(map_path, map_output)
         delete(map_output)
     }
@@ -428,9 +428,9 @@ symbols_command :: proc(input: string) {
     data := read_source_or_exit(input)
     defer delete(transmute([]byte)data)
 
-    output, err, ok := odinl.symbols_source(data)
+    output, err, ok := kvist.symbols_source(data)
     if !ok {
-        formatted := odinl.format_compile_error(input, data, err)
+        formatted := kvist.format_compile_error(input, data, err)
         fmt.eprint(formatted)
         delete(formatted)
         os.exit(1)
@@ -443,9 +443,9 @@ run_generated_command :: proc(input, generated_path, odin_command: string) -> in
     data := read_source_or_exit(input)
     defer delete(transmute([]byte)data)
 
-    result, err, ok := odinl.compile_source_with_map(data)
+    result, err, ok := kvist.compile_source_with_map(data)
     if !ok {
-        formatted := odinl.format_compile_error(input, data, err)
+        formatted := kvist.format_compile_error(input, data, err)
         fmt.eprint(formatted)
         delete(formatted)
         os.exit(1)
@@ -471,9 +471,9 @@ eval_command :: proc(input, eval_source, generated_path, save_name: string, no_p
         data := read_source_or_exit(input)
         defer delete(transmute([]byte)data)
 
-        result, err, ok := odinl.compile_source_with_map(data)
+        result, err, ok := kvist.compile_source_with_map(data)
         if !ok {
-            formatted := odinl.format_compile_error(input, data, err)
+            formatted := kvist.format_compile_error(input, data, err)
             fmt.eprint(formatted)
             delete(formatted)
             os.exit(1)
@@ -493,9 +493,9 @@ eval_command :: proc(input, eval_source, generated_path, save_name: string, no_p
     data := read_source_or_exit(input)
     defer delete(transmute([]byte)data)
 
-    result, err, ok := odinl.compile_eval_source_with_map(data, eval_source, no_print)
+    result, err, ok := kvist.compile_eval_source_with_map(data, eval_source, no_print)
     if !ok {
-        formatted := odinl.format_eval_compile_error(input, data, eval_source, err)
+        formatted := kvist.format_eval_compile_error(input, data, eval_source, err)
         fmt.eprint(formatted)
         delete(formatted)
         os.exit(1)

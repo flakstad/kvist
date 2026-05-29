@@ -1,0 +1,53 @@
+// Exercises defstruct docstrings, Malli-like field metadata, nested structs,
+// and omitted-field defaults through ordinary Odin struct construction.
+(package main)
+(import "core:fmt")
+
+(defstruct Point
+  "A 2D point."
+  {:x :float
+   :y :float})
+
+(defstruct Profile
+  "Small profile data."
+  {:name :string
+   :age :int
+   :active? :bool
+   :tags [:set :string]
+   :home :Point})
+
+(proc profile-defaults [] -> Profile
+  (Profile {:name "Ada"}))
+
+(proc profile-home-x [] -> f64
+  (let [profile (Profile {:name "Ada"})]
+    (:x (:home profile))))
+
+(proc profile-has-math-tag? [] -> bool
+  (let [profile (Profile {:name "Ada"
+                          :tags (new map[string]bool {"math" true "lisp" true})})]
+    (contains? (:tags profile) "math")))
+
+(proc profile-active? [] -> bool
+  (let [profile (Profile {:name "Ada"
+                          :active? true})]
+    (:active? profile)))
+
+(proc main []
+  (fmt.println (profile-has-math-tag?)))
+
+(comment
+  ;; Omitted fields follow ordinary Odin zero-value behavior in the lowered
+  ;; struct literal. The nested Point is the zero value Point{x = 0, y = 0}.
+  (profile-defaults)
+  ;; => Profile{name = "Ada"}
+
+  (profile-home-x)
+  ;; => 0.0
+
+  (profile-has-math-tag?)
+  ;; => true
+
+  (profile-active?)
+  ;; => true
+)

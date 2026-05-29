@@ -62,17 +62,17 @@
 
 (comment
   ;; These forms are meant for editor eval. They deliberately use real files,
-  ;; so the result survives across separate odinl eval processes.
+  ;; so the result survives across separate kvist eval processes.
 
   (ensure-dev-dir)
   ;; => nil
 
   ;; Text files use a small ordinary helper pair. read-text returns owned bytes,
   ;; so delete the bytes directly in the same scope that reads them.
-  (write-text "tmp/odinl-note.txt" "hello")
+  (write-text "tmp/kvist-note.txt" "hello")
   ;; => nil
 
-  (let [[data err] (read-text "tmp/odinl-note.txt")]
+  (let [[data err] (read-text "tmp/kvist-note.txt")]
     (if (!= err nil)
       ""
       (do
@@ -80,18 +80,19 @@
         (string data))))
   ;; => hello
 
-  ;; JSON is useful for typed cached dev data, but it is not OdinL core syntax.
+  ;; JSON is useful for typed cached dev data, but it is not Kvist core syntax.
   ;; write-as-json and read-json-as are ordinary generic procs in this file:
   ;; they call json.marshal and json.unmarshal explicitly, then use spit/slurp
   ;; for file IO. json.unmarshal allocates Note's decoded string fields, so
   ;; delete those fields directly in the same scope that reads them.
-  (let [[marshal-err write-err] (write-as-json "tmp/odinl-note.json"
-                                               (Note {:title "hello" :body "from OdinL"}))]
+  (let [[marshal-err write-err] (write-as-json
+                                  "tmp/kvist-note.json"
+                                  (Note {:title "hello" :body "from Kvist"}))]
     (and (== marshal-err nil)
          (== write-err nil)))
   ;; => true
 
-  (let [[note read-err unmarshal-err] (read-json-as Note "tmp/odinl-note.json")]
+  (let [[note read-err unmarshal-err] (read-json-as Note "tmp/kvist-note.json")]
     (if (or (!= read-err nil)
             (!= unmarshal-err nil))
       false
@@ -102,12 +103,12 @@
         true)))
   ;; prints the parsed Note struct, then returns true
 
-  (let [[marshal-err write-err] (write-as-json "tmp/odinl-count.json" (Count {:n 42}))]
+  (let [[marshal-err write-err] (write-as-json "tmp/kvist-count.json" (Count {:n 42}))]
     (and (== marshal-err nil)
          (== write-err nil)))
   ;; => true
 
-  (let [[count read-err unmarshal-err] (read-json-as Count "tmp/odinl-count.json")]
+  (let [[count read-err unmarshal-err] (read-json-as Count "tmp/kvist-count.json")]
     (if (or (!= read-err nil)
             (!= unmarshal-err nil))
       0

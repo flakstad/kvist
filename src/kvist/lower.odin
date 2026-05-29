@@ -1,4 +1,4 @@
-package odinl
+package kvist
 
 validate_top_level_order :: proc(program: AST_Program) -> (Compile_Error, bool) {
     seen_package := false

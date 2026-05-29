@@ -15,13 +15,13 @@
 
 (proc main []
   (let [number (Value {:i 42})
-        text (Value {:s "odinl"})]
+        text (Value {:s "kvist"})]
     (fmt.println (describe text))))
 
 (comment
   (describe (Value {:i 42}))
   ;; => int
 
-  (describe (Value {:s "odinl"}))
-  ;; => odinl
+  (describe (Value {:s "kvist"}))
+  ;; => kvist
 )

@@ -1,0 +1,70 @@
+// Host interop with core:thread, core:sync, and core:sync/chan.
+//
+// Odin concurrency is explicit: OS threads, thread pools, channels, mutexes,
+// atomics, and allocators. There is no hidden green-thread runtime and no
+// Clojure-style derefable future in core. This file shows the boring Odin
+// shapes directly, with Kvist only providing parens and the small `(type ...)`
+// spelling needed for polymorphic host types like chan.Chan(int).
+(package main)
+(import "core:fmt")
+(import "core:sync")
+(import chan "core:sync/chan")
+(import thread "core:thread")
+
+(struct Counter {
+  :lock sync.Mutex
+  :value int
+})
+
+(proc send-square [result: (type chan.Chan int)]
+  ;; Sending on a channel communicates between OS threads. The channel owns
+  ;; internal allocation from chan.create, so the creator deletes it.
+  (chan.send result (* 7 7)))
+
+(proc future-like-square [] -> int
+  ;; This is the manual Odin equivalent of a tiny future: create a result
+  ;; channel, run a worker thread, receive the answer. The channel is an owned
+  ;; value because chan.create was passed context.allocator.
+  (let [[result-ch err] (chan.create (type chan.Chan int) 1 context.allocator)]
+    (if (!= err .None)
+      0
+      (do
+        (defer (chan.destroy result-ch))
+        (thread.run-with-poly-data result-ch send-square)
+        (let [[value ok] (chan.recv result-ch)]
+          (if ok value 0))))))
+
+(proc increment-once [counter: (ptr Counter)]
+  ;; sync.guard lowers to the ordinary Odin guard pattern. The lock is held
+  ;; only for this scope and released automatically by Odin's deferred_in
+  ;; attribute on sync.guard.
+  (if (sync.guard (addr (:lock (deref counter))))
+    (set! (:value (deref counter)) (+ (:value (deref counter)) 1))))
+
+(proc mutex-protected-count [] -> int
+  ;; Two joinable threads mutate shared state. The pointer is passed explicitly,
+  ;; and the main thread joins/destroys the handles before reading the result.
+  (let [counter (Counter {:lock {} :value 0})
+        a (thread.create-and-start-with-poly-data (addr counter) increment-once)
+        b (thread.create-and-start-with-poly-data (addr counter) increment-once)]
+    (thread.join a)
+    (thread.join b)
+    (thread.destroy a)
+    (thread.destroy b)
+    (:value counter)))
+
+(proc main []
+  (fmt.println (future-like-square) (mutex-protected-count)))
+
+(comment
+  ;; A channel plus a worker thread is the basic future-like pattern. This is
+  ;; deliberately not a Kvist abstraction yet; the underlying Odin ownership
+  ;; and blocking behavior stay visible.
+  (future-like-square)
+  ;; => 49
+
+  ;; Shared mutation should be guarded. If you need lots of work items, reach
+  ;; for core:thread's Pool API next; the mutex/channel concepts are the same.
+  (mutex-protected-count)
+  ;; => 2
+)

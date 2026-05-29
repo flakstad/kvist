@@ -1,4 +1,4 @@
-package odinl
+package kvist
 
 import "core:fmt"
 import "core:strings"
@@ -13,6 +13,113 @@ is_proc_directive_symbol :: proc(form: CST_Form) -> bool {
 
 is_proc_prefix_directive :: proc(text: string) -> bool {
     return text == "#force_inline"
+}
+
+doc_lines_from_string :: proc(text: string) -> (lines: [dynamic]string) {
+    start := 0
+    for i := 0; i <= len(text); i += 1 {
+        if i == len(text) || text[i] == '\n' {
+            line := text[start:i]
+            append(&lines, fmt.tprintf("// %s", line))
+            start = i + 1
+        }
+    }
+    if len(lines) == 0 {
+        append(&lines, "// ")
+    }
+    return lines
+}
+
+append_doc_lines :: proc(base, extra: []string) -> (lines: [dynamic]string) {
+    for line in base {
+        append(&lines, line)
+    }
+    for line in extra {
+        append(&lines, line)
+    }
+    return lines
+}
+
+struct_field_exists :: proc(fields: []Struct_Field, name: string) -> bool {
+    for field in fields {
+        if field.name == name {
+            return true
+        }
+    }
+    return false
+}
+
+parse_defstruct_type_meta :: proc(form: CST_Form) -> (text: string, err: Compile_Error, ok: bool) {
+    #partial switch form.kind {
+    case .Keyword:
+        if len(form.text) <= 1 {
+            return "", Compile_Error{message = "invalid defstruct field type metadata", span = form.span}, false
+        }
+        tag := form.text[1:]
+        switch tag {
+        case "bool":
+            return "bool", {}, true
+        case "int":
+            return "int", {}, true
+        case "float":
+            return "f64", {}, true
+        case "string":
+            return "string", {}, true
+        case "char":
+            return "rune", {}, true
+        case "keyword":
+            return "string", {}, true
+        case:
+            return map_name(tag), {}, true
+        }
+    case .Vector:
+        if len(form.items) == 0 || form.items[0].kind != .Keyword {
+            return "", Compile_Error{message = "invalid defstruct field type metadata", span = form.span}, false
+        }
+        head := form.items[0].text
+        switch head {
+        case ":arr":
+            if len(form.items) != 2 {
+                return "", Compile_Error{message = "[:arr T] expects one element type", span = form.span}, false
+            }
+            elem_text, err_elem, ok_elem := parse_defstruct_type_meta(form.items[1])
+            if !ok_elem {
+                return "", err_elem, false
+            }
+            return fmt.tprintf("[dynamic]%s", elem_text), {}, true
+        case ":slice":
+            if len(form.items) != 2 {
+                return "", Compile_Error{message = "[:slice T] expects one element type", span = form.span}, false
+            }
+            elem_text, err_elem, ok_elem := parse_defstruct_type_meta(form.items[1])
+            if !ok_elem {
+                return "", err_elem, false
+            }
+            return fmt.tprintf("[]%s", elem_text), {}, true
+        case ":set":
+            if len(form.items) != 2 {
+                return "", Compile_Error{message = "[:set T] expects one element type", span = form.span}, false
+            }
+            elem_text, err_elem, ok_elem := parse_defstruct_type_meta(form.items[1])
+            if !ok_elem {
+                return "", err_elem, false
+            }
+            return fmt.tprintf("map[%s]bool", elem_text), {}, true
+        case ":fixed-arr":
+            if len(form.items) != 3 || form.items[1].kind != .Number {
+                return "", Compile_Error{message = "[:fixed-arr N T] expects a numeric length and one element type", span = form.span}, false
+            }
+            elem_text, err_elem, ok_elem := parse_defstruct_type_meta(form.items[2])
+            if !ok_elem {
+                return "", err_elem, false
+            }
+            return fmt.tprintf("[%s]%s", form.items[1].text, elem_text), {}, true
+        case:
+            return "", Compile_Error{message = "invalid defstruct field type metadata", span = form.span}, false
+        }
+    case:
+        return "", Compile_Error{message = "invalid defstruct field type metadata", span = form.span}, false
+    }
 }
 
 parse_type_text :: proc(form: CST_Form) -> (text: string, err: Compile_Error, ok: bool) {
@@ -81,6 +188,33 @@ parse_type_text :: proc(form: CST_Form) -> (text: string, err: Compile_Error, ok
                 return "", err_pointee, false
             }
             return fmt.tprintf("^%s", pointee_text), {}, true
+        }
+
+        if is_symbol(form.items[0], "type") {
+            if len(form.items) < 3 {
+                return "", Compile_Error{message = "type form expects a type constructor and at least one argument", span = form.span}, false
+            }
+            constructor_text, err_constructor, ok_constructor := parse_type_text(form.items[1])
+            if !ok_constructor {
+                return "", err_constructor, false
+            }
+
+            builder := strings.builder_make()
+            defer strings.builder_destroy(&builder)
+            strings.write_string(&builder, constructor_text)
+            strings.write_byte(&builder, '(')
+            for arg, idx in form.items[2:] {
+                arg_text, err_arg, ok_arg := parse_type_text(arg)
+                if !ok_arg {
+                    return "", err_arg, false
+                }
+                if idx > 0 {
+                    strings.write_string(&builder, ", ")
+                }
+                strings.write_string(&builder, arg_text)
+            }
+            strings.write_byte(&builder, ')')
+            return strings.clone(strings.to_string(builder)), {}, true
         }
 
         if !is_symbol(form.items[0], "proc") {
@@ -239,15 +373,49 @@ parse_struct_fields :: proc(form: CST_Form) -> (fields: [dynamic]Struct_Field, e
         if key.kind != .Keyword {
             return fields, Compile_Error{message = "expected struct field keyword", span = key.span}, false
         }
+        field_name := map_name(key.text[1:])
+        if struct_field_exists(fields[:], field_name) {
+            return fields, Compile_Error{message = fmt.tprintf("duplicate struct field %s", key.text), span = key.span}, false
+        }
         type_text, next_i, err_type, ok_type := parse_type_text_from_forms(form.items[:], i+1)
         if !ok_type {
             return fields, err_type, false
         }
         append(&fields, Struct_Field{
-            name = map_name(key.text[1:]),
+            name = field_name,
             ty   = type_text,
         })
         i = next_i
+    }
+    return fields, {}, true
+}
+
+parse_defstruct_fields :: proc(form: CST_Form) -> (fields: [dynamic]Struct_Field, err: Compile_Error, ok: bool) {
+    if form.kind != .Brace {
+        return fields, Compile_Error{message = "expected defstruct field brace form", span = form.span}, false
+    }
+    i := 0
+    for i < len(form.items) {
+        if i+1 >= len(form.items) {
+            return fields, Compile_Error{message = "missing defstruct field type metadata", span = form.span}, false
+        }
+        key := form.items[i]
+        if key.kind != .Keyword {
+            return fields, Compile_Error{message = "expected defstruct field keyword", span = key.span}, false
+        }
+        field_name := map_name(key.text[1:])
+        if struct_field_exists(fields[:], field_name) {
+            return fields, Compile_Error{message = fmt.tprintf("duplicate defstruct field %s", key.text), span = key.span}, false
+        }
+        type_text, err_type, ok_type := parse_defstruct_type_meta(form.items[i+1])
+        if !ok_type {
+            return fields, err_type, false
+        }
+        append(&fields, Struct_Field{
+            name = field_name,
+            ty   = type_text,
+        })
+        i += 2
     }
     return fields, {}, true
 }
@@ -474,6 +642,35 @@ parse_decl :: proc(top_form: CST_Top_Form) -> (decl: AST_Decl, err: Compile_Erro
             kind = .Struct,
             span = form.span,
             doc_lines = top_form.doc_lines,
+            struct_decl = Struct_Decl{
+                name   = map_name(form.items[1].text),
+                fields = fields,
+            },
+        }, {}, true
+    case "defstruct":
+        if len(form.items) != 3 && len(form.items) != 4 {
+            return decl, Compile_Error{message = "defstruct expects a name, optional docstring, and brace form", span = form.span}, false
+        }
+        if form.items[1].kind != .Symbol {
+            return decl, Compile_Error{message = "defstruct expects a symbol name", span = form.items[1].span}, false
+        }
+        doc_lines := top_form.doc_lines
+        field_index := 2
+        if len(form.items) == 4 {
+            if form.items[2].kind != .String {
+                return decl, Compile_Error{message = "defstruct docstring must be a string literal", span = form.items[2].span}, false
+            }
+            doc_lines = append_doc_lines(doc_lines[:], doc_lines_from_string(unquote_string(form.items[2].text))[:])
+            field_index = 3
+        }
+        fields, err_fields, ok_fields := parse_defstruct_fields(form.items[field_index])
+        if !ok_fields {
+            return decl, err_fields, false
+        }
+        return AST_Decl{
+            kind = .Struct,
+            span = form.span,
+            doc_lines = doc_lines,
             struct_decl = Struct_Decl{
                 name   = map_name(form.items[1].text),
                 fields = fields,

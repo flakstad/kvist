@@ -1,17 +1,17 @@
 // Host interop with a vendor package: vendor:stb/easy_font.
 //
 // vendor:stb/easy_font is small and terminal-safe, so it is a good first vendor
-// example. It exposes Odin structs/arrays and simple procs; OdinL calls them
+// example. It exposes Odin structs/arrays and simple procs; Kvist calls them
 // directly instead of adding an abstraction layer.
 (package main)
 (import "core:fmt")
 (import easy "vendor:stb/easy_font")
 
 (proc text-width [] -> int
-  (easy.width "OdinL"))
+  (easy.width "Kvist"))
 
 (proc text-height [] -> int
-  (easy.height "OdinL"))
+  (easy.height "Kvist"))
 
 (proc quad-count [] -> int
   ;; easy.print writes quads into caller-provided storage. That is an important
@@ -19,7 +19,7 @@
   ;; to the library, and use the returned count.
   (let [color (new easy.Color [255 255 255 255])
         quads (new [128]easy.Quad [])]
-    (easy.print (f32 0) (f32 0) "OdinL" color (slice quads))))
+    (easy.print (f32 0) (f32 0) "Kvist" color (slice quads))))
 
 (proc main []
   (fmt.println (text-width) (text-height) (quad-count)))

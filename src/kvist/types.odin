@@ -1,4 +1,4 @@
-package odinl
+package kvist
 
 Source_Kind :: enum {
     File,

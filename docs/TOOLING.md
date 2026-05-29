@@ -1,4 +1,4 @@
-# OdinL Tooling Plan
+# Kvist Tooling Plan
 
 Tooling comes after the compiler reaches the language draft's core target. The
 editor story should feel close to Clojure editing while keeping Odin as the
@@ -8,38 +8,38 @@ execution model.
 
 - `../cluck/emacs`: useful model for a light Clojure-like major mode derived
   from `clojure-mode`, with inline eval overlays and a small command set.
-- `../odineval`: useful model for Odin eval by generating temporary Odin,
+- `../probe`: useful model for Odin eval by generating temporary Odin,
   invoking `odin run` / `odin check`, showing generated code, and integrating
   with Emacs result buffers.
 
-Do not merge OdinL into `odineval` prematurely. Reuse the execution ideas and
-possibly code structure, but keep OdinL parsing/lowering/source mapping in this
+Do not merge Kvist into `probe` prematurely. Reuse the execution ideas and
+possibly code structure, but keep Kvist parsing/lowering/source mapping in this
 repo.
 
 ## Major Mode
 
-The first Emacs target should be `odinl-mode` for `*.odinl` files.
+The first Emacs target should be `kvist-mode` for `*.kvist` files.
 
 It should be very close to `clojure-mode`:
 
 - derive from `clojure-mode`
 - use structural editing packages such as paredit or smartparens
 - keep Lisp navigation commands working
-- use Clojure-like indentation with 2 spaces in `.odinl`
-- font-lock OdinL special forms, keywords, Odin directive symbols, and raw
+- use Clojure-like indentation with 2 spaces in `.kvist`
+- font-lock Kvist special forms, keywords, Odin directive symbols, and raw
   `(odin "...")` escape hatches
-- provide indentation overrides for OdinL forms such as `proc`, `struct`,
+- provide indentation overrides for Kvist forms such as `proc`, `struct`,
   `enum`, `union`, `let`, `switch`, `cond`, `for`, and `each`
 
-The compiler's Odin source remains 4-space indented. The OdinL source format is
+The compiler's Odin source remains 4-space indented. The Kvist source format is
 separate and should read like Clojure.
 
 ## Eval Tooling
 
-OdinL eval must remain source generation plus Odin execution, not an
+Kvist eval must remain source generation plus Odin execution, not an
 interpreter.
 
-Initial commands should mirror the useful `odineval` and `cluck` workflows:
+Initial commands should mirror the useful `probe` and `cluck` workflows:
 
 - eval form at point inline
 - eval selected region inline
@@ -52,12 +52,12 @@ Initial commands should mirror the useful `odineval` and `cluck` workflows:
 
 The eval path should be:
 
-1. collect file context from the current `.odinl` buffer
-2. lower OdinL to temporary Odin
+1. collect file context from the current `.kvist` buffer
+2. lower Kvist to temporary Odin
 3. inject a scratch `main` or scratch package runner when evaluating an
    expression/form
-4. run `odin run` or `odin check` from the `odinl` CLI
-5. map diagnostics back through OdinL source spans where possible
+4. run `odin run` or `odin check` from the `kvist` CLI
+5. map diagnostics back through Kvist source spans where possible
 6. display results inline and in a result buffer
 
 ## Compiler Support Needed First
@@ -67,38 +67,38 @@ tooling entry points:
 
 - compile file to generated Odin
 - compile with declaration source map
-- check or run generated Odin with `odinl check` / `odinl run`
+- check or run generated Odin with `kvist check` / `kvist run`
 - evaluate a selected expression/form with surrounding file context using
-  `odinl eval`
-- inspect the generated scratch Odin for a selected form with `odinl expand`
+  `kvist eval`
+- inspect the generated scratch Odin for a selected form with `kvist expand`
 - optionally write generated Odin for editor inspection with `--generated`
 
 The current `--map` output is line-oriented. Declarations are still the fallback
 mapping, but emitted body forms, binding assignments, conditions, loop
 collections, return values, and assignment values carry narrower source spans
-where the generated line has a clear OdinL origin. Internally, diagnostic
+where the generated line has a clear Kvist origin. Internally, diagnostic
 remapping also uses generated columns when Odin reports them. Eval forms carry
 an origin marker, so compiler errors in selected eval text can be reported
 against `file:<eval>:line:column` instead of the surrounding file.
 
-The Emacs result buffer should treat remapped OdinL diagnostics as
+The Emacs result buffer should treat remapped Kvist diagnostics as
 `compilation-mode` output. That keeps errors clickable and lets ordinary Emacs
-commands such as `next-error` / `M-g n` navigate back into `.odinl` source.
+commands such as `next-error` / `M-g n` navigate back into `.kvist` source.
 
 ## Near-Term Language Tooling
 
 After the core compiler is solid, the next language-level tooling target is the
-macro system. Macros should be a frontend feature over OdinL forms, not a
+macro system. Macros should be a frontend feature over Kvist forms, not a
 runtime facility:
 
 - expansion happens before ordinary lowering to Odin;
-- macro expansion output must still be inspectable OdinL/Odin-shaped code;
+- macro expansion output must still be inspectable Kvist/Odin-shaped code;
 - editor tooling should provide `macroexpand` for the form at point;
-- `odinl macroexpand` is the frontend expansion view; it currently handles
+- `kvist macroexpand` is the frontend expansion view; it currently handles
   built-in macro-like forms such as `with-allocator` and
   `with-temp-allocator` and cleanup forms such as `with-delete`, while
-  `odinl expand` remains the generated-Odin lowering preview;
-- `odinl macroexpand file.odinl FORM --map output.map` writes a simple
+  `kvist expand` remains the generated-Odin lowering preview;
+- `kvist macroexpand file.kvist FORM --map output.map` writes a simple
   line-oriented expansion map so generated macroexpand lines can be related
   back to the original macro call, binding values, and body forms;
 - diagnostics should keep enough source information to point through expansion
@@ -106,12 +106,12 @@ runtime facility:
 - macros must not introduce a hidden stateful REPL or dynamic runtime world.
 
 The current implementation has a small compiler-defined macro registry rather
-than user-defined macros. The registry is shared by `odinl macroexpand` and the
+than user-defined macros. The registry is shared by `kvist macroexpand` and the
 normal emitter so supported macro-like forms have one explicit classification
 point. For now, normal compilation still lowers these forms directly where that
 keeps ownership checks precise; a later expansion phase can move more of that
 lowering into frontend form rewriting once diagnostics and ownership rules stay
-equally clear. `odinl macroexpand` expands nested compiler-defined macro forms
+equally clear. `kvist macroexpand` expands nested compiler-defined macro forms
 inside ordinary wrapper forms and `with-*` bodies, so resource-scope previews
 show the shape of stacked cleanup/resource helpers. Formatting of recursive
 macroexpand output is still a preview format, not the final source formatter.
@@ -127,12 +127,12 @@ multi-return convenience macros are:
   `let` plus `(== err {})`.
 
 The bool/error distinction is intentional. Odin procs commonly report success
-with either an explicit bool or a zero-valued error object, and OdinL keeps that
+with either an explicit bool or a zero-valued error object, and Kvist keeps that
 choice visible instead of inventing a general truthiness rule.
 
 ## Data-Oriented Iteration
 
-OdinL should support REPL-driven development without pretending to have a
+Kvist should support REPL-driven development without pretending to have a
 stateful Lisp REPL. The model is still: generate scratch Odin, run/check it, and
 keep the useful artifacts.
 
@@ -184,7 +184,7 @@ Odin value, not as ambient language state.
 
 ### Watches
 
-Clojure atom watches are useful because they make changes visible. OdinL should
+Clojure atom watches are useful because they make changes visible. Kvist should
 not copy atoms or dynamic vars, but the tooling can provide similar feedback:
 
 - watch a source file or package and rerun a selected eval form;
@@ -230,7 +230,7 @@ path)` lowers to `os.read_entire_file(path, context.allocator)` and returns
 owned `[]byte` plus `os.Error`; callers delete the bytes or return them to
 transfer ownership.
 
-`odinl eval` runs generated scratch code from the source file's directory, so
+`kvist eval` runs generated scratch code from the source file's directory, so
 relative dev paths such as `tmp/users.json` are stable across separate eval
 processes. Odin's file-writing calls do not create parent directories; examples
 that write under `tmp` should create that directory explicitly and treat the
@@ -307,41 +307,41 @@ compiled Odin should remain ordinary.
 JSON should be the first supported structured format because users can inspect
 and edit it. CBOR is a reasonable later option for larger caches. Odin's custom
 marshalers/unmarshalers should remain available for special types rather than
-OdinL inventing a parallel serialization protocol.
+Kvist inventing a parallel serialization protocol.
 
 ### CLI Cache
 
 The CLI has a small text cache for eval output:
 
 ```sh
-odinl eval file.odinl FORM --save NAME
-odinl cache path NAME
-odinl cache list
-odinl cache rm NAME
+kvist eval file.kvist FORM --save NAME
+kvist cache path NAME
+kvist cache list
+kvist cache rm NAME
 ```
 
-The default cache directory is project-local `.odinl-cache`, which is gitignored.
-Set `ODINL_CACHE_DIR` when editor tooling or tests need an isolated cache. Cache
+The default cache directory is project-local `.kvist-cache`, which is gitignored.
+Set `KVIST_CACHE_DIR` when editor tooling or tests need an isolated cache. Cache
 names are simple file names: letters, digits, `_`, `-`, and `.` only. `--save`
 writes the exact stdout from a successful eval run to the named cache file and
 still prints stdout normally.
 
 This is intentionally text-oriented. For structured values, prefer explicit
-`spit`, `slurp`, `json.marshal`, and `json.unmarshal` in OdinL source so
+`spit`, `slurp`, `json.marshal`, and `json.unmarshal` in Kvist source so
 ownership and format choices stay visible.
 
 The Emacs tooling exposes this through ordinary CLI calls:
 
-- `odinl-save-form-result` (`C-c C-w`) evals a form and saves stdout with
-  `odinl eval --save`;
-- `odinl-cache-list` (`C-c C-l`) lists saved cache names;
-- `odinl-cache-open` (`C-c C-o`) opens a saved cache file;
-- `odinl-cache-rm` (`C-c C-d`) removes a saved cache file.
+- `kvist-save-form-result` (`C-c C-w`) evals a form and saves stdout with
+  `kvist eval --save`;
+- `kvist-cache-list` (`C-c C-l`) lists saved cache names;
+- `kvist-cache-open` (`C-c C-o`) opens a saved cache file;
+- `kvist-cache-rm` (`C-c C-d`) removes a saved cache file.
 
-Useful future `odinl` commands or flags:
+Useful future `kvist` commands or flags:
 
-- `odinl eval file.odinl FORM --tap`
-- `odinl watch file.odinl FORM`
+- `kvist eval file.kvist FORM --tap`
+- `kvist watch file.kvist FORM`
 
 The exact CLI can change, but it should keep the source of truth on disk so a
 fresh process can reproduce the same development state.
@@ -357,16 +357,16 @@ large:
   environment variables, or CLI/editor flags; supported sinks such as stdout,
   files, editor buffers, and sockets.
 - Runtime reactive utilities: whether watch/cell/signal behavior belongs in a
-  small OdinL library, and how to keep it explicit rather than part of compiler
+  small Kvist library, and how to keep it explicit rather than part of compiler
   semantics.
 - Disk cache layout: default cache directory, naming, invalidation, cleanup,
   file extensions, and whether cache metadata records source file, form, type,
   and timestamp.
-- Formatter and indentation: Clojure-like 2-space `.odinl` formatting, separate
+- Formatter and indentation: Clojure-like 2-space `.kvist` formatting, separate
   from 4-space generated Odin.
 - Source maps and diagnostics: expression-level spans, generated helper spans,
-  macro expansion spans, and editor navigation from Odin errors back to OdinL.
-- Package/workspace discovery: how `odinl eval`, `check`, `run`, and future
+  macro expansion spans, and editor navigation from Odin errors back to Kvist.
+- Package/workspace discovery: how `kvist eval`, `check`, `run`, and future
   watch commands find the right Odin package root and import context.
 - Tooling protocol: whether Emacs calls CLI commands only, or whether a small
   long-lived helper process is useful for speed while still avoiding stateful

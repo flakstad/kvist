@@ -1,6 +1,6 @@
 # Ownership Rules
 
-OdinL should teach ordinary Odin ownership. It should not hide allocation or
+Kvist should teach ordinary Odin ownership. It should not hide allocation or
 pretend that Odin has garbage collection.
 
 The practical rule is:
@@ -21,7 +21,7 @@ result and must be bound or returned. The same is true in threaded code:
 
 ## Delete These
 
-These forms return owned values in normal OdinL code:
+These forms return owned values in normal Kvist code:
 
 ```clojure
 (make [dynamic]int)
@@ -107,7 +107,7 @@ no longer needed:
 If a proc returns the bytes from `slurp`, ownership transfers to the caller and
 the callee must not delete them.
 
-Data marshalling is explicit host interop, not OdinL core. For JSON, call
+Data marshalling is explicit host interop, not Kvist core. For JSON, call
 `json.marshal` and `json.unmarshal` directly. `json.marshal` returns owned
 bytes that must be deleted after writing. `json.unmarshal` may allocate strings,
 slices, dynamic arrays, or maps inside the destination value; the caller owns
@@ -243,7 +243,7 @@ scope:
 
 This form still emits ordinary Odin calls to `runtime.default_temp_allocator_*`.
 The runtime import is explicit, and any owned values that escape the block must
-not borrow storage from the ended temp scope. OdinL rejects obvious direct
+not borrow storage from the ended temp scope. Kvist rejects obvious direct
 escapes such as returning `(map f xs)` from a `with-temp-allocator` body.
 
 `with-delete` is the small cleanup helper for local owned values:
@@ -352,13 +352,13 @@ But do not return a slice view into data that dies with the proc:
     (drop 1 xs)))
 ```
 
-Odin itself rejects some unsafe literal escapes. OdinL should also reject more
+Odin itself rejects some unsafe literal escapes. Kvist should also reject more
 of these cases over time as ownership analysis improves.
 
 ## Threading Pipelines
 
 Threading pipelines in `let` bindings are cleanup-aware. If an intermediate
-step allocates, OdinL lowers it to a generated temporary and emits
+step allocates, Kvist lowers it to a generated temporary and emits
 `defer delete(...)` for that generated value.
 
 ```clojure

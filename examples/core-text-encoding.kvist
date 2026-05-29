@@ -33,7 +33,7 @@
 (proc base64-roundtrip-length [] -> int
   ;; base64.encode and base64.decode allocate owned []byte values. The raw Odin
   ;; transmute is explicit because Odin distinguishes string from byte slices.
-  (let [text "odinl"
+  (let [text "kvist"
         [encoded encode-err] (base64.encode (odin "transmute([]byte)text"))]
     (if (!= encode-err nil)
       0
@@ -49,7 +49,7 @@
 (proc sha256-hex-length [] -> int
   ;; sha2 uses an explicit context, update, and final call. hex.encode then
   ;; allocates the printable digest bytes, which this proc deletes locally.
-  (let [text "odinl"
+  (let [text "kvist"
         ctx (sha2.Context_256 {})
         digest (new [32]byte [])]
     (sha2.init_256 (& ctx))

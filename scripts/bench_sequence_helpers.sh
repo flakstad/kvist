@@ -8,17 +8,17 @@ BASE_LABEL=$(printf '%s' "$BASE_REF" | tr '/:' '__')
 tmp_dir=$(mktemp -d)
 trap 'rm -rf "$tmp_dir"' EXIT INT TERM
 
-current_bin="$tmp_dir/odinl-current"
+current_bin="$tmp_dir/kvist-current"
 base_dir="$tmp_dir/base"
-base_bin="$tmp_dir/odinl-base"
+base_bin="$tmp_dir/kvist-base"
 
 printf 'building current compiler\n'
-odin build "$ROOT/cmd/odinl" -out:"$current_bin"
+odin build "$ROOT/cmd/kvist" -out:"$current_bin"
 
 printf 'building base compiler from %s\n' "$BASE_REF"
 mkdir -p "$base_dir"
 git -C "$ROOT" archive "$BASE_REF" | tar -x -C "$base_dir"
-odin build "$base_dir/cmd/odinl" -out:"$base_bin"
+odin build "$base_dir/cmd/kvist" -out:"$base_bin"
 
 run_bench() {
     label=$1
@@ -26,7 +26,7 @@ run_bench() {
     generated="$tmp_dir/$label.odin"
     exe="$tmp_dir/$label"
 
-    "$compiler" "$ROOT/benchmarks/sequence_helpers.odinl" -o "$generated"
+    "$compiler" "$ROOT/benchmarks/sequence_helpers.kvist" -o "$generated"
     odin build "$generated" -file -o:speed -out:"$exe"
     printf '\n== %s ==\n' "$label"
     "$exe"

@@ -3,25 +3,25 @@ package tests
 import "base:runtime"
 import "core:strings"
 import "core:testing"
-import odinl "../src/odinl"
+import kvist "../src/kvist"
 
 @(test)
 compile_hello_program :: proc(t: ^testing.T) {
     source := `(package main)
 (import "core:fmt")
 
-// Greets from OdinL.
+// Greets from Kvist.
 (struct Greeting {
   :message string
 })
 
 (proc main []
   (let [g (Greeting {
-            :message "hello from odinl"
+            :message "hello from kvist"
           })]
     (fmt.println (:message g))))`
 
-    output, err, ok := odinl.compile_source(source)
+    output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
     if !ok {
         testing.expect_value(t, err.message, "")
@@ -33,14 +33,59 @@ compile_hello_program :: proc(t: ^testing.T) {
 
 import "core:fmt"
 
-// Greets from OdinL.
+// Greets from Kvist.
 Greeting :: struct {
     message: string,
 }
 
 main :: proc() {
-    g := Greeting{message = "hello from odinl"}
+    g := Greeting{message = "hello from kvist"}
     fmt.println(g.message)
+}
+`
+    testing.expect_value(t, output, expected)
+}
+
+@(test)
+compile_defstruct_program :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct Profile
+  "Profile data."
+  {:name :string
+   :age :int
+   :active? :bool
+   :tags [:set :string]
+   :scores [:arr :int]
+   :home :Point})
+
+(defstruct Point
+  {:x :float
+   :y :float})`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    expected := `package main
+
+// Profile data.
+Profile :: struct {
+    name: string,
+    age: int,
+    active_p: bool,
+    tags: map[string]bool,
+    scores: [dynamic]int,
+    home: Point,
+}
+
+Point :: struct {
+    x: f64,
+    y: f64,
 }
 `
     testing.expect_value(t, output, expected)
@@ -49,30 +94,35 @@ main :: proc() {
 @(test)
 compile_all_examples :: proc(t: ^testing.T) {
     examples := [?]string{
-        "examples/control-flow.odinl",
-        "examples/core-math-linalg.odinl",
-        "examples/core-os-paths.odinl",
-        "examples/core-text-encoding.odinl",
-        "examples/core-time-slice.odinl",
-        "examples/data-literals.odinl",
-        "examples/declarations.odinl",
-        "examples/dev-io.odinl",
-        "examples/error-handling.odinl",
-        "examples/hello.odinl",
-        "examples/higher-order.odinl",
-        "examples/interop-directives.odinl",
-        "examples/pointers-and-raw.odinl",
-        "examples/proc-values.odinl",
-        "examples/sequence-helpers.odinl",
-        "examples/sequences.odinl",
-        "examples/tap.odinl",
-        "examples/unions.odinl",
-        "examples/vendor-raylib.odinl",
-        "examples/vendor-stb-easy-font.odinl",
+        "examples/control-flow.kvist",
+        "examples/core-concurrency.kvist",
+        "examples/core-container-queue.kvist",
+        "examples/core-encoding-formats.kvist",
+        "examples/core-math-linalg.kvist",
+        "examples/core-os-paths.kvist",
+        "examples/core-paths.kvist",
+        "examples/core-text-encoding.kvist",
+        "examples/core-time-slice.kvist",
+        "examples/data-literals.kvist",
+        "examples/declarations.kvist",
+        "examples/dev-io.kvist",
+        "examples/defstructs.kvist",
+        "examples/error-handling.kvist",
+        "examples/hello.kvist",
+        "examples/higher-order.kvist",
+        "examples/interop-directives.kvist",
+        "examples/pointers-and-raw.kvist",
+        "examples/proc-values.kvist",
+        "examples/sequence-helpers.kvist",
+        "examples/sequences.kvist",
+        "examples/tap.kvist",
+        "examples/unions.kvist",
+        "examples/vendor-raylib.kvist",
+        "examples/vendor-stb-easy-font.kvist",
     }
 
     for path in examples {
-        result, err, ok := odinl.compile_path_with_map(path)
+        result, err, ok := kvist.compile_path_with_map(path)
         testing.expect_value(t, ok, true)
         if !ok {
             testing.expect_value(t, err.message, "")
@@ -96,7 +146,7 @@ compile_eval_source_generates_scratch_main :: proc(t: ^testing.T) {
 (proc main []
   (fmt.println "ordinary main"))`
 
-    output, err, ok := odinl.compile_eval_source(source, "(add 20 22)")
+    output, err, ok := kvist.compile_eval_source(source, "(add 20 22)")
     testing.expect_value(t, ok, true)
     if !ok {
         testing.expect_value(t, err.message, "")
@@ -150,7 +200,7 @@ symbols_source_indexes_top_level_forms :: proc(t: ^testing.T) {
 (proc active? [user: User] -> bool
   (:active user))`
 
-    output, err, ok := odinl.symbols_source(source)
+    output, err, ok := kvist.symbols_source(source)
     testing.expect_value(t, ok, true)
     if !ok {
         testing.expect_value(t, err.message, "")
@@ -171,6 +221,27 @@ symbols_source_indexes_top_level_forms :: proc(t: ^testing.T) {
 }
 
 @(test)
+symbols_source_indexes_defstruct_docstring :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct Person
+  "Primary profile."
+  {:name :string
+   :age :int})`
+
+    output, err, ok := kvist.symbols_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "struct\tPerson\t3\t12\t\tPrimary profile.\n"), true)
+    testing.expect_value(t, strings.contains(output, "field\tPerson.name\t5\t4\tPerson\t\n"), true)
+}
+
+@(test)
 compile_eval_source_can_emit_statement_runner :: proc(t: ^testing.T) {
     source := `(package main)
 (import "core:fmt")
@@ -178,7 +249,7 @@ compile_eval_source_can_emit_statement_runner :: proc(t: ^testing.T) {
 (proc add [a: int, b: int] -> int
   (+ a b))`
 
-    output, err, ok := odinl.compile_eval_source(source, "(fmt.println (add 1 2))", true)
+    output, err, ok := kvist.compile_eval_source(source, "(fmt.println (add 1 2))", true)
     testing.expect_value(t, ok, true)
     if !ok {
         testing.expect_value(t, err.message, "")
@@ -209,7 +280,7 @@ compile_eval_source_prints_block_forms_as_statements :: proc(t: ^testing.T) {
 (proc load-note [path: string] -> [data: []byte, err: os.Error]
   (slurp path))`
 
-    output, err, ok := odinl.compile_eval_source(source, `(let [[data err] (load-note "tmp/odinl-note.txt")]
+    output, err, ok := kvist.compile_eval_source(source, `(let [[data err] (load-note "tmp/kvist-note.txt")]
   (if (!= err nil)
     0
     (do
@@ -234,7 +305,7 @@ load_note :: proc(path: string) -> (data: []byte, err: os.Error) {
 
 main :: proc() {
     {
-        data, err := load_note("tmp/odinl-note.txt")
+        data, err := load_note("tmp/kvist-note.txt")
         if (err) != (nil) {
             fmt.println(0)
         }
@@ -258,7 +329,7 @@ compile_eval_source_can_load_declaration_form :: proc(t: ^testing.T) {
   :message string
 })`
 
-    output, err, ok := odinl.compile_eval_source(source, `(struct Greeting {
+    output, err, ok := kvist.compile_eval_source(source, `(struct Greeting {
   :message string
 })`)
     testing.expect_value(t, ok, true)
@@ -281,6 +352,69 @@ main :: proc() {
 }
 
 @(test)
+compile_eval_source_can_load_defstruct_declaration_form :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct Greeting
+  "Greeting text."
+  {:message :string})`
+
+    output, err, ok := kvist.compile_eval_source(source, `(defstruct Greeting
+  "Greeting text."
+  {:message :string})`)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    expected := `package main
+
+// Greeting text.
+Greeting :: struct {
+    message: string,
+}
+
+main :: proc() {
+}
+`
+    testing.expect_value(t, output, expected)
+}
+
+@(test)
+compile_defstruct_rejects_duplicate_fields :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct Broken
+  {:name :string
+   :name :int})`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+    testing.expect_value(t, strings.contains(err.message, "duplicate defstruct field :name"), true)
+}
+
+@(test)
+compile_defstruct_rejects_bad_metadata :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct Broken
+  {:tags [:set]
+   :scores [:fixed-arr :int]})`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+    testing.expect_value(t, strings.contains(err.message, "expects one element type") || strings.contains(err.message, "expects a numeric length"), true)
+}
+
+@(test)
 compile_eval_source_deduplicates_import_declaration_form :: proc(t: ^testing.T) {
     source := `(package main)
 (import "core:fmt")
@@ -288,7 +422,7 @@ compile_eval_source_deduplicates_import_declaration_form :: proc(t: ^testing.T) 
 (proc main []
   (fmt.println "hello"))`
 
-    output, err, ok := odinl.compile_eval_source(source, `(import "core:fmt")`)
+    output, err, ok := kvist.compile_eval_source(source, `(import "core:fmt")`)
     testing.expect_value(t, ok, true)
     if !ok {
         testing.expect_value(t, err.message, "")
@@ -314,7 +448,7 @@ compile_eval_source_can_load_main_proc_declaration_form :: proc(t: ^testing.T) {
 (proc main []
   (fmt.println "hello"))`
 
-    output, err, ok := odinl.compile_eval_source(source, `(proc main []
+    output, err, ok := kvist.compile_eval_source(source, `(proc main []
   (fmt.println "hello"))`)
     testing.expect_value(t, ok, true)
     if !ok {
@@ -341,17 +475,17 @@ compile_eval_source_reports_eval_origin :: proc(t: ^testing.T) {
 (proc add [a: int, b: int] -> int
   (+ a b))`
 
-    _, err, ok := odinl.compile_eval_source(source, "(not 1 2)")
+    _, err, ok := kvist.compile_eval_source(source, "(not 1 2)")
     testing.expect_value(t, ok, false)
     if ok {
         return
     }
     defer delete(err.message)
-    testing.expect_value(t, err.span.source, odinl.Source_Kind.Eval)
+    testing.expect_value(t, err.span.source, kvist.Source_Kind.Eval)
 
-    formatted := odinl.format_eval_compile_error("app.odinl", source, "(not 1 2)", err)
+    formatted := kvist.format_eval_compile_error("app.kvist", source, "(not 1 2)", err)
     defer delete(formatted)
-    expected := `app.odinl:<eval>:1:1: not expects one argument
+    expected := `app.kvist:<eval>:1:1: not expects one argument
   (not 1 2)
   ^
 `
@@ -365,7 +499,7 @@ compile_eval_source_map_marks_eval_runner :: proc(t: ^testing.T) {
 (proc add [a: int, b: int] -> int
   (+ a b))`
 
-    result, err, ok := odinl.compile_eval_source_with_map(source, "(add 1 2)")
+    result, err, ok := kvist.compile_eval_source_with_map(source, "(add 1 2)")
     testing.expect_value(t, ok, true)
     if !ok {
         testing.expect_value(t, err.message, "")
@@ -396,7 +530,7 @@ reader_supports_hash_underscore_and_comment_form :: proc(t: ^testing.T) {
 (proc main []
   (return))`
 
-    output, err, ok := odinl.compile_source(source)
+    output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
     if !ok {
         testing.expect_value(t, err.message, "")
@@ -425,7 +559,7 @@ reader_preserves_top_form_source_text :: proc(t: ^testing.T) {
 
 (const answer 42)`
 
-    forms, err, ok := odinl.read_top_forms(source)
+    forms, err, ok := kvist.read_top_forms(source)
     testing.expect_value(t, ok, true)
     if !ok {
         testing.expect_value(t, err.message, "")
@@ -450,7 +584,7 @@ reader_converts_semicolon_doc_comments :: proc(t: ^testing.T) {
     source := `; Lisp doc.
 (const answer 42)`
 
-    forms, err, ok := odinl.read_top_forms(source)
+    forms, err, ok := kvist.read_top_forms(source)
     testing.expect_value(t, ok, true)
     if !ok {
         testing.expect_value(t, err.message, "")
@@ -476,7 +610,7 @@ reader_converts_block_doc_comments :: proc(t: ^testing.T) {
  */
 (const answer 42)`
 
-    forms, err, ok := odinl.read_top_forms(source)
+    forms, err, ok := kvist.read_top_forms(source)
     testing.expect_value(t, ok, true)
     if !ok {
         testing.expect_value(t, err.message, "")
@@ -501,17 +635,17 @@ reader_classifies_core_literals :: proc(t: ^testing.T) {
 (const ok true)
 (const none nil)`
 
-    forms, err, ok := odinl.read_top_forms(source)
+    forms, err, ok := kvist.read_top_forms(source)
     testing.expect_value(t, ok, true)
     if !ok {
         testing.expect_value(t, err.message, "")
         return
     }
 
-    testing.expect_value(t, forms[0].form.items[2].kind, odinl.CST_Form_Kind.Number)
-    testing.expect_value(t, forms[1].form.items[2].kind, odinl.CST_Form_Kind.Number)
-    testing.expect_value(t, forms[2].form.items[2].kind, odinl.CST_Form_Kind.Bool)
-    testing.expect_value(t, forms[3].form.items[2].kind, odinl.CST_Form_Kind.Nil)
+    testing.expect_value(t, forms[0].form.items[2].kind, kvist.CST_Form_Kind.Number)
+    testing.expect_value(t, forms[1].form.items[2].kind, kvist.CST_Form_Kind.Number)
+    testing.expect_value(t, forms[2].form.items[2].kind, kvist.CST_Form_Kind.Bool)
+    testing.expect_value(t, forms[3].form.items[2].kind, kvist.CST_Form_Kind.Nil)
 }
 
 @(test)
@@ -523,7 +657,7 @@ compile_source_with_declaration_source_map :: proc(t: ^testing.T) {
 (proc main []
   (return))`
 
-    result, err, ok := odinl.compile_source_with_map(source)
+    result, err, ok := kvist.compile_source_with_map(source)
     testing.expect_value(t, ok, true)
     if !ok {
         testing.expect_value(t, err.message, "")
@@ -542,22 +676,22 @@ main :: proc() {
 `
     testing.expect_value(t, result.output, expected)
     testing.expect_value(t, len(result.source_map) >= 4, true)
-    package_entry, found_package := odinl.source_map_entry_for_generated_line(result.source_map[:], 1)
+    package_entry, found_package := kvist.source_map_entry_for_generated_line(result.source_map[:], 1)
     testing.expect_value(t, found_package, true)
     testing.expect_value(t, package_entry.source_span.start, 0)
 
-    const_entry, found_const := odinl.source_map_entry_for_generated_line(result.source_map[:], 3)
+    const_entry, found_const := kvist.source_map_entry_for_generated_line(result.source_map[:], 3)
     testing.expect_value(t, found_const, true)
     testing.expect_value(t, const_entry.source_span.start > package_entry.source_span.start, true)
 
-    proc_entry, found_proc := odinl.source_map_entry_for_generated_line(result.source_map[:], 5)
+    proc_entry, found_proc := kvist.source_map_entry_for_generated_line(result.source_map[:], 5)
     testing.expect_value(t, found_proc, true)
-    proc_line, _, _, _ := odinl.source_position(source, proc_entry.source_span.start)
+    proc_line, _, _, _ := kvist.source_position(source, proc_entry.source_span.start)
     testing.expect_value(t, proc_line, 5)
 
-    return_entry, found_return := odinl.source_map_entry_for_generated_line(result.source_map[:], 6)
+    return_entry, found_return := kvist.source_map_entry_for_generated_line(result.source_map[:], 6)
     testing.expect_value(t, found_return, true)
-    return_line, return_column, _, _ := odinl.source_position(source, return_entry.source_span.start)
+    return_line, return_column, _, _ := kvist.source_position(source, return_entry.source_span.start)
     testing.expect_value(t, return_line, 6)
     testing.expect_value(t, return_column, 3)
 }
@@ -572,7 +706,7 @@ compile_source_map_accounts_for_feature_line_and_multiline_raw :: proc(t: ^testi
   (let [lookup (new map[string]int {"one" 1})]
     (return)))`
 
-    result, err, ok := odinl.compile_source_with_map(source)
+    result, err, ok := kvist.compile_source_with_map(source)
     testing.expect_value(t, ok, true)
     if !ok {
         testing.expect_value(t, err.message, "")
@@ -582,50 +716,50 @@ compile_source_map_accounts_for_feature_line_and_multiline_raw :: proc(t: ^testi
     defer delete(result.source_map)
 
     testing.expect_value(t, len(result.source_map) >= 5, true)
-    package_entry, found_package := odinl.source_map_entry_for_generated_line(result.source_map[:], 2)
+    package_entry, found_package := kvist.source_map_entry_for_generated_line(result.source_map[:], 2)
     testing.expect_value(t, found_package, true)
     testing.expect_value(t, package_entry.source_span.start, 0)
 
-    raw_entry, found_raw := odinl.source_map_entry_for_generated_line(result.source_map[:], 4)
+    raw_entry, found_raw := kvist.source_map_entry_for_generated_line(result.source_map[:], 4)
     testing.expect_value(t, found_raw, true)
-    raw_line, _, _, _ := odinl.source_position(source, raw_entry.source_span.start)
+    raw_line, _, _, _ := kvist.source_position(source, raw_entry.source_span.start)
     testing.expect_value(t, raw_line, 3)
 
-    proc_entry, found_proc := odinl.source_map_entry_for_generated_line(result.source_map[:], 7)
+    proc_entry, found_proc := kvist.source_map_entry_for_generated_line(result.source_map[:], 7)
     testing.expect_value(t, found_proc, true)
-    proc_line, _, _, _ := odinl.source_position(source, proc_entry.source_span.start)
+    proc_line, _, _, _ := kvist.source_position(source, proc_entry.source_span.start)
     testing.expect_value(t, proc_line, 5)
 
-    binding_entry, found_binding := odinl.source_map_entry_for_generated_line(result.source_map[:], 8)
+    binding_entry, found_binding := kvist.source_map_entry_for_generated_line(result.source_map[:], 8)
     testing.expect_value(t, found_binding, true)
-    binding_line, binding_column, _, _ := odinl.source_position(source, binding_entry.source_span.start)
+    binding_line, binding_column, _, _ := kvist.source_position(source, binding_entry.source_span.start)
     testing.expect_value(t, binding_line, 6)
     testing.expect_value(t, binding_column > 0, true)
 }
 
 @(test)
 format_declaration_source_map :: proc(t: ^testing.T) {
-    entries := [?]odinl.Source_Map_Entry{
+    entries := [?]kvist.Source_Map_Entry{
         {
             generated_start_line = 1,
             generated_end_line = 3,
-            source_span = odinl.Span{start = 10, end = 20},
+            source_span = kvist.Span{start = 10, end = 20},
         },
         {
             generated_start_line = 2,
             generated_end_line = 2,
-            source_span = odinl.Span{start = 30, end = 35},
+            source_span = kvist.Span{start = 30, end = 35},
         },
         {
             generated_start_line = 2,
             generated_end_line = 2,
             generated_start_column = 8,
             generated_end_column = 12,
-            source_span = odinl.Span{start = 40, end = 45},
+            source_span = kvist.Span{start = 40, end = 45},
         },
     }
 
-    formatted := odinl.format_source_map(entries[:])
+    formatted := kvist.format_source_map(entries[:])
     defer delete(formatted)
 
     expected := `generated_start generated_end source_start source_end
@@ -635,19 +769,19 @@ format_declaration_source_map :: proc(t: ^testing.T) {
 `
     testing.expect_value(t, formatted, expected)
 
-    entry, found := odinl.source_map_entry_for_generated_line(entries[:], 2)
+    entry, found := kvist.source_map_entry_for_generated_line(entries[:], 2)
     testing.expect_value(t, found, true)
     testing.expect_value(t, entry.source_span.start, 30)
 
-    column_entry, column_found := odinl.source_map_entry_for_generated_location(entries[:], 2, 9)
+    column_entry, column_found := kvist.source_map_entry_for_generated_location(entries[:], 2, 9)
     testing.expect_value(t, column_found, true)
     testing.expect_value(t, column_entry.source_span.start, 40)
 
-    fallback_entry, fallback_found := odinl.source_map_entry_for_generated_location(entries[:], 2, 2)
+    fallback_entry, fallback_found := kvist.source_map_entry_for_generated_location(entries[:], 2, 2)
     testing.expect_value(t, fallback_found, true)
     testing.expect_value(t, fallback_entry.source_span.start, 30)
 
-    _, missing := odinl.source_map_entry_for_generated_line(entries[:], 4)
+    _, missing := kvist.source_map_entry_for_generated_line(entries[:], 4)
     testing.expect_value(t, missing, false)
 }
 
@@ -672,7 +806,7 @@ compile_const_and_enum_forms :: proc(t: ^testing.T) {
   :Unprocessable-Content 422
 })`
 
-    output, err, ok := odinl.compile_source(source)
+    output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
     if !ok {
         testing.expect_value(t, err.message, "")
@@ -719,7 +853,7 @@ compile_switch_with_implicit_branch_returns :: proc(t: ^testing.T) {
     .Post "POST"
     :else "OTHER"))`
 
-    output, err, ok := odinl.compile_source(source)
+    output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
     if !ok {
         testing.expect_value(t, err.message, "")
@@ -764,7 +898,7 @@ compile_switch_with_grouped_value_cases :: proc(t: ^testing.T) {
     [.Get .Head] true
     :else false))`
 
-    output, err, ok := odinl.compile_source(source)
+    output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
     if !ok {
         testing.expect_value(t, err.message, "")
@@ -805,7 +939,7 @@ compile_explicit_partial_switch :: proc(t: ^testing.T) {
   (#partial switch method
     .Get (return)))`
 
-    output, err, ok := odinl.compile_source(source)
+    output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
     if !ok {
         testing.expect_value(t, err.message, "")
@@ -843,7 +977,7 @@ compile_union_decl_and_constructor :: proc(t: ^testing.T) {
 (proc wrap-int [n: int] -> Value
   (Value {:i n}))`
 
-    output, err, ok := odinl.compile_source(source)
+    output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
     if !ok {
         testing.expect_value(t, err.message, "")
@@ -886,7 +1020,7 @@ compile_operator_forms :: proc(t: ^testing.T) {
 (proc missing-key [lookup: map[string]int, key: string] -> bool
   (not (in? lookup key)))`
 
-    output, err, ok := odinl.compile_source(source)
+    output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
     if !ok {
         testing.expect_value(t, err.message, "")
@@ -940,7 +1074,7 @@ compile_union_type_switch :: proc(t: ^testing.T) {
     string v
     :else "nil"))`
 
-    output, err, ok := odinl.compile_source(source)
+    output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
     if !ok {
         testing.expect_value(t, err.message, "")
@@ -979,7 +1113,7 @@ compile_cond_with_final_else :: proc(t: ^testing.T) {
     (== n 0) "zero"
     :else "positive"))`
 
-    output, err, ok := odinl.compile_source(source)
+    output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
     if !ok {
         testing.expect_value(t, err.message, "")
@@ -1026,7 +1160,7 @@ implicit_returns_only_apply_to_final_nested_blocks :: proc(t: ^testing.T) {
       (trace sum))
     sum))`
 
-    output, err, ok := odinl.compile_source(source)
+    output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
     if !ok {
         testing.expect_value(t, err.message, "")
@@ -1080,7 +1214,7 @@ compile_break_and_continue_forms :: proc(t: ^testing.T) {
         (break)))
     result))`
 
-    output, err, ok := odinl.compile_source(source)
+    output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
     if !ok {
         testing.expect_value(t, err.message, "")
@@ -1120,7 +1254,7 @@ compile_defer_forms :: proc(t: ^testing.T) {
       (fmt.println x))
     (return)))`
 
-    output, err, ok := odinl.compile_source(source)
+    output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
     if !ok {
         testing.expect_value(t, err.message, "")
@@ -1158,7 +1292,7 @@ compile_flat_multi_return_destructuring :: proc(t: ^testing.T) {
     (when (and ok still-ok)
       (return))))`
 
-    output, err, ok := odinl.compile_source(source)
+    output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
     if !ok {
         testing.expect_value(t, err.message, "")
@@ -1195,7 +1329,7 @@ compile_when_let_macro :: proc(t: ^testing.T) {
     (when (> value 40)
       (return))))`
 
-    output, err, ok := odinl.compile_source(source)
+    output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
     if !ok {
         testing.expect_value(t, err.message, "")
@@ -1233,7 +1367,7 @@ compile_if_let_macro :: proc(t: ^testing.T) {
     value
     0))`
 
-    output, err, ok := odinl.compile_source(source)
+    output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
     if !ok {
         testing.expect_value(t, err.message, "")
@@ -1273,7 +1407,7 @@ compile_if_ok_macro :: proc(t: ^testing.T) {
     value
     0))`
 
-    output, err, ok := odinl.compile_source(source)
+    output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
     if !ok {
         testing.expect_value(t, err.message, "")
@@ -1301,7 +1435,7 @@ compile_when_ok_macro :: proc(t: ^testing.T) {
       (set! total value))
     total))`
 
-    output, err, ok := odinl.compile_source(source)
+    output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
     if !ok {
         testing.expect_value(t, err.message, "")
@@ -1334,7 +1468,7 @@ compile_file_dev_helpers :: proc(t: ^testing.T) {
         (defer (delete data))
         (len data)))))`
 
-    output, err, ok := odinl.compile_source(source)
+    output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
     if !ok {
         testing.expect_value(t, err.message, "")
@@ -1378,7 +1512,7 @@ compile_json_interop_is_explicit :: proc(t: ^testing.T) {
         (let [unmarshal-err (json.unmarshal data (& user))]
           (return user (== unmarshal-err nil)))))))`
 
-    output, err, ok := odinl.compile_source(source)
+    output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
     if !ok {
         testing.expect_value(t, err.message, "")
@@ -1393,8 +1527,8 @@ compile_json_interop_is_explicit :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "data, read_err := os.read_entire_file(path, context.allocator)"), true)
     testing.expect_value(t, strings.contains(output, "unmarshal_err := json.unmarshal(data, &user)"), true)
     testing.expect_value(t, strings.contains(output, "defer delete(data)"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_save_json"), false)
-    testing.expect_value(t, strings.contains(output, "odinl_load_json"), false)
+    testing.expect_value(t, strings.contains(output, "kvist_save_json"), false)
+    testing.expect_value(t, strings.contains(output, "kvist_load_json"), false)
 }
 
 @(test)
@@ -1408,7 +1542,7 @@ compile_tap_helper :: proc(t: ^testing.T) {
     (defer (delete owned))
     (fmt.println answer)))`
 
-    output, err, ok := odinl.compile_source(source)
+    output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
     if !ok {
         testing.expect_value(t, err.message, "")
@@ -1416,10 +1550,10 @@ compile_tap_helper :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    testing.expect_value(t, strings.contains(output, "answer := odinl_tap_labeled(\"answer\", 42)"), true)
-    testing.expect_value(t, strings.contains(output, "owned := odinl_tap_labeled(\"owned\", [dynamic]int{1, 2, 3})"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_tap :: proc(value: $T) -> T"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_tap_labeled :: proc(label: string, value: $T) -> T"), true)
+    testing.expect_value(t, strings.contains(output, "answer := kvist_tap_labeled(\"answer\", 42)"), true)
+    testing.expect_value(t, strings.contains(output, "owned := kvist_tap_labeled(\"owned\", [dynamic]int{1, 2, 3})"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_tap :: proc(value: $T) -> T"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_tap_labeled :: proc(label: string, value: $T) -> T"), true)
     testing.expect_value(t, strings.contains(output, "fmt.print(label)"), true)
     testing.expect_value(t, strings.contains(output, "fmt.println(value)"), true)
 }
@@ -1454,7 +1588,7 @@ compile_tap_thread_steps :: proc(t: ^testing.T) {
     (defer (delete mapped))
     (fmt.println answer total)))`
 
-    output, err, ok := odinl.compile_source(source)
+    output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
     if !ok {
         testing.expect_value(t, err.message, "")
@@ -1462,13 +1596,13 @@ compile_tap_thread_steps :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    testing.expect_value(t, strings.contains(output, "answer := odinl_tap_labeled(\"answer\", inc(41))"), true)
-    testing.expect_value(t, strings.contains(output, "mapped := odinl_tap_labeled(\"mapped\", odinl_map(inc, (xs)[:]))"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_thread_1 := odinl_map(inc, (xs)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "defer delete(odinl_thread_1)"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_thread_2 := odinl_filter(even_p, (odinl_tap_labeled(\"mapped\", odinl_thread_1))[:])"), true)
-    testing.expect_value(t, strings.contains(output, "defer delete(odinl_thread_2)"), true)
-    testing.expect_value(t, strings.contains(output, "total := odinl_reduce(add, 0, (odinl_thread_2)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "answer := kvist_tap_labeled(\"answer\", inc(41))"), true)
+    testing.expect_value(t, strings.contains(output, "mapped := kvist_tap_labeled(\"mapped\", kvist_map(inc, (xs)[:]))"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_thread_1 := kvist_map(inc, (xs)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "defer delete(kvist_thread_1)"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_thread_2 := kvist_filter(even_p, (kvist_tap_labeled(\"mapped\", kvist_thread_1))[:])"), true)
+    testing.expect_value(t, strings.contains(output, "defer delete(kvist_thread_2)"), true)
+    testing.expect_value(t, strings.contains(output, "total := kvist_reduce(add, 0, (kvist_thread_2)[:])"), true)
 }
 
 @(test)
@@ -1486,7 +1620,7 @@ compile_struct_field_destructuring :: proc(t: ^testing.T) {
         {:age} user]
     (return)))`
 
-    output, err, ok := odinl.compile_source(source)
+    output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
     if !ok {
         testing.expect_value(t, err.message, "")
@@ -1503,11 +1637,11 @@ User :: struct {
 
 main :: proc() {
     user := User{name = "Ada", age = 36}
-    odinl_destructure_1 := user
-    user_name := odinl_destructure_1.name
-    user_age := odinl_destructure_1.age
-    odinl_destructure_2 := user
-    age := odinl_destructure_2.age
+    kvist_destructure_1 := user
+    user_name := kvist_destructure_1.name
+    user_age := kvist_destructure_1.age
+    kvist_destructure_2 := user
+    age := kvist_destructure_2.age
     return
 }
 `
@@ -1525,7 +1659,7 @@ compile_with_allocator_scope :: proc(t: ^testing.T) {
       (into! buffer (new []int [1 2]))
       (return))))`
 
-    output, err, ok := odinl.compile_source(source)
+    output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
     if !ok {
         testing.expect_value(t, err.message, "")
@@ -1538,9 +1672,9 @@ compile_with_allocator_scope :: proc(t: ^testing.T) {
 main :: proc() {
     {
         allocator := context.temp_allocator
-        odinl_old_allocator_1 := context.allocator
+        kvist_old_allocator_1 := context.allocator
         context.allocator = allocator
-        defer context.allocator = odinl_old_allocator_1
+        defer context.allocator = kvist_old_allocator_1
         buffer := make([dynamic]int)
         defer delete(buffer)
         append(&(buffer), ..[]int{1, 2})
@@ -1563,7 +1697,7 @@ compile_with_temp_allocator_scope :: proc(t: ^testing.T) {
       (into! buffer (new []int [1 2]))
       (return))))`
 
-    output, err, ok := odinl.compile_source(source)
+    output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
     if !ok {
         testing.expect_value(t, err.message, "")
@@ -1577,12 +1711,12 @@ import runtime "base:runtime"
 
 main :: proc() {
     {
-        odinl_temp_scope_1 := runtime.default_temp_allocator_temp_begin()
-        defer runtime.default_temp_allocator_temp_end(odinl_temp_scope_1)
+        kvist_temp_scope_1 := runtime.default_temp_allocator_temp_begin()
+        defer runtime.default_temp_allocator_temp_end(kvist_temp_scope_1)
         allocator := context.temp_allocator
-        odinl_old_allocator_2 := context.allocator
+        kvist_old_allocator_2 := context.allocator
         context.allocator = allocator
-        defer context.allocator = odinl_old_allocator_2
+        defer context.allocator = kvist_old_allocator_2
         buffer := make([dynamic]int)
         defer delete(buffer)
         append(&(buffer), ..[]int{1, 2})
@@ -1611,7 +1745,7 @@ compile_with_delete_scope :: proc(t: ^testing.T) {
                 filtered (filter even? mapped)]
     (reduce add 0 filtered)))`
 
-    output, err, ok := odinl.compile_source(source)
+    output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
     if !ok {
         testing.expect_value(t, err.message, "")
@@ -1619,11 +1753,11 @@ compile_with_delete_scope :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    testing.expect_value(t, strings.contains(output, "mapped := odinl_map(inc, (xs)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "mapped := kvist_map(inc, (xs)[:])"), true)
     testing.expect_value(t, strings.contains(output, "defer delete(mapped)"), true)
-    testing.expect_value(t, strings.contains(output, "filtered := odinl_filter(even_p, (mapped)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "filtered := kvist_filter(even_p, (mapped)[:])"), true)
     testing.expect_value(t, strings.contains(output, "defer delete(filtered)"), true)
-    testing.expect_value(t, strings.contains(output, "return odinl_reduce(add, 0, (filtered)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "return kvist_reduce(add, 0, (filtered)[:])"), true)
 }
 
 @(test)
@@ -1634,7 +1768,7 @@ reject_returning_with_delete_binding :: proc(t: ^testing.T) {
   (with-delete [xs (new [dynamic]int [1 2])]
     xs))`
 
-    _, err, ok := odinl.compile_source(source)
+    _, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, false)
     defer delete(err.message)
     testing.expect_value(t, err.message, "with-delete binding cannot be returned; return it without with-delete or copy it before returning")
@@ -1652,7 +1786,7 @@ reject_returning_owned_result_from_with_temp_allocator :: proc(t: ^testing.T) {
   (with-temp-allocator [allocator]
     (map inc xs)))`
 
-    _, err, ok := odinl.compile_source(source)
+    _, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, false)
     defer delete(err.message)
     testing.expect_value(t, err.message, "owned value cannot escape with-temp-allocator; allocate it outside the temp scope or copy it before returning")
@@ -1668,7 +1802,7 @@ reject_returning_slurp_result_from_with_temp_allocator :: proc(t: ^testing.T) {
   (with-temp-allocator [allocator]
     (slurp path)))`
 
-    _, err, ok := odinl.compile_source(source)
+    _, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, false)
     defer delete(err.message)
     testing.expect_value(t, err.message, "owned value cannot escape with-temp-allocator; allocate it outside the temp scope or copy it before returning")
@@ -1676,7 +1810,7 @@ reject_returning_slurp_result_from_with_temp_allocator :: proc(t: ^testing.T) {
 
 @(test)
 macroexpand_with_allocator_scope :: proc(t: ^testing.T) {
-    output, err, ok := odinl.macroexpand_source(`(with-allocator [allocator context.temp_allocator]
+    output, err, ok := kvist.macroexpand_source(`(with-allocator [allocator context.temp_allocator]
   (let [buffer (make [dynamic]int)]
     (defer (delete buffer))
     (into! buffer (new []int [1 2]))))`)
@@ -1689,10 +1823,10 @@ macroexpand_with_allocator_scope :: proc(t: ^testing.T) {
 
     expected := `(do
   (let [allocator context.temp_allocator
-        odinl-old-allocator-1 context.allocator]
+        kvist-old-allocator-1 context.allocator]
     (set! context.allocator allocator)
     (defer (do
-      (set! context.allocator odinl-old-allocator-1)))
+      (set! context.allocator kvist-old-allocator-1)))
     (let [buffer (make [dynamic]int)] (defer (delete buffer)) (into! buffer (new []int [1 2])))))
 `
     testing.expect_value(t, output, expected)
@@ -1700,7 +1834,7 @@ macroexpand_with_allocator_scope :: proc(t: ^testing.T) {
 
 @(test)
 macroexpand_with_temp_allocator_scope :: proc(t: ^testing.T) {
-    output, err, ok := odinl.macroexpand_source(`(with-temp-allocator [allocator]
+    output, err, ok := kvist.macroexpand_source(`(with-temp-allocator [allocator]
   (let [buffer (make [dynamic]int)]
     (defer (delete buffer))
     (into! buffer (new []int [1 2]))))`)
@@ -1712,13 +1846,13 @@ macroexpand_with_temp_allocator_scope :: proc(t: ^testing.T) {
     defer delete(output)
 
     expected := `(do
-  (let [odinl-temp-scope-1 (runtime.default-temp-allocator-temp-begin)
+  (let [kvist-temp-scope-1 (runtime.default-temp-allocator-temp-begin)
         allocator context.temp-allocator
-        odinl-old-allocator-1 context.allocator]
+        kvist-old-allocator-1 context.allocator]
     (set! context.allocator allocator)
     (defer (do
-      (set! context.allocator odinl-old-allocator-1)
-      (runtime.default-temp-allocator-temp-end odinl-temp-scope-1)))
+      (set! context.allocator kvist-old-allocator-1)
+      (runtime.default-temp-allocator-temp-end kvist-temp-scope-1)))
     (let [buffer (make [dynamic]int)] (defer (delete buffer)) (into! buffer (new []int [1 2])))))
 `
     testing.expect_value(t, output, expected)
@@ -1726,7 +1860,7 @@ macroexpand_with_temp_allocator_scope :: proc(t: ^testing.T) {
 
 @(test)
 macroexpand_with_delete_scope :: proc(t: ^testing.T) {
-    output, err, ok := odinl.macroexpand_source(`(with-delete [xs (map inc users)]
+    output, err, ok := kvist.macroexpand_source(`(with-delete [xs (map inc users)]
   (count xs))`)
     testing.expect_value(t, ok, true)
     if !ok {
@@ -1745,7 +1879,7 @@ macroexpand_with_delete_scope :: proc(t: ^testing.T) {
 
 @(test)
 macroexpand_with_delete_multiple_bindings :: proc(t: ^testing.T) {
-    output, err, ok := odinl.macroexpand_source(`(with-delete [xs (map inc users) ys (filter even? xs)]
+    output, err, ok := kvist.macroexpand_source(`(with-delete [xs (map inc users) ys (filter even? xs)]
   (count ys))`)
     testing.expect_value(t, ok, true)
     if !ok {
@@ -1766,7 +1900,7 @@ macroexpand_with_delete_multiple_bindings :: proc(t: ^testing.T) {
 
 @(test)
 macroexpand_expands_nested_builtin_macro_body :: proc(t: ^testing.T) {
-    output, err, ok := odinl.macroexpand_source(`(with-allocator [allocator context.temp_allocator]
+    output, err, ok := kvist.macroexpand_source(`(with-allocator [allocator context.temp_allocator]
   (with-delete [xs (new [dynamic]int [1 2])]
     (count xs)))`)
     testing.expect_value(t, ok, true)
@@ -1778,10 +1912,10 @@ macroexpand_expands_nested_builtin_macro_body :: proc(t: ^testing.T) {
 
     expected := `(do
   (let [allocator context.temp_allocator
-        odinl-old-allocator-1 context.allocator]
+        kvist-old-allocator-1 context.allocator]
     (set! context.allocator allocator)
     (defer (do
-      (set! context.allocator odinl-old-allocator-1)))
+      (set! context.allocator kvist-old-allocator-1)))
     (do
       (let [xs (new [dynamic]int [1 2])]
         (defer (delete xs))
@@ -1792,7 +1926,7 @@ macroexpand_expands_nested_builtin_macro_body :: proc(t: ^testing.T) {
 
 @(test)
 macroexpand_recurses_through_ordinary_forms :: proc(t: ^testing.T) {
-    output, err, ok := odinl.macroexpand_source(`(let [n 1]
+    output, err, ok := kvist.macroexpand_source(`(let [n 1]
   (with-delete [xs (new [dynamic]int [1 2])]
     (count xs)))`)
     testing.expect_value(t, ok, true)
@@ -1812,7 +1946,7 @@ macroexpand_recurses_through_ordinary_forms :: proc(t: ^testing.T) {
 
 @(test)
 macroexpand_when_let :: proc(t: ^testing.T) {
-    output, err, ok := odinl.macroexpand_source(`(when-let [value found (query)]
+    output, err, ok := kvist.macroexpand_source(`(when-let [value found (query)]
   (fmt.println value))`)
     testing.expect_value(t, ok, true)
     if !ok {
@@ -1828,7 +1962,7 @@ macroexpand_when_let :: proc(t: ^testing.T) {
 
 @(test)
 macroexpand_if_let :: proc(t: ^testing.T) {
-    output, err, ok := odinl.macroexpand_source(`(if-let [value found (query)]
+    output, err, ok := kvist.macroexpand_source(`(if-let [value found (query)]
   value
   0)`)
     testing.expect_value(t, ok, true)
@@ -1845,7 +1979,7 @@ macroexpand_if_let :: proc(t: ^testing.T) {
 
 @(test)
 macroexpand_when_ok :: proc(t: ^testing.T) {
-    output, err, ok := odinl.macroexpand_source(`(when-ok [data err (read-text path)]
+    output, err, ok := kvist.macroexpand_source(`(when-ok [data err (read-text path)]
   (use data))`)
     testing.expect_value(t, ok, true)
     if !ok {
@@ -1861,7 +1995,7 @@ macroexpand_when_ok :: proc(t: ^testing.T) {
 
 @(test)
 macroexpand_if_ok :: proc(t: ^testing.T) {
-    output, err, ok := odinl.macroexpand_source(`(if-ok [data err (read-text path)]
+    output, err, ok := kvist.macroexpand_source(`(if-ok [data err (read-text path)]
   (len data)
   0)`)
     testing.expect_value(t, ok, true)
@@ -1878,25 +2012,25 @@ macroexpand_if_ok :: proc(t: ^testing.T) {
 
 @(test)
 macroexpand_rejects_binding_macro_shapes :: proc(t: ^testing.T) {
-    _, err_if_let, ok_if_let := odinl.macroexpand_source(`(if-let [value found (query)]
+    _, err_if_let, ok_if_let := kvist.macroexpand_source(`(if-let [value found (query)]
   value)`)
     testing.expect_value(t, ok_if_let, false)
     defer delete(err_if_let.message)
     testing.expect_value(t, err_if_let.message, "if-let expects [value bool expr], then, and else")
 
-    _, err_when_let, ok_when_let := odinl.macroexpand_source(`(when-let [value 1 (query)]
+    _, err_when_let, ok_when_let := kvist.macroexpand_source(`(when-let [value 1 (query)]
   value)`)
     testing.expect_value(t, ok_when_let, false)
     defer delete(err_when_let.message)
     testing.expect_value(t, err_when_let.message, "when-let expects [value bool expr] binding")
 
-    _, err_when_ok, ok_when_ok := odinl.macroexpand_source(`(when-ok [data (read-text path)]
+    _, err_when_ok, ok_when_ok := kvist.macroexpand_source(`(when-ok [data (read-text path)]
   data)`)
     testing.expect_value(t, ok_when_ok, false)
     defer delete(err_when_ok.message)
     testing.expect_value(t, err_when_ok.message, "when-ok expects [value err expr] binding")
 
-    _, err_if_ok, ok_if_ok := odinl.macroexpand_source(`(if-ok [data err (read-text path)]
+    _, err_if_ok, ok_if_ok := kvist.macroexpand_source(`(if-ok [data err (read-text path)]
   data)`)
     testing.expect_value(t, ok_if_ok, false)
     defer delete(err_if_ok.message)
@@ -1907,7 +2041,7 @@ macroexpand_rejects_binding_macro_shapes :: proc(t: ^testing.T) {
 macroexpand_source_map_marks_generated_lines :: proc(t: ^testing.T) {
     source := `(with-delete [xs (map inc users) ys (filter even? xs)]
   (count ys))`
-    result, err, ok := odinl.macroexpand_source_with_map(source)
+    result, err, ok := kvist.macroexpand_source_with_map(source)
     testing.expect_value(t, ok, true)
     if !ok {
         testing.expect_value(t, err.message, "")
@@ -1922,15 +2056,15 @@ macroexpand_source_map_marks_generated_lines :: proc(t: ^testing.T) {
     ys_value_start := strings.index(source, "(filter even? xs)")
     body_start := strings.index(source, "(count ys)")
 
-    xs_entry, xs_found := odinl.source_map_entry_for_generated_line(result.source_map[:], 2)
+    xs_entry, xs_found := kvist.source_map_entry_for_generated_line(result.source_map[:], 2)
     testing.expect_value(t, xs_found, true)
     testing.expect_value(t, xs_entry.source_span.start, xs_value_start)
 
-    ys_entry, ys_found := odinl.source_map_entry_for_generated_line(result.source_map[:], 3)
+    ys_entry, ys_found := kvist.source_map_entry_for_generated_line(result.source_map[:], 3)
     testing.expect_value(t, ys_found, true)
     testing.expect_value(t, ys_entry.source_span.start, ys_value_start)
 
-    body_entry, body_found := odinl.source_map_entry_for_generated_line(result.source_map[:], 6)
+    body_entry, body_found := kvist.source_map_entry_for_generated_line(result.source_map[:], 6)
     testing.expect_value(t, body_found, true)
     testing.expect_value(t, body_entry.source_span.start, body_start)
 }
@@ -1948,7 +2082,7 @@ compile_proc_types_and_literals :: proc(t: ^testing.T) {
                    41)]
     (return)))`
 
-    output, err, ok := odinl.compile_source(source)
+    output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
     if !ok {
         testing.expect_value(t, err.message, "")
@@ -2002,7 +2136,7 @@ compile_core_higher_order_helpers_and_slice_exprs :: proc(t: ^testing.T) {
     (defer (delete evens))
     (return)))`
 
-    output, err, ok := odinl.compile_source(source)
+    output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
     if !ok {
         testing.expect_value(t, err.message, "")
@@ -2026,21 +2160,21 @@ add :: proc(acc: int, x: int) -> int {
 
 main :: proc() {
     xs := []int{1, 2, 3, 4}
-    mapped := odinl_map(inc, (xs)[:])
+    mapped := kvist_map(inc, (xs)[:])
     tail := (mapped)[1:]
-    evens := odinl_filter(even_p, (mapped)[:])
-    odinl_thread_1 := odinl_map(inc, (xs)[:])
-    defer delete(odinl_thread_1)
-    odinl_thread_2 := odinl_filter(even_p, (odinl_thread_1)[:])
-    defer delete(odinl_thread_2)
-    total := odinl_reduce(add, 0, (odinl_thread_2)[:])
+    evens := kvist_filter(even_p, (mapped)[:])
+    kvist_thread_1 := kvist_map(inc, (xs)[:])
+    defer delete(kvist_thread_1)
+    kvist_thread_2 := kvist_filter(even_p, (kvist_thread_1)[:])
+    defer delete(kvist_thread_2)
+    total := kvist_reduce(add, 0, (kvist_thread_2)[:])
     middle := (mapped)[0:1]
     defer delete(mapped)
     defer delete(evens)
     return
 }
 
-odinl_map :: proc(f: proc(x: $T) -> $U, xs: []T) -> [dynamic]U {
+kvist_map :: proc(f: proc(x: $T) -> $U, xs: []T) -> [dynamic]U {
     out := make([dynamic]U, 0, len(xs))
     for x in xs {
         append(&out, f(x))
@@ -2048,7 +2182,7 @@ odinl_map :: proc(f: proc(x: $T) -> $U, xs: []T) -> [dynamic]U {
     return out
 }
 
-odinl_filter :: proc(pred: proc(x: $T) -> bool, xs: []T) -> [dynamic]T {
+kvist_filter :: proc(pred: proc(x: $T) -> bool, xs: []T) -> [dynamic]T {
     out := make([dynamic]T, 0, len(xs))
     for x in xs {
         if pred(x) {
@@ -2058,7 +2192,7 @@ odinl_filter :: proc(pred: proc(x: $T) -> bool, xs: []T) -> [dynamic]T {
     return out
 }
 
-odinl_reduce :: proc(f: proc(acc: $U, x: $T) -> U, init: U, xs: []T) -> U {
+kvist_reduce :: proc(f: proc(acc: $U, x: $T) -> U, init: U, xs: []T) -> U {
     acc := init
     for x in xs {
         acc = f(acc, x)
@@ -2089,7 +2223,7 @@ compile_sequence_trim_helpers_as_slice_views :: proc(t: ^testing.T) {
                             (count))]
     (return)))`
 
-    output, err, ok := odinl.compile_source(source)
+    output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
     if !ok {
         testing.expect_value(t, err.message, "")
@@ -2097,22 +2231,22 @@ compile_sequence_trim_helpers_as_slice_views :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    testing.expect_value(t, strings.contains(output, "prefix := odinl_take(2, (xs)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "suffix := odinl_drop(1, (xs)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "without_last := odinl_drop_last(1, (xs)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "without_two := odinl_drop_last(2, (xs)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "small_prefix := odinl_take_while(keep_p, (xs)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "large_suffix := odinl_drop_while(keep_p, (xs)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "threaded_count := len((odinl_drop_last(1, (xs)[:]))[:])"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_take :: proc(n: int, xs: []$T) -> []T"), true)
+    testing.expect_value(t, strings.contains(output, "prefix := kvist_take(2, (xs)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "suffix := kvist_drop(1, (xs)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "without_last := kvist_drop_last(1, (xs)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "without_two := kvist_drop_last(2, (xs)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "small_prefix := kvist_take_while(keep_p, (xs)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "large_suffix := kvist_drop_while(keep_p, (xs)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "threaded_count := len((kvist_drop_last(1, (xs)[:]))[:])"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_take :: proc(n: int, xs: []$T) -> []T"), true)
     testing.expect_value(t, strings.contains(output, "return xs[:limit]"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_drop :: proc(n: int, xs: []$T) -> []T"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_drop :: proc(n: int, xs: []$T) -> []T"), true)
     testing.expect_value(t, strings.contains(output, "return xs[start:]"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_drop_last :: proc(n: int, xs: []$T) -> []T"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_drop_last :: proc(n: int, xs: []$T) -> []T"), true)
     testing.expect_value(t, strings.contains(output, "return xs[:end]"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_take_while :: proc(pred: proc(x: $T) -> bool, xs: []T) -> []T"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_take_while :: proc(pred: proc(x: $T) -> bool, xs: []T) -> []T"), true)
     testing.expect_value(t, strings.contains(output, "return xs[:i]"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_drop_while :: proc(pred: proc(x: $T) -> bool, xs: []T) -> []T"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_drop_while :: proc(pred: proc(x: $T) -> bool, xs: []T) -> []T"), true)
     testing.expect_value(t, strings.contains(output, "return xs[i:]"), true)
 }
 
@@ -2135,7 +2269,7 @@ compile_threaded_let_binding_keeps_owned_intermediates_alive :: proc(t: ^testing
                           (take 1))]
     (return)))`
 
-    output, err, ok := odinl.compile_source(source)
+    output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
     if !ok {
         testing.expect_value(t, err.message, "")
@@ -2143,11 +2277,11 @@ compile_threaded_let_binding_keeps_owned_intermediates_alive :: proc(t: ^testing
     }
     defer delete(output)
 
-    testing.expect_value(t, strings.contains(output, "odinl_thread_1 := odinl_filter_field_active((users)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "defer delete(odinl_thread_1)"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_thread_2 := odinl_map_field_name(type_of(((odinl_thread_1)[:])[0].name), (odinl_thread_1)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "defer delete(odinl_thread_2)"), true)
-    testing.expect_value(t, strings.contains(output, "active_names := odinl_take(1, (odinl_thread_2)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_thread_1 := kvist_filter_field_active((users)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "defer delete(kvist_thread_1)"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_thread_2 := kvist_map_field_name(type_of(((kvist_thread_1)[:])[0].name), (kvist_thread_1)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "defer delete(kvist_thread_2)"), true)
+    testing.expect_value(t, strings.contains(output, "active_names := kvist_take(1, (kvist_thread_2)[:])"), true)
 }
 
 @(test)
@@ -2166,10 +2300,10 @@ reject_threaded_return_with_allocating_intermediate :: proc(t: ^testing.T) {
        (filter even?)
        (take 1)))`
 
-    _, err, ok := odinl.compile_source(source)
+    _, err, ok := kvist.compile_source(source)
     defer delete(err.message)
     testing.expect_value(t, ok, false)
-    testing.expect_value(t, err.message, "threaded return has an allocating intermediate; bind the pipeline with let so OdinL can emit cleanup")
+    testing.expect_value(t, err.message, "threaded return has an allocating intermediate; bind the pipeline with let so Kvist can emit cleanup")
 }
 
 @(test)
@@ -2188,7 +2322,7 @@ reject_returning_threaded_view_of_owned_intermediate :: proc(t: ^testing.T) {
                           (take 1))]
     active-names))`
 
-    _, err, ok := odinl.compile_source(source)
+    _, err, ok := kvist.compile_source(source)
     defer delete(err.message)
     testing.expect_value(t, ok, false)
     testing.expect_value(t, err.message, "cannot return a threaded slice view that borrows from an owned intermediate; return an owned result or keep the pipeline local")
@@ -2275,7 +2409,7 @@ compile_additional_sequence_helpers :: proc(t: ^testing.T) {
     (into! mutable ys)
     (return)))`
 
-    output, err, ok := odinl.compile_source(source)
+    output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
     if !ok {
         testing.expect_value(t, err.message, "")
@@ -2283,64 +2417,64 @@ compile_additional_sequence_helpers :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    testing.expect_value(t, strings.contains(output, "without_evens := odinl_remove(even_p, (xs)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "indexed := odinl_map_indexed(add_index, (xs)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "kept := odinl_keep(keep_even, (xs)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "flattened := odinl_mapcat(pair, (xs)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "joined := odinl_concat((without_evens)[:], (ys)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "copied := odinl_into([dynamic]int, (xs)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "interposed := odinl_interpose(0, (xs)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "interleaved := odinl_interleave((xs)[:], (ys)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "reversed := odinl_reverse((joined)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "shuffled := odinl_shuffle(pick_first, (joined)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "sorted := odinl_sort((joined)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "descending := odinl_sort_by_callback_neg((joined)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "import odinl_slice \"core:slice\""), true)
-    testing.expect_value(t, strings.contains(output, "sampled := odinl_take_nth(2, (joined)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_thread_1 := odinl_mapcat(pair, (xs)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "defer delete(odinl_thread_1)"), true)
-    testing.expect_value(t, strings.contains(output, "threaded_flat := odinl_filter(even_p, (odinl_thread_1)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_thread_2 := odinl_sort((xs)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "defer delete(odinl_thread_2)"), true)
-    testing.expect_value(t, strings.contains(output, "threaded_sorted := odinl_filter(even_p, (odinl_thread_2)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_thread_3 := odinl_take_nth(2, (xs)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "defer delete(odinl_thread_3)"), true)
-    testing.expect_value(t, strings.contains(output, "threaded_sample := odinl_map(neg, (odinl_thread_3)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_reverse_in_place((xs)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_sort_in_place((xs)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_sort_by_in_place_callback_neg((xs)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_shuffle_in_place(pick_first, (xs)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_map_in_place(neg, (mutable)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_map_indexed_in_place(add_index, (mutable)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_filter_in_place(even_p, &(mutable))"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_remove_in_place(even_p, &(mutable))"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_keep_in_place(keep_even, &(mutable))"), true)
+    testing.expect_value(t, strings.contains(output, "without_evens := kvist_remove(even_p, (xs)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "indexed := kvist_map_indexed(add_index, (xs)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "kept := kvist_keep(keep_even, (xs)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "flattened := kvist_mapcat(pair, (xs)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "joined := kvist_concat((without_evens)[:], (ys)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "copied := kvist_into([dynamic]int, (xs)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "interposed := kvist_interpose(0, (xs)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "interleaved := kvist_interleave((xs)[:], (ys)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "reversed := kvist_reverse((joined)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "shuffled := kvist_shuffle(pick_first, (joined)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "sorted := kvist_sort((joined)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "descending := kvist_sort_by_callback_neg((joined)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "import kvist_slice \"core:slice\""), true)
+    testing.expect_value(t, strings.contains(output, "sampled := kvist_take_nth(2, (joined)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_thread_1 := kvist_mapcat(pair, (xs)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "defer delete(kvist_thread_1)"), true)
+    testing.expect_value(t, strings.contains(output, "threaded_flat := kvist_filter(even_p, (kvist_thread_1)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_thread_2 := kvist_sort((xs)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "defer delete(kvist_thread_2)"), true)
+    testing.expect_value(t, strings.contains(output, "threaded_sorted := kvist_filter(even_p, (kvist_thread_2)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_thread_3 := kvist_take_nth(2, (xs)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "defer delete(kvist_thread_3)"), true)
+    testing.expect_value(t, strings.contains(output, "threaded_sample := kvist_map(neg, (kvist_thread_3)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_reverse_in_place((xs)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_sort_in_place((xs)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_sort_by_in_place_callback_neg((xs)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_shuffle_in_place(pick_first, (xs)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_map_in_place(neg, (mutable)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_map_indexed_in_place(add_index, (mutable)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_filter_in_place(even_p, &(mutable))"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_remove_in_place(even_p, &(mutable))"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_keep_in_place(keep_even, &(mutable))"), true)
     testing.expect_value(t, strings.contains(output, "append(&(mutable), ..(ys)[:])"), true)
     testing.expect_value(t, strings.contains(output, "tail_last := ((joined)[:])[len((joined)[:])-1]"), true)
-    testing.expect_value(t, strings.contains(output, "no_items_p := len((odinl_drop(3, (xs)[:]))[:]) == 0"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_remove :: proc(pred: proc(x: $T) -> bool, xs: []T) -> [dynamic]T"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_map_indexed :: proc(f: proc(i: int, x: $T) -> $U, xs: []T) -> [dynamic]U"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_keep :: proc(f: proc(x: $T) -> ($U, bool), xs: []T) -> [dynamic]U"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_mapcat :: proc(f: proc(x: $T) -> []$U, xs: []T) -> [dynamic]U"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_into :: proc($Out: typeid, xs: []$T) -> Out"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_interpose :: proc(sep: $T, xs: []T) -> [dynamic]T"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_interleave :: proc(xs, ys: []$T) -> [dynamic]T"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_shuffle :: proc(pick: proc(n: int) -> int, xs: []$T) -> [dynamic]T"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_sort :: proc(xs: []$T) -> [dynamic]T"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_slice.sort(out[:])"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_sort_by_callback_neg :: proc(xs: []$T) -> [dynamic]T"), true)
+    testing.expect_value(t, strings.contains(output, "no_items_p := len((kvist_drop(3, (xs)[:]))[:]) == 0"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_remove :: proc(pred: proc(x: $T) -> bool, xs: []T) -> [dynamic]T"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_map_indexed :: proc(f: proc(i: int, x: $T) -> $U, xs: []T) -> [dynamic]U"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_keep :: proc(f: proc(x: $T) -> ($U, bool), xs: []T) -> [dynamic]U"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_mapcat :: proc(f: proc(x: $T) -> []$U, xs: []T) -> [dynamic]U"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_into :: proc($Out: typeid, xs: []$T) -> Out"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_interpose :: proc(sep: $T, xs: []T) -> [dynamic]T"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_interleave :: proc(xs, ys: []$T) -> [dynamic]T"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_shuffle :: proc(pick: proc(n: int) -> int, xs: []$T) -> [dynamic]T"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_sort :: proc(xs: []$T) -> [dynamic]T"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_slice.sort(out[:])"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_sort_by_callback_neg :: proc(xs: []$T) -> [dynamic]T"), true)
     testing.expect_value(t, strings.contains(output, "return neg(a) < neg(b)"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_take_nth :: proc(n: int, xs: []$T) -> [dynamic]T"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_reverse_in_place :: proc(xs: []$T)"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_shuffle_in_place :: proc(pick: proc(n: int) -> int, xs: []$T)"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_sort_in_place :: proc(xs: []$T)"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_slice.sort(xs)"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_sort_by_in_place_callback_neg :: proc(xs: []$T)"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_map_in_place :: proc(f: proc(x: $T) -> T, xs: []T)"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_map_indexed_in_place :: proc(f: proc(i: int, x: $T) -> T, xs: []T)"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_filter_in_place :: proc(pred: proc(x: $T) -> bool, xs: ^[dynamic]T)"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_remove_in_place :: proc(pred: proc(x: $T) -> bool, xs: ^[dynamic]T)"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_keep_in_place :: proc(f: proc(x: $T) -> (T, bool), xs: ^[dynamic]T)"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_take_nth :: proc(n: int, xs: []$T) -> [dynamic]T"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_reverse_in_place :: proc(xs: []$T)"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_shuffle_in_place :: proc(pick: proc(n: int) -> int, xs: []$T)"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_sort_in_place :: proc(xs: []$T)"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_slice.sort(xs)"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_sort_by_in_place_callback_neg :: proc(xs: []$T)"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_map_in_place :: proc(f: proc(x: $T) -> T, xs: []T)"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_map_indexed_in_place :: proc(f: proc(i: int, x: $T) -> T, xs: []T)"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_filter_in_place :: proc(pred: proc(x: $T) -> bool, xs: ^[dynamic]T)"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_remove_in_place :: proc(pred: proc(x: $T) -> bool, xs: ^[dynamic]T)"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_keep_in_place :: proc(f: proc(x: $T) -> (T, bool), xs: ^[dynamic]T)"), true)
 }
 
 @(test)
@@ -2385,7 +2519,7 @@ compile_chunking_and_zipmap_sequence_helpers :: proc(t: ^testing.T) {
     (defer (delete threaded))
     (return)))`
 
-    output, err, ok := odinl.compile_source(source)
+    output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
     if !ok {
         testing.expect_value(t, err.message, "")
@@ -2393,29 +2527,29 @@ compile_chunking_and_zipmap_sequence_helpers :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    testing.expect_value(t, strings.contains(output, "front, back := odinl_split_at(2, (xs)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "chunks := odinl_partition(2, (xs)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "chunks_all := odinl_partition_all(3, (xs)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "by_run := odinl_partition_by(identity, (xs)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "by_name := odinl_zipmap((names)[:], (ages)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "by_parity := odinl_group_by(parity, (xs)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "unique := odinl_distinct((xs)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "distinct_parity := odinl_distinct_by(parity, (xs)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "front, back := kvist_split_at(2, (xs)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "chunks := kvist_partition(2, (xs)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "chunks_all := kvist_partition_all(3, (xs)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "by_run := kvist_partition_by(identity, (xs)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "by_name := kvist_zipmap((names)[:], (ages)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "by_parity := kvist_group_by(parity, (xs)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "unique := kvist_distinct((xs)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "distinct_parity := kvist_distinct_by(parity, (xs)[:])"), true)
     testing.expect_value(t, strings.contains(output, "for _, group in by_parity {"), true)
     testing.expect_value(t, strings.contains(output, "delete(group)"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_thread_1 := odinl_remove(even_p, (xs)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "defer delete(odinl_thread_1)"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_thread_2 := odinl_distinct((odinl_thread_1)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "defer delete(odinl_thread_2)"), true)
-    testing.expect_value(t, strings.contains(output, "threaded := odinl_partition_by(identity, (odinl_thread_2)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_split_at :: proc(n: int, xs: []$T) -> (left: []T, right: []T)"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_partition :: proc(n: int, xs: []$T) -> [dynamic][]T"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_partition_all :: proc(n: int, xs: []$T) -> [dynamic][]T"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_partition_by :: proc(f: proc(x: $T) -> $K, xs: []T) -> [dynamic][]T"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_zipmap :: proc(keys: []$K, values: []$V) -> map[K]V"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_group_by :: proc(f: proc(x: $T) -> $K, xs: []T) -> map[K][dynamic]T"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_distinct :: proc(xs: []$T) -> [dynamic]T"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_distinct_by :: proc(f: proc(x: $T) -> $K, xs: []T) -> [dynamic]T"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_thread_1 := kvist_remove(even_p, (xs)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "defer delete(kvist_thread_1)"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_thread_2 := kvist_distinct((kvist_thread_1)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "defer delete(kvist_thread_2)"), true)
+    testing.expect_value(t, strings.contains(output, "threaded := kvist_partition_by(identity, (kvist_thread_2)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_split_at :: proc(n: int, xs: []$T) -> (left: []T, right: []T)"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_partition :: proc(n: int, xs: []$T) -> [dynamic][]T"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_partition_all :: proc(n: int, xs: []$T) -> [dynamic][]T"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_partition_by :: proc(f: proc(x: $T) -> $K, xs: []T) -> [dynamic][]T"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_zipmap :: proc(keys: []$K, values: []$V) -> map[K]V"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_group_by :: proc(f: proc(x: $T) -> $K, xs: []T) -> map[K][dynamic]T"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_distinct :: proc(xs: []$T) -> [dynamic]T"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_distinct_by :: proc(f: proc(x: $T) -> $K, xs: []T) -> [dynamic]T"), true)
 }
 
 @(test)
@@ -2464,7 +2598,7 @@ compile_map_constructing_sequence_helpers :: proc(t: ^testing.T) {
     (merge! base overrides)
     (return)))`
 
-    output, err, ok := odinl.compile_source(source)
+    output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
     if !ok {
         testing.expect_value(t, err.message, "")
@@ -2472,28 +2606,28 @@ compile_map_constructing_sequence_helpers :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    testing.expect_value(t, strings.contains(output, "by_value := odinl_index_by(identity, (xs)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "by_group := odinl_group_by(identity, (xs)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "by_count := odinl_count_by(identity, (xs)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "by_sum := odinl_sum_by(identity, amount, (xs)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "threaded := odinl_count_by(identity, (xs)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "counts := odinl_frequencies((xs)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "merged := odinl_merge(base, overrides)"), true)
-    testing.expect_value(t, strings.contains(output, "key_list := odinl_keys(base)"), true)
-    testing.expect_value(t, strings.contains(output, "value_list := odinl_vals(overrides)"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_thread_1 := odinl_keys(merged)"), true)
-    testing.expect_value(t, strings.contains(output, "defer delete(odinl_thread_1)"), true)
-    testing.expect_value(t, strings.contains(output, "key_count := len((odinl_thread_1)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_merge_in_place(&(base), overrides)"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_index_by :: proc(f: proc(x: $T) -> $K, xs: []T) -> map[K]T"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_group_by :: proc(f: proc(x: $T) -> $K, xs: []T) -> map[K][dynamic]T"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_count_by :: proc(f: proc(x: $T) -> $K, xs: []T) -> map[K]int"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_sum_by :: proc(key_f: proc(x: $T) -> $K, value_f: proc(x: T) -> $V, xs: []T) -> map[K]V"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_frequencies :: proc(xs: []$T) -> map[T]int"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_merge :: proc(lhs, rhs: map[$K]$V) -> map[K]V"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_merge_in_place :: proc(target: ^map[$K]$V, source: map[K]V)"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_keys :: proc(m: map[$K]$V) -> [dynamic]K"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_vals :: proc(m: map[$K]$V) -> [dynamic]V"), true)
+    testing.expect_value(t, strings.contains(output, "by_value := kvist_index_by(identity, (xs)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "by_group := kvist_group_by(identity, (xs)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "by_count := kvist_count_by(identity, (xs)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "by_sum := kvist_sum_by(identity, amount, (xs)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "threaded := kvist_count_by(identity, (xs)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "counts := kvist_frequencies((xs)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "merged := kvist_merge(base, overrides)"), true)
+    testing.expect_value(t, strings.contains(output, "key_list := kvist_keys(base)"), true)
+    testing.expect_value(t, strings.contains(output, "value_list := kvist_vals(overrides)"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_thread_1 := kvist_keys(merged)"), true)
+    testing.expect_value(t, strings.contains(output, "defer delete(kvist_thread_1)"), true)
+    testing.expect_value(t, strings.contains(output, "key_count := len((kvist_thread_1)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_merge_in_place(&(base), overrides)"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_index_by :: proc(f: proc(x: $T) -> $K, xs: []T) -> map[K]T"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_group_by :: proc(f: proc(x: $T) -> $K, xs: []T) -> map[K][dynamic]T"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_count_by :: proc(f: proc(x: $T) -> $K, xs: []T) -> map[K]int"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_sum_by :: proc(key_f: proc(x: $T) -> $K, value_f: proc(x: T) -> $V, xs: []T) -> map[K]V"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_frequencies :: proc(xs: []$T) -> map[T]int"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_merge :: proc(lhs, rhs: map[$K]$V) -> map[K]V"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_merge_in_place :: proc(target: ^map[$K]$V, source: map[K]V)"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_keys :: proc(m: map[$K]$V) -> [dynamic]K"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_vals :: proc(m: map[$K]$V) -> [dynamic]V"), true)
 }
 
 @(test)
@@ -2519,7 +2653,7 @@ compile_bounded_sequence_producers :: proc(t: ^testing.T) {
     (defer (delete cycled))
     (return)))`
 
-    output, err, ok := odinl.compile_source(source)
+    output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
     if !ok {
         testing.expect_value(t, err.message, "")
@@ -2527,16 +2661,16 @@ compile_bounded_sequence_producers :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    testing.expect_value(t, strings.contains(output, "xs := odinl_range(1, 5, 1)"), true)
-    testing.expect_value(t, strings.contains(output, "ys := odinl_repeat(3, \"x\")"), true)
-    testing.expect_value(t, strings.contains(output, "zs := odinl_repeatedly(2, next)"), true)
-    testing.expect_value(t, strings.contains(output, "powers := odinl_iterate(4, double, 1)"), true)
-    testing.expect_value(t, strings.contains(output, "cycled := odinl_cycle(5, []int{1, 2})"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_range :: proc(start, end, step: int) -> [dynamic]int"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_repeat :: proc(n: int, value: $T) -> [dynamic]T"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_repeatedly :: proc(n: int, f: proc() -> $T) -> [dynamic]T"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_iterate :: proc(n: int, f: proc(x: $T) -> T, init: T) -> [dynamic]T"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_cycle :: proc(n: int, xs: []$T) -> [dynamic]T"), true)
+    testing.expect_value(t, strings.contains(output, "xs := kvist_range(1, 5, 1)"), true)
+    testing.expect_value(t, strings.contains(output, "ys := kvist_repeat(3, \"x\")"), true)
+    testing.expect_value(t, strings.contains(output, "zs := kvist_repeatedly(2, next)"), true)
+    testing.expect_value(t, strings.contains(output, "powers := kvist_iterate(4, double, 1)"), true)
+    testing.expect_value(t, strings.contains(output, "cycled := kvist_cycle(5, []int{1, 2})"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_range :: proc(start, end, step: int) -> [dynamic]int"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_repeat :: proc(n: int, value: $T) -> [dynamic]T"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_repeatedly :: proc(n: int, f: proc() -> $T) -> [dynamic]T"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_iterate :: proc(n: int, f: proc(x: $T) -> T, init: T) -> [dynamic]T"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_cycle :: proc(n: int, xs: []$T) -> [dynamic]T"), true)
 }
 
 @(test)
@@ -2576,7 +2710,7 @@ compile_keyword_callbacks_for_sequence_helpers :: proc(t: ^testing.T) {
     (remove! :verified mutated)
     (return)))`
 
-    output, err, ok := odinl.compile_source(source)
+    output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
     if !ok {
         testing.expect_value(t, err.message, "")
@@ -2584,40 +2718,40 @@ compile_keyword_callbacks_for_sequence_helpers :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    testing.expect_value(t, strings.contains(output, "names := odinl_map_field_name(type_of(((users)[:])[0].name), (users)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "by_name := odinl_index_by_field_name(type_of(((users)[:])[0].name), (users)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "by_verified := odinl_group_by_field_verified(type_of(((users)[:])[0].verified), (users)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "count_by_verified := odinl_count_by_field_verified(type_of(((users)[:])[0].verified), (users)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "sum_by_verified := odinl_sum_by_fields_verified_amount(type_of(((users)[:])[0].verified), type_of(((users)[:])[0].amount), (users)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "groups := odinl_partition_by_field_verified(type_of(((users)[:])[0].verified), (users)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "distinct_names := odinl_distinct_by_field_name(type_of(((users)[:])[0].name), (users)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "sorted := odinl_sort_by_field_name(type_of(((users)[:])[0].name), (users)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_sort_by_in_place_field_name((mutated)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_filter_in_place_field_verified(&(mutated))"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_remove_in_place_field_verified(&(mutated))"), true)
-    testing.expect_value(t, strings.contains(output, "verified := odinl_filter_field_verified((users)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "unverified := odinl_remove_field_verified((users)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "first, ok := odinl_find_field_verified((users)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "any_p := odinl_some_p_field_verified((users)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "all_p := odinl_every_p_field_verified((verified)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_map_field_name :: proc($Field_Type: typeid, xs: []$T) -> [dynamic]Field_Type"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_index_by_field_name :: proc($Key: typeid, xs: []$T) -> map[Key]T"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_group_by_field_verified :: proc($Key: typeid, xs: []$T) -> map[Key][dynamic]T"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_count_by_field_verified :: proc($Key: typeid, xs: []$T) -> map[Key]int"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_sum_by_fields_verified_amount :: proc($Key: typeid, $Value: typeid, xs: []$T) -> map[Key]Value"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_partition_by_field_verified :: proc($Key: typeid, xs: []$T) -> [dynamic][]T"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_distinct_by_field_name :: proc($Key: typeid, xs: []$T) -> [dynamic]T"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_sort_by_field_name :: proc($Key: typeid, xs: []$T) -> [dynamic]T"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_slice.sort_by(out[:], proc(a, b: T) -> bool"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_sort_by_in_place_field_name :: proc(xs: []$T)"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_slice.sort_by(xs, proc(a, b: T) -> bool"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_filter_in_place_field_verified :: proc(xs: ^[dynamic]$T)"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_remove_in_place_field_verified :: proc(xs: ^[dynamic]$T)"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_filter_field_verified :: proc(xs: []$T) -> [dynamic]T"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_remove_field_verified :: proc(xs: []$T) -> [dynamic]T"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_find_field_verified :: proc(xs: []$T) -> (value: T, ok: bool)"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_some_p_field_verified :: proc(xs: []$T) -> bool"), true)
-    testing.expect_value(t, strings.contains(output, "odinl_every_p_field_verified :: proc(xs: []$T) -> bool"), true)
+    testing.expect_value(t, strings.contains(output, "names := kvist_map_field_name(type_of(((users)[:])[0].name), (users)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "by_name := kvist_index_by_field_name(type_of(((users)[:])[0].name), (users)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "by_verified := kvist_group_by_field_verified(type_of(((users)[:])[0].verified), (users)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "count_by_verified := kvist_count_by_field_verified(type_of(((users)[:])[0].verified), (users)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "sum_by_verified := kvist_sum_by_fields_verified_amount(type_of(((users)[:])[0].verified), type_of(((users)[:])[0].amount), (users)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "groups := kvist_partition_by_field_verified(type_of(((users)[:])[0].verified), (users)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "distinct_names := kvist_distinct_by_field_name(type_of(((users)[:])[0].name), (users)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "sorted := kvist_sort_by_field_name(type_of(((users)[:])[0].name), (users)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_sort_by_in_place_field_name((mutated)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_filter_in_place_field_verified(&(mutated))"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_remove_in_place_field_verified(&(mutated))"), true)
+    testing.expect_value(t, strings.contains(output, "verified := kvist_filter_field_verified((users)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "unverified := kvist_remove_field_verified((users)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "first, ok := kvist_find_field_verified((users)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "any_p := kvist_some_p_field_verified((users)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "all_p := kvist_every_p_field_verified((verified)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_map_field_name :: proc($Field_Type: typeid, xs: []$T) -> [dynamic]Field_Type"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_index_by_field_name :: proc($Key: typeid, xs: []$T) -> map[Key]T"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_group_by_field_verified :: proc($Key: typeid, xs: []$T) -> map[Key][dynamic]T"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_count_by_field_verified :: proc($Key: typeid, xs: []$T) -> map[Key]int"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_sum_by_fields_verified_amount :: proc($Key: typeid, $Value: typeid, xs: []$T) -> map[Key]Value"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_partition_by_field_verified :: proc($Key: typeid, xs: []$T) -> [dynamic][]T"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_distinct_by_field_name :: proc($Key: typeid, xs: []$T) -> [dynamic]T"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_sort_by_field_name :: proc($Key: typeid, xs: []$T) -> [dynamic]T"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_slice.sort_by(out[:], proc(a, b: T) -> bool"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_sort_by_in_place_field_name :: proc(xs: []$T)"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_slice.sort_by(xs, proc(a, b: T) -> bool"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_filter_in_place_field_verified :: proc(xs: ^[dynamic]$T)"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_remove_in_place_field_verified :: proc(xs: ^[dynamic]$T)"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_filter_field_verified :: proc(xs: []$T) -> [dynamic]T"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_remove_field_verified :: proc(xs: []$T) -> [dynamic]T"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_find_field_verified :: proc(xs: []$T) -> (value: T, ok: bool)"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_some_p_field_verified :: proc(xs: []$T) -> bool"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_every_p_field_verified :: proc(xs: []$T) -> bool"), true)
 }
 
 @(test)
@@ -2636,7 +2770,7 @@ compile_sequence_indexing_helpers :: proc(t: ^testing.T) {
                       (count))]
     (return)))`
 
-    output, err, ok := odinl.compile_source(source)
+    output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
     if !ok {
         testing.expect_value(t, err.message, "")
@@ -2670,7 +2804,7 @@ allow_returning_owned_sequence_result :: proc(t: ^testing.T) {
 (proc owned [xs: []int] -> [dynamic]int
   (map inc xs))`
 
-    output, err, ok := odinl.compile_source(source)
+    output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
     if !ok {
         testing.expect_value(t, err.message, "")
@@ -2678,7 +2812,7 @@ allow_returning_owned_sequence_result :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    testing.expect_value(t, strings.contains(output, "return odinl_map(inc, (xs)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "return kvist_map(inc, (xs)[:])"), true)
 }
 
 @(test)
@@ -2693,7 +2827,7 @@ reject_discarded_owned_sequence_result :: proc(t: ^testing.T) {
     (map inc xs)
     (return)))`
 
-    _, err, ok := odinl.compile_source(source)
+    _, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, false)
     defer delete(err.message)
     testing.expect_value(t, err.message, "owned result must be bound or returned; nested owned results would leak")
@@ -2709,7 +2843,7 @@ reject_nested_owned_sequence_result :: proc(t: ^testing.T) {
 (proc bad [xs: []int] -> int
   (first (map inc xs)))`
 
-    _, err, ok := odinl.compile_source(source)
+    _, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, false)
     defer delete(err.message)
     testing.expect_value(t, err.message, "owned result must be bound or returned; nested owned results would leak")
@@ -2724,7 +2858,7 @@ reject_discarded_slurp_result :: proc(t: ^testing.T) {
   (slurp "cache.json")
   (return))`
 
-    _, err, ok := odinl.compile_source(source)
+    _, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, false)
     defer delete(err.message)
     testing.expect_value(t, err.message, "owned result must be bound or returned; nested owned results would leak")
@@ -2747,7 +2881,7 @@ compile_collection_type_forms_and_make_new :: proc(t: ^testing.T) {
         lookup (make (map string int))]
     (return)))`
 
-    output, err, ok := odinl.compile_source(source)
+    output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
     if !ok {
         testing.expect_value(t, err.message, "")
@@ -2775,6 +2909,66 @@ main :: proc() {
 }
 
 @(test)
+compile_polymorphic_type_form :: proc(t: ^testing.T) {
+    source := `(package main)
+(import chan "core:sync/chan")
+
+(struct Queue {
+  :jobs (type chan.Chan int)
+})
+
+(proc recv-job [jobs: (type chan.Chan int)] -> int
+  (let [[value ok] (chan.recv jobs)]
+    (if ok value 0)))
+
+(proc main []
+  (let [[jobs err] (chan.create (type chan.Chan int) context.allocator)]
+    (defer (chan.destroy jobs))
+    (if (== err .None)
+      (return)
+      (return))))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    expected := `package main
+
+import chan "core:sync/chan"
+
+Queue :: struct {
+    jobs: chan.Chan(int),
+}
+
+recv_job :: proc(jobs: chan.Chan(int)) -> int {
+    value, ok := chan.recv(jobs)
+    if ok {
+        return value
+    }
+    else {
+        return 0
+    }
+}
+
+main :: proc() {
+    jobs, err := chan.create(chan.Chan(int), context.allocator)
+    defer chan.destroy(jobs)
+    if (err) == (.None) {
+        return
+    }
+    else {
+        return
+    }
+}
+`
+    testing.expect_value(t, output, expected)
+}
+
+@(test)
 compile_array_map_literals_and_typed_let_type_forms :: proc(t: ^testing.T) {
     source := `(package main)
 
@@ -2788,7 +2982,7 @@ compile_array_map_literals_and_typed_let_type_forms :: proc(t: ^testing.T) {
         lookup: (map string int) (new (map string int) {"http" 80 "https" 443})]
     (return)))`
 
-    output, err, ok := odinl.compile_source(source)
+    output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
     if !ok {
         testing.expect_value(t, err.message, "")
@@ -2829,7 +3023,7 @@ compile_multiline_composite_literals :: proc(t: ^testing.T) {
                                       7)})])]
     (return)))`
 
-    output, err, ok := odinl.compile_source(source)
+    output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
     if !ok {
         testing.expect_value(t, err.message, "")
@@ -2887,7 +3081,7 @@ compile_thread_first_forms :: proc(t: ^testing.T) {
 (proc clone-path [req: Request, allocator: rawptr] -> string
   (-> req :path (clone-string allocator)))`
 
-    output, err, ok := odinl.compile_source(source)
+    output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
     if !ok {
         testing.expect_value(t, err.message, "")
@@ -2944,7 +3138,7 @@ compile_pointer_deref_and_address_of :: proc(t: ^testing.T) {
 (proc borrow-name [p: ^Person] -> ^string
   (addr (:name (deref p))))`
 
-    output, err, ok := odinl.compile_source(source)
+    output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
     if !ok {
         testing.expect_value(t, err.message, "")
@@ -2988,7 +3182,7 @@ compile_nil_predicate :: proc(t: ^testing.T) {
   (when (nil? p)
     (return)))`
 
-    output, err, ok := odinl.compile_source(source)
+    output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
     if !ok {
         testing.expect_value(t, err.message, "")
@@ -3029,7 +3223,7 @@ compile_lisp_predicate_and_bang_identifier_names :: proc(t: ^testing.T) {
   (let [x 1]
     (greater-than? 0 x)))`
 
-    output, err, ok := odinl.compile_source(source)
+    output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
     if !ok {
         testing.expect_value(t, err.message, "")
@@ -3077,7 +3271,7 @@ compile_odin_shaped_type_spellings :: proc(t: ^testing.T) {
         buffer (make [dynamic]int)]
     (return)))`
 
-    output, err, ok := odinl.compile_source(source)
+    output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
     if !ok {
         testing.expect_value(t, err.message, "")
@@ -3121,7 +3315,7 @@ compile_compact_type_spellings_inside_vectors :: proc(t: ^testing.T) {
         from-map (get lookup "missing" -1)]
     (+ (get xs 0) from-map)))`
 
-    output, err, ok := odinl.compile_source(source)
+    output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
     if !ok {
         testing.expect_value(t, err.message, "")
@@ -3134,11 +3328,11 @@ compile_compact_type_spellings_inside_vectors :: proc(t: ^testing.T) {
 first :: proc(xs: []int, lookup: map[string]int) -> int {
     buffer: [dynamic]int = make([dynamic]int)
     fixed: [3]int = [3]int{1, 2, 3}
-    from_map := odinl_get_or_default(lookup, "missing", -1)
+    from_map := kvist_get_or_default(lookup, "missing", -1)
     return (xs[0]) + (from_map)
 }
 
-odinl_get_or_default :: proc(m: map[$K]$V, key: K, default: V) -> V {
+kvist_get_or_default :: proc(m: map[$K]$V, key: K, default: V) -> V {
     value, ok := m[key]
     if ok {
         return value
@@ -3158,7 +3352,7 @@ compile_map_literals_with_non_string_keys :: proc(t: ^testing.T) {
         by-flag (new map[bool]int {true 1 false 0})]
     (return)))`
 
-    output, err, ok := odinl.compile_source(source)
+    output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
     if !ok {
         testing.expect_value(t, err.message, "")
@@ -3201,7 +3395,7 @@ compile_unparenthesized_proc_type_spelling :: proc(t: ^testing.T) {
   (proc [x: int] -> bool
     true))`
 
-    output, err, ok := odinl.compile_source(source)
+    output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
     if !ok {
         testing.expect_value(t, err.message, "")
@@ -3246,7 +3440,7 @@ compile_typed_let_with_proc_type_spelling :: proc(t: ^testing.T) {
     (pred 1)
     (return)))`
 
-    output, err, ok := odinl.compile_source(source)
+    output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
     if !ok {
         testing.expect_value(t, err.message, "")
@@ -3279,7 +3473,7 @@ compile_proc_directives_and_declaration_attributes :: proc(t: ^testing.T) {
 (proc query [] -> [value: int, ok: bool] #optional_ok
   (return 42 true))`
 
-    output, err, ok := odinl.compile_source(source)
+    output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
     if !ok {
         testing.expect_value(t, err.message, "")
@@ -3313,7 +3507,7 @@ compile_directive_expression_wrappers :: proc(t: ^testing.T) {
         y (#force_inline (inc x))]
     (return)))`
 
-    output, err, ok := odinl.compile_source(source)
+    output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
     if !ok {
         testing.expect_value(t, err.message, "")
@@ -3343,7 +3537,7 @@ reject_proc_directive_before_non_proc_declaration :: proc(t: ^testing.T) {
 (odin "#force_inline")
 (const answer 42)`
 
-    _, err, ok := odinl.compile_source(source)
+    _, err, ok := kvist.compile_source(source)
     defer delete(err.message)
     testing.expect_value(t, ok, false)
     testing.expect_value(t, err.message, "procedure directive must be followed by a proc declaration")
@@ -3356,7 +3550,7 @@ compile_parenthesized_nested_proc_type_spelling :: proc(t: ^testing.T) {
 (proc identity-factory [f: (proc [x: int] -> proc [y: int] -> bool)] -> (proc [x: int] -> proc [y: int] -> bool)
   f)`
 
-    output, err, ok := odinl.compile_source(source)
+    output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
     if !ok {
         testing.expect_value(t, err.message, "")
@@ -3378,13 +3572,13 @@ format_compile_errors_with_line_column_and_context :: proc(t: ^testing.T) {
     source := `(package main)
 (unknown thing)`
 
-    _, err, ok := odinl.compile_source(source)
+    _, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, false)
     defer delete(err.message)
-    formatted := odinl.format_compile_error("bad.odinl", source, err)
+    formatted := kvist.format_compile_error("bad.kvist", source, err)
     defer delete(formatted)
 
-    expected := `bad.odinl:2:2: unsupported top-level form: unknown
+    expected := `bad.kvist:2:2: unsupported top-level form: unknown
   (unknown thing)
    ^
 `
@@ -3396,16 +3590,16 @@ lower_rejects_missing_package :: proc(t: ^testing.T) {
     source := `(proc main []
   (return))`
 
-    _, err, ok := odinl.compile_source(source)
+    _, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, false)
     if ok {
         return
     }
     defer delete(err.message)
 
-    formatted := odinl.format_compile_error("bad.odinl", source, err)
+    formatted := kvist.format_compile_error("bad.kvist", source, err)
     defer delete(formatted)
-    expected := `bad.odinl:1:1: missing package declaration
+    expected := `bad.kvist:1:1: missing package declaration
   (proc main []
   ^
 `
@@ -3419,16 +3613,16 @@ lower_rejects_duplicate_package :: proc(t: ^testing.T) {
 (proc main []
   (return))`
 
-    _, err, ok := odinl.compile_source(source)
+    _, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, false)
     if ok {
         return
     }
     defer delete(err.message)
 
-    formatted := odinl.format_compile_error("bad.odinl", source, err)
+    formatted := kvist.format_compile_error("bad.kvist", source, err)
     defer delete(formatted)
-    expected := `bad.odinl:2:1: package declaration must appear exactly once
+    expected := `bad.kvist:2:1: package declaration must appear exactly once
   (package other)
   ^
 `
@@ -3441,16 +3635,16 @@ lower_rejects_import_after_declarations :: proc(t: ^testing.T) {
 (const answer 42)
 (import "core:fmt")`
 
-    _, err, ok := odinl.compile_source(source)
+    _, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, false)
     if ok {
         return
     }
     defer delete(err.message)
 
-    formatted := odinl.format_compile_error("bad.odinl", source, err)
+    formatted := kvist.format_compile_error("bad.kvist", source, err)
     defer delete(formatted)
-    expected := `bad.odinl:3:1: import declarations must appear before other declarations
+    expected := `bad.kvist:3:1: import declarations must appear before other declarations
   (import "core:fmt")
   ^
 `
@@ -3469,7 +3663,7 @@ compile_top_level_odin_escape :: proc(t: ^testing.T) {
   (odin "context.user_ptr = nil")
   (return))`
 
-    output, err, ok := odinl.compile_source(source)
+    output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
     if !ok {
         testing.expect_value(t, err.message, "")
@@ -3500,7 +3694,7 @@ compile_multiline_statement_odin_escape :: proc(t: ^testing.T) {
   (odin "x := 1\n_ = x")
   (return))`
 
-    output, err, ok := odinl.compile_source(source)
+    output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
     if !ok {
         testing.expect_value(t, err.message, "")

@@ -1,6 +1,6 @@
 // Host interop with core:os path and file helpers.
 //
-// This example keeps the Odin API visible. OdinL is only changing call syntax:
+// This example keeps the Odin API visible. Kvist is only changing call syntax:
 // paths are cleaned by core:os, file bytes are owned slices from core:os, and
 // callers still delete those slices when they are done.
 (package main)
@@ -8,7 +8,7 @@
 (import os "core:os")
 
 (proc clean-base-length [] -> int
-  (let [[clean err] (os.clean_path "./tmp/../examples/hello.odinl" context.allocator)]
+  (let [[clean err] (os.clean_path "./tmp/../examples/hello.kvist" context.allocator)]
     (if (!= err nil)
       0
       (do
@@ -65,13 +65,13 @@
   ;; => length of the current checkout directory name
 
   ;; The file helpers write under ./tmp relative to this source file during
-  ;; odinl eval. Creating the directory is part of the example on purpose.
-  (write-demo-file "tmp/odinl-core-os.txt")
+  ;; kvist eval. Creating the directory is part of the example on purpose.
+  (write-demo-file "tmp/kvist-core-os.txt")
   ;; => nil
 
-  (read-demo-length "tmp/odinl-core-os.txt")
+  (read-demo-length "tmp/kvist-core-os.txt")
   ;; => 18
 
-  (remove-demo-file "tmp/odinl-core-os.txt")
+  (remove-demo-file "tmp/kvist-core-os.txt")
   ;; => nil
 )

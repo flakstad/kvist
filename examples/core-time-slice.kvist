@@ -1,6 +1,6 @@
 // Host interop with core:time and core:slice.
 //
-// This example focuses on APIs that do not need an OdinL wrapper:
+// This example focuses on APIs that do not need a Kvist wrapper:
 // time.Duration arithmetic is ordinary Odin arithmetic, time formatting writes
 // into caller-provided fixed buffers, and core:slice helpers return explicit
 // bool results for queries that may fail.

@@ -1,4 +1,4 @@
-package odinl
+package kvist
 
 import "core:strings"
 

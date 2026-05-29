@@ -1,4 +1,4 @@
-// Greets from OdinL.
+// Greets from Kvist.
 (package main)
 (import "core:fmt")
 
@@ -8,7 +8,7 @@
 })
 
 (proc main []
-  (let [g (Greeting { :message "hello from odinl" })]
+  (let [g (Greeting { :message "hello from kvist" })]
     (fmt.println (:message g))))
 
 (comment

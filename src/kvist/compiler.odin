@@ -1,4 +1,4 @@
-package odinl
+package kvist
 
 import "core:fmt"
 import "core:os"
@@ -216,7 +216,7 @@ eval_form_head :: proc(form: CST_Form) -> string {
 
 eval_head_is_decl :: proc(head: string) -> bool {
     switch head {
-    case "comment", "package", "import", "const", "struct", "enum", "union", "odin", "proc":
+    case "comment", "package", "import", "const", "struct", "defstruct", "enum", "union", "odin", "proc":
         return true
     }
     return false

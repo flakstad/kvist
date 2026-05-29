@@ -1,43 +1,43 @@
-# OdinL Emacs Support
+# Kvist Emacs Support
 
-This directory contains lightweight Emacs support for OdinL.
+This directory contains lightweight Emacs support for Kvist.
 
 ## Install
 
 ```elisp
-(add-to-list 'load-path "/path/to/odinl/emacs")
-(require 'odinl-mode)
-(require 'odinl-eval)
+(add-to-list 'load-path "/path/to/kvist/emacs")
+(require 'kvist-mode)
+(require 'kvist-eval)
 ```
 
-`odinl-mode` derives from `clojure-mode`, associates `*.odinl` files with the
-mode, adds OdinL-specific font-locking, and uses Clojure-like 2-space
-indentation for OdinL source.
+`kvist-mode` derives from `clojure-mode`, associates `*.kvist` files with the
+mode, adds Kvist-specific font-locking, and uses Clojure-like 2-space
+indentation for Kvist source.
 
 It also registers an xref backend and completion-at-point function. `M-.`
-jumps to definitions indexed by `odinl symbols`, including current-file
+jumps to definitions indexed by `kvist symbols`, including current-file
 declarations and simple imported Odin package definitions like `fmt.println`.
-For OdinL language forms and sequence helpers, `M-.` jumps to the compiler
-implementation. Completion includes OdinL forms, sequence helpers, current-file
+For Kvist language forms and sequence helpers, `M-.` jumps to the compiler
+implementation. Completion includes Kvist forms, sequence helpers, current-file
 declarations, and imported package members.
 
-`C-c C-.` shows docs for the symbol at point without jumping. OdinL declaration
+`C-c C-.` shows docs for the symbol at point without jumping. Kvist declaration
 docs come from contiguous `//`, `;`, or `/* ... */` comments immediately
 preceding a top-level declaration. Compiler-defined forms such as `if-let` and
 `if-ok` have small built-in docs. Imported Odin docs come from contiguous `//`
 or `/* ... */` comments immediately preceding the imported package definition.
 
-`odinl-eval` shells out to the `odinl` CLI for eval, build, check, and run commands.
+`kvist-eval` shells out to the `kvist` CLI for eval, build, check, and run commands.
 The CLI generates temporary Odin and invokes Odin itself. Build the local
 compiler first:
 
 ```sh
-odin build cmd/odinl
+odin build cmd/kvist
 ```
 
-When the CLI reports OdinL diagnostics, the result buffer uses
+When the CLI reports Kvist diagnostics, the result buffer uses
 `compilation-mode`, so standard Emacs navigation such as `next-error` / `M-g n`
-can jump back to the reported `.odinl` source location.
+can jump back to the reported `.kvist` source location.
 
 Default keys:
 
@@ -54,12 +54,12 @@ Default keys:
 - `C-c C-v`: compile buffer and run `odin check` on generated Odin
 - `C-c C-a`: compile buffer and run generated Odin
 - `C-c C-m`: expand form at point into generated Odin
-- `C-c M-m`: macroexpand form at point into OdinL
+- `C-c M-m`: macroexpand form at point into Kvist
 - `C-c C-s`: toggle display of generated Odin
-- `C-c C-w`: eval form at point and save stdout to the OdinL cache
-- `C-c C-l`: list saved OdinL cache values
-- `C-c C-o`: open a saved OdinL cache value
-- `C-c C-d`: remove a saved OdinL cache value
+- `C-c C-w`: eval form at point and save stdout to the Kvist cache
+- `C-c C-l`: list saved Kvist cache values
+- `C-c C-o`: open a saved Kvist cache value
+- `C-c C-d`: remove a saved Kvist cache value
 - `C-c C-z`: switch to the result buffer
 
 Use a prefix argument with eval commands to treat the form/region as statements
@@ -68,8 +68,8 @@ instead of printing the expression result.
 Saved eval values use the CLI cache:
 
 ```sh
-odinl eval file.odinl FORM --save NAME
-odinl cache list
-odinl cache path NAME
-odinl cache rm NAME
+kvist eval file.kvist FORM --save NAME
+kvist cache list
+kvist cache path NAME
+kvist cache rm NAME
 ```

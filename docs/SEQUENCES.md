@@ -1,6 +1,6 @@
 # Sequence Helper Direction
 
-OdinL should grow a useful sequence helper surface, but it should remain Odin:
+Kvist should grow a useful sequence helper surface, but it should remain Odin:
 simple, eager, direct, and explicit about allocation.
 
 This is not a Clojure seq runtime. There should be no hidden lazy sequence
@@ -9,7 +9,7 @@ collection behavior. Helpers should lower to readable generic Odin procedures,
 ordinary indexing, ordinary slicing, ordinary loops, ordinary maps, and ordinary
 dynamic arrays.
 
-There will not be lazy sequences in OdinL. Producers must always be bounded,
+There will not be lazy sequences in Kvist. Producers must always be bounded,
 and helpers must always be one of: eager owned collection builders, borrowed
 slice views, scalar operations, or explicit in-place mutation.
 
@@ -199,7 +199,7 @@ chain of owned helpers allocates at each owned step:
 ```
 
 That pipeline builds a filtered dynamic array, then a mapped dynamic array, then
-a sorted copy. In a `let` binding, OdinL emits cleanup for owned threaded
+a sorted copy. In a `let` binding, Kvist emits cleanup for owned threaded
 intermediates, but the allocation and copy costs are still real.
 
 This is intentional for the non-bang helpers:
@@ -305,7 +305,7 @@ only needs per-region totals, not actual grouped order slices. `count-by` and
 outputs. If a caller needs to inspect the grouped orders themselves, `group-by`
 is still the right helper.
 
-The `examples/orders-report.odinl` example also includes an
+The `examples/orders-report.kvist` example also includes an
 `aggregate-helper-report-score` variant that uses `sum-by` and `count-by`. The
 focused aggregate benchmark compares that shape with the grouped version and a
 direct aggregate loop. Its expected result is lower allocation than `group-by`,
@@ -336,7 +336,7 @@ The main questions are:
   would first need a concrete Odin representation. Treat this as explicit eager
   construction or mutation, not a polymorphic collection protocol.
 - `shuffle` and `shuffle!` are implemented with an explicit picker callback. The
-  caller owns the randomness policy; OdinL only performs the swaps.
+  caller owns the randomness policy; Kvist only performs the swaps.
 - `distinct` and `distinct-by` are implemented with temporary `map[key]bool`
   storage. Broader set-like helpers should keep using ordinary Odin map-backed
   representations unless a better concrete Odin shape appears.
@@ -415,15 +415,15 @@ Production-style code can always bind owned intermediate results explicitly:
 
 This is slightly noisier, but it is honest and emits obvious Odin.
 
-For threaded pipelines in `let` bindings, OdinL lowers allocating intermediate
+For threaded pipelines in `let` bindings, Kvist lowers allocating intermediate
 steps to named temporaries and emits cleanup for those generated temporaries:
 
 ```odin
-odinl_tmp_1 := odinl_filter(active_p, users[:])
-defer delete(odinl_tmp_1)
-odinl_tmp_2 := odinl_map_field_name(type_of(odinl_tmp_1[0].name), odinl_tmp_1[:])
-defer delete(odinl_tmp_2)
-active_names := odinl_take(10, odinl_tmp_2[:])
+kvist_tmp_1 := kvist_filter(active_p, users[:])
+defer delete(kvist_tmp_1)
+kvist_tmp_2 := kvist_map_field_name(type_of(kvist_tmp_1[0].name), kvist_tmp_1[:])
+defer delete(kvist_tmp_2)
+active_names := kvist_take(10, kvist_tmp_2[:])
 ```
 
 This only happens where the compiler is emitting statements and has a real scope
@@ -473,7 +473,7 @@ Sequence helpers need an explicit ownership story:
   owned dynamic array.
 
 This is a documentation and examples requirement, not just an implementation
-detail. OdinL should help make Odin ownership easier to see, not easier to
+detail. Kvist should help make Odin ownership easier to see, not easier to
 forget.
 
 See `docs/OWNERSHIP.md` for the broader ownership rules used by examples and

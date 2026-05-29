@@ -1,4 +1,4 @@
-package odinl
+package kvist
 
 import "core:fmt"
 import "core:strings"
@@ -968,7 +968,7 @@ emit_thread_step :: proc(e: ^Emitter, current: string, step: CST_Form, thread_la
             }
             mark_core_tap(e)
             if len(step.items) == 1 {
-                return emit_call_text("odinl_tap", []string{current}), {}, true
+                return emit_call_text("kvist_tap", []string{current}), {}, true
             }
             label_form := step.items[1]
             label := ""
@@ -979,7 +979,7 @@ emit_thread_step :: proc(e: ^Emitter, current: string, step: CST_Form, thread_la
             } else {
                 return "", Compile_Error{message = "tap> label must be a keyword or string literal", span = label_form.span}, false
             }
-            return emit_call_text("odinl_tap_labeled", []string{label, current}), {}, true
+            return emit_call_text("kvist_tap_labeled", []string{label, current}), {}, true
         }
         if thread_last && (head.text == "map" || head.text == "filter" || head.text == "remove") {
             if len(step.items) != 2 {
@@ -990,9 +990,9 @@ emit_thread_step :: proc(e: ^Emitter, current: string, step: CST_Form, thread_la
                 return emit_map_callback_call(e, step.items[1], collection)
             }
             if head.text == "remove" {
-                return emit_predicate_callback_call(e, "odinl_remove", step.items[1], collection, mark_core_remove, mark_core_remove_field)
+                return emit_predicate_callback_call(e, "kvist_remove", step.items[1], collection, mark_core_remove, mark_core_remove_field)
             }
-            return emit_predicate_callback_call(e, "odinl_filter", step.items[1], collection, mark_core_filter, mark_core_filter_field)
+            return emit_predicate_callback_call(e, "kvist_filter", step.items[1], collection, mark_core_filter, mark_core_filter_field)
         }
         if thread_last && (head.text == "map-indexed" || head.text == "keep" || head.text == "mapcat") {
             if len(step.items) != 2 {
@@ -1004,14 +1004,14 @@ emit_thread_step :: proc(e: ^Emitter, current: string, step: CST_Form, thread_la
             }
             if head.text == "map-indexed" {
                 mark_core_map_indexed(e)
-                return emit_call_text("odinl_map_indexed", []string{f, slice_all_expr_text(current)}), {}, true
+                return emit_call_text("kvist_map_indexed", []string{f, slice_all_expr_text(current)}), {}, true
             }
             if head.text == "mapcat" {
                 mark_core_mapcat(e)
-                return emit_call_text("odinl_mapcat", []string{f, slice_all_expr_text(current)}), {}, true
+                return emit_call_text("kvist_mapcat", []string{f, slice_all_expr_text(current)}), {}, true
             }
             mark_core_keep(e)
-            return emit_call_text("odinl_keep", []string{f, slice_all_expr_text(current)}), {}, true
+            return emit_call_text("kvist_keep", []string{f, slice_all_expr_text(current)}), {}, true
         }
         if thread_last && head.text == "concat" {
             if len(step.items) != 2 {
@@ -1022,7 +1022,7 @@ emit_thread_step :: proc(e: ^Emitter, current: string, step: CST_Form, thread_la
                 return "", err_rhs, false
             }
             mark_core_concat(e)
-            return emit_call_text("odinl_concat", []string{slice_all_expr_text(current), slice_all_expr_text(rhs)}), {}, true
+            return emit_call_text("kvist_concat", []string{slice_all_expr_text(current), slice_all_expr_text(rhs)}), {}, true
         }
         if thread_last && head.text == "into" {
             if len(step.items) != 2 {
@@ -1036,7 +1036,7 @@ emit_thread_step :: proc(e: ^Emitter, current: string, step: CST_Form, thread_la
                 return "", Compile_Error{message = "into currently expects a dynamic array type", span = step.items[1].span}, false
             }
             mark_core_into(e)
-            return emit_call_text("odinl_into", []string{type_text, slice_all_expr_text(current)}), {}, true
+            return emit_call_text("kvist_into", []string{type_text, slice_all_expr_text(current)}), {}, true
         }
         if thread_last && head.text == "interpose" {
             if len(step.items) != 2 {
@@ -1047,7 +1047,7 @@ emit_thread_step :: proc(e: ^Emitter, current: string, step: CST_Form, thread_la
                 return "", err_sep, false
             }
             mark_core_interpose(e)
-            return emit_call_text("odinl_interpose", []string{sep, slice_all_expr_text(current)}), {}, true
+            return emit_call_text("kvist_interpose", []string{sep, slice_all_expr_text(current)}), {}, true
         }
         if thread_last && head.text == "interleave" {
             if len(step.items) != 2 {
@@ -1058,14 +1058,14 @@ emit_thread_step :: proc(e: ^Emitter, current: string, step: CST_Form, thread_la
                 return "", err_lhs, false
             }
             mark_core_interleave(e)
-            return emit_call_text("odinl_interleave", []string{slice_all_expr_text(lhs), slice_all_expr_text(current)}), {}, true
+            return emit_call_text("kvist_interleave", []string{slice_all_expr_text(lhs), slice_all_expr_text(current)}), {}, true
         }
         if thread_last && head.text == "reverse" {
             if len(step.items) != 1 {
                 return "", Compile_Error{message = "reverse thread step expects no arguments", span = step.span}, false
             }
             mark_core_reverse(e)
-            return emit_call_text("odinl_reverse", []string{slice_all_expr_text(current)}), {}, true
+            return emit_call_text("kvist_reverse", []string{slice_all_expr_text(current)}), {}, true
         }
         if thread_last && head.text == "shuffle" {
             if len(step.items) != 2 {
@@ -1076,14 +1076,14 @@ emit_thread_step :: proc(e: ^Emitter, current: string, step: CST_Form, thread_la
                 return "", err_pick, false
             }
             mark_core_shuffle(e)
-            return emit_call_text("odinl_shuffle", []string{pick, slice_all_expr_text(current)}), {}, true
+            return emit_call_text("kvist_shuffle", []string{pick, slice_all_expr_text(current)}), {}, true
         }
         if thread_last && head.text == "sort" {
             if len(step.items) != 1 {
                 return "", Compile_Error{message = "sort thread step expects no arguments", span = step.span}, false
             }
             mark_core_sort(e)
-            return emit_call_text("odinl_sort", []string{slice_all_expr_text(current)}), {}, true
+            return emit_call_text("kvist_sort", []string{slice_all_expr_text(current)}), {}, true
         }
         if thread_last && head.text == "sort-by" {
             if len(step.items) != 2 {
@@ -1101,14 +1101,14 @@ emit_thread_step :: proc(e: ^Emitter, current: string, step: CST_Form, thread_la
             }
             if head.text == "split-at" {
                 mark_core_split_at(e)
-                return emit_call_text("odinl_split_at", []string{count, slice_all_expr_text(current)}), {}, true
+                return emit_call_text("kvist_split_at", []string{count, slice_all_expr_text(current)}), {}, true
             }
             if head.text == "partition" {
                 mark_core_partition(e)
-                return emit_call_text("odinl_partition", []string{count, slice_all_expr_text(current)}), {}, true
+                return emit_call_text("kvist_partition", []string{count, slice_all_expr_text(current)}), {}, true
             }
             mark_core_partition_all(e)
-            return emit_call_text("odinl_partition_all", []string{count, slice_all_expr_text(current)}), {}, true
+            return emit_call_text("kvist_partition_all", []string{count, slice_all_expr_text(current)}), {}, true
         }
         if thread_last && head.text == "partition-by" {
             if len(step.items) != 2 {
@@ -1125,7 +1125,7 @@ emit_thread_step :: proc(e: ^Emitter, current: string, step: CST_Form, thread_la
                 return "", err_keys, false
             }
             mark_core_zipmap(e)
-            return emit_call_text("odinl_zipmap", []string{slice_all_expr_text(keys), slice_all_expr_text(current)}), {}, true
+            return emit_call_text("kvist_zipmap", []string{slice_all_expr_text(keys), slice_all_expr_text(current)}), {}, true
         }
         if thread_last && head.text == "index-by" {
             if len(step.items) != 2 {
@@ -1156,7 +1156,7 @@ emit_thread_step :: proc(e: ^Emitter, current: string, step: CST_Form, thread_la
                 return "", Compile_Error{message = "frequencies thread step expects no arguments", span = step.span}, false
             }
             mark_core_frequencies(e)
-            return emit_call_text("odinl_frequencies", []string{slice_all_expr_text(current)}), {}, true
+            return emit_call_text("kvist_frequencies", []string{slice_all_expr_text(current)}), {}, true
         }
         if thread_last && (head.text == "keys" || head.text == "vals") {
             if len(step.items) != 1 {
@@ -1164,17 +1164,17 @@ emit_thread_step :: proc(e: ^Emitter, current: string, step: CST_Form, thread_la
             }
             if head.text == "keys" {
                 mark_core_keys(e)
-                return emit_call_text("odinl_keys", []string{current}), {}, true
+                return emit_call_text("kvist_keys", []string{current}), {}, true
             }
             mark_core_vals(e)
-            return emit_call_text("odinl_vals", []string{current}), {}, true
+            return emit_call_text("kvist_vals", []string{current}), {}, true
         }
         if thread_last && head.text == "distinct" {
             if len(step.items) != 1 {
                 return "", Compile_Error{message = "distinct thread step expects no arguments", span = step.span}, false
             }
             mark_core_distinct(e)
-            return emit_call_text("odinl_distinct", []string{slice_all_expr_text(current)}), {}, true
+            return emit_call_text("kvist_distinct", []string{slice_all_expr_text(current)}), {}, true
         }
         if thread_last && head.text == "distinct-by" {
             if len(step.items) != 2 {
@@ -1191,7 +1191,7 @@ emit_thread_step :: proc(e: ^Emitter, current: string, step: CST_Form, thread_la
                 return "", err_count, false
             }
             mark_core_cycle(e)
-            return emit_call_text("odinl_cycle", []string{count, slice_all_expr_text(current)}), {}, true
+            return emit_call_text("kvist_cycle", []string{count, slice_all_expr_text(current)}), {}, true
         }
         if thread_last && head.text == "reduce" {
             if len(step.items) != 3 {
@@ -1206,7 +1206,7 @@ emit_thread_step :: proc(e: ^Emitter, current: string, step: CST_Form, thread_la
                 return "", err_init, false
             }
             mark_core_reduce(e)
-            return emit_call_text("odinl_reduce", []string{f, init, slice_all_expr_text(current)}), {}, true
+            return emit_call_text("kvist_reduce", []string{f, init, slice_all_expr_text(current)}), {}, true
         }
         if thread_last && (head.text == "take" || head.text == "drop") {
             if len(step.items) != 2 {
@@ -1218,10 +1218,10 @@ emit_thread_step :: proc(e: ^Emitter, current: string, step: CST_Form, thread_la
             }
             if head.text == "take" {
                 mark_core_take(e)
-                return emit_call_text("odinl_take", []string{count, slice_all_expr_text(current)}), {}, true
+                return emit_call_text("kvist_take", []string{count, slice_all_expr_text(current)}), {}, true
             } else {
                 mark_core_drop(e)
-                return emit_call_text("odinl_drop", []string{count, slice_all_expr_text(current)}), {}, true
+                return emit_call_text("kvist_drop", []string{count, slice_all_expr_text(current)}), {}, true
             }
         }
         if thread_last && head.text == "drop-last" {
@@ -1233,14 +1233,14 @@ emit_thread_step :: proc(e: ^Emitter, current: string, step: CST_Form, thread_la
                 return "", err_count, false
             }
             mark_core_drop_last(e)
-            return emit_call_text("odinl_drop_last", []string{count, slice_all_expr_text(current)}), {}, true
+            return emit_call_text("kvist_drop_last", []string{count, slice_all_expr_text(current)}), {}, true
         }
         if thread_last && head.text == "butlast" {
             if len(step.items) != 1 {
                 return "", Compile_Error{message = "butlast thread step expects no arguments", span = step.span}, false
             }
             mark_core_drop_last(e)
-            return emit_call_text("odinl_drop_last", []string{"1", slice_all_expr_text(current)}), {}, true
+            return emit_call_text("kvist_drop_last", []string{"1", slice_all_expr_text(current)}), {}, true
         }
         if thread_last && head.text == "take-nth" {
             if len(step.items) != 2 {
@@ -1251,7 +1251,7 @@ emit_thread_step :: proc(e: ^Emitter, current: string, step: CST_Form, thread_la
                 return "", err_count, false
             }
             mark_core_take_nth(e)
-            return emit_call_text("odinl_take_nth", []string{count, slice_all_expr_text(current)}), {}, true
+            return emit_call_text("kvist_take_nth", []string{count, slice_all_expr_text(current)}), {}, true
         }
         if thread_last && (head.text == "take-while" || head.text == "drop-while" || head.text == "find" || head.text == "some?" || head.text == "every?") {
             if len(step.items) != 2 {
@@ -1259,18 +1259,18 @@ emit_thread_step :: proc(e: ^Emitter, current: string, step: CST_Form, thread_la
             }
             collection := slice_all_expr_text(current)
             if head.text == "take-while" {
-                return emit_predicate_callback_call(e, "odinl_take_while", step.items[1], collection, mark_core_take_while, mark_core_take_while_field)
+                return emit_predicate_callback_call(e, "kvist_take_while", step.items[1], collection, mark_core_take_while, mark_core_take_while_field)
             }
             if head.text == "drop-while" {
-                return emit_predicate_callback_call(e, "odinl_drop_while", step.items[1], collection, mark_core_drop_while, mark_core_drop_while_field)
+                return emit_predicate_callback_call(e, "kvist_drop_while", step.items[1], collection, mark_core_drop_while, mark_core_drop_while_field)
             }
             if head.text == "find" {
-                return emit_predicate_callback_call(e, "odinl_find", step.items[1], collection, mark_core_find, mark_core_find_field)
+                return emit_predicate_callback_call(e, "kvist_find", step.items[1], collection, mark_core_find, mark_core_find_field)
             }
             if head.text == "some?" {
-                return emit_predicate_callback_call(e, "odinl_some_p", step.items[1], collection, mark_core_some, mark_core_some_field)
+                return emit_predicate_callback_call(e, "kvist_some_p", step.items[1], collection, mark_core_some, mark_core_some_field)
             }
-            return emit_predicate_callback_call(e, "odinl_every_p", step.items[1], collection, mark_core_every, mark_core_every_field)
+            return emit_predicate_callback_call(e, "kvist_every_p", step.items[1], collection, mark_core_every, mark_core_every_field)
         }
         if thread_last && head.text == "slice" {
             if len(step.items) > 3 {
@@ -1347,12 +1347,12 @@ emit_thread_step :: proc(e: ^Emitter, current: string, step: CST_Form, thread_la
 
 thread_temp_name :: proc(e: ^Emitter) -> string {
     e.temp_counter += 1
-    return fmt.tprintf("odinl_thread_%d", e.temp_counter)
+    return fmt.tprintf("kvist_thread_%d", e.temp_counter)
 }
 
 eval_temp_name :: proc(e: ^Emitter) -> string {
     e.temp_counter += 1
-    return fmt.tprintf("odinl_eval_%d", e.temp_counter)
+    return fmt.tprintf("kvist_eval_%d", e.temp_counter)
 }
 
 is_tap_thread_step :: proc(step: CST_Form) -> bool {
@@ -1496,7 +1496,7 @@ thread_form_final_view_borrows_owned_intermediate :: proc(form: CST_Form, thread
 thread_return_error :: proc(form: CST_Form) -> (Compile_Error, bool) {
     if thread_form_has_allocating_intermediate(form, true) || thread_form_has_allocating_intermediate(form, false) {
         return Compile_Error{
-            message = "threaded return has an allocating intermediate; bind the pipeline with let so OdinL can emit cleanup",
+            message = "threaded return has an allocating intermediate; bind the pipeline with let so Kvist can emit cleanup",
             span = form.span,
         }, true
     }
@@ -1560,7 +1560,7 @@ owned_result_usage_error :: proc(form: CST_Form, allow_root_owned: bool) -> (Com
         if (is_thread_form(form, true) && thread_form_has_allocating_intermediate(form, true)) ||
            (is_thread_form(form, false) && thread_form_has_allocating_intermediate(form, false)) {
             return Compile_Error{
-                message = "threaded expression has an allocating intermediate; bind the pipeline with let so OdinL can emit cleanup",
+                message = "threaded expression has an allocating intermediate; bind the pipeline with let so Kvist can emit cleanup",
                 span = form.span,
             }, true
         }
@@ -1641,7 +1641,7 @@ emit_binding_assignment :: proc(e: ^Emitter, binding: Binding, value: string) {
         emit_prefixed_expr_mapped(e, "", strings.clone(strings.to_string(line_builder)), binding.value.span)
     } else if binding.is_field_destructure {
         e.temp_counter += 1
-        target := fmt.tprintf("odinl_destructure_%d", e.temp_counter)
+        target := fmt.tprintf("kvist_destructure_%d", e.temp_counter)
         emit_prefixed_expr_mapped(e, fmt.tprintf("%s := ", target), value, binding.value.span)
         for field in binding.fields {
             if field.name == "_" {
@@ -1810,7 +1810,7 @@ emit_map_callback_call :: proc(e: ^Emitter, callback: CST_Form, collection: stri
     if field, ok_field := field_from_keyword(callback); ok_field {
         mark_core_map_field(e, field)
         return emit_call_text(
-            fmt.tprintf("odinl_map_field_%s", field),
+            fmt.tprintf("kvist_map_field_%s", field),
             []string{field_type_expr_text(collection, field), collection},
         ), {}, true
     }
@@ -1820,14 +1820,14 @@ emit_map_callback_call :: proc(e: ^Emitter, callback: CST_Form, collection: stri
         return "", err_f, false
     }
     mark_core_map(e)
-    return emit_call_text("odinl_map", []string{f, collection}), {}, true
+    return emit_call_text("kvist_map", []string{f, collection}), {}, true
 }
 
 emit_index_by_callback_call :: proc(e: ^Emitter, callback: CST_Form, collection: string) -> (string, Compile_Error, bool) {
     if field, ok_field := field_from_keyword(callback); ok_field {
         mark_core_index_by_field(e, field)
         return emit_call_text(
-            fmt.tprintf("odinl_index_by_field_%s", field),
+            fmt.tprintf("kvist_index_by_field_%s", field),
             []string{field_type_expr_text(collection, field), collection},
         ), {}, true
     }
@@ -1837,14 +1837,14 @@ emit_index_by_callback_call :: proc(e: ^Emitter, callback: CST_Form, collection:
         return "", err_f, false
     }
     mark_core_index_by(e)
-    return emit_call_text("odinl_index_by", []string{f, collection}), {}, true
+    return emit_call_text("kvist_index_by", []string{f, collection}), {}, true
 }
 
 emit_group_by_callback_call :: proc(e: ^Emitter, callback: CST_Form, collection: string) -> (string, Compile_Error, bool) {
     if field, ok_field := field_from_keyword(callback); ok_field {
         mark_core_group_by_field(e, field)
         return emit_call_text(
-            fmt.tprintf("odinl_group_by_field_%s", field),
+            fmt.tprintf("kvist_group_by_field_%s", field),
             []string{field_type_expr_text(collection, field), collection},
         ), {}, true
     }
@@ -1854,14 +1854,14 @@ emit_group_by_callback_call :: proc(e: ^Emitter, callback: CST_Form, collection:
         return "", err_f, false
     }
     mark_core_group_by(e)
-    return emit_call_text("odinl_group_by", []string{f, collection}), {}, true
+    return emit_call_text("kvist_group_by", []string{f, collection}), {}, true
 }
 
 emit_count_by_callback_call :: proc(e: ^Emitter, callback: CST_Form, collection: string) -> (string, Compile_Error, bool) {
     if field, ok_field := field_from_keyword(callback); ok_field {
         mark_core_count_by_field(e, field)
         return emit_call_text(
-            fmt.tprintf("odinl_count_by_field_%s", field),
+            fmt.tprintf("kvist_count_by_field_%s", field),
             []string{field_type_expr_text(collection, field), collection},
         ), {}, true
     }
@@ -1871,7 +1871,7 @@ emit_count_by_callback_call :: proc(e: ^Emitter, callback: CST_Form, collection:
         return "", err_f, false
     }
     mark_core_count_by(e)
-    return emit_call_text("odinl_count_by", []string{f, collection}), {}, true
+    return emit_call_text("kvist_count_by", []string{f, collection}), {}, true
 }
 
 emit_sum_by_callback_call :: proc(e: ^Emitter, key_callback, value_callback: CST_Form, collection: string) -> (string, Compile_Error, bool) {
@@ -1879,7 +1879,7 @@ emit_sum_by_callback_call :: proc(e: ^Emitter, key_callback, value_callback: CST
         if value_field, ok_value_field := field_from_keyword(value_callback); ok_value_field {
             mark_core_sum_by_field(e, key_field, value_field)
             return emit_call_text(
-                fmt.tprintf("odinl_sum_by_fields_%s_%s", key_field, value_field),
+                fmt.tprintf("kvist_sum_by_fields_%s_%s", key_field, value_field),
                 []string{
                     field_type_expr_text(collection, key_field),
                     field_type_expr_text(collection, value_field),
@@ -1898,14 +1898,14 @@ emit_sum_by_callback_call :: proc(e: ^Emitter, key_callback, value_callback: CST
         return "", err_value_f, false
     }
     mark_core_sum_by(e)
-    return emit_call_text("odinl_sum_by", []string{key_f, value_f, collection}), {}, true
+    return emit_call_text("kvist_sum_by", []string{key_f, value_f, collection}), {}, true
 }
 
 emit_distinct_by_callback_call :: proc(e: ^Emitter, callback: CST_Form, collection: string) -> (string, Compile_Error, bool) {
     if field, ok_field := field_from_keyword(callback); ok_field {
         mark_core_distinct_by_field(e, field)
         return emit_call_text(
-            fmt.tprintf("odinl_distinct_by_field_%s", field),
+            fmt.tprintf("kvist_distinct_by_field_%s", field),
             []string{field_type_expr_text(collection, field), collection},
         ), {}, true
     }
@@ -1914,14 +1914,14 @@ emit_distinct_by_callback_call :: proc(e: ^Emitter, callback: CST_Form, collecti
         return "", err_f, false
     }
     mark_core_distinct_by(e)
-    return emit_call_text("odinl_distinct_by", []string{f, collection}), {}, true
+    return emit_call_text("kvist_distinct_by", []string{f, collection}), {}, true
 }
 
 emit_partition_by_callback_call :: proc(e: ^Emitter, callback: CST_Form, collection: string) -> (string, Compile_Error, bool) {
     if field, ok_field := field_from_keyword(callback); ok_field {
         mark_core_partition_by_field(e, field)
         return emit_call_text(
-            fmt.tprintf("odinl_partition_by_field_%s", field),
+            fmt.tprintf("kvist_partition_by_field_%s", field),
             []string{field_type_expr_text(collection, field), collection},
         ), {}, true
     }
@@ -1931,7 +1931,7 @@ emit_partition_by_callback_call :: proc(e: ^Emitter, callback: CST_Form, collect
         return "", err_f, false
     }
     mark_core_partition_by(e)
-    return emit_call_text("odinl_partition_by", []string{f, collection}), {}, true
+    return emit_call_text("kvist_partition_by", []string{f, collection}), {}, true
 }
 
 is_plain_identifier_text :: proc(text: string) -> bool {
@@ -1960,16 +1960,16 @@ plain_symbol_callback :: proc(callback: CST_Form) -> (string, bool) {
 
 sort_by_callback_helper_name :: proc(callback: string, in_place: bool = false) -> string {
     if in_place {
-        return fmt.tprintf("odinl_sort_by_in_place_callback_%s", callback)
+        return fmt.tprintf("kvist_sort_by_in_place_callback_%s", callback)
     }
-    return fmt.tprintf("odinl_sort_by_callback_%s", callback)
+    return fmt.tprintf("kvist_sort_by_callback_%s", callback)
 }
 
 emit_sort_by_callback_call :: proc(e: ^Emitter, callback: CST_Form, collection: string) -> (string, Compile_Error, bool) {
     if field, ok_field := field_from_keyword(callback); ok_field {
         mark_core_sort_by_field(e, field)
         return emit_call_text(
-            fmt.tprintf("odinl_sort_by_field_%s", field),
+            fmt.tprintf("kvist_sort_by_field_%s", field),
             []string{field_type_expr_text(collection, field), collection},
         ), {}, true
     }
@@ -1984,13 +1984,13 @@ emit_sort_by_callback_call :: proc(e: ^Emitter, callback: CST_Form, collection: 
         return "", err_f, false
     }
     mark_core_sort_by(e)
-    return emit_call_text("odinl_sort_by", []string{f, collection}), {}, true
+    return emit_call_text("kvist_sort_by", []string{f, collection}), {}, true
 }
 
 emit_sort_by_in_place_callback_call :: proc(e: ^Emitter, callback: CST_Form, collection: string) -> (string, Compile_Error, bool) {
     if field, ok_field := field_from_keyword(callback); ok_field {
         mark_core_sort_by_in_place_field(e, field)
-        return emit_call_text(fmt.tprintf("odinl_sort_by_in_place_field_%s", field), []string{collection}), {}, true
+        return emit_call_text(fmt.tprintf("kvist_sort_by_in_place_field_%s", field), []string{collection}), {}, true
     }
 
     if callback_name, ok_callback := plain_symbol_callback(callback); ok_callback {
@@ -2003,7 +2003,7 @@ emit_sort_by_in_place_callback_call :: proc(e: ^Emitter, callback: CST_Form, col
         return "", err_f, false
     }
     mark_core_sort_by_in_place(e)
-    return emit_call_text("odinl_sort_by_in_place", []string{f, collection}), {}, true
+    return emit_call_text("kvist_sort_by_in_place", []string{f, collection}), {}, true
 }
 
 emit_dynamic_predicate_in_place_callback_call :: proc(e: ^Emitter, helper_name: string, callback: CST_Form, collection: string, mark_helper: proc(^Emitter), mark_field: proc(^Emitter, string)) -> (string, Compile_Error, bool) {
@@ -2343,7 +2343,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
                 return "", err_default, false
             }
             mark_core_get_or_default(e)
-            return emit_call_text("odinl_get_or_default", []string{target, key, default_value}), {}, true
+            return emit_call_text("kvist_get_or_default", []string{target, key, default_value}), {}, true
         }
         return fmt.tprintf("%s[%s]", target, key), {}, true
     }
@@ -2395,7 +2395,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
             if !ok_value {
                 return "", err_value, false
             }
-            return emit_call_text("odinl_tap", []string{value}), {}, true
+            return emit_call_text("kvist_tap", []string{value}), {}, true
         }
 
         label_form := form.items[1]
@@ -2411,7 +2411,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         if !ok_value {
             return "", err_value, false
         }
-        return emit_call_text("odinl_tap_labeled", []string{label, value}), {}, true
+        return emit_call_text("kvist_tap_labeled", []string{label, value}), {}, true
     }
 
     if head.text == "map" || head.text == "filter" || head.text == "remove" {
@@ -2427,9 +2427,9 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
             return emit_map_callback_call(e, form.items[1], collection)
         }
         if head.text == "remove" {
-            return emit_predicate_callback_call(e, "odinl_remove", form.items[1], collection, mark_core_remove, mark_core_remove_field)
+            return emit_predicate_callback_call(e, "kvist_remove", form.items[1], collection, mark_core_remove, mark_core_remove_field)
         }
-        return emit_predicate_callback_call(e, "odinl_filter", form.items[1], collection, mark_core_filter, mark_core_filter_field)
+        return emit_predicate_callback_call(e, "kvist_filter", form.items[1], collection, mark_core_filter, mark_core_filter_field)
     }
 
     if head.text == "map!" {
@@ -2445,7 +2445,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
             return "", err_collection, false
         }
         mark_core_map_in_place(e)
-        return emit_call_text("odinl_map_in_place", []string{f, slice_all_expr_text(collection)}), {}, true
+        return emit_call_text("kvist_map_in_place", []string{f, slice_all_expr_text(collection)}), {}, true
     }
 
     if head.text == "map-indexed!" {
@@ -2461,7 +2461,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
             return "", err_collection, false
         }
         mark_core_map_indexed_in_place(e)
-        return emit_call_text("odinl_map_indexed_in_place", []string{f, slice_all_expr_text(collection)}), {}, true
+        return emit_call_text("kvist_map_indexed_in_place", []string{f, slice_all_expr_text(collection)}), {}, true
     }
 
     if head.text == "filter!" || head.text == "remove!" {
@@ -2473,9 +2473,9 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
             return "", err_collection, false
         }
         if head.text == "remove!" {
-            return emit_dynamic_predicate_in_place_callback_call(e, "odinl_remove_in_place", form.items[1], collection, mark_core_remove_in_place, mark_core_remove_in_place_field)
+            return emit_dynamic_predicate_in_place_callback_call(e, "kvist_remove_in_place", form.items[1], collection, mark_core_remove_in_place, mark_core_remove_in_place_field)
         }
-        return emit_dynamic_predicate_in_place_callback_call(e, "odinl_filter_in_place", form.items[1], collection, mark_core_filter_in_place, mark_core_filter_in_place_field)
+        return emit_dynamic_predicate_in_place_callback_call(e, "kvist_filter_in_place", form.items[1], collection, mark_core_filter_in_place, mark_core_filter_in_place_field)
     }
 
     if head.text == "map-indexed" || head.text == "keep" || head.text == "mapcat" {
@@ -2493,14 +2493,14 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         collection = slice_all_expr_text(collection)
         if head.text == "map-indexed" {
             mark_core_map_indexed(e)
-            return emit_call_text("odinl_map_indexed", []string{f, collection}), {}, true
+            return emit_call_text("kvist_map_indexed", []string{f, collection}), {}, true
         }
         if head.text == "mapcat" {
             mark_core_mapcat(e)
-            return emit_call_text("odinl_mapcat", []string{f, collection}), {}, true
+            return emit_call_text("kvist_mapcat", []string{f, collection}), {}, true
         }
         mark_core_keep(e)
-        return emit_call_text("odinl_keep", []string{f, collection}), {}, true
+        return emit_call_text("kvist_keep", []string{f, collection}), {}, true
     }
 
     if head.text == "keep!" {
@@ -2516,7 +2516,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
             return "", err_collection, false
         }
         mark_core_keep_in_place(e)
-        return emit_call_text("odinl_keep_in_place", []string{f, address_of_expr_text(collection)}), {}, true
+        return emit_call_text("kvist_keep_in_place", []string{f, address_of_expr_text(collection)}), {}, true
     }
 
     if head.text == "into!" {
@@ -2547,7 +2547,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
             return "", err_source, false
         }
         mark_core_merge_in_place(e)
-        return emit_call_text("odinl_merge_in_place", []string{address_of_expr_text(target), source}), {}, true
+        return emit_call_text("kvist_merge_in_place", []string{address_of_expr_text(target), source}), {}, true
     }
 
     if head.text == "into" {
@@ -2566,7 +2566,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
             return "", err_collection, false
         }
         mark_core_into(e)
-        return emit_call_text("odinl_into", []string{type_text, slice_all_expr_text(collection)}), {}, true
+        return emit_call_text("kvist_into", []string{type_text, slice_all_expr_text(collection)}), {}, true
     }
 
     if head.text == "concat" {
@@ -2582,7 +2582,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
             return "", err_rhs, false
         }
         mark_core_concat(e)
-        return emit_call_text("odinl_concat", []string{slice_all_expr_text(lhs), slice_all_expr_text(rhs)}), {}, true
+        return emit_call_text("kvist_concat", []string{slice_all_expr_text(lhs), slice_all_expr_text(rhs)}), {}, true
     }
 
     if head.text == "merge" {
@@ -2598,7 +2598,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
             return "", err_rhs, false
         }
         mark_core_merge(e)
-        return emit_call_text("odinl_merge", []string{lhs, rhs}), {}, true
+        return emit_call_text("kvist_merge", []string{lhs, rhs}), {}, true
     }
 
     if head.text == "keys" || head.text == "vals" {
@@ -2611,10 +2611,10 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         }
         if head.text == "keys" {
             mark_core_keys(e)
-            return emit_call_text("odinl_keys", []string{source}), {}, true
+            return emit_call_text("kvist_keys", []string{source}), {}, true
         }
         mark_core_vals(e)
-        return emit_call_text("odinl_vals", []string{source}), {}, true
+        return emit_call_text("kvist_vals", []string{source}), {}, true
     }
 
     if head.text == "interpose" {
@@ -2630,7 +2630,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
             return "", err_collection, false
         }
         mark_core_interpose(e)
-        return emit_call_text("odinl_interpose", []string{sep, slice_all_expr_text(collection)}), {}, true
+        return emit_call_text("kvist_interpose", []string{sep, slice_all_expr_text(collection)}), {}, true
     }
 
     if head.text == "interleave" {
@@ -2646,7 +2646,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
             return "", err_rhs, false
         }
         mark_core_interleave(e)
-        return emit_call_text("odinl_interleave", []string{slice_all_expr_text(lhs), slice_all_expr_text(rhs)}), {}, true
+        return emit_call_text("kvist_interleave", []string{slice_all_expr_text(lhs), slice_all_expr_text(rhs)}), {}, true
     }
 
     if head.text == "reverse" {
@@ -2658,7 +2658,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
             return "", err_collection, false
         }
         mark_core_reverse(e)
-        return emit_call_text("odinl_reverse", []string{slice_all_expr_text(collection)}), {}, true
+        return emit_call_text("kvist_reverse", []string{slice_all_expr_text(collection)}), {}, true
     }
 
     if head.text == "shuffle" {
@@ -2674,7 +2674,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
             return "", err_collection, false
         }
         mark_core_shuffle(e)
-        return emit_call_text("odinl_shuffle", []string{pick, slice_all_expr_text(collection)}), {}, true
+        return emit_call_text("kvist_shuffle", []string{pick, slice_all_expr_text(collection)}), {}, true
     }
 
     if head.text == "reverse!" {
@@ -2686,7 +2686,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
             return "", err_collection, false
         }
         mark_core_reverse_in_place(e)
-        return emit_call_text("odinl_reverse_in_place", []string{slice_all_expr_text(collection)}), {}, true
+        return emit_call_text("kvist_reverse_in_place", []string{slice_all_expr_text(collection)}), {}, true
     }
 
     if head.text == "shuffle!" {
@@ -2702,7 +2702,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
             return "", err_collection, false
         }
         mark_core_shuffle_in_place(e)
-        return emit_call_text("odinl_shuffle_in_place", []string{pick, slice_all_expr_text(collection)}), {}, true
+        return emit_call_text("kvist_shuffle_in_place", []string{pick, slice_all_expr_text(collection)}), {}, true
     }
 
     if head.text == "sort" {
@@ -2714,7 +2714,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
             return "", err_collection, false
         }
         mark_core_sort(e)
-        return emit_call_text("odinl_sort", []string{slice_all_expr_text(collection)}), {}, true
+        return emit_call_text("kvist_sort", []string{slice_all_expr_text(collection)}), {}, true
     }
 
     if head.text == "sort!" {
@@ -2726,7 +2726,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
             return "", err_collection, false
         }
         mark_core_sort_in_place(e)
-        return emit_call_text("odinl_sort_in_place", []string{slice_all_expr_text(collection)}), {}, true
+        return emit_call_text("kvist_sort_in_place", []string{slice_all_expr_text(collection)}), {}, true
     }
 
     if head.text == "sort-by" {
@@ -2766,14 +2766,14 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         collection = slice_all_expr_text(collection)
         if head.text == "split-at" {
             mark_core_split_at(e)
-            return emit_call_text("odinl_split_at", []string{count, collection}), {}, true
+            return emit_call_text("kvist_split_at", []string{count, collection}), {}, true
         }
         if head.text == "partition" {
             mark_core_partition(e)
-            return emit_call_text("odinl_partition", []string{count, collection}), {}, true
+            return emit_call_text("kvist_partition", []string{count, collection}), {}, true
         }
         mark_core_partition_all(e)
-        return emit_call_text("odinl_partition_all", []string{count, collection}), {}, true
+        return emit_call_text("kvist_partition_all", []string{count, collection}), {}, true
     }
 
     if head.text == "partition-by" {
@@ -2800,7 +2800,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
             return "", err_values, false
         }
         mark_core_zipmap(e)
-        return emit_call_text("odinl_zipmap", []string{slice_all_expr_text(keys), slice_all_expr_text(values)}), {}, true
+        return emit_call_text("kvist_zipmap", []string{slice_all_expr_text(keys), slice_all_expr_text(values)}), {}, true
     }
 
     if head.text == "index-by" {
@@ -2856,7 +2856,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
             return "", err_collection, false
         }
         mark_core_frequencies(e)
-        return emit_call_text("odinl_frequencies", []string{slice_all_expr_text(collection)}), {}, true
+        return emit_call_text("kvist_frequencies", []string{slice_all_expr_text(collection)}), {}, true
     }
 
     if head.text == "distinct" {
@@ -2868,7 +2868,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
             return "", err_collection, false
         }
         mark_core_distinct(e)
-        return emit_call_text("odinl_distinct", []string{slice_all_expr_text(collection)}), {}, true
+        return emit_call_text("kvist_distinct", []string{slice_all_expr_text(collection)}), {}, true
     }
 
     if head.text == "distinct-by" {
@@ -2915,7 +2915,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
             }
         }
         mark_core_range(e)
-        return emit_call_text("odinl_range", []string{start, end, step}), {}, true
+        return emit_call_text("kvist_range", []string{start, end, step}), {}, true
     }
 
     if head.text == "repeat" {
@@ -2931,7 +2931,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
             return "", err_value, false
         }
         mark_core_repeat(e)
-        return emit_call_text("odinl_repeat", []string{count, value}), {}, true
+        return emit_call_text("kvist_repeat", []string{count, value}), {}, true
     }
 
     if head.text == "repeatedly" {
@@ -2947,7 +2947,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
             return "", err_f, false
         }
         mark_core_repeatedly(e)
-        return emit_call_text("odinl_repeatedly", []string{count, f}), {}, true
+        return emit_call_text("kvist_repeatedly", []string{count, f}), {}, true
     }
 
     if head.text == "iterate" {
@@ -2967,7 +2967,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
             return "", err_init, false
         }
         mark_core_iterate(e)
-        return emit_call_text("odinl_iterate", []string{count, f, init}), {}, true
+        return emit_call_text("kvist_iterate", []string{count, f, init}), {}, true
     }
 
     if head.text == "cycle" {
@@ -2983,7 +2983,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
             return "", err_collection, false
         }
         mark_core_cycle(e)
-        return emit_call_text("odinl_cycle", []string{count, slice_all_expr_text(collection)}), {}, true
+        return emit_call_text("kvist_cycle", []string{count, slice_all_expr_text(collection)}), {}, true
     }
 
     if head.text == "reduce" {
@@ -3004,7 +3004,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         }
         collection = slice_all_expr_text(collection)
         mark_core_reduce(e)
-        return emit_call_text("odinl_reduce", []string{f, init, collection}), {}, true
+        return emit_call_text("kvist_reduce", []string{f, init, collection}), {}, true
     }
 
     if head.text == "take" || head.text == "drop" {
@@ -3022,10 +3022,10 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         collection = slice_all_expr_text(collection)
         if head.text == "take" {
             mark_core_take(e)
-            return emit_call_text("odinl_take", []string{count, collection}), {}, true
+            return emit_call_text("kvist_take", []string{count, collection}), {}, true
         }
         mark_core_drop(e)
-        return emit_call_text("odinl_drop", []string{count, collection}), {}, true
+        return emit_call_text("kvist_drop", []string{count, collection}), {}, true
     }
 
     if head.text == "drop-last" {
@@ -3041,7 +3041,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
             return "", err_collection, false
         }
         mark_core_drop_last(e)
-        return emit_call_text("odinl_drop_last", []string{count, slice_all_expr_text(collection)}), {}, true
+        return emit_call_text("kvist_drop_last", []string{count, slice_all_expr_text(collection)}), {}, true
     }
 
     if head.text == "take-nth" {
@@ -3057,7 +3057,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
             return "", err_collection, false
         }
         mark_core_take_nth(e)
-        return emit_call_text("odinl_take_nth", []string{count, slice_all_expr_text(collection)}), {}, true
+        return emit_call_text("kvist_take_nth", []string{count, slice_all_expr_text(collection)}), {}, true
     }
 
     if head.text == "take-while" || head.text == "drop-while" || head.text == "find" || head.text == "some?" || head.text == "every?" {
@@ -3070,18 +3070,18 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         }
         collection = slice_all_expr_text(collection)
         if head.text == "take-while" {
-            return emit_predicate_callback_call(e, "odinl_take_while", form.items[1], collection, mark_core_take_while, mark_core_take_while_field)
+            return emit_predicate_callback_call(e, "kvist_take_while", form.items[1], collection, mark_core_take_while, mark_core_take_while_field)
         }
         if head.text == "drop-while" {
-            return emit_predicate_callback_call(e, "odinl_drop_while", form.items[1], collection, mark_core_drop_while, mark_core_drop_while_field)
+            return emit_predicate_callback_call(e, "kvist_drop_while", form.items[1], collection, mark_core_drop_while, mark_core_drop_while_field)
         }
         if head.text == "find" {
-            return emit_predicate_callback_call(e, "odinl_find", form.items[1], collection, mark_core_find, mark_core_find_field)
+            return emit_predicate_callback_call(e, "kvist_find", form.items[1], collection, mark_core_find, mark_core_find_field)
         }
         if head.text == "some?" {
-            return emit_predicate_callback_call(e, "odinl_some_p", form.items[1], collection, mark_core_some, mark_core_some_field)
+            return emit_predicate_callback_call(e, "kvist_some_p", form.items[1], collection, mark_core_some, mark_core_some_field)
         }
-        return emit_predicate_callback_call(e, "odinl_every_p", form.items[1], collection, mark_core_every, mark_core_every_field)
+        return emit_predicate_callback_call(e, "kvist_every_p", form.items[1], collection, mark_core_every, mark_core_every_field)
     }
 
     if head.text == "first" || head.text == "second" || head.text == "last" ||
@@ -3112,7 +3112,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         }
         if head.text == "butlast" {
             mark_core_drop_last(e)
-            return emit_call_text("odinl_drop_last", []string{"1", collection}), {}, true
+            return emit_call_text("kvist_drop_last", []string{"1", collection}), {}, true
         }
         return fmt.tprintf("(%s)[1:]", collection), {}, true
     }
@@ -3290,6 +3290,13 @@ emit_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) 
                 return "", Compile_Error{message = "odin expects one string literal", span = form.span}, false
             }
             return unquote_string(form.items[1].text), {}, true
+        }
+        if is_symbol(form.items[0], "type") {
+            type_text, err_type, ok_type := parse_type_text(form)
+            if !ok_type {
+                return "", err_type, false
+            }
+            return type_text, {}, true
         }
         return emit_call_like(e, form)
     case .Vector:
@@ -3564,7 +3571,7 @@ emit_with_allocator_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool
     }
 
     e.temp_counter += 1
-    old_allocator := fmt.tprintf("odinl_old_allocator_%d", e.temp_counter)
+    old_allocator := fmt.tprintf("kvist_old_allocator_%d", e.temp_counter)
     emit_line(e, "{")
     e.indent += 1
     emit_prefixed_expr_mapped(e, fmt.tprintf("%s := ", allocator_name), allocator_expr, binding.items[1].span)
@@ -3597,9 +3604,9 @@ emit_with_temp_allocator_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc:
     allocator_name := map_name(binding.items[0].text)
 
     e.temp_counter += 1
-    temp_scope := fmt.tprintf("odinl_temp_scope_%d", e.temp_counter)
+    temp_scope := fmt.tprintf("kvist_temp_scope_%d", e.temp_counter)
     e.temp_counter += 1
-    old_allocator := fmt.tprintf("odinl_old_allocator_%d", e.temp_counter)
+    old_allocator := fmt.tprintf("kvist_old_allocator_%d", e.temp_counter)
 
     emit_line(e, "{")
     e.indent += 1
@@ -4576,7 +4583,7 @@ emit_decl :: proc(e: ^Emitter, decl: IR_Decl) -> (Compile_Error, bool) {
 }
 
 emit_core_map_helper :: proc(e: ^Emitter) {
-    emit_line(e, "odinl_map :: proc(f: proc(x: $T) -> $U, xs: []T) -> [dynamic]U {")
+    emit_line(e, "kvist_map :: proc(f: proc(x: $T) -> $U, xs: []T) -> [dynamic]U {")
     e.indent += 1
     emit_line(e, "out := make([dynamic]U, 0, len(xs))")
     emit_line(e, "for x in xs {")
@@ -4590,7 +4597,7 @@ emit_core_map_helper :: proc(e: ^Emitter) {
 }
 
 emit_core_map_field_helper :: proc(e: ^Emitter, field: string) {
-    emit_line(e, fmt.tprintf("odinl_map_field_%s :: proc($Field_Type: typeid, xs: []$T) -> [dynamic]Field_Type %s", field, "{"))
+    emit_line(e, fmt.tprintf("kvist_map_field_%s :: proc($Field_Type: typeid, xs: []$T) -> [dynamic]Field_Type %s", field, "{"))
     e.indent += 1
     emit_line(e, "out := make([dynamic]Field_Type, 0, len(xs))")
     emit_line(e, "for x in xs {")
@@ -4604,7 +4611,7 @@ emit_core_map_field_helper :: proc(e: ^Emitter, field: string) {
 }
 
 emit_core_filter_helper :: proc(e: ^Emitter) {
-    emit_line(e, "odinl_filter :: proc(pred: proc(x: $T) -> bool, xs: []T) -> [dynamic]T {")
+    emit_line(e, "kvist_filter :: proc(pred: proc(x: $T) -> bool, xs: []T) -> [dynamic]T {")
     e.indent += 1
     emit_line(e, "out := make([dynamic]T, 0, len(xs))")
     emit_line(e, "for x in xs {")
@@ -4622,7 +4629,7 @@ emit_core_filter_helper :: proc(e: ^Emitter) {
 }
 
 emit_core_filter_field_helper :: proc(e: ^Emitter, field: string) {
-    emit_line(e, fmt.tprintf("odinl_filter_field_%s :: proc(xs: []$T) -> [dynamic]T %s", field, "{"))
+    emit_line(e, fmt.tprintf("kvist_filter_field_%s :: proc(xs: []$T) -> [dynamic]T %s", field, "{"))
     e.indent += 1
     emit_line(e, "out := make([dynamic]T, 0, len(xs))")
     emit_line(e, "for x in xs {")
@@ -4640,7 +4647,7 @@ emit_core_filter_field_helper :: proc(e: ^Emitter, field: string) {
 }
 
 emit_core_filter_in_place_helper :: proc(e: ^Emitter) {
-    emit_line(e, "odinl_filter_in_place :: proc(pred: proc(x: $T) -> bool, xs: ^[dynamic]T) {")
+    emit_line(e, "kvist_filter_in_place :: proc(pred: proc(x: $T) -> bool, xs: ^[dynamic]T) {")
     e.indent += 1
     emit_line(e, "data := xs^")
     emit_line(e, "write := 0")
@@ -4660,7 +4667,7 @@ emit_core_filter_in_place_helper :: proc(e: ^Emitter) {
 }
 
 emit_core_filter_in_place_field_helper :: proc(e: ^Emitter, field: string) {
-    emit_line(e, fmt.tprintf("odinl_filter_in_place_field_%s :: proc(xs: ^[dynamic]$T) %s", field, "{"))
+    emit_line(e, fmt.tprintf("kvist_filter_in_place_field_%s :: proc(xs: ^[dynamic]$T) %s", field, "{"))
     e.indent += 1
     emit_line(e, "data := xs^")
     emit_line(e, "write := 0")
@@ -4680,7 +4687,7 @@ emit_core_filter_in_place_field_helper :: proc(e: ^Emitter, field: string) {
 }
 
 emit_core_remove_helper :: proc(e: ^Emitter) {
-    emit_line(e, "odinl_remove :: proc(pred: proc(x: $T) -> bool, xs: []T) -> [dynamic]T {")
+    emit_line(e, "kvist_remove :: proc(pred: proc(x: $T) -> bool, xs: []T) -> [dynamic]T {")
     e.indent += 1
     emit_line(e, "out := make([dynamic]T, 0, len(xs))")
     emit_line(e, "for x in xs {")
@@ -4698,7 +4705,7 @@ emit_core_remove_helper :: proc(e: ^Emitter) {
 }
 
 emit_core_remove_field_helper :: proc(e: ^Emitter, field: string) {
-    emit_line(e, fmt.tprintf("odinl_remove_field_%s :: proc(xs: []$T) -> [dynamic]T %s", field, "{"))
+    emit_line(e, fmt.tprintf("kvist_remove_field_%s :: proc(xs: []$T) -> [dynamic]T %s", field, "{"))
     e.indent += 1
     emit_line(e, "out := make([dynamic]T, 0, len(xs))")
     emit_line(e, "for x in xs {")
@@ -4716,7 +4723,7 @@ emit_core_remove_field_helper :: proc(e: ^Emitter, field: string) {
 }
 
 emit_core_remove_in_place_helper :: proc(e: ^Emitter) {
-    emit_line(e, "odinl_remove_in_place :: proc(pred: proc(x: $T) -> bool, xs: ^[dynamic]T) {")
+    emit_line(e, "kvist_remove_in_place :: proc(pred: proc(x: $T) -> bool, xs: ^[dynamic]T) {")
     e.indent += 1
     emit_line(e, "data := xs^")
     emit_line(e, "write := 0")
@@ -4736,7 +4743,7 @@ emit_core_remove_in_place_helper :: proc(e: ^Emitter) {
 }
 
 emit_core_remove_in_place_field_helper :: proc(e: ^Emitter, field: string) {
-    emit_line(e, fmt.tprintf("odinl_remove_in_place_field_%s :: proc(xs: ^[dynamic]$T) %s", field, "{"))
+    emit_line(e, fmt.tprintf("kvist_remove_in_place_field_%s :: proc(xs: ^[dynamic]$T) %s", field, "{"))
     e.indent += 1
     emit_line(e, "data := xs^")
     emit_line(e, "write := 0")
@@ -4756,7 +4763,7 @@ emit_core_remove_in_place_field_helper :: proc(e: ^Emitter, field: string) {
 }
 
 emit_core_map_indexed_helper :: proc(e: ^Emitter) {
-    emit_line(e, "odinl_map_indexed :: proc(f: proc(i: int, x: $T) -> $U, xs: []T) -> [dynamic]U {")
+    emit_line(e, "kvist_map_indexed :: proc(f: proc(i: int, x: $T) -> $U, xs: []T) -> [dynamic]U {")
     e.indent += 1
     emit_line(e, "out := make([dynamic]U, 0, len(xs))")
     emit_line(e, "for x, i in xs {")
@@ -4770,7 +4777,7 @@ emit_core_map_indexed_helper :: proc(e: ^Emitter) {
 }
 
 emit_core_map_in_place_helper :: proc(e: ^Emitter) {
-    emit_line(e, "odinl_map_in_place :: proc(f: proc(x: $T) -> T, xs: []T) {")
+    emit_line(e, "kvist_map_in_place :: proc(f: proc(x: $T) -> T, xs: []T) {")
     e.indent += 1
     emit_line(e, "for i in 0..<len(xs) {")
     e.indent += 1
@@ -4782,7 +4789,7 @@ emit_core_map_in_place_helper :: proc(e: ^Emitter) {
 }
 
 emit_core_map_indexed_in_place_helper :: proc(e: ^Emitter) {
-    emit_line(e, "odinl_map_indexed_in_place :: proc(f: proc(i: int, x: $T) -> T, xs: []T) {")
+    emit_line(e, "kvist_map_indexed_in_place :: proc(f: proc(i: int, x: $T) -> T, xs: []T) {")
     e.indent += 1
     emit_line(e, "for i in 0..<len(xs) {")
     e.indent += 1
@@ -4794,7 +4801,7 @@ emit_core_map_indexed_in_place_helper :: proc(e: ^Emitter) {
 }
 
 emit_core_keep_helper :: proc(e: ^Emitter) {
-    emit_line(e, "odinl_keep :: proc(f: proc(x: $T) -> ($U, bool), xs: []T) -> [dynamic]U {")
+    emit_line(e, "kvist_keep :: proc(f: proc(x: $T) -> ($U, bool), xs: []T) -> [dynamic]U {")
     e.indent += 1
     emit_line(e, "out := make([dynamic]U, 0, len(xs))")
     emit_line(e, "for x in xs {")
@@ -4813,7 +4820,7 @@ emit_core_keep_helper :: proc(e: ^Emitter) {
 }
 
 emit_core_keep_in_place_helper :: proc(e: ^Emitter) {
-    emit_line(e, "odinl_keep_in_place :: proc(f: proc(x: $T) -> (T, bool), xs: ^[dynamic]T) {")
+    emit_line(e, "kvist_keep_in_place :: proc(f: proc(x: $T) -> (T, bool), xs: ^[dynamic]T) {")
     e.indent += 1
     emit_line(e, "data := xs^")
     emit_line(e, "write := 0")
@@ -4834,7 +4841,7 @@ emit_core_keep_in_place_helper :: proc(e: ^Emitter) {
 }
 
 emit_core_mapcat_helper :: proc(e: ^Emitter) {
-    emit_line(e, "odinl_mapcat :: proc(f: proc(x: $T) -> []$U, xs: []T) -> [dynamic]U {")
+    emit_line(e, "kvist_mapcat :: proc(f: proc(x: $T) -> []$U, xs: []T) -> [dynamic]U {")
     e.indent += 1
     emit_line(e, "out := make([dynamic]U, 0, len(xs))")
     emit_line(e, "for x in xs {")
@@ -4848,7 +4855,7 @@ emit_core_mapcat_helper :: proc(e: ^Emitter) {
 }
 
 emit_core_concat_helper :: proc(e: ^Emitter) {
-    emit_line(e, "odinl_concat :: proc(xs, ys: []$T) -> [dynamic]T {")
+    emit_line(e, "kvist_concat :: proc(xs, ys: []$T) -> [dynamic]T {")
     e.indent += 1
     emit_line(e, "out := make([dynamic]T, 0, len(xs)+len(ys))")
     emit_line(e, "append(&out, ..xs)")
@@ -4859,7 +4866,7 @@ emit_core_concat_helper :: proc(e: ^Emitter) {
 }
 
 emit_core_merge_helper :: proc(e: ^Emitter) {
-    emit_line(e, "odinl_merge :: proc(lhs, rhs: map[$K]$V) -> map[K]V {")
+    emit_line(e, "kvist_merge :: proc(lhs, rhs: map[$K]$V) -> map[K]V {")
     e.indent += 1
     emit_line(e, "out := make(map[K]V, len(lhs)+len(rhs))")
     emit_line(e, "for key, value in lhs {")
@@ -4878,7 +4885,7 @@ emit_core_merge_helper :: proc(e: ^Emitter) {
 }
 
 emit_core_merge_in_place_helper :: proc(e: ^Emitter) {
-    emit_line(e, "odinl_merge_in_place :: proc(target: ^map[$K]$V, source: map[K]V) {")
+    emit_line(e, "kvist_merge_in_place :: proc(target: ^map[$K]$V, source: map[K]V) {")
     e.indent += 1
     emit_line(e, "for key, value in source {")
     e.indent += 1
@@ -4890,7 +4897,7 @@ emit_core_merge_in_place_helper :: proc(e: ^Emitter) {
 }
 
 emit_core_get_or_default_helper :: proc(e: ^Emitter) {
-    emit_line(e, "odinl_get_or_default :: proc(m: map[$K]$V, key: K, default: V) -> V {")
+    emit_line(e, "kvist_get_or_default :: proc(m: map[$K]$V, key: K, default: V) -> V {")
     e.indent += 1
     emit_line(e, "value, ok := m[key]")
     emit_line(e, "if ok {")
@@ -4904,7 +4911,7 @@ emit_core_get_or_default_helper :: proc(e: ^Emitter) {
 }
 
 emit_core_into_helper :: proc(e: ^Emitter) {
-    emit_line(e, "odinl_into :: proc($Out: typeid, xs: []$T) -> Out {")
+    emit_line(e, "kvist_into :: proc($Out: typeid, xs: []$T) -> Out {")
     e.indent += 1
     emit_line(e, "out := make(Out, 0, len(xs))")
     emit_line(e, "append(&out, ..xs)")
@@ -4914,7 +4921,7 @@ emit_core_into_helper :: proc(e: ^Emitter) {
 }
 
 emit_core_interpose_helper :: proc(e: ^Emitter) {
-    emit_line(e, "odinl_interpose :: proc(sep: $T, xs: []T) -> [dynamic]T {")
+    emit_line(e, "kvist_interpose :: proc(sep: $T, xs: []T) -> [dynamic]T {")
     e.indent += 1
     emit_line(e, "out := make([dynamic]T, 0, max(0, len(xs)*2-1))")
     emit_line(e, "if len(xs) == 0 {")
@@ -4935,7 +4942,7 @@ emit_core_interpose_helper :: proc(e: ^Emitter) {
 }
 
 emit_core_interleave_helper :: proc(e: ^Emitter) {
-    emit_line(e, "odinl_interleave :: proc(xs, ys: []$T) -> [dynamic]T {")
+    emit_line(e, "kvist_interleave :: proc(xs, ys: []$T) -> [dynamic]T {")
     e.indent += 1
     emit_line(e, "n := len(xs)")
     emit_line(e, "if len(ys) < n {")
@@ -4956,7 +4963,7 @@ emit_core_interleave_helper :: proc(e: ^Emitter) {
 }
 
 emit_core_reverse_helper :: proc(e: ^Emitter) {
-    emit_line(e, "odinl_reverse :: proc(xs: []$T) -> [dynamic]T {")
+    emit_line(e, "kvist_reverse :: proc(xs: []$T) -> [dynamic]T {")
     e.indent += 1
     emit_line(e, "out := make([dynamic]T, 0, len(xs))")
     emit_line(e, "for i := len(xs)-1; i >= 0; i -= 1 {")
@@ -4970,7 +4977,7 @@ emit_core_reverse_helper :: proc(e: ^Emitter) {
 }
 
 emit_core_reverse_in_place_helper :: proc(e: ^Emitter) {
-    emit_line(e, "odinl_reverse_in_place :: proc(xs: []$T) {")
+    emit_line(e, "kvist_reverse_in_place :: proc(xs: []$T) {")
     e.indent += 1
     emit_line(e, "for i := 0; i < len(xs)/2; i += 1 {")
     e.indent += 1
@@ -4983,7 +4990,7 @@ emit_core_reverse_in_place_helper :: proc(e: ^Emitter) {
 }
 
 emit_core_shuffle_helper :: proc(e: ^Emitter) {
-    emit_line(e, "odinl_shuffle :: proc(pick: proc(n: int) -> int, xs: []$T) -> [dynamic]T {")
+    emit_line(e, "kvist_shuffle :: proc(pick: proc(n: int) -> int, xs: []$T) -> [dynamic]T {")
     e.indent += 1
     emit_line(e, "out := make([dynamic]T, 0, len(xs))")
     emit_line(e, "append(&out, ..xs)")
@@ -4999,7 +5006,7 @@ emit_core_shuffle_helper :: proc(e: ^Emitter) {
 }
 
 emit_core_shuffle_in_place_helper :: proc(e: ^Emitter) {
-    emit_line(e, "odinl_shuffle_in_place :: proc(pick: proc(n: int) -> int, xs: []$T) {")
+    emit_line(e, "kvist_shuffle_in_place :: proc(pick: proc(n: int) -> int, xs: []$T) {")
     e.indent += 1
     emit_line(e, "for i := len(xs)-1; i > 0; i -= 1 {")
     e.indent += 1
@@ -5012,30 +5019,30 @@ emit_core_shuffle_in_place_helper :: proc(e: ^Emitter) {
 }
 
 emit_core_sort_helper :: proc(e: ^Emitter) {
-    emit_line(e, "odinl_sort :: proc(xs: []$T) -> [dynamic]T {")
+    emit_line(e, "kvist_sort :: proc(xs: []$T) -> [dynamic]T {")
     e.indent += 1
     emit_line(e, "out := make([dynamic]T, 0, len(xs))")
     emit_line(e, "append(&out, ..xs)")
-    emit_line(e, "odinl_slice.sort(out[:])")
+    emit_line(e, "kvist_slice.sort(out[:])")
     emit_line(e, "return out")
     e.indent -= 1
     emit_line(e, "}")
 }
 
 emit_core_sort_in_place_helper :: proc(e: ^Emitter) {
-    emit_line(e, "odinl_sort_in_place :: proc(xs: []$T) {")
+    emit_line(e, "kvist_sort_in_place :: proc(xs: []$T) {")
     e.indent += 1
-    emit_line(e, "odinl_slice.sort(xs)")
+    emit_line(e, "kvist_slice.sort(xs)")
     e.indent -= 1
     emit_line(e, "}")
 }
 
 emit_core_sort_by_helper :: proc(e: ^Emitter) {
-    emit_line(e, "odinl_sort_by :: proc(f: proc(x: $T) -> $K, xs: []T) -> [dynamic]T {")
+    emit_line(e, "kvist_sort_by :: proc(f: proc(x: $T) -> $K, xs: []T) -> [dynamic]T {")
     e.indent += 1
     emit_line(e, "out := make([dynamic]T, 0, len(xs))")
     emit_line(e, "append(&out, ..xs)")
-    emit_line(e, "odinl_slice.sort_by_with_data(out[:], proc(a, b: T, user_data: rawptr) -> bool {")
+    emit_line(e, "kvist_slice.sort_by_with_data(out[:], proc(a, b: T, user_data: rawptr) -> bool {")
     e.indent += 1
     emit_line(e, "key := (proc(x: T) -> K)(user_data)")
     emit_line(e, "return key(a) < key(b)")
@@ -5047,9 +5054,9 @@ emit_core_sort_by_helper :: proc(e: ^Emitter) {
 }
 
 emit_core_sort_by_in_place_helper :: proc(e: ^Emitter) {
-    emit_line(e, "odinl_sort_by_in_place :: proc(f: proc(x: $T) -> $K, xs: []T) {")
+    emit_line(e, "kvist_sort_by_in_place :: proc(f: proc(x: $T) -> $K, xs: []T) {")
     e.indent += 1
-    emit_line(e, "odinl_slice.sort_by_with_data(xs, proc(a, b: T, user_data: rawptr) -> bool {")
+    emit_line(e, "kvist_slice.sort_by_with_data(xs, proc(a, b: T, user_data: rawptr) -> bool {")
     e.indent += 1
     emit_line(e, "key := (proc(x: T) -> K)(user_data)")
     emit_line(e, "return key(a) < key(b)")
@@ -5060,11 +5067,11 @@ emit_core_sort_by_in_place_helper :: proc(e: ^Emitter) {
 }
 
 emit_core_sort_by_field_helper :: proc(e: ^Emitter, field: string) {
-    emit_line(e, fmt.tprintf("odinl_sort_by_field_%s :: proc($Key: typeid, xs: []$T) -> [dynamic]T %s", field, "{"))
+    emit_line(e, fmt.tprintf("kvist_sort_by_field_%s :: proc($Key: typeid, xs: []$T) -> [dynamic]T %s", field, "{"))
     e.indent += 1
     emit_line(e, "out := make([dynamic]T, 0, len(xs))")
     emit_line(e, "append(&out, ..xs)")
-    emit_line(e, "odinl_slice.sort_by(out[:], proc(a, b: T) -> bool {")
+    emit_line(e, "kvist_slice.sort_by(out[:], proc(a, b: T) -> bool {")
     e.indent += 1
     emit_line(e, fmt.tprintf("return a.%s < b.%s", field, field))
     e.indent -= 1
@@ -5075,9 +5082,9 @@ emit_core_sort_by_field_helper :: proc(e: ^Emitter, field: string) {
 }
 
 emit_core_sort_by_in_place_field_helper :: proc(e: ^Emitter, field: string) {
-    emit_line(e, fmt.tprintf("odinl_sort_by_in_place_field_%s :: proc(xs: []$T) %s", field, "{"))
+    emit_line(e, fmt.tprintf("kvist_sort_by_in_place_field_%s :: proc(xs: []$T) %s", field, "{"))
     e.indent += 1
-    emit_line(e, "odinl_slice.sort_by(xs, proc(a, b: T) -> bool {")
+    emit_line(e, "kvist_slice.sort_by(xs, proc(a, b: T) -> bool {")
     e.indent += 1
     emit_line(e, fmt.tprintf("return a.%s < b.%s", field, field))
     e.indent -= 1
@@ -5091,7 +5098,7 @@ emit_core_sort_by_callback_helper :: proc(e: ^Emitter, callback: string) {
     e.indent += 1
     emit_line(e, "out := make([dynamic]T, 0, len(xs))")
     emit_line(e, "append(&out, ..xs)")
-    emit_line(e, "odinl_slice.sort_by(out[:], proc(a, b: T) -> bool {")
+    emit_line(e, "kvist_slice.sort_by(out[:], proc(a, b: T) -> bool {")
     e.indent += 1
     emit_line(e, fmt.tprintf("return %s(a) < %s(b)", callback, callback))
     e.indent -= 1
@@ -5104,7 +5111,7 @@ emit_core_sort_by_callback_helper :: proc(e: ^Emitter, callback: string) {
 emit_core_sort_by_in_place_callback_helper :: proc(e: ^Emitter, callback: string) {
     emit_line(e, fmt.tprintf("%s :: proc(xs: []$T) %s", sort_by_callback_helper_name(callback, true), "{"))
     e.indent += 1
-    emit_line(e, "odinl_slice.sort_by(xs, proc(a, b: T) -> bool {")
+    emit_line(e, "kvist_slice.sort_by(xs, proc(a, b: T) -> bool {")
     e.indent += 1
     emit_line(e, fmt.tprintf("return %s(a) < %s(b)", callback, callback))
     e.indent -= 1
@@ -5114,7 +5121,7 @@ emit_core_sort_by_in_place_callback_helper :: proc(e: ^Emitter, callback: string
 }
 
 emit_core_split_at_helper :: proc(e: ^Emitter) {
-    emit_line(e, "odinl_split_at :: proc(n: int, xs: []$T) -> (left: []T, right: []T) {")
+    emit_line(e, "kvist_split_at :: proc(n: int, xs: []$T) -> (left: []T, right: []T) {")
     e.indent += 1
     emit_line(e, "mid := n")
     emit_line(e, "if mid < 0 {")
@@ -5133,7 +5140,7 @@ emit_core_split_at_helper :: proc(e: ^Emitter) {
 }
 
 emit_core_partition_helper :: proc(e: ^Emitter) {
-    emit_line(e, "odinl_partition :: proc(n: int, xs: []$T) -> [dynamic][]T {")
+    emit_line(e, "kvist_partition :: proc(n: int, xs: []$T) -> [dynamic][]T {")
     e.indent += 1
     emit_line(e, "if n <= 0 {")
     e.indent += 1
@@ -5152,7 +5159,7 @@ emit_core_partition_helper :: proc(e: ^Emitter) {
 }
 
 emit_core_partition_all_helper :: proc(e: ^Emitter) {
-    emit_line(e, "odinl_partition_all :: proc(n: int, xs: []$T) -> [dynamic][]T {")
+    emit_line(e, "kvist_partition_all :: proc(n: int, xs: []$T) -> [dynamic][]T {")
     e.indent += 1
     emit_line(e, "if n <= 0 {")
     e.indent += 1
@@ -5177,7 +5184,7 @@ emit_core_partition_all_helper :: proc(e: ^Emitter) {
 }
 
 emit_core_partition_by_helper :: proc(e: ^Emitter) {
-    emit_line(e, "odinl_partition_by :: proc(f: proc(x: $T) -> $K, xs: []T) -> [dynamic][]T {")
+    emit_line(e, "kvist_partition_by :: proc(f: proc(x: $T) -> $K, xs: []T) -> [dynamic][]T {")
     e.indent += 1
     emit_line(e, "if len(xs) == 0 {")
     e.indent += 1
@@ -5206,7 +5213,7 @@ emit_core_partition_by_helper :: proc(e: ^Emitter) {
 }
 
 emit_core_partition_by_field_helper :: proc(e: ^Emitter, field: string) {
-    emit_line(e, fmt.tprintf("odinl_partition_by_field_%s :: proc($Key: typeid, xs: []$T) -> [dynamic][]T %s", field, "{"))
+    emit_line(e, fmt.tprintf("kvist_partition_by_field_%s :: proc($Key: typeid, xs: []$T) -> [dynamic][]T %s", field, "{"))
     e.indent += 1
     emit_line(e, "if len(xs) == 0 {")
     e.indent += 1
@@ -5235,7 +5242,7 @@ emit_core_partition_by_field_helper :: proc(e: ^Emitter, field: string) {
 }
 
 emit_core_zipmap_helper :: proc(e: ^Emitter) {
-    emit_line(e, "odinl_zipmap :: proc(keys: []$K, values: []$V) -> map[K]V {")
+    emit_line(e, "kvist_zipmap :: proc(keys: []$K, values: []$V) -> map[K]V {")
     e.indent += 1
     emit_line(e, "limit := len(keys)")
     emit_line(e, "if limit > len(values) {")
@@ -5255,7 +5262,7 @@ emit_core_zipmap_helper :: proc(e: ^Emitter) {
 }
 
 emit_core_index_by_helper :: proc(e: ^Emitter) {
-    emit_line(e, "odinl_index_by :: proc(f: proc(x: $T) -> $K, xs: []T) -> map[K]T {")
+    emit_line(e, "kvist_index_by :: proc(f: proc(x: $T) -> $K, xs: []T) -> map[K]T {")
     e.indent += 1
     emit_line(e, "out := make(map[K]T, len(xs))")
     emit_line(e, "for x in xs {")
@@ -5269,7 +5276,7 @@ emit_core_index_by_helper :: proc(e: ^Emitter) {
 }
 
 emit_core_index_by_field_helper :: proc(e: ^Emitter, field: string) {
-    emit_line(e, fmt.tprintf("odinl_index_by_field_%s :: proc($Key: typeid, xs: []$T) -> map[Key]T %s", field, "{"))
+    emit_line(e, fmt.tprintf("kvist_index_by_field_%s :: proc($Key: typeid, xs: []$T) -> map[Key]T %s", field, "{"))
     e.indent += 1
     emit_line(e, "out := make(map[Key]T, len(xs))")
     emit_line(e, "for x in xs {")
@@ -5283,7 +5290,7 @@ emit_core_index_by_field_helper :: proc(e: ^Emitter, field: string) {
 }
 
 emit_core_group_by_helper :: proc(e: ^Emitter) {
-    emit_line(e, "odinl_group_by :: proc(f: proc(x: $T) -> $K, xs: []T) -> map[K][dynamic]T {")
+    emit_line(e, "kvist_group_by :: proc(f: proc(x: $T) -> $K, xs: []T) -> map[K][dynamic]T {")
     e.indent += 1
     emit_line(e, "out := make(map[K][dynamic]T)")
     emit_line(e, "for x in xs {")
@@ -5305,7 +5312,7 @@ emit_core_group_by_helper :: proc(e: ^Emitter) {
 }
 
 emit_core_group_by_field_helper :: proc(e: ^Emitter, field: string) {
-    emit_line(e, fmt.tprintf("odinl_group_by_field_%s :: proc($Key: typeid, xs: []$T) -> map[Key][dynamic]T %s", field, "{"))
+    emit_line(e, fmt.tprintf("kvist_group_by_field_%s :: proc($Key: typeid, xs: []$T) -> map[Key][dynamic]T %s", field, "{"))
     e.indent += 1
     emit_line(e, "out := make(map[Key][dynamic]T)")
     emit_line(e, "for x in xs {")
@@ -5327,7 +5334,7 @@ emit_core_group_by_field_helper :: proc(e: ^Emitter, field: string) {
 }
 
 emit_core_count_by_helper :: proc(e: ^Emitter) {
-    emit_line(e, "odinl_count_by :: proc(f: proc(x: $T) -> $K, xs: []T) -> map[K]int {")
+    emit_line(e, "kvist_count_by :: proc(f: proc(x: $T) -> $K, xs: []T) -> map[K]int {")
     e.indent += 1
     emit_line(e, "out := make(map[K]int)")
     emit_line(e, "for x in xs {")
@@ -5341,7 +5348,7 @@ emit_core_count_by_helper :: proc(e: ^Emitter) {
 }
 
 emit_core_count_by_field_helper :: proc(e: ^Emitter, field: string) {
-    emit_line(e, fmt.tprintf("odinl_count_by_field_%s :: proc($Key: typeid, xs: []$T) -> map[Key]int %s", field, "{"))
+    emit_line(e, fmt.tprintf("kvist_count_by_field_%s :: proc($Key: typeid, xs: []$T) -> map[Key]int %s", field, "{"))
     e.indent += 1
     emit_line(e, "out := make(map[Key]int)")
     emit_line(e, "for x in xs {")
@@ -5355,7 +5362,7 @@ emit_core_count_by_field_helper :: proc(e: ^Emitter, field: string) {
 }
 
 emit_core_sum_by_helper :: proc(e: ^Emitter) {
-    emit_line(e, "odinl_sum_by :: proc(key_f: proc(x: $T) -> $K, value_f: proc(x: T) -> $V, xs: []T) -> map[K]V {")
+    emit_line(e, "kvist_sum_by :: proc(key_f: proc(x: $T) -> $K, value_f: proc(x: T) -> $V, xs: []T) -> map[K]V {")
     e.indent += 1
     emit_line(e, "out := make(map[K]V)")
     emit_line(e, "for x in xs {")
@@ -5369,7 +5376,7 @@ emit_core_sum_by_helper :: proc(e: ^Emitter) {
 }
 
 emit_core_sum_by_field_helper :: proc(e: ^Emitter, fields: Sum_By_Field) {
-    emit_line(e, fmt.tprintf("odinl_sum_by_fields_%s_%s :: proc($Key: typeid, $Value: typeid, xs: []$T) -> map[Key]Value %s", fields.key, fields.value, "{"))
+    emit_line(e, fmt.tprintf("kvist_sum_by_fields_%s_%s :: proc($Key: typeid, $Value: typeid, xs: []$T) -> map[Key]Value %s", fields.key, fields.value, "{"))
     e.indent += 1
     emit_line(e, "out := make(map[Key]Value)")
     emit_line(e, "for x in xs {")
@@ -5383,7 +5390,7 @@ emit_core_sum_by_field_helper :: proc(e: ^Emitter, fields: Sum_By_Field) {
 }
 
 emit_core_frequencies_helper :: proc(e: ^Emitter) {
-    emit_line(e, "odinl_frequencies :: proc(xs: []$T) -> map[T]int {")
+    emit_line(e, "kvist_frequencies :: proc(xs: []$T) -> map[T]int {")
     e.indent += 1
     emit_line(e, "out := make(map[T]int, len(xs))")
     emit_line(e, "for x in xs {")
@@ -5397,7 +5404,7 @@ emit_core_frequencies_helper :: proc(e: ^Emitter) {
 }
 
 emit_core_distinct_helper :: proc(e: ^Emitter) {
-    emit_line(e, "odinl_distinct :: proc(xs: []$T) -> [dynamic]T {")
+    emit_line(e, "kvist_distinct :: proc(xs: []$T) -> [dynamic]T {")
     e.indent += 1
     emit_line(e, "out := make([dynamic]T, 0, len(xs))")
     emit_line(e, "seen := make(map[T]bool, len(xs))")
@@ -5419,7 +5426,7 @@ emit_core_distinct_helper :: proc(e: ^Emitter) {
 }
 
 emit_core_distinct_by_helper :: proc(e: ^Emitter) {
-    emit_line(e, "odinl_distinct_by :: proc(f: proc(x: $T) -> $K, xs: []T) -> [dynamic]T {")
+    emit_line(e, "kvist_distinct_by :: proc(f: proc(x: $T) -> $K, xs: []T) -> [dynamic]T {")
     e.indent += 1
     emit_line(e, "out := make([dynamic]T, 0, len(xs))")
     emit_line(e, "seen := make(map[K]bool, len(xs))")
@@ -5442,7 +5449,7 @@ emit_core_distinct_by_helper :: proc(e: ^Emitter) {
 }
 
 emit_core_distinct_by_field_helper :: proc(e: ^Emitter, field: string) {
-    emit_line(e, fmt.tprintf("odinl_distinct_by_field_%s :: proc($Key: typeid, xs: []$T) -> [dynamic]T %s", field, "{"))
+    emit_line(e, fmt.tprintf("kvist_distinct_by_field_%s :: proc($Key: typeid, xs: []$T) -> [dynamic]T %s", field, "{"))
     e.indent += 1
     emit_line(e, "out := make([dynamic]T, 0, len(xs))")
     emit_line(e, "seen := make(map[Key]bool, len(xs))")
@@ -5465,7 +5472,7 @@ emit_core_distinct_by_field_helper :: proc(e: ^Emitter, field: string) {
 }
 
 emit_core_keys_helper :: proc(e: ^Emitter) {
-    emit_line(e, "odinl_keys :: proc(m: map[$K]$V) -> [dynamic]K {")
+    emit_line(e, "kvist_keys :: proc(m: map[$K]$V) -> [dynamic]K {")
     e.indent += 1
     emit_line(e, "out := make([dynamic]K, 0, len(m))")
     emit_line(e, "for k in m {")
@@ -5479,7 +5486,7 @@ emit_core_keys_helper :: proc(e: ^Emitter) {
 }
 
 emit_core_vals_helper :: proc(e: ^Emitter) {
-    emit_line(e, "odinl_vals :: proc(m: map[$K]$V) -> [dynamic]V {")
+    emit_line(e, "kvist_vals :: proc(m: map[$K]$V) -> [dynamic]V {")
     e.indent += 1
     emit_line(e, "out := make([dynamic]V, 0, len(m))")
     emit_line(e, "for _, v in m {")
@@ -5493,7 +5500,7 @@ emit_core_vals_helper :: proc(e: ^Emitter) {
 }
 
 emit_core_range_helper :: proc(e: ^Emitter) {
-    emit_line(e, "odinl_range :: proc(start, end, step: int) -> [dynamic]int {")
+    emit_line(e, "kvist_range :: proc(start, end, step: int) -> [dynamic]int {")
     e.indent += 1
     emit_line(e, "if step == 0 {")
     e.indent += 1
@@ -5534,7 +5541,7 @@ emit_core_range_helper :: proc(e: ^Emitter) {
 }
 
 emit_core_repeat_helper :: proc(e: ^Emitter) {
-    emit_line(e, "odinl_repeat :: proc(n: int, value: $T) -> [dynamic]T {")
+    emit_line(e, "kvist_repeat :: proc(n: int, value: $T) -> [dynamic]T {")
     e.indent += 1
     emit_line(e, "if n <= 0 {")
     e.indent += 1
@@ -5553,7 +5560,7 @@ emit_core_repeat_helper :: proc(e: ^Emitter) {
 }
 
 emit_core_repeatedly_helper :: proc(e: ^Emitter) {
-    emit_line(e, "odinl_repeatedly :: proc(n: int, f: proc() -> $T) -> [dynamic]T {")
+    emit_line(e, "kvist_repeatedly :: proc(n: int, f: proc() -> $T) -> [dynamic]T {")
     e.indent += 1
     emit_line(e, "if n <= 0 {")
     e.indent += 1
@@ -5572,7 +5579,7 @@ emit_core_repeatedly_helper :: proc(e: ^Emitter) {
 }
 
 emit_core_iterate_helper :: proc(e: ^Emitter) {
-    emit_line(e, "odinl_iterate :: proc(n: int, f: proc(x: $T) -> T, init: T) -> [dynamic]T {")
+    emit_line(e, "kvist_iterate :: proc(n: int, f: proc(x: $T) -> T, init: T) -> [dynamic]T {")
     e.indent += 1
     emit_line(e, "if n <= 0 {")
     e.indent += 1
@@ -5593,7 +5600,7 @@ emit_core_iterate_helper :: proc(e: ^Emitter) {
 }
 
 emit_core_cycle_helper :: proc(e: ^Emitter) {
-    emit_line(e, "odinl_cycle :: proc(n: int, xs: []$T) -> [dynamic]T {")
+    emit_line(e, "kvist_cycle :: proc(n: int, xs: []$T) -> [dynamic]T {")
     e.indent += 1
     emit_line(e, "if n <= 0 || len(xs) == 0 {")
     e.indent += 1
@@ -5612,14 +5619,14 @@ emit_core_cycle_helper :: proc(e: ^Emitter) {
 }
 
 emit_core_tap_helper :: proc(e: ^Emitter) {
-    emit_line(e, "odinl_tap :: proc(value: $T) -> T {")
+    emit_line(e, "kvist_tap :: proc(value: $T) -> T {")
     e.indent += 1
     emit_line(e, "fmt.println(value)")
     emit_line(e, "return value")
     e.indent -= 1
     emit_line(e, "}")
     emit_raw_newline(e)
-    emit_line(e, "odinl_tap_labeled :: proc(label: string, value: $T) -> T {")
+    emit_line(e, "kvist_tap_labeled :: proc(label: string, value: $T) -> T {")
     e.indent += 1
     emit_line(e, "fmt.print(label)")
     emit_line(e, "fmt.print(\": \")")
@@ -5630,7 +5637,7 @@ emit_core_tap_helper :: proc(e: ^Emitter) {
 }
 
 emit_core_reduce_helper :: proc(e: ^Emitter) {
-    emit_line(e, "odinl_reduce :: proc(f: proc(acc: $U, x: $T) -> U, init: U, xs: []T) -> U {")
+    emit_line(e, "kvist_reduce :: proc(f: proc(acc: $U, x: $T) -> U, init: U, xs: []T) -> U {")
     e.indent += 1
     emit_line(e, "acc := init")
     emit_line(e, "for x in xs {")
@@ -5644,7 +5651,7 @@ emit_core_reduce_helper :: proc(e: ^Emitter) {
 }
 
 emit_core_take_helper :: proc(e: ^Emitter) {
-    emit_line(e, "odinl_take :: proc(n: int, xs: []$T) -> []T {")
+    emit_line(e, "kvist_take :: proc(n: int, xs: []$T) -> []T {")
     e.indent += 1
     emit_line(e, "limit := n")
     emit_line(e, "if limit < 0 {")
@@ -5663,7 +5670,7 @@ emit_core_take_helper :: proc(e: ^Emitter) {
 }
 
 emit_core_drop_helper :: proc(e: ^Emitter) {
-    emit_line(e, "odinl_drop :: proc(n: int, xs: []$T) -> []T {")
+    emit_line(e, "kvist_drop :: proc(n: int, xs: []$T) -> []T {")
     e.indent += 1
     emit_line(e, "start := n")
     emit_line(e, "if start < 0 {")
@@ -5682,7 +5689,7 @@ emit_core_drop_helper :: proc(e: ^Emitter) {
 }
 
 emit_core_drop_last_helper :: proc(e: ^Emitter) {
-    emit_line(e, "odinl_drop_last :: proc(n: int, xs: []$T) -> []T {")
+    emit_line(e, "kvist_drop_last :: proc(n: int, xs: []$T) -> []T {")
     e.indent += 1
     emit_line(e, "end := len(xs) - n")
     emit_line(e, "if end < 0 {")
@@ -5701,7 +5708,7 @@ emit_core_drop_last_helper :: proc(e: ^Emitter) {
 }
 
 emit_core_take_nth_helper :: proc(e: ^Emitter) {
-    emit_line(e, "odinl_take_nth :: proc(n: int, xs: []$T) -> [dynamic]T {")
+    emit_line(e, "kvist_take_nth :: proc(n: int, xs: []$T) -> [dynamic]T {")
     e.indent += 1
     emit_line(e, "if n <= 0 {")
     e.indent += 1
@@ -5720,7 +5727,7 @@ emit_core_take_nth_helper :: proc(e: ^Emitter) {
 }
 
 emit_core_take_while_helper :: proc(e: ^Emitter) {
-    emit_line(e, "odinl_take_while :: proc(pred: proc(x: $T) -> bool, xs: []T) -> []T {")
+    emit_line(e, "kvist_take_while :: proc(pred: proc(x: $T) -> bool, xs: []T) -> []T {")
     e.indent += 1
     emit_line(e, "for i in 0..<len(xs) {")
     e.indent += 1
@@ -5737,7 +5744,7 @@ emit_core_take_while_helper :: proc(e: ^Emitter) {
 }
 
 emit_core_take_while_field_helper :: proc(e: ^Emitter, field: string) {
-    emit_line(e, fmt.tprintf("odinl_take_while_field_%s :: proc(xs: []$T) -> []T %s", field, "{"))
+    emit_line(e, fmt.tprintf("kvist_take_while_field_%s :: proc(xs: []$T) -> []T %s", field, "{"))
     e.indent += 1
     emit_line(e, "for i in 0..<len(xs) {")
     e.indent += 1
@@ -5754,7 +5761,7 @@ emit_core_take_while_field_helper :: proc(e: ^Emitter, field: string) {
 }
 
 emit_core_drop_while_helper :: proc(e: ^Emitter) {
-    emit_line(e, "odinl_drop_while :: proc(pred: proc(x: $T) -> bool, xs: []T) -> []T {")
+    emit_line(e, "kvist_drop_while :: proc(pred: proc(x: $T) -> bool, xs: []T) -> []T {")
     e.indent += 1
     emit_line(e, "for i in 0..<len(xs) {")
     e.indent += 1
@@ -5771,7 +5778,7 @@ emit_core_drop_while_helper :: proc(e: ^Emitter) {
 }
 
 emit_core_drop_while_field_helper :: proc(e: ^Emitter, field: string) {
-    emit_line(e, fmt.tprintf("odinl_drop_while_field_%s :: proc(xs: []$T) -> []T %s", field, "{"))
+    emit_line(e, fmt.tprintf("kvist_drop_while_field_%s :: proc(xs: []$T) -> []T %s", field, "{"))
     e.indent += 1
     emit_line(e, "for i in 0..<len(xs) {")
     e.indent += 1
@@ -5788,7 +5795,7 @@ emit_core_drop_while_field_helper :: proc(e: ^Emitter, field: string) {
 }
 
 emit_core_find_helper :: proc(e: ^Emitter) {
-    emit_line(e, "odinl_find :: proc(pred: proc(x: $T) -> bool, xs: []T) -> (value: T, ok: bool) {")
+    emit_line(e, "kvist_find :: proc(pred: proc(x: $T) -> bool, xs: []T) -> (value: T, ok: bool) {")
     e.indent += 1
     emit_line(e, "for x in xs {")
     e.indent += 1
@@ -5805,7 +5812,7 @@ emit_core_find_helper :: proc(e: ^Emitter) {
 }
 
 emit_core_find_field_helper :: proc(e: ^Emitter, field: string) {
-    emit_line(e, fmt.tprintf("odinl_find_field_%s :: proc(xs: []$T) -> (value: T, ok: bool) %s", field, "{"))
+    emit_line(e, fmt.tprintf("kvist_find_field_%s :: proc(xs: []$T) -> (value: T, ok: bool) %s", field, "{"))
     e.indent += 1
     emit_line(e, "for x in xs {")
     e.indent += 1
@@ -5822,7 +5829,7 @@ emit_core_find_field_helper :: proc(e: ^Emitter, field: string) {
 }
 
 emit_core_some_helper :: proc(e: ^Emitter) {
-    emit_line(e, "odinl_some_p :: proc(pred: proc(x: $T) -> bool, xs: []T) -> bool {")
+    emit_line(e, "kvist_some_p :: proc(pred: proc(x: $T) -> bool, xs: []T) -> bool {")
     e.indent += 1
     emit_line(e, "for x in xs {")
     e.indent += 1
@@ -5839,7 +5846,7 @@ emit_core_some_helper :: proc(e: ^Emitter) {
 }
 
 emit_core_some_field_helper :: proc(e: ^Emitter, field: string) {
-    emit_line(e, fmt.tprintf("odinl_some_p_field_%s :: proc(xs: []$T) -> bool %s", field, "{"))
+    emit_line(e, fmt.tprintf("kvist_some_p_field_%s :: proc(xs: []$T) -> bool %s", field, "{"))
     e.indent += 1
     emit_line(e, "for x in xs {")
     e.indent += 1
@@ -5856,7 +5863,7 @@ emit_core_some_field_helper :: proc(e: ^Emitter, field: string) {
 }
 
 emit_core_every_helper :: proc(e: ^Emitter) {
-    emit_line(e, "odinl_every_p :: proc(pred: proc(x: $T) -> bool, xs: []T) -> bool {")
+    emit_line(e, "kvist_every_p :: proc(pred: proc(x: $T) -> bool, xs: []T) -> bool {")
     e.indent += 1
     emit_line(e, "for x in xs {")
     e.indent += 1
@@ -5873,7 +5880,7 @@ emit_core_every_helper :: proc(e: ^Emitter) {
 }
 
 emit_core_every_field_helper :: proc(e: ^Emitter, field: string) {
-    emit_line(e, fmt.tprintf("odinl_every_p_field_%s :: proc(xs: []$T) -> bool %s", field, "{"))
+    emit_line(e, fmt.tprintf("kvist_every_p_field_%s :: proc(xs: []$T) -> bool %s", field, "{"))
     e.indent += 1
     emit_line(e, "for x in xs {")
     e.indent += 1
@@ -6306,7 +6313,7 @@ decls_need_core_slice_sort_import :: proc(decls: []IR_Decl) -> bool {
     for decl in decls {
         if decl.kind == .Import &&
            decl.import_decl.has_alias &&
-           decl.import_decl.alias == "odinl_slice" &&
+           decl.import_decl.alias == "kvist_slice" &&
            decl.import_decl.path == "\"core:slice\"" {
             return false
         }
@@ -6323,7 +6330,7 @@ emit_core_slice_sort_import :: proc(e: ^Emitter, emitted: ^bool, needed: bool) {
     if !needed || emitted^ {
         return
     }
-    emit_line(e, "import odinl_slice \"core:slice\"")
+    emit_line(e, "import kvist_slice \"core:slice\"")
     strings.write_byte(&e.builder, '\n')
     e.line += 1
     emitted^ = true

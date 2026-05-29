@@ -1,4 +1,4 @@
-package odinl
+package kvist
 
 import "core:fmt"
 import "core:strings"
@@ -372,10 +372,10 @@ macroexpand_with_allocator :: proc(form: CST_Form) -> (result: Emit_Result, err:
 
     macro_emit_line(&e, "(do", form.span)
     macro_emit_line(&e, fmt.tprintf("  (let [%s %s", allocator_name, allocator_expr), binding.items[1].span)
-    macro_emit_line(&e, "        odinl-old-allocator-1 context.allocator]", form.span)
+    macro_emit_line(&e, "        kvist-old-allocator-1 context.allocator]", form.span)
     macro_emit_line(&e, fmt.tprintf("    (set! context.allocator %s)", allocator_name), form.span)
     macro_emit_line(&e, "    (defer (do", form.span)
-    macro_emit_line(&e, "      (set! context.allocator odinl-old-allocator-1)))", form.span)
+    macro_emit_line(&e, "      (set! context.allocator kvist-old-allocator-1)))", form.span)
     body := form.items[2:]
     for item, idx in body {
         suffix := ""
@@ -407,13 +407,13 @@ macroexpand_with_temp_allocator :: proc(form: CST_Form) -> (result: Emit_Result,
     defer strings.builder_destroy(&e.builder)
 
     macro_emit_line(&e, "(do", form.span)
-    macro_emit_line(&e, "  (let [odinl-temp-scope-1 (runtime.default-temp-allocator-temp-begin)", form.span)
+    macro_emit_line(&e, "  (let [kvist-temp-scope-1 (runtime.default-temp-allocator-temp-begin)", form.span)
     macro_emit_line(&e, fmt.tprintf("        %s context.temp-allocator", allocator_name), form.span)
-    macro_emit_line(&e, "        odinl-old-allocator-1 context.allocator]", form.span)
+    macro_emit_line(&e, "        kvist-old-allocator-1 context.allocator]", form.span)
     macro_emit_line(&e, fmt.tprintf("    (set! context.allocator %s)", allocator_name), form.span)
     macro_emit_line(&e, "    (defer (do", form.span)
-    macro_emit_line(&e, "      (set! context.allocator odinl-old-allocator-1)", form.span)
-    macro_emit_line(&e, "      (runtime.default-temp-allocator-temp-end odinl-temp-scope-1)))", form.span)
+    macro_emit_line(&e, "      (set! context.allocator kvist-old-allocator-1)", form.span)
+    macro_emit_line(&e, "      (runtime.default-temp-allocator-temp-end kvist-temp-scope-1)))", form.span)
     body := form.items[2:]
     for item, idx in body {
         suffix := ""

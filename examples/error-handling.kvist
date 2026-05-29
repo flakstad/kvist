@@ -70,12 +70,12 @@
   (os.make_directory_all "tmp")
   ;; => nil
 
-  (spit "tmp/odinl-error-demo.txt" "hello")
+  (spit "tmp/kvist-error-demo.txt" "hello")
   ;; => nil
 
-  (read-byte-count "tmp/odinl-error-demo.txt")
+  (read-byte-count "tmp/kvist-error-demo.txt")
   ;; => 5
 
-  (print-byte-count "tmp/odinl-error-demo.txt")
+  (print-byte-count "tmp/kvist-error-demo.txt")
   ;; => 5
 )
