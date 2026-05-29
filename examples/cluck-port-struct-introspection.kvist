@@ -2,15 +2,15 @@
 (package main)
 (defstruct Point
   "A small geometric point."
-  {:x :float
-   :y :float})
+  {:x float
+   :y float})
 
 (defstruct Profile
   "Example struct for metadata introspection."
-  {:name :string
-   :age :int
-   :tags [:set :string]
-   :home :Point})
+  {:name string
+   :age int
+   :tags [set string]
+   :home Point})
 
 (defn struct-introspection-demo [] -> bool
   (println (struct/fields 'Profile))

@@ -2,18 +2,20 @@
 (package main)
 (import "core:fmt")
 
-(union Value {
+(defunion Value
+  "Simple tagged value."
+  {
   :i int
   :s string
 })
 
-(proc describe [value: Value] -> string
+(defn describe [value: Value] -> string
   (switch [v value]
     int "int"
     string v
     :else "nil"))
 
-(proc main []
+(defn main []
   (let [number (Value {:i 42})
         text (Value {:s "kvist"})]
     (fmt.println (describe text))))

@@ -1,41 +1,41 @@
 // Close port of the Cluck reset loop demos.
 (package main)
-(defn loop-index-demo [] -> [:arr :int]
-  (let [xs (arr/dynamic :int [10 20 30])
-        out (arr/empty :int)]
-    (defer (delete xs))
-    (for [x i xs]
-      (arr/push! out (+ x i)))
-    out))
+(defn loop-index-demo [] -> [arr int]
+  (let [xs (arr/dynamic int [10 20 30])
+        out (arr/empty int)]
+    (with-delete [owned-xs xs]
+      (for [x i owned-xs]
+        (arr/push! out (+ x i)))
+      out)))
 
-(defn loop-break-demo [] -> :int
-  (let [xs (arr/dynamic :int [3 5 8 13 21])
+(defn loop-break-demo [] -> int
+  (let [xs (arr/dynamic int [3 5 8 13 21])
         found 0]
-    (defer (delete xs))
-    (for [x xs]
-      (when (> x 10)
-        (set! found x)
-        (break)))
-    found))
+    (with-delete [owned-xs xs]
+      (for [x owned-xs]
+        (when (> x 10)
+          (set! found x)
+          (break)))
+      found)))
 
-(defn loop-continue-demo [] -> [:arr :int]
-  (let [xs (arr/dynamic :int [0 1 2 3 4 5])
-        out (arr/empty :int)]
-    (defer (delete xs))
-    (for [x xs]
-      (when (== 0 (% x 2))
-        (continue))
-      (arr/push! out x))
-    out))
+(defn loop-continue-demo [] -> [arr int]
+  (let [xs (arr/dynamic int [0 1 2 3 4 5])
+        out (arr/empty int)]
+    (with-delete [owned-xs xs]
+      (for [x owned-xs]
+        (when (== 0 (% x 2))
+          (continue))
+        (arr/push! out x))
+      out)))
 
 (defn main []
   (let [indexed (loop-index-demo)
         continued (loop-continue-demo)]
-    (defer (delete indexed))
-    (defer (delete continued))
-    (println indexed)
-    (println (loop-break-demo))
-    (println continued)))
+    (with-delete [owned-indexed indexed
+                  owned-continued continued]
+      (println owned-indexed)
+      (println (loop-break-demo))
+      (println owned-continued))))
 
 (comment
   (loop-index-demo)

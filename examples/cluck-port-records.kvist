@@ -2,29 +2,30 @@
 (package main)
 (defstruct Person
   "A small fixed-shape person struct."
-  {:name :string
-   :age :int
-   :tags [:set :string]})
+  {:name string
+   :age int
+   :tags [set string]})
 
-(defn records-demo [] -> :bool
-  (let [person (Person {:name "Ada"
+(defn records-demo [] -> bool
+  (let [tags (set/empty string 2)
+        person (Person {:name "Ada"
                         :age 36
-                        :tags (set/empty :string 2)})]
-    (defer (delete (:tags person)))
-    (set/add! (:tags person) "math")
-    (set/add! (:tags person) "lisp")
-    (println (:name person))
-    (println (:age person))
-    (println (:tags person))
-    (println (set/contains? (:tags person) "math"))
-    (update! person :age 37)
-    (println person)
-    true))
+                        :tags tags})]
+    (with-delete [owned-tags tags]
+      (set/add! owned-tags "math")
+      (set/add! owned-tags "lisp")
+      (println (:name person))
+      (println (:age person))
+      (println (:tags person))
+      (println (set/contains? (:tags person) "math"))
+      (update! person :age 37)
+      (println person)
+      true)))
 
 (defn main []
   (println (records-demo)))
 
 (comment
   ;; The surface is close. The visible gap is sets: Kvist still lowers
-  ;; [:set T] to map[T]bool rather than a dedicated set literal/API.
+  ;; [set T] to map[T]bool rather than a dedicated set literal/API.
   (records-demo))

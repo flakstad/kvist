@@ -42,14 +42,14 @@ inventing a new language on top of Odin.
 
 ## Example
 
-```odin
+```clojure
 (package main)
 (import "core:fmt")
 
-(proc add [a: int, b: int] -> int
+(defn add [a: int, b: int] -> int
   (+ a b))
 
-(proc main []
+(defn main []
   (fmt.println (add 20 22)))
 ```
 
@@ -580,13 +580,15 @@ foreign_call :: proc(handle: Foreign_Handle) ---
 - `(defvar name expr)` -> `name := expr`
 - `(defvar name type expr)` -> `name: type = expr`
 - `(struct Name {:field Type ...})`
-- `(defstruct Name "Doc..." {:field :metadata ...})`
+- `(defstruct Name "Doc..." {:field type ...})`
 - `(enum Name [A B C])` and `(enum Name {:A 1 :B 2})`
 - `(defenum Name "Doc..." [A B C])` and `(defenum Name "Doc..." {:A 1 :B 2})`
 - `(union Name {:variant Type ...})`
 - `(defunion Name "Doc..." {:variant Type ...})`
-- `(proc name [arg: type, ...] -> return-type body...)`
-  - params and returns accept either Odin-style type spelling or Malli-like metadata such as `:int`, `[:arr :string]`, and `[:set :keyword]`
+- `(defn name [arg: type, ...] -> return-type body...)`
+  - `defn` is the preferred source-level declaration form
+  - `proc` remains available for direct Odin-shaped code and proc types
+  - params and returns use ordinary types like `int`, `string`, `Person`, plus composite forms like `[arr string]` and `[set keyword]`
 - top-level and statement `(odin "...")` raw escape hatches
 - `(let [binding value ...] body...)` scoped expression/block, including
   multi-return and struct-field destructuring

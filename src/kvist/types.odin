@@ -67,8 +67,9 @@ Param :: struct {
 }
 
 Struct_Field :: struct {
-    name: string,
-    ty:   string,
+    name:        string,
+    source_name: string,
+    ty:          string,
 }
 
 Union_Variant :: struct {

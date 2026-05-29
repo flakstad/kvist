@@ -51,11 +51,14 @@ struct_field_exists :: proc(fields: []Struct_Field, name: string) -> bool {
 
 parse_defstruct_type_meta :: proc(form: CST_Form) -> (text: string, err: Compile_Error, ok: bool) {
     #partial switch form.kind {
-    case .Keyword:
-        if len(form.text) <= 1 {
-            return "", Compile_Error{message = "invalid defstruct field type metadata", span = form.span}, false
+    case .Keyword, .Symbol:
+        tag := form.text
+        if form.kind == .Keyword {
+            if len(form.text) <= 1 {
+                return "", Compile_Error{message = "invalid defstruct field type metadata", span = form.span}, false
+            }
+            tag = form.text[1:]
         }
-        tag := form.text[1:]
         switch tag {
         case "bool":
             return "bool", {}, true
@@ -73,41 +76,44 @@ parse_defstruct_type_meta :: proc(form: CST_Form) -> (text: string, err: Compile
             return map_name(tag), {}, true
         }
     case .Vector:
-        if len(form.items) == 0 || form.items[0].kind != .Keyword {
+        if len(form.items) == 0 || (form.items[0].kind != .Keyword && form.items[0].kind != .Symbol) {
             return "", Compile_Error{message = "invalid defstruct field type metadata", span = form.span}, false
         }
         head := form.items[0].text
+        if form.items[0].kind == .Keyword {
+            head = head[1:]
+        }
         switch head {
-        case ":arr":
+        case "arr":
             if len(form.items) != 2 {
-                return "", Compile_Error{message = "[:arr T] expects one element type", span = form.span}, false
+                return "", Compile_Error{message = "[arr T] expects one element type", span = form.span}, false
             }
             elem_text, err_elem, ok_elem := parse_defstruct_type_meta(form.items[1])
             if !ok_elem {
                 return "", err_elem, false
             }
             return fmt.tprintf("[dynamic]%s", elem_text), {}, true
-        case ":slice":
+        case "slice":
             if len(form.items) != 2 {
-                return "", Compile_Error{message = "[:slice T] expects one element type", span = form.span}, false
+                return "", Compile_Error{message = "[slice T] expects one element type", span = form.span}, false
             }
             elem_text, err_elem, ok_elem := parse_defstruct_type_meta(form.items[1])
             if !ok_elem {
                 return "", err_elem, false
             }
             return fmt.tprintf("[]%s", elem_text), {}, true
-        case ":set":
+        case "set":
             if len(form.items) != 2 {
-                return "", Compile_Error{message = "[:set T] expects one element type", span = form.span}, false
+                return "", Compile_Error{message = "[set T] expects one element type", span = form.span}, false
             }
             elem_text, err_elem, ok_elem := parse_defstruct_type_meta(form.items[1])
             if !ok_elem {
                 return "", err_elem, false
             }
             return fmt.tprintf("map[%s]bool", elem_text), {}, true
-        case ":fixed-arr":
+        case "fixed-arr":
             if len(form.items) != 3 || form.items[1].kind != .Number {
-                return "", Compile_Error{message = "[:fixed-arr N T] expects a numeric length and one element type", span = form.span}, false
+                return "", Compile_Error{message = "[fixed-arr N T] expects a numeric length and one element type", span = form.span}, false
             }
             elem_text, err_elem, ok_elem := parse_defstruct_type_meta(form.items[2])
             if !ok_elem {
@@ -127,7 +133,22 @@ parse_type_text :: proc(form: CST_Form) -> (text: string, err: Compile_Error, ok
     case .Keyword, .Vector:
         return parse_defstruct_type_meta(form)
     case .Symbol:
-        return map_name(form.text), {}, true
+        switch form.text {
+        case "bool":
+            return "bool", {}, true
+        case "int":
+            return "int", {}, true
+        case "float":
+            return "f64", {}, true
+        case "string":
+            return "string", {}, true
+        case "char":
+            return "rune", {}, true
+        case "keyword":
+            return "string", {}, true
+        case:
+            return map_name(form.text), {}, true
+        }
     case .List:
         if len(form.items) < 2 {
             return "", Compile_Error{message = "unsupported type form", span = form.span}, false
@@ -325,7 +346,10 @@ parse_param_vector :: proc(form: CST_Form) -> (params: [dynamic]Param, err: Comp
     i := 0
     for i < len(form.items) {
         name_form := form.items[i]
-        if name_form.kind != .Symbol || len(name_form.text) == 0 || name_form.text[len(name_form.text)-1] != ':' {
+        if name_form.kind != .Symbol || len(name_form.text) == 0 {
+            return params, Compile_Error{message = "expected parameter name", span = name_form.span}, false
+        }
+        if name_form.text[len(name_form.text)-1] != ':' {
             return params, Compile_Error{message = "expected parameter name ending in ':'", span = name_form.span}, false
         }
         if i+1 >= len(form.items) {
@@ -392,8 +416,9 @@ parse_struct_fields :: proc(form: CST_Form) -> (fields: [dynamic]Struct_Field, e
             return fields, err_type, false
         }
         append(&fields, Struct_Field{
-            name = field_name,
-            ty   = type_text,
+            name        = field_name,
+            source_name = key.text[1:],
+            ty          = type_text,
         })
         i = next_i
     }
@@ -422,8 +447,9 @@ parse_defstruct_fields :: proc(form: CST_Form) -> (fields: [dynamic]Struct_Field
             return fields, err_type, false
         }
         append(&fields, Struct_Field{
-            name = field_name,
-            ty   = type_text,
+            name        = field_name,
+            source_name = key.text[1:],
+            ty          = type_text,
         })
         i += 2
     }

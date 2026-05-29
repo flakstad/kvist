@@ -5,7 +5,9 @@
 // Default port for examples.
 (defconst default-port int 8080)
 
-(enum Http-Status {
+(defenum Http-Status
+  "Small explicit-status enum."
+  {
   :OK 200
   :Not-Found 404
 })
@@ -15,28 +17,28 @@
   :status Http-Status
 })
 
-(proc status-code [status: Http-Status] -> int
+(defn status-code [status: Http-Status] -> int
   (int status))
 
-(proc status-label [status: Http-Status] -> string
+(defn status-label [status: Http-Status] -> string
   (switch status
     .OK "ok"
     .Not-Found "not found"
     :else "unknown"))
 
-(proc endpoint-summary [] -> string
+(defn endpoint-summary [] -> string
   (let [endpoint (Endpoint {:path "/health" :status .OK})
         {:path path :status status} endpoint]
     (if (== status .OK)
       path
       "")))
 
-(proc shorthand-status-code [] -> int
+(defn shorthand-status-code [] -> int
   (let [endpoint (Endpoint {:path "/health" :status .Not-Found})
         {:status} endpoint]
     (status-code status)))
 
-(proc main []
+(defn main []
   (let [endpoint (Endpoint {:path "/health" :status .OK})]
     (fmt.println (status-label (:status endpoint)))))
 

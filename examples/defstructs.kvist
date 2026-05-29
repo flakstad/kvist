@@ -3,16 +3,16 @@
 (package main)
 (defstruct Point
   "A 2D point."
-  {:x :float
-   :y :float})
+  {:x float
+   :y float})
 
 (defstruct Profile
   "Small profile data."
-  {:name :string
-   :age :int
-   :active? :bool
-   :tags [:set :string]
-   :home :Point})
+  {:name string
+   :age int
+   :active? bool
+   :tags [set string]
+   :home Point})
 
 (defn profile-defaults [] -> Profile
   (Profile {:name "Ada"}))

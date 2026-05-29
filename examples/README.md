@@ -15,12 +15,12 @@ block so `C-c C-e` and `C-c C-c` are practical.
 - `cluck-port-strings.kvist`: Cluck reset string demo using Odin string ops.
 - `cluck-port-struct-defaults.kvist`: Cluck reset omitted-field/default demo.
 - `cluck-port-docs.kvist`: Cluck reset docstring/doc lookup demo.
-- `cluck-port-struct-introspection.kvist`: Cluck reset struct metadata lookup demo.
-- `cluck-port-struct-types.kvist`: Cluck reset metadata vocabulary demo.
+- `cluck-port-struct-introspection.kvist`: Cluck reset struct type lookup demo.
+- `cluck-port-struct-types.kvist`: Cluck reset struct type vocabulary demo.
 - `closures.kvist`: non-capturing `fn` literals and explicit callback context.
 - `hello.kvist`: package, import, struct literal, and a tiny `main`.
 - `declarations.kvist`: doc comments, import aliases, constants, enums, structs.
-- `defstructs.kvist`: `defstruct` docstrings, Malli-like metadata, nested structs.
+- `defstructs.kvist`: `defstruct` docstrings, typed fields, nested structs.
 - `control-flow.kvist`: `cond`, `switch`, loops, `when-let`, and `if-let`.
 - `data-literals.kvist`: arrays, maps, `make`, `new`, allocator macros.
 - `pointers-and-raw.kvist`: pointers and explicit raw Odin escape hatches.
@@ -37,9 +37,10 @@ block so `C-c C-e` and `C-c C-c` are practical.
 - `orders-report.kvist`: a more realistic eager data pipeline.
 
 Owned dynamic arrays, maps, allocated slices, `make`, and sequence helpers that
-return new collections need local `defer delete` unless ownership is returned
-to the caller. See [`docs/OWNERSHIP.md`](../docs/OWNERSHIP.md) for the rule of
-thumb.
+return new collections need local cleanup unless ownership is returned to the
+caller. Prefer `with-delete` for ordinary local scopes and plain `defer
+delete(...)` when you need finer control. See
+[`docs/OWNERSHIP.md`](../docs/OWNERSHIP.md) for the rule of thumb.
 
 ## Odin Core Interop
 

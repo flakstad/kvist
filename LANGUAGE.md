@@ -434,16 +434,17 @@ Current first-pass shape:
 ```clojure
 (defstruct Request
   "Incoming HTTP request."
-  {:method :Method
-   :path :string
-   :query :string
-   :params [:arr :string]})
+  {:method Method
+   :path string
+   :query string
+   :params [arr string]})
 ```
 
 The current implementation:
 
 - accepts an optional inline docstring immediately after the name;
-- accepts Malli-like field metadata forms;
+- accepts ordinary field type forms such as `string`, `Method`, `[arr string]`,
+  and `[set keyword]`;
 - lowers to an ordinary Odin struct declaration;
 - validates declaration shape at compile time.
 
@@ -498,9 +499,9 @@ For explicit values, keyed brace syntax is allowed:
 ```clojure
 (defunion Value
   "Tagged value."
-  {:i :int
-   :s :string
-   :ok :bool})
+  {:i int
+   :s string
+   :ok bool})
 ```
 
 Use `union` when exactly one variant is valid at a time and the choice may
@@ -517,29 +518,33 @@ The v0.1 union story should stay deliberately narrow:
 - rich inspection/destructuring support: later
 - full ergonomic use should wait for a future `match` design
 
-### `proc`
+### `defn` and `proc`
+
+`defn` is the preferred source-level function declaration form. `proc`
+remains available as the direct Odin-shaped spelling and is still the type
+spelling for procedure values.
 
 Functions use a typed signature vector:
 
 ```clojure
-(proc add [a: int, b: int] -> int
+(defn add [a: int, b: int] -> int
   (+ a b))
 
-(proc query-get [url: URL, key: string] -> [val: string, ok: bool]
+(defn query-get [url: URL, key: string] -> [val: string, ok: bool]
   ...)
 ```
 
-Malli-like source types also work in params and returns:
+Composite source types still use data-shaped vectors:
 
 ```clojure
-(proc score [xs: [:arr :int], tags: [:set :string]] -> :int
+(defn score [xs: [arr int], tags: [set string]] -> int
   ...)
 ```
 
 Commas are optional and exist for readability:
 
 ```clojure
-(proc add [a: int
+(defn add [a: int
            b: int] -> int
   (+ a b))
 ```
@@ -547,7 +552,7 @@ Commas are optional and exist for readability:
 An empty return annotation means the function is `void`:
 
 ```clojure
-(proc main []
+(defn main []
   (fmt.println "hello"))
 ```
 
@@ -567,14 +572,14 @@ Host imports still use Odin package paths such as `"core:fmt"`.
 When there is no literal element to infer from, use the package constructors:
 
 ```clojure
-(arr/empty :int)
-(arr/empty :int 16)
-(arr/dynamic :int [1 2 3])
-(arr/fixed :int [4 5 6])
-(map/empty :string :int)
-(map/of :string :int {"one" 1 "two" 2})
-(set/empty :string 8)
-(set/of :string ["math" "lisp"])
+(arr/empty int)
+(arr/empty int 16)
+(arr/dynamic int [1 2 3])
+(arr/fixed int [4 5 6])
+(map/empty string int)
+(map/of string int {"one" 1 "two" 2})
+(set/empty string 8)
+(set/of string ["math" "lisp"])
 ```
 
 ### `odin`
@@ -1446,7 +1451,7 @@ proc [url: URL, key: string] -> [val: string, ok: bool]
 That means higher-order procedures can look like:
 
 ```clojure
-(proc find-index [xs: []int, pred: proc [x: int] -> bool] -> int
+(proc find-index [xs: []int, pred: (proc [x: int] -> bool)] -> int
   ...)
 ```
 
@@ -1545,7 +1550,7 @@ Examples of the kind of thing this covers:
 
 The current design stance is:
 
-- do not design a separate metadata language for v0.1
+- do not design a separate schema language for v0.1
 - keep the common cases in mind
 - prefer the raw escape hatch until a truly obvious surface emerges
 
@@ -1614,8 +1619,8 @@ This is intentionally boring and matches Odin's own documentation conventions
 ```clojure
 (defstruct Request
   "Incoming HTTP request."
-  {:method :Method
-   :path :string})
+  {:method Method
+   :path string})
 ```
 
 The generated Odin still receives ordinary preceding `//` comments.

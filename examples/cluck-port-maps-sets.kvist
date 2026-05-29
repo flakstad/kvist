@@ -1,33 +1,33 @@
 // Port of the Cluck reset map/set demo. Sets are currently expressed as
 // map[T]bool rather than a dedicated set surface.
 (package main)
-(defn maps_and_sets_demo [] -> :int
-  (let [m (map/empty :string :string)
-        tags (set/empty :string)
+(defn maps_and_sets_demo [] -> int
+  (let [m (map/empty string string)
+        tags (set/empty string)
         total 0]
-    (defer (delete m))
-    (defer (delete tags))
-    (update! m "name" "Ada")
-    (update! m "lang" "Kvist")
-    (set/add! tags "native")
-    (set/add! tags "lisp")
-    (update! m "lang" "Reset Kvist")
-    (set/add! tags "mutable")
-    (each [key value m]
-      (println key value)
-      (set! total (+ total (str/count key)))
-      (set! total (+ total (str/count value))))
-    (each [tag present tags]
-      (when present
-        (println tag)
-        (set! total (+ total (str/count tag)))))
-    total))
+    (with-delete [owned-m m
+                  owned-tags tags]
+      (update! owned-m "name" "Ada")
+      (update! owned-m "lang" "Kvist")
+      (set/add! owned-tags "native")
+      (set/add! owned-tags "lisp")
+      (update! owned-m "lang" "Reset Kvist")
+      (set/add! owned-tags "mutable")
+      (each [key value owned-m]
+        (println key value)
+        (set! total (+ total (str/count key)))
+        (set! total (+ total (str/count value))))
+      (each [tag present owned-tags]
+        (when present
+          (println tag)
+          (set! total (+ total (str/count tag)))))
+      total)))
 
 (defn main []
   (println (maps_and_sets_demo)))
 
 (comment
   ;; Map iteration ports cleanly. The remaining set gap is representation,
-  ;; not basic source operations: [:set T] still lowers to map[T]bool.
+  ;; not basic source operations: [set T] still lowers to map[T]bool.
   (maps_and_sets_demo)
 )

@@ -7,7 +7,7 @@
   :message string
 })
 
-(proc main []
+(defn main []
   (let [g (Greeting { :message "hello from kvist" })]
     (fmt.println (:message g))))
 

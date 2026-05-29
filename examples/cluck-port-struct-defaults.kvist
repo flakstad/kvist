@@ -2,16 +2,16 @@
 (package main)
 (defstruct Point
   "A point with float coordinates."
-  {:x :float
-   :y :float})
+  {:x float
+   :y float})
 
 (defstruct Profile
   "A struct showing default-filled construction."
-  {:name :string
-   :age :int
-   :active? :bool
-   :tags [:set :string]
-   :home :Point})
+  {:name string
+   :age int
+   :active? bool
+   :tags [set string]
+   :home Point})
 
 (defn struct-defaults-demo [] -> bool
   (let [profile (Profile {:name "Ada"})]

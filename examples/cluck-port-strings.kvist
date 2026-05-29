@@ -5,13 +5,13 @@
 (defn strings-demo [] -> bool
   (let [name "kvist"
         greeting (fmt.tprintf "hello %s" name)]
-    (defer (delete greeting))
-    (println (str/count name))
-    (println (str/get name 1))
-    (println (str/slice name 1 4))
-    (println greeting)
-    (println (str/contains? name "vis"))
-    true))
+    (with-delete [owned-greeting greeting]
+      (println (str/count name))
+      (println (str/get name 1))
+      (println (str/slice name 1 4))
+      (println owned-greeting)
+      (println (str/contains? name "vis"))
+      true)))
 
 (defn main []
   (println (strings-demo)))

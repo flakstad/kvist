@@ -52,16 +52,16 @@ compile_defstruct_program :: proc(t: ^testing.T) {
 
 (defstruct Profile
   "Profile data."
-  {:name :string
-   :age :int
-   :active? :bool
-   :tags [:set :string]
-   :scores [:arr :int]
-   :home :Point})
+  {:name string
+   :age int
+   :active? bool
+   :tags [set string]
+   :scores [arr int]
+   :home Point})
 
 (defstruct Point
-  {:x :float
-   :y :float})`
+  {:x float
+   :y float})`
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
@@ -252,8 +252,8 @@ symbols_source_indexes_defstruct_docstring :: proc(t: ^testing.T) {
 
 (defstruct Person
   "Primary profile."
-  {:name :string
-   :age :int})`
+  {:name string
+   :age int})`
 
     output, err, ok := kvist.symbols_source(source)
     testing.expect_value(t, ok, true)
@@ -383,11 +383,11 @@ compile_eval_source_can_load_defstruct_declaration_form :: proc(t: ^testing.T) {
 
 (defstruct Greeting
   "Greeting text."
-  {:message :string})`
+  {:message string})`
 
     output, err, ok := kvist.compile_eval_source(source, `(defstruct Greeting
   "Greeting text."
-  {:message :string})`)
+  {:message string})`)
     testing.expect_value(t, ok, true)
     if !ok {
         testing.expect_value(t, err.message, "")
@@ -413,8 +413,8 @@ compile_defstruct_rejects_duplicate_fields :: proc(t: ^testing.T) {
     source := `(package main)
 
 (defstruct Broken
-  {:name :string
-   :name :int})`
+  {:name string
+   :name int})`
 
     _, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, false)
@@ -429,8 +429,8 @@ compile_defstruct_rejects_bad_metadata :: proc(t: ^testing.T) {
     source := `(package main)
 
 (defstruct Broken
-  {:tags [:set]
-   :scores [:fixed-arr :int]})`
+  {:tags [set]
+   :scores [fixed-arr int]})`
 
     _, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, false)
@@ -445,8 +445,8 @@ compile_struct_constructor_rejects_unknown_field :: proc(t: ^testing.T) {
     source := `(package main)
 
 (defstruct Person
-  {:name :string
-   :age :int})
+  {:name string
+   :age int})
 
 (proc bad [] -> Person
   (Person {:name "Ada" :extra 1}))`
@@ -464,8 +464,8 @@ compile_struct_constructor_rejects_duplicate_field :: proc(t: ^testing.T) {
     source := `(package main)
 
 (defstruct Person
-  {:name :string
-   :age :int})
+  {:name string
+   :age int})
 
 (proc bad [] -> Person
   (Person {:name "Ada" :name "Grace"}))`
@@ -483,8 +483,8 @@ compile_struct_constructor_rejects_literal_type_mismatch :: proc(t: ^testing.T) 
     source := `(package main)
 
 (defstruct Person
-  {:name :string
-   :age :int})
+  {:name string
+   :age int})
 
 (proc bad [] -> Person
   (Person {:name 42 :age "old"}))`
@@ -502,8 +502,8 @@ compile_update_bang_stmt :: proc(t: ^testing.T) {
     source := `(package main)
 
 (defstruct Point
-  {:x :int
-   :y :int})
+  {:x int
+   :y int})
 
 (proc score [] -> int
   (let [xs (new [dynamic]int [1 2 3])
@@ -976,10 +976,10 @@ compile_defconst_and_defvar_forms :: proc(t: ^testing.T) {
 compile_malli_types_and_empty_collection_constructors :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defn score [xs: [:arr :int], tags: [:set :string]] -> :int
-  (let [out (arr/empty :int 4)
-        lookup (map/empty :string :int)
-        seen (set/empty :string 8)]
+(defn score [xs: [arr int], tags: [set string]] -> int
+  (let [out (arr/empty int 4)
+        lookup (map/empty string int)
+        seen (set/empty string 8)]
     (arr/push! out (arr/count xs))
     (update! lookup "count" (arr/count xs))
     (set/add! seen "ok")
@@ -1000,6 +1000,24 @@ compile_malli_types_and_empty_collection_constructors :: proc(t: ^testing.T) {
 }
 
 @(test)
+compile_defn_clean_param_and_named_return_syntax :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn query [path: string, limit: int] -> [value: int, ok: bool]
+  (return limit true))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "query :: proc(path: string, limit: int) -> (value: int, ok: bool)"), true)
+}
+
+@(test)
 compile_defenum_and_defunion_aliases :: proc(t: ^testing.T) {
     source := `(package main)
 
@@ -1009,8 +1027,8 @@ compile_defenum_and_defunion_aliases :: proc(t: ^testing.T) {
 
 (defunion Value
   "Tagged value."
-  {:i :int
-   :s :string})`
+  {:i int
+   :s string})`
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
@@ -1024,6 +1042,36 @@ compile_defenum_and_defunion_aliases :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "Method :: enum {"), true)
     testing.expect_value(t, strings.contains(output, "// Tagged value."), true)
     testing.expect_value(t, strings.contains(output, "Value :: union {"), true)
+}
+
+@(test)
+compile_struct_types_reports_source_surface :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct Profile
+  {:name string
+   :active? bool
+   :favorite-key keyword
+   :tags [set string]
+   :scores [arr int]
+   :window [slice float]})
+
+(proc type-map [] -> map[string]string
+  (struct/types 'Profile))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "\":tags\" = \"[set string]\""), true)
+    testing.expect_value(t, strings.contains(output, "\":scores\" = \"[arr int]\""), true)
+    testing.expect_value(t, strings.contains(output, "\":window\" = \"[slice float]\""), true)
+    testing.expect_value(t, strings.contains(output, "\":active?\" = \"bool\""), true)
+    testing.expect_value(t, strings.contains(output, "\":favorite-key\" = \"string\""), true)
 }
 
 @(test)
