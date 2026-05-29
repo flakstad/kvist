@@ -1,0 +1,30 @@
+// Close port of the Cluck reset struct-defaults demo.
+(package main)
+(import "core:fmt")
+(defstruct Point
+  "A point with float coordinates."
+  {:x :float
+   :y :float})
+
+(defstruct Profile
+  "A struct showing default-filled construction."
+  {:name :string
+   :age :int
+   :active? :bool
+   :tags [:set :string]
+   :home :Point})
+
+(defn struct-defaults-demo [] -> bool
+  (let [profile (Profile {:name "Ada"})]
+    (println profile)
+    (println (:age profile))
+    (println (:active? profile))
+    (println (:tags profile))
+    (println (:home profile))
+    true))
+
+(defn main []
+  (println (struct-defaults-demo)))
+
+(comment
+  (struct-defaults-demo))

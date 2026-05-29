@@ -588,6 +588,7 @@ foreign_call :: proc(handle: Foreign_Handle) ---
 - `(with-temp-allocator [allocator] body...)` scoped `context.temp_allocator`
   override with temp allocator reset; requires `base:runtime`
 - `(set! place expr)` -> `place = expr`
+- `(update! target key-or-field expr)` -> direct index/key/field assignment
 - final expression in a non-void proc emits `return <expr>`
 - `(if test then else)`
 - `(when test body...)`

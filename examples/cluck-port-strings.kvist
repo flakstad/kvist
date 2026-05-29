@@ -1,0 +1,24 @@
+// Port of the Cluck reset string demo, using ordinary Odin string operations.
+(package main)
+(import "core:fmt")
+
+(defn strings-demo [] -> bool
+  (let [name "kvist"
+        greeting (fmt.tprintf "hello %s" name)]
+    (defer (delete greeting))
+    (println (str/count name))
+    (println (str/get name 1))
+    (println (str/slice name 1 4))
+    (println greeting)
+    (println (str/contains? name "vis"))
+    true))
+
+(defn main []
+  (println (strings-demo)))
+
+(comment
+  ;; Strings port cleanly for count/get/slice/contains?. The visible host-level
+  ;; bit left here is formatting, which still allocates an owned string.
+  (strings-demo)
+  ;; => true
+)

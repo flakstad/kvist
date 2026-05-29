@@ -1,0 +1,27 @@
+// Exercises update! over dynamic arrays, maps, and defstruct fields.
+(package main)
+(import "core:fmt")
+
+(defstruct Point
+  {:x :int
+   :y :int})
+
+(defn update-score [] -> int
+  (let [xs (new [dynamic]int [1 2 3])
+        lookup (new map[string]int {"a" 1 "b" 2})
+        point (Point {:x 4 :y 5})]
+    (defer (delete xs))
+    (defer (delete lookup))
+    (update! xs 1 42)
+    (update! lookup "a" 7)
+    (update! point :y 9)
+    (+ (+ (get xs 1) (get lookup "a"))
+       (:y point))))
+
+(defn main []
+  (println (update-score)))
+
+(comment
+  (update-score)
+  ;; => 58
+)

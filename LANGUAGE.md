@@ -539,6 +539,7 @@ The planned core expression forms are:
 - `cond`
 - `switch`
 - `set!`
+- `update!`
 - `get`
 - keyword field access: `(:field expr)`
 - threading: `->` and `->>`
@@ -910,6 +911,20 @@ Mutation remains explicit.
 (set! (:status res) 200)
 ```
 
+### `update!`
+
+`update!` is the explicit in-structure update form.
+
+```clojure
+(update! xs 0 42)
+(update! lookup "name" "Ada")
+(update! person :age 37)
+```
+
+It should lower directly to ordinary Odin assignment against an indexed, keyed,
+or field-selected place. It is not a hidden mutation protocol and it does not
+turn `get` into a writable place form.
+
 ### `get`
 
 `get` is for indexed or keyed lookup, not struct field access.
@@ -1186,6 +1201,16 @@ Prefer constructor syntax over `(as Type ...)`:
 ```
 
 This lowers naturally to an Odin struct literal.
+
+When the constructor target is a known struct, the compiler should validate
+obvious literal mistakes before Odin sees the generated file:
+
+- unknown fields;
+- duplicate fields;
+- obvious literal/type mismatches.
+
+Missing fields are acceptable and rely on ordinary Odin zero-value behavior in
+the lowered struct literal.
 
 The same constructor style should apply to named union values:
 

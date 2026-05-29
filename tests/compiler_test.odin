@@ -94,6 +94,11 @@ Point :: struct {
 @(test)
 compile_all_examples :: proc(t: ^testing.T) {
     examples := [?]string{
+        "examples/cluck-port-arrays.kvist",
+        "examples/cluck-port-maps-sets.kvist",
+        "examples/cluck-port-multi-return.kvist",
+        "examples/cluck-port-strings.kvist",
+        "examples/closures.kvist",
         "examples/control-flow.kvist",
         "examples/core-concurrency.kvist",
         "examples/core-container-queue.kvist",
@@ -117,6 +122,7 @@ compile_all_examples :: proc(t: ^testing.T) {
         "examples/sequences.kvist",
         "examples/tap.kvist",
         "examples/unions.kvist",
+        "examples/update.kvist",
         "examples/vendor-raylib.kvist",
         "examples/vendor-stb-easy-font.kvist",
     }
@@ -412,6 +418,94 @@ compile_defstruct_rejects_bad_metadata :: proc(t: ^testing.T) {
         return
     }
     testing.expect_value(t, strings.contains(err.message, "expects one element type") || strings.contains(err.message, "expects a numeric length"), true)
+}
+
+@(test)
+compile_struct_constructor_rejects_unknown_field :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct Person
+  {:name :string
+   :age :int})
+
+(proc bad [] -> Person
+  (Person {:name "Ada" :extra 1}))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+    testing.expect_value(t, strings.contains(err.message, "unknown struct constructor field :extra"), true)
+}
+
+@(test)
+compile_struct_constructor_rejects_duplicate_field :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct Person
+  {:name :string
+   :age :int})
+
+(proc bad [] -> Person
+  (Person {:name "Ada" :name "Grace"}))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+    testing.expect_value(t, strings.contains(err.message, "duplicate struct constructor field :name"), true)
+}
+
+@(test)
+compile_struct_constructor_rejects_literal_type_mismatch :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct Person
+  {:name :string
+   :age :int})
+
+(proc bad [] -> Person
+  (Person {:name 42 :age "old"}))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+    testing.expect_value(t, strings.contains(err.message, "struct constructor literal type mismatch for :name") || strings.contains(err.message, "struct constructor literal type mismatch for :age"), true)
+}
+
+@(test)
+compile_update_bang_stmt :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct Point
+  {:x :int
+   :y :int})
+
+(proc score [] -> int
+  (let [xs (new [dynamic]int [1 2 3])
+        lookup (new map[string]int {"a" 1})
+        point (Point {:x 4 :y 5})]
+    (update! xs 1 42)
+    (update! lookup "a" 7)
+    (update! point :y 9)
+    (+ (+ (get xs 1) (get lookup "a"))
+       (:y point))))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "(xs)[1] = 42"), true)
+    testing.expect_value(t, strings.contains(output, "(lookup)[\"a\"] = 7"), true)
+    testing.expect_value(t, strings.contains(output, "(point).y = 9"), true)
 }
 
 @(test)

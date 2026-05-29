@@ -1,0 +1,39 @@
+// Demonstrates the current anonymous-function boundary: fn literals work, but
+// they do not capture surrounding locals.
+(package main)
+(import "core:fmt")
+
+(defn apply-pred [pred: proc [x: int] -> bool, x: int] -> bool
+  (pred x))
+
+(defn greater-than? [threshold: int, x: int] -> bool
+  (> x threshold))
+
+(defn proc-literal-demo [] -> bool
+  (apply-pred (fn [x: int] -> bool
+                (> x 0))
+              5))
+
+(defn explicit-context-demo [] -> bool
+  (greater-than? 10 12))
+
+(defn main []
+  (println (proc-literal-demo) (explicit-context-demo)))
+
+(comment
+  ;; This works because the fn literal is non-capturing.
+  (proc-literal-demo)
+  ;; => true
+
+  ;; This is the current honest workaround for would-be closures: pass the
+  ;; context explicitly.
+  (explicit-context-demo)
+  ;; => true
+
+  ;; Do not assume this will work implicitly:
+  ;;
+  ;; (let [threshold 10]
+  ;;   (apply-pred (fn [x: int] -> bool
+  ;;                 (> x threshold))
+  ;;               12))
+)

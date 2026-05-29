@@ -604,13 +604,19 @@ parse_decl :: proc(top_form: CST_Top_Form) -> (decl: AST_Decl, err: Compile_Erro
         if form.items[1].kind != .Symbol {
             return decl, Compile_Error{message = "const expects a symbol name", span = form.items[1].span}, false
         }
+        doc_lines := top_form.doc_lines
+        value_index := 2
+        if len(form.items) > 3 && form.items[2].kind == .String {
+            doc_lines = append_doc_lines(doc_lines[:], doc_lines_from_string(unquote_string(form.items[2].text))[:])
+            value_index = 3
+        }
         const_decl := Const_Decl{
             name = map_name(form.items[1].text),
         }
-        if len(form.items) == 3 {
-            const_decl.value = form.items[2]
+        if len(form.items) == value_index+1 {
+            const_decl.value = form.items[value_index]
         } else {
-            type_text, next_i, err_type, ok_type := parse_type_text_from_forms(form.items[:], 2)
+            type_text, next_i, err_type, ok_type := parse_type_text_from_forms(form.items[:], value_index)
             if !ok_type {
                 return decl, err_type, false
             }
@@ -627,7 +633,7 @@ parse_decl :: proc(top_form: CST_Top_Form) -> (decl: AST_Decl, err: Compile_Erro
         return AST_Decl{
             kind = .Const,
             span = form.span,
-            doc_lines = top_form.doc_lines,
+            doc_lines = doc_lines,
             const_decl = const_decl,
         }, {}, true
     case "struct":
@@ -720,15 +726,27 @@ parse_decl :: proc(top_form: CST_Top_Form) -> (decl: AST_Decl, err: Compile_Erro
             doc_lines = top_form.doc_lines,
             raw_text = unquote_string(form.items[1].text),
         }, {}, true
-    case "proc":
-        proc_decl, err_proc, ok_proc := parse_proc_decl(form)
+    case "proc", "defn":
+        doc_lines := top_form.doc_lines
+        proc_form := form
+        if len(form.items) > 3 && form.items[2].kind == .String {
+            doc_lines = append_doc_lines(doc_lines[:], doc_lines_from_string(unquote_string(form.items[2].text))[:])
+            items: [dynamic]CST_Form
+            append(&items, form.items[0])
+            append(&items, form.items[1])
+            for item in form.items[3:] {
+                append(&items, item)
+            }
+            proc_form = CST_Form{kind = .List, items = items, span = form.span}
+        }
+        proc_decl, err_proc, ok_proc := parse_proc_decl(proc_form)
         if !ok_proc {
             return decl, err_proc, false
         }
         return AST_Decl{
             kind = .Proc,
             span = form.span,
-            doc_lines = top_form.doc_lines,
+            doc_lines = doc_lines,
             proc_decl = proc_decl,
         }, {}, true
         case:

@@ -16,25 +16,25 @@
    :tags [:set :string]
    :home :Point})
 
-(proc profile-defaults [] -> Profile
+(defn profile-defaults [] -> Profile
   (Profile {:name "Ada"}))
 
-(proc profile-home-x [] -> f64
+(defn profile-home-x [] -> f64
   (let [profile (Profile {:name "Ada"})]
     (:x (:home profile))))
 
-(proc profile-has-math-tag? [] -> bool
+(defn profile-has-math-tag? [] -> bool
   (let [profile (Profile {:name "Ada"
                           :tags (new map[string]bool {"math" true "lisp" true})})]
     (contains? (:tags profile) "math")))
 
-(proc profile-active? [] -> bool
+(defn profile-active? [] -> bool
   (let [profile (Profile {:name "Ada"
                           :active? true})]
     (:active? profile)))
 
-(proc main []
-  (fmt.println (profile-has-math-tag?)))
+(defn main []
+  (println (profile-has-math-tag?)))
 
 (comment
   ;; Omitted fields follow ordinary Odin zero-value behavior in the lowered

@@ -6,6 +6,17 @@ block so `C-c C-e` and `C-c C-c` are practical.
 
 ## Language Basics
 
+- `cluck-port-arrays.kvist`: Cluck reset arrays demo, showing owned dynamic arrays.
+- `cluck-port-maps-sets.kvist`: Cluck reset maps/sets demo; sets are still `map[T]bool`.
+- `cluck-port-multi-return.kvist`: Cluck reset multi-return demo.
+- `cluck-port-loops.kvist`: Cluck reset loop demos using Cluck-style `for` bindings.
+- `cluck-port-records.kvist`: Cluck reset records demo via `defstruct`.
+- `cluck-port-strings.kvist`: Cluck reset string demo using Odin string ops.
+- `cluck-port-struct-defaults.kvist`: Cluck reset omitted-field/default demo.
+- `cluck-port-docs.kvist`: Cluck reset docstring/doc lookup demo.
+- `cluck-port-struct-introspection.kvist`: Cluck reset struct metadata lookup demo.
+- `cluck-port-struct-types.kvist`: Cluck reset metadata vocabulary demo.
+- `closures.kvist`: non-capturing `fn` literals and explicit callback context.
 - `hello.kvist`: package, import, struct literal, and a tiny `main`.
 - `declarations.kvist`: doc comments, import aliases, constants, enums, structs.
 - `defstructs.kvist`: `defstruct` docstrings, Malli-like metadata, nested structs.
@@ -21,6 +32,7 @@ block so `C-c C-e` and `C-c C-c` are practical.
 - `sequences.kvist`: sequence helpers over structs, enums, and strings.
 - `sequence-helpers.kvist`: broad sequence helper coverage.
 - `mutation-and-bang.kvist`: mutating helper variants such as `map!`.
+- `update.kvist`: `update!` over arrays, maps, and defstruct fields.
 - `orders-report.kvist`: a more realistic eager data pipeline.
 
 Owned dynamic arrays, maps, allocated slices, `make`, and sequence helpers that

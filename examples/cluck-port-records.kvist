@@ -1,0 +1,29 @@
+// Close port of the Cluck reset records demo.
+(package main)
+(import "core:fmt")
+(defstruct Person
+  "A small fixed-shape person struct."
+  {:name :string
+   :age :int
+   :tags [:set :string]})
+
+(defn records-demo [] -> bool
+  (let [person (Person {:name "Ada"
+                        :age 36
+                        :tags (new map[string]bool {"math" true "lisp" true})})]
+    (defer (delete (:tags person)))
+    (println (:name person))
+    (println (:age person))
+    (println (:tags person))
+    (println (set/contains? (:tags person) "math"))
+    (update! person :age 37)
+    (println person)
+    true))
+
+(defn main []
+  (println (records-demo)))
+
+(comment
+  ;; The surface is close. The visible gap is sets: Kvist still lowers
+  ;; [:set T] to map[T]bool rather than a dedicated set literal/API.
+  (records-demo))
