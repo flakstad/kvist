@@ -1007,7 +1007,7 @@ Mutation remains explicit.
 
 ```clojure
 (set! total (+ total x))
-(set! (:status res) 200)
+(set! total^ (+ total^ 1))
 ```
 
 ### `update!`
@@ -1018,11 +1018,23 @@ Mutation remains explicit.
 (update! xs 0 42)
 (update! lookup "name" "Ada")
 (update! person :age 37)
+(update! point :x + 3)
 ```
 
 It should lower directly to ordinary Odin assignment against an indexed, keyed,
 or field-selected place. It is not a hidden mutation protocol and it does not
 turn `get` into a writable place form.
+
+The function-style form starts at five arguments so plain replacement stays
+unambiguous:
+
+```clojure
+(update! target key-or-field f arg1 arg2 ...)
+```
+
+That means `(update! point :y delta)` still means replacement, while
+`(update! point :y + delta)` means "read current field value, apply `+`, write
+result back".
 
 ### `get`
 
@@ -1044,7 +1056,7 @@ Keyword access is the primary field access form:
 ```clojure
 (:path req)
 (:name person)
-(set! (:status res) 200)
+(update! res :status 200)
 ```
 
 This should compile to ordinary Odin field access such as `req.path`.
@@ -1065,9 +1077,12 @@ Pointer types keep Odin spelling in type position:
 In expression position, prefer the readable aliases:
 
 ```clojure
-(deref order)
+order^
 (addr (:amount order))
 ```
+
+For a simple symbol, `x^` is the lightest read/write form. Keep `(deref x)`
+for more complex pointer expressions.
 
 These lower to Odin pointer dereference and address-of:
 
@@ -1083,6 +1098,33 @@ clearer:
 (^ order)
 (& (:amount order))
 ```
+
+### Pointer and value guidance
+
+Kvist keeps Odin's value model. There is no hidden borrow checker or pointer
+ownership layer. The current guidance is:
+
+- pass small values by value
+- pass large or shared mutable values by pointer
+- use slices for shared contiguous data
+- use `addr` and `deref` only when identity or mutation through a reference is
+  actually needed
+
+Preferred user-facing pointer style:
+
+```clojure
+^Order
+(addr order)
+order^
+```
+
+The older compatibility spellings still work:
+
+- `(ptr T)`
+- `(^ value)`
+- `(& place)`
+
+But they are not the preferred style for ordinary Kvist code.
 
 ### Threading
 
@@ -1537,8 +1579,8 @@ not part of the original expected-core list:
 
 - `(in? collection key)`, composed with `(not ...)` for absence checks
 - `(break)` and `(continue)`
-- `(deref x)` / `(^ x)` for pointer dereference
-- `(addr x)` / `(& x)` for address-of
+- `(deref x)` / `(^ x)` for pointer dereference, with `(deref x)` preferred
+- `(addr x)` / `(& x)` for address-of, with `(addr x)` preferred
 - directive expression wrappers such as `(#force_inline query-iter (& q))`
 
 These are intentionally small Odin conveniences, not new semantic layers.

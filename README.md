@@ -15,7 +15,9 @@ inspectable character of systems programming.
 The current language draft is [LANGUAGE.md](LANGUAGE.md). Deferred ideas that
 should not drive the core implementation yet live in
 [docs/FUTURE-IDEAS.md](docs/FUTURE-IDEAS.md). The larger unresolved language
-areas are tracked in [docs/NEXT-STEPS.md](docs/NEXT-STEPS.md).
+areas are tracked in [docs/NEXT-STEPS.md](docs/NEXT-STEPS.md). Ownership rules
+live in [docs/OWNERSHIP.md](docs/OWNERSHIP.md), and pointer/value guidance
+lives in [docs/POINTERS.md](docs/POINTERS.md).
 
 This is intentionally a source-to-source translator, not a new runtime or a
 new semantic layer. The goal is:
@@ -661,7 +663,8 @@ foreign_call :: proc(handle: Foreign_Handle) ---
   `(sort-by :age users)`, and `(filter :verified users)`
 - `(:field value)`, `(get value key)`, `(get map key default)`, `(-> value steps...)`, and `(->> value steps...)`
 - `(type Head Arg...)` for Odin polymorphic type instantiation in type/value positions
-- `(^ ptr)` and `(& place)`
+- `(^ ptr)` and `(& place)` as compatibility sugar; prefer `(deref ptr)` and
+  `(addr place)` in user-facing code
 - numbers, booleans, `nil`, and `(nil? value)`
 - calls: `(foo a b)` -> `foo(a, b)`
 - operators: `(+ a b)`, `(<= i 10)`, `(and a b)`, etc. emit infix

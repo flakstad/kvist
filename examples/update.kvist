@@ -1,4 +1,5 @@
-// Exercises update! over dynamic arrays, maps, and defstruct fields.
+// Exercises update! over dynamic arrays, maps, and defstruct fields, both as
+// direct replacement and function-style update with extra arguments.
 (package main)
 (defstruct Point
   {:x :int
@@ -11,8 +12,8 @@
     (defer (delete xs))
     (defer (delete lookup))
     (update! xs 1 42)
-    (update! lookup "a" 7)
-    (update! point :y 9)
+    (update! lookup "a" + 6)
+    (update! point :y + 4)
     (+ (+ (get xs 1) (get lookup "a"))
        (:y point))))
 

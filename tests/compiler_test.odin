@@ -3457,6 +3457,96 @@ borrow_name :: proc(p: ^Person) -> ^string {
 }
 
 @(test)
+compile_pointer_suffix_deref_and_set_bang_locals :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defvar counter int 0)
+
+(proc bump [total: ^int] -> int
+  (set! total^ (+ total^ 1))
+  total^)
+
+(proc main [] -> int
+  (let [local 2]
+    (set! local (+ local 1))
+    (set! counter local)
+    (bump (addr counter))))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+expected := `package main
+
+counter: int = 0
+
+bump :: proc(total: ^int) -> int {
+    total^ = (total^) + (1)
+    return total^
+}
+
+main :: proc() -> int {
+    local := 2
+    local = (local) + (1)
+    counter = local
+    return bump(&counter)
+}
+`
+    testing.expect_value(t, output, expected)
+}
+
+@(test)
+compile_function_style_update_bang :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(struct Point {
+  :x int
+  :y int
+})
+
+(proc score [] -> int
+  (let [xs (new [dynamic]int [1 2 3])
+        lookup (new map[string]int {"a" 1})
+        point (Point {:x 4 :y 5})]
+    (update! xs 1 + 40)
+    (update! lookup "a" + 6)
+    (update! point :y + 4)
+    (+ (get xs 1) (get lookup "a") (:y point))))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    expected := `#+feature dynamic-literals
+package main
+
+Point :: struct {
+    x: int,
+    y: int,
+}
+
+score :: proc() -> int {
+    xs := [dynamic]int{1, 2, 3}
+    lookup := map[string]int{"a" = 1}
+    point := Point{x = 4, y = 5}
+    (xs)[1] = ((xs)[1]) + (40)
+    (lookup)["a"] = ((lookup)["a"]) + (6)
+    (point).y = ((point).y) + (4)
+    return (xs[1]) + (lookup["a"]) + (point.y)
+}
+`
+    testing.expect_value(t, output, expected)
+}
+
+@(test)
 compile_nil_predicate :: proc(t: ^testing.T) {
     source := `(package main)
 

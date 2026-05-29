@@ -1023,6 +1023,110 @@ emit_call_text :: proc(name: string, arg_texts: []string) -> string {
     return strings.clone(strings.to_string(builder))
 }
 
+emit_operator_text :: proc(op: string, arg_texts: []string, span: Span) -> (string, Compile_Error, bool) {
+    if op == "not" {
+        if len(arg_texts) != 1 {
+            return "", Compile_Error{message = "not expects one argument", span = span}, false
+        }
+        return fmt.tprintf("!(%s)", arg_texts[0]), {}, true
+    }
+
+    if op == "and" || op == "or" {
+        if len(arg_texts) < 2 {
+            return "", Compile_Error{message = fmt.tprintf("%s expects at least two arguments", op), span = span}, false
+        }
+        joiner := " && "
+        if op == "or" {
+            joiner = " || "
+        }
+        builder := strings.builder_make()
+        defer strings.builder_destroy(&builder)
+        for arg_text, idx in arg_texts {
+            if idx > 0 {
+                strings.write_string(&builder, joiner)
+            }
+            fmt.sbprintf(&builder, "(%s)", arg_text)
+        }
+        return strings.clone(strings.to_string(builder)), {}, true
+    }
+
+    if op == "+" || op == "*" || op == "/" || op == "%" {
+        if len(arg_texts) < 2 {
+            return "", Compile_Error{message = fmt.tprintf("%s expects at least two arguments", op), span = span}, false
+        }
+        builder := strings.builder_make()
+        defer strings.builder_destroy(&builder)
+        for arg_text, idx in arg_texts {
+            if idx > 0 {
+                fmt.sbprintf(&builder, " %s ", op)
+            }
+            fmt.sbprintf(&builder, "(%s)", arg_text)
+        }
+        return strings.clone(strings.to_string(builder)), {}, true
+    }
+
+    if op == "-" {
+        if len(arg_texts) == 1 {
+            return fmt.tprintf("-(%s)", arg_texts[0]), {}, true
+        }
+        if len(arg_texts) >= 2 {
+            builder := strings.builder_make()
+            defer strings.builder_destroy(&builder)
+            for arg_text, idx in arg_texts {
+                if idx > 0 {
+                    strings.write_string(&builder, " - ")
+                }
+                fmt.sbprintf(&builder, "(%s)", arg_text)
+            }
+            return strings.clone(strings.to_string(builder)), {}, true
+        }
+        return "", Compile_Error{message = "- expects at least one argument", span = span}, false
+    }
+
+    if op == "==" || op == "!=" || op == "<" || op == "<=" || op == ">" || op == ">=" {
+        if len(arg_texts) != 2 {
+            return "", Compile_Error{message = fmt.tprintf("%s expects exactly two arguments", op), span = span}, false
+        }
+        return fmt.tprintf("(%s) %s (%s)", arg_texts[0], op, arg_texts[1]), {}, true
+    }
+
+    return "", Compile_Error{}, false
+}
+
+emit_update_rhs :: proc(e: ^Emitter, fn_form: CST_Form, arg_texts: []string) -> (string, Compile_Error, bool) {
+    if fn_form.kind == .Symbol {
+        if operator_text, err_op, ok_op := emit_operator_text(fn_form.text, arg_texts, fn_form.span); ok_op {
+            return operator_text, {}, true
+        } else if err_op.message != "" {
+            return "", err_op, false
+        }
+        return emit_call_text(map_name(fn_form.text), arg_texts), {}, true
+    }
+
+    fn_text, err_fn, ok_fn := emit_expr(e, fn_form)
+    if !ok_fn {
+        return "", err_fn, false
+    }
+    return emit_call_text(fn_text, arg_texts), {}, true
+}
+
+emit_update_place :: proc(e: ^Emitter, target_form, key_form: CST_Form) -> (lhs, current: string, err: Compile_Error, ok: bool) {
+    target, err_target, ok_target := emit_expr(e, target_form)
+    if !ok_target {
+        return "", "", err_target, false
+    }
+    if key_form.kind == .Keyword && len(key_form.text) > 1 {
+        text := fmt.tprintf("(%s).%s", target, map_name(key_form.text[1:]))
+        return text, text, Compile_Error{}, true
+    }
+    key, err_key, ok_key := emit_expr(e, key_form)
+    if !ok_key {
+        return "", "", err_key, false
+    }
+    text := fmt.tprintf("(%s)[%s]", target, key)
+    return text, text, Compile_Error{}, true
+}
+
 emit_thread_step :: proc(e: ^Emitter, current: string, step: CST_Form, thread_last: bool) -> (string, Compile_Error, bool) {
     #partial switch step.kind {
     case .Keyword:
@@ -1825,6 +1929,10 @@ addr_expr_text :: proc(text: string) -> string {
         return fmt.tprintf("&%s", text)
     }
     return fmt.tprintf("&(%s)", text)
+}
+
+symbol_is_simple_deref_suffix :: proc(text: string) -> bool {
+    return len(text) > 1 && text[len(text)-1] == '^' && is_plain_identifier_text(map_name(text[:len(text)-1]))
 }
 
 field_from_keyword :: proc(form: CST_Form) -> (field: string, ok: bool) {
@@ -4083,6 +4191,9 @@ emit_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) 
     case .Nil:
         return form.text, {}, true
     case .Symbol:
+        if symbol_is_simple_deref_suffix(form.text) {
+            return deref_expr_text(map_name(form.text[:len(form.text)-1])), {}, true
+        }
         return map_name(form.text), {}, true
     case .Keyword:
         return fmt.tprintf("%q", form.text), {}, true
@@ -5008,30 +5119,39 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
         emit_raw_newline(e)
         return {}, true
     case "update!":
-        if len(form.items) != 4 {
-            return Compile_Error{message = "update! expects target, key-or-field, and value", span = form.span}, false
+        if len(form.items) < 4 {
+            return Compile_Error{message = "update! expects target, key-or-field, and value or updater", span = form.span}, false
         }
-        target, err_target, ok_target := emit_expr(e, form.items[1])
-        if !ok_target {
-            return err_target, false
+        lhs, current, err_place, ok_place := emit_update_place(e, form.items[1], form.items[2])
+        if !ok_place {
+            return err_place, false
         }
-        lhs := ""
-        if form.items[2].kind == .Keyword && len(form.items[2].text) > 1 {
-            lhs = fmt.tprintf("(%s).%s", target, map_name(form.items[2].text[1:]))
-        } else {
-            key, err_key, ok_key := emit_expr(e, form.items[2])
-            if !ok_key {
-                return err_key, false
+        rhs := ""
+        if len(form.items) == 4 {
+            err_owned, bad_owned := owned_result_usage_error(form.items[3], true)
+            if bad_owned {
+                return err_owned, false
             }
-            lhs = fmt.tprintf("(%s)[%s]", target, key)
-        }
-        err_owned, bad_owned := owned_result_usage_error(form.items[3], true)
-        if bad_owned {
-            return err_owned, false
-        }
-        rhs, err_rhs, ok_rhs := emit_expr(e, form.items[3])
-        if !ok_rhs {
-            return err_rhs, false
+            rhs_text, err_rhs, ok_rhs := emit_expr(e, form.items[3])
+            if !ok_rhs {
+                return err_rhs, false
+            }
+            rhs = rhs_text
+        } else {
+            arg_texts: [dynamic]string
+            append(&arg_texts, current)
+            for extra_form in form.items[4:] {
+                extra_text, err_extra, ok_extra := emit_expr(e, extra_form)
+                if !ok_extra {
+                    return err_extra, false
+                }
+                append(&arg_texts, extra_text)
+            }
+            rhs_text, err_rhs, ok_rhs := emit_update_rhs(e, form.items[3], arg_texts[:])
+            if !ok_rhs {
+                return err_rhs, false
+            }
+            rhs = rhs_text
         }
         emit_indent(e)
         strings.write_string(&e.builder, lhs)

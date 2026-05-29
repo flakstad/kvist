@@ -25,6 +25,7 @@ block so `C-c C-e` and `C-c C-c` are practical.
 - `data-literals.kvist`: arrays, maps, `make`, `new`, allocator macros.
 - `vars-and-state.kvist`: `defconst`, `defvar`, and explicit top-level mutation.
 - `pointers-and-raw.kvist`: pointers and explicit raw Odin escape hatches.
+- `pointer-vs-value.kvist`: by-value struct updates versus in-place pointer mutation.
 - `unions.kvist`: union constructors and narrow union switches.
 - `proc-values.kvist`: proc values and proc types.
 

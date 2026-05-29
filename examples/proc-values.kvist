@@ -1,5 +1,5 @@
-// Exercises proc types, proc literals, callbacks, thread-first, nil?, and bang/predicate names.
-(package main)
+// Exercises proc types, proc literals, callbacks, thread-first, nil?, and
+// pointer-vs-value choices in ordinary helper code.
 
 (defstruct Request {
   :path string
@@ -14,7 +14,8 @@
 (defn path-len [req: Request] -> int
   (-> req :path len))
 
-(defn maybe-path-len [req: (ptr Request)] -> int
+(defn maybe-path-len [req: ^Request] -> int
+  ;; Accept a pointer when absence or shared identity is part of the API.
   (if (nil? req)
     0
     (path-len (deref req))))

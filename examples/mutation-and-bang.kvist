@@ -16,17 +16,19 @@
   (let [updated order]
     (when (and (== (:status updated) 2)
                (> (:amount updated) 100))
-      (set! (:amount updated) (- (:amount updated) (:discount updated)))
-      (set! (:discount updated) 0)
-      (set! (:status updated) 3))
+      (update! updated :amount (- (:amount updated) (:discount updated)))
+      (update! updated :discount 0)
+      (update! updated :status 3))
     updated))
 
 (defn settle-order! [order: ^Order]
+  ;; Use a pointer parameter when the caller expects in-place mutation of the
+  ;; shared order value rather than a returned copy.
   (when (and (== (:status (deref order)) 2)
              (> (:amount (deref order)) 100))
-    (set! (:amount (deref order)) (- (:amount (deref order)) (:discount (deref order))))
-    (set! (:discount (deref order)) 0)
-    (set! (:status (deref order)) 3)))
+    (update! order^ :amount (- (:amount order^) (:discount order^)))
+    (update! order^ :discount 0)
+    (update! order^ :status 3)))
 
 (defn order-score [orders: []Order] -> int
   (let [total 0]

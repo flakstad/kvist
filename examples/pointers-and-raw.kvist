@@ -1,5 +1,4 @@
 // Exercises raw Odin escapes, pointer dereference, address-of, mutation, and field access.
-(package main)
 
 (odin "Handle :: distinct rawptr")
 
@@ -7,21 +6,26 @@
   :value int
 })
 
-(proc bump! [x: ^int]
-  (set! (deref x) (+ (deref x) 1)))
+(defn bump! [x: ^int]
+  ;; For a simple pointer symbol, `x^` is the lightest read/write form.
+  (set! x^ (+ x^ 1)))
 
-(proc counter-value [counter: ^Counter] -> int
-  (:value (deref counter)))
+(defn counter-value [counter: ^Counter] -> int
+  ;; Read through a pointer when shared identity matters.
+  (:value counter^))
 
-(proc counter-after-bump [] -> int
+(defn counter-after-bump [] -> int
   (let [counter (Counter {:value 41})]
+    ;; Take the address of a struct field when you need in-place mutation.
     (bump! (addr (:value counter)))
     (counter-value (addr counter))))
 
-(proc main []
+(defn main []
   (println (counter-after-bump)))
 
 (comment
+  ;; Prefer `^T`, `addr`, and `x^` in ordinary Kvist code. Keep `(deref ...)`
+  ;; for more complex pointer expressions.
   (counter-after-bump)
   ;; => 42
 )
