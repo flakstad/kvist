@@ -42,8 +42,9 @@ block so `C-c C-e` and `C-c C-c` are practical.
 
 Owned dynamic arrays, maps, allocated slices, `make`, and sequence helpers that
 return new collections need local cleanup unless ownership is returned to the
-caller. Prefer `with-delete` for ordinary local scopes and plain `defer
-delete(...)` when you need finer control. See
+caller. Prefer `let` bindings marked with trailing `defer` or plain `defer
+delete(...)` for ordinary local scopes, and use `with-delete` when a scoped
+cleanup wrapper reads better than repeated local cleanup lines. See
 [`docs/OWNERSHIP.md`](../docs/OWNERSHIP.md) for the rule of thumb.
 
 ## Odin Core Interop

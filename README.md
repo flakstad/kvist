@@ -28,6 +28,37 @@ new semantic layer. The goal is:
 - emit boring, readable `.odin`
 - use `odin check` as the real validator
 
+## Why Kvist
+
+Odin is already a good language. Kvist does not need to justify itself by being
+shorter or prettier in every case, and it should not be framed as a generic
+attempt to out-syntax Odin.
+
+The stronger case for Kvist is narrower:
+
+- a macro-capable frontend for Odin
+- structural editing and source transformation over a uniform Lisp surface
+- source-level composition experiments that still lower to plain, readable Odin
+- richer tooling and eval workflows without introducing a hidden runtime
+
+The important win is not "Odin, but with parens". The important win is:
+
+- Lisp-grade metaprogramming over systems code
+- structurally editable source
+- explicit, inspectable lowering
+- keeping Odin's ownership, layout, and execution model visible
+
+That also sets the bar for new features. A Kvist form or helper should usually
+earn its place through one of:
+
+- better macroability
+- better structural tooling
+- clearer source composition
+- a genuine ergonomic improvement that still lowers honestly
+
+If a feature is only a different spelling for ordinary Odin, that is usually
+not enough by itself.
+
 ## Plan
 
 The first milestone is a small Odin compiler/transpiler that is pleasant enough
@@ -619,7 +650,8 @@ foreign_call :: proc(handle: Foreign_Handle) ---
   - `println` and `doc` stay implicitly available; most library helpers come from explicit Kvist package imports
 - top-level and statement `(odin "...")` raw escape hatches
 - `(let [binding value ...] body...)` scoped expression/block, including
-  multi-return and struct-field destructuring
+  multi-return and struct-field destructuring; a local binding may be followed
+  by `defer` to lower to `defer delete(...)` at scope exit
 - `(with-allocator [allocator expr] body...)` scoped `context.allocator`
   override with `defer` restoration
 - `(with-temp-allocator [allocator] body...)` scoped `context.temp_allocator`

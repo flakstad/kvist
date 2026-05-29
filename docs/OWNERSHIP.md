@@ -86,6 +86,18 @@ Use `defer delete` for local owned values:
   ...)
 ```
 
+For ordinary local scopes, Kvist also supports a binding-level `defer` marker:
+
+```clojure
+(let [active-users (filter active? users) defer
+      names (map :name active-users) defer]
+  ...)
+```
+
+This lowers to the same explicit `defer delete(...)` pattern. It is only a
+local binding convenience; it does not create a hidden runtime cleanup model.
+Defer-marked bindings cannot be returned directly from the scope.
+
 For `partition`, `partition-all`, and `partition-by`, delete the outer dynamic
 array. The chunks inside are borrowed slices and must not be deleted:
 

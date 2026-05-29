@@ -9,20 +9,19 @@
    :tags set[string]})
 
 (defn records-demo [] -> bool
-  (let [tags (set/empty string 2)
+  (let [tags (set/empty string 2) defer
         person (Person {:name "Ada"
                         :age 36
                         :tags tags})]
-    (with-delete [owned-tags tags]
-      (set/add! owned-tags "math")
-      (set/add! owned-tags "lisp")
-      (println (:name person))
-      (println (:age person))
-      (println (:tags person))
-      (println (set/contains? (:tags person) "math"))
-      (update! person :age 37)
-      (println person)
-      true)))
+    (set/add! tags "math")
+    (set/add! tags "lisp")
+    (println (:name person))
+    (println (:age person))
+    (println (:tags person))
+    (println (set/contains? (:tags person) "math"))
+    (update! person :age 37)
+    (println person)
+    true))
 
 (defn main []
   (println (records-demo)))

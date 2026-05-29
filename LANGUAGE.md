@@ -786,6 +786,18 @@ Typed local bindings are allowed:
   (+ x y))
 ```
 
+Local bindings may be marked with `defer` after the value expression:
+
+```clojure
+(let [xs (arr/dynamic int [1 2 3]) defer
+      lookup (map/empty string int) defer]
+  ...)
+```
+
+This lowers to ordinary local bindings plus `defer delete(...)` at scope exit.
+The marker is currently only supported on named local bindings in `let`.
+Defer-marked bindings cannot be returned directly from the scope.
+
 Flat multi-return destructuring is worth supporting because it matches ordinary
 Odin usage and keeps explicit control flow readable:
 

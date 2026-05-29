@@ -3,41 +3,36 @@
 (import arr "kvist:arr")
 
 (defn loop-index-demo [] -> [dynamic]int
-  (let [xs (arr/dynamic int [10 20 30])
+  (let [xs (arr/dynamic int [10 20 30]) defer
         out (arr/empty int)]
-    (with-delete [owned-xs xs]
-      (for [x i owned-xs]
-        (arr/push! out (+ x i)))
-      out)))
+    (for [x i xs]
+      (arr/push! out (+ x i)))
+    out))
 
 (defn loop-break-demo [] -> int
-  (let [xs (arr/dynamic int [3 5 8 13 21])
+  (let [xs (arr/dynamic int [3 5 8 13 21]) defer
         found 0]
-    (with-delete [owned-xs xs]
-      (for [x owned-xs]
-        (when (> x 10)
-          (set! found x)
-          (break)))
-      found)))
+    (for [x xs]
+      (when (> x 10)
+        (set! found x)
+        (break)))
+    found))
 
 (defn loop-continue-demo [] -> [dynamic]int
-  (let [xs (arr/dynamic int [0 1 2 3 4 5])
+  (let [xs (arr/dynamic int [0 1 2 3 4 5]) defer
         out (arr/empty int)]
-    (with-delete [owned-xs xs]
-      (for [x owned-xs]
-        (when (== 0 (% x 2))
-          (continue))
-        (arr/push! out x))
-      out)))
+    (for [x xs]
+      (when (== 0 (% x 2))
+        (continue))
+      (arr/push! out x))
+    out))
 
 (defn main []
-  (let [indexed (loop-index-demo)
-        continued (loop-continue-demo)]
-    (with-delete [owned-indexed indexed
-                  owned-continued continued]
-      (println owned-indexed)
-      (println (loop-break-demo))
-      (println owned-continued))))
+  (let [indexed (loop-index-demo) defer
+        continued (loop-continue-demo) defer]
+    (println indexed)
+    (println (loop-break-demo))
+    (println continued)))
 
 (comment
   (loop-index-demo)

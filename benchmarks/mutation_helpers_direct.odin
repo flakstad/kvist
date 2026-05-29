@@ -4,11 +4,11 @@ import "core:fmt"
 import mem "core:mem"
 import time "core:time"
 
-STRUCT_REPS :: 200
-STRUCT_INNER :: 1_000_000
-REPS :: 250
-ARRAY_N :: 20_000
-MAP_N :: 20_000
+STRUCT_REPS :: 40
+STRUCT_N :: 2_000
+REPS :: 80
+ARRAY_N :: 8_000
+MAP_N :: 8_000
 
 Score :: struct {
     value: int,
@@ -32,49 +32,56 @@ run_one :: proc(name: string, checksum: int, start: time.Tick, track: ^mem.Track
     report(name, time.tick_since(start), checksum, track)
 }
 
-bench_struct_update_bang :: proc(reps, inner: int) -> int {
+bump_score :: proc(score: Score) -> Score {
+    updated := score
+    updated.value = updated.value + 3
+    updated.bonus = updated.bonus + 1
+    return updated
+}
+
+bump_score_bang :: proc(score: ^Score) {
+    score.value = score.value + 3
+    score.bonus = score.bonus + 1
+}
+
+bench_struct_update :: proc(reps, n: int) -> int {
+    base := make([dynamic]Score, 0, n)
+    for j := 0; j < n; j += 1 {
+        append(&base, Score{value = j + 1, bonus = j % 7})
+    }
+    defer delete(base)
+
     checksum := 0
     for i := 0; i < reps; i += 1 {
-        score := Score{value = 1, bonus = 2}
-        for j := 0; j < inner; j += 1 {
-            score.value = score.value + 3
-            score.bonus = score.bonus + 1
+        scores := make([dynamic]Score, 0, len(base))
+        append(&scores, ..base[:])
+        for j := 0; j < n; j += 1 {
+            scores[j] = bump_score(scores[j])
         }
-        checksum += score.value
-        checksum += score.bonus
+        checksum += scores[n-1].value
+        checksum += scores[n-1].bonus
+        delete(scores)
     }
     return checksum
 }
 
-bench_struct_update :: proc(reps, inner: int) -> int {
-    checksum := 0
-    for i := 0; i < reps; i += 1 {
-        score := Score{value = 1, bonus = 2}
-        for j := 0; j < inner; j += 1 {
-            updated_1 := score
-            updated_1.value = updated_1.value + 3
-            score = updated_1
-            updated_2 := score
-            updated_2.bonus = updated_2.bonus + 1
-            score = updated_2
-        }
-        checksum += score.value
-        checksum += score.bonus
+bench_pointer_update :: proc(reps, n: int) -> int {
+    base := make([dynamic]Score, 0, n)
+    for j := 0; j < n; j += 1 {
+        append(&base, Score{value = j + 1, bonus = j % 7})
     }
-    return checksum
-}
+    defer delete(base)
 
-bench_pointer_update :: proc(reps, inner: int) -> int {
     checksum := 0
     for i := 0; i < reps; i += 1 {
-        score := Score{value = 1, bonus = 2}
-        score_ptr := &score
-        for j := 0; j < inner; j += 1 {
-            score_ptr.value = score_ptr.value + 3
-            score_ptr.bonus = score_ptr.bonus + 1
+        scores := make([dynamic]Score, 0, len(base))
+        append(&scores, ..base[:])
+        for j := 0; j < n; j += 1 {
+            bump_score_bang(&scores[j])
         }
-        checksum += score.value
-        checksum += score.bonus
+        checksum += scores[n-1].value
+        checksum += scores[n-1].bonus
+        delete(scores)
     }
     return checksum
 }
@@ -114,9 +121,9 @@ bench_map_update_bang :: proc(reps, n: int) -> int {
 
 main :: proc() {
     fmt.printfln(
-        "STRUCT_REPS=%v STRUCT_INNER=%v REPS=%v ARRAY_N=%v MAP_N=%v",
+        "STRUCT_REPS=%v STRUCT_N=%v REPS=%v ARRAY_N=%v MAP_N=%v",
         STRUCT_REPS,
-        STRUCT_INNER,
+        STRUCT_N,
         REPS,
         ARRAY_N,
         MAP_N,
@@ -130,13 +137,10 @@ main :: proc() {
 
     mem.tracking_allocator_reset(&track)
     start := time.tick_now()
-    run_one("struct-update!", bench_struct_update_bang(STRUCT_REPS, STRUCT_INNER), start, &track)
+    run_one("struct-update", bench_struct_update(STRUCT_REPS, STRUCT_N), start, &track)
     mem.tracking_allocator_reset(&track)
     start = time.tick_now()
-    run_one("struct-update", bench_struct_update(STRUCT_REPS, STRUCT_INNER), start, &track)
-    mem.tracking_allocator_reset(&track)
-    start = time.tick_now()
-    run_one("pointer-update", bench_pointer_update(STRUCT_REPS, STRUCT_INNER), start, &track)
+    run_one("pointer-update", bench_pointer_update(STRUCT_REPS, STRUCT_N), start, &track)
     mem.tracking_allocator_reset(&track)
     start = time.tick_now()
     run_one("array-update!", bench_array_update_bang(REPS, ARRAY_N), start, &track)

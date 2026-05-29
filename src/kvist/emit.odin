@@ -1934,6 +1934,43 @@ let_return_error :: proc(bindings: []Binding, body: []CST_Form) -> (Compile_Erro
     return {}, false
 }
 
+let_defer_return_error :: proc(bindings: []Binding, body: []CST_Form, last_in_proc: bool, returns: Return_Spec) -> (Compile_Error, bool) {
+    for item in body {
+        if item.kind != .List || len(item.items) == 0 || item.items[0].kind != .Symbol || item.items[0].text != "return" {
+            continue
+        }
+        for returned in item.items[1:] {
+            if returned.kind != .Symbol {
+                continue
+            }
+            returned_name := map_name(returned.text)
+            for binding in bindings {
+                if binding.deferred_delete && binding.name == returned_name {
+                    return Compile_Error{
+                        message = "defer-marked binding cannot be returned; remove defer or transfer ownership explicitly",
+                        span = returned.span,
+                    }, true
+                }
+            }
+        }
+    }
+    if last_in_proc && returns.kind != .None && len(body) > 0 {
+        final_form := body[len(body)-1]
+        if final_form.kind == .Symbol {
+            final_name := map_name(final_form.text)
+            for binding in bindings {
+                if binding.deferred_delete && binding.name == final_name {
+                    return Compile_Error{
+                        message = "defer-marked binding cannot be returned; remove defer or transfer ownership explicitly",
+                        span = final_form.span,
+                    }, true
+                }
+            }
+        }
+    }
+    return {}, false
+}
+
 emit_binding_assignment :: proc(e: ^Emitter, binding: Binding, value: string) {
     if binding.is_destructure {
         line_builder := strings.builder_make()
@@ -2336,13 +2373,20 @@ analyze_owned_scope_body :: proc(e: ^Emitter, forms: []CST_Form, can_transfer_fi
                 if binding.is_destructure || binding.is_field_destructure || binding.name == "" {
                     continue
                 }
-                if form_produces_owned_value(binding.value) {
+                if form_produces_owned_value(binding.value) || binding.deferred_delete {
                     append(live, Owned_Local{name = binding.name, span = form.items[0].span})
                 }
             }
             analyze_owned_scope_body(e, form.items[2:], final_in_scope && can_transfer_final, live)
             for i := start; i < len(live); i += 1 {
-                if !body_deletes_or_returns_name(form.items[2:], live[i].name, final_in_scope && can_transfer_final) {
+                skip_warning := false
+                for binding in bindings {
+                    if binding.name == live[i].name && binding.deferred_delete {
+                        skip_warning = true
+                        break
+                    }
+                }
+                if !skip_warning && !body_deletes_or_returns_name(form.items[2:], live[i].name, final_in_scope && can_transfer_final) {
                     emit_warning(e, fmt.tprintf("owned local %s is never deleted or returned", live[i].name), live[i].span)
                 }
             }
@@ -4418,7 +4462,14 @@ Binding :: struct {
     fields:         [dynamic]Binding_Field,
     is_typed:       bool,
     ty:             string,
+    deferred_delete: bool,
     value:          CST_Form,
+}
+
+let_binding_has_defer_marker :: proc(items: []CST_Form, idx: int) -> bool {
+    return idx < len(items) &&
+        items[idx].kind == .Symbol &&
+        items[idx].text == "defer"
 }
 
 parse_field_destructure_binding :: proc(form: CST_Form) -> (fields: [dynamic]Binding_Field, err: Compile_Error, ok: bool) {
@@ -4475,6 +4526,9 @@ parse_let_bindings :: proc(form: CST_Form) -> (bindings: [dynamic]Binding, err: 
             if i+1 >= len(form.items) {
                 return bindings, Compile_Error{message = "destructuring binding missing value", span = target.span}, false
             }
+            if let_binding_has_defer_marker(form.items[:], i+2) {
+                return bindings, Compile_Error{message = "defer binding marker is only supported on named local bindings", span = form.items[i+2].span}, false
+            }
             names: [dynamic]string
             for part in target.items {
                 if part.kind != .Symbol {
@@ -4491,6 +4545,9 @@ parse_let_bindings :: proc(form: CST_Form) -> (bindings: [dynamic]Binding, err: 
         case .Brace:
             if i+1 >= len(form.items) {
                 return bindings, Compile_Error{message = "field destructuring binding missing value", span = target.span}, false
+            }
+            if let_binding_has_defer_marker(form.items[:], i+2) {
+                return bindings, Compile_Error{message = "defer binding marker is only supported on named local bindings", span = form.items[i+2].span}, false
             }
             fields, err_fields, ok_fields := parse_field_destructure_binding(target)
             if !ok_fields {
@@ -4514,22 +4571,32 @@ parse_let_bindings :: proc(form: CST_Form) -> (bindings: [dynamic]Binding, err: 
                 if next_i >= len(form.items) {
                     return bindings, Compile_Error{message = "typed binding missing value", span = target.span}, false
                 }
+                deferred_delete := let_binding_has_defer_marker(form.items[:], next_i+1)
                 append(&bindings, Binding{
                     name = map_name(target.text[:len(target.text)-1]),
                     is_typed = true,
                     ty = type_text,
+                    deferred_delete = deferred_delete,
                     value = form.items[next_i],
                 })
                 i = next_i + 1
+                if deferred_delete {
+                    i += 1
+                }
             } else {
                 if i+1 >= len(form.items) {
                     return bindings, Compile_Error{message = "binding missing value", span = target.span}, false
                 }
+                deferred_delete := let_binding_has_defer_marker(form.items[:], i+2)
                 append(&bindings, Binding{
                     name = map_name(target.text),
+                    deferred_delete = deferred_delete,
                     value = form.items[i+1],
                 })
                 i += 2
+                if deferred_delete {
+                    i += 1
+                }
             }
         case:
             return bindings, Compile_Error{message = "unsupported binding target", span = target.span}, false
@@ -5085,6 +5152,10 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
             if bad_let_return {
                 return err_let_return, false
             }
+            err_let_defer_return, bad_let_defer_return := let_defer_return_error(bindings[:], body[:], last_in_proc, returns)
+            if bad_let_defer_return {
+                return err_let_defer_return, false
+            }
         }
         push_local_type_scope(e)
         defer pop_local_type_scope(e)
@@ -5114,6 +5185,9 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
                     return err_value, false
                 }
                 emit_binding_assignment(e, binding, value)
+            }
+            if binding.deferred_delete {
+                emit_line(e, fmt.tprintf("defer delete(%s)", binding.name))
             }
             if ty, ok_ty := obvious_binding_type(e, binding); ok_ty {
                 bind_local_type(e, binding.name, ty)

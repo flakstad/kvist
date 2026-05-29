@@ -2031,6 +2031,28 @@ compile_with_delete_scope :: proc(t: ^testing.T) {
 }
 
 @(test)
+compile_let_defer_binding :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(proc main []
+  (let [xs (new [dynamic]int [1 2]) defer
+        answer 42]
+    (return)))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "xs := [dynamic]int{1, 2}"), true)
+    testing.expect_value(t, strings.contains(output, "defer delete(xs)"), true)
+    testing.expect_value(t, strings.contains(output, "answer := 42"), true)
+}
+
+@(test)
 reject_returning_with_delete_binding :: proc(t: ^testing.T) {
     source := `(package main)
 
@@ -2042,6 +2064,20 @@ reject_returning_with_delete_binding :: proc(t: ^testing.T) {
     testing.expect_value(t, ok, false)
     defer delete(err.message)
     testing.expect_value(t, err.message, "with-delete binding cannot be returned; return it without with-delete or copy it before returning")
+}
+
+@(test)
+reject_returning_defer_binding :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(proc owned [] -> [dynamic]int
+  (let [xs (new [dynamic]int [1 2]) defer]
+    xs))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    defer delete(err.message)
+    testing.expect_value(t, err.message, "defer-marked binding cannot be returned; remove defer or transfer ownership explicitly")
 }
 
 @(test)

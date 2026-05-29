@@ -1,0 +1,50 @@
+// Focused benchmark for map update! lowering with minimal surrounding noise.
+(package main)
+(import "core:fmt")
+(import mem "core:mem")
+(import time "core:time")
+
+(odin "REPS :: 200
+MAP_N :: 50_000
+KEY_MOD :: 1024")
+
+(defn report [name: string, elapsed: time.Duration, checksum: int, track: ^mem.Tracking-Allocator]
+  (fmt.printfln "%-16s %9.3f ms allocs=%8v total=%10v peak=%9v live=%v checksum=%v"
+                name
+                (time.duration-milliseconds elapsed)
+                track.total-allocation-count
+                track.total-memory-allocated
+                track.peak-memory-allocated
+                track.current-memory-allocated
+                checksum))
+
+(defn run-one [name: string, checksum: int, start: time.Tick, track: ^mem.Tracking-Allocator]
+  (report name (time.tick-since start) checksum track))
+
+(defn bench-map-update! [reps: int, n: int] -> int
+  (let [i 0
+        checksum 0]
+    (for (< i reps)
+      (let [counts (map/empty int int)
+            j 0]
+        (for (< j n)
+          (update! counts (% j KEY_MOD) + 1)
+          (set! j (+ j 1)))
+        (set! checksum (+ checksum (get counts 17 0)))
+        (set! checksum (+ checksum (get counts 511 0)))
+        (delete counts))
+      (set! i (+ i 1)))
+    checksum))
+
+(defn main []
+  (fmt.printfln "REPS=%v MAP_N=%v KEY_MOD=%v" REPS MAP_N KEY_MOD)
+  (let [old-allocator context.allocator
+        track: mem.Tracking-Allocator (odin "mem.Tracking_Allocator{}")]
+    (mem.tracking-allocator-init (& track) old-allocator old-allocator)
+    (defer (mem.tracking-allocator-destroy (& track)))
+    (set! context.allocator (mem.tracking-allocator (& track)))
+    (defer (odin "context.allocator = old_allocator"))
+
+    (mem.tracking-allocator-reset (& track))
+    (let [start (time.tick-now)]
+      (run-one "map-update!" (bench-map-update! REPS MAP_N) start (& track)))))
