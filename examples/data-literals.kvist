@@ -1,6 +1,5 @@
 // Exercises structs, field access, typed collection literals, map lookup, and make.
 (package main)
-(import "core:fmt")
 (import runtime "base:runtime")
 
 (struct User {
@@ -86,7 +85,7 @@
     (get fixed 1)))
 
 (proc main []
-  (fmt.println (lookup-two)))
+  (println (lookup-two)))
 
 (comment
   ;; Struct construction is just Odin struct construction in parens.

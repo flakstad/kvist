@@ -4,7 +4,6 @@
 // paths are cleaned by core:os, file bytes are owned slices from core:os, and
 // callers still delete those slices when they are done.
 (package main)
-(import "core:fmt")
 (import os "core:os")
 
 (proc clean-base-length [] -> int
@@ -51,7 +50,7 @@
   (os.remove path))
 
 (proc main []
-  (fmt.println (clean-base-length) (cwd-base-length)))
+  (println (clean-base-length) (cwd-base-length)))
 
 (comment
   ;; clean_path allocates a cleaned path string because we pass an allocator.

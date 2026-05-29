@@ -1,6 +1,5 @@
 // Exercises conditionals, value switches, grouped cases, loops, and name mapping.
 (package main)
-(import "core:fmt")
 
 (enum Method [
   Get
@@ -59,7 +58,7 @@
 
 (proc main []
   (let [xs (new []int [1 2 3])]
-    (fmt.println (classify (sum xs)))))
+    (println (classify (sum xs)))))
 
 (comment
   (method-name .Get)

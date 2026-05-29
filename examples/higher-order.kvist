@@ -1,6 +1,5 @@
 // Exercises core generic map/filter/reduce helpers.
 (package main)
-(import "core:fmt")
 
 (proc inc [x: int] -> int
   (+ x 1))
@@ -34,7 +33,7 @@
     total))
 
 (proc main []
-  (fmt.println (threaded-total)))
+  (println (threaded-total)))
 
 (comment
   (mapped-first)

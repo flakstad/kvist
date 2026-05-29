@@ -4,7 +4,6 @@
 // records and cloned field strings by default. The INI iterator shown here is
 // allocation-free because it walks borrowed slices of the input string.
 (package main)
-(import "core:fmt")
 (import csv "core:encoding/csv")
 (import ini "core:encoding/ini")
 (import strconv "core:strconv")
@@ -64,7 +63,7 @@
     total))
 
 (proc main []
-  (fmt.println (csv-age-total) (csv-record-count) (ini-port) (ini-pair-count)))
+  (println (csv-age-total) (csv-record-count) (ini-port) (ini-pair-count)))
 
 (comment
   ;; CSV read_all includes the header record. The example parses two ages from

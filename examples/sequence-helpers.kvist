@@ -1,6 +1,5 @@
 // Exercises additional eager sequence helpers and ownership cleanup.
 (package main)
-(import "core:fmt")
 
 (proc even? [x: int] -> bool
   (== (% x 2) 0))
@@ -332,7 +331,7 @@
     (first threaded)))
 
 (proc main []
-  (fmt.println (age-for-grace)))
+  (println (age-for-grace)))
 
 (comment
   (split-front-length)

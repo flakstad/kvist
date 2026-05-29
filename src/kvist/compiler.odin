@@ -322,6 +322,9 @@ compile_program_with_map :: proc(program: AST_Program) -> (result: Emit_Result, 
     for entry in temp_result.source_map {
         append(&result.source_map, entry)
     }
+    for warning in temp_result.warnings {
+        append(&result.warnings, clone_compile_warning(warning, result_allocator))
+    }
     return result, Compile_Error{}, true
 }
 
@@ -366,6 +369,9 @@ compile_program_eval_form_with_map :: proc(program: AST_Program, eval_form: CST_
     context.allocator = result_allocator
     for entry in temp_result.source_map {
         append(&result.source_map, entry)
+    }
+    for warning in temp_result.warnings {
+        append(&result.warnings, clone_compile_warning(warning, result_allocator))
     }
     return result, Compile_Error{}, true
 }
@@ -438,12 +444,53 @@ format_eval_compile_error :: proc(path, source, eval_source: string, err: Compil
     return format_compile_error(path, source, err)
 }
 
+format_compile_warning :: proc(path, source: string, warning: Compile_Warning) -> string {
+    label := path
+    if label == "" {
+        label = "<source>"
+    }
+    message := warning.message
+    if message == "" {
+        message = "warning"
+    }
+    line, column, _, _ := source_position(source, warning.span.start)
+    return strings.clone(fmt.tprintf("%s:%d:%d: warning: %s\n", label, line, column, message))
+}
+
+format_eval_compile_warning :: proc(path, source, eval_source: string, warning: Compile_Warning) -> string {
+    if warning.span.source == .Eval {
+        label := "<eval>"
+        if path != "" {
+            label = fmt.tprintf("%s:<eval>", path)
+        }
+        return format_compile_warning(label, eval_source, warning)
+    }
+    return format_compile_warning(path, source, warning)
+}
+
 clone_compile_error :: proc(err: Compile_Error, allocator := context.allocator) -> Compile_Error {
     cloned := err
     if cloned.message != "" {
         cloned.message = strings.clone(cloned.message, allocator)
     }
     return cloned
+}
+
+clone_compile_warning :: proc(warning: Compile_Warning, allocator := context.allocator) -> Compile_Warning {
+    cloned := warning
+    if cloned.message != "" {
+        cloned.message = strings.clone(cloned.message, allocator)
+    }
+    return cloned
+}
+
+compile_warning_slice_delete :: proc(warnings: [dynamic]Compile_Warning, allocator := context.allocator) {
+    for warning in warnings {
+        if warning.message != "" {
+            delete(warning.message, allocator)
+        }
+    }
+    delete(warnings)
 }
 
 format_source_map :: proc(entries: []Source_Map_Entry) -> string {
@@ -526,6 +573,7 @@ compile_source :: proc(source: string) -> (output: string, err: Compile_Error, o
         return "", err_result, false
     }
     defer delete(result.source_map)
+    defer compile_warning_slice_delete(result.warnings)
     return result.output, {}, true
 }
 
@@ -557,6 +605,9 @@ compile_source_with_map :: proc(source: string) -> (result: Emit_Result, err: Co
     context.allocator = result_allocator
     for entry in temp_result.source_map {
         append(&result.source_map, entry)
+    }
+    for warning in temp_result.warnings {
+        append(&result.warnings, clone_compile_warning(warning, result_allocator))
     }
     return result, {}, true
 }
@@ -593,6 +644,7 @@ compile_eval_source :: proc(source, eval_source: string, no_print: bool = false)
         return "", err_result, false
     }
     defer delete(result.source_map)
+    defer compile_warning_slice_delete(result.warnings)
     return result.output, {}, true
 }
 
@@ -643,6 +695,9 @@ compile_eval_source_with_map :: proc(source, eval_source: string, no_print: bool
     for entry in temp_result.source_map {
         append(&result.source_map, entry)
     }
+    for warning in temp_result.warnings {
+        append(&result.warnings, clone_compile_warning(warning, result_allocator))
+    }
     return result, {}, true
 }
 
@@ -652,6 +707,7 @@ compile_path :: proc(path: string) -> (output: string, err: Compile_Error, ok: b
         return "", err_result, false
     }
     defer delete(result.source_map)
+    defer compile_warning_slice_delete(result.warnings)
     return result.output, {}, true
 }
 
@@ -677,6 +733,7 @@ compile_eval_path :: proc(path, eval_source: string, no_print: bool = false) -> 
         return "", err_result, false
     }
     defer delete(result.source_map)
+    defer compile_warning_slice_delete(result.warnings)
     return result.output, {}, true
 }
 

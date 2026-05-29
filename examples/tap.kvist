@@ -1,6 +1,5 @@
 // Explicit tap-style inspection for eval-driven development.
 (package main)
-(import "core:fmt")
 
 (struct User {
   :name string
@@ -36,8 +35,8 @@
     total))
 
 (proc main []
-  (fmt.println (inspected-age))
-  (fmt.println (inspected-thread-total)))
+  (println (inspected-age))
+  (println (inspected-thread-total)))
 
 (comment
   (inspected-age)

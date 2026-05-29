@@ -1,6 +1,5 @@
 // A small end-to-end order report using eager helpers, in-place helpers, and loops.
 (package main)
-(import "core:fmt")
 
 (struct Order {
   :id int
@@ -136,10 +135,10 @@
       (row-score (slice rows)))))
 
 (proc main []
-  (fmt.println (eager-report-score))
-  (fmt.println (bang-report-score))
-  (fmt.println (aggregate-helper-report-score))
-  (fmt.println (loop-report-score)))
+  (println (eager-report-score))
+  (println (bang-report-score))
+  (println (aggregate-helper-report-score))
+  (println (loop-report-score)))
 
 (comment
   ;; Eager helpers read cleanly when the intermediate collections matter.

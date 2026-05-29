@@ -5,7 +5,6 @@
 // owns backing storage after queue.init. Production code should destroy it in
 // the same scope unless ownership is returned.
 (package main)
-(import "core:fmt")
 (import queue "core:container/queue")
 
 (struct Job {
@@ -57,7 +56,7 @@
             0))))))
 
 (proc main []
-  (fmt.println (fifo-total) (deque-score) (safe-pop-score)))
+  (println (fifo-total) (deque-score) (safe-pop-score)))
 
 (comment
   ;; FIFO behavior: push 10, push 20, pop them in the same order.

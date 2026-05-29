@@ -1,6 +1,5 @@
 // Exercises proc types, proc literals, callbacks, thread-first, nil?, and bang/predicate names.
 (package main)
-(import "core:fmt")
 
 (struct Request {
   :path string
@@ -24,7 +23,7 @@
   (let [pred: (proc [x: int] -> bool) (fn [x: int] -> bool
                                            (greater-than? 10 x))
         req (Request {:path "/users"})]
-    (fmt.println (apply-pred pred 12))))
+    (println (apply-pred pred 12))))
 
 (comment
   (greater-than? 3 5)

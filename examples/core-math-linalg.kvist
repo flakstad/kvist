@@ -4,7 +4,6 @@
 // scalar math, vector construction, linalg helpers, and rand calls lower to the
 // same Odin APIs you would call in a normal Odin file.
 (package main)
-(import "core:fmt")
 (import math "core:math")
 (import rand "core:math/rand")
 (import linalg "core:math/linalg")
@@ -34,7 +33,7 @@
   (rand.int_max 10))
 
 (proc main []
-  (fmt.println (rounded-root)
+  (println (rounded-root)
                (clamped-score 42)
                (vector-dot)
                (vector-length)))

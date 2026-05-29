@@ -1,6 +1,5 @@
 // Exercises struct field updates, pointer mutation, and in-place sequence helpers.
 (package main)
-(import "core:fmt")
 
 (struct Order {
   :id int
@@ -62,9 +61,9 @@
     (order-score (slice orders))))
 
 (proc main []
-  (fmt.println (map-bang-score))
-  (fmt.println (filter-bang-count))
-  (fmt.println (pointer-update-score)))
+  (println (map-bang-score))
+  (println (filter-bang-count))
+  (println (pointer-update-score)))
 
 (comment
   ;; map! replaces each struct value with the returned updated struct.

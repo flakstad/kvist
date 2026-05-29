@@ -6,7 +6,6 @@
 // shapes directly, with Kvist only providing parens and the small `(type ...)`
 // spelling needed for polymorphic host types like chan.Chan(int).
 (package main)
-(import "core:fmt")
 (import "core:sync")
 (import chan "core:sync/chan")
 (import thread "core:thread")
@@ -54,7 +53,7 @@
     (:value counter)))
 
 (proc main []
-  (fmt.println (future-like-square) (mutex-protected-count)))
+  (println (future-like-square) (mutex-protected-count)))
 
 (comment
   ;; A channel plus a worker thread is the basic future-like pattern. This is

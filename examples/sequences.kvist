@@ -1,6 +1,5 @@
 // Exercises core sequence helpers over structs, enums, and strings.
 (package main)
-(import "core:fmt")
 
 (enum Status [
   Active
@@ -138,7 +137,7 @@
     (:name first-adult)))
 
 (proc main []
-  (fmt.println (active-count)))
+  (println (active-count)))
 
 (comment
   (:name (User {:name "Ada" :age 36 :status .Active :verified true}))

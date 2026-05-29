@@ -1,0 +1,45 @@
+// Exercises defconst and defvar together with explicit top-level mutation.
+(package main)
+
+(defconst default-port int 8080)
+(defvar live-port int 8080)
+(defvar request-count 0)
+
+(defn reset-state! []
+  (set! live-port default-port)
+  (set! request-count 0))
+
+(defn bump-request-count! [] -> int
+  (set! request-count (+ request-count 1))
+  request-count)
+
+(defn switch-port! [port: int] -> int
+  (set! live-port port)
+  live-port)
+
+(defn port-score [] -> int
+  (+ live-port request-count))
+
+(defn main []
+  (println (bump-request-count!)))
+
+(comment
+  (reset-state!)
+
+  default-port
+  ;; => 8080
+
+  (bump-request-count!)
+  ;; => 1
+
+  (bump-request-count!)
+  ;; => 2
+
+  (switch-port! 9090)
+  ;; => 9090
+
+  (port-score)
+  ;; => 9092
+
+  (reset-state!)
+)

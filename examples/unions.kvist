@@ -1,6 +1,5 @@
 // Exercises tagged union construction and narrow type-switch handling.
 (package main)
-(import "core:fmt")
 
 (defunion Value
   "Simple tagged value."
@@ -18,7 +17,7 @@
 (defn main []
   (let [number (Value {:i 42})
         text (Value {:s "kvist"})]
-    (fmt.println (describe text))))
+    (println (describe text))))
 
 (comment
   (describe (Value {:i 42}))

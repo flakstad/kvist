@@ -1,6 +1,5 @@
 // Exercises doc comments, import aliases, constants, explicit enums, and structs.
 (package main)
-(import fmt "core:fmt")
 
 // Default port for examples.
 (defconst default-port int 8080)
@@ -40,7 +39,7 @@
 
 (defn main []
   (let [endpoint (Endpoint {:path "/health" :status .OK})]
-    (fmt.println (status-label (:status endpoint)))))
+    (println (status-label (:status endpoint)))))
 
 (comment
   default-port

@@ -260,6 +260,19 @@ cleanup_odin_output_arg :: proc(out_path, out_arg: string) {
     }
 }
 
+print_compile_warnings :: proc(path, source, eval_source: string, warnings: []kvist.Compile_Warning) {
+    for warning in warnings {
+        formatted := ""
+        if eval_source != "" {
+            formatted = kvist.format_eval_compile_warning(path, source, eval_source, warning)
+        } else {
+            formatted = kvist.format_compile_warning(path, source, warning)
+        }
+        fmt.eprint(formatted)
+        delete(formatted)
+    }
+}
+
 run_odin_file :: proc(command, generated_path, source_path, source, eval_source, save_name: string, source_map: []kvist.Source_Map_Entry) -> int {
     source_dir, _ := os.split_path(source_path)
     working_dir := source_dir
@@ -362,6 +375,13 @@ compile_file_command :: proc(input, output_path, map_path: string) {
     }
     defer delete(result.output)
     defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    if len(result.warnings) > 0 {
+        data := read_source_or_exit(input)
+        defer delete(transmute([]byte)data)
+        print_compile_warnings(input, data, "", result.warnings[:])
+    }
 
     if output_path != "" {
         write_output_or_exit(output_path, result.output)
@@ -377,21 +397,26 @@ compile_file_command :: proc(input, output_path, map_path: string) {
 }
 
 compile_eval_emit_command :: proc(input, eval_source, output_path: string, no_print: bool) {
-    output, err, ok := kvist.compile_eval_path(input, eval_source, no_print)
+    data := read_source_or_exit(input)
+    defer delete(transmute([]byte)data)
+
+    result, err, ok := kvist.compile_eval_path_with_map(input, eval_source, no_print)
     if !ok {
-        data := read_source_or_exit(input)
         formatted := kvist.format_eval_compile_error(input, data, eval_source, err)
         fmt.eprint(formatted)
         delete(formatted)
-        delete(transmute([]byte)data)
         os.exit(1)
     }
-    defer delete(output)
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    print_compile_warnings(input, data, eval_source, result.warnings[:])
 
     if output_path != "" {
-        write_output_or_exit(output_path, output)
+        write_output_or_exit(output_path, result.output)
     } else {
-        fmt.print(output)
+        fmt.print(result.output)
     }
 }
 
@@ -450,7 +475,9 @@ run_generated_command :: proc(input, generated_path, odin_command: string) -> in
     }
     defer delete(result.output)
     defer delete(result.source_map)
+        defer kvist.compile_warning_slice_delete(result.warnings)
 
+    print_compile_warnings(input, data, "", result.warnings[:])
     path, temp_dir, path_ok := write_generated_for_execution(result.output, generated_path)
     if !path_ok {
         return 1
@@ -500,7 +527,9 @@ eval_command :: proc(input, eval_source, generated_path, save_name: string, no_p
     }
     defer delete(result.output)
     defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
 
+    print_compile_warnings(input, data, eval_source, result.warnings[:])
     path, temp_dir, path_ok := write_generated_for_execution(result.output, generated_path)
     if !path_ok {
         return 1

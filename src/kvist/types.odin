@@ -193,9 +193,15 @@ Source_Map_Entry :: struct {
 Emit_Result :: struct {
     output:     string,
     source_map: [dynamic]Source_Map_Entry,
+    warnings:   [dynamic]Compile_Warning,
 }
 
 Compile_Error :: struct {
+    message: string,
+    span:    Span,
+}
+
+Compile_Warning :: struct {
     message: string,
     span:    Span,
 }

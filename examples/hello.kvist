@@ -1,6 +1,5 @@
 // Greets from Kvist.
 (package main)
-(import "core:fmt")
 
 ;; This is a greeting
 (struct Greeting {
@@ -9,7 +8,7 @@
 
 (defn main []
   (let [g (Greeting { :message "hello from kvist" })]
-    (fmt.println (:message g))))
+    (println (:message g))))
 
 (comment
 

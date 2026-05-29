@@ -3,7 +3,9 @@
 An experiment in writing Odin with a small Clojure/Lisp-shaped syntax: Odin in
 parens, not Clojure on Odin.
 
-The current language draft is [LANGUAGE.md](LANGUAGE.md).
+The current language draft is [LANGUAGE.md](LANGUAGE.md). Deferred ideas that
+should not drive the core implementation yet live in
+[docs/FUTURE-IDEAS.md](docs/FUTURE-IDEAS.md).
 
 This is intentionally a source-to-source translator, not a new runtime or a
 new semantic layer. The goal is:
@@ -89,6 +91,13 @@ Run the executable examples through Kvist and then `odin check` with:
 ```sh
 ./scripts/check_examples.sh
 ```
+
+Ownership stays explicit. Known owned-producing helpers are documented in
+[docs/OWNERSHIP.md](docs/OWNERSHIP.md), and the compiler is expected to grow
+conservative warnings for obvious local leaks rather than relying on hidden
+automatic cleanup. The current warning pass catches discarded owned
+constructors, leaked owned `let` locals, and overwritten owned locals in
+obvious cases.
 
 Run CLI and Emacs-tooling integration checks with:
 

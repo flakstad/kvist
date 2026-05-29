@@ -98,6 +98,7 @@ Emitter :: struct {
     unions:                    [dynamic]Union_Decl,
     features:                  ^Emitter_Features,
     source_map:                ^[dynamic]Source_Map_Entry,
+    warnings:                  ^[dynamic]Compile_Warning,
     line:                      int,
     temp_counter:              int,
     attach_next_decl:          bool,
@@ -117,6 +118,13 @@ mark_dynamic_literals :: proc(e: ^Emitter) {
     if e.features != nil {
         e.features.dynamic_literals = true
     }
+}
+
+emit_warning :: proc(e: ^Emitter, message: string, span: Span) {
+    if e.warnings == nil {
+        return
+    }
+    append(e.warnings, Compile_Warning{message = strings.clone(message), span = span})
 }
 
 mark_core_map :: proc(e: ^Emitter) {
@@ -1792,8 +1800,23 @@ form_is_owned_allocation_result :: proc(form: CST_Form) -> bool {
     return type_text_is_dynamic_array(type_text) || type_text_is_map(type_text)
 }
 
+form_is_owned_constructor_result :: proc(form: CST_Form) -> bool {
+    if form.kind != .List || len(form.items) == 0 || form.items[0].kind != .Symbol {
+        return false
+    }
+    switch form.items[0].text {
+    case "arr/empty", "arr/dynamic", "map/empty", "map/of", "set/empty", "set/of":
+        return true
+    }
+    return false
+}
+
+form_produces_owned_value :: proc(form: CST_Form) -> bool {
+    return form_is_owned_result(form) || form_is_owned_allocation_result(form) || form_is_owned_constructor_result(form)
+}
+
 form_is_owned_temp_escape_result :: proc(form: CST_Form) -> bool {
-    return form_is_owned_result(form) || form_is_owned_allocation_result(form)
+    return form_produces_owned_value(form)
 }
 
 with_temp_allocator_escape_error :: proc(body: []CST_Form, last_in_proc: bool, returns: Return_Spec) -> (Compile_Error, bool) {
@@ -1824,6 +1847,186 @@ with_temp_allocator_escape_error :: proc(body: []CST_Form, last_in_proc: bool, r
 
 loop_collection_needs_temp_binding :: proc(form: CST_Form) -> bool {
     return form_is_owned_result(form) || form_is_owned_allocation_result(form)
+}
+
+Owned_Local :: struct {
+    name: string,
+    span: Span,
+}
+
+owned_locals_find_last :: proc(live: []Owned_Local, name: string) -> int {
+    for i := len(live) - 1; i >= 0; i -= 1 {
+        if live[i].name == name {
+            return i
+        }
+    }
+    return -1
+}
+
+owned_locals_remove_last :: proc(live: ^[dynamic]Owned_Local, name: string) -> bool {
+    idx := owned_locals_find_last(live[:], name)
+    if idx < 0 {
+        return false
+    }
+    ordered_remove(live, idx)
+    return true
+}
+
+form_head_symbol_text :: proc(form: CST_Form) -> (string, bool) {
+    if form.kind != .List || len(form.items) == 0 || form.items[0].kind != .Symbol {
+        return "", false
+    }
+    return form.items[0].text, true
+}
+
+form_is_delete_of_name :: proc(form: CST_Form, name: string) -> bool {
+    head, ok := form_head_symbol_text(form)
+    if !ok {
+        return false
+    }
+    if head == "delete" && len(form.items) == 2 && form.items[1].kind == .Symbol {
+        return map_name(form.items[1].text) == name
+    }
+    if head == "defer" {
+        for item in form.items[1:] {
+            if form_is_delete_of_name(item, name) {
+                return true
+            }
+        }
+    }
+    return false
+}
+
+body_deletes_name :: proc(forms: []CST_Form, name: string) -> bool {
+    for form in forms {
+        if form_is_delete_of_name(form, name) {
+            return true
+        }
+    }
+    return false
+}
+
+form_transfers_owned_name :: proc(form: CST_Form, name: string, can_transfer_final: bool) -> bool {
+    if form_is_delete_of_name(form, name) {
+        return true
+    }
+
+    head, ok := form_head_symbol_text(form)
+    if ok && head == "return" {
+        for item in form.items[1:] {
+            if item.kind == .Symbol && map_name(item.text) == name {
+                return true
+            }
+        }
+    }
+
+    if ok && head == "with-delete" && len(form.items) >= 3 && form.items[1].kind == .Vector {
+        binding := form.items[1]
+        i := 0
+        for i+1 < len(binding.items) {
+            value_form := binding.items[i+1]
+            if value_form.kind == .Symbol && map_name(value_form.text) == name {
+                return true
+            }
+            i += 2
+        }
+    }
+
+    if ok && head == "let" && len(form.items) >= 3 {
+        return body_deletes_or_returns_name(form.items[2:], name, can_transfer_final)
+    }
+
+    if ok && head == "do" && len(form.items) >= 2 {
+        return body_deletes_or_returns_name(form.items[1:], name, can_transfer_final)
+    }
+
+    if can_transfer_final && form.kind == .Symbol && map_name(form.text) == name {
+        return true
+    }
+
+    return false
+}
+
+body_deletes_or_returns_name :: proc(forms: []CST_Form, name: string, can_transfer_final: bool) -> bool {
+    for form, idx in forms {
+        if form_transfers_owned_name(form, name, can_transfer_final && idx == len(forms)-1) {
+            return true
+        }
+    }
+    return false
+}
+
+analyze_owned_scope_body :: proc(e: ^Emitter, forms: []CST_Form, can_transfer_final: bool, live: ^[dynamic]Owned_Local) {
+    for form, idx in forms {
+        final_in_scope := idx == len(forms)-1
+
+        if form.kind == .Symbol && final_in_scope && can_transfer_final {
+            _ = owned_locals_remove_last(live, map_name(form.text))
+            continue
+        }
+
+        head, ok := form_head_symbol_text(form)
+        if !ok {
+            if form_produces_owned_value(form) && !(final_in_scope && can_transfer_final) {
+                emit_warning(e, "owned value is discarded; bind it, delete it, or return it", form.span)
+            }
+            continue
+        }
+
+        switch head {
+        case "return":
+            for item in form.items[1:] {
+                if item.kind == .Symbol {
+                    _ = owned_locals_remove_last(live, map_name(item.text))
+                }
+            }
+        case "set!":
+            if len(form.items) == 3 && form.items[1].kind == .Symbol {
+                name := map_name(form.items[1].text)
+                if owned_locals_find_last(live[:], name) >= 0 {
+                    emit_warning(e, fmt.tprintf("owned local %s is overwritten before cleanup", name), form.items[1].span)
+                    _ = owned_locals_remove_last(live, name)
+                }
+                if form_produces_owned_value(form.items[2]) {
+                    append(live, Owned_Local{name = name, span = form.items[1].span})
+                }
+            }
+        case "let":
+            if len(form.items) < 3 {
+                continue
+            }
+            bindings, _, ok_bind := parse_let_bindings(form.items[1])
+            if !ok_bind {
+                continue
+            }
+            start := len(live)
+            for binding in bindings {
+                if binding.is_destructure || binding.is_field_destructure || binding.name == "" {
+                    continue
+                }
+                if form_produces_owned_value(binding.value) {
+                    append(live, Owned_Local{name = binding.name, span = form.items[0].span})
+                }
+            }
+            analyze_owned_scope_body(e, form.items[2:], final_in_scope && can_transfer_final, live)
+            for i := start; i < len(live); i += 1 {
+                if !body_deletes_or_returns_name(form.items[2:], live[i].name, final_in_scope && can_transfer_final) {
+                    emit_warning(e, fmt.tprintf("owned local %s is never deleted or returned", live[i].name), live[i].span)
+                }
+            }
+            resize(live, start)
+        case "with-delete":
+            if len(form.items) >= 3 {
+                analyze_owned_scope_body(e, form.items[2:], final_in_scope && can_transfer_final, live)
+            }
+        case "do":
+            analyze_owned_scope_body(e, form.items[1:], final_in_scope && can_transfer_final, live)
+        case:
+            if form_produces_owned_value(form) && !(final_in_scope && can_transfer_final) {
+                emit_warning(e, "owned value is discarded; bind it, delete it, or return it", form.span)
+            }
+        }
+    }
 }
 
 emit_for_in_loop_body :: proc(e: ^Emitter, coll_form: CST_Form, coll_text, first_name, second_name: string, body: []CST_Form) -> (Compile_Error, bool) {
@@ -4429,6 +4632,8 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
         }
         if last_in_proc && returns.kind != .None {
             emit_prefixed_expr_mapped(e, "return ", expr, form.span)
+        } else if form_is_owned_allocation_result(form) || form_is_owned_constructor_result(form) {
+            emit_prefixed_expr_mapped(e, "_ = ", expr, form.span)
         } else {
             emit_prefixed_expr_mapped(e, "", expr, form.span)
         }
@@ -4446,6 +4651,8 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
         }
         if last_in_proc && returns.kind != .None {
             emit_prefixed_expr_mapped(e, "return ", expr, form.span)
+        } else if form_is_owned_allocation_result(form) || form_is_owned_constructor_result(form) {
+            emit_prefixed_expr_mapped(e, "_ = ", expr, form.span)
         } else {
             emit_prefixed_expr_mapped(e, "", expr, form.span)
         }
@@ -4873,9 +5080,11 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
         return {}, true
     case:
         allow_root_owned := last_in_proc && returns.kind != .None
-        err_owned, bad_owned := owned_result_usage_error(form, allow_root_owned)
-        if bad_owned {
-            return err_owned, false
+        if !(form_produces_owned_value(form) && !allow_root_owned) {
+            err_owned, bad_owned := owned_result_usage_error(form, allow_root_owned)
+            if bad_owned {
+                return err_owned, false
+            }
         }
         expr, err_expr, ok_expr := emit_expr(e, form)
         if !ok_expr {
@@ -4883,6 +5092,8 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
         }
         if last_in_proc && returns.kind != .None {
             emit_prefixed_expr_mapped(e, "return ", expr, form.span)
+        } else if form_is_owned_allocation_result(form) || form_is_owned_constructor_result(form) {
+            emit_prefixed_expr_mapped(e, "_ = ", expr, form.span)
         } else {
             emit_prefixed_expr_mapped(e, "", expr, form.span)
         }
@@ -5138,6 +5349,9 @@ emit_decl :: proc(e: ^Emitter, decl: IR_Decl) -> (Compile_Error, bool) {
         e.indent -= 1
         emit_line(e, "}")
     case .Proc:
+        proc_live: [dynamic]Owned_Local
+        analyze_owned_scope_body(e, decl.proc_decl.body[:], decl.proc_decl.returns.kind != .None, &proc_live)
+        delete(proc_live)
         emit_indent(e)
         fmt.sbprintf(&e.builder, "%s :: ", decl.proc_decl.name)
         emit_proc_directives(e, e.pending_prefix_directives[:])
@@ -7070,6 +7284,7 @@ emit_decls_with_source_map :: proc(decls: []IR_Decl) -> (Emit_Result, Compile_Er
         decls    = decls,
         features = &features,
         source_map = &result.source_map,
+        warnings = &result.warnings,
         line     = 1,
     }
     defer strings.builder_destroy(&e.builder)
@@ -7145,6 +7360,7 @@ emit_eval_decls_with_source_map :: proc(decls: []IR_Decl, eval_form: CST_Form, n
         decls    = decls,
         features = &features,
         source_map = &result.source_map,
+        warnings = &result.warnings,
         line     = 1,
     }
     defer strings.builder_destroy(&e.builder)

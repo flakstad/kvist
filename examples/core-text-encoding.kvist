@@ -5,7 +5,6 @@
 // slices plus errors. Owned slices are deleted in the same proc that consumes
 // them unless ownership is deliberately returned to the caller.
 (package main)
-(import "core:fmt")
 (import strings "core:strings")
 (import strconv "core:strconv")
 (import base64 "core:encoding/base64")
@@ -63,7 +62,7 @@
           (len encoded))))))
 
 (proc main []
-  (fmt.println (useful-line? "user:Ada active=true")
+  (println (useful-line? "user:Ada active=true")
                (word-count)
                (parsed-score)
                (base64-roundtrip-length)

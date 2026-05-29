@@ -4,7 +4,6 @@
 // reuse it in later evals" workflow. There is no hidden REPL state here:
 // values are saved to ordinary files, then later eval calls read those files.
 (package main)
-(import "core:fmt")
 (import json "core:encoding/json")
 (import os "core:os")
 
@@ -99,7 +98,7 @@
       (do
         (defer (delete (:title note)))
         (defer (delete (:body note)))
-        (fmt.println note)
+        (println note)
         true)))
   ;; prints the parsed Note struct, then returns true
 

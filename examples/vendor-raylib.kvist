@@ -5,7 +5,6 @@
 // parens around them. The render proc opens a window, so it is left as an
 // explicit eval target rather than something main runs by default.
 (package main)
-(import "core:fmt")
 (import rl "vendor:raylib")
 
 (proc blue-alpha [] -> int
@@ -34,7 +33,7 @@
     (rl.EndDrawing)))
 
 (proc main []
-  (fmt.println (blue-alpha) (point-inside-demo?)))
+  (println (blue-alpha) (point-inside-demo?)))
 
 (comment
   ;; Safe terminal evals:

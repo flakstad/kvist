@@ -1,6 +1,5 @@
 // Exercises raw Odin escapes, pointer dereference, address-of, mutation, and field access.
 (package main)
-(import "core:fmt")
 
 (odin "Handle :: distinct rawptr")
 
@@ -20,7 +19,7 @@
     (counter-value (addr counter))))
 
 (proc main []
-  (fmt.println (counter-after-bump)))
+  (println (counter-after-bump)))
 
 (comment
   (counter-after-bump)

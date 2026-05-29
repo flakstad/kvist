@@ -4,7 +4,6 @@
 // current operating system's path rules. Some helpers return borrowed slices of
 // their input, while helpers such as clean/join/rel allocate new strings.
 (package main)
-(import "core:fmt")
 (import fp "core:path/filepath")
 (import slash "core:path/slashpath")
 
@@ -38,7 +37,7 @@
   (len (fp.ext "/tmp/archive.tar.gz")))
 
 (proc main []
-  (fmt.println
+  (println
     (slash-route-name-len)
     (slash-clean-score)
     (filepath-relative-len)

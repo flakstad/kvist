@@ -23,6 +23,7 @@ block so `C-c C-e` and `C-c C-c` are practical.
 - `defstructs.kvist`: `defstruct` docstrings, typed fields, nested structs.
 - `control-flow.kvist`: `cond`, `switch`, loops, `when-let`, and `if-let`.
 - `data-literals.kvist`: arrays, maps, `make`, `new`, allocator macros.
+- `vars-and-state.kvist`: `defconst`, `defvar`, and explicit top-level mutation.
 - `pointers-and-raw.kvist`: pointers and explicit raw Odin escape hatches.
 - `unions.kvist`: union constructors and narrow union switches.
 - `proc-values.kvist`: proc values and proc types.
@@ -33,6 +34,8 @@ block so `C-c C-e` and `C-c C-c` are practical.
 - `sequences.kvist`: sequence helpers over structs, enums, and strings.
 - `sequence-helpers.kvist`: broad sequence helper coverage.
 - `mutation-and-bang.kvist`: mutating helper variants such as `map!`.
+- `ownership-helpers.kvist`: `with-delete`, `with-allocator`, and `with-temp-allocator`.
+- `ownership-warnings.kvist`: intentionally warning-producing examples for the current ownership diagnostics.
 - `update.kvist`: `update!` over arrays, maps, and defstruct fields.
 - `orders-report.kvist`: a more realistic eager data pipeline.
 

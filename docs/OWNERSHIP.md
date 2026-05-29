@@ -14,6 +14,10 @@ The practical rule is:
 - Plain structs, enums, numbers, booleans, strings, fixed arrays, and ordinary
   slice views do not need deletion.
 
+Kvist should not rely on hidden cleanup to make this work. The ownership model
+stays explicit. The compiler may help with diagnostics, but user code should be
+written as if ownership is the programmer's responsibility.
+
 `tap>` prints and returns its value. It does not allocate an owned result by
 itself, but ownership passes through it: `(tap> (map f xs))` is still an owned
 result and must be bound or returned. The same is true in threaded code:
@@ -112,6 +116,40 @@ Data marshalling is explicit host interop, not Kvist core. For JSON, call
 bytes that must be deleted after writing. `json.unmarshal` may allocate strings,
 slices, dynamic arrays, or maps inside the destination value; the caller owns
 those decoded allocations and must clean them up according to the decoded type.
+
+## Compiler Ownership Knowledge
+
+The compiler should keep an internal list of **known owned producers**. This is
+the source of truth for future diagnostics and examples. The list should stay
+small and explicit rather than trying to infer ownership from arbitrary user
+procedures.
+
+That knowledge is for warnings first, not hidden cleanup behavior.
+
+Near-term diagnostics should stay conservative:
+
+- warn when a known owned result is produced and discarded;
+- warn when a known owned result is bound locally and then clearly never
+  deleted, returned, or transferred;
+- warn when a local known-owned binding is overwritten before cleanup.
+
+Current compiler warnings implement the first conservative slice of this:
+
+- discarded owned constructor/allocation results such as `arr/empty`, `arr/dynamic`,
+  `map/empty`, `map/of`, `set/empty`, and `set/of`;
+- owned `let` locals that are never deleted or returned;
+- owned locals overwritten with `set!` before cleanup.
+
+These warnings should avoid cases where ownership is ambiguous, especially:
+
+- values stored inside structs or other aggregates;
+- values passed through unknown user procedures;
+- branch-heavy flows where escape/transfer is not obvious;
+- nested ownership inside structs, maps, or arrays.
+
+Warnings are the right first step. A stricter mode can be considered later, but
+the initial goal is to help users catch obvious mistakes without pretending the
+compiler has a full ownership system.
 
 ## Do Not Delete These
 

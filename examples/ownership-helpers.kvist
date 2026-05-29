@@ -1,0 +1,40 @@
+// Exercises the explicit local ownership helpers: with-delete,
+// with-allocator, and with-temp-allocator.
+(package main)
+(import runtime "base:runtime")
+
+(defn local-buffer-count [] -> int
+  (with-delete [buffer (arr/empty int)]
+    (arr/push! buffer 1 2 3 4)
+    (count buffer)))
+
+(defn temp-allocator-buffer-count [] -> int
+  (with-allocator [allocator context.temp_allocator]
+    (with-delete [buffer (arr/empty int)]
+      (arr/push! buffer 5 6 7)
+      (count buffer))))
+
+(defn temp-scope-buffer-count [] -> int
+  (with-temp-allocator [allocator]
+    (let [buffer (arr/empty int)]
+      (defer (delete buffer))
+      (arr/push! buffer 8 9)
+      (count buffer))))
+
+(defn main []
+  (println (local-buffer-count)))
+
+(comment
+  (local-buffer-count)
+  ;; => 4
+
+  (temp-allocator-buffer-count)
+  ;; => 3
+
+  (temp-scope-buffer-count)
+  ;; => 2
+
+  ;; Expand one form when you want to inspect the ownership shape directly:
+  ;;   kvist macroexpand examples/ownership-helpers.kvist
+  ;;     '(with-delete [buffer (arr/empty int)] (arr/push! buffer 1 2 3) (count buffer))
+)
