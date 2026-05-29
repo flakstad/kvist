@@ -1,6 +1,8 @@
 // Exercises the explicit local ownership helpers: with-delete,
 // with-allocator, and with-temp-allocator.
 (package main)
+(import arr "kvist:arr")
+
 (import runtime "base:runtime")
 
 (defn local-buffer-count [] -> int

@@ -75,6 +75,27 @@ scan_compact_map_type :: proc(source: string, start: int) -> (end: int, ok: bool
     return i, true
 }
 
+scan_compact_set_type :: proc(source: string, start: int) -> (end: int, ok: bool) {
+    if start+4 > len(source) || source[start:start+4] != "set[" {
+        return start, false
+    }
+    i := start + 4
+    for i < len(source) && source[i] != ']' {
+        if is_whitespace(source[i]) || source[i] == '(' || source[i] == ')' || source[i] == '{' || source[i] == '}' || source[i] == ',' || source[i] == ';' {
+            return start, false
+        }
+        i += 1
+    }
+    if i >= len(source) || source[i] != ']' {
+        return start, false
+    }
+    i += 1
+    if i < len(source) && !is_delimiter(source[i]) {
+        return start, false
+    }
+    return i, true
+}
+
 scan_number :: proc(source: string, start: int) -> (end: int, ok: bool) {
     if start >= len(source) {
         return start, false
@@ -143,6 +164,14 @@ tokenize_with_origin :: proc(source: string, source_kind: Source_Kind) -> (token
         }
         if ch == 'm' {
             end, ok_type := scan_compact_map_type(source, start)
+            if ok_type {
+                append(&tokens, make_token(.Symbol, source[start:end], start, end, source_kind))
+                i = end
+                continue
+            }
+        }
+        if ch == 's' {
+            end, ok_type := scan_compact_set_type(source, start)
             if ok_type {
                 append(&tokens, make_token(.Symbol, source[start:end], start, end, source_kind))
                 i = end

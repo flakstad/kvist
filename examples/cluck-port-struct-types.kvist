@@ -1,5 +1,8 @@
 // Close port of the Cluck reset struct-types demo.
 (package main)
+(import arr "kvist:arr")
+(import set "kvist:set")
+
 (defstruct Point
   "A small geometric point."
   {:x float
@@ -11,9 +14,9 @@
    :age int
    :active? bool
    :favorite-key keyword
-   :scores [arr int]
-   :tags [set string]
-   :window [slice float]
+   :scores [dynamic]int
+   :tags set[string]
+   :window []float
    :home Point})
 
 (defn struct-types-demo [] -> bool
@@ -44,5 +47,5 @@
 (comment
   ;; Two visible Kvist/Odin differences remain here:
   ;; - keyword currently lowers to string values.
-  ;; - [set T] still lowers to map[T]bool.
+  ;; - set[T] still lowers to map[T]bool.
   (struct-types-demo))

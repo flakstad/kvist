@@ -1,5 +1,6 @@
 // Exercises struct field updates, pointer mutation, and in-place sequence helpers.
 (package main)
+(import arr "kvist:arr")
 
 (defstruct Order {
   :id int
@@ -35,10 +36,10 @@
     total))
 
 (defn sample-orders [] -> [dynamic]Order
-  (new [dynamic]Order [(Order {:id 1 :amount 80 :discount 5 :status 1})
-                       (Order {:id 2 :amount 250 :discount 20 :status 2})
-                       (Order {:id 3 :amount 140 :discount 10 :status 2})
-                       (Order {:id 4 :amount 90 :discount 0 :status 3})]))
+  (arr/dynamic Order [(Order {:id 1 :amount 80 :discount 5 :status 1})
+                      (Order {:id 2 :amount 250 :discount 20 :status 2})
+                      (Order {:id 3 :amount 140 :discount 10 :status 2})
+                      (Order {:id 4 :amount 90 :discount 0 :status 3})]))
 
 (defn map-bang-score [] -> int
   (let [orders (sample-orders)]

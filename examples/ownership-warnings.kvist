@@ -1,5 +1,6 @@
 // Compiles successfully, but should produce conservative ownership warnings.
 (package main)
+(import arr "kvist:arr")
 
 (defn discarded-owned-result-demo []
   (range 3)

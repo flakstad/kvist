@@ -11,7 +11,7 @@
   {:name string
    :age int
    :active? bool
-   :tags [set string]
+   :tags set[string]
    :home Point})
 
 (defn profile-defaults [] -> Profile

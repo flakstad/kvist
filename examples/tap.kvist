@@ -1,5 +1,6 @@
 // Explicit tap-style inspection for eval-driven development.
 (package main)
+(import arr "kvist:arr")
 
 (defstruct User {
   :name string
@@ -12,9 +13,9 @@
     age))
 
 (defn inspected-owned-count [] -> int
-  (let [xs (tap> "numbers" (new [dynamic]int [1 2 3]))]
+  (let [xs (tap> "numbers" (arr/dynamic int [1 2 3]))]
     (defer (delete xs))
-    (len xs)))
+    (count xs)))
 
 (defn plus-one [x: int] -> int
   (+ x 1))
@@ -26,12 +27,13 @@
   (+ acc x))
 
 (defn inspected-thread-total [] -> int
-  (let [xs (new []int [1 2 3 4])
+  (let [xs (arr/dynamic int [1 2 3 4])
         total (->> xs
                    (map plus-one)
                    (tap> :mapped)
                    (filter even?)
                    (reduce add 0))]
+    (defer (delete xs))
     total))
 
 (defn main []

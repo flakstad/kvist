@@ -1,5 +1,7 @@
 // Close port of the Cluck reset struct-introspection demo.
 (package main)
+(import struct "kvist:struct")
+
 (defstruct Point
   "A small geometric point."
   {:x float
@@ -9,7 +11,7 @@
   "Example struct for metadata introspection."
   {:name string
    :age int
-   :tags [set string]
+   :tags set[string]
    :home Point})
 
 (defn struct-introspection-demo [] -> bool

@@ -14,7 +14,8 @@ inspectable character of systems programming.
 
 The current language draft is [LANGUAGE.md](LANGUAGE.md). Deferred ideas that
 should not drive the core implementation yet live in
-[docs/FUTURE-IDEAS.md](docs/FUTURE-IDEAS.md).
+[docs/FUTURE-IDEAS.md](docs/FUTURE-IDEAS.md). The larger unresolved language
+areas are tracked in [docs/NEXT-STEPS.md](docs/NEXT-STEPS.md).
 
 This is intentionally a source-to-source translator, not a new runtime or a
 new semantic layer. The goal is:
@@ -591,6 +592,7 @@ foreign_call :: proc(handle: Foreign_Handle) ---
 - `(package name)`, `(import "path")`, `(import alias "path")`
   - host imports keep Odin package paths like `"core:fmt"`
   - source-package imports can load `.kvist` packages by relative path, e.g. `(import "support/math")`
+  - Kvist library packages are imported explicitly, e.g. `(import arr "kvist:arr")`, `(import str "kvist:str")`, `(import map "kvist:map")`, `(import set "kvist:set")`, `(import struct "kvist:struct")`
 - `(defconst name expr)` -> `name :: expr`
 - `(defconst name type expr)` -> `name: type : expr`
 - `(defvar name expr)` -> `name := expr`
@@ -604,7 +606,8 @@ foreign_call :: proc(handle: Foreign_Handle) ---
 - `(defn name [arg: type, ...] -> return-type body...)`
   - `defn` is the preferred source-level declaration form
   - `proc` remains available for direct Odin-shaped code and proc types
-  - params and returns use ordinary types like `int`, `string`, `Person`, plus composite forms like `[arr string]` and `[set keyword]`
+  - params and returns use ordinary types like `int`, `string`, `Person`, plus Odin-style container types like `[]string`, `[dynamic]int`, `map[string]int`, and Kvist set types like `set[keyword]`
+  - `println` and `doc` stay implicitly available; most library helpers come from explicit Kvist package imports
 - top-level and statement `(odin "...")` raw escape hatches
 - `(let [binding value ...] body...)` scoped expression/block, including
   multi-return and struct-field destructuring

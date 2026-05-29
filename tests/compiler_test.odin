@@ -56,8 +56,8 @@ compile_defstruct_program :: proc(t: ^testing.T) {
   {:name string
    :age int
    :active? bool
-   :tags [set string]
-   :scores [arr int]
+   :tags set[string]
+   :scores [dynamic]int
    :home Point})
 
 (defstruct Point
@@ -980,8 +980,11 @@ compile_defconst_and_defvar_forms :: proc(t: ^testing.T) {
 @(test)
 compile_malli_types_and_empty_collection_constructors :: proc(t: ^testing.T) {
     source := `(package main)
+(import arr "kvist:arr")
+(import map "kvist:map")
+(import set "kvist:set")
 
-(defn score [xs: [arr int], tags: [set string]] -> int
+(defn score [xs: [dynamic]int, tags: set[string]] -> int
   (let [out (arr/empty int 4)
         lookup (map/empty string int)
         seen (set/empty string 8)]
@@ -1002,6 +1005,30 @@ compile_malli_types_and_empty_collection_constructors :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "out := make([dynamic]int, 0, 4)"), true)
     testing.expect_value(t, strings.contains(output, "lookup := make(map[string]int)"), true)
     testing.expect_value(t, strings.contains(output, "seen := make(map[string]bool, 8)"), true)
+}
+
+@(test)
+compile_supports_aliased_kvist_package_imports :: proc(t: ^testing.T) {
+    source := `(package main)
+(import a "kvist:arr")
+
+(defn demo [] -> int
+  (let [xs (a/empty int)]
+    (a/push! xs 1 2 3)
+    (a/count xs)))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "xs := make([dynamic]int)"), true)
+    testing.expect_value(t, strings.contains(output, "append(&(xs), 1, 2, 3)"), true)
+    testing.expect_value(t, strings.contains(output, "return len(xs)"), true)
+    testing.expect_value(t, strings.contains(output, "kvist:arr"), false)
 }
 
 @(test)
@@ -1052,14 +1079,15 @@ compile_defenum_and_defunion_aliases :: proc(t: ^testing.T) {
 @(test)
 compile_struct_types_reports_source_surface :: proc(t: ^testing.T) {
     source := `(package main)
+(import struct "kvist:struct")
 
 (defstruct Profile
   {:name string
    :active? bool
    :favorite-key keyword
-   :tags [set string]
-   :scores [arr int]
-   :window [slice float]})
+   :tags set[string]
+   :scores [dynamic]int
+   :window []float})
 
 (proc type-map [] -> map[string]string
   (struct/types 'Profile))`
@@ -1072,9 +1100,9 @@ compile_struct_types_reports_source_surface :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    testing.expect_value(t, strings.contains(output, "\":tags\" = \"[set string]\""), true)
-    testing.expect_value(t, strings.contains(output, "\":scores\" = \"[arr int]\""), true)
-    testing.expect_value(t, strings.contains(output, "\":window\" = \"[slice float]\""), true)
+    testing.expect_value(t, strings.contains(output, "\":tags\" = \"set[string]\""), true)
+    testing.expect_value(t, strings.contains(output, "\":scores\" = \"[dynamic]int\""), true)
+    testing.expect_value(t, strings.contains(output, "\":window\" = \"[]float\""), true)
     testing.expect_value(t, strings.contains(output, "\":active?\" = \"bool\""), true)
     testing.expect_value(t, strings.contains(output, "\":favorite-key\" = \"string\""), true)
 }
@@ -4014,6 +4042,7 @@ main :: proc() {
 @(test)
 compile_warns_for_leaked_owned_let_local :: proc(t: ^testing.T) {
     source := `(package main)
+(import arr "kvist:arr")
 
 (defn demo []
   (let [xs (arr/empty int)]
@@ -4038,6 +4067,7 @@ compile_warns_for_leaked_owned_let_local :: proc(t: ^testing.T) {
 @(test)
 compile_warns_for_overwritten_owned_local :: proc(t: ^testing.T) {
     source := `(package main)
+(import arr "kvist:arr")
 
 (defn demo []
   (let [xs (arr/empty int)]

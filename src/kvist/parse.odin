@@ -15,6 +15,66 @@ is_proc_prefix_directive :: proc(text: string) -> bool {
     return text == "#force_inline"
 }
 
+normalize_scalar_type_name :: proc(text: string) -> string {
+    switch text {
+    case "bool":
+        return "bool"
+    case "int":
+        return "int"
+    case "float":
+        return "f64"
+    case "string":
+        return "string"
+    case "char":
+        return "rune"
+    case "keyword":
+        return "string"
+    case:
+        return map_name(text)
+    }
+}
+
+normalize_surface_type_symbol :: proc(text: string) -> string {
+    if len(text) == 0 {
+        return text
+    }
+    if text[0] == '^' {
+        return fmt.tprintf("^%s", normalize_surface_type_symbol(text[1:]))
+    }
+    if strings.has_prefix(text, "[]") {
+        return fmt.tprintf("[]%s", normalize_surface_type_symbol(text[2:]))
+    }
+    if strings.has_prefix(text, "[dynamic]") {
+        return fmt.tprintf("[dynamic]%s", normalize_surface_type_symbol(text[len("[dynamic]"):]))
+    }
+    if strings.has_prefix(text, "map[") {
+        closing := strings.index(text, "]")
+        if closing > 4 {
+            key_text := text[4:closing]
+            value_text := text[closing+1:]
+            return fmt.tprintf("map[%s]%s", normalize_surface_type_symbol(key_text), normalize_surface_type_symbol(value_text))
+        }
+    }
+    if strings.has_prefix(text, "set[") {
+        closing := strings.index(text, "]")
+        if closing > 4 {
+            elem_text := text[4:closing]
+            if closing == len(text)-1 {
+                return fmt.tprintf("map[%s]bool", normalize_surface_type_symbol(elem_text))
+            }
+        }
+    }
+    if len(text) > 2 && text[0] == '[' {
+        closing := strings.index(text, "]")
+        if closing > 1 {
+            length := text[1:closing]
+            elem_text := text[closing+1:]
+            return fmt.tprintf("[%s]%s", length, normalize_surface_type_symbol(elem_text))
+        }
+    }
+    return normalize_scalar_type_name(text)
+}
+
 doc_lines_from_string :: proc(text: string) -> (lines: [dynamic]string) {
     start := 0
     for i := 0; i <= len(text); i += 1 {
@@ -59,22 +119,7 @@ parse_defstruct_type_meta :: proc(form: CST_Form) -> (text: string, err: Compile
             }
             tag = form.text[1:]
         }
-        switch tag {
-        case "bool":
-            return "bool", {}, true
-        case "int":
-            return "int", {}, true
-        case "float":
-            return "f64", {}, true
-        case "string":
-            return "string", {}, true
-        case "char":
-            return "rune", {}, true
-        case "keyword":
-            return "string", {}, true
-        case:
-            return map_name(tag), {}, true
-        }
+        return normalize_surface_type_symbol(tag), {}, true
     case .Vector:
         if len(form.items) == 0 || (form.items[0].kind != .Keyword && form.items[0].kind != .Symbol) {
             return "", Compile_Error{message = "invalid defstruct field type metadata", span = form.span}, false
@@ -133,22 +178,7 @@ parse_type_text :: proc(form: CST_Form) -> (text: string, err: Compile_Error, ok
     case .Keyword, .Vector:
         return parse_defstruct_type_meta(form)
     case .Symbol:
-        switch form.text {
-        case "bool":
-            return "bool", {}, true
-        case "int":
-            return "int", {}, true
-        case "float":
-            return "f64", {}, true
-        case "string":
-            return "string", {}, true
-        case "char":
-            return "rune", {}, true
-        case "keyword":
-            return "string", {}, true
-        case:
-            return map_name(form.text), {}, true
-        }
+        return normalize_surface_type_symbol(form.text), {}, true
     case .List:
         if len(form.items) < 2 {
             return "", Compile_Error{message = "unsupported type form", span = form.span}, false

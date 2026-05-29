@@ -1,6 +1,8 @@
 // Close port of the Cluck reset loop demos.
 (package main)
-(defn loop-index-demo [] -> [arr int]
+(import arr "kvist:arr")
+
+(defn loop-index-demo [] -> [dynamic]int
   (let [xs (arr/dynamic int [10 20 30])
         out (arr/empty int)]
     (with-delete [owned-xs xs]
@@ -18,7 +20,7 @@
           (break)))
       found)))
 
-(defn loop-continue-demo [] -> [arr int]
+(defn loop-continue-demo [] -> [dynamic]int
   (let [xs (arr/dynamic int [0 1 2 3 4 5])
         out (arr/empty int)]
     (with-delete [owned-xs xs]

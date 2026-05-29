@@ -106,6 +106,68 @@ Emitter :: struct {
     pending_suffix_directives: [dynamic]string,
 }
 
+kvist_package_name_for_import_path :: proc(path: string) -> (string, bool) {
+    raw := path
+    if len(raw) >= 2 && raw[0] == '"' && raw[len(raw)-1] == '"' {
+        raw = unquote_string(raw)
+    }
+    switch raw {
+    case "kvist:arr":
+        return "arr", true
+    case "kvist:str":
+        return "str", true
+    case "kvist:map":
+        return "map", true
+    case "kvist:set":
+        return "set", true
+    case "kvist:struct":
+        return "struct", true
+    case:
+        return "", false
+    }
+}
+
+decl_is_kvist_import :: proc(decl: IR_Decl) -> bool {
+    if decl.kind != .Import {
+        return false
+    }
+    _, ok := kvist_package_name_for_import_path(decl.import_decl.path)
+    return ok
+}
+
+kvist_import_alias_for_decl :: proc(decl: IR_Decl) -> (alias, pkg: string, ok: bool) {
+    pkg, ok = kvist_package_name_for_import_path(decl.import_decl.path)
+    if !ok {
+        return "", "", false
+    }
+    if decl.import_decl.has_alias {
+        return decl.import_decl.alias, pkg, true
+    }
+    return import_default_alias(unquote_string(decl.import_decl.path)), pkg, true
+}
+
+resolve_kvist_head :: proc(e: ^Emitter, head: string) -> (canonical: string, matched_builtin: bool, err: Compile_Error, ok: bool) {
+    slash := strings.index(head, "/")
+    if slash <= 0 {
+        return head, false, Compile_Error{}, true
+    }
+    alias := head[:slash]
+    suffix := head[slash+1:]
+    if alias == "arr" || alias == "str" || alias == "map" || alias == "set" || alias == "struct" {
+        return head, true, Compile_Error{}, true
+    }
+    for decl in e.decls {
+        import_alias, pkg, ok_import := kvist_import_alias_for_decl(decl)
+        if !ok_import {
+            continue
+        }
+        if import_alias == alias {
+            return fmt.tprintf("%s/%s", pkg, suffix), true, Compile_Error{}, true
+        }
+    }
+    return head, false, Compile_Error{}, true
+}
+
 Thread_Result_Kind :: enum {
     Unknown,
     Owned,
@@ -2626,19 +2688,19 @@ surface_type_text :: proc(ty: string) -> string {
 
     if strings.has_prefix(ty, "[dynamic]") {
         elem := ty[len("[dynamic]"):]
-        return fmt.tprintf("[arr %s]", surface_type_text(elem))
+        return fmt.tprintf("[dynamic]%s", surface_type_text(elem))
     }
 
     if strings.has_prefix(ty, "[]") {
         elem := ty[2:]
-        return fmt.tprintf("[slice %s]", surface_type_text(elem))
+        return fmt.tprintf("[]%s", surface_type_text(elem))
     }
 
     if strings.has_prefix(ty, "map[") && strings.has_suffix(ty, "]bool") {
         key_end := strings.index(ty, "]")
         if key_end > 4 {
             key := ty[4:key_end]
-            return fmt.tprintf("[set %s]", surface_type_text(key))
+            return fmt.tprintf("set[%s]", surface_type_text(key))
         }
     }
 
@@ -2647,7 +2709,7 @@ surface_type_text :: proc(ty: string) -> string {
         if closing > 1 {
             length := ty[1:closing]
             elem := ty[closing+1:]
-            return fmt.tprintf("[fixed-arr %s %s]", length, surface_type_text(elem))
+            return fmt.tprintf("[%s]%s", length, surface_type_text(elem))
         }
     }
 
@@ -2817,6 +2879,13 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
     if head.kind != .Symbol {
         return "", Compile_Error{message = "unsupported call head", span = head.span}, false
     }
+
+    canonical_head, _, err_head, ok_head := resolve_kvist_head(e, head.text)
+    if !ok_head {
+        err_head.span = head.span
+        return "", err_head, false
+    }
+    head.text = canonical_head
 
     if operator_text, err_op, ok_op := emit_operator_expr(e, form); ok_op {
         return operator_text, {}, true
@@ -5282,6 +5351,9 @@ emit_decl :: proc(e: ^Emitter, decl: IR_Decl) -> (Compile_Error, bool) {
     case .Package:
         emit_line(e, fmt.tprintf("package %s", decl.package_name))
     case .Import:
+        if decl_is_kvist_import(decl) {
+            return Compile_Error{}, true
+        }
         if decl.import_decl.has_alias {
             emit_line(e, fmt.tprintf("import %s %s", decl.import_decl.alias, decl.import_decl.path))
         } else {

@@ -435,14 +435,14 @@ Current first-pass shape:
   {:method Method
    :path string
    :query string
-   :params [arr string]})
+   :params [dynamic]string})
 ```
 
 The current implementation:
 
 - accepts an optional inline docstring immediately after the name;
-- accepts ordinary field type forms such as `string`, `Method`, `[arr string]`,
-  and `[set keyword]`;
+- accepts ordinary field type forms such as `string`, `Method`, `[dynamic]string`,
+  `[]int`, and `set[keyword]`;
 - lowers to an ordinary Odin struct declaration;
 - validates declaration shape at compile time.
 
@@ -536,7 +536,7 @@ Functions use a typed signature vector:
 Composite source types still use data-shaped vectors:
 
 ```clojure
-(defn score [xs: [arr int], tags: [set string]] -> int
+(defn score [xs: [dynamic]int, tags: set[string]] -> int
   ...)
 ```
 
@@ -569,6 +569,37 @@ defaults the root package to `main` when compiling from a path. Raw source
 entry points still require an explicit package declaration for now.
 
 Host imports still use Odin package paths such as `"core:fmt"`.
+
+### Kvist Library Packages
+
+Most library helpers are intentionally not part of an implicit global prelude.
+Import them explicitly:
+
+```clojure
+(import arr "kvist:arr")
+(import str "kvist:str")
+(import map "kvist:map")
+(import set "kvist:set")
+(import struct "kvist:struct")
+```
+
+Then use the qualified helpers normally:
+
+```clojure
+(defn score [xs: [dynamic]int, tags: set[string]] -> int
+  (let [out (arr/empty int)
+        names (map/of string int {"Ada" 36})]
+    (arr/push! out (map/get names "Ada" 0))
+    (if (set/contains? tags "math")
+      (arr/get out 0)
+      0)))
+```
+
+`println` and `doc` remain implicitly available for now. The current bias is:
+
+- tiny implicit language core;
+- explicit Kvist library imports for ordinary helpers;
+- compiler/language machinery only where syntax or lowering genuinely requires it.
 
 ### Empty Collection Constructors
 
