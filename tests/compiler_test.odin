@@ -3537,13 +3537,89 @@ score :: proc() -> int {
     xs := [dynamic]int{1, 2, 3}
     lookup := map[string]int{"a" = 1}
     point := Point{x = 4, y = 5}
-    (xs)[1] = ((xs)[1]) + (40)
-    (lookup)["a"] = ((lookup)["a"]) + (6)
-    (point).y = ((point).y) + (4)
+    (xs)[1] += (40)
+    (lookup)["a"] += (6)
+    (point).y += (4)
     return (xs[1]) + (lookup["a"]) + (point.y)
 }
 `
     testing.expect_value(t, output, expected)
+}
+
+@(test)
+compile_update_expr_struct_field :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(struct Point {
+  :x int
+  :y int
+})
+
+(proc inc [x: int] -> int
+  (+ x 1))
+
+(proc score [] -> int
+  (let [point (Point {:x 4 :y 5})
+        newer (update point :y inc)]
+    (+ (:y point) (:y newer))))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    expected := `package main
+
+Point :: struct {
+    x: int,
+    y: int,
+}
+
+inc :: proc(x: int) -> int {
+    return (x) + (1)
+}
+
+score :: proc() -> int {
+    point := Point{x = 4, y = 5}
+    newer := proc(value: Point) -> Point {
+        kvist_eval_1 := value
+        (kvist_eval_1).y = inc((kvist_eval_1).y)
+        return kvist_eval_1
+    }(point)
+    return (point.y) + (newer.y)
+}
+`
+    testing.expect_value(t, output, expected)
+}
+
+@(test)
+compile_update_bang_unary_inc :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(struct Point {
+  :y int
+})
+
+(proc inc [x: int] -> int
+  (+ x 1))
+
+(proc score [] -> int
+  (let [point (Point {:y 5})]
+    (update! point :y inc)
+    (:y point)))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "(point).y += 1"), true)
 }
 
 @(test)

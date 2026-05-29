@@ -1,9 +1,12 @@
-// Exercises update! over dynamic arrays, maps, and defstruct fields, both as
-// direct replacement and function-style update with extra arguments.
+// Exercises update! over dynamic arrays, maps, and defstruct fields, plus
+// non-mutating update for struct field replacement.
 (package main)
 (defstruct Point
   {:x :int
    :y :int})
+
+(defn inc [x: int] -> int
+  (+ x 1))
 
 (defn update-score [] -> int
   (let [xs (new [dynamic]int [1 2 3])
@@ -17,10 +20,20 @@
     (+ (+ (get xs 1) (get lookup "a"))
        (:y point))))
 
+(defn updated-point-score [] -> int
+  (let [point (Point {:x 4 :y 5})
+        newer (update point :y inc)]
+    ;; `update` returns a modified copy, so the original point stays unchanged.
+    (+ (:y point) (:y newer))))
+
 (defn main []
-  (println (update-score)))
+  (println (update-score))
+  (println (updated-point-score)))
 
 (comment
   (update-score)
   ;; => 58
+
+  (updated-point-score)
+  ;; => 14
 )

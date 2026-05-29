@@ -1,0 +1,143 @@
+// Focused benchmark for update!, update, and pointer/value mutation patterns.
+(package main)
+(import "core:fmt")
+(import mem "core:mem")
+(import time "core:time")
+
+(odin "STRUCT_REPS :: 200
+STRUCT_INNER :: 1_000_000
+REPS :: 250
+ARRAY_N :: 20_000
+MAP_N :: 20_000")
+
+(defstruct Score
+  {:value int
+   :bonus int})
+
+(defn inc [x: int] -> int
+  (+ x 1))
+
+(defn report [name: string, elapsed: time.Duration, checksum: int, track: ^mem.Tracking-Allocator]
+  (fmt.printfln "%-19s %9.3f ms allocs=%8v total=%10v peak=%9v live=%v checksum=%v"
+                name
+                (time.duration-milliseconds elapsed)
+                track.total-allocation-count
+                track.total-memory-allocated
+                track.peak-memory-allocated
+                track.current-memory-allocated
+                checksum))
+
+(defn run-one [name: string, checksum: int, start: time.Tick, track: ^mem.Tracking-Allocator]
+  (report name (time.tick-since start) checksum track))
+
+(defn bench-struct-update! [reps: int, inner: int] -> int
+  (let [i 0
+        checksum 0]
+    (for (< i reps)
+      (let [score (Score {:value 1 :bonus 2})
+            j 0]
+        (for (< j inner)
+          (update! score :value + 3)
+          (update! score :bonus inc)
+          (set! j (+ j 1)))
+        (set! checksum (+ checksum (:value score)))
+        (set! checksum (+ checksum (:bonus score))))
+      (set! i (+ i 1)))
+    checksum))
+
+(defn bench-struct-update [reps: int, inner: int] -> int
+  (let [i 0
+        checksum 0]
+    (for (< i reps)
+      (let [score (Score {:value 1 :bonus 2})
+            j 0]
+        (for (< j inner)
+          (set! score (update score :value + 3))
+          (set! score (update score :bonus inc))
+          (set! j (+ j 1)))
+        (set! checksum (+ checksum (:value score)))
+        (set! checksum (+ checksum (:bonus score))))
+      (set! i (+ i 1)))
+    checksum))
+
+(defn bench-pointer-update [reps: int, inner: int] -> int
+  (let [i 0
+        checksum 0]
+    (for (< i reps)
+      (let [score (Score {:value 1 :bonus 2})
+            score-ptr (addr score)
+            j 0]
+        (for (< j inner)
+          (set! (:value score-ptr^) (+ (:value score-ptr^) 3))
+          (set! (:bonus score-ptr^) (+ (:bonus score-ptr^) 1))
+          (set! j (+ j 1)))
+        (set! checksum (+ checksum (:value score)))
+        (set! checksum (+ checksum (:bonus score))))
+      (set! i (+ i 1)))
+    checksum))
+
+(defn bench-array-update! [reps: int, n: int] -> int
+  (let [base (arr/empty int n)
+        j 0
+        i 0
+    checksum 0]
+    (for (< j n)
+      (arr/push! base j)
+      (set! j (+ j 1)))
+    (defer (delete base))
+    (for (< i reps)
+      (let [xs (arr/empty int n)
+            j 0]
+        (into! xs (slice base))
+        (set! j 0)
+        (for (< j n)
+          (update! xs j + 1)
+          (set! j (+ j 1)))
+        (set! checksum (+ checksum (get xs (- n 1))))
+        (delete xs))
+      (set! i (+ i 1)))
+    checksum))
+
+(defn bench-map-update! [reps: int, n: int] -> int
+  (let [i 0
+        checksum 0]
+    (for (< i reps)
+      (let [counts (map/empty int int)
+            j 0]
+        (for (< j n)
+          (update! counts (% j 1024) + 1)
+          (set! j (+ j 1)))
+        (set! checksum (+ checksum (get counts 17 0)))
+        (delete counts))
+      (set! i (+ i 1)))
+    checksum))
+
+(defn main []
+(fmt.printfln "STRUCT_REPS=%v STRUCT_INNER=%v REPS=%v ARRAY_N=%v MAP_N=%v"
+              STRUCT_REPS
+              STRUCT_INNER
+              REPS
+              ARRAY_N
+              MAP_N)
+  (let [old-allocator context.allocator
+        track: mem.Tracking-Allocator (odin "mem.Tracking_Allocator{}")]
+    (mem.tracking-allocator-init (& track) old-allocator old-allocator)
+    (defer (mem.tracking-allocator-destroy (& track)))
+    (set! context.allocator (mem.tracking-allocator (& track)))
+    (defer (odin "context.allocator = old_allocator"))
+
+    (mem.tracking-allocator-reset (& track))
+    (let [start (time.tick-now)]
+      (run-one "struct-update!" (bench-struct-update! STRUCT_REPS STRUCT_INNER) start (& track)))
+    (mem.tracking-allocator-reset (& track))
+    (let [start (time.tick-now)]
+      (run-one "struct-update" (bench-struct-update STRUCT_REPS STRUCT_INNER) start (& track)))
+    (mem.tracking-allocator-reset (& track))
+    (let [start (time.tick-now)]
+      (run-one "pointer-update" (bench-pointer-update STRUCT_REPS STRUCT_INNER) start (& track)))
+    (mem.tracking-allocator-reset (& track))
+    (let [start (time.tick-now)]
+      (run-one "array-update!" (bench-array-update! REPS ARRAY_N) start (& track)))
+    (mem.tracking-allocator-reset (& track))
+    (let [start (time.tick-now)]
+      (run-one "map-update!" (bench-map-update! REPS MAP_N) start (& track)))))

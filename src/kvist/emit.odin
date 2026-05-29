@@ -104,6 +104,8 @@ Emitter :: struct {
     attach_next_decl:          bool,
     pending_prefix_directives: [dynamic]string,
     pending_suffix_directives: [dynamic]string,
+    local_types:               [dynamic]Param,
+    local_type_scope_marks:    [dynamic]int,
 }
 
 kvist_package_name_for_import_path :: proc(path: string) -> (string, bool) {
@@ -1110,6 +1112,50 @@ emit_update_rhs :: proc(e: ^Emitter, fn_form: CST_Form, arg_texts: []string) -> 
     return emit_call_text(fn_text, arg_texts), {}, true
 }
 
+emit_compound_update_op :: proc(fn_form: CST_Form, extra_arg_texts: []string) -> (string, bool) {
+    if fn_form.kind != .Symbol {
+        return "", false
+    }
+
+    switch fn_form.text {
+    case "inc":
+        if len(extra_arg_texts) == 0 {
+            return "+= 1", true
+        }
+    case "dec":
+        if len(extra_arg_texts) == 0 {
+            return "-= 1", true
+        }
+    case "+":
+        if len(extra_arg_texts) == 1 {
+            return fmt.tprintf("+= (%s)", extra_arg_texts[0]), true
+        }
+    case "-":
+        if len(extra_arg_texts) == 1 {
+            return fmt.tprintf("-= (%s)", extra_arg_texts[0]), true
+        }
+    case "*":
+        if len(extra_arg_texts) == 1 {
+            return fmt.tprintf("*= (%s)", extra_arg_texts[0]), true
+        }
+    case "/":
+        if len(extra_arg_texts) == 1 {
+            return fmt.tprintf("/= (%s)", extra_arg_texts[0]), true
+        }
+    }
+
+    return "", false
+}
+
+update_form_is_unary_updater :: proc(form: CST_Form) -> bool {
+    if form.kind == .Symbol {
+        return form.text == "inc" || form.text == "dec"
+    }
+    return form.kind == .List && len(form.items) > 0 &&
+        form.items[0].kind == .Symbol &&
+        (form.items[0].text == "fn" || form.items[0].text == "proc")
+}
+
 emit_update_place :: proc(e: ^Emitter, target_form, key_form: CST_Form) -> (lhs, current: string, err: Compile_Error, ok: bool) {
     target, err_target, ok_target := emit_expr(e, target_form)
     if !ok_target {
@@ -1125,6 +1171,77 @@ emit_update_place :: proc(e: ^Emitter, target_form, key_form: CST_Form) -> (lhs,
     }
     text := fmt.tprintf("(%s)[%s]", target, key)
     return text, text, Compile_Error{}, true
+}
+
+emit_update_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) {
+    if len(form.items) < 4 {
+        return "", Compile_Error{message = "update expects target, field, and value or updater", span = form.span}, false
+    }
+    if form.items[2].kind != .Keyword || len(form.items[2].text) <= 1 {
+        return "", Compile_Error{message = "update currently supports struct field updates only", span = form.items[2].span}, false
+    }
+    if form.items[1].kind != .Symbol {
+        return "", Compile_Error{message = "update currently expects a named struct value", span = form.items[1].span}, false
+    }
+
+    target, err_target, ok_target := emit_expr(e, form.items[1])
+    if !ok_target {
+        return "", err_target, false
+    }
+    target_ty, ok_ty := lookup_local_type(e, map_name(form.items[1].text))
+    if !ok_ty {
+        return "", Compile_Error{message = "update needs a known local or parameter struct type", span = form.items[1].span}, false
+    }
+
+    temp_name := eval_temp_name(e)
+    field_name := map_name(form.items[2].text[1:])
+    lhs := fmt.tprintf("(%s).%s", temp_name, field_name)
+    current := lhs
+    rhs := ""
+
+    if len(form.items) == 4 && !update_form_is_unary_updater(form.items[3]) {
+        err_owned, bad_owned := owned_result_usage_error(form.items[3], true)
+        if bad_owned {
+            return "", err_owned, false
+        }
+        rhs_text, err_rhs, ok_rhs := emit_expr(e, form.items[3])
+        if !ok_rhs {
+            return "", err_rhs, false
+        }
+        rhs = rhs_text
+    } else {
+        arg_texts: [dynamic]string
+        append(&arg_texts, current)
+        if len(form.items) > 4 {
+            for extra_form in form.items[4:] {
+                extra_text, err_extra, ok_extra := emit_expr(e, extra_form)
+                if !ok_extra {
+                    return "", err_extra, false
+                }
+                append(&arg_texts, extra_text)
+            }
+        }
+        rhs_text, err_rhs, ok_rhs := emit_update_rhs(e, form.items[3], arg_texts[:])
+        if !ok_rhs {
+            return "", err_rhs, false
+        }
+        rhs = rhs_text
+    }
+
+    builder := strings.builder_make()
+    defer strings.builder_destroy(&builder)
+    strings.write_string(&builder, "proc(value: ")
+    strings.write_string(&builder, target_ty)
+    strings.write_string(&builder, ") -> ")
+    strings.write_string(&builder, target_ty)
+    strings.write_string(&builder, " {\n")
+    fmt.sbprintf(&builder, "    %s := value\n", temp_name)
+    fmt.sbprintf(&builder, "    %s = %s\n", lhs, rhs)
+    fmt.sbprintf(&builder, "    return %s\n", temp_name)
+    strings.write_string(&builder, "}(")
+    strings.write_string(&builder, target)
+    strings.write_string(&builder, ")")
+    return strings.clone(strings.to_string(builder)), {}, true
 }
 
 emit_thread_step :: proc(e: ^Emitter, current: string, step: CST_Form, thread_last: bool) -> (string, Compile_Error, bool) {
@@ -1952,6 +2069,51 @@ type_text_is_dynamic_array :: proc(text: string) -> bool {
 
 type_text_is_map :: proc(text: string) -> bool {
     return len(text) >= 4 && text[:4] == "map["
+}
+
+push_local_type_scope :: proc(e: ^Emitter) {
+    append(&e.local_type_scope_marks, len(e.local_types))
+}
+
+pop_local_type_scope :: proc(e: ^Emitter) {
+    if len(e.local_type_scope_marks) == 0 {
+        return
+    }
+    mark := e.local_type_scope_marks[len(e.local_type_scope_marks)-1]
+    resize(&e.local_type_scope_marks, len(e.local_type_scope_marks)-1)
+    resize(&e.local_types, mark)
+}
+
+bind_local_type :: proc(e: ^Emitter, name, ty: string) {
+    append(&e.local_types, Param{name = name, ty = ty})
+}
+
+lookup_local_type :: proc(e: ^Emitter, name: string) -> (string, bool) {
+    for i := len(e.local_types) - 1; i >= 0; i -= 1 {
+        if e.local_types[i].name == name {
+            return e.local_types[i].ty, true
+        }
+    }
+    return "", false
+}
+
+obvious_binding_type :: proc(e: ^Emitter, binding: Binding) -> (string, bool) {
+    if binding.is_destructure || binding.is_field_destructure || binding.name == "" {
+        return "", false
+    }
+    if binding.is_typed {
+        return binding.ty, true
+    }
+    if binding.value.kind == .Symbol {
+        return lookup_local_type(e, map_name(binding.value.text))
+    }
+    if binding.value.kind == .List && len(binding.value.items) == 2 && binding.value.items[0].kind == .Symbol && binding.value.items[1].kind == .Brace {
+        head_name := map_name(binding.value.items[0].text)
+        if _, ok := find_struct_decl(e, head_name); ok {
+            return head_name, true
+        }
+    }
+    return "", false
 }
 
 form_is_owned_allocation_result :: proc(form: CST_Form) -> bool {
@@ -4100,6 +4262,10 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         return addr_expr_text(target), {}, true
     }
 
+    if head.text == "update" {
+        return emit_update_expr(e, form)
+    }
+
     if head.text == "->" {
         return emit_thread_expr(e, form)
     }
@@ -4920,6 +5086,8 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
                 return err_let_return, false
             }
         }
+        push_local_type_scope(e)
+        defer pop_local_type_scope(e)
         scoped := !last_in_proc
         if scoped {
             emit_line(e, "{")
@@ -4946,6 +5114,9 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
                     return err_value, false
                 }
                 emit_binding_assignment(e, binding, value)
+            }
+            if ty, ok_ty := obvious_binding_type(e, binding); ok_ty {
+                bind_local_type(e, binding.name, ty)
             }
         }
         err_body, ok_body := emit_body_forms(e, body[:], returns_when_final(last_in_proc, returns))
@@ -5127,7 +5298,7 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
             return err_place, false
         }
         rhs := ""
-        if len(form.items) == 4 {
+        if len(form.items) == 4 && !update_form_is_unary_updater(form.items[3]) {
             err_owned, bad_owned := owned_result_usage_error(form.items[3], true)
             if bad_owned {
                 return err_owned, false
@@ -5138,14 +5309,27 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
             }
             rhs = rhs_text
         } else {
+            extra_arg_texts: [dynamic]string
             arg_texts: [dynamic]string
             append(&arg_texts, current)
-            for extra_form in form.items[4:] {
-                extra_text, err_extra, ok_extra := emit_expr(e, extra_form)
-                if !ok_extra {
-                    return err_extra, false
+            if len(form.items) > 4 {
+                for extra_form in form.items[4:] {
+                    extra_text, err_extra, ok_extra := emit_expr(e, extra_form)
+                    if !ok_extra {
+                        return err_extra, false
+                    }
+                    append(&extra_arg_texts, extra_text)
+                    append(&arg_texts, extra_text)
                 }
-                append(&arg_texts, extra_text)
+            }
+            if compound_text, ok_compound := emit_compound_update_op(form.items[3], extra_arg_texts[:]); ok_compound {
+                emit_indent(e)
+                strings.write_string(&e.builder, lhs)
+                record_current_line_fragment_map(e, 0, lhs, form.items[1].span)
+                strings.write_string(&e.builder, " ")
+                strings.write_string(&e.builder, compound_text)
+                emit_raw_newline(e)
+                return {}, true
             }
             rhs_text, err_rhs, ok_rhs := emit_update_rhs(e, form.items[3], arg_texts[:])
             if !ok_rhs {
@@ -5544,6 +5728,11 @@ emit_decl :: proc(e: ^Emitter, decl: IR_Decl) -> (Compile_Error, bool) {
         proc_live: [dynamic]Owned_Local
         analyze_owned_scope_body(e, decl.proc_decl.body[:], decl.proc_decl.returns.kind != .None, &proc_live)
         delete(proc_live)
+        push_local_type_scope(e)
+        defer pop_local_type_scope(e)
+        for param in decl.proc_decl.params {
+            bind_local_type(e, param.name, param.ty)
+        }
         emit_indent(e)
         fmt.sbprintf(&e.builder, "%s :: ", decl.proc_decl.name)
         emit_proc_directives(e, e.pending_prefix_directives[:])
