@@ -124,6 +124,8 @@ parse_defstruct_type_meta :: proc(form: CST_Form) -> (text: string, err: Compile
 
 parse_type_text :: proc(form: CST_Form) -> (text: string, err: Compile_Error, ok: bool) {
     #partial switch form.kind {
+    case .Keyword, .Vector:
+        return parse_defstruct_type_meta(form)
     case .Symbol:
         return map_name(form.text), {}, true
     case .List:
@@ -233,6 +235,14 @@ parse_type_text :: proc(form: CST_Form) -> (text: string, err: Compile_Error, ok
     }
 }
 
+vector_is_named_returns :: proc(form: CST_Form) -> bool {
+    if form.kind != .Vector || len(form.items) == 0 {
+        return false
+    }
+    item := form.items[0]
+    return item.kind == .Symbol && len(item.text) > 0 && item.text[len(item.text)-1] == ':'
+}
+
 parse_proc_type_text_from_parts :: proc(forms: []CST_Form, start: int) -> (text: string, next: int, err: Compile_Error, ok: bool) {
     if start+1 >= len(forms) || forms[start+1].kind != .Vector {
         return "", start, Compile_Error{message = "proc type expects a parameter vector", span = forms[start].span}, false
@@ -260,7 +270,7 @@ parse_proc_type_text_from_parts :: proc(forms: []CST_Form, start: int) -> (text:
             return "", start, Compile_Error{message = "missing proc type return spec", span = forms[next].span}, false
         }
 
-        if forms[next+1].kind == .Vector {
+        if vector_is_named_returns(forms[next+1]) {
             named, err_named, ok_named := parse_named_returns(forms[next+1])
             if !ok_named {
                 return "", start, err_named, false
@@ -501,7 +511,7 @@ parse_proc_decl :: proc(form: CST_Form) -> (decl: Proc_Decl, err: Compile_Error,
         }
         return_form := form.items[body_index+1]
         #partial switch return_form.kind {
-        case .Symbol, .List:
+        case .Symbol, .List, .Keyword:
             return_text, next_index, err_return, ok_return := parse_type_text_from_forms(form.items[:], body_index+1)
             if !ok_return {
                 return decl, err_return, false
@@ -510,13 +520,23 @@ parse_proc_decl :: proc(form: CST_Form) -> (decl: Proc_Decl, err: Compile_Error,
             returns.single_ty = return_text
             body_index = next_index
         case .Vector:
-            named, err_named, ok_named := parse_named_returns(return_form)
-            if !ok_named {
-                return decl, err_named, false
+            if vector_is_named_returns(return_form) {
+                named, err_named, ok_named := parse_named_returns(return_form)
+                if !ok_named {
+                    return decl, err_named, false
+                }
+                returns.kind = .Named
+                returns.named = named
+                body_index += 2
+            } else {
+                return_text, next_index, err_return, ok_return := parse_type_text_from_forms(form.items[:], body_index+1)
+                if !ok_return {
+                    return decl, err_return, false
+                }
+                returns.kind = .Single
+                returns.single_ty = return_text
+                body_index = next_index
             }
-            returns.kind = .Named
-            returns.named = named
-            body_index += 2
         case:
             return decl, Compile_Error{message = "unsupported return spec", span = return_form.span}, false
         }
@@ -597,12 +617,12 @@ parse_decl :: proc(top_form: CST_Top_Form) -> (decl: AST_Decl, err: Compile_Erro
             }, {}, true
         }
         return decl, Compile_Error{message = "import expects a string path or alias plus string path", span = form.span}, false
-    case "const":
+    case "const", "defconst":
         if len(form.items) < 3 {
-            return decl, Compile_Error{message = "const expects a name, optional type, and value", span = form.span}, false
+            return decl, Compile_Error{message = "defconst expects a name, optional type, and value", span = form.span}, false
         }
         if form.items[1].kind != .Symbol {
-            return decl, Compile_Error{message = "const expects a symbol name", span = form.items[1].span}, false
+            return decl, Compile_Error{message = "defconst expects a symbol name", span = form.items[1].span}, false
         }
         doc_lines := top_form.doc_lines
         value_index := 2
@@ -621,10 +641,10 @@ parse_decl :: proc(top_form: CST_Top_Form) -> (decl: AST_Decl, err: Compile_Erro
                 return decl, err_type, false
             }
             if next_i >= len(form.items) {
-                return decl, Compile_Error{message = "typed const missing value", span = form.span}, false
+                return decl, Compile_Error{message = "typed defconst missing value", span = form.span}, false
             }
             if next_i+1 != len(form.items) {
-                return decl, Compile_Error{message = "const expects exactly one value", span = form.items[next_i+1].span}, false
+                return decl, Compile_Error{message = "defconst expects exactly one value", span = form.items[next_i+1].span}, false
             }
             const_decl.has_ty = true
             const_decl.ty = type_text
@@ -635,6 +655,43 @@ parse_decl :: proc(top_form: CST_Top_Form) -> (decl: AST_Decl, err: Compile_Erro
             span = form.span,
             doc_lines = doc_lines,
             const_decl = const_decl,
+        }, {}, true
+    case "defvar":
+        if len(form.items) < 3 {
+            return decl, Compile_Error{message = "defvar expects a name, optional type, and value", span = form.span}, false
+        }
+        if form.items[1].kind != .Symbol {
+            return decl, Compile_Error{message = "defvar expects a symbol name", span = form.items[1].span}, false
+        }
+        doc_lines := top_form.doc_lines
+        value_index := 2
+        if len(form.items) > 3 && form.items[2].kind == .String {
+            doc_lines = append_doc_lines(doc_lines[:], doc_lines_from_string(unquote_string(form.items[2].text))[:])
+            value_index = 3
+        }
+        var_decl := Var_Decl{name = map_name(form.items[1].text)}
+        if len(form.items) == value_index+1 {
+            var_decl.value = form.items[value_index]
+        } else {
+            type_text, next_i, err_type, ok_type := parse_type_text_from_forms(form.items[:], value_index)
+            if !ok_type {
+                return decl, err_type, false
+            }
+            if next_i >= len(form.items) {
+                return decl, Compile_Error{message = "typed defvar missing value", span = form.span}, false
+            }
+            if next_i+1 != len(form.items) {
+                return decl, Compile_Error{message = "defvar expects exactly one value", span = form.items[next_i+1].span}, false
+            }
+            var_decl.has_ty = true
+            var_decl.ty = type_text
+            var_decl.value = form.items[next_i]
+        }
+        return AST_Decl{
+            kind = .Var,
+            span = form.span,
+            doc_lines = doc_lines,
+            var_decl = var_decl,
         }, {}, true
     case "struct":
         if len(form.items) != 3 || form.items[1].kind != .Symbol {
@@ -682,35 +739,53 @@ parse_decl :: proc(top_form: CST_Top_Form) -> (decl: AST_Decl, err: Compile_Erro
                 fields = fields,
             },
         }, {}, true
-    case "enum":
-        if len(form.items) != 3 || form.items[1].kind != .Symbol {
-            return decl, Compile_Error{message = "enum expects a name and variant vector or brace form", span = form.span}, false
+    case "enum", "defenum":
+        if len(form.items) < 3 || form.items[1].kind != .Symbol {
+            return decl, Compile_Error{message = "defenum expects a name and variant vector or brace form", span = form.span}, false
         }
-        variants, err_variants, ok_variants := parse_enum_variants(form.items[2])
+        doc_lines := top_form.doc_lines
+        variant_index := 2
+        if len(form.items) > 3 && form.items[2].kind == .String {
+            doc_lines = append_doc_lines(doc_lines[:], doc_lines_from_string(unquote_string(form.items[2].text))[:])
+            variant_index = 3
+        }
+        if len(form.items) != variant_index+1 {
+            return decl, Compile_Error{message = "defenum expects a name and variant vector or brace form", span = form.span}, false
+        }
+        variants, err_variants, ok_variants := parse_enum_variants(form.items[variant_index])
         if !ok_variants {
             return decl, err_variants, false
         }
         return AST_Decl{
             kind = .Enum,
             span = form.span,
-            doc_lines = top_form.doc_lines,
+            doc_lines = doc_lines,
             enum_decl = Enum_Decl{
                 name = map_name(form.items[1].text),
                 variants = variants,
             },
         }, {}, true
-    case "union":
-        if len(form.items) != 3 || form.items[1].kind != .Symbol {
-            return decl, Compile_Error{message = "union expects a name and variant brace form", span = form.span}, false
+    case "union", "defunion":
+        if len(form.items) < 3 || form.items[1].kind != .Symbol {
+            return decl, Compile_Error{message = "defunion expects a name and variant brace form", span = form.span}, false
         }
-        variants, err_variants, ok_variants := parse_union_variants(form.items[2])
+        doc_lines := top_form.doc_lines
+        variant_index := 2
+        if len(form.items) > 3 && form.items[2].kind == .String {
+            doc_lines = append_doc_lines(doc_lines[:], doc_lines_from_string(unquote_string(form.items[2].text))[:])
+            variant_index = 3
+        }
+        if len(form.items) != variant_index+1 {
+            return decl, Compile_Error{message = "defunion expects a name and variant brace form", span = form.span}, false
+        }
+        variants, err_variants, ok_variants := parse_union_variants(form.items[variant_index])
         if !ok_variants {
             return decl, err_variants, false
         }
         return AST_Decl{
             kind = .Union,
             span = form.span,
-            doc_lines = top_form.doc_lines,
+            doc_lines = doc_lines,
             union_decl = Union_Decl{
                 name     = map_name(form.items[1].text),
                 variants = variants,

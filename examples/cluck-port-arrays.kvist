@@ -1,12 +1,10 @@
 // Port of the Cluck reset arrays demo, using Kvist/Odin array ownership rules.
 (package main)
-(import "core:fmt")
 
-
-(defn arrays-demo [] -> int
-  (let [xs (new [dynamic]int [1 2 3])
-        ys (new [3]int [4 5 6])
-        zeros (make [dynamic]int)
+(defn arrays-demo [] -> :int
+  (let [xs (arr/dynamic :int [1 2 3])
+        ys (arr/fixed :int [4 5 6])
+        zeros (arr/empty :int)
         view (arr/slice xs 1 3)]
     (defer (delete xs))
     (defer (delete zeros))

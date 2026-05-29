@@ -573,13 +573,20 @@ foreign_call :: proc(handle: Foreign_Handle) ---
 ## Target Forms
 
 - `(package name)`, `(import "path")`, `(import alias "path")`
-- `(const name expr)` -> `name :: expr`
-- `(const name type expr)` -> `name: type : expr`
+  - host imports keep Odin package paths like `"core:fmt"`
+  - source-package imports can load `.kvist` packages by relative path, e.g. `(import "support/math")`
+- `(defconst name expr)` -> `name :: expr`
+- `(defconst name type expr)` -> `name: type : expr`
+- `(defvar name expr)` -> `name := expr`
+- `(defvar name type expr)` -> `name: type = expr`
 - `(struct Name {:field Type ...})`
 - `(defstruct Name "Doc..." {:field :metadata ...})`
 - `(enum Name [A B C])` and `(enum Name {:A 1 :B 2})`
+- `(defenum Name "Doc..." [A B C])` and `(defenum Name "Doc..." {:A 1 :B 2})`
 - `(union Name {:variant Type ...})`
+- `(defunion Name "Doc..." {:variant Type ...})`
 - `(proc name [arg: type, ...] -> return-type body...)`
+  - params and returns accept either Odin-style type spelling or Malli-like metadata such as `:int`, `[:arr :string]`, and `[:set :keyword]`
 - top-level and statement `(odin "...")` raw escape hatches
 - `(let [binding value ...] body...)` scoped expression/block, including
   multi-return and struct-field destructuring
@@ -597,6 +604,9 @@ foreign_call :: proc(handle: Foreign_Handle) ---
 - `(do body...)`
 - `(new Type literal)` typed composite literals
 - `(make Type args...)` runtime/allocator-backed construction
+- `(arr/empty elem-type [capacity])`, `(arr/dynamic elem-type [items...])`, `(arr/fixed elem-type [items...])`
+- `(map/empty key-type value-type [capacity])`, `(map/of key-type value-type {:k v ...})`
+- `(set/empty elem-type [capacity])`, `(set/of elem-type [a b c])`
 - `(map f xs)`, `(filter pred xs)`, `(reduce f init xs)`, `(take n xs)`,
   `(drop n xs)`, `(take-while pred xs)`, `(drop-while pred xs)`,
   `(find pred xs)`, `(some? pred xs)`, `(every? pred xs)`, `(first xs)`,

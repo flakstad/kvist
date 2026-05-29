@@ -1,0 +1,22 @@
+(package math)
+
+(defconst default-limit
+  "Default upper bound used by package examples."
+  10)
+
+(defn sum-range
+  "Return the sum of integers from START up to END."
+  [start: :int, end: :int] -> :int
+  (let [sum 0]
+    (for [i (range start end)]
+      (set! sum (+ sum i)))
+    sum))
+
+(defn evens-under
+  "Return a dynamic array of even integers below LIMIT."
+  [limit: :int] -> [:arr :int]
+  (let [out (arr/empty :int)]
+    (for [i (range 0 limit)]
+      (when (== 0 (% i 2))
+        (arr/push! out i)))
+    out))

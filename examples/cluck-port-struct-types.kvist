@@ -1,6 +1,5 @@
 // Close port of the Cluck reset struct-types demo.
 (package main)
-(import "core:fmt")
 (defstruct Point
   "A small geometric point."
   {:x :float
@@ -17,14 +16,14 @@
    :window [:slice :float]
    :home :Point})
 
-(defn struct-types-demo [] -> bool
-  (let [samples (new [dynamic]f64 [1.5 2.5 3.5 4.5])
+(defn struct-types-demo [] -> :bool
+  (let [samples (arr/dynamic :float [1.5 2.5 3.5 4.5])
         profile (Profile {:name "Ada"
                           :age 36
                           :active? true
                           :favorite-key :math/fp
-                          :scores (new [dynamic]int [10 20 30])
-                          :tags (new map[string]bool {"math" true "lisp" true})
+                          :scores (arr/dynamic :int [10 20 30])
+                          :tags (set/of :string ["math" "lisp"])
                           :window (slice samples 1 3)
                           :home (Point {:x 1.0 :y 2.0})})]
     (defer (delete samples))

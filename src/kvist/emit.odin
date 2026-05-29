@@ -67,6 +67,7 @@ Emitter_Features :: struct {
     core_cycle:       bool,
     core_tap:         bool,
     core_strings:     bool,
+    core_fmt:         bool,
     map_fields:       [dynamic]string,
     index_by_fields:  [dynamic]string,
     group_by_fields:  [dynamic]string,
@@ -457,6 +458,12 @@ mark_core_tap :: proc(e: ^Emitter) {
 mark_core_strings :: proc(e: ^Emitter) {
     if e.features != nil {
         e.features.core_strings = true
+    }
+}
+
+mark_core_fmt :: proc(e: ^Emitter) {
+    if e.features != nil {
+        e.features.core_fmt = true
     }
 }
 
@@ -1815,6 +1822,68 @@ with_temp_allocator_escape_error :: proc(body: []CST_Form, last_in_proc: bool, r
     return {}, false
 }
 
+loop_collection_needs_temp_binding :: proc(form: CST_Form) -> bool {
+    return form_is_owned_result(form) || form_is_owned_allocation_result(form)
+}
+
+emit_for_in_loop_body :: proc(e: ^Emitter, coll_form: CST_Form, coll_text, first_name, second_name: string, body: []CST_Form) -> (Compile_Error, bool) {
+    emit_indent(e)
+    strings.write_string(&e.builder, "for ")
+    strings.write_string(&e.builder, first_name)
+    prefix_len := len("for ") + len(first_name)
+    if second_name != "" {
+        strings.write_string(&e.builder, ", ")
+        strings.write_string(&e.builder, second_name)
+        prefix_len += len(", ") + len(second_name)
+    }
+    strings.write_string(&e.builder, " in ")
+    prefix_len += len(" in ")
+    strings.write_string(&e.builder, coll_text)
+    record_current_line_fragment_map(e, prefix_len, coll_text, coll_form.span)
+    strings.write_string(&e.builder, " {")
+    emit_raw_newline(e)
+    e.indent += 1
+    err_body, ok_body := emit_body_forms(e, body, Return_Spec{kind = .None})
+    if !ok_body {
+        return err_body, false
+    }
+    e.indent -= 1
+    emit_line(e, "}")
+    return {}, true
+}
+
+emit_for_in_loop :: proc(e: ^Emitter, coll_form: CST_Form, first_name, second_name: string, body: []CST_Form) -> (Compile_Error, bool) {
+    if !loop_collection_needs_temp_binding(coll_form) {
+        err_owned, bad_owned := owned_result_usage_error(coll_form, false)
+        if bad_owned {
+            return err_owned, false
+        }
+        coll, err_coll, ok_coll := emit_expr(e, coll_form)
+        if !ok_coll {
+            return err_coll, false
+        }
+        return emit_for_in_loop_body(e, coll_form, coll, first_name, second_name, body)
+    }
+
+    coll, err_coll, ok_coll := emit_expr(e, coll_form)
+    if !ok_coll {
+        return err_coll, false
+    }
+    e.temp_counter += 1
+    temp := fmt.tprintf("kvist_loop_%d", e.temp_counter)
+    emit_line(e, "{")
+    e.indent += 1
+    emit_prefixed_expr_mapped(e, fmt.tprintf("%s := ", temp), coll, coll_form.span)
+    emit_line(e, fmt.tprintf("defer delete(%s)", temp))
+    err_loop, ok_loop := emit_for_in_loop_body(e, coll_form, temp, first_name, second_name, body)
+    if !ok_loop {
+        return err_loop, false
+    }
+    e.indent -= 1
+    emit_line(e, "}")
+    return {}, true
+}
+
 emit_map_callback_call :: proc(e: ^Emitter, callback: CST_Form, collection: string) -> (string, Compile_Error, bool) {
     if field, ok_field := field_from_keyword(callback); ok_field {
         mark_core_map_field(e, field)
@@ -2522,6 +2591,131 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
             return "", err_target, false
         }
         return fmt.tprintf("len(%s)", target), {}, true
+    }
+
+    if head.text == "arr/empty" {
+        if len(form.items) != 2 && len(form.items) != 3 {
+            return "", Compile_Error{message = "arr/empty expects element type and optional capacity", span = form.span}, false
+        }
+        elem_text, err_elem, ok_elem := parse_type_text(form.items[1])
+        if !ok_elem {
+            return "", err_elem, false
+        }
+        if len(form.items) == 2 {
+            return fmt.tprintf("make([dynamic]%s)", elem_text), {}, true
+        }
+        capacity, err_capacity, ok_capacity := emit_expr(e, form.items[2])
+        if !ok_capacity {
+            return "", err_capacity, false
+        }
+        return fmt.tprintf("make([dynamic]%s, 0, %s)", elem_text, capacity), {}, true
+    }
+
+    if head.text == "arr/dynamic" {
+        if len(form.items) != 3 || form.items[2].kind != .Vector {
+            return "", Compile_Error{message = "arr/dynamic expects element type and vector literal", span = form.span}, false
+        }
+        elem_text, err_elem, ok_elem := parse_type_text(form.items[1])
+        if !ok_elem {
+            return "", err_elem, false
+        }
+        mark_dynamic_literals(e)
+        return emit_vector_literal(e, fmt.tprintf("[dynamic]%s", elem_text), form.items[2])
+    }
+
+    if head.text == "arr/fixed" {
+        if len(form.items) != 3 || form.items[2].kind != .Vector {
+            return "", Compile_Error{message = "arr/fixed expects element type and vector literal", span = form.span}, false
+        }
+        elem_text, err_elem, ok_elem := parse_type_text(form.items[1])
+        if !ok_elem {
+            return "", err_elem, false
+        }
+        length := len(form.items[2].items)
+        return emit_vector_literal(e, fmt.tprintf("[%d]%s", length, elem_text), form.items[2])
+    }
+
+    if head.text == "map/empty" {
+        if len(form.items) != 3 && len(form.items) != 4 {
+            return "", Compile_Error{message = "map/empty expects key type, value type, and optional capacity", span = form.span}, false
+        }
+        key_text, err_key, ok_key := parse_type_text(form.items[1])
+        if !ok_key {
+            return "", err_key, false
+        }
+        value_text, err_value, ok_value := parse_type_text(form.items[2])
+        if !ok_value {
+            return "", err_value, false
+        }
+        if len(form.items) == 3 {
+            return fmt.tprintf("make(map[%s]%s)", key_text, value_text), {}, true
+        }
+        capacity, err_capacity, ok_capacity := emit_expr(e, form.items[3])
+        if !ok_capacity {
+            return "", err_capacity, false
+        }
+        return fmt.tprintf("make(map[%s]%s, %s)", key_text, value_text, capacity), {}, true
+    }
+
+    if head.text == "map/of" {
+        if len(form.items) != 4 || form.items[3].kind != .Brace {
+            return "", Compile_Error{message = "map/of expects key type, value type, and brace literal", span = form.span}, false
+        }
+        key_text, err_key, ok_key := parse_type_text(form.items[1])
+        if !ok_key {
+            return "", err_key, false
+        }
+        value_text, err_value, ok_value := parse_type_text(form.items[2])
+        if !ok_value {
+            return "", err_value, false
+        }
+        return emit_brace_literal(e, fmt.tprintf("map[%s]%s", key_text, value_text), form.items[3])
+    }
+
+    if head.text == "set/empty" {
+        if len(form.items) != 2 && len(form.items) != 3 {
+            return "", Compile_Error{message = "set/empty expects element type and optional capacity", span = form.span}, false
+        }
+        elem_text, err_elem, ok_elem := parse_type_text(form.items[1])
+        if !ok_elem {
+            return "", err_elem, false
+        }
+        if len(form.items) == 2 {
+            return fmt.tprintf("make(map[%s]bool)", elem_text), {}, true
+        }
+        capacity, err_capacity, ok_capacity := emit_expr(e, form.items[2])
+        if !ok_capacity {
+            return "", err_capacity, false
+        }
+        return fmt.tprintf("make(map[%s]bool, %s)", elem_text, capacity), {}, true
+    }
+
+    if head.text == "set/of" {
+        if len(form.items) != 3 || form.items[2].kind != .Vector {
+            return "", Compile_Error{message = "set/of expects element type and vector literal", span = form.span}, false
+        }
+        elem_text, err_elem, ok_elem := parse_type_text(form.items[1])
+        if !ok_elem {
+            return "", err_elem, false
+        }
+        builder := strings.builder_make()
+        defer strings.builder_destroy(&builder)
+        strings.write_string(&builder, "map[")
+        strings.write_string(&builder, elem_text)
+        strings.write_string(&builder, "]bool{")
+        values, err_values, ok_values := emit_vector_item_texts(e, form.items[2])
+        if !ok_values {
+            return "", err_values, false
+        }
+        for value, idx in values {
+            if idx > 0 {
+                strings.write_string(&builder, ", ")
+            }
+            strings.write_string(&builder, value)
+            strings.write_string(&builder, " = true")
+        }
+        strings.write_byte(&builder, '}')
+        return strings.clone(strings.to_string(builder)), {}, true
     }
 
     if head.text == "arr/get" || head.text == "str/get" || head.text == "map/get" {
@@ -4513,6 +4707,7 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
         if len(form.items) != 2 {
             return Compile_Error{message = "doc expects a quoted declaration name", span = form.span}, false
         }
+        mark_core_fmt(e)
         name, ok_name := quoted_symbol_name(form.items[1])
         if !ok_name {
             return Compile_Error{message = "doc currently expects a quoted declaration name", span = form.items[1].span}, false
@@ -4548,43 +4743,15 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
         }
         name := map_name(name_form.text)
         value := map_name(value_form.text)
-        err_owned, bad_owned := owned_result_usage_error(coll_form, false)
-        if bad_owned {
-            return err_owned, false
-        }
-        coll, err_coll, ok_coll := emit_expr(e, coll_form)
-        if !ok_coll {
-            return err_coll, false
-        }
-        emit_indent(e)
-        strings.write_string(&e.builder, "for ")
-        strings.write_string(&e.builder, name)
-        if has_value {
-            strings.write_string(&e.builder, ", ")
-            strings.write_string(&e.builder, value)
-        }
-        strings.write_string(&e.builder, " in ")
-        strings.write_string(&e.builder, coll)
-        prefix_len := len("for ") + len(name)
-        if has_value {
-            prefix_len += len(", ") + len(value)
-        }
-        prefix_len += len(" in ")
-        record_current_line_fragment_map(e, prefix_len, coll, coll_form.span)
-        strings.write_string(&e.builder, " {")
-        emit_raw_newline(e)
-        e.indent += 1
         body: [dynamic]CST_Form
         for item in form.items[body_start:] {
             append(&body, item)
         }
-        err_body, ok_body := emit_body_forms(e, body[:], Return_Spec{kind = .None})
-        if !ok_body {
-            return err_body, false
+        second_name := ""
+        if has_value {
+            second_name = value
         }
-        e.indent -= 1
-        emit_line(e, "}")
-        return {}, true
+        return emit_for_in_loop(e, coll_form, name, second_name, body[:])
     case "for":
         if len(form.items) >= 3 && form.items[1].kind == .Vector {
             binding := form.items[1]
@@ -4592,70 +4759,21 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
             if len(binding.items) == 2 && binding.items[0].kind == .Symbol {
                 value_name := map_name(binding.items[0].text)
                 coll_form := binding.items[1]
-                err_owned, bad_owned := owned_result_usage_error(coll_form, false)
-                if bad_owned {
-                    return err_owned, false
-                }
-                coll, err_coll, ok_coll := emit_expr(e, coll_form)
-                if !ok_coll {
-                    return err_coll, false
-                }
-                emit_indent(e)
-                strings.write_string(&e.builder, "for ")
-                strings.write_string(&e.builder, value_name)
-                strings.write_string(&e.builder, " in ")
-                strings.write_string(&e.builder, coll)
-                record_current_line_fragment_map(e, len("for ") + len(value_name) + len(" in "), coll, coll_form.span)
-                strings.write_string(&e.builder, " {")
-                emit_raw_newline(e)
-                e.indent += 1
                 body: [dynamic]CST_Form
                 for item in form.items[body_start:] {
                     append(&body, item)
                 }
-                err_body, ok_body := emit_body_forms(e, body[:], Return_Spec{kind = .None})
-                if !ok_body {
-                    return err_body, false
-                }
-                e.indent -= 1
-                emit_line(e, "}")
-                return {}, true
+                return emit_for_in_loop(e, coll_form, value_name, "", body[:])
             }
             if len(binding.items) == 3 && binding.items[0].kind == .Symbol && binding.items[1].kind == .Symbol {
                 value_name := map_name(binding.items[0].text)
                 index_name := map_name(binding.items[1].text)
                 coll_form := binding.items[2]
-                err_owned, bad_owned := owned_result_usage_error(coll_form, false)
-                if bad_owned {
-                    return err_owned, false
-                }
-                coll, err_coll, ok_coll := emit_expr(e, coll_form)
-                if !ok_coll {
-                    return err_coll, false
-                }
-                emit_indent(e)
-                strings.write_string(&e.builder, "for ")
-                strings.write_string(&e.builder, index_name)
-                strings.write_string(&e.builder, ", ")
-                strings.write_string(&e.builder, value_name)
-                strings.write_string(&e.builder, " in ")
-                strings.write_string(&e.builder, coll)
-                prefix_len := len("for ") + len(index_name) + len(", ") + len(value_name) + len(" in ")
-                record_current_line_fragment_map(e, prefix_len, coll, coll_form.span)
-                strings.write_string(&e.builder, " {")
-                emit_raw_newline(e)
-                e.indent += 1
                 body: [dynamic]CST_Form
                 for item in form.items[body_start:] {
                     append(&body, item)
                 }
-                err_body, ok_body := emit_body_forms(e, body[:], Return_Spec{kind = .None})
-                if !ok_body {
-                    return err_body, false
-                }
-                e.indent -= 1
-                emit_line(e, "}")
-                return {}, true
+                return emit_for_in_loop(e, coll_form, index_name, value_name, body[:])
             }
             return Compile_Error{message = "for expects [value collection], [value index collection], or condition and body", span = form.span}, false
         }
@@ -4905,6 +5023,16 @@ emit_decl :: proc(e: ^Emitter, decl: IR_Decl) -> (Compile_Error, bool) {
             emit_line(e, fmt.tprintf("%s: %s : %s", decl.const_decl.name, decl.const_decl.ty, value))
         } else {
             emit_line(e, fmt.tprintf("%s :: %s", decl.const_decl.name, value))
+        }
+    case .Var:
+        value, err_value, ok_value := emit_expr(e, decl.var_decl.value)
+        if !ok_value {
+            return err_value, false
+        }
+        if decl.var_decl.has_ty {
+            emit_line(e, fmt.tprintf("%s: %s = %s", decl.var_decl.name, decl.var_decl.ty, value))
+        } else {
+            emit_line(e, fmt.tprintf("%s := %s", decl.var_decl.name, value))
         }
     case .Struct:
         emit_indent(e)
@@ -6707,6 +6835,8 @@ decl_uses_core_slice_sort :: proc(decl: IR_Decl) -> bool {
     #partial switch decl.kind {
     case .Const:
         return form_uses_core_slice_sort(decl.const_decl.value)
+    case .Var:
+        return form_uses_core_slice_sort(decl.var_decl.value)
     case .Enum:
         for variant in decl.enum_decl.variants {
             if variant.has_value && form_uses_core_slice_sort(variant.value) {
@@ -6754,6 +6884,20 @@ form_uses_core_strings :: proc(form: CST_Form) -> bool {
     return false
 }
 
+form_uses_core_fmt :: proc(form: CST_Form) -> bool {
+    if form.kind == .List && len(form.items) > 0 && form.items[0].kind == .Symbol {
+        if form.items[0].text == "println" || form.items[0].text == "doc" {
+            return true
+        }
+    }
+    for item in form.items {
+        if form_uses_core_fmt(item) {
+            return true
+        }
+    }
+    return false
+}
+
 decls_need_core_strings_import :: proc(decls: []IR_Decl) -> bool {
     for decl in decls {
         if decl.kind == .Import {
@@ -6769,6 +6913,10 @@ decls_need_core_strings_import :: proc(decls: []IR_Decl) -> bool {
             if form_uses_core_strings(decl.const_decl.value) {
                 return true
             }
+        case .Var:
+            if form_uses_core_strings(decl.var_decl.value) {
+                return true
+            }
         case .Enum:
             for variant in decl.enum_decl.variants {
                 if variant.has_value && form_uses_core_strings(variant.value) {
@@ -6778,6 +6926,42 @@ decls_need_core_strings_import :: proc(decls: []IR_Decl) -> bool {
         case .Proc:
             for form in decl.proc_decl.body {
                 if form_uses_core_strings(form) {
+                    return true
+                }
+            }
+        }
+    }
+    return false
+}
+
+decls_need_core_fmt_import :: proc(decls: []IR_Decl) -> bool {
+    for decl in decls {
+        if decl.kind == .Import {
+            if (!decl.import_decl.has_alias && decl.import_decl.path == "\"core:fmt\"") ||
+               (decl.import_decl.has_alias && decl.import_decl.alias == "fmt" && decl.import_decl.path == "\"core:fmt\"") {
+                return false
+            }
+        }
+    }
+    for decl in decls {
+        #partial switch decl.kind {
+        case .Const:
+            if form_uses_core_fmt(decl.const_decl.value) {
+                return true
+            }
+        case .Var:
+            if form_uses_core_fmt(decl.var_decl.value) {
+                return true
+            }
+        case .Enum:
+            for variant in decl.enum_decl.variants {
+                if variant.has_value && form_uses_core_fmt(variant.value) {
+                    return true
+                }
+            }
+        case .Proc:
+            for form in decl.proc_decl.body {
+                if form_uses_core_fmt(form) {
                     return true
                 }
             }
@@ -6806,6 +6990,16 @@ emit_core_strings_import :: proc(e: ^Emitter, emitted: ^bool, needed: bool) {
     emitted^ = true
 }
 
+emit_core_fmt_import :: proc(e: ^Emitter, emitted: ^bool, needed: bool) {
+    if !needed || emitted^ {
+        return
+    }
+    emit_line(e, "import \"core:fmt\"")
+    strings.write_byte(&e.builder, '\n')
+    e.line += 1
+    emitted^ = true
+}
+
 emit_decls_with_source_map :: proc(decls: []IR_Decl) -> (Emit_Result, Compile_Error, bool) {
     result := Emit_Result{}
     features := Emitter_Features{}
@@ -6827,12 +7021,15 @@ emit_decls_with_source_map :: proc(decls: []IR_Decl) -> (Emit_Result, Compile_Er
     }
     needs_core_slice_import := decls_need_core_slice_sort_import(decls)
     needs_core_strings_import := decls_need_core_strings_import(decls)
+    needs_core_fmt_import := decls_need_core_fmt_import(decls)
     emitted_core_slice_import := false
     emitted_core_strings_import := false
+    emitted_core_fmt_import := false
     for decl, idx in decls {
         if decl.kind != .Package && decl.kind != .Import {
             emit_core_slice_sort_import(&e, &emitted_core_slice_import, needs_core_slice_import)
             emit_core_strings_import(&e, &emitted_core_strings_import, needs_core_strings_import)
+            emit_core_fmt_import(&e, &emitted_core_fmt_import, needs_core_fmt_import)
         }
         start_line := e.line
         err_decl, ok_decl := emit_decl(&e, decl)
@@ -6860,6 +7057,7 @@ emit_decls_with_source_map :: proc(decls: []IR_Decl) -> (Emit_Result, Compile_Er
     }
     emit_core_slice_sort_import(&e, &emitted_core_slice_import, needs_core_slice_import)
     emit_core_strings_import(&e, &emitted_core_strings_import, needs_core_strings_import)
+    emit_core_fmt_import(&e, &emitted_core_fmt_import, needs_core_fmt_import)
     emit_core_helpers(&e, features)
     if features.dynamic_literals {
         output_builder := strings.builder_make()
@@ -6900,12 +7098,16 @@ emit_eval_decls_with_source_map :: proc(decls: []IR_Decl, eval_form: CST_Form, n
                              form_uses_core_slice_sort(eval_form)
     needs_core_strings_import := decls_need_core_strings_import(decls) ||
                                  form_uses_core_strings(eval_form)
+    needs_core_fmt_import := decls_need_core_fmt_import(decls) ||
+                             form_uses_core_fmt(eval_form)
     emitted_core_slice_import := false
     emitted_core_strings_import := false
+    emitted_core_fmt_import := false
     for decl, idx in decls {
         if decl.kind != .Package && decl.kind != .Import {
             emit_core_slice_sort_import(&e, &emitted_core_slice_import, needs_core_slice_import)
             emit_core_strings_import(&e, &emitted_core_strings_import, needs_core_strings_import)
+            emit_core_fmt_import(&e, &emitted_core_fmt_import, needs_core_fmt_import)
         }
         start_line := e.line
         err_decl, ok_decl := emit_decl(&e, decl)
@@ -6933,6 +7135,7 @@ emit_eval_decls_with_source_map :: proc(decls: []IR_Decl, eval_form: CST_Form, n
     }
     emit_core_slice_sort_import(&e, &emitted_core_slice_import, needs_core_slice_import)
     emit_core_strings_import(&e, &emitted_core_strings_import, needs_core_strings_import)
+    emit_core_fmt_import(&e, &emitted_core_fmt_import, needs_core_fmt_import)
 
     if e.line > 1 {
         strings.write_byte(&e.builder, '\n')
@@ -7062,6 +7265,8 @@ decl_name :: proc(decl: IR_Decl) -> string {
     #partial switch decl.kind {
     case .Const:
         return decl.const_decl.name
+    case .Var:
+        return decl.var_decl.name
     case .Struct:
         return decl.struct_decl.name
     case .Enum:

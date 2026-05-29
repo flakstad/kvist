@@ -95,9 +95,16 @@ Point :: struct {
 compile_all_examples :: proc(t: ^testing.T) {
     examples := [?]string{
         "examples/cluck-port-arrays.kvist",
+        "examples/cluck-port-docs.kvist",
         "examples/cluck-port-maps-sets.kvist",
         "examples/cluck-port-multi-return.kvist",
+        "examples/cluck-port-packages.kvist",
+        "examples/cluck-port-records.kvist",
+        "examples/cluck-port-loops.kvist",
         "examples/cluck-port-strings.kvist",
+        "examples/cluck-port-struct-defaults.kvist",
+        "examples/cluck-port-struct-introspection.kvist",
+        "examples/cluck-port-struct-types.kvist",
         "examples/closures.kvist",
         "examples/control-flow.kvist",
         "examples/core-concurrency.kvist",
@@ -139,6 +146,19 @@ compile_all_examples :: proc(t: ^testing.T) {
         delete(result.output)
         delete(result.source_map)
     }
+}
+
+@(test)
+compile_eval_path_rewrites_source_package_aliases :: proc(t: ^testing.T) {
+    output, err, ok := kvist.compile_eval_path("examples/cluck-port-packages.kvist", "(math/sum-range 0 5)")
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "math__sum_range(0, 5)"), true)
 }
 
 @(test)
@@ -929,6 +949,81 @@ Http_Status :: enum {
 }
 `
     testing.expect_value(t, output, expected)
+}
+
+@(test)
+compile_defconst_and_defvar_forms :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defconst answer 42)
+(defvar live-port int 8080)
+(defvar retries 3)`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "answer :: 42"), true)
+    testing.expect_value(t, strings.contains(output, "live_port: int = 8080"), true)
+    testing.expect_value(t, strings.contains(output, "retries := 3"), true)
+}
+
+@(test)
+compile_malli_types_and_empty_collection_constructors :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn score [xs: [:arr :int], tags: [:set :string]] -> :int
+  (let [out (arr/empty :int 4)
+        lookup (map/empty :string :int)
+        seen (set/empty :string 8)]
+    (arr/push! out (arr/count xs))
+    (update! lookup "count" (arr/count xs))
+    (set/add! seen "ok")
+    (+ (arr/get out 0) (map/get lookup "count" 0))))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "score :: proc(xs: [dynamic]int, tags: map[string]bool) -> int"), true)
+    testing.expect_value(t, strings.contains(output, "out := make([dynamic]int, 0, 4)"), true)
+    testing.expect_value(t, strings.contains(output, "lookup := make(map[string]int)"), true)
+    testing.expect_value(t, strings.contains(output, "seen := make(map[string]bool, 8)"), true)
+}
+
+@(test)
+compile_defenum_and_defunion_aliases :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defenum Method
+  "HTTP method."
+  [Get Post])
+
+(defunion Value
+  "Tagged value."
+  {:i :int
+   :s :string})`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "// HTTP method."), true)
+    testing.expect_value(t, strings.contains(output, "Method :: enum {"), true)
+    testing.expect_value(t, strings.contains(output, "// Tagged value."), true)
+    testing.expect_value(t, strings.contains(output, "Value :: union {"), true)
 }
 
 @(test)

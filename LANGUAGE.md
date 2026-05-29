@@ -385,7 +385,8 @@ The planned v0.1 top-level forms are:
 
 - `package`
 - `import`
-- `const`
+- `defconst`
+- `defvar`
 - `struct`
 - `defstruct`
 - `enum`
@@ -393,11 +394,18 @@ The planned v0.1 top-level forms are:
 - `proc`
 - `odin`
 
-### `const`
+### `defconst`
 
 ```clojure
-(const answer 42)
-(const max-size int 1024)
+(defconst answer 42)
+(defconst max-size int 1024)
+```
+
+### `defvar`
+
+```clojure
+(defvar live-port 8080)
+(defvar retries int 3)
 ```
 
 ### `struct`
@@ -465,6 +473,14 @@ For explicit values, keyed brace syntax is allowed:
 })
 ```
 
+`defenum` is the docstring-friendly alias:
+
+```clojure
+(defenum Method
+  "HTTP method."
+  [Get Post Delete])
+```
+
 ### `union`
 
 `union` denotes a tagged union in the Odin sense, not a C raw union.
@@ -475,6 +491,16 @@ For explicit values, keyed brace syntax is allowed:
   :s string
   :ok bool
 })
+```
+
+`defunion` is the docstring-friendly alias:
+
+```clojure
+(defunion Value
+  "Tagged value."
+  {:i :int
+   :s :string
+   :ok :bool})
 ```
 
 Use `union` when exactly one variant is valid at a time and the choice may
@@ -503,6 +529,13 @@ Functions use a typed signature vector:
   ...)
 ```
 
+Malli-like source types also work in params and returns:
+
+```clojure
+(proc score [xs: [:arr :int], tags: [:set :string]] -> :int
+  ...)
+```
+
 Commas are optional and exist for readability:
 
 ```clojure
@@ -516,6 +549,32 @@ An empty return annotation means the function is `void`:
 ```clojure
 (proc main []
   (fmt.println "hello"))
+```
+
+### Source Packages
+
+Kvist can inline relative `.kvist` packages from source:
+
+```clojure
+(import "support/math")
+(math/sum-range 0 5)
+```
+
+Host imports still use Odin package paths such as `"core:fmt"`.
+
+### Empty Collection Constructors
+
+When there is no literal element to infer from, use the package constructors:
+
+```clojure
+(arr/empty :int)
+(arr/empty :int 16)
+(arr/dynamic :int [1 2 3])
+(arr/fixed :int [4 5 6])
+(map/empty :string :int)
+(map/of :string :int {"one" 1 "two" 2})
+(set/empty :string 8)
+(set/of :string ["math" "lisp"])
 ```
 
 ### `odin`
@@ -560,7 +619,8 @@ The parser should recognize these as special forms rather than ordinary calls:
 
 - `package`
 - `import`
-- `const`
+- `defconst`
+- `defvar`
 - `struct`
 - `enum`
 - `union`
@@ -1420,7 +1480,7 @@ surface syntax.
 
 ### Expected core support
 
-- `package`, `import`, `const`, `struct`, `enum`, `union`, `proc`
+- `package`, `import`, `defconst`, `defvar`, `struct`, `enum`, `union`, `proc`
 - local bindings with `let`
 - `do`, `if`, `when`, `cond`
 - `set!`, `return`, `defer`
@@ -2183,7 +2243,7 @@ The first implementation milestone should remain modest:
 
 That locked subset should start with:
 
-- `package`, `import`, `const`, `struct`, `enum`, `union`, `proc`
+- `package`, `import`, `defconst`, `defvar`, `struct`, `enum`, `union`, `proc`
 - `let`, `do`, `if`, `when`, `cond`, `switch`
 - `set!`, `return`, `defer`, `each`
 - field access, `get`, threading

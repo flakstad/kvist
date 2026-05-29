@@ -9,6 +9,7 @@ block so `C-c C-e` and `C-c C-c` are practical.
 - `cluck-port-arrays.kvist`: Cluck reset arrays demo, showing owned dynamic arrays.
 - `cluck-port-maps-sets.kvist`: Cluck reset maps/sets demo; sets are still `map[T]bool`.
 - `cluck-port-multi-return.kvist`: Cluck reset multi-return demo.
+- `cluck-port-packages.kvist`: Cluck reset package demo using relative `.kvist` source imports.
 - `cluck-port-loops.kvist`: Cluck reset loop demos using Cluck-style `for` bindings.
 - `cluck-port-records.kvist`: Cluck reset records demo via `defstruct`.
 - `cluck-port-strings.kvist`: Cluck reset string demo using Odin string ops.

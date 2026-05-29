@@ -1,17 +1,18 @@
 // Close port of the Cluck reset records demo.
 (package main)
-(import "core:fmt")
 (defstruct Person
   "A small fixed-shape person struct."
   {:name :string
    :age :int
    :tags [:set :string]})
 
-(defn records-demo [] -> bool
+(defn records-demo [] -> :bool
   (let [person (Person {:name "Ada"
                         :age 36
-                        :tags (new map[string]bool {"math" true "lisp" true})})]
+                        :tags (set/empty :string 2)})]
     (defer (delete (:tags person)))
+    (set/add! (:tags person) "math")
+    (set/add! (:tags person) "lisp")
     (println (:name person))
     (println (:age person))
     (println (:tags person))

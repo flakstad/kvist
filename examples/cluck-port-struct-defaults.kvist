@@ -1,6 +1,5 @@
 // Close port of the Cluck reset struct-defaults demo.
 (package main)
-(import "core:fmt")
 (defstruct Point
   "A point with float coordinates."
   {:x :float

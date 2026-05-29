@@ -1,7 +1,5 @@
 // Exercises update! over dynamic arrays, maps, and defstruct fields.
 (package main)
-(import "core:fmt")
-
 (defstruct Point
   {:x :int
    :y :int})

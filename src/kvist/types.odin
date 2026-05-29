@@ -111,6 +111,13 @@ Const_Decl :: struct {
     value:  CST_Form,
 }
 
+Var_Decl :: struct {
+    name:   string,
+    has_ty: bool,
+    ty:     string,
+    value:  CST_Form,
+}
+
 Enum_Variant :: struct {
     name:      string,
     has_value: bool,
@@ -141,6 +148,7 @@ AST_Decl_Kind :: enum {
     Package,
     Import,
     Const,
+    Var,
     Struct,
     Enum,
     Union,
@@ -155,6 +163,7 @@ AST_Decl :: struct {
     package_name: string,
     import_decl:  Import_Decl,
     const_decl:   Const_Decl,
+    var_decl:     Var_Decl,
     struct_decl:  Struct_Decl,
     enum_decl:    Enum_Decl,
     union_decl:   Union_Decl,

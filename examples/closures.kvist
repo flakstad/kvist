@@ -1,8 +1,6 @@
 // Demonstrates the current anonymous-function boundary: fn literals work, but
 // they do not capture surrounding locals.
 (package main)
-(import "core:fmt")
-
 (defn apply-pred [pred: proc [x: int] -> bool, x: int] -> bool
   (pred x))
 

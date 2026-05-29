@@ -351,14 +351,13 @@ cleanup_generated :: proc(path, temp_dir, requested_path: string) {
 }
 
 compile_file_command :: proc(input, output_path, map_path: string) {
-    data := read_source_or_exit(input)
-    defer delete(transmute([]byte)data)
-
-    result, err, ok := kvist.compile_source_with_map(data)
+    result, err, ok := kvist.compile_path_with_map(input)
     if !ok {
+        data := read_source_or_exit(input)
         formatted := kvist.format_compile_error(input, data, err)
         fmt.eprint(formatted)
         delete(formatted)
+        delete(transmute([]byte)data)
         os.exit(1)
     }
     defer delete(result.output)
@@ -378,14 +377,13 @@ compile_file_command :: proc(input, output_path, map_path: string) {
 }
 
 compile_eval_emit_command :: proc(input, eval_source, output_path: string, no_print: bool) {
-    data := read_source_or_exit(input)
-    defer delete(transmute([]byte)data)
-
-    output, err, ok := kvist.compile_eval_source(data, eval_source, no_print)
+    output, err, ok := kvist.compile_eval_path(input, eval_source, no_print)
     if !ok {
+        data := read_source_or_exit(input)
         formatted := kvist.format_eval_compile_error(input, data, eval_source, err)
         fmt.eprint(formatted)
         delete(formatted)
+        delete(transmute([]byte)data)
         os.exit(1)
     }
     defer delete(output)
@@ -443,7 +441,7 @@ run_generated_command :: proc(input, generated_path, odin_command: string) -> in
     data := read_source_or_exit(input)
     defer delete(transmute([]byte)data)
 
-    result, err, ok := kvist.compile_source_with_map(data)
+    result, err, ok := kvist.compile_path_with_map(input)
     if !ok {
         formatted := kvist.format_compile_error(input, data, err)
         fmt.eprint(formatted)
@@ -471,7 +469,7 @@ eval_command :: proc(input, eval_source, generated_path, save_name: string, no_p
         data := read_source_or_exit(input)
         defer delete(transmute([]byte)data)
 
-        result, err, ok := kvist.compile_source_with_map(data)
+        result, err, ok := kvist.compile_path_with_map(input)
         if !ok {
             formatted := kvist.format_compile_error(input, data, err)
             fmt.eprint(formatted)
@@ -493,7 +491,7 @@ eval_command :: proc(input, eval_source, generated_path, save_name: string, no_p
     data := read_source_or_exit(input)
     defer delete(transmute([]byte)data)
 
-    result, err, ok := kvist.compile_eval_source_with_map(data, eval_source, no_print)
+    result, err, ok := kvist.compile_eval_path_with_map(input, eval_source, no_print)
     if !ok {
         formatted := kvist.format_eval_compile_error(input, data, eval_source, err)
         fmt.eprint(formatted)

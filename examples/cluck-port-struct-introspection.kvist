@@ -1,7 +1,5 @@
 // Close port of the Cluck reset struct-introspection demo.
 (package main)
-(import "core:fmt")
-
 (defstruct Point
   "A small geometric point."
   {:x :float

@@ -3,7 +3,7 @@
 (import fmt "core:fmt")
 
 // Default port for examples.
-(const default-port int 8080)
+(defconst default-port int 8080)
 
 (enum Http-Status {
   :OK 200

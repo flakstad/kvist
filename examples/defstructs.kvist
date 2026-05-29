@@ -1,8 +1,6 @@
 // Exercises defstruct docstrings, Malli-like field metadata, nested structs,
 // and omitted-field defaults through ordinary Odin struct construction.
 (package main)
-(import "core:fmt")
-
 (defstruct Point
   "A 2D point."
   {:x :float

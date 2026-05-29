@@ -203,13 +203,21 @@ symbols_source :: proc(source: string) -> (output: string, err: Compile_Error, o
                 path := import_path_text(form.items[2])
                 symbols_write_record_doc(&builder, "import", alias, source, form.items[1].span, path, top.doc_lines[:])
             }
-        case "const":
+        case "const", "defconst":
             if len(form.items) >= 2 && form.items[1].kind == .Symbol {
                 doc_lines := top.doc_lines
                 if len(form.items) > 3 && form.items[2].kind == .String {
                     doc_lines = symbols_append_doc_lines(doc_lines[:], symbols_doc_lines_from_string(unquote_string(form.items[2].text))[:])
                 }
                 symbols_write_record_doc(&builder, "const", form.items[1].text, source, form.items[1].span, "", doc_lines[:])
+            }
+        case "defvar":
+            if len(form.items) >= 2 && form.items[1].kind == .Symbol {
+                doc_lines := top.doc_lines
+                if len(form.items) > 3 && form.items[2].kind == .String {
+                    doc_lines = symbols_append_doc_lines(doc_lines[:], symbols_doc_lines_from_string(unquote_string(form.items[2].text))[:])
+                }
+                symbols_write_record_doc(&builder, "var", form.items[1].text, source, form.items[1].span, "", doc_lines[:])
             }
         case "struct":
             if len(form.items) == 3 && form.items[1].kind == .Symbol {

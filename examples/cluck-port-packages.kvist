@@ -1,0 +1,16 @@
+(package main)
+
+(import "support/math")
+
+(defconst banner
+  "package demo")
+
+(defn packages-demo [] -> :bool
+  (println banner)
+  (println (math/sum-range 0 5))
+  (let [evens (math/evens-under math/default-limit)]
+    (println evens))
+  true)
+
+(defn main []
+  (println (packages-demo)))

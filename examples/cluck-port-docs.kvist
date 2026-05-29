@@ -1,8 +1,6 @@
 // Close port of the Cluck reset docs demo.
 (package main)
-(import "core:fmt")
-
-(const docs_banner
+(defconst docs_banner
   "Banner used by the docs demo."
   "doc demo")
 
