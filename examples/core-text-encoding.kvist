@@ -11,11 +11,11 @@
 (import hex "core:encoding/hex")
 (import sha2 "core:crypto/sha2")
 
-(proc useful-line? [line: string] -> bool
+(defn useful-line? [line: string] -> bool
   (and (strings.has_prefix line "user:")
        (strings.contains line "active=true")))
 
-(proc word-count [] -> int
+(defn word-count [] -> int
   ;; strings.fields allocates the slice of string fields. We delete it before
   ;; returning because callers only need the count.
   (let [[words err] (strings.fields "  Ada  Lin   Grace  ")]
@@ -25,11 +25,11 @@
         (defer (delete words))
         (len words)))))
 
-(proc parsed-score [] -> int
+(defn parsed-score [] -> int
   (let [[value ok] (strconv.parse_int "42")]
     (if ok value 0)))
 
-(proc base64-roundtrip-length [] -> int
+(defn base64-roundtrip-length [] -> int
   ;; base64.encode and base64.decode allocate owned []byte values. The raw Odin
   ;; transmute is explicit because Odin distinguishes string from byte slices.
   (let [text "kvist"
@@ -45,7 +45,7 @@
               (defer (delete decoded))
               (len decoded))))))))
 
-(proc sha256-hex-length [] -> int
+(defn sha256-hex-length [] -> int
   ;; sha2 uses an explicit context, update, and final call. hex.encode then
   ;; allocates the printable digest bytes, which this proc deletes locally.
   (let [text "kvist"
@@ -61,7 +61,7 @@
           (defer (delete encoded))
           (len encoded))))))
 
-(proc main []
+(defn main []
   (println (useful-line? "user:Ada active=true")
                (word-count)
                (parsed-score)

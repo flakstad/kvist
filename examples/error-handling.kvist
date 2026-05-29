@@ -7,20 +7,20 @@
 (import "core:fmt")
 (import os "core:os")
 
-(proc parse-demo-int [text: string] -> [value: int, ok: bool]
+(defn parse-demo-int [text: string] -> [value: int, ok: bool]
   (cond
     (== text "one") (return 1 true)
     (== text "two") (return 2 true)
     :else (return 0 false)))
 
-(proc parse-label [text: string] -> string
+(defn parse-label [text: string] -> string
   ;; if-let checks the boolean result directly. There is no implicit truthiness
   ;; and no special error handling here.
   (if-let [value ok (parse-demo-int text)]
     (fmt.tprintf "parsed %d" value)
     "not parsed"))
 
-(proc parsed-total [a: string, b: string] -> int
+(defn parsed-total [a: string, b: string] -> int
   (let [total 0]
     ;; when-let is useful when failure should simply skip a side effect or local
     ;; mutation. The binding still lowers to ordinary multi-return Odin.
@@ -30,7 +30,7 @@
       (set! total (+ total value)))
     total))
 
-(proc read-byte-count [path: string] -> int
+(defn read-byte-count [path: string] -> int
   ;; if-ok is for Odin APIs that return an error value. On success, data is an
   ;; owned byte slice because we passed context.allocator, so cleanup stays in
   ;; the same branch that uses it.
@@ -40,14 +40,14 @@
       (len data))
     0))
 
-(proc print-byte-count [path: string]
+(defn print-byte-count [path: string]
   ;; when-ok is the statement form. It is the expression-friendly spelling of
   ;; "read, check err == {}, then use the owned result and delete it".
   (when-ok [data err (os.read_entire_file path context.allocator)]
     (defer (delete data))
     (fmt.println (len data))))
 
-(proc main []
+(defn main []
   (fmt.println (parse-label "one")))
 
 (comment

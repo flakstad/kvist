@@ -1,7 +1,7 @@
 // Exercises proc types, proc literals, callbacks, thread-first, nil?, and bang/predicate names.
 (package main)
 
-(struct Request {
+(defstruct Request {
   :path string
 })
 

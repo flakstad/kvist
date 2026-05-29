@@ -17,6 +17,28 @@ Loaded_Forms :: struct {
     decls: [dynamic]CST_Top_Form,
 }
 
+synthetic_package_decl :: proc(name: string) -> CST_Top_Form {
+    package_symbol := CST_Form{
+        kind = .Symbol,
+        text = "package",
+        span = Span{source = .File},
+    }
+    name_symbol := CST_Form{
+        kind = .Symbol,
+        text = name,
+        span = Span{source = .File},
+    }
+    package_form := CST_Form{
+        kind = .List,
+        span = Span{source = .File},
+    }
+    append(&package_form.items, package_symbol, name_symbol)
+    return CST_Top_Form{
+        form = package_form,
+        source = fmt.tprintf("(package %s)", name),
+    }
+}
+
 contains_text :: proc(items: []string, value: string) -> bool {
     for item in items {
         if item == value {
@@ -288,7 +310,8 @@ load_path_program :: proc(path: string) -> (AST_Program, Compile_Error, bool) {
         return AST_Program{}, err_load, false
     }
     if !loaded.has_package {
-        return AST_Program{}, Compile_Error{message = "missing package declaration"}, false
+        loaded.has_package = true
+        loaded.package_decl = synthetic_package_decl("main")
     }
     combined: [dynamic]CST_Top_Form
     append(&combined, loaded.package_decl)

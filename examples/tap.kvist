@@ -1,31 +1,31 @@
 // Explicit tap-style inspection for eval-driven development.
 (package main)
 
-(struct User {
+(defstruct User {
   :name string
   :age int
 })
 
-(proc inspected-age [] -> int
+(defn inspected-age [] -> int
   (let [user (tap> :user (User {:name "Ada" :age 36}))
         age (tap> :age (:age user))]
     age))
 
-(proc inspected-owned-count [] -> int
+(defn inspected-owned-count [] -> int
   (let [xs (tap> "numbers" (new [dynamic]int [1 2 3]))]
     (defer (delete xs))
     (len xs)))
 
-(proc plus-one [x: int] -> int
+(defn plus-one [x: int] -> int
   (+ x 1))
 
-(proc even? [x: int] -> bool
+(defn even? [x: int] -> bool
   (== (% x 2) 0))
 
-(proc add [acc: int, x: int] -> int
+(defn add [acc: int, x: int] -> int
   (+ acc x))
 
-(proc inspected-thread-total [] -> int
+(defn inspected-thread-total [] -> int
   (let [xs (new []int [1 2 3 4])
         total (->> xs
                    (map plus-one)
@@ -34,7 +34,7 @@
                    (reduce add 0))]
     total))
 
-(proc main []
+(defn main []
   (println (inspected-age))
   (println (inspected-thread-total)))
 

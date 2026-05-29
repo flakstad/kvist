@@ -8,7 +8,7 @@
 (import ini "core:encoding/ini")
 (import strconv "core:strconv")
 
-(proc delete-csv-records [records: (slice (slice string))]
+(defn delete-csv-records [records: (slice (slice string))]
   ;; csv.read_all_from_string returns an outer slice, each record slice, and
   ;; cloned field strings. Clean them in the reverse shape shown in Odin's docs.
   (each [record records]
@@ -17,7 +17,7 @@
     (delete record))
   (delete records))
 
-(proc csv-age-total [] -> int
+(defn csv-age-total [] -> int
   (let [[records err] (csv.read-all-from-string "name,age\nAda,36\nLin,29\n")]
     (if (!= err nil)
       0
@@ -29,7 +29,7 @@
             (+ a b)
             0))))))
 
-(proc csv-record-count [] -> int
+(defn csv-record-count [] -> int
   (let [[records err] (csv.read-all-from-string "kind,value\nalpha,1\nbeta,2\n")]
     (if (!= err nil)
       0
@@ -37,7 +37,7 @@
         (defer (delete-csv-records records))
         (len records)))))
 
-(proc ini-port [] -> int
+(defn ini-port [] -> int
   ;; The iterator keeps the current section on the iterator. key/value/section
   ;; are borrowed slices into the original string.
   (let [it (ini.iterator-from-string "[server]\nport = 8080\nhost = local\n")
@@ -52,7 +52,7 @@
             (set! port parsed)))))
     port))
 
-(proc ini-pair-count [] -> int
+(defn ini-pair-count [] -> int
   (let [it (ini.iterator-from-string "[ui]\ntheme = dark\nscale = 2\n")
         total 0]
     (for true
@@ -62,7 +62,7 @@
         (set! total (+ total 1))))
     total))
 
-(proc main []
+(defn main []
   (println (csv-age-total) (csv-record-count) (ini-port) (ini-pair-count)))
 
 (comment

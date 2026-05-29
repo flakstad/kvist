@@ -7,12 +7,12 @@
 (import json "core:encoding/json")
 (import os "core:os")
 
-(struct Note {
+(defstruct Note {
   :title string
   :body string
 })
 
-(struct Count {
+(defstruct Count {
   :n int
 })
 

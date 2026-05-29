@@ -3,7 +3,7 @@
 
 (odin "Handle :: distinct rawptr")
 
-(struct Counter {
+(defstruct Counter {
   :value int
 })
 

@@ -1,22 +1,22 @@
 // Exercises core generic map/filter/reduce helpers.
 (package main)
 
-(proc inc [x: int] -> int
+(defn inc [x: int] -> int
   (+ x 1))
 
-(proc even? [x: int] -> bool
+(defn even? [x: int] -> bool
   (== (% x 2) 0))
 
-(proc add [acc: int, x: int] -> int
+(defn add [acc: int, x: int] -> int
   (+ acc x))
 
-(proc mapped-first [] -> int
+(defn mapped-first [] -> int
   (let [xs (new []int [1 2 3 4])
         mapped (map inc xs)]
     (defer (delete mapped))
     (first mapped)))
 
-(proc even-count [] -> int
+(defn even-count [] -> int
   (let [xs (new []int [1 2 3 4])
         mapped (map inc xs)
         evens (filter even? mapped)]
@@ -24,7 +24,7 @@
     (defer (delete evens))
     (len evens)))
 
-(proc threaded-total [] -> int
+(defn threaded-total [] -> int
   (let [xs (new []int [1 2 3 4])
         total (->> xs
                    (map inc)
@@ -32,7 +32,7 @@
                    (reduce add 0))]
     total))
 
-(proc main []
+(defn main []
   (println (threaded-total)))
 
 (comment

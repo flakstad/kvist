@@ -101,16 +101,15 @@ The surface grammar uses three primary container shapes:
 indentation. This is separate from generated `.odin` and compiler `.odin`
 source, which use ordinary Odin 4-space indentation.
 
-The language keeps Odin-style top-level package and import forms:
+The language keeps explicit top-level import forms. For file-backed `.kvist`
+programs, `package` is optional and currently defaults to `main`:
 
 ```clojure
-(package main)
-(import "core:fmt")
 (import strings "core:strings")
 (import runtime "base:runtime")
 ```
 
-Qualified Odin names such as `fmt.println`, `strings.clone`, and
+Qualified Odin names such as `strings.clone`, and
 `runtime.Allocator` remain ordinary symbols.
 
 ## File Model
@@ -216,7 +215,7 @@ Examples:
 So:
 
 ```clojure
-(struct Cookie {
+(defstruct Cookie {
   :http-only bool
   :created-at string
 })
@@ -239,7 +238,7 @@ hyphens become underscores, case is otherwise preserved.
 Examples:
 
 ```clojure
-(enum Http-Status [
+(defenum Http-Status [
   OK
   Not-Found
   Unprocessable-Content
@@ -310,7 +309,7 @@ Brace forms are reader-level syntax. Their meaning is determined by context.
 Examples:
 
 ```clojure
-(struct Request {
+(defstruct Request {
   :method Method
   :path string
 })
@@ -372,7 +371,7 @@ Examples:
     (+ x 1)))
 
 (comment
-  (fmt.println "debug")
+  (println "debug")
   (dangerous-call))
 ```
 
@@ -408,12 +407,13 @@ The planned v0.1 top-level forms are:
 (defvar retries int 3)
 ```
 
-### `struct`
+### `defstruct`
 
-Structs use brace syntax with keyword field names.
+`defstruct` is the preferred user-facing fixed-shape declaration form. It
+supports both the direct brace form and the richer docstring/metadata form.
 
 ```clojure
-(struct Request {
+(defstruct Request {
   :method Method
   :path string
   :query string
@@ -424,10 +424,8 @@ Structs use brace syntax with keyword field names.
 Important: although brace syntax resembles a map, struct field order is
 preserved exactly as written because Odin struct layout depends on field order.
 
-### `defstruct`
-
-`defstruct` is the richer source-language struct form. It exists to carry more
-language help at compile time while still lowering to an ordinary Odin struct.
+The richer source-language `defstruct` form exists to carry more language help
+at compile time while still lowering to an ordinary Odin struct.
 
 Current first-pass shape:
 
@@ -451,13 +449,13 @@ The current implementation:
 `struct` remains the direct Odin-shaped declaration form. `defstruct` is the
 preferred path when the richer Cluck-derived surface is useful.
 
-### `enum`
+### `defenum`
 
-Enums are ordered by default and should use sequence syntax when values are
-implicit.
+`defenum` is the preferred user-facing enum declaration form. Enums are ordered
+by default and should use sequence syntax when values are implicit.
 
 ```clojure
-(enum Method [
+(defenum Method [
   Get
   Post
   Delete
@@ -467,14 +465,14 @@ implicit.
 For explicit values, keyed brace syntax is allowed:
 
 ```clojure
-(enum Http-Status {
+(defenum Http-Status {
   :OK 200
   :Not-Found 404
   :Unprocessable-Content 422
 })
 ```
 
-`defenum` is the docstring-friendly alias:
+The docstring-bearing form is:
 
 ```clojure
 (defenum Method
@@ -482,19 +480,20 @@ For explicit values, keyed brace syntax is allowed:
   [Get Post Delete])
 ```
 
-### `union`
+### `defunion`
 
-`union` denotes a tagged union in the Odin sense, not a C raw union.
+`defunion` is the preferred user-facing tagged union declaration form. It
+denotes a tagged union in the Odin sense, not a C raw union.
 
 ```clojure
-(union Value {
+(defunion Value {
   :i int
   :s string
   :ok bool
 })
 ```
 
-`defunion` is the docstring-friendly alias:
+The docstring-bearing form is:
 
 ```clojure
 (defunion Value
@@ -553,7 +552,7 @@ An empty return annotation means the function is `void`:
 
 ```clojure
 (defn main []
-  (fmt.println "hello"))
+  (println "hello"))
 ```
 
 ### Source Packages
@@ -564,6 +563,10 @@ Kvist can inline relative `.kvist` packages from source:
 (import "support/math")
 (math/sum-range 0 5)
 ```
+
+For file-backed `.kvist` programs, `(package ...)` is optional. Kvist currently
+defaults the root package to `main` when compiling from a path. Raw source
+entry points still require an explicit package declaration for now.
 
 Host imports still use Odin package paths such as `"core:fmt"`.
 
@@ -663,7 +666,7 @@ such as a keyword should parse as a normal call expression.
 Examples:
 
 ```clojure
-(fmt.println "hello")
+(println "hello")
 (strings.clone raw allocator)
 (make [dynamic]Route allocator)
 (new []int [1 2 3])
@@ -872,7 +875,7 @@ the generated code can stay explicit about whether lookup failure is allowed.
   "positive")
 
 (when debug?
-  (fmt.println "debug"))
+  (println "debug"))
 
 (cond
   (< n 0) "negative"
@@ -1398,7 +1401,7 @@ The recommended stance is:
 Example construction:
 
 ```clojure
-(union Value {
+(defunion Value {
   :i int
   :s string
 })
@@ -1606,7 +1609,7 @@ Likewise for types:
 
 ```clojure
 // Incoming HTTP request.
-(struct Request {
+(defstruct Request {
   :method Method
   :path string
 })
@@ -1768,7 +1771,7 @@ Example source:
 (import strings "core:strings")
 (import runtime "base:runtime")
 
-(struct Person {
+(defstruct Person {
   :name string
   :age int
 })

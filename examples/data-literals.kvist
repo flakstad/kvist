@@ -2,28 +2,28 @@
 (package main)
 (import runtime "base:runtime")
 
-(struct User {
+(defstruct User {
   :name string
   :age int
 })
 
-(struct State {
+(defstruct State {
   :values []int
   :fixed [3]int
   :buffer [dynamic]int
   :lookup map[string]int
 })
 
-(proc user-name [] -> string
+(defn user-name [] -> string
   (let [user (User {:name "Ada" :age 36})]
     (:name user)))
 
-(proc dynamic-first [] -> int
+(defn dynamic-first [] -> int
   (let [buffer-literal (new [dynamic]int [21 34])]
     (defer (delete buffer-literal))
     (first buffer-literal)))
 
-(proc empty-buffer-len [] -> int
+(defn empty-buffer-len [] -> int
   (let [buffer (make [dynamic]int)]
     (defer (delete buffer))
     (count buffer)))
@@ -31,7 +31,7 @@
 // with-allocator temporarily changes context.allocator for the body. This is
 // useful when a whole operation should allocate from a caller-provided allocator.
 // The dynamic array still owns storage and is still deleted explicitly.
-(proc temp-buffer-len [] -> int
+(defn temp-buffer-len [] -> int
   (with-allocator [allocator context.temp_allocator]
     (let [buffer (make [dynamic]int)]
       (defer (delete buffer))
@@ -41,29 +41,29 @@
 // with-temp-allocator starts Odin's temp allocator scope and ends it at block
 // exit. This is good for scratch work that cannot escape the block. Kvist
 // rejects obvious attempts to return owned values allocated inside this scope.
-(proc temp-scoped-buffer-len [] -> int
+(defn temp-scoped-buffer-len [] -> int
   (with-temp-allocator [allocator]
     (let [buffer (make [dynamic]int)]
       (defer (delete buffer))
       (into! buffer (new []int [1 2 3]))
       (count buffer))))
 
-(proc lookup-two [] -> int
+(defn lookup-two [] -> int
   (let [lookup (new map[string]int {"one" 1 "two" 2})]
     (defer (delete lookup))
     (get lookup "two")))
 
-(proc lookup-has-one? [] -> bool
+(defn lookup-has-one? [] -> bool
   (let [lookup (new map[string]int {"one" 1 "two" 2})]
     (defer (delete lookup))
     (contains? lookup "one")))
 
-(proc lookup-missing-default [] -> int
+(defn lookup-missing-default [] -> int
   (let [lookup (new map[string]int {"one" 1 "two" 2})]
     (defer (delete lookup))
     (get lookup "missing" -1)))
 
-(proc merged-lookup-total [] -> int
+(defn merged-lookup-total [] -> int
   (let [base (new map[string]int {"one" 1 "two" 2})
         overrides (new map[string]int {"two" 20 "three" 30})
         merged (merge base overrides)]
@@ -72,7 +72,7 @@
     (defer (delete merged))
     (+ (get merged "one") (get merged "two") (get merged "three"))))
 
-(proc merge-in-place-total [] -> int
+(defn merge-in-place-total [] -> int
   (let [lookup (new map[string]int {"one" 1 "two" 2})
         overrides (new map[string]int {"two" 20 "three" 30})]
     (defer (delete lookup))
@@ -80,11 +80,11 @@
     (merge! lookup overrides)
     (+ (get lookup "one") (get lookup "two") (get lookup "three"))))
 
-(proc fixed-middle [] -> int
+(defn fixed-middle [] -> int
   (let [fixed (new [3]int [5 8 13])]
     (get fixed 1)))
 
-(proc main []
+(defn main []
   (println (lookup-two)))
 
 (comment

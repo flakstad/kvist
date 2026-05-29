@@ -7,21 +7,21 @@
 (import fp "core:path/filepath")
 (import slash "core:path/slashpath")
 
-(proc slash-route-name-len [] -> int
+(defn slash-route-name-len [] -> int
   ;; join allocates a cleaned path string. base and name return borrowed slices
   ;; into that string unless called with new=true, so use them before delete.
   (let [route (slash.join (new []string ["api" "v1" "users.json"]))]
     (defer (delete route))
     (len (slash.name route))))
 
-(proc slash-clean-score [] -> int
+(defn slash-clean-score [] -> int
   ;; clean is lexical; it does not touch the filesystem.
   (let [path (slash.clean "/api//v1/../users/./active.json")]
     (defer (delete path))
     (+ (len (slash.base path))
        (len (slash.ext path)))))
 
-(proc filepath-relative-len [] -> int
+(defn filepath-relative-len [] -> int
   ;; filepath.rel allocates and returns an enum error. The .None case owns the
   ;; returned string and deletes it locally.
   (let [[rel err] (fp.rel "/srv/app" "/srv/app/assets/site.css")]
@@ -31,12 +31,12 @@
         (defer (delete rel))
         (len rel)))))
 
-(proc filepath-extension-len [] -> int
+(defn filepath-extension-len [] -> int
   ;; ext is a borrowed slice from its input string when called without new=true.
   ;; No allocation or delete is needed here.
   (len (fp.ext "/tmp/archive.tar.gz")))
 
-(proc main []
+(defn main []
   (println
     (slash-route-name-len)
     (slash-clean-score)

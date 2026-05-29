@@ -11,7 +11,7 @@
   :Not-Found 404
 })
 
-(struct Endpoint {
+(defstruct Endpoint {
   :path string
   :status Http-Status
 })

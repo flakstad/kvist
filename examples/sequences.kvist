@@ -1,35 +1,35 @@
 // Exercises core sequence helpers over structs, enums, and strings.
 (package main)
 
-(enum Status [
+(defenum Status [
   Active
   Paused
   Archived
 ])
 
-(struct User {
+(defstruct User {
   :name string
   :age int
   :status Status
   :verified bool
 })
 
-(proc active? [user: User] -> bool
+(defn active? [user: User] -> bool
   (== (:status user) .Active))
 
-(proc archived? [user: User] -> bool
+(defn archived? [user: User] -> bool
   (== (:status user) .Archived))
 
-(proc adult? [user: User] -> bool
+(defn adult? [user: User] -> bool
   (>= (:age user) 18))
 
-(proc young? [user: User] -> bool
+(defn young? [user: User] -> bool
   (< (:age user) 40))
 
-(proc add-age [total: int, user: User] -> int
+(defn add-age [total: int, user: User] -> int
   (+ total (:age user)))
 
-(proc active-count [] -> int
+(defn active-count [] -> int
   (let [users (new []User [(User {:name "Ada" :age 36 :status .Active :verified true})
                            (User {:name "Lin" :age 17 :status .Paused :verified false})
                            (User {:name "Grace" :age 45 :status .Active :verified true})
@@ -38,7 +38,7 @@
     (defer (delete active-users))
     (len active-users)))
 
-(proc active-age-total [] -> int
+(defn active-age-total [] -> int
   (let [users (new []User [(User {:name "Ada" :age 36 :status .Active :verified true})
                            (User {:name "Lin" :age 17 :status .Paused :verified false})
                            (User {:name "Grace" :age 45 :status .Active :verified true})
@@ -48,7 +48,7 @@
     (defer (delete active-users))
     total))
 
-(proc first-active-name [] -> string
+(defn first-active-name [] -> string
   (let [users (new []User [(User {:name "Ada" :age 36 :status .Active :verified true})
                            (User {:name "Lin" :age 17 :status .Paused :verified false})
                            (User {:name "Grace" :age 45 :status .Active :verified true})
@@ -60,7 +60,7 @@
     (defer (delete active-names))
     name))
 
-(proc age-for-ada [] -> int
+(defn age-for-ada [] -> int
   (let [users (new []User [(User {:name "Ada" :age 36 :status .Active :verified true})
                            (User {:name "Lin" :age 17 :status .Paused :verified false})
                            (User {:name "Grace" :age 45 :status .Active :verified true})
@@ -70,7 +70,7 @@
     (defer (delete users-by-name))
     (:age ada)))
 
-(proc status-run-count [] -> int
+(defn status-run-count [] -> int
   (let [users (new []User [(User {:name "Ada" :age 36 :status .Active :verified true})
                            (User {:name "Grace" :age 45 :status .Active :verified true})
                            (User {:name "Lin" :age 17 :status .Paused :verified false})
@@ -79,7 +79,7 @@
     (defer (delete status-runs))
     (len status-runs)))
 
-(proc active-status-group-count [] -> int
+(defn active-status-group-count [] -> int
   (let [users (new []User [(User {:name "Ada" :age 36 :status .Active :verified true})
                            (User {:name "Lin" :age 17 :status .Paused :verified false})
                            (User {:name "Grace" :age 45 :status .Active :verified true})
@@ -92,7 +92,7 @@
       (delete by-status))
     (len active-users)))
 
-(proc youngest-user-name [] -> string
+(defn youngest-user-name [] -> string
   (let [users (new []User [(User {:name "Ada" :age 36 :status .Active :verified true})
                            (User {:name "Lin" :age 17 :status .Paused :verified false})
                            (User {:name "Grace" :age 45 :status .Active :verified true})
@@ -102,7 +102,7 @@
     (defer (delete by-age))
     name))
 
-(proc youngest-user-name-in-place [] -> string
+(defn youngest-user-name-in-place [] -> string
   (let [users (new [dynamic]User [(User {:name "Ada" :age 36 :status .Active :verified true})
                                   (User {:name "Lin" :age 17 :status .Paused :verified false})
                                   (User {:name "Grace" :age 45 :status .Active :verified true})
@@ -111,14 +111,14 @@
     (sort-by! :age users)
     (:name (first users))))
 
-(proc third-user-name [] -> string
+(defn third-user-name [] -> string
   (let [users (new []User [(User {:name "Ada" :age 36 :status .Active :verified true})
                            (User {:name "Lin" :age 17 :status .Paused :verified false})
                            (User {:name "Grace" :age 45 :status .Active :verified true})
                            (User {:name "Edsger" :age 72 :status .Archived :verified false})])]
     (:name (nth users 2))))
 
-(proc all-active-users-adults? [] -> bool
+(defn all-active-users-adults? [] -> bool
   (let [users (new []User [(User {:name "Ada" :age 36 :status .Active :verified true})
                            (User {:name "Lin" :age 17 :status .Paused :verified false})
                            (User {:name "Grace" :age 45 :status .Active :verified true})
@@ -128,7 +128,7 @@
     (defer (delete active-users))
     all-adults?))
 
-(proc first-adult-name [] -> string
+(defn first-adult-name [] -> string
   (let [users (new []User [(User {:name "Ada" :age 36 :status .Active :verified true})
                            (User {:name "Lin" :age 17 :status .Paused :verified false})
                            (User {:name "Grace" :age 45 :status .Active :verified true})
@@ -136,7 +136,7 @@
         [first-adult _] (find adult? users)]
     (:name first-adult)))
 
-(proc main []
+(defn main []
   (println (active-count)))
 
 (comment

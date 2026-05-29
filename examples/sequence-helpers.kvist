@@ -1,106 +1,106 @@
 // Exercises additional eager sequence helpers and ownership cleanup.
 (package main)
 
-(proc even? [x: int] -> bool
+(defn even? [x: int] -> bool
   (== (% x 2) 0))
 
-(proc small? [x: int] -> bool
+(defn small? [x: int] -> bool
   (< x 4))
 
-(proc add-index [i: int, x: int] -> int
+(defn add-index [i: int, x: int] -> int
   (+ i x))
 
-(proc add [acc: int, x: int] -> int
+(defn add [acc: int, x: int] -> int
   (+ acc x))
 
-(proc identity-int [x: int] -> int
+(defn identity-int [x: int] -> int
   x)
 
-(proc parity [x: int] -> int
+(defn parity [x: int] -> int
   (% x 2))
 
-(proc name-key [name: string] -> string
+(defn name-key [name: string] -> string
   name)
 
-(proc next-answer [] -> int
+(defn next-answer [] -> int
   42)
 
-(proc double [x: int] -> int
+(defn double [x: int] -> int
   (* x 2))
 
-(proc negative [x: int] -> int
+(defn negative [x: int] -> int
   (- x))
 
-(proc pick-first [n: int] -> int
+(defn pick-first [n: int] -> int
   0)
 
-(proc square-even [x: int] -> [value: int, ok: bool]
+(defn square-even [x: int] -> [value: int, ok: bool]
   (if (even? x)
     (return (* x x) true)
     (return 0 false)))
 
-(struct Segment {
+(defstruct Segment {
   :values []int
 })
 
-(proc segment-values [segment: Segment] -> []int
+(defn segment-values [segment: Segment] -> []int
   (:values segment))
 
-(proc split-front-length [] -> int
+(defn split-front-length [] -> int
   (let [xs (new []int [1 2 3 4])
         [front _] (split-at 2 xs)]
     (len front)))
 
-(proc first-kept-square [] -> int
+(defn first-kept-square [] -> int
   (let [xs (new []int [1 2 3 4])
         kept (keep square-even xs)]
     (defer (delete kept))
     (first kept)))
 
-(proc with-delete-total [] -> int
+(defn with-delete-total [] -> int
   (let [xs (new []int [1 2 3])]
     (with-delete [doubled (map double xs)
                   evens (filter even? doubled)]
       (reduce add 0 evens))))
 
-(proc age-for-grace [] -> int
+(defn age-for-grace [] -> int
   (let [names (new []string ["Ada" "Lin" "Grace"])
         ages (new []int [36 17 45])
         ages-by-name (zipmap names ages)]
     (defer (delete ages-by-name))
     (get ages-by-name "Grace")))
 
-(proc chunk-count [] -> int
+(defn chunk-count [] -> int
   (let [xs (new []int [1 2 3 4])
         chunks (partition 2 xs)]
     (defer (delete chunks))
     (len chunks)))
 
-(proc repeated-two-count [] -> int
+(defn repeated-two-count [] -> int
   (let [xs (new []int [1 2 2 3])
         counts (frequencies xs)]
     (defer (delete counts))
     (get counts 2)))
 
-(proc count-by-parity-total [] -> int
+(defn count-by-parity-total [] -> int
   (let [xs (new []int [1 2 3 4 6])
         counts (count-by parity xs)]
     (defer (delete counts))
     (+ (get counts 0) (get counts 1))))
 
-(proc sum-by-parity-total [] -> int
+(defn sum-by-parity-total [] -> int
   (let [xs (new []int [1 2 3 4 6])
         sums (sum-by parity identity-int xs)]
     (defer (delete sums))
     (+ (get sums 0) (get sums 1))))
 
-(proc indexed-name-count [] -> int
+(defn indexed-name-count [] -> int
   (let [names (new []string ["Ada" "Lin" "Grace"])
         by-name (index-by name-key names)]
     (defer (delete by-name))
     (len by-name)))
 
-(proc key-value-count [] -> int
+(defn key-value-count [] -> int
   (let [names (new []string ["Ada" "Lin" "Grace"])
         ages (new []int [36 17 45])
         ages-by-name (zipmap names ages)
@@ -111,7 +111,7 @@
     (defer (delete age-values))
     (+ (count name-keys) (count age-values))))
 
-(proc even-group-count [] -> int
+(defn even-group-count [] -> int
   (let [xs (new []int [1 2 3 4 6])
         groups (group-by parity xs)
         evens (get groups 0)]
@@ -121,39 +121,39 @@
       (delete groups))
     (len evens)))
 
-(proc range-total [] -> int
+(defn range-total [] -> int
   (let [xs (range 1 5)]
     (defer (delete xs))
     (reduce add 0 xs)))
 
-(proc repeated-answer-count [] -> int
+(defn repeated-answer-count [] -> int
   (let [xs (repeatedly 3 next-answer)]
     (defer (delete xs))
     (len xs)))
 
-(proc repeated-word-last [] -> string
+(defn repeated-word-last [] -> string
   (let [xs (repeat 3 "odin")]
     (defer (delete xs))
     (last xs)))
 
-(proc iterated-last [] -> int
+(defn iterated-last [] -> int
   (let [xs (iterate 4 double 1)]
     (defer (delete xs))
     (last xs)))
 
-(proc cycled-total [] -> int
+(defn cycled-total [] -> int
   (let [base (new []int [1 2 3])
         xs (cycle 5 base)]
     (defer (delete xs))
     (reduce add 0 xs)))
 
-(proc counted-cycle [] -> int
+(defn counted-cycle [] -> int
   (let [base (new []int [1 2])
         xs (cycle 5 base)]
     (defer (delete xs))
     (count xs)))
 
-(proc trimmed-sum [] -> int
+(defn trimmed-sum [] -> int
   (let [xs (new []int [1 2 3 4 5])
         head (take 3 xs)
         tail (drop 2 xs)
@@ -162,19 +162,19 @@
     (+ (+ (last head) (first tail))
        (+ (len smalls) (first bigs)))))
 
-(proc tail-trim-score [] -> int
+(defn tail-trim-score [] -> int
   (let [xs (new []int [1 2 3 4 5])
         init (butlast xs)
         without-two (drop-last 2 xs)]
     (+ (last init) (len without-two))))
 
-(proc every-other-total [] -> int
+(defn every-other-total [] -> int
   (let [xs (new []int [1 2 3 4 5])
         sampled (take-nth 2 xs)]
     (defer (delete sampled))
     (reduce add 0 sampled)))
 
-(proc rest-second-empty-score [] -> int
+(defn rest-second-empty-score [] -> int
   (let [xs (new []int [10 20 30])
         tail (rest xs)
         empty-tail (drop 3 xs)]
@@ -182,7 +182,7 @@
       (+ (first tail) (second xs))
       0)))
 
-(proc concat-reversed-first [] -> int
+(defn concat-reversed-first [] -> int
   (let [xs (new []int [1 2])
         ys (new []int [3 4])
         joined (concat xs ys)
@@ -191,129 +191,129 @@
     (defer (delete reversed))
     (first reversed)))
 
-(proc interposed-total [] -> int
+(defn interposed-total [] -> int
   (let [xs (new []int [1 2 3])
         separated (interpose 10 xs)]
     (defer (delete separated))
     (reduce add 0 separated)))
 
-(proc interleaved-total [] -> int
+(defn interleaved-total [] -> int
   (let [xs (new []int [1 2 3])
         ys (new []int [10 20])
         joined (interleave xs ys)]
     (defer (delete joined))
     (reduce add 0 joined)))
 
-(proc shuffled-first [] -> int
+(defn shuffled-first [] -> int
   (let [xs (new []int [1 2 3 4])
         shuffled (shuffle pick-first xs)]
     (defer (delete shuffled))
     (first shuffled)))
 
-(proc shuffled-in-place-first [] -> int
+(defn shuffled-in-place-first [] -> int
   (let [xs (new [dynamic]int [1 2 3 4])]
     (defer (delete xs))
     (shuffle! pick-first xs)
     (first xs)))
 
-(proc sorted-second [] -> int
+(defn sorted-second [] -> int
   (let [xs (new []int [4 1 3 2])
         sorted (sort xs)]
     (defer (delete sorted))
     (second sorted)))
 
-(proc descending-first [] -> int
+(defn descending-first [] -> int
   (let [xs (new []int [4 1 3 2])
         sorted (sort-by negative xs)]
     (defer (delete sorted))
     (first sorted)))
 
-(proc sorted-in-place-first [] -> int
+(defn sorted-in-place-first [] -> int
   (let [xs (new [dynamic]int [4 1 3 2])]
     (defer (delete xs))
     (sort! xs)
     (first xs)))
 
-(proc reversed-in-place-first [] -> int
+(defn reversed-in-place-first [] -> int
   (let [xs (new [dynamic]int [1 2 3 4])]
     (defer (delete xs))
     (reverse! xs)
     (first xs)))
 
-(proc descending-in-place-first [] -> int
+(defn descending-in-place-first [] -> int
   (let [xs (new [dynamic]int [4 1 3 2])]
     (defer (delete xs))
     (sort-by! negative xs)
     (first xs)))
 
-(proc doubled-in-place-total [] -> int
+(defn doubled-in-place-total [] -> int
   (let [xs (new [dynamic]int [1 2 3])]
     (defer (delete xs))
     (map! double xs)
     (reduce add 0 xs)))
 
-(proc indexed-in-place-second [] -> int
+(defn indexed-in-place-second [] -> int
   (let [xs (new [dynamic]int [1 2 3])]
     (defer (delete xs))
     (map-indexed! add-index xs)
     (second xs)))
 
-(proc filtered-in-place-count [] -> int
+(defn filtered-in-place-count [] -> int
   (let [xs (new [dynamic]int [1 2 3 4])]
     (defer (delete xs))
     (filter! even? xs)
     (len xs)))
 
-(proc removed-in-place-first [] -> int
+(defn removed-in-place-first [] -> int
   (let [xs (new [dynamic]int [1 2 3 4])]
     (defer (delete xs))
     (remove! even? xs)
     (first xs)))
 
-(proc kept-in-place-first [] -> int
+(defn kept-in-place-first [] -> int
   (let [xs (new [dynamic]int [1 2 3 4])]
     (defer (delete xs))
     (keep! square-even xs)
     (first xs)))
 
-(proc appended-total [] -> int
+(defn appended-total [] -> int
   (let [xs (new [dynamic]int [1 2])
         more (new []int [3 4])]
     (defer (delete xs))
     (into! xs more)
     (reduce add 0 xs)))
 
-(proc copied-total [] -> int
+(defn copied-total [] -> int
   (let [xs (new []int [1 2 3])
         copied (into [dynamic]int xs)]
     (defer (delete copied))
     (reduce add 0 copied)))
 
-(proc distinct-total [] -> int
+(defn distinct-total [] -> int
   (let [xs (new []int [1 2 2 3 3])
         unique (distinct xs)]
     (defer (delete unique))
     (reduce add 0 unique)))
 
-(proc first-per-parity-count [] -> int
+(defn first-per-parity-count [] -> int
   (let [xs (new []int [1 3 2 4 5])
         unique (distinct-by parity xs)]
     (defer (delete unique))
     (count unique)))
 
-(proc ragged-chunk-size [] -> int
+(defn ragged-chunk-size [] -> int
   (let [xs (new []int [1 2 3 4 5])
         chunks (partition-all 2 xs)]
     (defer (delete chunks))
     (len (last chunks))))
 
-(proc run-count [] -> int
+(defn run-count [] -> int
   (let [xs (new []int [1 1 2 2 2 3 1])
         runs (partition-by identity-int xs)]
     (defer (delete runs))
     (len runs)))
 
-(proc flattened-total [] -> int
+(defn flattened-total [] -> int
   (let [segments (new []Segment [(Segment {:values (new []int [1 2])})
                                  (Segment {:values (new []int [3])})
                                  (Segment {:values (new []int [4 5])})])
@@ -321,7 +321,7 @@
     (defer (delete values))
     (reduce add 0 values)))
 
-(proc threaded-first [] -> int
+(defn threaded-first [] -> int
   (let [xs (new []int [1 2 3 4])
         threaded (->> xs
                       (remove even?)
@@ -330,7 +330,7 @@
     (defer (delete threaded))
     (first threaded)))
 
-(proc main []
+(defn main []
   (println (age-for-grace)))
 
 (comment

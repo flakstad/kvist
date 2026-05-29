@@ -1,7 +1,7 @@
 // A small end-to-end order report using eager helpers, in-place helpers, and loops.
 (package main)
 
-(struct Order {
+(defstruct Order {
   :id int
   :region int
   :amount int
@@ -9,7 +9,7 @@
   :status int
 })
 
-(struct Region-Report {
+(defstruct Region-Report {
   :region int
   :revenue int
   :count int
@@ -17,10 +17,10 @@
 
 (odin "Order_Groups :: map[int][dynamic]Order")
 
-(proc settled? [order: Order] -> bool
+(defn settled? [order: Order] -> bool
   (== (:status order) 3))
 
-(proc settle-order [order: Order] -> Order
+(defn settle-order [order: Order] -> Order
   (let [updated order]
     (when (and (== (:status updated) 2)
                (> (:amount updated) 100))
@@ -29,7 +29,7 @@
       (set! (:status updated) 3))
     updated))
 
-(proc row-score [rows: []Region-Report] -> int
+(defn row-score [rows: []Region-Report] -> int
   (let [total 0]
     (each [row rows]
       (set! total (+ total (:revenue row)))
@@ -37,14 +37,14 @@
       (set! total (+ total (:count row))))
     total))
 
-(proc sample-orders [] -> [dynamic]Order
+(defn sample-orders [] -> [dynamic]Order
   (new [dynamic]Order [(Order {:id 1 :region 0 :amount 80 :discount 5 :status 1})
                        (Order {:id 2 :region 1 :amount 250 :discount 20 :status 2})
                        (Order {:id 3 :region 1 :amount 140 :discount 10 :status 2})
                        (Order {:id 4 :region 2 :amount 90 :discount 0 :status 3})
                        (Order {:id 5 :region 2 :amount 410 :discount 35 :status 2})]))
 
-(proc rows-from-groups [groups: Order-Groups] -> [dynamic]Region-Report
+(defn rows-from-groups [groups: Order-Groups] -> [dynamic]Region-Report
   (let [rows (make [dynamic]Region-Report)]
     (each [region group groups]
       (let [revenue 0]
@@ -57,7 +57,7 @@
     (sort-by! :revenue rows)
     rows))
 
-(proc rows-from-aggregates [revenue-by-region: map[int]int, count-by-region: map[int]int] -> [dynamic]Region-Report
+(defn rows-from-aggregates [revenue-by-region: map[int]int, count-by-region: map[int]int] -> [dynamic]Region-Report
   (let [rows (make [dynamic]Region-Report)]
     (each [region revenue revenue-by-region]
       (append (addr rows)
@@ -67,7 +67,7 @@
     (sort-by! :revenue rows)
     rows))
 
-(proc eager-report-score [] -> int
+(defn eager-report-score [] -> int
   (let [orders (sample-orders)
         settled (map settle-order orders)
         paid (filter settled? settled)
@@ -83,7 +83,7 @@
       (delete rows))
     (row-score (slice rows))))
 
-(proc bang-report-score [] -> int
+(defn bang-report-score [] -> int
   (let [orders (sample-orders)
         work (map settle-order orders)]
     (filter! settled? work)
@@ -98,7 +98,7 @@
         (delete rows))
       (row-score (slice rows)))))
 
-(proc aggregate-helper-report-score [] -> int
+(defn aggregate-helper-report-score [] -> int
   (let [orders (sample-orders)
         work (map settle-order orders)]
     (filter! settled? work)
@@ -113,7 +113,7 @@
         (delete rows))
       (row-score (slice rows)))))
 
-(proc loop-report-score [] -> int
+(defn loop-report-score [] -> int
   (let [orders (sample-orders)
         revenue-by-region (make map[int]int)
         count-by-region (make map[int]int)]
@@ -134,7 +134,7 @@
         (delete rows))
       (row-score (slice rows)))))
 
-(proc main []
+(defn main []
   (println (eager-report-score))
   (println (bang-report-score))
   (println (aggregate-helper-report-score))

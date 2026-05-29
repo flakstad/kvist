@@ -2,7 +2,7 @@
 (package main)
 
 ;; This is a greeting
-(struct Greeting {
+(defstruct Greeting {
   :message string
 })
 

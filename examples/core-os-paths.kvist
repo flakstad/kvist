@@ -6,7 +6,7 @@
 (package main)
 (import os "core:os")
 
-(proc clean-base-length [] -> int
+(defn clean-base-length [] -> int
   (let [[clean err] (os.clean_path "./tmp/../examples/hello.kvist" context.allocator)]
     (if (!= err nil)
       0
@@ -14,7 +14,7 @@
         (defer (delete clean))
         (len (os.base clean))))))
 
-(proc cwd-base-length [] -> int
+(defn cwd-base-length [] -> int
   (let [[cwd err] (os.get_working_directory context.allocator)]
     (if (!= err nil)
       0
@@ -22,7 +22,7 @@
         (defer (delete cwd))
         (len (os.base cwd))))))
 
-(proc ensure-demo-dir [] -> os.Error
+(defn ensure-demo-dir [] -> os.Error
   ;; write_entire_file does not create parent directories. Treat an existing
   ;; tmp directory as success and surface any real filesystem error.
   (let [err (os.make_directory_all "tmp")]
@@ -31,13 +31,13 @@
       err
       nil)))
 
-(proc write-demo-file [path: string] -> os.Error
+(defn write-demo-file [path: string] -> os.Error
   (let [dir-err (ensure-demo-dir)]
     (if (!= dir-err nil)
       dir-err
       (os.write_entire_file path "hello from core:os"))))
 
-(proc read-demo-length [path: string] -> int
+(defn read-demo-length [path: string] -> int
   ;; if-ok is for Odin APIs whose second return value is an error. It checks
   ;; for the zero error value and keeps the owned data cleanup local.
   (if-ok [data err (os.read_entire_file path context.allocator)]
@@ -46,10 +46,10 @@
       (len data))
     0))
 
-(proc remove-demo-file [path: string] -> os.Error
+(defn remove-demo-file [path: string] -> os.Error
   (os.remove path))
 
-(proc main []
+(defn main []
   (println (clean-base-length) (cwd-base-length)))
 
 (comment

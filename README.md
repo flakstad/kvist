@@ -1,7 +1,16 @@
 # Kvist
 
-An experiment in writing Odin with a small Clojure/Lisp-shaped syntax: Odin in
-parens, not Clojure on Odin.
+Kvist - A Practical Lisp for Systems Programming
+
+Kvist is a systems programming language that combines expression-oriented
+syntax and macros with explicit memory and ownership semantics. It is designed
+to make low-level code more composable without introducing a hidden runtime or
+abstracting away the underlying execution model.
+
+Kvist compiles to readable Odin and relies on Odin for checking, building, and
+running generated programs. The language is influenced by Lisp and Clojure in
+its surface shape and metaprogramming model, but it preserves the manual,
+inspectable character of systems programming.
 
 The current language draft is [LANGUAGE.md](LANGUAGE.md). Deferred ideas that
 should not drive the core implementation yet live in
@@ -45,14 +54,11 @@ inventing a new language on top of Odin.
 ## Example
 
 ```clojure
-(package main)
-(import "core:fmt")
-
 (defn add [a: int, b: int] -> int
   (+ a b))
 
 (defn main []
-  (fmt.println (add 20 22)))
+  (println (add 20 22)))
 ```
 
 emits:
@@ -70,6 +76,10 @@ main :: proc() {
     fmt.println(add(20, 22))
 }
 ```
+
+For file-backed `.kvist` programs, `package` is optional. Kvist will inject a
+root `package main` when compiling from a path if you omit it. Raw source APIs
+such as `compile_source` still require an explicit package for now.
 
 ## Usage
 
@@ -182,20 +192,17 @@ passthrough.
 
 Example:
 
-```odin
-(package main)
-(import "core:fmt")
-
-(struct Point {
+```clojure
+(defstruct Point {
   :x int
   :y int
 })
 
-(proc add [a: int, b: int] -> int
+(defn add [a: int, b: int] -> int
   (+ a b))
 
-(proc main []
-  (fmt.println (add 1 2)))
+(defn main []
+  (println (add 1 2)))
 ```
 
 The Odin compiler should only see generated `.odin` files. That keeps normal
@@ -215,11 +222,11 @@ renamed Odin declaration.
   (+ x y))
 ```
 
-Inside a proc with a return type, the final expression should return
+Inside a function with a return type, the final expression should return
 implicitly:
 
 ```clojure
-(proc answer [] -> int
+(defn answer [] -> int
   (let [x 20
         y 22]
     (+ x y)))
@@ -588,11 +595,11 @@ foreign_call :: proc(handle: Foreign_Handle) ---
 - `(defconst name type expr)` -> `name: type : expr`
 - `(defvar name expr)` -> `name := expr`
 - `(defvar name type expr)` -> `name: type = expr`
-- `(struct Name {:field Type ...})`
+- `(defstruct Name {:field Type ...})`
 - `(defstruct Name "Doc..." {:field type ...})`
-- `(enum Name [A B C])` and `(enum Name {:A 1 :B 2})`
+- `(defenum Name [A B C])` and `(defenum Name {:A 1 :B 2})`
 - `(defenum Name "Doc..." [A B C])` and `(defenum Name "Doc..." {:A 1 :B 2})`
-- `(union Name {:variant Type ...})`
+- `(defunion Name {:variant Type ...})`
 - `(defunion Name "Doc..." {:variant Type ...})`
 - `(defn name [arg: type, ...] -> return-type body...)`
   - `defn` is the preferred source-level declaration form

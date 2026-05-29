@@ -1,6 +1,7 @@
 package tests
 
 import "base:runtime"
+import "core:os"
 import "core:strings"
 import "core:testing"
 import kvist "../src/kvist"
@@ -3864,6 +3865,43 @@ lower_rejects_missing_package :: proc(t: ^testing.T) {
   ^
 `
     testing.expect_value(t, formatted, expected)
+}
+
+@(test)
+compile_path_defaults_missing_package_to_main :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-test-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove(dir)
+    defer delete(dir)
+
+    path, join_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, join_err == nil, true)
+    if join_err != nil {
+        return
+    }
+    defer delete(path)
+
+    source := `(defn main []
+  (println "hello"))`
+    write_err := os.write_entire_file_from_string(path, source)
+    testing.expect_value(t, write_err == nil, true)
+    if write_err != nil {
+        return
+    }
+
+    output, err, ok := kvist.compile_path(path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "package main"), true)
+    testing.expect_value(t, strings.contains(output, "main :: proc()"), true)
 }
 
 @(test)

@@ -10,17 +10,17 @@
 (import chan "core:sync/chan")
 (import thread "core:thread")
 
-(struct Counter {
+(defstruct Counter {
   :lock sync.Mutex
   :value int
 })
 
-(proc send-square [result: (type chan.Chan int)]
+(defn send-square [result: (type chan.Chan int)]
   ;; Sending on a channel communicates between OS threads. The channel owns
   ;; internal allocation from chan.create, so the creator deletes it.
   (chan.send result (* 7 7)))
 
-(proc future-like-square [] -> int
+(defn future-like-square [] -> int
   ;; This is the manual Odin equivalent of a tiny future: create a result
   ;; channel, run a worker thread, receive the answer. The channel is an owned
   ;; value because chan.create was passed context.allocator.
@@ -33,14 +33,14 @@
         (let [[value ok] (chan.recv result-ch)]
           (if ok value 0))))))
 
-(proc increment-once [counter: (ptr Counter)]
+(defn increment-once [counter: (ptr Counter)]
   ;; sync.guard lowers to the ordinary Odin guard pattern. The lock is held
   ;; only for this scope and released automatically by Odin's deferred_in
   ;; attribute on sync.guard.
   (if (sync.guard (addr (:lock (deref counter))))
     (set! (:value (deref counter)) (+ (:value (deref counter)) 1))))
 
-(proc mutex-protected-count [] -> int
+(defn mutex-protected-count [] -> int
   ;; Two joinable threads mutate shared state. The pointer is passed explicitly,
   ;; and the main thread joins/destroys the handles before reading the result.
   (let [counter (Counter {:lock {} :value 0})
@@ -52,7 +52,7 @@
     (thread.destroy b)
     (:value counter)))
 
-(proc main []
+(defn main []
   (println (future-like-square) (mutex-protected-count)))
 
 (comment
