@@ -20,7 +20,7 @@ print_usage :: proc() {
     fmt.println("  kvist expand <input.kvist> <form> [--no-print] [-o output.odin]")
     fmt.println("  kvist macroexpand <input.kvist> <form> [-o output.kvist] [--map output.map]")
     fmt.println("  kvist symbols <input.kvist>")
-    fmt.println("  kvist editor-symbols <input.kvist>")
+    fmt.println("  kvist editor-symbols <input.kvist> [identifier]")
     fmt.println("  kvist builtin-symbols")
     fmt.println("  kvist imported-symbols <input.kvist>")
     fmt.println("  kvist package-symbols <import-path> [alias]")
@@ -466,14 +466,17 @@ symbols_command :: proc(input: string) {
     fmt.print(output)
 }
 
-editor_symbols_command :: proc(input: string) {
+editor_symbols_command :: proc(input: string, identifier := "") {
     data := read_source_or_exit(input)
     output, err, ok := kvist.editor_symbols_source(input, data)
     if !ok {
         fmt.eprintln(err.message)
         os.exit(1)
     }
-    fmt.print(output)
+    defer delete(output)
+    filtered := filter_symbol_output(output, identifier)
+    defer delete(filtered)
+    fmt.print(filtered)
 }
 
 builtin_symbols_command :: proc() {
@@ -495,6 +498,69 @@ imported_symbols_command :: proc(input: string) {
     }
     defer delete(output)
     fmt.print(output)
+}
+
+normalize_qualified_identifier :: proc(identifier: string) -> string {
+    slash := strings.index(identifier, "/")
+    dot := strings.index(identifier, ".")
+    if dot >= 0 && (slash < 0 || dot < slash) {
+        builder := strings.builder_make()
+        defer strings.builder_destroy(&builder)
+        strings.write_string(&builder, identifier[:dot])
+        strings.write_byte(&builder, '/')
+        strings.write_string(&builder, identifier[dot+1:])
+        return strings.clone(strings.to_string(builder))
+    }
+    return strings.clone(identifier)
+}
+
+symbol_matches_identifier :: proc(name, identifier: string) -> bool {
+    normalized_name := normalize_qualified_identifier(name)
+    defer delete(normalized_name)
+    normalized_identifier := normalize_qualified_identifier(identifier)
+    defer delete(normalized_identifier)
+
+    if normalized_name == normalized_identifier {
+        return true
+    }
+    if len(normalized_name) > len(identifier)+1 &&
+       normalized_name[len(normalized_name)-len(identifier):] == identifier &&
+       normalized_name[len(normalized_name)-len(identifier)-1] == '.' {
+        return true
+    }
+    if len(normalized_name) > len(identifier)+1 &&
+       normalized_name[len(normalized_name)-len(identifier):] == identifier &&
+       normalized_name[len(normalized_name)-len(identifier)-1] == '/' {
+        return true
+    }
+    return false
+}
+
+filter_symbol_output :: proc(output, identifier: string) -> string {
+    if identifier == "" {
+        return strings.clone(output)
+    }
+
+    lines := strings.split_lines(output, context.allocator)
+    defer delete(lines)
+
+    builder := strings.builder_make()
+    defer strings.builder_destroy(&builder)
+
+    if len(lines) > 0 {
+        strings.write_string(&builder, lines[0])
+        strings.write_byte(&builder, '\n')
+    }
+    for line, idx in lines {
+        if idx == 0 || line == "" {
+            continue
+        }
+        if symbol_matches_identifier(kvist.symbols_record_name(line), identifier) {
+            strings.write_string(&builder, line)
+            strings.write_byte(&builder, '\n')
+        }
+    }
+    return strings.clone(strings.to_string(builder))
 }
 
 package_symbols_command :: proc(import_path, alias: string) {
@@ -822,11 +888,15 @@ parse_symbols_command :: proc() {
 }
 
 parse_editor_symbols_command :: proc() {
-    if len(os.args) != 3 {
+    if len(os.args) != 3 && len(os.args) != 4 {
         print_usage()
         os.exit(2)
     }
-    editor_symbols_command(os.args[2])
+    identifier := ""
+    if len(os.args) == 4 {
+        identifier = os.args[3]
+    }
+    editor_symbols_command(os.args[2], identifier)
 }
 
 parse_builtin_symbols_command :: proc() {

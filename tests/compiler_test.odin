@@ -299,6 +299,15 @@ imported_symbols_source_indexes_odin_imports :: proc(t: ^testing.T) {
 }
 
 @(test)
+odin_symbol_visible_to_tooling_filters_internal_noise :: proc(t: ^testing.T) {
+    testing.expect_value(t, kvist.odin_symbol_visible_to_tooling("/tmp/fmt/fmt_os.odin", "println"), true)
+    testing.expect_value(t, kvist.odin_symbol_visible_to_tooling("/tmp/fmt/fmt.odin", "fmt_arg"), false)
+    testing.expect_value(t, kvist.odin_symbol_visible_to_tooling("/tmp/fmt/example.odin", "SomeType"), false)
+    testing.expect_value(t, kvist.odin_symbol_visible_to_tooling("/tmp/fmt/fmt_js.odin", "stderr"), false)
+    testing.expect_value(t, kvist.odin_symbol_visible_to_tooling("/tmp/fmt/fmt_os.odin", "main"), false)
+}
+
+@(test)
 editor_symbols_source_merges_context_surfaces :: proc(t: ^testing.T) {
     source := `(package main)
 (import fmt "core:fmt")
@@ -322,6 +331,29 @@ editor_symbols_source_merges_context_surfaces :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "kvist package\tarr/push!\t"), true)
     testing.expect_value(t, strings.contains(output, "kvist core\tprintln\t"), true)
     testing.expect_value(t, strings.contains(output, "odin\tfmt.println\t"), true)
+}
+
+@(test)
+editor_symbols_source_includes_language_forms_and_helpers :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn main []
+  (let [x 1]
+    (if true
+      (map inc [1 2 3])
+      (println x))))`
+
+    output, err, ok := kvist.editor_symbols_source("/Users/andreas/Projects/kvist/.tmp-editor-symbols-test.kvist", source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "kvist form\tlet\t"), true)
+    testing.expect_value(t, strings.contains(output, "kvist form\tif\t"), true)
+    testing.expect_value(t, strings.contains(output, "kvist helper\tmap\t"), true)
 }
 
 @(test)
