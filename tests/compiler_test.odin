@@ -238,7 +238,7 @@ symbols_source_indexes_top_level_forms :: proc(t: ^testing.T) {
 
     testing.expect_value(t, strings.contains(output, "kind\tname\tline\tcolumn\tdetail\tsignature\tdoc\n"), true)
     testing.expect_value(t, strings.contains(output, "import\tstrings\t2\t9\tcore:strings\t\t\n"), true)
-    testing.expect_value(t, strings.contains(output, "struct\tUser\t8\t9\t\t\tA user record.\\nOwned by caller.\n"), true)
+    testing.expect_value(t, strings.contains(output, "struct\tUser\t8\t9\t\t(User {:name string :active bool})\tA user record.\\nOwned by caller.\n"), true)
     testing.expect_value(t, strings.contains(output, "field\tUser.name\t9\t3\tUser\t\t\n"), true)
     testing.expect_value(t, strings.contains(output, "enum\tStatus\t13\t7\t\t\t\n"), true)
     testing.expect_value(t, strings.contains(output, "variant\tStatus.Active\t14\t3\tStatus\t\t\n"), true)
@@ -265,7 +265,7 @@ symbols_source_indexes_defstruct_docstring :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    testing.expect_value(t, strings.contains(output, "struct\tPerson\t3\t12\t\t\tPrimary profile.\n"), true)
+    testing.expect_value(t, strings.contains(output, "struct\tPerson\t3\t12\t\t(Person {:name string :age int})\tPrimary profile.\n"), true)
     testing.expect_value(t, strings.contains(output, "field\tPerson.name\t5\t4\tPerson\t\t\n"), true)
 }
 

@@ -11,6 +11,74 @@ import_path_text :: proc(form: CST_Form) -> string {
     return unquote_string(form.text)
 }
 
+package_symbols_write_entry :: proc(builder: ^strings.Builder, alias, import_path, member, signature, doc: string) {
+    symbols_write_record_doc(builder, "kvist package", fmt.tprintf("%s/%s", alias, member), "", Span{start = 0, end = 0, source = .File}, import_path, signature, symbols_doc_lines_from_string(doc)[:])
+    symbols_write_record_doc(builder, "kvist package", fmt.tprintf("%s.%s", alias, member), "", Span{start = 0, end = 0, source = .File}, import_path, signature, symbols_doc_lines_from_string(doc)[:])
+}
+
+package_symbols_append :: proc(builder: ^strings.Builder, import_path, alias: string) -> bool {
+    switch import_path {
+    case "kvist:arr":
+        package_symbols_write_entry(builder, alias, import_path, "count", "(arr/count xs)", "Count elements in an array, fixed array, or slice.")
+        package_symbols_write_entry(builder, alias, import_path, "empty", "(arr/empty T [capacity])", "Construct an empty dynamic array, optionally with capacity.")
+        package_symbols_write_entry(builder, alias, import_path, "dynamic", "(arr/dynamic T [v1 v2 ...])", "Construct a dynamic array from a vector literal.")
+        package_symbols_write_entry(builder, alias, import_path, "fixed", "(arr/fixed T [v1 v2 ...])", "Construct a fixed array from a vector literal.")
+        package_symbols_write_entry(builder, alias, import_path, "get", "(arr/get xs index)", "Index into an array-family value.")
+        package_symbols_write_entry(builder, alias, import_path, "slice", "(arr/slice xs start [end])", "Take a slice view over an array-family value.")
+        package_symbols_write_entry(builder, alias, import_path, "push!", "(arr/push! xs value...)", "Append one or more values to a dynamic array.")
+        package_symbols_write_entry(builder, alias, import_path, "map", "(arr/map f xs)", "Map over an array-family input and return an owned dynamic array.")
+        package_symbols_write_entry(builder, alias, import_path, "filter", "(arr/filter pred xs)", "Filter an array-family input and return an owned dynamic array.")
+        package_symbols_write_entry(builder, alias, import_path, "map!", "(arr/map! f xs)", "Map in place over a dynamic array.")
+        package_symbols_write_entry(builder, alias, import_path, "filter!", "(arr/filter! pred xs)", "Filter in place over a dynamic array.")
+        package_symbols_write_entry(builder, alias, import_path, "take", "(arr/take n xs)", "Take a leading slice or owned result from an array-family input.")
+        package_symbols_write_entry(builder, alias, import_path, "drop", "(arr/drop n xs)", "Drop a leading prefix from an array-family input.")
+        package_symbols_write_entry(builder, alias, import_path, "sort", "(arr/sort xs)", "Return a sorted owned array.")
+        package_symbols_write_entry(builder, alias, import_path, "sort!", "(arr/sort! xs)", "Sort a dynamic array in place.")
+        return true
+    case "kvist:str":
+        package_symbols_write_entry(builder, alias, import_path, "count", "(str/count s)", "Count characters or bytes in a string.")
+        package_symbols_write_entry(builder, alias, import_path, "get", "(str/get s index)", "Index into a string.")
+        package_symbols_write_entry(builder, alias, import_path, "slice", "(str/slice s start [end])", "Take a string slice.")
+        package_symbols_write_entry(builder, alias, import_path, "contains?", "(str/contains? s needle)", "Return true when the string contains the needle.")
+        return true
+    case "kvist:map":
+        package_symbols_write_entry(builder, alias, import_path, "empty", "(map/empty K V [capacity])", "Construct an empty map, optionally with capacity.")
+        package_symbols_write_entry(builder, alias, import_path, "of", "(map/of K V {k1 v1 ...})", "Construct a map from a brace literal.")
+        package_symbols_write_entry(builder, alias, import_path, "get", "(map/get m key [default])", "Look up a key in a map, optionally with a default.")
+        package_symbols_write_entry(builder, alias, import_path, "contains?", "(map/contains? m key)", "Return true when the map contains the key.")
+        return true
+    case "kvist:set":
+        package_symbols_write_entry(builder, alias, import_path, "empty", "(set/empty T [capacity])", "Construct an empty set, optionally with capacity.")
+        package_symbols_write_entry(builder, alias, import_path, "of", "(set/of T [v1 v2 ...])", "Construct a set from a vector literal.")
+        package_symbols_write_entry(builder, alias, import_path, "contains?", "(set/contains? s value)", "Return true when the set contains the value.")
+        package_symbols_write_entry(builder, alias, import_path, "add!", "(set/add! s value)", "Insert a value into a set.")
+        return true
+    case "kvist:struct":
+        package_symbols_write_entry(builder, alias, import_path, "fields", "(struct/fields target)", "Return source-level field names for a struct type or value.")
+        package_symbols_write_entry(builder, alias, import_path, "types", "(struct/types target)", "Return source-level field types for a struct type or value.")
+        return true
+    case:
+        return false
+    }
+}
+
+package_symbols_source :: proc(import_path, alias: string) -> (output: string, ok: bool) {
+    resolved_alias := alias
+    if resolved_alias == "" {
+        resolved_alias = import_default_alias(import_path)
+    }
+    if resolved_alias == "" {
+        return "", false
+    }
+    builder := strings.builder_make()
+    defer strings.builder_destroy(&builder)
+    strings.write_string(&builder, "kind\tname\tline\tcolumn\tdetail\tsignature\tdoc\n")
+    if !package_symbols_append(&builder, import_path, resolved_alias) {
+        return "", false
+    }
+    return strings.to_string(builder), true
+}
+
 import_default_alias :: proc(path: string) -> string {
     end := len(path)
     for end > 0 && path[end-1] == '/' {
@@ -31,7 +99,10 @@ import_default_alias :: proc(path: string) -> string {
 }
 
 symbols_write_record :: proc(builder: ^strings.Builder, kind, name: string, source: string, span: Span, detail: string = "") {
-    line, column, _, _ := source_position(source, span.start)
+    line, column := 1, 1
+    if source != "" {
+        line, column, _, _ = source_position(source, span.start)
+    }
     fmt.sbprintf(builder, "%s\t%s\t%d\t%d\t%s\t\t\n", kind, name, line, column, detail)
 }
 
@@ -70,7 +141,10 @@ symbols_write_escaped_doc :: proc(builder: ^strings.Builder, doc_lines: []string
 }
 
 symbols_write_record_doc :: proc(builder: ^strings.Builder, kind, name: string, source: string, span: Span, detail: string, signature: string, doc_lines: []string) {
-    line, column, _, _ := source_position(source, span.start)
+    line, column := 1, 1
+    if source != "" {
+        line, column, _, _ = source_position(source, span.start)
+    }
     fmt.sbprintf(builder, "%s\t%s\t%d\t%d\t%s\t%s\t", kind, name, line, column, detail, signature)
     symbols_write_escaped_doc(builder, doc_lines)
     strings.write_byte(builder, '\n')
@@ -105,6 +179,26 @@ symbols_proc_signature :: proc(name: string, decl: Proc_Decl) -> string {
     }
 
     strings.write_string(&builder, ")")
+    return strings.to_string(builder)
+}
+
+symbols_struct_signature :: proc(name: string, fields: []Struct_Field) -> string {
+    builder := strings.builder_make()
+    defer strings.builder_destroy(&builder)
+
+    strings.write_string(&builder, "(")
+    strings.write_string(&builder, name)
+    strings.write_string(&builder, " {")
+    for field, idx in fields {
+        if idx > 0 {
+            strings.write_string(&builder, " ")
+        }
+        strings.write_string(&builder, ":")
+        strings.write_string(&builder, field.source_name)
+        strings.write_string(&builder, " ")
+        strings.write_string(&builder, field.ty)
+    }
+    strings.write_string(&builder, "})")
     return strings.to_string(builder)
 }
 
@@ -249,7 +343,14 @@ symbols_source :: proc(source: string) -> (output: string, err: Compile_Error, o
         case "struct":
             if len(form.items) == 3 && form.items[1].kind == .Symbol {
                 name := form.items[1].text
-                symbols_write_record_doc(&builder, "struct", name, source, form.items[1].span, "", "", top.doc_lines[:])
+                signature := ""
+                fields, err_fields, ok_fields := parse_struct_fields(form.items[2])
+                if ok_fields {
+                    signature = symbols_struct_signature(name, fields[:])
+                } else {
+                    _ = err_fields
+                }
+                symbols_write_record_doc(&builder, "struct", name, source, form.items[1].span, "", signature, top.doc_lines[:])
                 symbols_write_fields(&builder, source, name, form.items[2])
             }
         case "defstruct":
@@ -261,7 +362,14 @@ symbols_source :: proc(source: string) -> (output: string, err: Compile_Error, o
                     doc_lines = symbols_append_doc_lines(doc_lines[:], symbols_doc_lines_from_string(unquote_string(form.items[2].text))[:])
                     field_index = 3
                 }
-                symbols_write_record_doc(&builder, "struct", name, source, form.items[1].span, "", "", doc_lines[:])
+                signature := ""
+                fields_sig, err_fields, ok_fields_sig := parse_defstruct_fields(form.items[field_index])
+                if ok_fields_sig {
+                    signature = symbols_struct_signature(name, fields_sig[:])
+                } else {
+                    _ = err_fields
+                }
+                symbols_write_record_doc(&builder, "struct", name, source, form.items[1].span, "", signature, doc_lines[:])
                 symbols_write_fields(&builder, source, name, form.items[field_index])
             }
         case "enum":

@@ -20,13 +20,14 @@ print_usage :: proc() {
     fmt.println("  kvist expand <input.kvist> <form> [--no-print] [-o output.odin]")
     fmt.println("  kvist macroexpand <input.kvist> <form> [-o output.kvist] [--map output.map]")
     fmt.println("  kvist symbols <input.kvist>")
+    fmt.println("  kvist package-symbols <import-path> [alias]")
     fmt.println("  kvist cache path <name>")
     fmt.println("  kvist cache list")
     fmt.println("  kvist cache rm <name>")
 }
 
 is_command :: proc(text: string) -> bool {
-    return text == "compile" || text == "build" || text == "check" || text == "run" || text == "eval" || text == "expand" || text == "macroexpand" || text == "symbols" || text == "cache"
+    return text == "compile" || text == "build" || text == "check" || text == "run" || text == "eval" || text == "expand" || text == "macroexpand" || text == "symbols" || text == "package-symbols" || text == "cache"
 }
 
 read_source_or_exit :: proc(path: string) -> string {
@@ -462,6 +463,16 @@ symbols_command :: proc(input: string) {
     fmt.print(output)
 }
 
+package_symbols_command :: proc(import_path, alias: string) {
+    output, ok := kvist.package_symbols_source(import_path, alias)
+    if !ok {
+        fmt.eprintln("unsupported package-symbols import path: ", import_path)
+        os.exit(1)
+    }
+    defer delete(output)
+    fmt.print(output)
+}
+
 run_generated_command :: proc(input, generated_path, odin_command: string) -> int {
     data := read_source_or_exit(input)
     defer delete(transmute([]byte)data)
@@ -776,6 +787,18 @@ parse_symbols_command :: proc() {
     symbols_command(os.args[2])
 }
 
+parse_package_symbols_command :: proc() {
+    if len(os.args) != 3 && len(os.args) != 4 {
+        print_usage()
+        os.exit(2)
+    }
+    alias := ""
+    if len(os.args) == 4 {
+        alias = os.args[3]
+    }
+    package_symbols_command(os.args[2], alias)
+}
+
 main :: proc() {
     if len(os.args) < 2 {
         print_usage()
@@ -804,6 +827,8 @@ main :: proc() {
         parse_macroexpand_command()
     case "symbols":
         parse_symbols_command()
+    case "package-symbols":
+        parse_package_symbols_command()
     case "cache":
         cache_command()
     }

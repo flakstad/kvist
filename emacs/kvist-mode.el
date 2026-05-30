@@ -449,6 +449,47 @@
                          :file file)))))
             members))))
 
+(defun kvist--cli-package-symbols (alias import-path)
+  "Return package symbols for ALIAS and IMPORT-PATH from the Kvist CLI."
+  (pcase-let ((`(,exit-code . ,output)
+                (kvist--call-string (kvist--executable)
+                                    (list "package-symbols" import-path alias))))
+    (when (or (and (integerp exit-code) (zerop exit-code))
+              (string-prefix-p "kind\tname\tline\tcolumn\tdetail\tsignature\tdoc\n" output))
+      (let ((lines (cdr (split-string output "\n" t))))
+        (delq nil
+              (mapcar (lambda (line)
+                        (kvist--parse-symbol-line line nil))
+                      lines))))))
+
+(defun kvist--merge-symbol-metadata (base updates)
+  "Merge signature/doc metadata from UPDATES into BASE symbols by name."
+  (let ((update-map (make-hash-table :test #'equal)))
+    (dolist (symbol updates)
+      (puthash (plist-get symbol :name) symbol update-map))
+    (mapcar
+     (lambda (symbol)
+       (if-let ((update (gethash (plist-get symbol :name) update-map)))
+           (let ((merged (copy-sequence symbol)))
+             (when-let ((signature (plist-get update :signature)))
+               (setq merged (plist-put merged :signature signature)))
+             (when-let ((doc (plist-get update :doc)))
+               (setq merged (plist-put merged :doc doc)))
+             merged)
+         symbol))
+     base)))
+
+(defun kvist--dedupe-symbols-by-name (symbols)
+  "Deduplicate SYMBOLS by their :name field, preserving first occurrence."
+  (let ((seen (make-hash-table :test #'equal))
+        out)
+    (dolist (symbol symbols)
+      (let ((name (plist-get symbol :name)))
+        (unless (gethash name seen)
+          (puthash name t seen)
+          (push symbol out))))
+    (nreverse out)))
+
 (defun kvist--canonical-kvist-package-symbols ()
   "Return built-in Kvist package symbols under their canonical aliases."
   (apply #'append
@@ -460,7 +501,11 @@
 
 (defun kvist--package-definition-symbols (alias import-path)
   "Return exported-looking symbols for ALIAS from IMPORT-PATH."
-  (or (kvist--package-member-symbols alias import-path)
+  (or (let ((base (kvist--package-member-symbols alias import-path)))
+        (when base
+          (kvist--merge-symbol-metadata base
+                                        (or (kvist--cli-package-symbols alias import-path)
+                                            nil))))
       (let ((dir (kvist--import-dir import-path))
             symbols)
         (when (and dir (file-directory-p dir))
@@ -472,9 +517,11 @@
                 (let ((member (match-string-no-properties 1))
                       (line (line-number-at-pos (match-beginning 1)))
                       (column (1+ (- (match-beginning 1) (line-beginning-position))))
+                      (signature (kvist--odin-signature-at-point))
                       (doc (kvist--preceding-odin-doc (match-beginning 0))))
                   (push (list :kind "odin"
                               :name (concat alias "." member)
+                              :signature signature
                               :line line
                               :column column
                               :detail import-path
@@ -483,13 +530,68 @@
                         symbols)
                   (push (list :kind "odin"
                               :name (concat alias "/" member)
+                              :signature signature
                               :line line
                               :column column
                               :detail import-path
                               :doc doc
                               :file file)
                         symbols))))))
-        (nreverse symbols))))
+        (kvist--dedupe-odin-package-symbols (nreverse symbols)))))
+
+(defun kvist--odin-signature-at-point ()
+  "Return a scraped Odin declaration signature from the current line."
+  (save-excursion
+    (beginning-of-line)
+    (let ((line (string-trim-right
+                 (buffer-substring-no-properties
+                  (line-beginning-position)
+                  (line-end-position)))))
+      (cond
+       ((string-match "::[[:space:]]*proc[[:space:]]*{" line)
+        (let ((parts (list (string-trim line)))
+              (done nil))
+          (while (and (not done) (= 0 (forward-line 1)))
+            (let ((next-line (string-trim
+                              (buffer-substring-no-properties
+                               (line-beginning-position)
+                               (line-end-position)))))
+              (push next-line parts)
+              (when (string-match-p "^[[:space:]]*}[[:space:]]*$" next-line)
+                (setq done t))))
+          (replace-regexp-in-string
+           "[[:space:]\n]+"
+           " "
+           (string-join (nreverse parts) " "))))
+       ((string-match "::" line)
+        (replace-regexp-in-string
+         "[[:space:]]+"
+         " "
+         (replace-regexp-in-string "[[:space:]]*{.*\\'" "" (string-trim line))))
+       (t nil)))))
+
+(defun kvist--odin-symbol-rank (symbol)
+  "Return a preference rank for imported Odin SYMBOL. Lower is better."
+  (let ((file (or (plist-get symbol :file) "")))
+    (+ (if (string-match-p "/old/" file) 100 0)
+       (if (string-match-p "_js\\.odin\\'" file) 10 0)
+       (if (string-match-p "/example\\.odin\\'" file) 200 0))))
+
+(defun kvist--dedupe-odin-package-symbols (symbols)
+  "Deduplicate imported Odin SYMBOLS by name, keeping the best-ranked entry."
+  (let ((best (make-hash-table :test #'equal))
+        order)
+    (dolist (symbol symbols)
+      (let* ((name (plist-get symbol :name))
+             (current (gethash name best)))
+        (unless current
+          (push name order))
+        (when (or (null current)
+                  (< (kvist--odin-symbol-rank symbol)
+                     (kvist--odin-symbol-rank current)))
+          (puthash name symbol best))))
+    (mapcar (lambda (name) (gethash name best))
+            (nreverse order))))
 
 (defun kvist--clean-doc-comment-line (line)
   "Return LINE with a leading line-comment marker removed."
@@ -627,14 +729,15 @@
 
 (defun kvist--package-symbols-for-current-buffer ()
   "Return imported Odin package symbols for current buffer imports."
-  (append
-   (apply #'append
-          (mapcar (lambda (symbol)
-                    (kvist--package-definition-symbols
-                     (plist-get symbol :name)
-                     (plist-get symbol :detail)))
-                  (kvist--import-symbols)))
-   (kvist--canonical-kvist-package-symbols)))
+  (kvist--dedupe-symbols-by-name
+   (append
+    (apply #'append
+           (mapcar (lambda (symbol)
+                     (kvist--package-definition-symbols
+                      (plist-get symbol :name)
+                      (plist-get symbol :detail)))
+                   (kvist--import-symbols)))
+    (kvist--canonical-kvist-package-symbols))))
 
 (defun kvist--package-definitions (identifier)
   "Return package definitions matching alias-qualified IDENTIFIER."
@@ -996,6 +1099,39 @@
         (special-mode)))
     (display-buffer buffer)))
 
+(defun kvist--eldoc-string (symbol)
+  "Return a one-line Eldoc string for SYMBOL."
+  (let* ((name (plist-get symbol :name))
+         (signature (or (plist-get symbol :signature) name))
+         (doc (string-trim (or (plist-get symbol :doc) "")))
+         (doc-line (car (split-string doc "\n" t))))
+    (if (and doc-line (not (string-empty-p doc-line)))
+        (format "%s -- %s" signature doc-line)
+      signature)))
+
+(defun kvist--eldoc-from-completion-prefix (identifier)
+  "Return Eldoc text from a unique completion match for IDENTIFIER."
+  (let* ((candidates (all-completions identifier (kvist--completion-candidates)))
+         (metadata (kvist--completion-metadata identifier)))
+    (when (= (length candidates) 1)
+      (when-let ((entry (assoc (car candidates) metadata)))
+        (cdr entry)))))
+
+(defun kvist-eldoc-function ()
+  "Return Eldoc text for the Kvist symbol at point."
+  (when-let ((identifier (kvist--identifier-at-point)))
+    (if-let ((matches (kvist--symbol-doc-candidates identifier)))
+        (let* ((normalized (kvist--normalize-qualified-identifier identifier))
+               (exact (seq-find (lambda (symbol)
+                                  (string=
+                                   (kvist--normalize-qualified-identifier
+                                    (plist-get symbol :name))
+                                   normalized))
+                                matches))
+               (symbol (or exact (car matches))))
+          (kvist--eldoc-string symbol))
+      (kvist--eldoc-from-completion-prefix identifier))))
+
 ;;;###autoload
 (defun kvist-doc-at-point ()
   "Show documentation for the Kvist or imported Odin symbol at point."
@@ -1048,6 +1184,7 @@
               "\\(\\(^\\|[^\\\\\n]\\)\\(\\\\\\\\\\)*\\)\\(;+\\|//+\\|/\\*+\\|#|\\) *")
   (add-hook 'xref-backend-functions #'kvist--xref-backend nil t)
   (add-hook 'completion-at-point-functions #'kvist-completion-at-point nil t)
+  (add-hook 'eldoc-documentation-functions #'kvist-eldoc-function nil t)
   (add-hook 'post-self-insert-hook #'kvist--post-self-insert-auto-import nil t)
   (font-lock-add-keywords nil kvist-font-lock-keywords)
   (kvist--setup-indentation))
