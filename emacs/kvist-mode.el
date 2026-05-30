@@ -318,6 +318,87 @@
                 (list :file source-file :tick tick :symbols symbols)))
         symbols))))
 
+(defun kvist--lookup-symbols (identifier &optional file)
+  "Return matching file-context symbols for IDENTIFIER via the CLI."
+  (let* ((source-file (or file buffer-file-name))
+         (temp (if file nil (kvist--source-temp-file)))
+         (input (or temp source-file))
+         (program (kvist--executable source-file)))
+    (unwind-protect
+        (pcase-let ((`(,exit-code . ,output)
+                      (kvist--call-string program (list "editor-symbols" input identifier))))
+          (unless (zerop exit-code)
+            (user-error "%s" (string-trim output)))
+          (let ((lines (cdr (split-string output "\n" t))))
+            (delq nil
+                  (mapcar (lambda (line)
+                            (kvist--parse-symbol-line line source-file))
+                          lines))))
+      (when temp
+        (ignore-errors (delete-file temp))))))
+
+(defun kvist--doc-text (identifier &optional file)
+  "Return rendered documentation text for IDENTIFIER via the CLI."
+  (let* ((source-file (or file buffer-file-name))
+         (temp (if file nil (kvist--source-temp-file)))
+         (input (or temp source-file))
+         (program (kvist--executable source-file)))
+    (unwind-protect
+        (pcase-let ((`(,exit-code . ,output)
+                      (kvist--call-string program (list "doc" input identifier))))
+          (unless (zerop exit-code)
+            (user-error "%s" (string-trim output)))
+          output)
+      (when temp
+        (ignore-errors (delete-file temp))))))
+
+(defun kvist--xref-symbols (identifier &optional file)
+  "Return xref symbols for IDENTIFIER via the CLI."
+  (let* ((source-file (or file buffer-file-name))
+         (temp (if file nil (kvist--source-temp-file)))
+         (input (or temp source-file))
+         (program (kvist--executable source-file)))
+    (unwind-protect
+        (pcase-let ((`(,exit-code . ,output)
+                      (kvist--call-string program (list "xref" input identifier))))
+          (unless (zerop exit-code)
+            (user-error "%s" (string-trim output)))
+          (let (symbols)
+            (dolist (line (split-string output "\n" t))
+              (when (string-match
+                     "\\`\\(.*\\):\\([0-9]+\\):\\([0-9]+\\)\t\\([^\t]+\\)\t\\(.+\\)\\'" line)
+                (push (list :file (match-string 1 line)
+                            :line (string-to-number (match-string 2 line))
+                            :column (string-to-number (match-string 3 line))
+                            :kind (match-string 4 line)
+                            :name (match-string 5 line))
+                      symbols)))
+            (nreverse symbols)))
+      (when temp
+        (ignore-errors (delete-file temp))))))
+
+(defun kvist--complete-symbols (&optional prefix file)
+  "Return completion symbols for PREFIX via the CLI."
+  (let* ((source-file (or file buffer-file-name))
+         (temp (if file nil (kvist--source-temp-file)))
+         (input (or temp source-file))
+         (program (kvist--executable source-file)))
+    (unwind-protect
+        (pcase-let ((`(,exit-code . ,output)
+                      (kvist--call-string
+                       program
+                       (append (list "complete" input)
+                               (when prefix (list prefix))))))
+          (unless (zerop exit-code)
+            (user-error "%s" (string-trim output)))
+          (let ((lines (cdr (split-string output "\n" t))))
+            (delq nil
+                  (mapcar (lambda (line)
+                            (kvist--parse-symbol-line line source-file))
+                          lines))))
+      (when temp
+        (ignore-errors (delete-file temp))))))
+
 (defun kvist--symbol-bounds ()
   "Return bounds of the Kvist symbol-like token at point."
   (let ((chars "-[:alnum:]_?!+*/<>=.:"))
@@ -417,25 +498,19 @@
                (string-match "\\`\\([^/]+\\)/" normalized))
       (kvist--ensure-kvist-package-import (match-string 1 normalized)))))
 
-(defun kvist--package-symbols-for-current-buffer ()
-  "Return imported Odin package symbols for current buffer imports."
-  (kvist--dedupe-symbols-by-name
-   (seq-filter (lambda (symbol)
-                 (or (equal (plist-get symbol :kind) "kvist package")
-                     (equal (plist-get symbol :kind) "odin")))
-               (ignore-errors (kvist--editor-symbols)))))
-
 (defun kvist--xref-backend () 'kvist)
 
 (cl-defmethod xref-backend-identifier-at-point ((_backend (eql kvist)))
   (kvist--identifier-at-point))
 
 (cl-defmethod xref-backend-definitions ((_backend (eql kvist)) identifier)
-  (let* ((editor-symbols (ignore-errors (kvist--editor-symbols)))
-         (editor-matches (seq-filter (lambda (symbol)
-                                       (kvist--symbol-matches-identifier-p symbol identifier))
-                                     editor-symbols))
-         (matches editor-matches))
+  (let* ((matches (or (ignore-errors (kvist--xref-symbols identifier))
+                      (ignore-errors (kvist--lookup-symbols identifier))
+                      (let* ((editor-symbols (ignore-errors (kvist--editor-symbols)))
+                             (editor-matches (seq-filter (lambda (symbol)
+                                                           (kvist--symbol-matches-identifier-p symbol identifier))
+                                                         editor-symbols)))
+                        editor-matches))))
     (mapcar
      (lambda (symbol)
        (let ((file (or (plist-get symbol :file) (buffer-file-name)))
@@ -456,32 +531,25 @@
              (string-match "\\`\\([^./]+\\)\\([./]\\)\\([^./]*\\)\\'" identifier))
     (cons (match-string 1 identifier) (match-string 2 identifier))))
 
+(defun kvist--completion-symbols (&optional identifier)
+  "Return completion symbols for IDENTIFIER context."
+  (or (ignore-errors (kvist--complete-symbols identifier))
+      (ignore-errors (kvist--editor-symbols))))
+
 (defun kvist--completion-candidates ()
   "Return completion candidates appropriate for the symbol at point."
   (let* ((identifier (kvist--identifier-at-point))
-         (package-prefix (kvist--package-prefix identifier)))
-    (if package-prefix
-        (let* ((alias (car package-prefix))
-               (sep (cdr package-prefix))
-               (prefix (concat alias sep))
-               (normalized-prefix (kvist--normalize-qualified-identifier prefix)))
-          (delete-dups
-           (mapcar
-            (lambda (symbol)
-              (let ((name (plist-get symbol :name)))
-                (if (string= sep ".")
-                    (replace-regexp-in-string "/" "." name t t)
-                  (replace-regexp-in-string "\\." "/" name t t))))
-            (seq-filter
-             (lambda (symbol)
-               (string-prefix-p normalized-prefix
-                                (kvist--normalize-qualified-identifier
-                                 (plist-get symbol :name))))
-             (ignore-errors (kvist--package-symbols-for-current-buffer))))))
-      (delete-dups
-       (append kvist-completion-builtins
-               (mapcar (lambda (symbol) (plist-get symbol :name))
-                       (ignore-errors (kvist--editor-symbols))))))))
+         (package-prefix (kvist--package-prefix identifier))
+         (symbols (kvist--completion-symbols identifier)))
+    (delete-dups
+     (mapcar
+      (lambda (symbol)
+        (let ((name (plist-get symbol :name)))
+          (if (and package-prefix
+                   (string= (cdr package-prefix) "."))
+              (replace-regexp-in-string "/" "." name t t)
+            (replace-regexp-in-string "\\." "/" name t t))))
+      symbols))))
 
 (defun kvist--completion-exit (completed status)
   "Handle completion of COMPLETED with STATUS."
@@ -492,18 +560,9 @@
   "Return symbol metadata alist keyed by display name for IDENTIFIER context."
   (let* ((identifier (or identifier (kvist--identifier-at-point)))
          (package-prefix (kvist--package-prefix identifier))
-         (symbols (if package-prefix
-                      (let* ((alias (car package-prefix))
-                             (normalized-prefix
-                              (kvist--normalize-qualified-identifier (concat alias "/"))))
-                        (seq-filter
-                         (lambda (symbol)
-                           (string-prefix-p normalized-prefix
-                                            (kvist--normalize-qualified-identifier
-                                             (plist-get symbol :name))))
-                         (ignore-errors (kvist--package-symbols-for-current-buffer))))
-                    (append (ignore-errors (kvist--symbols))
-                            (ignore-errors (kvist--editor-symbols))))))
+         (symbols (or (kvist--completion-symbols identifier)
+                      (ignore-errors (kvist--symbols))
+                      (ignore-errors (kvist--editor-symbols)))))
     (let (table)
       (dolist (symbol symbols)
         (let* ((name (plist-get symbol :name))
@@ -531,14 +590,28 @@
 
 (defun kvist--symbol-doc-candidates (identifier)
   "Return documentation candidates for IDENTIFIER."
-  (let* ((symbols (ignore-errors (kvist--editor-symbols)))
-         (matches (seq-filter (lambda (symbol)
-                                (kvist--symbol-matches-identifier-p symbol identifier))
-                              symbols)))
+  (let* ((matches (or (ignore-errors (kvist--lookup-symbols identifier))
+                      (let* ((symbols (ignore-errors (kvist--editor-symbols))))
+                        (seq-filter (lambda (symbol)
+                                      (kvist--symbol-matches-identifier-p symbol identifier))
+                                    symbols)))))
     (seq-filter (lambda (symbol)
                   (or (not (string-empty-p (or (plist-get symbol :doc) "")))
                       (not (string-empty-p (or (plist-get symbol :signature) "")))))
                 matches)))
+
+(defun kvist--show-doc-text (text)
+  "Show documentation buffer TEXT."
+  (let ((buffer (get-buffer-create kvist-doc-buffer-name)))
+    (with-current-buffer buffer
+      (let ((inhibit-read-only t))
+        (erase-buffer)
+        (insert text)
+        (unless (bolp)
+          (insert "\n"))
+        (goto-char (point-min))
+        (special-mode)))
+    (display-buffer buffer)))
 
 (defun kvist--show-doc (symbol)
   "Show documentation for SYMBOL."
@@ -579,8 +652,19 @@
 
 (defun kvist--eldoc-from-completion-prefix (identifier)
   "Return Eldoc text from a unique completion match for IDENTIFIER."
-  (let* ((candidates (all-completions identifier (kvist--completion-candidates)))
-         (metadata (kvist--completion-metadata identifier)))
+  (let* ((symbols (kvist--completion-symbols identifier))
+         (metadata (kvist--completion-metadata identifier))
+         (package-prefix (kvist--package-prefix identifier))
+         (candidates
+          (delete-dups
+           (mapcar
+            (lambda (symbol)
+              (let ((name (plist-get symbol :name)))
+                (if (and package-prefix
+                         (string= (cdr package-prefix) "."))
+                    (replace-regexp-in-string "/" "." name t t)
+                  (replace-regexp-in-string "\\." "/" name t t))))
+            symbols))))
     (when (= (length candidates) 1)
       (when-let ((entry (assoc (car candidates) metadata)))
         (cdr entry)))))
@@ -604,20 +688,22 @@
 (defun kvist-doc-at-point ()
   "Show documentation for the Kvist or imported Odin symbol at point."
   (interactive)
-  (let* ((identifier (or (kvist--identifier-at-point)
-                         (user-error "No symbol at point")))
-         (matches (kvist--symbol-doc-candidates identifier)))
-    (cond
-     ((null matches)
-      (user-error "No docs found for %s" identifier))
-     ((= (length matches) 1)
-      (kvist--show-doc (car matches)))
-     (t
-      (let* ((names (mapcar (lambda (symbol)
-                              (format "%s %s" (plist-get symbol :kind) (plist-get symbol :name)))
-                            matches))
-             (choice (completing-read "Doc: " names nil t)))
-        (kvist--show-doc (nth (cl-position choice names :test #'equal) matches)))))))
+  (let ((identifier (or (kvist--identifier-at-point)
+                        (user-error "No symbol at point"))))
+    (if-let ((text (ignore-errors (kvist--doc-text identifier))))
+        (kvist--show-doc-text text)
+      (let ((matches (kvist--symbol-doc-candidates identifier)))
+        (cond
+         ((null matches)
+          (user-error "No docs found for %s" identifier))
+         ((= (length matches) 1)
+          (kvist--show-doc (car matches)))
+         (t
+          (let* ((names (mapcar (lambda (symbol)
+                                  (format "%s %s" (plist-get symbol :kind) (plist-get symbol :name)))
+                                matches))
+                 (choice (completing-read "Doc: " names nil t)))
+            (kvist--show-doc (nth (cl-position choice names :test #'equal) matches)))))))))
 
 (defun kvist-completion-at-point ()
   "Complete Kvist special forms and symbols in the current file."
