@@ -37,6 +37,15 @@
   :element Element
 })
 
+(defmacro- if-form? [form]
+  (if (list? form)
+    (if (= (count form) 4)
+      (if (symbol? (first form))
+        (= (name (first form)) "if")
+        false)
+      false)
+    false))
+
 (defmacro- emit-attr-value [form]
     (if (string? form)
       (quasiquote (Attr-Value {:text (unquote form)}))
@@ -48,11 +57,16 @@
         (quasiquote (Attr-Value {:bool (unquote form)}))
         (if (keyword? form)
           (quasiquote (Attr-Value {:text (unquote (text form))}))
+          (if (if-form? form)
+            (quasiquote
+              (if-attr-value (unquote (nth form 1))
+                             (unquote (emit-attr-value (nth form 2)))
+                             (unquote (emit-attr-value (nth form 3)))))
           (if (symbol? form)
-            (quasiquote (Attr-Value {:text (unquote (text form))}))
+            (quasiquote (Attr-Value (unquote form)))
             (if (list? form)
-              (quasiquote (Attr-Value {:text (unquote form)}))
-              (quasiquote (Attr-Value {:text (unquote (text form))}))))))))))
+              (quasiquote (Attr-Value (unquote form)))
+              (quasiquote (Attr-Value {:text (unquote (text form))})))))))))))
 
 (defmacro- emit-attr-items [items]
   (if (= (count items) 0)
@@ -101,16 +115,31 @@
           (quasiquote (Node {:bool (unquote form)}))
           (if (keyword? form)
             (quasiquote (Node {:text (unquote (text form))}))
+            (if (if-form? form)
+              (quasiquote
+                (if-node (unquote (nth form 1))
+                         (unquote (emit-node (nth form 2)))
+                         (unquote (emit-node (nth form 3)))))
             (if (symbol? form)
-              (quasiquote (Node {:text (unquote (text form))}))
+              (quasiquote (Node (unquote form)))
               (if (list? form)
-                (quasiquote (Node {:text (unquote form)}))
-                (quasiquote (Node {:text (unquote (text form))})))))))))))
+                (quasiquote (Node (unquote form)))
+                (quasiquote (Node {:text (unquote (text form))}))))))))))))
 
 (defmacro html
-  "Expand a Hiccup vector tree into the typed hiccup/Node representation."
+  "Expand a Hiccup vector tree into the typed hiccup/Node representation. Attr and child positions accept ordinary Kvist expressions, including supported conditional forms, when they evaluate to Hiccup value types."
   [form]
   (emit-node form))
+
+(defn- if-attr-value [cond: bool, when-true: Attr-Value, when-false: Attr-Value] -> Attr-Value
+  (if cond
+    when-true
+    when-false))
+
+(defn- if-node [cond: bool, when-true: Node, when-false: Node] -> Node
+  (if cond
+    when-true
+    when-false))
 
 (defn tag
   "Return the tag name for an element node, or an empty string for scalar nodes."

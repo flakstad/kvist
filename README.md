@@ -20,7 +20,9 @@ inspectable character of systems programming.
 
 The current language draft is [LANGUAGE.md](LANGUAGE.md). Deferred ideas that
 should not drive the core implementation yet live in
-[docs/FUTURE-IDEAS.md](docs/FUTURE-IDEAS.md). A longer speculative note on an
+[docs/FUTURE-IDEAS.md](docs/FUTURE-IDEAS.md). The current preferred iterative
+development direction is documented in
+[docs/HOT-RELOAD.md](docs/HOT-RELOAD.md). A longer speculative note on an
 optional embedded live runtime lives in
 [docs/LIVE-RUNTIME.md](docs/LIVE-RUNTIME.md), and a more workflow-focused note
 on live iterative development lives in
@@ -52,6 +54,7 @@ The stronger case for Kvist is narrower:
 - structural editing and source transformation over a uniform Lisp surface
 - source-level composition experiments that still lower to plain, readable Odin
 - richer tooling and eval workflows without introducing a hidden runtime
+- first-class native hot-reload patterns over ordinary compiled code
 
 The important win is not "Odin, but with parens". The important win is:
 

@@ -34,6 +34,16 @@ Open questions:
 - how macros interact with source packages
 - what should remain available for explicit raw Odin escape
 
+Additional pressure from real DSL work is now clear:
+
+- data-oriented DSLs like Hiccup want a cleaner interpolation story
+- ideally, a macro should be able to distinguish structural data from ordinary
+  Kvist expressions without forcing verbose wrapper markers around every
+  runtime hole
+- this likely requires better macro-expander handling for nested package-local
+  helper macros, `quasiquote`/`splice`, and expression-vs-data interpolation
+  rules before the DSL surface should be widened further
+
 ### 3. Fixed-Shape Type Depth
 
 `defstruct` is real and already useful, but the broader fixed-shape type story
@@ -66,6 +76,14 @@ The type surface is much better now, but some areas still need a final shape:
 - where Kvist should stay close to Odin versus where it should own a richer
   source notation
 
+Call conventions are also still open:
+
+- ordinary positional function calls should remain available
+- it may be valuable to support a named-argument call style using a map-like
+  surface for functions that benefit from self-documenting call sites
+- that design needs to be weighed against Odin interop clarity, overload
+  ambiguity, and how much compile-time checking Kvist can provide
+
 ### 6. Error And Result Ergonomics
 
 Multiple returns work, but the language-level conventions around result/error
@@ -95,7 +113,8 @@ Several important ideas are noted but not yet built:
 - stronger editor integration
 - dev/repl package ideas
 - scratch-state helpers
-- hot-reload exploration
+- first-class native hot-reload patterns
+- tighter cooperation between native hot reload and `Kvist/Live`
 
 ### 9. Standard Library Shape
 

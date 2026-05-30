@@ -9,6 +9,15 @@ that matters most right now:
 This is a design note for an optional layer. It must not distort the main
 value of Kvist as a source-to-source compiler for readable Odin.
 
+The current preferred architecture is now hybrid:
+
+- native hot reload is the primary answer for broad compiled-code iteration
+- `Kvist/Live` is the secondary reflective layer for commands, tools,
+  extensions, modding, automation, and runtime inspection
+
+See [HOT-RELOAD.md](./HOT-RELOAD.md) for the primary iterative-development
+direction.
+
 ## Core Principle
 
 `Kvist/AOT` stays the main product.
@@ -42,7 +51,7 @@ The goal is:
 - replacing Odin build, debug, or deployment tools
 - requiring full feature parity between AOT and Live modes
 
-## Why This Is Better Than Plain DLL Hot Reload
+## Why Keep This Alongside Native Hot Reload
 
 The usual DLL hot-reload approach gives:
 
@@ -68,6 +77,16 @@ So the distinction is:
 
 - DLL reload swaps native code against frozen native memory
 - Kvist/Live reload swaps semantic modules over a stable host API
+
+That means `Kvist/Live` is not the whole iterative-development strategy. It is
+the complementary layer for the parts native reload does poorly:
+
+- runtime commands
+- inspectors
+- automation
+- scripting
+- extensions/modding
+- source-level migration of live-owned behavior state
 
 ## The Runtime Object
 

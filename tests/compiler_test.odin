@@ -124,6 +124,7 @@ compile_all_examples :: proc(t: ^testing.T) {
         "examples/hello.kvist",
         "examples/higher-order.kvist",
         "examples/hiccup-demo.kvist",
+        "examples/hiccup-interpolation.kvist",
         "examples/hiccup-render.kvist",
         "examples/hiccup-values.kvist",
         "examples/inline-literals.kvist",
@@ -419,6 +420,57 @@ editor_symbols_source_includes_source_package_imports :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "packages/hiccup/package.kvist"), true)
     testing.expect_value(t, strings.contains(output, "hiccup/emit-node"), false)
     testing.expect_value(t, strings.contains(output, "hiccup/render-node-into"), false)
+}
+
+@(test)
+compile_path_supports_hiccup_expression_interpolation :: proc(t: ^testing.T) {
+    path := "/Users/andreas/Projects/kvist/.tmp-hiccup-interpolation-test.kvist"
+    defer os.remove(path)
+
+    source := `(import hiccup "kvist:hiccup")
+
+(defn status-label [enabled?: bool] -> string
+  (if enabled?
+    "Ready"
+    "Hidden"))
+
+(defn demo [title: string, count: int, ratio: float, enabled?: bool] -> hiccup/Node
+  (hiccup/html
+    [:section {:data-count count
+               :data-ratio ratio
+               :hidden enabled?
+               :data-state (if enabled? "ready" "hidden")}
+     [:h1 title]
+     [:p (status-label enabled?)]
+     [:p (+ count 1)]
+     (if enabled?
+       "Visible"
+       "Hidden")]))`
+
+    write_err := os.write_entire_file_from_string(path, source)
+    testing.expect_value(t, write_err == nil, true)
+    if write_err != nil {
+        return
+    }
+
+    output, err, ok := kvist.compile_path(path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, `value = hiccup__Attr_Value(count)`), true)
+    testing.expect_value(t, strings.contains(output, `value = hiccup__Attr_Value(ratio)`), true)
+    testing.expect_value(t, strings.contains(output, `value = hiccup__Attr_Value(enabled_p)`), true)
+    testing.expect_value(t, strings.contains(output, `value = hiccup__if_attr_value(enabled_p, hiccup__Attr_Value("ready"), hiccup__Attr_Value("hidden"))`), true)
+    testing.expect_value(t, strings.contains(output, `children = []hiccup__Node{hiccup__Node(title)}`), true)
+    testing.expect_value(t, strings.contains(output, `hiccup__Node(status_label(enabled_p))`), true)
+    testing.expect_value(t, strings.contains(output, `hiccup__Node((count) + (1))`), true)
+    testing.expect_value(t, strings.contains(output, `hiccup__if_node(enabled_p, hiccup__Node("Visible"), hiccup__Node("Hidden"))`), true)
+    testing.expect_value(t, strings.contains(output, `hiccup__Attr_Value("count")`), false)
+    testing.expect_value(t, strings.contains(output, `hiccup__Node("title")`), false)
 }
 
 @(test)

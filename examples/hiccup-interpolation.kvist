@@ -1,0 +1,31 @@
+// Hiccup can interpolate ordinary Kvist expressions directly in attrs and children.
+(package main)
+(import hiccup "kvist:hiccup")
+
+(defn status-label [enabled?: bool] -> string
+  (if enabled?
+    "Ready"
+    "Hidden"))
+
+(defn interpolation-demo [] -> bool
+  (let [title "Dashboard"
+        count 3
+        ratio 1.5
+        enabled? true
+        page (hiccup/html
+               [:section {:data-count count
+                          :data-ratio ratio
+                          :hidden enabled?
+                          :data-state (if enabled? "ready" "hidden")}
+                [:h1 title]
+                [:p (status-label enabled?)]
+                [:p (+ count 1)]
+                (if enabled?
+                  "Visible"
+                  "Hidden")])
+        html (hiccup/render page) defer]
+    (println html)
+    true))
+
+(defn main []
+  (interpolation-demo))

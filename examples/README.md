@@ -21,6 +21,7 @@ block so `C-c C-e` and `C-c C-c` are practical.
 - `macro-dsl.kvist`: package-local declaration DSL that expands into multiple top-level forms.
 - `macro-union-helpers.kvist`: recursive macro DSL that emits a union plus variant constructors.
 - `macro-messages.kvist`: message-family DSL that emits payload structs, a tagged union, and constructors.
+- `hiccup-interpolation.kvist`: Hiccup attrs and child nodes with direct Kvist expression interpolation.
 - `closures.kvist`: non-capturing `fn` literals and explicit callback context.
 - `hello.kvist`: package, import, struct literal, and a tiny `main`.
 - `declarations.kvist`: doc comments, import aliases, constants, enums, structs.
@@ -88,12 +89,21 @@ are run deliberately.
   reloads it, and shows state migration.
 - `live_commands_demo`: long-running compiled host process that reloads a tiny
   live module file while preserving command state.
+- `hot_reload_demo`: long-running compiled host plus a reloadable shared
+  library; shows host-owned state surviving native code reload.
 
 Run them from the repo root with:
 
 ```sh
 odin run examples/live_reload_demo
 odin run examples/live_commands_demo
+```
+
+The native hot-reload demo has a two-step workflow:
+
+```sh
+odin build examples/hot_reload_demo/module -build-mode:dll -out:build/hot_reload_demo/hot_demo.dylib
+odin run examples/hot_reload_demo/host
 ```
 
 The live commands demo watches the `.kvist` files in
@@ -105,6 +115,15 @@ migration: change `counter-key` and `:version` in `commands.kvist` and the live
 module carries the count forward itself. It also shows command args and hook
 payload values flowing through the live layer rather than only zero-arg
 ambient state.
+
+The native hot-reload demo watches the shared library at
+`build/hot_reload_demo/hot_demo.dylib`. Edit
+`examples/hot_reload_demo/module/main.odin`, rebuild only the module shared
+library, and the running host reloads it in place while preserving the host
+state struct. The host now uses the reusable `kvist_hot.Reloader` helpers
+rather than open-coding the watch loop. See
+[`examples/hot_reload_demo/README.md`](./hot_reload_demo/README.md) for the
+full workflow.
 
 Useful commands while reading examples:
 

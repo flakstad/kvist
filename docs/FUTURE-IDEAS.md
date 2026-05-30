@@ -32,16 +32,33 @@ language/runtime implementation prematurely.
 - Use the Kvist library/vendor layer where the user-facing surface is clearly
   better than raw host calls, while still lowering to readable Odin.
 
+### Data DSLs
+
+- Continue exploring data-oriented DSLs shipped with Kvist, such as Hiccup-like
+  tree builders.
+- For these DSLs, the ideal user surface may allow ordinary Kvist expressions
+  to appear directly inside the data shape, rather than forcing explicit
+  wrapper markers everywhere.
+- Do not push that surface wider until the macro expander handles nested helper
+  macros and interpolation robustly.
+
+### Call Surface
+
+- Consider allowing functions to be called either positionally or with a
+  named-argument map-like surface when that materially improves readability.
+- This should remain a language-level design decision, not ad hoc per-library
+  sugar.
+
 ## Dev And Runtime Workflow
 
 - Add a `dev` package with helpers for storing/retrieving temporary state on
   disk to simulate in-memory continuity between runs.
 - Explore pseudo-REPL/dev flows built on scratch files and cached generated
   code.
-- Explore hot-reload patterns later, possibly by compiling program code into a
-  swap-friendly binary boundary while keeping live state in memory.
-- See [LIVE-RUNTIME.md](./LIVE-RUNTIME.md) for a longer speculative note on an
-  optional embedded live runtime and the host/live split it would require.
+- Keep building first-class native hot-reload patterns separately from the core
+  language surface. See [HOT-RELOAD.md](./HOT-RELOAD.md).
+- Keep the optional embedded live runtime secondary and complementary to native
+  hot reload. See [LIVE-RUNTIME.md](./LIVE-RUNTIME.md).
 - Keep this work clearly separate from the current compiler surface until the
   language core and ownership model are stable.
 

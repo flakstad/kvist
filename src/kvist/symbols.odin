@@ -1474,17 +1474,41 @@ symbols_source :: proc(source: string) -> (output: string, err: Compile_Error, o
                 symbols_write_record_doc(&builder, "struct", name, source, form.items[1].span, "", signature, doc_lines[:])
                 symbols_write_fields(&builder, source, name, form.items[field_index])
             }
-        case "enum", "defenum":
+        case "enum":
             if len(form.items) == 3 && form.items[1].kind == .Symbol {
                 name := form.items[1].text
                 symbols_write_record_doc(&builder, "enum", name, source, form.items[1].span, "", "", top.doc_lines[:])
                 symbols_write_enum_variants(&builder, source, name, form.items[2])
             }
-        case "union", "defunion":
+        case "defenum":
+            if (len(form.items) == 3 || len(form.items) == 4) && form.items[1].kind == .Symbol {
+                name := form.items[1].text
+                doc_lines := top.doc_lines
+                variant_index := 2
+                if len(form.items) == 4 && form.items[2].kind == .String {
+                    doc_lines = symbols_append_doc_lines(doc_lines[:], symbols_doc_lines_from_string(unquote_string(form.items[2].text))[:])
+                    variant_index = 3
+                }
+                symbols_write_record_doc(&builder, "enum", name, source, form.items[1].span, "", "", doc_lines[:])
+                symbols_write_enum_variants(&builder, source, name, form.items[variant_index])
+            }
+        case "union":
             if len(form.items) == 3 && form.items[1].kind == .Symbol {
                 name := form.items[1].text
                 symbols_write_record_doc(&builder, "union", name, source, form.items[1].span, "", "", top.doc_lines[:])
                 symbols_write_union_variants(&builder, source, name, form.items[2])
+            }
+        case "defunion":
+            if (len(form.items) == 3 || len(form.items) == 4) && form.items[1].kind == .Symbol {
+                name := form.items[1].text
+                doc_lines := top.doc_lines
+                variant_index := 2
+                if len(form.items) == 4 && form.items[2].kind == .String {
+                    doc_lines = symbols_append_doc_lines(doc_lines[:], symbols_doc_lines_from_string(unquote_string(form.items[2].text))[:])
+                    variant_index = 3
+                }
+                symbols_write_record_doc(&builder, "union", name, source, form.items[1].span, "", "", doc_lines[:])
+                symbols_write_union_variants(&builder, source, name, form.items[variant_index])
             }
         case "proc", "defn", "defn-":
             if len(form.items) >= 2 && form.items[1].kind == .Symbol {
