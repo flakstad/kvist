@@ -5,7 +5,7 @@
 (defn loop-index-demo [] -> [dynamic]int
   (let [xs (arr/dynamic int [10 20 30]) defer
         out (arr/empty int)]
-    (for [x i xs]
+    (for [i x xs]
       (arr/push! out (+ x i)))
     out))
 

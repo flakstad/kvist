@@ -16,16 +16,20 @@ indentation for Kvist source.
 
 It also registers an xref backend and completion-at-point function. `M-.`
 jumps to definitions indexed by `kvist symbols`, including current-file
-declarations and simple imported Odin package definitions like `fmt.println`.
-For Kvist language forms and sequence helpers, `M-.` jumps to the compiler
+declarations, compiler-provided Kvist package members such as `arr/push!`, and
+imported Odin package definitions such as `fmt.println`. Both `pkg/member` and
+`pkg.member` spellings are accepted for imported package symbols. For Kvist
+language forms and sequence helpers, `M-.` jumps to the compiler
 implementation. Completion includes Kvist forms, sequence helpers, current-file
 declarations, and imported package members.
 
-`C-c C-.` shows docs for the symbol at point without jumping. Kvist declaration
+`C-c C-.` and `C-c d` show docs for the symbol at point without jumping. Kvist declaration
 docs come from contiguous `//`, `;`, or `/* ... */` comments immediately
 preceding a top-level declaration. Compiler-defined forms such as `if-let` and
 `if-ok` have small built-in docs. Imported Odin docs come from contiguous `//`
 or `/* ... */` comments immediately preceding the imported package definition.
+Compiler-provided Kvist packages such as `arr`, `str`, `map`, `set`, and
+`struct` also provide docs through the editor integration.
 
 `kvist-eval` shells out to the `kvist` CLI for eval, build, check, and run commands.
 The CLI generates temporary Odin and invokes Odin itself. Build the local
@@ -43,6 +47,7 @@ Default keys:
 
 - `M-.`: go to definition
 - `C-c C-.`: show docs for symbol at point
+- `C-c d`: show docs for symbol at point
 - `C-c C-e`: eval form at point inline
 - `C-c C-p`: eval form at point in the result buffer
 - `C-c C-i`: eval form at point and insert a `;; =>` comment

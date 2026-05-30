@@ -1512,6 +1512,34 @@ first_positive :: proc(xs: []int) -> int {
 }
 
 @(test)
+compile_for_iteration_forms :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn score-array [xs: [dynamic]int] -> int
+  (let [total 0]
+    (for [i x xs]
+      (set! total (+ total i x)))
+    total))
+
+(defn score-map [counts: map[string]int] -> int
+  (let [total 0]
+    (for [key value counts]
+      (set! total (+ total value)))
+    total))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "for i, x in xs {"), true)
+    testing.expect_value(t, strings.contains(output, "for key, value in counts {"), true)
+}
+
+@(test)
 compile_defer_forms :: proc(t: ^testing.T) {
     source := `(package main)
 (import "core:fmt")
@@ -2496,6 +2524,120 @@ compile_source_with_top_level_macro_dsl :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, `make_Point :: proc() -> Point`), true)
     testing.expect_value(t, strings.contains(output, `return Point{}`), true)
     testing.expect_value(t, strings.contains(output, `point_origin_p :: proc(point: Point) -> bool`), true)
+}
+
+@(test)
+compile_source_with_recursive_macro_dsl :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defmacro emit-union-ctors [union-name variants]
+  (if (= (count variants) 0)
+    (forms)
+    (let [tag (first variants)
+          value-type (nth variants 1)
+          ctor-name (symbol (str "make-" (name union-name) "-" (name tag)))]
+      (forms
+        (quasiquote
+          (defn (unquote ctor-name) [value: (unquote value-type)] -> (unquote union-name)
+            ((unquote union-name) {(unquote tag) value})))
+        (emit-union-ctors union-name (rest (rest variants)))))))
+
+(defmacro defunion+ctors [name variants]
+  (forms
+    (quasiquote
+      (defunion (unquote name) (unquote variants)))
+    (emit-union-ctors name variants)))
+
+(defunion+ctors Value {
+  :i int
+  :s string
+  :ok bool
+})`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, `Value :: union {`), true)
+    testing.expect_value(t, strings.contains(output, `make_Value_i :: proc(value: int) -> Value`), true)
+    testing.expect_value(t, strings.contains(output, `make_Value_s :: proc(value: string) -> Value`), true)
+    testing.expect_value(t, strings.contains(output, `make_Value_ok :: proc(value: bool) -> Value`), true)
+    testing.expect_value(t, strings.contains(output, `return Value(value)`), true)
+}
+
+@(test)
+compile_source_with_message_family_macro :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defmacro emit-message-structs [entries]
+  (if (= (count entries) 0)
+    (forms)
+    (let [entry (first entries)
+          struct-name (nth entry 0)
+          fields (nth entry 1)]
+      (forms
+        (quasiquote
+          (defstruct (unquote struct-name) (unquote fields)))
+        (emit-message-structs (rest entries))))))
+
+(defmacro emit-message-union-entries [entries]
+  (if (= (count entries) 0)
+    (forms)
+    (let [entry (first entries)
+          struct-name (nth entry 0)
+          tag (keyword (name struct-name))]
+      (forms
+        tag
+        struct-name
+        (emit-message-union-entries (rest entries))))))
+
+(defmacro emit-message-ctors [union-name entries]
+  (if (= (count entries) 0)
+    (forms)
+    (let [entry (first entries)
+          struct-name (nth entry 0)
+          ctor-name (symbol (str "make-" (name union-name) "-" (name struct-name)))
+          tag (keyword (name struct-name))]
+      (forms
+        (quasiquote
+          (defn (unquote ctor-name) [value: (unquote struct-name)] -> (unquote union-name)
+            ((unquote union-name) {(unquote tag) value})))
+        (emit-message-ctors union-name (rest entries))))))
+
+(defmacro defmessages [union-name entries]
+  (forms
+    (emit-message-structs entries)
+    (quasiquote
+      (defunion (unquote union-name) {
+        (splice (emit-message-union-entries entries))
+      }))
+    (emit-message-ctors union-name entries)))
+
+(defmessages Event [
+  [Connected {:id int}]
+  [Disconnected {:id int :reason string}]
+  [Data {:id int :payload string}]
+])`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, `Connected :: struct {`), true)
+    testing.expect_value(t, strings.contains(output, `Disconnected :: struct {`), true)
+    testing.expect_value(t, strings.contains(output, `Data :: struct {`), true)
+    testing.expect_value(t, strings.contains(output, `Event :: union {`), true)
+    testing.expect_value(t, strings.contains(output, `make_Event_Connected :: proc(value: Connected) -> Event`), true)
+    testing.expect_value(t, strings.contains(output, `make_Event_Disconnected :: proc(value: Disconnected) -> Event`), true)
+    testing.expect_value(t, strings.contains(output, `make_Event_Data :: proc(value: Data) -> Event`), true)
 }
 
 @(test)

@@ -1192,7 +1192,7 @@ Loops and cleanup remain explicit statements/forms:
 (for (< i 10)
   (fmt.println i))
 
-(each [x xs]
+(for [x xs]
   (fmt.println x))
 
 (defer (free thing))
@@ -1200,8 +1200,8 @@ Loops and cleanup remain explicit statements/forms:
 
 The current direction is:
 
-- `for` for condition-controlled loops
-- `each` for iteration over collections/ranges
+- `for` for both condition-controlled loops and ordinary collection iteration
+- `each` remains available as the older collection-iteration alias
 
 Counted loops should be written explicitly with surrounding bindings and
 mutation:
@@ -1211,6 +1211,14 @@ mutation:
   (for (< i 10)
     (fmt.println i)
     (set! i (+ i 1))))
+
+(for [i x xs]
+  (fmt.println i)
+  (fmt.println x))
+
+(for [key value lookup]
+  (fmt.println key)
+  (fmt.println value))
 ```
 
 ### Higher-order procedures
@@ -2039,6 +2047,17 @@ Top-level macros may now expand into multiple top-level forms by returning
         (defn (unquote make-name) [] -> (unquote name)
           ((unquote name) {}))))))
 ```
+
+Macros may also invoke other package-local macros during expansion. That makes
+recursive declaration DSLs possible, for example emitting one constructor helper
+per union variant from a single top-level form.
+
+That same pattern scales to more realistic message/event declarations, where one
+macro can emit:
+
+- one payload `defstruct` per entry
+- one `defunion` over those payloads
+- one constructor helper per variant
 
 ### `with-*` forms
 

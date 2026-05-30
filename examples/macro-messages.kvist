@@ -1,0 +1,72 @@
+;; A more realistic systems DSL. One declaration expands into:
+;; - one defstruct per message payload
+;; - one tagged union over those payloads
+;; - one constructor helper per message variant
+
+(defmacro emit-message-structs [entries]
+  (if (= (count entries) 0)
+    (forms)
+    (let [entry (first entries)
+          struct-name (nth entry 0)
+          fields (nth entry 1)]
+      (forms
+        (quasiquote
+          (defstruct (unquote struct-name) (unquote fields)))
+        (emit-message-structs (rest entries))))))
+
+(defmacro emit-message-union-entries [entries]
+  (if (= (count entries) 0)
+    (forms)
+    (let [entry (first entries)
+          struct-name (nth entry 0)
+          tag (keyword (name struct-name))]
+      (forms
+        tag
+        struct-name
+        (emit-message-union-entries (rest entries))))))
+
+(defmacro emit-message-ctors [union-name entries]
+  (if (= (count entries) 0)
+    (forms)
+    (let [entry (first entries)
+          struct-name (nth entry 0)
+          ctor-name (symbol (str "make-" (name union-name) "-" (name struct-name)))
+          tag (keyword (name struct-name))]
+      (forms
+        (quasiquote
+          (defn (unquote ctor-name) [value: (unquote struct-name)] -> (unquote union-name)
+            ((unquote union-name) {(unquote tag) value})))
+        (emit-message-ctors union-name (rest entries))))))
+
+(defmacro defmessages [union-name entries]
+  (forms
+    (emit-message-structs entries)
+    (quasiquote
+      (defunion (unquote union-name) {
+        (splice (emit-message-union-entries entries))
+      }))
+    (emit-message-ctors union-name entries)))
+
+(defmessages Event [
+  [Connected {:id int}]
+  [Disconnected {:id int :reason string}]
+  [Data {:id int :payload string}]
+])
+
+(defn describe-event [event: Event] -> string
+  (switch [value event]
+    Connected "connected"
+    Disconnected "disconnected"
+    Data (:payload value)
+    :else "unknown"))
+
+(defn macro-messages-demo []
+  (let [connected (make-Event-Connected (Connected {:id 7}))
+        disconnected (make-Event-Disconnected (Disconnected {:id 7 :reason "timeout"}))
+        data (make-Event-Data (Data {:id 7 :payload "hello"}))]
+    (println (describe-event connected))
+    (println (describe-event disconnected))
+    (println (describe-event data))))
+
+(defn main []
+  (macro-messages-demo))

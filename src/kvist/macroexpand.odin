@@ -573,6 +573,14 @@ find_user_macro :: proc(macros: []User_Macro, name: string) -> (User_Macro, bool
     return User_Macro{}, false
 }
 
+invoke_user_macro_value :: proc(macro_decl: User_Macro, call: CST_Form, macros: []User_Macro) -> (Macro_Value, Compile_Error, bool) {
+    bindings, err_bindings, ok_bindings := macro_collect_call_bindings(macro_decl, call)
+    if !ok_bindings {
+        return Macro_Value{}, err_bindings, false
+    }
+    return macro_eval_sequence(macro_decl.body[:], macros, bindings[:])
+}
+
 macro_collect_call_bindings :: proc(macro_decl: User_Macro, call: CST_Form) -> ([]Macro_Binding, Compile_Error, bool) {
     if call.kind != .List || len(call.items) == 0 {
         return nil, Compile_Error{message = "macro call must be a list", span = call.span}, false
@@ -594,6 +602,46 @@ macro_collect_call_bindings :: proc(macro_decl: User_Macro, call: CST_Form) -> (
         append(&bindings, Macro_Binding{name = macro_decl.params.rest_name, value = macro_forms_value(rest_args)})
     }
     return bindings[:], Compile_Error{}, true
+}
+
+macro_collect_eval_call_bindings :: proc(macro_decl: User_Macro, call: CST_Form, macros: []User_Macro, bindings: []Macro_Binding) -> ([]Macro_Binding, Compile_Error, bool) {
+    if call.kind != .List || len(call.items) == 0 {
+        return nil, Compile_Error{message = "macro call must be a list", span = call.span}, false
+    }
+    args := call.items[1:]
+    if !macro_decl.params.has_rest && len(args) != len(macro_decl.params.names) {
+        return nil, Compile_Error{message = fmt.tprintf("%s expects %d arguments", macro_decl.name, len(macro_decl.params.names)), span = call.span}, false
+    }
+    if macro_decl.params.has_rest && len(args) < len(macro_decl.params.names) {
+        return nil, Compile_Error{message = fmt.tprintf("%s expects at least %d arguments", macro_decl.name, len(macro_decl.params.names)), span = call.span}, false
+    }
+
+    out: [dynamic]Macro_Binding
+    for name, idx in macro_decl.params.names {
+        value, err_value, ok_value := macro_eval_expr(args[idx], macros, bindings)
+        if !ok_value {
+            return nil, err_value, false
+        }
+        append(&out, Macro_Binding{name = name, value = value})
+    }
+    if macro_decl.params.has_rest {
+        rest_out: [dynamic]CST_Form
+        for arg in args[len(macro_decl.params.names):] {
+            value, err_value, ok_value := macro_eval_expr(arg, macros, bindings)
+            if !ok_value {
+                return nil, err_value, false
+            }
+            forms, err_forms, ok_forms := macro_value_to_forms(value, arg.span)
+            if !ok_forms {
+                return nil, err_forms, false
+            }
+            for item in forms {
+                append(&rest_out, item)
+            }
+        }
+        append(&out, Macro_Binding{name = macro_decl.params.rest_name, value = macro_forms_value(rest_out[:])})
+    }
+    return out[:], Compile_Error{}, true
 }
 
 macro_eval_sequence :: proc(forms: []CST_Form, macros: []User_Macro, bindings: []Macro_Binding) -> (Macro_Value, Compile_Error, bool) {
@@ -1088,17 +1136,22 @@ macro_eval_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_
                 return macro_bool_value(value.kind == .Form), Compile_Error{}, true
             }
         }
+        if head.kind == .Symbol {
+            if user_macro, ok_user := find_user_macro(macros, head.text); ok_user {
+                local_bindings, err_bindings, ok_bindings := macro_collect_eval_call_bindings(user_macro, form, macros, bindings)
+                if !ok_bindings {
+                    return Macro_Value{}, err_bindings, false
+                }
+                return macro_eval_sequence(user_macro.body[:], macros, local_bindings[:])
+            }
+        }
         return macro_form_value(form), Compile_Error{}, true
     }
     return Macro_Value{}, Compile_Error{message = "unsupported macro form", span = form.span}, false
 }
 
 expand_user_macro_call :: proc(macro_decl: User_Macro, call: CST_Form, macros: []User_Macro) -> (CST_Form, Compile_Error, bool) {
-    bindings, err_bindings, ok_bindings := macro_collect_call_bindings(macro_decl, call)
-    if !ok_bindings {
-        return CST_Form{}, err_bindings, false
-    }
-    value, err_value, ok_value := macro_eval_sequence(macro_decl.body[:], macros, bindings)
+    value, err_value, ok_value := invoke_user_macro_value(macro_decl, call, macros)
     if !ok_value {
         return CST_Form{}, err_value, false
     }
@@ -1113,11 +1166,7 @@ expand_user_macro_call :: proc(macro_decl: User_Macro, call: CST_Form, macros: [
 }
 
 expand_user_macro_call_to_forms :: proc(macro_decl: User_Macro, call: CST_Form, macros: []User_Macro) -> ([]CST_Form, Compile_Error, bool) {
-    bindings, err_bindings, ok_bindings := macro_collect_call_bindings(macro_decl, call)
-    if !ok_bindings {
-        return nil, err_bindings, false
-    }
-    value, err_value, ok_value := macro_eval_sequence(macro_decl.body[:], macros, bindings[:])
+    value, err_value, ok_value := invoke_user_macro_value(macro_decl, call, macros)
     if !ok_value {
         return nil, err_value, false
     }

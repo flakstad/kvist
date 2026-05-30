@@ -5460,19 +5460,19 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
                 return emit_for_in_loop(e, coll_form, value_name, "", body[:])
             }
             if len(binding.items) == 3 && binding.items[0].kind == .Symbol && binding.items[1].kind == .Symbol {
-                value_name := map_name(binding.items[0].text)
-                index_name := map_name(binding.items[1].text)
+                first_name := map_name(binding.items[0].text)
+                second_name := map_name(binding.items[1].text)
                 coll_form := binding.items[2]
                 body: [dynamic]CST_Form
                 for item in form.items[body_start:] {
                     append(&body, item)
                 }
-                return emit_for_in_loop(e, coll_form, index_name, value_name, body[:])
+                return emit_for_in_loop(e, coll_form, first_name, second_name, body[:])
             }
-            return Compile_Error{message = "for expects [value collection], [value index collection], or condition and body", span = form.span}, false
+            return Compile_Error{message = "for expects [value collection], [first second collection], or condition and body", span = form.span}, false
         }
         if len(form.items) < 3 {
-            return Compile_Error{message = "for expects [value collection], [value index collection], or condition and body", span = form.span}, false
+            return Compile_Error{message = "for expects [value collection], [first second collection], or condition and body", span = form.span}, false
         }
         cond, err_cond, ok_cond := emit_expr(e, form.items[1])
         if !ok_cond {
