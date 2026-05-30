@@ -227,7 +227,9 @@ macro_lookup_binding :: proc(bindings: []Macro_Binding, name: string) -> (Macro_
 }
 
 is_defmacro_form :: proc(form: CST_Form) -> bool {
-    return form.kind == .List && len(form.items) > 0 && is_symbol(form.items[0], "defmacro")
+    return form.kind == .List && len(form.items) > 0 &&
+        form.items[0].kind == .Symbol &&
+        (form.items[0].text == "defmacro" || form.items[0].text == "defmacro-")
 }
 
 core_macro_decl_from_source :: proc(source: string) -> (User_Macro, Compile_Error, bool) {
@@ -1187,6 +1189,87 @@ macro_eval_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_
                     return macro_bool_value(false), Compile_Error{}, true
                 }
                 return macro_bool_value(value.form.kind == .Brace), Compile_Error{}, true
+            case "list?":
+                if len(form.items) != 2 {
+                    return Macro_Value{}, Compile_Error{message = "list? expects one argument", span = form.span}, false
+                }
+                value, err_value, ok_value := macro_eval_expr(form.items[1], macros, bindings)
+                if !ok_value {
+                    return Macro_Value{}, err_value, false
+                }
+                if value.kind != .Form {
+                    return macro_bool_value(false), Compile_Error{}, true
+                }
+                return macro_bool_value(value.form.kind == .List), Compile_Error{}, true
+            case "symbol?":
+                if len(form.items) != 2 {
+                    return Macro_Value{}, Compile_Error{message = "symbol? expects one argument", span = form.span}, false
+                }
+                value, err_value, ok_value := macro_eval_expr(form.items[1], macros, bindings)
+                if !ok_value {
+                    return Macro_Value{}, err_value, false
+                }
+                if value.kind != .Form {
+                    return macro_bool_value(false), Compile_Error{}, true
+                }
+                return macro_bool_value(value.form.kind == .Symbol), Compile_Error{}, true
+            case "keyword?":
+                if len(form.items) != 2 {
+                    return Macro_Value{}, Compile_Error{message = "keyword? expects one argument", span = form.span}, false
+                }
+                value, err_value, ok_value := macro_eval_expr(form.items[1], macros, bindings)
+                if !ok_value {
+                    return Macro_Value{}, err_value, false
+                }
+                if value.kind != .Form {
+                    return macro_bool_value(false), Compile_Error{}, true
+                }
+                return macro_bool_value(value.form.kind == .Keyword), Compile_Error{}, true
+            case "string?":
+                if len(form.items) != 2 {
+                    return Macro_Value{}, Compile_Error{message = "string? expects one argument", span = form.span}, false
+                }
+                value, err_value, ok_value := macro_eval_expr(form.items[1], macros, bindings)
+                if !ok_value {
+                    return Macro_Value{}, err_value, false
+                }
+                if value.kind == .String {
+                    return macro_bool_value(true), Compile_Error{}, true
+                }
+                if value.kind != .Form {
+                    return macro_bool_value(false), Compile_Error{}, true
+                }
+                return macro_bool_value(value.form.kind == .String), Compile_Error{}, true
+            case "number?":
+                if len(form.items) != 2 {
+                    return Macro_Value{}, Compile_Error{message = "number? expects one argument", span = form.span}, false
+                }
+                value, err_value, ok_value := macro_eval_expr(form.items[1], macros, bindings)
+                if !ok_value {
+                    return Macro_Value{}, err_value, false
+                }
+                if value.kind == .Int {
+                    return macro_bool_value(true), Compile_Error{}, true
+                }
+                if value.kind != .Form {
+                    return macro_bool_value(false), Compile_Error{}, true
+                }
+                return macro_bool_value(value.form.kind == .Number), Compile_Error{}, true
+            case "bool?":
+                if len(form.items) != 2 {
+                    return Macro_Value{}, Compile_Error{message = "bool? expects one argument", span = form.span}, false
+                }
+                value, err_value, ok_value := macro_eval_expr(form.items[1], macros, bindings)
+                if !ok_value {
+                    return Macro_Value{}, err_value, false
+                }
+                if value.kind == .Bool {
+                    return macro_bool_value(true), Compile_Error{}, true
+                }
+                if value.kind != .Form {
+                    return macro_bool_value(false), Compile_Error{}, true
+                }
+                return macro_bool_value(value.form.kind == .Bool), Compile_Error{}, true
             case "text":
                 if len(form.items) != 2 {
                     return Macro_Value{}, Compile_Error{message = "text expects one argument", span = form.span}, false

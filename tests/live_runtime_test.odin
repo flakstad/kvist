@@ -496,3 +496,136 @@ live_runtime_accepts_bodyless_entrypoints_with_options_omitted :: proc(t: ^testi
     testing.expect_value(t, len(def.hooks), 1)
     testing.expect_value(t, len(def.hooks[0].body) > 0, true)
 }
+
+@(test)
+live_runtime_evaluates_cond_clauses :: proc(t: ^testing.T) {
+    runtime := kvist_live.new_runtime(kvist_live.Runtime_Config{
+        app_name = "tests",
+        live_enabled = true,
+    })
+    defer kvist_live.runtime_delete(&runtime)
+
+    def := must_parse_module(t, `(live/module {:name "cond-demo" :version "v1"})
+(def level 3)
+(defn tick []
+  (cond
+    [(= level 1) "one"]
+    [(= level 2) "two"]
+    [(= level 3) "three"]
+    [:else "other"]))
+(live/command tick)`)
+    defer {
+        kvist_live.state_entry_slice_delete(&def.initial_state)
+        kvist_live.delete_behavior_definition_slice(&def.functions)
+        kvist_live.delete_behavior_definition_slice(&def.commands)
+        kvist_live.delete_behavior_definition_slice(&def.hooks)
+        if def.name != "" {
+            delete(def.name)
+        }
+        if def.version != "" {
+            delete(def.version)
+        }
+    }
+
+    load_err, load_ok := kvist_live.load_module(&runtime, def)
+    testing.expect_value(t, load_ok, true)
+    testing.expect_value(t, load_err.message, "")
+
+    result, invoke_err, invoke_ok := kvist_live.invoke_command(&runtime, "tick", nil)
+    defer kvist_live.value_delete(&result)
+    testing.expect_value(t, invoke_ok, true)
+    testing.expect_value(t, invoke_err.message, "")
+    testing.expect_value(t, result.kind, kvist_live.Value_Kind.String)
+    testing.expect_value(t, result.text, "three")
+}
+
+@(test)
+live_runtime_runs_source_defined_lifecycle_functions :: proc(t: ^testing.T) {
+    runtime := kvist_live.new_runtime(kvist_live.Runtime_Config{
+        app_name = "tests",
+        live_enabled = true,
+    })
+    defer kvist_live.runtime_delete(&runtime)
+
+    capability_err, capability_ok := kvist_live.register_capability(&runtime, kvist_live.Host_Capability{
+        name = "tests.mark-hook",
+        doc = "Increment hook count.",
+        handler = stateful_hook_counter_capability,
+    })
+    testing.expect_value(t, capability_ok, true)
+    testing.expect_value(t, capability_err.message, "")
+
+    def := must_parse_module(t, `(live/module {:name "lifecycle" :version "v1"})
+(def init-message "booted")
+(def shutdown-message "stopped")
+(defn init []
+  (state/set! "init-message-seen" init-message))
+(defn shutdown []
+  (host/call "tests.mark-hook")
+  (state/set! "shutdown-message-seen" shutdown-message))
+(defn tick [] "ok")
+(live/command tick)`)
+    defer {
+        kvist_live.state_entry_slice_delete(&def.initial_state)
+        kvist_live.delete_behavior_definition_slice(&def.functions)
+        kvist_live.delete_behavior_definition_slice(&def.commands)
+        kvist_live.delete_behavior_definition_slice(&def.hooks)
+        if def.name != "" {
+            delete(def.name)
+        }
+        if def.version != "" {
+            delete(def.version)
+        }
+    }
+
+    load_err, load_ok := kvist_live.load_module(&runtime, def)
+    testing.expect_value(t, load_ok, true)
+    testing.expect_value(t, load_err.message, "")
+
+    module, module_ok := kvist_live.loaded_module(&runtime, "lifecycle")
+    testing.expect_value(t, module_ok, true)
+    init_seen, init_seen_ok := kvist_live.module_state_get_string(module, "init-message-seen")
+    testing.expect_value(t, init_seen_ok, true)
+    testing.expect_value(t, init_seen, "booted")
+
+    next_def := must_parse_module(t, `(live/module {:name "lifecycle" :version "v2"})
+(def init-message "rebooted")
+(def shutdown-message "stopped")
+(defn init []
+  (state/set! "init-message-seen" init-message))
+(defn shutdown []
+  (host/call "tests.mark-hook")
+  (state/set! "shutdown-message-seen" shutdown-message))
+(defn tick [] "ok")
+(live/command tick)`)
+    defer {
+        kvist_live.state_entry_slice_delete(&next_def.initial_state)
+        kvist_live.delete_behavior_definition_slice(&next_def.functions)
+        kvist_live.delete_behavior_definition_slice(&next_def.commands)
+        kvist_live.delete_behavior_definition_slice(&next_def.hooks)
+        if next_def.name != "" {
+            delete(next_def.name)
+        }
+        if next_def.version != "" {
+            delete(next_def.version)
+        }
+    }
+
+    reload_err, reload_ok := kvist_live.reload_module(&runtime, next_def)
+    testing.expect_value(t, reload_ok, true)
+    testing.expect_value(t, reload_err.message, "")
+
+    reloaded, reloaded_ok := kvist_live.loaded_module(&runtime, "lifecycle")
+    testing.expect_value(t, reloaded_ok, true)
+    init_seen_2, init_seen_ok_2 := kvist_live.module_state_get_string(reloaded, "init-message-seen")
+    testing.expect_value(t, init_seen_ok_2, true)
+    testing.expect_value(t, init_seen_2, "rebooted")
+
+    saw_hook_capability := false
+    for event in runtime.events {
+        if event.kind == .Capability_Called && event.module_name == "tests.mark-hook" {
+            saw_hook_capability = true
+        }
+    }
+    testing.expect_value(t, saw_hook_capability, true)
+}

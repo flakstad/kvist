@@ -1,0 +1,16 @@
+// Hiccup supports a small typed value surface for attrs and text nodes.
+(package main)
+(import hiccup "kvist:hiccup")
+
+(defn values-demo [] -> bool
+  (let [page (hiccup/html
+               [:section {:hidden false :data-count 3}
+                [:h1 "Report"]
+                [:p true]
+                [:p 42]])
+        html (hiccup/render page) defer]
+    (println html)
+    true))
+
+(defn main []
+  (values-demo))

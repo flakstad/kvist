@@ -17,6 +17,7 @@ delete_definition :: proc(def: ^kvist_live.Module_Definition) {
         delete(def.version)
     }
     kvist_live.state_entry_slice_delete(&def.initial_state)
+    kvist_live.delete_behavior_definition_slice(&def.functions)
     kvist_live.delete_behavior_definition_slice(&def.commands)
     kvist_live.delete_behavior_definition_slice(&def.hooks)
     def^ = kvist_live.Module_Definition{}

@@ -27,6 +27,12 @@
 (def hook-message "hook fired after the command")
 (def counter-key "run-count")
 
+(defn init []
+  (host/call "host.log" "live module initialized"))
+
+(defn shutdown []
+  (host/call "host.log" "live module shutting down"))
+
 (defn tick []
   (let [count (state/inc! counter-key)]
     (render-and-log count)

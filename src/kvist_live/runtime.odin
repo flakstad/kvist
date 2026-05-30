@@ -297,6 +297,15 @@ module_state_get_string :: proc(module: ^Live_Module, key: string) -> (string, b
     return state_entries_get_string(module.state[:], key)
 }
 
+merge_missing_state_entries :: proc(dst: ^Live_Module, src: []State_Entry) {
+    for entry in src {
+        if _, exists := module_state_get(dst, entry.key); exists {
+            continue
+        }
+        module_state_put(dst, entry.key, entry.value)
+    }
+}
+
 module_definition_to_module :: proc(runtime: ^Runtime, def: Module_Definition) -> Live_Module {
     module := Live_Module{
         runtime = runtime,
@@ -313,6 +322,31 @@ module_definition_to_module :: proc(runtime: ^Runtime, def: Module_Definition) -
     }
     runtime.next_generation += 1
     return module
+}
+
+run_source_init :: proc(runtime: ^Runtime, module: ^Live_Module) -> (Runtime_Error, bool) {
+    if _, found := find_live_function(module, "init"); !found {
+        return Runtime_Error{}, true
+    }
+
+    result, err, ok := execute_named_live_function(module, "init", nil)
+    value_delete(&result)
+    if !ok && err.message != "" {
+        record_event(runtime, .Error, module.name, err.message)
+    }
+    return err, ok
+}
+
+run_source_shutdown :: proc(runtime: ^Runtime, module: ^Live_Module) {
+    if _, found := find_live_function(module, "shutdown"); !found {
+        return
+    }
+
+    result, err, ok := execute_named_live_function(module, "shutdown", nil)
+    value_delete(&result)
+    if !ok && err.message != "" {
+        record_event(runtime, .Error, module.name, err.message)
+    }
 }
 
 find_command_index :: proc(runtime: ^Runtime, name: string) -> int {
@@ -519,6 +553,14 @@ load_module :: proc(runtime: ^Runtime, def: Module_Definition) -> (Runtime_Error
         }
     }
 
+    source_init_err, source_init_ok := run_source_init(runtime, &module)
+    if !source_init_ok {
+        clear_generation_commands(runtime, module.generation)
+        clear_generation_hooks(runtime, module.generation)
+        module_delete(&module)
+        return source_init_err, false
+    }
+
     append(&runtime.modules, module)
     record_event(runtime, .Module_Loaded, def.name, def.version)
     return Runtime_Error{}, true
@@ -546,7 +588,9 @@ reload_module :: proc(runtime: ^Runtime, def: Module_Definition) -> (Runtime_Err
             return migrate_err, false
         }
     } else {
-        new_module.state = module_state_clone(old_module.state[:])
+        // Keep new source-defined bindings from the replacement module, and
+        // only carry forward runtime-added state slots that are missing.
+        merge_missing_state_entries(&new_module, old_module.state[:])
     }
 
     if new_module.init != nil {
@@ -584,10 +628,19 @@ reload_module :: proc(runtime: ^Runtime, def: Module_Definition) -> (Runtime_Err
         }
     }
 
+    source_init_err, source_init_ok := run_source_init(runtime, &new_module)
+    if !source_init_ok {
+        clear_generation_commands(runtime, new_module.generation)
+        clear_generation_hooks(runtime, new_module.generation)
+        module_delete(&new_module)
+        return source_init_err, false
+    }
+
     if runtime.modules[idx].shutdown != nil {
         runtime.modules[idx].shutdown(runtime, &runtime.modules[idx])
         record_event(runtime, .Module_Shutdown, def.name, runtime.modules[idx].version)
     }
+    run_source_shutdown(runtime, &runtime.modules[idx])
 
     clear_generation_commands(runtime, runtime.modules[idx].generation)
     clear_generation_hooks(runtime, runtime.modules[idx].generation)

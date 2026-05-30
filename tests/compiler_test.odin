@@ -125,6 +125,7 @@ compile_all_examples :: proc(t: ^testing.T) {
         "examples/higher-order.kvist",
         "examples/hiccup-demo.kvist",
         "examples/hiccup-render.kvist",
+        "examples/hiccup-values.kvist",
         "examples/inline-literals.kvist",
         "examples/interop-directives.kvist",
         "examples/pointers-and-raw.kvist",
@@ -416,6 +417,8 @@ editor_symbols_source_includes_source_package_imports :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "struct\thiccup/Element\t"), true)
     testing.expect_value(t, strings.contains(output, "union\thiccup/Node\t"), true)
     testing.expect_value(t, strings.contains(output, "packages/hiccup/package.kvist"), true)
+    testing.expect_value(t, strings.contains(output, "hiccup/emit-node"), false)
+    testing.expect_value(t, strings.contains(output, "hiccup/render-node-into"), false)
 }
 
 @(test)

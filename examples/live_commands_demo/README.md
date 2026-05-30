@@ -46,13 +46,23 @@ line-based placeholder format. The current loader and evaluator understand:
 - `(live/command name)` or `(live/command name {...})`, with optional inline body
 - `(live/hook name)` or `(live/hook name {...})`, with optional inline body
 - top-level `def`, `defconst`, or `defvar` literal bindings
+- optional source-defined lifecycle helpers:
+  - `defn init [] ...`
+  - `defn shutdown [] ...`
 - behavior forms including `let`, `if`, `when`, `state/get`, `state/set!`,
   `state/inc!`, `module/name`, `module/version`, `host/call`, `hook/emit`,
-  `+`, `=`, `str`, direct symbol lookup from module bindings, and ordinary
-  calls to top-level `defn` helpers
+  `+`, `=`, `str`, `cond`, direct symbol lookup from module bindings, and
+  ordinary calls to top-level `defn` helpers
 
 If a `live/command` or `live/hook` has no inline body, the loader will use a
 same-named zero-argument top-level `defn`. Options maps are optional too.
 
+If the module defines zero-argument top-level `defn init` or `defn shutdown`,
+the runtime will invoke them on load and unload/reload.
+
 It still does not evaluate arbitrary Kvist code. This step is about moving the
 live path onto actual language syntax and a small executable shared subset.
+
+See [../../docs/LIVE-SHARED-SUBSET.md](../../docs/LIVE-SHARED-SUBSET.md) for
+the explicit current overlap the project is treating as the live/compiled
+shared surface.

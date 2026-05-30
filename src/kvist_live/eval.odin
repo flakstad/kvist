@@ -49,6 +49,41 @@ find_live_function :: proc(module: ^Live_Module, name: string) -> (^Behavior_Def
     return nil, false
 }
 
+execute_live_function :: proc(module: ^Live_Module, live_fn: ^Behavior_Definition, args: []Value, bindings: []Eval_Binding) -> (Value, Runtime_Error, bool) {
+    if len(args) != len(live_fn.params) {
+        return Value{}, Runtime_Error{message = strings.clone(fmt.tprintf("live function %s expects %d args", live_fn.name, len(live_fn.params)))}, false
+    }
+
+    local := clone_eval_binding_slice(bindings)
+    defer delete_eval_binding_slice(&local)
+
+    for arg, idx in args {
+        append(&local, Eval_Binding{
+            name = strings.clone(live_fn.params[idx]),
+            value = value_clone(arg),
+        })
+    }
+
+    result := value_nil()
+    for body_form in live_fn.body {
+        value_delete(&result)
+        next, err, ok := eval_form(module, body_form, local[:])
+        if !ok {
+            return Value{}, err, false
+        }
+        result = next
+    }
+    return result, Runtime_Error{}, true
+}
+
+execute_named_live_function :: proc(module: ^Live_Module, name: string, args: []Value) -> (Value, Runtime_Error, bool) {
+    live_fn, found := find_live_function(module, name)
+    if !found {
+        return Value{}, Runtime_Error{message = strings.clone(fmt.tprintf("unknown live function: %s", name))}, false
+    }
+    return execute_live_function(module, live_fn, args, nil)
+}
+
 find_module_binding :: proc(module: ^Live_Module, name: string) -> (Value, bool) {
     if entry, ok := module_state_get(module, name); ok {
         return value_clone(entry.value), true
@@ -171,6 +206,54 @@ eval_list :: proc(module: ^Live_Module, form: kvist.CST_Form, bindings: []Eval_B
             result = next
         }
         return result, Runtime_Error{}, true
+    case "cond":
+        if len(form.items) < 2 {
+            return Value{}, Runtime_Error{message = strings.clone("cond expects at least one clause")}, false
+        }
+        for clause in form.items[1:] {
+            if clause.kind != .Vector || len(clause.items) < 1 {
+                return Value{}, Runtime_Error{message = strings.clone("cond expects vector clauses")}, false
+            }
+            test_form := clause.items[0]
+            if test_form.kind == .Keyword && test_form.text == ":else" {
+                result := value_nil()
+                for body_form in clause.items[1:] {
+                    value_delete(&result)
+                    next, err, ok := eval_form(module, body_form, bindings)
+                    if !ok {
+                        return Value{}, err, false
+                    }
+                    result = next
+                }
+                return result, Runtime_Error{}, true
+            }
+
+            test, err, ok := eval_form(module, test_form, bindings)
+            if !ok {
+                return Value{}, err, false
+            }
+            truthy := value_truthy(test)
+            value_delete(&test)
+            if !truthy {
+                continue
+            }
+
+            if len(clause.items) == 1 {
+                return value_bool(true), Runtime_Error{}, true
+            }
+
+            result := value_nil()
+            for body_form in clause.items[1:] {
+                value_delete(&result)
+                next, next_err, next_ok := eval_form(module, body_form, bindings)
+                if !next_ok {
+                    return Value{}, next_err, false
+                }
+                result = next
+            }
+            return result, Runtime_Error{}, true
+        }
+        return value_nil(), Runtime_Error{}, true
     case "let":
         if len(form.items) < 3 || form.items[1].kind != .Vector {
             return Value{}, Runtime_Error{message = strings.clone("let expects a binding vector and a body")}, false
@@ -362,34 +445,21 @@ eval_list :: proc(module: ^Live_Module, form: kvist.CST_Form, bindings: []Eval_B
         if !found {
             return Value{}, Runtime_Error{message = strings.clone(fmt.tprintf("unsupported live form: %s", head))}, false
         }
-        if len(form.items)-1 != len(live_fn.params) {
-            return Value{}, Runtime_Error{message = strings.clone(fmt.tprintf("live function %s expects %d args", head, len(live_fn.params)))}, false
+        args: [dynamic]Value
+        defer {
+            for i in 0 ..< len(args) {
+                value_delete(&args[i])
+            }
+            delete(args)
         }
-
-        local := clone_eval_binding_slice(bindings)
-        defer delete_eval_binding_slice(&local)
-
-        for arg_form, idx in form.items[1:] {
+        for arg_form in form.items[1:] {
             value, value_err, value_ok := eval_form(module, arg_form, bindings)
             if !value_ok {
                 return Value{}, value_err, false
             }
-            append(&local, Eval_Binding{
-                name = strings.clone(live_fn.params[idx]),
-                value = value,
-            })
+            append(&args, value)
         }
-
-        result := value_nil()
-        for body_form in live_fn.body {
-            value_delete(&result)
-            next, err, ok := eval_form(module, body_form, local[:])
-            if !ok {
-                return Value{}, err, false
-            }
-            result = next
-        }
-        return result, Runtime_Error{}, true
+        return execute_live_function(module, live_fn, args[:], bindings)
     }
 }
 

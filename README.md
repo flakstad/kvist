@@ -24,7 +24,9 @@ should not drive the core implementation yet live in
 optional embedded live runtime lives in
 [docs/LIVE-RUNTIME.md](docs/LIVE-RUNTIME.md), and a more workflow-focused note
 on live iterative development lives in
-[docs/LIVE-DEVELOPMENT.md](docs/LIVE-DEVELOPMENT.md). The larger unresolved
+[docs/LIVE-DEVELOPMENT.md](docs/LIVE-DEVELOPMENT.md). The current live/compiled
+overlap is tracked in
+[docs/LIVE-SHARED-SUBSET.md](docs/LIVE-SHARED-SUBSET.md). The larger unresolved
 language areas are tracked in [docs/NEXT-STEPS.md](docs/NEXT-STEPS.md).
 Ownership rules live in [docs/OWNERSHIP.md](docs/OWNERSHIP.md), and
 pointer/value guidance lives in [docs/POINTERS.md](docs/POINTERS.md).

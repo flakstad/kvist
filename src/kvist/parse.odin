@@ -861,7 +861,7 @@ parse_decl :: proc(top_form: CST_Top_Form) -> (decl: AST_Decl, err: Compile_Erro
             doc_lines = top_form.doc_lines,
             raw_text = unquote_string(form.items[1].text),
         }, {}, true
-    case "proc", "defn":
+    case "proc", "defn", "defn-":
         doc_lines := top_form.doc_lines
         proc_form := form
         if len(form.items) > 3 && form.items[2].kind == .String {
@@ -884,6 +884,8 @@ parse_decl :: proc(top_form: CST_Top_Form) -> (decl: AST_Decl, err: Compile_Erro
             doc_lines = doc_lines,
             proc_decl = proc_decl,
         }, {}, true
+    case "defmacro", "defmacro-":
+        return AST_Decl{kind = .Ignored, span = form.span}, {}, true
         case:
             return decl, Compile_Error{message = fmt.tprintf("unsupported top-level form: %s", head.text), span = head.span}, false
         }

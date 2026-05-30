@@ -1,10 +1,17 @@
 (package hiccup)
 (import arr "kvist:arr")
+(import "core:fmt")
 (import strings "core:strings")
+
+(defunion Attr-Value {
+  :text string
+  :int int
+  :bool bool
+})
 
 (defstruct Attr {
   :name string
-  :value string
+  :value Attr-Value
 })
 
 (defstruct Element {
@@ -15,10 +22,27 @@
 
 (defunion Node {
   :text string
+  :int int
+  :bool bool
   :element Element
 })
 
-(defmacro emit-attr-items [items]
+(defmacro- emit-attr-value [form]
+  (if (string? form)
+    (quasiquote (Attr-Value {:text (unquote form)}))
+    (if (number? form)
+      (quasiquote (Attr-Value {:int (unquote form)}))
+      (if (bool? form)
+        (quasiquote (Attr-Value {:bool (unquote form)}))
+        (if (keyword? form)
+          (quasiquote (Attr-Value {:text (unquote (text form))}))
+          (if (symbol? form)
+            (quasiquote (Attr-Value {:text (unquote (text form))}))
+            (if (list? form)
+              (quasiquote (Attr-Value {:text (unquote form)}))
+              (quasiquote (Attr-Value {:text (unquote (text form))})))))))))
+
+(defmacro- emit-attr-items [items]
   (if (= (count items) 0)
     (forms)
     (let [key (nth items 0)
@@ -26,17 +50,17 @@
       (forms
         (quasiquote
           (Attr {:name (unquote (text key))
-                 :value (unquote (text value))}))
+                 :value (unquote (emit-attr-value value))}))
         (emit-attr-items (rest (rest items)))))))
 
-(defmacro emit-child-items [items]
+(defmacro- emit-child-items [items]
   (if (= (count items) 0)
     (forms)
     (forms
       (emit-node (first items))
       (emit-child-items (rest items)))))
 
-(defmacro emit-node [form]
+(defmacro- emit-node [form]
   (if (vector? form)
     (let [tag (first form)
           tail (rest form)]
@@ -55,8 +79,19 @@
               (Node {:element (Element {:tag (unquote (text tag))
                                         :attrs []
                                         :children [(splice (emit-child-items tail))]})}))))))
-    (quasiquote
-      (Node {:text (unquote (text form))}))))
+    (if (string? form)
+      (quasiquote (Node {:text (unquote form)}))
+      (if (number? form)
+        (quasiquote (Node {:int (unquote form)}))
+        (if (bool? form)
+          (quasiquote (Node {:bool (unquote form)}))
+          (if (keyword? form)
+            (quasiquote (Node {:text (unquote (text form))}))
+            (if (symbol? form)
+              (quasiquote (Node {:text (unquote (text form))}))
+              (if (list? form)
+                (quasiquote (Node {:text (unquote form)}))
+                (quasiquote (Node {:text (unquote (text form))}))))))))))
 
 (defmacro html [form]
   (emit-node form))
@@ -65,21 +100,27 @@
   (switch [value node]
     Element (:tag value)
     string ""
+    int ""
+    bool ""
     :else ""))
 
 (defn attr-count [node: Node] -> int
   (switch [value node]
     Element (arr/count (:attrs value))
     string 0
+    int 0
+    bool 0
     :else 0))
 
 (defn child-count [node: Node] -> int
   (switch [value node]
     Element (arr/count (:children value))
     string 0
+    int 0
+    bool 0
     :else 0))
 
-(defn replace-owned [text: string, old: string, new: string] -> string
+(defn- replace-owned [text: string, old: string, new: string] -> string
   (let [[updated allocated?] (strings.replace text old new -1)]
     (if allocated?
       (do
@@ -87,7 +128,7 @@
         updated)
       text)))
 
-(defn escape-html [text: string] -> string
+(defn- escape-html [text: string] -> string
   (let [[owned err] (strings.clone text)]
     (if (!= err nil)
       ""
@@ -97,15 +138,24 @@
             step4 (replace-owned step3 "\"" "&quot;")]
         (replace-owned step4 "'" "&#39;")))))
 
-(defn render-attr-into [builder: ^strings.Builder, attr: Attr]
-  (strings.write_string builder " ")
-  (strings.write_string builder (:name attr))
-  (strings.write_string builder "=\"")
-  (let [escaped (escape-html (:value attr)) defer]
-    (strings.write_string builder escaped))
-  (strings.write_string builder "\""))
+(defn- render-attr-into [builder: ^strings.Builder, attr: Attr]
+  (switch [value (:value attr)]
+    string
+    (do
+      (strings.write_string builder " ")
+      (strings.write_string builder (:name attr))
+      (strings.write_string builder "=\"")
+      (let [escaped (escape-html value) defer]
+        (strings.write_string builder escaped))
+      (strings.write_string builder "\""))
+    int
+    (fmt.sbprintf builder " %s=\"%d\"" (:name attr) value)
+    bool
+    (when value
+      (strings.write_string builder " ")
+      (strings.write_string builder (:name attr)))))
 
-(defn render-node-into [builder: ^strings.Builder, node: Node]
+(defn- render-node-into [builder: ^strings.Builder, node: Node]
   (switch [value node]
     Element
     (do
@@ -121,7 +171,13 @@
       (strings.write_string builder ">"))
     string
     (let [escaped (escape-html value) defer]
-      (strings.write_string builder escaped))))
+      (strings.write_string builder escaped))
+    int
+    (fmt.sbprintf builder "%d" value)
+    bool
+    (if value
+      (strings.write_string builder "true")
+      (strings.write_string builder "false"))))
 
 (defn render [node: Node] -> string
   (let [builder (strings.builder_make)]

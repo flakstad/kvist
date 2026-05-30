@@ -646,6 +646,26 @@ symbols_record_name :: proc(line: string) -> string {
     return rest[:second_tab]
 }
 
+symbols_record_detail :: proc(line: string) -> string {
+    first_tab := strings.index(line, "\t")
+    if first_tab < 0 {
+        return ""
+    }
+    rest := line[first_tab+1:]
+    for _ in 0..<3 {
+        tab := strings.index(rest, "\t")
+        if tab < 0 {
+            return ""
+        }
+        rest = rest[tab+1:]
+    }
+    tab := strings.index(rest, "\t")
+    if tab < 0 {
+        return rest
+    }
+    return rest[:tab]
+}
+
 symbols_append_unique_records :: proc(builder: ^strings.Builder, seen: ^map[string]bool, output: string) {
     lines := strings.split_lines(output, context.allocator)
     defer delete(lines)
@@ -704,6 +724,10 @@ symbols_append_source_package_records :: proc(builder: ^strings.Builder, seen: ^
         kind := fields[0]
         name := fields[1]
         if !symbols_top_level_kind_exported(kind) {
+            delete(fields)
+            continue
+        }
+        if symbols_record_detail(line) == "private" {
             delete(fields)
             continue
         }
@@ -1463,7 +1487,7 @@ symbols_source :: proc(source: string) -> (output: string, err: Compile_Error, o
                 symbols_write_record_doc(&builder, "union", name, source, form.items[1].span, "", "", top.doc_lines[:])
                 symbols_write_union_variants(&builder, source, name, form.items[2])
             }
-        case "proc", "defn":
+        case "proc", "defn", "defn-":
             if len(form.items) >= 2 && form.items[1].kind == .Symbol {
                 doc_lines := top.doc_lines
                 proc_form := form
@@ -1483,9 +1507,13 @@ symbols_source :: proc(source: string) -> (output: string, err: Compile_Error, o
                 } else {
                     _ = err_proc
                 }
-                symbols_write_record_doc(&builder, "proc", form.items[1].text, source, form.items[1].span, "", signature, doc_lines[:])
+                detail := ""
+                if head == "defn-" {
+                    detail = "private"
+                }
+                symbols_write_record_doc(&builder, "proc", form.items[1].text, source, form.items[1].span, detail, signature, doc_lines[:])
             }
-        case "defmacro":
+        case "defmacro", "defmacro-":
             if len(form.items) >= 3 && form.items[1].kind == .Symbol {
                 doc_lines := top.doc_lines
                 if len(form.items) > 4 && form.items[2].kind == .String {
@@ -1497,7 +1525,11 @@ symbols_source :: proc(source: string) -> (output: string, err: Compile_Error, o
                 } else if len(form.items) >= 4 && form.items[3].kind == .Vector {
                     signature = fmt.tprintf("(%s %s)", form.items[1].text, form.items[3].text)
                 }
-                symbols_write_record_doc(&builder, "macro", form.items[1].text, source, form.items[1].span, "", signature, doc_lines[:])
+                detail := ""
+                if head == "defmacro-" {
+                    detail = "private"
+                }
+                symbols_write_record_doc(&builder, "macro", form.items[1].text, source, form.items[1].span, detail, signature, doc_lines[:])
             }
         case:
         }

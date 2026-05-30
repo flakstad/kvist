@@ -128,6 +128,15 @@ decl_head_name :: proc(form: CST_Form) -> string {
     return form.items[0].text
 }
 
+is_private_decl_head :: proc(head: string) -> bool {
+    switch head {
+    case "defn-", "defmacro-":
+        return true
+    case:
+        return false
+    }
+}
+
 collect_local_decl_names :: proc(forms: []CST_Top_Form) -> (names: [dynamic]string) {
     for top in forms {
         form := top.form
@@ -135,7 +144,7 @@ collect_local_decl_names :: proc(forms: []CST_Top_Form) -> (names: [dynamic]stri
             continue
         }
         switch decl_head_name(form) {
-        case "const", "defconst", "defvar", "struct", "defstruct", "enum", "defenum", "union", "defunion", "proc", "defn", "defmacro":
+        case "const", "defconst", "defvar", "struct", "defstruct", "enum", "defenum", "union", "defunion", "proc", "defn", "defn-", "defmacro", "defmacro-":
             append(&names, form.items[1].text)
         }
     }
@@ -226,7 +235,7 @@ rewrite_decl_name :: proc(form: ^CST_Form, prefix: string) {
         return
     }
     switch decl_head_name(form^) {
-    case "const", "defconst", "defvar", "struct", "defstruct", "enum", "defenum", "union", "defunion", "proc", "defn", "defmacro":
+    case "const", "defconst", "defvar", "struct", "defstruct", "enum", "defenum", "union", "defunion", "proc", "defn", "defn-", "defmacro", "defmacro-":
         form^.items[1].text = fmt.tprintf("%s__%s", prefix, form^.items[1].text)
     }
 }
@@ -239,7 +248,7 @@ rewrite_top_form :: proc(top: CST_Top_Form, locals: []string, aliases: []Alias_P
        top.form.items[1].kind == .Symbol {
         head := decl_head_name(top.form)
         switch head {
-        case "const", "defconst", "defvar", "struct", "defstruct", "enum", "defenum", "union", "defunion", "proc", "defn", "defmacro":
+        case "const", "defconst", "defvar", "struct", "defstruct", "enum", "defenum", "union", "defunion", "proc", "defn", "defn-", "defmacro", "defmacro-":
             rewritten.form = top.form
             rewritten.form.items = nil
             for item, idx in top.form.items {

@@ -145,6 +145,9 @@ Keep out initially:
 - exact native layout assumptions
 - the full Odin type surface
 
+See [LIVE-SHARED-SUBSET.md](./LIVE-SHARED-SUBSET.md) for the current concrete
+surface that the live-runtime spike actually supports today.
+
 ## Host Capability Model
 
 The live layer must not rely on arbitrary raw memory access.
