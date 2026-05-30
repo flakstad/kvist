@@ -96,11 +96,15 @@ odin run examples/live_reload_demo
 odin run examples/live_commands_demo
 ```
 
-The live commands demo watches
-`examples/live_commands_demo/live/commands.kvist`. Edit that file while the
-demo runs to see the process stay alive, the module reload, the command/hook
-behavior change, shared `live/defn` helpers update, and the command counter
-survive the edit.
+The live commands demo watches the `.kvist` files in
+`examples/live_commands_demo/live/`. Edit either `commands.kvist` or
+`helpers.kvist` while the demo runs to see the process stay alive, the module
+reload, the command/hook behavior change, imported helper code update, and the
+command counter survive the edit. It now also shows source-defined reload
+migration: change `counter-key` and `:version` in `commands.kvist` and the live
+module carries the count forward itself. It also shows command args and hook
+payload values flowing through the live layer rather than only zero-arg
+ambient state.
 
 Useful commands while reading examples:
 

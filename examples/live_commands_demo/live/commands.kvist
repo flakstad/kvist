@@ -2,26 +2,18 @@
 //
 // The current live loader reads a narrow real-Kvist subset:
 // - (live/module {...})
+// - (import "path") for helper files
 // - ordinary top-level (defn ...)
 // - (live/command name ...)
 // - (live/hook name ...)
 // - top-level def / defconst / defvar literals
+// - source-defined (defn migrate []) on reload
 
 (live/module
   {:name "commands"
    :version "v1"})
 
-(defn render-and-log [count]
-  (host/call "host.render-tick"
-             (module/version)
-             message
-             count)
-  (host/call "host.log"
-             (str "command=tick count=" count)))
-
-(defn log-hook-message [hook-name]
-  (host/call "host.log"
-             (str "hook=" hook-name " " hook-message)))
+(import "helpers")
 
 (def message "hello from the live module")
 (def hook-message "hook fired after the command")
@@ -30,17 +22,31 @@
 (defn init []
   (host/call "host.log" "live module initialized"))
 
+(defn migrate []
+  (when (reload/from-version)
+    (let [old-run-count (reload/state-get "run-count")
+          old-tick-count (reload/state-get "tick-count")]
+      (if (= counter-key "tick-count")
+        (when old-run-count
+          (state/set! counter-key old-run-count)
+          (host/call "host.log"
+                     (str "migrated counter from run-count to " counter-key)))
+        (when old-tick-count
+          (state/set! counter-key old-tick-count)
+          (host/call "host.log"
+                     (str "migrated counter from tick-count to " counter-key)))))))
+
 (defn shutdown []
   (host/call "host.log" "live module shutting down"))
 
 (defn tick []
   (let [count (state/inc! counter-key)]
     (render-and-log count)
-    (hook/emit "after-command")
+    (hook/emit "after-command" count message)
     count))
 
 (defn after-command []
-  (log-hook-message "after-command"))
+  (log-hook-message "after-command" (payload/get 0) (payload/get 1)))
 
 (live/command tick)
 

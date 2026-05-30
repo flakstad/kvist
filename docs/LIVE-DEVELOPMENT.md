@@ -189,6 +189,7 @@ Conceptually:
 Even if syntax changes, the runtime model should already support:
 
 - `init`
+- `migrate`
 - `reload`
 - `migrate-state`
 - `shutdown`

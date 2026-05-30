@@ -3,35 +3,47 @@
 (import "core:fmt")
 (import strings "core:strings")
 
-(defunion Attr-Value {
+(defunion Attr-Value
+  "Typed Hiccup attribute value used by rendered HTML trees."
+  {
   :text string
   :int int
+  :float float
   :bool bool
 })
 
-(defstruct Attr {
+(defstruct Attr
+  "Rendered HTML attribute entry."
+  {
   :name string
   :value Attr-Value
 })
 
-(defstruct Element {
+(defstruct Element
+  "Rendered HTML element node."
+  {
   :tag string
   :attrs (slice Attr)
   :children (slice Node)
 })
 
-(defunion Node {
+(defunion Node
+  "Rendered Hiccup tree node."
+  {
   :text string
   :int int
+  :float float
   :bool bool
   :element Element
 })
 
 (defmacro- emit-attr-value [form]
-  (if (string? form)
-    (quasiquote (Attr-Value {:text (unquote form)}))
-    (if (number? form)
-      (quasiquote (Attr-Value {:int (unquote form)}))
+    (if (string? form)
+      (quasiquote (Attr-Value {:text (unquote form)}))
+      (if (int? form)
+        (quasiquote (Attr-Value {:int (unquote form)}))
+        (if (float? form)
+          (quasiquote (Attr-Value {:float (unquote form)}))
       (if (bool? form)
         (quasiquote (Attr-Value {:bool (unquote form)}))
         (if (keyword? form)
@@ -40,7 +52,7 @@
             (quasiquote (Attr-Value {:text (unquote (text form))}))
             (if (list? form)
               (quasiquote (Attr-Value {:text (unquote form)}))
-              (quasiquote (Attr-Value {:text (unquote (text form))})))))))))
+              (quasiquote (Attr-Value {:text (unquote (text form))}))))))))))
 
 (defmacro- emit-attr-items [items]
   (if (= (count items) 0)
@@ -81,8 +93,10 @@
                                         :children [(splice (emit-child-items tail))]})}))))))
     (if (string? form)
       (quasiquote (Node {:text (unquote form)}))
-      (if (number? form)
+      (if (int? form)
         (quasiquote (Node {:int (unquote form)}))
+        (if (float? form)
+          (quasiquote (Node {:float (unquote form)}))
         (if (bool? form)
           (quasiquote (Node {:bool (unquote form)}))
           (if (keyword? form)
@@ -91,32 +105,43 @@
               (quasiquote (Node {:text (unquote (text form))}))
               (if (list? form)
                 (quasiquote (Node {:text (unquote form)}))
-                (quasiquote (Node {:text (unquote (text form))}))))))))))
+                (quasiquote (Node {:text (unquote (text form))})))))))))))
 
-(defmacro html [form]
+(defmacro html
+  "Expand a Hiccup vector tree into the typed hiccup/Node representation."
+  [form]
   (emit-node form))
 
-(defn tag [node: Node] -> string
+(defn tag
+  "Return the tag name for an element node, or an empty string for scalar nodes."
+  [node: Node] -> string
   (switch [value node]
     Element (:tag value)
     string ""
     int ""
+    f64 ""
     bool ""
     :else ""))
 
-(defn attr-count [node: Node] -> int
+(defn attr-count
+  "Return the number of attrs on an element node."
+  [node: Node] -> int
   (switch [value node]
     Element (arr/count (:attrs value))
     string 0
     int 0
+    f64 0
     bool 0
     :else 0))
 
-(defn child-count [node: Node] -> int
+(defn child-count
+  "Return the number of children on an element node."
+  [node: Node] -> int
   (switch [value node]
     Element (arr/count (:children value))
     string 0
     int 0
+    f64 0
     bool 0
     :else 0))
 
@@ -150,6 +175,8 @@
       (strings.write_string builder "\""))
     int
     (fmt.sbprintf builder " %s=\"%d\"" (:name attr) value)
+    f64
+    (fmt.sbprintf builder " %s=\"%g\"" (:name attr) value)
     bool
     (when value
       (strings.write_string builder " ")
@@ -174,12 +201,16 @@
       (strings.write_string builder escaped))
     int
     (fmt.sbprintf builder "%d" value)
+    f64
+    (fmt.sbprintf builder "%g" value)
     bool
     (if value
       (strings.write_string builder "true")
       (strings.write_string builder "false"))))
 
-(defn render [node: Node] -> string
+(defn render
+  "Render a Hiccup node tree to an owned HTML string."
+  [node: Node] -> string
   (let [builder (strings.builder_make)]
     (defer (strings.builder_destroy (& builder)))
     (render-node-into (& builder) node)

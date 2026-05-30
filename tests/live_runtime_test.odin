@@ -1,5 +1,6 @@
 package tests
 
+import "core:os"
 import "core:testing"
 import kvist_live "../src/kvist_live"
 
@@ -87,6 +88,20 @@ must_parse_module :: proc(t: ^testing.T, source: string) -> kvist_live.Module_De
     testing.expect_value(t, ok, true)
     testing.expect_value(t, err.message, "")
     return def
+}
+
+delete_module_definition :: proc(def: ^kvist_live.Module_Definition) {
+    kvist_live.state_entry_slice_delete(&def.initial_state)
+    kvist_live.delete_behavior_definition_slice(&def.functions)
+    kvist_live.delete_behavior_definition_slice(&def.commands)
+    kvist_live.delete_behavior_definition_slice(&def.hooks)
+    if def.name != "" {
+        delete(def.name)
+    }
+    if def.version != "" {
+        delete(def.version)
+    }
+    def^ = kvist_live.Module_Definition{}
 }
 
 @(test)
@@ -326,6 +341,67 @@ live_runtime_reloads_modules_with_migration :: proc(t: ^testing.T) {
 }
 
 @(test)
+live_runtime_runs_source_defined_migrate_function :: proc(t: ^testing.T) {
+    runtime := kvist_live.new_runtime(kvist_live.Runtime_Config{
+        app_name = "tests",
+        live_enabled = true,
+    })
+    defer kvist_live.runtime_delete(&runtime)
+
+    initial_def := must_parse_module(t, `(live/module {:name "reloadable" :version "v1"})
+(def counter-key "run-count")
+(defn tick []
+  (state/inc! counter-key))
+(live/command tick)`)
+    defer delete_module_definition(&initial_def)
+
+    load_err, load_ok := kvist_live.load_module(&runtime, initial_def)
+    testing.expect_value(t, load_ok, true)
+    testing.expect_value(t, load_err.message, "")
+
+    result_1, invoke_err_1, invoke_ok_1 := kvist_live.invoke_command(&runtime, "tick", nil)
+    defer kvist_live.value_delete(&result_1)
+    testing.expect_value(t, invoke_ok_1, true)
+    testing.expect_value(t, invoke_err_1.message, "")
+    testing.expect_value(t, result_1.int_value, i64(1))
+
+    next_def := must_parse_module(t, `(live/module {:name "reloadable" :version "v2"})
+(def counter-key "tick-count")
+(defn migrate []
+  (when (reload/from-version)
+    (when (= (state/get counter-key) nil)
+      (let [old-count (reload/state-get "run-count")]
+        (when old-count
+          (state/set! counter-key old-count))))))
+(defn tick []
+  (state/inc! counter-key))
+(live/command tick)`)
+    defer delete_module_definition(&next_def)
+
+    reload_err, reload_ok := kvist_live.reload_module(&runtime, next_def)
+    testing.expect_value(t, reload_ok, true)
+    testing.expect_value(t, reload_err.message, "")
+
+    reloaded, found := kvist_live.loaded_module(&runtime, "reloadable")
+    testing.expect_value(t, found, true)
+    testing.expect_value(t, reloaded.reload_from_version, "v1")
+
+    old_counter, old_counter_ok := kvist_live.module_state_get(reloaded, "run-count")
+    testing.expect_value(t, old_counter_ok, true)
+    testing.expect_value(t, old_counter.value.int_value, i64(1))
+
+    migrated_counter, migrated_ok := kvist_live.module_state_get(reloaded, "tick-count")
+    testing.expect_value(t, migrated_ok, true)
+    testing.expect_value(t, migrated_counter.value.int_value, i64(1))
+
+    result_2, invoke_err_2, invoke_ok_2 := kvist_live.invoke_command(&runtime, "tick", nil)
+    defer kvist_live.value_delete(&result_2)
+    testing.expect_value(t, invoke_ok_2, true)
+    testing.expect_value(t, invoke_err_2.message, "")
+    testing.expect_value(t, result_2.int_value, i64(2))
+}
+
+@(test)
 live_runtime_executes_reusable_live_functions :: proc(t: ^testing.T) {
     runtime := kvist_live.new_runtime(kvist_live.Runtime_Config{
         app_name = "tests",
@@ -369,6 +445,49 @@ live_runtime_executes_reusable_live_functions :: proc(t: ^testing.T) {
     testing.expect_value(t, invoke_err.message, "")
     testing.expect_value(t, result.kind, kvist_live.Value_Kind.Int)
     testing.expect_value(t, result.int_value, i64(5))
+}
+
+@(test)
+live_runtime_exposes_command_args_and_hook_payloads :: proc(t: ^testing.T) {
+    runtime := kvist_live.new_runtime(kvist_live.Runtime_Config{
+        app_name = "tests",
+        live_enabled = true,
+    })
+    defer kvist_live.runtime_delete(&runtime)
+
+    def := must_parse_module(t, `(live/module {:name "arg-demo" :version "v1"})
+(def hook-result-key "hook-result")
+(defn after-command []
+  (state/set! hook-result-key
+              (str (payload/get 0) " / count=" (payload/count))))
+(defn tick []
+  (hook/emit "after-command" (args/get 0) (args/get 1))
+  (str "args=" (args/count) " first=" (args/get 0) " second=" (args/get 1)))
+(live/command tick)
+(live/hook after-command)`)
+    defer delete_module_definition(&def)
+
+    load_err, load_ok := kvist_live.load_module(&runtime, def)
+    testing.expect_value(t, load_ok, true)
+    testing.expect_value(t, load_err.message, "")
+
+    arg_0 := kvist_live.value_string("alpha")
+    defer kvist_live.value_delete(&arg_0)
+    arg_1 := kvist_live.value_int(42)
+    defer kvist_live.value_delete(&arg_1)
+
+    result, invoke_err, invoke_ok := kvist_live.invoke_command(&runtime, "tick", []kvist_live.Value{arg_0, arg_1})
+    defer kvist_live.value_delete(&result)
+    testing.expect_value(t, invoke_ok, true)
+    testing.expect_value(t, invoke_err.message, "")
+    testing.expect_value(t, result.kind, kvist_live.Value_Kind.String)
+    testing.expect_value(t, result.text, "args=2 first=alpha second=42")
+
+    module, module_ok := kvist_live.loaded_module(&runtime, "arg-demo")
+    testing.expect_value(t, module_ok, true)
+    hook_result, hook_result_ok := kvist_live.module_state_get_string(module, "hook-result")
+    testing.expect_value(t, hook_result_ok, true)
+    testing.expect_value(t, hook_result, "alpha / count=2")
 }
 
 @(test)
@@ -495,6 +614,77 @@ live_runtime_accepts_bodyless_entrypoints_with_options_omitted :: proc(t: ^testi
     testing.expect_value(t, len(def.commands[0].body) > 0, true)
     testing.expect_value(t, len(def.hooks), 1)
     testing.expect_value(t, len(def.hooks[0].body) > 0, true)
+}
+
+@(test)
+live_loader_resolves_helper_imports_from_path :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-live-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove(dir)
+    defer delete(dir)
+
+    root_path, root_join_err := os.join_path({dir, "commands.kvist"}, context.allocator)
+    testing.expect_value(t, root_join_err == nil, true)
+    if root_join_err != nil {
+        return
+    }
+    defer delete(root_path)
+
+    helper_path, helper_join_err := os.join_path({dir, "helpers.kvist"}, context.allocator)
+    testing.expect_value(t, helper_join_err == nil, true)
+    if helper_join_err != nil {
+        return
+    }
+    defer delete(helper_path)
+
+    helper_source := `(defn suffix [] " from helper")
+(defn render [message]
+  (str message (suffix)))`
+    helper_write_err := os.write_entire_file_from_string(helper_path, helper_source)
+    testing.expect_value(t, helper_write_err == nil, true)
+    if helper_write_err != nil {
+        return
+    }
+    defer os.remove(helper_path)
+
+    root_source := `(live/module {:name "imports" :version "v1"})
+(import "helpers")
+(def message "hello")
+(defn tick []
+  (render message))
+(live/command tick)`
+    root_write_err := os.write_entire_file_from_string(root_path, root_source)
+    testing.expect_value(t, root_write_err == nil, true)
+    if root_write_err != nil {
+        return
+    }
+    defer os.remove(root_path)
+
+    def, err, ok := kvist_live.module_definition_from_kvist_path(root_path)
+    defer delete_module_definition(&def)
+    testing.expect_value(t, ok, true)
+    testing.expect_value(t, err.message, "")
+    testing.expect_value(t, len(def.functions), 3)
+
+    runtime := kvist_live.new_runtime(kvist_live.Runtime_Config{
+        app_name = "tests",
+        live_enabled = true,
+    })
+    defer kvist_live.runtime_delete(&runtime)
+
+    load_err, load_ok := kvist_live.load_module(&runtime, def)
+    testing.expect_value(t, load_ok, true)
+    testing.expect_value(t, load_err.message, "")
+
+    result, invoke_err, invoke_ok := kvist_live.invoke_command(&runtime, "tick", nil)
+    defer kvist_live.value_delete(&result)
+    testing.expect_value(t, invoke_ok, true)
+    testing.expect_value(t, invoke_err.message, "")
+    testing.expect_value(t, result.kind, kvist_live.Value_Kind.String)
+    testing.expect_value(t, result.text, "hello from helper")
 }
 
 @(test)

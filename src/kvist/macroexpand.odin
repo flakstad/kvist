@@ -29,6 +29,7 @@ Macro_Value_Kind :: enum {
     Nil,
     Bool,
     Int,
+    Float,
     String,
     Form,
     Forms,
@@ -38,6 +39,7 @@ Macro_Value :: struct {
     kind:         Macro_Value_Kind,
     bool_value:   bool,
     int_value:    int,
+    float_value:  f64,
     string_value: string,
     form:         CST_Form,
     forms:        [dynamic]CST_Form,
@@ -76,6 +78,10 @@ macro_int_text :: proc(value: int) -> string {
     return fmt.tprintf("%d", value)
 }
 
+macro_float_text :: proc(value: f64) -> string {
+    return fmt.tprintf("%g", value)
+}
+
 macro_nil_value :: proc() -> Macro_Value {
     return Macro_Value{kind = .Nil}
 }
@@ -86,6 +92,10 @@ macro_bool_value :: proc(value: bool) -> Macro_Value {
 
 macro_int_value :: proc(value: int) -> Macro_Value {
     return Macro_Value{kind = .Int, int_value = value}
+}
+
+macro_float_value :: proc(value: f64) -> Macro_Value {
+    return Macro_Value{kind = .Float, float_value = value}
 }
 
 macro_string_value :: proc(value: string) -> Macro_Value {
@@ -126,6 +136,8 @@ macro_value_equal :: proc(a, b: Macro_Value) -> bool {
         return a.bool_value == b.bool_value
     case .Int:
         return a.int_value == b.int_value
+    case .Float:
+        return a.float_value == b.float_value
     case .String:
         return a.string_value == b.string_value
     case .Form:
@@ -157,6 +169,8 @@ macro_value_to_form :: proc(value: Macro_Value, span: Span) -> (CST_Form, Compil
         return CST_Form{kind = .Bool, text = "false", span = span}, Compile_Error{}, true
     case .Int:
         return CST_Form{kind = .Number, text = macro_int_text(value.int_value), span = span}, Compile_Error{}, true
+    case .Float:
+        return CST_Form{kind = .Number, text = macro_float_text(value.float_value), span = span}, Compile_Error{}, true
     case .String:
         return CST_Form{kind = .String, text = macro_quote_string(value.string_value), span = span}, Compile_Error{}, true
     case .Forms:
@@ -206,6 +220,8 @@ macro_value_to_string :: proc(value: Macro_Value, span: Span) -> (string, Compil
         return "", Compile_Error{}, true
     case .Int:
         return macro_int_text(value.int_value), Compile_Error{}, true
+    case .Float:
+        return macro_float_text(value.float_value), Compile_Error{}, true
     case .Bool:
         if value.bool_value {
             return "true", Compile_Error{}, true
@@ -875,11 +891,15 @@ macro_eval_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_
     case .Number:
         value: int
         parsed, ok_parsed := strconv.parse_int(form.text)
-        if !ok_parsed {
-            return Macro_Value{}, Compile_Error{message = "macro evaluator only supports integer numeric literals", span = form.span}, false
+        if ok_parsed {
+            value = parsed
+            return macro_int_value(value), Compile_Error{}, true
         }
-        value = parsed
-        return macro_int_value(value), Compile_Error{}, true
+        float_value, ok_float := strconv.parse_f64(form.text)
+        if !ok_float {
+            return Macro_Value{}, Compile_Error{message = "macro evaluator could not parse numeric literal", span = form.span}, false
+        }
+        return macro_float_value(float_value), Compile_Error{}, true
     case .String:
         return macro_string_value(unquote_string(form.text)), Compile_Error{}, true
     case .Keyword:
@@ -1251,10 +1271,49 @@ macro_eval_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_
                 if value.kind == .Int {
                     return macro_bool_value(true), Compile_Error{}, true
                 }
+                if value.kind == .Float {
+                    return macro_bool_value(true), Compile_Error{}, true
+                }
                 if value.kind != .Form {
                     return macro_bool_value(false), Compile_Error{}, true
                 }
                 return macro_bool_value(value.form.kind == .Number), Compile_Error{}, true
+            case "int?":
+                if len(form.items) != 2 {
+                    return Macro_Value{}, Compile_Error{message = "int? expects one argument", span = form.span}, false
+                }
+                value, err_value, ok_value := macro_eval_expr(form.items[1], macros, bindings)
+                if !ok_value {
+                    return Macro_Value{}, err_value, false
+                }
+                if value.kind == .Int {
+                    return macro_bool_value(true), Compile_Error{}, true
+                }
+                if value.kind != .Form || value.form.kind != .Number {
+                    return macro_bool_value(false), Compile_Error{}, true
+                }
+                _, ok_parsed := strconv.parse_int(value.form.text)
+                return macro_bool_value(ok_parsed), Compile_Error{}, true
+            case "float?":
+                if len(form.items) != 2 {
+                    return Macro_Value{}, Compile_Error{message = "float? expects one argument", span = form.span}, false
+                }
+                value, err_value, ok_value := macro_eval_expr(form.items[1], macros, bindings)
+                if !ok_value {
+                    return Macro_Value{}, err_value, false
+                }
+                if value.kind == .Float {
+                    return macro_bool_value(true), Compile_Error{}, true
+                }
+                if value.kind != .Form || value.form.kind != .Number {
+                    return macro_bool_value(false), Compile_Error{}, true
+                }
+                _, ok_parsed := strconv.parse_int(value.form.text)
+                if ok_parsed {
+                    return macro_bool_value(false), Compile_Error{}, true
+                }
+                _, ok_float := strconv.parse_f64(value.form.text)
+                return macro_bool_value(ok_float), Compile_Error{}, true
             case "bool?":
                 if len(form.items) != 2 {
                     return Macro_Value{}, Compile_Error{message = "bool? expects one argument", span = form.span}, false
@@ -1283,6 +1342,9 @@ macro_eval_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_
                 }
                 if value.kind == .Int {
                     return macro_string_value(macro_int_text(value.int_value)), Compile_Error{}, true
+                }
+                if value.kind == .Float {
+                    return macro_string_value(macro_float_text(value.float_value)), Compile_Error{}, true
                 }
                 if value.kind == .Bool {
                     if value.bool_value {

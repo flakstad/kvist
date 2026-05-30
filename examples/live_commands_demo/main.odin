@@ -7,6 +7,7 @@ import "core:time"
 import kvist_live "../../src/kvist_live"
 
 MODULE_PATH :: "examples/live_commands_demo/live/commands.kvist"
+LIVE_DIR :: "examples/live_commands_demo/live"
 TICK_DELAY :: 1 * time.Second
 
 delete_definition :: proc(def: ^kvist_live.Module_Definition) {
@@ -23,14 +24,64 @@ delete_definition :: proc(def: ^kvist_live.Module_Definition) {
     def^ = kvist_live.Module_Definition{}
 }
 
-read_module_source :: proc(path: string) -> (string, bool) {
-    data, read_err := os.read_entire_file_from_path(path, context.allocator)
+sort_strings_in_place :: proc(values: []string) {
+    for i in 0 ..< len(values) {
+        for j in i + 1 ..< len(values) {
+            if values[j] < values[i] {
+                values[i], values[j] = values[j], values[i]
+            }
+        }
+    }
+}
+
+live_dir_signature :: proc(dir: string) -> (string, bool) {
+    entries, read_err := os.read_directory_by_path(dir, -1, context.allocator)
     if read_err != nil {
-        fmt.eprintln("could not read live module: ", path)
+        fmt.eprintln("could not read live module directory: ", dir)
         return "", false
     }
-    defer delete(data)
-    return strings.clone(string(data)), true
+    defer os.file_info_slice_delete(entries, context.allocator)
+
+    file_names: [dynamic]string
+    defer {
+        for name in file_names {
+            delete(name)
+        }
+        delete(file_names)
+    }
+
+    for entry in entries {
+        if entry.type != .Regular || !strings.has_suffix(entry.name, ".kvist") {
+            continue
+        }
+        append(&file_names, strings.clone(entry.name))
+    }
+    sort_strings_in_place(file_names[:])
+
+    builder, builder_err := strings.builder_make()
+    if builder_err != nil {
+        fmt.eprintln("could not allocate live module signature builder")
+        return "", false
+    }
+    defer strings.builder_destroy(&builder)
+
+    for name in file_names {
+        path, join_err := os.join_path({dir, name}, context.allocator)
+        if join_err != nil {
+            fmt.eprintln("could not join live module path for: ", name)
+            return "", false
+        }
+        defer delete(path)
+
+        stamp, stamp_err := os.modification_time_by_path(path)
+        if stamp_err != nil {
+            fmt.eprintln("could not stat live module path: ", path)
+            return "", false
+        }
+        fmt.sbprintf(&builder, "%s|%v\n", name, stamp)
+    }
+
+    return strings.clone(strings.to_string(builder)), true
 }
 
 render_value :: proc(value: kvist_live.Value) -> string {
@@ -96,25 +147,6 @@ live_module_init :: proc(runtime: ^kvist_live.Runtime, module: ^kvist_live.Live_
     return kvist_live.Runtime_Error{}, true
 }
 
-live_module_migrate :: proc(runtime: ^kvist_live.Runtime, old_module: kvist_live.Live_Module, new_module: ^kvist_live.Live_Module) -> (kvist_live.Runtime_Error, bool) {
-    new_counter_key, new_counter_ok := kvist_live.module_state_get_string(new_module, "counter-key")
-    if !new_counter_ok || new_counter_key == "" {
-        new_counter_key = "run-count"
-        kvist_live.module_state_put_string(new_module, "counter-key", new_counter_key)
-    }
-
-    old_counter_key, old_counter_ok := kvist_live.state_entries_get_string(old_module.state[:], "counter-key")
-    if !old_counter_ok || old_counter_key == "" {
-        old_counter_key = new_counter_key
-    }
-
-    if entry, ok := kvist_live.state_entries_get(old_module.state[:], old_counter_key); ok {
-        kvist_live.module_state_put(new_module, new_counter_key, entry.value)
-    }
-    kvist_live.module_state_put_string(new_module, "migrated-from", old_module.version)
-    return kvist_live.Runtime_Error{}, true
-}
-
 live_module_shutdown :: proc(runtime: ^kvist_live.Runtime, module: ^kvist_live.Live_Module) {
     fmt.println(fmt.tprintf("shutting down module %s (%s)", module.name, module.version))
 }
@@ -122,7 +154,8 @@ live_module_shutdown :: proc(runtime: ^kvist_live.Runtime, module: ^kvist_live.L
 print_banner :: proc() {
     fmt.println("kvist live commands demo")
     fmt.println("editing file: ", MODULE_PATH)
-    fmt.println("edit the live command or hook bodies while this runs")
+    fmt.println("edit files under: ", LIVE_DIR)
+    fmt.println("edit the root module or imported helper file while this runs")
     fmt.println("press ctrl-c to stop")
     fmt.println("")
 }
@@ -154,16 +187,15 @@ main :: proc() {
         return
     }
 
-    source, source_ok := read_module_source(MODULE_PATH)
-    if !source_ok {
+    signature, signature_ok := live_dir_signature(LIVE_DIR)
+    if !signature_ok {
         return
     }
-    defer delete(source)
+    defer delete(signature)
 
-    initial_def, initial_err, initial_ok := kvist_live.module_definition_from_kvist_source(source)
+    initial_def, initial_err, initial_ok := kvist_live.module_definition_from_kvist_path(MODULE_PATH)
     if initial_ok {
         initial_def.init = live_module_init
-        initial_def.migrate = live_module_migrate
         initial_def.shutdown = live_module_shutdown
     }
     if !initial_ok {
@@ -180,32 +212,31 @@ main :: proc() {
     print_banner()
 
     for {
-        current_source, current_ok := read_module_source(MODULE_PATH)
+        current_signature, current_ok := live_dir_signature(LIVE_DIR)
         if current_ok {
-            if current_source != source {
-                next_def, next_err, next_ok := kvist_live.module_definition_from_kvist_source(current_source)
+            if current_signature != signature {
+                next_def, next_err, next_ok := kvist_live.module_definition_from_kvist_path(MODULE_PATH)
                 if next_ok {
                     next_def.init = live_module_init
-                    next_def.migrate = live_module_migrate
                     next_def.shutdown = live_module_shutdown
                 }
                 if !next_ok {
                     fmt.eprintln("reload parse failed: ", next_err.message)
-                    delete(current_source)
+                    delete(current_signature)
                 } else {
                     reload_err, reload_ok := kvist_live.reload_module(&runtime, next_def)
                     delete_definition(&next_def)
                     if !reload_ok {
                         fmt.eprintln("reload failed: ", reload_err.message)
-                        delete(current_source)
+                        delete(current_signature)
                     } else {
-                        delete(source)
-                        source = current_source
+                        delete(signature)
+                        signature = current_signature
                         fmt.println("reloaded live module from disk")
                     }
                 }
             } else {
-                delete(current_source)
+                delete(current_signature)
             }
         }
 

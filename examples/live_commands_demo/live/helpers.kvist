@@ -1,0 +1,14 @@
+(defn render-and-log [count]
+  (host/call "host.render-tick"
+             (module/version)
+             message
+             count)
+  (host/call "host.log"
+             (str "command=tick count=" count)))
+
+(defn log-hook-message [hook-name count message]
+  (host/call "host.log"
+             (str "hook=" hook-name
+                  " count=" count
+                  " message=" message
+                  " note=" hook-message)))

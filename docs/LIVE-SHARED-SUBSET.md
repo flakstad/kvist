@@ -24,6 +24,7 @@ a strong reason not to.
 
 The live loader currently accepts these ordinary top-level forms:
 
+- `import` in path-loaded live modules
 - `def`
 - `defconst`
 - `defvar`
@@ -31,11 +32,18 @@ The live loader currently accepts these ordinary top-level forms:
 
 Current constraints:
 
+- `import` currently supports only the unaliased form `(import "path")`
+- imported live helper files are merged into the root live module rather than
+  loaded as separate runtime modules
+- imported helper files currently support ordinary `def`, `defconst`,
+  `defvar`, and `defn`
+- imported helper files may not define `live/module`, `live/command`,
+  `live/hook`, `init`, `shutdown`, or `migrate`
 - top-level `def` / `defconst` / `defvar` values must still be simple literals
 - top-level `defn` is used for live helper functions and same-named entrypoint
   implementations
-- zero-arg top-level `defn init` and `defn shutdown` are treated as optional
-  source-defined lifecycle hooks
+- zero-arg top-level `defn init`, `defn migrate`, and `defn shutdown` are
+  treated as optional source-defined lifecycle hooks
 
 ## Current Live-Only Top-Level Forms
 
@@ -74,6 +82,12 @@ The live evaluator currently supports:
   - `state/inc!`
   - `module/name`
   - `module/version`
+  - `reload/from-version`
+  - `reload/state-get`
+  - `args/count`
+  - `args/get`
+  - `payload/count`
+  - `payload/get`
   - `host/call`
   - `hook/emit`
 - basic operations:
@@ -89,6 +103,7 @@ The runtime now recognizes these ordinary zero-arg top-level functions when
 present:
 
 - `defn init [] ...`
+- `defn migrate [] ...`
 - `defn shutdown [] ...`
 
 These are still runtime-specific conventions, but they deliberately reuse
@@ -98,7 +113,6 @@ ordinary Kvist `defn` rather than introducing more special top-level forms.
 
 These are not part of the current shared subset yet:
 
-- imports between live modules
 - macros
 - closures / anonymous `fn`
 - arrays, maps, and struct literals inside behavior bodies
@@ -106,7 +120,6 @@ These are not part of the current shared subset yet:
 - `case`
 - `match`-style branching
 - user-defined data types
-- source-defined lifecycle hooks
 - multi-arity functions
 - higher-order function values
 

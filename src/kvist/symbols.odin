@@ -778,7 +778,6 @@ repo_root_for_path :: proc(path: string) -> (string, bool) {
         absolute, abs_err := os.get_absolute_path(current, context.allocator)
         if abs_err == nil {
             current = absolute
-            defer delete(absolute)
         }
     }
     if !os.is_dir(current) {
@@ -1521,9 +1520,9 @@ symbols_source :: proc(source: string) -> (output: string, err: Compile_Error, o
                 }
                 signature := fmt.tprintf("(%s ...)", form.items[1].text)
                 if len(form.items) >= 3 && form.items[2].kind == .Vector {
-                    signature = fmt.tprintf("(%s %s)", form.items[1].text, form.items[2].text)
+                    signature = fmt.tprintf("(%s %s)", form.items[1].text, macro_form_text(form.items[2]))
                 } else if len(form.items) >= 4 && form.items[3].kind == .Vector {
-                    signature = fmt.tprintf("(%s %s)", form.items[1].text, form.items[3].text)
+                    signature = fmt.tprintf("(%s %s)", form.items[1].text, macro_form_text(form.items[3]))
                 }
                 detail := ""
                 if head == "defmacro-" {

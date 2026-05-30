@@ -3460,6 +3460,15 @@ validate_struct_constructor :: proc(e: ^Emitter, struct_decl: ^Struct_Decl, form
     return Compile_Error{}, true
 }
 
+is_numeric_scalar_type :: proc(text: string) -> bool {
+    switch text {
+    case "int", "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "uintptr", "f32", "f64":
+        return true
+    case:
+        return false
+    }
+}
+
 emit_union_constructor :: proc(e: ^Emitter, union_decl: ^Union_Decl, arg: CST_Form) -> (string, Compile_Error, bool) {
     if arg.kind != .Brace {
         return "", Compile_Error{message = "union construction expects a brace form", span = arg.span}, false
@@ -3476,9 +3485,11 @@ emit_union_constructor :: proc(e: ^Emitter, union_decl: ^Union_Decl, arg: CST_Fo
 
     variant_name := map_name(key.text[1:])
     found := false
+    variant_ty := ""
     for variant in union_decl.variants {
         if variant.name == variant_name {
             found = true
+            variant_ty = variant.ty
             break
         }
     }
@@ -3489,6 +3500,9 @@ emit_union_constructor :: proc(e: ^Emitter, union_decl: ^Union_Decl, arg: CST_Fo
     value_text, err_value, ok_value := emit_expr(e, value)
     if !ok_value {
         return "", err_value, false
+    }
+    if value.kind == .Number && is_numeric_scalar_type(variant_ty) {
+        value_text = fmt.tprintf("%s(%s)", variant_ty, value_text)
     }
     return fmt.tprintf("%s(%s)", union_decl.name, value_text), {}, true
 }

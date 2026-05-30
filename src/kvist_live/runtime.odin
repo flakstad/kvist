@@ -149,10 +149,14 @@ module_delete :: proc(module: ^Live_Module) {
     if module.version != "" {
         delete(module.version)
     }
+    if module.reload_from_version != "" {
+        delete(module.reload_from_version)
+    }
     if module.last_error != "" {
         delete(module.last_error)
     }
     module_state_delete(&module.state)
+    module_state_delete(&module.reload_state)
     delete_behavior_definition_slice(&module.functions)
     delete_behavior_definition_slice(&module.commands)
     delete_behavior_definition_slice(&module.hooks)
@@ -164,8 +168,10 @@ module_clone :: proc(module: Live_Module) -> Live_Module {
     cloned.runtime = nil
     cloned.name = strings.clone(module.name)
     cloned.version = strings.clone(module.version)
+    cloned.reload_from_version = strings.clone(module.reload_from_version)
     cloned.last_error = strings.clone(module.last_error)
     cloned.state = module_state_clone(module.state[:])
+    cloned.reload_state = module_state_clone(module.reload_state[:])
     cloned.functions = clone_behavior_definition_slice(module.functions[:])
     cloned.commands = clone_behavior_definition_slice(module.commands[:])
     cloned.hooks = clone_behavior_definition_slice(module.hooks[:])
@@ -330,6 +336,19 @@ run_source_init :: proc(runtime: ^Runtime, module: ^Live_Module) -> (Runtime_Err
     }
 
     result, err, ok := execute_named_live_function(module, "init", nil)
+    value_delete(&result)
+    if !ok && err.message != "" {
+        record_event(runtime, .Error, module.name, err.message)
+    }
+    return err, ok
+}
+
+run_source_migrate :: proc(runtime: ^Runtime, module: ^Live_Module) -> (Runtime_Error, bool) {
+    if _, found := find_live_function(module, "migrate"); !found {
+        return Runtime_Error{}, true
+    }
+
+    result, err, ok := execute_named_live_function(module, "migrate", nil)
     value_delete(&result)
     if !ok && err.message != "" {
         record_event(runtime, .Error, module.name, err.message)
@@ -577,6 +596,8 @@ reload_module :: proc(runtime: ^Runtime, def: Module_Definition) -> (Runtime_Err
 
     new_module := module_definition_to_module(runtime, def)
     new_module.reload_count = runtime.modules[idx].reload_count + 1
+    new_module.reload_from_version = strings.clone(old_module.version)
+    new_module.reload_state = module_state_clone(old_module.state[:])
 
     if def.migrate != nil {
         migrate_err, ok := def.migrate(runtime, old_module, &new_module)
@@ -591,6 +612,14 @@ reload_module :: proc(runtime: ^Runtime, def: Module_Definition) -> (Runtime_Err
         // Keep new source-defined bindings from the replacement module, and
         // only carry forward runtime-added state slots that are missing.
         merge_missing_state_entries(&new_module, old_module.state[:])
+    }
+
+    source_migrate_err, source_migrate_ok := run_source_migrate(runtime, &new_module)
+    if !source_migrate_ok {
+        clear_generation_commands(runtime, new_module.generation)
+        clear_generation_hooks(runtime, new_module.generation)
+        module_delete(&new_module)
+        return source_migrate_err, false
     }
 
     if new_module.init != nil {

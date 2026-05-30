@@ -3,8 +3,9 @@
 This is the first real iterative `kvist_live` demo.
 
 It runs one compiled Odin process, loads a tiny live module file, invokes a
-live command once per second, and reloads the module when the file changes.
-The live module owns the command counter state, so the count survives reloads.
+live command once per second, and reloads the module when the live source files
+change. The live module owns the command counter state, so the count survives
+reloads.
 
 Run it from the repo root:
 
@@ -16,6 +17,7 @@ Then edit:
 
 ```text
 examples/live_commands_demo/live/commands.kvist
+examples/live_commands_demo/live/helpers.kvist
 ```
 
 Try changing:
@@ -23,7 +25,9 @@ Try changing:
 - `:version`
 - `message`
 - `hook-message`
-- the `host.log` strings in the command or hook bodies
+- `counter-key`
+- the `host.log` strings in `helpers.kvist`
+- how the hook payload is emitted or read
 
 Save the file and keep watching the running process.
 
@@ -33,6 +37,17 @@ What should happen:
 - the module reloads in place
 - the printed message changes
 - the counter continues from the previous value instead of resetting
+- the hook log line reflects payload values emitted from the command
+
+To demonstrate source-defined migration specifically:
+
+1. change `:version` from `"v1"` to `"v2"`
+2. change `counter-key` from `"run-count"` to `"tick-count"`
+
+The module's own `defn migrate []` should copy the old counter value to the new
+state key during reload, so the count keeps increasing instead of restarting.
+The demo migration handles both `run-count -> tick-count` and
+`tick-count -> run-count` while you experiment.
 
 Press `ctrl-c` to stop the demo.
 
@@ -42,23 +57,39 @@ This demo now reads a narrow real-Kvist module subset rather than the earlier
 line-based placeholder format. The current loader and evaluator understand:
 
 - `(live/module {...})`
+- `(import "path")` for helper files, with the imported definitions merged into
+  the root live module
 - ordinary top-level `(defn name [params...] body...)`
 - `(live/command name)` or `(live/command name {...})`, with optional inline body
 - `(live/hook name)` or `(live/hook name {...})`, with optional inline body
 - top-level `def`, `defconst`, or `defvar` literal bindings
 - optional source-defined lifecycle helpers:
   - `defn init [] ...`
+  - `defn migrate [] ...`
   - `defn shutdown [] ...`
 - behavior forms including `let`, `if`, `when`, `state/get`, `state/set!`,
-  `state/inc!`, `module/name`, `module/version`, `host/call`, `hook/emit`,
-  `+`, `=`, `str`, `cond`, direct symbol lookup from module bindings, and
-  ordinary calls to top-level `defn` helpers
+  `state/inc!`, `module/name`, `module/version`, `reload/from-version`,
+  `reload/state-get`, `args/count`, `args/get`, `payload/count`,
+  `payload/get`, `host/call`, variadic `hook/emit`, `+`, `=`, `str`, `cond`,
+  direct symbol lookup from module bindings, and ordinary calls to top-level
+  `defn` helpers
 
 If a `live/command` or `live/hook` has no inline body, the loader will use a
 same-named zero-argument top-level `defn`. Options maps are optional too.
 
-If the module defines zero-argument top-level `defn init` or `defn shutdown`,
-the runtime will invoke them on load and unload/reload.
+If the module defines zero-argument top-level `defn init`, `defn migrate`, or
+`defn shutdown`, the runtime will invoke them on load, reload migration, and
+unload/reload respectively.
+
+The demo host watches the `examples/live_commands_demo/live/` directory for
+`.kvist` file changes, so edits to imported helper files trigger reload too.
+
+The demo command now emits hook payload values explicitly:
+
+- the `tick` command emits the current counter and message
+- the `after-command` hook reads those values with `payload/get`
+- the resulting host log line shows the live command/hook boundary carrying
+  real runtime data
 
 It still does not evaluate arbitrary Kvist code. This step is about moving the
 live path onto actual language syntax and a small executable shared subset.

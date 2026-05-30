@@ -100,6 +100,8 @@ Live_Module :: struct {
     name:           string,
     version:        string,
     state:          [dynamic]State_Entry,
+    reload_from_version: string,
+    reload_state:   [dynamic]State_Entry,
     functions:      [dynamic]Behavior_Definition,
     commands:       [dynamic]Behavior_Definition,
     hooks:          [dynamic]Behavior_Definition,
