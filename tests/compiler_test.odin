@@ -1616,8 +1616,10 @@ query :: proc() -> (value: int, found: bool) {
 main :: proc() {
     value, found := query()
     if found {
-        if (value) > (40) {
-            return
+        {
+            if (value) > (40) {
+                return
+            }
         }
     }
 }
@@ -2317,6 +2319,36 @@ macroexpand_if_ok :: proc(t: ^testing.T) {
 }
 
 @(test)
+macroexpand_thread_first :: proc(t: ^testing.T) {
+    output, err, ok := kvist.macroexpand_source(`(-> req :method method-name)`)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    expected := `(method-name (:method req))
+`
+    testing.expect_value(t, output, expected)
+}
+
+@(test)
+macroexpand_thread_last :: proc(t: ^testing.T) {
+    output, err, ok := kvist.macroexpand_source(`(->> xs (filter even?) (map inc) (count))`)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    expected := `(count (map inc (filter even? xs)))
+`
+    testing.expect_value(t, output, expected)
+}
+
+@(test)
 macroexpand_rejects_binding_macro_shapes :: proc(t: ^testing.T) {
     _, err_if_let, ok_if_let := kvist.macroexpand_source(`(if-let [value found (query)]
   value)`)
@@ -2374,6 +2406,96 @@ macroexpand_source_map_marks_generated_lines :: proc(t: ^testing.T) {
     body_entry, body_found := kvist.source_map_entry_for_generated_line(result.source_map[:], 6)
     testing.expect_value(t, body_found, true)
     testing.expect_value(t, body_entry.source_span.start, body_start)
+}
+
+@(test)
+macroexpand_user_macro_in_file_context :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defmacro unless [condition & body]
+  (quasiquote
+    (if (unquote condition)
+      (do)
+      (do (splice body)))))
+
+(defn answer [] -> int
+  42)`
+
+    output, err, ok := kvist.macroexpand_eval_source_with_map(source, `(unless (> n 0)
+  (return 0))`)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output.output)
+    defer delete(output.source_map)
+    defer kvist.compile_warning_slice_delete(output.warnings)
+
+    expected := `(if (> n 0) (do) (do (return 0)))
+`
+    testing.expect_value(t, output.output, expected)
+}
+
+@(test)
+compile_source_with_user_macro :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defmacro unless [condition & body]
+  (quasiquote
+    (if (unquote condition)
+      (do)
+      (do (splice body)))))
+
+(defn classify [n: int] -> string
+  (unless (> n 0)
+    (return "non-positive"))
+  "positive")`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, `classify :: proc(n: int) -> string`), true)
+    testing.expect_value(t, strings.contains(output, `return "non-positive"`), true)
+    testing.expect_value(t, strings.contains(output, `return "positive"`), true)
+}
+
+@(test)
+compile_source_with_top_level_macro_dsl :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defmacro defentity [name fields]
+  (let [make-name (symbol (str "make-" (name name)))]
+    (forms
+      (quasiquote
+        (defstruct (unquote name) (unquote fields)))
+      (quasiquote
+        (defn (unquote make-name) [] -> (unquote name)
+          ((unquote name) {}))))))
+
+(defentity Point {:x float :y float})
+
+(defn point-origin? [point: Point] -> bool
+  (and (== (:x point) 0.0)
+       (== (:y point) 0.0)))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, `Point :: struct {`), true)
+    testing.expect_value(t, strings.contains(output, `make_Point :: proc() -> Point`), true)
+    testing.expect_value(t, strings.contains(output, `return Point{}`), true)
+    testing.expect_value(t, strings.contains(output, `point_origin_p :: proc(point: Point) -> bool`), true)
 }
 
 @(test)

@@ -41,7 +41,7 @@
     (== name "DELETE") (return .Delete true)
     :else (return .Get false)))
 
-// when-let is a compiler-defined macro for Odin-style multi-returns with an
+// when-let is a core binding macro for Odin-style multi-returns with an
 // explicit boolean such as ok, found, present, or valid.
 (defn method-score [name: string] -> int
   (let [score 0]

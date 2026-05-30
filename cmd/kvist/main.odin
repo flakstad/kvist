@@ -424,7 +424,7 @@ macroexpand_command :: proc(input, eval_source, output_path, map_path: string) {
     data := read_source_or_exit(input)
     defer delete(transmute([]byte)data)
 
-    result, err, ok := kvist.macroexpand_source_with_map(eval_source)
+    result, err, ok := kvist.macroexpand_eval_source_with_map(data, eval_source)
     if !ok {
         formatted := kvist.format_eval_compile_error(input, data, eval_source, err)
         fmt.eprint(formatted)

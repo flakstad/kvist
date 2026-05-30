@@ -257,6 +257,14 @@ symbols_source :: proc(source: string) -> (output: string, err: Compile_Error, o
                 }
                 symbols_write_record_doc(&builder, "proc", form.items[1].text, source, form.items[1].span, "", doc_lines[:])
             }
+        case "defmacro":
+            if len(form.items) >= 3 && form.items[1].kind == .Symbol {
+                doc_lines := top.doc_lines
+                if len(form.items) > 4 && form.items[2].kind == .String {
+                    doc_lines = symbols_append_doc_lines(doc_lines[:], symbols_doc_lines_from_string(unquote_string(form.items[2].text))[:])
+                }
+                symbols_write_record_doc(&builder, "macro", form.items[1].text, source, form.items[1].span, "", doc_lines[:])
+            }
         case:
         }
     }

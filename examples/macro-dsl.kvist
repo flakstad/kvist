@@ -1,0 +1,24 @@
+;; A small declaration DSL. This macro expands to multiple top-level forms:
+;; one defstruct and one constructor helper.
+(defmacro defentity [name fields]
+  (let [make-name (symbol (str "make-" (name name)))]
+    (forms
+      (quasiquote
+        (defstruct (unquote name) (unquote fields)))
+      (quasiquote
+        (defn (unquote make-name) [] -> (unquote name)
+          ((unquote name) {}))))))
+
+(defentity Point {:x float :y float})
+
+(defn point-origin? [point: Point] -> bool
+  (and (== (:x point) 0.0)
+       (== (:y point) 0.0)))
+
+(defn macro-dsl-demo []
+  (let [point (make-Point)]
+    (println point)
+    (println (point-origin? point))))
+
+(defn main []
+  (macro-dsl-demo))

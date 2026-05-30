@@ -648,6 +648,10 @@ foreign_call :: proc(handle: Foreign_Handle) ---
   - `proc` remains available for direct Odin-shaped code and proc types
   - params and returns use ordinary types like `int`, `string`, `Person`, plus Odin-style container types like `[]string`, `[dynamic]int`, `map[string]int`, and Kvist set types like `set[keyword]`
   - `println` and `doc` stay implicitly available; most library helpers come from explicit Kvist package imports
+- `(defmacro name [arg ...] body...)`
+  - package-local for now
+  - expands over Kvist forms before ordinary parse/lowering
+  - resource-scope bootstrap macros still exist alongside it during bootstrap
 - top-level and statement `(odin "...")` raw escape hatches
 - `(let [binding value ...] body...)` scoped expression/block, including
   multi-return and struct-field destructuring; a local binding may be followed

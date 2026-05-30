@@ -1975,33 +1975,70 @@ file-backed dev values, watches, and Emacs integration.
 
 ## Macros
 
-Because Kvist is a Lisp, macros are likely an important later feature. But they
-should arrive only after the core surface language is stable. They are now one
-of the next major design areas after the direct compiler surface and eager
-sequence library are in good shape.
+Kvist now has a first real `defmacro` surface.
 
-The intended macro direction is:
+Current rules:
 
 - compile-time only
-- source-to-source over Kvist forms and AST, not runtime metaprogramming
-- no hidden interpreter world
-- no requirement for a persistent dynamic environment
-- expansion results should still lower to ordinary readable Odin
+- package-local for now
+- operates on Kvist forms before ordinary parse/lowering
+- expansion stays in source space; there is no runtime macro world
+- no hygiene yet
 
-This means macros should be designed as a language frontend feature, not as a
-runtime facility.
+The current compiler still carries an explicit built-in macro registry for the
+resource-scope bootstrap forms `with-allocator`, `with-temp-allocator`, and
+`with-delete`. The simpler binding forms `when-let`, `if-let`, `when-ok`, and
+`if-ok` now come through the ordinary compile-time macro path as core
+package-local macros. Threading forms `->` and `->>` are also inspectable
+through `kvist macroexpand`, but they still stay compile-special for now
+because the compiler uses their pipeline shape to manage owned intermediates.
 
-The current compiler has an explicit compiler-defined macro registry for the
-forms that behave like macros today. `with-allocator`, `with-temp-allocator`,
-and `with-delete` are classified there and shown by `kvist macroexpand`.
-Compilation still lowers them directly in statement emission where necessary,
-because that path currently carries the ownership escape checks for temp
-allocator scopes and `with-delete` bindings. This is a deliberate intermediate
-state: macro classification is explicit, but arbitrary user-defined macros and a
-full expansion pass are still future work. `kvist macroexpand` does expand
-nested compiler-defined macro forms inside ordinary wrapper forms and `with-*`
-bodies, which keeps stacked resource-scope previews honest. The resulting text
-is an inspection view, not a source formatter.
+That split is deliberate:
+
+- user-defined `defmacro` already works for package-local source transforms
+- the remaining resource-scope bootstrap forms stay compiler-owned until they
+  can be moved cleanly onto the same user-visible mechanism without losing
+  existing checks
+
+### `defmacro`
+
+The first supported shape is:
+
+```clojure
+(defmacro unless [condition & body]
+  (quasiquote
+    (if (unquote condition)
+      (do)
+      (do (splice body)))))
+```
+
+Parameters are untyped symbols. A final `& name` collects the remaining raw
+call forms.
+
+Supported macro-evaluator building blocks are intentionally small in v1:
+
+- control: `quote`, `quasiquote`, `unquote`, `splice`, `if`, `do`, `let`
+- form builders: `list`, `vector`, `brace`, `forms`
+- sequence/form helpers: `first`, `rest`, `nth`, `count`, `concat`
+- string/symbol helpers: `str`, `symbol`, `keyword`, `name`
+- predicates/comparisons: `=`, `form?`
+
+That is enough for real source transforms and small DSLs, without pretending the
+macro evaluator is already a full second language.
+
+Top-level macros may now expand into multiple top-level forms by returning
+`forms`, for example:
+
+```clojure
+(defmacro defentity [name fields]
+  (let [make-name (symbol (str "make-" (name name)))]
+    (forms
+      (quasiquote
+        (defstruct (unquote name) (unquote fields)))
+      (quasiquote
+        (defn (unquote make-name) [] -> (unquote name)
+          ((unquote name) {}))))))
+```
 
 ### `with-*` forms
 

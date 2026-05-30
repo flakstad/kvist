@@ -1,0 +1,19 @@
+;; A small package-local macro. This stays in source space and lowers away
+;; before ordinary Kvist parsing and Odin emission.
+(defmacro unless [condition & body]
+  (quasiquote
+    (if (unquote condition)
+      (do)
+      (do (splice body)))))
+
+(defn classify [n: int] -> string
+  (unless (> n 0)
+    (return "non-positive"))
+  "positive")
+
+(defn macros-demo []
+  (println (classify -1))
+  (println (classify 3)))
+
+(defn main []
+  (macros-demo))

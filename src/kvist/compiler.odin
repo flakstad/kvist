@@ -100,7 +100,7 @@ collect_local_decl_names :: proc(forms: []CST_Top_Form) -> (names: [dynamic]stri
             continue
         }
         switch decl_head_name(form) {
-        case "const", "defconst", "defvar", "struct", "defstruct", "enum", "defenum", "union", "defunion", "proc", "defn":
+        case "const", "defconst", "defvar", "struct", "defstruct", "enum", "defenum", "union", "defunion", "proc", "defn", "defmacro":
             append(&names, form.items[1].text)
         }
     }
@@ -191,7 +191,7 @@ rewrite_decl_name :: proc(form: ^CST_Form, prefix: string) {
         return
     }
     switch decl_head_name(form^) {
-    case "const", "defconst", "defvar", "struct", "defstruct", "enum", "defenum", "union", "defunion", "proc", "defn":
+    case "const", "defconst", "defvar", "struct", "defstruct", "enum", "defenum", "union", "defunion", "proc", "defn", "defmacro":
         form^.items[1].text = fmt.tprintf("%s__%s", prefix, form^.items[1].text)
     }
 }
@@ -204,7 +204,7 @@ rewrite_top_form :: proc(top: CST_Top_Form, locals: []string, aliases: []Alias_P
        top.form.items[1].kind == .Symbol {
         head := decl_head_name(top.form)
         switch head {
-        case "const", "defconst", "defvar", "struct", "defstruct", "enum", "defenum", "union", "defunion", "proc", "defn":
+        case "const", "defconst", "defvar", "struct", "defstruct", "enum", "defenum", "union", "defunion", "proc", "defn", "defmacro":
             rewritten.form = top.form
             rewritten.form.items = nil
             for item, idx in top.form.items {
@@ -301,13 +301,13 @@ load_source_forms :: proc(path, prefix: string, loaded_keys, import_keys: ^[dyna
     return result, Compile_Error{}, true
 }
 
-load_path_program :: proc(path: string) -> (AST_Program, Compile_Error, bool) {
+load_path_expanded_forms :: proc(path: string) -> (expanded: [dynamic]CST_Top_Form, macros: [dynamic]User_Macro, err: Compile_Error, ok: bool) {
     loaded_keys: [dynamic]string
     import_keys: [dynamic]string
     visiting: [dynamic]string
     loaded, err_load, ok_load := load_source_forms(path, "", &loaded_keys, &import_keys, &visiting)
     if !ok_load {
-        return AST_Program{}, err_load, false
+        return expanded, macros, err_load, false
     }
     if !loaded.has_package {
         loaded.has_package = true
@@ -321,7 +321,21 @@ load_path_program :: proc(path: string) -> (AST_Program, Compile_Error, bool) {
     for form in loaded.decls {
         append(&combined, form)
     }
-    return parse_program(combined[:])
+    expanded_forms, expanded_macros, err_expand, ok_expand := macroexpand_top_forms(combined[:], true)
+    if !ok_expand {
+        return expanded, macros, err_expand, false
+    }
+    expanded = expanded_forms
+    macros = expanded_macros
+    return expanded, macros, Compile_Error{}, true
+}
+
+load_path_program :: proc(path: string) -> (AST_Program, Compile_Error, bool) {
+    expanded, _, err_expand, ok_expand := load_path_expanded_forms(path)
+    if !ok_expand {
+        return AST_Program{}, err_expand, false
+    }
+    return parse_program(expanded[:])
 }
 
 compile_program_with_map :: proc(program: AST_Program) -> (result: Emit_Result, err: Compile_Error, ok: bool) {
@@ -612,7 +626,11 @@ compile_source_with_map :: proc(source: string) -> (result: Emit_Result, err: Co
     if !ok_forms {
         return result, clone_compile_error(err_forms, result_allocator), false
     }
-    program, err_program, ok_program := parse_program(forms[:])
+    expanded, _, err_expand, ok_expand := macroexpand_top_forms(forms[:], true)
+    if !ok_expand {
+        return result, clone_compile_error(err_expand, result_allocator), false
+    }
+    program, err_program, ok_program := parse_program(expanded[:])
     if !ok_program {
         return result, clone_compile_error(err_program, result_allocator), false
     }
@@ -683,7 +701,11 @@ compile_eval_source_with_map :: proc(source, eval_source: string, no_print: bool
     if !ok_forms {
         return result, clone_compile_error(err_forms, result_allocator), false
     }
-    program, err_program, ok_program := parse_program(forms[:])
+    expanded, macros, err_expand, ok_expand := macroexpand_top_forms(forms[:], true)
+    if !ok_expand {
+        return result, clone_compile_error(err_expand, result_allocator), false
+    }
+    program, err_program, ok_program := parse_program(expanded[:])
     if !ok_program {
         return result, clone_compile_error(err_program, result_allocator), false
     }
@@ -695,20 +717,24 @@ compile_eval_source_with_map :: proc(source, eval_source: string, no_print: bool
     if !ok_eval {
         return result, clone_compile_error(err_eval, result_allocator), false
     }
+    expanded_eval_form, err_eval_expand, ok_eval_expand := macroexpand_cst_form_with_macros(eval_form, macros[:])
+    if !ok_eval_expand {
+        return result, clone_compile_error(err_eval_expand, result_allocator), false
+    }
 
     temp_result: Emit_Result
     err_emit: Compile_Error
     ok_emit: bool
 
-    eval_head := eval_form_head(eval_form)
+    eval_head := eval_form_head(expanded_eval_form)
     if eval_head_is_decl(eval_head) {
-        eval_decl, err_decl, ok_decl := parse_decl(CST_Top_Form{form = eval_form})
+        eval_decl, err_decl, ok_decl := parse_decl(CST_Top_Form{form = expanded_eval_form})
         if !ok_decl {
             return result, clone_compile_error(err_decl, result_allocator), false
         }
         temp_result, err_emit, ok_emit = emit_eval_decl_program_with_source_map(lowered, IR_Decl(eval_decl))
     } else {
-        temp_result, err_emit, ok_emit = emit_eval_program_with_source_map(lowered, eval_form, no_print)
+        temp_result, err_emit, ok_emit = emit_eval_program_with_source_map(lowered, expanded_eval_form, no_print)
     }
     if !ok_emit {
         return result, clone_compile_error(err_emit, result_allocator), false
@@ -767,10 +793,15 @@ compile_eval_path_with_map :: proc(path, eval_source: string, no_print: bool = f
     defer runtime.default_temp_allocator_temp_end(temp_scope)
     context.allocator = context.temp_allocator
 
-    program, err_program, ok_program := load_path_program(path)
+    expanded_forms, macros, err_program, ok_program := load_path_expanded_forms(path)
     if !ok_program {
         context.allocator = old_allocator
         return result, clone_compile_error(err_program, result_allocator), false
+    }
+    program, err_parse, ok_parse := parse_program(expanded_forms[:])
+    if !ok_parse {
+        context.allocator = old_allocator
+        return result, clone_compile_error(err_parse, result_allocator), false
     }
     aliases, err_aliases, ok_aliases := collect_root_source_import_aliases(path)
     if !ok_aliases {
@@ -783,6 +814,11 @@ compile_eval_path_with_map :: proc(path, eval_source: string, no_print: bool = f
         return result, clone_compile_error(err_eval, result_allocator), false
     }
     eval_form = rewrite_form_symbols(eval_form, nil, aliases, "")
+    expanded_eval_form, err_eval_expand, ok_eval_expand := macroexpand_cst_form_with_macros(eval_form, macros[:])
+    if !ok_eval_expand {
+        context.allocator = old_allocator
+        return result, clone_compile_error(err_eval_expand, result_allocator), false
+    }
     context.allocator = old_allocator
-    return compile_program_eval_form_with_map(program, eval_form, no_print)
+    return compile_program_eval_form_with_map(program, expanded_eval_form, no_print)
 }

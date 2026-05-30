@@ -17,6 +17,8 @@ block so `C-c C-e` and `C-c C-c` are practical.
 - `cluck-port-docs.kvist`: Cluck reset docstring/doc lookup demo.
 - `cluck-port-struct-introspection.kvist`: Cluck reset struct type lookup demo.
 - `cluck-port-struct-types.kvist`: Cluck reset struct type vocabulary demo.
+- `macros.kvist`: package-local `defmacro` with a real control-flow rewrite.
+- `macro-dsl.kvist`: package-local declaration DSL that expands into multiple top-level forms.
 - `closures.kvist`: non-capturing `fn` literals and explicit callback context.
 - `hello.kvist`: package, import, struct literal, and a tiny `main`.
 - `declarations.kvist`: doc comments, import aliases, constants, enums, structs.
