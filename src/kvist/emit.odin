@@ -832,7 +832,7 @@ Brace_Pair :: struct {
     value: string,
 }
 
-emit_brace_pair_texts :: proc(e: ^Emitter, form: CST_Form) -> (pairs: [dynamic]Brace_Pair, err: Compile_Error, ok: bool) {
+emit_brace_pair_texts :: proc(e: ^Emitter, form: CST_Form, keyword_fields := true) -> (pairs: [dynamic]Brace_Pair, err: Compile_Error, ok: bool) {
     i := 0
     for i < len(form.items) {
         if i+1 >= len(form.items) {
@@ -848,7 +848,15 @@ emit_brace_pair_texts :: proc(e: ^Emitter, form: CST_Form) -> (pairs: [dynamic]B
 
         #partial switch key.kind {
         case .Keyword:
-            append(&pairs, Brace_Pair{key = map_name(key.text[1:]), value = value_text})
+            if keyword_fields {
+                append(&pairs, Brace_Pair{key = map_name(key.text[1:]), value = value_text})
+            } else {
+                key_text, err_key, ok_key := emit_expr(e, key)
+                if !ok_key {
+                    return pairs, err_key, false
+                }
+                append(&pairs, Brace_Pair{key = key_text, value = value_text})
+            }
         case .String:
             append(&pairs, Brace_Pair{key = key.text, value = value_text})
         case:
@@ -863,8 +871,8 @@ emit_brace_pair_texts :: proc(e: ^Emitter, form: CST_Form) -> (pairs: [dynamic]B
     return pairs, {}, true
 }
 
-emit_brace_pairs :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) {
-    pairs, err_pairs, ok_pairs := emit_brace_pair_texts(e, form)
+emit_brace_pairs :: proc(e: ^Emitter, form: CST_Form, keyword_fields := true) -> (string, Compile_Error, bool) {
+    pairs, err_pairs, ok_pairs := emit_brace_pair_texts(e, form, keyword_fields)
     if !ok_pairs {
         return "", err_pairs, false
     }
@@ -954,7 +962,7 @@ emit_vector_literal :: proc(e: ^Emitter, prefix: string, form: CST_Form) -> (str
 }
 
 emit_brace_literal :: proc(e: ^Emitter, prefix: string, form: CST_Form) -> (string, Compile_Error, bool) {
-    pairs, err_pairs, ok_pairs := emit_brace_pair_texts(e, form)
+    pairs, err_pairs, ok_pairs := emit_brace_pair_texts(e, form, !type_text_is_map(prefix))
     if !ok_pairs {
         return "", err_pairs, false
     }
@@ -967,7 +975,7 @@ emit_brace_literal :: proc(e: ^Emitter, prefix: string, form: CST_Form) -> (stri
         }
     }
     if !multiline {
-        inner, err_inner, ok_inner := emit_brace_pairs(e, form)
+        inner, err_inner, ok_inner := emit_brace_pairs(e, form, !type_text_is_map(prefix))
         if !ok_inner {
             return "", err_inner, false
         }
@@ -985,6 +993,69 @@ emit_brace_literal :: proc(e: ^Emitter, prefix: string, form: CST_Form) -> (stri
     }
     strings.write_byte(&builder, '}')
     return strings.clone(strings.to_string(builder)), {}, true
+}
+
+emit_struct_brace_literal :: proc(e: ^Emitter, struct_decl: ^Struct_Decl, form: CST_Form) -> (string, Compile_Error, bool) {
+    if form.kind != .Brace {
+        return "", Compile_Error{message = "struct construction expects a brace form", span = form.span}, false
+    }
+
+    pairs: [dynamic]Brace_Pair
+    i := 0
+    for i < len(form.items) {
+        if i+1 >= len(form.items) {
+            return "", Compile_Error{message = "missing struct constructor value", span = form.span}, false
+        }
+        key := form.items[i]
+        value := form.items[i+1]
+        field_name, ok_key := brace_key_name(key)
+        if !ok_key {
+            return "", Compile_Error{message = "struct construction expects keyword fields", span = key.span}, false
+        }
+        field, ok_field := find_struct_field(struct_decl, field_name)
+        if !ok_field {
+            return "", Compile_Error{message = fmt.tprintf("unknown struct constructor field %s", key.text), span = key.span}, false
+        }
+        value_text, err_value, ok_value := emit_expr_for_expected_type(e, value, field.ty)
+        if !ok_value {
+            return "", err_value, false
+        }
+        append(&pairs, Brace_Pair{key = field_name, value = value_text})
+        i += 2
+    }
+
+    multiline := false
+    for pair in pairs {
+        if contains_newline(pair.value) {
+            multiline = true
+            break
+        }
+    }
+    if !multiline {
+        builder := strings.builder_make()
+        defer strings.builder_destroy(&builder)
+        strings.write_string(&builder, struct_decl.name)
+        strings.write_byte(&builder, '{')
+        for pair, idx in pairs {
+            if idx > 0 {
+                strings.write_string(&builder, ", ")
+            }
+            fmt.sbprintf(&builder, "%s = %s", pair.key, pair.value)
+        }
+        strings.write_byte(&builder, '}')
+        return strings.clone(strings.to_string(builder)), Compile_Error{}, true
+    }
+
+    builder := strings.builder_make()
+    defer strings.builder_destroy(&builder)
+    strings.write_string(&builder, struct_decl.name)
+    strings.write_string(&builder, "{\n")
+    for pair in pairs {
+        append_indented_multiline(&builder, fmt.tprintf("%s = %s", pair.key, pair.value), "    ", ",")
+        strings.write_byte(&builder, '\n')
+    }
+    strings.write_byte(&builder, '}')
+    return strings.clone(strings.to_string(builder)), Compile_Error{}, true
 }
 
 emit_call_text :: proc(name: string, arg_texts: []string) -> string {
@@ -1874,7 +1945,7 @@ owned_result_usage_error :: proc(form: CST_Form, allow_root_owned: bool) -> (Com
     }
 
     #partial switch form.kind {
-    case .List, .Vector, .Brace:
+    case .List, .Vector, .Brace, .Set:
         start := 0
         if form.kind == .List && len(form.items) > 0 && form.items[0].kind == .Symbol {
             head := form.items[0].text
@@ -1897,6 +1968,13 @@ owned_result_usage_error :: proc(form: CST_Form, allow_root_owned: bool) -> (Com
         }
     }
     return {}, false
+}
+
+emit_expr_for_expected_type :: proc(e: ^Emitter, form: CST_Form, expected_type := "") -> (string, Compile_Error, bool) {
+    if expected_type != "" && (form.kind == .Vector || form.kind == .Brace || form.kind == .Set) {
+        return emit_inferred_literal(e, form, expected_type)
+    }
+    return emit_expr(e, form)
 }
 
 returned_binding_name :: proc(form: CST_Form) -> (string, bool) {
@@ -2104,8 +2182,244 @@ type_text_is_dynamic_array :: proc(text: string) -> bool {
     return len(text) >= 9 && text[:9] == "[dynamic]"
 }
 
+type_text_is_slice_or_fixed_array :: proc(text: string) -> bool {
+    return len(text) >= 2 && text[0] == '[' && !type_text_is_dynamic_array(text)
+}
+
 type_text_is_map :: proc(text: string) -> bool {
     return len(text) >= 4 && text[:4] == "map["
+}
+
+map_type_parts :: proc(text: string) -> (key, value: string, ok: bool) {
+    if !type_text_is_map(text) {
+        return "", "", false
+    }
+    split := strings.index(text, "]")
+    if split < 0 || split+1 > len(text) {
+        return "", "", false
+    }
+    return text[4:split], text[split+1:], true
+}
+
+number_literal_type :: proc(text: string) -> string {
+    for ch in text {
+        if ch == '.' || ch == 'e' || ch == 'E' {
+            return "f64"
+        }
+    }
+    return "int"
+}
+
+infer_homogeneous_items_type :: proc(e: ^Emitter, items: []CST_Form, what: string) -> (string, Compile_Error, bool) {
+    if len(items) == 0 {
+        return "", Compile_Error{message = fmt.tprintf("cannot infer type for empty %s literal; add a type context or use an explicit constructor", what)}, false
+    }
+    first_ty, err_first, ok_first := infer_literal_value_type(e, items[0])
+    if !ok_first {
+        return "", err_first, false
+    }
+    for item in items[1:] {
+        item_ty, err_item, ok_item := infer_literal_value_type(e, item)
+        if !ok_item {
+            return "", err_item, false
+        }
+        if item_ty != first_ty {
+            return "", Compile_Error{message = fmt.tprintf("%s literal must be homogeneous; saw both %s and %s", what, first_ty, item_ty), span = item.span}, false
+        }
+    }
+    return first_ty, Compile_Error{}, true
+}
+
+infer_literal_value_type :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) {
+    #partial switch form.kind {
+    case .Number:
+        return number_literal_type(form.text), Compile_Error{}, true
+    case .String:
+        return "string", Compile_Error{}, true
+    case .Bool:
+        return "bool", Compile_Error{}, true
+    case .Keyword:
+        return "string", Compile_Error{}, true
+    case .Symbol:
+        if ty, ok := lookup_local_type(e, map_name(form.text)); ok {
+            return ty, Compile_Error{}, true
+        }
+        return "", Compile_Error{message = fmt.tprintf("cannot infer literal type from symbol %s", form.text), span = form.span}, false
+    case .Vector:
+        if len(form.items) == 0 {
+            return "", Compile_Error{message = "cannot infer type for empty vector literal; add a type context or use arr/empty", span = form.span}, false
+        }
+        elem_ty, err_elem, ok_elem := infer_homogeneous_items_type(e, form.items[:], "vector")
+        if !ok_elem {
+            return "", err_elem, false
+        }
+        return fmt.tprintf("[dynamic]%s", elem_ty), Compile_Error{}, true
+    case .Brace:
+        if len(form.items) == 0 {
+            return "", Compile_Error{message = "cannot infer type for empty map literal; add a type context or use map/empty", span = form.span}, false
+        }
+        if len(form.items)%2 != 0 {
+            return "", Compile_Error{message = "map literal expects key/value pairs", span = form.span}, false
+        }
+        key_ty, err_key, ok_key := infer_literal_value_type(e, form.items[0])
+        if !ok_key {
+            return "", err_key, false
+        }
+        value_ty, err_value, ok_value := infer_literal_value_type(e, form.items[1])
+        if !ok_value {
+            return "", err_value, false
+        }
+        i := 2
+        for i < len(form.items) {
+            next_key_ty, err_next_key, ok_next_key := infer_literal_value_type(e, form.items[i])
+            if !ok_next_key {
+                return "", err_next_key, false
+            }
+            if next_key_ty != key_ty {
+                return "", Compile_Error{message = fmt.tprintf("map literal keys must be homogeneous; saw both %s and %s", key_ty, next_key_ty), span = form.items[i].span}, false
+            }
+            next_value_ty, err_next_value, ok_next_value := infer_literal_value_type(e, form.items[i+1])
+            if !ok_next_value {
+                return "", err_next_value, false
+            }
+            if next_value_ty != value_ty {
+                return "", Compile_Error{message = fmt.tprintf("map literal values must be homogeneous; saw both %s and %s", value_ty, next_value_ty), span = form.items[i+1].span}, false
+            }
+            i += 2
+        }
+        return fmt.tprintf("map[%s]%s", key_ty, value_ty), Compile_Error{}, true
+    case .Set:
+        if len(form.items) == 0 {
+            return "", Compile_Error{message = "cannot infer type for empty set literal; add a type context or use set/empty", span = form.span}, false
+        }
+        elem_ty, err_elem, ok_elem := infer_homogeneous_items_type(e, form.items[:], "set")
+        if !ok_elem {
+            return "", err_elem, false
+        }
+        return fmt.tprintf("map[%s]bool", elem_ty), Compile_Error{}, true
+    case .List:
+        if len(form.items) == 2 && form.items[0].kind == .Symbol && form.items[1].kind == .Brace {
+            head_name := map_name(form.items[0].text)
+            if _, ok := find_struct_decl(e, head_name); ok {
+                return head_name, Compile_Error{}, true
+            }
+        }
+        return "", Compile_Error{message = "cannot infer inline literal type from this expression", span = form.span}, false
+    case .Nil:
+        return "", Compile_Error{message = "cannot infer literal type from nil", span = form.span}, false
+    }
+    return "", Compile_Error{message = "unsupported inline literal type inference", span = form.span}, false
+}
+
+obvious_form_type :: proc(e: ^Emitter, form: CST_Form) -> (string, bool) {
+    if form.kind == .Symbol {
+        return lookup_local_type(e, map_name(form.text))
+    }
+    if form.kind == .List && len(form.items) == 2 && form.items[0].kind == .Symbol && form.items[1].kind == .Brace {
+        head_name := map_name(form.items[0].text)
+        if _, ok := find_struct_decl(e, head_name); ok {
+            return head_name, true
+        }
+    }
+    if form.kind == .Vector || form.kind == .Brace || form.kind == .Set {
+        if ty, _, ok := infer_literal_value_type(e, form); ok {
+            return ty, true
+        }
+    }
+    return "", false
+}
+
+emit_set_literal :: proc(e: ^Emitter, elem_type: string, form: CST_Form) -> (string, Compile_Error, bool) {
+    values, err_values, ok_values := emit_vector_item_texts(e, form)
+    if !ok_values {
+        return "", err_values, false
+    }
+    if !has_multiline_items(values[:]) {
+        builder := strings.builder_make()
+        defer strings.builder_destroy(&builder)
+        strings.write_string(&builder, "map[")
+        strings.write_string(&builder, elem_type)
+        strings.write_string(&builder, "]bool{")
+        for value, idx in values {
+            if idx > 0 {
+                strings.write_string(&builder, ", ")
+            }
+            strings.write_string(&builder, value)
+            strings.write_string(&builder, " = true")
+        }
+        strings.write_byte(&builder, '}')
+        return strings.clone(strings.to_string(builder)), Compile_Error{}, true
+    }
+
+    builder := strings.builder_make()
+    defer strings.builder_destroy(&builder)
+    strings.write_string(&builder, "map[")
+    strings.write_string(&builder, elem_type)
+    strings.write_string(&builder, "]bool{\n")
+    for value in values {
+        append_indented_multiline(&builder, fmt.tprintf("%s = true", value), "    ", ",")
+        strings.write_byte(&builder, '\n')
+    }
+    strings.write_byte(&builder, '}')
+    return strings.clone(strings.to_string(builder)), Compile_Error{}, true
+}
+
+emit_inferred_literal :: proc(e: ^Emitter, form: CST_Form, expected_type := "") -> (string, Compile_Error, bool) {
+    #partial switch form.kind {
+    case .Vector:
+        prefix := expected_type
+        if prefix == "" {
+            elem_ty, err_elem, ok_elem := infer_homogeneous_items_type(e, form.items[:], "vector")
+            if !ok_elem {
+                return "", err_elem, false
+            }
+            prefix = fmt.tprintf("[dynamic]%s", elem_ty)
+        } else if !(type_text_is_dynamic_array(prefix) || type_text_is_slice_or_fixed_array(prefix)) {
+            return "", Compile_Error{message = fmt.tprintf("vector literal does not match expected type %s", prefix), span = form.span}, false
+        }
+        if type_text_is_dynamic_array(prefix) {
+            mark_dynamic_literals(e)
+        }
+        return emit_vector_literal(e, prefix, form)
+    case .Brace:
+        prefix := expected_type
+        if prefix == "" {
+            if len(form.items) == 0 {
+                return emit_brace_literal(e, "", form)
+            }
+            inferred, err_inferred, ok_inferred := infer_literal_value_type(e, form)
+            if !ok_inferred {
+                return "", err_inferred, false
+            }
+            prefix = inferred
+        } else if !type_text_is_map(prefix) {
+            return emit_brace_literal(e, prefix, form)
+        }
+        mark_dynamic_literals(e)
+        return emit_brace_literal(e, prefix, form)
+    case .Set:
+        elem_ty := ""
+        if expected_type != "" {
+            key_ty, value_ty, ok_map := map_type_parts(expected_type)
+            if !ok_map || value_ty != "bool" {
+                return "", Compile_Error{message = fmt.tprintf("set literal does not match expected type %s", expected_type), span = form.span}, false
+            }
+            elem_ty = key_ty
+        } else {
+            inferred, err_inferred, ok_inferred := infer_literal_value_type(e, form)
+            if !ok_inferred {
+                return "", err_inferred, false
+            }
+            key_ty, value_ty, ok_map := map_type_parts(inferred)
+            if !ok_map || value_ty != "bool" {
+                return "", Compile_Error{message = "internal error inferring set literal type", span = form.span}, false
+            }
+            elem_ty = key_ty
+        }
+        mark_dynamic_literals(e)
+        return emit_set_literal(e, elem_ty, form)
+    }
+    return "", Compile_Error{message = "internal error: expected literal form", span = form.span}, false
 }
 
 push_local_type_scope :: proc(e: ^Emitter) {
@@ -2150,6 +2464,11 @@ obvious_binding_type :: proc(e: ^Emitter, binding: Binding) -> (string, bool) {
             return head_name, true
         }
     }
+    if binding.value.kind == .Vector || binding.value.kind == .Brace || binding.value.kind == .Set {
+        if ty, _, ok := infer_literal_value_type(e, binding.value); ok {
+            return ty, true
+        }
+    }
     return "", false
 }
 
@@ -2170,6 +2489,9 @@ form_is_owned_allocation_result :: proc(form: CST_Form) -> bool {
 }
 
 form_is_owned_constructor_result :: proc(form: CST_Form) -> bool {
+    if form.kind == .Vector || form.kind == .Brace || form.kind == .Set {
+        return true
+    }
     if form.kind != .List || len(form.items) == 0 || form.items[0].kind != .Symbol {
         return false
     }
@@ -2866,11 +3188,19 @@ emit_operator_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Erro
         if len(form.items) != 3 {
             return "", Compile_Error{message = fmt.tprintf("%s expects exactly two arguments", op), span = form.span}, false
         }
-        lhs, err_lhs, ok_lhs := emit_expr(e, form.items[1])
+        lhs_expected := ""
+        rhs_expected := ""
+        if ty, ok := obvious_form_type(e, form.items[1]); ok {
+            rhs_expected = ty
+        }
+        if ty, ok := obvious_form_type(e, form.items[2]); ok {
+            lhs_expected = ty
+        }
+        lhs, err_lhs, ok_lhs := emit_expr_for_expected_type(e, form.items[1], lhs_expected)
         if !ok_lhs {
             return "", err_lhs, false
         }
-        rhs, err_rhs, ok_rhs := emit_expr(e, form.items[2])
+        rhs, err_rhs, ok_rhs := emit_expr_for_expected_type(e, form.items[2], rhs_expected)
         if !ok_rhs {
             return "", err_rhs, false
         }
@@ -4371,6 +4701,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
             if !ok_struct_ctor {
                 return "", err_struct, false
             }
+            return emit_struct_brace_literal(e, struct_decl, form.items[1])
         }
         union_decl, ok_union := find_union_decl(e, head_name)
         if ok_union {
@@ -4441,10 +4772,8 @@ emit_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) 
             return type_text, {}, true
         }
         return emit_call_like(e, form)
-    case .Vector:
-        return emit_vector_literal(e, "", form)
-    case .Brace:
-        return emit_brace_literal(e, "", form)
+    case .Vector, .Brace, .Set:
+        return emit_inferred_literal(e, form)
     }
     return "", Compile_Error{message = "unsupported expression", span = form.span}, false
 }
@@ -5158,7 +5487,7 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
                 if bad_owned {
                     return err_owned, false
                 }
-                value, err_value, ok_value := emit_expr(e, binding.value)
+                value, err_value, ok_value := emit_expr_for_expected_type(e, binding.value, binding.ty)
                 if !ok_value {
                     return err_value, false
                 }
@@ -5598,7 +5927,7 @@ emit_eval_print_stmt :: proc(e: ^Emitter, form: CST_Form) -> (Compile_Error, boo
                 if bad_owned {
                     return err_owned, false
                 }
-                value, err_value, ok_value := emit_expr(e, binding.value)
+                value, err_value, ok_value := emit_expr_for_expected_type(e, binding.value, binding.ty)
                 if !ok_value {
                     return err_value, false
                 }
@@ -5716,7 +6045,11 @@ emit_decl :: proc(e: ^Emitter, decl: IR_Decl) -> (Compile_Error, bool) {
             emit_line(e, fmt.tprintf("import %s", decl.import_decl.path))
         }
     case .Const:
-        value, err_value, ok_value := emit_expr(e, decl.const_decl.value)
+        expected_type := ""
+        if decl.const_decl.has_ty {
+            expected_type = decl.const_decl.ty
+        }
+        value, err_value, ok_value := emit_expr_for_expected_type(e, decl.const_decl.value, expected_type)
         if !ok_value {
             return err_value, false
         }
@@ -5726,7 +6059,11 @@ emit_decl :: proc(e: ^Emitter, decl: IR_Decl) -> (Compile_Error, bool) {
             emit_line(e, fmt.tprintf("%s :: %s", decl.const_decl.name, value))
         }
     case .Var:
-        value, err_value, ok_value := emit_expr(e, decl.var_decl.value)
+        expected_type := ""
+        if decl.var_decl.has_ty {
+            expected_type = decl.var_decl.ty
+        }
+        value, err_value, ok_value := emit_expr_for_expected_type(e, decl.var_decl.value, expected_type)
         if !ok_value {
             return err_value, false
         }
@@ -7580,8 +7917,13 @@ decls_need_core_slice_sort_import :: proc(decls: []IR_Decl) -> bool {
 }
 
 form_uses_core_strings :: proc(form: CST_Form) -> bool {
+    if form.kind == .Symbol {
+        return strings.has_prefix(form.text, "strings.") || strings.has_prefix(form.text, "strings/")
+    }
     if form.kind == .List && len(form.items) > 0 && form.items[0].kind == .Symbol {
-        if form.items[0].text == "str/contains?" {
+        if form.items[0].text == "str/contains?" ||
+           strings.has_prefix(form.items[0].text, "strings.") ||
+           strings.has_prefix(form.items[0].text, "strings/") {
             return true
         }
     }

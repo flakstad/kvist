@@ -82,6 +82,26 @@ are run deliberately.
 - `tap.kvist`: `tap>` for expression-friendly inspection.
 - `interop-directives.kvist`: direct Odin directives and escape hatches.
 
+## Live Runtime Demos
+
+- `live_reload_demo`: smallest Odin-side `kvist_live` demo; loads a module,
+  reloads it, and shows state migration.
+- `live_commands_demo`: long-running compiled host process that reloads a tiny
+  live module file while preserving command state.
+
+Run them from the repo root with:
+
+```sh
+odin run examples/live_reload_demo
+odin run examples/live_commands_demo
+```
+
+The live commands demo watches
+`examples/live_commands_demo/live/commands.kvist`. Edit that file while the
+demo runs to see the process stay alive, the module reload, the command/hook
+behavior change, shared `live/defn` helpers update, and the command counter
+survive the edit.
+
 Useful commands while reading examples:
 
 ```sh

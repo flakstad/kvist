@@ -1,0 +1,133 @@
+(package hiccup)
+(import arr "kvist:arr")
+(import strings "core:strings")
+
+(defstruct Attr {
+  :name string
+  :value string
+})
+
+(defstruct Element {
+  :tag string
+  :attrs (slice Attr)
+  :children (slice Node)
+})
+
+(defunion Node {
+  :text string
+  :element Element
+})
+
+(defmacro emit-attr-items [items]
+  (if (= (count items) 0)
+    (forms)
+    (let [key (nth items 0)
+          value (nth items 1)]
+      (forms
+        (quasiquote
+          (Attr {:name (unquote (text key))
+                 :value (unquote (text value))}))
+        (emit-attr-items (rest (rest items)))))))
+
+(defmacro emit-child-items [items]
+  (if (= (count items) 0)
+    (forms)
+    (forms
+      (emit-node (first items))
+      (emit-child-items (rest items)))))
+
+(defmacro emit-node [form]
+  (if (vector? form)
+    (let [tag (first form)
+          tail (rest form)]
+      (if (= (count tail) 0)
+        (quasiquote
+          (Node {:element (Element {:tag (unquote (text tag))
+                                    :attrs []
+                                    :children []})}))
+        (let [candidate (first tail)]
+          (if (brace? candidate)
+            (quasiquote
+              (Node {:element (Element {:tag (unquote (text tag))
+                                        :attrs [(splice (emit-attr-items candidate))]
+                                        :children [(splice (emit-child-items (rest tail)))]} )}))
+            (quasiquote
+              (Node {:element (Element {:tag (unquote (text tag))
+                                        :attrs []
+                                        :children [(splice (emit-child-items tail))]})}))))))
+    (quasiquote
+      (Node {:text (unquote (text form))}))))
+
+(defmacro html [form]
+  (emit-node form))
+
+(defn tag [node: Node] -> string
+  (switch [value node]
+    Element (:tag value)
+    string ""
+    :else ""))
+
+(defn attr-count [node: Node] -> int
+  (switch [value node]
+    Element (arr/count (:attrs value))
+    string 0
+    :else 0))
+
+(defn child-count [node: Node] -> int
+  (switch [value node]
+    Element (arr/count (:children value))
+    string 0
+    :else 0))
+
+(defn replace-owned [text: string, old: string, new: string] -> string
+  (let [[updated allocated?] (strings.replace text old new -1)]
+    (if allocated?
+      (do
+        (delete text)
+        updated)
+      text)))
+
+(defn escape-html [text: string] -> string
+  (let [[owned err] (strings.clone text)]
+    (if (!= err nil)
+      ""
+      (let [step1 (replace-owned owned "&" "&amp;")
+            step2 (replace-owned step1 "<" "&lt;")
+            step3 (replace-owned step2 ">" "&gt;")
+            step4 (replace-owned step3 "\"" "&quot;")]
+        (replace-owned step4 "'" "&#39;")))))
+
+(defn render-attr-into [builder: ^strings.Builder, attr: Attr]
+  (strings.write_string builder " ")
+  (strings.write_string builder (:name attr))
+  (strings.write_string builder "=\"")
+  (let [escaped (escape-html (:value attr)) defer]
+    (strings.write_string builder escaped))
+  (strings.write_string builder "\""))
+
+(defn render-node-into [builder: ^strings.Builder, node: Node]
+  (switch [value node]
+    Element
+    (do
+      (strings.write_string builder "<")
+      (strings.write_string builder (:tag value))
+      (for [attr (:attrs value)]
+        (render-attr-into builder attr))
+      (strings.write_string builder ">")
+      (for [child (:children value)]
+        (render-node-into builder child))
+      (strings.write_string builder "</")
+      (strings.write_string builder (:tag value))
+      (strings.write_string builder ">"))
+    string
+    (let [escaped (escape-html value) defer]
+      (strings.write_string builder escaped))))
+
+(defn render [node: Node] -> string
+  (let [builder (strings.builder_make)]
+    (defer (strings.builder_destroy (& builder)))
+    (render-node-into (& builder) node)
+    (let [[out err] (strings.clone (strings.to_string builder))]
+      (if (!= err nil)
+        ""
+        out))))

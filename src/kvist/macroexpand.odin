@@ -832,6 +832,33 @@ macro_quasiquote_form :: proc(form: CST_Form, macros: []User_Macro, bindings: []
             append(&out.items, child)
         }
         return out, Compile_Error{}, true
+    case .Set:
+        out := CST_Form{kind = .Set, span = form.span}
+        for item in form.items {
+            if macro_is_symbol_call(item, "splice") && depth == 0 {
+                if len(item.items) != 2 {
+                    return CST_Form{}, Compile_Error{message = "splice expects one form", span = item.span}, false
+                }
+                value, err_value, ok_value := macro_eval_expr(item.items[1], macros, bindings)
+                if !ok_value {
+                    return CST_Form{}, err_value, false
+                }
+                forms, err_forms, ok_forms := macro_value_to_forms(value, item.items[1].span)
+                if !ok_forms {
+                    return CST_Form{}, err_forms, false
+                }
+                for expanded in forms {
+                    append(&out.items, expanded)
+                }
+                continue
+            }
+            child, err_child, ok_child := macro_quasiquote_form(item, macros, bindings, depth)
+            if !ok_child {
+                return CST_Form{}, err_child, false
+            }
+            append(&out.items, child)
+        }
+        return out, Compile_Error{}, true
     case:
         return form, Compile_Error{}, true
     }
@@ -872,6 +899,8 @@ macro_eval_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_
     case .Vector:
         return macro_form_value(form), Compile_Error{}, true
     case .Brace:
+        return macro_form_value(form), Compile_Error{}, true
+    case .Set:
         return macro_form_value(form), Compile_Error{}, true
     case .List:
         if len(form.items) == 0 {
@@ -1134,6 +1163,70 @@ macro_eval_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_
                     return Macro_Value{}, err_value, false
                 }
                 return macro_bool_value(value.kind == .Form), Compile_Error{}, true
+            case "vector?":
+                if len(form.items) != 2 {
+                    return Macro_Value{}, Compile_Error{message = "vector? expects one argument", span = form.span}, false
+                }
+                value, err_value, ok_value := macro_eval_expr(form.items[1], macros, bindings)
+                if !ok_value {
+                    return Macro_Value{}, err_value, false
+                }
+                if value.kind != .Form {
+                    return macro_bool_value(false), Compile_Error{}, true
+                }
+                return macro_bool_value(value.form.kind == .Vector), Compile_Error{}, true
+            case "brace?":
+                if len(form.items) != 2 {
+                    return Macro_Value{}, Compile_Error{message = "brace? expects one argument", span = form.span}, false
+                }
+                value, err_value, ok_value := macro_eval_expr(form.items[1], macros, bindings)
+                if !ok_value {
+                    return Macro_Value{}, err_value, false
+                }
+                if value.kind != .Form {
+                    return macro_bool_value(false), Compile_Error{}, true
+                }
+                return macro_bool_value(value.form.kind == .Brace), Compile_Error{}, true
+            case "text":
+                if len(form.items) != 2 {
+                    return Macro_Value{}, Compile_Error{message = "text expects one argument", span = form.span}, false
+                }
+                value, err_value, ok_value := macro_eval_expr(form.items[1], macros, bindings)
+                if !ok_value {
+                    return Macro_Value{}, err_value, false
+                }
+                if value.kind == .String {
+                    return macro_string_value(value.string_value), Compile_Error{}, true
+                }
+                if value.kind == .Int {
+                    return macro_string_value(macro_int_text(value.int_value)), Compile_Error{}, true
+                }
+                if value.kind == .Bool {
+                    if value.bool_value {
+                        return macro_string_value("true"), Compile_Error{}, true
+                    }
+                    return macro_string_value("false"), Compile_Error{}, true
+                }
+                if value.kind == .Nil {
+                    return macro_string_value("nil"), Compile_Error{}, true
+                }
+                if value.kind == .Form {
+                    #partial switch value.form.kind {
+                    case .String:
+                        return macro_string_value(unquote_string(value.form.text)), Compile_Error{}, true
+                    case .Symbol:
+                        return macro_string_value(value.form.text), Compile_Error{}, true
+                    case .Keyword:
+                        if len(value.form.text) > 0 && value.form.text[0] == ':' {
+                            return macro_string_value(value.form.text[1:]), Compile_Error{}, true
+                        }
+                        return macro_string_value(value.form.text), Compile_Error{}, true
+                    case .Number, .Bool, .Nil:
+                        return macro_string_value(value.form.text), Compile_Error{}, true
+                    case:
+                    }
+                }
+                return Macro_Value{}, Compile_Error{message = "text expects a scalar literal, symbol, or keyword", span = form.items[1].span}, false
             }
         }
         if head.kind == .Symbol {
@@ -1287,7 +1380,7 @@ macroexpand_cst_form_with_macros :: proc(form: CST_Form, macros: []User_Macro) -
             append(&expanded.items, child)
         }
         return expanded, Compile_Error{}, true
-    case .Vector, .Brace:
+    case .Vector, .Brace, .Set:
         expanded = form
         expanded.items = nil
         for item in form.items {
@@ -1419,6 +1512,18 @@ write_macro_form_expanded :: proc(builder: ^strings.Builder, form: CST_Form, mac
         strings.write_byte(builder, ']')
     case .Brace:
         strings.write_byte(builder, '{')
+        for item, idx in form.items {
+            if idx > 0 {
+                strings.write_byte(builder, ' ')
+            }
+            err_item, ok_item := write_macro_form_expanded(builder, item, macros)
+            if !ok_item {
+                return err_item, false
+            }
+        }
+        strings.write_byte(builder, '}')
+    case .Set:
+        strings.write_string(builder, "#{")
         for item, idx in form.items {
             if idx > 0 {
                 strings.write_byte(builder, ' ')

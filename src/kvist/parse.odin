@@ -168,6 +168,8 @@ parse_defstruct_type_meta :: proc(form: CST_Form) -> (text: string, err: Compile
         case:
             return "", Compile_Error{message = "invalid defstruct field type metadata", span = form.span}, false
         }
+    case .List:
+        return parse_type_text(form)
     case:
         return "", Compile_Error{message = "invalid defstruct field type metadata", span = form.span}, false
     }
@@ -540,6 +542,8 @@ parse_enum_variants :: proc(form: CST_Form) -> (variants: [dynamic]Enum_Variant,
             i += 2
         }
         return variants, {}, true
+    case .Set:
+        return variants, Compile_Error{message = "expected enum variant vector or brace form", span = form.span}, false
     case:
         return variants, Compile_Error{message = "expected enum variant vector or brace form", span = form.span}, false
     }

@@ -123,6 +123,9 @@ compile_all_examples :: proc(t: ^testing.T) {
         "examples/error-handling.kvist",
         "examples/hello.kvist",
         "examples/higher-order.kvist",
+        "examples/hiccup-demo.kvist",
+        "examples/hiccup-render.kvist",
+        "examples/inline-literals.kvist",
         "examples/interop-directives.kvist",
         "examples/pointers-and-raw.kvist",
         "examples/proc-values.kvist",
@@ -270,6 +273,34 @@ symbols_source_indexes_defstruct_docstring :: proc(t: ^testing.T) {
 }
 
 @(test)
+symbols_source_indexes_defunion_and_defenum :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defenum Status [
+  Active
+  Archived
+])
+
+(defunion Value {
+  :i int
+  :s string
+})`
+
+    output, err, ok := kvist.symbols_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "enum\tStatus\t3\t10\t\t\t\n"), true)
+    testing.expect_value(t, strings.contains(output, "variant\tStatus.Active\t4\t3\tStatus\t\t\n"), true)
+    testing.expect_value(t, strings.contains(output, "union\tValue\t8\t11\t\t\t\n"), true)
+    testing.expect_value(t, strings.contains(output, "variant\tValue.i\t9\t3\tValue\t\t\n"), true)
+}
+
+@(test)
 builtin_symbols_source_emits_signatures_and_docs :: proc(t: ^testing.T) {
     output := kvist.builtin_symbols_source()
     defer delete(output)
@@ -354,6 +385,37 @@ editor_symbols_source_includes_language_forms_and_helpers :: proc(t: ^testing.T)
     testing.expect_value(t, strings.contains(output, "kvist form\tlet\t"), true)
     testing.expect_value(t, strings.contains(output, "kvist form\tif\t"), true)
     testing.expect_value(t, strings.contains(output, "kvist helper\tmap\t"), true)
+}
+
+@(test)
+editor_symbols_source_includes_source_package_imports :: proc(t: ^testing.T) {
+    source := `(package main)
+(import hiccup "kvist:hiccup")
+
+(defn main []
+  (hiccup/render (hiccup/html [:div "ok"])))`
+
+    path := "/Users/andreas/Projects/kvist/.tmp-hiccup-editor-symbols.kvist"
+    write_err := os.write_entire_file(path, transmute([]byte)source)
+    testing.expect_value(t, write_err == nil, true)
+    if write_err != nil {
+        return
+    }
+    defer os.remove(path)
+
+    output, err, ok := kvist.editor_symbols_source(path, source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "macro\thiccup/html\t"), true)
+    testing.expect_value(t, strings.contains(output, "proc\thiccup/render\t"), true)
+    testing.expect_value(t, strings.contains(output, "struct\thiccup/Element\t"), true)
+    testing.expect_value(t, strings.contains(output, "union\thiccup/Node\t"), true)
+    testing.expect_value(t, strings.contains(output, "packages/hiccup/package.kvist"), true)
 }
 
 @(test)
@@ -850,6 +912,30 @@ reader_classifies_core_literals :: proc(t: ^testing.T) {
     testing.expect_value(t, forms[1].form.items[2].kind, kvist.CST_Form_Kind.Number)
     testing.expect_value(t, forms[2].form.items[2].kind, kvist.CST_Form_Kind.Bool)
     testing.expect_value(t, forms[3].form.items[2].kind, kvist.CST_Form_Kind.Nil)
+}
+
+@(test)
+reader_classifies_inline_collection_literals :: proc(t: ^testing.T) {
+    old_allocator := context.allocator
+    temp_scope := runtime.default_temp_allocator_temp_begin()
+    defer runtime.default_temp_allocator_temp_end(temp_scope)
+    context.allocator = context.temp_allocator
+    defer context.allocator = old_allocator
+
+    source := `(defconst xs [1 2 3])
+(defconst lookup {:one "1" :two "2"})
+(defconst tags #{:math :lisp})`
+
+    forms, err, ok := kvist.read_top_forms(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+
+    testing.expect_value(t, forms[0].form.items[2].kind, kvist.CST_Form_Kind.Vector)
+    testing.expect_value(t, forms[1].form.items[2].kind, kvist.CST_Form_Kind.Brace)
+    testing.expect_value(t, forms[2].form.items[2].kind, kvist.CST_Form_Kind.Set)
 }
 
 @(test)
@@ -4212,6 +4298,100 @@ main :: proc() {
 }
 `
     testing.expect_value(t, output, expected)
+}
+
+@(test)
+compile_inline_collection_literals :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(proc score [] -> int
+  (let [xs [1 2 3] defer
+        lookup {:one 1 :two 2} defer
+        tags #{:math :lisp} defer]
+    (println tags)
+    (+ (arr/count xs)
+       (get lookup :one))))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    expected := `#+feature dynamic-literals
+package main
+
+import "core:fmt"
+
+score :: proc() -> int {
+    xs := [dynamic]int{1, 2, 3}
+    defer delete(xs)
+    lookup := map[string]int{":one" = 1, ":two" = 2}
+    defer delete(lookup)
+    tags := map[string]bool{":math" = true, ":lisp" = true}
+    defer delete(tags)
+    fmt.println(tags)
+    return (len(xs)) + (lookup[":one"])
+}
+`
+    testing.expect_value(t, output, expected)
+}
+
+@(test)
+compile_typed_empty_inline_collection_literals :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(proc score [] -> int
+  (let [xs: [dynamic]int [] defer
+        lookup: map[string]int {} defer
+        tags: set[string] #{} defer]
+    (println lookup tags)
+    (arr/count xs)))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    expected := `#+feature dynamic-literals
+package main
+
+import "core:fmt"
+
+score :: proc() -> int {
+    xs: [dynamic]int = [dynamic]int{}
+    defer delete(xs)
+    lookup: map[string]int = map[string]int{}
+    defer delete(lookup)
+    tags: map[string]bool = map[string]bool{}
+    defer delete(tags)
+    fmt.println(lookup, tags)
+    return len(xs)
+}
+`
+    testing.expect_value(t, output, expected)
+}
+
+@(test)
+compile_inline_map_literal_rejects_mixed_values :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(proc main []
+  (let [profile {:name "Ada" :age 36}]
+    (return)))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+    defer delete(err.message)
+    testing.expect_value(t, strings.contains(err.message, "map literal values must be homogeneous"), true)
 }
 
 @(test)

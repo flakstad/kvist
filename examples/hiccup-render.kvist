@@ -1,0 +1,15 @@
+// Render a shipped hiccup tree to an owned HTML string.
+(package main)
+(import hiccup "kvist:hiccup")
+
+(defn render-demo [] -> bool
+  (let [page (hiccup/html
+               [:div {:class "border"}
+                [:button {:class "primary"} "Save & Close"]
+                [:span "Status <ok>"]])
+        html (hiccup/render page) defer]
+    (println html)
+    true))
+
+(defn main []
+  (render-demo))

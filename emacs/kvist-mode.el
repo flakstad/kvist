@@ -326,7 +326,7 @@
          (program (kvist--executable source-file)))
     (unwind-protect
         (pcase-let ((`(,exit-code . ,output)
-                      (kvist--call-string program (list "editor-symbols" input identifier))))
+                      (kvist--call-string program (list "lookup" input identifier))))
           (unless (zerop exit-code)
             (user-error "%s" (string-trim output)))
           (let ((lines (cdr (split-string output "\n" t))))

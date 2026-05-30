@@ -40,6 +40,8 @@ language/runtime implementation prematurely.
   code.
 - Explore hot-reload patterns later, possibly by compiling program code into a
   swap-friendly binary boundary while keeping live state in memory.
+- See [LIVE-RUNTIME.md](./LIVE-RUNTIME.md) for a longer speculative note on an
+  optional embedded live runtime and the host/live split it would require.
 - Keep this work clearly separate from the current compiler surface until the
   language core and ownership model are stable.
 

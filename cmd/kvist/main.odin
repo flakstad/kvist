@@ -21,6 +21,7 @@ print_usage :: proc() {
     fmt.println("  kvist macroexpand <input.kvist> <form> [-o output.kvist] [--map output.map]")
     fmt.println("  kvist symbols <input.kvist>")
     fmt.println("  kvist editor-symbols <input.kvist> [identifier]")
+    fmt.println("  kvist lookup <input.kvist> <identifier>")
     fmt.println("  kvist complete <input.kvist> [prefix]")
     fmt.println("  kvist doc <input.kvist> <identifier>")
     fmt.println("  kvist xref <input.kvist> <identifier>")
@@ -33,7 +34,7 @@ print_usage :: proc() {
 }
 
 is_command :: proc(text: string) -> bool {
-    return text == "compile" || text == "build" || text == "check" || text == "run" || text == "eval" || text == "expand" || text == "macroexpand" || text == "symbols" || text == "editor-symbols" || text == "complete" || text == "doc" || text == "xref" || text == "builtin-symbols" || text == "imported-symbols" || text == "package-symbols" || text == "cache"
+    return text == "compile" || text == "build" || text == "check" || text == "run" || text == "eval" || text == "expand" || text == "macroexpand" || text == "symbols" || text == "editor-symbols" || text == "lookup" || text == "complete" || text == "doc" || text == "xref" || text == "builtin-symbols" || text == "imported-symbols" || text == "package-symbols" || text == "cache"
 }
 
 read_source_or_exit :: proc(path: string) -> string {
@@ -837,6 +838,19 @@ complete_command :: proc(input: string, prefix := "") {
     fmt.print(filtered)
 }
 
+lookup_command :: proc(input, identifier: string) {
+    data := read_source_or_exit(input)
+    output, err, ok := kvist.editor_symbols_source(input, data)
+    if !ok {
+        fmt.eprintln(err.message)
+        os.exit(1)
+    }
+    defer delete(output)
+    filtered := filter_symbol_output(output, identifier)
+    defer delete(filtered)
+    fmt.print(filtered)
+}
+
 package_symbols_command :: proc(import_path, alias: string) {
     output, ok := kvist.package_symbols_source(import_path, alias)
     if !ok {
@@ -1173,6 +1187,14 @@ parse_editor_symbols_command :: proc() {
     editor_symbols_command(os.args[2], identifier)
 }
 
+parse_lookup_command :: proc() {
+    if len(os.args) != 4 {
+        print_usage()
+        os.exit(2)
+    }
+    lookup_command(os.args[2], os.args[3])
+}
+
 parse_complete_command :: proc() {
     if len(os.args) != 3 && len(os.args) != 4 {
         print_usage()
@@ -1259,6 +1281,8 @@ main :: proc() {
         parse_symbols_command()
     case "editor-symbols":
         parse_editor_symbols_command()
+    case "lookup":
+        parse_lookup_command()
     case "complete":
         parse_complete_command()
     case "doc":

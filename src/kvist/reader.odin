@@ -229,6 +229,11 @@ tokenize_with_origin :: proc(source: string, source_kind: Source_Kind) -> (token
             }
             continue
         case '#':
+            if i+1 < len(source) && source[i+1] == '{' {
+                append(&tokens, make_token(.L_Set_Brace, "#{", start, start+2, source_kind))
+                i += 2
+                continue
+            }
             if i+1 < len(source) && source[i+1] == '_' {
                 append(&tokens, make_token(.Discard, "#_", start, start+2, source_kind))
                 i += 2
@@ -320,6 +325,8 @@ parse_form :: proc(tokens: []Token, index: ^int) -> (form: CST_Form, err: Compil
         return parse_container(tokens, index, .L_Bracket, .R_Bracket, .Vector)
     case .L_Brace:
         return parse_container(tokens, index, .L_Brace, .R_Brace, .Brace)
+    case .L_Set_Brace:
+        return parse_container(tokens, index, .L_Set_Brace, .R_Brace, .Set)
     case .String:
         index^ += 1
         return CST_Form{kind = .String, text = token.text, span = token.span}, {}, true

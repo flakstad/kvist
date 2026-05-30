@@ -1,0 +1,16 @@
+// A shipped source package macro that lowers Hiccup-shaped data into a typed tree.
+(package main)
+(import hiccup "kvist:hiccup")
+
+(defn hiccup-demo [] -> bool
+  (let [page (hiccup/html
+               [:div {:class "border" :onclick onclick-handler}
+                [:button {:class "primary"} "Save"]
+                [:span "Status"]])]
+    (println (hiccup/tag page))
+    (println (hiccup/attr-count page))
+    (println (hiccup/child-count page))
+    true))
+
+(defn main []
+  (hiccup-demo))

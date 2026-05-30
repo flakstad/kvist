@@ -666,6 +666,88 @@ symbols_append_unique_records :: proc(builder: ^strings.Builder, seen: ^map[stri
     }
 }
 
+symbols_split_record_fields :: proc(line: string) -> (fields: [dynamic]string, ok: bool) {
+    rest := line
+    for {
+        tab := strings.index(rest, "\t")
+        if tab < 0 {
+            append(&fields, rest)
+            break
+        }
+        append(&fields, rest[:tab])
+        rest = rest[tab+1:]
+    }
+    return fields, len(fields) >= 7
+}
+
+symbols_top_level_kind_exported :: proc(kind: string) -> bool {
+    switch kind {
+    case "const", "var", "struct", "enum", "union", "proc", "macro":
+        return true
+    case:
+        return false
+    }
+}
+
+symbols_append_source_package_records :: proc(builder: ^strings.Builder, seen: ^map[string]bool, import_path, alias, package_file, output: string) {
+    lines := strings.split_lines(output, context.allocator)
+    defer delete(lines)
+    for line in lines {
+        if line == "" || line == "kind\tname\tline\tcolumn\tdetail\tsignature\tdoc" || line == "kind\tname\tline\tcolumn\tdetail\tsignature\tdoc\tfile" {
+            continue
+        }
+        fields, ok_fields := symbols_split_record_fields(line)
+        if !ok_fields {
+            delete(fields)
+            continue
+        }
+        kind := fields[0]
+        name := fields[1]
+        if !symbols_top_level_kind_exported(kind) {
+            delete(fields)
+            continue
+        }
+        line_text := fields[2]
+        column_text := fields[3]
+        signature := fields[5]
+        doc := fields[6]
+        temp := strings.builder_make()
+        fmt.sbprintf(&temp, "%s\t%s/%s\t%s\t%s\t%s\t%s\t%s\t%s\n", kind, alias, name, line_text, column_text, import_path, signature, doc, package_file)
+        fmt.sbprintf(&temp, "%s\t%s.%s\t%s\t%s\t%s\t%s\t%s\t%s\n", kind, alias, name, line_text, column_text, import_path, signature, doc, package_file)
+        symbols_append_unique_records(builder, seen, strings.to_string(temp))
+        strings.builder_destroy(&temp)
+        delete(fields)
+    }
+}
+
+source_package_symbols_source :: proc(importer_path, import_path: string) -> (package_file, output: string, err: Compile_Error, ok: bool) {
+    result_allocator := context.allocator
+    old_allocator := context.allocator
+    temp_scope := runtime.default_temp_allocator_temp_begin()
+    defer runtime.default_temp_allocator_temp_end(temp_scope)
+    context.allocator = context.temp_allocator
+    defer context.allocator = old_allocator
+
+    resolved, err_resolve, ok_resolve := resolve_source_import_path(importer_path, import_path)
+    if !ok_resolve {
+        return "", "", clone_compile_error(err_resolve, result_allocator), false
+    }
+    defer delete(resolved)
+    data, read_err := os.read_entire_file_from_path(resolved, context.allocator)
+    if read_err != nil {
+        return "", "", Compile_Error{message = strings.clone(fmt.tprintf("could not read source import: %s", resolved), result_allocator)}, false
+    }
+    defer delete(data)
+    package_output, package_err, ok_package := symbols_source(string(data))
+    if !ok_package {
+        return "", "", clone_compile_error(package_err, result_allocator), false
+    }
+    defer delete(package_output)
+    resolved_copy, _ := strings.clone(resolved, result_allocator)
+    output_copy, _ := strings.clone(package_output, result_allocator)
+    return resolved_copy, output_copy, Compile_Error{}, true
+}
+
 repo_root_for_path :: proc(path: string) -> (string, bool) {
     current := path
     if current != "" && !os.is_absolute_path(current) {
@@ -857,13 +939,40 @@ imported_symbols_source :: proc(path, source: string) -> (output: string, err: C
     builder := strings.builder_make()
     defer strings.builder_destroy(&builder)
     strings.write_string(&builder, "kind\tname\tline\tcolumn\tdetail\tsignature\tdoc\tfile\n")
+    seen := make(map[string]bool)
+    defer delete(seen)
     for top in forms {
         entry, ok_import := import_entry_from_form(top.form)
         if !ok_import {
             continue
         }
         if strings.has_prefix(entry.path, "kvist:") {
-            _ = package_symbols_append(&builder, entry.path, entry.alias)
+            if package_symbols_append(&builder, entry.path, entry.alias) {
+                continue
+            }
+            _, import_path, ok_source_import := source_import_alias_and_path(top.form)
+            if ok_source_import {
+                resolved, err_resolve, ok_resolve := resolve_source_import_path(path, import_path)
+                if !ok_resolve {
+                    return "", clone_compile_error(err_resolve, result_allocator), false
+                }
+                data, read_err := os.read_entire_file_from_path(resolved, context.allocator)
+                if read_err != nil {
+                    message := strings.clone(fmt.tprintf("could not read source import: %s", resolved), result_allocator)
+                    delete(resolved)
+                    return "", Compile_Error{message = message}, false
+                }
+                package_output, package_err, ok_package_output := symbols_source(string(data))
+                if !ok_package_output {
+                    delete(data)
+                    delete(resolved)
+                    return "", clone_compile_error(package_err, result_allocator), false
+                }
+                symbols_append_source_package_records(&builder, &seen, import_path, entry.alias, resolved, package_output)
+                delete(package_output)
+                delete(data)
+                delete(resolved)
+            }
             continue
         }
         if !have_odin_root {
@@ -918,15 +1027,38 @@ editor_symbols_source :: proc(path, source: string) -> (output: string, err: Com
         if !ok_import || !strings.has_prefix(entry.path, "kvist:") {
             continue
         }
-        if repo_root != "" {
+        if repo_root != "" && entry.path != "kvist:hiccup" {
             editor_package_symbols_append(&builder, &seen, repo_root, entry.path, entry.alias)
         } else {
             package_output, ok_package := package_symbols_source(entry.path, entry.alias)
-            if !ok_package {
+            if ok_package {
+                symbols_append_unique_records(&builder, &seen, package_output)
+                delete(package_output)
                 continue
             }
-            symbols_append_unique_records(&builder, &seen, package_output)
-            delete(package_output)
+            _, import_path, ok_source_import := source_import_alias_and_path(top.form)
+            if ok_source_import {
+                resolved, err_resolve, ok_resolve := resolve_source_import_path(path, import_path)
+                if !ok_resolve {
+                    return "", err_resolve, false
+                }
+                data, read_err := os.read_entire_file_from_path(resolved, context.allocator)
+                if read_err != nil {
+                    message := fmt.tprintf("could not read source import: %s", resolved)
+                    delete(resolved)
+                    return "", Compile_Error{message = message}, false
+                }
+                package_output, package_err, ok_package_output := symbols_source(string(data))
+                if !ok_package_output {
+                    delete(data)
+                    delete(resolved)
+                    return "", package_err, false
+                }
+                symbols_append_source_package_records(&builder, &seen, import_path, entry.alias, resolved, package_output)
+                delete(package_output)
+                delete(data)
+                delete(resolved)
+            }
         }
     }
 
@@ -1319,13 +1451,13 @@ symbols_source :: proc(source: string) -> (output: string, err: Compile_Error, o
                 symbols_write_record_doc(&builder, "struct", name, source, form.items[1].span, "", signature, doc_lines[:])
                 symbols_write_fields(&builder, source, name, form.items[field_index])
             }
-        case "enum":
+        case "enum", "defenum":
             if len(form.items) == 3 && form.items[1].kind == .Symbol {
                 name := form.items[1].text
                 symbols_write_record_doc(&builder, "enum", name, source, form.items[1].span, "", "", top.doc_lines[:])
                 symbols_write_enum_variants(&builder, source, name, form.items[2])
             }
-        case "union":
+        case "union", "defunion":
             if len(form.items) == 3 && form.items[1].kind == .Symbol {
                 name := form.items[1].text
                 symbols_write_record_doc(&builder, "union", name, source, form.items[1].span, "", "", top.doc_lines[:])
