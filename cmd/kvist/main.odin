@@ -20,6 +20,9 @@ print_usage :: proc() {
     fmt.println("  kvist expand <input.kvist> <form> [--no-print] [-o output.odin]")
     fmt.println("  kvist macroexpand <input.kvist> <form> [-o output.kvist] [--map output.map]")
     fmt.println("  kvist symbols <input.kvist>")
+    fmt.println("  kvist editor-symbols <input.kvist>")
+    fmt.println("  kvist builtin-symbols")
+    fmt.println("  kvist imported-symbols <input.kvist>")
     fmt.println("  kvist package-symbols <import-path> [alias]")
     fmt.println("  kvist cache path <name>")
     fmt.println("  kvist cache list")
@@ -27,7 +30,7 @@ print_usage :: proc() {
 }
 
 is_command :: proc(text: string) -> bool {
-    return text == "compile" || text == "build" || text == "check" || text == "run" || text == "eval" || text == "expand" || text == "macroexpand" || text == "symbols" || text == "package-symbols" || text == "cache"
+    return text == "compile" || text == "build" || text == "check" || text == "run" || text == "eval" || text == "expand" || text == "macroexpand" || text == "symbols" || text == "editor-symbols" || text == "builtin-symbols" || text == "imported-symbols" || text == "package-symbols" || text == "cache"
 }
 
 read_source_or_exit :: proc(path: string) -> string {
@@ -463,6 +466,37 @@ symbols_command :: proc(input: string) {
     fmt.print(output)
 }
 
+editor_symbols_command :: proc(input: string) {
+    data := read_source_or_exit(input)
+    output, err, ok := kvist.editor_symbols_source(input, data)
+    if !ok {
+        fmt.eprintln(err.message)
+        os.exit(1)
+    }
+    fmt.print(output)
+}
+
+builtin_symbols_command :: proc() {
+    output := kvist.builtin_symbols_source()
+    defer delete(output)
+    fmt.print(output)
+}
+
+imported_symbols_command :: proc(input: string) {
+    data := read_source_or_exit(input)
+    defer delete(transmute([]byte)data)
+
+    output, err, ok := kvist.imported_symbols_source(input, data)
+    if !ok {
+        formatted := kvist.format_compile_error(input, data, err)
+        fmt.eprint(formatted)
+        delete(formatted)
+        os.exit(1)
+    }
+    defer delete(output)
+    fmt.print(output)
+}
+
 package_symbols_command :: proc(import_path, alias: string) {
     output, ok := kvist.package_symbols_source(import_path, alias)
     if !ok {
@@ -787,6 +821,30 @@ parse_symbols_command :: proc() {
     symbols_command(os.args[2])
 }
 
+parse_editor_symbols_command :: proc() {
+    if len(os.args) != 3 {
+        print_usage()
+        os.exit(2)
+    }
+    editor_symbols_command(os.args[2])
+}
+
+parse_builtin_symbols_command :: proc() {
+    if len(os.args) != 2 {
+        print_usage()
+        os.exit(2)
+    }
+    builtin_symbols_command()
+}
+
+parse_imported_symbols_command :: proc() {
+    if len(os.args) != 3 {
+        print_usage()
+        os.exit(2)
+    }
+    imported_symbols_command(os.args[2])
+}
+
 parse_package_symbols_command :: proc() {
     if len(os.args) != 3 && len(os.args) != 4 {
         print_usage()
@@ -827,6 +885,12 @@ main :: proc() {
         parse_macroexpand_command()
     case "symbols":
         parse_symbols_command()
+    case "editor-symbols":
+        parse_editor_symbols_command()
+    case "builtin-symbols":
+        parse_builtin_symbols_command()
+    case "imported-symbols":
+        parse_imported_symbols_command()
     case "package-symbols":
         parse_package_symbols_command()
     case "cache":

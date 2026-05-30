@@ -270,6 +270,61 @@ symbols_source_indexes_defstruct_docstring :: proc(t: ^testing.T) {
 }
 
 @(test)
+builtin_symbols_source_emits_signatures_and_docs :: proc(t: ^testing.T) {
+    output := kvist.builtin_symbols_source()
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "kind\tname\tline\tcolumn\tdetail\tsignature\tdoc\n"), true)
+    testing.expect_value(t, strings.contains(output, "kvist core\tprintln\t1\t1\t\t(println value...)\tPrint one or more values. Kvist lowers this to fmt output and auto-imports core:fmt when needed.\n"), true)
+    testing.expect_value(t, strings.contains(output, "kvist form\tupdate!\t1\t1\t\t(update! target key-or-field value-or-updater ...)\tMutate a struct field, array/slice slot, or map key in place. Supports replacement and updater forms such as inc or +.\n"), true)
+    testing.expect_value(t, strings.contains(output, "kvist macro\twhen-let\t1\t1\t\t(when-let [value bool expr] body...)\tBind a value and explicit boolean result from a multi-return expression. Run the body only when the boolean is true. Expands to a destructuring let plus when.\n"), true)
+}
+
+@(test)
+imported_symbols_source_indexes_odin_imports :: proc(t: ^testing.T) {
+    source := `(package main)
+(import fmt "core:fmt")`
+
+    output, err, ok := kvist.imported_symbols_source("/tmp/imported-symbols-test.kvist", source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "kind\tname\tline\tcolumn\tdetail\tsignature\tdoc\tfile\n"), true)
+    testing.expect_value(t, strings.contains(output, "fmt.println"), true)
+    testing.expect_value(t, strings.contains(output, "\tcore:fmt\t"), true)
+}
+
+@(test)
+editor_symbols_source_merges_context_surfaces :: proc(t: ^testing.T) {
+    source := `(package main)
+(import fmt "core:fmt")
+
+(defstruct Greeting {:message string})
+
+(defn main []
+  (println (:message (Greeting {:message "hi"}))))`
+
+    output, err, ok := kvist.editor_symbols_source("/tmp/editor-symbols-test.kvist", source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "kind\tname\tline\tcolumn\tdetail\tsignature\tdoc\tfile\n"), true)
+    testing.expect_value(t, strings.contains(output, "struct\tGreeting\t"), true)
+    testing.expect_value(t, strings.contains(output, "proc\tmain\t"), true)
+    testing.expect_value(t, strings.contains(output, "kvist package\tarr/push!\t"), true)
+    testing.expect_value(t, strings.contains(output, "kvist core\tprintln\t"), true)
+    testing.expect_value(t, strings.contains(output, "odin\tfmt.println\t"), true)
+}
+
+@(test)
 compile_eval_source_can_emit_statement_runner :: proc(t: ^testing.T) {
     source := `(package main)
 (import "core:fmt")

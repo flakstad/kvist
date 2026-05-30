@@ -62,27 +62,6 @@
   (append kvist-special-forms kvist-core-helpers)
   "Static Kvist completions.")
 
-(defconst kvist--builtin-doc-map
-  '(("when-let" . ("kvist macro" "(when-let [value bool expr] body...)"
-                   "Bind a value and explicit boolean result from a multi-return expression. Run the body only when the boolean is true. Expands to a destructuring let plus when."))
-    ("if-let" . ("kvist macro" "(if-let [value bool expr] then else)"
-                 "Bind a value and explicit boolean result from a multi-return expression. Evaluate the then branch when the boolean is true, otherwise the else branch. Expands to a destructuring let plus if."))
-    ("when-ok" . ("kvist macro" "(when-ok [value err expr] body...)"
-                  "Bind a value and Odin error result from a multi-return expression. Run the body only when the error equals Odin's zero value {}. Expands to a destructuring let plus when."))
-    ("if-ok" . ("kvist macro" "(if-ok [value err expr] then else)"
-                "Bind a value and Odin error result from a multi-return expression. Evaluate the then branch when the error equals Odin's zero value {}, otherwise the else branch. Expands to a destructuring let plus if."))
-    ("println" . ("kvist core" "(println value...)"
-                  "Print one or more values. Kvist lowers this to fmt output and auto-imports core:fmt when needed."))
-    ("doc" . ("kvist core" "(doc 'symbol)"
-              "Print the stored docstring for a declaration name."))
-    ("update!" . ("kvist form" "(update! target key-or-field value-or-updater ...)"
-                  "Mutate a struct field, array/slice slot, or map key in place. Supports replacement and updater forms such as inc or +."))
-    ("update" . ("kvist form" "(update target key-or-field value-or-updater ...)"
-                 "Return an updated copy. Currently supported for struct fields."))
-    ("type" . ("kvist form" "(type Head Arg...)"
-               "Instantiate an Odin polymorphic type constructor. For example, (type chan.Chan int) lowers to chan.Chan(int) in both type and value positions.")))
-  "Static documentation for compiler-defined Kvist forms.")
-
 (defconst kvist--kvist-package-member-map
   '(("kvist:arr"
      ("count" . ("src/kvist/emit.odin" "if head.text == \"arr/count\" || head.text == \"str/count\"" "kvist package" "(arr/count xs)"
@@ -156,6 +135,15 @@
     ("set" . "kvist:set")
     ("struct" . "kvist:struct"))
   "Canonical explicit imports for compiler-provided Kvist packages.")
+
+(defvar kvist--builtin-symbol-cache nil
+  "Cached CLI metadata for compiler-defined Kvist built-ins.")
+
+(defvar-local kvist--editor-symbol-cache nil
+  "Cached full file-context symbol metadata for the current buffer.")
+
+(defvar-local kvist--imported-symbol-cache nil
+  "Cached imported symbol metadata for the current buffer.")
 
 (defun kvist--inside-string-on-line-p (pos)
   "Return non-nil if POS is inside a simple string on its current line."
@@ -322,15 +310,16 @@
             (column-text (nth 3 fields))
             (detail (or (nth 4 fields) ""))
             (signature (or (nth 5 fields) ""))
-            (doc (or (nth 6 fields) "")))
+            (doc (or (nth 6 fields) ""))
+            (file-text (or (nth 7 fields) "")))
       (list :kind kind
             :name name
             :line (string-to-number line-text)
             :column (string-to-number column-text)
             :detail (or detail "")
             :signature (and signature (not (string-empty-p signature)) signature)
-              :doc (kvist--unescape-doc doc)
-              :file file)))))
+            :doc (kvist--unescape-doc doc)
+            :file (if (string-empty-p file-text) file file-text))))))
 
 (defun kvist--unescape-doc (text)
   "Decode escaped documentation TEXT from `kvist symbols'."
@@ -371,6 +360,66 @@
       (when temp
         (ignore-errors (delete-file temp))))))
 
+(defun kvist--imported-symbols (&optional file)
+  "Return imported package symbols from `kvist imported-symbols'."
+  (let* ((source-file (or file buffer-file-name))
+         (tick (and (null file) (buffer-chars-modified-tick))))
+    (if (and (null file)
+             kvist--imported-symbol-cache
+             (equal (plist-get kvist--imported-symbol-cache :file) source-file)
+             (equal (plist-get kvist--imported-symbol-cache :tick) tick))
+        (plist-get kvist--imported-symbol-cache :symbols)
+      (let* ((temp (if file nil (kvist--source-temp-file)))
+             (input (or temp source-file))
+             (program (kvist--executable source-file))
+             (symbols
+              (unwind-protect
+                  (pcase-let ((`(,exit-code . ,output)
+                                (kvist--call-string program (list "imported-symbols" input))))
+                    (unless (zerop exit-code)
+                      (user-error "%s" (string-trim output)))
+                    (let ((lines (cdr (split-string output "\n" t))))
+                      (delq nil
+                            (mapcar (lambda (line)
+                                      (kvist--parse-symbol-line line nil))
+                                    lines))))
+                (when temp
+                  (ignore-errors (delete-file temp))))))
+        (when (null file)
+          (setq kvist--imported-symbol-cache
+                (list :file source-file :tick tick :symbols symbols)))
+        symbols))))
+
+(defun kvist--editor-symbols (&optional file)
+  "Return full file-context symbols from `kvist editor-symbols'."
+  (let* ((source-file (or file buffer-file-name))
+         (tick (and (null file) (buffer-chars-modified-tick))))
+    (if (and (null file)
+             kvist--editor-symbol-cache
+             (equal (plist-get kvist--editor-symbol-cache :file) source-file)
+             (equal (plist-get kvist--editor-symbol-cache :tick) tick))
+        (plist-get kvist--editor-symbol-cache :symbols)
+      (let* ((temp (if file nil (kvist--source-temp-file)))
+             (input (or temp source-file))
+             (program (kvist--executable source-file))
+             (symbols
+              (unwind-protect
+                  (pcase-let ((`(,exit-code . ,output)
+                                (kvist--call-string program (list "editor-symbols" input))))
+                    (unless (zerop exit-code)
+                      (user-error "%s" (string-trim output)))
+                    (let ((lines (cdr (split-string output "\n" t))))
+                      (delq nil
+                            (mapcar (lambda (line)
+                                      (kvist--parse-symbol-line line source-file))
+                                    lines))))
+                (when temp
+                  (ignore-errors (delete-file temp))))))
+        (when (null file)
+          (setq kvist--editor-symbol-cache
+                (list :file source-file :tick tick :symbols symbols)))
+        symbols))))
+
 (defun kvist--symbol-bounds ()
   "Return bounds of the Kvist symbol-like token at point."
   (let ((chars "-[:alnum:]_?!+*/<>=.:"))
@@ -403,22 +452,6 @@
         (string-suffix-p (concat "." identifier) name)
         (string-suffix-p (concat "/" identifier) name))))
 
-(defun kvist--odin-root ()
-  "Return the local Odin root, or nil if it cannot be discovered."
-  (pcase-let ((`(,exit-code . ,output) (kvist--call-string "odin" '("root"))))
-    (when (zerop exit-code)
-      (string-trim output))))
-
-(defun kvist--import-dir (import-path)
-  "Return the local directory for Odin IMPORT-PATH."
-  (when-let ((root (kvist--odin-root)))
-    (cond
-     ((string-prefix-p "core:" import-path)
-      (expand-file-name (substring import-path 5) (expand-file-name "core" root)))
-     ((string-prefix-p "vendor:" import-path)
-      (expand-file-name (substring import-path 7) (expand-file-name "vendor" root)))
-     (t nil))))
-
 (defun kvist--package-member-symbols (alias import-path)
   "Return compiler-provided Kvist package members for ALIAS and IMPORT-PATH."
   (when-let ((members (cdr (assoc import-path kvist--kvist-package-member-map))))
@@ -449,35 +482,20 @@
                          :file file)))))
             members))))
 
-(defun kvist--cli-package-symbols (alias import-path)
-  "Return package symbols for ALIAS and IMPORT-PATH from the Kvist CLI."
-  (pcase-let ((`(,exit-code . ,output)
-                (kvist--call-string (kvist--executable)
-                                    (list "package-symbols" import-path alias))))
-    (when (or (and (integerp exit-code) (zerop exit-code))
-              (string-prefix-p "kind\tname\tline\tcolumn\tdetail\tsignature\tdoc\n" output))
-      (let ((lines (cdr (split-string output "\n" t))))
-        (delq nil
-              (mapcar (lambda (line)
-                        (kvist--parse-symbol-line line nil))
-                      lines))))))
-
-(defun kvist--merge-symbol-metadata (base updates)
-  "Merge signature/doc metadata from UPDATES into BASE symbols by name."
-  (let ((update-map (make-hash-table :test #'equal)))
-    (dolist (symbol updates)
-      (puthash (plist-get symbol :name) symbol update-map))
-    (mapcar
-     (lambda (symbol)
-       (if-let ((update (gethash (plist-get symbol :name) update-map)))
-           (let ((merged (copy-sequence symbol)))
-             (when-let ((signature (plist-get update :signature)))
-               (setq merged (plist-put merged :signature signature)))
-             (when-let ((doc (plist-get update :doc)))
-               (setq merged (plist-put merged :doc doc)))
-             merged)
-         symbol))
-     base)))
+(defun kvist--builtin-symbols ()
+  "Return compiler-defined Kvist built-ins from the Kvist CLI."
+  (or kvist--builtin-symbol-cache
+      (setq kvist--builtin-symbol-cache
+            (pcase-let ((`(,exit-code . ,output)
+                          (kvist--call-string (kvist--executable)
+                                              '("builtin-symbols"))))
+              (when (or (and (integerp exit-code) (zerop exit-code))
+                        (string-prefix-p "kind\tname\tline\tcolumn\tdetail\tsignature\tdoc\n" output))
+                (let ((lines (cdr (split-string output "\n" t))))
+                  (delq nil
+                        (mapcar (lambda (line)
+                                  (kvist--parse-symbol-line line nil))
+                                lines))))))))
 
 (defun kvist--dedupe-symbols-by-name (symbols)
   "Deduplicate SYMBOLS by their :name field, preserving first occurrence."
@@ -499,177 +517,18 @@
                     (car entry)))
                  kvist--kvist-package-member-map)))
 
-(defun kvist--package-definition-symbols (alias import-path)
-  "Return exported-looking symbols for ALIAS from IMPORT-PATH."
-  (or (let ((base (kvist--package-member-symbols alias import-path)))
-        (when base
-          (kvist--merge-symbol-metadata base
-                                        (or (kvist--cli-package-symbols alias import-path)
-                                            nil))))
-      (let ((dir (kvist--import-dir import-path))
-            symbols)
-        (when (and dir (file-directory-p dir))
-          (dolist (file (directory-files-recursively dir "\\.odin\\'"))
-            (with-temp-buffer
-              (insert-file-contents file)
-              (goto-char (point-min))
-              (while (re-search-forward "^[ \t]*\\([[:alnum:]_][[:alnum:]_?!]*\\)[ \t]*::" nil t)
-                (let ((member (match-string-no-properties 1))
-                      (line (line-number-at-pos (match-beginning 1)))
-                      (column (1+ (- (match-beginning 1) (line-beginning-position))))
-                      (signature (kvist--odin-signature-at-point))
-                      (doc (kvist--preceding-odin-doc (match-beginning 0))))
-                  (push (list :kind "odin"
-                              :name (concat alias "." member)
-                              :signature signature
-                              :line line
-                              :column column
-                              :detail import-path
-                              :doc doc
-                              :file file)
-                        symbols)
-                  (push (list :kind "odin"
-                              :name (concat alias "/" member)
-                              :signature signature
-                              :line line
-                              :column column
-                              :detail import-path
-                              :doc doc
-                              :file file)
-                        symbols))))))
-        (kvist--dedupe-odin-package-symbols (nreverse symbols)))))
-
-(defun kvist--odin-signature-at-point ()
-  "Return a scraped Odin declaration signature from the current line."
-  (save-excursion
-    (beginning-of-line)
-    (let ((line (string-trim-right
-                 (buffer-substring-no-properties
-                  (line-beginning-position)
-                  (line-end-position)))))
-      (cond
-       ((string-match "::[[:space:]]*proc[[:space:]]*{" line)
-        (let ((parts (list (string-trim line)))
-              (done nil))
-          (while (and (not done) (= 0 (forward-line 1)))
-            (let ((next-line (string-trim
-                              (buffer-substring-no-properties
-                               (line-beginning-position)
-                               (line-end-position)))))
-              (push next-line parts)
-              (when (string-match-p "^[[:space:]]*}[[:space:]]*$" next-line)
-                (setq done t))))
-          (replace-regexp-in-string
-           "[[:space:]\n]+"
-           " "
-           (string-join (nreverse parts) " "))))
-       ((string-match "::" line)
-        (replace-regexp-in-string
-         "[[:space:]]+"
-         " "
-         (replace-regexp-in-string "[[:space:]]*{.*\\'" "" (string-trim line))))
-       (t nil)))))
-
-(defun kvist--odin-symbol-rank (symbol)
-  "Return a preference rank for imported Odin SYMBOL. Lower is better."
-  (let ((file (or (plist-get symbol :file) "")))
-    (+ (if (string-match-p "/old/" file) 100 0)
-       (if (string-match-p "_js\\.odin\\'" file) 10 0)
-       (if (string-match-p "/example\\.odin\\'" file) 200 0))))
-
-(defun kvist--dedupe-odin-package-symbols (symbols)
-  "Deduplicate imported Odin SYMBOLS by name, keeping the best-ranked entry."
-  (let ((best (make-hash-table :test #'equal))
-        order)
-    (dolist (symbol symbols)
-      (let* ((name (plist-get symbol :name))
-             (current (gethash name best)))
-        (unless current
-          (push name order))
-        (when (or (null current)
-                  (< (kvist--odin-symbol-rank symbol)
-                     (kvist--odin-symbol-rank current)))
-          (puthash name symbol best))))
-    (mapcar (lambda (name) (gethash name best))
-            (nreverse order))))
-
-(defun kvist--clean-doc-comment-line (line)
-  "Return LINE with a leading line-comment marker removed."
-  (setq line (string-trim-left line))
-  (cond
-   ((string-prefix-p "///" line)
-    (string-trim-left (substring line 3)))
-   ((string-prefix-p "//" line)
-    (string-trim-left (substring line 2)))
-   (t line)))
-
-(defun kvist--clean-block-doc-line (line)
-  "Return cleaned block-comment documentation LINE."
-  (setq line (string-trim line))
-  (when (string-prefix-p "*" line)
-    (setq line (string-trim-left (substring line 1))))
-  line)
-
-(defun kvist--clean-block-doc-comment (text)
-  "Return cleaned documentation text from a /* ... */ block."
-  (when (string-prefix-p "/*" text)
-    (setq text (substring text 2)))
-  (when (string-suffix-p "*/" text)
-    (setq text (substring text 0 (- (length text) 2))))
-  (let ((lines (mapcar #'kvist--clean-block-doc-line
-                       (split-string text "\n")))
-        result seen-content pending-blank)
-    (dolist (line lines)
-      (if (string-empty-p line)
-          (when seen-content
-            (setq pending-blank t))
-        (when pending-blank
-          (push "" result))
-        (push line result)
-        (setq seen-content t
-              pending-blank nil)))
-    (string-join (nreverse result) "\n")))
-
-(defun kvist--preceding-odin-doc (pos)
-  "Return contiguous comments immediately preceding POS."
-  (save-excursion
-    (goto-char pos)
-    (beginning-of-line)
-    (let (lines done)
-      (while (not done)
-        (let ((line-end (point)))
-          (if (not (= 0 (forward-line -1)))
-              (setq done t)
-            (let ((line (buffer-substring-no-properties
-                         (line-beginning-position)
-                         (line-end-position))))
-              (cond
-               ((string-match-p "\\`[ \t]*//" line)
-                (push (kvist--clean-doc-comment-line line) lines)
-                (beginning-of-line))
-               ((string-match-p "\\*/[ \t]*\\'" line)
-                (let ((block-end (line-end-position)))
-                  (if (search-backward "/*" nil t)
-                      (progn
-                        (push (kvist--clean-block-doc-comment
-                               (buffer-substring-no-properties (point) block-end))
-                              lines)
-                        (beginning-of-line))
-                    (goto-char line-end)
-                    (setq done t))))
-               ((string-match-p "\\`[ \t]*\\'" line)
-                (goto-char line-end)
-                (setq done t))
-               (t
-                (goto-char line-end)
-                (setq done t)))))))
-      (string-join lines "\n"))))
-
-(defun kvist--import-symbols ()
-  "Return import symbols from the current buffer."
-  (seq-filter (lambda (symbol)
-                (equal (plist-get symbol :kind) "import"))
-              (ignore-errors (kvist--symbols))))
+(defun kvist--explicit-kvist-package-symbols ()
+  "Return compiler-provided Kvist package symbols for explicit imports."
+  (apply #'append
+         (mapcar
+          (lambda (symbol)
+            (let ((alias (plist-get symbol :name))
+                  (import-path (plist-get symbol :detail)))
+              (when (and alias import-path (string-prefix-p "kvist:" import-path))
+                (kvist--package-member-symbols alias import-path))))
+          (seq-filter (lambda (symbol)
+                        (equal (plist-get symbol :kind) "import"))
+                      (ignore-errors (kvist--symbols))))))
 
 (defun kvist--import-present-p (alias path)
   "Return non-nil when current buffer already imports ALIAS from PATH."
@@ -730,14 +589,10 @@
 (defun kvist--package-symbols-for-current-buffer ()
   "Return imported Odin package symbols for current buffer imports."
   (kvist--dedupe-symbols-by-name
-   (append
-    (apply #'append
-           (mapcar (lambda (symbol)
-                     (kvist--package-definition-symbols
-                      (plist-get symbol :name)
-                      (plist-get symbol :detail)))
-                   (kvist--import-symbols)))
-    (kvist--canonical-kvist-package-symbols))))
+   (seq-filter (lambda (symbol)
+                 (or (equal (plist-get symbol :kind) "kvist package")
+                     (equal (plist-get symbol :kind) "odin")))
+               (ignore-errors (kvist--editor-symbols)))))
 
 (defun kvist--package-definitions (identifier)
   "Return package definitions matching alias-qualified IDENTIFIER."
@@ -940,7 +795,7 @@
   (kvist--identifier-at-point))
 
 (cl-defmethod xref-backend-definitions ((_backend (eql kvist)) identifier)
-  (let* ((symbols (append (ignore-errors (kvist--symbols))
+  (let* ((symbols (append (ignore-errors (kvist--editor-symbols))
                           (ignore-errors (kvist--package-definitions identifier))
                           (kvist--builtin-definitions identifier)))
          (matches (seq-filter (lambda (symbol)
@@ -991,8 +846,7 @@
       (delete-dups
        (append kvist-completion-builtins
                (mapcar (lambda (symbol) (plist-get symbol :name))
-                       (ignore-errors (append (kvist--symbols)
-                                              (kvist--package-symbols-for-current-buffer)))))))))
+                       (ignore-errors (kvist--editor-symbols))))))))
 
 (defun kvist--completion-exit (completed status)
   "Handle completion of COMPLETED with STATUS."
@@ -1014,14 +868,7 @@
                                              (plist-get symbol :name))))
                          (ignore-errors (kvist--package-symbols-for-current-buffer))))
                     (append (ignore-errors (kvist--symbols))
-                            (ignore-errors (kvist--package-symbols-for-current-buffer))
-                            (mapcar (lambda (entry)
-                                      (pcase-let ((`(,name . (,kind ,signature ,doc)) entry))
-                                        (list :name name
-                                              :kind kind
-                                              :signature signature
-                                              :doc doc)))
-                                    kvist--builtin-doc-map)))))
+                            (ignore-errors (kvist--editor-symbols))))))
     (let (table)
       (dolist (symbol symbols)
         (let* ((name (plist-get symbol :name))
@@ -1049,9 +896,8 @@
 
 (defun kvist--symbol-doc-candidates (identifier)
   "Return documentation candidates for IDENTIFIER."
-  (let* ((symbols (append (ignore-errors (kvist--symbols))
-                          (ignore-errors (kvist--package-definitions identifier))
-                          (kvist--builtin-doc-candidates identifier)))
+  (let* ((symbols (append (ignore-errors (kvist--editor-symbols))
+                          (ignore-errors (kvist--package-definitions identifier))))
          (matches (seq-filter (lambda (symbol)
                                 (kvist--symbol-matches-identifier-p symbol identifier))
                               symbols)))
@@ -1059,18 +905,6 @@
                   (or (not (string-empty-p (or (plist-get symbol :doc) "")))
                       (not (string-empty-p (or (plist-get symbol :signature) "")))))
                 matches)))
-
-(defun kvist--builtin-doc-candidates (identifier)
-  "Return static documentation candidates for Kvist built-in IDENTIFIER."
-  (when-let ((entry (cdr (assoc identifier kvist--builtin-doc-map))))
-    (pcase-let ((`(,kind ,signature ,doc) entry))
-      (list (list :kind kind
-                  :name identifier
-                  :signature signature
-                  :line 1
-                  :column 1
-                  :detail ""
-                  :doc doc)))))
 
 (defun kvist--show-doc (symbol)
   "Show documentation for SYMBOL."
@@ -1117,7 +951,7 @@
       (when-let ((entry (assoc (car candidates) metadata)))
         (cdr entry)))))
 
-(defun kvist-eldoc-function ()
+(defun kvist-eldoc-function (&rest _ignored)
   "Return Eldoc text for the Kvist symbol at point."
   (when-let ((identifier (kvist--identifier-at-point)))
     (if-let ((matches (kvist--symbol-doc-candidates identifier)))
