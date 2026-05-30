@@ -32,7 +32,7 @@ import_default_alias :: proc(path: string) -> string {
 
 symbols_write_record :: proc(builder: ^strings.Builder, kind, name: string, source: string, span: Span, detail: string = "") {
     line, column, _, _ := source_position(source, span.start)
-    fmt.sbprintf(builder, "%s\t%s\t%d\t%d\t%s\t\n", kind, name, line, column, detail)
+    fmt.sbprintf(builder, "%s\t%s\t%d\t%d\t%s\t\t\n", kind, name, line, column, detail)
 }
 
 symbols_clean_doc_line :: proc(line: string) -> string {
@@ -69,11 +69,43 @@ symbols_write_escaped_doc :: proc(builder: ^strings.Builder, doc_lines: []string
     }
 }
 
-symbols_write_record_doc :: proc(builder: ^strings.Builder, kind, name: string, source: string, span: Span, detail: string, doc_lines: []string) {
+symbols_write_record_doc :: proc(builder: ^strings.Builder, kind, name: string, source: string, span: Span, detail: string, signature: string, doc_lines: []string) {
     line, column, _, _ := source_position(source, span.start)
-    fmt.sbprintf(builder, "%s\t%s\t%d\t%d\t%s\t", kind, name, line, column, detail)
+    fmt.sbprintf(builder, "%s\t%s\t%d\t%d\t%s\t%s\t", kind, name, line, column, detail, signature)
     symbols_write_escaped_doc(builder, doc_lines)
     strings.write_byte(builder, '\n')
+}
+
+symbols_proc_signature :: proc(name: string, decl: Proc_Decl) -> string {
+    builder := strings.builder_make()
+    defer strings.builder_destroy(&builder)
+
+    fmt.sbprintf(&builder, "(%s [", name)
+    for param, idx in decl.params {
+        if idx > 0 {
+            strings.write_string(&builder, ", ")
+        }
+        fmt.sbprintf(&builder, "%s: %s", param.name, param.ty)
+    }
+    strings.write_string(&builder, "]")
+
+    #partial switch decl.returns.kind {
+    case .Single:
+        fmt.sbprintf(&builder, " -> %s", decl.returns.single_ty)
+    case .Named:
+        strings.write_string(&builder, " -> [")
+        for field, idx in decl.returns.named {
+            if idx > 0 {
+                strings.write_string(&builder, ", ")
+            }
+            fmt.sbprintf(&builder, "%s: %s", field.name, field.ty)
+        }
+        strings.write_string(&builder, "]")
+    case:
+    }
+
+    strings.write_string(&builder, ")")
+    return strings.to_string(builder)
 }
 
 symbols_doc_lines_from_string :: proc(text: string) -> (lines: [dynamic]string) {
@@ -175,14 +207,9 @@ symbols_source :: proc(source: string) -> (output: string, err: Compile_Error, o
     if !ok_forms {
         return "", clone_compile_error(err_forms, result_allocator), false
     }
-    _, err_program, ok_program := parse_program(forms[:])
-    if !ok_program {
-        return "", clone_compile_error(err_program, result_allocator), false
-    }
-
     builder := strings.builder_make()
     defer strings.builder_destroy(&builder)
-    strings.write_string(&builder, "kind\tname\tline\tcolumn\tdetail\tdoc\n")
+    strings.write_string(&builder, "kind\tname\tline\tcolumn\tdetail\tsignature\tdoc\n")
 
     for top in forms {
         form := top.form
@@ -196,12 +223,12 @@ symbols_source :: proc(source: string) -> (output: string, err: Compile_Error, o
                 path := import_path_text(form.items[1])
                 alias := import_default_alias(path)
                 if alias != "" {
-                    symbols_write_record_doc(&builder, "import", alias, source, form.items[1].span, path, top.doc_lines[:])
+                    symbols_write_record_doc(&builder, "import", alias, source, form.items[1].span, path, "", top.doc_lines[:])
                 }
             } else if len(form.items) == 3 && form.items[1].kind == .Symbol && form.items[2].kind == .String {
                 alias := form.items[1].text
                 path := import_path_text(form.items[2])
-                symbols_write_record_doc(&builder, "import", alias, source, form.items[1].span, path, top.doc_lines[:])
+                symbols_write_record_doc(&builder, "import", alias, source, form.items[1].span, path, "", top.doc_lines[:])
             }
         case "const", "defconst":
             if len(form.items) >= 2 && form.items[1].kind == .Symbol {
@@ -209,7 +236,7 @@ symbols_source :: proc(source: string) -> (output: string, err: Compile_Error, o
                 if len(form.items) > 3 && form.items[2].kind == .String {
                     doc_lines = symbols_append_doc_lines(doc_lines[:], symbols_doc_lines_from_string(unquote_string(form.items[2].text))[:])
                 }
-                symbols_write_record_doc(&builder, "const", form.items[1].text, source, form.items[1].span, "", doc_lines[:])
+                symbols_write_record_doc(&builder, "const", form.items[1].text, source, form.items[1].span, "", "", doc_lines[:])
             }
         case "defvar":
             if len(form.items) >= 2 && form.items[1].kind == .Symbol {
@@ -217,12 +244,12 @@ symbols_source :: proc(source: string) -> (output: string, err: Compile_Error, o
                 if len(form.items) > 3 && form.items[2].kind == .String {
                     doc_lines = symbols_append_doc_lines(doc_lines[:], symbols_doc_lines_from_string(unquote_string(form.items[2].text))[:])
                 }
-                symbols_write_record_doc(&builder, "var", form.items[1].text, source, form.items[1].span, "", doc_lines[:])
+                symbols_write_record_doc(&builder, "var", form.items[1].text, source, form.items[1].span, "", "", doc_lines[:])
             }
         case "struct":
             if len(form.items) == 3 && form.items[1].kind == .Symbol {
                 name := form.items[1].text
-                symbols_write_record_doc(&builder, "struct", name, source, form.items[1].span, "", top.doc_lines[:])
+                symbols_write_record_doc(&builder, "struct", name, source, form.items[1].span, "", "", top.doc_lines[:])
                 symbols_write_fields(&builder, source, name, form.items[2])
             }
         case "defstruct":
@@ -234,28 +261,42 @@ symbols_source :: proc(source: string) -> (output: string, err: Compile_Error, o
                     doc_lines = symbols_append_doc_lines(doc_lines[:], symbols_doc_lines_from_string(unquote_string(form.items[2].text))[:])
                     field_index = 3
                 }
-                symbols_write_record_doc(&builder, "struct", name, source, form.items[1].span, "", doc_lines[:])
+                symbols_write_record_doc(&builder, "struct", name, source, form.items[1].span, "", "", doc_lines[:])
                 symbols_write_fields(&builder, source, name, form.items[field_index])
             }
         case "enum":
             if len(form.items) == 3 && form.items[1].kind == .Symbol {
                 name := form.items[1].text
-                symbols_write_record_doc(&builder, "enum", name, source, form.items[1].span, "", top.doc_lines[:])
+                symbols_write_record_doc(&builder, "enum", name, source, form.items[1].span, "", "", top.doc_lines[:])
                 symbols_write_enum_variants(&builder, source, name, form.items[2])
             }
         case "union":
             if len(form.items) == 3 && form.items[1].kind == .Symbol {
                 name := form.items[1].text
-                symbols_write_record_doc(&builder, "union", name, source, form.items[1].span, "", top.doc_lines[:])
+                symbols_write_record_doc(&builder, "union", name, source, form.items[1].span, "", "", top.doc_lines[:])
                 symbols_write_union_variants(&builder, source, name, form.items[2])
             }
         case "proc", "defn":
             if len(form.items) >= 2 && form.items[1].kind == .Symbol {
                 doc_lines := top.doc_lines
+                proc_form := form
                 if len(form.items) > 3 && form.items[2].kind == .String {
                     doc_lines = symbols_append_doc_lines(doc_lines[:], symbols_doc_lines_from_string(unquote_string(form.items[2].text))[:])
+                    items: [dynamic]CST_Form
+                    append(&items, form.items[0], form.items[1])
+                    for item in form.items[3:] {
+                        append(&items, item)
+                    }
+                    proc_form = CST_Form{kind = .List, items = items, span = form.span}
                 }
-                symbols_write_record_doc(&builder, "proc", form.items[1].text, source, form.items[1].span, "", doc_lines[:])
+                signature := ""
+                proc_decl, err_proc, ok_proc := parse_proc_decl(proc_form)
+                if ok_proc {
+                    signature = symbols_proc_signature(form.items[1].text, proc_decl)
+                } else {
+                    _ = err_proc
+                }
+                symbols_write_record_doc(&builder, "proc", form.items[1].text, source, form.items[1].span, "", signature, doc_lines[:])
             }
         case "defmacro":
             if len(form.items) >= 3 && form.items[1].kind == .Symbol {
@@ -263,7 +304,13 @@ symbols_source :: proc(source: string) -> (output: string, err: Compile_Error, o
                 if len(form.items) > 4 && form.items[2].kind == .String {
                     doc_lines = symbols_append_doc_lines(doc_lines[:], symbols_doc_lines_from_string(unquote_string(form.items[2].text))[:])
                 }
-                symbols_write_record_doc(&builder, "macro", form.items[1].text, source, form.items[1].span, "", doc_lines[:])
+                signature := fmt.tprintf("(%s ...)", form.items[1].text)
+                if len(form.items) >= 3 && form.items[2].kind == .Vector {
+                    signature = fmt.tprintf("(%s %s)", form.items[1].text, form.items[2].text)
+                } else if len(form.items) >= 4 && form.items[3].kind == .Vector {
+                    signature = fmt.tprintf("(%s %s)", form.items[1].text, form.items[3].text)
+                }
+                symbols_write_record_doc(&builder, "macro", form.items[1].text, source, form.items[1].span, "", signature, doc_lines[:])
             }
         case:
         }

@@ -38,7 +38,7 @@
   '("package" "import" "const" "struct" "enum" "union" "proc" "odin"
     "let" "do" "if" "when" "cond" "switch" "set!" "return" "defer"
     "for" "each" "comment" "new" "make" "get" "nil?" "in" "not-in"
-    "type"
+    "type" "update" "update!"
     "break" "continue" "with-allocator" "with-temp-allocator"
     "with-delete" "when-let" "if-let" "when-ok" "if-ok"
     "slurp" "spit" "tap>"
@@ -63,87 +63,99 @@
   "Static Kvist completions.")
 
 (defconst kvist--builtin-doc-map
-  '(("when-let" . ("kvist macro" "[value bool expr]"
+  '(("when-let" . ("kvist macro" "(when-let [value bool expr] body...)"
                    "Bind a value and explicit boolean result from a multi-return expression. Run the body only when the boolean is true. Expands to a destructuring let plus when."))
-    ("if-let" . ("kvist macro" "[value bool expr] then else"
+    ("if-let" . ("kvist macro" "(if-let [value bool expr] then else)"
                  "Bind a value and explicit boolean result from a multi-return expression. Evaluate the then branch when the boolean is true, otherwise the else branch. Expands to a destructuring let plus if."))
-    ("when-ok" . ("kvist macro" "[value err expr]"
+    ("when-ok" . ("kvist macro" "(when-ok [value err expr] body...)"
                   "Bind a value and Odin error result from a multi-return expression. Run the body only when the error equals Odin's zero value {}. Expands to a destructuring let plus when."))
-    ("if-ok" . ("kvist macro" "[value err expr] then else"
+    ("if-ok" . ("kvist macro" "(if-ok [value err expr] then else)"
                 "Bind a value and Odin error result from a multi-return expression. Evaluate the then branch when the error equals Odin's zero value {}, otherwise the else branch. Expands to a destructuring let plus if."))
-    ("println" . ("kvist core" "value..."
+    ("println" . ("kvist core" "(println value...)"
                   "Print one or more values. Kvist lowers this to fmt output and auto-imports core:fmt when needed."))
-    ("doc" . ("kvist core" "'symbol"
+    ("doc" . ("kvist core" "(doc 'symbol)"
               "Print the stored docstring for a declaration name."))
-    ("type" . ("kvist form" "Head Arg..."
+    ("update!" . ("kvist form" "(update! target key-or-field value-or-updater ...)"
+                  "Mutate a struct field, array/slice slot, or map key in place. Supports replacement and updater forms such as inc or +."))
+    ("update" . ("kvist form" "(update target key-or-field value-or-updater ...)"
+                 "Return an updated copy. Currently supported for struct fields."))
+    ("type" . ("kvist form" "(type Head Arg...)"
                "Instantiate an Odin polymorphic type constructor. For example, (type chan.Chan int) lowers to chan.Chan(int) in both type and value positions.")))
   "Static documentation for compiler-defined Kvist forms.")
 
 (defconst kvist--kvist-package-member-map
   '(("kvist:arr"
-     ("count" . ("src/kvist/emit.odin" "if head.text == \"arr/count\" || head.text == \"str/count\"" "kvist package"
+     ("count" . ("src/kvist/emit.odin" "if head.text == \"arr/count\" || head.text == \"str/count\"" "kvist package" "(arr/count xs)"
                  "Count elements in an array, fixed array, or slice."))
-     ("empty" . ("src/kvist/emit.odin" "if head.text == \"arr/empty\"" "kvist package"
+     ("empty" . ("src/kvist/emit.odin" "if head.text == \"arr/empty\"" "kvist package" "(arr/empty T [capacity])"
                  "Construct an empty dynamic array, optionally with capacity."))
-     ("dynamic" . ("src/kvist/emit.odin" "if head.text == \"arr/dynamic\"" "kvist package"
+     ("dynamic" . ("src/kvist/emit.odin" "if head.text == \"arr/dynamic\"" "kvist package" "(arr/dynamic T [v1 v2 ...])"
                    "Construct a dynamic array from a vector literal."))
-     ("fixed" . ("src/kvist/emit.odin" "if head.text == \"arr/fixed\"" "kvist package"
+     ("fixed" . ("src/kvist/emit.odin" "if head.text == \"arr/fixed\"" "kvist package" "(arr/fixed T [v1 v2 ...])"
                  "Construct a fixed array from a vector literal."))
-     ("get" . ("src/kvist/emit.odin" "if head.text == \"arr/get\" || head.text == \"str/get\" || head.text == \"map/get\"" "kvist package"
+     ("get" . ("src/kvist/emit.odin" "if head.text == \"arr/get\" || head.text == \"str/get\" || head.text == \"map/get\"" "kvist package" "(arr/get xs index)"
                "Index into an array-family value."))
-     ("slice" . ("src/kvist/emit.odin" "if head.text == \"arr/slice\" || head.text == \"str/slice\"" "kvist package"
+     ("slice" . ("src/kvist/emit.odin" "if head.text == \"arr/slice\" || head.text == \"str/slice\"" "kvist package" "(arr/slice xs start [end])"
                  "Take a slice view over an array-family value."))
-     ("push!" . ("src/kvist/emit.odin" "if head.text == \"arr/push!\"" "kvist package"
+     ("push!" . ("src/kvist/emit.odin" "if head.text == \"arr/push!\"" "kvist package" "(arr/push! xs value...)"
                  "Append one or more values to a dynamic array."))
-     ("map" . ("src/kvist/emit.odin" "emit_core_map_helper :: proc" "kvist package"
+     ("map" . ("src/kvist/emit.odin" "emit_core_map_helper :: proc" "kvist package" "(arr/map f xs)"
                "Map over an array-family input and return an owned dynamic array."))
-     ("filter" . ("src/kvist/emit.odin" "emit_core_filter_helper :: proc" "kvist package"
+     ("filter" . ("src/kvist/emit.odin" "emit_core_filter_helper :: proc" "kvist package" "(arr/filter pred xs)"
                   "Filter an array-family input and return an owned dynamic array."))
-     ("map!" . ("src/kvist/emit.odin" "emit_core_map_in_place_helper :: proc" "kvist package"
+     ("map!" . ("src/kvist/emit.odin" "emit_core_map_in_place_helper :: proc" "kvist package" "(arr/map! f xs)"
                 "Map in place over a dynamic array."))
-     ("filter!" . ("src/kvist/emit.odin" "emit_core_filter_in_place_helper :: proc" "kvist package"
+     ("filter!" . ("src/kvist/emit.odin" "emit_core_filter_in_place_helper :: proc" "kvist package" "(arr/filter! pred xs)"
                    "Filter in place over a dynamic array."))
-     ("take" . ("src/kvist/emit.odin" "emit_core_take_helper :: proc" "kvist package"
+     ("take" . ("src/kvist/emit.odin" "emit_core_take_helper :: proc" "kvist package" "(arr/take n xs)"
                 "Take a leading slice or owned result from an array-family input."))
-     ("drop" . ("src/kvist/emit.odin" "emit_core_drop_helper :: proc" "kvist package"
+     ("drop" . ("src/kvist/emit.odin" "emit_core_drop_helper :: proc" "kvist package" "(arr/drop n xs)"
                 "Drop a leading prefix from an array-family input."))
-     ("sort" . ("src/kvist/emit.odin" "emit_core_sort_helper :: proc" "kvist package"
+     ("sort" . ("src/kvist/emit.odin" "emit_core_sort_helper :: proc" "kvist package" "(arr/sort xs)"
                 "Return a sorted owned array."))
-     ("sort!" . ("src/kvist/emit.odin" "emit_core_sort_in_place_helper :: proc" "kvist package"
+     ("sort!" . ("src/kvist/emit.odin" "emit_core_sort_in_place_helper :: proc" "kvist package" "(arr/sort! xs)"
                  "Sort a dynamic array in place.")))
     ("kvist:str"
-     ("count" . ("src/kvist/emit.odin" "if head.text == \"arr/count\" || head.text == \"str/count\"" "kvist package"
+     ("count" . ("src/kvist/emit.odin" "if head.text == \"arr/count\" || head.text == \"str/count\"" "kvist package" "(str/count s)"
                  "Count characters or bytes in a string."))
-     ("get" . ("src/kvist/emit.odin" "if head.text == \"arr/get\" || head.text == \"str/get\" || head.text == \"map/get\"" "kvist package"
+     ("get" . ("src/kvist/emit.odin" "if head.text == \"arr/get\" || head.text == \"str/get\" || head.text == \"map/get\"" "kvist package" "(str/get s index)"
                "Index into a string."))
-     ("slice" . ("src/kvist/emit.odin" "if head.text == \"arr/slice\" || head.text == \"str/slice\"" "kvist package"
+     ("slice" . ("src/kvist/emit.odin" "if head.text == \"arr/slice\" || head.text == \"str/slice\"" "kvist package" "(str/slice s start [end])"
                  "Take a string slice."))
-     ("contains?" . ("src/kvist/emit.odin" "if head.text == \"str/contains?\"" "kvist package"
+     ("contains?" . ("src/kvist/emit.odin" "if head.text == \"str/contains?\"" "kvist package" "(str/contains? s needle)"
                      "Return true when the string contains the needle.")))
     ("kvist:map"
-     ("empty" . ("src/kvist/emit.odin" "if head.text == \"map/empty\"" "kvist package"
+     ("empty" . ("src/kvist/emit.odin" "if head.text == \"map/empty\"" "kvist package" "(map/empty K V [capacity])"
                  "Construct an empty map, optionally with capacity."))
-     ("of" . ("src/kvist/emit.odin" "if head.text == \"map/of\"" "kvist package"
+     ("of" . ("src/kvist/emit.odin" "if head.text == \"map/of\"" "kvist package" "(map/of K V {k1 v1 ...})"
               "Construct a map from a brace literal."))
-     ("get" . ("src/kvist/emit.odin" "if head.text == \"arr/get\" || head.text == \"str/get\" || head.text == \"map/get\"" "kvist package"
+     ("get" . ("src/kvist/emit.odin" "if head.text == \"arr/get\" || head.text == \"str/get\" || head.text == \"map/get\"" "kvist package" "(map/get m key [default])"
                "Look up a key in a map, optionally with a default."))
-     ("contains?" . ("src/kvist/emit.odin" "if head.text == \"map/contains?\" || head.text == \"set/contains?\"" "kvist package"
+     ("contains?" . ("src/kvist/emit.odin" "if head.text == \"map/contains?\" || head.text == \"set/contains?\"" "kvist package" "(map/contains? m key)"
                      "Return true when the map contains the key.")))
     ("kvist:set"
-     ("empty" . ("src/kvist/emit.odin" "if head.text == \"set/empty\"" "kvist package"
+     ("empty" . ("src/kvist/emit.odin" "if head.text == \"set/empty\"" "kvist package" "(set/empty T [capacity])"
                  "Construct an empty set, optionally with capacity."))
-     ("of" . ("src/kvist/emit.odin" "if head.text == \"set/of\"" "kvist package"
+     ("of" . ("src/kvist/emit.odin" "if head.text == \"set/of\"" "kvist package" "(set/of T [v1 v2 ...])"
               "Construct a set from a vector literal."))
-     ("contains?" . ("src/kvist/emit.odin" "if head.text == \"map/contains?\" || head.text == \"set/contains?\"" "kvist package"
+     ("contains?" . ("src/kvist/emit.odin" "if head.text == \"map/contains?\" || head.text == \"set/contains?\"" "kvist package" "(set/contains? s value)"
                      "Return true when the set contains the value."))
-     ("add!" . ("src/kvist/emit.odin" "if head.text == \"set/add!\"" "kvist package"
+     ("add!" . ("src/kvist/emit.odin" "if head.text == \"set/add!\"" "kvist package" "(set/add! s value)"
                 "Insert a value into a set.")))
     ("kvist:struct"
-     ("fields" . ("src/kvist/emit.odin" "if head.text == \"struct/fields\" || head.text == \"struct/types\"" "kvist package"
+     ("fields" . ("src/kvist/emit.odin" "if head.text == \"struct/fields\" || head.text == \"struct/types\"" "kvist package" "(struct/fields target)"
                   "Return source-level field names for a struct type or value."))
-     ("types" . ("src/kvist/emit.odin" "if head.text == \"struct/fields\" || head.text == \"struct/types\"" "kvist package"
+     ("types" . ("src/kvist/emit.odin" "if head.text == \"struct/fields\" || head.text == \"struct/types\"" "kvist package" "(struct/types target)"
                  "Return source-level field types for a struct type or value."))))
   "Static package members for compiler-provided Kvist packages.")
+
+(defconst kvist--kvist-canonical-imports
+  '(("arr" . "kvist:arr")
+    ("str" . "kvist:str")
+    ("map" . "kvist:map")
+    ("set" . "kvist:set")
+    ("struct" . "kvist:struct"))
+  "Canonical explicit imports for compiler-provided Kvist packages.")
 
 (defun kvist--inside-string-on-line-p (pos)
   "Return non-nil if POS is inside a simple string on its current line."
@@ -309,12 +321,14 @@
             (line-text (nth 2 fields))
             (column-text (nth 3 fields))
             (detail (or (nth 4 fields) ""))
-            (doc (or (nth 5 fields) "")))
+            (signature (or (nth 5 fields) ""))
+            (doc (or (nth 6 fields) "")))
       (list :kind kind
             :name name
             :line (string-to-number line-text)
             :column (string-to-number column-text)
             :detail (or detail "")
+            :signature (and signature (not (string-empty-p signature)) signature)
               :doc (kvist--unescape-doc doc)
               :file file)))))
 
@@ -411,7 +425,7 @@
     (apply #'append
            (mapcar
             (lambda (entry)
-              (pcase-let ((`(,member . (,relative ,regexp ,kind ,doc)) entry))
+              (pcase-let ((`(,member . (,relative ,regexp ,kind ,signature ,doc)) entry))
                 (let* ((file (kvist--repo-file relative))
                        (location (kvist--file-location-for-regexp file (regexp-quote regexp)))
                        (line (or (plist-get location :line) 1))
@@ -419,6 +433,7 @@
                   (list
                    (list :kind kind
                          :name (concat alias "/" member)
+                         :signature signature
                          :line line
                          :column column
                          :detail import-path
@@ -426,6 +441,7 @@
                          :file file)
                    (list :kind kind
                          :name (concat alias "." member)
+                         :signature signature
                          :line line
                          :column column
                          :detail import-path
@@ -553,6 +569,62 @@
                 (equal (plist-get symbol :kind) "import"))
               (ignore-errors (kvist--symbols))))
 
+(defun kvist--import-present-p (alias path)
+  "Return non-nil when current buffer already imports ALIAS from PATH."
+  (save-excursion
+    (goto-char (point-min))
+    (let ((quoted-path (regexp-quote path))
+          (quoted-alias (regexp-quote alias)))
+      (or (re-search-forward
+           (format "^[[:space:]]*(import[[:space:]]+%s[[:space:]]+\"%s\")[[:space:]]*$"
+                   quoted-alias quoted-path)
+           nil t)
+          (re-search-forward
+           (format "^[[:space:]]*(import[[:space:]]+\"%s\")[[:space:]]*$"
+                   quoted-path)
+           nil t)))))
+
+(defun kvist--import-insertion-point ()
+  "Return buffer position where a new top-level import should be inserted."
+  (save-excursion
+    (goto-char (point-min))
+    (let ((last-import-end nil)
+          (package-end nil))
+      (while (re-search-forward "^[[:space:]]*(\\(package\\|import\\)\\_>" nil t)
+        (beginning-of-line)
+        (let ((head (match-string 1)))
+          (condition-case nil
+              (let ((end (save-excursion
+                           (forward-sexp 1)
+                           (point))))
+                (if (string= head "package")
+                    (setq package-end end)
+                  (setq last-import-end end))
+                (goto-char end))
+            (error
+             (goto-char (line-end-position))))))
+      (or last-import-end package-end (point-min)))))
+
+(defun kvist--ensure-kvist-package-import (alias)
+  "Ensure current buffer imports the canonical Kvist package ALIAS."
+  (when-let ((path (cdr (assoc alias kvist--kvist-canonical-imports))))
+    (unless (kvist--import-present-p alias path)
+      (save-excursion
+        (goto-char (kvist--import-insertion-point))
+        (unless (bolp)
+          (insert "\n"))
+        (insert (format "(import %s \"%s\")\n" alias path))
+        (unless (looking-at-p "\n")
+          (insert "\n"))))))
+
+(defun kvist--maybe-auto-import-qualified-symbol (&optional identifier)
+  "Insert a canonical Kvist package import for IDENTIFIER when appropriate."
+  (let* ((identifier (or identifier (kvist--identifier-at-point)))
+         (normalized (and identifier (kvist--normalize-qualified-identifier identifier))))
+    (when (and normalized
+               (string-match "\\`\\([^/]+\\)/" normalized))
+      (kvist--ensure-kvist-package-import (match-string 1 normalized)))))
+
 (defun kvist--package-symbols-for-current-buffer ()
   "Return imported Odin package symbols for current buffer imports."
   (append
@@ -609,6 +681,8 @@
     ("defer" . ("src/kvist/emit.odin" "case \"defer\":" "kvist form"))
     ("for" . ("src/kvist/emit.odin" "case \"for\":" "kvist form"))
     ("each" . ("src/kvist/emit.odin" "case \"each\":" "kvist form"))
+    ("update" . ("src/kvist/emit.odin" "case \"update\":" "kvist form"))
+    ("update!" . ("src/kvist/emit.odin" "case \"update!\":" "kvist form"))
     ("comment" . ("src/kvist/parse.odin" "case \"comment\":" "kvist form"))
     ("new" . ("src/kvist/emit.odin" "if head.text == \"new\"" "kvist form"))
     ("make" . ("src/kvist/emit.odin" "if head.text == \"make\"" "kvist form"))
@@ -783,13 +857,92 @@
   "Return completion bounds for Kvist symbols."
   (kvist--symbol-bounds))
 
+(defun kvist--package-prefix (identifier)
+  "Return (ALIAS . SEP) when IDENTIFIER starts a qualified package symbol."
+  (when (and identifier
+             (string-match "\\`\\([^./]+\\)\\([./]\\)\\([^./]*\\)\\'" identifier))
+    (cons (match-string 1 identifier) (match-string 2 identifier))))
+
 (defun kvist--completion-candidates ()
-  "Return simple Kvist completion candidates."
-  (delete-dups
-   (append kvist-completion-builtins
-           (mapcar (lambda (symbol) (plist-get symbol :name))
-                   (ignore-errors (append (kvist--symbols)
-                                          (kvist--package-symbols-for-current-buffer)))))))
+  "Return completion candidates appropriate for the symbol at point."
+  (let* ((identifier (kvist--identifier-at-point))
+         (package-prefix (kvist--package-prefix identifier)))
+    (if package-prefix
+        (let* ((alias (car package-prefix))
+               (sep (cdr package-prefix))
+               (prefix (concat alias sep))
+               (normalized-prefix (kvist--normalize-qualified-identifier prefix)))
+          (delete-dups
+           (mapcar
+            (lambda (symbol)
+              (let ((name (plist-get symbol :name)))
+                (if (string= sep ".")
+                    (replace-regexp-in-string "/" "." name t t)
+                  (replace-regexp-in-string "\\." "/" name t t))))
+            (seq-filter
+             (lambda (symbol)
+               (string-prefix-p normalized-prefix
+                                (kvist--normalize-qualified-identifier
+                                 (plist-get symbol :name))))
+             (ignore-errors (kvist--package-symbols-for-current-buffer))))))
+      (delete-dups
+       (append kvist-completion-builtins
+               (mapcar (lambda (symbol) (plist-get symbol :name))
+                       (ignore-errors (append (kvist--symbols)
+                                              (kvist--package-symbols-for-current-buffer)))))))))
+
+(defun kvist--completion-exit (completed status)
+  "Handle completion of COMPLETED with STATUS."
+  (when (eq status 'finished)
+    (kvist--maybe-auto-import-qualified-symbol completed)))
+
+(defun kvist--completion-metadata (identifier)
+  "Return symbol metadata alist keyed by display name for IDENTIFIER context."
+  (let* ((identifier (or identifier (kvist--identifier-at-point)))
+         (package-prefix (kvist--package-prefix identifier))
+         (symbols (if package-prefix
+                      (let* ((alias (car package-prefix))
+                             (normalized-prefix
+                              (kvist--normalize-qualified-identifier (concat alias "/"))))
+                        (seq-filter
+                         (lambda (symbol)
+                           (string-prefix-p normalized-prefix
+                                            (kvist--normalize-qualified-identifier
+                                             (plist-get symbol :name))))
+                         (ignore-errors (kvist--package-symbols-for-current-buffer))))
+                    (append (ignore-errors (kvist--symbols))
+                            (ignore-errors (kvist--package-symbols-for-current-buffer))
+                            (mapcar (lambda (entry)
+                                      (pcase-let ((`(,name . (,kind ,signature ,doc)) entry))
+                                        (list :name name
+                                              :kind kind
+                                              :signature signature
+                                              :doc doc)))
+                                    kvist--builtin-doc-map)))))
+    (let (table)
+      (dolist (symbol symbols)
+        (let* ((name (plist-get symbol :name))
+               (normalized (kvist--normalize-qualified-identifier name))
+               (display (if (and package-prefix
+                                 (string= (cdr package-prefix) "."))
+                            (replace-regexp-in-string "/" "." name t t)
+                          (replace-regexp-in-string "\\." "/" name t t))))
+          (unless (assoc display table)
+            (push (cons display (or (plist-get symbol :signature) normalized)) table))))
+      table)))
+
+(defun kvist--completion-annotation (metadata)
+  "Return annotation function using completion METADATA."
+  (lambda (candidate)
+    (when-let ((entry (assoc candidate metadata)))
+      (format "  %s" (cdr entry)))))
+
+(defun kvist--completion-table (candidates metadata)
+  "Return a completion table for CANDIDATES with completion METADATA."
+  (lambda (string pred action)
+    (if (eq action 'metadata)
+        `(metadata (annotation-function . ,(kvist--completion-annotation metadata)))
+      (complete-with-action action candidates string pred))))
 
 (defun kvist--symbol-doc-candidates (identifier)
   "Return documentation candidates for IDENTIFIER."
@@ -800,18 +953,20 @@
                                 (kvist--symbol-matches-identifier-p symbol identifier))
                               symbols)))
     (seq-filter (lambda (symbol)
-                  (not (string-empty-p (or (plist-get symbol :doc) ""))))
+                  (or (not (string-empty-p (or (plist-get symbol :doc) "")))
+                      (not (string-empty-p (or (plist-get symbol :signature) "")))))
                 matches)))
 
 (defun kvist--builtin-doc-candidates (identifier)
   "Return static documentation candidates for Kvist built-in IDENTIFIER."
   (when-let ((entry (cdr (assoc identifier kvist--builtin-doc-map))))
-    (pcase-let ((`(,kind ,detail ,doc) entry))
+    (pcase-let ((`(,kind ,signature ,doc) entry))
       (list (list :kind kind
                   :name identifier
+                  :signature signature
                   :line 1
                   :column 1
-                  :detail detail
+                  :detail ""
                   :doc doc)))))
 
 (defun kvist--show-doc (symbol)
@@ -819,6 +974,7 @@
   (let ((buffer (get-buffer-create kvist-doc-buffer-name))
         (name (plist-get symbol :name))
         (kind (plist-get symbol :kind))
+        (signature (plist-get symbol :signature))
         (detail (plist-get symbol :detail))
         (doc (plist-get symbol :doc))
         (file (plist-get symbol :file))
@@ -827,6 +983,8 @@
       (let ((inhibit-read-only t))
         (erase-buffer)
         (insert (format "%s %s\n" kind name))
+        (when (and signature (not (string-empty-p signature)))
+          (insert (format "%s\n" signature)))
         (when (and detail (not (string-empty-p detail)))
           (insert (format "%s\n" detail)))
         (when file
@@ -860,10 +1018,21 @@
 (defun kvist-completion-at-point ()
   "Complete Kvist special forms and symbols in the current file."
   (when-let ((bounds (kvist--completion-bounds)))
-    (list (car bounds)
-          (cdr bounds)
-          (kvist--completion-candidates)
-          :exclusive 'no)))
+    (let ((metadata (kvist--completion-metadata (kvist--identifier-at-point))))
+      (list (car bounds)
+            (cdr bounds)
+            (kvist--completion-table
+             (kvist--completion-candidates)
+             metadata)
+            :exit-function #'kvist--completion-exit
+            :exclusive 'no))))
+
+(defun kvist--post-self-insert-auto-import ()
+  "Auto-import canonical Kvist packages after typing a qualified prefix."
+  (when (and (memq last-command-event '(?/ ?.))
+             (not (nth 3 (syntax-ppss)))
+             (not (nth 4 (syntax-ppss))))
+    (kvist--maybe-auto-import-qualified-symbol)))
 
 ;;;###autoload
 (define-derived-mode kvist-mode clojure-mode "Kvist"
@@ -879,11 +1048,13 @@
               "\\(\\(^\\|[^\\\\\n]\\)\\(\\\\\\\\\\)*\\)\\(;+\\|//+\\|/\\*+\\|#|\\) *")
   (add-hook 'xref-backend-functions #'kvist--xref-backend nil t)
   (add-hook 'completion-at-point-functions #'kvist-completion-at-point nil t)
+  (add-hook 'post-self-insert-hook #'kvist--post-self-insert-auto-import nil t)
   (font-lock-add-keywords nil kvist-font-lock-keywords)
   (kvist--setup-indentation))
 
 (define-key kvist-mode-map (kbd "M-.") #'xref-find-definitions)
 (define-key kvist-mode-map (kbd "C-c C-.") #'kvist-doc-at-point)
+(define-key kvist-mode-map (kbd "C-c C-d") #'kvist-doc-at-point)
 (define-key kvist-mode-map kvist-doc-keybinding #'kvist-doc-at-point)
 
 ;;;###autoload

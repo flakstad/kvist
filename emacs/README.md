@@ -21,9 +21,15 @@ imported Odin package definitions such as `fmt.println`. Both `pkg/member` and
 `pkg.member` spellings are accepted for imported package symbols. For Kvist
 language forms and sequence helpers, `M-.` jumps to the compiler
 implementation. Completion includes Kvist forms, sequence helpers, current-file
-declarations, and imported package members.
+declarations, and imported package members. When point is inside a qualified
+package prefix such as `map/` or `fmt.`, completion is limited to that package.
+Typing or completing a canonical Kvist package prefix such as `arr/`, `str/`,
+`map/`, `set/`, or `struct/` automatically inserts the matching top-level
+`(import ... "kvist:...")` form when it is missing. Compiler-provided Kvist
+package members and built-in forms also show signatures in completion
+annotations and in the doc buffer.
 
-`C-c C-.` and `C-c d` show docs for the symbol at point without jumping. Kvist declaration
+`C-c C-.`, `C-c d`, and `C-c C-d` show docs for the symbol at point without jumping. Kvist declaration
 docs come from contiguous `//`, `;`, or `/* ... */` comments immediately
 preceding a top-level declaration. Compiler-defined forms such as `if-let` and
 `if-ok` have small built-in docs. Imported Odin docs come from contiguous `//`
@@ -61,10 +67,11 @@ Default keys:
 - `C-c C-m`: expand form at point into generated Odin
 - `C-c M-m`: macroexpand form at point into Kvist
 - `C-c C-s`: toggle display of generated Odin
+- `C-c C-d`: show docs for symbol at point
 - `C-c C-w`: eval form at point and save stdout to the Kvist cache
 - `C-c C-l`: list saved Kvist cache values
 - `C-c C-o`: open a saved Kvist cache value
-- `C-c C-d`: remove a saved Kvist cache value
+- `C-c M-d`: remove a saved Kvist cache value
 - `C-c C-z`: switch to the result buffer
 
 Use a prefix argument with eval commands to treat the form/region as statements
