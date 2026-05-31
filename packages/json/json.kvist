@@ -11,12 +11,12 @@
       (return err write-err)
       (do
         (defer (delete data))
-        (return nil (io/spit path data))))))
+        (return nil (io/write path data))))))
 
 (defn read-as
   "Read JSON bytes from a file and decode them into a typed value."
   [$T: typeid, path: string] -> [value: T, read-err: os.Error, unmarshal-err: j.Unmarshal_Error] #force_inline
-  (let [[data err] (io/slurp path)]
+  (let [[data err] (io/read path)]
     (if (!= err nil)
       (return value err unmarshal-err)
       (do

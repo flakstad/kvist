@@ -24,6 +24,7 @@ block so `C-c C-e` and `C-c C-c` are practical.
 - `testing.kvist`: shipped `kvist:test` macros including `t/deftest`, `t/is`, nested `t/testing`, `t/are`, and `t/use-fixtures` with `:each` / `:once`.
 - `hiccup-interpolation.kvist`: Hiccup attrs and child nodes with direct Kvist expression interpolation, including `if`, `when`, `nil` omission, and `[:<> ...]` fragments.
 - `closures.kvist`: non-capturing `fn` literals plus captured callbacks for selected non-escaping helper sites such as `map`, `filter`, `remove`, `keep`, and their bang variants.
+- `http-server.kvist`: shipped `kvist:http` package over vendored `odin-http`, with a thin server-side router and response surface.
 - `hello.kvist`: package, import, struct literal, and a tiny `main`.
 - `declarations.kvist`: doc comments, import aliases, constants, enums, structs.
 - `defstructs.kvist`: `defstruct` docstrings, typed fields, nested structs.
@@ -145,7 +146,14 @@ an explicit trailing metadata map, and a separate `app.kvist` where
 the "real program" code lives. `reload_run_demo` shows the general app-owned
 `:run` mode with one explicit `reload/checkpoint!` cooperation point at the
 runtime boundary. `reload_step_demo` shows the smaller convenience mode where
-Kvist owns the outer loop. For editor integration, `kvist dev --reload ...
+Kvist owns the outer loop.
+
+Rule of thumb:
+
+- prefer `:run` for most real applications
+- use `:step` when you explicitly want Kvist to provide the outer loop
+
+For editor integration, `kvist dev --reload ...
 --rebuild --json` reports machine-readable rebuild status and `kvist dev
 --reload ... --print-paths --json` prints generated paths and canonical
 commands. The same sources can also be executed without the

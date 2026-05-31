@@ -827,9 +827,9 @@ doc_command :: proc(input, identifier: string) {
         }
     }
 
-    printed := 0
     seen := make(map[string]bool)
     defer delete(seen)
+    printed := 0
     for row in rows {
         if symbol_match_rank(row, identifier) != best_rank {
             continue
@@ -885,9 +885,15 @@ xref_command :: proc(input, identifier: string) {
 
     seen := make(map[string]bool)
     defer delete(seen)
+    printed := 0
     for row in rows {
         if symbol_match_rank(row, identifier) != best_rank {
             continue
+        }
+        switch row.kind {
+        case "kvist form", "kvist helper", "kvist core", "kvist macro", "kvist package":
+            continue
+        case:
         }
         normalized := normalized_symbol_name(row.name)
         key := fmt.tprintf("%s:%d:%d:%s", row.file, row.line, row.column, normalized)
@@ -898,7 +904,12 @@ xref_command :: proc(input, identifier: string) {
         }
         seen[key] = true
         fmt.printf("%s:%d:%d\t%s\t%s\n", row.file, row.line, row.column, row.kind, row.name)
+        printed += 1
         delete(key)
+    }
+    if printed == 0 {
+        fmt.eprintln("no definitions found for: ", identifier)
+        os.exit(1)
     }
 }
 

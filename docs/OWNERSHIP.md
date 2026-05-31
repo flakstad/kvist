@@ -73,7 +73,7 @@ These forms return owned values in normal Kvist code:
 (arr/repeatedly n f)
 (arr/iterate n f x)
 (arr/cycle n xs)
-(io/slurp path)
+(io/read path)
 ```
 
 Use `defer delete` for local owned values:
@@ -109,12 +109,12 @@ array. The chunks inside are borrowed slices and must not be deleted:
   (arr/first (get chunks 0)))
 ```
 
-`io/slurp` lowers to `os.read_entire_file(path, context.allocator)`. It returns
+`io/read` lowers to `os.read_entire_file(path, context.allocator)`. It returns
 owned bytes plus an `os.Error`, so delete the bytes once the successful read is
 no longer needed:
 
 ```clojure
-(let [[data err] (io/slurp path)]
+(let [[data err] (io/read path)]
   (if (!= err nil)
     0
     (do
@@ -122,7 +122,7 @@ no longer needed:
       (len data))))
 ```
 
-If a proc returns the bytes from `io/slurp`, ownership transfers to the caller and
+If a proc returns the bytes from `io/read`, ownership transfers to the caller and
 the callee must not delete them.
 
 Data marshalling is explicit host interop, not Kvist core. For JSON, the shipped
@@ -205,7 +205,7 @@ These are scalar values, plain values, or borrowed views:
 (empty? xs)
 (count xs)
 (contains? collection key)
-(io/spit path data)
+(io/write path data)
 (tap> value)
 (tap> :label value)
 ```
@@ -214,7 +214,7 @@ Only the small cross-family kernel remains bare here: `slice`, `get`,
 `empty?`, `count`, and `contains?`. Other collection helpers should use their
 explicit package names.
 
-`io/spit` lowers to `os.write_entire_file(path, data)` and returns `os.Error`.
+`io/write` lowers to `os.write_entire_file(path, data)` and returns `os.Error`.
 It does not allocate an owned result.
 
 `arr/split-at` returns two borrowed slices:

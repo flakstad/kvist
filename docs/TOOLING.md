@@ -218,8 +218,8 @@ Initial support should stay boring:
 ```clojure
 (import io "kvist:io")
 
-(io/spit "tmp/users.json" text)
-(let [[data err] (io/slurp "tmp/users.json")]
+(io/write "tmp/users.json" text)
+(let [[data err] (io/read "tmp/users.json")]
   (if (!= err nil)
     0
     (do
@@ -228,9 +228,9 @@ Initial support should stay boring:
 ```
 
 These helpers are intentionally thin wrappers over `core:os`; source files
-must import them explicitly with `(import io "kvist:io")`. `(io/spit path
+must import them explicitly with `(import io "kvist:io")`. `(io/write path
 data)` lowers through `os.write_entire_file(path, data)` and returns
-`os.Error`. `(io/slurp path)` lowers through
+`os.Error`. `(io/read path)` lowers through
 `os.read_entire_file(path, context.allocator)` and returns owned `[]byte` plus
 `os.Error`; callers delete the bytes or return them to transfer ownership.
 
@@ -321,7 +321,7 @@ writes the exact stdout from a successful eval run to the named cache file and
 still prints stdout normally.
 
 This is intentionally text-oriented. For structured values, prefer explicit
-`io/spit`, `io/slurp`, `json/write`, and `json/read-as` in Kvist source so
+`io/write`, `io/read`, `json/write`, and `json/read-as` in Kvist source so
 ownership and format choices stay visible.
 
 The Emacs tooling exposes this through ordinary CLI calls:

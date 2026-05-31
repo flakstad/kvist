@@ -1,12 +1,12 @@
 (package io)
 (import os "core:os")
 
-(defn slurp
+(defn read
   "Read a file into owned bytes using the current allocator."
   [path: string] -> [data: []byte, err: os.Error] #force_inline
   (os.read_entire_file path context.allocator))
 
-(defn spit
+(defn write
   "Write bytes or text to a file."
   [path: string, data: $T] -> os.Error #force_inline
   (os.write_entire_file path data))

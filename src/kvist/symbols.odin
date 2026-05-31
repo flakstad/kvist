@@ -37,7 +37,7 @@ Language_Source_Entry :: struct {
     snippet:  string,
 }
 
-KVIST_CANONICAL_IMPORTS_FOR_EDITOR :: [7]Imported_Symbol_Entry{
+KVIST_CANONICAL_IMPORTS_FOR_EDITOR :: [8]Imported_Symbol_Entry{
     {alias = "arr", path = "kvist:arr"},
     {alias = "str", path = "kvist:str"},
     {alias = "map", path = "kvist:map"},
@@ -45,6 +45,7 @@ KVIST_CANONICAL_IMPORTS_FOR_EDITOR :: [7]Imported_Symbol_Entry{
     {alias = "struct", path = "kvist:struct"},
     {alias = "io", path = "kvist:io"},
     {alias = "json", path = "kvist:json"},
+    {alias = "http", path = "kvist:http"},
 }
 
 BUILTIN_SOURCE_ENTRIES :: []Builtin_Source_Entry{
@@ -166,10 +167,23 @@ PACKAGE_SOURCE_ENTRIES :: []Package_Source_Entry{
     {import_path = "kvist:set", member = "remove", relative = "packages/set/package.kvist", snippet = "(proc remove [s: set[$T], value: T] -> set[T] #force_inline"},
     {import_path = "kvist:struct", member = "fields", relative = "src/kvist/emit.odin", snippet = "if head.text == \"struct/fields\" || head.text == \"struct/types\""},
     {import_path = "kvist:struct", member = "types", relative = "src/kvist/emit.odin", snippet = "if head.text == \"struct/fields\" || head.text == \"struct/types\""},
-    {import_path = "kvist:io", member = "slurp", relative = "packages/io/io.kvist", snippet = "(defn slurp"},
-    {import_path = "kvist:io", member = "spit", relative = "packages/io/io.kvist", snippet = "(defn spit"},
+    {import_path = "kvist:io", member = "read", relative = "packages/io/io.kvist", snippet = "(defn read"},
+    {import_path = "kvist:io", member = "write", relative = "packages/io/io.kvist", snippet = "(defn write"},
     {import_path = "kvist:json", member = "write", relative = "packages/json/json.kvist", snippet = "(defn write"},
     {import_path = "kvist:json", member = "read-as", relative = "packages/json/json.kvist", snippet = "(defn read-as"},
+    {import_path = "kvist:http", member = "with-router", relative = "packages/http/http.kvist", snippet = "(defmacro with-router"},
+    {import_path = "kvist:http", member = "get", relative = "packages/http/http.kvist", snippet = "(defmacro get"},
+    {import_path = "kvist:http", member = "post", relative = "packages/http/http.kvist", snippet = "(defmacro post"},
+    {import_path = "kvist:http", member = "put", relative = "packages/http/http.kvist", snippet = "(defmacro put"},
+    {import_path = "kvist:http", member = "delete", relative = "packages/http/http.kvist", snippet = "(defmacro delete"},
+    {import_path = "kvist:http", member = "all", relative = "packages/http/http.kvist", snippet = "(defmacro all"},
+    {import_path = "kvist:http", member = "listen", relative = "packages/http/http.kvist", snippet = "(defmacro listen"},
+    {import_path = "kvist:http", member = "respond", relative = "packages/http/http.kvist", snippet = "(defmacro respond"},
+    {import_path = "kvist:http", member = "respond-plain", relative = "packages/http/http.kvist", snippet = "(defmacro respond-plain"},
+    {import_path = "kvist:http", member = "respond-html", relative = "packages/http/http.kvist", snippet = "(defmacro respond-html"},
+    {import_path = "kvist:http", member = "respond-json", relative = "packages/http/http.kvist", snippet = "(defmacro respond-json"},
+    {import_path = "kvist:http", member = "respond-file", relative = "packages/http/http.kvist", snippet = "(defmacro respond-file"},
+    {import_path = "kvist:http", member = "respond-dir", relative = "packages/http/http.kvist", snippet = "(defmacro respond-dir"},
 }
 
 LANGUAGE_SOURCE_ENTRIES :: []Language_Source_Entry{
@@ -1209,13 +1223,29 @@ package_entry_signature_doc :: proc(import_path, member: string) -> (signature, 
         }
     case "kvist:io":
         switch member {
-        case "slurp": return "(io/slurp path)", "Read a file into owned bytes using the current allocator.", true
-        case "spit": return "(io/spit path data)", "Write bytes or text to a file.", true
+        case "read": return "(io/read path)", "Read a file into owned bytes using the current allocator.", true
+        case "write": return "(io/write path data)", "Write bytes or text to a file.", true
         }
     case "kvist:json":
         switch member {
         case "write": return "(json/write path value)", "Encode a value as JSON and write it to a file.", true
         case "read-as": return "(json/read-as T path)", "Read JSON from a file and decode it into a typed value.", true
+        }
+    case "kvist:http":
+        switch member {
+        case "with-router": return "(http/with-router [router] body...)", "Bind a vendored HTTP router, initialize it, and destroy it on scope exit.", true
+        case "get": return "(http/get router pattern [req res] body...)", "Register a GET route with a typed request/response handler.", true
+        case "post": return "(http/post router pattern [req res] body...)", "Register a POST route with a typed request/response handler.", true
+        case "put": return "(http/put router pattern [req res] body...)", "Register a PUT route with a typed request/response handler.", true
+        case "delete": return "(http/delete router pattern [req res] body...)", "Register a DELETE route with a typed request/response handler.", true
+        case "all": return "(http/all router pattern [req res] body...)", "Register a catch-all route with a typed request/response handler.", true
+        case "listen": return "(http/listen port router)", "Start a loopback HTTP server for a configured router.", true
+        case "respond": return "(http/respond res status)", "Send a response with a status code and no body.", true
+        case "respond-plain": return "(http/respond-plain res text [status])", "Send a plain-text HTTP response.", true
+        case "respond-html": return "(http/respond-html res html [status])", "Send an HTML HTTP response.", true
+        case "respond-json": return "(http/respond-json res value [status])", "Send a JSON HTTP response.", true
+        case "respond-file": return "(http/respond-file res path [mime])", "Send a file response.", true
+        case "respond-dir": return "(http/respond-dir res base target request)", "Serve a directory path response.", true
         }
     }
     return "", "", false
@@ -1599,7 +1629,7 @@ import_default_alias :: proc(path: string) -> string {
 
 is_static_kvist_package :: proc(import_path: string) -> bool {
     switch import_path {
-    case "kvist:arr", "kvist:str", "kvist:map", "kvist:set", "kvist:struct", "kvist:io", "kvist:json":
+    case "kvist:arr", "kvist:str", "kvist:map", "kvist:set", "kvist:struct", "kvist:io", "kvist:json", "kvist:http":
         return true
     case:
         return false

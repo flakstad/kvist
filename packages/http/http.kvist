@@ -1,0 +1,96 @@
+(package http)
+(import h "kvist_vendor:http")
+(import net "core:net")
+
+(defmacro with-router [binding & body]
+  (let [router (first binding)]
+    (quasiquote
+      (let [(unquote router) (h.Router {})]
+        (h.router_init (addr (unquote router)))
+        (defer (h.router_destroy (addr (unquote router))))
+        (do
+          (splice body))))))
+
+(defmacro- route [adder router pattern binding & body]
+  (let [req (first binding)
+        res (nth binding 1)
+        req-param (symbol (str (name req) ":"))
+        res-param (symbol (str (name res) ":"))]
+    (quasiquote
+      ((unquote adder)
+       (addr (unquote router))
+       (unquote pattern)
+       (h.handler
+         (proc [(unquote req-param) ^h.Request (unquote res-param) ^h.Response]
+           (do
+             (splice body))))))))
+
+(defmacro get [router pattern binding & body]
+  (quasiquote
+    (route h.route_get (unquote router) (unquote pattern) (unquote binding)
+      (splice body))))
+
+(defmacro post [router pattern binding & body]
+  (quasiquote
+    (route h.route_post (unquote router) (unquote pattern) (unquote binding)
+      (splice body))))
+
+(defmacro put [router pattern binding & body]
+  (quasiquote
+    (route h.route_put (unquote router) (unquote pattern) (unquote binding)
+      (splice body))))
+
+(defmacro delete [router pattern binding & body]
+  (quasiquote
+    (route h.route_delete (unquote router) (unquote pattern) (unquote binding)
+      (splice body))))
+
+(defmacro all [router pattern binding & body]
+  (quasiquote
+    (route h.route_all (unquote router) (unquote pattern) (unquote binding)
+      (splice body))))
+
+(defmacro listen [port router]
+  (quasiquote
+      (let [server (h.Server {})]
+      (h.server_shutdown_on_interrupt (addr server))
+      (h.listen_and_serve
+        (addr server)
+        (h.router_handler (addr (unquote router)))
+        (net.Endpoint {:address net.IP4_Loopback :port (unquote port)})))))
+
+(defmacro respond [res status]
+  (quasiquote
+    (h.respond (unquote res) (unquote status))))
+
+(defmacro respond-plain [res text & rest]
+  (if (= (count rest) 0)
+    (quasiquote
+      (h.respond_plain (unquote res) (unquote text)))
+    (quasiquote
+      (h.respond_plain (unquote res) (unquote text) (unquote (first rest))))))
+
+(defmacro respond-html [res html & rest]
+  (if (= (count rest) 0)
+    (quasiquote
+      (h.respond_html (unquote res) (unquote html)))
+    (quasiquote
+      (h.respond_html (unquote res) (unquote html) (unquote (first rest))))))
+
+(defmacro respond-json [res value & rest]
+  (if (= (count rest) 0)
+    (quasiquote
+      (h.respond_json (unquote res) (unquote value)))
+    (quasiquote
+      (h.respond_json (unquote res) (unquote value) (unquote (first rest))))))
+
+(defmacro respond-file [res path & rest]
+  (if (= (count rest) 0)
+    (quasiquote
+      (h.respond_file (unquote res) (unquote path)))
+    (quasiquote
+      (h.respond_file (unquote res) (unquote path) (unquote (first rest))))))
+
+(defmacro respond-dir [res base target request]
+  (quasiquote
+    (h.respond_dir (unquote res) (unquote base) (unquote target) (unquote request))))

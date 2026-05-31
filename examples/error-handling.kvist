@@ -71,7 +71,7 @@
   (os.make_directory_all "tmp")
   ;; => nil
 
-  (io/spit "tmp/kvist-error-demo.txt" "hello")
+  (io/write "tmp/kvist-error-demo.txt" "hello")
   ;; => nil
 
   (read-byte-count "tmp/kvist-error-demo.txt")

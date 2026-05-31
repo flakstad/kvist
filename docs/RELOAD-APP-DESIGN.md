@@ -72,6 +72,42 @@ The intended default mental model is:
 - prefer `:run` for general applications
 - use `:step` when you explicitly want Kvist to provide the outer loop
 
+The relationship is:
+
+- `:run` is the general mode
+- `:step` is the convenience mode
+
+So users should not think of them as two unrelated systems. They share the
+same `defstate` contract and reload shell; the only real difference is who
+owns the outer runtime loop.
+
+### Use `:run` when
+
+- your app already has a request loop, event loop, frame loop, or worker loop
+- your runtime shape belongs to the program, not to Kvist
+- you want one explicit safe boundary for reload cooperation
+
+Examples:
+
+- servers
+- GUI applications
+- editors
+- workers
+- larger tools
+
+### Use `:step` when
+
+- a repeated step-and-sleep loop is already the right shape
+- you want the smallest possible reload shell surface
+- you want Kvist to own the outer loop entirely
+
+Examples:
+
+- games
+- simulations
+- polling tools
+- small interactive demos
+
 That keeps the source surface broad enough for servers, GUI apps, workers, and
 other app-owned runtimes while still offering a smaller convenience mode for
 loop-driven programs.
@@ -112,6 +148,53 @@ That should be enough to say:
 - `App_State` is the durable reload root
 - the reload shell should keep an instance of it alive
 - reloadable behavior is compiled around that root
+
+## `:run` Safe-Boundary Guidance
+
+For `:run`, the most important user obligation is where to place
+`reload/checkpoint!`.
+
+The rule is:
+
+- call it at one or a small number of explicit safe boundaries
+- when it returns `true`, return from `run`
+
+The checkpoint should sit at the runtime boundary, not in ordinary application
+logic.
+
+Good boundaries:
+
+- one request completed
+- one event-loop cycle completed
+- one frame completed
+- one job completed
+- one outer loop iteration completed
+
+Bad boundaries:
+
+- halfway through mutating shared state
+- inside leaf functions
+- while a transaction or lock must remain uninterrupted
+- inside arbitrary utility code just because it is convenient
+
+So the user guidance is not "call checkpoint every N milliseconds". It is:
+
+- call it where stopping is correct
+- call it often enough that reload latency feels reasonable
+
+For example:
+
+```clojure
+(defn run [state: (ptr App_State) host: (ptr reload/Run_Host)]
+  (for true
+    (process-one-job state)
+    (when (reload/checkpoint! host)
+      (return))))
+```
+
+If one unit of work is very long-running, then reload responsiveness will also
+be long. In that case the right fix is usually to introduce a finer safe
+boundary inside that runtime shape, not to scatter checkpoints randomly.
 
 ## Why One Root State
 

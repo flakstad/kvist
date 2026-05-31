@@ -838,7 +838,7 @@ compile_eval_source_prints_block_forms_as_statements :: proc(t: ^testing.T) {
 (import os "core:os")
 
 (defn load-note [path: string] -> [data: []byte, err: os.Error]
-  (io/slurp path))`
+  (io/read path))`
 
     output, err, ok := kvist.compile_eval_source(source, `(let [[data err] (load-note "tmp/kvist-note.txt")]
   (if (!= err nil)
@@ -860,7 +860,7 @@ import fmt "core:fmt"
 import os "core:os"
 
 load_note :: proc(path: string) -> (data: []byte, err: os.Error) {
-    return io/slurp(path)
+    return io/read(path)
 }
 
 main :: proc() {
@@ -2312,13 +2312,13 @@ compile_file_dev_helpers :: proc(t: ^testing.T) {
 (import os "core:os")
 
 (defn read-file [path: string] -> [data: []byte, err: os.Error]
-  (io/slurp path))
+  (io/read path))
 
 (defn write-text [path: string, text: string] -> os.Error
-  (io/spit path text))
+  (io/write path text))
 
 (defn read-count [path: string] -> int
-  (let [[data err] (io/slurp path)]
+  (let [[data err] (io/read path)]
     (if (!= err nil)
       0
       (do
@@ -2334,9 +2334,9 @@ compile_file_dev_helpers :: proc(t: ^testing.T) {
     defer delete(output)
 
     testing.expect_value(t, strings.contains(output, "read_file :: proc(path: string) -> (data: []byte, err: os.Error)"), true)
-    testing.expect_value(t, strings.contains(output, "return io/slurp(path)"), true)
-    testing.expect_value(t, strings.contains(output, "return io/spit(path, text)"), true)
-    testing.expect_value(t, strings.contains(output, "data, err := io/slurp(path)"), true)
+    testing.expect_value(t, strings.contains(output, "return io/read(path)"), true)
+    testing.expect_value(t, strings.contains(output, "return io/write(path, text)"), true)
+    testing.expect_value(t, strings.contains(output, "data, err := io/read(path)"), true)
     testing.expect_value(t, strings.contains(output, "defer delete(data)"), true)
 }
 
@@ -2370,6 +2370,25 @@ compile_json_interop_is_explicit :: proc(t: ^testing.T) {
 
     testing.expect_value(t, strings.contains(output, "marshal_err, write_err := json/write(path, user)"), true)
     testing.expect_value(t, strings.contains(output, "user, read_err, unmarshal_err := json/read_as(User, path)"), true)
+}
+
+@(test)
+compile_http_server_surface_is_explicit :: proc(t: ^testing.T) {
+    output, err, ok := kvist.compile_path("examples/http-server.kvist")
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "vendor/odin-http"), true)
+    testing.expect_value(t, strings.contains(output, "h.router_init(&router)"), true)
+    testing.expect_value(t, strings.contains(output, "h.route_get("), true)
+    testing.expect_value(t, strings.contains(output, "\"/ping\""), true)
+    testing.expect_value(t, strings.contains(output, "h.respond_plain(res, \"pong\")"), true)
+    testing.expect_value(t, strings.contains(output, "h.respond_json(res, Greeting{message = fmt.tprintf(\"hello %s\", params[0])})"), true)
+    testing.expect_value(t, strings.contains(output, "h.listen_and_serve(&server, h.router_handler(&router), net.Endpoint{address = net.IP4_Loopback, port = 6969})"), true)
 }
 
 @(test)
@@ -2673,6 +2692,29 @@ compile_let_or_break_err_binding_with_defer :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "data, err := read_text(path)"), true)
     testing.expect_value(t, strings.contains(output, "err != nil"), true)
     testing.expect_value(t, strings.contains(output, "defer delete(data)"), true)
+}
+
+@(test)
+compile_body_only_for_loop :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn run []
+  (for
+    (do
+      (println "tick")
+      (break))))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "for {"), true)
+    testing.expect_value(t, strings.contains(output, "fmt.println(\"tick\")"), true)
+    testing.expect_value(t, strings.contains(output, "break"), true)
 }
 
 @(test)
@@ -3451,7 +3493,7 @@ reject_returning_slurp_result_from_with_temp_allocator :: proc(t: ^testing.T) {
 
 (defn bad [path: string] -> [data: []byte, err: os.Error]
   (with-temp-allocator [allocator]
-    (io/slurp path)))`
+    (io/read path)))`
 
     _, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, false)
@@ -4822,20 +4864,20 @@ reject_legacy_unqualified_sequence_helpers :: proc(t: ^testing.T) {
 
     _, err, ok = kvist.compile_source(source)
     testing.expect_value(t, ok, false)
-    testing.expect_value(t, err.message, "`slurp` is no longer a core helper; use `io/slurp`")
+    testing.expect_value(t, err.message, "`slurp` is no longer a core helper; use `io/read`")
     delete(err.message)
 
     source = `(package main)
 (import io "kvist:io")
 
 (defn main [path: string, text: string]
-  (io/spit path text)
+  (io/write path text)
   (spit path text)
   (return))`
 
     _, err, ok = kvist.compile_source(source)
     testing.expect_value(t, ok, false)
-    testing.expect_value(t, err.message, "`spit` is no longer a core helper; use `io/spit`")
+    testing.expect_value(t, err.message, "`spit` is no longer a core helper; use `io/write`")
     delete(err.message)
 }
 
@@ -4893,7 +4935,7 @@ warn_discarded_slurp_result :: proc(t: ^testing.T) {
 (import io "kvist:io")
 
 (defn main []
-  (io/slurp "cache.json")
+  (io/read "cache.json")
   (return))`
 
     result, err, ok := kvist.compile_source_with_map(source)
@@ -4907,7 +4949,7 @@ warn_discarded_slurp_result :: proc(t: ^testing.T) {
     defer kvist.compile_warning_slice_delete(result.warnings)
     testing.expect_value(t, len(result.warnings), 1)
     if len(result.warnings) == 1 {
-        testing.expect_value(t, result.warnings[0].message, "owned result from io/slurp is discarded; bind it, delete it, or return it")
+        testing.expect_value(t, result.warnings[0].message, "owned result from io/read is discarded; bind it, delete it, or return it")
     }
 }
 

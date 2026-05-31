@@ -1,0 +1,34 @@
+// Thin Kvist surface over vendored odin-http.
+//
+// This is server-side only for now. It keeps the public surface small while
+// staying close to the underlying request/response router model.
+(package main)
+(import "core:fmt")
+(import http "kvist:http")
+
+(defstruct Greeting {
+  :message string
+})
+
+(defn main []
+  (http/with-router [router]
+    (http/get router "/ping" [req res]
+      (http/respond-plain res "pong"))
+
+    (http/get router "/hello/(%w+)" [req res]
+      (let [params (:url_params (deref req))]
+        (http/respond-json
+          res
+          (Greeting {:message (fmt.tprintf "hello %s" (get params 0))}))))
+
+    (http/listen 6969 router)))
+
+(comment
+  ;; Run this deliberately:
+  ;;
+  ;;   kvist run examples/http-server.kvist
+  ;;
+  ;; Then:
+  ;;   curl http://127.0.0.1:6969/ping
+  ;;   curl http://127.0.0.1:6969/hello/Ada
+  )

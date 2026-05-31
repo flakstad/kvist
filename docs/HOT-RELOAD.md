@@ -141,6 +141,27 @@ Today the generated host supports both:
 - `:step` for shell-owned loop-driven apps; this is the convenience mode when
   you want Kvist to provide the outer loop
 
+Recommended default:
+
+- prefer `:run` for most real applications
+- use `:step` when you explicitly want Kvist to own the outer loop
+
+Good `:run` fits:
+
+- web servers
+- GUI apps
+- worker processes
+- editors
+- tools with their own event or request cycle
+
+Good `:step` fits:
+
+- games
+- simulations
+- polling tools
+- immediate-mode interactive programs
+- small demos where a step-and-sleep loop is already the right shape
+
 In development, `kvist dev --reload ...` keeps the resident shell alive and
 rebuilds only the reloadable side. In ordinary execution, `kvist check|build|run
 --reload ...` generates a plain wrapper around the same `defstate` source:
@@ -164,6 +185,62 @@ Current state-layout behavior is intentionally conservative:
 That means behavior changes are the intended smooth path today, while durable
 state-shape changes still require either a clean restart or a future explicit
 migration/reset policy.
+
+## `:run` Checkpoint Guidance
+
+`reload/checkpoint!` is the single explicit cooperation point for `:run`.
+
+Treat it as:
+
+- "I am at a safe point where this runtime can stop and let the resident shell
+  swap code"
+
+Do not treat it as:
+
+- "sprinkle reload checks anywhere in the codebase"
+
+The guidance is:
+
+- call it at one deliberate runtime boundary
+- call it often enough that reload latency feels acceptable
+- only call it where returning from `run` is safe
+
+Good checkpoint boundaries:
+
+- once per request cycle
+- once per event-loop cycle
+- once per frame
+- once per job/batch item
+- once per outer loop iteration
+
+Bad checkpoint boundaries:
+
+- mid-transaction
+- while holding locks or fragile external resources
+- deep inside leaf functions
+- while shared state is only partially updated
+
+Practical examples:
+
+```clojure
+(defn run [state: (ptr App_State) host: (ptr reload/Run_Host)]
+  (for true
+    (handle-one-request state)
+    (when (reload/checkpoint! host)
+      (return))))
+```
+
+```clojure
+(defn run [state: (ptr App_State) host: (ptr reload/Run_Host)]
+  (for true
+    (pump-events state)
+    (dispatch-ready-work state)
+    (when (reload/checkpoint! host)
+      (return))))
+```
+
+If reload feels sluggish, move the checkpoint to a slightly finer safe
+boundary. Do not move it inward so far that correctness becomes unclear.
 
 If a source package needs to publish raw Odin names in that flow, it can now do
 so explicitly with:

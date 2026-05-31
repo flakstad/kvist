@@ -1437,7 +1437,7 @@ thin `kvist:io` helpers:
 (import io "kvist:io")
 (import json "kvist:json")
 
-(io/spit "tmp/users.json" text)
+(io/write "tmp/users.json" text)
 
 (let [[marshal-err write-err] (json/write "tmp/users.json" user)]
   (and (== marshal-err nil)
@@ -1450,8 +1450,8 @@ thin `kvist:io` helpers:
     ...))
 ```
 
-`io/spit` lowers through `os.write_entire_file(path, data)` and returns
-`os.Error`. `io/slurp` lowers through
+`io/write` lowers through `os.write_entire_file(path, data)` and returns
+`os.Error`. `io/read` lowers through
 `os.read_entire_file(path, context.allocator)` and returns owned `[]byte` plus
 `os.Error`. The caller must delete the bytes when keeping the value local, or
 return them to transfer ownership. Typed JSON file helpers live in

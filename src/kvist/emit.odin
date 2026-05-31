@@ -1,6 +1,7 @@
 package kvist
 
 import "core:fmt"
+import "core:os"
 import "core:strings"
 
 Sum_By_Field :: struct {
@@ -148,6 +149,8 @@ kvist_package_name_for_import_path :: proc(path: string) -> (string, bool) {
         return "io", true
     case "kvist:json":
         return "json", true
+    case "kvist:http":
+        return "http", true
     case:
         return "", false
     }
@@ -170,6 +173,48 @@ kvist_import_alias_for_decl :: proc(decl: IR_Decl) -> (alias, pkg: string, ok: b
         return decl.import_decl.alias, pkg, true
     }
     return import_default_alias(unquote_string(decl.import_decl.path)), pkg, true
+}
+
+resolved_import_path_literal_for_emit :: proc(path_literal: string) -> string {
+    raw := path_literal
+    if len(raw) >= 2 && raw[0] == '"' && raw[len(raw)-1] == '"' {
+        raw = unquote_string(raw)
+    }
+    if !strings.has_prefix(raw, "kvist_vendor:") {
+        return path_literal
+    }
+
+    root, ok_root := repo_root_for_path(".")
+    if !ok_root {
+        return path_literal
+    }
+    defer delete(root)
+
+    vendor_path := raw[len("kvist_vendor:"):]
+    if vendor_path == "" {
+        return path_literal
+    }
+
+    parts := make([dynamic]string, 0, 4)
+    defer delete(parts)
+    append(&parts, root, "vendor")
+
+    switch {
+    case vendor_path == "http":
+        append(&parts, "odin-http")
+    case strings.has_prefix(vendor_path, "http/"):
+        append(&parts, "odin-http")
+        append(&parts, vendor_path[len("http/"):])
+    case:
+        return path_literal
+    }
+
+    resolved, join_err := os.join_path(parts[:], context.allocator)
+    if join_err != nil {
+        return path_literal
+    }
+    defer delete(resolved)
+    return fmt.tprintf("%q", resolved)
 }
 
 resolve_kvist_head :: proc(e: ^Emitter, head: string) -> (canonical: string, matched_builtin: bool, err: Compile_Error, ok: bool) {
@@ -324,9 +369,9 @@ deprecated_builtin_collection_head :: proc(head: string) -> (canonical: string, 
     case "merge!":
         return "map/merge!", true
     case "slurp":
-        return "io/slurp", true
+        return "io/read", true
     case "spit":
-        return "io/spit", true
+        return "io/write", true
     case:
         return "", false
     }
@@ -2248,7 +2293,7 @@ owned_result_head :: proc(name: string) -> bool {
          "arr/distinct", "arr/distinct-by",
          "arr/range", "arr/repeat", "arr/repeatedly", "arr/iterate", "arr/cycle", "arr/take-nth",
          "str/split", "str/join", "str/replace", "str/lower", "str/upper",
-         "io/slurp":
+         "io/read":
         return true
     }
     return false
@@ -7135,8 +7180,19 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
             }
             return Compile_Error{message = "for expects [value collection], [first second collection], or condition and body", span = form.span}, false
         }
+        if len(form.items) == 2 {
+            emit_line(e, "for {")
+            e.indent += 1
+            err_body, ok_body := emit_stmt(e, form.items[1], false, Return_Spec{kind = .None})
+            if !ok_body {
+                return err_body, false
+            }
+            e.indent -= 1
+            emit_line(e, "}")
+            return {}, true
+        }
         if len(form.items) < 3 {
-            return Compile_Error{message = "for expects [value collection], [first second collection], or condition and body", span = form.span}, false
+            return Compile_Error{message = "for expects a single body form, [value collection], [first second collection], or condition and body", span = form.span}, false
         }
         cond, err_cond, ok_cond := emit_expr(e, form.items[1])
         if !ok_cond {
@@ -7374,10 +7430,11 @@ emit_decl :: proc(e: ^Emitter, decl: IR_Decl) -> (Compile_Error, bool) {
         if decl_is_kvist_import(decl) {
             return Compile_Error{}, true
         }
+        path_literal := resolved_import_path_literal_for_emit(decl.import_decl.path)
         if decl.import_decl.has_alias {
-            emit_line(e, fmt.tprintf("import %s %s", decl.import_decl.alias, decl.import_decl.path))
+            emit_line(e, fmt.tprintf("import %s %s", decl.import_decl.alias, path_literal))
         } else {
-            emit_line(e, fmt.tprintf("import %s", decl.import_decl.path))
+            emit_line(e, fmt.tprintf("import %s", path_literal))
         }
     case .Const:
         expected_type := ""

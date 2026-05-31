@@ -77,6 +77,20 @@ Current shape of the source contract:
 - general companion host mode: `:run`
 - optional metadata: `:init`, `:on-load`, `:on-unload`, `:version`, `:sleep-ms`
 
+When to use `:step`:
+
+- when a repeated step-and-sleep loop is already the right shape
+- when you want Kvist to own the outer loop
+- when the program is naturally loop-driven and does not need an app-owned
+  runtime boundary
+
+Typical fits:
+
+- games
+- simulations
+- polling tools
+- small interactive demos
+
 In this demo:
 
 - `main.kvist` is the reload-app shell

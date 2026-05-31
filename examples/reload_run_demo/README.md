@@ -81,13 +81,29 @@ Current shape of the source contract:
   returns true the `run` function should return so the resident shell can
   perform the actual reload safely
 
+When to use `:run`:
+
+- when the program already owns its runtime shape
+- when there is a natural request, event, job, or frame boundary
+- when `:step` would feel artificial
+
+In practice, `reload/checkpoint!` should sit at one safe boundary such as:
+
+- once per request
+- once per event-loop cycle
+- once per job
+- once per outer loop iteration
+
+It should not be scattered through ordinary program logic or placed halfway
+through fragile state mutations.
+
 In this demo:
 
 - `main.kvist` is the reload-app shell
 - `app.kvist` is the "real program" file in the same package
 - the durable root keeps reload bookkeeping plus one `Program_State`
   subsystem
-- `run` owns the outer loop and calls into the app package once per request
+- `run` owns the outer loop and calls into the app file once per request
   cycle before checking `reload/checkpoint!`
 
 That is the recommended project shape for larger `:run`-style applications:

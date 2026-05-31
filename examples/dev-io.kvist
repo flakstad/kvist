@@ -31,11 +31,11 @@
   (let [dir-err (ensure-dev-dir)]
     (if (!= dir-err nil)
       dir-err
-      (io/spit path text))))
+      (io/write path text))))
 
 (defn read-text [path: string] -> [data: []byte, err: os.Error]
   ;; Ownership of data transfers to the caller.
-  (io/slurp path))
+  (io/read path))
 
 (defn main []
   (return))
