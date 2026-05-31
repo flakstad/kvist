@@ -38,7 +38,7 @@
   '("package" "import" "const" "struct" "enum" "union" "proc" "odin"
     "let" "do" "if" "when" "cond" "switch" "set!" "return" "defer"
     "for" "each" "comment" "new" "make" "get" "nil?" "in" "not-in"
-    "type" "update" "update!"
+    "type" "or-else" "update" "update!"
     "break" "continue" "with-allocator" "with-temp-allocator"
     "when-let" "if-let" "when-ok" "if-ok"
     "slurp" "spit" "tap>"

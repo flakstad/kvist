@@ -804,6 +804,61 @@ This lowers to ordinary local bindings plus `defer delete(...)` at scope exit.
 The marker is currently only supported on named local bindings in `let`.
 Defer-marked bindings cannot escape through the return boundary.
 
+Two-name multi-return bindings may also carry Odin-style control-flow modifiers:
+
+```clojure
+(let [[value ok] (next-item iter) or-break]
+  ...)
+
+(let [[value ok] (next-item iter) or-continue]
+  ...)
+
+(let [[value ok] (query) or-return]
+  ...)
+```
+
+The current first pass keeps this narrow:
+
+- the binding target must be exactly two names;
+- the second name must be literally `ok` or `err`;
+- `or-return`, `or-break`, and `or-continue` are the supported modifiers;
+- `defer` may follow an `or-*` modifier and applies only on the successful path.
+
+For now, `or-return` follows Odin semantics conservatively by requiring proc
+named returns that match the binding names exactly:
+
+```clojure
+(proc query [] -> [value: int, ok: bool]
+  ...)
+
+(proc total [] -> [value: int, ok: bool]
+  (let [[value ok] (query) or-return]
+    (return (+ value 1) true)))
+```
+
+That constraint keeps lowering obvious:
+
+```clojure
+value, ok = query()
+if !ok {
+  return
+}
+```
+
+For expression-level optional-ok defaults, use `or-else`:
+
+```clojure
+(let [port (or-else (env-port) 8080)]
+  ...)
+```
+
+This follows Odin's `or_else` shape for optional-ok expressions and lowers to a
+direct Odin syntax:
+
+```odin
+port := env_port() or_else 8080
+```
+
 Flat multi-return destructuring is worth supporting because it matches ordinary
 Odin usage and keeps explicit control flow readable:
 

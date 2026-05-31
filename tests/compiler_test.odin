@@ -309,6 +309,7 @@ builtin_symbols_source_emits_signatures_and_docs :: proc(t: ^testing.T) {
 
     testing.expect_value(t, strings.contains(output, "kind\tname\tline\tcolumn\tdetail\tsignature\tdoc\n"), true)
     testing.expect_value(t, strings.contains(output, "kvist core\tprintln\t1\t1\t\t(println value...)\tPrint one or more values. Kvist lowers this to fmt output and auto-imports core:fmt when needed.\n"), true)
+    testing.expect_value(t, strings.contains(output, "kvist form\tor-else\t1\t1\t\t(or-else expr fallback)\tEvaluate an Odin optional-ok expression and return its value when ok is true, otherwise return the fallback value.\n"), true)
     testing.expect_value(t, strings.contains(output, "kvist form\tupdate!\t1\t1\t\t(update! target key-or-field value-or-updater ...)\tMutate a struct field, array/slice slot, or map key in place. Supports replacement and updater forms such as inc or +.\n"), true)
     testing.expect_value(t, strings.contains(output, "kvist macro\twhen-let\t1\t1\t\t(when-let [value bool expr] body...)\tBind a value and explicit boolean result from a multi-return expression. Run the body only when the boolean is true. Expands to a destructuring let plus when.\n"), true)
 }
@@ -2384,6 +2385,136 @@ compile_with_temp_allocator_final_scalar_use :: proc(t: ^testing.T) {
 }
 
 @(test)
+compile_let_or_return_ok_binding :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(proc next [] -> [value: int, ok: bool]
+  (return 1 true))
+
+(proc total [] -> [value: int, ok: bool]
+  (let [[value ok] (next) or-return]
+    (return (+ value 1) true)))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "value, ok = next()"), true)
+    testing.expect_value(t, strings.contains(output, "return"), true)
+}
+
+@(test)
+compile_let_or_break_err_binding_with_defer :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(proc read-text [path: string] -> [data: [dynamic]byte, err: rawptr]
+  (return (new [dynamic]byte [1 2]) nil))
+
+(proc load [path: string]
+  (for true
+    (let [[data err] (read-text path) or-break defer]
+      (println data))
+    (break)))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "data, err := read_text(path)"), true)
+    testing.expect_value(t, strings.contains(output, "err != nil"), true)
+    testing.expect_value(t, strings.contains(output, "defer delete(data)"), true)
+}
+
+@(test)
+reject_let_or_return_without_matching_named_returns :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(proc next [] -> [value: int, ok: bool]
+  (return 1 true))
+
+(proc total [] -> int
+  (let [[value ok] (next) or-return]
+    value))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    defer delete(err.message)
+    testing.expect_value(t, err.message, "or-return currently requires proc named returns matching the binding names exactly")
+}
+
+@(test)
+compile_let_or_break_and_or_continue_bindings :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(proc next [] -> [value: int, ok: bool]
+  (return 1 true))
+
+(proc demo []
+  (for true
+    (let [[value ok] (next) or-break]
+      (println value))
+    (let [[value ok] (next) or-continue]
+      (println value))
+    (break)))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "break"), true)
+    testing.expect_value(t, strings.contains(output, "continue"), true)
+}
+
+@(test)
+compile_or_else_optional_ok_expression :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(proc query [] -> [value: int, ok: bool] #optional_ok
+  (return 42 true))
+
+(proc total [] -> int
+  (or-else (query) 7))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "return query() or_else 7"), true)
+}
+
+@(test)
+reject_or_else_wrong_arity :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(proc query [] -> [value: int, ok: bool] #optional_ok
+  (return 42 true))
+
+(proc total [] -> int
+  (or-else (query)))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    defer delete(err.message)
+    testing.expect_value(t, err.message, "or-else expects optional-ok expression and fallback")
+}
+
+@(test)
 compile_let_defer_final_if_scalar_use :: proc(t: ^testing.T) {
     source := `(package main)
 
@@ -2561,6 +2692,28 @@ reject_returning_defer_binding_through_set_bang_wrapper :: proc(t: ^testing.T) {
 }
 
 @(test)
+reject_returning_defer_binding_in_final_if_points_to_alias_branch :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(struct Box {
+  :xs [dynamic]int
+})
+
+(proc owned [flag: bool] -> Box
+  (let [xs (new [dynamic]int [1 2]) defer
+        box (Box {:xs xs})]
+    (if flag
+      box
+      (Box {:xs (new [dynamic]int [])}))))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    defer delete(err.message)
+    testing.expect_value(t, err.message, "defer-marked binding cannot be returned; remove defer or transfer ownership explicitly")
+    testing.expect_value(t, source[err.span.start:err.span.end], "box")
+}
+
+@(test)
 reject_returning_owned_result_from_with_temp_allocator :: proc(t: ^testing.T) {
     source := `(package main)
 (import runtime "base:runtime")
@@ -2623,6 +2776,32 @@ reject_returning_owned_result_from_with_temp_allocator_through_set_bang_wrapper 
     testing.expect_value(t, ok, false)
     defer delete(err.message)
     testing.expect_value(t, err.message, "owned value cannot escape with-temp-allocator; allocate it outside the temp scope or copy it before returning")
+}
+
+@(test)
+reject_returning_owned_result_from_with_temp_allocator_in_final_if_points_to_alias_branch :: proc(t: ^testing.T) {
+    source := `(package main)
+(import runtime "base:runtime")
+
+(struct Box {
+  :xs [dynamic]int
+})
+
+(proc inc [x: int] -> int
+  (+ x 1))
+
+(proc bad [xs: []int flag: bool] -> Box
+  (with-temp-allocator [allocator]
+    (let [box (Box {:xs (map inc xs)})]
+      (if flag
+        box
+        (Box {:xs (new [dynamic]int [])})))))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    defer delete(err.message)
+    testing.expect_value(t, err.message, "owned value cannot escape with-temp-allocator; allocate it outside the temp scope or copy it before returning")
+    testing.expect_value(t, source[err.span.start:err.span.end], "box")
 }
 
 @(test)
@@ -3854,7 +4033,7 @@ warn_discarded_owned_sequence_result :: proc(t: ^testing.T) {
     defer kvist.compile_warning_slice_delete(result.warnings)
     testing.expect_value(t, len(result.warnings), 1)
     if len(result.warnings) == 1 {
-        testing.expect_value(t, result.warnings[0].message, "owned value is discarded; bind it, delete it, or return it")
+        testing.expect_value(t, result.warnings[0].message, "owned result from map is discarded; bind it, delete it, or return it")
     }
 }
 
@@ -3894,7 +4073,7 @@ warn_discarded_slurp_result :: proc(t: ^testing.T) {
     defer kvist.compile_warning_slice_delete(result.warnings)
     testing.expect_value(t, len(result.warnings), 1)
     if len(result.warnings) == 1 {
-        testing.expect_value(t, result.warnings[0].message, "owned value is discarded; bind it, delete it, or return it")
+        testing.expect_value(t, result.warnings[0].message, "owned result from slurp is discarded; bind it, delete it, or return it")
     }
 }
 
@@ -5391,7 +5570,60 @@ compile_warns_for_leaked_owned_let_local :: proc(t: ^testing.T) {
 
     testing.expect_value(t, len(result.warnings), 1)
     if len(result.warnings) == 1 {
-        testing.expect_value(t, result.warnings[0].message, "owned local xs is never deleted or returned")
+        testing.expect_value(t, result.warnings[0].message, "owned local xs is never deleted or returned; add (defer (delete xs)) or return it")
+    }
+}
+
+@(test)
+compile_does_not_warn_for_owned_local_deleted_in_all_if_branches :: proc(t: ^testing.T) {
+    source := `(package main)
+(import arr "kvist:arr")
+
+(defn demo [flag: bool]
+  (let [xs (arr/empty int)]
+    (if flag
+      (delete xs)
+      (delete xs))
+    (println 1)))`
+
+    result, err, ok := kvist.compile_source_with_map(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(t, len(result.warnings), 0)
+}
+
+@(test)
+compile_warns_for_owned_local_leaking_in_if_branch :: proc(t: ^testing.T) {
+    source := `(package main)
+(import arr "kvist:arr")
+
+(defn demo [flag: bool]
+  (let [xs (arr/empty int)]
+    (if flag
+      (delete xs)
+      (println 1))
+    (println 2)))`
+
+    result, err, ok := kvist.compile_source_with_map(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(t, len(result.warnings), 1)
+    if len(result.warnings) == 1 {
+        testing.expect_value(t, result.warnings[0].message, "owned local xs is never deleted or returned; add (defer (delete xs)) or return it")
     }
 }
 
@@ -5418,7 +5650,7 @@ compile_warns_for_overwritten_owned_local :: proc(t: ^testing.T) {
 
     testing.expect_value(t, len(result.warnings), 1)
     if len(result.warnings) == 1 {
-        testing.expect_value(t, result.warnings[0].message, "owned local xs is overwritten before cleanup")
+        testing.expect_value(t, result.warnings[0].message, "owned local xs is overwritten before cleanup; delete it or return it before set!")
     }
 }
 
@@ -5442,6 +5674,6 @@ compile_warns_for_discarded_owned_result :: proc(t: ^testing.T) {
 
     testing.expect_value(t, len(result.warnings), 1)
     if len(result.warnings) == 1 {
-        testing.expect_value(t, result.warnings[0].message, "owned value is discarded; bind it, delete it, or return it")
+        testing.expect_value(t, result.warnings[0].message, "owned result from range is discarded; bind it, delete it, or return it")
     }
 }

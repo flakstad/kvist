@@ -154,6 +154,14 @@ Current compiler warnings implement the first conservative slice of this:
 - owned `let` locals that are never deleted or returned;
 - owned locals overwritten with `set!` before cleanup.
 
+These warnings should be specific enough to point at the producing form and
+suggest the obvious next step, such as adding `(defer (delete xs))`, returning
+the value directly, or cleaning up before `set!`.
+
+The warning pass should also stay conservative around branches: if every `if`,
+`cond`, or `switch` branch clearly deletes or returns the owned local, the
+compiler should not warn. If one branch leaks, it should.
+
 These warnings should avoid cases where ownership is ambiguous, especially:
 
 - values stored inside structs or other aggregates;

@@ -52,6 +52,7 @@ BUILTIN_SOURCE_ENTRIES :: []Builtin_Source_Entry{
     {name = "if-ok", relative = "src/kvist/macroexpand.odin", snippet = "expand_if_ok_form :: proc"},
     {name = "println", relative = "src/kvist/emit.odin", snippet = "if form.items[0].text == \"println\" || form.items[0].text == \"doc\""},
     {name = "doc", relative = "src/kvist/emit.odin", snippet = "case \"doc\":"},
+    {name = "or-else", relative = "src/kvist/emit.odin", snippet = "if head.text == \"or-else\""},
     {name = "update!", relative = "src/kvist/emit.odin", snippet = "case \"update!\":"},
     {name = "update", relative = "src/kvist/emit.odin", snippet = "case \"update\":"},
     {name = "type", relative = "src/kvist/parse.odin", snippet = "if is_symbol(form.items[0], \"type\")"},
@@ -212,6 +213,7 @@ builtin_symbols_append :: proc(builder: ^strings.Builder) {
     builtin_symbols_write_entry(builder, "kvist macro", "if-ok", "(if-ok [value err expr] then else)", "Bind a value and Odin error result from a multi-return expression. Evaluate the then branch when the error equals Odin's zero value {}, otherwise the else branch. Expands to a destructuring let plus if.")
     builtin_symbols_write_entry(builder, "kvist core", "println", "(println value...)", "Print one or more values. Kvist lowers this to fmt output and auto-imports core:fmt when needed.")
     builtin_symbols_write_entry(builder, "kvist core", "doc", "(doc 'symbol)", "Print the stored docstring for a declaration name.")
+    builtin_symbols_write_entry(builder, "kvist form", "or-else", "(or-else expr fallback)", "Evaluate an Odin optional-ok expression and return its value when ok is true, otherwise return the fallback value.")
     builtin_symbols_write_entry(builder, "kvist form", "update!", "(update! target key-or-field value-or-updater ...)", "Mutate a struct field, array/slice slot, or map key in place. Supports replacement and updater forms such as inc or +.")
     builtin_symbols_write_entry(builder, "kvist form", "update", "(update target key-or-field value-or-updater ...)", "Return an updated copy. Currently supported for struct fields.")
     builtin_symbols_write_entry(builder, "kvist form", "type", "(type Head Arg...)", "Instantiate an Odin polymorphic type constructor. For example, (type chan.Chan int) lowers to chan.Chan(int) in both type and value positions.")
@@ -964,6 +966,8 @@ editor_builtin_symbols_append :: proc(builder: ^strings.Builder, seen: ^map[stri
             symbols_write_record_doc_file(&temp, "kvist core", entry.name, line, column, "", "(println value...)", symbols_doc_lines_from_string("Print one or more values. Kvist lowers this to fmt output and auto-imports core:fmt when needed.")[:], file)
         case "doc":
             symbols_write_record_doc_file(&temp, "kvist core", entry.name, line, column, "", "(doc 'symbol)", symbols_doc_lines_from_string("Print the stored docstring for a declaration name.")[:], file)
+        case "or-else":
+            symbols_write_record_doc_file(&temp, "kvist form", entry.name, line, column, "", "(or-else expr fallback)", symbols_doc_lines_from_string("Evaluate an Odin optional-ok expression and return its value when ok is true, otherwise return the fallback value.")[:], file)
         case "update!":
             symbols_write_record_doc_file(&temp, "kvist form", entry.name, line, column, "", "(update! target key-or-field value-or-updater ...)", symbols_doc_lines_from_string("Mutate a struct field, array/slice slot, or map key in place. Supports replacement and updater forms such as inc or +.")[:], file)
         case "update":
