@@ -2341,10 +2341,8 @@ compile_let_defer_scope :: proc(t: ^testing.T) {
 
 (proc total [xs: []int] -> int
   (let [mapped (map inc xs) defer
-        filtered (filter even? mapped) defer
-        total 0]
-    (set! total (reduce add 0 filtered))
-    total))`
+        filtered (filter even? mapped) defer]
+    (reduce add 0 filtered)))`
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
@@ -2358,8 +2356,98 @@ compile_let_defer_scope :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "defer delete(mapped)"), true)
     testing.expect_value(t, strings.contains(output, "filtered := kvist_filter(even_p, (mapped)[:])"), true)
     testing.expect_value(t, strings.contains(output, "defer delete(filtered)"), true)
-    testing.expect_value(t, strings.contains(output, "total = kvist_reduce(add, 0, (filtered)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "return total"), true)
+    testing.expect_value(t, strings.contains(output, "return kvist_reduce(add, 0, (filtered)[:])"), true)
+}
+
+@(test)
+compile_with_temp_allocator_final_scalar_use :: proc(t: ^testing.T) {
+    source := `(package main)
+(import runtime "base:runtime")
+
+(proc total [] -> int
+  (with-temp-allocator [allocator]
+    (let [xs (new [dynamic]int [1 2]) ]
+      (defer (delete xs))
+      (count xs))))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "runtime.default_temp_allocator_temp_begin"), true)
+    testing.expect_value(t, strings.contains(output, "defer delete(xs)"), true)
+    testing.expect_value(t, strings.contains(output, "return len((xs)[:])"), true)
+}
+
+@(test)
+compile_let_defer_final_if_scalar_use :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(proc total [flag: bool] -> int
+  (let [xs (new [dynamic]int [1 2]) defer]
+    (if flag
+      (count xs)
+      0)))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "defer delete(xs)"), true)
+    testing.expect_value(t, strings.contains(output, "return len((xs)[:])"), true)
+}
+
+@(test)
+compile_let_defer_final_cond_scalar_use :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(proc total [n: int] -> int
+  (let [xs (new [dynamic]int [1 2]) defer]
+    (cond
+      (> n 0) (count xs)
+      :else 0)))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "defer delete(xs)"), true)
+    testing.expect_value(t, strings.contains(output, "return len((xs)[:])"), true)
+}
+
+@(test)
+compile_let_defer_final_switch_scalar_use :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(proc total [mode: int] -> int
+  (let [xs (new [dynamic]int [1 2]) defer]
+    (switch mode
+      0 0
+      1 (count xs)
+      :else 2)))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "defer delete(xs)"), true)
+    testing.expect_value(t, strings.contains(output, "return len((xs)[:])"), true)
 }
 
 @(test)
@@ -2434,6 +2522,45 @@ reject_returning_defer_binding_inside_call :: proc(t: ^testing.T) {
 }
 
 @(test)
+reject_returning_defer_binding_through_local_wrapper :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(struct Box {
+  :xs [dynamic]int
+})
+
+(proc owned [] -> Box
+  (let [xs (new [dynamic]int [1 2]) defer
+        box (Box {:xs xs})]
+    box))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    defer delete(err.message)
+    testing.expect_value(t, err.message, "defer-marked binding cannot be returned; remove defer or transfer ownership explicitly")
+}
+
+@(test)
+reject_returning_defer_binding_through_set_bang_wrapper :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(struct Box {
+  :xs [dynamic]int
+})
+
+(proc owned [] -> Box
+  (let [xs (new [dynamic]int [1 2]) defer
+        box (Box {:xs (new [dynamic]int [])})]
+    (set! box (Box {:xs xs}))
+    box))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    defer delete(err.message)
+    testing.expect_value(t, err.message, "defer-marked binding cannot be returned; remove defer or transfer ownership explicitly")
+}
+
+@(test)
 reject_returning_owned_result_from_with_temp_allocator :: proc(t: ^testing.T) {
     source := `(package main)
 (import runtime "base:runtime")
@@ -2444,6 +2571,53 @@ reject_returning_owned_result_from_with_temp_allocator :: proc(t: ^testing.T) {
 (proc bad [xs: []int] -> [dynamic]int
   (with-temp-allocator [allocator]
     (map inc xs)))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    defer delete(err.message)
+    testing.expect_value(t, err.message, "owned value cannot escape with-temp-allocator; allocate it outside the temp scope or copy it before returning")
+}
+
+@(test)
+reject_returning_owned_result_from_with_temp_allocator_through_local_wrapper :: proc(t: ^testing.T) {
+    source := `(package main)
+(import runtime "base:runtime")
+
+(struct Box {
+  :xs [dynamic]int
+})
+
+(proc inc [x: int] -> int
+  (+ x 1))
+
+(proc bad [xs: []int] -> Box
+  (with-temp-allocator [allocator]
+    (let [box (Box {:xs (map inc xs)})]
+      box)))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    defer delete(err.message)
+    testing.expect_value(t, err.message, "owned value cannot escape with-temp-allocator; allocate it outside the temp scope or copy it before returning")
+}
+
+@(test)
+reject_returning_owned_result_from_with_temp_allocator_through_set_bang_wrapper :: proc(t: ^testing.T) {
+    source := `(package main)
+(import runtime "base:runtime")
+
+(struct Box {
+  :xs [dynamic]int
+})
+
+(proc inc [x: int] -> int
+  (+ x 1))
+
+(proc bad [xs: []int] -> Box
+  (with-temp-allocator [allocator]
+    (let [box (Box {:xs (new [dynamic]int [])})]
+      (set! box (Box {:xs (map inc xs)}))
+      box)))`
 
     _, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, false)

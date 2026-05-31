@@ -2026,49 +2026,344 @@ form_mentions_binding_name :: proc(form: CST_Form, name: string) -> bool {
     return false
 }
 
-form_contains_owned_temp_escape_result :: proc(form: CST_Form) -> bool {
-    if form_is_owned_temp_escape_result(form) {
-        return true
-    }
-    #partial switch form.kind {
-    case .List, .Vector, .Brace, .Set:
-        for item in form.items {
-            if form_contains_owned_temp_escape_result(item) {
-                return true
-            }
+form_mentions_any_binding_name :: proc(form: CST_Form, names: []string) -> bool {
+    for name in names {
+        if form_mentions_binding_name(form, name) {
+            return true
         }
     }
     return false
 }
 
-let_defer_return_error :: proc(bindings: []Binding, body: []CST_Form, last_in_proc: bool, returns: Return_Spec) -> (Compile_Error, bool) {
-    for item in body {
-        if item.kind != .List || len(item.items) == 0 || item.items[0].kind != .Symbol || item.items[0].text != "return" {
-            continue
-        }
-        for binding in bindings {
-            if !binding.deferred_delete {
-                continue
-            }
-            for returned in item.items[1:] {
-                if form_mentions_binding_name(returned, binding.name) {
-                    return Compile_Error{
-                        message = "defer-marked binding cannot be returned; remove defer or transfer ownership explicitly",
-                        span = item.span,
-                    }, true
-                }
-            }
+binding_names_contain :: proc(names: []string, name: string) -> bool {
+    for existing in names {
+        if existing == name {
+            return true
         }
     }
-    if last_in_proc && returns.kind != .None && len(body) > 0 {
-        final_form := body[len(body)-1]
-        for binding in bindings {
-            if binding.deferred_delete && form_mentions_binding_name(final_form, binding.name) {
-                return Compile_Error{
-                    message = "defer-marked binding cannot be returned; remove defer or transfer ownership explicitly",
-                    span = final_form.span,
-                }, true
+    return false
+}
+
+binding_names_append_unique :: proc(names: ^[dynamic]string, name: string) {
+    if name == "" || binding_names_contain(names[:], name) {
+        return
+    }
+    append(names, name)
+}
+
+set_bang_assigned_name :: proc(form: CST_Form) -> (string, bool) {
+    if form.kind != .List || len(form.items) != 3 || form.items[0].kind != .Symbol || form.items[0].text != "set!" {
+        return "", false
+    }
+    if form.items[1].kind != .Symbol {
+        return "", false
+    }
+    return map_name(form.items[1].text), true
+}
+
+type_text_is_non_owned_scalar :: proc(text: string) -> bool {
+    switch text {
+    case "bool", "int", "i64", "f64", "float", "string", "rune", "byte", "typeid", "rawptr":
+        return true
+    }
+    return false
+}
+
+return_spec_is_non_owned_scalar :: proc(returns: Return_Spec) -> bool {
+    return returns.kind == .Single && type_text_is_non_owned_scalar(returns.single_ty)
+}
+
+body_may_escape_deferred_binding_names :: proc(forms: []CST_Form, names: []string, returns: Return_Spec) -> bool {
+    scoped_names := make([dynamic]string, len(names))
+    defer delete(scoped_names)
+    copy(scoped_names[:], names)
+
+    for form in forms {
+        if form.kind == .List && len(form.items) > 0 && form.items[0].kind == .Symbol && form.items[0].text == "return" {
+            if form_may_escape_deferred_binding_names(form, scoped_names[:], returns) {
+                return true
             }
+        }
+        if assigned_name, ok_assigned := set_bang_assigned_name(form); ok_assigned &&
+           form_may_escape_deferred_binding_names(form.items[2], scoped_names[:], returns) {
+            binding_names_append_unique(&scoped_names, assigned_name)
+        }
+    }
+    if returns.kind != .None && len(forms) > 0 {
+        return form_may_escape_deferred_binding_names(forms[len(forms)-1], scoped_names[:], returns)
+    }
+    return false
+}
+
+body_may_escape_deferred_binding :: proc(forms: []CST_Form, name: string, returns: Return_Spec) -> bool {
+    names: [dynamic]string
+    defer delete(names)
+    append(&names, name)
+    return body_may_escape_deferred_binding_names(forms, names[:], returns)
+}
+
+switch_may_escape_deferred_binding_names :: proc(form: CST_Form, names: []string, returns: Return_Spec) -> bool {
+    if len(form.items) < 4 {
+        return false
+    }
+    i := 2
+    for i < len(form.items) {
+        if i+1 >= len(form.items) {
+            return false
+        }
+        if form_may_escape_deferred_binding_names(form.items[i+1], names, returns) {
+            return true
+        }
+        i += 2
+    }
+    return false
+}
+
+switch_may_escape_deferred_binding :: proc(form: CST_Form, name: string, returns: Return_Spec) -> bool {
+    names: [dynamic]string
+    defer delete(names)
+    append(&names, name)
+    return switch_may_escape_deferred_binding_names(form, names[:], returns)
+}
+
+form_may_escape_deferred_binding_names :: proc(form: CST_Form, names: []string, returns: Return_Spec) -> bool {
+    if !form_mentions_any_binding_name(form, names) {
+        return false
+    }
+
+    #partial switch form.kind {
+    case .Symbol:
+        return true
+    case .Vector, .Brace, .Set:
+        return true
+    case .List:
+        if len(form.items) == 0 || form.items[0].kind != .Symbol {
+            return !return_spec_is_non_owned_scalar(returns)
+        }
+        switch form.items[0].text {
+        case "return":
+            for returned in form.items[1:] {
+                if form_may_escape_deferred_binding_names(returned, names, returns) {
+                    return true
+                }
+            }
+            return false
+        case "let":
+            bindings, _, ok_bind := parse_let_bindings(form.items[1])
+            if !ok_bind {
+                if len(form.items) >= 3 {
+                    return body_may_escape_deferred_binding_names(form.items[2:], names, returns)
+                }
+                return false
+            }
+            scoped_names := make([dynamic]string, len(names))
+            defer delete(scoped_names)
+            copy(scoped_names[:], names)
+            for binding in bindings {
+                if binding.name != "" && form_may_escape_deferred_binding_names(binding.value, scoped_names[:], returns) {
+                    binding_names_append_unique(&scoped_names, binding.name)
+                }
+            }
+            if len(form.items) >= 3 {
+                return body_may_escape_deferred_binding_names(form.items[2:], scoped_names[:], returns)
+            }
+            return false
+        case "do":
+            if len(form.items) >= 2 {
+                return body_may_escape_deferred_binding_names(form.items[1:], names, returns)
+            }
+            return false
+        case "if", "when":
+            if len(form.items) >= 3 && form_may_escape_deferred_binding_names(form.items[2], names, returns) {
+                return true
+            }
+            if len(form.items) >= 4 && form_may_escape_deferred_binding_names(form.items[3], names, returns) {
+                return true
+            }
+            return false
+        case "cond":
+            if len(form.items) >= 3 {
+                i := 2
+                for i < len(form.items) {
+                    if form_may_escape_deferred_binding_names(form.items[i], names, returns) {
+                        return true
+                    }
+                    i += 2
+                }
+            }
+            return false
+        case "switch":
+            return switch_may_escape_deferred_binding_names(form, names, returns)
+        case "with-allocator", "with-temp-allocator":
+            if len(form.items) >= 3 {
+                return body_may_escape_deferred_binding_names(form.items[2:], names, returns)
+            }
+            return false
+        case:
+            return !return_spec_is_non_owned_scalar(returns)
+        }
+    }
+    return false
+}
+
+form_may_escape_deferred_binding :: proc(form: CST_Form, name: string, returns: Return_Spec) -> bool {
+    names: [dynamic]string
+    defer delete(names)
+    append(&names, name)
+    return form_may_escape_deferred_binding_names(form, names[:], returns)
+}
+
+body_may_escape_owned_temp_result_names :: proc(forms: []CST_Form, names: []string, returns: Return_Spec) -> bool {
+    scoped_names := make([dynamic]string, len(names))
+    defer delete(scoped_names)
+    copy(scoped_names[:], names)
+
+    for form in forms {
+        if form.kind == .List && len(form.items) > 0 && form.items[0].kind == .Symbol && form.items[0].text == "return" {
+            if form_may_escape_owned_temp_result_names(form, scoped_names[:], returns) {
+                return true
+            }
+        }
+        if assigned_name, ok_assigned := set_bang_assigned_name(form); ok_assigned &&
+           form_may_escape_owned_temp_result_names(form.items[2], scoped_names[:], returns) {
+            binding_names_append_unique(&scoped_names, assigned_name)
+        }
+    }
+    if returns.kind != .None && len(forms) > 0 {
+        return form_may_escape_owned_temp_result_names(forms[len(forms)-1], scoped_names[:], returns)
+    }
+    return false
+}
+
+body_may_escape_owned_temp_result :: proc(forms: []CST_Form, returns: Return_Spec) -> bool {
+    return body_may_escape_owned_temp_result_names(forms, nil, returns)
+}
+
+switch_may_escape_owned_temp_result_names :: proc(form: CST_Form, names: []string, returns: Return_Spec) -> bool {
+    if len(form.items) < 4 {
+        return false
+    }
+    i := 2
+    for i < len(form.items) {
+        if i+1 >= len(form.items) {
+            return false
+        }
+        if form_may_escape_owned_temp_result_names(form.items[i+1], names, returns) {
+            return true
+        }
+        i += 2
+    }
+    return false
+}
+
+switch_may_escape_owned_temp_result :: proc(form: CST_Form, returns: Return_Spec) -> bool {
+    return switch_may_escape_owned_temp_result_names(form, nil, returns)
+}
+
+form_may_escape_owned_temp_result_names :: proc(form: CST_Form, names: []string, returns: Return_Spec) -> bool {
+    if form_is_owned_temp_escape_result(form) {
+        return true
+    }
+
+    #partial switch form.kind {
+    case .Symbol:
+        return binding_names_contain(names, map_name(form.text))
+    case .Vector, .Brace, .Set:
+        for item in form.items {
+            if form_may_escape_owned_temp_result_names(item, names, returns) {
+                return true
+            }
+        }
+    case .List:
+        if len(form.items) == 0 || form.items[0].kind != .Symbol {
+            return !return_spec_is_non_owned_scalar(returns)
+        }
+        switch form.items[0].text {
+        case "return":
+            for returned in form.items[1:] {
+                if form_may_escape_owned_temp_result_names(returned, names, returns) {
+                    return true
+                }
+            }
+        case "let":
+            bindings, _, ok_bind := parse_let_bindings(form.items[1])
+            if !ok_bind {
+                if len(form.items) >= 3 {
+                    return body_may_escape_owned_temp_result_names(form.items[2:], names, returns)
+                }
+                return false
+            }
+            scoped_names := make([dynamic]string, len(names))
+            defer delete(scoped_names)
+            copy(scoped_names[:], names)
+            for binding in bindings {
+                if binding.name != "" && form_may_escape_owned_temp_result_names(binding.value, scoped_names[:], returns) {
+                    binding_names_append_unique(&scoped_names, binding.name)
+                }
+            }
+            if len(form.items) >= 3 {
+                return body_may_escape_owned_temp_result_names(form.items[2:], scoped_names[:], returns)
+            }
+        case "do":
+            if len(form.items) >= 2 {
+                return body_may_escape_owned_temp_result_names(form.items[1:], names, returns)
+            }
+        case "if", "when":
+            if len(form.items) >= 3 && form_may_escape_owned_temp_result_names(form.items[2], names, returns) {
+                return true
+            }
+            if len(form.items) >= 4 && form_may_escape_owned_temp_result_names(form.items[3], names, returns) {
+                return true
+            }
+        case "cond":
+            if len(form.items) >= 3 {
+                i := 2
+                for i < len(form.items) {
+                    if form_may_escape_owned_temp_result_names(form.items[i], names, returns) {
+                        return true
+                    }
+                    i += 2
+                }
+            }
+        case "switch":
+            return switch_may_escape_owned_temp_result_names(form, names, returns)
+        case "with-allocator", "with-temp-allocator":
+            if len(form.items) >= 3 {
+                return body_may_escape_owned_temp_result_names(form.items[2:], names, returns)
+            }
+        case:
+            return !return_spec_is_non_owned_scalar(returns)
+        }
+    }
+    return false
+}
+
+form_may_escape_owned_temp_result :: proc(form: CST_Form, returns: Return_Spec) -> bool {
+    return form_may_escape_owned_temp_result_names(form, nil, returns)
+}
+
+let_defer_return_error :: proc(bindings: []Binding, body: []CST_Form, last_in_proc: bool, returns: Return_Spec) -> (Compile_Error, bool) {
+    for binding in bindings {
+        if !binding.deferred_delete {
+            continue
+        }
+        names: [dynamic]string
+        defer delete(names)
+        append(&names, binding.name)
+        for alias_binding in bindings {
+            if alias_binding.name != "" && form_may_escape_deferred_binding_names(alias_binding.value, names[:], returns) {
+                binding_names_append_unique(&names, alias_binding.name)
+            }
+        }
+        if body_may_escape_deferred_binding_names(body, names[:], returns) {
+            err_span := body[0].span
+            if last_in_proc && returns.kind != .None && len(body) > 0 {
+                err_span = body[len(body)-1].span
+            }
+            return Compile_Error{
+                message = "defer-marked binding cannot be returned; remove defer or transfer ownership explicitly",
+                span = err_span,
+            }, true
         }
     }
     return {}, false
@@ -2536,27 +2831,15 @@ form_is_owned_temp_escape_result :: proc(form: CST_Form) -> bool {
 }
 
 with_temp_allocator_escape_error :: proc(body: []CST_Form, last_in_proc: bool, returns: Return_Spec) -> (Compile_Error, bool) {
-    for item in body {
-        if item.kind == .List && len(item.items) > 0 && item.items[0].kind == .Symbol && item.items[0].text == "return" {
-            for returned in item.items[1:] {
-                if form_contains_owned_temp_escape_result(returned) {
-                    return Compile_Error{
-                        message = "owned value cannot escape with-temp-allocator; allocate it outside the temp scope or copy it before returning",
-                        span = item.span,
-                    }, true
-                }
-            }
+    if body_may_escape_owned_temp_result(body, returns) {
+        err_span := body[0].span
+        if last_in_proc && returns.kind != .None && len(body) > 0 {
+            err_span = body[len(body)-1].span
         }
-    }
-
-    if last_in_proc && returns.kind != .None && len(body) > 0 {
-        final_form := body[len(body)-1]
-        if form_contains_owned_temp_escape_result(final_form) {
-            return Compile_Error{
-                message = "owned value cannot escape with-temp-allocator; allocate it outside the temp scope or copy it before returning",
-                span = final_form.span,
-            }, true
-        }
+        return Compile_Error{
+            message = "owned value cannot escape with-temp-allocator; allocate it outside the temp scope or copy it before returning",
+            span = err_span,
+        }, true
     }
     return {}, false
 }

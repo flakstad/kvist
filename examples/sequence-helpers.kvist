@@ -60,10 +60,8 @@
 (defn deferred-total [] -> int
   (let [xs (new []int [1 2 3])]
     (let [doubled (map double xs) defer
-          evens (filter even? doubled) defer
-          total 0]
-      (set! total (reduce add 0 evens))
-      total)))
+          evens (filter even? doubled) defer]
+      (reduce add 0 evens))))
 
 (defn age-for-grace [] -> int
   (let [names (new []string ["Ada" "Lin" "Grace"])
