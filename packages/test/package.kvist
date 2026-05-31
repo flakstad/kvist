@@ -1,5 +1,115 @@
 (package test)
 
+(import "base:intrinsics")
+(import reflect "core:reflect")
+(import "core:strings")
+(import "core:sync")
+(import "core:testing")
+
+(odin "
+__kvist_test_context_lock: sync.Mutex
+__kvist_test_context_stacks: map[uintptr][dynamic]string
+
+__kvist_test_context_cleanup :: proc(user_data: rawptr) {
+	key := uintptr(user_data)
+
+	sync.mutex_lock(&__kvist_test_context_lock)
+	defer sync.mutex_unlock(&__kvist_test_context_lock)
+
+	stack, ok := __kvist_test_context_stacks[key]
+	if !ok {
+		return
+	}
+	for msg in stack {
+		delete(msg)
+	}
+	delete(stack)
+	delete_key(&__kvist_test_context_stacks, key)
+	if len(__kvist_test_context_stacks) == 0 {
+		delete(__kvist_test_context_stacks)
+	}
+}
+
+__kvist_test_context_prefix :: proc(t: ^testing.T) -> string {
+	key := uintptr(t)
+
+	sync.mutex_lock(&__kvist_test_context_lock)
+	stack, ok := __kvist_test_context_stacks[key]
+	if !ok || len(stack) == 0 {
+		sync.mutex_unlock(&__kvist_test_context_lock)
+		return \"\"
+	}
+	prefix, _ := strings.join(stack[:], \" > \", allocator=context.temp_allocator)
+	sync.mutex_unlock(&__kvist_test_context_lock)
+	return prefix
+}
+
+__kvist_test_push_context :: proc(t: ^testing.T, message: string) {
+	key := uintptr(t)
+	cloned, clone_err := strings.clone(message)
+	assert(clone_err == nil, \"kvist:test could not clone t/testing message\")
+
+	sync.mutex_lock(&__kvist_test_context_lock)
+	defer sync.mutex_unlock(&__kvist_test_context_lock)
+
+	stack, existed := __kvist_test_context_stacks[key]
+	if !existed {
+		testing.cleanup(t, __kvist_test_context_cleanup, rawptr(t))
+	}
+	append(&stack, cloned)
+	__kvist_test_context_stacks[key] = stack
+}
+
+__kvist_test_pop_context :: proc(t: ^testing.T) {
+	key := uintptr(t)
+
+	sync.mutex_lock(&__kvist_test_context_lock)
+	defer sync.mutex_unlock(&__kvist_test_context_lock)
+
+	stack, ok := __kvist_test_context_stacks[key]
+	if !ok || len(stack) == 0 {
+		return
+	}
+	delete(stack[len(stack)-1])
+	resize(&stack, len(stack)-1)
+	if len(stack) == 0 {
+		delete(stack)
+		delete_key(&__kvist_test_context_stacks, key)
+		if len(__kvist_test_context_stacks) == 0 {
+			delete(__kvist_test_context_stacks)
+		}
+	} else {
+		__kvist_test_context_stacks[key] = stack
+	}
+}
+
+__kvist_test_expect :: proc(t: ^testing.T, ok: bool, msg := \"\", expr := #caller_expression(ok), loc := #caller_location) -> bool {
+	if ok {
+		return true
+	}
+	prefix := __kvist_test_context_prefix(t)
+	if prefix == \"\" {
+		return testing.expect(t, ok, msg, expr=expr, loc=loc)
+	}
+	if msg == \"\" {
+		return testing.expectf(t, ok, \"%s: expected %v to be true\", prefix, expr, loc=loc)
+	}
+	return testing.expectf(t, ok, \"%s: %s\", prefix, msg, loc=loc)
+}
+
+__kvist_test_expect_value :: proc(t: ^testing.T, value, expected: $T, loc := #caller_location, value_expr := #caller_expression(value)) -> bool where intrinsics.type_is_comparable(T) {
+	ok := value == expected || reflect.is_nil(value) && reflect.is_nil(expected)
+	if ok {
+		return true
+	}
+	prefix := __kvist_test_context_prefix(t)
+	if prefix == \"\" {
+		return testing.expect_value(t, value, expected, loc=loc, value_expr=value_expr)
+	}
+	return testing.expectf(t, ok, \"%s: expected %v to be %v, got %v\", prefix, value_expr, expected, value, loc=loc)
+}
+")
+
 (defmacro- __kvist_test_wrap_each
   [body]
   body)
@@ -22,33 +132,33 @@
           (if (= (count expr) 3)
             (if (nil? msg)
               (quasiquote
-                (testing.expect_value t (unquote (nth expr 1)) (unquote (nth expr 2))))
+                (__kvist_test_expect_value t (unquote (nth expr 1)) (unquote (nth expr 2))))
               (quasiquote
-                (testing.expectf t (= (unquote (nth expr 1)) (unquote (nth expr 2))) (unquote msg))))
+                (__kvist_test_expect t (= (unquote (nth expr 1)) (unquote (nth expr 2))) (unquote msg))))
             (error "t/is with = expects exactly two operands"))
           (if (= (name head) "not")
             (if (= (count expr) 2)
               (if (nil? msg)
                 (quasiquote
-                  (testing.expect t (not (unquote (nth expr 1)))))
+                  (__kvist_test_expect t (not (unquote (nth expr 1)))))
                 (quasiquote
-                  (testing.expect t (not (unquote (nth expr 1))) (unquote msg))))
+                  (__kvist_test_expect t (not (unquote (nth expr 1))) (unquote msg))))
               (error "t/is with not expects exactly one operand"))
             (if (nil? msg)
               (quasiquote
-                (testing.expect t (unquote expr)))
+                (__kvist_test_expect t (unquote expr)))
               (quasiquote
-                (testing.expect t (unquote expr) (unquote msg))))))
+                (__kvist_test_expect t (unquote expr) (unquote msg))))))
         (if (nil? msg)
           (quasiquote
-            (testing.expect t (unquote expr)))
+            (__kvist_test_expect t (unquote expr)))
           (quasiquote
-            (testing.expect t (unquote expr) (unquote msg))))))
+            (__kvist_test_expect t (unquote expr) (unquote msg))))))
     (if (nil? msg)
       (quasiquote
-        (testing.expect t (unquote expr)))
+        (__kvist_test_expect t (unquote expr)))
       (quasiquote
-        (testing.expect t (unquote expr) (unquote msg))))))
+        (__kvist_test_expect t (unquote expr) (unquote msg))))))
 
 (defmacro- emit-deftest
   [name doc body]
@@ -102,10 +212,13 @@
       (error "t/is expects an expression and optional message"))))
 
 (defmacro testing
-  "Group assertions under a message. The current implementation keeps this as structural grouping only."
+  "Group assertions under a message and prefix nested assertion failures with that context."
   [message & body]
   (quasiquote
-    (do (splice body))))
+    (do
+      (__kvist_test_push_context t (unquote message))
+      (defer (__kvist_test_pop_context t))
+      (splice body))))
 
 (defmacro are
   "Repeat the same assertion template over rows of values."

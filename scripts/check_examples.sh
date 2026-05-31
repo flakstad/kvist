@@ -16,7 +16,11 @@ for input in examples/*.kvist; do
 
     printf 'checking %s\n' "$input"
     ./kvist "$input" -o "$output" --map "$map"
-    odin check "$output" -file
+    if grep -Eq '^package tests$' "$output"; then
+        odin test "$output" -file
+    else
+        odin check "$output" -file
+    fi
 done
 
 printf 'checked all examples\n'

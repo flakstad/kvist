@@ -5,9 +5,6 @@ Kvist - A Practical Lisp for Systems Programming
 Kvist is a Lisp-shaped systems language with explicit ownership and
 data-oriented execution, targeting readable Odin.
 
-An experiment in writing Odin with a small Clojure/Lisp-shaped syntax: Odin in
-parens, not Clojure on Odin.
-
 Kvist is a systems programming language that combines expression-oriented
 syntax and macros with explicit memory and ownership semantics. It is designed
 to make low-level code more composable without introducing a hidden runtime or
@@ -16,7 +13,8 @@ abstracting away the underlying execution model.
 Kvist compiles to readable Odin and relies on Odin for checking, building, and
 running generated programs. The language is influenced by Lisp and Clojure in
 its surface shape and metaprogramming model, but it preserves the manual,
-inspectable character of systems programming.
+inspectable character of systems programming while also exploring native hot
+reload and live development modes.
 
 The current language draft is [LANGUAGE.md](LANGUAGE.md). Deferred ideas that
 should not drive the core implementation yet live in
@@ -30,17 +28,21 @@ on live iterative development lives in
 overlap is tracked in
 [docs/LIVE-SHARED-SUBSET.md](docs/LIVE-SHARED-SUBSET.md). The larger unresolved
 language areas are tracked in [docs/NEXT-STEPS.md](docs/NEXT-STEPS.md).
+The proposed higher-level user surface for native reload development lives in
+[docs/RELOAD-APP-DESIGN.md](docs/RELOAD-APP-DESIGN.md).
 Ownership rules live in [docs/OWNERSHIP.md](docs/OWNERSHIP.md), and
 pointer/value guidance lives in [docs/POINTERS.md](docs/POINTERS.md).
 Benchmark notes live in [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
 
-This is intentionally a source-to-source translator, not a new runtime or a
-new semantic layer. The goal is:
+The center of gravity today is still explicit lowering to Odin. The goal is:
 
-- keep Odin semantics
-- write paren-shaped source for editing comfort
+- build a small Lisp-shaped source language
+- keep Odin as the code generation and execution target
 - emit boring, readable `.odin`
 - use `odin check` as the real validator
+
+That does not rule out optional runtime support, native hot reload, or a Kvist
+live mode where those help the language and tooling story.
 
 ## Why Kvist
 
@@ -53,8 +55,9 @@ The stronger case for Kvist is narrower:
 - a macro-capable frontend for Odin
 - structural editing and source transformation over a uniform Lisp surface
 - source-level composition experiments that still lower to plain, readable Odin
-- richer tooling and eval workflows without introducing a hidden runtime
+- richer tooling, eval workflows, and live development support
 - first-class native hot-reload patterns over ordinary compiled code
+- optional live-module reload over a stable host capability surface
 
 The important win is not "Odin, but with parens". The important win is:
 
@@ -93,7 +96,6 @@ The non-goals are just as important:
 - no persistent collections
 - no seq abstraction
 - no lazy sequences or unbounded sequence producers
-- no runtime library unless Odin interop absolutely needs a helper
 - no semantic gap between source and generated Odin
 
 If this grows, it should grow by covering more Odin syntax directly where the
@@ -140,6 +142,10 @@ odin check /tmp/hello.odin -file
 ```
 
 If `-o` is omitted, generated Odin is written to stdout.
+When `-o` is used, absolute Odin import paths introduced by source-package
+loading are rewritten relative to the destination file, so the generated output
+can be moved under `/tmp`, cache directories, or checked-in build folders and
+still pass `odin check`.
 Pass `--map /tmp/hello.map` to also write a declaration-level source map:
 
 ```sh
@@ -458,7 +464,7 @@ Person :: struct {
     age: int,
 }
 
-(proc make-person [] -> Person
+(defn make-person [] -> Person
   (as Person {:name "Andreas"
               :age 42}))
 ```
@@ -466,7 +472,7 @@ Person :: struct {
 Maps, dynamic arrays, compound literals, and calls:
 
 ```clojure
-(proc route-get [(router ^Router) (pattern string) (handler Handler)]
+(defn route-get [(router ^Router) (pattern string) (handler Handler)]
   (route-add
     router
     .Get
@@ -491,7 +497,7 @@ route_get :: proc(router: ^Router, pattern: string, handler: Handler) {
 Slices, loops, and mutation:
 
 ```clojure
-(proc sum [(xs []int)] -> int
+(defn sum [(xs []int)] -> int
   (let [total 0]
     (for-in x xs
       (set! total (+ total x)))
@@ -501,7 +507,7 @@ Slices, loops, and mutation:
 Named and multi-value returns:
 
 ```clojure
-(proc query-get [(url URL) (key string)] -> (val string, ok bool) #optional_ok
+(defn query-get [(url URL) (key string)] -> (val string, ok bool) #optional_ok
   (let [q url.query]
     (for-in entry (#force_inline query-iter (& q))
       (when (== entry.key key)
@@ -514,7 +520,7 @@ is for the common final-expression case, not a ban on early returns.
 `or_return` should probably stay as an Odin postfix operator:
 
 ```clojure
-(proc decoded [(url URL) (key string) (allocator runtime.Allocator)] -> (val string, ok bool)
+(defn decoded [(url URL) (key string) (allocator runtime.Allocator)] -> (val string, ok bool)
   (let [s (or-return (query-get url key))]
     (net.percent-decode s allocator)))
 ```
@@ -533,7 +539,7 @@ abstraction.
 Pointers should keep Odin's spelling:
 
 ```clojure
-(proc bump [(x ^int)]
+(defn bump [(x ^int)]
   (set! (^ x) (+ (^ x) 1)))
 ```
 
@@ -546,7 +552,7 @@ Address-of also needs a readable spelling:
 Switch:
 
 ```clojure
-(proc method-string [(m Method)] -> string #no_bounds_check
+(defn method-string [(m Method)] -> string #no_bounds_check
   (switch m
     .Get "GET"
     .Post "POST"
@@ -590,13 +596,13 @@ everything into parens:
 
 ```clojure
 @(private)
-(proc route-add [(router ^Router) (method Method) (route Route)]
+(defn route-add [(router ^Router) (method Method) (route Route)]
   (when (not (in? router.routes method))
     (set! (get router.routes method)
           (make [dynamic]Route router.allocator)))
   (append (& (get router.routes method)) route))
 
-(proc headers-count [(h Headers)] -> int #force_inline
+(defn headers-count [(h Headers)] -> int #force_inline
   (len h._kv))
 
 (let [entry (#force_inline query-iter (& q))]
@@ -609,7 +615,7 @@ obvious.
 `defer` and conditional defer:
 
 ```clojure
-(proc header-parse [(headers ^Headers) (line string) (allocator runtime.Allocator)] -> (key string, ok bool)
+(defn header-parse [(headers ^Headers) (line string) (allocator runtime.Allocator)] -> (key string, ok bool)
   (let [value (strings.trim-space (slice line (+ colon 1)))
         key   (sanitize-key (^ headers) (slice line 0 colon))]
     (defer
@@ -622,7 +628,7 @@ obvious.
 Conditionals as expressions when useful:
 
 ```clojure
-(proc classify [(n int)] -> string
+(defn classify [(n int)] -> string
   (if (< n 0)
     "negative"
     (if (== n 0)
@@ -638,22 +644,26 @@ Foreign_Handle :: distinct rawptr
 @(link_name = "foreign_call")
 foreign_call :: proc(handle: Foreign_Handle) ---
 
-(proc call [(handle Foreign_Handle)]
+(defn call [(handle Foreign_Handle)]
   (foreign_call handle))
 ```
 
 ## Target Forms
 
 - `(package name)`, `(import "path")`, `(import alias "path")`
+  - explicit Odin-package imports are also available as `(import :odin "path")` and `(import alias :odin "path")`
   - host imports keep Odin package paths like `"core:fmt"`
   - source-package imports load relative package directories of `.kvist` files, e.g. `(import math "support/math")`
   - Kvist library packages are imported explicitly, e.g. `(import arr "kvist:arr")`, `(import str "kvist:str")`, `(import map "kvist:map")`, `(import set "kvist:set")`, `(import struct "kvist:struct")`
+  - raw Odin names re-exported from a source package can be declared with `(exports [Name ...])`
 - `(defconst name expr)` -> `name :: expr`
 - `(defconst name type expr)` -> `name: type : expr`
 - `(defconst- name expr)` package-private constant
 - `(defvar name expr)` -> `name := expr`
 - `(defvar name type expr)` -> `name: type = expr`
 - `(defvar- name expr)` package-private variable
+- `(export)` -> attaches `@(export)` to the next top-level declaration
+- `(exports [Name ...])` -> declares additional public source-package names provided by raw Odin forms
 - `(defstruct Name {:field Type ...})`
 - `(defstruct Name "Doc..." {:field type ...})`
 - `(defstruct- Name {:field Type ...})` package-private struct
@@ -664,9 +674,11 @@ foreign_call :: proc(handle: Foreign_Handle) ---
 - `(defunion Name "Doc..." {:variant Type ...})`
 - `(defunion- Name {:variant Type ...})` package-private union
 - `(defn name [arg: type, ...] -> return-type body...)`
+- `(defn name :abi "c" [arg: type, ...] -> return-type body...)`
   - `defn` is the preferred source-level declaration form
   - `defn-` is package-private
   - `proc` remains available for direct Odin-shaped code and proc types
+  - `:abi "c"` is available for explicit foreign/native entrypoints
   - params and returns use ordinary types like `int`, `string`, `Person`, plus Odin-style container types like `[]string`, `[dynamic]int`, `map[string]int`, and Kvist set types like `set[keyword]`
   - `println` and `doc` stay implicitly available; most library helpers come from explicit Kvist package imports
 - `(defmacro name [arg ...] body...)`

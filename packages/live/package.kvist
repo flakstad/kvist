@@ -1,0 +1,26 @@
+(package live)
+
+(defmacro defmodule
+  "Expand a live module declaration followed by ordinary Kvist top-level forms."
+  [options & body]
+  (forms
+    (list (symbol "live/module") options)
+    body))
+
+(defmacro defcommand
+  "Expand a zero-arg live command helper and its live/command declaration."
+  [name & body]
+  (forms
+    (quasiquote
+      (defn (unquote name) []
+        (splice body)))
+    (list (symbol "live/command") name)))
+
+(defmacro defhook
+  "Expand a zero-arg live hook helper and its live/hook declaration."
+  [name & body]
+  (forms
+    (quasiquote
+      (defn (unquote name) []
+        (splice body)))
+    (list (symbol "live/hook") name)))

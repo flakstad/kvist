@@ -21,7 +21,7 @@ block so `C-c C-e` and `C-c C-c` are practical.
 - `macro-dsl.kvist`: package-local declaration DSL that expands into multiple top-level forms.
 - `macro-union-helpers.kvist`: recursive macro DSL that emits a union plus variant constructors.
 - `macro-messages.kvist`: message-family DSL that emits payload structs, a tagged union, and constructors.
-- `testing.kvist`: shipped `kvist:test` macros including `t/deftest`, `t/is`, `t/are`, and `t/use-fixtures :each`.
+- `testing.kvist`: shipped `kvist:test` macros including `t/deftest`, `t/is`, nested `t/testing`, `t/are`, and `t/use-fixtures :each`.
 - `hiccup-interpolation.kvist`: Hiccup attrs and child nodes with direct Kvist expression interpolation, including `if`, `when`, `nil` omission, and `[:<> ...]` fragments.
 - `closures.kvist`: non-capturing `fn` literals and explicit callback context.
 - `hello.kvist`: package, import, struct literal, and a tiny `main`.
@@ -85,21 +85,29 @@ are run deliberately.
 
 ## Live Runtime Demos
 
-- `live_reload_demo`: smallest Odin-side `kvist_live` demo; loads a module,
-  reloads it, and shows state migration.
-- `live_commands_demo`: long-running compiled host process that reloads a tiny
+- `live_reload_demo`: smallest `.kvist`-hosted `kvist_live` demo; loads a
+  module, reloads it, and shows state migration.
+- `live_commands_demo`: long-running `.kvist` host process that reloads a tiny
   live module file while preserving command state.
+- `reload_step_demo`: first-pass single-file `defstate` reload workflow; `kvist dev --reload`
+  generates the resident shell and reloadable module for you.
+- `reload_run_demo`: app-owned `:run` workflow with one explicit
+  `reload/checkpoint!` boundary.
 - `hot_reload_demo`: long-running compiled host plus a reloadable shared
   library; shows host-owned state surviving native code reload.
+- `hybrid_live_demo`: `.kvist` host plus reloadable native DLL plus embedded
+  `Kvist/Live` command module; shows both continuity layers in one process.
 
 Run them from the repo root with:
 
 ```sh
-odin run examples/live_reload_demo
-odin run examples/live_commands_demo
+./kvist run examples/live_reload_demo/main.kvist
+./kvist run examples/live_commands_demo/main.kvist
+./kvist dev --reload examples/reload_step_demo/main.kvist
+./kvist run --reload examples/reload_run_demo/main.kvist
 ```
 
-The native hot-reload demo has a two-step workflow:
+The native hot-reload demos have a compile/build workflow:
 
 ```sh
 ./kvist examples/hot_reload_demo/shared/package.kvist -o build/generated/hot_reload_demo/shared/package.odin
@@ -107,6 +115,14 @@ The native hot-reload demo has a two-step workflow:
 ./kvist examples/hot_reload_demo/host/main.kvist -o build/generated/hot_reload_demo/host/main.odin
 odin build build/generated/hot_reload_demo/module -build-mode:dll -out:build/hot_reload_demo/hot_demo.dylib
 odin run build/generated/hot_reload_demo/host
+```
+
+```sh
+./kvist examples/hybrid_live_demo/shared/package.kvist -o build/generated/hybrid_live_demo/shared/package.odin
+./kvist examples/hybrid_live_demo/module/main.kvist -o build/generated/hybrid_live_demo/module/main.odin
+./kvist examples/hybrid_live_demo/host/main.kvist -o build/generated/hybrid_live_demo/host/main.odin
+odin build build/generated/hybrid_live_demo/module -build-mode:dll -out:build/hybrid_live_demo/hybrid_demo.dylib
+odin run build/generated/hybrid_live_demo/host
 ```
 
 The live commands demo watches the `.kvist` files in
@@ -117,17 +133,49 @@ command counter survive the edit. It now also shows source-defined reload
 migration: change `counter-key` and `:version` in `commands.kvist` and the live
 module carries the count forward itself. It also shows command args and hook
 payload values flowing through the live layer rather than only zero-arg
-ambient state.
+ambient state. The host now uses the reusable `kvist_live.Module_Reloader`
+helpers rather than open-coding the watched-directory loop.
+
+The reload demos are the lowest-ceremony native path so far. They keep the
+user source in one pure `.kvist` file with one `defstate` root and an explicit
+trailing metadata map. `reload_step_demo` shows the shell-owned `:step` loop
+mode, and `reload_run_demo` shows the app-owned `:run` mode with one explicit
+`reload/checkpoint!` cooperation point at the runtime boundary. For editor
+integration, `kvist dev --reload ... --rebuild` recompiles only the generated
+reloadable module and `kvist dev --reload ... --print-paths` prints the generated
+paths and rebuild command. The same sources can also be executed without the
+resident reload shell via `kvist check|build|run --reload ...`. See
+[`examples/reload_step_demo/README.md`](./reload_step_demo/README.md) and
+[`examples/reload_run_demo/README.md`](./reload_run_demo/README.md).
 
 The native hot-reload demo watches the shared library at
 `build/hot_reload_demo/hot_demo.dylib`. Edit
 `examples/hot_reload_demo/module/main.kvist`, recompile that file to generated
 Odin, rebuild only the module shared library, and the running host reloads it
-in place while preserving the host
-state struct. The host now uses the reusable `kvist_hot.Reloader` helpers
-rather than open-coding the watch loop. See
+in place while preserving the host state struct. The demo sources themselves
+are now pure `.kvist`, using
+`(import hot "kvist:hot")` plus `(hot/defmodule ...)` for the standard native
+module contract and `(import ... :odin "...")` for the implementation
+packages. The host now uses the reusable `kvist_hot.Reloader` helpers rather
+than open-coding the watch loop, with the higher-level host path
+`new_reloader(...)`, `load_initial_module(...)`, and
+`reload_module_if_source_changed(...)`. See
 [`examples/hot_reload_demo/README.md`](./hot_reload_demo/README.md) for the
 full workflow.
+
+The hybrid demo extends that same native pattern by embedding a `kvist_live`
+runtime beside it. Edit `examples/hybrid_live_demo/module/main.kvist` and
+rebuild only the DLL to exercise native hot reload, or edit
+`examples/hybrid_live_demo/live/*.kvist` to reload the reflective command layer
+from source. See
+[`examples/hybrid_live_demo/README.md`](./hybrid_live_demo/README.md) for the
+combined workflow. The live host side now also uses the higher-level
+`kvist_live` helper path:
+`new_module_reloader(...)`, `load_initial_module(...)`, and
+`reload_module_if_source_changed(...)`. The live module source now uses the
+shipped `kvist:live` package too:
+`(import live "kvist:live")`, `(live/defmodule ...)`,
+`live/defcommand`, and `live/defhook`.
 
 Useful commands while reading examples:
 

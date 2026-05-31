@@ -9,7 +9,7 @@ state.
 Run it from the repo root:
 
 ```sh
-odin run examples/live_reload_demo
+./kvist run examples/live_reload_demo/main.kvist
 ```
 
 You should see:
@@ -20,3 +20,7 @@ You should see:
 
 This example is intentionally non-interactive. It demonstrates the core reload
 and migration model without file watching or a long-running process.
+
+The host source is now pure `.kvist`. It imports the `kvist_live`
+implementation package through the explicit `(import ... :odin "...")` form,
+but the example source itself no longer uses raw Odin escape hatches.

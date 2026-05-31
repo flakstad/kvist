@@ -2,11 +2,15 @@ package tests
 
 import "core:os"
 import "core:testing"
+import "core:time"
+import "core:fmt"
+import "core:strings"
 import kvist_live "../src/kvist_live"
 
 last_capability_name: string
 last_capability_arg_count: int
 shutdown_count: int
+test_temp_dir_nonce: int
 
 echo_capability :: proc(runtime: ^kvist_live.Runtime, capability_name: string, args: []kvist_live.Value) -> (kvist_live.Value, kvist_live.Runtime_Error, bool) {
     last_capability_name = capability_name
@@ -91,17 +95,162 @@ must_parse_module :: proc(t: ^testing.T, source: string) -> kvist_live.Module_De
 }
 
 delete_module_definition :: proc(def: ^kvist_live.Module_Definition) {
-    kvist_live.state_entry_slice_delete(&def.initial_state)
-    kvist_live.delete_behavior_definition_slice(&def.functions)
-    kvist_live.delete_behavior_definition_slice(&def.commands)
-    kvist_live.delete_behavior_definition_slice(&def.hooks)
-    if def.name != "" {
-        delete(def.name)
+    kvist_live.module_definition_delete(def)
+}
+
+fresh_test_dir_name :: proc(prefix: string) -> string {
+    test_temp_dir_nonce += 1
+    return strings.clone(fmt.tprintf("%s_%d_%d", prefix, test_temp_dir_nonce, time.time_to_unix_nano(time.now())))
+}
+
+@(test)
+live_module_reloader_tracks_module_path_and_watch_dir :: proc(t: ^testing.T) {
+    temp_dir, temp_dir_err := os.temp_directory(context.allocator)
+    testing.expect_value(t, temp_dir_err == nil, true)
+    if temp_dir_err != nil {
+        return
     }
-    if def.version != "" {
-        delete(def.version)
+    defer delete(temp_dir)
+
+    dir_name := fresh_test_dir_name("kvist_live_reloader")
+    defer delete(dir_name)
+
+    module_dir, join_err := os.join_path({temp_dir, dir_name}, context.allocator)
+    testing.expect_value(t, join_err == nil, true)
+    if join_err != nil {
+        return
     }
-    def^ = kvist_live.Module_Definition{}
+    defer delete(module_dir)
+    if os.exists(module_dir) {
+        _ = os.remove(module_dir)
+    }
+    mkdir_err := os.make_directory(module_dir)
+    testing.expect_value(t, mkdir_err == nil, true)
+    if mkdir_err != nil {
+        return
+    }
+    defer _ = os.remove(module_dir)
+
+    module_path, module_join_err := os.join_path({module_dir, "commands.kvist"}, context.allocator)
+    testing.expect_value(t, module_join_err == nil, true)
+    if module_join_err != nil {
+        return
+    }
+    defer delete(module_path)
+
+    write_err := os.write_entire_file(module_path, `(live/module {:name "commands" :version "v1"})
+(live/command tick
+  1)`)
+    testing.expect_value(t, write_err == nil, true)
+    if write_err != nil {
+        return
+    }
+
+    reloader, err, ok := kvist_live.new_module_reloader(module_path)
+    testing.expect_value(t, ok, true)
+    testing.expect_value(t, err.message, "")
+    defer kvist_live.module_reloader_delete(&reloader)
+
+    testing.expect_value(t, reloader.module_path, module_path)
+    testing.expect_value(t, reloader.watch_dir, module_dir)
+    testing.expect_value(t, reloader.last_signature != "", true)
+    testing.expect_value(t, reloader.has_loaded, false)
+}
+
+@(test)
+live_module_reloader_detects_imported_file_changes :: proc(t: ^testing.T) {
+    temp_dir, temp_dir_err := os.temp_directory(context.allocator)
+    testing.expect_value(t, temp_dir_err == nil, true)
+    if temp_dir_err != nil {
+        return
+    }
+    defer delete(temp_dir)
+
+    dir_name := fresh_test_dir_name("kvist_live_reloader_imports")
+    defer delete(dir_name)
+
+    module_dir, join_err := os.join_path({temp_dir, dir_name}, context.allocator)
+    testing.expect_value(t, join_err == nil, true)
+    if join_err != nil {
+        return
+    }
+    defer delete(module_dir)
+    if os.exists(module_dir) {
+        _ = os.remove(module_dir)
+    }
+    mkdir_err := os.make_directory(module_dir)
+    testing.expect_value(t, mkdir_err == nil, true)
+    if mkdir_err != nil {
+        return
+    }
+    defer _ = os.remove(module_dir)
+
+    module_path, module_join_err := os.join_path({module_dir, "commands.kvist"}, context.allocator)
+    testing.expect_value(t, module_join_err == nil, true)
+    if module_join_err != nil {
+        return
+    }
+    defer delete(module_path)
+
+    helper_path, helper_join_err := os.join_path({module_dir, "helpers.kvist"}, context.allocator)
+    testing.expect_value(t, helper_join_err == nil, true)
+    if helper_join_err != nil {
+        return
+    }
+    defer delete(helper_path)
+
+    module_write_err := os.write_entire_file(module_path, `(live/module {:name "commands" :version "v1"})
+(import "helpers")
+(live/command tick
+  value)`)
+    testing.expect_value(t, module_write_err == nil, true)
+    if module_write_err != nil {
+        return
+    }
+
+    helper_write_err := os.write_entire_file(helper_path, `(def value "before")`)
+    testing.expect_value(t, helper_write_err == nil, true)
+    if helper_write_err != nil {
+        return
+    }
+
+    reloader, err, ok := kvist_live.new_module_reloader(module_path, module_dir)
+    testing.expect_value(t, ok, true)
+    testing.expect_value(t, err.message, "")
+    defer kvist_live.module_reloader_delete(&reloader)
+
+    initial_def, initial_err, initial_ok := kvist_live.load_initial_definition(&reloader)
+    testing.expect_value(t, initial_ok, true)
+    testing.expect_value(t, initial_err.message, "")
+    if initial_ok {
+        message_entry, message_ok := kvist_live.state_entries_get(initial_def.initial_state[:], "value")
+        testing.expect_value(t, message_ok, true)
+        if message_ok {
+            testing.expect_value(t, message_entry.value.text, "before")
+        }
+        kvist_live.module_definition_delete(&initial_def)
+    }
+    testing.expect_value(t, reloader.has_loaded, true)
+
+    time.sleep(2 * time.Millisecond)
+    helper_update_err := os.write_entire_file(helper_path, `(def value "after")`)
+    testing.expect_value(t, helper_update_err == nil, true)
+    if helper_update_err != nil {
+        return
+    }
+
+    changed, next_def, next_err, next_ok := kvist_live.reload_if_source_changed(&reloader)
+    testing.expect_value(t, next_ok, true)
+    testing.expect_value(t, next_err.message, "")
+    testing.expect_value(t, changed, true)
+    if next_ok && changed {
+        message_entry, message_ok := kvist_live.state_entries_get(next_def.initial_state[:], "value")
+        testing.expect_value(t, message_ok, true)
+        if message_ok {
+            testing.expect_value(t, message_entry.value.text, "after")
+        }
+        kvist_live.module_definition_delete(&next_def)
+    }
 }
 
 @(test)
@@ -133,6 +282,116 @@ live_runtime_registers_and_calls_capabilities :: proc(t: ^testing.T) {
     testing.expect_value(t, result.kind, kvist_live.Value_Kind.String)
     testing.expect_value(t, result.text, "ok")
     testing.expect_value(t, len(runtime.events) >= 2, true)
+}
+
+@(test)
+live_module_reloader_loads_and_reloads_runtime_modules :: proc(t: ^testing.T) {
+    shutdown_count = 0
+
+    temp_dir, temp_dir_err := os.temp_directory(context.allocator)
+    testing.expect_value(t, temp_dir_err == nil, true)
+    if temp_dir_err != nil {
+        return
+    }
+    defer delete(temp_dir)
+
+    dir_name := fresh_test_dir_name("kvist_live_runtime_reload")
+    defer delete(dir_name)
+
+    module_dir, join_err := os.join_path({temp_dir, dir_name}, context.allocator)
+    testing.expect_value(t, join_err == nil, true)
+    if join_err != nil {
+        return
+    }
+    defer delete(module_dir)
+    if os.exists(module_dir) {
+        _ = os.remove(module_dir)
+    }
+    mkdir_err := os.make_directory(module_dir)
+    testing.expect_value(t, mkdir_err == nil, true)
+    if mkdir_err != nil {
+        return
+    }
+    defer _ = os.remove(module_dir)
+
+    module_path, module_join_err := os.join_path({module_dir, "commands.kvist"}, context.allocator)
+    testing.expect_value(t, module_join_err == nil, true)
+    if module_join_err != nil {
+        return
+    }
+    defer delete(module_path)
+
+    write_v1_err := os.write_entire_file(module_path, `(live/module {:name "commands" :version "v1"})
+(defn tick []
+  (state/inc! "count"))
+(live/command tick)`)
+    testing.expect_value(t, write_v1_err == nil, true)
+    if write_v1_err != nil {
+        return
+    }
+
+    runtime := kvist_live.new_runtime(kvist_live.Runtime_Config{
+        app_name = "tests",
+        live_enabled = true,
+    })
+    defer kvist_live.runtime_delete(&runtime)
+
+    reloader, reloader_err, reloader_ok := kvist_live.new_module_reloader(module_path)
+    testing.expect_value(t, reloader_ok, true)
+    testing.expect_value(t, reloader_err.message, "")
+    if !reloader_ok {
+        return
+    }
+    defer kvist_live.module_reloader_delete(&reloader)
+
+    config := kvist_live.Module_Load_Config{
+        init = module_init_default_mode,
+        shutdown = module_shutdown_counter,
+        migrate = module_migrate_copy_mode,
+    }
+
+    load_err, load_ok := kvist_live.load_initial_module(&runtime, &reloader, config)
+    testing.expect_value(t, load_ok, true)
+    testing.expect_value(t, load_err.message, "")
+
+    initial_module, initial_found := kvist_live.loaded_module(&runtime, "commands")
+    testing.expect_value(t, initial_found, true)
+    if initial_found {
+        mode, mode_ok := kvist_live.module_state_get_string(initial_module, "mode")
+        testing.expect_value(t, mode_ok, true)
+        testing.expect_value(t, mode, "default")
+        kvist_live.module_state_put_string(initial_module, "mode", "patched")
+    }
+
+    time.sleep(2 * time.Millisecond)
+    write_v2_err := os.write_entire_file(module_path, `(live/module {:name "commands" :version "v2"})
+(defn tick []
+  (state/inc! "count"))
+(live/command tick)`)
+    testing.expect_value(t, write_v2_err == nil, true)
+    if write_v2_err != nil {
+        return
+    }
+
+    changed, reload_err, reload_ok := kvist_live.reload_module_if_source_changed(&runtime, &reloader, config)
+    testing.expect_value(t, reload_ok, true)
+    testing.expect_value(t, reload_err.message, "")
+    testing.expect_value(t, changed, true)
+    reloaded_module, reload_found := kvist_live.loaded_module(&runtime, "commands")
+    testing.expect_value(t, reload_found, true)
+    if reload_found {
+        testing.expect_value(t, reloaded_module.version, "v2")
+        testing.expect_value(t, reloaded_module.reload_from_version, "v1")
+        testing.expect_value(t, reloaded_module.reload_count, 1)
+
+        carried_mode, carried_mode_ok := kvist_live.module_state_get_string(reloaded_module, "mode")
+        testing.expect_value(t, carried_mode_ok, true)
+        testing.expect_value(t, carried_mode, "patched")
+
+        migrated_from, migrated_from_ok := kvist_live.module_state_get_string(reloaded_module, "migrated-from")
+        testing.expect_value(t, migrated_from_ok, true)
+        testing.expect_value(t, migrated_from, "v1")
+    }
 }
 
 @(test)
@@ -199,6 +458,45 @@ live_loader_reads_real_kvist_source :: proc(t: ^testing.T) {
     greeting_entry, greeting_ok := kvist_live.state_entries_get(def.initial_state[:], "greeting")
     testing.expect_value(t, greeting_ok, true)
     testing.expect_value(t, greeting_entry.value.text, "hello")
+}
+
+@(test)
+live_loader_macroexpands_live_module_forms :: proc(t: ^testing.T) {
+    runtime := kvist_live.new_runtime(kvist_live.Runtime_Config{
+        app_name = "tests",
+        live_enabled = true,
+    })
+    defer kvist_live.runtime_delete(&runtime)
+
+    def := must_parse_module(t, `(live/module {:name "macro-demo" :version "v1"})
+(defmacro expose-command [name]
+  (quasiquote
+    (live/command (unquote name))))
+(def base 1)
+(defn add-one [value]
+  (+ value 1))
+(defn tick []
+  (-> base
+      add-one
+      add-one))
+(expose-command tick)`)
+    defer delete_module_definition(&def)
+
+    testing.expect_value(t, len(def.commands), 1)
+    if len(def.commands) == 1 {
+        testing.expect_value(t, def.commands[0].name, "tick")
+    }
+
+    load_err, load_ok := kvist_live.load_module(&runtime, def)
+    testing.expect_value(t, load_ok, true)
+    testing.expect_value(t, load_err.message, "")
+
+    result, invoke_err, invoke_ok := kvist_live.invoke_command(&runtime, "tick", nil)
+    defer kvist_live.value_delete(&result)
+    testing.expect_value(t, invoke_ok, true)
+    testing.expect_value(t, invoke_err.message, "")
+    testing.expect_value(t, result.kind, kvist_live.Value_Kind.Int)
+    testing.expect_value(t, result.int_value, i64(3))
 }
 
 @(test)
@@ -685,6 +983,71 @@ live_loader_resolves_helper_imports_from_path :: proc(t: ^testing.T) {
     testing.expect_value(t, invoke_err.message, "")
     testing.expect_value(t, result.kind, kvist_live.Value_Kind.String)
     testing.expect_value(t, result.text, "hello from helper")
+}
+
+@(test)
+live_loader_accepts_shipped_live_macro_package :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-live-macro-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove(dir)
+    defer delete(dir)
+
+    root_path, root_join_err := os.join_path({dir, "commands.kvist"}, context.allocator)
+    testing.expect_value(t, root_join_err == nil, true)
+    if root_join_err != nil {
+        return
+    }
+    defer delete(root_path)
+
+    root_source := `(import live "kvist:live")
+(live/defmodule {:name "macro-package" :version "v1"}
+  (def counter-key "count")
+  (live/defcommand tick
+    (state/inc! counter-key))
+  (live/defhook after-tick
+    (payload/get 0)))`
+    root_write_err := os.write_entire_file_from_string(root_path, root_source)
+    testing.expect_value(t, root_write_err == nil, true)
+    if root_write_err != nil {
+        return
+    }
+    defer os.remove(root_path)
+
+    def, err, ok := kvist_live.module_definition_from_kvist_path(root_path)
+    defer delete_module_definition(&def)
+    testing.expect_value(t, ok, true)
+    testing.expect_value(t, err.message, "")
+    testing.expect_value(t, len(def.functions), 2)
+    testing.expect_value(t, len(def.commands), 1)
+    testing.expect_value(t, len(def.hooks), 1)
+    if len(def.commands) == 1 {
+        testing.expect_value(t, def.commands[0].name, "tick")
+        testing.expect_value(t, len(def.commands[0].body) > 0, true)
+    }
+    if len(def.hooks) == 1 {
+        testing.expect_value(t, def.hooks[0].name, "after-tick")
+        testing.expect_value(t, len(def.hooks[0].body) > 0, true)
+    }
+
+    runtime := kvist_live.new_runtime(kvist_live.Runtime_Config{
+        app_name = "tests",
+        live_enabled = true,
+    })
+    defer kvist_live.runtime_delete(&runtime)
+
+    load_err, load_ok := kvist_live.load_module(&runtime, def)
+    testing.expect_value(t, load_ok, true)
+    testing.expect_value(t, load_err.message, "")
+
+    result, invoke_err, invoke_ok := kvist_live.invoke_command(&runtime, "tick", nil)
+    defer kvist_live.value_delete(&result)
+    testing.expect_value(t, invoke_ok, true)
+    testing.expect_value(t, invoke_err.message, "")
+    testing.expect_value(t, result.kind, kvist_live.Value_Kind.Int)
+    testing.expect_value(t, result.int_value, i64(1))
 }
 
 @(test)

@@ -1,0 +1,8 @@
+(package hybrid_live_demo_shared)
+
+(defstruct State {
+  :tick_count int
+  :reload_count int
+  :unload_count int
+  :last_message string
+})

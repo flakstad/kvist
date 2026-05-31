@@ -474,7 +474,7 @@ parse_defstruct_fields :: proc(form: CST_Form) -> (fields: [dynamic]Struct_Field
         if struct_field_exists(fields[:], field_name) {
             return fields, Compile_Error{message = fmt.tprintf("duplicate defstruct field %s", key.text), span = key.span}, false
         }
-        type_text, err_type, ok_type := parse_defstruct_type_meta(form.items[i+1])
+        type_text, next_i, err_type, ok_type := parse_type_text_from_forms(form.items[:], i+1)
         if !ok_type {
             return fields, err_type, false
         }
@@ -483,7 +483,7 @@ parse_defstruct_fields :: proc(form: CST_Form) -> (fields: [dynamic]Struct_Field
             source_name = key.text[1:],
             ty          = type_text,
         })
-        i += 2
+        i = next_i
     }
     return fields, {}, true
 }
@@ -558,12 +558,26 @@ parse_proc_decl :: proc(form: CST_Form) -> (decl: Proc_Decl, err: Compile_Error,
     if name_form.kind != .Symbol {
         return decl, Compile_Error{message = "expected proc name", span = name_form.span}, false
     }
-    params, err_params, ok_params := parse_param_vector(form.items[2])
+    params_index := 2
+    calling_convention := ""
+    if params_index+1 < len(form.items) &&
+       form.items[params_index].kind == .Keyword &&
+       form.items[params_index].text == ":abi" {
+        if form.items[params_index+1].kind != .String {
+            return decl, Compile_Error{message = ":abi expects a string literal", span = form.items[params_index+1].span}, false
+        }
+        calling_convention = unquote_string(form.items[params_index+1].text)
+        params_index += 2
+    }
+    if params_index >= len(form.items) {
+        return decl, Compile_Error{message = "proc requires a parameter vector", span = form.span}, false
+    }
+    params, err_params, ok_params := parse_param_vector(form.items[params_index])
     if !ok_params {
         return decl, err_params, false
     }
 
-    body_index := 3
+    body_index := params_index + 1
     returns := Return_Spec{kind = .None}
     if body_index < len(form.items) && is_symbol(form.items[body_index], "->") {
         if body_index+1 >= len(form.items) {
@@ -624,6 +638,7 @@ parse_proc_decl :: proc(form: CST_Form) -> (decl: Proc_Decl, err: Compile_Error,
     }
     return Proc_Decl{
         name              = map_name(name_form.text),
+        calling_convention = calling_convention,
         params            = params,
         returns           = returns,
         prefix_directives = prefix_directives,
@@ -676,8 +691,39 @@ parse_decl :: proc(top_form: CST_Top_Form) -> (decl: AST_Decl, err: Compile_Erro
                 },
             }, {}, true
         }
-        return decl, Compile_Error{message = "import expects a string path or alias plus string path", span = form.span}, false
-    case "defconst", "defconst-":
+        if len(form.items) == 3 &&
+           form.items[1].kind == .Keyword &&
+           form.items[1].text == ":odin" &&
+           form.items[2].kind == .String {
+            return AST_Decl{
+                kind = .Import,
+                span = form.span,
+                doc_lines = top_form.doc_lines,
+                import_decl = Import_Decl{
+                    path = form.items[2].text,
+                    force_odin = true,
+                },
+            }, {}, true
+        }
+        if len(form.items) == 4 &&
+           form.items[1].kind == .Symbol &&
+           form.items[2].kind == .Keyword &&
+           form.items[2].text == ":odin" &&
+           form.items[3].kind == .String {
+            return AST_Decl{
+                kind = .Import,
+                span = form.span,
+                doc_lines = top_form.doc_lines,
+                import_decl = Import_Decl{
+                    alias = map_name(form.items[1].text),
+                    path = form.items[3].text,
+                    has_alias = true,
+                    force_odin = true,
+                },
+            }, {}, true
+        }
+        return decl, Compile_Error{message = "import expects a string path, alias plus string path, :odin plus string path, or alias plus :odin plus string path", span = form.span}, false
+    case "const", "defconst", "defconst-":
         if len(form.items) < 3 {
             return decl, Compile_Error{message = "defconst expects a name, optional type, and value", span = form.span}, false
         }
@@ -753,21 +799,50 @@ parse_decl :: proc(top_form: CST_Top_Form) -> (decl: AST_Decl, err: Compile_Erro
             doc_lines = doc_lines,
             var_decl = var_decl,
         }, {}, true
-    case "defstruct", "defstruct-":
-        if len(form.items) != 3 && len(form.items) != 4 {
-            return decl, Compile_Error{message = "defstruct expects a name, optional docstring, and brace form", span = form.span}, false
+    case "struct":
+        if len(form.items) != 3 || form.items[1].kind != .Symbol {
+            return decl, Compile_Error{message = "struct expects a name and brace form", span = form.span}, false
+        }
+        fields, err_fields, ok_fields := parse_struct_fields(form.items[2])
+        if !ok_fields {
+            return decl, err_fields, false
+        }
+        return AST_Decl{
+            kind = .Struct,
+            span = form.span,
+            doc_lines = top_form.doc_lines,
+            struct_decl = Struct_Decl{
+                name   = map_name(form.items[1].text),
+                fields = fields,
+            },
+        }, {}, true
+    case "defstruct", "defstruct-", "defstate":
+        if len(form.items) != 3 && len(form.items) != 4 && len(form.items) != 5 {
+            return decl, Compile_Error{message = fmt.tprintf("%s expects a name, optional docstring, a brace field form, and optional brace metadata form", head.text), span = form.span}, false
         }
         if form.items[1].kind != .Symbol {
-            return decl, Compile_Error{message = "defstruct expects a symbol name", span = form.items[1].span}, false
+            return decl, Compile_Error{message = fmt.tprintf("%s expects a symbol name", head.text), span = form.items[1].span}, false
         }
         doc_lines := top_form.doc_lines
         field_index := 2
-        if len(form.items) == 4 {
+        meta_index := -1
+        if len(form.items) >= 4 && form.items[2].kind == .String {
             if form.items[2].kind != .String {
-                return decl, Compile_Error{message = "defstruct docstring must be a string literal", span = form.items[2].span}, false
+                return decl, Compile_Error{message = fmt.tprintf("%s docstring must be a string literal", head.text), span = form.items[2].span}, false
             }
             doc_lines = append_doc_lines(doc_lines[:], doc_lines_from_string(unquote_string(form.items[2].text))[:])
             field_index = 3
+            if len(form.items) == 5 {
+                meta_index = 4
+            }
+        } else if len(form.items) == 4 {
+            meta_index = 3
+        }
+        if form.items[field_index].kind != .Brace {
+            return decl, Compile_Error{message = fmt.tprintf("%s expects a brace field form", head.text), span = form.items[field_index].span}, false
+        }
+        if meta_index >= 0 && form.items[meta_index].kind != .Brace {
+            return decl, Compile_Error{message = fmt.tprintf("%s metadata must be a brace form", head.text), span = form.items[meta_index].span}, false
         }
         fields, err_fields, ok_fields := parse_defstruct_fields(form.items[field_index])
         if !ok_fields {
@@ -844,15 +919,43 @@ parse_decl :: proc(top_form: CST_Top_Form) -> (decl: AST_Decl, err: Compile_Erro
             doc_lines = top_form.doc_lines,
             raw_text = unquote_string(form.items[1].text),
         }, {}, true
-    case "defn", "defn-":
+    case "export":
+        if len(form.items) != 1 {
+            return decl, Compile_Error{message = "export does not take arguments", span = form.span}, false
+        }
+        return AST_Decl{
+            kind = .Raw,
+            span = form.span,
+            doc_lines = top_form.doc_lines,
+            raw_text = "@(export)",
+        }, {}, true
+    case "exports":
+        if len(form.items) != 2 || form.items[1].kind != .Vector {
+            return decl, Compile_Error{message = "exports expects one vector of symbol names", span = form.span}, false
+        }
+        for item in form.items[1].items {
+            if item.kind != .Symbol {
+                return decl, Compile_Error{message = "exports expects symbol names", span = item.span}, false
+            }
+        }
+        return AST_Decl{kind = .Ignored, span = form.span}, {}, true
+    case "proc", "defn", "defn-":
         doc_lines := top_form.doc_lines
         proc_form := form
-        if len(form.items) > 3 && form.items[2].kind == .String {
-            doc_lines = append_doc_lines(doc_lines[:], doc_lines_from_string(unquote_string(form.items[2].text))[:])
+        doc_index := 2
+        if len(form.items) > 4 &&
+           form.items[2].kind == .Keyword &&
+           form.items[2].text == ":abi" &&
+           form.items[3].kind == .String {
+            doc_index = 4
+        }
+        if len(form.items) > doc_index+1 && form.items[doc_index].kind == .String {
+            doc_lines = append_doc_lines(doc_lines[:], doc_lines_from_string(unquote_string(form.items[doc_index].text))[:])
             items: [dynamic]CST_Form
-            append(&items, form.items[0])
-            append(&items, form.items[1])
-            for item in form.items[3:] {
+            for item, idx in form.items {
+                if idx == doc_index {
+                    continue
+                }
                 append(&items, item)
             }
             proc_form = CST_Form{kind = .List, items = items, span = form.span}

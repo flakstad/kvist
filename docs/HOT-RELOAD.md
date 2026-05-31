@@ -90,11 +90,158 @@ reload shape standard and visible.
 The current host-side helper surface is also intentionally small:
 
 - `new_reloader(...)`
-- `load_initial(...)`
-- `reload_if_source_changed(...)`
+- `load_initial_module(...)`
+- `reload_module_if_source_changed(...)`
 
-That is enough to keep the application loop ordinary while centralizing the
-reload generations and file-change tracking in one place.
+The lower-level load/result helpers still exist underneath, but the preferred
+host path is now the state-owning one above so `kvist_hot` itself sequences
+`on_unload`, manifest validation, and `on_load` around library swaps.
+
+On the module side, the first shipped Kvist helper package now exists too:
+
+- `(import hot "kvist:hot")`
+- `(hot/defmodule ...)`
+
+That macro expands the standard `kvist_hot` manifest and exported entrypoints
+for a host-owned state type, so reloadable modules stop hand-writing the same
+ABI surface per demo.
+
+There is now also a first-pass higher-level CLI surface on top of that runtime:
+
+- top-level `(defstate Name {fields...} {metadata...})` in pure `.kvist` user code
+- `kvist dev --reload app/main.kvist`
+- `kvist dev --reload app/main.kvist --rebuild`
+- `kvist dev --reload app/main.kvist --print-paths`
+- `kvist check --reload app/main.kvist`
+- `kvist build --reload app/main.kvist`
+- `kvist run --reload app/main.kvist`
+
+That path generates the resident shell and reloadable module underneath while
+keeping the user source as one `.kvist` app file with one durable root state
+and an explicit reload-lifetime contract.
+
+The compiler now also owns the generated-Odin import rebasing for this path.
+That means:
+
+- `kvist compile ... -o some/output.odin`
+- `kvist check|build|run --reload ...`
+- `kvist dev --reload ...`
+
+all write generated Odin with source-package-introduced Odin imports rewritten
+relative to the final output location instead of leaking absolute repo paths.
+This matters in practice for cache directories and symlinked temp roots like
+`/tmp` on macOS.
+
+Today the generated host supports both:
+
+- `:step` for shell-owned loop-driven apps
+- `:run` for app-owned runtimes that cooperate through one explicit
+  `reload/checkpoint!` boundary
+
+In development, `kvist dev --reload ...` keeps the resident shell alive and
+rebuilds only the reloadable side. In ordinary execution, `kvist check|build|run
+--reload ...` generates a plain wrapper around the same `defstate` source:
+
+- `:step` lowers to a normal step-and-sleep executable loop
+- `:run` lowers to a normal app-owned runtime call
+- `reload/checkpoint!` becomes a no-op when there is no resident reloader
+
+If a source package needs to publish raw Odin names in that flow, it can now do
+so explicitly with:
+
+```clojure
+(exports [Run_Host reload__Run_Host])
+```
+
+That keeps the public source-package surface explicit instead of relying on
+compiler hardcoding.
+
+## Recorded Decisions
+
+These points should now be treated as the working product direction for native
+hot reload.
+
+### 1. Native hot reload stays the primary iterative path
+
+For ordinary app code, native hot reload comes first. `Kvist/Live` remains the
+secondary reflective/runtime layer for commands, inspection, and automation.
+
+### 2. A stable resident shell is unavoidable
+
+There is no honest native hot-reload design where literally 100% of the
+program is replaced in place with no stable resident code at all.
+
+Something must remain loaded in order to:
+
+- own long-lived state
+- load and unload the new code
+- sequence reload lifecycle hooks
+- survive the swap
+
+So the long-term goal is not "remove the shell." It is "hide the shell from
+the everyday user workflow."
+
+### 3. The user should not have to think in host/module terms
+
+The current explicit host plus module demos prove the mechanism, but they are
+not the intended final user model.
+
+The intended user story is:
+
+- write ordinary Kvist/Odin-shaped code
+- put durable state in one obvious place
+- opt into hot reload explicitly
+- run a reload development workflow
+- let Kvist generate the resident shell and reloadable boundary underneath
+
+### 4. One durable state root is the right default
+
+The durable state that survives reload should have one explicit root.
+
+That is a benefit, not a drawback, because it:
+
+- makes the reload boundary explicit
+- gives one stable ownership root for long-lived state
+- simplifies reload validation and lifecycle hooks
+- avoids scattered persistence rules
+
+This should not mean "one giant blob." The good pattern is:
+
+- one root state struct
+- composed of subsystem structs
+- pointer-oriented access to the pieces that matter
+- explicit distinction between durable and transient state
+
+### 5. The main risk is coupling, not raw performance
+
+Requiring one root state struct is not inherently a performance problem if the
+program passes pointers to that state or its subsystems rather than copying the
+whole root by value.
+
+The real design risk is letting the root degrade into an unstructured kitchen-
+sink object where every subsystem reaches into every field.
+
+So the hot-reload guidance should be:
+
+- keep one durable root
+- split it into subsystem state structs
+- pass pointers to the needed subsystem or root
+- keep transient scratch/runtime-only state outside the durable root when that
+  is clearer
+
+### 6. The real remaining ceremony should move into tooling/codegen
+
+The current system still exposes:
+
+- explicit host code
+- explicit reloadable module code
+- explicit shared state contracts
+
+Those are useful implementation truths, but they should become Kvist's
+responsibility rather than the end user's day-to-day concern.
+
+That points directly toward a first-class reload-app design layered over the
+existing `kvist_hot` runtime pieces.
 
 ## State Ownership
 
@@ -157,5 +304,34 @@ It shows:
 - a host-owned state struct surviving reload
 - rebuild-only iteration on the reloadable module
 - the reusable `kvist_hot.Reloader` workflow in host code
+- the shipped `kvist:hot` macro package on the module side
 - `.kvist` demo sources compiled to Odin as part of the loop
+- pure-Kvist native module contracts via `(hot/defmodule ...)`
 - a clean place for later `Kvist/Live` embedding on top
+
+The newer lowest-ceremony native path lives in
+[`examples/reload_step_demo`](../examples/reload_step_demo/README.md). It demonstrates
+the first `defstate` reload workflow and the CLI shape intended for editor
+tooling.
+
+Its companion app-owned runtime example lives in
+[`examples/reload_run_demo`](../examples/reload_run_demo/README.md).
+
+That follow-on combined example now lives in
+[`examples/hybrid_live_demo`](../examples/hybrid_live_demo/README.md).
+
+It shows:
+
+- the same host-owned native state surviving DLL rebuilds
+- an embedded `kvist_live` runtime in the same host
+- live command reload from `.kvist` source without rebuilding the DLL
+- the two continuity layers cooperating instead of being documented separately
+
+## Next Surface Direction
+
+The next strong step on the native side is to stop exposing the
+mechanism-shaped host/module split directly to users and instead define one
+first-class reload pattern.
+
+That proposed surface is documented in
+[RELOAD-APP-DESIGN.md](./RELOAD-APP-DESIGN.md).

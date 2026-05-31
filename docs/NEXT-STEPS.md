@@ -141,6 +141,18 @@ Several important ideas are noted but not yet built:
 - first-class native hot-reload patterns
 - tighter cooperation between native hot reload and `Kvist/Live`
 
+The desired native hot-reload user model is now clearer than before:
+
+- one explicit durable root state
+- ordinary Kvist app code around it
+- one hot-reload opt-in
+- generated resident shell beneath that surface
+- `:step` as the shell-owned loop mode
+- `:run` as the app-owned runtime mode, with one explicit reload checkpoint at
+  the runtime boundary
+
+See [RELOAD-APP-DESIGN.md](./RELOAD-APP-DESIGN.md).
+
 ### 9. Standard Library Shape
 
 Useful library surface exists, but the stdlib is still partly inherited from

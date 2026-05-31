@@ -290,6 +290,10 @@ state_entries_get :: proc(state: []State_Entry, key: string) -> (State_Entry, bo
     return State_Entry{}, false
 }
 
+state_entries_get_dynamic :: proc(state: [dynamic]State_Entry, key: string) -> (State_Entry, bool) {
+    return state_entries_get(state[:], key)
+}
+
 state_entries_get_string :: proc(state: []State_Entry, key: string) -> (string, bool) {
     for entry in state {
         if entry.key == key && entry.value.kind == .String {

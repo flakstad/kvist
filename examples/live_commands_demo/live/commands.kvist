@@ -1,53 +1,53 @@
 // Edit this file while the live commands demo runs.
 //
 // The current live loader reads a narrow real-Kvist subset:
-// - (live/module {...})
+// - (import live "kvist:live")
 // - (import "path") for helper files
 // - ordinary top-level (defn ...)
-// - (live/command name ...)
-// - (live/hook name ...)
+// - (live/defmodule {...} ...)
+// - (live/defcommand name ...)
+// - (live/defhook name ...)
 // - top-level def / defconst / defvar literals
+// - ordinary top-level macro expansion before live loading
 // - source-defined (defn migrate []) on reload
 
-(live/module
-  {:name "commands"
-   :version "v1"})
+(import live "kvist:live")
 
 (import "helpers")
 
-(def message "hello from the live module")
-(def hook-message "hook fired after the command")
-(def counter-key "run-count")
+(live/defmodule
+  {:name "commands"
+   :version "v1"}
 
-(defn init []
-  (host/call "host.log" "live module initialized"))
+  (def message "hello from the live module")
+  (def hook-message "hook fired after the command")
+  (def counter-key "run-count")
 
-(defn migrate []
-  (when (reload/from-version)
-    (let [old-run-count (reload/state-get "run-count")
-          old-tick-count (reload/state-get "tick-count")]
-      (if (= counter-key "tick-count")
-        (when old-run-count
-          (state/set! counter-key old-run-count)
-          (host/call "host.log"
-                     (str "migrated counter from run-count to " counter-key)))
-        (when old-tick-count
-          (state/set! counter-key old-tick-count)
-          (host/call "host.log"
-                     (str "migrated counter from tick-count to " counter-key)))))))
+  (defn init []
+    (host/call "host.log" "live module initialized"))
 
-(defn shutdown []
-  (host/call "host.log" "live module shutting down"))
+  (defn migrate []
+    (when (reload/from-version)
+      (let [old-run-count (reload/state-get "run-count")
+            old-tick-count (reload/state-get "tick-count")]
+        (if (= counter-key "tick-count")
+          (when old-run-count
+            (state/set! counter-key old-run-count)
+            (host/call "host.log"
+                       (str "migrated counter from run-count to " counter-key)))
+          (when old-tick-count
+            (state/set! counter-key old-tick-count)
+            (host/call "host.log"
+                       (str "migrated counter from tick-count to " counter-key)))))))
 
-(defn tick []
-  (let [count (state/inc! counter-key)]
-    (render-and-log count)
-    (hook/emit "after-command" count message)
-    count))
+  (defn shutdown []
+    (host/call "host.log" "live module shutting down"))
 
-(defn after-command []
-  (log-hook-message "after-command" (payload/get 0) (payload/get 1)))
+  (live/defcommand tick
+    (let [count (state/inc! counter-key)]
+      (render-and-log count)
+      (hook/emit "after-command" count message)
+      count))
 
-(live/command tick)
-
-(live/hook after-command)
+  (live/defhook after-command
+    (log-hook-message "after-command" (payload/get 0) (payload/get 1))))

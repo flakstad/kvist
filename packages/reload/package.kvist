@@ -1,0 +1,10 @@
+(package reload)
+
+(import runtime :odin "../../src/kvist_hot_app_runtime")
+
+(exports [Run_Host reload__Run_Host])
+
+(odin "Run_Host :: runtime.Run_Host\nreload__Run_Host :: runtime.Run_Host")
+
+(defn checkpoint! [host: (ptr Run_Host)] -> bool
+  (runtime.checkpoint host))

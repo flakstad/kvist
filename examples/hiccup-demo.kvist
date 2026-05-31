@@ -2,6 +2,8 @@
 (package main)
 (import hiccup "kvist:hiccup")
 
+(defconst onclick-handler string "save()")
+
 (defn hiccup-demo [] -> bool
   (let [page (hiccup/html
                [:div {:class "border" :onclick onclick-handler}

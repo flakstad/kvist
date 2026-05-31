@@ -1,32 +1,30 @@
 # Kvist Agent Notes
 
-This repo is an experiment in writing Odin with a Lisp/Clojure-shaped surface.
-The project goal is **Odin in parens**, not Clojure semantics on Odin.
+This repo is an experiment in building a Lisp-shaped systems language that
+compiles to readable Odin.
 
 ## Direction
 
-- Preserve Odin semantics.
+- Keep Odin as the code generation and execution target.
 - Emit readable, boring `.odin`.
-- Keep the translator small and source-to-source.
+- Keep the core language tooling small and explicit where practical.
 - Let `odin check` validate the generated code.
-- Prefer mechanical syntax lowering over abstraction.
+- Prefer explicit, inspectable lowering over opaque abstraction.
 - Treat `.kvist` as the source extension and `.odin` as generated or ordinary
   Odin.
 - Copy raw Odin through unchanged outside detected Lisp-Odin top-level forms.
 - Do not require `#kvist` / `#end` markers for ordinary top-level forms unless
   implementation experience proves they are needed.
-- Treat REPL-like tooling as temp Odin generation plus `odin run`, not as an
-  interpreter.
-- Treat `[]` and `{}` as Odin literal sugar, not as Clojure collections.
+- Treat AOT compilation, hot reload, and live/runtime tooling as complementary
+  parts of the project rather than forcing one execution model everywhere.
+- Treat `[]` and `{}` as Kvist collection literals that lower honestly to Odin.
 
-## Non-Goals
+## Current Biases
 
-- Do not add a runtime unless a tiny helper is unavoidable.
-- Do not introduce persistent collections, seqs, dynamic vars, namespaces, or
-  other Clojure semantics.
+- Do not introduce a hidden seq runtime, dynamic vars, or a fake interpreter
+  environment.
 - Do not hide Odin concepts behind new abstractions.
 - Do not make generated Odin hard to inspect.
-- Do not build a fake stateful REPL or hidden dynamic environment.
 - Do not make mixed `.odin` files the primary workflow; use `.kvist` for mixed
   source.
 
@@ -39,14 +37,14 @@ The project goal is **Odin in parens**, not Clojure semantics on Odin.
 - Run tests with `odin test tests`.
 - Build the compiler with `odin build cmd/kvist`.
 - Check generated Odin with `odin check <file>.odin -file`.
-- Future eval-selection support should generate a scratch Odin entry point and
-  run/check that with Odin itself.
+- Eval-selection support may use scratch Odin generation, native hot reload, or
+  live/runtime machinery depending on which mode is being exercised.
 - `probe` may be reused as the execution/editor tooling base if Kvist is
   pursued further: package/project detection, temp workspaces, internal package
   eval, Emacs overlays, result buffers, and build/check/test commands are
   relevant. Keep Kvist parsing/lowering/source mapping separate.
-- Do not merge Kvist into `probe` prematurely. `probe` should remain a
-  practical ordinary-Odin tool; Kvist is a syntax experiment.
+- Keep Kvist concerns separate from `probe` unless there is a clear
+  architectural reason to merge pieces.
 
 ## Style
 

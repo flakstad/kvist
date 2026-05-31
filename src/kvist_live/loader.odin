@@ -4,6 +4,7 @@ import "core:fmt"
 import "core:os"
 import "core:strconv"
 import "core:strings"
+import "base:runtime"
 import kvist "../kvist"
 
 Loader_Accum :: struct {
@@ -13,6 +14,24 @@ Loader_Accum :: struct {
     functions: [dynamic]Behavior_Definition,
     commands:  [dynamic]Behavior_Definition,
     hooks:     [dynamic]Behavior_Definition,
+}
+
+clone_loader_form :: proc(form: kvist.CST_Form) -> kvist.CST_Form {
+    cloned := form
+    cloned.text = strings.clone(form.text)
+    cloned.items = nil
+    for item in form.items {
+        append(&cloned.items, clone_loader_form(item))
+    }
+    return cloned
+}
+
+clone_loader_top_form :: proc(top: kvist.CST_Top_Form) -> kvist.CST_Top_Form {
+    return kvist.CST_Top_Form{
+        form = clone_loader_form(top.form),
+        doc_lines = clone_string_slice(top.doc_lines[:]),
+        source = strings.clone(top.source),
+    }
 }
 
 loader_accum_delete :: proc(accum: ^Loader_Accum) {
@@ -230,6 +249,51 @@ resolve_import_path_from_form :: proc(form: kvist.CST_Form, current_path: string
     return resolved, Runtime_Error{}, true
 }
 
+live_macroexpand_input :: proc(raw_forms: []kvist.CST_Top_Form, current_path: string) -> (forms: [dynamic]kvist.CST_Top_Form, err: kvist.Compile_Error, ok: bool) {
+    importer_path := current_path
+    if importer_path == "" {
+        importer_path = "."
+    }
+
+    loaded_keys: [dynamic]string
+    import_keys: [dynamic]string
+    visiting: [dynamic]string
+    aliases: [dynamic]kvist.Alias_Prefix
+
+    for top in raw_forms {
+        alias, import_path, ok_import := kvist.source_import_alias_and_path(top.form)
+        if !ok_import || !strings.has_prefix(import_path, "kvist:") {
+            continue
+        }
+        append(&aliases, kvist.Alias_Prefix{alias = alias, prefix = alias})
+        resolved, resolve_err, resolve_ok := kvist.resolve_source_import_path(importer_path, import_path)
+        if !resolve_ok {
+            return nil, resolve_err, false
+        }
+        loaded, load_err, load_ok := kvist.load_source_forms(resolved, alias, &loaded_keys, &import_keys, &visiting)
+        if !load_ok {
+            return nil, load_err, false
+        }
+        for form in loaded.decls {
+            append(&forms, clone_loader_top_form(form))
+        }
+    }
+
+    for top in raw_forms {
+        _, import_path, ok_import := kvist.source_import_alias_and_path(top.form)
+        if ok_import && strings.has_prefix(import_path, "kvist:") {
+            continue
+        }
+        rewritten, rewrite_err, rewrite_ok := kvist.rewrite_top_form(top, nil, aliases[:], "")
+        if !rewrite_ok {
+            return nil, rewrite_err, false
+        }
+        append(&forms, clone_loader_top_form(rewritten))
+    }
+
+    return forms, kvist.Compile_Error{}, true
+}
+
 load_imported_live_file :: proc(path: string, import_stack: []string) -> (Loader_Accum, Runtime_Error, bool) {
     if path_in_stack(import_stack, path) {
         return Loader_Accum{}, Runtime_Error{message = strings.clone(fmt.tprintf("circular live import detected: %s", path))}, false
@@ -241,10 +305,11 @@ load_imported_live_file :: proc(path: string, import_stack: []string) -> (Loader
     }
     defer delete(data)
 
-    forms, forms_err, forms_ok := kvist.read_top_forms(string(data))
+    forms, forms_err, forms_ok := read_live_top_forms(string(data), path)
     if !forms_ok {
         return Loader_Accum{}, Runtime_Error{message = strings.clone(forms_err.message)}, false
     }
+    defer kvist.delete_cst_top_form_slice(&forms)
 
     next_stack := clone_string_slice(import_stack)
     defer delete_string_stack(&next_stack)
@@ -258,6 +323,38 @@ load_imported_live_file :: proc(path: string, import_stack: []string) -> (Loader
     return accum, Runtime_Error{}, true
 }
 
+read_live_top_forms :: proc(source: string, current_path: string = "") -> (forms: [dynamic]kvist.CST_Top_Form, err: kvist.Compile_Error, ok: bool) {
+    result_allocator := context.allocator
+
+    raw_forms, read_err, read_ok := kvist.read_top_forms(source)
+    if !read_ok {
+        return nil, kvist.clone_compile_error(read_err, result_allocator), false
+    }
+
+    macro_input, input_err, input_ok := live_macroexpand_input(raw_forms[:], current_path)
+    if !input_ok {
+        return nil, kvist.clone_compile_error(input_err, result_allocator), false
+    }
+
+    expanded_forms, macros, expand_err, expand_ok := kvist.macroexpand_top_forms(macro_input[:], true)
+    if !expand_ok {
+        return nil, kvist.clone_compile_error(expand_err, result_allocator), false
+    }
+    for top in expanded_forms {
+        rewritten, rewrite_err, rewrite_ok := kvist.macroexpand_builtin_runtime_form(top.form)
+        if !rewrite_ok {
+            kvist.delete_cst_top_form_slice(&forms)
+            return nil, kvist.clone_compile_error(rewrite_err, result_allocator), false
+        }
+        append(&forms, clone_loader_top_form(kvist.CST_Top_Form{
+            form = rewritten,
+            doc_lines = top.doc_lines,
+            source = top.source,
+        }))
+    }
+    return forms, kvist.Compile_Error{}, true
+}
+
 module_definition_from_forms :: proc(accum: ^Loader_Accum, forms: []kvist.CST_Top_Form, current_path: string, import_stack: []string, allow_live_decls: bool) -> (Module_Definition, Runtime_Error, bool) {
     for top in forms {
         form := top.form
@@ -266,6 +363,10 @@ module_definition_from_forms :: proc(accum: ^Loader_Accum, forms: []kvist.CST_To
         }
 
         if kvist.is_symbol(form.items[0], "import") {
+            _, import_path, ok_source_import := kvist.source_import_alias_and_path(form)
+            if ok_source_import && strings.has_prefix(import_path, "kvist:") {
+                continue
+            }
             resolved, import_err, import_ok := resolve_import_path_from_form(form, current_path)
             if !import_ok {
                 return loader_error(import_err.message, accum)
@@ -488,10 +589,11 @@ finalize_module_definition :: proc(accum: ^Loader_Accum) -> (Module_Definition, 
 }
 
 module_definition_from_kvist_source :: proc(source: string) -> (Module_Definition, Runtime_Error, bool) {
-    forms, read_err, read_ok := kvist.read_top_forms(source)
+    forms, read_err, read_ok := read_live_top_forms(source)
     if !read_ok {
         return Module_Definition{}, Runtime_Error{message = strings.clone(read_err.message)}, false
     }
+    defer kvist.delete_cst_top_form_slice(&forms)
 
     accum := new_loader_accum()
     _, err, ok := module_definition_from_forms(&accum, forms[:], "", nil, true)
@@ -508,10 +610,11 @@ module_definition_from_kvist_path :: proc(path: string) -> (Module_Definition, R
     }
     defer delete(data)
 
-    forms, forms_err, forms_ok := kvist.read_top_forms(string(data))
+    forms, forms_err, forms_ok := read_live_top_forms(string(data), path)
     if !forms_ok {
         return Module_Definition{}, Runtime_Error{message = strings.clone(forms_err.message)}, false
     }
+    defer kvist.delete_cst_top_form_slice(&forms)
 
     stack: [dynamic]string
     defer delete_string_stack(&stack)

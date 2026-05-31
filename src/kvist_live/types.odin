@@ -95,6 +95,19 @@ Module_Definition :: struct {
     migrate:       Module_Migrate_Hook,
 }
 
+Module_Load_Config :: struct {
+    init:     Module_Init_Hook,
+    shutdown: Module_Shutdown_Hook,
+    migrate:  Module_Migrate_Hook,
+}
+
+Module_Reloader :: struct {
+    module_path:     string,
+    watch_dir:       string,
+    last_signature:  string,
+    has_loaded:      bool,
+}
+
 Live_Module :: struct {
     runtime:         ^Runtime,
     name:           string,

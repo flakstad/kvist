@@ -6615,7 +6615,11 @@ emit_decl :: proc(e: ^Emitter, decl: IR_Decl) -> (Compile_Error, bool) {
         fmt.sbprintf(&e.builder, "%s :: ", decl.proc_decl.name)
         emit_proc_directives(e, e.pending_prefix_directives[:])
         emit_proc_directives(e, decl.proc_decl.prefix_directives[:])
-        strings.write_string(&e.builder, "proc(")
+        if decl.proc_decl.calling_convention != "" {
+            fmt.sbprintf(&e.builder, "proc %q (", decl.proc_decl.calling_convention)
+        } else {
+            strings.write_string(&e.builder, "proc(")
+        }
         for param, idx in decl.proc_decl.params {
             if idx > 0 {
                 strings.write_string(&e.builder, ", ")
@@ -8828,7 +8832,8 @@ decl_matches :: proc(a, b: IR_Decl) -> bool {
     if a.kind == .Import {
         return a.import_decl.path == b.import_decl.path &&
                a.import_decl.alias == b.import_decl.alias &&
-               a.import_decl.has_alias == b.import_decl.has_alias
+               a.import_decl.has_alias == b.import_decl.has_alias &&
+               a.import_decl.force_odin == b.import_decl.force_odin
     }
     a_name := decl_name(a)
     if a_name == "" {

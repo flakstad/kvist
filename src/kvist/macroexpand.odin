@@ -25,6 +25,27 @@ User_Macro :: struct {
     span:      Span,
 }
 
+delete_user_macro :: proc(macro_decl: ^User_Macro) {
+    if macro_decl.name != "" {
+        delete(macro_decl.name)
+    }
+    delete_string_slice(&macro_decl.doc_lines)
+    delete_string_slice(&macro_decl.params.names)
+    if macro_decl.params.rest_name != "" {
+        delete(macro_decl.params.rest_name)
+    }
+    delete_cst_form_slice(&macro_decl.body)
+    macro_decl^ = User_Macro{}
+}
+
+delete_user_macro_slice :: proc(macros: ^[dynamic]User_Macro) {
+    for i in 0 ..< len(macros^) {
+        delete_user_macro(&macros^[i])
+    }
+    delete(macros^)
+    macros^ = nil
+}
+
 Macro_Value_Kind :: enum {
     Nil,
     Bool,
@@ -572,10 +593,14 @@ parse_user_macro_decl :: proc(top: CST_Top_Form) -> (macro_decl: User_Macro, err
         append(&body, item)
     }
     return User_Macro{
-        name      = form.items[1].text,
-        doc_lines = doc_lines,
-        params    = params,
-        body      = body,
+        name      = strings.clone(form.items[1].text),
+        doc_lines = clone_string_slice(doc_lines[:]),
+        params    = Macro_Param_Spec{
+            names = clone_string_slice(params.names[:]),
+            has_rest = params.has_rest,
+            rest_name = strings.clone(params.rest_name),
+        },
+        body      = clone_cst_form_slice(body[:]),
         span      = form.span,
     }, Compile_Error{}, true
 }
@@ -2044,6 +2069,94 @@ macroexpand_source_with_map :: proc(source: string) -> (result: Emit_Result, err
     return result, {}, true
 }
 
+macroexpand_top_level_form_with_macros :: proc(form: CST_Form, macros: []User_Macro) -> (expanded: [dynamic]CST_Form, err: Compile_Error, ok: bool) {
+    if form.kind == .List && len(form.items) > 0 && form.items[0].kind == .Symbol {
+        if user_macro, ok_user := find_user_macro(macros, form.items[0].text); ok_user {
+            forms_out, err_user, ok_user_expand := expand_user_macro_call_to_forms(user_macro, form, macros)
+            if !ok_user_expand {
+                return expanded, err_user, false
+            }
+            for form_out in forms_out {
+                nested, err_nested, ok_nested := macroexpand_top_level_form_with_macros(form_out, macros)
+                if !ok_nested {
+                    return expanded, err_nested, false
+                }
+                for nested_form in nested {
+                    append(&expanded, nested_form)
+                }
+            }
+            return expanded, Compile_Error{}, true
+        }
+    }
+
+    rewritten, err_expand, ok_expand := macroexpand_cst_form_with_macros(form, macros)
+    if !ok_expand {
+        return expanded, err_expand, false
+    }
+    append(&expanded, rewritten)
+    return expanded, Compile_Error{}, true
+}
+
+macroexpand_builtin_runtime_form :: proc(form: CST_Form) -> (expanded: CST_Form, err: Compile_Error, ok: bool) {
+    if form.kind == .List && len(form.items) > 0 && form.items[0].kind == .Symbol {
+        switch builtin_macro_kind(form.items[0].text) {
+        case .Thread_First:
+            expanded_thread, err_expand, ok_expand := expand_thread_form(form, false)
+            if !ok_expand {
+                return CST_Form{}, err_expand, false
+            }
+            return macroexpand_builtin_runtime_form(expanded_thread)
+        case .Thread_Last:
+            expanded_thread, err_expand, ok_expand := expand_thread_form(form, true)
+            if !ok_expand {
+                return CST_Form{}, err_expand, false
+            }
+            return macroexpand_builtin_runtime_form(expanded_thread)
+        case .When_Let:
+            expanded_when, err_expand, ok_expand := expand_when_let_form(form)
+            if !ok_expand {
+                return CST_Form{}, err_expand, false
+            }
+            return macroexpand_builtin_runtime_form(expanded_when)
+        case .If_Let:
+            expanded_if, err_expand, ok_expand := expand_if_let_form(form)
+            if !ok_expand {
+                return CST_Form{}, err_expand, false
+            }
+            return macroexpand_builtin_runtime_form(expanded_if)
+        case .When_Ok:
+            expanded_when, err_expand, ok_expand := expand_when_ok_form(form)
+            if !ok_expand {
+                return CST_Form{}, err_expand, false
+            }
+            return macroexpand_builtin_runtime_form(expanded_when)
+        case .If_Ok:
+            expanded_if, err_expand, ok_expand := expand_if_ok_form(form)
+            if !ok_expand {
+                return CST_Form{}, err_expand, false
+            }
+            return macroexpand_builtin_runtime_form(expanded_if)
+        case .With_Allocator, .With_Temp_Allocator, .None:
+        }
+    }
+
+    #partial switch form.kind {
+    case .List, .Vector, .Brace, .Set:
+        expanded = form
+        expanded.items = nil
+        for item in form.items {
+            child, err_child, ok_child := macroexpand_builtin_runtime_form(item)
+            if !ok_child {
+                return CST_Form{}, err_child, false
+            }
+            append(&expanded.items, child)
+        }
+        return expanded, Compile_Error{}, true
+    case:
+        return form, Compile_Error{}, true
+    }
+}
+
 macroexpand_top_forms :: proc(forms: []CST_Top_Form, include_core_macros: bool = false) -> (expanded: [dynamic]CST_Top_Form, macros: [dynamic]User_Macro, err: Compile_Error, ok: bool) {
     if include_core_macros {
         initial_macros, err_core, ok_core := core_package_local_macros()
@@ -2063,43 +2176,29 @@ macroexpand_top_forms :: proc(forms: []CST_Top_Form, include_core_macros: bool =
             append(&macros, macro_decl)
             continue
         }
-        if top.form.kind == .List && len(top.form.items) > 0 && top.form.items[0].kind == .Symbol {
-            if user_macro, ok_user := find_user_macro(macros[:], top.form.items[0].text); ok_user {
-                forms_out, err_user, ok_user_expand := expand_user_macro_call_to_forms(user_macro, top.form, macros[:])
-                if !ok_user_expand {
-                    return expanded, macros, err_user, false
-                }
-                for form_out in forms_out {
-                    rewritten, err_expand, ok_expand := macroexpand_cst_form_with_macros(form_out, macros[:])
-                    if !ok_expand {
-                        return expanded, macros, err_expand, false
-                    }
-                    if is_defmacro_form(rewritten) {
-                        macro_decl, err_macro, ok_macro := parse_user_macro_decl(CST_Top_Form{form = rewritten, doc_lines = top.doc_lines, source = top.source})
-                        if !ok_macro {
-                            return expanded, macros, err_macro, false
-                        }
-                        append(&macros, macro_decl)
-                        continue
-                    }
-                    append(&expanded, CST_Top_Form{
-                        form      = rewritten,
-                        doc_lines = top.doc_lines,
-                        source    = top.source,
-                    })
-                }
-                continue
-            }
-        }
-        rewritten, err_expand, ok_expand := macroexpand_cst_form_with_macros(top.form, macros[:])
+        expanded_forms, err_expand, ok_expand := macroexpand_top_level_form_with_macros(top.form, macros[:])
         if !ok_expand {
             return expanded, macros, err_expand, false
         }
-        append(&expanded, CST_Top_Form{
-            form      = rewritten,
-            doc_lines = top.doc_lines,
-            source    = top.source,
-        })
+        for rewritten in expanded_forms {
+            if is_defmacro_form(rewritten) {
+                macro_decl, err_macro, ok_macro := parse_user_macro_decl(CST_Top_Form{
+                    form      = rewritten,
+                    doc_lines = top.doc_lines,
+                    source    = top.source,
+                })
+                if !ok_macro {
+                    return expanded, macros, err_macro, false
+                }
+                append(&macros, macro_decl)
+                continue
+            }
+            append(&expanded, CST_Top_Form{
+                form      = clone_cst_form(rewritten),
+                doc_lines = clone_string_slice(top.doc_lines[:]),
+                source    = strings.clone(top.source),
+            })
+        }
     }
     return expanded, macros, Compile_Error{}, true
 }

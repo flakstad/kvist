@@ -1,0 +1,40 @@
+(package hot)
+
+(defmacro defmodule
+  "Expand a standard kvist_hot native reload module contract for a host-owned state type, a message export, and a tick export."
+  [state-type message-export tick-export message-value load-message]
+  (forms
+    (quasiquote
+      (export))
+    (quasiquote
+      (defvar kvist-hot-api-version u32 1))
+    (quasiquote
+      (export))
+    (quasiquote
+      (proc kvist-hot-state-size :abi "c" [] -> int
+        (kvist_hot.State_Size (unquote state-type))))
+    (quasiquote
+      (export))
+    (quasiquote
+      (proc kvist-hot-state-align :abi "c" [] -> int
+        (kvist_hot.State_Align (unquote state-type))))
+    (quasiquote
+      (export))
+    (quasiquote
+      (proc kvist-hot-on-load :abi "c" [state: rawptr is-reload: bool]
+        (kvist_hot.On_Load (unquote state-type) state is-reload (unquote load-message))))
+    (quasiquote
+      (export))
+    (quasiquote
+      (proc kvist-hot-on-unload :abi "c" [state: rawptr]
+        (kvist_hot.On_Unload (unquote state-type) state)))
+    (quasiquote
+      (export))
+    (quasiquote
+      (proc (unquote message-export) :abi "c" [] -> cstring
+        (cstring (unquote message-value))))
+    (quasiquote
+      (export))
+    (quasiquote
+      (proc (unquote tick-export) :abi "c" [state: rawptr]
+        (kvist_hot.Tick (unquote state-type) state (unquote message-value))))))

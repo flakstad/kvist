@@ -32,7 +32,10 @@ The live loader currently accepts these ordinary top-level forms:
 
 Current constraints:
 
-- `import` currently supports only the unaliased form `(import "path")`
+- path-loaded live modules may also import shipped Kvist source packages such
+  as `(import live "kvist:live")` before macro expansion
+- imported live helper files still support only the unaliased form
+  `(import "path")`
 - imported live helper files are merged into the root live module rather than
   loaded as separate runtime modules
 - imported helper files currently support ordinary `def`, `defconst`,
@@ -56,6 +59,16 @@ Current constraints:
 - `live/hook`
   - marks a hook entrypoint
   - follows the same shape rules as `live/command`
+
+The shipped `kvist:live` package now wraps the most common source patterns
+with:
+
+- `live/defmodule`
+- `live/defcommand`
+- `live/defhook`
+
+Those macros lower back into the same structural `live/module`,
+`live/command`, and `live/hook` forms above.
 
 ## Current Expression Subset
 
@@ -113,7 +126,6 @@ ordinary Kvist `defn` rather than introducing more special top-level forms.
 
 These are not part of the current shared subset yet:
 
-- macros
 - closures / anonymous `fn`
 - arrays, maps, and struct literals inside behavior bodies
 - `for`
@@ -122,6 +134,11 @@ These are not part of the current shared subset yet:
 - user-defined data types
 - multi-arity functions
 - higher-order function values
+
+Top-level macro expansion is available before live loading, including file-
+local `defmacro` forms and shipped source-package macros such as `kvist:live`.
+What is still out of scope is arbitrary macro-expanded behavior that lowers
+outside the evaluator's supported runtime subset.
 
 ## Why This Matters
 

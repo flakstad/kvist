@@ -13,9 +13,10 @@ print_usage :: proc() {
     fmt.println("usage:")
     fmt.println("  kvist <input.kvist> [-o output.odin] [--map output.map] [--eval form] [--no-print]")
     fmt.println("  kvist compile <input.kvist> [-o output.odin] [--map output.map]")
-    fmt.println("  kvist build <input.kvist> [--generated output.odin]")
-    fmt.println("  kvist check <input.kvist> [--generated output.odin]")
-    fmt.println("  kvist run <input.kvist> [--generated output.odin]")
+    fmt.println("  kvist dev --reload <input.kvist> [--rebuild] [--generated-dir dir] [--print-paths]")
+    fmt.println("  kvist build <input.kvist> [--generated output.odin] [--reload] [--generated-dir dir]")
+    fmt.println("  kvist check <input.kvist> [--generated output.odin] [--reload] [--generated-dir dir]")
+    fmt.println("  kvist run <input.kvist> [--generated output.odin] [--reload] [--generated-dir dir]")
     fmt.println("  kvist test <input.kvist> [--generated output.odin] [--names test1,test2]")
     fmt.println("  kvist eval <input.kvist> <form> [--no-print] [--check] [--generated output.odin] [--save name]")
     fmt.println("  kvist expand <input.kvist> <form> [--no-print] [-o output.odin]")
@@ -35,7 +36,7 @@ print_usage :: proc() {
 }
 
 is_command :: proc(text: string) -> bool {
-    return text == "compile" || text == "build" || text == "check" || text == "run" || text == "test" || text == "eval" || text == "expand" || text == "macroexpand" || text == "symbols" || text == "editor-symbols" || text == "lookup" || text == "complete" || text == "doc" || text == "xref" || text == "builtin-symbols" || text == "imported-symbols" || text == "package-symbols" || text == "cache"
+    return text == "compile" || text == "dev" || text == "build" || text == "check" || text == "run" || text == "test" || text == "eval" || text == "expand" || text == "macroexpand" || text == "symbols" || text == "editor-symbols" || text == "lookup" || text == "complete" || text == "doc" || text == "xref" || text == "builtin-symbols" || text == "imported-symbols" || text == "package-symbols" || text == "cache"
 }
 
 read_source_or_exit :: proc(path: string) -> string {
@@ -340,7 +341,13 @@ run_odin_file :: proc(command, generated_path, source_path, source, eval_source,
 
 write_generated_for_execution :: proc(output, requested_path: string) -> (path, temp_dir: string, ok: bool) {
     if requested_path != "" {
-        write_output_or_exit(requested_path, output)
+        rebased, err_rebase, ok_rebase := kvist.rebase_emitted_odin_imports_for_output_path(output, requested_path)
+        if !ok_rebase {
+            fmt.eprintln(err_rebase.message)
+            return "", "", false
+        }
+        write_output_or_exit(requested_path, rebased)
+        delete(rebased)
         return requested_path, "", true
     }
 
@@ -358,7 +365,17 @@ write_generated_for_execution :: proc(output, requested_path: string) -> (path, 
         return "", "", false
     }
 
-    write_output_or_exit(generated, output)
+    rebased, err_rebase, ok_rebase := kvist.rebase_emitted_odin_imports_for_output_path(output, generated)
+    if !ok_rebase {
+        fmt.eprintln(err_rebase.message)
+        _ = os.remove(generated)
+        _ = os.remove(dir)
+        delete(generated)
+        delete(dir)
+        return "", "", false
+    }
+    write_output_or_exit(generated, rebased)
+    delete(rebased)
     return generated, dir, true
 }
 
@@ -396,7 +413,13 @@ compile_file_command :: proc(input, output_path, map_path: string) {
     }
 
     if output_path != "" {
-        write_output_or_exit(output_path, result.output)
+        output, err_rebase, ok_rebase := kvist.rebase_emitted_odin_imports_for_output_path(result.output, output_path)
+        if !ok_rebase {
+            fmt.eprintln(err_rebase.message)
+            os.exit(1)
+        }
+        defer delete(output)
+        write_output_or_exit(output_path, output)
     } else {
         fmt.print(result.output)
     }
@@ -426,7 +449,13 @@ compile_eval_emit_command :: proc(input, eval_source, output_path: string, no_pr
     print_compile_warnings(input, data, eval_source, result.warnings[:])
 
     if output_path != "" {
-        write_output_or_exit(output_path, result.output)
+        output, err_rebase, ok_rebase := kvist.rebase_emitted_odin_imports_for_output_path(result.output, output_path)
+        if !ok_rebase {
+            fmt.eprintln(err_rebase.message)
+            os.exit(1)
+        }
+        defer delete(output)
+        write_output_or_exit(output_path, output)
     } else {
         fmt.print(result.output)
     }
@@ -1112,12 +1141,17 @@ parse_run_or_check_command :: proc(odin_command: string) {
         print_usage()
         os.exit(2)
     }
-    input := os.args[2]
+    input := ""
     generated_path := ""
+    generated_dir := ""
+    reload_mode := false
 
-    i := 3
+    i := 2
     for i < len(os.args) {
         switch os.args[i] {
+        case "--reload":
+            reload_mode = true
+            i += 1
         case "--generated":
             if i+1 >= len(os.args) {
                 print_usage()
@@ -1125,10 +1159,35 @@ parse_run_or_check_command :: proc(odin_command: string) {
             }
             generated_path = os.args[i+1]
             i += 2
+        case "--generated-dir":
+            if i+1 >= len(os.args) {
+                print_usage()
+                os.exit(2)
+            }
+            generated_dir = os.args[i+1]
+            i += 2
         case:
+            if input == "" {
+                input = os.args[i]
+                i += 1
+            } else {
+                print_usage()
+                os.exit(2)
+            }
+        }
+    }
+
+    if input == "" {
+        print_usage()
+        os.exit(2)
+    }
+
+    if reload_mode {
+        if generated_path != "" {
             print_usage()
             os.exit(2)
         }
+        os.exit(reload_app_generate_and_execute(input, odin_command, generated_dir))
     }
 
     os.exit(run_generated_command(input, generated_path, odin_command))
@@ -1379,6 +1438,8 @@ main :: proc() {
     switch os.args[1] {
     case "compile":
         parse_compile_command()
+    case "dev":
+        parse_dev_command()
     case "build":
         parse_run_or_check_command("build")
     case "check":

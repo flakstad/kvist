@@ -66,6 +66,44 @@ normalize_expanded_top_forms :: proc(forms: []CST_Top_Form) -> (out: [dynamic]CS
     return out
 }
 
+validate_surface_top_level_order :: proc(forms: []CST_Top_Form) -> (Compile_Error, bool) {
+    seen_package := false
+    seen_non_import_decl := false
+
+    for top in forms {
+        head := decl_head_name(top.form)
+        switch head {
+        case "":
+            continue
+        case "package":
+            if seen_package {
+                return Compile_Error{message = "package declaration must appear exactly once", span = top.form.span}, false
+            }
+            if seen_non_import_decl {
+                return Compile_Error{message = "package declaration must be the first declaration", span = top.form.span}, false
+            }
+            seen_package = true
+        case "import":
+            if !seen_package {
+                return Compile_Error{message = "import requires a preceding package declaration", span = top.form.span}, false
+            }
+            if seen_non_import_decl {
+                return Compile_Error{message = "import declarations must appear before other declarations", span = top.form.span}, false
+            }
+        case:
+            if !seen_package {
+                return Compile_Error{message = "missing package declaration", span = top.form.span}, false
+            }
+            seen_non_import_decl = true
+        }
+    }
+
+    if !seen_package {
+        return Compile_Error{message = "missing package declaration"}, false
+    }
+    return Compile_Error{}, true
+}
+
 contains_text :: proc(items: []string, value: string) -> bool {
     for item in items {
         if item == value {
@@ -98,7 +136,83 @@ sorted_unique_texts :: proc(items: []string) -> (out: [dynamic]string) {
     })
     return out
 }
+clone_string_slice :: proc(values: []string) -> (out: [dynamic]string) {
+    for value in values {
+        append(&out, strings.clone(value))
+    }
+    return out
+}
 
+delete_string_slice :: proc(values: ^[dynamic]string) {
+    for i in 0 ..< len(values^) {
+        if values^[i] != "" {
+            delete(values^[i])
+        }
+    }
+    delete(values^)
+    values^ = nil
+}
+
+clone_cst_form :: proc(form: CST_Form) -> CST_Form {
+    cloned := form
+    cloned.text = strings.clone(form.text)
+    cloned.items = nil
+    for item in form.items {
+        append(&cloned.items, clone_cst_form(item))
+    }
+    return cloned
+}
+
+delete_cst_form :: proc(form: ^CST_Form) {
+    if form.text != "" {
+        delete(form.text)
+    }
+    for i in 0 ..< len(form.items) {
+        delete_cst_form(&form.items[i])
+    }
+    delete(form.items)
+    form^ = CST_Form{}
+}
+
+clone_cst_form_slice :: proc(forms: []CST_Form) -> (out: [dynamic]CST_Form) {
+    for form in forms {
+        append(&out, clone_cst_form(form))
+    }
+    return out
+}
+
+delete_cst_form_slice :: proc(forms: ^[dynamic]CST_Form) {
+    for i in 0 ..< len(forms^) {
+        delete_cst_form(&forms^[i])
+    }
+    delete(forms^)
+    forms^ = nil
+}
+
+clone_cst_top_form :: proc(top: CST_Top_Form) -> CST_Top_Form {
+    return CST_Top_Form{
+        form = clone_cst_form(top.form),
+        doc_lines = clone_string_slice(top.doc_lines[:]),
+        source = strings.clone(top.source),
+    }
+}
+
+delete_cst_top_form :: proc(top: ^CST_Top_Form) {
+    delete_cst_form(&top.form)
+    delete_string_slice(&top.doc_lines)
+    if top.source != "" {
+        delete(top.source)
+    }
+    top^ = CST_Top_Form{}
+}
+
+delete_cst_top_form_slice :: proc(forms: ^[dynamic]CST_Top_Form) {
+    for i in 0 ..< len(forms^) {
+        delete_cst_top_form(&forms^[i])
+    }
+    delete(forms^)
+    forms^ = nil
+}
 append_import_form_unique :: proc(forms: ^[dynamic]CST_Top_Form, seen: ^[dynamic]string, form: CST_Top_Form) {
     key := form.source
     if form.form.kind == .List && len(form.form.items) > 0 && is_symbol(form.form.items[0], "import") {
@@ -115,12 +229,18 @@ append_import_form_unique :: proc(forms: ^[dynamic]CST_Top_Form, seen: ^[dynamic
     append(forms, form)
 }
 
+is_builtin_kvist_import_path :: proc(path: string) -> bool {
+    switch path {
+    case "kvist:arr", "kvist:str", "kvist:map", "kvist:set", "kvist:struct":
+        return true
+    case:
+        return false
+    }
+}
+
 is_source_import_path :: proc(path: string) -> bool {
     if strings.has_prefix(path, "kvist:") {
-        if path == "kvist:arr" || path == "kvist:str" || path == "kvist:map" || path == "kvist:set" || path == "kvist:struct" {
-            return false
-        }
-        return true
+        return !is_builtin_kvist_import_path(path)
     }
     for ch in path {
         if ch == ':' {
@@ -131,8 +251,12 @@ is_source_import_path :: proc(path: string) -> bool {
 }
 
 resolve_shipped_source_import_path :: proc(importer_path, import_path: string) -> (string, Compile_Error, bool) {
-    if !strings.has_prefix(import_path, "kvist:") || import_path == "kvist:arr" || import_path == "kvist:str" || import_path == "kvist:map" || import_path == "kvist:set" || import_path == "kvist:struct" {
+    if !strings.has_prefix(import_path, "kvist:") || is_builtin_kvist_import_path(import_path) {
         return "", Compile_Error{}, false
+    }
+    package_name := import_path[len("kvist:"):]
+    if package_name == "" {
+        return "", Compile_Error{message = fmt.tprintf("could not resolve shipped source import: %s", import_path)}, false
     }
     root, ok_root := repo_root_for_path(importer_path)
     if !ok_root {
@@ -141,8 +265,8 @@ resolve_shipped_source_import_path :: proc(importer_path, import_path: string) -
     if !ok_root {
         return "", Compile_Error{message = fmt.tprintf("could not resolve shipped source import: %s", import_path)}, false
     }
-    package_name := import_path[len("kvist:"):]
-    candidate, join_err := os.join_path({root, "packages", package_name}, context.allocator)
+    defer delete(root)
+    candidate, join_err := os.join_path({root, "packages", package_name, "package.kvist"}, context.allocator)
     if join_err != nil || !os.exists(candidate) {
         if join_err == nil {
             delete(candidate)
@@ -168,7 +292,12 @@ resolve_source_import_path :: proc(importer_path, import_path: string) -> (strin
     }
 
     if os.exists(base) && os.is_dir(base) {
-        return base, Compile_Error{}, true
+        return strings.clone(base), Compile_Error{}, true
+    }
+
+    file_path := fmt.tprintf("%s.kvist", base)
+    if os.exists(file_path) && !os.is_dir(file_path) {
+        return strings.clone(file_path), Compile_Error{}, true
     }
     return "", Compile_Error{message = fmt.tprintf("could not resolve source import: %s", import_path)}, false
 }
@@ -218,7 +347,20 @@ collect_local_decl_names :: proc(forms: []CST_Top_Form) -> (names: [dynamic]stri
 collect_public_decl_names :: proc(forms: []CST_Top_Form) -> (names: [dynamic]string) {
     for top in forms {
         form := top.form
-        if form.kind != .List || len(form.items) < 2 || form.items[1].kind != .Symbol {
+        if form.kind != .List || len(form.items) == 0 {
+            continue
+        }
+        if is_symbol(form.items[0], "exports") {
+            if len(form.items) == 2 && form.items[1].kind == .Vector {
+                for item in form.items[1].items {
+                    if item.kind == .Symbol && !contains_text(names[:], item.text) {
+                        append(&names, item.text)
+                    }
+                }
+            }
+            continue
+        }
+        if len(form.items) < 2 || form.items[1].kind != .Symbol {
             continue
         }
         if is_public_decl_head(decl_head_name(form)) {
@@ -231,6 +373,14 @@ collect_public_decl_names :: proc(forms: []CST_Top_Form) -> (names: [dynamic]str
 source_import_alias_and_path :: proc(form: CST_Form) -> (alias, path: string, ok: bool) {
     if form.kind != .List || len(form.items) == 0 || !is_symbol(form.items[0], "import") {
         return "", "", false
+    }
+    if len(form.items) >= 3 {
+        if form.items[1].kind == .Keyword && form.items[1].text == ":odin" {
+            return "", "", false
+        }
+        if len(form.items) >= 4 && form.items[2].kind == .Keyword && form.items[2].text == ":odin" {
+            return "", "", false
+        }
     }
     if len(form.items) == 2 && form.items[1].kind == .String {
         path = import_path_text(form.items[1])
@@ -247,6 +397,49 @@ source_import_alias_and_path :: proc(form: CST_Form) -> (alias, path: string, ok
         return map_name(form.items[1].text), path, true
     }
     return "", "", false
+}
+
+rewrite_force_odin_import_form :: proc(importer_path: string, top: CST_Top_Form) -> CST_Top_Form {
+    rewritten := clone_cst_top_form(top)
+    form := &rewritten.form
+    if form.kind != .List || len(form.items) < 3 || !is_symbol(form.items[0], "import") {
+        return rewritten
+    }
+
+    path_index := -1
+    if len(form.items) == 3 &&
+       form.items[1].kind == .Keyword &&
+       form.items[1].text == ":odin" &&
+       form.items[2].kind == .String {
+        path_index = 2
+    }
+    if len(form.items) == 4 &&
+       form.items[1].kind == .Symbol &&
+       form.items[2].kind == .Keyword &&
+       form.items[2].text == ":odin" &&
+       form.items[3].kind == .String {
+        path_index = 3
+    }
+    if path_index < 0 {
+        return rewritten
+    }
+
+    raw_path := import_path_text(form.items[path_index])
+    if raw_path == "" || os.is_absolute_path(raw_path) || strings.contains(raw_path, ":") {
+        return rewritten
+    }
+
+    base_dir, _ := os.split_path(importer_path)
+    if base_dir == "" {
+        return rewritten
+    }
+    resolved, join_err := os.join_path({base_dir, raw_path}, context.allocator)
+    if join_err != nil {
+        return rewritten
+    }
+    delete(form.items[path_index].text)
+    form.items[path_index].text = fmt.tprintf("%q", resolved)
+    return rewritten
 }
 
 collect_root_source_import_aliases :: proc(path: string) -> ([]Alias_Prefix, Compile_Error, bool) {
@@ -390,7 +583,8 @@ collect_root_source_import_aliases_from_files :: proc(files: []Package_File) -> 
                 return nil, err_package, false
             }
             import_forms := flatten_package_forms(import_files[:])
-            append(&aliases, Alias_Prefix{alias = alias, prefix = alias, exports = collect_public_decl_names(import_forms[:])})
+            exports := collect_public_decl_names(import_forms[:])
+            append(&aliases, Alias_Prefix{alias = alias, prefix = alias, exports = exports})
         }
     }
     return aliases[:], Compile_Error{}, true
@@ -495,6 +689,10 @@ Package_File :: struct {
 }
 
 read_package_files :: proc(dir: string) -> ([]Package_File, Compile_Error, bool) {
+    if strings.has_suffix(dir, ".kvist") {
+        return read_root_package_files(dir)
+    }
+
     entries, err := os.read_directory_by_path(dir, -1, context.allocator)
     if err != nil {
         return nil, Compile_Error{message = fmt.tprintf("could not read package directory: %s", dir)}, false
@@ -711,12 +909,13 @@ load_source_forms :: proc(dir, prefix: string, loaded_keys, import_keys: ^[dynam
             if !ok_nested {
                 return result, err_nested, false
             }
-            append(&aliases, Alias_Prefix{alias = alias, prefix = nested_prefix, exports = nested.exports})
+            exports := clone_string_slice(nested.exports[:])
+            append(&aliases, Alias_Prefix{alias = alias, prefix = nested_prefix, exports = exports})
             for form in nested.imports {
-                append_import_form_unique(&result.imports, import_keys, form)
+                append_import_form_unique(&result.imports, import_keys, clone_cst_top_form(form))
             }
             for form in nested.decls {
-                append(&result.decls, form)
+                append(&result.decls, clone_cst_top_form(form))
             }
         }
     }
@@ -737,7 +936,7 @@ load_source_forms :: proc(dir, prefix: string, loaded_keys, import_keys: ^[dynam
                 continue
             }
             if head == "import" {
-                append_import_form_unique(&result.imports, import_keys, top)
+                append_import_form_unique(&result.imports, import_keys, rewrite_force_odin_import_form(file.path, top))
                 continue
             }
             rewritten, err_rewrite, ok_rewrite := rewrite_top_form(top, locals[:], aliases[:], prefix)
@@ -794,16 +993,18 @@ load_root_file_forms :: proc(path: string) -> (Loaded_Forms, Compile_Error, bool
             if !ok_resolve {
                 return result, err_resolve, false
             }
-            nested, err_nested, ok_nested := load_source_forms(resolved, alias, &loaded_keys, &import_keys, &visiting)
+            nested_import_keys: [dynamic]string
+            nested, err_nested, ok_nested := load_source_forms(resolved, alias, &loaded_keys, &nested_import_keys, &visiting)
             if !ok_nested {
                 return result, err_nested, false
             }
-            append(&aliases, Alias_Prefix{alias = alias, prefix = alias, exports = nested.exports})
+            exports := clone_string_slice(nested.exports[:])
+            append(&aliases, Alias_Prefix{alias = alias, prefix = alias, exports = exports})
             for form in nested.imports {
-                append_import_form_unique(&result.imports, &import_keys, form)
+                append_import_form_unique(&result.imports, &import_keys, clone_cst_top_form(form))
             }
             for form in nested.decls {
-                append(&result.decls, form)
+                append(&result.decls, clone_cst_top_form(form))
             }
         }
     }
@@ -1157,6 +1358,10 @@ compile_source_with_map :: proc(source: string) -> (result: Emit_Result, err: Co
     if !ok_forms {
         return result, clone_compile_error(err_forms, result_allocator), false
     }
+    err_order, ok_order := validate_surface_top_level_order(forms[:])
+    if !ok_order {
+        return result, clone_compile_error(err_order, result_allocator), false
+    }
     expanded, _, err_expand, ok_expand := macroexpand_top_forms(forms[:], true)
     if !ok_expand {
         return result, clone_compile_error(err_expand, result_allocator), false
@@ -1205,7 +1410,7 @@ eval_form_head :: proc(form: CST_Form) -> string {
 
 eval_head_is_decl :: proc(head: string) -> bool {
     switch head {
-    case "comment", "package", "import", "defconst", "defvar", "defstruct", "defenum", "defunion", "odin", "defn":
+    case "comment", "package", "import", "defconst", "defvar", "defstruct", "defenum", "defunion", "odin", "proc", "defn":
         return true
     }
     return false
@@ -1232,6 +1437,10 @@ compile_eval_source_with_map :: proc(source, eval_source: string, no_print: bool
     forms, err_forms, ok_forms := read_top_forms(source)
     if !ok_forms {
         return result, clone_compile_error(err_forms, result_allocator), false
+    }
+    err_order, ok_order := validate_surface_top_level_order(forms[:])
+    if !ok_order {
+        return result, clone_compile_error(err_order, result_allocator), false
     }
     expanded, macros, err_expand, ok_expand := macroexpand_top_forms(forms[:], true)
     if !ok_expand {
@@ -1307,6 +1516,111 @@ compile_path_with_map :: proc(path: string) -> (result: Emit_Result, err: Compil
     }
     context.allocator = old_allocator
     return compile_program_with_map(program)
+}
+
+rebase_emitted_odin_imports :: proc(source, output_dir: string) -> (output: string, err: Compile_Error, ok: bool) {
+    canonical_output_dir, output_dir_err, output_dir_ok := canonicalize_generated_output_dir(output_dir)
+    if !output_dir_ok {
+        return "", output_dir_err, false
+    }
+    defer delete(canonical_output_dir)
+
+    builder := strings.builder_make()
+    defer strings.builder_destroy(&builder)
+
+    changed := false
+    line_start := 0
+    for i := 0; i <= len(source); i += 1 {
+        if i < len(source) && source[i] != '\n' {
+            continue
+        }
+
+        line := source[line_start:i]
+        rewritten := line
+        if strings.has_prefix(line, "import ") {
+            first_quote := strings.index(line, "\"")
+            if first_quote >= 0 {
+                rest := line[first_quote+1:]
+                second_quote := strings.index(rest, "\"")
+                if second_quote >= 0 {
+                    import_path := rest[:second_quote]
+                    if os.is_absolute_path(import_path) {
+                        canonical_import_path, import_path_err := os.get_absolute_path(import_path, context.allocator)
+                        if import_path_err != nil {
+                            return "", Compile_Error{message = fmt.tprintf("could not canonicalize generated Odin import: %s", import_path)}, false
+                        }
+                        relative_path, rel_err := os.get_relative_path(canonical_output_dir, canonical_import_path, context.allocator)
+                        delete(canonical_import_path)
+                        if rel_err != nil {
+                            return "", Compile_Error{message = fmt.tprintf("could not rebase generated Odin import: %s", import_path)}, false
+                        }
+                        rewritten = fmt.tprintf("%s%q%s", line[:first_quote], relative_path, rest[second_quote+1:])
+                        delete(relative_path)
+                        changed = true
+                    }
+                }
+            }
+        }
+        strings.write_string(&builder, rewritten)
+        if i < len(source) {
+            strings.write_byte(&builder, '\n')
+        }
+        line_start = i + 1
+    }
+
+    if changed {
+        return strings.clone(strings.to_string(builder)), Compile_Error{}, true
+    }
+    return strings.clone(source), Compile_Error{}, true
+}
+
+rebase_emitted_odin_imports_for_output_path :: proc(source, output_path: string) -> (output: string, err: Compile_Error, ok: bool) {
+    output_dir, _ := os.split_path(output_path)
+    if output_dir == "" {
+        output_dir = "."
+    }
+    return rebase_emitted_odin_imports(source, output_dir)
+}
+
+canonicalize_generated_output_dir :: proc(path: string) -> (canonical: string, err: Compile_Error, ok: bool) {
+    if path == "" || path == "." {
+        canonical, canonical_err := os.get_absolute_path(".", context.allocator)
+        if canonical_err != nil {
+            return "", Compile_Error{message = "could not canonicalize generated Odin output directory: ."}, false
+        }
+        return canonical, Compile_Error{}, true
+    }
+    if os.exists(path) {
+        canonical, canonical_err := os.get_absolute_path(path, context.allocator)
+        if canonical_err != nil {
+            return "", Compile_Error{message = fmt.tprintf("could not canonicalize generated Odin output directory: %s", path)}, false
+        }
+        return canonical, Compile_Error{}, true
+    }
+
+    parent, leaf := os.split_path(path)
+    if leaf == "" {
+        return "", Compile_Error{message = fmt.tprintf("could not canonicalize generated Odin output directory: %s", path)}, false
+    }
+    if parent == "" || parent == path {
+        parent = "."
+    }
+
+    canonical_parent, parent_err, parent_ok := canonicalize_generated_output_dir(parent)
+    if !parent_ok {
+        return "", parent_err, false
+    }
+    joined, join_err := os.join_path({canonical_parent, leaf}, context.allocator)
+    delete(canonical_parent)
+    if join_err != nil {
+        return "", Compile_Error{message = fmt.tprintf("could not canonicalize generated Odin output directory: %s", path)}, false
+    }
+    cleaned, clean_err := os.clean_path(joined, context.allocator)
+    delete(joined)
+    if clean_err != nil {
+        return "", Compile_Error{message = fmt.tprintf("could not canonicalize generated Odin output directory: %s", path)}, false
+    }
+    return cleaned, Compile_Error{}, true
 }
 
 compile_eval_path :: proc(path, eval_source: string, no_print: bool = false) -> (output: string, err: Compile_Error, ok: bool) {

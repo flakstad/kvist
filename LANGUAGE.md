@@ -888,7 +888,7 @@ kvist test path/to/package.kvist --generated /tmp/generated-tests.odin
 
 The current boundary is still deliberate:
 
-- `t/testing` is structural grouping only; it does not yet add nested reporting context
+- `t/testing` prefixes nested assertion failures with joined context labels
 - fixtures currently support only `:each`, with fixture procs shaped like
   `proc(t: ^testing.T, body: proc(t: ^testing.T))`
 - the test CLI accepts Kvist test names and normalizes them to Odin test names

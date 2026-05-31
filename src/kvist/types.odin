@@ -97,9 +97,10 @@ Return_Spec :: struct {
 }
 
 Import_Decl :: struct {
-    alias:     string,
-    path:      string,
-    has_alias: bool,
+    alias:      string,
+    path:       string,
+    has_alias:  bool,
+    force_odin: bool,
 }
 
 Struct_Decl :: struct {
@@ -139,6 +140,7 @@ Union_Decl :: struct {
 
 Proc_Decl :: struct {
     name:              string,
+    calling_convention: string,
     params:            [dynamic]Param,
     returns:           Return_Spec,
     prefix_directives: [dynamic]string,

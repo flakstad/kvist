@@ -10,7 +10,7 @@ reloads.
 Run it from the repo root:
 
 ```sh
-odin run examples/live_commands_demo
+./kvist run examples/live_commands_demo/main.kvist
 ```
 
 Then edit:
@@ -56,12 +56,17 @@ Press `ctrl-c` to stop the demo.
 This demo now reads a narrow real-Kvist module subset rather than the earlier
 line-based placeholder format. The current loader and evaluator understand:
 
-- `(live/module {...})`
+- ordinary top-level macro expansion before live loading, including core
+  macros, file-local `defmacro` forms, and shipped source-package macros such
+  as `(import live "kvist:live")`
+- `(live/module {...})` plus the shipped `live/defmodule` wrapper
 - `(import "path")` for helper files, with the imported definitions merged into
   the root live module
 - ordinary top-level `(defn name [params...] body...)`
 - `(live/command name)` or `(live/command name {...})`, with optional inline body
 - `(live/hook name)` or `(live/hook name {...})`, with optional inline body
+- shipped `live/defcommand` / `live/defhook` wrappers for the common zero-arg
+  entrypoint case
 - top-level `def`, `defconst`, or `defvar` literal bindings
 - optional source-defined lifecycle helpers:
   - `defn init [] ...`
@@ -81,8 +86,15 @@ If the module defines zero-argument top-level `defn init`, `defn migrate`, or
 `defn shutdown`, the runtime will invoke them on load, reload migration, and
 unload/reload respectively.
 
-The demo host watches the `examples/live_commands_demo/live/` directory for
-`.kvist` file changes, so edits to imported helper files trigger reload too.
+The demo host now uses the reusable live host helper surface rather than
+open-coding directory signatures:
+
+- `new_module_reloader(...)`
+- `load_initial_module(...)`
+- `reload_module_if_source_changed(...)`
+
+It watches the `examples/live_commands_demo/live/` directory for `.kvist` file
+changes, so edits to imported helper files trigger reload too.
 
 The demo command now emits hook payload values explicitly:
 
@@ -92,7 +104,12 @@ The demo command now emits hook payload values explicitly:
   real runtime data
 
 It still does not evaluate arbitrary Kvist code. This step is about moving the
-live path onto actual language syntax and a small executable shared subset.
+live path onto actual language syntax, macro expansion, and a small executable
+shared subset.
+
+The host source is now pure `.kvist`. The example imports `kvist_live` and a
+small Odin-side helper package through explicit `:odin` imports, but the
+example file itself no longer contains raw Odin escape hatches.
 
 See [../../docs/LIVE-SHARED-SUBSET.md](../../docs/LIVE-SHARED-SUBSET.md) for
 the explicit current overlap the project is treating as the live/compiled

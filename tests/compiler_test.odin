@@ -1,6 +1,7 @@
 package tests
 
 import "base:runtime"
+import "core:fmt"
 import "core:os"
 import "core:strings"
 import "core:testing"
@@ -48,16 +49,29 @@ main :: proc() {
 }
 
 @(test)
-reject_legacy_top_level_proc_decl_head :: proc(t: ^testing.T) {
+compile_top_level_proc_decl_head :: proc(t: ^testing.T) {
     source := `(package main)
 
 (proc main []
   (println "hello"))`
 
-    _, err, ok := kvist.compile_source(source)
-    testing.expect_value(t, ok, false)
-    defer delete(err.message)
-    testing.expect_value(t, err.message, "unsupported top-level form: proc")
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    expected := `package main
+
+import "core:fmt"
+
+main :: proc() {
+    fmt.println("hello")
+}
+`
+    testing.expect_value(t, output, expected)
 }
 
 @(test)
@@ -257,13 +271,13 @@ symbols_source_indexes_top_level_forms :: proc(t: ^testing.T) {
 
     testing.expect_value(t, strings.contains(output, "kind\tname\tline\tcolumn\tdetail\tsignature\tdoc\n"), true)
     testing.expect_value(t, strings.contains(output, "import\tstrings\t2\t9\tcore:strings\t\t\n"), true)
-    testing.expect_value(t, strings.contains(output, "struct\tUser\t8\t9\t\t(User {:name string :active bool})\tA user record.\\nOwned by caller.\n"), true)
+    testing.expect_value(t, strings.contains(output, "struct\tUser\t8\t12\t\t(User {:name string :active bool})\tA user record.\\nOwned by caller.\n"), true)
     testing.expect_value(t, strings.contains(output, "field\tUser.name\t9\t3\tUser\t\t\n"), true)
-    testing.expect_value(t, strings.contains(output, "enum\tStatus\t13\t7\t\t\t\n"), true)
+    testing.expect_value(t, strings.contains(output, "enum\tStatus\t13\t10\t\t\t\n"), true)
     testing.expect_value(t, strings.contains(output, "variant\tStatus.Active\t14\t3\tStatus\t\t\n"), true)
-    testing.expect_value(t, strings.contains(output, "union\tValue\t18\t8\t\t\t\n"), true)
+    testing.expect_value(t, strings.contains(output, "union\tValue\t18\t11\t\t\t\n"), true)
     testing.expect_value(t, strings.contains(output, "variant\tValue.i\t19\t3\tValue\t\t\n"), true)
-    testing.expect_value(t, strings.contains(output, "const\tmax-age\t23\t8\t\t\t\n"), true)
+    testing.expect_value(t, strings.contains(output, "const\tmax-age\t23\t11\t\t\t\n"), true)
     testing.expect_value(t, strings.contains(output, "proc\tactive?\t27\t7\t\t(active? [user: User] -> bool)\tReturns true for active users.\\nUsed by sequence examples.\n"), true)
 }
 
@@ -660,7 +674,7 @@ compile_eval_source_can_load_declaration_form :: proc(t: ^testing.T) {
   :message string
 })`
 
-    output, err, ok := kvist.compile_eval_source(source, `(struct Greeting {
+    output, err, ok := kvist.compile_eval_source(source, `(defstruct Greeting {
   :message string
 })`)
     testing.expect_value(t, ok, true)
@@ -990,7 +1004,7 @@ reader_preserves_top_form_source_text :: proc(t: ^testing.T) {
     testing.expect_value(t, forms[0].source, "(package main)")
     testing.expect_value(t, len(forms[0].doc_lines), 1)
     testing.expect_value(t, forms[0].doc_lines[0], "// Doc.")
-    testing.expect_value(t, forms[1].source, "(const answer 42)")
+    testing.expect_value(t, forms[1].source, "(defconst answer 42)")
 }
 
 @(test)
@@ -2566,7 +2580,51 @@ compile_shipped_test_macro_package :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "import \"core:testing\""), true)
     testing.expect_value(t, strings.contains(output, "@(test)"), true)
     testing.expect_value(t, strings.contains(output, "sample :: proc(t: ^testing.T) {"), true)
-    testing.expect_value(t, strings.contains(output, "testing.expect(t, true)"), true)
+    testing.expect_value(t, strings.contains(output, "__kvist_test_expect(t, true)"), true)
+}
+
+compiler_test_repo_root :: proc(loc := #caller_location) -> string {
+    file_path := loc.file_path
+    if !os.is_absolute_path(file_path) {
+        absolute, err := os.get_absolute_path(file_path, context.temp_allocator)
+        if err == nil {
+            file_path = absolute
+        }
+    }
+    tests_dir, _ := os.split_path(file_path)
+    root, _ := os.split_path(tests_dir)
+    return root
+}
+
+build_test_kvist_binary :: proc(t: ^testing.T, repo_root, dir: string) -> (path: string, ok: bool) {
+    bin_path, join_err := os.join_path({dir, "kvist-test-bin"}, context.allocator)
+    testing.expect_value(t, join_err == nil, true)
+    if join_err != nil {
+        return "", false
+    }
+
+    state, stdout, stderr, exec_err := os.process_exec(
+        os.Process_Desc{
+            command = {"odin", "build", "cmd/kvist", fmt.tprintf("-out:%s", bin_path)},
+            working_dir = repo_root,
+        },
+        context.allocator,
+    )
+    defer delete(stdout)
+    defer delete(stderr)
+
+    testing.expect_value(t, exec_err == nil, true)
+    if exec_err != nil {
+        delete(bin_path)
+        return "", false
+    }
+    testing.expect_value(t, state.exited, true)
+    testing.expect_value(t, state.exit_code, 0)
+    if !state.exited || state.exit_code != 0 {
+        delete(bin_path)
+        return "", false
+    }
+    return bin_path, true
 }
 
 @(test)
@@ -2598,13 +2656,14 @@ compile_extended_shipped_test_macro_package :: proc(t: ^testing.T) {
 (t/deftest sample
   "Sample test."
   (t/testing "numbers"
+    (t/testing "parity"
     (t/is (= 1 1))
     (t/is (not false))
     (t/is (= (+ 1 1) 2))
     (t/are [x expected]
       (= x expected)
       1 1
-      2 2)))`
+      2 2))))`
 
     write_err := os.write_entire_file_from_string(path, source)
     testing.expect_value(t, write_err == nil, true)
@@ -2623,10 +2682,13 @@ compile_extended_shipped_test_macro_package :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "sample :: proc(t: ^testing.T) {"), true)
     testing.expect_value(t, strings.contains(output, "each_fixture("), true)
     testing.expect_value(t, strings.contains(output, "proc(t: ^testing.T) {"), true)
-    testing.expect_value(t, strings.contains(output, "testing.expect_value(t, 1, 1)"), true)
-    testing.expect_value(t, strings.contains(output, "testing.expect(t, !(false))"), true)
-    testing.expect_value(t, strings.contains(output, "testing.expect_value(t, (1) + (1), 2)"), true)
-    testing.expect_value(t, strings.contains(output, "testing.expect_value(t, 2, 2)"), true)
+    testing.expect_value(t, strings.contains(output, "__kvist_test_push_context(t, \"numbers\")"), true)
+    testing.expect_value(t, strings.contains(output, "__kvist_test_push_context(t, \"parity\")"), true)
+    testing.expect_value(t, strings.contains(output, "defer __kvist_test_pop_context(t)"), true)
+    testing.expect_value(t, strings.contains(output, "__kvist_test_expect_value(t, 1, 1)"), true)
+    testing.expect_value(t, strings.contains(output, "__kvist_test_expect(t, !(false))"), true)
+    testing.expect_value(t, strings.contains(output, "__kvist_test_expect_value(t, (1) + (1), 2)"), true)
+    testing.expect_value(t, strings.contains(output, "__kvist_test_expect_value(t, 2, 2)"), true)
 }
 
 @(test)
@@ -2668,8 +2730,8 @@ compile_shipped_test_generic_assertion_messages :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    testing.expect_value(t, strings.contains(output, `testing.expect(t, true, "ok")`), true)
-    testing.expect_value(t, strings.contains(output, `testing.expect(t, false, "not ok")`), true)
+    testing.expect_value(t, strings.contains(output, `__kvist_test_expect(t, true, "ok")`), true)
+    testing.expect_value(t, strings.contains(output, `__kvist_test_expect(t, false, "not ok")`), true)
 }
 
 @(test)
@@ -2696,6 +2758,13 @@ cli_test_command_runs_filtered_kvist_tests :: proc(t: ^testing.T) {
     }
     defer delete(generated)
 
+    repo_root := compiler_test_repo_root()
+    kvist_bin, bin_ok := build_test_kvist_binary(t, repo_root, dir)
+    if !bin_ok {
+        return
+    }
+    defer delete(kvist_bin)
+
     source := `(package tests)
 
 (import t "kvist:test")
@@ -2714,8 +2783,8 @@ cli_test_command_runs_filtered_kvist_tests :: proc(t: ^testing.T) {
 
     state, stdout, stderr, exec_err := os.process_exec(
         os.Process_Desc{
-            command = {"odin", "run", "cmd/kvist", "--", "test", path, "--generated", generated, "--names", "passing"},
-            working_dir = ".",
+            command = {kvist_bin, "test", path, "--generated", generated, "--names", "passing"},
+            working_dir = repo_root,
         },
         context.allocator,
     )
@@ -2729,6 +2798,64 @@ cli_test_command_runs_filtered_kvist_tests :: proc(t: ^testing.T) {
     testing.expect_value(t, state.exited, true)
     testing.expect_value(t, state.exit_code, 0)
     testing.expect_value(t, os.exists(generated), true)
+}
+
+@(test)
+cli_test_command_reports_testing_context :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-test-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove(dir)
+    defer delete(dir)
+
+    path, join_err := os.join_path({dir, "package.kvist"}, context.allocator)
+    testing.expect_value(t, join_err == nil, true)
+    if join_err != nil {
+        return
+    }
+    defer delete(path)
+
+    source := `(package tests)
+
+(import t "kvist:test")
+
+(t/deftest failing
+  (t/testing "numbers"
+    (t/testing "parity"
+      (t/is false "not ok"))))`
+
+    write_err := os.write_entire_file_from_string(path, source)
+    testing.expect_value(t, write_err == nil, true)
+    if write_err != nil {
+        return
+    }
+
+    repo_root := compiler_test_repo_root()
+    kvist_bin, bin_ok := build_test_kvist_binary(t, repo_root, dir)
+    if !bin_ok {
+        return
+    }
+    defer delete(kvist_bin)
+
+    state, stdout, stderr, exec_err := os.process_exec(
+        os.Process_Desc{
+            command = {kvist_bin, "test", path, "--names", "failing"},
+            working_dir = repo_root,
+        },
+        context.allocator,
+    )
+    defer delete(stdout)
+    defer delete(stderr)
+
+    testing.expect_value(t, exec_err == nil, true)
+    if exec_err != nil {
+        return
+    }
+    testing.expect_value(t, state.exited, true)
+    testing.expect_value(t, state.exit_code, 1)
+    testing.expect_value(t, strings.contains(string(stdout), "numbers > parity: not ok") || strings.contains(string(stderr), "numbers > parity: not ok"), true)
 }
 
 @(test)
@@ -5306,7 +5433,7 @@ lower_rejects_missing_package :: proc(t: ^testing.T) {
     formatted := kvist.format_compile_error("bad.kvist", source, err)
     defer delete(formatted)
     expected := `bad.kvist:1:1: missing package declaration
-  (defn main []
+  (proc main []
   ^
 `
     testing.expect_value(t, formatted, expected)
@@ -5718,6 +5845,452 @@ lower_rejects_import_after_declarations :: proc(t: ^testing.T) {
   ^
 `
     testing.expect_value(t, formatted, expected)
+}
+
+@(test)
+compile_explicit_odin_import_paths :: proc(t: ^testing.T) {
+    source := `(package main)
+(import kvist_live :odin "../../../src/kvist_live")
+(import :odin "core:fmt")
+
+(proc main []
+  (return))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    expected := `package main
+
+import kvist_live "../../../src/kvist_live"
+
+import "core:fmt"
+
+main :: proc() {
+    return
+}
+`
+    testing.expect_value(t, output, expected)
+}
+
+@(test)
+compile_exported_c_abi_proc_and_var :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(export)
+(defvar hot_api_version u32 1)
+
+(export)
+(proc hot_tick :abi "c" [state: rawptr] -> int
+  42)`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    expected := `package main
+
+@(export)
+hot_api_version: u32 = 1
+
+@(export)
+hot_tick :: proc "c" (state: rawptr) -> int {
+    return 42
+}
+`
+    testing.expect_value(t, output, expected)
+}
+
+@(test)
+compile_defstate_program :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstate App_State
+  {:steps int}
+  {:step step
+   :init init
+   :on-load on-load
+   :on-unload on-unload
+   :version "v1"
+   :sleep-ms 250})
+
+(defn step [state: (ptr App_State)]
+  (set! (:steps state^) (+ (:steps state^) 1)))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "App_State :: struct"), true)
+    testing.expect_value(t, strings.contains(output, "step :: proc"), true)
+    testing.expect_value(t, strings.contains(output, ":step"), false)
+}
+
+@(test)
+compile_defstate_program_with_run_metadata :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstate App_State
+  {:requests int}
+  {:run run
+   :version "v1"})
+
+(defn run [state: (ptr App_State)]
+  (set! (:requests state^) (+ (:requests state^) 1)))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "App_State :: struct"), true)
+    testing.expect_value(t, strings.contains(output, "run :: proc"), true)
+    testing.expect_value(t, strings.contains(output, ":run"), false)
+}
+
+@(test)
+compile_source_with_shipped_reload_package_exposes_run_host_alias :: proc(t: ^testing.T) {
+    tmp_dir, tmp_dir_err := os.temp_directory(context.allocator)
+    testing.expect_value(t, tmp_dir_err == nil, true)
+    if tmp_dir_err != nil {
+        return
+    }
+    defer delete(tmp_dir)
+
+    path, join_err := os.join_path({tmp_dir, "kvist-reload-package-test.kvist"}, context.allocator)
+    testing.expect_value(t, join_err == nil, true)
+    if join_err != nil {
+        return
+    }
+    defer delete(path)
+
+    source := `(package main)
+(import reload "kvist:reload")
+
+(defstate App_State
+  {:requests int}
+  {:run run})
+
+(defn run [state: (ptr App_State) host: (ptr reload/Run_Host)]
+  (when (reload/checkpoint! host)
+    (return)))`
+    write_err := os.write_entire_file_from_string(path, source)
+    testing.expect_value(t, write_err == nil, true)
+    if write_err != nil {
+        return
+    }
+
+    output, err, ok := kvist.compile_path(path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "import runtime "), true)
+    testing.expect_value(t, strings.contains(output, "Run_Host :: runtime.Run_Host"), true)
+    testing.expect_value(t, strings.contains(output, "reload__Run_Host :: runtime.Run_Host"), true)
+    testing.expect_value(t, strings.contains(output, "run :: proc(state: ^App_State, host: ^reload__Run_Host)"), true)
+}
+
+@(test)
+compile_output_rebases_absolute_odin_imports_for_output_path :: proc(t: ^testing.T) {
+    tmp_dir, tmp_dir_err := os.temp_directory(context.allocator)
+    testing.expect_value(t, tmp_dir_err == nil, true)
+    if tmp_dir_err != nil {
+        return
+    }
+    defer delete(tmp_dir)
+
+    output_dir, output_dir_err := os.join_path({tmp_dir, "generated"}, context.allocator)
+    testing.expect_value(t, output_dir_err == nil, true)
+    if output_dir_err != nil {
+        return
+    }
+    defer delete(output_dir)
+
+    output_path, output_path_err := os.join_path({output_dir, "main.odin"}, context.allocator)
+    testing.expect_value(t, output_path_err == nil, true)
+    if output_path_err != nil {
+        return
+    }
+    defer delete(output_path)
+
+    path, join_err := os.join_path({tmp_dir, "kvist-reload-package-rebase-test.kvist"}, context.allocator)
+    testing.expect_value(t, join_err == nil, true)
+    if join_err != nil {
+        return
+    }
+    defer delete(path)
+
+    source := `(package main)
+(import reload "kvist:reload")
+
+(defstate App_State
+  {:requests int}
+  {:run run})
+
+(defn run [state: (ptr App_State) host: (ptr reload/Run_Host)]
+  (when (reload/checkpoint! host)
+    (return)))`
+    write_err := os.write_entire_file_from_string(path, source)
+    testing.expect_value(t, write_err == nil, true)
+    if write_err != nil {
+        return
+    }
+
+    output, err, ok := kvist.compile_path(path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    rebased, rebase_err, rebase_ok := kvist.rebase_emitted_odin_imports_for_output_path(output, output_path)
+    testing.expect_value(t, rebase_ok, true)
+    if !rebase_ok {
+        testing.expect_value(t, rebase_err.message, "")
+        return
+    }
+    defer delete(rebased)
+
+    testing.expect_value(t, strings.contains(rebased, "import runtime "), true)
+    testing.expect_value(t, strings.contains(rebased, "import runtime \"/"), false)
+}
+
+@(test)
+compile_output_rebased_for_tmp_path_uses_canonical_relative_import :: proc(t: ^testing.T) {
+    tmp_dir, tmp_dir_err := os.temp_directory(context.allocator)
+    testing.expect_value(t, tmp_dir_err == nil, true)
+    if tmp_dir_err != nil {
+        return
+    }
+    defer delete(tmp_dir)
+
+    path, join_err := os.join_path({tmp_dir, "kvist-reload-package-tmp-check.kvist"}, context.allocator)
+    testing.expect_value(t, join_err == nil, true)
+    if join_err != nil {
+        return
+    }
+    defer delete(path)
+
+    output_path, output_path_err := os.join_path({tmp_dir, "kvist-reload-package-tmp-check.odin"}, context.allocator)
+    testing.expect_value(t, output_path_err == nil, true)
+    if output_path_err != nil {
+        return
+    }
+    defer delete(output_path)
+
+    source := `(package main)
+(import reload "kvist:reload")
+
+(defstate App_State
+  {:requests int}
+  {:run run})
+
+(defn run [state: (ptr App_State) host: (ptr reload/Run_Host)]
+  (when (reload/checkpoint! host)
+    (return)))`
+    write_err := os.write_entire_file_from_string(path, source)
+    testing.expect_value(t, write_err == nil, true)
+    if write_err != nil {
+        return
+    }
+
+    output, err, ok := kvist.compile_path(path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    rebased, rebase_err, rebase_ok := kvist.rebase_emitted_odin_imports_for_output_path(output, output_path)
+    testing.expect_value(t, rebase_ok, true)
+    if !rebase_ok {
+        testing.expect_value(t, rebase_err.message, "")
+        return
+    }
+    defer delete(rebased)
+
+    repo_root_value, repo_ok := kvist.repo_root_for_path(".")
+    testing.expect_value(t, repo_ok, true)
+    if !repo_ok {
+        return
+    }
+    repo_root := repo_root_value
+    defer delete(repo_root)
+
+    runtime_path, runtime_path_err := os.join_path({repo_root, "src", "kvist_hot_app_runtime"}, context.allocator)
+    testing.expect_value(t, runtime_path_err == nil, true)
+    if runtime_path_err != nil {
+        return
+    }
+    defer delete(runtime_path)
+
+    canonical_tmp_dir, canonical_tmp_dir_err := os.get_absolute_path(tmp_dir, context.allocator)
+    testing.expect_value(t, canonical_tmp_dir_err == nil, true)
+    if canonical_tmp_dir_err != nil {
+        return
+    }
+    defer delete(canonical_tmp_dir)
+
+    canonical_runtime_path, canonical_runtime_path_err := os.get_absolute_path(runtime_path, context.allocator)
+    testing.expect_value(t, canonical_runtime_path_err == nil, true)
+    if canonical_runtime_path_err != nil {
+        return
+    }
+    defer delete(canonical_runtime_path)
+
+    expected_import_path, expected_import_path_err := os.get_relative_path(canonical_tmp_dir, canonical_runtime_path, context.allocator)
+    testing.expect_value(t, expected_import_path_err == nil, true)
+    if expected_import_path_err != nil {
+        return
+    }
+    defer delete(expected_import_path)
+
+    expected_import_line := fmt.tprintf("import runtime %q", expected_import_path)
+    testing.expect_value(t, strings.contains(rebased, expected_import_line), true)
+}
+
+@(test)
+compile_source_package_exports_raw_odin_names :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-source-package-exports-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    support_dir, support_dir_err := os.join_path({dir, "support"}, context.allocator)
+    testing.expect_value(t, support_dir_err == nil, true)
+    if support_dir_err != nil {
+        return
+    }
+    defer delete(support_dir)
+
+    make_support_err := os.make_directory_all(support_dir)
+    testing.expect_value(t, make_support_err == nil, true)
+    if make_support_err != nil {
+        return
+    }
+
+    support_path, support_path_err := os.join_path({support_dir, "package.kvist"}, context.allocator)
+    testing.expect_value(t, support_path_err == nil, true)
+    if support_path_err != nil {
+        return
+    }
+    defer delete(support_path)
+
+    support_source := `(package support)
+(import fmt "core:fmt")
+(exports [Raw_Handle])
+(odin "Raw_Handle :: distinct rawptr")
+
+(defn describe [handle: Raw_Handle]
+  (fmt.printf "%v\n" handle))`
+    support_write_err := os.write_entire_file_from_string(support_path, support_source)
+    testing.expect_value(t, support_write_err == nil, true)
+    if support_write_err != nil {
+        return
+    }
+
+    main_path, main_path_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, main_path_err == nil, true)
+    if main_path_err != nil {
+        return
+    }
+    defer delete(main_path)
+
+    source := `(package main)
+(import support "support")
+
+(defn use-handle [handle: support/Raw_Handle]
+  (support/describe handle))`
+    write_err := os.write_entire_file_from_string(main_path, source)
+    testing.expect_value(t, write_err == nil, true)
+    if write_err != nil {
+        return
+    }
+
+    output, err, ok := kvist.compile_path(main_path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "Raw_Handle :: distinct rawptr"), true)
+    testing.expect_value(t, strings.contains(output, "use_handle :: proc(handle: ^support__Raw_Handle)"), false)
+    testing.expect_value(t, strings.contains(output, "use_handle :: proc(handle: support__Raw_Handle)"), true)
+}
+
+@(test)
+compile_source_with_shipped_hot_macro_package :: proc(t: ^testing.T) {
+    tmp_dir, tmp_dir_err := os.temp_directory(context.allocator)
+    testing.expect_value(t, tmp_dir_err == nil, true)
+    if tmp_dir_err != nil {
+        return
+    }
+    defer delete(tmp_dir)
+    path, join_err := os.join_path({tmp_dir, "kvist-hot-macro-test.kvist"}, context.allocator)
+    testing.expect_value(t, join_err == nil, true)
+    if join_err != nil {
+        return
+    }
+    defer delete(path)
+
+    source := `(package main)
+(import hot "kvist:hot")
+(import kvist_hot :odin "../../../src/kvist_hot")
+(import shared :odin "../shared")
+
+(defconst version string "module v1")
+
+(hot/defmodule shared.State
+                demo-message
+                demo-tick
+                version
+                "module v1 loaded")`
+
+    write_err := os.write_entire_file_from_string(path, source)
+    testing.expect_value(t, write_err == nil, true)
+    if write_err != nil {
+        return
+    }
+
+    output, err, ok := kvist.compile_path(path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, `import kvist_hot "../../../src/kvist_hot"`), true)
+    testing.expect_value(t, strings.contains(output, `kvist_hot_api_version: u32 = 1`), true)
+    testing.expect_value(t, strings.contains(output, `demo_message :: proc "c" () -> cstring`), true)
+    testing.expect_value(t, strings.contains(output, `demo_tick :: proc "c" (state: rawptr)`), true)
+    testing.expect_value(t, strings.contains(output, `kvist_hot.On_Load(shared.State, state, is_reload, "module v1 loaded")`), true)
 }
 
 @(test)

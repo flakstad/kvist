@@ -1,0 +1,41 @@
+(package reload_run_demo)
+
+(import fmt "core:fmt")
+(import time "core:time")
+(import reload "kvist:reload")
+
+(defstate App_State
+  {:request-count int
+   :reload-count int
+   :unload-count int
+   :message string}
+  {:run run
+   :init init
+   :on-load on-load
+   :on-unload on-unload
+   :version "v1"})
+
+(defconst delay time.Duration (* 1 time.Second))
+
+(defn init [state: (ptr App_State)]
+  (set! (:message state^) "run mode initialized"))
+
+(defn on-load [state: (ptr App_State) is-reload: bool]
+  (when is-reload
+    (set! (:reload-count state^) (+ (:reload-count state^) 1)))
+  (set! (:message state^) "run mode active"))
+
+(defn on-unload [state: (ptr App_State)]
+  (set! (:unload-count state^) (+ (:unload-count state^) 1)))
+
+(defn run [state: (ptr App_State) host: (ptr reload/Run_Host)]
+  (for true
+    (set! (:request-count state^) (+ (:request-count state^) 1))
+    (fmt.printf "[run] requests=%d reloads=%d unloads=%d message=%s\n"
+                (:request-count state^)
+                (:reload-count state^)
+                (:unload-count state^)
+                (:message state^))
+    (time.sleep delay)
+    (when (reload/checkpoint! host)
+      (return))))

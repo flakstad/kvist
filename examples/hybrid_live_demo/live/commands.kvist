@@ -1,0 +1,44 @@
+// Edit this file or helpers.kvist while the hybrid demo runs.
+//
+// The host process keeps running while:
+// - the native hot-reload module is rebuilt as a DLL
+// - this live module is reloaded from source
+// - top-level Kvist macros are expanded before the live subset runs
+
+(import live "kvist:live")
+
+(import "helpers")
+
+(live/defmodule
+  {:name "hybrid-inspector"
+   :version "v1"}
+
+  (def note "live layer inspecting host-owned hot state")
+  (def counter-key "inspect-count")
+
+  (defn init []
+    (host/call "host.log" "hybrid live module initialized"))
+
+  (defn migrate []
+    (let [old-count (reload/state-get counter-key)]
+      (when old-count
+        (state/set! counter-key old-count)))
+    (when (reload/from-version)
+      (host/call "host.log"
+                 (str "hybrid live module reloaded from "
+                      (reload/from-version)
+                      " to "
+                      (module/version)))))
+
+  (defn shutdown []
+    (host/call "host.log" "hybrid live module shutting down"))
+
+  (live/defcommand inspect
+    (let [count (state/inc! counter-key)]
+      (host/call "host.log" (render-inspection count))
+      (hook/emit "after-inspect" count)
+      count))
+
+  (live/defhook after-inspect
+    (host/call "host.log"
+               (str "hook=after-inspect count=" (payload/get 0)))))

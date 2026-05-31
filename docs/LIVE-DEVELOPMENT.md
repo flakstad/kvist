@@ -88,6 +88,35 @@ the complementary layer for the parts native reload does poorly:
 - extensions/modding
 - source-level migration of live-owned behavior state
 
+The host-side reload loop should also be a standard pattern rather than copied
+per app. The current reusable helper surface is intentionally small:
+
+- `new_module_reloader(...)`
+- `load_initial_module(...)`
+- `reload_module_if_source_changed(...)`
+
+The lower-level definition-oriented helpers still exist underneath, but the
+preferred host path is now the runtime-oriented one above. That keeps hosts
+from open-coding file signatures, imported-helper watching, parsed-definition
+cleanup, and initial-load bookkeeping.
+
+Live modules also now pass through ordinary top-level macro expansion before
+loading, including core macros plus file-local `defmacro` forms. The runtime
+surface is still intentionally smaller after expansion than full compiled
+Kvist; the important point is that live modules no longer bypass Kvist's macro
+layer entirely.
+
+There is now a matching shipped source package on the live side too:
+
+- `(import live "kvist:live")`
+- `live/defmodule`
+- `live/defcommand`
+- `live/defhook`
+
+That mirrors the native side's `kvist:hot` direction: keep the underlying
+runtime contract explicit, but stop making every user-land demo spell the same
+structural scaffolding by hand.
+
 ## The Runtime Object
 
 The live layer should be modeled as a real embeddable runtime, not as a debug

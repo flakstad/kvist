@@ -19,21 +19,26 @@ first answer for broad day-to-day compiled-code iteration.
 
 These sources are all `.kvist`.
 
-Today, the host and module still use a few narrow `(odin "...")` escape
-hatches for:
+The example files themselves are now pure Kvist source. The module side uses a
+small shipped Kvist helper package instead of hand-writing the full export
+contract:
 
-- exported `proc "c"` symbols
-- the dynlib-tagged symbol table struct
-- direct imports of existing Odin packages such as `kvist_hot`
+- `(import alias :odin "path")` for existing Odin implementation packages
+- `(import hot "kvist:hot")`
+- `(hot/defmodule ...)`
 
-That is a current compiler boundary, not the intended end-state.
+Under that surface, the generated module still uses `(export)` and `:abi "c"`
+for the actual C-ABI entrypoints.
+
+The dynlib-tagged symbol table and rawptr/state-cast glue now live in the
+implementation support package under `src/`, not inside the example sources.
 
 The host intentionally uses the reusable `kvist_hot` helpers rather than
 open-coding file timestamp checks:
 
 - `new_reloader(...)`
-- `load_initial(...)`
-- `reload_if_source_changed(...)`
+- `load_initial_module(...)`
+- `reload_module_if_source_changed(...)`
 
 ## Run It
 
@@ -56,8 +61,7 @@ The host prints a tick every second.
 While the host is still running:
 
 1. Edit [module/main.kvist](./module/main.kvist).
-2. Change the exported `hot_demo_message` string or the text formatting in
-   `hot_demo_tick`.
+2. Change the `hot-demo-version` string passed through `hot/defmodule`.
 3. Rebuild only the shared library:
 
 ```sh
@@ -99,25 +103,20 @@ For a real project, the host shape would usually be:
    - the app-specific callable exports
 3. Start one `kvist_hot.Reloader`.
 4. Keep your app loop ordinary.
-5. Poll `reload_if_source_changed(...)` inside that loop.
+5. Poll `reload_module_if_source_changed(...)` inside that loop.
 
 ## Current Limits
 
-The current Kvist-first demo is real and runnable, but a few boundaries still
-show through:
-
-- exported C-ABI entrypoints are written with raw Odin escape hatches
-- the dynlib symbol table uses a raw Odin struct because field tags are still
-  host-surface syntax
-- existing Odin-only packages such as `kvist_hot` are imported with raw Odin
-  import lines
-
-The actual workflow, however, is now `.kvist`-first:
+The actual workflow is now `.kvist`-first:
 
 - edit `*.kvist`
 - re-run `./kvist ... -o ...`
 - rebuild only the reloadable DLL
 - keep the host process alive
+
+Some implementation packages under `src/` are still ordinary Odin, especially
+where the current system needs field tags or other ABI-facing details. That is
+an implementation boundary, not example-surface leakage.
 
 If you change the shared state layout too much, you still need a restart. That
 is the main native hot-reload constraint, and it is exactly why `Kvist/Live`
