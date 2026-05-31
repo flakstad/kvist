@@ -315,6 +315,28 @@ symbols_source_indexes_defstruct_docstring :: proc(t: ^testing.T) {
 }
 
 @(test)
+symbols_source_indexes_defstate_as_struct :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstate App_State
+  {:steps int
+   :message string}
+  {:step step})`
+
+    output, err, ok := kvist.symbols_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "struct\tApp_State\t3\t11\tstate\t(App_State {:steps int :message string})\t\n"), true)
+    testing.expect_value(t, strings.contains(output, "field\tApp_State.steps\t4\t4\tApp_State\t\t\n"), true)
+    testing.expect_value(t, strings.contains(output, "field\tApp_State.message\t5\t4\tApp_State\t\t\n"), true)
+}
+
+@(test)
 symbols_source_indexes_defunion_and_defenum :: proc(t: ^testing.T) {
     source := `(package main)
 
@@ -584,6 +606,132 @@ editor_symbols_source_includes_multi_file_root_package_symbols :: proc(t: ^testi
 }
 
 @(test)
+editor_symbols_source_includes_multi_file_root_package_symbols_from_non_anchor_file :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-editor-root-package-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    main_path, main_join_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, main_join_err == nil, true)
+    if main_join_err != nil {
+        return
+    }
+    defer delete(main_path)
+    main_source := `(package demo)
+
+(defstruct App_State
+  {:count int})
+
+(defn main [] -> int
+  (helper-value 5))`
+    main_write_err := os.write_entire_file_from_string(main_path, main_source)
+    testing.expect_value(t, main_write_err == nil, true)
+    if main_write_err != nil {
+        return
+    }
+
+    app_path, app_join_err := os.join_path({dir, "app.kvist"}, context.allocator)
+    testing.expect_value(t, app_join_err == nil, true)
+    if app_join_err != nil {
+        return
+    }
+    defer delete(app_path)
+    app_source := `(package demo)
+
+(defn helper-value [n: int] -> int
+  (+ n 1))`
+    app_write_err := os.write_entire_file_from_string(app_path, app_source)
+    testing.expect_value(t, app_write_err == nil, true)
+    if app_write_err != nil {
+        return
+    }
+
+    output, err, ok := kvist.editor_symbols_source(app_path, app_source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "proc\tmain\t"), true)
+    testing.expect_value(t, strings.contains(output, "struct\tApp_State\t"), true)
+    testing.expect_value(t, strings.contains(output, main_path), true)
+}
+
+@(test)
+editor_symbols_source_includes_relative_source_package_imports :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-editor-source-import-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    main_path, main_join_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, main_join_err == nil, true)
+    if main_join_err != nil {
+        return
+    }
+    defer delete(main_path)
+    main_source := `(package demo)
+(import "support/math")
+
+(defn main [] -> int
+  (math/sum-range 0 5))`
+    main_write_err := os.write_entire_file_from_string(main_path, main_source)
+    testing.expect_value(t, main_write_err == nil, true)
+    if main_write_err != nil {
+        return
+    }
+
+    support_dir, support_dir_err := os.join_path({dir, "support", "math"}, context.allocator)
+    testing.expect_value(t, support_dir_err == nil, true)
+    if support_dir_err != nil {
+        return
+    }
+    defer delete(support_dir)
+    mk_support_err := os.make_directory_all(support_dir)
+    testing.expect_value(t, mk_support_err == nil, true)
+    if mk_support_err != nil {
+        return
+    }
+
+    support_path, support_path_err := os.join_path({support_dir, "math.kvist"}, context.allocator)
+    testing.expect_value(t, support_path_err == nil, true)
+    if support_path_err != nil {
+        return
+    }
+    defer delete(support_path)
+    support_source := `(package math)
+
+(defn sum-range [start: int, end: int] -> int
+  (+ start end))`
+    support_write_err := os.write_entire_file_from_string(support_path, support_source)
+    testing.expect_value(t, support_write_err == nil, true)
+    if support_write_err != nil {
+        return
+    }
+
+    output, err, ok := kvist.editor_symbols_source(main_path, main_source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "source import\tmath\t1\t1\tsupport/math\t(import math \"support/math\")"), true)
+    testing.expect_value(t, strings.contains(output, "proc\tmath/sum-range\t"), true)
+    testing.expect_value(t, strings.contains(output, support_path), true)
+}
+
+@(test)
 compile_path_supports_hiccup_expression_interpolation :: proc(t: ^testing.T) {
     path, ok_path := repo_temp_test_path(".tmp-hiccup-interpolation-test.kvist")
     testing.expect_value(t, ok_path, true)
@@ -686,10 +834,11 @@ main :: proc() {
 @(test)
 compile_eval_source_prints_block_forms_as_statements :: proc(t: ^testing.T) {
     source := `(package main)
+(import io "kvist:io")
 (import os "core:os")
 
 (defn load-note [path: string] -> [data: []byte, err: os.Error]
-  (slurp path))`
+  (io/slurp path))`
 
     output, err, ok := kvist.compile_eval_source(source, `(let [[data err] (load-note "tmp/kvist-note.txt")]
   (if (!= err nil)
@@ -711,7 +860,7 @@ import fmt "core:fmt"
 import os "core:os"
 
 load_note :: proc(path: string) -> (data: []byte, err: os.Error) {
-    return os.read_entire_file(path, context.allocator)
+    return io/slurp(path)
 }
 
 main :: proc() {
@@ -2159,16 +2308,17 @@ compile_when_ok_macro :: proc(t: ^testing.T) {
 @(test)
 compile_file_dev_helpers :: proc(t: ^testing.T) {
     source := `(package main)
+(import io "kvist:io")
 (import os "core:os")
 
 (defn read-file [path: string] -> [data: []byte, err: os.Error]
-  (slurp path))
+  (io/slurp path))
 
 (defn write-text [path: string, text: string] -> os.Error
-  (spit path text))
+  (io/spit path text))
 
 (defn read-count [path: string] -> int
-  (let [[data err] (slurp path)]
+  (let [[data err] (io/slurp path)]
     (if (!= err nil)
       0
       (do
@@ -2183,19 +2333,17 @@ compile_file_dev_helpers :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    testing.expect_value(t, strings.contains(output, `import os "core:os"`), true)
     testing.expect_value(t, strings.contains(output, "read_file :: proc(path: string) -> (data: []byte, err: os.Error)"), true)
-    testing.expect_value(t, strings.contains(output, "return os.read_entire_file(path, context.allocator)"), true)
-    testing.expect_value(t, strings.contains(output, "return os.write_entire_file(path, text)"), true)
-    testing.expect_value(t, strings.contains(output, "data, err := os.read_entire_file(path, context.allocator)"), true)
+    testing.expect_value(t, strings.contains(output, "return io/slurp(path)"), true)
+    testing.expect_value(t, strings.contains(output, "return io/spit(path, text)"), true)
+    testing.expect_value(t, strings.contains(output, "data, err := io/slurp(path)"), true)
     testing.expect_value(t, strings.contains(output, "defer delete(data)"), true)
 }
 
 @(test)
 compile_json_interop_is_explicit :: proc(t: ^testing.T) {
     source := `(package main)
-(import json "core:encoding/json")
-(import os "core:os")
+(import json "kvist:json")
 
 (defstruct User {
   :name string
@@ -2203,21 +2351,14 @@ compile_json_interop_is_explicit :: proc(t: ^testing.T) {
 })
 
 (defn save-user [path: string, user: User] -> bool
-  (let [[data marshal-err] (json.marshal user)]
-    (if (!= marshal-err nil)
-      false
-      (do
-        (defer (delete data))
-        (== (spit path data) nil)))))
+  (let [[marshal-err write-err] (json/write path user)]
+    (and (== marshal-err nil)
+         (== write-err nil))))
 
-(defn load-user [path: string] -> [user: User, ok: bool]
-  (let [[data read-err] (slurp path)]
-    (if (!= read-err nil)
-      (return user false)
-      (do
-        (defer (delete data))
-        (let [unmarshal-err (json.unmarshal data (& user))]
-          (return user (== unmarshal-err nil)))))))`
+(defn load-user [path: string] -> bool
+  (let [[user read-err unmarshal-err] (json/read-as User path)]
+    (and (== read-err nil)
+         (== unmarshal-err nil))))`
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
@@ -2227,15 +2368,8 @@ compile_json_interop_is_explicit :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    testing.expect_value(t, strings.contains(output, `import json "core:encoding/json"`), true)
-    testing.expect_value(t, strings.contains(output, `import os "core:os"`), true)
-    testing.expect_value(t, strings.contains(output, "data, marshal_err := json.marshal(user)"), true)
-    testing.expect_value(t, strings.contains(output, "return (os.write_entire_file(path, data)) == (nil)"), true)
-    testing.expect_value(t, strings.contains(output, "data, read_err := os.read_entire_file(path, context.allocator)"), true)
-    testing.expect_value(t, strings.contains(output, "unmarshal_err := json.unmarshal(data, &user)"), true)
-    testing.expect_value(t, strings.contains(output, "defer delete(data)"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_save_json"), false)
-    testing.expect_value(t, strings.contains(output, "kvist_load_json"), false)
+    testing.expect_value(t, strings.contains(output, "marshal_err, write_err := json/write(path, user)"), true)
+    testing.expect_value(t, strings.contains(output, "user, read_err, unmarshal_err := json/read_as(User, path)"), true)
 }
 
 @(test)
@@ -3311,12 +3445,13 @@ reject_returning_owned_result_from_with_temp_allocator_in_final_if_points_to_ali
 @(test)
 reject_returning_slurp_result_from_with_temp_allocator :: proc(t: ^testing.T) {
     source := `(package main)
+(import io "kvist:io")
 (import os "core:os")
 (import runtime "base:runtime")
 
 (defn bad [path: string] -> [data: []byte, err: os.Error]
   (with-temp-allocator [allocator]
-    (slurp path)))`
+    (io/slurp path)))`
 
     _, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, false)
@@ -4679,6 +4814,29 @@ reject_legacy_unqualified_sequence_helpers :: proc(t: ^testing.T) {
     testing.expect_value(t, ok, false)
     testing.expect_value(t, err.message, "`into!` is no longer a core helper; use `arr/into!`")
     delete(err.message)
+
+    source = `(package main)
+
+(defn main [path: string]
+  (slurp path))`
+
+    _, err, ok = kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    testing.expect_value(t, err.message, "`slurp` is no longer a core helper; use `io/slurp`")
+    delete(err.message)
+
+    source = `(package main)
+(import io "kvist:io")
+
+(defn main [path: string, text: string]
+  (io/spit path text)
+  (spit path text)
+  (return))`
+
+    _, err, ok = kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    testing.expect_value(t, err.message, "`spit` is no longer a core helper; use `io/spit`")
+    delete(err.message)
 }
 
 @(test)
@@ -4732,10 +4890,10 @@ reject_nested_owned_sequence_result :: proc(t: ^testing.T) {
 @(test)
 warn_discarded_slurp_result :: proc(t: ^testing.T) {
     source := `(package main)
-(import os "core:os")
+(import io "kvist:io")
 
 (defn main []
-  (slurp "cache.json")
+  (io/slurp "cache.json")
   (return))`
 
     result, err, ok := kvist.compile_source_with_map(source)
@@ -4749,7 +4907,7 @@ warn_discarded_slurp_result :: proc(t: ^testing.T) {
     defer kvist.compile_warning_slice_delete(result.warnings)
     testing.expect_value(t, len(result.warnings), 1)
     if len(result.warnings) == 1 {
-        testing.expect_value(t, result.warnings[0].message, "owned result from slurp is discarded; bind it, delete it, or return it")
+        testing.expect_value(t, result.warnings[0].message, "owned result from io/slurp is discarded; bind it, delete it, or return it")
     }
 }
 

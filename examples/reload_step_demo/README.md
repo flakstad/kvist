@@ -2,12 +2,12 @@
 
 This is the convenience `:step` reload workflow with a more realistic file
 split: one small reload-app shell file, one durable root state, and a separate
-package that holds the program logic you would keep extending.
+same-package program file that holds the logic you would keep extending.
 
 Source:
 
 - `main.kvist`
-- `app/package.kvist`
+- `app.kvist`
 
 Run the reloadable app:
 
@@ -80,12 +80,12 @@ Current shape of the source contract:
 In this demo:
 
 - `main.kvist` is the reload-app shell
-- `app/package.kvist` is the "real program" package
+- `app.kvist` is the "real program" file in the same package
 - the durable root keeps the reload counters plus one `Program_State`
   subsystem
-- `step` only wires the shell state into the app package
+- `step` only wires the shell state into the app file
 
-So the intended extension point is to keep growing `app/package.kvist` while
+So the intended extension point is to keep growing `app.kvist` while
 leaving the reload shell small and boring.
 
 See `../reload_run_demo/` for the app-owned runtime shape that uses `:run` plus

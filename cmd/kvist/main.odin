@@ -628,8 +628,9 @@ filter_symbol_output :: proc(output, identifier: string) -> string {
             continue
         }
         name := kvist.symbols_record_name(line)
-        if (identifier == "" || symbol_matches_identifier(name, identifier)) && !seen[name] {
-            seen[name] = true
+        key := line
+        if (identifier == "" || symbol_matches_identifier(name, identifier)) && !seen[key] {
+            seen[key] = true
             strings.write_string(&builder, line)
             strings.write_byte(&builder, '\n')
         }
@@ -659,8 +660,9 @@ filter_symbol_output_by_prefix :: proc(output, prefix: string) -> string {
             continue
         }
         name := kvist.symbols_record_name(line)
-        if symbol_matches_prefix(name, prefix) && !seen[name] {
-            seen[name] = true
+        key := line
+        if symbol_matches_prefix(name, prefix) && !seen[key] {
+            seen[key] = true
             strings.write_string(&builder, line)
             strings.write_byte(&builder, '\n')
         }

@@ -1,6 +1,5 @@
 (package reload_run_demo)
 
-(import "app")
 (import time "core:time")
 (import reload "kvist:reload")
 
@@ -22,7 +21,7 @@
 (defconst delay time.Duration (* 1 time.Second))
 
 (defn init [state: (ptr App_State)]
-  (app/init-program (& (:program state^))))
+  (init-program (& (:program state^))))
 
 (defn on-load [state: (ptr App_State) is-reload: bool]
   (when is-reload
@@ -33,10 +32,10 @@
 
 (defn run [state: (ptr App_State) host: (ptr reload/Run_Host)]
   (for true
-    (app/handle-request (& (:program state^)))
-    (app/print-status (:reload-count state^)
-                      (:unload-count state^)
-                      (& (:program state^)))
+    (handle-request (& (:program state^)))
+    (print-status (:reload-count state^)
+                  (:unload-count state^)
+                  (& (:program state^)))
     (time.sleep delay)
     (when (reload/checkpoint! host)
       (return))))

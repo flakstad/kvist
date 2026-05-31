@@ -144,6 +144,10 @@ kvist_package_name_for_import_path :: proc(path: string) -> (string, bool) {
         return "set", true
     case "kvist:struct":
         return "struct", true
+    case "kvist:io":
+        return "io", true
+    case "kvist:json":
+        return "json", true
     case:
         return "", false
     }
@@ -178,7 +182,7 @@ resolve_kvist_head :: proc(e: ^Emitter, head: string) -> (canonical: string, mat
     if alias == "kvist" {
         return suffix, true, Compile_Error{}, true
     }
-    if alias == "arr" || alias == "str" || alias == "map" || alias == "set" || alias == "struct" {
+    if alias == "arr" || alias == "str" || alias == "map" || alias == "set" || alias == "struct" || alias == "io" || alias == "json" {
         return head, true, Compile_Error{}, true
     }
     for decl in e.decls {
@@ -319,6 +323,10 @@ deprecated_builtin_collection_head :: proc(head: string) -> (canonical: string, 
         return "map/merge", true
     case "merge!":
         return "map/merge!", true
+    case "slurp":
+        return "io/slurp", true
+    case "spit":
+        return "io/spit", true
     case:
         return "", false
     }
@@ -2240,7 +2248,7 @@ owned_result_head :: proc(name: string) -> bool {
          "arr/distinct", "arr/distinct-by",
          "arr/range", "arr/repeat", "arr/repeatedly", "arr/iterate", "arr/cycle", "arr/take-nth",
          "str/split", "str/join", "str/replace", "str/lower", "str/upper",
-         "slurp":
+         "io/slurp":
         return true
     }
     return false
@@ -5157,32 +5165,6 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
             return "", err_target, false
         }
         return fmt.tprintf("(%s) == nil", target), {}, true
-    }
-
-    if head.text == "slurp" {
-        if len(form.items) != 2 {
-            return "", Compile_Error{message = "slurp expects path", span = form.span}, false
-        }
-        path, err_path, ok_path := emit_expr(e, form.items[1])
-        if !ok_path {
-            return "", err_path, false
-        }
-        return emit_call_text("os.read_entire_file", []string{path, "context.allocator"}), {}, true
-    }
-
-    if head.text == "spit" {
-        if len(form.items) != 3 {
-            return "", Compile_Error{message = "spit expects path and data", span = form.span}, false
-        }
-        path, err_path, ok_path := emit_expr(e, form.items[1])
-        if !ok_path {
-            return "", err_path, false
-        }
-        data, err_data, ok_data := emit_expr(e, form.items[2])
-        if !ok_data {
-            return "", err_data, false
-        }
-        return emit_call_text("os.write_entire_file", []string{path, data}), {}, true
     }
 
     if head.text == "tap>" {

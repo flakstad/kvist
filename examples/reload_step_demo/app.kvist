@@ -1,4 +1,4 @@
-(package app)
+(package reload_step_demo)
 
 (import fmt "core:fmt")
 
@@ -14,8 +14,8 @@
 
 (defn print-status [step-count: int, reload-count: int, unload-count: int, program: (ptr Program_State)]
   (fmt.printf "[app] step=%d reloads=%d unloads=%d jobs=%d status=%s\n"
-              step-count
-              reload-count
-              unload-count
+              step_count
+              reload_count
+              unload_count
               (:jobs-finished program^)
               (:last-status program^)))

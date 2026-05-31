@@ -1,0 +1,25 @@
+(package json)
+(import io "kvist:io")
+(import j "core:encoding/json")
+(import os "core:os")
+
+(defn write
+  "Encode a value as JSON and write it to a file."
+  [path: string, value: $T] -> [marshal-err: j.Marshal_Error, write-err: os.Error] #force_inline
+  (let [[data err] (j.marshal value)]
+    (if (!= err nil)
+      (return err write-err)
+      (do
+        (defer (delete data))
+        (return nil (io/spit path data))))))
+
+(defn read-as
+  "Read JSON bytes from a file and decode them into a typed value."
+  [$T: typeid, path: string] -> [value: T, read-err: os.Error, unmarshal-err: j.Unmarshal_Error] #force_inline
+  (let [[data err] (io/slurp path)]
+    (if (!= err nil)
+      (return value err unmarshal-err)
+      (do
+        (defer (delete data))
+        (let [decode-err (j.unmarshal data (& value))]
+          (return value nil decode-err))))))

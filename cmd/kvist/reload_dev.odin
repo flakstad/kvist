@@ -363,6 +363,78 @@ reload_app_config_from_source :: proc(input, source: string) -> (config: Reload_
     return config, kvist.Compile_Error{}, true
 }
 
+reload_app_primary_input :: proc(input: string) -> (resolved_input: string, ok: bool) {
+    data := read_source_or_exit(input)
+    defer delete(transmute([]byte)data)
+
+    _, _, config_ok := reload_app_config_from_source(input, data)
+    if config_ok {
+        return strings.clone(input), true
+    }
+
+    forms, _, read_ok := kvist.read_top_forms(data)
+    if !read_ok {
+        return "", false
+    }
+    package_name := ""
+    for top in forms {
+        form := top.form
+        if form.kind == .List && len(form.items) == 2 && form.items[0].kind == .Symbol && form.items[0].text == "package" && form.items[1].kind == .Symbol {
+            package_name = form.items[1].text
+            break
+        }
+    }
+    if package_name == "" {
+        return "", false
+    }
+
+    dir, _ := os.split_path(input)
+    if dir == "" {
+        return "", false
+    }
+    entries, dir_err := os.read_directory_by_path(dir, -1, context.allocator)
+    if dir_err != nil {
+        return "", false
+    }
+    defer delete(entries)
+
+    for entry in entries {
+        if entry.type != .Regular || !strings.has_suffix(entry.name, ".kvist") {
+            continue
+        }
+        file_path, join_err := os.join_path({dir, entry.name}, context.allocator)
+        if join_err != nil || file_path == input {
+            continue
+        }
+        file_data, file_err := os.read_entire_file_from_path(file_path, context.allocator)
+        if file_err != nil {
+            continue
+        }
+        file_source := string(file_data)
+        file_forms, _, ok_forms := kvist.read_top_forms(file_source)
+        if !ok_forms {
+            continue
+        }
+        file_package_name := ""
+        for top in file_forms {
+            form := top.form
+            if form.kind == .List && len(form.items) == 2 && form.items[0].kind == .Symbol && form.items[0].text == "package" && form.items[1].kind == .Symbol {
+                file_package_name = form.items[1].text
+                break
+            }
+        }
+        if file_package_name != package_name {
+            continue
+        }
+        _, _, file_config_ok := reload_app_config_from_source(file_path, file_source)
+        if file_config_ok {
+            return strings.clone(file_path), true
+        }
+    }
+
+    return "", false
+}
+
 reload_app_paths :: proc(root_dir: string) -> Reload_App_Paths {
     app_dir, app_join_err := os.join_path({root_dir, "app"}, context.allocator)
     if app_join_err != nil {
@@ -1048,19 +1120,26 @@ print_reload_rebuild_result_json :: proc(input: string, paths: Reload_App_Paths,
 }
 
 reload_app_generate_and_build :: proc(input: string, generated_dir := "", rebuild_only, print_paths_only, json_output: bool) {
-    data := read_source_or_exit(input)
+    effective_input := strings.clone(input)
+    defer delete(effective_input)
+    resolved_input, resolved_ok := reload_app_primary_input(input)
+    if resolved_ok {
+        delete(effective_input)
+        effective_input = resolved_input
+    }
+    data := read_source_or_exit(effective_input)
     defer delete(transmute([]byte)data)
 
-    config, config_err, config_ok := reload_app_config_from_source(input, data)
+    config, config_err, config_ok := reload_app_config_from_source(effective_input, data)
     if !config_ok {
-        formatted := kvist.format_compile_error(input, data, config_err)
+        formatted := kvist.format_compile_error(effective_input, data, config_err)
         fmt.eprint(formatted)
         delete(formatted)
         os.exit(1)
     }
     root_dir := generated_dir
     if root_dir == "" {
-        root_dir = reload_app_default_root(input)
+        root_dir = reload_app_default_root(effective_input)
     } else {
         root_dir = strings.clone(root_dir)
     }
@@ -1073,14 +1152,14 @@ reload_app_generate_and_build :: proc(input: string, generated_dir := "", rebuil
     defer delete_reload_app_paths(&paths)
     ensure_reload_app_dirs_or_exit(paths)
 
-    compile_path_to_output_or_exit(input, paths.app_odin)
-    write_reload_app_generated_sources_or_exit(input, config, paths, json_output && !rebuild_only && !print_paths_only)
+    compile_path_to_output_or_exit(effective_input, paths.app_odin)
+    write_reload_app_generated_sources_or_exit(effective_input, config, paths, json_output && !rebuild_only && !print_paths_only)
 
     if print_paths_only {
         if json_output {
-            print_reload_app_paths_json(input, paths)
+            print_reload_app_paths_json(effective_input, paths)
         } else {
-            print_reload_app_paths(input, paths)
+            print_reload_app_paths(effective_input, paths)
         }
         return
     }
@@ -1088,13 +1167,13 @@ reload_app_generate_and_build :: proc(input: string, generated_dir := "", rebuil
     module_build_exit_code := build_odin_package(paths.module_dir, paths.module_binary, "-build-mode:dll")
     if module_build_exit_code != 0 {
         if rebuild_only && json_output {
-            print_reload_rebuild_result_json(input, paths, Reload_Build_Result{ok = false, exit_code = module_build_exit_code})
+            print_reload_rebuild_result_json(effective_input, paths, Reload_Build_Result{ok = false, exit_code = module_build_exit_code})
         }
         os.exit(module_build_exit_code)
     }
     if rebuild_only {
         if json_output {
-            print_reload_rebuild_result_json(input, paths, Reload_Build_Result{ok = true, exit_code = 0})
+            print_reload_rebuild_result_json(effective_input, paths, Reload_Build_Result{ok = true, exit_code = 0})
         }
         return
     }
@@ -1107,12 +1186,19 @@ run_odin_package_command :: proc(package_dir, odin_command: string) -> int {
 }
 
 reload_app_generate_and_execute :: proc(input: string, odin_command: string, generated_dir := "") -> int {
-    data := read_source_or_exit(input)
+    effective_input := strings.clone(input)
+    defer delete(effective_input)
+    resolved_input, resolved_ok := reload_app_primary_input(input)
+    if resolved_ok {
+        delete(effective_input)
+        effective_input = resolved_input
+    }
+    data := read_source_or_exit(effective_input)
     defer delete(transmute([]byte)data)
 
-    config, config_err, config_ok := reload_app_config_from_source(input, data)
+    config, config_err, config_ok := reload_app_config_from_source(effective_input, data)
     if !config_ok {
-        formatted := kvist.format_compile_error(input, data, config_err)
+        formatted := kvist.format_compile_error(effective_input, data, config_err)
         fmt.eprint(formatted)
         delete(formatted)
         return 1
@@ -1120,7 +1206,7 @@ reload_app_generate_and_execute :: proc(input: string, odin_command: string, gen
 
     root_dir := generated_dir
     if root_dir == "" {
-        root_dir = reload_exec_default_root(input)
+        root_dir = reload_exec_default_root(effective_input)
     } else {
         root_dir = strings.clone(generated_dir)
     }
@@ -1133,9 +1219,9 @@ reload_app_generate_and_execute :: proc(input: string, odin_command: string, gen
     defer delete_reload_exec_paths(&paths)
     ensure_reload_exec_dirs_or_exit(paths)
 
-    compile_path_to_output_or_exit(input, paths.app_odin)
+    compile_path_to_output_or_exit(effective_input, paths.app_odin)
 
-    input_abs, abs_err := os.get_absolute_path(input, context.allocator)
+    input_abs, abs_err := os.get_absolute_path(effective_input, context.allocator)
     if abs_err != nil {
         fmt.eprintln("failed to resolve reload input path")
         return 1
@@ -1170,11 +1256,8 @@ reload_app_generate_and_execute :: proc(input: string, odin_command: string, gen
 }
 
 source_declares_reload_app :: proc(input: string) -> bool {
-    data := read_source_or_exit(input)
-    defer delete(transmute([]byte)data)
-
-    _, _, config_ok := reload_app_config_from_source(input, data)
-    return config_ok
+    _, ok := reload_app_primary_input(input)
+    return ok
 }
 
 parse_dev_command :: proc() {

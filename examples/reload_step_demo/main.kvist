@@ -1,7 +1,5 @@
 (package reload_step_demo)
 
-(import "app")
-
 (defstruct Program_State
   {:jobs-finished int
    :last-status string})
@@ -19,7 +17,7 @@
    :sleep-ms 1000})
 
 (defn init [state: (ptr App_State)]
-  (app/init-program (& (:program state^))))
+  (init-program (& (:program state^))))
 
 (defn on-load [state: (ptr App_State) is-reload: bool]
   (when is-reload
@@ -30,8 +28,8 @@
 
 (defn step [state: (ptr App_State)]
   (set! (:step-count state^) (+ (:step-count state^) 1))
-  (app/run-one-step (& (:program state^)))
-  (app/print-status (:step-count state^)
-                    (:reload-count state^)
-                    (:unload-count state^)
-                    (& (:program state^))))
+  (run-one-step (& (:program state^)))
+  (print-status (:step-count state^)
+                (:reload-count state^)
+                (:unload-count state^)
+                (& (:program state^))))

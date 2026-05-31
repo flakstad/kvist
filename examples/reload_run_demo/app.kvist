@@ -1,4 +1,4 @@
-(package app)
+(package reload_run_demo)
 
 (import fmt "core:fmt")
 

@@ -37,12 +37,14 @@ Language_Source_Entry :: struct {
     snippet:  string,
 }
 
-KVIST_CANONICAL_IMPORTS_FOR_EDITOR :: [5]Imported_Symbol_Entry{
+KVIST_CANONICAL_IMPORTS_FOR_EDITOR :: [7]Imported_Symbol_Entry{
     {alias = "arr", path = "kvist:arr"},
     {alias = "str", path = "kvist:str"},
     {alias = "map", path = "kvist:map"},
     {alias = "set", path = "kvist:set"},
     {alias = "struct", path = "kvist:struct"},
+    {alias = "io", path = "kvist:io"},
+    {alias = "json", path = "kvist:json"},
 }
 
 BUILTIN_SOURCE_ENTRIES :: []Builtin_Source_Entry{
@@ -164,6 +166,10 @@ PACKAGE_SOURCE_ENTRIES :: []Package_Source_Entry{
     {import_path = "kvist:set", member = "remove", relative = "packages/set/package.kvist", snippet = "(proc remove [s: set[$T], value: T] -> set[T] #force_inline"},
     {import_path = "kvist:struct", member = "fields", relative = "src/kvist/emit.odin", snippet = "if head.text == \"struct/fields\" || head.text == \"struct/types\""},
     {import_path = "kvist:struct", member = "types", relative = "src/kvist/emit.odin", snippet = "if head.text == \"struct/fields\" || head.text == \"struct/types\""},
+    {import_path = "kvist:io", member = "slurp", relative = "packages/io/io.kvist", snippet = "(defn slurp"},
+    {import_path = "kvist:io", member = "spit", relative = "packages/io/io.kvist", snippet = "(defn spit"},
+    {import_path = "kvist:json", member = "write", relative = "packages/json/json.kvist", snippet = "(defn write"},
+    {import_path = "kvist:json", member = "read-as", relative = "packages/json/json.kvist", snippet = "(defn read-as"},
 }
 
 LANGUAGE_SOURCE_ENTRIES :: []Language_Source_Entry{
@@ -201,8 +207,6 @@ LANGUAGE_SOURCE_ENTRIES :: []Language_Source_Entry{
     {name = "continue", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "case \"continue\":"},
     {name = "with-allocator", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "emit_with_allocator_stmt :: proc"},
     {name = "with-temp-allocator", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "emit_with_temp_allocator_stmt :: proc"},
-    {name = "slurp", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "if head.text == \"slurp\""},
-    {name = "spit", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "if head.text == \"spit\""},
     {name = "tap>", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "if head.text == \"tap>\""},
     {name = "->", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "emit_thread_expr :: proc"},
     {name = "->>", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "emit_thread_expr :: proc"},
@@ -788,6 +792,39 @@ symbols_append_source_package_records :: proc(builder: ^strings.Builder, seen: ^
     }
 }
 
+source_package_anchor_file :: proc(files: []Package_File) -> string {
+    for file in files {
+        _, name := os.split_path(file.path)
+        if name == "main.kvist" || name == "package.kvist" {
+            return file.path
+        }
+    }
+    if len(files) > 0 {
+        return files[0].path
+    }
+    return ""
+}
+
+symbols_append_source_package_import_record :: proc(builder: ^strings.Builder, seen: ^map[string]bool, alias, import_path, file_path: string) {
+    if alias == "" || file_path == "" {
+        return
+    }
+    key := fmt.tprintf("source import\t%s", alias)
+    if seen[key] {
+        delete(key)
+        return
+    }
+    seen[key] = true
+    temp := strings.builder_make()
+    defer strings.builder_destroy(&temp)
+    doc_lines := symbols_doc_lines_from_string(fmt.tprintf("Source package import %s.", import_path))
+    defer delete(doc_lines)
+    symbols_write_record_doc_file(&temp, "source import", alias, 1, 1, import_path, fmt.tprintf("(import %s \"%s\")", alias, import_path), doc_lines[:], file_path)
+    strings.write_string(builder, strings.to_string(temp))
+    strings.write_byte(builder, '\n')
+    delete(key)
+}
+
 symbols_append_local_package_records :: proc(builder: ^strings.Builder, seen: ^map[string]bool, file_path, output: string) {
     lines := strings.split_lines(output, context.allocator)
     defer delete(lines)
@@ -855,9 +892,6 @@ editor_root_package_files :: proc(path, source: string) -> ([]Package_File, bool
         }
         if entry.name == file_name {
             append(&matched, Package_File{path = file_path, source = source, package_name = package_name, forms = forms})
-            if entry.name == "main.kvist" || entry.name == "package.kvist" {
-                has_anchor = true
-            }
             continue
         }
         data, read_err := os.read_entire_file_from_path(file_path, context.allocator)
@@ -885,8 +919,13 @@ editor_root_package_files :: proc(path, source: string) -> ([]Package_File, bool
         append(&matched, Package_File{path = file_path, source = file_source, package_name = file_package_name, forms = file_forms})
     }
 
-    if !has_anchor {
+    if len(matched) == 0 {
         return nil, false
+    }
+    if !has_anchor {
+        files: [dynamic]Package_File
+        append(&files, Package_File{path = path, source = source, package_name = package_name, forms = forms})
+        return files[:], true
     }
     return matched[:], true
 }
@@ -1168,6 +1207,16 @@ package_entry_signature_doc :: proc(import_path, member: string) -> (signature, 
         case "fields": return "(struct/fields target)", "Return source-level field names for a struct type or value.", true
         case "types": return "(struct/types target)", "Return source-level field types for a struct type or value.", true
         }
+    case "kvist:io":
+        switch member {
+        case "slurp": return "(io/slurp path)", "Read a file into owned bytes using the current allocator.", true
+        case "spit": return "(io/spit path data)", "Write bytes or text to a file.", true
+        }
+    case "kvist:json":
+        switch member {
+        case "write": return "(json/write path value)", "Encode a value as JSON and write it to a file.", true
+        case "read-as": return "(json/read-as T path)", "Read JSON from a file and decode it into a typed value.", true
+        }
     }
     return "", "", false
 }
@@ -1209,38 +1258,41 @@ imported_symbols_source :: proc(path, source: string) -> (output: string, err: C
         if !ok_import {
             continue
         }
+        _, import_path, ok_source_import := source_import_alias_and_path(top.form)
+        if ok_source_import {
+            resolved, err_resolve, ok_resolve := resolve_source_import_path(path, import_path)
+            if !ok_resolve {
+                return "", clone_compile_error(err_resolve, result_allocator), false
+            }
+            files, err_files, ok_files := read_package_files(resolved)
+            if !ok_files {
+                delete(resolved)
+                return "", clone_compile_error(err_files, result_allocator), false
+            }
+            _, err_package, ok_package := validate_package_files(resolved, files[:])
+            if !ok_package {
+                delete(resolved)
+                return "", clone_compile_error(err_package, result_allocator), false
+            }
+            anchor := source_package_anchor_file(files[:])
+            symbols_append_source_package_import_record(&builder, &seen, entry.alias, import_path, anchor)
+            for file in files {
+                context.allocator = result_allocator
+                package_output, package_err, ok_package_output := symbols_source(file.source)
+                context.allocator = context.temp_allocator
+                if !ok_package_output {
+                    delete(resolved)
+                    return "", clone_compile_error(package_err, result_allocator), false
+                }
+                symbols_append_source_package_records(&builder, &seen, import_path, entry.alias, file.path, package_output)
+                delete(package_output)
+            }
+            delete(resolved)
+            continue
+        }
         if strings.has_prefix(entry.path, "kvist:") {
             if package_symbols_append(&builder, entry.path, entry.alias) {
                 continue
-            }
-            _, import_path, ok_source_import := source_import_alias_and_path(top.form)
-            if ok_source_import {
-                resolved, err_resolve, ok_resolve := resolve_source_import_path(path, import_path)
-                if !ok_resolve {
-                    return "", clone_compile_error(err_resolve, result_allocator), false
-                }
-                files, err_files, ok_files := read_package_files(resolved)
-                if !ok_files {
-                    delete(resolved)
-                    return "", clone_compile_error(err_files, result_allocator), false
-                }
-                _, err_package, ok_package := validate_package_files(resolved, files[:])
-                if !ok_package {
-                    delete(resolved)
-                    return "", clone_compile_error(err_package, result_allocator), false
-                }
-                for file in files {
-                    context.allocator = result_allocator
-                    package_output, package_err, ok_package_output := symbols_source(file.source)
-                    context.allocator = context.temp_allocator
-                    if !ok_package_output {
-                        delete(resolved)
-                        return "", clone_compile_error(package_err, result_allocator), false
-                    }
-                    symbols_append_source_package_records(&builder, &seen, import_path, entry.alias, file.path, package_output)
-                    delete(package_output)
-                }
-                delete(resolved)
             }
             continue
         }
@@ -1314,18 +1366,7 @@ editor_symbols_source :: proc(path, source: string) -> (output: string, err: Com
 
         for top in forms {
             entry, ok_import := import_entry_from_form(top.form)
-            if !ok_import || !strings.has_prefix(entry.path, "kvist:") {
-                continue
-            }
-            if repo_root != "" && entry.path != "kvist:hiccup" {
-                editor_package_symbols_append(&builder, &seen, repo_root, entry.path, entry.alias)
-            }
-            package_output, ok_package := package_symbols_source(entry.path, entry.alias)
-            if ok_package {
-                symbols_append_unique_records(&builder, &seen, package_output)
-                delete(package_output)
-            }
-            if repo_root != "" && entry.path != "kvist:hiccup" {
+            if !ok_import {
                 continue
             }
             _, import_path, ok_source_import := source_import_alias_and_path(top.form)
@@ -1344,6 +1385,8 @@ editor_symbols_source :: proc(path, source: string) -> (output: string, err: Com
                     delete(resolved)
                     return "", err_package, false
                 }
+                anchor := source_package_anchor_file(files[:])
+                symbols_append_source_package_import_record(&builder, &seen, entry.alias, import_path, anchor)
                 for file in files {
                     package_output, package_err, ok_package_output := symbols_source(file.source)
                     if !ok_package_output {
@@ -1354,6 +1397,18 @@ editor_symbols_source :: proc(path, source: string) -> (output: string, err: Com
                     delete(package_output)
                 }
                 delete(resolved)
+                continue
+            }
+            if !strings.has_prefix(entry.path, "kvist:") {
+                continue
+            }
+            if repo_root != "" && entry.path != "kvist:hiccup" {
+                editor_package_symbols_append(&builder, &seen, repo_root, entry.path, entry.alias)
+            }
+            package_output, ok_package := package_symbols_source(entry.path, entry.alias)
+            if ok_package {
+                symbols_append_unique_records(&builder, &seen, package_output)
+                delete(package_output)
             }
         }
         imported_output, imported_err, ok_imported := imported_symbols_source(path, source)
@@ -1544,7 +1599,7 @@ import_default_alias :: proc(path: string) -> string {
 
 is_static_kvist_package :: proc(import_path: string) -> bool {
     switch import_path {
-    case "kvist:arr", "kvist:str", "kvist:map", "kvist:set", "kvist:struct":
+    case "kvist:arr", "kvist:str", "kvist:map", "kvist:set", "kvist:struct", "kvist:io", "kvist:json":
         return true
     case:
         return false
@@ -1822,6 +1877,25 @@ symbols_source :: proc(source: string) -> (output: string, err: Compile_Error, o
                     detail = "private"
                 }
                 symbols_write_record_doc(&builder, "struct", name, source, form.items[1].span, detail, signature, doc_lines[:])
+                symbols_write_fields(&builder, source, name, form.items[field_index])
+            }
+        case "defstate":
+            if (len(form.items) == 3 || len(form.items) == 4 || len(form.items) == 5) && form.items[1].kind == .Symbol {
+                name := form.items[1].text
+                doc_lines := top.doc_lines
+                field_index := 2
+                if len(form.items) >= 4 && form.items[2].kind == .String {
+                    doc_lines = symbols_append_doc_lines(doc_lines[:], symbols_doc_lines_from_string(unquote_string(form.items[2].text))[:])
+                    field_index = 3
+                }
+                signature := ""
+                fields_sig, err_fields, ok_fields_sig := parse_defstruct_fields(form.items[field_index])
+                if ok_fields_sig {
+                    signature = symbols_struct_signature(name, fields_sig[:])
+                } else {
+                    _ = err_fields
+                }
+                symbols_write_record_doc(&builder, "struct", name, source, form.items[1].span, "state", signature, doc_lines[:])
                 symbols_write_fields(&builder, source, name, form.items[field_index])
             }
         case "defenum", "defenum-":

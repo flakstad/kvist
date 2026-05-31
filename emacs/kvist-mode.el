@@ -50,7 +50,7 @@
     "type" "or-else" "update" "update!"
     "break" "continue" "with-allocator" "with-temp-allocator"
     "when-let" "if-let" "when-ok" "if-ok"
-    "slurp" "spit" "tap>"
+    "tap>"
     "->" "->>")
   "Kvist special forms and syntactic heads.")
 
@@ -76,7 +76,9 @@
     ("str" . "kvist:str")
     ("map" . "kvist:map")
     ("set" . "kvist:set")
-    ("struct" . "kvist:struct"))
+    ("struct" . "kvist:struct")
+    ("io" . "kvist:io")
+    ("json" . "kvist:json"))
   "Canonical explicit imports for compiler-provided Kvist packages.")
 
 (defvar-local kvist--editor-symbol-cache nil
@@ -567,6 +569,11 @@ When REFRESH is non-nil, ignore any cached value."
         (string-suffix-p (concat "." identifier) name)
         (string-suffix-p (concat "/" identifier) name))))
 
+(defun kvist--navigable-symbol-p (symbol)
+  "Return non-nil when SYMBOL should be treated as a definition target."
+  (not (member (plist-get symbol :kind)
+               '("kvist form" "kvist helper" "kvist core" "kvist macro" "kvist package"))))
+
 (defun kvist--dedupe-symbols-by-name (symbols)
   "Deduplicate SYMBOLS by their :name field, preserving first occurrence."
   (let ((seen (make-hash-table :test #'equal))
@@ -640,13 +647,15 @@ When REFRESH is non-nil, ignore any cached value."
   (kvist--identifier-at-point))
 
 (cl-defmethod xref-backend-definitions ((_backend (eql kvist)) identifier)
-  (let* ((matches (or (ignore-errors (kvist--xref-symbols identifier))
-                      (ignore-errors (kvist--lookup-symbols identifier))
-                      (let* ((editor-symbols (ignore-errors (kvist--editor-symbols)))
-                             (editor-matches (seq-filter (lambda (symbol)
-                                                           (kvist--symbol-matches-identifier-p symbol identifier))
-                                                         editor-symbols)))
-                        editor-matches))))
+  (let* ((matches (seq-filter
+                   #'kvist--navigable-symbol-p
+                   (or (ignore-errors (kvist--xref-symbols identifier))
+                       (ignore-errors (kvist--lookup-symbols identifier))
+                       (let* ((editor-symbols (ignore-errors (kvist--editor-symbols)))
+                              (editor-matches (seq-filter (lambda (symbol)
+                                                            (kvist--symbol-matches-identifier-p symbol identifier))
+                                                          editor-symbols)))
+                         editor-matches)))))
     (mapcar
      (lambda (symbol)
        (let ((file (or (plist-get symbol :file) (buffer-file-name)))

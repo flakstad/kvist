@@ -216,8 +216,10 @@ The important iterative workflow is:
 Initial support should stay boring:
 
 ```clojure
-(spit "tmp/users.json" text)
-(let [[data err] (slurp "tmp/users.json")]
+(import io "kvist:io")
+
+(io/spit "tmp/users.json" text)
+(let [[data err] (io/slurp "tmp/users.json")]
   (if (!= err nil)
     0
     (do
@@ -225,12 +227,12 @@ Initial support should stay boring:
       (len data))))
 ```
 
-These forms are now intentionally thin wrappers over `core:os`; source files
-must import it explicitly with `(import os "core:os")`. `(spit path data)`
-lowers to `os.write_entire_file(path, data)` and returns `os.Error`. `(slurp
-path)` lowers to `os.read_entire_file(path, context.allocator)` and returns
-owned `[]byte` plus `os.Error`; callers delete the bytes or return them to
-transfer ownership.
+These helpers are intentionally thin wrappers over `core:os`; source files
+must import them explicitly with `(import io "kvist:io")`. `(io/spit path
+data)` lowers through `os.write_entire_file(path, data)` and returns
+`os.Error`. `(io/slurp path)` lowers through
+`os.read_entire_file(path, context.allocator)` and returns owned `[]byte` plus
+`os.Error`; callers delete the bytes or return them to transfer ownership.
 
 `kvist eval` runs generated scratch code from the source file's directory, so
 relative dev paths such as `tmp/users.json` are stable across separate eval
@@ -241,40 +243,30 @@ returned error as ordinary program data.
 Saving JSON can also stay boring:
 
 ```clojure
-(import json "core:encoding/json")
-(import os "core:os")
+(import io "kvist:io")
+(import json "kvist:json")
 
-(let [[data marshal-err] (json.marshal user)]
-  (if (!= marshal-err nil)
-    false
-    (do
-      (defer (delete data))
-      (== (spit "tmp/users.json" data) nil))))
+(let [[marshal-err write-err] (json/write "tmp/users.json" user)]
+  (and (== marshal-err nil)
+       (== write-err nil)))
 
-(let [[data read-err] (slurp "tmp/users.json")]
-  (if (!= read-err nil)
-    false
-    (do
-      (defer (delete data))
-      (let [user (User {})
-            unmarshal-err (json.unmarshal data (& user))]
-        (== unmarshal-err nil)))))
+(let [[user read-err unmarshal-err] (json/read-as User "tmp/users.json")]
+  (and (== read-err nil)
+       (== unmarshal-err nil)))
 ```
 
 For structured data, continue to require explicit format and type decisions
-rather than inventing a universal printer/reader. JSON is ordinary host
-interop: source files import `core:encoding/json` and call `json.marshal` /
-`json.unmarshal` explicitly. Odin's JSON unmarshal can allocate strings,
-slices, dynamic arrays, and maps inside the destination value according to that
-destination type, so callers still own any allocations inside a successfully
-decoded value. For allocation-heavy decoded values, keep cleanup explicit in the
-calling code.
+rather than inventing a universal printer/reader. The shipped `kvist:json`
+package keeps the surface narrow: `json/write` and `json/read-as`. Odin's JSON
+unmarshal can allocate strings, slices, dynamic arrays, and maps inside the
+destination value according to that destination type, so callers still own any
+allocations inside a successfully decoded value. For allocation-heavy decoded
+values, keep cleanup explicit in the calling code.
 
 These helpers should lean on Odin's existing core libraries:
 
 - `core:os` for `os.read_entire_file` and `os.write_entire_file`;
-- `core:encoding/json` for `json.marshal`, `json.unmarshal`, and JSON struct
-  tags;
+- `core:encoding/json` under the shipped `kvist:json` package;
 - `core:encoding/cbor` as a later binary cache option when inspectability is
   less important than speed or size.
 
@@ -307,7 +299,7 @@ workflow feel REPL-like by remembering recent paths and commands, but the
 compiled Odin should remain ordinary.
 
 JSON should be the first supported structured format because users can inspect
-and edit it. CBOR is a reasonable later option for larger caches. Odin's custom
+and edit it. CBOR is a reasonable later option for larger caches. Raw Odin
 marshalers/unmarshalers should remain available for special types rather than
 Kvist inventing a parallel serialization protocol.
 
@@ -329,7 +321,7 @@ writes the exact stdout from a successful eval run to the named cache file and
 still prints stdout normally.
 
 This is intentionally text-oriented. For structured values, prefer explicit
-`spit`, `slurp`, `json.marshal`, and `json.unmarshal` in Kvist source so
+`io/spit`, `io/slurp`, `json/write`, and `json/read-as` in Kvist source so
 ownership and format choices stay visible.
 
 The Emacs tooling exposes this through ordinary CLI calls:

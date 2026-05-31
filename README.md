@@ -772,9 +772,9 @@ foreign_call :: proc(handle: Foreign_Handle) ---
     compiler-lowered for now
 - map helpers `(map/merge a b)`, `(map/merge! target source)`,
   `(map/zip keys vals)`, `(map/keys m)`, and `(map/vals m)`
-- file-backed dev helpers `(slurp path)` and `(spit path data)`, which require
-  an explicit `core:os` import and lower directly to Odin core calls; JSON
-  marshal/unmarshal stays explicit through `core:encoding/json`
+- file-backed dev helpers `(io/slurp path)` and `(io/spit path data)` from
+  `(import io "kvist:io")`; typed JSON file helpers from
+  `(import json "kvist:json")`
 - `(tap> value)` and `(tap> :label value)` for explicit stdout inspection;
   require `core:fmt` and return the tapped value
 - keywords can stand in for field callbacks in those helpers, e.g. `(arr/map :name users)`,

@@ -1,13 +1,13 @@
 # Reload Run Demo
 
 This demo shows the general `:run` reload mode in a more realistic project
-shape: one small reload-app shell file plus a separate program package that
-holds the code you would keep growing.
+shape: one small reload-app shell file plus a separate same-package program
+file that holds the code you would keep growing.
 
 Source:
 
 - `main.kvist`
-- `app/package.kvist`
+- `app.kvist`
 
 Canonical import:
 
@@ -84,14 +84,15 @@ Current shape of the source contract:
 In this demo:
 
 - `main.kvist` is the reload-app shell
-- `app/package.kvist` is the "real program" package
+- `app.kvist` is the "real program" file in the same package
 - the durable root keeps reload bookkeeping plus one `Program_State`
   subsystem
 - `run` owns the outer loop and calls into the app package once per request
   cycle before checking `reload/checkpoint!`
 
 That is the recommended project shape for larger `:run`-style applications:
-keep the reload shell explicit but tiny, and keep extending the app package.
+keep the reload shell explicit but tiny, and keep extending the app file or
+adding more same-package files beside it.
 
 In the non-dev `run/check/build --reload` path there is no resident reloader,
 so `reload/checkpoint!` simply returns `false` and the `run` loop behaves like

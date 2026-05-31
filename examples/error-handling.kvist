@@ -5,6 +5,7 @@
 // error object where the zero value means success.
 (package main)
 (import "core:fmt")
+(import io "kvist:io")
 (import os "core:os")
 
 (defn parse-demo-int [text: string] -> [value: int, ok: bool]
@@ -70,7 +71,7 @@
   (os.make_directory_all "tmp")
   ;; => nil
 
-  (spit "tmp/kvist-error-demo.txt" "hello")
+  (io/spit "tmp/kvist-error-demo.txt" "hello")
   ;; => nil
 
   (read-byte-count "tmp/kvist-error-demo.txt")

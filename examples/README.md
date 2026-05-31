@@ -62,7 +62,7 @@ delete(...)` for ordinary local scopes. See
 - `core-text-encoding.kvist`: `core:strings`, `strconv`, base64, hex, sha2.
 - `core-math-linalg.kvist`: `core:math`, `math/rand`, and `math/linalg`.
 - `core-time-slice.kvist`: `core:time` durations/buffers and `core:slice`.
-- `dev-io.kvist`: explicit JSON marshal/unmarshal plus text file helpers.
+- `dev-io.kvist`: shipped `io` and `json` helpers for file-backed dev data.
 - `error-handling.kvist`: bool-return vs error-return API conventions.
 
 These examples intentionally keep Odin package names visible. Kvist should make
@@ -92,10 +92,10 @@ are run deliberately.
 - `reload_step_demo`: convenience single-file `defstate` reload workflow; `kvist dev --reload`
   generates the resident shell and reloadable module for you. The checked-in
   example now keeps `main.kvist` as a small shell and puts the app logic in
-  `app/package.kvist`.
+  `app.kvist`.
 - `reload_run_demo`: general app-owned `:run` workflow with one explicit
   `reload/checkpoint!` boundary. The checked-in example also uses the small
-  shell + `app/package.kvist` split.
+  shell + `app.kvist` split.
 - `hot_reload_demo`: long-running compiled host plus a reloadable shared
   library; shows host-owned state surviving native code reload.
 - `hybrid_live_demo`: `.kvist` host plus reloadable native DLL plus embedded
@@ -141,7 +141,7 @@ helpers rather than open-coding the watched-directory loop.
 
 The reload demos are the lowest-ceremony native path so far. They keep the
 user source in one pure `.kvist` reload shell file with one `defstate` root,
-an explicit trailing metadata map, and a separate `app/package.kvist` where
+an explicit trailing metadata map, and a separate `app.kvist` where
 the "real program" code lives. `reload_run_demo` shows the general app-owned
 `:run` mode with one explicit `reload/checkpoint!` cooperation point at the
 runtime boundary. `reload_step_demo` shows the smaller convenience mode where

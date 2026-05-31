@@ -73,7 +73,7 @@ These forms return owned values in normal Kvist code:
 (arr/repeatedly n f)
 (arr/iterate n f x)
 (arr/cycle n xs)
-(slurp path)
+(io/slurp path)
 ```
 
 Use `defer delete` for local owned values:
@@ -109,12 +109,12 @@ array. The chunks inside are borrowed slices and must not be deleted:
   (arr/first (get chunks 0)))
 ```
 
-`slurp` lowers to `os.read_entire_file(path, context.allocator)`. It returns
+`io/slurp` lowers to `os.read_entire_file(path, context.allocator)`. It returns
 owned bytes plus an `os.Error`, so delete the bytes once the successful read is
 no longer needed:
 
 ```clojure
-(let [[data err] (slurp path)]
+(let [[data err] (io/slurp path)]
   (if (!= err nil)
     0
     (do
@@ -122,14 +122,15 @@ no longer needed:
       (len data))))
 ```
 
-If a proc returns the bytes from `slurp`, ownership transfers to the caller and
+If a proc returns the bytes from `io/slurp`, ownership transfers to the caller and
 the callee must not delete them.
 
-Data marshalling is explicit host interop, not Kvist core. For JSON, call
-`json.marshal` and `json.unmarshal` directly. `json.marshal` returns owned
-bytes that must be deleted after writing. `json.unmarshal` may allocate strings,
-slices, dynamic arrays, or maps inside the destination value; the caller owns
-those decoded allocations and must clean them up according to the decoded type.
+Data marshalling is explicit host interop, not Kvist core. For JSON, the shipped
+`kvist:json` package provides `json/write` and `json/read-as`. `json/write`
+marshals to owned bytes internally and deletes them after writing. `json/read-as`
+may allocate strings, slices, dynamic arrays, or maps inside the destination
+value; the caller owns those decoded allocations and must clean them up according
+to the decoded type.
 
 ## Compiler Ownership Knowledge
 
@@ -204,7 +205,7 @@ These are scalar values, plain values, or borrowed views:
 (empty? xs)
 (count xs)
 (contains? collection key)
-(spit path data)
+(io/spit path data)
 (tap> value)
 (tap> :label value)
 ```
@@ -213,8 +214,8 @@ Only the small cross-family kernel remains bare here: `slice`, `get`,
 `empty?`, `count`, and `contains?`. Other collection helpers should use their
 explicit package names.
 
-`spit` lowers to `os.write_entire_file(path, data)` and returns `os.Error`. It
-does not allocate an owned result.
+`io/spit` lowers to `os.write_entire_file(path, data)` and returns `os.Error`.
+It does not allocate an owned result.
 
 `arr/split-at` returns two borrowed slices:
 

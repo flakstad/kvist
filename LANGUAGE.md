@@ -1431,38 +1431,32 @@ they return slice views or owned dynamic arrays.
 ### File-backed development values
 
 Kvist supports the first small piece of a disk-backed iterative workflow with
-thin `core:os` forms:
+thin `kvist:io` helpers:
 
 ```clojure
-(import json "core:encoding/json")
-(import os "core:os")
+(import io "kvist:io")
+(import json "kvist:json")
 
-(spit "tmp/users.json" text)
+(io/spit "tmp/users.json" text)
 
-(let [[data marshal-err] (json.marshal user)]
-  (if (!= marshal-err nil)
-    false
-    (do
-      (defer (delete data))
-      (== (spit "tmp/users.json" data) nil))))
+(let [[marshal-err write-err] (json/write "tmp/users.json" user)]
+  (and (== marshal-err nil)
+       (== write-err nil)))
 
-(let [[data err] (slurp "tmp/users.json")]
-  (if (!= err nil)
+(let [[user read-err unmarshal-err] (json/read-as User "tmp/users.json")]
+  (if (or (!= read-err nil)
+          (!= unmarshal-err nil))
     0
-    (do
-      (defer (delete data))
-      (let [user (User {})
-            unmarshal-err (json.unmarshal data (& user))]
-        ...)))))
+    ...))
 ```
 
-`spit` lowers to `os.write_entire_file(path, data)` and returns `os.Error`.
-`slurp` lowers to `os.read_entire_file(path, context.allocator)` and returns
-owned `[]byte` plus `os.Error`. The caller must delete the bytes when keeping
-the value local, or return them to transfer ownership. Data marshalling is not
-Kvist core syntax: use Odin's libraries explicitly, such as `json.marshal` and
-`json.unmarshal` from `core:encoding/json`. The caller owns any data allocated
-inside a successfully decoded value.
+`io/spit` lowers through `os.write_entire_file(path, data)` and returns
+`os.Error`. `io/slurp` lowers through
+`os.read_entire_file(path, context.allocator)` and returns owned `[]byte` plus
+`os.Error`. The caller must delete the bytes when keeping the value local, or
+return them to transfer ownership. Typed JSON file helpers live in
+`kvist:json` as `json/write` and `json/read-as`. The caller owns any data
+allocated inside a successfully decoded value.
 
 ## Literals and Construction
 

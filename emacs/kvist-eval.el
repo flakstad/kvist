@@ -423,17 +423,20 @@ CLI cache."
 (defun kvist--buffer-command (command)
   "Run Kvist buffer COMMAND, one of build, check, or run."
   (setq kvist--last-source-buffer (current-buffer))
+  (unless buffer-file-name
+    (user-error "Kvist %s requires a file-backed buffer" command))
+  (save-buffer)
   (let* ((source-buffer (current-buffer))
-         (source (kvist--source-temp-file))
+         (source (expand-file-name buffer-file-name))
          (generated (when kvist-show-generated
                       (make-temp-file "kvist-buffer-" nil ".odin")))
          (output-buffer (kvist--prepare-diagnostic-buffer kvist-result-buffer-name))
-         (root (file-name-as-directory (kvist--project-root))))
+         (root (file-name-as-directory (kvist--project-root source))))
     (unwind-protect
         (let* ((default-directory root)
                (args (append (list command source)
                              (when generated (list "--generated" generated))))
-               (exit-code (kvist--call (kvist--executable) args output-buffer t))
+               (exit-code (kvist--call (kvist--executable source) args output-buffer t))
                (result (with-current-buffer output-buffer
                          (buffer-substring-no-properties (point-min) (point-max)))))
           (setq result (kvist--remap-output-source-path result source source-buffer))
@@ -445,8 +448,6 @@ CLI cache."
                              (format "kvist %s: ok" command)
                            trimmed)))
             (kvist--display-output output-buffer result exit-code t)))
-      (when (file-exists-p source)
-        (delete-file source))
       (when (and generated (file-exists-p generated))
         (delete-file generated)))))
 

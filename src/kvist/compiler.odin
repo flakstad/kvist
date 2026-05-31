@@ -232,7 +232,7 @@ append_import_form_unique :: proc(forms: ^[dynamic]CST_Top_Form, seen: ^[dynamic
 
 is_builtin_kvist_import_path :: proc(path: string) -> bool {
     switch path {
-    case "kvist:arr", "kvist:str", "kvist:map", "kvist:set", "kvist:struct":
+    case "kvist:arr", "kvist:str", "kvist:map", "kvist:set", "kvist:struct", "kvist:io", "kvist:json":
         return true
     case:
         return false
@@ -271,7 +271,7 @@ is_source_import_path :: proc(path: string) -> bool {
 
 is_builtin_kvist_package_path :: proc(path: string) -> bool {
     switch path {
-    case "kvist:arr", "kvist:str", "kvist:map", "kvist:set", "kvist:struct":
+    case "kvist:arr", "kvist:str", "kvist:map", "kvist:set", "kvist:struct", "kvist:io", "kvist:json":
         return true
     }
     return false
@@ -537,13 +537,6 @@ read_root_package_files :: proc(path: string) -> ([]Package_File, Compile_Error,
         return files[:], Compile_Error{}, true
     }
 
-    _, file_name := os.split_path(path)
-    if file_name != "main.kvist" && file_name != "package.kvist" {
-        files: [dynamic]Package_File
-        append(&files, Package_File{path = path, source = source, package_name = package_name, forms = forms})
-        return files[:], Compile_Error{}, true
-    }
-
     dir, _ := os.split_path(path)
     if dir == "" {
         return nil, Compile_Error{message = fmt.tprintf("could not resolve root package directory: %s", path)}, false
@@ -554,6 +547,7 @@ read_root_package_files :: proc(path: string) -> ([]Package_File, Compile_Error,
     }
     defer delete(entries)
 
+    has_anchor := false
     matched: [dynamic]Package_File
     for entry in entries {
         if entry.type != .Regular || !strings.has_suffix(entry.name, ".kvist") {
@@ -591,11 +585,19 @@ read_root_package_files :: proc(path: string) -> ([]Package_File, Compile_Error,
             return nil, Compile_Error{message = fmt.tprintf("source package file has duplicate package declarations: %s", file_path)}, false
         }
         if file_package_name == package_name {
+            if entry.name == "main.kvist" || entry.name == "package.kvist" {
+                has_anchor = true
+            }
             append(&matched, Package_File{path = file_path, source = file_source, package_name = file_package_name, forms = file_forms})
         }
     }
     if len(matched) == 0 {
         return nil, Compile_Error{message = fmt.tprintf("source package file is missing package declaration: %s", path)}, false
+    }
+    if !has_anchor {
+        files: [dynamic]Package_File
+        append(&files, Package_File{path = path, source = source, package_name = package_name, forms = forms})
+        return files[:], Compile_Error{}, true
     }
     return matched[:], Compile_Error{}, true
 }
