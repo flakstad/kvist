@@ -423,6 +423,64 @@ editor_symbols_source_includes_source_package_imports :: proc(t: ^testing.T) {
 }
 
 @(test)
+editor_symbols_source_includes_multi_file_root_package_symbols :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-editor-root-package-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    main_path, main_join_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, main_join_err == nil, true)
+    if main_join_err != nil {
+        return
+    }
+    defer delete(main_path)
+    main_source := `(package demo)
+
+(defn main [] -> int
+  (helper-value 5))`
+    main_write_err := os.write_entire_file_from_string(main_path, main_source)
+    testing.expect_value(t, main_write_err == nil, true)
+    if main_write_err != nil {
+        return
+    }
+
+    helpers_path, helpers_join_err := os.join_path({dir, "helpers.kvist"}, context.allocator)
+    testing.expect_value(t, helpers_join_err == nil, true)
+    if helpers_join_err != nil {
+        return
+    }
+    defer delete(helpers_path)
+    helpers_source := `(package demo)
+
+(defn- secret-bonus [] -> int
+  2)
+
+(defn helper-value [n: int] -> int
+  (+ n (secret-bonus)))`
+    helpers_write_err := os.write_entire_file_from_string(helpers_path, helpers_source)
+    testing.expect_value(t, helpers_write_err == nil, true)
+    if helpers_write_err != nil {
+        return
+    }
+
+    output, err, ok := kvist.editor_symbols_source(main_path, main_source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "proc\thelper-value\t"), true)
+    testing.expect_value(t, strings.contains(output, "proc\tsecret-bonus\t"), true)
+    testing.expect_value(t, strings.contains(output, helpers_path), true)
+}
+
+@(test)
 compile_path_supports_hiccup_expression_interpolation :: proc(t: ^testing.T) {
     path := "/Users/andreas/Projects/kvist/.tmp-hiccup-interpolation-test.kvist"
     defer os.remove(path)
@@ -2269,7 +2327,7 @@ main :: proc() {
 }
 
 @(test)
-compile_with_delete_scope :: proc(t: ^testing.T) {
+compile_let_defer_scope :: proc(t: ^testing.T) {
     source := `(package main)
 
 (proc inc [x: int] -> int
@@ -2282,9 +2340,11 @@ compile_with_delete_scope :: proc(t: ^testing.T) {
   (+ acc x))
 
 (proc total [xs: []int] -> int
-  (with-delete [mapped (map inc xs)
-                filtered (filter even? mapped)]
-    (reduce add 0 filtered)))`
+  (let [mapped (map inc xs) defer
+        filtered (filter even? mapped) defer
+        total 0]
+    (set! total (reduce add 0 filtered))
+    total))`
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
@@ -2298,7 +2358,8 @@ compile_with_delete_scope :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "defer delete(mapped)"), true)
     testing.expect_value(t, strings.contains(output, "filtered := kvist_filter(even_p, (mapped)[:])"), true)
     testing.expect_value(t, strings.contains(output, "defer delete(filtered)"), true)
-    testing.expect_value(t, strings.contains(output, "return kvist_reduce(add, 0, (filtered)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "total = kvist_reduce(add, 0, (filtered)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "return total"), true)
 }
 
 @(test)
@@ -2324,26 +2385,47 @@ compile_let_defer_binding :: proc(t: ^testing.T) {
 }
 
 @(test)
-reject_returning_with_delete_binding :: proc(t: ^testing.T) {
-    source := `(package main)
-
-(proc owned [] -> [dynamic]int
-  (with-delete [xs (new [dynamic]int [1 2])]
-    xs))`
-
-    _, err, ok := kvist.compile_source(source)
-    testing.expect_value(t, ok, false)
-    defer delete(err.message)
-    testing.expect_value(t, err.message, "with-delete binding cannot be returned; return it without with-delete or copy it before returning")
-}
-
-@(test)
 reject_returning_defer_binding :: proc(t: ^testing.T) {
     source := `(package main)
 
 (proc owned [] -> [dynamic]int
   (let [xs (new [dynamic]int [1 2]) defer]
     xs))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    defer delete(err.message)
+    testing.expect_value(t, err.message, "defer-marked binding cannot be returned; remove defer or transfer ownership explicitly")
+}
+
+@(test)
+reject_returning_defer_binding_inside_struct_literal :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(struct Box {
+  :xs [dynamic]int
+})
+
+(proc owned [] -> Box
+  (let [xs (new [dynamic]int [1 2]) defer]
+    (Box {:xs xs})))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    defer delete(err.message)
+    testing.expect_value(t, err.message, "defer-marked binding cannot be returned; remove defer or transfer ownership explicitly")
+}
+
+@(test)
+reject_returning_defer_binding_inside_call :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(proc pass-through [xs: [dynamic]int] -> [dynamic]int
+  xs)
+
+(proc owned [] -> [dynamic]int
+  (let [xs (new [dynamic]int [1 2]) defer]
+    (pass-through xs)))`
 
     _, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, false)
@@ -2378,6 +2460,49 @@ reject_returning_slurp_result_from_with_temp_allocator :: proc(t: ^testing.T) {
 (proc bad [path: string] -> [data: []byte, err: os.Error]
   (with-temp-allocator [allocator]
     (slurp path)))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    defer delete(err.message)
+    testing.expect_value(t, err.message, "owned value cannot escape with-temp-allocator; allocate it outside the temp scope or copy it before returning")
+}
+
+@(test)
+reject_returning_wrapped_owned_result_from_with_temp_allocator :: proc(t: ^testing.T) {
+    source := `(package main)
+(import runtime "base:runtime")
+
+(struct Box {
+  :xs [dynamic]int
+})
+
+(proc inc [x: int] -> int
+  (+ x 1))
+
+(proc bad [xs: []int] -> Box
+  (with-temp-allocator [allocator]
+    (Box {:xs (map inc xs)})))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    defer delete(err.message)
+    testing.expect_value(t, err.message, "owned value cannot escape with-temp-allocator; allocate it outside the temp scope or copy it before returning")
+}
+
+@(test)
+reject_returning_owned_arg_call_from_with_temp_allocator :: proc(t: ^testing.T) {
+    source := `(package main)
+(import runtime "base:runtime")
+
+(proc pass-through [xs: [dynamic]int] -> [dynamic]int
+  xs)
+
+(proc inc [x: int] -> int
+  (+ x 1))
+
+(proc bad [xs: []int] -> [dynamic]int
+  (with-temp-allocator [allocator]
+    (pass-through (map inc xs))))`
 
     _, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, false)
@@ -2431,92 +2556,6 @@ macroexpand_with_temp_allocator_scope :: proc(t: ^testing.T) {
       (set! context.allocator kvist-old-allocator-1)
       (runtime.default-temp-allocator-temp-end kvist-temp-scope-1)))
     (let [buffer (make [dynamic]int)] (defer (delete buffer)) (into! buffer (new []int [1 2])))))
-`
-    testing.expect_value(t, output, expected)
-}
-
-@(test)
-macroexpand_with_delete_scope :: proc(t: ^testing.T) {
-    output, err, ok := kvist.macroexpand_source(`(with-delete [xs (map inc users)]
-  (count xs))`)
-    testing.expect_value(t, ok, true)
-    if !ok {
-        testing.expect_value(t, err.message, "")
-        return
-    }
-    defer delete(output)
-
-    expected := `(do
-  (let [xs (map inc users)]
-    (defer (delete xs))
-    (count xs)))
-`
-    testing.expect_value(t, output, expected)
-}
-
-@(test)
-macroexpand_with_delete_multiple_bindings :: proc(t: ^testing.T) {
-    output, err, ok := kvist.macroexpand_source(`(with-delete [xs (map inc users) ys (filter even? xs)]
-  (count ys))`)
-    testing.expect_value(t, ok, true)
-    if !ok {
-        testing.expect_value(t, err.message, "")
-        return
-    }
-    defer delete(output)
-
-    expected := `(do
-  (let [xs (map inc users)
-        ys (filter even? xs)]
-    (defer (delete xs))
-    (defer (delete ys))
-    (count ys)))
-`
-    testing.expect_value(t, output, expected)
-}
-
-@(test)
-macroexpand_expands_nested_builtin_macro_body :: proc(t: ^testing.T) {
-    output, err, ok := kvist.macroexpand_source(`(with-allocator [allocator context.temp_allocator]
-  (with-delete [xs (new [dynamic]int [1 2])]
-    (count xs)))`)
-    testing.expect_value(t, ok, true)
-    if !ok {
-        testing.expect_value(t, err.message, "")
-        return
-    }
-    defer delete(output)
-
-    expected := `(do
-  (let [allocator context.temp_allocator
-        kvist-old-allocator-1 context.allocator]
-    (set! context.allocator allocator)
-    (defer (do
-      (set! context.allocator kvist-old-allocator-1)))
-    (do
-      (let [xs (new [dynamic]int [1 2])]
-        (defer (delete xs))
-        (count xs)))))
-`
-    testing.expect_value(t, output, expected)
-}
-
-@(test)
-macroexpand_recurses_through_ordinary_forms :: proc(t: ^testing.T) {
-    output, err, ok := kvist.macroexpand_source(`(let [n 1]
-  (with-delete [xs (new [dynamic]int [1 2])]
-    (count xs)))`)
-    testing.expect_value(t, ok, true)
-    if !ok {
-        testing.expect_value(t, err.message, "")
-        return
-    }
-    defer delete(output)
-
-    expected := `(let [n 1] (do
-  (let [xs (new [dynamic]int [1 2])]
-    (defer (delete xs))
-    (count xs))))
 `
     testing.expect_value(t, output, expected)
 }
@@ -2646,8 +2685,9 @@ macroexpand_rejects_binding_macro_shapes :: proc(t: ^testing.T) {
 
 @(test)
 macroexpand_source_map_marks_generated_lines :: proc(t: ^testing.T) {
-    source := `(with-delete [xs (map inc users) ys (filter even? xs)]
-  (count ys))`
+    source := `(with-temp-allocator [allocator]
+  (let [xs (map inc users)]
+    (count xs)))`
     result, err, ok := kvist.macroexpand_source_with_map(source)
     testing.expect_value(t, ok, true)
     if !ok {
@@ -2658,21 +2698,11 @@ macroexpand_source_map_marks_generated_lines :: proc(t: ^testing.T) {
     defer delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
-    testing.expect_value(t, len(result.source_map), 6)
+    testing.expect_value(t, len(result.source_map), 9)
 
-    xs_value_start := strings.index(source, "(map inc users)")
-    ys_value_start := strings.index(source, "(filter even? xs)")
-    body_start := strings.index(source, "(count ys)")
+    body_start := strings.index(source, "(let [xs (map inc users)]")
 
-    xs_entry, xs_found := kvist.source_map_entry_for_generated_line(result.source_map[:], 2)
-    testing.expect_value(t, xs_found, true)
-    testing.expect_value(t, xs_entry.source_span.start, xs_value_start)
-
-    ys_entry, ys_found := kvist.source_map_entry_for_generated_line(result.source_map[:], 3)
-    testing.expect_value(t, ys_found, true)
-    testing.expect_value(t, ys_entry.source_span.start, ys_value_start)
-
-    body_entry, body_found := kvist.source_map_entry_for_generated_line(result.source_map[:], 6)
+    body_entry, body_found := kvist.source_map_entry_for_generated_line(result.source_map[:], 9)
     testing.expect_value(t, body_found, true)
     testing.expect_value(t, body_entry.source_span.start, body_start)
 }
@@ -4747,6 +4777,71 @@ compile_path_supports_multi_file_source_package_directory :: proc(t: ^testing.T)
     testing.expect_value(t, strings.contains(output, "math__evens_under"), true)
     testing.expect_value(t, strings.contains(output, "math__default_limit"), true)
     testing.expect_value(t, strings.contains(output, "math__even_step_p"), true)
+}
+
+@(test)
+compile_path_supports_multi_file_root_package_directory :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-root-package-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    main_path, main_join_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, main_join_err == nil, true)
+    if main_join_err != nil {
+        return
+    }
+    defer delete(main_path)
+    main_source := `(package demo)
+
+(defn main [] -> int
+  (helper-value 5))`
+    main_write_err := os.write_entire_file_from_string(main_path, main_source)
+    testing.expect_value(t, main_write_err == nil, true)
+    if main_write_err != nil {
+        return
+    }
+
+    helpers_path, helpers_join_err := os.join_path({dir, "helpers.kvist"}, context.allocator)
+    testing.expect_value(t, helpers_join_err == nil, true)
+    if helpers_join_err != nil {
+        return
+    }
+    defer delete(helpers_path)
+    helpers_source := `(package demo)
+(import arr "kvist:arr")
+
+(defn helper-value [n: int] -> int
+  (let [xs (arr/dynamic int [n (+ n 1)])]
+    (+ (arr/count xs) n)))`
+    helpers_write_err := os.write_entire_file_from_string(helpers_path, helpers_source)
+    testing.expect_value(t, helpers_write_err == nil, true)
+    if helpers_write_err != nil {
+        return
+    }
+
+    output, err, ok := kvist.compile_path(main_path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "helper_value :: proc"), true)
+    testing.expect_value(t, strings.contains(output, "main :: proc() -> int"), true)
+
+    eval_result, eval_err, ok_eval := kvist.compile_eval_path(main_path, "(main)")
+    testing.expect_value(t, ok_eval, true)
+    if !ok_eval {
+        testing.expect_value(t, eval_err.message, "")
+        return
+    }
+    defer delete(eval_result)
+    testing.expect_value(t, strings.contains(eval_result, "helper_value"), true)
 }
 
 @(test)

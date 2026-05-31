@@ -6,26 +6,24 @@
 (import set "kvist:set")
 
 (defn maps_and_sets_demo [] -> int
-  (let [m (map/empty string string)
-        tags (set/empty string)
+  (let [m (map/empty string string) defer
+        tags (set/empty string) defer
         total 0]
-    (with-delete [owned-m m
-                  owned-tags tags]
-      (update! owned-m "name" "Ada")
-      (update! owned-m "lang" "Kvist")
-      (set/add! owned-tags "native")
-      (set/add! owned-tags "lisp")
-      (update! owned-m "lang" "Reset Kvist")
-      (set/add! owned-tags "mutable")
-      (each [key value owned-m]
-        (println key value)
-        (set! total (+ total (str/count key)))
-        (set! total (+ total (str/count value))))
-      (each [tag present owned-tags]
-        (when present
-          (println tag)
-          (set! total (+ total (str/count tag)))))
-      total)))
+    (update! m "name" "Ada")
+    (update! m "lang" "Kvist")
+    (set/add! tags "native")
+    (set/add! tags "lisp")
+    (update! m "lang" "Reset Kvist")
+    (set/add! tags "mutable")
+    (each [key value m]
+      (println key value)
+      (set! total (+ total (str/count key)))
+      (set! total (+ total (str/count value))))
+    (each [tag present tags]
+      (when present
+        (println tag)
+        (set! total (+ total (str/count tag)))))
+    total))
 
 (defn main []
   (println (maps_and_sets_demo)))

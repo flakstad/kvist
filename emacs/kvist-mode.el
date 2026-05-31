@@ -40,7 +40,7 @@
     "for" "each" "comment" "new" "make" "get" "nil?" "in" "not-in"
     "type" "update" "update!"
     "break" "continue" "with-allocator" "with-temp-allocator"
-    "with-delete" "when-let" "if-let" "when-ok" "if-ok"
+    "when-let" "if-let" "when-ok" "if-ok"
     "slurp" "spit" "tap>"
     "->" "->>")
   "Kvist special forms and syntactic heads.")
@@ -180,7 +180,6 @@
                    (comment . 0)
                    (with-allocator . 1)
                    (with-temp-allocator . 1)
-                   (with-delete . 1)
                    (new . 1)
                    (make . 1)))
     (kvist--put-indent (car entry) (cdr entry))))

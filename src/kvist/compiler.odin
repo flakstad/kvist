@@ -222,40 +222,21 @@ source_import_alias_and_path :: proc(form: CST_Form) -> (alias, path: string, ok
 }
 
 collect_root_source_import_aliases :: proc(path: string) -> ([]Alias_Prefix, Compile_Error, bool) {
-    data, read_err := os.read_entire_file_from_path(path, context.allocator)
-    if read_err != nil {
-        return nil, Compile_Error{message = fmt.tprintf("could not read file: %s", path)}, false
+    files, err_files, ok_files := read_root_package_files(path)
+    if !ok_files {
+        return nil, err_files, false
     }
-    defer delete(data)
-    source := string(data)
-    forms, err_forms, ok_forms := read_top_forms(source)
-    if !ok_forms {
-        return nil, err_forms, false
-    }
-
-    aliases: [dynamic]Alias_Prefix
-    for top in forms {
-        alias, _, ok_import := source_import_alias_and_path(top.form)
-        if !ok_import {
-            continue
+    if len(files) > 0 && files[0].package_name != "" {
+        dir, _ := os.split_path(path)
+        if dir == "" {
+            return nil, Compile_Error{message = fmt.tprintf("could not resolve root package directory: %s", path)}, false
         }
-        _, import_path, _ := source_import_alias_and_path(top.form)
-        resolved, err_resolve, ok_resolve := resolve_source_import_path(path, import_path)
-        if !ok_resolve {
-            return nil, err_resolve, false
-        }
-        files, err_files, ok_files := read_package_files(resolved)
-        if !ok_files {
-            return nil, err_files, false
-        }
-        _, err_package, ok_package := validate_package_files(resolved, files[:])
+        _, err_package, ok_package := validate_package_files(dir, files[:])
         if !ok_package {
             return nil, err_package, false
         }
-        all_package_forms := flatten_package_forms(files[:])
-        append(&aliases, Alias_Prefix{alias = alias, prefix = alias, exports = collect_public_decl_names(all_package_forms[:])})
     }
-    return aliases[:], Compile_Error{}, true
+    return collect_root_source_import_aliases_from_files(files[:])
 }
 
 flatten_package_forms :: proc(files: []Package_File) -> (forms: [dynamic]CST_Top_Form) {
@@ -265,6 +246,126 @@ flatten_package_forms :: proc(files: []Package_File) -> (forms: [dynamic]CST_Top
         }
     }
     return forms
+}
+
+read_root_package_files :: proc(path: string) -> ([]Package_File, Compile_Error, bool) {
+    data, read_err := os.read_entire_file_from_path(path, context.allocator)
+    if read_err != nil {
+        return nil, Compile_Error{message = fmt.tprintf("could not read file: %s", path)}, false
+    }
+    source := string(data)
+    forms, err_forms, ok_forms := read_top_forms(source)
+    if !ok_forms {
+        return nil, err_forms, false
+    }
+
+    has_package := false
+    package_name := ""
+    for top in forms {
+        if decl_head_name(top.form) != "package" {
+            continue
+        }
+        has_package = true
+        if len(top.form.items) == 2 && top.form.items[1].kind == .Symbol {
+            package_name = top.form.items[1].text
+        }
+        break
+    }
+    if !has_package {
+        files: [dynamic]Package_File
+        append(&files, Package_File{path = path, source = source, package_name = package_name, forms = forms})
+        return files[:], Compile_Error{}, true
+    }
+
+    _, file_name := os.split_path(path)
+    if file_name != "main.kvist" && file_name != "package.kvist" {
+        files: [dynamic]Package_File
+        append(&files, Package_File{path = path, source = source, package_name = package_name, forms = forms})
+        return files[:], Compile_Error{}, true
+    }
+
+    dir, _ := os.split_path(path)
+    if dir == "" {
+        return nil, Compile_Error{message = fmt.tprintf("could not resolve root package directory: %s", path)}, false
+    }
+    entries, dir_err := os.read_directory_by_path(dir, -1, context.allocator)
+    if dir_err != nil {
+        return nil, Compile_Error{message = fmt.tprintf("could not read package directory: %s", dir)}, false
+    }
+    defer delete(entries)
+
+    matched: [dynamic]Package_File
+    for entry in entries {
+        if entry.type != .Regular || !strings.has_suffix(entry.name, ".kvist") {
+            continue
+        }
+        file_path, join_err := os.join_path({dir, entry.name}, context.allocator)
+        if join_err != nil {
+            return nil, Compile_Error{message = fmt.tprintf("could not read package directory: %s", dir)}, false
+        }
+        data, read_entry_err := os.read_entire_file_from_path(file_path, context.allocator)
+        if read_entry_err != nil {
+            return nil, Compile_Error{message = fmt.tprintf("could not read file: %s", file_path)}, false
+        }
+        file_source := string(data)
+        file_forms, err_file_forms, ok_file_forms := read_top_forms(file_source)
+        if !ok_file_forms {
+            return nil, err_file_forms, false
+        }
+        file_package_name := ""
+        package_count := 0
+        for top in file_forms {
+            if decl_head_name(top.form) != "package" {
+                continue
+            }
+            package_count += 1
+            if len(top.form.items) != 2 || top.form.items[1].kind != .Symbol {
+                return nil, Compile_Error{message = "package expects one symbol name", span = top.form.span}, false
+            }
+            file_package_name = top.form.items[1].text
+        }
+        if package_count == 0 {
+            continue
+        }
+        if package_count > 1 {
+            return nil, Compile_Error{message = fmt.tprintf("source package file has duplicate package declarations: %s", file_path)}, false
+        }
+        if file_package_name == package_name {
+            append(&matched, Package_File{path = file_path, source = file_source, package_name = file_package_name, forms = file_forms})
+        }
+    }
+    if len(matched) == 0 {
+        return nil, Compile_Error{message = fmt.tprintf("source package file is missing package declaration: %s", path)}, false
+    }
+    return matched[:], Compile_Error{}, true
+}
+
+collect_root_source_import_aliases_from_files :: proc(files: []Package_File) -> ([]Alias_Prefix, Compile_Error, bool) {
+    aliases: [dynamic]Alias_Prefix
+    for file in files {
+        for top in file.forms {
+            alias, _, ok_import := source_import_alias_and_path(top.form)
+            if !ok_import {
+                continue
+            }
+            _, import_path, _ := source_import_alias_and_path(top.form)
+            resolved, err_resolve, ok_resolve := resolve_source_import_path(file.path, import_path)
+            if !ok_resolve {
+                return nil, err_resolve, false
+            }
+            import_files, err_files, ok_files := read_package_files(resolved)
+            if !ok_files {
+                return nil, err_files, false
+            }
+            _, err_package, ok_package := validate_package_files(resolved, import_files[:])
+            if !ok_package {
+                return nil, err_package, false
+            }
+            import_forms := flatten_package_forms(import_files[:])
+            append(&aliases, Alias_Prefix{alias = alias, prefix = alias, exports = collect_public_decl_names(import_forms[:])})
+        }
+    }
+    return aliases[:], Compile_Error{}, true
 }
 
 rewrite_symbol_text :: proc(text: string, locals: []string, aliases: []Alias_Prefix, prefix: string, span: Span = {}) -> (string, Compile_Error, bool) {
@@ -624,67 +725,84 @@ load_source_forms :: proc(dir, prefix: string, loaded_keys, import_keys: ^[dynam
 }
 
 load_root_file_forms :: proc(path: string) -> (Loaded_Forms, Compile_Error, bool) {
-    data, read_err := os.read_entire_file_from_path(path, context.allocator)
-    if read_err != nil {
+    files, err_files, ok_files := read_root_package_files(path)
+    if !ok_files {
+        return Loaded_Forms{}, err_files, false
+    }
+    if len(files) == 0 {
         return Loaded_Forms{}, Compile_Error{message = fmt.tprintf("could not read file: %s", path)}, false
     }
-    defer delete(data)
-    source := string(data)
 
-    forms, err_forms, ok_forms := read_top_forms(source)
-    if !ok_forms {
-        return Loaded_Forms{}, err_forms, false
+    if files[0].package_name != "" {
+        dir, _ := os.split_path(path)
+        if dir == "" {
+            return Loaded_Forms{}, Compile_Error{message = fmt.tprintf("could not resolve root package directory: %s", path)}, false
+        }
+        _, err_package, ok_package := validate_package_files(dir, files[:])
+        if !ok_package {
+            return Loaded_Forms{}, err_package, false
+        }
+        err_conflicts, ok_conflicts := validate_package_conflicts(files[:])
+        if !ok_conflicts {
+            return Loaded_Forms{}, err_conflicts, false
+        }
     }
+
     aliases: [dynamic]Alias_Prefix
     import_keys: [dynamic]string
     loaded_keys: [dynamic]string
     visiting: [dynamic]string
     result := Loaded_Forms{}
-    locals := collect_local_decl_names(forms[:])
+    all_forms := flatten_package_forms(files[:])
+    locals := collect_local_decl_names(all_forms[:])
 
-    for top in forms {
-        alias, import_path, ok_import := source_import_alias_and_path(top.form)
-        if !ok_import {
-            continue
-        }
-        resolved, err_resolve, ok_resolve := resolve_source_import_path(path, import_path)
-        if !ok_resolve {
-            return result, err_resolve, false
-        }
-        nested, err_nested, ok_nested := load_source_forms(resolved, alias, &loaded_keys, &import_keys, &visiting)
-        if !ok_nested {
-            return result, err_nested, false
-        }
-        append(&aliases, Alias_Prefix{alias = alias, prefix = alias, exports = nested.exports})
-        for form in nested.imports {
-            append_import_form_unique(&result.imports, &import_keys, form)
-        }
-        for form in nested.decls {
-            append(&result.decls, form)
+    for file in files {
+        for top in file.forms {
+            alias, import_path, ok_import := source_import_alias_and_path(top.form)
+            if !ok_import {
+                continue
+            }
+            resolved, err_resolve, ok_resolve := resolve_source_import_path(file.path, import_path)
+            if !ok_resolve {
+                return result, err_resolve, false
+            }
+            nested, err_nested, ok_nested := load_source_forms(resolved, alias, &loaded_keys, &import_keys, &visiting)
+            if !ok_nested {
+                return result, err_nested, false
+            }
+            append(&aliases, Alias_Prefix{alias = alias, prefix = alias, exports = nested.exports})
+            for form in nested.imports {
+                append_import_form_unique(&result.imports, &import_keys, form)
+            }
+            for form in nested.decls {
+                append(&result.decls, form)
+            }
         }
     }
 
-    for top in forms {
-        form := top.form
-        head := decl_head_name(form)
-        if head == "package" {
-            result.has_package = true
-            result.package_decl = top
-            continue
+    for file in files {
+        for top in file.forms {
+            form := top.form
+            head := decl_head_name(form)
+            if head == "package" {
+                result.has_package = true
+                result.package_decl = top
+                continue
+            }
+            _, _, is_source_import := source_import_alias_and_path(form)
+            if is_source_import {
+                continue
+            }
+            if head == "import" {
+                append_import_form_unique(&result.imports, &import_keys, top)
+                continue
+            }
+            rewritten, err_rewrite, ok_rewrite := rewrite_top_form(top, locals[:], aliases[:], "")
+            if !ok_rewrite {
+                return result, err_rewrite, false
+            }
+            append(&result.decls, rewritten)
         }
-        _, _, is_source_import := source_import_alias_and_path(form)
-        if is_source_import {
-            continue
-        }
-        if head == "import" {
-            append_import_form_unique(&result.imports, &import_keys, top)
-            continue
-        }
-        rewritten, err_rewrite, ok_rewrite := rewrite_top_form(top, locals[:], aliases[:], "")
-        if !ok_rewrite {
-            return result, err_rewrite, false
-        }
-        append(&result.decls, rewritten)
     }
     return result, Compile_Error{}, true
 }

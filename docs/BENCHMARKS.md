@@ -141,7 +141,7 @@ Recommended next cases:
 
 1. `for`/`each` loops over arrays, maps, and sets
 2. package-heavy real-world workloads using explicit `kvist:*` imports
-3. ownership-helper patterns such as `with-delete` around collection builders
+3. ownership-helper patterns using `let ... defer` around collection builders
 4. more map-heavy workloads with realistic surrounding code, not just the
    isolated hot loop
 

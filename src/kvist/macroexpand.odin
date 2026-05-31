@@ -310,8 +310,6 @@ builtin_macro_kind :: proc(head: string) -> Builtin_Macro_Kind {
         return .With_Allocator
     case "with-temp-allocator":
         return .With_Temp_Allocator
-    case "with-delete":
-        return .With_Delete
     case "->":
         return .Thread_First
     case "->>":
@@ -1584,15 +1582,6 @@ write_macro_form_expanded :: proc(builder: ^strings.Builder, form: CST_Form, mac
             defer delete(expanded.source_map)
             write_macro_expanded_output(builder, expanded.output)
             return Compile_Error{}, true
-        case .With_Delete:
-            expanded, err_expand, ok_expand := macroexpand_with_delete(form, macros)
-            if !ok_expand {
-                return err_expand, false
-            }
-            defer delete(expanded.output)
-            defer delete(expanded.source_map)
-            write_macro_expanded_output(builder, expanded.output)
-            return Compile_Error{}, true
         case .Thread_First:
             expanded, err_expand, ok_expand := expand_thread_form(form, false)
             if !ok_expand {
@@ -1806,64 +1795,6 @@ macroexpand_with_temp_allocator :: proc(form: CST_Form, macros: []User_Macro) ->
     return result, {}, true
 }
 
-macroexpand_with_delete :: proc(form: CST_Form, macros: []User_Macro) -> (result: Emit_Result, err: Compile_Error, ok: bool) {
-    if len(form.items) < 3 || form.items[1].kind != .Vector {
-        return result, Compile_Error{message = "with-delete expects binding vector and body", span = form.span}, false
-    }
-    binding := form.items[1]
-    if len(binding.items) < 2 || len(binding.items)%2 != 0 {
-        return result, Compile_Error{message = "with-delete expects [name value ...] bindings", span = binding.span}, false
-    }
-
-    e := Macro_Expander{builder = strings.builder_make(), line = 1, source_map = &result.source_map}
-    defer strings.builder_destroy(&e.builder)
-
-    macro_emit_line(&e, "(do", form.span)
-    i := 0
-    for i < len(binding.items) {
-        if binding.items[i].kind != .Symbol {
-            return result, Compile_Error{message = "with-delete binding name must be a symbol", span = binding.items[i].span}, false
-        }
-        binding_name := binding.items[i].text
-        expanded_value_expr, err_value_expr, ok_value_expr := macroexpand_cst_form_with_macros(binding.items[i+1], macros)
-        if !ok_value_expr {
-            return result, err_value_expr, false
-        }
-        value_expr := macro_form_text(expanded_value_expr)
-        defer delete(value_expr)
-        suffix := ""
-        if i+2 >= len(binding.items) {
-            suffix = "]"
-        }
-        if i == 0 {
-            macro_emit_line(&e, fmt.tprintf("  (let [%s %s%s", binding_name, value_expr, suffix), binding.items[i+1].span)
-        } else {
-            macro_emit_line(&e, fmt.tprintf("        %s %s%s", binding_name, value_expr, suffix), binding.items[i+1].span)
-        }
-        i += 2
-    }
-    i = 0
-    for i < len(binding.items) {
-        binding_name := binding.items[i].text
-        macro_emit_line(&e, fmt.tprintf("    (defer (delete %s))", binding_name), binding.items[i].span)
-        i += 2
-    }
-    body := form.items[2:]
-    for item, idx in body {
-        suffix := ""
-        if idx == len(body)-1 {
-            suffix = "))"
-        }
-        err_body, ok_body := macro_emit_body_form(&e, item, macros, suffix)
-        if !ok_body {
-            return result, err_body, false
-        }
-    }
-
-    result.output = strings.clone(strings.to_string(e.builder))
-    return result, {}, true
-}
-
 macroexpand_when_let :: proc(form: CST_Form, macros: []User_Macro) -> (result: Emit_Result, err: Compile_Error, ok: bool) {
     expanded, err_expand, ok_expand := expand_when_let_form(form)
     if !ok_expand {
@@ -1910,8 +1841,6 @@ macroexpand_form_with_macros :: proc(form: CST_Form, macros: []User_Macro) -> (r
             return macroexpand_with_allocator(form, macros)
         case .With_Temp_Allocator:
             return macroexpand_with_temp_allocator(form, macros)
-        case .With_Delete:
-            return macroexpand_with_delete(form, macros)
         case .Thread_First:
             expanded, err_expand, ok_expand := expand_thread_form(form, false)
             if !ok_expand {

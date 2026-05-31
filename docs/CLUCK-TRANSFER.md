@@ -146,7 +146,7 @@ Kvist can be more helpful than raw Odin, but only within a narrow rule:
 
 ### Acceptable
 
-- `with-delete`-style cleanup helpers;
+- binding-site cleanup via `let ... defer`;
 - allocator-scope helpers;
 - compiler-inserted cleanup for obviously-owned threaded intermediates;
 - default-filled struct construction when the emitted Odin remains explicit;

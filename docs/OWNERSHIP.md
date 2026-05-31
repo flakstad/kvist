@@ -96,7 +96,9 @@ For ordinary local scopes, Kvist also supports a binding-level `defer` marker:
 
 This lowers to the same explicit `defer delete(...)` pattern. It is only a
 local binding convenience; it does not create a hidden runtime cleanup model.
-Defer-marked bindings cannot be returned directly from the scope.
+Defer-marked bindings cannot escape through the return boundary, including
+direct return, wrapping them in returned structs, or passing them into returned
+calls.
 
 For `partition`, `partition-all`, and `partition-by`, delete the outer dynamic
 array. The chunks inside are borrowed slices and must not be deleted:
@@ -294,23 +296,26 @@ scope:
 This form still emits ordinary Odin calls to `runtime.default_temp_allocator_*`.
 The runtime import is explicit, and any owned values that escape the block must
 not borrow storage from the ended temp scope. Kvist rejects obvious direct
-escapes such as returning `(map f xs)` from a `with-temp-allocator` body.
+escapes such as returning `(map f xs)` from a `with-temp-allocator` body, or
+hiding an owned temp-allocated result inside a returned call or struct literal.
 
-`with-delete` is the small cleanup helper for local owned values:
+For ordinary local owned values, prefer `let` bindings marked with trailing
+`defer`:
 
 ```clojure
-(with-delete [active (filter active? users)]
+(let [active (filter active? users) defer]
   (count active))
 
-(with-delete [active (filter active? users)
-              names (map :name active)]
+(let [active (filter active? users) defer
+      names (map :name active) defer]
   (count names))
 ```
 
-It lowers to a scope with bindings and matching `defer delete(...)` calls. Use
-it when the owned values are local to the body. Do not return a bound value from
-the body; if ownership should pass to the caller, return the owned expression
-directly without `with-delete`.
+This lowers to local bindings with matching `defer delete(...)` calls. Use it
+when the owned values are local to the body. Do not return a defer-marked value
+from the body; if ownership should pass to the caller, return the owned
+expression directly without the `defer` marker. That also applies to wrapping
+the binding inside a returned struct or passing it into a returned call.
 
 ## Returning Owned Values
 

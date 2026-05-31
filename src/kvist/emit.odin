@@ -2012,21 +2012,49 @@ let_return_error :: proc(bindings: []Binding, body: []CST_Form) -> (Compile_Erro
     return {}, false
 }
 
+form_mentions_binding_name :: proc(form: CST_Form, name: string) -> bool {
+    #partial switch form.kind {
+    case .Symbol:
+        return map_name(form.text) == name
+    case .List, .Vector, .Brace, .Set:
+        for item in form.items {
+            if form_mentions_binding_name(item, name) {
+                return true
+            }
+        }
+    }
+    return false
+}
+
+form_contains_owned_temp_escape_result :: proc(form: CST_Form) -> bool {
+    if form_is_owned_temp_escape_result(form) {
+        return true
+    }
+    #partial switch form.kind {
+    case .List, .Vector, .Brace, .Set:
+        for item in form.items {
+            if form_contains_owned_temp_escape_result(item) {
+                return true
+            }
+        }
+    }
+    return false
+}
+
 let_defer_return_error :: proc(bindings: []Binding, body: []CST_Form, last_in_proc: bool, returns: Return_Spec) -> (Compile_Error, bool) {
     for item in body {
         if item.kind != .List || len(item.items) == 0 || item.items[0].kind != .Symbol || item.items[0].text != "return" {
             continue
         }
-        for returned in item.items[1:] {
-            if returned.kind != .Symbol {
+        for binding in bindings {
+            if !binding.deferred_delete {
                 continue
             }
-            returned_name := map_name(returned.text)
-            for binding in bindings {
-                if binding.deferred_delete && binding.name == returned_name {
+            for returned in item.items[1:] {
+                if form_mentions_binding_name(returned, binding.name) {
                     return Compile_Error{
                         message = "defer-marked binding cannot be returned; remove defer or transfer ownership explicitly",
-                        span = returned.span,
+                        span = item.span,
                     }, true
                 }
             }
@@ -2034,15 +2062,12 @@ let_defer_return_error :: proc(bindings: []Binding, body: []CST_Form, last_in_pr
     }
     if last_in_proc && returns.kind != .None && len(body) > 0 {
         final_form := body[len(body)-1]
-        if final_form.kind == .Symbol {
-            final_name := map_name(final_form.text)
-            for binding in bindings {
-                if binding.deferred_delete && binding.name == final_name {
-                    return Compile_Error{
-                        message = "defer-marked binding cannot be returned; remove defer or transfer ownership explicitly",
-                        span = final_form.span,
-                    }, true
-                }
+        for binding in bindings {
+            if binding.deferred_delete && form_mentions_binding_name(final_form, binding.name) {
+                return Compile_Error{
+                    message = "defer-marked binding cannot be returned; remove defer or transfer ownership explicitly",
+                    span = final_form.span,
+                }, true
             }
         }
     }
@@ -2514,10 +2539,10 @@ with_temp_allocator_escape_error :: proc(body: []CST_Form, last_in_proc: bool, r
     for item in body {
         if item.kind == .List && len(item.items) > 0 && item.items[0].kind == .Symbol && item.items[0].text == "return" {
             for returned in item.items[1:] {
-                if form_is_owned_temp_escape_result(returned) {
+                if form_contains_owned_temp_escape_result(returned) {
                     return Compile_Error{
                         message = "owned value cannot escape with-temp-allocator; allocate it outside the temp scope or copy it before returning",
-                        span = returned.span,
+                        span = item.span,
                     }, true
                 }
             }
@@ -2526,7 +2551,7 @@ with_temp_allocator_escape_error :: proc(body: []CST_Form, last_in_proc: bool, r
 
     if last_in_proc && returns.kind != .None && len(body) > 0 {
         final_form := body[len(body)-1]
-        if form_is_owned_temp_escape_result(final_form) {
+        if form_contains_owned_temp_escape_result(final_form) {
             return Compile_Error{
                 message = "owned value cannot escape with-temp-allocator; allocate it outside the temp scope or copy it before returning",
                 span = final_form.span,
@@ -2608,18 +2633,6 @@ form_transfers_owned_name :: proc(form: CST_Form, name: string, can_transfer_fin
             if item.kind == .Symbol && map_name(item.text) == name {
                 return true
             }
-        }
-    }
-
-    if ok && head == "with-delete" && len(form.items) >= 3 && form.items[1].kind == .Vector {
-        binding := form.items[1]
-        i := 0
-        for i+1 < len(binding.items) {
-            value_form := binding.items[i+1]
-            if value_form.kind == .Symbol && map_name(value_form.text) == name {
-                return true
-            }
-            i += 2
         }
     }
 
@@ -2713,10 +2726,6 @@ analyze_owned_scope_body :: proc(e: ^Emitter, forms: []CST_Form, can_transfer_fi
                 }
             }
             resize(live, start)
-        case "with-delete":
-            if len(form.items) >= 3 {
-                analyze_owned_scope_body(e, form.items[2:], final_in_scope && can_transfer_final, live)
-            }
         case "do":
             analyze_owned_scope_body(e, form.items[1:], final_in_scope && can_transfer_final, live)
         case:
@@ -5143,98 +5152,6 @@ emit_with_temp_allocator_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc:
     return {}, true
 }
 
-with_delete_names_contains :: proc(binding_names: []string, name: string) -> bool {
-    for binding_name in binding_names {
-        if binding_name == name {
-            return true
-        }
-    }
-    return false
-}
-
-with_delete_return_error :: proc(body: []CST_Form, binding_names: []string, last_in_proc: bool, returns: Return_Spec) -> (Compile_Error, bool) {
-    for item in body {
-        if item.kind != .List || len(item.items) == 0 || item.items[0].kind != .Symbol || item.items[0].text != "return" {
-            continue
-        }
-        for returned in item.items[1:] {
-            if returned.kind == .Symbol && with_delete_names_contains(binding_names, map_name(returned.text)) {
-                return Compile_Error{
-                    message = "with-delete binding cannot be returned; return it without with-delete or copy it before returning",
-                    span = returned.span,
-                }, true
-            }
-        }
-    }
-    if last_in_proc && returns.kind != .None && len(body) > 0 {
-        final_form := body[len(body)-1]
-        if final_form.kind == .Symbol && with_delete_names_contains(binding_names, map_name(final_form.text)) {
-            return Compile_Error{
-                message = "with-delete binding cannot be returned; return it without with-delete or copy it before returning",
-                span = final_form.span,
-            }, true
-        }
-    }
-    return {}, false
-}
-
-emit_with_delete_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Return_Spec) -> (Compile_Error, bool) {
-    if len(form.items) < 3 {
-        return Compile_Error{message = "with-delete expects binding vector and body", span = form.span}, false
-    }
-    binding := form.items[1]
-    if binding.kind != .Vector || len(binding.items) < 2 || len(binding.items)%2 != 0 {
-        return Compile_Error{message = "with-delete expects [name value ...] bindings", span = binding.span}, false
-    }
-
-    binding_names: [dynamic]string
-    i := 0
-    for i < len(binding.items) {
-        if binding.items[i].kind != .Symbol {
-            return Compile_Error{message = "with-delete binding name must be a symbol", span = binding.items[i].span}, false
-        }
-        append(&binding_names, map_name(binding.items[i].text))
-        i += 2
-    }
-
-    body: [dynamic]CST_Form
-    for item in form.items[2:] {
-        append(&body, item)
-    }
-    err_return, bad_return := with_delete_return_error(body[:], binding_names[:], last_in_proc, returns)
-    if bad_return {
-        return err_return, false
-    }
-
-    emit_line(e, "{")
-    e.indent += 1
-    i = 0
-    for i < len(binding.items) {
-        binding_name := binding_names[i/2]
-        value_form := binding.items[i+1]
-        err_owned, bad_owned := owned_result_usage_error(value_form, true)
-        if bad_owned {
-            return err_owned, false
-        }
-        value, err_value, ok_value := emit_expr(e, value_form)
-        if !ok_value {
-            return err_value, false
-        }
-        emit_prefixed_expr_mapped(e, fmt.tprintf("%s := ", binding_name), value, value_form.span)
-        emit_line(e, fmt.tprintf("defer delete(%s)", binding_name))
-        i += 2
-    }
-
-    err_body, ok_body := emit_body_forms(e, body[:], returns_when_final(last_in_proc, returns))
-    if !ok_body {
-        return err_body, false
-    }
-
-    e.indent -= 1
-    emit_line(e, "}")
-    return {}, true
-}
-
 is_type_switch_subject :: proc(form: CST_Form) -> bool {
     return form.kind == .Vector && len(form.items) == 2 && form.items[0].kind == .Symbol
 }
@@ -5432,8 +5349,6 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
         return emit_with_allocator_stmt(e, form, last_in_proc, returns)
     case .With_Temp_Allocator:
         return emit_with_temp_allocator_stmt(e, form, last_in_proc, returns)
-    case .With_Delete:
-        return emit_with_delete_stmt(e, form, last_in_proc, returns)
     case .Thread_First, .Thread_Last:
     case .When_Let, .If_Let, .When_Ok, .If_Ok:
     case .None:

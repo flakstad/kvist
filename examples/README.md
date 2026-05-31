@@ -40,7 +40,7 @@ block so `C-c C-e` and `C-c C-c` are practical.
 - `sequences.kvist`: sequence helpers over structs, enums, and strings.
 - `sequence-helpers.kvist`: broad sequence helper coverage.
 - `mutation-and-bang.kvist`: mutating helper variants such as `map!`.
-- `ownership-helpers.kvist`: `with-delete`, `with-allocator`, and `with-temp-allocator`.
+- `ownership-helpers.kvist`: `let ... defer`, `with-allocator`, and `with-temp-allocator`.
 - `ownership-warnings.kvist`: intentionally warning-producing examples for the current ownership diagnostics.
 - `update.kvist`: `update!` over arrays, maps, and defstruct fields.
 - `orders-report.kvist`: a more realistic eager data pipeline.
@@ -48,8 +48,7 @@ block so `C-c C-e` and `C-c C-c` are practical.
 Owned dynamic arrays, maps, allocated slices, `make`, and sequence helpers that
 return new collections need local cleanup unless ownership is returned to the
 caller. Prefer `let` bindings marked with trailing `defer` or plain `defer
-delete(...)` for ordinary local scopes, and use `with-delete` when a scoped
-cleanup wrapper reads better than repeated local cleanup lines. See
+delete(...)` for ordinary local scopes. See
 [`docs/OWNERSHIP.md`](../docs/OWNERSHIP.md) for the rule of thumb.
 
 ## Odin Core Interop

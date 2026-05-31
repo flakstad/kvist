@@ -57,11 +57,13 @@
     (defer (delete kept))
     (first kept)))
 
-(defn with-delete-total [] -> int
+(defn deferred-total [] -> int
   (let [xs (new []int [1 2 3])]
-    (with-delete [doubled (map double xs)
-                  evens (filter even? doubled)]
-      (reduce add 0 evens))))
+    (let [doubled (map double xs) defer
+          evens (filter even? doubled) defer
+          total 0]
+      (set! total (reduce add 0 evens))
+      total)))
 
 (defn age-for-grace [] -> int
   (let [names (new []string ["Ada" "Lin" "Grace"])
@@ -340,7 +342,7 @@
   (first-kept-square)
   ;; => 4
 
-  (with-delete-total)
+  (deferred-total)
   ;; => 12
 
   (age-for-grace)

@@ -692,8 +692,8 @@ casually.
 
 The current implementation also recognizes a few built-in macro-like resource
 forms before the general macro system exists: `with-allocator`,
-`with-temp-allocator`, and `with-delete`. They are intentionally scoped cleanup
-forms that lower to ordinary Odin blocks with `defer`.
+and `with-temp-allocator`. They are intentionally scoped cleanup forms that
+lower to ordinary Odin blocks with `defer`.
 
 ### Ordinary calls
 
@@ -802,7 +802,7 @@ Local bindings may be marked with `defer` after the value expression:
 
 This lowers to ordinary local bindings plus `defer delete(...)` at scope exit.
 The marker is currently only supported on named local bindings in `let`.
-Defer-marked bindings cannot be returned directly from the scope.
+Defer-marked bindings cannot escape through the return boundary.
 
 Flat multi-return destructuring is worth supporting because it matches ordinary
 Odin usage and keeps explicit control flow readable:
@@ -2000,12 +2000,12 @@ Current rules:
 - no hygiene yet
 
 The current compiler still carries an explicit built-in macro registry for the
-resource-scope bootstrap forms `with-allocator`, `with-temp-allocator`, and
-`with-delete`. The simpler binding forms `when-let`, `if-let`, `when-ok`, and
-`if-ok` now come through the ordinary compile-time macro path as core
-package-local macros. Threading forms `->` and `->>` are also inspectable
-through `kvist macroexpand`, but they still stay compile-special for now
-because the compiler uses their pipeline shape to manage owned intermediates.
+resource-scope bootstrap forms `with-allocator` and `with-temp-allocator`. The
+simpler binding forms `when-let`, `if-let`, `when-ok`, and `if-ok` now come
+through the ordinary compile-time macro path as core package-local macros.
+Threading forms `->` and `->>` are also inspectable through `kvist macroexpand`,
+but they still stay compile-special for now because the compiler uses their
+pipeline shape to manage owned intermediates.
 
 That split is deliberate:
 
@@ -2122,16 +2122,17 @@ The explicit `base:runtime` import is intentional for now. The generated Odin
 uses Odin's normal temp allocator API directly instead of hiding it behind an
 Kvist runtime. Owned values allocated in this scope must not escape it; the
 compiler rejects obvious direct returns of owned helper results from
-`with-temp-allocator`.
+`with-temp-allocator`, including wrapping them in returned calls or struct
+literals.
 
 For the common "bind owned value, delete at scope exit" shape, use:
 
 ```clojure
-(with-delete [active (filter active? users)]
+(let [active (filter active? users) defer]
   ...)
 
-(with-delete [active (filter active? users)
-              names (map :name active)]
+(let [active (filter active? users) defer
+      names (map :name active) defer]
   ...)
 ```
 
@@ -2146,8 +2147,9 @@ It lowers to the moral equivalent of:
 ```
 
 This is intentionally not an ownership transfer form. Do not return the bound
-values from the body; return them directly without `with-delete`, or copy the data
-into a different owned result first.
+values from the body; remove `defer` and return them directly when ownership
+should transfer, or copy the data into a different owned result first. That
+also applies to returning them through wrapper calls or struct literals.
 
 Other `with-*` forms are still attractive because they can expand into
 combinations of existing core forms such as:
@@ -2176,9 +2178,6 @@ For example, allocator helpers should keep ownership visible:
   (let [buffer (make [dynamic]int)]
     (defer (delete buffer))
     ...))
-
-(with-delete [buffer (make [dynamic]int)]
-  ...)
 
 (with-arena [arena (make-arena allocator)]
   (work (:allocator arena)))

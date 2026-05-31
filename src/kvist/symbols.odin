@@ -123,7 +123,6 @@ LANGUAGE_SOURCE_ENTRIES :: []Language_Source_Entry{
     {name = "continue", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "case \"continue\":"},
     {name = "with-allocator", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "emit_with_allocator_stmt :: proc"},
     {name = "with-temp-allocator", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "emit_with_temp_allocator_stmt :: proc"},
-    {name = "with-delete", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "emit_with_delete_stmt :: proc"},
     {name = "slurp", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "if head.text == \"slurp\""},
     {name = "spit", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "if head.text == \"spit\""},
     {name = "tap>", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "if head.text == \"tap>\""},
@@ -744,6 +743,109 @@ symbols_append_source_package_records :: proc(builder: ^strings.Builder, seen: ^
     }
 }
 
+symbols_append_local_package_records :: proc(builder: ^strings.Builder, seen: ^map[string]bool, file_path, output: string) {
+    lines := strings.split_lines(output, context.allocator)
+    defer delete(lines)
+    for line in lines {
+        if line == "" || line == "kind\tname\tline\tcolumn\tdetail\tsignature\tdoc" || line == "kind\tname\tline\tcolumn\tdetail\tsignature\tdoc\tfile" {
+            continue
+        }
+        fields, ok_fields := symbols_split_record_fields(line)
+        if !ok_fields {
+            delete(fields)
+            continue
+        }
+        kind := fields[0]
+        name := fields[1]
+        line_text := fields[2]
+        column_text := fields[3]
+        detail := fields[4]
+        signature := fields[5]
+        doc := fields[6]
+        temp := strings.builder_make()
+        defer strings.builder_destroy(&temp)
+        fmt.sbprintf(&temp, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", kind, name, line_text, column_text, detail, signature, doc, file_path)
+        symbols_append_unique_records(builder, seen, strings.to_string(temp))
+        delete(fields)
+    }
+}
+
+editor_root_package_files :: proc(path, source: string) -> ([]Package_File, bool) {
+    forms, err_forms, ok_forms := read_top_forms(source)
+    if !ok_forms {
+        _ = err_forms
+        return nil, false
+    }
+    package_name := ""
+    for top in forms {
+        if decl_head_name(top.form) == "package" && len(top.form.items) == 2 && top.form.items[1].kind == .Symbol {
+            package_name = top.form.items[1].text
+            break
+        }
+    }
+    if package_name == "" {
+        return nil, false
+    }
+
+    dir, file_name := os.split_path(path)
+    if dir == "" {
+        return nil, false
+    }
+
+    entries, dir_err := os.read_directory_by_path(dir, -1, context.allocator)
+    if dir_err != nil {
+        return nil, false
+    }
+    defer delete(entries)
+
+    has_anchor := false
+    matched: [dynamic]Package_File
+    for entry in entries {
+        if entry.type != .Regular || !strings.has_suffix(entry.name, ".kvist") {
+            continue
+        }
+        file_path, join_err := os.join_path({dir, entry.name}, context.allocator)
+        if join_err != nil {
+            return nil, false
+        }
+        if entry.name == file_name {
+            append(&matched, Package_File{path = file_path, source = source, package_name = package_name, forms = forms})
+            if entry.name == "main.kvist" || entry.name == "package.kvist" {
+                has_anchor = true
+            }
+            continue
+        }
+        data, read_err := os.read_entire_file_from_path(file_path, context.allocator)
+        if read_err != nil {
+            continue
+        }
+        file_source := string(data)
+        file_forms, _, ok_file_forms := read_top_forms(file_source)
+        if !ok_file_forms {
+            continue
+        }
+        file_package_name := ""
+        for top in file_forms {
+            if decl_head_name(top.form) == "package" && len(top.form.items) == 2 && top.form.items[1].kind == .Symbol {
+                file_package_name = top.form.items[1].text
+                break
+            }
+        }
+        if file_package_name != package_name {
+            continue
+        }
+        if entry.name == "main.kvist" || entry.name == "package.kvist" {
+            has_anchor = true
+        }
+        append(&matched, Package_File{path = file_path, source = file_source, package_name = file_package_name, forms = file_forms})
+    }
+
+    if !has_anchor {
+        return nil, false
+    }
+    return matched[:], true
+}
+
 source_package_symbols_source :: proc(importer_path, import_path: string) -> (package_file, output: string, err: Compile_Error, ok: bool) {
     result_allocator := context.allocator
     old_allocator := context.allocator
@@ -1027,11 +1129,6 @@ imported_symbols_source :: proc(path, source: string) -> (output: string, err: C
 }
 
 editor_symbols_source :: proc(path, source: string) -> (output: string, err: Compile_Error, ok: bool) {
-    forms, err_forms, ok_forms := read_top_forms(source)
-    if !ok_forms {
-        return "", clone_compile_error(err_forms, context.allocator), false
-    }
-
     builder := strings.builder_make()
     defer strings.builder_destroy(&builder)
     strings.write_string(&builder, "kind\tname\tline\tcolumn\tdetail\tsignature\tdoc\tfile\n")
@@ -1040,13 +1137,107 @@ editor_symbols_source :: proc(path, source: string) -> (output: string, err: Com
     defer delete(seen)
     repo_root, _ := repo_root_for_path(path)
 
-    local_output, local_err, ok_local := symbols_source(source)
-    if !ok_local {
-        return "", local_err, false
-    }
-    symbols_append_unique_records(&builder, &seen, local_output)
-    delete(local_output)
+    package_files, ok_package_files := editor_root_package_files(path, source)
+    if ok_package_files {
+        for file in package_files {
+            local_output, local_err, ok_local := symbols_source(file.source)
+            if !ok_local {
+                return "", local_err, false
+            }
+            symbols_append_local_package_records(&builder, &seen, file.path, local_output)
+            delete(local_output)
+        }
+    } else {
+        forms, err_forms, ok_forms := read_top_forms(source)
+        if !ok_forms {
+            return "", clone_compile_error(err_forms, context.allocator), false
+        }
+        local_output, local_err, ok_local := symbols_source(source)
+        if !ok_local {
+            return "", local_err, false
+        }
+        symbols_append_local_package_records(&builder, &seen, path, local_output)
+        delete(local_output)
 
+        for entry in KVIST_CANONICAL_IMPORTS_FOR_EDITOR {
+            if repo_root != "" {
+                editor_package_symbols_append(&builder, &seen, repo_root, entry.path, entry.alias)
+            } else {
+                package_output, ok_package := package_symbols_source(entry.path, entry.alias)
+                if !ok_package {
+                    continue
+                }
+                symbols_append_unique_records(&builder, &seen, package_output)
+                delete(package_output)
+            }
+        }
+
+        for top in forms {
+            entry, ok_import := import_entry_from_form(top.form)
+            if !ok_import || !strings.has_prefix(entry.path, "kvist:") {
+                continue
+            }
+            if repo_root != "" && entry.path != "kvist:hiccup" {
+                editor_package_symbols_append(&builder, &seen, repo_root, entry.path, entry.alias)
+            } else {
+                package_output, ok_package := package_symbols_source(entry.path, entry.alias)
+                if ok_package {
+                    symbols_append_unique_records(&builder, &seen, package_output)
+                    delete(package_output)
+                    continue
+                }
+                _, import_path, ok_source_import := source_import_alias_and_path(top.form)
+                if ok_source_import {
+                    resolved, err_resolve, ok_resolve := resolve_source_import_path(path, import_path)
+                    if !ok_resolve {
+                        return "", err_resolve, false
+                    }
+                    files, err_files, ok_files := read_package_files(resolved)
+                    if !ok_files {
+                        delete(resolved)
+                        return "", err_files, false
+                    }
+                    _, err_package, ok_package := validate_package_files(resolved, files[:])
+                    if !ok_package {
+                        delete(resolved)
+                        return "", err_package, false
+                    }
+                    for file in files {
+                        package_output, package_err, ok_package_output := symbols_source(file.source)
+                        if !ok_package_output {
+                            delete(resolved)
+                            return "", package_err, false
+                        }
+                        symbols_append_source_package_records(&builder, &seen, import_path, entry.alias, file.path, package_output)
+                        delete(package_output)
+                    }
+                    delete(resolved)
+                }
+            }
+        }
+
+        imported_output, imported_err, ok_imported := imported_symbols_source(path, source)
+        if !ok_imported {
+            return "", imported_err, false
+        }
+        symbols_append_unique_records(&builder, &seen, imported_output)
+        delete(imported_output)
+
+        if repo_root != "" {
+            editor_builtin_symbols_append(&builder, &seen, repo_root)
+            editor_language_symbols_append(&builder, &seen, repo_root)
+        } else {
+            builtin_output := builtin_symbols_source()
+            symbols_append_unique_records(&builder, &seen, builtin_output)
+            delete(builtin_output)
+        }
+        return strings.clone(strings.to_string(builder)), {}, true
+    }
+
+    forms, err_forms, ok_forms := read_top_forms(source)
+    if !ok_forms {
+        return "", clone_compile_error(err_forms, context.allocator), false
+    }
     for entry in KVIST_CANONICAL_IMPORTS_FOR_EDITOR {
         if repo_root != "" {
             editor_package_symbols_append(&builder, &seen, repo_root, entry.path, entry.alias)
@@ -1059,7 +1250,6 @@ editor_symbols_source :: proc(path, source: string) -> (output: string, err: Com
             delete(package_output)
         }
     }
-
     for top in forms {
         entry, ok_import := import_entry_from_form(top.form)
         if !ok_import || !strings.has_prefix(entry.path, "kvist:") {
@@ -1103,14 +1293,12 @@ editor_symbols_source :: proc(path, source: string) -> (output: string, err: Com
             }
         }
     }
-
     imported_output, imported_err, ok_imported := imported_symbols_source(path, source)
     if !ok_imported {
         return "", imported_err, false
     }
     symbols_append_unique_records(&builder, &seen, imported_output)
     delete(imported_output)
-
     if repo_root != "" {
         editor_builtin_symbols_append(&builder, &seen, repo_root)
         editor_language_symbols_append(&builder, &seen, repo_root)
@@ -1119,7 +1307,6 @@ editor_symbols_source :: proc(path, source: string) -> (output: string, err: Com
         symbols_append_unique_records(&builder, &seen, builtin_output)
         delete(builtin_output)
     }
-
     return strings.clone(strings.to_string(builder)), {}, true
 }
 

@@ -96,7 +96,7 @@ runtime facility:
 - editor tooling should provide `macroexpand` for the form at point;
 - `kvist macroexpand` is the frontend expansion view; it currently handles
   built-in macro-like forms such as `with-allocator` and
-  `with-temp-allocator` and cleanup forms such as `with-delete`, while
+  `with-temp-allocator`, while
   `kvist expand` remains the generated-Odin lowering preview;
 - `kvist macroexpand file.kvist FORM --map output.map` writes a simple
   line-oriented expansion map so generated macroexpand lines can be related

@@ -265,7 +265,7 @@ assert_eq "hello from kvist" "$main_eval_output" "eval main output"
 printf 'tooling: sequence example evals\n'
 assert_eq "2" "$(./kvist eval examples/sequence-helpers.kvist '(split-front-length)')" "split-front-length"
 assert_eq "4" "$(./kvist eval examples/sequence-helpers.kvist '(first-kept-square)')" "first-kept-square"
-assert_eq "12" "$(./kvist eval examples/sequence-helpers.kvist '(with-delete-total)')" "with-delete-total"
+assert_eq "12" "$(./kvist eval examples/sequence-helpers.kvist '(deferred-total)')" "deferred-total"
 assert_eq "45" "$(./kvist eval examples/sequence-helpers.kvist '(age-for-grace)')" "age-for-grace"
 assert_eq "2" "$(./kvist eval examples/sequence-helpers.kvist '(chunk-count)')" "chunk-count"
 assert_eq "2" "$(./kvist eval examples/sequence-helpers.kvist '(repeated-two-count)')" "repeated-two-count"
