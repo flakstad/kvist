@@ -367,7 +367,7 @@ Examples:
 
 ```clojure
 (comment
-  (proc old-version [x: int] -> int
+  (defn old-version [x: int] -> int
     (+ x 1)))
 
 (comment
@@ -446,8 +446,7 @@ The current implementation:
 - lowers to an ordinary Odin struct declaration;
 - validates declaration shape at compile time.
 
-`struct` remains the direct Odin-shaped declaration form. `defstruct` is the
-preferred path when the richer Cluck-derived surface is useful.
+`defstruct` is the supported source-level struct declaration form.
 
 ### `defenum`
 
@@ -503,7 +502,7 @@ The docstring-bearing form is:
    :ok bool})
 ```
 
-Use `union` when exactly one variant is valid at a time and the choice may
+Use `defunion` when exactly one variant is valid at a time and the choice may
 carry data. This is appropriate for AST nodes, tagged results, events, tokens,
 or variant-bearing entities.
 
@@ -517,11 +516,11 @@ The v0.1 union story should stay deliberately narrow:
 - rich inspection/destructuring support: later
 - full ergonomic use should wait for a future `match` design
 
-### `defn` and `proc`
+### `defn`
 
-`defn` is the preferred source-level function declaration form. `proc`
-remains available as the direct Odin-shaped spelling and is still the type
-spelling for procedure values.
+`defn` is the supported source-level function declaration form. `proc` remains
+the spelling for procedure literals and procedure types, but not top-level
+declarations.
 
 Functions use a typed signature vector:
 
@@ -741,7 +740,7 @@ controlled way.
 Top-level declaration shape:
 
 ```clojure
-(proc add [a: int, b: int] -> int
+(defn add [a: int, b: int] -> int
   (+ a b))
 ```
 
@@ -828,10 +827,10 @@ For now, `or-return` follows Odin semantics conservatively by requiring proc
 named returns that match the binding names exactly:
 
 ```clojure
-(proc query [] -> [value: int, ok: bool]
+(defn query [] -> [value: int, ok: bool]
   ...)
 
-(proc total [] -> [value: int, ok: bool]
+(defn total [] -> [value: int, ok: bool]
   (let [[value ok] (query) or-return]
     (return (+ value 1) true)))
 ```
@@ -858,6 +857,41 @@ direct Odin syntax:
 ```odin
 port := env_port() or_else 8080
 ```
+
+### `kvist:test`
+
+Kvist ships a macro-based test package:
+
+```clojure
+(import t "kvist:test")
+
+(t/deftest sample
+  (t/is true))
+```
+
+This lowers to ordinary Odin `@(test)` procedures and `core:testing`
+assertions.
+
+- `t/deftest`
+- `t/is`
+- `t/are`
+- `t/testing`
+- `t/use-fixtures :each`
+
+Run Kvist tests with the CLI:
+
+```sh
+kvist test path/to/package.kvist
+kvist test path/to/package.kvist --names sample-arithmetic
+kvist test path/to/package.kvist --generated /tmp/generated-tests.odin
+```
+
+The current boundary is still deliberate:
+
+- `t/testing` is structural grouping only; it does not yet add nested reporting context
+- fixtures currently support only `:each`, with fixture procs shaped like
+  `proc(t: ^testing.T, body: proc(t: ^testing.T))`
+- the test CLI accepts Kvist test names and normalizes them to Odin test names
 
 Flat multi-return destructuring is worth supporting because it matches ordinary
 Odin usage and keeps explicit control flow readable:
@@ -1377,7 +1411,7 @@ This means the following should not be assumed to work implicitly:
 Instead, callbacks that need extra state should use explicit context arguments:
 
 ```clojure
-(proc greater-than? [threshold: int, x: int] -> bool
+(defn greater-than? [threshold: int, x: int] -> bool
   (> x threshold))
 
 (filter-with greater-than? threshold xs allocator)
@@ -1638,7 +1672,7 @@ proc [url: URL, key: string] -> [val: string, ok: bool]
 That means higher-order procedures can look like:
 
 ```clojure
-(proc find-index [xs: []int, pred: (proc [x: int] -> bool)] -> int
+(defn find-index [xs: []int, pred: (proc [x: int] -> bool)] -> int
   ...)
 ```
 
@@ -1672,7 +1706,7 @@ surface syntax.
 
 ### Expected core support
 
-- `package`, `import`, `defconst`, `defvar`, `struct`, `enum`, `union`, `proc`
+- `package`, `import`, `defconst`, `defvar`, `defstruct`, `defenum`, `defunion`, `defn`
 - local bindings with `let`
 - `do`, `if`, `when`, `cond`
 - `set!`, `return`, `defer`
@@ -1745,11 +1779,11 @@ That means code like this remains acceptable for now:
 
 ```clojure
 (odin "@(private)")
-(proc route-add [router: ^Router, method: Method, route: Route]
+(defn route-add [router: ^Router, method: Method, route: Route]
   ...)
 
 (odin "#force_inline")
-(proc headers-count [h: Headers] -> int
+(defn headers-count [h: Headers] -> int
   (len (:kv h)))
 
 (let [entry (#force_inline query-iter (& q))]
@@ -1785,7 +1819,7 @@ For now, this is the preferred style:
 
 ```clojure
 // Adds two numbers.
-(proc add [a: int, b: int] -> int
+(defn add [a: int, b: int] -> int
   (+ a b))
 ```
 
@@ -1824,14 +1858,14 @@ There are richer documentation ideas worth preserving for later exploration:
 Examples of the kind of thing worth considering later:
 
 ```clojure
-(proc add
+(defn add
   "Adds two numbers."
   [a: int, b: int] -> int
   (+ a b))
 ```
 
 ```clojure
-(proc complicated-thing
+(defn complicated-thing
   (doc-from "docs/complicated-thing.md")
   [req: Request, allocator: runtime.Allocator] -> [res: Response, ok: bool]
   ...)
@@ -1857,7 +1891,7 @@ The current draft semantics are:
 Example:
 
 ```clojure
-(proc answer [] -> int
+(defn answer [] -> int
   (let [x 20
         y 22]
     (+ x y)))
@@ -1876,17 +1910,17 @@ answer :: proc() -> int {
 This means all of the following are valid:
 
 ```clojure
-(proc add [a: int, b: int] -> int
+(defn add [a: int, b: int] -> int
   (+ a b))
 
-(proc add-explicit [a: int, b: int] -> int
+(defn add-explicit [a: int, b: int] -> int
   (return (+ a b)))
 ```
 
 Early exits still require explicit `return`:
 
 ```clojure
-(proc query-get [url: URL, key: string] -> [val: string, ok: bool]
+(defn query-get [url: URL, key: string] -> [val: string, ok: bool]
   (when (== key "")
     (return "" false))
   (when ...
@@ -1906,7 +1940,7 @@ Kvist should expose `nil` where Odin itself already has nil-capable values, but
 The preferred core style is Odin-first explicit multi-return:
 
 ```clojure
-(proc route-for [router: Router, method: Method] -> [route: Route, ok: bool]
+(defn route-for [router: Router, method: Method] -> [route: Route, ok: bool]
   (let [[route ok] (get (:routes router) method)]
     (when (not ok)
       (return {} false))
@@ -1916,7 +1950,7 @@ The preferred core style is Odin-first explicit multi-return:
 Likewise for parsing:
 
 ```clojure
-(proc request-path [s: string] -> [path: string, ok: bool]
+(defn request-path [s: string] -> [path: string, ok: bool]
   (let [[req ok] (parse-request s)]
     (when (not ok)
       (return "" false))
@@ -1927,7 +1961,7 @@ Direct `nil` checks remain appropriate where the underlying Odin value is
 actually nil-capable:
 
 ```clojure
-(proc print-user [p: ^User]
+(defn print-user [p: ^User]
   (when (nil? p)
     (return))
   (fmt.println (:name (^ p))))
@@ -1960,15 +1994,15 @@ Example source:
   :age int
 })
 
-(proc birthday-message [p: Person, allocator: runtime.Allocator] -> string
+(defn birthday-message [p: Person, allocator: runtime.Allocator] -> string
   (strings.clone
     (fmt.tprintf "%s is now %d" (:name p) (+ (:age p) 1))
     allocator))
 
-(proc print-person [p: Person]
+(defn print-person [p: Person]
   (fmt.println (fmt.tprintf "name=%s age=%d" (:name p) (:age p))))
 
-(proc main []
+(defn main []
   (let [p (Person {
             :name "Andreas"
             :age 42
@@ -2482,7 +2516,7 @@ The first implementation milestone should remain modest:
 
 That locked subset should start with:
 
-- `package`, `import`, `defconst`, `defvar`, `struct`, `enum`, `union`, `proc`
+- `package`, `import`, `defconst`, `defvar`, `defstruct`, `defenum`, `defunion`, `defn`
 - `let`, `do`, `if`, `when`, `cond`, `switch`
 - `set!`, `return`, `defer`, `each`
 - field access, `get`, threading

@@ -21,6 +21,7 @@ block so `C-c C-e` and `C-c C-c` are practical.
 - `macro-dsl.kvist`: package-local declaration DSL that expands into multiple top-level forms.
 - `macro-union-helpers.kvist`: recursive macro DSL that emits a union plus variant constructors.
 - `macro-messages.kvist`: message-family DSL that emits payload structs, a tagged union, and constructors.
+- `testing.kvist`: shipped `kvist:test` macros including `t/deftest`, `t/is`, `t/are`, and `t/use-fixtures :each`.
 - `hiccup-interpolation.kvist`: Hiccup attrs and child nodes with direct Kvist expression interpolation, including `if`, `when`, `nil` omission, and `[:<> ...]` fragments.
 - `closures.kvist`: non-capturing `fn` literals and explicit callback context.
 - `hello.kvist`: package, import, struct literal, and a tiny `main`.

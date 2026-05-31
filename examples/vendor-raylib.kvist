@@ -7,18 +7,18 @@
 (package main)
 (import rl "vendor:raylib")
 
-(proc blue-alpha [] -> int
+(defn blue-alpha [] -> int
   ;; raylib colors are distinct fixed arrays in the Odin binding.
   (int (get rl.BLUE 3)))
 
-(proc point-inside-demo? [] -> bool
+(defn point-inside-demo? [] -> bool
   ;; This is a safe terminal eval that still uses real raylib data shapes:
   ;; Vector2 is a fixed array type and Rectangle is an ordinary struct.
   (let [point (new rl.Vector2 [20.0 20.0])
         rect (rl.Rectangle {:x 10.0 :y 10.0 :width 40.0 :height 40.0})]
     (rl.CheckCollisionPointRec point rect)))
 
-(proc draw-demo-window []
+(defn draw-demo-window []
   ;; This is the real graphics interop shape: initialize a window, defer cleanup,
   ;; and run the ordinary raylib draw loop. It is intentionally explicit because
   ;; GUI/window code is not a good automatic example main for test runs.
@@ -32,7 +32,7 @@
     (rl.DrawCircle 320 230 (f32 32) rl.ORANGE)
     (rl.EndDrawing)))
 
-(proc main []
+(defn main []
   (println (blue-alpha) (point-inside-demo?)))
 
 (comment

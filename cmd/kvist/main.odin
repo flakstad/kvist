@@ -16,6 +16,7 @@ print_usage :: proc() {
     fmt.println("  kvist build <input.kvist> [--generated output.odin]")
     fmt.println("  kvist check <input.kvist> [--generated output.odin]")
     fmt.println("  kvist run <input.kvist> [--generated output.odin]")
+    fmt.println("  kvist test <input.kvist> [--generated output.odin] [--names test1,test2]")
     fmt.println("  kvist eval <input.kvist> <form> [--no-print] [--check] [--generated output.odin] [--save name]")
     fmt.println("  kvist expand <input.kvist> <form> [--no-print] [-o output.odin]")
     fmt.println("  kvist macroexpand <input.kvist> <form> [-o output.kvist] [--map output.map]")
@@ -34,7 +35,7 @@ print_usage :: proc() {
 }
 
 is_command :: proc(text: string) -> bool {
-    return text == "compile" || text == "build" || text == "check" || text == "run" || text == "eval" || text == "expand" || text == "macroexpand" || text == "symbols" || text == "editor-symbols" || text == "lookup" || text == "complete" || text == "doc" || text == "xref" || text == "builtin-symbols" || text == "imported-symbols" || text == "package-symbols" || text == "cache"
+    return text == "compile" || text == "build" || text == "check" || text == "run" || text == "test" || text == "eval" || text == "expand" || text == "macroexpand" || text == "symbols" || text == "editor-symbols" || text == "lookup" || text == "complete" || text == "doc" || text == "xref" || text == "builtin-symbols" || text == "imported-symbols" || text == "package-symbols" || text == "cache"
 }
 
 read_source_or_exit :: proc(path: string) -> string {
@@ -281,7 +282,7 @@ print_compile_warnings :: proc(path, source, eval_source: string, warnings: []kv
     }
 }
 
-run_odin_file :: proc(command, generated_path, source_path, source, eval_source, save_name: string, source_map: []kvist.Source_Map_Entry) -> int {
+run_odin_file :: proc(command, generated_path, source_path, source, eval_source, save_name: string, source_map: []kvist.Source_Map_Entry, extra_args: []string = nil) -> int {
     source_dir, _ := os.split_path(source_path)
     working_dir := source_dir
     if working_dir == "" {
@@ -298,6 +299,9 @@ run_odin_file :: proc(command, generated_path, source_path, source, eval_source,
     args := make([dynamic]string, 0, 5)
     defer delete(args)
     append(&args, "odin", command, generated_abs, "-file")
+    for arg in extra_args {
+        append(&args, arg)
+    }
     out_path := ""
     out_arg := ""
     if command == "build" || command == "run" {
@@ -578,10 +582,6 @@ symbol_matches_prefix :: proc(name, prefix: string) -> bool {
 }
 
 filter_symbol_output :: proc(output, identifier: string) -> string {
-    if identifier == "" {
-        return strings.clone(output)
-    }
-
     lines := strings.split_lines(output, context.allocator)
     defer delete(lines)
 
@@ -599,7 +599,7 @@ filter_symbol_output :: proc(output, identifier: string) -> string {
             continue
         }
         name := kvist.symbols_record_name(line)
-        if symbol_matches_identifier(name, identifier) && !seen[name] {
+        if (identifier == "" || symbol_matches_identifier(name, identifier)) && !seen[name] {
             seen[name] = true
             strings.write_string(&builder, line)
             strings.write_byte(&builder, '\n')
@@ -713,6 +713,52 @@ normalized_symbol_name :: proc(name: string) -> string {
         return strings.clone(strings.to_string(builder))
     }
     return strings.clone(name)
+}
+
+normalize_test_name_component :: proc(name: string) -> string {
+    builder := strings.builder_make()
+    defer strings.builder_destroy(&builder)
+    for ch in name {
+        switch ch {
+        case '-':
+            strings.write_byte(&builder, '_')
+        case '?':
+            strings.write_string(&builder, "_p")
+        case '!':
+            strings.write_string(&builder, "_bang")
+        case:
+            strings.write_rune(&builder, ch)
+        }
+    }
+    return strings.clone(strings.to_string(builder))
+}
+
+normalize_test_names_arg :: proc(text: string) -> string {
+    if text == "" {
+        return ""
+    }
+    builder := strings.builder_make()
+    defer strings.builder_destroy(&builder)
+    parts := strings.split(text, ",", context.allocator)
+    defer delete(parts)
+    for part, idx in parts {
+        trimmed := strings.trim_space(part)
+        dot := strings.last_index(trimmed, ".")
+        if idx > 0 {
+            strings.write_byte(&builder, ',')
+        }
+        if dot >= 0 {
+            strings.write_string(&builder, trimmed[:dot+1])
+            normalized := normalize_test_name_component(trimmed[dot+1:])
+            strings.write_string(&builder, normalized)
+            delete(normalized)
+        } else {
+            normalized := normalize_test_name_component(trimmed)
+            strings.write_string(&builder, normalized)
+            delete(normalized)
+        }
+    }
+    return strings.clone(strings.to_string(builder))
 }
 
 symbol_match_rank :: proc(row: Cli_Symbol_Row, identifier: string) -> int {
@@ -886,6 +932,39 @@ run_generated_command :: proc(input, generated_path, odin_command: string) -> in
     return run_odin_file(odin_command, path, input, data, "", "", result.source_map[:])
 }
 
+test_command :: proc(input, generated_path, test_names: string) -> int {
+    data := read_source_or_exit(input)
+    defer delete(transmute([]byte)data)
+
+    result, err, ok := kvist.compile_path_with_map(input)
+    if !ok {
+        formatted := kvist.format_compile_error(input, data, err)
+        fmt.eprint(formatted)
+        delete(formatted)
+        os.exit(1)
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    print_compile_warnings(input, data, "", result.warnings[:])
+    path, temp_dir, path_ok := write_generated_for_execution(result.output, generated_path)
+    if !path_ok {
+        return 1
+    }
+    defer cleanup_generated(path, temp_dir, generated_path)
+
+    extra_args := make([dynamic]string, 0, 1)
+    defer delete(extra_args)
+    if test_names != "" {
+        normalized_test_names := normalize_test_names_arg(test_names)
+        defer delete(normalized_test_names)
+        append(&extra_args, fmt.tprintf("-define:ODIN_TEST_NAMES=%s", normalized_test_names))
+    }
+
+    return run_odin_file("test", path, input, data, "", "", result.source_map[:], extra_args[:])
+}
+
 eval_command :: proc(input, eval_source, generated_path, save_name: string, no_print, check_only: bool) -> int {
     if check_only && save_name != "" {
         fmt.eprintln("--save cannot be used with --check")
@@ -1053,6 +1132,41 @@ parse_run_or_check_command :: proc(odin_command: string) {
     }
 
     os.exit(run_generated_command(input, generated_path, odin_command))
+}
+
+parse_test_command :: proc() {
+    if len(os.args) < 3 {
+        print_usage()
+        os.exit(2)
+    }
+    input := os.args[2]
+    generated_path := ""
+    test_names := ""
+
+    i := 3
+    for i < len(os.args) {
+        switch os.args[i] {
+        case "--generated":
+            if i+1 >= len(os.args) {
+                print_usage()
+                os.exit(2)
+            }
+            generated_path = os.args[i+1]
+            i += 2
+        case "--names":
+            if i+1 >= len(os.args) {
+                print_usage()
+                os.exit(2)
+            }
+            test_names = os.args[i+1]
+            i += 2
+        case:
+            print_usage()
+            os.exit(2)
+        }
+    }
+
+    os.exit(test_command(input, generated_path, test_names))
 }
 
 parse_eval_command :: proc() {
@@ -1271,6 +1385,8 @@ main :: proc() {
         parse_run_or_check_command("check")
     case "run":
         parse_run_or_check_command("run")
+    case "test":
+        parse_test_command()
     case "eval":
         parse_eval_command()
     case "expand":

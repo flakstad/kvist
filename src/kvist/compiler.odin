@@ -42,6 +42,30 @@ synthetic_package_decl :: proc(name: string) -> CST_Top_Form {
     }
 }
 
+normalize_expanded_top_forms :: proc(forms: []CST_Top_Form) -> (out: [dynamic]CST_Top_Form) {
+    seen_imports: [dynamic]string
+    defer delete(seen_imports)
+    for top in forms {
+        if decl_head_name(top.form) == "package" {
+            append(&out, top)
+            break
+        }
+    }
+    for top in forms {
+        if decl_head_name(top.form) == "import" {
+            append_import_form_unique(&out, &seen_imports, top)
+        }
+    }
+    for top in forms {
+        head := decl_head_name(top.form)
+        if head == "package" || head == "import" {
+            continue
+        }
+        append(&out, top)
+    }
+    return out
+}
+
 contains_text :: proc(items: []string, value: string) -> bool {
     for item in items {
         if item == value {
@@ -92,7 +116,10 @@ append_import_form_unique :: proc(forms: ^[dynamic]CST_Top_Form, seen: ^[dynamic
 }
 
 is_source_import_path :: proc(path: string) -> bool {
-    if path == "kvist:hiccup" {
+    if strings.has_prefix(path, "kvist:") {
+        if path == "kvist:arr" || path == "kvist:str" || path == "kvist:map" || path == "kvist:set" || path == "kvist:struct" {
+            return false
+        }
         return true
     }
     for ch in path {
@@ -104,7 +131,7 @@ is_source_import_path :: proc(path: string) -> bool {
 }
 
 resolve_shipped_source_import_path :: proc(importer_path, import_path: string) -> (string, Compile_Error, bool) {
-    if import_path != "kvist:hiccup" {
+    if !strings.has_prefix(import_path, "kvist:") || import_path == "kvist:arr" || import_path == "kvist:str" || import_path == "kvist:map" || import_path == "kvist:set" || import_path == "kvist:struct" {
         return "", Compile_Error{}, false
     }
     root, ok_root := repo_root_for_path(importer_path)
@@ -114,7 +141,8 @@ resolve_shipped_source_import_path :: proc(importer_path, import_path: string) -
     if !ok_root {
         return "", Compile_Error{message = fmt.tprintf("could not resolve shipped source import: %s", import_path)}, false
     }
-    candidate, join_err := os.join_path({root, "packages", "hiccup"}, context.allocator)
+    package_name := import_path[len("kvist:"):]
+    candidate, join_err := os.join_path({root, "packages", package_name}, context.allocator)
     if join_err != nil || !os.exists(candidate) {
         if join_err == nil {
             delete(candidate)
@@ -163,7 +191,7 @@ is_private_decl_head :: proc(head: string) -> bool {
 
 is_top_level_decl_head :: proc(head: string) -> bool {
     switch head {
-    case "const", "defconst", "defconst-", "defvar", "defvar-", "struct", "defstruct", "defstruct-", "enum", "defenum", "defenum-", "union", "defunion", "defunion-", "proc", "defn", "defn-", "defmacro", "defmacro-":
+    case "defconst", "defconst-", "defvar", "defvar-", "defstruct", "defstruct-", "defenum", "defenum-", "defunion", "defunion-", "defn", "defn-", "defmacro", "defmacro-":
         return true
     case:
         return false
@@ -419,7 +447,7 @@ rewrite_decl_name :: proc(form: ^CST_Form, prefix: string) {
         return
     }
     switch decl_head_name(form^) {
-    case "const", "defconst", "defconst-", "defvar", "defvar-", "struct", "defstruct", "defstruct-", "enum", "defenum", "defenum-", "union", "defunion", "defunion-", "proc", "defn", "defn-", "defmacro", "defmacro-":
+    case "defconst", "defconst-", "defvar", "defvar-", "defstruct", "defstruct-", "defenum", "defenum-", "defunion", "defunion-", "defn", "defn-", "defmacro", "defmacro-":
         form^.items[1].text = fmt.tprintf("%s__%s", prefix, form^.items[1].text)
     }
 }
@@ -828,7 +856,7 @@ load_path_expanded_forms :: proc(path: string) -> (expanded: [dynamic]CST_Top_Fo
     if !ok_expand {
         return expanded, macros, err_expand, false
     }
-    expanded = expanded_forms
+    expanded = normalize_expanded_top_forms(expanded_forms[:])
     macros = expanded_macros
     return expanded, macros, Compile_Error{}, true
 }
@@ -1133,7 +1161,8 @@ compile_source_with_map :: proc(source: string) -> (result: Emit_Result, err: Co
     if !ok_expand {
         return result, clone_compile_error(err_expand, result_allocator), false
     }
-    program, err_program, ok_program := parse_program(expanded[:])
+    normalized := normalize_expanded_top_forms(expanded[:])
+    program, err_program, ok_program := parse_program(normalized[:])
     if !ok_program {
         return result, clone_compile_error(err_program, result_allocator), false
     }
@@ -1176,7 +1205,7 @@ eval_form_head :: proc(form: CST_Form) -> string {
 
 eval_head_is_decl :: proc(head: string) -> bool {
     switch head {
-    case "comment", "package", "import", "const", "defconst", "defvar", "struct", "defstruct", "enum", "union", "odin", "proc", "defn":
+    case "comment", "package", "import", "defconst", "defvar", "defstruct", "defenum", "defunion", "odin", "defn":
         return true
     }
     return false
@@ -1208,7 +1237,8 @@ compile_eval_source_with_map :: proc(source, eval_source: string, no_print: bool
     if !ok_expand {
         return result, clone_compile_error(err_expand, result_allocator), false
     }
-    program, err_program, ok_program := parse_program(expanded[:])
+    normalized := normalize_expanded_top_forms(expanded[:])
+    program, err_program, ok_program := parse_program(normalized[:])
     if !ok_program {
         return result, clone_compile_error(err_program, result_allocator), false
     }

@@ -709,6 +709,50 @@ macro_list_from_value :: proc(value: Macro_Value, span: Span) -> ([]CST_Form, Co
     }
 }
 
+macro_slice_forms :: proc(forms: []CST_Form, start: int, end := -1) -> []CST_Form {
+    from := start
+    to := end
+    if from < 0 {
+        from = 0
+    }
+    if from > len(forms) {
+        from = len(forms)
+    }
+    if to < 0 || to > len(forms) {
+        to = len(forms)
+    }
+    if to < from {
+        to = from
+    }
+    out: [dynamic]CST_Form
+    for form in forms[from:to] {
+        append(&out, form)
+    }
+    return out[:]
+}
+
+macro_subst_form :: proc(form: CST_Form, names: []string, values: []CST_Form) -> CST_Form {
+    if form.kind == .Symbol {
+        for name, idx in names {
+            if form.text == name {
+                return values[idx]
+            }
+        }
+        return form
+    }
+
+    #partial switch form.kind {
+    case .List, .Vector, .Brace:
+        out := CST_Form{kind = form.kind, text = form.text, span = form.span}
+        for item in form.items {
+            append(&out.items, macro_subst_form(item, names, values))
+        }
+        return out
+    case:
+        return form
+    }
+}
+
 macro_is_symbol_call :: proc(form: CST_Form, name: string) -> bool {
     return form.kind == .List && len(form.items) > 0 && is_symbol(form.items[0], name)
 }
@@ -1067,6 +1111,37 @@ macro_eval_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_
                 case:
                     return macro_int_value(1), Compile_Error{}, true
                 }
+            case "slice":
+                if len(form.items) != 3 && len(form.items) != 4 {
+                    return Macro_Value{}, Compile_Error{message = "slice expects sequence, start, and optional end", span = form.span}, false
+                }
+                seq_value, err_seq, ok_seq := macro_eval_expr(form.items[1], macros, bindings)
+                if !ok_seq {
+                    return Macro_Value{}, err_seq, false
+                }
+                forms, err_forms, ok_forms := macro_list_from_value(seq_value, form.items[1].span)
+                if !ok_forms {
+                    return Macro_Value{}, err_forms, false
+                }
+                start_value, err_start, ok_start := macro_eval_expr(form.items[2], macros, bindings)
+                if !ok_start {
+                    return Macro_Value{}, err_start, false
+                }
+                if start_value.kind != .Int {
+                    return Macro_Value{}, Compile_Error{message = "slice start must be an integer", span = form.items[2].span}, false
+                }
+                end := -1
+                if len(form.items) == 4 {
+                    end_value, err_end, ok_end := macro_eval_expr(form.items[3], macros, bindings)
+                    if !ok_end {
+                        return Macro_Value{}, err_end, false
+                    }
+                    if end_value.kind != .Int {
+                        return Macro_Value{}, Compile_Error{message = "slice end must be an integer", span = form.items[3].span}, false
+                    }
+                    end = end_value.int_value
+                }
+                return macro_forms_value(macro_slice_forms(forms, start_value.int_value, end)), Compile_Error{}, true
             case "concat":
                 out: [dynamic]CST_Form
                 for arg in form.items[1:] {
@@ -1099,6 +1174,45 @@ macro_eval_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_
                     }
                 }
                 return macro_forms_value(out[:]), Compile_Error{}, true
+            case "subst":
+                if len(form.items) != 4 {
+                    return Macro_Value{}, Compile_Error{message = "subst expects template, names, and values", span = form.span}, false
+                }
+                template_value, err_template, ok_template := macro_eval_expr(form.items[1], macros, bindings)
+                if !ok_template {
+                    return Macro_Value{}, err_template, false
+                }
+                template_form, err_template_form, ok_template_form := macro_value_to_form(template_value, form.items[1].span)
+                if !ok_template_form {
+                    return Macro_Value{}, err_template_form, false
+                }
+                names_value, err_names, ok_names := macro_eval_expr(form.items[2], macros, bindings)
+                if !ok_names {
+                    return Macro_Value{}, err_names, false
+                }
+                name_forms, err_name_forms, ok_name_forms := macro_list_from_value(names_value, form.items[2].span)
+                if !ok_name_forms {
+                    return Macro_Value{}, err_name_forms, false
+                }
+                values_value, err_values, ok_values := macro_eval_expr(form.items[3], macros, bindings)
+                if !ok_values {
+                    return Macro_Value{}, err_values, false
+                }
+                value_forms, err_value_forms, ok_value_forms := macro_list_from_value(values_value, form.items[3].span)
+                if !ok_value_forms {
+                    return Macro_Value{}, err_value_forms, false
+                }
+                if len(name_forms) != len(value_forms) {
+                    return Macro_Value{}, Compile_Error{message = "subst expects the same number of names and values", span = form.span}, false
+                }
+                names: [dynamic]string
+                for name_form in name_forms {
+                    if name_form.kind != .Symbol {
+                        return Macro_Value{}, Compile_Error{message = "subst names must be symbols", span = name_form.span}, false
+                    }
+                    append(&names, name_form.text)
+                }
+                return macro_form_value(macro_subst_form(template_form, names[:], value_forms[:])), Compile_Error{}, true
             case "str":
                 builder := strings.builder_make()
                 defer strings.builder_destroy(&builder)
@@ -1385,6 +1499,19 @@ macro_eval_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_
                     }
                 }
                 return Macro_Value{}, Compile_Error{message = "text expects a scalar literal, symbol, or keyword", span = form.items[1].span}, false
+            case "error":
+                if len(form.items) != 2 {
+                    return Macro_Value{}, Compile_Error{message = "error expects one argument", span = form.span}, false
+                }
+                value, err_value, ok_value := macro_eval_expr(form.items[1], macros, bindings)
+                if !ok_value {
+                    return Macro_Value{}, err_value, false
+                }
+                message, err_message, ok_message := macro_value_to_string(value, form.items[1].span)
+                if !ok_message {
+                    return Macro_Value{}, err_message, false
+                }
+                return Macro_Value{}, Compile_Error{message = message, span = form.items[1].span}, false
             }
         }
         if head.kind == .Symbol {
@@ -1946,6 +2073,14 @@ macroexpand_top_forms :: proc(forms: []CST_Top_Form, include_core_macros: bool =
                     rewritten, err_expand, ok_expand := macroexpand_cst_form_with_macros(form_out, macros[:])
                     if !ok_expand {
                         return expanded, macros, err_expand, false
+                    }
+                    if is_defmacro_form(rewritten) {
+                        macro_decl, err_macro, ok_macro := parse_user_macro_decl(CST_Top_Form{form = rewritten, doc_lines = top.doc_lines, source = top.source})
+                        if !ok_macro {
+                            return expanded, macros, err_macro, false
+                        }
+                        append(&macros, macro_decl)
+                        continue
                     }
                     append(&expanded, CST_Top_Form{
                         form      = rewritten,

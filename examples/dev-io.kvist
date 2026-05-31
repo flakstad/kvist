@@ -19,24 +19,24 @@
 // The examples below write under ./tmp. Odin's write helpers do not create
 // parent directories, so production code should create the directory first or
 // surface that error. Here we keep the directory policy explicit and boring.
-(proc ensure-dev-dir [] -> os.Error
+(defn ensure-dev-dir [] -> os.Error
   (let [err (os.make_directory_all "tmp")]
     (if (and (!= err nil)
              (not (os.is_directory "tmp")))
       err
       nil)))
 
-(proc write-text [path: string, text: string] -> os.Error
+(defn write-text [path: string, text: string] -> os.Error
   (let [dir-err (ensure-dev-dir)]
     (if (!= dir-err nil)
       dir-err
       (spit path text))))
 
-(proc read-text [path: string] -> [data: []byte, err: os.Error]
+(defn read-text [path: string] -> [data: []byte, err: os.Error]
   ;; Ownership of data transfers to the caller.
   (slurp path))
 
-(proc write-as-json [path: string, value: $T] -> [marshal-err: json.Marshal_Error, write-err: os.Error]
+(defn write-as-json [path: string, value: $T] -> [marshal-err: json.Marshal_Error, write-err: os.Error]
   (let [dir-err (ensure-dev-dir)]
     (if (!= dir-err nil)
       (return marshal-err dir-err)
@@ -47,7 +47,7 @@
             (defer (delete data))
             (return nil (spit path data))))))))
 
-(proc read-json-as [$T: typeid, path: string] -> [value: T, read-err: os.Error, unmarshal-err: json.Unmarshal_Error]
+(defn read-json-as [$T: typeid, path: string] -> [value: T, read-err: os.Error, unmarshal-err: json.Unmarshal_Error]
   (let [[data err] (slurp path)]
     (if (!= err nil)
       (return value err unmarshal-err)
@@ -56,7 +56,7 @@
         (let [decode-err (json.unmarshal data (& value))]
           (return value nil decode-err))))))
 
-(proc main []
+(defn main []
   (return))
 
 (comment

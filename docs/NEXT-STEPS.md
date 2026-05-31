@@ -95,6 +95,31 @@ This includes:
 - helper forms, if any
 - interaction with ownership and early returns
 
+### 6a. Odin Feature Coverage
+
+Kvist now has a partial story for Odin's result-control operators:
+
+- `let [[value ok] expr or-return]`
+- `let [[value ok] expr or-break]`
+- `let [[value ok] expr or-continue]`
+- `(or-else expr fallback)`
+
+Other Odin feature areas still need an explicit policy pass. The current
+design decisions are:
+
+- testing should get a Kvist-native shipped macro package, likely `kvist:test`
+  with forms like `t/deftest` and `t/is`;
+- ordinary Odin directives and attributes should stay raw `(odin "...")` for
+  now, including:
+  - `#optional_ok`
+  - `#force_inline`
+  - `#no_bounds_check`
+  - `@(private)` / `@(test)` style attributes
+  - layout/ABI directives like `#packed` and `#raw_union`
+
+The next Odin-feature topic to review is `distinct`, but that discussion
+should stay high-level until the broader inventory pass is complete.
+
 ### 7. Closures And Higher-Order Functions
 
 `fn` exists, but captured closures are still not designed.

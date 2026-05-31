@@ -23,6 +23,17 @@ language/runtime implementation prematurely.
 - Keep these tools machine-friendly so editors can shell out to Kvist instead
   of each editor reimplementing language-aware transforms.
 
+## Testing Surface
+
+- Build on the shipped `kvist:test` package rather than designing a runtime
+  framework first.
+- Keep the user shape Clojure-like:
+  - `(import t "kvist:test")`
+  - `(t/deftest name ...)`
+  - `(t/is expr)`
+- Continue lowering that surface to ordinary Odin test declarations and
+  assertions.
+
 ## Batteries-Included Surface
 
 - Keep building a Kvist-level library layer on top of Odin core/vendor

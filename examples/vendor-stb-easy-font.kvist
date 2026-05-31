@@ -7,13 +7,13 @@
 (import "core:fmt")
 (import easy "vendor:stb/easy_font")
 
-(proc text-width [] -> int
+(defn text-width [] -> int
   (easy.width "Kvist"))
 
-(proc text-height [] -> int
+(defn text-height [] -> int
   (easy.height "Kvist"))
 
-(proc quad-count [] -> int
+(defn quad-count [] -> int
   ;; easy.print writes quads into caller-provided storage. That is an important
   ;; Odin pattern: allocate or reserve the buffer at the call site, pass a slice
   ;; to the library, and use the returned count.
@@ -21,7 +21,7 @@
         quads (new [128]easy.Quad [])]
     (easy.print (f32 0) (f32 0) "Kvist" color (slice quads))))
 
-(proc main []
+(defn main []
   (fmt.println (text-width) (text-height) (quad-count)))
 
 (comment

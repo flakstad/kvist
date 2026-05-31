@@ -12,11 +12,11 @@ compile_hello_program :: proc(t: ^testing.T) {
 (import "core:fmt")
 
 // Greets from Kvist.
-(struct Greeting {
+(defstruct Greeting {
   :message string
 })
 
-(proc main []
+(defn main []
   (let [g (Greeting {
             :message "hello from kvist"
           })]
@@ -45,6 +45,19 @@ main :: proc() {
 }
 `
     testing.expect_value(t, output, expected)
+}
+
+@(test)
+reject_legacy_top_level_proc_decl_head :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(proc main []
+  (println "hello"))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    defer delete(err.message)
+    testing.expect_value(t, err.message, "unsupported top-level form: proc")
 }
 
 @(test)
@@ -134,6 +147,7 @@ compile_all_examples :: proc(t: ^testing.T) {
         "examples/sequence-helpers.kvist",
         "examples/sequences.kvist",
         "examples/tap.kvist",
+        "examples/testing.kvist",
         "examples/unions.kvist",
         "examples/update.kvist",
         "examples/vendor-raylib.kvist",
@@ -173,10 +187,10 @@ compile_eval_source_generates_scratch_main :: proc(t: ^testing.T) {
     source := `(package app)
 (import "core:fmt")
 
-(proc add [a: int, b: int] -> int
+(defn add [a: int, b: int] -> int
   (+ a b))
 
-(proc main []
+(defn main []
   (fmt.println "ordinary main"))`
 
     output, err, ok := kvist.compile_eval_source(source, "(add 20 22)")
@@ -211,26 +225,26 @@ symbols_source_indexes_top_level_forms :: proc(t: ^testing.T) {
  * A user record.
  * Owned by caller.
  */
-(struct User {
+(defstruct User {
   :name string
   :active bool
 })
 
-(enum Status [
+(defenum Status [
   Active
   Archived
 ])
 
-(union Value {
+(defunion Value {
   :i int
   :s string
 })
 
-(const max-age int 120)
+(defconst max-age int 120)
 
 // Returns true for active users.
 // Used by sequence examples.
-(proc active? [user: User] -> bool
+(defn active? [user: User] -> bool
   (:active user))`
 
     output, err, ok := kvist.symbols_source(source)
@@ -312,6 +326,19 @@ builtin_symbols_source_emits_signatures_and_docs :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "kvist form\tor-else\t1\t1\t\t(or-else expr fallback)\tEvaluate an Odin optional-ok expression and return its value when ok is true, otherwise return the fallback value.\n"), true)
     testing.expect_value(t, strings.contains(output, "kvist form\tupdate!\t1\t1\t\t(update! target key-or-field value-or-updater ...)\tMutate a struct field, array/slice slot, or map key in place. Supports replacement and updater forms such as inc or +.\n"), true)
     testing.expect_value(t, strings.contains(output, "kvist macro\twhen-let\t1\t1\t\t(when-let [value bool expr] body...)\tBind a value and explicit boolean result from a multi-return expression. Run the body only when the boolean is true. Expands to a destructuring let plus when.\n"), true)
+}
+
+@(test)
+package_symbols_source_supports_shipped_test_package :: proc(t: ^testing.T) {
+    output, ok := kvist.package_symbols_source("kvist:test", "t")
+    testing.expect_value(t, ok, true)
+    if !ok {
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "macro\tt/deftest\t"), true)
+    testing.expect_value(t, strings.contains(output, "macro\tt/is\t"), true)
 }
 
 @(test)
@@ -550,7 +577,7 @@ compile_eval_source_can_emit_statement_runner :: proc(t: ^testing.T) {
     source := `(package main)
 (import "core:fmt")
 
-(proc add [a: int, b: int] -> int
+(defn add [a: int, b: int] -> int
   (+ a b))`
 
     output, err, ok := kvist.compile_eval_source(source, "(fmt.println (add 1 2))", true)
@@ -581,7 +608,7 @@ compile_eval_source_prints_block_forms_as_statements :: proc(t: ^testing.T) {
     source := `(package main)
 (import os "core:os")
 
-(proc load-note [path: string] -> [data: []byte, err: os.Error]
+(defn load-note [path: string] -> [data: []byte, err: os.Error]
   (slurp path))`
 
     output, err, ok := kvist.compile_eval_source(source, `(let [[data err] (load-note "tmp/kvist-note.txt")]
@@ -629,7 +656,7 @@ main :: proc() {
 compile_eval_source_can_load_declaration_form :: proc(t: ^testing.T) {
     source := `(package main)
 
-(struct Greeting {
+(defstruct Greeting {
   :message string
 })`
 
@@ -726,7 +753,7 @@ compile_struct_constructor_rejects_unknown_field :: proc(t: ^testing.T) {
   {:name string
    :age int})
 
-(proc bad [] -> Person
+(defn bad [] -> Person
   (Person {:name "Ada" :extra 1}))`
 
     _, err, ok := kvist.compile_source(source)
@@ -745,7 +772,7 @@ compile_struct_constructor_rejects_duplicate_field :: proc(t: ^testing.T) {
   {:name string
    :age int})
 
-(proc bad [] -> Person
+(defn bad [] -> Person
   (Person {:name "Ada" :name "Grace"}))`
 
     _, err, ok := kvist.compile_source(source)
@@ -764,7 +791,7 @@ compile_struct_constructor_rejects_literal_type_mismatch :: proc(t: ^testing.T) 
   {:name string
    :age int})
 
-(proc bad [] -> Person
+(defn bad [] -> Person
   (Person {:name 42 :age "old"}))`
 
     _, err, ok := kvist.compile_source(source)
@@ -783,7 +810,7 @@ compile_update_bang_stmt :: proc(t: ^testing.T) {
   {:x int
    :y int})
 
-(proc score [] -> int
+(defn score [] -> int
   (let [xs (new [dynamic]int [1 2 3])
         lookup (new map[string]int {"a" 1})
         point (Point {:x 4 :y 5})]
@@ -811,7 +838,7 @@ compile_eval_source_deduplicates_import_declaration_form :: proc(t: ^testing.T) 
     source := `(package main)
 (import "core:fmt")
 
-(proc main []
+(defn main []
   (fmt.println "hello"))`
 
     output, err, ok := kvist.compile_eval_source(source, `(import "core:fmt")`)
@@ -837,7 +864,7 @@ compile_eval_source_can_load_main_proc_declaration_form :: proc(t: ^testing.T) {
     source := `(package main)
 (import "core:fmt")
 
-(proc main []
+(defn main []
   (fmt.println "hello"))`
 
     output, err, ok := kvist.compile_eval_source(source, `(proc main []
@@ -864,7 +891,7 @@ main :: proc() {
 compile_eval_source_reports_eval_origin :: proc(t: ^testing.T) {
     source := `(package main)
 
-(proc add [a: int, b: int] -> int
+(defn add [a: int, b: int] -> int
   (+ a b))`
 
     _, err, ok := kvist.compile_eval_source(source, "(not 1 2)")
@@ -888,7 +915,7 @@ compile_eval_source_reports_eval_origin :: proc(t: ^testing.T) {
 compile_eval_source_map_marks_eval_runner :: proc(t: ^testing.T) {
     source := `(package main)
 
-(proc add [a: int, b: int] -> int
+(defn add [a: int, b: int] -> int
   (+ a b))`
 
     result, err, ok := kvist.compile_eval_source_with_map(source, "(add 1 2)")
@@ -918,9 +945,9 @@ reader_supports_hash_underscore_and_comment_form :: proc(t: ^testing.T) {
   :field string
 })
 (comment
-  (proc old []
+  (defn old []
     (fmt.println "old")))
-(proc main []
+(defn main []
   (return))`
 
     output, err, ok := kvist.compile_source(source)
@@ -950,7 +977,7 @@ reader_preserves_top_form_source_text :: proc(t: ^testing.T) {
     source := `// Doc.
 (package main)
 
-(const answer 42)`
+(defconst answer 42)`
 
     forms, err, ok := kvist.read_top_forms(source)
     testing.expect_value(t, ok, true)
@@ -975,7 +1002,7 @@ reader_converts_semicolon_doc_comments :: proc(t: ^testing.T) {
     defer context.allocator = old_allocator
 
     source := `; Lisp doc.
-(const answer 42)`
+(defconst answer 42)`
 
     forms, err, ok := kvist.read_top_forms(source)
     testing.expect_value(t, ok, true)
@@ -1001,7 +1028,7 @@ reader_converts_block_doc_comments :: proc(t: ^testing.T) {
  * Block doc.
  * Second line.
  */
-(const answer 42)`
+(defconst answer 42)`
 
     forms, err, ok := kvist.read_top_forms(source)
     testing.expect_value(t, ok, true)
@@ -1024,9 +1051,9 @@ reader_classifies_core_literals :: proc(t: ^testing.T) {
     defer context.allocator = old_allocator
 
     source := `(const answer 42)
-(const negative -1)
-(const ok true)
-(const none nil)`
+(defconst negative -1)
+(defconst ok true)
+(defconst none nil)`
 
     forms, err, ok := kvist.read_top_forms(source)
     testing.expect_value(t, ok, true)
@@ -1069,9 +1096,9 @@ reader_classifies_inline_collection_literals :: proc(t: ^testing.T) {
 compile_source_with_declaration_source_map :: proc(t: ^testing.T) {
     source := `(package main)
 
-(const answer 42)
+(defconst answer 42)
 
-(proc main []
+(defn main []
   (return))`
 
     result, err, ok := kvist.compile_source_with_map(source)
@@ -1120,7 +1147,7 @@ compile_source_map_accounts_for_feature_line_and_multiline_raw :: proc(t: ^testi
 
 (odin "Foreign_Handle :: distinct rawptr\nOther_Handle :: distinct rawptr")
 
-(proc main []
+(defn main []
   (let [lookup (new map[string]int {"one" 1})]
     (return)))`
 
@@ -1209,17 +1236,17 @@ compile_const_and_enum_forms :: proc(t: ^testing.T) {
     source := `(package main)
 
 // Default answer for bootstrapping.
-(const answer 42)
+(defconst answer 42)
 ; Maximum configured size.
-(const max-size int 1024)
+(defconst max-size int 1024)
 
-(enum Method [
+(defenum Method [
   Get
   Post
   Delete
 ])
 
-(enum Http-Status {
+(defenum Http-Status {
   :OK 200
   :Not-Found 404
   :Unprocessable-Content 422
@@ -1389,7 +1416,7 @@ compile_struct_types_reports_source_surface :: proc(t: ^testing.T) {
    :scores [dynamic]int
    :window []float})
 
-(proc type-map [] -> map[string]string
+(defn type-map [] -> map[string]string
   (struct/types 'Profile))`
 
     output, err, ok := kvist.compile_source(source)
@@ -1411,13 +1438,13 @@ compile_struct_types_reports_source_surface :: proc(t: ^testing.T) {
 compile_switch_with_implicit_branch_returns :: proc(t: ^testing.T) {
     source := `(package main)
 
-(enum Method [
+(defenum Method [
   Get
   Post
   Delete
 ])
 
-(proc method-name [method: Method] -> string
+(defn method-name [method: Method] -> string
   (switch method
     .Get "GET"
     .Post "POST"
@@ -1457,13 +1484,13 @@ method_name :: proc(method: Method) -> string {
 compile_switch_with_grouped_value_cases :: proc(t: ^testing.T) {
     source := `(package main)
 
-(enum Method [
+(defenum Method [
   Get
   Head
   Post
 ])
 
-(proc read-method? [method: Method] -> bool
+(defn read-method? [method: Method] -> bool
   (switch method
     [.Get .Head] true
     :else false))`
@@ -1500,12 +1527,12 @@ read_method_p :: proc(method: Method) -> bool {
 compile_explicit_partial_switch :: proc(t: ^testing.T) {
     source := `(package main)
 
-(enum Method [
+(defenum Method [
   Get
   Post
 ])
 
-(proc maybe-print [method: Method]
+(defn maybe-print [method: Method]
   (#partial switch method
     .Get (return)))`
 
@@ -1539,12 +1566,12 @@ compile_union_decl_and_constructor :: proc(t: ^testing.T) {
     source := `(package main)
 
 // Tagged sum for testing constructors.
-(union Value {
+(defunion Value {
   :i int
   :s string
 })
 
-(proc wrap-int [n: int] -> Value
+(defn wrap-int [n: int] -> Value
   (Value {:i n}))`
 
     output, err, ok := kvist.compile_source(source)
@@ -1574,20 +1601,20 @@ wrap_int :: proc(n: int) -> Value {
 compile_operator_forms :: proc(t: ^testing.T) {
     source := `(package main)
 
-(proc score [a: int, b: int, ok: bool] -> int
+(defn score [a: int, b: int, ok: bool] -> int
   (if (and ok (> a b))
     (+ a b)
     (if (not ok)
       (- b)
       (- b a))))
 
-(proc has-key [lookup: map[string]int, key: string] -> bool
+(defn has-key [lookup: map[string]int, key: string] -> bool
   (in? lookup key))
 
-(proc contains-key [lookup: map[string]int, key: string] -> bool
+(defn contains-key [lookup: map[string]int, key: string] -> bool
   (contains? lookup key))
 
-(proc missing-key [lookup: map[string]int, key: string] -> bool
+(defn missing-key [lookup: map[string]int, key: string] -> bool
   (not (in? lookup key)))`
 
     output, err, ok := kvist.compile_source(source)
@@ -1633,12 +1660,12 @@ missing_key :: proc(lookup: map[string]int, key: string) -> bool {
 compile_union_type_switch :: proc(t: ^testing.T) {
     source := `(package main)
 
-(union Value {
+(defunion Value {
   :i int
   :s string
 })
 
-(proc describe [value: Value] -> string
+(defn describe [value: Value] -> string
   (switch [v value]
     int "int"
     string v
@@ -1677,7 +1704,7 @@ describe :: proc(value: Value) -> string {
 compile_cond_with_final_else :: proc(t: ^testing.T) {
     source := `(package main)
 
-(proc classify [n: int] -> string
+(defn classify [n: int] -> string
   (cond
     (< n 0) "negative"
     (== n 0) "zero"
@@ -1712,10 +1739,10 @@ classify :: proc(n: int) -> string {
 implicit_returns_only_apply_to_final_nested_blocks :: proc(t: ^testing.T) {
     source := `(package main)
 
-(proc trace [x: int]
+(defn trace [x: int]
   (return))
 
-(proc choose [flag: bool] -> int
+(defn choose [flag: bool] -> int
   (let [x 1]
     (trace x))
   (if flag
@@ -1723,7 +1750,7 @@ implicit_returns_only_apply_to_final_nested_blocks :: proc(t: ^testing.T) {
     (trace 3))
   4)
 
-(proc total [xs: []int] -> int
+(defn total [xs: []int] -> int
   (let [sum 0]
     (each [x xs]
       (set! sum (+ sum x))
@@ -1774,7 +1801,7 @@ total :: proc(xs: []int) -> int {
 compile_break_and_continue_forms :: proc(t: ^testing.T) {
     source := `(package main)
 
-(proc first-positive [xs: []int] -> int
+(defn first-positive [xs: []int] -> int
   (let [result 0]
     (each [x xs]
       (when (< x 0)
@@ -1844,7 +1871,7 @@ compile_defer_forms :: proc(t: ^testing.T) {
     source := `(package main)
 (import "core:fmt")
 
-(proc main []
+(defn main []
   (let [x 1]
     (defer (fmt.println x))
     (defer
@@ -1881,10 +1908,10 @@ main :: proc() {
 compile_flat_multi_return_destructuring :: proc(t: ^testing.T) {
     source := `(package main)
 
-(proc query [] -> [value: int, ok: bool]
+(defn query [] -> [value: int, ok: bool]
   (return 42 true))
 
-(proc main []
+(defn main []
   (let [[value ok] (query)
         [_, still-ok] (query)]
     (when (and ok still-ok)
@@ -1919,10 +1946,10 @@ main :: proc() {
 compile_when_let_macro :: proc(t: ^testing.T) {
     source := `(package main)
 
-(proc query [] -> [value: int, found: bool]
+(defn query [] -> [value: int, found: bool]
   (return 42 true))
 
-(proc main []
+(defn main []
   (when-let [value found (query)]
     (when (> value 40)
       (return))))`
@@ -1959,10 +1986,10 @@ main :: proc() {
 compile_if_let_macro :: proc(t: ^testing.T) {
     source := `(package main)
 
-(proc query [] -> [value: int, found: bool]
+(defn query [] -> [value: int, found: bool]
   (return 42 true))
 
-(proc main [] -> int
+(defn main [] -> int
   (if-let [value found (query)]
     value
     0))`
@@ -1999,10 +2026,10 @@ compile_if_ok_macro :: proc(t: ^testing.T) {
     source := `(package main)
 (import os "core:os")
 
-(proc read-count [] -> [value: int, err: os.Error]
+(defn read-count [] -> [value: int, err: os.Error]
   (return 42 nil))
 
-(proc main [] -> int
+(defn main [] -> int
   (if-ok [value err (read-count)]
     value
     0))`
@@ -2026,10 +2053,10 @@ compile_when_ok_macro :: proc(t: ^testing.T) {
     source := `(package main)
 (import os "core:os")
 
-(proc read-count [] -> [value: int, err: os.Error]
+(defn read-count [] -> [value: int, err: os.Error]
   (return 42 nil))
 
-(proc main [] -> int
+(defn main [] -> int
   (let [total 0]
     (when-ok [value err (read-count)]
       (set! total value))
@@ -2054,13 +2081,13 @@ compile_file_dev_helpers :: proc(t: ^testing.T) {
     source := `(package main)
 (import os "core:os")
 
-(proc read-file [path: string] -> [data: []byte, err: os.Error]
+(defn read-file [path: string] -> [data: []byte, err: os.Error]
   (slurp path))
 
-(proc write-text [path: string, text: string] -> os.Error
+(defn write-text [path: string, text: string] -> os.Error
   (spit path text))
 
-(proc read-count [path: string] -> int
+(defn read-count [path: string] -> int
   (let [[data err] (slurp path)]
     (if (!= err nil)
       0
@@ -2090,12 +2117,12 @@ compile_json_interop_is_explicit :: proc(t: ^testing.T) {
 (import json "core:encoding/json")
 (import os "core:os")
 
-(struct User {
+(defstruct User {
   :name string
   :age int
 })
 
-(proc save-user [path: string, user: User] -> bool
+(defn save-user [path: string, user: User] -> bool
   (let [[data marshal-err] (json.marshal user)]
     (if (!= marshal-err nil)
       false
@@ -2103,7 +2130,7 @@ compile_json_interop_is_explicit :: proc(t: ^testing.T) {
         (defer (delete data))
         (== (spit path data) nil)))))
 
-(proc load-user [path: string] -> [user: User, ok: bool]
+(defn load-user [path: string] -> [user: User, ok: bool]
   (let [[data read-err] (slurp path)]
     (if (!= read-err nil)
       (return user false)
@@ -2136,7 +2163,7 @@ compile_tap_helper :: proc(t: ^testing.T) {
     source := `(package main)
 (import "core:fmt")
 
-(proc main []
+(defn main []
   (let [answer (tap> :answer 42)
         owned (tap> "owned" (new [dynamic]int [1 2 3]))]
     (defer (delete owned))
@@ -2163,16 +2190,16 @@ compile_tap_thread_steps :: proc(t: ^testing.T) {
     source := `(package main)
 (import "core:fmt")
 
-(proc inc [x: int] -> int
+(defn inc [x: int] -> int
   (+ x 1))
 
-(proc even? [x: int] -> bool
+(defn even? [x: int] -> bool
   (== (% x 2) 0))
 
-(proc add [acc: int, x: int] -> int
+(defn add [acc: int, x: int] -> int
   (+ acc x))
 
-(proc main []
+(defn main []
   (let [xs (new []int [1 2 3 4])
         answer (-> 41
                    inc
@@ -2209,12 +2236,12 @@ compile_tap_thread_steps :: proc(t: ^testing.T) {
 compile_struct_field_destructuring :: proc(t: ^testing.T) {
     source := `(package main)
 
-(struct User {
+(defstruct User {
   :name string
   :age int
 })
 
-(proc main []
+(defn main []
   (let [user (User {:name "Ada" :age 36})
         {:name user-name :age user-age} user
         {:age} user]
@@ -2252,7 +2279,7 @@ main :: proc() {
 compile_with_allocator_scope :: proc(t: ^testing.T) {
     source := `(package main)
 
-(proc main []
+(defn main []
   (with-allocator [allocator context.temp_allocator]
     (let [buffer (make [dynamic]int)]
       (defer (delete buffer))
@@ -2290,7 +2317,7 @@ compile_with_temp_allocator_scope :: proc(t: ^testing.T) {
     source := `(package main)
 (import runtime "base:runtime")
 
-(proc main []
+(defn main []
   (with-temp-allocator [allocator]
     (let [buffer (make [dynamic]int)]
       (defer (delete buffer))
@@ -2331,16 +2358,16 @@ main :: proc() {
 compile_let_defer_scope :: proc(t: ^testing.T) {
     source := `(package main)
 
-(proc inc [x: int] -> int
+(defn inc [x: int] -> int
   (+ x 1))
 
-(proc even? [x: int] -> bool
+(defn even? [x: int] -> bool
   (== (% x 2) 0))
 
-(proc add [acc: int, x: int] -> int
+(defn add [acc: int, x: int] -> int
   (+ acc x))
 
-(proc total [xs: []int] -> int
+(defn total [xs: []int] -> int
   (let [mapped (map inc xs) defer
         filtered (filter even? mapped) defer]
     (reduce add 0 filtered)))`
@@ -2365,7 +2392,7 @@ compile_with_temp_allocator_final_scalar_use :: proc(t: ^testing.T) {
     source := `(package main)
 (import runtime "base:runtime")
 
-(proc total [] -> int
+(defn total [] -> int
   (with-temp-allocator [allocator]
     (let [xs (new [dynamic]int [1 2]) ]
       (defer (delete xs))
@@ -2388,10 +2415,10 @@ compile_with_temp_allocator_final_scalar_use :: proc(t: ^testing.T) {
 compile_let_or_return_ok_binding :: proc(t: ^testing.T) {
     source := `(package main)
 
-(proc next [] -> [value: int, ok: bool]
+(defn next [] -> [value: int, ok: bool]
   (return 1 true))
 
-(proc total [] -> [value: int, ok: bool]
+(defn total [] -> [value: int, ok: bool]
   (let [[value ok] (next) or-return]
     (return (+ value 1) true)))`
 
@@ -2411,10 +2438,10 @@ compile_let_or_return_ok_binding :: proc(t: ^testing.T) {
 compile_let_or_break_err_binding_with_defer :: proc(t: ^testing.T) {
     source := `(package main)
 
-(proc read-text [path: string] -> [data: [dynamic]byte, err: rawptr]
+(defn read-text [path: string] -> [data: [dynamic]byte, err: rawptr]
   (return (new [dynamic]byte [1 2]) nil))
 
-(proc load [path: string]
+(defn load [path: string]
   (for true
     (let [[data err] (read-text path) or-break defer]
       (println data))
@@ -2437,10 +2464,10 @@ compile_let_or_break_err_binding_with_defer :: proc(t: ^testing.T) {
 reject_let_or_return_without_matching_named_returns :: proc(t: ^testing.T) {
     source := `(package main)
 
-(proc next [] -> [value: int, ok: bool]
+(defn next [] -> [value: int, ok: bool]
   (return 1 true))
 
-(proc total [] -> int
+(defn total [] -> int
   (let [[value ok] (next) or-return]
     value))`
 
@@ -2454,10 +2481,10 @@ reject_let_or_return_without_matching_named_returns :: proc(t: ^testing.T) {
 compile_let_or_break_and_or_continue_bindings :: proc(t: ^testing.T) {
     source := `(package main)
 
-(proc next [] -> [value: int, ok: bool]
+(defn next [] -> [value: int, ok: bool]
   (return 1 true))
 
-(proc demo []
+(defn demo []
   (for true
     (let [[value ok] (next) or-break]
       (println value))
@@ -2481,10 +2508,10 @@ compile_let_or_break_and_or_continue_bindings :: proc(t: ^testing.T) {
 compile_or_else_optional_ok_expression :: proc(t: ^testing.T) {
     source := `(package main)
 
-(proc query [] -> [value: int, ok: bool] #optional_ok
+(defn query [] -> [value: int, ok: bool] #optional_ok
   (return 42 true))
 
-(proc total [] -> int
+(defn total [] -> int
   (or-else (query) 7))`
 
     output, err, ok := kvist.compile_source(source)
@@ -2499,13 +2526,219 @@ compile_or_else_optional_ok_expression :: proc(t: ^testing.T) {
 }
 
 @(test)
+compile_shipped_test_macro_package :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-test-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove(dir)
+    defer delete(dir)
+
+    path, join_err := os.join_path({dir, "package.kvist"}, context.allocator)
+    testing.expect_value(t, join_err == nil, true)
+    if join_err != nil {
+        return
+    }
+    defer delete(path)
+
+    source := `(package tests)
+
+(import t "kvist:test")
+
+(t/deftest sample
+  (t/is true))`
+
+    write_err := os.write_entire_file_from_string(path, source)
+    testing.expect_value(t, write_err == nil, true)
+    if write_err != nil {
+        return
+    }
+
+    output, err, ok := kvist.compile_path(path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "import \"core:testing\""), true)
+    testing.expect_value(t, strings.contains(output, "@(test)"), true)
+    testing.expect_value(t, strings.contains(output, "sample :: proc(t: ^testing.T) {"), true)
+    testing.expect_value(t, strings.contains(output, "testing.expect(t, true)"), true)
+}
+
+@(test)
+compile_extended_shipped_test_macro_package :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-test-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove(dir)
+    defer delete(dir)
+
+    path, join_err := os.join_path({dir, "package.kvist"}, context.allocator)
+    testing.expect_value(t, join_err == nil, true)
+    if join_err != nil {
+        return
+    }
+    defer delete(path)
+
+    source := `(package tests)
+
+(import t "kvist:test")
+
+(defn each-fixture [t: ^testing.T, body: proc [t: ^testing.T]]
+  (body t))
+
+(t/use-fixtures :each each-fixture)
+
+(t/deftest sample
+  "Sample test."
+  (t/testing "numbers"
+    (t/is (= 1 1))
+    (t/is (not false))
+    (t/is (= (+ 1 1) 2))
+    (t/are [x expected]
+      (= x expected)
+      1 1
+      2 2)))`
+
+    write_err := os.write_entire_file_from_string(path, source)
+    testing.expect_value(t, write_err == nil, true)
+    if write_err != nil {
+        return
+    }
+
+    output, err, ok := kvist.compile_path(path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "sample :: proc(t: ^testing.T) {"), true)
+    testing.expect_value(t, strings.contains(output, "each_fixture("), true)
+    testing.expect_value(t, strings.contains(output, "proc(t: ^testing.T) {"), true)
+    testing.expect_value(t, strings.contains(output, "testing.expect_value(t, 1, 1)"), true)
+    testing.expect_value(t, strings.contains(output, "testing.expect(t, !(false))"), true)
+    testing.expect_value(t, strings.contains(output, "testing.expect_value(t, (1) + (1), 2)"), true)
+    testing.expect_value(t, strings.contains(output, "testing.expect_value(t, 2, 2)"), true)
+}
+
+@(test)
+compile_shipped_test_generic_assertion_messages :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-test-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove(dir)
+    defer delete(dir)
+
+    path, join_err := os.join_path({dir, "package.kvist"}, context.allocator)
+    testing.expect_value(t, join_err == nil, true)
+    if join_err != nil {
+        return
+    }
+    defer delete(path)
+
+    source := `(package tests)
+
+(import t "kvist:test")
+
+(t/deftest sample
+  (t/is true "ok")
+  (t/is false "not ok"))`
+
+    write_err := os.write_entire_file_from_string(path, source)
+    testing.expect_value(t, write_err == nil, true)
+    if write_err != nil {
+        return
+    }
+
+    output, err, ok := kvist.compile_path(path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, `testing.expect(t, true, "ok")`), true)
+    testing.expect_value(t, strings.contains(output, `testing.expect(t, false, "not ok")`), true)
+}
+
+@(test)
+cli_test_command_runs_filtered_kvist_tests :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-test-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove(dir)
+    defer delete(dir)
+
+    path, join_err := os.join_path({dir, "package.kvist"}, context.allocator)
+    testing.expect_value(t, join_err == nil, true)
+    if join_err != nil {
+        return
+    }
+    defer delete(path)
+
+    generated, generated_err := os.join_path({dir, "generated.odin"}, context.allocator)
+    testing.expect_value(t, generated_err == nil, true)
+    if generated_err != nil {
+        return
+    }
+    defer delete(generated)
+
+    source := `(package tests)
+
+(import t "kvist:test")
+
+(t/deftest passing
+  (t/is true))
+
+(t/deftest failing
+  (t/is false))`
+
+    write_err := os.write_entire_file_from_string(path, source)
+    testing.expect_value(t, write_err == nil, true)
+    if write_err != nil {
+        return
+    }
+
+    state, stdout, stderr, exec_err := os.process_exec(
+        os.Process_Desc{
+            command = {"odin", "run", "cmd/kvist", "--", "test", path, "--generated", generated, "--names", "passing"},
+            working_dir = ".",
+        },
+        context.allocator,
+    )
+    defer delete(stdout)
+    defer delete(stderr)
+
+    testing.expect_value(t, exec_err == nil, true)
+    if exec_err != nil {
+        return
+    }
+    testing.expect_value(t, state.exited, true)
+    testing.expect_value(t, state.exit_code, 0)
+    testing.expect_value(t, os.exists(generated), true)
+}
+
+@(test)
 reject_or_else_wrong_arity :: proc(t: ^testing.T) {
     source := `(package main)
 
-(proc query [] -> [value: int, ok: bool] #optional_ok
+(defn query [] -> [value: int, ok: bool] #optional_ok
   (return 42 true))
 
-(proc total [] -> int
+(defn total [] -> int
   (or-else (query)))`
 
     _, err, ok := kvist.compile_source(source)
@@ -2518,7 +2751,7 @@ reject_or_else_wrong_arity :: proc(t: ^testing.T) {
 compile_let_defer_final_if_scalar_use :: proc(t: ^testing.T) {
     source := `(package main)
 
-(proc total [flag: bool] -> int
+(defn total [flag: bool] -> int
   (let [xs (new [dynamic]int [1 2]) defer]
     (if flag
       (count xs)
@@ -2540,7 +2773,7 @@ compile_let_defer_final_if_scalar_use :: proc(t: ^testing.T) {
 compile_let_defer_final_cond_scalar_use :: proc(t: ^testing.T) {
     source := `(package main)
 
-(proc total [n: int] -> int
+(defn total [n: int] -> int
   (let [xs (new [dynamic]int [1 2]) defer]
     (cond
       (> n 0) (count xs)
@@ -2562,7 +2795,7 @@ compile_let_defer_final_cond_scalar_use :: proc(t: ^testing.T) {
 compile_let_defer_final_switch_scalar_use :: proc(t: ^testing.T) {
     source := `(package main)
 
-(proc total [mode: int] -> int
+(defn total [mode: int] -> int
   (let [xs (new [dynamic]int [1 2]) defer]
     (switch mode
       0 0
@@ -2585,7 +2818,7 @@ compile_let_defer_final_switch_scalar_use :: proc(t: ^testing.T) {
 compile_let_defer_binding :: proc(t: ^testing.T) {
     source := `(package main)
 
-(proc main []
+(defn main []
   (let [xs (new [dynamic]int [1 2]) defer
         answer 42]
     (return)))`
@@ -2607,7 +2840,7 @@ compile_let_defer_binding :: proc(t: ^testing.T) {
 reject_returning_defer_binding :: proc(t: ^testing.T) {
     source := `(package main)
 
-(proc owned [] -> [dynamic]int
+(defn owned [] -> [dynamic]int
   (let [xs (new [dynamic]int [1 2]) defer]
     xs))`
 
@@ -2621,11 +2854,11 @@ reject_returning_defer_binding :: proc(t: ^testing.T) {
 reject_returning_defer_binding_inside_struct_literal :: proc(t: ^testing.T) {
     source := `(package main)
 
-(struct Box {
+(defstruct Box {
   :xs [dynamic]int
 })
 
-(proc owned [] -> Box
+(defn owned [] -> Box
   (let [xs (new [dynamic]int [1 2]) defer]
     (Box {:xs xs})))`
 
@@ -2639,10 +2872,10 @@ reject_returning_defer_binding_inside_struct_literal :: proc(t: ^testing.T) {
 reject_returning_defer_binding_inside_call :: proc(t: ^testing.T) {
     source := `(package main)
 
-(proc pass-through [xs: [dynamic]int] -> [dynamic]int
+(defn pass-through [xs: [dynamic]int] -> [dynamic]int
   xs)
 
-(proc owned [] -> [dynamic]int
+(defn owned [] -> [dynamic]int
   (let [xs (new [dynamic]int [1 2]) defer]
     (pass-through xs)))`
 
@@ -2656,11 +2889,11 @@ reject_returning_defer_binding_inside_call :: proc(t: ^testing.T) {
 reject_returning_defer_binding_through_local_wrapper :: proc(t: ^testing.T) {
     source := `(package main)
 
-(struct Box {
+(defstruct Box {
   :xs [dynamic]int
 })
 
-(proc owned [] -> Box
+(defn owned [] -> Box
   (let [xs (new [dynamic]int [1 2]) defer
         box (Box {:xs xs})]
     box))`
@@ -2675,11 +2908,11 @@ reject_returning_defer_binding_through_local_wrapper :: proc(t: ^testing.T) {
 reject_returning_defer_binding_through_set_bang_wrapper :: proc(t: ^testing.T) {
     source := `(package main)
 
-(struct Box {
+(defstruct Box {
   :xs [dynamic]int
 })
 
-(proc owned [] -> Box
+(defn owned [] -> Box
   (let [xs (new [dynamic]int [1 2]) defer
         box (Box {:xs (new [dynamic]int [])})]
     (set! box (Box {:xs xs}))
@@ -2695,11 +2928,11 @@ reject_returning_defer_binding_through_set_bang_wrapper :: proc(t: ^testing.T) {
 reject_returning_defer_binding_in_final_if_points_to_alias_branch :: proc(t: ^testing.T) {
     source := `(package main)
 
-(struct Box {
+(defstruct Box {
   :xs [dynamic]int
 })
 
-(proc owned [flag: bool] -> Box
+(defn owned [flag: bool] -> Box
   (let [xs (new [dynamic]int [1 2]) defer
         box (Box {:xs xs})]
     (if flag
@@ -2718,10 +2951,10 @@ reject_returning_owned_result_from_with_temp_allocator :: proc(t: ^testing.T) {
     source := `(package main)
 (import runtime "base:runtime")
 
-(proc inc [x: int] -> int
+(defn inc [x: int] -> int
   (+ x 1))
 
-(proc bad [xs: []int] -> [dynamic]int
+(defn bad [xs: []int] -> [dynamic]int
   (with-temp-allocator [allocator]
     (map inc xs)))`
 
@@ -2736,14 +2969,14 @@ reject_returning_owned_result_from_with_temp_allocator_through_local_wrapper :: 
     source := `(package main)
 (import runtime "base:runtime")
 
-(struct Box {
+(defstruct Box {
   :xs [dynamic]int
 })
 
-(proc inc [x: int] -> int
+(defn inc [x: int] -> int
   (+ x 1))
 
-(proc bad [xs: []int] -> Box
+(defn bad [xs: []int] -> Box
   (with-temp-allocator [allocator]
     (let [box (Box {:xs (map inc xs)})]
       box)))`
@@ -2759,14 +2992,14 @@ reject_returning_owned_result_from_with_temp_allocator_through_set_bang_wrapper 
     source := `(package main)
 (import runtime "base:runtime")
 
-(struct Box {
+(defstruct Box {
   :xs [dynamic]int
 })
 
-(proc inc [x: int] -> int
+(defn inc [x: int] -> int
   (+ x 1))
 
-(proc bad [xs: []int] -> Box
+(defn bad [xs: []int] -> Box
   (with-temp-allocator [allocator]
     (let [box (Box {:xs (new [dynamic]int [])})]
       (set! box (Box {:xs (map inc xs)}))
@@ -2783,14 +3016,14 @@ reject_returning_owned_result_from_with_temp_allocator_in_final_if_points_to_ali
     source := `(package main)
 (import runtime "base:runtime")
 
-(struct Box {
+(defstruct Box {
   :xs [dynamic]int
 })
 
-(proc inc [x: int] -> int
+(defn inc [x: int] -> int
   (+ x 1))
 
-(proc bad [xs: []int flag: bool] -> Box
+(defn bad [xs: []int flag: bool] -> Box
   (with-temp-allocator [allocator]
     (let [box (Box {:xs (map inc xs)})]
       (if flag
@@ -2810,7 +3043,7 @@ reject_returning_slurp_result_from_with_temp_allocator :: proc(t: ^testing.T) {
 (import os "core:os")
 (import runtime "base:runtime")
 
-(proc bad [path: string] -> [data: []byte, err: os.Error]
+(defn bad [path: string] -> [data: []byte, err: os.Error]
   (with-temp-allocator [allocator]
     (slurp path)))`
 
@@ -2825,14 +3058,14 @@ reject_returning_wrapped_owned_result_from_with_temp_allocator :: proc(t: ^testi
     source := `(package main)
 (import runtime "base:runtime")
 
-(struct Box {
+(defstruct Box {
   :xs [dynamic]int
 })
 
-(proc inc [x: int] -> int
+(defn inc [x: int] -> int
   (+ x 1))
 
-(proc bad [xs: []int] -> Box
+(defn bad [xs: []int] -> Box
   (with-temp-allocator [allocator]
     (Box {:xs (map inc xs)})))`
 
@@ -2847,13 +3080,13 @@ reject_returning_owned_arg_call_from_with_temp_allocator :: proc(t: ^testing.T) 
     source := `(package main)
 (import runtime "base:runtime")
 
-(proc pass-through [xs: [dynamic]int] -> [dynamic]int
+(defn pass-through [xs: [dynamic]int] -> [dynamic]int
   xs)
 
-(proc inc [x: int] -> int
+(defn inc [x: int] -> int
   (+ x 1))
 
-(proc bad [xs: []int] -> [dynamic]int
+(defn bad [xs: []int] -> [dynamic]int
   (with-temp-allocator [allocator]
     (pass-through (map inc xs))))`
 
@@ -3268,10 +3501,10 @@ compile_source_with_message_family_macro :: proc(t: ^testing.T) {
 compile_proc_types_and_literals :: proc(t: ^testing.T) {
     source := `(package main)
 
-(proc apply [f: (proc [x: int] -> int), x: int] -> int
+(defn apply [f: (proc [x: int] -> int), x: int] -> int
   (f x))
 
-(proc main []
+(defn main []
   (let [out (apply (proc [x: int] -> int
                      (+ x 1))
                    41)]
@@ -3308,16 +3541,16 @@ main :: proc() {
 compile_core_higher_order_helpers_and_slice_exprs :: proc(t: ^testing.T) {
     source := `(package main)
 
-(proc inc [x: int] -> int
+(defn inc [x: int] -> int
   (+ x 1))
 
-(proc even? [x: int] -> bool
+(defn even? [x: int] -> bool
   (== (% x 2) 0))
 
-(proc add [acc: int, x: int] -> int
+(defn add [acc: int, x: int] -> int
   (+ acc x))
 
-(proc main []
+(defn main []
   (let [xs (new []int [1 2 3 4])
         mapped (map inc xs)
         tail (slice mapped 1)
@@ -3402,10 +3635,10 @@ kvist_reduce :: proc(f: proc(acc: $U, x: $T) -> U, init: U, xs: []T) -> U {
 compile_sequence_trim_helpers_as_slice_views :: proc(t: ^testing.T) {
     source := `(package main)
 
-(proc keep? [x: int] -> bool
+(defn keep? [x: int] -> bool
   (< x 4))
 
-(proc main []
+(defn main []
   (let [xs (new []int [1 2 3 4])
         prefix (take 2 xs)
         suffix (drop 1 xs)
@@ -3449,12 +3682,12 @@ compile_sequence_trim_helpers_as_slice_views :: proc(t: ^testing.T) {
 compile_threaded_let_binding_keeps_owned_intermediates_alive :: proc(t: ^testing.T) {
     source := `(package main)
 
-(struct User {
+(defstruct User {
   :name string
   :active bool
 })
 
-(proc main []
+(defn main []
   (let [users (new []User [(User {:name "Ada" :active true})
                            (User {:name "Lin" :active false})
                            (User {:name "Grace" :active true})])
@@ -3483,13 +3716,13 @@ compile_threaded_let_binding_keeps_owned_intermediates_alive :: proc(t: ^testing
 reject_threaded_return_with_allocating_intermediate :: proc(t: ^testing.T) {
     source := `(package main)
 
-(proc inc [x: int] -> int
+(defn inc [x: int] -> int
   (+ x 1))
 
-(proc even? [x: int] -> bool
+(defn even? [x: int] -> bool
   (== (% x 2) 0))
 
-(proc bad [xs: []int] -> []int
+(defn bad [xs: []int] -> []int
   (->> xs
        (map inc)
        (filter even?)
@@ -3505,12 +3738,12 @@ reject_threaded_return_with_allocating_intermediate :: proc(t: ^testing.T) {
 reject_returning_threaded_view_of_owned_intermediate :: proc(t: ^testing.T) {
     source := `(package main)
 
-(struct User {
+(defstruct User {
   :name string
   :active bool
 })
 
-(proc bad [users: []User] -> []string
+(defn bad [users: []User] -> []string
   (let [active-names (->> users
                           (filter :active)
                           (map :name)
@@ -3527,27 +3760,27 @@ reject_returning_threaded_view_of_owned_intermediate :: proc(t: ^testing.T) {
 compile_additional_sequence_helpers :: proc(t: ^testing.T) {
     source := `(package main)
 
-(proc even? [x: int] -> bool
+(defn even? [x: int] -> bool
   (== (% x 2) 0))
 
-(proc add-index [i: int, x: int] -> int
+(defn add-index [i: int, x: int] -> int
   (+ i x))
 
-(proc keep-even [x: int] -> [value: int, ok: bool]
+(defn keep-even [x: int] -> [value: int, ok: bool]
   (if (even? x)
     (return x true)
     (return 0 false)))
 
-(proc pair [x: int] -> []int
+(defn pair [x: int] -> []int
   (new []int [x (+ x 10)]))
 
-(proc neg [x: int] -> int
+(defn neg [x: int] -> int
   (- x))
 
-(proc pick-first [n: int] -> int
+(defn pick-first [n: int] -> int
   0)
 
-(proc main []
+(defn main []
   (let [xs (new []int [1 2 3])
         mutable (new [dynamic]int [1 2 3])
         ys (new []int [4 5])
@@ -3676,16 +3909,16 @@ compile_additional_sequence_helpers :: proc(t: ^testing.T) {
 compile_chunking_and_zipmap_sequence_helpers :: proc(t: ^testing.T) {
     source := `(package main)
 
-(proc even? [x: int] -> bool
+(defn even? [x: int] -> bool
   (== (% x 2) 0))
 
-(proc identity [x: int] -> int
+(defn identity [x: int] -> int
   x)
 
-(proc parity [x: int] -> int
+(defn parity [x: int] -> int
   (% x 2))
 
-(proc main []
+(defn main []
   (let [xs (new []int [1 2 2 3 3 3])
         names (new []string ["Ada" "Lin"])
         ages (new []int [36 17])
@@ -3751,13 +3984,13 @@ compile_chunking_and_zipmap_sequence_helpers :: proc(t: ^testing.T) {
 compile_map_constructing_sequence_helpers :: proc(t: ^testing.T) {
     source := `(package main)
 
-(proc identity [x: int] -> int
+(defn identity [x: int] -> int
   x)
 
-(proc amount [x: int] -> int
+(defn amount [x: int] -> int
   x)
 
-(proc main []
+(defn main []
   (let [xs (new []int [1 2 2 3])
         by-value (index-by identity xs)
         by-group (group-by identity xs)
@@ -3829,13 +4062,13 @@ compile_map_constructing_sequence_helpers :: proc(t: ^testing.T) {
 compile_bounded_sequence_producers :: proc(t: ^testing.T) {
     source := `(package main)
 
-(proc next [] -> int
+(defn next [] -> int
   42)
 
-(proc double [x: int] -> int
+(defn double [x: int] -> int
   (* x 2))
 
-(proc main []
+(defn main []
   (let [xs (range 1 5)
         ys (repeat 3 "x")
         zs (repeatedly 2 next)
@@ -3872,13 +4105,13 @@ compile_bounded_sequence_producers :: proc(t: ^testing.T) {
 compile_keyword_callbacks_for_sequence_helpers :: proc(t: ^testing.T) {
     source := `(package main)
 
-(struct User {
+(defstruct User {
   :name string
   :amount int
   :verified bool
 })
 
-(proc main []
+(defn main []
   (let [users (new []User [(User {:name "Ada" :amount 10 :verified true})
                            (User {:name "Lin" :amount 20 :verified false})])
         names (map :name users)
@@ -3953,7 +4186,7 @@ compile_keyword_callbacks_for_sequence_helpers :: proc(t: ^testing.T) {
 compile_sequence_indexing_helpers :: proc(t: ^testing.T) {
     source := `(package main)
 
-(proc main []
+(defn main []
   (let [xs (new []int [10 20 30])
         a (first xs)
         b (second xs)
@@ -3993,10 +4226,10 @@ main :: proc() {
 allow_returning_owned_sequence_result :: proc(t: ^testing.T) {
     source := `(package main)
 
-(proc inc [x: int] -> int
+(defn inc [x: int] -> int
   (+ x 1))
 
-(proc owned [xs: []int] -> [dynamic]int
+(defn owned [xs: []int] -> [dynamic]int
   (map inc xs))`
 
     output, err, ok := kvist.compile_source(source)
@@ -4014,10 +4247,10 @@ allow_returning_owned_sequence_result :: proc(t: ^testing.T) {
 warn_discarded_owned_sequence_result :: proc(t: ^testing.T) {
     source := `(package main)
 
-(proc inc [x: int] -> int
+(defn inc [x: int] -> int
   (+ x 1))
 
-(proc main []
+(defn main []
   (let [xs (new []int [1 2 3])]
     (map inc xs)
     (return)))`
@@ -4041,10 +4274,10 @@ warn_discarded_owned_sequence_result :: proc(t: ^testing.T) {
 reject_nested_owned_sequence_result :: proc(t: ^testing.T) {
     source := `(package main)
 
-(proc inc [x: int] -> int
+(defn inc [x: int] -> int
   (+ x 1))
 
-(proc bad [xs: []int] -> int
+(defn bad [xs: []int] -> int
   (first (map inc xs)))`
 
     _, err, ok := kvist.compile_source(source)
@@ -4058,7 +4291,7 @@ warn_discarded_slurp_result :: proc(t: ^testing.T) {
     source := `(package main)
 (import os "core:os")
 
-(proc main []
+(defn main []
   (slurp "cache.json")
   (return))`
 
@@ -4081,14 +4314,14 @@ warn_discarded_slurp_result :: proc(t: ^testing.T) {
 compile_collection_type_forms_and_make_new :: proc(t: ^testing.T) {
     source := `(package main)
 
-(struct State {
+(defstruct State {
   :values (slice int)
   :buffer (dynamic int)
   :lookup (map string int)
   :next (ptr State)
 })
 
-(proc main []
+(defn main []
   (let [values (new (slice int) [1 2 3])
         buffer (make (dynamic int))
         lookup (make (map string int))]
@@ -4126,15 +4359,15 @@ compile_polymorphic_type_form :: proc(t: ^testing.T) {
     source := `(package main)
 (import chan "core:sync/chan")
 
-(struct Queue {
+(defstruct Queue {
   :jobs (type chan.Chan int)
 })
 
-(proc recv-job [jobs: (type chan.Chan int)] -> int
+(defn recv-job [jobs: (type chan.Chan int)] -> int
   (let [[value ok] (chan.recv jobs)]
     (if ok value 0)))
 
-(proc main []
+(defn main []
   (let [[jobs err] (chan.create (type chan.Chan int) context.allocator)]
     (defer (chan.destroy jobs))
     (if (== err .None)
@@ -4185,12 +4418,12 @@ main :: proc() {
 compile_array_map_literals_and_typed_let_type_forms :: proc(t: ^testing.T) {
     source := `(package main)
 
-(struct Config {
+(defstruct Config {
   :ports (array 3 int)
   :lookup (map string int)
 })
 
-(proc main []
+(defn main []
   (let [ports: (array 3 int) (new (array 3 int) [80 443 8080])
         lookup: (map string int) (new (map string int) {"http" 80 "https" 443})]
     (return)))`
@@ -4224,11 +4457,11 @@ main :: proc() {
 compile_multiline_composite_literals :: proc(t: ^testing.T) {
     source := `(package main)
 
-(struct Handler {
+(defstruct Handler {
   :run (proc [] -> int)
 })
 
-(proc main []
+(defn main []
   (let [handler (Handler {:run (proc [] -> int
                                   42)})
         handlers (new (slice Handler)
@@ -4273,25 +4506,25 @@ main :: proc() {
 compile_thread_first_forms :: proc(t: ^testing.T) {
     source := `(package main)
 
-(enum Method [
+(defenum Method [
   Get
   Post
 ])
 
-(struct Request {
+(defstruct Request {
   :method Method
   :path string
 })
 
-(proc method-name [method: Method] -> string
+(defn method-name [method: Method] -> string
   (switch method
     .Get "GET"
     :else "OTHER"))
 
-(proc describe [req: Request] -> string
+(defn describe [req: Request] -> string
   (-> req :method method-name))
 
-(proc clone-path [req: Request, allocator: rawptr] -> string
+(defn clone-path [req: Request, allocator: rawptr] -> string
   (-> req :path (clone-string allocator)))`
 
     output, err, ok := kvist.compile_source(source)
@@ -4338,17 +4571,17 @@ clone_path :: proc(req: Request, allocator: rawptr) -> string {
 compile_pointer_deref_and_address_of :: proc(t: ^testing.T) {
     source := `(package main)
 
-(struct Person {
+(defstruct Person {
   :name string
 })
 
-(proc ptr-value [x: ^int] -> int
+(defn ptr-value [x: ^int] -> int
   (deref x))
 
-(proc bump [x: ^int]
+(defn bump [x: ^int]
   (set! (deref x) (+ (deref x) 1)))
 
-(proc borrow-name [p: ^Person] -> ^string
+(defn borrow-name [p: ^Person] -> ^string
   (addr (:name (deref p))))`
 
     output, err, ok := kvist.compile_source(source)
@@ -4386,11 +4619,11 @@ compile_pointer_suffix_deref_and_set_bang_locals :: proc(t: ^testing.T) {
 
 (defvar counter int 0)
 
-(proc bump [total: ^int] -> int
+(defn bump [total: ^int] -> int
   (set! total^ (+ total^ 1))
   total^)
 
-(proc main [] -> int
+(defn main [] -> int
   (let [local 2]
     (set! local (+ local 1))
     (set! counter local)
@@ -4427,12 +4660,12 @@ main :: proc() -> int {
 compile_function_style_update_bang :: proc(t: ^testing.T) {
     source := `(package main)
 
-(struct Point {
+(defstruct Point {
   :x int
   :y int
 })
 
-(proc score [] -> int
+(defn score [] -> int
   (let [xs (new [dynamic]int [1 2 3])
         lookup (new map[string]int {"a" 1})
         point (Point {:x 4 :y 5})]
@@ -4474,15 +4707,15 @@ score :: proc() -> int {
 compile_update_expr_struct_field :: proc(t: ^testing.T) {
     source := `(package main)
 
-(struct Point {
+(defstruct Point {
   :x int
   :y int
 })
 
-(proc inc [x: int] -> int
+(defn inc [x: int] -> int
   (+ x 1))
 
-(proc score [] -> int
+(defn score [] -> int
   (let [point (Point {:x 4 :y 5})
         newer (update point :y inc)]
     (+ (:y point) (:y newer))))`
@@ -4523,14 +4756,14 @@ score :: proc() -> int {
 compile_update_bang_unary_inc :: proc(t: ^testing.T) {
     source := `(package main)
 
-(struct Point {
+(defstruct Point {
   :y int
 })
 
-(proc inc [x: int] -> int
+(defn inc [x: int] -> int
   (+ x 1))
 
-(proc score [] -> int
+(defn score [] -> int
   (let [point (Point {:y 5})]
     (update! point :y inc)
     (:y point)))`
@@ -4550,14 +4783,14 @@ compile_update_bang_unary_inc :: proc(t: ^testing.T) {
 compile_nil_predicate :: proc(t: ^testing.T) {
     source := `(package main)
 
-(struct User {
+(defstruct User {
   :name string
 })
 
-(proc has-user [p: ^User] -> bool
+(defn has-user [p: ^User] -> bool
   (not (nil? p)))
 
-(proc print-user [p: ^User]
+(defn print-user [p: ^User]
   (when (nil? p)
     (return)))`
 
@@ -4592,13 +4825,13 @@ print_user :: proc(p: ^User) {
 compile_lisp_predicate_and_bang_identifier_names :: proc(t: ^testing.T) {
     source := `(package main)
 
-(proc greater-than? [threshold: int, x: int] -> bool
+(defn greater-than? [threshold: int, x: int] -> bool
   (> x threshold))
 
-(proc bump! [x: ^int]
+(defn bump! [x: ^int]
   (set! (deref x) (+ (deref x) 1)))
 
-(proc main []
+(defn main []
   (let [x 1]
     (greater-than? 0 x)))`
 
@@ -4632,7 +4865,7 @@ main :: proc() {
 compile_odin_shaped_type_spellings :: proc(t: ^testing.T) {
     source := `(package main)
 
-(struct Raw-Types {
+(defstruct Raw-Types {
   :values []int
   :fixed [3]int
   :buffer [dynamic]int
@@ -4640,10 +4873,10 @@ compile_odin_shaped_type_spellings :: proc(t: ^testing.T) {
   :next ^Raw-Types
 })
 
-(proc values [state: ^Raw-Types] -> []int
+(defn values [state: ^Raw-Types] -> []int
   (:values (deref state)))
 
-(proc main []
+(defn main []
   (let [values (new []int [1 2 3])
         lookup (new map[string]int {"one" 1})
         buffer-literal (new [dynamic]int [1 2])
@@ -4688,7 +4921,7 @@ main :: proc() {
 compile_compact_type_spellings_inside_vectors :: proc(t: ^testing.T) {
     source := `(package main)
 
-(proc first [xs: []int, lookup: map[string]int] -> int
+(defn first [xs: []int, lookup: map[string]int] -> int
   (let [buffer: [dynamic]int (make [dynamic]int)
         fixed: [3]int (new [3]int [1 2 3])
         from-map (get lookup "missing" -1)]
@@ -4726,7 +4959,7 @@ kvist_get_or_default :: proc(m: map[$K]$V, key: K, default: V) -> V {
 compile_map_literals_with_non_string_keys :: proc(t: ^testing.T) {
     source := `(package main)
 
-(proc main []
+(defn main []
   (let [by-code (new map[int]string {1 "one" 2 "two"})
         by-flag (new map[bool]int {true 1 false 0})]
     (return)))`
@@ -4755,7 +4988,7 @@ main :: proc() {
 compile_inline_collection_literals :: proc(t: ^testing.T) {
     source := `(package main)
 
-(proc score [] -> int
+(defn score [] -> int
   (let [xs [1 2 3] defer
         lookup {:one 1 :two 2} defer
         tags #{:math :lisp} defer]
@@ -4794,7 +5027,7 @@ score :: proc() -> int {
 compile_typed_empty_inline_collection_literals :: proc(t: ^testing.T) {
     source := `(package main)
 
-(proc score [] -> int
+(defn score [] -> int
   (let [xs: [dynamic]int [] defer
         lookup: map[string]int {} defer
         tags: set[string] #{} defer]
@@ -4832,7 +5065,7 @@ score :: proc() -> int {
 compile_inline_map_literal_rejects_mixed_values :: proc(t: ^testing.T) {
     source := `(package main)
 
-(proc main []
+(defn main []
   (let [profile {:name "Ada" :age 36}]
     (return)))`
 
@@ -4849,22 +5082,22 @@ compile_inline_map_literal_rejects_mixed_values :: proc(t: ^testing.T) {
 compile_unparenthesized_proc_type_spelling :: proc(t: ^testing.T) {
     source := `(package main)
 
-(const default-pred proc [x: int] -> bool
+(defconst default-pred proc [x: int] -> bool
   (proc [x: int] -> bool
     true))
 
-(struct Runner {
+(defstruct Runner {
   :run proc [x: int] -> bool
 })
 
-(union Callback {
+(defunion Callback {
   :pred proc [x: int] -> bool
 })
 
-(proc apply-pred [pred: proc [x: int] -> bool, x: int] -> bool
+(defn apply-pred [pred: proc [x: int] -> bool, x: int] -> bool
   (pred x))
 
-(proc always [] -> proc [x: int] -> bool
+(defn always [] -> proc [x: int] -> bool
   (proc [x: int] -> bool
     true))`
 
@@ -4907,7 +5140,7 @@ always :: proc() -> proc(x: int) -> bool {
 compile_typed_let_with_proc_type_spelling :: proc(t: ^testing.T) {
     source := `(package main)
 
-(proc main []
+(defn main []
   (let [pred: proc [x: int] -> bool (proc [x: int] -> bool
                                         true)]
     (pred 1)
@@ -4940,10 +5173,10 @@ compile_proc_directives_and_declaration_attributes :: proc(t: ^testing.T) {
 
 (odin "@(private)")
 (odin "#force_inline")
-(proc hidden [] -> int
+(defn hidden [] -> int
   1)
 
-(proc query [] -> [value: int, ok: bool] #optional_ok
+(defn query [] -> [value: int, ok: bool] #optional_ok
   (return 42 true))`
 
     output, err, ok := kvist.compile_source(source)
@@ -4972,10 +5205,10 @@ query :: proc() -> (value: int, ok: bool) #optional_ok {
 compile_directive_expression_wrappers :: proc(t: ^testing.T) {
     source := `(package main)
 
-(proc inc [x: int] -> int
+(defn inc [x: int] -> int
   (+ x 1))
 
-(proc main []
+(defn main []
   (let [x (#force_inline inc 41)
         y (#force_inline (inc x))]
     (return)))`
@@ -5008,7 +5241,7 @@ reject_proc_directive_before_non_proc_declaration :: proc(t: ^testing.T) {
     source := `(package main)
 
 (odin "#force_inline")
-(const answer 42)`
+(defconst answer 42)`
 
     _, err, ok := kvist.compile_source(source)
     defer delete(err.message)
@@ -5020,7 +5253,7 @@ reject_proc_directive_before_non_proc_declaration :: proc(t: ^testing.T) {
 compile_parenthesized_nested_proc_type_spelling :: proc(t: ^testing.T) {
     source := `(package main)
 
-(proc identity-factory [f: (proc [x: int] -> proc [y: int] -> bool)] -> (proc [x: int] -> proc [y: int] -> bool)
+(defn identity-factory [f: (proc [x: int] -> proc [y: int] -> bool)] -> (proc [x: int] -> proc [y: int] -> bool)
   f)`
 
     output, err, ok := kvist.compile_source(source)
@@ -5073,7 +5306,7 @@ lower_rejects_missing_package :: proc(t: ^testing.T) {
     formatted := kvist.format_compile_error("bad.kvist", source, err)
     defer delete(formatted)
     expected := `bad.kvist:1:1: missing package declaration
-  (proc main []
+  (defn main []
   ^
 `
     testing.expect_value(t, formatted, expected)
@@ -5446,7 +5679,7 @@ compile_path_rejects_mismatched_package_names_in_directory :: proc(t: ^testing.T
 lower_rejects_duplicate_package :: proc(t: ^testing.T) {
     source := `(package main)
 (package other)
-(proc main []
+(defn main []
   (return))`
 
     _, err, ok := kvist.compile_source(source)
@@ -5468,7 +5701,7 @@ lower_rejects_duplicate_package :: proc(t: ^testing.T) {
 @(test)
 lower_rejects_import_after_declarations :: proc(t: ^testing.T) {
     source := `(package main)
-(const answer 42)
+(defconst answer 42)
 (import "core:fmt")`
 
     _, err, ok := kvist.compile_source(source)
@@ -5495,7 +5728,7 @@ compile_top_level_odin_escape :: proc(t: ^testing.T) {
 (odin "Foreign_Handle :: distinct rawptr")
 (odin "foreign import sqlite \"system:sqlite3\"")
 
-(proc main []
+(defn main []
   (odin "context.user_ptr = nil")
   (return))`
 
@@ -5526,7 +5759,7 @@ main :: proc() {
 compile_multiline_statement_odin_escape :: proc(t: ^testing.T) {
     source := `(package main)
 
-(proc main []
+(defn main []
   (odin "x := 1\n_ = x")
   (return))`
 

@@ -677,7 +677,7 @@ parse_decl :: proc(top_form: CST_Top_Form) -> (decl: AST_Decl, err: Compile_Erro
             }, {}, true
         }
         return decl, Compile_Error{message = "import expects a string path or alias plus string path", span = form.span}, false
-    case "const", "defconst", "defconst-":
+    case "defconst", "defconst-":
         if len(form.items) < 3 {
             return decl, Compile_Error{message = "defconst expects a name, optional type, and value", span = form.span}, false
         }
@@ -753,23 +753,6 @@ parse_decl :: proc(top_form: CST_Top_Form) -> (decl: AST_Decl, err: Compile_Erro
             doc_lines = doc_lines,
             var_decl = var_decl,
         }, {}, true
-    case "struct":
-        if len(form.items) != 3 || form.items[1].kind != .Symbol {
-            return decl, Compile_Error{message = "struct expects a name and brace form", span = form.span}, false
-        }
-        fields, err_fields, ok_fields := parse_struct_fields(form.items[2])
-        if !ok_fields {
-            return decl, err_fields, false
-        }
-        return AST_Decl{
-            kind = .Struct,
-            span = form.span,
-            doc_lines = top_form.doc_lines,
-            struct_decl = Struct_Decl{
-                name   = map_name(form.items[1].text),
-                fields = fields,
-            },
-        }, {}, true
     case "defstruct", "defstruct-":
         if len(form.items) != 3 && len(form.items) != 4 {
             return decl, Compile_Error{message = "defstruct expects a name, optional docstring, and brace form", span = form.span}, false
@@ -799,7 +782,7 @@ parse_decl :: proc(top_form: CST_Top_Form) -> (decl: AST_Decl, err: Compile_Erro
                 fields = fields,
             },
         }, {}, true
-    case "enum", "defenum", "defenum-":
+    case "defenum", "defenum-":
         if len(form.items) < 3 || form.items[1].kind != .Symbol {
             return decl, Compile_Error{message = "defenum expects a name and variant vector or brace form", span = form.span}, false
         }
@@ -825,7 +808,7 @@ parse_decl :: proc(top_form: CST_Top_Form) -> (decl: AST_Decl, err: Compile_Erro
                 variants = variants,
             },
         }, {}, true
-    case "union", "defunion", "defunion-":
+    case "defunion", "defunion-":
         if len(form.items) < 3 || form.items[1].kind != .Symbol {
             return decl, Compile_Error{message = "defunion expects a name and variant brace form", span = form.span}, false
         }
@@ -861,7 +844,7 @@ parse_decl :: proc(top_form: CST_Top_Form) -> (decl: AST_Decl, err: Compile_Erro
             doc_lines = top_form.doc_lines,
             raw_text = unquote_string(form.items[1].text),
         }, {}, true
-    case "proc", "defn", "defn-":
+    case "defn", "defn-":
         doc_lines := top_form.doc_lines
         proc_form := form
         if len(form.items) > 3 && form.items[2].kind == .String {

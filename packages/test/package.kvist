@@ -1,0 +1,128 @@
+(package test)
+
+(defmacro- __kvist_test_wrap_each
+  [body]
+  body)
+
+(defmacro- emit-fixture-chain
+  [body fixtures]
+  (if (= (count fixtures) 0)
+    body
+    (quasiquote
+      ((unquote (first fixtures)) t
+       (proc [t: ^testing.T]
+         (unquote (emit-fixture-chain body (rest fixtures))))))))
+
+(defmacro- emit-is
+  [expr msg]
+  (if (list? expr)
+    (let [head (first expr)]
+      (if (symbol? head)
+        (if (= (name head) "=")
+          (if (= (count expr) 3)
+            (if (nil? msg)
+              (quasiquote
+                (testing.expect_value t (unquote (nth expr 1)) (unquote (nth expr 2))))
+              (quasiquote
+                (testing.expectf t (= (unquote (nth expr 1)) (unquote (nth expr 2))) (unquote msg))))
+            (error "t/is with = expects exactly two operands"))
+          (if (= (name head) "not")
+            (if (= (count expr) 2)
+              (if (nil? msg)
+                (quasiquote
+                  (testing.expect t (not (unquote (nth expr 1)))))
+                (quasiquote
+                  (testing.expect t (not (unquote (nth expr 1))) (unquote msg))))
+              (error "t/is with not expects exactly one operand"))
+            (if (nil? msg)
+              (quasiquote
+                (testing.expect t (unquote expr)))
+              (quasiquote
+                (testing.expect t (unquote expr) (unquote msg))))))
+        (if (nil? msg)
+          (quasiquote
+            (testing.expect t (unquote expr)))
+          (quasiquote
+            (testing.expect t (unquote expr) (unquote msg))))))
+    (if (nil? msg)
+      (quasiquote
+        (testing.expect t (unquote expr)))
+      (quasiquote
+        (testing.expect t (unquote expr) (unquote msg))))))
+
+(defmacro- emit-deftest
+  [name doc body]
+  (if (nil? doc)
+    (forms
+      (quasiquote (import "core:testing"))
+      (quasiquote (odin "@(test)"))
+      (quasiquote
+        (defn (unquote name) [t: ^testing.T]
+          (unquote (__kvist_test_wrap_each
+                     (quasiquote (do (splice body))))))))
+    (forms
+      (quasiquote (import "core:testing"))
+      (quasiquote (odin "@(test)"))
+      (quasiquote
+        (defn (unquote name)
+          (unquote doc)
+          [t: ^testing.T]
+          (unquote (__kvist_test_wrap_each
+                     (quasiquote (do (splice body))))))))))
+
+(defmacro- emit-are
+  [argv expr values]
+  (let [n (count argv)
+        row (slice values 0 n)
+        remaining (slice values n)]
+    (if (= (count values) 0)
+      (forms)
+      (if (= (count row) n)
+        (quasiquote
+          (do
+            (is (unquote (subst expr argv row)))
+            (splice (emit-are argv expr remaining))))
+        (error "t/are expects a multiple of the binding count")))))
+
+(defmacro deftest
+  "Define a Kvist test that lowers to an Odin @(test) proc with a testing.T parameter."
+  [name & body]
+  (let [maybe-doc (first body)]
+    (if (string? maybe-doc)
+      (emit-deftest name maybe-doc (rest body))
+      (emit-deftest name nil body))))
+
+(defmacro is
+  "Assert that an expression is true. Equality and not-forms get specialized lowering."
+  [expr & rest]
+  (if (= (count rest) 0)
+    (emit-is expr nil)
+    (if (= (count rest) 1)
+      (emit-is expr (first rest))
+      (error "t/is expects an expression and optional message"))))
+
+(defmacro testing
+  "Group assertions under a message. The current implementation keeps this as structural grouping only."
+  [message & body]
+  (quasiquote
+    (do (splice body))))
+
+(defmacro are
+  "Repeat the same assertion template over rows of values."
+  [argv expr & values]
+  (if (= (count argv) 0)
+    (error "t/are expects a non-empty binding vector")
+    (emit-are argv expr values)))
+
+(defmacro use-fixtures
+  "Install test fixtures. The current first pass supports only :each fixtures."
+  [scope & fixtures]
+  (if (= (name scope) "each")
+    (let [template (emit-fixture-chain (quote __kvist_test_body__) fixtures)]
+      (quasiquote
+        (defmacro- __kvist_test_wrap_each
+          [body]
+          (subst (unquote template)
+                 (vector (quote __kvist_test_body__))
+                 (vector body)))))
+    (error "t/use-fixtures currently supports only :each")))

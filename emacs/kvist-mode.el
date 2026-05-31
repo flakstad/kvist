@@ -35,7 +35,7 @@
   :group 'kvist)
 
 (defconst kvist-special-forms
-  '("package" "import" "const" "struct" "enum" "union" "proc" "odin"
+  '("package" "import" "defconst" "defvar" "defstruct" "defenum" "defunion" "defn" "defmacro" "proc" "odin"
     "let" "do" "if" "when" "cond" "switch" "set!" "return" "defer"
     "for" "each" "comment" "new" "make" "get" "nil?" "in" "not-in"
     "type" "or-else" "update" "update!"

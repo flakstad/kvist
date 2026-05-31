@@ -3,13 +3,13 @@
 
 (odin "@(private)")
 (odin "#force_inline")
-(proc hidden-answer [] -> int
+(defn hidden-answer [] -> int
   42)
 
-(proc query-answer [] -> [value: int, ok: bool] #optional_ok
+(defn query-answer [] -> [value: int, ok: bool] #optional_ok
   (return (hidden-answer) true))
 
-(proc main []
+(defn main []
   (let [[value ok] (query-answer)]
     (when ok
       (println value))))

@@ -1,0 +1,24 @@
+(package tests)
+
+(import t "kvist:test")
+
+(defn each-fixture [t: ^testing.T, body: proc [t: ^testing.T]]
+  (body t))
+
+(t/use-fixtures :each each-fixture)
+
+(t/deftest sample-arithmetic
+  "Basic assertions over ordinary Kvist expressions."
+  (t/testing "numbers"
+    (t/is true)
+    (t/is (= (+ 1 1) 2))
+    (t/is (not false))
+    (t/is (= (+ 2 2) 4))
+    (t/are [x expected]
+      (= x expected)
+      1 1
+      2 2)))
+
+(t/deftest explicit-pass-fail
+  (t/is true "documented success")
+  (t/is true "still true"))
