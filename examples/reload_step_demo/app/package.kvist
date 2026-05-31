@@ -1,0 +1,21 @@
+(package app)
+
+(import fmt "core:fmt")
+
+(defn init-program [program: (ptr Program_State)]
+  (set! (:last-status program^) "program initialized"))
+
+(defn run-one-step [program: (ptr Program_State)] -> string
+  (set! (:jobs-finished program^) (+ (:jobs-finished program^) 1))
+  (if (== (:jobs-finished program^) 1)
+    (set! (:last-status program^) "warming up")
+    (set! (:last-status program^) "running"))
+  (:last-status program^))
+
+(defn print-status [step-count: int, reload-count: int, unload-count: int, program: (ptr Program_State)]
+  (fmt.printf "[app] step=%d reloads=%d unloads=%d jobs=%d status=%s\n"
+              step-count
+              reload-count
+              unload-count
+              (:jobs-finished program^)
+              (:last-status program^)))

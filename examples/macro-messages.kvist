@@ -6,37 +6,37 @@
 (defmacro emit-message-structs [entries]
   (if (= (count entries) 0)
     (forms)
-    (let [entry (first entries)
-          struct-name (nth entry 0)
-          fields (nth entry 1)]
+    (let [entry (arr/first entries)
+          struct-name (arr/nth entry 0)
+          fields (arr/nth entry 1)]
       (forms
         (quasiquote
           (defstruct (unquote struct-name) (unquote fields)))
-        (emit-message-structs (rest entries))))))
+        (emit-message-structs (arr/rest entries))))))
 
 (defmacro emit-message-union-entries [entries]
   (if (= (count entries) 0)
     (forms)
-    (let [entry (first entries)
-          struct-name (nth entry 0)
+    (let [entry (arr/first entries)
+          struct-name (arr/nth entry 0)
           tag (keyword (name struct-name))]
       (forms
         tag
         struct-name
-        (emit-message-union-entries (rest entries))))))
+        (emit-message-union-entries (arr/rest entries))))))
 
 (defmacro emit-message-ctors [union-name entries]
   (if (= (count entries) 0)
     (forms)
-    (let [entry (first entries)
-          struct-name (nth entry 0)
+    (let [entry (arr/first entries)
+          struct-name (arr/nth entry 0)
           ctor-name (symbol (str "make-" (name union-name) "-" (name struct-name)))
           tag (keyword (name struct-name))]
       (forms
         (quasiquote
           (defn (unquote ctor-name) [value: (unquote struct-name)] -> (unquote union-name)
             ((unquote union-name) {(unquote tag) value})))
-        (emit-message-ctors union-name (rest entries))))))
+        (emit-message-ctors union-name (arr/rest entries))))))
 
 (defmacro defmessages [union-name entries]
   (forms

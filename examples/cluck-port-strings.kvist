@@ -1,25 +1,37 @@
 // Port of the Cluck reset string demo, using ordinary Odin string operations.
-(package main)
 (import str "kvist:str")
-
 (import "core:fmt")
 
 (defn strings-demo [] -> bool
   (let [name "kvist"
-        greeting (fmt.tprintf "hello %s" name) defer]
+        greeting (fmt.tprintf "hello %s" name) defer
+        parts (str/split "alpha,beta,gamma" ",") defer
+        joined (str/join parts "/") defer
+        replaced (str/replace joined "/" "-") defer
+        lowered (str/lower replaced) defer
+        uppered (str/upper lowered) defer]
     (println (str/count name))
     (println (str/get name 1))
     (println (str/slice name 1 4))
     (println greeting)
     (println (str/contains? name "vis"))
+    (println (str/trim "  kvist  "))
+    (println (str/trim-prefix "kvist/core" "kvist/"))
+    (println (str/trim-suffix "kvist.txt" ".txt"))
+    (println (str/starts-with? uppered "ALPHA"))
+    (println (str/ends-with? uppered "GAMMA"))
+    (println (str/index-of uppered "-"))
+    (println (str/last-index-of uppered "-"))
+    (println uppered)
     true))
 
 (defn main []
   (println (strings-demo)))
 
 (comment
-  ;; Strings port cleanly for count/get/slice/contains?. The visible host-level
-  ;; bit left here is formatting, which still allocates an owned string.
+  ;; Strings now cover direct count/get/slice/contains? plus a curated set of
+  ;; common Odin string transforms. Formatting is still explicit host-level
+  ;; allocation through fmt.
   (strings-demo)
   ;; => true
 )

@@ -1,0 +1,61 @@
+(package str)
+(import strings "core:strings")
+
+(defmacro slice [s start & rest]
+  (if (= (kvist/count rest) 0)
+    (quasiquote
+      (kvist/str/slice (unquote s) (unquote start)))
+    (quasiquote
+      (kvist/str/slice (unquote s) (unquote start) (unquote (kvist/first rest))))))
+
+(defmacro get [s index]
+  (quasiquote
+    (kvist/get (unquote s) (unquote index))))
+
+(defmacro split [s separator]
+  (quasiquote
+    (kvist/str/split (unquote s) (unquote separator))))
+
+(defmacro join [parts separator]
+  (quasiquote
+    (kvist/str/join (unquote parts) (unquote separator))))
+
+(defmacro replace [s old new & rest]
+  (if (= (kvist/count rest) 0)
+    (quasiquote
+      (kvist/str/replace (unquote s) (unquote old) (unquote new)))
+    (quasiquote
+      (kvist/str/replace (unquote s) (unquote old) (unquote new) (unquote (kvist/first rest))))))
+
+(proc count [s: string] -> int #force_inline
+  (len s))
+
+(proc contains? [s: string, needle: string] -> bool #force_inline
+  (strings.contains s needle))
+
+(proc trim [s: string] -> string #force_inline
+  (strings.trim_space s))
+
+(proc trim-prefix [s: string, prefix: string] -> string #force_inline
+  (strings.trim_prefix s prefix))
+
+(proc trim-suffix [s: string, suffix: string] -> string #force_inline
+  (strings.trim_suffix s suffix))
+
+(proc starts-with? [s: string, prefix: string] -> bool #force_inline
+  (strings.has_prefix s prefix))
+
+(proc ends-with? [s: string, suffix: string] -> bool #force_inline
+  (strings.has_suffix s suffix))
+
+(proc index-of [s: string, needle: string] -> int #force_inline
+  (strings.index s needle))
+
+(proc last-index-of [s: string, needle: string] -> int #force_inline
+  (strings.last_index s needle))
+
+(proc lower [s: string] -> string #force_inline
+  (strings.to_lower s))
+
+(proc upper [s: string] -> string #force_inline
+  (strings.to_upper s))

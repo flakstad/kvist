@@ -1,0 +1,55 @@
+(package map)
+(import arr "kvist:arr")
+
+(defmacro empty [key-type value-type & rest]
+  (if (= (kvist/count rest) 0)
+    (quasiquote
+      (kvist/map/empty (unquote key-type) (unquote value-type)))
+    (quasiquote
+      (kvist/map/empty (unquote key-type) (unquote value-type) (unquote (kvist/first rest))))))
+
+(defmacro of [key-type value-type entries]
+  (quasiquote
+    (kvist/map/of (unquote key-type) (unquote value-type) (unquote entries))))
+
+(defmacro get [m key & rest]
+  (if (= (kvist/count rest) 0)
+    (quasiquote
+      (kvist/map/get (unquote m) (unquote key)))
+    (quasiquote
+      (kvist/map/get (unquote m) (unquote key) (unquote (kvist/first rest))))))
+
+(defmacro merge! [target source]
+  (quasiquote
+    (kvist/map/merge! (unquote target) (unquote source))))
+
+(proc contains? [m: map[$K]$V, key: K] -> bool #force_inline
+  (in key m))
+
+(proc merge [lhs: map[$K]$V, rhs: map[$K]$V] -> map[K]V #force_inline
+  (let [out (map/empty K V (+ (count lhs) (count rhs)))]
+    (for [key value lhs]
+      (update! out key value))
+    (for [key value rhs]
+      (update! out key value))
+    out))
+
+(proc keys [m: map[$K]$V] -> [dynamic]K #force_inline
+  (let [out (arr/empty K (count m))]
+    (for [key _ m]
+      (arr/push! out key))
+    out))
+
+(proc vals [m: map[$K]$V] -> [dynamic]V #force_inline
+  (let [out (arr/empty V (count m))]
+    (for [_ value m]
+      (arr/push! out value))
+    out))
+
+(proc zip [ks: []$K, vs: []$V] -> map[K]V #force_inline
+  (let [value-count (count vs)
+        out (map/empty K V (if (< (count ks) value-count) (count ks) value-count))]
+    (for [i key ks]
+      (when (< i value-count)
+        (update! out key (arr/get vs i))))
+    out))

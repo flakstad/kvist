@@ -19,9 +19,9 @@ stays explicit. The compiler may help with diagnostics, but user code should be
 written as if ownership is the programmer's responsibility.
 
 `tap>` prints and returns its value. It does not allocate an owned result by
-itself, but ownership passes through it: `(tap> (map f xs))` is still an owned
+itself, but ownership passes through it: `(tap> (arr/map f xs))` is still an owned
 result and must be bound or returned. The same is true in threaded code:
-`(->> xs (map f) (tap> :mapped))` still returns an owned dynamic array.
+`(->> xs (arr/map f) (tap> :mapped))` still returns an owned dynamic array.
 
 ## Delete These
 
@@ -34,53 +34,53 @@ These forms return owned values in normal Kvist code:
 (new [dynamic]int [1 2 3])
 (new map[string]int {"one" 1 "two" 2})
 
-(map f xs)
-(filter pred xs)
-(remove pred xs)
-(take-nth n xs)
-(map-indexed f xs)
-(keep f xs)
-(mapcat f xs)
+(arr/map f xs)
+(arr/filter pred xs)
+(arr/remove pred xs)
+(arr/take-nth n xs)
+(arr/map-indexed f xs)
+(arr/keep f xs)
+(arr/mapcat f xs)
 (concat xs ys)
-(into [dynamic]int xs)
-(interpose sep xs)
-(interleave xs ys)
-(reverse xs)
-(shuffle pick xs)
-(sort xs)
-(sort-by f xs)
-(sort-by :field xs)
-(partition n xs)
-(partition-all n xs)
-(partition-by f xs)
-(partition-by :field xs)
-(zipmap keys vals)
-(index-by f xs)
-(index-by :field xs)
-(group-by f xs)
-(group-by :field xs)
-(count-by f xs)
-(count-by :field xs)
-(sum-by key-f value-f xs)
-(sum-by :key-field :value-field xs)
-(frequencies xs)
-(keys m)
-(vals m)
-(range end)
-(range start end)
-(range start end step)
-(repeat n x)
-(repeatedly n f)
-(iterate n f x)
-(cycle n xs)
+(arr/into [dynamic]int xs)
+(arr/interpose sep xs)
+(arr/interleave xs ys)
+(arr/reverse xs)
+(arr/shuffle pick xs)
+(arr/sort xs)
+(arr/sort-by f xs)
+(arr/sort-by :field xs)
+(arr/partition n xs)
+(arr/partition-all n xs)
+(arr/partition-by f xs)
+(arr/partition-by :field xs)
+(map/zip keys vals)
+(arr/index-by f xs)
+(arr/index-by :field xs)
+(arr/group-by f xs)
+(arr/group-by :field xs)
+(arr/count-by f xs)
+(arr/count-by :field xs)
+(arr/sum-by key-f value-f xs)
+(arr/sum-by :key-field :value-field xs)
+(arr/frequencies xs)
+(map/keys m)
+(map/vals m)
+(arr/range end)
+(arr/range start end)
+(arr/range start end step)
+(arr/repeat n x)
+(arr/repeatedly n f)
+(arr/iterate n f x)
+(arr/cycle n xs)
 (slurp path)
 ```
 
 Use `defer delete` for local owned values:
 
 ```clojure
-(let [active-users (filter active? users)
-      names (map :name active-users)]
+(let [active-users (arr/filter active? users)
+      names (arr/map :name active-users)]
   (defer (delete active-users))
   (defer (delete names))
   ...)
@@ -89,8 +89,8 @@ Use `defer delete` for local owned values:
 For ordinary local scopes, Kvist also supports a binding-level `defer` marker:
 
 ```clojure
-(let [active-users (filter active? users) defer
-      names (map :name active-users) defer]
+(let [active-users (arr/filter active? users) defer
+      names (arr/map :name active-users) defer]
   ...)
 ```
 
@@ -100,13 +100,13 @@ Defer-marked bindings cannot escape through the return boundary, including
 direct return, wrapping them in returned structs, or passing them into returned
 calls.
 
-For `partition`, `partition-all`, and `partition-by`, delete the outer dynamic
+For `arr/partition`, `arr/partition-all`, and `arr/partition-by`, delete the outer dynamic
 array. The chunks inside are borrowed slices and must not be deleted:
 
 ```clojure
-(let [chunks (partition 2 xs)]
+(let [chunks (arr/partition 2 xs)]
   (defer (delete chunks))
-  (first (get chunks 0)))
+  (arr/first (get chunks 0)))
 ```
 
 `slurp` lowers to `os.read_entire_file(path, context.allocator)`. It returns
@@ -150,7 +150,10 @@ Near-term diagnostics should stay conservative:
 Current compiler warnings implement the first conservative slice of this:
 
 - discarded owned constructor/allocation results such as `arr/empty`, `arr/dynamic`,
-  `map/empty`, `map/of`, `set/empty`, and `set/of`;
+  `map/empty`, `map/of`, `set/empty`, `set/of`, owned `str/*` builders such as
+  `str/join`, `str/replace`, `str/lower`, `str/upper`, and owned `set/*`
+  builders such as `set/union`, `set/intersection`, `set/difference`,
+  `set/add`, and `set/remove`;
 - owned `let` locals that are never deleted or returned;
 - owned locals overwritten with `set!` before cleanup.
 
@@ -182,22 +185,22 @@ These are scalar values, plain values, or borrowed views:
 (new []int [1 2 3])
 (new [3]int [1 2 3])
 
-(first xs)
-(second xs)
-(last xs)
-(nth xs n)
-(rest xs)
-(take n xs)
-(drop n xs)
-(butlast xs)
-(drop-last n xs)
-(take-while pred xs)
-(drop-while pred xs)
-(split-at n xs)
-(find pred xs)
+(arr/first xs)
+(arr/second xs)
+(arr/last xs)
+(arr/nth xs n)
+(arr/rest xs)
+(arr/take n xs)
+(arr/drop n xs)
+(arr/butlast xs)
+(arr/drop-last n xs)
+(arr/take-while pred xs)
+(arr/drop-while pred xs)
+(arr/split-at n xs)
+(arr/find pred xs)
 (some? pred xs)
 (every? pred xs)
-(reduce f init xs)
+(arr/reduce f init xs)
 (empty? xs)
 (count xs)
 (contains? collection key)
@@ -206,24 +209,28 @@ These are scalar values, plain values, or borrowed views:
 (tap> :label value)
 ```
 
+Only the small cross-family kernel remains bare here: `slice`, `get`,
+`empty?`, `count`, and `contains?`. Other collection helpers should use their
+explicit package names.
+
 `spit` lowers to `os.write_entire_file(path, data)` and returns `os.Error`. It
 does not allocate an owned result.
 
-`split-at` returns two borrowed slices:
+`arr/split-at` returns two borrowed slices:
 
 ```clojure
-(let [[front back] (split-at 2 xs)]
+(let [[front back] (arr/split-at 2 xs)]
   ...)
 ```
 
 Do not delete `front` or `back`.
 
-`distinct` and `distinct-by` return owned dynamic arrays. They use temporary
+`arr/distinct` and `arr/distinct-by` return owned dynamic arrays. They use temporary
 maps internally and clean those maps inside the helper, but the returned dynamic
 array belongs to the caller:
 
 ```clojure
-(let [users (distinct-by :id rows)]
+(let [users (arr/distinct-by :id rows)]
   (defer (delete users))
   ...)
 ```
@@ -233,20 +240,20 @@ array belongs to the caller:
 Bang helpers mutate existing storage and do not create owned results:
 
 ```clojure
-(reverse! xs)
-(shuffle! pick xs)
-(sort! xs)
-(sort-by! f xs)
-(sort-by! :field xs)
-(map! f xs)
-(map-indexed! f xs)
-(filter! pred xs)
-(filter! :field xs)
-(remove! pred xs)
-(remove! :field xs)
-(keep! f xs)
-(into! target xs)
-(merge! target source)
+(arr/reverse! xs)
+(arr/shuffle! pick xs)
+(arr/sort! xs)
+(arr/sort-by! f xs)
+(arr/sort-by! :field xs)
+(arr/map! f xs)
+(arr/map-indexed! f xs)
+(arr/filter! pred xs)
+(arr/filter! :field xs)
+(arr/remove! pred xs)
+(arr/remove! :field xs)
+(arr/keep! f xs)
+(arr/into! target xs)
+(map/merge! target source)
 ```
 
 Use them when mutation is the right Odin choice. They do not need `delete`
@@ -257,18 +264,18 @@ dynamic array because they compact and resize the existing storage:
 ```clojure
 (let [xs (new [dynamic]int [3 1 2])]
   (defer (delete xs))
-  (sort! xs)
-  (first xs))
+  (arr/sort! xs)
+  (arr/first xs))
 
 (let [xs (new [dynamic]int [1 2 3 4])]
   (defer (delete xs))
-  (filter! even? xs)
+  (arr/filter! even? xs)
   (len xs))
 
 (let [xs (new [dynamic]int [1 2])
       more (new []int [3 4])]
   (defer (delete xs))
-  (into! xs more)
+  (arr/into! xs more)
   (len xs))
 ```
 
@@ -304,18 +311,18 @@ scope:
 This form still emits ordinary Odin calls to `runtime.default_temp_allocator_*`.
 The runtime import is explicit, and any owned values that escape the block must
 not borrow storage from the ended temp scope. Kvist rejects obvious direct
-escapes such as returning `(map f xs)` from a `with-temp-allocator` body, or
+escapes such as returning `(arr/map f xs)` from a `with-temp-allocator` body, or
 hiding an owned temp-allocated result inside a returned call or struct literal.
 
 For ordinary local owned values, prefer `let` bindings marked with trailing
 `defer`:
 
 ```clojure
-(let [active (filter active? users) defer]
+(let [active (arr/filter active? users) defer]
   (count active))
 
-(let [active (filter active? users) defer
-      names (map :name active) defer]
+(let [active (arr/filter active? users) defer
+      names (arr/map :name active) defer]
   (count names))
 ```
 
@@ -330,8 +337,8 @@ the binding inside a returned struct or passing it into a returned call.
 If a proc returns an owned value, do not delete it locally:
 
 ```clojure
-(proc active-users [users: []User] -> [dynamic]User
-  (filter active? users))
+(defn active-users [users: []User] -> [dynamic]User
+  (arr/filter active? users))
 ```
 
 The caller owns the result:
@@ -345,27 +352,27 @@ The caller owns the result:
 The same rule applies to owned maps:
 
 ```clojure
-(proc ages-by-name [names: []string, ages: []int] -> map[string]int
-  (zipmap names ages))
+(defn ages-by-name [names: []string, ages: []int] -> map[string]int
+  (map/zip names ages))
 ```
 
-The caller deletes the returned map. `(merge left right)` follows the same rule:
-it returns a new owned map, while `(merge! target source)` mutates an existing
+The caller deletes the returned map. `(map/merge left right)` follows the same rule:
+it returns a new owned map, while `(map/merge! target source)` mutates an existing
 map and does not create an owned result.
 
 Aggregate helpers such as `count-by` and `sum-by` also return owned maps:
 
 ```clojure
-(let [totals (sum-by :region :amount orders)]
+(let [totals (arr/sum-by :region :amount orders)]
   (defer (delete totals))
   ...)
 ```
 
-`group-by` returns an owned map with owned dynamic-array values. Clean up both
+`arr/group-by` returns an owned map with owned dynamic-array values. Clean up both
 levels:
 
 ```clojure
-(let [groups (group-by :status users)]
+(let [groups (arr/group-by :status users)]
   (defer
     (each [_ group groups]
       (delete group))
@@ -378,22 +385,22 @@ levels:
 Owned helper results should be visible as a binding or a return value:
 
 ```clojure
-(let [names (map :name users)]
+(let [names (arr/map :name users)]
   (defer (delete names))
-  (first names))
+  (arr/first names))
 ```
 
 This is rejected because the intermediate dynamic array has no visible owner:
 
 ```clojure
-(first (map :name users))
+(arr/first (arr/map :name users))
 ```
 
 Return the owned result directly when ownership should pass to the caller:
 
 ```clojure
-(proc user-names [users: []User] -> [dynamic]string
-  (map :name users))
+(defn user-names [users: []User] -> [dynamic]string
+  (arr/map :name users))
 ```
 
 ## Borrowed Views Must Not Escape Their Backing Storage
@@ -402,17 +409,17 @@ Slice views borrow from another value. This is fine locally:
 
 ```clojure
 (let [xs (new []int [1 2 3 4])
-      tail (drop 1 xs)]
-  (first tail))
+      tail (arr/drop 1 xs)]
+  (arr/first tail))
 ```
 
 But do not return a slice view into data that dies with the proc:
 
 ```clojure
 ;; Wrong direction: returns a view into a local literal.
-(proc bad [] -> []int
+(defn bad [] -> []int
   (let [xs (new []int [1 2 3])]
-    (drop 1 xs)))
+    (arr/drop 1 xs)))
 ```
 
 Odin itself rejects some unsafe literal escapes. Kvist should also reject more
@@ -426,9 +433,9 @@ step allocates, Kvist lowers it to a generated temporary and emits
 
 ```clojure
 (let [total (->> xs
-                 (map inc)
-                 (filter even?)
-                 (reduce add 0))]
+                 (arr/map inc)
+                 (arr/filter even?)
+                 (arr/reduce add 0))]
   total)
 ```
 

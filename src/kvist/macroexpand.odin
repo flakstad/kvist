@@ -71,6 +71,8 @@ Macro_Binding :: struct {
     value: Macro_Value,
 }
 
+macro_gensym_counter: int
+
 macro_quote_string :: proc(text: string) -> string {
     builder := strings.builder_make()
     defer strings.builder_destroy(&builder)
@@ -1058,7 +1060,7 @@ macro_eval_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_
                 return macro_eval_list_builder(.Vector, form, macros, bindings)
             case "brace":
                 return macro_eval_list_builder(.Brace, form, macros, bindings)
-            case "first":
+            case "first", "arr/first", "kvist/first":
                 if len(form.items) != 2 {
                     return Macro_Value{}, Compile_Error{message = "first expects one argument", span = form.span}, false
                 }
@@ -1074,7 +1076,7 @@ macro_eval_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_
                     return macro_nil_value(), Compile_Error{}, true
                 }
                 return macro_form_value(forms[0]), Compile_Error{}, true
-            case "rest":
+            case "rest", "arr/rest", "kvist/rest":
                 if len(form.items) != 2 {
                     return Macro_Value{}, Compile_Error{message = "rest expects one argument", span = form.span}, false
                 }
@@ -1090,7 +1092,7 @@ macro_eval_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_
                     return macro_forms_value(nil), Compile_Error{}, true
                 }
                 return macro_forms_value(forms[1:]), Compile_Error{}, true
-            case "nth":
+            case "nth", "arr/nth", "kvist/nth":
                 if len(form.items) != 3 {
                     return Macro_Value{}, Compile_Error{message = "nth expects sequence and index", span = form.span}, false
                 }
@@ -1113,7 +1115,7 @@ macro_eval_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_
                     return macro_nil_value(), Compile_Error{}, true
                 }
                 return macro_form_value(forms[index_value.int_value]), Compile_Error{}, true
-            case "count":
+            case "count", "kvist/count":
                 if len(form.items) != 2 {
                     return Macro_Value{}, Compile_Error{message = "count expects one argument", span = form.span}, false
                 }
@@ -1265,6 +1267,27 @@ macro_eval_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_
                     return Macro_Value{}, Compile_Error{message = "symbol expects one string argument", span = form.items[1].span}, false
                 }
                 return macro_form_value(CST_Form{kind = .Symbol, text = value.string_value, span = form.span}), Compile_Error{}, true
+            case "gensym":
+                prefix := "__kvist_gensym"
+                if len(form.items) > 2 {
+                    return Macro_Value{}, Compile_Error{message = "gensym expects zero or one string argument", span = form.span}, false
+                }
+                if len(form.items) == 2 {
+                    value, err_value, ok_value := macro_eval_expr(form.items[1], macros, bindings)
+                    if !ok_value {
+                        return Macro_Value{}, err_value, false
+                    }
+                    if value.kind != .String {
+                        return Macro_Value{}, Compile_Error{message = "gensym expects zero or one string argument", span = form.items[1].span}, false
+                    }
+                    prefix = value.string_value
+                }
+                macro_gensym_counter += 1
+                return macro_form_value(CST_Form{
+                    kind = .Symbol,
+                    text = fmt.tprintf("%s_%d", prefix, macro_gensym_counter),
+                    span = form.span,
+                }), Compile_Error{}, true
             case "keyword":
                 if len(form.items) != 2 {
                     return Macro_Value{}, Compile_Error{message = "keyword expects one string argument", span = form.span}, false

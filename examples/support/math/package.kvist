@@ -5,6 +5,6 @@
   "Return the sum of integers from START up to END."
   [start: int, end: int] -> int
   (let [sum 0]
-    (for [i (range start end)]
+    (for [i (arr/range start end)]
       (set! sum (+ sum i)))
     sum))

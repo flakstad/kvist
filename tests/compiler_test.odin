@@ -7,6 +7,18 @@ import "core:strings"
 import "core:testing"
 import kvist "../src/kvist"
 
+repo_temp_test_path :: proc(name: string) -> (string, bool) {
+    root, ok_root := kvist.repo_root_for_path(".")
+    if !ok_root {
+        return "", false
+    }
+    path, join_err := os.join_path({root, name}, context.allocator)
+    if join_err != nil {
+        return "", false
+    }
+    return path, true
+}
+
 @(test)
 compile_hello_program :: proc(t: ^testing.T) {
     source := `(package main)
@@ -219,7 +231,7 @@ compile_eval_source_generates_scratch_main :: proc(t: ^testing.T) {
 
 import "core:fmt"
 
-add :: proc(a: int, b: int) -> int {
+add :: proc(a, b: int) -> int {
     return (a) + (b)
 }
 
@@ -411,14 +423,22 @@ editor_symbols_source_merges_context_surfaces :: proc(t: ^testing.T) {
 @(test)
 editor_symbols_source_includes_language_forms_and_helpers :: proc(t: ^testing.T) {
     source := `(package main)
+(import arr "kvist:arr")
 
 (defn main []
   (let [x 1]
     (if true
-      (map inc [1 2 3])
+      (arr/map inc [1 2 3])
       (println x))))`
 
-    output, err, ok := kvist.editor_symbols_source("/Users/andreas/Projects/kvist/.tmp-editor-symbols-test.kvist", source)
+    path, ok_path := repo_temp_test_path(".tmp-editor-symbols-test.kvist")
+    testing.expect_value(t, ok_path, true)
+    if !ok_path {
+        return
+    }
+    defer delete(path)
+
+    output, err, ok := kvist.editor_symbols_source(path, source)
     testing.expect_value(t, ok, true)
     if !ok {
         testing.expect_value(t, err.message, "")
@@ -428,7 +448,42 @@ editor_symbols_source_includes_language_forms_and_helpers :: proc(t: ^testing.T)
 
     testing.expect_value(t, strings.contains(output, "kvist form\tlet\t"), true)
     testing.expect_value(t, strings.contains(output, "kvist form\tif\t"), true)
-    testing.expect_value(t, strings.contains(output, "kvist helper\tmap\t"), true)
+    testing.expect_value(t, strings.contains(output, "kvist package\tarr/map\t"), true)
+}
+
+@(test)
+editor_symbols_source_includes_expanded_str_and_set_packages :: proc(t: ^testing.T) {
+    source := `(package main)
+(import str "kvist:str")
+(import set "kvist:set")
+
+(defn main []
+  (let [parts (str/split "a,b" ",")
+        seen (set/empty string)]
+    (defer (delete parts))
+    (defer (delete seen))
+    (set/union! seen (set/of string ["a"]))
+    (println (str/trim " ok "))))`
+
+    path, ok_path := repo_temp_test_path(".tmp-str-set-editor-symbols.kvist")
+    testing.expect_value(t, ok_path, true)
+    if !ok_path {
+        return
+    }
+    defer delete(path)
+
+    output, err, ok := kvist.editor_symbols_source(path, source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "kvist package\tstr/split\t"), true)
+    testing.expect_value(t, strings.contains(output, "kvist package\tstr/replace\t"), true)
+    testing.expect_value(t, strings.contains(output, "kvist package\tset/union!\t"), true)
+    testing.expect_value(t, strings.contains(output, "kvist package\tset/difference!\t"), true)
 }
 
 @(test)
@@ -439,7 +494,13 @@ editor_symbols_source_includes_source_package_imports :: proc(t: ^testing.T) {
 (defn main []
   (hiccup/render (hiccup/html [:div "ok"])))`
 
-    path := "/Users/andreas/Projects/kvist/.tmp-hiccup-editor-symbols.kvist"
+    path, ok_path := repo_temp_test_path(".tmp-hiccup-editor-symbols.kvist")
+    testing.expect_value(t, ok_path, true)
+    if !ok_path {
+        return
+    }
+    defer delete(path)
+
     write_err := os.write_entire_file(path, transmute([]byte)source)
     testing.expect_value(t, write_err == nil, true)
     if write_err != nil {
@@ -524,7 +585,12 @@ editor_symbols_source_includes_multi_file_root_package_symbols :: proc(t: ^testi
 
 @(test)
 compile_path_supports_hiccup_expression_interpolation :: proc(t: ^testing.T) {
-    path := "/Users/andreas/Projects/kvist/.tmp-hiccup-interpolation-test.kvist"
+    path, ok_path := repo_temp_test_path(".tmp-hiccup-interpolation-test.kvist")
+    testing.expect_value(t, ok_path, true)
+    if !ok_path {
+        return
+    }
+    defer delete(path)
     defer os.remove(path)
 
     source := `(import hiccup "kvist:hiccup")
@@ -606,7 +672,7 @@ compile_eval_source_can_emit_statement_runner :: proc(t: ^testing.T) {
 
 import "core:fmt"
 
-add :: proc(a: int, b: int) -> int {
+add :: proc(a, b: int) -> int {
     return (a) + (b)
 }
 
@@ -1641,7 +1707,7 @@ compile_operator_forms :: proc(t: ^testing.T) {
 
     expected := `package main
 
-score :: proc(a: int, b: int, ok: bool) -> int {
+score :: proc(a, b: int, ok: bool) -> int {
     if (ok) && ((a) > (b)) {
         return (a) + (b)
     }
@@ -2219,13 +2285,13 @@ compile_tap_thread_steps :: proc(t: ^testing.T) {
                    inc
                    (tap> :answer))
         mapped (->> xs
-                    (map inc)
+                    (arr/map inc)
                     (tap> :mapped))
         total (->> xs
-                   (map inc)
+                   (arr/map inc)
                    (tap> "mapped")
-                   (filter even?)
-                   (reduce add 0))]
+                   (arr/filter even?)
+                   (arr/reduce add 0))]
     (defer (delete mapped))
     (fmt.println answer total)))`
 
@@ -2297,7 +2363,7 @@ compile_with_allocator_scope :: proc(t: ^testing.T) {
   (with-allocator [allocator context.temp_allocator]
     (let [buffer (make [dynamic]int)]
       (defer (delete buffer))
-      (into! buffer (new []int [1 2]))
+      (arr/into! buffer (new []int [1 2]))
       (return))))`
 
     output, err, ok := kvist.compile_source(source)
@@ -2335,7 +2401,7 @@ compile_with_temp_allocator_scope :: proc(t: ^testing.T) {
   (with-temp-allocator [allocator]
     (let [buffer (make [dynamic]int)]
       (defer (delete buffer))
-      (into! buffer (new []int [1 2]))
+      (arr/into! buffer (new []int [1 2]))
       (return))))`
 
     output, err, ok := kvist.compile_source(source)
@@ -2371,6 +2437,7 @@ main :: proc() {
 @(test)
 compile_let_defer_scope :: proc(t: ^testing.T) {
     source := `(package main)
+(import arr "kvist:arr")
 
 (defn inc [x: int] -> int
   (+ x 1))
@@ -2382,9 +2449,9 @@ compile_let_defer_scope :: proc(t: ^testing.T) {
   (+ acc x))
 
 (defn total [xs: []int] -> int
-  (let [mapped (map inc xs) defer
-        filtered (filter even? mapped) defer]
-    (reduce add 0 filtered)))`
+  (let [mapped (arr/map inc xs) defer
+        filtered (arr/filter even? mapped) defer]
+    (arr/reduce add 0 filtered)))`
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
@@ -3160,7 +3227,7 @@ reject_returning_owned_result_from_with_temp_allocator :: proc(t: ^testing.T) {
 
 (defn bad [xs: []int] -> [dynamic]int
   (with-temp-allocator [allocator]
-    (map inc xs)))`
+    (arr/map inc xs)))`
 
     _, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, false)
@@ -3271,7 +3338,7 @@ reject_returning_wrapped_owned_result_from_with_temp_allocator :: proc(t: ^testi
 
 (defn bad [xs: []int] -> Box
   (with-temp-allocator [allocator]
-    (Box {:xs (map inc xs)})))`
+    (Box {:xs (arr/map inc xs)})))`
 
     _, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, false)
@@ -3292,7 +3359,7 @@ reject_returning_owned_arg_call_from_with_temp_allocator :: proc(t: ^testing.T) 
 
 (defn bad [xs: []int] -> [dynamic]int
   (with-temp-allocator [allocator]
-    (pass-through (map inc xs))))`
+    (pass-through (arr/map inc xs))))`
 
     _, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, false)
@@ -3305,7 +3372,7 @@ macroexpand_with_allocator_scope :: proc(t: ^testing.T) {
     output, err, ok := kvist.macroexpand_source(`(with-allocator [allocator context.temp_allocator]
   (let [buffer (make [dynamic]int)]
     (defer (delete buffer))
-    (into! buffer (new []int [1 2]))))`)
+    (arr/into! buffer (new []int [1 2]))))`)
     testing.expect_value(t, ok, true)
     if !ok {
         testing.expect_value(t, err.message, "")
@@ -3319,7 +3386,7 @@ macroexpand_with_allocator_scope :: proc(t: ^testing.T) {
     (set! context.allocator allocator)
     (defer (do
       (set! context.allocator kvist-old-allocator-1)))
-    (let [buffer (make [dynamic]int)] (defer (delete buffer)) (into! buffer (new []int [1 2])))))
+    (let [buffer (make [dynamic]int)] (defer (delete buffer)) (arr/into! buffer (new []int [1 2])))))
 `
     testing.expect_value(t, output, expected)
 }
@@ -3329,7 +3396,7 @@ macroexpand_with_temp_allocator_scope :: proc(t: ^testing.T) {
     output, err, ok := kvist.macroexpand_source(`(with-temp-allocator [allocator]
   (let [buffer (make [dynamic]int)]
     (defer (delete buffer))
-    (into! buffer (new []int [1 2]))))`)
+    (arr/into! buffer (new []int [1 2]))))`)
     testing.expect_value(t, ok, true)
     if !ok {
         testing.expect_value(t, err.message, "")
@@ -3345,7 +3412,7 @@ macroexpand_with_temp_allocator_scope :: proc(t: ^testing.T) {
     (defer (do
       (set! context.allocator kvist-old-allocator-1)
       (runtime.default-temp-allocator-temp-end kvist-temp-scope-1)))
-    (let [buffer (make [dynamic]int)] (defer (delete buffer)) (into! buffer (new []int [1 2])))))
+    (let [buffer (make [dynamic]int)] (defer (delete buffer)) (arr/into! buffer (new []int [1 2])))))
 `
     testing.expect_value(t, output, expected)
 }
@@ -3433,7 +3500,7 @@ macroexpand_thread_first :: proc(t: ^testing.T) {
 
 @(test)
 macroexpand_thread_last :: proc(t: ^testing.T) {
-    output, err, ok := kvist.macroexpand_source(`(->> xs (filter even?) (map inc) (count))`)
+    output, err, ok := kvist.macroexpand_source(`(->> xs (arr/filter even?) (arr/map inc) (count))`)
     testing.expect_value(t, ok, true)
     if !ok {
         testing.expect_value(t, err.message, "")
@@ -3441,7 +3508,7 @@ macroexpand_thread_last :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    expected := `(count (map inc (filter even? xs)))
+    expected := `(count (arr/map inc (arr/filter even? xs)))
 `
     testing.expect_value(t, output, expected)
 }
@@ -3476,7 +3543,7 @@ macroexpand_rejects_binding_macro_shapes :: proc(t: ^testing.T) {
 @(test)
 macroexpand_source_map_marks_generated_lines :: proc(t: ^testing.T) {
     source := `(with-temp-allocator [allocator]
-  (let [xs (map inc users)]
+  (let [xs (arr/map inc users)]
     (count xs)))`
     result, err, ok := kvist.macroexpand_source_with_map(source)
     testing.expect_value(t, ok, true)
@@ -3490,7 +3557,7 @@ macroexpand_source_map_marks_generated_lines :: proc(t: ^testing.T) {
 
     testing.expect_value(t, len(result.source_map), 9)
 
-    body_start := strings.index(source, "(let [xs (map inc users)]")
+    body_start := strings.index(source, "(let [xs (arr/map inc users)]")
 
     body_entry, body_found := kvist.source_map_entry_for_generated_line(result.source_map[:], 9)
     testing.expect_value(t, body_found, true)
@@ -3524,6 +3591,32 @@ macroexpand_user_macro_in_file_context :: proc(t: ^testing.T) {
     expected := `(if (> n 0) (do) (do (return 0)))
 `
     testing.expect_value(t, output.output, expected)
+}
+
+@(test)
+macroexpand_gensym_creates_stable_symbol_within_expansion :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defmacro with-temp-bool [value]
+  (let [tmp (gensym "__tmp")]
+    (quasiquote
+      (let [(unquote tmp) (unquote value)]
+        (when (unquote tmp)
+          (println (unquote tmp)))))))`
+
+    output, err, ok := kvist.macroexpand_eval_source_with_map(source, `(with-temp-bool true)`)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output.output)
+    defer delete(output.source_map)
+    defer kvist.compile_warning_slice_delete(output.warnings)
+
+    testing.expect_value(t, strings.contains(output.output, "(let [__tmp_"), true)
+    testing.expect_value(t, strings.contains(output.output, "(when __tmp_"), true)
+    testing.expect_value(t, strings.contains(output.output, "(println __tmp_"), true)
 }
 
 @(test)
@@ -3594,14 +3687,14 @@ compile_source_with_recursive_macro_dsl :: proc(t: ^testing.T) {
 (defmacro emit-union-ctors [union-name variants]
   (if (= (count variants) 0)
     (forms)
-    (let [tag (first variants)
-          value-type (nth variants 1)
+    (let [tag (arr/first variants)
+          value-type (arr/nth variants 1)
           ctor-name (symbol (str "make-" (name union-name) "-" (name tag)))]
       (forms
         (quasiquote
           (defn (unquote ctor-name) [value: (unquote value-type)] -> (unquote union-name)
             ((unquote union-name) {(unquote tag) value})))
-        (emit-union-ctors union-name (rest (rest variants)))))))
+        (emit-union-ctors union-name (arr/rest (arr/rest variants)))))))
 
 (defmacro defunion+ctors [name variants]
   (forms
@@ -3637,37 +3730,37 @@ compile_source_with_message_family_macro :: proc(t: ^testing.T) {
 (defmacro emit-message-structs [entries]
   (if (= (count entries) 0)
     (forms)
-    (let [entry (first entries)
-          struct-name (nth entry 0)
-          fields (nth entry 1)]
+    (let [entry (arr/first entries)
+          struct-name (arr/nth entry 0)
+          fields (arr/nth entry 1)]
       (forms
         (quasiquote
           (defstruct (unquote struct-name) (unquote fields)))
-        (emit-message-structs (rest entries))))))
+        (emit-message-structs (arr/rest entries))))))
 
 (defmacro emit-message-union-entries [entries]
   (if (= (count entries) 0)
     (forms)
-    (let [entry (first entries)
-          struct-name (nth entry 0)
+    (let [entry (arr/first entries)
+          struct-name (arr/nth entry 0)
           tag (keyword (name struct-name))]
       (forms
         tag
         struct-name
-        (emit-message-union-entries (rest entries))))))
+        (emit-message-union-entries (arr/rest entries))))))
 
 (defmacro emit-message-ctors [union-name entries]
   (if (= (count entries) 0)
     (forms)
-    (let [entry (first entries)
-          struct-name (nth entry 0)
+    (let [entry (arr/first entries)
+          struct-name (arr/nth entry 0)
           ctor-name (symbol (str "make-" (name union-name) "-" (name struct-name)))
           tag (keyword (name struct-name))]
       (forms
         (quasiquote
           (defn (unquote ctor-name) [value: (unquote struct-name)] -> (unquote union-name)
             ((unquote union-name) {(unquote tag) value})))
-        (emit-message-ctors union-name (rest entries))))))
+        (emit-message-ctors union-name (arr/rest entries))))))
 
 (defmacro defmessages [union-name entries]
   (forms
@@ -3756,13 +3849,13 @@ compile_core_higher_order_helpers_and_slice_exprs :: proc(t: ^testing.T) {
 
 (defn main []
   (let [xs (new []int [1 2 3 4])
-        mapped (map inc xs)
+        mapped (arr/map inc xs)
         tail (slice mapped 1)
-        evens (filter even? mapped)
+        evens (arr/filter even? mapped)
         total (->> xs
-                   (map inc)
-                   (filter even?)
-                   (reduce add 0))
+                   (arr/map inc)
+                   (arr/filter even?)
+                   (arr/reduce add 0))
         middle (slice mapped 0 1)]
     (defer (delete mapped))
     (defer (delete evens))
@@ -3786,7 +3879,7 @@ even_p :: proc(x: int) -> bool {
     return ((x) % (2)) == (0)
 }
 
-add :: proc(acc: int, x: int) -> int {
+add :: proc(acc, x: int) -> int {
     return (acc) + (x)
 }
 
@@ -3844,14 +3937,14 @@ compile_sequence_trim_helpers_as_slice_views :: proc(t: ^testing.T) {
 
 (defn main []
   (let [xs (new []int [1 2 3 4])
-        prefix (take 2 xs)
-        suffix (drop 1 xs)
-        without-last (butlast xs)
-        without-two (drop-last 2 xs)
-        small-prefix (take-while keep? xs)
-        large-suffix (drop-while keep? xs)
+        prefix (arr/take 2 xs)
+        suffix (arr/drop 1 xs)
+        without-last (arr/butlast xs)
+        without-two (arr/drop-last 2 xs)
+        small-prefix (arr/take-while keep? xs)
+        large-suffix (arr/drop-while keep? xs)
         threaded-count (->> xs
-                            (drop-last 1)
+                            (arr/drop-last 1)
                             (count))]
     (return)))`
 
@@ -3896,9 +3989,9 @@ compile_threaded_let_binding_keeps_owned_intermediates_alive :: proc(t: ^testing
                            (User {:name "Lin" :active false})
                            (User {:name "Grace" :active true})])
         active-names (->> users
-                          (filter :active)
-                          (map :name)
-                          (take 1))]
+                          (arr/filter :active)
+                          (arr/map :name)
+                          (arr/take 1))]
     (return)))`
 
     output, err, ok := kvist.compile_source(source)
@@ -3928,9 +4021,9 @@ reject_threaded_return_with_allocating_intermediate :: proc(t: ^testing.T) {
 
 (defn bad [xs: []int] -> []int
   (->> xs
-       (map inc)
-       (filter even?)
-       (take 1)))`
+       (arr/map inc)
+       (arr/filter even?)
+       (arr/take 1)))`
 
     _, err, ok := kvist.compile_source(source)
     defer delete(err.message)
@@ -3949,9 +4042,9 @@ reject_returning_threaded_view_of_owned_intermediate :: proc(t: ^testing.T) {
 
 (defn bad [users: []User] -> []string
   (let [active-names (->> users
-                          (filter :active)
-                          (map :name)
-                          (take 1))]
+                          (arr/filter :active)
+                          (arr/map :name)
+                          (arr/take 1))]
     active-names))`
 
     _, err, ok := kvist.compile_source(source)
@@ -3963,6 +4056,7 @@ reject_returning_threaded_view_of_owned_intermediate :: proc(t: ^testing.T) {
 @(test)
 compile_additional_sequence_helpers :: proc(t: ^testing.T) {
     source := `(package main)
+(import arr "kvist:arr")
 
 (defn even? [x: int] -> bool
   (== (% x 2) 0))
@@ -3988,30 +4082,30 @@ compile_additional_sequence_helpers :: proc(t: ^testing.T) {
   (let [xs (new []int [1 2 3])
         mutable (new [dynamic]int [1 2 3])
         ys (new []int [4 5])
-        without-evens (remove even? xs)
-        indexed (map-indexed add-index xs)
-        kept (keep keep-even xs)
-        flattened (mapcat pair xs)
+        without-evens (arr/remove even? xs)
+        indexed (arr/map-indexed add-index xs)
+        kept (arr/keep keep-even xs)
+        flattened (arr/mapcat pair xs)
         joined (concat without-evens ys)
-        copied (into [dynamic]int xs)
-        interposed (interpose 0 xs)
-        interleaved (interleave xs ys)
-        reversed (reverse joined)
-        shuffled (shuffle pick-first joined)
-        sorted (sort joined)
-        descending (sort-by neg joined)
-        sampled (take-nth 2 joined)
+        copied (arr/into [dynamic]int xs)
+        interposed (arr/interpose 0 xs)
+        interleaved (arr/interleave xs ys)
+        reversed (arr/reverse joined)
+        shuffled (arr/shuffle pick-first joined)
+        sorted (arr/sort joined)
+        descending (arr/sort-by neg joined)
+        sampled (arr/take-nth 2 joined)
         threaded-flat (->> xs
-                           (mapcat pair)
-                           (filter even?))
+                           (arr/mapcat pair)
+                           (arr/filter even?))
         threaded-sorted (->> xs
-                             (sort)
-                             (filter even?))
+                             (arr/sort)
+                             (arr/filter even?))
         threaded-sample (->> xs
-                             (take-nth 2)
-                             (map neg))
-        tail-last (last joined)
-        no-items? (empty? (drop 3 xs))]
+                             (arr/take-nth 2)
+                             (arr/map neg))
+        tail-last (arr/last joined)
+        no-items? (empty? (arr/drop 3 xs))]
     (defer (delete mutable))
     (defer (delete without-evens))
     (defer (delete indexed))
@@ -4029,16 +4123,16 @@ compile_additional_sequence_helpers :: proc(t: ^testing.T) {
     (defer (delete threaded-flat))
     (defer (delete threaded-sorted))
     (defer (delete threaded-sample))
-    (reverse! xs)
-    (sort! xs)
-    (sort-by! neg xs)
-    (shuffle! pick-first xs)
-    (map! neg mutable)
-    (map-indexed! add-index mutable)
-    (filter! even? mutable)
-    (remove! even? mutable)
-    (keep! keep-even mutable)
-    (into! mutable ys)
+    (arr/reverse! xs)
+    (arr/sort! xs)
+    (arr/sort-by! neg xs)
+    (arr/shuffle! pick-first xs)
+    (arr/map! neg mutable)
+    (arr/map-indexed! add-index mutable)
+    (arr/filter! even? mutable)
+    (arr/remove! even? mutable)
+    (arr/keep! keep-even mutable)
+    (arr/into! mutable ys)
     (return)))`
 
     output, err, ok := kvist.compile_source(source)
@@ -4126,18 +4220,18 @@ compile_chunking_and_zipmap_sequence_helpers :: proc(t: ^testing.T) {
   (let [xs (new []int [1 2 2 3 3 3])
         names (new []string ["Ada" "Lin"])
         ages (new []int [36 17])
-        [front back] (split-at 2 xs)
-        chunks (partition 2 xs)
-        chunks-all (partition-all 3 xs)
-        by-run (partition-by identity xs)
-        by-name (zipmap names ages)
-        by-parity (group-by parity xs)
-        unique (distinct xs)
-        distinct-parity (distinct-by parity xs)
+        [front back] (arr/split-at 2 xs)
+        chunks (arr/partition 2 xs)
+        chunks-all (arr/partition-all 3 xs)
+        by-run (arr/partition-by identity xs)
+        by-name (map/zip names ages)
+        by-parity (arr/group-by parity xs)
+        unique (arr/distinct xs)
+        distinct-parity (arr/distinct-by parity xs)
         threaded (->> xs
-                      (remove even?)
-                      (distinct)
-                      (partition-by identity))]
+                      (arr/remove even?)
+                      (arr/distinct)
+                      (arr/partition-by identity))]
     (defer (delete chunks))
     (defer (delete chunks-all))
     (defer (delete by-run))
@@ -4187,6 +4281,7 @@ compile_chunking_and_zipmap_sequence_helpers :: proc(t: ^testing.T) {
 @(test)
 compile_map_constructing_sequence_helpers :: proc(t: ^testing.T) {
     source := `(package main)
+(import map "kvist:map")
 
 (defn identity [x: int] -> int
   x)
@@ -4196,20 +4291,20 @@ compile_map_constructing_sequence_helpers :: proc(t: ^testing.T) {
 
 (defn main []
   (let [xs (new []int [1 2 2 3])
-        by-value (index-by identity xs)
-        by-group (group-by identity xs)
-        by-count (count-by identity xs)
-        by-sum (sum-by identity amount xs)
+        by-value (arr/index-by identity xs)
+        by-group (arr/group-by identity xs)
+        by-count (arr/count-by identity xs)
+        by-sum (arr/sum-by identity amount xs)
         threaded (->> xs
-                      (count-by identity))
-        counts (frequencies xs)
+                      (arr/count-by identity))
+        counts (arr/frequencies xs)
         base (new map[string]int {"a" 1 "b" 2})
         overrides (new map[string]int {"b" 20 "c" 30})
-        merged (merge base overrides)
-        key-list (keys base)
-        value-list (vals overrides)
+        merged (map/merge base overrides)
+        key-list (map/keys base)
+        value-list (map/vals overrides)
         key-count (->> merged
-                       (keys)
+                       (map/keys)
                        (count))]
     (defer (delete by-value))
     (defer
@@ -4227,7 +4322,7 @@ compile_map_constructing_sequence_helpers :: proc(t: ^testing.T) {
     (defer (delete value-list))
     (when (== key-count 0)
       (return))
-    (merge! base overrides)
+    (map/merge! base overrides)
     (return)))`
 
     output, err, ok := kvist.compile_source(source)
@@ -4273,11 +4368,11 @@ compile_bounded_sequence_producers :: proc(t: ^testing.T) {
   (* x 2))
 
 (defn main []
-  (let [xs (range 1 5)
-        ys (repeat 3 "x")
-        zs (repeatedly 2 next)
-        powers (iterate 4 double 1)
-        cycled (cycle 5 (new []int [1 2]))]
+  (let [xs (arr/range 1 5)
+        ys (arr/repeat 3 "x")
+        zs (arr/repeatedly 2 next)
+        powers (arr/iterate 4 double 1)
+        cycled (arr/cycle 5 (new []int [1 2]))]
     (defer (delete xs))
     (defer (delete ys))
     (defer (delete zs))
@@ -4318,28 +4413,28 @@ compile_keyword_callbacks_for_sequence_helpers :: proc(t: ^testing.T) {
 (defn main []
   (let [users (new []User [(User {:name "Ada" :amount 10 :verified true})
                            (User {:name "Lin" :amount 20 :verified false})])
-        names (map :name users)
-        by-name (index-by :name users)
-        by-verified (group-by :verified users)
-        count-by-verified (count-by :verified users)
-        sum-by-verified (sum-by :verified :amount users)
-        groups (partition-by :verified users)
-        distinct-names (distinct-by :name users)
-        sorted (sort-by :name users)
+        names (arr/map :name users)
+        by-name (arr/index-by :name users)
+        by-verified (arr/group-by :verified users)
+        count-by-verified (arr/count-by :verified users)
+        sum-by-verified (arr/sum-by :verified :amount users)
+        groups (arr/partition-by :verified users)
+        distinct-names (arr/distinct-by :name users)
+        sorted (arr/sort-by :name users)
         mutated (new [dynamic]User [(User {:name "Ada" :amount 10 :verified true})
                                     (User {:name "Lin" :amount 20 :verified false})])
-        verified (filter :verified users)
-        unverified (remove :verified users)
-        [first ok] (find :verified users)
-        any? (some? :verified users)
-        all? (every? :verified verified)]
+        verified (arr/filter :verified users)
+        unverified (arr/remove :verified users)
+        [first ok] (arr/find :verified users)
+        any? (arr/some? :verified users)
+        all? (arr/every? :verified verified)]
     (defer
       (each [_ group by-verified]
         (delete group))
       (delete by-verified))
-    (sort-by! :name mutated)
-    (filter! :verified mutated)
-    (remove! :verified mutated)
+    (arr/sort-by! :name mutated)
+    (arr/filter! :verified mutated)
+    (arr/remove! :verified mutated)
     (return)))`
 
     output, err, ok := kvist.compile_source(source)
@@ -4389,16 +4484,17 @@ compile_keyword_callbacks_for_sequence_helpers :: proc(t: ^testing.T) {
 @(test)
 compile_sequence_indexing_helpers :: proc(t: ^testing.T) {
     source := `(package main)
+(import arr "kvist:arr")
 
 (defn main []
   (let [xs (new []int [10 20 30])
-        a (first xs)
-        b (second xs)
-        c (nth xs 2)
+        a (arr/first xs)
+        b (arr/second xs)
+        c (arr/nth xs 2)
         n (count xs)
-        tail (rest xs)
+        tail (arr/rest xs)
         threaded (->> xs
-                      (rest)
+                      (arr/rest)
                       (count))]
     (return)))`
 
@@ -4434,7 +4530,7 @@ allow_returning_owned_sequence_result :: proc(t: ^testing.T) {
   (+ x 1))
 
 (defn owned [xs: []int] -> [dynamic]int
-  (map inc xs))`
+  (arr/map inc xs))`
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
@@ -4456,7 +4552,7 @@ warn_discarded_owned_sequence_result :: proc(t: ^testing.T) {
 
 (defn main []
   (let [xs (new []int [1 2 3])]
-    (map inc xs)
+    (arr/map inc xs)
     (return)))`
 
     result, err, ok := kvist.compile_source_with_map(source)
@@ -4470,8 +4566,151 @@ warn_discarded_owned_sequence_result :: proc(t: ^testing.T) {
     defer kvist.compile_warning_slice_delete(result.warnings)
     testing.expect_value(t, len(result.warnings), 1)
     if len(result.warnings) == 1 {
-        testing.expect_value(t, result.warnings[0].message, "owned result from map is discarded; bind it, delete it, or return it")
+        testing.expect_value(t, result.warnings[0].message, "owned result from arr/map is discarded; bind it, delete it, or return it")
     }
+}
+
+@(test)
+reject_legacy_unqualified_sequence_helpers :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(proc inc [x: int] -> int
+  (+ x 1))
+
+(proc main []
+  (let [xs (new []int [1 2 3])
+        ys (map inc xs)
+        first-y (->> xs
+                     (map inc)
+                     (first))]
+    (defer (delete ys))
+    (println first-y)))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    testing.expect_value(t, err.message, "`map` is no longer a core helper; use `arr/map`")
+    delete(err.message)
+
+    source = `(package main)
+
+(proc even? [x: int] -> bool
+  (== (% x 2) 0))
+
+(proc main [xs: []int]
+  (arr/filter even? xs)
+  (filter even? xs)
+  (return))`
+
+    _, err, ok = kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    testing.expect_value(t, err.message, "`filter` is no longer a core helper; use `arr/filter`")
+    delete(err.message)
+
+    source = `(package main)
+
+(proc main []
+  (let [xs (range 5)]
+    (defer (delete xs))
+    (return)))`
+
+    _, err, ok = kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    testing.expect_value(t, err.message, "`range` is no longer a core helper; use `arr/range`")
+    delete(err.message)
+
+    source = `(package main)
+
+(proc main [xs: []int]
+  (first xs))`
+
+    _, err, ok = kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    testing.expect_value(t, err.message, "`first` is no longer a core helper; use `arr/first`")
+    delete(err.message)
+
+    source = `(package main)
+
+(proc main [xs: []int]
+  (rest xs))`
+
+    _, err, ok = kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    testing.expect_value(t, err.message, "`rest` is no longer a core helper; use `arr/rest`")
+    delete(err.message)
+
+    source = `(package main)
+
+(proc main [keys: []string, vals: []int]
+  (zipmap keys vals))`
+
+    _, err, ok = kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    testing.expect_value(t, err.message, "`zipmap` is no longer a core helper; use `map/zip`")
+    delete(err.message)
+
+    source = `(package main)
+
+(proc main [lhs: map[string]int, rhs: map[string]int]
+  (merge lhs rhs))`
+
+    _, err, ok = kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    testing.expect_value(t, err.message, "`merge` is no longer a core helper; use `map/merge`")
+    delete(err.message)
+
+    source = `(package main)
+
+(proc main [target: map[string]int, source: map[string]int]
+  (merge! target source)
+  (return))`
+
+    _, err, ok = kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    testing.expect_value(t, err.message, "`merge!` is no longer a core helper; use `map/merge!`")
+    delete(err.message)
+
+    source = `(package main)
+
+(proc main [xs: []int]
+  (into! xs xs)
+  (return))`
+
+    _, err, ok = kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    testing.expect_value(t, err.message, "`into!` is no longer a core helper; use `arr/into!`")
+    delete(err.message)
+}
+
+@(test)
+report_namespaced_sequence_helper_errors_with_surface_name :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(proc inc [x: int] -> int
+  (+ x 1))
+
+(proc main [xs: []int]
+  (let [mapped (arr/map inc)]
+    (return mapped)))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    defer delete(err.message)
+    testing.expect_value(t, err.message, "arr/map expects function and collection")
+}
+
+@(test)
+report_namespaced_thread_helper_errors_with_surface_name :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(proc main [xs: []int]
+  (->> xs
+       (map/zip))
+  (return))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    defer delete(err.message)
+    testing.expect_value(t, err.message, "map/zip thread step expects one key collection argument")
 }
 
 @(test)
@@ -4482,7 +4721,7 @@ reject_nested_owned_sequence_result :: proc(t: ^testing.T) {
   (+ x 1))
 
 (defn bad [xs: []int] -> int
-  (first (map inc xs)))`
+  (arr/first (arr/map inc xs)))`
 
     _, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, false)
@@ -5049,7 +5288,7 @@ compile_lisp_predicate_and_bang_identifier_names :: proc(t: ^testing.T) {
 
     expected := `package main
 
-greater_than_p :: proc(threshold: int, x: int) -> bool {
+greater_than_p :: proc(threshold, x: int) -> bool {
     return (x) > (threshold)
 }
 
@@ -5407,7 +5646,7 @@ query :: proc() -> (value: int, ok: bool) #optional_ok {
 
 @(test)
 compile_map_supports_single_captured_local_in_fn_literal :: proc(t: ^testing.T) {
-    source := "(package main)\n\n(defn demo [xs: []int] -> [dynamic]int\n  (let [offset 10]\n    (map (fn [x: int] -> int\n           (+ x offset))\n         xs)))"
+    source := "(package main)\n\n(defn demo [xs: []int] -> [dynamic]int\n  (let [offset 10]\n    (arr/map (fn [x: int] -> int\n               (+ x offset))\n             xs)))"
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
@@ -5426,7 +5665,7 @@ compile_map_supports_single_captured_local_in_fn_literal :: proc(t: ^testing.T) 
 
 @(test)
 compile_map_bang_supports_single_captured_local_in_fn_literal :: proc(t: ^testing.T) {
-    source := "(package main)\n\n(defn demo [xs: [dynamic]int] -> [dynamic]int\n  (let [offset 10]\n    (map! (fn [x: int] -> int\n            (+ x offset))\n          xs)\n    xs))"
+    source := "(package main)\n\n(defn demo [xs: [dynamic]int] -> [dynamic]int\n  (let [offset 10]\n    (arr/map! (fn [x: int] -> int\n                (+ x offset))\n              xs)\n    xs))"
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
@@ -5445,7 +5684,7 @@ compile_map_bang_supports_single_captured_local_in_fn_literal :: proc(t: ^testin
 
 @(test)
 compile_map_rejects_multiple_captured_locals_in_fn_literal :: proc(t: ^testing.T) {
-    source := "(package main)\n\n(defn demo [xs: []int] -> [dynamic]int\n  (let [offset 10\n        scale 2]\n    (map (fn [x: int] -> int\n           (+ (* x scale) offset))\n         xs)))"
+    source := "(package main)\n\n(defn demo [xs: []int] -> [dynamic]int\n  (let [offset 10\n        scale 2]\n    (arr/map (fn [x: int] -> int\n               (+ (* x scale) offset))\n             xs)))"
 
     _, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, false)
@@ -5458,7 +5697,7 @@ compile_map_rejects_multiple_captured_locals_in_fn_literal :: proc(t: ^testing.T
 
 @(test)
 compile_filter_supports_single_captured_local_in_fn_literal :: proc(t: ^testing.T) {
-    source := "(package main)\n\n(defn demo [xs: [dynamic]int] -> [dynamic]int\n  (let [limit 10]\n    (filter (fn [x: int] -> bool\n              (> x limit))\n            xs)))"
+    source := "(package main)\n\n(defn demo [xs: [dynamic]int] -> [dynamic]int\n  (let [limit 10]\n    (arr/filter (fn [x: int] -> bool\n                  (> x limit))\n                xs)))"
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
@@ -5475,7 +5714,7 @@ compile_filter_supports_single_captured_local_in_fn_literal :: proc(t: ^testing.
 
 @(test)
 compile_filter_bang_supports_single_captured_local_in_fn_literal :: proc(t: ^testing.T) {
-    source := "(package main)\n\n(defn demo [xs: [dynamic]int] -> [dynamic]int\n  (let [limit 10]\n    (filter! (fn [x: int] -> bool\n               (> x limit))\n             xs)\n    xs))"
+    source := "(package main)\n\n(defn demo [xs: [dynamic]int] -> [dynamic]int\n  (let [limit 10]\n    (arr/filter! (fn [x: int] -> bool\n                   (> x limit))\n                 xs)\n    xs))"
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
@@ -5491,7 +5730,7 @@ compile_filter_bang_supports_single_captured_local_in_fn_literal :: proc(t: ^tes
 
 @(test)
 compile_remove_supports_single_captured_local_in_fn_literal :: proc(t: ^testing.T) {
-    source := "(package main)\n\n(defn demo [xs: [dynamic]int] -> [dynamic]int\n  (let [limit 10]\n    (remove (fn [x: int] -> bool\n              (> x limit))\n            xs)))"
+    source := "(package main)\n\n(defn demo [xs: [dynamic]int] -> [dynamic]int\n  (let [limit 10]\n    (arr/remove (fn [x: int] -> bool\n                  (> x limit))\n                xs)))"
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
@@ -5507,7 +5746,7 @@ compile_remove_supports_single_captured_local_in_fn_literal :: proc(t: ^testing.
 
 @(test)
 compile_keep_supports_single_captured_local_in_fn_literal :: proc(t: ^testing.T) {
-    source := "(package main)\n\n(defn demo [xs: [dynamic]int] -> [dynamic]int\n  (let [limit 10]\n    (keep (fn [x: int] -> [value: int, ok: bool]\n            (if (> x limit)\n              (return x true)\n              (return 0 false)))\n          xs)))"
+    source := "(package main)\n\n(defn demo [xs: [dynamic]int] -> [dynamic]int\n  (let [limit 10]\n    (arr/keep (fn [x: int] -> [value: int, ok: bool]\n                (if (> x limit)\n                  (return x true)\n                  (return 0 false)))\n              xs)))"
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
@@ -6658,7 +6897,7 @@ compile_warns_for_discarded_owned_result :: proc(t: ^testing.T) {
     source := `(package main)
 
 (defn demo []
-  (range 3)
+  (arr/range 3)
   (println 1))`
 
     result, err, ok := kvist.compile_source_with_map(source)
@@ -6673,6 +6912,535 @@ compile_warns_for_discarded_owned_result :: proc(t: ^testing.T) {
 
     testing.expect_value(t, len(result.warnings), 1)
     if len(result.warnings) == 1 {
-        testing.expect_value(t, result.warnings[0].message, "owned result from range is discarded; bind it, delete it, or return it")
+        testing.expect_value(t, result.warnings[0].message, "owned result from arr/range is discarded; bind it, delete it, or return it")
     }
+}
+
+@(test)
+compile_string_package_helpers :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn demo []
+  (let [name "  Kvist Core  "
+        parts (str/split "a,b,c" ",")
+        joined (str/join parts "-")
+        trimmed (str/trim name)
+        without-prefix (str/trim-prefix "kvist/core" "kvist/")
+        without-suffix (str/trim-suffix "kvist.txt" ".txt")
+        starts? (str/starts-with? without-prefix "co")
+        ends? (str/ends-with? without-suffix "st")
+        first-dash (str/index-of joined "-")
+        last-dash (str/last-index-of joined "-")
+        replaced-all (str/replace joined "-" "_")
+        replaced-one (str/replace joined "-" "_" 1)
+        lowered (str/lower replaced-all)
+        uppered (str/upper lowered)]
+    (defer (delete parts))
+    (defer (delete joined))
+    (defer (delete replaced-all))
+    (defer (delete replaced-one))
+    (defer (delete lowered))
+    (defer (delete uppered))
+    (println trimmed without-prefix without-suffix starts? ends? first-dash last-dash uppered)))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "import strings \"core:strings\""), true)
+    testing.expect_value(t, strings.contains(output, "parts := strings.split(\"a,b,c\", \",\")"), true)
+    testing.expect_value(t, strings.contains(output, "joined := strings.join((parts)[:], \"-\")"), true)
+    testing.expect_value(t, strings.contains(output, "trimmed := strings.trim_space(name)"), true)
+    testing.expect_value(t, strings.contains(output, "without_prefix := strings.trim_prefix(\"kvist/core\", \"kvist/\")"), true)
+    testing.expect_value(t, strings.contains(output, "without_suffix := strings.trim_suffix(\"kvist.txt\", \".txt\")"), true)
+    testing.expect_value(t, strings.contains(output, "starts_p := strings.has_prefix(without_prefix, \"co\")"), true)
+    testing.expect_value(t, strings.contains(output, "ends_p := strings.has_suffix(without_suffix, \"st\")"), true)
+    testing.expect_value(t, strings.contains(output, "first_dash := strings.index(joined, \"-\")"), true)
+    testing.expect_value(t, strings.contains(output, "last_dash := strings.last_index(joined, \"-\")"), true)
+    testing.expect_value(t, strings.contains(output, "replaced_all := kvist_str_replace(joined, \"-\", \"_\", -1)"), true)
+    testing.expect_value(t, strings.contains(output, "replaced_one := kvist_str_replace(joined, \"-\", \"_\", 1)"), true)
+    testing.expect_value(t, strings.contains(output, "lowered := strings.to_lower(replaced_all)"), true)
+    testing.expect_value(t, strings.contains(output, "uppered := strings.to_upper(lowered)"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_str_replace :: proc(s, old, new: string, n: int) -> string"), true)
+}
+
+@(test)
+compile_shipped_str_source_package_uses_hybrid_resolution :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-str-hybrid-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove(dir)
+    defer delete(dir)
+
+    path, join_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, join_err == nil, true)
+    if join_err != nil {
+        return
+    }
+    defer delete(path)
+
+    source := `(package main)
+(import str "kvist:str")
+
+(defn demo []
+  (let [name "  Kvist  "
+        trimmed (str/trim name)
+        initial (str/get trimmed 0)
+        tail (str/slice trimmed 1)
+        starts? (str/starts-with? trimmed "K")
+        lowered (str/lower trimmed)
+        uppered (str/upper lowered)
+        parts (str/split "a,b" ",")
+        joined (str/join parts "-")
+        replaced (str/replace joined "-" ":" 1)]
+    (defer (delete parts))
+    (defer (delete joined))
+    (defer (delete replaced))
+    (println (str/count trimmed) initial (str/count tail) starts? uppered joined replaced)))`
+
+    write_err := os.write_entire_file(path, transmute([]byte)source)
+    testing.expect_value(t, write_err == nil, true)
+    if write_err != nil {
+        return
+    }
+
+    output, err, ok := kvist.compile_path(path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "str__count :: #force_inline proc(s: string) -> int {"), true)
+    testing.expect_value(t, strings.contains(output, "return len(s)"), true)
+    testing.expect_value(t, strings.contains(output, "initial := trimmed[0]"), true)
+    testing.expect_value(t, strings.contains(output, "tail := (trimmed)[1:]"), true)
+    testing.expect_value(t, strings.contains(output, "str__trim :: #force_inline proc(s: string) -> string {"), true)
+    testing.expect_value(t, strings.contains(output, "return strings.trim_space(s)"), true)
+    testing.expect_value(t, strings.contains(output, "str__starts_with_p :: #force_inline proc(s, prefix: string) -> bool {"), true)
+    testing.expect_value(t, strings.contains(output, "return strings.has_prefix(s, prefix)"), true)
+    testing.expect_value(t, strings.contains(output, "str__lower :: #force_inline proc(s: string) -> string {"), true)
+    testing.expect_value(t, strings.contains(output, "return strings.to_lower(s)"), true)
+    testing.expect_value(t, strings.contains(output, "str__upper :: #force_inline proc(s: string) -> string {"), true)
+    testing.expect_value(t, strings.contains(output, "return strings.to_upper(s)"), true)
+    testing.expect_value(t, strings.contains(output, "trimmed := str__trim(name)"), true)
+    testing.expect_value(t, strings.contains(output, "starts_p := str__starts_with_p(trimmed, \"K\")"), true)
+    testing.expect_value(t, strings.contains(output, "lowered := str__lower(trimmed)"), true)
+    testing.expect_value(t, strings.contains(output, "uppered := str__upper(lowered)"), true)
+    testing.expect_value(t, strings.contains(output, "parts := strings.split(\"a,b\", \",\")"), true)
+    testing.expect_value(t, strings.contains(output, "joined := strings.join((parts)[:], \"-\")"), true)
+    testing.expect_value(t, strings.contains(output, "replaced := kvist_str_replace(joined, \"-\", \":\", 1)"), true)
+    testing.expect_value(t, strings.contains(output, "fmt.println(str__count(trimmed), initial, str__count(tail), starts_p, uppered, joined, replaced)"), true)
+}
+
+@(test)
+compile_shipped_set_source_package_uses_hybrid_resolution :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-set-package-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    path, join_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, join_err == nil, true)
+    if join_err != nil {
+        return
+    }
+    defer delete(path)
+
+    source := `(package main)
+(import set "kvist:set")
+
+(defn demo []
+  (let [base (set/of int [1 2 3])
+        extra (set/of int [3 4 5])
+        merged (set/union base extra)
+        overlap (set/intersection base extra)
+        only-base (set/difference base extra)
+        bigger (set/add base 9)
+        smaller (set/remove bigger 2)
+        subset? (set/subset? overlap merged)
+        superset? (set/superset? merged overlap)
+        disjoint? (set/disjoint? only-base extra)
+        mutable (set/of int [1 2 3])]
+    (defer (delete base))
+    (defer (delete extra))
+    (defer (delete merged))
+    (defer (delete overlap))
+    (defer (delete only-base))
+    (defer (delete bigger))
+    (defer (delete smaller))
+    (defer (delete mutable))
+    (set/add! mutable 4)
+    (set/remove! mutable 1)
+    (set/union! mutable extra)
+    (println subset? superset? disjoint? (set/contains? mutable 4))))`
+
+    write_err := os.write_entire_file(path, transmute([]byte)source)
+    testing.expect_value(t, write_err == nil, true)
+    if write_err != nil {
+        return
+    }
+
+    output, err, ok := kvist.compile_path(path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "set__union :: #force_inline proc(lhs, rhs: map[$T]bool) -> map[T]bool {"), true)
+    testing.expect_value(t, strings.contains(output, "set__intersection :: #force_inline proc(lhs, rhs: map[$T]bool) -> map[T]bool {"), true)
+    testing.expect_value(t, strings.contains(output, "set__difference :: #force_inline proc(lhs, rhs: map[$T]bool) -> map[T]bool {"), true)
+    testing.expect_value(t, strings.contains(output, "set__subset_p :: #force_inline proc(lhs, rhs: map[$T]bool) -> bool {"), true)
+    testing.expect_value(t, strings.contains(output, "set__superset_p :: #force_inline proc(lhs, rhs: map[$T]bool) -> bool {"), true)
+    testing.expect_value(t, strings.contains(output, "set__disjoint_p :: #force_inline proc(lhs, rhs: map[$T]bool) -> bool {"), true)
+    testing.expect_value(t, strings.contains(output, "set__add :: #force_inline proc(s: map[$T]bool, value: T) -> map[T]bool {"), true)
+    testing.expect_value(t, strings.contains(output, "set__remove :: #force_inline proc(s: map[$T]bool, value: T) -> map[T]bool {"), true)
+    testing.expect_value(t, strings.contains(output, "out := make(map[T]bool, (len((lhs)[:])) + (len((rhs)[:])))"), true)
+    testing.expect_value(t, strings.contains(output, "lhs_count := len((lhs)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "rhs_count := len((rhs)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "out := make(map[T]bool, if((lhs_count) < (rhs_count), lhs_count, rhs_count))"), true)
+    testing.expect_value(t, strings.contains(output, "if (len((lhs)[:])) > (len((rhs)[:])) {"), true)
+    testing.expect_value(t, strings.contains(output, "out := make(map[T]bool, (len((s)[:])) + (1))"), true)
+    testing.expect_value(t, strings.contains(output, "merged := set__union(base, extra)"), true)
+    testing.expect_value(t, strings.contains(output, "overlap := set__intersection(base, extra)"), true)
+    testing.expect_value(t, strings.contains(output, "only_base := set__difference(base, extra)"), true)
+    testing.expect_value(t, strings.contains(output, "bigger := set__add(base, 9)"), true)
+    testing.expect_value(t, strings.contains(output, "smaller := set__remove(bigger, 2)"), true)
+    testing.expect_value(t, strings.contains(output, "subset_p := set__subset_p(overlap, merged)"), true)
+    testing.expect_value(t, strings.contains(output, "superset_p := set__superset_p(merged, overlap)"), true)
+    testing.expect_value(t, strings.contains(output, "disjoint_p := set__disjoint_p(only_base, extra)"), true)
+    testing.expect_value(t, strings.contains(output, "(mutable)[4] = true"), true)
+    testing.expect_value(t, strings.contains(output, "delete_key(&(mutable), 1)"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_set_union_in_place(&(mutable), extra)"), true)
+    testing.expect_value(t, strings.contains(output, "fmt.println(subset_p, superset_p, disjoint_p, (map_get(&(mutable), 4, false)))"), false)
+}
+
+@(test)
+compile_shipped_map_source_package_uses_hybrid_resolution :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-map-package-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    path, join_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, join_err == nil, true)
+    if join_err != nil {
+        return
+    }
+    defer delete(path)
+
+    source := `(package main)
+(import map "kvist:map")
+
+(defn demo []
+  (let [base (map/of string int {"a" 1 "b" 2})
+        overrides (map/of string int {"b" 20 "c" 30})
+        merged (map/merge base overrides)
+        fresh (map/empty string int 4)
+        mutable (map/of string int {"seed" 1})
+        key-list (map/keys base)
+        value-list (map/vals overrides)
+        zipped (map/zip ["x" "y" "z"] [10 20])
+        has-a? (map/contains? merged "a")
+        read-a (map/get merged "a")]
+    (defer (delete base))
+    (defer (delete overrides))
+    (defer (delete merged))
+    (defer (delete fresh))
+    (defer (delete mutable))
+    (defer (delete key-list))
+    (defer (delete value-list))
+    (defer (delete zipped))
+    (map/merge! mutable overrides)
+    (println has-a? read-a (count key-list) (count value-list) (map/get zipped "x" 0))))`
+
+    write_err := os.write_entire_file(path, transmute([]byte)source)
+    testing.expect_value(t, write_err == nil, true)
+    if write_err != nil {
+        return
+    }
+
+    output, err, ok := kvist.compile_path(path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "map__contains_p :: #force_inline proc(m: map[$K]$V, key: K) -> bool {"), true)
+    testing.expect_value(t, strings.contains(output, "return (key) in (m)"), true)
+    testing.expect_value(t, strings.contains(output, "map__merge :: #force_inline proc(lhs, rhs: map[$K]$V) -> map[K]V {"), true)
+    testing.expect_value(t, strings.contains(output, "out := make(map[K]V, (len((lhs)[:])) + (len((rhs)[:])))"), true)
+    testing.expect_value(t, strings.contains(output, "map__keys :: #force_inline proc(m: map[$K]$V) -> [dynamic]K {"), true)
+    testing.expect_value(t, strings.contains(output, "out := make([dynamic]K, 0, len((m)[:]))"), true)
+    testing.expect_value(t, strings.contains(output, "map__vals :: #force_inline proc(m: map[$K]$V) -> [dynamic]V {"), true)
+    testing.expect_value(t, strings.contains(output, "out := make([dynamic]V, 0, len((m)[:]))"), true)
+    testing.expect_value(t, strings.contains(output, "map__zip :: #force_inline proc(ks: []$K, vs: []$V) -> map[K]V {"), true)
+    testing.expect_value(t, strings.contains(output, "value_count := len((vs)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "out := make(map[K]V, if((len((ks)[:])) < (value_count), len((ks)[:]), value_count))"), true)
+    testing.expect_value(t, strings.contains(output, "if (i) < (value_count) {"), true)
+    testing.expect_value(t, strings.contains(output, "merged := map__merge(base, overrides)"), true)
+    testing.expect_value(t, strings.contains(output, "fresh := make(map[string]int, 4)"), true)
+    testing.expect_value(t, strings.contains(output, "mutable := map[string]int{\"seed\" = 1}"), true)
+    testing.expect_value(t, strings.contains(output, "key_list := map__keys(base)"), true)
+    testing.expect_value(t, strings.contains(output, "value_list := map__vals(overrides)"), true)
+    testing.expect_value(t, strings.contains(output, "zipped := map__zip([dynamic]string{\"x\", \"y\", \"z\"}, [dynamic]int{10, 20})"), true)
+    testing.expect_value(t, strings.contains(output, "has_a_p := map__contains_p(merged, \"a\")"), true)
+    testing.expect_value(t, strings.contains(output, "read_a := merged[\"a\"]"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_merge_in_place(&(mutable), overrides)"), true)
+    testing.expect_value(t, strings.contains(output, "fmt.println(has_a_p, read_a, len((key_list)[:]), len((value_list)[:]), kvist_get_or_default(zipped, \"x\", 0))"), true)
+}
+
+@(test)
+compile_shipped_arr_source_package_uses_hybrid_resolution :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-arr-package-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    path, join_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, join_err == nil, true)
+    if join_err != nil {
+        return
+    }
+    defer delete(path)
+
+    source := `(package main)
+(import arr "kvist:arr")
+
+(defn big? [x: int] -> bool
+  (> x 15))
+
+(defn next-value [] -> int
+  7)
+
+(defn double [x: int] -> int
+  (* x 2))
+
+(defn inc-value [x: int] -> int
+  (+ x 1))
+
+(defn even-value? [x: int] -> bool
+  (== (% x 2) 0))
+
+(defn add-values [acc: int, x: int] -> int
+  (+ acc x))
+
+(defn demo []
+  (let [numbers (arr/range 1 5)
+        xs (new []int [10 20 30 40])
+        total (arr/count xs)
+        first-by-get (arr/get xs 0)
+        a (arr/first xs)
+        b (arr/second xs)
+        c (arr/nth xs 2)
+        z (arr/last xs)
+        window (arr/slice xs 1 3)
+        prefix (arr/take 2 xs)
+        suffix (arr/drop 1 xs)
+        without-tail (arr/drop-last 2 xs)
+        sampled (arr/take-nth 2 xs)
+        repeated (arr/repeat 3 9)
+        generated (arr/repeatedly 2 next-value)
+        powers (arr/iterate 4 double 1)
+        cycled (arr/cycle 5 xs)
+        mapped (arr/map inc-value xs)
+        filtered (arr/filter even-value? xs)
+        removed (arr/remove even-value? xs)
+        reduced (arr/reduce add-values 0 xs)
+        small-prefix (arr/take-while big? xs)
+        large-suffix (arr/drop-while big? xs)
+        [first-big found-big?] (arr/find big? xs)
+        any-big? (arr/some? big? xs)
+        all-big? (arr/every? big? xs)
+        tail (arr/rest xs)
+        init (arr/butlast xs)]
+    (println total first-by-get a b c z
+             first-big found-big? any-big? all-big?
+             (count numbers) (count sampled) (count repeated) (count generated) (count powers) (count cycled)
+             (count window) (count prefix) (count suffix) (count without-tail) (count tail) (count init))))`
+
+    write_err := os.write_entire_file(path, transmute([]byte)source)
+    testing.expect_value(t, write_err == nil, true)
+    if write_err != nil {
+        return
+    }
+
+    output, err, ok := kvist.compile_path(path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "total := len((xs)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "arr__range_impl :: #force_inline proc(start, end, step: int) -> [dynamic]int {"), true)
+    testing.expect_value(t, strings.contains(output, "numbers := arr__range_impl(1, 5, 1)"), true)
+    testing.expect_value(t, strings.contains(output, "first_by_get := xs[0]"), true)
+    testing.expect_value(t, strings.contains(output, "a := xs[0]"), true)
+    testing.expect_value(t, strings.contains(output, "b := xs[1]"), true)
+    testing.expect_value(t, strings.contains(output, "c := xs[2]"), true)
+    testing.expect_value(t, strings.contains(output, "z := xs[(len((xs)[:])) - (1)]"), true)
+    testing.expect_value(t, strings.contains(output, "window := (xs)[1:3]"), true)
+    testing.expect_value(t, strings.contains(output, "prefix := (xs)[0:2]"), true)
+    testing.expect_value(t, strings.contains(output, "suffix := (xs)[1:]"), true)
+    testing.expect_value(t, strings.contains(output, "without_tail := (xs)[0:(len((xs)[:])) - (2)]"), true)
+    testing.expect_value(t, strings.contains(output, "arr__take_nth :: #force_inline proc(n: int, xs: []$T) -> [dynamic]T {"), true)
+    testing.expect_value(t, strings.contains(output, "sampled := arr__take_nth(2, xs)"), true)
+    testing.expect_value(t, strings.contains(output, "arr__repeat :: #force_inline proc(n: int, value: $T) -> [dynamic]T {"), true)
+    testing.expect_value(t, strings.contains(output, "repeated := arr__repeat(3, 9)"), true)
+    testing.expect_value(t, strings.contains(output, "arr__repeatedly :: #force_inline proc(n: int, f: proc() -> $T) -> [dynamic]T {"), true)
+    testing.expect_value(t, strings.contains(output, "generated := arr__repeatedly(2, next_value)"), true)
+    testing.expect_value(t, strings.contains(output, "arr__iterate :: #force_inline proc(n: int, f: proc(x: $T) -> T, init: T) -> [dynamic]T {"), true)
+    testing.expect_value(t, strings.contains(output, "powers := arr__iterate(4, double, 1)"), true)
+    testing.expect_value(t, strings.contains(output, "arr__cycle :: #force_inline proc(n: int, xs: []$T) -> [dynamic]T {"), true)
+    testing.expect_value(t, strings.contains(output, "cycled := arr__cycle(5, xs)"), true)
+    testing.expect_value(t, strings.contains(output, "arr__map_impl :: #force_inline proc(f: proc(x: $T) -> $U, xs: []T) -> [dynamic]U {"), true)
+    testing.expect_value(t, strings.contains(output, "mapped := arr__map_impl(inc_value, (xs)[0:])"), true)
+    testing.expect_value(t, strings.contains(output, "arr__filter_impl :: #force_inline proc(pred: proc(x: $T) -> bool, xs: []T) -> [dynamic]T {"), true)
+    testing.expect_value(t, strings.contains(output, "filtered := arr__filter_impl(even_value_p, (xs)[0:])"), true)
+    testing.expect_value(t, strings.contains(output, "arr__remove_impl :: #force_inline proc(pred: proc(x: $T) -> bool, xs: []T) -> [dynamic]T {"), true)
+    testing.expect_value(t, strings.contains(output, "removed := arr__remove_impl(even_value_p, (xs)[0:])"), true)
+    testing.expect_value(t, strings.contains(output, "arr__reduce_impl :: #force_inline proc(f: proc(acc: $U, x: $T) -> U, init: U, xs: []T) -> U {"), true)
+    testing.expect_value(t, strings.contains(output, "reduced := arr__reduce_impl(add_values, 0, (xs)[0:])"), true)
+    testing.expect_value(t, strings.contains(output, "arr__take_while_impl :: #force_inline proc(pred: proc(x: $T) -> bool, xs: []T) -> []T {"), true)
+    testing.expect_value(t, strings.contains(output, "arr__drop_while_impl :: #force_inline proc(pred: proc(x: $T) -> bool, xs: []T) -> []T {"), true)
+    testing.expect_value(t, strings.contains(output, "small_prefix := arr__take_while_impl(big_p, (xs)[0:])"), true)
+    testing.expect_value(t, strings.contains(output, "large_suffix := arr__drop_while_impl(big_p, (xs)[0:])"), true)
+    testing.expect_value(t, strings.contains(output, "arr__find_impl :: #force_inline proc(pred: proc(x: $T) -> bool, xs: []T) -> (value: T, ok: bool) {"), true)
+    testing.expect_value(t, strings.contains(output, "arr__some_impl :: #force_inline proc(pred: proc(x: $T) -> bool, xs: []T) -> bool {"), true)
+    testing.expect_value(t, strings.contains(output, "arr__every_impl :: #force_inline proc(pred: proc(x: $T) -> bool, xs: []T) -> bool {"), true)
+    testing.expect_value(t, strings.contains(output, "first_big, found_big_p := arr__find_impl(big_p, (xs)[0:])"), true)
+    testing.expect_value(t, strings.contains(output, "any_big_p := arr__some_impl(big_p, (xs)[0:])"), true)
+    testing.expect_value(t, strings.contains(output, "all_big_p := arr__every_impl(big_p, (xs)[0:])"), true)
+    testing.expect_value(t, strings.contains(output, "tail := (xs)[1:]"), true)
+    testing.expect_value(t, strings.contains(output, "init := (xs)[0:(len((xs)[:])) - (1)]"), true)
+    testing.expect_value(t, strings.contains(output, "out := make([dynamic]T, 0, ((len((xs)[:])) + ((n) - (1))) / (n))"), true)
+    testing.expect_value(t, strings.contains(output, "out := make([dynamic]T, 0, n)"), true)
+    testing.expect_value(t, strings.contains(output, "out := make([dynamic]int, 0, arr__count)"), true)
+    testing.expect_value(t, strings.contains(output, "return (xs)[0:i]"), true)
+    testing.expect_value(t, strings.contains(output, "return (xs)[i:]"), true)
+    testing.expect_value(t, strings.contains(output, "fmt.println(total, first_by_get, a, b, c, z, first_big, found_big_p, any_big_p, all_big_p"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_range"), false)
+    testing.expect_value(t, strings.contains(output, "kvist_map("), false)
+    testing.expect_value(t, strings.contains(output, "kvist_filter("), false)
+    testing.expect_value(t, strings.contains(output, "kvist_remove("), false)
+    testing.expect_value(t, strings.contains(output, "kvist_reduce("), false)
+    testing.expect_value(t, strings.contains(output, "kvist_take_nth"), false)
+    testing.expect_value(t, strings.contains(output, "kvist_repeat"), false)
+    testing.expect_value(t, strings.contains(output, "kvist_repeatedly"), false)
+    testing.expect_value(t, strings.contains(output, "kvist_iterate"), false)
+    testing.expect_value(t, strings.contains(output, "kvist_cycle"), false)
+    testing.expect_value(t, strings.contains(output, "kvist_take_while"), false)
+    testing.expect_value(t, strings.contains(output, "kvist_drop_while"), false)
+    testing.expect_value(t, strings.contains(output, "kvist_find"), false)
+    testing.expect_value(t, strings.contains(output, "kvist_some_p"), false)
+    testing.expect_value(t, strings.contains(output, "kvist_every_p"), false)
+}
+
+@(test)
+compile_set_package_helpers :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn demo []
+  (let [base (set/of int [1 2 3])
+        extra (set/of int [3 4])
+        merged (set/union base extra)
+        overlap (set/intersection base extra)
+        only-base (set/difference base extra)
+        bigger (set/add base 9)
+        smaller (set/remove bigger 2)
+        subset? (set/subset? overlap merged)
+        superset? (set/superset? merged overlap)
+        disjoint? (set/disjoint? only-base extra)
+        mutable (set/of int [1 2 3])]
+    (defer (delete base))
+    (defer (delete extra))
+    (defer (delete merged))
+    (defer (delete overlap))
+    (defer (delete only-base))
+    (defer (delete bigger))
+    (defer (delete smaller))
+    (defer (delete mutable))
+    (set/add! mutable 4)
+    (set/remove! mutable 1)
+    (println subset? superset? disjoint?)))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "merged := kvist_set_union(base, extra)"), true)
+    testing.expect_value(t, strings.contains(output, "overlap := kvist_set_intersection(base, extra)"), true)
+    testing.expect_value(t, strings.contains(output, "only_base := kvist_set_difference(base, extra)"), true)
+    testing.expect_value(t, strings.contains(output, "bigger := kvist_set_add(base, 9)"), true)
+    testing.expect_value(t, strings.contains(output, "smaller := kvist_set_remove(bigger, 2)"), true)
+    testing.expect_value(t, strings.contains(output, "subset_p := kvist_set_subset(overlap, merged)"), true)
+    testing.expect_value(t, strings.contains(output, "superset_p := kvist_set_superset(merged, overlap)"), true)
+    testing.expect_value(t, strings.contains(output, "disjoint_p := kvist_set_disjoint(only_base, extra)"), true)
+    testing.expect_value(t, strings.contains(output, "(mutable)[4] = true"), true)
+    testing.expect_value(t, strings.contains(output, "delete_key(&(mutable), 1)"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_set_union :: proc(lhs, rhs: map[$T]bool) -> map[T]bool"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_set_intersection :: proc(lhs, rhs: map[$T]bool) -> map[T]bool"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_set_difference :: proc(lhs, rhs: map[$T]bool) -> map[T]bool"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_set_subset :: proc(lhs, rhs: map[$T]bool) -> bool"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_set_superset :: proc(lhs, rhs: map[$T]bool) -> bool"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_set_disjoint :: proc(lhs, rhs: map[$T]bool) -> bool"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_set_add :: proc(s: map[$T]bool, value: T) -> map[T]bool"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_set_remove :: proc(s: map[$T]bool, value: T) -> map[T]bool"), true)
+}
+
+@(test)
+compile_set_package_bang_algebra_helpers :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn demo []
+  (let [target (set/of int [1 2 3]) defer
+        rhs (set/of int [3 4 5]) defer]
+    (set/union! target rhs)
+    (set/intersection! target rhs)
+    (set/difference! target rhs)
+    (println (set/contains? target 4))))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "kvist_set_union_in_place(&(target), rhs)"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_set_intersection_in_place(&(target), rhs)"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_set_difference_in_place(&(target), rhs)"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_set_union_in_place :: proc(target: ^map[$T]bool, source: map[T]bool)"), true)
+    testing.expect_value(t, strings.contains(output, "target^[key] = true"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_set_intersection_in_place :: proc(target: ^map[$T]bool, source: map[T]bool)"), true)
+    testing.expect_value(t, strings.contains(output, "to_delete := make([dynamic]T, 0)"), true)
+    testing.expect_value(t, strings.contains(output, "delete_key(target, key)"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_set_difference_in_place :: proc(target: ^map[$T]bool, source: map[T]bool)"), true)
 }

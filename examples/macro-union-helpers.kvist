@@ -3,14 +3,14 @@
 (defmacro emit-union-ctors [union-name variants]
   (if (= (count variants) 0)
     (forms)
-    (let [tag (first variants)
-          value-type (nth variants 1)
+    (let [tag (arr/first variants)
+          value-type (arr/nth variants 1)
           ctor-name (symbol (str "make-" (name union-name) "-" (name tag)))]
       (forms
         (quasiquote
           (defn (unquote ctor-name) [value: (unquote value-type)] -> (unquote union-name)
             ((unquote union-name) {(unquote tag) value})))
-        (emit-union-ctors union-name (rest (rest variants)))))))
+        (emit-union-ctors union-name (arr/rest (arr/rest variants)))))))
 
 (defmacro defunion+ctors [name variants]
   (forms

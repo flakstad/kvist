@@ -1,0 +1,111 @@
+(package set)
+(import map "kvist:map")
+
+(defmacro empty [elem-type & rest]
+  (if (= (kvist/count rest) 0)
+    (quasiquote
+      (kvist/set/empty (unquote elem-type)))
+    (quasiquote
+      (kvist/set/empty (unquote elem-type) (unquote (kvist/first rest))))))
+
+(defmacro of [elem-type values]
+  (quasiquote
+    (kvist/set/of (unquote elem-type) (unquote values))))
+
+(defmacro add! [s value]
+  (quasiquote
+    (kvist/set/add! (unquote s) (unquote value))))
+
+(defmacro remove! [s value]
+  (quasiquote
+    (kvist/set/remove! (unquote s) (unquote value))))
+
+(defmacro union! [target source]
+  (quasiquote
+    (kvist/set/union! (unquote target) (unquote source))))
+
+(defmacro intersection! [target source]
+  (quasiquote
+    (kvist/set/intersection! (unquote target) (unquote source))))
+
+(defmacro difference! [target source]
+  (quasiquote
+    (kvist/set/difference! (unquote target) (unquote source))))
+
+(proc contains? [s: set[$T], value: T] -> bool #force_inline
+  (map/contains? s value))
+
+(proc union [lhs: set[$T], rhs: set[$T]] -> set[T] #force_inline
+  (let [out (set/empty T (+ (count lhs) (count rhs)))]
+    (for [value _ lhs]
+      (update! out value true))
+    (for [value _ rhs]
+      (update! out value true))
+    out))
+
+(proc intersection [lhs: set[$T], rhs: set[$T]] -> set[T] #force_inline
+  (let [lhs-count (count lhs)
+        rhs-count (count rhs)
+        out (set/empty T (if (< lhs-count rhs-count) lhs-count rhs-count))
+        scan lhs
+        probe rhs]
+    (when (> lhs-count rhs-count)
+      (do
+        (set! scan rhs)
+        (set! probe lhs)))
+    (for [value _ scan]
+      (when (map/contains? probe value)
+        (update! out value true)))
+    out))
+
+(proc difference [lhs: set[$T], rhs: set[$T]] -> set[T] #force_inline
+  (let [out (set/empty T (count lhs))]
+    (for [value _ lhs]
+      (when (not (map/contains? rhs value))
+        (update! out value true)))
+    out))
+
+(proc subset? [lhs: set[$T], rhs: set[$T]] -> bool #force_inline
+  (let [ok? true]
+    (when (> (count lhs) (count rhs))
+      (return false))
+    (for [value _ lhs]
+      (when (not (map/contains? rhs value))
+        (do
+          (set! ok? false)
+          (break))))
+    ok?))
+
+(proc superset? [lhs: set[$T], rhs: set[$T]] -> bool #force_inline
+  (subset? rhs lhs))
+
+(proc disjoint? [lhs: set[$T], rhs: set[$T]] -> bool #force_inline
+  (let [ok? true
+        lhs-count (count lhs)
+        rhs-count (count rhs)
+        scan lhs
+        probe rhs]
+    (when (> lhs-count rhs-count)
+      (do
+        (set! scan rhs)
+        (set! probe lhs)))
+    (for [value _ scan]
+      (when (map/contains? probe value)
+        (do
+          (set! ok? false)
+          (break))))
+    ok?))
+
+(proc add [s: set[$T], value: T] -> set[T] #force_inline
+  (let [out (set/empty T (+ (count s) 1))]
+    (for [entry _ s]
+      (update! out entry true))
+    (update! out value true)
+    out))
+
+(proc remove [s: set[$T], value: T] -> set[T] #force_inline
+  (let [out (set/empty T (count s))]
+    (for [entry _ s]
+      (when (!= entry value)
+        (update! out entry true)))
+    out))

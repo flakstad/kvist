@@ -1,0 +1,256 @@
+(package arr)
+
+(defmacro count [xs]
+  (quasiquote
+    (kvist/count (unquote xs))))
+
+(defmacro map [f xs]
+  (if (keyword? f)
+    (quasiquote
+      (kvist/arr/map (unquote f) (unquote xs)))
+    (quasiquote
+      (map-impl (unquote f) (slice (unquote xs) 0)))))
+
+(defmacro filter [pred xs]
+  (if (keyword? pred)
+    (quasiquote
+      (kvist/arr/filter (unquote pred) (unquote xs)))
+    (quasiquote
+      (filter-impl (unquote pred) (slice (unquote xs) 0)))))
+
+(defmacro remove [pred xs]
+  (if (keyword? pred)
+    (quasiquote
+      (kvist/arr/remove (unquote pred) (unquote xs)))
+    (quasiquote
+      (remove-impl (unquote pred) (slice (unquote xs) 0)))))
+
+(defmacro reduce [f init xs]
+  (quasiquote
+    (reduce-impl (unquote f) (unquote init) (slice (unquote xs) 0))))
+
+(defmacro get [xs index]
+  (quasiquote
+    (kvist/get (unquote xs) (unquote index))))
+
+(defmacro slice [xs start & rest]
+  (if (= (kvist/count rest) 0)
+    (quasiquote
+      (kvist/slice (unquote xs) (unquote start)))
+    (quasiquote
+      (kvist/slice (unquote xs) (unquote start) (unquote (kvist/first rest))))))
+
+(defmacro first [xs]
+  (quasiquote
+    (kvist/get (unquote xs) 0)))
+
+(defmacro second [xs]
+  (quasiquote
+    (get (unquote xs) 1)))
+
+(defmacro nth [xs index]
+  (quasiquote
+    (kvist/get (unquote xs) (unquote index))))
+
+(defmacro last [xs]
+  (quasiquote
+    (kvist/get (unquote xs) (- (kvist/count (unquote xs)) 1))))
+
+(defmacro rest [xs]
+  (quasiquote
+    (slice (unquote xs) 1)))
+
+(defmacro take [n xs]
+  (quasiquote
+    (slice (unquote xs) 0 (unquote n))))
+
+(defmacro drop [n xs]
+  (quasiquote
+    (slice (unquote xs) (unquote n))))
+
+(defmacro drop-last [n xs]
+  (quasiquote
+    (slice (unquote xs) 0 (- (kvist/count (unquote xs)) (unquote n)))))
+
+(defmacro butlast [xs]
+  (quasiquote
+    (slice (unquote xs) 0 (- (kvist/count (unquote xs)) 1))))
+
+(defmacro range [& rest]
+  (if (= (kvist/count rest) 1)
+    (quasiquote
+      (range-impl 0 (unquote (kvist/first rest)) 1))
+    (if (= (kvist/count rest) 2)
+      (quasiquote
+        (range-impl (unquote (kvist/first rest)) (unquote (kvist/nth rest 1)) 1))
+      (quasiquote
+        (range-impl (unquote (kvist/first rest)) (unquote (kvist/nth rest 1)) (unquote (kvist/nth rest 2)))))))
+
+(defn- range-impl [start: int, end: int, step: int] -> [dynamic]int #force_inline
+  (when (== step 0)
+    (return (arr/empty int)))
+  (let [count 0]
+    (if (and (> step 0) (< start end))
+      (set! count (+ (/ (- (- end start) 1) step) 1))
+      (when (and (< step 0) (> start end))
+        (set! count (+ (/ (- (- start end) 1) (- step)) 1))))
+    (let [out (arr/empty int count)
+          i start]
+      (if (> step 0)
+        (for (< i end)
+          (arr/push! out i)
+          (set! i (+ i step)))
+        (for (> i end)
+          (arr/push! out i)
+          (set! i (+ i step))))
+      out)))
+
+(defn- map-impl [f: (proc [x: $T] -> $U), xs: []T] -> [dynamic]U #force_inline
+  (let [out (arr/empty U (count xs))]
+    (for [x xs]
+      (arr/push! out (f x)))
+    out))
+
+(defn- filter-impl [pred: (proc [x: $T] -> bool), xs: []T] -> [dynamic]T #force_inline
+  (let [out (arr/empty T (count xs))]
+    (for [x xs]
+      (when (pred x)
+        (arr/push! out x)))
+    out))
+
+(defn- remove-impl [pred: (proc [x: $T] -> bool), xs: []T] -> [dynamic]T #force_inline
+  (let [out (arr/empty T (count xs))]
+    (for [x xs]
+      (when (not (pred x))
+        (arr/push! out x)))
+    out))
+
+(defn- reduce-impl [f: (proc [acc: $U, x: $T] -> U), init: U, xs: []T] -> U #force_inline
+  (let [acc init]
+    (for [x xs]
+      (set! acc (f acc x)))
+    acc))
+
+(proc take-nth [n: int, xs: []$T] -> [dynamic]T #force_inline
+  (when (<= n 0)
+    (return (arr/empty T)))
+  (let [out (arr/empty T (/ (+ (count xs) (- n 1)) n))
+        i 0]
+    (for (< i (count xs))
+      (arr/push! out (get xs i))
+      (set! i (+ i n)))
+    out))
+
+(proc repeat [n: int, value: $T] -> [dynamic]T #force_inline
+  (when (<= n 0)
+    (return (arr/empty T)))
+  (let [out (arr/empty T n)
+        i 0]
+    (for (< i n)
+      (arr/push! out value)
+      (set! i (+ i 1)))
+    out))
+
+(proc repeatedly [n: int, f: (proc [] -> $T)] -> [dynamic]T #force_inline
+  (when (<= n 0)
+    (return (arr/empty T)))
+  (let [out (arr/empty T n)
+        i 0]
+    (for (< i n)
+      (arr/push! out (f))
+      (set! i (+ i 1)))
+    out))
+
+(proc iterate [n: int, f: (proc [x: $T] -> T), init: T] -> [dynamic]T #force_inline
+  (when (<= n 0)
+    (return (arr/empty T)))
+  (let [out (arr/empty T n)
+        current init
+        i 0]
+    (for (< i n)
+      (arr/push! out current)
+      (set! current (f current))
+      (set! i (+ i 1)))
+    out))
+
+(proc cycle [n: int, xs: []$T] -> [dynamic]T #force_inline
+  (let [size (count xs)]
+    (when (or (<= n 0) (== size 0))
+      (return (arr/empty T)))
+    (let [out (arr/empty T n)
+          i 0]
+      (for (< i n)
+        (arr/push! out (get xs (% i size)))
+        (set! i (+ i 1)))
+      out)))
+
+(defmacro take-while [pred xs]
+  (if (keyword? pred)
+    (quasiquote
+      (kvist/arr/take-while (unquote pred) (unquote xs)))
+    (quasiquote
+      (take-while-impl (unquote pred) (slice (unquote xs) 0)))))
+
+(defmacro drop-while [pred xs]
+  (if (keyword? pred)
+    (quasiquote
+      (kvist/arr/drop-while (unquote pred) (unquote xs)))
+    (quasiquote
+      (drop-while-impl (unquote pred) (slice (unquote xs) 0)))))
+
+(defmacro some? [pred xs]
+  (if (keyword? pred)
+    (quasiquote
+      (kvist/arr/some? (unquote pred) (unquote xs)))
+    (quasiquote
+      (some-impl (unquote pred) (slice (unquote xs) 0)))))
+
+(defmacro every? [pred xs]
+  (if (keyword? pred)
+    (quasiquote
+      (kvist/arr/every? (unquote pred) (unquote xs)))
+    (quasiquote
+      (every-impl (unquote pred) (slice (unquote xs) 0)))))
+
+(defmacro find [pred xs]
+  (if (keyword? pred)
+    (quasiquote
+      (kvist/arr/find (unquote pred) (unquote xs)))
+    (quasiquote
+      (find-impl (unquote pred) (slice (unquote xs) 0)))))
+
+(defn- some-impl [pred: (proc [x: $T] -> bool), xs: []T] -> bool #force_inline
+  (let [result false]
+    (for [x xs]
+      (when (pred x)
+        (do
+          (set! result true)
+          (break))))
+    result))
+
+(defn- every-impl [pred: (proc [x: $T] -> bool), xs: []T] -> bool #force_inline
+  (let [result true]
+    (for [x xs]
+      (when (not (pred x))
+        (do
+          (set! result false)
+          (break))))
+    result))
+
+(defn- find-impl [pred: (proc [x: $T] -> bool), xs: []T] -> [value: T, ok: bool] #force_inline
+  (for [x xs]
+    (when (pred x)
+      (return x true)))
+  (return value false))
+
+(defn- take-while-impl [pred: (proc [x: $T] -> bool), xs: []T] -> []T #force_inline
+  (for [x i xs]
+    (when (not (pred x))
+      (return (slice xs 0 i))))
+  xs)
+
+(defn- drop-while-impl [pred: (proc [x: $T] -> bool), xs: []T] -> []T #force_inline
+  (for [x i xs]
+    (when (not (pred x))
+      (return (slice xs i))))
+  (slice xs (count xs)))

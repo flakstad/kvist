@@ -56,7 +56,7 @@
           (Region-Report {:region region
                           :revenue revenue
                           :count (len group)}))))
-    (sort-by! :revenue rows)
+    (arr/sort-by! :revenue rows)
     rows))
 
 (defn rows-from-aggregates [revenue-by-region: map[int]int, count-by-region: map[int]int] -> [dynamic]Region-Report
@@ -66,14 +66,14 @@
         (Region-Report {:region region
                         :revenue revenue
                         :count (get count-by-region region 0)})))
-    (sort-by! :revenue rows)
+    (arr/sort-by! :revenue rows)
     rows))
 
 (defn eager-report-score [] -> int
   (let [orders (sample-orders)
-        settled (map settle-order orders)
-        paid (filter settled? settled)
-        groups (group-by :region paid)
+        settled (arr/map settle-order orders)
+        paid (arr/filter settled? settled)
+        groups (arr/group-by :region paid)
         rows (rows-from-groups groups)]
     (defer
       (delete orders)
@@ -83,13 +83,13 @@
         (delete group))
       (delete groups)
       (delete rows))
-    (row-score (slice rows))))
+    (row-score (arr/slice rows))))
 
 (defn bang-report-score [] -> int
   (let [orders (sample-orders)
-        work (map settle-order orders)]
-    (filter! settled? work)
-    (let [groups (group-by :region work)
+        work (arr/map settle-order orders)]
+    (arr/filter! settled? work)
+    (let [groups (arr/group-by :region work)
           rows (rows-from-groups groups)]
       (defer
         (delete orders)
@@ -98,14 +98,14 @@
           (delete group))
         (delete groups)
         (delete rows))
-      (row-score (slice rows)))))
+      (row-score (arr/slice rows)))))
 
 (defn aggregate-helper-report-score [] -> int
   (let [orders (sample-orders)
-        work (map settle-order orders)]
-    (filter! settled? work)
-    (let [revenue-by-region (sum-by :region :amount work)
-          count-by-region (count-by :region work)
+        work (arr/map settle-order orders)]
+    (arr/filter! settled? work)
+    (let [revenue-by-region (arr/sum-by :region :amount work)
+          count-by-region (arr/count-by :region work)
           rows (rows-from-aggregates revenue-by-region count-by-region)]
       (defer
         (delete orders)
@@ -113,7 +113,7 @@
         (delete revenue-by-region)
         (delete count-by-region)
         (delete rows))
-      (row-score (slice rows)))))
+      (row-score (arr/slice rows)))))
 
 (defn loop-report-score [] -> int
   (let [orders (sample-orders)
@@ -134,7 +134,7 @@
         (delete revenue-by-region)
         (delete count-by-region)
         (delete rows))
-      (row-score (slice rows)))))
+      (row-score (arr/slice rows)))))
 
 (defn main []
   (println (eager-report-score))

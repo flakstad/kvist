@@ -10,6 +10,7 @@ Alias_Prefix :: struct {
     alias:   string,
     prefix:  string,
     exports: [dynamic]string,
+    allow_fallback: bool,
 }
 
 Loaded_Forms :: struct {
@@ -238,9 +239,27 @@ is_builtin_kvist_import_path :: proc(path: string) -> bool {
     }
 }
 
+is_shipped_source_import_path :: proc(path: string) -> bool {
+    if !strings.has_prefix(path, "kvist:") {
+        return false
+    }
+    root, ok_root := repo_root_for_path(".")
+    if !ok_root {
+        return false
+    }
+    defer delete(root)
+    package_name := path[len("kvist:"):]
+    candidate, join_err := os.join_path({root, "packages", package_name}, context.allocator)
+    if join_err != nil {
+        return false
+    }
+    defer delete(candidate)
+    return os.exists(candidate) && os.is_dir(candidate)
+}
+
 is_source_import_path :: proc(path: string) -> bool {
     if strings.has_prefix(path, "kvist:") {
-        return !is_builtin_kvist_import_path(path)
+        return is_shipped_source_import_path(path) || !is_builtin_kvist_import_path(path)
     }
     for ch in path {
         if ch == ':' {
@@ -250,8 +269,20 @@ is_source_import_path :: proc(path: string) -> bool {
     return true
 }
 
+is_builtin_kvist_package_path :: proc(path: string) -> bool {
+    switch path {
+    case "kvist:arr", "kvist:str", "kvist:map", "kvist:set", "kvist:struct":
+        return true
+    }
+    return false
+}
+
+shipped_source_import_allows_builtin_fallback :: proc(import_path: string) -> bool {
+    return is_builtin_kvist_package_path(import_path)
+}
+
 resolve_shipped_source_import_path :: proc(importer_path, import_path: string) -> (string, Compile_Error, bool) {
-    if !strings.has_prefix(import_path, "kvist:") || is_builtin_kvist_import_path(import_path) {
+    if !strings.has_prefix(import_path, "kvist:") {
         return "", Compile_Error{}, false
     }
     package_name := import_path[len("kvist:"):]
@@ -266,7 +297,7 @@ resolve_shipped_source_import_path :: proc(importer_path, import_path: string) -
         return "", Compile_Error{message = fmt.tprintf("could not resolve shipped source import: %s", import_path)}, false
     }
     defer delete(root)
-    candidate, join_err := os.join_path({root, "packages", package_name, "package.kvist"}, context.allocator)
+    candidate, join_err := os.join_path({root, "packages", package_name}, context.allocator)
     if join_err != nil || !os.exists(candidate) {
         if join_err == nil {
             delete(candidate)
@@ -299,6 +330,14 @@ resolve_source_import_path :: proc(importer_path, import_path: string) -> (strin
     if os.exists(file_path) && !os.is_dir(file_path) {
         return strings.clone(file_path), Compile_Error{}, true
     }
+    if os.exists(base) && !os.is_dir(base) {
+        return base, Compile_Error{}, true
+    }
+
+    kvist_file := fmt.tprintf("%s.kvist", base)
+    if os.exists(kvist_file) && !os.is_dir(kvist_file) {
+        return kvist_file, Compile_Error{}, true
+    }
     return "", Compile_Error{message = fmt.tprintf("could not resolve source import: %s", import_path)}, false
 }
 
@@ -320,7 +359,7 @@ is_private_decl_head :: proc(head: string) -> bool {
 
 is_top_level_decl_head :: proc(head: string) -> bool {
     switch head {
-    case "defconst", "defconst-", "defvar", "defvar-", "defstruct", "defstruct-", "defenum", "defenum-", "defunion", "defunion-", "defn", "defn-", "defmacro", "defmacro-":
+    case "defconst", "defconst-", "defvar", "defvar-", "defstruct", "defstruct-", "defenum", "defenum-", "defunion", "defunion-", "defn", "defn-", "defmacro", "defmacro-", "proc":
         return true
     case:
         return false
@@ -583,8 +622,12 @@ collect_root_source_import_aliases_from_files :: proc(files: []Package_File) -> 
                 return nil, err_package, false
             }
             import_forms := flatten_package_forms(import_files[:])
-            exports := collect_public_decl_names(import_forms[:])
-            append(&aliases, Alias_Prefix{alias = alias, prefix = alias, exports = exports})
+            append(&aliases, Alias_Prefix{
+                alias = alias,
+                prefix = alias,
+                exports = collect_public_decl_names(import_forms[:]),
+                allow_fallback = shipped_source_import_allows_builtin_fallback(import_path),
+            })
         }
     }
     return aliases[:], Compile_Error{}, true
@@ -602,6 +645,9 @@ rewrite_symbol_text :: proc(text: string, locals: []string, aliases: []Alias_Pre
         if len(body) > len(prefix_text) && body[:len(prefix_text)] == prefix_text {
             member := body[len(prefix_text):]
             if len(alias_map.exports) > 0 && !contains_text(alias_map.exports[:], member) {
+                if alias_map.allow_fallback {
+                    return text, Compile_Error{}, true
+                }
                 return "", Compile_Error{message = fmt.tprintf("source package member is private or undefined: %s/%s", alias_map.alias, member), span = span}, false
             }
             return fmt.tprintf("%s%s__%s", quote_prefix, alias_map.prefix, member), Compile_Error{}, true
@@ -909,8 +955,12 @@ load_source_forms :: proc(dir, prefix: string, loaded_keys, import_keys: ^[dynam
             if !ok_nested {
                 return result, err_nested, false
             }
-            exports := clone_string_slice(nested.exports[:])
-            append(&aliases, Alias_Prefix{alias = alias, prefix = nested_prefix, exports = exports})
+            append(&aliases, Alias_Prefix{
+                alias = alias,
+                prefix = nested_prefix,
+                exports = nested.exports,
+                allow_fallback = shipped_source_import_allows_builtin_fallback(import_path),
+            })
             for form in nested.imports {
                 append_import_form_unique(&result.imports, import_keys, clone_cst_top_form(form))
             }
@@ -933,6 +983,10 @@ load_source_forms :: proc(dir, prefix: string, loaded_keys, import_keys: ^[dynam
             }
             _, _, is_source_import := source_import_alias_and_path(form)
             if is_source_import {
+                _, import_path, _ := source_import_alias_and_path(form)
+                if shipped_source_import_allows_builtin_fallback(import_path) {
+                    append_import_form_unique(&result.imports, import_keys, top)
+                }
                 continue
             }
             if head == "import" {
@@ -998,8 +1052,12 @@ load_root_file_forms :: proc(path: string) -> (Loaded_Forms, Compile_Error, bool
             if !ok_nested {
                 return result, err_nested, false
             }
-            exports := clone_string_slice(nested.exports[:])
-            append(&aliases, Alias_Prefix{alias = alias, prefix = alias, exports = exports})
+            append(&aliases, Alias_Prefix{
+                alias = alias,
+                prefix = alias,
+                exports = nested.exports,
+                allow_fallback = shipped_source_import_allows_builtin_fallback(import_path),
+            })
             for form in nested.imports {
                 append_import_form_unique(&result.imports, &import_keys, clone_cst_top_form(form))
             }
@@ -1020,6 +1078,10 @@ load_root_file_forms :: proc(path: string) -> (Loaded_Forms, Compile_Error, bool
             }
             _, _, is_source_import := source_import_alias_and_path(form)
             if is_source_import {
+                _, import_path, _ := source_import_alias_and_path(form)
+                if shipped_source_import_allows_builtin_fallback(import_path) {
+                    append_import_form_unique(&result.imports, &import_keys, top)
+                }
                 continue
             }
             if head == "import" {

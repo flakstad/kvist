@@ -59,33 +59,109 @@ BUILTIN_SOURCE_ENTRIES :: []Builtin_Source_Entry{
 }
 
 PACKAGE_SOURCE_ENTRIES :: []Package_Source_Entry{
-    {import_path = "kvist:arr", member = "count", relative = "src/kvist/emit.odin", snippet = "if head.text == \"arr/count\" || head.text == \"str/count\""},
+    {import_path = "kvist:arr", member = "count", relative = "packages/arr/package.kvist", snippet = "(defmacro count [xs]"},
+    {import_path = "kvist:arr", member = "map", relative = "packages/arr/package.kvist", snippet = "(defmacro map [f xs]"},
+    {import_path = "kvist:arr", member = "filter", relative = "packages/arr/package.kvist", snippet = "(defmacro filter [pred xs]"},
+    {import_path = "kvist:arr", member = "remove", relative = "packages/arr/package.kvist", snippet = "(defmacro remove [pred xs]"},
+    {import_path = "kvist:arr", member = "reduce", relative = "packages/arr/package.kvist", snippet = "(defmacro reduce [f init xs]"},
     {import_path = "kvist:arr", member = "empty", relative = "src/kvist/emit.odin", snippet = "if head.text == \"arr/empty\""},
     {import_path = "kvist:arr", member = "dynamic", relative = "src/kvist/emit.odin", snippet = "if head.text == \"arr/dynamic\""},
     {import_path = "kvist:arr", member = "fixed", relative = "src/kvist/emit.odin", snippet = "if head.text == \"arr/fixed\""},
-    {import_path = "kvist:arr", member = "get", relative = "src/kvist/emit.odin", snippet = "if head.text == \"arr/get\" || head.text == \"str/get\" || head.text == \"map/get\""},
-    {import_path = "kvist:arr", member = "slice", relative = "src/kvist/emit.odin", snippet = "if head.text == \"arr/slice\" || head.text == \"str/slice\""},
+    {import_path = "kvist:arr", member = "get", relative = "packages/arr/package.kvist", snippet = "(defmacro get [xs index]"},
+    {import_path = "kvist:arr", member = "slice", relative = "packages/arr/package.kvist", snippet = "(defmacro slice [xs start & rest]"},
     {import_path = "kvist:arr", member = "push!", relative = "src/kvist/emit.odin", snippet = "if head.text == \"arr/push!\""},
-    {import_path = "kvist:arr", member = "map", relative = "src/kvist/emit.odin", snippet = "emit_core_map_helper :: proc"},
-    {import_path = "kvist:arr", member = "filter", relative = "src/kvist/emit.odin", snippet = "emit_core_filter_helper :: proc"},
+    {import_path = "kvist:arr", member = "range", relative = "packages/arr/package.kvist", snippet = "(defmacro range [& rest]"},
+    {import_path = "kvist:arr", member = "map-indexed", relative = "src/kvist/emit.odin", snippet = "emit_core_map_indexed_helper :: proc"},
+    {import_path = "kvist:arr", member = "keep", relative = "src/kvist/emit.odin", snippet = "emit_core_keep_helper :: proc"},
+    {import_path = "kvist:arr", member = "mapcat", relative = "src/kvist/emit.odin", snippet = "emit_core_mapcat_helper :: proc"},
+    {import_path = "kvist:arr", member = "first", relative = "packages/arr/package.kvist", snippet = "(defmacro first [xs]"},
+    {import_path = "kvist:arr", member = "second", relative = "packages/arr/package.kvist", snippet = "(defmacro second [xs]"},
+    {import_path = "kvist:arr", member = "last", relative = "packages/arr/package.kvist", snippet = "(defmacro last [xs]"},
+    {import_path = "kvist:arr", member = "nth", relative = "packages/arr/package.kvist", snippet = "(defmacro nth [xs index]"},
+    {import_path = "kvist:arr", member = "rest", relative = "packages/arr/package.kvist", snippet = "(defmacro rest [xs]"},
+    {import_path = "kvist:arr", member = "butlast", relative = "packages/arr/package.kvist", snippet = "(defmacro butlast [xs]"},
     {import_path = "kvist:arr", member = "map!", relative = "src/kvist/emit.odin", snippet = "emit_core_map_in_place_helper :: proc"},
+    {import_path = "kvist:arr", member = "map-indexed!", relative = "src/kvist/emit.odin", snippet = "emit_core_map_indexed_in_place_helper :: proc"},
     {import_path = "kvist:arr", member = "filter!", relative = "src/kvist/emit.odin", snippet = "emit_core_filter_in_place_helper :: proc"},
-    {import_path = "kvist:arr", member = "take", relative = "src/kvist/emit.odin", snippet = "emit_core_take_helper :: proc"},
-    {import_path = "kvist:arr", member = "drop", relative = "src/kvist/emit.odin", snippet = "emit_core_drop_helper :: proc"},
+    {import_path = "kvist:arr", member = "remove!", relative = "src/kvist/emit.odin", snippet = "emit_core_remove_in_place_helper :: proc"},
+    {import_path = "kvist:arr", member = "keep!", relative = "src/kvist/emit.odin", snippet = "emit_core_keep_in_place_helper :: proc"},
+    {import_path = "kvist:arr", member = "into", relative = "src/kvist/emit.odin", snippet = "emit_core_into_helper :: proc"},
+    {import_path = "kvist:arr", member = "into!", relative = "src/kvist/emit.odin", snippet = "if head.text == \"arr/into!\""},
+    {import_path = "kvist:arr", member = "interpose", relative = "src/kvist/emit.odin", snippet = "emit_core_interpose_helper :: proc"},
+    {import_path = "kvist:arr", member = "interleave", relative = "src/kvist/emit.odin", snippet = "emit_core_interleave_helper :: proc"},
+    {import_path = "kvist:arr", member = "reverse", relative = "src/kvist/emit.odin", snippet = "emit_core_reverse_helper :: proc"},
+    {import_path = "kvist:arr", member = "reverse!", relative = "src/kvist/emit.odin", snippet = "emit_core_reverse_in_place_helper :: proc"},
+    {import_path = "kvist:arr", member = "shuffle", relative = "src/kvist/emit.odin", snippet = "emit_core_shuffle_helper :: proc"},
+    {import_path = "kvist:arr", member = "shuffle!", relative = "src/kvist/emit.odin", snippet = "emit_core_shuffle_in_place_helper :: proc"},
+    {import_path = "kvist:arr", member = "take", relative = "packages/arr/package.kvist", snippet = "(defmacro take [n xs]"},
+    {import_path = "kvist:arr", member = "drop", relative = "packages/arr/package.kvist", snippet = "(defmacro drop [n xs]"},
+    {import_path = "kvist:arr", member = "drop-last", relative = "packages/arr/package.kvist", snippet = "(defmacro drop-last [n xs]"},
+    {import_path = "kvist:arr", member = "take-while", relative = "packages/arr/package.kvist", snippet = "(defmacro take-while [pred xs]"},
+    {import_path = "kvist:arr", member = "drop-while", relative = "packages/arr/package.kvist", snippet = "(defmacro drop-while [pred xs]"},
+    {import_path = "kvist:arr", member = "split-at", relative = "src/kvist/emit.odin", snippet = "emit_core_split_at_helper :: proc"},
+    {import_path = "kvist:arr", member = "partition", relative = "src/kvist/emit.odin", snippet = "emit_core_partition_helper :: proc"},
+    {import_path = "kvist:arr", member = "partition-all", relative = "src/kvist/emit.odin", snippet = "emit_core_partition_all_helper :: proc"},
+    {import_path = "kvist:arr", member = "partition-by", relative = "src/kvist/emit.odin", snippet = "emit_core_partition_by_helper :: proc"},
+    {import_path = "kvist:arr", member = "index-by", relative = "src/kvist/emit.odin", snippet = "emit_core_index_by_helper :: proc"},
+    {import_path = "kvist:arr", member = "group-by", relative = "src/kvist/emit.odin", snippet = "emit_core_group_by_helper :: proc"},
+    {import_path = "kvist:arr", member = "count-by", relative = "src/kvist/emit.odin", snippet = "emit_core_count_by_helper :: proc"},
+    {import_path = "kvist:arr", member = "sum-by", relative = "src/kvist/emit.odin", snippet = "emit_core_sum_by_helper :: proc"},
+    {import_path = "kvist:arr", member = "frequencies", relative = "src/kvist/emit.odin", snippet = "emit_core_frequencies_helper :: proc"},
+    {import_path = "kvist:arr", member = "distinct", relative = "src/kvist/emit.odin", snippet = "emit_core_distinct_helper :: proc"},
+    {import_path = "kvist:arr", member = "distinct-by", relative = "src/kvist/emit.odin", snippet = "emit_core_distinct_by_helper :: proc"},
+    {import_path = "kvist:arr", member = "take-nth", relative = "packages/arr/package.kvist", snippet = "(proc take-nth [n: int, xs: []$T] -> [dynamic]T #force_inline"},
+    {import_path = "kvist:arr", member = "repeat", relative = "packages/arr/package.kvist", snippet = "(proc repeat [n: int, value: $T] -> [dynamic]T #force_inline"},
+    {import_path = "kvist:arr", member = "repeatedly", relative = "packages/arr/package.kvist", snippet = "(proc repeatedly [n: int, f: (proc [] -> $T)] -> [dynamic]T #force_inline"},
+    {import_path = "kvist:arr", member = "iterate", relative = "packages/arr/package.kvist", snippet = "(proc iterate [n: int, f: (proc [x: $T] -> T), init: T] -> [dynamic]T #force_inline"},
+    {import_path = "kvist:arr", member = "cycle", relative = "packages/arr/package.kvist", snippet = "(proc cycle [n: int, xs: []$T] -> [dynamic]T #force_inline"},
+    {import_path = "kvist:arr", member = "find", relative = "packages/arr/package.kvist", snippet = "(defmacro find [pred xs]"},
+    {import_path = "kvist:arr", member = "some?", relative = "packages/arr/package.kvist", snippet = "(defmacro some? [pred xs]"},
+    {import_path = "kvist:arr", member = "every?", relative = "packages/arr/package.kvist", snippet = "(defmacro every? [pred xs]"},
     {import_path = "kvist:arr", member = "sort", relative = "src/kvist/emit.odin", snippet = "emit_core_sort_helper :: proc"},
     {import_path = "kvist:arr", member = "sort!", relative = "src/kvist/emit.odin", snippet = "emit_core_sort_in_place_helper :: proc"},
-    {import_path = "kvist:str", member = "count", relative = "src/kvist/emit.odin", snippet = "if head.text == \"arr/count\" || head.text == \"str/count\""},
-    {import_path = "kvist:str", member = "get", relative = "src/kvist/emit.odin", snippet = "if head.text == \"arr/get\" || head.text == \"str/get\" || head.text == \"map/get\""},
-    {import_path = "kvist:str", member = "slice", relative = "src/kvist/emit.odin", snippet = "if head.text == \"arr/slice\" || head.text == \"str/slice\""},
-    {import_path = "kvist:str", member = "contains?", relative = "src/kvist/emit.odin", snippet = "if head.text == \"str/contains?\""},
-    {import_path = "kvist:map", member = "empty", relative = "src/kvist/emit.odin", snippet = "if head.text == \"map/empty\""},
-    {import_path = "kvist:map", member = "of", relative = "src/kvist/emit.odin", snippet = "if head.text == \"map/of\""},
-    {import_path = "kvist:map", member = "get", relative = "src/kvist/emit.odin", snippet = "if head.text == \"arr/get\" || head.text == \"str/get\" || head.text == \"map/get\""},
-    {import_path = "kvist:map", member = "contains?", relative = "src/kvist/emit.odin", snippet = "if head.text == \"map/contains?\" || head.text == \"set/contains?\""},
-    {import_path = "kvist:set", member = "empty", relative = "src/kvist/emit.odin", snippet = "if head.text == \"set/empty\""},
-    {import_path = "kvist:set", member = "of", relative = "src/kvist/emit.odin", snippet = "if head.text == \"set/of\""},
-    {import_path = "kvist:set", member = "contains?", relative = "src/kvist/emit.odin", snippet = "if head.text == \"map/contains?\" || head.text == \"set/contains?\""},
-    {import_path = "kvist:set", member = "add!", relative = "src/kvist/emit.odin", snippet = "if head.text == \"set/add!\""},
+    {import_path = "kvist:arr", member = "sort-by", relative = "src/kvist/emit.odin", snippet = "emit_core_sort_by_helper :: proc"},
+    {import_path = "kvist:arr", member = "sort-by!", relative = "src/kvist/emit.odin", snippet = "emit_core_sort_by_in_place_helper :: proc"},
+    {import_path = "kvist:str", member = "count", relative = "packages/str/package.kvist", snippet = "(proc count [s: string] -> int #force_inline"},
+    {import_path = "kvist:str", member = "get", relative = "packages/str/package.kvist", snippet = "(defmacro get [s index]"},
+    {import_path = "kvist:str", member = "slice", relative = "packages/str/package.kvist", snippet = "(defmacro slice [s start & rest]"},
+    {import_path = "kvist:str", member = "contains?", relative = "packages/str/package.kvist", snippet = "(proc contains? [s: string, needle: string] -> bool #force_inline"},
+    {import_path = "kvist:str", member = "split", relative = "packages/str/package.kvist", snippet = "(defmacro split [s separator]"},
+    {import_path = "kvist:str", member = "join", relative = "packages/str/package.kvist", snippet = "(defmacro join [parts separator]"},
+    {import_path = "kvist:str", member = "trim", relative = "packages/str/package.kvist", snippet = "(proc trim [s: string] -> string #force_inline"},
+    {import_path = "kvist:str", member = "trim-prefix", relative = "packages/str/package.kvist", snippet = "(proc trim-prefix [s: string, prefix: string] -> string #force_inline"},
+    {import_path = "kvist:str", member = "trim-suffix", relative = "packages/str/package.kvist", snippet = "(proc trim-suffix [s: string, suffix: string] -> string #force_inline"},
+    {import_path = "kvist:str", member = "starts-with?", relative = "packages/str/package.kvist", snippet = "(proc starts-with? [s: string, prefix: string] -> bool #force_inline"},
+    {import_path = "kvist:str", member = "ends-with?", relative = "packages/str/package.kvist", snippet = "(proc ends-with? [s: string, suffix: string] -> bool #force_inline"},
+    {import_path = "kvist:str", member = "index-of", relative = "packages/str/package.kvist", snippet = "(proc index-of [s: string, needle: string] -> int #force_inline"},
+    {import_path = "kvist:str", member = "last-index-of", relative = "packages/str/package.kvist", snippet = "(proc last-index-of [s: string, needle: string] -> int #force_inline"},
+    {import_path = "kvist:str", member = "replace", relative = "packages/str/package.kvist", snippet = "(defmacro replace [s old new & rest]"},
+    {import_path = "kvist:str", member = "lower", relative = "packages/str/package.kvist", snippet = "(proc lower [s: string] -> string #force_inline"},
+    {import_path = "kvist:str", member = "upper", relative = "packages/str/package.kvist", snippet = "(proc upper [s: string] -> string #force_inline"},
+    {import_path = "kvist:map", member = "empty", relative = "packages/map/package.kvist", snippet = "(defmacro empty [key-type value-type & rest]"},
+    {import_path = "kvist:map", member = "of", relative = "packages/map/package.kvist", snippet = "(defmacro of [key-type value-type entries]"},
+    {import_path = "kvist:map", member = "get", relative = "packages/map/package.kvist", snippet = "(defmacro get [m key & rest]"},
+    {import_path = "kvist:map", member = "contains?", relative = "packages/map/package.kvist", snippet = "(proc contains? [m: map[$K]$V, key: K] -> bool #force_inline"},
+    {import_path = "kvist:map", member = "keys", relative = "packages/map/package.kvist", snippet = "(proc keys [m: map[$K]$V] -> [dynamic]K #force_inline"},
+    {import_path = "kvist:map", member = "vals", relative = "packages/map/package.kvist", snippet = "(proc vals [m: map[$K]$V] -> [dynamic]V #force_inline"},
+    {import_path = "kvist:map", member = "zip", relative = "packages/map/package.kvist", snippet = "(proc zip [ks: []$K, vs: []$V] -> map[K]V #force_inline"},
+    {import_path = "kvist:map", member = "merge", relative = "packages/map/package.kvist", snippet = "(proc merge [lhs: map[$K]$V, rhs: map[$K]$V] -> map[K]V #force_inline"},
+    {import_path = "kvist:map", member = "merge!", relative = "packages/map/package.kvist", snippet = "(defmacro merge! [target source]"},
+    {import_path = "kvist:set", member = "empty", relative = "packages/set/package.kvist", snippet = "(defmacro empty [elem-type & rest]"},
+    {import_path = "kvist:set", member = "of", relative = "packages/set/package.kvist", snippet = "(defmacro of [elem-type values]"},
+    {import_path = "kvist:set", member = "contains?", relative = "packages/set/package.kvist", snippet = "(proc contains? [s: set[$T], value: T] -> bool #force_inline"},
+    {import_path = "kvist:set", member = "add!", relative = "packages/set/package.kvist", snippet = "(defmacro add! [s value]"},
+    {import_path = "kvist:set", member = "remove!", relative = "packages/set/package.kvist", snippet = "(defmacro remove! [s value]"},
+    {import_path = "kvist:set", member = "union", relative = "packages/set/package.kvist", snippet = "(proc union [lhs: set[$T], rhs: set[$T]] -> set[T] #force_inline"},
+    {import_path = "kvist:set", member = "intersection", relative = "packages/set/package.kvist", snippet = "(proc intersection [lhs: set[$T], rhs: set[$T]] -> set[T] #force_inline"},
+    {import_path = "kvist:set", member = "difference", relative = "packages/set/package.kvist", snippet = "(proc difference [lhs: set[$T], rhs: set[$T]] -> set[T] #force_inline"},
+    {import_path = "kvist:set", member = "union!", relative = "packages/set/package.kvist", snippet = "(defmacro union! [target source]"},
+    {import_path = "kvist:set", member = "intersection!", relative = "packages/set/package.kvist", snippet = "(defmacro intersection! [target source]"},
+    {import_path = "kvist:set", member = "difference!", relative = "packages/set/package.kvist", snippet = "(defmacro difference! [target source]"},
+    {import_path = "kvist:set", member = "subset?", relative = "packages/set/package.kvist", snippet = "(proc subset? [lhs: set[$T], rhs: set[$T]] -> bool #force_inline"},
+    {import_path = "kvist:set", member = "superset?", relative = "packages/set/package.kvist", snippet = "(proc superset? [lhs: set[$T], rhs: set[$T]] -> bool #force_inline"},
+    {import_path = "kvist:set", member = "disjoint?", relative = "packages/set/package.kvist", snippet = "(proc disjoint? [lhs: set[$T], rhs: set[$T]] -> bool #force_inline"},
+    {import_path = "kvist:set", member = "add", relative = "packages/set/package.kvist", snippet = "(proc add [s: set[$T], value: T] -> set[T] #force_inline"},
+    {import_path = "kvist:set", member = "remove", relative = "packages/set/package.kvist", snippet = "(proc remove [s: set[$T], value: T] -> set[T] #force_inline"},
     {import_path = "kvist:struct", member = "fields", relative = "src/kvist/emit.odin", snippet = "if head.text == \"struct/fields\" || head.text == \"struct/types\""},
     {import_path = "kvist:struct", member = "types", relative = "src/kvist/emit.odin", snippet = "if head.text == \"struct/fields\" || head.text == \"struct/types\""},
 }
@@ -130,67 +206,9 @@ LANGUAGE_SOURCE_ENTRIES :: []Language_Source_Entry{
     {name = "tap>", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "if head.text == \"tap>\""},
     {name = "->", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "emit_thread_expr :: proc"},
     {name = "->>", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "emit_thread_expr :: proc"},
-    {name = "map", kind = "kvist helper", relative = "src/kvist/emit.odin", snippet = "emit_core_map_helper :: proc"},
-    {name = "filter", kind = "kvist helper", relative = "src/kvist/emit.odin", snippet = "emit_core_filter_helper :: proc"},
-    {name = "remove", kind = "kvist helper", relative = "src/kvist/emit.odin", snippet = "emit_core_remove_helper :: proc"},
-    {name = "reduce", kind = "kvist helper", relative = "src/kvist/emit.odin", snippet = "emit_core_reduce_helper :: proc"},
-    {name = "map-indexed", kind = "kvist helper", relative = "src/kvist/emit.odin", snippet = "emit_core_map_indexed_helper :: proc"},
-    {name = "keep", kind = "kvist helper", relative = "src/kvist/emit.odin", snippet = "emit_core_keep_helper :: proc"},
-    {name = "mapcat", kind = "kvist helper", relative = "src/kvist/emit.odin", snippet = "emit_core_mapcat_helper :: proc"},
-    {name = "concat", kind = "kvist helper", relative = "src/kvist/emit.odin", snippet = "emit_core_concat_helper :: proc"},
-    {name = "merge", kind = "kvist helper", relative = "src/kvist/emit.odin", snippet = "emit_core_merge_helper :: proc"},
-    {name = "merge!", kind = "kvist helper", relative = "src/kvist/emit.odin", snippet = "emit_core_merge_in_place_helper :: proc"},
-    {name = "into", kind = "kvist helper", relative = "src/kvist/emit.odin", snippet = "emit_core_into_helper :: proc"},
-    {name = "into!", kind = "kvist helper", relative = "src/kvist/emit.odin", snippet = "if head.text == \"into!\""},
-    {name = "interpose", kind = "kvist helper", relative = "src/kvist/emit.odin", snippet = "emit_core_interpose_helper :: proc"},
-    {name = "interleave", kind = "kvist helper", relative = "src/kvist/emit.odin", snippet = "emit_core_interleave_helper :: proc"},
-    {name = "reverse", kind = "kvist helper", relative = "src/kvist/emit.odin", snippet = "emit_core_reverse_helper :: proc"},
-    {name = "reverse!", kind = "kvist helper", relative = "src/kvist/emit.odin", snippet = "emit_core_reverse_in_place_helper :: proc"},
-    {name = "shuffle", kind = "kvist helper", relative = "src/kvist/emit.odin", snippet = "emit_core_shuffle_helper :: proc"},
-    {name = "shuffle!", kind = "kvist helper", relative = "src/kvist/emit.odin", snippet = "emit_core_shuffle_in_place_helper :: proc"},
-    {name = "sort", kind = "kvist helper", relative = "src/kvist/emit.odin", snippet = "emit_core_sort_helper :: proc"},
-    {name = "sort!", kind = "kvist helper", relative = "src/kvist/emit.odin", snippet = "emit_core_sort_in_place_helper :: proc"},
-    {name = "sort-by", kind = "kvist helper", relative = "src/kvist/emit.odin", snippet = "emit_core_sort_by_helper :: proc"},
-    {name = "sort-by!", kind = "kvist helper", relative = "src/kvist/emit.odin", snippet = "emit_core_sort_by_in_place_helper :: proc"},
-    {name = "map!", kind = "kvist helper", relative = "src/kvist/emit.odin", snippet = "emit_core_map_in_place_helper :: proc"},
-    {name = "map-indexed!", kind = "kvist helper", relative = "src/kvist/emit.odin", snippet = "emit_core_map_indexed_in_place_helper :: proc"},
-    {name = "filter!", kind = "kvist helper", relative = "src/kvist/emit.odin", snippet = "emit_core_filter_in_place_helper :: proc"},
-    {name = "remove!", kind = "kvist helper", relative = "src/kvist/emit.odin", snippet = "emit_core_remove_in_place_helper :: proc"},
-    {name = "keep!", kind = "kvist helper", relative = "src/kvist/emit.odin", snippet = "emit_core_keep_in_place_helper :: proc"},
-    {name = "split-at", kind = "kvist helper", relative = "src/kvist/emit.odin", snippet = "emit_core_split_at_helper :: proc"},
-    {name = "partition", kind = "kvist helper", relative = "src/kvist/emit.odin", snippet = "emit_core_partition_helper :: proc"},
-    {name = "partition-all", kind = "kvist helper", relative = "src/kvist/emit.odin", snippet = "emit_core_partition_all_helper :: proc"},
-    {name = "partition-by", kind = "kvist helper", relative = "src/kvist/emit.odin", snippet = "emit_core_partition_by_helper :: proc"},
-    {name = "zipmap", kind = "kvist helper", relative = "src/kvist/emit.odin", snippet = "emit_core_zipmap_helper :: proc"},
-    {name = "index-by", kind = "kvist helper", relative = "src/kvist/emit.odin", snippet = "emit_core_index_by_helper :: proc"},
-    {name = "group-by", kind = "kvist helper", relative = "src/kvist/emit.odin", snippet = "emit_core_group_by_helper :: proc"},
-    {name = "frequencies", kind = "kvist helper", relative = "src/kvist/emit.odin", snippet = "emit_core_frequencies_helper :: proc"},
-    {name = "keys", kind = "kvist helper", relative = "src/kvist/emit.odin", snippet = "emit_core_keys_helper :: proc"},
-    {name = "vals", kind = "kvist helper", relative = "src/kvist/emit.odin", snippet = "emit_core_vals_helper :: proc"},
-    {name = "distinct", kind = "kvist helper", relative = "src/kvist/emit.odin", snippet = "emit_core_distinct_helper :: proc"},
-    {name = "distinct-by", kind = "kvist helper", relative = "src/kvist/emit.odin", snippet = "emit_core_distinct_by_helper :: proc"},
-    {name = "range", kind = "kvist helper", relative = "src/kvist/emit.odin", snippet = "emit_core_range_helper :: proc"},
-    {name = "repeat", kind = "kvist helper", relative = "src/kvist/emit.odin", snippet = "emit_core_repeat_helper :: proc"},
-    {name = "repeatedly", kind = "kvist helper", relative = "src/kvist/emit.odin", snippet = "emit_core_repeatedly_helper :: proc"},
-    {name = "iterate", kind = "kvist helper", relative = "src/kvist/emit.odin", snippet = "emit_core_iterate_helper :: proc"},
-    {name = "cycle", kind = "kvist helper", relative = "src/kvist/emit.odin", snippet = "emit_core_cycle_helper :: proc"},
-    {name = "take", kind = "kvist helper", relative = "src/kvist/emit.odin", snippet = "emit_core_take_helper :: proc"},
-    {name = "drop", kind = "kvist helper", relative = "src/kvist/emit.odin", snippet = "emit_core_drop_helper :: proc"},
-    {name = "butlast", kind = "kvist helper", relative = "src/kvist/emit.odin", snippet = "if head.text == \"first\" || head.text == \"second\""},
-    {name = "drop-last", kind = "kvist helper", relative = "src/kvist/emit.odin", snippet = "emit_core_drop_last_helper :: proc"},
-    {name = "take-nth", kind = "kvist helper", relative = "src/kvist/emit.odin", snippet = "emit_core_take_nth_helper :: proc"},
-    {name = "take-while", kind = "kvist helper", relative = "src/kvist/emit.odin", snippet = "emit_core_take_while_helper :: proc"},
-    {name = "drop-while", kind = "kvist helper", relative = "src/kvist/emit.odin", snippet = "emit_core_drop_while_helper :: proc"},
-    {name = "find", kind = "kvist helper", relative = "src/kvist/emit.odin", snippet = "emit_core_find_helper :: proc"},
-    {name = "some?", kind = "kvist helper", relative = "src/kvist/emit.odin", snippet = "emit_core_some_helper :: proc"},
-    {name = "every?", kind = "kvist helper", relative = "src/kvist/emit.odin", snippet = "emit_core_every_helper :: proc"},
-    {name = "first", kind = "kvist helper", relative = "src/kvist/emit.odin", snippet = "if head.text == \"first\" || head.text == \"second\""},
-    {name = "second", kind = "kvist helper", relative = "src/kvist/emit.odin", snippet = "if head.text == \"first\" || head.text == \"second\""},
-    {name = "last", kind = "kvist helper", relative = "src/kvist/emit.odin", snippet = "if head.text == \"first\" || head.text == \"second\""},
-    {name = "nth", kind = "kvist helper", relative = "src/kvist/emit.odin", snippet = "if head.text == \"nth\""},
-    {name = "rest", kind = "kvist helper", relative = "src/kvist/emit.odin", snippet = "if head.text == \"first\" || head.text == \"second\""},
-    {name = "empty?", kind = "kvist helper", relative = "src/kvist/emit.odin", snippet = "if head.text == \"first\" || head.text == \"second\""},
-    {name = "count", kind = "kvist helper", relative = "src/kvist/emit.odin", snippet = "if head.text == \"first\" || head.text == \"second\""},
+    {name = "slice", kind = "kvist helper", relative = "src/kvist/emit.odin", snippet = "if head.text == \"slice\" || head.text == \"arr/slice\""},
+    {name = "empty?", kind = "kvist helper", relative = "src/kvist/emit.odin", snippet = "head.text == \"empty?\" || head.text == \"count\""},
+    {name = "count", kind = "kvist helper", relative = "src/kvist/emit.odin", snippet = "head.text == \"empty?\" || head.text == \"count\""},
     {name = "contains?", kind = "kvist helper", relative = "src/kvist/emit.odin", snippet = "if op == \"in?\" || op == \"contains?\""},
 }
 
@@ -1026,53 +1044,10 @@ editor_package_symbols_append :: proc(builder: ^strings.Builder, seen: ^map[stri
         if !ok {
             continue
         }
-        signature := ""
-        doc := ""
-        switch import_path {
-        case "kvist:arr":
-            switch entry.member {
-            case "count": signature = "(arr/count xs)"; doc = "Count elements in an array, fixed array, or slice."
-            case "empty": signature = "(arr/empty T [capacity])"; doc = "Construct an empty dynamic array, optionally with capacity."
-            case "dynamic": signature = "(arr/dynamic T [v1 v2 ...])"; doc = "Construct a dynamic array from a vector literal."
-            case "fixed": signature = "(arr/fixed T [v1 v2 ...])"; doc = "Construct a fixed array from a vector literal."
-            case "get": signature = "(arr/get xs index)"; doc = "Index into an array-family value."
-            case "slice": signature = "(arr/slice xs start [end])"; doc = "Take a slice view over an array-family value."
-            case "push!": signature = "(arr/push! xs value...)"; doc = "Append one or more values to a dynamic array."
-            case "map": signature = "(arr/map f xs)"; doc = "Map over an array-family input and return an owned dynamic array."
-            case "filter": signature = "(arr/filter pred xs)"; doc = "Filter an array-family input and return an owned dynamic array."
-            case "map!": signature = "(arr/map! f xs)"; doc = "Map in place over a dynamic array."
-            case "filter!": signature = "(arr/filter! pred xs)"; doc = "Filter in place over a dynamic array."
-            case "take": signature = "(arr/take n xs)"; doc = "Take a leading slice or owned result from an array-family input."
-            case "drop": signature = "(arr/drop n xs)"; doc = "Drop a leading prefix from an array-family input."
-            case "sort": signature = "(arr/sort xs)"; doc = "Return a sorted owned array."
-            case "sort!": signature = "(arr/sort! xs)"; doc = "Sort a dynamic array in place."
-            }
-        case "kvist:str":
-            switch entry.member {
-            case "count": signature = "(str/count s)"; doc = "Count characters or bytes in a string."
-            case "get": signature = "(str/get s index)"; doc = "Index into a string."
-            case "slice": signature = "(str/slice s start [end])"; doc = "Take a string slice."
-            case "contains?": signature = "(str/contains? s needle)"; doc = "Return true when the string contains the needle."
-            }
-        case "kvist:map":
-            switch entry.member {
-            case "empty": signature = "(map/empty K V [capacity])"; doc = "Construct an empty map, optionally with capacity."
-            case "of": signature = "(map/of K V {k1 v1 ...})"; doc = "Construct a map from a brace literal."
-            case "get": signature = "(map/get m key [default])"; doc = "Look up a key in a map, optionally with a default."
-            case "contains?": signature = "(map/contains? m key)"; doc = "Return true when the map contains the key."
-            }
-        case "kvist:set":
-            switch entry.member {
-            case "empty": signature = "(set/empty T [capacity])"; doc = "Construct an empty set, optionally with capacity."
-            case "of": signature = "(set/of T [v1 v2 ...])"; doc = "Construct a set from a vector literal."
-            case "contains?": signature = "(set/contains? s value)"; doc = "Return true when the set contains the value."
-            case "add!": signature = "(set/add! s value)"; doc = "Insert a value into a set."
-            }
-        case "kvist:struct":
-            switch entry.member {
-            case "fields": signature = "(struct/fields target)"; doc = "Return source-level field names for a struct type or value."
-            case "types": signature = "(struct/types target)"; doc = "Return source-level field types for a struct type or value."
-            }
+        signature, doc, ok_doc := package_entry_signature_doc(import_path, entry.member)
+        if !ok_doc {
+            delete(file)
+            continue
         }
         doc_lines := symbols_doc_lines_from_string(doc)
         defer delete(doc_lines)
@@ -1083,6 +1058,118 @@ editor_package_symbols_append :: proc(builder: ^strings.Builder, seen: ^map[stri
         symbols_append_unique_records(builder, seen, strings.to_string(temp))
         delete(file)
     }
+}
+
+package_entry_signature_doc :: proc(import_path, member: string) -> (signature, doc: string, ok: bool) {
+    switch import_path {
+    case "kvist:arr":
+        switch member {
+        case "count": return "(arr/count xs)", "Count elements in an array, fixed array, or slice.", true
+        case "empty": return "(arr/empty T [capacity])", "Construct an empty dynamic array, optionally with capacity.", true
+        case "dynamic": return "(arr/dynamic T [v1 v2 ...])", "Construct a dynamic array from a vector literal.", true
+        case "fixed": return "(arr/fixed T [v1 v2 ...])", "Construct a fixed array from a vector literal.", true
+        case "get": return "(arr/get xs index)", "Index into an array-family value.", true
+        case "slice": return "(arr/slice xs start [end])", "Take a slice view over an array-family value.", true
+        case "push!": return "(arr/push! xs value...)", "Append one or more values to a dynamic array.", true
+        case "map": return "(arr/map f xs)", "Map over an array-family input and return an owned dynamic array.", true
+        case "filter": return "(arr/filter pred xs)", "Filter an array-family input and return an owned dynamic array.", true
+        case "remove": return "(arr/remove pred xs)", "Remove matching values from an array-family input and return an owned dynamic array.", true
+        case "map-indexed": return "(arr/map-indexed f xs)", "Map with index over an array-family input and return an owned dynamic array.", true
+        case "keep": return "(arr/keep f xs)", "Keep callback results where the callback returns ok=true.", true
+        case "mapcat": return "(arr/mapcat f xs)", "Map each item to a slice and append the results into one owned dynamic array.", true
+        case "reduce": return "(arr/reduce f init xs)", "Reduce an array-family input to a scalar.", true
+        case "first": return "(arr/first xs)", "Return the first element of an array-family value.", true
+        case "rest": return "(arr/rest xs)", "Return a slice view without the first element.", true
+        case "map!": return "(arr/map! f xs)", "Map in place over a dynamic array.", true
+        case "map-indexed!": return "(arr/map-indexed! f xs)", "Map in place with index over a dynamic array.", true
+        case "filter!": return "(arr/filter! pred xs)", "Filter in place over a dynamic array.", true
+        case "remove!": return "(arr/remove! pred xs)", "Remove matching values in place from a dynamic array.", true
+        case "keep!": return "(arr/keep! f xs)", "Keep callback results in place in a dynamic array.", true
+        case "into": return "(arr/into [dynamic]T xs)", "Copy a collection into a new dynamic array of the requested type.", true
+        case "into!": return "(arr/into! target xs)", "Append one collection into an existing dynamic array.", true
+        case "interpose": return "(arr/interpose sep xs)", "Insert a separator between array elements and return an owned dynamic array.", true
+        case "interleave": return "(arr/interleave xs ys)", "Interleave two arrays into an owned dynamic array.", true
+        case "reverse": return "(arr/reverse xs)", "Return a reversed owned dynamic array.", true
+        case "reverse!": return "(arr/reverse! xs)", "Reverse a dynamic array in place.", true
+        case "shuffle": return "(arr/shuffle pick xs)", "Return a shuffled owned dynamic array.", true
+        case "shuffle!": return "(arr/shuffle! pick xs)", "Shuffle a dynamic array in place.", true
+        case "take": return "(arr/take n xs)", "Take a leading slice or owned result from an array-family input.", true
+        case "drop": return "(arr/drop n xs)", "Drop a leading prefix from an array-family input.", true
+        case "drop-last": return "(arr/drop-last n xs)", "Drop a trailing suffix from an array-family input.", true
+        case "split-at": return "(arr/split-at n xs)", "Split an array-family input into left and right slice views.", true
+        case "partition": return "(arr/partition n xs)", "Partition an array-family input into borrowed chunks.", true
+        case "partition-all": return "(arr/partition-all n xs)", "Partition an array-family input into borrowed chunks, keeping a short tail chunk.", true
+        case "partition-by": return "(arr/partition-by f xs)", "Partition an array-family input when the callback result changes.", true
+        case "index-by": return "(arr/index-by f xs)", "Build a map from key function to original array values.", true
+        case "group-by": return "(arr/group-by f xs)", "Build a map from key function to grouped owned dynamic arrays.", true
+        case "count-by": return "(arr/count-by f xs)", "Count items by key into a map.", true
+        case "sum-by": return "(arr/sum-by key-f value-f xs)", "Sum values by key into a map.", true
+        case "frequencies": return "(arr/frequencies xs)", "Count occurrences of array values into a map.", true
+        case "distinct": return "(arr/distinct xs)", "Return an owned dynamic array with duplicate values removed.", true
+        case "distinct-by": return "(arr/distinct-by f xs)", "Return an owned dynamic array with duplicate callback keys removed.", true
+        case "take-nth": return "(arr/take-nth n xs)", "Sample every nth item into an owned dynamic array.", true
+        case "sort": return "(arr/sort xs)", "Return a sorted owned array.", true
+        case "sort!": return "(arr/sort! xs)", "Sort a dynamic array in place.", true
+        case "sort-by": return "(arr/sort-by f xs)", "Return an owned array sorted by callback key.", true
+        case "sort-by!": return "(arr/sort-by! f xs)", "Sort a dynamic array in place by callback key.", true
+        }
+    case "kvist:str":
+        switch member {
+        case "count": return "(str/count s)", "Count characters or bytes in a string.", true
+        case "get": return "(str/get s index)", "Index into a string.", true
+        case "slice": return "(str/slice s start [end])", "Take a string slice.", true
+        case "contains?": return "(str/contains? s needle)", "Return true when the string contains the needle.", true
+        case "split": return "(str/split s sep)", "Split a string into an owned dynamic array of string slices.", true
+        case "join": return "(str/join parts sep)", "Join a string collection into one owned string.", true
+        case "trim": return "(str/trim s)", "Trim surrounding whitespace from a string slice.", true
+        case "trim-prefix": return "(str/trim-prefix s prefix)", "Trim a prefix from a string slice when present.", true
+        case "trim-suffix": return "(str/trim-suffix s suffix)", "Trim a suffix from a string slice when present.", true
+        case "starts-with?": return "(str/starts-with? s prefix)", "Return true when the string starts with the prefix.", true
+        case "ends-with?": return "(str/ends-with? s suffix)", "Return true when the string ends with the suffix.", true
+        case "index-of": return "(str/index-of s needle)", "Return the byte index of the first matching substring, or -1.", true
+        case "last-index-of": return "(str/last-index-of s needle)", "Return the byte index of the last matching substring, or -1.", true
+        case "replace": return "(str/replace s old new [count])", "Return an owned string with substring replacements applied.", true
+        case "lower": return "(str/lower s)", "Return an owned lowercased string.", true
+        case "upper": return "(str/upper s)", "Return an owned uppercased string.", true
+        }
+    case "kvist:map":
+        switch member {
+        case "empty": return "(map/empty K V [capacity])", "Construct an empty map, optionally with capacity.", true
+        case "of": return "(map/of K V {k1 v1 ...})", "Construct a map from a brace literal.", true
+        case "get": return "(map/get m key [default])", "Look up a key in a map, optionally with a default.", true
+        case "contains?": return "(map/contains? m key)", "Return true when the map contains the key.", true
+        case "keys": return "(map/keys m)", "Return an owned dynamic array of map keys.", true
+        case "vals": return "(map/vals m)", "Return an owned dynamic array of map values.", true
+        case "zip": return "(map/zip keys vals)", "Build a map from key and value collections.", true
+        case "merge": return "(map/merge lhs rhs)", "Return an owned map containing entries from both inputs.", true
+        case "merge!": return "(map/merge! target source)", "Insert all entries from source into target in place.", true
+        }
+    case "kvist:set":
+        switch member {
+        case "empty": return "(set/empty T [capacity])", "Construct an empty set, optionally with capacity.", true
+        case "of": return "(set/of T [v1 v2 ...])", "Construct a set from a vector literal.", true
+        case "contains?": return "(set/contains? s value)", "Return true when the set contains the value.", true
+        case "union": return "(set/union lhs rhs)", "Return an owned set containing values from both inputs.", true
+        case "intersection": return "(set/intersection lhs rhs)", "Return an owned set containing values present in both inputs.", true
+        case "difference": return "(set/difference lhs rhs)", "Return an owned set containing values from lhs not present in rhs.", true
+        case "union!": return "(set/union! target source)", "Insert all values from source into target in place.", true
+        case "intersection!": return "(set/intersection! target source)", "Remove values from target that are not present in source.", true
+        case "difference!": return "(set/difference! target source)", "Remove every value from target that is present in source.", true
+        case "subset?": return "(set/subset? lhs rhs)", "Return true when every lhs value is present in rhs.", true
+        case "superset?": return "(set/superset? lhs rhs)", "Return true when lhs contains every value from rhs.", true
+        case "disjoint?": return "(set/disjoint? lhs rhs)", "Return true when the sets share no values.", true
+        case "add": return "(set/add s value)", "Return an owned set with the value inserted.", true
+        case "add!": return "(set/add! s value)", "Insert a value into a set.", true
+        case "remove": return "(set/remove s value)", "Return an owned set with the value removed.", true
+        case "remove!": return "(set/remove! s value)", "Remove a value from a set in place.", true
+        }
+    case "kvist:struct":
+        switch member {
+        case "fields": return "(struct/fields target)", "Return source-level field names for a struct type or value.", true
+        case "types": return "(struct/types target)", "Return source-level field types for a struct type or value.", true
+        }
+    }
+    return "", "", false
 }
 
 editor_language_symbols_append :: proc(builder: ^strings.Builder, seen: ^map[string]bool, repo_root: string) {
@@ -1375,49 +1462,19 @@ package_symbols_write_entry :: proc(builder: ^strings.Builder, alias, import_pat
 }
 
 package_symbols_append :: proc(builder: ^strings.Builder, import_path, alias: string) -> bool {
-    switch import_path {
-    case "kvist:arr":
-        package_symbols_write_entry(builder, alias, import_path, "count", "(arr/count xs)", "Count elements in an array, fixed array, or slice.")
-        package_symbols_write_entry(builder, alias, import_path, "empty", "(arr/empty T [capacity])", "Construct an empty dynamic array, optionally with capacity.")
-        package_symbols_write_entry(builder, alias, import_path, "dynamic", "(arr/dynamic T [v1 v2 ...])", "Construct a dynamic array from a vector literal.")
-        package_symbols_write_entry(builder, alias, import_path, "fixed", "(arr/fixed T [v1 v2 ...])", "Construct a fixed array from a vector literal.")
-        package_symbols_write_entry(builder, alias, import_path, "get", "(arr/get xs index)", "Index into an array-family value.")
-        package_symbols_write_entry(builder, alias, import_path, "slice", "(arr/slice xs start [end])", "Take a slice view over an array-family value.")
-        package_symbols_write_entry(builder, alias, import_path, "push!", "(arr/push! xs value...)", "Append one or more values to a dynamic array.")
-        package_symbols_write_entry(builder, alias, import_path, "map", "(arr/map f xs)", "Map over an array-family input and return an owned dynamic array.")
-        package_symbols_write_entry(builder, alias, import_path, "filter", "(arr/filter pred xs)", "Filter an array-family input and return an owned dynamic array.")
-        package_symbols_write_entry(builder, alias, import_path, "map!", "(arr/map! f xs)", "Map in place over a dynamic array.")
-        package_symbols_write_entry(builder, alias, import_path, "filter!", "(arr/filter! pred xs)", "Filter in place over a dynamic array.")
-        package_symbols_write_entry(builder, alias, import_path, "take", "(arr/take n xs)", "Take a leading slice or owned result from an array-family input.")
-        package_symbols_write_entry(builder, alias, import_path, "drop", "(arr/drop n xs)", "Drop a leading prefix from an array-family input.")
-        package_symbols_write_entry(builder, alias, import_path, "sort", "(arr/sort xs)", "Return a sorted owned array.")
-        package_symbols_write_entry(builder, alias, import_path, "sort!", "(arr/sort! xs)", "Sort a dynamic array in place.")
-        return true
-    case "kvist:str":
-        package_symbols_write_entry(builder, alias, import_path, "count", "(str/count s)", "Count characters or bytes in a string.")
-        package_symbols_write_entry(builder, alias, import_path, "get", "(str/get s index)", "Index into a string.")
-        package_symbols_write_entry(builder, alias, import_path, "slice", "(str/slice s start [end])", "Take a string slice.")
-        package_symbols_write_entry(builder, alias, import_path, "contains?", "(str/contains? s needle)", "Return true when the string contains the needle.")
-        return true
-    case "kvist:map":
-        package_symbols_write_entry(builder, alias, import_path, "empty", "(map/empty K V [capacity])", "Construct an empty map, optionally with capacity.")
-        package_symbols_write_entry(builder, alias, import_path, "of", "(map/of K V {k1 v1 ...})", "Construct a map from a brace literal.")
-        package_symbols_write_entry(builder, alias, import_path, "get", "(map/get m key [default])", "Look up a key in a map, optionally with a default.")
-        package_symbols_write_entry(builder, alias, import_path, "contains?", "(map/contains? m key)", "Return true when the map contains the key.")
-        return true
-    case "kvist:set":
-        package_symbols_write_entry(builder, alias, import_path, "empty", "(set/empty T [capacity])", "Construct an empty set, optionally with capacity.")
-        package_symbols_write_entry(builder, alias, import_path, "of", "(set/of T [v1 v2 ...])", "Construct a set from a vector literal.")
-        package_symbols_write_entry(builder, alias, import_path, "contains?", "(set/contains? s value)", "Return true when the set contains the value.")
-        package_symbols_write_entry(builder, alias, import_path, "add!", "(set/add! s value)", "Insert a value into a set.")
-        return true
-    case "kvist:struct":
-        package_symbols_write_entry(builder, alias, import_path, "fields", "(struct/fields target)", "Return source-level field names for a struct type or value.")
-        package_symbols_write_entry(builder, alias, import_path, "types", "(struct/types target)", "Return source-level field types for a struct type or value.")
-        return true
-    case:
-        return false
+    wrote_any := false
+    for entry in PACKAGE_SOURCE_ENTRIES {
+        if entry.import_path != import_path {
+            continue
+        }
+        signature, doc, ok := package_entry_signature_doc(import_path, entry.member)
+        if !ok {
+            continue
+        }
+        package_symbols_write_entry(builder, alias, import_path, entry.member, signature, doc)
+        wrote_any = true
     }
+    return wrote_any
 }
 
 package_symbols_source :: proc(import_path, alias: string) -> (output: string, ok: bool) {

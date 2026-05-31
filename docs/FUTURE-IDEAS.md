@@ -42,6 +42,52 @@ language/runtime implementation prematurely.
   should be close at hand without third-party dependency hunting.
 - Use the Kvist library/vendor layer where the user-facing surface is clearly
   better than raw host calls, while still lowering to readable Odin.
+- Keep these packages shipped with the compiler/toolchain, but only pull them
+  into a built program when the user imports them explicitly.
+- The goal is "available by default", not "automatically linked".
+
+### General-Purpose Packages To Explore
+
+- `dev`
+  - scratch-state helpers
+  - simple file-backed development persistence
+  - leak/debug helpers later
+- `path`
+  - common path composition and inspection helpers
+  - a quieter Kvist surface over routine Odin path/filepath use
+- `json`
+  - a thinner Kvist surface for common marshal/unmarshal cases
+  - only if it materially improves ordinary source without hiding ownership
+- `io`
+  - straightforward text/bytes/file flows
+  - result/error handling that stays explicit
+- `time`
+  - date/time helpers that are common in application code
+- `url`
+  - parsing, path, and query helpers
+- `html`
+  - rendering and response helpers that complement `kvist:hiccup`
+- `http`
+  - a broader batteries-included server/client story if that becomes a real
+    direction
+
+These should all be judged by the same bar:
+
+- better user-facing Kvist source
+- direct, readable Odin lowering
+- no hidden runtime layer
+- no automatic inclusion unless imported
+
+### Collection Composition
+
+- Keep a transducer-style path open for collection pipelines if it can compile
+  to one plain Odin loop and one owned result.
+- This is only interesting if it reduces the eager pipeline allocation cost
+  without introducing a hidden interpreter, lazy seq runtime, or persistent
+  collection system.
+- The current eager helper surface should remain simple and direct until a
+  transducer design is concrete enough to prove that it preserves readable
+  lowering and explicit ownership.
 
 ### Data DSLs
 

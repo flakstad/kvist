@@ -175,13 +175,13 @@ Run CLI and Emacs-tooling integration checks with:
 Generate a scratch runner for one selected form with:
 
 ```sh
-./kvist eval examples/higher-order.kvist '(reduce add 0 (new []int [1 2 3]))'
+./kvist eval examples/higher-order.kvist '(arr/reduce add 0 (new []int [1 2 3]))'
 ```
 
 Inspect the generated scratch Odin without running it with:
 
 ```sh
-./kvist expand examples/higher-order.kvist '(reduce add 0 (new []int [1 2 3]))'
+./kvist expand examples/higher-order.kvist '(arr/reduce add 0 (new []int [1 2 3]))'
 ```
 
 Inspect frontend macro-style expansion before Odin lowering with:
@@ -233,6 +233,12 @@ Odin, run:
 
 ```sh
 ./scripts/bench_closure_helpers.sh
+
+For the focused intrinsic-vs-source-backed `kvist:arr` comparison against
+direct Odin, run:
+
+```sh
+./scripts/bench_source_backed_arr.sh
 ```
 
 The compiler implementation is in Odin under `src/kvist`; the CLI entry point
@@ -477,7 +483,7 @@ Person :: struct {
 Maps, dynamic arrays, compound literals, and calls:
 
 ```clojure
-(defn route-get [(router ^Router) (pattern string) (handler Handler)]
+(defn route-get [router: ^Router, pattern: string, handler: Handler]
   (route-add
     router
     .Get
@@ -502,9 +508,9 @@ route_get :: proc(router: ^Router, pattern: string, handler: Handler) {
 Slices, loops, and mutation:
 
 ```clojure
-(defn sum [(xs []int)] -> int
+(defn sum [xs: []int] -> int
   (let [total 0]
-    (for-in x xs
+    (for [x xs]
       (set! total (+ total x)))
     total))
 ```
@@ -512,9 +518,9 @@ Slices, loops, and mutation:
 Named and multi-value returns:
 
 ```clojure
-(defn query-get [(url URL) (key string)] -> (val string, ok bool) #optional_ok
+(defn query-get [url: URL, key: string] -> [val: string, ok: bool] #optional_ok
   (let [q url.query]
-    (for-in entry (#force_inline query-iter (& q))
+    (for [entry (#force_inline query-iter (& q))]
       (when (== entry.key key)
         (return entry.value true)))))
 ```
@@ -522,29 +528,28 @@ Named and multi-value returns:
 This is one place where explicit `return` remains useful. Implicit final return
 is for the common final-expression case, not a ban on early returns.
 
-`or_return` should probably stay as an Odin postfix operator:
+Kvist now keeps Odin-style early-exit result handling explicit:
 
 ```clojure
-(defn decoded [(url URL) (key string) (allocator runtime.Allocator)] -> (val string, ok bool)
-  (let [s (or-return (query-get url key))]
+(defn decoded [url: URL, key: string, allocator: runtime.Allocator] -> [val: string, ok: bool]
+  (let [[s ok] (query-get url key) or-return]
     (net.percent-decode s allocator)))
 ```
 
-or, if postfix forms prove clearer:
+For optional-ok defaults, use the expression form `or-else`:
 
 ```clojure
-(let [s (query-get url key or-return)]
-  ...)
+(or-else (query-get url key) "missing")
 ```
 
-This syntax is unsettled. The important point is that `or_return` is a core Odin
-control-flow feature and should not be hidden behind a fake exception/result
+The important point is still the same: Odin-style result control flow should
+stay visible in source, not be hidden behind a fake exception/result
 abstraction.
 
 Pointers should keep Odin's spelling:
 
 ```clojure
-(defn bump [(x ^int)]
+(defn bump [x: ^int]
   (set! (^ x) (+ (^ x) 1)))
 ```
 
@@ -557,26 +562,12 @@ Address-of also needs a readable spelling:
 Switch:
 
 ```clojure
-(defn method-string [(m Method)] -> string #no_bounds_check
+(defn method-string [m: Method] -> string #no_bounds_check
   (switch m
     .Get "GET"
     .Post "POST"
     .Delete "DELETE"
     :else ""))
-```
-
-Type switches and partial switches need to preserve Odin's syntax closely:
-
-```clojure
-(switch-in t rline.target
-  string (io.write-string w t)
-  URL    (request-path-write w t))
-
-(#partial switch mode
-  .Flush
-  (do
-    (assert (not rw.ended))
-    (write-chunk b (slice rw.buf))))
 ```
 
 Anonymous procs and callbacks:
@@ -586,7 +577,7 @@ Anonymous procs and callbacks:
   (& router)
   "/users/(%w+)/comments/(%d+)"
   (http.handler
-    (proc [(req ^http.Request) (res ^http.Response)]
+    (proc [req: ^http.Request, res: ^http.Response]
       (http.respond-plain
         res
         (fmt.tprintf "user %s, comment: %s"
@@ -601,13 +592,13 @@ everything into parens:
 
 ```clojure
 @(private)
-(defn route-add [(router ^Router) (method Method) (route Route)]
+(defn route-add [router: ^Router, method: Method, route: Route]
   (when (not (in? router.routes method))
     (set! (get router.routes method)
           (make [dynamic]Route router.allocator)))
   (append (& (get router.routes method)) route))
 
-(defn headers-count [(h Headers)] -> int #force_inline
+(defn headers-count [h: Headers] -> int #force_inline
   (len h._kv))
 
 (let [entry (#force_inline query-iter (& q))]
@@ -620,7 +611,7 @@ obvious.
 `defer` and conditional defer:
 
 ```clojure
-(defn header-parse [(headers ^Headers) (line string) (allocator runtime.Allocator)] -> (key string, ok bool)
+(defn header-parse [headers: ^Headers, line: string, allocator: runtime.Allocator] -> [key: string, ok: bool]
   (let [value (strings.trim-space (slice line (+ colon 1)))
         key   (sanitize-key (^ headers) (slice line 0 colon))]
     (defer
@@ -633,7 +624,7 @@ obvious.
 Conditionals as expressions when useful:
 
 ```clojure
-(defn classify [(n int)] -> string
+(defn classify [n: int] -> string
   (if (< n 0)
     "negative"
     (if (== n 0)
@@ -649,7 +640,7 @@ Foreign_Handle :: distinct rawptr
 @(link_name = "foreign_call")
 foreign_call :: proc(handle: Foreign_Handle) ---
 
-(defn call [(handle Foreign_Handle)]
+(defn call [handle: Foreign_Handle]
   (foreign_call handle))
 ```
 
@@ -704,44 +695,93 @@ foreign_call :: proc(handle: Foreign_Handle) ---
 - `(if test then else)`
 - `(when test body...)`
 - `(for test body...)`
-- `(each [name collection] body...)` and `(each [key value map] body...)`
+- `(for [name collection] body...)` and `(for [key value map] body...)`
+- `(each ...)` remains as a legacy loop alias for now and should disappear over time
 - `(do body...)`
 - `(new Type literal)` typed composite literals
 - `(make Type args...)` runtime/allocator-backed construction
 - `(arr/empty elem-type [capacity])`, `(arr/dynamic elem-type [items...])`, `(arr/fixed elem-type [items...])`
 - `(map/empty key-type value-type [capacity])`, `(map/of key-type value-type {:k v ...})`
 - `(set/empty elem-type [capacity])`, `(set/of elem-type [a b c])`
-- `(map f xs)`, `(filter pred xs)`, `(reduce f init xs)`, `(take n xs)`,
-  `(drop n xs)`, `(take-while pred xs)`, `(drop-while pred xs)`,
-  `(find pred xs)`, `(some? pred xs)`, `(every? pred xs)`, `(first xs)`,
-  `(second xs)`, `(last xs)`, `(nth xs n)`, `(rest xs)`, `(empty? xs)`,
-  `(remove pred xs)`, `(map-indexed f xs)`, `(keep f xs)`, `(mapcat f xs)`,
-  `(concat xs ys)`, `(merge a b)`, `(into [dynamic]T xs)`, `(interpose sep xs)`,
-  `(interleave xs ys)`, `(reverse xs)`, `(shuffle pick xs)`, `(sort xs)`, `(sort-by f xs)`,
-  `(sort-by :field xs)`, mutating `(reverse! xs)`, `(shuffle! pick xs)`,
-  `(sort! xs)`, `(sort-by! f xs)`, `(sort-by! :field xs)`, `(map! f xs)`,
-  `(map-indexed! f xs)`, `(filter! pred xs)`, `(filter! :field xs)`,
-  `(remove! pred xs)`, `(remove! :field xs)`, `(keep! f xs)`,
-  `(into! target xs)`, `(merge! target source)`,
-  `(split-at n xs)`,
-  `(partition n xs)`, `(partition-all n xs)`, `(partition-by f xs)`,
-  `(partition-by :field xs)`, `(zipmap keys vals)`, `(index-by f xs)`,
-  `(index-by :field xs)`, `(group-by f xs)`, `(group-by :field xs)`,
-  `(count-by f xs)`, `(count-by :field xs)`, `(sum-by key-f value-f xs)`,
-  `(sum-by :key-field :value-field xs)`, `(frequencies xs)`, `(keys m)`,
-  `(vals m)`, `(distinct xs)`, `(distinct-by f xs)`,
-  and `(distinct-by :field xs)`, plus bounded producers
-  `(range ...)`, `(repeat n x)`, `(repeatedly n f)`, `(iterate n f x)`,
-  and `(cycle n xs)`
+- `str/*` helpers such as `(str/count s)`, `(str/get s i)`, `(str/slice s start [end])`,
+  `(str/contains? s needle)`, `(str/split s sep)`, `(str/join parts sep)`,
+  `(str/trim s)`, `(str/trim-prefix s prefix)`, `(str/trim-suffix s suffix)`,
+  `(str/starts-with? s prefix)`, `(str/ends-with? s suffix)`,
+  `(str/index-of s needle)`, `(str/last-index-of s needle)`,
+  `(str/replace s old new [count])`, `(str/lower s)`, `(str/upper s)`
+  - `kvist:str` is now mostly source-backed: `str/count`, `str/get`,
+    `str/slice`, `str/contains?`, `str/split`, `str/join`, `str/trim`,
+    `str/trim-prefix`, `str/trim-suffix`, `str/starts-with?`,
+    `str/ends-with?`, `str/index-of`, `str/last-index-of`, `str/replace`,
+    `str/lower`, and `str/upper` come from shipped `.kvist` source and still
+    lower to direct Odin indexing, slicing, or `core:strings` calls
+- `set/*` helpers such as `(set/contains? s value)`, `(set/union lhs rhs)`,
+  `(set/intersection lhs rhs)`, `(set/difference lhs rhs)`,
+  `(set/union! target source)`, `(set/intersection! target source)`,
+  `(set/difference! target source)`,
+  `(set/subset? lhs rhs)`, `(set/superset? lhs rhs)`,
+  `(set/disjoint? lhs rhs)`, `(set/add s value)`, `(set/add! s value)`,
+  `(set/remove s value)`, `(set/remove! s value)`
+  - `kvist:set` is now mostly source-backed: `set/empty`, `set/of`,
+    `set/contains?`, `set/union`, `set/intersection`, `set/difference`,
+    `set/union!`, `set/intersection!`, `set/difference!`, `set/subset?`,
+    `set/superset?`, `set/disjoint?`, `set/add`, `set/add!`, `set/remove`,
+    and `set/remove!` come from shipped `.kvist` source and lower to direct
+    loops, direct constructors, or direct in-place mutations over `map[T]bool`
+- `map/*` helpers such as `(map/get m key [default])`, `(map/contains? m key)`,
+  `(map/keys m)`, `(map/vals m)`, `(map/zip keys vals)`, `(map/merge lhs rhs)`,
+  `(map/merge! target source)`
+  - `kvist:map` is now mostly source-backed: `map/empty`, `map/of`, `map/get`,
+    `map/contains?`, `map/keys`, `map/vals`, `map/zip`, `map/merge`, and
+    `map/merge!` come from shipped `.kvist` source and lower to direct
+    constructors, membership checks, loops with explicit preallocation, raw
+    indexing, optional-default helpers, or direct in-place mutation
+- `arr/*` sequence helpers such as `(arr/map f xs)`, `(arr/filter pred xs)`,
+  `(arr/reduce f init xs)`, `(arr/take n xs)`, `(arr/drop n xs)`,
+  `(arr/take-while pred xs)`, `(arr/drop-while pred xs)`, `(arr/find pred xs)`,
+  `(arr/some? pred xs)`, `(arr/every? pred xs)`, `(arr/first xs)`,
+  `(arr/second xs)`, `(arr/last xs)`, `(arr/nth xs n)`, `(arr/rest xs)`,
+  `(arr/remove pred xs)`, `(arr/map-indexed f xs)`, `(arr/keep f xs)`,
+  `(arr/mapcat f xs)`, `(arr/into [dynamic]T xs)`, `(arr/interpose sep xs)`,
+  `(arr/interleave xs ys)`, `(arr/reverse xs)`, `(arr/shuffle pick xs)`,
+  `(arr/sort xs)`, `(arr/sort-by f xs)`, `(arr/sort-by :field xs)`, mutating
+  `(arr/reverse! xs)`, `(arr/shuffle! pick xs)`, `(arr/sort! xs)`,
+  `(arr/sort-by! f xs)`, `(arr/sort-by! :field xs)`, `(arr/map! f xs)`,
+  `(arr/map-indexed! f xs)`, `(arr/filter! pred xs)`, `(arr/filter! :field xs)`,
+  `(arr/remove! pred xs)`, `(arr/remove! :field xs)`, `(arr/keep! f xs)`,
+  `(arr/into! target xs)`, `(arr/split-at n xs)`, `(arr/partition n xs)`,
+  `(arr/partition-all n xs)`, `(arr/partition-by f xs)`,
+  `(arr/partition-by :field xs)`, `(arr/index-by f xs)`,
+  `(arr/index-by :field xs)`, `(arr/group-by f xs)`, `(arr/group-by :field xs)`,
+  `(arr/count-by f xs)`, `(arr/count-by :field xs)`,
+  `(arr/sum-by key-f value-f xs)`, `(arr/sum-by :key-field :value-field xs)`,
+  `(arr/frequencies xs)`, `(arr/distinct xs)`, `(arr/distinct-by f xs)`,
+  `(arr/distinct-by :field xs)`, plus bounded producers `(arr/range ...)`,
+  `(arr/repeat n x)`, `(arr/repeatedly n f)`, `(arr/iterate n f x)`, and
+  `(arr/cycle n xs)`
+  - `kvist:arr` is now slightly source-backed: `arr/count`, `arr/get`,
+    `arr/slice`, `arr/first`, `arr/second`, `arr/nth`, `arr/last`,
+    `arr/rest`, `arr/take`, `arr/drop`, `arr/drop-last`, `arr/butlast`,
+    `arr/range`, `arr/take-nth`, `arr/repeat`, `arr/repeatedly`,
+    `arr/iterate`, `arr/cycle`, the ordinary proc-callback path for
+    `arr/map`, `arr/filter`, `arr/remove`, and `arr/reduce`, and the ordinary
+    proc-predicate path for `arr/take-while`, `arr/drop-while`, `arr/find`,
+    `arr/some?`, and `arr/every?`
+    come from shipped `.kvist` macros and still lower to the same direct
+    indexing/slicing Odin; the broader sequence helper surface remains
+    compiler-lowered for now
+- map helpers `(map/merge a b)`, `(map/merge! target source)`,
+  `(map/zip keys vals)`, `(map/keys m)`, and `(map/vals m)`
 - file-backed dev helpers `(slurp path)` and `(spit path data)`, which require
   an explicit `core:os` import and lower directly to Odin core calls; JSON
   marshal/unmarshal stays explicit through `core:encoding/json`
 - `(tap> value)` and `(tap> :label value)` for explicit stdout inspection;
   require `core:fmt` and return the tapped value
-- keywords can stand in for field callbacks in those helpers, e.g. `(map :name users)`,
-  `(index-by :id users)`, `(group-by :status users)`, `(count-by :status users)`,
-  `(sum-by :region :amount orders)`, `(partition-by :status users)`,
-  `(sort-by :age users)`, and `(filter :verified users)`
+- keywords can stand in for field callbacks in those helpers, e.g. `(arr/map :name users)`,
+  `(arr/index-by :id users)`, `(arr/group-by :status users)`,
+  `(arr/count-by :status users)`, `(arr/sum-by :region :amount orders)`,
+  `(arr/partition-by :status users)`, `(arr/sort-by :age users)`, and
+  `(arr/filter :verified users)`
 - `(:field value)`, `(get value key)`, `(get map key default)`, `(-> value steps...)`, and `(->> value steps...)`
 - `(type Head Arg...)` for Odin polymorphic type instantiation in type/value positions
 - `(^ ptr)` and `(& place)` as compatibility sugar; prefer `(deref ptr)` and
@@ -753,6 +793,10 @@ foreign_call :: proc(handle: Foreign_Handle) ---
 Current pragmatic Odin conveniences beyond the original core target include
 `(in? collection key)`, `(contains? collection key)`, `(count xs)`, `(break)`,
 `(continue)`, and directive expression wrappers like `(#force_inline call arg)`.
+
+For collection helpers, the remaining intentional bare kernel is small:
+`slice`, `get`, `empty?`, `count`, and `contains?`. Other collection operations
+should be package-qualified under `arr/`, `map/`, `str/`, or `set/`.
 
 This is deliberately incomplete. Add only forms that map cleanly to Odin.
 

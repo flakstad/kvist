@@ -46,14 +46,14 @@
 (defn map-bang-score [] -> int
   (let [orders (sample-orders)]
     (defer (delete orders))
-    (map! settle-order orders)
-    (order-score (slice orders))))
+    (arr/map! settle-order orders)
+    (order-score (arr/slice orders))))
 
 (defn filter-bang-count [] -> int
   (let [orders (sample-orders)]
     (defer (delete orders))
-    (map! settle-order orders)
-    (filter! settled? orders)
+    (arr/map! settle-order orders)
+    (arr/filter! settled? orders)
     (count orders)))
 
 (defn pointer-update-score [] -> int
@@ -61,7 +61,7 @@
     (defer (delete orders))
     (each [_ idx orders]
       (settle-order! (addr (get orders idx))))
-    (order-score (slice orders))))
+    (order-score (arr/slice orders))))
 
 (defn main []
   (println (map-bang-score))
@@ -69,11 +69,11 @@
   (println (pointer-update-score)))
 
 (comment
-  ;; map! replaces each struct value with the returned updated struct.
+  ;; arr/map! replaces each struct value with the returned updated struct.
   (map-bang-score)
   ;; => 513
 
-  ;; filter! compacts a dynamic array after mutation.
+  ;; arr/filter! compacts a dynamic array after mutation.
   (filter-bang-count)
   ;; => 3
 

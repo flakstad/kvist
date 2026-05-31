@@ -32,7 +32,7 @@ of captured callbacks for compiler-known non-escaping helper sites such as
 
 Questions:
 
-- whether this should widen beyond `map` / `map!`
+- whether this should widen beyond the current helper subset
 - whether more than one captured outer local should be supported
 - how far to take captured callbacks before explicit context should remain the
   preferred style
@@ -55,6 +55,10 @@ current language direction:
 - helper naming
 - ownership conventions
 - what belongs in the preferred user-facing surface vs raw Odin interop
+- which helpers belong in the preferred user-facing surface
+- moving as much package behavior as possible into ordinary `.kvist` source
+  macros/functions rather than compiler intrinsics, so long as the lowered Odin
+  remains equally direct and does not add indirection or unnecessary allocation
 
 ### 4. Future DSL Work
 

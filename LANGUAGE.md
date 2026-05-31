@@ -375,17 +375,17 @@ leaving the expression language.
 
 ## Top-Level Forms
 
-The planned v0.1 top-level forms are:
+Current top-level source forms are:
 
 - `package`
 - `import`
 - `defconst`
 - `defvar`
-- `struct`
 - `defstruct`
-- `enum`
-- `union`
-- `proc`
+- `defenum`
+- `defunion`
+- `defn`
+- `defmacro`
 - `odin`
 
 ### `defconst`
@@ -660,9 +660,11 @@ The parser should recognize these as special forms rather than ordinary calls:
 - `import`
 - `defconst`
 - `defvar`
-- `struct`
-- `enum`
-- `union`
+- `defstruct`
+- `defenum`
+- `defunion`
+- `defn`
+- `defmacro`
 - `proc`
 - `odin`
 - `let`
@@ -727,32 +729,27 @@ This keeps field access semantically distinct from function invocation and
 avoids pretending keywords are first-class callable lookup functions in the
 Clojure sense.
 
-### `proc` by shape
+### `proc` by role
 
-`proc` is intentionally allowed in more than one position, but only in a
-controlled way.
+`proc` is intentionally kept narrow.
 
-Top-level declaration shape:
-
-```clojure
-(defn add [a: int, b: int] -> int
-  (+ a b))
-```
-
-Expression literal shape:
+Procedure literal shape:
 
 ```clojure
 (proc [x: int] -> int
   (+ x 1))
 ```
 
-The parser should distinguish these by shape:
+Procedure type shape:
 
-- `(proc name [args...] ...)` => declaration form
-- `(proc [args...] ...)` => procedure literal form
+```clojure
+(defconst Step (proc [int] -> int))
+```
+
+Top-level function declarations use `defn`, not `proc`.
 
 There is no need to make `proc` a generic callable head with more ad hoc
-variants in v0.1.
+variants in the source language.
 
 ### Future macro expansion boundary
 
@@ -1320,7 +1317,7 @@ Higher-order procedures are supported because Odin procedure values are
 first-class. Kvist should expose that directly, but honestly:
 
 - anonymous procedures are still the baseline
-- first-cut captured callbacks now work only for a narrow, compiler-known,
+- captured callbacks currently work only for a narrow, compiler-known,
   non-escaping subset
 - anything outside that subset still needs explicit context
 

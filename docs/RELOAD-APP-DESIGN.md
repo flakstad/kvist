@@ -179,6 +179,157 @@ Examples:
 The language surface does not need to force a single exact transient-state
 mechanism yet. It only needs to make the durable root explicit.
 
+## Current State-Shape Rules
+
+Today the safe rule is:
+
+- change behavior freely
+- keep durable `defstate` shape stable during a resident reload session
+- restart the app when changing durable state layout
+
+The current runtime validates:
+
+- state size
+- state alignment
+
+That is enough to reject many incompatible reloads, but it is not enough to
+prove semantic compatibility. Two layouts can still be logically different even
+when size and alignment happen to match.
+
+So the product message should stay explicit:
+
+- code changes are the intended smooth reload path
+- durable state-schema changes are not transparently migrated yet
+
+## Proposed State Schema Design
+
+The next real step is to make durable-state compatibility explicit on
+`defstate`, rather than relying only on raw layout checks.
+
+The shape should stay close to the current source form:
+
+```clojure
+(defstate App_State
+  {:world (ptr World_State)
+   :ui (ptr UI_State)
+   :assets (ptr Asset_Cache)}
+  {:run run
+   :version "3"
+   :migrate migrate
+   :on-schema-change :warn-reset
+   :init init
+   :on-load on-load
+   :on-unload on-unload})
+```
+
+Meaning:
+
+- `:version`
+  - durable-state schema version, not just app display version
+- `:migrate`
+  - explicit migration hook for compatible upgrade paths
+- `:on-schema-change`
+  - explicit policy when the new durable state cannot be reused directly
+
+## Proposed Reload Decision Flow
+
+On reload:
+
+1. load the new module
+2. compare runtime ABI and state layout as today
+3. compare durable-state schema version
+4. choose one of these paths:
+
+- compatible layout and same schema version:
+  - keep state in place
+  - run normal `on-load`
+- compatible layout but different schema version and migration exists:
+  - run `migrate`
+  - if migration succeeds, swap to new code
+  - if migration fails, keep old code running
+- incompatible layout or incompatible schema with no valid migration:
+  - warn clearly
+  - do not silently discard state
+  - require an explicit reset/restart choice
+
+The important policy is that state reset should never be the invisible default.
+
+## Proposed Schema-Change Policies
+
+Suggested policy values:
+
+- `:reject`
+  - incompatible reload is refused
+  - old code keeps running
+  - user must restart explicitly
+- `:warn-reset`
+  - incompatible reload prints a warning and offers reset as an explicit choice
+  - reset is allowed, but never automatic
+- `:migrate-required`
+  - incompatible reload is refused unless a migration hook succeeds
+
+Current recommendation:
+
+- default to `:reject`
+- allow `:warn-reset` as the practical development option
+- do not add a silent `:reset` default
+
+That matches the intended user experience:
+
+- smooth behavior reloads by default
+- explicit warning for incompatible state changes
+- optional reset when the developer chooses it
+
+## Proposed Migration Hook Shape
+
+The migration surface should avoid raw reinterpretation of arbitrary memory.
+The safer model is explicit construction of the new state from a versioned view
+of the old one.
+
+Conceptually:
+
+```clojure
+(defn migrate [ctx: reload/Migration old-version: string new-state: (ptr App_State)]
+  ...)
+```
+
+Where `ctx` gives controlled access to the previous durable state by stable
+field identity rather than by unchecked casting.
+
+That allows migrations like:
+
+- populate a newly added field with defaults
+- rename or split older fields
+- rebuild one subsystem while preserving others
+
+## Large App-State Guidance
+
+For large applications, the durable root should still be one `defstate`, but it
+should usually be a root of subsystem handles or pointers rather than one giant
+flat by-value blob.
+
+Good shape:
+
+```clojure
+(defstate App_State
+  {:world (ptr World_State)
+   :renderer (ptr Renderer_State)
+   :editor (ptr Editor_State)
+   :assets (ptr Asset_Cache)}
+  {:run run
+   :version "7"
+   :migrate migrate
+   :on-schema-change :warn-reset})
+```
+
+That makes migration tractable because changes can happen at subsystem
+boundaries:
+
+- preserve still-valid subsystem pointers
+- initialize newly added subsystems
+- rebuild removed or transient subsystems
+- migrate changed subsystem-owned data explicitly
+
 ## Lifecycle Surface
 
 The higher-level reload path should support a small explicit lifecycle.

@@ -6,6 +6,7 @@ Current benchmark harness:
 - `./scripts/bench_aggregate_helpers.sh`
 - `./scripts/bench_mutation_helpers.sh`
 - `./scripts/bench_closure_helpers.sh`
+- `./scripts/bench_source_backed_arr.sh`
 
 These compare generated Kvist output against hand-written Odin for the same
 workloads.
@@ -135,13 +136,44 @@ favors the Kvist-generated version in this run.
 
 ## Good Next Benchmarks
 
-The next benchmark additions should target language features we recently added,
-not only older sequence helpers.
+The new source-backed `kvist:arr` benchmark now covers:
+
+- intrinsic `arr/*` lowering
+- imported `kvist:arr` source-backed lowering
+- direct Odin baselines
+- one fused-loop lower bound for the eager pipeline case
+
+Current run shape:
+
+- `pipe-intrinsic`: `17.609 ms`
+- `pipe-source`: `17.910 ms`
+- `pipe-direct`: `27.008 ms`
+- `pipe-fused`: `3.653 ms`
+- `builders-intrinsic`: `9.430 ms`
+- `builders-source`: `10.119 ms`
+- `builders-direct`: `11.869 ms`
+- `scan-intrinsic`: `10.061 ms`
+- `scan-source`: `9.926 ms`
+- `scan-direct`: `11.891 ms`
+
+The important result is not any one number, but the shape:
+
+- intrinsic and source-backed paths now match allocation counts exactly in the
+  migrated `arr` surface
+- the source-backed path is within normal run-to-run noise of the intrinsic
+  path on these workloads
+- both stay close to the direct eager Odin baseline
+- the fused loop is still much faster when the semantics avoid intermediate
+  owned collections entirely
+
+The next benchmark additions should keep targeting language features we
+recently added, not only older sequence helpers.
 
 Recommended next cases:
 
-1. `for`/`each` loops over arrays, maps, and sets
-2. package-heavy real-world workloads using explicit `kvist:*` imports
+1. `for` loops over arrays, maps, and sets
+2. package-heavy real-world workloads using explicit `kvist:*` imports beyond
+   the focused `arr` benchmark
 3. ownership-helper patterns using `let ... defer` around collection builders
 4. more map-heavy workloads with realistic surrounding code, not just the
    isolated hot loop

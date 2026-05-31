@@ -28,8 +28,10 @@ It should be very close to `clojure-mode`:
 - use Clojure-like indentation with 2 spaces in `.kvist`
 - font-lock Kvist special forms, keywords, Odin directive symbols, and raw
   `(odin "...")` escape hatches
-- provide indentation overrides for Kvist forms such as `proc`, `struct`,
-  `enum`, `union`, `let`, `switch`, `cond`, `for`, and `each`
+- provide indentation overrides for Kvist forms such as `defn`, `defstruct`,
+  `defenum`, `defunion`, `proc`, `let`, `switch`, `cond`, and `for`
+  `each` can stay recognized for legacy code, but it should not be treated as
+  the preferred loop surface going forward
 
 The compiler's Odin source remains 4-space indented. The Kvist source format is
 separate and should read like Clojure.
@@ -170,9 +172,9 @@ separate statement would force a local binding just for inspection.
 
 ```clojure
 (->> users
-     (filter active?)
+     (arr/filter active?)
      (tap> :active)
-     (map :name))
+     (arr/map :name))
 ```
 
 The step is ownership-transparent. A tapped owned final value remains owned by

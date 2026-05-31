@@ -33,109 +33,148 @@ slice views, scalar operations, or explicit in-place mutation.
 These helpers are already in scope and should remain small:
 
 ```clojure
-(map f xs)
-(filter pred xs)
-(remove pred xs)
-(reduce f init xs)
-(map-indexed f xs)
-(keep f xs)
-(mapcat f xs)
+(arr/map f xs)
+(arr/filter pred xs)
+(arr/remove pred xs)
+(arr/reduce f init xs)
+(arr/map-indexed f xs)
+(arr/keep f xs)
+(arr/mapcat f xs)
 (concat xs ys)
-(merge a b)
-(into [dynamic]T xs)
-(interpose sep xs)
-(interleave xs ys)
-(reverse xs)
-(shuffle pick xs)
-(sort xs)
-(sort-by f xs)
-(sort-by :field xs)
-(reverse! xs)
-(shuffle! pick xs)
-(sort! xs)
-(sort-by! f xs)
-(sort-by! :field xs)
-(map! f xs)
-(map-indexed! f xs)
-(filter! pred xs)
-(filter! :field xs)
-(remove! pred xs)
-(remove! :field xs)
-(keep! f xs)
-(into! target xs)
-(merge! target source)
-(split-at n xs)
-(partition n xs)
-(partition-all n xs)
-(partition-by f xs)
-(partition-by :field xs)
-(zipmap keys vals)
-(index-by f xs)
-(index-by :field xs)
-(group-by f xs)
-(group-by :field xs)
-(count-by f xs)
-(count-by :field xs)
-(sum-by key-f value-f xs)
-(sum-by :key-field :value-field xs)
-(frequencies xs)
-(keys m)
-(vals m)
-(distinct xs)
-(distinct-by f xs)
-(distinct-by :field xs)
-(range end)
-(range start end)
-(range start end step)
-(repeat n x)
-(repeatedly n f)
-(iterate n f x)
-(cycle n xs)
-(take n xs)
-(drop n xs)
-(butlast xs)
-(drop-last n xs)
-(take-nth n xs)
-(take-while pred xs)
-(drop-while pred xs)
-(find pred xs)
-(some? pred xs)
-(every? pred xs)
-(first xs)
-(second xs)
-(last xs)
-(nth xs n)
-(rest xs)
+(map/merge a b)
+(arr/into [dynamic]T xs)
+(arr/interpose sep xs)
+(arr/interleave xs ys)
+(arr/reverse xs)
+(arr/shuffle pick xs)
+(arr/sort xs)
+(arr/sort-by f xs)
+(arr/sort-by :field xs)
+(arr/reverse! xs)
+(arr/shuffle! pick xs)
+(arr/sort! xs)
+(arr/sort-by! f xs)
+(arr/sort-by! :field xs)
+(arr/map! f xs)
+(arr/map-indexed! f xs)
+(arr/filter! pred xs)
+(arr/filter! :field xs)
+(arr/remove! pred xs)
+(arr/remove! :field xs)
+(arr/keep! f xs)
+(arr/into! target xs)
+(map/merge! target source)
+(arr/split-at n xs)
+(arr/partition n xs)
+(arr/partition-all n xs)
+(arr/partition-by f xs)
+(arr/partition-by :field xs)
+(map/zip keys vals)
+(arr/index-by f xs)
+(arr/index-by :field xs)
+(arr/group-by f xs)
+(arr/group-by :field xs)
+(arr/count-by f xs)
+(arr/count-by :field xs)
+(arr/sum-by key-f value-f xs)
+(arr/sum-by :key-field :value-field xs)
+(arr/frequencies xs)
+(map/keys m)
+(map/vals m)
+(arr/distinct xs)
+(arr/distinct-by f xs)
+(arr/distinct-by :field xs)
+(arr/range end)
+(arr/range start end)
+(arr/range start end step)
+(arr/repeat n x)
+(arr/repeatedly n f)
+(arr/iterate n f x)
+(arr/cycle n xs)
+(arr/take n xs)
+(arr/drop n xs)
+(arr/butlast xs)
+(arr/drop-last n xs)
+(arr/take-nth n xs)
+(arr/take-while pred xs)
+(arr/drop-while pred xs)
+(arr/find pred xs)
+(arr/some? pred xs)
+(arr/every? pred xs)
+(arr/first xs)
+(arr/second xs)
+(arr/last xs)
+(arr/nth xs n)
+(arr/rest xs)
+(str/count s)
+(str/get s index)
+(str/slice s start [end])
+(str/contains? s needle)
+(str/split s sep)
+(str/join parts sep)
+(str/trim s)
+(str/trim-prefix s prefix)
+(str/trim-suffix s suffix)
+(str/starts-with? s prefix)
+(str/ends-with? s suffix)
+(str/index-of s needle)
+(str/last-index-of s needle)
+(str/replace s old new [count])
+(str/lower s)
+(str/upper s)
+(set/contains? s value)
+(set/union lhs rhs)
+(set/intersection lhs rhs)
+(set/difference lhs rhs)
+(set/union! target source)
+(set/intersection! target source)
+(set/difference! target source)
+(set/subset? lhs rhs)
+(set/superset? lhs rhs)
+(set/disjoint? lhs rhs)
+(set/add s value)
+(set/add! s value)
+(set/remove s value)
+(set/remove! s value)
 (empty? xs)
 (count xs)
 (get m k default)
 (contains? collection key)
 ```
 
+Only this small cross-family kernel stays bare: `slice`, `get`, `empty?`,
+`count`, and `contains?`. Other collection operations should use explicit
+package names such as `arr/...`, `map/...`, `str/...`, or `set/...`.
+
 The access and trimming helpers use the direct Odin representation where
-possible. `first`, `second`, `last`, and `nth` lower to indexing. `empty?`
-lowers to `len`. `rest`, `take`, `drop`, `butlast`, `drop-last`, `take-while`,
-and `drop-while` return non-owning slice views. Three-argument `get` is a map
+possible. `arr/first`, `arr/second`, `arr/last`, and `arr/nth` lower to indexing.
+`empty?` lowers to `len`. `arr/rest`, `arr/take`, `arr/drop`, `arr/butlast`,
+`arr/drop-last`, `arr/take-while`, and `arr/drop-while` return non-owning slice
+views. Three-argument `get` is a map
 helper: it uses Odin's
 comma-ok lookup and returns the supplied default when the key is absent.
 
-Builder helpers such as `map`, `filter`, `remove`, `map-indexed`, `keep`,
-`mapcat`, `concat`, `into`, `interpose`, `interleave`, `reverse`, `shuffle`,
-`range`, `repeat`, `repeatedly`, `iterate`, bounded `cycle`, and `take-nth`
+Builder helpers such as `arr/map`, `arr/filter`, `arr/remove`,
+`arr/map-indexed`, `arr/keep`, `arr/mapcat`, `concat`, `arr/into`,
+`arr/interpose`, `arr/interleave`, `arr/reverse`, `arr/shuffle`,
+`arr/range`, `arr/repeat`, `arr/repeatedly`, `arr/iterate`, bounded
+`arr/cycle`, and `arr/take-nth`
 return owned dynamic arrays. `into` is currently only for explicit dynamic-array
-targets, for example `(into [dynamic]int xs)`. `distinct` and `distinct-by` also
+targets, for example `(arr/into [dynamic]int xs)`. `arr/distinct` and
+`arr/distinct-by` also
 return owned dynamic arrays and use a temporary `map[key]bool` internally, so
-the value or key must be valid as an Odin map key. `zipmap`, `index-by`, and
-`frequencies` return owned maps. `merge` returns an owned map that combines two
-input maps, with right-hand values replacing duplicate keys. `keys` and `vals`
-return owned dynamic arrays copied from a map. `group-by` returns an owned map
-whose values are owned dynamic arrays; delete each group before deleting the map.
-`count-by` and `sum-by` return owned maps for common aggregate cases where the
-grouped items themselves are not needed. `partition`, `partition-all`, and
-`partition-by` return owned dynamic arrays of borrowed slice chunks. `keep` is
+the value or key must be valid as an Odin map key. `map/zip`, `arr/index-by`,
+and `arr/frequencies` return owned maps. `map/merge` returns an owned map that combines
+two input maps, with right-hand values replacing duplicate keys. `map/keys` and
+`map/vals` return owned dynamic arrays copied from a map. `arr/group-by` returns
+an owned map whose values are owned dynamic arrays; delete each group before deleting
+the map. `arr/count-by` and `arr/sum-by` return owned maps for common aggregate
+cases where the grouped items themselves are not needed. `arr/partition`,
+`arr/partition-all`, and `arr/partition-by` return owned dynamic arrays of
+borrowed slice chunks. `arr/keep` is
 Odin-shaped: the callback returns `(value, ok)`, and only `ok` values are
-appended. `mapcat` is also Odin-shaped: the callback returns a borrowed slice,
-and `mapcat` appends those values into one owned dynamic array.
+appended. `arr/mapcat` is also Odin-shaped: the callback returns a borrowed
+slice, and `arr/mapcat` appends those values into one owned dynamic array.
 
 `sort` and `sort-by` copy before sorting. They do not mutate the input
 collection, and their result is owned.
@@ -144,10 +183,10 @@ collection, and their result is owned.
 instead of hiding a random generator:
 
 ```clojure
-(proc pick [n: int] -> int
+(defn pick [n: int] -> int
   (rand.int-max n))
 
-(shuffle pick xs)
+(arr/shuffle pick xs)
 ```
 
 The picker must return an index in `[0, n)`. This keeps generated code simple
@@ -164,24 +203,64 @@ into the same dynamic array; the value type must match the array element type.
 target. It lowers directly to Odin `append(&target, ..xs)`-style code, mutates
 the target, and does not create a new owned result.
 
+String helpers stay close to Odin `core:strings`. `kvist:str` is now mostly
+source-backed: `str/count`, `str/get`, `str/slice`, `str/contains?`,
+`str/split`, `str/join`, `str/trim`, `str/trim-prefix`, `str/trim-suffix`,
+`str/starts-with?`, `str/ends-with?`, `str/index-of`, `str/last-index-of`,
+`str/replace`, `str/lower`, and `str/upper` are shipped as ordinary `.kvist`
+source and still lower to direct indexing, slicing, or `strings.*` calls.
+`str/split` returns an owned dynamic array of string slices. `str/join` and
+`str/replace` return owned strings and should be deleted or returned like
+other owned values.
+
+Set helpers stay explicit about the underlying Odin representation: a set is
+still `map[T]bool` in the emitted code. `kvist:set` is now a hybrid package:
+helpers such as `set/empty`, `set/of`, `set/contains?`, `set/union`,
+`set/intersection`, `set/difference`, `set/union!`, `set/intersection!`,
+`set/difference!`, `set/add`, `set/add!`, `set/remove`, `set/remove!`,
+`set/subset?`, `set/superset?`, and `set/disjoint?` are shipped as ordinary
+`.kvist` source and lower to tight loops, direct constructors, or direct
+in-place mutations over that map representation.
+
+Map helpers follow the same hybrid rule. `kvist:map` now ships source-backed
+helpers for `map/empty`, `map/of`, `map/get`, `map/contains?`, `map/keys`,
+`map/vals`, `map/zip`, `map/merge`, and `map/merge!`. Those lower to plain
+Odin constructors, membership checks, preallocated dynamic arrays, raw
+indexing, optional-default helpers, direct key/value loops, or direct in-place
+mutation.
+
+`kvist:arr` is only partly source-backed so far. The current shipped source
+subset is the indexing/slicing macro layer for `arr/count`, `arr/get`,
+`arr/slice`, `arr/first`, `arr/second`, `arr/nth`, `arr/last`, `arr/rest`,
+`arr/take`, `arr/drop`, `arr/drop-last`, `arr/butlast`, `arr/range`,
+`arr/take-nth`, `arr/repeat`, `arr/repeatedly`, `arr/iterate`, `arr/cycle`,
+the ordinary proc-callback path for `arr/map`, `arr/filter`, `arr/remove`,
+and `arr/reduce`, plus the ordinary proc-predicate path for `arr/take-while`,
+`arr/drop-while`, `arr/find`, `arr/some?`, and `arr/every?` via source-backed
+`#force_inline` loops. Those helpers still lower to direct indexing, slicing,
+or tight `for` loops, while keyword-field shorthand and the broader
+sequence-helper surface remain compiler-lowered until there is a safe way to
+preserve the same array-family coverage and allocation behavior in ordinary
+package code.
+
 Keyword callbacks are field-access shorthand in the supported higher-order
 helpers:
 
 ```clojure
-(map :name users)
-(index-by :id users)
-(group-by :status users)
-(count-by :status users)
-(sum-by :region :amount orders)
-(partition-by :status users)
-(distinct-by :id users)
-(sort-by :age users)
-(sort-by! :age users)
-(filter :verified users)
-(remove :archived users)
+(arr/map :name users)
+(arr/index-by :id users)
+(arr/group-by :status users)
+(arr/count-by :status users)
+(arr/sum-by :region :amount orders)
+(arr/partition-by :status users)
+(arr/distinct-by :id users)
+(arr/sort-by :age users)
+(arr/sort-by! :age users)
+(arr/filter :verified users)
+(arr/remove :archived users)
 (->> users
-     (filter :verified)
-     (map :name))
+     (arr/filter :verified)
+     (arr/map :name))
 ```
 
 This means "call the field accessor" for structs and struct-like values. It is
@@ -194,9 +273,9 @@ chain of owned helpers allocates at each owned step:
 
 ```clojure
 (->> users
-     (filter active?)
-     (map :name)
-     (sort))
+     (arr/filter active?)
+     (arr/map :name)
+     (arr/sort))
 ```
 
 That pipeline builds a filtered dynamic array, then a mapped dynamic array, then
@@ -213,13 +292,13 @@ For hot paths, prefer one of these shapes:
 
 - use slice-view helpers such as `take`, `drop`, `butlast`, `drop-last`,
   `rest`, and `split-at` when a borrowed view is enough;
-- use bang helpers such as `sort!`, `reverse!`, `shuffle!`, `map!`, `filter!`,
-  `remove!`, `keep!`, `into!`, and `merge!` when mutating existing storage is the
+- use bang helpers such as `arr/sort!`, `arr/reverse!`, `arr/shuffle!`, `arr/map!`, `arr/filter!`,
+  `arr/remove!`, `arr/keep!`, `arr/into!`, and `map/merge!` when mutating existing storage is the
   right Odin choice;
 - write an explicit `each` loop when one pass and no intermediate collection is
   needed;
-- avoid `group-by` when only aggregate totals are needed. Use `count-by` or
-  `sum-by` for simple aggregate maps, or accumulate directly into maps for
+- avoid `arr/group-by` when only aggregate totals are needed. Use `arr/count-by` or
+  `arr/sum-by` for simple aggregate maps, or accumulate directly into maps for
   custom stateful aggregates.
 
 The useful distinction is not "helpers versus loops". It is whether the
@@ -228,27 +307,27 @@ intermediate collection is a real value in the program.
 Use eager helpers when the intermediate value has meaning:
 
 ```clojure
-(let [settled (map settle-order orders)
-      paid (filter settled? settled)
-      groups (group-by :region paid)]
+(let [settled (arr/map settle-order orders)
+      paid (arr/filter settled? settled)
+      groups (arr/group-by :region paid)]
   ...)
 ```
 
 Use bang helpers when you own a working buffer:
 
 ```clojure
-(let [work (map settle-order orders)]
-  (filter! settled? work)
+(let [work (arr/map settle-order orders)]
+  (arr/filter! settled? work)
   ...)
 ```
 
 Use aggregate helpers when grouped slices would be waste:
 
 ```clojure
-(let [work (map settle-order orders)]
-  (filter! settled? work)
-  (let [revenue-by-region (sum-by :region :amount work)
-        count-by-region (count-by :region work)]
+(let [work (arr/map settle-order orders)]
+  (arr/filter! settled? work)
+  (let [revenue-by-region (arr/sum-by :region :amount work)
+        count-by-region (arr/count-by :region work)]
     ...))
 ```
 
@@ -351,11 +430,11 @@ Avoid unbounded forms such as plain `cycle`, unbounded `repeat`, unbounded
 `repeatedly`, or unbounded `iterate`. Use explicit counts:
 
 ```clojure
-(range start end step)
-(repeat n x)
-(repeatedly n f)
-(iterate n f x)
-(cycle n xs)
+(arr/range start end step)
+(arr/repeat n x)
+(arr/repeatedly n f)
+(arr/iterate n f x)
+(arr/cycle n xs)
 ```
 
 `cycle` returns an owned dynamic array containing at most `n` items by cycling
@@ -371,17 +450,17 @@ Today:
 
 ```clojure
 (->> users
-     (filter active?)
-     (map :name)
-     (take 10))
+     (arr/filter active?)
+     (arr/map :name)
+     (arr/take 10))
 ```
 
 Possible later design:
 
 ```clojure
-(comp (filter active?)
-      (map :name)
-      (take 10))
+(comp (arr/filter active?)
+      (arr/map :name)
+      (arr/take 10))
 ```
 
 That later design should still produce plain Odin code. It should not introduce
@@ -394,9 +473,9 @@ data flow much easier to read:
 
 ```clojure
 (->> users
-     (filter active?)
-     (map :name)
-     (take 10))
+     (arr/filter active?)
+     (arr/map :name)
+     (arr/take 10))
 ```
 
 The hard part is ownership. If a thread step allocates and its result is passed
@@ -406,9 +485,9 @@ owned value.
 Production-style code can always bind owned intermediate results explicitly:
 
 ```clojure
-(let [active-users (filter active? users)
-      active-names-all (map :name active-users)
-      active-names (take 10 active-names-all)]
+(let [active-users (arr/filter active? users)
+      active-names-all (arr/map :name active-users)
+      active-names (arr/take 10 active-names-all)]
   (defer (delete active-users))
   (defer (delete active-names-all))
   ...)
@@ -438,10 +517,10 @@ Transducers would improve this by compiling a composed transformation into one
 loop and one owned result:
 
 ```clojure
-(into [dynamic]string
-      (comp (filter active?)
-            (map :name)
-            (take 10))
+(arr/into [dynamic]string
+      (comp (arr/filter active?)
+            (arr/map :name)
+            (arr/take 10))
       users)
 ```
 
@@ -455,18 +534,18 @@ Sequence helpers need an explicit ownership story:
 - Slice-view helpers such as `rest`, `take`, `drop`, `butlast`, `drop-last`,
   `take-while`, `drop-while`, and `split-at` do not own data and must not be
   deleted.
-- Dynamic-array helpers such as `map`, `filter`, `remove`, `map-indexed`,
-  `keep`, `mapcat`, `concat`, `reverse`, `shuffle`, `sort`, `sort-by`, and
-  `take-nth` allocate and return owned dynamic arrays.
-- Chunking helpers `partition`, `partition-all`, and `partition-by` allocate the
+- Dynamic-array helpers such as `arr/map`, `arr/filter`, `arr/remove`, `arr/map-indexed`,
+  `arr/keep`, `arr/mapcat`, `concat`, `arr/reverse`, `arr/shuffle`, `arr/sort`, `arr/sort-by`, and
+  `arr/take-nth` allocate and return owned dynamic arrays.
+- Chunking helpers `arr/partition`, `arr/partition-all`, and `arr/partition-by` allocate the
   outer dynamic array, but their slice chunks borrow the input collection.
-- `merge`, `zipmap`, `index-by`, `count-by`, `sum-by`, and `frequencies`
+- `map/merge`, `map/zip`, `arr/index-by`, `arr/count-by`, `arr/sum-by`, and `arr/frequencies`
   allocate and return owned maps.
-- `keys` and `vals` allocate and return owned dynamic arrays copied from a map.
-- `group-by` allocates an owned map and one owned dynamic array per key. Delete
+- `map/keys` and `map/vals` allocate and return owned dynamic arrays copied from a map.
+- `arr/group-by` allocates an owned map and one owned dynamic array per key. Delete
   the groups, then delete the map.
 - Owned helper results must be bound or returned. Nested owned results such as
-  `(first (map f xs))` are rejected because there is no visible place to delete
+  `(arr/first (arr/map f xs))` are rejected because there is no visible place to delete
   the intermediate dynamic array.
 - Examples that use allocating helpers should show `defer delete(...)` when the
   result lives beyond a trivial expression.

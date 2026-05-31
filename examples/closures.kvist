@@ -1,5 +1,7 @@
 // Demonstrates the current first-cut captured-callback support.
 (package main)
+(import arr "kvist:arr")
+
 (defn apply-pred [pred: (proc [x: int] -> bool), x: int] -> bool
   (pred x))
 
@@ -13,16 +15,16 @@
 
 (defn captured-map-demo [xs: [dynamic]int] -> [dynamic]int
   (let [offset 10]
-    (map (fn [x: int] -> int
-           (+ x offset))
-         xs)))
+    (arr/map (fn [x: int] -> int
+               (+ x offset))
+             xs)))
 
 (defn captured-map-bang-demo [] -> [dynamic]int
   (let [offset 10
         xs [1 2 3]]
-    (map! (fn [x: int] -> int
-            (+ x offset))
-          xs)
+    (arr/map! (fn [x: int] -> int
+                (+ x offset))
+              xs)
     xs))
 
 (defn main []

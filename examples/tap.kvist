@@ -28,12 +28,13 @@
 
 (defn inspected-thread-total [] -> int
   (let [xs (arr/dynamic int [1 2 3 4])
-        total (->> xs
-                   (map plus-one)
-                   (tap> :mapped)
-                   (filter even?)
-                   (reduce add 0))]
+        mapped (arr/map plus-one xs)
+        _ (tap> :mapped mapped)
+        evens (arr/filter even? mapped)
+        total (arr/reduce add 0 evens)]
     (defer (delete xs))
+    (defer (delete mapped))
+    (defer (delete evens))
     total))
 
 (defn main []

@@ -1,12 +1,13 @@
 # Reload Step Demo
 
-This is the first-pass `defstate` reload workflow: one pure `.kvist` app
-source, one durable root state, and a CLI-generated resident shell plus
-reloadable module underneath.
+This is the convenience `:step` reload workflow with a more realistic file
+split: one small reload-app shell file, one durable root state, and a separate
+package that holds the program logic you would keep extending.
 
 Source:
 
 - `main.kvist`
+- `app/package.kvist`
 
 Run the reloadable app:
 
@@ -75,6 +76,17 @@ Current shape of the source contract:
 - convenience host mode: `:step`
 - general companion host mode: `:run`
 - optional metadata: `:init`, `:on-load`, `:on-unload`, `:version`, `:sleep-ms`
+
+In this demo:
+
+- `main.kvist` is the reload-app shell
+- `app/package.kvist` is the "real program" package
+- the durable root keeps the reload counters plus one `Program_State`
+  subsystem
+- `step` only wires the shell state into the app package
+
+So the intended extension point is to keep growing `app/package.kvist` while
+leaving the reload shell small and boring.
 
 See `../reload_run_demo/` for the app-owned runtime shape that uses `:run` plus
 one explicit `reload/checkpoint!` call at the runtime boundary.

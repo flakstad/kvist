@@ -1,5 +1,5 @@
-// Port of the Cluck reset map/set demo. Sets are currently expressed as
-// map[T]bool rather than a dedicated set surface.
+// Port of the Cluck reset map/set demo. Sets still lower to map[T]bool, but
+// there is now an explicit set helper surface for basic set algebra.
 (package main)
 (import str "kvist:str")
 (import map "kvist:map")
@@ -8,13 +8,28 @@
 (defn maps_and_sets_demo [] -> int
   (let [m (map/empty string string) defer
         tags (set/empty string) defer
+        featured (set/empty string) defer
         total 0]
     (update! m "name" "Ada")
     (update! m "lang" "Kvist")
     (set/add! tags "native")
     (set/add! tags "lisp")
+    (set/add! featured "native")
+    (set/add! featured "compiled")
     (update! m "lang" "Reset Kvist")
     (set/add! tags "mutable")
+    (let [all-tags (set/union tags featured) defer
+          shared (set/intersection tags featured) defer
+          missing (set/difference all-tags shared) defer
+          promoted (set/add shared "systems") defer
+          narrowed (set/remove promoted "native") defer]
+      (println (set/subset? shared all-tags))
+      (println (set/superset? all-tags shared))
+      (println (set/disjoint? narrowed featured))
+      (set/remove! tags "lisp")
+      (each [tag present missing]
+        (when present
+          (println "missing" tag))))
     (each [key value m]
       (println key value)
       (set! total (+ total (str/count key)))
@@ -29,7 +44,7 @@
   (println (maps_and_sets_demo)))
 
 (comment
-  ;; Map iteration ports cleanly. The remaining set gap is representation,
-  ;; not basic source operations: set[T] still lowers to map[T]bool.
+  ;; Set algebra is available at the surface, while the emitted Odin still uses
+  ;; plain map[T]bool loops.
   (maps_and_sets_demo)
 )

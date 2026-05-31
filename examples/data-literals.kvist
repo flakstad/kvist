@@ -24,7 +24,7 @@
 (defn dynamic-first [] -> int
   (let [buffer-literal (arr/dynamic int [21 34])]
     (defer (delete buffer-literal))
-    (first buffer-literal)))
+    (arr/first buffer-literal)))
 
 (defn empty-buffer-len [] -> int
   (let [buffer (arr/empty int)]
@@ -38,7 +38,7 @@
   (with-allocator [allocator context.temp_allocator]
     (let [buffer (arr/empty int)]
       (defer (delete buffer))
-      (into! buffer (arr/dynamic int [1 2]))
+      (arr/into! buffer (arr/dynamic int [1 2]))
       (count buffer))))
 
 // with-temp-allocator starts Odin's temp allocator scope and ends it at block
@@ -48,7 +48,7 @@
   (with-temp-allocator [allocator]
     (let [buffer (arr/empty int)]
       (defer (delete buffer))
-      (into! buffer (arr/dynamic int [1 2 3]))
+      (arr/into! buffer (arr/dynamic int [1 2 3]))
       (count buffer))))
 
 (defn lookup-two [] -> int
@@ -69,7 +69,7 @@
 (defn merged-lookup-total [] -> int
   (let [base (map/of string int {"one" 1 "two" 2})
         overrides (map/of string int {"two" 20 "three" 30})
-        merged (merge base overrides)]
+        merged (map/merge base overrides)]
     (defer (delete base))
     (defer (delete overrides))
     (defer (delete merged))
@@ -80,7 +80,7 @@
         overrides (map/of string int {"two" 20 "three" 30})]
     (defer (delete lookup))
     (defer (delete overrides))
-    (merge! lookup overrides)
+    (map/merge! lookup overrides)
     (+ (get lookup "one") (get lookup "two") (get lookup "three"))))
 
 (defn fixed-middle [] -> int

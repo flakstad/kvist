@@ -1,0 +1,199 @@
+// Focused benchmark for intrinsic vs source-backed kvist:arr helpers.
+(package main)
+(import pkgarr "kvist:arr")
+(import "core:fmt")
+(import mem "core:mem")
+(import time "core:time")
+
+(odin "N :: 50_000
+REPS :: 80
+SCAN_REPS :: 400
+BUILDER_REPS :: 60")
+
+(proc inc-value [x: int] -> int
+  (+ x 1))
+
+(proc even-value? [x: int] -> bool
+  (== (% x 2) 0))
+
+(proc divisible-by-three? [x: int] -> bool
+  (== (% x 3) 0))
+
+(proc add-values [acc: int, x: int] -> int
+  (+ acc x))
+
+(proc double [x: int] -> int
+  (* x 2))
+
+(proc always-seven [] -> int
+  7)
+
+(proc below-cutoff? [x: int] -> bool
+  (< x (/ N 2)))
+
+(proc report [name: string, elapsed: time.Duration, checksum: int, track: ^mem.Tracking-Allocator]
+  (fmt.printfln "%-19s %9.3f ms allocs=%8v total=%10v peak=%9v live=%v checksum=%v"
+                name
+                (time.duration_milliseconds elapsed)
+                track.total-allocation-count
+                track.total-memory-allocated
+                track.peak-memory-allocated
+                track.current-memory-allocated
+                checksum))
+
+(proc run-one [name: string, checksum: int, start: time.Tick, track: ^mem.Tracking-Allocator]
+  (report name (time.tick-since start) checksum track))
+
+(proc bench-pipe-intrinsic [xs: []int, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (for (< i reps)
+      (let [mapped (arr/map inc-value xs) defer
+            filtered (arr/filter even-value? mapped) defer
+            removed (arr/remove divisible-by-three? filtered) defer
+            total (arr/reduce add-values 0 removed)]
+        (set! checksum (+ checksum total)))
+      (set! i (+ i 1)))
+    checksum))
+
+(proc bench-pipe-source [xs: []int, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (for (< i reps)
+      (let [mapped (pkgarr/map inc-value xs) defer
+            filtered (pkgarr/filter even-value? mapped) defer
+            removed (pkgarr/remove divisible-by-three? filtered) defer
+            total (pkgarr/reduce add-values 0 removed)]
+        (set! checksum (+ checksum total)))
+      (set! i (+ i 1)))
+    checksum))
+
+(proc bench-pipe-fused [xs: []int, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (for (< i reps)
+      (let [total 0]
+        (for [x xs]
+          (let [mapped (inc-value x)]
+            (when (and (even-value? mapped)
+                       (not (divisible-by-three? mapped)))
+              (set! total (+ total mapped)))))
+        (set! checksum (+ checksum total)))
+      (set! i (+ i 1)))
+    checksum))
+
+(proc bench-builders-intrinsic [xs: []int, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (for (< i reps)
+      (let [numbers (arr/range 1 N) defer
+            sampled (arr/take-nth 3 xs) defer
+            repeated (arr/repeat 8 9) defer
+            generated (arr/repeatedly 8 always-seven) defer
+            powers (arr/iterate 8 double 1) defer
+            cycled (arr/cycle 9 xs) defer]
+        (set! checksum (+ checksum (arr/last numbers)))
+        (set! checksum (+ checksum (arr/last sampled)))
+        (set! checksum (+ checksum (arr/last repeated)))
+        (set! checksum (+ checksum (arr/last generated)))
+        (set! checksum (+ checksum (arr/last powers)))
+        (set! checksum (+ checksum (arr/last cycled))))
+      (set! i (+ i 1)))
+    checksum))
+
+(proc bench-builders-source [xs: []int, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (for (< i reps)
+      (let [numbers (pkgarr/range 1 N) defer
+            sampled (pkgarr/take-nth 3 xs) defer
+            repeated (pkgarr/repeat 8 9) defer
+            generated (pkgarr/repeatedly 8 always-seven) defer
+            powers (pkgarr/iterate 8 double 1) defer
+            cycled (pkgarr/cycle 9 xs) defer]
+        (set! checksum (+ checksum (pkgarr/last numbers)))
+        (set! checksum (+ checksum (pkgarr/last sampled)))
+        (set! checksum (+ checksum (pkgarr/last repeated)))
+        (set! checksum (+ checksum (pkgarr/last generated)))
+        (set! checksum (+ checksum (pkgarr/last powers)))
+        (set! checksum (+ checksum (pkgarr/last cycled))))
+      (set! i (+ i 1)))
+    checksum))
+
+(proc bench-scan-intrinsic [xs: []int, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (for (< i reps)
+      (let [prefix (arr/take-while below-cutoff? xs)
+            suffix (arr/drop-while below-cutoff? xs)
+            [first-hit ok] (arr/find divisible-by-three? suffix)
+            any? (arr/some? divisible-by-three? suffix)
+            all? (arr/every? below-cutoff? prefix)]
+        (set! checksum (+ checksum (count prefix)))
+        (set! checksum (+ checksum (count suffix)))
+        (when ok
+          (set! checksum (+ checksum first-hit)))
+        (when any?
+          (set! checksum (+ checksum 1)))
+        (when all?
+          (set! checksum (+ checksum 1))))
+      (set! i (+ i 1)))
+    checksum))
+
+(proc bench-scan-source [xs: []int, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (for (< i reps)
+      (let [prefix (pkgarr/take-while below-cutoff? xs)
+            suffix (pkgarr/drop-while below-cutoff? xs)
+            [first-hit ok] (pkgarr/find divisible-by-three? suffix)
+            any? (pkgarr/some? divisible-by-three? suffix)
+            all? (pkgarr/every? below-cutoff? prefix)]
+        (set! checksum (+ checksum (count prefix)))
+        (set! checksum (+ checksum (count suffix)))
+        (when ok
+          (set! checksum (+ checksum first-hit)))
+        (when any?
+          (set! checksum (+ checksum 1)))
+        (when all?
+          (set! checksum (+ checksum 1))))
+      (set! i (+ i 1)))
+    checksum))
+
+(proc main []
+  (let [old-allocator context.allocator
+        xs (arr/range 1 N)
+        track: mem.Tracking-Allocator (odin "mem.Tracking_Allocator{}")]
+    (defer (delete xs))
+    (mem.tracking-allocator-init (& track) old-allocator old-allocator)
+    (defer (mem.tracking-allocator-destroy (& track)))
+    (set! context.allocator (mem.tracking-allocator (& track)))
+    (defer (odin "context.allocator = old_allocator"))
+
+    (mem.tracking-allocator-reset (& track))
+    (let [start (time.tick-now)]
+      (run-one "pipe-intrinsic" (bench-pipe-intrinsic (slice xs 0) REPS) start (& track)))
+
+    (mem.tracking-allocator-reset (& track))
+    (let [start (time.tick-now)]
+      (run-one "pipe-source" (bench-pipe-source (slice xs 0) REPS) start (& track)))
+
+    (mem.tracking-allocator-reset (& track))
+    (let [start (time.tick-now)]
+      (run-one "pipe-fused" (bench-pipe-fused (slice xs 0) REPS) start (& track)))
+
+    (mem.tracking-allocator-reset (& track))
+    (let [start (time.tick-now)]
+      (run-one "builders-intrinsic" (bench-builders-intrinsic (slice xs 0) BUILDER_REPS) start (& track)))
+
+    (mem.tracking-allocator-reset (& track))
+    (let [start (time.tick-now)]
+      (run-one "builders-source" (bench-builders-source (slice xs 0) BUILDER_REPS) start (& track)))
+
+    (mem.tracking-allocator-reset (& track))
+    (let [start (time.tick-now)]
+      (run-one "scan-intrinsic" (bench-scan-intrinsic (slice xs 0) SCAN_REPS) start (& track)))
+
+    (mem.tracking-allocator-reset (& track))
+    (let [start (time.tick-now)]
+      (run-one "scan-source" (bench-scan-source (slice xs 0) SCAN_REPS) start (& track)))))

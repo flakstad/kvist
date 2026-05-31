@@ -154,6 +154,17 @@ metadata, plain `kvist check|build|run app/main.kvist` now route through that
 same production wrapper automatically. `--reload` remains valid, but is no
 longer required for the common reload-app source shape.
 
+Current state-layout behavior is intentionally conservative:
+
+- the runtime validates state size and alignment on module load/reload
+- if those checks fail, the reload is rejected and the running process keeps the
+  previous code loaded
+- there is no field-aware durable-state migration yet
+
+That means behavior changes are the intended smooth path today, while durable
+state-shape changes still require either a clean restart or a future explicit
+migration/reset policy.
+
 If a source package needs to publish raw Odin names in that flow, it can now do
 so explicitly with:
 

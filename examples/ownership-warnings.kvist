@@ -3,7 +3,7 @@
 (import arr "kvist:arr")
 
 (defn discarded-owned-result-demo []
-  (range 3)
+  (arr/range 3)
   (println "discarded"))
 
 (defn leaked-owned-local-demo []
