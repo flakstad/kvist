@@ -157,4 +157,5 @@ It shows:
 - a host-owned state struct surviving reload
 - rebuild-only iteration on the reloadable module
 - the reusable `kvist_hot.Reloader` workflow in host code
+- `.kvist` demo sources compiled to Odin as part of the loop
 - a clean place for later `Kvist/Live` embedding on top

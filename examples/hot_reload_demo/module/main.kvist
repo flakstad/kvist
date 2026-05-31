@@ -1,0 +1,46 @@
+(package hot_reload_demo_module)
+
+(odin "import shared \"../shared\"")
+
+(defconst hot-demo-version string "module v1")
+
+(odin "@(export)")
+(defvar kvist_hot_api_version u32 1)
+
+(odin "@(export)")
+(odin "kvist_hot_state_size :: proc \"c\" () -> int {")
+(odin "    return size_of(shared.State)")
+(odin "}")
+
+(odin "@(export)")
+(odin "kvist_hot_state_align :: proc \"c\" () -> int {")
+(odin "    return align_of(shared.State)")
+(odin "}")
+
+(odin "@(export)")
+(odin "kvist_hot_on_load :: proc \"c\" (state: rawptr, is_reload: bool) {")
+(odin "    app_state := (^shared.State)(state)")
+(odin "    if is_reload {")
+(odin "        app_state.reload_count += 1")
+(odin "    } else {")
+(odin "        app_state.last_message = \"module v1 loaded\"")
+(odin "    }")
+(odin "}")
+
+(odin "@(export)")
+(odin "kvist_hot_on_unload :: proc \"c\" (state: rawptr) {")
+(odin "    app_state := (^shared.State)(state)")
+(odin "    app_state.unload_count += 1")
+(odin "}")
+
+(odin "@(export)")
+(odin "hot_demo_message :: proc \"c\" () -> cstring {")
+(odin "    return cstring(hot_demo_version)")
+(odin "}")
+
+(odin "@(export)")
+(odin "hot_demo_tick :: proc \"c\" (state: rawptr) {")
+(odin "    app_state := (^shared.State)(state)")
+(odin "    app_state.tick_count += 1")
+(odin "    app_state.last_message = hot_demo_version")
+(odin "}")

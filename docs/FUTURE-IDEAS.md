@@ -41,6 +41,15 @@ language/runtime implementation prematurely.
   wrapper markers everywhere.
 - Do not push that surface wider until the macro expander handles nested helper
   macros and interpolation robustly.
+- A Datomic-flavored Datalog DSL is a strong candidate here:
+  - source query shape like `[:find ?e :where ...]`
+  - macro validation and canonicalization
+  - compilation to an efficient internal query representation
+  - separate runtime/query engine execution layer
+- A routing DSL is another strong candidate:
+  - route table shape similar to Reitit-style data
+  - macro validation of methods, params, and handler bindings
+  - compilation to an efficient internal matcher/dispatch structure
 
 ### Call Surface
 

@@ -21,7 +21,7 @@ block so `C-c C-e` and `C-c C-c` are practical.
 - `macro-dsl.kvist`: package-local declaration DSL that expands into multiple top-level forms.
 - `macro-union-helpers.kvist`: recursive macro DSL that emits a union plus variant constructors.
 - `macro-messages.kvist`: message-family DSL that emits payload structs, a tagged union, and constructors.
-- `hiccup-interpolation.kvist`: Hiccup attrs and child nodes with direct Kvist expression interpolation.
+- `hiccup-interpolation.kvist`: Hiccup attrs and child nodes with direct Kvist expression interpolation, including `if`, `when`, `nil` omission, and `[:<> ...]` fragments.
 - `closures.kvist`: non-capturing `fn` literals and explicit callback context.
 - `hello.kvist`: package, import, struct literal, and a tiny `main`.
 - `declarations.kvist`: doc comments, import aliases, constants, enums, structs.
@@ -102,8 +102,11 @@ odin run examples/live_commands_demo
 The native hot-reload demo has a two-step workflow:
 
 ```sh
-odin build examples/hot_reload_demo/module -build-mode:dll -out:build/hot_reload_demo/hot_demo.dylib
-odin run examples/hot_reload_demo/host
+./kvist examples/hot_reload_demo/shared/package.kvist -o build/generated/hot_reload_demo/shared/package.odin
+./kvist examples/hot_reload_demo/module/main.kvist -o build/generated/hot_reload_demo/module/main.odin
+./kvist examples/hot_reload_demo/host/main.kvist -o build/generated/hot_reload_demo/host/main.odin
+odin build build/generated/hot_reload_demo/module -build-mode:dll -out:build/hot_reload_demo/hot_demo.dylib
+odin run build/generated/hot_reload_demo/host
 ```
 
 The live commands demo watches the `.kvist` files in
@@ -118,8 +121,9 @@ ambient state.
 
 The native hot-reload demo watches the shared library at
 `build/hot_reload_demo/hot_demo.dylib`. Edit
-`examples/hot_reload_demo/module/main.odin`, rebuild only the module shared
-library, and the running host reloads it in place while preserving the host
+`examples/hot_reload_demo/module/main.kvist`, recompile that file to generated
+Odin, rebuild only the module shared library, and the running host reloads it
+in place while preserving the host
 state struct. The host now uses the reusable `kvist_hot.Reloader` helpers
 rather than open-coding the watch loop. See
 [`examples/hot_reload_demo/README.md`](./hot_reload_demo/README.md) for the

@@ -2,12 +2,14 @@ package kvist
 
 import "core:fmt"
 import "core:os"
+import "core:sort"
 import "core:strings"
 import "base:runtime"
 
 Alias_Prefix :: struct {
-    alias:  string,
-    prefix: string,
+    alias:   string,
+    prefix:  string,
+    exports: [dynamic]string,
 }
 
 Loaded_Forms :: struct {
@@ -15,6 +17,7 @@ Loaded_Forms :: struct {
     package_decl: CST_Top_Form,
     imports: [dynamic]CST_Top_Form,
     decls: [dynamic]CST_Top_Form,
+    exports: [dynamic]string,
 }
 
 synthetic_package_decl :: proc(name: string) -> CST_Top_Form {
@@ -46,6 +49,30 @@ contains_text :: proc(items: []string, value: string) -> bool {
         }
     }
     return false
+}
+
+sorted_unique_texts :: proc(items: []string) -> (out: [dynamic]string) {
+    for item in items {
+        if !contains_text(out[:], item) {
+            append(&out, item)
+        }
+    }
+    sort.sort(sort.Interface{
+        collection = rawptr(&out),
+        len = proc(it: sort.Interface) -> int {
+            values := (^([dynamic]string))(it.collection)
+            return len(values^)
+        },
+        less = proc(it: sort.Interface, i, j: int) -> bool {
+            values := (^([dynamic]string))(it.collection)
+            return values[i] < values[j]
+        },
+        swap = proc(it: sort.Interface, i, j: int) {
+            values := (^([dynamic]string))(it.collection)
+            values[i], values[j] = values[j], values[i]
+        },
+    })
+    return out
 }
 
 append_import_form_unique :: proc(forms: ^[dynamic]CST_Top_Form, seen: ^[dynamic]string, form: CST_Top_Form) {
@@ -87,7 +114,7 @@ resolve_shipped_source_import_path :: proc(importer_path, import_path: string) -
     if !ok_root {
         return "", Compile_Error{message = fmt.tprintf("could not resolve shipped source import: %s", import_path)}, false
     }
-    candidate, join_err := os.join_path({root, "packages", "hiccup", "package.kvist"}, context.allocator)
+    candidate, join_err := os.join_path({root, "packages", "hiccup"}, context.allocator)
     if join_err != nil || !os.exists(candidate) {
         if join_err == nil {
             delete(candidate)
@@ -112,11 +139,8 @@ resolve_source_import_path :: proc(importer_path, import_path: string) -> (strin
         base = joined
     }
 
-    candidates := [3]string{fmt.tprintf("%s.kvist", base), fmt.tprintf("%s/package.kvist", base), base}
-    for candidate in candidates {
-        if os.exists(candidate) {
-            return candidate, Compile_Error{}, true
-        }
+    if os.exists(base) && os.is_dir(base) {
+        return base, Compile_Error{}, true
     }
     return "", Compile_Error{message = fmt.tprintf("could not resolve source import: %s", import_path)}, false
 }
@@ -130,11 +154,24 @@ decl_head_name :: proc(form: CST_Form) -> string {
 
 is_private_decl_head :: proc(head: string) -> bool {
     switch head {
-    case "defn-", "defmacro-":
+    case "defconst-", "defvar-", "defstruct-", "defenum-", "defunion-", "defn-", "defmacro-":
         return true
     case:
         return false
     }
+}
+
+is_top_level_decl_head :: proc(head: string) -> bool {
+    switch head {
+    case "const", "defconst", "defconst-", "defvar", "defvar-", "struct", "defstruct", "defstruct-", "enum", "defenum", "defenum-", "union", "defunion", "defunion-", "proc", "defn", "defn-", "defmacro", "defmacro-":
+        return true
+    case:
+        return false
+    }
+}
+
+is_public_decl_head :: proc(head: string) -> bool {
+    return is_top_level_decl_head(head) && !is_private_decl_head(head)
 }
 
 collect_local_decl_names :: proc(forms: []CST_Top_Form) -> (names: [dynamic]string) {
@@ -143,8 +180,20 @@ collect_local_decl_names :: proc(forms: []CST_Top_Form) -> (names: [dynamic]stri
         if form.kind != .List || len(form.items) < 2 || form.items[1].kind != .Symbol {
             continue
         }
-        switch decl_head_name(form) {
-        case "const", "defconst", "defvar", "struct", "defstruct", "enum", "defenum", "union", "defunion", "proc", "defn", "defn-", "defmacro", "defmacro-":
+        if is_top_level_decl_head(decl_head_name(form)) {
+            append(&names, form.items[1].text)
+        }
+    }
+    return names
+}
+
+collect_public_decl_names :: proc(forms: []CST_Top_Form) -> (names: [dynamic]string) {
+    for top in forms {
+        form := top.form
+        if form.kind != .List || len(form.items) < 2 || form.items[1].kind != .Symbol {
+            continue
+        }
+        if is_public_decl_head(decl_head_name(form)) {
             append(&names, form.items[1].text)
         }
     }
@@ -179,7 +228,6 @@ collect_root_source_import_aliases :: proc(path: string) -> ([]Alias_Prefix, Com
     }
     defer delete(data)
     source := string(data)
-
     forms, err_forms, ok_forms := read_top_forms(source)
     if !ok_forms {
         return nil, err_forms, false
@@ -191,12 +239,35 @@ collect_root_source_import_aliases :: proc(path: string) -> ([]Alias_Prefix, Com
         if !ok_import {
             continue
         }
-        append(&aliases, Alias_Prefix{alias = alias, prefix = alias})
+        _, import_path, _ := source_import_alias_and_path(top.form)
+        resolved, err_resolve, ok_resolve := resolve_source_import_path(path, import_path)
+        if !ok_resolve {
+            return nil, err_resolve, false
+        }
+        files, err_files, ok_files := read_package_files(resolved)
+        if !ok_files {
+            return nil, err_files, false
+        }
+        _, err_package, ok_package := validate_package_files(resolved, files[:])
+        if !ok_package {
+            return nil, err_package, false
+        }
+        all_package_forms := flatten_package_forms(files[:])
+        append(&aliases, Alias_Prefix{alias = alias, prefix = alias, exports = collect_public_decl_names(all_package_forms[:])})
     }
     return aliases[:], Compile_Error{}, true
 }
 
-rewrite_symbol_text :: proc(text: string, locals: []string, aliases: []Alias_Prefix, prefix: string) -> string {
+flatten_package_forms :: proc(files: []Package_File) -> (forms: [dynamic]CST_Top_Form) {
+    for file in files {
+        for top in file.forms {
+            append(&forms, top)
+        }
+    }
+    return forms
+}
+
+rewrite_symbol_text :: proc(text: string, locals: []string, aliases: []Alias_Prefix, prefix: string, span: Span = {}) -> (string, Compile_Error, bool) {
     quote_prefix := ""
     body := text
     if len(body) > 0 && body[0] == '\'' {
@@ -206,28 +277,40 @@ rewrite_symbol_text :: proc(text: string, locals: []string, aliases: []Alias_Pre
     for alias_map in aliases {
         prefix_text := fmt.tprintf("%s/", alias_map.alias)
         if len(body) > len(prefix_text) && body[:len(prefix_text)] == prefix_text {
-            return fmt.tprintf("%s%s__%s", quote_prefix, alias_map.prefix, body[len(prefix_text):])
+            member := body[len(prefix_text):]
+            if len(alias_map.exports) > 0 && !contains_text(alias_map.exports[:], member) {
+                return "", Compile_Error{message = fmt.tprintf("source package member is private or undefined: %s/%s", alias_map.alias, member), span = span}, false
+            }
+            return fmt.tprintf("%s%s__%s", quote_prefix, alias_map.prefix, member), Compile_Error{}, true
         }
     }
     if prefix != "" && contains_text(locals, body) {
-        return fmt.tprintf("%s%s__%s", quote_prefix, prefix, body)
+        return fmt.tprintf("%s%s__%s", quote_prefix, prefix, body), Compile_Error{}, true
     }
-    return text
+    return text, Compile_Error{}, true
 }
 
-rewrite_form_symbols :: proc(form: CST_Form, locals: []string, aliases: []Alias_Prefix, prefix: string) -> CST_Form {
+rewrite_form_symbols :: proc(form: CST_Form, locals: []string, aliases: []Alias_Prefix, prefix: string) -> (CST_Form, Compile_Error, bool) {
     rewritten := form
     #partial switch form.kind {
     case .Symbol:
-        rewritten.text = rewrite_symbol_text(form.text, locals, aliases, prefix)
-        return rewritten
+        text, err_text, ok_text := rewrite_symbol_text(form.text, locals, aliases, prefix, form.span)
+        if !ok_text {
+            return CST_Form{}, err_text, false
+        }
+        rewritten.text = text
+        return rewritten, Compile_Error{}, true
     case .List, .Vector, .Brace:
         rewritten.items = nil
         for item in form.items {
-            append(&rewritten.items, rewrite_form_symbols(item, locals, aliases, prefix))
+            child, err_child, ok_child := rewrite_form_symbols(item, locals, aliases, prefix)
+            if !ok_child {
+                return CST_Form{}, err_child, false
+            }
+            append(&rewritten.items, child)
         }
     }
-    return rewritten
+    return rewritten, Compile_Error{}, true
 }
 
 rewrite_decl_name :: proc(form: ^CST_Form, prefix: string) {
@@ -235,20 +318,19 @@ rewrite_decl_name :: proc(form: ^CST_Form, prefix: string) {
         return
     }
     switch decl_head_name(form^) {
-    case "const", "defconst", "defvar", "struct", "defstruct", "enum", "defenum", "union", "defunion", "proc", "defn", "defn-", "defmacro", "defmacro-":
+    case "const", "defconst", "defconst-", "defvar", "defvar-", "struct", "defstruct", "defstruct-", "enum", "defenum", "defenum-", "union", "defunion", "defunion-", "proc", "defn", "defn-", "defmacro", "defmacro-":
         form^.items[1].text = fmt.tprintf("%s__%s", prefix, form^.items[1].text)
     }
 }
 
-rewrite_top_form :: proc(top: CST_Top_Form, locals: []string, aliases: []Alias_Prefix, prefix: string) -> CST_Top_Form {
+rewrite_top_form :: proc(top: CST_Top_Form, locals: []string, aliases: []Alias_Prefix, prefix: string) -> (CST_Top_Form, Compile_Error, bool) {
     rewritten := top
     if prefix != "" &&
        top.form.kind == .List &&
        len(top.form.items) >= 2 &&
        top.form.items[1].kind == .Symbol {
         head := decl_head_name(top.form)
-        switch head {
-        case "const", "defconst", "defvar", "struct", "defstruct", "enum", "defenum", "union", "defunion", "proc", "defn", "defn-", "defmacro", "defmacro-":
+        if is_top_level_decl_head(head) {
             rewritten.form = top.form
             rewritten.form.items = nil
             for item, idx in top.form.items {
@@ -257,27 +339,291 @@ rewrite_top_form :: proc(top: CST_Top_Form, locals: []string, aliases: []Alias_P
                     renamed.text = fmt.tprintf("%s__%s", prefix, item.text)
                     append(&rewritten.form.items, renamed)
                 } else {
-                    append(&rewritten.form.items, rewrite_form_symbols(item, locals, aliases, prefix))
+                    child, err_child, ok_child := rewrite_form_symbols(item, locals, aliases, prefix)
+                    if !ok_child {
+                        return CST_Top_Form{}, err_child, false
+                    }
+                    append(&rewritten.form.items, child)
                 }
             }
-            return rewritten
-        }
+            return rewritten, Compile_Error{}, true
+        } 
     }
-    rewritten.form = rewrite_form_symbols(top.form, locals, aliases, prefix)
+    form, err_form, ok_form := rewrite_form_symbols(top.form, locals, aliases, prefix)
+    if !ok_form {
+        return CST_Top_Form{}, err_form, false
+    }
+    rewritten.form = form
     rewrite_decl_name(&rewritten.form, prefix)
-    return rewritten
+    return rewritten, Compile_Error{}, true
 }
 
-load_source_forms :: proc(path, prefix: string, loaded_keys, import_keys: ^[dynamic]string, visiting: ^[dynamic]string) -> (Loaded_Forms, Compile_Error, bool) {
-    key := fmt.tprintf("%s|%s", path, prefix)
+Package_File :: struct {
+    path:         string,
+    source:       string,
+    package_name: string,
+    forms:        [dynamic]CST_Top_Form,
+}
+
+read_package_files :: proc(dir: string) -> ([]Package_File, Compile_Error, bool) {
+    entries, err := os.read_directory_by_path(dir, -1, context.allocator)
+    if err != nil {
+        return nil, Compile_Error{message = fmt.tprintf("could not read package directory: %s", dir)}, false
+    }
+    defer delete(entries)
+
+    paths: [dynamic]string
+    for entry in entries {
+        if entry.type != .Regular {
+            continue
+        }
+        if !strings.has_suffix(entry.name, ".kvist") {
+            continue
+        }
+        path, join_err := os.join_path({dir, entry.name}, context.allocator)
+        if join_err != nil {
+            return nil, Compile_Error{message = fmt.tprintf("could not read package directory: %s", dir)}, false
+        }
+        append(&paths, path)
+    }
+    if len(paths) == 0 {
+        return nil, Compile_Error{message = fmt.tprintf("source package directory contains no .kvist files: %s", dir)}, false
+    }
+    sorted := sorted_unique_texts(paths[:])
+    defer delete(paths)
+
+    files: [dynamic]Package_File
+    for path in sorted {
+        data, read_err := os.read_entire_file_from_path(path, context.allocator)
+        if read_err != nil {
+            return nil, Compile_Error{message = fmt.tprintf("could not read file: %s", path)}, false
+        }
+        source := string(data)
+        forms, err_forms, ok_forms := read_top_forms(source)
+        if !ok_forms {
+            return nil, err_forms, false
+        }
+        package_name := ""
+        package_count := 0
+        for top in forms {
+            if decl_head_name(top.form) != "package" {
+                continue
+            }
+            package_count += 1
+            if len(top.form.items) != 2 || top.form.items[1].kind != .Symbol {
+                return nil, Compile_Error{message = "package expects one symbol name", span = top.form.span}, false
+            }
+            package_name = top.form.items[1].text
+        }
+        if package_count == 0 {
+            return nil, Compile_Error{message = fmt.tprintf("source package file is missing package declaration: %s", path)}, false
+        }
+        if package_count > 1 {
+            return nil, Compile_Error{message = fmt.tprintf("source package file has duplicate package declarations: %s", path)}, false
+        }
+        append(&files, Package_File{path = path, source = source, package_name = package_name, forms = forms})
+    }
+    return files[:], Compile_Error{}, true
+}
+
+validate_package_files :: proc(dir: string, files: []Package_File) -> (package_name: string, err: Compile_Error, ok: bool) {
+    package_name = files[0].package_name
+    for file in files[1:] {
+        if file.package_name != package_name {
+            return "", Compile_Error{message = fmt.tprintf("source package files must declare the same package in %s", dir)}, false
+        }
+    }
+    return package_name, Compile_Error{}, true
+}
+
+collect_package_import_aliases :: proc(files: []Package_File) -> (aliases: [dynamic]string, paths: [dynamic]string, err: Compile_Error, ok: bool) {
+    for file in files {
+        for top in file.forms {
+            alias, path, ok_import := source_import_alias_and_path(top.form)
+            if !ok_import {
+                continue
+            }
+            if contains_text(aliases[:], alias) {
+                return nil, nil, Compile_Error{message = fmt.tprintf("duplicate source import alias in package: %s", alias), span = top.form.span}, false
+            }
+            append(&aliases, alias)
+            append(&paths, path)
+        }
+        for top in file.forms {
+            form := top.form
+            if decl_head_name(form) != "import" {
+                continue
+            }
+            _, path, is_source_import := source_import_alias_and_path(form)
+            if is_source_import {
+                continue
+            }
+            if len(form.items) == 3 && form.items[1].kind == .Symbol {
+                alias := map_name(form.items[1].text)
+                if contains_text(aliases[:], alias) {
+                    return nil, nil, Compile_Error{message = fmt.tprintf("duplicate import alias in package: %s", alias), span = form.items[1].span}, false
+                }
+                append(&aliases, alias)
+                append(&paths, "")
+            }
+            if len(form.items) == 2 && form.items[1].kind == .String {
+                if is_source_import_path(path) {
+                    continue
+                }
+                alias := import_default_alias(path)
+                if alias != "" {
+                    if contains_text(aliases[:], alias) {
+                        return nil, nil, Compile_Error{message = fmt.tprintf("duplicate import alias in package: %s", alias), span = form.items[1].span}, false
+                    }
+                    append(&aliases, alias)
+                    append(&paths, "")
+                }
+            }
+        }
+    }
+    return aliases, paths, Compile_Error{}, true
+}
+
+validate_package_conflicts :: proc(files: []Package_File) -> (Compile_Error, bool) {
+    names: [dynamic]string
+    for file in files {
+        for top in file.forms {
+            form := top.form
+            if form.kind != .List || len(form.items) < 2 || form.items[1].kind != .Symbol {
+                continue
+            }
+            head := decl_head_name(form)
+            if !is_top_level_decl_head(head) {
+                continue
+            }
+            name := form.items[1].text
+            if contains_text(names[:], name) {
+                return Compile_Error{message = fmt.tprintf("duplicate top-level declaration in package: %s", name), span = form.items[1].span}, false
+            }
+            append(&names, name)
+        }
+    }
+    aliases, _, err_aliases, ok_aliases := collect_package_import_aliases(files)
+    if !ok_aliases {
+        return err_aliases, false
+    }
+    for alias in aliases {
+        if contains_text(names[:], alias) {
+            return Compile_Error{message = fmt.tprintf("import alias conflicts with top-level declaration in package: %s", alias)}, false
+        }
+    }
+    return Compile_Error{}, true
+}
+
+load_source_forms :: proc(dir, prefix: string, loaded_keys, import_keys: ^[dynamic]string, visiting: ^[dynamic]string) -> (Loaded_Forms, Compile_Error, bool) {
+    key := fmt.tprintf("%s|%s", dir, prefix)
     if contains_text(loaded_keys[:], key) {
         return Loaded_Forms{}, Compile_Error{}, true
     }
-    if contains_text(visiting[:], key) {
-        return Loaded_Forms{}, Compile_Error{message = fmt.tprintf("cyclic source import: %s", path)}, false
+    if contains_text(visiting[:], dir) {
+        cycle_start := 0
+        for item, i in visiting[:] {
+            if item == dir {
+                cycle_start = i
+                break
+            }
+        }
+        chain: [dynamic]string
+        for item in visiting[cycle_start:] {
+            append(&chain, item)
+        }
+        append(&chain, dir)
+        return Loaded_Forms{}, Compile_Error{message = fmt.tprintf("cyclic source import: %s", strings.join(chain[:], " -> ", context.allocator))}, false
     }
-    append(visiting, key)
+    append(visiting, dir)
+    defer resize(visiting, len(visiting)-1)
 
+    files, err_files, ok_files := read_package_files(dir)
+    if !ok_files {
+        return Loaded_Forms{}, err_files, false
+    }
+    package_name, err_package, ok_package := validate_package_files(dir, files[:])
+    if !ok_package {
+        return Loaded_Forms{}, err_package, false
+    }
+    err_conflicts, ok_conflicts := validate_package_conflicts(files[:])
+    if !ok_conflicts {
+        return Loaded_Forms{}, err_conflicts, false
+    }
+    all_forms: [dynamic]CST_Top_Form
+    for file in files {
+        for top in file.forms {
+            append(&all_forms, top)
+        }
+    }
+    locals := collect_local_decl_names(all_forms[:])
+    exported := collect_public_decl_names(all_forms[:])
+    aliases: [dynamic]Alias_Prefix
+    result := Loaded_Forms{}
+    for name in exported {
+        append(&result.exports, name)
+    }
+
+    for file in files {
+        for top in file.forms {
+            alias, import_path, ok_import := source_import_alias_and_path(top.form)
+            if !ok_import {
+                continue
+            }
+            resolved, err_resolve, ok_resolve := resolve_source_import_path(file.path, import_path)
+            if !ok_resolve {
+                return result, err_resolve, false
+            }
+            nested_prefix := alias
+            if prefix != "" {
+                nested_prefix = fmt.tprintf("%s__%s", prefix, alias)
+            }
+            nested, err_nested, ok_nested := load_source_forms(resolved, nested_prefix, loaded_keys, import_keys, visiting)
+            if !ok_nested {
+                return result, err_nested, false
+            }
+            append(&aliases, Alias_Prefix{alias = alias, prefix = nested_prefix, exports = nested.exports})
+            for form in nested.imports {
+                append_import_form_unique(&result.imports, import_keys, form)
+            }
+            for form in nested.decls {
+                append(&result.decls, form)
+            }
+        }
+    }
+
+    for file in files {
+        for top in file.forms {
+            form := top.form
+            head := decl_head_name(form)
+            if head == "package" {
+                if prefix == "" {
+                    result.has_package = true
+                    result.package_decl = synthetic_package_decl(package_name)
+                }
+                continue
+            }
+            _, _, is_source_import := source_import_alias_and_path(form)
+            if is_source_import {
+                continue
+            }
+            if head == "import" {
+                append_import_form_unique(&result.imports, import_keys, top)
+                continue
+            }
+            rewritten, err_rewrite, ok_rewrite := rewrite_top_form(top, locals[:], aliases[:], prefix)
+            if !ok_rewrite {
+                return result, err_rewrite, false
+            }
+            append(&result.decls, rewritten)
+        }
+    }
+
+    append(loaded_keys, key)
+    return result, Compile_Error{}, true
+}
+
+load_root_file_forms :: proc(path: string) -> (Loaded_Forms, Compile_Error, bool) {
     data, read_err := os.read_entire_file_from_path(path, context.allocator)
     if read_err != nil {
         return Loaded_Forms{}, Compile_Error{message = fmt.tprintf("could not read file: %s", path)}, false
@@ -289,10 +635,12 @@ load_source_forms :: proc(path, prefix: string, loaded_keys, import_keys: ^[dyna
     if !ok_forms {
         return Loaded_Forms{}, err_forms, false
     }
-
-    locals := collect_local_decl_names(forms[:])
     aliases: [dynamic]Alias_Prefix
+    import_keys: [dynamic]string
+    loaded_keys: [dynamic]string
+    visiting: [dynamic]string
     result := Loaded_Forms{}
+    locals := collect_local_decl_names(forms[:])
 
     for top in forms {
         alias, import_path, ok_import := source_import_alias_and_path(top.form)
@@ -303,17 +651,13 @@ load_source_forms :: proc(path, prefix: string, loaded_keys, import_keys: ^[dyna
         if !ok_resolve {
             return result, err_resolve, false
         }
-        nested_prefix := alias
-        if prefix != "" {
-            nested_prefix = fmt.tprintf("%s__%s", prefix, alias)
-        }
-        append(&aliases, Alias_Prefix{alias = alias, prefix = nested_prefix})
-        nested, err_nested, ok_nested := load_source_forms(resolved, nested_prefix, loaded_keys, import_keys, visiting)
+        nested, err_nested, ok_nested := load_source_forms(resolved, alias, &loaded_keys, &import_keys, &visiting)
         if !ok_nested {
             return result, err_nested, false
         }
+        append(&aliases, Alias_Prefix{alias = alias, prefix = alias, exports = nested.exports})
         for form in nested.imports {
-            append_import_form_unique(&result.imports, import_keys, form)
+            append_import_form_unique(&result.imports, &import_keys, form)
         }
         for form in nested.decls {
             append(&result.decls, form)
@@ -324,10 +668,8 @@ load_source_forms :: proc(path, prefix: string, loaded_keys, import_keys: ^[dyna
         form := top.form
         head := decl_head_name(form)
         if head == "package" {
-            if prefix == "" {
-                result.has_package = true
-                result.package_decl = top
-            }
+            result.has_package = true
+            result.package_decl = top
             continue
         }
         _, _, is_source_import := source_import_alias_and_path(form)
@@ -335,21 +677,20 @@ load_source_forms :: proc(path, prefix: string, loaded_keys, import_keys: ^[dyna
             continue
         }
         if head == "import" {
-            append_import_form_unique(&result.imports, import_keys, top)
+            append_import_form_unique(&result.imports, &import_keys, top)
             continue
         }
-        append(&result.decls, rewrite_top_form(top, locals[:], aliases[:], prefix))
+        rewritten, err_rewrite, ok_rewrite := rewrite_top_form(top, locals[:], aliases[:], "")
+        if !ok_rewrite {
+            return result, err_rewrite, false
+        }
+        append(&result.decls, rewritten)
     }
-
-    append(loaded_keys, key)
     return result, Compile_Error{}, true
 }
 
 load_path_expanded_forms :: proc(path: string) -> (expanded: [dynamic]CST_Top_Form, macros: [dynamic]User_Macro, err: Compile_Error, ok: bool) {
-    loaded_keys: [dynamic]string
-    import_keys: [dynamic]string
-    visiting: [dynamic]string
-    loaded, err_load, ok_load := load_source_forms(path, "", &loaded_keys, &import_keys, &visiting)
+    loaded, err_load, ok_load := load_root_file_forms(path)
     if !ok_load {
         return expanded, macros, err_load, false
     }
@@ -857,7 +1198,12 @@ compile_eval_path_with_map :: proc(path, eval_source: string, no_print: bool = f
         context.allocator = old_allocator
         return result, clone_compile_error(err_eval, result_allocator), false
     }
-    eval_form = rewrite_form_symbols(eval_form, nil, aliases, "")
+    eval_form_rewritten, err_rewrite_eval, ok_rewrite_eval := rewrite_form_symbols(eval_form, nil, aliases, "")
+    if !ok_rewrite_eval {
+        context.allocator = old_allocator
+        return result, clone_compile_error(err_rewrite_eval, result_allocator), false
+    }
+    eval_form = eval_form_rewritten
     expanded_eval_form, err_eval_expand, ok_eval_expand := macroexpand_cst_form_with_macros(eval_form, macros[:])
     if !ok_eval_expand {
         context.allocator = old_allocator

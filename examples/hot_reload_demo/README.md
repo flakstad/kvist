@@ -12,10 +12,21 @@ first answer for broad day-to-day compiled-code iteration.
 
 ## Files
 
-- [host/main.odin](./host/main.odin): the long-running host process
-- [module/main.odin](./module/main.odin): the reloadable shared library
-- [shared/shared.odin](./shared/shared.odin): shared state layout used by both
+- [host/main.kvist](./host/main.kvist): the long-running host process
+- [module/main.kvist](./module/main.kvist): the reloadable shared library
+- [shared/package.kvist](./shared/package.kvist): shared state layout used by both
   host and module
+
+These sources are all `.kvist`.
+
+Today, the host and module still use a few narrow `(odin "...")` escape
+hatches for:
+
+- exported `proc "c"` symbols
+- the dynlib-tagged symbol table struct
+- direct imports of existing Odin packages such as `kvist_hot`
+
+That is a current compiler boundary, not the intended end-state.
 
 The host intentionally uses the reusable `kvist_hot` helpers rather than
 open-coding file timestamp checks:
@@ -30,8 +41,12 @@ From the repo root:
 
 ```sh
 mkdir -p build/hot_reload_demo
-odin build examples/hot_reload_demo/module -build-mode:dll -out:build/hot_reload_demo/hot_demo.dylib
-odin run examples/hot_reload_demo/host
+mkdir -p build/generated/hot_reload_demo/shared build/generated/hot_reload_demo/module build/generated/hot_reload_demo/host
+./kvist examples/hot_reload_demo/shared/package.kvist -o build/generated/hot_reload_demo/shared/package.odin
+./kvist examples/hot_reload_demo/module/main.kvist -o build/generated/hot_reload_demo/module/main.odin
+./kvist examples/hot_reload_demo/host/main.kvist -o build/generated/hot_reload_demo/host/main.odin
+odin build build/generated/hot_reload_demo/module -build-mode:dll -out:build/hot_reload_demo/hot_demo.dylib
+odin run build/generated/hot_reload_demo/host
 ```
 
 The host prints a tick every second.
@@ -40,13 +55,14 @@ The host prints a tick every second.
 
 While the host is still running:
 
-1. Edit [module/main.odin](./module/main.odin).
+1. Edit [module/main.kvist](./module/main.kvist).
 2. Change the exported `hot_demo_message` string or the text formatting in
    `hot_demo_tick`.
 3. Rebuild only the shared library:
 
 ```sh
-odin build examples/hot_reload_demo/module -build-mode:dll -out:build/hot_reload_demo/hot_demo.dylib
+./kvist examples/hot_reload_demo/module/main.kvist -o build/generated/hot_reload_demo/module/main.odin
+odin build build/generated/hot_reload_demo/module -build-mode:dll -out:build/hot_reload_demo/hot_demo.dylib
 ```
 
 The running host notices the file change, reloads the module, and continues
@@ -70,8 +86,9 @@ In Emacs or another editor, the workflow would be:
 
 1. Start the host process once.
 2. Keep it running in a terminal.
-3. Edit reloadable module code.
-4. Rebuild only the shared library.
+3. Edit reloadable Kvist module code.
+4. Recompile that Kvist file to generated Odin.
+5. Rebuild only the shared library.
 5. Observe the running process continue with new code and old state.
 
 For a real project, the host shape would usually be:
@@ -83,6 +100,24 @@ For a real project, the host shape would usually be:
 3. Start one `kvist_hot.Reloader`.
 4. Keep your app loop ordinary.
 5. Poll `reload_if_source_changed(...)` inside that loop.
+
+## Current Limits
+
+The current Kvist-first demo is real and runnable, but a few boundaries still
+show through:
+
+- exported C-ABI entrypoints are written with raw Odin escape hatches
+- the dynlib symbol table uses a raw Odin struct because field tags are still
+  host-surface syntax
+- existing Odin-only packages such as `kvist_hot` are imported with raw Odin
+  import lines
+
+The actual workflow, however, is now `.kvist`-first:
+
+- edit `*.kvist`
+- re-run `./kvist ... -o ...`
+- rebuild only the reloadable DLL
+- keep the host process alive
 
 If you change the shared state layout too much, you still need a restart. That
 is the main native hot-reload constraint, and it is exactly why `Kvist/Live`

@@ -646,25 +646,31 @@ foreign_call :: proc(handle: Foreign_Handle) ---
 
 - `(package name)`, `(import "path")`, `(import alias "path")`
   - host imports keep Odin package paths like `"core:fmt"`
-  - source-package imports can load `.kvist` packages by relative path, e.g. `(import "support/math")`
+  - source-package imports load relative package directories of `.kvist` files, e.g. `(import math "support/math")`
   - Kvist library packages are imported explicitly, e.g. `(import arr "kvist:arr")`, `(import str "kvist:str")`, `(import map "kvist:map")`, `(import set "kvist:set")`, `(import struct "kvist:struct")`
 - `(defconst name expr)` -> `name :: expr`
 - `(defconst name type expr)` -> `name: type : expr`
+- `(defconst- name expr)` package-private constant
 - `(defvar name expr)` -> `name := expr`
 - `(defvar name type expr)` -> `name: type = expr`
+- `(defvar- name expr)` package-private variable
 - `(defstruct Name {:field Type ...})`
 - `(defstruct Name "Doc..." {:field type ...})`
+- `(defstruct- Name {:field Type ...})` package-private struct
 - `(defenum Name [A B C])` and `(defenum Name {:A 1 :B 2})`
 - `(defenum Name "Doc..." [A B C])` and `(defenum Name "Doc..." {:A 1 :B 2})`
+- `(defenum- Name [A B C])` package-private enum
 - `(defunion Name {:variant Type ...})`
 - `(defunion Name "Doc..." {:variant Type ...})`
+- `(defunion- Name {:variant Type ...})` package-private union
 - `(defn name [arg: type, ...] -> return-type body...)`
   - `defn` is the preferred source-level declaration form
+  - `defn-` is package-private
   - `proc` remains available for direct Odin-shaped code and proc types
   - params and returns use ordinary types like `int`, `string`, `Person`, plus Odin-style container types like `[]string`, `[dynamic]int`, `map[string]int`, and Kvist set types like `set[keyword]`
   - `println` and `doc` stay implicitly available; most library helpers come from explicit Kvist package imports
 - `(defmacro name [arg ...] body...)`
-  - package-local for now
+  - package-local for now; `defmacro-` is package-private
   - expands over Kvist forms before ordinary parse/lowering
   - resource-scope bootstrap macros still exist alongside it during bootstrap
 - top-level and statement `(odin "...")` raw escape hatches

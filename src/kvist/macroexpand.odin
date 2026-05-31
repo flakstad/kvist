@@ -1329,6 +1329,21 @@ macro_eval_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_
                     return macro_bool_value(false), Compile_Error{}, true
                 }
                 return macro_bool_value(value.form.kind == .Bool), Compile_Error{}, true
+            case "nil?":
+                if len(form.items) != 2 {
+                    return Macro_Value{}, Compile_Error{message = "nil? expects one argument", span = form.span}, false
+                }
+                value, err_value, ok_value := macro_eval_expr(form.items[1], macros, bindings)
+                if !ok_value {
+                    return Macro_Value{}, err_value, false
+                }
+                if value.kind == .Nil {
+                    return macro_bool_value(true), Compile_Error{}, true
+                }
+                if value.kind != .Form {
+                    return macro_bool_value(false), Compile_Error{}, true
+                }
+                return macro_bool_value(value.form.kind == .Nil), Compile_Error{}, true
             case "text":
                 if len(form.items) != 2 {
                     return Macro_Value{}, Compile_Error{message = "text expects one argument", span = form.span}, false

@@ -557,12 +557,18 @@ An empty return annotation means the function is `void`:
 
 ### Source Packages
 
-Kvist can inline relative `.kvist` packages from source:
+Kvist source packages are directories of `.kvist` files. Every file in the
+directory must declare the same `(package ...)` name. Import the package by
+relative directory path:
 
 ```clojure
-(import "support/math")
+(import math "support/math")
 (math/sum-range 0 5)
 ```
+
+Top-level declarations are public by default. Use the `-` suffixed declaration
+forms for package-private declarations such as `defn-`, `defmacro-`,
+`defconst-`, `defvar-`, `defstruct-`, `defenum-`, and `defunion-`.
 
 For file-backed `.kvist` programs, `(package ...)` is optional. Kvist currently
 defaults the root package to `main` when compiling from a path. Raw source

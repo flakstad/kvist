@@ -1,0 +1,17 @@
+(package math)
+
+(defconst default-limit
+  "Default upper bound used by package examples."
+  10)
+
+(defn- even-step? [i: int] -> bool
+  (== 0 (% i 2)))
+
+(defn evens-under
+  "Return a dynamic array of even integers below LIMIT."
+  [limit: int] -> [dynamic]int
+  (let [out (arr/empty int)]
+    (for [i (range 0 limit)]
+      (when (even-step? i)
+        (arr/push! out i)))
+    out))

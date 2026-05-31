@@ -677,7 +677,7 @@ parse_decl :: proc(top_form: CST_Top_Form) -> (decl: AST_Decl, err: Compile_Erro
             }, {}, true
         }
         return decl, Compile_Error{message = "import expects a string path or alias plus string path", span = form.span}, false
-    case "const", "defconst":
+    case "const", "defconst", "defconst-":
         if len(form.items) < 3 {
             return decl, Compile_Error{message = "defconst expects a name, optional type, and value", span = form.span}, false
         }
@@ -716,7 +716,7 @@ parse_decl :: proc(top_form: CST_Top_Form) -> (decl: AST_Decl, err: Compile_Erro
             doc_lines = doc_lines,
             const_decl = const_decl,
         }, {}, true
-    case "defvar":
+    case "defvar", "defvar-":
         if len(form.items) < 3 {
             return decl, Compile_Error{message = "defvar expects a name, optional type, and value", span = form.span}, false
         }
@@ -770,7 +770,7 @@ parse_decl :: proc(top_form: CST_Top_Form) -> (decl: AST_Decl, err: Compile_Erro
                 fields = fields,
             },
         }, {}, true
-    case "defstruct":
+    case "defstruct", "defstruct-":
         if len(form.items) != 3 && len(form.items) != 4 {
             return decl, Compile_Error{message = "defstruct expects a name, optional docstring, and brace form", span = form.span}, false
         }
@@ -799,7 +799,7 @@ parse_decl :: proc(top_form: CST_Top_Form) -> (decl: AST_Decl, err: Compile_Erro
                 fields = fields,
             },
         }, {}, true
-    case "enum", "defenum":
+    case "enum", "defenum", "defenum-":
         if len(form.items) < 3 || form.items[1].kind != .Symbol {
             return decl, Compile_Error{message = "defenum expects a name and variant vector or brace form", span = form.span}, false
         }
@@ -825,7 +825,7 @@ parse_decl :: proc(top_form: CST_Top_Form) -> (decl: AST_Decl, err: Compile_Erro
                 variants = variants,
             },
         }, {}, true
-    case "union", "defunion":
+    case "union", "defunion", "defunion-":
         if len(form.items) < 3 || form.items[1].kind != .Symbol {
             return decl, Compile_Error{message = "defunion expects a name and variant brace form", span = form.span}, false
         }

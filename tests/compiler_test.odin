@@ -435,17 +435,25 @@ compile_path_supports_hiccup_expression_interpolation :: proc(t: ^testing.T) {
     "Hidden"))
 
 (defn demo [title: string, count: int, ratio: float, enabled?: bool] -> hiccup/Node
-  (hiccup/html
-    [:section {:data-count count
-               :data-ratio ratio
-               :hidden enabled?
-               :data-state (if enabled? "ready" "hidden")}
-     [:h1 title]
-     [:p (status-label enabled?)]
-     [:p (+ count 1)]
-     (if enabled?
-       "Visible"
-       "Hidden")]))`
+  (let [archived? false]
+    (hiccup/html
+      [:section {:data-count count
+                 :data-ratio ratio
+                 :hidden enabled?
+                 :data-state (if enabled? "ready" "hidden")
+                 :data-archived (when archived? "true")}
+       [:h1 title]
+       [:<>
+        [:h2 title]
+        [:p (+ count 10)]]
+       [:p (status-label enabled?)]
+       [:p (+ count 1)]
+       (when archived?
+         [:p "Archived"])
+       nil
+       (if enabled?
+         "Visible"
+         "Hidden")])))`
 
     write_err := os.write_entire_file_from_string(path, source)
     testing.expect_value(t, write_err == nil, true)
@@ -465,9 +473,14 @@ compile_path_supports_hiccup_expression_interpolation :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, `value = hiccup__Attr_Value(ratio)`), true)
     testing.expect_value(t, strings.contains(output, `value = hiccup__Attr_Value(enabled_p)`), true)
     testing.expect_value(t, strings.contains(output, `value = hiccup__if_attr_value(enabled_p, hiccup__Attr_Value("ready"), hiccup__Attr_Value("hidden"))`), true)
+    testing.expect_value(t, strings.contains(output, `value = hiccup__if_attr_value(archived_p, hiccup__Attr_Value("true"), hiccup__Attr_Value(hiccup__Nothing{}))`), true)
     testing.expect_value(t, strings.contains(output, `children = []hiccup__Node{hiccup__Node(title)}`), true)
+    testing.expect_value(t, strings.contains(output, `hiccup__Node(hiccup__Fragment{children = []hiccup__Node{hiccup__Node(hiccup__Element{tag = "h2"`), true)
+    testing.expect_value(t, strings.contains(output, `hiccup__Node((count) + (10))`), true)
     testing.expect_value(t, strings.contains(output, `hiccup__Node(status_label(enabled_p))`), true)
     testing.expect_value(t, strings.contains(output, `hiccup__Node((count) + (1))`), true)
+    testing.expect_value(t, strings.contains(output, `hiccup__if_node(archived_p, hiccup__Node(hiccup__Element{tag = "p"`), true)
+    testing.expect_value(t, strings.contains(output, `hiccup__Node(hiccup__Nothing{})`), true)
     testing.expect_value(t, strings.contains(output, `hiccup__if_node(enabled_p, hiccup__Node("Visible"), hiccup__Node("Hidden"))`), true)
     testing.expect_value(t, strings.contains(output, `hiccup__Attr_Value("count")`), false)
     testing.expect_value(t, strings.contains(output, `hiccup__Node("title")`), false)
@@ -4718,6 +4731,267 @@ compile_path_defaults_missing_package_to_main :: proc(t: ^testing.T) {
 
     testing.expect_value(t, strings.contains(output, "package main"), true)
     testing.expect_value(t, strings.contains(output, "main :: proc()"), true)
+}
+
+@(test)
+compile_path_supports_multi_file_source_package_directory :: proc(t: ^testing.T) {
+    output, err, ok := kvist.compile_path("examples/cluck-port-packages.kvist")
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "math__sum_range"), true)
+    testing.expect_value(t, strings.contains(output, "math__evens_under"), true)
+    testing.expect_value(t, strings.contains(output, "math__default_limit"), true)
+    testing.expect_value(t, strings.contains(output, "math__even_step_p"), true)
+}
+
+@(test)
+compile_path_rejects_private_source_package_member_access :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-private-package-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    pkg_dir, join_pkg_err := os.join_path({dir, "support", "secret"}, context.allocator)
+    testing.expect_value(t, join_pkg_err == nil, true)
+    if join_pkg_err != nil {
+        return
+    }
+    defer delete(pkg_dir)
+    mk_pkg_err := os.make_directory_all(pkg_dir)
+    testing.expect_value(t, mk_pkg_err == nil, true)
+    if mk_pkg_err != nil {
+        return
+    }
+
+    pkg_file, pkg_join_err := os.join_path({pkg_dir, "package.kvist"}, context.allocator)
+    testing.expect_value(t, pkg_join_err == nil, true)
+    if pkg_join_err != nil {
+        return
+    }
+    defer delete(pkg_file)
+    pkg_source := `(package secret)
+
+(defn- hidden [] -> int
+  42)
+
+(defn visible [] -> int
+  7)`
+    pkg_write_err := os.write_entire_file_from_string(pkg_file, pkg_source)
+    testing.expect_value(t, pkg_write_err == nil, true)
+    if pkg_write_err != nil {
+        return
+    }
+
+    main_path, main_join_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, main_join_err == nil, true)
+    if main_join_err != nil {
+        return
+    }
+    defer delete(main_path)
+    main_source := `(import secret "support/secret")
+
+(defn main []
+  (println (secret/hidden)))`
+    main_write_err := os.write_entire_file_from_string(main_path, main_source)
+    testing.expect_value(t, main_write_err == nil, true)
+    if main_write_err != nil {
+        return
+    }
+
+    _, err, ok := kvist.compile_path(main_path)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+    defer delete(err.message)
+    testing.expect_value(t, strings.contains(err.message, "source package member is private or undefined: secret/hidden"), true)
+}
+
+@(test)
+compile_path_rejects_cyclic_source_package_imports :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-cycle-package-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    support_dir, support_join_err := os.join_path({dir, "support"}, context.allocator)
+    testing.expect_value(t, support_join_err == nil, true)
+    if support_join_err != nil {
+        return
+    }
+    defer delete(support_dir)
+
+    alpha_dir, alpha_join_err := os.join_path({support_dir, "alpha"}, context.allocator)
+    testing.expect_value(t, alpha_join_err == nil, true)
+    if alpha_join_err != nil {
+        return
+    }
+    defer delete(alpha_dir)
+    beta_dir, beta_join_err := os.join_path({support_dir, "beta"}, context.allocator)
+    testing.expect_value(t, beta_join_err == nil, true)
+    if beta_join_err != nil {
+        return
+    }
+    defer delete(beta_dir)
+
+    alpha_mk_err := os.make_directory_all(alpha_dir)
+    testing.expect_value(t, alpha_mk_err == nil, true)
+    if alpha_mk_err != nil {
+        return
+    }
+    beta_mk_err := os.make_directory_all(beta_dir)
+    testing.expect_value(t, beta_mk_err == nil, true)
+    if beta_mk_err != nil {
+        return
+    }
+
+    alpha_file, alpha_file_err := os.join_path({alpha_dir, "package.kvist"}, context.allocator)
+    testing.expect_value(t, alpha_file_err == nil, true)
+    if alpha_file_err != nil {
+        return
+    }
+    defer delete(alpha_file)
+    alpha_source := `(package alpha)
+(import beta "../beta")
+
+(defn alpha-value [] -> int
+  (beta/beta-value))`
+    alpha_write_err := os.write_entire_file_from_string(alpha_file, alpha_source)
+    testing.expect_value(t, alpha_write_err == nil, true)
+    if alpha_write_err != nil {
+        return
+    }
+
+    beta_file, beta_file_err := os.join_path({beta_dir, "package.kvist"}, context.allocator)
+    testing.expect_value(t, beta_file_err == nil, true)
+    if beta_file_err != nil {
+        return
+    }
+    defer delete(beta_file)
+    beta_source := `(package beta)
+(import alpha "../alpha")
+
+(defn beta-value [] -> int
+  (alpha/alpha-value))`
+    beta_write_err := os.write_entire_file_from_string(beta_file, beta_source)
+    testing.expect_value(t, beta_write_err == nil, true)
+    if beta_write_err != nil {
+        return
+    }
+
+    main_path, main_join_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, main_join_err == nil, true)
+    if main_join_err != nil {
+        return
+    }
+    defer delete(main_path)
+    main_source := `(import alpha "support/alpha")
+
+(defn main []
+  (alpha/alpha-value))`
+    main_write_err := os.write_entire_file_from_string(main_path, main_source)
+    testing.expect_value(t, main_write_err == nil, true)
+    if main_write_err != nil {
+        return
+    }
+
+    _, err, ok := kvist.compile_path(main_path)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+    defer delete(err.message)
+    testing.expect_value(t, strings.contains(err.message, "cyclic source import:"), true)
+    testing.expect_value(t, strings.contains(err.message, "support/alpha"), true)
+    testing.expect_value(t, strings.contains(err.message, "support/beta"), true)
+}
+
+@(test)
+compile_path_rejects_mismatched_package_names_in_directory :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-mismatch-package-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    pkg_dir, pkg_join_err := os.join_path({dir, "support", "mixed"}, context.allocator)
+    testing.expect_value(t, pkg_join_err == nil, true)
+    if pkg_join_err != nil {
+        return
+    }
+    defer delete(pkg_dir)
+    mk_pkg_err := os.make_directory_all(pkg_dir)
+    testing.expect_value(t, mk_pkg_err == nil, true)
+    if mk_pkg_err != nil {
+        return
+    }
+
+    one_file, one_join_err := os.join_path({pkg_dir, "one.kvist"}, context.allocator)
+    testing.expect_value(t, one_join_err == nil, true)
+    if one_join_err != nil {
+        return
+    }
+    defer delete(one_file)
+    one_write_err := os.write_entire_file_from_string(one_file, `(package mixed)
+
+(defn one [] -> int
+  1)`)
+    testing.expect_value(t, one_write_err == nil, true)
+    if one_write_err != nil {
+        return
+    }
+
+    two_file, two_join_err := os.join_path({pkg_dir, "two.kvist"}, context.allocator)
+    testing.expect_value(t, two_join_err == nil, true)
+    if two_join_err != nil {
+        return
+    }
+    defer delete(two_file)
+    two_write_err := os.write_entire_file_from_string(two_file, `(package other)
+
+(defn two [] -> int
+  2)`)
+    testing.expect_value(t, two_write_err == nil, true)
+    if two_write_err != nil {
+        return
+    }
+
+    main_path, main_join_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, main_join_err == nil, true)
+    if main_join_err != nil {
+        return
+    }
+    defer delete(main_path)
+    main_source := `(import mixed "support/mixed")
+
+(defn main []
+  (mixed/one))`
+    main_write_err := os.write_entire_file_from_string(main_path, main_source)
+    testing.expect_value(t, main_write_err == nil, true)
+    if main_write_err != nil {
+        return
+    }
+
+    _, err, ok := kvist.compile_path(main_path)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+    defer delete(err.message)
+    testing.expect_value(t, strings.contains(err.message, "source package files must declare the same package"), true)
 }
 
 @(test)

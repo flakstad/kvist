@@ -1,0 +1,148 @@
+(package hot_reload_demo_host)
+
+(import dynlib "core:dynlib")
+(import fmt "core:fmt")
+(import time "core:time")
+(odin "import kvist_hot \"../../../../src/kvist_hot\"")
+(odin "import shared \"../shared\"")
+
+(odin "Demo_Symbols :: struct {")
+(odin "    api_version: ^u32 `dynlib:\"kvist_hot_api_version\"`,")
+(odin "    state_size:  proc \"c\" () -> int `dynlib:\"kvist_hot_state_size\"`,")
+(odin "    state_align: proc \"c\" () -> int `dynlib:\"kvist_hot_state_align\"`,")
+(odin "    on_load:     proc \"c\" (state: rawptr, is_reload: bool) `dynlib:\"kvist_hot_on_load\"`,")
+(odin "    on_unload:   proc \"c\" (state: rawptr) `dynlib:\"kvist_hot_on_unload\"`,")
+(odin "    message:     proc \"c\" () -> cstring `dynlib:\"hot_demo_message\"`,")
+(odin "    tick:        proc \"c\" (state: rawptr) `dynlib:\"hot_demo_tick\"`,")
+(odin "    __handle:    dynlib.Library,")
+(odin "}")
+
+(odin "call_manifest_on_load :: proc(manifest: kvist_hot.Manifest, state: ^shared.State, is_reload: bool) {")
+(odin "    manifest.on_load(state, is_reload)")
+(odin "}")
+
+(odin "call_symbol_on_unload :: proc(symbols: ^Demo_Symbols, state: ^shared.State) {")
+(odin "    symbols.on_unload(rawptr(state))")
+(odin "}")
+
+(odin "call_symbol_tick :: proc(symbols: ^Demo_Symbols, state: ^shared.State) {")
+(odin "    symbols.tick(rawptr(state))")
+(odin "}")
+
+(odin "call_symbol_message :: proc(symbols: ^Demo_Symbols) -> string {")
+(odin "    return string(symbols.message())")
+(odin "}")
+
+(odin "hot_demo_library_path :: proc() -> string {")
+(odin "    return kvist_hot.library_filename(\"build/hot_reload_demo/hot_demo\")")
+(odin "}")
+
+(odin "hot_demo_validate_manifest :: proc(manifest: kvist_hot.Manifest) -> (string, bool) {")
+(odin "    return kvist_hot.validate_manifest(manifest, size_of(shared.State), align_of(shared.State))")
+(odin "}")
+
+(odin "hot_demo_new_reloader :: proc(path: string) -> (kvist_hot.Reloader, string, bool) {")
+(odin "    return kvist_hot.new_reloader(path)")
+(odin "}")
+
+(odin "hot_demo_load_initial :: proc(reloader: ^kvist_hot.Reloader, symbols: ^Demo_Symbols) -> (kvist_hot.Reload_Result, string, bool) {")
+(odin "    return kvist_hot.load_initial(reloader, symbols)")
+(odin "}")
+
+(odin "hot_demo_reload_if_changed :: proc(reloader: ^kvist_hot.Reloader, symbols: ^Demo_Symbols) -> (bool, kvist_hot.Reload_Result, string, bool) {")
+(odin "    return kvist_hot.reload_if_source_changed(reloader, symbols)")
+(odin "}")
+
+(odin "hot_demo_cleanup_shadow_copy :: proc(path: string) {")
+(odin "    kvist_hot.cleanup_shadow_copy(path)")
+(odin "}")
+
+(defn manifest-from-symbols [symbols: Demo_Symbols] -> kvist_hot.Manifest
+  (kvist_hot.Manifest {
+    :api_version (:api_version symbols)
+    :state_size (:state_size symbols)
+    :state_align (:state_align symbols)
+    :on_load (:on_load symbols)
+    :on_unload (:on_unload symbols)
+  }))
+
+(defn library-path [] -> string
+  (hot_demo_library_path))
+
+(defn finish-reload [symbols: ^Demo_Symbols,
+                     state: ^shared.State,
+                     result: kvist_hot.Reload_Result,
+                     generation: int,
+                     is-reload: bool] -> bool
+  (let [manifest (manifest-from-symbols symbols^)
+        [validation-err valid] (hot_demo_validate_manifest manifest)]
+    (if (not valid)
+      (do
+        (fmt.println "[host] manifest validation failed:" validation-err)
+        (delete validation-err)
+        (dynlib.unload_library (:__handle symbols^))
+        (hot_demo_cleanup_shadow_copy (:shadow_path result))
+        (delete (:shadow_path result))
+        false)
+      (do
+        (call_manifest_on_load manifest state is-reload)
+        (fmt.printf "[host] loaded generation %d from %s (%d symbols)\n"
+                    generation
+                    (:shadow_path result)
+                    (:symbol_count result))
+        (hot_demo_cleanup_shadow_copy (:shadow_path result))
+        (delete (:shadow_path result))
+        true))))
+
+(defn print-current-state [symbols: ^Demo_Symbols, state: ^shared.State]
+  (fmt.printf "[tick] module=%s tick=%d reloads=%d unloads=%d message=%s\n"
+              (call_symbol_message symbols)
+              (:tick_count state^)
+              (:reload_count state^)
+              (:unload_count state^)
+              (:last_message state^)))
+
+(defn print-after-reload [state: ^shared.State]
+  (fmt.printf "[host] after reload: ticks=%d reloads=%d unloads=%d message=%s\n"
+              (:tick_count state^)
+              (:reload_count state^)
+              (:unload_count state^)
+              (:last_message state^)))
+
+(defn main []
+  (let [path (library-path) defer
+        state (shared.State {})
+        symbols: Demo_Symbols {}
+        [reloader reloader-err reloader-ok] (hot_demo_new_reloader path)]
+    (if (not reloader-ok)
+      (do
+        (fmt.println reloader-err)
+        (delete reloader-err)
+        (fmt.println "build it first with:")
+        (fmt.printf "  ./kvist examples/hot_reload_demo/module/main.kvist -o build/generated/hot_reload_demo/module/main.odin\n")
+        (fmt.printf "  odin build build/generated/hot_reload_demo/module -build-mode:dll -out:%s\n" path))
+      (do
+        (let [[initial-result initial-err initial-ok] (hot_demo_load_initial (addr reloader) (addr symbols))]
+          (if (not initial-ok)
+            (do
+              (fmt.println "[host] initial load failed:" initial-err)
+              (delete initial-err))
+            (do
+              (when (finish-reload (addr symbols) (addr state) initial-result (:generation reloader) false)
+                (fmt.println "[host] running. rebuild the module shared library to reload in place.")
+                (fmt.println "[host] state lives in the host and survives reload.")
+                (for true
+                  (call_symbol_tick (addr symbols) (addr state))
+                  (print-current-state (addr symbols) (addr state))
+                  (time.sleep (* 1 time.Second))
+                  (let [[changed reload-result reload-err reload-ok]
+                        (hot_demo_reload_if_changed (addr reloader) (addr symbols))]
+                    (if (not reload-ok)
+                      (do
+                        (fmt.println "[host] reload failed:" reload-err)
+                        (delete reload-err))
+                    (do
+                      (when changed
+                          (call_symbol_on_unload (addr symbols) (addr state))
+                          (when (finish-reload (addr symbols) (addr state) reload-result (:generation reloader) true)
+                            (print-after-reload (addr state))))))))))))))))

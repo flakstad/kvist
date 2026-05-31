@@ -757,18 +757,29 @@ source_package_symbols_source :: proc(importer_path, import_path: string) -> (pa
         return "", "", clone_compile_error(err_resolve, result_allocator), false
     }
     defer delete(resolved)
-    data, read_err := os.read_entire_file_from_path(resolved, context.allocator)
-    if read_err != nil {
-        return "", "", Compile_Error{message = strings.clone(fmt.tprintf("could not read source import: %s", resolved), result_allocator)}, false
+    files, err_files, ok_files := read_package_files(resolved)
+    if !ok_files {
+        return "", "", clone_compile_error(err_files, result_allocator), false
     }
-    defer delete(data)
-    package_output, package_err, ok_package := symbols_source(string(data))
+    _, err_package, ok_package := validate_package_files(resolved, files[:])
     if !ok_package {
-        return "", "", clone_compile_error(package_err, result_allocator), false
+        return "", "", clone_compile_error(err_package, result_allocator), false
     }
-    defer delete(package_output)
+    builder := strings.builder_make()
+    defer strings.builder_destroy(&builder)
+    strings.write_string(&builder, "kind\tname\tline\tcolumn\tdetail\tsignature\tdoc\tfile\n")
+    seen := make(map[string]bool)
+    defer delete(seen)
+    for file in files {
+        package_output, package_err, ok_package_output := symbols_source(file.source)
+        if !ok_package_output {
+            return "", "", clone_compile_error(package_err, result_allocator), false
+        }
+        symbols_append_source_package_records(&builder, &seen, import_path, import_default_alias(import_path), file.path, package_output)
+        delete(package_output)
+    }
     resolved_copy, _ := strings.clone(resolved, result_allocator)
-    output_copy, _ := strings.clone(package_output, result_allocator)
+    output_copy, _ := strings.clone(strings.to_string(builder), result_allocator)
     return resolved_copy, output_copy, Compile_Error{}, true
 }
 
@@ -979,21 +990,25 @@ imported_symbols_source :: proc(path, source: string) -> (output: string, err: C
                 if !ok_resolve {
                     return "", clone_compile_error(err_resolve, result_allocator), false
                 }
-                data, read_err := os.read_entire_file_from_path(resolved, context.allocator)
-                if read_err != nil {
-                    message := strings.clone(fmt.tprintf("could not read source import: %s", resolved), result_allocator)
+                files, err_files, ok_files := read_package_files(resolved)
+                if !ok_files {
                     delete(resolved)
-                    return "", Compile_Error{message = message}, false
+                    return "", clone_compile_error(err_files, result_allocator), false
                 }
-                package_output, package_err, ok_package_output := symbols_source(string(data))
-                if !ok_package_output {
-                    delete(data)
+                _, err_package, ok_package := validate_package_files(resolved, files[:])
+                if !ok_package {
                     delete(resolved)
-                    return "", clone_compile_error(package_err, result_allocator), false
+                    return "", clone_compile_error(err_package, result_allocator), false
                 }
-                symbols_append_source_package_records(&builder, &seen, import_path, entry.alias, resolved, package_output)
-                delete(package_output)
-                delete(data)
+                for file in files {
+                    package_output, package_err, ok_package_output := symbols_source(file.source)
+                    if !ok_package_output {
+                        delete(resolved)
+                        return "", clone_compile_error(package_err, result_allocator), false
+                    }
+                    symbols_append_source_package_records(&builder, &seen, import_path, entry.alias, file.path, package_output)
+                    delete(package_output)
+                }
                 delete(resolved)
             }
             continue
@@ -1065,21 +1080,25 @@ editor_symbols_source :: proc(path, source: string) -> (output: string, err: Com
                 if !ok_resolve {
                     return "", err_resolve, false
                 }
-                data, read_err := os.read_entire_file_from_path(resolved, context.allocator)
-                if read_err != nil {
-                    message := fmt.tprintf("could not read source import: %s", resolved)
+                files, err_files, ok_files := read_package_files(resolved)
+                if !ok_files {
                     delete(resolved)
-                    return "", Compile_Error{message = message}, false
+                    return "", err_files, false
                 }
-                package_output, package_err, ok_package_output := symbols_source(string(data))
-                if !ok_package_output {
-                    delete(data)
+                _, err_package, ok_package := validate_package_files(resolved, files[:])
+                if !ok_package {
                     delete(resolved)
-                    return "", package_err, false
+                    return "", err_package, false
                 }
-                symbols_append_source_package_records(&builder, &seen, import_path, entry.alias, resolved, package_output)
-                delete(package_output)
-                delete(data)
+                for file in files {
+                    package_output, package_err, ok_package_output := symbols_source(file.source)
+                    if !ok_package_output {
+                        delete(resolved)
+                        return "", package_err, false
+                    }
+                    symbols_append_source_package_records(&builder, &seen, import_path, entry.alias, file.path, package_output)
+                    delete(package_output)
+                }
                 delete(resolved)
             }
         }
@@ -1426,21 +1445,29 @@ symbols_source :: proc(source: string) -> (output: string, err: Compile_Error, o
                 path := import_path_text(form.items[2])
                 symbols_write_record_doc(&builder, "import", alias, source, form.items[1].span, path, "", top.doc_lines[:])
             }
-        case "const", "defconst":
+        case "const", "defconst", "defconst-":
             if len(form.items) >= 2 && form.items[1].kind == .Symbol {
                 doc_lines := top.doc_lines
                 if len(form.items) > 3 && form.items[2].kind == .String {
                     doc_lines = symbols_append_doc_lines(doc_lines[:], symbols_doc_lines_from_string(unquote_string(form.items[2].text))[:])
                 }
-                symbols_write_record_doc(&builder, "const", form.items[1].text, source, form.items[1].span, "", "", doc_lines[:])
+                detail := ""
+                if head == "defconst-" {
+                    detail = "private"
+                }
+                symbols_write_record_doc(&builder, "const", form.items[1].text, source, form.items[1].span, detail, "", doc_lines[:])
             }
-        case "defvar":
+        case "defvar", "defvar-":
             if len(form.items) >= 2 && form.items[1].kind == .Symbol {
                 doc_lines := top.doc_lines
                 if len(form.items) > 3 && form.items[2].kind == .String {
                     doc_lines = symbols_append_doc_lines(doc_lines[:], symbols_doc_lines_from_string(unquote_string(form.items[2].text))[:])
                 }
-                symbols_write_record_doc(&builder, "var", form.items[1].text, source, form.items[1].span, "", "", doc_lines[:])
+                detail := ""
+                if head == "defvar-" {
+                    detail = "private"
+                }
+                symbols_write_record_doc(&builder, "var", form.items[1].text, source, form.items[1].span, detail, "", doc_lines[:])
             }
         case "struct":
             if len(form.items) == 3 && form.items[1].kind == .Symbol {
@@ -1455,7 +1482,7 @@ symbols_source :: proc(source: string) -> (output: string, err: Compile_Error, o
                 symbols_write_record_doc(&builder, "struct", name, source, form.items[1].span, "", signature, top.doc_lines[:])
                 symbols_write_fields(&builder, source, name, form.items[2])
             }
-        case "defstruct":
+        case "defstruct", "defstruct-":
             if (len(form.items) == 3 || len(form.items) == 4) && form.items[1].kind == .Symbol {
                 name := form.items[1].text
                 doc_lines := top.doc_lines
@@ -1471,7 +1498,11 @@ symbols_source :: proc(source: string) -> (output: string, err: Compile_Error, o
                 } else {
                     _ = err_fields
                 }
-                symbols_write_record_doc(&builder, "struct", name, source, form.items[1].span, "", signature, doc_lines[:])
+                detail := ""
+                if head == "defstruct-" {
+                    detail = "private"
+                }
+                symbols_write_record_doc(&builder, "struct", name, source, form.items[1].span, detail, signature, doc_lines[:])
                 symbols_write_fields(&builder, source, name, form.items[field_index])
             }
         case "enum":
@@ -1480,7 +1511,7 @@ symbols_source :: proc(source: string) -> (output: string, err: Compile_Error, o
                 symbols_write_record_doc(&builder, "enum", name, source, form.items[1].span, "", "", top.doc_lines[:])
                 symbols_write_enum_variants(&builder, source, name, form.items[2])
             }
-        case "defenum":
+        case "defenum", "defenum-":
             if (len(form.items) == 3 || len(form.items) == 4) && form.items[1].kind == .Symbol {
                 name := form.items[1].text
                 doc_lines := top.doc_lines
@@ -1489,7 +1520,11 @@ symbols_source :: proc(source: string) -> (output: string, err: Compile_Error, o
                     doc_lines = symbols_append_doc_lines(doc_lines[:], symbols_doc_lines_from_string(unquote_string(form.items[2].text))[:])
                     variant_index = 3
                 }
-                symbols_write_record_doc(&builder, "enum", name, source, form.items[1].span, "", "", doc_lines[:])
+                detail := ""
+                if head == "defenum-" {
+                    detail = "private"
+                }
+                symbols_write_record_doc(&builder, "enum", name, source, form.items[1].span, detail, "", doc_lines[:])
                 symbols_write_enum_variants(&builder, source, name, form.items[variant_index])
             }
         case "union":
@@ -1498,7 +1533,7 @@ symbols_source :: proc(source: string) -> (output: string, err: Compile_Error, o
                 symbols_write_record_doc(&builder, "union", name, source, form.items[1].span, "", "", top.doc_lines[:])
                 symbols_write_union_variants(&builder, source, name, form.items[2])
             }
-        case "defunion":
+        case "defunion", "defunion-":
             if (len(form.items) == 3 || len(form.items) == 4) && form.items[1].kind == .Symbol {
                 name := form.items[1].text
                 doc_lines := top.doc_lines
@@ -1507,7 +1542,11 @@ symbols_source :: proc(source: string) -> (output: string, err: Compile_Error, o
                     doc_lines = symbols_append_doc_lines(doc_lines[:], symbols_doc_lines_from_string(unquote_string(form.items[2].text))[:])
                     variant_index = 3
                 }
-                symbols_write_record_doc(&builder, "union", name, source, form.items[1].span, "", "", doc_lines[:])
+                detail := ""
+                if head == "defunion-" {
+                    detail = "private"
+                }
+                symbols_write_record_doc(&builder, "union", name, source, form.items[1].span, detail, "", doc_lines[:])
                 symbols_write_union_variants(&builder, source, name, form.items[variant_index])
             }
         case "proc", "defn", "defn-":
