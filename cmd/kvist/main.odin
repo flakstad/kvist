@@ -1190,6 +1190,10 @@ parse_run_or_check_command :: proc(odin_command: string) {
         os.exit(reload_app_generate_and_execute(input, odin_command, generated_dir))
     }
 
+    if generated_path == "" && source_declares_reload_app(input) {
+        os.exit(reload_app_generate_and_execute(input, odin_command, generated_dir))
+    }
+
     os.exit(run_generated_command(input, generated_path, odin_command))
 }
 

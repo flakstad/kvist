@@ -149,6 +149,11 @@ rebuilds only the reloadable side. In ordinary execution, `kvist check|build|run
 - `:run` lowers to a normal app-owned runtime call
 - `reload/checkpoint!` becomes a no-op when there is no resident reloader
 
+For sources that clearly declare the reload-app contract through `defstate`
+metadata, plain `kvist check|build|run app/main.kvist` now route through that
+same production wrapper automatically. `--reload` remains valid, but is no
+longer required for the common reload-app source shape.
+
 If a source package needs to publish raw Odin names in that flow, it can now do
 so explicitly with:
 
@@ -163,11 +168,18 @@ compiler hardcoding.
 
 The current editor-facing reload contract is:
 
+- `kvist dev --reload app/main.kvist --json`
 - `kvist dev --reload app/main.kvist --print-paths --json`
 - `kvist dev --reload app/main.kvist --rebuild --json`
 
-The first command prints machine-readable generated paths and canonical reload
-commands. The second prints a structured rebuild result with:
+The first command starts the resident reload session and emits structured event
+lines prefixed with `KVIST_RELOAD_EVENT<TAB>`. Those lines carry JSON payloads
+such as `started`, `reloaded`, `reload_failed`, and `checkpoint_error`, while
+ordinary app stdout/stderr still flows through the same terminal or editor
+buffer.
+
+The second command prints machine-readable generated paths and canonical reload
+commands. The third prints a structured rebuild result with:
 
 - `ok`
 - `exit_code`

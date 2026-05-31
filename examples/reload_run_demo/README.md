@@ -32,10 +32,28 @@ Rebuild with machine-readable status for editor integration:
 ./build/kvist dev --reload examples/reload_run_demo/main.kvist --rebuild --json
 ```
 
+Start the resident shell with structured status events:
+
+```sh
+./build/kvist dev --reload examples/reload_run_demo/main.kvist --json
+```
+
+That stream includes `KVIST_RELOAD_EVENT<TAB>{...}` lines for `started`,
+`reloaded`, `reload_failed`, and `checkpoint_error`, which is the intended
+editor-facing session surface.
+
 Run the same source without the resident reload shell:
 
 ```sh
 ./build/kvist run --reload examples/reload_run_demo/main.kvist
+```
+
+The same reload-app source also works with plain commands:
+
+```sh
+./build/kvist check examples/reload_run_demo/main.kvist
+./build/kvist build examples/reload_run_demo/main.kvist
+./build/kvist run examples/reload_run_demo/main.kvist
 ```
 
 Check or build that production-style wrapper:

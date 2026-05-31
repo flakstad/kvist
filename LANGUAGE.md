@@ -1395,8 +1395,9 @@ Anonymous procedures use `proc` as an expression form:
 ```
 
 Current closure support is deliberately narrow. Captured callbacks currently
-work only for selected non-escaping helper call sites, starting with `map` and
-`map!`, and only when the callback captures exactly one outer local:
+work only for selected non-escaping helper call sites, starting with `map`,
+`map!`, `filter`, `filter!`, `remove`, `remove!`, `keep`, and `keep!`, and
+only when the callback captures exactly one outer local:
 
 ```clojure
 (let [offset 10]

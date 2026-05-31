@@ -28,7 +28,7 @@ Kvist now has:
 
 Non-capturing proc values are supported, and there is now a first narrow pass
 of captured callbacks for compiler-known non-escaping helper sites such as
-`map` and `map!`.
+`map`, `filter`, `remove`, `keep`, and their bang variants.
 
 Questions:
 

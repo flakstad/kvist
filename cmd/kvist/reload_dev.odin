@@ -591,7 +591,7 @@ reload_app_module_source :: proc(config: Reload_App_Config, app_import_path, kvi
     return strings.clone(strings.to_string(builder))
 }
 
-reload_app_host_source :: proc(config: Reload_App_Config, input_path, app_import_path, kvist_hot_import_path, hot_app_runtime_import_path, module_binary_path: string) -> string {
+reload_app_host_source :: proc(config: Reload_App_Config, input_path, app_import_path, kvist_hot_import_path, hot_app_runtime_import_path, module_binary_path: string, json_output := false) -> string {
     builder := strings.builder_make()
     defer strings.builder_destroy(&builder)
 
@@ -599,6 +599,9 @@ reload_app_host_source :: proc(config: Reload_App_Config, input_path, app_import
     strings.write_string(&builder, "import \"core:dynlib\"\n")
     strings.write_string(&builder, "import \"core:fmt\"\n")
     strings.write_string(&builder, "import \"core:os\"\n")
+    if json_output {
+        strings.write_string(&builder, "import \"core:strings\"\n")
+    }
     strings.write_string(&builder, "import \"core:time\"\n")
     fmt.sbprintf(&builder, "import app %q\n", app_import_path)
     fmt.sbprintf(&builder, "import kvist_hot %q\n\n", kvist_hot_import_path)
@@ -621,8 +624,66 @@ reload_app_host_source :: proc(config: Reload_App_Config, input_path, app_import
     }
     strings.write_string(&builder, "    __handle:    dynlib.Library,\n")
     strings.write_string(&builder, "}\n\n")
+    if json_output {
+        strings.write_string(&builder, "reload_event_prefix :: \"KVIST_RELOAD_EVENT\\t\"\n\n")
+        strings.write_string(&builder, "reload_json_write_escaped_string :: proc(builder: ^strings.Builder, value: string) {\n")
+        strings.write_string(&builder, "    strings.write_byte(builder, '\"')\n")
+        strings.write_string(&builder, "    for ch in value {\n")
+        strings.write_string(&builder, "        switch ch {\n")
+        strings.write_string(&builder, "        case '\\\\':\n            strings.write_string(builder, \"\\\\\\\\\")\n")
+        strings.write_string(&builder, "        case '\"':\n            strings.write_string(builder, \"\\\\\\\"\")\n")
+        strings.write_string(&builder, "        case '\\n':\n            strings.write_string(builder, \"\\\\n\")\n")
+        strings.write_string(&builder, "        case '\\r':\n            strings.write_string(builder, \"\\\\r\")\n")
+        strings.write_string(&builder, "        case '\\t':\n            strings.write_string(builder, \"\\\\t\")\n")
+        strings.write_string(&builder, "        case:\n            strings.write_rune(builder, ch)\n")
+        strings.write_string(&builder, "        }\n")
+        strings.write_string(&builder, "    }\n")
+        strings.write_string(&builder, "    strings.write_byte(builder, '\"')\n")
+        strings.write_string(&builder, "}\n\n")
+        strings.write_string(&builder, "reload_emit_event :: proc(event, input_path, package_name, module_binary_path, rebuild_command, version, message: string, generation: int) {\n")
+        strings.write_string(&builder, "    payload := strings.builder_make()\n")
+        strings.write_string(&builder, "    defer strings.builder_destroy(&payload)\n")
+        strings.write_string(&builder, "    strings.write_string(&payload, \"{\")\n")
+        strings.write_string(&builder, "    reload_json_write_escaped_string(&payload, \"mode\")\n")
+        strings.write_string(&builder, "    strings.write_string(&payload, \": \")\n")
+        strings.write_string(&builder, "    reload_json_write_escaped_string(&payload, \"reload\")\n")
+        strings.write_string(&builder, "    strings.write_string(&payload, \", \")\n")
+        strings.write_string(&builder, "    reload_json_write_escaped_string(&payload, \"event\")\n")
+        strings.write_string(&builder, "    strings.write_string(&payload, \": \")\n")
+        strings.write_string(&builder, "    reload_json_write_escaped_string(&payload, event)\n")
+        strings.write_string(&builder, "    strings.write_string(&payload, \", \")\n")
+        strings.write_string(&builder, "    reload_json_write_escaped_string(&payload, \"input\")\n")
+        strings.write_string(&builder, "    strings.write_string(&payload, \": \")\n")
+        strings.write_string(&builder, "    reload_json_write_escaped_string(&payload, input_path)\n")
+        strings.write_string(&builder, "    strings.write_string(&payload, \", \")\n")
+        strings.write_string(&builder, "    reload_json_write_escaped_string(&payload, \"package\")\n")
+        strings.write_string(&builder, "    strings.write_string(&payload, \": \")\n")
+        strings.write_string(&builder, "    reload_json_write_escaped_string(&payload, package_name)\n")
+        strings.write_string(&builder, "    strings.write_string(&payload, \", \")\n")
+        strings.write_string(&builder, "    reload_json_write_escaped_string(&payload, \"module_binary\")\n")
+        strings.write_string(&builder, "    strings.write_string(&payload, \": \")\n")
+        strings.write_string(&builder, "    reload_json_write_escaped_string(&payload, module_binary_path)\n")
+        strings.write_string(&builder, "    strings.write_string(&payload, \", \")\n")
+        strings.write_string(&builder, "    reload_json_write_escaped_string(&payload, \"rebuild_command\")\n")
+        strings.write_string(&builder, "    strings.write_string(&payload, \": \")\n")
+        strings.write_string(&builder, "    reload_json_write_escaped_string(&payload, rebuild_command)\n")
+        strings.write_string(&builder, "    strings.write_string(&payload, \", \")\n")
+        strings.write_string(&builder, "    reload_json_write_escaped_string(&payload, \"generation\")\n")
+        strings.write_string(&builder, "    fmt.sbprintf(&payload, \": %d, \", generation)\n")
+        strings.write_string(&builder, "    reload_json_write_escaped_string(&payload, \"version\")\n")
+        strings.write_string(&builder, "    strings.write_string(&payload, \": \")\n")
+        strings.write_string(&builder, "    reload_json_write_escaped_string(&payload, version)\n")
+        strings.write_string(&builder, "    strings.write_string(&payload, \", \")\n")
+        strings.write_string(&builder, "    reload_json_write_escaped_string(&payload, \"message\")\n")
+        strings.write_string(&builder, "    strings.write_string(&payload, \": \")\n")
+        strings.write_string(&builder, "    reload_json_write_escaped_string(&payload, message)\n")
+        strings.write_string(&builder, "    strings.write_string(&payload, \"}\\n\")\n")
+        strings.write_string(&builder, "    fmt.print(reload_event_prefix, strings.to_string(payload))\n")
+        strings.write_string(&builder, "}\n\n")
+    }
     strings.write_string(&builder, "main :: proc() {\n")
     fmt.sbprintf(&builder, "    module_path := %q\n", module_binary_path)
+    fmt.sbprintf(&builder, "    rebuild_command := %q\n", fmt.tprintf("kvist dev --reload %q --rebuild", input_path))
     if config.mode == .Step {
         fmt.sbprintf(&builder, "    sleep_duration := time.Duration(%d) * time.Millisecond\n", config.sleep_ms)
     }
@@ -635,28 +696,62 @@ reload_app_host_source :: proc(config: Reload_App_Config, input_path, app_import
     strings.write_string(&builder, "    defer {\n        if reloader.has_loaded {\n            kvist_hot.unload_current_module(&symbols, &state)\n        }\n    }\n\n")
     strings.write_string(&builder, "    initial_err, initial_ok := kvist_hot.load_initial_module(&reloader, &symbols, &state)\n")
     strings.write_string(&builder, "    if !initial_ok {\n        fmt.eprintln(initial_err)\n        os.exit(1)\n    }\n\n")
-    fmt.sbprintf(&builder, "    fmt.println(\"[reload] running %s\")\n", config.package_name)
-    fmt.sbprintf(&builder, "    fmt.println(%q)\n", fmt.tprintf("[reload] rebuild with: kvist dev --reload %q --rebuild", input_path))
+    if json_output {
+        fmt.sbprintf(&builder, "    reload_emit_event(\"started\", %q, %q, module_path, rebuild_command, string(symbols.version()), \"reload session started\", reloader.generation)\n", input_path, config.package_name)
+    } else {
+        fmt.sbprintf(&builder, "    fmt.println(\"[reload] running %s\")\n", config.package_name)
+        fmt.sbprintf(&builder, "    fmt.println(%q)\n", fmt.tprintf("[reload] rebuild with: kvist dev --reload %q --rebuild", input_path))
+    }
     switch config.mode {
     case .Step:
         strings.write_string(&builder, "    for {\n")
         strings.write_string(&builder, "        symbols.step(rawptr(&state))\n")
-        strings.write_string(&builder, "        fmt.printf(\"[reload] generation=%d version=%s\\n\", reloader.generation, string(symbols.version()))\n")
+        if json_output {
+            strings.write_string(&builder, "        // Structured events are emitted only on start and successful/failed reloads.\n")
+        } else {
+            strings.write_string(&builder, "        fmt.printf(\"[reload] generation=%d version=%s\\n\", reloader.generation, string(symbols.version()))\n")
+        }
         strings.write_string(&builder, "        changed, reload_err, reload_ok := kvist_hot.reload_module_if_source_changed(&reloader, &symbols, &state)\n")
-        strings.write_string(&builder, "        if changed && !reload_ok {\n            fmt.eprintln(reload_err)\n        }\n")
+        if json_output {
+            strings.write_string(&builder, "        if changed && !reload_ok {\n            reload_emit_event(\"reload_failed\", ")
+            fmt.sbprintf(&builder, "%q, %q", input_path, config.package_name)
+            strings.write_string(&builder, ", module_path, rebuild_command, string(symbols.version()), reload_err, reloader.generation)\n            fmt.eprintln(reload_err)\n        }\n")
+            strings.write_string(&builder, "        if changed && reload_ok {\n            reload_emit_event(\"reloaded\", ")
+            fmt.sbprintf(&builder, "%q, %q", input_path, config.package_name)
+            strings.write_string(&builder, ", module_path, rebuild_command, string(symbols.version()), \"reload applied\", reloader.generation)\n        }\n")
+        } else {
+            strings.write_string(&builder, "        if changed && !reload_ok {\n            fmt.eprintln(reload_err)\n        }\n")
+        }
         strings.write_string(&builder, "        time.sleep(sleep_duration)\n")
         strings.write_string(&builder, "    }\n")
     case .Run:
         strings.write_string(&builder, "    host := reload_runtime.run_host_init(&reloader)\n")
         strings.write_string(&builder, "    for {\n")
         strings.write_string(&builder, "        reload_runtime.run_host_begin_cycle(&host)\n")
-        strings.write_string(&builder, "        fmt.printf(\"[reload] generation=%d version=%s\\n\", reloader.generation, string(symbols.version()))\n")
+        if !json_output {
+            strings.write_string(&builder, "        fmt.printf(\"[reload] generation=%d version=%s\\n\", reloader.generation, string(symbols.version()))\n")
+        }
         strings.write_string(&builder, "        symbols.run(rawptr(&state), rawptr(&host))\n")
-        strings.write_string(&builder, "        if host.checkpoint_error != \"\" {\n            fmt.eprintln(host.checkpoint_error)\n            os.exit(1)\n        }\n")
+        if json_output {
+            strings.write_string(&builder, "        if host.checkpoint_error != \"\" {\n            reload_emit_event(\"checkpoint_error\", ")
+            fmt.sbprintf(&builder, "%q, %q", input_path, config.package_name)
+            strings.write_string(&builder, ", module_path, rebuild_command, string(symbols.version()), host.checkpoint_error, reloader.generation)\n            fmt.eprintln(host.checkpoint_error)\n            os.exit(1)\n        }\n")
+        } else {
+            strings.write_string(&builder, "        if host.checkpoint_error != \"\" {\n            fmt.eprintln(host.checkpoint_error)\n            os.exit(1)\n        }\n")
+        }
         strings.write_string(&builder, "        if host.reload_requested {\n")
         strings.write_string(&builder, "            changed, reload_err, reload_ok := kvist_hot.reload_module_if_source_changed(&reloader, &symbols, &state)\n")
-        strings.write_string(&builder, "            if !reload_ok {\n                fmt.eprintln(reload_err)\n                os.exit(1)\n            }\n")
-        strings.write_string(&builder, "            if changed {\n                continue\n            }\n")
+        if json_output {
+            strings.write_string(&builder, "            if !reload_ok {\n                reload_emit_event(\"reload_failed\", ")
+            fmt.sbprintf(&builder, "%q, %q", input_path, config.package_name)
+            strings.write_string(&builder, ", module_path, rebuild_command, string(symbols.version()), reload_err, reloader.generation)\n                fmt.eprintln(reload_err)\n                os.exit(1)\n            }\n")
+            strings.write_string(&builder, "            if changed {\n                reload_emit_event(\"reloaded\", ")
+            fmt.sbprintf(&builder, "%q, %q", input_path, config.package_name)
+            strings.write_string(&builder, ", module_path, rebuild_command, string(symbols.version()), \"reload applied\", reloader.generation)\n                continue\n            }\n")
+        } else {
+            strings.write_string(&builder, "            if !reload_ok {\n                fmt.eprintln(reload_err)\n                os.exit(1)\n            }\n")
+            strings.write_string(&builder, "            if changed {\n                continue\n            }\n")
+        }
         strings.write_string(&builder, "        }\n")
         strings.write_string(&builder, "        break\n")
         strings.write_string(&builder, "    }\n")
@@ -717,7 +812,7 @@ reload_app_main_source :: proc(config: Reload_App_Config, app_import_path, reloa
     return strings.clone(strings.to_string(builder))
 }
 
-write_reload_app_generated_sources_or_exit :: proc(input: string, config: Reload_App_Config, paths: Reload_App_Paths) {
+write_reload_app_generated_sources_or_exit :: proc(input: string, config: Reload_App_Config, paths: Reload_App_Paths, json_output := false) {
     input_abs, abs_err := os.get_absolute_path(input, context.allocator)
     if abs_err != nil {
         fmt.eprintln("failed to resolve input path")
@@ -758,7 +853,7 @@ write_reload_app_generated_sources_or_exit :: proc(input: string, config: Reload
     defer delete(host_reload_runtime_import)
     module_source := reload_app_module_source(config, module_app_import, module_hot_import)
     defer delete(module_source)
-    host_source := reload_app_host_source(config, input_abs, host_app_import, host_hot_import, host_reload_runtime_import, paths.module_binary)
+    host_source := reload_app_host_source(config, input_abs, host_app_import, host_hot_import, host_reload_runtime_import, paths.module_binary, json_output)
     defer delete(host_source)
 
     write_output_or_exit(paths.module_odin, module_source)
@@ -979,7 +1074,7 @@ reload_app_generate_and_build :: proc(input: string, generated_dir := "", rebuil
     ensure_reload_app_dirs_or_exit(paths)
 
     compile_path_to_output_or_exit(input, paths.app_odin)
-    write_reload_app_generated_sources_or_exit(input, config, paths)
+    write_reload_app_generated_sources_or_exit(input, config, paths, json_output && !rebuild_only && !print_paths_only)
 
     if print_paths_only {
         if json_output {
@@ -1074,6 +1169,14 @@ reload_app_generate_and_execute :: proc(input: string, odin_command: string, gen
     return run_odin_package_command(paths.main_dir, odin_command)
 }
 
+source_declares_reload_app :: proc(input: string) -> bool {
+    data := read_source_or_exit(input)
+    defer delete(transmute([]byte)data)
+
+    _, _, config_ok := reload_app_config_from_source(input, data)
+    return config_ok
+}
+
 parse_dev_command :: proc() {
     if len(os.args) < 4 {
         print_usage()
@@ -1122,11 +1225,6 @@ parse_dev_command :: proc() {
 
     if !reload_mode || input == "" {
         print_usage()
-        os.exit(2)
-    }
-
-    if json_output && !print_paths_only && !rebuild_only {
-        fmt.eprintln("--json currently requires --print-paths or --rebuild in reload dev mode")
         os.exit(2)
     }
 

@@ -26,6 +26,14 @@ Run the same source without the resident reload shell:
 ./build/kvist run --reload examples/reload_step_demo/main.kvist
 ```
 
+The same source also works directly with plain app commands now:
+
+```sh
+./build/kvist check examples/reload_step_demo/main.kvist
+./build/kvist build examples/reload_step_demo/main.kvist
+./build/kvist run examples/reload_step_demo/main.kvist
+```
+
 Check or build that production-style wrapper:
 
 ```sh
@@ -50,6 +58,15 @@ Rebuild with machine-readable status:
 ```sh
 ./build/kvist dev --reload examples/reload_step_demo/main.kvist --rebuild --json
 ```
+
+Start the resident shell with structured status events for editor integration:
+
+```sh
+./build/kvist dev --reload examples/reload_step_demo/main.kvist --json
+```
+
+That stream includes lines prefixed with `KVIST_RELOAD_EVENT<TAB>` carrying
+JSON payloads for `started`, `reloaded`, and reload failure events.
 
 Current shape of the source contract:
 

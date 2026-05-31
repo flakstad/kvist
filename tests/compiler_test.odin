@@ -5457,6 +5457,71 @@ compile_map_rejects_multiple_captured_locals_in_fn_literal :: proc(t: ^testing.T
 }
 
 @(test)
+compile_filter_supports_single_captured_local_in_fn_literal :: proc(t: ^testing.T) {
+    source := "(package main)\n\n(defn demo [xs: [dynamic]int] -> [dynamic]int\n  (let [limit 10]\n    (filter (fn [x: int] -> bool\n              (> x limit))\n            xs)))"
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+    testing.expect_value(t, strings.contains(output, "kvist_filter_1("), true)
+    testing.expect_value(t, strings.contains(output, "proc(limit: int, x: int) -> bool {"), true)
+    testing.expect_value(t, strings.contains(output, "return (x) > (limit)"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_filter_1 :: proc(pred: proc(c1: $C1, x: $T) -> bool, c1: C1, xs: []T) -> [dynamic]T {"), true)
+}
+
+@(test)
+compile_filter_bang_supports_single_captured_local_in_fn_literal :: proc(t: ^testing.T) {
+    source := "(package main)\n\n(defn demo [xs: [dynamic]int] -> [dynamic]int\n  (let [limit 10]\n    (filter! (fn [x: int] -> bool\n               (> x limit))\n             xs)\n    xs))"
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+    testing.expect_value(t, strings.contains(output, "kvist_filter_in_place_1("), true)
+    testing.expect_value(t, strings.contains(output, "proc(limit: int, x: int) -> bool {"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_filter_in_place_1 :: proc(pred: proc(c1: $C1, x: $T) -> bool, c1: C1, xs: ^[dynamic]T) {"), true)
+}
+
+@(test)
+compile_remove_supports_single_captured_local_in_fn_literal :: proc(t: ^testing.T) {
+    source := "(package main)\n\n(defn demo [xs: [dynamic]int] -> [dynamic]int\n  (let [limit 10]\n    (remove (fn [x: int] -> bool\n              (> x limit))\n            xs)))"
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+    testing.expect_value(t, strings.contains(output, "kvist_remove_1("), true)
+    testing.expect_value(t, strings.contains(output, "proc(limit: int, x: int) -> bool {"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_remove_1 :: proc(pred: proc(c1: $C1, x: $T) -> bool, c1: C1, xs: []T) -> [dynamic]T {"), true)
+}
+
+@(test)
+compile_keep_supports_single_captured_local_in_fn_literal :: proc(t: ^testing.T) {
+    source := "(package main)\n\n(defn demo [xs: [dynamic]int] -> [dynamic]int\n  (let [limit 10]\n    (keep (fn [x: int] -> [value: int, ok: bool]\n            (if (> x limit)\n              (return x true)\n              (return 0 false)))\n          xs)))"
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+    testing.expect_value(t, strings.contains(output, "kvist_keep_1("), true)
+    testing.expect_value(t, strings.contains(output, "proc(limit: int, x: int) -> (value: int, ok: bool) {"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_keep_1 :: proc(f: proc(c1: $C1, x: $T) -> ($U, bool), c1: C1, xs: []T) -> [dynamic]U {"), true)
+}
+
+@(test)
 compile_directive_expression_wrappers :: proc(t: ^testing.T) {
     source := `(package main)
 

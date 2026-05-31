@@ -6,6 +6,7 @@
 
 (require 'clojure-mode)
 (require 'cl-lib)
+(require 'json)
 (require 'subr-x)
 (require 'seq)
 (require 'xref)
@@ -33,6 +34,14 @@
   "Preferred key binding for Kvist docs at point."
   :type 'sexp
   :group 'kvist)
+
+(defcustom kvist-reload-buffer-name "*Kvist Reload*"
+  "Buffer name used for long-running `kvist dev --reload' sessions."
+  :type 'string
+  :group 'kvist)
+
+(defconst kvist--reload-event-prefix "KVIST_RELOAD_EVENT\t"
+  "Prefix used by `kvist dev --reload --json` for structured session events.")
 
 (defconst kvist-special-forms
   '("package" "import" "defconst" "defvar" "defstruct" "defenum" "defunion" "defn" "defmacro" "proc" "odin"
@@ -72,6 +81,15 @@
 
 (defvar-local kvist--editor-symbol-cache nil
   "Cached full file-context symbol metadata for the current buffer.")
+
+(defvar-local kvist--reload-path-cache nil
+  "Cached reload path metadata for the current buffer.")
+
+(defvar-local kvist--reload-last-result nil
+  "Most recent reload rebuild result for the current buffer.")
+
+(defvar-local kvist--reload-last-event nil
+  "Most recent structured reload session event for the current buffer.")
 
 (defun kvist--inside-string-on-line-p (pos)
   "Return non-nil if POS is inside a simple string on its current line."
@@ -226,6 +244,118 @@
   (with-temp-buffer
     (let ((exit-code (apply #'call-process program nil t nil args)))
       (cons exit-code (buffer-substring-no-properties (point-min) (point-max))))))
+
+(defun kvist--reload-buffer-name (source-file)
+  "Return a readable reload buffer name for SOURCE-FILE."
+  (format "%s<%s>" kvist-reload-buffer-name (file-name-nondirectory source-file)))
+
+(defun kvist--reload-source-file ()
+  "Return the current file-backed Kvist source path."
+  (unless buffer-file-name
+    (user-error "Reload workflow requires a file-backed buffer"))
+  (expand-file-name buffer-file-name))
+
+(defun kvist--extract-json-object (text)
+  "Return the last JSON object found in TEXT, or nil."
+  (let ((start (cl-position ?{ text))
+        (end (cl-position ?} text :from-end t)))
+    (when (and start end (<= start end))
+      (substring text start (1+ end)))))
+
+(defun kvist--parse-json-output (text)
+  "Parse the last JSON object found in TEXT into an alist."
+  (when-let ((json-text (kvist--extract-json-object text)))
+    (json-parse-string json-text :object-type 'alist :array-type 'list :null-object nil :false-object nil)))
+
+(defun kvist--reload-paths (&optional refresh)
+  "Return reload path metadata for the current buffer.
+When REFRESH is non-nil, ignore any cached value."
+  (let* ((source-file (kvist--reload-source-file))
+         (program (kvist--executable source-file)))
+    (if (and (not refresh)
+             kvist--reload-path-cache
+             (equal (alist-get 'input kvist--reload-path-cache) source-file))
+        kvist--reload-path-cache
+      (pcase-let ((`(,exit-code . ,output)
+                    (kvist--call-string program
+                                        (list "dev" "--reload" source-file "--print-paths" "--json"))))
+        (unless (zerop exit-code)
+          (user-error "%s" (string-trim output)))
+        (let ((parsed (or (kvist--parse-json-output output)
+                          (user-error "Could not parse reload path JSON"))))
+          (setq kvist--reload-path-cache parsed)
+          parsed)))))
+
+(defun kvist--reload-rebuild-result ()
+  "Run a reload rebuild for the current buffer and return parsed JSON."
+  (let* ((source-file (kvist--reload-source-file))
+         (program (kvist--executable source-file)))
+    (save-buffer)
+    (pcase-let ((`(,exit-code . ,output)
+                  (kvist--call-string program
+                                      (list "dev" "--reload" source-file "--rebuild" "--json"))))
+      (let ((parsed (or (kvist--parse-json-output output)
+                        (user-error "%s" (string-trim output)))))
+        (setq kvist--reload-last-result parsed)
+        (unless (or (zerop exit-code) (alist-get 'ok parsed))
+          (user-error "%s" (string-trim output)))
+        parsed))))
+
+(defun kvist--reload-command (source-file)
+  "Return the long-running reload command for SOURCE-FILE."
+  (mapconcat #'shell-quote-argument
+             (list (kvist--executable source-file)
+                   "dev" "--reload" source-file "--json")
+             " "))
+
+(defun kvist--reload-format-paths (paths)
+  "Return a readable summary string for reload PATHS."
+  (string-join
+   (list (format "input: %s" (alist-get 'input paths))
+         (format "root_dir: %s" (alist-get 'root_dir paths))
+         (format "module_dir: %s" (alist-get 'module_dir paths))
+         (format "host_dir: %s" (alist-get 'host_dir paths))
+         (format "module_binary: %s" (alist-get 'module_binary paths))
+         (format "rebuild_command: %s" (alist-get 'rebuild_command paths))
+         (format "run_command: %s" (alist-get 'run_command paths)))
+   "\n"))
+
+(defun kvist--reload-parse-event-line (line)
+  "Parse one structured reload event LINE."
+  (when (string-prefix-p kvist--reload-event-prefix line)
+    (kvist--parse-json-output (substring line (length kvist--reload-event-prefix)))))
+
+(defun kvist--reload-handle-event (event)
+  "Update buffer-local reload state from EVENT."
+  (setq kvist--reload-last-event event)
+  (pcase (alist-get 'event event)
+    ("started"
+     (message "Kvist reload started: generation %s (%s)"
+              (alist-get 'generation event)
+              (alist-get 'version event)))
+    ("reloaded"
+     (message "Kvist reload applied: generation %s (%s)"
+              (alist-get 'generation event)
+              (alist-get 'version event)))
+    ("reload_failed"
+     (message "Kvist reload failed: %s"
+              (or (alist-get 'message event) "<unknown error>")))
+    ("checkpoint_error"
+     (message "Kvist reload checkpoint error: %s"
+              (or (alist-get 'message event) "<unknown error>")))))
+
+(defun kvist--reload-compilation-filter ()
+  "Process structured reload events in the current compilation buffer."
+  (save-excursion
+    (goto-char compilation-filter-start)
+    (let ((line-start (line-beginning-position)))
+      (goto-char line-start)
+      (while (re-search-forward
+              (concat "^" (regexp-quote kvist--reload-event-prefix) "\\(.*\\)$")
+              (point-max)
+              t)
+        (when-let ((event (kvist--reload-parse-event-line (match-string-no-properties 0))))
+          (kvist--reload-handle-event event))))))
 
 (defun kvist--parse-symbol-line (line file)
   "Parse one `kvist symbols' LINE for FILE."
@@ -704,6 +834,45 @@
                  (choice (completing-read "Doc: " names nil t)))
             (kvist--show-doc (nth (cl-position choice names :test #'equal) matches)))))))))
 
+;;;###autoload
+(defun kvist-reload-show-paths (&optional refresh)
+  "Show reload path metadata for the current Kvist buffer.
+With prefix argument REFRESH, re-read the path metadata from the CLI."
+  (interactive "P")
+  (let ((paths (kvist--reload-paths refresh)))
+    (with-current-buffer (get-buffer-create "*Kvist Reload Paths*")
+      (let ((inhibit-read-only t))
+        (erase-buffer)
+        (insert (kvist--reload-format-paths paths))
+        (insert "\n")
+        (goto-char (point-min))
+        (special-mode))
+      (display-buffer (current-buffer)))))
+
+;;;###autoload
+(defun kvist-reload-start ()
+  "Start a long-running `kvist dev --reload' session for the current buffer."
+  (interactive)
+  (save-buffer)
+  (let* ((source-file (kvist--reload-source-file))
+         (default-directory (file-name-as-directory (kvist--project-root source-file)))
+         (command (kvist--reload-command source-file))
+         (buffer-name (kvist--reload-buffer-name source-file)))
+    (let ((buffer (compilation-start command 'compilation-mode (lambda (_mode) buffer-name))))
+      (with-current-buffer buffer
+        (setq-local kvist--reload-last-event nil)
+        (add-hook 'compilation-filter-hook #'kvist--reload-compilation-filter nil t)))
+    (message "Started Kvist reload session for %s" (file-name-nondirectory source-file))))
+
+;;;###autoload
+(defun kvist-reload-rebuild ()
+  "Rebuild the reloadable module for the current Kvist buffer."
+  (interactive)
+  (let ((result (kvist--reload-rebuild-result)))
+    (message "Kvist reload rebuild %s (module: %s)"
+             (if (alist-get 'ok result) "ok" "failed")
+             (or (alist-get 'module_binary result) "<unknown>"))))
+
 (defun kvist-completion-at-point ()
   "Complete Kvist special forms and symbols in the current file."
   (when-let ((bounds (kvist--completion-bounds)))
@@ -745,6 +914,9 @@
 (define-key kvist-mode-map (kbd "M-.") #'xref-find-definitions)
 (define-key kvist-mode-map (kbd "C-c C-.") #'kvist-doc-at-point)
 (define-key kvist-mode-map (kbd "C-c C-d") #'kvist-doc-at-point)
+(define-key kvist-mode-map (kbd "C-c r s") #'kvist-reload-start)
+(define-key kvist-mode-map (kbd "C-c r r") #'kvist-reload-rebuild)
+(define-key kvist-mode-map (kbd "C-c r p") #'kvist-reload-show-paths)
 (define-key kvist-mode-map kvist-doc-keybinding #'kvist-doc-at-point)
 
 ;;;###autoload

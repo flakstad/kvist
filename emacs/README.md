@@ -76,9 +76,28 @@ Default keys:
 - `C-c t t`: run the `t/deftest` at point
 - `C-c t p`: run Kvist tests for the current package
 - `C-c t a`: run all Kvist test packages in the current project
+- `C-c r s`: start `kvist dev --reload` for the current file
+- `C-c r r`: rebuild the current reloadable app via `--rebuild --json`
+- `C-c r p`: show generated reload paths and commands
 
 Use a prefix argument with eval commands to treat the form/region as statements
 instead of printing the expression result.
+
+The reload commands use the CLI's JSON surface:
+
+```sh
+kvist dev --reload file.kvist --json
+kvist dev --reload file.kvist --print-paths --json
+kvist dev --reload file.kvist --rebuild --json
+```
+
+`C-c r s` starts the long-running resident reload shell in a compilation buffer.
+The session uses `--json`, so the reload host emits structured event lines with
+the prefix `KVIST_RELOAD_EVENT<TAB>` while ordinary app stdout/stderr still
+flows through the same buffer.
+`C-c r r` saves the current buffer and rebuilds only the generated reloadable
+module. `C-c r p` shows the generated host/module paths and canonical reload
+commands for the current file.
 
 Saved eval values use the CLI cache:
 

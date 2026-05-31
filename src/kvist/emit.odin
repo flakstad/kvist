@@ -13,6 +13,7 @@ Emitter_Features :: struct {
     core_map:         bool,
     core_map_capture_1: bool,
     core_filter:      bool,
+    core_filter_capture_1: bool,
     core_reduce:      bool,
     core_take:        bool,
     core_drop:        bool,
@@ -24,8 +25,10 @@ Emitter_Features :: struct {
     core_some:        bool,
     core_every:       bool,
     core_remove:      bool,
+    core_remove_capture_1: bool,
     core_map_indexed: bool,
     core_keep:        bool,
+    core_keep_capture_1: bool,
     core_mapcat:      bool,
     core_concat:      bool,
     core_merge:       bool,
@@ -42,8 +45,11 @@ Emitter_Features :: struct {
     core_map_in_place_capture_1: bool,
     core_map_indexed_in_place: bool,
     core_filter_in_place: bool,
+    core_filter_in_place_capture_1: bool,
     core_remove_in_place: bool,
+    core_remove_in_place_capture_1: bool,
     core_keep_in_place: bool,
+    core_keep_in_place_capture_1: bool,
     core_sort:        bool,
     core_sort_by:     bool,
     core_sort_in_place: bool,
@@ -211,6 +217,12 @@ mark_core_filter :: proc(e: ^Emitter) {
     }
 }
 
+mark_core_filter_capture_1 :: proc(e: ^Emitter) {
+    if e.features != nil {
+        e.features.core_filter_capture_1 = true
+    }
+}
+
 mark_core_reduce :: proc(e: ^Emitter) {
     if e.features != nil {
         e.features.core_reduce = true
@@ -277,6 +289,12 @@ mark_core_remove :: proc(e: ^Emitter) {
     }
 }
 
+mark_core_remove_capture_1 :: proc(e: ^Emitter) {
+    if e.features != nil {
+        e.features.core_remove_capture_1 = true
+    }
+}
+
 mark_core_map_indexed :: proc(e: ^Emitter) {
     if e.features != nil {
         e.features.core_map_indexed = true
@@ -286,6 +304,12 @@ mark_core_map_indexed :: proc(e: ^Emitter) {
 mark_core_keep :: proc(e: ^Emitter) {
     if e.features != nil {
         e.features.core_keep = true
+    }
+}
+
+mark_core_keep_capture_1 :: proc(e: ^Emitter) {
+    if e.features != nil {
+        e.features.core_keep_capture_1 = true
     }
 }
 
@@ -385,15 +409,33 @@ mark_core_filter_in_place :: proc(e: ^Emitter) {
     }
 }
 
+mark_core_filter_in_place_capture_1 :: proc(e: ^Emitter) {
+    if e.features != nil {
+        e.features.core_filter_in_place_capture_1 = true
+    }
+}
+
 mark_core_remove_in_place :: proc(e: ^Emitter) {
     if e.features != nil {
         e.features.core_remove_in_place = true
     }
 }
 
+mark_core_remove_in_place_capture_1 :: proc(e: ^Emitter) {
+    if e.features != nil {
+        e.features.core_remove_in_place_capture_1 = true
+    }
+}
+
 mark_core_keep_in_place :: proc(e: ^Emitter) {
     if e.features != nil {
         e.features.core_keep_in_place = true
+    }
+}
+
+mark_core_keep_in_place_capture_1 :: proc(e: ^Emitter) {
+    if e.features != nil {
+        e.features.core_keep_in_place_capture_1 = true
     }
 }
 
@@ -1390,17 +1432,33 @@ emit_thread_step :: proc(e: ^Emitter, current: string, step: CST_Form, thread_la
             if len(step.items) != 2 {
                 return "", Compile_Error{message = fmt.tprintf("%s thread step expects one function argument", head.text), span = step.span}, false
             }
-            f, err_f, ok_f := emit_expr(e, step.items[1])
-            if !ok_f {
-                return "", err_f, false
-            }
             if head.text == "map-indexed" {
+                f, err_f, ok_f := emit_expr(e, step.items[1])
+                if !ok_f {
+                    return "", err_f, false
+                }
                 mark_core_map_indexed(e)
                 return emit_call_text("kvist_map_indexed", []string{f, slice_all_expr_text(current)}), {}, true
             }
             if head.text == "mapcat" {
+                f, err_f, ok_f := emit_expr(e, step.items[1])
+                if !ok_f {
+                    return "", err_f, false
+                }
                 mark_core_mapcat(e)
                 return emit_call_text("kvist_mapcat", []string{f, slice_all_expr_text(current)}), {}, true
+            }
+            proc_text, capture_name, captured, err_capture, ok_capture := captured_unary_callback_proc(e, step.items[1], "keep", .Keep)
+            if !ok_capture {
+                return "", err_capture, false
+            }
+            if captured {
+                mark_core_keep_capture_1(e)
+                return emit_call_text("kvist_keep_1", []string{proc_text, capture_name, slice_all_expr_text(current)}), {}, true
+            }
+            f, err_f, ok_f := emit_expr(e, step.items[1])
+            if !ok_f {
+                return "", err_f, false
             }
             mark_core_keep(e)
             return emit_call_text("kvist_keep", []string{f, slice_all_expr_text(current)}), {}, true
@@ -3317,33 +3375,13 @@ emit_map_callback_call :: proc(e: ^Emitter, callback: CST_Form, collection: stri
         ), {}, true
     }
 
-    if callback.kind == .List && len(callback.items) > 0 && (is_symbol(callback.items[0], "fn") || is_symbol(callback.items[0], "proc")) {
-        parsed, err_parse, ok_parse := parse_proc_literal_form(callback)
-        if !ok_parse {
-            return "", err_parse, false
-        }
-        if len(parsed.params) != 1 {
-            return "", Compile_Error{message = "capturing map callback currently expects exactly one parameter", span = callback.span}, false
-        }
-        if parsed.returns.kind != .Single {
-            return "", Compile_Error{message = "capturing map callback currently requires an explicit single return type", span = callback.span}, false
-        }
-        param_names := []string{parsed.params[0].name}
-        captures := collect_proc_literal_captures(e, parsed.body[:], param_names)
-        if len(captures) > 1 {
-            return "", Compile_Error{message = "capturing map callback currently supports exactly one captured outer local", span = callback.span}, false
-        }
-        if len(captures) == 1 {
-            params: [dynamic]Param
-            append(&params, captures[0])
-            append(&params, parsed.params[0])
-            proc_text, err_proc, ok_proc := emit_proc_literal_text(e, params[:], parsed.returns, parsed.body[:])
-            if !ok_proc {
-                return "", err_proc, false
-            }
-            mark_core_map_capture_1(e)
-            return emit_call_text("kvist_map_1", []string{proc_text, captures[0].name, collection}), {}, true
-        }
+    proc_text, capture_name, captured, err_capture, ok_capture := captured_unary_callback_proc(e, callback, "map", .Value)
+    if !ok_capture {
+        return "", err_capture, false
+    }
+    if captured {
+        mark_core_map_capture_1(e)
+        return emit_call_text("kvist_map_1", []string{proc_text, capture_name, collection}), {}, true
     }
 
     f, err_f, ok_f := emit_expr(e, callback)
@@ -3544,6 +3582,20 @@ emit_dynamic_predicate_in_place_callback_call :: proc(e: ^Emitter, helper_name: 
         return emit_call_text(fmt.tprintf("%s_field_%s", helper_name, field), []string{collection_ptr}), {}, true
     }
 
+    proc_text, capture_name, captured, err_capture, ok_capture := captured_unary_callback_proc(e, callback, helper_name, .Predicate)
+    if !ok_capture {
+        return "", err_capture, false
+    }
+    if captured {
+        switch helper_name {
+        case "kvist_filter_in_place":
+            mark_core_filter_in_place_capture_1(e)
+        case "kvist_remove_in_place":
+            mark_core_remove_in_place_capture_1(e)
+        }
+        return emit_call_text(fmt.tprintf("%s_1", helper_name), []string{proc_text, capture_name, collection_ptr}), {}, true
+    }
+
     pred, err_pred, ok_pred := emit_expr(e, callback)
     if !ok_pred {
         return "", err_pred, false
@@ -3556,6 +3608,20 @@ emit_predicate_callback_call :: proc(e: ^Emitter, helper_name: string, callback:
     if field, ok_field := field_from_keyword(callback); ok_field {
         mark_field(e, field)
         return emit_call_text(fmt.tprintf("%s_field_%s", helper_name, field), []string{collection}), {}, true
+    }
+
+    proc_text, capture_name, captured, err_capture, ok_capture := captured_unary_callback_proc(e, callback, helper_name, .Predicate)
+    if !ok_capture {
+        return "", err_capture, false
+    }
+    if captured {
+        switch helper_name {
+        case "kvist_filter":
+            mark_core_filter_capture_1(e)
+        case "kvist_remove":
+            mark_core_remove_capture_1(e)
+        }
+        return emit_call_text(fmt.tprintf("%s_1", helper_name), []string{proc_text, capture_name, collection}), {}, true
     }
 
     pred, err_pred, ok_pred := emit_expr(e, callback)
@@ -3752,6 +3818,55 @@ collect_proc_literal_captures_from_form :: proc(e: ^Emitter, form: CST_Form, bou
         }
     case:
     }
+}
+
+Captured_Callback_Kind :: enum {
+    Value,
+    Predicate,
+    Keep,
+}
+
+captured_unary_callback_proc :: proc(e: ^Emitter, callback: CST_Form, helper_name: string, kind: Captured_Callback_Kind) -> (proc_text, capture_name: string, captured: bool, err: Compile_Error, ok: bool) {
+    if callback.kind != .List || len(callback.items) == 0 || (!is_symbol(callback.items[0], "fn") && !is_symbol(callback.items[0], "proc")) {
+        return "", "", false, Compile_Error{}, true
+    }
+    parsed, err_parse, ok_parse := parse_proc_literal_form(callback)
+    if !ok_parse {
+        return "", "", false, err_parse, false
+    }
+    if len(parsed.params) != 1 {
+        return "", "", false, Compile_Error{message = fmt.tprintf("capturing %s callback currently expects exactly one parameter", helper_name), span = callback.span}, false
+    }
+    switch kind {
+    case .Value:
+        if parsed.returns.kind != .Single {
+            return "", "", false, Compile_Error{message = fmt.tprintf("capturing %s callback currently requires an explicit single return type", helper_name), span = callback.span}, false
+        }
+    case .Predicate:
+        if parsed.returns.kind != .Single || parsed.returns.single_ty != "bool" {
+            return "", "", false, Compile_Error{message = fmt.tprintf("capturing %s callback currently requires an explicit bool return type", helper_name), span = callback.span}, false
+        }
+    case .Keep:
+        if parsed.returns.kind != .Named || len(parsed.returns.named) != 2 || parsed.returns.named[1].ty != "bool" {
+            return "", "", false, Compile_Error{message = fmt.tprintf("capturing %s callback currently requires explicit named returns [value: T, ok: bool]", helper_name), span = callback.span}, false
+        }
+    }
+    param_names := []string{parsed.params[0].name}
+    captures := collect_proc_literal_captures(e, parsed.body[:], param_names)
+    if len(captures) > 1 {
+        return "", "", false, Compile_Error{message = fmt.tprintf("capturing %s callback currently supports exactly one captured outer local", helper_name), span = callback.span}, false
+    }
+    if len(captures) == 0 {
+        return "", "", false, Compile_Error{}, true
+    }
+    params: [dynamic]Param
+    append(&params, captures[0])
+    append(&params, parsed.params[0])
+    proc_text_value, err_proc, ok_proc := emit_proc_literal_text(e, params[:], parsed.returns, parsed.body[:])
+    if !ok_proc {
+        return "", "", false, err_proc, false
+    }
+    return proc_text_value, captures[0].name, true, Compile_Error{}, true
 }
 
 emit_operator_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) {
@@ -4568,33 +4683,13 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
             return "", err_collection, false
         }
         callback := form.items[1]
-        if callback.kind == .List && len(callback.items) > 0 && (is_symbol(callback.items[0], "fn") || is_symbol(callback.items[0], "proc")) {
-            parsed, err_parse, ok_parse := parse_proc_literal_form(callback)
-            if !ok_parse {
-                return "", err_parse, false
-            }
-            if len(parsed.params) != 1 {
-                return "", Compile_Error{message = "capturing map! callback currently expects exactly one parameter", span = callback.span}, false
-            }
-            if parsed.returns.kind != .Single {
-                return "", Compile_Error{message = "capturing map! callback currently requires an explicit single return type", span = callback.span}, false
-            }
-            param_names := []string{parsed.params[0].name}
-            captures := collect_proc_literal_captures(e, parsed.body[:], param_names)
-            if len(captures) > 1 {
-                return "", Compile_Error{message = "capturing map! callback currently supports exactly one captured outer local", span = callback.span}, false
-            }
-            if len(captures) == 1 {
-                params: [dynamic]Param
-                append(&params, captures[0])
-                append(&params, parsed.params[0])
-                proc_text, err_proc, ok_proc := emit_proc_literal_text(e, params[:], parsed.returns, parsed.body[:])
-                if !ok_proc {
-                    return "", err_proc, false
-                }
-                mark_core_map_in_place_capture_1(e)
-                return emit_call_text("kvist_map_in_place_1", []string{proc_text, captures[0].name, slice_all_expr_text(collection)}), {}, true
-            }
+        proc_text, capture_name, captured, err_capture, ok_capture := captured_unary_callback_proc(e, callback, "map!", .Value)
+        if !ok_capture {
+            return "", err_capture, false
+        }
+        if captured {
+            mark_core_map_in_place_capture_1(e)
+            return emit_call_text("kvist_map_in_place_1", []string{proc_text, capture_name, slice_all_expr_text(collection)}), {}, true
         }
         f, err_f, ok_f := emit_expr(e, callback)
         if !ok_f {
@@ -4638,22 +4733,39 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         if len(form.items) != 3 {
             return "", Compile_Error{message = fmt.tprintf("%s expects function and collection", head.text), span = form.span}, false
         }
-        f, err_f, ok_f := emit_expr(e, form.items[1])
-        if !ok_f {
-            return "", err_f, false
-        }
+        callback := form.items[1]
         collection, err_collection, ok_collection := emit_expr(e, form.items[2])
         if !ok_collection {
             return "", err_collection, false
         }
         collection = slice_all_expr_text(collection)
         if head.text == "map-indexed" {
+            f, err_f, ok_f := emit_expr(e, callback)
+            if !ok_f {
+                return "", err_f, false
+            }
             mark_core_map_indexed(e)
             return emit_call_text("kvist_map_indexed", []string{f, collection}), {}, true
         }
         if head.text == "mapcat" {
+            f, err_f, ok_f := emit_expr(e, callback)
+            if !ok_f {
+                return "", err_f, false
+            }
             mark_core_mapcat(e)
             return emit_call_text("kvist_mapcat", []string{f, collection}), {}, true
+        }
+        proc_text, capture_name, captured, err_capture, ok_capture := captured_unary_callback_proc(e, callback, "keep", .Keep)
+        if !ok_capture {
+            return "", err_capture, false
+        }
+        if captured {
+            mark_core_keep_capture_1(e)
+            return emit_call_text("kvist_keep_1", []string{proc_text, capture_name, collection}), {}, true
+        }
+        f, err_f, ok_f := emit_expr(e, callback)
+        if !ok_f {
+            return "", err_f, false
         }
         mark_core_keep(e)
         return emit_call_text("kvist_keep", []string{f, collection}), {}, true
@@ -4663,13 +4775,22 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         if len(form.items) != 3 {
             return "", Compile_Error{message = "keep! expects function and dynamic array", span = form.span}, false
         }
-        f, err_f, ok_f := emit_expr(e, form.items[1])
-        if !ok_f {
-            return "", err_f, false
-        }
+        callback := form.items[1]
         collection, err_collection, ok_collection := emit_expr(e, form.items[2])
         if !ok_collection {
             return "", err_collection, false
+        }
+        proc_text, capture_name, captured, err_capture, ok_capture := captured_unary_callback_proc(e, callback, "keep!", .Keep)
+        if !ok_capture {
+            return "", err_capture, false
+        }
+        if captured {
+            mark_core_keep_in_place_capture_1(e)
+            return emit_call_text("kvist_keep_in_place_1", []string{proc_text, capture_name, address_of_expr_text(collection)}), {}, true
+        }
+        f, err_f, ok_f := emit_expr(e, callback)
+        if !ok_f {
+            return "", err_f, false
         }
         mark_core_keep_in_place(e)
         return emit_call_text("kvist_keep_in_place", []string{f, address_of_expr_text(collection)}), {}, true
@@ -6904,6 +7025,24 @@ emit_core_filter_helper :: proc(e: ^Emitter) {
     emit_line(e, "}")
 }
 
+emit_core_filter_capture_1_helper :: proc(e: ^Emitter) {
+    emit_line(e, "kvist_filter_1 :: proc(pred: proc(c1: $C1, x: $T) -> bool, c1: C1, xs: []T) -> [dynamic]T {")
+    e.indent += 1
+    emit_line(e, "out := make([dynamic]T, 0, len(xs))")
+    emit_line(e, "for x in xs {")
+    e.indent += 1
+    emit_line(e, "if pred(c1, x) {")
+    e.indent += 1
+    emit_line(e, "append(&out, x)")
+    e.indent -= 1
+    emit_line(e, "}")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "return out")
+    e.indent -= 1
+    emit_line(e, "}")
+}
+
 emit_core_filter_field_helper :: proc(e: ^Emitter, field: string) {
     emit_line(e, fmt.tprintf("kvist_filter_field_%s :: proc(xs: []$T) -> [dynamic]T %s", field, "{"))
     e.indent += 1
@@ -6930,6 +7069,26 @@ emit_core_filter_in_place_helper :: proc(e: ^Emitter) {
     emit_line(e, "for x in data {")
     e.indent += 1
     emit_line(e, "if pred(x) {")
+    e.indent += 1
+    emit_line(e, "data[write] = x")
+    emit_line(e, "write += 1")
+    e.indent -= 1
+    emit_line(e, "}")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "resize(xs, write)")
+    e.indent -= 1
+    emit_line(e, "}")
+}
+
+emit_core_filter_in_place_capture_1_helper :: proc(e: ^Emitter) {
+    emit_line(e, "kvist_filter_in_place_1 :: proc(pred: proc(c1: $C1, x: $T) -> bool, c1: C1, xs: ^[dynamic]T) {")
+    e.indent += 1
+    emit_line(e, "data := xs^")
+    emit_line(e, "write := 0")
+    emit_line(e, "for x in data {")
+    e.indent += 1
+    emit_line(e, "if pred(c1, x) {")
     e.indent += 1
     emit_line(e, "data[write] = x")
     emit_line(e, "write += 1")
@@ -6980,6 +7139,24 @@ emit_core_remove_helper :: proc(e: ^Emitter) {
     emit_line(e, "}")
 }
 
+emit_core_remove_capture_1_helper :: proc(e: ^Emitter) {
+    emit_line(e, "kvist_remove_1 :: proc(pred: proc(c1: $C1, x: $T) -> bool, c1: C1, xs: []T) -> [dynamic]T {")
+    e.indent += 1
+    emit_line(e, "out := make([dynamic]T, 0, len(xs))")
+    emit_line(e, "for x in xs {")
+    e.indent += 1
+    emit_line(e, "if !pred(c1, x) {")
+    e.indent += 1
+    emit_line(e, "append(&out, x)")
+    e.indent -= 1
+    emit_line(e, "}")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "return out")
+    e.indent -= 1
+    emit_line(e, "}")
+}
+
 emit_core_remove_field_helper :: proc(e: ^Emitter, field: string) {
     emit_line(e, fmt.tprintf("kvist_remove_field_%s :: proc(xs: []$T) -> [dynamic]T %s", field, "{"))
     e.indent += 1
@@ -7006,6 +7183,26 @@ emit_core_remove_in_place_helper :: proc(e: ^Emitter) {
     emit_line(e, "for x in data {")
     e.indent += 1
     emit_line(e, "if !pred(x) {")
+    e.indent += 1
+    emit_line(e, "data[write] = x")
+    emit_line(e, "write += 1")
+    e.indent -= 1
+    emit_line(e, "}")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "resize(xs, write)")
+    e.indent -= 1
+    emit_line(e, "}")
+}
+
+emit_core_remove_in_place_capture_1_helper :: proc(e: ^Emitter) {
+    emit_line(e, "kvist_remove_in_place_1 :: proc(pred: proc(c1: $C1, x: $T) -> bool, c1: C1, xs: ^[dynamic]T) {")
+    e.indent += 1
+    emit_line(e, "data := xs^")
+    emit_line(e, "write := 0")
+    emit_line(e, "for x in data {")
+    e.indent += 1
+    emit_line(e, "if !pred(c1, x) {")
     e.indent += 1
     emit_line(e, "data[write] = x")
     emit_line(e, "write += 1")
@@ -7107,6 +7304,25 @@ emit_core_keep_helper :: proc(e: ^Emitter) {
     emit_line(e, "}")
 }
 
+emit_core_keep_capture_1_helper :: proc(e: ^Emitter) {
+    emit_line(e, "kvist_keep_1 :: proc(f: proc(c1: $C1, x: $T) -> ($U, bool), c1: C1, xs: []T) -> [dynamic]U {")
+    e.indent += 1
+    emit_line(e, "out := make([dynamic]U, 0, len(xs))")
+    emit_line(e, "for x in xs {")
+    e.indent += 1
+    emit_line(e, "value, ok := f(c1, x)")
+    emit_line(e, "if ok {")
+    e.indent += 1
+    emit_line(e, "append(&out, value)")
+    e.indent -= 1
+    emit_line(e, "}")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "return out")
+    e.indent -= 1
+    emit_line(e, "}")
+}
+
 emit_core_keep_in_place_helper :: proc(e: ^Emitter) {
     emit_line(e, "kvist_keep_in_place :: proc(f: proc(x: $T) -> (T, bool), xs: ^[dynamic]T) {")
     e.indent += 1
@@ -7115,6 +7331,27 @@ emit_core_keep_in_place_helper :: proc(e: ^Emitter) {
     emit_line(e, "for x in data {")
     e.indent += 1
     emit_line(e, "value, ok := f(x)")
+    emit_line(e, "if ok {")
+    e.indent += 1
+    emit_line(e, "data[write] = value")
+    emit_line(e, "write += 1")
+    e.indent -= 1
+    emit_line(e, "}")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "resize(xs, write)")
+    e.indent -= 1
+    emit_line(e, "}")
+}
+
+emit_core_keep_in_place_capture_1_helper :: proc(e: ^Emitter) {
+    emit_line(e, "kvist_keep_in_place_1 :: proc(f: proc(c1: $C1, x: $T) -> (T, bool), c1: C1, xs: ^[dynamic]T) {")
+    e.indent += 1
+    emit_line(e, "data := xs^")
+    emit_line(e, "write := 0")
+    emit_line(e, "for x in data {")
+    e.indent += 1
+    emit_line(e, "value, ok := f(c1, x)")
     emit_line(e, "if ok {")
     e.indent += 1
     emit_line(e, "data[write] = value")
@@ -8185,12 +8422,12 @@ emit_core_every_field_helper :: proc(e: ^Emitter, field: string) {
 }
 
 core_helpers_needed :: proc(features: Emitter_Features) -> bool {
-    return features.core_map || features.core_map_capture_1 || features.core_filter || features.core_reduce ||
+    return features.core_map || features.core_map_capture_1 || features.core_filter || features.core_filter_capture_1 || features.core_reduce ||
            features.core_take || features.core_drop ||
            features.core_drop_last || features.core_take_nth ||
            features.core_take_while || features.core_drop_while ||
            features.core_find || features.core_some || features.core_every ||
-           features.core_remove || features.core_map_indexed || features.core_keep ||
+           features.core_remove || features.core_remove_capture_1 || features.core_map_indexed || features.core_keep || features.core_keep_capture_1 ||
            features.core_mapcat || features.core_concat ||
            features.core_merge || features.core_merge_in_place ||
            features.core_get_or_default ||
@@ -8200,8 +8437,9 @@ core_helpers_needed :: proc(features: Emitter_Features) -> bool {
            features.core_shuffle || features.core_shuffle_in_place ||
            features.core_map_in_place || features.core_map_in_place_capture_1 ||
            features.core_map_indexed_in_place ||
-           features.core_filter_in_place || features.core_remove_in_place ||
-           features.core_keep_in_place ||
+           features.core_filter_in_place || features.core_filter_in_place_capture_1 ||
+           features.core_remove_in_place || features.core_remove_in_place_capture_1 ||
+           features.core_keep_in_place || features.core_keep_in_place_capture_1 ||
            features.core_sort || features.core_sort_by ||
            features.core_sort_in_place || features.core_sort_by_in_place ||
            features.core_split_at || features.core_partition ||
@@ -8265,6 +8503,10 @@ emit_core_helpers :: proc(e: ^Emitter, features: Emitter_Features) {
         emit_core_helper_separator(e, &emitted)
         emit_core_filter_helper(e)
     }
+    if features.core_filter_capture_1 {
+        emit_core_helper_separator(e, &emitted)
+        emit_core_filter_capture_1_helper(e)
+    }
     for field in features.filter_fields {
         emit_core_helper_separator(e, &emitted)
         emit_core_filter_field_helper(e, field)
@@ -8272,6 +8514,10 @@ emit_core_helpers :: proc(e: ^Emitter, features: Emitter_Features) {
     if features.core_filter_in_place {
         emit_core_helper_separator(e, &emitted)
         emit_core_filter_in_place_helper(e)
+    }
+    if features.core_filter_in_place_capture_1 {
+        emit_core_helper_separator(e, &emitted)
+        emit_core_filter_in_place_capture_1_helper(e)
     }
     for field in features.filter_in_place_fields {
         emit_core_helper_separator(e, &emitted)
@@ -8281,6 +8527,10 @@ emit_core_helpers :: proc(e: ^Emitter, features: Emitter_Features) {
         emit_core_helper_separator(e, &emitted)
         emit_core_remove_helper(e)
     }
+    if features.core_remove_capture_1 {
+        emit_core_helper_separator(e, &emitted)
+        emit_core_remove_capture_1_helper(e)
+    }
     for field in features.remove_fields {
         emit_core_helper_separator(e, &emitted)
         emit_core_remove_field_helper(e, field)
@@ -8288,6 +8538,10 @@ emit_core_helpers :: proc(e: ^Emitter, features: Emitter_Features) {
     if features.core_remove_in_place {
         emit_core_helper_separator(e, &emitted)
         emit_core_remove_in_place_helper(e)
+    }
+    if features.core_remove_in_place_capture_1 {
+        emit_core_helper_separator(e, &emitted)
+        emit_core_remove_in_place_capture_1_helper(e)
     }
     for field in features.remove_in_place_fields {
         emit_core_helper_separator(e, &emitted)
@@ -8313,9 +8567,17 @@ emit_core_helpers :: proc(e: ^Emitter, features: Emitter_Features) {
         emit_core_helper_separator(e, &emitted)
         emit_core_keep_helper(e)
     }
+    if features.core_keep_capture_1 {
+        emit_core_helper_separator(e, &emitted)
+        emit_core_keep_capture_1_helper(e)
+    }
     if features.core_keep_in_place {
         emit_core_helper_separator(e, &emitted)
         emit_core_keep_in_place_helper(e)
+    }
+    if features.core_keep_in_place_capture_1 {
+        emit_core_helper_separator(e, &emitted)
+        emit_core_keep_in_place_capture_1_helper(e)
     }
     if features.core_mapcat {
         emit_core_helper_separator(e, &emitted)

@@ -23,7 +23,7 @@ block so `C-c C-e` and `C-c C-c` are practical.
 - `macro-messages.kvist`: message-family DSL that emits payload structs, a tagged union, and constructors.
 - `testing.kvist`: shipped `kvist:test` macros including `t/deftest`, `t/is`, nested `t/testing`, `t/are`, and `t/use-fixtures` with `:each` / `:once`.
 - `hiccup-interpolation.kvist`: Hiccup attrs and child nodes with direct Kvist expression interpolation, including `if`, `when`, `nil` omission, and `[:<> ...]` fragments.
-- `closures.kvist`: non-capturing `fn` literals plus first-cut captured callbacks for `map` / `map!`.
+- `closures.kvist`: non-capturing `fn` literals plus first-cut captured callbacks for selected helper sites such as `map` / `map!`.
 - `hello.kvist`: package, import, struct literal, and a tiny `main`.
 - `declarations.kvist`: doc comments, import aliases, constants, enums, structs.
 - `defstructs.kvist`: `defstruct` docstrings, typed fields, nested structs.
