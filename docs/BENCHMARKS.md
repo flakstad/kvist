@@ -154,7 +154,7 @@ cleanly as the older helper benchmarks.
 There is now also a focused captured-callback benchmark for the first closure
 pass:
 
-- Kvist `map`, `filter`, and `map!` with one captured outer local
+- Kvist `map`, `filter`, `remove`, `keep`, and `map!` with one captured outer local
 - direct Odin helper-with-context equivalents
 - direct Odin loop baselines
 

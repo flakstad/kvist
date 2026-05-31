@@ -63,7 +63,7 @@ Default keys:
 - `C-c C-k`: eval the whole buffer
 - `C-c C-b`: compile buffer and run `odin build` on generated Odin
 - `C-c C-v`: compile buffer and run `odin check` on generated Odin
-- `C-c C-a`: compile buffer and run generated Odin
+- `C-c C-a`: save buffer and run `kvist run` asynchronously
 - `C-c C-m`: expand form at point into generated Odin
 - `C-c M-m`: macroexpand form at point into Kvist
 - `C-c C-s`: toggle display of generated Odin
@@ -91,13 +91,21 @@ kvist dev --reload file.kvist --print-paths --json
 kvist dev --reload file.kvist --rebuild --json
 ```
 
-`C-c r s` starts the long-running resident reload shell in a compilation buffer.
+`C-c C-a` now runs the current file in its own per-file compilation buffer, so
+long-running programs do not block Emacs and multiple runs can stay open at the
+same time.
+
+`C-c r s` starts the long-running resident reload shell in its own per-file
+compilation buffer.
 The session uses `--json`, so the reload host emits structured event lines with
 the prefix `KVIST_RELOAD_EVENT<TAB>` while ordinary app stdout/stderr still
 flows through the same buffer.
 `C-c r r` saves the current buffer and rebuilds only the generated reloadable
 module. `C-c r p` shows the generated host/module paths and canonical reload
 commands for the current file.
+
+For reload-app sources, `C-c C-a` runs the production-style wrapper (`kvist run
+file.kvist`), while `C-c r s` starts the resident reload session.
 
 Saved eval values use the CLI cache:
 

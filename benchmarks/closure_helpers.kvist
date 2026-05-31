@@ -84,6 +84,62 @@ MAP_BANG_REPS :: 80")
       (set! i (+ i 1)))
     checksum))
 
+(defn bench-remove-captured [xs: [dynamic]int, reps: int] -> int
+  (let [limit 60000
+        i 0
+        checksum 0]
+    (for (< i reps)
+      (let [filtered (remove (fn [x: int] -> bool
+                               (> x limit))
+                             xs)]
+        (set! checksum (+ checksum (count filtered)))
+        (delete filtered))
+      (set! i (+ i 1)))
+    checksum))
+
+(defn bench-remove-loop [xs: [dynamic]int, reps: int] -> int
+  (let [limit 60000
+        i 0
+        checksum 0]
+    (for (< i reps)
+      (let [filtered (arr/empty int (count xs))]
+        (for [x xs]
+          (when (not (> x limit))
+            (arr/push! filtered x)))
+        (set! checksum (+ checksum (count filtered)))
+        (delete filtered))
+      (set! i (+ i 1)))
+    checksum))
+
+(defn bench-keep-captured [xs: [dynamic]int, reps: int] -> int
+  (let [limit 60000
+        i 0
+        checksum 0]
+    (for (< i reps)
+      (let [kept (keep (fn [x: int] -> [value: int, ok: bool]
+                         (if (> x limit)
+                           (return x true)
+                           (return 0 false)))
+                       xs)]
+        (set! checksum (+ checksum (count kept)))
+        (delete kept))
+      (set! i (+ i 1)))
+    checksum))
+
+(defn bench-keep-loop [xs: [dynamic]int, reps: int] -> int
+  (let [limit 60000
+        i 0
+        checksum 0]
+    (for (< i reps)
+      (let [kept (arr/empty int (count xs))]
+        (for [x xs]
+          (when (> x limit)
+            (arr/push! kept x)))
+        (set! checksum (+ checksum (count kept)))
+        (delete kept))
+      (set! i (+ i 1)))
+    checksum))
+
 (defn bench-map-bang-captured [base: [dynamic]int, reps: int] -> int
   (let [offset 7
         i 0
@@ -144,6 +200,18 @@ MAP_BANG_REPS :: 80")
     (mem.tracking-allocator-reset (& track))
     (let [start (time.tick-now)]
       (run-one "filter-loop" (bench-filter-loop map-base MAP_REPS) start (& track)))
+    (mem.tracking-allocator-reset (& track))
+    (let [start (time.tick-now)]
+      (run-one "remove-captured" (bench-remove-captured map-base MAP_REPS) start (& track)))
+    (mem.tracking-allocator-reset (& track))
+    (let [start (time.tick-now)]
+      (run-one "remove-loop" (bench-remove-loop map-base MAP_REPS) start (& track)))
+    (mem.tracking-allocator-reset (& track))
+    (let [start (time.tick-now)]
+      (run-one "keep-captured" (bench-keep-captured map-base MAP_REPS) start (& track)))
+    (mem.tracking-allocator-reset (& track))
+    (let [start (time.tick-now)]
+      (run-one "keep-loop" (bench-keep-loop map-base MAP_REPS) start (& track)))
     (mem.tracking-allocator-reset (& track))
     (let [start (time.tick-now)]
       (run-one "map!-captured" (bench-map-bang-captured bang-base MAP_BANG_REPS) start (& track)))

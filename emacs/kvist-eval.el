@@ -42,6 +42,11 @@
   :type 'string
   :group 'kvist)
 
+(defcustom kvist-run-buffer-name "*Kvist Run*"
+  "Buffer name used for long-running `kvist run' sessions."
+  :type 'string
+  :group 'kvist)
+
 (defconst kvist-declaration-heads
   '("comment" "package" "import" "const" "struct" "enum" "union" "odin" "proc")
   "Kvist forms that are declarations at top level.")
@@ -529,6 +534,45 @@ CLI cache."
     (compilation-start command 'compilation-mode
                        (lambda (_) kvist-test-buffer-name))))
 
+(defun kvist--file-label (source-file)
+  "Return a readable project-relative label for SOURCE-FILE."
+  (let* ((root (file-name-as-directory (kvist--project-root source-file)))
+         (file (expand-file-name source-file)))
+    (if (string-prefix-p root file)
+        (file-relative-name file root)
+      (file-name-nondirectory file))))
+
+(defun kvist--run-buffer-instance-name (source-file)
+  "Return a readable run buffer name for SOURCE-FILE."
+  (format "%s<%s>" kvist-run-buffer-name (kvist--file-label source-file)))
+
+(defun kvist--buffer-command-string (command file &optional generated)
+  "Return a shell command string for Kvist COMMAND on FILE.
+When GENERATED is non-nil, include `--generated GENERATED'."
+  (mapconcat
+   #'identity
+   (append
+    (list (shell-quote-argument (kvist--executable file))
+          command
+          (shell-quote-argument file))
+    (when generated
+      (list "--generated" (shell-quote-argument generated))))
+   " "))
+
+(defun kvist--start-buffer-run ()
+  "Run the current Kvist buffer asynchronously in a compilation buffer."
+  (setq kvist--last-source-buffer (current-buffer))
+  (unless buffer-file-name
+    (user-error "Kvist run requires a file-backed buffer"))
+  (save-buffer)
+  (let* ((source-file (expand-file-name buffer-file-name))
+         (default-directory (file-name-as-directory (kvist--project-root source-file)))
+         (command (kvist--buffer-command-string "run" source-file))
+         (buffer-name (kvist--run-buffer-instance-name source-file)))
+    (compilation-start command 'compilation-mode
+                       (lambda (_) buffer-name))
+    (message "Started plain Kvist run in %s" buffer-name)))
+
 (defun kvist--project-test-command ()
   "Return a shell command string that runs all project Kvist tests."
   (let ((entries (kvist--project-test-entry-files)))
@@ -747,9 +791,9 @@ With prefix argument NO-PRINT, treat the form as a statement."
 
 ;;;###autoload
 (defun kvist-run-buffer ()
-  "Compile the current Kvist buffer and run generated Odin."
+  "Run the current Kvist buffer asynchronously in a compilation buffer."
   (interactive)
-  (kvist--buffer-command "run"))
+  (kvist--start-buffer-run))
 
 ;;;###autoload
 (defun kvist-test-at-point ()

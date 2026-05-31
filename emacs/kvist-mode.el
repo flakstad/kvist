@@ -245,9 +245,14 @@
     (let ((exit-code (apply #'call-process program nil t nil args)))
       (cons exit-code (buffer-substring-no-properties (point-min) (point-max))))))
 
+(defun kvist--call-string-in-root (source-file program args)
+  "Call PROGRAM with ARGS from SOURCE-FILE's Kvist project root."
+  (let ((default-directory (file-name-as-directory (kvist--project-root source-file))))
+    (kvist--call-string program args)))
+
 (defun kvist--reload-buffer-name (source-file)
   "Return a readable reload buffer name for SOURCE-FILE."
-  (format "%s<%s>" kvist-reload-buffer-name (file-name-nondirectory source-file)))
+  (format "%s<%s>" kvist-reload-buffer-name (kvist--file-label source-file)))
 
 (defun kvist--reload-source-file ()
   "Return the current file-backed Kvist source path."
@@ -277,8 +282,9 @@ When REFRESH is non-nil, ignore any cached value."
              (equal (alist-get 'input kvist--reload-path-cache) source-file))
         kvist--reload-path-cache
       (pcase-let ((`(,exit-code . ,output)
-                    (kvist--call-string program
-                                        (list "dev" "--reload" source-file "--print-paths" "--json"))))
+                    (kvist--call-string-in-root source-file
+                                                program
+                                                (list "dev" "--reload" source-file "--print-paths" "--json"))))
         (unless (zerop exit-code)
           (user-error "%s" (string-trim output)))
         (let ((parsed (or (kvist--parse-json-output output)
@@ -292,8 +298,9 @@ When REFRESH is non-nil, ignore any cached value."
          (program (kvist--executable source-file)))
     (save-buffer)
     (pcase-let ((`(,exit-code . ,output)
-                  (kvist--call-string program
-                                      (list "dev" "--reload" source-file "--rebuild" "--json"))))
+                  (kvist--call-string-in-root source-file
+                                              program
+                                              (list "dev" "--reload" source-file "--rebuild" "--json"))))
       (let ((parsed (or (kvist--parse-json-output output)
                         (user-error "%s" (string-trim output)))))
         (setq kvist--reload-last-result parsed)
@@ -862,7 +869,7 @@ With prefix argument REFRESH, re-read the path metadata from the CLI."
       (with-current-buffer buffer
         (setq-local kvist--reload-last-event nil)
         (add-hook 'compilation-filter-hook #'kvist--reload-compilation-filter nil t)))
-    (message "Started Kvist reload session for %s" (file-name-nondirectory source-file))))
+    (message "Started Kvist reload session in %s" buffer-name)))
 
 ;;;###autoload
 (defun kvist-reload-rebuild ()

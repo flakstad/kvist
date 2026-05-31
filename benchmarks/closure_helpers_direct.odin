@@ -52,6 +52,27 @@ filter_with_context_1 :: proc(pred: proc(c1: int, x: int) -> bool, c1: int, xs: 
     return out
 }
 
+remove_with_context_1 :: proc(pred: proc(c1: int, x: int) -> bool, c1: int, xs: []int) -> [dynamic]int {
+    out := make([dynamic]int, 0, len(xs))
+    for x in xs {
+        if !pred(c1, x) {
+            append(&out, x)
+        }
+    }
+    return out
+}
+
+keep_with_context_1 :: proc(f: proc(c1: int, x: int) -> (value: int, ok: bool), c1: int, xs: []int) -> [dynamic]int {
+    out := make([dynamic]int, 0, len(xs))
+    for x in xs {
+        value, ok := f(c1, x)
+        if ok {
+            append(&out, value)
+        }
+    }
+    return out
+}
+
 map_in_place_with_context_1 :: proc(f: proc(c1: int, x: int) -> int, c1: int, xs: []int) {
     for i := 0; i < len(xs); i += 1 {
         xs[i] = f(c1, xs[i])
@@ -64,6 +85,13 @@ add_offset :: proc(offset, x: int) -> int {
 
 greater_than_limit :: proc(limit, x: int) -> bool {
     return x > limit
+}
+
+keep_if_greater_than_limit :: proc(limit, x: int) -> (value: int, ok: bool) {
+    if x > limit {
+        return x, true
+    }
+    return 0, false
 }
 
 bench_map_context_helper :: proc(xs: []int, reps: int) -> int {
@@ -114,6 +142,60 @@ bench_filter_loop :: proc(xs: []int, reps: int) -> int {
         }
         checksum += len(filtered)
         delete(filtered)
+    }
+    return checksum
+}
+
+bench_remove_context_helper :: proc(xs: []int, reps: int) -> int {
+    checksum := 0
+    limit := 60_000
+    for i := 0; i < reps; i += 1 {
+        filtered := remove_with_context_1(greater_than_limit, limit, xs)
+        checksum += len(filtered)
+        delete(filtered)
+    }
+    return checksum
+}
+
+bench_remove_loop :: proc(xs: []int, reps: int) -> int {
+    checksum := 0
+    limit := 60_000
+    for i := 0; i < reps; i += 1 {
+        filtered := make([dynamic]int, 0, len(xs))
+        for x in xs {
+            if !(x > limit) {
+                append(&filtered, x)
+            }
+        }
+        checksum += len(filtered)
+        delete(filtered)
+    }
+    return checksum
+}
+
+bench_keep_context_helper :: proc(xs: []int, reps: int) -> int {
+    checksum := 0
+    limit := 60_000
+    for i := 0; i < reps; i += 1 {
+        kept := keep_with_context_1(keep_if_greater_than_limit, limit, xs)
+        checksum += len(kept)
+        delete(kept)
+    }
+    return checksum
+}
+
+bench_keep_loop :: proc(xs: []int, reps: int) -> int {
+    checksum := 0
+    limit := 60_000
+    for i := 0; i < reps; i += 1 {
+        kept := make([dynamic]int, 0, len(xs))
+        for x in xs {
+            if x > limit {
+                append(&kept, x)
+            }
+        }
+        checksum += len(kept)
+        delete(kept)
     }
     return checksum
 }
@@ -181,6 +263,22 @@ main :: proc() {
     mem.tracking_allocator_reset(&track)
     start = time.tick_now()
     run_one("filter-loop", bench_filter_loop(map_base[:], MAP_REPS), start, &track)
+
+    mem.tracking_allocator_reset(&track)
+    start = time.tick_now()
+    run_one("remove-helper-ctx", bench_remove_context_helper(map_base[:], MAP_REPS), start, &track)
+
+    mem.tracking_allocator_reset(&track)
+    start = time.tick_now()
+    run_one("remove-loop", bench_remove_loop(map_base[:], MAP_REPS), start, &track)
+
+    mem.tracking_allocator_reset(&track)
+    start = time.tick_now()
+    run_one("keep-helper-ctx", bench_keep_context_helper(map_base[:], MAP_REPS), start, &track)
+
+    mem.tracking_allocator_reset(&track)
+    start = time.tick_now()
+    run_one("keep-loop", bench_keep_loop(map_base[:], MAP_REPS), start, &track)
 
     mem.tracking_allocator_reset(&track)
     start = time.tick_now()
