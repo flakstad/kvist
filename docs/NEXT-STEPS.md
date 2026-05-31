@@ -1,181 +1,89 @@
 # Next Steps
 
-This note captures the larger unresolved language areas after the recent
-surface-syntax cleanup. It is intended as a working backlog for design and
-implementation, not as a promise that all of these should happen immediately.
+This note tracks the current areas worth exploring next. It is not a design
+history log.
 
-## Still Valid, Not Yet Idiomatic
+## Current State
 
-Many existing examples are still valid Kvist, but some are not yet written in
-the preferred surface style. That cleanup can continue later. The items below
-are more important than example polish.
+Kvist now has:
 
-## Major Open Areas
+- package-by-directory source loading with package-private `def...-` forms
+- package-local macros with quasiquote, shipped DSL packages, and recursive
+  macro expansion
+- inline array, map, and set literals
+- a shipped `hiccup` package with rendering
+- explicit ownership helpers and stricter escape diagnostics
+- a shipped `kvist:test` package with:
+  - `t/deftest`
+  - `t/is`
+  - `t/are`
+  - nested `t/testing`
+  - `t/use-fixtures :each`
+  - setup-only `t/use-fixtures :once`
+- CLI and Emacs support for docs, completion, xref, eval, and tests
 
-### 1. Package System Depth
+## Most Likely Next Areas
 
-Basic source-package loading works, but the broader package story is not fully
-designed yet:
+### 1. Closures And Higher-Order Function Depth
 
-- project/package roots
-- visibility rules
-- import cycle diagnostics
-- larger multi-package layout conventions
+Non-capturing proc values are supported, and there is now a first narrow pass
+of captured callbacks for compiler-known non-escaping helper sites such as
+`map` and `map!`.
 
-### 2. Macro System
+Questions:
 
-Macros are part of the intended language direction, but the real user-facing
-macro system has not been designed or implemented yet.
+- whether this should widen beyond `map` / `map!`
+- whether more than one captured outer local should be supported
+- how far to take captured callbacks before explicit context should remain the
+  preferred style
 
-Open questions:
+### 2. Package And Tooling Polish
 
-- macro declaration surface
-- expansion phase boundaries
-- how macros interact with source packages
-- what should remain available for explicit raw Odin escape
+The package model is in place, but there is still room to tighten:
 
-Additional pressure from real DSL work is now clear:
+- package diagnostics and error messages
+- project-wide test discovery/reporting polish
+- package-aware editor commands and CLI inspection helpers
+- docs that describe package layout and visibility concisely
 
-- data-oriented DSLs like Hiccup want a cleaner interpolation story
-- ideally, a macro should be able to distinguish structural data from ordinary
-  Kvist expressions without forcing verbose wrapper markers around every
-  runtime hole
-- this likely requires better macro-expander handling for nested package-local
-  helper macros, `quasiquote`/`splice`, and expression-vs-data interpolation
-  rules before the DSL surface should be widened further
+### 3. Standard Library Shape
 
-### 3. Fixed-Shape Type Depth
+The library surface is real, but it should keep being reviewed against the
+current language direction:
 
-`defstruct` is real and already useful, but the broader fixed-shape type story
-is still incomplete:
-
-- `defenum` and `defunion` need more deliberate design and example pressure
-- constructor ergonomics can be improved
-- richer compile-time checks are still possible
-- usage patterns for enums/unions in real code are not yet settled
-
-### 4. Ownership Ergonomics
-
-Ownership warnings and helper forms exist, but the everyday user story is only
-first-pass.
-
-Still open:
-
-- clearer library conventions for owned producers
-- more helper patterns around local owned values
-- better documentation for common ownership workflows
-- development helpers such as tracking allocators
-
-### 5. Function And Type Surface Consistency
-
-The type surface is much better now, but some areas still need a final shape:
-
-- proc types and higher-order function syntax
-- generic type surface
-- interop-facing type forms
-- where Kvist should stay close to Odin versus where it should own a richer
-  source notation
-
-Call conventions are also still open:
-
-- ordinary positional function calls should remain available
-- it may be valuable to support a named-argument call style using a map-like
-  surface for functions that benefit from self-documenting call sites
-- that design needs to be weighed against Odin interop clarity, overload
-  ambiguity, and how much compile-time checking Kvist can provide
-
-### 6. Error And Result Ergonomics
-
-Multiple returns work, but the language-level conventions around result/error
-handling are still light.
-
-This includes:
-
-- common result patterns
-- helper forms, if any
-- interaction with ownership and early returns
-
-### 6a. Odin Feature Coverage
-
-Kvist now has a partial story for Odin's result-control operators:
-
-- `let [[value ok] expr or-return]`
-- `let [[value ok] expr or-break]`
-- `let [[value ok] expr or-continue]`
-- `(or-else expr fallback)`
-
-Other Odin feature areas still need an explicit policy pass. The current
-design decisions are:
-
-- testing should get a Kvist-native shipped macro package, likely `kvist:test`
-  with forms like `t/deftest` and `t/is`;
-- ordinary Odin directives and attributes should stay raw `(odin "...")` for
-  now, including:
-  - `#optional_ok`
-  - `#force_inline`
-  - `#no_bounds_check`
-  - `@(private)` / `@(test)` style attributes
-  - layout/ABI directives like `#packed` and `#raw_union`
-
-The next Odin-feature topic to review is `distinct`, but that discussion
-should stay high-level until the broader inventory pass is complete.
-
-### 7. Closures And Higher-Order Functions
-
-`fn` exists, but captured closures are still not designed.
-
-This remains open both semantically and in lowering strategy:
-
-- do we want captured closures at all?
-- if yes, what does the lowered Odin model look like?
-- how much value do they add relative to explicit data + top-level procs?
-
-### 8. Tooling And Dev Workflow
-
-Several important ideas are noted but not yet built:
-
-- structural formatting/manipulation through the CLI
-- stronger editor integration
-- dev/repl package ideas
-- scratch-state helpers
-- first-class native hot-reload patterns
-- tighter cooperation between native hot reload and `Kvist/Live`
-
-The desired native hot-reload user model is now clearer than before:
-
-- one explicit durable root state
-- ordinary Kvist app code around it
-- one hot-reload opt-in
-- generated resident shell beneath that surface
-- `:step` as the shell-owned loop mode
-- `:run` as the app-owned runtime mode, with one explicit reload checkpoint at
-  the runtime boundary
-
-See [RELOAD-APP-DESIGN.md](./RELOAD-APP-DESIGN.md).
-
-### 9. Standard Library Shape
-
-Useful library surface exists, but the stdlib is still partly inherited from
-earlier Kvist work rather than fully reorganized around the newer language
-direction.
-
-This matters especially for:
-
-- collection helper placement
 - package boundaries
+- helper naming
 - ownership conventions
-- which helpers belong in the preferred user-facing surface
+- what belongs in the preferred user-facing surface vs raw Odin interop
 
-## Highest-Priority Design Topics
+### 4. Future DSL Work
 
-If work should focus on the most language-shaping open areas rather than
-cleanup, the priority order is currently:
+High-value data DSLs remain attractive, but they are not the next foundational
+step.
 
-1. macros
-2. package/module depth
-3. ownership ergonomics
-4. enum/union story
-5. higher-order functions / closures
+Strong candidates:
 
-Those are the places most likely to change the language materially rather than
-just making it more polished.
+- routing
+- a Datomic-flavored Datalog query DSL
+
+These should build on the current macro system and still lower to explicit,
+typed internal structures.
+
+### 5. Hot Reload And Live Workflow
+
+This work is real but should remain clearly separate from the core language
+surface:
+
+- native hot reload over ordinary compiled Kvist/Odin code
+- optional embedded live runtime where it materially helps development
+
+See:
+
+- [HOT-RELOAD.md](./HOT-RELOAD.md)
+- [RELOAD-APP-DESIGN.md](./RELOAD-APP-DESIGN.md)
+- [LIVE-RUNTIME.md](./LIVE-RUNTIME.md)
+
+## Current Bias
+
+If there is no stronger pressure from a concrete use case, the next serious
+language-level discussion should be closures and higher-order function depth.

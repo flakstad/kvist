@@ -1,5 +1,4 @@
-// Demonstrates the current anonymous-function boundary: fn literals work, but
-// they do not capture surrounding locals.
+// Demonstrates the current first-cut captured-callback support.
 (package main)
 (defn apply-pred [pred: (proc [x: int] -> bool), x: int] -> bool
   (pred x))
@@ -12,26 +11,37 @@
                 (> x 0))
               5))
 
-(defn explicit-context-demo [] -> bool
-  (greater-than? 10 12))
+(defn captured-map-demo [xs: [dynamic]int] -> [dynamic]int
+  (let [offset 10]
+    (map (fn [x: int] -> int
+           (+ x offset))
+         xs)))
+
+(defn captured-map-bang-demo [] -> [dynamic]int
+  (let [offset 10
+        xs [1 2 3]]
+    (map! (fn [x: int] -> int
+            (+ x offset))
+          xs)
+    xs))
 
 (defn main []
-  (println (proc-literal-demo) (explicit-context-demo)))
+  (let [xs [1 2 3] defer]
+    (println (proc-literal-demo) (captured-map-demo xs) (captured-map-bang-demo))))
 
 (comment
-  ;; This works because the fn literal is non-capturing.
+  ;; Plain non-capturing function literals still work.
   (proc-literal-demo)
   ;; => true
 
-  ;; This is the current honest workaround for would-be closures: pass the
-  ;; context explicitly.
-  (explicit-context-demo)
-  ;; => true
+  ;; First-cut captured callbacks work for known non-escaping helpers.
+  (let [xs [1 2 3] defer]
+    (captured-map-demo xs))
+  ;; => [11 12 13]
 
-  ;; Do not assume this will work implicitly:
-  ;;
-  ;; (let [threshold 10]
-  ;;   (apply-pred (fn [x: int] -> bool
-  ;;                 (> x threshold))
-  ;;               12))
+  (captured-map-bang-demo)
+  ;; => [11 12 13]
+
+  ;; Current boundary: this is only implemented for selected helper call sites
+  ;; and only supports one captured outer local.
 )

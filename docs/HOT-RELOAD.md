@@ -112,6 +112,8 @@ There is now also a first-pass higher-level CLI surface on top of that runtime:
 - `kvist dev --reload app/main.kvist`
 - `kvist dev --reload app/main.kvist --rebuild`
 - `kvist dev --reload app/main.kvist --print-paths`
+- `kvist dev --reload app/main.kvist --print-paths --json`
+- `kvist dev --reload app/main.kvist --rebuild --json`
 - `kvist check --reload app/main.kvist`
 - `kvist build --reload app/main.kvist`
 - `kvist run --reload app/main.kvist`
@@ -134,9 +136,10 @@ This matters in practice for cache directories and symlinked temp roots like
 
 Today the generated host supports both:
 
-- `:step` for shell-owned loop-driven apps
 - `:run` for app-owned runtimes that cooperate through one explicit
-  `reload/checkpoint!` boundary
+  `reload/checkpoint!` boundary; this is the general mode for most programs
+- `:step` for shell-owned loop-driven apps; this is the convenience mode when
+  you want Kvist to provide the outer loop
 
 In development, `kvist dev --reload ...` keeps the resident shell alive and
 rebuilds only the reloadable side. In ordinary execution, `kvist check|build|run
@@ -155,6 +158,25 @@ so explicitly with:
 
 That keeps the public source-package surface explicit instead of relying on
 compiler hardcoding.
+
+## Tooling Surface
+
+The current editor-facing reload contract is:
+
+- `kvist dev --reload app/main.kvist --print-paths --json`
+- `kvist dev --reload app/main.kvist --rebuild --json`
+
+The first command prints machine-readable generated paths and canonical reload
+commands. The second prints a structured rebuild result with:
+
+- `ok`
+- `exit_code`
+- `module_dir`
+- `module_odin`
+- `module_binary`
+
+That is the intended integration point for Emacs and other external tooling.
+The ordinary human-oriented text output remains available without `--json`.
 
 ## Recorded Decisions
 

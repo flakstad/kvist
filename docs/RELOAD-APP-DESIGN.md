@@ -65,6 +65,17 @@ For the shipped runtime helper package, the canonical import is:
 The current reload wrapper generation expects that canonical alias rather than
 arbitrary renaming of the package import.
 
+## Recommended Host Mode Choice
+
+The intended default mental model is:
+
+- prefer `:run` for general applications
+- use `:step` when you explicitly want Kvist to provide the outer loop
+
+That keeps the source surface broad enough for servers, GUI apps, workers, and
+other app-owned runtimes while still offering a smaller convenience mode for
+loop-driven programs.
+
 For example:
 
 ```clojure
@@ -212,6 +223,10 @@ The intended split is:
 
 - `kvist dev --reload ...` for iterative development with a resident shell and
   reloadable module boundary
+- `kvist dev --reload ... --print-paths --json` for machine-readable path and
+  command discovery
+- `kvist dev --reload ... --rebuild --json` for machine-readable rebuild
+  status
 - `kvist check --reload ...` / `kvist build --reload ...` /
   `kvist run --reload ...` for ordinary execution of the same source without
   the resident reload shell
@@ -291,7 +306,8 @@ This fits naturally for:
 - immediate-mode applications
 
 So `:step` is not a special reload hook. It is the generated host's repeated
-main callback.
+main callback, and it should be understood as the convenience mode rather than
+the universal default.
 
 ### `:run`
 
@@ -354,6 +370,18 @@ That means `:run` should evolve toward one of these shapes:
 The important rule is that the user should only have to think about one
 integration point per runtime boundary, not "remember to call hot reload
 everywhere."
+
+## Editor Integration
+
+The first stable editor-facing contract is intentionally small:
+
+- `kvist dev --reload app/main.kvist --print-paths --json`
+- `kvist dev --reload app/main.kvist --rebuild --json`
+
+The first command reports generated reload paths and canonical reload commands
+in machine-readable form. The second reports rebuild success or failure
+together with the generated module locations. That is the preferred surface
+for Emacs and other external tooling.
 
 ## Proposed `:run` Contract
 

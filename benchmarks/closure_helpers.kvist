@@ -1,0 +1,119 @@
+// Focused benchmark for first-cut captured callbacks in map/map!.
+(package main)
+(import "core:fmt")
+(import mem "core:mem")
+(import time "core:time")
+(import arr "kvist:arr")
+
+(odin "MAP_N :: 120_000
+MAP_REPS :: 120
+MAP_BANG_N :: 80_000
+MAP_BANG_REPS :: 80")
+
+(defn report [name: string, elapsed: time.Duration, checksum: int, track: ^mem.Tracking-Allocator]
+  (fmt.printfln "%-22s %9.3f ms allocs=%8v total=%10v peak=%9v live=%v checksum=%v"
+                name
+                (time.duration-milliseconds elapsed)
+                track.total-allocation-count
+                track.total-memory-allocated
+                track.peak-memory-allocated
+                track.current-memory-allocated
+                checksum))
+
+(defn run-one [name: string, checksum: int, start: time.Tick, track: ^mem.Tracking-Allocator]
+  (report name (time.tick-since start) checksum track))
+
+(defn make-base [n: int] -> [dynamic]int
+  (let [xs (arr/empty int n)
+        i 0]
+    (for (< i n)
+      (arr/push! xs i)
+      (set! i (+ i 1)))
+    xs))
+
+(defn bench-map-captured [xs: [dynamic]int, reps: int] -> int
+  (let [offset 7
+        i 0
+        checksum 0]
+    (for (< i reps)
+      (let [mapped (map (fn [x: int] -> int
+                          (+ x offset))
+                        xs)]
+        (set! checksum (+ checksum (last mapped)))
+        (delete mapped))
+      (set! i (+ i 1)))
+    checksum))
+
+(defn bench-map-loop [xs: [dynamic]int, reps: int] -> int
+  (let [offset 7
+        i 0
+        checksum 0]
+    (for (< i reps)
+      (let [mapped (arr/empty int (count xs))]
+        (for [x xs]
+          (arr/push! mapped (+ x offset)))
+        (set! checksum (+ checksum (last mapped)))
+        (delete mapped))
+      (set! i (+ i 1)))
+    checksum))
+
+(defn bench-map-bang-captured [base: [dynamic]int, reps: int] -> int
+  (let [offset 7
+        i 0
+        checksum 0]
+    (for (< i reps)
+      (let [xs (arr/empty int (count base))]
+        (into! xs base)
+        (map! (fn [x: int] -> int
+                (+ x offset))
+              xs)
+        (set! checksum (+ checksum (last xs)))
+        (delete xs))
+      (set! i (+ i 1)))
+    checksum))
+
+(defn bench-map-bang-loop [base: [dynamic]int, reps: int] -> int
+  (let [offset 7
+        i 0
+        checksum 0]
+    (for (< i reps)
+      (let [xs (arr/empty int (count base))]
+        (into! xs base)
+        (let [j 0]
+          (for (< j (count xs))
+            (update! xs j + offset)
+            (set! j (+ j 1))))
+        (set! checksum (+ checksum (last xs)))
+        (delete xs))
+      (set! i (+ i 1)))
+    checksum))
+
+(defn main []
+  (fmt.printfln "MAP_N=%v MAP_REPS=%v MAP_BANG_N=%v MAP_BANG_REPS=%v"
+                MAP_N
+                MAP_REPS
+                MAP_BANG_N
+                MAP_BANG_REPS)
+  (let [old-allocator context.allocator
+        track: mem.Tracking-Allocator (odin "mem.Tracking_Allocator{}")
+        map-base (make-base MAP_N)
+        bang-base (make-base MAP_BANG_N)]
+    (defer (delete map-base))
+    (defer (delete bang-base))
+    (mem.tracking-allocator-init (& track) old-allocator old-allocator)
+    (defer (mem.tracking-allocator-destroy (& track)))
+    (set! context.allocator (mem.tracking-allocator (& track)))
+    (defer (odin "context.allocator = old_allocator"))
+
+    (mem.tracking-allocator-reset (& track))
+    (let [start (time.tick-now)]
+      (run-one "map-captured" (bench-map-captured map-base MAP_REPS) start (& track)))
+    (mem.tracking-allocator-reset (& track))
+    (let [start (time.tick-now)]
+      (run-one "map-loop" (bench-map-loop map-base MAP_REPS) start (& track)))
+    (mem.tracking-allocator-reset (& track))
+    (let [start (time.tick-now)]
+      (run-one "map!-captured" (bench-map-bang-captured bang-base MAP_BANG_REPS) start (& track)))
+    (mem.tracking-allocator-reset (& track))
+    (let [start (time.tick-now)]
+      (run-one "map!-loop" (bench-map-bang-loop bang-base MAP_BANG_REPS) start (& track)))))

@@ -73,6 +73,9 @@ Default keys:
 - `C-c C-o`: open a saved Kvist cache value
 - `C-c M-d`: remove a saved Kvist cache value
 - `C-c C-z`: switch to the result buffer
+- `C-c t t`: run the `t/deftest` at point
+- `C-c t p`: run Kvist tests for the current package
+- `C-c t a`: run all Kvist test packages in the current project
 
 Use a prefix argument with eval commands to treat the form/region as statements
 instead of printing the expression result.

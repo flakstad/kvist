@@ -11,6 +11,7 @@ Sum_By_Field :: struct {
 Emitter_Features :: struct {
     dynamic_literals: bool,
     core_map:         bool,
+    core_map_capture_1: bool,
     core_filter:      bool,
     core_reduce:      bool,
     core_take:        bool,
@@ -38,6 +39,7 @@ Emitter_Features :: struct {
     core_shuffle:     bool,
     core_shuffle_in_place: bool,
     core_map_in_place: bool,
+    core_map_in_place_capture_1: bool,
     core_map_indexed_in_place: bool,
     core_filter_in_place: bool,
     core_remove_in_place: bool,
@@ -194,6 +196,12 @@ emit_warning :: proc(e: ^Emitter, message: string, span: Span) {
 mark_core_map :: proc(e: ^Emitter) {
     if e.features != nil {
         e.features.core_map = true
+    }
+}
+
+mark_core_map_capture_1 :: proc(e: ^Emitter) {
+    if e.features != nil {
+        e.features.core_map_capture_1 = true
     }
 }
 
@@ -356,6 +364,12 @@ mark_core_shuffle_in_place :: proc(e: ^Emitter) {
 mark_core_map_in_place :: proc(e: ^Emitter) {
     if e.features != nil {
         e.features.core_map_in_place = true
+    }
+}
+
+mark_core_map_in_place_capture_1 :: proc(e: ^Emitter) {
+    if e.features != nil {
+        e.features.core_map_in_place_capture_1 = true
     }
 }
 
@@ -2904,6 +2918,11 @@ obvious_binding_type :: proc(e: ^Emitter, binding: Binding) -> (string, bool) {
     if binding.value.kind == .Symbol {
         return lookup_local_type(e, map_name(binding.value.text))
     }
+    if binding.value.kind == .Number || binding.value.kind == .String || binding.value.kind == .Bool || binding.value.kind == .Keyword {
+        if ty, _, ok := infer_literal_value_type(e, binding.value); ok {
+            return ty, true
+        }
+    }
     if binding.value.kind == .List && len(binding.value.items) == 2 && binding.value.items[0].kind == .Symbol && binding.value.items[1].kind == .Brace {
         head_name := map_name(binding.value.items[0].text)
         if _, ok := find_struct_decl(e, head_name); ok {
@@ -3298,6 +3317,35 @@ emit_map_callback_call :: proc(e: ^Emitter, callback: CST_Form, collection: stri
         ), {}, true
     }
 
+    if callback.kind == .List && len(callback.items) > 0 && (is_symbol(callback.items[0], "fn") || is_symbol(callback.items[0], "proc")) {
+        parsed, err_parse, ok_parse := parse_proc_literal_form(callback)
+        if !ok_parse {
+            return "", err_parse, false
+        }
+        if len(parsed.params) != 1 {
+            return "", Compile_Error{message = "capturing map callback currently expects exactly one parameter", span = callback.span}, false
+        }
+        if parsed.returns.kind != .Single {
+            return "", Compile_Error{message = "capturing map callback currently requires an explicit single return type", span = callback.span}, false
+        }
+        param_names := []string{parsed.params[0].name}
+        captures := collect_proc_literal_captures(e, parsed.body[:], param_names)
+        if len(captures) > 1 {
+            return "", Compile_Error{message = "capturing map callback currently supports exactly one captured outer local", span = callback.span}, false
+        }
+        if len(captures) == 1 {
+            params: [dynamic]Param
+            append(&params, captures[0])
+            append(&params, parsed.params[0])
+            proc_text, err_proc, ok_proc := emit_proc_literal_text(e, params[:], parsed.returns, parsed.body[:])
+            if !ok_proc {
+                return "", err_proc, false
+            }
+            mark_core_map_capture_1(e)
+            return emit_call_text("kvist_map_1", []string{proc_text, captures[0].name, collection}), {}, true
+        }
+    }
+
     f, err_f, ok_f := emit_expr(e, callback)
     if !ok_f {
         return "", err_f, false
@@ -3523,16 +3571,34 @@ emit_proc_literal_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_
         return "", Compile_Error{message = "invalid function literal", span = form.span}, false
     }
 
+    parsed, err_parse, ok_parse := parse_proc_literal_form(form)
+    if !ok_parse {
+        return "", err_parse, false
+    }
+    return emit_proc_literal_text(e, parsed.params[:], parsed.returns, parsed.body[:])
+}
+
+Proc_Literal :: struct {
+    params:  [dynamic]Param,
+    returns: Return_Spec,
+    body:    [dynamic]CST_Form,
+}
+
+parse_proc_literal_form :: proc(form: CST_Form) -> (Proc_Literal, Compile_Error, bool) {
+    if len(form.items) < 2 || (!is_symbol(form.items[0], "proc") && !is_symbol(form.items[0], "fn")) || form.items[1].kind != .Vector {
+        return Proc_Literal{}, Compile_Error{message = "invalid function literal", span = form.span}, false
+    }
+
     params, err_params, ok_params := parse_param_vector(form.items[1])
     if !ok_params {
-        return "", err_params, false
+        return Proc_Literal{}, err_params, false
     }
 
     body_index := 2
     returns := Return_Spec{kind = .None}
     if body_index < len(form.items) && is_symbol(form.items[body_index], "->") {
         if body_index+1 >= len(form.items) {
-            return "", Compile_Error{message = "missing function literal return spec", span = form.items[body_index].span}, false
+            return Proc_Literal{}, Compile_Error{message = "missing function literal return spec", span = form.items[body_index].span}, false
         }
         return_form := form.items[body_index+1]
         #partial switch return_form.kind {
@@ -3540,7 +3606,7 @@ emit_proc_literal_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_
             if vector_is_named_returns(return_form) {
                 named, err_named, ok_named := parse_named_returns(return_form)
                 if !ok_named {
-                    return "", err_named, false
+                    return Proc_Literal{}, err_named, false
                 }
                 returns.kind = .Named
                 returns.named = named
@@ -3548,7 +3614,7 @@ emit_proc_literal_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_
             } else {
                 return_text, next_index, err_return, ok_return := parse_type_text_from_forms(form.items[:], body_index+1)
                 if !ok_return {
-                    return "", err_return, false
+                    return Proc_Literal{}, err_return, false
                 }
                 returns.kind = .Single
                 returns.single_ty = return_text
@@ -3557,26 +3623,51 @@ emit_proc_literal_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_
         case .Symbol, .List, .Keyword:
             return_text, next_index, err_return, ok_return := parse_type_text_from_forms(form.items[:], body_index+1)
             if !ok_return {
-                return "", err_return, false
+                return Proc_Literal{}, err_return, false
             }
             returns.kind = .Single
             returns.single_ty = return_text
             body_index = next_index
         case:
-            return "", Compile_Error{message = "unsupported function literal return spec", span = return_form.span}, false
+            return Proc_Literal{}, Compile_Error{message = "unsupported function literal return spec", span = return_form.span}, false
         }
     }
     if body_index >= len(form.items) {
-        return "", Compile_Error{message = "function literal body is empty", span = form.span}, false
+        return Proc_Literal{}, Compile_Error{message = "function literal body is empty", span = form.span}, false
     }
 
+    body: [dynamic]CST_Form
+    for item in form.items[body_index:] {
+        append(&body, item)
+    }
+    return Proc_Literal{
+        params  = params,
+        returns = returns,
+        body    = body,
+    }, Compile_Error{}, true
+}
+
+emit_proc_literal_text :: proc(e: ^Emitter, params: []Param, returns: Return_Spec, body: []CST_Form) -> (string, Compile_Error, bool) {
     sub := Emitter{
-        builder  = strings.builder_make(),
-        indent   = 1,
-        unions   = e.unions,
-        features = e.features,
+        builder     = strings.builder_make(),
+        indent      = 1,
+        decls       = e.decls,
+        structs     = e.structs,
+        unions      = e.unions,
+        features    = e.features,
+        source_map  = e.source_map,
+        warnings    = e.warnings,
+        line        = e.line,
+        temp_counter = e.temp_counter,
     }
     defer strings.builder_destroy(&sub.builder)
+
+    for local in e.local_types {
+        bind_local_type(&sub, local.name, local.ty)
+    }
+    for param in params {
+        bind_local_type(&sub, param.name, param.ty)
+    }
 
     strings.write_string(&sub.builder, "proc(")
     for param, idx in params {
@@ -3588,18 +3679,79 @@ emit_proc_literal_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_
     strings.write_byte(&sub.builder, ')')
     emit_return_spec(&sub, returns)
     strings.write_string(&sub.builder, " {\n")
-
-    body: [dynamic]CST_Form
-    for item in form.items[body_index:] {
-        append(&body, item)
-    }
-    err_body, ok_body := emit_body_forms(&sub, body[:], returns)
+    err_body, ok_body := emit_body_forms(&sub, body, returns)
     if !ok_body {
         return "", err_body, false
     }
-
     strings.write_string(&sub.builder, "}")
     return strings.clone(strings.to_string(sub.builder)), {}, true
+}
+
+name_in_list :: proc(names: []string, name: string) -> bool {
+    for existing in names {
+        if existing == name {
+            return true
+        }
+    }
+    return false
+}
+
+append_capture_param_unique :: proc(captures: ^[dynamic]Param, capture: Param) {
+    for existing in captures^ {
+        if existing.name == capture.name {
+            return
+        }
+    }
+    append(captures, capture)
+}
+
+collect_proc_literal_captures :: proc(e: ^Emitter, body: []CST_Form, param_names: []string) -> (captures: [dynamic]Param) {
+    for form in body {
+        collect_proc_literal_captures_from_form(e, form, param_names, &captures)
+    }
+    return captures
+}
+
+collect_proc_literal_captures_from_form :: proc(e: ^Emitter, form: CST_Form, bound_names: []string, captures: ^[dynamic]Param) {
+    #partial switch form.kind {
+    case .Symbol:
+        name := map_name(form.text)
+        if name_in_list(bound_names, name) {
+            return
+        }
+        if ty, ok := lookup_local_type(e, name); ok {
+            append_capture_param_unique(captures, Param{name = name, ty = ty})
+        }
+    case .List:
+        if len(form.items) > 0 && (is_symbol(form.items[0], "fn") || is_symbol(form.items[0], "proc")) {
+            return
+        }
+        if len(form.items) > 1 && is_symbol(form.items[0], "let") {
+            bindings, _, ok_bindings := parse_let_bindings(form.items[1])
+            names: [dynamic]string
+            for name in bound_names {
+                append(&names, name)
+            }
+            for binding in bindings {
+                collect_proc_literal_captures_from_form(e, binding.value, names[:], captures)
+                if binding.name != "" {
+                    append(&names, binding.name)
+                }
+            }
+            for item in form.items[2:] {
+                collect_proc_literal_captures_from_form(e, item, names[:], captures)
+            }
+            return
+        }
+        for item in form.items {
+            collect_proc_literal_captures_from_form(e, item, bound_names, captures)
+        }
+    case .Vector, .Brace, .Set:
+        for item in form.items {
+            collect_proc_literal_captures_from_form(e, item, bound_names, captures)
+        }
+    case:
+    }
 }
 
 emit_operator_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) {
@@ -4411,13 +4563,42 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         if len(form.items) != 3 {
             return "", Compile_Error{message = "map! expects function and collection", span = form.span}, false
         }
-        f, err_f, ok_f := emit_expr(e, form.items[1])
-        if !ok_f {
-            return "", err_f, false
-        }
         collection, err_collection, ok_collection := emit_expr(e, form.items[2])
         if !ok_collection {
             return "", err_collection, false
+        }
+        callback := form.items[1]
+        if callback.kind == .List && len(callback.items) > 0 && (is_symbol(callback.items[0], "fn") || is_symbol(callback.items[0], "proc")) {
+            parsed, err_parse, ok_parse := parse_proc_literal_form(callback)
+            if !ok_parse {
+                return "", err_parse, false
+            }
+            if len(parsed.params) != 1 {
+                return "", Compile_Error{message = "capturing map! callback currently expects exactly one parameter", span = callback.span}, false
+            }
+            if parsed.returns.kind != .Single {
+                return "", Compile_Error{message = "capturing map! callback currently requires an explicit single return type", span = callback.span}, false
+            }
+            param_names := []string{parsed.params[0].name}
+            captures := collect_proc_literal_captures(e, parsed.body[:], param_names)
+            if len(captures) > 1 {
+                return "", Compile_Error{message = "capturing map! callback currently supports exactly one captured outer local", span = callback.span}, false
+            }
+            if len(captures) == 1 {
+                params: [dynamic]Param
+                append(&params, captures[0])
+                append(&params, parsed.params[0])
+                proc_text, err_proc, ok_proc := emit_proc_literal_text(e, params[:], parsed.returns, parsed.body[:])
+                if !ok_proc {
+                    return "", err_proc, false
+                }
+                mark_core_map_in_place_capture_1(e)
+                return emit_call_text("kvist_map_in_place_1", []string{proc_text, captures[0].name, slice_all_expr_text(collection)}), {}, true
+            }
+        }
+        f, err_f, ok_f := emit_expr(e, callback)
+        if !ok_f {
+            return "", err_f, false
         }
         mark_core_map_in_place(e)
         return emit_call_text("kvist_map_in_place", []string{f, slice_all_expr_text(collection)}), {}, true
@@ -6677,6 +6858,20 @@ emit_core_map_helper :: proc(e: ^Emitter) {
     emit_line(e, "}")
 }
 
+emit_core_map_capture_1_helper :: proc(e: ^Emitter) {
+    emit_line(e, "kvist_map_1 :: proc(f: proc(c1: $C1, x: $T) -> $U, c1: C1, xs: []T) -> [dynamic]U {")
+    e.indent += 1
+    emit_line(e, "out := make([dynamic]U, 0, len(xs))")
+    emit_line(e, "for x in xs {")
+    e.indent += 1
+    emit_line(e, "append(&out, f(c1, x))")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "return out")
+    e.indent -= 1
+    emit_line(e, "}")
+}
+
 emit_core_map_field_helper :: proc(e: ^Emitter, field: string) {
     emit_line(e, fmt.tprintf("kvist_map_field_%s :: proc($Field_Type: typeid, xs: []$T) -> [dynamic]Field_Type %s", field, "{"))
     e.indent += 1
@@ -6863,6 +7058,18 @@ emit_core_map_in_place_helper :: proc(e: ^Emitter) {
     emit_line(e, "for i in 0..<len(xs) {")
     e.indent += 1
     emit_line(e, "xs[i] = f(xs[i])")
+    e.indent -= 1
+    emit_line(e, "}")
+    e.indent -= 1
+    emit_line(e, "}")
+}
+
+emit_core_map_in_place_capture_1_helper :: proc(e: ^Emitter) {
+    emit_line(e, "kvist_map_in_place_1 :: proc(f: proc(c1: $C1, x: $T) -> T, c1: C1, xs: []T) {")
+    e.indent += 1
+    emit_line(e, "for i in 0..<len(xs) {")
+    e.indent += 1
+    emit_line(e, "xs[i] = f(c1, xs[i])")
     e.indent -= 1
     emit_line(e, "}")
     e.indent -= 1
@@ -7978,7 +8185,7 @@ emit_core_every_field_helper :: proc(e: ^Emitter, field: string) {
 }
 
 core_helpers_needed :: proc(features: Emitter_Features) -> bool {
-    return features.core_map || features.core_filter || features.core_reduce ||
+    return features.core_map || features.core_map_capture_1 || features.core_filter || features.core_reduce ||
            features.core_take || features.core_drop ||
            features.core_drop_last || features.core_take_nth ||
            features.core_take_while || features.core_drop_while ||
@@ -7991,7 +8198,8 @@ core_helpers_needed :: proc(features: Emitter_Features) -> bool {
            features.core_interpose || features.core_interleave ||
            features.core_reverse || features.core_reverse_in_place ||
            features.core_shuffle || features.core_shuffle_in_place ||
-           features.core_map_in_place || features.core_map_indexed_in_place ||
+           features.core_map_in_place || features.core_map_in_place_capture_1 ||
+           features.core_map_indexed_in_place ||
            features.core_filter_in_place || features.core_remove_in_place ||
            features.core_keep_in_place ||
            features.core_sort || features.core_sort_by ||
@@ -8045,6 +8253,10 @@ emit_core_helpers :: proc(e: ^Emitter, features: Emitter_Features) {
         emit_core_helper_separator(e, &emitted)
         emit_core_map_helper(e)
     }
+    if features.core_map_capture_1 {
+        emit_core_helper_separator(e, &emitted)
+        emit_core_map_capture_1_helper(e)
+    }
     for field in features.map_fields {
         emit_core_helper_separator(e, &emitted)
         emit_core_map_field_helper(e, field)
@@ -8088,6 +8300,10 @@ emit_core_helpers :: proc(e: ^Emitter, features: Emitter_Features) {
     if features.core_map_in_place {
         emit_core_helper_separator(e, &emitted)
         emit_core_map_in_place_helper(e)
+    }
+    if features.core_map_in_place_capture_1 {
+        emit_core_helper_separator(e, &emitted)
+        emit_core_map_in_place_capture_1_helper(e)
     }
     if features.core_map_indexed_in_place {
         emit_core_helper_separator(e, &emitted)

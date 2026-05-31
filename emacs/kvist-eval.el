@@ -37,6 +37,11 @@
   :type 'boolean
   :group 'kvist)
 
+(defcustom kvist-test-buffer-name "*Kvist Test*"
+  "Buffer name used for Kvist test output."
+  :type 'string
+  :group 'kvist)
+
 (defconst kvist-declaration-heads
   '("comment" "package" "import" "const" "struct" "enum" "union" "odin" "proc")
   "Kvist forms that are declarations at top level.")
@@ -83,6 +88,9 @@
     (define-key map (kbd "C-c C-o") #'kvist-cache-open)
     (define-key map (kbd "C-c M-d") #'kvist-cache-rm)
     (define-key map (kbd "C-c C-z") #'kvist-switch-to-result)
+    (define-key map (kbd "C-c t t") #'kvist-test-at-point)
+    (define-key map (kbd "C-c t p") #'kvist-test-package)
+    (define-key map (kbd "C-c t a") #'kvist-test-project)
     map)
   "Keymap for `kvist-eval-mode'.")
 
@@ -437,6 +445,101 @@ CLI cache."
       (when (and generated (file-exists-p generated))
         (delete-file generated)))))
 
+(defun kvist--test-import-aliases ()
+  "Return likely aliases used for `kvist:test' in the current buffer."
+  (let ((aliases '("t")))
+    (save-excursion
+      (goto-char (point-min))
+      (while (re-search-forward
+              "^[[:space:]]*(import\\(?:[[:space:]\n]+\\([[:word:]!?+._/-]+\\)\\)?[[:space:]\n]+\"kvist:test\")"
+              nil t)
+        (let ((alias (match-string-no-properties 1)))
+          (when (and alias (not (member alias aliases)))
+            (push alias aliases)))))
+    aliases))
+
+(defun kvist--deftest-name-at-point ()
+  "Return the enclosing Kvist test name at point."
+  (save-excursion
+    (let ((aliases (kvist--test-import-aliases))
+          found)
+      (condition-case nil
+          (while (not found)
+            (backward-up-list)
+            (let ((beg (point))
+                  (end (scan-sexps (point) 1)))
+              (when (and beg end)
+                (let ((form (buffer-substring-no-properties
+                             beg
+                             (min end (+ beg 200)))))
+                  (when (or (string-match
+                             (concat "\\`[[:space:]\n]*(deftest\\_>[[:space:]\n]+\\([[:word:]!?+._/-]+\\)") form)
+                            (cl-some
+                             (lambda (alias)
+                               (string-match
+                                (format "\\`[[:space:]\n]*(%s/deftest\\_>[[:space:]\n]+\\([[:word:]!?+._/-]+\\)" (regexp-quote alias))
+                                form))
+                             aliases))
+                    (setq found (match-string 1 form)))))))
+        (error nil))
+      found)))
+
+(defun kvist--package-entry-file (&optional file)
+  "Return the package entry file for FILE or the current buffer."
+  (let* ((file (expand-file-name (or file (or buffer-file-name default-directory))))
+         (dir (if (file-directory-p file) file (file-name-directory file)))
+         (package-entry (expand-file-name "package.kvist" dir))
+         (main-entry (expand-file-name "main.kvist" dir)))
+    (cond
+     ((file-exists-p package-entry) package-entry)
+     ((file-exists-p main-entry) main-entry)
+     (t file))))
+
+(defun kvist--project-test-entry-files ()
+  "Return deduplicated package entry files that use `kvist:test'."
+  (let* ((root (file-name-as-directory (kvist--project-root)))
+         (matches (directory-files-recursively root "\\.kvist\\'"))
+         (entries nil))
+    (dolist (match matches)
+      (when (with-temp-buffer
+              (insert-file-contents match)
+              (and (re-search-forward "kvist:test" nil t)
+                   (re-search-forward "(\\(?:[[:word:]!?+._/-]+/\\)?deftest\\_>" nil t)))
+        (let ((entry (kvist--package-entry-file match)))
+          (when (and (file-exists-p entry)
+                     (not (member entry entries)))
+            (push entry entries)))))
+    (nreverse entries)))
+
+(defun kvist--test-command-string (file &optional names)
+  "Return a shell command string for `kvist test' on FILE and optional NAMES."
+  (mapconcat
+   #'identity
+   (append
+    (list (shell-quote-argument (kvist--executable))
+          "test"
+          (shell-quote-argument file))
+    (when names
+      (list "--names" (shell-quote-argument names))))
+   " "))
+
+(defun kvist--start-test-compilation (command)
+  "Run test COMMAND in a compilation buffer."
+  (let ((default-directory (file-name-as-directory (kvist--project-root))))
+    (compilation-start command 'compilation-mode
+                       (lambda (_) kvist-test-buffer-name))))
+
+(defun kvist--project-test-command ()
+  "Return a shell command string that runs all project Kvist tests."
+  (let ((entries (kvist--project-test-entry-files)))
+    (unless entries
+      (user-error "No Kvist test packages found in project"))
+    (mapconcat
+     (lambda (entry)
+       (kvist--test-command-string entry))
+     entries
+     " && ")))
+
 ;;;###autoload
 (defun kvist-expand-form-at-point (&optional no-print)
   "Show generated Odin for the form at point.
@@ -649,6 +752,29 @@ With prefix argument NO-PRINT, treat the form as a statement."
   (kvist--buffer-command "run"))
 
 ;;;###autoload
+(defun kvist-test-at-point ()
+  "Run the Kvist test at point."
+  (interactive)
+  (let ((name (or (kvist--deftest-name-at-point)
+                  (user-error "Point is not inside a t/deftest form"))))
+    (kvist--start-test-compilation
+     (kvist--test-command-string (kvist--package-entry-file) name))))
+
+;;;###autoload
+(defun kvist-test-package ()
+  "Run Kvist tests for the current package."
+  (interactive)
+  (kvist--start-test-compilation
+   (kvist--test-command-string (kvist--package-entry-file))))
+
+;;;###autoload
+(defun kvist-test-project ()
+  "Run all Kvist test packages in the current project."
+  (interactive)
+  (kvist--start-test-compilation
+   (kvist--project-test-command)))
+
+;;;###autoload
 (defun kvist-toggle-show-generated ()
   "Toggle whether Kvist eval shows generated Odin."
   (interactive)
@@ -736,7 +862,10 @@ With prefix argument NO-PRINT, treat the form as a statement."
   (local-set-key (kbd "C-c C-l") #'kvist-cache-list)
   (local-set-key (kbd "C-c C-o") #'kvist-cache-open)
   (local-set-key (kbd "C-c M-d") #'kvist-cache-rm)
-  (local-set-key (kbd "C-c C-z") #'kvist-switch-to-result))
+  (local-set-key (kbd "C-c C-z") #'kvist-switch-to-result)
+  (local-set-key (kbd "C-c t t") #'kvist-test-at-point)
+  (local-set-key (kbd "C-c t p") #'kvist-test-package)
+  (local-set-key (kbd "C-c t a") #'kvist-test-project))
 
 (add-hook 'kvist-mode-hook #'kvist-setup-mode-keys)
 

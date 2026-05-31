@@ -39,12 +39,24 @@ Print the generated paths and rebuild commands for editor/tool integration:
 ./build/kvist dev --reload examples/reload_step_demo/main.kvist --print-paths
 ```
 
+Print the same information as JSON for Emacs or other external tooling:
+
+```sh
+./build/kvist dev --reload examples/reload_step_demo/main.kvist --print-paths --json
+```
+
+Rebuild with machine-readable status:
+
+```sh
+./build/kvist dev --reload examples/reload_step_demo/main.kvist --rebuild --json
+```
+
 Current shape of the source contract:
 
 - one top-level `(defstate Name {fields...} {metadata...})`
 - fields map first, reload-lifetime/config map second
-- currently implemented host mode: `:step`
-- companion implemented host mode: `:run`
+- convenience host mode: `:step`
+- general companion host mode: `:run`
 - optional metadata: `:init`, `:on-load`, `:on-unload`, `:version`, `:sleep-ms`
 
 See `../reload_run_demo/` for the app-owned runtime shape that uses `:run` plus

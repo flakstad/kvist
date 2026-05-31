@@ -13,7 +13,7 @@ print_usage :: proc() {
     fmt.println("usage:")
     fmt.println("  kvist <input.kvist> [-o output.odin] [--map output.map] [--eval form] [--no-print]")
     fmt.println("  kvist compile <input.kvist> [-o output.odin] [--map output.map]")
-    fmt.println("  kvist dev --reload <input.kvist> [--rebuild] [--generated-dir dir] [--print-paths]")
+    fmt.println("  kvist dev --reload <input.kvist> [--rebuild] [--generated-dir dir] [--print-paths] [--json]")
     fmt.println("  kvist build <input.kvist> [--generated output.odin] [--reload] [--generated-dir dir]")
     fmt.println("  kvist check <input.kvist> [--generated output.odin] [--reload] [--generated-dir dir]")
     fmt.println("  kvist run <input.kvist> [--generated output.odin] [--reload] [--generated-dir dir]")

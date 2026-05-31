@@ -23,7 +23,8 @@ slice views, scalar operations, or explicit in-place mutation.
 - Do not hide allocation; generated helpers that allocate should be easy to
   spot in the emitted Odin.
 - Keep callbacks as plain Odin procedure values.
-- Keep callback state explicit. Odin procedure literals do not capture.
+- Keep callback lowering explicit. First-cut captured callbacks are allowed only
+  for selected non-escaping helper sites, starting with `map` and `map!`.
 - Let Odin bounds checks and type checking remain visible.
 - Avoid names or behavior that imply Clojure's nullable lazy seq model.
 

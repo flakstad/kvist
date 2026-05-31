@@ -21,9 +21,9 @@ block so `C-c C-e` and `C-c C-c` are practical.
 - `macro-dsl.kvist`: package-local declaration DSL that expands into multiple top-level forms.
 - `macro-union-helpers.kvist`: recursive macro DSL that emits a union plus variant constructors.
 - `macro-messages.kvist`: message-family DSL that emits payload structs, a tagged union, and constructors.
-- `testing.kvist`: shipped `kvist:test` macros including `t/deftest`, `t/is`, nested `t/testing`, `t/are`, and `t/use-fixtures :each`.
+- `testing.kvist`: shipped `kvist:test` macros including `t/deftest`, `t/is`, nested `t/testing`, `t/are`, and `t/use-fixtures` with `:each` / `:once`.
 - `hiccup-interpolation.kvist`: Hiccup attrs and child nodes with direct Kvist expression interpolation, including `if`, `when`, `nil` omission, and `[:<> ...]` fragments.
-- `closures.kvist`: non-capturing `fn` literals and explicit callback context.
+- `closures.kvist`: non-capturing `fn` literals plus first-cut captured callbacks for `map` / `map!`.
 - `hello.kvist`: package, import, struct literal, and a tiny `main`.
 - `declarations.kvist`: doc comments, import aliases, constants, enums, structs.
 - `defstructs.kvist`: `defstruct` docstrings, typed fields, nested structs.
@@ -89,9 +89,9 @@ are run deliberately.
   module, reloads it, and shows state migration.
 - `live_commands_demo`: long-running `.kvist` host process that reloads a tiny
   live module file while preserving command state.
-- `reload_step_demo`: first-pass single-file `defstate` reload workflow; `kvist dev --reload`
+- `reload_step_demo`: convenience single-file `defstate` reload workflow; `kvist dev --reload`
   generates the resident shell and reloadable module for you.
-- `reload_run_demo`: app-owned `:run` workflow with one explicit
+- `reload_run_demo`: general app-owned `:run` workflow with one explicit
   `reload/checkpoint!` boundary.
 - `hot_reload_demo`: long-running compiled host plus a reloadable shared
   library; shows host-owned state surviving native code reload.
@@ -138,12 +138,13 @@ helpers rather than open-coding the watched-directory loop.
 
 The reload demos are the lowest-ceremony native path so far. They keep the
 user source in one pure `.kvist` file with one `defstate` root and an explicit
-trailing metadata map. `reload_step_demo` shows the shell-owned `:step` loop
-mode, and `reload_run_demo` shows the app-owned `:run` mode with one explicit
-`reload/checkpoint!` cooperation point at the runtime boundary. For editor
-integration, `kvist dev --reload ... --rebuild` recompiles only the generated
-reloadable module and `kvist dev --reload ... --print-paths` prints the generated
-paths and rebuild command. The same sources can also be executed without the
+trailing metadata map. `reload_run_demo` shows the general app-owned `:run`
+mode with one explicit `reload/checkpoint!` cooperation point at the runtime
+boundary. `reload_step_demo` shows the smaller convenience mode where Kvist
+owns the outer loop. For editor integration, `kvist dev --reload ...
+--rebuild --json` reports machine-readable rebuild status and `kvist dev
+--reload ... --print-paths --json` prints generated paths and canonical
+commands. The same sources can also be executed without the
 resident reload shell via `kvist check|build|run --reload ...`. See
 [`examples/reload_step_demo/README.md`](./reload_step_demo/README.md) and
 [`examples/reload_run_demo/README.md`](./reload_run_demo/README.md).

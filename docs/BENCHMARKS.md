@@ -5,6 +5,7 @@ Current benchmark harness:
 - `./scripts/bench_sequence_helpers.sh`
 - `./scripts/bench_aggregate_helpers.sh`
 - `./scripts/bench_mutation_helpers.sh`
+- `./scripts/bench_closure_helpers.sh`
 
 These compare generated Kvist output against hand-written Odin for the same
 workloads.
@@ -147,3 +148,25 @@ Recommended next cases:
 
 These would tell us whether the newer language surface is still lowering as
 cleanly as the older helper benchmarks.
+
+## Captured Callback Baseline
+
+There is now also a focused captured-callback benchmark for the first closure
+pass:
+
+- Kvist `map` / `map!` with one captured outer local
+- direct Odin helper-with-context equivalents
+- direct Odin loop baselines
+
+Run it with:
+
+```sh
+./scripts/bench_closure_helpers.sh
+```
+
+This benchmark is meant to answer two separate questions:
+
+1. whether the generated Kvist lowering is at parity with an explicit
+   helper-with-context shape in direct Odin
+2. how much overhead remains versus hand-written loop code when the source uses
+   eager helper style instead of explicit loops

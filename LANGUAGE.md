@@ -22,11 +22,6 @@ The language should smell like Clojure in surface syntax while remaining honest
 about Odin's operational model: explicit layout, explicit mutation, explicit
 allocation, and ordinary Odin interop.
 
-The practical transfer notes from the Cluck language design work are in
-[docs/CLUCK-TRANSFER.md](docs/CLUCK-TRANSFER.md). The short version is:
-Kvist should absorb as much of that source-language design as it can without
-introducing a hidden runtime model or opaque lowering.
-
 ## Non-Goals
 
 These are explicit non-goals for the first language design:
@@ -877,6 +872,7 @@ assertions.
 - `t/are`
 - `t/testing`
 - `t/use-fixtures :each`
+- `t/use-fixtures :once`
 
 Run Kvist tests with the CLI:
 
@@ -889,8 +885,10 @@ kvist test path/to/package.kvist --generated /tmp/generated-tests.odin
 The current boundary is still deliberate:
 
 - `t/testing` prefixes nested assertion failures with joined context labels
-- fixtures currently support only `:each`, with fixture procs shaped like
+- `:each` fixtures use procs shaped like
   `proc(t: ^testing.T, body: proc(t: ^testing.T))`
+- `:once` fixtures are setup-only and run once before the first test in the
+  package; they are ordinary zero-argument procs
 - the test CLI accepts Kvist test names and normalizes them to Odin test names
 
 Flat multi-return destructuring is worth supporting because it matches ordinary
@@ -1321,8 +1319,10 @@ mutation:
 Higher-order procedures are supported because Odin procedure values are
 first-class. Kvist should expose that directly, but honestly:
 
-- anonymous procedures are non-capturing
-- any callback that needs runtime context must receive that context explicitly
+- anonymous procedures are still the baseline
+- first-cut captured callbacks now work only for a narrow, compiler-known,
+  non-escaping subset
+- anything outside that subset still needs explicit context
 
 The intended surface style can still be familiar:
 
@@ -1394,21 +1394,23 @@ Anonymous procedures use `proc` as an expression form:
      allocator)
 ```
 
-Because Odin only has non-capturing lambda procedures, Kvist should not pretend
-to support Clojure-style closure capture unless it later grows a deliberate
-closure-lowering model.
-
-This means the following should not be assumed to work implicitly:
+Current closure support is deliberately narrow. Captured callbacks currently
+work only for selected non-escaping helper call sites, starting with `map` and
+`map!`, and only when the callback captures exactly one outer local:
 
 ```clojure
-(let [threshold 10]
-  (filter (proc [x: int] -> bool
-            (> x threshold))
-          xs
-          allocator))
+(let [offset 10]
+  (map (fn [x: int] -> int
+         (+ x offset))
+       xs))
 ```
 
-Instead, callbacks that need extra state should use explicit context arguments:
+This lowers to ordinary Odin helper calls with an extra explicit context
+argument. There is no heap-allocated closure object, and escaping closures are
+still unsupported.
+
+Outside those known helper sites, callbacks that need extra state should use
+explicit context arguments:
 
 ```clojure
 (defn greater-than? [threshold: int, x: int] -> bool
@@ -1418,7 +1420,7 @@ Instead, callbacks that need extra state should use explicit context arguments:
 ```
 
 This keeps the source language close to Clojure in feel while staying honest
-about Odin's no-capturing-closures model.
+about Odin's underlying no-general-closures model.
 
 `into`, transducers, and collection-building conventions are better treated as a
 separate future design project once the core language, procedure types, and

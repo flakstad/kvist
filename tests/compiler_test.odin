@@ -2692,6 +2692,83 @@ compile_extended_shipped_test_macro_package :: proc(t: ^testing.T) {
 }
 
 @(test)
+compile_shipped_test_once_fixtures :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-test-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove(dir)
+    defer delete(dir)
+
+    path, join_err := os.join_path({dir, "package.kvist"}, context.allocator)
+    testing.expect_value(t, join_err == nil, true)
+    if join_err != nil {
+        return
+    }
+    defer delete(path)
+
+    source := `(package tests)
+
+(import t "kvist:test")
+
+(defvar fixture-count int 0)
+
+(defn once-fixture []
+  (set! fixture-count (+ fixture-count 1)))
+
+(t/use-fixtures :once once-fixture)
+
+(t/deftest first
+  (t/is (= fixture-count 1)))
+
+(t/deftest second
+  (t/is (= fixture-count 1)))`
+
+    write_err := os.write_entire_file_from_string(path, source)
+    testing.expect_value(t, write_err == nil, true)
+    if write_err != nil {
+        return
+    }
+
+    output, err, ok := kvist.compile_path(path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "__kvist_test_once_guard"), true)
+    testing.expect_value(t, strings.contains(output, "__kvist_test_ensure_once()"), true)
+    testing.expect_value(t, strings.contains(output, "once_fixture()"), true)
+
+    repo_root := compiler_test_repo_root()
+    kvist_bin, bin_ok := build_test_kvist_binary(t, repo_root, dir)
+    if !bin_ok {
+        return
+    }
+    defer delete(kvist_bin)
+
+    state, stdout, stderr, exec_err := os.process_exec(
+        os.Process_Desc{
+            command = {kvist_bin, "test", path},
+            working_dir = repo_root,
+        },
+        context.allocator,
+    )
+    defer delete(stdout)
+    defer delete(stderr)
+
+    testing.expect_value(t, exec_err == nil, true)
+    if exec_err != nil {
+        return
+    }
+    testing.expect_value(t, state.exited, true)
+    testing.expect_value(t, state.exit_code, 0)
+}
+
+@(test)
 compile_shipped_test_generic_assertion_messages :: proc(t: ^testing.T) {
     dir, dir_err := os.make_directory_temp("", "kvist-test-*", context.allocator)
     testing.expect_value(t, dir_err == nil, true)
@@ -5314,7 +5391,7 @@ compile_proc_directives_and_declaration_attributes :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    expected := `package main
+expected := `package main
 
 @(private)
 hidden :: #force_inline proc() -> int {
@@ -5326,6 +5403,57 @@ query :: proc() -> (value: int, ok: bool) #optional_ok {
 }
 `
     testing.expect_value(t, output, expected)
+}
+
+@(test)
+compile_map_supports_single_captured_local_in_fn_literal :: proc(t: ^testing.T) {
+    source := "(package main)\n\n(defn demo [xs: []int] -> [dynamic]int\n  (let [offset 10]\n    (map (fn [x: int] -> int\n           (+ x offset))\n         xs)))"
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+    testing.expect_value(t, strings.contains(output, "return kvist_map_1("), true)
+    testing.expect_value(t, strings.contains(output, "proc(offset: int, x: int) -> int {"), true)
+    testing.expect_value(t, strings.contains(output, "return (x) + (offset)"), true)
+    testing.expect_value(t, strings.contains(output, "offset,"), true)
+    testing.expect_value(t, strings.contains(output, "(xs)[:]"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_map_1 :: proc(f: proc(c1: $C1, x: $T) -> $U, c1: C1, xs: []T) -> [dynamic]U {"), true)
+}
+
+@(test)
+compile_map_bang_supports_single_captured_local_in_fn_literal :: proc(t: ^testing.T) {
+    source := "(package main)\n\n(defn demo [xs: [dynamic]int] -> [dynamic]int\n  (let [offset 10]\n    (map! (fn [x: int] -> int\n            (+ x offset))\n          xs)\n    xs))"
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+    testing.expect_value(t, strings.contains(output, "kvist_map_in_place_1("), true)
+    testing.expect_value(t, strings.contains(output, "proc(offset: int, x: int) -> int {"), true)
+    testing.expect_value(t, strings.contains(output, "return (x) + (offset)"), true)
+    testing.expect_value(t, strings.contains(output, "offset,"), true)
+    testing.expect_value(t, strings.contains(output, "(xs)[:]"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_map_in_place_1 :: proc(f: proc(c1: $C1, x: $T) -> T, c1: C1, xs: []T) {"), true)
+}
+
+@(test)
+compile_map_rejects_multiple_captured_locals_in_fn_literal :: proc(t: ^testing.T) {
+    source := "(package main)\n\n(defn demo [xs: []int] -> [dynamic]int\n  (let [offset 10\n        scale 2]\n    (map (fn [x: int] -> int\n           (+ (* x scale) offset))\n         xs)))"
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+    defer delete(err.message)
+    testing.expect_value(t, strings.contains(err.message, "capturing map callback currently supports exactly one captured outer local"), true)
 }
 
 @(test)

@@ -80,10 +80,11 @@ not enough by itself.
 ## Plan
 
 The first milestone is a small Odin compiler/transpiler that is pleasant enough
-for small pure `.kvist` files:
+for ordinary `.kvist` packages:
 
-- one `.kvist` file emits one `.odin` file
-- `.kvist` files use Kvist forms rather than mixed raw Odin top-level text
+- one package entry file emits one `.odin` file
+- source packages are directories of `.kvist` files
+- top-level forms use Kvist syntax rather than mixed raw Odin declarations
 - forms map mechanically to Odin constructs
 - generated Odin stays readable and debuggable
 - Odin remains responsible for type checking, semantics, and diagnostics
@@ -227,6 +228,13 @@ For the focused mutation/update comparison against direct Odin, run:
 ./scripts/bench_mutation_helpers.sh
 ```
 
+For the focused captured-callback `map` / `map!` comparison against direct
+Odin, run:
+
+```sh
+./scripts/bench_closure_helpers.sh
+```
+
 The compiler implementation is in Odin under `src/kvist`; the CLI entry point
 is `cmd/kvist/main.odin`.
 
@@ -236,9 +244,6 @@ The eager sequence helper direction is documented in
 [docs/SEQUENCES.md](docs/SEQUENCES.md).
 Ownership and deletion rules are documented in
 [docs/OWNERSHIP.md](docs/OWNERSHIP.md).
-Notes on carrying richer language design over from Cluck while preserving
-inspectable Odin lowering are in
-[docs/CLUCK-TRANSFER.md](docs/CLUCK-TRANSFER.md).
 The runnable example guide is in [examples/README.md](examples/README.md).
 Emacs support is in [emacs/kvist-mode.el](emacs/kvist-mode.el) and
 [emacs/kvist-eval.el](emacs/kvist-eval.el).

@@ -108,9 +108,15 @@ __kvist_test_expect_value :: proc(t: ^testing.T, value, expected: $T, loc := #ca
 	}
 	return testing.expectf(t, ok, \"%s: expected %v to be %v, got %v\", prefix, value_expr, expected, value, loc=loc)
 }
+
+__kvist_test_once_guard: sync.Once
 ")
 
 (defmacro- __kvist_test_wrap_each
+  [body]
+  body)
+
+(defmacro- __kvist_test_wrap_once
   [body]
   body)
 
@@ -122,6 +128,15 @@ __kvist_test_expect_value :: proc(t: ^testing.T, value, expected: $T, loc := #ca
       ((unquote (first fixtures)) t
        (proc [t: ^testing.T]
          (unquote (emit-fixture-chain body (rest fixtures))))))))
+
+(defmacro- emit-once-fixtures
+  [fixtures]
+  (if (= (count fixtures) 0)
+    (forms)
+    (quasiquote
+      (do
+        ((unquote (first fixtures)))
+        (splice (emit-once-fixtures (rest fixtures)))))))
 
 (defmacro- emit-is
   [expr msg]
@@ -168,8 +183,9 @@ __kvist_test_expect_value :: proc(t: ^testing.T, value, expected: $T, loc := #ca
       (quasiquote (odin "@(test)"))
       (quasiquote
         (defn (unquote name) [t: ^testing.T]
-          (unquote (__kvist_test_wrap_each
-                     (quasiquote (do (splice body))))))))
+          (unquote (__kvist_test_wrap_once
+                     (__kvist_test_wrap_each
+                       (quasiquote (do (splice body)))))))))
     (forms
       (quasiquote (import "core:testing"))
       (quasiquote (odin "@(test)"))
@@ -177,8 +193,9 @@ __kvist_test_expect_value :: proc(t: ^testing.T, value, expected: $T, loc := #ca
         (defn (unquote name)
           (unquote doc)
           [t: ^testing.T]
-          (unquote (__kvist_test_wrap_each
-                     (quasiquote (do (splice body))))))))))
+          (unquote (__kvist_test_wrap_once
+                     (__kvist_test_wrap_each
+                       (quasiquote (do (splice body)))))))))))
 
 (defmacro- emit-are
   [argv expr values]
@@ -228,7 +245,7 @@ __kvist_test_expect_value :: proc(t: ^testing.T, value, expected: $T, loc := #ca
     (emit-are argv expr values)))
 
 (defmacro use-fixtures
-  "Install test fixtures. The current first pass supports only :each fixtures."
+  "Install test fixtures. Supports `:each` fixtures and setup-only `:once` fixtures."
   [scope & fixtures]
   (if (= (name scope) "each")
     (let [template (emit-fixture-chain (quote __kvist_test_body__) fixtures)]
@@ -238,4 +255,20 @@ __kvist_test_expect_value :: proc(t: ^testing.T, value, expected: $T, loc := #ca
           (subst (unquote template)
                  (vector (quote __kvist_test_body__))
                  (vector body)))))
-    (error "t/use-fixtures currently supports only :each")))
+    (if (= (name scope) "once")
+      (let [setup (emit-once-fixtures fixtures)]
+        (forms
+          (quasiquote
+            (defn- __kvist_test_run_once_fixtures []
+              (unquote setup)))
+          (quasiquote
+            (defn- __kvist_test_ensure_once []
+              (sync.once_do (& __kvist_test_once_guard) __kvist_test_run_once_fixtures)))
+          (quasiquote
+            (defmacro- __kvist_test_wrap_once
+              [body]
+              (quasiquote
+                (do
+                  (__kvist_test_ensure_once)
+                  (unquote body)))))))
+      (error "t/use-fixtures currently supports only :each and :once"))))

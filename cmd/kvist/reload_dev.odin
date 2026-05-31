@@ -46,6 +46,11 @@ Reload_Exec_Paths :: struct {
     main_odin: string,
 }
 
+Reload_Build_Result :: struct {
+    ok:        bool,
+    exit_code: int,
+}
+
 delete_reload_app_paths :: proc(paths: ^Reload_App_Paths) {
     if paths.root_dir != "" {
         delete(paths.root_dir)
@@ -783,7 +788,7 @@ run_process_inherited :: proc(command: []string, working_dir: string) -> int {
     return 1
 }
 
-build_odin_package_or_exit :: proc(package_dir, output_path: string, build_mode := "") {
+build_odin_package :: proc(package_dir, output_path: string, build_mode := "") -> int {
     args := make([dynamic]string, 0, 6)
     defer delete(args)
     append(&args, "odin", "build", package_dir)
@@ -791,7 +796,11 @@ build_odin_package_or_exit :: proc(package_dir, output_path: string, build_mode 
         append(&args, build_mode)
     }
     append(&args, fmt.tprintf("-out:%s", output_path))
-    exit_code := run_process_inherited(args[:], ".")
+    return run_process_inherited(args[:], ".")
+}
+
+build_odin_package_or_exit :: proc(package_dir, output_path: string, build_mode := "") {
+    exit_code := build_odin_package(package_dir, output_path, build_mode)
     if exit_code != 0 {
         os.exit(exit_code)
     }
@@ -817,7 +826,133 @@ print_reload_app_paths :: proc(input: string, paths: Reload_App_Paths) {
     fmt.println("run_command=kvist dev --reload ", input)
 }
 
-reload_app_generate_and_build :: proc(input: string, generated_dir := "", rebuild_only, print_paths_only: bool) {
+json_write_escaped_string :: proc(builder: ^strings.Builder, value: string) {
+    strings.write_byte(builder, '"')
+    for ch in value {
+        switch ch {
+        case '\\':
+            strings.write_string(builder, "\\\\")
+        case '"':
+            strings.write_string(builder, "\\\"")
+        case '\n':
+            strings.write_string(builder, "\\n")
+        case '\r':
+            strings.write_string(builder, "\\r")
+        case '\t':
+            strings.write_string(builder, "\\t")
+        case:
+            strings.write_rune(builder, ch)
+        }
+    }
+    strings.write_byte(builder, '"')
+}
+
+json_write_key :: proc(builder: ^strings.Builder, key: string) {
+    json_write_escaped_string(builder, key)
+    strings.write_string(builder, ": ")
+}
+
+print_reload_app_paths_json :: proc(input: string, paths: Reload_App_Paths) {
+    builder := strings.builder_make()
+    defer strings.builder_destroy(&builder)
+
+    strings.write_string(&builder, "{\n")
+
+    json_write_key(&builder, "mode")
+    json_write_escaped_string(&builder, "reload")
+    strings.write_string(&builder, ",\n")
+
+    json_write_key(&builder, "input")
+    json_write_escaped_string(&builder, input)
+    strings.write_string(&builder, ",\n")
+
+    json_write_key(&builder, "root_dir")
+    json_write_escaped_string(&builder, paths.root_dir)
+    strings.write_string(&builder, ",\n")
+
+    json_write_key(&builder, "app_dir")
+    json_write_escaped_string(&builder, paths.app_dir)
+    strings.write_string(&builder, ",\n")
+
+    json_write_key(&builder, "module_dir")
+    json_write_escaped_string(&builder, paths.module_dir)
+    strings.write_string(&builder, ",\n")
+
+    json_write_key(&builder, "host_dir")
+    json_write_escaped_string(&builder, paths.host_dir)
+    strings.write_string(&builder, ",\n")
+
+    json_write_key(&builder, "app_odin")
+    json_write_escaped_string(&builder, paths.app_odin)
+    strings.write_string(&builder, ",\n")
+
+    json_write_key(&builder, "module_odin")
+    json_write_escaped_string(&builder, paths.module_odin)
+    strings.write_string(&builder, ",\n")
+
+    json_write_key(&builder, "host_odin")
+    json_write_escaped_string(&builder, paths.host_odin)
+    strings.write_string(&builder, ",\n")
+
+    json_write_key(&builder, "module_binary")
+    json_write_escaped_string(&builder, paths.module_binary)
+    strings.write_string(&builder, ",\n")
+
+    json_write_key(&builder, "rebuild_command")
+    json_write_escaped_string(&builder, fmt.tprintf("kvist dev --reload %q --rebuild", input))
+    strings.write_string(&builder, ",\n")
+
+    json_write_key(&builder, "run_command")
+    json_write_escaped_string(&builder, fmt.tprintf("kvist dev --reload %q", input))
+    strings.write_string(&builder, "\n}\n")
+
+    fmt.print(strings.to_string(builder))
+}
+
+print_reload_rebuild_result_json :: proc(input: string, paths: Reload_App_Paths, result: Reload_Build_Result) {
+    builder := strings.builder_make()
+    defer strings.builder_destroy(&builder)
+
+    strings.write_string(&builder, "{\n")
+
+    json_write_key(&builder, "mode")
+    json_write_escaped_string(&builder, "reload")
+    strings.write_string(&builder, ",\n")
+
+    json_write_key(&builder, "action")
+    json_write_escaped_string(&builder, "rebuild")
+    strings.write_string(&builder, ",\n")
+
+    json_write_key(&builder, "input")
+    json_write_escaped_string(&builder, input)
+    strings.write_string(&builder, ",\n")
+
+    json_write_key(&builder, "ok")
+    if result.ok {
+        strings.write_string(&builder, "true,\n")
+    } else {
+        strings.write_string(&builder, "false,\n")
+    }
+
+    json_write_key(&builder, "exit_code")
+    fmt.sbprintf(&builder, "%d,\n", result.exit_code)
+
+    json_write_key(&builder, "module_dir")
+    json_write_escaped_string(&builder, paths.module_dir)
+    strings.write_string(&builder, ",\n")
+
+    json_write_key(&builder, "module_odin")
+    json_write_escaped_string(&builder, paths.module_odin)
+    strings.write_string(&builder, ",\n")
+
+    json_write_key(&builder, "module_binary")
+    json_write_escaped_string(&builder, paths.module_binary)
+    strings.write_string(&builder, "\n}\n")
+
+    fmt.print(strings.to_string(builder))
+}
+
+reload_app_generate_and_build :: proc(input: string, generated_dir := "", rebuild_only, print_paths_only, json_output: bool) {
     data := read_source_or_exit(input)
     defer delete(transmute([]byte)data)
 
@@ -847,12 +982,25 @@ reload_app_generate_and_build :: proc(input: string, generated_dir := "", rebuil
     write_reload_app_generated_sources_or_exit(input, config, paths)
 
     if print_paths_only {
-        print_reload_app_paths(input, paths)
+        if json_output {
+            print_reload_app_paths_json(input, paths)
+        } else {
+            print_reload_app_paths(input, paths)
+        }
         return
     }
 
-    build_odin_package_or_exit(paths.module_dir, paths.module_binary, "-build-mode:dll")
+    module_build_exit_code := build_odin_package(paths.module_dir, paths.module_binary, "-build-mode:dll")
+    if module_build_exit_code != 0 {
+        if rebuild_only && json_output {
+            print_reload_rebuild_result_json(input, paths, Reload_Build_Result{ok = false, exit_code = module_build_exit_code})
+        }
+        os.exit(module_build_exit_code)
+    }
     if rebuild_only {
+        if json_output {
+            print_reload_rebuild_result_json(input, paths, Reload_Build_Result{ok = true, exit_code = 0})
+        }
         return
     }
 
@@ -935,6 +1083,7 @@ parse_dev_command :: proc() {
     reload_mode := false
     rebuild_only := false
     print_paths_only := false
+    json_output := false
     generated_dir := ""
     input := ""
 
@@ -949,6 +1098,9 @@ parse_dev_command :: proc() {
             i += 1
         case "--print-paths":
             print_paths_only = true
+            i += 1
+        case "--json":
+            json_output = true
             i += 1
         case "--generated-dir":
             if i+1 >= len(os.args) {
@@ -973,5 +1125,10 @@ parse_dev_command :: proc() {
         os.exit(2)
     }
 
-    reload_app_generate_and_build(input, generated_dir, rebuild_only, print_paths_only)
+    if json_output && !print_paths_only && !rebuild_only {
+        fmt.eprintln("--json currently requires --print-paths or --rebuild in reload dev mode")
+        os.exit(2)
+    }
+
+    reload_app_generate_and_build(input, generated_dir, rebuild_only, print_paths_only, json_output)
 }
