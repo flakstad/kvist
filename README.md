@@ -216,6 +216,12 @@ Set `BASE_REF` to compare the current compiler against a specific revision:
 BASE_REF=main ./scripts/bench_sequence_helpers.sh
 ```
 
+For the planned `{:keys [...]}` let-destructuring lowering baseline, run:
+
+```sh
+./scripts/bench_destructuring_helpers.sh
+```
+
 For the current-only aggregate helper comparison against direct Odin, run:
 
 ```sh

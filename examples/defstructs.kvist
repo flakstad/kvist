@@ -1,6 +1,7 @@
 // Exercises defstruct docstrings, Malli-like field metadata, nested structs,
 // and omitted-field defaults through ordinary Odin struct construction.
 (package main)
+(import "core:fmt")
 (defstruct Point
   "A 2D point."
   {:x float
@@ -31,6 +32,15 @@
                           :active? true})]
     (:active? profile)))
 
+(defn profile-summary [] -> string
+  (let [profile (Profile {:name "Ada"
+                          :age 36})
+        {:keys [name age]} profile]
+    (fmt.tprintf "%s/%d" name age)))
+
+(defn profile-summary-from [{:keys [name age] :as profile}: Profile] -> string
+  (fmt.tprintf "%s/%d/%t" name age (:active? profile)))
+
 (defn main []
   (println (profile-has-math-tag?)))
 
@@ -48,4 +58,10 @@
 
   (profile-active?)
   ;; => true
+
+  (profile-summary)
+  ;; => "Ada/36"
+
+  (profile-summary-from (Profile {:name "Ada" :age 36 :active? true}))
+  ;; => "Ada/36/true"
 )

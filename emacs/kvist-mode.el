@@ -79,7 +79,8 @@
     ("struct" . "kvist:struct")
     ("io" . "kvist:io")
     ("json" . "kvist:json")
-    ("http" . "kvist:http"))
+    ("http" . "kvist:http")
+    ("httpc" . "kvist:http/client"))
   "Canonical explicit imports for compiler-provided Kvist packages.")
 
 (defvar-local kvist--editor-symbol-cache nil

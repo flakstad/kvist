@@ -151,6 +151,8 @@ kvist_package_name_for_import_path :: proc(path: string) -> (string, bool) {
         return "json", true
     case "kvist:http":
         return "http", true
+    case "kvist:http/client":
+        return "client", true
     case:
         return "", false
     }
@@ -1429,6 +1431,340 @@ emit_call_text :: proc(name: string, arg_texts: []string) -> string {
     }
     strings.write_byte(&builder, ')')
     return strings.clone(strings.to_string(builder))
+}
+
+find_proc_decl :: proc(e: ^Emitter, name: string) -> (^Proc_Decl, bool) {
+    for idx in 0..<len(e.decls) {
+        decl := &e.decls[idx]
+        if decl.kind == .Proc && decl.proc_decl.name == name {
+            return &decl.proc_decl, true
+        }
+    }
+    return nil, false
+}
+
+emit_named_call_arg_texts :: proc(e: ^Emitter, form: CST_Form) -> (arg_texts: [dynamic]string, err: Compile_Error, ok: bool) {
+    if form.kind != .Brace {
+        return arg_texts, Compile_Error{message = "named arguments expect a brace form", span = form.span}, false
+    }
+
+    seen: [dynamic]string
+    for i := 0; i < len(form.items); i += 2 {
+        if i+1 >= len(form.items) {
+            return arg_texts, Compile_Error{message = "missing named argument value", span = form.span}, false
+        }
+
+        key := form.items[i]
+        value := form.items[i+1]
+        field_name, ok_key := brace_key_name(key)
+        if !ok_key {
+            return arg_texts, Compile_Error{message = "named arguments expect keyword fields", span = key.span}, false
+        }
+        for existing in seen {
+            if existing == field_name {
+                return arg_texts, Compile_Error{message = fmt.tprintf("duplicate named argument %s", key.text), span = key.span}, false
+            }
+        }
+        append(&seen, field_name)
+
+        value_text, err_value, ok_value := emit_expr(e, value)
+        if !ok_value {
+            return arg_texts, err_value, false
+        }
+        append(&arg_texts, fmt.tprintf("%s = %s", field_name, value_text))
+    }
+
+    return arg_texts, Compile_Error{}, true
+}
+
+find_proc_param :: proc(proc_decl: ^Proc_Decl, name: string) -> (^Param, bool) {
+    for idx in 0..<len(proc_decl.params) {
+        if proc_decl.params[idx].name == name {
+            return &proc_decl.params[idx], true
+        }
+    }
+    return nil, false
+}
+
+proc_param_keyword_names :: proc(proc_decl: ^Proc_Decl) -> (names: [dynamic]string) {
+    for param, param_idx in proc_decl.params {
+        append(&names, fmt.tprintf(":%s", param.name))
+    }
+    return names
+}
+
+join_strings :: proc(items: []string, sep: string) -> string {
+    builder := strings.builder_make()
+    defer strings.builder_destroy(&builder)
+    for item, idx in items {
+        if idx > 0 {
+            strings.write_string(&builder, sep)
+        }
+        strings.write_string(&builder, item)
+    }
+    return strings.clone(strings.to_string(builder))
+}
+
+named_arg_message_with_valid_keys :: proc(prefix: string, proc_decl: ^Proc_Decl) -> string {
+    names := proc_param_keyword_names(proc_decl)
+    defer delete_string_slice(&names)
+    return fmt.tprintf("%s; valid named args: %s", prefix, join_strings(names[:], ", "))
+}
+
+min3 :: proc(a, b, c: int) -> int {
+    if a <= b && a <= c {
+        return a
+    }
+    if b <= c {
+        return b
+    }
+    return c
+}
+
+edit_distance :: proc(a, b: string) -> int {
+    if a == b {
+        return 0
+    }
+    prev := make([dynamic]int, len(b)+1)
+    curr := make([dynamic]int, len(b)+1)
+    defer delete(prev)
+    defer delete(curr)
+    for j := 0; j <= len(b); j += 1 {
+        append(&prev, j)
+        append(&curr, 0)
+    }
+    for i := 1; i <= len(a); i += 1 {
+        curr[0] = i
+        for j := 1; j <= len(b); j += 1 {
+            cost := 1
+            if a[i-1] == b[j-1] {
+                cost = 0
+            }
+            curr[j] = min3(
+                prev[j]+1,
+                curr[j-1]+1,
+                prev[j-1]+cost,
+            )
+        }
+        for j := 0; j <= len(b); j += 1 {
+            prev[j] = curr[j]
+        }
+    }
+    return prev[len(b)]
+}
+
+closest_proc_param_keyword :: proc(proc_decl: ^Proc_Decl, name: string) -> (string, bool) {
+    best := ""
+    best_distance := 999999
+    for param, param_idx in proc_decl.params {
+        distance := edit_distance(name, param.name)
+        if distance < best_distance {
+            best_distance = distance
+            best = param.name
+        }
+    }
+    if best == "" {
+        return "", false
+    }
+    threshold := 3
+    if len(name) >= 8 {
+        threshold = 4
+    }
+    if best_distance > threshold {
+        return "", false
+    }
+    return best, true
+}
+
+emit_named_call_with_defaults :: proc(e: ^Emitter, proc_decl: ^Proc_Decl, form: CST_Form) -> (arg_texts: [dynamic]string, err: Compile_Error, ok: bool) {
+    if form.kind != .Brace {
+        return arg_texts, Compile_Error{message = "named arguments expect a brace form", span = form.span}, false
+    }
+
+    named_values := make([dynamic]Brace_Pair, 0, len(form.items)/2)
+    defer delete(named_values)
+
+    seen: [dynamic]string
+    for i := 0; i < len(form.items); i += 2 {
+        if i+1 >= len(form.items) {
+            return arg_texts, Compile_Error{message = "missing named argument value", span = form.span}, false
+        }
+        key := form.items[i]
+        value := form.items[i+1]
+        field_name, ok_key := brace_key_name(key)
+        if !ok_key {
+            return arg_texts, Compile_Error{message = "named arguments expect keyword fields", span = key.span}, false
+        }
+        for existing in seen {
+            if existing == field_name {
+                return arg_texts, Compile_Error{message = fmt.tprintf("duplicate named argument %s", key.text), span = key.span}, false
+            }
+        }
+        append(&seen, field_name)
+        if _, ok_param := find_proc_param(proc_decl, field_name); !ok_param {
+            message := fmt.tprintf("unknown named argument %s", key.text)
+            if closest, ok_closest := closest_proc_param_keyword(proc_decl, field_name); ok_closest {
+                message = fmt.tprintf("%s; did you mean :%s?", message, closest)
+            }
+            return arg_texts, Compile_Error{message = named_arg_message_with_valid_keys(message, proc_decl), span = key.span}, false
+        }
+        value_text, err_value, ok_value := emit_expr(e, value)
+        if !ok_value {
+            return arg_texts, err_value, false
+        }
+        append(&named_values, Brace_Pair{key = field_name, value = value_text})
+    }
+
+    for param, param_idx in proc_decl.params {
+        matched := false
+        for pair in named_values {
+            if pair.key == param.name {
+                append(&arg_texts, fmt.tprintf("%s = %s", param.name, pair.value))
+                matched = true
+                break
+            }
+        }
+        if matched {
+            continue
+        }
+        if param.has_default {
+            default_text, err_default, ok_default := emit_expr(e, param.default_value)
+            if !ok_default {
+                return arg_texts, err_default, false
+            }
+            append(&arg_texts, fmt.tprintf("%s = %s", param.name, default_text))
+            continue
+        }
+        missing: [dynamic]string
+        append(&missing, fmt.tprintf(":%s", param.name))
+        for later_idx := param_idx + 1; later_idx < len(proc_decl.params); later_idx += 1 {
+            later := proc_decl.params[later_idx]
+            if !later.has_default {
+                append(&missing, fmt.tprintf(":%s", later.name))
+            }
+        }
+        message := fmt.tprintf("missing required named arguments: %s", join_strings(missing[:], ", "))
+        delete_string_slice(&missing)
+        return arg_texts, Compile_Error{message = named_arg_message_with_valid_keys(message, proc_decl), span = form.span}, false
+    }
+
+    return arg_texts, Compile_Error{}, true
+}
+
+emit_positional_call_with_defaults :: proc(e: ^Emitter, proc_decl: ^Proc_Decl, args: []CST_Form, span: Span) -> (arg_texts: [dynamic]string, err: Compile_Error, ok: bool) {
+    if len(args) > len(proc_decl.params) {
+        return arg_texts, Compile_Error{message = fmt.tprintf("%s expects at most %d arguments", proc_decl.name, len(proc_decl.params)), span = span}, false
+    }
+
+    for arg in args {
+        arg_text, err_arg, ok_arg := emit_expr(e, arg)
+        if !ok_arg {
+            return arg_texts, err_arg, false
+        }
+        append(&arg_texts, arg_text)
+    }
+    for idx := len(args); idx < len(proc_decl.params); idx += 1 {
+        param := proc_decl.params[idx]
+        if !param.has_default {
+            return arg_texts, Compile_Error{message = fmt.tprintf("%s expects at least %d arguments", proc_decl.name, idx+1), span = span}, false
+        }
+        default_text, err_default, ok_default := emit_expr(e, param.default_value)
+        if !ok_default {
+            return arg_texts, err_default, false
+        }
+        append(&arg_texts, default_text)
+    }
+    return arg_texts, Compile_Error{}, true
+}
+
+emit_mixed_call_with_defaults :: proc(e: ^Emitter, proc_decl: ^Proc_Decl, positional_args: []CST_Form, named_form: CST_Form, span: Span) -> (arg_texts: [dynamic]string, err: Compile_Error, ok: bool) {
+    if len(positional_args) > len(proc_decl.params) {
+        return arg_texts, Compile_Error{message = fmt.tprintf("%s expects at most %d arguments", proc_decl.name, len(proc_decl.params)), span = span}, false
+    }
+
+    named_values := make([dynamic]Brace_Pair, 0, len(named_form.items)/2)
+    defer delete(named_values)
+
+    seen: [dynamic]string
+    for i := 0; i < len(named_form.items); i += 2 {
+        if i+1 >= len(named_form.items) {
+            return arg_texts, Compile_Error{message = "missing named argument value", span = named_form.span}, false
+        }
+        key := named_form.items[i]
+        value := named_form.items[i+1]
+        field_name, ok_key := brace_key_name(key)
+        if !ok_key {
+            return arg_texts, Compile_Error{message = "named arguments expect keyword fields", span = key.span}, false
+        }
+        for existing in seen {
+            if existing == field_name {
+                return arg_texts, Compile_Error{message = fmt.tprintf("duplicate named argument %s", key.text), span = key.span}, false
+            }
+        }
+        append(&seen, field_name)
+        if _, ok_param := find_proc_param(proc_decl, field_name); !ok_param {
+            message := fmt.tprintf("unknown named argument %s", key.text)
+            if closest, ok_closest := closest_proc_param_keyword(proc_decl, field_name); ok_closest {
+                message = fmt.tprintf("%s; did you mean :%s?", message, closest)
+            }
+            return arg_texts, Compile_Error{message = named_arg_message_with_valid_keys(message, proc_decl), span = key.span}, false
+        }
+        value_text, err_value, ok_value := emit_expr(e, value)
+        if !ok_value {
+            return arg_texts, err_value, false
+        }
+        append(&named_values, Brace_Pair{key = field_name, value = value_text})
+    }
+
+    for arg, idx in positional_args {
+        arg_text, err_arg, ok_arg := emit_expr(e, arg)
+        if !ok_arg {
+            return arg_texts, err_arg, false
+        }
+        param := proc_decl.params[idx]
+        for pair in named_values {
+            if pair.key == param.name {
+                return arg_texts, Compile_Error{message = fmt.tprintf("named argument :%s overlaps positional argument %d", param.name, idx+1), span = named_form.span}, false
+            }
+        }
+        append(&arg_texts, arg_text)
+    }
+
+    for idx := len(positional_args); idx < len(proc_decl.params); idx += 1 {
+        param := proc_decl.params[idx]
+        matched := false
+        for pair in named_values {
+            if pair.key == param.name {
+                append(&arg_texts, fmt.tprintf("%s = %s", param.name, pair.value))
+                matched = true
+                break
+            }
+        }
+        if matched {
+            continue
+        }
+        if param.has_default {
+            default_text, err_default, ok_default := emit_expr(e, param.default_value)
+            if !ok_default {
+                return arg_texts, err_default, false
+            }
+            append(&arg_texts, fmt.tprintf("%s = %s", param.name, default_text))
+            continue
+        }
+        missing: [dynamic]string
+        append(&missing, fmt.tprintf(":%s", param.name))
+        for later_idx := idx + 1; later_idx < len(proc_decl.params); later_idx += 1 {
+            later := proc_decl.params[later_idx]
+            if !later.has_default {
+                append(&missing, fmt.tprintf(":%s", later.name))
+            }
+        }
+        message := fmt.tprintf("missing required arguments after positional prefix: %s", join_strings(missing[:], ", "))
+        delete_string_slice(&missing)
+        return arg_texts, Compile_Error{message = named_arg_message_with_valid_keys(message, proc_decl), span = span}, false
+    }
+
+    return arg_texts, Compile_Error{}, true
 }
 
 emit_operator_text :: proc(op: string, arg_texts: []string, span: Span) -> (string, Compile_Error, bool) {
@@ -2844,14 +3180,23 @@ emit_binding_assignment :: proc(e: ^Emitter, binding: Binding, value: string) {
         fmt.sbprintf(&line_builder, " := %s", value)
         emit_prefixed_expr_mapped(e, "", strings.clone(strings.to_string(line_builder)), binding.value.span)
     } else if binding.is_field_destructure {
-        e.temp_counter += 1
-        target := fmt.tprintf("kvist_destructure_%d", e.temp_counter)
-        emit_prefixed_expr_mapped(e, fmt.tprintf("%s := ", target), value, binding.value.span)
+        target := ""
+        if binding.value.kind == .Symbol {
+            target = map_name(binding.value.text)
+        } else {
+            e.temp_counter += 1
+            target = fmt.tprintf("kvist_destructure_%d", e.temp_counter)
+            emit_prefixed_expr_mapped(e, fmt.tprintf("%s := ", target), value, binding.value.span)
+        }
+        access_target := target
+        if ty, ok := obvious_form_type(e, binding.value); ok && len(ty) > 0 && ty[0] == '^' {
+            access_target = deref_expr_text(target)
+        }
         for field in binding.fields {
             if field.name == "_" {
                 continue
             }
-            emit_prefixed_expr(e, fmt.tprintf("%s := ", field.name), fmt.tprintf("%s.%s", target, field.field))
+            emit_prefixed_expr(e, fmt.tprintf("%s := ", field.name), fmt.tprintf("%s.%s", access_target, field.field))
         }
     } else if binding.is_typed {
         emit_prefixed_expr_mapped(e, fmt.tprintf("%s: %s = ", binding.name, binding.ty), value, binding.value.span)
@@ -3169,12 +3514,114 @@ obvious_form_type :: proc(e: ^Emitter, form: CST_Form) -> (string, bool) {
             return head_name, true
         }
     }
+    if form.kind == .List && len(form.items) > 0 && form.items[0].kind == .Symbol {
+        head_name := map_name(form.items[0].text)
+        if proc_decl, ok := find_proc_decl(e, head_name); ok && proc_decl.returns.kind == .Single {
+            return proc_decl.returns.single_ty, true
+        }
+    }
     if form.kind == .Vector || form.kind == .Brace || form.kind == .Set {
         if ty, _, ok := infer_literal_value_type(e, form); ok {
             return ty, true
         }
     }
     return "", false
+}
+
+field_destructure_struct_decl :: proc(e: ^Emitter, binding: Binding) -> (^Struct_Decl, bool) {
+    ty, ok_ty := obvious_form_type(e, binding.value)
+    if !ok_ty || ty == "" {
+        return nil, false
+    }
+    if ty[0] == '^' {
+        ty = ty[1:]
+    }
+    return find_struct_decl(e, ty)
+}
+
+validate_field_destructure_binding :: proc(e: ^Emitter, binding: Binding) -> (Compile_Error, bool) {
+    struct_decl, ok_struct := field_destructure_struct_decl(e, binding)
+    if !ok_struct {
+        return {}, true
+    }
+    for field in binding.fields {
+        if field.name == "_" {
+            continue
+        }
+        if _, ok := find_struct_field(struct_decl, field.field); !ok {
+            return Compile_Error{
+                message = fmt.tprintf("unknown field :%s in destructuring for %s", field.field, struct_decl.name),
+                span = binding.target_span,
+            }, false
+        }
+    }
+    return {}, true
+}
+
+bind_field_destructure_types :: proc(e: ^Emitter, binding: Binding) {
+    struct_decl, ok_struct := field_destructure_struct_decl(e, binding)
+    if !ok_struct {
+        return
+    }
+    for field in binding.fields {
+        if field.name == "_" {
+            continue
+        }
+        struct_field, ok_field := find_struct_field(struct_decl, field.field)
+        if !ok_field {
+            continue
+        }
+        bind_local_type(e, field.name, struct_field.ty)
+    }
+}
+
+validate_param_field_destructure :: proc(e: ^Emitter, param: Param) -> (Compile_Error, bool) {
+    struct_ty := param.ty
+    if len(struct_ty) > 0 && struct_ty[0] == '^' {
+        struct_ty = struct_ty[1:]
+    }
+    struct_decl, ok_struct := find_struct_decl(e, struct_ty)
+    if !ok_struct {
+        return Compile_Error{
+            message = fmt.tprintf("destructured parameter %s requires a known struct type, got %s", param.name, param.ty),
+        }, false
+    }
+    for field in param.destructure_fields {
+        if _, ok := find_struct_field(struct_decl, field.name); !ok {
+            return Compile_Error{
+                message = fmt.tprintf("unknown field :%s in parameter destructuring for %s", field.name, struct_decl.name),
+            }, false
+        }
+    }
+    return {}, true
+}
+
+bind_param_field_destructure_types :: proc(e: ^Emitter, param: Param) {
+    struct_ty := param.ty
+    if len(struct_ty) > 0 && struct_ty[0] == '^' {
+        struct_ty = struct_ty[1:]
+    }
+    struct_decl, ok_struct := find_struct_decl(e, struct_ty)
+    if !ok_struct {
+        return
+    }
+    for field in param.destructure_fields {
+        struct_field, ok_field := find_struct_field(struct_decl, field.name)
+        if !ok_field {
+            continue
+        }
+        bind_local_type(e, field.name, struct_field.ty)
+    }
+}
+
+emit_param_field_destructure :: proc(e: ^Emitter, param: Param) {
+    access_target := param.name
+    if len(param.ty) > 0 && param.ty[0] == '^' {
+        access_target = deref_expr_text(access_target)
+    }
+    for field in param.destructure_fields {
+        emit_prefixed_expr(e, fmt.tprintf("%s := ", field.name), fmt.tprintf("%s.%s", access_target, field.name))
+    }
 }
 
 emit_set_literal :: proc(e: ^Emitter, elem_type: string, form: CST_Form) -> (string, Compile_Error, bool) {
@@ -3315,6 +3762,12 @@ obvious_binding_type :: proc(e: ^Emitter, binding: Binding) -> (string, bool) {
         head_name := map_name(binding.value.items[0].text)
         if _, ok := find_struct_decl(e, head_name); ok {
             return head_name, true
+        }
+    }
+    if binding.value.kind == .List && len(binding.value.items) > 0 && binding.value.items[0].kind == .Symbol {
+        head_name := map_name(binding.value.items[0].text)
+        if proc_decl, ok := find_proc_decl(e, head_name); ok && proc_decl.returns.kind == .Single {
+            return proc_decl.returns.single_ty, true
         }
     }
     if binding.value.kind == .Vector || binding.value.kind == .Brace || binding.value.kind == .Set {
@@ -4062,7 +4515,16 @@ emit_proc_literal_text :: proc(e: ^Emitter, params: []Param, returns: Return_Spe
         bind_local_type(&sub, local.name, local.ty)
     }
     for param in params {
+        if param.is_field_destructure {
+            err_param, ok_param := validate_param_field_destructure(e, param)
+            if !ok_param {
+                return "", err_param, false
+            }
+        }
         bind_local_type(&sub, param.name, param.ty)
+        if param.is_field_destructure {
+            bind_param_field_destructure_types(&sub, param)
+        }
     }
 
     strings.write_string(&sub.builder, "proc(")
@@ -4075,6 +4537,11 @@ emit_proc_literal_text :: proc(e: ^Emitter, params: []Param, returns: Return_Spe
     strings.write_byte(&sub.builder, ')')
     emit_return_spec(&sub, returns)
     strings.write_string(&sub.builder, " {\n")
+    for param in params {
+        if param.is_field_destructure {
+            emit_param_field_destructure(&sub, param)
+        }
+    }
     err_body, ok_body := emit_body_forms(&sub, body, returns)
     if !ok_body {
         return "", err_body, false
@@ -6131,10 +6598,43 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         if ok_union {
             return emit_union_constructor(e, union_decl, form.items[1])
         }
+        if !strings.contains(head_name, ".") {
+            if proc_decl, ok_proc := find_proc_decl(e, head_name); ok_proc {
+                named_arg_texts, err_named, ok_named := emit_named_call_with_defaults(e, proc_decl, form.items[1])
+                if !ok_named {
+                    return "", err_named, false
+                }
+                return emit_call_text(head_name, named_arg_texts[:]), {}, true
+            }
+            named_arg_texts, err_named, ok_named := emit_named_call_arg_texts(e, form.items[1])
+            if ok_named {
+                return emit_call_text(head_name, named_arg_texts[:]), {}, true
+            }
+            if err_named.message != "" && err_named.message != "named arguments expect keyword fields" {
+                return "", err_named, false
+            }
+        }
         return emit_brace_literal(e, head_name, form.items[1])
     }
 
     arg_texts: [dynamic]string
+    head_name := map_name(head.text)
+    if !strings.contains(head_name, ".") {
+        if proc_decl, ok_proc := find_proc_decl(e, head_name); ok_proc {
+            if len(form.items) >= 3 && form.items[len(form.items)-1].kind == .Brace {
+                arg_texts_with_mixed, err_args, ok_args := emit_mixed_call_with_defaults(e, proc_decl, form.items[1:len(form.items)-1], form.items[len(form.items)-1], form.span)
+                if !ok_args {
+                    return "", err_args, false
+                }
+                return emit_call_text(head_name, arg_texts_with_mixed[:]), {}, true
+            }
+            arg_texts_with_defaults, err_args, ok_args := emit_positional_call_with_defaults(e, proc_decl, form.items[1:], form.span)
+            if !ok_args {
+                return "", err_args, false
+            }
+            return emit_call_text(head_name, arg_texts_with_defaults[:]), {}, true
+        }
+    }
     for arg in form.items[1:] {
         arg_text, err_arg, ok_arg := emit_expr(e, arg)
         if !ok_arg {
@@ -6142,7 +6642,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         }
         append(&arg_texts, arg_text)
     }
-    return emit_call_text(map_name(head.text), arg_texts[:]), {}, true
+    return emit_call_text(head_name, arg_texts[:]), {}, true
 }
 
 emit_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) {
@@ -6207,6 +6707,15 @@ Binding_Field :: struct {
     name:  string,
 }
 
+binding_field_exists :: proc(fields: []Binding_Field, field_name: string) -> bool {
+    for field in fields {
+        if field.field == field_name {
+            return true
+        }
+    }
+    return false
+}
+
 Binding :: struct {
     is_destructure: bool,
     is_field_destructure: bool,
@@ -6218,6 +6727,7 @@ Binding :: struct {
     ty:             string,
     deferred_delete: bool,
     or_modifier:    string,
+    target_span:    Span,
     value:          CST_Form,
 }
 
@@ -6244,6 +6754,27 @@ parse_field_destructure_binding :: proc(form: CST_Form) -> (fields: [dynamic]Bin
         return fields, Compile_Error{message = "field destructuring expects at least one field", span = form.span}, false
     }
 
+    if form.items[0].kind == .Keyword && form.items[0].text == ":keys" {
+        if len(form.items) != 2 {
+            return fields, Compile_Error{message = "{:keys [...]} destructuring does not yet support extra entries", span = form.span}, false
+        }
+        names := form.items[1]
+        if names.kind != .Vector {
+            return fields, Compile_Error{message = "{:keys ...} destructuring expects a vector of symbols", span = names.span}, false
+        }
+        for item in names.items {
+            if item.kind != .Symbol {
+                return fields, Compile_Error{message = "{:keys [...]} destructuring expects symbol names", span = item.span}, false
+            }
+            name := map_name(item.text)
+            if binding_field_exists(fields[:], name) {
+                return fields, Compile_Error{message = fmt.tprintf("duplicate field :%s in destructuring", name), span = item.span}, false
+            }
+            append(&fields, Binding_Field{field = name, name = name})
+        }
+        return fields, {}, true
+    }
+
     all_keywords := true
     for item in form.items {
         if item.kind != .Keyword {
@@ -6254,6 +6785,9 @@ parse_field_destructure_binding :: proc(form: CST_Form) -> (fields: [dynamic]Bin
     if all_keywords {
         for item in form.items {
             name := map_name(item.text[1:])
+            if binding_field_exists(fields[:], name) {
+                return fields, Compile_Error{message = fmt.tprintf("duplicate field %s in destructuring", item.text), span = item.span}, false
+            }
             append(&fields, Binding_Field{field = name, name = name})
         }
         return fields, {}, true
@@ -6271,6 +6805,9 @@ parse_field_destructure_binding :: proc(form: CST_Form) -> (fields: [dynamic]Bin
         }
         if local.kind != .Symbol {
             return fields, Compile_Error{message = "field destructuring expects symbol locals", span = local.span}, false
+        }
+        if binding_field_exists(fields[:], map_name(key.text[1:])) {
+            return fields, Compile_Error{message = fmt.tprintf("duplicate field %s in destructuring", key.text), span = key.span}, false
         }
         append(&fields, Binding_Field{
             field = map_name(key.text[1:]),
@@ -6324,6 +6861,7 @@ parse_let_bindings :: proc(form: CST_Form) -> (bindings: [dynamic]Binding, err: 
                 pattern = names,
                 deferred_delete = deferred_delete,
                 or_modifier = or_modifier,
+                target_span = target.span,
                 value = form.items[i+1],
             })
             i = next_i
@@ -6341,6 +6879,7 @@ parse_let_bindings :: proc(form: CST_Form) -> (bindings: [dynamic]Binding, err: 
             append(&bindings, Binding{
                 is_field_destructure = true,
                 fields = fields,
+                target_span = target.span,
                 value = form.items[i+1],
             })
             i += 2
@@ -6362,6 +6901,7 @@ parse_let_bindings :: proc(form: CST_Form) -> (bindings: [dynamic]Binding, err: 
                     is_typed = true,
                     ty = type_text,
                     deferred_delete = deferred_delete,
+                    target_span = target.span,
                     value = form.items[next_i],
                 })
                 i = next_i + 1
@@ -6376,6 +6916,7 @@ parse_let_bindings :: proc(form: CST_Form) -> (bindings: [dynamic]Binding, err: 
                 append(&bindings, Binding{
                     name = map_name(target.text),
                     deferred_delete = deferred_delete,
+                    target_span = target.span,
                     value = form.items[i+1],
                 })
                 i += 2
@@ -6834,6 +7375,12 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
             e.indent += 1
         }
         for binding in bindings {
+            if binding.is_field_destructure {
+                err_destructure, ok_destructure := validate_field_destructure_binding(e, binding)
+                if !ok_destructure {
+                    return err_destructure, false
+                }
+            }
             if is_thread_form(binding.value, true) {
                 err_thread, ok_thread := emit_thread_binding_assignment(e, binding, true)
                 if !ok_thread {
@@ -6878,6 +7425,8 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
             }
             if ty, ok_ty := obvious_binding_type(e, binding); ok_ty {
                 bind_local_type(e, binding.name, ty)
+            } else if binding.is_field_destructure {
+                bind_field_destructure_types(e, binding)
             }
         }
         err_body, ok_body := emit_body_forms(e, body[:], returns_when_final(last_in_proc, returns))
@@ -7512,7 +8061,16 @@ emit_decl :: proc(e: ^Emitter, decl: IR_Decl) -> (Compile_Error, bool) {
         push_local_type_scope(e)
         defer pop_local_type_scope(e)
         for param in decl.proc_decl.params {
+            if param.is_field_destructure {
+                err_param, ok_param := validate_param_field_destructure(e, param)
+                if !ok_param {
+                    return err_param, false
+                }
+            }
             bind_local_type(e, param.name, param.ty)
+            if param.is_field_destructure {
+                bind_param_field_destructure_types(e, param)
+            }
         }
         emit_indent(e)
         fmt.sbprintf(&e.builder, "%s :: ", decl.proc_decl.name)
@@ -7547,6 +8105,11 @@ emit_decl :: proc(e: ^Emitter, decl: IR_Decl) -> (Compile_Error, bool) {
         strings.write_string(&e.builder, " {")
         emit_raw_newline(e)
         e.indent += 1
+        for param in decl.proc_decl.params {
+            if param.is_field_destructure {
+                emit_param_field_destructure(e, param)
+            }
+        }
         err_body, ok_body := emit_body_forms(e, decl.proc_decl.body[:], decl.proc_decl.returns)
         if !ok_body {
             return err_body, false

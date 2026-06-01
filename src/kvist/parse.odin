@@ -376,25 +376,108 @@ parse_param_vector :: proc(form: CST_Form) -> (params: [dynamic]Param, err: Comp
         return params, Compile_Error{message = "expected parameter vector", span = form.span}, false
     }
     i := 0
+    saw_default := false
     for i < len(form.items) {
-        name_form := form.items[i]
-        if name_form.kind != .Symbol || len(name_form.text) == 0 {
-            return params, Compile_Error{message = "expected parameter name", span = name_form.span}, false
+        target := form.items[i]
+        param := Param{}
+        next_i := 0
+        #partial switch target.kind {
+        case .Symbol:
+            if len(target.text) == 0 {
+                return params, Compile_Error{message = "expected parameter name", span = target.span}, false
+            }
+            if target.text[len(target.text)-1] != ':' {
+                return params, Compile_Error{message = "expected parameter name ending in ':'", span = target.span}, false
+            }
+            if i+1 >= len(form.items) {
+                return params, Compile_Error{message = "missing parameter type", span = target.span}, false
+            }
+            type_text, parsed_next_i, err_type, ok_type := parse_type_text_from_forms(form.items[:], i+1)
+            if !ok_type {
+                return params, err_type, false
+            }
+            param = Param{
+                name = map_name(target.text[:len(target.text)-1]),
+                ty   = type_text,
+            }
+            next_i = parsed_next_i
+        case .Brace:
+            if i+2 >= len(form.items) {
+                return params, Compile_Error{message = "destructured parameter missing : and type", span = target.span}, false
+            }
+            separator := form.items[i+1]
+            if separator.kind != .Keyword || separator.text != ":" {
+                return params, Compile_Error{message = "destructured parameter expects {:keys [...] :as name}: Type", span = separator.span}, false
+            }
+
+            fields: [dynamic]Struct_Field
+            as_name := ""
+            saw_keys := false
+            j := 0
+            for j < len(target.items) {
+                if target.items[j].kind != .Keyword {
+                    return params, Compile_Error{message = "destructured parameter expects keyword entries", span = target.items[j].span}, false
+                }
+                key := target.items[j].text
+                switch key {
+                case ":keys":
+                    if saw_keys || j+1 >= len(target.items) || target.items[j+1].kind != .Vector {
+                        return params, Compile_Error{message = "destructured parameter expects one :keys vector", span = target.items[j].span}, false
+                    }
+                    for item in target.items[j+1].items {
+                        if item.kind != .Symbol {
+                            return params, Compile_Error{message = ":keys parameter destructuring expects symbols", span = item.span}, false
+                        }
+                        name := map_name(item.text)
+                        if struct_field_exists(fields[:], name) {
+                            return params, Compile_Error{message = fmt.tprintf("duplicate field :%s in parameter destructuring", name), span = item.span}, false
+                        }
+                        append(&fields, Struct_Field{name = name, source_name = name})
+                    }
+                    saw_keys = true
+                    j += 2
+                case ":as":
+                    if as_name != "" || j+1 >= len(target.items) || target.items[j+1].kind != .Symbol {
+                        return params, Compile_Error{message = "destructured parameter expects one :as symbol", span = target.items[j].span}, false
+                    }
+                    as_name = map_name(target.items[j+1].text)
+                    j += 2
+                case:
+                    return params, Compile_Error{message = "destructured parameter only supports :keys and :as", span = target.items[j].span}, false
+                }
+            }
+            if !saw_keys || len(fields) == 0 {
+                return params, Compile_Error{message = "destructured parameter expects :keys with at least one field", span = target.span}, false
+            }
+            if as_name == "" {
+                return params, Compile_Error{message = "destructured parameter currently requires :as", span = target.span}, false
+            }
+            type_text, parsed_next_i, err_type, ok_type := parse_type_text_from_forms(form.items[:], i+2)
+            if !ok_type {
+                return params, err_type, false
+            }
+            param = Param{
+                name                 = as_name,
+                ty                   = type_text,
+                is_field_destructure = true,
+                destructure_fields   = fields,
+            }
+            next_i = parsed_next_i
+        case:
+            return params, Compile_Error{message = "expected parameter name or destructuring form", span = target.span}, false
         }
-        if name_form.text[len(name_form.text)-1] != ':' {
-            return params, Compile_Error{message = "expected parameter name ending in ':'", span = name_form.span}, false
+        if next_i < len(form.items) && is_symbol(form.items[next_i], "=") {
+            if next_i+1 >= len(form.items) {
+                return params, Compile_Error{message = "missing default parameter value", span = form.items[next_i].span}, false
+            }
+            param.has_default = true
+            param.default_value = form.items[next_i+1]
+            next_i += 2
+            saw_default = true
+        } else if saw_default {
+            return params, Compile_Error{message = "parameters with defaults must trail required parameters", span = target.span}, false
         }
-        if i+1 >= len(form.items) {
-            return params, Compile_Error{message = "missing parameter type", span = name_form.span}, false
-        }
-        type_text, next_i, err_type, ok_type := parse_type_text_from_forms(form.items[:], i+1)
-        if !ok_type {
-            return params, err_type, false
-        }
-        append(&params, Param{
-            name = map_name(name_form.text[:len(name_form.text)-1]),
-            ty   = type_text,
-        })
+        append(&params, param)
         i = next_i
     }
     return params, {}, true
@@ -723,7 +806,7 @@ parse_decl :: proc(top_form: CST_Top_Form) -> (decl: AST_Decl, err: Compile_Erro
             }, {}, true
         }
         return decl, Compile_Error{message = "import expects a string path, alias plus string path, :odin plus string path, or alias plus :odin plus string path", span = form.span}, false
-    case "const", "defconst", "defconst-":
+    case "defconst", "defconst-":
         if len(form.items) < 3 {
             return decl, Compile_Error{message = "defconst expects a name, optional type, and value", span = form.span}, false
         }
@@ -798,23 +881,6 @@ parse_decl :: proc(top_form: CST_Top_Form) -> (decl: AST_Decl, err: Compile_Erro
             span = form.span,
             doc_lines = doc_lines,
             var_decl = var_decl,
-        }, {}, true
-    case "struct":
-        if len(form.items) != 3 || form.items[1].kind != .Symbol {
-            return decl, Compile_Error{message = "struct expects a name and brace form", span = form.span}, false
-        }
-        fields, err_fields, ok_fields := parse_struct_fields(form.items[2])
-        if !ok_fields {
-            return decl, err_fields, false
-        }
-        return AST_Decl{
-            kind = .Struct,
-            span = form.span,
-            doc_lines = top_form.doc_lines,
-            struct_decl = Struct_Decl{
-                name   = map_name(form.items[1].text),
-                fields = fields,
-            },
         }, {}, true
     case "defstruct", "defstruct-", "defstate":
         if len(form.items) != 3 && len(form.items) != 4 && len(form.items) != 5 {
@@ -939,7 +1005,7 @@ parse_decl :: proc(top_form: CST_Top_Form) -> (decl: AST_Decl, err: Compile_Erro
             }
         }
         return AST_Decl{kind = .Ignored, span = form.span}, {}, true
-    case "proc", "defn", "defn-":
+    case "defn", "defn-":
         doc_lines := top_form.doc_lines
         proc_form := form
         doc_index := 2

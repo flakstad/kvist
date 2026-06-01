@@ -24,8 +24,12 @@ block so `C-c C-e` and `C-c C-c` are practical.
 - `testing.kvist`: shipped `kvist:test` macros including `t/deftest`, `t/is`, nested `t/testing`, `t/are`, and `t/use-fixtures` with `:each` / `:once`.
 - `hiccup-interpolation.kvist`: Hiccup attrs and child nodes with direct Kvist expression interpolation, including `if`, `when`, `nil` omission, and `[:<> ...]` fragments.
 - `closures.kvist`: non-capturing `fn` literals plus captured callbacks for selected non-escaping helper sites such as `map`, `filter`, `remove`, `keep`, and their bang variants.
-- `http-server.kvist`: shipped `kvist:http` package over vendored `odin-http`, with a thin server-side router and response surface.
+- `http-server.kvist`: shipped `kvist:http` package over vendored `odin-http`, using the explicit stateful router/server lifecycle and thin response helpers.
+- `http-client.kvist`: shipped `kvist:http/client` package over vendored `odin-http`, with a thin request/response client surface.
 - `hello.kvist`: package, import, struct literal, and a tiny `main`.
+- `function-calls.kvist`: positional calls, named calls, and trailing default arguments.
+- `call-conventions.kvist`: API-shaped examples using positional prefixes plus named/default tails.
+- `destructuring.kvist`: struct-backed `{:keys [...]}` destructuring in `let`, params, proc literals, pointer params, and named/default-call interop.
 - `declarations.kvist`: doc comments, import aliases, constants, enums, structs.
 - `defstructs.kvist`: `defstruct` docstrings, typed fields, nested structs.
 - `control-flow.kvist`: `cond`, `switch`, loops, `when-let`, and `if-let`.

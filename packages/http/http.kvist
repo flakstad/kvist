@@ -1,13 +1,80 @@
 (package http)
 (import h "kvist_vendor:http")
 (import net "core:net")
+ (import time "core:time")
+
+(defn new-router [] -> h.Router
+  (let [router (h.Router {})]
+    (h.router_init (addr router))
+    router))
+
+(defmacro router-destroy! [router]
+  (quasiquote
+    (h.router_destroy (addr (unquote router)))))
+
+(defn new-server [] -> h.Server
+  (h.Server {}))
+
+(defmacro server-shutdown-on-interrupt! [server]
+  (quasiquote
+    (h.server_shutdown_on_interrupt (addr (unquote server)))))
+
+(defmacro shutdown! [server]
+  (quasiquote
+    (h.server_shutdown (addr (unquote server)))))
+
+(defmacro listen! [server port]
+  (quasiquote
+    (h.listen
+      (addr (unquote server))
+      (net.Endpoint {:address net.IP4_Loopback :port (unquote port)}))))
+
+(defmacro handler [binding & body]
+  (let [req (first binding)
+        res (nth binding 1)
+        req-param (symbol (str (name req) ":"))
+        res-param (symbol (str (name res) ":"))]
+    (quasiquote
+      (h.handler
+        (proc [(unquote req-param) ^h.Request (unquote res-param) ^h.Response]
+          (do
+            (splice body)))))))
+
+(defmacro router-handler [router]
+  (quasiquote
+    (h.router_handler (addr (unquote router)))))
+
+(defmacro serve! [server router]
+  (quasiquote
+    (h.serve
+      (addr (unquote server))
+      (router-handler (unquote router)))))
+
+(defmacro serve-handler! [server handler]
+  (quasiquote
+    (h.serve
+      (addr (unquote server))
+      (unquote handler))))
+
+(defmacro listen-and-serve! [server router port]
+  (quasiquote
+    (h.listen_and_serve
+      (addr (unquote server))
+      (router-handler (unquote router))
+      (net.Endpoint {:address net.IP4_Loopback :port (unquote port)}))))
+
+(defmacro listen-and-serve-handler! [server handler port]
+  (quasiquote
+    (h.listen_and_serve
+      (addr (unquote server))
+      (unquote handler)
+      (net.Endpoint {:address net.IP4_Loopback :port (unquote port)}))))
 
 (defmacro with-router [binding & body]
   (let [router (first binding)]
     (quasiquote
-      (let [(unquote router) (h.Router {})]
-        (h.router_init (addr (unquote router)))
-        (defer (h.router_destroy (addr (unquote router))))
+      (let [(unquote router) (new-router)]
+        (defer (router-destroy! (unquote router)))
         (do
           (splice body))))))
 
@@ -20,44 +87,94 @@
       ((unquote adder)
        (addr (unquote router))
        (unquote pattern)
-       (h.handler
-         (proc [(unquote req-param) ^h.Request (unquote res-param) ^h.Response]
-           (do
-             (splice body))))))))
+       (handler [(unquote req) (unquote res)]
+         (splice body))))))
 
-(defmacro get [router pattern binding & body]
+(defmacro get! [router pattern binding & body]
   (quasiquote
     (route h.route_get (unquote router) (unquote pattern) (unquote binding)
       (splice body))))
 
-(defmacro post [router pattern binding & body]
+(defmacro get [router pattern binding & body]
+  (quasiquote
+    (get! (unquote router) (unquote pattern) (unquote binding)
+      (splice body))))
+
+(defmacro post! [router pattern binding & body]
   (quasiquote
     (route h.route_post (unquote router) (unquote pattern) (unquote binding)
       (splice body))))
 
-(defmacro put [router pattern binding & body]
+(defmacro post [router pattern binding & body]
+  (quasiquote
+    (post! (unquote router) (unquote pattern) (unquote binding)
+      (splice body))))
+
+(defmacro put! [router pattern binding & body]
   (quasiquote
     (route h.route_put (unquote router) (unquote pattern) (unquote binding)
       (splice body))))
 
-(defmacro delete [router pattern binding & body]
+(defmacro put [router pattern binding & body]
+  (quasiquote
+    (put! (unquote router) (unquote pattern) (unquote binding)
+      (splice body))))
+
+(defmacro patch! [router pattern binding & body]
+  (quasiquote
+    (route h.route_patch (unquote router) (unquote pattern) (unquote binding)
+      (splice body))))
+
+(defmacro patch [router pattern binding & body]
+  (quasiquote
+    (patch! (unquote router) (unquote pattern) (unquote binding)
+      (splice body))))
+
+(defmacro head! [router pattern binding & body]
+  (quasiquote
+    (route h.route_head (unquote router) (unquote pattern) (unquote binding)
+      (splice body))))
+
+(defmacro head [router pattern binding & body]
+  (quasiquote
+    (head! (unquote router) (unquote pattern) (unquote binding)
+      (splice body))))
+
+(defmacro options! [router pattern binding & body]
+  (quasiquote
+    (route h.route_options (unquote router) (unquote pattern) (unquote binding)
+      (splice body))))
+
+(defmacro options [router pattern binding & body]
+  (quasiquote
+    (options! (unquote router) (unquote pattern) (unquote binding)
+      (splice body))))
+
+(defmacro delete! [router pattern binding & body]
   (quasiquote
     (route h.route_delete (unquote router) (unquote pattern) (unquote binding)
       (splice body))))
 
-(defmacro all [router pattern binding & body]
+(defmacro delete [router pattern binding & body]
+  (quasiquote
+    (delete! (unquote router) (unquote pattern) (unquote binding)
+      (splice body))))
+
+(defmacro all! [router pattern binding & body]
   (quasiquote
     (route h.route_all (unquote router) (unquote pattern) (unquote binding)
       (splice body))))
 
+(defmacro all [router pattern binding & body]
+  (quasiquote
+    (all! (unquote router) (unquote pattern) (unquote binding)
+      (splice body))))
+
 (defmacro listen [port router]
   (quasiquote
-      (let [server (h.Server {})]
-      (h.server_shutdown_on_interrupt (addr server))
-      (h.listen_and_serve
-        (addr server)
-        (h.router_handler (addr (unquote router)))
-        (net.Endpoint {:address net.IP4_Loopback :port (unquote port)})))))
+      (let [server (new-server)]
+      (server-shutdown-on-interrupt! server)
+      (listen-and-serve! server (unquote router) (unquote port)))))
 
 (defmacro respond [res status]
   (quasiquote
@@ -94,3 +211,34 @@
 (defmacro respond-dir [res base target request]
   (quasiquote
     (h.respond_dir (unquote res) (unquote base) (unquote target) (unquote request))))
+
+(defmacro request-cookie [req key]
+  (quasiquote
+    (h.request_cookie_get (unquote req) (unquote key))))
+
+(defmacro request-cookies [req]
+  (quasiquote
+    (h.request_cookies (unquote req))))
+
+(defmacro set-cookie! [res name value]
+  (quasiquote
+    (append
+      (addr (:cookies (deref (unquote res))))
+      (h.Cookie {:name (unquote name) :value (unquote value)}))))
+
+(defn new-rate-limit-opts [window: time.Duration max: int] -> h.Rate_Limit_Opts
+  (h.Rate_Limit_Opts {:window window :max max}))
+
+(defn new-rate-limit-data [] -> h.Rate_Limit_Data
+  (h.Rate_Limit_Data {}))
+
+(defmacro rate-limit-destroy! [data]
+  (quasiquote
+    (h.rate_limit_destroy (addr (unquote data)))))
+
+(defmacro rate-limit [data next opts]
+  (quasiquote
+    (h.rate_limit
+      (addr (unquote data))
+      (addr (unquote next))
+      (addr (unquote opts)))))

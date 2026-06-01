@@ -11,17 +11,21 @@
 })
 
 (defn main []
-  (http/with-router [router]
-    (http/get router "/ping" [req res]
+  (let [router (http/new-router)
+        server (http/new-server)]
+    (defer (http/router-destroy! router))
+
+    (http/get! router "/ping" [req res]
       (http/respond-plain res "pong"))
 
-    (http/get router "/hello/(%w+)" [req res]
+    (http/get! router "/hello/(%w+)" [req res]
       (let [params (:url_params (deref req))]
         (http/respond-json
           res
           (Greeting {:message (fmt.tprintf "hello %s" (get params 0))}))))
 
-    (http/listen 6969 router)))
+    (http/server-shutdown-on-interrupt! server)
+    (http/listen-and-serve! server router 6969)))
 
 (comment
   ;; Run this deliberately:

@@ -232,7 +232,7 @@ append_import_form_unique :: proc(forms: ^[dynamic]CST_Top_Form, seen: ^[dynamic
 
 is_builtin_kvist_import_path :: proc(path: string) -> bool {
     switch path {
-    case "kvist:arr", "kvist:str", "kvist:map", "kvist:set", "kvist:struct", "kvist:io", "kvist:json", "kvist:http":
+    case "kvist:arr", "kvist:str", "kvist:map", "kvist:set", "kvist:struct", "kvist:io", "kvist:json", "kvist:http", "kvist:http/client":
         return true
     case:
         return false
@@ -271,7 +271,7 @@ is_source_import_path :: proc(path: string) -> bool {
 
 is_builtin_kvist_package_path :: proc(path: string) -> bool {
     switch path {
-    case "kvist:arr", "kvist:str", "kvist:map", "kvist:set", "kvist:struct", "kvist:io", "kvist:json", "kvist:http":
+    case "kvist:arr", "kvist:str", "kvist:map", "kvist:set", "kvist:struct", "kvist:io", "kvist:json", "kvist:http", "kvist:http/client":
         return true
     }
     return false

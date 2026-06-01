@@ -1,0 +1,49 @@
+(package client)
+(import h "kvist_vendor:http")
+(import hc "kvist_vendor:http/client")
+
+(defn new-request [method: h.Method] -> hc.Request
+  (let [req (hc.Request {})]
+    (hc.request_init (addr req) method)
+    req))
+
+(defmacro request [req target]
+  (quasiquote
+    (hc.request (addr (unquote req)) (unquote target))))
+
+(defmacro get [target]
+  (quasiquote
+    (hc.get (unquote target))))
+
+(defmacro with-json [req value]
+  (quasiquote
+    (hc.with_json (addr (unquote req)) (unquote value))))
+
+(defmacro request-destroy [req]
+  (quasiquote
+    (hc.request_destroy (addr (unquote req)))))
+
+(defmacro set-header! [req key value]
+  (quasiquote
+    (h.headers_set_unsafe (addr (:headers (unquote req))) (unquote key) (unquote value))))
+
+(defmacro add-cookie! [req name value]
+  (quasiquote
+    (append
+      (addr (:cookies (unquote req)))
+      (h.Cookie {:name (unquote name) :value (unquote value)}))))
+
+(defmacro response-body [res & rest]
+  (if (= (count rest) 0)
+    (quasiquote
+      (hc.response_body (addr (unquote res))))
+    (quasiquote
+      (hc.response_body (addr (unquote res)) (unquote (arr/first rest))))))
+
+(defmacro response-destroy [res]
+  (quasiquote
+    (hc.response_destroy (addr (unquote res)))))
+
+(defmacro body-destroy [body allocation]
+  (quasiquote
+    (hc.body_destroy (unquote body) (unquote allocation))))

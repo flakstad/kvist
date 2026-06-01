@@ -61,10 +61,10 @@ main :: proc() {
 }
 
 @(test)
-compile_top_level_proc_decl_head :: proc(t: ^testing.T) {
+compile_top_level_defn_decl_head :: proc(t: ^testing.T) {
     source := `(package main)
 
-(proc main []
+(defn main []
   (println "hello"))`
 
     output, err, ok := kvist.compile_source(source)
@@ -365,6 +365,49 @@ symbols_source_indexes_defunion_and_defenum :: proc(t: ^testing.T) {
 }
 
 @(test)
+symbols_source_includes_proc_default_values_in_signatures :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn greet [name: string, punctuation: string = "!", count: int = (+ 1 2)] -> string
+  name)`
+
+    output, err, ok := kvist.symbols_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "proc\tgreet\t3\t7\t\t(greet [name: string, punctuation: string = \"!\", count: int = (+ 1 2)] -> string)\t\n"), true)
+}
+
+@(test)
+symbols_source_includes_destructured_param_signatures :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(import "core:fmt")
+
+(defstruct Point {
+  :x int
+  :y int
+})
+
+(defn draw [{:keys [x y] :as point}: Point] -> int
+  (+ x y))`
+
+    output, err, ok := kvist.symbols_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "(draw [{:keys [x y] :as point}: Point] -> int)"), true)
+}
+
+@(test)
 builtin_symbols_source_emits_signatures_and_docs :: proc(t: ^testing.T) {
     output := kvist.builtin_symbols_source()
     defer delete(output)
@@ -471,6 +514,47 @@ editor_symbols_source_includes_language_forms_and_helpers :: proc(t: ^testing.T)
     testing.expect_value(t, strings.contains(output, "kvist form\tlet\t"), true)
     testing.expect_value(t, strings.contains(output, "kvist form\tif\t"), true)
     testing.expect_value(t, strings.contains(output, "kvist package\tarr/map\t"), true)
+}
+
+@(test)
+editor_symbols_source_includes_proc_default_values_in_signatures :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn greet [name: string, punctuation: string = "!", count: int = (+ 1 2)] -> string
+  name)`
+
+    output, err, ok := kvist.editor_symbols_source("/tmp/editor-default-signature-test.kvist", source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "proc\tgreet\t3\t7\t\t(greet [name: string, punctuation: string = \"!\", count: int = (+ 1 2)] -> string)\t\t/tmp/editor-default-signature-test.kvist\n"), true)
+}
+
+@(test)
+editor_symbols_source_includes_destructured_param_signatures :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct Point {
+  :x int
+  :y int
+})
+
+(defn draw [{:keys [x y] :as point}: Point] -> int
+  (+ x y))`
+
+    output, err, ok := kvist.editor_symbols_source("/tmp/editor-destructure-signature-test.kvist", source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "(draw [{:keys [x y] :as point}: Point] -> int)"), true)
 }
 
 @(test)
@@ -1089,14 +1173,14 @@ main :: proc() {
 }
 
 @(test)
-compile_eval_source_can_load_main_proc_declaration_form :: proc(t: ^testing.T) {
+compile_eval_source_can_load_main_defn_declaration_form :: proc(t: ^testing.T) {
     source := `(package main)
 (import "core:fmt")
 
 (defn main []
   (fmt.println "hello"))`
 
-    output, err, ok := kvist.compile_eval_source(source, `(proc main []
+    output, err, ok := kvist.compile_eval_source(source, `(defn main []
   (fmt.println "hello"))`)
     testing.expect_value(t, ok, true)
     if !ok {
@@ -1170,7 +1254,7 @@ compile_eval_source_map_marks_eval_runner :: proc(t: ^testing.T) {
 @(test)
 reader_supports_hash_underscore_and_comment_form :: proc(t: ^testing.T) {
     source := `(package main)
-#_(struct Ignored {
+#_(defstruct Ignored {
   :field string
 })
 (comment
@@ -1279,7 +1363,7 @@ reader_classifies_core_literals :: proc(t: ^testing.T) {
     context.allocator = context.temp_allocator
     defer context.allocator = old_allocator
 
-    source := `(const answer 42)
+    source := `(defconst answer 42)
 (defconst negative -1)
 (defconst ok true)
 (defconst none nil)`
@@ -2383,12 +2467,136 @@ compile_http_server_surface_is_explicit :: proc(t: ^testing.T) {
     defer delete(output)
 
     testing.expect_value(t, strings.contains(output, "vendor/odin-http"), true)
+    testing.expect_value(t, strings.contains(output, "http__new_router :: proc() -> h.Router"), true)
+    testing.expect_value(t, strings.contains(output, "http__new_server :: proc() -> h.Server"), true)
+    testing.expect_value(t, strings.contains(output, "router := http__new_router()"), true)
+    testing.expect_value(t, strings.contains(output, "server := http__new_server()"), true)
+    testing.expect_value(t, strings.contains(output, "defer h.router_destroy(&router)"), true)
     testing.expect_value(t, strings.contains(output, "h.router_init(&router)"), true)
     testing.expect_value(t, strings.contains(output, "h.route_get("), true)
     testing.expect_value(t, strings.contains(output, "\"/ping\""), true)
     testing.expect_value(t, strings.contains(output, "h.respond_plain(res, \"pong\")"), true)
     testing.expect_value(t, strings.contains(output, "h.respond_json(res, Greeting{message = fmt.tprintf(\"hello %s\", params[0])})"), true)
+    testing.expect_value(t, strings.contains(output, "h.server_shutdown_on_interrupt(&server)"), true)
     testing.expect_value(t, strings.contains(output, "h.listen_and_serve(&server, h.router_handler(&router), net.Endpoint{address = net.IP4_Loopback, port = 6969})"), true)
+}
+
+@(test)
+compile_http_client_surface_is_explicit :: proc(t: ^testing.T) {
+    output, err, ok := kvist.compile_path("examples/http-client.kvist")
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "vendor/odin-http/client"), true)
+    testing.expect_value(t, strings.contains(output, "httpc__new_request :: proc(method: h.Method) -> hc.Request"), true)
+    testing.expect_value(t, strings.contains(output, "res, err := hc.get(\"http://127.0.0.1:6969/ping\")"), true)
+    testing.expect_value(t, strings.contains(output, "defer hc.response_destroy(&res)"), true)
+    testing.expect_value(t, strings.contains(output, "req := httpc__new_request(.Post)"), true)
+    testing.expect_value(t, strings.contains(output, "defer hc.request_destroy(&req)"), true)
+    testing.expect_value(t, strings.contains(output, "h.headers_set_unsafe(&(req.headers), \"x-api-key\", \"demo\")"), true)
+    testing.expect_value(t, strings.contains(output, "append(&(req.cookies), h.Cookie{name = \"session\", value = \"abc123\"})"), true)
+    testing.expect_value(t, strings.contains(output, "json_err := hc.with_json(&req, Greeting{message = \"hello\"})"), true)
+    testing.expect_value(t, strings.contains(output, "res, err := hc.request(&req, \"http://127.0.0.1:6969/hello\")"), true)
+}
+
+@(test)
+compile_http_handler_surface_is_explicit :: proc(t: ^testing.T) {
+    path, ok_path := repo_temp_test_path(".tmp-http-handler-test.kvist")
+    testing.expect_value(t, ok_path, true)
+    if !ok_path {
+        return
+    }
+    defer delete(path)
+    defer os.remove(path)
+
+    source := `(package main)
+(import http "kvist:http")
+
+(defn main []
+  (let [router (http/new-router)
+        server (http/new-server)]
+    (defer (http/router-destroy! router))
+    (http/get! router "/ping" [req res]
+      (http/respond-plain res "pong"))
+    (let [app (http/router-handler router)]
+      (http/server-shutdown-on-interrupt! server)
+      (http/listen! server 6969)
+      (http/serve-handler! server app))))`
+
+    write_err := os.write_entire_file_from_string(path, source)
+    testing.expect_value(t, write_err == nil, true)
+    if write_err != nil {
+        return
+    }
+
+    output, err, ok := kvist.compile_path(path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "app := h.router_handler(&router)"), true)
+    testing.expect_value(t, strings.contains(output, "h.listen(&server, net.Endpoint{address = net.IP4_Loopback, port = 6969})"), true)
+    testing.expect_value(t, strings.contains(output, "h.serve(&server, app)"), true)
+}
+
+@(test)
+compile_http_rate_limit_surface_is_explicit :: proc(t: ^testing.T) {
+    path, ok_path := repo_temp_test_path(".tmp-http-rate-limit-test.kvist")
+    testing.expect_value(t, ok_path, true)
+    if !ok_path {
+        return
+    }
+    defer delete(path)
+    defer os.remove(path)
+
+    source := `(package main)
+(import http "kvist:http")
+(import time "core:time")
+
+(defn main []
+  (let [router (http/new-router)
+        server (http/new-server)
+        opts (http/new-rate-limit-opts (* 60 time.Second) 100)
+        data (http/new-rate-limit-data)]
+    (defer (http/router-destroy! router))
+    (defer (http/rate-limit-destroy! data))
+    (http/get! router "/ping" [req res]
+      (http/respond-plain res "pong"))
+    (let [base (http/router-handler router)
+          app (http/rate-limit data base opts)]
+      (http/server-shutdown-on-interrupt! server)
+      (http/listen! server 6969)
+      (http/serve-handler! server app))))`
+
+    write_err := os.write_entire_file_from_string(path, source)
+    testing.expect_value(t, write_err == nil, true)
+    if write_err != nil {
+        return
+    }
+
+    output, err, ok := kvist.compile_path(path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "http__new_rate_limit_opts :: proc(window: time.Duration, max: int) -> h.Rate_Limit_Opts"), true)
+    testing.expect_value(t, strings.contains(output, "http__new_rate_limit_data :: proc() -> h.Rate_Limit_Data"), true)
+    testing.expect_value(t, strings.contains(output, "opts := http__new_rate_limit_opts((60) * (time.Second), 100)"), true)
+    testing.expect_value(t, strings.contains(output, "data := http__new_rate_limit_data()"), true)
+    testing.expect_value(t, strings.contains(output, "defer h.rate_limit_destroy(&data)"), true)
+    testing.expect_value(t, strings.contains(output, "base := h.router_handler(&router)"), true)
+    testing.expect_value(t, strings.contains(output, "app := h.rate_limit(&data, &base, &opts)"), true)
+    testing.expect_value(t, strings.contains(output, "h.serve(&server, app)"), true)
 }
 
 @(test)
@@ -2488,6 +2696,46 @@ compile_struct_field_destructuring :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
+expected := `package main
+
+User :: struct {
+    name: string,
+    age: int,
+}
+
+main :: proc() {
+    user := User{name = "Ada", age = 36}
+    user_name := user.name
+    user_age := user.age
+    age := user.age
+    return
+}
+`
+    testing.expect_value(t, output, expected)
+}
+
+@(test)
+compile_struct_keys_destructuring :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct User {
+  :name string
+  :age int
+})
+
+(defn main []
+  (let [user (User {:name "Ada" :age 36})
+        {:keys [name age]} user]
+    (return)))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
     expected := `package main
 
 User :: struct {
@@ -2497,15 +2745,261 @@ User :: struct {
 
 main :: proc() {
     user := User{name = "Ada", age = 36}
-    kvist_destructure_1 := user
-    user_name := kvist_destructure_1.name
-    user_age := kvist_destructure_1.age
-    kvist_destructure_2 := user
-    age := kvist_destructure_2.age
+    name := user.name
+    age := user.age
     return
 }
 `
     testing.expect_value(t, output, expected)
+}
+
+@(test)
+compile_struct_keys_destructuring_uses_temp_for_expressions :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct User {
+  :name string
+  :age int
+})
+
+(defn make-user [] -> User
+  (User {:name "Ada" :age 36}))
+
+(defn main []
+  (let [{:keys [name age]} (make-user)]
+    (return)))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "kvist_destructure_1 := make_user()"), true)
+    testing.expect_value(t, strings.contains(output, "name := kvist_destructure_1.name"), true)
+    testing.expect_value(t, strings.contains(output, "age := kvist_destructure_1.age"), true)
+}
+
+@(test)
+compile_struct_keys_destructuring_rejects_unknown_fields :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct User {
+  :name string
+  :age int
+})
+
+(defn main []
+  (let [user (User {:name "Ada" :age 36})
+        {:keys [name missing]} user]
+    (return)))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+    defer delete(err.message)
+    testing.expect_value(t, strings.contains(err.message, "unknown field :missing in destructuring for User"), true)
+}
+
+@(test)
+compile_struct_keys_destructuring_rejects_duplicate_fields :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct User {
+  :name string
+  :age int
+})
+
+(defn main []
+  (let [user (User {:name "Ada" :age 36})
+        {:keys [name name]} user]
+    (return)))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+    defer delete(err.message)
+    testing.expect_value(t, strings.contains(err.message, "duplicate field :name in destructuring"), true)
+}
+
+@(test)
+compile_proc_params_support_struct_keys_destructuring :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct Point {
+  :x int
+  :y int
+})
+
+(defn draw [{:keys [x y] :as point}: Point] -> int
+  (+ x y (:x point)))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "draw :: proc(point: Point) -> int {"), true)
+    testing.expect_value(t, strings.contains(output, "x := point.x"), true)
+    testing.expect_value(t, strings.contains(output, "y := point.y"), true)
+    testing.expect_value(t, strings.contains(output, "return (x) + (y) + (point.x)"), true)
+}
+
+@(test)
+compile_proc_literal_params_support_struct_keys_destructuring :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct Point {
+  :x int
+  :y int
+})
+
+(defn make-drawer [] -> proc [point: Point] -> int
+  (proc [{:keys [x y] :as point}: Point] -> int
+    (+ x y (:x point))))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "return proc(point: Point) -> int {"), true)
+    testing.expect_value(t, strings.contains(output, "x := point.x"), true)
+    testing.expect_value(t, strings.contains(output, "y := point.y"), true)
+}
+
+@(test)
+compile_proc_params_destructuring_rejects_unknown_fields :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct Point {
+  :x int
+  :y int
+})
+
+(defn draw [{:keys [x z] :as point}: Point] -> int
+  (+ x z))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+    defer delete(err.message)
+    testing.expect_value(t, strings.contains(err.message, "unknown field :z in parameter destructuring for Point"), true)
+}
+
+@(test)
+compile_proc_params_destructuring_supports_pointer_structs :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct Point {
+  :x int
+  :y int
+})
+
+(defn draw [{:keys [x y] :as point}: ^Point] -> int
+  (+ x y (:x (^ point))))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "draw :: proc(point: ^Point) -> int {"), true)
+    testing.expect_value(t, strings.contains(output, "x := point^.x"), true)
+    testing.expect_value(t, strings.contains(output, "y := point^.y"), true)
+}
+
+@(test)
+compile_proc_params_destructuring_supports_defaults_and_named_calls :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct Point {
+  :x int
+  :y int
+})
+
+(defn render [{:keys [x y] :as point}: Point, prefix: string = "P"] -> string
+  (fmt.tprintf "%s:%d,%d/%d" prefix x y (:x point)))
+
+(defn main []
+  (let [first (render (Point {:x 2 :y 3}))
+        second (render (Point {:x 4 :y 5}) {:prefix "Q"})
+        third (render {:point (Point {:x 6 :y 7}) :prefix "R"})]
+    (println first second third)))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "render :: proc(point: Point, prefix: string) -> string {"), true)
+    testing.expect_value(t, strings.contains(output, "x := point.x"), true)
+    testing.expect_value(t, strings.contains(output, "y := point.y"), true)
+    testing.expect_value(t, strings.contains(output, "first := render(Point{x = 2, y = 3}, \"P\")"), true)
+    testing.expect_value(t, strings.contains(output, "second := render(Point{x = 4, y = 5}, prefix = \"Q\")"), true)
+    testing.expect_value(t, strings.contains(output, "third := render(point = Point{x = 6, y = 7}, prefix = \"R\")"), true)
+}
+
+@(test)
+compile_proc_params_destructuring_rejects_duplicate_fields :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct Point {
+  :x int
+  :y int
+})
+
+(defn draw [{:keys [x x] :as point}: Point] -> int
+  (+ x 1))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+    defer delete(err.message)
+    testing.expect_value(t, strings.contains(err.message, "duplicate field :x in parameter destructuring"), true)
+}
+
+@(test)
+compile_proc_params_destructuring_requires_as_in_first_cut :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct Point {
+  :x int
+  :y int
+})
+
+(defn draw [{:keys [x y]}: Point] -> int
+  (+ x y))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+    defer delete(err.message)
+    testing.expect_value(t, strings.contains(err.message, "destructured parameter currently requires :as"), true)
 }
 
 @(test)
@@ -4751,10 +5245,10 @@ warn_discarded_owned_sequence_result :: proc(t: ^testing.T) {
 reject_legacy_unqualified_sequence_helpers :: proc(t: ^testing.T) {
     source := `(package main)
 
-(proc inc [x: int] -> int
+(defn inc [x: int] -> int
   (+ x 1))
 
-(proc main []
+(defn main []
   (let [xs (new []int [1 2 3])
         ys (map inc xs)
         first-y (->> xs
@@ -4770,10 +5264,10 @@ reject_legacy_unqualified_sequence_helpers :: proc(t: ^testing.T) {
 
     source = `(package main)
 
-(proc even? [x: int] -> bool
+(defn even? [x: int] -> bool
   (== (% x 2) 0))
 
-(proc main [xs: []int]
+(defn main [xs: []int]
   (arr/filter even? xs)
   (filter even? xs)
   (return))`
@@ -4785,7 +5279,7 @@ reject_legacy_unqualified_sequence_helpers :: proc(t: ^testing.T) {
 
     source = `(package main)
 
-(proc main []
+(defn main []
   (let [xs (range 5)]
     (defer (delete xs))
     (return)))`
@@ -4797,7 +5291,7 @@ reject_legacy_unqualified_sequence_helpers :: proc(t: ^testing.T) {
 
     source = `(package main)
 
-(proc main [xs: []int]
+(defn main [xs: []int]
   (first xs))`
 
     _, err, ok = kvist.compile_source(source)
@@ -4807,7 +5301,7 @@ reject_legacy_unqualified_sequence_helpers :: proc(t: ^testing.T) {
 
     source = `(package main)
 
-(proc main [xs: []int]
+(defn main [xs: []int]
   (rest xs))`
 
     _, err, ok = kvist.compile_source(source)
@@ -4817,7 +5311,7 @@ reject_legacy_unqualified_sequence_helpers :: proc(t: ^testing.T) {
 
     source = `(package main)
 
-(proc main [keys: []string, vals: []int]
+(defn main [keys: []string, vals: []int]
   (zipmap keys vals))`
 
     _, err, ok = kvist.compile_source(source)
@@ -4827,7 +5321,7 @@ reject_legacy_unqualified_sequence_helpers :: proc(t: ^testing.T) {
 
     source = `(package main)
 
-(proc main [lhs: map[string]int, rhs: map[string]int]
+(defn main [lhs: map[string]int, rhs: map[string]int]
   (merge lhs rhs))`
 
     _, err, ok = kvist.compile_source(source)
@@ -4837,7 +5331,7 @@ reject_legacy_unqualified_sequence_helpers :: proc(t: ^testing.T) {
 
     source = `(package main)
 
-(proc main [target: map[string]int, source: map[string]int]
+(defn main [target: map[string]int, source: map[string]int]
   (merge! target source)
   (return))`
 
@@ -4848,7 +5342,7 @@ reject_legacy_unqualified_sequence_helpers :: proc(t: ^testing.T) {
 
     source = `(package main)
 
-(proc main [xs: []int]
+(defn main [xs: []int]
   (into! xs xs)
   (return))`
 
@@ -4885,10 +5379,10 @@ reject_legacy_unqualified_sequence_helpers :: proc(t: ^testing.T) {
 report_namespaced_sequence_helper_errors_with_surface_name :: proc(t: ^testing.T) {
     source := `(package main)
 
-(proc inc [x: int] -> int
+(defn inc [x: int] -> int
   (+ x 1))
 
-(proc main [xs: []int]
+(defn main [xs: []int]
   (let [mapped (arr/map inc)]
     (return mapped)))`
 
@@ -4902,7 +5396,7 @@ report_namespaced_sequence_helper_errors_with_surface_name :: proc(t: ^testing.T
 report_namespaced_thread_helper_errors_with_surface_name :: proc(t: ^testing.T) {
     source := `(package main)
 
-(proc main [xs: []int]
+(defn main [xs: []int]
   (->> xs
        (map/zip))
   (return))`
@@ -5722,6 +6216,249 @@ compile_inline_map_literal_rejects_mixed_values :: proc(t: ^testing.T) {
 }
 
 @(test)
+compile_function_calls_support_positional_and_named_args :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn foo [a: int, b: int, c: int] -> int
+  (+ a b c))
+
+(defn main [] -> int
+  (let [first (foo 1 2 3)
+        second (foo {:a 4 :b 5 :c 6})]
+    (+ first second)))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "first := foo(1, 2, 3)"), true)
+    testing.expect_value(t, strings.contains(output, "second := foo(a = 4, b = 5, c = 6)"), true)
+}
+
+@(test)
+reject_duplicate_named_call_arguments :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn foo [a: int] -> int
+  a)
+
+(defn main [] -> int
+  (foo {:a 1 :a 2}))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+    defer delete(err.message)
+    testing.expect_value(t, strings.contains(err.message, "duplicate named argument :a"), true)
+}
+
+@(test)
+compile_function_calls_fill_trailing_default_args_positionally :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn greet [name: string, punctuation: string = "!"] -> string
+  (+ name punctuation))
+
+(defn main [] -> string
+  (greet "Ada"))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "greet :: proc(name, punctuation: string) -> string"), true)
+    testing.expect_value(t, strings.contains(output, "return greet(\"Ada\", \"!\")"), true)
+}
+
+@(test)
+compile_named_function_calls_fill_missing_default_args :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn greet [name: string, punctuation: string = "!"] -> string
+  (+ name punctuation))
+
+(defn main [] -> string
+  (greet {:name "Ada"}))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "return greet(name = \"Ada\", punctuation = \"!\")"), true)
+}
+
+@(test)
+reject_missing_required_named_argument_without_default :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn greet [name: string, punctuation: string = "!"] -> string
+  (+ name punctuation))
+
+(defn main [] -> string
+  (greet {:punctuation "?"}))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+    defer delete(err.message)
+    testing.expect_value(t, strings.contains(err.message, "missing required named arguments: :name"), true)
+    testing.expect_value(t, strings.contains(err.message, "valid named args: :name, :punctuation"), true)
+}
+
+@(test)
+reject_unknown_named_argument :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn greet [name: string, punctuation: string = "!"] -> string
+  (+ name punctuation))
+
+(defn main [] -> string
+  (greet {:name "Ada" :tone "warm"}))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+    defer delete(err.message)
+    testing.expect_value(t, strings.contains(err.message, "unknown named argument :tone"), true)
+    testing.expect_value(t, strings.contains(err.message, "valid named args: :name, :punctuation"), true)
+}
+
+@(test)
+reject_unknown_named_argument_with_typo_suggestion :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn greet [name: string, punctuation: string = "!"] -> string
+  (+ name punctuation))
+
+(defn main [] -> string
+  (greet {:name "Ada" :punctuaton "?"}))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+    defer delete(err.message)
+    testing.expect_value(t, strings.contains(err.message, "unknown named argument :punctuaton"), true)
+    testing.expect_value(t, strings.contains(err.message, "did you mean :punctuation?"), true)
+}
+
+@(test)
+reject_required_parameter_after_default_parameter :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn greet [name: string = "Ada", punctuation: string] -> string
+  (+ name punctuation))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+    defer delete(err.message)
+    testing.expect_value(t, strings.contains(err.message, "parameters with defaults must trail required parameters"), true)
+}
+
+@(test)
+compile_function_calls_support_mixed_positional_and_named_args :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn place [name: string, x: int, y: int, label: string = "ok"] -> string
+  label)
+
+(defn main [] -> string
+  (place "enemy" {:x 10 :y 20}))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "return place(\"enemy\", x = 10, y = 20, label = \"ok\")"), true)
+}
+
+@(test)
+compile_mixed_calls_fill_named_and_default_tail_args :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn draw [target: int, x: int, y: int, color: int = 7, scale: int = 1] -> int
+  color)
+
+(defn main [] -> int
+  (draw 99 {:y 20 :x 10 :scale 3}))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "return draw(99, x = 10, y = 20, color = 7, scale = 3)"), true)
+}
+
+@(test)
+reject_mixed_call_named_argument_overlapping_positional_argument :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn place [name: string, x: int, y: int] -> int
+  x)
+
+(defn main [] -> int
+  (place "enemy" {:name "boss" :x 10 :y 20}))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+    defer delete(err.message)
+    testing.expect_value(t, strings.contains(err.message, "named argument :name overlaps positional argument 1"), true)
+}
+
+@(test)
+reject_mixed_call_missing_required_named_tail_argument :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn place [name: string, x: int, y: int, label: string = "ok"] -> string
+  label)
+
+(defn main [] -> string
+  (place "enemy" {:x 10}))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+    defer delete(err.message)
+    testing.expect_value(t, strings.contains(err.message, "missing required arguments after positional prefix: :y"), true)
+    testing.expect_value(t, strings.contains(err.message, "valid named args: :name, :x, :y, :label"), true)
+}
+
+@(test)
 compile_unparenthesized_proc_type_spelling :: proc(t: ^testing.T) {
     source := `(package main)
 
@@ -6052,7 +6789,7 @@ format_compile_errors_with_line_column_and_context :: proc(t: ^testing.T) {
 
 @(test)
 lower_rejects_missing_package :: proc(t: ^testing.T) {
-    source := `(proc main []
+    source := `(defn main []
   (return))`
 
     _, err, ok := kvist.compile_source(source)
@@ -6065,7 +6802,7 @@ lower_rejects_missing_package :: proc(t: ^testing.T) {
     formatted := kvist.format_compile_error("bad.kvist", source, err)
     defer delete(formatted)
     expected := `bad.kvist:1:1: missing package declaration
-  (proc main []
+  (defn main []
   ^
 `
     testing.expect_value(t, formatted, expected)
@@ -6485,7 +7222,7 @@ compile_explicit_odin_import_paths :: proc(t: ^testing.T) {
 (import kvist_live :odin "../../../src/kvist_live")
 (import :odin "core:fmt")
 
-(proc main []
+(defn main []
   (return))`
 
     output, err, ok := kvist.compile_source(source)
@@ -6517,7 +7254,7 @@ compile_exported_c_abi_proc_and_var :: proc(t: ^testing.T) {
 (defvar hot_api_version u32 1)
 
 (export)
-(proc hot_tick :abi "c" [state: rawptr] -> int
+(defn hot_tick :abi "c" [state: rawptr] -> int
   42)`
 
     output, err, ok := kvist.compile_source(source)

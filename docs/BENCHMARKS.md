@@ -7,6 +7,7 @@ Current benchmark harness:
 - `./scripts/bench_mutation_helpers.sh`
 - `./scripts/bench_closure_helpers.sh`
 - `./scripts/bench_source_backed_arr.sh`
+- `./scripts/bench_destructuring_helpers.sh`
 
 These compare generated Kvist output against hand-written Odin for the same
 workloads.
@@ -180,6 +181,37 @@ Recommended next cases:
 
 These would tell us whether the newer language surface is still lowering as
 cleanly as the older helper benchmarks.
+
+## Planned Destructuring Baseline
+
+There is now also a focused baseline for the planned `let` destructuring shape:
+
+```clojure
+(let [{:keys [x y z w]} point]
+  ...)
+```
+
+Run it with:
+
+```sh
+./scripts/bench_destructuring_helpers.sh
+```
+
+This benchmark is intentionally set up before the syntax lands. It compares the
+lowering shapes we are deciding between:
+
+- direct field reads from an already-bound local
+- explicit local bindings for each field from that local
+- direct field reads when the source is a nontrivial expression that should be
+  evaluated once
+- explicit local bindings after one temp-backed source evaluation
+
+The important things to watch are:
+
+- `allocs=0` for all four cases
+- whether `*-bound` stays at or near parity with `*-direct`
+- whether the expression-backed temp shape stays near parity with the simpler
+  local-source shape
 
 ## Captured Callback Baseline
 

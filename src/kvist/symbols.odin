@@ -37,7 +37,7 @@ Language_Source_Entry :: struct {
     snippet:  string,
 }
 
-KVIST_CANONICAL_IMPORTS_FOR_EDITOR :: [8]Imported_Symbol_Entry{
+KVIST_CANONICAL_IMPORTS_FOR_EDITOR :: [9]Imported_Symbol_Entry{
     {alias = "arr", path = "kvist:arr"},
     {alias = "str", path = "kvist:str"},
     {alias = "map", path = "kvist:map"},
@@ -46,6 +46,7 @@ KVIST_CANONICAL_IMPORTS_FOR_EDITOR :: [8]Imported_Symbol_Entry{
     {alias = "io", path = "kvist:io"},
     {alias = "json", path = "kvist:json"},
     {alias = "http", path = "kvist:http"},
+    {alias = "httpc", path = "kvist:http/client"},
 }
 
 BUILTIN_SOURCE_ENTRIES :: []Builtin_Source_Entry{
@@ -112,11 +113,11 @@ PACKAGE_SOURCE_ENTRIES :: []Package_Source_Entry{
     {import_path = "kvist:arr", member = "frequencies", relative = "src/kvist/emit.odin", snippet = "emit_core_frequencies_helper :: proc"},
     {import_path = "kvist:arr", member = "distinct", relative = "src/kvist/emit.odin", snippet = "emit_core_distinct_helper :: proc"},
     {import_path = "kvist:arr", member = "distinct-by", relative = "src/kvist/emit.odin", snippet = "emit_core_distinct_by_helper :: proc"},
-    {import_path = "kvist:arr", member = "take-nth", relative = "packages/arr/package.kvist", snippet = "(proc take-nth [n: int, xs: []$T] -> [dynamic]T #force_inline"},
-    {import_path = "kvist:arr", member = "repeat", relative = "packages/arr/package.kvist", snippet = "(proc repeat [n: int, value: $T] -> [dynamic]T #force_inline"},
-    {import_path = "kvist:arr", member = "repeatedly", relative = "packages/arr/package.kvist", snippet = "(proc repeatedly [n: int, f: (proc [] -> $T)] -> [dynamic]T #force_inline"},
-    {import_path = "kvist:arr", member = "iterate", relative = "packages/arr/package.kvist", snippet = "(proc iterate [n: int, f: (proc [x: $T] -> T), init: T] -> [dynamic]T #force_inline"},
-    {import_path = "kvist:arr", member = "cycle", relative = "packages/arr/package.kvist", snippet = "(proc cycle [n: int, xs: []$T] -> [dynamic]T #force_inline"},
+    {import_path = "kvist:arr", member = "take-nth", relative = "packages/arr/package.kvist", snippet = "(defn take-nth [n: int, xs: []$T] -> [dynamic]T #force_inline"},
+    {import_path = "kvist:arr", member = "repeat", relative = "packages/arr/package.kvist", snippet = "(defn repeat [n: int, value: $T] -> [dynamic]T #force_inline"},
+    {import_path = "kvist:arr", member = "repeatedly", relative = "packages/arr/package.kvist", snippet = "(defn repeatedly [n: int, f: (proc [] -> $T)] -> [dynamic]T #force_inline"},
+    {import_path = "kvist:arr", member = "iterate", relative = "packages/arr/package.kvist", snippet = "(defn iterate [n: int, f: (proc [x: $T] -> T), init: T] -> [dynamic]T #force_inline"},
+    {import_path = "kvist:arr", member = "cycle", relative = "packages/arr/package.kvist", snippet = "(defn cycle [n: int, xs: []$T] -> [dynamic]T #force_inline"},
     {import_path = "kvist:arr", member = "find", relative = "packages/arr/package.kvist", snippet = "(defmacro find [pred xs]"},
     {import_path = "kvist:arr", member = "some?", relative = "packages/arr/package.kvist", snippet = "(defmacro some? [pred xs]"},
     {import_path = "kvist:arr", member = "every?", relative = "packages/arr/package.kvist", snippet = "(defmacro every? [pred xs]"},
@@ -124,58 +125,81 @@ PACKAGE_SOURCE_ENTRIES :: []Package_Source_Entry{
     {import_path = "kvist:arr", member = "sort!", relative = "src/kvist/emit.odin", snippet = "emit_core_sort_in_place_helper :: proc"},
     {import_path = "kvist:arr", member = "sort-by", relative = "src/kvist/emit.odin", snippet = "emit_core_sort_by_helper :: proc"},
     {import_path = "kvist:arr", member = "sort-by!", relative = "src/kvist/emit.odin", snippet = "emit_core_sort_by_in_place_helper :: proc"},
-    {import_path = "kvist:str", member = "count", relative = "packages/str/package.kvist", snippet = "(proc count [s: string] -> int #force_inline"},
+    {import_path = "kvist:str", member = "count", relative = "packages/str/package.kvist", snippet = "(defn count [s: string] -> int #force_inline"},
     {import_path = "kvist:str", member = "get", relative = "packages/str/package.kvist", snippet = "(defmacro get [s index]"},
     {import_path = "kvist:str", member = "slice", relative = "packages/str/package.kvist", snippet = "(defmacro slice [s start & rest]"},
-    {import_path = "kvist:str", member = "contains?", relative = "packages/str/package.kvist", snippet = "(proc contains? [s: string, needle: string] -> bool #force_inline"},
+    {import_path = "kvist:str", member = "contains?", relative = "packages/str/package.kvist", snippet = "(defn contains? [s: string, needle: string] -> bool #force_inline"},
     {import_path = "kvist:str", member = "split", relative = "packages/str/package.kvist", snippet = "(defmacro split [s separator]"},
     {import_path = "kvist:str", member = "join", relative = "packages/str/package.kvist", snippet = "(defmacro join [parts separator]"},
-    {import_path = "kvist:str", member = "trim", relative = "packages/str/package.kvist", snippet = "(proc trim [s: string] -> string #force_inline"},
-    {import_path = "kvist:str", member = "trim-prefix", relative = "packages/str/package.kvist", snippet = "(proc trim-prefix [s: string, prefix: string] -> string #force_inline"},
-    {import_path = "kvist:str", member = "trim-suffix", relative = "packages/str/package.kvist", snippet = "(proc trim-suffix [s: string, suffix: string] -> string #force_inline"},
-    {import_path = "kvist:str", member = "starts-with?", relative = "packages/str/package.kvist", snippet = "(proc starts-with? [s: string, prefix: string] -> bool #force_inline"},
-    {import_path = "kvist:str", member = "ends-with?", relative = "packages/str/package.kvist", snippet = "(proc ends-with? [s: string, suffix: string] -> bool #force_inline"},
-    {import_path = "kvist:str", member = "index-of", relative = "packages/str/package.kvist", snippet = "(proc index-of [s: string, needle: string] -> int #force_inline"},
-    {import_path = "kvist:str", member = "last-index-of", relative = "packages/str/package.kvist", snippet = "(proc last-index-of [s: string, needle: string] -> int #force_inline"},
+    {import_path = "kvist:str", member = "trim", relative = "packages/str/package.kvist", snippet = "(defn trim [s: string] -> string #force_inline"},
+    {import_path = "kvist:str", member = "trim-prefix", relative = "packages/str/package.kvist", snippet = "(defn trim-prefix [s: string, prefix: string] -> string #force_inline"},
+    {import_path = "kvist:str", member = "trim-suffix", relative = "packages/str/package.kvist", snippet = "(defn trim-suffix [s: string, suffix: string] -> string #force_inline"},
+    {import_path = "kvist:str", member = "starts-with?", relative = "packages/str/package.kvist", snippet = "(defn starts-with? [s: string, prefix: string] -> bool #force_inline"},
+    {import_path = "kvist:str", member = "ends-with?", relative = "packages/str/package.kvist", snippet = "(defn ends-with? [s: string, suffix: string] -> bool #force_inline"},
+    {import_path = "kvist:str", member = "index-of", relative = "packages/str/package.kvist", snippet = "(defn index-of [s: string, needle: string] -> int #force_inline"},
+    {import_path = "kvist:str", member = "last-index-of", relative = "packages/str/package.kvist", snippet = "(defn last-index-of [s: string, needle: string] -> int #force_inline"},
     {import_path = "kvist:str", member = "replace", relative = "packages/str/package.kvist", snippet = "(defmacro replace [s old new & rest]"},
-    {import_path = "kvist:str", member = "lower", relative = "packages/str/package.kvist", snippet = "(proc lower [s: string] -> string #force_inline"},
-    {import_path = "kvist:str", member = "upper", relative = "packages/str/package.kvist", snippet = "(proc upper [s: string] -> string #force_inline"},
+    {import_path = "kvist:str", member = "lower", relative = "packages/str/package.kvist", snippet = "(defn lower [s: string] -> string #force_inline"},
+    {import_path = "kvist:str", member = "upper", relative = "packages/str/package.kvist", snippet = "(defn upper [s: string] -> string #force_inline"},
     {import_path = "kvist:map", member = "empty", relative = "packages/map/package.kvist", snippet = "(defmacro empty [key-type value-type & rest]"},
     {import_path = "kvist:map", member = "of", relative = "packages/map/package.kvist", snippet = "(defmacro of [key-type value-type entries]"},
     {import_path = "kvist:map", member = "get", relative = "packages/map/package.kvist", snippet = "(defmacro get [m key & rest]"},
-    {import_path = "kvist:map", member = "contains?", relative = "packages/map/package.kvist", snippet = "(proc contains? [m: map[$K]$V, key: K] -> bool #force_inline"},
-    {import_path = "kvist:map", member = "keys", relative = "packages/map/package.kvist", snippet = "(proc keys [m: map[$K]$V] -> [dynamic]K #force_inline"},
-    {import_path = "kvist:map", member = "vals", relative = "packages/map/package.kvist", snippet = "(proc vals [m: map[$K]$V] -> [dynamic]V #force_inline"},
-    {import_path = "kvist:map", member = "zip", relative = "packages/map/package.kvist", snippet = "(proc zip [ks: []$K, vs: []$V] -> map[K]V #force_inline"},
-    {import_path = "kvist:map", member = "merge", relative = "packages/map/package.kvist", snippet = "(proc merge [lhs: map[$K]$V, rhs: map[$K]$V] -> map[K]V #force_inline"},
+    {import_path = "kvist:map", member = "contains?", relative = "packages/map/package.kvist", snippet = "(defn contains? [m: map[$K]$V, key: K] -> bool #force_inline"},
+    {import_path = "kvist:map", member = "keys", relative = "packages/map/package.kvist", snippet = "(defn keys [m: map[$K]$V] -> [dynamic]K #force_inline"},
+    {import_path = "kvist:map", member = "vals", relative = "packages/map/package.kvist", snippet = "(defn vals [m: map[$K]$V] -> [dynamic]V #force_inline"},
+    {import_path = "kvist:map", member = "zip", relative = "packages/map/package.kvist", snippet = "(defn zip [ks: []$K, vs: []$V] -> map[K]V #force_inline"},
+    {import_path = "kvist:map", member = "merge", relative = "packages/map/package.kvist", snippet = "(defn merge [lhs: map[$K]$V, rhs: map[$K]$V] -> map[K]V #force_inline"},
     {import_path = "kvist:map", member = "merge!", relative = "packages/map/package.kvist", snippet = "(defmacro merge! [target source]"},
     {import_path = "kvist:set", member = "empty", relative = "packages/set/package.kvist", snippet = "(defmacro empty [elem-type & rest]"},
     {import_path = "kvist:set", member = "of", relative = "packages/set/package.kvist", snippet = "(defmacro of [elem-type values]"},
-    {import_path = "kvist:set", member = "contains?", relative = "packages/set/package.kvist", snippet = "(proc contains? [s: set[$T], value: T] -> bool #force_inline"},
+    {import_path = "kvist:set", member = "contains?", relative = "packages/set/package.kvist", snippet = "(defn contains? [s: set[$T], value: T] -> bool #force_inline"},
     {import_path = "kvist:set", member = "add!", relative = "packages/set/package.kvist", snippet = "(defmacro add! [s value]"},
     {import_path = "kvist:set", member = "remove!", relative = "packages/set/package.kvist", snippet = "(defmacro remove! [s value]"},
-    {import_path = "kvist:set", member = "union", relative = "packages/set/package.kvist", snippet = "(proc union [lhs: set[$T], rhs: set[$T]] -> set[T] #force_inline"},
-    {import_path = "kvist:set", member = "intersection", relative = "packages/set/package.kvist", snippet = "(proc intersection [lhs: set[$T], rhs: set[$T]] -> set[T] #force_inline"},
-    {import_path = "kvist:set", member = "difference", relative = "packages/set/package.kvist", snippet = "(proc difference [lhs: set[$T], rhs: set[$T]] -> set[T] #force_inline"},
+    {import_path = "kvist:set", member = "union", relative = "packages/set/package.kvist", snippet = "(defn union [lhs: set[$T], rhs: set[$T]] -> set[T] #force_inline"},
+    {import_path = "kvist:set", member = "intersection", relative = "packages/set/package.kvist", snippet = "(defn intersection [lhs: set[$T], rhs: set[$T]] -> set[T] #force_inline"},
+    {import_path = "kvist:set", member = "difference", relative = "packages/set/package.kvist", snippet = "(defn difference [lhs: set[$T], rhs: set[$T]] -> set[T] #force_inline"},
     {import_path = "kvist:set", member = "union!", relative = "packages/set/package.kvist", snippet = "(defmacro union! [target source]"},
     {import_path = "kvist:set", member = "intersection!", relative = "packages/set/package.kvist", snippet = "(defmacro intersection! [target source]"},
     {import_path = "kvist:set", member = "difference!", relative = "packages/set/package.kvist", snippet = "(defmacro difference! [target source]"},
-    {import_path = "kvist:set", member = "subset?", relative = "packages/set/package.kvist", snippet = "(proc subset? [lhs: set[$T], rhs: set[$T]] -> bool #force_inline"},
-    {import_path = "kvist:set", member = "superset?", relative = "packages/set/package.kvist", snippet = "(proc superset? [lhs: set[$T], rhs: set[$T]] -> bool #force_inline"},
-    {import_path = "kvist:set", member = "disjoint?", relative = "packages/set/package.kvist", snippet = "(proc disjoint? [lhs: set[$T], rhs: set[$T]] -> bool #force_inline"},
-    {import_path = "kvist:set", member = "add", relative = "packages/set/package.kvist", snippet = "(proc add [s: set[$T], value: T] -> set[T] #force_inline"},
-    {import_path = "kvist:set", member = "remove", relative = "packages/set/package.kvist", snippet = "(proc remove [s: set[$T], value: T] -> set[T] #force_inline"},
+    {import_path = "kvist:set", member = "subset?", relative = "packages/set/package.kvist", snippet = "(defn subset? [lhs: set[$T], rhs: set[$T]] -> bool #force_inline"},
+    {import_path = "kvist:set", member = "superset?", relative = "packages/set/package.kvist", snippet = "(defn superset? [lhs: set[$T], rhs: set[$T]] -> bool #force_inline"},
+    {import_path = "kvist:set", member = "disjoint?", relative = "packages/set/package.kvist", snippet = "(defn disjoint? [lhs: set[$T], rhs: set[$T]] -> bool #force_inline"},
+    {import_path = "kvist:set", member = "add", relative = "packages/set/package.kvist", snippet = "(defn add [s: set[$T], value: T] -> set[T] #force_inline"},
+    {import_path = "kvist:set", member = "remove", relative = "packages/set/package.kvist", snippet = "(defn remove [s: set[$T], value: T] -> set[T] #force_inline"},
     {import_path = "kvist:struct", member = "fields", relative = "src/kvist/emit.odin", snippet = "if head.text == \"struct/fields\" || head.text == \"struct/types\""},
     {import_path = "kvist:struct", member = "types", relative = "src/kvist/emit.odin", snippet = "if head.text == \"struct/fields\" || head.text == \"struct/types\""},
     {import_path = "kvist:io", member = "read", relative = "packages/io/io.kvist", snippet = "(defn read"},
     {import_path = "kvist:io", member = "write", relative = "packages/io/io.kvist", snippet = "(defn write"},
     {import_path = "kvist:json", member = "write", relative = "packages/json/json.kvist", snippet = "(defn write"},
     {import_path = "kvist:json", member = "read-as", relative = "packages/json/json.kvist", snippet = "(defn read-as"},
+    {import_path = "kvist:http", member = "new-router", relative = "packages/http/http.kvist", snippet = "(defn new-router"},
+    {import_path = "kvist:http", member = "router-destroy!", relative = "packages/http/http.kvist", snippet = "(defmacro router-destroy!"},
+    {import_path = "kvist:http", member = "new-server", relative = "packages/http/http.kvist", snippet = "(defn new-server"},
+    {import_path = "kvist:http", member = "server-shutdown-on-interrupt!", relative = "packages/http/http.kvist", snippet = "(defmacro server-shutdown-on-interrupt!"},
+    {import_path = "kvist:http", member = "shutdown!", relative = "packages/http/http.kvist", snippet = "(defmacro shutdown!"},
+    {import_path = "kvist:http", member = "listen!", relative = "packages/http/http.kvist", snippet = "(defmacro listen!"},
+    {import_path = "kvist:http", member = "handler", relative = "packages/http/http.kvist", snippet = "(defmacro handler"},
+    {import_path = "kvist:http", member = "router-handler", relative = "packages/http/http.kvist", snippet = "(defmacro router-handler"},
+    {import_path = "kvist:http", member = "serve!", relative = "packages/http/http.kvist", snippet = "(defmacro serve!"},
+    {import_path = "kvist:http", member = "serve-handler!", relative = "packages/http/http.kvist", snippet = "(defmacro serve-handler!"},
+    {import_path = "kvist:http", member = "listen-and-serve!", relative = "packages/http/http.kvist", snippet = "(defmacro listen-and-serve!"},
+    {import_path = "kvist:http", member = "listen-and-serve-handler!", relative = "packages/http/http.kvist", snippet = "(defmacro listen-and-serve-handler!"},
     {import_path = "kvist:http", member = "with-router", relative = "packages/http/http.kvist", snippet = "(defmacro with-router"},
+    {import_path = "kvist:http", member = "get!", relative = "packages/http/http.kvist", snippet = "(defmacro get!"},
     {import_path = "kvist:http", member = "get", relative = "packages/http/http.kvist", snippet = "(defmacro get"},
+    {import_path = "kvist:http", member = "post!", relative = "packages/http/http.kvist", snippet = "(defmacro post!"},
     {import_path = "kvist:http", member = "post", relative = "packages/http/http.kvist", snippet = "(defmacro post"},
+    {import_path = "kvist:http", member = "put!", relative = "packages/http/http.kvist", snippet = "(defmacro put!"},
     {import_path = "kvist:http", member = "put", relative = "packages/http/http.kvist", snippet = "(defmacro put"},
+    {import_path = "kvist:http", member = "patch!", relative = "packages/http/http.kvist", snippet = "(defmacro patch!"},
+    {import_path = "kvist:http", member = "patch", relative = "packages/http/http.kvist", snippet = "(defmacro patch"},
+    {import_path = "kvist:http", member = "head!", relative = "packages/http/http.kvist", snippet = "(defmacro head!"},
+    {import_path = "kvist:http", member = "head", relative = "packages/http/http.kvist", snippet = "(defmacro head"},
+    {import_path = "kvist:http", member = "options!", relative = "packages/http/http.kvist", snippet = "(defmacro options!"},
+    {import_path = "kvist:http", member = "options", relative = "packages/http/http.kvist", snippet = "(defmacro options"},
+    {import_path = "kvist:http", member = "delete!", relative = "packages/http/http.kvist", snippet = "(defmacro delete!"},
     {import_path = "kvist:http", member = "delete", relative = "packages/http/http.kvist", snippet = "(defmacro delete"},
+    {import_path = "kvist:http", member = "all!", relative = "packages/http/http.kvist", snippet = "(defmacro all!"},
     {import_path = "kvist:http", member = "all", relative = "packages/http/http.kvist", snippet = "(defmacro all"},
     {import_path = "kvist:http", member = "listen", relative = "packages/http/http.kvist", snippet = "(defmacro listen"},
     {import_path = "kvist:http", member = "respond", relative = "packages/http/http.kvist", snippet = "(defmacro respond"},
@@ -184,6 +208,23 @@ PACKAGE_SOURCE_ENTRIES :: []Package_Source_Entry{
     {import_path = "kvist:http", member = "respond-json", relative = "packages/http/http.kvist", snippet = "(defmacro respond-json"},
     {import_path = "kvist:http", member = "respond-file", relative = "packages/http/http.kvist", snippet = "(defmacro respond-file"},
     {import_path = "kvist:http", member = "respond-dir", relative = "packages/http/http.kvist", snippet = "(defmacro respond-dir"},
+    {import_path = "kvist:http", member = "request-cookie", relative = "packages/http/http.kvist", snippet = "(defmacro request-cookie"},
+    {import_path = "kvist:http", member = "request-cookies", relative = "packages/http/http.kvist", snippet = "(defmacro request-cookies"},
+    {import_path = "kvist:http", member = "set-cookie!", relative = "packages/http/http.kvist", snippet = "(defmacro set-cookie!"},
+    {import_path = "kvist:http", member = "new-rate-limit-opts", relative = "packages/http/http.kvist", snippet = "(defn new-rate-limit-opts"},
+    {import_path = "kvist:http", member = "new-rate-limit-data", relative = "packages/http/http.kvist", snippet = "(defn new-rate-limit-data"},
+    {import_path = "kvist:http", member = "rate-limit-destroy!", relative = "packages/http/http.kvist", snippet = "(defmacro rate-limit-destroy!"},
+    {import_path = "kvist:http", member = "rate-limit", relative = "packages/http/http.kvist", snippet = "(defmacro rate-limit"},
+    {import_path = "kvist:http/client", member = "new-request", relative = "packages/http/client/client.kvist", snippet = "(defn new-request"},
+    {import_path = "kvist:http/client", member = "request", relative = "packages/http/client/client.kvist", snippet = "(defmacro request"},
+    {import_path = "kvist:http/client", member = "get", relative = "packages/http/client/client.kvist", snippet = "(defmacro get"},
+    {import_path = "kvist:http/client", member = "with-json", relative = "packages/http/client/client.kvist", snippet = "(defmacro with-json"},
+    {import_path = "kvist:http/client", member = "request-destroy", relative = "packages/http/client/client.kvist", snippet = "(defmacro request-destroy"},
+    {import_path = "kvist:http/client", member = "set-header!", relative = "packages/http/client/client.kvist", snippet = "(defmacro set-header!"},
+    {import_path = "kvist:http/client", member = "add-cookie!", relative = "packages/http/client/client.kvist", snippet = "(defmacro add-cookie!"},
+    {import_path = "kvist:http/client", member = "response-body", relative = "packages/http/client/client.kvist", snippet = "(defmacro response-body"},
+    {import_path = "kvist:http/client", member = "response-destroy", relative = "packages/http/client/client.kvist", snippet = "(defmacro response-destroy"},
+    {import_path = "kvist:http/client", member = "body-destroy", relative = "packages/http/client/client.kvist", snippet = "(defmacro body-destroy"},
 }
 
 LANGUAGE_SOURCE_ENTRIES :: []Language_Source_Entry{
@@ -1233,11 +1274,34 @@ package_entry_signature_doc :: proc(import_path, member: string) -> (signature, 
         }
     case "kvist:http":
         switch member {
+        case "new-router": return "(http/new-router)", "Create and initialize a vendored HTTP router value.", true
+        case "router-destroy!": return "(http/router-destroy! router)", "Destroy a router and free its owned route patterns.", true
+        case "new-server": return "(http/new-server)", "Create a vendored HTTP server value.", true
+        case "server-shutdown-on-interrupt!": return "(http/server-shutdown-on-interrupt! server)", "Register graceful shutdown on SIGINT for a server.", true
+        case "shutdown!": return "(http/shutdown! server)", "Begin graceful shutdown for a running server.", true
+        case "listen!": return "(http/listen! server port)", "Bind a server socket on loopback for the given port.", true
+        case "handler": return "(http/handler [req res] body...)", "Create a vendored HTTP handler from a typed request/response callback body.", true
+        case "router-handler": return "(http/router-handler router)", "Turn a router into a vendored HTTP handler value.", true
+        case "serve!": return "(http/serve! server router)", "Serve requests for a configured router on a listening server.", true
+        case "serve-handler!": return "(http/serve-handler! server handler)", "Serve requests for an already-built handler on a listening server.", true
+        case "listen-and-serve!": return "(http/listen-and-serve! server router port)", "Bind and serve a router on loopback for the given port.", true
+        case "listen-and-serve-handler!": return "(http/listen-and-serve-handler! server handler port)", "Bind and serve an already-built handler on loopback for the given port.", true
         case "with-router": return "(http/with-router [router] body...)", "Bind a vendored HTTP router, initialize it, and destroy it on scope exit.", true
+        case "get!": return "(http/get! router pattern [req res] body...)", "Register a GET route on a router.", true
         case "get": return "(http/get router pattern [req res] body...)", "Register a GET route with a typed request/response handler.", true
+        case "post!": return "(http/post! router pattern [req res] body...)", "Register a POST route on a router.", true
         case "post": return "(http/post router pattern [req res] body...)", "Register a POST route with a typed request/response handler.", true
+        case "put!": return "(http/put! router pattern [req res] body...)", "Register a PUT route on a router.", true
         case "put": return "(http/put router pattern [req res] body...)", "Register a PUT route with a typed request/response handler.", true
+        case "patch!": return "(http/patch! router pattern [req res] body...)", "Register a PATCH route on a router.", true
+        case "patch": return "(http/patch router pattern [req res] body...)", "Register a PATCH route with a typed request/response handler.", true
+        case "head!": return "(http/head! router pattern [req res] body...)", "Register a HEAD route on a router.", true
+        case "head": return "(http/head router pattern [req res] body...)", "Register a HEAD route with a typed request/response handler.", true
+        case "options!": return "(http/options! router pattern [req res] body...)", "Register an OPTIONS route on a router.", true
+        case "options": return "(http/options router pattern [req res] body...)", "Register an OPTIONS route with a typed request/response handler.", true
+        case "delete!": return "(http/delete! router pattern [req res] body...)", "Register a DELETE route on a router.", true
         case "delete": return "(http/delete router pattern [req res] body...)", "Register a DELETE route with a typed request/response handler.", true
+        case "all!": return "(http/all! router pattern [req res] body...)", "Register a catch-all route on a router.", true
         case "all": return "(http/all router pattern [req res] body...)", "Register a catch-all route with a typed request/response handler.", true
         case "listen": return "(http/listen port router)", "Start a loopback HTTP server for a configured router.", true
         case "respond": return "(http/respond res status)", "Send a response with a status code and no body.", true
@@ -1246,6 +1310,26 @@ package_entry_signature_doc :: proc(import_path, member: string) -> (signature, 
         case "respond-json": return "(http/respond-json res value [status])", "Send a JSON HTTP response.", true
         case "respond-file": return "(http/respond-file res path [mime])", "Send a file response.", true
         case "respond-dir": return "(http/respond-dir res base target request)", "Serve a directory path response.", true
+        case "request-cookie": return "(http/request-cookie req key)", "Read one request cookie by key.", true
+        case "request-cookies": return "(http/request-cookies req)", "Read all request cookies into an owned map.", true
+        case "set-cookie!": return "(http/set-cookie! res name value)", "Append a simple response cookie.", true
+        case "new-rate-limit-opts": return "(http/new-rate-limit-opts window max)", "Create upstream rate limit options.", true
+        case "new-rate-limit-data": return "(http/new-rate-limit-data)", "Create upstream rate limit middleware state.", true
+        case "rate-limit-destroy!": return "(http/rate-limit-destroy! data)", "Destroy upstream rate limit middleware state.", true
+        case "rate-limit": return "(http/rate-limit data next opts)", "Wrap an existing handler with upstream IP-based rate limiting.", true
+        }
+    case "kvist:http/client":
+        switch member {
+        case "new-request": return "(httpc/new-request method)", "Create and initialize an HTTP client request value.", true
+        case "request": return "(httpc/request req target)", "Send an initialized HTTP client request.", true
+        case "get": return "(httpc/get target)", "Send a simple GET request.", true
+        case "with-json": return "(httpc/with-json req value)", "Encode a request body as JSON and set the content type.", true
+        case "request-destroy": return "(httpc/request-destroy req)", "Destroy a request value and free its owned buffers.", true
+        case "set-header!": return "(httpc/set-header! req key value)", "Set a request header.", true
+        case "add-cookie!": return "(httpc/add-cookie! req name value)", "Append a simple request cookie.", true
+        case "response-body": return "(httpc/response-body res [max-length])", "Read a response body once.", true
+        case "response-destroy": return "(httpc/response-destroy res)", "Destroy a response and close the connection.", true
+        case "body-destroy": return "(httpc/body-destroy body allocation)", "Free a response body returned by response-body.", true
         }
     }
     return "", "", false
@@ -1629,7 +1713,7 @@ import_default_alias :: proc(path: string) -> string {
 
 is_static_kvist_package :: proc(import_path: string) -> bool {
     switch import_path {
-    case "kvist:arr", "kvist:str", "kvist:map", "kvist:set", "kvist:struct", "kvist:io", "kvist:json", "kvist:http":
+    case "kvist:arr", "kvist:str", "kvist:map", "kvist:set", "kvist:struct", "kvist:io", "kvist:json", "kvist:http", "kvist:http/client":
         return true
     case:
         return false
@@ -1697,7 +1781,22 @@ symbols_proc_signature :: proc(name: string, decl: Proc_Decl) -> string {
         if idx > 0 {
             strings.write_string(&builder, ", ")
         }
-        fmt.sbprintf(&builder, "%s: %s", param.name, param.ty)
+        if param.is_field_destructure {
+            strings.write_string(&builder, "{:keys [")
+            for field, field_idx in param.destructure_fields {
+                if field_idx > 0 {
+                    strings.write_string(&builder, " ")
+                }
+                strings.write_string(&builder, field.name)
+            }
+            fmt.sbprintf(&builder, "] :as %s}: %s", param.name, param.ty)
+        } else {
+            fmt.sbprintf(&builder, "%s: %s", param.name, param.ty)
+        }
+        if param.has_default {
+            strings.write_string(&builder, " = ")
+            strings.write_string(&builder, symbols_form_text(param.default_value))
+        }
     }
     strings.write_string(&builder, "]")
 
@@ -1718,6 +1817,56 @@ symbols_proc_signature :: proc(name: string, decl: Proc_Decl) -> string {
 
     strings.write_string(&builder, ")")
     return strings.to_string(builder)
+}
+
+write_symbols_form :: proc(builder: ^strings.Builder, form: CST_Form) {
+    #partial switch form.kind {
+    case .List:
+        strings.write_byte(builder, '(')
+        for item, idx in form.items {
+            if idx > 0 {
+                strings.write_byte(builder, ' ')
+            }
+            write_symbols_form(builder, item)
+        }
+        strings.write_byte(builder, ')')
+    case .Vector:
+        strings.write_byte(builder, '[')
+        for item, idx in form.items {
+            if idx > 0 {
+                strings.write_byte(builder, ' ')
+            }
+            write_symbols_form(builder, item)
+        }
+        strings.write_byte(builder, ']')
+    case .Brace:
+        strings.write_byte(builder, '{')
+        for item, idx in form.items {
+            if idx > 0 {
+                strings.write_byte(builder, ' ')
+            }
+            write_symbols_form(builder, item)
+        }
+        strings.write_byte(builder, '}')
+    case .Set:
+        strings.write_string(builder, "#{")
+        for item, idx in form.items {
+            if idx > 0 {
+                strings.write_byte(builder, ' ')
+            }
+            write_symbols_form(builder, item)
+        }
+        strings.write_byte(builder, '}')
+    case .Symbol, .Keyword, .String, .Number, .Bool, .Nil:
+        strings.write_string(builder, form.text)
+    }
+}
+
+symbols_form_text :: proc(form: CST_Form) -> string {
+    builder := strings.builder_make()
+    defer strings.builder_destroy(&builder)
+    write_symbols_form(&builder, form)
+    return strings.clone(strings.to_string(builder))
 }
 
 symbols_struct_signature :: proc(name: string, fields: []Struct_Field) -> string {
