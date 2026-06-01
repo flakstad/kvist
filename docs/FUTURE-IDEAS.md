@@ -110,10 +110,26 @@ These should all be judged by the same bar:
 
 ### Call Surface
 
-- Consider allowing functions to be called either positionally or with a
-  named-argument map-like surface when that materially improves readability.
-- This should remain a language-level design decision, not ad hoc per-library
-  sugar.
+The current call surface already includes:
+
+- positional calls
+- named calls for known top-level `defn`
+- mixed positional plus named-tail calls for known top-level `defn`
+- trailing default parameters for known top-level `defn`
+
+Future work here should focus on boundary decisions rather than re-arguing the
+base feature:
+
+- whether any of this should ever apply to proc-valued expressions, not just
+  statically known top-level procs
+- whether destructuring and call-site named/default conventions should gain a
+  shared "options object" story, or stay intentionally separate
+- whether destructuring should widen beyond the current struct-backed
+  `{:keys [...]}` subset
+- whether `:or` defaults are worth supporting for destructuring, and under what
+  semantics
+- whether any broader call sugar would still preserve explicit, readable Odin
+  lowering
 
 ## Dev And Runtime Workflow
 

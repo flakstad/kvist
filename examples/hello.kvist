@@ -8,11 +8,11 @@
 
 (defn main []
   (let [g (Greeting { :message "hello from kvist" })]
-    (println (:message g))))
+    (core/println (:message g))))
 
-(comment
+(core/comment
 
-  (-> (Greeting { :message "hello!" })
+  (core/-> (Greeting { :message "hello!" })
       :message
       len)
   ;; => 6

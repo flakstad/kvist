@@ -8,6 +8,8 @@ Current benchmark harness:
 - `./scripts/bench_closure_helpers.sh`
 - `./scripts/bench_source_backed_arr.sh`
 - `./scripts/bench_destructuring_helpers.sh`
+- `./scripts/bench_core_helpers.sh`
+- `./scripts/bench_package_helpers.sh`
 
 These compare generated Kvist output against hand-written Odin for the same
 workloads.
@@ -73,22 +75,22 @@ The main performance question is now:
 
 The focused mutation benchmark now covers:
 
-- `update!` on struct fields
-- `update` on struct fields
+- `core/update!` on struct fields
+- `core/update` on struct fields
 - explicit pointer mutation
-- `update!` on dynamic arrays
-- `update!` on maps
+- `core/update!` on dynamic arrays
+- `core/update!` on maps
 
 Current focused mutation run:
 
-- `struct-update`: Kvist `0.080 ms`, direct Odin `0.080 ms`
-- `pointer-update`: Kvist `0.076 ms`, direct Odin `0.075 ms`
-- `array-update!`: Kvist `0.313 ms`, direct Odin `0.314 ms`
-- `map-update!`: Kvist `12.174 ms`, direct Odin `8.140 ms`
+- `struct-update`: Kvist `0.082 ms`, direct Odin `0.084 ms`
+- `pointer-update`: Kvist `0.075 ms`, direct Odin `0.083 ms`
+- `array-update!`: Kvist `0.303 ms`, direct Odin `0.324 ms`
+- `map-update!`: Kvist `7.676 ms`, direct Odin `9.087 ms`
 
 Two fixes mattered here:
 
-1. `update!` now lowers simple arithmetic updater cases to compound
+1. `core/update!` now lowers simple arithmetic updater cases to compound
    assignment when possible:
    - `+=`
    - `-=`
@@ -110,10 +112,9 @@ The useful conclusion for now is:
 
 - struct copy-update and pointer mutation are effectively at parity in this
   workload
-- array `update!` is also at parity after the lowering fix
-- the remaining `map/update!` gap should be treated as suspicious but not yet
-  as proven codegen trouble, because the generated hot loop now matches the
-  direct Odin shape
+- array `core/update!` is also at parity after the lowering fix
+- the map `core/update!` path is also at parity here, with matching allocation
+  counts and total allocated bytes versus direct Odin
 
 ## Focused Map Update Benchmark
 
@@ -122,8 +123,9 @@ other costs and answers the remaining question directly.
 
 Current focused map-only run:
 
-- Kvist `map-update!`: `62.642 ms`
-- direct Odin: `66.551 ms`
+- Kvist `map-update!`: `63.822 ms`
+- direct Odin: `63.917 ms`
+- both with `allocs=1800`, `total=19852800`, `peak=73984`, `live=0`
 
 The generated hot loop is now:
 
@@ -131,13 +133,12 @@ The generated hot loop is now:
 counts[j % KEY_MOD] += 1
 ```
 
-So the earlier map gap was not a persistent lowering problem. After the
-compound-assignment fix, the focused map workload is at parity and slightly
-favors the Kvist-generated version in this run.
+The focused map workload is effectively identical to direct Odin in both time
+and allocation behavior.
 
-## Good Next Benchmarks
+## Source-Backed `arr` Benchmark
 
-The new source-backed `kvist:arr` benchmark now covers:
+The source-backed `kvist:arr` benchmark covers:
 
 - intrinsic `arr/*` lowering
 - imported `kvist:arr` source-backed lowering
@@ -159,16 +160,16 @@ Current run shape:
 
 The important result is not any one number, but the shape:
 
-- intrinsic and source-backed paths now match allocation counts exactly in the
-  migrated `arr` surface
+- intrinsic and source-backed paths match allocation counts exactly in the
+  tested `arr` surface
 - the source-backed path is within normal run-to-run noise of the intrinsic
   path on these workloads
 - both stay close to the direct eager Odin baseline
 - the fused loop is still much faster when the semantics avoid intermediate
   owned collections entirely
 
-The next benchmark additions should keep targeting language features we
-recently added, not only older sequence helpers.
+The next benchmark additions should keep targeting the parts of the surface
+where source-level semantics may still hide real cost.
 
 Recommended next cases:
 
@@ -179,7 +180,7 @@ Recommended next cases:
 4. more map-heavy workloads with realistic surrounding code, not just the
    isolated hot loop
 
-These would tell us whether the newer language surface is still lowering as
+These would tell us whether the current language surface is still lowering as
 cleanly as the older helper benchmarks.
 
 ## Planned Destructuring Baseline
@@ -234,3 +235,70 @@ This benchmark is meant to answer two separate questions:
    helper-with-context shape in direct Odin
 2. how much overhead remains versus hand-written loop code when the source uses
    eager helper style instead of explicit loops
+
+## Core Helper Baseline
+
+There is now also a focused `core/*` benchmark for the canonical collection
+kernel:
+
+- `core/count`
+- `core/get`
+- `core/slice`
+- `core/contains?`
+
+Run it with:
+
+```sh
+./scripts/bench_core_helpers.sh
+```
+
+Current run shape:
+
+- `index-core`: `2.884 ms`
+- `index-direct`: `2.853 ms`
+- `slice-core`: `0.000 ms`
+- `slice-direct`: `0.000 ms`
+- `map-core`: `199.146 ms`
+- `map-direct`: `200.095 ms`
+
+The important result is the shape:
+
+- all measured `core/*` workloads ran with `allocs=0`, `total=0`, and `live=0`
+- `core/count`, `core/get`, `core/slice`, and `core/contains?` lower
+  essentially identically to direct Odin in these hot paths
+- the canonical `core/*` move is performance-neutral on the tested workloads
+
+## Package Surface Baseline
+
+There is now also a focused package-surface benchmark for the moved package
+APIs that are hot and runtime-safe today:
+
+- `str/*` transforms and queries
+- `map/*` constructor plus bang mutation helpers
+- `set/*` constructor plus bang mutation helpers
+
+Run it with:
+
+```sh
+./scripts/bench_package_helpers.sh
+```
+
+Current run shape:
+
+- `str-package`: Kvist `1.511 ms`, direct Odin `1.561 ms`
+- `map-package`: Kvist `0.147 ms`, direct Odin `0.147 ms`
+- `set-package`: Kvist `0.392 ms`, direct Odin `0.388 ms`
+
+Allocation shape from the current run:
+
+- `str-package` and `str-direct`: `allocs=6000`, `total=172800`, `peak=144`
+- `map-package` and `map-direct`: `allocs=500`, `total=160000`, `peak=640`
+- `set-package` and `set-direct`: `allocs=1250`, `total=432000`, `peak=1728`
+
+What this says:
+
+- the string package wrappers stay in the same performance band as direct Odin
+- the map bang/package surface is effectively identical to direct Odin in both
+  time and allocation behavior
+- the set bang/package surface is now also at parity after removing the
+  temporary delete-list allocation from `set/intersection!`

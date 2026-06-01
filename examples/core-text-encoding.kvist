@@ -5,6 +5,7 @@
 // slices plus errors. Owned slices are deleted in the same proc that consumes
 // them unless ownership is deliberately returned to the caller.
 (package main)
+(import core "kvist:core")
 (import strings "core:strings")
 (import strconv "core:strconv")
 (import base64 "core:encoding/base64")
@@ -53,8 +54,8 @@
         digest (new [32]byte [])]
     (sha2.init_256 (& ctx))
     (sha2.update (& ctx) (odin "transmute([]byte)text"))
-    (sha2.final (& ctx) (slice digest))
-    (let [[encoded err] (hex.encode (slice digest))]
+    (sha2.final (& ctx) (core/slice digest))
+    (let [[encoded err] (hex.encode (core/slice digest))]
       (if (!= err nil)
         0
         (do
@@ -62,13 +63,13 @@
           (len encoded))))))
 
 (defn main []
-  (println (useful-line? "user:Ada active=true")
+  (core/println (useful-line? "user:Ada active=true")
                (word-count)
                (parsed-score)
                (base64-roundtrip-length)
                (sha256-hex-length)))
 
-(comment
+(core/comment
   ;; These examples are useful for learning the host APIs because the Odin
   ;; package names and result ownership are still visible at the call site.
 

@@ -1,5 +1,6 @@
 // Exercises structs, field access, typed collection literals, map lookup, and make.
 (package main)
+(import core "kvist:core")
 (import arr "kvist:arr")
 (import map "kvist:map")
 
@@ -29,7 +30,7 @@
 (defn empty-buffer-len [] -> int
   (let [buffer (arr/empty int)]
     (defer (delete buffer))
-    (count buffer)))
+    (core/count buffer)))
 
 // with-allocator temporarily changes context.allocator for the body. This is
 // useful when a whole operation should allocate from a caller-provided allocator.
@@ -39,7 +40,7 @@
     (let [buffer (arr/empty int)]
       (defer (delete buffer))
       (arr/into! buffer (arr/dynamic int [1 2]))
-      (count buffer))))
+      (core/count buffer))))
 
 // with-temp-allocator starts Odin's temp allocator scope and ends it at block
 // exit. This is good for scratch work that cannot escape the block. Kvist
@@ -49,22 +50,22 @@
     (let [buffer (arr/empty int)]
       (defer (delete buffer))
       (arr/into! buffer (arr/dynamic int [1 2 3]))
-      (count buffer))))
+      (core/count buffer))))
 
 (defn lookup-two [] -> int
   (let [lookup (map/of string int {"one" 1 "two" 2})]
     (defer (delete lookup))
-    (get lookup "two")))
+    (core/get lookup "two")))
 
 (defn lookup-has-one? [] -> bool
   (let [lookup (map/of string int {"one" 1 "two" 2})]
     (defer (delete lookup))
-    (contains? lookup "one")))
+    (core/contains? lookup "one")))
 
 (defn lookup-missing-default [] -> int
   (let [lookup (map/of string int {"one" 1 "two" 2})]
     (defer (delete lookup))
-    (get lookup "missing" -1)))
+    (core/get lookup "missing" -1)))
 
 (defn merged-lookup-total [] -> int
   (let [base (map/of string int {"one" 1 "two" 2})
@@ -73,7 +74,7 @@
     (defer (delete base))
     (defer (delete overrides))
     (defer (delete merged))
-    (+ (get merged "one") (get merged "two") (get merged "three"))))
+    (+ (core/get merged "one") (core/get merged "two") (core/get merged "three"))))
 
 (defn merge-in-place-total [] -> int
   (let [lookup (map/of string int {"one" 1 "two" 2})
@@ -81,16 +82,16 @@
     (defer (delete lookup))
     (defer (delete overrides))
     (map/merge! lookup overrides)
-    (+ (get lookup "one") (get lookup "two") (get lookup "three"))))
+    (+ (core/get lookup "one") (core/get lookup "two") (core/get lookup "three"))))
 
 (defn fixed-middle [] -> int
   (let [fixed (arr/fixed int [5 8 13])]
-    (get fixed 1)))
+    (core/get fixed 1)))
 
 (defn main []
-  (println (lookup-two)))
+  (core/println (lookup-two)))
 
-(comment
+(core/comment
   ;; Struct construction is just Odin struct construction in parens.
   (user-name)
   ;; => Ada

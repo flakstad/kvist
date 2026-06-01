@@ -35,9 +35,9 @@
     total))
 
 (defn main []
-  (println (threaded-total)))
+  (core/println (threaded-total)))
 
-(comment
+(core/comment
   (mapped-first)
   ;; => 2
 

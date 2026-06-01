@@ -1,7 +1,7 @@
 // Boolean success and Odin error success are separate conventions.
 //
-// Use when-let/if-let for APIs that return an explicit bool such as ok, found,
-// present, or valid. Use when-ok/if-ok for APIs whose second value is an Odin
+// Use core/when-let/core/if-let for APIs that return an explicit bool such as ok, found,
+// present, or valid. Use core/when-ok/core/if-ok for APIs whose second value is an Odin
 // error object where the zero value means success.
 (package main)
 (import "core:fmt")
@@ -9,49 +9,49 @@
 (import os "core:os")
 
 (defn parse-demo-int [text: string] -> [value: int, ok: bool]
-  (cond
+  (core/cond
     (== text "one") (return 1 true)
     (== text "two") (return 2 true)
     :else (return 0 false)))
 
 (defn parse-label [text: string] -> string
-  ;; if-let checks the boolean result directly. There is no implicit truthiness
+  ;; core/if-let checks the boolean result directly. There is no implicit truthiness
   ;; and no special error handling here.
-  (if-let [value ok (parse-demo-int text)]
+  (core/if-let [value ok (parse-demo-int text)]
     (fmt.tprintf "parsed %d" value)
     "not parsed"))
 
 (defn parsed-total [a: string, b: string] -> int
   (let [total 0]
-    ;; when-let is useful when failure should simply skip a side effect or local
+    ;; core/core/when-let is useful when failure should simply skip a side effect or local
     ;; mutation. The binding still lowers to ordinary multi-return Odin.
-    (when-let [value ok (parse-demo-int a)]
+    (core/when-let [value ok (parse-demo-int a)]
       (set! total (+ total value)))
-    (when-let [value ok (parse-demo-int b)]
+    (core/when-let [value ok (parse-demo-int b)]
       (set! total (+ total value)))
     total))
 
 (defn read-byte-count [path: string] -> int
-  ;; if-ok is for Odin APIs that return an error value. On success, data is an
+  ;; core/core/core/if-ok is for Odin APIs that return an error value. On success, data is an
   ;; owned byte slice because we passed context.allocator, so cleanup stays in
   ;; the same branch that uses it.
-  (if-ok [data err (os.read_entire_file path context.allocator)]
+  (core/if-ok [data err (os.read_entire_file path context.allocator)]
     (do
       (defer (delete data))
       (len data))
     0))
 
 (defn print-byte-count [path: string]
-  ;; when-ok is the statement form. It is the expression-friendly spelling of
+  ;; core/core/when-ok is the statement form. It is the expression-friendly spelling of
   ;; "read, check err == {}, then use the owned result and delete it".
-  (when-ok [data err (os.read_entire_file path context.allocator)]
+  (core/when-ok [data err (os.read_entire_file path context.allocator)]
     (defer (delete data))
     (fmt.println (len data))))
 
 (defn main []
   (fmt.println (parse-label "one")))
 
-(comment
+(core/comment
   ;; Bool-return helpers answer "did this parse/find/query succeed?"
   (parse-label "one")
   ;; => parsed 1

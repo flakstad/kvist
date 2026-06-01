@@ -20,7 +20,7 @@
   (int status))
 
 (defn status-label [status: Http-Status] -> string
-  (switch status
+  (core/switch status
     .OK "ok"
     .Not-Found "not found"
     :else "unknown"))
@@ -39,9 +39,9 @@
 
 (defn main []
   (let [endpoint (Endpoint {:path "/health" :status .OK})]
-    (println (status-label (:status endpoint)))))
+    (core/println (status-label (:status endpoint)))))
 
-(comment
+(core/comment
   default-port
   ;; => 8080
 

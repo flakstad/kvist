@@ -25,8 +25,8 @@ Preferred writable places:
 
 ```clojure
 (set! total^ (+ total^ 1))
-(update! order^ :amount 42)
-(set! (get xs i) 9)
+(core/update! order^ :amount 42)
+(set! (core/get xs i) 9)
 ```
 
 That keeps `set!` uniform: write to the place you spelled in source.

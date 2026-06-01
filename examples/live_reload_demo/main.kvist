@@ -1,25 +1,26 @@
 (package live_reload_demo)
+(import core "kvist:core")
 
 (import fmt "core:fmt")
 (import kvist_live :odin "../../../src/kvist_live")
 
-(proc demo-command [runtime: (ptr kvist_live.Runtime)
+(defn demo-command [runtime: (ptr kvist_live.Runtime)
                     module: (ptr kvist_live.Live_Module)
                     command: (ptr kvist_live.Live_Command)
-                    args: (slice kvist_live.Value)] -> [value: kvist_live.Value, err: kvist_live.Runtime_Error, ok: bool]
+                    args: (core/slice kvist_live.Value)] -> [value: kvist_live.Value, err: kvist_live.Runtime_Error, ok: bool]
   (let [count: i64 0
         [entry found] (kvist_live.module_state_get module "count")]
-    (when (and found (== (:kind (:value entry^)) .Int))
+    (core/when (and found (== (:kind (:value entry^)) .Int))
       (set! count (:int_value (:value entry^))))
     (set! count (+ count 1))
     (let [next-count (kvist_live.value_int count)
           [message _] (kvist_live.module_state_get_string module "message")]
       (defer (kvist_live.value_delete (addr next-count)))
       (kvist_live.module_state_put module "count" next-count)
-      (fmt.println (fmt.tprintf "[%s] %s (count=%d)" (:version module^) message count))
+      (fmt.println (fmt.tprintf "[%s] %s (core/count=%d)" (:version module^) message count))
       (return (kvist_live.value_int count) (kvist_live.Runtime_Error {}) true))))
 
-(proc demo-init [runtime: (ptr kvist_live.Runtime)
+(defn demo-init [runtime: (ptr kvist_live.Runtime)
                  module: (ptr kvist_live.Live_Module)] -> [err: kvist_live.Runtime_Error, ok: bool]
   (kvist_live.register_command runtime
                                module
@@ -27,23 +28,23 @@
                                "Print the live message and increment count."
                                demo-command))
 
-(proc demo-migrate [runtime: (ptr kvist_live.Runtime)
+(defn demo-migrate [runtime: (ptr kvist_live.Runtime)
                     old-module: kvist_live.Live_Module
                     new-module: (ptr kvist_live.Live_Module)] -> [err: kvist_live.Runtime_Error, ok: bool]
   (let [[entry found] (kvist_live.state_entries_get_dynamic (:state old-module) "count")]
-    (when found
+    (core/when found
       (kvist_live.module_state_put new-module "count" (:value entry)))
     (kvist_live.module_state_put_string new-module "migrated-from" (:version old-module))
     (return (kvist_live.Runtime_Error {}) true)))
 
-(proc append-state-string [entries: (ptr (dynamic kvist_live.State_Entry)) key: string value: string]
+(defn append-state-string [entries: (ptr (dynamic kvist_live.State_Entry)) key: string value: string]
   (append entries
           (kvist_live.State_Entry {
             :key key
             :value (kvist_live.value_string value)
           })))
 
-(proc build-definition [version: string message: string] -> kvist_live.Module_Definition
+(defn build-definition [version: string message: string] -> kvist_live.Module_Definition
   (let [state: [dynamic]kvist_live.State_Entry []]
     (append-state-string (addr state) "message" message)
     (kvist_live.Module_Definition {
@@ -54,7 +55,7 @@
       :migrate demo-migrate
     })))
 
-(proc main []
+(defn main []
   (let [runtime (kvist_live.new_runtime (kvist_live.Runtime_Config {
                  :app_name "live-reload-demo"
                  :live_enabled true
@@ -75,10 +76,10 @@
               (do
                 (kvist_live.invoke_command (addr runtime) "tick" nil)
                 (let [[module loaded-ok] (kvist_live.loaded_module (addr runtime) "demo")]
-                  (when loaded-ok
+                  (core/when loaded-ok
                     (let [[migrated-from _] (kvist_live.module_state_get_string module "migrated-from")
                           [count-entry count-ok] (kvist_live.module_state_get module "count")]
-                      (when count-ok
+                      (core/when count-ok
                         (fmt.println
                           (fmt.tprintf "state survived reload: count=%d migrated-from=%s"
                                        (:int_value (:value count-entry^))

@@ -1,80 +1,224 @@
 (package arr)
+(import core "kvist:core")
 
 (defmacro count [xs]
   (quasiquote
-    (kvist/count (unquote xs))))
+    (kvist/core/count (unquote xs))))
 
 (defmacro map [f xs]
   (if (keyword? f)
     (quasiquote
       (kvist/arr/map (unquote f) (unquote xs)))
     (quasiquote
-      (map-impl (unquote f) (slice (unquote xs) 0)))))
+      (map-impl (unquote f) (kvist/core/slice (unquote xs) 0)))))
 
 (defmacro filter [pred xs]
   (if (keyword? pred)
     (quasiquote
       (kvist/arr/filter (unquote pred) (unquote xs)))
     (quasiquote
-      (filter-impl (unquote pred) (slice (unquote xs) 0)))))
+      (filter-impl (unquote pred) (kvist/core/slice (unquote xs) 0)))))
 
 (defmacro remove [pred xs]
   (if (keyword? pred)
     (quasiquote
       (kvist/arr/remove (unquote pred) (unquote xs)))
     (quasiquote
-      (remove-impl (unquote pred) (slice (unquote xs) 0)))))
+      (remove-impl (unquote pred) (kvist/core/slice (unquote xs) 0)))))
 
 (defmacro reduce [f init xs]
   (quasiquote
-    (reduce-impl (unquote f) (unquote init) (slice (unquote xs) 0))))
+    (reduce-impl (unquote f) (unquote init) (kvist/core/slice (unquote xs) 0))))
+
+(defmacro empty [elem-type & rest]
+  (if (= (kvist/count rest) 0)
+    (quasiquote
+      (kvist/arr/empty (unquote elem-type)))
+    (quasiquote
+      (kvist/arr/empty (unquote elem-type) (unquote (kvist/first rest))))))
+
+(defmacro dynamic [elem-type items]
+  (quasiquote
+    (kvist/arr/dynamic (unquote elem-type) (unquote items))))
+
+(defmacro fixed [elem-type items]
+  (quasiquote
+    (kvist/arr/fixed (unquote elem-type) (unquote items))))
+
+(defmacro map-indexed [f xs]
+  (quasiquote
+    (kvist/arr/map-indexed (unquote f) (unquote xs))))
+
+(defmacro keep [f xs]
+  (quasiquote
+    (kvist/arr/keep (unquote f) (unquote xs))))
+
+(defmacro mapcat [f xs]
+  (quasiquote
+    (kvist/arr/mapcat (unquote f) (unquote xs))))
+
+(defmacro push! [xs & values]
+  (quasiquote
+    (kvist/arr/push! (unquote xs) (splice values))))
+
+(defmacro map! [f xs]
+  (quasiquote
+    (kvist/arr/map! (unquote f) (unquote xs))))
+
+(defmacro map-indexed! [f xs]
+  (quasiquote
+    (kvist/arr/map-indexed! (unquote f) (unquote xs))))
+
+(defmacro filter! [pred xs]
+  (quasiquote
+    (kvist/arr/filter! (unquote pred) (unquote xs))))
+
+(defmacro remove! [pred xs]
+  (quasiquote
+    (kvist/arr/remove! (unquote pred) (unquote xs))))
+
+(defmacro keep! [f xs]
+  (quasiquote
+    (kvist/arr/keep! (unquote f) (unquote xs))))
+
+(defmacro into [out-type xs]
+  (quasiquote
+    (kvist/arr/into (unquote out-type) (unquote xs))))
+
+(defmacro into! [target xs]
+  (quasiquote
+    (kvist/arr/into! (unquote target) (unquote xs))))
+
+(defmacro interpose [sep xs]
+  (quasiquote
+    (kvist/arr/interpose (unquote sep) (unquote xs))))
+
+(defmacro interleave [xs ys]
+  (quasiquote
+    (kvist/arr/interleave (unquote xs) (unquote ys))))
+
+(defmacro reverse [xs]
+  (quasiquote
+    (kvist/arr/reverse (unquote xs))))
+
+(defmacro reverse! [xs]
+  (quasiquote
+    (kvist/arr/reverse! (unquote xs))))
+
+(defmacro shuffle [pick xs]
+  (quasiquote
+    (kvist/arr/shuffle (unquote pick) (unquote xs))))
+
+(defmacro shuffle! [pick xs]
+  (quasiquote
+    (kvist/arr/shuffle! (unquote pick) (unquote xs))))
 
 (defmacro get [xs index]
   (quasiquote
-    (kvist/get (unquote xs) (unquote index))))
+    (kvist/core/get (unquote xs) (unquote index))))
 
 (defmacro slice [xs start & rest]
   (if (= (kvist/count rest) 0)
     (quasiquote
-      (kvist/slice (unquote xs) (unquote start)))
+      (kvist/core/slice (unquote xs) (unquote start)))
     (quasiquote
-      (kvist/slice (unquote xs) (unquote start) (unquote (kvist/first rest))))))
+      (kvist/core/slice (unquote xs) (unquote start) (unquote (kvist/first rest))))))
 
 (defmacro first [xs]
   (quasiquote
-    (kvist/get (unquote xs) 0)))
+    (kvist/core/get (unquote xs) 0)))
 
 (defmacro second [xs]
   (quasiquote
-    (get (unquote xs) 1)))
+    (kvist/core/get (unquote xs) 1)))
 
 (defmacro nth [xs index]
   (quasiquote
-    (kvist/get (unquote xs) (unquote index))))
+    (kvist/core/get (unquote xs) (unquote index))))
 
 (defmacro last [xs]
   (quasiquote
-    (kvist/get (unquote xs) (- (kvist/count (unquote xs)) 1))))
+    (kvist/core/get (unquote xs) (- (kvist/core/count (unquote xs)) 1))))
 
 (defmacro rest [xs]
   (quasiquote
-    (slice (unquote xs) 1)))
+    (kvist/core/slice (unquote xs) 1)))
 
 (defmacro take [n xs]
   (quasiquote
-    (slice (unquote xs) 0 (unquote n))))
+    (kvist/core/slice (unquote xs) 0 (unquote n))))
 
 (defmacro drop [n xs]
   (quasiquote
-    (slice (unquote xs) (unquote n))))
+    (kvist/core/slice (unquote xs) (unquote n))))
 
 (defmacro drop-last [n xs]
   (quasiquote
-    (slice (unquote xs) 0 (- (kvist/count (unquote xs)) (unquote n)))))
+    (kvist/core/slice (unquote xs) 0 (- (kvist/core/count (unquote xs)) (unquote n)))))
+
+(defmacro split-at [n xs]
+  (quasiquote
+    (kvist/arr/split-at (unquote n) (unquote xs))))
+
+(defmacro partition [n xs]
+  (quasiquote
+    (kvist/arr/partition (unquote n) (unquote xs))))
+
+(defmacro partition-all [n xs]
+  (quasiquote
+    (kvist/arr/partition-all (unquote n) (unquote xs))))
+
+(defmacro partition-by [f xs]
+  (quasiquote
+    (kvist/arr/partition-by (unquote f) (unquote xs))))
+
+(defmacro index-by [f xs]
+  (quasiquote
+    (kvist/arr/index-by (unquote f) (unquote xs))))
+
+(defmacro group-by [f xs]
+  (quasiquote
+    (kvist/arr/group-by (unquote f) (unquote xs))))
+
+(defmacro count-by [f xs]
+  (quasiquote
+    (kvist/arr/count-by (unquote f) (unquote xs))))
+
+(defmacro sum-by [key-f value-f xs]
+  (quasiquote
+    (kvist/arr/sum-by (unquote key-f) (unquote value-f) (unquote xs))))
+
+(defmacro frequencies [xs]
+  (quasiquote
+    (kvist/arr/frequencies (unquote xs))))
+
+(defmacro distinct [xs]
+  (quasiquote
+    (kvist/arr/distinct (unquote xs))))
+
+(defmacro distinct-by [f xs]
+  (quasiquote
+    (kvist/arr/distinct-by (unquote f) (unquote xs))))
+
+(defmacro sort [xs]
+  (quasiquote
+    (kvist/arr/sort (unquote xs))))
+
+(defmacro sort! [xs]
+  (quasiquote
+    (kvist/arr/sort! (unquote xs))))
+
+(defmacro sort-by [f xs]
+  (quasiquote
+    (kvist/arr/sort-by (unquote f) (unquote xs))))
+
+(defmacro sort-by! [f xs]
+  (quasiquote
+    (kvist/arr/sort-by! (unquote f) (unquote xs))))
 
 (defmacro butlast [xs]
   (quasiquote
-    (slice (unquote xs) 0 (- (kvist/count (unquote xs)) 1))))
+    (kvist/core/slice (unquote xs) 0 (- (kvist/core/count (unquote xs)) 1))))
 
 (defmacro range [& rest]
   (if (= (kvist/count rest) 1)
@@ -87,12 +231,12 @@
         (range-impl (unquote (kvist/first rest)) (unquote (kvist/nth rest 1)) (unquote (kvist/nth rest 2)))))))
 
 (defn- range-impl [start: int, end: int, step: int] -> [dynamic]int #force_inline
-  (when (== step 0)
+  (core/when (== step 0)
     (return (arr/empty int)))
   (let [count 0]
     (if (and (> step 0) (< start end))
       (set! count (+ (/ (- (- end start) 1) step) 1))
-      (when (and (< step 0) (> start end))
+      (core/when (and (< step 0) (> start end))
         (set! count (+ (/ (- (- start end) 1) (- step)) 1))))
     (let [out (arr/empty int count)
           i start]
@@ -106,22 +250,22 @@
       out)))
 
 (defn- map-impl [f: (proc [x: $T] -> $U), xs: []T] -> [dynamic]U #force_inline
-  (let [out (arr/empty U (count xs))]
+  (let [out (arr/empty U (core/count xs))]
     (for [x xs]
       (arr/push! out (f x)))
     out))
 
 (defn- filter-impl [pred: (proc [x: $T] -> bool), xs: []T] -> [dynamic]T #force_inline
-  (let [out (arr/empty T (count xs))]
+  (let [out (arr/empty T (core/count xs))]
     (for [x xs]
-      (when (pred x)
+      (core/when (pred x)
         (arr/push! out x)))
     out))
 
 (defn- remove-impl [pred: (proc [x: $T] -> bool), xs: []T] -> [dynamic]T #force_inline
-  (let [out (arr/empty T (count xs))]
+  (let [out (arr/empty T (core/count xs))]
     (for [x xs]
-      (when (not (pred x))
+      (core/when (not (pred x))
         (arr/push! out x)))
     out))
 
@@ -132,17 +276,17 @@
     acc))
 
 (proc take-nth [n: int, xs: []$T] -> [dynamic]T #force_inline
-  (when (<= n 0)
+  (core/when (<= n 0)
     (return (arr/empty T)))
-  (let [out (arr/empty T (/ (+ (count xs) (- n 1)) n))
+  (let [out (arr/empty T (/ (+ (core/count xs) (- n 1)) n))
         i 0]
-    (for (< i (count xs))
-      (arr/push! out (get xs i))
+    (for (< i (core/count xs))
+      (arr/push! out (core/get xs i))
       (set! i (+ i n)))
     out))
 
 (proc repeat [n: int, value: $T] -> [dynamic]T #force_inline
-  (when (<= n 0)
+  (core/when (<= n 0)
     (return (arr/empty T)))
   (let [out (arr/empty T n)
         i 0]
@@ -152,7 +296,7 @@
     out))
 
 (proc repeatedly [n: int, f: (proc [] -> $T)] -> [dynamic]T #force_inline
-  (when (<= n 0)
+  (core/when (<= n 0)
     (return (arr/empty T)))
   (let [out (arr/empty T n)
         i 0]
@@ -162,7 +306,7 @@
     out))
 
 (proc iterate [n: int, f: (proc [x: $T] -> T), init: T] -> [dynamic]T #force_inline
-  (when (<= n 0)
+  (core/when (<= n 0)
     (return (arr/empty T)))
   (let [out (arr/empty T n)
         current init
@@ -174,13 +318,13 @@
     out))
 
 (proc cycle [n: int, xs: []$T] -> [dynamic]T #force_inline
-  (let [size (count xs)]
-    (when (or (<= n 0) (== size 0))
+  (let [size (core/count xs)]
+    (core/when (or (<= n 0) (== size 0))
       (return (arr/empty T)))
     (let [out (arr/empty T n)
           i 0]
       (for (< i n)
-        (arr/push! out (get xs (% i size)))
+        (arr/push! out (core/get xs (% i size)))
         (set! i (+ i 1)))
       out)))
 
@@ -189,40 +333,40 @@
     (quasiquote
       (kvist/arr/take-while (unquote pred) (unquote xs)))
     (quasiquote
-      (take-while-impl (unquote pred) (slice (unquote xs) 0)))))
+      (take-while-impl (unquote pred) (kvist/core/slice (unquote xs) 0)))))
 
 (defmacro drop-while [pred xs]
   (if (keyword? pred)
     (quasiquote
       (kvist/arr/drop-while (unquote pred) (unquote xs)))
     (quasiquote
-      (drop-while-impl (unquote pred) (slice (unquote xs) 0)))))
+      (drop-while-impl (unquote pred) (kvist/core/slice (unquote xs) 0)))))
 
 (defmacro some? [pred xs]
   (if (keyword? pred)
     (quasiquote
       (kvist/arr/some? (unquote pred) (unquote xs)))
     (quasiquote
-      (some-impl (unquote pred) (slice (unquote xs) 0)))))
+      (some-impl (unquote pred) (kvist/core/slice (unquote xs) 0)))))
 
 (defmacro every? [pred xs]
   (if (keyword? pred)
     (quasiquote
       (kvist/arr/every? (unquote pred) (unquote xs)))
     (quasiquote
-      (every-impl (unquote pred) (slice (unquote xs) 0)))))
+      (every-impl (unquote pred) (kvist/core/slice (unquote xs) 0)))))
 
 (defmacro find [pred xs]
   (if (keyword? pred)
     (quasiquote
       (kvist/arr/find (unquote pred) (unquote xs)))
     (quasiquote
-      (find-impl (unquote pred) (slice (unquote xs) 0)))))
+      (find-impl (unquote pred) (kvist/core/slice (unquote xs) 0)))))
 
 (defn- some-impl [pred: (proc [x: $T] -> bool), xs: []T] -> bool #force_inline
   (let [result false]
     (for [x xs]
-      (when (pred x)
+      (core/when (pred x)
         (do
           (set! result true)
           (break))))
@@ -231,7 +375,7 @@
 (defn- every-impl [pred: (proc [x: $T] -> bool), xs: []T] -> bool #force_inline
   (let [result true]
     (for [x xs]
-      (when (not (pred x))
+      (core/when (not (pred x))
         (do
           (set! result false)
           (break))))
@@ -239,18 +383,18 @@
 
 (defn- find-impl [pred: (proc [x: $T] -> bool), xs: []T] -> [value: T, ok: bool] #force_inline
   (for [x xs]
-    (when (pred x)
+    (core/when (pred x)
       (return x true)))
   (return value false))
 
 (defn- take-while-impl [pred: (proc [x: $T] -> bool), xs: []T] -> []T #force_inline
   (for [x i xs]
-    (when (not (pred x))
-      (return (slice xs 0 i))))
+    (core/when (not (pred x))
+      (return (core/slice xs 0 i))))
   xs)
 
 (defn- drop-while-impl [pred: (proc [x: $T] -> bool), xs: []T] -> []T #force_inline
   (for [x i xs]
-    (when (not (pred x))
-      (return (slice xs i))))
-  (slice xs (count xs)))
+    (core/when (not (pred x))
+      (return (core/slice xs i))))
+  (core/slice xs (core/count xs)))

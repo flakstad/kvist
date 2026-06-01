@@ -18,21 +18,21 @@
                            :data-ratio ratio
                            :hidden enabled?
                            :data-state (if enabled? "ready" "hidden")
-                           :data-archived (when archived? "true")}
+                           :data-archived (core/when archived? "true")}
                 [:h1 title]
                 [:<>
                  [:h2 title]
                  [:p (+ count 10)]]
                 [:p (status-label enabled?)]
                 [:p (+ count 1)]
-                (when archived?
+                (core/when archived?
                   [:p "Archived"])
                 nil
                 (if enabled?
                   "Visible"
                   "Hidden")])
         html (hiccup/render page) defer]
-    (println html)
+    (core/println html)
     true))
 
 (defn main []

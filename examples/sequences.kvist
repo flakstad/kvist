@@ -1,5 +1,6 @@
 // Exercises core sequence helpers over structs, enums, and strings.
 (package main)
+(import core "kvist:core")
 (import arr "kvist:arr")
 
 (defenum Status [
@@ -67,7 +68,7 @@
                            (User {:name "Grace" :age 45 :status .Active :verified true})
                            (User {:name "Edsger" :age 72 :status .Archived :verified false})])
         users-by-name (arr/index-by :name users)
-        ada (get users-by-name "Ada")]
+        ada (core/get users-by-name "Ada")]
     (defer (delete users-by-name))
     (:age ada)))
 
@@ -86,9 +87,9 @@
                            (User {:name "Grace" :age 45 :status .Active :verified true})
                            (User {:name "Edsger" :age 72 :status .Archived :verified false})])
         by-status (arr/group-by :status users)
-        active-users (get by-status .Active)]
+        active-users (core/get by-status .Active)]
     (defer
-      (each [_ group by-status]
+      (for [_ group by-status]
         (delete group))
       (delete by-status))
     (len active-users)))
@@ -138,9 +139,9 @@
     (:name first-adult)))
 
 (defn main []
-  (println (active-count)))
+  (core/println (active-count)))
 
-(comment
+(core/comment
   (:name (User {:name "Ada" :age 36 :status .Active :verified true}))
   ;; => Ada
 

@@ -208,7 +208,7 @@ live_module_reloader_detects_imported_file_changes :: proc(t: ^testing.T) {
         return
     }
 
-    helper_write_err := os.write_entire_file(helper_path, `(def value "before")`)
+    helper_write_err := os.write_entire_file(helper_path, `(defconst value "before")`)
     testing.expect_value(t, helper_write_err == nil, true)
     if helper_write_err != nil {
         return
@@ -233,7 +233,7 @@ live_module_reloader_detects_imported_file_changes :: proc(t: ^testing.T) {
     testing.expect_value(t, reloader.has_loaded, true)
 
     time.sleep(2 * time.Millisecond)
-    helper_update_err := os.write_entire_file(helper_path, `(def value "after")`)
+    helper_update_err := os.write_entire_file(helper_path, `(defconst value "after")`)
     testing.expect_value(t, helper_update_err == nil, true)
     if helper_update_err != nil {
         return
@@ -472,11 +472,11 @@ live_loader_macroexpands_live_module_forms :: proc(t: ^testing.T) {
 (defmacro expose-command [name]
   (quasiquote
     (live/command (unquote name))))
-(def base 1)
+(defconst base 1)
 (defn add-one [value]
   (+ value 1))
 (defn tick []
-  (-> base
+  (core/-> base
       add-one
       add-one))
 (expose-command tick)`)
@@ -647,7 +647,7 @@ live_runtime_runs_source_defined_migrate_function :: proc(t: ^testing.T) {
     defer kvist_live.runtime_delete(&runtime)
 
     initial_def := must_parse_module(t, `(live/module {:name "reloadable" :version "v1"})
-(def counter-key "run-count")
+(defconst counter-key "run-count")
 (defn tick []
   (state/inc! counter-key))
 (live/command tick)`)
@@ -664,12 +664,12 @@ live_runtime_runs_source_defined_migrate_function :: proc(t: ^testing.T) {
     testing.expect_value(t, result_1.int_value, i64(1))
 
     next_def := must_parse_module(t, `(live/module {:name "reloadable" :version "v2"})
-(def counter-key "tick-count")
+(defconst counter-key "tick-count")
 (defn migrate []
-  (when (reload/from-version)
-    (when (= (state/get counter-key) nil)
+  (core/when (reload/from-version)
+    (core/when (= (state/get counter-key) nil)
       (let [old-count (reload/state-get "run-count")]
-        (when old-count
+        (core/when old-count
           (state/set! counter-key old-count))))))
 (defn tick []
   (state/inc! counter-key))
@@ -754,7 +754,7 @@ live_runtime_exposes_command_args_and_hook_payloads :: proc(t: ^testing.T) {
     defer kvist_live.runtime_delete(&runtime)
 
     def := must_parse_module(t, `(live/module {:name "arg-demo" :version "v1"})
-(def hook-result-key "hook-result")
+(defconst hook-result-key "hook-result")
 (defn after-command []
   (state/set! hook-result-key
               (str (payload/get 0) " / count=" (payload/count))))
@@ -797,7 +797,7 @@ live_runtime_resolves_module_bindings_as_symbols :: proc(t: ^testing.T) {
     defer kvist_live.runtime_delete(&runtime)
 
     def := must_parse_module(t, `(live/module {:name "bindings" :version "v1"})
-(def message "hello")
+(defconst message "hello")
 (defconst bonus 2)
 (defn suffix [] " world")
 (live/command tick {}
@@ -844,7 +844,7 @@ live_runtime_uses_same_named_defn_for_entrypoints :: proc(t: ^testing.T) {
     testing.expect_value(t, capability_err.message, "")
 
     def := must_parse_module(t, `(live/module {:name "entrypoints" :version "v1"})
-(def greeting "hello")
+(defconst greeting "hello")
 (defn tick []
   (str greeting " from tick"))
 (defn after-command []
@@ -950,7 +950,7 @@ live_loader_resolves_helper_imports_from_path :: proc(t: ^testing.T) {
 
     root_source := `(live/module {:name "imports" :version "v1"})
 (import "helpers")
-(def message "hello")
+(defconst message "hello")
 (defn tick []
   (render message))
 (live/command tick)`
@@ -1004,7 +1004,7 @@ live_loader_accepts_shipped_live_macro_package :: proc(t: ^testing.T) {
 
     root_source := `(import live "kvist:live")
 (live/defmodule {:name "macro-package" :version "v1"}
-  (def counter-key "count")
+  (defconst counter-key "count")
   (live/defcommand tick
     (state/inc! counter-key))
   (live/defhook after-tick
@@ -1059,7 +1059,7 @@ live_runtime_evaluates_cond_clauses :: proc(t: ^testing.T) {
     defer kvist_live.runtime_delete(&runtime)
 
     def := must_parse_module(t, `(live/module {:name "cond-demo" :version "v1"})
-(def level 3)
+(defconst level 3)
 (defn tick []
   (cond
     [(= level 1) "one"]
@@ -1109,8 +1109,8 @@ live_runtime_runs_source_defined_lifecycle_functions :: proc(t: ^testing.T) {
     testing.expect_value(t, capability_err.message, "")
 
     def := must_parse_module(t, `(live/module {:name "lifecycle" :version "v1"})
-(def init-message "booted")
-(def shutdown-message "stopped")
+(defconst init-message "booted")
+(defconst shutdown-message "stopped")
 (defn init []
   (state/set! "init-message-seen" init-message))
 (defn shutdown []
@@ -1142,8 +1142,8 @@ live_runtime_runs_source_defined_lifecycle_functions :: proc(t: ^testing.T) {
     testing.expect_value(t, init_seen, "booted")
 
     next_def := must_parse_module(t, `(live/module {:name "lifecycle" :version "v2"})
-(def init-message "rebooted")
-(def shutdown-message "stopped")
+(defconst init-message "rebooted")
+(defconst shutdown-message "stopped")
 (defn init []
   (state/set! "init-message-seen" init-message))
 (defn shutdown []

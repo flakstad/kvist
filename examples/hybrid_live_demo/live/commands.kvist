@@ -13,17 +13,17 @@
   {:name "hybrid-inspector"
    :version "v1"}
 
-  (def note "live layer inspecting host-owned hot state")
-  (def counter-key "inspect-count")
+  (defconst note "live layer inspecting host-owned hot state")
+  (defconst counter-key "inspect-count")
 
   (defn init []
     (host/call "host.log" "hybrid live module initialized"))
 
   (defn migrate []
     (let [old-count (reload/state-get counter-key)]
-      (when old-count
+      (core/when old-count
         (state/set! counter-key old-count)))
-    (when (reload/from-version)
+    (core/when (reload/from-version)
       (host/call "host.log"
                  (str "hybrid live module reloaded from "
                       (reload/from-version)

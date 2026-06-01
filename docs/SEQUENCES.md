@@ -136,19 +136,20 @@ These helpers are already in scope and should remain small:
 (set/add! s value)
 (set/remove s value)
 (set/remove! s value)
-(empty? xs)
-(count xs)
-(get m k default)
-(contains? collection key)
+(core/empty? xs)
+(core/count xs)
+(core/get m k default)
+(core/contains? collection key)
 ```
 
-Only this small cross-family kernel stays bare: `slice`, `get`, `empty?`,
-`count`, and `contains?`. Other collection operations should use explicit
-package names such as `arr/...`, `map/...`, `str/...`, or `set/...`.
+Cross-family collection helpers live in `kvist:core`: `core/count`,
+`core/empty?`, `core/get`, `core/slice`, and `core/contains?`. Other
+collection operations should use explicit package names such as `arr/...`,
+`map/...`, `str/...`, or `set/...`.
 
 The access and trimming helpers use the direct Odin representation where
 possible. `arr/first`, `arr/second`, `arr/last`, and `arr/nth` lower to indexing.
-`empty?` lowers to `len`. `arr/rest`, `arr/take`, `arr/drop`, `arr/butlast`,
+`core/empty?` lowers to `len`. `arr/rest`, `arr/take`, `arr/drop`, `arr/butlast`,
 `arr/drop-last`, `arr/take-while`, and `arr/drop-while` return non-owning slice
 views. Three-argument `get` is a map
 helper: it uses Odin's
@@ -203,45 +204,43 @@ into the same dynamic array; the value type must match the array element type.
 target. It lowers directly to Odin `append(&target, ..xs)`-style code, mutates
 the target, and does not create a new owned result.
 
-String helpers stay close to Odin `core:strings`. `kvist:str` is now mostly
-source-backed: `str/count`, `str/get`, `str/slice`, `str/contains?`,
+String helpers stay close to Odin `core:strings`. `kvist:str` is a shipped
+`.kvist` package. `str/count`, `str/get`, `str/slice`, `str/contains?`,
 `str/split`, `str/join`, `str/trim`, `str/trim-prefix`, `str/trim-suffix`,
 `str/starts-with?`, `str/ends-with?`, `str/index-of`, `str/last-index-of`,
-`str/replace`, `str/lower`, and `str/upper` are shipped as ordinary `.kvist`
-source and still lower to direct indexing, slicing, or `strings.*` calls.
+`str/replace`, `str/lower`, and `str/upper` lower to direct indexing,
+slicing, or `strings.*` calls.
 `str/split` returns an owned dynamic array of string slices. `str/join` and
 `str/replace` return owned strings and should be deleted or returned like
 other owned values.
 
 Set helpers stay explicit about the underlying Odin representation: a set is
-still `map[T]bool` in the emitted code. `kvist:set` is now a hybrid package:
-helpers such as `set/empty`, `set/of`, `set/contains?`, `set/union`,
+`map[T]bool` in the emitted code. `kvist:set` is a shipped `.kvist` package.
+Helpers such as `set/empty`, `set/of`, `set/contains?`, `set/union`,
 `set/intersection`, `set/difference`, `set/union!`, `set/intersection!`,
 `set/difference!`, `set/add`, `set/add!`, `set/remove`, `set/remove!`,
-`set/subset?`, `set/superset?`, and `set/disjoint?` are shipped as ordinary
-`.kvist` source and lower to tight loops, direct constructors, or direct
-in-place mutations over that map representation.
+`set/subset?`, `set/superset?`, and `set/disjoint?` lower to tight loops,
+direct constructors, or direct in-place mutations over that map
+representation.
 
-Map helpers follow the same hybrid rule. `kvist:map` now ships source-backed
-helpers for `map/empty`, `map/of`, `map/get`, `map/contains?`, `map/keys`,
-`map/vals`, `map/zip`, `map/merge`, and `map/merge!`. Those lower to plain
-Odin constructors, membership checks, preallocated dynamic arrays, raw
-indexing, optional-default helpers, direct key/value loops, or direct in-place
-mutation.
+Map helpers follow the same hybrid rule. `kvist:map` is a shipped `.kvist`
+package with helpers such as `map/empty`, `map/of`, `map/get`,
+`map/contains?`, `map/keys`, `map/vals`, `map/zip`, `map/assoc`,
+`map/assoc!`, `map/dissoc`, `map/dissoc!`, `map/merge`, and `map/merge!`.
+Those lower to plain Odin
+constructors, membership checks, preallocated dynamic arrays, raw indexing,
+optional-default helpers, direct key/value loops, or direct in-place mutation.
 
-`kvist:arr` is only partly source-backed so far. The current shipped source
-subset is the indexing/slicing macro layer for `arr/count`, `arr/get`,
-`arr/slice`, `arr/first`, `arr/second`, `arr/nth`, `arr/last`, `arr/rest`,
-`arr/take`, `arr/drop`, `arr/drop-last`, `arr/butlast`, `arr/range`,
-`arr/take-nth`, `arr/repeat`, `arr/repeatedly`, `arr/iterate`, `arr/cycle`,
-the ordinary proc-callback path for `arr/map`, `arr/filter`, `arr/remove`,
-and `arr/reduce`, plus the ordinary proc-predicate path for `arr/take-while`,
-`arr/drop-while`, `arr/find`, `arr/some?`, and `arr/every?` via source-backed
-`#force_inline` loops. Those helpers still lower to direct indexing, slicing,
-or tight `for` loops, while keyword-field shorthand and the broader
-sequence-helper surface remain compiler-lowered until there is a safe way to
-preserve the same array-family coverage and allocation behavior in ordinary
-package code.
+`kvist:arr` is a shipped `.kvist` package with the broad sequence helper
+surface. Many helpers are implemented directly in package source, including
+the indexing/slicing layer, the ordinary proc-callback path for `arr/map`,
+`arr/filter`, `arr/remove`, and `arr/reduce`, and the ordinary proc-predicate
+path for `arr/take-while`, `arr/drop-while`, `arr/find`, `arr/some?`, and
+`arr/every?` via `#force_inline` loops. Constructors like `arr/empty`,
+`arr/dynamic`, `arr/fixed`, mutators like `arr/push!`, `arr/map!`,
+`arr/filter!`, `arr/remove!`, `arr/keep!`, and the wider grouping,
+partitioning, and sorting helper surface still lower through a smaller
+intrinsic substrate where that keeps codegen and allocation behavior direct.
 
 Keyword callbacks are field-access shorthand in the supported higher-order
 helpers:
@@ -258,7 +257,7 @@ helpers:
 (arr/sort-by! :age users)
 (arr/filter :verified users)
 (arr/remove :archived users)
-(->> users
+(core/->> users
      (arr/filter :verified)
      (arr/map :name))
 ```
@@ -272,7 +271,7 @@ The default sequence helpers prefer clear ownership over minimum allocation. A
 chain of owned helpers allocates at each owned step:
 
 ```clojure
-(->> users
+(core/->> users
      (arr/filter active?)
      (arr/map :name)
      (arr/sort))
@@ -295,7 +294,7 @@ For hot paths, prefer one of these shapes:
 - use bang helpers such as `arr/sort!`, `arr/reverse!`, `arr/shuffle!`, `arr/map!`, `arr/filter!`,
   `arr/remove!`, `arr/keep!`, `arr/into!`, and `map/merge!` when mutating existing storage is the
   right Odin choice;
-- write an explicit `each` loop when one pass and no intermediate collection is
+- write an explicit `for` loop when one pass and no intermediate collection is
   needed;
 - avoid `arr/group-by` when only aggregate totals are needed. Use `arr/count-by` or
   `arr/sum-by` for simple aggregate maps, or accumulate directly into maps for
@@ -337,9 +336,9 @@ detail before a scalar result, or when the update needs custom state:
 ```clojure
 (let [revenue-by-region (make map[int]int)
       count-by-region (make map[int]int)]
-  (each [order orders]
+  (for [order orders]
     (let [settled (settle-order order)]
-      (when (settled? settled)
+      (core/when (settled? settled)
         (set! (get revenue-by-region (:region settled))
               (+ (get revenue-by-region (:region settled))
                  (:amount settled)))
@@ -449,7 +448,7 @@ committing to it now.
 Today:
 
 ```clojure
-(->> users
+(core/->> users
      (arr/filter active?)
      (arr/map :name)
      (arr/take 10))
@@ -472,7 +471,7 @@ Threading forms should remain part of the language because they make nested
 data flow much easier to read:
 
 ```clojure
-(->> users
+(core/->> users
      (arr/filter active?)
      (arr/map :name)
      (arr/take 10))

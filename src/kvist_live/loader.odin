@@ -336,7 +336,7 @@ read_live_top_forms :: proc(source: string, current_path: string = "") -> (forms
         return nil, kvist.clone_compile_error(input_err, result_allocator), false
     }
 
-    expanded_forms, macros, expand_err, expand_ok := kvist.macroexpand_top_forms(macro_input[:], true)
+    expanded_forms, macros, expand_err, expand_ok := kvist.macroexpand_top_forms(macro_input[:], true, current_path)
     if !expand_ok {
         return nil, kvist.clone_compile_error(expand_err, result_allocator), false
     }
@@ -505,7 +505,7 @@ module_definition_from_forms :: proc(accum: ^Loader_Accum, forms: []kvist.CST_To
             continue
         }
 
-        if !kvist.is_symbol(form.items[0], "defconst") && !kvist.is_symbol(form.items[0], "defvar") && !kvist.is_symbol(form.items[0], "def") {
+        if !kvist.is_symbol(form.items[0], "defconst") && !kvist.is_symbol(form.items[0], "defvar") {
             continue
         }
 

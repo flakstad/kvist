@@ -4,6 +4,7 @@
 // example. It exposes Odin structs/arrays and simple procs; Kvist calls them
 // directly instead of adding an abstraction layer.
 (package main)
+(import core "kvist:core")
 (import "core:fmt")
 (import easy "vendor:stb/easy_font")
 
@@ -19,12 +20,12 @@
   ;; to the library, and use the returned count.
   (let [color (new easy.Color [255 255 255 255])
         quads (new [128]easy.Quad [])]
-    (easy.print (f32 0) (f32 0) "Kvist" color (slice quads))))
+    (easy.print (f32 0) (f32 0) "Kvist" color (core/slice quads))))
 
 (defn main []
   (fmt.println (text-width) (text-height) (quad-count)))
 
-(comment
+(core/comment
   ;; These are safe to eval in a terminal. They do not open a window or allocate
   ;; long-lived resources.
 

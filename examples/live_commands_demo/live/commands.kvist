@@ -7,7 +7,7 @@
 // - (live/defmodule {...} ...)
 // - (live/defcommand name ...)
 // - (live/defhook name ...)
-// - top-level def / defconst / defvar literals
+// - top-level defconst / defvar literals
 // - ordinary top-level macro expansion before live loading
 // - source-defined (defn migrate []) on reload
 
@@ -19,23 +19,23 @@
   {:name "commands"
    :version "v1"}
 
-  (def message "hello from the live module")
-  (def hook-message "hook fired after the command")
-  (def counter-key "run-count")
+  (defconst message "hello from the live module")
+  (defconst hook-message "hook fired after the command")
+  (defconst counter-key "run-count")
 
   (defn init []
     (host/call "host.log" "live module initialized"))
 
   (defn migrate []
-    (when (reload/from-version)
+    (core/when (reload/from-version)
       (let [old-run-count (reload/state-get "run-count")
             old-tick-count (reload/state-get "tick-count")]
         (if (= counter-key "tick-count")
-          (when old-run-count
+          (core/when old-run-count
             (state/set! counter-key old-run-count)
             (host/call "host.log"
                        (str "migrated counter from run-count to " counter-key)))
-          (when old-tick-count
+          (core/when old-tick-count
             (state/set! counter-key old-tick-count)
             (host/call "host.log"
                        (str "migrated counter from tick-count to " counter-key)))))))

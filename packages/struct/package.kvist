@@ -1,0 +1,9 @@
+(package struct)
+
+(defmacro fields [target]
+  (quasiquote
+    (kvist/struct/fields (unquote target))))
+
+(defmacro types [target]
+  (quasiquote
+    (kvist/struct/types (unquote target))))

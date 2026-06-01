@@ -18,10 +18,10 @@ Kvist should not rely on hidden cleanup to make this work. The ownership model
 stays explicit. The compiler may help with diagnostics, but user code should be
 written as if ownership is the programmer's responsibility.
 
-`tap>` prints and returns its value. It does not allocate an owned result by
-itself, but ownership passes through it: `(tap> (arr/map f xs))` is still an owned
+`core/tap>` prints and returns its value. It does not allocate an owned result by
+itself, but ownership passes through it: `(core/tap> (arr/map f xs))` is still an owned
 result and must be bound or returned. The same is true in threaded code:
-`(->> xs (arr/map f) (tap> :mapped))` still returns an owned dynamic array.
+`(core/->> xs (arr/map f) (core/tap> :mapped))` still returns an owned dynamic array.
 
 ## Delete These
 
@@ -163,7 +163,7 @@ suggest the obvious next step, such as adding `(defer (delete xs))`, returning
 the value directly, or cleaning up before `set!`.
 
 The warning pass should also stay conservative around branches: if every `if`,
-`cond`, or `switch` branch clearly deletes or returns the owned local, the
+`core/cond`, or `core/switch` branch clearly deletes or returns the owned local, the
 compiler should not warn. If one branch leaks, it should.
 
 These warnings should avoid cases where ownership is ambiguous, especially:
@@ -202,17 +202,17 @@ These are scalar values, plain values, or borrowed views:
 (some? pred xs)
 (every? pred xs)
 (arr/reduce f init xs)
-(empty? xs)
-(count xs)
-(contains? collection key)
+(core/empty? xs)
+(core/count xs)
+(core/contains? collection key)
 (io/write path data)
-(tap> value)
-(tap> :label value)
+(core/tap> value)
+(core/tap> :label value)
 ```
 
-Only the small cross-family kernel remains bare here: `slice`, `get`,
-`empty?`, `count`, and `contains?`. Other collection helpers should use their
-explicit package names.
+Cross-family collection helpers live in `kvist:core`: `core/count`,
+`core/empty?`, and `core/contains?`. `kvist:core` is auto-exposed, so these
+can also be written bare. `core/...` remains the canonical qualified home.
 
 `io/write` lowers to `os.write_entire_file(path, data)` and returns `os.Error`.
 It does not allocate an owned result.
@@ -375,7 +375,7 @@ levels:
 ```clojure
 (let [groups (arr/group-by :status users)]
   (defer
-    (each [_ group groups]
+    (for [_ group groups]
       (delete group))
     (delete groups))
   ...)
@@ -433,7 +433,7 @@ step allocates, Kvist lowers it to a generated temporary and emits
 `defer delete(...)` for that generated value.
 
 ```clojure
-(let [total (->> xs
+(let [total (core/->> xs
                  (arr/map inc)
                  (arr/filter even?)
                  (arr/reduce add 0))]
@@ -454,5 +454,5 @@ Examples should be production-style:
 - Every local owned dynamic array or map should have a nearby `defer delete`.
 - Do not delete borrowed views.
 - Do not delete values that are returned to transfer ownership.
-- Prefer small named procs plus `(comment ...)` eval examples over large `main`
+- Prefer small named procs plus `(core/comment ...)` eval examples over large `main`
   procedures that only print everything.

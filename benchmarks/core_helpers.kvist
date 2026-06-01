@@ -1,0 +1,118 @@
+// Focused benchmark for canonical core/* helper lowering vs direct Odin.
+(package main)
+(import core "kvist:core")
+(import arr "kvist:arr")
+(import "core:fmt")
+(import mem "core:mem")
+(import time "core:time")
+
+(odin "N :: 50_000
+REPS :: 400
+KEY_COUNT :: 20_000
+STRIDE :: 7")
+
+(proc report [name: string, elapsed: time.Duration, checksum: int, track: ^mem.Tracking-Allocator]
+  (fmt.printfln "%-17s %9.3f ms allocs=%8v total=%10v peak=%9v live=%v checksum=%v"
+                name
+                (time.duration-milliseconds elapsed)
+                track.total-allocation-count
+                track.total-memory-allocated
+                track.peak-memory-allocated
+                track.current-memory-allocated
+                checksum))
+
+(proc run-one [name: string, checksum: int, start: time.Tick, track: ^mem.Tracking-Allocator]
+  (report name (time.tick-since start) checksum track))
+
+(proc build-ints [n: int] -> [dynamic]int
+  (let [xs (arr/empty int n)
+        i 0]
+    (for (< i n)
+      (arr/push! xs i)
+      (set! i (+ i 1)))
+    xs))
+
+(proc build-keys [n: int] -> [dynamic]int
+  (let [keys (arr/empty int n)
+        i 0]
+    (for (< i n)
+      (arr/push! keys (% (* i 13) N))
+      (set! i (+ i 1)))
+    keys))
+
+(proc build-lookup [n: int] -> map[int]int
+  (let [lookup (new map[int]int {})
+        i 0]
+    (for (< i n)
+      (core/update! lookup i (* i 3))
+      (set! i (+ i 1)))
+    lookup))
+
+(proc bench-index-core [xs: []int, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (for (< i reps)
+      (let [j 0
+            total 0
+            n (core/count xs)]
+        (for (< j n)
+          (set! total (+ total (core/get xs j)))
+          (set! j (+ j STRIDE)))
+        (set! checksum (+ checksum total)))
+      (set! i (+ i 1)))
+    checksum))
+
+(proc bench-slice-core [xs: []int, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (for (< i reps)
+      (let [prefix (core/slice xs 128 8192)
+            suffix (core/slice xs 8192)
+            total (+ (+ (core/count prefix) (core/count suffix))
+                     (+ (core/get prefix 0) (core/get suffix 0)))]
+        (set! checksum (+ checksum total)))
+      (set! i (+ i 1)))
+    checksum))
+
+(proc bench-map-core [lookup: map[int]int, keys: []int, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (for (< i reps)
+      (let [j 0
+            total 0
+            n (core/count keys)]
+        (for (< j n)
+          (let [key (core/get keys j)]
+            (when (core/contains? lookup key)
+              (set! total (+ total (core/get lookup key 0))))
+            (set! total (+ total (core/get lookup (+ key N) -1))))
+          (set! j (+ j 1)))
+        (set! checksum (+ checksum total)))
+      (set! i (+ i 1)))
+    checksum))
+
+(proc main []
+  (let [xs (build-ints N)
+        keys (build-keys KEY_COUNT)
+        lookup (build-lookup N)
+        old-allocator context.allocator
+        track: mem.Tracking-Allocator (odin "mem.Tracking_Allocator{}")]
+    (defer (delete xs))
+    (defer (delete keys))
+    (defer (delete lookup))
+    (mem.tracking-allocator-init (& track) old-allocator old-allocator)
+    (defer (mem.tracking-allocator-destroy (& track)))
+    (set! context.allocator (mem.tracking-allocator (& track)))
+    (defer (odin "context.allocator = old_allocator"))
+
+    (mem.tracking-allocator-reset (& track))
+    (let [start (time.tick-now)]
+      (run-one "index-core" (bench-index-core (core/slice xs 0) REPS) start (& track)))
+
+    (mem.tracking-allocator-reset (& track))
+    (let [start (time.tick-now)]
+      (run-one "slice-core" (bench-slice-core (core/slice xs 0) REPS) start (& track)))
+
+    (mem.tracking-allocator-reset (& track))
+    (let [start (time.tick-now)]
+      (run-one "map-core" (bench-map-core lookup (core/slice keys 0) REPS) start (& track)))))

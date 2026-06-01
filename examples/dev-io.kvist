@@ -40,7 +40,7 @@
 (defn main []
   (return))
 
-(comment
+(core/comment
   ;; These forms are meant for editor eval. They deliberately use real files,
   ;; so the result survives across separate kvist eval processes.
 
@@ -79,7 +79,7 @@
       (do
         (defer (delete (:title note)))
         (defer (delete (:body note)))
-        (println note)
+        (core/println note)
         true)))
   ;; prints the parsed Note struct, then returns true
 

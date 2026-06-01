@@ -20,7 +20,7 @@
   (init-program (& (:program state^))))
 
 (defn on-load [state: (ptr App_State) is-reload: bool]
-  (when is-reload
+  (core/when is-reload
     (set! (:reload-count state^) (+ (:reload-count state^) 1))))
 
 (defn on-unload [state: (ptr App_State)]

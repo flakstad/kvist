@@ -10,25 +10,25 @@
         replaced (str/replace joined "/" "-") defer
         lowered (str/lower replaced) defer
         uppered (str/upper lowered) defer]
-    (println (str/count name))
-    (println (str/get name 1))
-    (println (str/slice name 1 4))
-    (println greeting)
-    (println (str/contains? name "vis"))
-    (println (str/trim "  kvist  "))
-    (println (str/trim-prefix "kvist/core" "kvist/"))
-    (println (str/trim-suffix "kvist.txt" ".txt"))
-    (println (str/starts-with? uppered "ALPHA"))
-    (println (str/ends-with? uppered "GAMMA"))
-    (println (str/index-of uppered "-"))
-    (println (str/last-index-of uppered "-"))
-    (println uppered)
+    (core/println (str/count name))
+    (core/println (str/get name 1))
+    (core/println (str/slice name 1 4))
+    (core/println greeting)
+    (core/println (str/contains? name "vis"))
+    (core/println (str/trim "  kvist  "))
+    (core/println (str/trim-prefix "kvist/core" "kvist/"))
+    (core/println (str/trim-suffix "kvist.txt" ".txt"))
+    (core/println (str/starts-with? uppered "ALPHA"))
+    (core/println (str/ends-with? uppered "GAMMA"))
+    (core/println (str/index-of uppered "-"))
+    (core/println (str/last-index-of uppered "-"))
+    (core/println uppered)
     true))
 
 (defn main []
-  (println (strings-demo)))
+  (core/println (strings-demo)))
 
-(comment
+(core/comment
   ;; Strings now cover direct count/get/slice/contains? plus a curated set of
   ;; common Odin string transforms. Formatting is still explicit host-level
   ;; allocation through fmt.

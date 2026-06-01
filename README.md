@@ -111,7 +111,7 @@ inventing a new language on top of Odin.
   (+ a b))
 
 (defn main []
-  (println (add 20 22)))
+  (core/println (add 20 22)))
 ```
 
 emits:
@@ -281,7 +281,7 @@ Example:
   (+ a b))
 
 (defn main []
-  (println (add 1 2)))
+  (core/println (add 1 2)))
 ```
 
 The Odin compiler should only see generated `.odin` files. That keeps normal
@@ -444,8 +444,8 @@ chan.Chan(int)
 These examples are design sketches. They are here to make the proposed surface
 syntax concrete before the implementation commits too hard.
 
-Common top-level Odin should usually stay raw because Odin's syntax is already
-compact and readable:
+Common top-level declarations should stay in canonical Kvist forms even when
+the target Odin spelling is already compact and readable:
 
 ```odin
 package http
@@ -527,7 +527,7 @@ Named and multi-value returns:
 (defn query-get [url: URL, key: string] -> [val: string, ok: bool] #optional_ok
   (let [q url.query]
     (for [entry (#force_inline query-iter (& q))]
-      (when (== entry.key key)
+      (core/when (== entry.key key)
         (return entry.value true)))))
 ```
 
@@ -542,10 +542,10 @@ Kvist now keeps Odin-style early-exit result handling explicit:
     (net.percent-decode s allocator)))
 ```
 
-For optional-ok defaults, use the expression form `or-else`:
+For optional-ok defaults, use the expression form `core/or-else`:
 
 ```clojure
-(or-else (query-get url key) "missing")
+(core/or-else (query-get url key) "missing")
 ```
 
 The important point is still the same: Odin-style result control flow should
@@ -569,7 +569,7 @@ Switch:
 
 ```clojure
 (defn method-string [m: Method] -> string #no_bounds_check
-  (switch m
+  (core/switch m
     .Get "GET"
     .Post "POST"
     .Delete "DELETE"
@@ -599,7 +599,7 @@ everything into parens:
 ```clojure
 @(private)
 (defn route-add [router: ^Router, method: Method, route: Route]
-  (when (not (in? router.routes method))
+  (core/when (core/not-in method router.routes)
     (set! (get router.routes method)
           (make [dynamic]Route router.allocator)))
   (append (& (get router.routes method)) route))
@@ -621,7 +621,7 @@ obvious.
   (let [value (strings.trim-space (slice line (+ colon 1)))
         key   (sanitize-key (^ headers) (slice line 0 colon))]
     (defer
-      (when (not ok)
+      (core/when (not ok)
         (delete key allocator)
         (set! key "")))
     ...))
@@ -677,12 +677,12 @@ foreign_call :: proc(handle: Foreign_Handle) ---
 - `(defunion- Name {:variant Type ...})` package-private union
 - `(defn name [arg: type, ...] -> return-type body...)`
 - `(defn name :abi "c" [arg: type, ...] -> return-type body...)`
-  - `defn` is the preferred source-level declaration form
+  - `defn` is the canonical source-level declaration form
   - `defn-` is package-private
-  - `proc` remains available for direct Odin-shaped code and proc types
+  - `proc` remains available in type positions and anonymous proc literals, not as a top-level declaration alias
   - `:abi "c"` is available for explicit foreign/native entrypoints
   - params and returns use ordinary types like `int`, `string`, `Person`, plus Odin-style container types like `[]string`, `[dynamic]int`, `map[string]int`, and Kvist set types like `set[keyword]`
-  - `println` and `doc` stay implicitly available; most library helpers come from explicit Kvist package imports
+  - `core/println` is the canonical print helper; `core/doc` and the rest of the non-syntax surface live in real Kvist packages
 - `(defmacro name [arg ...] body...)`
   - package-local for now; `defmacro-` is package-private
   - expands over Kvist forms before ordinary parse/lowering
@@ -696,13 +696,12 @@ foreign_call :: proc(handle: Foreign_Handle) ---
 - `(with-temp-allocator [allocator] body...)` scoped `context.temp_allocator`
   override with temp allocator reset; requires `base:runtime`
 - `(set! place expr)` -> `place = expr`
-- `(update! target key-or-field expr)` -> direct index/key/field assignment
+- `(core/update! target key-or-field expr)` -> direct index/key/field assignment
 - final expression in a non-void proc emits `return <expr>`
 - `(if test then else)`
-- `(when test body...)`
+- `(core/when test body...)`
 - `(for test body...)`
 - `(for [name collection] body...)` and `(for [key value map] body...)`
-- `(each ...)` remains as a legacy loop alias for now and should disappear over time
 - `(do body...)`
 - `(new Type literal)` typed composite literals
 - `(make Type args...)` runtime/allocator-backed construction
@@ -715,12 +714,8 @@ foreign_call :: proc(handle: Foreign_Handle) ---
   `(str/starts-with? s prefix)`, `(str/ends-with? s suffix)`,
   `(str/index-of s needle)`, `(str/last-index-of s needle)`,
   `(str/replace s old new [count])`, `(str/lower s)`, `(str/upper s)`
-  - `kvist:str` is now mostly source-backed: `str/count`, `str/get`,
-    `str/slice`, `str/contains?`, `str/split`, `str/join`, `str/trim`,
-    `str/trim-prefix`, `str/trim-suffix`, `str/starts-with?`,
-    `str/ends-with?`, `str/index-of`, `str/last-index-of`, `str/replace`,
-    `str/lower`, and `str/upper` come from shipped `.kvist` source and still
-    lower to direct Odin indexing, slicing, or `core:strings` calls
+  - `kvist:str` is a shipped `.kvist` package. These helpers lower to direct
+    Odin indexing, slicing, or `core:strings` calls.
 - `set/*` helpers such as `(set/contains? s value)`, `(set/union lhs rhs)`,
   `(set/intersection lhs rhs)`, `(set/difference lhs rhs)`,
   `(set/union! target source)`, `(set/intersection! target source)`,
@@ -728,20 +723,23 @@ foreign_call :: proc(handle: Foreign_Handle) ---
   `(set/subset? lhs rhs)`, `(set/superset? lhs rhs)`,
   `(set/disjoint? lhs rhs)`, `(set/add s value)`, `(set/add! s value)`,
   `(set/remove s value)`, `(set/remove! s value)`
-  - `kvist:set` is now mostly source-backed: `set/empty`, `set/of`,
-    `set/contains?`, `set/union`, `set/intersection`, `set/difference`,
-    `set/union!`, `set/intersection!`, `set/difference!`, `set/subset?`,
-    `set/superset?`, `set/disjoint?`, `set/add`, `set/add!`, `set/remove`,
-    and `set/remove!` come from shipped `.kvist` source and lower to direct
-    loops, direct constructors, or direct in-place mutations over `map[T]bool`
+  - `kvist:set` is a shipped `.kvist` package. These helpers lower to direct
+    loops, direct constructors, or direct in-place mutations over `map[T]bool`.
 - `map/*` helpers such as `(map/get m key [default])`, `(map/contains? m key)`,
-  `(map/keys m)`, `(map/vals m)`, `(map/zip keys vals)`, `(map/merge lhs rhs)`,
-  `(map/merge! target source)`
-  - `kvist:map` is now mostly source-backed: `map/empty`, `map/of`, `map/get`,
-    `map/contains?`, `map/keys`, `map/vals`, `map/zip`, `map/merge`, and
-    `map/merge!` come from shipped `.kvist` source and lower to direct
+  `(map/keys m)`, `(map/vals m)`, `(map/zip keys vals)`, `(map/assoc m key value)`,
+  `(map/assoc! target key value)`, `(map/dissoc m key)`, `(map/dissoc! target key)`,
+  `(map/merge lhs rhs)`, `(map/merge! target source)`
+  - `kvist:map` is a shipped `.kvist` package. These helpers lower to direct
     constructors, membership checks, loops with explicit preallocation, raw
-    indexing, optional-default helpers, or direct in-place mutation
+    indexing, optional-default helpers, or direct in-place mutation.
+- `core/*` helpers such as `(core/count collection)`, `(core/get target key [default])`,
+  `(core/slice target start [end])`, `(core/empty? collection)`,
+  `(core/contains? collection key)`, `(core/update! target key-or-field value-or-updater ...)`,
+  and `(core/update target key-or-field value-or-updater ...)`
+  - `kvist:core` is the small auto-exposed core library.
+  - `core/...` is the canonical qualified home.
+  - These helpers are defined in shipped `.kvist` source and lower through a
+    small intrinsic substrate where direct Odin codegen needs it.
 - `arr/*` sequence helpers such as `(arr/map f xs)`, `(arr/filter pred xs)`,
   `(arr/reduce f init xs)`, `(arr/take n xs)`, `(arr/drop n xs)`,
   `(arr/take-while pred xs)`, `(arr/drop-while pred xs)`, `(arr/find pred xs)`,
@@ -765,44 +763,40 @@ foreign_call :: proc(handle: Foreign_Handle) ---
   `(arr/distinct-by :field xs)`, plus bounded producers `(arr/range ...)`,
   `(arr/repeat n x)`, `(arr/repeatedly n f)`, `(arr/iterate n f x)`, and
   `(arr/cycle n xs)`
-  - `kvist:arr` is now slightly source-backed: `arr/count`, `arr/get`,
-    `arr/slice`, `arr/first`, `arr/second`, `arr/nth`, `arr/last`,
-    `arr/rest`, `arr/take`, `arr/drop`, `arr/drop-last`, `arr/butlast`,
-    `arr/range`, `arr/take-nth`, `arr/repeat`, `arr/repeatedly`,
-    `arr/iterate`, `arr/cycle`, the ordinary proc-callback path for
-    `arr/map`, `arr/filter`, `arr/remove`, and `arr/reduce`, and the ordinary
-    proc-predicate path for `arr/take-while`, `arr/drop-while`, `arr/find`,
-    `arr/some?`, and `arr/every?`
-    come from shipped `.kvist` macros and still lower to the same direct
-    indexing/slicing Odin; the broader sequence helper surface remains
-    compiler-lowered for now
+  - `kvist:arr` is a shipped `.kvist` package with the broad sequence helper
+    surface. Many helpers are implemented directly in package source; the rest
+    lower through a small intrinsic substrate where array-family coverage,
+    specialization, or allocation behavior still needs compiler support.
 - map helpers `(map/merge a b)`, `(map/merge! target source)`,
   `(map/zip keys vals)`, `(map/keys m)`, and `(map/vals m)`
 - file-backed dev helpers `(io/read path)` and `(io/write path data)` from
   `(import io "kvist:io")`; typed JSON file helpers from
   `(import json "kvist:json")`
-- `(tap> value)` and `(tap> :label value)` for explicit stdout inspection;
+- `(core/tap> value)` and `(core/tap> :label value)` for explicit stdout inspection;
   require `core:fmt` and return the tapped value
 - keywords can stand in for field callbacks in those helpers, e.g. `(arr/map :name users)`,
   `(arr/index-by :id users)`, `(arr/group-by :status users)`,
   `(arr/count-by :status users)`, `(arr/sum-by :region :amount orders)`,
   `(arr/partition-by :status users)`, `(arr/sort-by :age users)`, and
   `(arr/filter :verified users)`
-- `(:field value)`, `(get value key)`, `(get map key default)`, `(-> value steps...)`, and `(->> value steps...)`
+- `(:field value)`, `(core/get value key)`, `(core/get map key default)`, `(core/-> value steps...)`, and `(core/->> value steps...)`
 - `(type Head Arg...)` for Odin polymorphic type instantiation in type/value positions
 - `(^ ptr)` and `(& place)` as compatibility sugar; prefer `(deref ptr)` and
   `(addr place)` in user-facing code
-- numbers, booleans, `nil`, and `(nil? value)`
+- numbers, booleans, `nil`, and `(core/nil? value)`
 - calls: `(foo a b)` -> `foo(a, b)`
 - operators: `(+ a b)`, `(<= i 10)`, `(and a b)`, etc. emit infix
 
-Current pragmatic Odin conveniences beyond the original core target include
-`(in? collection key)`, `(contains? collection key)`, `(count xs)`, `(break)`,
-`(continue)`, and directive expression wrappers like `(#force_inline call arg)`.
+Pragmatic Odin conveniences beyond the minimal special-form core include
+`(core/contains? collection key)`, `(core/in value collection)`,
+`(core/not-in value collection)`, `(break)`, `(continue)`, and directive expression
+wrappers like `(#force_inline call arg)`.
 
-For collection helpers, the remaining intentional bare kernel is small:
-`slice`, `get`, `empty?`, `count`, and `contains?`. Other collection operations
-should be package-qualified under `arr/`, `map/`, `str/`, or `set/`.
+For collection helpers, prefer explicit package names. Cross-family helpers now
+live under `core/`, for example `core/count`, `core/empty?`, and
+`core/contains?`, plus update helpers like `core/update!` and `core/update`.
+Other collection operations should be package-qualified under `arr/`, `map/`,
+`str/`, or `set/`.
 
 This is deliberately incomplete. Add only forms that map cleanly to Odin.
 

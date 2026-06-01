@@ -5,6 +5,7 @@
 // into caller-provided fixed buffers, and core:slice helpers return explicit
 // bool results for queries that may fail.
 (package main)
+(import core "kvist:core")
 (import time "core:time")
 (import slice "core:slice")
 
@@ -15,17 +16,17 @@
 
 (defn fixed-date-weekday [] -> int
   ;; datetime_to_time returns an explicit ok bool. This is the same shape that
-  ;; if-let is designed for: bind the value and the bool, then branch.
-  (if-let [t ok (time.datetime_to_time 2024 1 2 3 4 5)]
+  ;; core/if-let is designed for: bind the value and the bool, then branch.
+  (core/if-let [t ok (time.datetime_to_time 2024 1 2 3 4 5)]
     (int (time.weekday t))
     -1))
 
 (defn fixed-date-string-length [] -> int
   ;; Odin time formatting writes into caller-provided storage. The returned
   ;; string is a view into this local buffer, so it must not escape this proc.
-  (if-let [t ok (time.datetime_to_time 2024 1 2 3 4 5)]
+  (core/if-let [t ok (time.datetime_to_time 2024 1 2 3 4 5)]
     (let [buf (new [time.MIN_YYYY_DATE_LEN]u8 [])
-          text (time.to_string_yyyy_mm_dd t (slice buf))]
+          text (time.to_string_yyyy_mm_dd t (core/slice buf))]
       (len text))
     0))
 
@@ -33,25 +34,25 @@
   ;; core:slice min_max also returns an explicit ok bool. No allocation happens
   ;; here; xs is an ordinary fixed slice literal.
   (let [xs (new []int [4 1 7 2])]
-    (let [[lo hi ok] (slice.min_max xs)]
+    (let [[lo hi ok] (core/slice.min_max xs)]
       (if ok
         (+ (* lo 10) hi)
         0))))
 
 (defn search-score [] -> int
   (let [xs (new []int [4 1 7 2])]
-    (if-let [idx found (slice.linear_search xs 7)]
+    (core/if-let [idx found (core/slice.linear_search xs 7)]
       idx
       -1)))
 
 (defn main []
-  (println (duration-ms)
+  (core/println (duration-ms)
                (fixed-date-weekday)
                (fixed-date-string-length)
                (min-max-score)
                (search-score)))
 
-(comment
+(core/comment
   ;; Duration conversion.
   (duration-ms)
   ;; => 1500

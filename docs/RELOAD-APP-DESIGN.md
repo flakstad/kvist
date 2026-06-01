@@ -188,7 +188,7 @@ For example:
 (defn run [state: (ptr App_State) host: (ptr reload/Run_Host)]
   (for true
     (process-one-job state)
-    (when (reload/checkpoint! host)
+    (core/when (reload/checkpoint! host)
       (return))))
 ```
 

@@ -6,6 +6,7 @@
 // shapes directly, with Kvist only providing parens and the small `(type ...)`
 // spelling needed for polymorphic host types like chan.Chan(int).
 (package main)
+(import core "kvist:core")
 (import "core:sync")
 (import chan "core:sync/chan")
 (import thread "core:thread")
@@ -38,7 +39,7 @@
   ;; only for this scope and released automatically by Odin's deferred_in
   ;; attribute on sync.guard.
   (if (sync.guard (addr (:lock (deref counter))))
-    (update! counter^ :value (+ (:value counter^) 1))))
+    (core/update! counter^ :value (+ (:value counter^) 1))))
 
 (defn mutex-protected-count [] -> int
   ;; Two joinable threads mutate shared state. The pointer is passed explicitly,
@@ -53,9 +54,9 @@
     (:value counter)))
 
 (defn main []
-  (println (future-like-square) (mutex-protected-count)))
+  (core/println (future-like-square) (mutex-protected-count)))
 
-(comment
+(core/comment
   ;; A channel plus a worker thread is the basic future-like pattern. This is
   ;; deliberately not a Kvist abstraction yet; the underlying Odin ownership
   ;; and blocking behavior stay visible.

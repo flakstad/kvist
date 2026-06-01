@@ -1,0 +1,13 @@
+(package main)
+(import http "kvist:http")
+
+(defn main []
+  (let [router (http/new-router)
+        server (http/new-server)]
+    (defer (http/router-destroy! router))
+
+    (http/get! router "/" [req res]
+      (http/respond-plain res "pong"))
+
+    (http/server-shutdown-on-interrupt! server)
+    (http/listen-and-serve! server router 6969)))

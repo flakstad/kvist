@@ -218,6 +218,8 @@ Builtin_Macro_Kind :: enum {
     None,
     With_Allocator,
     With_Temp_Allocator,
+    When,
+    Cond,
     Thread_First,
     Thread_Last,
     When_Let,

@@ -118,8 +118,9 @@ query_get_uint :: proc(url: URL, key: string, base := 0) -> (result: uint, ok: b
 }
 
 Route :: struct {
-	handler: Handler,
-	pattern: string,
+	handler:    Handler,
+	pattern:    string,
+	exact_path: string,
 }
 
 Router :: struct {
@@ -138,12 +139,14 @@ router_destroy :: proc(router: ^Router) {
 
 	for route in router.all {
 		delete(route.pattern)
+		delete(route.exact_path)
 	}
 	delete(router.all)
 
 	for _, routes in router.routes {
 		for route in routes {
 			delete(route.pattern)
+			delete(route.exact_path)
 		}
 
 		delete(routes)
@@ -181,7 +184,7 @@ route_get :: proc(router: ^Router, pattern: string, handler: Handler) {
 	route_add(
 		router,
 		.Get,
-		Route{handler = handler, pattern = strings.concatenate([]string{"^", pattern, "$"}, router.allocator)},
+		route_make(router, pattern, handler),
 	)
 }
 
@@ -189,7 +192,7 @@ route_post :: proc(router: ^Router, pattern: string, handler: Handler) {
 	route_add(
 		router,
 		.Post,
-		Route{handler = handler, pattern = strings.concatenate([]string{"^", pattern, "$"}, router.allocator)},
+		route_make(router, pattern, handler),
 	)
 }
 
@@ -198,7 +201,7 @@ route_head :: proc(router: ^Router, pattern: string, handler: Handler) {
 	route_add(
 		router,
 		.Head,
-		Route{handler = handler, pattern = strings.concatenate([]string{"^", pattern, "$"}, router.allocator)},
+		route_make(router, pattern, handler),
 	)
 }
 
@@ -206,7 +209,7 @@ route_put :: proc(router: ^Router, pattern: string, handler: Handler) {
 	route_add(
 		router,
 		.Put,
-		Route{handler = handler, pattern = strings.concatenate([]string{"^", pattern, "$"}, router.allocator)},
+		route_make(router, pattern, handler),
 	)
 }
 
@@ -214,7 +217,7 @@ route_patch :: proc(router: ^Router, pattern: string, handler: Handler) {
 	route_add(
 		router,
 		.Patch,
-		Route{handler = handler, pattern = strings.concatenate([]string{"^", pattern, "$"}, router.allocator)},
+		route_make(router, pattern, handler),
 	)
 }
 
@@ -222,7 +225,7 @@ route_trace :: proc(router: ^Router, pattern: string, handler: Handler) {
 	route_add(
 		router,
 		.Trace,
-		Route{handler = handler, pattern = strings.concatenate([]string{"^", pattern, "$"}, router.allocator)},
+		route_make(router, pattern, handler),
 	)
 }
 
@@ -230,7 +233,7 @@ route_delete :: proc(router: ^Router, pattern: string, handler: Handler) {
 	route_add(
 		router,
 		.Delete,
-		Route{handler = handler, pattern = strings.concatenate([]string{"^", pattern, "$"}, router.allocator)},
+		route_make(router, pattern, handler),
 	)
 }
 
@@ -238,7 +241,7 @@ route_connect :: proc(router: ^Router, pattern: string, handler: Handler) {
 	route_add(
 		router,
 		.Connect,
-		Route{handler = handler, pattern = strings.concatenate([]string{"^", pattern, "$"}, router.allocator)},
+		route_make(router, pattern, handler),
 	)
 }
 
@@ -246,7 +249,7 @@ route_options :: proc(router: ^Router, pattern: string, handler: Handler) {
 	route_add(
 		router,
 		.Options,
-		Route{handler = handler, pattern = strings.concatenate([]string{"^", pattern, "$"}, router.allocator)},
+		route_make(router, pattern, handler),
 	)
 }
 
@@ -258,8 +261,30 @@ route_all :: proc(router: ^Router, pattern: string, handler: Handler) {
 
 	append(
 		&router.all,
-		Route{handler = handler, pattern = strings.concatenate([]string{"^", pattern, "$"}, router.allocator)},
+		route_make(router, pattern, handler),
 	)
+}
+
+@(private)
+route_pattern_is_exact :: proc(pattern: string) -> bool {
+	for ch in pattern {
+		switch ch {
+		case '(', ')', '.', '%', '+', '-', '*', '?', '[', ']', '^', '$':
+			return false
+		}
+	}
+	return true
+}
+
+@(private)
+route_make :: proc(router: ^Router, pattern: string, handler: Handler) -> Route {
+	route := Route{handler = handler}
+	if route_pattern_is_exact(pattern) {
+		route.exact_path = strings.clone(pattern, router.allocator)
+	} else {
+		route.pattern = strings.concatenate([]string{"^", pattern, "$"}, router.allocator)
+	}
+	return route
 }
 
 @(private)
@@ -275,6 +300,16 @@ route_add :: proc(router: ^Router, method: Method, route: Route) {
 routes_try :: proc(routes: [dynamic]Route, req: ^Request, res: ^Response) -> bool {
 	try_captures: [match.MAX_CAPTURES]match.Match = ---
 	for route in routes {
+		if route.exact_path != "" {
+			if req.url.path == route.exact_path {
+				req.url_params = nil
+				rh := route.handler
+				rh.handle(&rh, req, res)
+				return true
+			}
+			continue
+		}
+
 		n, err := match.find_aux(req.url.path, route.pattern, 0, true, &try_captures)
 		if err != .OK {
 			log.errorf("Error matching route: %v", err)

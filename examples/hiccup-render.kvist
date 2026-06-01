@@ -8,7 +8,7 @@
                 [:button {:class "primary"} "Save & Close"]
                 [:span "Status <ok>"]])
         html (hiccup/render page) defer]
-    (println html)
+    (core/println html)
     true))
 
 (defn main []

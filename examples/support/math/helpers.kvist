@@ -12,6 +12,6 @@
   [limit: int] -> [dynamic]int
   (let [out (arr/empty int)]
     (for [i (arr/range 0 limit)]
-      (when (even-step? i)
+      (core/when (even-step? i)
         (arr/push! out i)))
     out))

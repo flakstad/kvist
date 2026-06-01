@@ -1,5 +1,6 @@
 // Focused benchmark for first-cut captured callbacks in map/map!.
 (package main)
+(import core "kvist:core")
 (import "core:fmt")
 (import mem "core:mem")
 (import time "core:time")
@@ -164,7 +165,7 @@ MAP_BANG_REPS :: 80")
         (into! xs base)
         (let [j 0]
           (for (< j (count xs))
-            (update! xs j + offset)
+            (core/update! xs j + offset)
             (set! j (+ j 1))))
         (set! checksum (+ checksum (last xs)))
         (delete xs))

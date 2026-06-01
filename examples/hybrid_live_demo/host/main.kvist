@@ -1,4 +1,5 @@
 (package hybrid_live_demo_host)
+(import core "kvist:core")
 
 (import fmt "core:fmt")
 (import strings "core:strings")
@@ -18,7 +19,7 @@
 (defvar hybrid-native-generation int 0)
 
 (proc render-value [value: kvist_live.Value] -> string
-  (switch (:kind value)
+  (core/switch (:kind value)
     .Nil (strings.clone "nil")
     .Bool (if (:bool_value value)
             (strings.clone "true")
@@ -27,9 +28,9 @@
     [.String .Handle] (strings.clone (:text value))
     :else (strings.clone "")))
 
-(proc host-log-capability [runtime: (ptr kvist_live.Runtime)
+(defn host-log-capability [runtime: (ptr kvist_live.Runtime)
                            capability-name: string
-                           args: (slice kvist_live.Value)] -> [value: kvist_live.Value, err: kvist_live.Runtime_Error, ok: bool]
+                           args: (core/slice kvist_live.Value)] -> [value: kvist_live.Value, err: kvist_live.Runtime_Error, ok: bool]
   (if (== (len args) 0)
     (do
       (fmt.println "[host.log]")
@@ -41,9 +42,9 @@
           (delete rendered)))
       (return (kvist_live.value_nil) (kvist_live.Runtime_Error {}) true))))
 
-(proc host-snapshot-capability [runtime: (ptr kvist_live.Runtime)
+(defn host-snapshot-capability [runtime: (ptr kvist_live.Runtime)
                                 capability-name: string
-                                args: (slice kvist_live.Value)] -> [value: kvist_live.Value, err: kvist_live.Runtime_Error, ok: bool]
+                                args: (core/slice kvist_live.Value)] -> [value: kvist_live.Value, err: kvist_live.Runtime_Error, ok: bool]
   (if (== hybrid-state-ptr nil)
     (return (kvist_live.value_nil)
             (kvist_live.Runtime_Error {:message (strings.clone "host state is not ready")})
@@ -56,10 +57,10 @@
                                 (:last_message hybrid-state-ptr^))]
       (return (kvist_live.value_string snapshot) (kvist_live.Runtime_Error {}) true))))
 
-(proc library-path [] -> string
+(defn library-path [] -> string
   (kvist_hot.library_filename "build/hybrid_live_demo/hybrid_demo"))
 
-(proc print-native-state [symbols: (ptr support.Hybrid_Demo_Symbols) state: (ptr shared.State)]
+(defn print-native-state [symbols: (ptr support.Hybrid_Demo_Symbols) state: (ptr shared.State)]
   (fmt.printf "[native] module=%s tick=%d reloads=%d unloads=%d message=%s\n"
               (support.Call_Symbol_Message symbols)
               (:tick_count state^)
@@ -67,7 +68,7 @@
               (:unload_count state^)
               (:last_message state^)))
 
-(proc print-banner [path: string]
+(defn print-banner [path: string]
   (fmt.println "kvist hybrid hot reload + live demo")
   (fmt.println "native module source: examples/hybrid_live_demo/module/main.kvist")
   (fmt.println "live module sources: examples/hybrid_live_demo/live/*.kvist")
@@ -77,7 +78,7 @@
   (fmt.println "press ctrl-c to stop")
   (fmt.println ""))
 
-(proc main []
+(defn main []
   (let [path (library-path) defer
         state (shared.State {})
         symbols: support.Hybrid_Demo_Symbols {}
@@ -144,7 +145,7 @@
                                                                                live-module-config)]
                                 (if (not reload-live-ok)
                                   (fmt.eprintln "live reload failed:" (:message reload-live-err))
-                                  (when live-changed
+                                  (core/when live-changed
                                     (fmt.println "[host] reloaded live module from disk"))))
                               (let [[changed reload-err reload-ok]
                                     (kvist_hot.reload_module_if_source_changed (addr reloader)
@@ -154,11 +155,11 @@
                                   (do
                                     (fmt.println "[host] native reload failed:" reload-err)
                                     (delete reload-err))
-                                  (when changed
+                                  (core/when changed
                                     (set! hybrid-native-generation (:generation reloader)))))
                               (support.Call_Symbol_Tick (addr symbols) (addr state))
                               (print-native-state (addr symbols) (addr state))
                               (let [[_ command-err command-ok] (kvist_live.invoke_command (addr runtime) "inspect" nil)]
-                                (when (not command-ok)
+                                (core/when (not command-ok)
                                   (fmt.eprintln "live command failed:" (:message command-err))))
                               (time.sleep tick-delay))))))))))))))))

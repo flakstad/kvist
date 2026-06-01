@@ -80,7 +80,10 @@
     ("io" . "kvist:io")
     ("json" . "kvist:json")
     ("http" . "kvist:http")
-    ("httpc" . "kvist:http/client"))
+    ("httpc" . "kvist:http/client")
+    ("session" . "kvist:http/session")
+    ("sse" . "kvist:http/sse")
+    ("dstar" . "kvist:http/datastar"))
   "Canonical explicit imports for compiler-provided Kvist packages.")
 
 (defvar-local kvist--editor-symbol-cache nil

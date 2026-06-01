@@ -67,7 +67,7 @@ line-based placeholder format. The current loader and evaluator understand:
 - `(live/hook name)` or `(live/hook name {...})`, with optional inline body
 - shipped `live/defcommand` / `live/defhook` wrappers for the common zero-arg
   entrypoint case
-- top-level `def`, `defconst`, or `defvar` literal bindings
+- top-level `defconst` or `defvar` literal bindings
 - optional source-defined lifecycle helpers:
   - `defn init [] ...`
   - `defn migrate [] ...`

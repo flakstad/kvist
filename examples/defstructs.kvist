@@ -2,6 +2,7 @@
 // and omitted-field defaults through ordinary Odin struct construction.
 (package main)
 (import "core:fmt")
+(import core "kvist:core")
 (defstruct Point
   "A 2D point."
   {:x float
@@ -25,7 +26,7 @@
 (defn profile-has-math-tag? [] -> bool
   (let [profile (Profile {:name "Ada"
                           :tags (new map[string]bool {"math" true "lisp" true})})]
-    (contains? (:tags profile) "math")))
+    (core/contains? (:tags profile) "math")))
 
 (defn profile-active? [] -> bool
   (let [profile (Profile {:name "Ada"
@@ -42,9 +43,9 @@
   (fmt.tprintf "%s/%d/%t" name age (:active? profile)))
 
 (defn main []
-  (println (profile-has-math-tag?)))
+  (core/println (profile-has-math-tag?)))
 
-(comment
+(core/comment
   ;; Omitted fields follow ordinary Odin zero-value behavior in the lowered
   ;; struct literal. The nested Point is the zero value Point{x = 0, y = 0}.
   (profile-defaults)

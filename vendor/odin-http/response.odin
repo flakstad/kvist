@@ -1,6 +1,7 @@
 package http
 
 import "core:bytes"
+import list "core:container/intrusive/list"
 import "core:io"
 import "core:log"
 import "core:mem/virtual"
@@ -9,6 +10,9 @@ import "core:slice"
 import "core:strconv"
 
 Response :: struct {
+	using node:       list.Node,
+	async_handler:    ^Handler,
+	work_data:        rawptr,
 	// Add your headers and cookies here directly.
 	headers:          Headers,
 	cookies:          [dynamic]Cookie,
@@ -26,6 +30,7 @@ Response :: struct {
 	_buf:             bytes.Buffer,
 	_heading_written: bool,
 }
+#assert(offset_of(Response, node) == 0, "Response.node must remain the first field")
 
 response_init :: proc(r: ^Response, allocator := context.allocator) {
 	r.status             = .Not_Found
@@ -286,6 +291,11 @@ _response_write_heading :: proc(r: ^Response, content_length: int) {
 // Closes the connection or starts the handling of the next request.
 @(private)
 response_send :: proc(r: ^Response, conn: ^Connection, loc := #caller_location) {
+	if conn.state >= .Closing || conn.state == .Will_Close {
+		clean_request_loop(conn)
+		return
+	}
+
 	assert(!r.sent, "response has already been sent", loc)
 	r.sent = true
 
@@ -341,7 +351,9 @@ response_send_got_body :: proc(r: ^Response, will_close: bool) {
 @(private)
 on_response_sent :: proc(op: ^nbio.Operation, conn: ^Connection) {
 	if op.send.err != nil {
-		log.errorf("could not send response: %v", op.send.err)
+		if conn.state < .Closing {
+			log.warnf("could not send response: %v", op.send.err)
+		}
 		if !connection_set_state(conn, .Will_Close) { return }
 	}
 
@@ -351,6 +363,10 @@ on_response_sent :: proc(op: ^nbio.Operation, conn: ^Connection) {
 // Response has been sent, clean up and close/handle next.
 @(private)
 clean_request_loop :: proc(conn: ^Connection, close: Maybe(bool) = nil) {
+	if conn.loop.res.work_data != nil {
+		cancel_async(&conn.loop.res)
+	}
+
 	context.temp_allocator = virtual.arena_allocator(&conn.temp_allocator)
 
 	// blocks, size, used := allocator_free_all(&conn.temp_allocator)

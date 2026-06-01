@@ -5,12 +5,16 @@ history log.
 
 ## Current State
 
-Kvist now has:
+Kvist has:
 
 - package-by-directory source loading with package-private `def...-` forms
 - package-local macros with quasiquote, shipped DSL packages, and recursive
   macro expansion
 - inline array, map, and set literals
+- positional calls, named calls, mixed positional plus named-tail calls, and
+  trailing default parameters for known top-level `defn`
+- flat struct-backed `{:keys [...]}` destructuring in `let`
+- struct-backed destructured params with `{:keys [...] :as name}: Type`
 - a shipped `hiccup` package with rendering
 - explicit ownership helpers and stricter escape diagnostics
 - a shipped `kvist:test` package with:
@@ -22,12 +26,31 @@ Kvist now has:
   - setup-only `t/use-fixtures :once`
 - CLI and Emacs support for docs, completion, xref, eval, and tests
 
+Current intentional limits worth remembering:
+
+- named/default/mixed call rewriting is limited to known top-level `defn`
+- destructuring is currently struct-backed `{:keys [...]}` only
+- destructured params currently require `:as`
+- no `:or`, renaming, or nesting yet
+
 ## Most Likely Next Areas
 
-### 1. Closures And Higher-Order Function Depth
+### 1. Destructuring Boundary Decisions
 
-Non-capturing proc values are supported, and there is now a first narrow pass
-of captured callbacks for compiler-known non-escaping helper sites such as
+The first useful destructuring slice is in place. The next questions are now
+semantic rather than mechanical:
+
+- whether destructuring should stay struct-backed only for a while
+- whether `:or` defaults are worth adding, especially for params
+- whether any future map-oriented destructuring is actually better than
+  explicit `get`-style access for Kvist
+- whether proc-value support or broader destructuring forms would still keep
+  lowering obvious
+
+### 2. Closures And Higher-Order Function Depth
+
+Non-capturing proc values are supported, and there is a narrow pass of
+captured callbacks for compiler-known non-escaping helper sites such as
 `map`, `filter`, `remove`, `keep`, and their bang variants.
 
 Questions:
@@ -37,7 +60,7 @@ Questions:
 - how far to take captured callbacks before explicit context should remain the
   preferred style
 
-### 2. Package And Tooling Polish
+### 3. Package And Tooling Polish
 
 The package model is in place, but there is still room to tighten:
 
@@ -46,7 +69,7 @@ The package model is in place, but there is still room to tighten:
 - package-aware editor commands and CLI inspection helpers
 - docs that describe package layout and visibility concisely
 
-### 3. Standard Library Shape
+### 4. Standard Library Shape
 
 The library surface is real, but it should keep being reviewed against the
 current language direction:
@@ -59,6 +82,28 @@ current language direction:
 - moving as much package behavior as possible into ordinary `.kvist` source
   macros/functions rather than compiler intrinsics, so long as the lowered Odin
   remains equally direct and does not add indirection or unnecessary allocation
+
+Current rule of thumb:
+
+- if something is conceptually package API, tooling and docs should point at a
+  real package file first
+- package macros are preferred over compiler-known helper spellings when a thin
+  wrapper can preserve the same direct Odin shape
+- compiler intrinsics should shrink toward a lower-level substrate used by
+  package code, not remain the primary public surface
+
+Current package boundary:
+
+- `kvist:str`, `kvist:set`, `kvist:map`, and `kvist:struct` are mostly real
+  package code
+- `kvist:arr` exposes a broad real package facade, but part of that facade
+  still expands to `kvist/arr/...` intrinsics under the hood
+- public package entries in tooling point at package files rather than
+  directly at `emit.odin`
+- the remaining intrinsic `arr/*` cases are mostly the wider grouping,
+  partitioning, sorting, and in-place transform helpers where array-family
+  coverage, ownership rules, or callback specialization still need the smaller
+  compiler substrate
 
 ### 4. Future DSL Work
 
@@ -73,7 +118,7 @@ Strong candidates:
 These should build on the current macro system and still lower to explicit,
 typed internal structures.
 
-### 5. Hot Reload And Live Workflow
+### 6. Hot Reload And Live Workflow
 
 This work is real but should remain clearly separate from the core language
 surface:
@@ -90,4 +135,6 @@ See:
 ## Current Bias
 
 If there is no stronger pressure from a concrete use case, the next serious
-language-level discussion should be closures and higher-order function depth.
+language-level discussion should be the destructuring boundary: whether the
+current struct-backed `{:keys [...]}` slice should stay narrow, or widen into a
+broader general destructuring design.

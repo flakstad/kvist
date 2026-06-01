@@ -29,9 +29,7 @@ It should be very close to `clojure-mode`:
 - font-lock Kvist special forms, keywords, Odin directive symbols, and raw
   `(odin "...")` escape hatches
 - provide indentation overrides for Kvist forms such as `defn`, `defstruct`,
-  `defenum`, `defunion`, `proc`, `let`, `switch`, `cond`, and `for`
-  `each` can stay recognized for legacy code, but it should not be treated as
-  the preferred loop surface going forward
+  `defenum`, `defunion`, `proc`, `let`, `core/switch`, `core/cond`, and `for`
 
 The compiler's Odin source remains 4-space indented. The Kvist source format is
 separate and should read like Clojure.
@@ -123,9 +121,9 @@ clearly expand to existing forms, such as allocator setup/teardown,
 `with-*`-style cleanup, and repetitive check/error propagation. The initial
 multi-return convenience macros are:
 
-- `when-let` and `if-let` for `[value bool expr]`, expanding to destructuring
+- `core/when-let` and `core/if-let` for `[value bool expr]`, expanding to destructuring
   `let` plus a direct boolean condition;
-- `when-ok` and `if-ok` for `[value err expr]`, expanding to destructuring
+- `core/when-ok` and `core/if-ok` for `[value err expr]`, expanding to destructuring
   `let` plus `(== err {})`.
 
 The bool/error distinction is intentional. Odin procs commonly report success
@@ -153,8 +151,8 @@ A tap system should help inspect values during eval and normal runs without
 changing program semantics. The initial spelling is:
 
 ```clojure
-(tap> value)
-(tap> :label value)
+(core/tap> value)
+(core/tap> :label value)
 ```
 
 This currently lowers through tiny generated helpers that print to stdout with
@@ -163,17 +161,17 @@ explicitly. That is intentionally modest: it works in normal runs and editor
 evals, it is visible in the generated Odin, and it does not depend on a hidden
 global tap registry.
 
-In practice, `tap>` is the expression-friendly version of adding a temporary
+In practice, `core/tap>` is the expression-friendly version of adding a temporary
 print line: wrap a value, see it, and keep passing the same value onward. It is
 especially useful inside a threaded pipeline or nested expression where adding a
 separate statement would force a local binding just for inspection.
 
-`tap>` also works as a `->` / `->>` thread step:
+`core/tap>` also works as a `core/->` / `core/->>` thread step:
 
 ```clojure
-(->> users
+(core/->> users
      (arr/filter active?)
-     (tap> :active)
+     (core/tap> :active)
      (arr/map :name))
 ```
 

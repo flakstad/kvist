@@ -7,10 +7,10 @@
                [:div {:class "border" :onclick "alert('hello!')"}
                 [:button {:class "primary"} "Save"]
                 [:span "Status"]])]
-    (println (h/tag page))
-    (println (h/attr-count page))
-    (println (h/child-count page))
-    (println (h/render page))
+    (core/println (h/tag page))
+    (core/println (h/attr-count page))
+    (core/println (h/child-count page))
+    (core/println (h/render page))
     true))
 
 (defn main []

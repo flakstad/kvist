@@ -1,0 +1,139 @@
+(package sse)
+(import h "kvist_vendor:http")
+(import nbio "core:nbio")
+(import net "core:net")
+(import time "core:time")
+
+(odin "
+Stream :: ^h.Sse
+Timeout_Op :: ^nbio.Operation
+Send_Error :: net.Send_Error
+On_Error :: h.Sse_On_Error
+
+__kvist_http_sse_new_started :: proc(res: ^h.Response) -> ^h.Sse {
+	stream := new(h.Sse, context.temp_allocator)
+	h.sse_init(stream, res)
+	h.sse_start(stream)
+	return stream
+}
+
+__kvist_http_sse_new_started_on_error :: proc(res: ^h.Response, on_error: h.Sse_On_Error) -> ^h.Sse {
+	stream := new(h.Sse, context.temp_allocator)
+	h.sse_init(stream, res, on_error = on_error)
+	h.sse_start(stream)
+	return stream
+}
+
+__kvist_http_sse_schedule_timeout :: proc(delay: time.Duration, stream: ^h.Sse, cb: proc(_: ^nbio.Operation, stream: ^h.Sse)) {
+	if stream == nil || stream.state > .Ending {
+		return
+	}
+
+	if stream.timeout_op != nil {
+		nbio.remove(stream.timeout_op)
+		stream.timeout_op = nil
+	}
+
+	on_timeout :: proc(op: ^nbio.Operation, stream: ^h.Sse, cb: proc(_: ^nbio.Operation, stream: ^h.Sse)) {
+		stream.timeout_op = nil
+		cb(op, stream)
+	}
+
+	stream.timeout_op = nbio.timeout_poly2(delay, stream, cb, on_timeout, l = stream.r._conn.owning_thread.event_loop)
+}
+
+__kvist_http_sse_closed :: proc(stream: ^h.Sse) -> bool {
+	return stream.state > .Ending
+}
+
+__kvist_http_sse_user_int :: proc(stream: ^h.Sse) -> int {
+	return int(uintptr(stream.user_data))
+}
+
+__kvist_http_sse_set_user_int :: proc(stream: ^h.Sse, value: int) {
+	stream.user_data = rawptr(uintptr(value))
+}
+")
+
+(defmacro new-stream [res]
+  (quasiquote
+    (__kvist_http_sse_new_started (unquote res))))
+
+(defmacro new-stream-on-error [res on-error]
+  (quasiquote
+    (__kvist_http_sse_new_started_on_error (unquote res) (unquote on-error))))
+
+(defmacro on-error [name binding & body]
+  (let [stream (first binding)
+        err (nth binding 1)
+        stream-param (symbol (str (name stream) ":"))
+        err-param (symbol (str (name err) ":"))]
+    (quasiquote
+      (defn (unquote name) [(unquote stream-param) ^h.Sse (unquote err-param) net.Send_Error]
+        (do
+          (splice body))))))
+
+(defmacro on-timeout [name binding & body]
+  (let [op (first binding)
+        stream (nth binding 1)
+        op-param (symbol (str (name op) ":"))
+        stream-param (symbol (str (name stream) ":"))]
+    (quasiquote
+      (defn (unquote name) [(unquote op-param) ^nbio.Operation (unquote stream-param) ^h.Sse]
+        (do
+          (splice body))))))
+
+(defmacro start! [stream]
+  (quasiquote
+    (h.sse_start (unquote stream))))
+
+(defmacro with-stream [binding & body]
+  (let [stream (first binding)
+        res (nth binding 1)]
+    (quasiquote
+      (let [(unquote stream) (__kvist_http_sse_new_started (unquote res))]
+        (do
+          (splice body))))))
+
+(defmacro send! [stream data]
+  (quasiquote
+    (h.sse_event (unquote stream) (h.Sse_Event { :data (unquote data) }))))
+
+(defmacro send-event! [stream event data]
+  (quasiquote
+    (h.sse_event (unquote stream) (h.Sse_Event { :event (unquote event) :data (unquote data) }))))
+
+(defmacro comment! [stream text]
+  (quasiquote
+    (h.sse_event (unquote stream) (h.Sse_Event { :comment (unquote text) }))))
+
+(defmacro retry! [stream milliseconds]
+  (quasiquote
+    (h.sse_event (unquote stream) (h.Sse_Event { :retry (unquote milliseconds) }))))
+
+(defmacro schedule-timeout! [delay stream callback]
+  (quasiquote
+    (__kvist_http_sse_schedule_timeout (unquote delay) (unquote stream) (unquote callback))))
+
+(defmacro closed? [stream]
+  (quasiquote
+    (__kvist_http_sse_closed (unquote stream))))
+
+(defmacro user-int [stream]
+  (quasiquote
+    (__kvist_http_sse_user_int (unquote stream))))
+
+(defmacro set-user-int! [stream value]
+  (quasiquote
+    (__kvist_http_sse_set_user_int (unquote stream) (unquote value))))
+
+(defmacro flush! [_stream]
+  '(do))
+
+(defmacro close! [stream]
+  (quasiquote
+    (h.sse_end (unquote stream))))
+
+(defmacro destroy! [stream]
+  (quasiquote
+    (h.sse_destroy (unquote stream))))

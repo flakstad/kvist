@@ -93,9 +93,9 @@ And:
 
 ```clojure
 (defn auto-tag-blocked [ctx event]
-  (when (= :item/updated (:type event))
+  (core/when (= :item/updated (:type event))
     (let [item (load-item ctx (:item-id event))]
-      (when (> (:blocked-days item) 7)
+      (core/when (> (:blocked-days item) 7)
         (update-item! ctx (:id item) {:tags [:blocked]})))))
 ```
 

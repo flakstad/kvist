@@ -1,7 +1,7 @@
 # Kvist Examples
 
 The examples are meant to be read and evaled form by form from Emacs. Most
-files keep `main` small and put the useful calls in a rich `(comment ...)`
+files keep `main` small and put the useful calls in a rich `(core/comment ...)`
 block so `C-c C-e` and `C-c C-c` are practical.
 
 ## Language Basics
@@ -22,17 +22,24 @@ block so `C-c C-e` and `C-c C-c` are practical.
 - `macro-union-helpers.kvist`: recursive macro DSL that emits a union plus variant constructors.
 - `macro-messages.kvist`: message-family DSL that emits payload structs, a tagged union, and constructors.
 - `testing.kvist`: shipped `kvist:test` macros including `t/deftest`, `t/is`, nested `t/testing`, `t/are`, and `t/use-fixtures` with `:each` / `:once`.
+- `builtin-package-tests.kvist`: executable `kvist:test` coverage for shipped `core`, `arr`, `map`, `set`, `str`, `io`, `json`, and `struct` packages.
 - `hiccup-interpolation.kvist`: Hiccup attrs and child nodes with direct Kvist expression interpolation, including `if`, `when`, `nil` omission, and `[:<> ...]` fragments.
 - `closures.kvist`: non-capturing `fn` literals plus captured callbacks for selected non-escaping helper sites such as `map`, `filter`, `remove`, `keep`, and their bang variants.
 - `http-server.kvist`: shipped `kvist:http` package over vendored `odin-http`, using the explicit stateful router/server lifecycle and thin response helpers.
 - `http-client.kvist`: shipped `kvist:http/client` package over vendored `odin-http`, with a thin request/response client surface.
+- `http-session.kvist`: explicit cookie and CSRF session planning with `kvist:http/session`, staying close to the upstream req/res handler model.
+- `http-sse.kvist`: explicit server-sent events with `kvist:http/sse`, using a persistent upstream SSE stream handle.
+- `http-sse-live.kvist`: a long-lived SSE stream that keeps sending ticks until the client disconnects, suitable for `curl -N`.
+- `http-datastar.kvist`: thin Datastar server events over `kvist:http/sse`, for patching elements, signals, and scripts.
+- `http-datastar-live.kvist`: a served Datastar page plus a live SSE endpoint that keeps updating until the browser disconnects.
+- `http-stress-server.kvist`: small rough-load target for plain request and concurrent SSE checks, paired with `scripts/stress_http.sh`.
 - `hello.kvist`: package, import, struct literal, and a tiny `main`.
 - `function-calls.kvist`: positional calls, named calls, and trailing default arguments.
 - `call-conventions.kvist`: API-shaped examples using positional prefixes plus named/default tails.
 - `destructuring.kvist`: struct-backed `{:keys [...]}` destructuring in `let`, params, proc literals, pointer params, and named/default-call interop.
 - `declarations.kvist`: doc comments, import aliases, constants, enums, structs.
 - `defstructs.kvist`: `defstruct` docstrings, typed fields, nested structs.
-- `control-flow.kvist`: `cond`, `switch`, loops, `when-let`, and `if-let`.
+- `control-flow.kvist`: `core/cond`, `core/switch`, loops, `core/when-let`, and `core/if-let`.
 - `data-literals.kvist`: arrays, maps, `make`, `new`, allocator macros.
 - `vars-and-state.kvist`: `defconst`, `defvar`, and explicit top-level mutation.
 - `pointers-and-raw.kvist`: pointers and explicit raw Odin escape hatches.
@@ -48,7 +55,7 @@ block so `C-c C-e` and `C-c C-c` are practical.
 - `mutation-and-bang.kvist`: mutating helper variants such as `map!`.
 - `ownership-helpers.kvist`: `let ... defer`, `with-allocator`, and `with-temp-allocator`.
 - `ownership-warnings.kvist`: intentionally warning-producing examples for the current ownership diagnostics.
-- `update.kvist`: `update!` over arrays, maps, and defstruct fields.
+- `update.kvist`: `core/update!` over arrays, maps, and defstruct fields.
 - `orders-report.kvist`: a more realistic eager data pipeline.
 
 Owned dynamic arrays, maps, allocated slices, `make`, and sequence helpers that
@@ -96,7 +103,7 @@ are run deliberately.
   live module file while preserving command state.
 - `reload_step_demo`: convenience single-file `defstate` reload workflow; `kvist dev --reload`
   generates the resident shell and reloadable module for you. The checked-in
-  example now keeps `main.kvist` as a small shell and puts the app logic in
+  example keeps `main.kvist` as a small shell and puts the app logic in
   `app.kvist`.
 - `reload_run_demo`: general app-owned `:run` workflow with one explicit
   `reload/checkpoint!` boundary. The checked-in example also uses the small
@@ -137,11 +144,11 @@ The live commands demo watches the `.kvist` files in
 `examples/live_commands_demo/live/`. Edit either `commands.kvist` or
 `helpers.kvist` while the demo runs to see the process stay alive, the module
 reload, the command/hook behavior change, imported helper code update, and the
-command counter survive the edit. It now also shows source-defined reload
+command counter survive the edit. It also shows source-defined reload
 migration: change `counter-key` and `:version` in `commands.kvist` and the live
 module carries the count forward itself. It also shows command args and hook
 payload values flowing through the live layer rather than only zero-arg
-ambient state. The host now uses the reusable `kvist_live.Module_Reloader`
+ambient state. The host uses the reusable `kvist_live.Module_Reloader`
 helpers rather than open-coding the watched-directory loop.
 
 The reload demos are the lowest-ceremony native path so far. They keep the
@@ -170,10 +177,10 @@ The native hot-reload demo watches the shared library at
 `examples/hot_reload_demo/module/main.kvist`, recompile that file to generated
 Odin, rebuild only the module shared library, and the running host reloads it
 in place while preserving the host state struct. The demo sources themselves
-are now pure `.kvist`, using
+are pure `.kvist`, using
 `(import hot "kvist:hot")` plus `(hot/defmodule ...)` for the standard native
 module contract and `(import ... :odin "...")` for the implementation
-packages. The host now uses the reusable `kvist_hot.Reloader` helpers rather
+packages. The host uses the reusable `kvist_hot.Reloader` helpers rather
 than open-coding the watch loop, with the higher-level host path
 `new_reloader(...)`, `load_initial_module(...)`, and
 `reload_module_if_source_changed(...)`. See
@@ -186,10 +193,10 @@ rebuild only the DLL to exercise native hot reload, or edit
 `examples/hybrid_live_demo/live/*.kvist` to reload the reflective command layer
 from source. See
 [`examples/hybrid_live_demo/README.md`](./hybrid_live_demo/README.md) for the
-combined workflow. The live host side now also uses the higher-level
+combined workflow. The live host side also uses the higher-level
 `kvist_live` helper path:
 `new_module_reloader(...)`, `load_initial_module(...)`, and
-`reload_module_if_source_changed(...)`. The live module source now uses the
+`reload_module_if_source_changed(...)`. The live module source uses the
 shipped `kvist:live` package too:
 `(import live "kvist:live")`, `(live/defmodule ...)`,
 `live/defcommand`, and `live/defhook`.
@@ -199,6 +206,6 @@ Useful commands while reading examples:
 ```sh
 kvist check examples/core-time-slice.kvist
 kvist eval examples/core-time-slice.kvist '(duration-ms)'
-kvist macroexpand examples/error-handling.kvist '(if-ok [data err (os.read_entire_file "tmp/x" context.allocator)] (len data) 0)'
+kvist macroexpand examples/error-handling.kvist '(core/if-ok [data err (os.read_entire_file "tmp/x" context.allocator)] (len data) 0)'
 kvist expand examples/sequences.kvist '(age-for-ada)'
 ```

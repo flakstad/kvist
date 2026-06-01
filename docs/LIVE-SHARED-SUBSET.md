@@ -25,7 +25,6 @@ a strong reason not to.
 The live loader currently accepts these ordinary top-level forms:
 
 - `import` in path-loaded live modules
-- `def`
 - `defconst`
 - `defvar`
 - `defn`
@@ -38,11 +37,11 @@ Current constraints:
   `(import "path")`
 - imported live helper files are merged into the root live module rather than
   loaded as separate runtime modules
-- imported helper files currently support ordinary `def`, `defconst`,
-  `defvar`, and `defn`
+- imported helper files currently support ordinary `defconst`, `defvar`, and
+  `defn`
 - imported helper files may not define `live/module`, `live/command`,
   `live/hook`, `init`, `shutdown`, or `migrate`
-- top-level `def` / `defconst` / `defvar` values must still be simple literals
+- top-level `defconst` / `defvar` values must still be simple literals
 - top-level `defn` is used for live helper functions and same-named entrypoint
   implementations
 - zero-arg top-level `defn init`, `defn migrate`, and `defn shutdown` are
@@ -82,7 +81,7 @@ The live evaluator currently supports:
   - keyword
 - symbols:
   - local bindings
-  - module bindings from top-level `def` / `defconst` / `defvar`
+  - module bindings from top-level `defconst` / `defvar`
 - control flow:
   - `do`
   - `if`

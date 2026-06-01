@@ -1,5 +1,6 @@
 // Explicit tap-style inspection for eval-driven development.
 (package main)
+(import core "kvist:core")
 (import arr "kvist:arr")
 
 (defstruct User {
@@ -8,14 +9,14 @@
 })
 
 (defn inspected-age [] -> int
-  (let [user (tap> :user (User {:name "Ada" :age 36}))
-        age (tap> :age (:age user))]
+  (let [user (core/tap> :user (User {:name "Ada" :age 36}))
+        age (core/tap> :age (:age user))]
     age))
 
 (defn inspected-owned-count [] -> int
-  (let [xs (tap> "numbers" (arr/dynamic int [1 2 3]))]
+  (let [xs (core/tap> "numbers" (arr/dynamic int [1 2 3]))]
     (defer (delete xs))
-    (count xs)))
+    (core/count xs)))
 
 (defn plus-one [x: int] -> int
   (+ x 1))
@@ -29,7 +30,7 @@
 (defn inspected-thread-total [] -> int
   (let [xs (arr/dynamic int [1 2 3 4])
         mapped (arr/map plus-one xs)
-        _ (tap> :mapped mapped)
+        _ (core/tap> :mapped mapped)
         evens (arr/filter even? mapped)
         total (arr/reduce add 0 evens)]
     (defer (delete xs))
@@ -38,10 +39,10 @@
     total))
 
 (defn main []
-  (println (inspected-age))
-  (println (inspected-thread-total)))
+  (core/println (inspected-age))
+  (core/println (inspected-thread-total)))
 
-(comment
+(core/comment
   (inspected-age)
   ;; prints:
   ;; user: User{name = "Ada", age = 36}

@@ -136,12 +136,22 @@ method_string :: proc(m: Method) -> string #no_bounds_check {
 }
 
 method_parse :: proc(m: string) -> (method: Method, ok: bool) #no_bounds_check {
-	// PERF: I assume this is faster than a map with this amount of items.
-
-	for r in Method {
-		if _method_strings[r] == m {
-			return r, true
-		}
+	switch len(m) {
+	case 3:
+		if m == "GET" { return .Get, true }
+		if m == "PUT" { return .Put, true }
+	case 4:
+		if m == "POST" { return .Post, true }
+		if m == "HEAD" { return .Head, true }
+	case 5:
+		if m == "PATCH" { return .Patch, true }
+		if m == "TRACE" { return .Trace, true }
+	case 6:
+		if m == "DELETE" { return .Delete, true }
+	case 7:
+		if m == "CONNECT" { return .Connect, true }
+	case 8:
+		if m == "OPTIONS" { return .Options, true }
 	}
 
 	return nil, false

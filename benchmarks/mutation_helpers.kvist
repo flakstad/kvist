@@ -1,5 +1,7 @@
 // Focused benchmark for update!, update, and pointer/value mutation patterns.
 (package main)
+(import core "kvist:core")
+(import arr "kvist:arr")
 (import "core:fmt")
 (import mem "core:mem")
 (import time "core:time")
@@ -32,13 +34,13 @@ MAP_N :: 8_000")
 
 (defn bump-score [score: Score] -> Score
   (let [updated score]
-    (set! updated (update updated :value + 3))
-    (set! updated (update updated :bonus inc))
+    (set! updated (core/update updated :value + 3))
+    (set! updated (core/update updated :bonus inc))
     updated))
 
 (defn bump-score! [score: ^Score]
-  (update! score^ :value + 3)
-  (update! score^ :bonus inc))
+  (core/update! score^ :value + 3)
+  (core/update! score^ :bonus inc))
 
 (defn bench-struct-update [reps: int, n: int] -> int
   (let [base (arr/empty Score n)
@@ -52,13 +54,13 @@ MAP_N :: 8_000")
     (for (< i reps)
       (let [scores (arr/empty Score n)
             j 0]
-        (into! scores (slice base))
+        (arr/into! scores (core/slice base))
         (for (< j n)
-          (let [score (get scores j)]
-            (update! scores j (bump-score score)))
+          (let [score (core/get scores j)]
+            (core/update! scores j (bump-score score)))
           (set! j (+ j 1)))
-        (set! checksum (+ checksum (:value (get scores (- n 1)))))
-        (set! checksum (+ checksum (:bonus (get scores (- n 1)))))
+        (set! checksum (+ checksum (:value (core/get scores (- n 1)))))
+        (set! checksum (+ checksum (:bonus (core/get scores (- n 1)))))
         (delete scores))
       (set! i (+ i 1)))
     checksum))
@@ -75,13 +77,13 @@ MAP_N :: 8_000")
     (for (< i reps)
       (let [scores (arr/empty Score n)
             j 0]
-        (into! scores (slice base))
+        (arr/into! scores (core/slice base))
         (for (< j n)
-          (let [score-ptr (addr (get scores j))]
+          (let [score-ptr (addr (core/get scores j))]
             (bump-score! score-ptr))
           (set! j (+ j 1)))
-        (set! checksum (+ checksum (:value (get scores (- n 1)))))
-        (set! checksum (+ checksum (:bonus (get scores (- n 1)))))
+        (set! checksum (+ checksum (:value (core/get scores (- n 1)))))
+        (set! checksum (+ checksum (:bonus (core/get scores (- n 1)))))
         (delete scores))
       (set! i (+ i 1)))
     checksum))
@@ -98,12 +100,12 @@ MAP_N :: 8_000")
     (for (< i reps)
       (let [xs (arr/empty int n)
             j 0]
-        (into! xs (slice base))
+        (arr/into! xs (core/slice base))
         (set! j 0)
         (for (< j n)
-          (update! xs j + 1)
+          (core/update! xs j + 1)
           (set! j (+ j 1)))
-        (set! checksum (+ checksum (get xs (- n 1))))
+        (set! checksum (+ checksum (core/get xs (- n 1))))
         (delete xs))
       (set! i (+ i 1)))
     checksum))
@@ -112,12 +114,12 @@ MAP_N :: 8_000")
   (let [i 0
         checksum 0]
     (for (< i reps)
-      (let [counts (map/empty int int)
+      (let [counts (new map[int]int {})
             j 0]
         (for (< j n)
-          (update! counts (% j 1024) + 1)
+          (core/update! counts (% j 1024) + 1)
           (set! j (+ j 1)))
-        (set! checksum (+ checksum (get counts 17 0)))
+        (set! checksum (+ checksum (core/get counts 17 0)))
         (delete counts))
       (set! i (+ i 1)))
     checksum))

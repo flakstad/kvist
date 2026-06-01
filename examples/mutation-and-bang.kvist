@@ -1,5 +1,6 @@
 // Exercises struct field updates, pointer mutation, and in-place sequence helpers.
 (package main)
+(import core "kvist:core")
 (import arr "kvist:arr")
 
 (defstruct Order {
@@ -14,25 +15,25 @@
 
 (defn settle-order [order: Order] -> Order
   (let [updated order]
-    (when (and (== (:status updated) 2)
+    (core/when (and (== (:status updated) 2)
                (> (:amount updated) 100))
-      (update! updated :amount (- (:amount updated) (:discount updated)))
-      (update! updated :discount 0)
-      (update! updated :status 3))
+      (core/update! updated :amount (- (:amount updated) (:discount updated)))
+      (core/update! updated :discount 0)
+      (core/update! updated :status 3))
     updated))
 
 (defn settle-order! [order: ^Order]
   ;; Use a pointer parameter when the caller expects in-place mutation of the
   ;; shared order value rather than a returned copy.
-  (when (and (== (:status (deref order)) 2)
+  (core/when (and (== (:status (deref order)) 2)
              (> (:amount (deref order)) 100))
-    (update! order^ :amount (- (:amount order^) (:discount order^)))
-    (update! order^ :discount 0)
-    (update! order^ :status 3)))
+    (core/update! order^ :amount (- (:amount order^) (:discount order^)))
+    (core/update! order^ :discount 0)
+    (core/update! order^ :status 3)))
 
 (defn order-score [orders: []Order] -> int
   (let [total 0]
-    (each [order orders]
+    (for [order orders]
       (set! total (+ total (:amount order)))
       (set! total (+ total (:status order))))
     total))
@@ -54,21 +55,21 @@
     (defer (delete orders))
     (arr/map! settle-order orders)
     (arr/filter! settled? orders)
-    (count orders)))
+    (core/count orders)))
 
 (defn pointer-update-score [] -> int
   (let [orders (sample-orders)]
     (defer (delete orders))
-    (each [_ idx orders]
-      (settle-order! (addr (get orders idx))))
+    (for [_ idx orders]
+      (settle-order! (addr (core/get orders idx))))
     (order-score (arr/slice orders))))
 
 (defn main []
-  (println (map-bang-score))
-  (println (filter-bang-count))
-  (println (pointer-update-score)))
+  (core/println (map-bang-score))
+  (core/println (filter-bang-count))
+  (core/println (pointer-update-score)))
 
-(comment
+(core/comment
   ;; arr/map! replaces each struct value with the returned updated struct.
   (map-bang-score)
   ;; => 513

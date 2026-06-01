@@ -4,16 +4,16 @@
   (let [xs [1 2 3] defer
         lookup {:one 1 :two 2} defer
         tags #{:math :lisp} defer]
-    (println tags)
+    (core/println tags)
     (+ (arr/count xs)
-       (get lookup :one))))
+       (core/get lookup :one))))
 
 (defn typed-empty-inline-literals-demo [] -> int
   (let [xs: [dynamic]int [] defer
         lookup: map[string]int {} defer
         tags: set[string] #{} defer]
-    (println lookup tags)
+    (core/println lookup tags)
     (arr/count xs)))
 
 (defn main []
-  (println (inline-literals-demo) (typed-empty-inline-literals-demo)))
+  (core/println (inline-literals-demo) (typed-empty-inline-literals-demo)))

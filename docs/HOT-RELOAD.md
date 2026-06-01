@@ -1,6 +1,6 @@
 # Native Hot Reload
 
-This note captures the current preferred direction for iterative development in
+This note captures the preferred direction for iterative development in
 Kvist:
 
 - native hot reload is the primary path for broad compiled-code iteration
@@ -94,10 +94,10 @@ The current host-side helper surface is also intentionally small:
 - `reload_module_if_source_changed(...)`
 
 The lower-level load/result helpers still exist underneath, but the preferred
-host path is now the state-owning one above so `kvist_hot` itself sequences
+host path is the state-owning one above so `kvist_hot` itself sequences
 `on_unload`, manifest validation, and `on_load` around library swaps.
 
-On the module side, the first shipped Kvist helper package now exists too:
+On the module side, there is a shipped Kvist helper package:
 
 - `(import hot "kvist:hot")`
 - `(hot/defmodule ...)`
@@ -106,7 +106,7 @@ That macro expands the standard `kvist_hot` manifest and exported entrypoints
 for a host-owned state type, so reloadable modules stop hand-writing the same
 ABI surface per demo.
 
-There is now also a first-pass higher-level CLI surface on top of that runtime:
+There is also a higher-level CLI surface on top of that runtime:
 
 - top-level `(defstate Name {fields...} {metadata...})` in pure `.kvist` user code
 - `kvist dev --reload app/main.kvist`
@@ -122,7 +122,7 @@ That path generates the resident shell and reloadable module underneath while
 keeping the user source as one `.kvist` app file with one durable root state
 and an explicit reload-lifetime contract.
 
-The compiler now also owns the generated-Odin import rebasing for this path.
+The compiler owns the generated-Odin import rebasing for this path.
 That means:
 
 - `kvist compile ... -o some/output.odin`
@@ -226,7 +226,7 @@ Practical examples:
 (defn run [state: (ptr App_State) host: (ptr reload/Run_Host)]
   (for true
     (handle-one-request state)
-    (when (reload/checkpoint! host)
+    (core/when (reload/checkpoint! host)
       (return))))
 ```
 
@@ -235,7 +235,7 @@ Practical examples:
   (for true
     (pump-events state)
     (dispatch-ready-work state)
-    (when (reload/checkpoint! host)
+    (core/when (reload/checkpoint! host)
       (return))))
 ```
 

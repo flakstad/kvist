@@ -1,0 +1,157 @@
+// Focused benchmark for source-backed package helpers vs direct Odin.
+(package main)
+(import arr "kvist:arr")
+(import map "kvist:map")
+(import set "kvist:set")
+(import str "kvist:str")
+(import "core:fmt")
+(import mem "core:mem")
+(import time "core:time")
+
+(odin "COUNT :: 512
+REPS :: 250
+STRING_REPS :: 1_200")
+
+(proc report [name: string, elapsed: time.Duration, checksum: int, track: ^mem.Tracking-Allocator]
+  (fmt.printfln "%-17s %9.3f ms allocs=%8v total=%10v peak=%9v live=%v checksum=%v"
+                name
+                (time.duration-milliseconds elapsed)
+                track.total-allocation-count
+                track.total-memory-allocated
+                track.peak-memory-allocated
+                track.current-memory-allocated
+                checksum))
+
+(proc run-one [name: string, checksum: int, start: time.Tick, track: ^mem.Tracking-Allocator]
+  (report name (time.tick-since start) checksum track))
+
+(proc build-map-overrides [] -> map[int]int
+  (let [out (map/empty int int 3)]
+    (update! out 2 20)
+    (update! out 4 40)
+    (update! out 6 60)
+    out))
+
+(proc build-map-mutable [] -> map[int]int
+  (let [out (map/empty int int 6)]
+    (update! out 0 1)
+    (update! out 1 2)
+    (update! out 2 3)
+    (update! out 3 4)
+    out))
+
+(proc build-set-rhs [] -> set[int]
+  (let [out (set/empty int 5)]
+    (set/add! out 4)
+    (set/add! out 5)
+    (set/add! out 6)
+    (set/add! out 7)
+    (set/add! out 8)
+    out))
+
+(proc build-set-mutable [] -> set[int]
+  (let [out (set/empty int 6)]
+    (set/add! out 1)
+    (set/add! out 2)
+    (set/add! out 3)
+    (set/add! out 4)
+    (set/add! out 5)
+    (set/add! out 6)
+    out))
+
+(proc build-even-set [] -> set[int]
+  (let [out (set/empty int 5)]
+    (set/add! out 2)
+    (set/add! out 4)
+    (set/add! out 6)
+    (set/add! out 8)
+    (set/add! out 10)
+    out))
+
+(proc bench-str-package [reps: int] -> int
+  (let [checksum 0
+        i 0]
+    (for (< i reps)
+      (let [source "  Kvist,odin,core,odin  "
+            trimmed (str/trim source)
+            parts (str/split trimmed ",") defer
+            joined (str/join parts "-") defer
+            replaced (str/replace joined "odin" "ODIN" 1) defer
+            lowered (str/lower replaced) defer
+            uppered (str/upper lowered) defer]
+        (set! checksum (+ checksum (str/count trimmed)))
+        (set! checksum (+ checksum (count parts)))
+        (set! checksum (+ checksum (str/index-of joined "-")))
+        (set! checksum (+ checksum (str/last-index-of joined "-")))
+        (set! checksum (+ checksum (count (str/slice uppered 6))))
+        (when (str/starts-with? trimmed "Kvist")
+          (set! checksum (+ checksum 1)))
+        (when (str/ends-with? trimmed "odin")
+          (set! checksum (+ checksum 1)))
+        (when (str/contains? replaced "ODIN")
+          (set! checksum (+ checksum 1))))
+      (set! i (+ i 1)))
+    checksum))
+
+(proc bench-map-package [reps: int] -> int
+  (let [checksum 0
+        i 0]
+    (for (< i reps)
+      (let [overrides (build-map-overrides) defer
+            mutable (build-map-mutable) defer]
+        (map/assoc! mutable 1 2)
+        (map/dissoc! mutable 0)
+        (map/merge! mutable overrides)
+        (map/assoc! mutable COUNT 99)
+        (set! checksum (+ checksum (map/get mutable 1 0)))
+        (set! checksum (+ checksum (map/get mutable 2 0)))
+        (set! checksum (+ checksum (map/get mutable COUNT 0)))
+        (set! checksum (+ checksum 6))
+        (when (!= (map/get mutable 4 0) 0)
+          (set! checksum (+ checksum 1))))
+      (set! i (+ i 1)))
+    checksum))
+
+(proc bench-set-package [reps: int] -> int
+  (let [checksum 0
+        i 0]
+    (for (< i reps)
+      (let [rhs (build-set-rhs) defer
+            mutable (build-set-mutable) defer
+            evens (build-even-set) defer
+            removed (set/empty int 1) defer]
+        (set/add! mutable (+ COUNT 1))
+        (set/remove! mutable 0)
+        (set/union! mutable rhs)
+        (set/intersection! mutable evens)
+        (set/add! removed 2)
+        (set/difference! mutable removed)
+        (set! checksum (+ checksum 3))
+        (when (get mutable 4 false)
+          (set! checksum (+ checksum 1)))
+        (when (get mutable 6 false)
+          (set! checksum (+ checksum 1)))
+        (when (get mutable 8 false)
+          (set! checksum (+ checksum 1))))
+      (set! i (+ i 1)))
+    checksum))
+
+(proc main []
+  (let [old-allocator context.allocator
+        track: mem.Tracking-Allocator (odin "mem.Tracking_Allocator{}")]
+    (mem.tracking-allocator-init (& track) old-allocator old-allocator)
+    (defer (mem.tracking-allocator-destroy (& track)))
+    (set! context.allocator (mem.tracking-allocator (& track)))
+    (defer (odin "context.allocator = old_allocator"))
+
+    (mem.tracking-allocator-reset (& track))
+    (let [start (time.tick-now)]
+      (run-one "str-package" (bench-str-package STRING_REPS) start (& track)))
+
+    (mem.tracking-allocator-reset (& track))
+    (let [start (time.tick-now)]
+      (run-one "map-package" (bench-map-package REPS) start (& track)))
+
+    (mem.tracking-allocator-reset (& track))
+    (let [start (time.tick-now)]
+      (run-one "set-package" (bench-set-package REPS) start (& track)))))

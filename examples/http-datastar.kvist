@@ -1,0 +1,29 @@
+// Thin Datastar event helpers over kvist:http/sse.
+(package main)
+(import http "kvist:http")
+(import sse "kvist:http/sse")
+(import dstar "kvist:http/datastar")
+
+(defn main []
+  (let [router (http/new-router)
+        server (http/new-server)]
+    (defer (http/router-destroy! router))
+
+    (http/get! router "/konto/events" [req res]
+      (sse/with-stream [stream res]
+        (dstar/patch-elements! stream "<div id='status'>Klar</div>")
+        (dstar/patch-signals! stream "{connected: true}")
+        (dstar/execute-script! stream "console.log('datastar ready')")
+        (sse/close! stream)))
+
+    (http/server-shutdown-on-interrupt! server)
+    (http/listen-and-serve! server router 6969)))
+
+(comment
+  ;; Run deliberately:
+  ;;
+  ;;   kvist run examples/http-datastar.kvist
+  ;;
+  ;; Then connect a Datastar-capable client to:
+  ;;   http://127.0.0.1:6969/konto/events
+  )

@@ -1,4 +1,5 @@
 (package map)
+(import core "kvist:core")
 (import arr "kvist:arr")
 
 (defmacro empty [key-type value-type & rest]
@@ -23,33 +24,58 @@
   (quasiquote
     (kvist/map/merge! (unquote target) (unquote source))))
 
+(defmacro assoc! [target key value]
+  (quasiquote
+    (core/update! (unquote target) (unquote key) (unquote value))))
+
+(defmacro dissoc! [target key]
+  (quasiquote
+    (kvist/map/dissoc! (unquote target) (unquote key))))
+
 (proc contains? [m: map[$K]$V, key: K] -> bool #force_inline
-  (in key m))
+  (odin "return key in m"))
+
+(proc assoc [m: map[$K]$V, key: K, value: V] -> map[K]V #force_inline
+  (let [out (map/empty K V (+ (odin "len(m)") 1))]
+    (for [entry-key entry-value m]
+      (core/update! out entry-key entry-value))
+    (core/update! out key value)
+    out))
+
+(proc dissoc [m: map[$K]$V, key: K] -> map[K]V #force_inline
+  (let [out (map/empty K V (odin "len(m)"))]
+    (for [entry-key entry-value m]
+      (core/when (!= entry-key key)
+        (core/update! out entry-key entry-value)))
+    out))
 
 (proc merge [lhs: map[$K]$V, rhs: map[$K]$V] -> map[K]V #force_inline
-  (let [out (map/empty K V (+ (count lhs) (count rhs)))]
+  (let [out (map/empty K V (+ (odin "len(lhs)") (odin "len(rhs)")))]
     (for [key value lhs]
-      (update! out key value))
+      (core/update! out key value))
     (for [key value rhs]
-      (update! out key value))
+      (core/update! out key value))
     out))
 
 (proc keys [m: map[$K]$V] -> [dynamic]K #force_inline
-  (let [out (arr/empty K (count m))]
+  (let [out (arr/empty K (odin "len(m)"))]
     (for [key _ m]
       (arr/push! out key))
     out))
 
 (proc vals [m: map[$K]$V] -> [dynamic]V #force_inline
-  (let [out (arr/empty V (count m))]
+  (let [out (arr/empty V (odin "len(m)"))]
     (for [_ value m]
       (arr/push! out value))
     out))
 
 (proc zip [ks: []$K, vs: []$V] -> map[K]V #force_inline
-  (let [value-count (count vs)
-        out (map/empty K V (if (< (count ks) value-count) (count ks) value-count))]
-    (for [i key ks]
-      (when (< i value-count)
-        (update! out key (arr/get vs i))))
-    out))
+  (let [value-count (odin "len(vs)")
+        cap (odin "len(ks)")]
+    (core/when (> cap value-count)
+      (set! cap value-count))
+    (let [out (map/empty K V cap)]
+      (for [key i ks]
+        (core/when (< i value-count)
+          (core/update! out key (arr/get vs i))))
+      out)))

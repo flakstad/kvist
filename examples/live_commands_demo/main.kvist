@@ -14,7 +14,7 @@
     :shutdown support.Live_Module_Shutdown
   }))
 
-(proc main []
+(defn main []
   (let [runtime (kvist_live.new_runtime (kvist_live.Runtime_Config {
                  :app_name "live-commands-demo"
                  :live_enabled true
@@ -41,9 +41,9 @@
                                                                    module-config)]
                     (if (not reload-ok)
                       (fmt.eprintln "reload failed:" (:message reload-err))
-                      (when changed
+                      (core/when changed
                         (fmt.println "reloaded live module from disk"))))
                   (let [[_ command-err command-ok] (kvist_live.invoke_command (addr runtime) "tick" nil)]
-                    (when (not command-ok)
+                    (core/when (not command-ok)
                       (fmt.eprintln "command failed:" (:message command-err))))
                   (time.sleep tick-delay))))))))))

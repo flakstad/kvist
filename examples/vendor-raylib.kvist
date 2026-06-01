@@ -5,11 +5,12 @@
 // parens around them. The render proc opens a window, so it is left as an
 // explicit eval target rather than something main runs by default.
 (package main)
+(import core "kvist:core")
 (import rl "vendor:raylib")
 
 (defn blue-alpha [] -> int
   ;; raylib colors are distinct fixed arrays in the Odin binding.
-  (int (get rl.BLUE 3)))
+  (int (core/get rl.BLUE 3)))
 
 (defn point-inside-demo? [] -> bool
   ;; This is a safe terminal eval that still uses real raylib data shapes:
@@ -33,9 +34,9 @@
     (rl.EndDrawing)))
 
 (defn main []
-  (println (blue-alpha) (point-inside-demo?)))
+  (core/println (blue-alpha) (point-inside-demo?)))
 
-(comment
+(core/comment
   ;; Safe terminal evals:
 
   (blue-alpha)

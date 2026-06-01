@@ -1,0 +1,130 @@
+(package session)
+(import h "kvist_vendor:http")
+
+(defenum Session-Action [
+  Accept
+  Create
+  RefreshCsrf
+  Reject
+])
+
+(defstruct Session-Opts {
+  :session-cookie string
+  :csrf-cookie string
+  :path string
+  :secure bool
+  :http-only bool
+  :same-site h.Cookie_Same_Site
+  :new-sid (proc [] -> string)
+  :csrf-for (proc [sid: string] -> string)
+  :request-csrf (proc [req: ^h.Request] -> string)
+})
+
+(defstruct Session-Plan {
+  :action Session-Action
+  :sid string
+  :csrf string
+  :set-cookie bool
+})
+
+(odin "
+__kvist_http_session_request_method :: proc(req: ^h.Request) -> h.Method {
+	return req.line.(h.Requestline).method
+}
+
+__kvist_http_session_call_new_sid :: proc(f: proc() -> string) -> string {
+	return f()
+}
+
+__kvist_http_session_call_sid_string :: proc(f: proc(sid: string) -> string, sid: string) -> string {
+	return f(sid)
+}
+
+__kvist_http_session_call_req_string :: proc(f: proc(req: ^h.Request) -> string, req: ^h.Request) -> string {
+	return f(req)
+}
+")
+
+(defn new-opts [session-cookie: string
+                csrf-cookie: string
+                new-sid: (proc [] -> string)
+                csrf-for: (proc [sid: string] -> string)
+                request-csrf: (proc [req: ^h.Request] -> string)] -> Session-Opts
+  (Session-Opts {:session-cookie session-cookie
+                 :csrf-cookie csrf-cookie
+                 :path "/"
+                 :secure false
+                 :http-only true
+                 :same-site .Lax
+                 :new-sid new-sid
+                 :csrf-for csrf-for
+                 :request-csrf request-csrf}))
+
+(defn request-sid [req: ^h.Request, opts: Session-Opts] -> [value: string, ok: bool]
+  (h.request_cookie_get req (:session-cookie opts)))
+
+(defn request-csrf-cookie [req: ^h.Request, opts: Session-Opts] -> [value: string, ok: bool]
+  (h.request_cookie_get req (:csrf-cookie opts)))
+
+(defn expected-csrf [sid: string, opts: Session-Opts] -> string
+  (__kvist_http_session_call_sid_string (:csrf-for opts) sid))
+
+(defmacro accepted? [plan]
+  (quasiquote
+    (!= (:action (unquote plan)) .Reject)))
+
+(defn read-method? [method: h.Method] -> bool
+  (or (== method .Get)
+      (== method .Head)))
+
+(defn request-method [req: ^h.Request] -> h.Method
+  (__kvist_http_session_request_method req))
+
+(defn plan [req: ^h.Request, opts: Session-Opts] -> Session-Plan
+  (let [method (request-method req)]
+    (if-let [sid sid-ok (request-sid req opts)]
+      (let [csrf (expected-csrf sid opts)
+            [csrf-cookie-token csrf-cookie-ok] (request-csrf-cookie req opts)]
+        (cond
+          (and (read-method? method)
+               csrf-cookie-ok
+               (== csrf-cookie-token csrf))
+          (Session-Plan {:action .Accept :sid sid :csrf csrf :set-cookie false})
+
+          (read-method? method)
+          (Session-Plan {:action .RefreshCsrf :sid sid :csrf csrf :set-cookie true})
+
+          (and (== method .Post)
+               (== (__kvist_http_session_call_req_string (:request-csrf opts) req) csrf))
+          (Session-Plan {:action .Accept :sid sid :csrf csrf :set-cookie false})
+
+          :else
+          (Session-Plan {:action .Reject :sid sid :csrf csrf :set-cookie false})))
+      (if (read-method? method)
+        (let [sid (__kvist_http_session_call_new_sid (:new-sid opts))
+              csrf (expected-csrf sid opts)]
+          (Session-Plan {:action .Create :sid sid :csrf csrf :set-cookie true}))
+        (Session-Plan {:action .Reject :sid "" :csrf "" :set-cookie false})))))
+
+(defmacro apply-plan! [res opts plan]
+  (quasiquote
+    (when (:set-cookie (unquote plan))
+      (append
+        (addr (:cookies (deref (unquote res))))
+        (h.Cookie {:name (:session-cookie (unquote opts))
+                   :value (:sid (unquote plan))
+                   :path (:path (unquote opts))
+                   :http-only (:http-only (unquote opts))
+                   :secure (:secure (unquote opts))
+                   :same-site (:same-site (unquote opts))})
+        (h.Cookie {:name (:csrf-cookie (unquote opts))
+                   :value (:csrf (unquote plan))
+                   :path (:path (unquote opts))
+                   :secure (:secure (unquote opts))
+                   :same-site (:same-site (unquote opts))})))))
+
+(defmacro reject! [res]
+  (quasiquote
+    (do
+      (set! (:status (deref (unquote res))) .Forbidden)
+      (h.respond (unquote res)))))

@@ -1,6 +1,7 @@
 package kvist
 
 import "core:fmt"
+import "core:os"
 import "core:strconv"
 import "core:strings"
 import "base:runtime"
@@ -44,6 +45,20 @@ delete_user_macro_slice :: proc(macros: ^[dynamic]User_Macro) {
     }
     delete(macros^)
     macros^ = nil
+}
+
+clone_user_macro :: proc(macro_decl: User_Macro) -> User_Macro {
+    return User_Macro{
+        name = strings.clone(macro_decl.name),
+        doc_lines = clone_string_slice(macro_decl.doc_lines[:]),
+        params = Macro_Param_Spec{
+            names = clone_string_slice(macro_decl.params.names[:]),
+            has_rest = macro_decl.params.has_rest,
+            rest_name = strings.clone(macro_decl.params.rest_name),
+        },
+        body = clone_cst_form_slice(macro_decl.body[:]),
+        span = macro_decl.span,
+    }
 }
 
 Macro_Value_Kind :: enum {
@@ -271,58 +286,43 @@ is_defmacro_form :: proc(form: CST_Form) -> bool {
         (form.items[0].text == "defmacro" || form.items[0].text == "defmacro-")
 }
 
-core_macro_decl_from_source :: proc(source: string) -> (User_Macro, Compile_Error, bool) {
-    forms, err_forms, ok_forms := read_top_forms(source)
+core_package_local_macros :: proc(anchor_path: string = ".") -> ([]User_Macro, Compile_Error, bool) {
+    root, ok_root := repo_root_for_path(anchor_path)
+    if !ok_root {
+        root, ok_root = repo_root_for_path(".")
+    }
+    if !ok_root {
+        return nil, Compile_Error{message = "could not find kvist repo root for core macro loading"}, false
+    }
+    defer delete(root)
+    path, join_err := os.join_path({root, "packages", "core", "package.kvist"}, context.allocator)
+    if join_err != nil {
+        return nil, Compile_Error{message = "could not resolve shipped core package file"}, false
+    }
+    defer delete(path)
+    data, read_err := os.read_entire_file_from_path(path, context.allocator)
+    if read_err != nil {
+        return nil, Compile_Error{message = fmt.tprintf("could not read shipped core package file: %s", path)}, false
+    }
+    forms, err_forms, ok_forms := read_top_forms(string(data))
     if !ok_forms {
-        return User_Macro{}, err_forms, false
+        return nil, err_forms, false
     }
-    if len(forms) != 1 {
-        return User_Macro{}, Compile_Error{message = "internal core macro definition must contain exactly one form"}, false
-    }
-    return parse_user_macro_decl(forms[0])
-}
-
-core_package_local_macros :: proc() -> ([]User_Macro, Compile_Error, bool) {
-    sources := []string{
-        `(defmacro when-let [binding & body]
-  (list (quote let)
-        (vector (vector (first binding) (nth binding 1))
-                (nth binding 2))
-        (list (quote when)
-              (nth binding 1)
-              (list (quote do) body))))`,
-        `(defmacro if-let [binding then else]
-  (list (quote let)
-        (vector (vector (first binding) (nth binding 1))
-                (nth binding 2))
-        (list (quote if)
-              (nth binding 1)
-              then
-              else)))`,
-        `(defmacro when-ok [binding & body]
-  (list (quote let)
-        (vector (vector (first binding) (nth binding 1))
-                (nth binding 2))
-        (list (quote when)
-              (list (quote ==) (nth binding 1) (brace))
-              (list (quote do) body))))`,
-        `(defmacro if-ok [binding then else]
-  (list (quote let)
-        (vector (vector (first binding) (nth binding 1))
-                (nth binding 2))
-        (list (quote if)
-              (list (quote ==) (nth binding 1) (brace))
-              then
-              else)))`,
-    }
-
     macros: [dynamic]User_Macro
-    for source in sources {
-        macro_decl, err_macro, ok_macro := core_macro_decl_from_source(source)
+    for top in forms {
+        if !is_defmacro_form(top.form) {
+            continue
+        }
+        macro_decl, err_macro, ok_macro := parse_user_macro_decl(top)
         if !ok_macro {
             return nil, err_macro, false
         }
+        qualified := clone_user_macro(macro_decl)
+        old_name := qualified.name
+        qualified.name = fmt.tprintf("core/%s", old_name)
+        delete(old_name)
         append(&macros, macro_decl)
+        append(&macros, qualified)
     }
     return macros[:], Compile_Error{}, true
 }
@@ -333,20 +333,126 @@ builtin_macro_kind :: proc(head: string) -> Builtin_Macro_Kind {
         return .With_Allocator
     case "with-temp-allocator":
         return .With_Temp_Allocator
-    case "->":
+    case "kvist/core-when", "core-when":
+        return .When
+    case "kvist/core-cond", "core-cond":
+        return .Cond
+    case "kvist/core-thread-first", "core-thread-first":
         return .Thread_First
-    case "->>":
+    case "kvist/core-thread-last", "core-thread-last":
         return .Thread_Last
-    case "when-let":
-        return .When_Let
-    case "if-let":
-        return .If_Let
-    case "when-ok":
-        return .When_Ok
-    case "if-ok":
-        return .If_Ok
     }
     return .None
+}
+
+expand_when_form :: proc(form: CST_Form) -> (expanded: CST_Form, err: Compile_Error, ok: bool) {
+    if len(form.items) < 3 {
+        return expanded, Compile_Error{message = "when expects test and body", span = form.span}, false
+    }
+    expanded = CST_Form{kind = .List, span = form.span}
+    append(&expanded.items, macro_symbol("if", form.span))
+    append(&expanded.items, form.items[1])
+    if len(form.items) == 3 {
+        append(&expanded.items, form.items[2])
+        return expanded, Compile_Error{}, true
+    }
+    body := CST_Form{kind = .List, span = form.span}
+    append(&body.items, macro_symbol("do", form.span))
+    for item in form.items[2:] {
+        append(&body.items, item)
+    }
+    append(&expanded.items, body)
+    return expanded, Compile_Error{}, true
+}
+
+cond_body_form :: proc(forms: []CST_Form, span: Span) -> CST_Form {
+    if len(forms) == 0 {
+        body := CST_Form{kind = .List, span = span}
+        append(&body.items, macro_symbol("do", span))
+        return body
+    }
+    if len(forms) == 1 {
+        return forms[0]
+    }
+    body := CST_Form{kind = .List, span = span}
+    append(&body.items, macro_symbol("do", span))
+    for form in forms {
+        append(&body.items, form)
+    }
+    return body
+}
+
+expand_cond_vector_clauses :: proc(clauses: []CST_Form, span: Span) -> (expanded: CST_Form, err: Compile_Error, ok: bool) {
+    if len(clauses) == 0 {
+        return expanded, Compile_Error{message = "cond expects at least one clause", span = span}, false
+    }
+    first := clauses[0]
+    if first.kind != .Vector || len(first.items) == 0 {
+        return expanded, Compile_Error{message = "cond expects vector clauses or test/body pairs", span = first.span}, false
+    }
+
+    test_form := first.items[0]
+    body_form := cond_body_form(first.items[1:], first.span)
+    if test_form.kind == .Keyword && test_form.text == ":else" {
+        if len(clauses) != 1 {
+            return expanded, Compile_Error{message = "cond :else must be the final clause", span = test_form.span}, false
+        }
+        return body_form, Compile_Error{}, true
+    }
+
+    expanded = CST_Form{kind = .List, span = span}
+    append(&expanded.items, macro_symbol("if", span))
+    append(&expanded.items, test_form)
+    append(&expanded.items, body_form)
+    if len(clauses) > 1 {
+        else_form, err_else, ok_else := expand_cond_vector_clauses(clauses[1:], span)
+        if !ok_else {
+            return expanded, err_else, false
+        }
+        append(&expanded.items, else_form)
+    }
+    return expanded, Compile_Error{}, true
+}
+
+expand_cond_clauses :: proc(clauses: []CST_Form, span: Span) -> (expanded: CST_Form, err: Compile_Error, ok: bool) {
+    if len(clauses) < 2 {
+        return expanded, Compile_Error{message = "cond expects at least one clause", span = span}, false
+    }
+    if len(clauses)%2 != 0 {
+        return expanded, Compile_Error{message = "cond expects test/body pairs", span = span}, false
+    }
+
+    test_form := clauses[0]
+    body_form := clauses[1]
+    if test_form.kind == .Keyword && test_form.text == ":else" {
+        if len(clauses) != 2 {
+            return expanded, Compile_Error{message = "cond :else must be the final clause", span = test_form.span}, false
+        }
+        return body_form, Compile_Error{}, true
+    }
+
+    expanded = CST_Form{kind = .List, span = span}
+    append(&expanded.items, macro_symbol("if", span))
+    append(&expanded.items, test_form)
+    append(&expanded.items, body_form)
+    if len(clauses) > 2 {
+        else_form, err_else, ok_else := expand_cond_clauses(clauses[2:], span)
+        if !ok_else {
+            return expanded, err_else, false
+        }
+        append(&expanded.items, else_form)
+    }
+    return expanded, Compile_Error{}, true
+}
+
+expand_cond_form :: proc(form: CST_Form) -> (expanded: CST_Form, err: Compile_Error, ok: bool) {
+    if len(form.items) < 3 {
+        return expanded, Compile_Error{message = "cond expects at least one clause", span = form.span}, false
+    }
+    if form.items[1].kind == .Vector {
+        return expand_cond_vector_clauses(form.items[1:], form.span)
+    }
+    return expand_cond_clauses(form.items[1:], form.span)
 }
 
 expand_thread_step_form :: proc(current, step: CST_Form, thread_last: bool) -> (expanded: CST_Form, err: Compile_Error, ok: bool) {
@@ -1115,7 +1221,7 @@ macro_eval_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_
                     return macro_nil_value(), Compile_Error{}, true
                 }
                 return macro_form_value(forms[index_value.int_value]), Compile_Error{}, true
-            case "count", "kvist/count":
+            case "core/count", "count", "kvist/count":
                 if len(form.items) != 2 {
                     return Macro_Value{}, Compile_Error{message = "count expects one argument", span = form.span}, false
                 }
@@ -1138,7 +1244,7 @@ macro_eval_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_
                 case:
                     return macro_int_value(1), Compile_Error{}, true
                 }
-            case "slice":
+            case "core/slice", "slice":
                 if len(form.items) != 3 && len(form.items) != 4 {
                     return Macro_Value{}, Compile_Error{message = "slice expects sequence, start, and optional end", span = form.span}, false
                 }
@@ -1702,6 +1808,11 @@ macroexpand_cst_form_with_macros :: proc(form: CST_Form, macros: []User_Macro) -
                 }
                 return macroexpand_cst_form_with_macros(expanded, macros)
             }
+            #partial switch builtin_macro_kind(form.items[0].text) {
+            case .Thread_First, .Thread_Last:
+                return form, Compile_Error{}, true
+            case:
+            }
         }
         expanded = form
         expanded.items = nil
@@ -1757,6 +1868,18 @@ write_macro_form_expanded :: proc(builder: ^strings.Builder, form: CST_Form, mac
             defer delete(expanded.source_map)
             write_macro_expanded_output(builder, expanded.output)
             return Compile_Error{}, true
+        case .When:
+            expanded_when, err_expand, ok_expand := expand_when_form(form)
+            if !ok_expand {
+                return err_expand, false
+            }
+            return write_macro_form_expanded(builder, expanded_when, macros)
+        case .Cond:
+            expanded_cond, err_expand, ok_expand := expand_cond_form(form)
+            if !ok_expand {
+                return err_expand, false
+            }
+            return write_macro_form_expanded(builder, expanded_cond, macros)
         case .Thread_First:
             expanded, err_expand, ok_expand := expand_thread_form(form, false)
             if !ok_expand {
@@ -2016,6 +2139,18 @@ macroexpand_form_with_macros :: proc(form: CST_Form, macros: []User_Macro) -> (r
             return macroexpand_with_allocator(form, macros)
         case .With_Temp_Allocator:
             return macroexpand_with_temp_allocator(form, macros)
+        case .When:
+            expanded, err_expand, ok_expand := expand_when_form(form)
+            if !ok_expand {
+                return result, err_expand, false
+            }
+            return macroexpand_form_with_macros(expanded, macros)
+        case .Cond:
+            expanded, err_expand, ok_expand := expand_cond_form(form)
+            if !ok_expand {
+                return result, err_expand, false
+            }
+            return macroexpand_form_with_macros(expanded, macros)
         case .Thread_First:
             expanded, err_expand, ok_expand := expand_thread_form(form, false)
             if !ok_expand {
@@ -2055,12 +2190,22 @@ macroexpand_form_with_macros :: proc(form: CST_Form, macros: []User_Macro) -> (r
     return result, {}, true
 }
 
-macroexpand_form :: proc(form: CST_Form) -> (result: Emit_Result, err: Compile_Error, ok: bool) {
-    return macroexpand_form_with_macros(form, nil)
+macroexpand_form :: proc(form: CST_Form, anchor_path: string = ".") -> (result: Emit_Result, err: Compile_Error, ok: bool) {
+    core_macros, err_core, ok_core := core_package_local_macros(anchor_path)
+    if !ok_core {
+        return result, err_core, false
+    }
+    defer {
+        for i in 0..<len(core_macros) {
+            delete_user_macro(&core_macros[i])
+        }
+        delete(core_macros)
+    }
+    return macroexpand_form_with_macros(form, core_macros[:])
 }
 
-macroexpand_source :: proc(source: string) -> (output: string, err: Compile_Error, ok: bool) {
-    result, err_result, ok_result := macroexpand_source_with_map(source)
+macroexpand_source :: proc(source: string, anchor_path: string = ".") -> (output: string, err: Compile_Error, ok: bool) {
+    result, err_result, ok_result := macroexpand_source_with_map(source, anchor_path)
     if !ok_result {
         return "", err_result, false
     }
@@ -2068,7 +2213,7 @@ macroexpand_source :: proc(source: string) -> (output: string, err: Compile_Erro
     return result.output, {}, true
 }
 
-macroexpand_source_with_map :: proc(source: string) -> (result: Emit_Result, err: Compile_Error, ok: bool) {
+macroexpand_source_with_map :: proc(source: string, anchor_path: string = ".") -> (result: Emit_Result, err: Compile_Error, ok: bool) {
     result_allocator := context.allocator
     old_allocator := context.allocator
     temp_scope := runtime.default_temp_allocator_temp_begin()
@@ -2080,7 +2225,7 @@ macroexpand_source_with_map :: proc(source: string) -> (result: Emit_Result, err
     if !ok_form {
         return result, clone_compile_error(err_form, result_allocator), false
     }
-    temp_result, err_expand, ok_expand := macroexpand_form(form)
+    temp_result, err_expand, ok_expand := macroexpand_form(form, anchor_path)
     if !ok_expand {
         return result, clone_compile_error(err_expand, result_allocator), false
     }
@@ -2123,6 +2268,18 @@ macroexpand_top_level_form_with_macros :: proc(form: CST_Form, macros: []User_Ma
 macroexpand_builtin_runtime_form :: proc(form: CST_Form) -> (expanded: CST_Form, err: Compile_Error, ok: bool) {
     if form.kind == .List && len(form.items) > 0 && form.items[0].kind == .Symbol {
         switch builtin_macro_kind(form.items[0].text) {
+        case .When:
+            expanded_when, err_expand, ok_expand := expand_when_form(form)
+            if !ok_expand {
+                return CST_Form{}, err_expand, false
+            }
+            return macroexpand_builtin_runtime_form(expanded_when)
+        case .Cond:
+            expanded_cond, err_expand, ok_expand := expand_cond_form(form)
+            if !ok_expand {
+                return CST_Form{}, err_expand, false
+            }
+            return macroexpand_builtin_runtime_form(expanded_cond)
         case .Thread_First:
             expanded_thread, err_expand, ok_expand := expand_thread_form(form, false)
             if !ok_expand {
@@ -2180,9 +2337,9 @@ macroexpand_builtin_runtime_form :: proc(form: CST_Form) -> (expanded: CST_Form,
     }
 }
 
-macroexpand_top_forms :: proc(forms: []CST_Top_Form, include_core_macros: bool = false) -> (expanded: [dynamic]CST_Top_Form, macros: [dynamic]User_Macro, err: Compile_Error, ok: bool) {
+macroexpand_top_forms :: proc(forms: []CST_Top_Form, include_core_macros: bool = false, anchor_path: string = ".") -> (expanded: [dynamic]CST_Top_Form, macros: [dynamic]User_Macro, err: Compile_Error, ok: bool) {
     if include_core_macros {
-        initial_macros, err_core, ok_core := core_package_local_macros()
+        initial_macros, err_core, ok_core := core_package_local_macros(anchor_path)
         if !ok_core {
             return expanded, macros, err_core, false
         }
@@ -2238,7 +2395,7 @@ macroexpand_program_source_with_map :: proc(source: string) -> (result: Emit_Res
     if !ok_forms {
         return result, clone_compile_error(err_forms, result_allocator), false
     }
-    expanded, _, err_expand, ok_expand := macroexpand_top_forms(forms[:])
+    expanded, _, err_expand, ok_expand := macroexpand_top_forms(forms[:], true)
     if !ok_expand {
         return result, clone_compile_error(err_expand, result_allocator), false
     }
@@ -2280,7 +2437,7 @@ macroexpand_eval_source_with_map :: proc(source, eval_source: string) -> (result
     if !ok_forms {
         return result, clone_compile_error(err_forms, result_allocator), false
     }
-    _, macros, err_expand, ok_expand := macroexpand_top_forms(forms[:])
+    _, macros, err_expand, ok_expand := macroexpand_top_forms(forms[:], true)
     if !ok_expand {
         return result, clone_compile_error(err_expand, result_allocator), false
     }

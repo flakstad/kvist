@@ -186,7 +186,7 @@ parse_type_text :: proc(form: CST_Form) -> (text: string, err: Compile_Error, ok
             return "", Compile_Error{message = "unsupported type form", span = form.span}, false
         }
 
-        if is_symbol(form.items[0], "slice") {
+        if is_symbol(form.items[0], "slice") || is_symbol(form.items[0], "core/slice") || is_symbol(form.items[0], "kvist/core/slice") {
             if len(form.items) != 2 {
                 return "", Compile_Error{message = "slice type expects one element type", span = form.span}, false
             }
@@ -742,6 +742,8 @@ parse_decl :: proc(top_form: CST_Top_Form) -> (decl: AST_Decl, err: Compile_Erro
 
     switch head.text {
     case "comment":
+        return AST_Decl{}, Compile_Error{message = "`comment` has moved to `core/comment`", span = form.span}, false
+    case "core/comment", "kvist/core-comment":
         return AST_Decl{kind = .Ignored, span = form.span}, {}, true
     case "package":
         if len(form.items) != 2 || form.items[1].kind != .Symbol {
@@ -1005,7 +1007,7 @@ parse_decl :: proc(top_form: CST_Top_Form) -> (decl: AST_Decl, err: Compile_Erro
             }
         }
         return AST_Decl{kind = .Ignored, span = form.span}, {}, true
-    case "defn", "defn-":
+    case "proc", "defn", "defn-":
         doc_lines := top_form.doc_lines
         proc_form := form
         doc_index := 2

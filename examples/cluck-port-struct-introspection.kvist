@@ -15,12 +15,12 @@
    :home Point})
 
 (defn struct-introspection-demo [] -> bool
-  (println (struct/fields 'Profile))
-  (println (struct/types 'Profile))
+  (core/println (struct/fields 'Profile))
+  (core/println (struct/types 'Profile))
   true)
 
 (defn main []
-  (println (struct-introspection-demo)))
+  (core/println (struct-introspection-demo)))
 
-(comment
+(core/comment
   (struct-introspection-demo))

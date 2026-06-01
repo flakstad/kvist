@@ -147,7 +147,7 @@ The reader should support:
 - booleans
 - `nil`
 - comments
-- `(comment ...)`
+- `(core/comment ...)`
 
 ### Symbols
 
@@ -353,20 +353,20 @@ Lisp-style `;` comments are also acceptable:
 Block comments can be added later if needed, but there is no need to overdesign
 the reader before real usage justifies it.
 
-### `(comment ...)`
+### `(core/comment ...)`
 
-`(comment ...)` should be supported as a structured reader/parsing form that
-ignores everything within it.
+`(core/comment ...)` should be a core macro that ignores everything within it at
+compile time.
 
 Examples:
 
 ```clojure
-(comment
+(core/comment
   (defn old-version [x: int] -> int
     (+ x 1)))
 
-(comment
-  (println "debug")
+(core/comment
+  (core/println "debug")
   (dangerous-call))
 ```
 
@@ -546,7 +546,7 @@ An empty return annotation means the function is `void`:
 
 ```clojure
 (defn main []
-  (println "hello"))
+  (core/println "hello"))
 ```
 
 ### Source Packages
@@ -572,7 +572,9 @@ Host imports still use Odin package paths such as `"core:fmt"`.
 
 ### Kvist Library Packages
 
-Most library helpers are intentionally not part of an implicit global prelude.
+Most library helpers are intentionally not part of a large implicit global prelude.
+`kvist:core` is the exception: its public macros and helpers are auto-exposed in
+every file, while still remaining available at their explicit `core/...` names.
 Import them explicitly:
 
 ```clojure
@@ -595,7 +597,8 @@ Then use the qualified helpers normally:
       0)))
 ```
 
-`println` and `doc` remain implicitly available for now. The current bias is:
+`core/println` is the canonical print helper. Helpers like `core/doc` live in
+packages even when they are small. The current bias is:
 
 - tiny implicit language core;
 - explicit Kvist library imports for ordinary helpers;
@@ -633,18 +636,17 @@ The planned core expression forms are:
 - `let`
 - `do`
 - `if`
-- `when`
-- `cond`
-- `switch`
+- `core/when`
+- `core/cond`
+- `core/switch`
 - `set!`
-- `update!`
-- `get`
+- `core/update!`
+- `core/get`
 - keyword field access: `(:field expr)`
-- threading: `->` and `->>`
+- threading: `core/->` and `core/->>`
 - `return`
 - `defer`
 - `for`
-- `each`
 - higher-order procedures
 - raw `odin`
 
@@ -670,15 +672,13 @@ The parser should recognize these as special forms rather than ordinary calls:
 - `let`
 - `do`
 - `if`
-- `when`
-- `cond`
-- `switch`
+- `core/cond`
+- `core/switch`
 - `set!`
 - `return`
 - `defer`
 - `for`
-- `each`
-- `comment`
+- `core/comment`
 
 Everything else should be treated as an ordinary call unless another reader
 rule applies.
@@ -699,7 +699,7 @@ such as a keyword should parse as a normal call expression.
 Examples:
 
 ```clojure
-(println "hello")
+(core/println "hello")
 (strings.clone raw allocator)
 (make [dynamic]Route allocator)
 (new []int [1 2 3])
@@ -836,10 +836,10 @@ if !ok {
 }
 ```
 
-For expression-level optional-ok defaults, use `or-else`:
+For expression-level optional-ok defaults, use `core/or-else`:
 
 ```clojure
-(let [port (or-else (env-port) 8080)]
+(let [port (core/or-else (env-port) 8080)]
   ...)
 ```
 
@@ -879,7 +879,7 @@ kvist test path/to/package.kvist --names sample-arithmetic
 kvist test path/to/package.kvist --generated /tmp/generated-tests.odin
 ```
 
-The current boundary is still deliberate:
+The boundary is deliberate:
 
 - `t/testing` prefixes nested assertion failures with joined context labels
 - `:each` fixtures use procs shaped like
@@ -888,12 +888,93 @@ The current boundary is still deliberate:
   package; they are ordinary zero-argument procs
 - the test CLI accepts Kvist test names and normalizes them to Odin test names
 
+### `kvist:http`
+
+Kvist ships a thin HTTP server/client surface over vendored `odin-http`.
+
+The core server shape stays explicit and stateful:
+
+```clojure
+(import http "kvist:http")
+
+(let [router (http/new-router)
+      server (http/new-server)]
+  (defer (http/router-destroy! router))
+  (http/get! router "/ping" [req res]
+    (http/respond-plain res "pong"))
+  (http/server-shutdown-on-interrupt! server)
+  (http/listen-and-serve! server router 6969))
+```
+
+Thin middleware composition is available directly over upstream handlers:
+
+```clojure
+(let [base (http/router-handler router)
+      app (http/middleware base [next req res]
+            (http/handle! next req res))]
+  (http/serve-handler! server app))
+```
+
+Session and CSRF helpers live in a separate shipped package:
+
+```clojure
+(import session "kvist:http/session")
+
+(let [plan (session/plan req opts)]
+  (session/apply-plan! res opts plan)
+  (if (session/accepted? plan)
+    (http/respond-plain res (:sid plan))
+    (session/reject! res)))
+```
+
+This is intentionally explicit:
+
+- request/response still come from upstream `odin-http`
+- session helpers compute a plan from cookies, method, and user-provided
+  callbacks
+- no hidden request map or framework runtime is introduced
+
+Server-sent events also stay close to upstream response streaming:
+
+```clojure
+(import sse "kvist:http/sse")
+
+(sse/with-stream [stream res]
+  (sse/comment! stream "connected")
+  (sse/send-event! stream "welcome" "ready")
+  (sse/close! stream))
+```
+
+This uses a persistent vendored `odin-http` SSE stream directly:
+
+- `sse/with-stream` allocates and starts a server-side SSE stream handle
+- `send!`, `send-event!`, `comment!`, and `retry!` queue SSE events on that stream
+- `close!` ends the stream explicitly; otherwise it may stay open until disconnect
+
+Datastar helpers build directly on top of SSE:
+
+```clojure
+(import dstar "kvist:http/datastar")
+
+(sse/with-stream [stream res]
+  (dstar/patch-elements! stream "<div id='status'>Klar</div>")
+  (dstar/patch-signals! stream "{connected: true}")
+  (dstar/execute-script! stream "console.log('ready')")
+  (sse/close! stream))
+```
+
+This layer stays protocol-shaped:
+
+- `patch-elements!` emits `datastar-patch-elements`
+- `patch-signals!` emits `datastar-patch-signals`
+- `execute-script!` and `redirect!` are thin helpers over patching a `script` tag
+
 Flat multi-return destructuring is worth supporting because it matches ordinary
 Odin usage and keeps explicit control flow readable:
 
 ```clojure
 (let [[req ok] (parse-request s)]
-  (when (not ok)
+  (core/when (not ok)
     (return "" false))
   (:path req))
 ```
@@ -919,15 +1000,15 @@ Examples:
 This keeps the core language explicit while leaving room for later macro-based
 binding abstractions.
 
-`when-let` and `if-let` are deliberately Odin-shaped binding macros: they are
+`core/when-let` and `core/if-let` are deliberately Odin-shaped binding macros: they are
 for multi-return procs that return a value and an explicit boolean such as
 `ok`, `found`, `present`, or `valid`. They do not add Clojure truthiness.
 
 ```clojure
-(when-let [value found (query)]
+(core/when-let [value found (query)]
   (use value))
 
-(if-let [value found (query)]
+(core/if-let [value found (query)]
   (use value)
   fallback)
 ```
@@ -936,7 +1017,7 @@ They expand to destructuring `let` plus a direct boolean test:
 
 ```clojure
 (let [[value found] (query)]
-  (when found
+  (core/when found
     (use value)))
 
 (let [[value found] (query)]
@@ -945,19 +1026,19 @@ They expand to destructuring `let` plus a direct boolean test:
     fallback))
 ```
 
-For Odin error-style returns, use `when-ok` and `if-ok`. They have the same
+For Odin error-style returns, use `core/when-ok` and `core/if-ok`. They have the same
 binding shape but check whether the second return value equals Odin's zero
 value `{}`:
 
 ```clojure
-(if-ok [data err (read-text path)]
+(core/if-ok [data err (read-text path)]
   (do
     (defer (delete data))
     (len data))
   0)
 ```
 
-This is intentionally separate from `if-let`: boolean success values and error
+This is intentionally separate from `core/if-let`: boolean success values and error
 values are different Odin conventions and should stay visible in source.
 
 ```clojure
@@ -1000,17 +1081,17 @@ the generated code can stay explicit about whether lookup failure is allowed.
   (+ 1 2))
 ```
 
-### `if`, `when`, `cond`
+### `if`, `when`, `core/cond`
 
 ```clojure
 (if (< n 0)
   "negative"
   "positive")
 
-(when debug?
-  (println "debug"))
+(core/when debug?
+  (core/println "debug"))
 
-(cond
+(core/cond
   (< n 0) "negative"
   (== n 0) "zero"
   :else "positive")
@@ -1058,7 +1139,7 @@ Use Lisp-friendly word forms for boolean logic:
 Examples:
 
 ```clojure
-(when (and ok (not done))
+(core/when (and ok (not done))
   ...)
 
 (if (or debug force)
@@ -1082,21 +1163,21 @@ Reasons:
 If a more Clojure-like generic equality layer ever appears, it should be a
 deliberate later addition rather than an accidental alias.
 
-### `switch`
+### `core/switch`
 
-`switch` is the v0.1 value-dispatch form. It is intended for Odin-like
+`core/switch` is the v0.1 value-dispatch form. It is intended for Odin-like
 branching over enums and other ordinary values without introducing a full
 pattern language.
 
 ```clojure
-(switch method
+(core/switch method
   .Get "GET"
   .Post "POST"
   .Delete "DELETE"
   :else "")
 ```
 
-`switch` should be expression-valued when every arm produces a value, and should
+`core/switch` should be expression-valued when every arm produces a value, and should
 lower directly to ordinary Odin `switch` or an equivalent obvious lowering.
 
 It is the preferred v0.1 form for enum dispatch. Union destructuring and
@@ -1117,11 +1198,11 @@ Mutation remains explicit.
 `update!` is the explicit in-structure update form.
 
 ```clojure
-(update! xs 0 42)
-(update! lookup "name" "Ada")
-(update! person :age 37)
-(update! point :x + 3)
-(update! point :x inc)
+(core/update! xs 0 42)
+(core/update! lookup "name" "Ada")
+(core/update! person :age 37)
+(core/update! point :x + 3)
+(core/update! point :x inc)
 ```
 
 It should lower directly to ordinary Odin assignment against an indexed, keyed,
@@ -1132,18 +1213,18 @@ The function-style form starts at five arguments so plain replacement stays
 unambiguous:
 
 ```clojure
-(update! target key-or-field f arg1 arg2 ...)
+(core/update! target key-or-field f arg1 arg2 ...)
 ```
 
-That means `(update! point :y delta)` still means replacement, while
-`(update! point :y + delta)` means "read current field value, apply `+`, write
+That means `(core/update! point :y delta)` still means replacement, while
+`(core/update! point :y + delta)` means "read current field value, apply `+`, write
 result back".
 
 Unary updater shorthand is intentionally narrow in the 4-argument form:
 
 ```clojure
-(update! point :y inc)
-(update! point :y (fn [x: int] -> int (+ x 1)))
+(core/update! point :y inc)
+(core/update! point :y (fn [x: int] -> int (+ x 1)))
 ```
 
 That is supported for the obvious updater cases without making plain symbol
@@ -1154,9 +1235,9 @@ replacement ambiguous again.
 `update` returns a modified copy instead of mutating in place.
 
 ```clojure
-(update point :y 9)
-(update point :y + 4)
-(update point :y inc)
+(core/update point :y 9)
+(core/update point :y + 4)
+(core/update point :y inc)
 ```
 
 For now this is intentionally narrower than `update!`:
@@ -1188,7 +1269,7 @@ Keyword access is the primary field access form:
 ```clojure
 (:path req)
 (:name person)
-(update! res :status 200)
+(core/update! res :status 200)
 ```
 
 This should compile to ordinary Odin field access such as `req.path`.
@@ -1260,17 +1341,17 @@ But they are not the preferred style for ordinary Kvist code.
 
 ### Threading
 
-Field-heavy code should compose naturally with `->`:
+Field-heavy code should compose naturally with `core/->`:
 
 ```clojure
-(-> req :path)
-(-> req :method method-name)
+(core/-> req :path)
+(core/-> req :method method-name)
 ```
 
 This expands in the usual Clojure style:
 
 ```clojure
-(-> req :method method-name)
+(core/-> req :method method-name)
 ;; => (method-name (:method req))
 ```
 
@@ -1361,7 +1442,7 @@ The intended surface style can still be familiar:
 (find ready? xs)
 (some? archived? xs)
 (every? valid? xs)
-(->> users
+(core/->> users
      (filter :verified)
      (map :name))
 ```
@@ -1702,9 +1783,9 @@ surface syntax.
 
 - `package`, `import`, `defconst`, `defvar`, `defstruct`, `defenum`, `defunion`, `defn`
 - local bindings with `let`
-- `do`, `if`, `when`, `cond`
+- `do`, `if`, `core/when`, `core/cond`
 - `set!`, `return`, `defer`
-- `for`, `each`
+- `for`
 - field access, keyed lookup, threading
 - named type construction and generic `new`
 - Odin polymorphic type instantiation with `(type Head Arg...)`
@@ -1716,7 +1797,9 @@ surface syntax.
 The compiler also currently supports a few mechanically lowered forms that were
 not part of the original expected-core list:
 
-- `(in? collection key)`, composed with `(not ...)` for absence checks
+- `(core/contains? collection key)` for collection membership checks
+- `(core/in value collection)` and `(core/not-in value collection)` for direct
+  Odin-style membership tests
 - `(break)` and `(continue)`
 - `(deref x)` / `(^ x)` for pointer dereference, with `(deref x)` preferred
 - `(addr x)` / `(& x)` for address-of, with `(addr x)` preferred
@@ -1915,9 +1998,9 @@ Early exits still require explicit `return`:
 
 ```clojure
 (defn query-get [url: URL, key: string] -> [val: string, ok: bool]
-  (when (== key "")
+  (core/when (== key "")
     (return "" false))
-  (when ...
+  (core/when ...
     (return value true))
   (return "" false))
 ```
@@ -1936,7 +2019,7 @@ The preferred core style is Odin-first explicit multi-return:
 ```clojure
 (defn route-for [router: Router, method: Method] -> [route: Route, ok: bool]
   (let [[route ok] (get (:routes router) method)]
-    (when (not ok)
+    (core/when (not ok)
       (return {} false))
     route))
 ```
@@ -1946,7 +2029,7 @@ Likewise for parsing:
 ```clojure
 (defn request-path [s: string] -> [path: string, ok: bool]
   (let [[req ok] (parse-request s)]
-    (when (not ok)
+    (core/when (not ok)
       (return "" false))
     (:path req)))
 ```
@@ -1956,12 +2039,12 @@ actually nil-capable:
 
 ```clojure
 (defn print-user [p: ^User]
-  (when (nil? p)
+  (core/when (core/nil? p)
     (return))
   (fmt.println (:name (^ p))))
 ```
 
-`nil?` lowers mechanically to an Odin nil comparison.
+`core/nil?` lowers mechanically to an Odin nil comparison.
 
 The intended stance is:
 
@@ -2047,22 +2130,22 @@ files and saved data files.
 The first tap form is deliberately simple:
 
 ```clojure
-(tap> value)
-(tap> :label value)
+(core/tap> value)
+(core/tap> :label value)
 ```
 
 It lowers through generated helpers that call `fmt.print` / `fmt.println` and
-return the tapped value. The `core:fmt` import is explicit. `tap>` can also be
-used as a `->` / `->>` step, where it is a pass-through expression:
+return the tapped value. The `core:fmt` import is explicit. `core/tap>` can also be
+used as a `core/->` / `core/->>` step, where it is a pass-through expression:
 
 ```clojure
-(->> users
+(core/->> users
      (filter :active)
-     (tap> :active-users)
+     (core/tap> :active-users)
      (map :name))
 ```
 
-Ownership passes through `tap>`. If a tapped threaded value is an owned final
+Ownership passes through `core/tap>`. If a tapped threaded value is an owned final
 result, the caller or local binding still owns it. If a tapped owned value is an
 intermediate, Kvist emits the same cleanup it would for the underlying pipeline
 step.
@@ -2084,9 +2167,9 @@ Current rules:
 
 The current compiler still carries an explicit built-in macro registry for the
 resource-scope bootstrap forms `with-allocator` and `with-temp-allocator`. The
-simpler binding forms `when-let`, `if-let`, `when-ok`, and `if-ok` now come
+simpler binding forms `core/when-let`, `core/if-let`, `core/when-ok`, and `core/if-ok` now come
 through the ordinary compile-time macro path as core package-local macros.
-Threading forms `->` and `->>` are also inspectable through `kvist macroexpand`,
+Threading forms `core/->` and `core/->>` are also inspectable through `kvist macroexpand`,
 but they still stay compile-special for now because the compiler uses their
 pipeline shape to manage owned intermediates.
 
@@ -2290,7 +2373,7 @@ Possible macro-friendly targets include:
 These are intentionally deferred:
 
 - macros as a user-facing feature
-- pattern matching syntax over unions/enums beyond `switch`
+- pattern matching syntax over unions/enums beyond `core/switch`
 - persistent collection semantics
 - transducers and the final collection-processing abstraction
 - protocols or multimethods
@@ -2307,7 +2390,7 @@ The following design questions remain open and should be settled before too much
 implementation accumulates:
 
 1. Union construction syntax
-2. Union handling beyond value-level `switch`
+2. Union handling beyond value-level `core/switch`
 3. Whether `nil` is surfaced directly or only where required by Odin lowering
 4. Slice/array/map literal syntax beyond struct construction
 5. How much compile-time type inference is allowed for composite literals
@@ -2511,9 +2594,9 @@ The first implementation milestone should remain modest:
 That locked subset should start with:
 
 - `package`, `import`, `defconst`, `defvar`, `defstruct`, `defenum`, `defunion`, `defn`
-- `let`, `do`, `if`, `when`, `cond`, `switch`
-- `set!`, `return`, `defer`, `each`
-- field access, `get`, threading
+- `let`, `do`, `if`, `core/when`, `core/cond`, `core/switch`
+- `set!`, `return`, `defer`, `for`
+- field access, `core/get`, threading
 - named constructors, `new`, `make`
 - flat multi-return destructuring
 - raw `odin` escape hatch

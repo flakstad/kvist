@@ -1,5 +1,6 @@
 (package hiccup)
 (import arr "kvist:arr")
+(import core "kvist:core")
 (import "core:fmt")
 (import strings "core:strings")
 
@@ -52,7 +53,7 @@
 
 (defmacro- if-form? [form]
   (if (list? form)
-    (if (= (count form) 4)
+    (if (= (core/count form) 4)
       (if (symbol? (first form))
         (= (name (first form)) "if")
         false)
@@ -61,9 +62,14 @@
 
 (defmacro- when-form? [form]
   (if (list? form)
-    (if (= (count form) 3)
+    (if (= (core/count form) 3)
       (if (symbol? (first form))
-        (= (name (first form)) "when")
+        (let [head (name (first form))]
+          (if (= head "when")
+            true
+            (if (= head "core/when")
+              true
+              (= head "kvist/core-when"))))
         false)
       false)
     false))
@@ -114,7 +120,7 @@
               (quasiquote (Attr-Value {:text (unquote (text form))})))))))))))))
 
 (defmacro- emit-attr-items [items]
-  (if (= (count items) 0)
+  (if (= (core/count items) 0)
     (forms)
     (let [key (nth items 0)
           value (nth items 1)]
@@ -125,7 +131,7 @@
         (emit-attr-items (rest (rest items)))))))
 
 (defmacro- emit-child-items [items]
-  (if (= (count items) 0)
+  (if (= (core/count items) 0)
     (forms)
     (forms
       (emit-node (first items))
@@ -145,7 +151,7 @@
       (if (fragment-tag? tag)
         (quasiquote
           (Node {:fragment (Fragment {:children [(splice (emit-child-items tail))]})}))
-        (if (= (count tail) 0)
+        (if (= (core/count tail) 0)
           (quasiquote
             (Node {:element (Element {:tag (unquote (text tag))
                                       :attrs []
@@ -202,7 +208,7 @@
 (defn tag
   "Return the tag name for an element node, or an empty string for scalar nodes."
   [node: Node] -> string
-  (switch [value node]
+  (core/switch [value node]
     Nothing ""
     Fragment ""
     Element (:tag value)
@@ -215,7 +221,7 @@
 (defn attr-count
   "Return the number of attrs on an element node."
   [node: Node] -> int
-  (switch [value node]
+  (core/switch [value node]
     Nothing 0
     Fragment 0
     Element (arr/count (:attrs value))
@@ -228,7 +234,7 @@
 (defn child-count
   "Return the number of children on an element node."
   [node: Node] -> int
-  (switch [value node]
+  (core/switch [value node]
     Nothing 0
     Fragment (arr/count (:children value))
     Element (arr/count (:children value))
@@ -257,7 +263,7 @@
         (replace-owned step4 "'" "&#39;")))))
 
 (defn- render-attr-into [builder: ^strings.Builder, attr: Attr]
-  (switch [value (:value attr)]
+  (core/switch [value (:value attr)]
     Nothing (noop)
     string
     (do
@@ -272,12 +278,12 @@
     f64
     (fmt.sbprintf builder " %s=\"%g\"" (:name attr) value)
     bool
-    (when value
+    (core/when value
       (strings.write_string builder " ")
       (strings.write_string builder (:name attr)))))
 
 (defn- render-node-into [builder: ^strings.Builder, node: Node]
-  (switch [value node]
+  (core/switch [value node]
     Nothing (noop)
     Fragment
     (for [child (:children value)]

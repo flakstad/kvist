@@ -1,5 +1,6 @@
 package http
 
+import "base:intrinsics"
 import "base:runtime"
 
 import "core:bufio"
@@ -16,6 +17,7 @@ import "core:slice"
 import "core:sync"
 import "core:thread"
 import "core:time"
+import mpsc "internal/mpsc"
 
 Server_Opts :: struct {
 	// Whether the server should accept every request that sends a "Expect: 100-continue" header automatically.
@@ -93,11 +95,13 @@ Server :: struct {
 }
 
 Server_Thread :: struct {
-	thread:     ^thread.Thread,
-	event_loop: ^nbio.Event_Loop,
-	conns:      map[net.TCP_Socket]^Connection,
-	state:      Server_State,
-	accept:     ^nbio.Operation,
+	thread:        ^thread.Thread,
+	event_loop:    ^nbio.Event_Loop,
+	conns:         map[net.TCP_Socket]^Connection,
+	state:         Server_State,
+	accept:        ^nbio.Operation,
+	resume_queue:  mpsc.Queue(Response),
+	async_pending: int,
 
 	// free_temp_blocks:       map[int]queue.Queue(^Block),
 	// free_temp_blocks_count: int,
@@ -183,6 +187,7 @@ listen_and_serve :: proc(
 
 _server_thread_init :: proc(s: ^Server, ttd: ^Server_Thread) {
 	td = ttd
+	mpsc.init(&td.resume_queue)
 
 	td.conns = make(map[net.TCP_Socket]^Connection)
 	// td.free_temp_blocks = make(map[int]queue.Queue(^Block))
@@ -201,15 +206,61 @@ _server_thread_init :: proc(s: ^Server, ttd: ^Server_Thread) {
 
 	log.debug("starting event loop")
 	td.state = .Serving
+	shutdown_start: time.Tick
 	for {
-		if atomic_load(&s.closing) { _server_thread_shutdown(s) }
+		if atomic_load(&s.closing) {
+			if intrinsics.atomic_load(&td.async_pending) == 0 {
+				_server_thread_shutdown(s)
+				break
+			}
+
+			if shutdown_start == {} {
+				shutdown_start = time.tick_now()
+			}
+
+			if time.tick_since(shutdown_start) > 5 * time.Second {
+				log.warnf("shutdown: %d async requests still pending after 5s timeout — force closing", td.async_pending)
+				_server_thread_shutdown(s)
+				break
+			}
+		}
 		if td.state == .Closed { break }
 		if td.state == .Cleaning { continue }
 
-		err := nbio.tick()
+		tick_ms := -1 if !atomic_load(&s.closing) else 1 * time.Millisecond
+		err := nbio.tick(tick_ms)
 		if err != nil {
 			log.errorf("non-blocking io tick error: %v", err)
 			break
+		}
+
+		for {
+			res := mpsc.pop(&td.resume_queue)
+			if res == nil {
+				stall := false
+				for _ in 0 ..< 3 {
+					res = mpsc.pop(&td.resume_queue)
+					if res != nil {
+						stall = true
+						break
+					}
+				}
+				if !stall {
+					break
+				}
+			}
+
+			old_temp := context.temp_allocator
+			context.temp_allocator = virtual.arena_allocator(&res._conn.temp_allocator)
+
+			h := res.async_handler if res.async_handler != nil else &res._conn.server.handler
+			h.handle(h, &res._conn.loop.req, res)
+
+			intrinsics.atomic_add(&td.async_pending, -1)
+			context.temp_allocator = old_temp
+
+			res.work_data = nil
+			res.async_handler = nil
 		}
 	}
 
@@ -261,11 +312,18 @@ _server_thread_shutdown :: proc(s: ^Server, loc := #caller_location) {
 	// 	log.infof("had %i temp blocks to spare", blocks)
 	// }
 
+	for _, conn in td.conns {
+		if conn.loop.res.work_data != nil {
+			log.warnf("shutdown: force canceling async request on connection %i", conn.socket)
+			cancel_async(&conn.loop.res)
+		}
+	}
+
 	for {
 		for sock, conn in td.conns {
 			#partial switch conn.state {
 			case .Active:
-				log.infof("shutdown: connection %i still active", sock)
+				log.debugf("shutdown: connection %i active, waiting for response send", sock)
 			case .New, .Idle, .Pending:
 				log.infof("shutdown: closing connection %i", sock)
 				connection_close(conn)
@@ -280,8 +338,8 @@ _server_thread_shutdown :: proc(s: ^Server, loc := #caller_location) {
 			break
 		}
 
-		err := nbio.tick()
-		fmt.assertf(err == nil, "IO tick error during shutdown: %v")
+		err := nbio.tick(1 * time.Millisecond)
+		fmt.assertf(err == nil, "IO tick error during shutdown: %v", err)
 	}
 
 	td.state = .Cleaning
@@ -366,6 +424,7 @@ Connection :: struct {
 	scanner:        Scanner,
 	temp_allocator: virtual.Arena,
 	loop:           Loop,
+	owning_thread:  ^Server_Thread,
 }
 
 // Loop/request cycle state.
@@ -425,7 +484,10 @@ on_accept :: proc(op: ^nbio.Operation, server: ^Server) {
 			return
 		}
 
-		fmt.panicf("accept error: %v", op.accept.err)
+		if !atomic_load(&server.closing) {
+			fmt.panicf("accept error: %v", op.accept.err)
+		}
+		return
 	}
 
 	// Accept next connection.
@@ -436,6 +498,7 @@ on_accept :: proc(op: ^nbio.Operation, server: ^Server) {
 	c.server = server
 	c.socket = op.accept.client
 	c.loop.req.client = op.accept.client_endpoint
+	c.owning_thread = td
 
 	td.conns[c.socket] = c
 
@@ -459,6 +522,8 @@ conn_handle_reqs :: proc(c: ^Connection) {
 
 @(private)
 conn_handle_req :: proc(c: ^Connection, allocator := context.temp_allocator) {
+	if atomic_load(&c.server.closing) { return }
+
 	on_rline1 :: proc(loop: rawptr, token: string, err: bufio.Scanner_Error) {
 		l := cast(^Loop)loop
 

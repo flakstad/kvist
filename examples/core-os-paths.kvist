@@ -38,9 +38,9 @@
       (os.write_entire_file path "hello from core:os"))))
 
 (defn read-demo-length [path: string] -> int
-  ;; if-ok is for Odin APIs whose second return value is an error. It checks
+  ;; core/core/core/if-ok is for Odin APIs whose second return value is an error. It checks
   ;; for the zero error value and keeps the owned data cleanup local.
-  (if-ok [data err (os.read_entire_file path context.allocator)]
+  (core/if-ok [data err (os.read_entire_file path context.allocator)]
     (do
       (defer (delete data))
       (len data))
@@ -50,9 +50,9 @@
   (os.remove path))
 
 (defn main []
-  (println (clean-base-length) (cwd-base-length)))
+  (core/println (clean-base-length) (cwd-base-length)))
 
-(comment
+(core/comment
   ;; clean_path allocates a cleaned path string because we pass an allocator.
   ;; The proc deletes it before returning, so callers only get a scalar length.
   (clean-base-length)

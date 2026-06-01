@@ -9,7 +9,7 @@ that matters most right now:
 This is a design note for an optional layer. It must not distort the main
 value of Kvist as a source-to-source compiler for readable Odin.
 
-The current preferred architecture is now hybrid:
+The preferred architecture is hybrid:
 
 - native hot reload is the primary answer for broad compiled-code iteration
 - `Kvist/Live` is the secondary reflective layer for commands, tools,
@@ -96,17 +96,17 @@ per app. The current reusable helper surface is intentionally small:
 - `reload_module_if_source_changed(...)`
 
 The lower-level definition-oriented helpers still exist underneath, but the
-preferred host path is now the runtime-oriented one above. That keeps hosts
+preferred host path is the runtime-oriented one above. That keeps hosts
 from open-coding file signatures, imported-helper watching, parsed-definition
 cleanup, and initial-load bookkeeping.
 
-Live modules also now pass through ordinary top-level macro expansion before
+Live modules pass through ordinary top-level macro expansion before
 loading, including core macros plus file-local `defmacro` forms. The runtime
 surface is still intentionally smaller after expansion than full compiled
 Kvist; the important point is that live modules no longer bypass Kvist's macro
 layer entirely.
 
-There is now a matching shipped source package on the live side too:
+There is a matching shipped source package on the live side too:
 
 - `(import live "kvist:live")`
 - `live/defmodule`
@@ -173,7 +173,8 @@ reloads behavior modules that consume them."
 
 The first shared subset between `Kvist/AOT` and `Kvist/Live` should stay small:
 
-- `def`
+- `defconst`
+- `defvar`
 - `defn`
 - `fn`
 - `let`

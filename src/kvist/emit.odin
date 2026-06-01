@@ -135,6 +135,8 @@ kvist_package_name_for_import_path :: proc(path: string) -> (string, bool) {
         raw = unquote_string(raw)
     }
     switch raw {
+    case "kvist:core":
+        return "core", true
     case "kvist:arr":
         return "arr", true
     case "kvist:str":
@@ -153,6 +155,12 @@ kvist_package_name_for_import_path :: proc(path: string) -> (string, bool) {
         return "http", true
     case "kvist:http/client":
         return "client", true
+    case "kvist:http/session":
+        return "session", true
+    case "kvist:http/sse":
+        return "sse", true
+    case "kvist:http/datastar":
+        return "datastar", true
     case:
         return "", false
     }
@@ -229,7 +237,7 @@ resolve_kvist_head :: proc(e: ^Emitter, head: string) -> (canonical: string, mat
     if alias == "kvist" {
         return suffix, true, Compile_Error{}, true
     }
-    if alias == "arr" || alias == "str" || alias == "map" || alias == "set" || alias == "struct" || alias == "io" || alias == "json" {
+    if alias == "core" || alias == "arr" || alias == "str" || alias == "map" || alias == "set" || alias == "struct" || alias == "io" || alias == "json" {
         return head, true, Compile_Error{}, true
     }
     for decl in e.decls {
@@ -1917,13 +1925,13 @@ emit_update_place :: proc(e: ^Emitter, target_form, key_form: CST_Form) -> (lhs,
 
 emit_update_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) {
     if len(form.items) < 4 {
-        return "", Compile_Error{message = "update expects target, field, and value or updater", span = form.span}, false
+        return "", Compile_Error{message = "core/update expects target, field, and value or updater", span = form.span}, false
     }
     if form.items[2].kind != .Keyword || len(form.items[2].text) <= 1 {
-        return "", Compile_Error{message = "update currently supports struct field updates only", span = form.items[2].span}, false
+        return "", Compile_Error{message = "core/update currently supports struct field updates only", span = form.items[2].span}, false
     }
     if form.items[1].kind != .Symbol {
-        return "", Compile_Error{message = "update currently expects a named struct value", span = form.items[1].span}, false
+        return "", Compile_Error{message = "core/update currently expects a named struct value", span = form.items[1].span}, false
     }
 
     target, err_target, ok_target := emit_expr(e, form.items[1])
@@ -1932,7 +1940,7 @@ emit_update_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error,
     }
     target_ty, ok_ty := lookup_local_type(e, map_name(form.items[1].text))
     if !ok_ty {
-        return "", Compile_Error{message = "update needs a known local or parameter struct type", span = form.items[1].span}, false
+        return "", Compile_Error{message = "core/update needs a known local or parameter struct type", span = form.items[1].span}, false
     }
 
     temp_name := eval_temp_name(e)
@@ -1992,6 +2000,9 @@ emit_thread_step :: proc(e: ^Emitter, current: string, step: CST_Form, thread_la
         return fmt.tprintf("%s.%s", current, map_name(step.text[1:])), {}, true
     case .Symbol:
         if thread_last && step.text == "slice" {
+            return "", Compile_Error{message = "`slice` has moved to `core/slice`", span = step.span}, false
+        }
+        if thread_last && step.text == "core/slice" {
             return slice_all_expr_text(current), {}, true
         }
         args: [dynamic]string
@@ -2034,8 +2045,11 @@ emit_thread_step :: proc(e: ^Emitter, current: string, step: CST_Form, thread_la
             }
         }
         if head.text == "tap>" {
+            return "", Compile_Error{message = "`tap>` has moved to `core/tap>`", span = step.span}, false
+        }
+        if head.text == "core/tap>" || head.text == "kvist/core-tap" || head.text == "core-tap" {
             if len(step.items) > 2 {
-                return "", Compile_Error{message = "tap> thread step expects optional label", span = step.span}, false
+                return "", Compile_Error{message = "core/tap> thread step expects optional label", span = step.span}, false
             }
             mark_core_tap(e)
             if len(step.items) == 1 {
@@ -2048,9 +2062,21 @@ emit_thread_step :: proc(e: ^Emitter, current: string, step: CST_Form, thread_la
             } else if label_form.kind == .String {
                 label = label_form.text
             } else {
-                return "", Compile_Error{message = "tap> label must be a keyword or string literal", span = label_form.span}, false
+                return "", Compile_Error{message = "core/tap> label must be a keyword or string literal", span = label_form.span}, false
             }
             return emit_call_text("kvist_tap_labeled", []string{label, current}), {}, true
+        }
+        if thread_last && (head.text == "core/count" || head.text == "kvist/core/count") {
+            if len(step.items) != 1 {
+                return "", Compile_Error{message = "core/count thread step expects no extra arguments", span = step.span}, false
+            }
+            return fmt.tprintf("len(%s)", slice_all_expr_text(current)), {}, true
+        }
+        if thread_last && (head.text == "core/empty?" || head.text == "kvist/core/empty?") {
+            if len(step.items) != 1 {
+                return "", Compile_Error{message = "core/empty? thread step expects no extra arguments", span = step.span}, false
+            }
+            return fmt.tprintf("len(%s) == 0", slice_all_expr_text(current)), {}, true
         }
         if thread_last && (head.text == "arr/map" ||
                            head.text == "arr/filter" ||
@@ -2362,7 +2388,7 @@ emit_thread_step :: proc(e: ^Emitter, current: string, step: CST_Form, thread_la
             }
             return emit_predicate_callback_call(e, "kvist_every_p", step.items[1], collection, mark_core_every, mark_core_every_field)
         }
-        if thread_last && (head.text == "slice" || head.text == "arr/slice") {
+        if thread_last && (head.text == "core/slice" || head.text == "arr/slice") {
             if len(step.items) > 3 {
                 return "", Compile_Error{message = "slice thread step expects optional start and end", span = step.span}, false
             }
@@ -2453,6 +2479,20 @@ is_tap_thread_step :: proc(step: CST_Form) -> bool {
            step.items[0].kind == .Symbol && step.items[0].text == "tap>"
 }
 
+is_thread_form_head :: proc(head: string, thread_last: bool) -> bool {
+    if thread_last {
+        return head == "kvist/core-thread-last" || head == "core-thread-last"
+    }
+    return head == "kvist/core-thread-first" || head == "core-thread-first"
+}
+
+thread_surface_name :: proc(thread_last: bool) -> string {
+    if thread_last {
+        return "core/->>"
+    }
+    return "core/->"
+}
+
 thread_step_result_kind :: proc(step: CST_Form, thread_last: bool) -> Thread_Result_Kind {
     #partial switch step.kind {
     case .Keyword:
@@ -2514,7 +2554,7 @@ thread_step_result_kind :: proc(step: CST_Form, thread_last: bool) -> Thread_Res
         if thread_last && (head_name == "arr/take" || head_name == "arr/drop" ||
                            head_name == "arr/drop-last" || head_name == "arr/butlast" ||
                            head_name == "arr/take-while" || head_name == "arr/drop-while" ||
-                           head_name == "slice" || head_name == "arr/slice" || head_name == "arr/rest" ||
+                           head_name == "core/slice" || head_name == "arr/slice" || head_name == "arr/rest" ||
                            head_name == "arr/split-at") {
             return .View
         }
@@ -2527,7 +2567,7 @@ thread_step_result_kind :: proc(step: CST_Form, thread_last: bool) -> Thread_Res
                            head_name == "str/index-of" || head_name == "str/last-index-of" ||
                            head_name == "set/subset?" || head_name == "set/superset?" ||
                            head_name == "set/disjoint?" ||
-                           head_name == "empty?" || head_name == "count") {
+                           head_name == "core/empty?" || head_name == "core/count") {
             return .Scalar
         }
     }
@@ -2547,10 +2587,7 @@ is_thread_form :: proc(form: CST_Form, thread_last: bool) -> bool {
     if form.kind != .List || len(form.items) == 0 || form.items[0].kind != .Symbol {
         return false
     }
-    if thread_last {
-        return form.items[0].text == "->>"
-    }
-    return form.items[0].text == "->"
+    return is_thread_form_head(form.items[0].text, thread_last)
 }
 
 thread_form_has_allocating_intermediate :: proc(form: CST_Form, thread_last: bool) -> bool {
@@ -2646,7 +2683,7 @@ form_is_owned_result :: proc(form: CST_Form) -> bool {
         return true
     }
     if is_thread_form(form, true) || is_thread_form(form, false) {
-        kind := thread_form_final_kind(form, form.items[0].text == "->>")
+        kind := thread_form_final_kind(form, is_thread_form_head(form.items[0].text, true))
         return kind == .Owned || kind == .Owned_Borrowing
     }
     return false
@@ -2936,7 +2973,7 @@ form_escape_deferred_binding_span_names :: proc(form: CST_Form, names: []string,
                 }
             }
             return {}, false
-        case "cond":
+        case "cond", "kvist/core-cond", "core-cond":
             if len(form.items) >= 3 {
                 i := 2
                 for i < len(form.items) {
@@ -2947,7 +2984,7 @@ form_escape_deferred_binding_span_names :: proc(form: CST_Form, names: []string,
                 }
             }
             return {}, false
-        case "switch":
+        case "switch", "kvist/core-switch", "core-switch":
             return switch_escape_deferred_binding_span_names(form, names, returns)
         case "with-allocator", "with-temp-allocator":
             if len(form.items) >= 3 {
@@ -3103,7 +3140,7 @@ form_escape_owned_temp_result_span_names :: proc(form: CST_Form, names: []string
                 }
             }
             return {}, false
-        case "cond":
+        case "cond", "kvist/core-cond", "core-cond":
             if len(form.items) >= 3 {
                 i := 2
                 for i < len(form.items) {
@@ -3114,7 +3151,7 @@ form_escape_owned_temp_result_span_names :: proc(form: CST_Form, names: []string
                 }
             }
             return {}, false
-        case "switch":
+        case "switch", "kvist/core-switch", "core-switch":
             return switch_escape_owned_temp_result_span_names(form, names, returns)
         case "with-allocator", "with-temp-allocator":
             if len(form.items) >= 3 {
@@ -3313,7 +3350,7 @@ emit_thread_binding_assignment :: proc(e: ^Emitter, binding: Binding, thread_las
 
 emit_thread_expr :: proc(e: ^Emitter, form: CST_Form, thread_last: bool = false) -> (string, Compile_Error, bool) {
     if len(form.items) < 3 {
-        return "", Compile_Error{message = "-> expects an initial expression and at least one step", span = form.span}, false
+        return "", Compile_Error{message = fmt.tprintf("%s expects an initial expression and at least one step", thread_surface_name(thread_last)), span = form.span}, false
     }
 
     current, err_current, ok_current := emit_expr(e, form.items[1])
@@ -3973,7 +4010,7 @@ form_transfers_owned_name :: proc(form: CST_Form, name: string, can_transfer_fin
             form_transfers_owned_name(form.items[3], name, can_transfer_final)
     }
 
-    if ok && head == "cond" {
+    if ok && (head == "cond" || head == "kvist/core-cond" || head == "core-cond") {
         if len(form.items) < 4 || len(form.items)%2 != 0 {
             return false
         }
@@ -4775,7 +4812,15 @@ emit_operator_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Erro
         return fmt.tprintf("(%s) %s (%s)", lhs, op, rhs), {}, true
     }
 
-    if op == "in?" || op == "contains?" {
+    if op == "contains?" {
+        return "", Compile_Error{message = "`contains?` has moved to `core/contains?`", span = form.items[0].span}, false
+    }
+
+    if op == "in?" {
+        return "", Compile_Error{message = "`in?` has moved to `core/contains?`", span = form.items[0].span}, false
+    }
+
+    if op == "core/contains?" {
         if len(form.items) != 3 {
             return "", Compile_Error{message = fmt.tprintf("%s expects exactly two arguments", op), span = form.span}, false
         }
@@ -4790,7 +4835,15 @@ emit_operator_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Erro
         return fmt.tprintf("(%s) in (%s)", key, collection), {}, true
     }
 
-    if op == "in" || op == "not-in" {
+    if op == "in" {
+        return "", Compile_Error{message = "`in` has moved to `core/in`", span = form.items[0].span}, false
+    }
+
+    if op == "not-in" {
+        return "", Compile_Error{message = "`not-in` has moved to `core/not-in`", span = form.items[0].span}, false
+    }
+
+    if op == "core/in" || op == "kvist/core-in" || op == "core-in" || op == "core/not-in" || op == "kvist/core-not-in" || op == "core-not-in" {
         if len(form.items) != 3 {
             return "", Compile_Error{message = fmt.tprintf("%s expects exactly two arguments", op), span = form.span}, false
         }
@@ -4802,7 +4855,7 @@ emit_operator_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Erro
         if !ok_rhs {
             return "", err_rhs, false
         }
-        if op == "not-in" {
+        if op == "core/not-in" || op == "kvist/core-not-in" || op == "core-not-in" {
             return fmt.tprintf("!((%s) in (%s))", lhs, rhs), {}, true
         }
         return fmt.tprintf("(%s) in (%s)", lhs, rhs), {}, true
@@ -5126,6 +5179,18 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
     }
 
     if head.text == "get" {
+        return "", Compile_Error{message = "`get` has moved to `core/get`", span = form.items[0].span}, false
+    }
+
+    if head.text == "count" {
+        return "", Compile_Error{message = "`count` has moved to `core/count`", span = form.items[0].span}, false
+    }
+
+    if head.text == "empty?" {
+        return "", Compile_Error{message = "`empty?` has moved to `core/empty?`", span = form.items[0].span}, false
+    }
+
+    if head.text == "core/get" {
         if len(form.items) != 3 && len(form.items) != 4 {
             return "", Compile_Error{message = "get expects collection, key, and optional default", span = form.span}, false
         }
@@ -5289,7 +5354,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
             return "", Compile_Error{message = fmt.tprintf("%s expects collection, key, and optional default", head.text), span = form.span}, false
         }
         rewritten := form
-        rewritten.items[0].text = "get"
+        rewritten.items[0].text = "core/get"
         return emit_call_like(e, rewritten)
     }
 
@@ -5506,7 +5571,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
             return "", Compile_Error{message = fmt.tprintf("%s expects collection and key", head.text), span = form.span}, false
         }
         rewritten := form
-        rewritten.items[0].text = "contains?"
+        rewritten.items[0].text = "core/contains?"
         return emit_call_like(e, rewritten)
     }
 
@@ -5638,6 +5703,10 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
     }
 
     if head.text == "println" {
+        return "", Compile_Error{message = "`println` has moved to `core/println`", span = form.items[0].span}, false
+    }
+
+    if head.text == "core/println" || head.text == "kvist/core-println" || head.text == "core-println" {
         arg_texts: [dynamic]string
         for arg in form.items[1:] {
             arg_text, err_arg, ok_arg := emit_expr(e, arg)
@@ -5669,8 +5738,12 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
     }
 
     if head.text == "nil?" {
+        return "", Compile_Error{message = "`nil?` has moved to `core/nil?`", span = form.items[0].span}, false
+    }
+
+    if head.text == "core/nil?" || head.text == "kvist/core-nil?" || head.text == "core-nil?" {
         if len(form.items) != 2 {
-            return "", Compile_Error{message = "nil? expects one expression", span = form.span}, false
+            return "", Compile_Error{message = "core/nil? expects one expression", span = form.span}, false
         }
         target, err_target, ok_target := emit_expr(e, form.items[1])
         if !ok_target {
@@ -5680,8 +5753,12 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
     }
 
     if head.text == "tap>" {
+        return "", Compile_Error{message = "`tap>` has moved to `core/tap>`", span = form.items[0].span}, false
+    }
+
+    if head.text == "core/tap>" || head.text == "kvist/core-tap" || head.text == "core-tap" {
         if len(form.items) != 2 && len(form.items) != 3 {
-            return "", Compile_Error{message = "tap> expects value or label and value", span = form.span}, false
+            return "", Compile_Error{message = "core/tap> expects value or label and value", span = form.span}, false
         }
         mark_core_tap(e)
         if len(form.items) == 2 {
@@ -5699,7 +5776,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         } else if label_form.kind == .String {
             label = label_form.text
         } else {
-            return "", Compile_Error{message = "tap> label must be a keyword or string literal", span = label_form.span}, false
+            return "", Compile_Error{message = "core/tap> label must be a keyword or string literal", span = label_form.span}, false
         }
         value, err_value, ok_value := emit_expr(e, form.items[2])
         if !ok_value {
@@ -5879,6 +5956,21 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         }
         mark_core_merge_in_place(e)
         return emit_call_text("kvist_merge_in_place", []string{address_of_expr_text(target), source}), {}, true
+    }
+
+    if head.text == "map/dissoc!" {
+        if len(form.items) != 3 {
+            return "", Compile_Error{message = fmt.tprintf("%s expects target map and key", surface_head), span = form.span}, false
+        }
+        target, err_target, ok_target := emit_expr(e, form.items[1])
+        if !ok_target {
+            return "", err_target, false
+        }
+        key, err_key, ok_key := emit_expr(e, form.items[2])
+        if !ok_key {
+            return "", err_key, false
+        }
+        return emit_call_text("delete_key", []string{address_of_expr_text(target), key}), {}, true
     }
 
     if head.text == "arr/into" {
@@ -6215,8 +6307,12 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
     }
 
     if head.text == "or-else" {
+        return "", Compile_Error{message = "`or-else` has moved to `core/or-else`", span = form.items[0].span}, false
+    }
+
+    if head.text == "core/or-else" || head.text == "kvist/core-or-else" || head.text == "core-or-else" {
         if len(form.items) != 3 {
-            return "", Compile_Error{message = "or-else expects optional-ok expression and fallback", span = form.span}, false
+            return "", Compile_Error{message = "core/or-else expects optional-ok expression and fallback", span = form.span}, false
         }
         optional_text, err_optional, ok_optional := emit_expr(e, form.items[1])
         if !ok_optional {
@@ -6434,7 +6530,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
     if head.text == "arr/first" ||
        head.text == "arr/second" || head.text == "arr/last" ||
        head.text == "arr/rest" || head.text == "arr/butlast" ||
-       head.text == "empty?" || head.text == "count" {
+       head.text == "core/empty?" || head.text == "core/count" {
         if len(form.items) != 2 {
             return "", Compile_Error{message = fmt.tprintf("%s expects collection", surface_head), span = form.span}, false
         }
@@ -6443,7 +6539,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
             return "", err_collection, false
         }
         collection = slice_all_expr_text(collection)
-        if head.text == "count" {
+        if head.text == "core/count" {
             return fmt.tprintf("len(%s)", collection), {}, true
         }
         if head.text == "arr/first" {
@@ -6455,7 +6551,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         if head.text == "arr/last" {
             return fmt.tprintf("(%s)[len(%s)-1]", collection, collection), {}, true
         }
-        if head.text == "empty?" {
+        if head.text == "core/empty?" {
             return fmt.tprintf("len(%s) == 0", collection), {}, true
         }
         if head.text == "arr/butlast" {
@@ -6480,7 +6576,11 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         return fmt.tprintf("(%s)[%s]", slice_all_expr_text(collection), index), {}, true
     }
 
-    if head.text == "slice" || head.text == "arr/slice" {
+    if head.text == "slice" {
+        return "", Compile_Error{message = "`slice` has moved to `core/slice`", span = form.items[0].span}, false
+    }
+
+    if head.text == "core/slice" || head.text == "arr/slice" {
         if len(form.items) < 2 || len(form.items) > 4 {
             return "", Compile_Error{message = "slice expects collection, optional start, and optional end", span = form.span}, false
         }
@@ -6528,14 +6628,26 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
     }
 
     if head.text == "update" {
+        return "", Compile_Error{message = "`update` has moved to `core/update`", span = form.items[0].span}, false
+    }
+
+    if head.text == "core/update" || head.text == "kvist/core/update" || head.text == "core-update" || head.text == "kvist/core-update" {
         return emit_update_expr(e, form)
     }
 
     if head.text == "->" {
-        return emit_thread_expr(e, form)
+        return "", Compile_Error{message = "`->` has moved to `core/->`", span = form.items[0].span}, false
     }
 
     if head.text == "->>" {
+        return "", Compile_Error{message = "`->>` has moved to `core/->>`", span = form.items[0].span}, false
+    }
+
+    if head.text == "kvist/core-thread-first" || head.text == "core-thread-first" {
+        return emit_thread_expr(e, form)
+    }
+
+    if head.text == "kvist/core-thread-last" || head.text == "core-thread-last" {
         return emit_thread_expr(e, form, true)
     }
 
@@ -7323,13 +7435,24 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
         return emit_with_allocator_stmt(e, form, last_in_proc, returns)
     case .With_Temp_Allocator:
         return emit_with_temp_allocator_stmt(e, form, last_in_proc, returns)
+    case .When:
+    case .Cond:
     case .Thread_First, .Thread_Last:
     case .When_Let, .If_Let, .When_Ok, .If_Ok:
     case .None:
     }
 
-    switch head.text {
+    canonical_head_text := head.text
+    canonical_head, _, err_head, ok_head := resolve_kvist_head(e, head.text)
+    if !ok_head {
+        return err_head, false
+    }
+    canonical_head_text = canonical_head
+
+    switch canonical_head_text {
     case "comment":
+        return Compile_Error{message = "`comment` has moved to `core/comment`", span = form.items[0].span}, false
+    case "core/comment", "kvist/core-comment":
         return {}, true
     case "#partial":
         if len(form.items) < 2 || !is_symbol(form.items[1], "switch") {
@@ -7453,6 +7576,10 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
         emit_line(e, "}")
         return {}, true
     case "when":
+        return Compile_Error{message = "`when` has moved to `core/when`", span = form.items[0].span}, false
+    case "cond":
+        return Compile_Error{message = "`cond` has moved to `core/cond`", span = form.items[0].span}, false
+    case "kvist/core-when", "core-when":
         if len(form.items) < 3 {
             return Compile_Error{message = "when expects test and body", span = form.span}, false
         }
@@ -7480,9 +7607,11 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
         return {}, true
     case "if":
         return emit_if_like(e, "if", form, last_in_proc, returns)
-    case "cond":
+    case "kvist/core-cond", "core-cond":
         return emit_cond_stmt(e, form, last_in_proc, returns)
     case "switch":
+        return Compile_Error{message = "`switch` has moved to `core/switch`", span = form.items[0].span}, false
+    case "kvist/core-switch", "core-switch":
         return emit_switch_stmt(e, form, last_in_proc, returns)
     case "return":
         if len(form.items) == 1 {
@@ -7544,7 +7673,7 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
             deferred := form.items[1]
             if deferred.kind == .List && len(deferred.items) > 0 && deferred.items[0].kind == .Symbol {
                 switch deferred.items[0].text {
-                case "if", "when", "cond", "switch", "let", "do":
+                case "if", "when", "cond", "kvist/core-cond", "core-cond", "switch", "kvist/core-switch", "core-switch", "let", "do":
                 case:
                     expr, err_expr, ok_expr := emit_expr(e, deferred)
                     if !ok_expr {
@@ -7600,8 +7729,10 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
         emit_raw_newline(e)
         return {}, true
     case "update!":
+        return Compile_Error{message = "`update!` has moved to `core/update!`", span = form.items[0].span}, false
+    case "core/update!", "kvist/core/update!", "core-update!", "kvist/core-update!":
         if len(form.items) < 4 {
-            return Compile_Error{message = "update! expects target, key-or-field, and value or updater", span = form.span}, false
+            return Compile_Error{message = "core/update! expects target, key-or-field, and value or updater", span = form.span}, false
         }
         lhs, current, err_place, ok_place := emit_update_place(e, form.items[1], form.items[2])
         if !ok_place {
@@ -7656,13 +7787,15 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
         emit_raw_newline(e)
         return {}, true
     case "doc":
+        return Compile_Error{message = "`doc` has moved to `core/doc`", span = form.items[0].span}, false
+    case "core/doc", "kvist/core-doc", "core-doc":
         if len(form.items) != 2 {
-            return Compile_Error{message = "doc expects a quoted declaration name", span = form.span}, false
+            return Compile_Error{message = "core/doc expects a quoted declaration name", span = form.span}, false
         }
         mark_core_fmt(e)
         name, ok_name := quoted_symbol_name(form.items[1])
         if !ok_name {
-            return Compile_Error{message = "doc currently expects a quoted declaration name", span = form.items[1].span}, false
+            return Compile_Error{message = "core/doc currently expects a quoted declaration name", span = form.items[1].span}, false
         }
         text, ok_doc := find_decl_doc_text(e, name)
         if !ok_doc {
@@ -7671,39 +7804,7 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
         emit_line(e, fmt.tprintf("fmt.println(%q)", text))
         return {}, true
     case "each":
-        body_start := 3
-        name_form: CST_Form
-        value_form: CST_Form
-        coll_form: CST_Form
-        has_value := false
-        if len(form.items) >= 4 && form.items[1].kind == .Symbol {
-            name_form = form.items[1]
-            coll_form = form.items[2]
-        } else if len(form.items) >= 3 && form.items[1].kind == .Vector && len(form.items[1].items) == 2 && form.items[1].items[0].kind == .Symbol {
-            name_form = form.items[1].items[0]
-            coll_form = form.items[1].items[1]
-            body_start = 2
-        } else if len(form.items) >= 3 && form.items[1].kind == .Vector && len(form.items[1].items) == 3 &&
-                  form.items[1].items[0].kind == .Symbol && form.items[1].items[1].kind == .Symbol {
-            name_form = form.items[1].items[0]
-            value_form = form.items[1].items[1]
-            coll_form = form.items[1].items[2]
-            has_value = true
-            body_start = 2
-        } else {
-            return Compile_Error{message = "each expects [name collection] or [key value collection] and body", span = form.span}, false
-        }
-        name := map_name(name_form.text)
-        value := map_name(value_form.text)
-        body: [dynamic]CST_Form
-        for item in form.items[body_start:] {
-            append(&body, item)
-        }
-        second_name := ""
-        if has_value {
-            second_name = value
-        }
-        return emit_for_in_loop(e, coll_form, name, second_name, body[:])
+        return Compile_Error{message = "`each` has been removed; use `for`", span = form.span}, false
     case "for":
         if len(form.items) >= 3 && form.items[1].kind == .Vector {
             binding := form.items[1]
@@ -9361,20 +9462,13 @@ emit_core_set_union_in_place_helper :: proc(e: ^Emitter) {
 emit_core_set_intersection_in_place_helper :: proc(e: ^Emitter) {
     emit_line(e, "kvist_set_intersection_in_place :: proc(target: ^map[$T]bool, source: map[T]bool) {")
     e.indent += 1
-    emit_line(e, "to_delete := make([dynamic]T, 0)")
-    emit_line(e, "defer delete(to_delete)")
     emit_line(e, "for key in target^ {")
     e.indent += 1
     emit_line(e, "if !source[key] {")
     e.indent += 1
-    emit_line(e, "append(&to_delete, key)")
-    e.indent -= 1
-    emit_line(e, "}")
-    e.indent -= 1
-    emit_line(e, "}")
-    emit_line(e, "for key in to_delete {")
-    e.indent += 1
     emit_line(e, "delete_key(target, key)")
+    e.indent -= 1
+    emit_line(e, "}")
     e.indent -= 1
     emit_line(e, "}")
     e.indent -= 1
@@ -10354,7 +10448,12 @@ form_uses_core_strings :: proc(form: CST_Form) -> bool {
 
 form_uses_core_fmt :: proc(form: CST_Form) -> bool {
     if form.kind == .List && len(form.items) > 0 && form.items[0].kind == .Symbol {
-        if form.items[0].text == "println" || form.items[0].text == "doc" {
+        if form.items[0].text == "core/println" ||
+           form.items[0].text == "kvist/core-println" ||
+           form.items[0].text == "core-println" ||
+           form.items[0].text == "core/doc" ||
+           form.items[0].text == "kvist/core-doc" ||
+           form.items[0].text == "core-doc" {
             return true
         }
     }

@@ -1,5 +1,6 @@
 // Port of the Cluck reset arrays demo, using Kvist/Odin array ownership rules.
 (package main)
+(import core "kvist:core")
 (import arr "kvist:arr")
 
 (defn arrays-demo [] -> int
@@ -9,19 +10,19 @@
         view (arr/slice xs 1 3)]
     (arr/push! xs 4)
     (arr/push! zeros 0 0 0)
-    (update! xs 0 10)
-    (update! zeros 1 99)
-    (println xs)
-    (println ys)
-    (println zeros)
-    (println view)
+    (core/update! xs 0 10)
+    (core/update! zeros 1 99)
+    (core/println xs)
+    (core/println ys)
+    (core/println zeros)
+    (core/println view)
     (+ (+ (arr/get xs 0) (arr/get ys 1))
        (arr/get zeros 1))))
 
 (defn main []
-  (println (arrays-demo)))
+  (core/println (arrays-demo)))
 
-(comment
+(core/comment
   ;; Owned dynamic arrays stay explicit, but simple local cleanup can now be
   ;; marked directly on the let binding.
   (arrays-demo)

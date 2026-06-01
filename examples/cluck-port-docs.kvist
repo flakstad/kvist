@@ -1,5 +1,6 @@
 // Close port of the Cluck reset docs demo.
 (package main)
+(import core "kvist:core")
 (defconst docs_banner
   "Banner used by the docs demo."
   "doc demo")
@@ -7,13 +8,13 @@
 (defn docs-demo
   "Show doc lookup for both value and function declarations."
   [] -> bool
-  (println docs_banner)
-  (doc 'docs_banner)
-  (doc 'docs_demo)
+  (core/println docs_banner)
+  (core/doc 'docs_banner)
+  (core/doc 'docs_demo)
   true)
 
 (defn main []
-  (println (docs-demo)))
+  (core/println (docs-demo)))
 
-(comment
+(core/comment
   (docs-demo))

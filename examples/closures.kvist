@@ -29,9 +29,9 @@
 
 (defn main []
   (let [xs [1 2 3] defer]
-    (println (proc-literal-demo) (captured-map-demo xs) (captured-map-bang-demo))))
+    (core/println (proc-literal-demo) (captured-map-demo xs) (captured-map-bang-demo))))
 
-(comment
+(core/comment
   ;; Plain non-capturing function literals still work.
   (proc-literal-demo)
   ;; => true

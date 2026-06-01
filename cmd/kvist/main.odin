@@ -299,7 +299,11 @@ run_odin_file :: proc(command, generated_path, source_path, source, eval_source,
 
     args := make([dynamic]string, 0, 5)
     defer delete(args)
-    append(&args, "odin", command, generated_abs, "-file")
+    odin_command := command
+    if command == "run" {
+        odin_command = "build"
+    }
+    append(&args, "odin", odin_command, generated_abs, "-file")
     for arg in extra_args {
         append(&args, arg)
     }
@@ -327,10 +331,36 @@ run_odin_file :: proc(command, generated_path, source_path, source, eval_source,
         fmt.eprint(mapped_stderr)
     }
     if err != nil {
-        fmt.eprintln("failed to run odin ", command)
+        fmt.eprintln("failed to run odin ", odin_command)
         return 1
     }
     if state.exited {
+        if command == "run" && state.exit_code == 0 {
+            run_state, run_stdout, run_stderr, run_err := os.process_exec(
+                os.Process_Desc{command = {out_path}, working_dir = working_dir},
+                context.allocator,
+            )
+            defer delete(run_stdout)
+            defer delete(run_stderr)
+
+            if len(run_stdout) > 0 {
+                fmt.print(string(run_stdout))
+            }
+            if len(run_stderr) > 0 {
+                fmt.eprint(string(run_stderr))
+            }
+            if run_err != nil {
+                fmt.eprintln("failed to run built program: ", out_path)
+                return 1
+            }
+            if run_state.exited {
+                if run_state.exit_code == 0 && save_name != "" {
+                    save_stdout_to_cache_or_exit(save_name, run_stdout)
+                }
+                return run_state.exit_code
+            }
+            return 1
+        }
         if state.exit_code == 0 && save_name != "" {
             save_stdout_to_cache_or_exit(save_name, stdout)
         }

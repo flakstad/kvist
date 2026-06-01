@@ -1,5 +1,7 @@
 // Contrasts value-style updates that return a new struct with pointer-style
 // updates that mutate shared state in place.
+(package main)
+(import core "kvist:core")
 
 (defstruct Score {
   :value int
@@ -9,14 +11,14 @@
 (defn apply-bonus [score: Score] -> Score
   ;; By-value update: copy, mutate the local copy, return the new value.
   (let [updated score]
-    (update! updated :value (+ (:value updated) (:bonus updated)))
-    (update! updated :bonus 0)
+    (core/update! updated :value (+ (:value updated) (:bonus updated)))
+    (core/update! updated :bonus 0)
     updated))
 
 (defn apply-bonus! [score: ^Score]
   ;; Pointer update: mutate the caller's value directly.
-  (update! score^ :value (+ (:value score^) (:bonus score^)))
-  (update! score^ :bonus 0))
+  (core/update! score^ :value (+ (:value score^) (:bonus score^)))
+  (core/update! score^ :bonus 0))
 
 (defn value-style-score [] -> int
   (let [original (Score {:value 10 :bonus 5})
@@ -31,10 +33,10 @@
     (:value score)))
 
 (defn main []
-  (println (value-style-score))
-  (println (pointer-style-score)))
+  (core/println (value-style-score))
+  (core/println (pointer-style-score)))
 
-(comment
+(core/comment
   ;; Original value is 10, returned updated value is 15.
   (value-style-score)
   ;; => 25

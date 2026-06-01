@@ -1,5 +1,6 @@
 // Exercises additional eager sequence helpers and ownership cleanup.
 (package main)
+(import core "kvist:core")
 (import arr "kvist:arr")
 (import map "kvist:map")
 
@@ -70,7 +71,7 @@
         ages (new []int [36 17 45])
         ages-by-name (map/zip names ages)]
     (defer (delete ages-by-name))
-    (get ages-by-name "Grace")))
+    (core/get ages-by-name "Grace")))
 
 (defn chunk-count [] -> int
   (let [xs (new []int [1 2 3 4])
@@ -82,19 +83,19 @@
   (let [xs (new []int [1 2 2 3])
         counts (arr/frequencies xs)]
     (defer (delete counts))
-    (get counts 2)))
+    (core/get counts 2)))
 
 (defn count-by-parity-total [] -> int
   (let [xs (new []int [1 2 3 4 6])
         counts (arr/count-by parity xs)]
     (defer (delete counts))
-    (+ (get counts 0) (get counts 1))))
+    (+ (core/get counts 0) (core/get counts 1))))
 
 (defn sum-by-parity-total [] -> int
   (let [xs (new []int [1 2 3 4 6])
         sums (arr/sum-by parity identity-int xs)]
     (defer (delete sums))
-    (+ (get sums 0) (get sums 1))))
+    (+ (core/get sums 0) (core/get sums 1))))
 
 (defn indexed-name-count [] -> int
   (let [names (new []string ["Ada" "Lin" "Grace"])
@@ -111,14 +112,14 @@
     (defer (delete ages-by-name))
     (defer (delete name-keys))
     (defer (delete age-values))
-    (+ (count name-keys) (count age-values))))
+    (+ (core/count name-keys) (core/count age-values))))
 
 (defn even-group-count [] -> int
   (let [xs (new []int [1 2 3 4 6])
         groups (arr/group-by parity xs)
-        evens (get groups 0)]
+        evens (core/get groups 0)]
     (defer
-      (each [_ group groups]
+      (for [_ group groups]
         (delete group))
       (delete groups))
     (len evens)))
@@ -153,7 +154,7 @@
   (let [base (new []int [1 2])
         xs (arr/cycle 5 base)]
     (defer (delete xs))
-    (count xs)))
+    (core/count xs)))
 
 (defn trimmed-sum [] -> int
   (let [xs (new []int [1 2 3 4 5])
@@ -180,7 +181,7 @@
   (let [xs (new []int [10 20 30])
         tail (arr/rest xs)
         empty-tail (arr/drop 3 xs)]
-    (if (empty? empty-tail)
+    (if (core/empty? empty-tail)
       (+ (arr/first tail) (arr/second xs))
       0)))
 
@@ -301,7 +302,7 @@
   (let [xs (new []int [1 3 2 4 5])
         unique (arr/distinct-by parity xs)]
     (defer (delete unique))
-    (count unique)))
+    (core/count unique)))
 
 (defn ragged-chunk-size [] -> int
   (let [xs (new []int [1 2 3 4 5])
@@ -334,9 +335,9 @@
     (arr/first threaded)))
 
 (defn main []
-  (println (age-for-grace)))
+  (core/println (age-for-grace)))
 
-(comment
+(core/comment
   (split-front-length)
   ;; => 2
 
@@ -355,7 +356,7 @@
   (repeated-two-count)
   ;; => 2
 
-  (count-by-parity-total)
+  (core/count-by-parity-total)
   ;; => 5
 
   (sum-by-parity-total)

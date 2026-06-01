@@ -1,7 +1,25 @@
 (package http)
 (import h "kvist_vendor:http")
 (import net "core:net")
- (import time "core:time")
+(import time "core:time")
+
+(odin "
+Request :: h.Request
+Response :: h.Response
+Handler :: h.Handler
+
+http__respond_file_content_text :: proc(res: ^h.Response, path: string, content: string, status: h.Status = .OK) {
+	h.respond_file_content(res, path, transmute([]byte)content, status)
+}
+
+http__handle_ptr :: proc(handler: ^h.Handler, req: ^h.Request, res: ^h.Response) {
+	handler.handle(handler, req, res)
+}
+
+http__handler_next :: proc(handler: ^h.Handler) -> ^h.Handler {
+	return handler.next.(^h.Handler)
+}
+")
 
 (defn new-router [] -> h.Router
   (let [router (h.Router {})]
@@ -39,6 +57,26 @@
         (proc [(unquote req-param) ^h.Request (unquote res-param) ^h.Response]
           (do
             (splice body)))))))
+
+(defmacro handle! [handler req res]
+  (quasiquote
+    (http__handle_ptr (addr (unquote handler)) (unquote req) (unquote res))))
+
+(defmacro middleware [next binding & body]
+  (let [next-binding (first binding)
+        req (nth binding 1)
+        res (nth binding 2)
+        self (symbol "__http_middleware_self")
+        self-param (symbol (str (name self) ":"))
+        req-param (symbol (str (name req) ":"))
+        res-param (symbol (str (name res) ":"))]
+    (quasiquote
+      (h.middleware_proc
+        (addr (unquote next))
+        (proc [(unquote self-param) ^h.Handler (unquote req-param) ^h.Request (unquote res-param) ^h.Response]
+          (let [(unquote next-binding) (http__handler_next (unquote self))]
+            (do
+              (splice body))))))))
 
 (defmacro router-handler [router]
   (quasiquote
@@ -180,6 +218,12 @@
   (quasiquote
     (h.respond (unquote res) (unquote status))))
 
+(defmacro respond-ok [res]
+  (quasiquote
+    (do
+      (h.response_status (unquote res) h.Status.OK)
+      (h.respond (unquote res)))))
+
 (defmacro respond-plain [res text & rest]
   (if (= (count rest) 0)
     (quasiquote
@@ -207,6 +251,13 @@
       (h.respond_file (unquote res) (unquote path)))
     (quasiquote
       (h.respond_file (unquote res) (unquote path) (unquote (first rest))))))
+
+(defmacro respond-file-content [res path content & rest]
+  (if (= (count rest) 0)
+    (quasiquote
+      (http__respond_file_content_text (unquote res) (unquote path) (unquote content)))
+    (quasiquote
+      (http__respond_file_content_text (unquote res) (unquote path) (unquote content) (unquote (first rest))))))
 
 (defmacro respond-dir [res base target request]
   (quasiquote

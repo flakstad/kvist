@@ -11,6 +11,7 @@ Alias_Prefix :: struct {
     prefix:  string,
     exports: [dynamic]string,
     allow_fallback: bool,
+    preserve_qualified_calls: bool,
 }
 
 Loaded_Forms :: struct {
@@ -218,7 +219,8 @@ append_import_form_unique :: proc(forms: ^[dynamic]CST_Top_Form, seen: ^[dynamic
     key := form.source
     if form.form.kind == .List && len(form.form.items) > 0 && is_symbol(form.form.items[0], "import") {
         if len(form.form.items) == 2 && form.form.items[1].kind == .String {
-            key = import_path_text(form.form.items[1])
+            path := import_path_text(form.form.items[1])
+            key = fmt.tprintf("%s|%s", import_default_alias(path), path)
         } else if len(form.form.items) == 3 && form.form.items[1].kind == .Symbol && form.form.items[2].kind == .String {
             key = fmt.tprintf("%s|%s", form.form.items[1].text, import_path_text(form.form.items[2]))
         }
@@ -232,7 +234,7 @@ append_import_form_unique :: proc(forms: ^[dynamic]CST_Top_Form, seen: ^[dynamic
 
 is_builtin_kvist_import_path :: proc(path: string) -> bool {
     switch path {
-    case "kvist:arr", "kvist:str", "kvist:map", "kvist:set", "kvist:struct", "kvist:io", "kvist:json", "kvist:http", "kvist:http/client":
+    case "kvist:core", "kvist:arr", "kvist:str", "kvist:map", "kvist:set", "kvist:struct", "kvist:io", "kvist:json", "kvist:http", "kvist:http/client", "kvist:http/session", "kvist:http/sse", "kvist:http/datastar":
         return true
     case:
         return false
@@ -271,7 +273,7 @@ is_source_import_path :: proc(path: string) -> bool {
 
 is_builtin_kvist_package_path :: proc(path: string) -> bool {
     switch path {
-    case "kvist:arr", "kvist:str", "kvist:map", "kvist:set", "kvist:struct", "kvist:io", "kvist:json", "kvist:http", "kvist:http/client":
+    case "kvist:core", "kvist:arr", "kvist:str", "kvist:map", "kvist:set", "kvist:struct", "kvist:io", "kvist:json", "kvist:http", "kvist:http/client", "kvist:http/session", "kvist:http/sse", "kvist:http/datastar":
         return true
     }
     return false
@@ -629,6 +631,7 @@ collect_root_source_import_aliases_from_files :: proc(files: []Package_File) -> 
                 prefix = alias,
                 exports = collect_public_decl_names(import_forms[:]),
                 allow_fallback = shipped_source_import_allows_builtin_fallback(import_path),
+                preserve_qualified_calls = import_path == "kvist:core",
             })
         }
     }
@@ -646,6 +649,9 @@ rewrite_symbol_text :: proc(text: string, locals: []string, aliases: []Alias_Pre
         prefix_text := fmt.tprintf("%s/", alias_map.alias)
         if len(body) > len(prefix_text) && body[:len(prefix_text)] == prefix_text {
             member := body[len(prefix_text):]
+            if alias_map.preserve_qualified_calls {
+                return text, Compile_Error{}, true
+            }
             if len(alias_map.exports) > 0 && !contains_text(alias_map.exports[:], member) {
                 if alias_map.allow_fallback {
                     return text, Compile_Error{}, true
@@ -689,7 +695,7 @@ rewrite_decl_name :: proc(form: ^CST_Form, prefix: string) {
         return
     }
     switch decl_head_name(form^) {
-    case "defconst", "defconst-", "defvar", "defvar-", "defstruct", "defstruct-", "defenum", "defenum-", "defunion", "defunion-", "defn", "defn-", "defmacro", "defmacro-":
+    case "defconst", "defconst-", "defvar", "defvar-", "defstruct", "defstruct-", "defenum", "defenum-", "defunion", "defunion-", "defn", "defn-", "defmacro", "defmacro-", "proc":
         form^.items[1].text = fmt.tprintf("%s__%s", prefix, form^.items[1].text)
     }
 }
@@ -938,6 +944,17 @@ load_source_forms :: proc(dir, prefix: string, loaded_keys, import_keys: ^[dynam
     for name in exported {
         append(&result.exports, name)
     }
+    if package_name != "" {
+        self_prefix := prefix
+        if self_prefix == "" {
+            self_prefix = package_name
+        }
+        append(&aliases, Alias_Prefix{
+            alias = package_name,
+            prefix = self_prefix,
+            exports = exported,
+        })
+    }
 
     for file in files {
         for top in file.forms {
@@ -962,6 +979,7 @@ load_source_forms :: proc(dir, prefix: string, loaded_keys, import_keys: ^[dynam
                 prefix = nested_prefix,
                 exports = nested.exports,
                 allow_fallback = shipped_source_import_allows_builtin_fallback(import_path),
+                preserve_qualified_calls = import_path == "kvist:core",
             })
             for form in nested.imports {
                 append_import_form_unique(&result.imports, import_keys, clone_cst_top_form(form))
@@ -1059,6 +1077,7 @@ load_root_file_forms :: proc(path: string) -> (Loaded_Forms, Compile_Error, bool
                 prefix = alias,
                 exports = nested.exports,
                 allow_fallback = shipped_source_import_allows_builtin_fallback(import_path),
+                preserve_qualified_calls = import_path == "kvist:core",
             })
             for form in nested.imports {
                 append_import_form_unique(&result.imports, &import_keys, clone_cst_top_form(form))
@@ -1117,11 +1136,24 @@ load_path_expanded_forms :: proc(path: string) -> (expanded: [dynamic]CST_Top_Fo
     for form in loaded.decls {
         append(&combined, form)
     }
-    expanded_forms, expanded_macros, err_expand, ok_expand := macroexpand_top_forms(combined[:], true)
+    expanded_forms, expanded_macros, err_expand, ok_expand := macroexpand_top_forms(combined[:], true, path)
     if !ok_expand {
         return expanded, macros, err_expand, false
     }
-    expanded = normalize_expanded_top_forms(expanded_forms[:])
+    aliases, err_aliases, ok_aliases := collect_root_source_import_aliases(path)
+    if !ok_aliases {
+        return expanded, macros, err_aliases, false
+    }
+    locals := collect_local_decl_names(expanded_forms[:])
+    rewritten_expanded: [dynamic]CST_Top_Form
+    for top in expanded_forms {
+        rewritten, err_rewrite, ok_rewrite := rewrite_top_form(top, locals[:], aliases[:], "")
+        if !ok_rewrite {
+            return expanded, macros, err_rewrite, false
+        }
+        append(&rewritten_expanded, rewritten)
+    }
+    expanded = normalize_expanded_top_forms(rewritten_expanded[:])
     macros = expanded_macros
     return expanded, macros, Compile_Error{}, true
 }
@@ -1474,7 +1506,7 @@ eval_form_head :: proc(form: CST_Form) -> string {
 
 eval_head_is_decl :: proc(head: string) -> bool {
     switch head {
-    case "comment", "package", "import", "defconst", "defvar", "defstruct", "defenum", "defunion", "odin", "proc", "defn":
+    case "core/comment", "kvist/core-comment", "package", "import", "defconst", "defvar", "defstruct", "defenum", "defunion", "odin", "proc", "defn":
         return true
     }
     return false

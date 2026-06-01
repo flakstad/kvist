@@ -10,9 +10,9 @@
       0)))
 
 (defn main []
-  (println (multi-return-demo)))
+  (core/println (multi-return-demo)))
 
-(comment
+(core/comment
   (multi-return-demo)
   ;; => 5
 )

@@ -10,7 +10,7 @@
 
 (defmacro get [s index]
   (quasiquote
-    (kvist/get (unquote s) (unquote index))))
+    (kvist/core/get (unquote s) (unquote index))))
 
 (defmacro split [s separator]
   (quasiquote
@@ -27,35 +27,35 @@
     (quasiquote
       (kvist/str/replace (unquote s) (unquote old) (unquote new) (unquote (kvist/first rest))))))
 
-(proc count [s: string] -> int #force_inline
+(defn count [s: string] -> int #force_inline
   (len s))
 
-(proc contains? [s: string, needle: string] -> bool #force_inline
+(defn contains? [s: string, needle: string] -> bool #force_inline
   (strings.contains s needle))
 
-(proc trim [s: string] -> string #force_inline
+(defn trim [s: string] -> string #force_inline
   (strings.trim_space s))
 
-(proc trim-prefix [s: string, prefix: string] -> string #force_inline
+(defn trim-prefix [s: string, prefix: string] -> string #force_inline
   (strings.trim_prefix s prefix))
 
-(proc trim-suffix [s: string, suffix: string] -> string #force_inline
+(defn trim-suffix [s: string, suffix: string] -> string #force_inline
   (strings.trim_suffix s suffix))
 
-(proc starts-with? [s: string, prefix: string] -> bool #force_inline
+(defn starts-with? [s: string, prefix: string] -> bool #force_inline
   (strings.has_prefix s prefix))
 
-(proc ends-with? [s: string, suffix: string] -> bool #force_inline
+(defn ends-with? [s: string, suffix: string] -> bool #force_inline
   (strings.has_suffix s suffix))
 
-(proc index-of [s: string, needle: string] -> int #force_inline
+(defn index-of [s: string, needle: string] -> int #force_inline
   (strings.index s needle))
 
-(proc last-index-of [s: string, needle: string] -> int #force_inline
+(defn last-index-of [s: string, needle: string] -> int #force_inline
   (strings.last_index s needle))
 
-(proc lower [s: string] -> string #force_inline
+(defn lower [s: string] -> string #force_inline
   (strings.to_lower s))
 
-(proc upper [s: string] -> string #force_inline
+(defn upper [s: string] -> string #force_inline
   (strings.to_upper s))

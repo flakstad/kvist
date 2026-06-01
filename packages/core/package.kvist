@@ -1,0 +1,171 @@
+(package core)
+
+(defmacro when [test & body]
+  (quasiquote
+    (kvist/core-when (unquote test) (splice body))))
+
+(defmacro cond [& clauses]
+  (quasiquote
+    (kvist/core-cond (splice clauses))))
+
+(defmacro comment [& body]
+  (quasiquote
+    (kvist/core-comment)))
+
+(defmacro switch [value & clauses]
+  (quasiquote
+    (kvist/core-switch (unquote value) (splice clauses))))
+
+(defmacro -> [value & steps]
+  (quasiquote
+    (kvist/core-thread-first (unquote value) (splice steps))))
+
+(defmacro ->> [value & steps]
+  (quasiquote
+    (kvist/core-thread-last (unquote value) (splice steps))))
+
+(defmacro count [collection]
+  (quasiquote
+    (kvist/core/count (unquote collection))))
+
+(defmacro get [target key & rest]
+  (if (= (kvist/count rest) 0)
+    (quasiquote
+      (kvist/core/get (unquote target) (unquote key)))
+    (quasiquote
+      (kvist/core/get (unquote target) (unquote key) (unquote (kvist/first rest))))))
+
+(defmacro slice [target & rest]
+  (if (= (kvist/count rest) 0)
+    (quasiquote
+      (kvist/core/slice (unquote target)))
+    (if (= (kvist/count rest) 1)
+      (quasiquote
+        (kvist/core/slice (unquote target) (unquote (kvist/first rest))))
+      (quasiquote
+        (kvist/core/slice (unquote target) (unquote (kvist/first rest)) (unquote (kvist/nth rest 1)))))))
+
+(defmacro empty? [collection]
+  (quasiquote
+    (kvist/core/empty? (unquote collection))))
+
+(defmacro contains? [collection key]
+  (quasiquote
+    (kvist/core/contains? (unquote collection) (unquote key))))
+
+(defmacro in [value collection]
+  (quasiquote
+    (kvist/core-in (unquote value) (unquote collection))))
+
+(defmacro not-in [value collection]
+  (quasiquote
+    (kvist/core-not-in (unquote value) (unquote collection))))
+
+(defmacro when-let [binding & body]
+  (if (vector? binding)
+    (if (= (kvist/count binding) 3)
+      (if (symbol? (kvist/first binding))
+        (if (symbol? (kvist/nth binding 1))
+          (quasiquote
+            (let [[(unquote (kvist/first binding)) (unquote (kvist/nth binding 1))]
+                  (unquote (kvist/nth binding 2))]
+              (kvist/core-when (unquote (kvist/nth binding 1))
+                (splice body))))
+          (error "when-let expects [value bool expr] binding"))
+        (error "when-let expects [value bool expr] binding"))
+      (error "when-let expects [value bool expr] binding"))
+    (error "when-let expects [value bool expr] binding")))
+
+(defmacro if-let [binding & body]
+  (if (= (kvist/count body) 2)
+    (if (vector? binding)
+      (if (= (kvist/count binding) 3)
+        (if (symbol? (kvist/first binding))
+          (if (symbol? (kvist/nth binding 1))
+            (quasiquote
+              (let [[(unquote (kvist/first binding)) (unquote (kvist/nth binding 1))]
+                    (unquote (kvist/nth binding 2))]
+                (if (unquote (kvist/nth binding 1))
+                  (unquote (kvist/first body))
+                  (unquote (kvist/nth body 1)))))
+            (error "if-let expects [value bool expr] binding"))
+          (error "if-let expects [value bool expr] binding"))
+        (error "if-let expects [value bool expr] binding"))
+      (error "if-let expects [value bool expr] binding"))
+    (error "if-let expects [value bool expr], then, and else")))
+
+(defmacro when-ok [binding & body]
+  (if (vector? binding)
+    (if (= (kvist/count binding) 3)
+      (if (symbol? (kvist/first binding))
+        (if (symbol? (kvist/nth binding 1))
+          (quasiquote
+            (let [[(unquote (kvist/first binding)) (unquote (kvist/nth binding 1))]
+                  (unquote (kvist/nth binding 2))]
+              (kvist/core-when (== (unquote (kvist/nth binding 1)) {})
+                (splice body))))
+          (error "when-ok expects [value err expr] binding"))
+        (error "when-ok expects [value err expr] binding"))
+      (error "when-ok expects [value err expr] binding"))
+    (error "when-ok expects [value err expr] binding")))
+
+(defmacro if-ok [binding & body]
+  (if (= (kvist/count body) 2)
+    (if (vector? binding)
+      (if (= (kvist/count binding) 3)
+        (if (symbol? (kvist/first binding))
+          (if (symbol? (kvist/nth binding 1))
+            (quasiquote
+              (let [[(unquote (kvist/first binding)) (unquote (kvist/nth binding 1))]
+                    (unquote (kvist/nth binding 2))]
+                (if (== (unquote (kvist/nth binding 1)) {})
+                  (unquote (kvist/first body))
+                  (unquote (kvist/nth body 1)))))
+            (error "if-ok expects [value err expr] binding"))
+          (error "if-ok expects [value err expr] binding"))
+        (error "if-ok expects [value err expr] binding"))
+      (error "if-ok expects [value err expr] binding"))
+    (error "if-ok expects [value err expr], then, and else")))
+
+(defmacro update! [target key-or-field value-or-updater & rest]
+  (if (= (kvist/count rest) 0)
+    (quasiquote
+      (kvist/core-update! (unquote target) (unquote key-or-field) (unquote value-or-updater)))
+    (quasiquote
+      (kvist/core-update! (unquote target)
+                          (unquote key-or-field)
+                          (unquote value-or-updater)
+                          (splice rest)))))
+
+(defmacro update [target key-or-field value-or-updater & rest]
+  (if (= (kvist/count rest) 0)
+    (quasiquote
+      (kvist/core-update (unquote target) (unquote key-or-field) (unquote value-or-updater)))
+    (quasiquote
+      (kvist/core-update (unquote target)
+                         (unquote key-or-field)
+                         (unquote value-or-updater)
+                         (splice rest)))))
+
+(defmacro or-else [expr fallback]
+  (quasiquote
+    (kvist/core-or-else (unquote expr) (unquote fallback))))
+
+(defmacro doc [name]
+  (quasiquote
+    (kvist/core-doc (unquote name))))
+
+(defmacro nil? [value]
+  (quasiquote
+    (kvist/core-nil? (unquote value))))
+
+(defmacro tap> [value & rest]
+  (if (= (kvist/count rest) 0)
+    (quasiquote
+      (kvist/core-tap (unquote value)))
+    (quasiquote
+      (kvist/core-tap (unquote value) (unquote (kvist/first rest))))))
+
+(defmacro println [& values]
+  (quasiquote
+    (kvist/core-println (splice values))))

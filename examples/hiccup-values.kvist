@@ -10,7 +10,7 @@
                 [:p 42]
                 [:p 3.25]])
         html (hiccup/render page) defer]
-    (println html)
+    (core/println html)
     true))
 
 (defn main []

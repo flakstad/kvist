@@ -1,5 +1,6 @@
 // Close port of the Cluck reset records demo.
 (package main)
+(import core "kvist:core")
 (import set "kvist:set")
 
 (defstruct Person
@@ -15,18 +16,18 @@
                         :tags tags})]
     (set/add! tags "math")
     (set/add! tags "lisp")
-    (println (:name person))
-    (println (:age person))
-    (println (:tags person))
-    (println (set/contains? (:tags person) "math"))
-    (update! person :age 37)
-    (println person)
+    (core/println (:name person))
+    (core/println (:age person))
+    (core/println (:tags person))
+    (core/println (set/contains? (:tags person) "math"))
+    (core/update! person :age 37)
+    (core/println person)
     true))
 
 (defn main []
-  (println (records-demo)))
+  (core/println (records-demo)))
 
-(comment
+(core/comment
   ;; The surface is close. The visible gap is sets: Kvist still lowers
   ;; set[T] to map[T]bool rather than a dedicated set literal/API.
   (records-demo))
