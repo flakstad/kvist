@@ -2215,6 +2215,29 @@ classify :: proc(n: int) -> string {
 }
 
 @(test)
+compile_cond_vector_clauses :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn classify [n: int] -> string
+  (core/cond
+    [(< n 0) "negative"]
+    [:else "non-negative"]))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "if (n) < (0) {"), true)
+    testing.expect_value(t, strings.contains(output, "return \"negative\""), true)
+    testing.expect_value(t, strings.contains(output, "else {"), true)
+    testing.expect_value(t, strings.contains(output, "return \"non-negative\""), true)
+}
+
+@(test)
 implicit_returns_only_apply_to_final_nested_blocks :: proc(t: ^testing.T) {
     source := `(package main)
 
@@ -4712,7 +4735,7 @@ macroexpand_thread_last :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    expected := `(kvist/core/count (arr/map inc (arr/filter even? xs)))
+    expected := `(core-count (arr/map inc (arr/filter even? xs)))
 `
     testing.expect_value(t, output, expected)
 }
@@ -4857,7 +4880,7 @@ macroexpand_gensym_creates_stable_symbol_within_expansion :: proc(t: ^testing.T)
 
     testing.expect_value(t, strings.contains(output.output, "(let [__tmp_"), true)
     testing.expect_value(t, strings.contains(output.output, "(if __tmp_"), true)
-    testing.expect_value(t, strings.contains(output.output, "(kvist/core-println __tmp_"), true)
+    testing.expect_value(t, strings.contains(output.output, "(core-println __tmp_"), true)
 }
 
 @(test)

@@ -333,11 +333,9 @@ builtin_macro_kind :: proc(head: string) -> Builtin_Macro_Kind {
         return .With_Allocator
     case "with-temp-allocator":
         return .With_Temp_Allocator
-    case "kvist/core-cond", "core-cond":
-        return .Cond
-    case "kvist/core-thread-first", "core-thread-first":
+    case "core-thread-first":
         return .Thread_First
-    case "kvist/core-thread-last", "core-thread-last":
+    case "core-thread-last":
         return .Thread_Last
     }
     return .None
@@ -361,96 +359,6 @@ expand_when_form :: proc(form: CST_Form) -> (expanded: CST_Form, err: Compile_Er
     }
     append(&expanded.items, body)
     return expanded, Compile_Error{}, true
-}
-
-cond_body_form :: proc(forms: []CST_Form, span: Span) -> CST_Form {
-    if len(forms) == 0 {
-        body := CST_Form{kind = .List, span = span}
-        append(&body.items, macro_symbol("do", span))
-        return body
-    }
-    if len(forms) == 1 {
-        return forms[0]
-    }
-    body := CST_Form{kind = .List, span = span}
-    append(&body.items, macro_symbol("do", span))
-    for form in forms {
-        append(&body.items, form)
-    }
-    return body
-}
-
-expand_cond_vector_clauses :: proc(clauses: []CST_Form, span: Span) -> (expanded: CST_Form, err: Compile_Error, ok: bool) {
-    if len(clauses) == 0 {
-        return expanded, Compile_Error{message = "cond expects at least one clause", span = span}, false
-    }
-    first := clauses[0]
-    if first.kind != .Vector || len(first.items) == 0 {
-        return expanded, Compile_Error{message = "cond expects vector clauses or test/body pairs", span = first.span}, false
-    }
-
-    test_form := first.items[0]
-    body_form := cond_body_form(first.items[1:], first.span)
-    if test_form.kind == .Keyword && test_form.text == ":else" {
-        if len(clauses) != 1 {
-            return expanded, Compile_Error{message = "cond :else must be the final clause", span = test_form.span}, false
-        }
-        return body_form, Compile_Error{}, true
-    }
-
-    expanded = CST_Form{kind = .List, span = span}
-    append(&expanded.items, macro_symbol("if", span))
-    append(&expanded.items, test_form)
-    append(&expanded.items, body_form)
-    if len(clauses) > 1 {
-        else_form, err_else, ok_else := expand_cond_vector_clauses(clauses[1:], span)
-        if !ok_else {
-            return expanded, err_else, false
-        }
-        append(&expanded.items, else_form)
-    }
-    return expanded, Compile_Error{}, true
-}
-
-expand_cond_clauses :: proc(clauses: []CST_Form, span: Span) -> (expanded: CST_Form, err: Compile_Error, ok: bool) {
-    if len(clauses) < 2 {
-        return expanded, Compile_Error{message = "cond expects at least one clause", span = span}, false
-    }
-    if len(clauses)%2 != 0 {
-        return expanded, Compile_Error{message = "cond expects test/body pairs", span = span}, false
-    }
-
-    test_form := clauses[0]
-    body_form := clauses[1]
-    if test_form.kind == .Keyword && test_form.text == ":else" {
-        if len(clauses) != 2 {
-            return expanded, Compile_Error{message = "cond :else must be the final clause", span = test_form.span}, false
-        }
-        return body_form, Compile_Error{}, true
-    }
-
-    expanded = CST_Form{kind = .List, span = span}
-    append(&expanded.items, macro_symbol("if", span))
-    append(&expanded.items, test_form)
-    append(&expanded.items, body_form)
-    if len(clauses) > 2 {
-        else_form, err_else, ok_else := expand_cond_clauses(clauses[2:], span)
-        if !ok_else {
-            return expanded, err_else, false
-        }
-        append(&expanded.items, else_form)
-    }
-    return expanded, Compile_Error{}, true
-}
-
-expand_cond_form :: proc(form: CST_Form) -> (expanded: CST_Form, err: Compile_Error, ok: bool) {
-    if len(form.items) < 3 {
-        return expanded, Compile_Error{message = "cond expects at least one clause", span = form.span}, false
-    }
-    if form.items[1].kind == .Vector {
-        return expand_cond_vector_clauses(form.items[1:], form.span)
-    }
-    return expand_cond_clauses(form.items[1:], form.span)
 }
 
 expand_thread_step_form :: proc(current, step: CST_Form, thread_last: bool) -> (expanded: CST_Form, err: Compile_Error, ok: bool) {
@@ -1872,12 +1780,6 @@ write_macro_form_expanded :: proc(builder: ^strings.Builder, form: CST_Form, mac
                 return err_expand, false
             }
             return write_macro_form_expanded(builder, expanded_when, macros)
-        case .Cond:
-            expanded_cond, err_expand, ok_expand := expand_cond_form(form)
-            if !ok_expand {
-                return err_expand, false
-            }
-            return write_macro_form_expanded(builder, expanded_cond, macros)
         case .Thread_First:
             expanded, err_expand, ok_expand := expand_thread_form(form, false)
             if !ok_expand {
@@ -2143,12 +2045,6 @@ macroexpand_form_with_macros :: proc(form: CST_Form, macros: []User_Macro) -> (r
                 return result, err_expand, false
             }
             return macroexpand_form_with_macros(expanded, macros)
-        case .Cond:
-            expanded, err_expand, ok_expand := expand_cond_form(form)
-            if !ok_expand {
-                return result, err_expand, false
-            }
-            return macroexpand_form_with_macros(expanded, macros)
         case .Thread_First:
             expanded, err_expand, ok_expand := expand_thread_form(form, false)
             if !ok_expand {
@@ -2272,12 +2168,6 @@ macroexpand_builtin_runtime_form :: proc(form: CST_Form) -> (expanded: CST_Form,
                 return CST_Form{}, err_expand, false
             }
             return macroexpand_builtin_runtime_form(expanded_when)
-        case .Cond:
-            expanded_cond, err_expand, ok_expand := expand_cond_form(form)
-            if !ok_expand {
-                return CST_Form{}, err_expand, false
-            }
-            return macroexpand_builtin_runtime_form(expanded_cond)
         case .Thread_First:
             expanded_thread, err_expand, ok_expand := expand_thread_form(form, false)
             if !ok_expand {

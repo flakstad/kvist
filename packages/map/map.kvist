@@ -35,9 +35,9 @@
   [m key & rest]
   (if (= (kvist/count rest) 0)
     (quasiquote
-      (kvist/map/get (unquote m) (unquote key)))
+      (core/get (unquote m) (unquote key)))
     (quasiquote
-      (kvist/map/get (unquote m) (unquote key) (unquote (kvist/first rest))))))
+      (core/get (unquote m) (unquote key) (unquote (kvist/first rest))))))
 
 (defmacro merge!
   "Mutate `target` by assigning every entry from `source`.

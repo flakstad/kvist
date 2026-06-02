@@ -16,6 +16,60 @@
         (do
           (splice body))))))
 
+(defmacro- cond-body
+  [forms]
+  (if (= (kvist/count forms) 0)
+    (quasiquote
+      (do))
+    (if (= (kvist/count forms) 1)
+      (quasiquote
+        (unquote (kvist/first forms)))
+      (quasiquote
+        (do
+          (splice forms))))))
+
+(defmacro- cond-pairs
+  [& clauses]
+  (if (= (kvist/count clauses) 0)
+    (error "cond expects at least one clause")
+    (if (= (kvist/count clauses) 1)
+      (error "cond expects test/body pairs")
+      (if (= (kvist/first clauses) :else)
+        (if (= (kvist/count clauses) 2)
+          (quasiquote
+            (unquote (kvist/nth clauses 1)))
+          (error "cond :else must be the final clause"))
+        (if (= (kvist/count clauses) 2)
+          (quasiquote
+            (if (unquote (kvist/first clauses))
+              (unquote (kvist/nth clauses 1))))
+          (quasiquote
+            (if (unquote (kvist/first clauses))
+              (unquote (kvist/nth clauses 1))
+              (cond-pairs (splice (kvist/rest (kvist/rest clauses)))))))))))
+
+(defmacro- cond-vectors
+  [& clauses]
+  (if (= (kvist/count clauses) 0)
+    (error "cond expects at least one clause")
+    (if (vector? (kvist/first clauses))
+      (let [clause (kvist/first clauses)]
+        (if (= (kvist/count clause) 0)
+          (error "cond expects vector clauses or test/body pairs")
+          (if (= (kvist/first clause) :else)
+            (if (= (kvist/count clauses) 1)
+              (cond-body (kvist/rest clause))
+              (error "cond :else must be the final clause"))
+            (if (= (kvist/count clauses) 1)
+              (quasiquote
+                (if (unquote (kvist/first clause))
+                  (unquote (cond-body (kvist/rest clause)))))
+              (quasiquote
+                (if (unquote (kvist/first clause))
+                  (unquote (cond-body (kvist/rest clause)))
+                  (cond-vectors (splice (kvist/rest clauses)))))))))
+      (error "cond expects vector clauses or test/body pairs"))))
+
 (defmacro cond
   "Evaluate test/expression clauses from left to right.
 
@@ -23,8 +77,13 @@
   fallback. The first truthy test selects its expression. This is a macro, not a
   runtime dispatcher, and lowers to ordinary conditional code."
   [& clauses]
-  (quasiquote
-    (kvist/core-cond (splice clauses))))
+  (if (= (kvist/count clauses) 0)
+    (error "cond expects at least one clause")
+    (if (vector? (kvist/first clauses))
+      (quasiquote
+        (cond-vectors (splice clauses)))
+      (quasiquote
+        (cond-pairs (splice clauses))))))
 
 (defmacro comment
   "Ignore all body forms at compile time.
@@ -42,7 +101,7 @@
   or dynamic dispatch."
   [value & clauses]
   (quasiquote
-    (kvist/core-switch (unquote value) (splice clauses))))
+    (core-switch (unquote value) (splice clauses))))
 
 (defmacro ->
   "Thread `value` through `steps` as the first argument.
@@ -52,7 +111,7 @@
   current value after the head. This is a compile-time rewrite."
   [value & steps]
   (quasiquote
-    (kvist/core-thread-first (unquote value) (splice steps))))
+    (core-thread-first (unquote value) (splice steps))))
 
 (defmacro ->>
   "Thread `value` through `steps` as the last argument.
@@ -62,7 +121,7 @@
   without creating intermediate function wrappers."
   [value & steps]
   (quasiquote
-    (kvist/core-thread-last (unquote value) (splice steps))))
+    (core-thread-last (unquote value) (splice steps))))
 
 (defmacro count
   "Return the size of a collection or string.
@@ -71,7 +130,7 @@
   direct Odin length operation. Strings are counted in bytes."
   [collection]
   (quasiquote
-    (kvist/core/count (unquote collection))))
+    (core-count (unquote collection))))
 
 (defmacro get
   "Index or look up `key` in `target`.
@@ -82,9 +141,9 @@
   [target key & rest]
   (if (= (kvist/count rest) 0)
     (quasiquote
-      (kvist/core/get (unquote target) (unquote key)))
+      (core-get (unquote target) (unquote key)))
     (quasiquote
-      (kvist/core/get (unquote target) (unquote key) (unquote (kvist/first rest))))))
+      (core-get (unquote target) (unquote key) (unquote (kvist/first rest))))))
 
 (defmacro slice
   "Return a slice view of `target`.
@@ -95,12 +154,12 @@
   [target & rest]
   (if (= (kvist/count rest) 0)
     (quasiquote
-      (kvist/core/slice (unquote target)))
+      (core-slice (unquote target)))
     (if (= (kvist/count rest) 1)
       (quasiquote
-        (kvist/core/slice (unquote target) (unquote (kvist/first rest))))
+        (core-slice (unquote target) (unquote (kvist/first rest))))
       (quasiquote
-        (kvist/core/slice (unquote target) (unquote (kvist/first rest)) (unquote (kvist/nth rest 1)))))))
+        (core-slice (unquote target) (unquote (kvist/first rest)) (unquote (kvist/nth rest 1)))))))
 
 (defmacro empty?
   "Return true when `collection` contains no elements.
@@ -109,7 +168,7 @@
   strings. It allocates nothing."
   [collection]
   (quasiquote
-    (kvist/core/empty? (unquote collection))))
+    (core-empty? (unquote collection))))
 
 (defmacro contains?
   "Return true when `collection` contains `key`.
@@ -119,7 +178,7 @@
   expression."
   [collection key]
   (quasiquote
-    (kvist/core/contains? (unquote collection) (unquote key))))
+    (core-contains? (unquote collection) (unquote key))))
 
 (defmacro in
   "Return true when `value` is present in `collection`.
@@ -128,7 +187,7 @@
   you need collection-specific behavior documented at the call site."
   [value collection]
   (quasiquote
-    (kvist/core-in (unquote value) (unquote collection))))
+    (core-in (unquote value) (unquote collection))))
 
 (defmacro not-in
   "Return true when `value` is absent from `collection`.
@@ -137,7 +196,7 @@
   code."
   [value collection]
   (quasiquote
-    (kvist/core-not-in (unquote value) (unquote collection))))
+    (core-not-in (unquote value) (unquote collection))))
 
 (defmacro when-let
   "Bind a value and boolean result, then run `body` when the boolean is true.
@@ -252,9 +311,9 @@
   [target key-or-field value-or-updater & rest]
   (if (= (kvist/count rest) 0)
     (quasiquote
-      (kvist/core-update! (unquote target) (unquote key-or-field) (unquote value-or-updater)))
+      (core-update! (unquote target) (unquote key-or-field) (unquote value-or-updater)))
     (quasiquote
-      (kvist/core-update! (unquote target)
+      (core-update! (unquote target)
                           (unquote key-or-field)
                           (unquote value-or-updater)
                           (splice rest)))))
@@ -268,9 +327,9 @@
   [target key-or-field value-or-updater & rest]
   (if (= (kvist/count rest) 0)
     (quasiquote
-      (kvist/core-update (unquote target) (unquote key-or-field) (unquote value-or-updater)))
+      (core-update (unquote target) (unquote key-or-field) (unquote value-or-updater)))
     (quasiquote
-      (kvist/core-update (unquote target)
+      (core-update (unquote target)
                          (unquote key-or-field)
                          (unquote value-or-updater)
                          (splice rest)))))
@@ -282,7 +341,7 @@
   otherwise `fallback` is returned. This expands to direct conditional code."
   [expr fallback]
   (quasiquote
-    (kvist/core-or-else (unquote expr) (unquote fallback))))
+    (core-or-else (unquote expr) (unquote fallback))))
 
 (defmacro doc
   "Print documentation for `name`.
@@ -292,7 +351,7 @@
   runtime reflection API."
   [name]
   (quasiquote
-    (kvist/core-doc (unquote name))))
+    (core-doc (unquote name))))
 
 (defmacro nil?
   "Return true when `value` is nil.
@@ -311,9 +370,9 @@
   [value & rest]
   (if (= (kvist/count rest) 0)
     (quasiquote
-      (kvist/core-tap (unquote value)))
+      (core-tap (unquote value)))
     (quasiquote
-      (kvist/core-tap (unquote value) (unquote (kvist/first rest))))))
+      (core-tap (unquote value) (unquote (kvist/first rest))))))
 
 (defmacro println
   "Print values followed by a newline.
@@ -322,4 +381,4 @@
   to Odin `fmt` output and requests the required import automatically."
   [& values]
   (quasiquote
-    (kvist/core-println (splice values))))
+    (core-println (splice values))))

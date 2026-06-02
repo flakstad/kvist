@@ -32,7 +32,7 @@
   any growth Odin needs for the set itself."
   [s value]
   (quasiquote
-    (kvist/set/add! (unquote s) (unquote value))))
+    (core/update! (unquote s) (unquote value) true)))
 
 (defmacro remove!
   "Remove `value` from set `s` in place.

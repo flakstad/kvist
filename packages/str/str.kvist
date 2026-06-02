@@ -13,9 +13,9 @@
   [s start & rest]
   (if (= (kvist/count rest) 0)
     (quasiquote
-      (kvist/str/slice (unquote s) (unquote start)))
+      (core/slice (unquote s) (unquote start)))
     (quasiquote
-      (kvist/str/slice (unquote s) (unquote start) (unquote (kvist/first rest))))))
+      (core/slice (unquote s) (unquote start) (unquote (kvist/first rest))))))
 
 (defmacro get
   "Return the byte at `index` from `s`.

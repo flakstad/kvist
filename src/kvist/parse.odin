@@ -194,7 +194,7 @@ parse_type_text :: proc(form: CST_Form) -> (text: string, err: Compile_Error, ok
             return "", Compile_Error{message = "unsupported type form", span = form.span}, false
         }
 
-        if is_symbol(form.items[0], "slice") || is_symbol(form.items[0], "core/slice") || is_symbol(form.items[0], "kvist/core/slice") {
+        if is_symbol(form.items[0], "slice") || is_symbol(form.items[0], "core/slice") || is_symbol(form.items[0], "core-slice") {
             if len(form.items) != 2 {
                 return "", Compile_Error{message = "slice type expects one element type", span = form.span}, false
             }
