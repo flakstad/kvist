@@ -2095,11 +2095,11 @@ emit_thread_step :: proc(e: ^Emitter, current: string, step: CST_Form, thread_la
             case "arr__remove":
                 head.text = "arr/remove"
             case "arr__map_indexed":
-                head.text = "arr/map-indexed"
+                head.text = "arr-map-indexed"
             case "arr__keep":
-                head.text = "arr/keep"
+                head.text = "arr-keep"
             case "arr__mapcat":
-                head.text = "arr/mapcat"
+                head.text = "arr-mapcat"
             }
         }
         if head.text == "tap>" {
@@ -2136,26 +2136,30 @@ emit_thread_step :: proc(e: ^Emitter, current: string, step: CST_Form, thread_la
             }
             return fmt.tprintf("len(%s) == 0", slice_all_expr_text(current)), {}, true
         }
-        if thread_last && (head.text == "arr/map" ||
-                           head.text == "arr/filter" ||
-                           head.text == "arr/remove") {
+        is_arr_map := head.text == "arr-map" || head.text == "arr/map"
+        is_arr_filter := head.text == "arr-filter" || head.text == "arr/filter"
+        is_arr_remove := head.text == "arr-remove" || head.text == "arr/remove"
+        if thread_last && (is_arr_map || is_arr_filter || is_arr_remove) {
             if len(step.items) != 2 {
                 return "", Compile_Error{message = fmt.tprintf("%s thread step expects one function argument", surface_head), span = step.span}, false
             }
             collection := slice_all_expr_text(current)
-            if head.text == "arr/map" {
+            if is_arr_map {
                 return emit_map_callback_call(e, step.items[1], collection)
             }
-            if head.text == "arr/remove" {
+            if is_arr_remove {
                 return emit_predicate_callback_call(e, "kvist_remove", step.items[1], collection, mark_core_remove, mark_core_remove_field)
             }
             return emit_predicate_callback_call(e, "kvist_filter", step.items[1], collection, mark_core_filter, mark_core_filter_field)
         }
-        if thread_last && (head.text == "arr/map-indexed" || head.text == "arr/keep" || head.text == "arr/mapcat") {
+        is_arr_map_indexed := head.text == "arr-map-indexed" || head.text == "arr/map-indexed"
+        is_arr_keep := head.text == "arr-keep" || head.text == "arr/keep"
+        is_arr_mapcat := head.text == "arr-mapcat" || head.text == "arr/mapcat"
+        if thread_last && (is_arr_map_indexed || is_arr_keep || is_arr_mapcat) {
             if len(step.items) != 2 {
                 return "", Compile_Error{message = fmt.tprintf("%s thread step expects one function argument", surface_head), span = step.span}, false
             }
-            if head.text == "arr/map-indexed" {
+            if is_arr_map_indexed {
                 f, err_f, ok_f := emit_expr(e, step.items[1])
                 if !ok_f {
                     return "", err_f, false
@@ -2163,7 +2167,7 @@ emit_thread_step :: proc(e: ^Emitter, current: string, step: CST_Form, thread_la
                 mark_core_map_indexed(e)
                 return emit_call_text("kvist_map_indexed", []string{f, slice_all_expr_text(current)}), {}, true
             }
-            if head.text == "arr/mapcat" {
+            if is_arr_mapcat {
                 f, err_f, ok_f := emit_expr(e, step.items[1])
                 if !ok_f {
                     return "", err_f, false
@@ -2240,7 +2244,7 @@ emit_thread_step :: proc(e: ^Emitter, current: string, step: CST_Form, thread_la
             mark_core_reverse(e)
             return emit_call_text("kvist_reverse", []string{slice_all_expr_text(current)}), {}, true
         }
-        if thread_last && head.text == "arr/shuffle" {
+        if thread_last && (head.text == "arr-shuffle" || head.text == "arr/shuffle") {
             if len(step.items) != 2 {
                 return "", Compile_Error{message = "shuffle thread step expects one picker function argument", span = step.span}, false
             }
@@ -2251,20 +2255,23 @@ emit_thread_step :: proc(e: ^Emitter, current: string, step: CST_Form, thread_la
             mark_core_shuffle(e)
             return emit_call_text("kvist_shuffle", []string{pick, slice_all_expr_text(current)}), {}, true
         }
-        if thread_last && head.text == "arr/sort" {
+        if thread_last && (head.text == "arr-sort" || head.text == "arr/sort") {
             if len(step.items) != 1 {
                 return "", Compile_Error{message = "sort thread step expects no arguments", span = step.span}, false
             }
             mark_core_sort(e)
             return emit_call_text("kvist_sort", []string{slice_all_expr_text(current)}), {}, true
         }
-        if thread_last && head.text == "arr/sort-by" {
+        if thread_last && (head.text == "arr-sort-by" || head.text == "arr/sort-by") {
             if len(step.items) != 2 {
                 return "", Compile_Error{message = "sort-by thread step expects one key function argument", span = step.span}, false
             }
             return emit_sort_by_callback_call(e, step.items[1], slice_all_expr_text(current))
         }
-        if thread_last && (head.text == "arr/split-at" || head.text == "arr/partition" || head.text == "arr/partition-all") {
+        is_arr_split_at := head.text == "arr-split-at" || head.text == "arr/split-at"
+        is_arr_partition := head.text == "arr-partition" || head.text == "arr/partition"
+        is_arr_partition_all := head.text == "arr-partition-all" || head.text == "arr/partition-all"
+        if thread_last && (is_arr_split_at || is_arr_partition || is_arr_partition_all) {
             if len(step.items) != 2 {
                 return "", Compile_Error{message = fmt.tprintf("%s thread step expects one count argument", surface_head), span = step.span}, false
             }
@@ -2272,18 +2279,18 @@ emit_thread_step :: proc(e: ^Emitter, current: string, step: CST_Form, thread_la
             if !ok_count {
                 return "", err_count, false
             }
-            if head.text == "arr/split-at" {
+            if is_arr_split_at {
                 mark_core_split_at(e)
                 return emit_call_text("kvist_split_at", []string{count, slice_all_expr_text(current)}), {}, true
             }
-            if head.text == "arr/partition" {
+            if is_arr_partition {
                 mark_core_partition(e)
                 return emit_call_text("kvist_partition", []string{count, slice_all_expr_text(current)}), {}, true
             }
             mark_core_partition_all(e)
             return emit_call_text("kvist_partition_all", []string{count, slice_all_expr_text(current)}), {}, true
         }
-        if thread_last && head.text == "arr/partition-by" {
+        if thread_last && (head.text == "arr-partition-by" || head.text == "arr/partition-by") {
             if len(step.items) != 2 {
                 return "", Compile_Error{message = "partition-by thread step expects one key function argument", span = step.span}, false
             }
@@ -2300,31 +2307,31 @@ emit_thread_step :: proc(e: ^Emitter, current: string, step: CST_Form, thread_la
             mark_core_zipmap(e)
             return emit_call_text("kvist_zipmap", []string{slice_all_expr_text(keys), slice_all_expr_text(current)}), {}, true
         }
-        if thread_last && head.text == "arr/index-by" {
+        if thread_last && (head.text == "arr-index-by" || head.text == "arr/index-by") {
             if len(step.items) != 2 {
                 return "", Compile_Error{message = "index-by thread step expects one key function argument", span = step.span}, false
             }
             return emit_index_by_callback_call(e, step.items[1], slice_all_expr_text(current))
         }
-        if thread_last && head.text == "arr/group-by" {
+        if thread_last && (head.text == "arr-group-by" || head.text == "arr/group-by") {
             if len(step.items) != 2 {
                 return "", Compile_Error{message = "group-by thread step expects one key function argument", span = step.span}, false
             }
             return emit_group_by_callback_call(e, step.items[1], slice_all_expr_text(current))
         }
-        if thread_last && head.text == "arr/count-by" {
+        if thread_last && (head.text == "arr-count-by" || head.text == "arr/count-by") {
             if len(step.items) != 2 {
                 return "", Compile_Error{message = "count-by thread step expects one key function argument", span = step.span}, false
             }
             return emit_count_by_callback_call(e, step.items[1], slice_all_expr_text(current))
         }
-        if thread_last && head.text == "arr/sum-by" {
+        if thread_last && (head.text == "arr-sum-by" || head.text == "arr/sum-by") {
             if len(step.items) != 3 {
                 return "", Compile_Error{message = "sum-by thread step expects key and value function arguments", span = step.span}, false
             }
             return emit_sum_by_callback_call(e, step.items[1], step.items[2], slice_all_expr_text(current))
         }
-        if thread_last && head.text == "arr/frequencies" {
+        if thread_last && (head.text == "arr-frequencies" || head.text == "arr/frequencies") {
             if len(step.items) != 1 {
                 return "", Compile_Error{message = "frequencies thread step expects no arguments", span = step.span}, false
             }
@@ -2343,14 +2350,14 @@ emit_thread_step :: proc(e: ^Emitter, current: string, step: CST_Form, thread_la
             mark_core_vals(e)
             return emit_call_text("kvist_vals", []string{current}), {}, true
         }
-        if thread_last && head.text == "arr/distinct" {
+        if thread_last && (head.text == "arr-distinct" || head.text == "arr/distinct") {
             if len(step.items) != 1 {
                 return "", Compile_Error{message = "distinct thread step expects no arguments", span = step.span}, false
             }
             mark_core_distinct(e)
             return emit_call_text("kvist_distinct", []string{slice_all_expr_text(current)}), {}, true
         }
-        if thread_last && head.text == "arr/distinct-by" {
+        if thread_last && (head.text == "arr-distinct-by" || head.text == "arr/distinct-by") {
             if len(step.items) != 2 {
                 return "", Compile_Error{message = "distinct-by thread step expects one key function argument", span = step.span}, false
             }
@@ -2427,21 +2434,26 @@ emit_thread_step :: proc(e: ^Emitter, current: string, step: CST_Form, thread_la
             mark_core_take_nth(e)
             return emit_call_text("kvist_take_nth", []string{count, slice_all_expr_text(current)}), {}, true
         }
-        if thread_last && (head.text == "arr/take-while" || head.text == "arr/drop-while" || head.text == "arr/find" || head.text == "arr/some?" || head.text == "arr/every?") {
+        is_arr_take_while := head.text == "arr-take-while" || head.text == "arr/take-while"
+        is_arr_drop_while := head.text == "arr-drop-while" || head.text == "arr/drop-while"
+        is_arr_find := head.text == "arr-find" || head.text == "arr/find"
+        is_arr_some := head.text == "arr-some?" || head.text == "arr/some?"
+        is_arr_every := head.text == "arr-every?" || head.text == "arr/every?"
+        if thread_last && (is_arr_take_while || is_arr_drop_while || is_arr_find || is_arr_some || is_arr_every) {
             if len(step.items) != 2 {
                 return "", Compile_Error{message = fmt.tprintf("%s thread step expects one predicate argument", surface_head), span = step.span}, false
             }
             collection := slice_all_expr_text(current)
-            if head.text == "arr/take-while" {
+            if is_arr_take_while {
                 return emit_predicate_callback_call(e, "kvist_take_while", step.items[1], collection, mark_core_take_while, mark_core_take_while_field)
             }
-            if head.text == "arr/drop-while" {
+            if is_arr_drop_while {
                 return emit_predicate_callback_call(e, "kvist_drop_while", step.items[1], collection, mark_core_drop_while, mark_core_drop_while_field)
             }
-            if head.text == "arr/find" {
+            if is_arr_find {
                 return emit_predicate_callback_call(e, "kvist_find", step.items[1], collection, mark_core_find, mark_core_find_field)
             }
-            if head.text == "arr/some?" {
+            if is_arr_some {
                 return emit_predicate_callback_call(e, "kvist_some_p", step.items[1], collection, mark_core_some, mark_core_some_field)
             }
             return emit_predicate_callback_call(e, "kvist_every_p", step.items[1], collection, mark_core_every, mark_core_every_field)
@@ -2575,20 +2587,22 @@ thread_step_result_kind :: proc(step: CST_Form, thread_last: bool) -> Thread_Res
         if head_name == "map/merge" {
             return .Owned
         }
-        if thread_last && (head_name == "arr/map" ||
-                           head_name == "arr/filter" ||
-                           head_name == "arr/remove" || head_name == "arr/map-indexed" ||
-                           head_name == "arr/keep" || head_name == "arr/mapcat" ||
+        if thread_last && (head_name == "arr/map" || head_name == "arr-map" ||
+                           head_name == "arr/filter" || head_name == "arr-filter" ||
+                           head_name == "arr/remove" || head_name == "arr-remove" || head_name == "arr/map-indexed" || head_name == "arr-map-indexed" ||
+                           head_name == "arr/keep" || head_name == "arr-keep" || head_name == "arr/mapcat" || head_name == "arr-mapcat" ||
                            head_name == "concat" || head_name == "arr/into" || head_name == "arr-into" ||
                            head_name == "arr/interpose" ||
                            head_name == "arr/interleave" ||
-                           head_name == "arr/reverse" || head_name == "arr/shuffle" ||
-                           head_name == "arr/sort" ||
-                           head_name == "arr/sort-by" ||
+                           head_name == "arr/reverse" || head_name == "arr/shuffle" || head_name == "arr-shuffle" ||
+                           head_name == "arr/sort" || head_name == "arr-sort" ||
+                           head_name == "arr/sort-by" || head_name == "arr-sort-by" ||
                            head_name == "map/zip" ||
-                           head_name == "arr/index-by" || head_name == "arr/group-by" ||
-                           head_name == "arr/count-by" || head_name == "arr/sum-by" ||
-                           head_name == "arr/frequencies" ||
+                           head_name == "arr/index-by" || head_name == "arr-index-by" ||
+                           head_name == "arr/group-by" || head_name == "arr-group-by" ||
+                           head_name == "arr/count-by" || head_name == "arr-count-by" ||
+                           head_name == "arr/sum-by" || head_name == "arr-sum-by" ||
+                           head_name == "arr/frequencies" || head_name == "arr-frequencies" ||
                            head_name == "map/keys" ||
                            head_name == "map/vals" ||
                            head_name == "set/union" ||
@@ -2596,8 +2610,8 @@ thread_step_result_kind :: proc(step: CST_Form, thread_last: bool) -> Thread_Res
                            head_name == "set/difference" ||
                            head_name == "set/add" ||
                            head_name == "set/remove" ||
-                           head_name == "arr/distinct" ||
-                           head_name == "arr/distinct-by" || head_name == "arr/cycle" ||
+                           head_name == "arr/distinct" || head_name == "arr-distinct" ||
+                           head_name == "arr/distinct-by" || head_name == "arr-distinct-by" || head_name == "arr/cycle" ||
                            head_name == "str/split" || head_name == "str-split" ||
                            head_name == "str/join" || head_name == "str-join" ||
                            head_name == "str/replace" || head_name == "str-replace" ||
@@ -2606,18 +2620,22 @@ thread_step_result_kind :: proc(step: CST_Form, thread_last: bool) -> Thread_Res
                            head_name == "arr/take-nth") {
             return .Owned
         }
-        if thread_last && (head_name == "arr/partition" || head_name == "arr/partition-all" || head_name == "arr/partition-by") {
+        if thread_last && (head_name == "arr/partition" || head_name == "arr-partition" ||
+                           head_name == "arr/partition-all" || head_name == "arr-partition-all" ||
+                           head_name == "arr/partition-by" || head_name == "arr-partition-by") {
             return .Owned_Borrowing
         }
         if thread_last && (head_name == "arr/take" || head_name == "arr/drop" ||
                            head_name == "arr/drop-last" || head_name == "arr/butlast" ||
-                           head_name == "arr/take-while" || head_name == "arr/drop-while" ||
+                           head_name == "arr/take-while" || head_name == "arr-take-while" ||
+                           head_name == "arr/drop-while" || head_name == "arr-drop-while" ||
                            head_name == "core/slice" || head_name == "arr/slice" || head_name == "arr/rest" ||
-                           head_name == "arr/split-at") {
+                           head_name == "arr/split-at" || head_name == "arr-split-at") {
             return .View
         }
-        if thread_last && (head_name == "arr/find" ||
-                           head_name == "arr/some?" || head_name == "arr/every?" ||
+        if thread_last && (head_name == "arr/find" || head_name == "arr-find" ||
+                           head_name == "arr/some?" || head_name == "arr-some?" ||
+                           head_name == "arr/every?" || head_name == "arr-every?" ||
                            head_name == "arr/first" ||
                            head_name == "arr/second" ||
                            head_name == "arr/last" || head_name == "arr/nth" ||
@@ -2714,14 +2732,17 @@ thread_return_error :: proc(form: CST_Form) -> (Compile_Error, bool) {
 owned_result_head :: proc(name: string) -> bool {
     normalized := normalize_builtin_collection_head(name)
     switch normalized {
-    case "arr/map", "arr/filter", "arr/remove", "arr/map-indexed", "arr/keep", "arr/mapcat",
-         "concat", "map/merge", "arr/reverse", "arr/sort", "arr/sort-by",
-         "arr/into", "arr-into", "arr/interpose", "arr/interleave", "arr/shuffle",
-         "arr/partition", "arr/partition-all", "arr/partition-by",
-         "map/zip", "arr/index-by", "arr/group-by", "arr/count-by", "arr/sum-by",
-         "arr/frequencies", "map/keys", "map/vals",
+    case "arr/map", "arr-map", "arr/filter", "arr-filter", "arr/remove", "arr-remove",
+         "arr/map-indexed", "arr-map-indexed", "arr/keep", "arr-keep", "arr/mapcat", "arr-mapcat",
+         "concat", "map/merge", "arr/reverse", "arr/sort", "arr-sort", "arr/sort-by", "arr-sort-by",
+         "arr/into", "arr-into", "arr/interpose", "arr/interleave", "arr/shuffle", "arr-shuffle",
+         "arr/partition", "arr-partition", "arr/partition-all", "arr-partition-all",
+         "arr/partition-by", "arr-partition-by",
+         "map/zip", "arr/index-by", "arr-index-by", "arr/group-by", "arr-group-by",
+         "arr/count-by", "arr-count-by", "arr/sum-by", "arr-sum-by",
+         "arr/frequencies", "arr-frequencies", "map/keys", "map/vals",
          "set/union", "set/intersection", "set/difference", "set/add", "set/remove",
-         "arr/distinct", "arr/distinct-by",
+         "arr/distinct", "arr-distinct", "arr/distinct-by", "arr-distinct-by",
          "arr/range", "arr/repeat", "arr/repeatedly", "arr/iterate", "arr/cycle", "arr/take-nth",
          "str/split", "str-split", "str/join", "str-join", "str/replace", "str-replace", "str/lower", "str/upper",
          "io/read":
@@ -5524,22 +5545,6 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         return emit_call_text(call_name, arg_texts[:]), {}, true
     }
 
-    if head.text == "str/contains?" {
-        if len(form.items) != 3 {
-            return "", Compile_Error{message = "str/contains? expects string and needle", span = form.span}, false
-        }
-        mark_core_strings(e)
-        target, err_target, ok_target := emit_expr(e, form.items[1])
-        if !ok_target {
-            return "", err_target, false
-        }
-        needle, err_needle, ok_needle := emit_expr(e, form.items[2])
-        if !ok_needle {
-            return "", err_needle, false
-        }
-        return emit_call_text("strings.contains", []string{target, needle}), {}, true
-    }
-
     if head.text == "str-split" || head.text == "str/split" {
         if len(form.items) != 3 {
             return "", Compile_Error{message = "str/split expects string and separator", span = form.span}, false
@@ -5572,78 +5577,6 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         return emit_call_text("strings.join", []string{slice_all_expr_text(items), separator}), {}, true
     }
 
-    if head.text == "str/trim" || head.text == "str/trim-prefix" || head.text == "str/trim-suffix" {
-        expected_len := 2
-        function_name := "strings.trim_space"
-        message := "str/trim expects string"
-        if head.text == "str/trim-prefix" {
-            expected_len = 3
-            function_name = "strings.trim_prefix"
-            message = "str/trim-prefix expects string and prefix"
-        } else if head.text == "str/trim-suffix" {
-            expected_len = 3
-            function_name = "strings.trim_suffix"
-            message = "str/trim-suffix expects string and suffix"
-        }
-        if len(form.items) != expected_len {
-            return "", Compile_Error{message = message, span = form.span}, false
-        }
-        mark_core_strings(e)
-        arg_texts: [dynamic]string
-        for arg in form.items[1:] {
-            arg_text, err_arg, ok_arg := emit_expr(e, arg)
-            if !ok_arg {
-                return "", err_arg, false
-            }
-            append(&arg_texts, arg_text)
-        }
-        return emit_call_text(function_name, arg_texts[:]), {}, true
-    }
-
-    if head.text == "str/starts-with?" || head.text == "str/ends-with?" {
-        message := "str/starts-with? expects string and prefix"
-        function_name := "strings.has_prefix"
-        if head.text == "str/ends-with?" {
-            message = "str/ends-with? expects string and suffix"
-            function_name = "strings.has_suffix"
-        }
-        if len(form.items) != 3 {
-            return "", Compile_Error{message = message, span = form.span}, false
-        }
-        mark_core_strings(e)
-        target, err_target, ok_target := emit_expr(e, form.items[1])
-        if !ok_target {
-            return "", err_target, false
-        }
-        suffix, err_suffix, ok_suffix := emit_expr(e, form.items[2])
-        if !ok_suffix {
-            return "", err_suffix, false
-        }
-        return emit_call_text(function_name, []string{target, suffix}), {}, true
-    }
-
-    if head.text == "str/index-of" || head.text == "str/last-index-of" {
-        message := "str/index-of expects string and needle"
-        function_name := "strings.index"
-        if head.text == "str/last-index-of" {
-            message = "str/last-index-of expects string and needle"
-            function_name = "strings.last_index"
-        }
-        if len(form.items) != 3 {
-            return "", Compile_Error{message = message, span = form.span}, false
-        }
-        mark_core_strings(e)
-        target, err_target, ok_target := emit_expr(e, form.items[1])
-        if !ok_target {
-            return "", err_target, false
-        }
-        needle, err_needle, ok_needle := emit_expr(e, form.items[2])
-        if !ok_needle {
-            return "", err_needle, false
-        }
-        return emit_call_text(function_name, []string{target, needle}), {}, true
-    }
-
     if head.text == "str-replace" || head.text == "str/replace" {
         if len(form.items) != 4 && len(form.items) != 5 {
             return "", Compile_Error{message = "str/replace expects string, old, new, and optional count", span = form.span}, false
@@ -5672,27 +5605,9 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         return emit_call_text("kvist_str_replace", []string{target, old_text, new_text, count_text}), {}, true
     }
 
-    if head.text == "str/lower" || head.text == "str/upper" {
-        message := "str/lower expects string"
-        function_name := "strings.to_lower"
-        if head.text == "str/upper" {
-            message = "str/upper expects string"
-            function_name = "strings.to_upper"
-        }
-        if len(form.items) != 2 {
-            return "", Compile_Error{message = message, span = form.span}, false
-        }
-        mark_core_strings(e)
-        target, err_target, ok_target := emit_expr(e, form.items[1])
-        if !ok_target {
-            return "", err_target, false
-        }
-        return emit_call_text(function_name, []string{target}), {}, true
-    }
-
-    if head.text == "map/contains?" || head.text == "set/contains?" {
+    if head.text == "map/contains?" {
         if len(form.items) != 3 {
-            return "", Compile_Error{message = fmt.tprintf("%s expects collection and key", head.text), span = form.span}, false
+            return "", Compile_Error{message = "map/contains? expects collection and key", span = form.span}, false
         }
         rewritten := form
         rewritten.items[0].text = "core-contains?"
@@ -5755,78 +5670,6 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
             return "", err_value, false
         }
         return emit_call_text("delete_key", []string{fmt.tprintf("&(%s)", target), value}), {}, true
-    }
-
-    if head.text == "set/union" || head.text == "set/intersection" || head.text == "set/difference" {
-        if len(form.items) != 3 {
-            return "", Compile_Error{message = fmt.tprintf("%s expects two sets", head.text), span = form.span}, false
-        }
-        lhs, err_lhs, ok_lhs := emit_expr(e, form.items[1])
-        if !ok_lhs {
-            return "", err_lhs, false
-        }
-        rhs, err_rhs, ok_rhs := emit_expr(e, form.items[2])
-        if !ok_rhs {
-            return "", err_rhs, false
-        }
-        helper_name := "kvist_set_union"
-        if head.text == "set/union" {
-            mark_core_set_union(e)
-        } else if head.text == "set/intersection" {
-            helper_name = "kvist_set_intersection"
-            mark_core_set_intersection(e)
-        } else {
-            helper_name = "kvist_set_difference"
-            mark_core_set_difference(e)
-        }
-        return emit_call_text(helper_name, []string{lhs, rhs}), {}, true
-    }
-
-    if head.text == "set/subset?" || head.text == "set/superset?" || head.text == "set/disjoint?" {
-        if len(form.items) != 3 {
-            return "", Compile_Error{message = fmt.tprintf("%s expects two sets", head.text), span = form.span}, false
-        }
-        lhs, err_lhs, ok_lhs := emit_expr(e, form.items[1])
-        if !ok_lhs {
-            return "", err_lhs, false
-        }
-        rhs, err_rhs, ok_rhs := emit_expr(e, form.items[2])
-        if !ok_rhs {
-            return "", err_rhs, false
-        }
-        helper_name := "kvist_set_subset"
-        if head.text == "set/subset?" {
-            mark_core_set_subset(e)
-        } else if head.text == "set/superset?" {
-            helper_name = "kvist_set_superset"
-            mark_core_set_superset(e)
-        } else {
-            helper_name = "kvist_set_disjoint"
-            mark_core_set_disjoint(e)
-        }
-        return emit_call_text(helper_name, []string{lhs, rhs}), {}, true
-    }
-
-    if head.text == "set/add" || head.text == "set/remove" {
-        if len(form.items) != 3 {
-            return "", Compile_Error{message = fmt.tprintf("%s expects set and value", head.text), span = form.span}, false
-        }
-        target, err_target, ok_target := emit_expr(e, form.items[1])
-        if !ok_target {
-            return "", err_target, false
-        }
-        value, err_value, ok_value := emit_expr(e, form.items[2])
-        if !ok_value {
-            return "", err_value, false
-        }
-        helper_name := "kvist_set_add"
-        if head.text == "set/add" {
-            mark_core_set_add(e)
-        } else {
-            helper_name = "kvist_set_remove"
-            mark_core_set_remove(e)
-        }
-        return emit_call_text(helper_name, []string{target, value}), {}, true
     }
 
     if head.text == "println" {
@@ -5914,9 +5757,10 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         return emit_call_text("kvist_tap_labeled", []string{label, value}), {}, true
     }
 
-    if head.text == "arr/map" ||
-       head.text == "arr/filter" ||
-       head.text == "arr/remove" {
+    is_arr_map := head.text == "arr-map" || head.text == "arr/map"
+    is_arr_filter := head.text == "arr-filter" || head.text == "arr/filter"
+    is_arr_remove := head.text == "arr-remove" || head.text == "arr/remove"
+    if is_arr_map || is_arr_filter || is_arr_remove {
         if len(form.items) != 3 {
             return "", Compile_Error{message = fmt.tprintf("%s expects function and collection", surface_head), span = form.span}, false
         }
@@ -5925,16 +5769,16 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
             return "", err_collection, false
         }
         collection = slice_all_expr_text(collection)
-        if head.text == "arr/map" {
+        if is_arr_map {
             return emit_map_callback_call(e, form.items[1], collection)
         }
-        if head.text == "arr/remove" {
+        if is_arr_remove {
             return emit_predicate_callback_call(e, "kvist_remove", form.items[1], collection, mark_core_remove, mark_core_remove_field)
         }
         return emit_predicate_callback_call(e, "kvist_filter", form.items[1], collection, mark_core_filter, mark_core_filter_field)
     }
 
-    if head.text == "arr/map!" {
+    if head.text == "arr-map!" || head.text == "arr/map!" {
         if len(form.items) != 3 {
             return "", Compile_Error{message = "map! expects function and collection", span = form.span}, false
         }
@@ -5959,7 +5803,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         return emit_call_text("kvist_map_in_place", []string{f, slice_all_expr_text(collection)}), {}, true
     }
 
-    if head.text == "arr/map-indexed!" {
+    if head.text == "arr-map-indexed!" || head.text == "arr/map-indexed!" {
         if len(form.items) != 3 {
             return "", Compile_Error{message = "map-indexed! expects function and collection", span = form.span}, false
         }
@@ -5975,7 +5819,9 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         return emit_call_text("kvist_map_indexed_in_place", []string{f, slice_all_expr_text(collection)}), {}, true
     }
 
-    if head.text == "arr/filter!" || head.text == "arr/remove!" {
+    is_arr_filter_in_place := head.text == "arr-filter!" || head.text == "arr/filter!"
+    is_arr_remove_in_place := head.text == "arr-remove!" || head.text == "arr/remove!"
+    if is_arr_filter_in_place || is_arr_remove_in_place {
         if len(form.items) != 3 {
             return "", Compile_Error{message = fmt.tprintf("%s expects predicate and dynamic array", surface_head), span = form.span}, false
         }
@@ -5983,13 +5829,16 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         if !ok_collection {
             return "", err_collection, false
         }
-        if head.text == "arr/remove!" {
+        if is_arr_remove_in_place {
             return emit_dynamic_predicate_in_place_callback_call(e, "kvist_remove_in_place", form.items[1], collection, mark_core_remove_in_place, mark_core_remove_in_place_field)
         }
         return emit_dynamic_predicate_in_place_callback_call(e, "kvist_filter_in_place", form.items[1], collection, mark_core_filter_in_place, mark_core_filter_in_place_field)
     }
 
-    if head.text == "arr/map-indexed" || head.text == "arr/keep" || head.text == "arr/mapcat" {
+    is_arr_map_indexed := head.text == "arr-map-indexed" || head.text == "arr/map-indexed"
+    is_arr_keep := head.text == "arr-keep" || head.text == "arr/keep"
+    is_arr_mapcat := head.text == "arr-mapcat" || head.text == "arr/mapcat"
+    if is_arr_map_indexed || is_arr_keep || is_arr_mapcat {
         if len(form.items) != 3 {
             return "", Compile_Error{message = fmt.tprintf("%s expects function and collection", surface_head), span = form.span}, false
         }
@@ -5999,7 +5848,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
             return "", err_collection, false
         }
         collection = slice_all_expr_text(collection)
-        if head.text == "arr/map-indexed" {
+        if is_arr_map_indexed {
             f, err_f, ok_f := emit_expr(e, callback)
             if !ok_f {
                 return "", err_f, false
@@ -6007,7 +5856,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
             mark_core_map_indexed(e)
             return emit_call_text("kvist_map_indexed", []string{f, collection}), {}, true
         }
-        if head.text == "arr/mapcat" {
+        if is_arr_mapcat {
             f, err_f, ok_f := emit_expr(e, callback)
             if !ok_f {
                 return "", err_f, false
@@ -6031,7 +5880,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         return emit_call_text("kvist_keep", []string{f, collection}), {}, true
     }
 
-    if head.text == "arr/keep!" {
+    if head.text == "arr-keep!" || head.text == "arr/keep!" {
         if len(form.items) != 3 {
             return "", Compile_Error{message = "keep! expects function and dynamic array", span = form.span}, false
         }
@@ -6214,7 +6063,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         return emit_call_text("kvist_reverse", []string{slice_all_expr_text(collection)}), {}, true
     }
 
-    if head.text == "arr/shuffle" {
+    if head.text == "arr-shuffle" || head.text == "arr/shuffle" {
         if len(form.items) != 3 {
             return "", Compile_Error{message = "shuffle expects picker function and collection", span = form.span}, false
         }
@@ -6230,7 +6079,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         return emit_call_text("kvist_shuffle", []string{pick, slice_all_expr_text(collection)}), {}, true
     }
 
-    if head.text == "arr/reverse!" {
+    if head.text == "arr-reverse!" || head.text == "arr/reverse!" {
         if len(form.items) != 2 {
             return "", Compile_Error{message = "reverse! expects collection", span = form.span}, false
         }
@@ -6242,7 +6091,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         return emit_call_text("kvist_reverse_in_place", []string{slice_all_expr_text(collection)}), {}, true
     }
 
-    if head.text == "arr/shuffle!" {
+    if head.text == "arr-shuffle!" || head.text == "arr/shuffle!" {
         if len(form.items) != 3 {
             return "", Compile_Error{message = "shuffle! expects picker function and collection", span = form.span}, false
         }
@@ -6258,7 +6107,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         return emit_call_text("kvist_shuffle_in_place", []string{pick, slice_all_expr_text(collection)}), {}, true
     }
 
-    if head.text == "arr/sort" {
+    if head.text == "arr-sort" || head.text == "arr/sort" {
         if len(form.items) != 2 {
             return "", Compile_Error{message = "sort expects collection", span = form.span}, false
         }
@@ -6270,7 +6119,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         return emit_call_text("kvist_sort", []string{slice_all_expr_text(collection)}), {}, true
     }
 
-    if head.text == "arr/sort!" {
+    if head.text == "arr-sort!" || head.text == "arr/sort!" {
         if len(form.items) != 2 {
             return "", Compile_Error{message = "sort! expects collection", span = form.span}, false
         }
@@ -6282,7 +6131,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         return emit_call_text("kvist_sort_in_place", []string{slice_all_expr_text(collection)}), {}, true
     }
 
-    if head.text == "arr/sort-by" {
+    if head.text == "arr-sort-by" || head.text == "arr/sort-by" {
         if len(form.items) != 3 {
             return "", Compile_Error{message = "sort-by expects key function and collection", span = form.span}, false
         }
@@ -6293,7 +6142,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         return emit_sort_by_callback_call(e, form.items[1], slice_all_expr_text(collection))
     }
 
-    if head.text == "arr/sort-by!" {
+    if head.text == "arr-sort-by!" || head.text == "arr/sort-by!" {
         if len(form.items) != 3 {
             return "", Compile_Error{message = "sort-by! expects key function and collection", span = form.span}, false
         }
@@ -6304,7 +6153,10 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         return emit_sort_by_in_place_callback_call(e, form.items[1], slice_all_expr_text(collection))
     }
 
-    if head.text == "arr/split-at" || head.text == "arr/partition" || head.text == "arr/partition-all" {
+    is_arr_split_at := head.text == "arr-split-at" || head.text == "arr/split-at"
+    is_arr_partition := head.text == "arr-partition" || head.text == "arr/partition"
+    is_arr_partition_all := head.text == "arr-partition-all" || head.text == "arr/partition-all"
+    if is_arr_split_at || is_arr_partition || is_arr_partition_all {
         if len(form.items) != 3 {
             return "", Compile_Error{message = fmt.tprintf("%s expects count and collection", surface_head), span = form.span}, false
         }
@@ -6317,11 +6169,11 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
             return "", err_collection, false
         }
         collection = slice_all_expr_text(collection)
-        if head.text == "arr/split-at" {
+        if is_arr_split_at {
             mark_core_split_at(e)
             return emit_call_text("kvist_split_at", []string{count, collection}), {}, true
         }
-        if head.text == "arr/partition" {
+        if is_arr_partition {
             mark_core_partition(e)
             return emit_call_text("kvist_partition", []string{count, collection}), {}, true
         }
@@ -6329,7 +6181,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         return emit_call_text("kvist_partition_all", []string{count, collection}), {}, true
     }
 
-    if head.text == "arr/partition-by" {
+    if head.text == "arr-partition-by" || head.text == "arr/partition-by" {
         if len(form.items) != 3 {
             return "", Compile_Error{message = "partition-by expects key function and collection", span = form.span}, false
         }
@@ -6356,7 +6208,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         return emit_call_text("kvist_zipmap", []string{slice_all_expr_text(keys), slice_all_expr_text(values)}), {}, true
     }
 
-    if head.text == "arr/index-by" {
+    if head.text == "arr-index-by" || head.text == "arr/index-by" {
         if len(form.items) != 3 {
             return "", Compile_Error{message = "index-by expects key function and collection", span = form.span}, false
         }
@@ -6367,7 +6219,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         return emit_index_by_callback_call(e, form.items[1], slice_all_expr_text(collection))
     }
 
-    if head.text == "arr/group-by" {
+    if head.text == "arr-group-by" || head.text == "arr/group-by" {
         if len(form.items) != 3 {
             return "", Compile_Error{message = "group-by expects key function and collection", span = form.span}, false
         }
@@ -6378,7 +6230,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         return emit_group_by_callback_call(e, form.items[1], slice_all_expr_text(collection))
     }
 
-    if head.text == "arr/count-by" {
+    if head.text == "arr-count-by" || head.text == "arr/count-by" {
         if len(form.items) != 3 {
             return "", Compile_Error{message = "count-by expects key function and collection", span = form.span}, false
         }
@@ -6389,7 +6241,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         return emit_count_by_callback_call(e, form.items[1], slice_all_expr_text(collection))
     }
 
-    if head.text == "arr/sum-by" {
+    if head.text == "arr-sum-by" || head.text == "arr/sum-by" {
         if len(form.items) != 4 {
             return "", Compile_Error{message = "sum-by expects key function, value function, and collection", span = form.span}, false
         }
@@ -6400,7 +6252,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         return emit_sum_by_callback_call(e, form.items[1], form.items[2], slice_all_expr_text(collection))
     }
 
-    if head.text == "arr/frequencies" {
+    if head.text == "arr-frequencies" || head.text == "arr/frequencies" {
         if len(form.items) != 2 {
             return "", Compile_Error{message = "frequencies expects collection", span = form.span}, false
         }
@@ -6412,7 +6264,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         return emit_call_text("kvist_frequencies", []string{slice_all_expr_text(collection)}), {}, true
     }
 
-    if head.text == "arr/distinct" {
+    if head.text == "arr-distinct" || head.text == "arr/distinct" {
         if len(form.items) != 2 {
             return "", Compile_Error{message = "distinct expects collection", span = form.span}, false
         }
@@ -6424,7 +6276,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         return emit_call_text("kvist_distinct", []string{slice_all_expr_text(collection)}), {}, true
     }
 
-    if head.text == "arr/distinct-by" {
+    if head.text == "arr-distinct-by" || head.text == "arr/distinct-by" {
         if len(form.items) != 3 {
             return "", Compile_Error{message = "distinct-by expects key function and collection", span = form.span}, false
         }
@@ -6632,7 +6484,12 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         return emit_call_text("kvist_take_nth", []string{count, slice_all_expr_text(collection)}), {}, true
     }
 
-    if head.text == "arr/take-while" || head.text == "arr/drop-while" || head.text == "arr/find" || head.text == "arr/some?" || head.text == "arr/every?" {
+    is_arr_take_while := head.text == "arr-take-while" || head.text == "arr/take-while"
+    is_arr_drop_while := head.text == "arr-drop-while" || head.text == "arr/drop-while"
+    is_arr_find := head.text == "arr-find" || head.text == "arr/find"
+    is_arr_some := head.text == "arr-some?" || head.text == "arr/some?"
+    is_arr_every := head.text == "arr-every?" || head.text == "arr/every?"
+    if is_arr_take_while || is_arr_drop_while || is_arr_find || is_arr_some || is_arr_every {
         if len(form.items) != 3 {
             return "", Compile_Error{message = fmt.tprintf("%s expects predicate and collection", surface_head), span = form.span}, false
         }
@@ -6641,16 +6498,16 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
             return "", err_collection, false
         }
         collection = slice_all_expr_text(collection)
-        if head.text == "arr/take-while" {
+        if is_arr_take_while {
             return emit_predicate_callback_call(e, "kvist_take_while", form.items[1], collection, mark_core_take_while, mark_core_take_while_field)
         }
-        if head.text == "arr/drop-while" {
+        if is_arr_drop_while {
             return emit_predicate_callback_call(e, "kvist_drop_while", form.items[1], collection, mark_core_drop_while, mark_core_drop_while_field)
         }
-        if head.text == "arr/find" {
+        if is_arr_find {
             return emit_predicate_callback_call(e, "kvist_find", form.items[1], collection, mark_core_find, mark_core_find_field)
         }
-        if head.text == "arr/some?" {
+        if is_arr_some {
             return emit_predicate_callback_call(e, "kvist_some_p", form.items[1], collection, mark_core_some, mark_core_some_field)
         }
         return emit_predicate_callback_call(e, "kvist_every_p", form.items[1], collection, mark_core_every, mark_core_every_field)

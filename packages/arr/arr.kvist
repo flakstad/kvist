@@ -20,7 +20,7 @@
   [f xs]
   (if (keyword? f)
     (quasiquote
-      (kvist/arr/map (unquote f) (unquote xs)))
+      (arr-map (unquote f) (unquote xs)))
     (quasiquote
       (map-impl (unquote f) (core/slice (unquote xs) 0)))))
 
@@ -32,7 +32,7 @@
   [pred xs]
   (if (keyword? pred)
     (quasiquote
-      (kvist/arr/filter (unquote pred) (unquote xs)))
+      (arr-filter (unquote pred) (unquote xs)))
     (quasiquote
       (filter-impl (unquote pred) (core/slice (unquote xs) 0)))))
 
@@ -44,7 +44,7 @@
   [pred xs]
   (if (keyword? pred)
     (quasiquote
-      (kvist/arr/remove (unquote pred) (unquote xs)))
+      (arr-remove (unquote pred) (unquote xs)))
     (quasiquote
       (remove-impl (unquote pred) (core/slice (unquote xs) 0)))))
 
@@ -96,7 +96,7 @@
   mutated, and the result is allocated with capacity based on the input count."
   [f xs]
   (quasiquote
-    (kvist/arr/map-indexed (unquote f) (unquote xs))))
+    (arr-map-indexed (unquote f) (unquote xs))))
 
 (defmacro keep
   "Map each element with `f` and keep only successful results.
@@ -105,7 +105,7 @@
   to a newly allocated dynamic array; false results are skipped."
   [f xs]
   (quasiquote
-    (kvist/arr/keep (unquote f) (unquote xs))))
+    (arr-keep (unquote f) (unquote xs))))
 
 (defmacro mapcat
   "Map each element to a slice and concatenate the slices.
@@ -115,7 +115,7 @@
   in order."
   [f xs]
   (quasiquote
-    (kvist/arr/mapcat (unquote f) (unquote xs))))
+    (arr-mapcat (unquote f) (unquote xs))))
 
 (defmacro push!
   "Append one or more `values` to dynamic array `xs` in place.
@@ -133,7 +133,7 @@
   output element type is the same as the input element type."
   [f xs]
   (quasiquote
-    (kvist/arr/map! (unquote f) (unquote xs))))
+    (arr-map! (unquote f) (unquote xs))))
 
 (defmacro map-indexed!
   "Replace each element of dynamic array `xs` with `(f x i)`.
@@ -142,7 +142,7 @@
   is mutated in place."
   [f xs]
   (quasiquote
-    (kvist/arr/map-indexed! (unquote f) (unquote xs))))
+    (arr-map-indexed! (unquote f) (unquote xs))))
 
 (defmacro filter!
   "Remove elements from `xs` in place when `pred` is false.
@@ -151,7 +151,7 @@
   replacement array."
   [pred xs]
   (quasiquote
-    (kvist/arr/filter! (unquote pred) (unquote xs))))
+    (arr-filter! (unquote pred) (unquote xs))))
 
 (defmacro remove!
   "Remove elements from `xs` in place when `pred` is true.
@@ -160,7 +160,7 @@
   replacement array."
   [pred xs]
   (quasiquote
-    (kvist/arr/remove! (unquote pred) (unquote xs))))
+    (arr-remove! (unquote pred) (unquote xs))))
 
 (proc remove-ordered-at
   "Return a new dynamic array with the element at `index` removed.
@@ -212,7 +212,7 @@
   of the array; unsuccessful values are dropped."
   [f xs]
   (quasiquote
-    (kvist/arr/keep! (unquote f) (unquote xs))))
+    (arr-keep! (unquote f) (unquote xs))))
 
 (defmacro into
   "Copy `xs` into a new array value of `out-type`.
@@ -313,7 +313,7 @@
   This mutates the existing array and does not allocate a replacement array."
   [xs]
   (quasiquote
-    (kvist/arr/reverse! (unquote xs))))
+    (arr-reverse! (unquote xs))))
 
 (defmacro shuffle
   "Return a shuffled copy of `xs`.
@@ -322,7 +322,7 @@
   not mutated; the result is a newly allocated dynamic array."
   [pick xs]
   (quasiquote
-    (kvist/arr/shuffle (unquote pick) (unquote xs))))
+    (arr-shuffle (unquote pick) (unquote xs))))
 
 (defmacro shuffle!
   "Shuffle dynamic array `xs` in place.
@@ -331,7 +331,7 @@
   array is mutated without allocating a replacement array."
   [pick xs]
   (quasiquote
-    (kvist/arr/shuffle! (unquote pick) (unquote xs))))
+    (arr-shuffle! (unquote pick) (unquote xs))))
 
 (defmacro get
   "Return the element at `index` in `xs`.
@@ -423,7 +423,7 @@
   and the suffix from `n`. Elements are not copied."
   [n xs]
   (quasiquote
-    (kvist/arr/split-at (unquote n) (unquote xs))))
+    (arr-split-at (unquote n) (unquote xs))))
 
 (defmacro partition
   "Return non-overlapping groups of exactly `n` elements from `xs`.
@@ -432,7 +432,7 @@
   over the input where possible."
   [n xs]
   (quasiquote
-    (kvist/arr/partition (unquote n) (unquote xs))))
+    (arr-partition (unquote n) (unquote xs))))
 
 (defmacro partition-all
   "Return non-overlapping groups of up to `n` elements from `xs`.
@@ -440,7 +440,7 @@
   Unlike `arr/partition`, the final short group is included."
   [n xs]
   (quasiquote
-    (kvist/arr/partition-all (unquote n) (unquote xs))))
+    (arr-partition-all (unquote n) (unquote xs))))
 
 (defmacro partition-by
   "Partition `xs` each time key function `f` returns a new key.
@@ -449,7 +449,7 @@
   order."
   [f xs]
   (quasiquote
-    (kvist/arr/partition-by (unquote f) (unquote xs))))
+    (arr-partition-by (unquote f) (unquote xs))))
 
 (defmacro index-by
   "Return a map from `(f x)` to `x` for each element in `xs`.
@@ -458,7 +458,7 @@
   newly allocated map."
   [f xs]
   (quasiquote
-    (kvist/arr/index-by (unquote f) (unquote xs))))
+    (arr-index-by (unquote f) (unquote xs))))
 
 (defmacro group-by
   "Return a map from `(f x)` to a dynamic array of matching elements.
@@ -467,7 +467,7 @@
   group arrays are newly allocated."
   [f xs]
   (quasiquote
-    (kvist/arr/group-by (unquote f) (unquote xs))))
+    (arr-group-by (unquote f) (unquote xs))))
 
 (defmacro count-by
   "Return a map counting how many elements produce each key from `f`.
@@ -476,7 +476,7 @@
   the input."
   [f xs]
   (quasiquote
-    (kvist/arr/count-by (unquote f) (unquote xs))))
+    (arr-count-by (unquote f) (unquote xs))))
 
 (defmacro sum-by
   "Return a map summing `(value-f x)` for each key `(key-f x)`.
@@ -485,7 +485,7 @@
   zero value of the value type."
   [key-f value-f xs]
   (quasiquote
-    (kvist/arr/sum-by (unquote key-f) (unquote value-f) (unquote xs))))
+    (arr-sum-by (unquote key-f) (unquote value-f) (unquote xs))))
 
 (defmacro frequencies
   "Return a map from each distinct element in `xs` to its count.
@@ -493,7 +493,7 @@
   This is equivalent to counting by identity and allocates a map for the result."
   [xs]
   (quasiquote
-    (kvist/arr/frequencies (unquote xs))))
+    (arr-frequencies (unquote xs))))
 
 (defmacro distinct
   "Return the distinct values from `xs` in first-seen order.
@@ -502,7 +502,7 @@
   track values already emitted."
   [xs]
   (quasiquote
-    (kvist/arr/distinct (unquote xs))))
+    (arr-distinct (unquote xs))))
 
 (defmacro distinct-by
   "Return elements whose key `(f x)` has not been seen before.
@@ -511,7 +511,7 @@
   are skipped. Output order follows the input."
   [f xs]
   (quasiquote
-    (kvist/arr/distinct-by (unquote f) (unquote xs))))
+    (arr-distinct-by (unquote f) (unquote xs))))
 
 (defmacro sort
   "Return a sorted copy of `xs`.
@@ -520,7 +520,7 @@
   operations and allocates a dynamic array copy before sorting."
   [xs]
   (quasiquote
-    (kvist/arr/sort (unquote xs))))
+    (arr-sort (unquote xs))))
 
 (defmacro sort!
   "Sort dynamic array `xs` in place.
@@ -528,7 +528,7 @@
   This mutates the existing array and does not allocate a replacement array."
   [xs]
   (quasiquote
-    (kvist/arr/sort! (unquote xs))))
+    (arr-sort! (unquote xs))))
 
 (defmacro sort-by
   "Return a sorted copy of `xs` ordered by key function `f`.
@@ -537,7 +537,7 @@
   sort-by comparisons."
   [f xs]
   (quasiquote
-    (kvist/arr/sort-by (unquote f) (unquote xs))))
+    (arr-sort-by (unquote f) (unquote xs))))
 
 (defmacro sort-by!
   "Sort dynamic array `xs` in place using key function `f`.
@@ -545,7 +545,7 @@
   This mutates the existing array and does not allocate a replacement array."
   [f xs]
   (quasiquote
-    (kvist/arr/sort-by! (unquote f) (unquote xs))))
+    (arr-sort-by! (unquote f) (unquote xs))))
 
 (defmacro butlast
   "Return a slice view of `xs` without its last element.
@@ -729,7 +729,7 @@
   [pred xs]
   (if (keyword? pred)
     (quasiquote
-      (kvist/arr/take-while (unquote pred) (unquote xs)))
+      (arr-take-while (unquote pred) (unquote xs)))
     (quasiquote
       (take-while-impl (unquote pred) (core/slice (unquote xs) 0)))))
 
@@ -741,7 +741,7 @@
   [pred xs]
   (if (keyword? pred)
     (quasiquote
-      (kvist/arr/drop-while (unquote pred) (unquote xs)))
+      (arr-drop-while (unquote pred) (unquote xs)))
     (quasiquote
       (drop-while-impl (unquote pred) (core/slice (unquote xs) 0)))))
 
@@ -753,7 +753,7 @@
   [pred xs]
   (if (keyword? pred)
     (quasiquote
-      (kvist/arr/some? (unquote pred) (unquote xs)))
+      (arr-some? (unquote pred) (unquote xs)))
     (quasiquote
       (some-impl (unquote pred) (core/slice (unquote xs) 0)))))
 
@@ -765,7 +765,7 @@
   [pred xs]
   (if (keyword? pred)
     (quasiquote
-      (kvist/arr/every? (unquote pred) (unquote xs)))
+      (arr-every? (unquote pred) (unquote xs)))
     (quasiquote
       (every-impl (unquote pred) (core/slice (unquote xs) 0)))))
 
@@ -777,7 +777,7 @@
   [pred xs]
   (if (keyword? pred)
     (quasiquote
-      (kvist/arr/find (unquote pred) (unquote xs)))
+      (arr-find (unquote pred) (unquote xs)))
     (quasiquote
       (find-impl (unquote pred) (core/slice (unquote xs) 0)))))
 

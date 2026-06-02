@@ -8514,6 +8514,7 @@ compile_warns_for_discarded_owned_result :: proc(t: ^testing.T) {
 @(test)
 compile_string_package_helpers :: proc(t: ^testing.T) {
     source := `(package main)
+(import str "kvist:str")
 
 (defn demo []
   (let [name "  Kvist Core  "
@@ -8549,17 +8550,23 @@ compile_string_package_helpers :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "import strings \"core:strings\""), true)
     testing.expect_value(t, strings.contains(output, "parts := strings.split(\"a,b,c\", \",\")"), true)
     testing.expect_value(t, strings.contains(output, "joined := strings.join((parts)[:], \"-\")"), true)
-    testing.expect_value(t, strings.contains(output, "trimmed := strings.trim_space(name)"), true)
-    testing.expect_value(t, strings.contains(output, "without_prefix := strings.trim_prefix(\"kvist/core\", \"kvist/\")"), true)
-    testing.expect_value(t, strings.contains(output, "without_suffix := strings.trim_suffix(\"kvist.txt\", \".txt\")"), true)
-    testing.expect_value(t, strings.contains(output, "starts_p := strings.has_prefix(without_prefix, \"co\")"), true)
-    testing.expect_value(t, strings.contains(output, "ends_p := strings.has_suffix(without_suffix, \"st\")"), true)
-    testing.expect_value(t, strings.contains(output, "first_dash := strings.index(joined, \"-\")"), true)
-    testing.expect_value(t, strings.contains(output, "last_dash := strings.last_index(joined, \"-\")"), true)
+    testing.expect_value(t, strings.contains(output, "str__trim :: #force_inline proc(s: string) -> string {"), true)
+    testing.expect_value(t, strings.contains(output, "return strings.trim_space(s)"), true)
+    testing.expect_value(t, strings.contains(output, "str__starts_with_p :: #force_inline proc(s, prefix: string) -> bool {"), true)
+    testing.expect_value(t, strings.contains(output, "return strings.has_prefix(s, prefix)"), true)
+    testing.expect_value(t, strings.contains(output, "trimmed := str__trim(name)"), true)
+    testing.expect_value(t, strings.contains(output, "without_prefix := str__trim_prefix(\"kvist/core\", \"kvist/\")"), true)
+    testing.expect_value(t, strings.contains(output, "without_suffix := str__trim_suffix(\"kvist.txt\", \".txt\")"), true)
+    testing.expect_value(t, strings.contains(output, "starts_p := str__starts_with_p(without_prefix, \"co\")"), true)
+    testing.expect_value(t, strings.contains(output, "ends_p := str__ends_with_p(without_suffix, \"st\")"), true)
+    testing.expect_value(t, strings.contains(output, "first_dash := str__index_of(joined, \"-\")"), true)
+    testing.expect_value(t, strings.contains(output, "last_dash := str__last_index_of(joined, \"-\")"), true)
     testing.expect_value(t, strings.contains(output, "replaced_all := kvist_str_replace(joined, \"-\", \"_\", -1)"), true)
     testing.expect_value(t, strings.contains(output, "replaced_one := kvist_str_replace(joined, \"-\", \"_\", 1)"), true)
-    testing.expect_value(t, strings.contains(output, "lowered := strings.to_lower(replaced_all)"), true)
-    testing.expect_value(t, strings.contains(output, "uppered := strings.to_upper(lowered)"), true)
+    testing.expect_value(t, strings.contains(output, "str__lower :: #force_inline proc(s: string) -> string {"), true)
+    testing.expect_value(t, strings.contains(output, "return strings.to_lower(s)"), true)
+    testing.expect_value(t, strings.contains(output, "lowered := str__lower(replaced_all)"), true)
+    testing.expect_value(t, strings.contains(output, "uppered := str__upper(lowered)"), true)
     testing.expect_value(t, strings.contains(output, "kvist_str_replace :: proc(s, old, new: string, n: int) -> string"), true)
 }
 
@@ -8988,6 +8995,7 @@ compile_shipped_arr_source_package_uses_hybrid_resolution :: proc(t: ^testing.T)
 @(test)
 compile_set_package_helpers :: proc(t: ^testing.T) {
     source := `(package main)
+(import set "kvist:set")
 
 (defn demo []
   (let [base (set/of int [1 2 3])
@@ -9021,29 +9029,34 @@ compile_set_package_helpers :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    testing.expect_value(t, strings.contains(output, "merged := kvist_set_union(base, extra)"), true)
-    testing.expect_value(t, strings.contains(output, "overlap := kvist_set_intersection(base, extra)"), true)
-    testing.expect_value(t, strings.contains(output, "only_base := kvist_set_difference(base, extra)"), true)
-    testing.expect_value(t, strings.contains(output, "bigger := kvist_set_add(base, 9)"), true)
-    testing.expect_value(t, strings.contains(output, "smaller := kvist_set_remove(bigger, 2)"), true)
-    testing.expect_value(t, strings.contains(output, "subset_p := kvist_set_subset(overlap, merged)"), true)
-    testing.expect_value(t, strings.contains(output, "superset_p := kvist_set_superset(merged, overlap)"), true)
-    testing.expect_value(t, strings.contains(output, "disjoint_p := kvist_set_disjoint(only_base, extra)"), true)
+    testing.expect_value(t, strings.contains(output, "set__union :: #force_inline proc(lhs, rhs: map[$T]bool) -> map[T]bool {"), true)
+    testing.expect_value(t, strings.contains(output, "set__intersection :: #force_inline proc(lhs, rhs: map[$T]bool) -> map[T]bool {"), true)
+    testing.expect_value(t, strings.contains(output, "set__difference :: #force_inline proc(lhs, rhs: map[$T]bool) -> map[T]bool {"), true)
+    testing.expect_value(t, strings.contains(output, "set__subset_p :: #force_inline proc(lhs, rhs: map[$T]bool) -> bool {"), true)
+    testing.expect_value(t, strings.contains(output, "set__superset_p :: #force_inline proc(lhs, rhs: map[$T]bool) -> bool {"), true)
+    testing.expect_value(t, strings.contains(output, "set__disjoint_p :: #force_inline proc(lhs, rhs: map[$T]bool) -> bool {"), true)
+    testing.expect_value(t, strings.contains(output, "set__add :: #force_inline proc(s: map[$T]bool, value: T) -> map[T]bool {"), true)
+    testing.expect_value(t, strings.contains(output, "set__remove :: #force_inline proc(s: map[$T]bool, value: T) -> map[T]bool {"), true)
+    testing.expect_value(t, strings.contains(output, "out := make(map[T]bool, (len(lhs)) + (len(rhs)))"), true)
+    testing.expect_value(t, strings.contains(output, "out := make(map[T]bool, cap)"), true)
+    testing.expect_value(t, strings.contains(output, "merged := set__union(base, extra)"), true)
+    testing.expect_value(t, strings.contains(output, "overlap := set__intersection(base, extra)"), true)
+    testing.expect_value(t, strings.contains(output, "only_base := set__difference(base, extra)"), true)
+    testing.expect_value(t, strings.contains(output, "bigger := set__add(base, 9)"), true)
+    testing.expect_value(t, strings.contains(output, "smaller := set__remove(bigger, 2)"), true)
+    testing.expect_value(t, strings.contains(output, "subset_p := set__subset_p(overlap, merged)"), true)
+    testing.expect_value(t, strings.contains(output, "superset_p := set__superset_p(merged, overlap)"), true)
+    testing.expect_value(t, strings.contains(output, "disjoint_p := set__disjoint_p(only_base, extra)"), true)
     testing.expect_value(t, strings.contains(output, "(mutable)[4] = true"), true)
     testing.expect_value(t, strings.contains(output, "delete_key(&(mutable), 1)"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_set_union :: proc(lhs, rhs: map[$T]bool) -> map[T]bool"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_set_intersection :: proc(lhs, rhs: map[$T]bool) -> map[T]bool"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_set_difference :: proc(lhs, rhs: map[$T]bool) -> map[T]bool"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_set_subset :: proc(lhs, rhs: map[$T]bool) -> bool"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_set_superset :: proc(lhs, rhs: map[$T]bool) -> bool"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_set_disjoint :: proc(lhs, rhs: map[$T]bool) -> bool"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_set_add :: proc(s: map[$T]bool, value: T) -> map[T]bool"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_set_remove :: proc(s: map[$T]bool, value: T) -> map[T]bool"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_set_union :: proc(lhs, rhs: map[$T]bool) -> map[T]bool"), false)
+    testing.expect_value(t, strings.contains(output, "kvist_set_add :: proc(s: map[$T]bool, value: T) -> map[T]bool"), false)
 }
 
 @(test)
 compile_set_package_bang_algebra_helpers :: proc(t: ^testing.T) {
     source := `(package main)
+(import set "kvist:set")
 
 (defn demo []
   (let [target (set/of int [1 2 3]) defer

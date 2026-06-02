@@ -1133,6 +1133,85 @@ load_root_file_forms :: proc(path: string) -> (Loaded_Forms, Compile_Error, bool
     return result, Compile_Error{}, true
 }
 
+compile_source_should_load_source_import :: proc(import_path: string) -> bool {
+    // Keep this narrow while compile_source output tests still cover legacy
+    // builtin fallbacks. Expand package-by-package as those fallbacks move out.
+    switch import_path {
+    case "kvist:str", "kvist:set":
+        return true
+    }
+    return false
+}
+
+load_root_source_forms :: proc(forms: []CST_Top_Form) -> (Loaded_Forms, Compile_Error, bool) {
+    aliases: [dynamic]Alias_Prefix
+    import_keys: [dynamic]string
+    loaded_keys: [dynamic]string
+    visiting: [dynamic]string
+    result := Loaded_Forms{}
+    locals := collect_local_decl_names(forms)
+
+    for top in forms {
+        alias, import_path, ok_import := source_import_alias_and_path(top.form)
+        if !ok_import {
+            continue
+        }
+        if !compile_source_should_load_source_import(import_path) {
+            continue
+        }
+        resolved, err_resolve, ok_resolve := resolve_source_import_path(".", import_path)
+        if !ok_resolve {
+            return result, err_resolve, false
+        }
+        nested_import_keys: [dynamic]string
+        nested, err_nested, ok_nested := load_source_forms(resolved, alias, &loaded_keys, &nested_import_keys, &visiting)
+        if !ok_nested {
+            return result, err_nested, false
+        }
+        append(&aliases, Alias_Prefix{
+            alias = alias,
+            prefix = alias,
+            exports = nested.exports,
+            allow_fallback = shipped_source_import_allows_builtin_fallback(import_path),
+            preserve_qualified_calls = import_path == "kvist:core",
+        })
+        for form in nested.imports {
+            append_import_form_unique(&result.imports, &import_keys, clone_cst_top_form(form))
+        }
+        for form in nested.decls {
+            append(&result.decls, clone_cst_top_form(form))
+        }
+    }
+
+    for top in forms {
+        form := top.form
+        head := decl_head_name(form)
+        if head == "package" {
+            result.has_package = true
+            result.package_decl = top
+            continue
+        }
+        _, _, is_source_import := source_import_alias_and_path(form)
+        if is_source_import {
+            _, import_path, _ := source_import_alias_and_path(form)
+            if shipped_source_import_allows_builtin_fallback(import_path) {
+                append_import_form_unique(&result.imports, &import_keys, top)
+            }
+            continue
+        }
+        if head == "import" {
+            append_import_form_unique(&result.imports, &import_keys, top)
+            continue
+        }
+        rewritten, err_rewrite, ok_rewrite := rewrite_top_form(top, locals[:], aliases[:], "")
+        if !ok_rewrite {
+            return result, err_rewrite, false
+        }
+        append(&result.decls, rewritten)
+    }
+    return result, Compile_Error{}, true
+}
+
 load_path_expanded_forms :: proc(path: string) -> (expanded: [dynamic]CST_Top_Form, macros: [dynamic]User_Macro, err: Compile_Error, ok: bool) {
     loaded, err_load, ok_load := load_root_file_forms(path)
     if !ok_load {
@@ -1472,7 +1551,23 @@ compile_source_with_map :: proc(source: string) -> (result: Emit_Result, err: Co
     if !ok_order {
         return result, clone_compile_error(err_order, result_allocator), false
     }
-    expanded, _, err_expand, ok_expand := macroexpand_top_forms(forms[:], true)
+    loaded, err_load, ok_load := load_root_source_forms(forms[:])
+    if !ok_load {
+        return result, clone_compile_error(err_load, result_allocator), false
+    }
+    if !loaded.has_package {
+        loaded.has_package = true
+        loaded.package_decl = synthetic_package_decl("main")
+    }
+    combined: [dynamic]CST_Top_Form
+    append(&combined, loaded.package_decl)
+    for form in loaded.imports {
+        append(&combined, form)
+    }
+    for form in loaded.decls {
+        append(&combined, form)
+    }
+    expanded, _, err_expand, ok_expand := macroexpand_top_forms(combined[:], true)
     if !ok_expand {
         return result, clone_compile_error(err_expand, result_allocator), false
     }
