@@ -1,14 +1,24 @@
 (package live)
 
 (defmacro defmodule
-  "Expand a live module declaration followed by ordinary Kvist top-level forms."
+  "Declare a live module and emit its body forms.
+
+  `(live/defmodule options form...)` expands to the structural
+  `(live/module options)` declaration followed by the supplied top-level forms.
+  This is a package macro wrapper for the live loader's current module syntax;
+  it does not add a runtime abstraction layer."
   [options & body]
   (forms
     (list (symbol "live/module") options)
     body))
 
 (defmacro defcommand
-  "Expand a zero-arg live command helper and its live/command declaration."
+  "Define a zero-argument live command and register it with the live loader.
+
+  The macro emits a normal zero-arg `defn` named `name`, followed by the
+  structural `(live/command name)` declaration consumed by live tooling. Use the
+  lower-level structural form directly for command shapes that need explicit
+  metadata or different binding behavior."
   [name & body]
   (forms
     (quasiquote
@@ -17,7 +27,10 @@
     (list (symbol "live/command") name)))
 
 (defmacro defhook
-  "Expand a zero-arg live hook helper and its live/hook declaration."
+  "Define a zero-argument live hook and register it with the live loader.
+
+  The macro emits a normal zero-arg `defn` named `name`, followed by the
+  structural `(live/hook name)` declaration consumed by live tooling."
   [name & body]
   (forms
     (quasiquote

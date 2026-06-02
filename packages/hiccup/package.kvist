@@ -188,7 +188,18 @@
                 (quasiquote (Node {:text (unquote (text form))}))))))))))))))
 
 (defmacro html
-  "Expand a Hiccup vector tree into the typed hiccup/Node representation. Attr and child positions accept ordinary Kvist expressions, including supported conditional forms, omission via when/nil, and fragment nodes via [:<> ...], when they evaluate to Hiccup value types."
+  "Expand a Hiccup vector tree into a typed `hiccup/Node`.
+
+  Element vectors use the shape `[:tag {:attr value...} child...]`; the attrs map
+  is optional. `[:<> child...]` creates a fragment with no wrapper element.
+  Literal strings, ints, floats, bools, keywords, and nested vectors are converted
+  directly to typed node values.
+
+  Attribute and child positions may contain ordinary Kvist expressions when the
+  expression evaluates to the corresponding Hiccup union type. `nil` and
+  supported `when` forms omit attrs or children by producing the internal none
+  variant. Supported `if` forms are lowered into typed conditional nodes or
+  attribute values at expansion time."
   [form]
   (emit-node form))
 
@@ -206,7 +217,10 @@
   (do))
 
 (defn tag
-  "Return the tag name for an element node, or an empty string for scalar nodes."
+  "Return the HTML tag name for an element node.
+
+  Scalar nodes, fragments, and omitted nodes return the empty string. This
+  function does not allocate."
   [node: Node] -> string
   (core/switch [value node]
     Nothing ""
@@ -219,7 +233,10 @@
     :else ""))
 
 (defn attr-count
-  "Return the number of attrs on an element node."
+  "Return the number of attributes on an element node.
+
+  Non-element nodes return zero. The count includes attrs that may later render
+  as omitted because their value is the internal none variant."
   [node: Node] -> int
   (core/switch [value node]
     Nothing 0
@@ -232,7 +249,11 @@
     :else 0))
 
 (defn child-count
-  "Return the number of children on an element node."
+  "Return the number of child nodes.
+
+  Element and fragment nodes return their child count. Scalar nodes and omitted
+  nodes return zero. This is a direct slice length operation and allocates
+  nothing."
   [node: Node] -> int
   (core/switch [value node]
     Nothing 0
@@ -313,7 +334,11 @@
       (strings.write_string builder "false"))))
 
 (defn render
-  "Render a Hiccup node tree to an owned HTML string."
+  "Render a Hiccup node tree to an owned HTML string.
+
+  Text and attribute string values are HTML-escaped. Boolean attributes render as
+  a bare attribute name when true and are omitted when false. Omitted nodes and
+  attrs produce no output. The returned string is owned by the caller."
   [node: Node] -> string
   (let [builder (strings.builder_make)]
     (defer (strings.builder_destroy (& builder)))

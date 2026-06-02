@@ -205,7 +205,16 @@ __kvist_test_once_guard: sync.Once
         (error "t/are expects a multiple of the binding count")))))
 
 (defmacro deftest
-  "Define a Kvist test that lowers to an Odin @(test) proc with a testing.T parameter."
+  "Define an executable Kvist test.
+
+  `(t/deftest name body...)` lowers to an Odin `@(test)` proc named `name` with a
+  `^testing.T` parameter bound as `t` inside the body. A string immediately after
+  the test name becomes the generated proc docstring:
+
+  `(t/deftest parses-empty-input \"Empty input is valid.\" ...)`
+
+  Tests should use `t/is` for assertions so failures are reported through Odin's
+  testing package and include any active `t/testing` context."
   [name & body]
   (let [maybe-doc (first body)]
     (if (string? maybe-doc)
@@ -213,7 +222,14 @@ __kvist_test_once_guard: sync.Once
       (emit-deftest name nil body))))
 
 (defmacro is
-  "Assert that an expression is true. Equality and not-forms get specialized lowering."
+  "Assert that `expr` is true, with an optional failure message.
+
+  `(t/is expr)` records a test failure when `expr` is false. `(t/is expr
+  \"message\")` uses the message in the failure report. Equality forms of shape
+  `(= actual expected)` lower to Odin's value-aware expectation helper so reports
+  include both values; `(not expr)` also gets direct specialized lowering.
+
+  `t/is` returns the boolean result from the underlying Odin assertion helper."
   [expr & rest]
   (if (= (core/count rest) 0)
     (emit-is expr nil)
@@ -222,7 +238,11 @@ __kvist_test_once_guard: sync.Once
       (error "t/is expects an expression and optional message"))))
 
 (defmacro testing
-  "Group assertions under a message and prefix nested assertion failures with that context."
+  "Run `body` with an additional assertion context message.
+
+  Nested `t/testing` forms are joined in failure output, so a failing assertion
+  reports the path of surrounding contexts. The context is scoped with `defer`,
+  and is removed even when the body returns early."
   [message & body]
   (quasiquote
     (do
@@ -231,14 +251,29 @@ __kvist_test_once_guard: sync.Once
       (splice body))))
 
 (defmacro are
-  "Repeat the same assertion template over rows of values."
+  "Repeat one assertion template over rows of values.
+
+  `argv` is a binding vector used inside `expr`. `values` are consumed in rows
+  the same length as `argv`; each row substitutes into `expr` and expands to one
+  `t/is` assertion. The number of values must be an exact multiple of the binding
+  count.
+
+  Example shape: `(t/are [x y] (= (+ x y) 10) 1 9 4 6)`."
   [argv expr & values]
   (if (= (core/count argv) 0)
     (error "t/are expects a non-empty binding vector")
     (emit-are argv expr values)))
 
 (defmacro use-fixtures
-  "Install test fixtures. Supports `:each` fixtures and setup-only `:once` fixtures."
+  "Install fixtures for tests defined later in the same package file.
+
+  `(t/use-fixtures :each f...)` wraps each test body in the listed fixtures.
+  Each fixture is called as `(f t body-proc)`, where `body-proc` is a proc taking
+  `^testing.T`.
+
+  `(t/use-fixtures :once f...)` runs setup procs once before the first wrapped
+  test body executes. Current `:once` fixtures are setup-only and do not receive
+  a teardown continuation."
   [scope & fixtures]
   (if (= (name scope) "each")
     (let [template (emit-fixture-chain (quote __kvist_test_body__) fixtures)]

@@ -1,14 +1,26 @@
 (package session)
 (import h "kvist_vendor:http")
 
-(defenum Session-Action [
+(defenum Session-Action
+  "Decision produced by `session/plan`.
+
+  `Accept` means the request may proceed. `Create` means a new session should be
+  established for a safe request. `RefreshCsrf` keeps the session id but writes a
+  fresh CSRF cookie. `Reject` means the request should be denied."
+  [
   Accept
   Create
   RefreshCsrf
   Reject
 ])
 
-(defstruct Session-Opts {
+(defstruct Session-Opts
+  "Configuration for cookie-backed session and CSRF planning.
+
+  The callback fields are ordinary Odin-compatible procs. `new-sid` creates a
+  session id, `csrf-for` derives the expected CSRF token for a session id, and
+  `request-csrf` extracts the submitted token from a non-read request."
+  {
   :session-cookie string
   :csrf-cookie string
   :path string
@@ -20,7 +32,13 @@
   :request-csrf (proc [req: ^h.Request] -> string)
 })
 
-(defstruct Session-Plan {
+(defstruct Session-Plan
+  "Result of evaluating a request against `Session-Opts`.
+
+  `sid` and `csrf` contain the session and token values to accept or write.
+  `set-cookie` tells `session/apply-plan!` whether cookies should be appended to
+  the response."
+  {
   :action Session-Action
   :sid string
   :csrf string
@@ -45,7 +63,13 @@ __kvist_http_session_call_req_string :: proc(f: proc(req: ^h.Request) -> string,
 }
 ")
 
-(defn new-opts [session-cookie: string
+(defn new-opts
+  "Create default session options.
+
+  The default cookie path is `/`, `secure` is false, `http-only` is true, and
+  `same-site` is `.Lax`. Customize those fields with ordinary struct updates
+  after construction when needed."
+  [session-cookie: string
                 csrf-cookie: string
                 new-sid: (proc [] -> string)
                 csrf-for: (proc [sid: string] -> string)
@@ -60,27 +84,51 @@ __kvist_http_session_call_req_string :: proc(f: proc(req: ^h.Request) -> string,
                  :csrf-for csrf-for
                  :request-csrf request-csrf}))
 
-(defn request-sid [req: ^h.Request, opts: Session-Opts] -> [value: string, ok: bool]
+(defn request-sid
+  "Read the configured session cookie from `req`.
+
+  Returns `[value, ok]`, where `ok` is false when the cookie is absent."
+  [req: ^h.Request, opts: Session-Opts] -> [value: string, ok: bool]
   (h.request_cookie_get req (:session-cookie opts)))
 
-(defn request-csrf-cookie [req: ^h.Request, opts: Session-Opts] -> [value: string, ok: bool]
+(defn request-csrf-cookie
+  "Read the configured CSRF cookie from `req`.
+
+  Returns `[value, ok]`, where `ok` is false when the cookie is absent."
+  [req: ^h.Request, opts: Session-Opts] -> [value: string, ok: bool]
   (h.request_cookie_get req (:csrf-cookie opts)))
 
-(defn expected-csrf [sid: string, opts: Session-Opts] -> string
+(defn expected-csrf
+  "Return the expected CSRF token for session id `sid`."
+  [sid: string, opts: Session-Opts] -> string
   (__kvist_http_session_call_sid_string (:csrf-for opts) sid))
 
-(defmacro accepted? [plan]
+(defmacro accepted?
+  "Return true when `plan` is not a reject plan."
+  [plan]
   (quasiquote
     (!= (:action (unquote plan)) .Reject)))
 
-(defn read-method? [method: h.Method] -> bool
+(defn read-method?
+  "Return true for HTTP methods treated as safe reads by the session planner.
+
+  Currently GET and HEAD are read methods."
+  [method: h.Method] -> bool
   (or (== method .Get)
       (== method .Head)))
 
-(defn request-method [req: ^h.Request] -> h.Method
+(defn request-method
+  "Return the HTTP method from request `req`."
+  [req: ^h.Request] -> h.Method
   (__kvist_http_session_request_method req))
 
-(defn plan [req: ^h.Request, opts: Session-Opts] -> Session-Plan
+(defn plan
+  "Plan session and CSRF handling for `req`.
+
+  Safe read requests may create or refresh cookies. POST requests require the
+  submitted CSRF value from `opts.request-csrf` to match the derived token.
+  Requests without a valid existing session on non-read methods are rejected."
+  [req: ^h.Request, opts: Session-Opts] -> Session-Plan
   (let [method (request-method req)]
     (if-let [sid sid-ok (request-sid req opts)]
       (let [csrf (expected-csrf sid opts)
@@ -106,7 +154,12 @@ __kvist_http_session_call_req_string :: proc(f: proc(req: ^h.Request) -> string,
           (Session-Plan {:action .Create :sid sid :csrf csrf :set-cookie true}))
         (Session-Plan {:action .Reject :sid "" :csrf "" :set-cookie false})))))
 
-(defmacro apply-plan! [res opts plan]
+(defmacro apply-plan!
+  "Apply cookie writes requested by `plan` to response `res`.
+
+  When `(:set-cookie plan)` is true, this appends both the session cookie and the
+  CSRF cookie using fields from `opts`. It does not send the response."
+  [res opts plan]
   (quasiquote
     (when (:set-cookie (unquote plan))
       (append
@@ -123,7 +176,9 @@ __kvist_http_session_call_req_string :: proc(f: proc(req: ^h.Request) -> string,
                    :secure (:secure (unquote opts))
                    :same-site (:same-site (unquote opts))})))))
 
-(defmacro reject! [res]
+(defmacro reject!
+  "Respond to `res` with HTTP 403 Forbidden."
+  [res]
   (quasiquote
     (do
       (set! (:status (deref (unquote res))) .Forbidden)

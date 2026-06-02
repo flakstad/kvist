@@ -1,226 +1,476 @@
 (package arr)
 (import core "kvist:core")
 
-(defmacro count [xs]
+(defmacro count
+  "Return the number of elements in an array-family value.
+
+  This lowers to the same direct length operation as `core/count`; it is O(1)
+  and allocates nothing."
+  [xs]
   (quasiquote
     (kvist/core/count (unquote xs))))
 
-(defmacro map [f xs]
+(defmacro map
+  "Return a new dynamic array containing `(f x)` for each `x` in `xs`.
+
+  Non-keyword callbacks lower through a force-inlined loop helper. Keyword
+  shorthand is kept as an array-specific macro path and lowers through the
+  compiler's specialized keyword projection support. The result is newly
+  allocated with capacity based on the input count."
+  [f xs]
   (if (keyword? f)
     (quasiquote
       (kvist/arr/map (unquote f) (unquote xs)))
     (quasiquote
       (map-impl (unquote f) (kvist/core/slice (unquote xs) 0)))))
 
-(defmacro filter [pred xs]
+(defmacro filter
+  "Return a new dynamic array containing values for which `pred` is true.
+
+  The input is not mutated. The result is allocated once with input-sized
+  capacity and populated by a direct loop."
+  [pred xs]
   (if (keyword? pred)
     (quasiquote
       (kvist/arr/filter (unquote pred) (unquote xs)))
     (quasiquote
       (filter-impl (unquote pred) (kvist/core/slice (unquote xs) 0)))))
 
-(defmacro remove [pred xs]
+(defmacro remove
+  "Return a new dynamic array containing values for which `pred` is false.
+
+  This is the complement of `arr/filter`. The input is not mutated; the result
+  is allocated once and populated by a direct loop."
+  [pred xs]
   (if (keyword? pred)
     (quasiquote
       (kvist/arr/remove (unquote pred) (unquote xs)))
     (quasiquote
       (remove-impl (unquote pred) (kvist/core/slice (unquote xs) 0)))))
 
-(defmacro reduce [f init xs]
+(defmacro reduce
+  "Reduce `xs` from left to right using accumulator function `f`.
+
+  `f` receives the current accumulator and one element, and must return the next
+  accumulator. `init` is returned for an empty input. This lowers to a direct
+  loop and does not allocate."
+  [f init xs]
   (quasiquote
     (reduce-impl (unquote f) (unquote init) (kvist/core/slice (unquote xs) 0))))
 
-(defmacro empty [elem-type & rest]
+(defmacro empty
+  "Create an empty dynamic array of `elem-type`.
+
+  `(arr/empty T)` uses default capacity. `(arr/empty T capacity)` reserves
+  capacity for efficient appends. The returned dynamic array is owned by the
+  caller."
+  [elem-type & rest]
   (if (= (kvist/count rest) 0)
     (quasiquote
       (kvist/arr/empty (unquote elem-type)))
     (quasiquote
       (kvist/arr/empty (unquote elem-type) (unquote (kvist/first rest))))))
 
-(defmacro dynamic [elem-type items]
+(defmacro dynamic
+  "Create a dynamic array of `elem-type` from literal `items`.
+
+  The result is an owned dynamic array. Use this when the array needs to grow or
+  be passed to APIs expecting `[dynamic]T`."
+  [elem-type items]
   (quasiquote
     (kvist/arr/dynamic (unquote elem-type) (unquote items))))
 
-(defmacro fixed [elem-type items]
+(defmacro fixed
+  "Create a fixed array of `elem-type` from literal `items`.
+
+  The result is an Odin fixed-size array value. It does not allocate dynamic
+  storage and its length is known from the literal item count."
+  [elem-type items]
   (quasiquote
     (kvist/arr/fixed (unquote elem-type) (unquote items))))
 
-(defmacro map-indexed [f xs]
+(defmacro map-indexed
+  "Return a new dynamic array by calling `f` with each value and index.
+
+  The callback receives the element and its zero-based index. The input is not
+  mutated, and the result is allocated with capacity based on the input count."
+  [f xs]
   (quasiquote
     (kvist/arr/map-indexed (unquote f) (unquote xs))))
 
-(defmacro keep [f xs]
+(defmacro keep
+  "Map each element with `f` and keep only successful results.
+
+  `f` must return `[value, ok]`. Values whose `ok` result is true are appended
+  to a newly allocated dynamic array; false results are skipped."
+  [f xs]
   (quasiquote
     (kvist/arr/keep (unquote f) (unquote xs))))
 
-(defmacro mapcat [f xs]
+(defmacro mapcat
+  "Map each element to a slice and concatenate the slices.
+
+  `f` is called for each input element and must return an array-family value.
+  The output is a newly allocated dynamic array containing all returned elements
+  in order."
+  [f xs]
   (quasiquote
     (kvist/arr/mapcat (unquote f) (unquote xs))))
 
-(defmacro push! [xs & values]
+(defmacro push!
+  "Append one or more `values` to dynamic array `xs` in place.
+
+  This mutates the target array and follows Odin dynamic array growth behavior.
+  No replacement array is returned."
+  [xs & values]
   (quasiquote
     (kvist/arr/push! (unquote xs) (splice values))))
 
-(defmacro map! [f xs]
+(defmacro map!
+  "Replace each element of dynamic array `xs` with `(f x)`.
+
+  This mutates the array in place. It is intended for transformations where the
+  output element type is the same as the input element type."
+  [f xs]
   (quasiquote
     (kvist/arr/map! (unquote f) (unquote xs))))
 
-(defmacro map-indexed! [f xs]
+(defmacro map-indexed!
+  "Replace each element of dynamic array `xs` with `(f x i)`.
+
+  The callback receives the current element and its zero-based index. The array
+  is mutated in place."
+  [f xs]
   (quasiquote
     (kvist/arr/map-indexed! (unquote f) (unquote xs))))
 
-(defmacro filter! [pred xs]
+(defmacro filter!
+  "Remove elements from `xs` in place when `pred` is false.
+
+  The dynamic array keeps elements that satisfy `pred`. This avoids allocating a
+  replacement array."
+  [pred xs]
   (quasiquote
     (kvist/arr/filter! (unquote pred) (unquote xs))))
 
-(defmacro remove! [pred xs]
+(defmacro remove!
+  "Remove elements from `xs` in place when `pred` is true.
+
+  This is the in-place complement of `arr/filter!` and avoids allocating a
+  replacement array."
+  [pred xs]
   (quasiquote
     (kvist/arr/remove! (unquote pred) (unquote xs))))
 
-(defmacro keep! [f xs]
+(defmacro keep!
+  "Map and compact `xs` in place using an optional-result callback.
+
+  `f` must return `[value, ok]`. Successful values replace the retained prefix
+  of the array; unsuccessful values are dropped."
+  [f xs]
   (quasiquote
     (kvist/arr/keep! (unquote f) (unquote xs))))
 
-(defmacro into [out-type xs]
+(defmacro into
+  "Copy `xs` into a new array value of `out-type`.
+
+  Use this to convert between compatible array-family representations. The
+  input is not mutated."
+  [out-type xs]
   (quasiquote
     (kvist/arr/into (unquote out-type) (unquote xs))))
 
-(defmacro into! [target xs]
+(defmacro into!
+  "Append all elements from `xs` into dynamic array `target`.
+
+  This mutates `target` and does not allocate a replacement array, though Odin
+  may grow the target's backing storage."
+  [target xs]
   (quasiquote
     (kvist/arr/into! (unquote target) (unquote xs))))
 
-(defmacro interpose [sep xs]
+(defmacro interpose
+  "Return a new dynamic array with `sep` inserted between input elements.
+
+  No separator is added before the first or after the last element. The input is
+  not mutated."
+  [sep xs]
   (quasiquote
     (kvist/arr/interpose (unquote sep) (unquote xs))))
 
-(defmacro interleave [xs ys]
+(defmacro interleave
+  "Return a new dynamic array alternating elements from `xs` and `ys`.
+
+  Interleaving stops when the shorter input is exhausted. Extra elements from
+  the longer input are ignored."
+  [xs ys]
   (quasiquote
     (kvist/arr/interleave (unquote xs) (unquote ys))))
 
-(defmacro reverse [xs]
+(defmacro reverse
+  "Return a new dynamic array with the elements of `xs` in reverse order.
+
+  The input is not mutated. The result is allocated with capacity equal to the
+  input count."
+  [xs]
   (quasiquote
     (kvist/arr/reverse (unquote xs))))
 
-(defmacro reverse! [xs]
+(defmacro reverse!
+  "Reverse dynamic array `xs` in place.
+
+  This mutates the existing array and does not allocate a replacement array."
+  [xs]
   (quasiquote
     (kvist/arr/reverse! (unquote xs))))
 
-(defmacro shuffle [pick xs]
+(defmacro shuffle
+  "Return a shuffled copy of `xs`.
+
+  `pick` supplies the random index selection used by the lowering. The input is
+  not mutated; the result is a newly allocated dynamic array."
+  [pick xs]
   (quasiquote
     (kvist/arr/shuffle (unquote pick) (unquote xs))))
 
-(defmacro shuffle! [pick xs]
+(defmacro shuffle!
+  "Shuffle dynamic array `xs` in place.
+
+  `pick` supplies the random index selection used by the lowering. The existing
+  array is mutated without allocating a replacement array."
+  [pick xs]
   (quasiquote
     (kvist/arr/shuffle! (unquote pick) (unquote xs))))
 
-(defmacro get [xs index]
+(defmacro get
+  "Return the element at `index` in `xs`.
+
+  This lowers to direct indexing through `core/get`; bounds behavior is Odin's
+  ordinary indexing behavior."
+  [xs index]
   (quasiquote
     (kvist/core/get (unquote xs) (unquote index))))
 
-(defmacro slice [xs start & rest]
+(defmacro slice
+  "Return a slice view of `xs`.
+
+  `(arr/slice xs start)` slices from `start` to the end. `(arr/slice xs start
+  end)` slices up to but not including `end`. This does not copy elements."
+  [xs start & rest]
   (if (= (kvist/count rest) 0)
     (quasiquote
       (kvist/core/slice (unquote xs) (unquote start)))
     (quasiquote
       (kvist/core/slice (unquote xs) (unquote start) (unquote (kvist/first rest))))))
 
-(defmacro first [xs]
+(defmacro first
+  "Return the first element of `xs`."
+  [xs]
   (quasiquote
     (kvist/core/get (unquote xs) 0)))
 
-(defmacro second [xs]
+(defmacro second
+  "Return the second element of `xs`."
+  [xs]
   (quasiquote
     (kvist/core/get (unquote xs) 1)))
 
-(defmacro nth [xs index]
+(defmacro nth
+  "Return the element at zero-based `index` in `xs`."
+  [xs index]
   (quasiquote
     (kvist/core/get (unquote xs) (unquote index))))
 
-(defmacro last [xs]
+(defmacro last
+  "Return the last element of `xs`.
+
+  The input must be non-empty. This lowers to direct indexing at
+  `(count xs) - 1`."
+  [xs]
   (quasiquote
     (kvist/core/get (unquote xs) (- (kvist/core/count (unquote xs)) 1))))
 
-(defmacro rest [xs]
+(defmacro rest
+  "Return a slice view of `xs` without its first element.
+
+  This does not copy elements and aliases the original storage."
+  [xs]
   (quasiquote
     (kvist/core/slice (unquote xs) 1)))
 
-(defmacro take [n xs]
+(defmacro take
+  "Return a slice view of the first `n` elements of `xs`.
+
+  This does not copy elements. `n` must be within the bounds expected by Odin
+  slicing."
+  [n xs]
   (quasiquote
     (kvist/core/slice (unquote xs) 0 (unquote n))))
 
-(defmacro drop [n xs]
+(defmacro drop
+  "Return a slice view of `xs` without its first `n` elements.
+
+  This does not copy elements. `n` must be within the bounds expected by Odin
+  slicing."
+  [n xs]
   (quasiquote
     (kvist/core/slice (unquote xs) (unquote n))))
 
-(defmacro drop-last [n xs]
+(defmacro drop-last
+  "Return a slice view of `xs` without its last `n` elements.
+
+  This does not copy elements. `n` must be within the bounds expected by Odin
+  slicing."
+  [n xs]
   (quasiquote
     (kvist/core/slice (unquote xs) 0 (- (kvist/core/count (unquote xs)) (unquote n)))))
 
-(defmacro split-at [n xs]
+(defmacro split-at
+  "Split `xs` at index `n`.
+
+  Returns the package lowering for a pair of slice views: the prefix before `n`
+  and the suffix from `n`. Elements are not copied."
+  [n xs]
   (quasiquote
     (kvist/arr/split-at (unquote n) (unquote xs))))
 
-(defmacro partition [n xs]
+(defmacro partition
+  "Return non-overlapping groups of exactly `n` elements from `xs`.
+
+  Any trailing group smaller than `n` is omitted. Group values are slice views
+  over the input where possible."
+  [n xs]
   (quasiquote
     (kvist/arr/partition (unquote n) (unquote xs))))
 
-(defmacro partition-all [n xs]
+(defmacro partition-all
+  "Return non-overlapping groups of up to `n` elements from `xs`.
+
+  Unlike `arr/partition`, the final short group is included."
+  [n xs]
   (quasiquote
     (kvist/arr/partition-all (unquote n) (unquote xs))))
 
-(defmacro partition-by [f xs]
+(defmacro partition-by
+  "Partition `xs` each time key function `f` returns a new key.
+
+  Adjacent elements with equal keys are grouped together. Groups preserve input
+  order."
+  [f xs]
   (quasiquote
     (kvist/arr/partition-by (unquote f) (unquote xs))))
 
-(defmacro index-by [f xs]
+(defmacro index-by
+  "Return a map from `(f x)` to `x` for each element in `xs`.
+
+  Later elements overwrite earlier elements with the same key. The result is a
+  newly allocated map."
+  [f xs]
   (quasiquote
     (kvist/arr/index-by (unquote f) (unquote xs))))
 
-(defmacro group-by [f xs]
+(defmacro group-by
+  "Return a map from `(f x)` to a dynamic array of matching elements.
+
+  Elements preserve their input order within each group. The returned map and
+  group arrays are newly allocated."
+  [f xs]
   (quasiquote
     (kvist/arr/group-by (unquote f) (unquote xs))))
 
-(defmacro count-by [f xs]
+(defmacro count-by
+  "Return a map counting how many elements produce each key from `f`.
+
+  The result maps keys to integer counts and is allocated once before scanning
+  the input."
+  [f xs]
   (quasiquote
     (kvist/arr/count-by (unquote f) (unquote xs))))
 
-(defmacro sum-by [key-f value-f xs]
+(defmacro sum-by
+  "Return a map summing `(value-f x)` for each key `(key-f x)`.
+
+  This is useful for grouped numeric aggregation. Missing keys start from the
+  zero value of the value type."
+  [key-f value-f xs]
   (quasiquote
     (kvist/arr/sum-by (unquote key-f) (unquote value-f) (unquote xs))))
 
-(defmacro frequencies [xs]
+(defmacro frequencies
+  "Return a map from each distinct element in `xs` to its count.
+
+  This is equivalent to counting by identity and allocates a map for the result."
+  [xs]
   (quasiquote
     (kvist/arr/frequencies (unquote xs))))
 
-(defmacro distinct [xs]
+(defmacro distinct
+  "Return the distinct values from `xs` in first-seen order.
+
+  The result is a newly allocated dynamic array. A set/map is used internally to
+  track values already emitted."
+  [xs]
   (quasiquote
     (kvist/arr/distinct (unquote xs))))
 
-(defmacro distinct-by [f xs]
+(defmacro distinct-by
+  "Return elements whose key `(f x)` has not been seen before.
+
+  The first element for each key is kept and later elements with the same key
+  are skipped. Output order follows the input."
+  [f xs]
   (quasiquote
     (kvist/arr/distinct-by (unquote f) (unquote xs))))
 
-(defmacro sort [xs]
+(defmacro sort
+  "Return a sorted copy of `xs`.
+
+  The input is not mutated. Sorting uses the package lowering for Odin sort
+  operations and allocates a dynamic array copy before sorting."
+  [xs]
   (quasiquote
     (kvist/arr/sort (unquote xs))))
 
-(defmacro sort! [xs]
+(defmacro sort!
+  "Sort dynamic array `xs` in place.
+
+  This mutates the existing array and does not allocate a replacement array."
+  [xs]
   (quasiquote
     (kvist/arr/sort! (unquote xs))))
 
-(defmacro sort-by [f xs]
+(defmacro sort-by
+  "Return a sorted copy of `xs` ordered by key function `f`.
+
+  The input is not mutated. Keys are computed by the package lowering used for
+  sort-by comparisons."
+  [f xs]
   (quasiquote
     (kvist/arr/sort-by (unquote f) (unquote xs))))
 
-(defmacro sort-by! [f xs]
+(defmacro sort-by!
+  "Sort dynamic array `xs` in place using key function `f`.
+
+  This mutates the existing array and does not allocate a replacement array."
+  [f xs]
   (quasiquote
     (kvist/arr/sort-by! (unquote f) (unquote xs))))
 
-(defmacro butlast [xs]
+(defmacro butlast
+  "Return a slice view of `xs` without its last element.
+
+  This does not copy elements. The input must be non-empty."
+  [xs]
   (quasiquote
     (kvist/core/slice (unquote xs) 0 (- (kvist/core/count (unquote xs)) 1))))
 
-(defmacro range [& rest]
+(defmacro range
+  "Return a dynamic array of integers in arithmetic progression.
+
+  `(arr/range end)` starts at 0 and steps by 1. `(arr/range start end)` uses
+  step 1. `(arr/range start end step)` uses the explicit step. The end value is
+  excluded. A zero step returns an empty array."
+  [& rest]
   (if (= (kvist/count rest) 1)
     (quasiquote
       (range-impl 0 (unquote (kvist/first rest)) 1))
@@ -230,7 +480,12 @@
       (quasiquote
         (range-impl (unquote (kvist/first rest)) (unquote (kvist/nth rest 1)) (unquote (kvist/nth rest 2)))))))
 
-(defn- range-impl [start: int, end: int, step: int] -> [dynamic]int #force_inline
+(defn- range-impl
+  "Implementation helper for `arr/range`.
+
+  Computes the exact output capacity before appending so the generated Odin loop
+  avoids repeated growth. Kept private; call `arr/range`."
+  [start: int, end: int, step: int] -> [dynamic]int #force_inline
   (core/when (== step 0)
     (return (arr/empty int)))
   (let [count 0]
@@ -249,33 +504,59 @@
           (set! i (+ i step))))
       out)))
 
-(defn- map-impl [f: (proc [x: $T] -> $U), xs: []T] -> [dynamic]U #force_inline
+(defn- map-impl
+  "Implementation helper for non-keyword `arr/map`.
+
+  This force-inlined helper gives source-backed macros a direct Odin loop while
+  keeping callback dispatch visible to the compiler."
+  [f: (proc [x: $T] -> $U), xs: []T] -> [dynamic]U #force_inline
   (let [out (arr/empty U (core/count xs))]
     (for [x xs]
       (arr/push! out (f x)))
     out))
 
-(defn- filter-impl [pred: (proc [x: $T] -> bool), xs: []T] -> [dynamic]T #force_inline
+(defn- filter-impl
+  "Implementation helper for non-keyword `arr/filter`.
+
+  Allocates one output array with input-sized capacity and appends matching
+  elements in a single pass."
+  [pred: (proc [x: $T] -> bool), xs: []T] -> [dynamic]T #force_inline
   (let [out (arr/empty T (core/count xs))]
     (for [x xs]
       (core/when (pred x)
         (arr/push! out x)))
     out))
 
-(defn- remove-impl [pred: (proc [x: $T] -> bool), xs: []T] -> [dynamic]T #force_inline
+(defn- remove-impl
+  "Implementation helper for non-keyword `arr/remove`.
+
+  Allocates one output array with input-sized capacity and appends elements for
+  which the predicate is false."
+  [pred: (proc [x: $T] -> bool), xs: []T] -> [dynamic]T #force_inline
   (let [out (arr/empty T (core/count xs))]
     (for [x xs]
       (core/when (not (pred x))
         (arr/push! out x)))
     out))
 
-(defn- reduce-impl [f: (proc [acc: $U, x: $T] -> U), init: U, xs: []T] -> U #force_inline
+(defn- reduce-impl
+  "Implementation helper for `arr/reduce`.
+
+  Runs a single left-to-right pass and keeps only the accumulator, so it
+  allocates nothing."
+  [f: (proc [acc: $U, x: $T] -> U), init: U, xs: []T] -> U #force_inline
   (let [acc init]
     (for [x xs]
       (set! acc (f acc x)))
     acc))
 
-(proc take-nth [n: int, xs: []$T] -> [dynamic]T #force_inline
+(proc take-nth
+  "Return a dynamic array containing every `n`th element of `xs`.
+
+  The first selected element is at index 0. When `n` is less than or equal to
+  zero, the result is empty. The output capacity is computed from the input
+  count so appending does not repeatedly reallocate."
+  [n: int, xs: []$T] -> [dynamic]T #force_inline
   (core/when (<= n 0)
     (return (arr/empty T)))
   (let [out (arr/empty T (/ (+ (core/count xs) (- n 1)) n))
@@ -285,7 +566,12 @@
       (set! i (+ i n)))
     out))
 
-(proc repeat [n: int, value: $T] -> [dynamic]T #force_inline
+(proc repeat
+  "Return a dynamic array containing `value` repeated `n` times.
+
+  Non-positive `n` returns an empty dynamic array. The result is allocated with
+  exact capacity."
+  [n: int, value: $T] -> [dynamic]T #force_inline
   (core/when (<= n 0)
     (return (arr/empty T)))
   (let [out (arr/empty T n)
@@ -295,7 +581,12 @@
       (set! i (+ i 1)))
     out))
 
-(proc repeatedly [n: int, f: (proc [] -> $T)] -> [dynamic]T #force_inline
+(proc repeatedly
+  "Call `f` `n` times and return the produced values in a dynamic array.
+
+  Calls happen left to right. Non-positive `n` returns an empty dynamic array.
+  The result is allocated with exact capacity."
+  [n: int, f: (proc [] -> $T)] -> [dynamic]T #force_inline
   (core/when (<= n 0)
     (return (arr/empty T)))
   (let [out (arr/empty T n)
@@ -305,7 +596,12 @@
       (set! i (+ i 1)))
     out))
 
-(proc iterate [n: int, f: (proc [x: $T] -> T), init: T] -> [dynamic]T #force_inline
+(proc iterate
+  "Return `n` successive values by repeatedly applying `f`.
+
+  The first output value is `init`; each later value is produced from the
+  previous one. Non-positive `n` returns an empty dynamic array."
+  [n: int, f: (proc [x: $T] -> T), init: T] -> [dynamic]T #force_inline
   (core/when (<= n 0)
     (return (arr/empty T)))
   (let [out (arr/empty T n)
@@ -317,7 +613,13 @@
       (set! i (+ i 1)))
     out))
 
-(proc cycle [n: int, xs: []$T] -> [dynamic]T #force_inline
+(proc cycle
+  "Return `n` values by repeating the contents of `xs`.
+
+  The input order is preserved on each pass. Empty input or non-positive `n`
+  returns an empty dynamic array. The output is owned and allocated with exact
+  capacity."
+  [n: int, xs: []$T] -> [dynamic]T #force_inline
   (let [size (core/count xs)]
     (core/when (or (<= n 0) (== size 0))
       (return (arr/empty T)))
@@ -328,42 +630,69 @@
         (set! i (+ i 1)))
       out)))
 
-(defmacro take-while [pred xs]
+(defmacro take-while
+  "Return the longest leading slice whose elements satisfy `pred`.
+
+  The result is a slice view into the original input and does not copy elements.
+  Keyword shorthand is supported for array element projection."
+  [pred xs]
   (if (keyword? pred)
     (quasiquote
       (kvist/arr/take-while (unquote pred) (unquote xs)))
     (quasiquote
       (take-while-impl (unquote pred) (kvist/core/slice (unquote xs) 0)))))
 
-(defmacro drop-while [pred xs]
+(defmacro drop-while
+  "Return the suffix after dropping leading elements that satisfy `pred`.
+
+  The result is a slice view into the original input and does not copy elements.
+  Keyword shorthand is supported for array element projection."
+  [pred xs]
   (if (keyword? pred)
     (quasiquote
       (kvist/arr/drop-while (unquote pred) (unquote xs)))
     (quasiquote
       (drop-while-impl (unquote pred) (kvist/core/slice (unquote xs) 0)))))
 
-(defmacro some? [pred xs]
+(defmacro some?
+  "Return true when any element of `xs` satisfies `pred`.
+
+  Evaluation stops at the first matching element. This lowers to a direct loop
+  and allocates nothing."
+  [pred xs]
   (if (keyword? pred)
     (quasiquote
       (kvist/arr/some? (unquote pred) (unquote xs)))
     (quasiquote
       (some-impl (unquote pred) (kvist/core/slice (unquote xs) 0)))))
 
-(defmacro every? [pred xs]
+(defmacro every?
+  "Return true when every element of `xs` satisfies `pred`.
+
+  Evaluation stops at the first failing element. Empty inputs return true. This
+  lowers to a direct loop and allocates nothing."
+  [pred xs]
   (if (keyword? pred)
     (quasiquote
       (kvist/arr/every? (unquote pred) (unquote xs)))
     (quasiquote
       (every-impl (unquote pred) (kvist/core/slice (unquote xs) 0)))))
 
-(defmacro find [pred xs]
+(defmacro find
+  "Return the first element of `xs` satisfying `pred`, plus an ok flag.
+
+  The return shape is `[value, ok]`. When no element matches, `ok` is false and
+  `value` is the zero value of the element type."
+  [pred xs]
   (if (keyword? pred)
     (quasiquote
       (kvist/arr/find (unquote pred) (unquote xs)))
     (quasiquote
       (find-impl (unquote pred) (kvist/core/slice (unquote xs) 0)))))
 
-(defn- some-impl [pred: (proc [x: $T] -> bool), xs: []T] -> bool #force_inline
+(defn- some-impl
+  "Implementation helper for non-keyword `arr/some?`."
+  [pred: (proc [x: $T] -> bool), xs: []T] -> bool #force_inline
   (let [result false]
     (for [x xs]
       (core/when (pred x)
@@ -372,7 +701,9 @@
           (break))))
     result))
 
-(defn- every-impl [pred: (proc [x: $T] -> bool), xs: []T] -> bool #force_inline
+(defn- every-impl
+  "Implementation helper for non-keyword `arr/every?`."
+  [pred: (proc [x: $T] -> bool), xs: []T] -> bool #force_inline
   (let [result true]
     (for [x xs]
       (core/when (not (pred x))
@@ -381,19 +712,25 @@
           (break))))
     result))
 
-(defn- find-impl [pred: (proc [x: $T] -> bool), xs: []T] -> [value: T, ok: bool] #force_inline
+(defn- find-impl
+  "Implementation helper for non-keyword `arr/find`."
+  [pred: (proc [x: $T] -> bool), xs: []T] -> [value: T, ok: bool] #force_inline
   (for [x xs]
     (core/when (pred x)
       (return x true)))
   (return value false))
 
-(defn- take-while-impl [pred: (proc [x: $T] -> bool), xs: []T] -> []T #force_inline
+(defn- take-while-impl
+  "Implementation helper for non-keyword `arr/take-while`."
+  [pred: (proc [x: $T] -> bool), xs: []T] -> []T #force_inline
   (for [x i xs]
     (core/when (not (pred x))
       (return (core/slice xs 0 i))))
   xs)
 
-(defn- drop-while-impl [pred: (proc [x: $T] -> bool), xs: []T] -> []T #force_inline
+(defn- drop-while-impl
+  "Implementation helper for non-keyword `arr/drop-while`."
+  [pred: (proc [x: $T] -> bool), xs: []T] -> []T #force_inline
   (for [x i xs]
     (core/when (not (pred x))
       (return (core/slice xs i))))

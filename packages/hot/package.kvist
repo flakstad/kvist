@@ -1,7 +1,17 @@
 (package hot)
 
 (defmacro defmodule
-  "Expand a standard kvist_hot native reload module contract for a host-owned state type, a message export, and a tick export."
+  "Emit the standard native hot-reload module contract.
+
+  `(hot/defmodule state-type message-export tick-export message-value
+  load-message)` expands to exported C-ABI entrypoints expected by the
+  `kvist_hot` host runtime: API version, state size/alignment, load/unload hooks,
+  a message export, and a tick export. The state storage remains host-owned; the
+  generated functions cast the raw state pointer through `kvist_hot` helpers.
+
+  This macro is intentionally a source package wrapper around the native
+  contract so module authors can write the common shape without hand-emitting the
+  boilerplate exports."
   [state-type message-export tick-export message-value load-message]
   (forms
     (quasiquote

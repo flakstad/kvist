@@ -2,48 +2,80 @@
 (import h "kvist_vendor:http")
 (import hc "kvist_vendor:http/client")
 
-(defn new-request [method: h.Method] -> hc.Request
+(defn new-request
+  "Create and initialize an HTTP client request for `method`.
+
+  The returned request owns vendor request state. Destroy it with
+  `client/request-destroy` after the request has completed."
+  [method: h.Method] -> hc.Request
   (let [req (hc.Request {})]
     (hc.request_init (addr req) method)
     req))
 
-(defmacro request [req target]
+(defmacro request
+  "Send initialized request `req` to `target`.
+
+  This lowers directly to the vendor client request call with the request passed
+  by address."
+  [req target]
   (quasiquote
     (hc.request (addr (unquote req)) (unquote target))))
 
-(defmacro get [target]
+(defmacro get
+  "Send a simple HTTP GET request to `target`."
+  [target]
   (quasiquote
     (hc.get (unquote target))))
 
-(defmacro with-json [req value]
+(defmacro with-json
+  "Attach JSON body `value` to request `req`.
+
+  The request is mutated in place through the vendor client package."
+  [req value]
   (quasiquote
     (hc.with_json (addr (unquote req)) (unquote value))))
 
-(defmacro request-destroy [req]
+(defmacro request-destroy
+  "Destroy request state owned by `req`."
+  [req]
   (quasiquote
     (hc.request_destroy (addr (unquote req)))))
 
-(defmacro set-header! [req key value]
+(defmacro set-header!
+  "Set request header `key` to `value` in place."
+  [req key value]
   (quasiquote
     (h.headers_set_unsafe (addr (:headers (unquote req))) (unquote key) (unquote value))))
 
-(defmacro add-cookie! [req name value]
+(defmacro add-cookie!
+  "Append a request cookie with `name` and `value`."
+  [req name value]
   (quasiquote
     (append
       (addr (:cookies (unquote req)))
       (h.Cookie {:name (unquote name) :value (unquote value)}))))
 
-(defmacro response-body [res & rest]
+(defmacro response-body
+  "Read the response body from `res`.
+
+  With no extra argument, the vendor default allocation mode is used. With one
+  extra argument, that allocation mode is passed through. Destroy allocated body
+  storage with `client/body-destroy` when required by the vendor API."
+  [res & rest]
   (if (= (count rest) 0)
     (quasiquote
       (hc.response_body (addr (unquote res))))
     (quasiquote
       (hc.response_body (addr (unquote res)) (unquote (arr/first rest))))))
 
-(defmacro response-destroy [res]
+(defmacro response-destroy
+  "Destroy response state owned by `res`."
+  [res]
   (quasiquote
     (hc.response_destroy (addr (unquote res)))))
 
-(defmacro body-destroy [body allocation]
+(defmacro body-destroy
+  "Destroy a response body according to `allocation`."
+  [body allocation]
   (quasiquote
     (hc.body_destroy (unquote body) (unquote allocation))))

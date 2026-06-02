@@ -6,5 +6,12 @@
 
 (odin "Run_Host :: runtime.Run_Host\nreload__Run_Host :: runtime.Run_Host")
 
-(defn checkpoint! [host: (ptr Run_Host)] -> bool
+(defn checkpoint!
+  "Cooperate with a resident reload host at a safe runtime boundary.
+
+  Call this from long-running `:run` loops at points where the program can safely
+  hand control back to the host. It returns true when the host accepted or
+  requested a reload checkpoint. In ordinary execution without a resident reload
+  host, the runtime path is expected to behave as a no-op boundary."
+  [host: (ptr Run_Host)] -> bool
   (runtime.checkpoint host))

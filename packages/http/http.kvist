@@ -21,33 +21,69 @@ http__handler_next :: proc(handler: ^h.Handler) -> ^h.Handler {
 }
 ")
 
-(defn new-router [] -> h.Router
+(defn new-router
+  "Create and initialize a new HTTP router value.
+
+  The returned router owns vendor router state and must be destroyed with
+  `http/router-destroy!` when it is no longer needed. `http/with-router` is the
+  usual scoped form for this."
+  [] -> h.Router
   (let [router (h.Router {})]
     (h.router_init (addr router))
     router))
 
-(defmacro router-destroy! [router]
+(defmacro router-destroy!
+  "Destroy a router created by `http/new-router`.
+
+  This lowers directly to the vendor router destroy call on the router address.
+  It does not nil or otherwise invalidate the Kvist binding."
+  [router]
   (quasiquote
     (h.router_destroy (addr (unquote router)))))
 
-(defn new-server [] -> h.Server
+(defn new-server
+  "Create a new HTTP server value.
+
+  The server starts unbound and is intended to be passed to `http/serve!`,
+  `http/listen!`, or the combined listen-and-serve helpers."
+  [] -> h.Server
   (h.Server {}))
 
-(defmacro server-shutdown-on-interrupt! [server]
+(defmacro server-shutdown-on-interrupt!
+  "Arrange for `server` to shut down on process interrupt.
+
+  This mutates server state through the vendor HTTP package and returns whatever
+  the underlying call returns."
+  [server]
   (quasiquote
     (h.server_shutdown_on_interrupt (addr (unquote server)))))
 
-(defmacro shutdown! [server]
+(defmacro shutdown!
+  "Request shutdown of a running server.
+
+  This lowers directly to the vendor server shutdown call on the server address."
+  [server]
   (quasiquote
     (h.server_shutdown (addr (unquote server)))))
 
-(defmacro listen! [server port]
+(defmacro listen!
+  "Bind `server` to loopback on `port`.
+
+  The endpoint is `net.IP4_Loopback`; use the vendor HTTP API directly if a
+  different bind address is required."
+  [server port]
   (quasiquote
     (h.listen
       (addr (unquote server))
       (net.Endpoint {:address net.IP4_Loopback :port (unquote port)}))))
 
-(defmacro handler [binding & body]
+(defmacro handler
+  "Create an HTTP handler from request and response bindings.
+
+  `binding` must contain two names, usually `[req res]`. The body is emitted as a
+  direct Odin handler proc receiving `^h.Request` and `^h.Response`; no runtime
+  adapter allocation is introduced by the macro."
+  [binding & body]
   (let [req (first binding)
         res (nth binding 1)
         req-param (symbol (str (name req) ":"))
@@ -58,11 +94,22 @@ http__handler_next :: proc(handler: ^h.Handler) -> ^h.Handler {
           (do
             (splice body)))))))
 
-(defmacro handle! [handler req res]
+(defmacro handle!
+  "Invoke `handler` with request pointer `req` and response pointer `res`.
+
+  This is useful inside middleware or tests when a handler value should be driven
+  manually."
+  [handler req res]
   (quasiquote
     (http__handle_ptr (addr (unquote handler)) (unquote req) (unquote res))))
 
-(defmacro middleware [next binding & body]
+(defmacro middleware
+  "Create middleware around `next`.
+
+  `binding` must contain `[next-binding req res]`. Inside `body`,
+  `next-binding` is bound to the next handler pointer and may be passed to
+  `http/handle!`. The expansion lowers to the vendor middleware proc form."
+  [next binding & body]
   (let [next-binding (first binding)
         req (nth binding 1)
         res (nth binding 2)
@@ -78,37 +125,60 @@ http__handler_next :: proc(handler: ^h.Handler) -> ^h.Handler {
             (do
               (splice body))))))))
 
-(defmacro router-handler [router]
+(defmacro router-handler
+  "Return the vendor handler value for `router`.
+
+  The handler borrows router state; the router must outlive the handler use."
+  [router]
   (quasiquote
     (h.router_handler (addr (unquote router)))))
 
-(defmacro serve! [server router]
+(defmacro serve!
+  "Attach `router` to `server` and start serving.
+
+  This converts the router to a handler with `http/router-handler` and calls the
+  vendor serve operation."
+  [server router]
   (quasiquote
     (h.serve
       (addr (unquote server))
       (router-handler (unquote router)))))
 
-(defmacro serve-handler! [server handler]
+(defmacro serve-handler!
+  "Attach `handler` to `server` and start serving."
+  [server handler]
   (quasiquote
     (h.serve
       (addr (unquote server))
       (unquote handler))))
 
-(defmacro listen-and-serve! [server router port]
+(defmacro listen-and-serve!
+  "Bind `server` to loopback `port` and serve `router`.
+
+  This combines `http/listen!` and router serving through the vendor
+  listen-and-serve operation."
+  [server router port]
   (quasiquote
     (h.listen_and_serve
       (addr (unquote server))
       (router-handler (unquote router))
       (net.Endpoint {:address net.IP4_Loopback :port (unquote port)}))))
 
-(defmacro listen-and-serve-handler! [server handler port]
+(defmacro listen-and-serve-handler!
+  "Bind `server` to loopback `port` and serve `handler`."
+  [server handler port]
   (quasiquote
     (h.listen_and_serve
       (addr (unquote server))
       (unquote handler)
       (net.Endpoint {:address net.IP4_Loopback :port (unquote port)}))))
 
-(defmacro with-router [binding & body]
+(defmacro with-router
+  "Evaluate `body` with a scoped router binding.
+
+  The router is created with `http/new-router` and destroyed with `defer` after
+  the body. Use this when route registration is local to a block or test."
+  [binding & body]
   (let [router (first binding)]
     (quasiquote
       (let [(unquote router) (new-router)]
@@ -116,7 +186,9 @@ http__handler_next :: proc(handler: ^h.Handler) -> ^h.Handler {
         (do
           (splice body))))))
 
-(defmacro- route [adder router pattern binding & body]
+(defmacro- route
+  "Private route registration helper used by the method-specific route macros."
+  [adder router pattern binding & body]
   (let [req (first binding)
         res (nth binding 1)
         req-param (symbol (str (name req) ":"))
@@ -128,166 +200,278 @@ http__handler_next :: proc(handler: ^h.Handler) -> ^h.Handler {
        (handler [(unquote req) (unquote res)]
          (splice body))))))
 
-(defmacro get! [router pattern binding & body]
+(defmacro get!
+  "Register a GET route on `router` for `pattern`."
+  [router pattern binding & body]
   (quasiquote
     (route h.route_get (unquote router) (unquote pattern) (unquote binding)
       (splice body))))
 
-(defmacro get [router pattern binding & body]
+(defmacro get
+  "Register a GET route on `router` for `pattern`.
+
+  Alias for `http/get!`; route registration mutates the router."
+  [router pattern binding & body]
   (quasiquote
     (get! (unquote router) (unquote pattern) (unquote binding)
       (splice body))))
 
-(defmacro post! [router pattern binding & body]
+(defmacro post!
+  "Register a POST route on `router` for `pattern`."
+  [router pattern binding & body]
   (quasiquote
     (route h.route_post (unquote router) (unquote pattern) (unquote binding)
       (splice body))))
 
-(defmacro post [router pattern binding & body]
+(defmacro post
+  "Register a POST route on `router` for `pattern`.
+
+  Alias for `http/post!`; route registration mutates the router."
+  [router pattern binding & body]
   (quasiquote
     (post! (unquote router) (unquote pattern) (unquote binding)
       (splice body))))
 
-(defmacro put! [router pattern binding & body]
+(defmacro put!
+  "Register a PUT route on `router` for `pattern`."
+  [router pattern binding & body]
   (quasiquote
     (route h.route_put (unquote router) (unquote pattern) (unquote binding)
       (splice body))))
 
-(defmacro put [router pattern binding & body]
+(defmacro put
+  "Register a PUT route on `router` for `pattern`.
+
+  Alias for `http/put!`; route registration mutates the router."
+  [router pattern binding & body]
   (quasiquote
     (put! (unquote router) (unquote pattern) (unquote binding)
       (splice body))))
 
-(defmacro patch! [router pattern binding & body]
+(defmacro patch!
+  "Register a PATCH route on `router` for `pattern`."
+  [router pattern binding & body]
   (quasiquote
     (route h.route_patch (unquote router) (unquote pattern) (unquote binding)
       (splice body))))
 
-(defmacro patch [router pattern binding & body]
+(defmacro patch
+  "Register a PATCH route on `router` for `pattern`.
+
+  Alias for `http/patch!`; route registration mutates the router."
+  [router pattern binding & body]
   (quasiquote
     (patch! (unquote router) (unquote pattern) (unquote binding)
       (splice body))))
 
-(defmacro head! [router pattern binding & body]
+(defmacro head!
+  "Register a HEAD route on `router` for `pattern`."
+  [router pattern binding & body]
   (quasiquote
     (route h.route_head (unquote router) (unquote pattern) (unquote binding)
       (splice body))))
 
-(defmacro head [router pattern binding & body]
+(defmacro head
+  "Register a HEAD route on `router` for `pattern`.
+
+  Alias for `http/head!`; route registration mutates the router."
+  [router pattern binding & body]
   (quasiquote
     (head! (unquote router) (unquote pattern) (unquote binding)
       (splice body))))
 
-(defmacro options! [router pattern binding & body]
+(defmacro options!
+  "Register an OPTIONS route on `router` for `pattern`."
+  [router pattern binding & body]
   (quasiquote
     (route h.route_options (unquote router) (unquote pattern) (unquote binding)
       (splice body))))
 
-(defmacro options [router pattern binding & body]
+(defmacro options
+  "Register an OPTIONS route on `router` for `pattern`.
+
+  Alias for `http/options!`; route registration mutates the router."
+  [router pattern binding & body]
   (quasiquote
     (options! (unquote router) (unquote pattern) (unquote binding)
       (splice body))))
 
-(defmacro delete! [router pattern binding & body]
+(defmacro delete!
+  "Register a DELETE route on `router` for `pattern`."
+  [router pattern binding & body]
   (quasiquote
     (route h.route_delete (unquote router) (unquote pattern) (unquote binding)
       (splice body))))
 
-(defmacro delete [router pattern binding & body]
+(defmacro delete
+  "Register a DELETE route on `router` for `pattern`.
+
+  Alias for `http/delete!`; route registration mutates the router."
+  [router pattern binding & body]
   (quasiquote
     (delete! (unquote router) (unquote pattern) (unquote binding)
       (splice body))))
 
-(defmacro all! [router pattern binding & body]
+(defmacro all!
+  "Register a route for all HTTP methods on `router` for `pattern`."
+  [router pattern binding & body]
   (quasiquote
     (route h.route_all (unquote router) (unquote pattern) (unquote binding)
       (splice body))))
 
-(defmacro all [router pattern binding & body]
+(defmacro all
+  "Register a route for all HTTP methods on `router` for `pattern`.
+
+  Alias for `http/all!`; route registration mutates the router."
+  [router pattern binding & body]
   (quasiquote
     (all! (unquote router) (unquote pattern) (unquote binding)
       (splice body))))
 
-(defmacro listen [port router]
+(defmacro listen
+  "Create a server, install interrupt shutdown, and listen-and-serve `router`.
+
+  This is a convenience macro for small programs. For explicit server lifetime
+  control, use `http/new-server`, `http/server-shutdown-on-interrupt!`, and
+  `http/listen-and-serve!` directly."
+  [port router]
   (quasiquote
       (let [server (new-server)]
       (server-shutdown-on-interrupt! server)
       (listen-and-serve! server (unquote router) (unquote port)))))
 
-(defmacro respond [res status]
+(defmacro respond
+  "Send an empty response with `status`."
+  [res status]
   (quasiquote
     (h.respond (unquote res) (unquote status))))
 
-(defmacro respond-ok [res]
+(defmacro respond-ok
+  "Set status 200 OK and send an empty response."
+  [res]
   (quasiquote
     (do
       (h.response_status (unquote res) h.Status.OK)
       (h.respond (unquote res)))))
 
-(defmacro respond-plain [res text & rest]
+(defmacro respond-plain
+  "Send `text` as a plain-text response.
+
+  An optional final status argument overrides the default vendor status."
+  [res text & rest]
   (if (= (count rest) 0)
     (quasiquote
       (h.respond_plain (unquote res) (unquote text)))
     (quasiquote
       (h.respond_plain (unquote res) (unquote text) (unquote (first rest))))))
 
-(defmacro respond-html [res html & rest]
+(defmacro respond-html
+  "Send `html` as an HTML response.
+
+  An optional final status argument overrides the default vendor status. The HTML
+  string is sent as provided; escaping should happen before calling this macro."
+  [res html & rest]
   (if (= (count rest) 0)
     (quasiquote
       (h.respond_html (unquote res) (unquote html)))
     (quasiquote
       (h.respond_html (unquote res) (unquote html) (unquote (first rest))))))
 
-(defmacro respond-json [res value & rest]
+(defmacro respond-json
+  "Serialize `value` as JSON and send it as the response body.
+
+  An optional final status argument overrides the default vendor status."
+  [res value & rest]
   (if (= (count rest) 0)
     (quasiquote
       (h.respond_json (unquote res) (unquote value)))
     (quasiquote
       (h.respond_json (unquote res) (unquote value) (unquote (first rest))))))
 
-(defmacro respond-file [res path & rest]
+(defmacro respond-file
+  "Send the file at `path` as the response body.
+
+  An optional final status argument overrides the default vendor status."
+  [res path & rest]
   (if (= (count rest) 0)
     (quasiquote
       (h.respond_file (unquote res) (unquote path)))
     (quasiquote
       (h.respond_file (unquote res) (unquote path) (unquote (first rest))))))
 
-(defmacro respond-file-content [res path content & rest]
+(defmacro respond-file-content
+  "Send already-loaded file `content` using `path` for response metadata.
+
+  `content` is treated as string bytes and passed directly to the vendor
+  response helper. An optional final status argument overrides the default."
+  [res path content & rest]
   (if (= (count rest) 0)
     (quasiquote
       (http__respond_file_content_text (unquote res) (unquote path) (unquote content)))
     (quasiquote
       (http__respond_file_content_text (unquote res) (unquote path) (unquote content) (unquote (first rest))))))
 
-(defmacro respond-dir [res base target request]
+(defmacro respond-dir
+  "Serve a directory response rooted at `base`.
+
+  `target` and `request` are forwarded to the vendor directory responder."
+  [res base target request]
   (quasiquote
     (h.respond_dir (unquote res) (unquote base) (unquote target) (unquote request))))
 
-(defmacro request-cookie [req key]
+(defmacro request-cookie
+  "Return cookie `key` from request `req`.
+
+  The return shape is the vendor cookie lookup result, typically value plus
+  success flag."
+  [req key]
   (quasiquote
     (h.request_cookie_get (unquote req) (unquote key))))
 
-(defmacro request-cookies [req]
+(defmacro request-cookies
+  "Return the parsed cookies for request `req`."
+  [req]
   (quasiquote
     (h.request_cookies (unquote req))))
 
-(defmacro set-cookie! [res name value]
+(defmacro set-cookie!
+  "Append a response cookie with `name` and `value`.
+
+  This mutates the response cookie array in place."
+  [res name value]
   (quasiquote
     (append
       (addr (:cookies (deref (unquote res))))
       (h.Cookie {:name (unquote name) :value (unquote value)}))))
 
-(defn new-rate-limit-opts [window: time.Duration max: int] -> h.Rate_Limit_Opts
+(defn new-rate-limit-opts
+  "Create rate-limit options.
+
+  `window` is the time window and `max` is the maximum request count accepted
+  within that window by the vendor rate limiter."
+  [window: time.Duration max: int] -> h.Rate_Limit_Opts
   (h.Rate_Limit_Opts {:window window :max max}))
 
-(defn new-rate-limit-data [] -> h.Rate_Limit_Data
+(defn new-rate-limit-data
+  "Create empty rate-limit state.
+
+  The returned value owns vendor rate-limit state and should be destroyed with
+  `http/rate-limit-destroy!` when no longer needed."
+  [] -> h.Rate_Limit_Data
   (h.Rate_Limit_Data {}))
 
-(defmacro rate-limit-destroy! [data]
+(defmacro rate-limit-destroy!
+  "Destroy rate-limit state created by `http/new-rate-limit-data`."
+  [data]
   (quasiquote
     (h.rate_limit_destroy (addr (unquote data)))))
 
-(defmacro rate-limit [data next opts]
+(defmacro rate-limit
+  "Create rate-limiting middleware around `next`.
+
+  `data` holds mutable limiter state and `opts` controls the window and maximum
+  accepted request count. Both are passed by address to the vendor limiter."
+  [data next opts]
   (quasiquote
     (h.rate_limit
       (addr (unquote data))

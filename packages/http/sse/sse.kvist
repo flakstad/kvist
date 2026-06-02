@@ -55,15 +55,27 @@ __kvist_http_sse_set_user_int :: proc(stream: ^h.Sse, value: int) {
 }
 ")
 
-(defmacro new-stream [res]
+(defmacro new-stream
+  "Create and start a server-sent events stream for response `res`.
+
+  The stream is allocated in the current temporary allocator by the vendor
+  wrapper and is already started before it is returned."
+  [res]
   (quasiquote
     (__kvist_http_sse_new_started (unquote res))))
 
-(defmacro new-stream-on-error [res on-error]
+(defmacro new-stream-on-error
+  "Create and start an SSE stream with a custom error callback."
+  [res on-error]
   (quasiquote
     (__kvist_http_sse_new_started_on_error (unquote res) (unquote on-error))))
 
-(defmacro on-error [name binding & body]
+(defmacro on-error
+  "Define an SSE error callback proc.
+
+  `binding` must contain `[stream err]`. The generated proc receives `^h.Sse`
+  and `net.Send_Error` and can be passed to `sse/new-stream-on-error`."
+  [name binding & body]
   (let [stream (first binding)
         err (nth binding 1)
         stream-param (symbol (str (name stream) ":"))
@@ -73,7 +85,13 @@ __kvist_http_sse_set_user_int :: proc(stream: ^h.Sse, value: int) {
         (do
           (splice body))))))
 
-(defmacro on-timeout [name binding & body]
+(defmacro on-timeout
+  "Define an SSE timeout callback proc.
+
+  `binding` must contain `[op stream]`. The generated proc receives
+  `^nbio.Operation` and `^h.Sse` and can be passed to
+  `sse/schedule-timeout!`."
+  [name binding & body]
   (let [op (first binding)
         stream (nth binding 1)
         op-param (symbol (str (name op) ":"))
@@ -83,11 +101,18 @@ __kvist_http_sse_set_user_int :: proc(stream: ^h.Sse, value: int) {
         (do
           (splice body))))))
 
-(defmacro start! [stream]
+(defmacro start!
+  "Start an initialized SSE `stream`."
+  [stream]
   (quasiquote
     (h.sse_start (unquote stream))))
 
-(defmacro with-stream [binding & body]
+(defmacro with-stream
+  "Evaluate `body` with a newly started SSE stream binding.
+
+  `binding` must contain `[stream res]`. The stream is created from response
+  `res` and bound to `stream` for the body."
+  [binding & body]
   (let [stream (first binding)
         res (nth binding 1)]
     (quasiquote
@@ -95,45 +120,70 @@ __kvist_http_sse_set_user_int :: proc(stream: ^h.Sse, value: int) {
         (do
           (splice body))))))
 
-(defmacro send! [stream data]
+(defmacro send!
+  "Send a data-only SSE event on `stream`."
+  [stream data]
   (quasiquote
     (h.sse_event (unquote stream) (h.Sse_Event { :data (unquote data) }))))
 
-(defmacro send-event! [stream event data]
+(defmacro send-event!
+  "Send a named SSE event with `event` and `data`."
+  [stream event data]
   (quasiquote
     (h.sse_event (unquote stream) (h.Sse_Event { :event (unquote event) :data (unquote data) }))))
 
-(defmacro comment! [stream text]
+(defmacro comment!
+  "Send an SSE comment frame."
+  [stream text]
   (quasiquote
     (h.sse_event (unquote stream) (h.Sse_Event { :comment (unquote text) }))))
 
-(defmacro retry! [stream milliseconds]
+(defmacro retry!
+  "Send an SSE retry interval in milliseconds."
+  [stream milliseconds]
   (quasiquote
     (h.sse_event (unquote stream) (h.Sse_Event { :retry (unquote milliseconds) }))))
 
-(defmacro schedule-timeout! [delay stream callback]
+(defmacro schedule-timeout!
+  "Schedule `callback` to run after `delay` for `stream`.
+
+  Any previous timeout operation stored on the stream is removed before the new
+  timeout is installed."
+  [delay stream callback]
   (quasiquote
     (__kvist_http_sse_schedule_timeout (unquote delay) (unquote stream) (unquote callback))))
 
-(defmacro closed? [stream]
+(defmacro closed?
+  "Return true when `stream` is closed or past the ending state."
+  [stream]
   (quasiquote
     (__kvist_http_sse_closed (unquote stream))))
 
-(defmacro user-int [stream]
+(defmacro user-int
+  "Return the integer stored in the stream user-data slot."
+  [stream]
   (quasiquote
     (__kvist_http_sse_user_int (unquote stream))))
 
-(defmacro set-user-int! [stream value]
+(defmacro set-user-int!
+  "Store integer `value` in the stream user-data slot."
+  [stream value]
   (quasiquote
     (__kvist_http_sse_set_user_int (unquote stream) (unquote value))))
 
-(defmacro flush! [_stream]
+(defmacro flush!
+  "Compatibility no-op for APIs that expect an explicit stream flush."
+  [_stream]
   '(do))
 
-(defmacro close! [stream]
+(defmacro close!
+  "End the SSE stream."
+  [stream]
   (quasiquote
     (h.sse_end (unquote stream))))
 
-(defmacro destroy! [stream]
+(defmacro destroy!
+  "Destroy SSE stream state through the vendor package."
+  [stream]
   (quasiquote
     (h.sse_destroy (unquote stream))))
