@@ -273,7 +273,7 @@ is_source_import_path :: proc(path: string) -> bool {
 
 is_builtin_kvist_package_path :: proc(path: string) -> bool {
     switch path {
-    case "kvist:core", "kvist:arr", "kvist:str", "kvist:map", "kvist:set", "kvist:struct", "kvist:io", "kvist:json", "kvist:http", "kvist:http/client", "kvist:http/session", "kvist:http/sse", "kvist:http/datastar":
+    case "kvist:core", "kvist:arr", "kvist:str", "kvist:map", "kvist:set", "kvist:struct", "kvist:io", "kvist:json", "kvist:hiccup", "kvist:http", "kvist:http/client", "kvist:http/session", "kvist:http/sse", "kvist:http/datastar", "kvist:hot", "kvist:live", "kvist:reload", "kvist:test":
         return true
     }
     return false
@@ -281,6 +281,20 @@ is_builtin_kvist_package_path :: proc(path: string) -> bool {
 
 shipped_source_import_allows_builtin_fallback :: proc(import_path: string) -> bool {
     return is_builtin_kvist_package_path(import_path)
+}
+
+is_package_anchor_filename :: proc(dir_path, file_name: string) -> bool {
+    if file_name == "main.kvist" || file_name == "package.kvist" {
+        return true
+    }
+    if !strings.has_suffix(file_name, ".kvist") {
+        return false
+    }
+    _, dir_name := os.split_path(dir_path)
+    if dir_name == "" {
+        return false
+    }
+    return file_name == fmt.tprintf("%s.kvist", dir_name)
 }
 
 resolve_shipped_source_import_path :: proc(importer_path, import_path: string) -> (string, Compile_Error, bool) {
@@ -587,7 +601,7 @@ read_root_package_files :: proc(path: string) -> ([]Package_File, Compile_Error,
             return nil, Compile_Error{message = fmt.tprintf("source package file has duplicate package declarations: %s", file_path)}, false
         }
         if file_package_name == package_name {
-            if entry.name == "main.kvist" || entry.name == "package.kvist" {
+            if is_package_anchor_filename(dir, entry.name) {
                 has_anchor = true
             }
             append(&matched, Package_File{path = file_path, source = file_source, package_name = file_package_name, forms = file_forms})

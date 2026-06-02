@@ -1,41 +1,93 @@
 (package core)
 
-(defmacro when [test & body]
+(defmacro when
+  "Evaluate `body` only when `test` is true.
+
+  This is the expression-level conditional helper for side effects and simple
+  guarded code. It expands to Kvist's core conditional lowering, so it does not
+  introduce a callback or runtime dispatch layer."
+  [test & body]
   (quasiquote
     (kvist/core-when (unquote test) (splice body))))
 
-(defmacro cond [& clauses]
+(defmacro cond
+  "Evaluate test/expression clauses from left to right.
+
+  Clauses are written as `test expr` pairs, with `:else expr` as the final
+  fallback. The first truthy test selects its expression. This is a macro, not a
+  runtime dispatcher, and lowers to ordinary conditional code."
+  [& clauses]
   (quasiquote
     (kvist/core-cond (splice clauses))))
 
-(defmacro comment [& body]
+(defmacro comment
+  "Ignore all body forms at compile time.
+
+  Use this for scratch forms, examples, or temporarily disabled code in a Kvist
+  file. The body is not emitted to Odin and is not evaluated."
+  [& body]
   (quasiquote
     (kvist/core-comment)))
 
-(defmacro switch [value & clauses]
+(defmacro switch
+  "Dispatch on `value` using Odin-style switch lowering.
+
+  Clauses are written as case/expression pairs, with `:else expr` for the
+  fallback. Cases lower to direct Odin switch cases; there is no runtime table
+  or dynamic dispatch."
+  [value & clauses]
   (quasiquote
     (kvist/core-switch (unquote value) (splice clauses))))
 
-(defmacro -> [value & steps]
+(defmacro ->
+  "Thread `value` through `steps` as the first argument.
+
+  Each step receives the result of the previous step in first-argument position.
+  A bare symbol step becomes `(step current)`, while a list step inserts the
+  current value after the head. This is a compile-time rewrite."
+  [value & steps]
   (quasiquote
     (kvist/core-thread-first (unquote value) (splice steps))))
 
-(defmacro ->> [value & steps]
+(defmacro ->>
+  "Thread `value` through `steps` as the last argument.
+
+  Each step receives the result of the previous step in final-argument position.
+  This is useful for collection-style pipelines and expands at compile time
+  without creating intermediate function wrappers."
+  [value & steps]
   (quasiquote
     (kvist/core-thread-last (unquote value) (splice steps))))
 
-(defmacro count [collection]
+(defmacro count
+  "Return the size of a collection or string.
+
+  For arrays, slices, maps, sets, and strings this lowers to the appropriate
+  direct Odin length operation. Strings are counted in bytes."
+  [collection]
   (quasiquote
     (kvist/core/count (unquote collection))))
 
-(defmacro get [target key & rest]
+(defmacro get
+  "Index or look up `key` in `target`.
+
+  Arrays, slices, fixed arrays, and strings use direct indexing. Maps support an
+  optional default value: `(core/get m k default)` returns `default` when `k` is
+  absent. The operation is selected at compile time from the target shape."
+  [target key & rest]
   (if (= (kvist/count rest) 0)
     (quasiquote
       (kvist/core/get (unquote target) (unquote key)))
     (quasiquote
       (kvist/core/get (unquote target) (unquote key) (unquote (kvist/first rest))))))
 
-(defmacro slice [target & rest]
+(defmacro slice
+  "Return a slice view of `target`.
+
+  With no bounds, returns `target[:]`. With one bound, slices from that start
+  index to the end. With two bounds, slices from start up to but not including
+  end. This is direct Odin slicing and does not copy elements or bytes."
+  [target & rest]
   (if (= (kvist/count rest) 0)
     (quasiquote
       (kvist/core/slice (unquote target)))
@@ -45,23 +97,50 @@
       (quasiquote
         (kvist/core/slice (unquote target) (unquote (kvist/first rest)) (unquote (kvist/nth rest 1)))))))
 
-(defmacro empty? [collection]
+(defmacro empty?
+  "Return true when `collection` contains no elements.
+
+  This lowers to a direct length check for supported collection shapes and
+  strings. It allocates nothing."
+  [collection]
   (quasiquote
     (kvist/core/empty? (unquote collection))))
 
-(defmacro contains? [collection key]
+(defmacro contains?
+  "Return true when `collection` contains `key`.
+
+  Maps and sets use direct membership checks. Array-family collections scan for
+  an equal value. The lowering is chosen at compile time from the collection
+  expression."
+  [collection key]
   (quasiquote
     (kvist/core/contains? (unquote collection) (unquote key))))
 
-(defmacro in [value collection]
+(defmacro in
+  "Return true when `value` is present in `collection`.
+
+  This lowers to Odin's `in` operation. Prefer package-specific predicates when
+  you need collection-specific behavior documented at the call site."
+  [value collection]
   (quasiquote
     (kvist/core-in (unquote value) (unquote collection))))
 
-(defmacro not-in [value collection]
+(defmacro not-in
+  "Return true when `value` is absent from `collection`.
+
+  This is the negated form of `core/in` and lowers directly to Odin membership
+  code."
+  [value collection]
   (quasiquote
     (kvist/core-not-in (unquote value) (unquote collection))))
 
-(defmacro when-let [binding & body]
+(defmacro when-let
+  "Bind a value and boolean result, then run `body` when the boolean is true.
+
+  The binding must be `[value-name ok-name expr]`, where `expr` returns two
+  values. Both names are bound with `let`; `body` runs only when `ok-name` is
+  true. This is useful for Odin optional-ok style APIs."
+  [binding & body]
   (if (vector? binding)
     (if (= (kvist/count binding) 3)
       (if (symbol? (kvist/first binding))
@@ -76,7 +155,13 @@
       (error "when-let expects [value bool expr] binding"))
     (error "when-let expects [value bool expr] binding")))
 
-(defmacro if-let [binding & body]
+(defmacro if-let
+  "Bind a value and boolean result, then choose between two expressions.
+
+  The binding must be `[value-name ok-name expr]`, followed by a then expression
+  and an else expression. The then branch is used when `ok-name` is true;
+  otherwise the else branch is used."
+  [binding & body]
   (if (= (kvist/count body) 2)
     (if (vector? binding)
       (if (= (kvist/count binding) 3)
@@ -94,7 +179,13 @@
       (error "if-let expects [value bool expr] binding"))
     (error "if-let expects [value bool expr], then, and else")))
 
-(defmacro when-ok [binding & body]
+(defmacro when-ok
+  "Bind a value and error result, then run `body` when the error is nil.
+
+  The binding must be `[value-name err-name expr]`, where `expr` returns a value
+  and an Odin error. `body` runs only when `err-name` equals Odin's zero error
+  value `{}`."
+  [binding & body]
   (if (vector? binding)
     (if (= (kvist/count binding) 3)
       (if (symbol? (kvist/first binding))
@@ -109,7 +200,13 @@
       (error "when-ok expects [value err expr] binding"))
     (error "when-ok expects [value err expr] binding")))
 
-(defmacro if-ok [binding & body]
+(defmacro if-ok
+  "Bind a value and error result, then choose between success and error branches.
+
+  The binding must be `[value-name err-name expr]`, followed by a success
+  expression and a failure expression. The success branch is selected when
+  `err-name` equals Odin's zero error value `{}`."
+  [binding & body]
   (if (= (kvist/count body) 2)
     (if (vector? binding)
       (if (= (kvist/count binding) 3)
@@ -127,7 +224,13 @@
       (error "if-ok expects [value err expr] binding"))
     (error "if-ok expects [value err expr], then, and else")))
 
-(defmacro update! [target key-or-field value-or-updater & rest]
+(defmacro update!
+  "Mutate a field, indexed slot, or map key in place.
+
+  With a plain value, assigns that value. With an updater and additional
+  arguments, reads the current value and writes the updater result. This lowers
+  to direct Odin mutation and is intended for explicit in-place updates."
+  [target key-or-field value-or-updater & rest]
   (if (= (kvist/count rest) 0)
     (quasiquote
       (kvist/core-update! (unquote target) (unquote key-or-field) (unquote value-or-updater)))
@@ -137,7 +240,13 @@
                           (unquote value-or-updater)
                           (splice rest)))))
 
-(defmacro update [target key-or-field value-or-updater & rest]
+(defmacro update
+  "Return an updated copy of `target`.
+
+  This is the persistent counterpart to `core/update!` for supported target
+  shapes. It leaves the original value unchanged and lowers to explicit copy and
+  update code where supported."
+  [target key-or-field value-or-updater & rest]
   (if (= (kvist/count rest) 0)
     (quasiquote
       (kvist/core-update (unquote target) (unquote key-or-field) (unquote value-or-updater)))
@@ -147,25 +256,51 @@
                          (unquote value-or-updater)
                          (splice rest)))))
 
-(defmacro or-else [expr fallback]
+(defmacro or-else
+  "Return an optional-ok value or a fallback.
+
+  `expr` must return `[value, ok]`. When `ok` is true, the value is returned;
+  otherwise `fallback` is returned. This expands to direct conditional code."
+  [expr fallback]
   (quasiquote
     (kvist/core-or-else (unquote expr) (unquote fallback))))
 
-(defmacro doc [name]
+(defmacro doc
+  "Print documentation for `name`.
+
+  `name` is resolved through Kvist's known symbols and package metadata. This is
+  a developer-facing helper for interactive use and examples, not a general
+  runtime reflection API."
+  [name]
   (quasiquote
     (kvist/core-doc (unquote name))))
 
-(defmacro nil? [value]
+(defmacro nil?
+  "Return true when `value` is nil.
+
+  This lowers to a direct nil comparison and allocates nothing."
+  [value]
   (quasiquote
     (kvist/core-nil? (unquote value))))
 
-(defmacro tap> [value & rest]
+(defmacro tap>
+  "Print `value` for debugging and return it unchanged.
+
+  An optional label may be supplied to identify the tap point. Because the input
+  value is returned, `tap>` can be inserted into pipelines without changing the
+  data flowing through them."
+  [value & rest]
   (if (= (kvist/count rest) 0)
     (quasiquote
       (kvist/core-tap (unquote value)))
     (quasiquote
       (kvist/core-tap (unquote value) (unquote (kvist/first rest))))))
 
-(defmacro println [& values]
+(defmacro println
+  "Print values followed by a newline.
+
+  This is the core convenience wrapper for formatted console output. It lowers
+  to Odin `fmt` output and requests the required import automatically."
+  [& values]
   (quasiquote
     (kvist/core-println (splice values))))

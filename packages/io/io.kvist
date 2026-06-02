@@ -2,11 +2,19 @@
 (import os "core:os")
 
 (defn read
-  "Read a file into owned bytes using the current allocator."
+  "Read the entire file at `path` into owned bytes.
+
+  The returned byte slice is allocated with the current allocator and belongs to
+  the caller. On success, `err` is nil. On failure, `data` is the zero value and
+  `err` is the Odin OS error from `os.read_entire_file`."
   [path: string] -> [data: []byte, err: os.Error] #force_inline
   (os.read_entire_file path context.allocator))
 
 (defn write
-  "Write bytes or text to a file."
+  "Write `data` to the file at `path`.
+
+  `data` may be text or bytes accepted by Odin `os.write_entire_file`. Existing
+  file contents are replaced. The function returns the Odin OS error value, nil
+  on success."
   [path: string, data: $T] -> os.Error #force_inline
   (os.write_entire_file path data))

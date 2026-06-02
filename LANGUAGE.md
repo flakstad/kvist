@@ -1797,7 +1797,8 @@ surface syntax.
 The compiler also currently supports a few mechanically lowered forms that were
 not part of the original expected-core list:
 
-- `(core/contains? collection key)` for collection membership checks
+- `(core/contains? collection key)` for collection membership checks across
+  arrays, maps/sets, and strings
 - `(core/in value collection)` and `(core/not-in value collection)` for direct
   Odin-style membership tests
 - `(break)` and `(continue)`

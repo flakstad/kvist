@@ -12,6 +12,7 @@ repo_temp_test_path :: proc(name: string) -> (string, bool) {
     if !ok_root {
         return "", false
     }
+    defer delete(root)
     path, join_err := os.join_path({root, name}, context.allocator)
     if join_err != nil {
         return "", false
@@ -2105,7 +2106,7 @@ compile_operator_forms :: proc(t: ^testing.T) {
     defer delete(output)
 
     testing.expect_value(t, strings.contains(output, "has_key :: proc(lookup: map[string]int, key: string) -> bool {\n    return (key) in (lookup)\n}"), true)
-    testing.expect_value(t, strings.contains(output, "contains_key :: proc(lookup: map[string]int, key: string) -> bool {\n    return core/contains_p(lookup, key)\n}"), true)
+    testing.expect_value(t, strings.contains(output, "contains_key :: proc(lookup: map[string]int, key: string) -> bool {\n    return (key) in (lookup)\n}"), true)
     testing.expect_value(t, strings.contains(output, "missing_key :: proc(lookup: map[string]int, key: string) -> bool {\n    return !((key) in (lookup))\n}"), true)
 }
 
@@ -2130,8 +2131,8 @@ compile_explicit_core_package_helpers :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    testing.expect_value(t, strings.contains(output, "core/contains_p(xs, 2)"), true)
-    testing.expect_value(t, strings.contains(output, "core/contains_p(lookup, \"one\")"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_contains_value((xs)[:], 2)"), true)
+    testing.expect_value(t, strings.contains(output, "(\"one\") in (lookup)"), true)
 }
 
 @(test)
@@ -4050,6 +4051,174 @@ cli_test_command_runs_builtin_package_suite :: proc(t: ^testing.T) {
 }
 
 @(test)
+cli_test_command_runs_http_and_hiccup_package_suite :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-http-hiccup-package-suite-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    repo_root := compiler_test_repo_root()
+    kvist_bin, bin_ok := build_test_kvist_binary(t, repo_root, dir)
+    if !bin_ok {
+        return
+    }
+    defer delete(kvist_bin)
+
+    path, join_err := os.join_path({repo_root, "examples", "http-and-hiccup-package-tests.kvist"}, context.allocator)
+    testing.expect_value(t, join_err == nil, true)
+    if join_err != nil {
+        return
+    }
+    defer delete(path)
+
+    state, stdout, stderr, exec_err := os.process_exec(
+        os.Process_Desc{
+            command = {kvist_bin, "test", path},
+            working_dir = repo_root,
+        },
+        context.allocator,
+    )
+    defer delete(stdout)
+    defer delete(stderr)
+
+    testing.expect_value(t, exec_err == nil, true)
+    if exec_err != nil {
+        return
+    }
+    testing.expect_value(t, state.exited, true)
+    testing.expect_value(t, state.exit_code, 0)
+}
+
+@(test)
+cli_test_command_runs_test_package_suite :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-test-package-suite-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    repo_root := compiler_test_repo_root()
+    kvist_bin, bin_ok := build_test_kvist_binary(t, repo_root, dir)
+    if !bin_ok {
+        return
+    }
+    defer delete(kvist_bin)
+
+    path, join_err := os.join_path({repo_root, "examples", "test-package-tests.kvist"}, context.allocator)
+    testing.expect_value(t, join_err == nil, true)
+    if join_err != nil {
+        return
+    }
+    defer delete(path)
+
+    state, stdout, stderr, exec_err := os.process_exec(
+        os.Process_Desc{
+            command = {kvist_bin, "test", path},
+            working_dir = repo_root,
+        },
+        context.allocator,
+    )
+    defer delete(stdout)
+    defer delete(stderr)
+
+    testing.expect_value(t, exec_err == nil, true)
+    if exec_err != nil {
+        return
+    }
+    testing.expect_value(t, state.exited, true)
+    testing.expect_value(t, state.exit_code, 0)
+}
+
+@(test)
+cli_test_command_runs_arr_package_suite :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-arr-package-suite-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    repo_root := compiler_test_repo_root()
+    kvist_bin, bin_ok := build_test_kvist_binary(t, repo_root, dir)
+    if !bin_ok {
+        return
+    }
+    defer delete(kvist_bin)
+
+    path, join_err := os.join_path({repo_root, "examples", "arr-package-tests.kvist"}, context.allocator)
+    testing.expect_value(t, join_err == nil, true)
+    if join_err != nil {
+        return
+    }
+    defer delete(path)
+
+    state, stdout, stderr, exec_err := os.process_exec(
+        os.Process_Desc{
+            command = {kvist_bin, "test", path},
+            working_dir = repo_root,
+        },
+        context.allocator,
+    )
+    defer delete(stdout)
+    defer delete(stderr)
+
+    testing.expect_value(t, exec_err == nil, true)
+    if exec_err != nil {
+        return
+    }
+    testing.expect_value(t, state.exited, true)
+    testing.expect_value(t, state.exit_code, 0)
+}
+
+@(test)
+cli_test_command_runs_package_edge_suite :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-package-edge-suite-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    repo_root := compiler_test_repo_root()
+    kvist_bin, bin_ok := build_test_kvist_binary(t, repo_root, dir)
+    if !bin_ok {
+        return
+    }
+    defer delete(kvist_bin)
+
+    path, join_err := os.join_path({repo_root, "examples", "package-edge-tests.kvist"}, context.allocator)
+    testing.expect_value(t, join_err == nil, true)
+    if join_err != nil {
+        return
+    }
+    defer delete(path)
+
+    state, stdout, stderr, exec_err := os.process_exec(
+        os.Process_Desc{
+            command = {kvist_bin, "test", path},
+            working_dir = repo_root,
+        },
+        context.allocator,
+    )
+    defer delete(stdout)
+    defer delete(stderr)
+
+    testing.expect_value(t, exec_err == nil, true)
+    if exec_err != nil {
+        return
+    }
+    testing.expect_value(t, state.exited, true)
+    testing.expect_value(t, state.exit_code, 0)
+}
+
+@(test)
 compile_let_defer_final_if_scalar_use :: proc(t: ^testing.T) {
     source := `(package main)
 (import core "kvist:core")
@@ -5892,6 +6061,59 @@ main :: proc() {
 }
 `
     testing.expect_value(t, output, expected)
+}
+
+@(test)
+compile_soa_types_new_column_access_and_push :: proc(t: ^testing.T) {
+    source := `(package main)
+(import core "kvist:core")
+(import arr "kvist:arr")
+
+(defstruct Particle {
+  :mass f32
+  :id int
+})
+
+(defn fixed-first [] -> f32
+  (let [particles (new #soa[2]Particle
+                    [(Particle {:mass 1 :id 10})
+                     (Particle {:mass 2 :id 20})])]
+    (arr/get (:mass particles) 0)))
+
+(defn add-particle! [particles: ^#soa[dynamic]Particle
+                     particle: Particle]
+  (arr/push! particles particle)
+  (return))
+
+(defn dynamic-score [] -> f32
+  (let [particles (new #soa[dynamic]Particle
+                    [(Particle {:mass 1 :id 10})])]
+    (defer (delete particles))
+    (arr/push! particles (Particle {:mass 2 :id 20}))
+    (core/update! (:mass particles) 0 12)
+    (+ (arr/get (:mass particles) 0)
+       (:mass (arr/get particles 1)))))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "fixed_first :: proc() -> f32"), true)
+    testing.expect_value(t, strings.contains(output, "particles := #soa[2]Particle{"), true)
+    testing.expect_value(t, strings.contains(output, "return particles.mass[0]"), true)
+    testing.expect_value(t, strings.contains(output, "add_particle_bang :: proc(particles: ^#soa[dynamic]Particle, particle: Particle)"), true)
+    testing.expect_value(t, strings.contains(output, "append_soa(particles, particle)"), true)
+    testing.expect_value(t, strings.contains(output, "dynamic_score :: proc() -> f32"), true)
+    testing.expect_value(t, strings.contains(output, "particles := (proc() -> #soa[dynamic]Particle {"), true)
+    testing.expect_value(t, strings.contains(output, "out := make(#soa[dynamic]Particle)"), true)
+    testing.expect_value(t, strings.contains(output, "append_soa(&out, Particle{"), true)
+    testing.expect_value(t, strings.contains(output, "append_soa(&(particles), Particle{"), true)
+    testing.expect_value(t, strings.contains(output, "(particles.mass)[0] = 12"), true)
+    testing.expect_value(t, strings.contains(output, "return (particles.mass[0]) + (particles[1].mass)"), true)
 }
 
 @(test)

@@ -22,7 +22,11 @@ block so `C-c C-e` and `C-c C-c` are practical.
 - `macro-union-helpers.kvist`: recursive macro DSL that emits a union plus variant constructors.
 - `macro-messages.kvist`: message-family DSL that emits payload structs, a tagged union, and constructors.
 - `testing.kvist`: shipped `kvist:test` macros including `t/deftest`, `t/is`, nested `t/testing`, `t/are`, and `t/use-fixtures` with `:each` / `:once`.
+- `test-package-tests.kvist`: executable `kvist:test` coverage for the `kvist:test` package itself, including fixtures, nested contexts, and `t/are`.
+- `arr-package-tests.kvist`: executable `kvist:test` coverage for additional `kvist:arr` runtime surface such as `range`, `rest`, `mapcat`, proc-keyed grouping, `sort`, `sort-by`, and bang helpers.
 - `builtin-package-tests.kvist`: executable `kvist:test` coverage for shipped `core`, `arr`, `map`, `set`, `str`, `io`, `json`, and `struct` packages.
+- `package-edge-tests.kvist`: executable `kvist:test` edge-case coverage for shipped `core`, `map`, `set`, `str`, `struct`, `io`, and `json` packages.
+- `http-and-hiccup-package-tests.kvist`: executable `kvist:test` coverage for shipped `hiccup`, `http`, `http/client`, and `http/session` packages, plus compile-surface smoke for `http/sse` and `http/datastar`.
 - `hiccup-interpolation.kvist`: Hiccup attrs and child nodes with direct Kvist expression interpolation, including `if`, `when`, `nil` omission, and `[:<> ...]` fragments.
 - `closures.kvist`: non-capturing `fn` literals plus captured callbacks for selected non-escaping helper sites such as `map`, `filter`, `remove`, `keep`, and their bang variants.
 - `http-server.kvist`: shipped `kvist:http` package over vendored `odin-http`, using the explicit stateful router/server lifecycle and thin response helpers.

@@ -2,41 +2,87 @@
 (import core "kvist:core")
 (import map "kvist:map")
 
-(defmacro empty [elem-type & rest]
+(defmacro empty
+  "Create an empty Odin set.
+
+  `(set/empty T)` creates a `set[T]` with default capacity.
+  `(set/empty T capacity)` preallocates for approximately `capacity` elements.
+  The set is allocated with the current allocator and has ordinary Odin set
+  lifetime."
+  [elem-type & rest]
   (if (= (kvist/count rest) 0)
     (quasiquote
       (kvist/set/empty (unquote elem-type)))
     (quasiquote
       (kvist/set/empty (unquote elem-type) (unquote (kvist/first rest))))))
 
-(defmacro of [elem-type values]
+(defmacro of
+  "Create a set from `values`.
+
+  Duplicate values collapse to one set member. The result is a newly allocated
+  Odin set whose element type is `elem-type`."
+  [elem-type values]
   (quasiquote
     (kvist/set/of (unquote elem-type) (unquote values))))
 
-(defmacro add! [s value]
+(defmacro add!
+  "Add `value` to set `s` in place.
+
+  This mutates the existing set and performs no replacement allocation beyond
+  any growth Odin needs for the set itself."
+  [s value]
   (quasiquote
     (kvist/set/add! (unquote s) (unquote value))))
 
-(defmacro remove! [s value]
+(defmacro remove!
+  "Remove `value` from set `s` in place.
+
+  Removing a value that is not present is allowed. The operation mutates the
+  existing set and does not allocate a replacement set."
+  [s value]
   (quasiquote
     (kvist/set/remove! (unquote s) (unquote value))))
 
-(defmacro union! [target source]
+(defmacro union!
+  "Mutate `target` so it contains every value from `source`.
+
+  Values already present in `target` remain present. This is the in-place
+  version of `set/union` and avoids allocating a new set."
+  [target source]
   (quasiquote
     (kvist/set/union! (unquote target) (unquote source))))
 
-(defmacro intersection! [target source]
+(defmacro intersection!
+  "Mutate `target` so it keeps only values also present in `source`.
+
+  Values not contained by `source` are removed from `target`. This is the
+  in-place version of `set/intersection`."
+  [target source]
   (quasiquote
     (kvist/set/intersection! (unquote target) (unquote source))))
 
-(defmacro difference! [target source]
+(defmacro difference!
+  "Mutate `target` so it removes every value present in `source`.
+
+  This is the in-place version of `set/difference`; it preserves values from
+  `target` that are not members of `source`."
+  [target source]
   (quasiquote
     (kvist/set/difference! (unquote target) (unquote source))))
 
-(defn contains? [s: set[$T], value: T] -> bool #force_inline
+(defn contains?
+  "Return true when `value` is a member of `s`.
+
+  This lowers to direct set/map membership and does not allocate."
+  [s: set[$T], value: T] -> bool #force_inline
   (map/contains? s value))
 
-(proc union [lhs: set[$T], rhs: set[$T]] -> set[T] #force_inline
+(proc union
+  "Return a new set containing all values from `lhs` and `rhs`.
+
+  Neither input set is mutated. The result is allocated with enough capacity for
+  both inputs before values are inserted."
+  [lhs: set[$T], rhs: set[$T]] -> set[T] #force_inline
   (let [out (set/empty T (+ (odin "len(lhs)") (odin "len(rhs)")))]
     (for [value _ lhs]
       (core/update! out value true))
@@ -44,7 +90,13 @@
       (core/update! out value true))
     out))
 
-(proc intersection [lhs: set[$T], rhs: set[$T]] -> set[T] #force_inline
+(proc intersection
+  "Return a new set containing values present in both `lhs` and `rhs`.
+
+  Neither input set is mutated. The implementation scans the smaller set and
+  probes the larger one, avoiding unnecessary work while still lowering to
+  direct Odin loops and membership checks."
+  [lhs: set[$T], rhs: set[$T]] -> set[T] #force_inline
   (let [lhs-count (odin "len(lhs)")
         rhs-count (odin "len(rhs)")
         cap lhs-count
@@ -62,14 +114,24 @@
           (core/update! out value true)))
       out)))
 
-(proc difference [lhs: set[$T], rhs: set[$T]] -> set[T] #force_inline
+(proc difference
+  "Return a new set containing values from `lhs` that are absent from `rhs`.
+
+  Neither input set is mutated. The result is allocated with capacity based on
+  `lhs` and populated by direct membership checks against `rhs`."
+  [lhs: set[$T], rhs: set[$T]] -> set[T] #force_inline
   (let [out (set/empty T (odin "len(lhs)"))]
     (for [value _ lhs]
       (core/when (not (map/contains? rhs value))
         (core/update! out value true)))
     out))
 
-(defn subset? [lhs: set[$T], rhs: set[$T]] -> bool #force_inline
+(defn subset?
+  "Return true when every value in `lhs` is also present in `rhs`.
+
+  This performs direct membership checks and short-circuits on the first missing
+  value. If `lhs` is larger than `rhs`, it returns false immediately."
+  [lhs: set[$T], rhs: set[$T]] -> bool #force_inline
   (let [ok? true]
     (core/when (> (odin "len(lhs)") (odin "len(rhs)"))
       (return false))
@@ -80,10 +142,20 @@
           (break))))
     ok?))
 
-(defn superset? [lhs: set[$T], rhs: set[$T]] -> bool #force_inline
+(defn superset?
+  "Return true when every value in `rhs` is also present in `lhs`.
+
+  This is equivalent to `(set/subset? rhs lhs)` and has the same short-circuit
+  behavior."
+  [lhs: set[$T], rhs: set[$T]] -> bool #force_inline
   (subset? rhs lhs))
 
-(defn disjoint? [lhs: set[$T], rhs: set[$T]] -> bool #force_inline
+(defn disjoint?
+  "Return true when `lhs` and `rhs` have no values in common.
+
+  The implementation scans the smaller set and probes the larger one, stopping
+  as soon as a shared value is found."
+  [lhs: set[$T], rhs: set[$T]] -> bool #force_inline
   (let [ok? true
         lhs-count (odin "len(lhs)")
         rhs-count (odin "len(rhs)")
@@ -100,14 +172,24 @@
           (break))))
     ok?))
 
-(proc add [s: set[$T], value: T] -> set[T] #force_inline
+(proc add
+  "Return a new set containing all values from `s` plus `value`.
+
+  The input set is not mutated. A new set is allocated, existing values are
+  copied, and `value` is inserted."
+  [s: set[$T], value: T] -> set[T] #force_inline
   (let [out (set/empty T (+ (odin "len(s)") 1))]
     (for [entry _ s]
       (core/update! out entry true))
     (core/update! out value true)
     out))
 
-(proc remove [s: set[$T], value: T] -> set[T] #force_inline
+(proc remove
+  "Return a new set like `s` without `value`.
+
+  The input set is not mutated. A new set is allocated and every value except
+  `value` is copied into it."
+  [s: set[$T], value: T] -> set[T] #force_inline
   (let [out (set/empty T (odin "len(s)"))]
     (for [entry _ s]
       (core/when (!= entry value)

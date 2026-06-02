@@ -1,0 +1,37 @@
+(package tests)
+
+(import t "kvist:test")
+
+(defvar once-ran 0)
+(defvar each-ran 0)
+
+(defn once-fixture []
+  (set! once-ran (+ once-ran 1)))
+
+(defn each-fixture [t: ^testing.T, body: proc [t: ^testing.T]]
+  (set! each-ran (+ each-ran 1))
+  (body t))
+
+(t/use-fixtures :once once-fixture)
+(t/use-fixtures :each each-fixture)
+
+(t/deftest test-package-fixtures-and-assertions
+  (t/testing "fixtures"
+    (t/is (= once-ran 1))
+    (t/is (> each-ran 0)))
+  (t/testing "truthiness"
+    (t/is true)
+    (t/is (not false))
+    (t/is (= (+ 2 3) 5)))
+  (t/testing "rows"
+    (t/are [x expected]
+      (= (* x x) expected)
+      1 1
+      2 4
+      3 9)))
+
+(t/deftest test-package-nested-context
+  (t/testing "outer"
+    (t/testing "inner"
+      (t/is (= once-ran 1))
+      (t/is (> each-ran 0) "each fixture should run before each test body"))))

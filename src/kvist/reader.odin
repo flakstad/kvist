@@ -51,6 +51,35 @@ scan_compact_bracket_type :: proc(source: string, start: int) -> (end: int, ok: 
     return i, true
 }
 
+scan_compact_soa_type :: proc(source: string, start: int) -> (end: int, ok: bool) {
+    prefix := "#soa["
+    body_start := start
+    if start+1 < len(source) && source[start] == '^' && source[start+1] == '#' {
+        body_start = start + 1
+    }
+    if body_start+len(prefix) > len(source) || source[body_start:body_start+len(prefix)] != prefix {
+        return start, false
+    }
+    i := body_start + len(prefix)
+    for i < len(source) && source[i] != ']' {
+        if is_whitespace(source[i]) || source[i] == '(' || source[i] == ')' || source[i] == '{' || source[i] == '}' || source[i] == ',' || source[i] == ';' {
+            return start, false
+        }
+        i += 1
+    }
+    if i >= len(source) || source[i] != ']' {
+        return start, false
+    }
+    i += 1
+    if i >= len(source) || is_symbol_boundary(source[i]) || source[i] == '[' || source[i] == ']' {
+        return start, false
+    }
+    for i < len(source) && !is_delimiter(source[i]) {
+        i += 1
+    }
+    return i, true
+}
+
 scan_compact_map_type :: proc(source: string, start: int) -> (end: int, ok: bool) {
     if start+4 > len(source) || source[start:start+4] != "map[" {
         return start, false
@@ -156,6 +185,14 @@ tokenize_with_origin :: proc(source: string, source_kind: Source_Kind) -> (token
         start := i
         if ch == '[' {
             end, ok_type := scan_compact_bracket_type(source, start)
+            if ok_type {
+                append(&tokens, make_token(.Symbol, source[start:end], start, end, source_kind))
+                i = end
+                continue
+            }
+        }
+        if ch == '#' || ch == '^' {
+            end, ok_type := scan_compact_soa_type(source, start)
             if ok_type {
                 append(&tokens, make_token(.Symbol, source[start:end], start, end, source_kind))
                 i = end

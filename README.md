@@ -788,7 +788,8 @@ foreign_call :: proc(handle: Foreign_Handle) ---
 - operators: `(+ a b)`, `(<= i 10)`, `(and a b)`, etc. emit infix
 
 Pragmatic Odin conveniences beyond the minimal special-form core include
-`(core/contains? collection key)`, `(core/in value collection)`,
+`(core/contains? collection key)` for generic collection membership,
+`(core/in value collection)`,
 `(core/not-in value collection)`, `(break)`, `(continue)`, and directive expression
 wrappers like `(#force_inline call arg)`.
 

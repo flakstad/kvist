@@ -35,6 +35,7 @@ Emitter_Features :: struct {
     core_merge:       bool,
     core_merge_in_place: bool,
     core_get_or_default: bool,
+    core_contains_value: bool,
     core_into:        bool,
     core_interpose:   bool,
     core_interleave:  bool,
@@ -151,6 +152,8 @@ kvist_package_name_for_import_path :: proc(path: string) -> (string, bool) {
         return "io", true
     case "kvist:json":
         return "json", true
+    case "kvist:hiccup":
+        return "hiccup", true
     case "kvist:http":
         return "http", true
     case "kvist:http/client":
@@ -161,6 +164,14 @@ kvist_package_name_for_import_path :: proc(path: string) -> (string, bool) {
         return "sse", true
     case "kvist:http/datastar":
         return "datastar", true
+    case "kvist:hot":
+        return "hot", true
+    case "kvist:live":
+        return "live", true
+    case "kvist:reload":
+        return "reload", true
+    case "kvist:test":
+        return "test", true
     case:
         return "", false
     }
@@ -557,6 +568,12 @@ mark_core_merge_in_place :: proc(e: ^Emitter) {
 mark_core_get_or_default :: proc(e: ^Emitter) {
     if e.features != nil {
         e.features.core_get_or_default = true
+    }
+}
+
+mark_core_contains_value :: proc(e: ^Emitter) {
+    if e.features != nil {
+        e.features.core_contains_value = true
     }
 }
 
@@ -1279,6 +1296,47 @@ type_form_needs_dynamic_literals :: proc(form: CST_Form) -> bool {
         return false
     }
     return form.items[0].text == "map" || form.items[0].text == "dynamic"
+}
+
+type_text_is_soa :: proc(text: string) -> bool {
+    return strings.has_prefix(text, "#soa[")
+}
+
+type_text_is_dynamic_soa :: proc(text: string) -> bool {
+    return strings.has_prefix(text, "#soa[dynamic]")
+}
+
+type_text_is_pointer_to_dynamic_soa :: proc(text: string) -> bool {
+    return strings.has_prefix(text, "^#soa[dynamic]")
+}
+
+type_text_is_soa_array :: proc(text: string) -> bool {
+    return type_text_is_soa(text)
+}
+
+emit_dynamic_soa_vector_literal :: proc(e: ^Emitter, type_text: string, form: CST_Form) -> (string, Compile_Error, bool) {
+    items, err_items, ok_items := emit_vector_item_texts(e, form)
+    if !ok_items {
+        return "", err_items, false
+    }
+
+    builder := strings.builder_make()
+    defer strings.builder_destroy(&builder)
+    strings.write_string(&builder, "(proc() -> ")
+    strings.write_string(&builder, type_text)
+    strings.write_string(&builder, " {\n")
+    strings.write_string(&builder, fmt.tprintf("    out := make(%s)\n", type_text))
+    if len(items) > 0 {
+        strings.write_string(&builder, "    append_soa(&out")
+        for item in items {
+            strings.write_string(&builder, ", ")
+            strings.write_string(&builder, item)
+        }
+        strings.write_string(&builder, ")\n")
+    }
+    strings.write_string(&builder, "    return out\n")
+    strings.write_string(&builder, "})()")
+    return strings.clone(strings.to_string(builder)), {}, true
 }
 
 emit_vector_literal :: proc(e: ^Emitter, prefix: string, form: CST_Form) -> (string, Compile_Error, bool) {
@@ -3413,7 +3471,8 @@ type_text_is_dynamic_array :: proc(text: string) -> bool {
 }
 
 type_text_is_slice_or_fixed_array :: proc(text: string) -> bool {
-    return len(text) >= 2 && text[0] == '[' && !type_text_is_dynamic_array(text)
+    return len(text) >= 2 && text[0] == '[' && !type_text_is_dynamic_array(text) ||
+           type_text_is_soa(text) && !type_text_is_dynamic_soa(text)
 }
 
 type_text_is_map :: proc(text: string) -> bool {
@@ -3706,8 +3765,11 @@ emit_inferred_literal :: proc(e: ^Emitter, form: CST_Form, expected_type := "") 
                 return "", err_elem, false
             }
             prefix = fmt.tprintf("[dynamic]%s", elem_ty)
-        } else if !(type_text_is_dynamic_array(prefix) || type_text_is_slice_or_fixed_array(prefix)) {
+        } else if !(type_text_is_dynamic_array(prefix) || type_text_is_slice_or_fixed_array(prefix) || type_text_is_soa_array(prefix)) {
             return "", Compile_Error{message = fmt.tprintf("vector literal does not match expected type %s", prefix), span = form.span}, false
+        }
+        if type_text_is_dynamic_soa(prefix) {
+            return emit_dynamic_soa_vector_literal(e, prefix, form)
         }
         if type_text_is_dynamic_array(prefix) {
             mark_dynamic_literals(e)
@@ -3780,6 +3842,20 @@ lookup_local_type :: proc(e: ^Emitter, name: string) -> (string, bool) {
     return "", false
 }
 
+known_form_type :: proc(e: ^Emitter, form: CST_Form) -> (string, bool) {
+    if form.kind == .Symbol {
+        name := form.text
+        if symbol_is_simple_deref_suffix(name) {
+            if ty, ok := lookup_local_type(e, map_name(name[:len(name)-1])); ok && len(ty) > 0 && ty[0] == '^' {
+                return ty[1:], true
+            }
+            return "", false
+        }
+        return lookup_local_type(e, map_name(name))
+    }
+    return "", false
+}
+
 obvious_binding_type :: proc(e: ^Emitter, binding: Binding) -> (string, bool) {
     if binding.is_destructure || binding.is_field_destructure || binding.name == "" {
         return "", false
@@ -3799,6 +3875,15 @@ obvious_binding_type :: proc(e: ^Emitter, binding: Binding) -> (string, bool) {
         head_name := map_name(binding.value.items[0].text)
         if _, ok := find_struct_decl(e, head_name); ok {
             return head_name, true
+        }
+    }
+    if binding.value.kind == .List && len(binding.value.items) >= 2 && binding.value.items[0].kind == .Symbol {
+        head := binding.value.items[0].text
+        if head == "new" || head == "make" {
+            type_text, _, ok_type := parse_type_text(binding.value.items[1])
+            if ok_type {
+                return type_text, true
+            }
         }
     }
     if binding.value.kind == .List && len(binding.value.items) > 0 && binding.value.items[0].kind == .Symbol {
@@ -3841,7 +3926,7 @@ form_is_owned_allocation_result :: proc(form: CST_Form) -> bool {
         return false
     }
     defer delete(type_text)
-    return type_text_is_dynamic_array(type_text) || type_text_is_map(type_text)
+    return type_text_is_dynamic_array(type_text) || type_text_is_dynamic_soa(type_text) || type_text_is_map(type_text)
 }
 
 form_is_owned_constructor_result :: proc(form: CST_Form) -> bool {
@@ -4710,6 +4795,9 @@ emit_operator_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Erro
     }
 
     op := head.text
+    if canonical_op, _, _, ok := resolve_kvist_head(e, op); ok {
+        op = canonical_op
+    }
     if op == "not" {
         if len(form.items) != 2 {
             return "", Compile_Error{message = "not expects one argument", span = form.span}, false
@@ -4831,6 +4919,23 @@ emit_operator_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Erro
         key, err_key, ok_key := emit_expr(e, form.items[2])
         if !ok_key {
             return "", err_key, false
+        }
+        if ty, ok := obvious_form_type(e, form.items[1]); ok {
+            if ty == "string" {
+                key_ty, ok_key_ty := obvious_form_type(e, form.items[2])
+                if ok_key_ty && key_ty == "string" {
+                    mark_core_strings(e)
+                    return emit_call_text("strings.contains", []string{collection, key}), {}, true
+                }
+                return "", Compile_Error{message = "core/contains? on strings expects a string needle", span = form.items[2].span}, false
+            }
+            if strings.has_prefix(ty, "map[") {
+                return fmt.tprintf("(%s) in (%s)", key, collection), {}, true
+            }
+            if strings.has_prefix(ty, "[]") || strings.has_prefix(ty, "[dynamic]") || (len(ty) > 1 && ty[0] == '[') {
+                mark_core_contains_value(e)
+                return emit_call_text("kvist_contains_value", []string{fmt.tprintf("(%s)[:]", collection), key}), {}, true
+            }
         }
         return fmt.tprintf("(%s) in (%s)", key, collection), {}, true
     }
@@ -4954,6 +5059,15 @@ surface_type_text :: proc(ty: string) -> string {
     if strings.has_prefix(ty, "[dynamic]") {
         elem := ty[len("[dynamic]"):]
         return fmt.tprintf("[dynamic]%s", surface_type_text(elem))
+    }
+
+    if strings.has_prefix(ty, "#soa[") {
+        closing := strings.index(ty, "]")
+        if closing > len("#soa[") {
+            length := ty[len("#soa["):closing]
+            elem := ty[closing+1:]
+            return fmt.tprintf("#soa[%s]%s", length, surface_type_text(elem))
+        }
     }
 
     if strings.has_prefix(ty, "[]") {
@@ -5388,8 +5502,18 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         if !ok_target {
             return "", err_target, false
         }
+        target_ty, known_target_ty := known_form_type(e, form.items[1])
         arg_texts: [dynamic]string
-        append(&arg_texts, fmt.tprintf("&(%s)", target))
+        call_name := "append"
+        if known_target_ty && type_text_is_dynamic_soa(target_ty) {
+            call_name = "append_soa"
+            append(&arg_texts, address_of_expr_text(target))
+        } else if known_target_ty && type_text_is_pointer_to_dynamic_soa(target_ty) {
+            call_name = "append_soa"
+            append(&arg_texts, target)
+        } else {
+            append(&arg_texts, fmt.tprintf("&(%s)", target))
+        }
         for arg in form.items[2:] {
             arg_text, err_arg, ok_arg := emit_expr(e, arg)
             if !ok_arg {
@@ -5397,7 +5521,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
             }
             append(&arg_texts, arg_text)
         }
-        return emit_call_text("append", arg_texts[:]), {}, true
+        return emit_call_text(call_name, arg_texts[:]), {}, true
     }
 
     if head.text == "str/contains?" {
@@ -6538,7 +6662,10 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         if !ok_collection {
             return "", err_collection, false
         }
-        collection = slice_all_expr_text(collection)
+        collection_ty, _ := obvious_form_type(e, form.items[1])
+        if !strings.has_prefix(collection_ty, "map[") && collection_ty != "string" && collection_ty != "cstring" {
+            collection = slice_all_expr_text(collection)
+        }
         if head.text == "core/count" {
             return fmt.tprintf("len(%s)", collection), {}, true
         }
@@ -6665,6 +6792,9 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         }
         #partial switch form.items[2].kind {
         case .Vector:
+            if type_text_is_dynamic_soa(type_text) {
+                return emit_dynamic_soa_vector_literal(e, type_text, form.items[2])
+            }
             return emit_vector_literal(e, type_text, form.items[2])
         case .Brace:
             return emit_brace_literal(e, type_text, form.items[2])
@@ -8709,6 +8839,23 @@ emit_core_get_or_default_helper :: proc(e: ^Emitter) {
     emit_line(e, "}")
 }
 
+emit_core_contains_value_helper :: proc(e: ^Emitter) {
+    emit_line(e, "kvist_contains_value :: #force_inline proc(xs: []$T, value: T) -> bool {")
+    e.indent += 1
+    emit_line(e, "for x in xs {")
+    e.indent += 1
+    emit_line(e, "if x == value {")
+    e.indent += 1
+    emit_line(e, "return true")
+    e.indent -= 1
+    emit_line(e, "}")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "return false")
+    e.indent -= 1
+    emit_line(e, "}")
+}
+
 emit_core_into_helper :: proc(e: ^Emitter) {
     emit_line(e, "kvist_into :: proc($Out: typeid, xs: []$T) -> Out {")
     e.indent += 1
@@ -9903,6 +10050,7 @@ core_helpers_needed :: proc(features: Emitter_Features) -> bool {
            features.core_mapcat || features.core_concat ||
            features.core_merge || features.core_merge_in_place ||
            features.core_get_or_default ||
+           features.core_contains_value ||
            features.core_into ||
            features.core_interpose || features.core_interleave ||
            features.core_reverse || features.core_reverse_in_place ||
@@ -10078,6 +10226,10 @@ emit_core_helpers :: proc(e: ^Emitter, features: Emitter_Features) {
     if features.core_get_or_default {
         emit_core_helper_separator(e, &emitted)
         emit_core_get_or_default_helper(e)
+    }
+    if features.core_contains_value {
+        emit_core_helper_separator(e, &emitted)
+        emit_core_contains_value_helper(e)
     }
     if features.core_into {
         emit_core_helper_separator(e, &emitted)
@@ -10567,6 +10719,130 @@ emit_core_fmt_import :: proc(e: ^Emitter, emitted: ^bool, needed: bool) {
     emitted^ = true
 }
 
+features_need_core_slice_sort_import :: proc(features: Emitter_Features) -> bool {
+    return features.core_sort ||
+           features.core_sort_by ||
+           features.core_sort_in_place ||
+           features.core_sort_by_in_place ||
+           len(features.sort_by_fields) > 0 ||
+           len(features.sort_by_in_place_fields) > 0 ||
+           len(features.sort_by_callbacks) > 0 ||
+           len(features.sort_by_in_place_callbacks) > 0
+}
+
+features_need_core_strings_import :: proc(features: Emitter_Features) -> bool {
+    return features.core_strings || features.core_string_replace
+}
+
+features_need_core_fmt_import :: proc(features: Emitter_Features) -> bool {
+    return features.core_fmt
+}
+
+output_has_import_line :: proc(output, line: string) -> bool {
+    start := 0
+    for start <= len(output) {
+        found := strings.index(output[start:], line)
+        if found < 0 {
+            return false
+        }
+        at := start + found
+        before_ok := at == 0 || output[at-1] == '\n'
+        after_at := at + len(line)
+        after_ok := after_at == len(output) || output[after_at] == '\n'
+        if before_ok && after_ok {
+            return true
+        }
+        start = at + len(line)
+    }
+    return false
+}
+
+output_has_import_path :: proc(output, path: string) -> bool {
+    start := 0
+    needle := strings.concatenate({"\"", path, "\""}, context.temp_allocator)
+    defer delete(needle)
+    for start <= len(output) {
+        found := strings.index(output[start:], "import ")
+        if found < 0 {
+            return false
+        }
+        at := start + found
+        line_end := strings.index(output[at:], "\n")
+        if line_end < 0 {
+            line_end = len(output) - at
+        }
+        line_text := output[at : at+line_end]
+        if strings.contains(line_text, needle) {
+            return true
+        }
+        start = at + line_end
+        if start < len(output) && output[start] == '\n' {
+            start += 1
+        }
+    }
+    return false
+}
+
+inject_imports_into_output_header :: proc(output: string, imports: []string) -> (string, int) {
+    if len(imports) == 0 {
+        return strings.clone(output), 0
+    }
+
+    insert_at := 0
+    offset := 0
+    saw_package := false
+
+    for offset < len(output) {
+        line_end := strings.index(output[offset:], "\n")
+        if line_end < 0 {
+            line_end = len(output) - offset
+        }
+        line_text := output[offset : offset+line_end]
+        trimmed := strings.trim_space(line_text)
+        next_offset := offset + line_end
+        if next_offset < len(output) && output[next_offset] == '\n' {
+            next_offset += 1
+        }
+
+        if !saw_package {
+            if strings.has_prefix(trimmed, "package ") {
+                saw_package = true
+                insert_at = next_offset
+                offset = next_offset
+                continue
+            }
+            break
+        }
+
+        if trimmed == "" || strings.has_prefix(trimmed, "import ") {
+            insert_at = next_offset
+            offset = next_offset
+            continue
+        }
+        break
+    }
+
+    builder := strings.builder_make()
+    defer strings.builder_destroy(&builder)
+    strings.write_string(&builder, output[:insert_at])
+    for import_line in imports {
+        strings.write_string(&builder, import_line)
+        strings.write_byte(&builder, '\n')
+    }
+    strings.write_string(&builder, output[insert_at:])
+    return strings.clone(strings.to_string(builder)), len(imports)
+}
+
+shift_source_map_lines :: proc(entries: ^[dynamic]Source_Map_Entry, delta: int) {
+    if delta == 0 {
+        return
+    }
+    for &entry in entries {
+        entry.generated_start_line += delta
+        entry.generated_end_line += delta
+    }
+}
+
 emit_decls_with_source_map :: proc(decls: []IR_Decl) -> (Emit_Result, Compile_Error, bool) {
     result := Emit_Result{}
     features := Emitter_Features{}
@@ -10627,19 +10903,40 @@ emit_decls_with_source_map :: proc(decls: []IR_Decl) -> (Emit_Result, Compile_Er
     emit_core_strings_import(&e, &emitted_core_strings_import, needs_core_strings_import)
     emit_core_fmt_import(&e, &emitted_core_fmt_import, needs_core_fmt_import)
     emit_core_helpers(&e, features)
+    output := strings.clone(strings.to_string(e.builder))
+    late_imports: [dynamic]string
+    if !emitted_core_slice_import && features_need_core_slice_sort_import(features) &&
+       !output_has_import_line(output, "import kvist_slice \"core:slice\"") {
+        append(&late_imports, "import kvist_slice \"core:slice\"")
+    }
+    if !emitted_core_strings_import && features_need_core_strings_import(features) &&
+       !output_has_import_path(output, "core:strings") {
+        append(&late_imports, "import strings \"core:strings\"")
+    }
+    if !emitted_core_fmt_import && features_need_core_fmt_import(features) &&
+       !output_has_import_path(output, "core:fmt") {
+        append(&late_imports, "import \"core:fmt\"")
+    }
+    if len(late_imports) > 0 {
+        adjusted_output, added_lines := inject_imports_into_output_header(output, late_imports[:])
+        delete(output)
+        output = adjusted_output
+        shift_source_map_lines(&result.source_map, added_lines)
+    }
     if features.dynamic_literals {
         output_builder := strings.builder_make()
         defer strings.builder_destroy(&output_builder)
         strings.write_string(&output_builder, "#+feature dynamic-literals\n")
-        strings.write_string(&output_builder, strings.to_string(e.builder))
+        strings.write_string(&output_builder, output)
         for &entry in result.source_map {
             entry.generated_start_line += 1
             entry.generated_end_line += 1
         }
         result.output = strings.clone(strings.to_string(output_builder))
+        delete(output)
         return result, {}, true
     }
-    result.output = strings.clone(strings.to_string(e.builder))
+    result.output = output
     return result, {}, true
 }
 
@@ -10734,19 +11031,40 @@ emit_eval_decls_with_source_map :: proc(decls: []IR_Decl, eval_form: CST_Form, n
     })
 
     emit_core_helpers(&e, features)
+    output := strings.clone(strings.to_string(e.builder))
+    late_imports: [dynamic]string
+    if !emitted_core_slice_import && features_need_core_slice_sort_import(features) &&
+       !output_has_import_line(output, "import kvist_slice \"core:slice\"") {
+        append(&late_imports, "import kvist_slice \"core:slice\"")
+    }
+    if !emitted_core_strings_import && features_need_core_strings_import(features) &&
+       !output_has_import_path(output, "core:strings") {
+        append(&late_imports, "import strings \"core:strings\"")
+    }
+    if !emitted_core_fmt_import && features_need_core_fmt_import(features) &&
+       !output_has_import_path(output, "core:fmt") {
+        append(&late_imports, "import \"core:fmt\"")
+    }
+    if len(late_imports) > 0 {
+        adjusted_output, added_lines := inject_imports_into_output_header(output, late_imports[:])
+        delete(output)
+        output = adjusted_output
+        shift_source_map_lines(&result.source_map, added_lines)
+    }
     if features.dynamic_literals {
         output_builder := strings.builder_make()
         defer strings.builder_destroy(&output_builder)
         strings.write_string(&output_builder, "#+feature dynamic-literals\n")
-        strings.write_string(&output_builder, strings.to_string(e.builder))
+        strings.write_string(&output_builder, output)
         for &entry in result.source_map {
             entry.generated_start_line += 1
             entry.generated_end_line += 1
         }
         result.output = strings.clone(strings.to_string(output_builder))
+        delete(output)
         return result, {}, true
     }
-    result.output = strings.clone(strings.to_string(e.builder))
+    result.output = output
     return result, {}, true
 }
 

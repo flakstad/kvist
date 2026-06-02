@@ -41,6 +41,14 @@ normalize_surface_type_symbol :: proc(text: string) -> string {
     if text[0] == '^' {
         return fmt.tprintf("^%s", normalize_surface_type_symbol(text[1:]))
     }
+    if strings.has_prefix(text, "#soa[") {
+        closing := strings.index(text, "]")
+        if closing > len("#soa[") {
+            length := text[len("#soa["):closing]
+            elem_text := text[closing+1:]
+            return fmt.tprintf("#soa[%s]%s", length, normalize_surface_type_symbol(elem_text))
+        }
+    }
     if strings.has_prefix(text, "[]") {
         return fmt.tprintf("[]%s", normalize_surface_type_symbol(text[2:]))
     }

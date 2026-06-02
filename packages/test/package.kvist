@@ -73,15 +73,7 @@ __kvist_test_pop_context :: proc(t: ^testing.T) {
 	}
 	delete(stack[len(stack)-1])
 	resize(&stack, len(stack)-1)
-	if len(stack) == 0 {
-		delete(stack)
-		delete_key(&__kvist_test_context_stacks, key)
-		if len(__kvist_test_context_stacks) == 0 {
-			delete(__kvist_test_context_stacks)
-		}
-	} else {
-		__kvist_test_context_stacks[key] = stack
-	}
+	__kvist_test_context_stacks[key] = stack
 }
 
 __kvist_test_expect :: proc(t: ^testing.T, ok: bool, msg := \"\", expr := #caller_expression(ok), loc := #caller_location) -> bool {

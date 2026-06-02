@@ -851,9 +851,13 @@ symbols_append_source_package_records :: proc(builder: ^strings.Builder, seen: ^
             continue
         }
         fields, ok_fields := symbols_split_record_fields(line)
-        if !ok_fields {
+        _ = ok_fields
+        if len(fields) < 4 {
             delete(fields)
             continue
+        }
+        for len(fields) < 7 {
+            append(&fields, "")
         }
         kind := fields[0]
         name := fields[1]
@@ -886,7 +890,8 @@ symbols_append_source_package_records :: proc(builder: ^strings.Builder, seen: ^
 source_package_anchor_file :: proc(files: []Package_File) -> string {
     for file in files {
         _, name := os.split_path(file.path)
-        if name == "main.kvist" || name == "package.kvist" {
+        dir, _ := os.split_path(file.path)
+        if is_package_anchor_filename(dir, name) {
             return file.path
         }
     }
@@ -902,7 +907,6 @@ symbols_append_source_package_import_record :: proc(builder: ^strings.Builder, s
     }
     key := fmt.tprintf("source import\t%s", alias)
     if seen[key] {
-        delete(key)
         return
     }
     seen[key] = true
@@ -913,7 +917,6 @@ symbols_append_source_package_import_record :: proc(builder: ^strings.Builder, s
     symbols_write_record_doc_file(&temp, "source import", alias, 1, 1, import_path, fmt.tprintf("(import %s \"%s\")", alias, import_path), doc_lines[:], file_path)
     strings.write_string(builder, strings.to_string(temp))
     strings.write_byte(builder, '\n')
-    delete(key)
 }
 
 symbols_append_local_package_records :: proc(builder: ^strings.Builder, seen: ^map[string]bool, file_path, output: string) {
@@ -924,9 +927,13 @@ symbols_append_local_package_records :: proc(builder: ^strings.Builder, seen: ^m
             continue
         }
         fields, ok_fields := symbols_split_record_fields(line)
-        if !ok_fields {
+        _ = ok_fields
+        if len(fields) < 4 {
             delete(fields)
             continue
+        }
+        for len(fields) < 7 {
+            append(&fields, "")
         }
         kind := fields[0]
         name := fields[1]
@@ -935,10 +942,13 @@ symbols_append_local_package_records :: proc(builder: ^strings.Builder, seen: ^m
         detail := fields[4]
         signature := fields[5]
         doc := fields[6]
-        temp := strings.builder_make()
-        defer strings.builder_destroy(&temp)
-        fmt.sbprintf(&temp, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", kind, name, line_text, column_text, detail, signature, doc, file_path)
-        symbols_append_unique_records(builder, seen, strings.to_string(temp))
+        key := fmt.tprintf("%s\t%s", kind, name)
+        if seen[key] {
+            delete(fields)
+            continue
+        }
+        seen[key] = true
+        fmt.sbprintf(builder, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", kind, name, line_text, column_text, detail, signature, doc, file_path)
         delete(fields)
     }
 }
@@ -982,7 +992,7 @@ editor_root_package_files :: proc(path, source: string) -> ([]Package_File, bool
             return nil, false
         }
         if entry.name == file_name {
-            if entry.name == "main.kvist" || entry.name == "package.kvist" {
+            if is_package_anchor_filename(dir, entry.name) {
                 has_anchor = true
             }
             append(&matched, Package_File{path = file_path, source = source, package_name = package_name, forms = forms})
@@ -1007,7 +1017,7 @@ editor_root_package_files :: proc(path, source: string) -> ([]Package_File, bool
         if file_package_name != package_name {
             continue
         }
-        if entry.name == "main.kvist" || entry.name == "package.kvist" {
+        if is_package_anchor_filename(dir, entry.name) {
             has_anchor = true
         }
         append(&matched, Package_File{path = file_path, source = file_source, package_name = file_package_name, forms = file_forms})
@@ -1058,7 +1068,9 @@ source_package_symbols_source :: proc(importer_path, import_path: string) -> (pa
             return "", "", clone_compile_error(package_err, result_allocator), false
         }
         symbols_append_source_package_records(&builder, &seen, import_path, import_default_alias(import_path), file.path, package_output)
+        context.allocator = result_allocator
         delete(package_output)
+        context.allocator = context.temp_allocator
     }
     resolved_copy, _ := strings.clone(resolved, result_allocator)
     output_copy, _ := strings.clone(strings.to_string(builder), result_allocator)
@@ -1075,24 +1087,59 @@ repo_root_for_path :: proc(path: string) -> (string, bool) {
             owned_current = absolute
         }
     }
-    if !os.is_dir(current) {
-        dir, _ := os.split_path(current)
-        current = dir
+    current_end := len(current)
+    for current_end > 1 && current[current_end-1] == '/' {
+        current_end -= 1
+    }
+    current = current[:current_end]
+    if current != "" && !os.is_dir(current) {
+        last_slash := -1
+        for i := len(current) - 1; i >= 0; i -= 1 {
+            if current[i] == '/' {
+                last_slash = i
+                break
+            }
+        }
+        if last_slash < 0 {
+            current = ""
+        } else if last_slash == 0 {
+            current = current[:1]
+        } else {
+            current = current[:last_slash]
+        }
     }
     for current != "" {
         marker, err := os.join_path({current, "cmd", "kvist", "main.odin"}, context.allocator)
         if err == nil {
             if os.exists(marker) {
                 delete(marker)
-                root := strings.clone(current)
-                if owned_current != "" {
-                    delete(owned_current)
+                if owned_current == "" {
+                    return current, true
                 }
+                root := strings.clone(current)
+                delete(owned_current)
                 return root, true
             }
             delete(marker)
         }
-        parent, _ := os.split_path(strings.trim_right(current, "/"))
+        trimmed_end := len(current)
+        for trimmed_end > 1 && current[trimmed_end-1] == '/' {
+            trimmed_end -= 1
+        }
+        trimmed := current[:trimmed_end]
+        last_slash := -1
+        for i := len(trimmed) - 1; i >= 0; i -= 1 {
+            if trimmed[i] == '/' {
+                last_slash = i
+                break
+            }
+        }
+        parent := ""
+        if last_slash == 0 {
+            parent = trimmed[:1]
+        } else if last_slash > 0 {
+            parent = trimmed[:last_slash]
+        }
         if parent == "" || parent == current {
             break
         }
@@ -1189,7 +1236,7 @@ package_entry_signature_doc :: proc(import_path, member: string) -> (signature, 
         case "get": return "(core/get target key [default])", "Index into array-family values or look up map entries with an optional default.", true
         case "slice": return "(core/slice target start [end])", "Take a slice view over an array-family value or string.", true
         case "empty?": return "(core/empty? collection)", "Return true when a collection has zero elements.", true
-        case "contains?": return "(core/contains? collection key)", "Return true when a collection contains the key or value using Odin's in operator.", true
+        case "contains?": return "(core/contains? collection key)", "Return true when a collection contains the key or value, using direct membership checks for maps/sets and value scans for array-family collections.", true
         case "in": return "(core/in value collection)", "Return true when a value is present in a collection using Odin's in operator.", true
         case "not-in": return "(core/not-in value collection)", "Return true when a value is absent from a collection using Odin's in operator.", true
         case "update!": return "(core/update! target key-or-field value-or-updater ...)", "Mutate a struct field, array/slice slot, or map key in place. Supports replacement and updater forms such as inc or +.", true
@@ -1500,7 +1547,9 @@ imported_symbols_source :: proc(path, source: string) -> (output: string, err: C
                     return "", clone_compile_error(package_err, result_allocator), false
                 }
                 symbols_append_source_package_records(&builder, &seen, import_path, entry.alias, file.path, package_output)
+                context.allocator = result_allocator
                 delete(package_output)
+                context.allocator = context.temp_allocator
             }
             delete(resolved)
             continue
@@ -1525,6 +1574,13 @@ imported_symbols_source :: proc(path, source: string) -> (output: string, err: C
 }
 
 editor_symbols_source :: proc(path, source: string) -> (output: string, err: Compile_Error, ok: bool) {
+    result_allocator := context.allocator
+    old_allocator := context.allocator
+    temp_scope := runtime.default_temp_allocator_temp_begin()
+    defer runtime.default_temp_allocator_temp_end(temp_scope)
+    context.allocator = context.temp_allocator
+    defer context.allocator = old_allocator
+
     builder := strings.builder_make()
     defer strings.builder_destroy(&builder)
     strings.write_string(&builder, "kind\tname\tline\tcolumn\tdetail\tsignature\tdoc\tfile\n")
@@ -1535,58 +1591,66 @@ editor_symbols_source :: proc(path, source: string) -> (output: string, err: Com
     if !os.exists(path) {
         cwd_repo_root, ok_cwd_repo_root := repo_root_for_path(".")
         if ok_cwd_repo_root {
-            if repo_root != "" {
-                delete(repo_root)
-            }
             repo_root = cwd_repo_root
         }
     }
-    if repo_root != "" {
-        defer delete(repo_root)
-    }
 
     package_files, ok_package_files := editor_root_package_files(path, source)
+    files_for_imports: [dynamic]Package_File
+    defer delete(files_for_imports)
     if ok_package_files {
         for file in package_files {
+            context.allocator = result_allocator
             local_output, local_err, ok_local := symbols_source(file.source)
+            context.allocator = context.temp_allocator
             if !ok_local {
                 return "", local_err, false
             }
             symbols_append_local_package_records(&builder, &seen, file.path, local_output)
+            context.allocator = result_allocator
             delete(local_output)
+            context.allocator = context.temp_allocator
+            append(&files_for_imports, file)
         }
     } else {
         forms, err_forms, ok_forms := read_top_forms(source)
         if !ok_forms {
-            return "", clone_compile_error(err_forms, context.allocator), false
+            return "", clone_compile_error(err_forms, result_allocator), false
         }
+        context.allocator = result_allocator
         local_output, local_err, ok_local := symbols_source(source)
+        context.allocator = context.temp_allocator
         if !ok_local {
             return "", local_err, false
         }
         symbols_append_local_package_records(&builder, &seen, path, local_output)
+        context.allocator = result_allocator
         delete(local_output)
+        context.allocator = context.temp_allocator
+        append(&files_for_imports, Package_File{path = path, source = source, forms = forms})
+    }
 
-        for entry in KVIST_CANONICAL_IMPORTS_FOR_EDITOR {
-            if repo_root != "" {
-                editor_package_symbols_append(&builder, &seen, repo_root, entry.path, entry.alias)
-            }
-            package_output, ok_package := package_symbols_source(entry.path, entry.alias)
-            if !ok_package {
-                continue
-            }
-            symbols_append_unique_records(&builder, &seen, package_output)
-            delete(package_output)
+    for entry in KVIST_CANONICAL_IMPORTS_FOR_EDITOR {
+        if repo_root != "" {
+            editor_package_symbols_append(&builder, &seen, repo_root, entry.path, entry.alias)
         }
+        context.allocator = result_allocator
+        package_output, ok_package := package_symbols_source(entry.path, entry.alias)
+        context.allocator = context.temp_allocator
+        if !ok_package {
+            continue
+        }
+        symbols_append_unique_records(&builder, &seen, package_output)
+        context.allocator = result_allocator
+        delete(package_output)
+        context.allocator = context.temp_allocator
+    }
 
-        for top in forms {
-            entry, ok_import := import_entry_from_form(top.form)
-            if !ok_import {
-                continue
-            }
-            _, import_path, ok_source_import := source_import_alias_and_path(top.form)
+    for import_file in files_for_imports {
+        for top in import_file.forms {
+            alias, import_path, ok_source_import := source_import_alias_and_path(top.form)
             if ok_source_import {
-                resolved, err_resolve, ok_resolve := resolve_source_import_path(path, import_path)
+                resolved, err_resolve, ok_resolve := resolve_source_import_path(import_file.path, import_path)
                 if !ok_resolve {
                     return "", err_resolve, false
                 }
@@ -1601,127 +1665,75 @@ editor_symbols_source :: proc(path, source: string) -> (output: string, err: Com
                     return "", err_package, false
                 }
                 anchor := source_package_anchor_file(files[:])
-                symbols_append_source_package_import_record(&builder, &seen, entry.alias, import_path, anchor)
+                symbols_append_source_package_import_record(&builder, &seen, alias, import_path, anchor)
                 for file in files {
+                    context.allocator = result_allocator
                     package_output, package_err, ok_package_output := symbols_source(file.source)
+                    context.allocator = context.temp_allocator
                     if !ok_package_output {
                         delete(resolved)
                         return "", package_err, false
                     }
-                    symbols_append_source_package_records(&builder, &seen, import_path, entry.alias, file.path, package_output)
+                    symbols_append_source_package_records(&builder, &seen, import_path, alias, file.path, package_output)
+                    context.allocator = result_allocator
                     delete(package_output)
+                    context.allocator = context.temp_allocator
                 }
                 delete(resolved)
                 continue
             }
-            if !strings.has_prefix(entry.path, "kvist:") {
+
+            entry, ok_import := import_entry_from_form(top.form)
+            if !ok_import || !strings.has_prefix(entry.path, "kvist:") {
                 continue
             }
-            if repo_root != "" && entry.path != "kvist:hiccup" {
+            if repo_root != "" {
                 editor_package_symbols_append(&builder, &seen, repo_root, entry.path, entry.alias)
             }
+            context.allocator = result_allocator
             package_output, ok_package := package_symbols_source(entry.path, entry.alias)
+            context.allocator = context.temp_allocator
             if ok_package {
                 symbols_append_unique_records(&builder, &seen, package_output)
+                context.allocator = result_allocator
                 delete(package_output)
+                context.allocator = context.temp_allocator
             }
         }
-        imported_output, imported_err, ok_imported := imported_symbols_source(path, source)
+    }
+
+    for import_file in files_for_imports {
+        context.allocator = result_allocator
+        imported_output, imported_err, ok_imported := imported_symbols_source(import_file.path, import_file.source)
+        context.allocator = context.temp_allocator
         if !ok_imported {
             return "", imported_err, false
         }
         symbols_append_unique_records(&builder, &seen, imported_output)
+        context.allocator = result_allocator
         delete(imported_output)
-
-        if repo_root != "" {
-            editor_builtin_symbols_append(&builder, &seen, repo_root)
-            editor_language_symbols_append(&builder, &seen, repo_root)
-        }
-        builtin_output := builtin_symbols_source()
-        symbols_append_unique_records(&builder, &seen, builtin_output)
-        delete(builtin_output)
-        language_output := language_symbols_source()
-        symbols_append_unique_records(&builder, &seen, language_output)
-        delete(language_output)
-        return strings.clone(strings.to_string(builder)), {}, true
+        context.allocator = context.temp_allocator
     }
 
-    forms, err_forms, ok_forms := read_top_forms(source)
-    if !ok_forms {
-        return "", clone_compile_error(err_forms, context.allocator), false
-    }
-    for entry in KVIST_CANONICAL_IMPORTS_FOR_EDITOR {
-        if repo_root != "" {
-            editor_package_symbols_append(&builder, &seen, repo_root, entry.path, entry.alias)
-        }
-        package_output, ok_package := package_symbols_source(entry.path, entry.alias)
-        if !ok_package {
-            continue
-        }
-        symbols_append_unique_records(&builder, &seen, package_output)
-        delete(package_output)
-    }
-    for top in forms {
-        entry, ok_import := import_entry_from_form(top.form)
-        if !ok_import || !strings.has_prefix(entry.path, "kvist:") {
-            continue
-        }
-        if repo_root != "" {
-            editor_package_symbols_append(&builder, &seen, repo_root, entry.path, entry.alias)
-        }
-        package_output, ok_package := package_symbols_source(entry.path, entry.alias)
-        if ok_package {
-            symbols_append_unique_records(&builder, &seen, package_output)
-            delete(package_output)
-        }
-        if repo_root != "" {
-            continue
-        }
-        _, import_path, ok_source_import := source_import_alias_and_path(top.form)
-        if ok_source_import {
-            resolved, err_resolve, ok_resolve := resolve_source_import_path(path, import_path)
-            if !ok_resolve {
-                return "", err_resolve, false
-            }
-            files, err_files, ok_files := read_package_files(resolved)
-            if !ok_files {
-                delete(resolved)
-                return "", err_files, false
-            }
-            _, err_package, ok_package := validate_package_files(resolved, files[:])
-            if !ok_package {
-                delete(resolved)
-                return "", err_package, false
-            }
-            for file in files {
-                package_output, package_err, ok_package_output := symbols_source(file.source)
-                if !ok_package_output {
-                    delete(resolved)
-                    return "", package_err, false
-                }
-                symbols_append_source_package_records(&builder, &seen, import_path, entry.alias, file.path, package_output)
-                delete(package_output)
-            }
-            delete(resolved)
-        }
-    }
-    imported_output, imported_err, ok_imported := imported_symbols_source(path, source)
-    if !ok_imported {
-        return "", imported_err, false
-    }
-    symbols_append_unique_records(&builder, &seen, imported_output)
-    delete(imported_output)
     if repo_root != "" {
         editor_builtin_symbols_append(&builder, &seen, repo_root)
         editor_language_symbols_append(&builder, &seen, repo_root)
     }
+    context.allocator = result_allocator
     builtin_output := builtin_symbols_source()
+    context.allocator = context.temp_allocator
     symbols_append_unique_records(&builder, &seen, builtin_output)
+    context.allocator = result_allocator
     delete(builtin_output)
+    context.allocator = context.temp_allocator
+    context.allocator = result_allocator
     language_output := language_symbols_source()
+    context.allocator = context.temp_allocator
     symbols_append_unique_records(&builder, &seen, language_output)
+    context.allocator = result_allocator
     delete(language_output)
-    return strings.clone(strings.to_string(builder)), {}, true
+    context.allocator = context.temp_allocator
+    return strings.clone(strings.to_string(builder), result_allocator), {}, true
 }
 
 package_symbols_write_entry :: proc(builder: ^strings.Builder, alias, import_path, member, signature, doc: string) {
@@ -1814,7 +1826,7 @@ import_default_alias :: proc(path: string) -> string {
 
 is_static_kvist_package :: proc(import_path: string) -> bool {
     switch import_path {
-    case "kvist:core", "kvist:arr", "kvist:str", "kvist:map", "kvist:set", "kvist:struct", "kvist:io", "kvist:json", "kvist:http", "kvist:http/client", "kvist:http/session", "kvist:http/sse", "kvist:http/datastar":
+    case "kvist:core", "kvist:arr", "kvist:str", "kvist:map", "kvist:set", "kvist:struct", "kvist:io", "kvist:json", "kvist:hiccup", "kvist:http", "kvist:http/client", "kvist:http/session", "kvist:http/sse", "kvist:http/datastar", "kvist:hot", "kvist:live", "kvist:reload", "kvist:test":
         return true
     case:
         return false

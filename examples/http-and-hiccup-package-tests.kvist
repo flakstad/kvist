@@ -1,0 +1,141 @@
+(package tests)
+
+(import t "kvist:test")
+(import hiccup "kvist:hiccup")
+(import http "kvist:http")
+(import httpc "kvist:http/client")
+(import session "kvist:http/session")
+(import sse "kvist:http/sse")
+(import dstar "kvist:http/datastar")
+(import h "kvist_vendor:http")
+(import time "core:time")
+
+(defstruct Greeting {
+  :message string
+})
+
+(defn new-sid [] -> string
+  "demo-session")
+
+(defn csrf-for [sid: string] -> string
+  (odin "if sid == \"demo-session\" { return \"csrf-demo-session\" }")
+  (odin "if sid == \"abc\" { return \"csrf-abc\" }")
+  "")
+
+(defn request-csrf-header [req: ^h.Request] -> string
+  (let [[token ok] (h.headers_get_unsafe (:headers (deref req)) "x-csrf")]
+    (if ok
+      token
+      "")))
+
+(defn make-request [method: h.Method, cookie-header: string, csrf-header: string] -> h.Request
+  (let [req (h.Request {})]
+    (h.request_init (addr req) context.temp_allocator)
+    (set! (:line req) (h.Requestline {:method method
+                                      :target "/demo"
+                                      :version (h.Version {:major 1 :minor 1})}))
+    (when (> (core/count cookie-header) 0)
+      (h.headers_set_unsafe (addr (:headers req)) "cookie" cookie-header))
+    (when (> (core/count csrf-header) 0)
+      (h.headers_set_unsafe (addr (:headers req)) "x-csrf" csrf-header))
+    req))
+
+(defn make-response [] -> h.Response
+  (let [res (h.Response {})]
+    (h.response_init (addr res) context.temp_allocator)
+    res))
+
+(defn sse-datastar-compile-demo [res: ^h.Response] -> bool
+  (sse/with-stream [stream res]
+    (sse/comment! stream "connected")
+    (sse/retry! stream 1000)
+    (sse/set-user-int! stream 7)
+    (dstar/patch-elements! stream "<div id='status'>ok</div>")
+    (dstar/patch-signals! stream "{ready: true}")
+    (dstar/execute-script! stream "console.log('ready')")
+    (sse/close! stream))
+  true)
+
+(t/deftest hiccup-package-surface
+  (let [node (hiccup/html
+               [:div {:class "panel"
+                      :hidden false}
+                [:<> [:span "A&B"] (when true [:strong "ok"])]])
+        rendered (hiccup/render node) defer]
+    (t/is (= (hiccup/tag node) "div"))
+    (t/is (= (hiccup/attr-count node) 2))
+    (t/is (= (hiccup/child-count node) 1))
+    (t/is (= rendered "<div class=\"panel\"><span>A&amp;B</span><strong>ok</strong></div>"))))
+
+(t/deftest http-package-basic-surface
+  (let [router (http/new-router)
+        server (http/new-server)
+        opts (http/new-rate-limit-opts time.Second 5)
+        data (http/new-rate-limit-data)
+        req (make-request .Get "sid=abc; csrf=csrf-abc" "")
+        res (make-response)
+        app (http/handler [req0 res0]
+              (set! (:status (deref res0)) .Accepted)
+              (http/set-cookie! res0 "session" "abc"))]
+    (defer (http/router-destroy! router))
+    (defer (http/rate-limit-destroy! data))
+    (http/handle! app (addr req) (addr res))
+    (let [[sid ok] (http/request-cookie (addr req) "sid")
+          cookies (http/request-cookies (addr req)) defer]
+      (t/is ok)
+      (t/is (= sid "abc"))
+      (t/is (= (map/get cookies "csrf" "") "csrf-abc")))
+    (t/is (= (:window opts) time.Second))
+    (t/is (= (:max opts) 5))
+    (t/is (== (:status res) .Accepted))
+    (t/is (= (count (:cookies res)) 1))
+    (t/is (= (:name (get (:cookies res) 0)) "session"))
+    (t/is (= (:value (get (:cookies res) 0)) "abc"))))
+
+(t/deftest http-client-package-surface
+  (let [req (httpc/new-request .Get)]
+    (defer (httpc/request-destroy req))
+    (httpc/set-header! req "x-api-key" "demo")
+    (httpc/add-cookie! req "session" "abc123")
+    (let [json-err (httpc/with-json req (Greeting {:message "hello"}))
+          [api-key ok] (h.headers_get_unsafe (:headers req) "x-api-key")]
+      (t/is (== json-err nil))
+      (t/is ok)
+      (t/is (= api-key "demo"))
+      (t/is (== (:method req) .Post))
+      (t/is (= (count (:cookies req)) 1))
+      (t/is (= (:name (get (:cookies req) 0)) "session"))
+      (t/is (= (:value (get (:cookies req) 0)) "abc123")))))
+
+(t/deftest http-session-package-surface
+  (let [opts (session/new-opts "sid" "csrf" new-sid csrf-for request-csrf-header)
+        fresh-get (make-request .Get "" "")
+        accepted-get (make-request .Get "sid=abc; csrf=csrf-abc" "")
+        refresh-get (make-request .Get "sid=abc" "")
+        accepted-post (make-request .Post "sid=abc; csrf=csrf-abc" "csrf-abc")
+        rejected-post (make-request .Post "sid=abc; csrf=csrf-abc" "wrong")
+        create-plan (session/plan (addr fresh-get) opts)
+        accept-plan (session/plan (addr accepted-get) opts)
+        refresh-plan (session/plan (addr refresh-get) opts)
+        accept-post-plan (session/plan (addr accepted-post) opts)
+        reject-plan (session/plan (addr rejected-post) opts)
+        res (make-response)]
+    (session/apply-plan! (addr res) opts create-plan)
+    (t/is (== (:action create-plan) .Create))
+    (t/is (:set-cookie create-plan))
+    (t/is (= (:sid create-plan) "demo-session"))
+    (t/is (= (:csrf create-plan) "csrf-demo-session"))
+    (t/is (== (:action accept-plan) .Accept))
+    (t/is (not (:set-cookie accept-plan)))
+    (t/is (session/accepted? accept-plan))
+    (t/is (== (:action refresh-plan) .RefreshCsrf))
+    (t/is (:set-cookie refresh-plan))
+    (t/is (== (:action accept-post-plan) .Accept))
+    (t/is (== (:action reject-plan) .Reject))
+    (t/is (not (session/accepted? reject-plan)))
+    (t/is (= (count (:cookies res)) 2))
+    (t/is (= (:name (get (:cookies res) 0)) "sid"))
+    (t/is (= (:name (get (:cookies res) 1)) "csrf"))))
+
+(t/deftest sse-and-datastar-surface-compiles
+  (t/is true))

@@ -1,61 +1,146 @@
 (package str)
 (import strings "core:strings")
 
-(defmacro slice [s start & rest]
+(defmacro slice
+  "Return a string slice view of `s`.
+
+  With two indexes, `(str/slice s start end)` lowers to Odin slicing from
+  `start` up to but not including `end`. With one index, `(str/slice s start)`
+  slices from `start` to the end of the string. This does not copy bytes; the
+  result aliases the original string storage, with the same lifetime and UTF-8
+  caveats as ordinary Odin string slicing."
+  [s start & rest]
   (if (= (kvist/count rest) 0)
     (quasiquote
       (kvist/str/slice (unquote s) (unquote start)))
     (quasiquote
       (kvist/str/slice (unquote s) (unquote start) (unquote (kvist/first rest))))))
 
-(defmacro get [s index]
+(defmacro get
+  "Return the byte at `index` from `s`.
+
+  This is direct indexing, not Unicode scalar or grapheme access. It lowers to
+  the same operation as `core/get` on a string and performs no allocation."
+  [s index]
   (quasiquote
     (kvist/core/get (unquote s) (unquote index))))
 
-(defmacro split [s separator]
+(defmacro split
+  "Split `s` around every occurrence of `separator`.
+
+  The result and allocation behavior are those of Odin `core:strings.split`.
+  Use this when an owned array of string slices is wanted; the returned pieces
+  refer to the original string contents rather than copying each substring."
+  [s separator]
   (quasiquote
     (kvist/str/split (unquote s) (unquote separator))))
 
-(defmacro join [parts separator]
+(defmacro join
+  "Join `parts` with `separator` between adjacent strings.
+
+  This lowers to Odin `core:strings.join` and returns a newly allocated string.
+  The caller owns that string according to the current allocator."
+  [parts separator]
   (quasiquote
     (kvist/str/join (unquote parts) (unquote separator))))
 
-(defmacro replace [s old new & rest]
+(defmacro replace
+  "Return a copy of `s` with occurrences of `old` replaced by `new`.
+
+  Without a count argument, every occurrence is replaced. With a fourth
+  argument, replacement is limited according to Odin `core:strings.replace`.
+  This allocates a new string and leaves the input unchanged."
+  [s old new & rest]
   (if (= (kvist/count rest) 0)
     (quasiquote
       (kvist/str/replace (unquote s) (unquote old) (unquote new)))
     (quasiquote
       (kvist/str/replace (unquote s) (unquote old) (unquote new) (unquote (kvist/first rest))))))
 
-(defn count [s: string] -> int #force_inline
+(defn count
+  "Return the byte length of `s`.
+
+  This is exactly Odin `len(s)`: it is O(1), allocates nothing, and counts
+  bytes, not Unicode scalar values or user-perceived characters."
+  [s: string] -> int #force_inline
   (len s))
 
-(defn contains? [s: string, needle: string] -> bool #force_inline
+(defn contains?
+  "Return true when `needle` occurs anywhere in `s`.
+
+  Matching is byte/string matching as provided by Odin `core:strings.contains`;
+  no locale, normalization, or case folding is applied."
+  [s: string, needle: string] -> bool #force_inline
   (strings.contains s needle))
 
-(defn trim [s: string] -> string #force_inline
+(defn trim
+  "Trim leading and trailing Unicode whitespace from `s`.
+
+  This forwards to Odin `core:strings.trim_space`. The result is a string slice
+  view into the original string; no new string contents are allocated."
+  [s: string] -> string #force_inline
   (strings.trim_space s))
 
-(defn trim-prefix [s: string, prefix: string] -> string #force_inline
+(defn trim-prefix
+  "Remove `prefix` from the start of `s` when it is present.
+
+  If `s` does not start with `prefix`, `s` is returned unchanged. The result is
+  a slice view into the original string and does not allocate."
+  [s: string, prefix: string] -> string #force_inline
   (strings.trim_prefix s prefix))
 
-(defn trim-suffix [s: string, suffix: string] -> string #force_inline
+(defn trim-suffix
+  "Remove `suffix` from the end of `s` when it is present.
+
+  If `s` does not end with `suffix`, `s` is returned unchanged. The result is a
+  slice view into the original string and does not allocate."
+  [s: string, suffix: string] -> string #force_inline
   (strings.trim_suffix s suffix))
 
-(defn starts-with? [s: string, prefix: string] -> bool #force_inline
+(defn starts-with?
+  "Return true when `s` begins with `prefix`.
+
+  This is a byte/string prefix check using Odin `core:strings.has_prefix`; it
+  does not allocate and performs no normalization."
+  [s: string, prefix: string] -> bool #force_inline
   (strings.has_prefix s prefix))
 
-(defn ends-with? [s: string, suffix: string] -> bool #force_inline
+(defn ends-with?
+  "Return true when `s` ends with `suffix`.
+
+  This is a byte/string suffix check using Odin `core:strings.has_suffix`; it
+  does not allocate and performs no normalization."
+  [s: string, suffix: string] -> bool #force_inline
   (strings.has_suffix s suffix))
 
-(defn index-of [s: string, needle: string] -> int #force_inline
+(defn index-of
+  "Return the byte index of the first occurrence of `needle` in `s`.
+
+  Returns `-1` when `needle` is not present. The index is a byte offset suitable
+  for Odin string slicing, not a character position."
+  [s: string, needle: string] -> int #force_inline
   (strings.index s needle))
 
-(defn last-index-of [s: string, needle: string] -> int #force_inline
+(defn last-index-of
+  "Return the byte index of the last occurrence of `needle` in `s`.
+
+  Returns `-1` when `needle` is not present. The index is a byte offset suitable
+  for Odin string slicing, not a character position."
+  [s: string, needle: string] -> int #force_inline
   (strings.last_index s needle))
 
-(defn lower [s: string] -> string #force_inline
+(defn lower
+  "Return a lower-case copy of `s`.
+
+  This forwards to Odin `core:strings.to_lower` and allocates a new string with
+  the current allocator. The input string is not modified."
+  [s: string] -> string #force_inline
   (strings.to_lower s))
 
-(defn upper [s: string] -> string #force_inline
+(defn upper
+  "Return an upper-case copy of `s`.
+
+  This forwards to Odin `core:strings.to_upper` and allocates a new string with
+  the current allocator. The input string is not modified."
+  [s: string] -> string #force_inline
   (strings.to_upper s))

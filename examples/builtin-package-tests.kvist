@@ -2,6 +2,7 @@
 
 (import t "kvist:test")
 (import arr "kvist:arr")
+(import core "kvist:core")
 (import io "kvist:io")
 (import json "kvist:json")
 (import map "kvist:map")
@@ -20,14 +21,37 @@
   :body string
 })
 
+(defstruct Member {
+  :name string
+  :score int
+  :active bool
+})
+
 (defn inc-value [x: int] -> int
   (+ x 1))
 
 (defn even-value? [x: int] -> bool
   (== (% x 2) 0))
 
+(defn below-four? [x: int] -> bool
+  (< x 4))
+
 (defn add-values [acc: int, x: int] -> int
   (+ acc x))
+
+(defn add-index [i: int, x: int] -> int
+  (+ i x))
+
+(defn neg-value [x: int] -> int
+  (- 0 x))
+
+(defn keep-even [x: int] -> [value: int, ok: bool]
+  (if (even-value? x)
+    (return x true)
+    (return 0 false)))
+
+(defn pick-first [_n: int] -> int
+  0)
 
 (defn query-positive [x: int] -> [value: int, ok: bool] #optional_ok
   (if (> x 0)
@@ -43,7 +67,7 @@
 
 (t/deftest core-package-surface
   (let [xs [1 2 3 4] defer
-        lookup (map/of string int {"a" 1 "b" 2}) defer
+        lookup (map/of int int {1 10 2 20}) defer
         mutable (new [dynamic]int [1 2 3]) defer
         prefix (slice xs 1 3)]
     (update! mutable 1 9)
@@ -51,10 +75,44 @@
     (t/is (= (get xs 0) 1))
     (t/is (= (count prefix) 2))
     (t/is (= (get prefix 0) 2))
-    (t/is (= (map/get lookup "a" 0) 1))
+    (t/is (= (map/get lookup 1 0) 10))
     (t/is (= (or-else (query-positive 7) 0) 7))
     (t/is (= (or-else (query-positive -1) 9) 9))
     (t/is (= (get mutable 1) 9))))
+
+(t/deftest core-package-extended-surface
+  (let [xs [1 2 3 4] defer
+        arr-copy (arr/into [dynamic]int xs) defer
+        lookup (map/of int int {1 10 2 20}) defer
+        mapped-thread (arr/map inc-value xs) defer
+        threaded (arr/filter even-value? mapped-thread)
+        profile (Profile {:name "Ada" :age 10})
+        updated-profile (core/update profile :age 11)
+        bucket "unset"
+        when-let-result 0
+        if-let-result (or-else (query-positive 5) 0)]
+    (defer (delete threaded))
+    (core/when true
+      (set! bucket "when"))
+    (core/when-let [value ok (query-positive 7)]
+      (set! when-let-result value))
+    (let [[data err] (io/read "README.md")]
+      (defer (delete data))
+      (t/is (== err nil))
+      (t/is (> (count data) 0)))
+    (t/is (= bucket "when"))
+    (t/is (= when-let-result 7))
+    (t/is (= if-let-result 5))
+    (t/is (= (:age updated-profile) 11))
+    (t/is (= (:age profile) 10))
+    (t/is (core/in 1 lookup))
+    (t/is (core/not-in 9 lookup))
+    (t/is (map/contains? lookup 1))
+    (t/is (not (empty? xs)))
+    (t/is (= (count threaded) 2))
+    (t/is (= (get threaded 0) 2))
+    (t/is (= (count arr-copy) 4))
+    (t/is (= (get arr-copy 3) 4))))
 
 (t/deftest arr-package-surface
   (let [xs (arr/range 1 6) defer
@@ -76,6 +134,133 @@
     (t/is (= (count repeated) 3))
     (t/is (= (get mutable 0) 2))
     (t/is (= (get mutable (- (count mutable) 1)) 8))))
+
+(t/deftest arr-package-extended-surface
+  (let [xs (arr/range 1 6) defer
+        indexed (arr/map-indexed add-index (slice xs 0)) defer
+        kept (arr/keep keep-even (slice xs 0)) defer
+        interposed (arr/interpose 0 (slice xs 0)) defer
+        left (arr/dynamic int [1 2 3]) defer
+        right (arr/dynamic int [9 8 7]) defer
+        interleaved (arr/interleave left right) defer
+        reversed (arr/reverse (slice xs 0)) defer
+        taken (arr/take 3 (slice xs 0))
+        dropped (arr/drop 2 (slice xs 0))
+        drop-last-two (arr/drop-last 2 (slice xs 0))
+        split-front (slice xs 0 0)
+        split-back (slice xs 0 0)
+        partitions (arr/partition 2 (slice xs 0)) defer
+        partitions-all (arr/partition-all 4 (slice xs 0)) defer
+        partitioned (arr/partition-by even-value? (slice xs 0)) defer
+        counts (arr/count-by even-value? (slice xs 0)) defer
+        sums (arr/sum-by even-value? inc-value (slice xs 0)) defer
+        freq-source (arr/dynamic int [1 1 2 3 3 3]) defer
+        distinct-source (arr/dynamic int [1 1 2 2 3 3]) defer
+        freqs (arr/frequencies freq-source) defer
+        distincts (arr/distinct distinct-source) defer
+        reversed! (arr/dynamic int [1 2 3]) defer
+        shuffled! (arr/dynamic int [1 2 3]) defer
+        mapped! (arr/dynamic int [1 2 3]) defer
+        indexed! (arr/dynamic int [1 2 3]) defer
+        kept! (arr/dynamic int [1 2 3 4]) defer
+        removed! (arr/dynamic int [1 2 3 4]) defer
+        target (arr/dynamic int [9]) defer
+        take-while-below (arr/take-while below-four? (slice xs 0))
+        drop-while-below (arr/drop-while below-four? (slice xs 0))
+        repeated-twice (arr/repeat 2 7) defer
+        every-below (arr/dynamic int [1 2 3]) defer
+        every-below-slice (slice every-below 0)
+        take-nth-two (arr/take-nth 2 (slice xs 0)) defer
+        iterated (arr/iterate 3 inc-value 1) defer
+        cycle-base (new []int [1 2])
+        cycled (arr/cycle 5 cycle-base) defer]
+    (let [[front back] (arr/split-at 2 (slice xs 0))]
+      (set! split-front front)
+      (set! split-back back))
+    (let [[found-value found-ok] (arr/find even-value? (slice xs 0))]
+      (arr/reverse! reversed!)
+      (arr/shuffle! pick-first shuffled!)
+      (arr/map! inc-value mapped!)
+      (arr/map-indexed! add-index indexed!)
+      (arr/keep! keep-even kept!)
+      (arr/remove! even-value? removed!)
+      (arr/into! target (slice xs 0))
+      (t/is (= (get indexed 0) 1))
+      (t/is (= (get indexed 4) 9))
+      (t/is (= (count kept) 2))
+      (t/is (= (get kept 1) 4))
+      (t/is (= (count interposed) 9))
+      (t/is (= (get interposed 1) 0))
+      (t/is (= (count interleaved) 6))
+      (t/is (= (get interleaved 1) 9))
+      (t/is (= (get reversed 0) 5))
+      (t/is (= (count taken) 3))
+      (t/is (= (get dropped 0) 3))
+      (t/is (= (count drop-last-two) 3))
+      (t/is (= (count split-front) 2))
+      (t/is (= (count split-back) 3))
+      (t/is (= (count partitions) 2))
+      (t/is (= (count (get partitions 0)) 2))
+      (t/is (= (count partitions-all) 2))
+      (t/is (= (count partitioned) 5))
+      (t/is (= (map/get counts true 0) 2))
+      (t/is (= (map/get sums true 0) 8))
+      (t/is (= (map/get freqs 3 0) 3))
+      (t/is (= (count distincts) 3))
+      (t/is (= (get reversed! 0) 3))
+      (t/is (= (count shuffled!) 3))
+      (t/is (= (get mapped! 2) 4))
+      (t/is (= (get indexed! 2) 5))
+      (t/is (= (count kept!) 2))
+      (t/is (= (count removed!) 2))
+      (t/is (= (count target) 6))
+      (t/is (= (get target 0) 9))
+      (t/is (= (get target 5) 5))
+      (t/is (= found-value 2))
+      (t/is found-ok)
+      (t/is (arr/some? even-value? (slice xs 0)))
+      (t/is (arr/every? below-four? every-below-slice))
+      (t/is (= (count take-while-below) 3))
+      (t/is (= (count drop-while-below) 2))
+      (t/is (= (count repeated-twice) 2))
+      (t/is (= (get take-nth-two 1) 3))
+      (t/is (= (get iterated 2) 3))
+      (t/is (= (get cycled 3) 2)))))
+
+(t/deftest arr-package-keyword-shorthand-surface
+  (let [members (arr/dynamic Member [(Member {:name "Ada" :score 10 :active true})
+                                     (Member {:name "Lin" :score 20 :active false})
+                                     (Member {:name "Ada" :score 30 :active true})]) defer
+        names (arr/map :name (slice members 0)) defer
+        active (arr/filter :active (slice members 0)) defer
+        inactive (arr/remove :active (slice members 0)) defer
+        grouped (arr/group-by :active (slice members 0))
+        counted (arr/count-by :active (slice members 0)) defer
+        summed (arr/sum-by :active :score (slice members 0)) defer
+        unique-members (arr/distinct-by :name (slice members 0)) defer
+        partitions (arr/partition-by :active (slice members 0)) defer
+        active-prefix (arr/take-while :active active)
+        inactive-tail (arr/drop-while :active members)
+        empty-members (arr/dynamic Member []) defer]
+    (defer
+      (for [_ group grouped]
+        (delete group))
+      (delete grouped))
+    (let [[found-member found-ok] (arr/find :active (slice members 0))]
+      (t/is (= (get names 0) "Ada"))
+      (t/is (= (count active) 2))
+      (t/is (= (count inactive) 1))
+      (t/is (= (map/get counted true 0) 2))
+      (t/is (= (map/get summed true 0) 40))
+      (t/is (= (count unique-members) 2))
+      (t/is (= (count partitions) 3))
+      (t/is (= (count (map/get grouped true empty-members)) 2))
+      (t/is (= (:name found-member) "Ada"))
+      (t/is found-ok)
+      (t/is (arr/some? :active (slice members 0)))
+      (t/is (arr/every? :active active))
+      (t/is (= (count active-prefix) 2))
+      (t/is (= (count inactive-tail) 2)))))
 
 (t/deftest map-package-surface
   (let [base (map/of string int {"a" 1 "b" 2}) defer

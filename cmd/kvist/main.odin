@@ -309,7 +309,7 @@ run_odin_file :: proc(command, generated_path, source_path, source, eval_source,
     }
     out_path := ""
     out_arg := ""
-    if command == "build" || command == "run" {
+    if command == "build" || command == "run" || command == "test" {
         out_path = strings.clone(fmt.tprintf("%s.bin", generated_abs))
         out_arg = strings.clone(fmt.tprintf("-out:%s", out_path))
         append(&args, out_arg)
