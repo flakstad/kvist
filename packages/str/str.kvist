@@ -1,4 +1,5 @@
 (package str)
+(import core "kvist:core")
 (import strings "core:strings")
 
 (defmacro slice
@@ -23,7 +24,7 @@
   the same operation as `core/get` on a string and performs no allocation."
   [s index]
   (quasiquote
-    (kvist/core/get (unquote s) (unquote index))))
+    (core/get (unquote s) (unquote index))))
 
 (defmacro split
   "Split `s` around every occurrence of `separator`.

@@ -34,7 +34,7 @@
         (fmt.println reloader-err)
         (delete reloader-err)
         (fmt.println "build it first with:")
-        (fmt.printf "  ./kvist examples/hot_reload_demo/shared/package.kvist -o build/generated/hot_reload_demo/shared/package.odin\n")
+        (fmt.printf "  ./kvist examples/hot_reload_demo/shared/shared.kvist -o build/generated/hot_reload_demo/shared/shared.odin\n")
         (fmt.printf "  ./kvist examples/hot_reload_demo/module/main.kvist -o build/generated/hot_reload_demo/module/main.odin\n")
         (fmt.printf "  ./kvist examples/hot_reload_demo/host/main.kvist -o build/generated/hot_reload_demo/host/main.odin\n")
         (fmt.printf "  odin build build/generated/hot_reload_demo/module -build-mode:dll -out:%s\n" path)

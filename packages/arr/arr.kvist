@@ -8,7 +8,7 @@
   and allocates nothing."
   [xs]
   (quasiquote
-    (kvist/core/count (unquote xs))))
+    (core/count (unquote xs))))
 
 (defmacro map
   "Return a new dynamic array containing `(f x)` for each `x` in `xs`.
@@ -22,7 +22,7 @@
     (quasiquote
       (kvist/arr/map (unquote f) (unquote xs)))
     (quasiquote
-      (map-impl (unquote f) (kvist/core/slice (unquote xs) 0)))))
+      (map-impl (unquote f) (core/slice (unquote xs) 0)))))
 
 (defmacro filter
   "Return a new dynamic array containing values for which `pred` is true.
@@ -34,7 +34,7 @@
     (quasiquote
       (kvist/arr/filter (unquote pred) (unquote xs)))
     (quasiquote
-      (filter-impl (unquote pred) (kvist/core/slice (unquote xs) 0)))))
+      (filter-impl (unquote pred) (core/slice (unquote xs) 0)))))
 
 (defmacro remove
   "Return a new dynamic array containing values for which `pred` is false.
@@ -46,7 +46,7 @@
     (quasiquote
       (kvist/arr/remove (unquote pred) (unquote xs)))
     (quasiquote
-      (remove-impl (unquote pred) (kvist/core/slice (unquote xs) 0)))))
+      (remove-impl (unquote pred) (core/slice (unquote xs) 0)))))
 
 (defmacro reduce
   "Reduce `xs` from left to right using accumulator function `f`.
@@ -56,7 +56,7 @@
   loop and does not allocate."
   [f init xs]
   (quasiquote
-    (reduce-impl (unquote f) (unquote init) (kvist/core/slice (unquote xs) 0))))
+    (reduce-impl (unquote f) (unquote init) (core/slice (unquote xs) 0))))
 
 (defmacro empty
   "Create an empty dynamic array of `elem-type`.
@@ -239,7 +239,7 @@
   not mutated."
   [sep xs]
   (quasiquote
-    (interpose-impl (unquote sep) (kvist/core/slice (unquote xs) 0))))
+    (interpose-impl (unquote sep) (core/slice (unquote xs) 0))))
 
 (defn- interpose-impl
   "Return a new dynamic array with `sep` inserted between input elements.
@@ -266,7 +266,7 @@
   the longer input are ignored."
   [xs ys]
   (quasiquote
-    (interleave-impl (kvist/core/slice (unquote xs) 0) (kvist/core/slice (unquote ys) 0))))
+    (interleave-impl (core/slice (unquote xs) 0) (core/slice (unquote ys) 0))))
 
 (defn- interleave-impl
   "Return a new dynamic array alternating elements from `xs` and `ys`.
@@ -292,7 +292,7 @@
   input count."
   [xs]
   (quasiquote
-    (reverse-impl (kvist/core/slice (unquote xs) 0))))
+    (reverse-impl (core/slice (unquote xs) 0))))
 
 (defn- reverse-impl
   "Return a new dynamic array with the elements of `xs` in reverse order.
@@ -340,7 +340,7 @@
   ordinary indexing behavior."
   [xs index]
   (quasiquote
-    (kvist/core/get (unquote xs) (unquote index))))
+    (core/get (unquote xs) (unquote index))))
 
 (defmacro slice
   "Return a slice view of `xs`.
@@ -350,27 +350,27 @@
   [xs start & rest]
   (if (= (kvist/count rest) 0)
     (quasiquote
-      (kvist/core/slice (unquote xs) (unquote start)))
+      (core/slice (unquote xs) (unquote start)))
     (quasiquote
-      (kvist/core/slice (unquote xs) (unquote start) (unquote (kvist/first rest))))))
+      (core/slice (unquote xs) (unquote start) (unquote (kvist/first rest))))))
 
 (defmacro first
   "Return the first element of `xs`."
   [xs]
   (quasiquote
-    (kvist/core/get (unquote xs) 0)))
+    (core/get (unquote xs) 0)))
 
 (defmacro second
   "Return the second element of `xs`."
   [xs]
   (quasiquote
-    (kvist/core/get (unquote xs) 1)))
+    (core/get (unquote xs) 1)))
 
 (defmacro nth
   "Return the element at zero-based `index` in `xs`."
   [xs index]
   (quasiquote
-    (kvist/core/get (unquote xs) (unquote index))))
+    (core/get (unquote xs) (unquote index))))
 
 (defmacro last
   "Return the last element of `xs`.
@@ -379,7 +379,7 @@
   `(count xs) - 1`."
   [xs]
   (quasiquote
-    (kvist/core/get (unquote xs) (- (kvist/core/count (unquote xs)) 1))))
+    (core/get (unquote xs) (- (core/count (unquote xs)) 1))))
 
 (defmacro rest
   "Return a slice view of `xs` without its first element.
@@ -387,7 +387,7 @@
   This does not copy elements and aliases the original storage."
   [xs]
   (quasiquote
-    (kvist/core/slice (unquote xs) 1)))
+    (core/slice (unquote xs) 1)))
 
 (defmacro take
   "Return a slice view of the first `n` elements of `xs`.
@@ -396,7 +396,7 @@
   slicing."
   [n xs]
   (quasiquote
-    (kvist/core/slice (unquote xs) 0 (unquote n))))
+    (core/slice (unquote xs) 0 (unquote n))))
 
 (defmacro drop
   "Return a slice view of `xs` without its first `n` elements.
@@ -405,7 +405,7 @@
   slicing."
   [n xs]
   (quasiquote
-    (kvist/core/slice (unquote xs) (unquote n))))
+    (core/slice (unquote xs) (unquote n))))
 
 (defmacro drop-last
   "Return a slice view of `xs` without its last `n` elements.
@@ -414,7 +414,7 @@
   slicing."
   [n xs]
   (quasiquote
-    (kvist/core/slice (unquote xs) 0 (- (kvist/core/count (unquote xs)) (unquote n)))))
+    (core/slice (unquote xs) 0 (- (core/count (unquote xs)) (unquote n)))))
 
 (defmacro split-at
   "Split `xs` at index `n`.
@@ -553,7 +553,7 @@
   This does not copy elements. The input must be non-empty."
   [xs]
   (quasiquote
-    (kvist/core/slice (unquote xs) 0 (- (kvist/core/count (unquote xs)) 1))))
+    (core/slice (unquote xs) 0 (- (core/count (unquote xs)) 1))))
 
 (defmacro range
   "Return a dynamic array of integers in arithmetic progression.
@@ -731,7 +731,7 @@
     (quasiquote
       (kvist/arr/take-while (unquote pred) (unquote xs)))
     (quasiquote
-      (take-while-impl (unquote pred) (kvist/core/slice (unquote xs) 0)))))
+      (take-while-impl (unquote pred) (core/slice (unquote xs) 0)))))
 
 (defmacro drop-while
   "Return the suffix after dropping leading elements that satisfy `pred`.
@@ -743,7 +743,7 @@
     (quasiquote
       (kvist/arr/drop-while (unquote pred) (unquote xs)))
     (quasiquote
-      (drop-while-impl (unquote pred) (kvist/core/slice (unquote xs) 0)))))
+      (drop-while-impl (unquote pred) (core/slice (unquote xs) 0)))))
 
 (defmacro some?
   "Return true when any element of `xs` satisfies `pred`.
@@ -755,7 +755,7 @@
     (quasiquote
       (kvist/arr/some? (unquote pred) (unquote xs)))
     (quasiquote
-      (some-impl (unquote pred) (kvist/core/slice (unquote xs) 0)))))
+      (some-impl (unquote pred) (core/slice (unquote xs) 0)))))
 
 (defmacro every?
   "Return true when every element of `xs` satisfies `pred`.
@@ -767,7 +767,7 @@
     (quasiquote
       (kvist/arr/every? (unquote pred) (unquote xs)))
     (quasiquote
-      (every-impl (unquote pred) (kvist/core/slice (unquote xs) 0)))))
+      (every-impl (unquote pred) (core/slice (unquote xs) 0)))))
 
 (defmacro find
   "Return the first element of `xs` satisfying `pred`, plus an ok flag.
@@ -779,7 +779,7 @@
     (quasiquote
       (kvist/arr/find (unquote pred) (unquote xs)))
     (quasiquote
-      (find-impl (unquote pred) (kvist/core/slice (unquote xs) 0)))))
+      (find-impl (unquote pred) (core/slice (unquote xs) 0)))))
 
 (defn- some-impl
   "Implementation helper for non-keyword `arr/some?`."

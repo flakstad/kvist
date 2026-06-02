@@ -751,7 +751,7 @@ parse_decl :: proc(top_form: CST_Top_Form) -> (decl: AST_Decl, err: Compile_Erro
     switch head.text {
     case "comment":
         return AST_Decl{}, Compile_Error{message = "`comment` has moved to `core/comment`", span = form.span}, false
-    case "core/comment", "kvist/core-comment":
+    case "core/comment":
         return AST_Decl{kind = .Ignored, span = form.span}, {}, true
     case "package":
         if len(form.items) != 2 || form.items[1].kind != .Symbol {

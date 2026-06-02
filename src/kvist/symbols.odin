@@ -23,13 +23,6 @@ Builtin_Source_Entry :: struct {
     snippet:  string,
 }
 
-Package_Source_Entry :: struct {
-    import_path: string,
-    member:      string,
-    relative:    string,
-    snippet:     string,
-}
-
 Language_Source_Entry :: struct {
     name:     string,
     kind:     string,
@@ -55,243 +48,6 @@ KVIST_CANONICAL_IMPORTS_FOR_EDITOR :: [13]Imported_Symbol_Entry{
 
 BUILTIN_SOURCE_ENTRIES :: []Builtin_Source_Entry{
     {name = "type", relative = "src/kvist/parse.odin", snippet = "if is_symbol(form.items[0], \"type\")"},
-}
-
-PACKAGE_SOURCE_ENTRIES :: []Package_Source_Entry{
-    {import_path = "kvist:core", member = "when", relative = "packages/core/package.kvist", snippet = "(defmacro when [test & body]"},
-    {import_path = "kvist:core", member = "cond", relative = "packages/core/package.kvist", snippet = "(defmacro cond [& clauses]"},
-    {import_path = "kvist:core", member = "comment", relative = "packages/core/package.kvist", snippet = "(defmacro comment [& body]"},
-    {import_path = "kvist:core", member = "switch", relative = "packages/core/package.kvist", snippet = "(defmacro switch [value & clauses]"},
-    {import_path = "kvist:core", member = "->", relative = "packages/core/package.kvist", snippet = "(defmacro -> [value & steps]"},
-    {import_path = "kvist:core", member = "->>", relative = "packages/core/package.kvist", snippet = "(defmacro ->> [value & steps]"},
-    {import_path = "kvist:core", member = "count", relative = "packages/core/package.kvist", snippet = "(defmacro count [collection]"},
-    {import_path = "kvist:core", member = "get", relative = "packages/core/package.kvist", snippet = "(defmacro get [target key & rest]"},
-    {import_path = "kvist:core", member = "slice", relative = "packages/core/package.kvist", snippet = "(defmacro slice [target & rest]"},
-    {import_path = "kvist:core", member = "empty?", relative = "packages/core/package.kvist", snippet = "(defmacro empty? [collection]"},
-    {import_path = "kvist:core", member = "contains?", relative = "packages/core/package.kvist", snippet = "(defmacro contains? [collection key]"},
-    {import_path = "kvist:core", member = "in", relative = "packages/core/package.kvist", snippet = "(defmacro in [value collection]"},
-    {import_path = "kvist:core", member = "not-in", relative = "packages/core/package.kvist", snippet = "(defmacro not-in [value collection]"},
-    {import_path = "kvist:core", member = "update!", relative = "packages/core/package.kvist", snippet = "(defmacro update! [target key-or-field value-or-updater & rest]"},
-    {import_path = "kvist:core", member = "update", relative = "packages/core/package.kvist", snippet = "(defmacro update [target key-or-field value-or-updater & rest]"},
-    {import_path = "kvist:core", member = "or-else", relative = "packages/core/package.kvist", snippet = "(defmacro or-else [expr fallback]"},
-    {import_path = "kvist:core", member = "doc", relative = "packages/core/package.kvist", snippet = "(defmacro doc [name]"},
-    {import_path = "kvist:core", member = "nil?", relative = "packages/core/package.kvist", snippet = "(defmacro nil? [value]"},
-    {import_path = "kvist:core", member = "tap>", relative = "packages/core/package.kvist", snippet = "(defmacro tap> [value & rest]"},
-    {import_path = "kvist:core", member = "println", relative = "packages/core/package.kvist", snippet = "(defmacro println [& values]"},
-    {import_path = "kvist:core", member = "when-let", relative = "packages/core/package.kvist", snippet = "(defmacro when-let [binding & body]"},
-    {import_path = "kvist:core", member = "if-let", relative = "packages/core/package.kvist", snippet = "(defmacro if-let [binding then else]"},
-    {import_path = "kvist:core", member = "when-ok", relative = "packages/core/package.kvist", snippet = "(defmacro when-ok [binding & body]"},
-    {import_path = "kvist:core", member = "if-ok", relative = "packages/core/package.kvist", snippet = "(defmacro if-ok [binding then else]"},
-    {import_path = "kvist:arr", member = "count", relative = "packages/arr/package.kvist", snippet = "(defmacro count [xs]"},
-    {import_path = "kvist:arr", member = "map", relative = "packages/arr/package.kvist", snippet = "(defmacro map [f xs]"},
-    {import_path = "kvist:arr", member = "filter", relative = "packages/arr/package.kvist", snippet = "(defmacro filter [pred xs]"},
-    {import_path = "kvist:arr", member = "remove", relative = "packages/arr/package.kvist", snippet = "(defmacro remove [pred xs]"},
-    {import_path = "kvist:arr", member = "reduce", relative = "packages/arr/package.kvist", snippet = "(defmacro reduce [f init xs]"},
-    {import_path = "kvist:arr", member = "empty", relative = "packages/arr/package.kvist", snippet = "(defmacro empty [elem-type & rest]"},
-    {import_path = "kvist:arr", member = "dynamic", relative = "packages/arr/package.kvist", snippet = "(defmacro dynamic [elem-type items]"},
-    {import_path = "kvist:arr", member = "fixed", relative = "packages/arr/package.kvist", snippet = "(defmacro fixed [elem-type items]"},
-    {import_path = "kvist:arr", member = "get", relative = "packages/arr/package.kvist", snippet = "(defmacro get [xs index]"},
-    {import_path = "kvist:arr", member = "slice", relative = "packages/arr/package.kvist", snippet = "(defmacro slice [xs start & rest]"},
-    {import_path = "kvist:arr", member = "push!", relative = "packages/arr/package.kvist", snippet = "(defmacro push! [xs & values]"},
-    {import_path = "kvist:arr", member = "range", relative = "packages/arr/package.kvist", snippet = "(defmacro range [& rest]"},
-    {import_path = "kvist:arr", member = "map-indexed", relative = "packages/arr/package.kvist", snippet = "(defmacro map-indexed [f xs]"},
-    {import_path = "kvist:arr", member = "keep", relative = "packages/arr/package.kvist", snippet = "(defmacro keep [f xs]"},
-    {import_path = "kvist:arr", member = "mapcat", relative = "packages/arr/package.kvist", snippet = "(defmacro mapcat [f xs]"},
-    {import_path = "kvist:arr", member = "first", relative = "packages/arr/package.kvist", snippet = "(defmacro first [xs]"},
-    {import_path = "kvist:arr", member = "second", relative = "packages/arr/package.kvist", snippet = "(defmacro second [xs]"},
-    {import_path = "kvist:arr", member = "last", relative = "packages/arr/package.kvist", snippet = "(defmacro last [xs]"},
-    {import_path = "kvist:arr", member = "nth", relative = "packages/arr/package.kvist", snippet = "(defmacro nth [xs index]"},
-    {import_path = "kvist:arr", member = "rest", relative = "packages/arr/package.kvist", snippet = "(defmacro rest [xs]"},
-    {import_path = "kvist:arr", member = "butlast", relative = "packages/arr/package.kvist", snippet = "(defmacro butlast [xs]"},
-    {import_path = "kvist:arr", member = "map!", relative = "packages/arr/package.kvist", snippet = "(defmacro map! [f xs]"},
-    {import_path = "kvist:arr", member = "map-indexed!", relative = "packages/arr/package.kvist", snippet = "(defmacro map-indexed! [f xs]"},
-    {import_path = "kvist:arr", member = "filter!", relative = "packages/arr/package.kvist", snippet = "(defmacro filter! [pred xs]"},
-    {import_path = "kvist:arr", member = "remove!", relative = "packages/arr/package.kvist", snippet = "(defmacro remove! [pred xs]"},
-    {import_path = "kvist:arr", member = "remove-ordered-at", relative = "packages/arr/package.kvist", snippet = "(proc remove-ordered-at [xs: []$T, index: int] -> [dynamic]T #force_inline"},
-    {import_path = "kvist:arr", member = "remove-ordered-at!", relative = "packages/arr/package.kvist", snippet = "(defmacro remove-ordered-at! [xs index]"},
-    {import_path = "kvist:arr", member = "remove-unordered-at", relative = "packages/arr/package.kvist", snippet = "(proc remove-unordered-at [xs: []$T, index: int] -> [dynamic]T #force_inline"},
-    {import_path = "kvist:arr", member = "remove-unordered-at!", relative = "packages/arr/package.kvist", snippet = "(defmacro remove-unordered-at! [xs index]"},
-    {import_path = "kvist:arr", member = "keep!", relative = "packages/arr/package.kvist", snippet = "(defmacro keep! [f xs]"},
-    {import_path = "kvist:arr", member = "into", relative = "packages/arr/package.kvist", snippet = "(defmacro into [out-type xs]"},
-    {import_path = "kvist:arr", member = "into!", relative = "packages/arr/package.kvist", snippet = "(defmacro into! [target xs]"},
-    {import_path = "kvist:arr", member = "interpose", relative = "packages/arr/package.kvist", snippet = "(defmacro interpose [sep xs]"},
-    {import_path = "kvist:arr", member = "interleave", relative = "packages/arr/package.kvist", snippet = "(defmacro interleave [xs ys]"},
-    {import_path = "kvist:arr", member = "reverse", relative = "packages/arr/package.kvist", snippet = "(defmacro reverse [xs]"},
-    {import_path = "kvist:arr", member = "reverse!", relative = "packages/arr/package.kvist", snippet = "(defmacro reverse! [xs]"},
-    {import_path = "kvist:arr", member = "shuffle", relative = "packages/arr/package.kvist", snippet = "(defmacro shuffle [pick xs]"},
-    {import_path = "kvist:arr", member = "shuffle!", relative = "packages/arr/package.kvist", snippet = "(defmacro shuffle! [pick xs]"},
-    {import_path = "kvist:arr", member = "take", relative = "packages/arr/package.kvist", snippet = "(defmacro take [n xs]"},
-    {import_path = "kvist:arr", member = "drop", relative = "packages/arr/package.kvist", snippet = "(defmacro drop [n xs]"},
-    {import_path = "kvist:arr", member = "drop-last", relative = "packages/arr/package.kvist", snippet = "(defmacro drop-last [n xs]"},
-    {import_path = "kvist:arr", member = "take-while", relative = "packages/arr/package.kvist", snippet = "(defmacro take-while [pred xs]"},
-    {import_path = "kvist:arr", member = "drop-while", relative = "packages/arr/package.kvist", snippet = "(defmacro drop-while [pred xs]"},
-    {import_path = "kvist:arr", member = "split-at", relative = "packages/arr/package.kvist", snippet = "(defmacro split-at [n xs]"},
-    {import_path = "kvist:arr", member = "partition", relative = "packages/arr/package.kvist", snippet = "(defmacro partition [n xs]"},
-    {import_path = "kvist:arr", member = "partition-all", relative = "packages/arr/package.kvist", snippet = "(defmacro partition-all [n xs]"},
-    {import_path = "kvist:arr", member = "partition-by", relative = "packages/arr/package.kvist", snippet = "(defmacro partition-by [f xs]"},
-    {import_path = "kvist:arr", member = "index-by", relative = "packages/arr/package.kvist", snippet = "(defmacro index-by [f xs]"},
-    {import_path = "kvist:arr", member = "group-by", relative = "packages/arr/package.kvist", snippet = "(defmacro group-by [f xs]"},
-    {import_path = "kvist:arr", member = "count-by", relative = "packages/arr/package.kvist", snippet = "(defmacro count-by [f xs]"},
-    {import_path = "kvist:arr", member = "sum-by", relative = "packages/arr/package.kvist", snippet = "(defmacro sum-by [key-f value-f xs]"},
-    {import_path = "kvist:arr", member = "frequencies", relative = "packages/arr/package.kvist", snippet = "(defmacro frequencies [xs]"},
-    {import_path = "kvist:arr", member = "distinct", relative = "packages/arr/package.kvist", snippet = "(defmacro distinct [xs]"},
-    {import_path = "kvist:arr", member = "distinct-by", relative = "packages/arr/package.kvist", snippet = "(defmacro distinct-by [f xs]"},
-    {import_path = "kvist:arr", member = "take-nth", relative = "packages/arr/package.kvist", snippet = "(proc take-nth [n: int, xs: []$T] -> [dynamic]T #force_inline"},
-    {import_path = "kvist:arr", member = "repeat", relative = "packages/arr/package.kvist", snippet = "(proc repeat [n: int, value: $T] -> [dynamic]T #force_inline"},
-    {import_path = "kvist:arr", member = "repeatedly", relative = "packages/arr/package.kvist", snippet = "(proc repeatedly [n: int, f: (proc [] -> $T)] -> [dynamic]T #force_inline"},
-    {import_path = "kvist:arr", member = "iterate", relative = "packages/arr/package.kvist", snippet = "(proc iterate [n: int, f: (proc [x: $T] -> T), init: T] -> [dynamic]T #force_inline"},
-    {import_path = "kvist:arr", member = "cycle", relative = "packages/arr/package.kvist", snippet = "(proc cycle [n: int, xs: []$T] -> [dynamic]T #force_inline"},
-    {import_path = "kvist:arr", member = "find", relative = "packages/arr/package.kvist", snippet = "(defmacro find [pred xs]"},
-    {import_path = "kvist:arr", member = "some?", relative = "packages/arr/package.kvist", snippet = "(defmacro some? [pred xs]"},
-    {import_path = "kvist:arr", member = "every?", relative = "packages/arr/package.kvist", snippet = "(defmacro every? [pred xs]"},
-    {import_path = "kvist:arr", member = "sort", relative = "packages/arr/package.kvist", snippet = "(defmacro sort [xs]"},
-    {import_path = "kvist:arr", member = "sort!", relative = "packages/arr/package.kvist", snippet = "(defmacro sort! [xs]"},
-    {import_path = "kvist:arr", member = "sort-by", relative = "packages/arr/package.kvist", snippet = "(defmacro sort-by [f xs]"},
-    {import_path = "kvist:arr", member = "sort-by!", relative = "packages/arr/package.kvist", snippet = "(defmacro sort-by! [f xs]"},
-    {import_path = "kvist:str", member = "count", relative = "packages/str/package.kvist", snippet = "(proc count [s: string] -> int #force_inline"},
-    {import_path = "kvist:str", member = "get", relative = "packages/str/package.kvist", snippet = "(defmacro get [s index]"},
-    {import_path = "kvist:str", member = "slice", relative = "packages/str/package.kvist", snippet = "(defmacro slice [s start & rest]"},
-    {import_path = "kvist:str", member = "contains?", relative = "packages/str/package.kvist", snippet = "(defn contains? [s: string, needle: string] -> bool #force_inline"},
-    {import_path = "kvist:str", member = "split", relative = "packages/str/package.kvist", snippet = "(defmacro split [s separator]"},
-    {import_path = "kvist:str", member = "join", relative = "packages/str/package.kvist", snippet = "(defmacro join [parts separator]"},
-    {import_path = "kvist:str", member = "trim", relative = "packages/str/package.kvist", snippet = "(defn trim [s: string] -> string #force_inline"},
-    {import_path = "kvist:str", member = "trim-prefix", relative = "packages/str/package.kvist", snippet = "(defn trim-prefix [s: string, prefix: string] -> string #force_inline"},
-    {import_path = "kvist:str", member = "trim-suffix", relative = "packages/str/package.kvist", snippet = "(defn trim-suffix [s: string, suffix: string] -> string #force_inline"},
-    {import_path = "kvist:str", member = "starts-with?", relative = "packages/str/package.kvist", snippet = "(defn starts-with? [s: string, prefix: string] -> bool #force_inline"},
-    {import_path = "kvist:str", member = "ends-with?", relative = "packages/str/package.kvist", snippet = "(defn ends-with? [s: string, suffix: string] -> bool #force_inline"},
-    {import_path = "kvist:str", member = "index-of", relative = "packages/str/package.kvist", snippet = "(defn index-of [s: string, needle: string] -> int #force_inline"},
-    {import_path = "kvist:str", member = "last-index-of", relative = "packages/str/package.kvist", snippet = "(defn last-index-of [s: string, needle: string] -> int #force_inline"},
-    {import_path = "kvist:str", member = "replace", relative = "packages/str/package.kvist", snippet = "(defmacro replace [s old new & rest]"},
-    {import_path = "kvist:str", member = "lower", relative = "packages/str/package.kvist", snippet = "(defn lower [s: string] -> string #force_inline"},
-    {import_path = "kvist:str", member = "upper", relative = "packages/str/package.kvist", snippet = "(defn upper [s: string] -> string #force_inline"},
-    {import_path = "kvist:map", member = "empty", relative = "packages/map/package.kvist", snippet = "(defmacro empty [key-type value-type & rest]"},
-    {import_path = "kvist:map", member = "of", relative = "packages/map/package.kvist", snippet = "(defmacro of [key-type value-type entries]"},
-    {import_path = "kvist:map", member = "get", relative = "packages/map/package.kvist", snippet = "(defmacro get [m key & rest]"},
-    {import_path = "kvist:map", member = "contains?", relative = "packages/map/package.kvist", snippet = "(proc contains? [m: map[$K]$V, key: K] -> bool #force_inline"},
-    {import_path = "kvist:map", member = "keys", relative = "packages/map/package.kvist", snippet = "(proc keys [m: map[$K]$V] -> [dynamic]K #force_inline"},
-    {import_path = "kvist:map", member = "vals", relative = "packages/map/package.kvist", snippet = "(proc vals [m: map[$K]$V] -> [dynamic]V #force_inline"},
-    {import_path = "kvist:map", member = "zip", relative = "packages/map/package.kvist", snippet = "(proc zip [ks: []$K, vs: []$V] -> map[K]V #force_inline"},
-    {import_path = "kvist:map", member = "assoc", relative = "packages/map/package.kvist", snippet = "(proc assoc [m: map[$K]$V, key: K, value: V] -> map[K]V #force_inline"},
-    {import_path = "kvist:map", member = "assoc!", relative = "packages/map/package.kvist", snippet = "(defmacro assoc! [target key value]"},
-    {import_path = "kvist:map", member = "dissoc", relative = "packages/map/package.kvist", snippet = "(proc dissoc [m: map[$K]$V, key: K] -> map[K]V #force_inline"},
-    {import_path = "kvist:map", member = "dissoc!", relative = "packages/map/package.kvist", snippet = "(defmacro dissoc! [target key]"},
-    {import_path = "kvist:map", member = "merge", relative = "packages/map/package.kvist", snippet = "(proc merge [lhs: map[$K]$V, rhs: map[$K]$V] -> map[K]V #force_inline"},
-    {import_path = "kvist:map", member = "merge!", relative = "packages/map/package.kvist", snippet = "(defmacro merge! [target source]"},
-    {import_path = "kvist:set", member = "empty", relative = "packages/set/package.kvist", snippet = "(defmacro empty [elem-type & rest]"},
-    {import_path = "kvist:set", member = "of", relative = "packages/set/package.kvist", snippet = "(defmacro of [elem-type values]"},
-    {import_path = "kvist:set", member = "contains?", relative = "packages/set/package.kvist", snippet = "(defn contains? [s: set[$T], value: T] -> bool #force_inline"},
-    {import_path = "kvist:set", member = "add!", relative = "packages/set/package.kvist", snippet = "(defmacro add! [s value]"},
-    {import_path = "kvist:set", member = "remove!", relative = "packages/set/package.kvist", snippet = "(defmacro remove! [s value]"},
-    {import_path = "kvist:set", member = "union", relative = "packages/set/package.kvist", snippet = "(defn union [lhs: set[$T], rhs: set[$T]] -> set[T] #force_inline"},
-    {import_path = "kvist:set", member = "intersection", relative = "packages/set/package.kvist", snippet = "(defn intersection [lhs: set[$T], rhs: set[$T]] -> set[T] #force_inline"},
-    {import_path = "kvist:set", member = "difference", relative = "packages/set/package.kvist", snippet = "(defn difference [lhs: set[$T], rhs: set[$T]] -> set[T] #force_inline"},
-    {import_path = "kvist:set", member = "union!", relative = "packages/set/package.kvist", snippet = "(defmacro union! [target source]"},
-    {import_path = "kvist:set", member = "intersection!", relative = "packages/set/package.kvist", snippet = "(defmacro intersection! [target source]"},
-    {import_path = "kvist:set", member = "difference!", relative = "packages/set/package.kvist", snippet = "(defmacro difference! [target source]"},
-    {import_path = "kvist:set", member = "subset?", relative = "packages/set/package.kvist", snippet = "(proc subset? [lhs: set[$T], rhs: set[$T]] -> bool #force_inline"},
-    {import_path = "kvist:set", member = "superset?", relative = "packages/set/package.kvist", snippet = "(proc superset? [lhs: set[$T], rhs: set[$T]] -> bool #force_inline"},
-    {import_path = "kvist:set", member = "disjoint?", relative = "packages/set/package.kvist", snippet = "(proc disjoint? [lhs: set[$T], rhs: set[$T]] -> bool #force_inline"},
-    {import_path = "kvist:set", member = "add", relative = "packages/set/package.kvist", snippet = "(proc add [s: set[$T], value: T] -> set[T] #force_inline"},
-    {import_path = "kvist:set", member = "remove", relative = "packages/set/package.kvist", snippet = "(proc remove [s: set[$T], value: T] -> set[T] #force_inline"},
-    {import_path = "kvist:struct", member = "fields", relative = "packages/struct/package.kvist", snippet = "(defmacro fields [target]"},
-    {import_path = "kvist:struct", member = "types", relative = "packages/struct/package.kvist", snippet = "(defmacro types [target]"},
-    {import_path = "kvist:io", member = "read", relative = "packages/io/io.kvist", snippet = "(defn read"},
-    {import_path = "kvist:io", member = "write", relative = "packages/io/io.kvist", snippet = "(defn write"},
-    {import_path = "kvist:json", member = "write", relative = "packages/json/json.kvist", snippet = "(defn write"},
-    {import_path = "kvist:json", member = "read-as", relative = "packages/json/json.kvist", snippet = "(defn read-as"},
-    {import_path = "kvist:http", member = "new-router", relative = "packages/http/http.kvist", snippet = "(defn new-router"},
-    {import_path = "kvist:http", member = "router-destroy!", relative = "packages/http/http.kvist", snippet = "(defmacro router-destroy!"},
-    {import_path = "kvist:http", member = "new-server", relative = "packages/http/http.kvist", snippet = "(defn new-server"},
-    {import_path = "kvist:http", member = "server-shutdown-on-interrupt!", relative = "packages/http/http.kvist", snippet = "(defmacro server-shutdown-on-interrupt!"},
-    {import_path = "kvist:http", member = "shutdown!", relative = "packages/http/http.kvist", snippet = "(defmacro shutdown!"},
-    {import_path = "kvist:http", member = "listen!", relative = "packages/http/http.kvist", snippet = "(defmacro listen!"},
-    {import_path = "kvist:http", member = "handler", relative = "packages/http/http.kvist", snippet = "(defmacro handler"},
-    {import_path = "kvist:http", member = "handle!", relative = "packages/http/http.kvist", snippet = "(defmacro handle!"},
-    {import_path = "kvist:http", member = "middleware", relative = "packages/http/http.kvist", snippet = "(defmacro middleware"},
-    {import_path = "kvist:http", member = "router-handler", relative = "packages/http/http.kvist", snippet = "(defmacro router-handler"},
-    {import_path = "kvist:http", member = "serve!", relative = "packages/http/http.kvist", snippet = "(defmacro serve!"},
-    {import_path = "kvist:http", member = "serve-handler!", relative = "packages/http/http.kvist", snippet = "(defmacro serve-handler!"},
-    {import_path = "kvist:http", member = "listen-and-serve!", relative = "packages/http/http.kvist", snippet = "(defmacro listen-and-serve!"},
-    {import_path = "kvist:http", member = "listen-and-serve-handler!", relative = "packages/http/http.kvist", snippet = "(defmacro listen-and-serve-handler!"},
-    {import_path = "kvist:http", member = "with-router", relative = "packages/http/http.kvist", snippet = "(defmacro with-router"},
-    {import_path = "kvist:http", member = "get!", relative = "packages/http/http.kvist", snippet = "(defmacro get!"},
-    {import_path = "kvist:http", member = "get", relative = "packages/http/http.kvist", snippet = "(defmacro get"},
-    {import_path = "kvist:http", member = "post!", relative = "packages/http/http.kvist", snippet = "(defmacro post!"},
-    {import_path = "kvist:http", member = "post", relative = "packages/http/http.kvist", snippet = "(defmacro post"},
-    {import_path = "kvist:http", member = "put!", relative = "packages/http/http.kvist", snippet = "(defmacro put!"},
-    {import_path = "kvist:http", member = "put", relative = "packages/http/http.kvist", snippet = "(defmacro put"},
-    {import_path = "kvist:http", member = "patch!", relative = "packages/http/http.kvist", snippet = "(defmacro patch!"},
-    {import_path = "kvist:http", member = "patch", relative = "packages/http/http.kvist", snippet = "(defmacro patch"},
-    {import_path = "kvist:http", member = "head!", relative = "packages/http/http.kvist", snippet = "(defmacro head!"},
-    {import_path = "kvist:http", member = "head", relative = "packages/http/http.kvist", snippet = "(defmacro head"},
-    {import_path = "kvist:http", member = "options!", relative = "packages/http/http.kvist", snippet = "(defmacro options!"},
-    {import_path = "kvist:http", member = "options", relative = "packages/http/http.kvist", snippet = "(defmacro options"},
-    {import_path = "kvist:http", member = "delete!", relative = "packages/http/http.kvist", snippet = "(defmacro delete!"},
-    {import_path = "kvist:http", member = "delete", relative = "packages/http/http.kvist", snippet = "(defmacro delete"},
-    {import_path = "kvist:http", member = "all!", relative = "packages/http/http.kvist", snippet = "(defmacro all!"},
-    {import_path = "kvist:http", member = "all", relative = "packages/http/http.kvist", snippet = "(defmacro all"},
-    {import_path = "kvist:http", member = "listen", relative = "packages/http/http.kvist", snippet = "(defmacro listen"},
-    {import_path = "kvist:http", member = "respond", relative = "packages/http/http.kvist", snippet = "(defmacro respond"},
-    {import_path = "kvist:http", member = "respond-ok", relative = "packages/http/http.kvist", snippet = "(defmacro respond-ok"},
-    {import_path = "kvist:http", member = "respond-plain", relative = "packages/http/http.kvist", snippet = "(defmacro respond-plain"},
-    {import_path = "kvist:http", member = "respond-html", relative = "packages/http/http.kvist", snippet = "(defmacro respond-html"},
-    {import_path = "kvist:http", member = "respond-json", relative = "packages/http/http.kvist", snippet = "(defmacro respond-json"},
-    {import_path = "kvist:http", member = "respond-file", relative = "packages/http/http.kvist", snippet = "(defmacro respond-file"},
-    {import_path = "kvist:http", member = "respond-file-content", relative = "packages/http/http.kvist", snippet = "(defmacro respond-file-content"},
-    {import_path = "kvist:http", member = "respond-dir", relative = "packages/http/http.kvist", snippet = "(defmacro respond-dir"},
-    {import_path = "kvist:http", member = "request-cookie", relative = "packages/http/http.kvist", snippet = "(defmacro request-cookie"},
-    {import_path = "kvist:http", member = "request-cookies", relative = "packages/http/http.kvist", snippet = "(defmacro request-cookies"},
-    {import_path = "kvist:http", member = "set-cookie!", relative = "packages/http/http.kvist", snippet = "(defmacro set-cookie!"},
-    {import_path = "kvist:http", member = "new-rate-limit-opts", relative = "packages/http/http.kvist", snippet = "(defn new-rate-limit-opts"},
-    {import_path = "kvist:http", member = "new-rate-limit-data", relative = "packages/http/http.kvist", snippet = "(defn new-rate-limit-data"},
-    {import_path = "kvist:http", member = "rate-limit-destroy!", relative = "packages/http/http.kvist", snippet = "(defmacro rate-limit-destroy!"},
-    {import_path = "kvist:http", member = "rate-limit", relative = "packages/http/http.kvist", snippet = "(defmacro rate-limit"},
-    {import_path = "kvist:http/client", member = "new-request", relative = "packages/http/client/client.kvist", snippet = "(defn new-request"},
-    {import_path = "kvist:http/client", member = "request", relative = "packages/http/client/client.kvist", snippet = "(defmacro request"},
-    {import_path = "kvist:http/client", member = "get", relative = "packages/http/client/client.kvist", snippet = "(defmacro get"},
-    {import_path = "kvist:http/client", member = "with-json", relative = "packages/http/client/client.kvist", snippet = "(defmacro with-json"},
-    {import_path = "kvist:http/client", member = "request-destroy", relative = "packages/http/client/client.kvist", snippet = "(defmacro request-destroy"},
-    {import_path = "kvist:http/client", member = "set-header!", relative = "packages/http/client/client.kvist", snippet = "(defmacro set-header!"},
-    {import_path = "kvist:http/client", member = "add-cookie!", relative = "packages/http/client/client.kvist", snippet = "(defmacro add-cookie!"},
-    {import_path = "kvist:http/client", member = "response-body", relative = "packages/http/client/client.kvist", snippet = "(defmacro response-body"},
-    {import_path = "kvist:http/client", member = "response-destroy", relative = "packages/http/client/client.kvist", snippet = "(defmacro response-destroy"},
-    {import_path = "kvist:http/client", member = "body-destroy", relative = "packages/http/client/client.kvist", snippet = "(defmacro body-destroy"},
-    {import_path = "kvist:http/session", member = "new-opts", relative = "packages/http/session/session.kvist", snippet = "(defn new-opts"},
-    {import_path = "kvist:http/session", member = "request-sid", relative = "packages/http/session/session.kvist", snippet = "(defn request-sid"},
-    {import_path = "kvist:http/session", member = "request-csrf-cookie", relative = "packages/http/session/session.kvist", snippet = "(defn request-csrf-cookie"},
-    {import_path = "kvist:http/session", member = "expected-csrf", relative = "packages/http/session/session.kvist", snippet = "(defn expected-csrf"},
-    {import_path = "kvist:http/session", member = "accepted?", relative = "packages/http/session/session.kvist", snippet = "(defmacro accepted?"},
-    {import_path = "kvist:http/session", member = "read-method?", relative = "packages/http/session/session.kvist", snippet = "(defn read-method?"},
-    {import_path = "kvist:http/session", member = "request-method", relative = "packages/http/session/session.kvist", snippet = "(defn request-method"},
-    {import_path = "kvist:http/session", member = "plan", relative = "packages/http/session/session.kvist", snippet = "(defn plan"},
-    {import_path = "kvist:http/session", member = "apply-plan!", relative = "packages/http/session/session.kvist", snippet = "(defmacro apply-plan!"},
-    {import_path = "kvist:http/session", member = "reject!", relative = "packages/http/session/session.kvist", snippet = "(defmacro reject!"},
-    {import_path = "kvist:http/sse", member = "new-stream", relative = "packages/http/sse/sse.kvist", snippet = "(defmacro new-stream"},
-    {import_path = "kvist:http/sse", member = "new-stream-on-error", relative = "packages/http/sse/sse.kvist", snippet = "(defmacro new-stream-on-error"},
-    {import_path = "kvist:http/sse", member = "on-error", relative = "packages/http/sse/sse.kvist", snippet = "(defmacro on-error"},
-    {import_path = "kvist:http/sse", member = "on-timeout", relative = "packages/http/sse/sse.kvist", snippet = "(defmacro on-timeout"},
-    {import_path = "kvist:http/sse", member = "start!", relative = "packages/http/sse/sse.kvist", snippet = "(defmacro start!"},
-    {import_path = "kvist:http/sse", member = "with-stream", relative = "packages/http/sse/sse.kvist", snippet = "(defmacro with-stream"},
-    {import_path = "kvist:http/sse", member = "send!", relative = "packages/http/sse/sse.kvist", snippet = "(defmacro send!"},
-    {import_path = "kvist:http/sse", member = "send-event!", relative = "packages/http/sse/sse.kvist", snippet = "(defmacro send-event!"},
-    {import_path = "kvist:http/sse", member = "comment!", relative = "packages/http/sse/sse.kvist", snippet = "(defmacro comment!"},
-    {import_path = "kvist:http/sse", member = "retry!", relative = "packages/http/sse/sse.kvist", snippet = "(defmacro retry!"},
-    {import_path = "kvist:http/sse", member = "schedule-timeout!", relative = "packages/http/sse/sse.kvist", snippet = "(defmacro schedule-timeout!"},
-    {import_path = "kvist:http/sse", member = "closed?", relative = "packages/http/sse/sse.kvist", snippet = "(defmacro closed?"},
-    {import_path = "kvist:http/sse", member = "user-int", relative = "packages/http/sse/sse.kvist", snippet = "(defmacro user-int"},
-    {import_path = "kvist:http/sse", member = "set-user-int!", relative = "packages/http/sse/sse.kvist", snippet = "(defmacro set-user-int!"},
-    {import_path = "kvist:http/sse", member = "flush!", relative = "packages/http/sse/sse.kvist", snippet = "(defmacro flush!"},
-    {import_path = "kvist:http/sse", member = "close!", relative = "packages/http/sse/sse.kvist", snippet = "(defmacro close!"},
-    {import_path = "kvist:http/sse", member = "destroy!", relative = "packages/http/sse/sse.kvist", snippet = "(defmacro destroy!"},
-    {import_path = "kvist:http/datastar", member = "patch-elements!", relative = "packages/http/datastar/datastar.kvist", snippet = "(defmacro patch-elements!"},
-    {import_path = "kvist:http/datastar", member = "patch-elements-selector!", relative = "packages/http/datastar/datastar.kvist", snippet = "(defmacro patch-elements-selector!"},
-    {import_path = "kvist:http/datastar", member = "patch-elements-transition!", relative = "packages/http/datastar/datastar.kvist", snippet = "(defmacro patch-elements-transition!"},
-    {import_path = "kvist:http/datastar", member = "patch-elements-seq!", relative = "packages/http/datastar/datastar.kvist", snippet = "(defmacro patch-elements-seq!"},
-    {import_path = "kvist:http/datastar", member = "remove-elements!", relative = "packages/http/datastar/datastar.kvist", snippet = "(defmacro remove-elements!"},
-    {import_path = "kvist:http/datastar", member = "patch-signals!", relative = "packages/http/datastar/datastar.kvist", snippet = "(defmacro patch-signals!"},
-    {import_path = "kvist:http/datastar", member = "patch-signals-missing!", relative = "packages/http/datastar/datastar.kvist", snippet = "(defmacro patch-signals-missing!"},
-    {import_path = "kvist:http/datastar", member = "execute-script!", relative = "packages/http/datastar/datastar.kvist", snippet = "(defmacro execute-script!"},
-    {import_path = "kvist:http/datastar", member = "redirect!", relative = "packages/http/datastar/datastar.kvist", snippet = "(defmacro redirect!"},
 }
 
 LANGUAGE_SOURCE_ENTRIES :: []Language_Source_Entry{
@@ -847,7 +603,7 @@ symbols_top_level_kind_exported :: proc(kind: string) -> bool {
     }
 }
 
-symbols_append_source_package_records :: proc(builder: ^strings.Builder, seen: ^map[string]bool, import_path, alias, package_file, output: string) {
+symbols_append_source_package_records :: proc(builder: ^strings.Builder, seen: ^map[string]bool, import_path, alias, package_file, output: string, package_kind: string = "") {
     lines := strings.split_lines(output, context.allocator)
     defer delete(lines)
     for line in lines {
@@ -877,15 +633,19 @@ symbols_append_source_package_records :: proc(builder: ^strings.Builder, seen: ^
         column_text := fields[3]
         signature := fields[5]
         doc := fields[6]
+        kind_text := kind
+        if package_kind != "" {
+            kind_text = package_kind
+        }
         slash_name := fmt.tprintf("%s/%s", alias, name)
         if !seen[slash_name] {
             seen[slash_name] = true
-            fmt.sbprintf(builder, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", kind, slash_name, line_text, column_text, import_path, signature, doc, package_file)
+            fmt.sbprintf(builder, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", kind_text, slash_name, line_text, column_text, import_path, signature, doc, package_file)
         }
         dot_name := fmt.tprintf("%s.%s", alias, name)
         if !seen[dot_name] {
             seen[dot_name] = true
-            fmt.sbprintf(builder, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", kind, dot_name, line_text, column_text, import_path, signature, doc, package_file)
+            fmt.sbprintf(builder, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", kind_text, dot_name, line_text, column_text, import_path, signature, doc, package_file)
         }
         delete(fields)
     }
@@ -1201,296 +961,6 @@ editor_builtin_symbols_append :: proc(builder: ^strings.Builder, seen: ^map[stri
     }
 }
 
-editor_package_symbols_append :: proc(builder: ^strings.Builder, seen: ^map[string]bool, repo_root, import_path, alias: string) {
-    for entry in PACKAGE_SOURCE_ENTRIES {
-        if entry.import_path != import_path {
-            continue
-        }
-        file, line, column, ok := file_location_for_snippet(repo_root, entry.relative, entry.snippet)
-        if !ok {
-            continue
-        }
-        signature, doc, ok_doc := package_entry_signature_doc(import_path, entry.member)
-        if !ok_doc {
-            delete(file)
-            continue
-        }
-        doc_lines := symbols_doc_lines_from_string(doc)
-        defer delete(doc_lines)
-        temp := strings.builder_make()
-        defer strings.builder_destroy(&temp)
-        symbols_write_record_doc_file(&temp, "kvist package", fmt.tprintf("%s/%s", alias, entry.member), line, column, import_path, signature, doc_lines[:], file)
-        symbols_write_record_doc_file(&temp, "kvist package", fmt.tprintf("%s.%s", alias, entry.member), line, column, import_path, signature, doc_lines[:], file)
-        symbols_append_unique_records(builder, seen, strings.to_string(temp))
-        delete(file)
-    }
-}
-
-package_entry_signature_doc :: proc(import_path, member: string) -> (signature, doc: string, ok: bool) {
-    switch import_path {
-    case "kvist:core":
-        switch member {
-        case "when": return "(core/when test body...)", "Run one or more body forms only when the test is truthy.", true
-        case "cond": return "(core/cond test1 expr1 ... :else exprN)", "Evaluate test/expression pairs in order and return the first matching result.", true
-        case "comment": return "(core/comment body...)", "Ignore one or more forms at compile time, commonly for eval-friendly example blocks.", true
-        case "switch": return "(core/switch value case1 expr1 ... :else exprN)", "Dispatch on a value using Odin-style switch lowering.", true
-        case "->": return "(core/-> value step...)", "Thread the current value into the first argument position of each step.", true
-        case "->>": return "(core/->> value step...)", "Thread the current value into the last argument position of each step.", true
-        case "count": return "(core/count collection)", "Count elements in a collection or bytes in a string.", true
-        case "get": return "(core/get target key [default])", "Index into array-family values or look up map entries with an optional default.", true
-        case "slice": return "(core/slice target start [end])", "Take a slice view over an array-family value or string.", true
-        case "empty?": return "(core/empty? collection)", "Return true when a collection has zero elements.", true
-        case "contains?": return "(core/contains? collection key)", "Return true when a collection contains the key or value, using direct membership checks for maps/sets and value scans for array-family collections.", true
-        case "in": return "(core/in value collection)", "Return true when a value is present in a collection using Odin's in operator.", true
-        case "not-in": return "(core/not-in value collection)", "Return true when a value is absent from a collection using Odin's in operator.", true
-        case "update!": return "(core/update! target key-or-field value-or-updater ...)", "Mutate a struct field, array/slice slot, or map key in place. Supports replacement and updater forms such as inc or +.", true
-        case "update": return "(core/update target key-or-field value-or-updater ...)", "Return an updated copy. Currently supported for struct fields.", true
-        case "or-else": return "(core/or-else expr fallback)", "Evaluate an Odin optional-ok expression and return its value when ok is true, otherwise return the fallback value.", true
-        case "doc": return "(core/doc 'symbol)", "Print the stored docstring for a declaration name.", true
-        case "nil?": return "(core/nil? value)", "Return true when the value equals Odin nil.", true
-        case "tap>": return "(core/tap> value [label])", "Print a value and return it unchanged, optionally with a label.", true
-        case "println": return "(core/println value...)", "Print one or more values. Kvist lowers this to fmt output and auto-imports core:fmt when needed.", true
-        case "when-let": return "(core/when-let [value bool expr] body...)", "Bind a value and explicit boolean result from a multi-return expression. Run the body only when the boolean is true.", true
-        case "if-let": return "(core/if-let [value bool expr] then else)", "Bind a value and explicit boolean result from a multi-return expression. Evaluate the then branch when the boolean is true, otherwise the else branch.", true
-        case "when-ok": return "(core/when-ok [value err expr] body...)", "Bind a value and Odin error result from a multi-return expression. Run the body only when the error equals Odin's zero value {}.", true
-        case "if-ok": return "(core/if-ok [value err expr] then else)", "Bind a value and Odin error result from a multi-return expression. Evaluate the then branch when the error equals Odin's zero value {}, otherwise the else branch.", true
-        }
-    case "kvist:arr":
-        switch member {
-        case "count": return "(arr/count xs)", "Count elements in an array, fixed array, or slice.", true
-        case "empty": return "(arr/empty T [capacity])", "Construct an empty dynamic array, optionally with capacity.", true
-        case "dynamic": return "(arr/dynamic T [v1 v2 ...])", "Construct a dynamic array from a vector literal.", true
-        case "fixed": return "(arr/fixed T [v1 v2 ...])", "Construct a fixed array from a vector literal.", true
-        case "get": return "(arr/get xs index)", "Index into an array-family value.", true
-        case "slice": return "(arr/slice xs start [end])", "Take a slice view over an array-family value.", true
-        case "push!": return "(arr/push! xs value...)", "Append one or more values to a dynamic array.", true
-        case "map": return "(arr/map f xs)", "Map over an array-family input and return an owned dynamic array.", true
-        case "filter": return "(arr/filter pred xs)", "Filter an array-family input and return an owned dynamic array.", true
-        case "remove": return "(arr/remove pred xs)", "Remove matching values from an array-family input and return an owned dynamic array.", true
-        case "map-indexed": return "(arr/map-indexed f xs)", "Map with index over an array-family input and return an owned dynamic array.", true
-        case "keep": return "(arr/keep f xs)", "Keep callback results where the callback returns ok=true.", true
-        case "mapcat": return "(arr/mapcat f xs)", "Map each item to a slice and append the results into one owned dynamic array.", true
-        case "reduce": return "(arr/reduce f init xs)", "Reduce an array-family input to a scalar.", true
-        case "first": return "(arr/first xs)", "Return the first element of an array-family value.", true
-        case "rest": return "(arr/rest xs)", "Return a slice view without the first element.", true
-        case "map!": return "(arr/map! f xs)", "Map in place over a dynamic array.", true
-        case "map-indexed!": return "(arr/map-indexed! f xs)", "Map in place with index over a dynamic array.", true
-        case "filter!": return "(arr/filter! pred xs)", "Filter in place over a dynamic array.", true
-        case "remove!": return "(arr/remove! pred xs)", "Remove matching values in place from a dynamic array.", true
-        case "remove-ordered-at": return "(arr/remove-ordered-at xs index)", "Return an owned dynamic array with one indexed element removed, preserving order.", true
-        case "remove-ordered-at!": return "(arr/remove-ordered-at! xs index)", "Remove one indexed element from a dynamic array in place, preserving order.", true
-        case "remove-unordered-at": return "(arr/remove-unordered-at xs index)", "Return an owned dynamic array with one indexed element removed without preserving order.", true
-        case "remove-unordered-at!": return "(arr/remove-unordered-at! xs index)", "Remove one indexed element from a dynamic array in place without preserving order.", true
-        case "keep!": return "(arr/keep! f xs)", "Keep callback results in place in a dynamic array.", true
-        case "into": return "(arr/into [dynamic]T xs)", "Copy a collection into a new dynamic array of the requested type.", true
-        case "into!": return "(arr/into! target xs)", "Append one collection into an existing dynamic array.", true
-        case "interpose": return "(arr/interpose sep xs)", "Insert a separator between array elements and return an owned dynamic array.", true
-        case "interleave": return "(arr/interleave xs ys)", "Interleave two arrays into an owned dynamic array.", true
-        case "reverse": return "(arr/reverse xs)", "Return a reversed owned dynamic array.", true
-        case "reverse!": return "(arr/reverse! xs)", "Reverse a dynamic array in place.", true
-        case "shuffle": return "(arr/shuffle pick xs)", "Return a shuffled owned dynamic array.", true
-        case "shuffle!": return "(arr/shuffle! pick xs)", "Shuffle a dynamic array in place.", true
-        case "take": return "(arr/take n xs)", "Take a leading slice or owned result from an array-family input.", true
-        case "drop": return "(arr/drop n xs)", "Drop a leading prefix from an array-family input.", true
-        case "drop-last": return "(arr/drop-last n xs)", "Drop a trailing suffix from an array-family input.", true
-        case "split-at": return "(arr/split-at n xs)", "Split an array-family input into left and right slice views.", true
-        case "partition": return "(arr/partition n xs)", "Partition an array-family input into borrowed chunks.", true
-        case "partition-all": return "(arr/partition-all n xs)", "Partition an array-family input into borrowed chunks, keeping a short tail chunk.", true
-        case "partition-by": return "(arr/partition-by f xs)", "Partition an array-family input when the callback result changes.", true
-        case "index-by": return "(arr/index-by f xs)", "Build a map from key function to original array values.", true
-        case "group-by": return "(arr/group-by f xs)", "Build a map from key function to grouped owned dynamic arrays.", true
-        case "count-by": return "(arr/count-by f xs)", "Count items by key into a map.", true
-        case "sum-by": return "(arr/sum-by key-f value-f xs)", "Sum values by key into a map.", true
-        case "frequencies": return "(arr/frequencies xs)", "Count occurrences of array values into a map.", true
-        case "distinct": return "(arr/distinct xs)", "Return an owned dynamic array with duplicate values removed.", true
-        case "distinct-by": return "(arr/distinct-by f xs)", "Return an owned dynamic array with duplicate callback keys removed.", true
-        case "take-nth": return "(arr/take-nth n xs)", "Sample every nth item into an owned dynamic array.", true
-        case "sort": return "(arr/sort xs)", "Return a sorted owned array.", true
-        case "sort!": return "(arr/sort! xs)", "Sort a dynamic array in place.", true
-        case "sort-by": return "(arr/sort-by f xs)", "Return an owned array sorted by callback key.", true
-        case "sort-by!": return "(arr/sort-by! f xs)", "Sort a dynamic array in place by callback key.", true
-        }
-    case "kvist:str":
-        switch member {
-        case "count": return "(str/count s)", "Count characters or bytes in a string.", true
-        case "get": return "(str/get s index)", "Index into a string.", true
-        case "slice": return "(str/slice s start [end])", "Take a string slice.", true
-        case "contains?": return "(str/contains? s needle)", "Return true when the string contains the needle.", true
-        case "split": return "(str/split s sep)", "Split a string into an owned dynamic array of string slices.", true
-        case "join": return "(str/join parts sep)", "Join a string collection into one owned string.", true
-        case "trim": return "(str/trim s)", "Trim surrounding whitespace from a string slice.", true
-        case "trim-prefix": return "(str/trim-prefix s prefix)", "Trim a prefix from a string slice when present.", true
-        case "trim-suffix": return "(str/trim-suffix s suffix)", "Trim a suffix from a string slice when present.", true
-        case "starts-with?": return "(str/starts-with? s prefix)", "Return true when the string starts with the prefix.", true
-        case "ends-with?": return "(str/ends-with? s suffix)", "Return true when the string ends with the suffix.", true
-        case "index-of": return "(str/index-of s needle)", "Return the byte index of the first matching substring, or -1.", true
-        case "last-index-of": return "(str/last-index-of s needle)", "Return the byte index of the last matching substring, or -1.", true
-        case "replace": return "(str/replace s old new [count])", "Return an owned string with substring replacements applied.", true
-        case "lower": return "(str/lower s)", "Return an owned lowercased string.", true
-        case "upper": return "(str/upper s)", "Return an owned uppercased string.", true
-        }
-    case "kvist:map":
-        switch member {
-        case "empty": return "(map/empty K V [capacity])", "Construct an empty map, optionally with capacity.", true
-        case "of": return "(map/of K V {k1 v1 ...})", "Construct a map from a brace literal.", true
-        case "get": return "(map/get m key [default])", "Look up a key in a map, optionally with a default.", true
-        case "contains?": return "(map/contains? m key)", "Return true when the map contains the key.", true
-        case "keys": return "(map/keys m)", "Return an owned dynamic array of map keys.", true
-        case "vals": return "(map/vals m)", "Return an owned dynamic array of map values.", true
-        case "zip": return "(map/zip keys vals)", "Build a map from key and value collections.", true
-        case "assoc": return "(map/assoc m key value)", "Return an owned map with the key associated to the value.", true
-        case "assoc!": return "(map/assoc! target key value)", "Associate a key to a value in place.", true
-        case "dissoc": return "(map/dissoc m key)", "Return an owned map without the key.", true
-        case "dissoc!": return "(map/dissoc! target key)", "Remove a key from a map in place.", true
-        case "merge": return "(map/merge lhs rhs)", "Return an owned map containing entries from both inputs.", true
-        case "merge!": return "(map/merge! target source)", "Insert all entries from source into target in place.", true
-        }
-    case "kvist:set":
-        switch member {
-        case "empty": return "(set/empty T [capacity])", "Construct an empty set, optionally with capacity.", true
-        case "of": return "(set/of T [v1 v2 ...])", "Construct a set from a vector literal.", true
-        case "contains?": return "(set/contains? s value)", "Return true when the set contains the value.", true
-        case "union": return "(set/union lhs rhs)", "Return an owned set containing values from both inputs.", true
-        case "intersection": return "(set/intersection lhs rhs)", "Return an owned set containing values present in both inputs.", true
-        case "difference": return "(set/difference lhs rhs)", "Return an owned set containing values from lhs not present in rhs.", true
-        case "union!": return "(set/union! target source)", "Insert all values from source into target in place.", true
-        case "intersection!": return "(set/intersection! target source)", "Remove values from target that are not present in source.", true
-        case "difference!": return "(set/difference! target source)", "Remove every value from target that is present in source.", true
-        case "subset?": return "(set/subset? lhs rhs)", "Return true when every lhs value is present in rhs.", true
-        case "superset?": return "(set/superset? lhs rhs)", "Return true when lhs contains every value from rhs.", true
-        case "disjoint?": return "(set/disjoint? lhs rhs)", "Return true when the sets share no values.", true
-        case "add": return "(set/add s value)", "Return an owned set with the value inserted.", true
-        case "add!": return "(set/add! s value)", "Insert a value into a set.", true
-        case "remove": return "(set/remove s value)", "Return an owned set with the value removed.", true
-        case "remove!": return "(set/remove! s value)", "Remove a value from a set in place.", true
-        }
-    case "kvist:struct":
-        switch member {
-        case "fields": return "(struct/fields target)", "Return source-level field names for a struct type or value.", true
-        case "types": return "(struct/types target)", "Return source-level field types for a struct type or value.", true
-        }
-    case "kvist:io":
-        switch member {
-        case "read": return "(io/read path)", "Read a file into owned bytes using the current allocator.", true
-        case "write": return "(io/write path data)", "Write bytes or text to a file.", true
-        }
-    case "kvist:json":
-        switch member {
-        case "write": return "(json/write path value)", "Encode a value as JSON and write it to a file.", true
-        case "read-as": return "(json/read-as T path)", "Read JSON from a file and decode it into a typed value.", true
-        }
-    case "kvist:http":
-        switch member {
-        case "new-router": return "(http/new-router)", "Create and initialize a vendored HTTP router value.", true
-        case "router-destroy!": return "(http/router-destroy! router)", "Destroy a router and free its owned route patterns.", true
-        case "new-server": return "(http/new-server)", "Create a vendored HTTP server value.", true
-        case "server-shutdown-on-interrupt!": return "(http/server-shutdown-on-interrupt! server)", "Register graceful shutdown on SIGINT for a server.", true
-        case "shutdown!": return "(http/shutdown! server)", "Begin graceful shutdown for a running server.", true
-        case "listen!": return "(http/listen! server port)", "Bind a server socket on loopback for the given port.", true
-        case "handler": return "(http/handler [req res] body...)", "Create a vendored HTTP handler from a typed request/response callback body.", true
-        case "handle!": return "(http/handle! handler req res)", "Run an existing vendored HTTP handler against a request and response.", true
-        case "middleware": return "(http/middleware next [req res] body...)", "Create a vendored HTTP middleware wrapper around an existing handler.", true
-        case "router-handler": return "(http/router-handler router)", "Turn a router into a vendored HTTP handler value.", true
-        case "serve!": return "(http/serve! server router)", "Serve requests for a configured router on a listening server.", true
-        case "serve-handler!": return "(http/serve-handler! server handler)", "Serve requests for an already-built handler on a listening server.", true
-        case "listen-and-serve!": return "(http/listen-and-serve! server router port)", "Bind and serve a router on loopback for the given port.", true
-        case "listen-and-serve-handler!": return "(http/listen-and-serve-handler! server handler port)", "Bind and serve an already-built handler on loopback for the given port.", true
-        case "with-router": return "(http/with-router [router] body...)", "Bind a vendored HTTP router, initialize it, and destroy it on scope exit.", true
-        case "get!": return "(http/get! router pattern [req res] body...)", "Register a GET route on a router.", true
-        case "get": return "(http/get router pattern [req res] body...)", "Register a GET route with a typed request/response handler.", true
-        case "post!": return "(http/post! router pattern [req res] body...)", "Register a POST route on a router.", true
-        case "post": return "(http/post router pattern [req res] body...)", "Register a POST route with a typed request/response handler.", true
-        case "put!": return "(http/put! router pattern [req res] body...)", "Register a PUT route on a router.", true
-        case "put": return "(http/put router pattern [req res] body...)", "Register a PUT route with a typed request/response handler.", true
-        case "patch!": return "(http/patch! router pattern [req res] body...)", "Register a PATCH route on a router.", true
-        case "patch": return "(http/patch router pattern [req res] body...)", "Register a PATCH route with a typed request/response handler.", true
-        case "head!": return "(http/head! router pattern [req res] body...)", "Register a HEAD route on a router.", true
-        case "head": return "(http/head router pattern [req res] body...)", "Register a HEAD route with a typed request/response handler.", true
-        case "options!": return "(http/options! router pattern [req res] body...)", "Register an OPTIONS route on a router.", true
-        case "options": return "(http/options router pattern [req res] body...)", "Register an OPTIONS route with a typed request/response handler.", true
-        case "delete!": return "(http/delete! router pattern [req res] body...)", "Register a DELETE route on a router.", true
-        case "delete": return "(http/delete router pattern [req res] body...)", "Register a DELETE route with a typed request/response handler.", true
-        case "all!": return "(http/all! router pattern [req res] body...)", "Register a catch-all route on a router.", true
-        case "all": return "(http/all router pattern [req res] body...)", "Register a catch-all route with a typed request/response handler.", true
-        case "listen": return "(http/listen port router)", "Start a loopback HTTP server for a configured router.", true
-        case "respond": return "(http/respond res status)", "Send a response with a status code and no body.", true
-        case "respond-ok": return "(http/respond-ok res)", "Send a 200 OK response with no body.", true
-        case "respond-plain": return "(http/respond-plain res text [status])", "Send a plain-text HTTP response.", true
-        case "respond-html": return "(http/respond-html res html [status])", "Send an HTML HTTP response.", true
-        case "respond-json": return "(http/respond-json res value [status])", "Send a JSON HTTP response.", true
-        case "respond-file": return "(http/respond-file res path [mime])", "Send a file response.", true
-        case "respond-file-content": return "(http/respond-file-content res path content [mime])", "Send a file response with explicit content bytes.", true
-        case "respond-dir": return "(http/respond-dir res base target request)", "Serve a directory path response.", true
-        case "request-cookie": return "(http/request-cookie req key)", "Read one request cookie by key.", true
-        case "request-cookies": return "(http/request-cookies req)", "Read all request cookies into an owned map.", true
-        case "set-cookie!": return "(http/set-cookie! res name value)", "Append a simple response cookie.", true
-        case "new-rate-limit-opts": return "(http/new-rate-limit-opts window max)", "Create upstream rate limit options.", true
-        case "new-rate-limit-data": return "(http/new-rate-limit-data)", "Create upstream rate limit middleware state.", true
-        case "rate-limit-destroy!": return "(http/rate-limit-destroy! data)", "Destroy upstream rate limit middleware state.", true
-        case "rate-limit": return "(http/rate-limit data next opts)", "Wrap an existing handler with upstream IP-based rate limiting.", true
-        }
-    case "kvist:http/session":
-        switch member {
-        case "new-opts": return "(session/new-opts session-cookie csrf-cookie new-sid csrf-for request-csrf)", "Create explicit session and CSRF options with user-provided callbacks.", true
-        case "request-sid": return "(session/request-sid req opts)", "Read the configured session cookie from a request.", true
-        case "request-csrf-cookie": return "(session/request-csrf-cookie req opts)", "Read the configured CSRF cookie from a request.", true
-        case "expected-csrf": return "(session/expected-csrf sid opts)", "Compute the expected CSRF token for a session id.", true
-        case "accepted?": return "(session/accepted? plan)", "Return true when a session plan should proceed.", true
-        case "read-method?": return "(session/read-method? method)", "Return true for read-style HTTP methods treated like GET and HEAD.", true
-        case "request-method": return "(session/request-method req)", "Read the current upstream request method.", true
-        case "plan": return "(session/plan req opts)", "Compute an explicit accept/create/refresh/reject session plan for a request.", true
-        case "apply-plan!": return "(session/apply-plan! res opts plan)", "Append session and CSRF cookies to a response when a plan requires it.", true
-        case "reject!": return "(session/reject! res)", "Write a 403 Forbidden response for a rejected session plan.", true
-        }
-    case "kvist:http/sse":
-        switch member {
-        case "new-stream": return "(sse/new-stream res)", "Allocate and start a persistent SSE stream for a response.", true
-        case "new-stream-on-error": return "(sse/new-stream-on-error res on-error)", "Allocate and start a persistent SSE stream with an on-disconnect callback.", true
-        case "on-error": return "(sse/on-error name [stream err] body...)", "Define an SSE disconnect/error callback.", true
-        case "on-timeout": return "(sse/on-timeout name [_op stream] body...)", "Define an SSE timer callback.", true
-        case "start!": return "(sse/start! stream)", "Start an already allocated SSE stream.", true
-        case "with-stream": return "(sse/with-stream [stream res] body...)", "Allocate and start an SSE stream, then run body with it.", true
-        case "send!": return "(sse/send! stream data)", "Queue one SSE data event on the stream.", true
-        case "send-event!": return "(sse/send-event! stream event data)", "Queue one named SSE event on the stream.", true
-        case "comment!": return "(sse/comment! stream text)", "Queue one SSE comment frame on the stream.", true
-        case "retry!": return "(sse/retry! stream milliseconds)", "Queue one SSE retry directive on the stream.", true
-        case "schedule-timeout!": return "(sse/schedule-timeout! delay stream callback)", "Schedule a callback on the stream's owning event loop.", true
-        case "closed?": return "(sse/closed? stream)", "Return true when the SSE stream has ended or closed.", true
-        case "user-int": return "(sse/user-int stream)", "Read the stream user_data slot as an int counter.", true
-        case "set-user-int!": return "(sse/set-user-int! stream value)", "Write the stream user_data slot from an int counter.", true
-        case "flush!": return "(sse/flush! stream)", "No-op compatibility helper for the persistent SSE stream surface.", true
-        case "close!": return "(sse/close! stream)", "End an SSE stream explicitly.", true
-        case "destroy!": return "(sse/destroy! stream)", "Destroy an SSE stream's in-memory state.", true
-        }
-    case "kvist:http/datastar":
-        switch member {
-        case "patch-elements!": return "(dstar/patch-elements! stream html)", "Send one Datastar patch-elements event with default targeting.", true
-        case "patch-elements-selector!": return "(dstar/patch-elements-selector! stream selector mode html)", "Send one Datastar patch-elements event with explicit selector and mode.", true
-        case "patch-elements-transition!": return "(dstar/patch-elements-transition! stream selector mode html)", "Send one Datastar patch-elements event with view transitions enabled.", true
-        case "patch-elements-seq!": return "(dstar/patch-elements-seq! stream html...)", "Send multiple Datastar patch-elements events in sequence.", true
-        case "remove-elements!": return "(dstar/remove-elements! stream selector)", "Send one Datastar patch-elements remove event for a selector.", true
-        case "patch-signals!": return "(dstar/patch-signals! stream signals)", "Send one Datastar patch-signals event.", true
-        case "patch-signals-missing!": return "(dstar/patch-signals-missing! stream signals)", "Send one Datastar patch-signals event with onlyIfMissing.", true
-        case "execute-script!": return "(dstar/execute-script! stream script)", "Send one Datastar script execution event.", true
-        case "redirect!": return "(dstar/redirect! stream url)", "Send one Datastar redirect script event.", true
-        }
-    case "kvist:http/client":
-        switch member {
-        case "new-request": return "(httpc/new-request method)", "Create and initialize an HTTP client request value.", true
-        case "request": return "(httpc/request req target)", "Send an initialized HTTP client request.", true
-        case "get": return "(httpc/get target)", "Send a simple GET request.", true
-        case "with-json": return "(httpc/with-json req value)", "Encode a request body as JSON and set the content type.", true
-        case "request-destroy": return "(httpc/request-destroy req)", "Destroy a request value and free its owned buffers.", true
-        case "set-header!": return "(httpc/set-header! req key value)", "Set a request header.", true
-        case "add-cookie!": return "(httpc/add-cookie! req name value)", "Append a simple request cookie.", true
-        case "response-body": return "(httpc/response-body res [max-length])", "Read a response body once.", true
-        case "response-destroy": return "(httpc/response-destroy res)", "Destroy a response and close the connection.", true
-        case "body-destroy": return "(httpc/body-destroy body allocation)", "Free a response body returned by response-body.", true
-        }
-    }
-    return "", "", false
-}
-
 editor_language_symbols_append :: proc(builder: ^strings.Builder, seen: ^map[string]bool, repo_root: string) {
     for entry in LANGUAGE_SOURCE_ENTRIES {
         file, line, column, ok := file_location_for_snippet(repo_root, entry.relative, entry.snippet)
@@ -1563,9 +1033,6 @@ imported_symbols_source :: proc(path, source: string) -> (output: string, err: C
             continue
         }
         if strings.has_prefix(entry.path, "kvist:") {
-            if package_symbols_append(&builder, entry.path, entry.alias) {
-                continue
-            }
             continue
         }
         if !have_odin_root {
@@ -1639,11 +1106,8 @@ editor_symbols_source :: proc(path, source: string) -> (output: string, err: Com
     }
 
     for entry in KVIST_CANONICAL_IMPORTS_FOR_EDITOR {
-        if repo_root != "" {
-            editor_package_symbols_append(&builder, &seen, repo_root, entry.path, entry.alias)
-        }
         context.allocator = result_allocator
-        package_output, ok_package := package_symbols_source(entry.path, entry.alias)
+        package_output, ok_package := package_symbols_source(entry.path, entry.alias, "kvist package")
         context.allocator = context.temp_allocator
         if !ok_package {
             continue
@@ -1682,7 +1146,7 @@ editor_symbols_source :: proc(path, source: string) -> (output: string, err: Com
                         delete(resolved)
                         return "", package_err, false
                     }
-                    symbols_append_source_package_records(&builder, &seen, import_path, alias, file.path, package_output)
+                    symbols_append_source_package_records(&builder, &seen, import_path, alias, file.path, package_output, "kvist package")
                     context.allocator = result_allocator
                     delete(package_output)
                     context.allocator = context.temp_allocator
@@ -1695,11 +1159,8 @@ editor_symbols_source :: proc(path, source: string) -> (output: string, err: Com
             if !ok_import || !strings.has_prefix(entry.path, "kvist:") {
                 continue
             }
-            if repo_root != "" {
-                editor_package_symbols_append(&builder, &seen, repo_root, entry.path, entry.alias)
-            }
             context.allocator = result_allocator
-            package_output, ok_package := package_symbols_source(entry.path, entry.alias)
+            package_output, ok_package := package_symbols_source(entry.path, entry.alias, "kvist package")
             context.allocator = context.temp_allocator
             if ok_package {
                 symbols_append_unique_records(&builder, &seen, package_output)
@@ -1744,30 +1205,7 @@ editor_symbols_source :: proc(path, source: string) -> (output: string, err: Com
     return strings.clone(strings.to_string(builder), result_allocator), {}, true
 }
 
-package_symbols_write_entry :: proc(builder: ^strings.Builder, alias, import_path, member, signature, doc: string) {
-    doc_lines := symbols_doc_lines_from_string(doc)
-    defer delete(doc_lines)
-    symbols_write_record_doc(builder, "kvist package", fmt.tprintf("%s/%s", alias, member), "", Span{start = 0, end = 0, source = .File}, import_path, signature, doc_lines[:])
-    symbols_write_record_doc(builder, "kvist package", fmt.tprintf("%s.%s", alias, member), "", Span{start = 0, end = 0, source = .File}, import_path, signature, doc_lines[:])
-}
-
-package_symbols_append :: proc(builder: ^strings.Builder, import_path, alias: string) -> bool {
-    wrote_any := false
-    for entry in PACKAGE_SOURCE_ENTRIES {
-        if entry.import_path != import_path {
-            continue
-        }
-        signature, doc, ok := package_entry_signature_doc(import_path, entry.member)
-        if !ok {
-            continue
-        }
-        package_symbols_write_entry(builder, alias, import_path, entry.member, signature, doc)
-        wrote_any = true
-    }
-    return wrote_any
-}
-
-package_symbols_source :: proc(import_path, alias: string) -> (output: string, ok: bool) {
+package_symbols_source :: proc(import_path, alias: string, package_kind: string = "") -> (output: string, ok: bool) {
     result_allocator := context.allocator
 
     resolved_alias := alias
@@ -1780,9 +1218,6 @@ package_symbols_source :: proc(import_path, alias: string) -> (output: string, o
     builder := strings.builder_make()
     defer strings.builder_destroy(&builder)
     strings.write_string(&builder, "kind\tname\tline\tcolumn\tdetail\tsignature\tdoc\n")
-    if package_symbols_append(&builder, import_path, resolved_alias) {
-        return strings.clone(strings.to_string(builder), result_allocator), true
-    }
     resolved, err_resolve, ok_resolve := resolve_source_import_path(".", import_path)
     if !ok_resolve {
         _ = err_resolve
@@ -1807,7 +1242,7 @@ package_symbols_source :: proc(import_path, alias: string) -> (output: string, o
             _ = package_err
             return "", false
         }
-        symbols_append_source_package_records(&builder, &seen, import_path, resolved_alias, file.path, package_output)
+        symbols_append_source_package_records(&builder, &seen, import_path, resolved_alias, file.path, package_output, package_kind)
         delete(package_output)
     }
     return strings.clone(strings.to_string(builder), result_allocator), true

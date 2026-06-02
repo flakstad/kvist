@@ -129,7 +129,7 @@ Run them from the repo root with:
 The native hot-reload demos have a compile/build workflow:
 
 ```sh
-./kvist examples/hot_reload_demo/shared/package.kvist -o build/generated/hot_reload_demo/shared/package.odin
+./kvist examples/hot_reload_demo/shared/shared.kvist -o build/generated/hot_reload_demo/shared/shared.odin
 ./kvist examples/hot_reload_demo/module/main.kvist -o build/generated/hot_reload_demo/module/main.odin
 ./kvist examples/hot_reload_demo/host/main.kvist -o build/generated/hot_reload_demo/host/main.odin
 odin build build/generated/hot_reload_demo/module -build-mode:dll -out:build/hot_reload_demo/hot_demo.dylib
@@ -137,7 +137,7 @@ odin run build/generated/hot_reload_demo/host
 ```
 
 ```sh
-./kvist examples/hybrid_live_demo/shared/package.kvist -o build/generated/hybrid_live_demo/shared/package.odin
+./kvist examples/hybrid_live_demo/shared/shared.kvist -o build/generated/hybrid_live_demo/shared/shared.odin
 ./kvist examples/hybrid_live_demo/module/main.kvist -o build/generated/hybrid_live_demo/module/main.odin
 ./kvist examples/hybrid_live_demo/host/main.kvist -o build/generated/hybrid_live_demo/host/main.odin
 odin build build/generated/hybrid_live_demo/module -build-mode:dll -out:build/hybrid_live_demo/hybrid_demo.dylib

@@ -89,7 +89,7 @@
         (fmt.println reloader-err)
         (delete reloader-err)
         (fmt.println "build it first with:")
-        (fmt.printf "  ./kvist examples/hybrid_live_demo/shared/package.kvist -o build/generated/hybrid_live_demo/shared/package.odin\n")
+        (fmt.printf "  ./kvist examples/hybrid_live_demo/shared/shared.kvist -o build/generated/hybrid_live_demo/shared/shared.odin\n")
         (fmt.printf "  ./kvist examples/hybrid_live_demo/module/main.kvist -o build/generated/hybrid_live_demo/module/main.odin\n")
         (fmt.printf "  ./kvist examples/hybrid_live_demo/host/main.kvist -o build/generated/hybrid_live_demo/host/main.odin\n")
         (fmt.printf "  odin build build/generated/hybrid_live_demo/module -build-mode:dll -out:%s\n" path)

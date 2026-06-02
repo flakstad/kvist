@@ -26,7 +26,7 @@ On the live side, the example now uses the matching shipped live package:
 
 - [host/main.kvist](./host/main.kvist): long-running host process
 - [module/main.kvist](./module/main.kvist): reloadable shared library
-- [shared/package.kvist](./shared/package.kvist): host-owned state layout
+- [shared/shared.kvist](./shared/shared.kvist): host-owned state layout
 - [live/commands.kvist](./live/commands.kvist): live command module
 - [live/helpers.kvist](./live/helpers.kvist): imported live helper code
 
@@ -37,7 +37,7 @@ From the repo root:
 ```sh
 mkdir -p build/hybrid_live_demo
 mkdir -p build/generated/hybrid_live_demo/shared build/generated/hybrid_live_demo/module build/generated/hybrid_live_demo/host
-./kvist examples/hybrid_live_demo/shared/package.kvist -o build/generated/hybrid_live_demo/shared/package.odin
+./kvist examples/hybrid_live_demo/shared/shared.kvist -o build/generated/hybrid_live_demo/shared/shared.odin
 ./kvist examples/hybrid_live_demo/module/main.kvist -o build/generated/hybrid_live_demo/module/main.odin
 ./kvist examples/hybrid_live_demo/host/main.kvist -o build/generated/hybrid_live_demo/host/main.odin
 odin build build/generated/hybrid_live_demo/module -build-mode:dll -out:build/hybrid_live_demo/hybrid_demo.dylib

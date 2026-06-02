@@ -67,9 +67,7 @@
         (let [head (name (first form))]
           (if (= head "when")
             true
-            (if (= head "core/when")
-              true
-              (= head "kvist/core-when"))))
+            (= head "core/when")))
         false)
       false)
     false))

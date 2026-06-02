@@ -295,7 +295,7 @@ core_package_local_macros :: proc(anchor_path: string = ".") -> ([]User_Macro, C
         return nil, Compile_Error{message = "could not find kvist repo root for core macro loading"}, false
     }
     defer delete(root)
-    path, join_err := os.join_path({root, "packages", "core", "package.kvist"}, context.allocator)
+    path, join_err := os.join_path({root, "packages", "core", "core.kvist"}, context.allocator)
     if join_err != nil {
         return nil, Compile_Error{message = "could not resolve shipped core package file"}, false
     }
@@ -333,8 +333,6 @@ builtin_macro_kind :: proc(head: string) -> Builtin_Macro_Kind {
         return .With_Allocator
     case "with-temp-allocator":
         return .With_Temp_Allocator
-    case "kvist/core-when", "core-when":
-        return .When
     case "kvist/core-cond", "core-cond":
         return .Cond
     case "kvist/core-thread-first", "core-thread-first":

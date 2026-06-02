@@ -147,23 +147,23 @@ The source-backed `kvist:arr` benchmark covers:
 
 Current run shape:
 
-- `pipe-intrinsic`: `19.748 ms`
-- `pipe-source`: `23.080 ms`
-- `pipe-direct`: `18.409 ms`
-- `pipe-fused`: `2.769 ms`
-- `builders-intrinsic`: `9.726 ms`
-- `builders-source`: `9.660 ms`
-- `builders-direct`: `9.507 ms`
-- `scan-intrinsic`: `10.153 ms`
-- `scan-source`: `9.875 ms`
-- `scan-direct`: `10.788 ms`
-- `reorder-intrinsic`: `87.963 ms`
-- `reorder-source`: `88.625 ms`
-- `reorder-direct`: `85.065 ms`
-- `remove-at-source`: `17.197 ms`
-- `remove-at!-source`: `14.509 ms`
-- `remove-at-direct`: `12.438 ms`
-- `remove-at!-direct`: `12.285 ms`
+- `pipe-intrinsic`: `19.186 ms`
+- `pipe-source`: `18.784 ms`
+- `pipe-direct`: `17.983 ms`
+- `pipe-fused`: `2.615 ms`
+- `builders-intrinsic`: `9.763 ms`
+- `builders-source`: `9.713 ms`
+- `builders-direct`: `9.223 ms`
+- `scan-intrinsic`: `10.685 ms`
+- `scan-source`: `10.505 ms`
+- `scan-direct`: `10.358 ms`
+- `reorder-intrinsic`: `84.203 ms`
+- `reorder-source`: `87.099 ms`
+- `reorder-direct`: `77.709 ms`
+- `remove-at-source`: `13.004 ms`
+- `remove-at!-source`: `12.553 ms`
+- `remove-at-direct`: `6.893 ms`
+- `remove-at!-direct`: `7.639 ms`
 
 The important result is not any one number, but the shape:
 
@@ -190,6 +190,11 @@ The important result is not any one number, but the shape:
 
 The next benchmark additions should keep targeting the parts of the surface
 where source-level semantics may still hide real cost.
+
+`scripts/bench_source_backed_arr.sh` compares the current working tree against
+`HEAD` by default. During package layout migrations, use `BASE_REF=skip` to run
+only the current compiler and direct Odin baselines when the old compiler cannot
+load renamed package files.
 
 Recommended next cases:
 

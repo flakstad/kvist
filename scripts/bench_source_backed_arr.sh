@@ -15,10 +15,12 @@ base_bin="$tmp_dir/kvist-base"
 printf 'building current compiler\n'
 odin build "$ROOT/cmd/kvist" -out:"$current_bin"
 
-printf 'building base compiler from %s\n' "$BASE_REF"
-mkdir -p "$base_dir"
-git -C "$ROOT" archive "$BASE_REF" | tar -x -C "$base_dir"
-odin build "$base_dir/cmd/kvist" -out:"$base_bin"
+if [ "$BASE_REF" != "skip" ]; then
+    printf 'building base compiler from %s\n' "$BASE_REF"
+    mkdir -p "$base_dir"
+    git -C "$ROOT" archive "$BASE_REF" | tar -x -C "$base_dir"
+    odin build "$base_dir/cmd/kvist" -out:"$base_bin"
+fi
 
 run_bench() {
     label=$1
@@ -32,7 +34,9 @@ run_bench() {
     "$exe"
 }
 
-run_bench "base-$BASE_LABEL" "$base_bin"
+if [ "$BASE_REF" != "skip" ]; then
+    run_bench "base-$BASE_LABEL" "$base_bin"
+fi
 run_bench "current" "$current_bin"
 
 direct_exe="$tmp_dir/direct-odin"

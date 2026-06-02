@@ -5865,7 +5865,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         return "", Compile_Error{message = "`nil?` has moved to `core/nil?`", span = form.items[0].span}, false
     }
 
-    if head.text == "core/nil?" || head.text == "kvist/core-nil?" || head.text == "core-nil?" {
+    if head.text == "core/nil?" {
         if len(form.items) != 2 {
             return "", Compile_Error{message = "core/nil? expects one expression", span = form.span}, false
         }
@@ -7193,6 +7193,13 @@ returns_when_final :: proc(last_in_proc: bool, returns: Return_Spec) -> Return_S
     return Return_Spec{kind = .None}
 }
 
+emit_if_branch_stmt :: proc(e: ^Emitter, branch: CST_Form, last_in_proc: bool, returns: Return_Spec) -> (Compile_Error, bool) {
+    if branch.kind == .List && len(branch.items) > 0 && branch.items[0].kind == .Symbol && branch.items[0].text == "do" {
+        return emit_body_forms(e, branch.items[1:], returns)
+    }
+    return emit_stmt(e, branch, last_in_proc, returns)
+}
+
 emit_if_like :: proc(e: ^Emitter, head: string, form: CST_Form, last_in_proc: bool, returns: Return_Spec) -> (Compile_Error, bool) {
     if len(form.items) < 3 || len(form.items) > 4 {
         return Compile_Error{message = fmt.tprintf("%s expects test, then, and optional else", head), span = form.span}, false
@@ -7209,7 +7216,7 @@ emit_if_like :: proc(e: ^Emitter, head: string, form: CST_Form, last_in_proc: bo
     emit_raw_newline(e)
     e.indent += 1
     branch_returns := returns_when_final(last_in_proc, returns)
-    err_then, ok_then := emit_stmt(e, form.items[2], last_in_proc, branch_returns)
+    err_then, ok_then := emit_if_branch_stmt(e, form.items[2], last_in_proc, branch_returns)
     if !ok_then {
         return err_then, false
     }
@@ -7220,7 +7227,7 @@ emit_if_like :: proc(e: ^Emitter, head: string, form: CST_Form, last_in_proc: bo
         strings.write_string(&e.builder, "else {")
         emit_raw_newline(e)
         e.indent += 1
-        err_else, ok_else := emit_stmt(e, form.items[3], last_in_proc, branch_returns)
+        err_else, ok_else := emit_if_branch_stmt(e, form.items[3], last_in_proc, branch_returns)
         if !ok_else {
             return err_else, false
         }
@@ -7582,7 +7589,7 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
     switch canonical_head_text {
     case "comment":
         return Compile_Error{message = "`comment` has moved to `core/comment`", span = form.items[0].span}, false
-    case "core/comment", "kvist/core-comment":
+    case "core/comment":
         return {}, true
     case "#partial":
         if len(form.items) < 2 || !is_symbol(form.items[1], "switch") {
@@ -7709,32 +7716,6 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
         return Compile_Error{message = "`when` has moved to `core/when`", span = form.items[0].span}, false
     case "cond":
         return Compile_Error{message = "`cond` has moved to `core/cond`", span = form.items[0].span}, false
-    case "kvist/core-when", "core-when":
-        if len(form.items) < 3 {
-            return Compile_Error{message = "when expects test and body", span = form.span}, false
-        }
-        test, err_test, ok_test := emit_expr(e, form.items[1])
-        if !ok_test {
-            return err_test, false
-        }
-        emit_indent(e)
-        strings.write_string(&e.builder, "if ")
-        strings.write_string(&e.builder, test)
-        record_current_line_fragment_map(e, len("if "), test, form.items[1].span)
-        strings.write_string(&e.builder, " {")
-        emit_raw_newline(e)
-        e.indent += 1
-        body: [dynamic]CST_Form
-        for item in form.items[2:] {
-            append(&body, item)
-        }
-        err_body, ok_body := emit_body_forms(e, body[:], returns_when_final(last_in_proc, returns))
-        if !ok_body {
-            return err_body, false
-        }
-        e.indent -= 1
-        emit_line(e, "}")
-        return {}, true
     case "if":
         return emit_if_like(e, "if", form, last_in_proc, returns)
     case "kvist/core-cond", "core-cond":

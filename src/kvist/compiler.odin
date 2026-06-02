@@ -1520,7 +1520,7 @@ eval_form_head :: proc(form: CST_Form) -> string {
 
 eval_head_is_decl :: proc(head: string) -> bool {
     switch head {
-    case "core/comment", "kvist/core-comment", "package", "import", "defconst", "defvar", "defstruct", "defenum", "defunion", "odin", "proc", "defn":
+    case "core/comment", "package", "import", "defconst", "defvar", "defstruct", "defenum", "defunion", "odin", "proc", "defn":
         return true
     }
     return false

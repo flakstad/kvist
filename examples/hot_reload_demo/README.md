@@ -14,7 +14,7 @@ first answer for broad day-to-day compiled-code iteration.
 
 - [host/main.kvist](./host/main.kvist): the long-running host process
 - [module/main.kvist](./module/main.kvist): the reloadable shared library
-- [shared/package.kvist](./shared/package.kvist): shared state layout used by both
+- [shared/shared.kvist](./shared/shared.kvist): shared state layout used by both
   host and module
 
 These sources are all `.kvist`.
@@ -47,7 +47,7 @@ From the repo root:
 ```sh
 mkdir -p build/hot_reload_demo
 mkdir -p build/generated/hot_reload_demo/shared build/generated/hot_reload_demo/module build/generated/hot_reload_demo/host
-./kvist examples/hot_reload_demo/shared/package.kvist -o build/generated/hot_reload_demo/shared/package.odin
+./kvist examples/hot_reload_demo/shared/shared.kvist -o build/generated/hot_reload_demo/shared/shared.odin
 ./kvist examples/hot_reload_demo/module/main.kvist -o build/generated/hot_reload_demo/module/main.odin
 ./kvist examples/hot_reload_demo/host/main.kvist -o build/generated/hot_reload_demo/host/main.odin
 odin build build/generated/hot_reload_demo/module -build-mode:dll -out:build/hot_reload_demo/hot_demo.dylib

@@ -453,25 +453,25 @@ package_symbols_source_emits_core_update_helpers :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    testing.expect_value(t, strings.contains(output, "kvist package\tcore/update!\t"), true)
-    testing.expect_value(t, strings.contains(output, "kvist package\tcore/update\t"), true)
-    testing.expect_value(t, strings.contains(output, "kvist package\tcore/when\t"), true)
-    testing.expect_value(t, strings.contains(output, "kvist package\tcore/cond\t"), true)
-    testing.expect_value(t, strings.contains(output, "kvist package\tcore/comment\t"), true)
-    testing.expect_value(t, strings.contains(output, "kvist package\tcore/switch\t"), true)
-    testing.expect_value(t, strings.contains(output, "kvist package\tcore/->\t"), true)
-    testing.expect_value(t, strings.contains(output, "kvist package\tcore/->>\t"), true)
-    testing.expect_value(t, strings.contains(output, "kvist package\tcore/or-else\t"), true)
-    testing.expect_value(t, strings.contains(output, "kvist package\tcore/doc\t"), true)
-    testing.expect_value(t, strings.contains(output, "kvist package\tcore/nil?\t"), true)
-    testing.expect_value(t, strings.contains(output, "kvist package\tcore/tap>\t"), true)
-    testing.expect_value(t, strings.contains(output, "kvist package\tcore/println\t"), true)
-    testing.expect_value(t, strings.contains(output, "kvist package\tcore/in\t"), true)
-    testing.expect_value(t, strings.contains(output, "kvist package\tcore/not-in\t"), true)
-    testing.expect_value(t, strings.contains(output, "kvist package\tcore/when-let\t"), true)
-    testing.expect_value(t, strings.contains(output, "kvist package\tcore/if-let\t"), true)
-    testing.expect_value(t, strings.contains(output, "kvist package\tcore/when-ok\t"), true)
-    testing.expect_value(t, strings.contains(output, "kvist package\tcore/if-ok\t"), true)
+    testing.expect_value(t, strings.contains(output, "macro\tcore/update!\t"), true)
+    testing.expect_value(t, strings.contains(output, "macro\tcore/update\t"), true)
+    testing.expect_value(t, strings.contains(output, "macro\tcore/when\t"), true)
+    testing.expect_value(t, strings.contains(output, "macro\tcore/cond\t"), true)
+    testing.expect_value(t, strings.contains(output, "macro\tcore/comment\t"), true)
+    testing.expect_value(t, strings.contains(output, "macro\tcore/switch\t"), true)
+    testing.expect_value(t, strings.contains(output, "macro\tcore/->\t"), true)
+    testing.expect_value(t, strings.contains(output, "macro\tcore/->>\t"), true)
+    testing.expect_value(t, strings.contains(output, "macro\tcore/or-else\t"), true)
+    testing.expect_value(t, strings.contains(output, "macro\tcore/doc\t"), true)
+    testing.expect_value(t, strings.contains(output, "macro\tcore/nil?\t"), true)
+    testing.expect_value(t, strings.contains(output, "macro\tcore/tap>\t"), true)
+    testing.expect_value(t, strings.contains(output, "macro\tcore/println\t"), true)
+    testing.expect_value(t, strings.contains(output, "macro\tcore/in\t"), true)
+    testing.expect_value(t, strings.contains(output, "macro\tcore/not-in\t"), true)
+    testing.expect_value(t, strings.contains(output, "macro\tcore/when-let\t"), true)
+    testing.expect_value(t, strings.contains(output, "macro\tcore/if-let\t"), true)
+    testing.expect_value(t, strings.contains(output, "macro\tcore/when-ok\t"), true)
+    testing.expect_value(t, strings.contains(output, "macro\tcore/if-ok\t"), true)
 }
 
 @(test)
@@ -767,7 +767,7 @@ editor_symbols_source_includes_source_package_imports :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "proc\thiccup/render\t"), true)
     testing.expect_value(t, strings.contains(output, "struct\thiccup/Element\t"), true)
     testing.expect_value(t, strings.contains(output, "union\thiccup/Node\t"), true)
-    testing.expect_value(t, strings.contains(output, "packages/hiccup/package.kvist"), true)
+    testing.expect_value(t, strings.contains(output, "packages/hiccup/hiccup.kvist"), true)
     testing.expect_value(t, strings.contains(output, "hiccup/emit-node"), false)
     testing.expect_value(t, strings.contains(output, "hiccup/render-node-into"), false)
 }
@@ -6575,11 +6575,11 @@ User :: struct {
 }
 
 has_user :: proc(p: ^User) -> bool {
-    return !((p) == nil)
+    return !((p) == (nil))
 }
 
 print_user :: proc(p: ^User) {
-    if (p) == nil {
+    if (p) == (nil) {
         return
     }
 }

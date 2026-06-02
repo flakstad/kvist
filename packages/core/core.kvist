@@ -7,8 +7,14 @@
   guarded code. It expands to Kvist's core conditional lowering, so it does not
   introduce a callback or runtime dispatch layer."
   [test & body]
-  (quasiquote
-    (kvist/core-when (unquote test) (splice body))))
+  (if (= (kvist/count body) 1)
+    (quasiquote
+      (if (unquote test)
+        (unquote (kvist/first body))))
+    (quasiquote
+      (if (unquote test)
+        (do
+          (splice body))))))
 
 (defmacro cond
   "Evaluate test/expression clauses from left to right.
@@ -26,8 +32,7 @@
   Use this for scratch forms, examples, or temporarily disabled code in a Kvist
   file. The body is not emitted to Odin and is not evaluated."
   [& body]
-  (quasiquote
-    (kvist/core-comment)))
+  (forms))
 
 (defmacro switch
   "Dispatch on `value` using Odin-style switch lowering.
@@ -145,11 +150,18 @@
     (if (= (kvist/count binding) 3)
       (if (symbol? (kvist/first binding))
         (if (symbol? (kvist/nth binding 1))
-          (quasiquote
-            (let [[(unquote (kvist/first binding)) (unquote (kvist/nth binding 1))]
-                  (unquote (kvist/nth binding 2))]
-              (kvist/core-when (unquote (kvist/nth binding 1))
-                (splice body))))
+          (if (= (kvist/count body) 1)
+            (quasiquote
+              (let [[(unquote (kvist/first binding)) (unquote (kvist/nth binding 1))]
+                    (unquote (kvist/nth binding 2))]
+                (if (unquote (kvist/nth binding 1))
+                  (unquote (kvist/first body)))))
+            (quasiquote
+              (let [[(unquote (kvist/first binding)) (unquote (kvist/nth binding 1))]
+                    (unquote (kvist/nth binding 2))]
+                (if (unquote (kvist/nth binding 1))
+                  (do
+                    (splice body))))))
           (error "when-let expects [value bool expr] binding"))
         (error "when-let expects [value bool expr] binding"))
       (error "when-let expects [value bool expr] binding"))
@@ -190,11 +202,18 @@
     (if (= (kvist/count binding) 3)
       (if (symbol? (kvist/first binding))
         (if (symbol? (kvist/nth binding 1))
-          (quasiquote
-            (let [[(unquote (kvist/first binding)) (unquote (kvist/nth binding 1))]
-                  (unquote (kvist/nth binding 2))]
-              (kvist/core-when (== (unquote (kvist/nth binding 1)) {})
-                (splice body))))
+          (if (= (kvist/count body) 1)
+            (quasiquote
+              (let [[(unquote (kvist/first binding)) (unquote (kvist/nth binding 1))]
+                    (unquote (kvist/nth binding 2))]
+                (if (== (unquote (kvist/nth binding 1)) {})
+                  (unquote (kvist/first body)))))
+            (quasiquote
+              (let [[(unquote (kvist/first binding)) (unquote (kvist/nth binding 1))]
+                    (unquote (kvist/nth binding 2))]
+                (if (== (unquote (kvist/nth binding 1)) {})
+                  (do
+                    (splice body))))))
           (error "when-ok expects [value err expr] binding"))
         (error "when-ok expects [value err expr] binding"))
       (error "when-ok expects [value err expr] binding"))
@@ -281,7 +300,7 @@
   This lowers to a direct nil comparison and allocates nothing."
   [value]
   (quasiquote
-    (kvist/core-nil? (unquote value))))
+    (== (unquote value) nil)))
 
 (defmacro tap>
   "Print `value` for debugging and return it unchanged.
