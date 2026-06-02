@@ -162,6 +162,49 @@
   (quasiquote
     (kvist/arr/remove! (unquote pred) (unquote xs))))
 
+(proc remove-ordered-at
+  "Return a new dynamic array with the element at `index` removed.
+
+  This is the returning form of Odin's `ordered_remove`: the input is copied
+  first, then the indexed element is removed while preserving the relative order
+  of all remaining elements. The result is owned by the caller."
+  [xs: []$T, index: int] -> [dynamic]T #force_inline
+  (let [out (arr/empty T (core/count xs))]
+    (odin "append(&out, ..xs)")
+    (ordered_remove (& out) index)
+    out))
+
+(defmacro remove-ordered-at!
+  "Remove the element at `index` from dynamic array `xs` in place.
+
+  This lowers directly to Odin's `ordered_remove` and preserves the relative
+  order of remaining elements. It mutates `xs` and allocates nothing."
+  [xs index]
+  (quasiquote
+    (ordered_remove (addr (unquote xs)) (unquote index))))
+
+(proc remove-unordered-at
+  "Return a new dynamic array with the element at `index` removed.
+
+  This is the returning form of Odin's `unordered_remove`: the input is copied
+  first, then removal may move the final element into `index`. Use this when
+  element order does not matter and removal speed is preferred."
+  [xs: []$T, index: int] -> [dynamic]T #force_inline
+  (let [out (arr/empty T (core/count xs))]
+    (odin "append(&out, ..xs)")
+    (unordered_remove (& out) index)
+    out))
+
+(defmacro remove-unordered-at!
+  "Remove the element at `index` from dynamic array `xs` in place.
+
+  This lowers directly to Odin's `unordered_remove`. It may move the final
+  element into the removed slot, so it does not preserve order, but it avoids the
+  shifting cost of ordered removal."
+  [xs index]
+  (quasiquote
+    (unordered_remove (addr (unquote xs)) (unquote index))))
+
 (defmacro keep!
   "Map and compact `xs` in place using an optional-result callback.
 
@@ -196,7 +239,25 @@
   not mutated."
   [sep xs]
   (quasiquote
-    (kvist/arr/interpose (unquote sep) (unquote xs))))
+    (interpose-impl (unquote sep) (kvist/core/slice (unquote xs) 0))))
+
+(defn- interpose-impl
+  "Return a new dynamic array with `sep` inserted between input elements.
+
+  No separator is added before the first or after the last element. The input is
+  not mutated."
+  [sep: $T, xs: []T] -> [dynamic]T #force_inline
+  (let [n (core/count xs)
+        cap 0]
+    (core/when (== n 0)
+      (return (arr/empty T 0)))
+    (set! cap (- (* n 2) 1))
+    (let [out (arr/empty T cap)]
+      (arr/push! out (core/get xs 0))
+      (for [x (core/slice xs 1)]
+        (arr/push! out sep)
+        (arr/push! out x))
+      out)))
 
 (defmacro interleave
   "Return a new dynamic array alternating elements from `xs` and `ys`.
@@ -205,7 +266,24 @@
   the longer input are ignored."
   [xs ys]
   (quasiquote
-    (kvist/arr/interleave (unquote xs) (unquote ys))))
+    (interleave-impl (kvist/core/slice (unquote xs) 0) (kvist/core/slice (unquote ys) 0))))
+
+(defn- interleave-impl
+  "Return a new dynamic array alternating elements from `xs` and `ys`.
+
+  Interleaving stops when the shorter input is exhausted. Extra elements from
+  the longer input are ignored."
+  [xs: []$T, ys: []T] -> [dynamic]T #force_inline
+  (let [n (core/count xs)]
+    (core/when (< (core/count ys) n)
+      (set! n (core/count ys)))
+    (let [out (arr/empty T (* n 2))
+          i 0]
+      (for (< i n)
+        (arr/push! out (core/get xs i))
+        (arr/push! out (core/get ys i))
+        (set! i (+ i 1)))
+      out)))
 
 (defmacro reverse
   "Return a new dynamic array with the elements of `xs` in reverse order.
@@ -214,7 +292,20 @@
   input count."
   [xs]
   (quasiquote
-    (kvist/arr/reverse (unquote xs))))
+    (reverse-impl (kvist/core/slice (unquote xs) 0))))
+
+(defn- reverse-impl
+  "Return a new dynamic array with the elements of `xs` in reverse order.
+
+  The input is not mutated. The result is allocated with capacity equal to the
+  input count."
+  [xs: []$T] -> [dynamic]T #force_inline
+  (let [out (arr/empty T (core/count xs))
+        i (- (core/count xs) 1)]
+    (for (>= i 0)
+      (arr/push! out (core/get xs i))
+      (set! i (- i 1)))
+    out))
 
 (defmacro reverse!
   "Reverse dynamic array `xs` in place.

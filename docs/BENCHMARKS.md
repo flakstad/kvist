@@ -147,16 +147,23 @@ The source-backed `kvist:arr` benchmark covers:
 
 Current run shape:
 
-- `pipe-intrinsic`: `17.609 ms`
-- `pipe-source`: `17.910 ms`
-- `pipe-direct`: `27.008 ms`
-- `pipe-fused`: `3.653 ms`
-- `builders-intrinsic`: `9.430 ms`
-- `builders-source`: `10.119 ms`
-- `builders-direct`: `11.869 ms`
-- `scan-intrinsic`: `10.061 ms`
-- `scan-source`: `9.926 ms`
-- `scan-direct`: `11.891 ms`
+- `pipe-intrinsic`: `19.748 ms`
+- `pipe-source`: `23.080 ms`
+- `pipe-direct`: `18.409 ms`
+- `pipe-fused`: `2.769 ms`
+- `builders-intrinsic`: `9.726 ms`
+- `builders-source`: `9.660 ms`
+- `builders-direct`: `9.507 ms`
+- `scan-intrinsic`: `10.153 ms`
+- `scan-source`: `9.875 ms`
+- `scan-direct`: `10.788 ms`
+- `reorder-intrinsic`: `87.963 ms`
+- `reorder-source`: `88.625 ms`
+- `reorder-direct`: `85.065 ms`
+- `remove-at-source`: `17.197 ms`
+- `remove-at!-source`: `14.509 ms`
+- `remove-at-direct`: `12.438 ms`
+- `remove-at!-direct`: `12.285 ms`
 
 The important result is not any one number, but the shape:
 
@@ -165,6 +172,19 @@ The important result is not any one number, but the shape:
 - the source-backed path is within normal run-to-run noise of the intrinsic
   path on these workloads
 - both stay close to the direct eager Odin baseline
+- source-backed `reverse`, `interpose`, and `interleave` now run in the same
+  allocation and timing envelope as the intrinsic helpers on the reorder
+  workload
+- the source-backed remove-at returning helpers now emit the same bulk-copy shape
+  as raw Odin: `append(&out, ..xs)` followed by `ordered_remove` or
+  `unordered_remove`
+- the remove-at bang helpers lower directly to Odin's `ordered_remove` and
+  `unordered_remove`; the benchmark setup now uses the same inline bulk-copy
+  shape as the direct Odin baseline so this row measures the bang wrapper rather
+  than `arr/into`
+- remove-at timings still show more run-to-run spread than the allocation shape;
+  allocation equality and generated code shape are the stable regression signals
+  until the benchmark harness is tightened further
 - the fused loop is still much faster when the semantics avoid intermediate
   owned collections entirely
 

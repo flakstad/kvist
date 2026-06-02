@@ -136,6 +136,31 @@
     (t/is (= (get sorted 0) 1))
     (t/is (= (get sorted 3) 4))))
 
+(t/deftest arr-index-removal-helpers
+  (let [xs (new []int [10 20 30 40])
+        ordered (arr/remove-ordered-at xs 1) defer
+        unordered (arr/remove-unordered-at xs 1) defer
+        ordered! (arr/dynamic int [10 20 30 40]) defer
+        unordered! (arr/dynamic int [10 20 30 40]) defer]
+    (arr/remove-ordered-at! ordered! 1)
+    (arr/remove-unordered-at! unordered! 1)
+    (t/is (= (count ordered) 3))
+    (t/is (= (get ordered 0) 10))
+    (t/is (= (get ordered 1) 30))
+    (t/is (= (get ordered 2) 40))
+    (t/is (= (count unordered) 3))
+    (t/is (= (get unordered 0) 10))
+    (t/is (= (get unordered 1) 40))
+    (t/is (= (get unordered 2) 30))
+    (t/is (= (count ordered!) 3))
+    (t/is (= (get ordered! 0) 10))
+    (t/is (= (get ordered! 1) 30))
+    (t/is (= (get ordered! 2) 40))
+    (t/is (= (count unordered!) 3))
+    (t/is (= (get unordered! 0) 10))
+    (t/is (= (get unordered! 1) 40))
+    (t/is (= (get unordered! 2) 30))))
+
 (t/deftest arr-keyword-shorthand-runtime-surface
   (let [members (arr/dynamic Member [(Member {:name "Ada" :score 10 :active true})
                                      (Member {:name "Lin" :score 20 :active false})

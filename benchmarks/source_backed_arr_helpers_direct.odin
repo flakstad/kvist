@@ -8,6 +8,8 @@ N :: 50_000
 REPS :: 80
 SCAN_REPS :: 400
 BUILDER_REPS :: 60
+REMOVE_REPS :: 300
+REORDER_REPS :: 120
 
 report :: proc(name: string, elapsed: time.Duration, checksum: int, track: ^mem.Tracking_Allocator) {
     fmt.printfln(
@@ -202,10 +204,96 @@ bench_scan :: proc(xs: []int, reps: int) -> int {
     return checksum
 }
 
+bench_reorder_direct :: proc(xs, ys: []int, reps: int) -> int {
+    checksum := 0
+    for i := 0; i < reps; i += 1 {
+        reversed := make([dynamic]int, 0, len(xs))
+        for j := len(xs)-1; j >= 0; j -= 1 {
+            append(&reversed, xs[j])
+        }
+
+        interposed := make([dynamic]int, 0, max(0, len(xs)*2-1))
+        if len(xs) > 0 {
+            append(&interposed, xs[0])
+            for x in xs[1:] {
+                append(&interposed, 0)
+                append(&interposed, x)
+            }
+        }
+
+        n := len(xs)
+        if len(ys) < n {
+            n = len(ys)
+        }
+        interleaved := make([dynamic]int, 0, n*2)
+        for j := 0; j < n; j += 1 {
+            append(&interleaved, xs[j])
+            append(&interleaved, ys[j])
+        }
+
+        checksum += reversed[0]
+        checksum += interposed[1]
+        checksum += interleaved[1]
+        checksum += len(reversed)
+        checksum += len(interposed)
+        checksum += len(interleaved)
+        delete(interleaved)
+        delete(interposed)
+        delete(reversed)
+    }
+    return checksum
+}
+
+bench_remove_at_direct :: proc(xs: []int, reps: int) -> int {
+    checksum := 0
+    mid := len(xs) / 2
+    for i := 0; i < reps; i += 1 {
+        ordered := make([dynamic]int, 0, len(xs))
+        append(&ordered, ..xs)
+        ordered_remove(&ordered, mid)
+
+        unordered := make([dynamic]int, 0, len(xs))
+        append(&unordered, ..xs)
+        unordered_remove(&unordered, mid)
+
+        checksum += len(ordered)
+        checksum += ordered[mid]
+        checksum += len(unordered)
+        checksum += unordered[mid]
+        delete(unordered)
+        delete(ordered)
+    }
+    return checksum
+}
+
+bench_remove_at_bang_direct :: proc(xs: []int, reps: int) -> int {
+    checksum := 0
+    mid := len(xs) / 2
+    for i := 0; i < reps; i += 1 {
+        ordered := make([dynamic]int, 0, len(xs))
+        append(&ordered, ..xs)
+        unordered := make([dynamic]int, 0, len(xs))
+        append(&unordered, ..xs)
+
+        ordered_remove(&ordered, mid)
+        unordered_remove(&unordered, mid)
+
+        checksum += len(ordered)
+        checksum += ordered[mid]
+        checksum += len(unordered)
+        checksum += unordered[mid]
+        delete(unordered)
+        delete(ordered)
+    }
+    return checksum
+}
+
 main :: proc() {
     old_allocator := context.allocator
     xs := make_range(1, N, 1)
+    ys := make_range(N, N*2, 1)
     defer delete(xs)
+    defer delete(ys)
     track: mem.Tracking_Allocator
     mem.tracking_allocator_init(&track, old_allocator, old_allocator)
     defer mem.tracking_allocator_destroy(&track)
@@ -227,4 +315,16 @@ main :: proc() {
     mem.tracking_allocator_reset(&track)
     start = time.tick_now()
     run_one("scan-direct", bench_scan(xs[:], SCAN_REPS), start, &track)
+
+    mem.tracking_allocator_reset(&track)
+    start = time.tick_now()
+    run_one("reorder-direct", bench_reorder_direct(xs[:], ys[:], REORDER_REPS), start, &track)
+
+    mem.tracking_allocator_reset(&track)
+    start = time.tick_now()
+    run_one("remove-at-direct", bench_remove_at_direct(xs[:], REMOVE_REPS), start, &track)
+
+    mem.tracking_allocator_reset(&track)
+    start = time.tick_now()
+    run_one("remove-at!-direct", bench_remove_at_bang_direct(xs[:], REMOVE_REPS), start, &track)
 }

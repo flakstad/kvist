@@ -8,7 +8,9 @@
 (odin "N :: 50_000
 REPS :: 80
 SCAN_REPS :: 400
-BUILDER_REPS :: 60")
+BUILDER_REPS :: 60
+REMOVE_REPS :: 300
+REORDER_REPS :: 120")
 
 (proc inc-value [x: int] -> int
   (+ x 1))
@@ -160,11 +162,77 @@ BUILDER_REPS :: 60")
       (set! i (+ i 1)))
     checksum))
 
+(proc bench-reorder-intrinsic [xs: []int, ys: []int, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (for (< i reps)
+      (let [reversed (arr/reverse xs) defer
+            interposed (arr/interpose 0 xs) defer
+            interleaved (arr/interleave xs ys) defer]
+        (set! checksum (+ checksum (arr/get reversed 0)))
+        (set! checksum (+ checksum (arr/get interposed 1)))
+        (set! checksum (+ checksum (arr/get interleaved 1)))
+        (set! checksum (+ checksum (count reversed)))
+        (set! checksum (+ checksum (count interposed)))
+        (set! checksum (+ checksum (count interleaved))))
+      (set! i (+ i 1)))
+    checksum))
+
+(proc bench-reorder-source [xs: []int, ys: []int, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (for (< i reps)
+      (let [reversed (pkgarr/reverse xs) defer
+            interposed (pkgarr/interpose 0 xs) defer
+            interleaved (pkgarr/interleave xs ys) defer]
+        (set! checksum (+ checksum (pkgarr/get reversed 0)))
+        (set! checksum (+ checksum (pkgarr/get interposed 1)))
+        (set! checksum (+ checksum (pkgarr/get interleaved 1)))
+        (set! checksum (+ checksum (count reversed)))
+        (set! checksum (+ checksum (count interposed)))
+        (set! checksum (+ checksum (count interleaved))))
+      (set! i (+ i 1)))
+    checksum))
+
+(proc bench-remove-at-source [xs: []int, reps: int] -> int
+  (let [i 0
+        checksum 0
+        mid (/ (count xs) 2)]
+    (for (< i reps)
+      (let [ordered (pkgarr/remove-ordered-at xs mid) defer
+            unordered (pkgarr/remove-unordered-at xs mid) defer]
+        (set! checksum (+ checksum (count ordered)))
+        (set! checksum (+ checksum (pkgarr/get ordered mid)))
+        (set! checksum (+ checksum (count unordered)))
+        (set! checksum (+ checksum (pkgarr/get unordered mid))))
+      (set! i (+ i 1)))
+    checksum))
+
+(proc bench-remove-at-bang-source [xs: []int, reps: int] -> int
+  (let [i 0
+        checksum 0
+        mid (/ (count xs) 2)]
+    (for (< i reps)
+      (let [ordered (pkgarr/empty int (count xs)) defer
+            unordered (pkgarr/empty int (count xs)) defer]
+        (odin "append(&ordered, ..xs)")
+        (odin "append(&unordered, ..xs)")
+        (pkgarr/remove-ordered-at! ordered mid)
+        (pkgarr/remove-unordered-at! unordered mid)
+        (set! checksum (+ checksum (count ordered)))
+        (set! checksum (+ checksum (pkgarr/get ordered mid)))
+        (set! checksum (+ checksum (count unordered)))
+        (set! checksum (+ checksum (pkgarr/get unordered mid))))
+      (set! i (+ i 1)))
+    checksum))
+
 (proc main []
   (let [old-allocator context.allocator
         xs (arr/range 1 N)
+        ys (arr/range N (* N 2))
         track: mem.Tracking-Allocator (odin "mem.Tracking_Allocator{}")]
     (defer (delete xs))
+    (defer (delete ys))
     (mem.tracking-allocator-init (& track) old-allocator old-allocator)
     (defer (mem.tracking-allocator-destroy (& track)))
     (set! context.allocator (mem.tracking-allocator (& track)))
@@ -196,4 +264,20 @@ BUILDER_REPS :: 60")
 
     (mem.tracking-allocator-reset (& track))
     (let [start (time.tick-now)]
-      (run-one "scan-source" (bench-scan-source (slice xs 0) SCAN_REPS) start (& track)))))
+      (run-one "scan-source" (bench-scan-source (slice xs 0) SCAN_REPS) start (& track)))
+
+    (mem.tracking-allocator-reset (& track))
+    (let [start (time.tick-now)]
+      (run-one "reorder-intrinsic" (bench-reorder-intrinsic (slice xs 0) (slice ys 0) REORDER_REPS) start (& track)))
+
+    (mem.tracking-allocator-reset (& track))
+    (let [start (time.tick-now)]
+      (run-one "reorder-source" (bench-reorder-source (slice xs 0) (slice ys 0) REORDER_REPS) start (& track)))
+
+    (mem.tracking-allocator-reset (& track))
+    (let [start (time.tick-now)]
+      (run-one "remove-at-source" (bench-remove-at-source (slice xs 0) REMOVE_REPS) start (& track)))
+
+    (mem.tracking-allocator-reset (& track))
+    (let [start (time.tick-now)]
+      (run-one "remove-at!-source" (bench-remove-at-bang-source (slice xs 0) REMOVE_REPS) start (& track)))))

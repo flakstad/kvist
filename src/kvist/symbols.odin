@@ -107,6 +107,10 @@ PACKAGE_SOURCE_ENTRIES :: []Package_Source_Entry{
     {import_path = "kvist:arr", member = "map-indexed!", relative = "packages/arr/package.kvist", snippet = "(defmacro map-indexed! [f xs]"},
     {import_path = "kvist:arr", member = "filter!", relative = "packages/arr/package.kvist", snippet = "(defmacro filter! [pred xs]"},
     {import_path = "kvist:arr", member = "remove!", relative = "packages/arr/package.kvist", snippet = "(defmacro remove! [pred xs]"},
+    {import_path = "kvist:arr", member = "remove-ordered-at", relative = "packages/arr/package.kvist", snippet = "(proc remove-ordered-at [xs: []$T, index: int] -> [dynamic]T #force_inline"},
+    {import_path = "kvist:arr", member = "remove-ordered-at!", relative = "packages/arr/package.kvist", snippet = "(defmacro remove-ordered-at! [xs index]"},
+    {import_path = "kvist:arr", member = "remove-unordered-at", relative = "packages/arr/package.kvist", snippet = "(proc remove-unordered-at [xs: []$T, index: int] -> [dynamic]T #force_inline"},
+    {import_path = "kvist:arr", member = "remove-unordered-at!", relative = "packages/arr/package.kvist", snippet = "(defmacro remove-unordered-at! [xs index]"},
     {import_path = "kvist:arr", member = "keep!", relative = "packages/arr/package.kvist", snippet = "(defmacro keep! [f xs]"},
     {import_path = "kvist:arr", member = "into", relative = "packages/arr/package.kvist", snippet = "(defmacro into [out-type xs]"},
     {import_path = "kvist:arr", member = "into!", relative = "packages/arr/package.kvist", snippet = "(defmacro into! [target xs]"},
@@ -1273,6 +1277,10 @@ package_entry_signature_doc :: proc(import_path, member: string) -> (signature, 
         case "map-indexed!": return "(arr/map-indexed! f xs)", "Map in place with index over a dynamic array.", true
         case "filter!": return "(arr/filter! pred xs)", "Filter in place over a dynamic array.", true
         case "remove!": return "(arr/remove! pred xs)", "Remove matching values in place from a dynamic array.", true
+        case "remove-ordered-at": return "(arr/remove-ordered-at xs index)", "Return an owned dynamic array with one indexed element removed, preserving order.", true
+        case "remove-ordered-at!": return "(arr/remove-ordered-at! xs index)", "Remove one indexed element from a dynamic array in place, preserving order.", true
+        case "remove-unordered-at": return "(arr/remove-unordered-at xs index)", "Return an owned dynamic array with one indexed element removed without preserving order.", true
+        case "remove-unordered-at!": return "(arr/remove-unordered-at! xs index)", "Remove one indexed element from a dynamic array in place without preserving order.", true
         case "keep!": return "(arr/keep! f xs)", "Keep callback results in place in a dynamic array.", true
         case "into": return "(arr/into [dynamic]T xs)", "Copy a collection into a new dynamic array of the requested type.", true
         case "into!": return "(arr/into! target xs)", "Append one collection into an existing dynamic array.", true
