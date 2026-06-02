@@ -12,9 +12,9 @@
   [elem-type & rest]
   (if (= (kvist/count rest) 0)
     (quasiquote
-      (kvist/set/empty (unquote elem-type)))
+      (set-empty (unquote elem-type)))
     (quasiquote
-      (kvist/set/empty (unquote elem-type) (unquote (kvist/first rest))))))
+      (set-empty (unquote elem-type) (unquote (kvist/first rest))))))
 
 (defmacro of
   "Create a set from `values`.
@@ -23,7 +23,7 @@
   Odin set whose element type is `elem-type`."
   [elem-type values]
   (quasiquote
-    (kvist/set/of (unquote elem-type) (unquote values))))
+    (set-of (unquote elem-type) (unquote values))))
 
 (defmacro add!
   "Add `value` to set `s` in place.
@@ -41,7 +41,7 @@
   existing set and does not allocate a replacement set."
   [s value]
   (quasiquote
-    (kvist/set/remove! (unquote s) (unquote value))))
+    (set-remove! (unquote s) (unquote value))))
 
 (defmacro union!
   "Mutate `target` so it contains every value from `source`.
@@ -50,7 +50,7 @@
   version of `set/union` and avoids allocating a new set."
   [target source]
   (quasiquote
-    (kvist/set/union! (unquote target) (unquote source))))
+    (set-union! (unquote target) (unquote source))))
 
 (defmacro intersection!
   "Mutate `target` so it keeps only values also present in `source`.
@@ -59,7 +59,7 @@
   in-place version of `set/intersection`."
   [target source]
   (quasiquote
-    (kvist/set/intersection! (unquote target) (unquote source))))
+    (set-intersection! (unquote target) (unquote source))))
 
 (defmacro difference!
   "Mutate `target` so it removes every value present in `source`.
@@ -68,7 +68,7 @@
   `target` that are not members of `source`."
   [target source]
   (quasiquote
-    (kvist/set/difference! (unquote target) (unquote source))))
+    (set-difference! (unquote target) (unquote source))))
 
 (defn contains?
   "Return true when `value` is a member of `s`.

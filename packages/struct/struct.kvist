@@ -8,7 +8,7 @@
   field names without manually repeating them."
   [target]
   (quasiquote
-    (kvist/struct/fields (unquote target))))
+    (struct-fields (unquote target))))
 
 (defmacro types
   "Return metadata for the field types of a struct value or type.
@@ -18,4 +18,4 @@
   a runtime reflection table."
   [target]
   (quasiquote
-    (kvist/struct/types (unquote target))))
+    (struct-types (unquote target))))

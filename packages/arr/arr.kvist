@@ -67,9 +67,9 @@
   [elem-type & rest]
   (if (= (kvist/count rest) 0)
     (quasiquote
-      (kvist/arr/empty (unquote elem-type)))
+      (arr-empty (unquote elem-type)))
     (quasiquote
-      (kvist/arr/empty (unquote elem-type) (unquote (kvist/first rest))))))
+      (arr-empty (unquote elem-type) (unquote (kvist/first rest))))))
 
 (defmacro dynamic
   "Create a dynamic array of `elem-type` from literal `items`.
@@ -78,7 +78,7 @@
   be passed to APIs expecting `[dynamic]T`."
   [elem-type items]
   (quasiquote
-    (kvist/arr/dynamic (unquote elem-type) (unquote items))))
+    (arr-dynamic (unquote elem-type) (unquote items))))
 
 (defmacro fixed
   "Create a fixed array of `elem-type` from literal `items`.
@@ -87,7 +87,7 @@
   storage and its length is known from the literal item count."
   [elem-type items]
   (quasiquote
-    (kvist/arr/fixed (unquote elem-type) (unquote items))))
+    (arr-fixed (unquote elem-type) (unquote items))))
 
 (defmacro map-indexed
   "Return a new dynamic array by calling `f` with each value and index.
@@ -124,7 +124,7 @@
   No replacement array is returned."
   [xs & values]
   (quasiquote
-    (kvist/arr/push! (unquote xs) (splice values))))
+    (arr-push! (unquote xs) (splice values))))
 
 (defmacro map!
   "Replace each element of dynamic array `xs` with `(f x)`.
@@ -221,7 +221,7 @@
   input is not mutated."
   [out-type xs]
   (quasiquote
-    (kvist/arr/into (unquote out-type) (unquote xs))))
+    (arr-into (unquote out-type) (unquote xs))))
 
 (defmacro into!
   "Append all elements from `xs` into dynamic array `target`.
@@ -230,7 +230,7 @@
   may grow the target's backing storage."
   [target xs]
   (quasiquote
-    (kvist/arr/into! (unquote target) (unquote xs))))
+    (arr-into! (unquote target) (unquote xs))))
 
 (defmacro interpose
   "Return a new dynamic array with `sep` inserted between input elements.

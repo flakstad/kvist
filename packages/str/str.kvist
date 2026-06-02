@@ -34,7 +34,7 @@
   refer to the original string contents rather than copying each substring."
   [s separator]
   (quasiquote
-    (kvist/str/split (unquote s) (unquote separator))))
+    (str-split (unquote s) (unquote separator))))
 
 (defmacro join
   "Join `parts` with `separator` between adjacent strings.
@@ -43,7 +43,7 @@
   The caller owns that string according to the current allocator."
   [parts separator]
   (quasiquote
-    (kvist/str/join (unquote parts) (unquote separator))))
+    (str-join (unquote parts) (unquote separator))))
 
 (defmacro replace
   "Return a copy of `s` with occurrences of `old` replaced by `new`.
@@ -54,9 +54,9 @@
   [s old new & rest]
   (if (= (kvist/count rest) 0)
     (quasiquote
-      (kvist/str/replace (unquote s) (unquote old) (unquote new)))
+      (str-replace (unquote s) (unquote old) (unquote new)))
     (quasiquote
-      (kvist/str/replace (unquote s) (unquote old) (unquote new) (unquote (kvist/first rest))))))
+      (str-replace (unquote s) (unquote old) (unquote new) (unquote (kvist/first rest))))))
 
 (defn count
   "Return the byte length of `s`.

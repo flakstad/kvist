@@ -12,9 +12,9 @@
   [key-type value-type & rest]
   (if (= (kvist/count rest) 0)
     (quasiquote
-      (kvist/map/empty (unquote key-type) (unquote value-type)))
+      (map-empty (unquote key-type) (unquote value-type)))
     (quasiquote
-      (kvist/map/empty (unquote key-type) (unquote value-type) (unquote (kvist/first rest))))))
+      (map-empty (unquote key-type) (unquote value-type) (unquote (kvist/first rest))))))
 
 (defmacro of
   "Create a map from a literal sequence of key/value entries.
@@ -24,7 +24,7 @@
   overwrite earlier values when the lowered code assigns them."
   [key-type value-type entries]
   (quasiquote
-    (kvist/map/of (unquote key-type) (unquote value-type) (unquote entries))))
+    (map-of (unquote key-type) (unquote value-type) (unquote entries))))
 
 (defmacro get
   "Look up `key` in map `m`.
@@ -46,7 +46,7 @@
   operation over Odin maps and does not allocate a replacement map."
   [target source]
   (quasiquote
-    (kvist/map/merge! (unquote target) (unquote source))))
+    (map-merge! (unquote target) (unquote source))))
 
 (defmacro assoc!
   "Associate `key` with `value` in `target` in place.
@@ -64,7 +64,7 @@
   the same behavior as Odin map deletion for a missing key."
   [target key]
   (quasiquote
-    (kvist/map/dissoc! (unquote target) (unquote key))))
+    (map-dissoc! (unquote target) (unquote key))))
 
 (proc contains?
   "Return true when `m` contains `key`.

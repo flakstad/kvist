@@ -2197,7 +2197,7 @@ emit_thread_step :: proc(e: ^Emitter, current: string, step: CST_Form, thread_la
             mark_core_concat(e)
             return emit_call_text("kvist_concat", []string{slice_all_expr_text(current), slice_all_expr_text(rhs)}), {}, true
         }
-        if thread_last && head.text == "arr/into" {
+        if thread_last && (head.text == "arr-into" || head.text == "arr/into") {
             if len(step.items) != 2 {
                 return "", Compile_Error{message = "into thread step expects one dynamic array type argument", span = step.span}, false
             }
@@ -2579,7 +2579,7 @@ thread_step_result_kind :: proc(step: CST_Form, thread_last: bool) -> Thread_Res
                            head_name == "arr/filter" ||
                            head_name == "arr/remove" || head_name == "arr/map-indexed" ||
                            head_name == "arr/keep" || head_name == "arr/mapcat" ||
-                           head_name == "concat" || head_name == "arr/into" ||
+                           head_name == "concat" || head_name == "arr/into" || head_name == "arr-into" ||
                            head_name == "arr/interpose" ||
                            head_name == "arr/interleave" ||
                            head_name == "arr/reverse" || head_name == "arr/shuffle" ||
@@ -2598,9 +2598,9 @@ thread_step_result_kind :: proc(step: CST_Form, thread_last: bool) -> Thread_Res
                            head_name == "set/remove" ||
                            head_name == "arr/distinct" ||
                            head_name == "arr/distinct-by" || head_name == "arr/cycle" ||
-                           head_name == "str/split" ||
-                           head_name == "str/join" ||
-                           head_name == "str/replace" ||
+                           head_name == "str/split" || head_name == "str-split" ||
+                           head_name == "str/join" || head_name == "str-join" ||
+                           head_name == "str/replace" || head_name == "str-replace" ||
                            head_name == "str/lower" ||
                            head_name == "str/upper" ||
                            head_name == "arr/take-nth") {
@@ -2716,14 +2716,14 @@ owned_result_head :: proc(name: string) -> bool {
     switch normalized {
     case "arr/map", "arr/filter", "arr/remove", "arr/map-indexed", "arr/keep", "arr/mapcat",
          "concat", "map/merge", "arr/reverse", "arr/sort", "arr/sort-by",
-         "arr/into", "arr/interpose", "arr/interleave", "arr/shuffle",
+         "arr/into", "arr-into", "arr/interpose", "arr/interleave", "arr/shuffle",
          "arr/partition", "arr/partition-all", "arr/partition-by",
          "map/zip", "arr/index-by", "arr/group-by", "arr/count-by", "arr/sum-by",
          "arr/frequencies", "map/keys", "map/vals",
          "set/union", "set/intersection", "set/difference", "set/add", "set/remove",
          "arr/distinct", "arr/distinct-by",
          "arr/range", "arr/repeat", "arr/repeatedly", "arr/iterate", "arr/cycle", "arr/take-nth",
-         "str/split", "str/join", "str/replace", "str/lower", "str/upper",
+         "str/split", "str-split", "str/join", "str-join", "str/replace", "str-replace", "str/lower", "str/upper",
          "io/read":
         return true
     }
@@ -3937,7 +3937,7 @@ form_is_owned_constructor_result :: proc(form: CST_Form) -> bool {
         return false
     }
     switch form.items[0].text {
-    case "arr/empty", "arr/dynamic", "map/empty", "map/of", "set/empty", "set/of":
+    case "arr/empty", "arr-empty", "arr/dynamic", "arr-dynamic", "map/empty", "map-empty", "map/of", "map-of", "set/empty", "set-empty", "set/of", "set-of":
         return true
     }
     return false
@@ -5338,7 +5338,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         return fmt.tprintf("len(%s)", target), {}, true
     }
 
-    if head.text == "arr/empty" {
+    if head.text == "arr-empty" || head.text == "arr/empty" {
         if len(form.items) != 2 && len(form.items) != 3 {
             return "", Compile_Error{message = "arr/empty expects element type and optional capacity", span = form.span}, false
         }
@@ -5356,7 +5356,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         return fmt.tprintf("make([dynamic]%s, 0, %s)", elem_text, capacity), {}, true
     }
 
-    if head.text == "arr/dynamic" {
+    if head.text == "arr-dynamic" || head.text == "arr/dynamic" {
         if len(form.items) != 3 || form.items[2].kind != .Vector {
             return "", Compile_Error{message = "arr/dynamic expects element type and vector literal", span = form.span}, false
         }
@@ -5368,7 +5368,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         return emit_vector_literal(e, fmt.tprintf("[dynamic]%s", elem_text), form.items[2])
     }
 
-    if head.text == "arr/fixed" {
+    if head.text == "arr-fixed" || head.text == "arr/fixed" {
         if len(form.items) != 3 || form.items[2].kind != .Vector {
             return "", Compile_Error{message = "arr/fixed expects element type and vector literal", span = form.span}, false
         }
@@ -5380,7 +5380,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         return emit_vector_literal(e, fmt.tprintf("[%d]%s", length, elem_text), form.items[2])
     }
 
-    if head.text == "map/empty" {
+    if head.text == "map-empty" || head.text == "map/empty" {
         if len(form.items) != 3 && len(form.items) != 4 {
             return "", Compile_Error{message = "map/empty expects key type, value type, and optional capacity", span = form.span}, false
         }
@@ -5402,7 +5402,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         return fmt.tprintf("make(map[%s]%s, %s)", key_text, value_text, capacity), {}, true
     }
 
-    if head.text == "map/of" {
+    if head.text == "map-of" || head.text == "map/of" {
         if len(form.items) != 4 || form.items[3].kind != .Brace {
             return "", Compile_Error{message = "map/of expects key type, value type, and brace literal", span = form.span}, false
         }
@@ -5417,7 +5417,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         return emit_brace_literal(e, fmt.tprintf("map[%s]%s", key_text, value_text), form.items[3])
     }
 
-    if head.text == "set/empty" {
+    if head.text == "set-empty" || head.text == "set/empty" {
         if len(form.items) != 2 && len(form.items) != 3 {
             return "", Compile_Error{message = "set/empty expects element type and optional capacity", span = form.span}, false
         }
@@ -5435,7 +5435,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         return fmt.tprintf("make(map[%s]bool, %s)", elem_text, capacity), {}, true
     }
 
-    if head.text == "set/of" {
+    if head.text == "set-of" || head.text == "set/of" {
         if len(form.items) != 3 || form.items[2].kind != .Vector {
             return "", Compile_Error{message = "set/of expects element type and vector literal", span = form.span}, false
         }
@@ -5494,7 +5494,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         return fmt.tprintf("(%s)[%s:%s]", target, start, end), {}, true
     }
 
-    if head.text == "arr/push!" {
+    if head.text == "arr-push!" || head.text == "arr/push!" {
         if len(form.items) < 3 {
             return "", Compile_Error{message = "arr/push! expects dynamic array and at least one value", span = form.span}, false
         }
@@ -5540,7 +5540,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         return emit_call_text("strings.contains", []string{target, needle}), {}, true
     }
 
-    if head.text == "str/split" {
+    if head.text == "str-split" || head.text == "str/split" {
         if len(form.items) != 3 {
             return "", Compile_Error{message = "str/split expects string and separator", span = form.span}, false
         }
@@ -5556,7 +5556,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         return emit_call_text("strings.split", []string{target, separator}), {}, true
     }
 
-    if head.text == "str/join" {
+    if head.text == "str-join" || head.text == "str/join" {
         if len(form.items) != 3 {
             return "", Compile_Error{message = "str/join expects strings and separator", span = form.span}, false
         }
@@ -5644,7 +5644,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         return emit_call_text(function_name, []string{target, needle}), {}, true
     }
 
-    if head.text == "str/replace" {
+    if head.text == "str-replace" || head.text == "str/replace" {
         if len(form.items) != 4 && len(form.items) != 5 {
             return "", Compile_Error{message = "str/replace expects string, old, new, and optional count", span = form.span}, false
         }
@@ -5714,7 +5714,10 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         return fmt.tprintf("(%s)[%s] = true", target, value), {}, true
     }
 
-    if head.text == "set/union!" || head.text == "set/intersection!" || head.text == "set/difference!" {
+    is_set_union_in_place := head.text == "set-union!" || head.text == "set/union!"
+    is_set_intersection_in_place := head.text == "set-intersection!" || head.text == "set/intersection!"
+    is_set_difference_in_place := head.text == "set-difference!" || head.text == "set/difference!"
+    if is_set_union_in_place || is_set_intersection_in_place || is_set_difference_in_place {
         if len(form.items) != 3 {
             return "", Compile_Error{message = fmt.tprintf("%s expects target and source sets", head.text), span = form.span}, false
         }
@@ -5727,9 +5730,9 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
             return "", err_source, false
         }
         helper_name := "kvist_set_union_in_place"
-        if head.text == "set/union!" {
+        if is_set_union_in_place {
             mark_core_set_union_in_place(e)
-        } else if head.text == "set/intersection!" {
+        } else if is_set_intersection_in_place {
             helper_name = "kvist_set_intersection_in_place"
             mark_core_set_intersection_in_place(e)
         } else {
@@ -5739,7 +5742,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         return emit_call_text(helper_name, []string{fmt.tprintf("&(%s)", target), source}), {}, true
     }
 
-    if head.text == "set/remove!" {
+    if head.text == "set-remove!" || head.text == "set/remove!" {
         if len(form.items) != 3 {
             return "", Compile_Error{message = "set/remove! expects set and value", span = form.span}, false
         }
@@ -5842,7 +5845,9 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         return emit_call_text("fmt.println", arg_texts[:]), {}, true
     }
 
-    if head.text == "struct/fields" || head.text == "struct/types" {
+    is_struct_fields := head.text == "struct-fields" || head.text == "struct/fields"
+    is_struct_types := head.text == "struct-types" || head.text == "struct/types"
+    if is_struct_fields || is_struct_types {
         if len(form.items) != 2 {
             return "", Compile_Error{message = fmt.tprintf("%s expects a quoted struct name", head.text), span = form.span}, false
         }
@@ -5854,7 +5859,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         if !ok_struct {
             return "", Compile_Error{message = fmt.tprintf("unknown struct: %s", struct_name), span = form.items[1].span}, false
         }
-        if head.text == "struct/fields" {
+        if is_struct_fields {
             return emit_struct_fields_literal(struct_decl), {}, true
         }
         mark_dynamic_literals(e)
@@ -6051,7 +6056,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         return emit_call_text("kvist_keep_in_place", []string{f, address_of_expr_text(collection)}), {}, true
     }
 
-    if head.text == "arr/into!" {
+    if head.text == "arr-into!" || head.text == "arr/into!" {
         if len(form.items) != 3 {
             return "", Compile_Error{message = "into! expects target and collection", span = form.span}, false
         }
@@ -6066,7 +6071,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         return emit_call_text("append", []string{address_of_expr_text(target), fmt.tprintf("..%s", slice_all_expr_text(collection))}), {}, true
     }
 
-    if head.text == "map/merge!" {
+    if head.text == "map-merge!" || head.text == "map/merge!" {
         if len(form.items) != 3 {
             return "", Compile_Error{message = fmt.tprintf("%s expects target map and source map", surface_head), span = form.span}, false
         }
@@ -6082,7 +6087,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         return emit_call_text("kvist_merge_in_place", []string{address_of_expr_text(target), source}), {}, true
     }
 
-    if head.text == "map/dissoc!" {
+    if head.text == "map-dissoc!" || head.text == "map/dissoc!" {
         if len(form.items) != 3 {
             return "", Compile_Error{message = fmt.tprintf("%s expects target map and key", surface_head), span = form.span}, false
         }
@@ -6097,7 +6102,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         return emit_call_text("delete_key", []string{address_of_expr_text(target), key}), {}, true
     }
 
-    if head.text == "arr/into" {
+    if head.text == "arr-into" || head.text == "arr/into" {
         if len(form.items) != 3 {
             return "", Compile_Error{message = "into expects dynamic array type and collection", span = form.span}, false
         }
@@ -10562,7 +10567,9 @@ form_uses_core_strings :: proc(form: CST_Form) -> bool {
     if form.kind == .List && len(form.items) > 0 && form.items[0].kind == .Symbol {
         if form.items[0].text == "str/contains?" ||
            form.items[0].text == "str/split" ||
+           form.items[0].text == "str-split" ||
            form.items[0].text == "str/join" ||
+           form.items[0].text == "str-join" ||
            form.items[0].text == "str/trim" ||
            form.items[0].text == "str/trim-prefix" ||
            form.items[0].text == "str/trim-suffix" ||
@@ -10571,6 +10578,7 @@ form_uses_core_strings :: proc(form: CST_Form) -> bool {
            form.items[0].text == "str/index-of" ||
            form.items[0].text == "str/last-index-of" ||
            form.items[0].text == "str/replace" ||
+           form.items[0].text == "str-replace" ||
            form.items[0].text == "str/lower" ||
            form.items[0].text == "str/upper" ||
            strings.has_prefix(form.items[0].text, "strings.") ||
