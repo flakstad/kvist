@@ -43,34 +43,52 @@ build_map_mutable :: proc() -> map[int]int {
     return out
 }
 
-build_set_rhs :: proc() -> map[int]bool {
-    out := make(map[int]bool, 5)
-    out[4] = true
-    out[5] = true
-    out[6] = true
-    out[7] = true
-    out[8] = true
+build_map_keys :: proc() -> [dynamic]int {
+    out := make([dynamic]int, 0, 4)
+    append(&out, 1)
+    append(&out, 2)
+    append(&out, 3)
+    append(&out, 4)
     return out
 }
 
-build_set_mutable :: proc() -> map[int]bool {
-    out := make(map[int]bool, 6)
-    out[1] = true
-    out[2] = true
-    out[3] = true
-    out[4] = true
-    out[5] = true
-    out[6] = true
+build_map_vals :: proc() -> [dynamic]int {
+    out := make([dynamic]int, 0, 4)
+    append(&out, 10)
+    append(&out, 20)
+    append(&out, 30)
+    append(&out, 40)
     return out
 }
 
-build_even_set :: proc() -> map[int]bool {
-    out := make(map[int]bool, 5)
-    out[2] = true
-    out[4] = true
-    out[6] = true
-    out[8] = true
-    out[10] = true
+build_set_rhs :: proc() -> map[int]struct{} {
+    out := make(map[int]struct{}, 5)
+    out[4] = {}
+    out[5] = {}
+    out[6] = {}
+    out[7] = {}
+    out[8] = {}
+    return out
+}
+
+build_set_mutable :: proc() -> map[int]struct{} {
+    out := make(map[int]struct{}, 6)
+    out[1] = {}
+    out[2] = {}
+    out[3] = {}
+    out[4] = {}
+    out[5] = {}
+    out[6] = {}
+    return out
+}
+
+build_even_set :: proc() -> map[int]struct{} {
+    out := make(map[int]struct{}, 5)
+    out[2] = {}
+    out[4] = {}
+    out[6] = {}
+    out[8] = {}
+    out[10] = {}
     return out
 }
 
@@ -81,7 +99,7 @@ bench_str_direct :: proc(reps: int) -> int {
         trimmed := strings.trim_space(source)
         parts := strings.split(trimmed, ",")
         joined, _ := strings.join(parts[:], "-")
-        replaced := kvist_str_replace(joined, "odin", "ODIN", 1)
+        replaced, _ := strings.replace(joined, "odin", "ODIN", 1, context.allocator)
         lowered := strings.to_lower(replaced)
         uppered := strings.to_upper(lowered)
 
@@ -135,22 +153,96 @@ bench_map_direct :: proc(reps: int) -> int {
     return checksum
 }
 
+bench_map_pure_direct :: proc(reps: int) -> int {
+    checksum := 0
+    for i := 0; i < reps; i += 1 {
+        base := build_map_mutable()
+        overrides := build_map_overrides()
+        ks_source := build_map_keys()
+        vs_source := build_map_vals()
+
+        associated := make(map[int]int, len(base)+1)
+        for key, value in base {
+            associated[key] = value
+        }
+        associated[COUNT] = 99
+
+        dissociated := make(map[int]int, len(associated))
+        for key, value in associated {
+            if key != 0 {
+                dissociated[key] = value
+            }
+        }
+
+        merged := make(map[int]int, len(base)+len(overrides))
+        for key, value in base {
+            merged[key] = value
+        }
+        for key, value in overrides {
+            merged[key] = value
+        }
+
+        keys := make([dynamic]int, 0, len(merged))
+        for key in merged {
+            append(&keys, key)
+        }
+
+        vals := make([dynamic]int, 0, len(merged))
+        for _, value in merged {
+            append(&vals, value)
+        }
+
+        n := len(ks_source)
+        if len(vs_source) < n {
+            n = len(vs_source)
+        }
+        zipped := make(map[int]int, n)
+        for j := 0; j < n; j += 1 {
+            zipped[ks_source[j]] = vs_source[j]
+        }
+
+        checksum += len(associated)
+        checksum += len(dissociated)
+        checksum += len(merged)
+        checksum += len(keys)
+        checksum += len(vals)
+        checksum += dissociated[COUNT]
+        checksum += merged[4]
+        checksum += zipped[3]
+        if 4 in zipped {
+            checksum += 1
+        }
+
+        delete(zipped)
+        delete(vals)
+        delete(keys)
+        delete(merged)
+        delete(dissociated)
+        delete(associated)
+        delete(vs_source)
+        delete(ks_source)
+        delete(overrides)
+        delete(base)
+    }
+    return checksum
+}
+
 bench_set_direct :: proc(reps: int) -> int {
     checksum := 0
     for i := 0; i < reps; i += 1 {
         rhs := build_set_rhs()
         mutable := build_set_mutable()
         evens := build_even_set()
-        removed := make(map[int]bool, 1)
-        removed[2] = true
+        removed := make(map[int]struct{}, 1)
+        removed[2] = {}
 
-        mutable[COUNT+1] = true
+        mutable[COUNT+1] = {}
         delete_key(&mutable, 0)
         for value in rhs {
-            mutable[value] = true
+            mutable[value] = {}
         }
         for value in mutable {
-            if !evens[value] {
+            if !(value in evens) {
                 delete_key(&mutable, value)
             }
         }
@@ -159,13 +251,13 @@ bench_set_direct :: proc(reps: int) -> int {
         }
 
         checksum += 3
-        if mutable[4] {
+        if 4 in mutable {
             checksum += 1
         }
-        if mutable[6] {
+        if 6 in mutable {
             checksum += 1
         }
-        if mutable[8] {
+        if 8 in mutable {
             checksum += 1
         }
 
@@ -177,9 +269,118 @@ bench_set_direct :: proc(reps: int) -> int {
     return checksum
 }
 
-kvist_str_replace :: proc(s, old, new: string, n: int) -> string {
-    replaced, _ := strings.replace(s, old, new, n, context.allocator)
-    return replaced
+bench_set_pure_direct :: proc(reps: int) -> int {
+    checksum := 0
+    for i := 0; i < reps; i += 1 {
+        lhs := build_set_mutable()
+        rhs := build_set_rhs()
+
+        unioned := make(map[int]struct{}, len(lhs)+len(rhs))
+        for value in lhs {
+            unioned[value] = {}
+        }
+        for value in rhs {
+            unioned[value] = {}
+        }
+
+        cap := len(lhs)
+        if len(rhs) < cap {
+            cap = len(rhs)
+        }
+        intersected := make(map[int]struct{}, cap)
+        scan := lhs
+        probe := rhs
+        if len(lhs) > len(rhs) {
+            scan = rhs
+            probe = lhs
+        }
+        for value in scan {
+            if value in probe {
+                intersected[value] = {}
+            }
+        }
+
+        differed := make(map[int]struct{}, len(lhs))
+        for value in lhs {
+            if !(value in rhs) {
+                differed[value] = {}
+            }
+        }
+
+        added := make(map[int]struct{}, len(lhs)+1)
+        for value in lhs {
+            added[value] = {}
+        }
+        added[COUNT+1] = {}
+
+        removed := make(map[int]struct{}, len(added))
+        for value in added {
+            if value != 2 {
+                removed[value] = {}
+            }
+        }
+
+        checksum += len(unioned)
+        checksum += len(intersected)
+        checksum += len(differed)
+        checksum += len(removed)
+        if 8 in unioned {
+            checksum += 1
+        }
+        subset := true
+        if len(intersected) > len(unioned) {
+            subset = false
+        } else {
+            for value in intersected {
+                if !(value in unioned) {
+                    subset = false
+                    break
+                }
+            }
+        }
+        if subset {
+            checksum += 1
+        }
+        superset := true
+        if len(unioned) < len(intersected) {
+            superset = false
+        } else {
+            for value in intersected {
+                if !(value in unioned) {
+                    superset = false
+                    break
+                }
+            }
+        }
+        if superset {
+            checksum += 1
+        }
+        disjoint := true
+        scan_disjoint := differed
+        probe_disjoint := rhs
+        if len(differed) > len(rhs) {
+            scan_disjoint = rhs
+            probe_disjoint = differed
+        }
+        for value in scan_disjoint {
+            if value in probe_disjoint {
+                disjoint = false
+                break
+            }
+        }
+        if disjoint {
+            checksum += 1
+        }
+
+        delete(removed)
+        delete(added)
+        delete(differed)
+        delete(intersected)
+        delete(unioned)
+        delete(rhs)
+        delete(lhs)
+    }
+    return checksum
 }
 
 main :: proc() {
@@ -201,5 +402,13 @@ main :: proc() {
 
     mem.tracking_allocator_reset(&track)
     start = time.tick_now()
+    run_one("map-pure-direct", bench_map_pure_direct(REPS), start, &track)
+
+    mem.tracking_allocator_reset(&track)
+    start = time.tick_now()
     run_one("set-direct", bench_set_direct(REPS), start, &track)
+
+    mem.tracking_allocator_reset(&track)
+    start = time.tick_now()
+    run_one("set-pure-direct", bench_set_pure_direct(REPS), start, &track)
 }

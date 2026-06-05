@@ -47,5 +47,5 @@
 (core/comment
   ;; Two visible Kvist/Odin differences remain here:
   ;; - keyword currently lowers to string values.
-  ;; - set[T] still lowers to map[T]bool.
+  ;; - set[T] lowers to map[T]struct{}.
   (struct-types-demo))

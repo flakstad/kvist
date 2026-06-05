@@ -26,15 +26,14 @@
   (quasiquote
     (core/get (unquote s) (unquote index))))
 
-(defmacro split
+(defn split
   "Split `s` around every occurrence of `separator`.
 
   The result and allocation behavior are those of Odin `core:strings.split`.
   Use this when an owned array of string slices is wanted; the returned pieces
   refer to the original string contents rather than copying each substring."
-  [s separator]
-  (quasiquote
-    (str-split (unquote s) (unquote separator))))
+  [s: string, separator: string] -> []string #force_inline
+  (strings.split s separator))
 
 (defmacro join
   "Join `parts` with `separator` between adjacent strings.
@@ -43,7 +42,16 @@
   The caller owns that string according to the current allocator."
   [parts separator]
   (quasiquote
-    (str-join (unquote parts) (unquote separator))))
+    (join-impl (core/slice (unquote parts) 0) (unquote separator))))
+
+(defn- join-impl
+  "Implementation helper for `str/join`.
+
+  Accepts a slice so callers can pass either a dynamic array or a slice through
+  the public macro. The returned string is owned by the caller."
+  [parts: []string, separator: string] -> string #force_inline
+  (let [[out _] (strings.join parts separator)]
+    out))
 
 (defmacro replace
   "Return a copy of `s` with occurrences of `old` replaced by `new`.
@@ -54,9 +62,20 @@
   [s old new & rest]
   (if (= (kvist/count rest) 0)
     (quasiquote
-      (str-replace (unquote s) (unquote old) (unquote new)))
+      (replace-impl (unquote s) (unquote old) (unquote new) -1))
     (quasiquote
-      (str-replace (unquote s) (unquote old) (unquote new) (unquote (kvist/first rest))))))
+      (replace-impl (unquote s) (unquote old) (unquote new) (unquote (kvist/first rest))))))
+
+(defn- replace-impl
+  "Implementation helper for `str/replace`.
+
+  `n` follows Odin `core:strings.replace`: `-1` replaces all occurrences,
+  positive values limit the number of replacements, and zero returns a string
+  according to Odin's replacement semantics. The returned string is owned by the
+  caller when Odin allocates one."
+  [s: string, old: string, new: string, n: int] -> string #force_inline
+  (let [[out _] (strings.replace s old new n)]
+    out))
 
 (defn count
   "Return the byte length of `s`.

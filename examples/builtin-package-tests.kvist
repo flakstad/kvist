@@ -315,9 +315,9 @@
     (t/is (set/subset? intersected unioned))
     (t/is (set/superset? unioned intersected))
     (t/is (set/disjoint? differed rhs))
-    (t/is (= (get mutable 4 false) true))
-    (t/is (= (get mutable 5 false) true))
-    (t/is (= (get mutable 2 false) false))))
+    (t/is (set/contains? mutable 4))
+    (t/is (set/contains? mutable 5))
+    (t/is (not (set/contains? mutable 2)))))
 
 (t/deftest str-package-surface
   (let [name "  Kvist Core  "

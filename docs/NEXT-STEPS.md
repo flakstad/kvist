@@ -15,7 +15,7 @@ Kvist has:
   trailing default parameters for known top-level `defn`
 - flat struct-backed `{:keys [...]}` destructuring in `let`
 - struct-backed destructured params with `{:keys [...] :as name}: Type`
-- a shipped `hiccup` package with rendering
+- a shipped `html` package with rendering
 - explicit ownership helpers and stricter escape diagnostics
 - a shipped `kvist:test` package with:
   - `t/deftest`

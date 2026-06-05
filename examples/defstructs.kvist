@@ -3,6 +3,7 @@
 (package main)
 (import "core:fmt")
 (import core "kvist:core")
+(import set "kvist:set")
 (defstruct Point
   "A 2D point."
   {:x float
@@ -25,7 +26,7 @@
 
 (defn profile-has-math-tag? [] -> bool
   (let [profile (Profile {:name "Ada"
-                          :tags (new map[string]bool {"math" true "lisp" true})})]
+                          :tags (set/of string ["math" "lisp"])})]
     (core/contains? (:tags profile) "math")))
 
 (defn profile-active? [] -> bool

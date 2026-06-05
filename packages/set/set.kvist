@@ -32,7 +32,7 @@
   any growth Odin needs for the set itself."
   [s value]
   (quasiquote
-    (core/update! (unquote s) (unquote value) true)))
+    (core/update! (unquote s) (unquote value) (odin "{}"))))
 
 (defmacro remove!
   "Remove `value` from set `s` in place.
@@ -41,7 +41,7 @@
   existing set and does not allocate a replacement set."
   [s value]
   (quasiquote
-    (set-remove! (unquote s) (unquote value))))
+    (core/delete! (unquote s) (unquote value))))
 
 (defmacro union!
   "Mutate `target` so it contains every value from `source`.
@@ -50,7 +50,8 @@
   version of `set/union` and avoids allocating a new set."
   [target source]
   (quasiquote
-    (set-union! (unquote target) (unquote source))))
+    (for [value _ (unquote source)]
+      (core/update! (unquote target) value (odin "{}")))))
 
 (defmacro intersection!
   "Mutate `target` so it keeps only values also present in `source`.
@@ -59,7 +60,9 @@
   in-place version of `set/intersection`."
   [target source]
   (quasiquote
-    (set-intersection! (unquote target) (unquote source))))
+    (for [value _ (unquote target)]
+      (core/when (not (map/contains? (unquote source) value))
+        (core/delete! (unquote target) value)))))
 
 (defmacro difference!
   "Mutate `target` so it removes every value present in `source`.
@@ -68,7 +71,8 @@
   `target` that are not members of `source`."
   [target source]
   (quasiquote
-    (set-difference! (unquote target) (unquote source))))
+    (for [value _ (unquote source)]
+      (core/delete! (unquote target) value))))
 
 (defn contains?
   "Return true when `value` is a member of `s`.
@@ -85,9 +89,9 @@
   [lhs: set[$T], rhs: set[$T]] -> set[T] #force_inline
   (let [out (set/empty T (+ (odin "len(lhs)") (odin "len(rhs)")))]
     (for [value _ lhs]
-      (core/update! out value true))
+      (core/update! out value (odin "{}")))
     (for [value _ rhs]
-      (core/update! out value true))
+      (core/update! out value (odin "{}")))
     out))
 
 (proc intersection
@@ -111,7 +115,7 @@
           (set! probe lhs)))
       (for [value _ scan]
         (core/when (map/contains? probe value)
-          (core/update! out value true)))
+          (core/update! out value (odin "{}"))))
       out)))
 
 (proc difference
@@ -123,7 +127,7 @@
   (let [out (set/empty T (odin "len(lhs)"))]
     (for [value _ lhs]
       (core/when (not (map/contains? rhs value))
-        (core/update! out value true)))
+        (core/update! out value (odin "{}"))))
     out))
 
 (defn subset?
@@ -180,8 +184,8 @@
   [s: set[$T], value: T] -> set[T] #force_inline
   (let [out (set/empty T (+ (odin "len(s)") 1))]
     (for [entry _ s]
-      (core/update! out entry true))
-    (core/update! out value true)
+      (core/update! out entry (odin "{}")))
+    (core/update! out value (odin "{}"))
     out))
 
 (proc remove
@@ -193,5 +197,5 @@
   (let [out (set/empty T (odin "len(s)"))]
     (for [entry _ s]
       (core/when (!= entry value)
-        (core/update! out entry true)))
+        (core/update! out entry (odin "{}"))))
     out))

@@ -88,6 +88,47 @@ Macro_Binding :: struct {
 
 macro_gensym_counter: int
 
+@(thread_local)
+macro_eval_anchor_path: string
+
+macro_eval_set_anchor :: proc(anchor_path: string) -> string {
+    previous := macro_eval_anchor_path
+    macro_eval_anchor_path = anchor_path
+    return previous
+}
+
+macro_eval_restore_anchor :: proc(previous: string) {
+    macro_eval_anchor_path = previous
+}
+
+macro_eval_read_path :: proc(raw_path: string, span: Span) -> (path: string, err: Compile_Error, ok: bool) {
+    if raw_path == "" {
+        return "", Compile_Error{message = "io/read path must not be empty", span = span}, false
+    }
+    if os.is_absolute_path(raw_path) {
+        return strings.clone(raw_path), Compile_Error{}, true
+    }
+
+    base := macro_eval_anchor_path
+    if base == "" {
+        base = "."
+    }
+    if strings.has_suffix(base, ".kvist") {
+        dir, _ := os.split_path(base)
+        if dir == "" {
+            base = "."
+        } else {
+            base = dir
+        }
+    }
+
+    resolved, join_err := os.join_path({base, raw_path}, context.allocator)
+    if join_err != nil {
+        return "", Compile_Error{message = fmt.tprintf("could not resolve compile-time io/read path: %s", raw_path), span = span}, false
+    }
+    return resolved, Compile_Error{}, true
+}
+
 macro_quote_string :: proc(text: string) -> string {
     builder := strings.builder_make()
     defer strings.builder_destroy(&builder)
@@ -1267,6 +1308,30 @@ macro_eval_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_
                     strings.write_string(&builder, text)
                 }
                 return macro_string_value(strings.clone(strings.to_string(builder))), Compile_Error{}, true
+            case "io/read", "io__read":
+                if len(form.items) != 2 {
+                    return Macro_Value{}, Compile_Error{message = "io/read expects one path argument", span = form.span}, false
+                }
+                path_value, err_path_value, ok_path_value := macro_eval_expr(form.items[1], macros, bindings)
+                if !ok_path_value {
+                    return Macro_Value{}, err_path_value, false
+                }
+                raw_path, err_raw_path, ok_raw_path := macro_value_to_string(path_value, form.items[1].span)
+                if !ok_raw_path {
+                    return Macro_Value{}, err_raw_path, false
+                }
+                path, err_path, ok_path := macro_eval_read_path(raw_path, form.items[1].span)
+                if !ok_path {
+                    return Macro_Value{}, err_path, false
+                }
+                defer delete(path)
+                data, read_err := os.read_entire_file_from_path(path, context.allocator)
+                if read_err != nil {
+                    return Macro_Value{}, Compile_Error{message = fmt.tprintf("compile-time io/read could not read file: %s", path), span = form.items[1].span}, false
+                }
+                text := strings.clone(string(data))
+                delete(data)
+                return macro_string_value(text), Compile_Error{}, true
             case "symbol":
                 if len(form.items) != 2 {
                     return Macro_Value{}, Compile_Error{message = "symbol expects one string argument", span = form.span}, false
@@ -2085,6 +2150,9 @@ macroexpand_form_with_macros :: proc(form: CST_Form, macros: []User_Macro) -> (r
 }
 
 macroexpand_form :: proc(form: CST_Form, anchor_path: string = ".") -> (result: Emit_Result, err: Compile_Error, ok: bool) {
+    previous_anchor := macro_eval_set_anchor(anchor_path)
+    defer macro_eval_restore_anchor(previous_anchor)
+
     core_macros, err_core, ok_core := core_package_local_macros(anchor_path)
     if !ok_core {
         return result, err_core, false
@@ -2226,6 +2294,9 @@ macroexpand_builtin_runtime_form :: proc(form: CST_Form) -> (expanded: CST_Form,
 }
 
 macroexpand_top_forms :: proc(forms: []CST_Top_Form, include_core_macros: bool = false, anchor_path: string = ".") -> (expanded: [dynamic]CST_Top_Form, macros: [dynamic]User_Macro, err: Compile_Error, ok: bool) {
+    previous_anchor := macro_eval_set_anchor(anchor_path)
+    defer macro_eval_restore_anchor(previous_anchor)
+
     if include_core_macros {
         initial_macros, err_core, ok_core := core_package_local_macros(anchor_path)
         if !ok_core {
@@ -2313,7 +2384,7 @@ macroexpand_program_source_with_map :: proc(source: string) -> (result: Emit_Res
     return result, Compile_Error{}, true
 }
 
-macroexpand_eval_source_with_map :: proc(source, eval_source: string) -> (result: Emit_Result, err: Compile_Error, ok: bool) {
+macroexpand_eval_source_with_map :: proc(source, eval_source: string, anchor_path: string = ".") -> (result: Emit_Result, err: Compile_Error, ok: bool) {
     result_allocator := context.allocator
     old_allocator := context.allocator
     temp_scope := runtime.default_temp_allocator_temp_begin()
@@ -2325,7 +2396,7 @@ macroexpand_eval_source_with_map :: proc(source, eval_source: string) -> (result
     if !ok_forms {
         return result, clone_compile_error(err_forms, result_allocator), false
     }
-    _, macros, err_expand, ok_expand := macroexpand_top_forms(forms[:], true)
+    _, macros, err_expand, ok_expand := macroexpand_top_forms(forms[:], true, anchor_path)
     if !ok_expand {
         return result, clone_compile_error(err_expand, result_allocator), false
     }
@@ -2333,7 +2404,9 @@ macroexpand_eval_source_with_map :: proc(source, eval_source: string) -> (result
     if !ok_eval {
         return result, clone_compile_error(err_eval, result_allocator), false
     }
+    previous_anchor := macro_eval_set_anchor(anchor_path)
     temp_result, err_macro, ok_macro := macroexpand_form_with_macros(eval_form, macros[:])
+    macro_eval_restore_anchor(previous_anchor)
     if !ok_macro {
         return result, clone_compile_error(err_macro, result_allocator), false
     }

@@ -1,0 +1,15 @@
+// Render an HTML template file at compile time and replace placeholders at runtime.
+(package main)
+(import h "kvist:html")
+
+(defn render-file-demo [] -> bool
+  (let [message "The template file was embedded when this source compiled."
+        html (h/render-file
+               "html-template.html"
+               {:name "Bob"
+                :message message}) defer]
+    (core/println html)
+    true))
+
+(defn main []
+  (render-file-demo))

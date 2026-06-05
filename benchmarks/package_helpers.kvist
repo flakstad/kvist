@@ -40,6 +40,22 @@ STRING_REPS :: 1_200")
     (update! out 3 4)
     out))
 
+(proc build-map-keys [] -> [dynamic]int
+  (let [out (arr/empty int 4)]
+    (arr/push! out 1)
+    (arr/push! out 2)
+    (arr/push! out 3)
+    (arr/push! out 4)
+    out))
+
+(proc build-map-vals [] -> [dynamic]int
+  (let [out (arr/empty int 4)]
+    (arr/push! out 10)
+    (arr/push! out 20)
+    (arr/push! out 30)
+    (arr/push! out 40)
+    out))
+
 (proc build-set-rhs [] -> set[int]
   (let [out (set/empty int 5)]
     (set/add! out 4)
@@ -112,6 +128,33 @@ STRING_REPS :: 1_200")
       (set! i (+ i 1)))
     checksum))
 
+(proc bench-map-pure-package [reps: int] -> int
+  (let [checksum 0
+        i 0]
+    (for (< i reps)
+      (let [base (build-map-mutable) defer
+            overrides (build-map-overrides) defer
+            ks-source (build-map-keys) defer
+            vs-source (build-map-vals) defer
+            associated (map/assoc base COUNT 99) defer
+            dissociated (map/dissoc associated 0) defer
+            merged (map/merge base overrides) defer
+            keys (map/keys merged) defer
+            vals (map/vals merged) defer
+            zipped (map/zip (slice ks-source 0) (slice vs-source 0)) defer]
+        (set! checksum (+ checksum (count associated)))
+        (set! checksum (+ checksum (count dissociated)))
+        (set! checksum (+ checksum (count merged)))
+        (set! checksum (+ checksum (count keys)))
+        (set! checksum (+ checksum (count vals)))
+        (set! checksum (+ checksum (map/get dissociated COUNT 0)))
+        (set! checksum (+ checksum (map/get merged 4 0)))
+        (set! checksum (+ checksum (map/get zipped 3 0)))
+        (when (map/contains? zipped 4)
+          (set! checksum (+ checksum 1))))
+      (set! i (+ i 1)))
+    checksum))
+
 (proc bench-set-package [reps: int] -> int
   (let [checksum 0
         i 0]
@@ -127,11 +170,37 @@ STRING_REPS :: 1_200")
         (set/add! removed 2)
         (set/difference! mutable removed)
         (set! checksum (+ checksum 3))
-        (when (get mutable 4 false)
+        (when (set/contains? mutable 4)
           (set! checksum (+ checksum 1)))
-        (when (get mutable 6 false)
+        (when (set/contains? mutable 6)
           (set! checksum (+ checksum 1)))
-        (when (get mutable 8 false)
+        (when (set/contains? mutable 8)
+          (set! checksum (+ checksum 1))))
+      (set! i (+ i 1)))
+    checksum))
+
+(proc bench-set-pure-package [reps: int] -> int
+  (let [checksum 0
+        i 0]
+    (for (< i reps)
+      (let [lhs (build-set-mutable) defer
+            rhs (build-set-rhs) defer
+            unioned (set/union lhs rhs) defer
+            intersected (set/intersection lhs rhs) defer
+            differed (set/difference lhs rhs) defer
+            added (set/add lhs (+ COUNT 1)) defer
+            removed (set/remove added 2) defer]
+        (set! checksum (+ checksum (count unioned)))
+        (set! checksum (+ checksum (count intersected)))
+        (set! checksum (+ checksum (count differed)))
+        (set! checksum (+ checksum (count removed)))
+        (when (set/contains? unioned 8)
+          (set! checksum (+ checksum 1)))
+        (when (set/subset? intersected unioned)
+          (set! checksum (+ checksum 1)))
+        (when (set/superset? unioned intersected)
+          (set! checksum (+ checksum 1)))
+        (when (set/disjoint? differed rhs)
           (set! checksum (+ checksum 1))))
       (set! i (+ i 1)))
     checksum))
@@ -154,4 +223,12 @@ STRING_REPS :: 1_200")
 
     (mem.tracking-allocator-reset (& track))
     (let [start (time.tick-now)]
-      (run-one "set-package" (bench-set-package REPS) start (& track)))))
+      (run-one "map-pure-package" (bench-map-pure-package REPS) start (& track)))
+
+    (mem.tracking-allocator-reset (& track))
+    (let [start (time.tick-now)]
+      (run-one "set-package" (bench-set-package REPS) start (& track)))
+
+    (mem.tracking-allocator-reset (& track))
+    (let [start (time.tick-now)]
+      (run-one "set-pure-package" (bench-set-pure-package REPS) start (& track)))))

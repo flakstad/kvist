@@ -1,6 +1,6 @@
-// Hiccup can interpolate ordinary Kvist expressions directly in attrs and children.
+// HTML can interpolate ordinary Kvist expressions directly in attrs and children.
 (package main)
-(import hiccup "kvist:hiccup")
+(import html "kvist:html")
 
 (defn status-label [enabled?: bool] -> string
   (if enabled?
@@ -13,12 +13,12 @@
         ratio 1.5
         enabled? true
         archived? false
-        page (hiccup/html
-                [:section {:data-count count
-                           :data-ratio ratio
-                           :hidden enabled?
-                           :data-state (if enabled? "ready" "hidden")
-                           :data-archived (core/when archived? "true")}
+        html (html/render
+               [:section {:data-count count
+                          :data-ratio ratio
+                          :hidden enabled?
+                          :data-state (if enabled? "ready" "hidden")
+                          :data-archived (core/when archived? "true")}
                 [:h1 title]
                 [:<>
                  [:h2 title]
@@ -30,8 +30,7 @@
                 nil
                 (if enabled?
                   "Visible"
-                  "Hidden")])
-        html (hiccup/render page) defer]
+                  "Hidden")]) defer]
     (core/println html)
     true))
 

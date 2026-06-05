@@ -651,6 +651,28 @@ symbols_append_source_package_records :: proc(builder: ^strings.Builder, seen: ^
     }
 }
 
+symbols_append_html_syntax_records :: proc(builder: ^strings.Builder, seen: ^map[string]bool, import_path, alias, package_file: string, package_kind: string = "") {
+    if import_path != "kvist:html" || alias == "" {
+        return
+    }
+    kind_text := "macro"
+    if package_kind != "" {
+        kind_text = package_kind
+    }
+    signature := "(for [x xs] child...)"
+    doc := "Repeat child markup inside html/render."
+    slash_name := fmt.tprintf("%s/for", alias)
+    if !seen[slash_name] {
+        seen[slash_name] = true
+        fmt.sbprintf(builder, "%s\t%s\t1\t1\t%s\t%s\t%s\t%s\n", kind_text, slash_name, import_path, signature, doc, package_file)
+    }
+    dot_name := fmt.tprintf("%s.for", alias)
+    if !seen[dot_name] {
+        seen[dot_name] = true
+        fmt.sbprintf(builder, "%s\t%s\t1\t1\t%s\t%s\t%s\t%s\n", kind_text, dot_name, import_path, signature, doc, package_file)
+    }
+}
+
 source_package_anchor_file :: proc(files: []Package_File) -> string {
     for file in files {
         _, name := os.split_path(file.path)
@@ -836,6 +858,7 @@ source_package_symbols_source :: proc(importer_path, import_path: string) -> (pa
         delete(package_output)
         context.allocator = context.temp_allocator
     }
+    symbols_append_html_syntax_records(&builder, &seen, import_path, import_default_alias(import_path), source_package_anchor_file(files[:]))
     resolved_copy, _ := strings.clone(resolved, result_allocator)
     output_copy, _ := strings.clone(strings.to_string(builder), result_allocator)
     return resolved_copy, output_copy, Compile_Error{}, true
@@ -1029,6 +1052,7 @@ imported_symbols_source :: proc(path, source: string) -> (output: string, err: C
                 delete(package_output)
                 context.allocator = context.temp_allocator
             }
+            symbols_append_html_syntax_records(&builder, &seen, import_path, entry.alias, anchor)
             delete(resolved)
             continue
         }
@@ -1245,6 +1269,7 @@ package_symbols_source :: proc(import_path, alias: string, package_kind: string 
         symbols_append_source_package_records(&builder, &seen, import_path, resolved_alias, file.path, package_output, package_kind)
         delete(package_output)
     }
+    symbols_append_html_syntax_records(&builder, &seen, import_path, resolved_alias, source_package_anchor_file(files[:]), package_kind)
     return strings.clone(strings.to_string(builder), result_allocator), true
 }
 
@@ -1265,15 +1290,6 @@ import_default_alias :: proc(path: string) -> string {
         return ""
     }
     return map_name(path[start:end])
-}
-
-is_static_kvist_package :: proc(import_path: string) -> bool {
-    switch import_path {
-    case "kvist:core", "kvist:arr", "kvist:str", "kvist:map", "kvist:set", "kvist:struct", "kvist:io", "kvist:json", "kvist:hiccup", "kvist:http", "kvist:http/client", "kvist:http/session", "kvist:http/sse", "kvist:http/datastar", "kvist:hot", "kvist:live", "kvist:reload", "kvist:test":
-        return true
-    case:
-        return false
-    }
 }
 
 symbols_write_record :: proc(builder: ^strings.Builder, kind, name: string, source: string, span: Span, detail: string = "") {

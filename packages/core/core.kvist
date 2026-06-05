@@ -318,6 +318,17 @@
                           (unquote value-or-updater)
                           (splice rest)))))
 
+(defmacro delete!
+  "Remove `key` from a mutable map-like target in place.
+
+  This lowers to Odin `delete_key` with no wrapper procedure and no allocation.
+  Missing keys are allowed. Sets are represented as Odin maps internally, so
+  package code can use this for set member removal as well as ordinary map key
+  removal."
+  [target key]
+  (quasiquote
+    (core-delete! (unquote target) (unquote key))))
+
 (defmacro update
   "Return an updated copy of `target`.
 

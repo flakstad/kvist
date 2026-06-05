@@ -1,0 +1,18 @@
+// A shipped source package macro that renders Hiccup-style HTML data.
+(package main)
+(import arr "kvist:arr")
+(import h "kvist:html")
+
+(defn html-demo [] -> bool
+  (let [ids (arr/range 1 4) defer
+        page (h/render
+               [:div {:class "border" :onclick "alert('hello!')"}
+                [:button {:class "primary"} "Save"]
+                [:ul
+                 (h/for [id ids]
+                   [:li id])]]) defer]
+    (core/println page)
+    true))
+
+(defn main []
+  (html-demo))

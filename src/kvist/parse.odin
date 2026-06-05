@@ -68,7 +68,7 @@ normalize_surface_type_symbol :: proc(text: string) -> string {
         if closing > 4 {
             elem_text := text[4:closing]
             if closing == len(text)-1 {
-                return fmt.tprintf("map[%s]bool", normalize_surface_type_symbol(elem_text))
+                return fmt.tprintf("map[%s]struct{{}}", normalize_surface_type_symbol(elem_text))
             }
         }
     }
@@ -163,7 +163,7 @@ parse_defstruct_type_meta :: proc(form: CST_Form) -> (text: string, err: Compile
             if !ok_elem {
                 return "", err_elem, false
             }
-            return fmt.tprintf("map[%s]bool", elem_text), {}, true
+            return fmt.tprintf("map[%s]struct{{}}", elem_text), {}, true
         case "fixed-arr":
             if len(form.items) != 3 || form.items[1].kind != .Number {
                 return "", Compile_Error{message = "[fixed-arr N T] expects a numeric length and one element type", span = form.span}, false

@@ -1,5 +1,6 @@
 // Focused benchmark for intrinsic vs source-backed kvist:arr helpers.
 (package main)
+(import arr "kvist:arr")
 (import pkgarr "kvist:arr")
 (import "core:fmt")
 (import mem "core:mem")
@@ -9,8 +10,23 @@
 REPS :: 80
 SCAN_REPS :: 400
 BUILDER_REPS :: 60
+KEEP_REPS :: 220
+MAP_BANG_REPS :: 220
+FILTER_BANG_REPS :: 220
+KEEP_BANG_REPS :: 220
 REMOVE_REPS :: 300
-REORDER_REPS :: 120")
+REORDER_REPS :: 120
+PARTITION_REPS :: 300
+PARTITION_BY_REPS :: 120
+FREQUENCIES_REPS :: 220
+INDEX_BY_REPS :: 220
+GROUP_BY_REPS :: 120
+COUNT_BY_REPS :: 220
+SUM_BY_REPS :: 220
+DISTINCT_REPS :: 120
+DISTINCT_BY_REPS :: 220
+SORT_REPS :: 80
+SHUFFLE_REPS :: 160")
 
 (proc inc-value [x: int] -> int
   (+ x 1))
@@ -18,8 +34,16 @@ REORDER_REPS :: 120")
 (proc even-value? [x: int] -> bool
   (== (% x 2) 0))
 
+(proc keep-even [x: int] -> [value: int, ok: bool]
+  (if (even-value? x)
+    (return x true)
+    (return 0 false)))
+
 (proc divisible-by-three? [x: int] -> bool
   (== (% x 3) 0))
+
+(proc parity [x: int] -> int
+  (% x 2))
 
 (proc add-values [acc: int, x: int] -> int
   (+ acc x))
@@ -29,6 +53,9 @@ REORDER_REPS :: 120")
 
 (proc always-seven [] -> int
   7)
+
+(proc pick-first [n: int] -> int
+  0)
 
 (proc below-cutoff? [x: int] -> bool
   (< x (/ N 2)))
@@ -84,16 +111,140 @@ REORDER_REPS :: 120")
       (set! i (+ i 1)))
     checksum))
 
+(proc bench-keep-intrinsic [xs: []int, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (for (< i reps)
+      (let [kept (arr/keep keep-even xs) defer]
+        (set! checksum (+ checksum (count kept)))
+        (set! checksum (+ checksum (pkgarr/get kept 0)))
+        (set! checksum (+ checksum (pkgarr/last kept))))
+      (set! i (+ i 1)))
+    checksum))
+
+(proc bench-keep-source [xs: []int, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (for (< i reps)
+      (let [kept (pkgarr/keep keep-even xs) defer]
+        (set! checksum (+ checksum (count kept)))
+        (set! checksum (+ checksum (pkgarr/get kept 0)))
+        (set! checksum (+ checksum (pkgarr/last kept))))
+      (set! i (+ i 1)))
+    checksum))
+
+(proc bench-map!-intrinsic [xs: []int, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (for (< i reps)
+      (let [mutable (arr/empty int (count xs)) defer]
+        (odin "append(&mutable, ..xs)")
+        (arr/map! inc-value mutable)
+        (set! checksum (+ checksum (pkgarr/get mutable 0)))
+        (set! checksum (+ checksum (pkgarr/last mutable))))
+      (set! i (+ i 1)))
+    checksum))
+
+(proc bench-map!-source [xs: []int, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (for (< i reps)
+      (let [mutable (pkgarr/empty int (count xs)) defer]
+        (odin "append(&mutable, ..xs)")
+        (pkgarr/map! inc-value mutable)
+        (set! checksum (+ checksum (pkgarr/get mutable 0)))
+        (set! checksum (+ checksum (pkgarr/last mutable))))
+      (set! i (+ i 1)))
+    checksum))
+
+(proc bench-filter!-intrinsic [xs: []int, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (for (< i reps)
+      (let [mutable (arr/empty int (count xs)) defer]
+        (odin "append(&mutable, ..xs)")
+        (arr/filter! even-value? mutable)
+        (set! checksum (+ checksum (count mutable)))
+        (set! checksum (+ checksum (pkgarr/get mutable 0)))
+        (set! checksum (+ checksum (pkgarr/last mutable))))
+      (set! i (+ i 1)))
+    checksum))
+
+(proc bench-filter!-source [xs: []int, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (for (< i reps)
+      (let [mutable (pkgarr/empty int (count xs)) defer]
+        (odin "append(&mutable, ..xs)")
+        (pkgarr/filter! even-value? mutable)
+        (set! checksum (+ checksum (count mutable)))
+        (set! checksum (+ checksum (pkgarr/get mutable 0)))
+        (set! checksum (+ checksum (pkgarr/last mutable))))
+      (set! i (+ i 1)))
+    checksum))
+
+(proc bench-remove!-intrinsic [xs: []int, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (for (< i reps)
+      (let [mutable (arr/empty int (count xs)) defer]
+        (odin "append(&mutable, ..xs)")
+        (arr/remove! even-value? mutable)
+        (set! checksum (+ checksum (count mutable)))
+        (set! checksum (+ checksum (pkgarr/get mutable 0)))
+        (set! checksum (+ checksum (pkgarr/last mutable))))
+      (set! i (+ i 1)))
+    checksum))
+
+(proc bench-remove!-source [xs: []int, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (for (< i reps)
+      (let [mutable (pkgarr/empty int (count xs)) defer]
+        (odin "append(&mutable, ..xs)")
+        (pkgarr/remove! even-value? mutable)
+        (set! checksum (+ checksum (count mutable)))
+        (set! checksum (+ checksum (pkgarr/get mutable 0)))
+        (set! checksum (+ checksum (pkgarr/last mutable))))
+      (set! i (+ i 1)))
+    checksum))
+
+(proc bench-keep!-intrinsic [xs: []int, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (for (< i reps)
+      (let [mutable (arr/empty int (count xs)) defer]
+        (odin "append(&mutable, ..xs)")
+        (arr/keep! keep-even mutable)
+        (set! checksum (+ checksum (count mutable)))
+        (set! checksum (+ checksum (pkgarr/get mutable 0)))
+        (set! checksum (+ checksum (pkgarr/last mutable))))
+      (set! i (+ i 1)))
+    checksum))
+
+(proc bench-keep!-source [xs: []int, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (for (< i reps)
+      (let [mutable (pkgarr/empty int (count xs)) defer]
+        (odin "append(&mutable, ..xs)")
+        (pkgarr/keep! keep-even mutable)
+        (set! checksum (+ checksum (count mutable)))
+        (set! checksum (+ checksum (pkgarr/get mutable 0)))
+        (set! checksum (+ checksum (pkgarr/last mutable))))
+      (set! i (+ i 1)))
+    checksum))
+
 (proc bench-builders-intrinsic [xs: []int, reps: int] -> int
   (let [i 0
         checksum 0]
     (for (< i reps)
-      (let [numbers (arr/range 1 N) defer
-            sampled (arr/take-nth 3 xs) defer
-            repeated (arr/repeat 8 9) defer
-            generated (arr/repeatedly 8 always-seven) defer
-            powers (arr/iterate 8 double 1) defer
-            cycled (arr/cycle 9 xs) defer]
+      (let [numbers (pkgarr/range 1 N) defer
+            sampled (pkgarr/take-nth 3 xs) defer
+            repeated (pkgarr/repeat 8 9) defer
+            generated (pkgarr/repeatedly 8 always-seven) defer
+            powers (pkgarr/iterate 8 double 1) defer
+            cycled (pkgarr/cycle 9 xs) defer]
         (set! checksum (+ checksum (arr/last numbers)))
         (set! checksum (+ checksum (arr/last sampled)))
         (set! checksum (+ checksum (arr/last repeated)))
@@ -166,12 +317,12 @@ REORDER_REPS :: 120")
   (let [i 0
         checksum 0]
     (for (< i reps)
-      (let [reversed (arr/reverse xs) defer
-            interposed (arr/interpose 0 xs) defer
-            interleaved (arr/interleave xs ys) defer]
-        (set! checksum (+ checksum (arr/get reversed 0)))
-        (set! checksum (+ checksum (arr/get interposed 1)))
-        (set! checksum (+ checksum (arr/get interleaved 1)))
+      (let [reversed (pkgarr/reverse xs) defer
+            interposed (pkgarr/interpose 0 xs) defer
+            interleaved (pkgarr/interleave xs ys) defer]
+        (set! checksum (+ checksum (pkgarr/get reversed 0)))
+        (set! checksum (+ checksum (pkgarr/get interposed 1)))
+        (set! checksum (+ checksum (pkgarr/get interleaved 1)))
         (set! checksum (+ checksum (count reversed)))
         (set! checksum (+ checksum (count interposed)))
         (set! checksum (+ checksum (count interleaved))))
@@ -226,13 +377,283 @@ REORDER_REPS :: 120")
       (set! i (+ i 1)))
     checksum))
 
+(proc bench-partition-intrinsic [xs: []int, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (for (< i reps)
+      (let [chunks (arr/partition 64 xs) defer
+            chunks-all (arr/partition-all 64 xs) defer]
+        (set! checksum (+ checksum (count chunks)))
+        (set! checksum (+ checksum (count chunks-all)))
+        (set! checksum (+ checksum (count (pkgarr/get chunks 0))))
+        (set! checksum (+ checksum (count (pkgarr/get chunks-all (- (count chunks-all) 1))))))
+      (set! i (+ i 1)))
+    checksum))
+
+(proc bench-partition-source [xs: []int, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (for (< i reps)
+      (let [chunks (pkgarr/partition 64 xs) defer
+            chunks-all (pkgarr/partition-all 64 xs) defer]
+        (set! checksum (+ checksum (count chunks)))
+        (set! checksum (+ checksum (count chunks-all)))
+        (set! checksum (+ checksum (count (pkgarr/get chunks 0))))
+        (set! checksum (+ checksum (count (pkgarr/get chunks-all (- (count chunks-all) 1))))))
+      (set! i (+ i 1)))
+    checksum))
+
+(proc bench-partition-by-intrinsic [xs: []int, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (for (< i reps)
+      (let [groups (arr/partition-by parity xs) defer]
+        (set! checksum (+ checksum (count groups)))
+        (set! checksum (+ checksum (count (pkgarr/get groups 0))))
+        (set! checksum (+ checksum (count (pkgarr/last groups)))))
+      (set! i (+ i 1)))
+    checksum))
+
+(proc bench-partition-by-source [xs: []int, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (for (< i reps)
+      (let [groups (pkgarr/partition-by parity xs) defer]
+        (set! checksum (+ checksum (count groups)))
+        (set! checksum (+ checksum (count (pkgarr/get groups 0))))
+        (set! checksum (+ checksum (count (pkgarr/last groups)))))
+      (set! i (+ i 1)))
+    checksum))
+
+(proc bench-frequencies-intrinsic [xs: []int, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (for (< i reps)
+      (let [counts (arr/frequencies xs) defer]
+        (set! checksum (+ checksum (count counts)))
+        (set! checksum (+ checksum (core/get counts 1))))
+      (set! i (+ i 1)))
+    checksum))
+
+(proc bench-frequencies-source [xs: []int, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (for (< i reps)
+      (let [counts (pkgarr/frequencies xs) defer]
+        (set! checksum (+ checksum (count counts)))
+        (set! checksum (+ checksum (core/get counts 1))))
+      (set! i (+ i 1)))
+    checksum))
+
+(proc bench-index-by-intrinsic [xs: []int, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (for (< i reps)
+      (let [indexed (arr/index-by parity xs) defer]
+        (set! checksum (+ checksum (count indexed)))
+        (set! checksum (+ checksum (core/get indexed 0)))
+        (set! checksum (+ checksum (core/get indexed 1))))
+      (set! i (+ i 1)))
+    checksum))
+
+(proc bench-index-by-source [xs: []int, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (for (< i reps)
+      (let [indexed (pkgarr/index-by parity xs) defer]
+        (set! checksum (+ checksum (count indexed)))
+        (set! checksum (+ checksum (core/get indexed 0)))
+        (set! checksum (+ checksum (core/get indexed 1))))
+      (set! i (+ i 1)))
+    checksum))
+
+(proc bench-group-by-intrinsic [xs: []int, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (for (< i reps)
+      (let [groups (arr/group-by parity xs)]
+        (defer
+          (for [_ group groups]
+            (delete group))
+          (delete groups))
+        (set! checksum (+ checksum (odin "len(groups)")))
+        (set! checksum (+ checksum (odin "len(groups[0])")))
+        (set! checksum (+ checksum (odin "len(groups[1])"))))
+      (set! i (+ i 1)))
+    checksum))
+
+(proc bench-group-by-source [xs: []int, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (for (< i reps)
+      (let [groups (pkgarr/group-by parity xs)]
+        (defer
+          (for [_ group groups]
+            (delete group))
+          (delete groups))
+        (set! checksum (+ checksum (odin "len(groups)")))
+        (set! checksum (+ checksum (odin "len(groups[0])")))
+        (set! checksum (+ checksum (odin "len(groups[1])"))))
+      (set! i (+ i 1)))
+    checksum))
+
+(proc bench-count-by-intrinsic [xs: []int, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (for (< i reps)
+      (let [counts (arr/count-by parity xs) defer]
+        (set! checksum (+ checksum (count counts)))
+        (set! checksum (+ checksum (core/get counts 0)))
+        (set! checksum (+ checksum (core/get counts 1))))
+      (set! i (+ i 1)))
+    checksum))
+
+(proc bench-count-by-source [xs: []int, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (for (< i reps)
+      (let [counts (pkgarr/count-by parity xs) defer]
+        (set! checksum (+ checksum (count counts)))
+        (set! checksum (+ checksum (core/get counts 0)))
+        (set! checksum (+ checksum (core/get counts 1))))
+      (set! i (+ i 1)))
+    checksum))
+
+(proc bench-sum-by-intrinsic [xs: []int, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (for (< i reps)
+      (let [sums (arr/sum-by parity inc-value xs) defer]
+        (set! checksum (+ checksum (odin "len(sums)")))
+        (set! checksum (+ checksum (core/get sums 0)))
+        (set! checksum (+ checksum (core/get sums 1))))
+      (set! i (+ i 1)))
+    checksum))
+
+(proc bench-sum-by-source [xs: []int, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (for (< i reps)
+      (let [sums (pkgarr/sum-by parity inc-value xs) defer]
+        (set! checksum (+ checksum (odin "len(sums)")))
+        (set! checksum (+ checksum (core/get sums 0)))
+        (set! checksum (+ checksum (core/get sums 1))))
+      (set! i (+ i 1)))
+    checksum))
+
+(proc bench-distinct-intrinsic [xs: []int, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (for (< i reps)
+      (let [unique (arr/distinct xs) defer]
+        (set! checksum (+ checksum (count unique)))
+        (set! checksum (+ checksum (pkgarr/get unique 0)))
+        (set! checksum (+ checksum (pkgarr/last unique))))
+      (set! i (+ i 1)))
+    checksum))
+
+(proc bench-distinct-source [xs: []int, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (for (< i reps)
+      (let [unique (pkgarr/distinct xs) defer]
+        (set! checksum (+ checksum (count unique)))
+        (set! checksum (+ checksum (pkgarr/get unique 0)))
+        (set! checksum (+ checksum (pkgarr/last unique))))
+      (set! i (+ i 1)))
+    checksum))
+
+(proc bench-distinct-by-intrinsic [xs: []int, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (for (< i reps)
+      (let [unique (arr/distinct-by parity xs) defer]
+        (set! checksum (+ checksum (count unique)))
+        (set! checksum (+ checksum (pkgarr/get unique 0)))
+        (set! checksum (+ checksum (pkgarr/last unique))))
+      (set! i (+ i 1)))
+    checksum))
+
+(proc bench-distinct-by-source [xs: []int, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (for (< i reps)
+      (let [unique (pkgarr/distinct-by parity xs) defer]
+        (set! checksum (+ checksum (count unique)))
+        (set! checksum (+ checksum (pkgarr/get unique 0)))
+        (set! checksum (+ checksum (pkgarr/last unique))))
+      (set! i (+ i 1)))
+    checksum))
+
+(proc bench-sort-intrinsic [xs: []int, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (for (< i reps)
+      (let [sorted (arr/sort xs) defer
+            mutable (arr/empty int (count xs)) defer]
+        (odin "append(&mutable, ..xs)")
+        (arr/sort! mutable)
+        (set! checksum (+ checksum (pkgarr/get sorted 0)))
+        (set! checksum (+ checksum (pkgarr/last sorted)))
+        (set! checksum (+ checksum (pkgarr/get mutable 0)))
+        (set! checksum (+ checksum (pkgarr/last mutable))))
+      (set! i (+ i 1)))
+    checksum))
+
+(proc bench-sort-source [xs: []int, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (for (< i reps)
+      (let [sorted (pkgarr/sort xs) defer
+            mutable (pkgarr/empty int (count xs)) defer]
+        (odin "append(&mutable, ..xs)")
+        (pkgarr/sort! mutable)
+        (set! checksum (+ checksum (pkgarr/get sorted 0)))
+        (set! checksum (+ checksum (pkgarr/last sorted)))
+        (set! checksum (+ checksum (pkgarr/get mutable 0)))
+        (set! checksum (+ checksum (pkgarr/last mutable))))
+      (set! i (+ i 1)))
+    checksum))
+
+(proc bench-shuffle-intrinsic [xs: []int, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (for (< i reps)
+      (let [shuffled (arr/shuffle pick-first xs) defer
+            mutable (arr/empty int (count xs)) defer]
+        (odin "append(&mutable, ..xs)")
+        (arr/shuffle! pick-first mutable)
+        (set! checksum (+ checksum (pkgarr/get shuffled 0)))
+        (set! checksum (+ checksum (pkgarr/last shuffled)))
+        (set! checksum (+ checksum (pkgarr/get mutable 0)))
+        (set! checksum (+ checksum (pkgarr/last mutable))))
+      (set! i (+ i 1)))
+    checksum))
+
+(proc bench-shuffle-source [xs: []int, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (for (< i reps)
+      (let [shuffled (pkgarr/shuffle pick-first xs) defer
+            mutable (pkgarr/empty int (count xs)) defer]
+        (odin "append(&mutable, ..xs)")
+        (pkgarr/shuffle! pick-first mutable)
+        (set! checksum (+ checksum (pkgarr/get shuffled 0)))
+        (set! checksum (+ checksum (pkgarr/last shuffled)))
+        (set! checksum (+ checksum (pkgarr/get mutable 0)))
+        (set! checksum (+ checksum (pkgarr/last mutable))))
+      (set! i (+ i 1)))
+    checksum))
+
 (proc main []
   (let [old-allocator context.allocator
-        xs (arr/range 1 N)
-        ys (arr/range N (* N 2))
+        xs (pkgarr/range 1 N)
+        ys (pkgarr/range N (* N 2))
+        reversed (pkgarr/reverse (slice xs 0))
         track: mem.Tracking-Allocator (odin "mem.Tracking_Allocator{}")]
     (defer (delete xs))
     (defer (delete ys))
+    (defer (delete reversed))
     (mem.tracking-allocator-init (& track) old-allocator old-allocator)
     (defer (mem.tracking-allocator-destroy (& track)))
     (set! context.allocator (mem.tracking-allocator (& track)))
@@ -252,7 +673,47 @@ REORDER_REPS :: 120")
 
     (mem.tracking-allocator-reset (& track))
     (let [start (time.tick-now)]
-      (run-one "builders-intrinsic" (bench-builders-intrinsic (slice xs 0) BUILDER_REPS) start (& track)))
+      (run-one "keep-intrinsic" (bench-keep-intrinsic (slice xs 0) KEEP_REPS) start (& track)))
+
+    (mem.tracking-allocator-reset (& track))
+    (let [start (time.tick-now)]
+      (run-one "keep-source" (bench-keep-source (slice xs 0) KEEP_REPS) start (& track)))
+
+    (mem.tracking-allocator-reset (& track))
+    (let [start (time.tick-now)]
+      (run-one "map!-intrinsic" (bench-map!-intrinsic (slice xs 0) MAP_BANG_REPS) start (& track)))
+
+    (mem.tracking-allocator-reset (& track))
+    (let [start (time.tick-now)]
+      (run-one "map!-source" (bench-map!-source (slice xs 0) MAP_BANG_REPS) start (& track)))
+
+    (mem.tracking-allocator-reset (& track))
+    (let [start (time.tick-now)]
+      (run-one "filter!-intrinsic" (bench-filter!-intrinsic (slice xs 0) FILTER_BANG_REPS) start (& track)))
+
+    (mem.tracking-allocator-reset (& track))
+    (let [start (time.tick-now)]
+      (run-one "filter!-source" (bench-filter!-source (slice xs 0) FILTER_BANG_REPS) start (& track)))
+
+    (mem.tracking-allocator-reset (& track))
+    (let [start (time.tick-now)]
+      (run-one "remove!-intrinsic" (bench-remove!-intrinsic (slice xs 0) FILTER_BANG_REPS) start (& track)))
+
+    (mem.tracking-allocator-reset (& track))
+    (let [start (time.tick-now)]
+      (run-one "remove!-source" (bench-remove!-source (slice xs 0) FILTER_BANG_REPS) start (& track)))
+
+    (mem.tracking-allocator-reset (& track))
+    (let [start (time.tick-now)]
+      (run-one "keep!-intrinsic" (bench-keep!-intrinsic (slice xs 0) KEEP_BANG_REPS) start (& track)))
+
+    (mem.tracking-allocator-reset (& track))
+    (let [start (time.tick-now)]
+      (run-one "keep!-source" (bench-keep!-source (slice xs 0) KEEP_BANG_REPS) start (& track)))
+
+    (mem.tracking-allocator-reset (& track))
+    (let [start (time.tick-now)]
+      (run-one "builders-package-a" (bench-builders-intrinsic (slice xs 0) BUILDER_REPS) start (& track)))
 
     (mem.tracking-allocator-reset (& track))
     (let [start (time.tick-now)]
@@ -268,7 +729,7 @@ REORDER_REPS :: 120")
 
     (mem.tracking-allocator-reset (& track))
     (let [start (time.tick-now)]
-      (run-one "reorder-intrinsic" (bench-reorder-intrinsic (slice xs 0) (slice ys 0) REORDER_REPS) start (& track)))
+      (run-one "reorder-package-a" (bench-reorder-intrinsic (slice xs 0) (slice ys 0) REORDER_REPS) start (& track)))
 
     (mem.tracking-allocator-reset (& track))
     (let [start (time.tick-now)]
@@ -280,4 +741,92 @@ REORDER_REPS :: 120")
 
     (mem.tracking-allocator-reset (& track))
     (let [start (time.tick-now)]
-      (run-one "remove-at!-source" (bench-remove-at-bang-source (slice xs 0) REMOVE_REPS) start (& track)))))
+      (run-one "remove-at!-source" (bench-remove-at-bang-source (slice xs 0) REMOVE_REPS) start (& track)))
+
+    (mem.tracking-allocator-reset (& track))
+    (let [start (time.tick-now)]
+      (run-one "partition-intr" (bench-partition-intrinsic (slice xs 0) PARTITION_REPS) start (& track)))
+
+    (mem.tracking-allocator-reset (& track))
+    (let [start (time.tick-now)]
+      (run-one "partition-source" (bench-partition-source (slice xs 0) PARTITION_REPS) start (& track)))
+
+    (mem.tracking-allocator-reset (& track))
+    (let [start (time.tick-now)]
+      (run-one "partition-by-intr" (bench-partition-by-intrinsic (slice xs 0) PARTITION_BY_REPS) start (& track)))
+
+    (mem.tracking-allocator-reset (& track))
+    (let [start (time.tick-now)]
+      (run-one "partition-by-src" (bench-partition-by-source (slice xs 0) PARTITION_BY_REPS) start (& track)))
+
+    (mem.tracking-allocator-reset (& track))
+    (let [start (time.tick-now)]
+      (run-one "freq-intrinsic" (bench-frequencies-intrinsic (slice xs 0) FREQUENCIES_REPS) start (& track)))
+
+    (mem.tracking-allocator-reset (& track))
+    (let [start (time.tick-now)]
+      (run-one "freq-source" (bench-frequencies-source (slice xs 0) FREQUENCIES_REPS) start (& track)))
+
+    (mem.tracking-allocator-reset (& track))
+    (let [start (time.tick-now)]
+      (run-one "index-by-intr" (bench-index-by-intrinsic (slice xs 0) INDEX_BY_REPS) start (& track)))
+
+    (mem.tracking-allocator-reset (& track))
+    (let [start (time.tick-now)]
+      (run-one "index-by-source" (bench-index-by-source (slice xs 0) INDEX_BY_REPS) start (& track)))
+
+    (mem.tracking-allocator-reset (& track))
+    (let [start (time.tick-now)]
+      (run-one "group-by-intr" (bench-group-by-intrinsic (slice xs 0) GROUP_BY_REPS) start (& track)))
+
+    (mem.tracking-allocator-reset (& track))
+    (let [start (time.tick-now)]
+      (run-one "group-by-source" (bench-group-by-source (slice xs 0) GROUP_BY_REPS) start (& track)))
+
+    (mem.tracking-allocator-reset (& track))
+    (let [start (time.tick-now)]
+      (run-one "count-by-intr" (bench-count-by-intrinsic (slice xs 0) COUNT_BY_REPS) start (& track)))
+
+    (mem.tracking-allocator-reset (& track))
+    (let [start (time.tick-now)]
+      (run-one "count-by-source" (bench-count-by-source (slice xs 0) COUNT_BY_REPS) start (& track)))
+
+    (mem.tracking-allocator-reset (& track))
+    (let [start (time.tick-now)]
+      (run-one "sum-by-intr" (bench-sum-by-intrinsic (slice xs 0) SUM_BY_REPS) start (& track)))
+
+    (mem.tracking-allocator-reset (& track))
+    (let [start (time.tick-now)]
+      (run-one "sum-by-source" (bench-sum-by-source (slice xs 0) SUM_BY_REPS) start (& track)))
+
+    (mem.tracking-allocator-reset (& track))
+    (let [start (time.tick-now)]
+      (run-one "distinct-intr" (bench-distinct-intrinsic (slice xs 0) DISTINCT_REPS) start (& track)))
+
+    (mem.tracking-allocator-reset (& track))
+    (let [start (time.tick-now)]
+      (run-one "distinct-source" (bench-distinct-source (slice xs 0) DISTINCT_REPS) start (& track)))
+
+    (mem.tracking-allocator-reset (& track))
+    (let [start (time.tick-now)]
+      (run-one "distinct-by-intr" (bench-distinct-by-intrinsic (slice xs 0) DISTINCT_BY_REPS) start (& track)))
+
+    (mem.tracking-allocator-reset (& track))
+    (let [start (time.tick-now)]
+      (run-one "distinct-by-source" (bench-distinct-by-source (slice xs 0) DISTINCT_BY_REPS) start (& track)))
+
+    (mem.tracking-allocator-reset (& track))
+    (let [start (time.tick-now)]
+      (run-one "sort-intrinsic" (bench-sort-intrinsic (slice reversed 0) SORT_REPS) start (& track)))
+
+    (mem.tracking-allocator-reset (& track))
+    (let [start (time.tick-now)]
+      (run-one "sort-source" (bench-sort-source (slice reversed 0) SORT_REPS) start (& track)))
+
+    (mem.tracking-allocator-reset (& track))
+    (let [start (time.tick-now)]
+      (run-one "shuffle-intr" (bench-shuffle-intrinsic (slice xs 0) SHUFFLE_REPS) start (& track)))
+
+    (mem.tracking-allocator-reset (& track))
+    (let [start (time.tick-now)]
+      (run-one "shuffle-source" (bench-shuffle-source (slice xs 0) SHUFFLE_REPS) start (& track)))))

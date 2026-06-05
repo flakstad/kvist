@@ -1,7 +1,8 @@
 (package tests)
 
 (import t "kvist:test")
-(import hiccup "kvist:hiccup")
+(import arr "kvist:arr")
+(import html "kvist:html")
 (import http "kvist:http")
 (import httpc "kvist:http/client")
 (import session "kvist:http/session")
@@ -56,16 +57,36 @@
     (sse/close! stream))
   true)
 
-(t/deftest hiccup-package-surface
-  (let [node (hiccup/html
-               [:div {:class "panel"
-                      :hidden false}
-                [:<> [:span "A&B"] (when true [:strong "ok"])]])
-        rendered (hiccup/render node) defer]
-    (t/is (= (hiccup/tag node) "div"))
-    (t/is (= (hiccup/attr-count node) 2))
-    (t/is (= (hiccup/child-count node) 1))
-    (t/is (= rendered "<div class=\"panel\"><span>A&amp;B</span><strong>ok</strong></div>"))))
+(t/deftest html-package-surface
+  (let [ids (arr/range 1 4) defer
+        rendered (html/render
+                   [:div {:class "panel"
+                          :hidden false}
+                    [:<> [:span "A&B"] (when true [:strong "ok"])]
+                    [:ul
+                     (html/for [id ids]
+                       [:li id])]]) defer
+        templated (html/render "<p>{{name}}</p>" {:name "Ada"}) defer]
+    (t/is (= rendered "<div class=\"panel\"><span>A&amp;B</span><strong>ok</strong><ul><li>1</li><li>2</li><li>3</li></ul></div>"))
+    (t/is (= templated "<p>Ada</p>"))))
+
+(t/deftest html-direct-render-runtime-surface
+  (let [title "Dashboard & Ops"
+        count 3
+        ready? true
+        archived? false
+        rendered (html/render
+                   [:section {:class "panel"
+                              :data-count count
+                              :hidden archived?
+                              :data-state (if ready? "ready" "hidden")}
+                    [:h1 title]
+                    (core/when ready?
+                      [:span "Ready <ok>"])
+                    (if archived?
+                      [:p "Archived"]
+                      [:p "Live"])]) defer]
+    (t/is (= rendered "<section class=\"panel\" data-count=\"3\" data-state=\"ready\"><h1>Dashboard &amp; Ops</h1><span>Ready &lt;ok&gt;</span><p>Live</p></section>"))))
 
 (t/deftest http-package-basic-surface
   (let [router (http/new-router)

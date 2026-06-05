@@ -7,7 +7,7 @@ block so `C-c C-e` and `C-c C-c` are practical.
 ## Language Basics
 
 - `cluck-port-arrays.kvist`: Cluck reset arrays demo, showing owned dynamic arrays.
-- `cluck-port-maps-sets.kvist`: Cluck reset maps/sets demo; sets are still `map[T]bool`.
+- `cluck-port-maps-sets.kvist`: Cluck reset maps/sets demo; sets lower to `map[T]struct{}`.
 - `cluck-port-multi-return.kvist`: Cluck reset multi-return demo.
 - `cluck-port-packages.kvist`: Cluck reset package demo using relative `.kvist` source imports.
 - `cluck-port-loops.kvist`: Cluck reset loop demos using Cluck-style `for` bindings.
@@ -26,8 +26,9 @@ block so `C-c C-e` and `C-c C-c` are practical.
 - `arr-package-tests.kvist`: executable `kvist:test` coverage for additional `kvist:arr` runtime surface such as `range`, `rest`, `mapcat`, proc-keyed grouping, `sort`, `sort-by`, and bang helpers.
 - `builtin-package-tests.kvist`: executable `kvist:test` coverage for shipped `core`, `arr`, `map`, `set`, `str`, `io`, `json`, and `struct` packages.
 - `package-edge-tests.kvist`: executable `kvist:test` edge-case coverage for shipped `core`, `map`, `set`, `str`, `struct`, `io`, and `json` packages.
-- `http-and-hiccup-package-tests.kvist`: executable `kvist:test` coverage for shipped `hiccup`, `http`, `http/client`, and `http/session` packages, plus compile-surface smoke for `http/sse` and `http/datastar`.
-- `hiccup-interpolation.kvist`: Hiccup attrs and child nodes with direct Kvist expression interpolation, including `if`, `when`, `nil` omission, and `[:<> ...]` fragments.
+- `http-and-html-package-tests.kvist`: executable `kvist:test` coverage for shipped `html`, `http`, `http/client`, and `http/session` packages, plus compile-surface smoke for `http/sse` and `http/datastar`.
+- `html-interpolation.kvist`: Hiccup-style HTML attrs and child nodes with direct Kvist expression interpolation, including `if`, `when`, `nil` omission, and `[:<> ...]` fragments.
+- `html-render-file.kvist`: compile-time template file rendering with `{{name}}` placeholders and runtime bindings.
 - `closures.kvist`: non-capturing `fn` literals plus captured callbacks for selected non-escaping helper sites such as `map`, `filter`, `remove`, `keep`, and their bang variants.
 - `http-server.kvist`: shipped `kvist:http` package over vendored `odin-http`, using the explicit stateful router/server lifecycle and thin response helpers.
 - `http-client.kvist`: shipped `kvist:http/client` package over vendored `odin-http`, with a thin request/response client surface.
@@ -42,6 +43,7 @@ block so `C-c C-e` and `C-c C-c` are practical.
 - `call-conventions.kvist`: API-shaped examples using positional prefixes plus named/default tails.
 - `destructuring.kvist`: struct-backed `{:keys [...]}` destructuring in `let`, params, proc literals, pointer params, and named/default-call interop.
 - `declarations.kvist`: doc comments, import aliases, constants, enums, structs.
+- `local-declarations.kvist`: compact proc-local constants, enums, structs, and unions.
 - `defstructs.kvist`: `defstruct` docstrings, typed fields, nested structs.
 - `control-flow.kvist`: `core/cond`, `core/switch`, loops, `core/when-let`, and `core/if-let`.
 - `data-literals.kvist`: arrays, maps, `make`, `new`, allocator macros.

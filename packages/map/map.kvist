@@ -46,7 +46,8 @@
   operation over Odin maps and does not allocate a replacement map."
   [target source]
   (quasiquote
-    (map-merge! (unquote target) (unquote source))))
+    (for [key value (unquote source)]
+      (core/update! (unquote target) key value))))
 
 (defmacro assoc!
   "Associate `key` with `value` in `target` in place.
@@ -64,7 +65,7 @@
   the same behavior as Odin map deletion for a missing key."
   [target key]
   (quasiquote
-    (map-dissoc! (unquote target) (unquote key))))
+    (core/delete! (unquote target) (unquote key))))
 
 (proc contains?
   "Return true when `m` contains `key`.

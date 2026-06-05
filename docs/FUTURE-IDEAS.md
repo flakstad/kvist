@@ -66,7 +66,7 @@ language/runtime implementation prematurely.
 - `url`
   - parsing, path, and query helpers
 - `html`
-  - rendering and response helpers that complement `kvist:hiccup`
+  - rendering and response helpers that complement `kvist:html`
 - `http`
   - a broader batteries-included server/client story if that becomes a real
     direction
@@ -91,7 +91,7 @@ These should all be judged by the same bar:
 
 ### Data DSLs
 
-- Continue exploring data-oriented DSLs shipped with Kvist, such as Hiccup-like
+- Continue exploring data-oriented DSLs shipped with Kvist, such as HTML-like
   tree builders.
 - For these DSLs, the ideal user surface may allow ordinary Kvist expressions
   to appear directly inside the data shape, rather than forcing explicit

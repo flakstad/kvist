@@ -1,4 +1,4 @@
-// Port of the Cluck reset map/set demo. Sets still lower to map[T]bool, but
+// Port of the Cluck reset map/set demo. Sets lower to map[T]struct{}, but
 // there is now an explicit set helper surface for basic set algebra.
 (package main)
 (import core "kvist:core")
@@ -28,17 +28,15 @@
       (core/println (set/superset? all-tags shared))
       (core/println (set/disjoint? narrowed featured))
       (set/remove! tags "lisp")
-      (for [tag present missing]
-        (core/when present
-          (core/println "missing" tag))))
+      (for [tag _ missing]
+        (core/println "missing" tag)))
     (for [key value m]
       (core/println key value)
       (set! total (+ total (str/count key)))
       (set! total (+ total (str/count value))))
-    (for [tag present tags]
-      (core/when present
-        (core/println tag)
-        (set! total (+ total (str/count tag)))))
+    (for [tag _ tags]
+      (core/println tag)
+      (set! total (+ total (str/count tag))))
     total))
 
 (defn main []
@@ -46,6 +44,6 @@
 
 (core/comment
   ;; Set algebra is available at the surface, while the emitted Odin still uses
-  ;; plain map[T]bool loops.
+  ;; plain map[T]struct{} loops.
   (maps_and_sets_demo)
 )

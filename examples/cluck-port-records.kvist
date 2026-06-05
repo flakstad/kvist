@@ -29,5 +29,5 @@
 
 (core/comment
   ;; The surface is close. The visible gap is sets: Kvist still lowers
-  ;; set[T] to map[T]bool rather than a dedicated set literal/API.
+  ;; set[T] to map[T]struct{} rather than a dedicated set literal/API.
   (records-demo))

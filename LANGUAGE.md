@@ -874,9 +874,9 @@ assertions.
 Run Kvist tests with the CLI:
 
 ```sh
-kvist test path/to/package.kvist
-kvist test path/to/package.kvist --names sample-arithmetic
-kvist test path/to/package.kvist --generated /tmp/generated-tests.odin
+kvist test path/to/tests.kvist
+kvist test path/to/tests.kvist --names sample-arithmetic
+kvist test path/to/tests.kvist --generated /tmp/generated-tests.odin
 ```
 
 The boundary is deliberate:
@@ -1538,6 +1538,11 @@ thin `kvist:io` helpers:
 return them to transfer ownership. Typed JSON file helpers live in
 `kvist:json` as `json/write` and `json/read-as`. The caller owns any data
 allocated inside a successfully decoded value.
+
+Inside `defmacro` bodies, `(io/read "path")` is also available as a compile-time
+operation. It reads text during macro expansion and returns a macro string
+value, with relative paths resolved from the source file currently being
+compiled. Ordinary runtime `(io/read path)` keeps the owned-byte behavior above.
 
 ## Literals and Construction
 
@@ -2202,6 +2207,7 @@ Supported macro-evaluator building blocks are intentionally small in v1:
 - form builders: `list`, `vector`, `brace`, `forms`
 - sequence/form helpers: `first`, `rest`, `nth`, `count`, `concat`
 - string/symbol helpers: `str`, `symbol`, `keyword`, `name`
+- compile-time file text: `io/read`
 - predicates/comparisons: `=`, `form?`
 
 That is enough for real source transforms and small DSLs, without pretending the

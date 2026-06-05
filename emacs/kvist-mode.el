@@ -46,8 +46,8 @@
 (defconst kvist-special-forms
   '("package" "import" "defconst" "defvar" "defstruct" "defenum" "defunion" "defn" "defmacro" "proc" "odin"
     "let" "do" "if" "when" "cond" "switch" "set!" "return" "defer"
-    "for" "each" "comment" "new" "make" "get" "nil?" "in" "not-in"
-    "type" "or-else" "update" "update!"
+    "for" "loop" "each" "comment" "new" "make" "get" "nil?" "in" "not-in"
+    "type" "or-else" "update" "update!" "inc!" "dec!" "toggle!" "negate!"
     "break" "continue" "with-allocator" "with-temp-allocator"
     "when-let" "if-let" "when-ok" "if-ok"
     "tap>"
@@ -88,6 +88,12 @@
 
 (defvar-local kvist--editor-symbol-cache nil
   "Cached full file-context symbol metadata for the current buffer.")
+
+(defvar-local kvist--editor-symbol-stale-cache nil
+  "Most recent full file-context symbols for non-blocking UI paths.")
+
+(defvar-local kvist--manual-completion-request nil
+  "Non-nil while Kvist completion is explicitly requested by the user.")
 
 (defvar-local kvist--reload-path-cache nil
   "Cached reload path metadata for the current buffer.")
@@ -201,6 +207,7 @@
                    (return . 0)
                    (defer . 0)
                    (for . 1)
+                   (loop . 1)
                    (each . 2)
                    (comment . 0)
                    (with-allocator . 1)
@@ -237,14 +244,33 @@
      (fallback fallback)
      (t (error "Could not find kvist executable; run `odin build cmd/kvist'")))))
 
+(defun kvist--buffer-missing-closers ()
+  "Return closing delimiters needed to make the current buffer parseable."
+  (save-excursion
+    (let ((opens (nth 9 (syntax-ppss (point-max))))
+          (closers ""))
+      (dolist (pos opens closers)
+        (setq closers
+              (concat
+               (pcase (char-after pos)
+                 (?\( ")")
+                 (?\[ "]")
+                 (?\{ "}")
+                 (_ ""))
+               closers))))))
+
 (defun kvist--source-temp-file ()
-  "Write the current Kvist buffer to a temporary .kvist file."
+  "Write the current Kvist buffer to a temporary tooling source file."
   (unless buffer-file-name
     (user-error "Kvist tooling requires a file-backed buffer"))
-  (let* ((dir (file-name-directory (expand-file-name buffer-file-name)))
-         (temp (make-temp-file (expand-file-name ".kvist-symbols-" dir) nil ".kvist")))
-    (write-region (point-min) (point-max) temp nil 'silent)
-    temp))
+  (save-excursion
+    (let* ((dir (file-name-directory (expand-file-name buffer-file-name)))
+           (temp (make-temp-file (expand-file-name ".kvist-symbols-" dir) nil ".tmp")))
+      (write-region (point-min) (point-max) temp nil 'silent)
+      (let ((closers (kvist--buffer-missing-closers)))
+        (when (not (string-empty-p closers))
+          (write-region closers nil temp 'append 'silent)))
+      temp)))
 
 (defun kvist--call-string (program args)
   "Call PROGRAM with ARGS and return (EXIT-CODE . OUTPUT)."
@@ -392,6 +418,14 @@ When REFRESH is non-nil, ignore any cached value."
             :doc (kvist--unescape-doc doc)
             :file (if (string-empty-p file-text) file file-text))))))
 
+(defun kvist--parse-symbol-output (output source-file)
+  "Parse CLI symbol OUTPUT for SOURCE-FILE."
+  (let ((lines (cdr (split-string output "\n" t))))
+    (delq nil
+          (mapcar (lambda (line)
+                    (kvist--parse-symbol-line line source-file))
+                  lines))))
+
 (defun kvist--unescape-doc (text)
   "Decode escaped documentation TEXT from `kvist symbols'."
   (let ((i 0)
@@ -423,11 +457,7 @@ When REFRESH is non-nil, ignore any cached value."
         (pcase-let ((`(,exit-code . ,output) (kvist--call-string program (list "symbols" input))))
           (unless (zerop exit-code)
             (user-error "%s" (string-trim output)))
-          (let ((lines (cdr (split-string output "\n" t))))
-            (delq nil
-                  (mapcar (lambda (line)
-                            (kvist--parse-symbol-line line source-file))
-                          lines))))
+          (kvist--parse-symbol-output output source-file))
       (when temp
         (ignore-errors (delete-file temp))))))
 
@@ -449,17 +479,32 @@ When REFRESH is non-nil, ignore any cached value."
                                 (kvist--call-string program (list "editor-symbols" input))))
                     (unless (zerop exit-code)
                       (user-error "%s" (string-trim output)))
-                    (let ((lines (cdr (split-string output "\n" t))))
-                      (delq nil
-                            (mapcar (lambda (line)
-                                      (kvist--parse-symbol-line line source-file))
-                                    lines))))
+                    (kvist--parse-symbol-output output source-file))
                 (when temp
                   (ignore-errors (delete-file temp))))))
         (when (null file)
-          (setq kvist--editor-symbol-cache
-                (list :file source-file :tick tick :symbols symbols)))
+          (kvist--store-editor-symbols source-file tick symbols))
         symbols))))
+
+(defun kvist--cached-editor-symbols ()
+  "Return cached editor symbols without invoking the Kvist CLI."
+  (let ((source-file buffer-file-name)
+        (tick (buffer-chars-modified-tick)))
+    (cond
+     ((and kvist--editor-symbol-cache
+           (equal (plist-get kvist--editor-symbol-cache :file) source-file)
+           (equal (plist-get kvist--editor-symbol-cache :tick) tick))
+      (plist-get kvist--editor-symbol-cache :symbols))
+     ((and kvist--editor-symbol-stale-cache
+           (equal (plist-get kvist--editor-symbol-stale-cache :file) source-file))
+      (plist-get kvist--editor-symbol-stale-cache :symbols)))))
+
+(defun kvist--store-editor-symbols (source-file tick symbols)
+  "Store SYMBOLS for SOURCE-FILE and TICK in completion caches."
+  (setq kvist--editor-symbol-cache
+        (list :file source-file :tick tick :symbols symbols))
+  (setq kvist--editor-symbol-stale-cache
+        (list :file source-file :symbols symbols)))
 
 (defun kvist--lookup-symbols (identifier &optional file)
   "Return matching file-context symbols for IDENTIFIER via the CLI."
@@ -683,8 +728,12 @@ When REFRESH is non-nil, ignore any cached value."
 
 (defun kvist--completion-symbols (&optional identifier)
   "Return completion symbols for IDENTIFIER context."
-  (or (ignore-errors (kvist--complete-symbols identifier))
-      (ignore-errors (kvist--editor-symbols))))
+  (or (kvist--cached-editor-symbols)
+      (when (or kvist--manual-completion-request
+                (eq this-command 'completion-at-point))
+        (ignore-errors (kvist--editor-symbols)))
+      (when (not identifier)
+        (ignore-errors (kvist--symbols)))))
 
 (defun kvist--completion-candidates ()
   "Return completion candidates appropriate for the symbol at point."
@@ -710,9 +759,7 @@ When REFRESH is non-nil, ignore any cached value."
   "Return symbol metadata alist keyed by display name for IDENTIFIER context."
   (let* ((identifier (or identifier (kvist--identifier-at-point)))
          (package-prefix (kvist--package-prefix identifier))
-         (symbols (or (kvist--completion-symbols identifier)
-                      (ignore-errors (kvist--symbols))
-                      (ignore-errors (kvist--editor-symbols)))))
+         (symbols (kvist--completion-symbols identifier)))
     (let (table)
       (dolist (symbol symbols)
         (let* ((name (plist-get symbol :name))
@@ -802,7 +849,7 @@ When REFRESH is non-nil, ignore any cached value."
 
 (defun kvist--eldoc-from-completion-prefix (identifier)
   "Return Eldoc text from a unique completion match for IDENTIFIER."
-  (let* ((symbols (kvist--completion-symbols identifier))
+  (let* ((symbols (kvist--cached-editor-symbols))
          (metadata (kvist--completion-metadata identifier))
          (package-prefix (kvist--package-prefix identifier))
          (candidates
@@ -822,7 +869,10 @@ When REFRESH is non-nil, ignore any cached value."
 (defun kvist-eldoc-function (&rest _ignored)
   "Return Eldoc text for the Kvist symbol at point."
   (when-let ((identifier (kvist--identifier-at-point)))
-    (if-let ((matches (kvist--symbol-doc-candidates identifier)))
+    (if-let ((matches (let ((symbols (kvist--cached-editor-symbols)))
+                        (seq-filter (lambda (symbol)
+                                      (kvist--symbol-matches-identifier-p symbol identifier))
+                                    symbols))))
         (let* ((normalized (kvist--normalize-qualified-identifier identifier))
                (exact (seq-find (lambda (symbol)
                                   (string=
@@ -896,15 +946,27 @@ With prefix argument REFRESH, re-read the path metadata from the CLI."
 
 (defun kvist-completion-at-point ()
   "Complete Kvist special forms and symbols in the current file."
-  (when-let ((bounds (kvist--completion-bounds)))
-    (let ((metadata (kvist--completion-metadata (kvist--identifier-at-point))))
+  (when-let ((bounds (and (or kvist--manual-completion-request
+                              (eq this-command 'completion-at-point))
+                          (kvist--completion-bounds))))
+    (let* ((identifier (kvist--identifier-at-point))
+           (metadata (kvist--completion-metadata identifier))
+           (candidates (delete-dups
+                        (append (kvist--completion-candidates)
+                                kvist-completion-builtins))))
       (list (car bounds)
             (cdr bounds)
             (kvist--completion-table
-             (kvist--completion-candidates)
+             candidates
              metadata)
             :exit-function #'kvist--completion-exit
             :exclusive 'no))))
+
+(defun kvist-complete-at-point ()
+  "Explicitly complete Kvist symbols at point."
+  (interactive)
+  (let ((kvist--manual-completion-request t))
+    (completion-at-point)))
 
 (defun kvist--post-self-insert-auto-import ()
   "Auto-import canonical Kvist packages after typing a qualified prefix."
@@ -938,6 +1000,7 @@ With prefix argument REFRESH, re-read the path metadata from the CLI."
 (define-key kvist-mode-map (kbd "C-c r s") #'kvist-reload-start)
 (define-key kvist-mode-map (kbd "C-c r r") #'kvist-reload-rebuild)
 (define-key kvist-mode-map (kbd "C-c r p") #'kvist-reload-show-paths)
+(define-key kvist-mode-map (kbd "TAB") #'kvist-complete-at-point)
 (define-key kvist-mode-map kvist-doc-keybinding #'kvist-doc-at-point)
 
 ;;;###autoload

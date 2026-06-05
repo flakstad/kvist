@@ -10,7 +10,6 @@ Alias_Prefix :: struct {
     alias:   string,
     prefix:  string,
     exports: [dynamic]string,
-    allow_fallback: bool,
     preserve_qualified_calls: bool,
 }
 
@@ -232,15 +231,6 @@ append_import_form_unique :: proc(forms: ^[dynamic]CST_Top_Form, seen: ^[dynamic
     append(forms, form)
 }
 
-is_builtin_kvist_import_path :: proc(path: string) -> bool {
-    switch path {
-    case "kvist:core", "kvist:arr", "kvist:str", "kvist:map", "kvist:set", "kvist:struct", "kvist:io", "kvist:json", "kvist:http", "kvist:http/client", "kvist:http/session", "kvist:http/sse", "kvist:http/datastar":
-        return true
-    case:
-        return false
-    }
-}
-
 is_shipped_source_import_path :: proc(path: string) -> bool {
     if !strings.has_prefix(path, "kvist:") {
         return false
@@ -261,7 +251,7 @@ is_shipped_source_import_path :: proc(path: string) -> bool {
 
 is_source_import_path :: proc(path: string) -> bool {
     if strings.has_prefix(path, "kvist:") {
-        return is_shipped_source_import_path(path) || !is_builtin_kvist_import_path(path)
+        return true
     }
     for ch in path {
         if ch == ':' {
@@ -271,20 +261,8 @@ is_source_import_path :: proc(path: string) -> bool {
     return true
 }
 
-is_builtin_kvist_package_path :: proc(path: string) -> bool {
-    switch path {
-    case "kvist:core", "kvist:arr", "kvist:str", "kvist:map", "kvist:set", "kvist:struct", "kvist:io", "kvist:json", "kvist:hiccup", "kvist:http", "kvist:http/client", "kvist:http/session", "kvist:http/sse", "kvist:http/datastar", "kvist:hot", "kvist:live", "kvist:reload", "kvist:test":
-        return true
-    }
-    return false
-}
-
-shipped_source_import_allows_builtin_fallback :: proc(import_path: string) -> bool {
-    return is_builtin_kvist_package_path(import_path)
-}
-
 is_package_anchor_filename :: proc(dir_path, file_name: string) -> bool {
-    if file_name == "main.kvist" || file_name == "package.kvist" {
+    if file_name == "main.kvist" {
         return true
     }
     if !strings.has_suffix(file_name, ".kvist") {
@@ -423,6 +401,12 @@ collect_public_decl_names :: proc(forms: []CST_Top_Form) -> (names: [dynamic]str
         }
     }
     return names
+}
+
+append_source_package_marker_exports :: proc(names: ^[dynamic]string, import_path: string) {
+    if import_path == "kvist:html" && !contains_text(names^[:], "for") {
+        append(names, "for")
+    }
 }
 
 source_import_alias_and_path :: proc(form: CST_Form) -> (alias, path: string, ok: bool) {
@@ -640,11 +624,12 @@ collect_root_source_import_aliases_from_files :: proc(files: []Package_File) -> 
                 return nil, err_package, false
             }
             import_forms := flatten_package_forms(import_files[:])
+            exports := collect_public_decl_names(import_forms[:])
+            append_source_package_marker_exports(&exports, import_path)
             append(&aliases, Alias_Prefix{
                 alias = alias,
                 prefix = alias,
-                exports = collect_public_decl_names(import_forms[:]),
-                allow_fallback = shipped_source_import_allows_builtin_fallback(import_path),
+                exports = exports,
                 preserve_qualified_calls = import_path == "kvist:core",
             })
         }
@@ -667,9 +652,6 @@ rewrite_symbol_text :: proc(text: string, locals: []string, aliases: []Alias_Pre
                 return text, Compile_Error{}, true
             }
             if len(alias_map.exports) > 0 && !contains_text(alias_map.exports[:], member) {
-                if alias_map.allow_fallback {
-                    return text, Compile_Error{}, true
-                }
                 return "", Compile_Error{message = fmt.tprintf("source package member is private or undefined: %s/%s", alias_map.alias, member), span = span}, false
             }
             return fmt.tprintf("%s%s__%s", quote_prefix, alias_map.prefix, member), Compile_Error{}, true
@@ -714,6 +696,208 @@ rewrite_decl_name :: proc(form: ^CST_Form, prefix: string) {
     }
 }
 
+type_constructor_symbol :: proc(text: string) -> bool {
+    switch text {
+    case "slice", "core/slice", "core-slice", "dynamic", "array", "map", "set", "ptr", "proc":
+        return true
+    }
+    return false
+}
+
+rewrite_type_form_symbols :: proc(form: CST_Form, locals: []string, aliases: []Alias_Prefix, prefix: string) -> (CST_Form, Compile_Error, bool) {
+    rewritten := form
+    #partial switch form.kind {
+    case .Symbol:
+        if type_constructor_symbol(form.text) {
+            return rewritten, Compile_Error{}, true
+        }
+        text, err_text, ok_text := rewrite_symbol_text(form.text, locals, aliases, prefix, form.span)
+        if !ok_text {
+            return CST_Form{}, err_text, false
+        }
+        rewritten.text = text
+        return rewritten, Compile_Error{}, true
+    case .List:
+        rewritten.items = nil
+        for item, idx in form.items {
+            if idx == 0 && item.kind == .Symbol && type_constructor_symbol(item.text) {
+                append(&rewritten.items, item)
+                continue
+            }
+            child, err_child, ok_child := rewrite_type_form_symbols(item, locals, aliases, prefix)
+            if !ok_child {
+                return CST_Form{}, err_child, false
+            }
+            append(&rewritten.items, child)
+        }
+    case .Vector:
+        rewritten.items = nil
+        for item, idx in form.items {
+            if idx == 0 && (item.kind == .Keyword || item.kind == .Symbol) {
+                head := item.text
+                if item.kind == .Keyword && len(head) > 0 {
+                    head = head[1:]
+                }
+                if type_constructor_symbol(head) || head == "arr" || head == "fixed-arr" {
+                    append(&rewritten.items, item)
+                    continue
+                }
+            }
+            if item.kind == .Symbol && len(item.text) > 0 && item.text[len(item.text)-1] == ':' {
+                append(&rewritten.items, item)
+                continue
+            }
+            child, err_child, ok_child := rewrite_type_form_symbols(item, locals, aliases, prefix)
+            if !ok_child {
+                return CST_Form{}, err_child, false
+            }
+            append(&rewritten.items, child)
+        }
+    }
+    return rewritten, Compile_Error{}, true
+}
+
+rewrite_param_vector_signature :: proc(form: CST_Form, locals: []string, aliases: []Alias_Prefix, prefix: string) -> (CST_Form, Compile_Error, bool) {
+    if form.kind != .Vector {
+        return form, Compile_Error{}, true
+    }
+    rewritten := form
+    rewritten.items = nil
+    i := 0
+    for i < len(form.items) {
+        target := form.items[i]
+        type_start := -1
+        #partial switch target.kind {
+        case .Symbol:
+            append(&rewritten.items, target)
+            if len(target.text) == 0 || target.text[len(target.text)-1] != ':' {
+                i += 1
+                continue
+            }
+            type_start = i + 1
+        case .Brace:
+            append(&rewritten.items, target)
+            if i+1 < len(form.items) {
+                append(&rewritten.items, form.items[i+1])
+            }
+            type_start = i + 2
+        case:
+            child, err_child, ok_child := rewrite_form_symbols(target, locals, aliases, prefix)
+            if !ok_child {
+                return CST_Form{}, err_child, false
+            }
+            append(&rewritten.items, child)
+            i += 1
+            continue
+        }
+
+        if type_start >= len(form.items) {
+            i += 1
+            continue
+        }
+        _, next_i, err_type, ok_type := parse_type_text_from_forms(form.items[:], type_start)
+        if !ok_type {
+            return CST_Form{}, err_type, false
+        }
+        for item in form.items[type_start:next_i] {
+            type_item, err_type_item, ok_type_item := rewrite_type_form_symbols(item, locals, aliases, prefix)
+            if !ok_type_item {
+                return CST_Form{}, err_type_item, false
+            }
+            append(&rewritten.items, type_item)
+        }
+        i = next_i
+        if i < len(form.items) && is_symbol(form.items[i], "=") {
+            append(&rewritten.items, form.items[i])
+            if i+1 >= len(form.items) {
+                return CST_Form{}, Compile_Error{message = "missing default parameter value", span = form.items[i].span}, false
+            }
+            value, err_value, ok_value := rewrite_form_symbols(form.items[i+1], locals, aliases, prefix)
+            if !ok_value {
+                return CST_Form{}, err_value, false
+            }
+            append(&rewritten.items, value)
+            i += 2
+        }
+    }
+    return rewritten, Compile_Error{}, true
+}
+
+rewrite_proc_like_top_form :: proc(top: CST_Top_Form, locals: []string, aliases: []Alias_Prefix, prefix: string) -> (CST_Top_Form, Compile_Error, bool) {
+    form := top.form
+    rewritten := top
+    rewritten.form = form
+    rewritten.form.items = nil
+
+    params_index := 2
+    if params_index+1 < len(form.items) &&
+       form.items[params_index].kind == .Keyword &&
+       form.items[params_index].text == ":abi" &&
+       form.items[params_index+1].kind == .String {
+        params_index += 2
+    }
+    if params_index < len(form.items) && form.items[params_index].kind == .String {
+        params_index += 1
+    }
+
+    i := 0
+    for i < len(form.items) {
+        item := form.items[i]
+        if i == 1 && item.kind == .Symbol {
+            renamed := item
+            renamed.text = fmt.tprintf("%s__%s", prefix, item.text)
+            append(&rewritten.form.items, renamed)
+            i += 1
+            continue
+        }
+        if i == params_index {
+            params, err_params, ok_params := rewrite_param_vector_signature(item, locals, aliases, prefix)
+            if !ok_params {
+                return CST_Top_Form{}, err_params, false
+            }
+            append(&rewritten.form.items, params)
+            i += 1
+            continue
+        }
+        if i == params_index+1 && is_symbol(item, "->") {
+            append(&rewritten.form.items, item)
+            if i+1 >= len(form.items) {
+                return CST_Top_Form{}, Compile_Error{message = "missing return spec after '->'", span = item.span}, false
+            }
+            if form.items[i+1].kind == .Vector && vector_is_named_returns(form.items[i+1]) {
+                named, err_named, ok_named := rewrite_type_form_symbols(form.items[i+1], locals, aliases, prefix)
+                if !ok_named {
+                    return CST_Top_Form{}, err_named, false
+                }
+                append(&rewritten.form.items, named)
+                i += 2
+                continue
+            }
+            _, next_i, err_type, ok_type := parse_type_text_from_forms(form.items[:], i+1)
+            if !ok_type {
+                return CST_Top_Form{}, err_type, false
+            }
+            for type_item in form.items[i+1:next_i] {
+                rewritten_type_item, err_type_item, ok_type_item := rewrite_type_form_symbols(type_item, locals, aliases, prefix)
+                if !ok_type_item {
+                    return CST_Top_Form{}, err_type_item, false
+                }
+                append(&rewritten.form.items, rewritten_type_item)
+            }
+            i = next_i
+            continue
+        }
+
+        child, err_child, ok_child := rewrite_form_symbols(item, locals, aliases, prefix)
+        if !ok_child {
+            return CST_Top_Form{}, err_child, false
+        }
+        append(&rewritten.form.items, child)
+        i += 1
+    }
+    return rewritten, Compile_Error{}, true
+}
+
 rewrite_top_form :: proc(top: CST_Top_Form, locals: []string, aliases: []Alias_Prefix, prefix: string) -> (CST_Top_Form, Compile_Error, bool) {
     rewritten := top
     if prefix != "" &&
@@ -721,6 +905,9 @@ rewrite_top_form :: proc(top: CST_Top_Form, locals: []string, aliases: []Alias_P
        len(top.form.items) >= 2 &&
        top.form.items[1].kind == .Symbol {
         head := decl_head_name(top.form)
+        if head == "proc" || head == "defn" || head == "defn-" {
+            return rewrite_proc_like_top_form(top, locals, aliases, prefix)
+        }
         if is_top_level_decl_head(head) {
             rewritten.form = top.form
             rewritten.form.items = nil
@@ -988,11 +1175,12 @@ load_source_forms :: proc(dir, prefix: string, loaded_keys, import_keys: ^[dynam
             if !ok_nested {
                 return result, err_nested, false
             }
+            nested_exports := nested.exports
+            append_source_package_marker_exports(&nested_exports, import_path)
             append(&aliases, Alias_Prefix{
                 alias = alias,
                 prefix = nested_prefix,
-                exports = nested.exports,
-                allow_fallback = shipped_source_import_allows_builtin_fallback(import_path),
+                exports = nested_exports,
                 preserve_qualified_calls = import_path == "kvist:core",
             })
             for form in nested.imports {
@@ -1017,10 +1205,6 @@ load_source_forms :: proc(dir, prefix: string, loaded_keys, import_keys: ^[dynam
             }
             _, _, is_source_import := source_import_alias_and_path(form)
             if is_source_import {
-                _, import_path, _ := source_import_alias_and_path(form)
-                if shipped_source_import_allows_builtin_fallback(import_path) {
-                    append_import_form_unique(&result.imports, import_keys, top)
-                }
                 continue
             }
             if head == "import" {
@@ -1086,11 +1270,12 @@ load_root_file_forms :: proc(path: string) -> (Loaded_Forms, Compile_Error, bool
             if !ok_nested {
                 return result, err_nested, false
             }
+            nested_exports := nested.exports
+            append_source_package_marker_exports(&nested_exports, import_path)
             append(&aliases, Alias_Prefix{
                 alias = alias,
                 prefix = alias,
-                exports = nested.exports,
-                allow_fallback = shipped_source_import_allows_builtin_fallback(import_path),
+                exports = nested_exports,
                 preserve_qualified_calls = import_path == "kvist:core",
             })
             for form in nested.imports {
@@ -1113,10 +1298,6 @@ load_root_file_forms :: proc(path: string) -> (Loaded_Forms, Compile_Error, bool
             }
             _, _, is_source_import := source_import_alias_and_path(form)
             if is_source_import {
-                _, import_path, _ := source_import_alias_and_path(form)
-                if shipped_source_import_allows_builtin_fallback(import_path) {
-                    append_import_form_unique(&result.imports, &import_keys, top)
-                }
                 continue
             }
             if head == "import" {
@@ -1133,16 +1314,6 @@ load_root_file_forms :: proc(path: string) -> (Loaded_Forms, Compile_Error, bool
     return result, Compile_Error{}, true
 }
 
-compile_source_should_load_source_import :: proc(import_path: string) -> bool {
-    // Keep this narrow while compile_source output tests still cover legacy
-    // builtin fallbacks. Expand package-by-package as those fallbacks move out.
-    switch import_path {
-    case "kvist:str", "kvist:set":
-        return true
-    }
-    return false
-}
-
 load_root_source_forms :: proc(forms: []CST_Top_Form) -> (Loaded_Forms, Compile_Error, bool) {
     aliases: [dynamic]Alias_Prefix
     import_keys: [dynamic]string
@@ -1156,9 +1327,6 @@ load_root_source_forms :: proc(forms: []CST_Top_Form) -> (Loaded_Forms, Compile_
         if !ok_import {
             continue
         }
-        if !compile_source_should_load_source_import(import_path) {
-            continue
-        }
         resolved, err_resolve, ok_resolve := resolve_source_import_path(".", import_path)
         if !ok_resolve {
             return result, err_resolve, false
@@ -1168,11 +1336,12 @@ load_root_source_forms :: proc(forms: []CST_Top_Form) -> (Loaded_Forms, Compile_
         if !ok_nested {
             return result, err_nested, false
         }
+        nested_exports := nested.exports
+        append_source_package_marker_exports(&nested_exports, import_path)
         append(&aliases, Alias_Prefix{
             alias = alias,
             prefix = alias,
-            exports = nested.exports,
-            allow_fallback = shipped_source_import_allows_builtin_fallback(import_path),
+            exports = nested_exports,
             preserve_qualified_calls = import_path == "kvist:core",
         })
         for form in nested.imports {
@@ -1193,10 +1362,6 @@ load_root_source_forms :: proc(forms: []CST_Top_Form) -> (Loaded_Forms, Compile_
         }
         _, _, is_source_import := source_import_alias_and_path(form)
         if is_source_import {
-            _, import_path, _ := source_import_alias_and_path(form)
-            if shipped_source_import_allows_builtin_fallback(import_path) {
-                append_import_form_unique(&result.imports, &import_keys, top)
-            }
             continue
         }
         if head == "import" {
@@ -1647,7 +1812,23 @@ compile_eval_source_with_map :: proc(source, eval_source: string, no_print: bool
     if !ok_order {
         return result, clone_compile_error(err_order, result_allocator), false
     }
-    expanded, macros, err_expand, ok_expand := macroexpand_top_forms(forms[:], true)
+    loaded, err_load, ok_load := load_root_source_forms(forms[:])
+    if !ok_load {
+        return result, clone_compile_error(err_load, result_allocator), false
+    }
+    if !loaded.has_package {
+        loaded.has_package = true
+        loaded.package_decl = synthetic_package_decl("main")
+    }
+    combined: [dynamic]CST_Top_Form
+    append(&combined, loaded.package_decl)
+    for form in loaded.imports {
+        append(&combined, form)
+    }
+    for form in loaded.decls {
+        append(&combined, form)
+    }
+    expanded, macros, err_expand, ok_expand := macroexpand_top_forms(combined[:], true)
     if !ok_expand {
         return result, clone_compile_error(err_expand, result_allocator), false
     }
@@ -1664,7 +1845,9 @@ compile_eval_source_with_map :: proc(source, eval_source: string, no_print: bool
     if !ok_eval {
         return result, clone_compile_error(err_eval, result_allocator), false
     }
+    previous_macro_anchor := macro_eval_set_anchor(".")
     expanded_eval_form, err_eval_expand, ok_eval_expand := macroexpand_cst_form_with_macros(eval_form, macros[:])
+    macro_eval_restore_anchor(previous_macro_anchor)
     if !ok_eval_expand {
         return result, clone_compile_error(err_eval_expand, result_allocator), false
     }
@@ -1871,7 +2054,9 @@ compile_eval_path_with_map :: proc(path, eval_source: string, no_print: bool = f
         return result, clone_compile_error(err_rewrite_eval, result_allocator), false
     }
     eval_form = eval_form_rewritten
+    previous_macro_anchor := macro_eval_set_anchor(path)
     expanded_eval_form, err_eval_expand, ok_eval_expand := macroexpand_cst_form_with_macros(eval_form, macros[:])
+    macro_eval_restore_anchor(previous_macro_anchor)
     if !ok_eval_expand {
         context.allocator = old_allocator
         return result, clone_compile_error(err_eval_expand, result_allocator), false

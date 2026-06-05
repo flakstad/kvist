@@ -494,10 +494,12 @@ CLI cache."
   "Return the package entry file for FILE or the current buffer."
   (let* ((file (expand-file-name (or file (or buffer-file-name default-directory))))
          (dir (if (file-directory-p file) file (file-name-directory file)))
-         (package-entry (expand-file-name "package.kvist" dir))
+         (dir-entry (expand-file-name
+                     (concat (file-name-nondirectory (directory-file-name dir)) ".kvist")
+                     dir))
          (main-entry (expand-file-name "main.kvist" dir)))
     (cond
-     ((file-exists-p package-entry) package-entry)
+     ((file-exists-p dir-entry) dir-entry)
      ((file-exists-p main-entry) main-entry)
      (t file))))
 

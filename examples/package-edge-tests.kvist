@@ -116,8 +116,8 @@
     (t/is (set/superset? lhs empty-set))
     (t/is (set/disjoint? lhs disjoint-rhs))
     (t/is (not (set/disjoint? lhs rhs)))
-    (t/is (= (get mutable 3 false) true))
-    (t/is (= (get mutable 4 false) false))))
+    (t/is (set/contains? mutable 3))
+    (t/is (not (set/contains? mutable 4)))))
 
 (t/deftest str-package-edge-cases
   (let [parts (str/split "abc" ",") defer
