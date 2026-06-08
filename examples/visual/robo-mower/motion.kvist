@@ -138,15 +138,15 @@
                      (> wire-distance (f32 14.0)))
                  (<= best (f32 900.0)))
         (set! lookahead (f32 112.0)))
-      (when (== side 0)
+      (when (= side 0)
         (set! progress (- nearest-x left)))
-      (when (== side 1)
+      (when (= side 1)
         (set! progress (+ width (- nearest-y top))))
-      (when (== side 2)
+      (when (= side 2)
         (set! progress (+ width height (- right nearest-x))))
-      (when (== side 3)
+      (when (= side 3)
         (set! progress (+ width height width (- bottom nearest-y))))
-      (when (== side 0)
+      (when (= side 0)
         (let [remaining (- right nearest-x)]
           (if (> remaining corner-advance)
             (do
@@ -157,10 +157,10 @@
               (set! tx right)
               (set! ty (math.min (+ top corner-lookahead) bottom))
               (let [turn-cmd (corner-turn-command robot Right-Angle blade)]
-                (when (== turn-cmd.speed (f32 0.0))
+                (when (= turn-cmd.speed (f32 0.0))
                   (return turn-cmd)))
               (return (smooth-pursuit-command robot tx ty (f32 34.0) blade))))))
-      (when (== side 1)
+      (when (= side 1)
         (let [remaining (- bottom nearest-y)]
           (if (> remaining corner-advance)
             (do
@@ -171,10 +171,10 @@
               (set! tx (math.max (- right corner-lookahead) left))
               (set! ty bottom)
               (let [turn-cmd (corner-turn-command robot Pi blade)]
-                (when (== turn-cmd.speed (f32 0.0))
+                (when (= turn-cmd.speed (f32 0.0))
                   (return turn-cmd)))
               (return (smooth-pursuit-command robot tx ty (f32 34.0) blade))))))
-      (when (== side 2)
+      (when (= side 2)
         (let [remaining (- nearest-x left)]
           (if (> remaining corner-advance)
             (do
@@ -185,10 +185,10 @@
               (set! tx left)
               (set! ty (math.max (- bottom corner-lookahead) top))
               (let [turn-cmd (corner-turn-command robot (- Right-Angle) blade)]
-                (when (== turn-cmd.speed (f32 0.0))
+                (when (= turn-cmd.speed (f32 0.0))
                   (return turn-cmd)))
               (return (smooth-pursuit-command robot tx ty (f32 34.0) blade))))))
-      (when (== side 3)
+      (when (= side 3)
         (let [remaining (- nearest-y top)]
           (if (> remaining corner-advance)
             (do
@@ -199,7 +199,7 @@
               (set! tx (math.min (+ left corner-lookahead) right))
               (set! ty top)
               (let [turn-cmd (corner-turn-command robot 0.0 blade)]
-                (when (== turn-cmd.speed (f32 0.0))
+                (when (= turn-cmd.speed (f32 0.0))
                   (return turn-cmd)))
               (return (smooth-pursuit-command robot tx ty (f32 34.0) blade))))))
       (set! target (+ progress lookahead))

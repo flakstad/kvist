@@ -321,9 +321,9 @@ eval_list :: proc(module: ^Live_Module, form: kvist.CST_Form, ctx: Eval_Context)
             result = next
         }
         return result, Runtime_Error{}, true
-    case "state/get":
+    case "state.get":
         if len(form.items) != 2 {
-            return Value{}, Runtime_Error{message = strings.clone("state/get expects one key argument")}, false
+            return Value{}, Runtime_Error{message = strings.clone("state.get expects one key argument")}, false
         }
         key, err, ok := state_key_text(module, form.items[1], ctx)
         if !ok {
@@ -335,14 +335,14 @@ eval_list :: proc(module: ^Live_Module, form: kvist.CST_Form, ctx: Eval_Context)
             return value_nil(), Runtime_Error{}, true
         }
         return value_clone(entry.value), Runtime_Error{}, true
-    case "args/count":
+    case "args.count":
         if len(form.items) != 1 {
-            return Value{}, Runtime_Error{message = strings.clone("args/count expects no arguments")}, false
+            return Value{}, Runtime_Error{message = strings.clone("args.count expects no arguments")}, false
         }
         return value_int(i64(len(ctx.args))), Runtime_Error{}, true
-    case "args/get":
+    case "args.get":
         if len(form.items) != 2 {
-            return Value{}, Runtime_Error{message = strings.clone("args/get expects one index argument")}, false
+            return Value{}, Runtime_Error{message = strings.clone("args.get expects one index argument")}, false
         }
         idx_value, idx_err, idx_ok := eval_form(module, form.items[1], ctx)
         if !idx_ok {
@@ -350,17 +350,17 @@ eval_list :: proc(module: ^Live_Module, form: kvist.CST_Form, ctx: Eval_Context)
         }
         defer value_delete(&idx_value)
         if idx_value.kind != .Int {
-            return Value{}, Runtime_Error{message = strings.clone("args/get index must evaluate to an int")}, false
+            return Value{}, Runtime_Error{message = strings.clone("args.get index must evaluate to an int")}, false
         }
-        return eval_value_at(ctx.args, idx_value.int_value, "args/get")
-    case "payload/count":
+        return eval_value_at(ctx.args, idx_value.int_value, "args.get")
+    case "payload.count":
         if len(form.items) != 1 {
-            return Value{}, Runtime_Error{message = strings.clone("payload/count expects no arguments")}, false
+            return Value{}, Runtime_Error{message = strings.clone("payload.count expects no arguments")}, false
         }
         return value_int(i64(len(ctx.payload))), Runtime_Error{}, true
-    case "payload/get":
+    case "payload.get":
         if len(form.items) != 2 {
-            return Value{}, Runtime_Error{message = strings.clone("payload/get expects one index argument")}, false
+            return Value{}, Runtime_Error{message = strings.clone("payload.get expects one index argument")}, false
         }
         idx_value, idx_err, idx_ok := eval_form(module, form.items[1], ctx)
         if !idx_ok {
@@ -368,20 +368,20 @@ eval_list :: proc(module: ^Live_Module, form: kvist.CST_Form, ctx: Eval_Context)
         }
         defer value_delete(&idx_value)
         if idx_value.kind != .Int {
-            return Value{}, Runtime_Error{message = strings.clone("payload/get index must evaluate to an int")}, false
+            return Value{}, Runtime_Error{message = strings.clone("payload.get index must evaluate to an int")}, false
         }
-        return eval_value_at(ctx.payload, idx_value.int_value, "payload/get")
-    case "reload/from-version":
+        return eval_value_at(ctx.payload, idx_value.int_value, "payload.get")
+    case "reload.from-version":
         if len(form.items) != 1 {
-            return Value{}, Runtime_Error{message = strings.clone("reload/from-version expects no arguments")}, false
+            return Value{}, Runtime_Error{message = strings.clone("reload.from-version expects no arguments")}, false
         }
         if module.reload_from_version == "" {
             return value_nil(), Runtime_Error{}, true
         }
         return value_string(module.reload_from_version), Runtime_Error{}, true
-    case "reload/state-get":
+    case "reload.state-get":
         if len(form.items) != 2 {
-            return Value{}, Runtime_Error{message = strings.clone("reload/state-get expects one key argument")}, false
+            return Value{}, Runtime_Error{message = strings.clone("reload.state-get expects one key argument")}, false
         }
         key, err, ok := state_key_text(module, form.items[1], ctx)
         if !ok {
@@ -393,9 +393,9 @@ eval_list :: proc(module: ^Live_Module, form: kvist.CST_Form, ctx: Eval_Context)
             return value_nil(), Runtime_Error{}, true
         }
         return value, Runtime_Error{}, true
-    case "state/set!":
+    case "state.set!":
         if len(form.items) != 3 {
-            return Value{}, Runtime_Error{message = strings.clone("state/set! expects a key and a value")}, false
+            return Value{}, Runtime_Error{message = strings.clone("state.set! expects a key and a value")}, false
         }
         key, err, ok := state_key_text(module, form.items[1], ctx)
         if !ok {
@@ -408,9 +408,9 @@ eval_list :: proc(module: ^Live_Module, form: kvist.CST_Form, ctx: Eval_Context)
         }
         module_state_put(module, key, value)
         return value, Runtime_Error{}, true
-    case "state/inc!":
+    case "state.inc!":
         if len(form.items) != 2 && len(form.items) != 3 {
-            return Value{}, Runtime_Error{message = strings.clone("state/inc! expects a key and optional delta")}, false
+            return Value{}, Runtime_Error{message = strings.clone("state.inc! expects a key and optional delta")}, false
         }
         key, err, ok := state_key_text(module, form.items[1], ctx)
         if !ok {
@@ -425,27 +425,27 @@ eval_list :: proc(module: ^Live_Module, form: kvist.CST_Form, ctx: Eval_Context)
             }
             defer value_delete(&delta_value)
             if delta_value.kind != .Int {
-                return Value{}, Runtime_Error{message = strings.clone("state/inc! delta must evaluate to an int")}, false
+                return Value{}, Runtime_Error{message = strings.clone("state.inc! delta must evaluate to an int")}, false
             }
             delta = delta_value.int_value
         }
         current := i64(0)
         if entry, found := module_state_get(module, key); found {
             if entry.value.kind != .Int {
-                return Value{}, Runtime_Error{message = strings.clone("state/inc! requires an int state slot")}, false
+                return Value{}, Runtime_Error{message = strings.clone("state.inc! requires an int state slot")}, false
             }
             current = entry.value.int_value
         }
         updated := value_int(current + delta)
         module_state_put(module, key, updated)
         return updated, Runtime_Error{}, true
-    case "module/name":
+    case "module.name":
         return value_string(module.name), Runtime_Error{}, true
-    case "module/version":
+    case "module.version":
         return value_string(module.version), Runtime_Error{}, true
-    case "host/call":
+    case "host.call":
         if len(form.items) < 2 {
-            return Value{}, Runtime_Error{message = strings.clone("host/call expects a capability name")}, false
+            return Value{}, Runtime_Error{message = strings.clone("host.call expects a capability name")}, false
         }
         cap_value, err, ok := eval_form(module, form.items[1], ctx)
         if !ok {
@@ -453,7 +453,7 @@ eval_list :: proc(module: ^Live_Module, form: kvist.CST_Form, ctx: Eval_Context)
         }
         defer value_delete(&cap_value)
         if cap_value.kind != .String && cap_value.kind != .Handle {
-            return Value{}, Runtime_Error{message = strings.clone("host/call capability name must evaluate to a string")}, false
+            return Value{}, Runtime_Error{message = strings.clone("host.call capability name must evaluate to a string")}, false
         }
         args: [dynamic]Value
         defer {
@@ -470,9 +470,9 @@ eval_list :: proc(module: ^Live_Module, form: kvist.CST_Form, ctx: Eval_Context)
             append(&args, value)
         }
         return call_capability(module.runtime, cap_value.text, args[:])
-    case "hook/emit":
+    case "hook.emit":
         if len(form.items) < 2 {
-            return Value{}, Runtime_Error{message = strings.clone("hook/emit expects a hook name")}, false
+            return Value{}, Runtime_Error{message = strings.clone("hook.emit expects a hook name")}, false
         }
         hook_value, err, ok := eval_form(module, form.items[1], ctx)
         if !ok {
@@ -480,7 +480,7 @@ eval_list :: proc(module: ^Live_Module, form: kvist.CST_Form, ctx: Eval_Context)
         }
         defer value_delete(&hook_value)
         if hook_value.kind != .String && hook_value.kind != .Handle {
-            return Value{}, Runtime_Error{message = strings.clone("hook/emit expects a hook name string")}, false
+            return Value{}, Runtime_Error{message = strings.clone("hook.emit expects a hook name string")}, false
         }
         payload: [dynamic]Value
         defer {
@@ -582,7 +582,7 @@ eval_form :: proc(module: ^Live_Module, form: kvist.CST_Form, ctx: Eval_Context)
     case .Nil:
         return value_nil(), Runtime_Error{}, true
     case .Keyword:
-        return value_string(form.text[1:]), Runtime_Error{}, true
+        return Value{}, Runtime_Error{message = strings.clone("keywords are syntax markers, not live values; use a string, integer, bool, or nil")}, false
     case .Symbol:
         if value, ok := find_binding(ctx.bindings, form.text); ok {
             return value_clone(value), Runtime_Error{}, true

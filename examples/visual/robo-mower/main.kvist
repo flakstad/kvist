@@ -26,32 +26,32 @@
 (def Brush-Erase: int 2)
 
 (defstruct App-State
-  {:world World
-   :belief Robot-Belief
-   :robot Robot
-   :sensors Sensors
-   :paused bool
-   :sim-speed f32
-   :sim-credit f32
-   :show-grid bool
-   :show-sensors bool
-   :brush-mode int
-   :rain bool
-   :hills bool
-   :reflex-enabled bool
-   :lifted bool
-   :bumper bool
-   :comms-ok bool
-   :charging bool
-   :undocking bool
-   :dock-time f32
-   :battery f32
-   :mission-time f32
-   :frames int
-   :metric-start f64
-   :fps f64
-   :update-ms f64
-   :draw-ms f64})
+  {world: World
+   belief: Robot-Belief
+   robot: Robot
+   sensors: Sensors
+   paused: bool
+   sim-speed: f32
+   sim-credit: f32
+   show-grid: bool
+   show-sensors: bool
+   brush-mode: int
+   rain: bool
+   hills: bool
+   reflex-enabled: bool
+   lifted: bool
+   bumper: bool
+   comms-ok: bool
+   charging: bool
+   undocking: bool
+   dock-time: f32
+   battery: f32
+   mission-time: f32
+   frames: int
+   metric-start: f64
+   fps: f64
+   update-ms: f64
+   draw-ms: f64})
 
 (defn v2
   "Construct a raylib 2D vector."
@@ -96,13 +96,13 @@
 (defn recovery-name
   "Return a short HUD label for the active collision recovery state."
   [recovery: int] -> cstring
-  (when (== recovery Recovery-Reverse)
+  (when (= recovery Recovery-Reverse)
     (return "reverse"))
-  (when (== recovery Recovery-Turn)
+  (when (= recovery Recovery-Turn)
     (return "turn"))
-  (when (== recovery Recovery-Arc)
+  (when (= recovery Recovery-Arc)
     (return "arc"))
-  (when (== recovery Recovery-PreArc)
+  (when (= recovery Recovery-PreArc)
     (return "orient"))
   "none")
 
@@ -120,15 +120,15 @@
 (defn set-mode!
   "Set the robot controller mode and prime mode-specific state."
   [state: (ptr App-State), mode: int]
-  (when (and (== mode Mode-Return)
-             (not (== state.robot.mode Mode-Return)))
+  (when (and (= mode Mode-Return)
+             (not (= state.robot.mode Mode-Return)))
     (set! state.robot.return-source state.robot.mode))
-  (when (not (== mode Mode-Return))
+  (when (not (= mode Mode-Return))
     (set! state.robot.return-source mode))
   (set! state.robot.mode mode)
   (set! state.robot.recovery Recovery-None)
   (set! state.robot.recovery-time 0.0)
-  (when (== mode Mode-Random)
+  (when (= mode Mode-Random)
     (choose-random-heading! (addr state.robot))))
 
 (defn screen-x
@@ -160,32 +160,32 @@
 (defn make-app-state
   "Allocate a complete simulation state with default robot world and controls."
   [] -> App-State
-  (let [state (App-State {:world (make-world)
-                          :belief (make-belief)
-                          :robot (make-robot)
-                          :sensors (Sensors {})
-                          :paused false
-                          :sim-speed 1.0
-                          :sim-credit 0.0
-                          :show-grid true
-                          :show-sensors true
-                          :brush-mode Brush-Obstacle
-                          :rain false
-                          :hills false
-                          :reflex-enabled true
-                          :lifted false
-                          :bumper false
-                          :comms-ok true
-                          :charging false
-                          :undocking false
-                          :dock-time 0.0
-                          :battery 100.0
-                          :mission-time 0.0
-                          :frames 0
-                          :metric-start 0.0
-                          :fps 0
-                          :update-ms 0
-                          :draw-ms 0})]
+  (let [state (App-State {world: (make-world)
+                          belief: (make-belief)
+                          robot: (make-robot)
+                          sensors: (Sensors {})
+                          paused: false
+                          sim-speed: 1.0
+                          sim-credit: 0.0
+                          show-grid: true
+                          show-sensors: true
+                          brush-mode: Brush-Obstacle
+                          rain: false
+                          hills: false
+                          reflex-enabled: true
+                          lifted: false
+                          bumper: false
+                          comms-ok: true
+                          charging: false
+                          undocking: false
+                          dock-time: 0.0
+                          battery: 100.0
+                          mission-time: 0.0
+                          frames: 0
+                          metric-start: 0.0
+                          fps: 0
+                          update-ms: 0
+                          draw-ms: 0})]
     (reset-app! (addr state))
     state))
 
@@ -275,11 +275,11 @@
             cell-y (/ my Cell-Size)
             world (addr state.world)]
         (when (rl.IsMouseButtonDown .LEFT)
-          (when (== state.brush-mode Brush-Boundary)
+          (when (= state.brush-mode Brush-Boundary)
             (set-cell! world cell-x cell-y Cell-Boundary))
-          (when (== state.brush-mode Brush-Erase)
+          (when (= state.brush-mode Brush-Erase)
             (set-cell! world cell-x cell-y Cell-Grass))
-          (when (== state.brush-mode Brush-Obstacle)
+          (when (= state.brush-mode Brush-Obstacle)
             (paint-cell! world cell-x cell-y 1 Cell-Obstacle)))
         (when (rl.IsMouseButtonDown .RIGHT)
           (paint-cell! world cell-x cell-y 1 Cell-Grass))))))
@@ -314,11 +314,11 @@
   (mut! state.mission-time += dt)
   (let [drain (+ (f32 0.16) (* (abs-f32 cmd.speed) (f32 0.004)))]
     (set! state.battery (math.clamp (- state.battery (* dt drain)) (f32 0.0) (f32 100.0))))
-  (when (and (not (== state.robot.mode Mode-Return))
+  (when (and (not (= state.robot.mode Mode-Return))
              (or (<= state.battery Low-Battery-Percent)
                  (>= state.mission-time (f32 180.0))))
     (set-mode! state Mode-Return))
-  (when (and (== state.robot.mode Mode-Return)
+  (when (and (= state.robot.mode Mode-Return)
              (< (dock-distance2 (addr state.robot)) (f32 1600.0)))
     (begin-charging! state)))
 
@@ -374,11 +374,11 @@
   [world: (ptr World), cell: int] -> rl.Color
   (let [cells world^.cells
         cut world^.cut]
-    (when (== cells[cell] Cell-Obstacle)
+    (when (= cells[cell] Cell-Obstacle)
       (return (rgba 78 74 68 255)))
-    (when (== cells[cell] Cell-Boundary)
+    (when (= cells[cell] Cell-Boundary)
       (return (rgba 230 54 62 255)))
-    (when (== cells[cell] Cell-Outside)
+    (when (= cells[cell] Cell-Outside)
       (return (rgba 42 49 56 255)))
     (when cut[cell]
       (return (rgba 52 116 65 255)))
@@ -436,7 +436,7 @@
 (defn draw-belief-marker
   "Draw the robot's last cutting evidence for belief-based modes."
   [state: (ptr App-State)]
-  (when (== state.robot.mode Mode-Mapped)
+  (when (= state.robot.mode Mode-Mapped)
     (rl.DrawCircleLinesV (v2 (screen-x state.belief.last-cut-x)
                              (screen-y state.belief.last-cut-y))
                          9
@@ -445,25 +445,25 @@
 (defn draw-mapped-lanes
   "Draw the configured mapped-mode lane plan and active target."
   [state: (ptr App-State)]
-  (when (== state.robot.mode Mode-Mapped)
+  (when (= state.robot.mode Mode-Mapped)
     (let [lane 0
           active state.robot.lane-index
           target-x (mapped-lane-target-x active)
           target-y (mapped-lane-y active)]
-      (when (== state.robot.lane-phase Mapped-Phase-Shift)
+      (when (= state.robot.lane-phase Mapped-Phase-Shift)
         (set! target-x state.robot.lane-shift-x)
         (set! target-y (mapped-shift-target-y (addr state.robot))))
       (while (< lane (mapped-lane-count))
         (let [y (screen-y (mapped-lane-y lane))
               color (rgba 255 255 255 42)]
-          (when (== lane active)
+          (when (= lane active)
             (set! color (rgba 255 224 120 155)))
           (rl.DrawLineEx (v2 (screen-x (mapped-min-x)) y)
                          (v2 (screen-x (mapped-max-x)) y)
                          2.0
                          color))
         (mut! lane += 1))
-      (when (== state.robot.lane-phase Mapped-Phase-Shift)
+      (when (= state.robot.lane-phase Mapped-Phase-Shift)
         (rl.DrawLineEx (v2 (screen-x target-x) (screen-y (mapped-lane-y active)))
                        (v2 (screen-x target-x) (screen-y target-y))
                        3.0
@@ -557,20 +557,20 @@
     (draw-hud-text font (fmt.ctprintf "%5.1f%%" (belief-known-percent belief)) 970 80 16.0 rl.RAYWHITE)
     (draw-hud-text font "lane" 1050 80 16.0 rl.LIGHTGRAY)
     (draw-hud-text font (fmt.ctprintf "%2d/%2d" robot^.lane-index (mapped-lane-count)) 1094 80 16.0 rl.RAYWHITE)
-    (draw-button font "random" (rect 18 106 78 Button-H) (== robot^.mode Mode-Random))
-    (draw-button font "boundary" (rect 102 106 98 Button-H) (== robot^.mode Mode-Boundary))
-    (draw-button font "frontier" (rect 206 106 92 Button-H) (== robot^.mode Mode-Frontier))
-    (draw-button font "mapped" (rect 304 106 82 Button-H) (== robot^.mode Mode-Mapped))
-    (draw-button font "home" (rect 392 106 70 Button-H) (== robot^.mode Mode-Return))
+    (draw-button font "random" (rect 18 106 78 Button-H) (= robot^.mode Mode-Random))
+    (draw-button font "boundary" (rect 102 106 98 Button-H) (= robot^.mode Mode-Boundary))
+    (draw-button font "frontier" (rect 206 106 92 Button-H) (= robot^.mode Mode-Frontier))
+    (draw-button font "mapped" (rect 304 106 82 Button-H) (= robot^.mode Mode-Mapped))
+    (draw-button font "home" (rect 392 106 70 Button-H) (= robot^.mode Mode-Return))
     (draw-button font "-" (rect 480 106 34 Button-H) false)
     (draw-button font "+" (rect 520 106 34 Button-H) false)
     (draw-button font "pause" (rect 570 106 74 Button-H) state.paused)
     (draw-button font "reset" (rect 650 106 66 Button-H) false)
     (draw-button font "grid" (rect 730 106 62 Button-H) state.show-grid)
     (draw-button font "rays" (rect 798 106 62 Button-H) state.show-sensors)
-    (draw-button font "obst" (rect 866 106 62 Button-H) (== state.brush-mode Brush-Obstacle))
-    (draw-button font "wire" (rect 934 106 62 Button-H) (== state.brush-mode Brush-Boundary))
-    (draw-button font "erase" (rect 1002 106 68 Button-H) (== state.brush-mode Brush-Erase))
+    (draw-button font "obst" (rect 866 106 62 Button-H) (= state.brush-mode Brush-Obstacle))
+    (draw-button font "wire" (rect 934 106 62 Button-H) (= state.brush-mode Brush-Boundary))
+    (draw-button font "erase" (rect 1002 106 68 Button-H) (= state.brush-mode Brush-Erase))
     (draw-button font "rain" (rect 18 138 62 Button-H) state.rain)
     (draw-button font "hill" (rect 86 138 62 Button-H) state.hills)
     (draw-button font "reflex" (rect 154 138 74 Button-H) state.reflex-enabled)

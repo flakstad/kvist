@@ -9,7 +9,7 @@
 (import ini "core:encoding/ini")
 (import strconv "core:strconv")
 
-(defn delete-csv-records [records: (core.slice (core.slice string))]
+(defn delete-csv-records [records: (slice (slice string))]
   ;; csv.read_all_from_string returns an outer slice, each record slice, and
   ;; cloned field strings. Clean them in the reverse shape shown in Odin's docs.
   (each [record records]
@@ -24,8 +24,8 @@
       0
       (do
         (defer (delete-csv-records records))
-        (let [[a ok-a] (strconv.parse-int (core.get (core.get records 1) 1))
-              [b ok-b] (strconv.parse-int (core.get (core.get records 2) 1))]
+        (let [[a ok-a] (strconv.parse-int (get (get records 1) 1))
+              [b ok-b] (strconv.parse-int (get (get records 2) 1))]
           (if (and ok-a ok-b)
             (+ a b)
             0))))))
@@ -45,11 +45,11 @@
         port 0]
     (while true
       (let [[key value ok] (ini.iterate (addr it))]
-        (core.when (not ok)
+        (when (not ok)
           (break))
-        (core.when (and (== (:section it) "server")
-                   (== key "port"))
-          (core.when-let [parsed ok (strconv.parse-int value)]
+        (when (and (= it.section "server")
+                   (= key "port"))
+          (when-let [parsed ok (strconv.parse-int value)]
             (set! port parsed)))))
     port))
 
@@ -58,15 +58,15 @@
         total 0]
     (while true
       (let [[_ _ ok] (ini.iterate (addr it))]
-        (core.when (not ok)
+        (when (not ok)
           (break))
         (set! total (+ total 1))))
     total))
 
 (defn main []
-  (core.println (csv-age-total) (csv-record-count) (ini-port) (ini-pair-count)))
+  (println (csv-age-total) (csv-record-count) (ini-port) (ini-pair-count)))
 
-(core.comment
+(comment
   ;; CSV read_all includes the header record. The example parses two ages from
   ;; rows 1 and 2, then deletes the nested owned records.
   (csv-age-total)

@@ -5,29 +5,29 @@
 
 (defstruct Person
   "A small fixed-shape person struct."
-  {:name string
-   :age int
-   :tags set[string]})
+  {name: string
+   age: int
+   tags: set[string]})
 
 (defn records-demo [] -> bool
   (let [tags (set.empty string 2) defer
-        person (Person {:name "Ada"
-                        :age 36
-                        :tags tags})]
+        person (Person {name: "Ada"
+                        age: 36
+                        tags: tags})]
     (set.add! tags "math")
     (set.add! tags "lisp")
-    (core.println (:name person))
-    (core.println (:age person))
-    (core.println (:tags person))
-    (core.println (set.contains? (:tags person) "math"))
-    (core.update! person :age 37)
-    (core.println person)
+    (println person.name)
+    (println person.age)
+    (println person.tags)
+    (println (set.contains? person.tags "math"))
+    (set! person.age 37)
+    (println person)
     true))
 
 (defn main []
-  (core.println (records-demo)))
+  (println (records-demo)))
 
-(core.comment
+(comment
   ;; The surface is close. The visible gap is sets: Kvist still lowers
   ;; set[T] to map[T]struct{} rather than a dedicated set literal.API.
   (records-demo))

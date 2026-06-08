@@ -12,23 +12,23 @@ The host process is written in `.kvist`, the reloadable module is written in
 On the native side, the example uses the same pure-Kvist surface as the
 standalone hot-reload demo:
 
-- `(import alias :odin "path")` for Odin implementation packages
+- `(import alias "path")` for Odin implementation packages
 - `(import hot "kvist:hot")` for the shipped native module-contract macro
 - `(hot.defmodule ...)` to emit the standard `kvist_hot` entrypoints
 
 On the live side, the example now uses the matching shipped live package:
 
 - `(import live "kvist:live")`
-- `(live/defmodule ...)`
-- `live/defcommand` / `live/defhook` for the common zero-arg entrypoint shape
+- `(live.defmodule ...)`
+- `live.defcommand` / `live.defhook` for the common zero-arg entrypoint shape
 
 ## Files
 
-- [host/main.kvist](./host/main.kvist): long-running host process
-- [module/main.kvist](./module/main.kvist): reloadable shared library
+- [host.main.kvist](./host.main.kvist): long-running host process
+- [module.main.kvist](./module.main.kvist): reloadable shared library
 - [shared/shared.kvist](./shared/shared.kvist): host-owned state layout
-- [live/commands.kvist](./live/commands.kvist): live command module
-- [live/helpers.kvist](./live/helpers.kvist): imported live helper code
+- [live.commands.kvist](./live.commands.kvist): live command module
+- [live.helpers.kvist](./live.helpers.kvist): imported live helper code
 
 ## Run It
 
@@ -37,9 +37,9 @@ From the repo root:
 ```sh
 mkdir -p build/hybrid_live_demo
 mkdir -p build/generated/hybrid_live_demo/shared build/generated/hybrid_live_demo/module build/generated/hybrid_live_demo/host
-./kvist examples/reload/hybrid_live_demo/shared/shared.kvist -o build/generated/hybrid_live_demo/shared/shared.odin
-./kvist examples/reload/hybrid_live_demo/module/main.kvist -o build/generated/hybrid_live_demo/module/main.odin
-./kvist examples/reload/hybrid_live_demo/host/main.kvist -o build/generated/hybrid_live_demo/host/main.odin
+./kvist examples/reload.hybrid_live_demo/shared/shared.kvist -o build/generated/hybrid_live_demo/shared/shared.odin
+./kvist examples/reload.hybrid_live_demo/module.main.kvist -o build/generated/hybrid_live_demo/module.main.odin
+./kvist examples/reload.hybrid_live_demo/host.main.kvist -o build/generated/hybrid_live_demo/host.main.odin
 odin build build/generated/hybrid_live_demo/module -build-mode:dll -out:build/hybrid_live_demo/hybrid_demo.dylib
 odin run build/generated/hybrid_live_demo/host
 ```
@@ -50,10 +50,10 @@ While the host is still running, you can change either side independently.
 
 ### 1. Native hot reload
 
-Edit [module/main.kvist](./module/main.kvist), then rebuild only the DLL:
+Edit [module.main.kvist](./module.main.kvist), then rebuild only the DLL:
 
 ```sh
-./kvist examples/reload/hybrid_live_demo/module/main.kvist -o build/generated/hybrid_live_demo/module/main.odin
+./kvist examples/reload.hybrid_live_demo/module.main.kvist -o build/generated/hybrid_live_demo/module.main.odin
 odin build build/generated/hybrid_live_demo/module -build-mode:dll -out:build/hybrid_live_demo/hybrid_demo.dylib
 ```
 
@@ -63,8 +63,8 @@ The host-owned `State` value survives while the native module code swaps.
 
 Edit either live source file:
 
-- [live/commands.kvist](./live/commands.kvist)
-- [live/helpers.kvist](./live/helpers.kvist)
+- [live.commands.kvist](./live.commands.kvist)
+- [live.helpers.kvist](./live.helpers.kvist)
 
 Save the file and keep watching the running host. The live command layer
 reloads from source without rebuilding the DLL or restarting the process.

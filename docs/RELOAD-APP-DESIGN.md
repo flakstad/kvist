@@ -16,7 +16,7 @@ Production owns the real app state:
 (package app)
 
 (defstruct App_State
-  {:ticks int})
+  {ticks: int})
 
 (defn init [state: (ptr App_State)]
   (set! state^.ticks 0))
@@ -41,13 +41,13 @@ The reload adapter declares the reload contract:
 (import reload "kvist:reload")
 
 (defstate app.App_State
-  {:run run
-   :init app.init})
+  {run: run
+   init: app.init})
 
 (defn run [state: (ptr app.App_State) host: (ptr reload.Run_Host)]
   (while true
     (app.tick state)
-    (core.when (reload.checkpoint! host)
+    (when (reload.checkpoint! host)
       (return))))
 ```
 
@@ -55,19 +55,19 @@ The reload adapter declares the reload contract:
 
 The intended default mental model is:
 
-- prefer `:run` for general applications
-- use `:step` when you explicitly want Kvist to provide the outer loop
+- prefer `run:` for general applications
+- use `step:` when you explicitly want Kvist to provide the outer loop
 
 The relationship is:
 
-- `:run` is the general mode
-- `:step` is the convenience mode
+- `run:` is the general mode
+- `step:` is the convenience mode
 
 So users should not think of them as two unrelated systems. They share the
 same `defstate` contract and reload shell; the only real difference is who
 owns the outer runtime loop.
 
-### Use `:run` when
+### Use `run:` when
 
 - your app already has a request loop, event loop, frame loop, or worker loop
 - your runtime shape belongs to the program, not to Kvist
@@ -81,7 +81,7 @@ Examples:
 - workers
 - larger tools
 
-### Use `:step` when
+### Use `step:` when
 
 - a repeated step-and-sleep loop is already the right shape
 - you want the smallest possible reload shell surface
@@ -102,21 +102,21 @@ For example:
 
 ```clojure
 (defstruct World_State
-  {:player Player_State
-   :camera Camera_State
-   :ui UI_State})
+  {player: Player_State
+   camera: Camera_State
+   ui: UI_State})
 
 (defstate App_State
-  {:world World_State
-   :audio Audio_State
-   :assets Asset_Cache
-   :editor Editor_State}
-  {:step step
-   :init init
-   :on-load on-load
-   :on-unload on-unload
-   :version "v1"
-   :sleep-ms 1000})
+  {world: World_State
+   audio: Audio_State
+   assets: Asset_Cache
+   editor: Editor_State}
+  {step: step
+   init: init
+   on-load: on-load
+   on-unload: on-unload
+   version: "v1"
+   sleep-ms: 1000})
 
 (defn init [state: (ptr App_State)]
   ...)
@@ -135,9 +135,9 @@ That should be enough to say:
 - the reload shell should keep an instance of it alive
 - reloadable behavior is compiled around that root
 
-## `:run` Safe-Boundary Guidance
+## `run:` Safe-Boundary Guidance
 
-For `:run`, the most important user obligation is where to place
+For `run:`, the most important user obligation is where to place
 `reload.checkpoint!`.
 
 The rule is:
@@ -174,7 +174,7 @@ For example:
 (defn run [state: (ptr App_State) host: (ptr reload.Run_Host)]
   (while true
     (process-one-job state)
-    (core.when (reload.checkpoint! host)
+    (when (reload.checkpoint! host)
       (return))))
 ```
 
@@ -182,12 +182,12 @@ The metadata-only `defstate` form is reload adapter metadata. It does not emit
 a new struct. It tells the generator which existing state type should be
 preserved and which lifecycle procs should be called.
 
-The older inline form still works for tiny demos:
+The inline form is useful for tiny demos:
 
 ```clojure
 (defstate App_State
-  {:ticks int}
-  {:run run})
+  {ticks: int}
+  {run: run})
 ```
 
 But larger projects should prefer the adapter split so production is not locked
@@ -275,7 +275,7 @@ callback:
 ```clojure
 (defn run [state: (ptr App_State) host: (ptr reload.Run_Host)]
   (framework/start
-    {:on-cycle (fn []
+    {on-cycle: (fn []
                  (reload.checkpoint! host))}))
 ```
 
@@ -317,7 +317,7 @@ helpers because it makes the cooperation point explicit:
 
 This also avoids turning hot reload into invisible language magic.
 
-### What `:run` Should Not Do
+### What `run:` Should Not Do
 
 `:`run` should not mean:
 
@@ -326,7 +326,7 @@ This also avoids turning hot reload into invisible language magic.
 - "add low-level reload concerns to ordinary domain code"
 - "force a dedicated server-specific top-level mode"
 
-That is why a third `:serve` mode should probably wait. If `:run` plus one
+That is why a third `:serve` mode should probably wait. If `run:` plus one
 explicit host-handle checkpoint is designed well, it should already cover:
 
 - web servers
@@ -337,26 +337,26 @@ explicit host-handle checkpoint is designed well, it should already cover:
 
 ## Why Two Modes
 
-`:`step` and `:run` is probably enough for the initial host-mode story.
+`:`step` and `run:` is probably enough for the initial host-mode story.
 
 That split gives:
 
-- `:step` for shell-owned loops
-- `:run` for app-owned loops
+- `step:` for shell-owned loops
+- `run:` for app-owned loops
 
 This should cover most programs without adding a third mode like `:serve`
-prematurely. A web server, for example, should usually fit inside `:run`
+prematurely. A web server, for example, should usually fit inside `run:`
 rather than needing a dedicated top-level reload-app mode.
 
 ## Current Recommendation
 
 The current product story should be:
 
-- keep `:step` as the right default for loop-driven apps
-- keep `:run` as the companion mode for app-owned runtimes
-- keep the `:run` cooperation surface small: one host handle and one explicit
+- keep `step:` as the right default for loop-driven apps
+- keep `run:` as the companion mode for app-owned runtimes
+- keep the `run:` cooperation surface small: one host handle and one explicit
   checkpoint API
-- do not add a separate `:serve` mode unless `:run` proves insufficient
+- do not add a separate `:serve` mode unless `run:` proves insufficient
 
 That keeps the model small while covering both loop-driven and framework-owned
 program shapes.
@@ -414,8 +414,8 @@ pattern:
 - generated reloadable module entrypoints
 - existing `kvist_hot` runtime helpers
 
-That means this design is additive. It does not require replacing the current
-runtime mechanism first.
+This design uses the existing generated module entrypoints and `kvist_hot`
+runtime helpers.
 
 ## Compatibility Story
 
@@ -440,8 +440,8 @@ There are several plausible syntax directions.
 
 ```clojure
 (defstate App_State
-  {:world World_State}
-  {:step step})
+  {world: World_State}
+  {step: step})
 ```
 
 Pros:
@@ -454,7 +454,7 @@ Pros:
 
 ```clojure
 (defstate App_State
-  {:world World_State})
+  {world: World_State})
 
 (defn main []
   ...)
@@ -488,7 +488,7 @@ Current recommendation:
 - prefer a source-level durable-state declaration via `defstate`
 - keep the hot contract in the trailing metadata map on that form
 - keep reload enablement in `kvist dev --reload ...`
-- support `:step` and `:run` as the initial host-mode pair
+- support `step:` and `run:` as the initial host-mode pair
 - optionally support CLI conveniences later
 
 ## Recommended First Implementation Slice
@@ -496,7 +496,7 @@ Current recommendation:
 The smallest meaningful reload slice would be:
 
 1. require one explicit durable root state type
-2. require explicit `defstate` metadata naming `:step` and optional reload hooks
+2. require explicit `defstate` metadata naming `step:` and optional reload hooks
 3. add a `kvist dev --reload ...` command that generates shell/module output
 4. lower that to the existing `kvist_hot` machinery
 
@@ -512,7 +512,7 @@ without pretending the native boundary has disappeared.
 
 The next slices after that should be:
 
-1. harden the implemented `:run` contract around one explicit reload
+1. harden the implemented `run:` contract around one explicit reload
    cooperation point at the runtime boundary
 2. broaden validation and docs/tooling around which mode to use when
 3. keep shrinking one-off implementation seams where reload mode still depends

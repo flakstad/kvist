@@ -122,12 +122,8 @@ base feature:
 
 - whether any of this should ever apply to function-valued expressions, not just
   statically known top-level functions
-- whether destructuring and call-site named/default conventions should gain a
-  shared "options object" story, or stay intentionally separate
-- whether destructuring should widen beyond the current struct-backed
-  `{:keys [...]}` subset
-- whether `:or` defaults are worth supporting for destructuring, and under what
-  semantics
+- whether named/default conventions should gain a broader "options object"
+  story, or stay intentionally tied to known function declarations
 - whether any broader call sugar would still preserve explicit, readable Odin
   lowering
 

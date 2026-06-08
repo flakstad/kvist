@@ -1017,7 +1017,7 @@ imported_symbols_source :: proc(path, source: string) -> (output: string, err: C
         if !ok_import {
             continue
         }
-        _, import_path, ok_source_import := source_import_alias_and_path(top.form)
+        _, import_path, ok_source_import := source_import_alias_and_path(top.form, path)
         if ok_source_import {
             resolved, err_resolve, ok_resolve := resolve_source_import_path(path, import_path)
             if !ok_resolve {
@@ -1142,7 +1142,7 @@ editor_symbols_source :: proc(path, source: string) -> (output: string, err: Com
 
     for import_file in files_for_imports {
         for top in import_file.forms {
-            alias, import_path, ok_source_import := source_import_alias_and_path(top.form)
+            alias, import_path, ok_source_import := source_import_alias_and_path(top.form, import_file.path)
             if ok_source_import {
                 resolved, err_resolve, ok_resolve := resolve_source_import_path(import_file.path, import_path)
                 if !ok_resolve {
@@ -1351,18 +1351,7 @@ symbols_proc_signature :: proc(name: string, decl: Proc_Decl) -> string {
         if idx > 0 {
             strings.write_string(&builder, ", ")
         }
-        if param.is_field_destructure {
-            strings.write_string(&builder, "{:keys [")
-            for field, field_idx in param.destructure_fields {
-                if field_idx > 0 {
-                    strings.write_string(&builder, " ")
-                }
-                strings.write_string(&builder, field.name)
-            }
-            fmt.sbprintf(&builder, "] :as %s}: %s", param.name, param.ty)
-        } else {
-            fmt.sbprintf(&builder, "%s: %s", param.name, param.ty)
-        }
+        fmt.sbprintf(&builder, "%s: %s", param.name, param.ty)
         if param.has_default {
             strings.write_string(&builder, " = ")
             strings.write_string(&builder, symbols_form_text(param.default_value))
@@ -1450,8 +1439,8 @@ symbols_struct_signature :: proc(name: string, fields: []Struct_Field) -> string
         if idx > 0 {
             strings.write_string(&builder, " ")
         }
-        strings.write_string(&builder, ":")
         strings.write_string(&builder, field.source_name)
+        strings.write_string(&builder, ":")
         strings.write_string(&builder, " ")
         strings.write_string(&builder, field.ty)
     }
@@ -1496,6 +1485,9 @@ symbols_write_fields :: proc(builder: ^strings.Builder, source, parent: string, 
         key := fields.items[i]
         if key.kind == .Keyword && len(key.text) > 1 {
             name := fmt.tprintf("%s.%s", parent, key.text[1:])
+            symbols_write_record(builder, "field", name, source, key.span, parent)
+        } else if key.kind == .Symbol && len(key.text) > 1 && key.text[len(key.text)-1] == ':' {
+            name := fmt.tprintf("%s.%s", parent, key.text[:len(key.text)-1])
             symbols_write_record(builder, "field", name, source, key.span, parent)
         }
         i += 2
@@ -1762,6 +1754,9 @@ symbols_write_enum_variants :: proc(builder: ^strings.Builder, source, parent: s
             if key.kind == .Keyword && len(key.text) > 1 {
                 name := fmt.tprintf("%s.%s", parent, key.text[1:])
                 symbols_write_record(builder, "variant", name, source, key.span, parent)
+            } else if key.kind == .Symbol && len(key.text) > 1 && key.text[len(key.text)-1] == ':' {
+                name := fmt.tprintf("%s.%s", parent, key.text[:len(key.text)-1])
+                symbols_write_record(builder, "variant", name, source, key.span, parent)
             }
             i += 2
         }
@@ -1781,6 +1776,9 @@ symbols_write_union_variants :: proc(builder: ^strings.Builder, source, parent: 
         key := variants.items[i]
         if key.kind == .Keyword && len(key.text) > 1 {
             name := fmt.tprintf("%s.%s", parent, key.text[1:])
+            symbols_write_record(builder, "variant", name, source, key.span, parent)
+        } else if key.kind == .Symbol && len(key.text) > 1 && key.text[len(key.text)-1] == ':' {
+            name := fmt.tprintf("%s.%s", parent, key.text[:len(key.text)-1])
             symbols_write_record(builder, "variant", name, source, key.span, parent)
         }
         i += 2

@@ -19,21 +19,21 @@
 (def Hud-Font-Spacing: f32 1.0)
 
 (defstruct Boid
-  {:x f32
-   :y f32
-   :vx f32
-   :vy f32
-   :hue f32})
+  {x: f32
+   y: f32
+   vx: f32
+   vy: f32
+   hue: f32})
 
 (defstruct App-State
-  {:boids #soa[dynamic]Boid
-   :target-fps int
-   :paused bool
-   :frames int
-   :metric-start f64
-   :fps f64
-   :update-ms f64
-   :draw-ms f64})
+  {boids: #soa[dynamic]Boid
+   target-fps: int
+   paused: bool
+   frames: int
+   metric-start: f64
+   fps: f64
+   update-ms: f64
+   draw-ms: f64})
 
 (defn lcg-next
   "Advance the deterministic random seed and return the next raw integer."
@@ -75,11 +75,11 @@
             x (+ 80.0 (* (- (f32 Width) 160.0) (rand-unit (addr seed))))
             y (+ 130.0 (* (- (f32 Height) 180.0) (rand-unit (addr seed))))
             hue (* 360.0 (rand-unit (addr seed)))]
-        (soa.push! boids (Boid {:x x
-                                :y y
-                                :vx (* speed (math.cos angle))
-                                :vy (* speed (math.sin angle))
-                                :hue hue})))
+        (soa.push! boids (Boid {x: x
+                                y: y
+                                vx: (* speed (math.cos angle))
+                                vy: (* speed (math.sin angle))
+                                hue: hue})))
       (mut! i += 1))
     boids))
 
@@ -116,7 +116,7 @@
             count 0
             j 0]
         (while (< j n)
-          (when (not (== i j))
+          (when (not (= i j))
             (let [dx (- boids.x[j] x)
                   dy (- boids.y[j] y)
                   dist2 (+ (* dx dx) (* dy dy))]
@@ -241,14 +241,14 @@
   (defer (rl.CloseWindow))
   (rl.SetTargetFPS (i32 Initial-Target-FPS))
   (let [font (rl.LoadFontEx (cstring Hud-Font-Path) Hud-Font-Atlas-Size nil 0)
-        state (App-State {:boids (make-boids Boid-Count)
-                          :target-fps Initial-Target-FPS
-                          :paused false
-                          :frames 0
-                          :metric-start (rl.GetTime)
-                          :fps 0
-                          :update-ms 0
-                          :draw-ms 0})]
+        state (App-State {boids: (make-boids Boid-Count)
+                          target-fps: Initial-Target-FPS
+                          paused: false
+                          frames: 0
+                          metric-start: (rl.GetTime)
+                          fps: 0
+                          update-ms: 0
+                          draw-ms: 0})]
     (rl.SetTextureFilter font.texture .BILINEAR)
     (defer (rl.UnloadFont font))
     (defer (delete state.boids))

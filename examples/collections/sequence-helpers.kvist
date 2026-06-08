@@ -5,7 +5,7 @@
 (import map "kvist:map")
 
 (defn even? [x: int] -> bool
-  (== (% x 2) 0))
+  (= (% x 2) 0))
 
 (defn small? [x: int] -> bool
   (< x 4))
@@ -43,11 +43,11 @@
     (return 0 false)))
 
 (defstruct Segment {
-  :values []int
+  values: []int
 })
 
 (defn segment-values [segment: Segment] -> []int
-  (:values segment))
+  segment.values)
 
 (defn split-front-length [] -> int
   (let [xs ([]int [1 2 3 4])
@@ -71,7 +71,7 @@
         ages ([]int [36 17 45])
         ages-by-name (map.zip names ages)]
     (defer (delete ages-by-name))
-    (core.get ages-by-name "Grace")))
+    (get ages-by-name "Grace")))
 
 (defn chunk-count [] -> int
   (let [xs ([]int [1 2 3 4])
@@ -83,19 +83,19 @@
   (let [xs ([]int [1 2 2 3])
         counts (arr.frequencies xs)]
     (defer (delete counts))
-    (core.get counts 2)))
+    (get counts 2)))
 
 (defn count-by-parity-total [] -> int
   (let [xs ([]int [1 2 3 4 6])
         counts (arr.count-by parity xs)]
     (defer (delete counts))
-    (+ (core.get counts 0) (core.get counts 1))))
+    (+ (get counts 0) (get counts 1))))
 
 (defn sum-by-parity-total [] -> int
   (let [xs ([]int [1 2 3 4 6])
         sums (arr.sum-by parity identity-int xs)]
     (defer (delete sums))
-    (+ (core.get sums 0) (core.get sums 1))))
+    (+ (get sums 0) (get sums 1))))
 
 (defn indexed-name-count [] -> int
   (let [names ([]string ["Ada" "Lin" "Grace"])
@@ -112,12 +112,12 @@
     (defer (delete ages-by-name))
     (defer (delete name-keys))
     (defer (delete age-values))
-    (+ (core.count name-keys) (core.count age-values))))
+    (+ (count name-keys) (count age-values))))
 
 (defn even-group-count [] -> int
   (let [xs ([]int [1 2 3 4 6])
         groups (arr.group-by parity xs)
-        evens (core.get groups 0)]
+        evens (get groups 0)]
     (defer
       (each [_ group groups]
         (delete group))
@@ -154,7 +154,7 @@
   (let [base ([]int [1 2])
         xs (arr.cycle 5 base)]
     (defer (delete xs))
-    (core.count xs)))
+    (count xs)))
 
 (defn trimmed-sum [] -> int
   (let [xs ([]int [1 2 3 4 5])
@@ -181,7 +181,7 @@
   (let [xs ([]int [10 20 30])
         tail (arr.rest xs)
         empty-tail (arr.drop 3 xs)]
-    (if (core.empty? empty-tail)
+    (if (empty? empty-tail)
       (+ (arr.first tail) (arr.second xs))
       0)))
 
@@ -302,7 +302,7 @@
   (let [xs ([]int [1 3 2 4 5])
         unique (arr.distinct-by parity xs)]
     (defer (delete unique))
-    (core.count unique)))
+    (count unique)))
 
 (defn ragged-chunk-size [] -> int
   (let [xs ([]int [1 2 3 4 5])
@@ -317,9 +317,9 @@
     (len runs)))
 
 (defn flattened-total [] -> int
-  (let [segments ([]Segment [(Segment {:values ([]int [1 2])})
-                                 (Segment {:values ([]int [3])})
-                                 (Segment {:values ([]int [4 5])})])
+  (let [segments ([]Segment [(Segment {values: ([]int [1 2])})
+                                 (Segment {values: ([]int [3])})
+                                 (Segment {values: ([]int [4 5])})])
         values (arr.mapcat segment-values segments)]
     (defer (delete values))
     (arr.reduce add 0 values)))
@@ -327,7 +327,7 @@
 (defn threaded-first [] -> int
   (let [xs ([]int [1 2 3 4])
         without-evens (arr.remove even? xs)
-        indexed (arr.map-indexed add-index (core.slice without-evens))
+        indexed (arr.map-indexed add-index (slice without-evens))
         threaded (arr.reverse indexed)]
     (defer (delete without-evens))
     (defer (delete indexed))
@@ -335,9 +335,9 @@
     (arr.first threaded)))
 
 (defn main []
-  (core.println (age-for-grace)))
+  (println (age-for-grace)))
 
-(core.comment
+(comment
   (split-front-length)
   ;; => 2
 
@@ -356,7 +356,7 @@
   (repeated-two-count)
   ;; => 2
 
-  (core.count-by-parity-total)
+  (count-by-parity-total)
   ;; => 5
 
   (sum-by-parity-total)

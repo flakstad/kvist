@@ -1,0 +1,36 @@
+// Exercises positional multi-return binding. Struct fields use dot access.
+(package main)
+(import "core:fmt")
+
+(defn divmod [n: int, d: int] -> [q: int, r: int]
+  (return (/ n d) (% n d)))
+
+(defn parse-count [text: string] -> [value: int, ok: bool]
+  (if (= text "42")
+    (return 42 true)
+    (return 0 false)))
+
+(defn quotient-label [n: int, d: int] -> string
+  (let [[q r] (divmod n d)]
+    (fmt.tprintf "%d rem %d" q r)))
+
+(defn parsed-or-zero [text: string] -> int
+  (let [[value ok] (parse-count text)]
+    (if ok value 0)))
+
+(defn main []
+  (fmt.println (quotient-label 17 5))
+  (fmt.println (parsed-or-zero "42"))
+  (fmt.println (parsed-or-zero "x")))
+
+(comment
+
+  ;; Multi-return binding maps directly to Odin multiple assignment.
+  (let [[q r] (divmod 17 5)]
+    (fmt.tprintf "%d/%d" q r))
+  ;; => "3/2"
+
+  ;; Struct fields use dot access.
+  ;; Prefer `point.x` and `point.y`.
+
+)

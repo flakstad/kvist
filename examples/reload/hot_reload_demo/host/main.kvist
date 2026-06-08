@@ -2,9 +2,9 @@
 
 (import fmt "core:fmt")
 (import time "core:time")
-(import kvist_hot :odin "../../../../src/kvist_hot")
-(import support :odin "../../../../src/kvist_hot_demo_support")
-(import shared :odin "../shared")
+(import kvist_hot "../../../../src/kvist_hot")
+(import support "../../../../src/kvist_hot_demo_support")
+(import shared "../shared")
 
 (defn library-path [] -> string
   (kvist_hot.library_filename "build/hot_reload_demo/hot_demo"))
@@ -12,17 +12,17 @@
 (defn print-current-state [symbols: (ptr support.Hot_Demo_Symbols) state: (ptr shared.State)]
   (fmt.printf "[tick] module=%s tick=%d reloads=%d unloads=%d message=%s\n"
               (support.Call_Symbol_Message symbols)
-              (:tick_count state^)
-              (:reload_count state^)
-              (:unload_count state^)
-              (:last_message state^)))
+              state^.tick_count
+              state^.reload_count
+              state^.unload_count
+              state^.last_message))
 
 (defn print-after-reload [state: (ptr shared.State)]
   (fmt.printf "[host] after reload: ticks=%d reloads=%d unloads=%d message=%s\n"
-              (:tick_count state^)
-              (:reload_count state^)
-              (:unload_count state^)
-              (:last_message state^)))
+              state^.tick_count
+              state^.reload_count
+              state^.unload_count
+              state^.last_message))
 
 (defn main []
   (let [path (library-path) defer
@@ -45,7 +45,7 @@
             (fmt.println "[host] initial load failed:" initial-err)
             (delete initial-err))
           (do
-            (fmt.printf "[host] loaded generation %d from %s\n" (:generation reloader) path)
+            (fmt.printf "[host] loaded generation %d from %s\n" reloader.generation path)
             (fmt.println "[host] running. rebuild the module shared library to reload in place.")
             (fmt.println "[host] state lives in the host and survives reload.")
             (while true
@@ -60,6 +60,6 @@
                   (do
                     (fmt.println "[host] reload failed:" reload-err)
                     (delete reload-err))
-                  (core.when changed
-                    (fmt.printf "[host] loaded generation %d from %s\n" (:generation reloader) path)
+                  (when changed
+                    (fmt.printf "[host] loaded generation %d from %s\n" reloader.generation path)
                     (print-after-reload (addr state))))))))))))

@@ -8,13 +8,13 @@
 (def Belief-Wire: int 4)
 
 (defstruct Robot-Belief
-  {:cells [dynamic]int
-   :visited-count int
-   :cutting-count int
-   :obstacle-count int
-   :wire-count int
-   :last-cut-x f32
-   :last-cut-y f32})
+  {cells: [dynamic]int
+   visited-count: int
+   cutting-count: int
+   obstacle-count: int
+   wire-count: int
+   last-cut-x: f32
+   last-cut-y: f32})
 
 (defn make-belief-buffer
   "Allocate and fill the robot belief grid."
@@ -29,13 +29,13 @@
 (defn make-belief
   "Allocate an empty robot belief map."
   [] -> Robot-Belief
-  (Robot-Belief {:cells (make-belief-buffer Belief-Unknown)
-                 :visited-count 0
-                 :cutting-count 0
-                 :obstacle-count 0
-                 :wire-count 0
-                 :last-cut-x (dock-x)
-                 :last-cut-y (dock-y)}))
+  (Robot-Belief {cells: (make-belief-buffer Belief-Unknown)
+                 visited-count: 0
+                 cutting-count: 0
+                 obstacle-count: 0
+                 wire-count: 0
+                 last-cut-x: (dock-x)
+                 last-cut-y: (dock-y)}))
 
 (defn delete-belief!
   "Release robot belief buffers."
@@ -65,24 +65,24 @@
   (let [cells belief^.cells
         cell (idx x y)
         old cells[cell]]
-    (when (== old value)
+    (when (= old value)
       (return))
-    (when (== old Belief-Visited)
+    (when (= old Belief-Visited)
       (mut! belief^.visited-count -= 1))
-    (when (== old Belief-Cutting)
+    (when (= old Belief-Cutting)
       (mut! belief^.cutting-count -= 1))
-    (when (== old Belief-Obstacle)
+    (when (= old Belief-Obstacle)
       (mut! belief^.obstacle-count -= 1))
-    (when (== old Belief-Wire)
+    (when (= old Belief-Wire)
       (mut! belief^.wire-count -= 1))
     (set! cells[cell] value)
-    (when (== value Belief-Visited)
+    (when (= value Belief-Visited)
       (mut! belief^.visited-count += 1))
-    (when (== value Belief-Cutting)
+    (when (= value Belief-Cutting)
       (mut! belief^.cutting-count += 1))
-    (when (== value Belief-Obstacle)
+    (when (= value Belief-Obstacle)
       (mut! belief^.obstacle-count += 1))
-    (when (== value Belief-Wire)
+    (when (= value Belief-Wire)
       (mut! belief^.wire-count += 1))))
 
 (defn belief-mark-point!
@@ -131,7 +131,7 @@
         (while (<= xx (+ center-x cell-radius))
           (when (in-bounds? xx yy)
             (let [cell (idx xx yy)]
-              (when (== cells[cell] Belief-Obstacle)
+              (when (= cells[cell] Belief-Obstacle)
                 (let [cx (cell-center-x cell)
                       cy (cell-center-y cell)
                       dx (- cx x)
@@ -152,7 +152,7 @@
       (let [t (/ (f32 i) (f32 steps))
             x (+ ax (* (- bx ax) t))
             y (+ ay (* (- by ay) t))]
-        (when (or (== (belief-cell-at-point belief x y) Belief-Obstacle)
+        (when (or (= (belief-cell-at-point belief x y) Belief-Obstacle)
                   (belief-obstacle-near? belief x y (f32 18.0)))
           (return false)))
       (mut! i += 1)))
@@ -168,7 +168,7 @@
       (set! belief^.last-cut-y robot^.y))
     (when (< sensors^.wire (f32 18.0))
       (set! current-value Belief-Wire))
-    (if (== current-value Belief-Cutting)
+    (if (= current-value Belief-Cutting)
       (belief-mark-radius! belief robot^.x robot^.y Blade-Radius current-value)
       (belief-mark-point! belief robot^.x robot^.y current-value))
     (when (< sensors^.front (f32 32.0))

@@ -4,7 +4,7 @@
 (import core "kvist:core")
 
 (defstruct Request {
-  :path string
+  path: string
 })
 
 (defn apply-pred [pred: (fn [x: int] -> bool), x: int] -> bool
@@ -14,25 +14,25 @@
   (> x threshold))
 
 (defn path-len [req: Request] -> int
-  (core.-> req :path len))
+  (-> req .path len))
 
 (defn maybe-path-len [req: ^Request] -> int
   ;; Accept a pointer when absence or shared identity is part of the API.
-  (if (core.nil? req)
+  (if (nil? req)
     0
     (path-len (deref req))))
 
 (defn main []
   (let [pred: (fn [x: int] -> bool) (fn [x: int] -> bool
                                            (greater-than? 10 x))
-        req (Request {:path "/users"})]
-    (core.println (apply-pred pred 12))))
+        req (Request {path: "/users"})]
+    (println (apply-pred pred 12))))
 
-(core.comment
+(comment
   (greater-than? 3 5)
   ;; => true
 
-  (path-len (Request {:path "/users"}))
+  (path-len (Request {path: "/users"}))
   ;; => 6
 
   (maybe-path-len nil)

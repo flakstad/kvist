@@ -9,6 +9,19 @@ odin build cmd/kvist
 tmp_dir=$(mktemp -d)
 trap 'rm -rf "$tmp_dir"' EXIT INT TERM
 
+run_odin() {
+    attempt=1
+    while :; do
+        "$@" && return 0
+        status=$?
+        if [ "$attempt" -ge 3 ]; then
+            return "$status"
+        fi
+        printf 'retrying after odin exited with %s: %s\n' "$status" "$*" >&2
+        attempt=$((attempt + 1))
+    done
+}
+
 find examples/collections \
      examples/interop \
      examples/language \
@@ -27,9 +40,9 @@ while IFS= read -r input; do
     printf 'checking %s\n' "$input"
     ./kvist "$input" -o "$output" --map "$map"
     if grep -Eq '^package tests$' "$output"; then
-        odin test "$output" -file
+        run_odin odin test "$output" -file -define:ODIN_TEST_THREADS=1
     else
-        odin check "$output" -file
+        run_odin odin check "$output" -file
     fi
 done
 

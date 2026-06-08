@@ -142,7 +142,7 @@ This matters in practice for cache directories and symlinked temp roots like
 
 Today the generated host has one user callback:
 
-- `:run` names the reloadable app entrypoint
+- `run:` names the reloadable app entrypoint
 - `run` receives the durable state root and a reload host handle
 - the app calls `reload.checkpoint!` at one explicit safe boundary
 
@@ -225,7 +225,7 @@ Practical examples:
 (defn run [state: (ptr App_State) host: (ptr reload.Run_Host)]
   (while true
     (handle-one-request state)
-    (core.when (reload.checkpoint! host)
+    (when (reload.checkpoint! host)
       (return))))
 ```
 
@@ -234,7 +234,7 @@ Practical examples:
   (while true
     (pump-events state)
     (dispatch-ready-work state)
-    (core.when (reload.checkpoint! host)
+    (when (reload.checkpoint! host)
       (return))))
 ```
 

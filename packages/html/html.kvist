@@ -10,44 +10,44 @@
 (defunion- Attr-Value
   "Typed HTML attribute value used by rendered HTML trees."
   {
-  :none Nothing
-  :text string
-  :int int
-  :float float
-  :bool bool
+  none: Nothing
+  text: string
+  int: int
+  float: float
+  bool: bool
 })
 
 (defstruct- Attr
   "Rendered HTML attribute entry."
   {
-  :name string
-  :value Attr-Value
+  name: string
+  value: Attr-Value
 })
 
 (defstruct- Element
   "Rendered HTML element node."
   {
-  :tag string
-  :attrs (slice Attr)
-  :children (slice Node)
+  tag: string
+  attrs: (slice Attr)
+  children: (slice Node)
 })
 
 (defstruct- Fragment
   "Rendered HTML fragment node with multiple children and no wrapper element."
   {
-  :children (slice Node)
+  children: (slice Node)
 })
 
 (defunion- Node
   "Rendered HTML tree node."
   {
-  :none Nothing
-  :fragment Fragment
-  :text string
-  :int int
-  :float float
-  :bool bool
-  :element Element
+  none: Nothing
+  fragment: Fragment
+  text: string
+  int: int
+  float: float
+  bool: bool
+  element: Element
 })
 
 (defmacro- if-form? [form]
@@ -105,22 +105,22 @@
 
 (defmacro- emit-attr-value [form]
     (if (nil-form? form)
-      (quasiquote (Attr-Value {:none (Nothing {})}))
+      (quasiquote (Attr-Value {none: (Nothing {})}))
       (if (when-form? form)
         (quasiquote
           (if-attr-value (unquote (nth form 1))
                          (unquote (emit-attr-value (nth form 2)))
-                         (Attr-Value {:none (Nothing {})})))
+                         (Attr-Value {none: (Nothing {})})))
     (if (string? form)
-      (quasiquote (Attr-Value {:text (unquote form)}))
+      (quasiquote (Attr-Value {text: (unquote form)}))
       (if (int? form)
-        (quasiquote (Attr-Value {:int (unquote form)}))
+        (quasiquote (Attr-Value {int: (unquote form)}))
         (if (float? form)
-          (quasiquote (Attr-Value {:float (unquote form)}))
+          (quasiquote (Attr-Value {float: (unquote form)}))
       (if (bool? form)
-        (quasiquote (Attr-Value {:bool (unquote form)}))
+        (quasiquote (Attr-Value {bool: (unquote form)}))
         (if (keyword? form)
-          (quasiquote (Attr-Value {:text (unquote (text form))}))
+          (quasiquote (Attr-Value {text: (unquote (text form))}))
           (if (if-form? form)
             (quasiquote
               (if-attr-value (unquote (nth form 1))
@@ -130,7 +130,7 @@
             (quasiquote (Attr-Value (unquote form)))
             (if (list? form)
               (quasiquote (Attr-Value (unquote form)))
-              (quasiquote (Attr-Value {:text (unquote (text form))})))))))))))))
+              (quasiquote (Attr-Value {text: (unquote (text form))})))))))))))))
 
 (defmacro- emit-attr-items [items]
   (if (= (core.count items) 0)
@@ -139,8 +139,8 @@
           value (nth items 1)]
       (forms
         (quasiquote
-          (Attr {:name (unquote (text key))
-                 :value (unquote (emit-attr-value value))}))
+          (Attr {name: (unquote (name key))
+                 value: (unquote (emit-attr-value value))}))
         (emit-attr-items (rest (rest items)))))))
 
 (defmacro- emit-child-items [items]
@@ -152,43 +152,43 @@
 
 (defmacro- emit-node [form]
   (if (nil-form? form)
-    (quasiquote (Node {:none (Nothing {})}))
+    (quasiquote (Node {none: (Nothing {})}))
     (if (when-form? form)
       (quasiquote
         (if-node (unquote (nth form 1))
                  (unquote (emit-node (nth form 2)))
-                 (Node {:none (Nothing {})})))
+                 (Node {none: (Nothing {})})))
   (if (vector? form)
     (let [tag (first form)
           tail (rest form)]
       (if (fragment-tag? tag)
         (quasiquote
-          (Node {:fragment (Fragment {:children [(splice (emit-child-items tail))]})}))
+          (Node {fragment: (Fragment {children: [(splice (emit-child-items tail))]})}))
         (if (= (core.count tail) 0)
           (quasiquote
-            (Node {:element (Element {:tag (unquote (text tag))
-                                      :attrs []
-                                      :children []})}))
+            (Node {element: (Element {tag: (unquote (name tag))
+                                      attrs: []
+                                      children: []})}))
           (let [candidate (first tail)]
             (if (brace? candidate)
               (quasiquote
-                (Node {:element (Element {:tag (unquote (text tag))
-                                          :attrs [(splice (emit-attr-items candidate))]
-                                          :children [(splice (emit-child-items (rest tail)))]} )}))
+                (Node {element: (Element {tag: (unquote (name tag))
+                                          attrs: [(splice (emit-attr-items candidate))]
+                                          children: [(splice (emit-child-items (rest tail)))]} )}))
               (quasiquote
-                (Node {:element (Element {:tag (unquote (text tag))
-                                          :attrs []
-                                          :children [(splice (emit-child-items tail))]})})))))))
+                (Node {element: (Element {tag: (unquote (name tag))
+                                          attrs: []
+                                          children: [(splice (emit-child-items tail))]})})))))))
     (if (string? form)
-      (quasiquote (Node {:text (unquote form)}))
+      (quasiquote (Node {text: (unquote form)}))
       (if (int? form)
-        (quasiquote (Node {:int (unquote form)}))
+        (quasiquote (Node {int: (unquote form)}))
         (if (float? form)
-          (quasiquote (Node {:float (unquote form)}))
+          (quasiquote (Node {float: (unquote form)}))
         (if (bool? form)
-          (quasiquote (Node {:bool (unquote form)}))
+          (quasiquote (Node {bool: (unquote form)}))
           (if (keyword? form)
-            (quasiquote (Node {:text (unquote (text form))}))
+            (quasiquote (Node {text: (unquote (text form))}))
             (if (if-form? form)
               (quasiquote
                 (if-node (unquote (nth form 1))
@@ -198,12 +198,12 @@
               (quasiquote (Node (unquote form)))
               (if (list? form)
                 (quasiquote (Node (unquote form)))
-                (quasiquote (Node {:text (unquote (text form))}))))))))))))))
+                (quasiquote (Node {text: (unquote (text form))}))))))))))))))
 
 (defmacro- html
   "Expand a Hiccup-style HTML vector tree into an internal typed node.
 
-  Element vectors use the shape `[:tag {:attr value...} child...]`; the attrs map
+  Element vectors use the shape `[:tag {attr: value...} child...]`; the attrs map
   is optional. `[:<> child...]` creates a fragment with no wrapper element.
   Literal strings, ints, floats, bools, keywords, and nested vectors are converted
   directly to typed node values.
@@ -248,42 +248,42 @@
         (replace-owned step4 "'" "&#39;")))))
 
 (defn- render-attr-into [builder: ^strings.Builder, attr: Attr]
-  (core.switch [value (:value attr)]
+  (core.switch [value attr.value]
     Nothing (noop)
     string
     (do
       (strings.write_string builder " ")
-      (strings.write_string builder (:name attr))
+      (strings.write_string builder attr.name)
       (strings.write_string builder "=\"")
       (let [escaped (escape-html value) defer]
         (strings.write_string builder escaped))
       (strings.write_string builder "\""))
     int
-    (fmt.sbprintf builder " %s=\"%d\"" (:name attr) value)
+    (fmt.sbprintf builder " %s=\"%d\"" attr.name value)
     f64
-    (fmt.sbprintf builder " %s=\"%g\"" (:name attr) value)
+    (fmt.sbprintf builder " %s=\"%g\"" attr.name value)
     bool
     (core.when value
       (strings.write_string builder " ")
-      (strings.write_string builder (:name attr)))))
+      (strings.write_string builder attr.name))))
 
 (defn- render-node-into [builder: ^strings.Builder, node: Node]
   (core.switch [value node]
     Nothing (noop)
     Fragment
-    (each [child (:children value)]
+    (each [child value.children]
       (render-node-into builder child))
     Element
     (do
       (strings.write_string builder "<")
-      (strings.write_string builder (:tag value))
-      (each [attr (:attrs value)]
+      (strings.write_string builder value.tag)
+      (each [attr value.attrs]
         (render-attr-into builder attr))
       (strings.write_string builder ">")
-      (each [child (:children value)]
+      (each [child value.children]
         (render-node-into builder child))
       (strings.write_string builder "</")
-      (strings.write_string builder (:tag value))
+      (strings.write_string builder value.tag)
       (strings.write_string builder ">"))
     string
     (let [escaped (escape-html value) defer]
@@ -357,7 +357,7 @@
           (set! (unquote out)
                 (replace-owned
                   (unquote out)
-                  (unquote (str "{{" (text key) "}}"))
+                  (unquote (str "{{" (name key) "}}"))
                   (unquote value))))
         (emit-template-bindings out (rest (rest bindings)))))))
 
@@ -374,7 +374,7 @@
     (error "html.render template bindings must be a brace literal")))
 
 (defmacro- emit-render-attr [builder key value]
-  (let [attr-name (text key)]
+  (let [attr-name (name key)]
     (if (nil-form? value)
       (forms)
       (if (when-form? value)
@@ -407,8 +407,8 @@
                 (quasiquote
                   (render-attr-into
                     (addr (unquote builder))
-                    (Attr {:name (unquote attr-name)
-                           :value (Attr-Value (unquote value))})))))))))))))
+                    (Attr {name: (unquote attr-name)
+                           value: (Attr-Value (unquote value))})))))))))))))
 
 (defmacro- emit-render-attrs [builder items]
   (if (= (core.count items) 0)
@@ -466,20 +466,20 @@
           (emit-render-children builder tail)
           (if (= (core.count tail) 0)
             (forms
-              (quasiquote (strings.write_string (addr (unquote builder)) (unquote (str "<" (text tag) ">"))))
-              (quasiquote (strings.write_string (addr (unquote builder)) (unquote (str "</" (text tag) ">")))))
+              (quasiquote (strings.write_string (addr (unquote builder)) (unquote (str "<" (name tag) ">"))))
+              (quasiquote (strings.write_string (addr (unquote builder)) (unquote (str "</" (name tag) ">")))))
             (let [candidate (first tail)]
               (if (brace? candidate)
                 (forms
-                  (quasiquote (strings.write_string (addr (unquote builder)) (unquote (str "<" (text tag)))))
+                  (quasiquote (strings.write_string (addr (unquote builder)) (unquote (str "<" (name tag)))))
                   (emit-render-attrs builder candidate)
                   (quasiquote (strings.write_string (addr (unquote builder)) ">"))
                   (emit-render-children builder (rest tail))
-                  (quasiquote (strings.write_string (addr (unquote builder)) (unquote (str "</" (text tag) ">")))))
+                  (quasiquote (strings.write_string (addr (unquote builder)) (unquote (str "</" (name tag) ">")))))
                 (forms
-                  (quasiquote (strings.write_string (addr (unquote builder)) (unquote (str "<" (text tag) ">"))))
+                  (quasiquote (strings.write_string (addr (unquote builder)) (unquote (str "<" (name tag) ">"))))
                   (emit-render-children builder tail)
-                  (quasiquote (strings.write_string (addr (unquote builder)) (unquote (str "</" (text tag) ">"))))))))))
+                  (quasiquote (strings.write_string (addr (unquote builder)) (unquote (str "</" (name tag) ">"))))))))))
       (if (string? form)
         (quasiquote
           (write-escaped (addr (unquote builder)) (unquote form)))
@@ -513,7 +513,7 @@
   Direct Hiccup-style vector calls like `(html.render [:div ...])` expand to
   builder writes and avoid constructing a full intermediate node tree.
 
-  Template calls like `(html.render \"<h1>{{name}}</h1>\" {:name name})`
+  Template calls like `(html.render \"<h1>{{name}}</h1>\" {name: name})`
   replace `{{key}}` placeholders and return an owned string."
   [form & rest]
   (if (= (core.count rest) 0)
@@ -535,7 +535,7 @@
 (defmacro render-file
   "Render a compile-time template file with placeholder bindings.
 
-  `(html.render-file \"home.html\" {:name name})` reads `home.html` at macro
+  `(html.render-file \"home.html\" {name: name})` reads `home.html` at macro
   expansion time, embeds its contents, and emits the same template rendering as
   `html.render`."
   [path & rest]

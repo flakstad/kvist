@@ -135,9 +135,11 @@
 (defmacro get
   "Index or look up `key` in `target`.
 
-  Arrays, slices, fixed arrays, and strings use direct indexing. Maps support an
-  optional default value: `(core.get m k default)` returns `default` when `k` is
-  absent. The operation is selected at compile time from the target shape."
+  Dot selectors read fields, matching `target.field`. Arrays, slices, fixed
+  arrays, and strings use direct indexing, matching `target[index]`. Maps
+  support an optional default value: `(get m k default)` returns `default` when
+  `k` is absent. The operation is selected at compile time from the target
+  shape."
   [target key & rest]
   (if (= (kvist.count rest) 0)
     (quasiquote
@@ -150,7 +152,8 @@
 
   With no bounds, returns `target[:]`. With one bound, slices from that start
   index to the end. With two bounds, slices from start up to but not including
-  end. This is direct Odin slicing and does not copy elements or bytes."
+  end. This is the call-shaped equivalent of attached slice syntax like
+  `target[start:end]`. It does not copy elements or bytes."
   [target & rest]
   (if (= (kvist.count rest) 0)
     (quasiquote
@@ -265,12 +268,12 @@
             (quasiquote
               (let [[(unquote (kvist.first binding)) (unquote (kvist.nth binding 1))]
                     (unquote (kvist.nth binding 2))]
-                (if (== (unquote (kvist.nth binding 1)) {})
+                (if (= (unquote (kvist.nth binding 1)) {})
                   (unquote (kvist.first body)))))
             (quasiquote
               (let [[(unquote (kvist.first binding)) (unquote (kvist.nth binding 1))]
                     (unquote (kvist.nth binding 2))]
-                (if (== (unquote (kvist.nth binding 1)) {})
+                (if (= (unquote (kvist.nth binding 1)) {})
                   (do
                     (splice body))))))
           (error "when-ok expects [value err expr] binding"))
@@ -293,7 +296,7 @@
             (quasiquote
               (let [[(unquote (kvist.first binding)) (unquote (kvist.nth binding 1))]
                     (unquote (kvist.nth binding 2))]
-                (if (== (unquote (kvist.nth binding 1)) {})
+                (if (= (unquote (kvist.nth binding 1)) {})
                   (unquote (kvist.first body))
                   (unquote (kvist.nth body 1)))))
             (error "if-ok expects [value err expr] binding"))
@@ -303,20 +306,14 @@
     (error "if-ok expects [value err expr], then, and else")))
 
 (defmacro update!
-  "Mutate a field, indexed slot, or map key in place.
+  "Apply a function to the current value at a place and write the result back.
 
-  With a plain value, assigns that value. With an updater and additional
-  arguments, reads the current value and writes the updater result. This lowers
-  to direct Odin mutation and is intended for explicit in-place updates."
-  [target key-or-field value-or-updater & rest]
-  (if (= (kvist.count rest) 0)
-    (quasiquote
-      (core-update! (unquote target) (unquote key-or-field) (unquote value-or-updater)))
-    (quasiquote
-      (core-update! (unquote target)
-                          (unquote key-or-field)
-                          (unquote value-or-updater)
-                          (splice rest)))))
+  `(update! place f args...)` reads the current place value and writes
+  `(f current args...)`. Use `set!` for direct assignment and `mut!` for
+  compound operator mutation."
+  [place updater & rest]
+  (quasiquote
+    (core-update! (unquote place) (unquote updater) (splice rest))))
 
 (defmacro delete!
   "Remove `key` from a mutable map-like target in place.
@@ -332,9 +329,9 @@
 (defmacro update
   "Return an updated copy of `target`.
 
-  This is the persistent counterpart to `core.update!` for supported target
-  shapes. It leaves the original value unchanged and lowers to explicit copy and
-  update code where supported."
+  This is the persistent copy/update form for supported target shapes. It leaves
+  the original value unchanged and lowers to explicit copy and update code where
+  supported."
   [target key-or-field value-or-updater & rest]
   (if (= (kvist.count rest) 0)
     (quasiquote
@@ -370,7 +367,7 @@
   This lowers to a direct nil comparison and allocates nothing."
   [value]
   (quasiquote
-    (== (unquote value) nil)))
+    (= (unquote value) nil)))
 
 (defmacro tap>
   "Print `value` for debugging and return it unchanged.

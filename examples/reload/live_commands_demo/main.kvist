@@ -2,35 +2,35 @@
 
 (import fmt "core:fmt")
 (import time "core:time")
-(import kvist_live :odin "../../../src/kvist_live")
-(import support :odin "../../../src/kvist_live_demo_support")
+(import kvist_live "../../../src/kvist_live")
+(import support "../../../src/kvist_live_demo_support")
 
 (def module-path: string "examples/reload/live_commands_demo/live/commands.kvist")
 (def live-dir: string "examples/reload/live_commands_demo/live")
 (def tick-delay: time.Duration (* 1 time.Second))
 (def module-config: kvist_live.Module_Load_Config   (kvist_live.Module_Load_Config {
-    :init support.Live_Module_Init
-    :shutdown support.Live_Module_Shutdown
+    init: support.Live_Module_Init
+    shutdown: support.Live_Module_Shutdown
   }))
 
 (defn main []
   (let [runtime (kvist_live.new_runtime (kvist_live.Runtime_Config {
-                 :app_name "live-commands-demo"
-                 :live_enabled true
+                 app_name: "live-commands-demo"
+                 live_enabled: true
                }))
         [capability-err capability-ok] (support.Register_Live_Commands_Capabilities (addr runtime))
         [reloader reloader-err reloader-ok] (kvist_live.new_module_reloader module-path live-dir)]
     (defer (kvist_live.runtime_delete (addr runtime)))
     (if (not capability-ok)
-      (fmt.eprintln "failed to register host capability:" (:message capability-err))
+      (fmt.eprintln "failed to register host capability:" capability-err.message)
       (if (not reloader-ok)
-        (fmt.eprintln "failed to initialize live reloader:" (:message reloader-err))
+        (fmt.eprintln "failed to initialize live reloader:" reloader-err.message)
         (do
           (defer (kvist_live.module_reloader_delete (addr reloader)))
           (let [[load-err load-ok]
                 (kvist_live.load_initial_module (addr runtime) (addr reloader) module-config)]
             (if (not load-ok)
-              (fmt.eprintln "failed to load live module:" (:message load-err))
+              (fmt.eprintln "failed to load live module:" load-err.message)
               (do
                 (support.Print_Live_Commands_Banner module-path live-dir)
                 (while true
@@ -39,10 +39,10 @@
                                                                    (addr reloader)
                                                                    module-config)]
                     (if (not reload-ok)
-                      (fmt.eprintln "reload failed:" (:message reload-err))
-                      (core.when changed
+                      (fmt.eprintln "reload failed:" reload-err.message)
+                      (when changed
                         (fmt.println "reloaded live module from disk"))))
                   (let [[_ command-err command-ok] (kvist_live.invoke_command (addr runtime) "tick" nil)]
-                    (core.when (not command-ok)
-                      (fmt.eprintln "command failed:" (:message command-err))))
+                    (when (not command-ok)
+                      (fmt.eprintln "command failed:" command-err.message)))
                   (time.sleep tick-delay))))))))))

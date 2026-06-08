@@ -24,24 +24,24 @@
 (def Hud-Font-Spacing: f32 1.0)
 
 (defstruct App-State
-  {:density [dynamic]f32
-   :density0 [dynamic]f32
-   :vx [dynamic]f32
-   :vy [dynamic]f32
-   :vx0 [dynamic]f32
-   :vy0 [dynamic]f32
-   :target-fps int
-   :steps-per-frame int
-   :paused bool
-   :show-velocity bool
-   :has-last-mouse bool
-   :last-mouse-x f32
-   :last-mouse-y f32
-   :frames int
-   :metric-start f64
-   :fps f64
-   :update-ms f64
-   :draw-ms f64})
+  {density: [dynamic]f32
+   density0: [dynamic]f32
+   vx: [dynamic]f32
+   vy: [dynamic]f32
+   vx0: [dynamic]f32
+   vy0: [dynamic]f32
+   target-fps: int
+   steps-per-frame: int
+   paused: bool
+   show-velocity: bool
+   has-last-mouse: bool
+   last-mouse-x: f32
+   last-mouse-y: f32
+   frames: int
+   metric-start: f64
+   fps: f64
+   update-ms: f64
+   draw-ms: f64})
 
 (defn idx
   "Convert grid x.y coordinates into a flat array index."
@@ -91,7 +91,7 @@
             top-neighbor (idx x 1)
             bottom (idx x (- Grid-H 1))
             bottom-neighbor (idx x (- Grid-H 2))]
-        (if (== mode 2)
+        (if (= mode 2)
           (do
             (set! xs[top] (- xs[top-neighbor]))
             (set! xs[bottom] (- xs[bottom-neighbor])))
@@ -105,7 +105,7 @@
             left-neighbor (idx 1 y)
             right (idx (- Grid-W 1) y)
             right-neighbor (idx (- Grid-W 2) y)]
-        (if (== mode 1)
+        (if (= mode 1)
           (do
             (set! xs[left] (- xs[left-neighbor]))
             (set! xs[right] (- xs[right-neighbor])))
@@ -242,18 +242,18 @@
 (defn velocity-step!
   "Advance velocity through diffusion, projection, advection, and projection."
   [state: (ptr App-State)]
-  (diffuse! 1 (:vx0 state^) (:vx state^) Viscosity Dt)
-  (diffuse! 2 (:vy0 state^) (:vy state^) Viscosity Dt)
-  (project! (:vx0 state^) (:vy0 state^) (:vx state^) (:vy state^))
-  (advect! 1 (:vx state^) (:vx0 state^) (:vx0 state^) (:vy0 state^) Dt)
-  (advect! 2 (:vy state^) (:vy0 state^) (:vx0 state^) (:vy0 state^) Dt)
-  (project! (:vx state^) (:vy state^) (:vx0 state^) (:vy0 state^)))
+  (diffuse! 1 state^.vx0 state^.vx Viscosity Dt)
+  (diffuse! 2 state^.vy0 state^.vy Viscosity Dt)
+  (project! state^.vx0 state^.vy0 state^.vx state^.vy)
+  (advect! 1 state^.vx state^.vx0 state^.vx0 state^.vy0 Dt)
+  (advect! 2 state^.vy state^.vy0 state^.vx0 state^.vy0 Dt)
+  (project! state^.vx state^.vy state^.vx0 state^.vy0))
 
 (defn density-step!
   "Advance smoke density through diffusion and velocity advection."
   [state: (ptr App-State)]
-  (diffuse! 0 (:density0 state^) (:density state^) Diffusion Dt)
-  (advect! 0 (:density state^) (:density0 state^) (:vx state^) (:vy state^) Dt))
+  (diffuse! 0 state^.density0 state^.density Diffusion Dt)
+  (advect! 0 state^.density state^.density0 state^.vx state^.vy Dt))
 
 (defn fade-density!
   "Dissipate smoke density and clamp extreme injection values."
@@ -269,15 +269,15 @@
   [state: (ptr App-State)]
   (velocity-step! state)
   (density-step! state)
-  (fade-density! (:density state^)))
+  (fade-density! state^.density))
 
 (defn add-smoke!
   "Inject density and velocity into a circular patch."
   [state: (ptr App-State), gx: int, gy: int, radius: int, amount: f32, fx: f32, fy: f32]
   (let [r2 (* radius radius)
-        density (:density state^)
-        vx (:vx state^)
-        vy (:vy state^)
+        density state^.density
+        vx state^.vx
+        vy state^.vy
         y (- gy radius)]
     (while (<= y (+ gy radius))
       (let [x (- gx radius)]
@@ -301,16 +301,16 @@
 (defn seed-field!
   "Reset all fields and seed a few deterministic smoke plumes."
   [state: (ptr App-State)]
-  (clear-buffer! (:density state^))
-  (clear-buffer! (:density0 state^))
-  (clear-buffer! (:vx state^))
-  (clear-buffer! (:vy state^))
-  (clear-buffer! (:vx0 state^))
-  (clear-buffer! (:vy0 state^))
+  (clear-buffer! state^.density)
+  (clear-buffer! state^.density0)
+  (clear-buffer! state^.vx)
+  (clear-buffer! state^.vy)
+  (clear-buffer! state^.vx0)
+  (clear-buffer! state^.vy0)
   (add-smoke! state 38 62 5 115.0 2.5 -16.0)
   (add-smoke! state 70 55 7 150.0 0.0 -22.0)
   (add-smoke! state 102 64 5 115.0 -2.5 -16.0)
-  (set! (:has-last-mouse state^) false))
+  (set! state^.has-last-mouse false))
 
 (defn grid-start-x
   "Return the current centered pixel x coordinate for the grid."
@@ -343,21 +343,21 @@
         (when (rl.IsMouseButtonDown .LEFT)
           (let [dx: f32 0.0
                 dy: f32 0.0]
-            (when (:has-last-mouse state^)
-              (set! dx (- mx (:last-mouse-x state^)))
-              (set! dy (- my (:last-mouse-y state^))))
+            (when state^.has-last-mouse
+              (set! dx (- mx state^.last-mouse-x))
+              (set! dy (- my state^.last-mouse-y)))
             (add-smoke! state gx gy 5 80.0 (* dx (f32 0.42)) (* dy (f32 0.42)))))
         (when (rl.IsMouseButtonDown .RIGHT)
           (let [dx: f32 0.0
                 dy: f32 0.0]
-            (when (:has-last-mouse state^)
-              (set! dx (- mx (:last-mouse-x state^)))
-              (set! dy (- my (:last-mouse-y state^))))
+            (when state^.has-last-mouse
+              (set! dx (- mx state^.last-mouse-x))
+              (set! dy (- my state^.last-mouse-y)))
             (add-smoke! state gx gy 7 8.0 (* dx (f32 0.78)) (* dy (f32 0.78)))))
-        (set! (:has-last-mouse state^) true)
-        (set! (:last-mouse-x state^) mx)
-        (set! (:last-mouse-y state^) my))
-      (set! (:has-last-mouse state^) false))))
+        (set! state^.has-last-mouse true)
+        (set! state^.last-mouse-x mx)
+        (set! state^.last-mouse-y my))
+      (set! state^.has-last-mouse false))))
 
 (defn color-for
   "Map density and speed into a smoke color."
@@ -373,9 +373,9 @@
   "Draw the density field as fixed-size grid cells."
   [state: (ptr App-State)]
   (let [start-x (grid-start-x)
-        density (:density state^)
-        vx (:vx state^)
-        vy (:vy state^)
+        density state^.density
+        vx state^.vx
+        vy state^.vy
         y 0]
     (while (< y Grid-H)
       (let [x 0]
@@ -393,10 +393,10 @@
 (defn draw-velocity
   "Draw a sparse velocity-vector overlay."
   [state: (ptr App-State)]
-  (when (:show-velocity state^)
+  (when state^.show-velocity
     (let [start-x (grid-start-x)
-          vx (:vx state^)
-          vy (:vy state^)
+          vx state^.vx
+          vy state^.vy
           y 4]
       (while (< y (- Grid-H 4))
         (let [x 4]
@@ -431,13 +431,13 @@
     (draw-hud-text font "cells" 224 20 Hud-Font-Size rl.LIGHTGRAY)
     (draw-hud-text font (fmt.ctprintf "%6d" Grid-Cells) 284 20 Hud-Font-Size rl.RAYWHITE)
     (draw-hud-text font "fps" 382 20 Hud-Font-Size rl.LIGHTGRAY)
-    (draw-hud-text font (fmt.ctprintf "%6.1f" (:fps state^)) 425 20 Hud-Font-Size rl.RAYWHITE)
+    (draw-hud-text font (fmt.ctprintf "%6.1f" state^.fps) 425 20 Hud-Font-Size rl.RAYWHITE)
     (draw-hud-text font "update" 520 20 Hud-Font-Size rl.LIGHTGRAY)
-    (draw-hud-text font (fmt.ctprintf "%7.3f ms" (:update-ms state^)) 590 20 Hud-Font-Size rl.RAYWHITE)
+    (draw-hud-text font (fmt.ctprintf "%7.3f ms" state^.update-ms) 590 20 Hud-Font-Size rl.RAYWHITE)
     (draw-hud-text font "draw" 715 20 Hud-Font-Size rl.LIGHTGRAY)
-    (draw-hud-text font (fmt.ctprintf "%7.3f ms" (:draw-ms state^)) 765 20 Hud-Font-Size rl.RAYWHITE)
+    (draw-hud-text font (fmt.ctprintf "%7.3f ms" state^.draw-ms) 765 20 Hud-Font-Size rl.RAYWHITE)
     (draw-hud-text font "steps" 18 50 Hud-Font-Size rl.LIGHTGRAY)
-    (draw-hud-text font (fmt.ctprintf "%3d/frame" (:steps-per-frame state^)) 82 50 Hud-Font-Size rl.RAYWHITE)
+    (draw-hud-text font (fmt.ctprintf "%3d/frame" state^.steps-per-frame) 82 50 Hud-Font-Size rl.RAYWHITE)
     (draw-hud-text font "solve" 215 50 Hud-Font-Size rl.LIGHTGRAY)
     (draw-hud-text font (fmt.ctprintf "%2d iterations" Solver-Iterations) 272 50 Hud-Font-Size rl.RAYWHITE)
     (draw-hud-text font "buffers" 418 50 Hud-Font-Size rl.LIGHTGRAY)
@@ -447,28 +447,28 @@
 (defn update-fps-metric!
   "Update the smoothed FPS counter roughly twice per second."
   [state: (ptr App-State)]
-  (set! (:frames state^) (+ (:frames state^) 1))
+  (set! state^.frames (+ state^.frames 1))
   (let [now (rl.GetTime)
-        elapsed (- now (:metric-start state^))]
+        elapsed (- now state^.metric-start)]
     (when (>= elapsed 0.5)
-      (set! (:fps state^) (/ (f64 (:frames state^)) elapsed))
-      (set! (:frames state^) 0)
-      (set! (:metric-start state^) now))))
+      (set! state^.fps (/ (f64 state^.frames) elapsed))
+      (set! state^.frames 0)
+      (set! state^.metric-start now))))
 
 (defn handle-input!
   "Apply keyboard controls to the app state."
   [state: (ptr App-State)]
   (when (rl.IsKeyPressed .SPACE)
-    (set! (:paused state^) (not (:paused state^))))
+    (set! state^.paused (not state^.paused)))
   (when (rl.IsKeyPressed .V)
-    (set! (:show-velocity state^) (not (:show-velocity state^))))
-  (when (rl.IsKeyPressed .ONE) (set! (:target-fps state^) 30))
-  (when (rl.IsKeyPressed .TWO) (set! (:target-fps state^) 60))
-  (when (rl.IsKeyPressed .THREE) (set! (:target-fps state^) 144))
+    (set! state^.show-velocity (not state^.show-velocity)))
+  (when (rl.IsKeyPressed .ONE) (set! state^.target-fps 30))
+  (when (rl.IsKeyPressed .TWO) (set! state^.target-fps 60))
+  (when (rl.IsKeyPressed .THREE) (set! state^.target-fps 144))
   (when (rl.IsKeyPressed .UP)
-    (set! (:steps-per-frame state^) (math.clamp (+ (:steps-per-frame state^) 1) 1 8)))
+    (set! state^.steps-per-frame (math.clamp (+ state^.steps-per-frame 1) 1 8)))
   (when (rl.IsKeyPressed .DOWN)
-    (set! (:steps-per-frame state^) (math.clamp (- (:steps-per-frame state^) 1) 1 8)))
+    (set! state^.steps-per-frame (math.clamp (- state^.steps-per-frame 1) 1 8)))
   (when (rl.IsKeyPressed .R) (seed-field! state)))
 
 (defn run-window
@@ -479,24 +479,24 @@
   (defer (rl.CloseWindow))
   (rl.SetTargetFPS (i32 Initial-Target-FPS))
   (let [font (rl.LoadFontEx (cstring Hud-Font-Path) Hud-Font-Atlas-Size nil 0)
-        state (App-State {:density (make-buffer)
-                          :density0 (make-buffer)
-                          :vx (make-buffer)
-                          :vy (make-buffer)
-                          :vx0 (make-buffer)
-                          :vy0 (make-buffer)
-                          :target-fps Initial-Target-FPS
-                          :steps-per-frame Initial-Steps-Per-Frame
-                          :paused false
-                          :show-velocity false
-                          :has-last-mouse false
-                          :last-mouse-x 0
-                          :last-mouse-y 0
-                          :frames 0
-                          :metric-start (rl.GetTime)
-                          :fps 0
-                          :update-ms 0
-                          :draw-ms 0})]
+        state (App-State {density: (make-buffer)
+                          density0: (make-buffer)
+                          vx: (make-buffer)
+                          vy: (make-buffer)
+                          vx0: (make-buffer)
+                          vy0: (make-buffer)
+                          target-fps: Initial-Target-FPS
+                          steps-per-frame: Initial-Steps-Per-Frame
+                          paused: false
+                          show-velocity: false
+                          has-last-mouse: false
+                          last-mouse-x: 0
+                          last-mouse-y: 0
+                          frames: 0
+                          metric-start: (rl.GetTime)
+                          fps: 0
+                          update-ms: 0
+                          draw-ms: 0})]
     (rl.SetTextureFilter font.texture .BILINEAR)
     (defer (rl.UnloadFont font))
     (defer (delete state.density))

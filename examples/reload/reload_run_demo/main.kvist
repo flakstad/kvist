@@ -4,67 +4,67 @@
 (import time "core:time")
 
 (defstruct Program_State
-  {:request-count int
-   :last-route string
-   :last-response string})
+  {request-count: int
+   last-route: string
+   last-response: string})
 
 (defstruct App_State
-  {:program Program_State
-   :reload-count int
-   :unload-count int})
+  {program: Program_State
+   reload-count: int
+   unload-count: int})
 
 (def delay: time.Duration (* 1 time.Second))
 
 (defn init-program
   "Initializes the nested request-handling program state."
   [program: (ptr Program_State)]
-  (set! (:last-route program^) "boot")
-  (set! (:last-response program^) "program initialized"))
+  (set! program^.last-route "boot")
+  (set! program^.last-response "program initialized"))
 
 (defn init
   "Initializes the durable app state before the first run."
   [state: (ptr App_State)]
-  (init-program (& (:program state^))))
+  (init-program (& state^.program)))
 
 (defn on-load
   "Records reload entries after the first load."
   [state: (ptr App_State) is-reload: bool]
   (when is-reload
-    (set! (:reload-count state^) (+ (:reload-count state^) 1))))
+    (set! state^.reload-count (+ state^.reload-count 1))))
 
 (defn on-unload
   "Records module unloads before a reload swap."
   [state: (ptr App_State)]
-  (set! (:unload-count state^) (+ (:unload-count state^) 1)))
+  (set! state^.unload-count (+ state^.unload-count 1)))
 
 (defn handle-request
   "Runs one synthetic request and returns the response text."
   [program: (ptr Program_State)] -> string
-  (set! (:request-count program^) (+ (:request-count program^) 1))
-  (if (== (:request-count program^) 1)
-    (set! (:last-route program^) "/warmup")
-    (set! (:last-route program^) "/status"))
-  (set! (:last-response program^) "ok")
-  (:last-response program^))
+  (set! program^.request-count (+ program^.request-count 1))
+  (if (= program^.request-count 1)
+    (set! program^.last-route "/warmup")
+    (set! program^.last-route "/status"))
+  (set! program^.last-response "ok")
+  program^.last-response)
 
 (defn print-status
   "Prints the current synthetic request and reload counters."
   [reload-count: int unload-count: int program: (ptr Program_State)]
   (fmt.printf
     "[run] requests=%d reloads=%d unloads=%d route=%s response=%s\n"
-    (:request-count program^)
+    program^.request-count
     reload-count
     unload-count
-    (:last-route program^)
-    (:last-response program^)))
+    program^.last-route
+    program^.last-response))
 
 (defn tick
   "Runs one production application iteration."
   [state: (ptr App_State)]
-  (handle-request (& (:program state^)))
-  (print-status (:reload-count state^)
-                (:unload-count state^)
-                (& (:program state^))))
+  (handle-request (& state^.program))
+  (print-status state^.reload-count
+                state^.unload-count
+                (& state^.program)))
 
 (defn run
   "Runs the production application loop without reload machinery."

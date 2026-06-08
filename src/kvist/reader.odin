@@ -1,7 +1,6 @@
 package kvist
 
 import "core:strings"
-import "core:fmt"
 
 is_whitespace :: proc(ch: byte) -> bool {
     return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r'
@@ -592,8 +591,9 @@ parse_attached_postfix :: proc(tokens: []Token, index: ^int, base: CST_Form) -> 
             token := tokens[index^]
             index^ += 1
             list_items: [dynamic]CST_Form
-            append(&list_items, CST_Form{kind = .Keyword, text = fmt.tprintf(":%s", token.text[1:]), span = token.span})
+            append(&list_items, CST_Form{kind = .Symbol, text = "__kvist_field", span = token.span})
             append(&list_items, current)
+            append(&list_items, CST_Form{kind = .Symbol, text = token.text[1:], span = token.span})
             current = CST_Form{
                 kind = .List,
                 items = list_items,

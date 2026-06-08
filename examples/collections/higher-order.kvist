@@ -6,7 +6,7 @@
   (+ x 1))
 
 (defn even? [x: int] -> bool
-  (== (% x 2) 0))
+  (= (% x 2) 0))
 
 (defn add [acc: int, x: int] -> int
   (+ acc x))
@@ -35,9 +35,9 @@
     total))
 
 (defn main []
-  (core.println (threaded-total)))
+  (println (threaded-total)))
 
-(core.comment
+(comment
   (mapped-first)
   ;; => 2
 

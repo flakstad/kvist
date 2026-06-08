@@ -4,10 +4,10 @@
 
 (defn render-demo [] -> bool
   (let [html (html.render
-               [:div {:class "border"}
-                [:button {:class "primary"} "Save & Close"]
+               [:div {class: "border"}
+                [:button {class: "primary"} "Save & Close"]
                 [:span "Status <ok>"]]) defer]
-    (core.println html)
+    (println html)
     true))
 
 (defn main []

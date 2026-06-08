@@ -12,8 +12,8 @@
 (import thread "core:thread")
 
 (defstruct Counter {
-  :lock sync.Mutex
-  :value int
+  lock: sync.Mutex
+  value: int
 })
 
 (defn send-square [result: (type chan.Chan int)]
@@ -38,25 +38,25 @@
   ;; sync.guard lowers to the ordinary Odin guard pattern. The lock is held
   ;; only for this scope and released automatically by Odin's deferred_in
   ;; attribute on sync.guard.
-  (if (sync.guard (addr (:lock (deref counter))))
-    (core.update! counter^ :value (+ (:value counter^) 1))))
+  (if (sync.guard (addr counter^.lock))
+    (set! counter^.value (+ counter^.value 1))))
 
 (defn mutex-protected-count [] -> int
   ;; Two joinable threads mutate shared state. The pointer is passed explicitly,
   ;; and the main thread joins.destroys the handles before reading the result.
-  (let [counter (Counter {:lock {} :value 0})
+  (let [counter (Counter {lock: {} value: 0})
         a (thread.create-and-start-with-poly-data (addr counter) increment-once)
         b (thread.create-and-start-with-poly-data (addr counter) increment-once)]
     (thread.join a)
     (thread.join b)
     (thread.destroy a)
     (thread.destroy b)
-    (:value counter)))
+    counter.value))
 
 (defn main []
-  (core.println (future-like-square) (mutex-protected-count)))
+  (println (future-like-square) (mutex-protected-count)))
 
-(core.comment
+(comment
   ;; A channel plus a worker thread is the basic future-like pattern. This is
   ;; deliberately not a Kvist abstraction yet; the underlying Odin ownership
   ;; and blocking behavior stay visible.

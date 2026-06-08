@@ -13,9 +13,9 @@ Prefer ordinary Kvist forms whenever possible.
 
 Keep live-only forms narrow and structural:
 
-- `live/module`
-- `live/command`
-- `live/hook`
+- `live.module`
+- `live.command`
+- `live.hook`
 
 Everything else should move toward ordinary Kvist surface area unless there is
 a strong reason not to.
@@ -39,8 +39,8 @@ Current constraints:
   loaded as separate runtime modules
 - imported helper files currently support ordinary `def`, `defvar`, and
   `defn`
-- imported helper files may not define `live/module`, `live/command`,
-  `live/hook`, `init`, `shutdown`, or `migrate`
+- imported helper files may not define `live.module`, `live.command`,
+  `live.hook`, `init`, `shutdown`, or `migrate`
 - top-level `def` / `defvar` values must still be simple literals
 - top-level `defn` is used for live helper functions and same-named entrypoint
   implementations
@@ -49,25 +49,25 @@ Current constraints:
 
 ## Current Live-Only Top-Level Forms
 
-- `live/module`
+- `live.module`
   - module metadata and initial literal state
-- `live/command`
+- `live.command`
   - marks a command entrypoint
   - may have no body, an options map, an inline body, or both
   - with no inline body, a same-named zero-arg `defn` is used
-- `live/hook`
+- `live.hook`
   - marks a hook entrypoint
-  - follows the same shape rules as `live/command`
+  - follows the same shape rules as `live.command`
 
 The shipped `kvist:live` package now wraps the most common source patterns
 with:
 
-- `live/defmodule`
-- `live/defcommand`
-- `live/defhook`
+- `live.defmodule`
+- `live.defcommand`
+- `live.defhook`
 
-Those macros lower back into the same structural `live/module`,
-`live/command`, and `live/hook` forms above.
+Those macros lower back into the same structural `live.module`,
+`live.command`, and `live.hook` forms above.
 
 ## Current Expression Subset
 
@@ -78,7 +78,6 @@ The live evaluator currently supports:
   - int
   - bool
   - nil
-  - keyword
 - symbols:
   - local bindings
   - module bindings from top-level `def` / `defvar`
@@ -99,9 +98,9 @@ The live evaluator currently supports:
   - `args.count`
   - `args.get`
   - `payload.count`
-  - `payload/get`
-  - `host/call`
-  - `hook/emit`
+  - `payload.get`
+  - `host.call`
+  - `hook.emit`
 - basic operations:
   - `+`
   - `=`

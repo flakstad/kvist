@@ -7,7 +7,7 @@
 
 (defn run-one-step [program: ^Program_State] -> string
   (mut! program^.jobs-finished += 1)
-  (if (== program^.jobs-finished 1)
+  (if (= program^.jobs-finished 1)
     (set! program^.last-status "warming up")
     (set! program^.last-status "running"))
   program^.last-status)

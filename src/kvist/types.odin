@@ -64,12 +64,10 @@ CST_Top_Form :: struct {
 }
 
 Param :: struct {
-    name:                 string,
-    ty:                   string,
-    is_field_destructure: bool,
-    destructure_fields:   [dynamic]Struct_Field,
-    has_default:          bool,
-    default_value:        CST_Form,
+    name:          string,
+    ty:            string,
+    has_default:   bool,
+    default_value: CST_Form,
 }
 
 Struct_Field :: struct {
@@ -104,7 +102,6 @@ Import_Decl :: struct {
     alias:      string,
     path:       string,
     has_alias:  bool,
-    force_odin: bool,
 }
 
 Struct_Decl :: struct {

@@ -7,15 +7,15 @@
 (import httpc "kvist:http/client")
 
 (defstruct Greeting {
-  :message string
+  message: string
 })
 
 (defn fetch-ping [] -> bool
   (let [[res err] (httpc.get "http://127.0.0.1:6969/ping")]
-    (if (== err nil)
+    (if (= err nil)
       (do
         (defer (httpc.response-destroy res))
-        (== (:status res) .OK))
+        (= res.status .OK))
       false)))
 
 (defn post-greeting [] -> bool
@@ -23,14 +23,14 @@
     (defer (httpc.request-destroy req))
     (httpc.set-header! req "x-api-key" "demo")
     (httpc.add-cookie! req "session" "abc123")
-    (let [json-err (httpc.with-json req (Greeting {:message "hello"}))]
+    (let [json-err (httpc.with-json req (Greeting {message: "hello"}))]
       (if (!= json-err nil)
         false
         (let [[res err] (httpc.request req "http://127.0.0.1:6969/hello")]
-          (if (== err nil)
+          (if (= err nil)
             (do
               (defer (httpc.response-destroy res))
-              (== (:status res) .OK))
+              (= res.status .OK))
             false))))))
 
 (defn main []

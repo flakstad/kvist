@@ -3,17 +3,17 @@
 
 ;; This is a greeting
 (defstruct Greeting {
-  :message string
+  message: string
 })
 
 (defn main []
-  (let [g (Greeting { :message "hello from kvist" })]
-    (core.println (:message g))))
+  (let [g (Greeting { message: "hello from kvist" })]
+    (println g.message)))
 
-(core.comment
+(comment
 
-  (core.-> (Greeting { :message "hello!" })
-      :message
+  (-> (Greeting { message: "hello!" })
+      .message
       len)
   ;; => 6
 

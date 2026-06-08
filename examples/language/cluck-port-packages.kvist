@@ -6,11 +6,11 @@
   "package demo")
 
 (defn packages-demo [] -> bool
-  (core.println banner)
-  (core.println (math.sum-range 0 5))
+  (println banner)
+  (println (math.sum-range 0 5))
   (let [evens (math.evens-under math.default-limit)]
-    (core.println evens))
+    (println evens))
   true)
 
 (defn main []
-  (core.println (packages-demo)))
+  (println (packages-demo)))

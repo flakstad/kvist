@@ -4,25 +4,25 @@
 (import arr "kvist:arr")
 
 (defstruct User {
-  :name string
-  :age int
+  name: string
+  age: int
 })
 
 (defn inspected-age [] -> int
-  (let [user (core.tap> :user (User {:name "Ada" :age 36}))
-        age (core.tap> :age (:age user))]
+  (let [user (tap> "user" (User {name: "Ada" age: 36}))
+        age (tap> "age" user.age)]
     age))
 
 (defn inspected-owned-count [] -> int
-  (let [xs (core.tap> "numbers" (arr.dynamic int [1 2 3]))]
+  (let [xs (tap> "numbers" (arr.dynamic int [1 2 3]))]
     (defer (delete xs))
-    (core.count xs)))
+    (count xs)))
 
 (defn plus-one [x: int] -> int
   (+ x 1))
 
 (defn even? [x: int] -> bool
-  (== (% x 2) 0))
+  (= (% x 2) 0))
 
 (defn add [acc: int, x: int] -> int
   (+ acc x))
@@ -32,17 +32,17 @@
         mapped (arr.map plus-one xs)]
     (defer (delete xs))
     (defer (delete mapped))
-    (core.tap> :mapped mapped)
+    (tap> "mapped" mapped)
     (let [evens (arr.filter even? mapped)
           total (arr.reduce add 0 evens)]
       (defer (delete evens))
       total)))
 
 (defn main []
-  (core.println (inspected-age))
-  (core.println (inspected-thread-total)))
+  (println (inspected-age))
+  (println (inspected-thread-total)))
 
-(core.comment
+(comment
   (inspected-age)
   ;; prints:
   ;; user: User{name = "Ada", age = 36}

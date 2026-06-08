@@ -23,18 +23,18 @@
 (def Hud-Font-Spacing: f32 1.0)
 
 (defstruct App-State
-  {:a [dynamic]f32
-   :b [dynamic]f32
-   :next-a [dynamic]f32
-   :next-b [dynamic]f32
-   :target-fps int
-   :steps-per-frame int
-   :paused bool
-   :frames int
-   :metric-start f64
-   :fps f64
-   :update-ms f64
-   :draw-ms f64})
+  {a: [dynamic]f32
+   b: [dynamic]f32
+   next-a: [dynamic]f32
+   next-b: [dynamic]f32
+   target-fps: int
+   steps-per-frame: int
+   paused: bool
+   frames: int
+   metric-start: f64
+   fps: f64
+   update-ms: f64
+   draw-ms: f64})
 
 (defn idx
   "Convert grid x.y coordinates into a flat array index."
@@ -245,18 +245,18 @@
   (defer (rl.CloseWindow))
   (rl.SetTargetFPS (i32 Initial-Target-FPS))
   (let [font (rl.LoadFontEx (cstring Hud-Font-Path) Hud-Font-Atlas-Size nil 0)
-        state (App-State {:a (make-buffer)
-                          :b (make-buffer)
-                          :next-a (make-buffer)
-                          :next-b (make-buffer)
-                          :target-fps Initial-Target-FPS
-                          :steps-per-frame Initial-Steps-Per-Frame
-                          :paused false
-                          :frames 0
-                          :metric-start (rl.GetTime)
-                          :fps 0
-                          :update-ms 0
-                          :draw-ms 0})]
+        state (App-State {a: (make-buffer)
+                          b: (make-buffer)
+                          next-a: (make-buffer)
+                          next-b: (make-buffer)
+                          target-fps: Initial-Target-FPS
+                          steps-per-frame: Initial-Steps-Per-Frame
+                          paused: false
+                          frames: 0
+                          metric-start: (rl.GetTime)
+                          fps: 0
+                          update-ms: 0
+                          draw-ms: 0})]
     (rl.SetTextureFilter font.texture .BILINEAR)
     (defer (rl.UnloadFont font))
     (defer (delete state.a))

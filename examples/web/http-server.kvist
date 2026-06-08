@@ -7,7 +7,7 @@
 (import http "kvist:http")
 
 (defstruct Greeting {
-  :message string
+  message: string
 })
 
 (defn main []
@@ -19,10 +19,10 @@
       (http.respond-plain res "pong"))
 
     (http.get! router "/hello/(%w+)" [req res]
-      (let [params (:url_params (deref req))]
+      (let [params req^.url_params]
         (http.respond-json
           res
-          (Greeting {:message (fmt.tprintf "hello %s" (get params 0))}))))
+          (Greeting {message: (fmt.tprintf "hello %s" (get params 0))}))))
 
     (http.server-shutdown-on-interrupt! server)
     (http.listen-and-serve! server router 6969)))

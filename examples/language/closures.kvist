@@ -28,16 +28,16 @@
 
 (defn main []
   (let [xs [1 2 3] defer]
-    (core.println (fn-literal-demo) (captured-map-demo (core.slice xs 0)) (captured-map-bang-demo))))
+    (println (fn-literal-demo) (captured-map-demo (slice xs 0)) (captured-map-bang-demo))))
 
-(core.comment
+(comment
   ;; Plain non-capturing function literals still work.
   (fn-literal-demo)
   ;; => true
 
   ;; First-cut captured callbacks work for known non-escaping helpers.
   (let [xs [1 2 3] defer]
-    (captured-map-demo (core.slice xs 0)))
+    (captured-map-demo (slice xs 0)))
   ;; => [11 12 13]
 
   (captured-map-bang-demo)

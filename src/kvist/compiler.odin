@@ -10,6 +10,7 @@ Alias_Prefix :: struct {
     alias:   string,
     prefix:  string,
     exports: [dynamic]string,
+    raw_exports: [dynamic]string,
     preserve_qualified_calls: bool,
 }
 
@@ -19,6 +20,7 @@ Loaded_Forms :: struct {
     imports: [dynamic]CST_Top_Form,
     decls: [dynamic]CST_Top_Form,
     exports: [dynamic]string,
+    raw_exports: [dynamic]string,
 }
 
 synthetic_package_decl :: proc(name: string) -> CST_Top_Form {
@@ -40,6 +42,33 @@ synthetic_package_decl :: proc(name: string) -> CST_Top_Form {
     return CST_Top_Form{
         form = package_form,
         source = fmt.tprintf("(package %s)", name),
+    }
+}
+
+synthetic_import_decl :: proc(alias, path: string) -> CST_Top_Form {
+    import_symbol := CST_Form{
+        kind = .Symbol,
+        text = "import",
+        span = Span{source = .File},
+    }
+    alias_symbol := CST_Form{
+        kind = .Symbol,
+        text = alias,
+        span = Span{source = .File},
+    }
+    path_string := CST_Form{
+        kind = .String,
+        text = fmt.tprintf("%q", path),
+        span = Span{source = .File},
+    }
+    import_form := CST_Form{
+        kind = .List,
+        span = Span{source = .File},
+    }
+    append(&import_form.items, import_symbol, alias_symbol, path_string)
+    return CST_Top_Form{
+        form = import_form,
+        source = fmt.tprintf("(import %s %q)", alias, path),
     }
 }
 
@@ -250,6 +279,37 @@ is_shipped_source_import_path :: proc(path: string) -> bool {
 }
 
 is_source_import_path :: proc(path: string) -> bool {
+    return is_source_import_path_from(".", path)
+}
+
+directory_has_kvist_files :: proc(dir: string) -> bool {
+    entries, err := os.read_directory_by_path(dir, -1, context.allocator)
+    if err != nil {
+        return false
+    }
+    defer delete(entries)
+
+    for entry in entries {
+        if entry.type == .Regular && strings.has_suffix(entry.name, ".kvist") {
+            return true
+        }
+    }
+    return false
+}
+
+resolve_import_base_path :: proc(importer_path, import_path: string) -> (base: string, owned: bool) {
+    base_dir, _ := os.split_path(importer_path)
+    if base_dir == "" {
+        return import_path, false
+    }
+    joined, join_err := os.join_path({base_dir, import_path}, context.allocator)
+    if join_err != nil {
+        return import_path, false
+    }
+    return joined, true
+}
+
+is_source_import_path_from :: proc(importer_path, path: string) -> bool {
     if strings.has_prefix(path, "kvist:") {
         return true
     }
@@ -257,6 +317,26 @@ is_source_import_path :: proc(path: string) -> bool {
         if ch == ':' {
             return false
         }
+    }
+
+    base, base_owned := resolve_import_base_path(importer_path, path)
+    if base_owned {
+        defer delete(base)
+    }
+    if os.exists(base) {
+        if os.is_dir(base) {
+            return directory_has_kvist_files(base)
+        }
+        return strings.has_suffix(base, ".kvist")
+    }
+
+    file_path := fmt.tprintf("%s.kvist", base)
+    return os.exists(file_path) && !os.is_dir(file_path)
+}
+
+is_relative_odin_import_path :: proc(path: string) -> bool {
+    if path == "" || os.is_absolute_path(path) || strings.contains(path, ":") {
+        return false
     }
     return true
 }
@@ -403,34 +483,117 @@ collect_public_decl_names :: proc(forms: []CST_Top_Form) -> (names: [dynamic]str
     return names
 }
 
+valid_odin_decl_name :: proc(text: string) -> bool {
+    if text == "" {
+        return false
+    }
+    for ch, idx in text {
+        if idx == 0 {
+            if (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || ch == '_' {
+                continue
+            }
+            return false
+        }
+        if (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '_' {
+            continue
+        }
+        return false
+    }
+    return true
+}
+
+collect_raw_odin_decl_names_from_source :: proc(source: string) -> (names: [dynamic]string) {
+    lines := strings.split_lines(source, context.allocator)
+    defer delete(lines)
+    for line in lines {
+        if line == "" || strings.trim_left(line, " \t") != line {
+            continue
+        }
+        trimmed := strings.trim_space(line)
+        if trimmed == "" || strings.has_prefix(trimmed, "//") {
+            continue
+        }
+        separator := strings.index(trimmed, "::")
+        if separator < 0 {
+            separator = strings.index(trimmed, ":")
+        }
+        if separator <= 0 {
+            continue
+        }
+        name := strings.trim_space(trimmed[:separator])
+        if valid_odin_decl_name(name) && !contains_text(names[:], name) {
+            append(&names, strings.clone(name))
+        }
+    }
+    return names
+}
+
+collect_raw_odin_decl_names_from_dir :: proc(dir: string) -> (names: [dynamic]string) {
+    if !os.exists(dir) || !os.is_dir(dir) {
+        return names
+    }
+    entries, err := os.read_directory_by_path(dir, -1, context.allocator)
+    if err != nil {
+        return names
+    }
+    defer delete(entries)
+
+    for entry in entries {
+        if entry.type != .Regular || !strings.has_suffix(entry.name, ".odin") {
+            continue
+        }
+        path, join_err := os.join_path({dir, entry.name}, context.allocator)
+        if join_err != nil {
+            continue
+        }
+        data, read_err := os.read_entire_file_from_path(path, context.allocator)
+        delete(path)
+        if read_err != nil {
+            continue
+        }
+        file_names := collect_raw_odin_decl_names_from_source(string(data))
+        delete(data)
+        for name in file_names {
+            if !contains_text(names[:], name) {
+                append(&names, strings.clone(name))
+            }
+        }
+        delete_string_slice(&file_names)
+    }
+    return names
+}
+
+source_package_dir_for_raw_sidecars :: proc(path: string) -> string {
+    if os.exists(path) && os.is_dir(path) {
+        return strings.clone(path)
+    }
+    dir, _ := os.split_path(path)
+    if dir == "" {
+        return strings.clone(".")
+    }
+    return strings.clone(dir)
+}
+
 append_source_package_marker_exports :: proc(names: ^[dynamic]string, import_path: string) {
     if import_path == "kvist:html" && !contains_text(names^[:], "for") {
         append(names, "for")
     }
 }
 
-source_import_alias_and_path :: proc(form: CST_Form) -> (alias, path: string, ok: bool) {
+source_import_alias_and_path :: proc(form: CST_Form, importer_path: string = ".") -> (alias, path: string, ok: bool) {
     if form.kind != .List || len(form.items) == 0 || !is_symbol(form.items[0], "import") {
         return "", "", false
     }
-    if len(form.items) >= 3 {
-        if form.items[1].kind == .Keyword && form.items[1].text == ":odin" {
-            return "", "", false
-        }
-        if len(form.items) >= 4 && form.items[2].kind == .Keyword && form.items[2].text == ":odin" {
-            return "", "", false
-        }
-    }
     if len(form.items) == 2 && form.items[1].kind == .String {
         path = import_path_text(form.items[1])
-        if !is_source_import_path(path) {
+        if !is_source_import_path_from(importer_path, path) {
             return "", "", false
         }
         return import_default_alias(path), path, true
     }
     if len(form.items) == 3 && form.items[1].kind == .Symbol && form.items[2].kind == .String {
         path = import_path_text(form.items[2])
-        if !is_source_import_path(path) {
+        if !is_source_import_path_from(importer_path, path) {
             return "", "", false
         }
         return map_name(form.items[1].text), path, true
@@ -438,33 +601,30 @@ source_import_alias_and_path :: proc(form: CST_Form) -> (alias, path: string, ok
     return "", "", false
 }
 
-rewrite_force_odin_import_form :: proc(importer_path: string, top: CST_Top_Form) -> CST_Top_Form {
+rewrite_relative_odin_import_form :: proc(importer_path: string, top: CST_Top_Form) -> CST_Top_Form {
     rewritten := clone_cst_top_form(top)
     form := &rewritten.form
-    if form.kind != .List || len(form.items) < 3 || !is_symbol(form.items[0], "import") {
+    if form.kind != .List || len(form.items) < 2 || !is_symbol(form.items[0], "import") {
         return rewritten
     }
 
     path_index := -1
-    if len(form.items) == 3 &&
-       form.items[1].kind == .Keyword &&
-       form.items[1].text == ":odin" &&
-       form.items[2].kind == .String {
-        path_index = 2
+    if len(form.items) == 2 && form.items[1].kind == .String {
+        path_index = 1
     }
-    if len(form.items) == 4 &&
-       form.items[1].kind == .Symbol &&
-       form.items[2].kind == .Keyword &&
-       form.items[2].text == ":odin" &&
-       form.items[3].kind == .String {
-        path_index = 3
+    if len(form.items) == 3 && form.items[1].kind == .Symbol && form.items[2].kind == .String {
+        path_index = 2
     }
     if path_index < 0 {
         return rewritten
     }
 
     raw_path := import_path_text(form.items[path_index])
-    if raw_path == "" || os.is_absolute_path(raw_path) || strings.contains(raw_path, ":") {
+    if !is_relative_odin_import_path(raw_path) {
+        return rewritten
+    }
+    _, _, is_source_import := source_import_alias_and_path(top.form, importer_path)
+    if is_source_import {
         return rewritten
     }
 
@@ -678,11 +838,11 @@ collect_root_source_import_aliases_from_files :: proc(files: []Package_File) -> 
     aliases: [dynamic]Alias_Prefix
     for file in files {
         for top in file.forms {
-            alias, _, ok_import := source_import_alias_and_path(top.form)
+            alias, _, ok_import := source_import_alias_and_path(top.form, file.path)
             if !ok_import {
                 continue
             }
-            _, import_path, _ := source_import_alias_and_path(top.form)
+            _, import_path, _ := source_import_alias_and_path(top.form, file.path)
             resolved, err_resolve, ok_resolve := resolve_source_import_path(file.path, import_path)
             if !ok_resolve {
                 return nil, err_resolve, false
@@ -697,11 +857,15 @@ collect_root_source_import_aliases_from_files :: proc(files: []Package_File) -> 
             }
             import_forms := flatten_package_forms(import_files[:])
             exports := collect_public_decl_names(import_forms[:])
+            raw_dir := source_package_dir_for_raw_sidecars(resolved)
+            raw_exports := collect_raw_odin_decl_names_from_dir(raw_dir)
+            delete(raw_dir)
             append_source_package_marker_exports(&exports, import_path)
             append(&aliases, Alias_Prefix{
                 alias = alias,
                 prefix = alias,
                 exports = exports,
+                raw_exports = raw_exports,
                 preserve_qualified_calls = import_path == "kvist:core",
             })
         }
@@ -728,8 +892,13 @@ rewrite_symbol_text :: proc(text: string, locals: []string, aliases: []Alias_Pre
             if alias_map.preserve_qualified_calls {
                 return text, Compile_Error{}, true
             }
-            if len(alias_map.exports) > 0 && !contains_text(alias_map.exports[:], member) {
+            raw_member := map_name(member)
+            is_raw_export := contains_text(alias_map.raw_exports[:], raw_member)
+            if len(alias_map.exports) > 0 && !contains_text(alias_map.exports[:], member) && !is_raw_export {
                 return "", Compile_Error{message = fmt.tprintf("source package member is private or undefined: %s.%s", alias_map.alias, member), span = span}, false
+            }
+            if is_raw_export {
+                return fmt.tprintf("%s%s%s.%s", quote_prefix, operator_prefix, alias_map.prefix, raw_member), Compile_Error{}, true
             }
             return fmt.tprintf("%s%s%s__%s", quote_prefix, operator_prefix, alias_map.prefix, member), Compile_Error{}, true
         }
@@ -1103,7 +1272,7 @@ validate_package_files :: proc(dir: string, files: []Package_File) -> (package_n
 collect_package_import_aliases :: proc(files: []Package_File) -> (aliases: [dynamic]string, paths: [dynamic]string, err: Compile_Error, ok: bool) {
     for file in files {
         for top in file.forms {
-            alias, path, ok_import := source_import_alias_and_path(top.form)
+            alias, path, ok_import := source_import_alias_and_path(top.form, file.path)
             if !ok_import {
                 continue
             }
@@ -1118,7 +1287,7 @@ collect_package_import_aliases :: proc(files: []Package_File) -> (aliases: [dyna
             if decl_head_name(form) != "import" {
                 continue
             }
-            _, path, is_source_import := source_import_alias_and_path(form)
+            _, path, is_source_import := source_import_alias_and_path(form, file.path)
             if is_source_import {
                 continue
             }
@@ -1222,26 +1391,36 @@ load_source_forms :: proc(dir, prefix: string, loaded_keys, import_keys: ^[dynam
     }
     locals := collect_local_decl_names(all_forms[:])
     exported := collect_public_decl_names(all_forms[:])
+    raw_dir := source_package_dir_for_raw_sidecars(dir)
+    defer delete(raw_dir)
+    raw_exported := collect_raw_odin_decl_names_from_dir(raw_dir)
     aliases: [dynamic]Alias_Prefix
     result := Loaded_Forms{}
     for name in exported {
         append(&result.exports, name)
+    }
+    for name in raw_exported {
+        append(&result.raw_exports, name)
     }
     if package_name != "" {
         self_prefix := prefix
         if self_prefix == "" {
             self_prefix = package_name
         }
+        if len(raw_exported) > 0 {
+            append_import_form_unique(&result.imports, import_keys, synthetic_import_decl(self_prefix, raw_dir))
+        }
         append(&aliases, Alias_Prefix{
             alias = package_name,
             prefix = self_prefix,
             exports = exported,
+            raw_exports = raw_exported,
         })
     }
 
     for file in files {
         for top in file.forms {
-            alias, import_path, ok_import := source_import_alias_and_path(top.form)
+            alias, import_path, ok_import := source_import_alias_and_path(top.form, file.path)
             if !ok_import {
                 continue
             }
@@ -1258,11 +1437,13 @@ load_source_forms :: proc(dir, prefix: string, loaded_keys, import_keys: ^[dynam
                 return result, err_nested, false
             }
             nested_exports := nested.exports
+            nested_raw_exports := nested.raw_exports
             append_source_package_marker_exports(&nested_exports, import_path)
             append(&aliases, Alias_Prefix{
                 alias = alias,
                 prefix = nested_prefix,
                 exports = nested_exports,
+                raw_exports = nested_raw_exports,
                 preserve_qualified_calls = import_path == "kvist:core",
             })
             for form in nested.imports {
@@ -1285,12 +1466,12 @@ load_source_forms :: proc(dir, prefix: string, loaded_keys, import_keys: ^[dynam
                 }
                 continue
             }
-            _, _, is_source_import := source_import_alias_and_path(form)
+            _, _, is_source_import := source_import_alias_and_path(form, file.path)
             if is_source_import {
                 continue
             }
             if head == "import" {
-                append_import_form_unique(&result.imports, import_keys, rewrite_force_odin_import_form(file.path, top))
+                append_import_form_unique(&result.imports, import_keys, rewrite_relative_odin_import_form(file.path, top))
                 continue
             }
             rewritten, err_rewrite, ok_rewrite := rewrite_top_form(top, locals[:], aliases[:], prefix)
@@ -1339,7 +1520,7 @@ load_root_file_forms :: proc(path: string) -> (Loaded_Forms, Compile_Error, bool
 
     for file in files {
         for top in file.forms {
-            alias, import_path, ok_import := source_import_alias_and_path(top.form)
+            alias, import_path, ok_import := source_import_alias_and_path(top.form, file.path)
             if !ok_import {
                 continue
             }
@@ -1353,11 +1534,13 @@ load_root_file_forms :: proc(path: string) -> (Loaded_Forms, Compile_Error, bool
                 return result, err_nested, false
             }
             nested_exports := nested.exports
+            nested_raw_exports := nested.raw_exports
             append_source_package_marker_exports(&nested_exports, import_path)
             append(&aliases, Alias_Prefix{
                 alias = alias,
                 prefix = alias,
                 exports = nested_exports,
+                raw_exports = nested_raw_exports,
                 preserve_qualified_calls = import_path == "kvist:core",
             })
             for form in nested.imports {
@@ -1378,7 +1561,7 @@ load_root_file_forms :: proc(path: string) -> (Loaded_Forms, Compile_Error, bool
                 result.package_decl = top
                 continue
             }
-            _, _, is_source_import := source_import_alias_and_path(form)
+            _, _, is_source_import := source_import_alias_and_path(form, file.path)
             if is_source_import {
                 continue
             }
@@ -1419,11 +1602,13 @@ load_root_source_forms :: proc(forms: []CST_Top_Form) -> (Loaded_Forms, Compile_
             return result, err_nested, false
         }
         nested_exports := nested.exports
+        nested_raw_exports := nested.raw_exports
         append_source_package_marker_exports(&nested_exports, import_path)
         append(&aliases, Alias_Prefix{
             alias = alias,
             prefix = alias,
             exports = nested_exports,
+            raw_exports = nested_raw_exports,
             preserve_qualified_calls = import_path == "kvist:core",
         })
         for form in nested.imports {
@@ -1442,7 +1627,7 @@ load_root_source_forms :: proc(forms: []CST_Top_Form) -> (Loaded_Forms, Compile_
             result.package_decl = top
             continue
         }
-        _, _, is_source_import := source_import_alias_and_path(form)
+        _, _, is_source_import := source_import_alias_and_path(form, ".")
         if is_source_import {
             continue
         }

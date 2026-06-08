@@ -50,18 +50,18 @@ These helpers are already in scope and should remain small:
 (arr.shuffle pick xs)
 (arr.sort xs)
 (arr.sort-by f xs)
-(arr.sort-by :field xs)
+(arr.sort-by .field xs)
 (arr.reverse! xs)
 (arr.shuffle! pick xs)
 (arr.sort! xs)
 (arr.sort-by! f xs)
-(arr.sort-by! :field xs)
+(arr.sort-by! .field xs)
 (arr.map! f xs)
 (arr.map-indexed! f xs)
 (arr.filter! pred xs)
-(arr.filter! :field xs)
+(arr.filter! .field xs)
 (arr.remove! pred xs)
-(arr.remove! :field xs)
+(arr.remove! .field xs)
 (arr.keep! f xs)
 (arr.into! target xs)
 (map.merge! target source)
@@ -69,22 +69,22 @@ These helpers are already in scope and should remain small:
 (arr.partition n xs)
 (arr.partition-all n xs)
 (arr.partition-by f xs)
-(arr.partition-by :field xs)
+(arr.partition-by .field xs)
 (map.zip keys vals)
 (arr.index-by f xs)
-(arr.index-by :field xs)
+(arr.index-by .field xs)
 (arr.group-by f xs)
-(arr.group-by :field xs)
+(arr.group-by .field xs)
 (arr.count-by f xs)
-(arr.count-by :field xs)
+(arr.count-by .field xs)
 (arr.sum-by key-f value-f xs)
-(arr.sum-by :key-field :value-field xs)
+(arr.sum-by .key-field .value-field xs)
 (arr.frequencies xs)
 (map.keys m)
 (map.vals m)
 (arr.distinct xs)
 (arr.distinct-by f xs)
-(arr.distinct-by :field xs)
+(arr.distinct-by .field xs)
 (arr.range end)
 (arr.range start end)
 (arr.range start end step)
@@ -140,22 +140,63 @@ These helpers are already in scope and should remain small:
 (set.add! s value)
 (set.remove s value)
 (set.remove! s value)
-(core.empty? xs)
-(core.count xs)
-(core.get m k default)
-(core.contains? collection key)
+(empty? xs)
+(count xs)
+(get xs i)
+(get user .name)
+(get m k default)
+(slice xs start end)
+(contains? collection key)
 ```
 
-Cross-family collection helpers live in `kvist:core`: `core.count`,
-`core.empty?`, `core.get`, `core.slice`, and `core.contains?`. Other
-collection operations should use explicit package names such as `arr/...`,
-`map/...`, `str/...`, or `set/...`.
+Cross-family collection helpers live in `kvist:core`: `count`,
+`empty?`, `get`, `slice`, and `contains?`. Other
+collection operations should use explicit package names such as `arr.*`, `map.*`, `str.*`, or `set.*`.
 
 The access and trimming helpers use the direct Odin representation where
-possible. `arr.first`, `arr.second`, `arr.last`, and `arr.nth` lower to indexing.
+possible. Direct access syntax and call-shaped helpers are equivalent where both
+apply:
+
+```clojure
+user.name      ;; (get user .name)
+xs[i]          ;; (get xs i)
+xs[start:end]  ;; (slice xs start end)
+```
+
+Mutation uses the same place model:
+
+```clojure
+(set! place value)         ;; assign
+(mut! place += value)      ;; compound operator mutation
+(update! place f args...)  ;; functional mutation
+```
+
+`for` is the expression form for building owned collections from other
+collections:
+
+```clojure
+(for [user users :let [decade (* (/ user.age 10) 10)] :when user.active]
+  :into [dynamic]Row
+  (Row {name: user.name decade: decade}))
+
+(for [user users :when user.active]
+  :into map[string]User
+  [user.id user])
+
+(for [user users :while (< user.age 65) :when user.active]
+  :into set[string]
+  user.id)
+```
+
+Without `:into`, Kvist infers a `[dynamic]T` result when the yielded expression
+has an obvious type. Map output requires a yielded `[key value]` vector. Set
+output inserts the yielded value as the member. Use `each` when the loop exists
+for side effects, mutation, logging, or early return.
+
+`arr.first`, `arr.second`, `arr.last`, and `arr.nth` lower to indexing.
 Direct expression indexes can be written as attached brackets, for example
 `cells[(idx x y)]`, and work in reads, `set!`, and `mut!` places.
-`core.empty?` lowers to `len`. `arr.rest`, `arr.take`, `arr.drop`, `arr.butlast`,
+`empty?` lowers to `len`. `arr.rest`, `arr.take`, `arr.drop`, `arr.butlast`,
 `arr.drop-last`, `arr.take-while`, and `arr.drop-while` return non-owning slice
 views. Three-argument `get` is a map
 helper: it uses Odin's
@@ -254,28 +295,30 @@ and `arr.max-by`, and the ordinary function-predicate path for
 partitioning, and sorting helper surface still lower through a smaller
 intrinsic substrate where that keeps codegen and allocation behavior direct.
 
-Keyword callbacks are field-access shorthand in the supported higher-order
-helpers:
+Dot selectors are field selectors in supported higher-order helper positions.
+They read a field from the current element without requiring a tiny anonymous
+function:
 
 ```clojure
-(arr.map :name users)
-(arr.index-by :id users)
-(arr.group-by :status users)
-(arr.count-by :status users)
-(arr.sum-by :region :amount orders)
-(arr.partition-by :status users)
-(arr.distinct-by :id users)
-(arr.sort-by :age users)
-(arr.sort-by! :age users)
-(arr.filter :verified users)
-(arr.remove :archived users)
-(core.->> users
-     (arr.filter :verified)
-     (arr.map :name))
+(arr.map .name users)
+(arr.index-by .id users)
+(arr.group-by .status users)
+(arr.count-by .status users)
+(arr.sum-by .region .amount orders)
+(arr.partition-by .status users)
+(arr.distinct-by .id users)
+(arr.sort-by .age users)
+(arr.sort-by! .age users)
+(arr.filter .verified users)
+(arr.remove .archived users)
+(->> users
+     (arr.filter .verified)
+     (arr.map .name))
 ```
 
-This means "call the field accessor" for structs and struct-like values. It is
-not general keyword-as-function map lookup.
+For example, `(arr.map .name users)` is the field-selector form of
+`(arr.map (fn [user] user.name) users)`. This is field access for structs and
+struct-like values, not map lookup.
 
 ## Allocation And Performance
 
@@ -283,9 +326,9 @@ The default sequence helpers prefer clear ownership over minimum allocation. A
 chain of owned helpers allocates at each owned step:
 
 ```clojure
-(core.->> users
+(->> users
      (arr.filter active?)
-     (arr.map :name)
+     (arr.map .name)
      (arr.sort))
 ```
 
@@ -320,7 +363,7 @@ Use eager helpers when the intermediate value has meaning:
 ```clojure
 (let [settled (arr.map settle-order orders)
       paid (arr.filter settled? settled)
-      groups (arr.group-by :region paid)]
+      groups (arr.group-by .region paid)]
   ...)
 ```
 
@@ -337,8 +380,8 @@ Use aggregate helpers when grouped slices would be waste:
 ```clojure
 (let [work (arr.map settle-order orders)]
   (arr.filter! settled? work)
-  (let [revenue-by-region (arr.sum-by :region :amount work)
-        count-by-region (arr.count-by :region work)]
+  (let [revenue-by-region (arr.sum-by .region .amount work)
+        count-by-region (arr.count-by .region work)]
     ...))
 ```
 
@@ -350,7 +393,7 @@ detail before a scalar result, or when the update needs custom state:
       count-by-region (make map[int]int)]
   (each [order orders]
     (let [settled (settle-order order)]
-      (core.when (settled? settled)
+      (when (settled? settled)
         (set! (get revenue-by-region settled.region)
               (+ (get revenue-by-region settled.region)
                  settled.amount))
@@ -460,9 +503,9 @@ committing to it now.
 Today:
 
 ```clojure
-(core.->> users
+(->> users
      (arr.filter active?)
-     (arr.map :name)
+     (arr.map .name)
      (arr.take 10))
 ```
 
@@ -470,7 +513,7 @@ Possible later design:
 
 ```clojure
 (comp (arr.filter active?)
-      (arr.map :name)
+      (arr.map .name)
       (arr.take 10))
 ```
 
@@ -483,9 +526,9 @@ Threading forms should remain part of the language because they make nested
 data flow much easier to read:
 
 ```clojure
-(core.->> users
+(->> users
      (arr.filter active?)
-     (arr.map :name)
+     (arr.map .name)
      (arr.take 10))
 ```
 
@@ -497,7 +540,7 @@ Production-style code can always bind owned intermediate results explicitly:
 
 ```clojure
 (let [active-users (arr.filter active? users)
-      active-names-all (arr.map :name active-users)
+      active-names-all (arr.map .name active-users)
       active-names (arr.take 10 active-names-all)]
   (defer (delete active-users))
   (defer (delete active-names-all))
@@ -530,7 +573,7 @@ loop and one owned result:
 ```clojure
 (arr.into [dynamic]string
       (comp (arr.filter active?)
-            (arr.map :name)
+            (arr.map .name)
             (arr.take 10))
       users)
 ```

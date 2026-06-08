@@ -283,21 +283,21 @@ reload_app_config_from_source :: proc(input, source: string) -> (config: Reload_
             found_defstate = true
             config.state_type = reload_app_symbol_name(form.items[1].text)
             meta := form.items[meta_index]
-			i := 0
-			for i < len(meta.items) {
-				if i+1 >= len(meta.items) {
-					return config, kvist.Compile_Error{message = "defstate reload metadata has a missing value", span = meta.span}, false
-				}
-				key_form := meta.items[i]
-				value := meta.items[i+1]
-				if key_form.kind != .Keyword || len(key_form.text) < 2 {
-					return config, kvist.Compile_Error{message = "defstate reload metadata expects keyword keys", span = key_form.span}, false
-				}
-				key := key_form.text[1:]
-				switch key {
+            i := 0
+            for i < len(meta.items) {
+                if i+1 >= len(meta.items) {
+                    return config, kvist.Compile_Error{message = "defstate reload metadata has a missing value", span = meta.span}, false
+                }
+                key_form := meta.items[i]
+                value := meta.items[i+1]
+                if key_form.kind != .Symbol || len(key_form.text) < 2 || key_form.text[len(key_form.text)-1] != ':' {
+                    return config, kvist.Compile_Error{message = "defstate reload metadata expects field labels like run:", span = key_form.span}, false
+                }
+                key := key_form.text[:len(key_form.text)-1]
+                switch key {
                 case "run":
                     if value.kind != .Symbol {
-                        return config, kvist.Compile_Error{message = "defstate :run must be a symbol", span = value.span}, false
+                        return config, kvist.Compile_Error{message = "defstate run: must be a symbol", span = value.span}, false
                     }
                     if config.run_name != "" {
                         delete(config.run_name)
@@ -308,7 +308,7 @@ reload_app_config_from_source :: proc(input, source: string) -> (config: Reload_
                         config.init_name = ""
                     } else {
                         if value.kind != .Symbol {
-                            return config, kvist.Compile_Error{message = "defstate :init must be a symbol or nil", span = value.span}, false
+                            return config, kvist.Compile_Error{message = "defstate init: must be a symbol or nil", span = value.span}, false
                         }
                         if config.init_name != "" {
                             delete(config.init_name)
@@ -320,7 +320,7 @@ reload_app_config_from_source :: proc(input, source: string) -> (config: Reload_
                         config.on_load_name = ""
                     } else {
                         if value.kind != .Symbol {
-                            return config, kvist.Compile_Error{message = "defstate :on-load must be a symbol or nil", span = value.span}, false
+                            return config, kvist.Compile_Error{message = "defstate on-load: must be a symbol or nil", span = value.span}, false
                         }
                         if config.on_load_name != "" {
                             delete(config.on_load_name)
@@ -332,7 +332,7 @@ reload_app_config_from_source :: proc(input, source: string) -> (config: Reload_
                         config.on_unload_name = ""
                     } else {
                         if value.kind != .Symbol {
-                            return config, kvist.Compile_Error{message = "defstate :on-unload must be a symbol or nil", span = value.span}, false
+                            return config, kvist.Compile_Error{message = "defstate on-unload: must be a symbol or nil", span = value.span}, false
                         }
                         if config.on_unload_name != "" {
                             delete(config.on_unload_name)
@@ -341,14 +341,14 @@ reload_app_config_from_source :: proc(input, source: string) -> (config: Reload_
                     }
                 case "version":
                     if value.kind != .String {
-                        return config, kvist.Compile_Error{message = "defstate :version must be a string", span = value.span}, false
+                        return config, kvist.Compile_Error{message = "defstate version: must be a string", span = value.span}, false
                     }
                     if config.version != "" {
                         delete(config.version)
                     }
                     config.version = kvist.unquote_string(value.text)
                 case:
-                    return config, kvist.Compile_Error{message = fmt.tprintf("unsupported defstate reload metadata option: :%s", key), span = key_form.span}, false
+                    return config, kvist.Compile_Error{message = fmt.tprintf("unsupported defstate reload metadata option: %s:", key), span = key_form.span}, false
                 }
                 i += 2
             }
@@ -359,7 +359,7 @@ reload_app_config_from_source :: proc(input, source: string) -> (config: Reload_
         return config, kvist.Compile_Error{message = "missing defstate declaration"}, false
     }
     if config.run_name == "" {
-        return config, kvist.Compile_Error{message = "defstate reload metadata requires :run"}, false
+        return config, kvist.Compile_Error{message = "defstate reload metadata requires run:"}, false
     }
     if config.package_name == "" {
         config.package_name = strings.clone("main")

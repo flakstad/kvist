@@ -21,9 +21,9 @@
   (+ live-port request-count))
 
 (defn main []
-  (core.println (bump-request-count!)))
+  (println (bump-request-count!)))
 
-(core.comment
+(comment
   (reset-state!)
 
   default-port

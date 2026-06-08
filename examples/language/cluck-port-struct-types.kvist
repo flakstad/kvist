@@ -6,46 +6,44 @@
 
 (defstruct Point
   "A small geometric point."
-  {:x float
-   :y float})
+  {x: float
+   y: float})
 
 (defstruct Profile
   "Example struct showing the current type metadata surface."
-  {:name string
-   :age int
-   :active? bool
-   :favorite-key keyword
-   :scores [dynamic]int
-   :tags set[string]
-   :window []float
-   :home Point})
+  {name: string
+   age: int
+   active?: bool
+   favorite-key: string
+   scores: [dynamic]int
+   tags: set[string]
+   window: []float
+   home: Point})
 
 (defn struct-types-demo [] -> bool
   (let [samples (arr.dynamic float [1.5 2.5 3.5 4.5]) defer
-        profile (Profile {:name "Ada"
-                          :age 36
-                          :active? true
-                          :favorite-key :math.fp
-                          :scores (arr.dynamic int [10 20 30])
-                          :tags (set.of string ["math" "lisp"])
-                          :window (core.slice samples 1 3)
-                          :home (Point {:x 1.0 :y 2.0})})]
-    (core.println (:name profile))
-    (core.println (:tags profile))
-    (core.println (:window profile))
-    (core.println (:home profile))
-    (core.println (arr.count (:scores profile)))
-    (core.println (set.contains? (:tags profile) "math"))
-    (core.println profile)
-    (delete (:scores profile))
-    (delete (:tags profile))
+        profile (Profile {name: "Ada"
+                          age: 36
+                          active?: true
+                          favorite-key: "math.fp"
+                          scores: (arr.dynamic int [10 20 30])
+                          tags: (set.of string ["math" "lisp"])
+                          window: (slice samples 1 3)
+                          home: (Point {x: 1.0 y: 2.0})})]
+    (println profile.name)
+    (println profile.tags)
+    (println profile.window)
+    (println profile.home)
+    (println (arr.count profile.scores))
+    (println (set.contains? profile.tags "math"))
+    (println profile)
+    (delete profile.scores)
+    (delete profile.tags)
     true))
 
 (defn main []
-  (core.println (struct-types-demo)))
+  (println (struct-types-demo)))
 
-(core.comment
-  ;; Two visible Kvist/Odin differences remain here:
-  ;; - keyword currently lowers to string values.
-  ;; - set[T] lowers to map[T]struct{}.
+(comment
+  ;; set[T] lowers to map[T]struct{}.
   (struct-types-demo))

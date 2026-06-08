@@ -23,7 +23,7 @@ The example files themselves are now pure Kvist source. The module side uses a
 small shipped Kvist helper package instead of hand-writing the full export
 contract:
 
-- `(import alias :odin "path")` for existing Odin implementation packages
+- `(import alias "path")` for existing Odin implementation packages
 - `(import hot "kvist:hot")`
 - `(hot.defmodule ...)`
 

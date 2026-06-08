@@ -4,7 +4,7 @@
 ;; - one constructor helper per message variant
 
 (defmacro emit-message-structs [entries]
-  (if (= (core.count entries) 0)
+  (if (= (count entries) 0)
     (forms)
     (let [entry (arr.first entries)
           struct-name (arr.nth entry 0)
@@ -15,23 +15,23 @@
         (emit-message-structs (arr.rest entries))))))
 
 (defmacro emit-message-union-entries [entries]
-  (if (= (core.count entries) 0)
+  (if (= (count entries) 0)
     (forms)
     (let [entry (arr.first entries)
           struct-name (arr.nth entry 0)
-          tag (keyword (name struct-name))]
+          tag (symbol (str (name struct-name) ":"))]
       (forms
         tag
         struct-name
         (emit-message-union-entries (arr.rest entries))))))
 
 (defmacro emit-message-ctors [union-name entries]
-  (if (= (core.count entries) 0)
+  (if (= (count entries) 0)
     (forms)
     (let [entry (arr.first entries)
           struct-name (arr.nth entry 0)
           ctor-name (symbol (str "make-" (name union-name) "-" (name struct-name)))
-          tag (keyword (name struct-name))]
+          tag (symbol (str (name struct-name) ":"))]
       (forms
         (quasiquote
           (defn (unquote ctor-name) [value: (unquote struct-name)] -> (unquote union-name)
@@ -48,25 +48,25 @@
     (emit-message-ctors union-name entries)))
 
 (defmessages Event [
-  [Connected {:id int}]
-  [Disconnected {:id int :reason string}]
-  [Data {:id int :payload string}]
+  [Connected {id: int}]
+  [Disconnected {id: int reason: string}]
+  [Data {id: int payload: string}]
 ])
 
 (defn describe-event [event: Event] -> string
-  (core.switch [value event]
+  (switch [value event]
     Connected "connected"
     Disconnected "disconnected"
-    Data (:payload value)
+    Data value.payload
     :else "unknown"))
 
 (defn macro-messages-demo []
-  (let [connected (make-Event-Connected (Connected {:id 7}))
-        disconnected (make-Event-Disconnected (Disconnected {:id 7 :reason "timeout"}))
-        data (make-Event-Data (Data {:id 7 :payload "hello"}))]
-    (core.println (describe-event connected))
-    (core.println (describe-event disconnected))
-    (core.println (describe-event data))))
+  (let [connected (make-Event-Connected (Connected {id: 7}))
+        disconnected (make-Event-Disconnected (Disconnected {id: 7 reason: "timeout"}))
+        data (make-Event-Data (Data {id: 7 payload: "hello"}))]
+    (println (describe-event connected))
+    (println (describe-event disconnected))
+    (println (describe-event data))))
 
 (defn main []
   (macro-messages-demo))

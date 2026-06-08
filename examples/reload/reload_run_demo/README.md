@@ -55,10 +55,10 @@ The adapter form points at the production state type:
 
 ```clojure
 (defstate app.App_State
-  {:run run
-   :init app.init
-   :on-load app.on-load
-   :on-unload app.on-unload})
+  {run: run
+   init: app.init
+   on-load: app.on-load
+   on-unload: app.on-unload})
 ```
 
 That metadata-only `defstate` does not emit a new struct. The production app

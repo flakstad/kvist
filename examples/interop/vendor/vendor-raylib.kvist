@@ -13,13 +13,13 @@
 
 (defn blue-alpha [] -> int
   ;; raylib colors are distinct fixed arrays in the Odin binding.
-  (int (core.get rl.BLUE 3)))
+  (int (get rl.BLUE 3)))
 
 (defn point-inside-demo? [] -> bool
   ;; This is a safe terminal eval that still uses real raylib data shapes:
   ;; Vector2 is a fixed array type and Rectangle is an ordinary struct.
   (let [point (rl.Vector2 [20.0 20.0])
-        rect (rl.Rectangle {:x 10.0 :y 10.0 :width 40.0 :height 40.0})]
+        rect (rl.Rectangle {x: 10.0 y: 10.0 width: 40.0 height: 40.0})]
     (rl.CheckCollisionPointRec point rect)))
 
 (defn draw-demo-window []
@@ -41,9 +41,9 @@
       (rl.EndDrawing))))
 
 (defn main []
-  (core.println (blue-alpha) (point-inside-demo?)))
+  (println (blue-alpha) (point-inside-demo?)))
 
-(core.comment
+(comment
   ;; Safe terminal evals:
 
   (blue-alpha)

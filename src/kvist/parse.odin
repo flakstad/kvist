@@ -27,8 +27,6 @@ normalize_scalar_type_name :: proc(text: string) -> string {
         return "string"
     case "char":
         return "rune"
-    case "keyword":
-        return "string"
     case:
         return map_name(text)
     }
@@ -183,23 +181,15 @@ struct_field_exists :: proc(fields: []Struct_Field, name: string) -> bool {
 
 parse_defstruct_type_meta :: proc(form: CST_Form) -> (text: string, err: Compile_Error, ok: bool) {
     #partial switch form.kind {
-    case .Keyword, .Symbol:
-        tag := form.text
-        if form.kind == .Keyword {
-            if len(form.text) <= 1 {
-                return "", Compile_Error{message = "invalid defstruct field type metadata", span = form.span}, false
-            }
-            tag = form.text[1:]
-        }
-        return normalize_surface_type_symbol(tag), {}, true
+    case .Keyword:
+        return "", Compile_Error{message = "keywords are syntax markers, not type names; use a normal type symbol", span = form.span}, false
+    case .Symbol:
+        return normalize_surface_type_symbol(form.text), {}, true
     case .Vector:
-        if len(form.items) == 0 || (form.items[0].kind != .Keyword && form.items[0].kind != .Symbol) {
+        if len(form.items) == 0 || form.items[0].kind != .Symbol {
             return "", Compile_Error{message = "invalid defstruct field type metadata", span = form.span}, false
         }
         head := form.items[0].text
-        if form.items[0].kind == .Keyword {
-            head = head[1:]
-        }
         switch head {
         case "arr":
             if len(form.items) != 2 {
@@ -249,7 +239,9 @@ parse_defstruct_type_meta :: proc(form: CST_Form) -> (text: string, err: Compile
 
 parse_type_text :: proc(form: CST_Form) -> (text: string, err: Compile_Error, ok: bool) {
     #partial switch form.kind {
-    case .Keyword, .Vector:
+    case .Keyword:
+        return "", Compile_Error{message = "keywords are syntax markers, not type names; use a normal type symbol", span = form.span}, false
+    case .Vector:
         return parse_defstruct_type_meta(form)
     case .Symbol:
         return normalize_surface_type_symbol(form.text), {}, true
@@ -488,69 +480,9 @@ parse_param_vector :: proc(form: CST_Form) -> (params: [dynamic]Param, err: Comp
             }
             next_i = parsed_next_i
         case .Brace:
-            if i+2 >= len(form.items) {
-                return params, Compile_Error{message = "destructured parameter missing : and type", span = target.span}, false
-            }
-            separator := form.items[i+1]
-            if separator.kind != .Keyword || separator.text != ":" {
-                return params, Compile_Error{message = "destructured parameter expects {:keys [...] :as name}: Type", span = separator.span}, false
-            }
-
-            fields: [dynamic]Struct_Field
-            as_name := ""
-            saw_keys := false
-            j := 0
-            for j < len(target.items) {
-                if target.items[j].kind != .Keyword {
-                    return params, Compile_Error{message = "destructured parameter expects keyword entries", span = target.items[j].span}, false
-                }
-                key := target.items[j].text
-                switch key {
-                case ":keys":
-                    if saw_keys || j+1 >= len(target.items) || target.items[j+1].kind != .Vector {
-                        return params, Compile_Error{message = "destructured parameter expects one :keys vector", span = target.items[j].span}, false
-                    }
-                    for item in target.items[j+1].items {
-                        if item.kind != .Symbol {
-                            return params, Compile_Error{message = ":keys parameter destructuring expects symbols", span = item.span}, false
-                        }
-                        name := map_name(item.text)
-                        if struct_field_exists(fields[:], name) {
-                            return params, Compile_Error{message = fmt.tprintf("duplicate field :%s in parameter destructuring", name), span = item.span}, false
-                        }
-                        append(&fields, Struct_Field{name = name, source_name = name})
-                    }
-                    saw_keys = true
-                    j += 2
-                case ":as":
-                    if as_name != "" || j+1 >= len(target.items) || target.items[j+1].kind != .Symbol {
-                        return params, Compile_Error{message = "destructured parameter expects one :as symbol", span = target.items[j].span}, false
-                    }
-                    as_name = map_name(target.items[j+1].text)
-                    j += 2
-                case:
-                    return params, Compile_Error{message = "destructured parameter only supports :keys and :as", span = target.items[j].span}, false
-                }
-            }
-            if !saw_keys || len(fields) == 0 {
-                return params, Compile_Error{message = "destructured parameter expects :keys with at least one field", span = target.span}, false
-            }
-            if as_name == "" {
-                return params, Compile_Error{message = "destructured parameter currently requires :as", span = target.span}, false
-            }
-            type_text, parsed_next_i, err_type, ok_type := parse_type_text_from_forms(form.items[:], i+2)
-            if !ok_type {
-                return params, err_type, false
-            }
-            param = Param{
-                name                 = as_name,
-                ty                   = type_text,
-                is_field_destructure = true,
-                destructure_fields   = fields,
-            }
-            next_i = parsed_next_i
+            return params, Compile_Error{message = "field destructuring parameters have been removed; use a named parameter and dot access", span = target.span}, false
         case:
-            return params, Compile_Error{message = "expected parameter name or destructuring form", span = target.span}, false
+            return params, Compile_Error{message = "expected parameter name", span = target.span}, false
         }
         if next_i < len(form.items) && is_symbol(form.items[next_i], "=") {
             if next_i+1 >= len(form.items) {
@@ -605,10 +537,10 @@ parse_struct_fields :: proc(form: CST_Form) -> (fields: [dynamic]Struct_Field, e
             return fields, Compile_Error{message = "missing struct field type", span = form.span}, false
         }
         key := form.items[i]
-        if key.kind != .Keyword {
-            return fields, Compile_Error{message = "expected struct field keyword", span = key.span}, false
+        field_name, source_name, ok_label := parse_label_name(key)
+        if !ok_label {
+            return fields, Compile_Error{message = "expected struct field label", span = key.span}, false
         }
-        field_name := map_name(key.text[1:])
         if struct_field_exists(fields[:], field_name) {
             return fields, Compile_Error{message = fmt.tprintf("duplicate struct field %s", key.text), span = key.span}, false
         }
@@ -618,12 +550,22 @@ parse_struct_fields :: proc(form: CST_Form) -> (fields: [dynamic]Struct_Field, e
         }
         append(&fields, Struct_Field{
             name        = field_name,
-            source_name = key.text[1:],
+            source_name = source_name,
             ty          = type_text,
         })
         i = next_i
     }
     return fields, {}, true
+}
+
+parse_label_name :: proc(form: CST_Form) -> (name, source_name: string, ok: bool) {
+    if form.kind == .Symbol && len(form.text) > 1 && form.text[len(form.text)-1] == ':' {
+        source := form.text[:len(form.text)-1]
+        if len(source) > 0 {
+            return map_name(source), source, true
+        }
+    }
+    return "", "", false
 }
 
 parse_defstruct_fields :: proc(form: CST_Form) -> (fields: [dynamic]Struct_Field, err: Compile_Error, ok: bool) {
@@ -636,10 +578,10 @@ parse_defstruct_fields :: proc(form: CST_Form) -> (fields: [dynamic]Struct_Field
             return fields, Compile_Error{message = "missing defstruct field type metadata", span = form.span}, false
         }
         key := form.items[i]
-        if key.kind != .Keyword {
-            return fields, Compile_Error{message = "expected defstruct field keyword", span = key.span}, false
+        field_name, source_name, ok_label := parse_label_name(key)
+        if !ok_label {
+            return fields, Compile_Error{message = "expected defstruct field label", span = key.span}, false
         }
-        field_name := map_name(key.text[1:])
         if struct_field_exists(fields[:], field_name) {
             return fields, Compile_Error{message = fmt.tprintf("duplicate defstruct field %s", key.text), span = key.span}, false
         }
@@ -649,7 +591,7 @@ parse_defstruct_fields :: proc(form: CST_Form) -> (fields: [dynamic]Struct_Field
         }
         append(&fields, Struct_Field{
             name        = field_name,
-            source_name = key.text[1:],
+            source_name = source_name,
             ty          = type_text,
         })
         i = next_i
@@ -667,15 +609,16 @@ parse_union_variants :: proc(form: CST_Form) -> (variants: [dynamic]Union_Varian
             return variants, Compile_Error{message = "missing union variant type", span = form.span}, false
         }
         key := form.items[i]
-        if key.kind != .Keyword {
-            return variants, Compile_Error{message = "expected union variant keyword", span = key.span}, false
+        variant_name, _, ok_label := parse_label_name(key)
+        if !ok_label {
+            return variants, Compile_Error{message = "expected union variant label", span = key.span}, false
         }
         type_text, next_i, err_type, ok_type := parse_type_text_from_forms(form.items[:], i+1)
         if !ok_type {
             return variants, err_type, false
         }
         append(&variants, Union_Variant{
-            name = map_name(key.text[1:]),
+            name = variant_name,
             ty   = type_text,
         })
         i = next_i
@@ -700,11 +643,12 @@ parse_enum_variants :: proc(form: CST_Form) -> (variants: [dynamic]Enum_Variant,
                 return variants, Compile_Error{message = "missing enum variant value", span = form.span}, false
             }
             key := form.items[i]
-            if key.kind != .Keyword {
-                return variants, Compile_Error{message = "expected enum variant keyword", span = key.span}, false
+            variant_name, _, ok_label := parse_label_name(key)
+            if !ok_label {
+                return variants, Compile_Error{message = "expected enum variant label", span = key.span}, false
             }
             append(&variants, Enum_Variant{
-                name = map_name(key.text[1:]),
+                name = variant_name,
                 has_value = true,
                 value = form.items[i+1],
             })
@@ -898,38 +842,7 @@ parse_decl :: proc(top_form: CST_Top_Form) -> (decl: AST_Decl, err: Compile_Erro
                 },
             }, {}, true
         }
-        if len(form.items) == 3 &&
-           form.items[1].kind == .Keyword &&
-           form.items[1].text == ":odin" &&
-           form.items[2].kind == .String {
-            return AST_Decl{
-                kind = .Import,
-                span = form.span,
-                doc_lines = top_form.doc_lines,
-                import_decl = Import_Decl{
-                    path = form.items[2].text,
-                    force_odin = true,
-                },
-            }, {}, true
-        }
-        if len(form.items) == 4 &&
-           form.items[1].kind == .Symbol &&
-           form.items[2].kind == .Keyword &&
-           form.items[2].text == ":odin" &&
-           form.items[3].kind == .String {
-            return AST_Decl{
-                kind = .Import,
-                span = form.span,
-                doc_lines = top_form.doc_lines,
-                import_decl = Import_Decl{
-                    alias = map_name(form.items[1].text),
-                    path = form.items[3].text,
-                    has_alias = true,
-                    force_odin = true,
-                },
-            }, {}, true
-        }
-        return decl, Compile_Error{message = "import expects a string path, alias plus string path, :odin plus string path, or alias plus :odin plus string path", span = form.span}, false
+        return decl, Compile_Error{message = "import expects a string path or alias plus string path", span = form.span}, false
     case "def", "def-":
         if len(form.items) < 3 {
             return decl, Compile_Error{message = "def expects a name, optional docstring, optional type, and value", span = form.span}, false

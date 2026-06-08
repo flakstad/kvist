@@ -21,7 +21,7 @@
             plan (session.plan req opts)]
         (session.apply-plan! res opts plan)
         (if (session.accepted? plan)
-          (http.respond-plain res (:sid plan))
+          (http.respond-plain res plan.sid)
           (session.reject! res))))
     (http.server-shutdown-on-interrupt! server)
     (http.listen-and-serve! server router 6969)))

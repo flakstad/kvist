@@ -5,11 +5,11 @@
 (import reload "kvist:reload")
 
 (defstate app.App_State
-  {:run run
-   :init app.init
-   :on-load app.on-load
-   :on-unload app.on-unload
-   :version "v1"})
+  {run: run
+   init: app.init
+   on-load: app.on-load
+   on-unload: app.on-unload
+   version: "v1"})
 
 (defn run
   "Runs the reloadable application loop and returns at a safe checkpoint."

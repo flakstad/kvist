@@ -4,39 +4,39 @@
 (import core "kvist:core")
 
 (defstruct Score {
-  :value int
-  :bonus int
+  value: int
+  bonus: int
 })
 
 (defn apply-bonus [score: Score] -> Score
   ;; By-value update: copy, mutate the local copy, return the new value.
   (let [updated score]
-    (core.update! updated :value (+ (:value updated) (:bonus updated)))
-    (core.update! updated :bonus 0)
+    (set! updated.value (+ updated.value updated.bonus))
+    (set! updated.bonus 0)
     updated))
 
 (defn apply-bonus! [score: ^Score]
   ;; Pointer update: mutate the caller's value directly.
-  (core.update! score^ :value (+ (:value score^) (:bonus score^)))
-  (core.update! score^ :bonus 0))
+  (set! score^.value (+ score^.value score^.bonus))
+  (set! score^.bonus 0))
 
 (defn value-style-score [] -> int
-  (let [original (Score {:value 10 :bonus 5})
+  (let [original (Score {value: 10 bonus: 5})
         updated (apply-bonus original)]
     ;; `original` stays unchanged because the update happened on a copy.
-    (+ (:value original) (:value updated))))
+    (+ original.value updated.value)))
 
 (defn pointer-style-score [] -> int
-  (let [score (Score {:value 10 :bonus 5})]
+  (let [score (Score {value: 10 bonus: 5})]
     (apply-bonus! (addr score))
     ;; `score` changed in place.
-    (:value score)))
+    score.value))
 
 (defn main []
-  (core.println (value-style-score))
-  (core.println (pointer-style-score)))
+  (println (value-style-score))
+  (println (pointer-style-score)))
 
-(core.comment
+(comment
   ;; Original value is 10, returned updated value is 15.
   (value-style-score)
   ;; => 25

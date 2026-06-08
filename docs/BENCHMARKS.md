@@ -7,7 +7,6 @@ Current benchmark harness:
 - `./scripts/bench_mutation_helpers.sh`
 - `./scripts/bench_closure_helpers.sh`
 - `./scripts/bench_source_backed_arr.sh`
-- `./scripts/bench_destructuring_helpers.sh`
 - `./scripts/bench_core_helpers.sh`
 - `./scripts/bench_package_helpers.sh`
 
@@ -75,11 +74,11 @@ The main performance question is now:
 
 The focused mutation benchmark now covers:
 
-- `core.update!` on struct fields
-- `core.update` on struct fields
+- `update!` on struct fields
+- `update` on struct fields
 - explicit pointer mutation
-- `core.update!` on dynamic arrays
-- `core.update!` on maps
+- `update!` on dynamic arrays
+- `update!` on maps
 
 Current focused mutation run:
 
@@ -90,7 +89,7 @@ Current focused mutation run:
 
 Two fixes mattered here:
 
-1. `core.update!` now lowers simple arithmetic updater cases to compound
+1. `update!` now lowers simple arithmetic updater cases to compound
    assignment when possible:
    - `+=`
    - `-=`
@@ -112,8 +111,8 @@ The useful conclusion for now is:
 
 - struct copy-update and pointer mutation are effectively at parity in this
   workload
-- array `core.update!` is also at parity after the lowering fix
-- the map `core.update!` path is also at parity here, with matching allocation
+- array `update!` is also at parity after the lowering fix
+- the map `update!` path is also at parity here, with matching allocation
   counts and total allocated bytes versus direct Odin
 
 ## Focused Map Update Benchmark
@@ -208,37 +207,6 @@ Recommended next cases:
 These would tell us whether the current language surface is still lowering as
 cleanly as the older helper benchmarks.
 
-## Planned Destructuring Baseline
-
-There is now also a focused baseline for the planned `let` destructuring shape:
-
-```clojure
-(let [{:keys [x y z w]} point]
-  ...)
-```
-
-Run it with:
-
-```sh
-./scripts/bench_destructuring_helpers.sh
-```
-
-This benchmark is intentionally set up before the syntax lands. It compares the
-lowering shapes we are deciding between:
-
-- direct field reads from an already-bound local
-- explicit local bindings for each field from that local
-- direct field reads when the source is a nontrivial expression that should be
-  evaluated once
-- explicit local bindings after one temp-backed source evaluation
-
-The important things to watch are:
-
-- `allocs=0` for all four cases
-- whether `*-bound` stays at or near parity with `*-direct`
-- whether the expression-backed temp shape stays near parity with the simpler
-  local-source shape
-
 ## Captured Callback Baseline
 
 There is now also a focused captured-callback benchmark for the first closure
@@ -263,13 +231,13 @@ This benchmark is meant to answer two separate questions:
 
 ## Core Helper Baseline
 
-There is now also a focused `core.*` benchmark for the canonical collection
+There is now also a focused core helper benchmark for the canonical collection
 kernel:
 
-- `core.count`
-- `core.get`
-- `core.slice`
-- `core.contains?`
+- `count`
+- `get`
+- `slice`
+- `contains?`
 
 Run it with:
 
@@ -288,10 +256,10 @@ Current run shape:
 
 The important result is the shape:
 
-- all measured `core.*` workloads ran with `allocs=0`, `total=0`, and `live=0`
-- `core.count`, `core.get`, `core.slice`, and `core.contains?` lower
+- all measured core helper workloads ran with `allocs=0`, `total=0`, and `live=0`
+- `count`, `get`, `slice`, and `contains?` lower
   essentially identically to direct Odin in these hot paths
-- the canonical `core.*` move is performance-neutral on the tested workloads
+- the canonical core helper move is performance-neutral on the tested workloads
 
 ## Package Surface Baseline
 

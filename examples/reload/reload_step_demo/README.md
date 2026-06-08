@@ -86,8 +86,8 @@ Current shape of the source contract:
 
 - one top-level `(defstate Name {fields...} {metadata...})`
 - fields map first, reload-lifetime/config map second
-- required metadata: `:run`
-- optional metadata: `:init`, `:on-load`, `:on-unload`, `:version`
+- required metadata: `run:`
+- optional metadata: `init:`, `on-load:`, `on-unload:`, `version:`
 
 When to use this shape:
 

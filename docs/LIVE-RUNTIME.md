@@ -84,7 +84,7 @@ Then live code can do:
 
 ```clojure
 (defn stale-items-report [ctx]
-  (let [items (find-items ctx {:status :open :updated-before "2026-01-01"})]
+  (let [items (find-items ctx {status: .Open updated-before: "2026-01-01"})]
     (each [item items]
       (print-line ctx item.title))))
 ```
@@ -93,10 +93,10 @@ And:
 
 ```clojure
 (defn auto-tag-blocked [ctx event]
-  (core.when (= :item/updated event.type)
+  (when (= .Item_Updated event.type)
     (let [item (load-item ctx event.item-id)]
-      (core.when (> item.blocked-days 7)
-        (update-item! ctx item.id {:tags [:blocked]})))))
+      (when (> item.blocked-days 7)
+        (update-item! ctx item.id {tags: [.Blocked]})))))
 ```
 
 What is dynamic here:
@@ -116,20 +116,20 @@ What stays static:
 A compiled app starts with optional live support:
 
 ```clojure
-(app.start {:live? true})
+(app.start {live?: true})
 ```
 
 Then inside the app you get a console:
 
 ```clojure
 > (current-user)
-{:id "u1" :name "Andreas"}
+{id: "u1" name: "Andreas"}
 
-> (register-command! :hello
+> (register-command! "hello"
     (fn [ctx args]
       (print-line ctx "hello")))
 
-> (run-command! :hello {})
+> (run-command! "hello" {})
 hello
 ```
 
@@ -174,13 +174,13 @@ A live tool might look like:
 
 ```clojure
 (deftool highlighter
-  {:cursor :crosshair}
+  {cursor: .Crosshair}
   (fn [ctx stroke]
     (add-element! ctx
-      {:type :highlight
-       :points stroke.points
-       :color :yellow
-       :alpha 0.35})))
+      {type: .Highlight
+       points: stroke.points
+       color: .Yellow
+       alpha: 0.35})))
 ```
 
 Then while the app runs:
@@ -221,11 +221,11 @@ Instead, the host exposes capabilities:
 
 ```clojure
 (defhostapi app
-  (find-items [query] -> [:arr :item])
-  (load-item [id] -> :item)
-  (save-item! [id patch] -> :item)
-  (append-event! [event] -> :ok)
-  (log! [level text] -> :ok))
+  (find-items [query] -> [arr item])
+  (load-item [id] -> item)
+  (save-item! [id patch] -> item)
+  (append-event! [event] -> ok)
+  (log! [level text] -> ok))
 ```
 
 Live Kvist calls those. Compiled Kvist/Odin implements those.

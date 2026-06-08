@@ -13,7 +13,7 @@
   (let [xs (arr.dynamic int [3 5 8 13 21]) defer
         found 0]
     (each [x xs]
-      (core.when (> x 10)
+      (when (> x 10)
         (set! found x)
         (break)))
     found))
@@ -22,7 +22,7 @@
   (let [xs (arr.dynamic int [0 1 2 3 4 5]) defer
         out (arr.empty int)]
     (each [x xs]
-      (core.when (== 0 (% x 2))
+      (when (= 0 (% x 2))
         (continue))
       (arr.push! out x))
     out))
@@ -30,11 +30,11 @@
 (defn main []
   (let [indexed (loop-index-demo) defer
         continued (loop-continue-demo) defer]
-    (core.println indexed)
-    (core.println (loop-break-demo))
-    (core.println continued)))
+    (println indexed)
+    (println (loop-break-demo))
+    (println continued)))
 
-(core.comment
+(comment
   (loop-index-demo)
   (loop-break-demo)
   (loop-continue-demo))

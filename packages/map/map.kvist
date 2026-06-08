@@ -47,16 +47,16 @@
   [target source]
   (quasiquote
     (each [key value (unquote source)]
-      (core.update! (unquote target) key value))))
+      (set! (core.get (unquote target) key) value))))
 
 (defmacro assoc!
   "Associate `key` with `value` in `target` in place.
 
   This mutates the existing Odin map and returns the updated target expression.
-  It is the map-specific spelling of `core.update!` for key assignment."
+  It is the map-specific spelling of assigning through `(core.get target key)`."
   [target key value]
   (quasiquote
-    (core.update! (unquote target) (unquote key) (unquote value))))
+    (set! (core.get (unquote target) (unquote key)) (unquote value))))
 
 (defmacro dissoc!
   "Remove `key` from `target` in place.
@@ -84,8 +84,8 @@
   [m: map[$K]$V, key: K, value: V] -> map[K]V #force_inline
   (let [out (map.empty K V (+ (core.count m) 1))]
     (each [entry-key entry-value m]
-      (core.update! out entry-key entry-value))
-    (core.update! out key value)
+      (set! (core.get out entry-key) entry-value))
+    (set! (core.get out key) value)
     out))
 
 (defn dissoc
@@ -97,7 +97,7 @@
   (let [out (map.empty K V (core.count m))]
     (each [entry-key entry-value m]
       (core.when (!= entry-key key)
-        (core.update! out entry-key entry-value)))
+        (set! (core.get out entry-key) entry-value)))
     out))
 
 (defn merge
@@ -108,9 +108,9 @@
   [lhs: map[$K]$V, rhs: map[$K]$V] -> map[K]V #force_inline
   (let [out (map.empty K V (+ (core.count lhs) (core.count rhs)))]
     (each [key value lhs]
-      (core.update! out key value))
+      (set! (core.get out key) value))
     (each [key value rhs]
-      (core.update! out key value))
+      (set! (core.get out key) value))
     out))
 
 (defn keys
@@ -150,5 +150,5 @@
     (let [out (map.empty K V cap)]
       (each [key i ks]
         (core.when (< i value-count)
-          (core.update! out key (arr.get vs i))))
+          (set! (core.get out key) (arr.get vs i))))
       out)))

@@ -29,8 +29,8 @@ It should be very close to `clojure-mode`:
 - font-lock Kvist special forms, keywords, Odin directive symbols, and raw
   `(odin "...")` escape hatches
 - provide indentation overrides for Kvist forms such as `defn`, `defstruct`,
-  `defenum`, `defunion`, `fn`, `let`, `defvar`, `block`, `core.switch`,
-  `core.cond`, and `for`
+  `defenum`, `defunion`, `fn`, `let`, `defvar`, `block`, `switch`,
+  `cond`, and `for`
 
 The compiler's Odin source remains 4-space indented. The Kvist source format is
 separate and should read like Clojure.
@@ -122,10 +122,10 @@ clearly expand to existing forms, such as allocator setup/teardown,
 `with-*`-style cleanup, and repetitive check/error propagation. The initial
 multi-return convenience macros are:
 
-- `core.when-let` and `core.if-let` for `[value bool expr]`, expanding to destructuring
+- `when-let` and `if-let` for `[value bool expr]`, expanding to multi-return
   `let` plus a direct boolean condition;
-- `core.when-ok` and `core.if-ok` for `[value err expr]`, expanding to destructuring
-  `let` plus `(== err {})`.
+- `when-ok` and `if-ok` for `[value err expr]`, expanding to multi-return
+  `let` plus `(= err {})`.
 
 The bool/error distinction is intentional. Odin procs commonly report success
 with either an explicit bool or a zero-valued error object, and Kvist keeps that
@@ -152,8 +152,8 @@ A tap system should help inspect values during eval and normal runs without
 changing program semantics. The initial spelling is:
 
 ```clojure
-(core.tap> value)
-(core.tap> :label value)
+(tap> value)
+(tap> "label" value)
 ```
 
 This currently lowers through tiny generated helpers that print to stdout with
@@ -162,18 +162,18 @@ explicitly. That is intentionally modest: it works in normal runs and editor
 evals, it is visible in the generated Odin, and it does not depend on a hidden
 global tap registry.
 
-In practice, `core.tap>` is the expression-friendly version of adding a temporary
+In practice, `tap>` is the expression-friendly version of adding a temporary
 print line: wrap a value, see it, and keep passing the same value onward. It is
 especially useful inside a threaded pipeline or nested expression where adding a
 separate statement would force a local binding just for inspection.
 
-`core.tap>` also works as a `core.->` / `core.->>` thread step:
+`tap>` also works as a `->` / `->>` thread step:
 
 ```clojure
-(core.->> users
+(->> users
      (arr.filter active?)
-     (core.tap> :active)
-     (arr.map :name))
+     (tap> "active")
+     (arr.map .name))
 ```
 
 The step is ownership-transparent. A tapped owned final value remains owned by
@@ -246,12 +246,12 @@ Saving JSON can also stay boring:
 (import json "kvist:json")
 
 (let [[marshal-err write-err] (json.write "tmp/users.json" user)]
-  (and (== marshal-err nil)
-       (== write-err nil)))
+  (and (= marshal-err nil)
+       (= write-err nil)))
 
 (let [[user read-err unmarshal-err] (json.read-as User "tmp/users.json")]
-  (and (== read-err nil)
-       (== unmarshal-err nil)))
+  (and (= read-err nil)
+       (= unmarshal-err nil)))
 ```
 
 For structured data, continue to require explicit format and type decisions

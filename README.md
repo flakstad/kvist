@@ -83,8 +83,9 @@ The first milestone is a small Odin compiler/transpiler that is pleasant enough
 for ordinary `.kvist` packages:
 
 - one package entry file emits one `.odin` file
-- source packages are directories of `.kvist` files
-- top-level forms use Kvist syntax rather than mixed raw Odin declarations
+- source packages are directories with `.kvist` files, optionally alongside
+  ordinary `.odin` sidecar files
+- top-level Kvist forms use Kvist syntax; raw Odin sidecars remain normal Odin
 - forms map mechanically to Odin constructs
 - generated Odin stays readable and debuggable
 - Odin remains responsible for type checking, semantics, and diagnostics
@@ -111,7 +112,7 @@ inventing a new language on top of Odin.
   (+ a b))
 
 (defn main []
-  (core.println (add 20 22)))
+  (println (add 20 22)))
 ```
 
 emits:
@@ -200,7 +201,7 @@ The CLI can also invoke Odin for generated files directly:
 The examples cover control flow, collection literals, procedure values,
 core sequence helpers over scalars and structs, pointer/raw interop,
 source-level procedure directives, named returns, flat multi-return
-destructuring, struct-field destructuring, in-place mutation, and a small
+binding, in-place mutation, and a small
 order-report workload that compares eager helpers, bang helpers, and explicit
 aggregate loops.
 
@@ -214,12 +215,6 @@ Set `BASE_REF` to compare the current compiler against a specific revision:
 
 ```sh
 BASE_REF=main ./scripts/bench_sequence_helpers.sh
-```
-
-For the planned `{:keys [...]}` let-destructuring lowering baseline, run:
-
-```sh
-./scripts/bench_destructuring_helpers.sh
 ```
 
 For the current-only aggregate helper comparison against direct Odin, run:
@@ -264,28 +259,34 @@ Emacs support is in [emacs/kvist-mode.el](emacs/kvist-mode.el) and
 
 The intended source extension is `.kvist`.
 
-Normal `.odin` files should remain ordinary Odin and should not require this
-translator. For v0.1, `.kvist` files are pure Kvist source. Raw Odin is
-available through explicit `(odin "...")` escape hatches rather than implicit
-passthrough.
+Normal `.odin` files remain ordinary Odin and do not require this translator.
+Kvist source packages are detected by `.kvist` files. If a source-package
+directory also contains `.odin` files, those files are treated as raw Odin
+sidecars. Imported package sidecars are available through the package alias.
+For root `run`, `build`, `check`, and `test` commands, Kvist writes a temporary
+generated `.odin` file into the source directory and asks Odin to build the
+whole package directory, so sibling `.odin` files in the same package are
+included. Raw snippets inside a `.kvist` file are still available through
+explicit `(odin "...")` escape hatches.
 
 Example:
 
 ```clojure
 (defstruct Point {
-  :x int
-  :y int
+  x: int
+  y: int
 })
 
 (defn add [a: int, b: int] -> int
   (+ a b))
 
 (defn main []
-  (core.println (add 1 2)))
+  (println (add 1 2)))
 ```
 
-The Odin compiler should only see generated `.odin` files. That keeps normal
-Odin tooling honest while Kvist remains a source-to-source layer.
+The Odin compiler sees generated `.odin` files plus any ordinary `.odin`
+sidecars imported by the generated output. That keeps normal Odin tooling
+honest while Kvist remains a source-to-source layer.
 
 ## Syntax Shape
 
@@ -404,7 +405,7 @@ Examples of the intended shape:
 ```clojure
 ([]int [1 2 3])
 (map[string]int {"a" 1 "b" 2})
-(Person {:name "Andreas" :age 42})
+(Person {name: "Andreas" age: 42})
 ```
 
 These should lower to ordinary Odin constructs such as:
@@ -425,7 +426,7 @@ read.
 Use type-call syntax for both nominal and anonymous typed composite literals.
 
 ```clojure
-(Person {:name "Ada" :age 36})
+(Person {name: "Ada" age: 36})
 ([3]f32 [1 2 3])
 (matrix[2 2]f32 [1 0
                   0 1])
@@ -491,8 +492,8 @@ Person :: struct {
 }
 
 (defn make-person [] -> Person
-  (Person {:name "Andreas"
-           :age 42}))
+  (Person {name: "Andreas"
+           age: 42}))
 ```
 
 Maps, dynamic arrays, compound literals, and calls:
@@ -502,8 +503,8 @@ Maps, dynamic arrays, compound literals, and calls:
   (route-add
     router
     .Get
-    (Route {:handler handler
-            :pattern (strings.concatenate
+    (Route {handler: handler
+            pattern: (strings.concatenate
                        ([]string ["^" pattern "$"])
                        router.allocator)})))
 ```
@@ -536,7 +537,7 @@ Named and multi-value returns:
 (defn query-get [url: URL, key: string] -> [val: string, ok: bool] #optional_ok
   (let [q url.query]
     (each [entry (#force_inline query-iter (& q))]
-      (core.when (== entry.key key)
+      (when (= entry.key key)
         (return entry.value true)))))
 ```
 
@@ -551,10 +552,10 @@ Kvist now keeps Odin-style early-exit result handling explicit:
     (net.percent-decode s allocator)))
 ```
 
-For optional-ok defaults, use the expression form `core.or-else`:
+For optional-ok defaults, use the expression form `or-else`:
 
 ```clojure
-(core.or-else (query-get url key) "missing")
+(or-else (query-get url key) "missing")
 ```
 
 The important point is still the same: Odin-style result control flow should
@@ -578,7 +579,7 @@ Switch:
 
 ```clojure
 (defn method-string [m: Method] -> string #no_bounds_check
-  (core.switch m
+  (switch m
     .Get "GET"
     .Post "POST"
     .Delete "DELETE"
@@ -608,7 +609,7 @@ everything into parens:
 ```clojure
 @(private)
 (defn route-add [router: ^Router, method: Method, route: Route]
-  (core.when (core.not-in method router.routes)
+  (when (not-in method router.routes)
     (set! (get router.routes method)
           (make [dynamic]Route router.allocator)))
   (append (& (get router.routes method)) route))
@@ -630,7 +631,7 @@ obvious.
   (let [value (strings.trim-space (slice line (+ colon 1)))
         key   (sanitize-key (^ headers) (slice line 0 colon))]
     (defer
-      (core.when (not ok)
+      (when (not ok)
         (delete key allocator)
         (set! key "")))
     ...))
@@ -642,7 +643,7 @@ Conditionals as expressions when useful:
 (defn classify [n: int] -> string
   (if (< n 0)
     "negative"
-    (if (== n 0)
+    (if (= n 0)
       "zero"
       "positive")))
 ```
@@ -667,9 +668,16 @@ Local declarations do not have public/private variants; they are scoped to the
 current Odin block or procedure.
 
 - `(package name)`, `(import "path")`, `(import alias "path")`
-  - explicit Odin-package imports are also available as `(import :odin "path")` and `(import alias :odin "path")`
   - host imports keep Odin package paths like `"core:fmt"`
-  - source-package imports load relative package directories of `.kvist` files, e.g. `(import math "support/math")`
+  - relative imports are resolved by inspecting the target: directories or files
+    with `.kvist` source are loaded as Kvist source packages; Odin-only targets
+    remain ordinary Odin imports
+  - mixed source-package directories may contain `.kvist` files and `.odin`
+    sidecars; imported package Kvist declarations are flattened, and raw Odin
+    sidecar declarations are available through the package alias
+  - root package directories may also contain sibling `.odin` sidecars; root
+    `run`, `build`, `check`, and `test` commands build the package directory so
+    those files participate as normal Odin package files
   - Kvist library packages are imported explicitly, e.g. `(import arr "kvist:arr")`, `(import cli "kvist:cli")`, `(import str "kvist:str")`, `(import map "kvist:map")`, `(import set "kvist:set")`, `(import soa "kvist:soa")`
   - raw Odin names re-exported from a source package can be declared with `(exports [Name ...])`
 - top-level `(def name expr)` -> `name :: expr`
@@ -680,29 +688,29 @@ current Odin block or procedure.
 - top-level `(defvar- name expr)` and `(defvar- name: type expr)` package-private variables
 - `(export)` -> attaches `@(export)` to the next top-level declaration
 - `(exports [Name ...])` -> declares additional public source-package names provided by raw Odin forms
-- top-level `(defstruct Name {:field Type ...})`
-- top-level `(defstruct Name "Doc..." {:field type ...})`
-- top-level `(defstruct- Name {:field Type ...})` package-private struct
-- top-level `(defenum Name [A B C])` and `(defenum Name {:A 1 :B 2})`
-- top-level `(defenum Name "Doc..." [A B C])` and `(defenum Name "Doc..." {:A 1 :B 2})`
+- top-level `(defstruct Name {field: Type ...})`
+- top-level `(defstruct Name "Doc..." {field: type ...})`
+- top-level `(defstruct- Name {field: Type ...})` package-private struct
+- top-level `(defenum Name [A B C])` and `(defenum Name {A: 1 B: 2})`
+- top-level `(defenum Name "Doc..." [A B C])` and `(defenum Name "Doc..." {A: 1 B: 2})`
 - top-level `(defenum- Name [A B C])` package-private enum
-- top-level `(defunion Name {:variant Type ...})`
-- top-level `(defunion Name "Doc..." {:variant Type ...})`
-- top-level `(defunion- Name {:variant Type ...})` package-private union
+- top-level `(defunion Name {variant: Type ...})`
+- top-level `(defunion Name "Doc..." {variant: Type ...})`
+- top-level `(defunion- Name {variant: Type ...})` package-private union
 - top-level `(defn name [arg: type, ...] -> return-type body...)`
 - top-level `(defn name :abi "c" [arg: type, ...] -> return-type body...)`
   - `defn-` is the package-private named function form
   - `fn` is the canonical source-level form for function types and anonymous function literals
   - `:abi "c"` is available for explicit foreign/native entrypoints
-  - params and returns use ordinary types like `int`, `string`, `Person`, plus Odin-style container types like `[]string`, `[dynamic]int`, `map[string]int`, and Kvist set types like `set[keyword]`
-  - `core.println` is the canonical print helper; `core.doc` and the rest of the non-syntax surface live in real Kvist packages
+  - params and returns use ordinary types like `int`, `string`, `Person`, plus Odin-style container types like `[]string`, `[dynamic]int`, `map[string]int`, and Kvist set types like `set[string]`
+  - `println` is the canonical print helper; `doc` and the rest of the non-syntax surface live in real Kvist packages
 - top-level `(defmacro name [arg ...] body...)`
   - `defmacro-` is the package-private macro form
   - expands over Kvist forms before ordinary parse/lowering
   - resource-scope bootstrap macros still exist alongside it during bootstrap
 - top-level and statement `(odin "...")` raw escape hatches
 - `(let [binding value ...] body...)` scoped expression/block, including
-  multi-return and struct-field destructuring; a local binding may be followed
+  positional multi-return binding; a local binding may be followed
   by `defer` to lower to `defer delete(...)` at scope exit
 - local `(def name expr)` and `(def name: type expr)` declare Odin constants scoped to the current block
 - local `(defvar name expr)` and `(defvar name: type expr)` create mutable runtime locals scoped to the current block
@@ -714,12 +722,18 @@ current Odin block or procedure.
   override with temp allocator reset; requires `base:runtime`
 - `(set! place expr)` -> `place = expr`
 - `(mut! place += expr)` and other compound operators -> direct compound assignment
-- `(core.update! target key-or-field expr)` -> direct index/key/field assignment
+- place mutation forms:
+  - `(set! place value)` assigns a value
+  - `(mut! place += value)` applies a compound operator mutation
+  - `(update! place f args...)` reads `place`, applies `f`, and writes the result
 - final expression in a non-void `defn` emits `return <expr>`
 - `(if test then else)`
-- `(core.when test body...)`
+- `(when test body...)`
 - `(while test body...)`
 - `(each [name collection] body...)` and `(each [key value map] body...)`
+- `(for [x xs :let [y expr] :when pred :while pred] :into [dynamic]T value)`
+  builds an owned dynamic array; `:into map[K]V` expects yielded `[key value]`,
+  and `:into set[T]` inserts yielded member values
 - `(do body...)`
 - `(Type literal)` typed composite literals, including compact Odin type heads
   such as `(matrix[2 2]f32 [1 2 3 4])`, `(#simd[4]f32 [1 2 3 4])`,
@@ -730,14 +744,14 @@ current Odin block or procedure.
   `(linalg.identity (type matrix[2 2]f32))`
 - `(make Type args...)` runtime/allocator-backed construction
 - `(arr.empty elem-type [capacity])`, `(arr.dynamic elem-type [items...])`, `(arr.fixed elem-type [items...])`
-- `(map.empty key-type value-type [capacity])`, `(map.of key-type value-type {:k v ...})`
+- `(map.empty key-type value-type [capacity])`, `(map.of key-type value-type {"k" v ...})`
 - `(set.empty elem-type [capacity])`, `(set.of elem-type [a b c])`
 - `(soa.make Particle [capacity])`, `(soa.push! particles value...)`, and
-  `(soa.update! particles i :field expr ...)` for dynamic SOA storage and
+  `(soa.update! particles i .field expr ...)` for dynamic SOA storage and
   direct indexed column updates
-- `(soa.fill! particles :field value)`, `(soa.scale! particles :field factor)`,
-  `(soa.axpy! particles :dst a :src)`, `(soa.sum-into! total particles :field)`,
-  and `(soa.dot-into! total particles :a :b)` for whole-column SOA loops
+- `(soa.fill! particles .field value)`, `(soa.scale! particles .field factor)`,
+  `(soa.axpy! particles .dst a .src)`, `(soa.sum-into! total particles .field)`,
+  and `(soa.dot-into! total particles .a .b)` for whole-column SOA loops
 - use `core:math/linalg` directly for matrix/vector operations such as
   `linalg.mul`, `linalg.transpose`, and `linalg.dot`; matrix values are ordinary
   typed constructors like `(matrix[2 2]f32 [1 2 3 4])`
@@ -770,12 +784,11 @@ current Odin block or procedure.
   - `kvist:map` is a shipped `.kvist` package. These helpers lower to direct
     constructors, membership checks, loops with explicit preallocation, raw
     indexing, optional-default helpers, or direct in-place mutation.
-- `core.*` helpers such as `(core.count collection)`, `(core.get target key [default])`,
-  `(core.slice target start [end])`, `(core.empty? collection)`,
-  `(core.contains? collection key)`, `(core.update! target key-or-field value-or-updater ...)`,
-  and `(core.update target key-or-field value-or-updater ...)`
+- auto-exposed core helpers such as `(count collection)`, `(get target key [default])`,
+  `(slice target start [end])`, `(empty? collection)`, `(contains? collection key)`,
+  `(update! place f args...)`, and `(update target key-or-field value-or-updater ...)`
   - `kvist:core` is the small auto-exposed core library.
-  - `core.*` is the canonical qualified home.
+  - Prefer the bare spelling in user code; qualified names remain accepted for explicit package references.
   - These helpers are defined in shipped `.kvist` source and lower through a
     small intrinsic substrate where direct Odin codegen needs it.
 - `arr.*` sequence helpers such as `(arr.map f xs)`, `(arr.filter pred xs)`,
@@ -789,19 +802,19 @@ current Odin block or procedure.
   `(arr.remove pred xs)`, `(arr.map-indexed f xs)`, `(arr.keep f xs)`,
   `(arr.mapcat f xs)`, `(arr.into [dynamic]T xs)`, `(arr.interpose sep xs)`,
   `(arr.interleave xs ys)`, `(arr.reverse xs)`, `(arr.shuffle pick xs)`,
-  `(arr.sort xs)`, `(arr.sort-by f xs)`, `(arr.sort-by :field xs)`, mutating
+  `(arr.sort xs)`, `(arr.sort-by f xs)`, `(arr.sort-by .field xs)`, mutating
   `(arr.reverse! xs)`, `(arr.shuffle! pick xs)`, `(arr.sort! xs)`,
-  `(arr.sort-by! f xs)`, `(arr.sort-by! :field xs)`, `(arr.map! f xs)`,
-  `(arr.map-indexed! f xs)`, `(arr.filter! pred xs)`, `(arr.filter! :field xs)`,
-  `(arr.remove! pred xs)`, `(arr.remove! :field xs)`, `(arr.keep! f xs)`,
+  `(arr.sort-by! f xs)`, `(arr.sort-by! .field xs)`, `(arr.map! f xs)`,
+  `(arr.map-indexed! f xs)`, `(arr.filter! pred xs)`, `(arr.filter! .field xs)`,
+  `(arr.remove! pred xs)`, `(arr.remove! .field xs)`, `(arr.keep! f xs)`,
   `(arr.into! target xs)`, `(arr.split-at n xs)`, `(arr.partition n xs)`,
   `(arr.partition-all n xs)`, `(arr.partition-by f xs)`,
-  `(arr.partition-by :field xs)`, `(arr.index-by f xs)`,
-  `(arr.index-by :field xs)`, `(arr.group-by f xs)`, `(arr.group-by :field xs)`,
-  `(arr.count-by f xs)`, `(arr.count-by :field xs)`,
-  `(arr.sum-by key-f value-f xs)`, `(arr.sum-by :key-field :value-field xs)`,
+  `(arr.partition-by .field xs)`, `(arr.index-by f xs)`,
+  `(arr.index-by .field xs)`, `(arr.group-by f xs)`, `(arr.group-by .field xs)`,
+  `(arr.count-by f xs)`, `(arr.count-by .field xs)`,
+  `(arr.sum-by key-f value-f xs)`, `(arr.sum-by .key-field .value-field xs)`,
   `(arr.frequencies xs)`, `(arr.distinct xs)`, `(arr.distinct-by f xs)`,
-  `(arr.distinct-by :field xs)`, plus bounded producers `(arr.range ...)`,
+  `(arr.distinct-by .field xs)`, plus bounded producers `(arr.range ...)`,
   `(arr.repeat n x)`, `(arr.repeatedly n f)`, `(arr.iterate n f x)`, and
   `(arr.cycle n xs)`
   - `kvist:arr` is a shipped `.kvist` package with the broad sequence helper
@@ -810,12 +823,12 @@ current Odin block or procedure.
     specialization, or allocation behavior still needs compiler support.
 - `soa.*` helpers such as `(soa.fields T)`, `(soa.types T)`,
   `(soa.make T capacity)`, `(soa.push! particles particle)`, and
-  `(soa.update! particles i :x (+ x dx) :y (+ y dy))`
+  `(soa.update! particles i .x (+ x dx) .y (+ y dy))`
   - `kvist:soa` owns compile-time struct metadata helpers and SOA
     convenience macros. SOA updates expand to same-named local reads plus direct
     indexed column writes.
-  - Whole-column helpers such as `(soa.axpy! particles :x dt :vx)` and
-    `(soa.dot-into! total particles :vx :vx)` expand to direct loops over
+  - Whole-column helpers such as `(soa.axpy! particles .x dt .vx)` and
+    `(soa.dot-into! total particles .vx .vx)` expand to direct loops over
     `(len particles)`.
 - `cli.*` helpers for command-line programs:
   `(cli.flag args name)`, `(cli.option args name fallback)`,
@@ -830,36 +843,41 @@ current Odin block or procedure.
 - file-backed dev helpers `(io.read path)` and `(io.write path data)` from
   `(import io "kvist:io")`; typed JSON file helpers from
   `(import json "kvist:json")`
-- `(core.tap> value)` and `(core.tap> :label value)` for explicit stdout inspection;
+- `(tap> value)` and `(tap> "label" value)` for explicit stdout inspection;
   require `core:fmt` and return the tapped value
-- keywords can stand in for field callbacks in those helpers, e.g. `(arr.map :name users)`,
-  `(arr.index-by :id users)`, `(arr.group-by :status users)`,
-  `(arr.count-by :status users)`, `(arr.sum-by :region :amount orders)`,
-  `(arr.partition-by :status users)`, `(arr.sort-by :age users)`, and
-  `(arr.filter :verified users)`
-- `value.field` for field access; `(:field value)` is compatibility sugar and
-  keyword callback shorthand
+- `value.field` reads a field directly
+- `.field` is a field selector in supported callback positions. It means
+  "read this field from the current element", e.g. `(arr.map .name users)`,
+  `(arr.index-by .id users)`, `(arr.group-by .status users)`,
+  `(arr.count-by .status users)`, `(arr.sum-by .region .amount orders)`,
+  `(arr.partition-by .status users)`, `(arr.sort-by .age users)`, and
+  `(arr.filter .verified users)`.
 - direct attached indexing such as `cells[(idx x y)]` works in reads, `set!`,
   and `mut!`
-- `(core.get value key)`, `(core.get map key default)`, `(core.-> value steps...)`, and `(core.->> value steps...)`
+- direct access syntax has call-shaped equivalents:
+  - `value.field` <=> `(get value .field)`
+  - `value[index]` <=> `(get value index)`
+  - `value[start:end]` <=> `(slice value start end)`
+  - `value[start:]` <=> `(slice value start)`
+- `(get map key default)`, `(-> value steps...)`, and `(->> value steps...)`
 - `(type Head Arg...)` for Odin polymorphic type instantiation in type/value positions
-- `(^ ptr)` and `(& place)` as compatibility sugar; prefer `(deref ptr)` and
-  `(addr place)` in user-facing code
-- numbers, booleans, `nil`, and `(core.nil? value)`
+- `x^` and `(deref expr)` for pointer dereference; `(addr place)` for addresses
+- numbers, booleans, `nil`, and `(nil? value)`
 - calls: `(foo a b)` -> `foo(a, b)`
-- operators: `(+ a b)`, `(<= i 10)`, `(and a b)`, etc. emit infix
+- operators: `(= a b)`, `(+ a b)`, `(<= i 10)`, `(and a b)`, etc. emit infix
+  - `=`, `<`, `<=`, `>`, and `>=` accept two or more operands and compare
+    adjacent values once, e.g. `(< a b c)` means `a < b && b < c`
+  - `!=` is intentionally binary
 
 Pragmatic Odin conveniences beyond the minimal special-form core include
-`(core.contains? collection key)` for generic collection membership,
-`(core.in value collection)`,
-`(core.not-in value collection)`, `(break)`, `(continue)`, and directive expression
+`(contains? collection key)` for generic collection membership,
+`(in value collection)`,
+`(not-in value collection)`, `(break)`, `(continue)`, and directive expression
 wrappers like `(#force_inline call arg)`.
 
 For collection helpers, prefer explicit package names. Cross-family helpers now
-live under `core., for example `core.count`, `core.empty?`, and
-`core.contains?`, plus update helpers like `core.update!` and `core.update`.
-Other collection operations should be package-qualified under `arr/`, `map/`,
-`str/`, or `set/`.
+live as bare names, for example `count`, `empty?`, `contains?`, plus update helpers like `update!` and `update`.
+Other collection operations should be package-qualified under `arr.`, `map.`, `str.`, or `set.`.
 
 This is deliberately incomplete. Add only forms that map cleanly to Odin.
 

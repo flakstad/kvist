@@ -1,22 +1,22 @@
 (package tests)
+(import core "kvist:core")
 
 (import t "kvist:test")
 (import arr "kvist:arr")
-(import core "kvist:core")
 (import map "kvist:map")
 
 (defstruct Member {
-  :name string
-  :score int
-  :active bool
+  name: string
+  score: int
+  active: bool
 })
 
 (defstruct Segment {
-  :values []int
+  values: []int
 })
 
 (defn even? [x: int] -> bool
-  (== (% x 2) 0))
+  (= (% x 2) 0))
 
 (defn add [acc: int, x: int] -> int
   (+ acc x))
@@ -111,9 +111,9 @@
     (t.is (= (count unique) 2))))
 
 (t.deftest arr-reordering-and-flattening-surface
-  (let [segments ([]Segment [(Segment {:values ([]int [1 2])})
-                                 (Segment {:values ([]int [3])})
-                                 (Segment {:values ([]int [4 5])})])
+  (let [segments ([]Segment [(Segment {values: ([]int [1 2])})
+                                 (Segment {values: ([]int [3])})
+                                 (Segment {values: ([]int [4 5])})])
         flattened (arr.mapcat segment-values segments) defer
         xs ([]int [4 1 3 2])
         shuffled (arr.shuffle pick-first xs) defer
@@ -131,9 +131,9 @@
 (t.deftest arr-non-allocating-scan-surface
   (let [xs ([]int [10 20 30 40])
         missing-xs ([]int [10 20 19])
-        members ([]Member [(Member {:name "Ada" :score 10 :active true})
-                           (Member {:name "Lin" :score 30 :active false})
-                           (Member {:name "Moe" :score 20 :active true})])
+        members ([]Member [(Member {name: "Ada" score: 10 active: true})
+                           (Member {name: "Lin" score: 30 active: false})
+                           (Member {name: "Moe" score: 20 active: true})])
         empty-members ([]Member [])]
     (let [[found-index found-value found-ok] (arr.find-indexed even-index-over-twenty? xs)
           [missing-index _missing-value missing-ok] (arr.find-indexed even-index-over-twenty? missing-xs)
@@ -194,44 +194,44 @@
     (t.is (= (get unordered! 1) 40))
     (t.is (= (get unordered! 2) 30))))
 
-(t.deftest arr-keyword-shorthand-runtime-surface
-  (let [members (arr.dynamic Member [(Member {:name "Ada" :score 10 :active true})
-                                     (Member {:name "Lin" :score 20 :active false})
-                                     (Member {:name "Ada" :score 30 :active true})]) defer
-        names (arr.map :name (slice members 0)) defer
-        active (arr.filter :active (slice members 0)) defer
-        inactive (arr.remove :active (slice members 0)) defer
-        indexed (arr.index-by :name (slice members 0)) defer
-        grouped (arr.group-by :active (slice members 0))
-        counted (arr.count-by :active (slice members 0)) defer
-        summed (arr.sum-by :active :score (slice members 0)) defer
-        sorted (arr.sort-by :name (slice members 0)) defer
-        distincts (arr.distinct-by :name (slice members 0)) defer
-        partitions (arr.partition-by :active (slice members 0)) defer
+(t.deftest arr-field-selector-runtime-surface
+  (let [members (arr.dynamic Member [(Member {name: "Ada" score: 10 active: true})
+                                     (Member {name: "Lin" score: 20 active: false})
+                                     (Member {name: "Ada" score: 30 active: true})]) defer
+        names (arr.map .name (slice members 0)) defer
+        active (arr.filter .active (slice members 0)) defer
+        inactive (arr.remove .active (slice members 0)) defer
+        indexed (arr.index-by .name (slice members 0)) defer
+        grouped (arr.group-by .active (slice members 0))
+        counted (arr.count-by .active (slice members 0)) defer
+        summed (arr.sum-by .active .score (slice members 0)) defer
+        sorted (arr.sort-by .name (slice members 0)) defer
+        distincts (arr.distinct-by .name (slice members 0)) defer
+        partitions (arr.partition-by .active (slice members 0)) defer
         find-source (slice members 0)
-        active-only (arr.dynamic Member [(Member {:name "Ada" :score 10 :active true})
-                                         (Member {:name "Moe" :score 11 :active true})]) defer
-        sort-bang (arr.dynamic Member [(Member {:name "Lin" :score 20 :active false})
-                                       (Member {:name "Ada" :score 10 :active true})
-                                       (Member {:name "Zed" :score 30 :active true})]) defer
-        filter-bang (arr.dynamic Member [(Member {:name "Ada" :score 10 :active true})
-                                         (Member {:name "Lin" :score 20 :active false})
-                                         (Member {:name "Moe" :score 11 :active true})]) defer
-        remove-bang (arr.dynamic Member [(Member {:name "Ada" :score 10 :active true})
-                                         (Member {:name "Lin" :score 20 :active false})
-                                         (Member {:name "Moe" :score 11 :active true})]) defer
-        active-prefix (arr.take-while :active active-only)
-        inactive-tail (arr.drop-while :active members)
-        missing-member (Member {:name "" :score 0 :active false})
+        active-only (arr.dynamic Member [(Member {name: "Ada" score: 10 active: true})
+                                         (Member {name: "Moe" score: 11 active: true})]) defer
+        sort-bang (arr.dynamic Member [(Member {name: "Lin" score: 20 active: false})
+                                       (Member {name: "Ada" score: 10 active: true})
+                                       (Member {name: "Zed" score: 30 active: true})]) defer
+        filter-bang (arr.dynamic Member [(Member {name: "Ada" score: 10 active: true})
+                                         (Member {name: "Lin" score: 20 active: false})
+                                         (Member {name: "Moe" score: 11 active: true})]) defer
+        remove-bang (arr.dynamic Member [(Member {name: "Ada" score: 10 active: true})
+                                         (Member {name: "Lin" score: 20 active: false})
+                                         (Member {name: "Moe" score: 11 active: true})]) defer
+        active-prefix (arr.take-while .active active-only)
+        inactive-tail (arr.drop-while .active members)
+        missing-member (Member {name: "" score: 0 active: false})
         empty-members (arr.dynamic Member []) defer]
     (defer
       (each [_ group grouped]
         (delete group))
       (delete grouped))
-    (let [[found found-ok] (arr.find :active find-source)]
-      (arr.sort-by! :name sort-bang)
-      (arr.filter! :active filter-bang)
-      (arr.remove! :active remove-bang)
+    (let [[found found-ok] (arr.find .active find-source)]
+      (arr.sort-by! .name sort-bang)
+      (arr.filter! .active filter-bang)
+      (arr.remove! .active remove-bang)
       (t.is (= (get names 0) "Ada"))
       (t.is (= (count active) 2))
       (t.is (= (count inactive) 1))
@@ -245,8 +245,8 @@
       (t.is (= (count partitions) 3))
       (t.is (= found.name "Ada"))
       (t.is found-ok)
-      (t.is (arr.some? :active (slice members 0)))
-      (t.is (arr.every? :active active-only))
+      (t.is (arr.some? .active (slice members 0)))
+      (t.is (arr.every? .active active-only))
       (t.is (= (count active-prefix) 2))
       (t.is (= (count inactive-tail) 2))
       (t.is (= (get sort-bang 0).name "Ada"))

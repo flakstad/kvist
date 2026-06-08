@@ -14,12 +14,12 @@
 (defmacro map
   "Return a new dynamic array containing `(f x)` for each `x` in `xs`.
 
-  Non-keyword callbacks lower through a force-inlined loop helper. Keyword
-  shorthand is kept as an array-specific macro path and lowers through the
-  compiler's specialized keyword projection support. The result is newly
-  allocated with capacity based on the input count."
+  Ordinary callbacks lower through a force-inlined loop helper. Dot field
+  selectors such as `.name` lower through the compiler's specialized field
+  projection support. The result is newly allocated with capacity based on the
+  input count."
   [f xs]
-  (if (keyword? f)
+  (if (field-selector? f)
     (quasiquote
       (arr-map (unquote f) (unquote xs)))
     (quasiquote
@@ -31,7 +31,7 @@
   The input is not mutated. The result is allocated once with input-sized
   capacity and populated by a direct loop."
   [pred xs]
-  (if (keyword? pred)
+  (if (field-selector? pred)
     (quasiquote
       (arr-filter (unquote pred) (unquote xs)))
     (quasiquote
@@ -43,7 +43,7 @@
   This is the complement of `arr.filter`. The input is not mutated; the result
   is allocated once and populated by a direct loop."
   [pred xs]
-  (if (keyword? pred)
+  (if (field-selector? pred)
     (quasiquote
       (arr-remove (unquote pred) (unquote xs)))
     (quasiquote
@@ -170,11 +170,14 @@
   This mutates the array in place. It is intended for transformations where the
   output element type is the same as the input element type."
   [f xs]
-  (if (symbol? f)
+  (if (field-selector? f)
     (quasiquote
-      (map!-impl (unquote f) (core.slice (unquote xs) 0)))
-    (quasiquote
-      (arr-map! (unquote f) (unquote xs)))))
+      (arr-map! (unquote f) (unquote xs)))
+    (if (symbol? f)
+      (quasiquote
+        (map!-impl (unquote f) (core.slice (unquote xs) 0)))
+      (quasiquote
+        (arr-map! (unquote f) (unquote xs))))))
 
 (defn- map!-impl
   "Implementation helper for symbol-callback `arr.map!`."
@@ -203,11 +206,14 @@
   The dynamic array keeps elements that satisfy `pred`. This avoids allocating a
   replacement array."
   [pred xs]
-  (if (symbol? pred)
+  (if (field-selector? pred)
     (quasiquote
-      (filter!-impl (unquote pred) (addr (unquote xs))))
-    (quasiquote
-      (arr-filter! (unquote pred) (unquote xs)))))
+      (arr-filter! (unquote pred) (unquote xs)))
+    (if (symbol? pred)
+      (quasiquote
+        (filter!-impl (unquote pred) (addr (unquote xs))))
+      (quasiquote
+        (arr-filter! (unquote pred) (unquote xs))))))
 
 (defn- filter!-impl
   "Implementation helper for symbol-callback `arr.filter!`."
@@ -226,11 +232,14 @@
   This is the in-place complement of `arr.filter!` and avoids allocating a
   replacement array."
   [pred xs]
-  (if (symbol? pred)
+  (if (field-selector? pred)
     (quasiquote
-      (remove!-impl (unquote pred) (addr (unquote xs))))
-    (quasiquote
-      (arr-remove! (unquote pred) (unquote xs)))))
+      (arr-remove! (unquote pred) (unquote xs)))
+    (if (symbol? pred)
+      (quasiquote
+        (remove!-impl (unquote pred) (addr (unquote xs))))
+      (quasiquote
+        (arr-remove! (unquote pred) (unquote xs))))))
 
 (defn- remove!-impl
   "Implementation helper for symbol-callback `arr.remove!`."
@@ -342,7 +351,7 @@
   [sep: $T, xs: []T] -> [dynamic]T #force_inline
   (let [n (core.count xs)
         cap 0]
-    (core.when (== n 0)
+    (core.when (= n 0)
       (return (arr.empty T 0)))
     (set! cap (- (* n 2) 1))
     (let [out (arr.empty T cap)]
@@ -570,7 +579,7 @@
 
   Any trailing group smaller than `n` is omitted. Group values are slice views
   over the input where possible."
-  [n: int, xs: []$T] -> [:arr [:slice T]] #force_inline
+  [n: int, xs: []$T] -> [arr [slice T]] #force_inline
   (if (<= n 0)
     (return (odin "make([dynamic][]T)")))
   (let [out (odin "make([dynamic][]T, 0, len(xs)/n)")
@@ -584,7 +593,7 @@
   "Return non-overlapping groups of up to `n` elements from `xs`.
 
   Unlike `arr.partition`, the final short group is included."
-  [n: int, xs: []$T] -> [:arr [:slice T]] #force_inline
+  [n: int, xs: []$T] -> [arr [slice T]] #force_inline
   (if (<= n 0)
     (return (odin "make([dynamic][]T)")))
   (let [out (odin "make([dynamic][]T, 0, (len(xs)+n-1)/n)")
@@ -603,16 +612,16 @@
   Adjacent elements with equal keys are grouped together. Groups preserve input
   order."
   [f xs]
-  (if (keyword? f)
+  (if (field-selector? f)
     (quasiquote
       (arr-partition-by (unquote f) (unquote xs)))
     (quasiquote
       (partition-by-impl (unquote f) (core.slice (unquote xs) 0)))))
 
 (defn- partition-by-impl
-  "Implementation helper for non-keyword `arr.partition-by`."
-  [f: (fn [x: $T] -> $K), xs: []T] -> [:arr [:slice T]] #force_inline
-  (if (== (core.count xs) 0)
+  "Implementation helper for non-field-selector `arr.partition-by`."
+  [f: (fn [x: $T] -> $K), xs: []T] -> [arr [slice T]] #force_inline
+  (if (= (core.count xs) 0)
     (return (odin "make([dynamic][]T)")))
   (let [out (odin "make([dynamic][]T, 0, len(xs))")
         start 0
@@ -635,14 +644,14 @@
   Later elements overwrite earlier elements with the same key. The result is a
   newly allocated map."
   [f xs]
-  (if (keyword? f)
+  (if (field-selector? f)
     (quasiquote
       (arr-index-by (unquote f) (unquote xs)))
     (quasiquote
       (index-by-impl (unquote f) (core.slice (unquote xs) 0)))))
 
 (defn- index-by-impl
-  "Implementation helper for non-keyword `arr.index-by`."
+  "Implementation helper for non-field-selector `arr.index-by`."
   [f: (fn [x: $T] -> $K), xs: []T] -> map[K]T #force_inline
   (let [out (odin "make(map[K]T, len(xs))")]
     (each [x xs]
@@ -655,14 +664,14 @@
   Elements preserve their input order within each group. The returned map and
   group arrays are newly allocated."
   [f xs]
-  (if (keyword? f)
+  (if (field-selector? f)
     (quasiquote
       (arr-group-by (unquote f) (unquote xs)))
     (quasiquote
       (group-by-impl (unquote f) (core.slice (unquote xs) 0)))))
 
 (defn- group-by-impl
-  "Implementation helper for non-keyword `arr.group-by`."
+  "Implementation helper for non-field-selector `arr.group-by`."
   [f: (fn [x: $T] -> $K), xs: []T] -> (map K (dynamic T)) #force_inline
   (let [out (odin "make(map[K][dynamic]T)")]
     (each [x xs]
@@ -679,14 +688,14 @@
   The result maps keys to integer counts and is allocated once before scanning
   the input."
   [f xs]
-  (if (keyword? f)
+  (if (field-selector? f)
     (quasiquote
       (arr-count-by (unquote f) (unquote xs)))
     (quasiquote
       (count-by-impl (unquote f) (core.slice (unquote xs) 0)))))
 
 (defn- count-by-impl
-  "Implementation helper for non-keyword `arr.count-by`."
+  "Implementation helper for non-field-selector `arr.count-by`."
   [f: (fn [x: $T] -> $K), xs: []T] -> map[K]int #force_inline
   (let [out (odin "make(map[K]int)")]
     (each [x xs]
@@ -699,14 +708,14 @@
   This is useful for grouped numeric aggregation. Missing keys start from the
   zero value of the value type."
   [key-f value-f xs]
-  (if (and (keyword? key-f) (keyword? value-f))
+  (if (and (field-selector? key-f) (field-selector? value-f))
     (quasiquote
       (arr-sum-by (unquote key-f) (unquote value-f) (unquote xs)))
     (quasiquote
       (sum-by-impl (unquote key-f) (unquote value-f) (core.slice (unquote xs) 0)))))
 
 (defn- sum-by-impl
-  "Implementation helper for non-keyword `arr.sum-by`."
+  "Implementation helper for non-field-selector `arr.sum-by`."
   [key-f: (fn [x: $T] -> $K), value-f: (fn [x: T] -> $V), xs: []T] -> map[K]V #force_inline
   (let [out (odin "make(map[K]V)")]
     (each [x xs]
@@ -756,14 +765,14 @@
   The first element for each key is kept and later elements with the same key
   are skipped. Output order follows the input."
   [f xs]
-  (if (keyword? f)
+  (if (field-selector? f)
     (quasiquote
       (arr-distinct-by (unquote f) (unquote xs)))
     (quasiquote
       (distinct-by-impl (unquote f) (core.slice (unquote xs) 0)))))
 
 (defn- distinct-by-impl
-  "Implementation helper for non-keyword `arr.distinct-by`."
+  "Implementation helper for non-field-selector `arr.distinct-by`."
   [f: (fn [x: $T] -> $K), xs: []T] -> [dynamic]T #force_inline
   (let [out (arr.empty T (core.count xs))
         seen (odin "make(map[K]bool, len(xs))") defer]
@@ -851,7 +860,7 @@
   Computes the exact output capacity before appending so the generated Odin loop
   avoids repeated growth. Kept private; call `arr.range`."
   [start: int, end: int, step: int] -> [dynamic]int #force_inline
-  (core.when (== step 0)
+  (core.when (= step 0)
     (return (arr.empty int)))
   (let [count 0]
     (if (and (> step 0) (< start end))
@@ -870,7 +879,7 @@
       out)))
 
 (defn- map-impl
-  "Implementation helper for non-keyword `arr.map`.
+  "Implementation helper for non-field-selector `arr.map`.
 
   This force-inlined helper gives source-backed macros a direct Odin loop while
   keeping callback dispatch visible to the compiler."
@@ -881,7 +890,7 @@
     out))
 
 (defn- filter-impl
-  "Implementation helper for non-keyword `arr.filter`.
+  "Implementation helper for non-field-selector `arr.filter`.
 
   Allocates one output array with input-sized capacity and appends matching
   elements in a single pass."
@@ -893,7 +902,7 @@
     out))
 
 (defn- remove-impl
-  "Implementation helper for non-keyword `arr.remove`.
+  "Implementation helper for non-field-selector `arr.remove`.
 
   Allocates one output array with input-sized capacity and appends elements for
   which the predicate is false."
@@ -997,7 +1006,7 @@
   capacity."
   [n: int, xs: []$T] -> [dynamic]T #force_inline
   (let [size (core.count xs)]
-    (core.when (or (<= n 0) (== size 0))
+    (core.when (or (<= n 0) (= size 0))
       (return (arr.empty T)))
     (let [out (arr.empty T n)
           i 0]
@@ -1010,9 +1019,9 @@
   "Return the longest leading slice whose elements satisfy `pred`.
 
   The result is a slice view into the original input and does not copy elements.
-  Keyword shorthand is supported for array element projection."
+  Dot field selectors are supported for array element projection."
   [pred xs]
-  (if (keyword? pred)
+  (if (field-selector? pred)
     (quasiquote
       (arr-take-while (unquote pred) (unquote xs)))
     (quasiquote
@@ -1022,9 +1031,9 @@
   "Return the suffix after dropping leading elements that satisfy `pred`.
 
   The result is a slice view into the original input and does not copy elements.
-  Keyword shorthand is supported for array element projection."
+  Dot field selectors are supported for array element projection."
   [pred xs]
-  (if (keyword? pred)
+  (if (field-selector? pred)
     (quasiquote
       (arr-drop-while (unquote pred) (unquote xs)))
     (quasiquote
@@ -1036,7 +1045,7 @@
   Evaluation stops at the first matching element. This lowers to a direct loop
   and allocates nothing."
   [pred xs]
-  (if (keyword? pred)
+  (if (field-selector? pred)
     (quasiquote
       (arr-some? (unquote pred) (unquote xs)))
     (quasiquote
@@ -1048,7 +1057,7 @@
   Evaluation stops at the first failing element. Empty inputs return true. This
   lowers to a direct loop and allocates nothing."
   [pred xs]
-  (if (keyword? pred)
+  (if (field-selector? pred)
     (quasiquote
       (arr-every? (unquote pred) (unquote xs)))
     (quasiquote
@@ -1060,7 +1069,7 @@
   The return shape is `[value, ok]`. When no element matches, `ok` is false and
   `value` is the zero value of the element type."
   [pred xs]
-  (if (keyword? pred)
+  (if (field-selector? pred)
     (quasiquote
       (arr-find (unquote pred) (unquote xs)))
     (quasiquote
@@ -1095,7 +1104,7 @@
     (max-by-impl (unquote f) (core.slice (unquote xs) 0))))
 
 (defn- some-impl
-  "Implementation helper for non-keyword `arr.some?`."
+  "Implementation helper for non-field-selector `arr.some?`."
   [pred: (fn [x: $T] -> bool), xs: []T] -> bool #force_inline
   (let [result false]
     (each [x xs]
@@ -1106,7 +1115,7 @@
     result))
 
 (defn- every-impl
-  "Implementation helper for non-keyword `arr.every?`."
+  "Implementation helper for non-field-selector `arr.every?`."
   [pred: (fn [x: $T] -> bool), xs: []T] -> bool #force_inline
   (let [result true]
     (each [x xs]
@@ -1117,7 +1126,7 @@
     result))
 
 (defn- find-impl
-  "Implementation helper for non-keyword `arr.find`."
+  "Implementation helper for non-field-selector `arr.find`."
   [pred: (fn [x: $T] -> bool), xs: []T] -> [value: T, ok: bool] #force_inline
   (each [x xs]
     (core.when (pred x)
@@ -1135,7 +1144,7 @@
 (defn- min-by-impl
   "Implementation helper for `arr.min-by`."
   [f: (fn [x: $T] -> $K), xs: []T] -> [value: T, ok: bool] #force_inline
-  (core.when (== (core.count xs) 0)
+  (core.when (= (core.count xs) 0)
     (return value false))
   (let [best (core.get xs 0)
         best-key (f best)
@@ -1152,7 +1161,7 @@
 (defn- max-by-impl
   "Implementation helper for `arr.max-by`."
   [f: (fn [x: $T] -> $K), xs: []T] -> [value: T, ok: bool] #force_inline
-  (core.when (== (core.count xs) 0)
+  (core.when (= (core.count xs) 0)
     (return value false))
   (let [best (core.get xs 0)
         best-key (f best)
@@ -1167,7 +1176,7 @@
     (return best true)))
 
 (defn- take-while-impl
-  "Implementation helper for non-keyword `arr.take-while`."
+  "Implementation helper for non-field-selector `arr.take-while`."
   [pred: (fn [x: $T] -> bool), xs: []T] -> []T #force_inline
   (each [x i xs]
     (core.when (not (pred x))
@@ -1175,7 +1184,7 @@
   xs)
 
 (defn- drop-while-impl
-  "Implementation helper for non-keyword `arr.drop-while`."
+  "Implementation helper for non-field-selector `arr.drop-while`."
   [pred: (fn [x: $T] -> bool), xs: []T] -> []T #force_inline
   (each [x i xs]
     (core.when (not (pred x))

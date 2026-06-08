@@ -3,7 +3,7 @@
 (odin "Handle :: distinct rawptr")
 
 (defstruct Counter {
-  :value int
+  value: int
 })
 
 (defn bump! [x: ^int]
@@ -12,18 +12,18 @@
 
 (defn counter-value [counter: ^Counter] -> int
   ;; Read through a pointer when shared identity matters.
-  (:value counter^))
+  counter^.value)
 
 (defn counter-after-bump [] -> int
-  (let [counter (Counter {:value 41})]
+  (let [counter (Counter {value: 41})]
     ;; Take the address of a struct field when you need in-place mutation.
-    (bump! (addr (:value counter)))
+    (bump! (addr counter.value))
     (counter-value (addr counter))))
 
 (defn main []
-  (core.println (counter-after-bump)))
+  (println (counter-after-bump)))
 
-(core.comment
+(comment
   ;; Prefer `^T`, `addr`, and `x^` in ordinary Kvist code. Keep `(deref ...)`
   ;; for more complex pointer expressions.
   (counter-after-bump)

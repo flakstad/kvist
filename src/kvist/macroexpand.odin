@@ -1391,6 +1391,12 @@ macro_eval_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_
                 }
                 #partial switch single.kind {
                 case .Symbol:
+                    if len(single.text) > 1 && single.text[0] == '.' {
+                        return macro_string_value(single.text[1:]), Compile_Error{}, true
+                    }
+                    if len(single.text) > 1 && single.text[len(single.text)-1] == ':' {
+                        return macro_string_value(single.text[:len(single.text)-1]), Compile_Error{}, true
+                    }
                     return macro_string_value(single.text), Compile_Error{}, true
                 case .Keyword:
                     if len(single.text) > 0 && single.text[0] == ':' {
@@ -1401,18 +1407,24 @@ macro_eval_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_
                     return Macro_Value{}, Compile_Error{message = "name expects one symbol or keyword", span = form.items[1].span}, false
                 }
             case "=":
-                if len(form.items) != 3 {
-                    return Macro_Value{}, Compile_Error{message = "= expects two arguments", span = form.span}, false
+                if len(form.items) < 3 {
+                    return Macro_Value{}, Compile_Error{message = "= expects at least two arguments", span = form.span}, false
                 }
-                left, err_left, ok_left := macro_eval_expr(form.items[1], macros, bindings)
-                if !ok_left {
-                    return Macro_Value{}, err_left, false
+                previous, err_previous, ok_previous := macro_eval_expr(form.items[1], macros, bindings)
+                if !ok_previous {
+                    return Macro_Value{}, err_previous, false
                 }
-                right, err_right, ok_right := macro_eval_expr(form.items[2], macros, bindings)
-                if !ok_right {
-                    return Macro_Value{}, err_right, false
+                for item in form.items[2:] {
+                    current, err_current, ok_current := macro_eval_expr(item, macros, bindings)
+                    if !ok_current {
+                        return Macro_Value{}, err_current, false
+                    }
+                    if !macro_value_equal(previous, current) {
+                        return macro_bool_value(false), Compile_Error{}, true
+                    }
+                    previous = current
                 }
-                return macro_bool_value(macro_value_equal(left, right)), Compile_Error{}, true
+                return macro_bool_value(true), Compile_Error{}, true
             case "form?":
                 if len(form.items) != 2 {
                     return Macro_Value{}, Compile_Error{message = "form? expects one argument", span = form.span}, false
@@ -1482,6 +1494,20 @@ macro_eval_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_
                     return macro_bool_value(false), Compile_Error{}, true
                 }
                 return macro_bool_value(value.form.kind == .Keyword), Compile_Error{}, true
+            case "field-selector?":
+                if len(form.items) != 2 {
+                    return Macro_Value{}, Compile_Error{message = "field-selector? expects one argument", span = form.span}, false
+                }
+                value, err_value, ok_value := macro_eval_expr(form.items[1], macros, bindings)
+                if !ok_value {
+                    return Macro_Value{}, err_value, false
+                }
+                if value.kind != .Form {
+                    return macro_bool_value(false), Compile_Error{}, true
+                }
+                return macro_bool_value(value.form.kind == .Symbol &&
+                                        len(value.form.text) > 1 &&
+                                        value.form.text[0] == '.'), Compile_Error{}, true
             case "string?":
                 if len(form.items) != 2 {
                     return Macro_Value{}, Compile_Error{message = "string? expects one argument", span = form.span}, false
@@ -1729,6 +1755,23 @@ macro_emit_body_form :: proc(e: ^Macro_Expander, item: CST_Form, macros: []User_
 write_macro_form :: proc(builder: ^strings.Builder, form: CST_Form) {
     #partial switch form.kind {
     case .List:
+        if len(form.items) == 3 &&
+           form.items[0].kind == .Symbol &&
+           form.items[0].text == "__kvist_field" &&
+           form.items[2].kind == .Symbol {
+            write_macro_form(builder, form.items[1])
+            strings.write_byte(builder, '.')
+            strings.write_string(builder, form.items[2].text)
+            return
+        }
+        if len(form.items) == 2 &&
+           form.items[0].kind == .Symbol &&
+           len(form.items[0].text) > 1 &&
+           form.items[0].text[0] == '.' {
+            write_macro_form(builder, form.items[1])
+            strings.write_string(builder, form.items[0].text)
+            return
+        }
         strings.write_byte(builder, '(')
         for item, idx in form.items {
             if idx > 0 {
@@ -1899,6 +1942,29 @@ write_macro_form_expanded :: proc(builder: ^strings.Builder, form: CST_Form, mac
 
     #partial switch form.kind {
     case .List:
+        if len(form.items) == 3 &&
+           form.items[0].kind == .Symbol &&
+           form.items[0].text == "__kvist_field" &&
+           form.items[2].kind == .Symbol {
+            err_receiver, ok_receiver := write_macro_form_expanded(builder, form.items[1], macros)
+            if !ok_receiver {
+                return err_receiver, false
+            }
+            strings.write_byte(builder, '.')
+            strings.write_string(builder, form.items[2].text)
+            return Compile_Error{}, true
+        }
+        if len(form.items) == 2 &&
+           form.items[0].kind == .Symbol &&
+           len(form.items[0].text) > 1 &&
+           form.items[0].text[0] == '.' {
+            err_receiver, ok_receiver := write_macro_form_expanded(builder, form.items[1], macros)
+            if !ok_receiver {
+                return err_receiver, false
+            }
+            strings.write_string(builder, form.items[0].text)
+            return Compile_Error{}, true
+        }
         strings.write_byte(builder, '(')
         for item, idx in form.items {
             if idx > 0 {

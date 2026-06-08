@@ -5,24 +5,24 @@
 (defn classify-code [code: int] -> int
   (def limit: int 99)
   (defenum Status [OK Large])
-  (defstruct Payload {:code int :status Status})
-  (defunion Value {:payload Payload :raw int})
-  (let [payload (Payload {:code code :status .OK})
-        value (Value {:payload payload})]
-    (core.switch [item value]
-      Payload (if (> (:code item) limit) 1 0)
+  (defstruct Payload {code: int status: Status})
+  (defunion Value {payload: Payload raw: int})
+  (let [payload (Payload {code: code status: .OK})
+        value (Value {payload: payload})]
+    (switch [item value]
+      Payload (if (> item.code limit) 1 0)
       int item
       :else -1)))
 
 (defn http-label [code: int] -> string
-  (defenum Http-Status {:OK 200 :Not-Found 404 :Error 500})
-  (core.switch (Http-Status code)
+  (defenum Http-Status {OK: 200 Not-Found: 404 Error: 500})
+  (switch (Http-Status code)
     .OK "ok"
     .Not-Found "missing"
     .Error "error"
     :else "unknown"))
 
 (defn main []
-  (core.println (classify-code 42))
-  (core.println (classify-code 120))
-  (core.println (http-label 404)))
+  (println (classify-code 42))
+  (println (classify-code 120))
+  (println (http-label 404)))

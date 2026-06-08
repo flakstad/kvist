@@ -12,7 +12,7 @@
 (import time "core:time")
 
 (defstruct Greeting {
-  :message string
+  message: string
 })
 
 (defn new-sid [] -> string
@@ -24,7 +24,7 @@
   "")
 
 (defn request-csrf-header [req: ^h.Request] -> string
-  (let [[token ok] (h.headers_get_unsafe (deref req).headers "x-csrf")]
+  (let [[token ok] (h.headers_get_unsafe req^.headers "x-csrf")]
     (if ok
       token
       "")))
@@ -32,12 +32,12 @@
 (defn make-request [method: h.Method, cookie-header: string, csrf-header: string] -> h.Request
   (let [req (h.Request {})]
     (h.request_init (addr req) context.temp_allocator)
-    (set! req.line (h.Requestline {:method method
-                                      :target "/demo"
-                                      :version (h.Version {:major 1 :minor 1})}))
-    (when (> (core.count cookie-header) 0)
+    (set! req.line (h.Requestline {method: method
+                                      target: "/demo"
+                                      version: (h.Version {major: 1 minor: 1})}))
+    (when (> (count cookie-header) 0)
       (h.headers_set_unsafe (addr req.headers) "cookie" cookie-header))
-    (when (> (core.count csrf-header) 0)
+    (when (> (count csrf-header) 0)
       (h.headers_set_unsafe (addr req.headers) "x-csrf" csrf-header))
     req))
 
@@ -60,13 +60,13 @@
 (t.deftest html-package-surface
   (let [ids (arr.range 1 4) defer
         rendered (html.render
-                   [:div {:class "panel"
-                          :hidden false}
+                   [:div {class: "panel"
+                          hidden: false}
                     [:<> [:span "A&B"] (when true [:strong "ok"])]
                     [:ul
                      (html.for [id ids]
                        [:li id])]]) defer
-        templated (html.render "<p>{{name}}</p>" {:name "Ada"}) defer]
+        templated (html.render "<p>{{name}}</p>" {name: "Ada"}) defer]
     (t.is (= rendered "<div class=\"panel\"><span>A&amp;B</span><strong>ok</strong><ul><li>1</li><li>2</li><li>3</li></ul></div>"))
     (t.is (= templated "<p>Ada</p>"))))
 
@@ -76,12 +76,12 @@
         ready? true
         archived? false
         rendered (html.render
-                   [:section {:class "panel"
-                              :data-count count
-                              :hidden archived?
-                              :data-state (if ready? "ready" "hidden")}
+                   [:section {class: "panel"
+                              data-count: count
+                              hidden: archived?
+                              data-state: (if ready? "ready" "hidden")}
                     [:h1 title]
-                    (core.when ready?
+                    (when ready?
                       [:span "Ready <ok>"])
                     (if archived?
                       [:p "Archived"]
@@ -96,7 +96,7 @@
         req (make-request .Get "sid=abc; csrf=csrf-abc" "")
         res (make-response)
         app (http.handler [req0 res0]
-              (set! (deref res0).status .Accepted)
+              (set! res0^.status .Accepted)
               (http.set-cookie! res0 "session" "abc"))]
     (defer (http.router-destroy! router))
     (defer (http.rate-limit-destroy! data))
@@ -108,7 +108,7 @@
       (t.is (= (map.get cookies "csrf" "") "csrf-abc")))
     (t.is (= opts.window time.Second))
     (t.is (= opts.max 5))
-    (t.is (== res.status .Accepted))
+    (t.is (= res.status .Accepted))
     (t.is (= (count res.cookies) 1))
     (t.is (= (get res.cookies 0).name "session"))
     (t.is (= (get res.cookies 0).value "abc"))))
@@ -118,12 +118,12 @@
     (defer (httpc.request-destroy req))
     (httpc.set-header! req "x-api-key" "demo")
     (httpc.add-cookie! req "session" "abc123")
-    (let [json-err (httpc.with-json req (Greeting {:message "hello"}))
+    (let [json-err (httpc.with-json req (Greeting {message: "hello"}))
           [api-key ok] (h.headers_get_unsafe req.headers "x-api-key")]
-      (t.is (== json-err nil))
+      (t.is (= json-err nil))
       (t.is ok)
       (t.is (= api-key "demo"))
-      (t.is (== req.method .Post))
+      (t.is (= req.method .Post))
       (t.is (= (count req.cookies) 1))
       (t.is (= (get req.cookies 0).name "session"))
       (t.is (= (get req.cookies 0).value "abc123")))))
@@ -142,17 +142,17 @@
         reject-plan (session.plan (addr rejected-post) opts)
         res (make-response)]
     (session.apply-plan! (addr res) opts create-plan)
-    (t.is (== create-plan.action .Create))
+    (t.is (= create-plan.action .Create))
     (t.is create-plan.set-cookie)
     (t.is (= create-plan.sid "demo-session"))
     (t.is (= create-plan.csrf "csrf-demo-session"))
-    (t.is (== accept-plan.action .Accept))
+    (t.is (= accept-plan.action .Accept))
     (t.is (not accept-plan.set-cookie))
     (t.is (session.accepted? accept-plan))
-    (t.is (== refresh-plan.action .RefreshCsrf))
+    (t.is (= refresh-plan.action .RefreshCsrf))
     (t.is refresh-plan.set-cookie)
-    (t.is (== accept-post-plan.action .Accept))
-    (t.is (== reject-plan.action .Reject))
+    (t.is (= accept-post-plan.action .Accept))
+    (t.is (= reject-plan.action .Reject))
     (t.is (not (session.accepted? reject-plan)))
     (t.is (= (count res.cookies) 2))
     (t.is (= (get res.cookies 0).name "sid"))

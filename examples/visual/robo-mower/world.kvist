@@ -22,10 +22,10 @@
 (def Dock-Cell-Y: int (+ Boundary-Y 3))
 
 (defstruct World
-  {:cells [dynamic]int
-   :cut [dynamic]bool
-   :obstacle-count int
-   :boundary-count int})
+  {cells: [dynamic]int
+   cut: [dynamic]bool
+   obstacle-count: int
+   boundary-count: int})
 
 (defn idx
   "Convert grid coordinates to a flat cell index."
@@ -60,10 +60,10 @@
 (defn make-world
   "Allocate the mutable world buffers and seed the default field."
   [] -> World
-  (let [world (World {:cells (make-int-buffer Cell-Outside)
-                      :cut (make-bool-buffer false)
-                      :obstacle-count 0
-                      :boundary-count 0})]
+  (let [world (World {cells: (make-int-buffer Cell-Outside)
+                      cut: (make-bool-buffer false)
+                      obstacle-count: 0
+                      boundary-count: 0})]
     (reset-world! (addr world))
     world))
 
@@ -94,11 +94,11 @@
   (let [cells world^.cells
         cut world^.cut
         cell (idx x y)
-        was-obstacle (== cells[cell] Cell-Obstacle)
-        was-boundary (== cells[cell] Cell-Boundary)
-        is-obstacle (== value Cell-Obstacle)
-        is-boundary (== value Cell-Boundary)
-        is-grass (== value Cell-Grass)]
+        was-obstacle (= cells[cell] Cell-Obstacle)
+        was-boundary (= cells[cell] Cell-Boundary)
+        is-obstacle (= value Cell-Obstacle)
+        is-boundary (= value Cell-Boundary)
+        is-grass (= value Cell-Grass)]
     (when (and was-obstacle (not is-obstacle))
       (mut! world^.obstacle-count -= 1))
     (when (and (not was-obstacle) is-obstacle)
@@ -162,13 +162,13 @@
     (return true))
   (let [cells world^.cells
         cell (idx x y)]
-    (not (== cells[cell] Cell-Grass))))
+    (not (= cells[cell] Cell-Grass))))
 
 (defn cell-mowable?
   "Return true when a cell is grass that can be cut."
   [world: (ptr World), cell: int] -> bool
   (let [cells world^.cells]
-    (== cells[cell] Cell-Grass)))
+    (= cells[cell] Cell-Grass)))
 
 (defn point-blocked?
   "Return true when a local field-space point is outside or inside an obstacle."
@@ -233,7 +233,7 @@
             dx (- cx x)
             dy (- cy y)
             d2 (+ (* dx dx) (* dy dy))]
-        (when (and (<= d2 r2) (== cells[cell] Cell-Grass))
+        (when (and (<= d2 r2) (= cells[cell] Cell-Grass))
           (set! cut[cell] true)))
       (mut! cell += 1))))
 
@@ -252,12 +252,12 @@
             dx (- cx x)
             dy (- cy y)
             d2 (+ (* dx dx) (* dy dy))]
-        (when (and (<= d2 r2) (== cells[cell] Cell-Grass))
+        (when (and (<= d2 r2) (= cells[cell] Cell-Grass))
           (mut! grass-count += 1)
           (when (not cut[cell])
             (mut! uncut-count += 1))))
       (mut! cell += 1))
-    (when (== grass-count 0)
+    (when (= grass-count 0)
       (return 0.0))
     (/ (f32 uncut-count) (f32 grass-count))))
 
@@ -270,11 +270,11 @@
         mowable 0
         done 0]
     (while (< i Grid-Cells)
-      (when (== cells[i] Cell-Grass)
+      (when (= cells[i] Cell-Grass)
         (mut! mowable += 1)
         (when cut[i]
           (mut! done += 1)))
       (mut! i += 1))
-    (when (== mowable 0)
+    (when (= mowable 0)
       (return 100.0))
     (* 100.0 (/ (f64 done) (f64 mowable)))))

@@ -13,29 +13,29 @@
 
 (defn main []
   (println (greet "Ada"))
-  (println (greet {:name "Linus" :punctuation "?"}))
+  (println (greet {name: "Linus" punctuation: "?"}))
   (println (rect-area 4))
-  (println (rect-area {:height 12 :width 3}))
-  (println (place "enemy" {:x 10 :y 20})))
+  (println (rect-area {height: 12 width: 3}))
+  (println (place "enemy" {x: 10 y: 20})))
 
 (comment
 
   ;; Positional arguments stay positional.
   (greet "Ada" "!")
 
-  ;; A single keyword brace form lowers to named arguments.
-  (greet {:name "Linus" :punctuation "?"})
+  ;; A single field-label brace form lowers to named arguments.
+  (greet {name: "Linus" punctuation: "?"})
 
   ;; Trailing default arguments can be omitted positionally.
   (rect-area 4)
   ;; => 40
 
   ;; Named calls can omit any parameter with a default.
-  (greet {:name "Grace"})
+  (greet {name: "Grace"})
   ;; => "hello Grace!"
 
   ;; Mixed calls keep the required prefix positional and name the optional tail.
-  (place "enemy" {:x 10 :y 20})
+  (place "enemy" {x: 10 y: 20})
   ;; => "enemy:10,20/ok"
 
 )

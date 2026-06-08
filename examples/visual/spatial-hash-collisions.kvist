@@ -20,28 +20,28 @@
 (def Hud-Font-Spacing: f32 1.0)
 
 (defstruct Circle
-  {:x f32
-   :y f32
-   :vx f32
-   :vy f32
-   :radius f32
-   :cell int
-   :hit bool})
+  {x: f32
+   y: f32
+   vx: f32
+   vy: f32
+   radius: f32
+   cell: int
+   hit: bool})
 
 (defstruct App-State
-  {:circles #soa[dynamic]Circle
-   :head [dynamic]int
-   :next [dynamic]int
-   :target-fps int
-   :paused bool
-   :show-grid bool
-   :collisions int
-   :pairs-tested int
-   :frames int
-   :metric-start f64
-   :fps f64
-   :update-ms f64
-   :draw-ms f64})
+  {circles: #soa[dynamic]Circle
+   head: [dynamic]int
+   next: [dynamic]int
+   target-fps: int
+   paused: bool
+   show-grid: bool
+   collisions: int
+   pairs-tested: int
+   frames: int
+   metric-start: f64
+   fps: f64
+   update-ms: f64
+   draw-ms: f64})
 
 (defn lcg-next
   "Advance the deterministic random seed and return the next raw integer."
@@ -92,13 +92,13 @@
             radius (+ 3.0 (* 4.5 (rand-unit (addr seed))))
             x (+ radius (* (- (f32 Width) (* radius 2.0)) (rand-unit (addr seed))))
             y (+ (f32 Sim-Y) radius (* (- (f32 (- Height Sim-Y)) (* radius 2.0)) (rand-unit (addr seed))))]
-        (soa.push! circles (Circle {:x x
-                                    :y y
-                                    :vx (* speed (math.cos angle))
-                                    :vy (* speed (math.sin angle))
-                                    :radius radius
-                                    :cell -1
-                                    :hit false})))
+        (soa.push! circles (Circle {x: x
+                                    y: y
+                                    vx: (* speed (math.cos angle))
+                                    vy: (* speed (math.sin angle))
+                                    radius: radius
+                                    cell: -1
+                                    hit: false})))
       (mut! i += 1))
     circles))
 
@@ -274,19 +274,19 @@
   (defer (rl.CloseWindow))
   (rl.SetTargetFPS (i32 Initial-Target-FPS))
   (let [font (rl.LoadFontEx (cstring Hud-Font-Path) Hud-Font-Atlas-Size nil 0)
-        state (App-State {:circles (make-circles Circle-Count)
-                          :head (make-int-buffer Bucket-Count -1)
-                          :next (make-int-buffer Circle-Count -1)
-                          :target-fps Initial-Target-FPS
-                          :paused false
-                          :show-grid true
-                          :collisions 0
-                          :pairs-tested 0
-                          :frames 0
-                          :metric-start (rl.GetTime)
-                          :fps 0
-                          :update-ms 0
-                          :draw-ms 0})]
+        state (App-State {circles: (make-circles Circle-Count)
+                          head: (make-int-buffer Bucket-Count -1)
+                          next: (make-int-buffer Circle-Count -1)
+                          target-fps: Initial-Target-FPS
+                          paused: false
+                          show-grid: true
+                          collisions: 0
+                          pairs-tested: 0
+                          frames: 0
+                          metric-start: (rl.GetTime)
+                          fps: 0
+                          update-ms: 0
+                          draw-ms: 0})]
     (rl.SetTextureFilter font.texture .BILINEAR)
     (defer (rl.UnloadFont font))
     (defer (delete state.circles))

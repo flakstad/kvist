@@ -9,12 +9,12 @@
 (import os "core:os")
 
 (defstruct Note {
-  :title string
-  :body string
+  title: string
+  body: string
 })
 
 (defstruct Count {
-  :n int
+  n: int
 })
 
 // The examples below write under ./tmp. Odin's write helpers do not create
@@ -40,7 +40,7 @@
 (defn main []
   (return))
 
-(core.comment
+(comment
   ;; These forms are meant for editor eval. They deliberately use real files,
   ;; so the result survives across separate kvist eval processes.
 
@@ -67,9 +67,9 @@
   (ensure-dev-dir)
   (let [[marshal-err write-err] (json.write
                                   "tmp.kvist-note.json"
-                                  (Note {:title "hello" :body "from Kvist"}))]
-    (and (== marshal-err nil)
-         (== write-err nil)))
+                                  (Note {title: "hello" body: "from Kvist"}))]
+    (and (= marshal-err nil)
+         (= write-err nil)))
   ;; => true
 
   (let [[note read-err unmarshal-err] (json.read-as Note "tmp.kvist-note.json")]
@@ -77,22 +77,22 @@
             (!= unmarshal-err nil))
       false
       (do
-        (defer (delete (:title note)))
-        (defer (delete (:body note)))
-        (core.println note)
+        (defer (delete note.title))
+        (defer (delete note.body))
+        (println note)
         true)))
   ;; prints the parsed Note struct, then returns true
 
   (ensure-dev-dir)
-  (let [[marshal-err write-err] (json.write "tmp.kvist-count.json" (Count {:n 42}))]
-    (and (== marshal-err nil)
-         (== write-err nil)))
+  (let [[marshal-err write-err] (json.write "tmp.kvist-count.json" (Count {n: 42}))]
+    (and (= marshal-err nil)
+         (= write-err nil)))
   ;; => true
 
   (let [[count read-err unmarshal-err] (json.read-as Count "tmp.kvist-count.json")]
     (if (or (!= read-err nil)
             (!= unmarshal-err nil))
       0
-      (:n count)))
+      count.n))
   ;; => 42
 )

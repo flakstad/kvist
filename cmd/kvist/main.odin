@@ -283,7 +283,7 @@ print_compile_warnings :: proc(path, source, eval_source: string, warnings: []kv
     }
 }
 
-run_odin_file :: proc(command, generated_path, source_path, source, eval_source, save_name: string, source_map: []kvist.Source_Map_Entry, extra_args: []string = nil) -> int {
+run_odin_file :: proc(command, generated_path, source_path, source, eval_source, save_name: string, source_map: []kvist.Source_Map_Entry, extra_args: []string = nil, package_dir := "") -> int {
     source_dir, _ := os.split_path(source_path)
     working_dir := source_dir
     if working_dir == "" {
@@ -303,7 +303,11 @@ run_odin_file :: proc(command, generated_path, source_path, source, eval_source,
     if command == "run" {
         odin_command = "build"
     }
-    append(&args, "odin", odin_command, generated_abs, "-file")
+    if package_dir != "" {
+        append(&args, "odin", odin_command, package_dir)
+    } else {
+        append(&args, "odin", odin_command, generated_abs, "-file")
+    }
     for arg in extra_args {
         append(&args, arg)
     }
@@ -369,22 +373,81 @@ run_odin_file :: proc(command, generated_path, source_path, source, eval_source,
     return 1
 }
 
-write_generated_for_execution :: proc(output, requested_path: string) -> (path, temp_dir: string, ok: bool) {
+source_dir_has_odin_sidecars :: proc(source_path: string) -> bool {
+    source_dir, _ := os.split_path(source_path)
+    if source_dir == "" {
+        source_dir = "."
+    }
+    entries, err := os.read_directory_by_path(source_dir, -1, context.allocator)
+    if err != nil {
+        return false
+    }
+    defer os.file_info_slice_delete(entries, context.allocator)
+    for entry in entries {
+        if entry.type != .Regular || !strings.has_suffix(entry.name, ".odin") {
+            continue
+        }
+        if strings.has_prefix(entry.name, "kvist-generated-") {
+            continue
+        }
+        return true
+    }
+    return false
+}
+
+temporary_generated_path_in_source_dir :: proc(source_path: string) -> (path, package_dir: string, ok: bool) {
+    source_dir, _ := os.split_path(source_path)
+    if source_dir == "" {
+        source_dir = "."
+    }
+    for i in 0..<1000 {
+        name := fmt.tprintf("kvist-generated-%d.odin", i)
+        candidate, join_err := os.join_path({source_dir, name}, context.allocator)
+        if join_err != nil {
+            return "", "", false
+        }
+        if !os.exists(candidate) {
+            return candidate, strings.clone(source_dir), true
+        }
+        delete(candidate)
+    }
+    return "", "", false
+}
+
+write_generated_for_execution :: proc(output, requested_path, source_path: string) -> (path, temp_dir, package_dir: string, ok: bool) {
     if requested_path != "" {
         rebased, err_rebase, ok_rebase := kvist.rebase_emitted_odin_imports_for_output_path(output, requested_path)
         if !ok_rebase {
             fmt.eprintln(err_rebase.message)
-            return "", "", false
+            return "", "", "", false
         }
         write_output_or_exit(requested_path, rebased)
         delete(rebased)
-        return requested_path, "", true
+        return requested_path, "", "", true
+    }
+
+    if source_dir_has_odin_sidecars(source_path) {
+        generated, package_build_dir, path_ok := temporary_generated_path_in_source_dir(source_path)
+        if !path_ok {
+            fmt.eprintln("failed to create temporary generated path in source package")
+            return "", "", "", false
+        }
+        rebased, err_rebase, ok_rebase := kvist.rebase_emitted_odin_imports_for_output_path(output, generated)
+        if !ok_rebase {
+            fmt.eprintln(err_rebase.message)
+            delete(generated)
+            delete(package_build_dir)
+            return "", "", "", false
+        }
+        write_output_or_exit(generated, rebased)
+        delete(rebased)
+        return generated, "", package_build_dir, true
     }
 
     dir, dir_err := os.make_directory_temp("", "kvist-*", context.allocator)
     if dir_err != nil {
         fmt.eprintln("failed to create temporary directory")
-        return "", "", false
+        return "", "", "", false
     }
 
     generated, join_err := os.join_path({dir, "generated.odin"}, context.allocator)
@@ -392,7 +455,7 @@ write_generated_for_execution :: proc(output, requested_path: string) -> (path, 
         fmt.eprintln("failed to create temporary path")
         _ = os.remove(dir)
         delete(dir)
-        return "", "", false
+        return "", "", "", false
     }
 
     rebased, err_rebase, ok_rebase := kvist.rebase_emitted_odin_imports_for_output_path(output, generated)
@@ -402,14 +465,14 @@ write_generated_for_execution :: proc(output, requested_path: string) -> (path, 
         _ = os.remove(dir)
         delete(generated)
         delete(dir)
-        return "", "", false
+        return "", "", "", false
     }
     write_output_or_exit(generated, rebased)
     delete(rebased)
-    return generated, dir, true
+    return generated, dir, "", true
 }
 
-cleanup_generated :: proc(path, temp_dir, requested_path: string) {
+cleanup_generated :: proc(path, temp_dir, requested_path, package_dir: string) {
     if requested_path == "" {
         if path != "" {
             _ = os.remove(path)
@@ -419,6 +482,9 @@ cleanup_generated :: proc(path, temp_dir, requested_path: string) {
             _ = os.remove(temp_dir)
             delete(temp_dir)
         }
+    }
+    if package_dir != "" {
+        delete(package_dir)
     }
 }
 
@@ -992,16 +1058,16 @@ run_generated_command :: proc(input, generated_path, odin_command: string) -> in
     }
     defer delete(result.output)
     defer delete(result.source_map)
-        defer kvist.compile_warning_slice_delete(result.warnings)
+    defer kvist.compile_warning_slice_delete(result.warnings)
 
     print_compile_warnings(input, data, "", result.warnings[:])
-    path, temp_dir, path_ok := write_generated_for_execution(result.output, generated_path)
+    path, temp_dir, package_dir, path_ok := write_generated_for_execution(result.output, generated_path, input)
     if !path_ok {
         return 1
     }
-    defer cleanup_generated(path, temp_dir, generated_path)
+    defer cleanup_generated(path, temp_dir, generated_path, package_dir)
 
-    return run_odin_file(odin_command, path, input, data, "", "", result.source_map[:])
+    return run_odin_file(odin_command, path, input, data, "", "", result.source_map[:], package_dir = package_dir)
 }
 
 test_command :: proc(input, generated_path, test_names: string) -> int {
@@ -1020,11 +1086,11 @@ test_command :: proc(input, generated_path, test_names: string) -> int {
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     print_compile_warnings(input, data, "", result.warnings[:])
-    path, temp_dir, path_ok := write_generated_for_execution(result.output, generated_path)
+    path, temp_dir, package_dir, path_ok := write_generated_for_execution(result.output, generated_path, input)
     if !path_ok {
         return 1
     }
-    defer cleanup_generated(path, temp_dir, generated_path)
+    defer cleanup_generated(path, temp_dir, generated_path, package_dir)
 
     extra_args := make([dynamic]string, 0, 1)
     defer delete(extra_args)
@@ -1034,7 +1100,7 @@ test_command :: proc(input, generated_path, test_names: string) -> int {
         append(&extra_args, fmt.tprintf("-define:ODIN_TEST_NAMES=%s", normalized_test_names))
     }
 
-    return run_odin_file("test", path, input, data, "", "", result.source_map[:], extra_args[:])
+    return run_odin_file("test", path, input, data, "", "", result.source_map[:], extra_args[:], package_dir)
 }
 
 eval_command :: proc(input, eval_source, generated_path, save_name: string, no_print, check_only: bool) -> int {
@@ -1056,13 +1122,13 @@ eval_command :: proc(input, eval_source, generated_path, save_name: string, no_p
         defer delete(result.output)
         defer delete(result.source_map)
 
-        path, temp_dir, path_ok := write_generated_for_execution(result.output, generated_path)
+        path, temp_dir, package_dir, path_ok := write_generated_for_execution(result.output, generated_path, input)
         if !path_ok {
             return 1
         }
-        defer cleanup_generated(path, temp_dir, generated_path)
+        defer cleanup_generated(path, temp_dir, generated_path, package_dir)
 
-        return run_odin_file("run", path, input, data, "", save_name, result.source_map[:])
+        return run_odin_file("run", path, input, data, "", save_name, result.source_map[:], package_dir = package_dir)
     }
 
     data := read_source_or_exit(input)
@@ -1080,17 +1146,17 @@ eval_command :: proc(input, eval_source, generated_path, save_name: string, no_p
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     print_compile_warnings(input, data, eval_source, result.warnings[:])
-    path, temp_dir, path_ok := write_generated_for_execution(result.output, generated_path)
+    path, temp_dir, package_dir, path_ok := write_generated_for_execution(result.output, generated_path, input)
     if !path_ok {
         return 1
     }
-    defer cleanup_generated(path, temp_dir, generated_path)
+    defer cleanup_generated(path, temp_dir, generated_path, package_dir)
 
     odin_command := "run"
     if check_only {
         odin_command = "check"
     }
-    return run_odin_file(odin_command, path, input, data, eval_source, save_name, result.source_map[:])
+    return run_odin_file(odin_command, path, input, data, eval_source, save_name, result.source_map[:], package_dir = package_dir)
 }
 
 parse_legacy_compile :: proc() {

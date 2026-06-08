@@ -4,48 +4,48 @@
 (import time "core:time")
 
 (defstruct Run-Stats
-  {:mode int
-   :run int
-   :steps int
-   :elapsed-s f64
-   :sim-seconds f32
-   :coverage f64
-   :known f64
-   :battery f32
-   :collisions int
-   :distance f32
-   :cutting-s f32
-   :return-s f32
-   :charging-s f32
-   :dock-events int
-   :docked bool})
+  {mode: int
+   run: int
+   steps: int
+   elapsed-s: f64
+   sim-seconds: f32
+   coverage: f64
+   known: f64
+   battery: f32
+   collisions: int
+   distance: f32
+   cutting-s: f32
+   return-s: f32
+   charging-s: f32
+   dock-events: int
+   docked: bool})
 
 (defn parse-mode
   "Parse a CLI mode name into the corresponding controller mode."
   [name: string] -> int
-  (when (== name "random")
+  (when (= name "random")
     (return Mode-Random))
-  (when (== name "boundary")
+  (when (= name "boundary")
     (return Mode-Boundary))
-  (when (== name "frontier")
+  (when (= name "frontier")
     (return Mode-Frontier))
-  (when (== name "mapped")
+  (when (= name "mapped")
     (return Mode-Mapped))
-  (when (== name "return")
+  (when (= name "return")
     (return Mode-Return))
   Mode-Mapped)
 
 (defn parse-robot-profile
   "Parse a CLI robot sensor profile name."
   [name: string] -> int
-  (when (== name "bumper")
+  (when (= name "bumper")
     (return Sensor-Bumper))
   Sensor-Forward)
 
 (defn sensor-profile-name
   "Return a short label for the robot sensor profile."
   [profile: int] -> cstring
-  (when (== profile Sensor-Bumper)
+  (when (= profile Sensor-Bumper)
     (return "bumper"))
   "forward")
 
@@ -85,7 +85,7 @@
         (update-simulation! (addr state) Fixed-DT)
         (when state.robot.blade-on
           (mut! cutting-steps += 1))
-        (when (== state.robot.mode Mode-Return)
+        (when (= state.robot.mode Mode-Return)
           (mut! return-steps += 1))
         (when state.charging
           (mut! charging-steps += 1))
@@ -94,21 +94,21 @@
         (set! was-charging state.charging)
         (mut! i += 1))
       (let [elapsed (time.duration_seconds (time.tick_since start))
-            stats (Run-Stats {:mode mode
-                              :run run
-                              :steps steps
-                              :elapsed-s elapsed
-                              :sim-seconds (f32 seconds)
-                              :coverage (coverage-percent (addr state.world))
-                              :known (belief-known-percent (addr state.belief))
-                              :battery state.battery
-                              :collisions state.robot.collisions
-                              :distance state.robot.distance
-                              :cutting-s (* (f32 cutting-steps) Fixed-DT)
-                              :return-s (* (f32 return-steps) Fixed-DT)
-                              :charging-s (* (f32 charging-steps) Fixed-DT)
-                              :dock-events dock-events
-                              :docked (docked? (addr state))})]
+            stats (Run-Stats {mode: mode
+                              run: run
+                              steps: steps
+                              elapsed-s: elapsed
+                              sim-seconds: (f32 seconds)
+                              coverage: (coverage-percent (addr state.world))
+                              known: (belief-known-percent (addr state.belief))
+                              battery: state.battery
+                              collisions: state.robot.collisions
+                              distance: state.robot.distance
+                              cutting-s: (* (f32 cutting-steps) Fixed-DT)
+                              return-s: (* (f32 return-steps) Fixed-DT)
+                              charging-s: (* (f32 charging-steps) Fixed-DT)
+                              dock-events: dock-events
+                              docked: (docked? (addr state))})]
         (delete-app-state! (addr state))
         stats))))
 
@@ -166,21 +166,21 @@
           (mut! total-docked += 1)))
       (mut! run += 1))
     (let [n (f64 runs)
-          avg (Run-Stats {:mode mode
-                          :run 0
-                          :steps (* seconds Target-FPS)
-                          :elapsed-s (/ total-elapsed n)
-                          :sim-seconds (f32 seconds)
-                          :coverage (/ total-coverage n)
-                          :known (/ total-known n)
-                          :battery (f32 (/ total-battery n))
-                          :collisions (int (/ total-collisions n))
-                          :distance (f32 (/ total-distance n))
-                          :cutting-s (f32 (/ total-cutting n))
-                          :return-s (f32 (/ total-return n))
-                          :charging-s (f32 (/ total-charging n))
-                          :dock-events (/ total-dock-events runs)
-                          :docked (== total-docked runs)})]
+          avg (Run-Stats {mode: mode
+                          run: 0
+                          steps: (* seconds Target-FPS)
+                          elapsed-s: (/ total-elapsed n)
+                          sim-seconds: (f32 seconds)
+                          coverage: (/ total-coverage n)
+                          known: (/ total-known n)
+                          battery: (f32 (/ total-battery n))
+                          collisions: (int (/ total-collisions n))
+                          distance: (f32 (/ total-distance n))
+                          cutting-s: (f32 (/ total-cutting n))
+                          return-s: (f32 (/ total-return n))
+                          charging-s: (f32 (/ total-charging n))
+                          dock-events: (/ total-dock-events runs)
+                          docked: (= total-docked runs)})]
       (print-stats-row "avg" avg))))
 
 (defn run-all-experiments
@@ -201,6 +201,6 @@
         obstacle (cli.flag args "--obstacle")
         sensor-profile (parse-robot-profile robot-name-raw)]
     (fmt.printf "system=kvist-odin demo=robo-mower robot=%s seconds=%d runs=%d obstacle=%s dt=%.6f\n" (sensor-profile-name sensor-profile) seconds runs (on-off obstacle) Fixed-DT)
-    (if (== mode-name-raw "all")
+    (if (= mode-name-raw "all")
       (run-all-experiments runs seconds obstacle sensor-profile)
       (run-mode-experiments (parse-mode mode-name-raw) runs seconds obstacle sensor-profile))))

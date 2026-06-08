@@ -75,7 +75,7 @@ http__handler_next :: proc(handler: ^h.Handler) -> ^h.Handler {
   (quasiquote
     (h.listen
       (addr (unquote server))
-      (net.Endpoint {:address net.IP4_Loopback :port (unquote port)}))))
+      (net.Endpoint {address: net.IP4_Loopback port: (unquote port)}))))
 
 (defmacro handler
   "Create an HTTP handler from request and response bindings.
@@ -162,7 +162,7 @@ http__handler_next :: proc(handler: ^h.Handler) -> ^h.Handler {
     (h.listen_and_serve
       (addr (unquote server))
       (router-handler (unquote router))
-      (net.Endpoint {:address net.IP4_Loopback :port (unquote port)}))))
+      (net.Endpoint {address: net.IP4_Loopback port: (unquote port)}))))
 
 (defmacro listen-and-serve-handler!
   "Bind `server` to loopback `port` and serve `handler`."
@@ -171,7 +171,7 @@ http__handler_next :: proc(handler: ^h.Handler) -> ^h.Handler {
     (h.listen_and_serve
       (addr (unquote server))
       (unquote handler)
-      (net.Endpoint {:address net.IP4_Loopback :port (unquote port)}))))
+      (net.Endpoint {address: net.IP4_Loopback port: (unquote port)}))))
 
 (defmacro with-router
   "Evaluate `body` with a scoped router binding.
@@ -441,8 +441,8 @@ http__handler_next :: proc(handler: ^h.Handler) -> ^h.Handler {
   [res name value]
   (quasiquote
     (append
-      (addr (:cookies (deref (unquote res))))
-      (h.Cookie {:name (unquote name) :value (unquote value)}))))
+      (addr (deref (unquote res)).cookies)
+      (h.Cookie {name: (unquote name) value: (unquote value)}))))
 
 (defn new-rate-limit-opts
   "Create rate-limit options.
@@ -450,7 +450,7 @@ http__handler_next :: proc(handler: ^h.Handler) -> ^h.Handler {
   `window` is the time window and `max` is the maximum request count accepted
   within that window by the vendor rate limiter."
   [window: time.Duration max: int] -> h.Rate_Limit_Opts
-  (h.Rate_Limit_Opts {:window window :max max}))
+  (h.Rate_Limit_Opts {window: window max: max}))
 
 (defn new-rate-limit-data
   "Create empty rate-limit state.

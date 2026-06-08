@@ -1,8 +1,8 @@
 # Kvist Language Roadmap
 
-This is the current canonical cleanup/build list for the "Clojure-shaped Odin"
-surface. New work should remove old spellings instead of keeping compatibility
-aliases.
+This is the current canonical build list for the "Clojure-shaped Odin" surface.
+The user-facing language should stay small, direct, and consistent with the
+current documented forms.
 
 ## 1. Keep `make` for Odin Runtime Construction
 
@@ -54,6 +54,10 @@ Canonical loops are:
 The result type is inferred from the yielded expression where practical. When
 inference is not enough, the form should support an explicit output type.
 
+Status: `for` is an expression-only comprehension. It supports binding clauses,
+`:let`, `:when`, `:while`, and `:into` for `[dynamic]T`, `map[K]V`, and
+`set[T]`. Map output yields `[key value]`; set output yields the member value.
+
 ## 4. Add Indexed Field/Place Syntax
 
 SOA and array code should support direct indexed places:
@@ -64,6 +68,11 @@ SOA and array code should support direct indexed places:
 ```
 
 This should work anywhere a normal place is accepted.
+
+Status: indexed expression and place syntax is implemented. It supports direct
+reads, computed indexes, field-index composition such as `particles.vx[i]`,
+chained indexes such as `matrix[row][col]`, slice views such as `xs[start:end]`,
+and mutation through `set!`, `mut!`, and `update!`.
 
 ## 5. Add `kvist:cli`
 
@@ -96,10 +105,10 @@ After indexed places are solid, add macros that reduce SOA column boilerplate:
 
 ```clojure
 (soa.update! particles i
-  :vx (+ vx (* ax dt))
-  :vy (+ vy (* ay dt))
-  :x  (+ x (* vx dt))
-  :y  (+ y (* vy dt)))
+  .vx (+ vx (* ax dt))
+  .vy (+ vy (* ay dt))
+  .x  (+ x (* vx dt))
+  .y  (+ y (* vy dt)))
 ```
 
 The macro should expand to explicit column access and mutation.
@@ -108,7 +117,7 @@ Status: `kvist:soa` provides `soa.make`, `soa.push!`, and
 `soa.update!`. `soa.update!` binds mentioned fields to same-named locals,
 then emits direct indexed column writes. Whole-column helpers such as
 `soa.axpy!`, `soa.clamp!`, `soa.sum-into!`, and `soa.dot-into!` take the SOA
-buffer plus keyword field names and expand to direct loops over `(len
+buffer plus dot field selectors and expand to direct loops over `(len
 particles)`.
 
 ## 8. Prune Redundant Collection Helpers
@@ -126,5 +135,5 @@ Keep helpers only where they add real runtime behavior or readability.
 ## 9. Keep Odin Alignment Visible
 
 Prefer direct, inspectable lowering and names that make the Odin concept clear.
-Do not add compatibility aliases for removed forms such as `as`, `new`, `loop`,
-or old loop-shaped `for`.
+Keep the documented source surface canonical rather than growing duplicate
+spellings for the same operation.

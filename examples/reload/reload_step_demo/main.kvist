@@ -4,19 +4,19 @@
 (import reload "kvist:reload")
 
 (defstruct Program_State
-  {:jobs-finished int
-   :last-status string})
+  {jobs-finished: int
+   last-status: string})
 
 (defstate App_State
-  {:program Program_State
-   :step-count int
-   :reload-count int
-   :unload-count int}
-  {:run run
-   :init init
-   :on-load on-load
-   :on-unload on-unload
-   :version "v1"})
+  {program: Program_State
+   step-count: int
+   reload-count: int
+   unload-count: int}
+  {run: run
+   init: init
+   on-load: on-load
+   on-unload: on-unload
+   version: "v1"})
 
 (defconst delay time.Duration (* 1 time.Second))
 

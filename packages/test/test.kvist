@@ -139,8 +139,14 @@ __kvist_test_once_guard: sync.Once
         (if (= (name head) "=")
           (if (= (core.count expr) 3)
             (if (nil? msg)
-              (quasiquote
-                (__kvist_test_expect_value t (unquote (nth expr 1)) (unquote (nth expr 2))))
+              (if (field-selector? (nth expr 1))
+                (quasiquote
+                  (__kvist_test_expect t (= (unquote (nth expr 1)) (unquote (nth expr 2)))))
+                (if (field-selector? (nth expr 2))
+                  (quasiquote
+                    (__kvist_test_expect t (= (unquote (nth expr 1)) (unquote (nth expr 2)))))
+                  (quasiquote
+                    (__kvist_test_expect_value t (unquote (nth expr 1)) (unquote (nth expr 2))))))
               (quasiquote
                 (__kvist_test_expect t (= (unquote (nth expr 1)) (unquote (nth expr 2))) (unquote msg))))
             (error "t.is with = expects exactly two operands"))
@@ -227,7 +233,9 @@ __kvist_test_once_guard: sync.Once
   `(t.is expr)` records a test failure when `expr` is false. `(t.is expr
   \"message\")` uses the message in the failure report. Equality forms of shape
   `(= actual expected)` lower to Odin's value-aware expectation helper so reports
-  include both values; `(not expr)` also gets direct specialized lowering.
+  include both values. Equality against implicit selectors such as `.OK` lowers
+  as a boolean expression so Odin can infer the selector type; `(not expr)` also
+  gets direct specialized lowering.
 
   `t.is` returns the boolean result from the underlying Odin assertion helper."
   [expr & rest]
@@ -267,11 +275,11 @@ __kvist_test_once_guard: sync.Once
 (defmacro use-fixtures
   "Install fixtures for tests defined later in the same package file.
 
-  `(t.use-fixtures :each f...)` wraps each test body in the listed fixtures.
+  `(t.use-fixtures each: f...)` wraps each test body in the listed fixtures.
   Each fixture is called as `(f t body-proc)`, where `body-proc` is a proc taking
   `^testing.T`.
 
-  `(t.use-fixtures :once f...)` runs setup procs once before the first wrapped
+  `(t.use-fixtures once: f...)` runs setup procs once before the first wrapped
   test body executes. Current `:once` fixtures are setup-only and do not receive
   a teardown continuation."
   [scope & fixtures]
@@ -299,4 +307,4 @@ __kvist_test_once_guard: sync.Once
                 (do
                   (__kvist_test_ensure_once)
                   (unquote body)))))))
-      (error "t.use-fixtures currently supports only :each and :once"))))
+      (error "t.use-fixtures currently supports only each: and once:"))))

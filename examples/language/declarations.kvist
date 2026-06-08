@@ -7,41 +7,39 @@
 (defenum Http-Status
   "Small explicit-status enum."
   {
-  :OK 200
-  :Not-Found 404
+  OK: 200
+  Not-Found: 404
 })
 
 (defstruct Endpoint {
-  :path string
-  :status Http-Status
+  path: string
+  status: Http-Status
 })
 
 (defn status-code [status: Http-Status] -> int
   (int status))
 
 (defn status-label [status: Http-Status] -> string
-  (core.switch status
+  (switch status
     .OK "ok"
     .Not-Found "not found"
     :else "unknown"))
 
 (defn endpoint-summary [] -> string
-  (let [endpoint (Endpoint {:path "/health" :status .OK})
-        {:path path :status status} endpoint]
-    (if (== status .OK)
-      path
+  (let [endpoint (Endpoint {path: "/health" status: .OK})]
+    (if (= endpoint.status .OK)
+      endpoint.path
       "")))
 
 (defn shorthand-status-code [] -> int
-  (let [endpoint (Endpoint {:path "/health" :status .Not-Found})
-        {:status} endpoint]
-    (status-code status)))
+  (let [endpoint (Endpoint {path: "/health" status: .Not-Found})]
+    (status-code endpoint.status)))
 
 (defn main []
-  (let [endpoint (Endpoint {:path "/health" :status .OK})]
-    (core.println (status-label (:status endpoint)))))
+  (let [endpoint (Endpoint {path: "/health" status: .OK})]
+    (println (status-label endpoint.status))))
 
-(core.comment
+(comment
   default-port
   ;; => 8080
 

@@ -70,9 +70,9 @@ kvist_literal_value :: proc(form: kvist.CST_Form) -> (Value, Runtime_Error, bool
     case .Nil:
         return value_nil(), Runtime_Error{}, true
     case .Keyword:
-        return value_string(form.text), Runtime_Error{}, true
+        return Value{}, Runtime_Error{message = strings.clone("keywords are syntax markers, not live values; use a string, integer, bool, or nil")}, false
     case:
-        return Value{}, Runtime_Error{message = strings.clone("unsupported literal in live module; expected string, int, bool, nil, or keyword")}, false
+        return Value{}, Runtime_Error{message = strings.clone("unsupported literal in live module; expected string, int, bool, or nil")}, false
     }
 }
 
@@ -84,10 +84,10 @@ append_state_value :: proc(state: ^[dynamic]State_Entry, key: string, value: Val
 }
 
 option_state_key :: proc(form: kvist.CST_Form) -> (string, bool) {
-    if form.kind != .Keyword || len(form.text) < 2 {
-        return "", false
+    if form.kind == .Symbol && len(form.text) > 1 && form.text[len(form.text)-1] == ':' {
+        return form.text[:len(form.text)-1], true
     }
-    return form.text[1:], true
+    return "", false
 }
 
 find_state_entry_index :: proc(state: []State_Entry, key: string) -> int {
@@ -135,7 +135,7 @@ apply_literal_options :: proc(state: ^[dynamic]State_Entry, form: kvist.CST_Form
         }
         key, ok := option_state_key(form.items[i])
         if !ok {
-            return Runtime_Error{message = strings.clone("live module options map expects keyword keys")}, false
+            return Runtime_Error{message = strings.clone("live module options map expects field labels like name:")}, false
         }
         value, value_err, value_ok := kvist_literal_value(form.items[i+1])
         if !value_ok {
@@ -261,7 +261,7 @@ live_macroexpand_input :: proc(raw_forms: []kvist.CST_Top_Form, current_path: st
     aliases: [dynamic]kvist.Alias_Prefix
 
     for top in raw_forms {
-        alias, import_path, ok_import := kvist.source_import_alias_and_path(top.form)
+        alias, import_path, ok_import := kvist.source_import_alias_and_path(top.form, importer_path)
         if !ok_import || !strings.has_prefix(import_path, "kvist:") {
             continue
         }
@@ -280,7 +280,7 @@ live_macroexpand_input :: proc(raw_forms: []kvist.CST_Top_Form, current_path: st
     }
 
     for top in raw_forms {
-        _, import_path, ok_import := kvist.source_import_alias_and_path(top.form)
+        _, import_path, ok_import := kvist.source_import_alias_and_path(top.form, importer_path)
         if ok_import && strings.has_prefix(import_path, "kvist:") {
             continue
         }
@@ -363,7 +363,7 @@ module_definition_from_forms :: proc(accum: ^Loader_Accum, forms: []kvist.CST_To
         }
 
         if kvist.is_symbol(form.items[0], "import") {
-            _, import_path, ok_source_import := kvist.source_import_alias_and_path(form)
+            _, import_path, ok_source_import := kvist.source_import_alias_and_path(form, current_path)
             if ok_source_import && strings.has_prefix(import_path, "kvist:") {
                 continue
             }
@@ -381,27 +381,27 @@ module_definition_from_forms :: proc(accum: ^Loader_Accum, forms: []kvist.CST_To
             continue
         }
 
-        if kvist.is_symbol(form.items[0], "live/module") {
+        if kvist.is_symbol(form.items[0], "live.module") {
             if !allow_live_decls {
-                return loader_error("live/module is only allowed in the root live module file", accum)
+                return loader_error("live.module is only allowed in the root live module file", accum)
             }
             if len(form.items) != 2 {
-                return loader_error("live/module expects one options map", accum)
+                return loader_error("live.module expects one options map", accum)
             }
             if form.items[1].kind != .Brace {
-                return loader_error("live/module expects a brace options map", accum)
+                return loader_error("live.module expects a brace options map", accum)
             }
 
             i := 0
             for i < len(form.items[1].items) {
                 if i+1 >= len(form.items[1].items) {
-                    return loader_error("live/module options map has a missing value", accum)
+                    return loader_error("live.module options map has a missing value", accum)
                 }
                 key_form := form.items[1].items[i]
                 value_form := form.items[1].items[i+1]
                 key, key_ok := option_state_key(key_form)
                 if !key_ok {
-                    return loader_error("live/module expects keyword keys", accum)
+                    return loader_error("live.module expects field labels like name:", accum)
                 }
                 value, value_err, value_ok := kvist_literal_value(value_form)
                 if !value_ok {
@@ -411,7 +411,7 @@ module_definition_from_forms :: proc(accum: ^Loader_Accum, forms: []kvist.CST_To
                 case "name":
                     if value.kind != .String {
                         value_delete(&value)
-                        return loader_error("live/module :name must be a string", accum)
+                        return loader_error("live.module name: must be a string", accum)
                     }
                     delete(accum.name)
                     accum.name = strings.clone(value.text)
@@ -419,7 +419,7 @@ module_definition_from_forms :: proc(accum: ^Loader_Accum, forms: []kvist.CST_To
                 case "version":
                     if value.kind != .String {
                         value_delete(&value)
-                        return loader_error("live/module :version must be a string", accum)
+                        return loader_error("live.module version: must be a string", accum)
                     }
                     delete(accum.version)
                     accum.version = strings.clone(value.text)
@@ -432,7 +432,7 @@ module_definition_from_forms :: proc(accum: ^Loader_Accum, forms: []kvist.CST_To
             continue
         }
 
-        if kvist.is_symbol(form.items[0], "live/defn") || kvist.is_symbol(form.items[0], "defn") {
+        if kvist.is_symbol(form.items[0], "live.defn") || kvist.is_symbol(form.items[0], "defn") {
             form_name := form.items[0].text
             if len(form.items) < 4 {
                 return loader_errorf(accum, "%s expects a name, parameter vector, and a body", form_name)
@@ -455,11 +455,11 @@ module_definition_from_forms :: proc(accum: ^Loader_Accum, forms: []kvist.CST_To
             continue
         }
 
-        if kvist.is_symbol(form.items[0], "live/command") {
+        if kvist.is_symbol(form.items[0], "live.command") {
             if !allow_live_decls {
-                return loader_error("live/command is only allowed in the root live module file", accum)
+                return loader_error("live.command is only allowed in the root live module file", accum)
             }
-            name_form, options_form, body_start, part_err, part_ok := command_or_hook_parts(form, "live/command")
+            name_form, options_form, body_start, part_err, part_ok := command_or_hook_parts(form, "live.command")
             if !part_ok {
                 return loader_error(part_err.message, accum)
             }
@@ -480,11 +480,11 @@ module_definition_from_forms :: proc(accum: ^Loader_Accum, forms: []kvist.CST_To
             continue
         }
 
-        if kvist.is_symbol(form.items[0], "live/hook") {
+        if kvist.is_symbol(form.items[0], "live.hook") {
             if !allow_live_decls {
-                return loader_error("live/hook is only allowed in the root live module file", accum)
+                return loader_error("live.hook is only allowed in the root live module file", accum)
             }
-            name_form, options_form, body_start, part_err, part_ok := command_or_hook_parts(form, "live/hook")
+            name_form, options_form, body_start, part_err, part_ok := command_or_hook_parts(form, "live.hook")
             if !part_ok {
                 return loader_error(part_err.message, accum)
             }
@@ -559,10 +559,10 @@ finalize_module_definition :: proc(accum: ^Loader_Accum) -> (Module_Definition, 
         }
         fn_def, found := find_behavior_definition(accum.functions[:], accum.commands[i].name)
         if !found {
-            return loader_errorf(accum, "live/command %s needs a body or a same-named defn", accum.commands[i].name)
+            return loader_errorf(accum, "live.command %s needs a body or a same-named defn", accum.commands[i].name)
         }
         if len(fn_def.params) != 0 {
-            return loader_errorf(accum, "live/command %s currently requires a zero-arg defn", accum.commands[i].name)
+            return loader_errorf(accum, "live.command %s currently requires a zero-arg defn", accum.commands[i].name)
         }
         accum.commands[i].body = clone_cst_form_slice(fn_def.body[:])
     }
@@ -573,10 +573,10 @@ finalize_module_definition :: proc(accum: ^Loader_Accum) -> (Module_Definition, 
         }
         fn_def, found := find_behavior_definition(accum.functions[:], accum.hooks[i].name)
         if !found {
-            return loader_errorf(accum, "live/hook %s needs a body or a same-named defn", accum.hooks[i].name)
+            return loader_errorf(accum, "live.hook %s needs a body or a same-named defn", accum.hooks[i].name)
         }
         if len(fn_def.params) != 0 {
-            return loader_errorf(accum, "live/hook %s currently requires a zero-arg defn", accum.hooks[i].name)
+            return loader_errorf(accum, "live.hook %s currently requires a zero-arg defn", accum.hooks[i].name)
         }
         accum.hooks[i].body = clone_cst_form_slice(fn_def.body[:])
     }

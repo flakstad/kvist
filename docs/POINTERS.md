@@ -9,7 +9,7 @@ ownership runtime for pointers. The current rule is simple:
 - use `addr` and `deref` only when identity or mutation through a reference
   is actually required
 
-Preferred source style:
+Source style:
 
 ```clojure
 ^Order
@@ -21,23 +21,15 @@ total^
 Use `x^` for the simple symbol case. Keep `(deref ...)` for more complex
 expressions such as `(deref (get ptrs i))`.
 
-Preferred writable places:
+Writable places:
 
 ```clojure
 (set! total^ (+ total^ 1))
-(core.update! order^ :amount 42)
-(set! (core.get xs i) 9)
+(set! order^.amount 42)
+(set! (get xs i) 9)
 ```
 
 That keeps `set!` uniform: write to the place you spelled in source.
-
-Prefer this over the older compatibility spellings:
-
-- `(ptr T)`
-- `(^ value)`
-- `(& place)`
-
-Those forms still work, but they are no longer the documented style.
 
 ## What Kvist Helps With Today
 

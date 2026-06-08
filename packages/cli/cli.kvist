@@ -10,7 +10,7 @@
   [args: []string, name: string] -> bool #force_inline
   (let [found false]
     (each [arg args]
-      (when (== arg name)
+      (when (= arg name)
         (set! found true)))
     found))
 
@@ -19,7 +19,7 @@
   [args: []string, name: string, fallback: string] -> string #force_inline
   (let [value fallback]
     (each [arg i args]
-      (when (and (== arg name) (< (+ i 1) (len args)))
+      (when (and (= arg name) (< (+ i 1) (len args)))
         (set! value (get args (+ i 1)))))
     value))
 

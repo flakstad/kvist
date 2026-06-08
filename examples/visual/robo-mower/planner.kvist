@@ -51,7 +51,7 @@
 (defn mapped-lane-target-x
   "Return the x endpoint for one mapped sweep lane."
   [lane: int] -> f32
-  (when (== (% lane 2) 0)
+  (when (= (% lane 2) 0)
     (return (mapped-max-x)))
   (mapped-min-x))
 
@@ -101,7 +101,7 @@
         best-y robot^.y
         found false]
     (while (< i Grid-Cells)
-      (when (== cells[i] Belief-Unknown)
+      (when (= cells[i] Belief-Unknown)
         (let [cx (cell-center-x i)
               cy (cell-center-y i)]
           (when (and (>= cx (mapped-min-x))
@@ -140,13 +140,13 @@
 (defn frontier-command
   "Belief-frontier behavior using blade load and nearest unknown grass."
   [belief: (ptr Robot-Belief), robot: (ptr Robot), sensors: (ptr Sensors)] -> Command
-  (when (and (== robot^.sensor-profile Sensor-Forward)
-             (== sensors^.front-kind Cell-Obstacle)
+  (when (and (= robot^.sensor-profile Sensor-Forward)
+             (= sensors^.front-kind Cell-Obstacle)
              (< sensors^.front (f32 86.0)))
     (if (> sensors^.left sensors^.right)
       (return (command (f32 22.0) (f32 1.65) true))
       (return (command (f32 22.0) (f32 -1.65) true))))
-  (when (and (== robot^.sensor-profile Sensor-Forward)
+  (when (and (= robot^.sensor-profile Sensor-Forward)
              sensors^.blocked)
     (if (> sensors^.left sensors^.right)
       (return (command (f32 0.0) (f32 1.8) true))
@@ -156,7 +156,7 @@
 (defn return-home-command
   "Return to the charging base using a strategy suited to the source mode."
   [robot: (ptr Robot), sensors: (ptr Sensors)] -> Command
-  (when (== robot^.return-source Mode-Mapped)
+  (when (= robot^.return-source Mode-Mapped)
     (return (mapped-home-command robot sensors)))
   (wire-home-command robot sensors))
 
@@ -165,7 +165,7 @@
   [belief: (ptr Robot-Belief), robot: (ptr Robot), sensors: (ptr Sensors)] -> Command
   (when (> robot^.lane-index (mapped-lane-count))
     (set! robot^.lane-index 0))
-  (when (== robot^.lane-phase Mapped-Phase-Shift)
+  (when (= robot^.lane-phase Mapped-Phase-Shift)
     (let [shift-x robot^.lane-shift-x
           next-y (mapped-shift-target-y robot)]
       (when (> (abs-f32 (- robot^.x shift-x)) Mapped-Rejoin-Tolerance)
@@ -227,25 +227,25 @@
 (defn controller-command
   "Run the selected controller mode."
   [robot: (ptr Robot), sensors: (ptr Sensors), belief: (ptr Robot-Belief)] -> Command
-  (when (== robot^.mode Mode-Random)
+  (when (= robot^.mode Mode-Random)
     (return (random-bounce-command robot sensors)))
-  (when (== robot^.mode Mode-Boundary)
+  (when (= robot^.mode Mode-Boundary)
     (return (boundary-follow-command robot sensors)))
-  (when (== robot^.mode Mode-Mapped)
+  (when (= robot^.mode Mode-Mapped)
     (return (mapped-command belief robot sensors)))
-  (when (== robot^.mode Mode-Return)
+  (when (= robot^.mode Mode-Return)
     (return (return-home-command robot sensors)))
   (frontier-command belief robot sensors))
 
 (defn mode-name
   "Return a short HUD label for a controller mode."
   [mode: int] -> cstring
-  (when (== mode Mode-Random)
+  (when (= mode Mode-Random)
     (return "random"))
-  (when (== mode Mode-Boundary)
+  (when (= mode Mode-Boundary)
     (return "boundary"))
-  (when (== mode Mode-Mapped)
+  (when (= mode Mode-Mapped)
     (return "mapped"))
-  (when (== mode Mode-Return)
+  (when (= mode Mode-Return)
     (return "return"))
   "frontier")

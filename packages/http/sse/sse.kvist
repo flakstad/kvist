@@ -124,25 +124,25 @@ __kvist_http_sse_set_user_int :: proc(stream: ^h.Sse, value: int) {
   "Send a data-only SSE event on `stream`."
   [stream data]
   (quasiquote
-    (h.sse_event (unquote stream) (h.Sse_Event { :data (unquote data) }))))
+    (h.sse_event (unquote stream) (h.Sse_Event { data: (unquote data) }))))
 
 (defmacro send-event!
   "Send a named SSE event with `event` and `data`."
   [stream event data]
   (quasiquote
-    (h.sse_event (unquote stream) (h.Sse_Event { :event (unquote event) :data (unquote data) }))))
+    (h.sse_event (unquote stream) (h.Sse_Event { event: (unquote event) data: (unquote data) }))))
 
 (defmacro comment!
   "Send an SSE comment frame."
   [stream text]
   (quasiquote
-    (h.sse_event (unquote stream) (h.Sse_Event { :comment (unquote text) }))))
+    (h.sse_event (unquote stream) (h.Sse_Event { comment: (unquote text) }))))
 
 (defmacro retry!
   "Send an SSE retry interval in milliseconds."
   [stream milliseconds]
   (quasiquote
-    (h.sse_event (unquote stream) (h.Sse_Event { :retry (unquote milliseconds) }))))
+    (h.sse_event (unquote stream) (h.Sse_Event { retry: (unquote milliseconds) }))))
 
 (defmacro schedule-timeout!
   "Schedule `callback` to run after `delay` for `stream`.

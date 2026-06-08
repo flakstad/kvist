@@ -13,8 +13,8 @@ Kvist has:
 - inline array, map, and set literals
 - positional calls, named calls, mixed positional plus named-tail calls, and
   trailing default parameters for known top-level `defn`
-- flat struct-backed `{:keys [...]}` destructuring in `let`
-- struct-backed destructured params with `{:keys [...] :as name}: Type`
+- positional multi-return binding in `let`
+- dot access for package names, struct fields, and indexed storage paths
 - a shipped `html` package with rendering
 - explicit ownership helpers and stricter escape diagnostics
 - a shipped `kvist:test` package with:
@@ -29,25 +29,13 @@ Kvist has:
 Current intentional limits worth remembering:
 
 - named/default/mixed call rewriting is limited to known top-level `defn`
-- destructuring is currently struct-backed `{:keys [...]}` only
-- destructured params currently require `:as`
-- no `:or`, renaming, or nesting yet
+- named/default/mixed call rewriting does not apply to arbitrary function values
+- field destructuring is intentionally not part of the language; use dot access
+  or explicit locals
 
 ## Most Likely Next Areas
 
-### 1. Destructuring Boundary Decisions
-
-The first useful destructuring slice is in place. The next questions are now
-semantic rather than mechanical:
-
-- whether destructuring should stay struct-backed only for a while
-- whether `:or` defaults are worth adding, especially for params
-- whether any future map-oriented destructuring is actually better than
-  explicit `get`-style access for Kvist
-- whether function-value support or broader destructuring forms would still keep
-  lowering obvious
-
-### 2. Closures And Higher-Order Function Depth
+### 1. Closures And Higher-Order Function Depth
 
 Non-capturing function values are supported, and there is a narrow pass of
 captured callbacks for compiler-known non-escaping helper sites such as
@@ -60,7 +48,7 @@ Questions:
 - how far to take captured callbacks before explicit context should remain the
   preferred style
 
-### 3. Package And Tooling Polish
+### 2. Package And Tooling Polish
 
 The package model is in place, but there is still room to tighten:
 
@@ -69,7 +57,7 @@ The package model is in place, but there is still room to tighten:
 - package-aware editor commands and CLI inspection helpers
 - docs that describe package layout and visibility concisely
 
-### 4. Standard Library Shape
+### 3. Standard Library Shape
 
 The library surface is real, but it should keep being reviewed against the
 current language direction:
@@ -97,7 +85,7 @@ Current package boundary:
 - `kvist:str`, `kvist:set`, `kvist:map`, `kvist:soa`, and `kvist:cli`
   are mostly real package code
 - `kvist:arr` exposes a broad real package facade, but part of that facade
-  still expands to `kvist.arr/...` intrinsics under the hood
+  still expands to `arr.*` compiler intrinsics under the hood
 - public package entries in tooling point at package files rather than
   directly at `emit.odin`
 - the remaining intrinsic `arr.*` cases are mostly the wider grouping,
@@ -118,7 +106,7 @@ Strong candidates:
 These should build on the current macro system and still lower to explicit,
 typed internal structures.
 
-### 6. Hot Reload And Live Workflow
+### 5. Hot Reload And Live Workflow
 
 This work is real but should remain clearly separate from the core language
 surface:
@@ -135,6 +123,6 @@ See:
 ## Current Bias
 
 If there is no stronger pressure from a concrete use case, the next serious
-language-level discussion should be the destructuring boundary: whether the
-current struct-backed `{:keys [...]}` slice should stay narrow, or widen into a
-broader general destructuring design.
+language-level discussion should be closure/function-value depth: how much
+capturing convenience Kvist should provide before explicit context remains the
+clearer low-level story.

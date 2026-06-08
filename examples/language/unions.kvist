@@ -4,25 +4,25 @@
 (defunion Value
   "Simple tagged value."
   {
-  :i int
-  :s string
+  i: int
+  s: string
 })
 
 (defn describe [value: Value] -> string
-  (core.switch [v value]
+  (switch [v value]
     int "int"
     string v
     :else "nil"))
 
 (defn main []
-  (let [number (Value {:i 42})
-        text (Value {:s "kvist"})]
-    (core.println (describe text))))
+  (let [number (Value {i: 42})
+        text (Value {s: "kvist"})]
+    (println (describe text))))
 
-(core.comment
-  (describe (Value {:i 42}))
+(comment
+  (describe (Value {i: 42}))
   ;; => int
 
-  (describe (Value {:s "kvist"}))
+  (describe (Value {s: "kvist"}))
   ;; => kvist
 )

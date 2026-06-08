@@ -54,8 +54,8 @@
         digest ([32]byte [])]
     (sha2.init_256 (& ctx))
     (sha2.update (& ctx) (odin "transmute([]byte)text"))
-    (sha2.final (& ctx) (core.slice digest))
-    (let [[encoded err] (hex.encode (core.slice digest))]
+    (sha2.final (& ctx) (slice digest))
+    (let [[encoded err] (hex.encode (slice digest))]
       (if (!= err nil)
         0
         (do
@@ -63,13 +63,13 @@
           (len encoded))))))
 
 (defn main []
-  (core.println (useful-line? "user:Ada active=true")
+  (println (useful-line? "user:Ada active=true")
                (word-count)
                (parsed-score)
                (base64-roundtrip-length)
                (sha256-hex-length)))
 
-(core.comment
+(comment
   ;; These examples are useful for learning the host APIs because the Odin
   ;; package names and result ownership are still visible at the call site.
 

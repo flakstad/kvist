@@ -8,8 +8,8 @@
 (import queue "core:container/queue")
 
 (defstruct Job {
-  :id int
-  :priority int
+  id: int
+  priority: int
 })
 
 (defn fifo-total [] -> int
@@ -35,15 +35,15 @@
         0
         (do
           (defer (queue.destroy (addr q)))
-          (queue.push-back (addr q) (Job {:id 1 :priority 10}))
-          (queue.push-front (addr q) (Job {:id 2 :priority 50}))
+          (queue.push-back (addr q) (Job {id: 1 priority: 10}))
+          (queue.push-front (addr q) (Job {id: 2 priority: 50}))
           (let [first-job (queue.pop-front (addr q))
                 second-job (queue.pop-front (addr q))]
-            (+ (:priority first-job) (:priority second-job))))))))
+            (+ first-job.priority second-job.priority)))))))
 
 (defn safe-pop-score [] -> int
   ;; Safe pop returns value + bool. That is a normal Odin found.ok convention,
-  ;; so Kvist uses core.if-let rather than error handling.
+  ;; so Kvist uses if-let rather than error handling.
   (let [q: (type queue.Queue int) {}]
     (let [err (queue.init (addr q))]
       (if (!= err nil)
@@ -51,14 +51,14 @@
         (do
           (defer (queue.destroy (addr q)))
           (queue.push-back (addr q) 5)
-          (core.if-let [value ok (queue.pop-front-safe (addr q))]
+          (if-let [value ok (queue.pop-front-safe (addr q))]
             value
             0))))))
 
 (defn main []
-  (core.println (fifo-total) (deque-score) (safe-pop-score)))
+  (println (fifo-total) (deque-score) (safe-pop-score)))
 
-(core.comment
+(comment
   ;; FIFO behavior: push 10, push 20, pop them in the same order.
   (fifo-total)
   ;; => 30

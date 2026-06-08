@@ -16,8 +16,8 @@
 (import "helpers")
 
 (live.defmodule
-  {:name "commands"
-   :version "v1"}
+  {name: "commands"
+   version: "v1"}
 
   (def message "hello from the live module")
   (def hook-message "hook fired after the command")
@@ -27,15 +27,15 @@
     (host.call "host.log" "live module initialized"))
 
   (defn migrate []
-    (core.when (reload.from-version)
+    (when (reload.from-version)
       (let [old-run-count (reload.state-get "run-count")
             old-tick-count (reload.state-get "tick-count")]
         (if (= counter-key "tick-count")
-          (core.when old-run-count
+          (when old-run-count
             (state.set! counter-key old-run-count)
             (host.call "host.log"
                        (str "migrated counter from run-count to " counter-key)))
-          (core.when old-tick-count
+          (when old-tick-count
             (state.set! counter-key old-tick-count)
             (host.call "host.log"
                        (str "migrated counter from tick-count to " counter-key)))))))

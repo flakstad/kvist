@@ -45,15 +45,15 @@
   "Set request header `key` to `value` in place."
   [req key value]
   (quasiquote
-    (h.headers_set_unsafe (addr (:headers (unquote req))) (unquote key) (unquote value))))
+    (h.headers_set_unsafe (addr (unquote req).headers) (unquote key) (unquote value))))
 
 (defmacro add-cookie!
   "Append a request cookie with `name` and `value`."
   [req name value]
   (quasiquote
     (append
-      (addr (:cookies (unquote req)))
-      (h.Cookie {:name (unquote name) :value (unquote value)}))))
+      (addr (unquote req).cookies)
+      (h.Cookie {name: (unquote name) value: (unquote value)}))))
 
 (defmacro response-body
   "Read the response body from `res`.

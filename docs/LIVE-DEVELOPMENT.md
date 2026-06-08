@@ -109,9 +109,9 @@ layer entirely.
 There is a matching shipped source package on the live side too:
 
 - `(import live "kvist:live")`
-- `live/defmodule`
-- `live/defcommand`
-- `live/defhook`
+- `live.defmodule`
+- `live.defcommand`
+- `live.defhook`
 
 That mirrors the native side's `kvist:hot` direction: keep the underlying
 runtime contract explicit, but stop making every user-land demo spell the same
@@ -205,11 +205,11 @@ Use a host capability API instead:
 
 ```clojure
 (defhostapi app
-  (find-items [query] -> [:arr :item])
-  (load-item [id] -> :item)
-  (save-item! [id patch] -> :item)
-  (append-event! [event] -> :ok)
-  (log! [level text] -> :ok))
+  (find-items [query] -> [arr item])
+  (load-item [id] -> item)
+  (save-item! [id patch] -> item)
+  (append-event! [event] -> ok)
+  (log! [level text] -> ok))
 ```
 
 That implies:
@@ -227,7 +227,7 @@ Conceptually:
 
 ```clojure
 (defmodule inventory-tools
-  (def state {:version 1 :filters []})
+  (def state {version: 1 filters: []})
 
   (defn init [ctx] ...)
   (defn reload [ctx old-module] ...)

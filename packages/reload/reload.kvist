@@ -1,6 +1,6 @@
 (package reload)
 
-(import runtime :odin "../../src/olive_reload")
+(import runtime "../../src/olive_reload")
 
 (exports [Run_Host reload__Run_Host])
 

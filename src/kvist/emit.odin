@@ -827,18 +827,14 @@ emit_brace_pair_texts :: proc(e: ^Emitter, form: CST_Form, keyword_fields := tru
 
         #partial switch key.kind {
         case .Keyword:
-            if keyword_fields {
-                append(&pairs, Brace_Pair{key = map_name(key.text[1:]), value = value_text})
-            } else {
-                key_text, err_key, ok_key := emit_expr(e, key)
-                if !ok_key {
-                    return pairs, err_key, false
-                }
-                append(&pairs, Brace_Pair{key = key_text, value = value_text})
-            }
+            return pairs, Compile_Error{message = "keywords are syntax markers, not brace labels or map keys; use field labels like name: or ordinary key values", span = key.span}, false
         case .Symbol:
             if len(key.text) > 1 && key.text[len(key.text)-1] == ':' {
-                return pairs, Compile_Error{message = "named fields use :field labels", span = key.span}, false
+                if keyword_fields {
+                    append(&pairs, Brace_Pair{key = map_name(key.text[:len(key.text)-1]), value = value_text})
+                    i += 2
+                    continue
+                }
             }
             key_text, err_key, ok_key := emit_expr(e, key)
             if !ok_key {
@@ -947,7 +943,7 @@ brace_form_starts_with_field_label :: proc(form: CST_Form) -> bool {
         return true
     }
     first := form.items[0]
-    return first.kind == .Keyword
+    return first.kind == .Symbol && len(first.text) > 1 && first.text[len(first.text)-1] == ':'
 }
 
 has_multiline_items :: proc(items: []string) -> bool {
@@ -1091,7 +1087,7 @@ emit_struct_brace_literal :: proc(e: ^Emitter, struct_decl: ^Struct_Decl, form: 
         value := form.items[i+1]
         field_name, ok_key := brace_key_name(key)
         if !ok_key {
-            return "", Compile_Error{message = "struct construction expects keyword fields", span = key.span}, false
+            return "", Compile_Error{message = "struct construction expects field: labels", span = key.span}, false
         }
         field, ok_field := find_struct_field(struct_decl, field_name)
         if !ok_field {
@@ -1157,7 +1153,7 @@ emit_imported_struct_brace_literal :: proc(e: ^Emitter, type_text: string, field
         value := form.items[i+1]
         field_name, ok_key := brace_key_name(key)
         if !ok_key {
-            return "", Compile_Error{message = "struct construction expects keyword fields", span = key.span}, false
+            return "", Compile_Error{message = "struct construction expects field: labels", span = key.span}, false
         }
         field, ok_field := find_field_in_slice(fields, field_name)
         if !ok_field {
@@ -1306,7 +1302,7 @@ emit_named_call_arg_texts :: proc(e: ^Emitter, form: CST_Form) -> (arg_texts: [d
         value := form.items[i+1]
         field_name, ok_key := brace_key_name(key)
         if !ok_key {
-            return arg_texts, Compile_Error{message = "named arguments expect keyword fields", span = key.span}, false
+            return arg_texts, Compile_Error{message = "named arguments expect field: labels", span = key.span}, false
         }
         for existing in seen {
             if existing == field_name {
@@ -1835,9 +1831,13 @@ imported_odin_type_fields :: proc(e: ^Emitter, type_text: string) -> (fields: [d
 
 proc_param_keyword_names :: proc(proc_decl: ^Proc_Decl) -> (names: [dynamic]string) {
     for param, param_idx in proc_decl.params {
-        append(&names, fmt.tprintf(":%s", param.name))
+        append(&names, label_text(param.name))
     }
     return names
+}
+
+label_text :: proc(name: string) -> string {
+    return fmt.tprintf("%s:", name)
 }
 
 join_strings :: proc(items: []string, sep: string) -> string {
@@ -1940,7 +1940,7 @@ emit_named_call_with_defaults :: proc(e: ^Emitter, proc_decl: ^Proc_Decl, form: 
         value := form.items[i+1]
         field_name, ok_key := brace_key_name(key)
         if !ok_key {
-            return arg_texts, Compile_Error{message = "named arguments expect keyword fields", span = key.span}, false
+            return arg_texts, Compile_Error{message = "named arguments expect field: labels", span = key.span}, false
         }
         for existing in seen {
             if existing == field_name {
@@ -1951,7 +1951,7 @@ emit_named_call_with_defaults :: proc(e: ^Emitter, proc_decl: ^Proc_Decl, form: 
         if _, ok_param := find_proc_param(proc_decl, field_name); !ok_param {
             message := fmt.tprintf("unknown named argument %s", key.text)
             if closest, ok_closest := closest_proc_param_keyword(proc_decl, field_name); ok_closest {
-                message = fmt.tprintf("%s; did you mean :%s?", message, closest)
+                message = fmt.tprintf("%s; did you mean %s", message, label_text(closest))
             }
             return arg_texts, Compile_Error{message = named_arg_message_with_valid_keys(message, proc_decl), span = key.span}, false
         }
@@ -1983,11 +1983,11 @@ emit_named_call_with_defaults :: proc(e: ^Emitter, proc_decl: ^Proc_Decl, form: 
             continue
         }
         missing: [dynamic]string
-        append(&missing, fmt.tprintf(":%s", param.name))
+        append(&missing, label_text(param.name))
         for later_idx := param_idx + 1; later_idx < len(proc_decl.params); later_idx += 1 {
             later := proc_decl.params[later_idx]
             if !later.has_default {
-                append(&missing, fmt.tprintf(":%s", later.name))
+                append(&missing, label_text(later.name))
             }
         }
         message := fmt.tprintf("missing required named arguments: %s", join_strings(missing[:], ", "))
@@ -2041,7 +2041,7 @@ emit_mixed_call_with_defaults :: proc(e: ^Emitter, proc_decl: ^Proc_Decl, positi
         value := named_form.items[i+1]
         field_name, ok_key := brace_key_name(key)
         if !ok_key {
-            return arg_texts, Compile_Error{message = "named arguments expect keyword fields", span = key.span}, false
+            return arg_texts, Compile_Error{message = "named arguments expect field: labels", span = key.span}, false
         }
         for existing in seen {
             if existing == field_name {
@@ -2052,7 +2052,7 @@ emit_mixed_call_with_defaults :: proc(e: ^Emitter, proc_decl: ^Proc_Decl, positi
         if _, ok_param := find_proc_param(proc_decl, field_name); !ok_param {
             message := fmt.tprintf("unknown named argument %s", key.text)
             if closest, ok_closest := closest_proc_param_keyword(proc_decl, field_name); ok_closest {
-                message = fmt.tprintf("%s; did you mean :%s?", message, closest)
+                message = fmt.tprintf("%s; did you mean %s", message, label_text(closest))
             }
             return arg_texts, Compile_Error{message = named_arg_message_with_valid_keys(message, proc_decl), span = key.span}, false
         }
@@ -2071,7 +2071,7 @@ emit_mixed_call_with_defaults :: proc(e: ^Emitter, proc_decl: ^Proc_Decl, positi
         }
         for pair in named_values {
             if pair.key == param.name {
-                return arg_texts, Compile_Error{message = fmt.tprintf("named argument :%s overlaps positional argument %d", param.name, idx+1), span = named_form.span}, false
+                return arg_texts, Compile_Error{message = fmt.tprintf("named argument %s overlaps positional argument %d", label_text(param.name), idx+1), span = named_form.span}, false
             }
         }
         append(&arg_texts, arg_text)
@@ -2099,11 +2099,11 @@ emit_mixed_call_with_defaults :: proc(e: ^Emitter, proc_decl: ^Proc_Decl, positi
             continue
         }
         missing: [dynamic]string
-        append(&missing, fmt.tprintf(":%s", param.name))
+        append(&missing, label_text(param.name))
         for later_idx := idx + 1; later_idx < len(proc_decl.params); later_idx += 1 {
             later := proc_decl.params[later_idx]
             if !later.has_default {
-                append(&missing, fmt.tprintf(":%s", later.name))
+                append(&missing, label_text(later.name))
             }
         }
         message := fmt.tprintf("missing required arguments after positional prefix: %s", join_strings(missing[:], ", "))
@@ -2174,11 +2174,15 @@ emit_operator_text :: proc(op: string, arg_texts: []string, span: Span) -> (stri
         return "", Compile_Error{message = "- expects at least one argument", span = span}, false
     }
 
-    if op == "==" || op == "!=" || op == "<" || op == "<=" || op == ">" || op == ">=" {
+    if op == "=" || op == "==" || op == "!=" || op == "<" || op == "<=" || op == ">" || op == ">=" {
         if len(arg_texts) != 2 {
             return "", Compile_Error{message = fmt.tprintf("%s expects exactly two arguments", op), span = span}, false
         }
-        return fmt.tprintf("(%s) %s (%s)", arg_texts[0], op, arg_texts[1]), {}, true
+        odin_op := op
+        if odin_op == "=" {
+            odin_op = "=="
+        }
+        return fmt.tprintf("(%s) %s (%s)", arg_texts[0], odin_op, arg_texts[1]), {}, true
     }
 
     return "", Compile_Error{}, false
@@ -2199,6 +2203,115 @@ emit_update_rhs :: proc(e: ^Emitter, fn_form: CST_Form, arg_texts: []string) -> 
         return "", err_fn, false
     }
     return emit_call_text(fn_text, arg_texts), {}, true
+}
+
+comparison_odin_op :: proc(op: string) -> string {
+    if op == "=" {
+        return "=="
+    }
+    return op
+}
+
+comparison_supports_nary :: proc(op: string) -> bool {
+    return op == "=" || op == "==" || op == "<" || op == "<=" || op == ">" || op == ">="
+}
+
+comparison_form_wants_context_type :: proc(form: CST_Form) -> bool {
+    if form.kind == .Number || form.kind == .Vector || form.kind == .Brace || form.kind == .Set {
+        return true
+    }
+    if form.kind == .Symbol && len(form.text) > 1 && form.text[0] == '.' {
+        return true
+    }
+    return false
+}
+
+comparison_context_type :: proc(e: ^Emitter, operands: []CST_Form, idx: int) -> string {
+    if !comparison_form_wants_context_type(operands[idx]) {
+        return ""
+    }
+
+    distance := 1
+    for idx-distance >= 0 || idx+distance < len(operands) {
+        if idx-distance >= 0 {
+            if ty, ok := obvious_form_type(e, operands[idx-distance]); ok {
+                return ty
+            }
+        }
+        if idx+distance < len(operands) {
+            if ty, ok := obvious_form_type(e, operands[idx+distance]); ok {
+                return ty
+            }
+        }
+        distance += 1
+    }
+    return ""
+}
+
+emit_nary_comparison_expr :: proc(e: ^Emitter, op: string, operands: []CST_Form, span: Span) -> (string, Compile_Error, bool) {
+    if len(operands) < 2 {
+        return "", Compile_Error{message = fmt.tprintf("%s expects at least two arguments", op), span = span}, false
+    }
+    if op == "!=" && len(operands) != 2 {
+        return "", Compile_Error{message = "!= expects exactly two arguments", span = span}, false
+    }
+    if len(operands) == 2 {
+        lhs_expected := ""
+        rhs_expected := ""
+        if ty, ok := obvious_form_type(e, operands[0]); ok {
+            rhs_expected = ty
+        }
+        if ty, ok := obvious_form_type(e, operands[1]); ok {
+            lhs_expected = ty
+        }
+        lhs, err_lhs, ok_lhs := emit_expr_for_expected_type(e, operands[0], lhs_expected)
+        if !ok_lhs {
+            return "", err_lhs, false
+        }
+        rhs, err_rhs, ok_rhs := emit_expr_for_expected_type(e, operands[1], rhs_expected)
+        if !ok_rhs {
+            return "", err_rhs, false
+        }
+        return fmt.tprintf("(%s) %s (%s)", lhs, comparison_odin_op(op), rhs), {}, true
+    }
+    if !comparison_supports_nary(op) {
+        return "", Compile_Error{message = fmt.tprintf("%s expects exactly two arguments", op), span = span}, false
+    }
+
+    names: [dynamic]string
+    defer delete(names)
+
+    e.temp_counter += 1
+    proc_id := e.temp_counter
+    for idx in 0..<len(operands) {
+        append(&names, fmt.tprintf("kvist_cmp_%d_%d", proc_id, idx))
+    }
+
+    builder := strings.builder_make()
+    defer strings.builder_destroy(&builder)
+    strings.write_string(&builder, "(proc() -> bool {\n")
+    for operand, idx in operands {
+        expected_type := comparison_context_type(e, operands, idx)
+        value, err_value, ok_value := emit_expr_for_expected_type(e, operand, expected_type)
+        if !ok_value {
+            return "", err_value, false
+        }
+        if expected_type != "" {
+            fmt.sbprintf(&builder, "    %s: %s = %s\n", names[idx], expected_type, value)
+        } else {
+            fmt.sbprintf(&builder, "    %s := %s\n", names[idx], value)
+        }
+    }
+    strings.write_string(&builder, "    return ")
+    odin_op := comparison_odin_op(op)
+    for idx in 0..<len(operands)-1 {
+        if idx > 0 {
+            strings.write_string(&builder, " && ")
+        }
+        fmt.sbprintf(&builder, "(%s) %s (%s)", names[idx], odin_op, names[idx+1])
+    }
+    strings.write_string(&builder, "\n})()")
+    return strings.clone(strings.to_string(builder)), {}, true
 }
 
 emit_compound_update_op :: proc(fn_form: CST_Form, extra_arg_texts: []string) -> (string, bool) {
@@ -2245,21 +2358,49 @@ update_form_is_unary_updater :: proc(form: CST_Form) -> bool {
         form.items[0].text == "fn"
 }
 
-emit_update_place :: proc(e: ^Emitter, target_form, key_form: CST_Form) -> (lhs, current: string, err: Compile_Error, ok: bool) {
-    target, err_target, ok_target := emit_expr(e, target_form)
-    if !ok_target {
-        return "", "", err_target, false
+emit_update_place_assignment_stmt :: proc(
+    e: ^Emitter,
+    lhs, current: string,
+    place_span: Span,
+    updater_form: CST_Form,
+    extra_forms: []CST_Form,
+) -> (Compile_Error, bool) {
+    if updater_form.kind != .Symbol && updater_form.kind != .List {
+        return Compile_Error{message = "core/update! expects updater function or operator", span = updater_form.span}, false
     }
-    if key_form.kind == .Keyword && len(key_form.text) > 1 {
-        text := fmt.tprintf("(%s).%s", target, map_name(key_form.text[1:]))
-        return text, text, Compile_Error{}, true
+
+    extra_arg_texts: [dynamic]string
+    arg_texts: [dynamic]string
+    append(&arg_texts, current)
+    for extra_form in extra_forms {
+        extra_text, err_extra, ok_extra := emit_expr(e, extra_form)
+        if !ok_extra {
+            return err_extra, false
+        }
+        append(&extra_arg_texts, extra_text)
+        append(&arg_texts, extra_text)
     }
-    key, err_key, ok_key := emit_expr(e, key_form)
-    if !ok_key {
-        return "", "", err_key, false
+    if compound_text, ok_compound := emit_compound_update_op(updater_form, extra_arg_texts[:]); ok_compound {
+        emit_indent(e)
+        strings.write_string(&e.builder, lhs)
+        record_current_line_fragment_map(e, 0, lhs, place_span)
+        strings.write_string(&e.builder, " ")
+        strings.write_string(&e.builder, compound_text)
+        emit_raw_newline(e)
+        return {}, true
     }
-    text := fmt.tprintf("(%s)[%s]", target, key)
-    return text, text, Compile_Error{}, true
+    rhs, err_rhs, ok_rhs := emit_update_rhs(e, updater_form, arg_texts[:])
+    if !ok_rhs {
+        return err_rhs, false
+    }
+    emit_indent(e)
+    strings.write_string(&e.builder, lhs)
+    record_current_line_fragment_map(e, 0, lhs, place_span)
+    strings.write_string(&e.builder, " = ")
+    strings.write_string(&e.builder, rhs)
+    record_current_line_fragment_map(e, len(lhs) + len(" = "), rhs, updater_form.span)
+    emit_raw_newline(e)
+    return {}, true
 }
 
 compound_assignment_operator :: proc(head: string) -> (string, bool) {
@@ -2293,7 +2434,7 @@ form_is_assignable_place :: proc(form: CST_Form) -> bool {
     }
     head := form.items[0]
     if head.kind == .Keyword {
-        return len(form.items) == 2
+        return false
     }
     if head.kind != .Symbol {
         return false
@@ -2301,6 +2442,8 @@ form_is_assignable_place :: proc(form: CST_Form) -> bool {
     switch head.text {
     case "deref", "^":
         return len(form.items) == 2
+    case "__kvist_field":
+        return len(form.items) == 3
     case "__kvist_index":
         return len(form.items) == 3
     case "core/get", "core-get", "arr/get", "arr-get", "arr/nth":
@@ -2423,8 +2566,9 @@ emit_update_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error,
     if len(form.items) < 4 {
         return "", Compile_Error{message = "core/update expects target, field, and value or updater", span = form.span}, false
     }
-    if form.items[2].kind != .Keyword || len(form.items[2].text) <= 1 {
-        return "", Compile_Error{message = "core/update currently supports struct field updates only", span = form.items[2].span}, false
+    field_name, ok_field := field_from_selector(form.items[2])
+    if !ok_field {
+        return "", Compile_Error{message = "core/update currently supports struct field updates with .field selectors only", span = form.items[2].span}, false
     }
     if form.items[1].kind != .Symbol {
         return "", Compile_Error{message = "core/update currently expects a named struct value", span = form.items[1].span}, false
@@ -2440,7 +2584,6 @@ emit_update_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error,
     }
 
     temp_name := eval_temp_name(e)
-    field_name := map_name(form.items[2].text[1:])
     lhs := fmt.tprintf("(%s).%s", temp_name, field_name)
     current := lhs
     rhs := ""
@@ -2492,9 +2635,10 @@ emit_update_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error,
 
 emit_thread_step :: proc(e: ^Emitter, current: string, step: CST_Form, thread_last: bool) -> (string, Compile_Error, bool) {
     #partial switch step.kind {
-    case .Keyword:
-        return fmt.tprintf("%s.%s", current, map_name(step.text[1:])), {}, true
     case .Symbol:
+        if field, ok_field := field_from_selector(step); ok_field {
+            return fmt.tprintf("%s.%s", current, field), {}, true
+        }
         step_text, _, err_head, ok_head := resolve_kvist_head(e, step.text)
         if !ok_head {
             err_head.span = step.span
@@ -2514,14 +2658,14 @@ emit_thread_step :: proc(e: ^Emitter, current: string, step: CST_Form, thread_la
             return "", Compile_Error{message = "thread step cannot be an empty list", span = step.span}, false
         }
         head := step.items[0]
-        if head.kind == .Keyword {
+        if field, ok_field := field_from_selector(head); ok_field {
             if len(step.items) != 1 {
-                return "", Compile_Error{message = "keyword thread step does not take arguments", span = step.span}, false
+                return "", Compile_Error{message = "field selector thread step does not take arguments", span = step.span}, false
             }
-            return fmt.tprintf("%s.%s", current, map_name(head.text[1:])), {}, true
+            return fmt.tprintf("%s.%s", current, field), {}, true
         }
         if head.kind != .Symbol {
-            return "", Compile_Error{message = "thread list step expects symbol or keyword head", span = head.span}, false
+            return "", Compile_Error{message = "thread list step expects symbol or field selector head", span = head.span}, false
         }
         canonical_head, _, err_head, ok_head := resolve_kvist_head(e, head.text)
         if !ok_head {
@@ -2574,12 +2718,9 @@ emit_thread_step :: proc(e: ^Emitter, current: string, step: CST_Form, thread_la
                 head.text = "arr/sum-by"
             }
         }
-        if head.text == "tap>" {
-            return "", Compile_Error{message = "`tap>` has moved to `core/tap>`", span = step.span}, false
-        }
-        if head.text == "core/tap>" || head.text == "core-tap" {
+        if head.text == "tap>" || head.text == "core/tap>" || head.text == "core-tap" {
             if len(step.items) > 2 {
-                return "", Compile_Error{message = "core/tap> thread step expects optional label", span = step.span}, false
+                return "", Compile_Error{message = "tap> thread step expects optional label", span = step.span}, false
             }
             mark_core_tap(e)
             if len(step.items) == 1 {
@@ -2587,12 +2728,10 @@ emit_thread_step :: proc(e: ^Emitter, current: string, step: CST_Form, thread_la
             }
             label_form := step.items[1]
             label := ""
-            if label_form.kind == .Keyword {
-                label = fmt.tprintf("\"%s\"", label_form.text[1:])
-            } else if label_form.kind == .String {
+            if label_form.kind == .String {
                 label = label_form.text
             } else {
-                return "", Compile_Error{message = "core/tap> label must be a keyword or string literal", span = label_form.span}, false
+                return "", Compile_Error{message = "tap> label must be a string literal", span = label_form.span}, false
             }
             return emit_call_text("kvist_tap_labeled", []string{label, current}), {}, true
         }
@@ -2878,7 +3017,7 @@ emit_thread_step :: proc(e: ^Emitter, current: string, step: CST_Form, thread_la
                 return "", Compile_Error{message = fmt.tprintf("%s thread step expects one predicate argument", surface_head), span = step.span}, false
             }
             collection := slice_all_expr_text(current)
-            if field, ok_field := field_from_keyword(step.items[1]); ok_field {
+            if field, ok_field := field_from_selector(step.items[1]); ok_field {
                 if is_arr_take_while {
                     mark_core_take_while_field(e, field)
                     return emit_call_text(fmt.tprintf("kvist_take_while_field_%s", field), []string{collection}), {}, true
@@ -3180,9 +3319,10 @@ thread_scalar_result_head :: proc(head_name: string) -> bool {
 
 thread_step_result_kind :: proc(e: ^Emitter, step: CST_Form, thread_last: bool) -> Thread_Result_Kind {
     #partial switch step.kind {
-    case .Keyword:
-        return .Scalar
     case .Symbol:
+        if _, ok_field := field_from_selector(step); ok_field {
+            return .Scalar
+        }
         if thread_last && step.text == "slice" {
             return .View
         }
@@ -3192,7 +3332,7 @@ thread_step_result_kind :: proc(e: ^Emitter, step: CST_Form, thread_last: bool) 
             return .Unknown
         }
         head := step.items[0]
-        if head.kind == .Keyword {
+        if _, ok_field := field_from_selector(head); ok_field {
             return .Scalar
         }
         if head.kind != .Symbol {
@@ -3860,25 +4000,6 @@ emit_binding_assignment :: proc(e: ^Emitter, binding: Binding, value: string) {
         }
         fmt.sbprintf(&line_builder, " := %s", value)
         emit_prefixed_expr_mapped(e, "", strings.clone(strings.to_string(line_builder)), binding.value.span)
-    } else if binding.is_field_destructure {
-        target := ""
-        if binding.value.kind == .Symbol {
-            target = map_name(binding.value.text)
-        } else {
-            e.temp_counter += 1
-            target = fmt.tprintf("kvist_destructure_%d", e.temp_counter)
-            emit_prefixed_expr_mapped(e, fmt.tprintf("%s := ", target), value, binding.value.span)
-        }
-        access_target := target
-        if ty, ok := obvious_form_type(e, binding.value); ok && len(ty) > 0 && ty[0] == '^' {
-            access_target = deref_expr_text(target)
-        }
-        for field in binding.fields {
-            if field.name == "_" {
-                continue
-            }
-            emit_prefixed_expr(e, fmt.tprintf("%s := ", field.name), fmt.tprintf("%s.%s", access_target, field.field))
-        }
     } else if binding.is_typed {
         emit_prefixed_expr_mapped(e, fmt.tprintf("%s: %s = ", binding.name, binding.ty), value, binding.value.span)
     } else {
@@ -4041,11 +4162,46 @@ symbol_is_simple_deref_suffix :: proc(text: string) -> bool {
     return len(text) > 1 && text[len(text)-1] == '^' && is_plain_identifier_text(map_name(text[:len(text)-1]))
 }
 
-field_from_keyword :: proc(form: CST_Form) -> (field: string, ok: bool) {
-    if form.kind != .Keyword || len(form.text) < 2 {
+field_from_selector :: proc(form: CST_Form) -> (field: string, ok: bool) {
+    if form.kind == .Symbol && len(form.text) > 1 && form.text[0] == '.' {
+        return map_name(form.text[1:]), true
+    }
+    return "", false
+}
+
+field_selector_looks_like_field :: proc(form: CST_Form) -> bool {
+    if form.kind != .Symbol || len(form.text) <= 1 || form.text[0] != '.' {
+        return false
+    }
+    ch := form.text[1]
+    return (ch >= 'a' && ch <= 'z') || ch == '_'
+}
+
+selector_accesses_field :: proc(e: ^Emitter, target_form, selector_form: CST_Form) -> (field: string, ok: bool) {
+    selector_field, ok_field := field_from_selector(selector_form)
+    if !ok_field {
         return "", false
     }
-    return map_name(form.text[1:]), true
+    if target_form.kind == .Symbol {
+        target_name := target_form.text
+        if symbol_is_simple_deref_suffix(target_name) {
+            target_name = target_name[:len(target_name)-1]
+        }
+        if target_ty, ok_ty := lookup_local_type(e, map_name(target_name)); ok_ty {
+            ty := target_ty
+            if strings.has_prefix(ty, "^") {
+                ty = ty[1:]
+            }
+            if _, ok_struct := find_struct_decl(e, ty); ok_struct {
+                return selector_field, true
+            }
+            return "", false
+        }
+    }
+    if field_selector_looks_like_field(selector_form) {
+        return selector_field, true
+    }
+    return "", false
 }
 
 field_type_expr_text :: proc(collection, field: string) -> string {
@@ -4126,7 +4282,7 @@ infer_literal_value_type :: proc(e: ^Emitter, form: CST_Form) -> (string, Compil
     case .Bool:
         return "bool", Compile_Error{}, true
     case .Keyword:
-        return "string", Compile_Error{}, true
+        return "", Compile_Error{message = "keywords are syntax markers, not values; use a string, enum value, field label, or field selector", span = form.span}, false
     case .Symbol:
         if ty, ok := lookup_local_type(e, map_name(form.text)); ok {
             return ty, Compile_Error{}, true
@@ -4220,167 +4376,6 @@ obvious_form_type :: proc(e: ^Emitter, form: CST_Form) -> (string, bool) {
         }
     }
     return "", false
-}
-
-field_destructure_struct_decl :: proc(e: ^Emitter, binding: Binding) -> (^Struct_Decl, bool) {
-    ty, ok_ty := obvious_form_type(e, binding.value)
-    if !ok_ty || ty == "" {
-        return nil, false
-    }
-    if ty[0] == '^' {
-        ty = ty[1:]
-    }
-    return find_struct_decl(e, ty)
-}
-
-validate_field_destructure_binding :: proc(e: ^Emitter, binding: Binding) -> (Compile_Error, bool) {
-    struct_decl, ok_struct := field_destructure_struct_decl(e, binding)
-    if ok_struct {
-        for field in binding.fields {
-            if field.name == "_" {
-                continue
-            }
-            if _, ok := find_struct_field(struct_decl, field.field); !ok {
-                return Compile_Error{
-                    message = fmt.tprintf("unknown field :%s in destructuring for %s", field.field, struct_decl.name),
-                    span = binding.target_span,
-                }, false
-            }
-        }
-        return {}, true
-    }
-
-    ty, ok_ty := obvious_form_type(e, binding.value)
-    if !ok_ty || ty == "" {
-        return {}, true
-    }
-    imported_fields, ok_imported := imported_odin_type_fields(e, ty)
-    if !ok_imported {
-        return {}, true
-    }
-    defer delete_struct_field_slice(&imported_fields)
-    for field in binding.fields {
-        if field.name == "_" {
-            continue
-        }
-        if _, ok := find_field_in_slice(imported_fields[:], field.field); !ok {
-            return Compile_Error{
-                message = fmt.tprintf("unknown field :%s in destructuring for %s", field.field, ty),
-                span = binding.target_span,
-            }, false
-        }
-    }
-    return {}, true
-}
-
-bind_field_destructure_types :: proc(e: ^Emitter, binding: Binding) {
-    struct_decl, ok_struct := field_destructure_struct_decl(e, binding)
-    if ok_struct {
-        for field in binding.fields {
-            if field.name == "_" {
-                continue
-            }
-            struct_field, ok_field := find_struct_field(struct_decl, field.field)
-            if !ok_field {
-                continue
-            }
-            bind_local_type(e, field.name, struct_field.ty)
-        }
-        return
-    }
-
-    ty, ok_ty := obvious_form_type(e, binding.value)
-    if !ok_ty || ty == "" {
-        return
-    }
-    imported_fields, ok_imported := imported_odin_type_fields(e, ty)
-    if !ok_imported {
-        return
-    }
-    defer delete_struct_field_slice(&imported_fields)
-    for field in binding.fields {
-        if field.name == "_" {
-            continue
-        }
-        imported_field, ok_field := find_field_in_slice(imported_fields[:], field.field)
-        if ok_field {
-            bind_local_type(e, field.name, imported_field.ty)
-        }
-    }
-}
-
-validate_param_field_destructure :: proc(e: ^Emitter, param: Param) -> (Compile_Error, bool) {
-    struct_ty := param.ty
-    if len(struct_ty) > 0 && struct_ty[0] == '^' {
-        struct_ty = struct_ty[1:]
-    }
-    struct_decl, ok_struct := find_struct_decl(e, struct_ty)
-    if ok_struct {
-        for field in param.destructure_fields {
-            if _, ok := find_struct_field(struct_decl, field.name); !ok {
-                return Compile_Error{
-                    message = fmt.tprintf("unknown field :%s in parameter destructuring for %s", field.name, struct_decl.name),
-                }, false
-            }
-        }
-        return {}, true
-    }
-
-    imported_fields, ok_imported := imported_odin_type_fields(e, param.ty)
-    if !ok_imported {
-        return Compile_Error{
-            message = fmt.tprintf("destructured parameter %s requires a known struct type, got %s", param.name, param.ty),
-        }, false
-    }
-    defer delete_struct_field_slice(&imported_fields)
-    for field in param.destructure_fields {
-        if _, ok := find_field_in_slice(imported_fields[:], field.name); !ok {
-            return Compile_Error{
-                message = fmt.tprintf("unknown field :%s in parameter destructuring for %s", field.name, param.ty),
-            }, false
-        }
-    }
-    return {}, true
-}
-
-bind_param_field_destructure_types :: proc(e: ^Emitter, param: Param) {
-    struct_ty := param.ty
-    if len(struct_ty) > 0 && struct_ty[0] == '^' {
-        struct_ty = struct_ty[1:]
-    }
-    struct_decl, ok_struct := find_struct_decl(e, struct_ty)
-    if ok_struct {
-        for field in param.destructure_fields {
-            struct_field, ok_field := find_struct_field(struct_decl, field.name)
-            if !ok_field {
-                continue
-            }
-            bind_local_type(e, field.name, struct_field.ty)
-        }
-        return
-    }
-
-    imported_fields, ok_imported := imported_odin_type_fields(e, param.ty)
-    if !ok_imported {
-        return
-    }
-    defer delete_struct_field_slice(&imported_fields)
-    for field in param.destructure_fields {
-        imported_field, ok_field := find_field_in_slice(imported_fields[:], field.name)
-        if ok_field {
-            bind_local_type(e, field.name, imported_field.ty)
-        }
-    }
-}
-
-emit_param_field_destructure :: proc(e: ^Emitter, param: Param) {
-    access_target := param.name
-    if len(param.ty) > 0 && param.ty[0] == '^' {
-        access_target = deref_expr_text(access_target)
-    }
-    for field in param.destructure_fields {
-        emit_prefixed_expr(e, fmt.tprintf("%s := ", field.name), fmt.tprintf("%s.%s", access_target, field.name))
-    }
 }
 
 emit_set_literal :: proc(e: ^Emitter, elem_type: string, form: CST_Form) -> (string, Compile_Error, bool) {
@@ -4528,7 +4523,7 @@ known_form_type :: proc(e: ^Emitter, form: CST_Form) -> (string, bool) {
 }
 
 obvious_binding_type :: proc(e: ^Emitter, binding: Binding) -> (string, bool) {
-    if binding.is_destructure || binding.is_field_destructure || binding.name == "" {
+    if binding.is_destructure || binding.name == "" {
         return "", false
     }
     if binding.is_typed {
@@ -4537,7 +4532,7 @@ obvious_binding_type :: proc(e: ^Emitter, binding: Binding) -> (string, bool) {
     if binding.value.kind == .Symbol {
         return lookup_local_type(e, map_name(binding.value.text))
     }
-    if binding.value.kind == .Number || binding.value.kind == .String || binding.value.kind == .Bool || binding.value.kind == .Keyword {
+    if binding.value.kind == .Number || binding.value.kind == .String || binding.value.kind == .Bool {
         if ty, _, ok := infer_literal_value_type(e, binding.value); ok {
             return ty, true
         }
@@ -4581,7 +4576,6 @@ obvious_binding_type :: proc(e: ^Emitter, binding: Binding) -> (string, bool) {
 
 binding_value_is_let :: proc(binding: Binding) -> bool {
     return !binding.is_destructure &&
-        !binding.is_field_destructure &&
         !binding.is_result_binding &&
         binding.name != "" &&
         binding.value.kind == .List &&
@@ -4645,8 +4639,6 @@ emit_let_value_binding_assignment :: proc(e: ^Emitter, binding: Binding) -> (Com
         }
         if ty, ok_ty := obvious_binding_type(e, inner); ok_ty {
             bind_local_type(e, inner.name, ty)
-        } else if inner.is_field_destructure {
-            bind_field_destructure_types(e, inner)
         }
     }
 
@@ -4959,7 +4951,7 @@ analyze_owned_scope_body :: proc(e: ^Emitter, forms: []CST_Form, can_transfer_fi
             start := len(live)
             for binding in bindings {
                 delete_name, has_delete_name := binding_delete_target_name(binding)
-                if binding.is_destructure || binding.is_field_destructure || (!has_delete_name && binding.name == "") {
+                if binding.is_destructure || (!has_delete_name && binding.name == "") {
                     continue
                 }
                 if binding_value_produces_owned_value(binding) || binding.deferred_delete {
@@ -5058,7 +5050,7 @@ emit_for_in_loop :: proc(e: ^Emitter, coll_form: CST_Form, first_name, second_na
 }
 
 emit_map_callback_call :: proc(e: ^Emitter, callback: CST_Form, collection: string) -> (string, Compile_Error, bool) {
-    if field, ok_field := field_from_keyword(callback); ok_field {
+    if field, ok_field := field_from_selector(callback); ok_field {
         mark_core_map_field(e, field)
         return emit_call_text(
             fmt.tprintf("kvist_map_field_%s", field),
@@ -5084,7 +5076,7 @@ emit_map_callback_call :: proc(e: ^Emitter, callback: CST_Form, collection: stri
 }
 
 emit_index_by_callback_call :: proc(e: ^Emitter, callback: CST_Form, collection: string) -> (string, Compile_Error, bool) {
-    if field, ok_field := field_from_keyword(callback); ok_field {
+    if field, ok_field := field_from_selector(callback); ok_field {
         mark_core_index_by_field(e, field)
         return emit_call_text(
             fmt.tprintf("kvist_index_by_field_%s", field),
@@ -5104,7 +5096,7 @@ emit_index_by_callback_call :: proc(e: ^Emitter, callback: CST_Form, collection:
 }
 
 emit_group_by_callback_call :: proc(e: ^Emitter, callback: CST_Form, collection: string) -> (string, Compile_Error, bool) {
-    if field, ok_field := field_from_keyword(callback); ok_field {
+    if field, ok_field := field_from_selector(callback); ok_field {
         mark_core_group_by_field(e, field)
         return emit_call_text(
             fmt.tprintf("kvist_group_by_field_%s", field),
@@ -5124,7 +5116,7 @@ emit_group_by_callback_call :: proc(e: ^Emitter, callback: CST_Form, collection:
 }
 
 emit_count_by_callback_call :: proc(e: ^Emitter, callback: CST_Form, collection: string) -> (string, Compile_Error, bool) {
-    if field, ok_field := field_from_keyword(callback); ok_field {
+    if field, ok_field := field_from_selector(callback); ok_field {
         mark_core_count_by_field(e, field)
         return emit_call_text(
             fmt.tprintf("kvist_count_by_field_%s", field),
@@ -5144,8 +5136,8 @@ emit_count_by_callback_call :: proc(e: ^Emitter, callback: CST_Form, collection:
 }
 
 emit_sum_by_callback_call :: proc(e: ^Emitter, key_callback, value_callback: CST_Form, collection: string) -> (string, Compile_Error, bool) {
-    if key_field, ok_key_field := field_from_keyword(key_callback); ok_key_field {
-        if value_field, ok_value_field := field_from_keyword(value_callback); ok_value_field {
+    if key_field, ok_key_field := field_from_selector(key_callback); ok_key_field {
+        if value_field, ok_value_field := field_from_selector(value_callback); ok_value_field {
             mark_core_sum_by_field(e, key_field, value_field)
             return emit_call_text(
                 fmt.tprintf("kvist_sum_by_fields_%s_%s", key_field, value_field),
@@ -5174,7 +5166,7 @@ emit_sum_by_callback_call :: proc(e: ^Emitter, key_callback, value_callback: CST
 }
 
 emit_distinct_by_callback_call :: proc(e: ^Emitter, callback: CST_Form, collection: string) -> (string, Compile_Error, bool) {
-    if field, ok_field := field_from_keyword(callback); ok_field {
+    if field, ok_field := field_from_selector(callback); ok_field {
         mark_core_distinct_by_field(e, field)
         return emit_call_text(
             fmt.tprintf("kvist_distinct_by_field_%s", field),
@@ -5193,7 +5185,7 @@ emit_distinct_by_callback_call :: proc(e: ^Emitter, callback: CST_Form, collecti
 }
 
 emit_partition_by_callback_call :: proc(e: ^Emitter, callback: CST_Form, collection: string) -> (string, Compile_Error, bool) {
-    if field, ok_field := field_from_keyword(callback); ok_field {
+    if field, ok_field := field_from_selector(callback); ok_field {
         mark_core_partition_by_field(e, field)
         return emit_call_text(
             fmt.tprintf("kvist_partition_by_field_%s", field),
@@ -5244,7 +5236,7 @@ sort_by_callback_helper_name :: proc(callback: string, in_place: bool = false) -
 }
 
 emit_sort_by_callback_call :: proc(e: ^Emitter, callback: CST_Form, collection: string) -> (string, Compile_Error, bool) {
-    if field, ok_field := field_from_keyword(callback); ok_field {
+    if field, ok_field := field_from_selector(callback); ok_field {
         mark_core_sort_by_field(e, field)
         return emit_call_text(
             fmt.tprintf("kvist_sort_by_field_%s", field),
@@ -5266,7 +5258,7 @@ emit_sort_by_callback_call :: proc(e: ^Emitter, callback: CST_Form, collection: 
 }
 
 emit_sort_by_in_place_callback_call :: proc(e: ^Emitter, callback: CST_Form, collection: string) -> (string, Compile_Error, bool) {
-    if field, ok_field := field_from_keyword(callback); ok_field {
+    if field, ok_field := field_from_selector(callback); ok_field {
         mark_core_sort_by_in_place_field(e, field)
         return emit_call_text(fmt.tprintf("kvist_sort_by_in_place_field_%s", field), []string{collection}), {}, true
     }
@@ -5286,7 +5278,7 @@ emit_sort_by_in_place_callback_call :: proc(e: ^Emitter, callback: CST_Form, col
 
 emit_dynamic_predicate_in_place_callback_call :: proc(e: ^Emitter, helper_name: string, callback: CST_Form, collection: string, mark_helper: proc(^Emitter), mark_field: proc(^Emitter, string)) -> (string, Compile_Error, bool) {
     collection_ptr := address_of_expr_text(collection)
-    if field, ok_field := field_from_keyword(callback); ok_field {
+    if field, ok_field := field_from_selector(callback); ok_field {
         mark_field(e, field)
         return emit_call_text(fmt.tprintf("%s_field_%s", helper_name, field), []string{collection_ptr}), {}, true
     }
@@ -5314,7 +5306,7 @@ emit_dynamic_predicate_in_place_callback_call :: proc(e: ^Emitter, helper_name: 
 }
 
 emit_predicate_callback_call :: proc(e: ^Emitter, helper_name: string, callback: CST_Form, collection: string, mark_helper: proc(^Emitter), mark_field: proc(^Emitter, string)) -> (string, Compile_Error, bool) {
-    if field, ok_field := field_from_keyword(callback); ok_field {
+    if field, ok_field := field_from_selector(callback); ok_field {
         mark_field(e, field)
         return emit_call_text(fmt.tprintf("%s_field_%s", helper_name, field), []string{collection}), {}, true
     }
@@ -5443,16 +5435,7 @@ emit_proc_literal_text :: proc(e: ^Emitter, params: []Param, returns: Return_Spe
         bind_local_type(&sub, local.name, local.ty)
     }
     for param in params {
-        if param.is_field_destructure {
-            err_param, ok_param := validate_param_field_destructure(e, param)
-            if !ok_param {
-                return "", err_param, false
-            }
-        }
         bind_local_type(&sub, param.name, param.ty)
-        if param.is_field_destructure {
-            bind_param_field_destructure_types(&sub, param)
-        }
     }
 
     strings.write_string(&sub.builder, "proc(")
@@ -5465,11 +5448,6 @@ emit_proc_literal_text :: proc(e: ^Emitter, params: []Param, returns: Return_Spe
     strings.write_byte(&sub.builder, ')')
     emit_return_spec(&sub, returns)
     strings.write_string(&sub.builder, " {\n")
-    for param in params {
-        if param.is_field_destructure {
-            emit_param_field_destructure(&sub, param)
-        }
-    }
     err_body, ok_body := emit_body_forms(&sub, body, returns)
     if !ok_body {
         return "", err_body, false
@@ -5683,27 +5661,8 @@ emit_operator_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Erro
         return "", Compile_Error{message = "- expects at least one argument", span = form.span}, false
     }
 
-    if op == "==" || op == "!=" || op == "<" || op == "<=" || op == ">" || op == ">=" {
-        if len(form.items) != 3 {
-            return "", Compile_Error{message = fmt.tprintf("%s expects exactly two arguments", op), span = form.span}, false
-        }
-        lhs_expected := ""
-        rhs_expected := ""
-        if ty, ok := obvious_form_type(e, form.items[1]); ok {
-            rhs_expected = ty
-        }
-        if ty, ok := obvious_form_type(e, form.items[2]); ok {
-            lhs_expected = ty
-        }
-        lhs, err_lhs, ok_lhs := emit_expr_for_expected_type(e, form.items[1], lhs_expected)
-        if !ok_lhs {
-            return "", err_lhs, false
-        }
-        rhs, err_rhs, ok_rhs := emit_expr_for_expected_type(e, form.items[2], rhs_expected)
-        if !ok_rhs {
-            return "", err_rhs, false
-        }
-        return fmt.tprintf("(%s) %s (%s)", lhs, op, rhs), {}, true
+    if op == "=" || op == "==" || op == "!=" || op == "<" || op == "<=" || op == ">" || op == ">=" {
+        return emit_nary_comparison_expr(e, op, form.items[1:], form.span)
     }
 
     if op == "contains?" {
@@ -5861,7 +5820,7 @@ emit_struct_fields_literal :: proc(struct_decl: ^Struct_Decl) -> string {
         if len(field.source_name) > 0 {
             display_name = field.source_name
         }
-        strings.write_string(&builder, fmt.tprintf("%q", fmt.tprintf(":%s", display_name)))
+        strings.write_string(&builder, fmt.tprintf("%q", display_name))
     }
     strings.write_string(&builder, "}")
     return strings.clone(strings.to_string(builder))
@@ -5958,15 +5917,15 @@ emit_struct_types_literal :: proc(struct_decl: ^Struct_Decl) -> string {
         if len(field.source_name) > 0 {
             display_name = field.source_name
         }
-        strings.write_string(&builder, fmt.tprintf("%q = %q", fmt.tprintf(":%s", display_name), surface_type_text(field.ty)))
+        strings.write_string(&builder, fmt.tprintf("%q = %q", display_name, surface_type_text(field.ty)))
     }
     strings.write_string(&builder, "}")
     return strings.clone(strings.to_string(builder))
 }
 
 brace_key_name :: proc(form: CST_Form) -> (string, bool) {
-    if form.kind == .Keyword && len(form.text) > 1 {
-        return map_name(form.text[1:]), true
+    if form.kind == .Symbol && len(form.text) > 1 && form.text[len(form.text)-1] == ':' {
+        return map_name(form.text[:len(form.text)-1]), true
     }
     return "", false
 }
@@ -6026,7 +5985,7 @@ validate_struct_constructor :: proc(e: ^Emitter, struct_decl: ^Struct_Decl, form
         value := form.items[i+1]
         field_name, ok_key := brace_key_name(key)
         if !ok_key {
-            return Compile_Error{message = "struct construction expects keyword fields", span = key.span}, false
+            return Compile_Error{message = "struct construction expects labeled fields", span = key.span}, false
         }
         for existing in seen {
             if existing == field_name {
@@ -6065,11 +6024,11 @@ emit_union_constructor :: proc(e: ^Emitter, union_decl: ^Union_Decl, arg: CST_Fo
 
     key := arg.items[0]
     value := arg.items[1]
-    if key.kind != .Keyword {
-        return "", Compile_Error{message = "union construction expects a keyword variant", span = key.span}, false
+    variant_name, ok_key := brace_key_name(key)
+    if !ok_key {
+        return "", Compile_Error{message = "union construction expects a variant label", span = key.span}, false
     }
 
-    variant_name := map_name(key.text[1:])
     found := false
     variant_ty := ""
     for variant in union_decl.variants {
@@ -6169,6 +6128,12 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         target, err_target, ok_target := emit_expr(e, form.items[1])
         if !ok_target {
             return "", err_target, false
+        }
+        if field, ok_field := selector_accesses_field(e, form.items[1], form.items[2]); ok_field {
+            if len(form.items) == 4 {
+                return "", Compile_Error{message = "get field access does not support a default value", span = form.items[2].span}, false
+            }
+            return fmt.tprintf("(%s).%s", target, field), {}, true
         }
         key, err_key, ok_key := emit_expr(e, form.items[2])
         if !ok_key {
@@ -6462,12 +6427,10 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
 
         label_form := form.items[1]
         label: string
-        if label_form.kind == .Keyword {
-            label = fmt.tprintf("\"%s\"", label_form.text[1:])
-        } else if label_form.kind == .String {
+        if label_form.kind == .String {
             label = label_form.text
         } else {
-            return "", Compile_Error{message = "core/tap> label must be a keyword or string literal", span = label_form.span}, false
+            return "", Compile_Error{message = "core/tap> label must be a string literal", span = label_form.span}, false
         }
         value, err_value, ok_value := emit_expr(e, form.items[2])
         if !ok_value {
@@ -6812,7 +6775,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
             return "", err_collection, false
         }
         collection = slice_all_expr_text(collection)
-        if field, ok_field := field_from_keyword(form.items[1]); ok_field {
+        if field, ok_field := field_from_selector(form.items[1]); ok_field {
             if is_arr_take_while {
                 mark_core_take_while_field(e, field)
                 return emit_call_text(fmt.tprintf("kvist_take_while_field_%s", field), []string{collection}), {}, true
@@ -7124,7 +7087,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
             if ok_named {
                 return emit_call_text(head_name, named_arg_texts[:]), {}, true
             }
-            if err_named.message != "" && err_named.message != "named arguments expect keyword fields" {
+            if err_named.message != "" && err_named.message != "named arguments expect field: labels" {
                 return "", err_named, false
             }
         }
@@ -7236,6 +7199,41 @@ parse_for_comprehension_clauses :: proc(bindings: CST_Form) -> (clauses: [dynami
                 })
                 i += 2
                 continue
+            case ":while":
+                if i+1 >= len(bindings.items) {
+                    return clauses, Compile_Error{message = ":while expects a predicate expression", span = item.span}, false
+                }
+                append(&clauses, For_Comprehension_Clause{
+                    kind      = .While,
+                    predicate = bindings.items[i+1],
+                })
+                i += 2
+                continue
+            case ":let":
+                if i+1 >= len(bindings.items) {
+                    return clauses, Compile_Error{message = ":let expects a binding vector", span = item.span}, false
+                }
+                let_bindings := bindings.items[i+1]
+                if let_bindings.kind != .Vector {
+                    return clauses, Compile_Error{message = ":let expects a binding vector", span = let_bindings.span}, false
+                }
+                if len(let_bindings.items) == 0 {
+                    return clauses, Compile_Error{message = ":let expects at least one binding", span = let_bindings.span}, false
+                }
+                if len(let_bindings.items)%2 != 0 {
+                    return clauses, Compile_Error{message = ":let expects name/value pairs", span = let_bindings.span}, false
+                }
+                for j := 0; j < len(let_bindings.items); j += 2 {
+                    if let_bindings.items[j].kind != .Symbol {
+                        return clauses, Compile_Error{message = ":let binding expects a symbol", span = let_bindings.items[j].span}, false
+                    }
+                }
+                append(&clauses, For_Comprehension_Clause{
+                    kind     = .Let,
+                    bindings = let_bindings,
+                })
+                i += 2
+                continue
             case:
                 return clauses, Compile_Error{message = fmt.tprintf("unsupported for comprehension clause %s", item.text), span = item.span}, false
             }
@@ -7261,18 +7259,95 @@ parse_for_comprehension_clauses :: proc(bindings: CST_Form) -> (clauses: [dynami
 
 bind_for_comprehension_clause_types :: proc(e: ^Emitter, clauses: []For_Comprehension_Clause) {
     for clause in clauses {
-        if clause.kind != .Binding {
+        switch clause.kind {
+        case .Binding:
+            coll_ty, ok_coll_ty := obvious_form_type(e, clause.collection)
+            if !ok_coll_ty {
+                continue
+            }
+            elem_ty, ok_elem_ty := collection_element_type(coll_ty)
+            if ok_elem_ty {
+                bind_local_type(e, clause.name, elem_ty)
+            }
+        case .Let:
+            for i := 0; i < len(clause.bindings.items); i += 2 {
+                name_form := clause.bindings.items[i]
+                value_form := clause.bindings.items[i+1]
+                if ty, ok_ty := obvious_form_type(e, value_form); ok_ty {
+                    bind_local_type(e, map_name(name_form.text), ty)
+                }
+            }
+        case .When, .While:
             continue
-        }
-        coll_ty, ok_coll_ty := obvious_form_type(e, clause.collection)
-        if !ok_coll_ty {
-            continue
-        }
-        elem_ty, ok_elem_ty := collection_element_type(coll_ty)
-        if ok_elem_ty {
-            bind_local_type(e, clause.name, elem_ty)
         }
     }
+}
+
+for_comprehension_output_kind :: proc(type_text: string) -> (kind: For_Comprehension_Output_Kind, key_ty, value_ty: string, ok: bool) {
+    if elem, ok_elem := dynamic_array_element_type(type_text); ok_elem {
+        return .Dynamic_Array, "", elem, true
+    }
+    if key, value, ok_map := map_type_parts(type_text); ok_map {
+        if value == "struct{}" {
+            return .Set, key, value, true
+        }
+        return .Map, key, value, true
+    }
+    return .Dynamic_Array, "", "", false
+}
+
+collect_for_comprehension_captures :: proc(e: ^Emitter, clauses: []For_Comprehension_Clause, yield_form: CST_Form) -> (captures: [dynamic]Param) {
+    bound_names: [dynamic]string
+    for clause in clauses {
+        switch clause.kind {
+        case .Binding:
+            collect_proc_literal_captures_from_form(e, clause.collection, bound_names[:], &captures)
+            append(&bound_names, clause.name)
+        case .When, .While:
+            collect_proc_literal_captures_from_form(e, clause.predicate, bound_names[:], &captures)
+        case .Let:
+            for i := 0; i < len(clause.bindings.items); i += 2 {
+                name_form := clause.bindings.items[i]
+                value_form := clause.bindings.items[i+1]
+                collect_proc_literal_captures_from_form(e, value_form, bound_names[:], &captures)
+                append(&bound_names, map_name(name_form.text))
+            }
+        }
+    }
+    collect_proc_literal_captures_from_form(e, yield_form, bound_names[:], &captures)
+    return captures
+}
+
+emit_for_comprehension_proc_params :: proc(captures: []Param) -> string {
+    if len(captures) == 0 {
+        return ""
+    }
+    builder := strings.builder_make()
+    defer strings.builder_destroy(&builder)
+    for capture, idx in captures {
+        if idx > 0 {
+            strings.write_string(&builder, ", ")
+        }
+        strings.write_string(&builder, capture.name)
+        strings.write_string(&builder, ": ")
+        strings.write_string(&builder, capture.ty)
+    }
+    return strings.clone(strings.to_string(builder))
+}
+
+emit_for_comprehension_call_args :: proc(captures: []Param) -> string {
+    if len(captures) == 0 {
+        return ""
+    }
+    builder := strings.builder_make()
+    defer strings.builder_destroy(&builder)
+    for capture, idx in captures {
+        if idx > 0 {
+            strings.write_string(&builder, ", ")
+        }
+        strings.write_string(&builder, capture.name)
+    }
+    return strings.clone(strings.to_string(builder))
 }
 
 emit_for_comprehension_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) {
@@ -7316,14 +7391,16 @@ emit_for_comprehension_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Com
         }
         out_type = fmt.tprintf("[dynamic]%s", yield_ty)
     }
-    if _, ok_elem := dynamic_array_element_type(out_type); !ok_elem {
+    output_kind, output_key_ty, output_value_ty, ok_output := for_comprehension_output_kind(out_type)
+    if !ok_output {
         pop_local_type_scope(e)
-        return "", Compile_Error{message = "for comprehension :into expects a [dynamic]T type", span = form.span}, false
+        return "", Compile_Error{message = "for comprehension :into expects [dynamic]T, map[K]V, or set[T]", span = form.span}, false
     }
 
     collection_texts: [dynamic]string
     collection_owned: [dynamic]bool
     predicate_texts: [dynamic]string
+    let_value_texts: [dynamic]string
     for clause in clauses {
         switch clause.kind {
         case .Binding:
@@ -7334,25 +7411,73 @@ emit_for_comprehension_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Com
             }
             append(&collection_texts, coll_text)
             append(&collection_owned, loop_collection_needs_temp_binding(clause.collection))
-        case .When:
+        case .When, .While:
             pred_text, err_pred, ok_pred := emit_expr(e, clause.predicate)
             if !ok_pred {
                 pop_local_type_scope(e)
                 return "", err_pred, false
             }
             append(&predicate_texts, pred_text)
+        case .Let:
+            for i := 0; i < len(clause.bindings.items); i += 2 {
+                value_text, err_value, ok_value := emit_expr(e, clause.bindings.items[i+1])
+                if !ok_value {
+                    pop_local_type_scope(e)
+                    return "", err_value, false
+                }
+                append(&let_value_texts, value_text)
+            }
         }
     }
 
-    yield_text, err_yield, ok_yield := emit_expr(e, yield_form)
-    pop_local_type_scope(e)
-    if !ok_yield {
-        return "", err_yield, false
+    captures := collect_for_comprehension_captures(e, clauses[:], yield_form)
+    proc_params := emit_for_comprehension_proc_params(captures[:])
+    proc_args := emit_for_comprehension_call_args(captures[:])
+
+    yield_text := ""
+    map_key_text := ""
+    map_value_text := ""
+    set_value_text := ""
+    switch output_kind {
+    case .Dynamic_Array:
+        yield, err_yield, ok_yield := emit_expr_for_expected_type(e, yield_form, output_value_ty)
+        if !ok_yield {
+            pop_local_type_scope(e)
+            return "", err_yield, false
+        }
+        yield_text = yield
+    case .Map:
+        if yield_form.kind != .Vector || len(yield_form.items) != 2 {
+            pop_local_type_scope(e)
+            return "", Compile_Error{message = "for comprehension map output expects yielded [key value]", span = yield_form.span}, false
+        }
+        key_text, err_key, ok_key := emit_expr_for_expected_type(e, yield_form.items[0], output_key_ty)
+        if !ok_key {
+            pop_local_type_scope(e)
+            return "", err_key, false
+        }
+        value_text, err_value, ok_value := emit_expr_for_expected_type(e, yield_form.items[1], output_value_ty)
+        if !ok_value {
+            pop_local_type_scope(e)
+            return "", err_value, false
+        }
+        map_key_text = key_text
+        map_value_text = value_text
+    case .Set:
+        value_text, err_value, ok_value := emit_expr_for_expected_type(e, yield_form, output_key_ty)
+        if !ok_value {
+            pop_local_type_scope(e)
+            return "", err_value, false
+        }
+        set_value_text = value_text
     }
+    pop_local_type_scope(e)
 
     builder := strings.builder_make()
     defer strings.builder_destroy(&builder)
-    strings.write_string(&builder, "(proc() -> ")
+    strings.write_string(&builder, "(proc(")
+    strings.write_string(&builder, proc_params)
+    strings.write_string(&builder, ") -> ")
     strings.write_string(&builder, out_type)
     strings.write_string(&builder, " {\n")
     strings.write_string(&builder, "    out := make(")
@@ -7362,6 +7487,7 @@ emit_for_comprehension_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Com
     depth := 1
     coll_idx := 0
     pred_idx := 0
+    let_idx := 0
     for clause in clauses {
         switch clause.kind {
         case .Binding:
@@ -7398,11 +7524,43 @@ emit_for_comprehension_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Com
             append_indent(&builder, depth)
             strings.write_string(&builder, "}\n")
             pred_idx += 1
+        case .While:
+            append_indent(&builder, depth)
+            strings.write_string(&builder, "if !(")
+            strings.write_string(&builder, predicate_texts[pred_idx])
+            strings.write_string(&builder, ") {\n")
+            append_indent(&builder, depth+1)
+            strings.write_string(&builder, "break\n")
+            append_indent(&builder, depth)
+            strings.write_string(&builder, "}\n")
+            pred_idx += 1
+        case .Let:
+            for i := 0; i < len(clause.bindings.items); i += 2 {
+                name := map_name(clause.bindings.items[i].text)
+                append_indent(&builder, depth)
+                strings.write_string(&builder, name)
+                strings.write_string(&builder, " := ")
+                strings.write_string(&builder, let_value_texts[let_idx])
+                strings.write_byte(&builder, '\n')
+                let_idx += 1
+            }
         }
     }
 
     append_indent(&builder, depth)
-    append_indented_multiline(&builder, emit_call_text("append", []string{"&out", yield_text}), "", "")
+    switch output_kind {
+    case .Dynamic_Array:
+        append_indented_multiline(&builder, emit_call_text("append", []string{"&out", yield_text}), "", "")
+    case .Map:
+        strings.write_string(&builder, "out[")
+        strings.write_string(&builder, map_key_text)
+        strings.write_string(&builder, "] = ")
+        strings.write_string(&builder, map_value_text)
+    case .Set:
+        strings.write_string(&builder, "out[")
+        strings.write_string(&builder, set_value_text)
+        strings.write_string(&builder, "] = {}")
+    }
     strings.write_byte(&builder, '\n')
     for depth > 1 {
         depth -= 1
@@ -7410,7 +7568,9 @@ emit_for_comprehension_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Com
         strings.write_string(&builder, "}\n")
     }
     strings.write_string(&builder, "    return out\n")
-    strings.write_string(&builder, "})()")
+    strings.write_string(&builder, "})(")
+    strings.write_string(&builder, proc_args)
+    strings.write_string(&builder, ")")
     return strings.clone(strings.to_string(builder)), {}, true
 }
 
@@ -7434,7 +7594,7 @@ emit_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) 
         }
         return map_name(form.text), {}, true
     case .Keyword:
-        return fmt.tprintf("%q", form.text), {}, true
+        return "", Compile_Error{message = "keywords are syntax markers, not values; use a string, enum value, field label, or field selector", span = form.span}, false
     case .List:
         if len(form.items) == 0 {
             return "", Compile_Error{message = "empty list expression", span = form.span}, false
@@ -7451,6 +7611,16 @@ emit_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) 
         }
         if is_symbol(form.items[0], "fn") {
             return emit_proc_literal_expr(e, form)
+        }
+        if is_symbol(form.items[0], "__kvist_field") {
+            if len(form.items) != 3 || form.items[2].kind != .Symbol {
+                return "", Compile_Error{message = "field access expects receiver and field", span = form.span}, false
+            }
+            receiver, err_receiver, ok_receiver := emit_expr(e, form.items[1])
+            if !ok_receiver {
+                return "", err_receiver, false
+            }
+            return fmt.tprintf("%s.%s", receiver, map_name(form.items[2].text)), {}, true
         }
         if is_symbol(form.items[0], "__kvist_index") {
             if len(form.items) != 3 {
@@ -7499,16 +7669,6 @@ emit_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) 
             }
             return fmt.tprintf("(%s)[%s:%s]", target, start, end), {}, true
         }
-        if form.items[0].kind == .Keyword {
-            if len(form.items) != 2 {
-                return "", Compile_Error{message = "field access expects one receiver", span = form.span}, false
-            }
-            receiver, err_receiver, ok_receiver := emit_expr(e, form.items[1])
-            if !ok_receiver {
-                return "", err_receiver, false
-            }
-            return fmt.tprintf("%s.%s", receiver, map_name(form.items[0].text[1:])), {}, true
-        }
         if is_symbol(form.items[0], "odin") {
             if len(form.items) != 2 || form.items[1].kind != .String {
                 return "", Compile_Error{message = "odin expects one string literal", span = form.span}, false
@@ -7538,6 +7698,8 @@ emit_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) 
 For_Comprehension_Clause_Kind :: enum {
     Binding,
     When,
+    While,
+    Let,
 }
 
 For_Comprehension_Clause :: struct {
@@ -7545,6 +7707,13 @@ For_Comprehension_Clause :: struct {
     name:       string,
     collection: CST_Form,
     predicate:  CST_Form,
+    bindings:   CST_Form,
+}
+
+For_Comprehension_Output_Kind :: enum {
+    Dynamic_Array,
+    Map,
+    Set,
 }
 
 type_text_is_slice :: proc(text: string) -> bool {
@@ -7580,27 +7749,11 @@ append_indent :: proc(builder: ^strings.Builder, depth: int) {
     }
 }
 
-Binding_Field :: struct {
-    field: string,
-    name:  string,
-}
-
-binding_field_exists :: proc(fields: []Binding_Field, field_name: string) -> bool {
-    for field in fields {
-        if field.field == field_name {
-            return true
-        }
-    }
-    return false
-}
-
 Binding :: struct {
     is_destructure: bool,
-    is_field_destructure: bool,
     is_result_binding: bool,
     name:           string,
     pattern:        [dynamic]string,
-    fields:         [dynamic]Binding_Field,
     is_typed:       bool,
     ty:             string,
     deferred_delete: bool,
@@ -7627,75 +7780,6 @@ let_binding_or_modifier :: proc(items: []CST_Form, idx: int) -> (string, bool) {
     }
 }
 
-parse_field_destructure_binding :: proc(form: CST_Form) -> (fields: [dynamic]Binding_Field, err: Compile_Error, ok: bool) {
-    if len(form.items) == 0 {
-        return fields, Compile_Error{message = "field destructuring expects at least one field", span = form.span}, false
-    }
-
-    if form.items[0].kind == .Keyword && form.items[0].text == ":keys" {
-        if len(form.items) != 2 {
-            return fields, Compile_Error{message = "{:keys [...]} destructuring does not yet support extra entries", span = form.span}, false
-        }
-        names := form.items[1]
-        if names.kind != .Vector {
-            return fields, Compile_Error{message = "{:keys ...} destructuring expects a vector of symbols", span = names.span}, false
-        }
-        for item in names.items {
-            if item.kind != .Symbol {
-                return fields, Compile_Error{message = "{:keys [...]} destructuring expects symbol names", span = item.span}, false
-            }
-            name := map_name(item.text)
-            if binding_field_exists(fields[:], name) {
-                return fields, Compile_Error{message = fmt.tprintf("duplicate field :%s in destructuring", name), span = item.span}, false
-            }
-            append(&fields, Binding_Field{field = name, name = name})
-        }
-        return fields, {}, true
-    }
-
-    all_keywords := true
-    for item in form.items {
-        if item.kind != .Keyword {
-            all_keywords = false
-            break
-        }
-    }
-    if all_keywords {
-        for item in form.items {
-            name := map_name(item.text[1:])
-            if binding_field_exists(fields[:], name) {
-                return fields, Compile_Error{message = fmt.tprintf("duplicate field %s in destructuring", item.text), span = item.span}, false
-            }
-            append(&fields, Binding_Field{field = name, name = name})
-        }
-        return fields, {}, true
-    }
-
-    if len(form.items)%2 != 0 {
-        return fields, Compile_Error{message = "field destructuring expects field/local pairs", span = form.span}, false
-    }
-    i := 0
-    for i < len(form.items) {
-        key := form.items[i]
-        local := form.items[i+1]
-        if key.kind != .Keyword {
-            return fields, Compile_Error{message = "field destructuring expects keyword fields", span = key.span}, false
-        }
-        if local.kind != .Symbol {
-            return fields, Compile_Error{message = "field destructuring expects symbol locals", span = local.span}, false
-        }
-        if binding_field_exists(fields[:], map_name(key.text[1:])) {
-            return fields, Compile_Error{message = fmt.tprintf("duplicate field %s in destructuring", key.text), span = key.span}, false
-        }
-        append(&fields, Binding_Field{
-            field = map_name(key.text[1:]),
-            name = map_name(local.text),
-        })
-        i += 2
-    }
-    return fields, {}, true
-}
-
 parse_let_bindings :: proc(form: CST_Form) -> (bindings: [dynamic]Binding, err: Compile_Error, ok: bool) {
     if form.kind != .Vector {
         return bindings, Compile_Error{message = "let expects a binding vector", span = form.span}, false
@@ -7706,12 +7790,12 @@ parse_let_bindings :: proc(form: CST_Form) -> (bindings: [dynamic]Binding, err: 
         #partial switch target.kind {
         case .Vector:
             if i+1 >= len(form.items) {
-                return bindings, Compile_Error{message = "destructuring binding missing value", span = target.span}, false
+                return bindings, Compile_Error{message = "multi-return binding missing value", span = target.span}, false
             }
             names: [dynamic]string
             for part in target.items {
                 if part.kind != .Symbol {
-                    return bindings, Compile_Error{message = "destructuring expects symbols", span = part.span}, false
+                    return bindings, Compile_Error{message = "multi-return binding expects symbols", span = part.span}, false
                 }
                 append(&names, map_name(part.text))
             }
@@ -7743,24 +7827,6 @@ parse_let_bindings :: proc(form: CST_Form) -> (bindings: [dynamic]Binding, err: 
                 value = form.items[i+1],
             })
             i = next_i
-        case .Brace:
-            if i+1 >= len(form.items) {
-                return bindings, Compile_Error{message = "field destructuring binding missing value", span = target.span}, false
-            }
-            if let_binding_has_defer_marker(form.items[:], i+2) {
-                return bindings, Compile_Error{message = "defer binding marker is only supported on named local bindings", span = form.items[i+2].span}, false
-            }
-            fields, err_fields, ok_fields := parse_field_destructure_binding(target)
-            if !ok_fields {
-                return bindings, err_fields, false
-            }
-            append(&bindings, Binding{
-                is_field_destructure = true,
-                fields = fields,
-                target_span = target.span,
-                value = form.items[i+1],
-            })
-            i += 2
         case .Symbol:
             if len(target.text) > 0 && target.text[len(target.text)-1] == ':' {
                 if i+2 >= len(form.items) {
@@ -7802,6 +7868,8 @@ parse_let_bindings :: proc(form: CST_Form) -> (bindings: [dynamic]Binding, err: 
                     i += 1
                 }
             }
+        case .Brace:
+            return bindings, Compile_Error{message = "field destructuring has been removed; use dot access or explicit local bindings", span = target.span}, false
         case:
             return bindings, Compile_Error{message = "unsupported binding target", span = target.span}, false
         }
@@ -8287,21 +8355,6 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
         return Compile_Error{message = "empty list statement", span = form.span}, false
     }
 
-    if form.items[0].kind == .Keyword {
-        expr, err_expr, ok_expr := emit_expr(e, form)
-        if !ok_expr {
-            return err_expr, false
-        }
-        if last_in_proc && returns.kind != .None {
-            emit_prefixed_expr_mapped(e, "return ", expr, form.span)
-        } else if form_is_owned_allocation_result(form) || form_is_owned_constructor_result(form) {
-            emit_prefixed_expr_mapped(e, "_ = ", expr, form.span)
-        } else {
-            emit_prefixed_expr_mapped(e, "", expr, form.span)
-        }
-        return {}, true
-    }
-
     head := form.items[0]
     if head.kind != .Symbol {
         expr, err_expr, ok_expr := emit_expr(e, form)
@@ -8411,12 +8464,6 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
             e.indent += 1
         }
         for binding in bindings {
-            if binding.is_field_destructure {
-                err_destructure, ok_destructure := validate_field_destructure_binding(e, binding)
-                if !ok_destructure {
-                    return err_destructure, false
-                }
-            }
             if binding_value_is_let(binding) {
                 err_flat, ok_flat := emit_let_value_binding_assignment(e, binding)
                 if !ok_flat {
@@ -8466,8 +8513,6 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
             }
             if ty, ok_ty := obvious_binding_type(e, binding); ok_ty {
                 bind_local_type(e, binding.name, ty)
-            } else if binding.is_field_destructure {
-                bind_field_destructure_types(e, binding)
             }
         }
         err_body, ok_body := emit_body_forms(e, body[:], returns_when_final(last_in_proc, returns))
@@ -8623,61 +8668,17 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
     case "update!":
         return Compile_Error{message = "`update!` has moved to `core/update!`", span = form.items[0].span}, false
     case "core/update!", "core-update!":
-        if len(form.items) < 4 {
-            return Compile_Error{message = "core/update! expects target, key-or-field, and value or updater", span = form.span}, false
+        if len(form.items) < 3 {
+            return Compile_Error{message = "core/update! expects place, updater, and optional arguments", span = form.span}, false
         }
-        lhs, current, err_place, ok_place := emit_update_place(e, form.items[1], form.items[2])
-        if !ok_place {
-            return err_place, false
+        if !form_is_assignable_place(form.items[1]) {
+            return Compile_Error{message = "core/update! expects an assignable place", span = form.items[1].span}, false
         }
-        rhs := ""
-        if len(form.items) == 4 && !update_form_is_unary_updater(form.items[3]) {
-            err_owned, bad_owned := owned_result_usage_error(form.items[3], true)
-            if bad_owned {
-                return err_owned, false
-            }
-            rhs_text, err_rhs, ok_rhs := emit_expr(e, form.items[3])
-            if !ok_rhs {
-                return err_rhs, false
-            }
-            rhs = rhs_text
-        } else {
-            extra_arg_texts: [dynamic]string
-            arg_texts: [dynamic]string
-            append(&arg_texts, current)
-            if len(form.items) > 4 {
-                for extra_form in form.items[4:] {
-                    extra_text, err_extra, ok_extra := emit_expr(e, extra_form)
-                    if !ok_extra {
-                        return err_extra, false
-                    }
-                    append(&extra_arg_texts, extra_text)
-                    append(&arg_texts, extra_text)
-                }
-            }
-            if compound_text, ok_compound := emit_compound_update_op(form.items[3], extra_arg_texts[:]); ok_compound {
-                emit_indent(e)
-                strings.write_string(&e.builder, lhs)
-                record_current_line_fragment_map(e, 0, lhs, form.items[1].span)
-                strings.write_string(&e.builder, " ")
-                strings.write_string(&e.builder, compound_text)
-                emit_raw_newline(e)
-                return {}, true
-            }
-            rhs_text, err_rhs, ok_rhs := emit_update_rhs(e, form.items[3], arg_texts[:])
-            if !ok_rhs {
-                return err_rhs, false
-            }
-            rhs = rhs_text
+        lhs, err_lhs, ok_lhs := emit_expr(e, form.items[1])
+        if !ok_lhs {
+            return err_lhs, false
         }
-        emit_indent(e)
-        strings.write_string(&e.builder, lhs)
-        record_current_line_fragment_map(e, 0, lhs, form.items[1].span)
-        strings.write_string(&e.builder, " = ")
-        strings.write_string(&e.builder, rhs)
-        record_current_line_fragment_map(e, len(lhs) + len(" = "), rhs, form.items[3].span)
-        emit_raw_newline(e)
-        return {}, true
+        return emit_update_place_assignment_stmt(e, lhs, lhs, form.items[1].span, form.items[2], form.items[3:])
     case "core/delete!", "core-delete!":
         if len(form.items) != 3 {
             return Compile_Error{message = "core/delete! expects target and key", span = form.span}, false
@@ -9076,16 +9077,7 @@ emit_decl :: proc(e: ^Emitter, decl: IR_Decl) -> (Compile_Error, bool) {
         push_local_type_scope(e)
         defer pop_local_type_scope(e)
         for param in decl.proc_decl.params {
-            if param.is_field_destructure {
-                err_param, ok_param := validate_param_field_destructure(e, param)
-                if !ok_param {
-                    return err_param, false
-                }
-            }
             bind_local_type(e, param.name, param.ty)
-            if param.is_field_destructure {
-                bind_param_field_destructure_types(e, param)
-            }
         }
         emit_indent(e)
         fmt.sbprintf(&e.builder, "%s :: ", decl.proc_decl.name)
@@ -9120,11 +9112,6 @@ emit_decl :: proc(e: ^Emitter, decl: IR_Decl) -> (Compile_Error, bool) {
         strings.write_string(&e.builder, " {")
         emit_raw_newline(e)
         e.indent += 1
-        for param in decl.proc_decl.params {
-            if param.is_field_destructure {
-                emit_param_field_destructure(e, param)
-            }
-        }
         err_body, ok_body := emit_body_forms(e, decl.proc_decl.body[:], decl.proc_decl.returns)
         if !ok_body {
             return err_body, false
@@ -10787,8 +10774,7 @@ decl_matches :: proc(a, b: IR_Decl) -> bool {
     if a.kind == .Import {
         return a.import_decl.path == b.import_decl.path &&
                a.import_decl.alias == b.import_decl.alias &&
-               a.import_decl.has_alias == b.import_decl.has_alias &&
-               a.import_decl.force_odin == b.import_decl.force_odin
+               a.import_decl.has_alias == b.import_decl.has_alias
     }
     a_name := decl_name(a)
     if a_name == "" {

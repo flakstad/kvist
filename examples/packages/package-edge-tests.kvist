@@ -1,8 +1,8 @@
 (package tests)
+(import core "kvist:core")
 
 (import t "kvist:test")
 (import arr "kvist:arr")
-(import core "kvist:core")
 (import io "kvist:io")
 (import json "kvist:json")
 (import map "kvist:map")
@@ -12,13 +12,13 @@
 (import os "core:os")
 
 (defstruct Profile {
-  :name string
-  :age int
+  name: string
+  age: int
 })
 
 (defstruct Note {
-  :title string
-  :body string
+  title: string
+  body: string
 })
 
 (defn inc-value [x: int] -> int
@@ -39,17 +39,17 @@
         empty-xs (arr.dynamic int []) defer
         lookup (map.of string int {"a" 1}) defer
         mutable ([dynamic]int [1 2 3]) defer
-        profile (Profile {:name "Ada" :age 10})
-        updated-profile (core.update profile :age 11)
-        missing (core.or-else (query-missing) 9)]
-    (core.update! mutable 0 7)
-    (t.is (= (core.count empty-xs) 0))
-    (t.is (core.empty? empty-xs))
-    (t.is (core.contains? xs 2))
-    (t.is (not (core.contains? xs 9)))
-    (t.is (core.contains? lookup "a"))
-    (t.is (not (core.contains? lookup "z")))
-    (t.is (= (core.get mutable 0) 7))
+        profile (Profile {name: "Ada" age: 10})
+        updated-profile (update profile .age 11)
+        missing (or-else (query-missing) 9)]
+    (set! mutable[0] 7)
+    (t.is (= (count empty-xs) 0))
+    (t.is (empty? empty-xs))
+    (t.is (contains? xs 2))
+    (t.is (not (contains? xs 9)))
+    (t.is (contains? lookup "a"))
+    (t.is (not (contains? lookup "z")))
+    (t.is (= (get mutable 0) 7))
     (t.is (= updated-profile.age 11))
     (t.is (= profile.age 10))
     (t.is (= missing 9))))
@@ -65,10 +65,10 @@
         vals (map.vals empty-map) defer
         empty-keys (arr.dynamic string []) defer
         empty-vals (arr.dynamic int []) defer
-        zipped-empty (map.zip (core.slice empty-keys 0) (core.slice empty-vals 0)) defer
+        zipped-empty (map.zip (slice empty-keys 0) (slice empty-vals 0)) defer
         short-keys (arr.dynamic string ["a" "b" "c"]) defer
         short-vals (arr.dynamic int [10 20]) defer
-        zipped-short (map.zip (core.slice short-keys 0) (core.slice short-vals 0)) defer
+        zipped-short (map.zip (slice short-keys 0) (slice short-vals 0)) defer
         mutable (map.of string int {}) defer]
     (map.assoc! mutable "x" 1)
     (map.assoc! mutable "x" 2)
@@ -147,11 +147,11 @@
   (let [fields (soa.fields 'Profile)
         types (soa.types 'Profile) defer]
     (t.is (= (count fields) 2))
-    (t.is (= (map.get types ":missing" "none") "none"))
-    (t.is (= (map.get types ":name" "") "string"))))
+    (t.is (= (map.get types "missing" "none") "none"))
+    (t.is (= (map.get types "name" "") "string"))))
 
 (t.deftest io-and-json-package-edge-cases
-  (t.is (== (ensure-test-dir) nil))
+  (t.is (= (ensure-test-dir) nil))
   (let [missing-path "tmp.does-not-exist.kvist"
         invalid-json-path "tmp.invalid.json"
         json-path "tmp.package-edge-tests.json"]
@@ -160,12 +160,12 @@
     (let [[missing-data missing-err] (io.read missing-path)]
       (defer (delete missing-data))
       (t.is (!= missing-err nil)))
-    (t.is (== (io.write invalid-json-path "{oops") nil))
+    (t.is (= (io.write invalid-json-path "{oops") nil))
     (let [[note read-err unmarshal-err] (json.read-as Note invalid-json-path)]
       (defer (delete note.title))
       (defer (delete note.body))
-      (t.is (== read-err nil))
+      (t.is (= read-err nil))
       (t.is (!= unmarshal-err nil)))
-    (let [[marshal-err write-err] (json.write json-path (Note {:title "hello" :body "world"}))]
-      (t.is (== marshal-err nil))
-      (t.is (== write-err nil)))))
+    (let [[marshal-err write-err] (json.write json-path (Note {title: "hello" body: "world"}))]
+      (t.is (= marshal-err nil))
+      (t.is (= write-err nil)))))

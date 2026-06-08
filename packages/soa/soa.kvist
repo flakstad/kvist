@@ -89,9 +89,9 @@
     (soa_unzip (unquote particles))))
 
 (defmacro- soa-place [target index field]
-  (if (keyword? field)
+  (if (field-selector? field)
     (symbol (str (text target) "." (name field) "[" (text index) "]"))
-    (error "soa.update! field names must be keywords")))
+    (error "SOA field names must be dot selectors like `.x`")))
 
 (defmacro- soa-set-fields [target index clauses]
   (if (nil? clauses)
@@ -99,7 +99,7 @@
     (if (= (kvist.count clauses) 0)
       (forms)
       (if (= (kvist.count clauses) 1)
-        (error "soa.update! expects :field value pairs")
+        (error "soa.update! expects .field value pairs")
         (let [field (kvist.first clauses)
               value (kvist.nth clauses 1)
               place (soa-place target index field)]
@@ -114,7 +114,7 @@
     (if (= (kvist.count clauses) 0)
       body
       (if (= (kvist.count clauses) 1)
-        (error "soa.update! expects :field value pairs")
+        (error "soa.update! expects .field value pairs")
         (let [field (kvist.first clauses)
               local (symbol (name field))
               place (soa-place target index field)]
@@ -123,7 +123,7 @@
               (unquote (soa-bind-fields target index (kvist.rest (kvist.rest clauses)) body)))))))))
 
 (defmacro update!
-  "Update SOA columns at `index` using keyword.value field clauses.
+  "Update SOA columns at `index` using `.field value` clauses.
 
   Each mentioned field is first bound to a same-named local, so update
   expressions can read the old column values with names like `x`, `vx`, and

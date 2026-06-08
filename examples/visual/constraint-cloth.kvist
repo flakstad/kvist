@@ -21,18 +21,18 @@
 (def Hud-Font-Spacing: f32 1.0)
 
 (defstruct App-State
-  {:x [dynamic]f32
-   :y [dynamic]f32
-   :old-x [dynamic]f32
-   :old-y [dynamic]f32
-   :pinned [dynamic]bool
-   :target-fps int
-   :paused bool
-   :frames int
-   :metric-start f64
-   :fps f64
-   :update-ms f64
-   :draw-ms f64})
+  {x: [dynamic]f32
+   y: [dynamic]f32
+   old-x: [dynamic]f32
+   old-y: [dynamic]f32
+   pinned: [dynamic]bool
+   target-fps: int
+   paused: bool
+   frames: int
+   metric-start: f64
+   fps: f64
+   update-ms: f64
+   draw-ms: f64})
 
 (defn point-index
   "Convert cloth grid x.y coordinates into a flat point index."
@@ -92,8 +92,8 @@
         (set! state.y[i] y)
         (set! state.old-x[i] x)
         (set! state.old-y[i] y)
-        (set! state.pinned[i] (and (== row 0)
-                                   (== (% col 4) 0))))
+        (set! state.pinned[i] (and (= row 0)
+                                   (= (% col 4) 0))))
       (mut! i += 1))))
 
 (defn enforce-pins!
@@ -272,18 +272,18 @@
   (defer (rl.CloseWindow))
   (rl.SetTargetFPS (i32 Initial-Target-FPS))
   (let [font (rl.LoadFontEx (cstring Hud-Font-Path) Hud-Font-Atlas-Size nil 0)
-        state (App-State {:x (make-f32-buffer Point-Count)
-                          :y (make-f32-buffer Point-Count)
-                          :old-x (make-f32-buffer Point-Count)
-                          :old-y (make-f32-buffer Point-Count)
-                          :pinned (make-bool-buffer Point-Count)
-                          :target-fps Initial-Target-FPS
-                          :paused false
-                          :frames 0
-                          :metric-start (rl.GetTime)
-                          :fps 0
-                          :update-ms 0
-                          :draw-ms 0})]
+        state (App-State {x: (make-f32-buffer Point-Count)
+                          y: (make-f32-buffer Point-Count)
+                          old-x: (make-f32-buffer Point-Count)
+                          old-y: (make-f32-buffer Point-Count)
+                          pinned: (make-bool-buffer Point-Count)
+                          target-fps: Initial-Target-FPS
+                          paused: false
+                          frames: 0
+                          metric-start: (rl.GetTime)
+                          fps: 0
+                          update-ms: 0
+                          draw-ms: 0})]
     (rl.SetTextureFilter font.texture .BILINEAR)
     (defer (rl.UnloadFont font))
     (defer (delete state.x))

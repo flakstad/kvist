@@ -7,20 +7,20 @@
 (import runtime "base:runtime")
 
 (defstruct User {
-  :name string
-  :age int
+  name: string
+  age: int
 })
 
 (defstruct State {
-  :values []int
-  :fixed [3]int
-  :buffer [dynamic]int
-  :lookup map[string]int
+  values: []int
+  fixed: [3]int
+  buffer: [dynamic]int
+  lookup: map[string]int
 })
 
 (defn user-name [] -> string
-  (let [user (User {:name "Ada" :age 36})]
-    (:name user)))
+  (let [user (User {name: "Ada" age: 36})]
+    user.name))
 
 (defn dynamic-first [] -> int
   (let [buffer-literal (arr.dynamic int [21 34])]
@@ -30,7 +30,7 @@
 (defn empty-buffer-len [] -> int
   (let [buffer (arr.empty int)]
     (defer (delete buffer))
-    (core.count buffer)))
+    (count buffer)))
 
 // with-allocator temporarily changes context.allocator for the body. This is
 // useful when a whole operation should allocate from a caller-provided allocator.
@@ -40,7 +40,7 @@
     (let [buffer (arr.empty int)]
       (defer (delete buffer))
       (arr.into! buffer (arr.dynamic int [1 2]))
-      (core.count buffer))))
+      (count buffer))))
 
 // with-temp-allocator starts Odin's temp allocator scope and ends it at block
 // exit. This is good for scratch work that cannot escape the block. Kvist
@@ -50,22 +50,22 @@
     (let [buffer (arr.empty int)]
       (defer (delete buffer))
       (arr.into! buffer (arr.dynamic int [1 2 3]))
-      (core.count buffer))))
+      (count buffer))))
 
 (defn lookup-two [] -> int
   (let [lookup (map.of string int {"one" 1 "two" 2})]
     (defer (delete lookup))
-    (core.get lookup "two")))
+    (get lookup "two")))
 
 (defn lookup-has-one? [] -> bool
   (let [lookup (map.of string int {"one" 1 "two" 2})]
     (defer (delete lookup))
-    (core.contains? lookup "one")))
+    (contains? lookup "one")))
 
 (defn lookup-missing-default [] -> int
   (let [lookup (map.of string int {"one" 1 "two" 2})]
     (defer (delete lookup))
-    (core.get lookup "missing" -1)))
+    (get lookup "missing" -1)))
 
 (defn merged-lookup-total [] -> int
   (let [base (map.of string int {"one" 1 "two" 2})
@@ -74,7 +74,7 @@
     (defer (delete base))
     (defer (delete overrides))
     (defer (delete merged))
-    (+ (core.get merged "one") (core.get merged "two") (core.get merged "three"))))
+    (+ (get merged "one") (get merged "two") (get merged "three"))))
 
 (defn merge-in-place-total [] -> int
   (let [lookup (map.of string int {"one" 1 "two" 2})
@@ -82,16 +82,16 @@
     (defer (delete lookup))
     (defer (delete overrides))
     (map.merge! lookup overrides)
-    (+ (core.get lookup "one") (core.get lookup "two") (core.get lookup "three"))))
+    (+ (get lookup "one") (get lookup "two") (get lookup "three"))))
 
 (defn fixed-middle [] -> int
   (let [fixed (arr.fixed int [5 8 13])]
-    (core.get fixed 1)))
+    (get fixed 1)))
 
 (defn main []
-  (core.println (lookup-two)))
+  (println (lookup-two)))
 
-(core.comment
+(comment
   ;; Struct construction is just Odin struct construction in parens.
   (user-name)
   ;; => Ada

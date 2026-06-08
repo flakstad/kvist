@@ -12,8 +12,8 @@
   "positive")
 
 (defn macros-demo []
-  (core.println (classify -1))
-  (core.println (classify 3)))
+  (println (classify -1))
+  (println (classify 3)))
 
 (defn main []
   (macros-demo))

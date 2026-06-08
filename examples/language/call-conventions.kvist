@@ -13,11 +13,11 @@
 
 (defn main []
   (println (connect-db "localhost"))
-  (println (connect-db {:host "analytics" :pool-size 16}))
-  (println (draw-label "hud" "READY" {:x 40 :y 24}))
-  (println (draw-label "hud" "BOSS" {:x 200 :y 48 :color "red" :size 24}))
+  (println (connect-db {host: "analytics" pool-size: 16}))
+  (println (draw-label "hud" "READY" {x: 40 y: 24}))
+  (println (draw-label "hud" "BOSS" {x: 200 y: 48 color: "red" size: 24}))
   (println (spawn-enemy "arena-1" "slime"))
-  (println (spawn-enemy "arena-1" "tank" {:x 12 :y 7 :hp 250 :tag "mid-boss"})))
+  (println (spawn-enemy "arena-1" "tank" {x: 12 y: 7 hp: 250 tag: "mid-boss"})))
 
 (comment
 
@@ -25,20 +25,20 @@
   (connect-db "localhost" 6432 1000 4)
 
   ;; Pure named: useful when skipping to later defaults.
-  (connect-db {:host "analytics" :pool-size 16})
+  (connect-db {host: "analytics" pool-size: 16})
 
   ;; Mixed: required prefix positional, tunable tail named.
-  (draw-label "hud" "READY" {:x 40 :y 24})
+  (draw-label "hud" "READY" {x: 40 y: 24})
 
   ;; Mixed with overrides deeper into the optional tail.
-  (draw-label "hud" "BOSS" {:x 200 :y 48 :color "red" :size 24})
+  (draw-label "hud" "BOSS" {x: 200 y: 48 color: "red" size: 24})
 
   ;; Defaults make short calls stay short.
   (spawn-enemy "arena-1" "slime")
   ;; => arena-1:slime @0,0 hp=100 tag=grunt
 
   ;; Mixed calls are the nice middle ground for API-shaped functions.
-  (spawn-enemy "arena-1" "tank" {:x 12 :y 7 :hp 250 :tag "mid-boss"})
+  (spawn-enemy "arena-1" "tank" {x: 12 y: 7 hp: 250 tag: "mid-boss"})
   ;; => arena-1:tank @12,7 hp=250 tag=mid-boss
 
 )

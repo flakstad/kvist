@@ -37,13 +37,13 @@
   (len (fp.ext "/tmp/archive.tar.gz")))
 
 (defn main []
-  (core.println
+  (println
     (slash-route-name-len)
     (slash-clean-score)
     (filepath-relative-len)
     (filepath-extension-len)))
 
-(core.comment
+(comment
   ;; URL-like path handling.
   (slash-route-name-len)
   ;; => 5
