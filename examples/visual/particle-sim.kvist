@@ -1,0 +1,337 @@
+// Raylib particle simulation written as Kvist forms and lowered to Odin.
+//
+// Window mode:
+//   ./kvist examples/visual/particle-sim.kvist -o /tmp/kvist-particle-sim.odin
+//   odin build /tmp/kvist-particle-sim.odin -file -out:build/particle-sim
+//   scripts/particle_stats.sh -- build/particle-sim
+//
+// Headless benchmark mode:
+//   scripts/particle_stats.sh -- build/particle-sim --bench --particles 50000 --steps 20000
+(package main)
+(import cli "kvist:cli")
+(import fmt "core:fmt")
+(import math "core:math")
+(import os "core:os")
+(import rl "vendor:raylib")
+(import soa "kvist:soa")
+(import time "core:time")
+
+(def Width: int 960)
+(def Height: int 640)
+(def Initial-Particle-Count: int 10000)
+(def Initial-Render-Limit: int 1200)
+(def Initial-Target-FPS: int 60)
+(def Bench-DT: f32 0.016666667)
+(def Bench-Warmup-Steps: int 120)
+(def Hud-Font-Path: string "/System/Library/Fonts/Supplemental/Verdana.ttf")
+(def Hud-Font-Size: f32 20.0)
+(def Hud-Font-Atlas-Size: i32 20)
+(def Hud-Font-Spacing: f32 1.0)
+
+(defstruct Particle
+  {:x f32
+   :y f32
+   :vx f32
+   :vy f32
+   :radius f32
+   :mass f32
+   :color int})
+
+(defstruct App-State
+  {:particles #soa[dynamic]Particle
+   :particle-count int
+   :render-limit int
+   :target-fps int
+   :paused bool
+   :antialias bool
+   :frames int
+   :metric-start f64
+   :fps f64
+   :update-ms f64
+   :draw-ms f64})
+
+(defn lcg-next
+  "Advance the deterministic random seed and return the next raw integer."
+  [seed: ^u32] -> u32
+  (set! seed^ (+ (* seed^ 1664525) 1013904223))
+  seed^)
+
+(defn rand-unit
+  "Return a repeatable pseudo-random f32 in the half-open range [0, 1)."
+  [seed: ^u32] -> f32
+  (/ (f32 (% (lcg-next seed) 1000000)) 1000000.0))
+
+(defn particle-color
+  "Map a compact particle color bucket to a raylib color."
+  [idx: int] -> rl.Color
+  (let [bucket (% idx 7)]
+    (cond
+      (== bucket 0) rl.SKYBLUE
+      (== bucket 1) rl.BLUE
+      (== bucket 2) rl.GREEN
+      (== bucket 3) rl.YELLOW
+      (== bucket 4) rl.ORANGE
+      (== bucket 5) rl.PINK
+      :else rl.PURPLE)))
+
+(defn particle-color-index
+  "Convert particle speed into the small color bucket stored in the SOA column."
+  [speed: f32] -> int
+  (let [bucket (int (/ speed 50.0))]
+    (% bucket 7)))
+
+(defn make-particles
+  "Allocate and initialize n particles inside a dynamic struct-of-arrays buffer."
+  [n: int, w: int, h: int] -> #soa[dynamic]Particle
+  (let [particles (soa/make Particle n)
+        seed: u32 0xC0FFEE
+        i 0]
+    (while (< i n)
+      (let [angle (* (rand-unit (addr seed)) 6.28318530718)
+            speed (+ 25.0 (* 140.0 (rand-unit (addr seed))))
+            radius (+ 1.5 (* 3.5 (rand-unit (addr seed))))
+            x (+ 20.0 (* (- (f32 w) 40.0) (rand-unit (addr seed))))
+            y (+ 20.0 (* (- (f32 h) 40.0) (rand-unit (addr seed))))]
+        (soa/push! particles
+                      (Particle {:x x
+                                 :y y
+                                 :vx (* speed (math.cos angle))
+                                 :vy (* speed (math.sin angle))
+                                 :radius radius
+                                 :mass (* radius radius)
+                                 :color (particle-color-index speed)})))
+      (mut! i += 1))
+    particles))
+
+(defn reset-particles!
+  "Replace the app state's particle storage with a freshly initialized buffer."
+  [state: ^App-State, n: int]
+  (delete state.particles)
+  (set! state.particles (make-particles n Width Height))
+  (set! state.particle-count n)
+  (when (and (> state.render-limit n)
+             (not (== state.render-limit 0)))
+    (set! state.render-limit n)))
+
+(defn render-count
+  "Return how many simulated particles should be drawn this frame."
+  [state: ^App-State] -> int
+  (if (or (<= state.render-limit 0)
+          (> state.render-limit state.particle-count))
+    state.particle-count
+    state.render-limit))
+
+(defn step-particles!
+  "Advance all particles in place, including mouse attraction, bounds, damping, and color."
+  [particles: ^#soa[dynamic]Particle
+   dt: f32
+   w: int
+   h: int
+   mouse-x: f32
+   mouse-y: f32
+   mouse-down: bool]
+  (let [i 0
+        n (len particles^)
+        width (f32 w)
+        height (f32 h)]
+    (while (< i n)
+      (when mouse-down
+        (let [dx (- mouse-x particles.x[i])
+              dy (- mouse-y particles.y[i])
+              dist2 (+ (* dx dx) (* dy dy) 80.0)
+              force (/ 90000.0 dist2)
+              inv-mass (/ 1.0 particles.mass[i])]
+          (mut! particles.vx[i] += (* dx force inv-mass dt))
+          (mut! particles.vy[i] += (* dy force inv-mass dt))))
+
+      (mut! particles.vy[i] += (* 8.0 dt))
+      (mut! particles.x[i] += (* particles.vx[i] dt))
+      (mut! particles.y[i] += (* particles.vy[i] dt))
+
+      (let [radius particles.radius[i]
+            right (- width radius)
+            bottom (- height radius)]
+        (when (< particles.x[i] radius)
+          (set! particles.x[i] radius)
+          (mut! particles.vx[i] *= -0.92))
+        (when (> particles.x[i] right)
+          (set! particles.x[i] right)
+          (mut! particles.vx[i] *= -0.92))
+        (when (< particles.y[i] radius)
+          (set! particles.y[i] radius)
+          (mut! particles.vy[i] *= -0.92))
+        (when (> particles.y[i] bottom)
+          (set! particles.y[i] bottom)
+          (mut! particles.vy[i] *= -0.92)))
+
+      (mut! particles.vx[i] *= 0.999)
+      (mut! particles.vy[i] *= 0.999)
+      (let [vx particles.vx[i]
+            vy particles.vy[i]
+            speed (math.sqrt (+ (* vx vx) (* vy vy)))]
+        (set! particles.color[i] (particle-color-index speed)))
+      (mut! i += 1))))
+
+(defn draw-particles
+  "Draw the active prefix of the particle buffer with raylib circles."
+  [state: ^App-State]
+  (let [particles (addr state.particles)
+        n (render-count state)
+        i 0]
+    (while (< i n)
+      (rl.DrawCircleV
+        (rl.Vector2 [particles.x[i] particles.y[i]])
+        particles.radius[i]
+        (particle-color particles.color[i]))
+      (mut! i += 1))))
+
+(defn draw-hud-text
+  "Draw one HUD text field with the configured readable mono font."
+  [font: rl.Font, text: cstring, x: f32, y: f32, size: f32, color: rl.Color]
+  (rl.DrawTextEx font text (rl.Vector2 [x y]) size Hud-Font-Spacing color))
+
+(defn draw-hud
+  "Draw the translucent overlay containing frame, simulation, and control data."
+  [font: rl.Font, state: ^App-State]
+  (let [panel (rl.Rectangle [8 8 (f32 (- (rl.GetScreenWidth) 16)) 110])]
+    (rl.DrawRectangleRounded panel 0.08 8 [0 0 0 190])
+    (rl.DrawRectangleRoundedLines panel 0.08 8 [255 255 255 45])
+    (draw-hud-text font "backend" 18 20 Hud-Font-Size rl.LIGHTGRAY)
+    (draw-hud-text font "kvist #soa" 92 20 Hud-Font-Size rl.RAYWHITE)
+    (draw-hud-text font "target" 205 20 Hud-Font-Size rl.LIGHTGRAY)
+    (draw-hud-text font (fmt.ctprintf "%3d" state.target-fps) 268 20 Hud-Font-Size rl.RAYWHITE)
+    (draw-hud-text font "fps" 340 20 Hud-Font-Size rl.LIGHTGRAY)
+    (draw-hud-text font (fmt.ctprintf "%6.1f" state.fps) 384 20 Hud-Font-Size rl.RAYWHITE)
+    (draw-hud-text font "update" 472 20 Hud-Font-Size rl.LIGHTGRAY)
+    (draw-hud-text font (fmt.ctprintf "%7.3f ms" state.update-ms) 540 20 Hud-Font-Size rl.RAYWHITE)
+    (draw-hud-text font "draw" 664 20 Hud-Font-Size rl.LIGHTGRAY)
+    (draw-hud-text font (fmt.ctprintf "%7.3f ms" state.draw-ms) 710 20 Hud-Font-Size rl.RAYWHITE)
+    (draw-hud-text font "particles" 18 45 Hud-Font-Size rl.LIGHTGRAY)
+    (draw-hud-text font (fmt.ctprintf "%7d" state.particle-count) 110 45 Hud-Font-Size rl.RAYWHITE)
+    (draw-hud-text font "drawn" 230 45 Hud-Font-Size rl.LIGHTGRAY)
+    (draw-hud-text font (fmt.ctprintf "%7d" (render-count state)) 290 45 Hud-Font-Size rl.RAYWHITE)
+    (draw-hud-text font "cpu/rss" 410 45 Hud-Font-Size rl.LIGHTGRAY)
+    (draw-hud-text font "sampled externally with scripts/particle_stats.sh" 485 45 Hud-Font-Size rl.RAYWHITE)
+    (draw-hud-text
+      font
+      "drag/click: attract   space: pause   r: reset   a: antialias   0/1/2/3: 10/30/60/144 fps   4/5/6: 1.2k/10k/50k particles   7/8/9: draw 1.2k/10k/all"
+      18 74
+      16.0
+      rl.LIGHTGRAY)))
+
+(defn update-fps-metric!
+  "Update the smoothed FPS counter roughly twice per second."
+  [state: ^App-State]
+  (mut! state.frames += 1)
+  (let [now (rl.GetTime)
+        elapsed (- now state.metric-start)]
+    (when (>= elapsed 0.5)
+      (set! state.fps (/ (f64 state.frames) elapsed))
+      (set! state.frames 0)
+      (set! state.metric-start now))))
+
+(defn handle-input!
+  "Apply keyboard controls to the mutable app state."
+  [state: ^App-State]
+  (when (rl.IsKeyPressed .SPACE)
+    (set! state.paused (not state.paused)))
+  (when (rl.IsKeyPressed .A)
+    (set! state.antialias (not state.antialias)))
+  (when (rl.IsKeyPressed .ZERO) (set! state.target-fps 10))
+  (when (rl.IsKeyPressed .ONE) (set! state.target-fps 30))
+  (when (rl.IsKeyPressed .TWO) (set! state.target-fps 60))
+  (when (rl.IsKeyPressed .THREE) (set! state.target-fps 144))
+  (when (rl.IsKeyPressed .FOUR) (reset-particles! state 1200))
+  (when (rl.IsKeyPressed .FIVE) (reset-particles! state 10000))
+  (when (rl.IsKeyPressed .SIX) (reset-particles! state 50000))
+  (when (rl.IsKeyPressed .SEVEN) (set! state.render-limit 1200))
+  (when (rl.IsKeyPressed .EIGHT) (set! state.render-limit 10000))
+  (when (rl.IsKeyPressed .NINE) (set! state.render-limit 0))
+  (when (rl.IsKeyPressed .R)
+    (reset-particles! state state.particle-count)))
+
+(defn run-window
+  "Open the raylib window and run the interactive particle simulation."
+  []
+  (rl.SetConfigFlags [.WINDOW_RESIZABLE .WINDOW_HIGHDPI])
+  (rl.InitWindow (i32 Width) (i32 Height) "Kvist particle simulation")
+  (defer (rl.CloseWindow))
+  (rl.SetTargetFPS (i32 Initial-Target-FPS))
+  (let [font (rl.LoadFontEx (cstring Hud-Font-Path) Hud-Font-Atlas-Size nil 0)
+        state (App-State {:particles (make-particles Initial-Particle-Count Width Height)
+                          :particle-count Initial-Particle-Count
+                          :render-limit Initial-Render-Limit
+                          :target-fps Initial-Target-FPS
+                          :paused false
+                          :antialias false
+                          :frames 0
+                          :metric-start (rl.GetTime)
+                          :fps 0
+                          :update-ms 0
+                          :draw-ms 0})]
+    (rl.SetTextureFilter font.texture .BILINEAR)
+    (defer (rl.UnloadFont font))
+    (defer (delete state.particles))
+    (while (not (rl.WindowShouldClose))
+      (handle-input! (addr state))
+      (rl.SetTargetFPS (i32 state.target-fps))
+      (let [start (rl.GetTime)]
+        (if (not state.paused)
+          (step-particles!
+            (addr state.particles)
+            (rl.GetFrameTime)
+            (int (rl.GetScreenWidth))
+            (int (rl.GetScreenHeight))
+            (f32 (rl.GetMouseX))
+            (f32 (rl.GetMouseY))
+            (rl.IsMouseButtonDown .LEFT))
+          (set! state.update-ms 0))
+        (when (not state.paused)
+          (set! state.update-ms (* (- (rl.GetTime) start) 1000.0))))
+
+      (let [draw-start (rl.GetTime)]
+        (rl.BeginDrawing)
+        (rl.ClearBackground [14 17 23 255])
+        (if state.antialias
+          (rl.BeginBlendMode .ALPHA_PREMULTIPLY)
+          (rl.BeginBlendMode .ALPHA))
+        (draw-particles (addr state))
+        (rl.EndBlendMode)
+        (draw-hud font (addr state))
+        (rl.EndDrawing)
+        (set! state.draw-ms (* (- (rl.GetTime) draw-start) 1000.0)))
+      (update-fps-metric! (addr state)))))
+
+(defn run-bench
+  "Run the simulation loop without rendering and print machine-readable timing metrics."
+  [particle-count: int, steps: int]
+  (let [particles (make-particles particle-count Width Height)
+        i 0]
+    (defer (delete particles))
+    (while (< i Bench-Warmup-Steps)
+      (step-particles! (addr particles) Bench-DT Width Height 0 0 false)
+      (mut! i += 1))
+    (let [step 0
+          start (time.tick_now)]
+      (while (< step steps)
+        (step-particles! (addr particles) Bench-DT Width Height 0 0 false)
+        (mut! step += 1))
+      (let [elapsed (time.duration_seconds (time.tick_since start))
+            updates (f64 steps)
+            particle-updates (* updates (f64 particle-count))]
+        (fmt.printf
+          "system=kvist-odin backend=soa particles=%d steps=%d elapsed_s=%.6f update_ms_per_step=%.6f ns_per_particle=%.3f particle_updates_per_s=%.0f\n"
+          particle-count
+          steps
+          elapsed
+          (* (/ elapsed updates) 1000.0)
+          (* (/ elapsed particle-updates) 1000000000.0)
+          (/ particle-updates elapsed))))))
+
+(defn main
+  "Dispatch to headless benchmark mode when --bench is present, otherwise run the window."
+  []
+  (if (cli/flag os.args "--bench")
+    (run-bench (cli/int-option os.args "--particles" 50000)
+               (cli/int-option os.args "--steps" 20000))
+    (run-window)))

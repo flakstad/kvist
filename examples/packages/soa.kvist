@@ -1,0 +1,39 @@
+// Demonstrates Odin struct-of-arrays storage with ordinary Kvist collection
+// operations. #soa lives in the type; arr/push! dispatches to append_soa.
+(package main)
+(import core "kvist:core")
+(import arr "kvist:arr")
+(import soa "kvist:soa")
+
+(defstruct Particle
+  {:mass f32
+   :velocity f32
+   :id int})
+
+(defn fixed-first-mass [] -> f32
+  (let [particles (#soa[2]Particle
+                    [(Particle {:mass 1 :velocity 3 :id 10})
+                     (Particle {:mass 2 :velocity 4 :id 20})])]
+    (arr/get (:mass particles) 0)))
+
+(defn add-particle! [particles: ^#soa[dynamic]Particle
+                     particle: Particle]
+  (soa/push! particles particle)
+  (return))
+
+(defn dynamic-score [] -> f32
+  (let [particles (soa/make Particle 2)
+        score: f32 0]
+    (defer (delete particles))
+    (soa/push! particles (Particle {:mass 1 :velocity 3 :id 10}))
+    (soa/push! particles (Particle {:mass 2 :velocity 4 :id 20}))
+    (soa/update! particles 0 :mass 12 :velocity (+ velocity 1))
+    (soa/axpy! particles :mass 0.5 :velocity)
+    (soa/clamp! particles :mass 0.0 10.0)
+    (soa/sum-into! score particles :mass)
+    (soa/dot-into! score particles :velocity :velocity)
+    score))
+
+(defn main []
+  (core/println (fixed-first-mass))
+  (core/println (dynamic-score)))

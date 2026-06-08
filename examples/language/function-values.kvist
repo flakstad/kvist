@@ -1,0 +1,40 @@
+// Exercises function types, function literals, callbacks, thread-first, nil?, and
+// pointer-vs-value choices in ordinary helper code.
+(package main)
+(import core "kvist:core")
+
+(defstruct Request {
+  :path string
+})
+
+(defn apply-pred [pred: (fn [x: int] -> bool), x: int] -> bool
+  (pred x))
+
+(defn greater-than? [threshold: int, x: int] -> bool
+  (> x threshold))
+
+(defn path-len [req: Request] -> int
+  (core/-> req :path len))
+
+(defn maybe-path-len [req: ^Request] -> int
+  ;; Accept a pointer when absence or shared identity is part of the API.
+  (if (core/nil? req)
+    0
+    (path-len (deref req))))
+
+(defn main []
+  (let [pred: (fn [x: int] -> bool) (fn [x: int] -> bool
+                                           (greater-than? 10 x))
+        req (Request {:path "/users"})]
+    (core/println (apply-pred pred 12))))
+
+(core/comment
+  (greater-than? 3 5)
+  ;; => true
+
+  (path-len (Request {:path "/users"}))
+  ;; => 6
+
+  (maybe-path-len nil)
+  ;; => 0
+)

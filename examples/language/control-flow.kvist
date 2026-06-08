@@ -1,0 +1,90 @@
+// Exercises conditionals, value switches, grouped cases, loops, and name mapping.
+(package main)
+(import core "kvist:core")
+(import arr "kvist:arr")
+
+(defenum Method [
+  Get
+  Head
+  Post
+  Delete
+])
+
+(defn read-method? [method: Method] -> bool
+  (core/switch method
+    [.Get .Head] true
+    :else false))
+
+(defn method-name [method: Method] -> string
+  (core/switch method
+    .Get "GET"
+    .Head "HEAD"
+    .Post "POST"
+    :else "OTHER"))
+
+(defn classify [n: int] -> string
+  (core/cond
+    (< n 0) "negative"
+    (== n 0) "zero"
+    :else "positive"))
+
+(defn sum [xs: []int] -> int
+  (let [total 0]
+    (each [x xs]
+      (set! total (+ total x)))
+    total))
+
+(defn lookup-method [name: string] -> [method: Method, ok: bool]
+  (core/cond
+    (== name "GET") (return .Get true)
+    (== name "HEAD") (return .Head true)
+    (== name "POST") (return .Post true)
+    (== name "DELETE") (return .Delete true)
+    :else (return .Get false)))
+
+// core/when-let is a core binding macro for Odin-style multi-returns with an
+// explicit boolean such as ok, found, present, or valid.
+(defn method-score [name: string] -> int
+  (let [score 0]
+    (core/when-let [method found (lookup-method name)]
+      (core/when (read-method? method)
+        (set! score 10)))
+    score))
+
+// core/if-let is the expression variant. Use it when the false branch should
+// produce a value instead of just doing nothing.
+(defn method-title [name: string] -> string
+  (core/if-let [method found (lookup-method name)]
+    (method-name method)
+    "UNKNOWN"))
+
+(defn main []
+  (let [xs (arr/dynamic int [1 2 3])]
+    (defer (delete xs))
+    (core/println (classify (sum (core/slice xs))))))
+
+(core/comment
+  (method-name .Get)
+  ;; => GET
+
+  (read-method? .Head)
+  ;; => true
+
+  (classify -1)
+  ;; => negative
+
+  (sum [1 2 3 4 5 6])
+  ;; => 21
+
+  (method-score "HEAD")
+  ;; => 10
+
+  (method-score "POST")
+  ;; => 0
+
+  (method-title "DELETE")
+  ;; => OTHER
+
+  (method-title "PATCH")
+  ;; => UNKNOWN
+)

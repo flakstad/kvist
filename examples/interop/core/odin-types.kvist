@@ -1,0 +1,26 @@
+// Direct Odin type constructors that participate in Kvist's (T x) rule.
+(package main)
+(import core "kvist:core")
+(import intrinsics "base:intrinsics")
+
+(defenum Permission
+  "Small enum used to demonstrate compact bit_set type spelling."
+  [Read
+   Write
+   Execute])
+
+(defn make-permissions
+  "Construct a bit_set with an explicit u8 backing type."
+  [] -> bit_set[Permission; u8]
+  (bit_set[Permission; u8] [.Read .Execute]))
+
+(defn simd-score
+  "Construct a #simd vector and reduce a simple lane-wise addition."
+  [] -> f32
+  (let [v (#simd[4]f32 [1.0 2.0 3.0 4.0])
+        doubled (intrinsics.simd_add v v)]
+    (intrinsics.simd_reduce_add_ordered doubled)))
+
+(defn main []
+  (core/println (make-permissions)
+                (simd-score)))

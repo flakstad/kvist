@@ -1,0 +1,315 @@
+// Visual broadphase demo: moving circles indexed by a mutable spatial hash grid.
+(package main)
+(import fmt "core:fmt")
+(import math "core:math")
+(import rl "vendor:raylib")
+(import soa "kvist:soa")
+
+(def Width: int 1100)
+(def Height: int 720)
+(def Sim-Y: int 116)
+(def Circle-Count: int 1600)
+(def Cell-Size: int 40)
+(def Cells-X: int 28)
+(def Cells-Y: int 16)
+(def Bucket-Count: int (* Cells-X Cells-Y))
+(def Initial-Target-FPS: int 60)
+(def Hud-Font-Path: string "/System/Library/Fonts/Supplemental/Verdana.ttf")
+(def Hud-Font-Size: f32 20.0)
+(def Hud-Font-Atlas-Size: i32 20)
+(def Hud-Font-Spacing: f32 1.0)
+
+(defstruct Circle
+  {:x f32
+   :y f32
+   :vx f32
+   :vy f32
+   :radius f32
+   :cell int
+   :hit bool})
+
+(defstruct App-State
+  {:circles #soa[dynamic]Circle
+   :head [dynamic]int
+   :next [dynamic]int
+   :target-fps int
+   :paused bool
+   :show-grid bool
+   :collisions int
+   :pairs-tested int
+   :frames int
+   :metric-start f64
+   :fps f64
+   :update-ms f64
+   :draw-ms f64})
+
+(defn lcg-next
+  "Advance the deterministic random seed and return the next raw integer."
+  [seed: ^u32] -> u32
+  (set! seed^ (+ (* seed^ 1664525) 1013904223))
+  seed^)
+
+(defn rand-unit
+  "Return a repeatable pseudo-random f32 in the half-open range [0, 1)."
+  [seed: ^u32] -> f32
+  (/ (f32 (% (lcg-next seed) 1000000)) 1000000.0))
+
+(defn rgba
+  "Construct a raylib color from integer channel values."
+  [r: int, g: int, b: int, a: int] -> rl.Color
+  (rl.Color [(u8 r) (u8 g) (u8 b) (u8 a)]))
+
+(defn v2
+  "Construct a raylib 2D vector."
+  [x: f32, y: f32] -> rl.Vector2
+  (rl.Vector2 [x y]))
+
+(defn fill-int!
+  "Fill a dynamic int buffer with one value."
+  [xs: [dynamic]int, value: int]
+  (let [i 0
+        n (len xs)]
+    (while (< i n)
+      (set! xs[i] value)
+      (mut! i += 1))))
+
+(defn make-int-buffer
+  "Allocate a dynamic int buffer and initialize every slot."
+  [n: int, value: int] -> [dynamic]int
+  (let [xs (make [dynamic]int n)]
+    (fill-int! xs value)
+    xs))
+
+(defn make-circles
+  "Allocate and initialize moving circles in SOA storage."
+  [n: int] -> #soa[dynamic]Circle
+  (let [circles (soa/make Circle n)
+        seed: u32 0xBADC0DE
+        i 0]
+    (while (< i n)
+      (let [angle (* (rand-unit (addr seed)) 6.28318530718)
+            speed (+ 35.0 (* 145.0 (rand-unit (addr seed))))
+            radius (+ 3.0 (* 4.5 (rand-unit (addr seed))))
+            x (+ radius (* (- (f32 Width) (* radius 2.0)) (rand-unit (addr seed))))
+            y (+ (f32 Sim-Y) radius (* (- (f32 (- Height Sim-Y)) (* radius 2.0)) (rand-unit (addr seed))))]
+        (soa/push! circles (Circle {:x x
+                                    :y y
+                                    :vx (* speed (math.cos angle))
+                                    :vy (* speed (math.sin angle))
+                                    :radius radius
+                                    :cell -1
+                                    :hit false})))
+      (mut! i += 1))
+    circles))
+
+(defn cell-index
+  "Return the clamped spatial-hash bucket index for a screen position."
+  [x: f32, y: f32] -> int
+  (let [cx (math.clamp (int (/ x (f32 Cell-Size))) 0 (- Cells-X 1))
+        cy (math.clamp (int (/ (- y (f32 Sim-Y)) (f32 Cell-Size))) 0 (- Cells-Y 1))]
+    (+ cx (* cy Cells-X))))
+
+(defn move-and-index!
+  "Move circles, bounce off bounds, and rebuild the linked-list hash buckets."
+  [state: ^App-State, dt: f32]
+  (fill-int! state.head -1)
+  (fill-int! state.next -1)
+  (set! state.collisions 0)
+  (set! state.pairs-tested 0)
+  (let [i 0
+        n (len state.circles)]
+    (while (< i n)
+      (set! state.circles.hit[i] false)
+      (mut! state.circles.x[i] += (* state.circles.vx[i] dt))
+      (mut! state.circles.y[i] += (* state.circles.vy[i] dt))
+      (let [r state.circles.radius[i]
+            right (- (f32 Width) r)
+            bottom (- (f32 Height) r)
+            top (+ (f32 Sim-Y) r)]
+        (when (< state.circles.x[i] r)
+          (set! state.circles.x[i] r)
+          (mut! state.circles.vx[i] *= -1.0))
+        (when (> state.circles.x[i] right)
+          (set! state.circles.x[i] right)
+          (mut! state.circles.vx[i] *= -1.0))
+        (when (< state.circles.y[i] top)
+          (set! state.circles.y[i] top)
+          (mut! state.circles.vy[i] *= -1.0))
+        (when (> state.circles.y[i] bottom)
+          (set! state.circles.y[i] bottom)
+          (mut! state.circles.vy[i] *= -1.0)))
+      (let [cell (cell-index state.circles.x[i] state.circles.y[i])]
+        (set! state.circles.cell[i] cell)
+        (set! state.next[i] state.head[cell])
+        (set! state.head[cell] i))
+      (mut! i += 1))))
+
+(defn detect-collisions!
+  "Mark colliding circles by checking only neighboring spatial-hash buckets."
+  [state: ^App-State]
+  (let [i 0
+        n (len state.circles)]
+    (while (< i n)
+      (let [cell state.circles.cell[i]
+            cx (% cell Cells-X)
+            cy (/ cell Cells-X)
+            yy (- cy 1)]
+        (while (<= yy (+ cy 1))
+          (let [xx (- cx 1)]
+            (while (<= xx (+ cx 1))
+              (when (and (>= xx 0)
+                         (< xx Cells-X)
+                         (>= yy 0)
+                         (< yy Cells-Y))
+                (let [bucket (+ xx (* yy Cells-X))
+                      j state.head[bucket]]
+                  (while (!= j -1)
+                    (when (> j i)
+                      (mut! state.pairs-tested += 1)
+                      (let [dx (- state.circles.x[j] state.circles.x[i])
+                            dy (- state.circles.y[j] state.circles.y[i])
+                            rr (+ state.circles.radius[i] state.circles.radius[j])]
+                        (when (< (+ (* dx dx) (* dy dy)) (* rr rr))
+                          (set! state.circles.hit[i] true)
+                          (set! state.circles.hit[j] true)
+                          (mut! state.collisions += 1))))
+                    (set! j state.next[j]))))
+              (mut! xx += 1)))
+          (mut! yy += 1)))
+      (mut! i += 1))))
+
+(defn step!
+  "Advance the broadphase simulation one frame."
+  [state: ^App-State, dt: f32]
+  (move-and-index! state dt)
+  (detect-collisions! state))
+
+(defn draw-grid
+  "Draw spatial hash bucket boundaries."
+  []
+  (let [x 0]
+    (while (<= x Cells-X)
+      (rl.DrawLine (i32 (* x Cell-Size)) (i32 Sim-Y) (i32 (* x Cell-Size)) (i32 Height) (rgba 255 255 255 24))
+      (mut! x += 1)))
+  (let [y 0]
+    (while (<= y Cells-Y)
+      (rl.DrawLine 0 (i32 (+ Sim-Y (* y Cell-Size))) (i32 Width) (i32 (+ Sim-Y (* y Cell-Size))) (rgba 255 255 255 24))
+      (mut! y += 1))))
+
+(defn draw-circles
+  "Draw every circle, highlighting broadphase collision hits."
+  [state: ^App-State]
+  (let [i 0
+        n (len state.circles)]
+    (while (< i n)
+      (let [color (rgba 106 190 255 150)]
+        (when state.circles.hit[i]
+          (set! color (rgba 255 110 88 235)))
+        (rl.DrawCircleV (v2 state.circles.x[i] state.circles.y[i]) state.circles.radius[i] color))
+      (mut! i += 1))))
+
+(defn draw-hud-text
+  "Draw one HUD field with the configured readable mono font."
+  [font: rl.Font, text: cstring, x: f32, y: f32, size: f32, color: rl.Color]
+  (rl.DrawTextEx font text (v2 x y) size Hud-Font-Spacing color))
+
+(defn draw-hud
+  "Draw the fixed-column spatial hash HUD."
+  [font: rl.Font, state: ^App-State]
+  (let [panel (rl.Rectangle [8 8 (f32 (- (rl.GetScreenWidth) 16)) 96])]
+    (rl.DrawRectangleRounded panel 0.08 8 [0 0 0 195])
+    (rl.DrawRectangleRoundedLines panel 0.08 8 [255 255 255 45])
+    (draw-hud-text font "demo" 18 20 Hud-Font-Size rl.LIGHTGRAY)
+    (draw-hud-text font "spatial hash" 72 20 Hud-Font-Size rl.RAYWHITE)
+    (draw-hud-text font "circles" 218 20 Hud-Font-Size rl.LIGHTGRAY)
+    (draw-hud-text font (fmt.ctprintf "%5d" (len state.circles)) 298 20 Hud-Font-Size rl.RAYWHITE)
+    (draw-hud-text font "pairs" 385 20 Hud-Font-Size rl.LIGHTGRAY)
+    (draw-hud-text font (fmt.ctprintf "%7d" state.pairs-tested) 445 20 Hud-Font-Size rl.RAYWHITE)
+    (draw-hud-text font "hits" 560 20 Hud-Font-Size rl.LIGHTGRAY)
+    (draw-hud-text font (fmt.ctprintf "%5d" state.collisions) 612 20 Hud-Font-Size rl.RAYWHITE)
+    (draw-hud-text font "fps" 700 20 Hud-Font-Size rl.LIGHTGRAY)
+    (draw-hud-text font (fmt.ctprintf "%6.1f" state.fps) 742 20 Hud-Font-Size rl.RAYWHITE)
+    (draw-hud-text font "update" 835 20 Hud-Font-Size rl.LIGHTGRAY)
+    (draw-hud-text font (fmt.ctprintf "%7.3f ms" state.update-ms) 905 20 Hud-Font-Size rl.RAYWHITE)
+    (draw-hud-text font "grid" 18 50 Hud-Font-Size rl.LIGHTGRAY)
+    (draw-hud-text font (fmt.ctprintf "%2d x %2d buckets, mutable head/next arrays" Cells-X Cells-Y) 72 50 Hud-Font-Size rl.RAYWHITE)
+    (draw-hud-text font "space: pause   g: grid   1/2/3: 30/60/144 fps   r: reset" 18 76 16.0 rl.LIGHTGRAY)))
+
+(defn update-fps-metric!
+  "Update the smoothed FPS counter roughly twice per second."
+  [state: ^App-State]
+  (mut! state.frames += 1)
+  (let [now (rl.GetTime)
+        elapsed (- now state.metric-start)]
+    (when (>= elapsed 0.5)
+      (set! state.fps (/ (f64 state.frames) elapsed))
+      (set! state.frames 0)
+      (set! state.metric-start now))))
+
+(defn reset!
+  "Replace the circles with deterministic initial state."
+  [state: ^App-State]
+  (delete state.circles)
+  (set! state.circles (make-circles Circle-Count))
+  (fill-int! state.head -1)
+  (fill-int! state.next -1))
+
+(defn handle-input!
+  "Apply keyboard controls to the app state."
+  [state: ^App-State]
+  (when (rl.IsKeyPressed .SPACE)
+    (set! state.paused (not state.paused)))
+  (when (rl.IsKeyPressed .G)
+    (set! state.show-grid (not state.show-grid)))
+  (when (rl.IsKeyPressed .ONE) (set! state.target-fps 30))
+  (when (rl.IsKeyPressed .TWO) (set! state.target-fps 60))
+  (when (rl.IsKeyPressed .THREE) (set! state.target-fps 144))
+  (when (rl.IsKeyPressed .R) (reset! state)))
+
+(defn run-window
+  "Open the raylib window and run the spatial hash collision demo."
+  []
+  (rl.SetConfigFlags [.WINDOW_RESIZABLE .WINDOW_HIGHDPI])
+  (rl.InitWindow (i32 Width) (i32 Height) "Kvist spatial hash collisions")
+  (defer (rl.CloseWindow))
+  (rl.SetTargetFPS (i32 Initial-Target-FPS))
+  (let [font (rl.LoadFontEx (cstring Hud-Font-Path) Hud-Font-Atlas-Size nil 0)
+        state (App-State {:circles (make-circles Circle-Count)
+                          :head (make-int-buffer Bucket-Count -1)
+                          :next (make-int-buffer Circle-Count -1)
+                          :target-fps Initial-Target-FPS
+                          :paused false
+                          :show-grid true
+                          :collisions 0
+                          :pairs-tested 0
+                          :frames 0
+                          :metric-start (rl.GetTime)
+                          :fps 0
+                          :update-ms 0
+                          :draw-ms 0})]
+    (rl.SetTextureFilter font.texture .BILINEAR)
+    (defer (rl.UnloadFont font))
+    (defer (delete state.circles))
+    (defer (delete state.head))
+    (defer (delete state.next))
+    (while (not (rl.WindowShouldClose))
+      (handle-input! (addr state))
+      (rl.SetTargetFPS (i32 state.target-fps))
+      (let [start (rl.GetTime)]
+        (when (not state.paused)
+          (step! (addr state) (rl.GetFrameTime))
+          (set! state.update-ms (* (- (rl.GetTime) start) 1000.0))))
+      (let [draw-start (rl.GetTime)]
+        (rl.BeginDrawing)
+        (rl.ClearBackground [14 17 23 255])
+        (when state.show-grid (draw-grid))
+        (draw-circles (addr state))
+        (draw-hud font (addr state))
+        (rl.EndDrawing)
+        (set! state.draw-ms (* (- (rl.GetTime) draw-start) 1000.0)))
+      (update-fps-metric! (addr state)))))
+
+(defn main
+  "Run the visual spatial hash collision demo."
+  []
+  (run-window))

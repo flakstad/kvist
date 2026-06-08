@@ -1,0 +1,249 @@
+// Reusable motion/navigation commands for the robo mower sandbox.
+(package main)
+
+(defn abs-f32
+  "Return the absolute value of a 32-bit float."
+  [x: f32] -> f32
+  (when (< x (f32 0.0))
+    (return (- x)))
+  x)
+
+(defn drive-to-point-with-radius-command
+  "Steer toward a point with a caller-selected squared arrival radius."
+  [robot: (ptr Robot), tx: f32, ty: f32, speed: f32, blade: bool, arrive-r2: f32] -> Command
+  (let [dx (- tx (:x robot^))
+        dy (- ty (:y robot^))
+        d2 (+ (* dx dx) (* dy dy))]
+    (when (< d2 arrive-r2)
+      (return (command (f32 0.0) (f32 0.0) blade)))
+    (let [target-angle (math.atan2 dy dx)
+          error (normalize-angle (- target-angle (:heading robot^)))
+          abs-error (abs-f32 error)
+          drive-speed speed
+          turn (math.clamp (* error (f32 2.4)) (f32 -2.0) (f32 2.0))]
+      (when (> abs-error (f32 0.72))
+        (return (command (f32 0.0) turn blade)))
+      (when (> abs-error (f32 0.34))
+        (set! drive-speed (* speed (f32 0.35))))
+      (command drive-speed turn blade))))
+
+(defn drive-to-point-command
+  "Steer toward a point, spinning in place before driving on large heading errors."
+  [robot: (ptr Robot), tx: f32, ty: f32, speed: f32, blade: bool] -> Command
+  (drive-to-point-with-radius-command robot tx ty speed blade (f32 625.0)))
+
+(defn boundary-left-x
+  "Return local field-space x for the left boundary wire center."
+  [] -> f32
+  (+ (* (f32 Boundary-X) (f32 Cell-Size)) 5.0))
+
+(defn boundary-right-x
+  "Return local field-space x for the right boundary wire center."
+  [] -> f32
+  (+ (* (f32 (+ Boundary-X Boundary-W -1)) (f32 Cell-Size)) 5.0))
+
+(defn boundary-top-y
+  "Return local field-space y for the top boundary wire center."
+  [] -> f32
+  (+ (* (f32 Boundary-Y) (f32 Cell-Size)) 5.0))
+
+(defn boundary-bottom-y
+  "Return local field-space y for the bottom boundary wire center."
+  [] -> f32
+  (+ (* (f32 (+ Boundary-Y Boundary-H -1)) (f32 Cell-Size)) 5.0))
+
+(defn distance2
+  "Return squared distance between two points."
+  [ax: f32, ay: f32, bx: f32, by: f32] -> f32
+  (let [dx (- ax bx)
+        dy (- ay by)]
+    (+ (* dx dx) (* dy dy))))
+
+(defn smooth-pursuit-command
+  "Steer toward a moving path target without stopping to spin in place."
+  [robot: (ptr Robot), tx: f32, ty: f32, speed: f32, blade: bool] -> Command
+  (let [dx (- tx (:x robot^))
+        dy (- ty (:y robot^))
+        target-angle (math.atan2 dy dx)
+        error (normalize-angle (- target-angle (:heading robot^)))
+        abs-error (abs-f32 error)
+        drive-speed speed
+        turn (math.clamp (* error (f32 2.65)) (f32 -2.15) (f32 2.15))]
+    (when (> abs-error (f32 1.35))
+      (set! drive-speed (* speed (f32 0.24))))
+    (when (and (> abs-error (f32 0.72))
+               (<= abs-error (f32 1.35)))
+      (set! drive-speed (* speed (f32 0.44))))
+    (command drive-speed turn blade)))
+
+(defn corner-turn-command
+  "Turn at a boundary corner before advancing along the next wire segment."
+  [robot: (ptr Robot), target-heading: f32, blade: bool] -> Command
+  (let [error (normalize-angle (- target-heading (:heading robot^)))
+        turn (math.clamp (* error (f32 2.8)) (f32 -2.1) (f32 2.1))]
+    (when (> (abs-f32 error) (f32 0.16))
+      (return (command (f32 0.0) turn blade)))
+    (command (f32 30.0) turn blade)))
+
+(defn boundary-follow-with-blade-command
+  "Follow the configured boundary wire with the wire centered under the robot."
+  [robot: (ptr Robot), sensors: (ptr Sensors), blade: bool] -> Command
+  (let [left (boundary-left-x)
+        right (boundary-right-x)
+        top (boundary-top-y)
+        bottom (boundary-bottom-y)
+        wire-distance (:wire sensors^)
+        width (- right left)
+        height (- bottom top)
+        perimeter (* (+ width height) (f32 2.0))
+        base-lookahead (f32 92.0)
+        corner-advance (f32 16.0)
+        corner-lookahead (f32 42.0)
+        x (:x robot^)
+        y (:y robot^)
+        top-x (math.clamp x left right)
+        right-y (math.clamp y top bottom)
+        bottom-x (math.clamp x left right)
+        left-y (math.clamp y top bottom)
+        best (distance2 x y top-x top)
+        side 0
+        nearest-x top-x
+        nearest-y top]
+    (let [d (distance2 x y right right-y)]
+      (when (< d best)
+        (set! best d)
+        (set! side 1)
+        (set! nearest-x right)
+        (set! nearest-y right-y)))
+    (let [d (distance2 x y bottom-x bottom)]
+      (when (< d best)
+        (set! best d)
+        (set! side 2)
+        (set! nearest-x bottom-x)
+        (set! nearest-y bottom)))
+    (let [d (distance2 x y left left-y)]
+      (when (< d best)
+        (set! best d)
+        (set! side 3)
+        (set! nearest-x left)
+        (set! nearest-y left-y)))
+    (let [progress (f32 0.0)
+          target (f32 0.0)
+          lookahead base-lookahead
+          tx left
+          ty top]
+      (when (> best (f32 900.0))
+        (set! lookahead (f32 132.0)))
+      (when (and (or (> best (f32 196.0))
+                     (> wire-distance (f32 14.0)))
+                 (<= best (f32 900.0)))
+        (set! lookahead (f32 112.0)))
+      (when (== side 0)
+        (set! progress (- nearest-x left)))
+      (when (== side 1)
+        (set! progress (+ width (- nearest-y top))))
+      (when (== side 2)
+        (set! progress (+ width height (- right nearest-x))))
+      (when (== side 3)
+        (set! progress (+ width height width (- bottom nearest-y))))
+      (when (== side 0)
+        (let [remaining (- right nearest-x)]
+          (if (> remaining corner-advance)
+            (do
+              (set! tx (math.min (+ nearest-x lookahead) right))
+              (set! ty top)
+              (return (smooth-pursuit-command robot tx ty (f32 54.0) blade)))
+            (do
+              (set! tx right)
+              (set! ty (math.min (+ top corner-lookahead) bottom))
+              (let [turn-cmd (corner-turn-command robot Right-Angle blade)]
+                (when (== (:speed turn-cmd) (f32 0.0))
+                  (return turn-cmd)))
+              (return (smooth-pursuit-command robot tx ty (f32 34.0) blade))))))
+      (when (== side 1)
+        (let [remaining (- bottom nearest-y)]
+          (if (> remaining corner-advance)
+            (do
+              (set! tx right)
+              (set! ty (math.min (+ nearest-y lookahead) bottom))
+              (return (smooth-pursuit-command robot tx ty (f32 54.0) blade)))
+            (do
+              (set! tx (math.max (- right corner-lookahead) left))
+              (set! ty bottom)
+              (let [turn-cmd (corner-turn-command robot Pi blade)]
+                (when (== (:speed turn-cmd) (f32 0.0))
+                  (return turn-cmd)))
+              (return (smooth-pursuit-command robot tx ty (f32 34.0) blade))))))
+      (when (== side 2)
+        (let [remaining (- nearest-x left)]
+          (if (> remaining corner-advance)
+            (do
+              (set! tx (math.max (- nearest-x lookahead) left))
+              (set! ty bottom)
+              (return (smooth-pursuit-command robot tx ty (f32 54.0) blade)))
+            (do
+              (set! tx left)
+              (set! ty (math.max (- bottom corner-lookahead) top))
+              (let [turn-cmd (corner-turn-command robot (- Right-Angle) blade)]
+                (when (== (:speed turn-cmd) (f32 0.0))
+                  (return turn-cmd)))
+              (return (smooth-pursuit-command robot tx ty (f32 34.0) blade))))))
+      (when (== side 3)
+        (let [remaining (- nearest-y top)]
+          (if (> remaining corner-advance)
+            (do
+              (set! tx left)
+              (set! ty (math.max (- nearest-y lookahead) top))
+              (return (smooth-pursuit-command robot tx ty (f32 54.0) blade)))
+            (do
+              (set! tx (math.min (+ left corner-lookahead) right))
+              (set! ty top)
+              (let [turn-cmd (corner-turn-command robot 0.0 blade)]
+                (when (== (:speed turn-cmd) (f32 0.0))
+                  (return turn-cmd)))
+              (return (smooth-pursuit-command robot tx ty (f32 34.0) blade))))))
+      (set! target (+ progress lookahead))
+      (while (> target perimeter)
+        (set! target (- target perimeter)))
+      (when (<= target width)
+        (set! tx (+ left target))
+        (set! ty top)
+        (return (smooth-pursuit-command robot tx ty (f32 54.0) blade)))
+      (when (<= target (+ width height))
+        (set! tx right)
+        (set! ty (+ top (- target width)))
+        (return (smooth-pursuit-command robot tx ty (f32 54.0) blade)))
+      (when (<= target (+ width height width))
+        (set! tx (- right (- target width height)))
+        (set! ty bottom)
+        (return (smooth-pursuit-command robot tx ty (f32 54.0) blade)))
+      (set! tx left)
+      (set! ty (- bottom (- target width height width)))
+      (smooth-pursuit-command robot tx ty (f32 54.0) blade))))
+
+(defn boundary-follow-command
+  "Follow the boundary wire with the blade enabled."
+  [robot: (ptr Robot), sensors: (ptr Sensors)] -> Command
+  (boundary-follow-with-blade-command robot sensors true))
+
+(defn wire-home-command
+  "Find the boundary wire and follow it toward the charging base."
+  [robot: (ptr Robot), sensors: (ptr Sensors)] -> Command
+  (when (< (+ (* (- (dock-x) (:x robot^)) (- (dock-x) (:x robot^)))
+              (* (- (dock-y) (:y robot^)) (- (dock-y) (:y robot^)))) (f32 1600.0))
+    (return (command (f32 0.0) (f32 0.0) false)))
+  (when (< (:front sensors^) (f32 28.0))
+    (return (command (f32 0.0) (f32 1.8) false)))
+  (boundary-follow-with-blade-command robot sensors false))
+
+(defn mapped-home-command
+  "Return directly to dock using the robot's estimated pose."
+  [robot: (ptr Robot), sensors: (ptr Sensors)] -> Command
+  (when (< (:front sensors^) (f32 28.0))
+    (return (command (f32 0.0) (f32 1.8) false)))
+  (drive-to-point-command robot (dock-x) (dock-y) (f32 68.0) false))
+
+(defn undock-command
+  "Drive out from the charger with the blade disabled."
+  [] -> Command
+  (command Undock-Speed 0.0 false))

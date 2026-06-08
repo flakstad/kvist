@@ -85,7 +85,7 @@ Then live code can do:
 ```clojure
 (defn stale-items-report [ctx]
   (let [items (find-items ctx {:status :open :updated-before "2026-01-01"})]
-    (for [item items]
+    (each [item items]
       (print-line ctx (:title item)))))
 ```
 

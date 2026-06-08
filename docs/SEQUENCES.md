@@ -233,8 +233,8 @@ optional-default helpers, direct key/value loops, or direct in-place mutation.
 
 `kvist:arr` is a shipped `.kvist` package with the broad sequence helper
 surface. Many helpers are implemented directly in package source, including
-the indexing/slicing layer, the ordinary proc-callback path for `arr/map`,
-`arr/filter`, `arr/remove`, and `arr/reduce`, and the ordinary proc-predicate
+the indexing/slicing layer, the ordinary function-callback path for `arr/map`,
+`arr/filter`, `arr/remove`, and `arr/reduce`, and the ordinary function-predicate
 path for `arr/take-while`, `arr/drop-while`, `arr/find`, `arr/some?`, and
 `arr/every?` via `#force_inline` loops. Constructors like `arr/empty`,
 `arr/dynamic`, `arr/fixed`, mutators like `arr/push!`, `arr/map!`,
@@ -294,7 +294,7 @@ For hot paths, prefer one of these shapes:
 - use bang helpers such as `arr/sort!`, `arr/reverse!`, `arr/shuffle!`, `arr/map!`, `arr/filter!`,
   `arr/remove!`, `arr/keep!`, `arr/into!`, and `map/merge!` when mutating existing storage is the
   right Odin choice;
-- write an explicit `for` loop when one pass and no intermediate collection is
+- write an explicit `each` loop when one pass and no intermediate collection is
   needed;
 - avoid `arr/group-by` when only aggregate totals are needed. Use `arr/count-by` or
   `arr/sum-by` for simple aggregate maps, or accumulate directly into maps for
@@ -336,7 +336,7 @@ detail before a scalar result, or when the update needs custom state:
 ```clojure
 (let [revenue-by-region (make map[int]int)
       count-by-region (make map[int]int)]
-  (for [order orders]
+  (each [order orders]
     (let [settled (settle-order order)]
       (core/when (settled? settled)
         (set! (get revenue-by-region (:region settled))
@@ -384,7 +384,7 @@ only needs per-region totals, not actual grouped order slices. `count-by` and
 outputs. If a caller needs to inspect the grouped orders themselves, `group-by`
 is still the right helper.
 
-The `examples/orders-report.kvist` example also includes an
+The `examples/collections/orders-report.kvist` example also includes an
 `aggregate-helper-report-score` variant that uses `sum-by` and `count-by`. The
 focused aggregate benchmark compares that shape with the grouped version and a
 direct aggregate loop. Its expected result is lower allocation than `group-by`,

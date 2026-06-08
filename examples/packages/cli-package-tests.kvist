@@ -1,0 +1,23 @@
+(package main)
+(import cli "kvist:cli")
+(import os "core:os")
+
+(defn demo-port
+  "Parse a representative CLI argument slice and return the selected port."
+  [] -> int
+  (let [args ([]string ["tool" "serve" "--port" "8080" "--debug"])
+        command (or-else (cli/command args) "none")
+        port (cli/int-option args "--port" 3000)]
+    (when (cli/flag args "--debug")
+      (cli/eprintln "debug enabled"))
+    (cli/printf "command=%s port=%d\n" command port)
+    port))
+
+(defn main
+  "Exercise the kvist:cli package helpers without depending on process args."
+  []
+  (let [port (demo-port)]
+    (when (cli/flag os.args "--tty")
+      (let [[columns rows] (cli/terminal-size 80 24)]
+        (cli/println "stdout-tty?" (cli/stdout-tty?) "size" columns rows)))
+    (cli/println "selected port" port)))

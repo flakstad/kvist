@@ -1,0 +1,42 @@
+// Environment, safety, and physical actuator gates.
+(package main)
+
+(defn environment-command
+  "Apply simulated environmental conditions to a requested command."
+  [state: (ptr App-State), cmd: Command] -> Command
+  (let [scale (f32 1.0)
+        turn (:turn cmd)]
+    (when state.rain
+      (set! scale (* scale (f32 0.72))))
+    (when state.hills
+      (set! scale (* scale (f32 0.62)))
+      (set! turn (+ turn (f32 0.24))))
+    (command (* (:speed cmd) scale) turn (:blade cmd))))
+
+(defn safety-command
+  "Apply independent robot safety/reflex overrides before actuation."
+  [state: (ptr App-State), cmd: Command] -> Command
+  (when (not state.reflex-enabled)
+    (return cmd))
+  (when (or state.lifted (not state.comms-ok))
+    (return (command (f32 0.0) (f32 0.0) false)))
+  (when state.bumper
+    (return (command (f32 -32.0) (f32 1.4) false)))
+  cmd)
+
+(defn power-command
+  "Apply physical battery depletion: no battery means no actuator power."
+  [state: (ptr App-State), cmd: Command] -> Command
+  (when (<= state.battery (f32 0.0))
+    (set! state.robot.recovery Recovery-None)
+    (set! state.robot.recovery-kind Collision-None)
+    (set-drive-metrics! (addr state.robot) 0.0 0.0 false)
+    (return (command (f32 0.0) (f32 0.0) false)))
+  cmd)
+
+(defn actuator-command
+  "Apply environment, safety, and physical power gates to a requested command."
+  [state: (ptr App-State), requested: Command] -> Command
+  (let [env-cmd (environment-command state requested)
+        safe-cmd (safety-command state env-cmd)]
+    (power-command state safe-cmd)))

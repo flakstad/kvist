@@ -1,0 +1,289 @@
+// Visual dense-array demo: Gray-Scott reaction diffusion on dynamic f32 grids.
+(package main)
+(import fmt "core:fmt")
+(import math "core:math")
+(import rl "vendor:raylib")
+
+(def Width: int 1100)
+(def Height: int 720)
+(def Grid-W: int 160)
+(def Grid-H: int 86)
+(def Grid-Cells: int (* Grid-W Grid-H))
+(def Cell-Size: int 6)
+(def Sim-Y: int 116)
+(def Initial-Target-FPS: int 60)
+(def Initial-Steps-Per-Frame: int 6)
+(def Diff-A: f32 1.0)
+(def Diff-B: f32 0.48)
+(def Feed: f32 0.055)
+(def Kill: f32 0.062)
+(def Hud-Font-Path: string "/System/Library/Fonts/Supplemental/Verdana.ttf")
+(def Hud-Font-Size: f32 20.0)
+(def Hud-Font-Atlas-Size: i32 20)
+(def Hud-Font-Spacing: f32 1.0)
+
+(defstruct App-State
+  {:a [dynamic]f32
+   :b [dynamic]f32
+   :next-a [dynamic]f32
+   :next-b [dynamic]f32
+   :target-fps int
+   :steps-per-frame int
+   :paused bool
+   :frames int
+   :metric-start f64
+   :fps f64
+   :update-ms f64
+   :draw-ms f64})
+
+(defn idx
+  "Convert grid x/y coordinates into a flat array index."
+  [x: int, y: int] -> int
+  (+ x (* y Grid-W)))
+
+(defn rgba
+  "Construct a raylib color from integer channel values."
+  [r: int, g: int, b: int, a: int] -> rl.Color
+  (rl.Color [(u8 r) (u8 g) (u8 b) (u8 a)]))
+
+(defn v2
+  "Construct a raylib 2D vector."
+  [x: f32, y: f32] -> rl.Vector2
+  (rl.Vector2 [x y]))
+
+(defn make-buffer
+  "Allocate a zero-filled dynamic f32 grid buffer."
+  [] -> [dynamic]f32
+  (let [xs (make [dynamic]f32 Grid-Cells)
+        i 0]
+    (while (< i Grid-Cells)
+      (set! xs[i] 0.0)
+      (mut! i += 1))
+    xs))
+
+(defn fill-buffer!
+  "Set every value in a dynamic f32 buffer."
+  [xs: [dynamic]f32, value: f32]
+  (let [i 0
+        n (len xs)]
+    (while (< i n)
+      (set! xs[i] value)
+      (mut! i += 1))))
+
+(defn seed-square!
+  "Seed a square of chemical B into the field."
+  [a: [dynamic]f32, b: [dynamic]f32, cx: int, cy: int, radius: int]
+  (let [y (- cy radius)]
+    (while (<= y (+ cy radius))
+      (let [x (- cx radius)]
+        (while (<= x (+ cx radius))
+          (when (and (> x 0)
+                     (< x (- Grid-W 1))
+                     (> y 0)
+                     (< y (- Grid-H 1)))
+            (let [i (idx x y)]
+              (set! a[i] 0.45)
+              (set! b[i] 1.0)))
+          (mut! x += 1)))
+      (mut! y += 1))))
+
+(defn seed-field!
+  "Initialize the field with deterministic chemical patches."
+  [state: ^App-State]
+  (fill-buffer! state.a 1.0)
+  (fill-buffer! state.b 0.0)
+  (fill-buffer! state.next-a 1.0)
+  (fill-buffer! state.next-b 0.0)
+  (seed-square! state.a state.b 54 33 7)
+  (seed-square! state.a state.b 104 47 9)
+  (seed-square! state.a state.b 80 66 5)
+  (seed-square! state.a state.b 125 22 4)
+  (seed-square! state.a state.b 30 66 4))
+
+(defn laplacian
+  "Return a weighted 3x3 Laplacian sample from a flat grid."
+  [xs: [dynamic]f32, i: int] -> f32
+  (let [left (- i 1)
+        right (+ i 1)
+        up (- i Grid-W)
+        down (+ i Grid-W)
+        up-left (- up 1)
+        up-right (+ up 1)
+        down-left (- down 1)
+        down-right (+ down 1)]
+    (+ (* xs[i] -1.0)
+       (* 0.2 (+ xs[left]
+                 xs[right]
+                 xs[up]
+                 xs[down]))
+       (* 0.05 (+ xs[up-left]
+                  xs[up-right]
+                  xs[down-left]
+                  xs[down-right])))))
+
+(defn step-field!
+  "Advance the Gray-Scott field one simulation step and swap buffers."
+  [state: ^App-State]
+  (let [y 1]
+    (while (< y (- Grid-H 1))
+      (let [x 1]
+        (while (< x (- Grid-W 1))
+          (let [i (idx x y)
+                a state.a[i]
+                b state.b[i]
+                reaction (* a b b)
+                next-a (+ a (* (+ (* Diff-A (laplacian state.a i))
+                                   (- reaction)
+                                   (* Feed (- 1.0 a)))
+                                1.0))
+                next-b (+ b (* (+ (* Diff-B (laplacian state.b i))
+                                   reaction
+                                   (* (- (+ Feed Kill)) b))
+                                1.0))]
+            (set! state.next-a[i] (math.clamp next-a 0.0 1.0))
+            (set! state.next-b[i] (math.clamp next-b 0.0 1.0)))
+          (mut! x += 1)))
+      (mut! y += 1)))
+  (let [old-a state.a
+        old-b state.b]
+    (set! state.a state.next-a)
+    (set! state.b state.next-b)
+    (set! state.next-a old-a)
+    (set! state.next-b old-b)))
+
+(defn color-for
+  "Map chemical concentrations to a readable simulation color."
+  [a: f32, b: f32] -> rl.Color
+  (let [v (math.clamp (* b 1.9) 0.0 1.0)
+        edge (math.clamp (* (- b a) 2.6) 0.0 1.0)
+        r (int (+ 18.0 (* 54.0 v)))
+        g (int (+ 25.0 (* 180.0 edge)))
+        bl (int (+ 42.0 (* 205.0 v)))]
+    (rgba r g bl 255)))
+
+(defn draw-field
+  "Draw the reaction-diffusion grid as fixed-size cells."
+  [state: ^App-State]
+  (let [grid-px (* Grid-W Cell-Size)
+        start-x (/ (- (int (rl.GetScreenWidth)) grid-px) 2)
+        y 0]
+    (while (< y Grid-H)
+      (let [x 0]
+        (while (< x Grid-W)
+          (let [i (idx x y)]
+            (rl.DrawRectangle
+              (i32 (+ start-x (* x Cell-Size)))
+              (i32 (+ Sim-Y (* y Cell-Size)))
+              (i32 Cell-Size)
+              (i32 Cell-Size)
+              (color-for state.a[i] state.b[i])))
+          (mut! x += 1)))
+      (mut! y += 1))))
+
+(defn draw-hud-text
+  "Draw one HUD field with the configured readable mono font."
+  [font: rl.Font, text: cstring, x: f32, y: f32, size: f32, color: rl.Color]
+  (rl.DrawTextEx font text (v2 x y) size Hud-Font-Spacing color))
+
+(defn draw-hud
+  "Draw the fixed-column field simulation HUD."
+  [font: rl.Font, state: ^App-State]
+  (let [panel (rl.Rectangle [8 8 (f32 (- (rl.GetScreenWidth) 16)) 94])]
+    (rl.DrawRectangleRounded panel 0.08 8 [0 0 0 190])
+    (rl.DrawRectangleRoundedLines panel 0.08 8 [255 255 255 45])
+    (draw-hud-text font "demo" 18 20 Hud-Font-Size rl.LIGHTGRAY)
+    (draw-hud-text font "reaction diffusion" 72 20 Hud-Font-Size rl.RAYWHITE)
+    (draw-hud-text font "cells" 262 20 Hud-Font-Size rl.LIGHTGRAY)
+    (draw-hud-text font (fmt.ctprintf "%6d" Grid-Cells) 322 20 Hud-Font-Size rl.RAYWHITE)
+    (draw-hud-text font "fps" 420 20 Hud-Font-Size rl.LIGHTGRAY)
+    (draw-hud-text font (fmt.ctprintf "%6.1f" state.fps) 464 20 Hud-Font-Size rl.RAYWHITE)
+    (draw-hud-text font "update" 556 20 Hud-Font-Size rl.LIGHTGRAY)
+    (draw-hud-text font (fmt.ctprintf "%7.3f ms" state.update-ms) 624 20 Hud-Font-Size rl.RAYWHITE)
+    (draw-hud-text font "draw" 750 20 Hud-Font-Size rl.LIGHTGRAY)
+    (draw-hud-text font (fmt.ctprintf "%7.3f ms" state.draw-ms) 798 20 Hud-Font-Size rl.RAYWHITE)
+    (draw-hud-text font "steps" 18 48 Hud-Font-Size rl.LIGHTGRAY)
+    (draw-hud-text font (fmt.ctprintf "%3d/frame" state.steps-per-frame) 80 48 Hud-Font-Size rl.RAYWHITE)
+    (draw-hud-text font "buffers" 210 48 Hud-Font-Size rl.LIGHTGRAY)
+    (draw-hud-text font "a, b, next-a, next-b [dynamic]f32" 286 48 Hud-Font-Size rl.RAYWHITE)
+    (draw-hud-text font "space: pause   up/down: steps per frame   1/2/3: 30/60/144 fps   r: reset" 18 73 16.0 rl.LIGHTGRAY)))
+
+(defn update-fps-metric!
+  "Update the smoothed FPS counter roughly twice per second."
+  [state: ^App-State]
+  (mut! state.frames += 1)
+  (let [now (rl.GetTime)
+        elapsed (- now state.metric-start)]
+    (when (>= elapsed 0.5)
+      (set! state.fps (/ (f64 state.frames) elapsed))
+      (set! state.frames 0)
+      (set! state.metric-start now))))
+
+(defn reset!
+  "Reset the field to its deterministic starting patches."
+  [state: ^App-State]
+  (seed-field! state))
+
+(defn handle-input!
+  "Apply keyboard controls to the app state."
+  [state: ^App-State]
+  (when (rl.IsKeyPressed .SPACE)
+    (set! state.paused (not state.paused)))
+  (when (rl.IsKeyPressed .ONE) (set! state.target-fps 30))
+  (when (rl.IsKeyPressed .TWO) (set! state.target-fps 60))
+  (when (rl.IsKeyPressed .THREE) (set! state.target-fps 144))
+  (when (rl.IsKeyPressed .UP)
+    (set! state.steps-per-frame (math.clamp (+ state.steps-per-frame 1) 1 20)))
+  (when (rl.IsKeyPressed .DOWN)
+    (set! state.steps-per-frame (math.clamp (- state.steps-per-frame 1) 1 20)))
+  (when (rl.IsKeyPressed .R) (reset! state)))
+
+(defn run-window
+  "Open the raylib window and run the reaction-diffusion field demo."
+  []
+  (rl.SetConfigFlags [.WINDOW_RESIZABLE .WINDOW_HIGHDPI])
+  (rl.InitWindow (i32 Width) (i32 Height) "Kvist reaction diffusion")
+  (defer (rl.CloseWindow))
+  (rl.SetTargetFPS (i32 Initial-Target-FPS))
+  (let [font (rl.LoadFontEx (cstring Hud-Font-Path) Hud-Font-Atlas-Size nil 0)
+        state (App-State {:a (make-buffer)
+                          :b (make-buffer)
+                          :next-a (make-buffer)
+                          :next-b (make-buffer)
+                          :target-fps Initial-Target-FPS
+                          :steps-per-frame Initial-Steps-Per-Frame
+                          :paused false
+                          :frames 0
+                          :metric-start (rl.GetTime)
+                          :fps 0
+                          :update-ms 0
+                          :draw-ms 0})]
+    (rl.SetTextureFilter font.texture .BILINEAR)
+    (defer (rl.UnloadFont font))
+    (defer (delete state.a))
+    (defer (delete state.b))
+    (defer (delete state.next-a))
+    (defer (delete state.next-b))
+    (seed-field! (addr state))
+    (while (not (rl.WindowShouldClose))
+      (handle-input! (addr state))
+      (rl.SetTargetFPS (i32 state.target-fps))
+      (let [start (rl.GetTime)]
+        (when (not state.paused)
+          (let [step 0]
+            (while (< step state.steps-per-frame)
+              (step-field! (addr state))
+              (mut! step += 1)))
+          (set! state.update-ms (* (- (rl.GetTime) start) 1000.0))))
+      (let [draw-start (rl.GetTime)]
+        (rl.BeginDrawing)
+        (rl.ClearBackground [15 18 24 255])
+        (draw-field (addr state))
+        (draw-hud font (addr state))
+        (rl.EndDrawing)
+        (set! state.draw-ms (* (- (rl.GetTime) draw-start) 1000.0)))
+      (update-fps-metric! (addr state)))))
+
+(defn main
+  "Run the visual dense-array reaction-diffusion demo."
+  []
+  (run-window))

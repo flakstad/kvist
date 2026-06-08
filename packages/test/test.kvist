@@ -119,7 +119,7 @@ __kvist_test_once_guard: sync.Once
     body
     (quasiquote
       ((unquote (first fixtures)) t
-       (proc [t: ^testing.T]
+       (fn [t: ^testing.T]
          (unquote (emit-fixture-chain body (rest fixtures))))))))
 
 (defmacro- emit-once-fixtures

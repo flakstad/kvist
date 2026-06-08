@@ -59,5 +59,4 @@ compiles to readable Odin.
   `(return ...)` in ordinary kvist code.
 - Treat `let` as Clojure-style scoped binding syntax: `(let [x value] body...)`.
 - Do not use `^type` for type hints; `^` is Odin pointer syntax.
-- Use explicit type ascription for typed literal lowering. `(as Type literal)`
-  is the current placeholder until the syntax settles.
+- Use type-call syntax for typed literal lowering and conversions: `(T value)`.

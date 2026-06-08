@@ -1,0 +1,314 @@
+// Visual constraint demo: Verlet cloth with pinned anchors and distance solves.
+(package main)
+(import fmt "core:fmt")
+(import math "core:math")
+(import rl "vendor:raylib")
+
+(def Width: int 1100)
+(def Height: int 720)
+(def Cloth-W: int 34)
+(def Cloth-H: int 20)
+(def Point-Count: int (* Cloth-W Cloth-H))
+(def Spacing: f32 24.0)
+(def Start-X: f32 155.0)
+(def Start-Y: f32 135.0)
+(def Initial-Target-FPS: int 60)
+(def Solver-Iterations: int 7)
+(def Gravity: f32 680.0)
+(def Hud-Font-Path: string "/System/Library/Fonts/Supplemental/Verdana.ttf")
+(def Hud-Font-Size: f32 20.0)
+(def Hud-Font-Atlas-Size: i32 20)
+(def Hud-Font-Spacing: f32 1.0)
+
+(defstruct App-State
+  {:x [dynamic]f32
+   :y [dynamic]f32
+   :old-x [dynamic]f32
+   :old-y [dynamic]f32
+   :pinned [dynamic]bool
+   :target-fps int
+   :paused bool
+   :frames int
+   :metric-start f64
+   :fps f64
+   :update-ms f64
+   :draw-ms f64})
+
+(defn point-index
+  "Convert cloth grid x/y coordinates into a flat point index."
+  [x: int, y: int] -> int
+  (+ x (* y Cloth-W)))
+
+(defn rest-x
+  "Return the original x coordinate for a point index."
+  [i: int] -> f32
+  (+ Start-X (* (f32 (% i Cloth-W)) Spacing)))
+
+(defn rest-y
+  "Return the original y coordinate for a point index."
+  [i: int] -> f32
+  (+ Start-Y (* (f32 (/ i Cloth-W)) Spacing)))
+
+(defn rgba
+  "Construct a raylib color from integer channel values."
+  [r: int, g: int, b: int, a: int] -> rl.Color
+  (rl.Color [(u8 r) (u8 g) (u8 b) (u8 a)]))
+
+(defn v2
+  "Construct a raylib 2D vector."
+  [x: f32, y: f32] -> rl.Vector2
+  (rl.Vector2 [x y]))
+
+(defn make-f32-buffer
+  "Allocate a zero-filled dynamic f32 buffer."
+  [n: int] -> [dynamic]f32
+  (let [xs (make [dynamic]f32 n)
+        i 0]
+    (while (< i n)
+      (set! xs[i] 0.0)
+      (mut! i += 1))
+    xs))
+
+(defn make-bool-buffer
+  "Allocate a false-filled dynamic bool buffer."
+  [n: int] -> [dynamic]bool
+  (let [xs (make [dynamic]bool n)
+        i 0]
+    (while (< i n)
+      (set! xs[i] false)
+      (mut! i += 1))
+    xs))
+
+(defn seed-cloth!
+  "Reset all points to the rest pose and pin top-row anchors."
+  [state: ^App-State]
+  (let [i 0]
+    (while (< i Point-Count)
+      (let [x (rest-x i)
+            y (rest-y i)
+            col (% i Cloth-W)
+            row (/ i Cloth-W)]
+        (set! state.x[i] x)
+        (set! state.y[i] y)
+        (set! state.old-x[i] x)
+        (set! state.old-y[i] y)
+        (set! state.pinned[i] (and (== row 0)
+                                   (== (% col 4) 0))))
+      (mut! i += 1))))
+
+(defn enforce-pins!
+  "Move pinned points back to their fixed rest positions."
+  [state: ^App-State]
+  (let [i 0]
+    (while (< i Point-Count)
+      (when state.pinned[i]
+        (let [x (rest-x i)
+              y (rest-y i)]
+          (set! state.x[i] x)
+          (set! state.y[i] y)
+          (set! state.old-x[i] x)
+          (set! state.old-y[i] y)))
+      (mut! i += 1))))
+
+(defn verlet!
+  "Integrate unpinned cloth points using Verlet-style position history."
+  [state: ^App-State, dt: f32]
+  (let [i 0
+        dt2 (* dt dt)]
+    (while (< i Point-Count)
+      (when (not state.pinned[i])
+        (let [x state.x[i]
+              y state.y[i]
+              vx (* (- state.x[i] state.old-x[i]) 0.995)
+              vy (* (- state.y[i] state.old-y[i]) 0.995)]
+          (set! state.old-x[i] x)
+          (set! state.old-y[i] y)
+          (mut! state.x[i] += vx)
+          (mut! state.y[i] += (+ vy (* Gravity dt2)))))
+      (mut! i += 1))))
+
+(defn satisfy-pair!
+  "Relax one distance constraint between two cloth points."
+  [state: ^App-State, a: int, b: int, rest: f32]
+  (let [dx (- state.x[b] state.x[a])
+        dy (- state.y[b] state.y[a])
+        dist (math.sqrt (+ (* dx dx) (* dy dy)))]
+    (when (> dist 0.001)
+      (let [diff (/ (- dist rest) dist)
+            ax (* dx diff)
+            ay (* dy diff)
+            a-pin state.pinned[a]
+            b-pin state.pinned[b]]
+        (when (and (not a-pin) (not b-pin))
+          (mut! state.x[a] += (* ax 0.5))
+          (mut! state.y[a] += (* ay 0.5))
+          (mut! state.x[b] -= (* ax 0.5))
+          (mut! state.y[b] -= (* ay 0.5)))
+        (when (and a-pin (not b-pin))
+          (mut! state.x[b] -= ax)
+          (mut! state.y[b] -= ay))
+        (when (and (not a-pin) b-pin)
+          (mut! state.x[a] += ax)
+          (mut! state.y[a] += ay))))))
+
+(defn solve-constraints!
+  "Run multiple passes of horizontal and vertical distance constraints."
+  [state: ^App-State]
+  (let [iter 0]
+    (while (< iter Solver-Iterations)
+      (let [row 0]
+        (while (< row Cloth-H)
+          (let [col 0]
+            (while (< col Cloth-W)
+              (let [i (point-index col row)]
+                (when (< col (- Cloth-W 1))
+                  (satisfy-pair! state i (point-index (+ col 1) row) Spacing))
+                (when (< row (- Cloth-H 1))
+                  (satisfy-pair! state i (point-index col (+ row 1)) Spacing)))
+              (mut! col += 1)))
+          (mut! row += 1)))
+      (enforce-pins! state)
+      (mut! iter += 1))))
+
+(defn apply-mouse!
+  "Pull nearby cloth points toward the mouse while the left button is down."
+  [state: ^App-State]
+  (when (rl.IsMouseButtonDown .LEFT)
+    (let [mx (f32 (rl.GetMouseX))
+          my (f32 (rl.GetMouseY))
+          i 0]
+      (while (< i Point-Count)
+        (when (not state.pinned[i])
+          (let [dx (- mx state.x[i])
+                dy (- my state.y[i])
+                d2 (+ (* dx dx) (* dy dy))]
+            (when (< d2 3600.0)
+              (mut! state.x[i] += (* dx 0.045))
+              (mut! state.y[i] += (* dy 0.045)))))
+        (mut! i += 1)))))
+
+(defn step-cloth!
+  "Advance the cloth one frame with integration, mouse forces, and constraints."
+  [state: ^App-State, dt: f32]
+  (verlet! state dt)
+  (apply-mouse! state)
+  (solve-constraints! state))
+
+(defn draw-segment
+  "Draw one cloth constraint segment."
+  [state: ^App-State, a: int, b: int, color: rl.Color]
+  (rl.DrawLineEx (v2 state.x[a] state.y[a]) (v2 state.x[b] state.y[b]) 1.5 color))
+
+(defn draw-cloth
+  "Draw the constraint grid and pinned anchors."
+  [state: ^App-State]
+  (let [row 0]
+    (while (< row Cloth-H)
+      (let [col 0]
+        (while (< col Cloth-W)
+          (let [i (point-index col row)]
+            (when (< col (- Cloth-W 1))
+              (draw-segment state i (point-index (+ col 1) row) (rgba 104 176 255 150)))
+            (when (< row (- Cloth-H 1))
+              (draw-segment state i (point-index col (+ row 1)) (rgba 104 176 255 95)))
+            (when state.pinned[i]
+              (rl.DrawCircleV (v2 state.x[i] state.y[i]) 5.0 (rgba 255 208 94 255))))
+          (mut! col += 1)))
+      (mut! row += 1))))
+
+(defn draw-hud-text
+  "Draw one HUD field with the configured readable mono font."
+  [font: rl.Font, text: cstring, x: f32, y: f32, size: f32, color: rl.Color]
+  (rl.DrawTextEx font text (v2 x y) size Hud-Font-Spacing color))
+
+(defn draw-hud
+  "Draw the fixed-column cloth simulation HUD."
+  [font: rl.Font, state: ^App-State]
+  (let [panel (rl.Rectangle [8 8 (f32 (- (rl.GetScreenWidth) 16)) 96])]
+    (rl.DrawRectangleRounded panel 0.08 8 [0 0 0 195])
+    (rl.DrawRectangleRoundedLines panel 0.08 8 [255 255 255 45])
+    (draw-hud-text font "demo" 18 20 Hud-Font-Size rl.LIGHTGRAY)
+    (draw-hud-text font "constraint cloth" 72 20 Hud-Font-Size rl.RAYWHITE)
+    (draw-hud-text font "points" 250 20 Hud-Font-Size rl.LIGHTGRAY)
+    (draw-hud-text font (fmt.ctprintf "%5d" Point-Count) 318 20 Hud-Font-Size rl.RAYWHITE)
+    (draw-hud-text font "iters" 404 20 Hud-Font-Size rl.LIGHTGRAY)
+    (draw-hud-text font (fmt.ctprintf "%2d" Solver-Iterations) 462 20 Hud-Font-Size rl.RAYWHITE)
+    (draw-hud-text font "fps" 520 20 Hud-Font-Size rl.LIGHTGRAY)
+    (draw-hud-text font (fmt.ctprintf "%6.1f" state.fps) 562 20 Hud-Font-Size rl.RAYWHITE)
+    (draw-hud-text font "update" 656 20 Hud-Font-Size rl.LIGHTGRAY)
+    (draw-hud-text font (fmt.ctprintf "%7.3f ms" state.update-ms) 726 20 Hud-Font-Size rl.RAYWHITE)
+    (draw-hud-text font "draw" 852 20 Hud-Font-Size rl.LIGHTGRAY)
+    (draw-hud-text font (fmt.ctprintf "%7.3f ms" state.draw-ms) 902 20 Hud-Font-Size rl.RAYWHITE)
+    (draw-hud-text font "storage" 18 50 Hud-Font-Size rl.LIGHTGRAY)
+    (draw-hud-text font "x, y, old-x, old-y [dynamic]f32 + pinned [dynamic]bool" 98 50 Hud-Font-Size rl.RAYWHITE)
+    (draw-hud-text font "drag/click: pull cloth   space: pause   1/2/3: 30/60/144 fps   r: reset" 18 76 16.0 rl.LIGHTGRAY)))
+
+(defn update-fps-metric!
+  "Update the smoothed FPS counter roughly twice per second."
+  [state: ^App-State]
+  (mut! state.frames += 1)
+  (let [now (rl.GetTime)
+        elapsed (- now state.metric-start)]
+    (when (>= elapsed 0.5)
+      (set! state.fps (/ (f64 state.frames) elapsed))
+      (set! state.frames 0)
+      (set! state.metric-start now))))
+
+(defn handle-input!
+  "Apply keyboard controls to the app state."
+  [state: ^App-State]
+  (when (rl.IsKeyPressed .SPACE)
+    (set! state.paused (not state.paused)))
+  (when (rl.IsKeyPressed .ONE) (set! state.target-fps 30))
+  (when (rl.IsKeyPressed .TWO) (set! state.target-fps 60))
+  (when (rl.IsKeyPressed .THREE) (set! state.target-fps 144))
+  (when (rl.IsKeyPressed .R) (seed-cloth! state)))
+
+(defn run-window
+  "Open the raylib window and run the constraint cloth demo."
+  []
+  (rl.SetConfigFlags [.WINDOW_RESIZABLE .WINDOW_HIGHDPI])
+  (rl.InitWindow (i32 Width) (i32 Height) "Kvist constraint cloth")
+  (defer (rl.CloseWindow))
+  (rl.SetTargetFPS (i32 Initial-Target-FPS))
+  (let [font (rl.LoadFontEx (cstring Hud-Font-Path) Hud-Font-Atlas-Size nil 0)
+        state (App-State {:x (make-f32-buffer Point-Count)
+                          :y (make-f32-buffer Point-Count)
+                          :old-x (make-f32-buffer Point-Count)
+                          :old-y (make-f32-buffer Point-Count)
+                          :pinned (make-bool-buffer Point-Count)
+                          :target-fps Initial-Target-FPS
+                          :paused false
+                          :frames 0
+                          :metric-start (rl.GetTime)
+                          :fps 0
+                          :update-ms 0
+                          :draw-ms 0})]
+    (rl.SetTextureFilter font.texture .BILINEAR)
+    (defer (rl.UnloadFont font))
+    (defer (delete state.x))
+    (defer (delete state.y))
+    (defer (delete state.old-x))
+    (defer (delete state.old-y))
+    (defer (delete state.pinned))
+    (seed-cloth! (addr state))
+    (while (not (rl.WindowShouldClose))
+      (handle-input! (addr state))
+      (rl.SetTargetFPS (i32 state.target-fps))
+      (let [start (rl.GetTime)]
+        (when (not state.paused)
+          (step-cloth! (addr state) (rl.GetFrameTime))
+          (set! state.update-ms (* (- (rl.GetTime) start) 1000.0))))
+      (let [draw-start (rl.GetTime)]
+        (rl.BeginDrawing)
+        (rl.ClearBackground [14 17 23 255])
+        (draw-cloth (addr state))
+        (draw-hud font (addr state))
+        (rl.EndDrawing)
+        (set! state.draw-ms (* (- (rl.GetTime) draw-start) 1000.0)))
+      (update-fps-metric! (addr state)))))
+
+(defn main
+  "Run the visual constraint cloth demo."
+  []
+  (run-window))

@@ -29,7 +29,8 @@ It should be very close to `clojure-mode`:
 - font-lock Kvist special forms, keywords, Odin directive symbols, and raw
   `(odin "...")` escape hatches
 - provide indentation overrides for Kvist forms such as `defn`, `defstruct`,
-  `defenum`, `defunion`, `proc`, `let`, `core/switch`, `core/cond`, and `for`
+  `defenum`, `defunion`, `fn`, `let`, `defvar`, `block`, `core/switch`,
+  `core/cond`, and `for`
 
 The compiler's Odin source remains 4-space indented. The Kvist source format is
 separate and should read like Clojure.
@@ -74,7 +75,7 @@ tooling entry points:
 - optionally write generated Odin for editor inspection with `--generated`
 
 The current `--map` output is line-oriented. Declarations are still the fallback
-mapping, but emitted body forms, binding assignments, conditions, loop
+mapping, but emitted body forms, binding assignments, conditions, for
 collections, return values, and assignment values carry narrower source spans
 where the generated line has a clear Kvist origin. Internally, diagnostic
 remapping also uses generated columns when Odin reports them. Eval forms carry
@@ -205,7 +206,7 @@ kind of process.
 
 The important iterative workflow is:
 
-1. write a proc that downloads, parses, or computes data;
+1. write a function that downloads, parses, or computes data;
 2. run it once from the editor;
 3. save the result to disk;
 4. load that saved value in later eval calls without repeating the expensive

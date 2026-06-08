@@ -1,0 +1,171 @@
+(package tests)
+
+(import t "kvist:test")
+(import arr "kvist:arr")
+(import core "kvist:core")
+(import io "kvist:io")
+(import json "kvist:json")
+(import map "kvist:map")
+(import set "kvist:set")
+(import str "kvist:str")
+(import soa "kvist:soa")
+(import os "core:os")
+
+(defstruct Profile {
+  :name string
+  :age int
+})
+
+(defstruct Note {
+  :title string
+  :body string
+})
+
+(defn inc-value [x: int] -> int
+  (+ x 1))
+
+(defn query-missing [] -> [value: int, ok: bool] #optional_ok
+  (return 0 false))
+
+(defn ensure-test-dir [] -> os.Error
+  (let [err (os.make_directory_all "tmp")]
+    (if (and (!= err nil)
+             (not (os.is_directory "tmp")))
+      err
+      nil)))
+
+(t/deftest core-package-edge-cases
+  (let [xs [1 2 3] defer
+        empty-xs (arr/dynamic int []) defer
+        lookup (map/of string int {"a" 1}) defer
+        mutable ([dynamic]int [1 2 3]) defer
+        profile (Profile {:name "Ada" :age 10})
+        updated-profile (core/update profile :age 11)
+        missing (core/or-else (query-missing) 9)]
+    (core/update! mutable 0 7)
+    (t/is (= (core/count empty-xs) 0))
+    (t/is (core/empty? empty-xs))
+    (t/is (core/contains? xs 2))
+    (t/is (not (core/contains? xs 9)))
+    (t/is (core/contains? lookup "a"))
+    (t/is (not (core/contains? lookup "z")))
+    (t/is (= (core/get mutable 0) 7))
+    (t/is (= (:age updated-profile) 11))
+    (t/is (= (:age profile) 10))
+    (t/is (= missing 9))))
+
+(t/deftest map-package-edge-cases
+  (let [empty-map (map/empty string int) defer
+        base (map/of string int {"a" 1 "b" 2}) defer
+        other (map/of string int {"b" 20}) defer
+        merged (map/merge base other) defer
+        assoced (map/assoc base "c" 3) defer
+        trimmed (map/dissoc base "missing") defer
+        keys (map/keys empty-map) defer
+        vals (map/vals empty-map) defer
+        empty-keys (arr/dynamic string []) defer
+        empty-vals (arr/dynamic int []) defer
+        zipped-empty (map/zip (core/slice empty-keys 0) (core/slice empty-vals 0)) defer
+        short-keys (arr/dynamic string ["a" "b" "c"]) defer
+        short-vals (arr/dynamic int [10 20]) defer
+        zipped-short (map/zip (core/slice short-keys 0) (core/slice short-vals 0)) defer
+        mutable (map/of string int {}) defer]
+    (map/assoc! mutable "x" 1)
+    (map/assoc! mutable "x" 2)
+    (map/dissoc! mutable "missing")
+    (map/merge! mutable other)
+    (t/is (= (map/get empty-map "none" 7) 7))
+    (t/is (not (map/contains? empty-map "a")))
+    (t/is (= (map/get merged "b" 0) 20))
+    (t/is (= (map/get assoced "c" 0) 3))
+    (t/is (= (map/get trimmed "a" 0) 1))
+    (t/is (= (count keys) 0))
+    (t/is (= (count vals) 0))
+    (t/is (= (count zipped-empty) 0))
+    (t/is (= (map/get zipped-short "a" 0) 10))
+    (t/is (= (map/get zipped-short "c" 99) 99))
+    (t/is (= (map/get mutable "x" 0) 2))
+    (t/is (= (map/get mutable "b" 0) 20))))
+
+(t/deftest set-package-edge-cases
+  (let [empty-set (set/of int []) defer
+        lhs (set/of int [1 2 3]) defer
+        rhs (set/of int [3 4]) defer
+        disjoint-rhs (set/of int [7 8]) defer
+        unioned (set/union lhs empty-set) defer
+        intersected (set/intersection lhs disjoint-rhs) defer
+        differed (set/difference lhs empty-set) defer
+        same (set/add lhs 2) defer
+        removed-missing (set/remove lhs 9) defer
+        mutable (set/of int []) defer
+        remove-four (set/of int [4]) defer]
+    (set/add! mutable 1)
+    (set/add! mutable 1)
+    (set/remove! mutable 9)
+    (set/union! mutable rhs)
+    (set/intersection! mutable rhs)
+    (set/difference! mutable remove-four)
+    (t/is (not (set/contains? empty-set 1)))
+    (t/is (set/contains? unioned 3))
+    (t/is (not (set/contains? intersected 1)))
+    (t/is (not (set/contains? intersected 3)))
+    (t/is (set/contains? differed 2))
+    (t/is (set/contains? same 2))
+    (t/is (set/contains? removed-missing 1))
+    (t/is (set/subset? empty-set lhs))
+    (t/is (set/superset? lhs empty-set))
+    (t/is (set/disjoint? lhs disjoint-rhs))
+    (t/is (not (set/disjoint? lhs rhs)))
+    (t/is (set/contains? mutable 3))
+    (t/is (not (set/contains? mutable 4)))))
+
+(t/deftest str-package-edge-cases
+  (let [parts (str/split "abc" ",") defer
+        empty-parts (arr/dynamic string []) defer
+        joined-empty (str/join empty-parts ",") defer
+        replaced-once (str/replace "a-a-a" "-" "_" 1) defer
+        lowered (str/lower "MiXeD") defer
+        uppered (str/upper "MiXeD") defer]
+    (t/is (= (str/count "") 0))
+    (t/is (= (str/get "abc" 1) 98))
+    (t/is (= (str/slice "abc" 1 1) ""))
+    (t/is (= (count parts) 1))
+    (t/is (= joined-empty ""))
+    (t/is (= replaced-once "a_a-a"))
+    (t/is (not (str/contains? "abc" "z")))
+    (t/is (= (str/index-of "abc" "z") -1))
+    (t/is (= (str/last-index-of "abc" "z") -1))
+    (t/is (= (str/trim "abc") "abc"))
+    (t/is (= (str/trim-prefix "core" "kvist/") "core"))
+    (t/is (= (str/trim-suffix "core" ".txt") "core"))
+    (t/is (str/starts-with? "abc" ""))
+    (t/is (str/ends-with? "abc" ""))
+    (t/is (= lowered "mixed"))
+    (t/is (= uppered "MIXED"))))
+
+(t/deftest soa-package-edge-cases
+  (let [fields (soa/fields 'Profile)
+        types (soa/types 'Profile) defer]
+    (t/is (= (count fields) 2))
+    (t/is (= (map/get types ":missing" "none") "none"))
+    (t/is (= (map/get types ":name" "") "string"))))
+
+(t/deftest io-and-json-package-edge-cases
+  (t/is (== (ensure-test-dir) nil))
+  (let [missing-path "tmp/does-not-exist.kvist"
+        invalid-json-path "tmp/invalid.json"
+        json-path "tmp/package-edge-tests.json"]
+    (defer (os.remove invalid-json-path))
+    (defer (os.remove json-path))
+    (let [[missing-data missing-err] (io/read missing-path)]
+      (defer (delete missing-data))
+      (t/is (!= missing-err nil)))
+    (t/is (== (io/write invalid-json-path "{oops") nil))
+    (let [[note read-err unmarshal-err] (json/read-as Note invalid-json-path)]
+      (defer (delete (:title note)))
+      (defer (delete (:body note)))
+      (t/is (== read-err nil))
+      (t/is (!= unmarshal-err nil)))
+    (let [[marshal-err write-err] (json/write json-path (Note {:title "hello" :body "world"}))]
+      (t/is (== marshal-err nil))
+      (t/is (== write-err nil)))))

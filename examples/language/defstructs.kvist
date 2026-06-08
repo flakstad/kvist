@@ -1,0 +1,72 @@
+// Exercises defstruct docstrings, Malli-like field metadata, nested structs,
+// and omitted-field defaults through ordinary Odin struct construction.
+(package main)
+(import "core:fmt")
+(import core "kvist:core")
+(import set "kvist:set")
+(defstruct Point
+  "A 2D point."
+  {:x float
+   :y float})
+
+(defstruct Profile
+  "Small profile data."
+  {:name string
+   :age int
+   :active? bool
+   :tags set[string]
+   :home Point})
+
+(defn profile-defaults [] -> Profile
+  (Profile {:name "Ada"}))
+
+(defn profile-home-x [] -> f64
+  (let [profile (Profile {:name "Ada"})]
+    (:x (:home profile))))
+
+(defn profile-has-math-tag? [] -> bool
+  (let [tags (set/empty string 2) defer]
+    (set/add! tags "math")
+    (set/add! tags "lisp")
+    (let [profile (Profile {:name "Ada"
+                            :tags tags})]
+      (core/contains? (:tags profile) "math"))))
+
+(defn profile-active? [] -> bool
+  (let [profile (Profile {:name "Ada"
+                          :active? true})]
+    (:active? profile)))
+
+(defn profile-summary [] -> string
+  (let [profile (Profile {:name "Ada"
+                          :age 36})
+        {:keys [name age]} profile]
+    (fmt.tprintf "%s/%d" name age)))
+
+(defn profile-summary-from [{:keys [name age] :as profile}: Profile] -> string
+  (fmt.tprintf "%s/%d/%t" name age (:active? profile)))
+
+(defn main []
+  (core/println (profile-has-math-tag?)))
+
+(core/comment
+  ;; Omitted fields follow ordinary Odin zero-value behavior in the lowered
+  ;; struct literal. The nested Point is the zero value Point{x = 0, y = 0}.
+  (profile-defaults)
+  ;; => Profile{name = "Ada"}
+
+  (profile-home-x)
+  ;; => 0.0
+
+  (profile-has-math-tag?)
+  ;; => true
+
+  (profile-active?)
+  ;; => true
+
+  (profile-summary)
+  ;; => "Ada/36"
+
+  (profile-summary-from (Profile {:name "Ada" :age 36 :active? true}))
+  ;; => "Ada/36/true"
+)

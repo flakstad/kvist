@@ -1,0 +1,60 @@
+// Host interop with vendor:raylib.
+//
+// This file shows that Kvist can call a real graphics binding without wrapping
+// it in a Kvist-specific abstraction. The calls are ordinary Odin calls with
+// parens around them. The render proc opens a window, so it is left as an
+// explicit eval target rather than something main runs by default.
+(package main)
+(import core "kvist:core")
+(import rl "vendor:raylib")
+
+(def Demo-Font-Path: string "/System/Library/Fonts/Supplemental/Verdana.ttf")
+(def Demo-Font-Atlas-Size: i32 24)
+
+(defn blue-alpha [] -> int
+  ;; raylib colors are distinct fixed arrays in the Odin binding.
+  (int (core/get rl.BLUE 3)))
+
+(defn point-inside-demo? [] -> bool
+  ;; This is a safe terminal eval that still uses real raylib data shapes:
+  ;; Vector2 is a fixed array type and Rectangle is an ordinary struct.
+  (let [point (rl.Vector2 [20.0 20.0])
+        rect (rl.Rectangle {:x 10.0 :y 10.0 :width 40.0 :height 40.0})]
+    (rl.CheckCollisionPointRec point rect)))
+
+(defn draw-demo-window []
+  ;; This is the real graphics interop shape: initialize a window, defer cleanup,
+  ;; and run the ordinary raylib draw loop. It is intentionally explicit because
+  ;; GUI/window code is not a good automatic example main for test runs.
+  (rl.SetConfigFlags [.WINDOW_RESIZABLE .WINDOW_HIGHDPI])
+  (rl.InitWindow 640 360 (cstring "Kvist raylib"))
+  (defer (rl.CloseWindow))
+  (rl.SetTargetFPS 60)
+  (let [font (rl.LoadFontEx (cstring Demo-Font-Path) Demo-Font-Atlas-Size nil 0)]
+    (rl.SetTextureFilter font.texture .BILINEAR)
+    (defer (rl.UnloadFont font))
+    (while (not (rl.WindowShouldClose))
+      (rl.BeginDrawing)
+      (rl.ClearBackground rl.RAYWHITE)
+      (rl.DrawTextEx font (cstring "Kvist calling vendor:raylib") (rl.Vector2 [80.0 150.0]) 24.0 1.0 rl.BLUE)
+      (rl.DrawCircle 320 230 (f32 32) rl.ORANGE)
+      (rl.EndDrawing))))
+
+(defn main []
+  (core/println (blue-alpha) (point-inside-demo?)))
+
+(core/comment
+  ;; Safe terminal evals:
+
+  (blue-alpha)
+  ;; => 255
+
+  (point-inside-demo?)
+  ;; => true
+
+  ;; Explicit GUI eval. This opens a window and runs until the window closes:
+  ;; it is the kind of form you should run deliberately, not as part of every
+  ;; buffer eval or automated test.
+  ;;
+  ;; (draw-demo-window)
+)

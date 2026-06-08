@@ -17,7 +17,7 @@
     (quasiquote
       (export))
     (quasiquote
-      (defvar kvist-hot-api-version u32 1))
+      (defvar kvist-hot-api-version: u32 1))
     (quasiquote
       (export))
     (quasiquote

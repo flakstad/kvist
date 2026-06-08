@@ -1,6 +1,6 @@
 (package math)
 
-(defconst default-limit
+(def default-limit
   "Default upper bound used by package examples."
   10)
 
@@ -11,7 +11,7 @@
   "Return a dynamic array of even integers below LIMIT."
   [limit: int] -> [dynamic]int
   (let [out (arr/empty int)]
-    (for [i (arr/range 0 limit)]
+    (each [i (arr/range 0 limit)]
       (core/when (even-step? i)
         (arr/push! out i)))
     out))

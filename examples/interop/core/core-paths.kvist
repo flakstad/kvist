@@ -1,0 +1,63 @@
+// Host interop with core:path/slashpath and core:path/filepath.
+//
+// slashpath works on forward-slash paths such as URLs. filepath works with the
+// current operating system's path rules. Some helpers return borrowed slices of
+// their input, while helpers such as clean/join/rel allocate new strings.
+(package main)
+(import fp "core:path/filepath")
+(import slash "core:path/slashpath")
+
+(defn slash-route-name-len [] -> int
+  ;; join allocates a cleaned path string. base and name return borrowed slices
+  ;; into that string unless called with new=true, so use them before delete.
+  (let [route (slash.join ([]string ["api" "v1" "users.json"]))]
+    (defer (delete route))
+    (len (slash.name route))))
+
+(defn slash-clean-score [] -> int
+  ;; clean is lexical; it does not touch the filesystem.
+  (let [path (slash.clean "/api//v1/../users/./active.json")]
+    (defer (delete path))
+    (+ (len (slash.base path))
+       (len (slash.ext path)))))
+
+(defn filepath-relative-len [] -> int
+  ;; filepath.rel allocates and returns an enum error. The .None case owns the
+  ;; returned string and deletes it locally.
+  (let [[rel err] (fp.rel "/srv/app" "/srv/app/assets/site.css")]
+    (if (!= err .None)
+      0
+      (do
+        (defer (delete rel))
+        (len rel)))))
+
+(defn filepath-extension-len [] -> int
+  ;; ext is a borrowed slice from its input string when called without new=true.
+  ;; No allocation or delete is needed here.
+  (len (fp.ext "/tmp/archive.tar.gz")))
+
+(defn main []
+  (core/println
+    (slash-route-name-len)
+    (slash-clean-score)
+    (filepath-relative-len)
+    (filepath-extension-len)))
+
+(core/comment
+  ;; URL-like path handling.
+  (slash-route-name-len)
+  ;; => 5
+
+  ;; "/api//v1/../users/./active.json" cleans to "/api/users/active.json".
+  ;; base length is 11 and extension length is 5.
+  (slash-clean-score)
+  ;; => 16
+
+  ;; OS filepath handling. On this platform this is "assets/site.css".
+  (filepath-relative-len)
+  ;; => 15
+
+  ;; Borrowed extension slice; no cleanup needed.
+  (filepath-extension-len)
+  ;; => 3
+)

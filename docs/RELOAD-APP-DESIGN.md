@@ -1,69 +1,55 @@
 # Reload App Design
 
-This note proposes the next user-facing layer on top of the existing
-`kvist_hot` runtime.
+Kvist reload apps now follow the Olive-style split:
 
-The problem is clear:
+- production source stays ordinary Kvist
+- a reload adapter is used for development
+- the adapter points at the durable production state type
+- the generated host/module code uses the vendored Olive reload runtime
 
-- the current host + module demos are honest
-- but they still expose too much mechanism
-- the desired user model is closer to ordinary Kvist with one durable state
-  root and one explicit reload opt-in
+## Source Shape
 
-This note is about that higher-level surface.
-
-## Design Goal
-
-The user should be able to:
-
-- write ordinary Kvist
-- define one durable state root
-- opt into native hot reload explicitly
-- run a reload development command
-- let Kvist generate the resident shell and reloadable module boundary
-
-The same source should also be able to run without the resident reload shell
-for ordinary execution and production-style builds.
-
-The user should not have to hand-write:
-
-- dynlib symbol tables
-- native reload manifests
-- a parallel host project just to keep a loop alive
-
-## Mental Model
-
-The intended mental model is:
-
-- almost all app logic is reloadable
-- one small generated shell stays resident
-- one durable state root survives reload
-- lifecycle hooks are available when needed
-
-So "all my code reloads" really means:
-
-- all normal app behavior reloads
-- except the small irreducible shell that owns the process and durable state
-
-That is the honest native model.
-
-## Proposed User Pattern
-
-The core pattern should be:
-
-1. one durable root state type
-2. a trailing metadata map on that state declaration for reload hooks/config
-3. ordinary top-level behavior `defn`s referenced from that metadata
-4. one reload development command
-
-For the shipped runtime helper package, the canonical import is:
+Production owns the real app state:
 
 ```clojure
-(import reload "kvist:reload")
+;; main.kvist
+(package app)
+
+(defstruct App_State
+  {:ticks int})
+
+(defn init [state: (ptr App_State)]
+  (set! (:ticks state^) 0))
+
+(defn tick [state: (ptr App_State)]
+  (set! (:ticks state^) (+ (:ticks state^) 1)))
+
+(defn main []
+  (let [state (App_State {})]
+    (init &state)
+    (while true
+      (tick &state))))
 ```
 
-The current reload wrapper generation expects that canonical alias rather than
-arbitrary renaming of the package import.
+The reload adapter declares the reload contract:
+
+```clojure
+;; reload.kvist
+(package app_reload)
+
+(import app "app")
+(import reload "kvist:reload")
+
+(defstate app/App_State
+  {:run run
+   :init app/init})
+
+(defn run [state: (ptr app/App_State) host: (ptr reload/Run_Host)]
+  (while true
+    (app/tick state)
+    (core/when (reload/checkpoint! host)
+      (return))))
+```
 
 ## Recommended Host Mode Choice
 
@@ -186,474 +172,79 @@ For example:
 
 ```clojure
 (defn run [state: (ptr App_State) host: (ptr reload/Run_Host)]
-  (for true
+  (while true
     (process-one-job state)
     (core/when (reload/checkpoint! host)
       (return))))
 ```
 
-If one unit of work is very long-running, then reload responsiveness will also
-be long. In that case the right fix is usually to introduce a finer safe
-boundary inside that runtime shape, not to scatter checkpoints randomly.
+The metadata-only `defstate` form is reload adapter metadata. It does not emit
+a new struct. It tells the generator which existing state type should be
+preserved and which lifecycle procs should be called.
 
-## Why One Root State
-
-The default should be one durable root state struct.
-
-That is a benefit because it gives:
-
-- one explicit ownership root
-- one clear reload boundary
-- one obvious place for compatibility checks
-- one obvious place for state migration hooks
-
-This does not mean "one giant blob." The intended pattern is:
-
-- one root
-- composed subsystem structs inside it
-- pointer-oriented access to root or subsystems
-
-Good:
+The older inline form still works for tiny demos:
 
 ```clojure
 (defstate App_State
-  {:world World_State
-   :ui UI_State
-   :audio Audio_State
-   :assets Asset_Cache})
+  {:ticks int}
+  {:run run})
 ```
 
-Bad:
+But larger projects should prefer the adapter split so production is not locked
+into the reload harness.
 
-- every system reaches into every field
-- the entire state is copied around by value
-- transient scratch state is dumped into the durable root by default
+## Commands
 
-## Durable vs Transient State
+Production commands point at the ordinary entrypoint:
 
-The reload-app design should distinguish two broad classes of state.
+```sh
+kvist check main.kvist
+kvist build main.kvist
+kvist run main.kvist
+```
 
-### Durable state
+Reload commands point at the adapter:
 
-- lives in the root `App_State`
-- survives code reload
-- owned by the generated shell
-- validated for layout compatibility
+```sh
+kvist dev --reload reload.kvist --watch
+kvist dev --reload reload.kvist
+kvist dev --reload reload.kvist --rebuild
+kvist dev --reload reload.kvist --print-paths --json
+```
 
-Examples:
+`--watch` starts the resident host and polls the adapter directory recursively
+for `.kvist` changes. On change, Kvist recompiles the adapter package to Odin,
+rebuilds the reloadable dynamic library, and the running app picks it up at the
+next `reload/checkpoint!` boundary.
 
-- world/app/model data
-- long-lived caches that should persist
-- editor/session state that should survive rebuilds
+## Runtime Model
 
-### Transient state
+The runtime model is one callback:
 
-- rebuilt on reload
-- not part of durable compatibility guarantees
-- can remain module-local or reload-local
+- the resident host owns one durable state value
+- the reloadable module owns current code
+- `run` owns the app loop
+- `reload/checkpoint!` marks safe boundaries
+- when `checkpoint!` returns true, `run` returns to the host
+- the host validates state layout and swaps the module
 
-Examples:
+State layout changes still require restart for now. Behavior changes are the
+smooth path.
 
-- frame scratch
-- temporary algorithm work buffers
-- ephemeral render command state
-- one-shot runtime glue
+## Backend
 
-The language surface does not need to force a single exact transient-state
-mechanism yet. It only needs to make the durable root explicit.
+Kvist vendors Olive's reload runtime under `src/olive_reload`. The Kvist CLI
+still owns `.kvist` compilation, source import rebasing, generated paths, JSON
+command discovery, and `.kvist` watching.
 
-## Current State-Shape Rules
-
-Today the safe rule is:
-
-- change behavior freely
-- keep durable `defstate` shape stable during a resident reload session
-- restart the app when changing durable state layout
-
-The current runtime validates:
-
-- state size
-- state alignment
-
-That is enough to reject many incompatible reloads, but it is not enough to
-prove semantic compatibility. Two layouts can still be logically different even
-when size and alignment happen to match.
-
-So the product message should stay explicit:
-
-- code changes are the intended smooth reload path
-- durable state-schema changes are not transparently migrated yet
-
-## Proposed State Schema Design
-
-The next real step is to make durable-state compatibility explicit on
-`defstate`, rather than relying only on raw layout checks.
-
-The shape should stay close to the current source form:
+Generated reload modules export Olive-compatible symbols such as
+`olive_reload_api_version`, `olive_reload_state_size`, and
+`olive_reload_app_run`. The public Kvist package `kvist:reload` re-exports
+`olive_reload.Run_Host` and `olive_reload.checkpoint` so user source keeps the
+Kvist-facing syntax:
 
 ```clojure
-(defstate App_State
-  {:world (ptr World_State)
-   :ui (ptr UI_State)
-   :assets (ptr Asset_Cache)}
-  {:run run
-   :version "3"
-   :migrate migrate
-   :on-schema-change :warn-reset
-   :init init
-   :on-load on-load
-   :on-unload on-unload})
-```
-
-Meaning:
-
-- `:version`
-  - durable-state schema version, not just app display version
-- `:migrate`
-  - explicit migration hook for compatible upgrade paths
-- `:on-schema-change`
-  - explicit policy when the new durable state cannot be reused directly
-
-## Proposed Reload Decision Flow
-
-On reload:
-
-1. load the new module
-2. compare runtime ABI and state layout as today
-3. compare durable-state schema version
-4. choose one of these paths:
-
-- compatible layout and same schema version:
-  - keep state in place
-  - run normal `on-load`
-- compatible layout but different schema version and migration exists:
-  - run `migrate`
-  - if migration succeeds, swap to new code
-  - if migration fails, keep old code running
-- incompatible layout or incompatible schema with no valid migration:
-  - warn clearly
-  - do not silently discard state
-  - require an explicit reset/restart choice
-
-The important policy is that state reset should never be the invisible default.
-
-## Proposed Schema-Change Policies
-
-Suggested policy values:
-
-- `:reject`
-  - incompatible reload is refused
-  - old code keeps running
-  - user must restart explicitly
-- `:warn-reset`
-  - incompatible reload prints a warning and offers reset as an explicit choice
-  - reset is allowed, but never automatic
-- `:migrate-required`
-  - incompatible reload is refused unless a migration hook succeeds
-
-Current recommendation:
-
-- default to `:reject`
-- allow `:warn-reset` as the practical development option
-- do not add a silent `:reset` default
-
-That matches the intended user experience:
-
-- smooth behavior reloads by default
-- explicit warning for incompatible state changes
-- optional reset when the developer chooses it
-
-## Proposed Migration Hook Shape
-
-The migration surface should avoid raw reinterpretation of arbitrary memory.
-The safer model is explicit construction of the new state from a versioned view
-of the old one.
-
-Conceptually:
-
-```clojure
-(defn migrate [ctx: reload/Migration old-version: string new-state: (ptr App_State)]
-  ...)
-```
-
-Where `ctx` gives controlled access to the previous durable state by stable
-field identity rather than by unchecked casting.
-
-That allows migrations like:
-
-- populate a newly added field with defaults
-- rename or split older fields
-- rebuild one subsystem while preserving others
-
-## Large App-State Guidance
-
-For large applications, the durable root should still be one `defstate`, but it
-should usually be a root of subsystem handles or pointers rather than one giant
-flat by-value blob.
-
-Good shape:
-
-```clojure
-(defstate App_State
-  {:world (ptr World_State)
-   :renderer (ptr Renderer_State)
-   :editor (ptr Editor_State)
-   :assets (ptr Asset_Cache)}
-  {:run run
-   :version "7"
-   :migrate migrate
-   :on-schema-change :warn-reset})
-```
-
-That makes migration tractable because changes can happen at subsystem
-boundaries:
-
-- preserve still-valid subsystem pointers
-- initialize newly added subsystems
-- rebuild removed or transient subsystems
-- migrate changed subsystem-owned data explicitly
-
-## Lifecycle Surface
-
-The higher-level reload path should support a small explicit lifecycle.
-
-At minimum:
-
-- `init`
-- `on-load`
-- `on-unload`
-
-Possibly later:
-
-- `migrate`
-- `validate`
-
-Initial working assumption:
-
-- `init` is for first-time setup of the durable state
-- `on-load` runs when a new module instance becomes active
-- `on-unload` runs before the old module is replaced
-
-Example shape:
-
-```clojure
-(defstate App_State
-  {:world World_State}
-  {:step step
-   :init init
-   :on-load on-load
-   :on-unload on-unload})
-```
-
-The generated shell should wire those named functions through the existing
-`kvist_hot` mechanism.
-
-## Production Story
-
-Reload mode should stay a development affordance, not a deployment
-architecture requirement.
-
-The intended split is:
-
-- `kvist dev --reload ...` for iterative development with a resident shell and
-  reloadable module boundary
-- `kvist dev --reload ... --print-paths --json` for machine-readable path and
-  command discovery
-- `kvist dev --reload ... --rebuild --json` for machine-readable rebuild
-  status
-- `kvist check --reload ...` / `kvist build --reload ...` /
-  `kvist run --reload ...` for ordinary execution of the same source without
-  the resident reload shell
-
-That means the same `defstate` source has two host contexts:
-
-- development context: resident reload shell, `reload/checkpoint!` can request
-  a reload
-- ordinary execution context: plain executable wrapper, `reload/checkpoint!`
-  returns `false`
-
-So production does not need the DLL boundary or the resident shell. The reload
-metadata remains useful as a source-level declaration of durable state and
-runtime shape, but the non-dev path lowers to a normal executable wrapper.
-
-The generated Odin for those wrappers is now rebased relative to its output
-destination, so `kvist compile ... -o ...` and `kvist check|build|run --reload`
-do not depend on absolute repo-root import paths in emitted Odin.
-
-## Host Modes
-
-The current generated shell is loop-driven. That is a good first pattern, but
-it is too narrow to be the final reload-app model for Kvist.
-
-The design should separate:
-
-- the durable-state and reload contract
-- the generated host mode that drives the program
-
-The durable-state part should stay stable:
-
-- one `defstate`
-- one explicit metadata map for hot behavior
-- optional load/unload hooks
-- one CLI surface: `kvist dev --reload ...`
-
-What should vary is how the generated host drives the running program.
-
-### `:step`
-
-`:`step` is the current mode.
-
-Example:
-
-```clojure
-(defstate App_State
-  {:world World_State
-   :ui UI_State}
-  {:step step
-   :init init
-   :on-load on-load
-   :on-unload on-unload
-   :sleep-ms 16})
-```
-
-This means the generated shell owns the steady-state loop.
-
-Conceptually:
-
-```odin
-init if first load
-on_load every activation
-
-for {
-    step(&state)
-    reload_if_changed(...)
-    sleep(...)
-}
-```
-
-This fits naturally for:
-
-- games
-- simulations
-- editors
-- polling tools
-- immediate-mode applications
-
-So `:step` is not a special reload hook. It is the generated host's repeated
-main callback, and it should be understood as the convenience mode rather than
-the universal default.
-
-### `:run`
-
-The second mode should be `:run`.
-
-Example:
-
-```clojure
-(defstate App_State
-  {:router Router
-   :db DB
-   :config Config}
-  {:run run
-   :init init
-   :on-load on-load
-   :on-unload on-unload})
-```
-
-This mode is for applications that want to own their own runtime shape rather
-than being driven by a generated step-and-sleep loop.
-
-Examples:
-
-- GUI applications with framework-owned event loops
-- servers
-- workers
-- tools that block inside an existing runtime
-- runtimes that already have their own scheduling model
-
-The critical design constraint is:
-
-- `:run` must not require scattered special reload calls throughout user code
-
-If `:run` is good, the cooperation point must be explicit and architectural,
-not ambient and easy to forget.
-
-### Why `:run` Is Different
-
-A purely blocking `run(state)` is not enough for hot reload by itself.
-
-If the generated shell does this:
-
-```odin
-run(&state)
-```
-
-then the shell cannot reload while `run` is blocking unless the app-owned
-runtime cooperates.
-
-So `:run` needs one explicit reload checkpoint model. The user should not
-sprinkle low-level reload calls throughout ordinary app code. Instead, Kvist
-should make the cooperation point singular and easy to reason about.
-
-That means `:run` should evolve toward one of these shapes:
-
-- generated adapters around known loop styles
-- a single explicit host handle passed into `run`
-- a single runtime-boundary polling/checkpoint API
-
-The important rule is that the user should only have to think about one
-integration point per runtime boundary, not "remember to call hot reload
-everywhere."
-
-## Editor Integration
-
-The first stable editor-facing contract is intentionally small:
-
-- `kvist dev --reload app/main.kvist --print-paths --json`
-- `kvist dev --reload app/main.kvist --rebuild --json`
-
-The first command reports generated reload paths and canonical reload commands
-in machine-readable form. The second reports rebuild success or failure
-together with the generated module locations. That is the preferred surface
-for Emacs and other external tooling.
-
-## Proposed `:run` Contract
-
-The most likely first useful `:run` contract is:
-
-- the generated shell still owns the durable state and reload bookkeeping
-- the reloadable module exports one `run` function
-- that `run` function receives the durable state and a small host handle
-- user code calls one checkpoint operation only at an architectural boundary
-
-Conceptually:
-
-```clojure
-(defstate Server_State
-  {:router Router
-   :db DB
-   :config Config}
-  {:run run
-   :init init
-   :on-load on-load
-   :on-unload on-unload})
-
-(defn run [state: (ptr Server_State) host: reload/Run_Host]
-  ...)
-```
-
-The important part is not the exact name `Run_Host`. The important part is:
-
-- one explicit value from the generated shell
-- one place where reload coordination enters the app-owned runtime
-
-### Single Checkpoint API
-
-The hot runtime side of that handle should stay small.
-
-Conceptually, something like:
-
-```clojure
+(import reload "kvist:reload")
 (reload/checkpoint! host)
 ```
 
@@ -672,8 +263,8 @@ The rule should be:
 For example, in a server-style loop:
 
 ```clojure
-(defn run [state: (ptr Server_State) host: reload/Run_Host]
-  (for true
+(defn run [state: (ptr Server_State) host: (ptr reload/Run_Host)]
+  (while true
     (accept-or-process-one-thing state)
     (reload/checkpoint! host)))
 ```
@@ -682,7 +273,7 @@ For a framework-owned event loop, the checkpoint may sit in one adapter
 callback:
 
 ```clojure
-(defn run [state: (ptr App_State) host: reload/Run_Host]
+(defn run [state: (ptr App_State) host: (ptr reload/Run_Host)]
   (framework/start
     {:on-cycle (fn []
                  (reload/checkpoint! host))}))

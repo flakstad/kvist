@@ -1,0 +1,22 @@
+(package reload_step_demo)
+
+(import fmt "core:fmt")
+
+(defn init-program [program: ^Program_State]
+  (set! program^.last-status "program initialized"))
+
+(defn run-one-step [program: ^Program_State] -> string
+  (mut! program^.jobs-finished += 1)
+  (if (== program^.jobs-finished 1)
+    (set! program^.last-status "warming up")
+    (set! program^.last-status "running"))
+  program^.last-status)
+
+(defn print-status [step-count: int, reload-count: int, unload-count: int, program: ^Program_State]
+  (fmt.printf
+    "[app] step=%d reloads=%d unloads=%d jobs=%d status=%s\n"
+    step_count
+    reload_count
+    unload_count
+    program^.jobs-finished
+    program^.last-status))

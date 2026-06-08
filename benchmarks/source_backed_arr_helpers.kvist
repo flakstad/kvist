@@ -28,39 +28,39 @@ DISTINCT_BY_REPS :: 220
 SORT_REPS :: 80
 SHUFFLE_REPS :: 160")
 
-(proc inc-value [x: int] -> int
+(defn inc-value [x: int] -> int
   (+ x 1))
 
-(proc even-value? [x: int] -> bool
+(defn even-value? [x: int] -> bool
   (== (% x 2) 0))
 
-(proc keep-even [x: int] -> [value: int, ok: bool]
+(defn keep-even [x: int] -> [value: int, ok: bool]
   (if (even-value? x)
     (return x true)
     (return 0 false)))
 
-(proc divisible-by-three? [x: int] -> bool
+(defn divisible-by-three? [x: int] -> bool
   (== (% x 3) 0))
 
-(proc parity [x: int] -> int
+(defn parity [x: int] -> int
   (% x 2))
 
-(proc add-values [acc: int, x: int] -> int
+(defn add-values [acc: int, x: int] -> int
   (+ acc x))
 
-(proc double [x: int] -> int
+(defn double [x: int] -> int
   (* x 2))
 
-(proc always-seven [] -> int
+(defn always-seven [] -> int
   7)
 
-(proc pick-first [n: int] -> int
+(defn pick-first [n: int] -> int
   0)
 
-(proc below-cutoff? [x: int] -> bool
+(defn below-cutoff? [x: int] -> bool
   (< x (/ N 2)))
 
-(proc report [name: string, elapsed: time.Duration, checksum: int, track: ^mem.Tracking-Allocator]
+(defn report [name: string, elapsed: time.Duration, checksum: int, track: ^mem.Tracking-Allocator]
   (fmt.printfln "%-19s %9.3f ms allocs=%8v total=%10v peak=%9v live=%v checksum=%v"
                 name
                 (time.duration_milliseconds elapsed)
@@ -70,13 +70,13 @@ SHUFFLE_REPS :: 160")
                 track.current-memory-allocated
                 checksum))
 
-(proc run-one [name: string, checksum: int, start: time.Tick, track: ^mem.Tracking-Allocator]
+(defn run-one [name: string, checksum: int, start: time.Tick, track: ^mem.Tracking-Allocator]
   (report name (time.tick-since start) checksum track))
 
-(proc bench-pipe-intrinsic [xs: []int, reps: int] -> int
+(defn bench-pipe-intrinsic [xs: []int, reps: int] -> int
   (let [i 0
         checksum 0]
-    (for (< i reps)
+    (while (< i reps)
       (let [mapped (arr/map inc-value xs) defer
             filtered (arr/filter even-value? mapped) defer
             removed (arr/remove divisible-by-three? filtered) defer
@@ -85,10 +85,10 @@ SHUFFLE_REPS :: 160")
       (set! i (+ i 1)))
     checksum))
 
-(proc bench-pipe-source [xs: []int, reps: int] -> int
+(defn bench-pipe-source [xs: []int, reps: int] -> int
   (let [i 0
         checksum 0]
-    (for (< i reps)
+    (while (< i reps)
       (let [mapped (pkgarr/map inc-value xs) defer
             filtered (pkgarr/filter even-value? mapped) defer
             removed (pkgarr/remove divisible-by-three? filtered) defer
@@ -97,12 +97,12 @@ SHUFFLE_REPS :: 160")
       (set! i (+ i 1)))
     checksum))
 
-(proc bench-pipe-fused [xs: []int, reps: int] -> int
+(defn bench-pipe-fused [xs: []int, reps: int] -> int
   (let [i 0
         checksum 0]
-    (for (< i reps)
+    (while (< i reps)
       (let [total 0]
-        (for [x xs]
+        (each [x xs]
           (let [mapped (inc-value x)]
             (when (and (even-value? mapped)
                        (not (divisible-by-three? mapped)))
@@ -111,10 +111,10 @@ SHUFFLE_REPS :: 160")
       (set! i (+ i 1)))
     checksum))
 
-(proc bench-keep-intrinsic [xs: []int, reps: int] -> int
+(defn bench-keep-intrinsic [xs: []int, reps: int] -> int
   (let [i 0
         checksum 0]
-    (for (< i reps)
+    (while (< i reps)
       (let [kept (arr/keep keep-even xs) defer]
         (set! checksum (+ checksum (count kept)))
         (set! checksum (+ checksum (pkgarr/get kept 0)))
@@ -122,10 +122,10 @@ SHUFFLE_REPS :: 160")
       (set! i (+ i 1)))
     checksum))
 
-(proc bench-keep-source [xs: []int, reps: int] -> int
+(defn bench-keep-source [xs: []int, reps: int] -> int
   (let [i 0
         checksum 0]
-    (for (< i reps)
+    (while (< i reps)
       (let [kept (pkgarr/keep keep-even xs) defer]
         (set! checksum (+ checksum (count kept)))
         (set! checksum (+ checksum (pkgarr/get kept 0)))
@@ -133,10 +133,10 @@ SHUFFLE_REPS :: 160")
       (set! i (+ i 1)))
     checksum))
 
-(proc bench-map!-intrinsic [xs: []int, reps: int] -> int
+(defn bench-map!-intrinsic [xs: []int, reps: int] -> int
   (let [i 0
         checksum 0]
-    (for (< i reps)
+    (while (< i reps)
       (let [mutable (arr/empty int (count xs)) defer]
         (odin "append(&mutable, ..xs)")
         (arr/map! inc-value mutable)
@@ -145,10 +145,10 @@ SHUFFLE_REPS :: 160")
       (set! i (+ i 1)))
     checksum))
 
-(proc bench-map!-source [xs: []int, reps: int] -> int
+(defn bench-map!-source [xs: []int, reps: int] -> int
   (let [i 0
         checksum 0]
-    (for (< i reps)
+    (while (< i reps)
       (let [mutable (pkgarr/empty int (count xs)) defer]
         (odin "append(&mutable, ..xs)")
         (pkgarr/map! inc-value mutable)
@@ -157,10 +157,10 @@ SHUFFLE_REPS :: 160")
       (set! i (+ i 1)))
     checksum))
 
-(proc bench-filter!-intrinsic [xs: []int, reps: int] -> int
+(defn bench-filter!-intrinsic [xs: []int, reps: int] -> int
   (let [i 0
         checksum 0]
-    (for (< i reps)
+    (while (< i reps)
       (let [mutable (arr/empty int (count xs)) defer]
         (odin "append(&mutable, ..xs)")
         (arr/filter! even-value? mutable)
@@ -170,10 +170,10 @@ SHUFFLE_REPS :: 160")
       (set! i (+ i 1)))
     checksum))
 
-(proc bench-filter!-source [xs: []int, reps: int] -> int
+(defn bench-filter!-source [xs: []int, reps: int] -> int
   (let [i 0
         checksum 0]
-    (for (< i reps)
+    (while (< i reps)
       (let [mutable (pkgarr/empty int (count xs)) defer]
         (odin "append(&mutable, ..xs)")
         (pkgarr/filter! even-value? mutable)
@@ -183,10 +183,10 @@ SHUFFLE_REPS :: 160")
       (set! i (+ i 1)))
     checksum))
 
-(proc bench-remove!-intrinsic [xs: []int, reps: int] -> int
+(defn bench-remove!-intrinsic [xs: []int, reps: int] -> int
   (let [i 0
         checksum 0]
-    (for (< i reps)
+    (while (< i reps)
       (let [mutable (arr/empty int (count xs)) defer]
         (odin "append(&mutable, ..xs)")
         (arr/remove! even-value? mutable)
@@ -196,10 +196,10 @@ SHUFFLE_REPS :: 160")
       (set! i (+ i 1)))
     checksum))
 
-(proc bench-remove!-source [xs: []int, reps: int] -> int
+(defn bench-remove!-source [xs: []int, reps: int] -> int
   (let [i 0
         checksum 0]
-    (for (< i reps)
+    (while (< i reps)
       (let [mutable (pkgarr/empty int (count xs)) defer]
         (odin "append(&mutable, ..xs)")
         (pkgarr/remove! even-value? mutable)
@@ -209,10 +209,10 @@ SHUFFLE_REPS :: 160")
       (set! i (+ i 1)))
     checksum))
 
-(proc bench-keep!-intrinsic [xs: []int, reps: int] -> int
+(defn bench-keep!-intrinsic [xs: []int, reps: int] -> int
   (let [i 0
         checksum 0]
-    (for (< i reps)
+    (while (< i reps)
       (let [mutable (arr/empty int (count xs)) defer]
         (odin "append(&mutable, ..xs)")
         (arr/keep! keep-even mutable)
@@ -222,10 +222,10 @@ SHUFFLE_REPS :: 160")
       (set! i (+ i 1)))
     checksum))
 
-(proc bench-keep!-source [xs: []int, reps: int] -> int
+(defn bench-keep!-source [xs: []int, reps: int] -> int
   (let [i 0
         checksum 0]
-    (for (< i reps)
+    (while (< i reps)
       (let [mutable (pkgarr/empty int (count xs)) defer]
         (odin "append(&mutable, ..xs)")
         (pkgarr/keep! keep-even mutable)
@@ -235,10 +235,10 @@ SHUFFLE_REPS :: 160")
       (set! i (+ i 1)))
     checksum))
 
-(proc bench-builders-intrinsic [xs: []int, reps: int] -> int
+(defn bench-builders-intrinsic [xs: []int, reps: int] -> int
   (let [i 0
         checksum 0]
-    (for (< i reps)
+    (while (< i reps)
       (let [numbers (pkgarr/range 1 N) defer
             sampled (pkgarr/take-nth 3 xs) defer
             repeated (pkgarr/repeat 8 9) defer
@@ -254,10 +254,10 @@ SHUFFLE_REPS :: 160")
       (set! i (+ i 1)))
     checksum))
 
-(proc bench-builders-source [xs: []int, reps: int] -> int
+(defn bench-builders-source [xs: []int, reps: int] -> int
   (let [i 0
         checksum 0]
-    (for (< i reps)
+    (while (< i reps)
       (let [numbers (pkgarr/range 1 N) defer
             sampled (pkgarr/take-nth 3 xs) defer
             repeated (pkgarr/repeat 8 9) defer
@@ -273,10 +273,10 @@ SHUFFLE_REPS :: 160")
       (set! i (+ i 1)))
     checksum))
 
-(proc bench-scan-intrinsic [xs: []int, reps: int] -> int
+(defn bench-scan-intrinsic [xs: []int, reps: int] -> int
   (let [i 0
         checksum 0]
-    (for (< i reps)
+    (while (< i reps)
       (let [prefix (arr/take-while below-cutoff? xs)
             suffix (arr/drop-while below-cutoff? xs)
             [first-hit ok] (arr/find divisible-by-three? suffix)
@@ -293,10 +293,10 @@ SHUFFLE_REPS :: 160")
       (set! i (+ i 1)))
     checksum))
 
-(proc bench-scan-source [xs: []int, reps: int] -> int
+(defn bench-scan-source [xs: []int, reps: int] -> int
   (let [i 0
         checksum 0]
-    (for (< i reps)
+    (while (< i reps)
       (let [prefix (pkgarr/take-while below-cutoff? xs)
             suffix (pkgarr/drop-while below-cutoff? xs)
             [first-hit ok] (pkgarr/find divisible-by-three? suffix)
@@ -313,10 +313,10 @@ SHUFFLE_REPS :: 160")
       (set! i (+ i 1)))
     checksum))
 
-(proc bench-reorder-intrinsic [xs: []int, ys: []int, reps: int] -> int
+(defn bench-reorder-intrinsic [xs: []int, ys: []int, reps: int] -> int
   (let [i 0
         checksum 0]
-    (for (< i reps)
+    (while (< i reps)
       (let [reversed (pkgarr/reverse xs) defer
             interposed (pkgarr/interpose 0 xs) defer
             interleaved (pkgarr/interleave xs ys) defer]
@@ -329,10 +329,10 @@ SHUFFLE_REPS :: 160")
       (set! i (+ i 1)))
     checksum))
 
-(proc bench-reorder-source [xs: []int, ys: []int, reps: int] -> int
+(defn bench-reorder-source [xs: []int, ys: []int, reps: int] -> int
   (let [i 0
         checksum 0]
-    (for (< i reps)
+    (while (< i reps)
       (let [reversed (pkgarr/reverse xs) defer
             interposed (pkgarr/interpose 0 xs) defer
             interleaved (pkgarr/interleave xs ys) defer]
@@ -345,11 +345,11 @@ SHUFFLE_REPS :: 160")
       (set! i (+ i 1)))
     checksum))
 
-(proc bench-remove-at-source [xs: []int, reps: int] -> int
+(defn bench-remove-at-source [xs: []int, reps: int] -> int
   (let [i 0
         checksum 0
         mid (/ (count xs) 2)]
-    (for (< i reps)
+    (while (< i reps)
       (let [ordered (pkgarr/remove-ordered-at xs mid) defer
             unordered (pkgarr/remove-unordered-at xs mid) defer]
         (set! checksum (+ checksum (count ordered)))
@@ -359,11 +359,11 @@ SHUFFLE_REPS :: 160")
       (set! i (+ i 1)))
     checksum))
 
-(proc bench-remove-at-bang-source [xs: []int, reps: int] -> int
+(defn bench-remove-at-bang-source [xs: []int, reps: int] -> int
   (let [i 0
         checksum 0
         mid (/ (count xs) 2)]
-    (for (< i reps)
+    (while (< i reps)
       (let [ordered (pkgarr/empty int (count xs)) defer
             unordered (pkgarr/empty int (count xs)) defer]
         (odin "append(&ordered, ..xs)")
@@ -377,10 +377,10 @@ SHUFFLE_REPS :: 160")
       (set! i (+ i 1)))
     checksum))
 
-(proc bench-partition-intrinsic [xs: []int, reps: int] -> int
+(defn bench-partition-intrinsic [xs: []int, reps: int] -> int
   (let [i 0
         checksum 0]
-    (for (< i reps)
+    (while (< i reps)
       (let [chunks (arr/partition 64 xs) defer
             chunks-all (arr/partition-all 64 xs) defer]
         (set! checksum (+ checksum (count chunks)))
@@ -390,10 +390,10 @@ SHUFFLE_REPS :: 160")
       (set! i (+ i 1)))
     checksum))
 
-(proc bench-partition-source [xs: []int, reps: int] -> int
+(defn bench-partition-source [xs: []int, reps: int] -> int
   (let [i 0
         checksum 0]
-    (for (< i reps)
+    (while (< i reps)
       (let [chunks (pkgarr/partition 64 xs) defer
             chunks-all (pkgarr/partition-all 64 xs) defer]
         (set! checksum (+ checksum (count chunks)))
@@ -403,10 +403,10 @@ SHUFFLE_REPS :: 160")
       (set! i (+ i 1)))
     checksum))
 
-(proc bench-partition-by-intrinsic [xs: []int, reps: int] -> int
+(defn bench-partition-by-intrinsic [xs: []int, reps: int] -> int
   (let [i 0
         checksum 0]
-    (for (< i reps)
+    (while (< i reps)
       (let [groups (arr/partition-by parity xs) defer]
         (set! checksum (+ checksum (count groups)))
         (set! checksum (+ checksum (count (pkgarr/get groups 0))))
@@ -414,10 +414,10 @@ SHUFFLE_REPS :: 160")
       (set! i (+ i 1)))
     checksum))
 
-(proc bench-partition-by-source [xs: []int, reps: int] -> int
+(defn bench-partition-by-source [xs: []int, reps: int] -> int
   (let [i 0
         checksum 0]
-    (for (< i reps)
+    (while (< i reps)
       (let [groups (pkgarr/partition-by parity xs) defer]
         (set! checksum (+ checksum (count groups)))
         (set! checksum (+ checksum (count (pkgarr/get groups 0))))
@@ -425,30 +425,30 @@ SHUFFLE_REPS :: 160")
       (set! i (+ i 1)))
     checksum))
 
-(proc bench-frequencies-intrinsic [xs: []int, reps: int] -> int
+(defn bench-frequencies-intrinsic [xs: []int, reps: int] -> int
   (let [i 0
         checksum 0]
-    (for (< i reps)
+    (while (< i reps)
       (let [counts (arr/frequencies xs) defer]
         (set! checksum (+ checksum (count counts)))
         (set! checksum (+ checksum (core/get counts 1))))
       (set! i (+ i 1)))
     checksum))
 
-(proc bench-frequencies-source [xs: []int, reps: int] -> int
+(defn bench-frequencies-source [xs: []int, reps: int] -> int
   (let [i 0
         checksum 0]
-    (for (< i reps)
+    (while (< i reps)
       (let [counts (pkgarr/frequencies xs) defer]
         (set! checksum (+ checksum (count counts)))
         (set! checksum (+ checksum (core/get counts 1))))
       (set! i (+ i 1)))
     checksum))
 
-(proc bench-index-by-intrinsic [xs: []int, reps: int] -> int
+(defn bench-index-by-intrinsic [xs: []int, reps: int] -> int
   (let [i 0
         checksum 0]
-    (for (< i reps)
+    (while (< i reps)
       (let [indexed (arr/index-by parity xs) defer]
         (set! checksum (+ checksum (count indexed)))
         (set! checksum (+ checksum (core/get indexed 0)))
@@ -456,10 +456,10 @@ SHUFFLE_REPS :: 160")
       (set! i (+ i 1)))
     checksum))
 
-(proc bench-index-by-source [xs: []int, reps: int] -> int
+(defn bench-index-by-source [xs: []int, reps: int] -> int
   (let [i 0
         checksum 0]
-    (for (< i reps)
+    (while (< i reps)
       (let [indexed (pkgarr/index-by parity xs) defer]
         (set! checksum (+ checksum (count indexed)))
         (set! checksum (+ checksum (core/get indexed 0)))
@@ -467,13 +467,13 @@ SHUFFLE_REPS :: 160")
       (set! i (+ i 1)))
     checksum))
 
-(proc bench-group-by-intrinsic [xs: []int, reps: int] -> int
+(defn bench-group-by-intrinsic [xs: []int, reps: int] -> int
   (let [i 0
         checksum 0]
-    (for (< i reps)
+    (while (< i reps)
       (let [groups (arr/group-by parity xs)]
         (defer
-          (for [_ group groups]
+          (each [_ group groups]
             (delete group))
           (delete groups))
         (set! checksum (+ checksum (odin "len(groups)")))
@@ -482,13 +482,13 @@ SHUFFLE_REPS :: 160")
       (set! i (+ i 1)))
     checksum))
 
-(proc bench-group-by-source [xs: []int, reps: int] -> int
+(defn bench-group-by-source [xs: []int, reps: int] -> int
   (let [i 0
         checksum 0]
-    (for (< i reps)
+    (while (< i reps)
       (let [groups (pkgarr/group-by parity xs)]
         (defer
-          (for [_ group groups]
+          (each [_ group groups]
             (delete group))
           (delete groups))
         (set! checksum (+ checksum (odin "len(groups)")))
@@ -497,10 +497,10 @@ SHUFFLE_REPS :: 160")
       (set! i (+ i 1)))
     checksum))
 
-(proc bench-count-by-intrinsic [xs: []int, reps: int] -> int
+(defn bench-count-by-intrinsic [xs: []int, reps: int] -> int
   (let [i 0
         checksum 0]
-    (for (< i reps)
+    (while (< i reps)
       (let [counts (arr/count-by parity xs) defer]
         (set! checksum (+ checksum (count counts)))
         (set! checksum (+ checksum (core/get counts 0)))
@@ -508,10 +508,10 @@ SHUFFLE_REPS :: 160")
       (set! i (+ i 1)))
     checksum))
 
-(proc bench-count-by-source [xs: []int, reps: int] -> int
+(defn bench-count-by-source [xs: []int, reps: int] -> int
   (let [i 0
         checksum 0]
-    (for (< i reps)
+    (while (< i reps)
       (let [counts (pkgarr/count-by parity xs) defer]
         (set! checksum (+ checksum (count counts)))
         (set! checksum (+ checksum (core/get counts 0)))
@@ -519,10 +519,10 @@ SHUFFLE_REPS :: 160")
       (set! i (+ i 1)))
     checksum))
 
-(proc bench-sum-by-intrinsic [xs: []int, reps: int] -> int
+(defn bench-sum-by-intrinsic [xs: []int, reps: int] -> int
   (let [i 0
         checksum 0]
-    (for (< i reps)
+    (while (< i reps)
       (let [sums (arr/sum-by parity inc-value xs) defer]
         (set! checksum (+ checksum (odin "len(sums)")))
         (set! checksum (+ checksum (core/get sums 0)))
@@ -530,10 +530,10 @@ SHUFFLE_REPS :: 160")
       (set! i (+ i 1)))
     checksum))
 
-(proc bench-sum-by-source [xs: []int, reps: int] -> int
+(defn bench-sum-by-source [xs: []int, reps: int] -> int
   (let [i 0
         checksum 0]
-    (for (< i reps)
+    (while (< i reps)
       (let [sums (pkgarr/sum-by parity inc-value xs) defer]
         (set! checksum (+ checksum (odin "len(sums)")))
         (set! checksum (+ checksum (core/get sums 0)))
@@ -541,10 +541,10 @@ SHUFFLE_REPS :: 160")
       (set! i (+ i 1)))
     checksum))
 
-(proc bench-distinct-intrinsic [xs: []int, reps: int] -> int
+(defn bench-distinct-intrinsic [xs: []int, reps: int] -> int
   (let [i 0
         checksum 0]
-    (for (< i reps)
+    (while (< i reps)
       (let [unique (arr/distinct xs) defer]
         (set! checksum (+ checksum (count unique)))
         (set! checksum (+ checksum (pkgarr/get unique 0)))
@@ -552,10 +552,10 @@ SHUFFLE_REPS :: 160")
       (set! i (+ i 1)))
     checksum))
 
-(proc bench-distinct-source [xs: []int, reps: int] -> int
+(defn bench-distinct-source [xs: []int, reps: int] -> int
   (let [i 0
         checksum 0]
-    (for (< i reps)
+    (while (< i reps)
       (let [unique (pkgarr/distinct xs) defer]
         (set! checksum (+ checksum (count unique)))
         (set! checksum (+ checksum (pkgarr/get unique 0)))
@@ -563,10 +563,10 @@ SHUFFLE_REPS :: 160")
       (set! i (+ i 1)))
     checksum))
 
-(proc bench-distinct-by-intrinsic [xs: []int, reps: int] -> int
+(defn bench-distinct-by-intrinsic [xs: []int, reps: int] -> int
   (let [i 0
         checksum 0]
-    (for (< i reps)
+    (while (< i reps)
       (let [unique (arr/distinct-by parity xs) defer]
         (set! checksum (+ checksum (count unique)))
         (set! checksum (+ checksum (pkgarr/get unique 0)))
@@ -574,10 +574,10 @@ SHUFFLE_REPS :: 160")
       (set! i (+ i 1)))
     checksum))
 
-(proc bench-distinct-by-source [xs: []int, reps: int] -> int
+(defn bench-distinct-by-source [xs: []int, reps: int] -> int
   (let [i 0
         checksum 0]
-    (for (< i reps)
+    (while (< i reps)
       (let [unique (pkgarr/distinct-by parity xs) defer]
         (set! checksum (+ checksum (count unique)))
         (set! checksum (+ checksum (pkgarr/get unique 0)))
@@ -585,10 +585,10 @@ SHUFFLE_REPS :: 160")
       (set! i (+ i 1)))
     checksum))
 
-(proc bench-sort-intrinsic [xs: []int, reps: int] -> int
+(defn bench-sort-intrinsic [xs: []int, reps: int] -> int
   (let [i 0
         checksum 0]
-    (for (< i reps)
+    (while (< i reps)
       (let [sorted (arr/sort xs) defer
             mutable (arr/empty int (count xs)) defer]
         (odin "append(&mutable, ..xs)")
@@ -600,10 +600,10 @@ SHUFFLE_REPS :: 160")
       (set! i (+ i 1)))
     checksum))
 
-(proc bench-sort-source [xs: []int, reps: int] -> int
+(defn bench-sort-source [xs: []int, reps: int] -> int
   (let [i 0
         checksum 0]
-    (for (< i reps)
+    (while (< i reps)
       (let [sorted (pkgarr/sort xs) defer
             mutable (pkgarr/empty int (count xs)) defer]
         (odin "append(&mutable, ..xs)")
@@ -615,10 +615,10 @@ SHUFFLE_REPS :: 160")
       (set! i (+ i 1)))
     checksum))
 
-(proc bench-shuffle-intrinsic [xs: []int, reps: int] -> int
+(defn bench-shuffle-intrinsic [xs: []int, reps: int] -> int
   (let [i 0
         checksum 0]
-    (for (< i reps)
+    (while (< i reps)
       (let [shuffled (arr/shuffle pick-first xs) defer
             mutable (arr/empty int (count xs)) defer]
         (odin "append(&mutable, ..xs)")
@@ -630,10 +630,10 @@ SHUFFLE_REPS :: 160")
       (set! i (+ i 1)))
     checksum))
 
-(proc bench-shuffle-source [xs: []int, reps: int] -> int
+(defn bench-shuffle-source [xs: []int, reps: int] -> int
   (let [i 0
         checksum 0]
-    (for (< i reps)
+    (while (< i reps)
       (let [shuffled (pkgarr/shuffle pick-first xs) defer
             mutable (pkgarr/empty int (count xs)) defer]
         (odin "append(&mutable, ..xs)")
@@ -645,7 +645,7 @@ SHUFFLE_REPS :: 160")
       (set! i (+ i 1)))
     checksum))
 
-(proc main []
+(defn main []
   (let [old-allocator context.allocator
         xs (pkgarr/range 1 N)
         ys (pkgarr/range N (* N 2))

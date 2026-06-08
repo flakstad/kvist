@@ -1,0 +1,533 @@
+// Robot kinematics and sensors for the robo mower sandbox.
+(package main)
+(import math "core:math")
+
+(def Mode-Random: int 0)
+(def Mode-Boundary: int 1)
+(def Mode-Frontier: int 2)
+(def Mode-Mapped: int 3)
+(def Mode-Return: int 4)
+(def Sensor-Forward: int 0)
+(def Sensor-Bumper: int 1)
+(def Robot-Radius: f32 11.0)
+(def Blade-Radius: f32 18.0)
+(def Wheel-Track: f32 42.0)
+(def Max-Sensor-Distance: f32 150.0)
+(def Collision-None: int 0)
+(def Collision-Obstacle: int 1)
+(def Collision-Boundary: int 2)
+(def Recovery-None: int 0)
+(def Recovery-Reverse: int 1)
+(def Recovery-Turn: int 2)
+(def Recovery-Arc: int 3)
+(def Recovery-PreArc: int 4)
+(def Recovery-Reverse-Speed: f32 38.0)
+(def Recovery-Reverse-Time: f32 1.05)
+(def Recovery-Arc-Speed: f32 56.0)
+(def Recovery-Arc-Turn: f32 0.78)
+(def Recovery-Arc-Time: f32 2.05)
+(def Boundary-Recovery-Arc-Min-Time: f32 2.2)
+(def Boundary-Recovery-Arc-Max-Time: f32 5.2)
+(def Boundary-Recovery-Wire-Tolerance: f32 18.0)
+(def Mapped-Recovery-Arc-Min-Time: f32 2.2)
+(def Mapped-Recovery-Arc-Max-Time: f32 5.2)
+(def Mapped-Recovery-Line-Tolerance: f32 14.0)
+(def Recovery-PreArc-Timeout: f32 1.4)
+(def Recovery-Turn-Timeout: f32 1.8)
+(def Right-Angle: f32 1.5707964)
+(def Pi: f32 3.141592653589793)
+(def Two-Pi: f32 6.283185307179586)
+
+(defstruct Robot
+  {:x f32
+   :y f32
+   :heading f32
+   :speed f32
+   :radius f32
+   :collisions int
+   :distance f32
+   :mode int
+   :return-source int
+   :sensor-profile int
+   :lane-index int
+   :lane-phase int
+   :lane-shift-x f32
+   :turn-bias f32
+   :recovery int
+   :recovery-kind int
+   :recovery-time f32
+   :recovery-heading f32
+   :left-wheel f32
+   :right-wheel f32
+   :blade-on bool
+   :blade-load f32
+   :no-cut-time f32
+   :seed u32})
+
+(defstruct Sensors
+  {:front f32
+   :front-kind int
+   :left f32
+   :right f32
+   :wire f32
+   :blade-load f32
+   :blocked bool})
+
+(defstruct Command
+  {:speed f32
+   :turn f32
+   :blade bool})
+
+(defn normalize-angle
+  "Normalize an angle to [-pi, pi]."
+  [angle: f32] -> f32
+  (let [a angle]
+    (while (> a Pi)
+      (set! a (- a Two-Pi)))
+    (while (< a (- Pi))
+      (set! a (+ a Two-Pi)))
+    a))
+
+(defn reset-robot!
+  "Reset the robot pose and counters."
+  [robot: (ptr Robot)]
+  (set! (:x robot^) (dock-x))
+  (set! (:y robot^) (dock-y))
+  (set! (:heading robot^) 0.15)
+  (set! (:speed robot^) 0.0)
+  (set! (:radius robot^) Robot-Radius)
+  (set! (:collisions robot^) 0)
+  (set! (:distance robot^) 0.0)
+  (set! (:mode robot^) Mode-Mapped)
+  (set! (:return-source robot^) Mode-Mapped)
+  (set! (:sensor-profile robot^) Sensor-Forward)
+  (set! (:lane-index robot^) 0)
+  (set! (:lane-phase robot^) 0)
+  (set! (:lane-shift-x robot^) (dock-x))
+  (set! (:turn-bias robot^) 1.0)
+  (set! (:recovery robot^) Recovery-None)
+  (set! (:recovery-kind robot^) Collision-None)
+  (set! (:recovery-time robot^) 0.0)
+  (set! (:recovery-heading robot^) 0.15)
+  (set! (:left-wheel robot^) 0.0)
+  (set! (:right-wheel robot^) 0.0)
+  (set! (:blade-on robot^) false)
+  (set! (:blade-load robot^) 0.0)
+  (set! (:no-cut-time robot^) 0.0)
+  (set! (:seed robot^) 0xC0A57))
+
+(defn make-robot
+  "Create a robot at the default pose."
+  [] -> Robot
+  (let [robot (Robot {})]
+    (reset-robot! (addr robot))
+    robot))
+
+(defn edge-distance
+  "Return the distance from a point to the outer simulation edge."
+  [x: f32, y: f32] -> f32
+  (let [left x
+        right (- (f32 Field-Px-W) x)
+        top y
+        bottom (- (f32 Field-Px-H) y)]
+    (math.min (math.min left right) (math.min top bottom))))
+
+(defn boundary-distance
+  "Return the distance from a point to the nearest boundary wire cell."
+  [world: (ptr World), x: f32, y: f32] -> f32
+  (when (== (:boundary-count world^) 0)
+    (return (edge-distance x y)))
+  (let [cells (:cells world^)
+        i 0
+        best (f32 999999999.0)]
+    (while (< i Grid-Cells)
+      (when (== cells[i] Cell-Boundary)
+        (let [dx (- (cell-center-x i) x)
+              dy (- (cell-center-y i) y)
+              d (math.sqrt (+ (* dx dx) (* dy dy)))]
+          (when (< d best)
+            (set! best d))))
+      (mut! i += 1))
+    best))
+
+(defn lcg-next
+  "Advance the robot's deterministic random seed."
+  [seed: ^u32] -> u32
+  (set! seed^ (+ (* seed^ 1664525) 1013904223))
+  seed^)
+
+(defn rand-unit
+  "Return a repeatable pseudo-random f32 in the half-open range [0, 1)."
+  [seed: ^u32] -> f32
+  (/ (f32 (% (lcg-next seed) 1000000)) 1000000.0))
+
+(defn choose-random-heading!
+  "Pick a new random drive heading for random mode."
+  [robot: (ptr Robot)]
+  (set! (:heading robot^) (* (rand-unit (addr robot.seed)) Two-Pi)))
+
+(defn random-heading
+  "Return a new deterministic random heading without mutating the current pose."
+  [robot: (ptr Robot)] -> f32
+  (normalize-angle (* (rand-unit (addr robot.seed)) Two-Pi)))
+
+(defn raycast
+  "Cast a distance ray against obstacles and the field boundary."
+  [world: (ptr World), x: f32, y: f32, angle: f32, max-distance: f32] -> f32
+  (let [dist (f32 0.0)
+        hit false
+        step (f32 4.0)
+        dx (math.cos angle)
+        dy (math.sin angle)]
+    (while (and (< dist max-distance) (not hit))
+      (let [px (+ x (* dx dist))
+            py (+ y (* dy dist))]
+        (when (point-blocked? world px py)
+          (set! hit true)))
+      (when (not hit)
+        (set! dist (+ dist step))))
+    (math.clamp dist (f32 0.0) max-distance)))
+
+(defn raycast-kind
+  "Return the cell kind hit by a distance ray, or grass when no hit occurs."
+  [world: (ptr World), x: f32, y: f32, angle: f32, max-distance: f32] -> int
+  (let [dist (f32 0.0)
+        hit-kind Cell-Grass
+        step (f32 4.0)
+        dx (math.cos angle)
+        dy (math.sin angle)]
+    (while (and (< dist max-distance) (== hit-kind Cell-Grass))
+      (let [px (+ x (* dx dist))
+            py (+ y (* dy dist))
+            kind (point-cell world px py)]
+        (when (not (== kind Cell-Grass))
+          (set! hit-kind kind)))
+      (when (== hit-kind Cell-Grass)
+        (set! dist (+ dist step))))
+    hit-kind))
+
+(defn sense!
+  "Update the robot sensor readings."
+  [world: (ptr World), robot: (ptr Robot), sensors: (ptr Sensors)]
+  (set! (:front sensors^) (raycast world (:x robot^) (:y robot^) (:heading robot^) Max-Sensor-Distance))
+  (set! (:front-kind sensors^) (raycast-kind world (:x robot^) (:y robot^) (:heading robot^) Max-Sensor-Distance))
+  (set! (:left sensors^) (raycast world (:x robot^) (:y robot^) (+ (:heading robot^) (f32 0.78)) Max-Sensor-Distance))
+  (set! (:right sensors^) (raycast world (:x robot^) (:y robot^) (- (:heading robot^) (f32 0.78)) Max-Sensor-Distance))
+  (set! (:wire sensors^) (boundary-distance world (:x robot^) (:y robot^)))
+  (set! (:blade-load sensors^) (:blade-load robot^))
+  (set! (:blocked sensors^) (< (:front sensors^) (f32 22.0))))
+
+(defn command
+  "Construct a drive command."
+  [speed: f32, turn: f32, blade: bool] -> Command
+  (Command {:speed speed :turn turn :blade blade}))
+
+(defn set-drive-metrics!
+  "Update live actuator telemetry from linear speed turn rate and blade state."
+  [robot: (ptr Robot), speed: f32, turn: f32, blade: bool]
+  (let [turn-speed (* turn Wheel-Track (f32 0.5))]
+    (set! (:left-wheel robot^) (- speed turn-speed))
+    (set! (:right-wheel robot^) (+ speed turn-speed))
+    (set! (:blade-on robot^) blade)))
+
+(defn update-blade-load!
+  "Update the blade load sensor and no-cut timer."
+  [world: (ptr World), robot: (ptr Robot), active: bool, dt: f32]
+  (if active
+    (set! (:blade-load robot^) (blade-load-at world (:x robot^) (:y robot^) Blade-Radius))
+    (set! (:blade-load robot^) 0.0))
+  (if (> (:blade-load robot^) (f32 0.12))
+    (set! (:no-cut-time robot^) 0.0)
+    (mut! (:no-cut-time robot^) += dt)))
+
+(defn collides-at?
+  "Return true when the robot footprint would collide at a point."
+  [world: (ptr World), x: f32, y: f32, radius: f32] -> bool
+  (not (== (collision-kind-at world x y radius) Collision-None)))
+
+(defn collision-kind-for-cell
+  "Map a world cell value to the recovery collision class."
+  [value: int] -> int
+  (when (== value Cell-Grass)
+    (return Collision-None))
+  (when (== value Cell-Boundary)
+    (return Collision-None))
+  (when (== value Cell-Obstacle)
+    (return Collision-Obstacle))
+  Collision-Boundary)
+
+(defn merge-collision-kind
+  "Merge collision classifications, keeping obstacle hits stronger than wire hits."
+  [current: int, value: int] -> int
+  (let [kind (collision-kind-for-cell value)]
+    (when (== kind Collision-Obstacle)
+      (return Collision-Obstacle))
+    (when (and (== current Collision-None) (== kind Collision-Boundary))
+      (return Collision-Boundary))
+    current))
+
+(defn collision-kind-at
+  "Classify a robot footprint collision at a candidate point."
+  [world: (ptr World), x: f32, y: f32, radius: f32] -> int
+  (let [center (point-cell world x y)
+        kind Collision-None]
+    (when (== center Cell-Outside)
+      (return Collision-Boundary))
+    (when (== center Cell-Obstacle)
+      (return Collision-Obstacle))
+    (when (== (point-cell world (+ x radius) y) Cell-Obstacle)
+      (set! kind Collision-Obstacle))
+    (when (== (point-cell world (- x radius) y) Cell-Obstacle)
+      (set! kind Collision-Obstacle))
+    (when (== (point-cell world x (+ y radius)) Cell-Obstacle)
+      (set! kind Collision-Obstacle))
+    (when (== (point-cell world x (- y radius)) Cell-Obstacle)
+      (set! kind Collision-Obstacle))
+    kind))
+
+(defn clamp-robot-to-field!
+  "Keep the robot center inside the boundary margin."
+  [robot: (ptr Robot)]
+  (set! (:x robot^) (math.clamp (:x robot^) Robot-Radius (- (f32 Field-Px-W) Robot-Radius)))
+  (set! (:y robot^) (math.clamp (:y robot^) Robot-Radius (- (f32 Field-Px-H) Robot-Radius))))
+
+(defn choose-obstacle-recovery-side!
+  "Choose an obstacle recovery arc side with more lateral clearance."
+  [world: (ptr World), robot: (ptr Robot)]
+  (let [left (raycast world (:x robot^) (:y robot^) (+ (:heading robot^) Right-Angle) Max-Sensor-Distance)
+        right (raycast world (:x robot^) (:y robot^) (- (:heading robot^) Right-Angle) Max-Sensor-Distance)]
+    (if (> left right)
+      (set! (:turn-bias robot^) 1.0)
+      (set! (:turn-bias robot^) -1.0))))
+
+(defn boundary-away-heading
+  "Return the inward heading away from the nearest boundary side."
+  [robot: (ptr Robot)] -> f32
+  (let [left (abs-f32 (- (:x robot^) (boundary-left-x)))
+        right (abs-f32 (- (:x robot^) (boundary-right-x)))
+        top (abs-f32 (- (:y robot^) (boundary-top-y)))
+        bottom (abs-f32 (- (:y robot^) (boundary-bottom-y)))
+        best top
+        heading Right-Angle]
+    (when (< right best)
+      (set! best right)
+      (set! heading Pi))
+    (when (< bottom best)
+      (set! best bottom)
+      (set! heading (- Right-Angle)))
+    (when (< left best)
+      (set! heading 0.0))
+    heading))
+
+(defn turn-bias-toward-heading!
+  "Set turn bias to the shortest turn direction toward a heading."
+  [robot: (ptr Robot), target-heading: f32]
+  (if (> (normalize-angle (- target-heading (:heading robot^))) 0.0)
+    (set! (:turn-bias robot^) 1.0)
+    (set! (:turn-bias robot^) -1.0)))
+
+(defn mapped-recovery-line-distance
+  "Return distance from the robot to the interrupted mapped guide line."
+  [robot: (ptr Robot)] -> f32
+  (when (== (:lane-phase robot^) Mapped-Phase-Shift)
+    (return (abs-f32 (- (:x robot^) (:lane-shift-x robot^)))))
+  (abs-f32 (- (:y robot^) (mapped-lane-y (:lane-index robot^)))))
+
+(defn begin-pre-arc-recovery!
+  "Turn in place toward an obstacle recovery heading before driving the arc."
+  [robot: (ptr Robot), target-heading: f32]
+  (set! (:recovery-heading robot^) (normalize-angle target-heading))
+  (turn-bias-toward-heading! robot (:recovery-heading robot^))
+  (set! (:recovery robot^) Recovery-PreArc)
+  (set! (:recovery-time robot^) 0.0)
+  (set! (:speed robot^) 0.0))
+
+(defn begin-open-side-pre-arc-recovery!
+  "Turn in place to the open side before arcing back toward the interrupted path."
+  [robot: (ptr Robot)]
+  (begin-pre-arc-recovery! robot (normalize-angle (+ (:heading robot^) (* (:turn-bias robot^) Right-Angle)))))
+
+(defn start-collision-recovery!
+  "Start obstacle or boundary collision recovery without teleporting heading."
+  [robot: (ptr Robot), kind: int]
+  (set! (:recovery-heading robot^) (random-heading robot))
+  (set! (:recovery-kind robot^) kind)
+  (set! (:recovery-time robot^) 0.0)
+  (set! (:speed robot^) 0.0)
+  (when (== kind Collision-Obstacle)
+    (set! (:recovery robot^) Recovery-Reverse)
+    (return))
+  (set! (:recovery robot^) Recovery-Turn))
+
+(defn finish-reverse-recovery!
+  "Finish backup recovery or switch to boundary in-place turn recovery."
+  [robot: (ptr Robot)]
+  (if (== (:recovery-kind robot^) Collision-Obstacle)
+    (if (or (== (:mode robot^) Mode-Random)
+            (== (:mode robot^) Mode-Frontier))
+      (do
+        (set! (:recovery-heading robot^) (normalize-angle (+ (:heading robot^) (* (:turn-bias robot^) Right-Angle))))
+        (set! (:recovery robot^) Recovery-Turn))
+      (do
+        (if (== (:mode robot^) Mode-Boundary)
+          (begin-pre-arc-recovery! robot (boundary-away-heading robot))
+          (begin-open-side-pre-arc-recovery! robot))))
+    (set! (:recovery robot^) Recovery-Turn))
+  (set! (:recovery-time robot^) 0.0)
+  (set! (:speed robot^) 0.0))
+
+(defn run-recovery-step!
+  "Run an active collision recovery step and return true while it owns motion."
+  [world: (ptr World), robot: (ptr Robot), cmd: Command, dt: f32] -> bool
+  (when (== (:recovery robot^) Recovery-None)
+    (return false))
+  (when (== (:recovery robot^) Recovery-Reverse)
+    (let [old-x (:x robot^)
+          old-y (:y robot^)
+          heading (:heading robot^)
+          nx (- old-x (* (math.cos heading) Recovery-Reverse-Speed dt))
+          ny (- old-y (* (math.sin heading) Recovery-Reverse-Speed dt))]
+      (set-drive-metrics! robot (- Recovery-Reverse-Speed) 0.0 false)
+      (update-blade-load! world robot false dt)
+      (mut! (:recovery-time robot^) += dt)
+      (if (collides-at? world nx ny (:radius robot^))
+        (finish-reverse-recovery! robot)
+        (do
+          (set! (:x robot^) nx)
+          (set! (:y robot^) ny)
+          (clamp-robot-to-field! robot)
+          (set! (:speed robot^) (- Recovery-Reverse-Speed))
+          (mut! (:distance robot^) += (math.sqrt (+ (* (- nx old-x) (- nx old-x))
+                                                     (* (- ny old-y) (- ny old-y)))))))
+      (when (>= (:recovery-time robot^) Recovery-Reverse-Time)
+        (finish-reverse-recovery! robot))
+      (return true)))
+  (when (== (:recovery robot^) Recovery-PreArc)
+    (let [error (normalize-angle (- (:recovery-heading robot^) (:heading robot^)))
+          turn (math.clamp (* error (f32 3.0)) (f32 -2.4) (f32 2.4))
+          heading (normalize-angle (+ (:heading robot^) (* turn dt)))]
+      (set-drive-metrics! robot 0.0 turn false)
+      (update-blade-load! world robot false dt)
+      (mut! (:recovery-time robot^) += dt)
+      (set! (:heading robot^) heading)
+      (set! (:speed robot^) 0.0)
+      (when (or (< (abs-f32 error) (f32 0.08))
+                (> (:recovery-time robot^) Recovery-PreArc-Timeout))
+        (set! (:turn-bias robot^) (- (:turn-bias robot^)))
+        (set! (:recovery robot^) Recovery-Arc)
+        (set! (:recovery-time robot^) 0.0)
+        (set! (:speed robot^) 0.0))
+      (return true)))
+  (when (== (:recovery robot^) Recovery-Arc)
+    (let [old-x (:x robot^)
+          old-y (:y robot^)
+          turn (* (:turn-bias robot^) Recovery-Arc-Turn)
+          speed Recovery-Arc-Speed
+          heading (normalize-angle (+ (:heading robot^) (* turn dt)))
+          nx (+ old-x (* (math.cos heading) speed dt))
+          ny (+ old-y (* (math.sin heading) speed dt))
+          collision-kind (collision-kind-at world nx ny (:radius robot^))]
+      (set-drive-metrics! robot speed turn true)
+      (update-blade-load! world robot true dt)
+      (mut! (:recovery-time robot^) += dt)
+      (if (not (== collision-kind Collision-None))
+        (do
+          (mut! (:collisions robot^) += 1)
+          (set! (:speed robot^) 0.0)
+          (when (== collision-kind Collision-Obstacle)
+            (choose-obstacle-recovery-side! world robot))
+          (start-collision-recovery! robot collision-kind)
+          (when (not (== collision-kind Collision-Obstacle))
+            (set! (:turn-bias robot^) (- (:turn-bias robot^)))))
+        (do
+          (set! (:heading robot^) heading)
+          (set! (:x robot^) nx)
+          (set! (:y robot^) ny)
+          (clamp-robot-to-field! robot)
+          (set! (:speed robot^) speed)
+          (mut! (:distance robot^) += (math.sqrt (+ (* (- nx old-x) (- nx old-x))
+                                                     (* (- ny old-y) (- ny old-y)))))))
+      (when (== collision-kind Collision-None)
+        (mark-cut! world (:x robot^) (:y robot^) Blade-Radius))
+      (let [arc-done false]
+        (when (>= (:recovery-time robot^) Recovery-Arc-Time)
+          (set! arc-done true))
+        (when (== (:mode robot^) Mode-Boundary)
+          (set! arc-done false)
+          (when (and (>= (:recovery-time robot^) Boundary-Recovery-Arc-Min-Time)
+                     (< (boundary-distance world (:x robot^) (:y robot^)) Boundary-Recovery-Wire-Tolerance))
+            (set! arc-done true))
+          (when (>= (:recovery-time robot^) Boundary-Recovery-Arc-Max-Time)
+            (set! arc-done true)))
+        (when (== (:mode robot^) Mode-Mapped)
+          (set! arc-done false)
+          (when (and (>= (:recovery-time robot^) Mapped-Recovery-Arc-Min-Time)
+                     (< (mapped-recovery-line-distance robot) Mapped-Recovery-Line-Tolerance))
+            (set! arc-done true))
+          (when (>= (:recovery-time robot^) Mapped-Recovery-Arc-Max-Time)
+            (set! arc-done true)))
+        (when arc-done
+          (set! (:recovery robot^) Recovery-None)
+          (set! (:recovery-kind robot^) Collision-None)
+          (set! (:recovery-time robot^) 0.0)
+          (set! (:speed robot^) 0.0)
+          (when (== (:mode robot^) Mode-Random)
+            (choose-random-heading! robot))))
+      (return true)))
+  (let [error (normalize-angle (- (:recovery-heading robot^) (:heading robot^)))
+        turn (math.clamp (* error (f32 3.0)) (f32 -2.4) (f32 2.4))
+        blade-active (and (:blade cmd) (not (== (:recovery-kind robot^) Collision-Obstacle)))
+        heading (normalize-angle (+ (:heading robot^) (* turn dt)))]
+    (set-drive-metrics! robot 0.0 turn blade-active)
+    (update-blade-load! world robot blade-active dt)
+    (mut! (:recovery-time robot^) += dt)
+    (set! (:heading robot^) heading)
+    (set! (:speed robot^) 0.0)
+    (when (or (< (abs-f32 error) (f32 0.08))
+              (> (:recovery-time robot^) Recovery-Turn-Timeout))
+      (set! (:recovery robot^) Recovery-None)
+      (set! (:recovery-kind robot^) Collision-None)
+      (set! (:recovery-time robot^) 0.0))
+    (when blade-active
+      (mark-cut! world (:x robot^) (:y robot^) Blade-Radius))
+    true))
+
+(defn step-robot!
+  "Integrate one fixed robot step and cut grass under the blade."
+  [world: (ptr World), robot: (ptr Robot), cmd: Command, dt: f32]
+  (when (run-recovery-step! world robot cmd dt)
+    (return))
+  (let [old-x (:x robot^)
+        old-y (:y robot^)
+        turn (math.clamp (:turn cmd) (f32 -2.4) (f32 2.4))
+        speed (math.clamp (:speed cmd) (f32 -55.0) (f32 86.0))
+        heading (normalize-angle (+ (:heading robot^) (* turn dt)))
+        nx (+ old-x (* (math.cos heading) speed dt))
+        ny (+ old-y (* (math.sin heading) speed dt))
+        collision-kind (collision-kind-at world nx ny (:radius robot^))
+        blade-active (and (:blade cmd) (not (== collision-kind Collision-Obstacle)))]
+    (set! (:heading robot^) heading)
+    (if (not (== collision-kind Collision-None))
+      (do
+        (mut! (:collisions robot^) += 1)
+        (set! (:x robot^) old-x)
+        (set! (:y robot^) old-y)
+        (clamp-robot-to-field! robot)
+        (when (== collision-kind Collision-Obstacle)
+          (choose-obstacle-recovery-side! world robot))
+        (start-collision-recovery! robot collision-kind)
+        (set-drive-metrics! robot 0.0 0.0 blade-active)
+        (update-blade-load! world robot blade-active dt)
+        (when (not (== collision-kind Collision-Obstacle))
+          (set! (:turn-bias robot^) (- (:turn-bias robot^)))))
+      (do
+        (set! (:x robot^) nx)
+        (set! (:y robot^) ny)
+        (clamp-robot-to-field! robot)
+        (set! (:speed robot^) speed)
+        (set-drive-metrics! robot speed turn blade-active)
+        (update-blade-load! world robot blade-active dt)
+        (mut! (:distance robot^) += (math.sqrt (+ (* (- nx old-x) (- nx old-x))
+                                                   (* (- ny old-y) (- ny old-y)))))))
+    (when blade-active
+      (mark-cut! world (:x robot^) (:y robot^) Blade-Radius))))

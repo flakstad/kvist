@@ -1,6 +1,6 @@
 (package reload)
 
-(import runtime :odin "../../src/kvist_hot_app_runtime")
+(import runtime :odin "../../src/olive_reload")
 
 (exports [Run_Host reload__Run_Host])
 
@@ -9,9 +9,9 @@
 (defn checkpoint!
   "Cooperate with a resident reload host at a safe runtime boundary.
 
-  Call this from long-running `:run` loops at points where the program can safely
-  hand control back to the host. It returns true when the host accepted or
-  requested a reload checkpoint. In ordinary execution without a resident reload
-  host, the runtime path is expected to behave as a no-op boundary."
-  [host: (ptr Run_Host)] -> bool
+  Call this from long-running reload-app loops at points where the program can
+  safely hand control back to the host. It returns true when the host accepted
+  or requested a reload checkpoint. In ordinary execution without a resident
+  reload host, the runtime path is expected to behave as a no-op boundary."
+  [host: ^Run_Host] -> bool
   (runtime.checkpoint host))

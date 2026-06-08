@@ -271,16 +271,16 @@
   (core/switch [value node]
     Nothing (noop)
     Fragment
-    (for [child (:children value)]
+    (each [child (:children value)]
       (render-node-into builder child))
     Element
     (do
       (strings.write_string builder "<")
       (strings.write_string builder (:tag value))
-      (for [attr (:attrs value)]
+      (each [attr (:attrs value)]
         (render-attr-into builder attr))
       (strings.write_string builder ">")
-      (for [child (:children value)]
+      (each [child (:children value)]
         (render-node-into builder child))
       (strings.write_string builder "</")
       (strings.write_string builder (:tag value))
@@ -435,7 +435,7 @@
               source-form (nth bindings 1)]
           (if (symbol? name-form)
             (quasiquote
-              (for [(unquote name-form) (unquote source-form)]
+              (each [(unquote name-form) (unquote source-form)]
                 (do
                   (splice (emit-render-body builder body)))))
             (error "html/for binding name must be a symbol")))

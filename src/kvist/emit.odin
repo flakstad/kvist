@@ -167,7 +167,7 @@ resolve_kvist_head :: proc(e: ^Emitter, head: string) -> (canonical: string, mat
     if alias == "kvist" {
         return suffix, true, Compile_Error{}, true
     }
-    if alias == "core" || alias == "arr" || alias == "str" || alias == "map" || alias == "set" || alias == "struct" || alias == "io" || alias == "json" {
+    if alias == "core" || alias == "arr" || alias == "str" || alias == "map" || alias == "set" || alias == "soa" || alias == "io" || alias == "json" {
         return head, true, Compile_Error{}, true
     }
     for decl in e.decls {
@@ -817,15 +817,14 @@ emit_brace_pair_texts :: proc(e: ^Emitter, form: CST_Form, keyword_fields := tru
                 append(&pairs, Brace_Pair{key = key_text, value = value_text})
             }
         case .Symbol:
-            if keyword_fields && len(key.text) > 1 && key.text[len(key.text)-1] == ':' {
-                append(&pairs, Brace_Pair{key = map_name(key.text[:len(key.text)-1]), value = value_text})
-            } else {
-                key_text, err_key, ok_key := emit_expr(e, key)
-                if !ok_key {
-                    return pairs, err_key, false
-                }
-                append(&pairs, Brace_Pair{key = key_text, value = value_text})
+            if len(key.text) > 1 && key.text[len(key.text)-1] == ':' {
+                return pairs, Compile_Error{message = "named fields use :field labels", span = key.span}, false
             }
+            key_text, err_key, ok_key := emit_expr(e, key)
+            if !ok_key {
+                return pairs, err_key, false
+            }
+            append(&pairs, Brace_Pair{key = key_text, value = value_text})
         case .String:
             append(&pairs, Brace_Pair{key = key.text, value = value_text})
         case:
@@ -885,17 +884,50 @@ emit_vector_items :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error
     return strings.clone(strings.to_string(builder)), {}, true
 }
 
+emit_quaternion_vector_constructor :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) {
+    if len(form.items) != 4 {
+        return "", Compile_Error{message = "quaternion constructor expects four components", span = form.span}, false
+    }
+    items, err_items, ok_items := emit_vector_item_texts(e, form)
+    if !ok_items {
+        return "", err_items, false
+    }
+    return fmt.tprintf(
+        "quaternion(x=%s, y=%s, z=%s, w=%s)",
+        items[0],
+        items[1],
+        items[2],
+        items[3],
+    ), {}, true
+}
+
+emit_quaternion_arg_constructor :: proc(e: ^Emitter, args: []CST_Form, span: Span) -> (string, Compile_Error, bool) {
+    if len(args) != 4 {
+        return "", Compile_Error{message = "quaternion constructor expects four components", span = span}, false
+    }
+    items: [dynamic]string
+    for arg in args {
+        item, err_item, ok_item := emit_expr(e, arg)
+        if !ok_item {
+            return "", err_item, false
+        }
+        append(&items, item)
+    }
+    return fmt.tprintf(
+        "quaternion(x=%s, y=%s, z=%s, w=%s)",
+        items[0],
+        items[1],
+        items[2],
+        items[3],
+    ), {}, true
+}
+
 brace_form_starts_with_field_label :: proc(form: CST_Form) -> bool {
     if len(form.items) == 0 {
         return true
     }
     first := form.items[0]
-    if first.kind == .Keyword {
-        return true
-    }
-    return first.kind == .Symbol &&
-        len(first.text) > 1 &&
-        first.text[len(first.text)-1] == ':'
+    return first.kind == .Keyword
 }
 
 has_multiline_items :: proc(items: []string) -> bool {
@@ -910,12 +942,13 @@ has_multiline_items :: proc(items: []string) -> bool {
 type_form_needs_dynamic_literals :: proc(form: CST_Form) -> bool {
     if form.kind == .Symbol {
         return len(form.text) >= 4 && form.text[:4] == "map[" ||
-               len(form.text) >= 9 && form.text[:9] == "[dynamic]"
+               len(form.text) >= 9 && form.text[:9] == "[dynamic]" ||
+               strings.has_prefix(form.text, "#soa[")
     }
     if form.kind != .List || len(form.items) == 0 || form.items[0].kind != .Symbol {
         return false
     }
-    return form.items[0].text == "map" || form.items[0].text == "dynamic"
+    return form.items[0].text == "map" || form.items[0].text == "dynamic" || form.items[0].text == "#soa"
 }
 
 type_text_is_soa :: proc(text: string) -> bool {
@@ -987,7 +1020,7 @@ emit_vector_literal :: proc(e: ^Emitter, prefix: string, form: CST_Form) -> (str
 emit_brace_literal :: proc(e: ^Emitter, prefix: string, form: CST_Form) -> (string, Compile_Error, bool) {
     keyword_fields := !type_text_is_map(prefix)
     if prefix != "" && keyword_fields && !brace_form_starts_with_field_label(form) {
-        return emit_vector_literal(e, prefix, form)
+        return "", Compile_Error{message = "positional aggregate literals use vector syntax", span = form.span}, false
     }
 
     pairs, err_pairs, ok_pairs := emit_brace_pair_texts(e, form, keyword_fields)
@@ -1091,7 +1124,7 @@ emit_imported_struct_brace_literal :: proc(e: ^Emitter, type_text: string, field
         return "", Compile_Error{message = "struct construction expects a brace form", span = form.span}, false
     }
     if !brace_form_starts_with_field_label(form) {
-        return emit_vector_literal(e, type_text, form)
+        return "", Compile_Error{message = "positional aggregate literals use vector syntax", span = form.span}, false
     }
 
     pairs: [dynamic]Brace_Pair
@@ -1341,6 +1374,33 @@ type_text_is_builtin_odin_scalar :: proc(text: string) -> bool {
         return true
     }
     return false
+}
+
+type_text_needs_conversion_parens :: proc(text: string) -> bool {
+    trimmed := strings.trim_space(text)
+    if trimmed == "" {
+        return false
+    }
+    for ch in trimmed {
+        if (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
+           (ch >= '0' && ch <= '9') || ch == '_' || ch == '.' {
+            continue
+        }
+        return true
+    }
+    return false
+}
+
+emit_type_conversion_text :: proc(type_text, value_text: string) -> string {
+    if type_text_needs_conversion_parens(type_text) {
+        return fmt.tprintf("(%s)(%s)", type_text, value_text)
+    }
+    return fmt.tprintf("%s(%s)", type_text, value_text)
+}
+
+symbol_head_needs_type_conversion_parens :: proc(head: string) -> bool {
+    type_text := normalize_surface_type_symbol(head)
+    return type_text_needs_conversion_parens(type_text)
 }
 
 qualify_imported_odin_field_type :: proc(alias, type_text: string) -> string {
@@ -2162,7 +2222,7 @@ update_form_is_unary_updater :: proc(form: CST_Form) -> bool {
     }
     return form.kind == .List && len(form.items) > 0 &&
         form.items[0].kind == .Symbol &&
-        (form.items[0].text == "fn" || form.items[0].text == "proc")
+        form.items[0].text == "fn"
 }
 
 emit_update_place :: proc(e: ^Emitter, target_form, key_form: CST_Form) -> (lhs, current: string, err: Compile_Error, ok: bool) {
@@ -2254,6 +2314,48 @@ emit_compound_assignment_stmt :: proc(e: ^Emitter, form: CST_Form, op: string) -
     strings.write_string(&e.builder, " ")
     strings.write_string(&e.builder, rhs)
     record_current_line_fragment_map(e, len(lhs) + len(" ") + len(op) + len(" "), rhs, form.items[2].span)
+    emit_raw_newline(e)
+    return {}, true
+}
+
+emit_mut_bang_stmt :: proc(e: ^Emitter, form: CST_Form) -> (Compile_Error, bool) {
+    if len(form.items) != 4 {
+        return Compile_Error{message = "mut! expects place, operator, and value", span = form.span}, false
+    }
+    op_form := form.items[2]
+    if op_form.kind != .Symbol {
+        return Compile_Error{message = "mut! expects an assignment operator symbol", span = op_form.span}, false
+    }
+    if op_form.text == "=" {
+        return Compile_Error{message = "mut! does not support =; use set! for plain assignment", span = op_form.span}, false
+    }
+    op, ok_op := compound_assignment_operator(op_form.text)
+    if !ok_op {
+        return Compile_Error{message = "mut! expects a compound assignment operator", span = op_form.span}, false
+    }
+    if !form_is_assignable_place(form.items[1]) {
+        return Compile_Error{message = "mut! expects an assignable place", span = form.items[1].span}, false
+    }
+    lhs, err_lhs, ok_lhs := emit_expr(e, form.items[1])
+    if !ok_lhs {
+        return err_lhs, false
+    }
+    err_owned, bad_owned := owned_result_usage_error(form.items[3], true)
+    if bad_owned {
+        return err_owned, false
+    }
+    rhs, err_rhs, ok_rhs := emit_expr(e, form.items[3])
+    if !ok_rhs {
+        return err_rhs, false
+    }
+    emit_indent(e)
+    strings.write_string(&e.builder, lhs)
+    record_current_line_fragment_map(e, 0, lhs, form.items[1].span)
+    strings.write_string(&e.builder, " ")
+    strings.write_string(&e.builder, op)
+    strings.write_string(&e.builder, " ")
+    strings.write_string(&e.builder, rhs)
+    record_current_line_fragment_map(e, len(lhs) + len(" ") + len(op) + len(" "), rhs, form.items[3].span)
     emit_raw_newline(e)
     return {}, true
 }
@@ -3217,9 +3319,7 @@ owned_result_usage_error :: proc(form: CST_Form, allow_root_owned: bool) -> (Com
         start := 0
         if form.kind == .List && len(form.items) > 0 && form.items[0].kind == .Symbol {
             head := form.items[0].text
-            if head == "make" || head == "as" {
-                start = 2
-            } else if head == "new" {
+            if head == "make" {
                 start = 2
             } else if allow_root_owned && form_is_owned_result(form) {
                 start = 1
@@ -4399,11 +4499,19 @@ obvious_binding_type :: proc(e: ^Emitter, binding: Binding) -> (string, bool) {
     }
     if binding.value.kind == .List && len(binding.value.items) >= 2 && binding.value.items[0].kind == .Symbol {
         head := binding.value.items[0].text
-        if head == "new" || head == "make" {
+        if head == "make" {
             type_text, _, ok_type := parse_type_text(binding.value.items[1])
             if ok_type {
                 return type_text, true
             }
+        }
+    }
+    if binding.value.kind == .List &&
+       len(binding.value.items) == 2 &&
+       (binding.value.items[1].kind == .Vector || binding.value.items[1].kind == .Brace || binding.value.items[1].kind == .Set) {
+        type_text, _, ok_type := parse_type_text(binding.value.items[0])
+        if ok_type {
+            return type_text, true
         }
     }
     if binding.value.kind == .List && len(binding.value.items) > 0 && binding.value.items[0].kind == .Symbol {
@@ -4523,7 +4631,7 @@ form_is_owned_allocation_result :: proc(form: CST_Form) -> bool {
         return false
     }
     head := form.items[0].text
-    if head != "make" && head != "new" {
+    if head != "make" {
         return false
     }
     type_text, _, ok_type := parse_type_text(form.items[1])
@@ -4538,12 +4646,22 @@ form_is_owned_constructor_result :: proc(form: CST_Form) -> bool {
     if form.kind == .Vector || form.kind == .Brace || form.kind == .Set {
         return true
     }
-    if form.kind != .List || len(form.items) == 0 || form.items[0].kind != .Symbol {
+    if form.kind != .List || len(form.items) == 0 {
         return false
     }
-    switch form.items[0].text {
-    case "arr/empty", "arr-empty", "arr/dynamic", "arr-dynamic", "map/empty", "map-empty", "map/of", "map-of", "set/empty", "set-empty", "set/of", "set-of":
-        return true
+    if form.items[0].kind == .Symbol {
+        switch form.items[0].text {
+        case "arr/empty", "arr-empty", "arr/dynamic", "arr-dynamic", "map/empty", "map-empty", "map/of", "map-of", "set/empty", "set-empty", "set/of", "set-of":
+            return true
+        }
+    }
+    if len(form.items) == 2 &&
+       (form.items[1].kind == .Vector || form.items[1].kind == .Brace || form.items[1].kind == .Set) {
+        type_text, _, ok_type := parse_type_text(form.items[0])
+        if ok_type {
+            defer delete(type_text)
+            return type_text_is_dynamic_array(type_text) || type_text_is_dynamic_soa(type_text) || type_text_is_map(type_text)
+        }
     }
     return false
 }
@@ -4575,7 +4693,7 @@ with_temp_allocator_escape_error :: proc(body: []CST_Form, last_in_proc: bool, r
 }
 
 loop_collection_needs_temp_binding :: proc(form: CST_Form) -> bool {
-    return form_is_owned_result(form) || form_is_owned_allocation_result(form)
+    return form_is_owned_result(form) || form_is_owned_allocation_result(form) || form_is_owned_constructor_result(form)
 }
 
 Owned_Local :: struct {
@@ -5173,7 +5291,7 @@ emit_predicate_callback_call :: proc(e: ^Emitter, helper_name: string, callback:
 }
 
 emit_proc_literal_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) {
-    if len(form.items) < 2 || (!is_symbol(form.items[0], "proc") && !is_symbol(form.items[0], "fn")) || form.items[1].kind != .Vector {
+    if len(form.items) < 2 || !is_symbol(form.items[0], "fn") || form.items[1].kind != .Vector {
         return "", Compile_Error{message = "invalid function literal", span = form.span}, false
     }
 
@@ -5191,7 +5309,7 @@ Proc_Literal :: struct {
 }
 
 parse_proc_literal_form :: proc(form: CST_Form) -> (Proc_Literal, Compile_Error, bool) {
-    if len(form.items) < 2 || (!is_symbol(form.items[0], "proc") && !is_symbol(form.items[0], "fn")) || form.items[1].kind != .Vector {
+    if len(form.items) < 2 || !is_symbol(form.items[0], "fn") || form.items[1].kind != .Vector {
         return Proc_Literal{}, Compile_Error{message = "invalid function literal", span = form.span}, false
     }
 
@@ -5345,7 +5463,7 @@ collect_proc_literal_captures_from_form :: proc(e: ^Emitter, form: CST_Form, bou
             append_capture_param_unique(captures, Param{name = name, ty = ty})
         }
     case .List:
-        if len(form.items) > 0 && (is_symbol(form.items[0], "fn") || is_symbol(form.items[0], "proc")) {
+        if len(form.items) > 0 && is_symbol(form.items[0], "fn") {
             return
         }
         if len(form.items) > 1 && is_symbol(form.items[0], "let") {
@@ -5383,7 +5501,7 @@ Captured_Callback_Kind :: enum {
 }
 
 captured_unary_callback_proc :: proc(e: ^Emitter, callback: CST_Form, helper_name: string, kind: Captured_Callback_Kind) -> (proc_text, capture_name: string, captured: bool, err: Compile_Error, ok: bool) {
-    if callback.kind != .List || len(callback.items) == 0 || (!is_symbol(callback.items[0], "fn") && !is_symbol(callback.items[0], "proc")) {
+    if callback.kind != .List || len(callback.items) == 0 || !is_symbol(callback.items[0], "fn") {
         return "", "", false, Compile_Error{}, true
     }
     parsed, err_parse, ok_parse := parse_proc_literal_form(callback)
@@ -5726,6 +5844,15 @@ surface_type_text :: proc(ty: string) -> string {
         }
     }
 
+    if strings.has_prefix(ty, "#simd[") {
+        closing := strings.index(ty, "]")
+        if closing > len("#simd[") {
+            length := ty[len("#simd["):closing]
+            elem := ty[closing+1:]
+            return fmt.tprintf("#simd[%s]%s", length, surface_type_text(elem))
+        }
+    }
+
     if strings.has_prefix(ty, "[]") {
         elem := ty[2:]
         return fmt.tprintf("[]%s", surface_type_text(elem))
@@ -5736,6 +5863,23 @@ surface_type_text :: proc(ty: string) -> string {
         if key_end > 4 {
             key := ty[4:key_end]
             return fmt.tprintf("set[%s]", surface_type_text(key))
+        }
+    }
+
+    if strings.has_prefix(ty, "bit_set[") {
+        closing := strings.index(ty, "]")
+        if closing > len("bit_set[") && closing == len(ty)-1 {
+            return normalize_bit_set_text(ty[len("bit_set["):closing])
+        }
+    }
+
+    if strings.has_prefix(ty, "matrix[") {
+        closing := strings.index(ty, "]")
+        if closing > len("matrix[") {
+            dims := normalize_matrix_dims_text(ty[len("matrix["):closing])
+            defer delete(dims)
+            elem := ty[closing+1:]
+            return fmt.tprintf("matrix[%s]%s", dims, surface_type_text(elem))
         }
     }
 
@@ -5772,9 +5916,6 @@ emit_struct_types_literal :: proc(struct_decl: ^Struct_Decl) -> string {
 brace_key_name :: proc(form: CST_Form) -> (string, bool) {
     if form.kind == .Keyword && len(form.text) > 1 {
         return map_name(form.text[1:]), true
-    }
-    if form.kind == .Symbol && len(form.text) > 1 && form.text[len(form.text)-1] == ':' {
-        return map_name(form.text[:len(form.text)-1]), true
     }
     return "", false
 }
@@ -5960,6 +6101,14 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
 
     if head.text == "empty?" {
         return "", Compile_Error{message = "`empty?` has moved to `core/empty?`", span = form.items[0].span}, false
+    }
+
+    if head.text == "new" {
+        return "", Compile_Error{message = "`new` has been removed; use type-call syntax like (T literal)", span = form.items[0].span}, false
+    }
+
+    if head.text == "as" {
+        return "", Compile_Error{message = "`as` has been removed; use type-call syntax like (T x)", span = form.items[0].span}, false
     }
 
     if head.text == "core-get" {
@@ -6207,8 +6356,8 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         return emit_call_text("fmt.println", arg_texts[:]), {}, true
     }
 
-    is_struct_fields := head.text == "struct-fields" || head.text == "struct/fields"
-    is_struct_types := head.text == "struct-types" || head.text == "struct/types"
+    is_struct_fields := head.text == "struct-fields" || head.text == "struct/fields" || head.text == "soa/fields"
+    is_struct_types := head.text == "struct-types" || head.text == "struct/types" || head.text == "soa/types"
     if is_struct_fields || is_struct_types {
         if len(form.items) != 2 {
             return "", Compile_Error{message = fmt.tprintf("%s expects a quoted struct name", head.text), span = form.span}, false
@@ -6794,29 +6943,22 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         return emit_thread_expr(e, form, true)
     }
 
-    if head.text == "new" {
-        if len(form.items) != 3 {
-            return "", Compile_Error{message = "new expects type and literal", span = form.span}, false
+    if head.text == "soa-make-raw" {
+        if len(form.items) != 2 && len(form.items) != 3 {
+            return "", Compile_Error{message = "soa/make expects elem-type and optional capacity", span = form.span}, false
         }
-        type_form := form.items[1]
-        type_text, err_type, ok_type := parse_type_text(type_form)
+        type_text, err_type, ok_type := parse_type_text(form.items[1])
         if !ok_type {
             return "", err_type, false
         }
-        if type_form_needs_dynamic_literals(type_form) {
-            mark_dynamic_literals(e)
+        if len(form.items) == 2 {
+            return fmt.tprintf("make(%s)", type_text), {}, true
         }
-        #partial switch form.items[2].kind {
-        case .Vector:
-            if type_text_is_dynamic_soa(type_text) {
-                return emit_dynamic_soa_vector_literal(e, type_text, form.items[2])
-            }
-            return emit_vector_literal(e, type_text, form.items[2])
-        case .Brace:
-            return emit_brace_literal(e, type_text, form.items[2])
-        case:
-            return "", Compile_Error{message = "new expects vector or brace literal", span = form.items[2].span}, false
+        capacity, err_capacity, ok_capacity := emit_expr(e, form.items[2])
+        if !ok_capacity {
+            return "", err_capacity, false
         }
+        return fmt.tprintf("make(%s, 0, %s)", type_text, capacity), {}, true
     }
 
     if head.text == "make" {
@@ -6842,6 +6984,60 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         return strings.clone(strings.to_string(builder)), {}, true
     }
 
+    if len(form.items) == 2 && form.items[1].kind == .Vector {
+        if head.text == "quaternion" {
+            return emit_quaternion_vector_constructor(e, form.items[1])
+        }
+        head_name := map_name(head.text)
+        if !strings.contains(head_name, ".") {
+            if _, _, ok_proc := resolve_proc_call_decl(e, head.text); ok_proc {
+                // Let the normal call path handle declared procedures with vector arguments.
+            } else {
+                type_text, err_type, ok_type := parse_type_text(head)
+                if !ok_type {
+                    return "", err_type, false
+                }
+                if type_form_needs_dynamic_literals(head) {
+                    mark_dynamic_literals(e)
+                }
+                if type_text_is_dynamic_soa(type_text) {
+                    return emit_dynamic_soa_vector_literal(e, type_text, form.items[1])
+                }
+                return emit_vector_literal(e, type_text, form.items[1])
+            }
+        } else {
+            imported_fields, ok_imported_type := imported_odin_type_fields(e, head_name)
+            if ok_imported_type {
+                defer delete_struct_field_slice(&imported_fields)
+                type_text, err_type, ok_type := parse_type_text(head)
+                if !ok_type {
+                    return "", err_type, false
+                }
+                if type_form_needs_dynamic_literals(head) {
+                    mark_dynamic_literals(e)
+                }
+                return emit_vector_literal(e, type_text, form.items[1])
+            }
+            if _, ok_expected := imported_odin_proc_arg_type(e, head_name, 0); !ok_expected {
+                type_text, err_type, ok_type := parse_type_text(head)
+                if !ok_type {
+                    return "", err_type, false
+                }
+                if type_form_needs_dynamic_literals(head) {
+                    mark_dynamic_literals(e)
+                }
+                if type_text_is_dynamic_soa(type_text) {
+                    return emit_dynamic_soa_vector_literal(e, type_text, form.items[1])
+                }
+                return emit_vector_literal(e, type_text, form.items[1])
+            }
+        }
+    }
+
+    if head.text == "quaternion" {
+        return emit_quaternion_arg_constructor(e, form.items[1:], form.span)
+    }
+
     if len(form.items) == 2 && form.items[1].kind == .Brace {
         head_name := map_name(head.text)
         struct_decl, ok_struct := find_struct_decl(e, head_name)
@@ -6860,6 +7056,10 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         if ok_imported {
             defer delete_struct_field_slice(&imported_fields)
             return emit_imported_struct_brace_literal(e, head_name, imported_fields[:], form.items[1])
+        }
+        if type_text_is_map(head_name) {
+            mark_dynamic_literals(e)
+            return emit_brace_literal(e, head_name, form.items[1])
         }
         if !strings.contains(head_name, ".") {
             if call_name, proc_decl, ok_proc := resolve_proc_call_decl(e, head.text); ok_proc {
@@ -6898,6 +7098,17 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
             return emit_call_text(call_name, arg_texts_with_defaults[:]), {}, true
         }
     }
+    if len(form.items) == 2 && symbol_head_needs_type_conversion_parens(head.text) {
+        type_text, err_type, ok_type := parse_type_text(head)
+        if !ok_type {
+            return "", err_type, false
+        }
+        value_text, err_value, ok_value := emit_expr(e, form.items[1])
+        if !ok_value {
+            return "", err_value, false
+        }
+        return emit_type_conversion_text(type_text, value_text), {}, true
+    }
     for arg, arg_idx in form.items[1:] {
         arg_text := ""
         err_arg: Compile_Error
@@ -6916,6 +7127,242 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
     return emit_call_text(head_name, arg_texts[:]), {}, true
 }
 
+emit_type_application_expr :: proc(e: ^Emitter, type_form: CST_Form, args: []CST_Form, span: Span) -> (string, Compile_Error, bool) {
+    if len(args) != 1 {
+        return "", Compile_Error{message = "type application expects exactly one value", span = span}, false
+    }
+
+    type_text, err_type, ok_type := parse_type_text(type_form)
+    if !ok_type {
+        return "", err_type, false
+    }
+
+    value := args[0]
+    #partial switch value.kind {
+    case .Vector:
+        if type_form_needs_dynamic_literals(type_form) {
+            mark_dynamic_literals(e)
+        }
+        if type_text_is_dynamic_soa(type_text) {
+            return emit_dynamic_soa_vector_literal(e, type_text, value)
+        }
+        return emit_vector_literal(e, type_text, value)
+    case .Brace:
+        struct_decl, ok_struct := find_struct_decl(e, type_text)
+        if ok_struct {
+            err_struct, ok_struct_ctor := validate_struct_constructor(e, struct_decl, value)
+            if !ok_struct_ctor {
+                return "", err_struct, false
+            }
+            return emit_struct_brace_literal(e, struct_decl, value)
+        }
+        return emit_inferred_literal(e, value, type_text)
+    case:
+        value_text, err_value, ok_value := emit_expr(e, value)
+        if !ok_value {
+            return "", err_value, false
+        }
+        return emit_type_conversion_text(type_text, value_text), {}, true
+    }
+}
+
+parse_for_comprehension_clauses :: proc(bindings: CST_Form) -> (clauses: [dynamic]For_Comprehension_Clause, err: Compile_Error, ok: bool) {
+    if bindings.kind != .Vector {
+        return clauses, Compile_Error{message = "for comprehension expects a binding vector", span = bindings.span}, false
+    }
+    i := 0
+    for i < len(bindings.items) {
+        item := bindings.items[i]
+        if item.kind == .Keyword {
+            switch item.text {
+            case ":when":
+                if i+1 >= len(bindings.items) {
+                    return clauses, Compile_Error{message = ":when expects a predicate expression", span = item.span}, false
+                }
+                append(&clauses, For_Comprehension_Clause{
+                    kind      = .When,
+                    predicate = bindings.items[i+1],
+                })
+                i += 2
+                continue
+            case:
+                return clauses, Compile_Error{message = fmt.tprintf("unsupported for comprehension clause %s", item.text), span = item.span}, false
+            }
+        }
+        if item.kind != .Symbol {
+            return clauses, Compile_Error{message = "for comprehension binding expects a symbol", span = item.span}, false
+        }
+        if i+1 >= len(bindings.items) {
+            return clauses, Compile_Error{message = "for comprehension binding expects a collection expression", span = item.span}, false
+        }
+        append(&clauses, For_Comprehension_Clause{
+            kind       = .Binding,
+            name       = map_name(item.text),
+            collection = bindings.items[i+1],
+        })
+        i += 2
+    }
+    if len(clauses) == 0 {
+        return clauses, Compile_Error{message = "for comprehension expects at least one binding", span = bindings.span}, false
+    }
+    return clauses, {}, true
+}
+
+bind_for_comprehension_clause_types :: proc(e: ^Emitter, clauses: []For_Comprehension_Clause) {
+    for clause in clauses {
+        if clause.kind != .Binding {
+            continue
+        }
+        coll_ty, ok_coll_ty := obvious_form_type(e, clause.collection)
+        if !ok_coll_ty {
+            continue
+        }
+        elem_ty, ok_elem_ty := collection_element_type(coll_ty)
+        if ok_elem_ty {
+            bind_local_type(e, clause.name, elem_ty)
+        }
+    }
+}
+
+emit_for_comprehension_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) {
+    if len(form.items) < 3 || form.items[1].kind != .Vector {
+        return "", Compile_Error{message = "for comprehension expects bindings and one yield expression", span = form.span}, false
+    }
+
+    clauses, err_clauses, ok_clauses := parse_for_comprehension_clauses(form.items[1])
+    if !ok_clauses {
+        return "", err_clauses, false
+    }
+
+    body_index := 2
+    out_type := ""
+    if body_index < len(form.items) && form.items[body_index].kind == .Keyword && form.items[body_index].text == ":into" {
+        if body_index+1 >= len(form.items) {
+            return "", Compile_Error{message = ":into expects a dynamic array type", span = form.items[body_index].span}, false
+        }
+        type_text, err_type, ok_type := parse_type_text(form.items[body_index+1])
+        if !ok_type {
+            return "", err_type, false
+        }
+        out_type = type_text
+        body_index += 2
+    }
+    if len(form.items)-body_index != 1 {
+        return "", Compile_Error{message = "for comprehension expects exactly one yield expression", span = form.span}, false
+    }
+
+    yield_form := form.items[body_index]
+    push_local_type_scope(e)
+    bind_for_comprehension_clause_types(e, clauses[:])
+    if out_type == "" {
+        yield_ty, err_yield_ty, ok_yield_ty := infer_literal_value_type(e, yield_form)
+        if !ok_yield_ty {
+            pop_local_type_scope(e)
+            return "", Compile_Error{
+                message = fmt.tprintf("cannot infer for comprehension output type: %s; add :into [dynamic]T", err_yield_ty.message),
+                span = yield_form.span,
+            }, false
+        }
+        out_type = fmt.tprintf("[dynamic]%s", yield_ty)
+    }
+    if _, ok_elem := dynamic_array_element_type(out_type); !ok_elem {
+        pop_local_type_scope(e)
+        return "", Compile_Error{message = "for comprehension :into expects a [dynamic]T type", span = form.span}, false
+    }
+
+    collection_texts: [dynamic]string
+    collection_owned: [dynamic]bool
+    predicate_texts: [dynamic]string
+    for clause in clauses {
+        switch clause.kind {
+        case .Binding:
+            coll_text, err_coll, ok_coll := emit_expr(e, clause.collection)
+            if !ok_coll {
+                pop_local_type_scope(e)
+                return "", err_coll, false
+            }
+            append(&collection_texts, coll_text)
+            append(&collection_owned, loop_collection_needs_temp_binding(clause.collection))
+        case .When:
+            pred_text, err_pred, ok_pred := emit_expr(e, clause.predicate)
+            if !ok_pred {
+                pop_local_type_scope(e)
+                return "", err_pred, false
+            }
+            append(&predicate_texts, pred_text)
+        }
+    }
+
+    yield_text, err_yield, ok_yield := emit_expr(e, yield_form)
+    pop_local_type_scope(e)
+    if !ok_yield {
+        return "", err_yield, false
+    }
+
+    builder := strings.builder_make()
+    defer strings.builder_destroy(&builder)
+    strings.write_string(&builder, "(proc() -> ")
+    strings.write_string(&builder, out_type)
+    strings.write_string(&builder, " {\n")
+    strings.write_string(&builder, "    out := make(")
+    strings.write_string(&builder, out_type)
+    strings.write_string(&builder, ")\n")
+
+    depth := 1
+    coll_idx := 0
+    pred_idx := 0
+    for clause in clauses {
+        switch clause.kind {
+        case .Binding:
+            coll_text := collection_texts[coll_idx]
+            if collection_owned[coll_idx] {
+                e.temp_counter += 1
+                temp := fmt.tprintf("kvist_for_%d", e.temp_counter)
+                append_indent(&builder, depth)
+                strings.write_string(&builder, temp)
+                strings.write_string(&builder, " := ")
+                strings.write_string(&builder, coll_text)
+                strings.write_byte(&builder, '\n')
+                append_indent(&builder, depth)
+                strings.write_string(&builder, "defer delete(")
+                strings.write_string(&builder, temp)
+                strings.write_string(&builder, ")\n")
+                coll_text = temp
+            }
+            append_indent(&builder, depth)
+            strings.write_string(&builder, "for ")
+            strings.write_string(&builder, clause.name)
+            strings.write_string(&builder, " in ")
+            strings.write_string(&builder, coll_text)
+            strings.write_string(&builder, " {\n")
+            depth += 1
+            coll_idx += 1
+        case .When:
+            append_indent(&builder, depth)
+            strings.write_string(&builder, "if !(")
+            strings.write_string(&builder, predicate_texts[pred_idx])
+            strings.write_string(&builder, ") {\n")
+            append_indent(&builder, depth+1)
+            strings.write_string(&builder, "continue\n")
+            append_indent(&builder, depth)
+            strings.write_string(&builder, "}\n")
+            pred_idx += 1
+        }
+    }
+
+    append_indent(&builder, depth)
+    append_indented_multiline(&builder, emit_call_text("append", []string{"&out", yield_text}), "", "")
+    strings.write_byte(&builder, '\n')
+    for depth > 1 {
+        depth -= 1
+        append_indent(&builder, depth)
+        strings.write_string(&builder, "}\n")
+    }
+    strings.write_string(&builder, "    return out\n")
+    strings.write_string(&builder, "})()")
+    return strings.clone(strings.to_string(builder)), {}, true
+}
+
 emit_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) {
     #partial switch form.kind {
     case .String:
@@ -6927,6 +7374,10 @@ emit_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) 
     case .Nil:
         return form.text, {}, true
     case .Symbol:
+        if len(form.text) > 1 && form.text[0] == '&' {
+            target := map_name(form.text[1:])
+            return addr_expr_text(target), {}, true
+        }
         if symbol_is_simple_deref_suffix(form.text) {
             return deref_expr_text(map_name(form.text[:len(form.text)-1])), {}, true
         }
@@ -6937,10 +7388,17 @@ emit_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) 
         if len(form.items) == 0 {
             return "", Compile_Error{message = "empty list expression", span = form.span}, false
         }
-        if form.items[0].kind == .Symbol && len(form.items[0].text) > 0 && form.items[0].text[0] == '#' {
+        if form.items[0].kind == .Symbol &&
+           len(form.items[0].text) > 0 &&
+           form.items[0].text[0] == '#' &&
+           !strings.has_prefix(form.items[0].text, "#soa[") &&
+           !strings.has_prefix(form.items[0].text, "#simd[") {
             return emit_directive_expr(e, form)
         }
-        if is_symbol(form.items[0], "proc") || is_symbol(form.items[0], "fn") {
+        if is_symbol(form.items[0], "proc") {
+            return "", Compile_Error{message = "`proc` has been removed; use `fn` for function literals and function types, or `defn` for named functions", span = form.items[0].span}, false
+        }
+        if is_symbol(form.items[0], "fn") {
             return emit_proc_literal_expr(e, form)
         }
         if form.items[0].kind == .Keyword {
@@ -6959,8 +7417,8 @@ emit_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) 
             }
             return unquote_string(form.items[1].text), {}, true
         }
-        if is_symbol(form.items[0], "as") {
-            return emit_as_expr(e, form)
+        if is_symbol(form.items[0], "for") {
+            return emit_for_comprehension_expr(e, form)
         }
         if is_symbol(form.items[0], "type") {
             type_text, err_type, ok_type := parse_type_text(form)
@@ -6969,6 +7427,9 @@ emit_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) 
             }
             return type_text, {}, true
         }
+        if form.items[0].kind != .Symbol {
+            return emit_type_application_expr(e, form.items[0], form.items[1:], form.span)
+        }
         return emit_call_like(e, form)
     case .Vector, .Brace, .Set:
         return emit_inferred_literal(e, form)
@@ -6976,34 +7437,49 @@ emit_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) 
     return "", Compile_Error{message = "unsupported expression", span = form.span}, false
 }
 
-emit_as_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) {
-    if len(form.items) != 3 {
-        return "", Compile_Error{message = "as expects a type and one expression", span = form.span}, false
+For_Comprehension_Clause_Kind :: enum {
+    Binding,
+    When,
+}
+
+For_Comprehension_Clause :: struct {
+    kind:       For_Comprehension_Clause_Kind,
+    name:       string,
+    collection: CST_Form,
+    predicate:  CST_Form,
+}
+
+type_text_is_slice :: proc(text: string) -> bool {
+    return len(text) >= 2 && text[:2] == "[]"
+}
+
+collection_element_type :: proc(type_text: string) -> (string, bool) {
+    if type_text_is_dynamic_array(type_text) {
+        return type_text[len("[dynamic]"):], true
     }
-    type_text, err_type, ok_type := parse_type_text(form.items[1])
-    if !ok_type {
-        return "", err_type, false
+    if type_text_is_slice(type_text) {
+        return type_text[len("[]"):], true
     }
-    value := form.items[2]
-    #partial switch value.kind {
-    case .Brace:
-        struct_decl, ok_struct := find_struct_decl(e, type_text)
-        if ok_struct {
-            err_struct, ok_struct_ctor := validate_struct_constructor(e, struct_decl, value)
-            if !ok_struct_ctor {
-                return "", err_struct, false
-            }
-            return emit_struct_brace_literal(e, struct_decl, value)
+    if len(type_text) > 0 && type_text[0] == '[' && !type_text_is_dynamic_array(type_text) {
+        close := strings.index(type_text, "]")
+        if close >= 0 && close+1 < len(type_text) {
+            return type_text[close+1:], true
         }
-        return emit_inferred_literal(e, value, type_text)
-    case .Vector, .Set:
-        return emit_inferred_literal(e, value, type_text)
     }
-    value_text, err_value, ok_value := emit_expr(e, value)
-    if !ok_value {
-        return "", err_value, false
+    return "", false
+}
+
+dynamic_array_element_type :: proc(type_text: string) -> (string, bool) {
+    if !type_text_is_dynamic_array(type_text) {
+        return "", false
     }
-    return fmt.tprintf("%s(%s)", type_text, value_text), {}, true
+    return type_text[len("[dynamic]"):], true
+}
+
+append_indent :: proc(builder: ^strings.Builder, depth: int) {
+    for _ in 0..<depth {
+        strings.write_string(builder, "    ")
+    }
 }
 
 Binding_Field :: struct {
@@ -7257,15 +7733,73 @@ returns_when_final :: proc(last_in_proc: bool, returns: Return_Spec) -> Return_S
 
 is_local_decl_head :: proc(head: string) -> bool {
     switch head {
-    case "defconst", "defconst-", "defstruct", "defstruct-", "defenum", "defenum-", "defunion", "defunion-":
+    case "def", "defstruct", "defenum", "defunion":
         return true
     case:
         return false
     }
 }
 
+emit_local_var_stmt :: proc(e: ^Emitter, form: CST_Form) -> (Compile_Error, bool) {
+    if len(form.items) < 3 {
+        return Compile_Error{message = "defvar expects a name, optional type, and value", span = form.span}, false
+    }
+    target := form.items[1]
+    if target.kind != .Symbol {
+        return Compile_Error{message = "defvar expects a symbol name", span = target.span}, false
+    }
+
+    name := target.text
+    ty := ""
+    value_index := 2
+    is_typed := false
+    if len(name) > 0 && name[len(name)-1] == ':' {
+        if len(name) == 1 {
+            return Compile_Error{message = "defvar expects a name before :", span = target.span}, false
+        }
+        parsed_ty, next_i, err_type, ok_type := parse_type_text_from_forms(form.items[:], 2)
+        if !ok_type {
+            return err_type, false
+        }
+        if next_i >= len(form.items) {
+            return Compile_Error{message = "typed defvar missing value", span = target.span}, false
+        }
+        ty = parsed_ty
+        value_index = next_i
+        name = name[:len(name)-1]
+        is_typed = true
+    }
+    if value_index+1 != len(form.items) {
+        return Compile_Error{message = "defvar expects exactly one value", span = form.items[value_index+1].span}, false
+    }
+
+    value_form := form.items[value_index]
+    err_owned, bad_owned := owned_result_usage_error(value_form, true)
+    if bad_owned {
+        return err_owned, false
+    }
+    value, err_value, ok_value := emit_expr_for_expected_type(e, value_form, ty)
+    if !ok_value {
+        return err_value, false
+    }
+
+    local_name := map_name(name)
+    if is_typed {
+        emit_prefixed_expr_mapped(e, fmt.tprintf("%s: %s = ", local_name, ty), value, value_form.span)
+        bind_local_type(e, local_name, ty)
+    } else {
+        emit_prefixed_expr_mapped(e, fmt.tprintf("%s := ", local_name), value, value_form.span)
+        if form_ty, ok_ty := obvious_form_type(e, value_form); ok_ty {
+            bind_local_type(e, local_name, form_ty)
+        }
+    }
+    return {}, true
+}
+
 emit_local_decl_stmt :: proc(e: ^Emitter, form: CST_Form) -> (Compile_Error, bool) {
-    decl, err_decl, ok_decl := parse_decl(CST_Top_Form{form = form})
+    decl_form := form
+
+    decl, err_decl, ok_decl := parse_decl(CST_Top_Form{form = decl_form})
     if !ok_decl {
         return err_decl, false
     }
@@ -7672,7 +8206,26 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
 
     head := form.items[0]
     if head.kind != .Symbol {
-        return Compile_Error{message = "unsupported statement head", span = head.span}, false
+        expr, err_expr, ok_expr := emit_expr(e, form)
+        if !ok_expr {
+            return err_expr, false
+        }
+        if last_in_proc && returns.kind != .None {
+            emit_prefixed_expr_mapped(e, "return ", expr, form.span)
+        } else if form_is_owned_allocation_result(form) || form_is_owned_constructor_result(form) {
+            emit_prefixed_expr_mapped(e, "_ = ", expr, form.span)
+        } else {
+            emit_prefixed_expr_mapped(e, "", expr, form.span)
+        }
+        return {}, true
+    }
+
+    if head.text == "var" {
+        return Compile_Error{message = "`var` has been removed; use `defvar`", span = head.span}, false
+    }
+
+    if head.text == "defvar" {
+        return emit_local_var_stmt(e, form)
     }
 
     if is_local_decl_head(head.text) {
@@ -7697,12 +8250,11 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
     case .None:
     }
 
-    if op, ok_op := compound_assignment_operator(head.text); ok_op {
-        return emit_compound_assignment_stmt(e, form, op)
-    }
     switch head.text {
     case "inc!", "dec!", "toggle!", "negate!":
         return emit_unary_mutation_stmt(e, form, head.text)
+    case "mut!":
+        return emit_mut_bang_stmt(e, form)
     }
 
     canonical_head_text := head.text
@@ -7829,7 +8381,7 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
             emit_line(e, "}")
         }
         return {}, true
-    case "do":
+    case "do", "block":
         emit_line(e, "{")
         e.indent += 1
         push_local_type_scope(e)
@@ -8059,9 +8611,19 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
         }
         emit_line(e, fmt.tprintf("fmt.println(%q)", text))
         return {}, true
+    case "loop":
+        return Compile_Error{message = "`loop` has been removed; use `each` for collection iteration or `while` for condition loops", span = form.span}, false
+    case "for":
+        if last_in_proc && returns.kind != .None {
+            expr, err_expr, ok_expr := emit_expr(e, form)
+            if !ok_expr {
+                return err_expr, false
+            }
+            emit_prefixed_expr_mapped(e, "return ", expr, form.span)
+            return {}, true
+        }
+        return Compile_Error{message = "`for` is a comprehension; use `each` for collection loops or `while` for condition loops", span = form.span}, false
     case "each":
-        return Compile_Error{message = "`each` has been removed; use `for`", span = form.span}, false
-    case "for", "loop":
         if len(form.items) >= 3 && form.items[1].kind == .Vector {
             binding := form.items[1]
             body_start := 2
@@ -8084,23 +8646,12 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
                 }
                 return emit_for_in_loop(e, coll_form, first_name, second_name, body[:])
             }
-            return Compile_Error{message = fmt.tprintf("%s expects [value collection], [first second collection], or condition and body", canonical_head_text), span = form.span}, false
+            return Compile_Error{message = fmt.tprintf("%s expects [value collection] or [first second collection]", canonical_head_text), span = form.span}, false
         }
-        if len(form.items) == 2 {
-            emit_line(e, "for {")
-            e.indent += 1
-            push_local_type_scope(e)
-            err_body, ok_body := emit_stmt(e, form.items[1], false, Return_Spec{kind = .None})
-            pop_local_type_scope(e)
-            if !ok_body {
-                return err_body, false
-            }
-            e.indent -= 1
-            emit_line(e, "}")
-            return {}, true
-        }
+        return Compile_Error{message = "each expects [value collection] or [first second collection] and body", span = form.span}, false
+    case "while":
         if len(form.items) < 3 {
-            return Compile_Error{message = fmt.tprintf("%s expects a single body form, [value collection], [first second collection], or condition and body", canonical_head_text), span = form.span}, false
+            return Compile_Error{message = "while expects condition and body", span = form.span}, false
         }
         cond, err_cond, ok_cond := emit_expr(e, form.items[1])
         if !ok_cond {

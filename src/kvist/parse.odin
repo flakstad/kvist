@@ -34,6 +34,46 @@ normalize_scalar_type_name :: proc(text: string) -> string {
     }
 }
 
+normalize_matrix_dims_text :: proc(text: string) -> string {
+    builder := strings.builder_make()
+    defer strings.builder_destroy(&builder)
+    part_start := -1
+    part_count := 0
+    for i := 0; i <= len(text); i += 1 {
+        is_sep := i == len(text) || text[i] == ',' || is_whitespace(text[i])
+        if is_sep {
+            if part_start >= 0 {
+                if part_count > 0 {
+                    strings.write_string(&builder, ", ")
+                }
+                strings.write_string(&builder, text[part_start:i])
+                part_count += 1
+                part_start = -1
+            }
+            continue
+        }
+        if part_start < 0 {
+            part_start = i
+        }
+    }
+    return strings.clone(strings.to_string(builder))
+}
+
+normalize_bit_set_text :: proc(text: string) -> string {
+    semi := strings.index(text, ";")
+    if semi < 0 {
+        elem_text := strings.trim_space(text)
+        return fmt.tprintf("bit_set[%s]", normalize_surface_type_symbol(elem_text))
+    }
+    elem_text := strings.trim_space(text[:semi])
+    underlying_text := strings.trim_space(text[semi+1:])
+    return fmt.tprintf(
+        "bit_set[%s; %s]",
+        normalize_surface_type_symbol(elem_text),
+        normalize_surface_type_symbol(underlying_text),
+    )
+}
+
 normalize_surface_type_symbol :: proc(text: string) -> string {
     if len(text) == 0 {
         return text
@@ -47,6 +87,14 @@ normalize_surface_type_symbol :: proc(text: string) -> string {
             length := text[len("#soa["):closing]
             elem_text := text[closing+1:]
             return fmt.tprintf("#soa[%s]%s", length, normalize_surface_type_symbol(elem_text))
+        }
+    }
+    if strings.has_prefix(text, "#simd[") {
+        closing := strings.index(text, "]")
+        if closing > len("#simd[") {
+            length := text[len("#simd["):closing]
+            elem_text := text[closing+1:]
+            return fmt.tprintf("#simd[%s]%s", length, normalize_surface_type_symbol(elem_text))
         }
     }
     if strings.has_prefix(text, "[]") {
@@ -70,6 +118,22 @@ normalize_surface_type_symbol :: proc(text: string) -> string {
             if closing == len(text)-1 {
                 return fmt.tprintf("map[%s]struct{{}}", normalize_surface_type_symbol(elem_text))
             }
+        }
+    }
+    if strings.has_prefix(text, "bit_set[") {
+        closing := strings.index(text, "]")
+        if closing > len("bit_set[") && closing == len(text)-1 {
+            return normalize_bit_set_text(text[len("bit_set["):closing])
+        }
+    }
+    if strings.has_prefix(text, "matrix[") {
+        closing := strings.index(text, "]")
+        if closing > len("matrix[") {
+            dims_text := text[len("matrix["):closing]
+            dims := normalize_matrix_dims_text(dims_text)
+            defer delete(dims)
+            elem_text := text[closing+1:]
+            return fmt.tprintf("matrix[%s]%s", dims, normalize_surface_type_symbol(elem_text))
         }
     }
     if len(text) > 2 && text[0] == '[' {
@@ -242,6 +306,17 @@ parse_type_text :: proc(form: CST_Form) -> (text: string, err: Compile_Error, ok
             return fmt.tprintf("map[%s]%s", key_text, value_text), {}, true
         }
 
+        if is_symbol(form.items[0], "matrix") {
+            if len(form.items) != 4 || !(form.items[1].kind == .Symbol || form.items[1].kind == .Number) || !(form.items[2].kind == .Symbol || form.items[2].kind == .Number) {
+                return "", Compile_Error{message = "matrix type expects row count, column count, and element type", span = form.span}, false
+            }
+            elem_text, err_elem, ok_elem := parse_type_text(form.items[3])
+            if !ok_elem {
+                return "", err_elem, false
+            }
+            return fmt.tprintf("matrix[%s, %s]%s", form.items[1].text, form.items[2].text, elem_text), {}, true
+        }
+
         if is_symbol(form.items[0], "ptr") {
             if len(form.items) != 2 {
                 return "", Compile_Error{message = "ptr type expects one pointee type", span = form.span}, false
@@ -254,8 +329,11 @@ parse_type_text :: proc(form: CST_Form) -> (text: string, err: Compile_Error, ok
         }
 
         if is_symbol(form.items[0], "type") {
+            if len(form.items) == 2 {
+                return parse_type_text(form.items[1])
+            }
             if len(form.items) < 3 {
-                return "", Compile_Error{message = "type form expects a type constructor and at least one argument", span = form.span}, false
+                return "", Compile_Error{message = "type form expects a type value or a type constructor and at least one argument", span = form.span}, false
             }
             constructor_text, err_constructor, ok_constructor := parse_type_text(form.items[1])
             if !ok_constructor {
@@ -280,7 +358,7 @@ parse_type_text :: proc(form: CST_Form) -> (text: string, err: Compile_Error, ok
             return strings.clone(strings.to_string(builder)), {}, true
         }
 
-        if !is_symbol(form.items[0], "proc") {
+        if !is_symbol(form.items[0], "fn") {
             return "", Compile_Error{message = "unsupported type form", span = form.span}, false
         }
         proc_text, next_index, err_proc, ok_proc := parse_proc_type_text_from_parts(form.items[:], 0)
@@ -288,7 +366,7 @@ parse_type_text :: proc(form: CST_Form) -> (text: string, err: Compile_Error, ok
             return "", err_proc, false
         }
         if next_index != len(form.items) {
-            return "", Compile_Error{message = "proc type form cannot contain a body", span = form.span}, false
+            return "", Compile_Error{message = "fn type form cannot contain a body", span = form.span}, false
         }
         return proc_text, {}, true
     case:
@@ -306,7 +384,7 @@ vector_is_named_returns :: proc(form: CST_Form) -> bool {
 
 parse_proc_type_text_from_parts :: proc(forms: []CST_Form, start: int) -> (text: string, next: int, err: Compile_Error, ok: bool) {
     if start+1 >= len(forms) || forms[start+1].kind != .Vector {
-        return "", start, Compile_Error{message = "proc type expects a parameter vector", span = forms[start].span}, false
+        return "", start, Compile_Error{message = "fn type expects a parameter vector", span = forms[start].span}, false
     }
 
     params, err_params, ok_params := parse_param_vector(forms[start+1])
@@ -328,7 +406,7 @@ parse_proc_type_text_from_parts :: proc(forms: []CST_Form, start: int) -> (text:
     next = start + 2
     if next < len(forms) && is_symbol(forms[next], "->") {
         if next+1 >= len(forms) {
-            return "", start, Compile_Error{message = "missing proc type return spec", span = forms[next].span}, false
+            return "", start, Compile_Error{message = "missing fn type return spec", span = forms[next].span}, false
         }
 
         if vector_is_named_returns(forms[next+1]) {
@@ -362,7 +440,7 @@ parse_type_text_from_forms :: proc(forms: []CST_Form, start: int) -> (text: stri
     if start >= len(forms) {
         return "", start, Compile_Error{message = "missing type"}, false
     }
-    if is_symbol(forms[start], "proc") {
+    if is_symbol(forms[start], "fn") {
         return parse_proc_type_text_from_parts(forms, start)
     }
     text, err, ok = parse_type_text(forms[start])
@@ -643,11 +721,11 @@ parse_enum_variants :: proc(form: CST_Form) -> (variants: [dynamic]Enum_Variant,
 
 parse_proc_decl :: proc(form: CST_Form) -> (decl: Proc_Decl, err: Compile_Error, ok: bool) {
     if len(form.items) < 3 {
-        return decl, Compile_Error{message = "proc requires name, params, and body", span = form.span}, false
+        return decl, Compile_Error{message = "defn requires name, params, and body", span = form.span}, false
     }
     name_form := form.items[1]
     if name_form.kind != .Symbol {
-        return decl, Compile_Error{message = "expected proc name", span = name_form.span}, false
+        return decl, Compile_Error{message = "expected defn name", span = name_form.span}, false
     }
     params_index := 2
     calling_convention := ""
@@ -661,7 +739,7 @@ parse_proc_decl :: proc(form: CST_Form) -> (decl: Proc_Decl, err: Compile_Error,
         params_index += 2
     }
     if params_index >= len(form.items) {
-        return decl, Compile_Error{message = "proc requires a parameter vector", span = form.span}, false
+        return decl, Compile_Error{message = "defn requires a parameter vector", span = form.span}, false
     }
     params, err_params, ok_params := parse_param_vector(form.items[params_index])
     if !ok_params {
@@ -736,6 +814,42 @@ parse_proc_decl :: proc(form: CST_Form) -> (decl: Proc_Decl, err: Compile_Error,
         suffix_directives = suffix_directives,
         body              = body,
     }, {}, true
+}
+
+parse_decl_typed_binding :: proc(
+    form: CST_Form,
+    head_name: string,
+    value_index: int,
+) -> (
+    name: string,
+    has_ty: bool,
+    ty: string,
+    value: CST_Form,
+    err: Compile_Error,
+    ok: bool,
+) {
+    raw_name := form.items[1].text
+    if len(raw_name) > 0 && raw_name[len(raw_name)-1] == ':' {
+        if len(raw_name) == 1 {
+            return "", false, "", {}, Compile_Error{message = fmt.tprintf("%s expects a name before :", head_name), span = form.items[1].span}, false
+        }
+        type_text, next_i, err_type, ok_type := parse_type_text_from_forms(form.items[:], value_index)
+        if !ok_type {
+            return "", false, "", {}, err_type, false
+        }
+        if next_i >= len(form.items) {
+            return "", false, "", {}, Compile_Error{message = fmt.tprintf("typed %s missing value", head_name), span = form.span}, false
+        }
+        if next_i+1 != len(form.items) {
+            return "", false, "", {}, Compile_Error{message = fmt.tprintf("%s expects exactly one value", head_name), span = form.items[next_i+1].span}, false
+        }
+        return map_name(raw_name[:len(raw_name)-1]), true, type_text, form.items[next_i], {}, true
+    }
+
+    if len(form.items) != value_index+1 {
+        return "", false, "", {}, Compile_Error{message = fmt.tprintf("typed %s expects a name ending in ':'", head_name), span = form.items[1].span}, false
+    }
+    return map_name(raw_name), false, "", form.items[value_index], {}, true
 }
 
 parse_decl :: proc(top_form: CST_Top_Form) -> (decl: AST_Decl, err: Compile_Error, ok: bool) {
@@ -816,12 +930,12 @@ parse_decl :: proc(top_form: CST_Top_Form) -> (decl: AST_Decl, err: Compile_Erro
             }, {}, true
         }
         return decl, Compile_Error{message = "import expects a string path, alias plus string path, :odin plus string path, or alias plus :odin plus string path", span = form.span}, false
-    case "defconst", "defconst-":
+    case "def", "def-":
         if len(form.items) < 3 {
-            return decl, Compile_Error{message = "defconst expects a name, optional type, and value", span = form.span}, false
+            return decl, Compile_Error{message = "def expects a name, optional docstring, optional type, and value", span = form.span}, false
         }
         if form.items[1].kind != .Symbol {
-            return decl, Compile_Error{message = "defconst expects a symbol name", span = form.items[1].span}, false
+            return decl, Compile_Error{message = "def expects a symbol name", span = form.items[1].span}, false
         }
         doc_lines := top_form.doc_lines
         value_index := 2
@@ -829,25 +943,15 @@ parse_decl :: proc(top_form: CST_Top_Form) -> (decl: AST_Decl, err: Compile_Erro
             doc_lines = append_doc_lines(doc_lines[:], doc_lines_from_string(unquote_string(form.items[2].text))[:])
             value_index = 3
         }
-        const_decl := Const_Decl{
-            name = map_name(form.items[1].text),
+        name, has_ty, ty, value, err_binding, ok_binding := parse_decl_typed_binding(form, head.text, value_index)
+        if !ok_binding {
+            return decl, err_binding, false
         }
-        if len(form.items) == value_index+1 {
-            const_decl.value = form.items[value_index]
-        } else {
-            type_text, next_i, err_type, ok_type := parse_type_text_from_forms(form.items[:], value_index)
-            if !ok_type {
-                return decl, err_type, false
-            }
-            if next_i >= len(form.items) {
-                return decl, Compile_Error{message = "typed defconst missing value", span = form.span}, false
-            }
-            if next_i+1 != len(form.items) {
-                return decl, Compile_Error{message = "defconst expects exactly one value", span = form.items[next_i+1].span}, false
-            }
-            const_decl.has_ty = true
-            const_decl.ty = type_text
-            const_decl.value = form.items[next_i]
+        const_decl := Const_Decl{
+            name   = name,
+            has_ty = has_ty,
+            ty     = ty,
+            value  = value,
         }
         return AST_Decl{
             kind = .Const,
@@ -857,7 +961,7 @@ parse_decl :: proc(top_form: CST_Top_Form) -> (decl: AST_Decl, err: Compile_Erro
         }, {}, true
     case "defvar", "defvar-":
         if len(form.items) < 3 {
-            return decl, Compile_Error{message = "defvar expects a name, optional type, and value", span = form.span}, false
+            return decl, Compile_Error{message = "defvar expects a name, optional docstring, optional type, and value", span = form.span}, false
         }
         if form.items[1].kind != .Symbol {
             return decl, Compile_Error{message = "defvar expects a symbol name", span = form.items[1].span}, false
@@ -868,23 +972,15 @@ parse_decl :: proc(top_form: CST_Top_Form) -> (decl: AST_Decl, err: Compile_Erro
             doc_lines = append_doc_lines(doc_lines[:], doc_lines_from_string(unquote_string(form.items[2].text))[:])
             value_index = 3
         }
-        var_decl := Var_Decl{name = map_name(form.items[1].text)}
-        if len(form.items) == value_index+1 {
-            var_decl.value = form.items[value_index]
-        } else {
-            type_text, next_i, err_type, ok_type := parse_type_text_from_forms(form.items[:], value_index)
-            if !ok_type {
-                return decl, err_type, false
-            }
-            if next_i >= len(form.items) {
-                return decl, Compile_Error{message = "typed defvar missing value", span = form.span}, false
-            }
-            if next_i+1 != len(form.items) {
-                return decl, Compile_Error{message = "defvar expects exactly one value", span = form.items[next_i+1].span}, false
-            }
-            var_decl.has_ty = true
-            var_decl.ty = type_text
-            var_decl.value = form.items[next_i]
+        name, has_ty, ty, value, err_binding, ok_binding := parse_decl_typed_binding(form, head.text, value_index)
+        if !ok_binding {
+            return decl, err_binding, false
+        }
+        var_decl := Var_Decl{
+            name   = name,
+            has_ty = has_ty,
+            ty     = ty,
+            value  = value,
         }
         return AST_Decl{
             kind = .Var,
@@ -893,6 +989,9 @@ parse_decl :: proc(top_form: CST_Top_Form) -> (decl: AST_Decl, err: Compile_Erro
             var_decl = var_decl,
         }, {}, true
     case "defstruct", "defstruct-", "defstate":
+        if head.text == "defstate" && len(form.items) == 3 && form.items[1].kind == .Symbol && form.items[2].kind == .Brace {
+            return AST_Decl{kind = .Ignored, span = form.span}, {}, true
+        }
         if len(form.items) != 3 && len(form.items) != 4 && len(form.items) != 5 {
             return decl, Compile_Error{message = fmt.tprintf("%s expects a name, optional docstring, a brace field form, and optional brace metadata form", head.text), span = form.span}, false
         }
@@ -1015,7 +1114,7 @@ parse_decl :: proc(top_form: CST_Top_Form) -> (decl: AST_Decl, err: Compile_Erro
             }
         }
         return AST_Decl{kind = .Ignored, span = form.span}, {}, true
-    case "proc", "defn", "defn-":
+    case "defn", "defn-":
         doc_lines := top_form.doc_lines
         proc_form := form
         doc_index := 2

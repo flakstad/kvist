@@ -12,7 +12,7 @@
 REPS :: 250
 STRING_REPS :: 1_200")
 
-(proc report [name: string, elapsed: time.Duration, checksum: int, track: ^mem.Tracking-Allocator]
+(defn report [name: string, elapsed: time.Duration, checksum: int, track: ^mem.Tracking-Allocator]
   (fmt.printfln "%-17s %9.3f ms allocs=%8v total=%10v peak=%9v live=%v checksum=%v"
                 name
                 (time.duration-milliseconds elapsed)
@@ -22,17 +22,17 @@ STRING_REPS :: 1_200")
                 track.current-memory-allocated
                 checksum))
 
-(proc run-one [name: string, checksum: int, start: time.Tick, track: ^mem.Tracking-Allocator]
+(defn run-one [name: string, checksum: int, start: time.Tick, track: ^mem.Tracking-Allocator]
   (report name (time.tick-since start) checksum track))
 
-(proc build-map-overrides [] -> map[int]int
+(defn build-map-overrides [] -> map[int]int
   (let [out (map/empty int int 3)]
     (update! out 2 20)
     (update! out 4 40)
     (update! out 6 60)
     out))
 
-(proc build-map-mutable [] -> map[int]int
+(defn build-map-mutable [] -> map[int]int
   (let [out (map/empty int int 6)]
     (update! out 0 1)
     (update! out 1 2)
@@ -40,7 +40,7 @@ STRING_REPS :: 1_200")
     (update! out 3 4)
     out))
 
-(proc build-map-keys [] -> [dynamic]int
+(defn build-map-keys [] -> [dynamic]int
   (let [out (arr/empty int 4)]
     (arr/push! out 1)
     (arr/push! out 2)
@@ -48,7 +48,7 @@ STRING_REPS :: 1_200")
     (arr/push! out 4)
     out))
 
-(proc build-map-vals [] -> [dynamic]int
+(defn build-map-vals [] -> [dynamic]int
   (let [out (arr/empty int 4)]
     (arr/push! out 10)
     (arr/push! out 20)
@@ -56,7 +56,7 @@ STRING_REPS :: 1_200")
     (arr/push! out 40)
     out))
 
-(proc build-set-rhs [] -> set[int]
+(defn build-set-rhs [] -> set[int]
   (let [out (set/empty int 5)]
     (set/add! out 4)
     (set/add! out 5)
@@ -65,7 +65,7 @@ STRING_REPS :: 1_200")
     (set/add! out 8)
     out))
 
-(proc build-set-mutable [] -> set[int]
+(defn build-set-mutable [] -> set[int]
   (let [out (set/empty int 6)]
     (set/add! out 1)
     (set/add! out 2)
@@ -75,7 +75,7 @@ STRING_REPS :: 1_200")
     (set/add! out 6)
     out))
 
-(proc build-even-set [] -> set[int]
+(defn build-even-set [] -> set[int]
   (let [out (set/empty int 5)]
     (set/add! out 2)
     (set/add! out 4)
@@ -84,10 +84,10 @@ STRING_REPS :: 1_200")
     (set/add! out 10)
     out))
 
-(proc bench-str-package [reps: int] -> int
+(defn bench-str-package [reps: int] -> int
   (let [checksum 0
         i 0]
-    (for (< i reps)
+    (while (< i reps)
       (let [source "  Kvist,odin,core,odin  "
             trimmed (str/trim source)
             parts (str/split trimmed ",") defer
@@ -109,10 +109,10 @@ STRING_REPS :: 1_200")
       (set! i (+ i 1)))
     checksum))
 
-(proc bench-map-package [reps: int] -> int
+(defn bench-map-package [reps: int] -> int
   (let [checksum 0
         i 0]
-    (for (< i reps)
+    (while (< i reps)
       (let [overrides (build-map-overrides) defer
             mutable (build-map-mutable) defer]
         (map/assoc! mutable 1 2)
@@ -128,10 +128,10 @@ STRING_REPS :: 1_200")
       (set! i (+ i 1)))
     checksum))
 
-(proc bench-map-pure-package [reps: int] -> int
+(defn bench-map-pure-package [reps: int] -> int
   (let [checksum 0
         i 0]
-    (for (< i reps)
+    (while (< i reps)
       (let [base (build-map-mutable) defer
             overrides (build-map-overrides) defer
             ks-source (build-map-keys) defer
@@ -155,10 +155,10 @@ STRING_REPS :: 1_200")
       (set! i (+ i 1)))
     checksum))
 
-(proc bench-set-package [reps: int] -> int
+(defn bench-set-package [reps: int] -> int
   (let [checksum 0
         i 0]
-    (for (< i reps)
+    (while (< i reps)
       (let [rhs (build-set-rhs) defer
             mutable (build-set-mutable) defer
             evens (build-even-set) defer
@@ -179,10 +179,10 @@ STRING_REPS :: 1_200")
       (set! i (+ i 1)))
     checksum))
 
-(proc bench-set-pure-package [reps: int] -> int
+(defn bench-set-pure-package [reps: int] -> int
   (let [checksum 0
         i 0]
-    (for (< i reps)
+    (while (< i reps)
       (let [lhs (build-set-mutable) defer
             rhs (build-set-rhs) defer
             unioned (set/union lhs rhs) defer
@@ -205,7 +205,7 @@ STRING_REPS :: 1_200")
       (set! i (+ i 1)))
     checksum))
 
-(proc main []
+(defn main []
   (let [old-allocator context.allocator
         track: mem.Tracking-Allocator (odin "mem.Tracking_Allocator{}")]
     (mem.tracking-allocator-init (& track) old-allocator old-allocator)

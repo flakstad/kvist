@@ -106,27 +106,33 @@ That macro expands the standard `kvist_hot` manifest and exported entrypoints
 for a host-owned state type, so reloadable modules stop hand-writing the same
 ABI surface per demo.
 
-There is also a higher-level CLI surface on top of that runtime:
+There is also a higher-level CLI surface on top of that runtime. Production
+commands point at ordinary Kvist source:
 
-- top-level `(defstate Name {fields...} {metadata...})` in pure `.kvist` user code
-- `kvist dev --reload app/main.kvist`
-- `kvist dev --reload app/main.kvist --rebuild`
-- `kvist dev --reload app/main.kvist --print-paths`
-- `kvist dev --reload app/main.kvist --print-paths --json`
-- `kvist dev --reload app/main.kvist --rebuild --json`
-- `kvist check --reload app/main.kvist`
-- `kvist build --reload app/main.kvist`
-- `kvist run --reload app/main.kvist`
+- `kvist check main.kvist`
+- `kvist build main.kvist`
+- `kvist run main.kvist`
+
+Development commands point at a reload adapter, or at a nearby production file
+when a conventional `reload.kvist` adapter can be discovered:
+
+- `kvist dev --reload reload.kvist`
+- `kvist dev --reload reload.kvist --watch`
+- `kvist dev --reload reload.kvist --rebuild`
+- `kvist dev --reload reload.kvist --print-paths`
+- `kvist dev --reload reload.kvist --print-paths --json`
+- `kvist dev --reload reload.kvist --rebuild --json`
+- `kvist dev --reload main.kvist --watch`
 
 That path generates the resident shell and reloadable module underneath while
-keeping the user source as one `.kvist` app file with one durable root state
-and an explicit reload-lifetime contract.
+keeping production source ordinary. The reload adapter names the durable root
+state and lifecycle procs explicitly.
 
 The compiler owns the generated-Odin import rebasing for this path.
 That means:
 
 - `kvist compile ... -o some/output.odin`
-- `kvist check|build|run --reload ...`
+- `kvist check|build|run ...`
 - `kvist dev --reload ...`
 
 all write generated Odin with source-package-introduced Odin imports rewritten
@@ -134,46 +140,39 @@ relative to the final output location instead of leaking absolute repo paths.
 This matters in practice for cache directories and symlinked temp roots like
 `/tmp` on macOS.
 
-Today the generated host supports both:
+Today the generated host has one user callback:
 
-- `:run` for app-owned runtimes that cooperate through one explicit
-  `reload/checkpoint!` boundary; this is the general mode for most programs
-- `:step` for shell-owned loop-driven apps; this is the convenience mode when
-  you want Kvist to provide the outer loop
+- `:run` names the reloadable app entrypoint
+- `run` receives the durable state root and a reload host handle
+- the app calls `reload/checkpoint!` at one explicit safe boundary
 
-Recommended default:
-
-- prefer `:run` for most real applications
-- use `:step` when you explicitly want Kvist to own the outer loop
-
-Good `:run` fits:
+Good fits:
 
 - web servers
 - GUI apps
 - worker processes
 - editors
 - tools with their own event or request cycle
-
-Good `:step` fits:
-
 - games
 - simulations
 - polling tools
 - immediate-mode interactive programs
 - small demos where a step-and-sleep loop is already the right shape
 
-In development, `kvist dev --reload ...` keeps the resident shell alive and
-rebuilds only the reloadable side. In ordinary execution, `kvist check|build|run
---reload ...` generates a plain wrapper around the same `defstate` source:
+In development, `kvist dev --reload ... --watch` keeps the resident shell alive
+and rebuilds the reloadable side when `.kvist` files in the reload package
+directory change. `kvist dev --reload ...` still starts just the resident shell,
+and `kvist dev --reload ... --rebuild` still performs one manual rebuild. In
+ordinary execution, `kvist check|build|run ...` can point at the normal
+production entrypoint instead of the reload adapter.
 
-- `:step` lowers to a normal step-and-sleep executable loop
-- `:run` lowers to a normal app-owned runtime call
-- `reload/checkpoint!` becomes a no-op when there is no resident reloader
+In that ordinary execution context, `reload/checkpoint!` becomes a no-op when
+there is no resident reloader.
 
-For sources that clearly declare the reload-app contract through `defstate`
-metadata, plain `kvist check|build|run app/main.kvist` now route through that
-same production wrapper automatically. `--reload` remains valid, but is no
-longer required for the common reload-app source shape.
+For tiny sources that directly declare the reload-app contract through inline
+`defstate` metadata, plain `kvist check|build|run main.kvist` can still
+route through the generated production wrapper. Larger projects should keep
+that contract in a separate reload adapter.
 
 Current state-layout behavior is intentionally conservative:
 
@@ -186,9 +185,9 @@ That means behavior changes are the intended smooth path today, while durable
 state-shape changes still require either a clean restart or a future explicit
 migration/reset policy.
 
-## `:run` Checkpoint Guidance
+## Checkpoint Guidance
 
-`reload/checkpoint!` is the single explicit cooperation point for `:run`.
+`reload/checkpoint!` is the single explicit cooperation point for reload apps.
 
 Treat it as:
 
@@ -224,7 +223,7 @@ Practical examples:
 
 ```clojure
 (defn run [state: (ptr App_State) host: (ptr reload/Run_Host)]
-  (for true
+  (while true
     (handle-one-request state)
     (core/when (reload/checkpoint! host)
       (return))))
@@ -232,7 +231,7 @@ Practical examples:
 
 ```clojure
 (defn run [state: (ptr App_State) host: (ptr reload/Run_Host)]
-  (for true
+  (while true
     (pump-events state)
     (dispatch-ready-work state)
     (core/when (reload/checkpoint! host)
@@ -256,9 +255,10 @@ compiler hardcoding.
 
 The current editor-facing reload contract is:
 
-- `kvist dev --reload app/main.kvist --json`
-- `kvist dev --reload app/main.kvist --print-paths --json`
-- `kvist dev --reload app/main.kvist --rebuild --json`
+- `kvist dev --reload reload.kvist --json`
+- `kvist dev --reload reload.kvist --watch`
+- `kvist dev --reload reload.kvist --print-paths --json`
+- `kvist dev --reload reload.kvist --rebuild --json`
 
 The first command starts the resident reload session and emits structured event
 lines prefixed with `KVIST_RELOAD_EVENT<TAB>`. Those lines carry JSON payloads
@@ -266,8 +266,12 @@ such as `started`, `reloaded`, `reload_failed`, and `checkpoint_error`, while
 ordinary app stdout/stderr still flows through the same terminal or editor
 buffer.
 
-The second command prints machine-readable generated paths and canonical reload
-commands. The third prints a structured rebuild result with:
+`--watch` starts the resident reload session and also polls the source package
+for `.kvist` changes, rebuilding the reloadable module after a short debounce.
+
+`--print-paths --json` prints machine-readable generated paths and canonical
+watch/run/rebuild commands. `--rebuild --json` prints a structured rebuild
+result with:
 
 - `ok`
 - `exit_code`
@@ -417,7 +421,7 @@ This is the architecture that seems strongest right now.
 ## Demo
 
 The first native hot-reload demo lives in
-[`examples/hot_reload_demo`](../examples/hot_reload_demo/README.md).
+[`examples/reload/hot_reload_demo`](../examples/reload/hot_reload_demo/README.md).
 
 It shows:
 
@@ -431,16 +435,18 @@ It shows:
 - pure-Kvist native module contracts via `(hot/defmodule ...)`
 - a clean place for later `Kvist/Live` embedding on top
 
-The newer lowest-ceremony native path lives in
-[`examples/reload_step_demo`](../examples/reload_step_demo/README.md). It demonstrates
-the first `defstate` reload workflow and the CLI shape intended for editor
-tooling.
+The lowest-ceremony native reload path starts with
+[`examples/reload/reload_step_demo`](../examples/reload/reload_step_demo/README.md).
+It demonstrates the loop-shaped `defstate` reload workflow and the CLI shape
+intended for editor tooling.
 
 Its companion app-owned runtime example lives in
-[`examples/reload_run_demo`](../examples/reload_run_demo/README.md).
+[`examples/reload/reload_run_demo`](../examples/reload/reload_run_demo/README.md).
+It demonstrates the Olive-like split between ordinary production Kvist and a
+small reload adapter.
 
 That follow-on combined example now lives in
-[`examples/hybrid_live_demo`](../examples/hybrid_live_demo/README.md).
+[`examples/reload/hybrid_live_demo`](../examples/reload/hybrid_live_demo/README.md).
 
 It shows:
 

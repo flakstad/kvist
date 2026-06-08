@@ -6,3 +6,7 @@ __pycache__/
 *.odin.tmp
 .worktrees/
 /kvist
+/.DS_Store
+/examples/.DS_Store
+/examples/**/.DS_Store
+/examples/.kvist-symbols-*.tmp

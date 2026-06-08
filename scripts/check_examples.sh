@@ -9,7 +9,17 @@ odin build cmd/kvist
 tmp_dir=$(mktemp -d)
 trap 'rm -rf "$tmp_dir"' EXIT INT TERM
 
-for input in examples/*.kvist; do
+find examples/collections \
+     examples/interop \
+     examples/language \
+     examples/packages \
+     examples/visual \
+     examples/web \
+     -name '*.kvist' \
+     ! -path 'examples/visual/simple-game/*' \
+     -print |
+sort |
+while IFS= read -r input; do
     name=$(basename "$input" .kvist)
     output="$tmp_dir/$name.odin"
     map="$tmp_dir/$name.map"

@@ -29,13 +29,13 @@ assert_file_nonempty() {
 }
 
 printf 'tooling: compile command\n'
-./kvist compile examples/hello.kvist -o "$tmp_dir/hello.odin" --map "$tmp_dir/hello.map"
+./kvist compile examples/language/hello.kvist -o "$tmp_dir/hello.odin" --map "$tmp_dir/hello.map"
 assert_file_nonempty "$tmp_dir/hello.odin" "compile output"
 assert_file_nonempty "$tmp_dir/hello.map" "compile source map"
 odin check "$tmp_dir/hello.odin" -file
 
 printf 'tooling: symbols command\n'
-./kvist symbols examples/sequences.kvist > "$tmp_dir/symbols.tsv"
+./kvist symbols examples/collections/sequences.kvist > "$tmp_dir/symbols.tsv"
 if ! grep -q "$(printf 'proc\tactive-count')" "$tmp_dir/symbols.tsv"; then
     printf 'failed: symbols output did not include active-count proc\n' >&2
     cat "$tmp_dir/symbols.tsv" >&2
@@ -48,7 +48,7 @@ if ! grep -q "$(printf 'field\tUser.name')" "$tmp_dir/symbols.tsv"; then
 fi
 
 printf 'tooling: check command\n'
-./kvist check examples/hello.kvist --generated "$tmp_dir/check.odin"
+./kvist check examples/language/hello.kvist --generated "$tmp_dir/check.odin"
 assert_file_nonempty "$tmp_dir/check.odin" "check generated output"
 
 printf 'tooling: check diagnostic mapping\n'
@@ -114,26 +114,26 @@ do
 done
 
 printf 'tooling: build command\n'
-./kvist build examples/hello.kvist --generated "$tmp_dir/build.odin"
+./kvist build examples/language/hello.kvist --generated "$tmp_dir/build.odin"
 assert_file_nonempty "$tmp_dir/build.odin" "build generated output"
 
 printf 'tooling: run command\n'
-run_output=$(./kvist run examples/hello.kvist)
+run_output=$(./kvist run examples/language/hello.kvist)
 assert_eq "hello from kvist" "$run_output" "run output"
 
 printf 'tooling: eval command\n'
-eval_output=$(./kvist eval examples/higher-order.kvist '(reduce add 0 (new []int [1 2 3]))' --generated "$tmp_dir/eval.odin")
+eval_output=$(./kvist eval examples/collections/higher-order.kvist '(threaded-total)' --generated "$tmp_dir/eval.odin")
 assert_eq "6" "$eval_output" "eval output"
 assert_file_nonempty "$tmp_dir/eval.odin" "eval generated output"
 
 printf 'tooling: eval tap output\n'
-tap_output=$(./kvist eval examples/tap.kvist '(tap> :answer 42)')
+tap_output=$(./kvist eval examples/collections/tap.kvist '(tap> :answer 42)')
 tap_expected=$(printf 'answer: 42\n42')
 assert_eq "$tap_expected" "$tap_output" "tap eval output"
 
 printf 'tooling: eval save cache\n'
 cache_dir="$tmp_dir/cache"
-saved_output=$(KVIST_CACHE_DIR="$cache_dir" ./kvist eval examples/higher-order.kvist '(reduce add 0 (new []int [1 2 3]))' --save sum)
+saved_output=$(KVIST_CACHE_DIR="$cache_dir" ./kvist eval examples/collections/higher-order.kvist '(threaded-total)' --save sum)
 assert_eq "6" "$saved_output" "saved eval output"
 saved_path=$(KVIST_CACHE_DIR="$cache_dir" ./kvist cache path sum)
 assert_eq "$cache_dir/sum" "$saved_path" "cache path"
@@ -145,23 +145,23 @@ assert_eq "" "$(KVIST_CACHE_DIR="$cache_dir" ./kvist cache list)" "cache list af
 printf 'tooling: eval file-backed dev helpers\n'
 cat > "$tmp_dir/dev-io.kvist" <<'EOF'
 (package main)
-(import json "core:encoding/json")
-(import os "core:os")
+(import io "kvist:io")
+(import json "kvist:json")
 
-(struct Note {
+(defstruct Note {
   :title string
   :body string
 })
 
-(struct Count {
+(defstruct Count {
   :n int
 })
 
 (proc write-read-count [path: string] -> int
-  (let [write-err (spit path "kvist")]
+  (let [write-err (io/write path "kvist")]
     (if (!= write-err nil)
       0
-      (let [[data read-err] (slurp path)]
+      (let [[data read-err] (io/read path)]
         (if (!= read-err nil)
           0
           (do
@@ -169,33 +169,21 @@ cat > "$tmp_dir/dev-io.kvist" <<'EOF'
             (len data)))))))
 
 (proc save-note-json [path: string] -> bool
-  (let [note (Note {:title "hello" :body "kvist"})
-        [data marshal-err] (json.marshal note)]
-    (if (!= marshal-err nil)
-      false
-      (do
-        (defer (delete data))
-        (== (spit path data) nil)))))
+  (let [[marshal-err write-err] (json/write path (Note {:title "hello" :body "kvist"}))]
+    (and (== marshal-err nil)
+         (== write-err nil))))
 
 (proc save-count-json [path: string, n: int] -> bool
-  (let [[data marshal-err] (json.marshal (Count {:n n}))]
-    (if (!= marshal-err nil)
-      false
-      (do
-        (defer (delete data))
-        (== (spit path data) nil)))))
+  (let [[marshal-err write-err] (json/write path (Count {:n n}))]
+    (and (== marshal-err nil)
+         (== write-err nil))))
 
 (proc load-count-json [path: string] -> int
-  (let [[data read-err] (slurp path)]
-    (if (!= read-err nil)
+  (let [[count read-err unmarshal-err] (json/read-as Count path)]
+    (if (or (!= read-err nil)
+            (!= unmarshal-err nil))
       0
-      (do
-        (defer (delete data))
-        (let [count (Count {})
-              unmarshal-err (json.unmarshal data (& count))]
-          (if (!= unmarshal-err nil)
-            0
-            (:n count)))))))
+      (:n count))))
 EOF
 file_eval_output=$(./kvist eval "$tmp_dir/dev-io.kvist" "(write-read-count \"$tmp_dir/kvist-cache.txt\")")
 assert_eq "5" "$file_eval_output" "file-backed eval output"
@@ -212,7 +200,7 @@ count_load_output=$(./kvist eval "$tmp_dir/dev-io.kvist" "(load-count-json \"$tm
 assert_eq "42" "$count_load_output" "json load eval output"
 
 printf 'tooling: expand command\n'
-./kvist expand examples/data-literals.kvist '(temp-buffer-len)' -o "$tmp_dir/expand.odin"
+./kvist expand examples/language/data-literals.kvist '(temp-buffer-len)' -o "$tmp_dir/expand.odin"
 assert_file_nonempty "$tmp_dir/expand.odin" "expand generated output"
 if ! grep -q 'context.allocator = allocator' "$tmp_dir/expand.odin"; then
     printf 'failed: expand output did not include with-allocator lowering\n' >&2
@@ -227,7 +215,7 @@ fi
 odin check "$tmp_dir/expand.odin" -file
 
 printf 'tooling: macroexpand command\n'
-./kvist macroexpand examples/data-literals.kvist '(with-allocator [allocator context.temp_allocator] (let [buffer (make [dynamic]int)] (defer (delete buffer))))' -o "$tmp_dir/macroexpand.kvist" --map "$tmp_dir/macroexpand.map"
+./kvist macroexpand examples/language/data-literals.kvist '(with-allocator [allocator context.temp_allocator] (let [buffer (make [dynamic]int)] (defer (delete buffer))))' -o "$tmp_dir/macroexpand.kvist" --map "$tmp_dir/macroexpand.map"
 assert_file_nonempty "$tmp_dir/macroexpand.kvist" "macroexpand output"
 assert_file_nonempty "$tmp_dir/macroexpand.map" "macroexpand source map"
 if ! grep -q '(set! context.allocator allocator)' "$tmp_dir/macroexpand.kvist"; then
@@ -245,7 +233,7 @@ if ! grep -q '^2 2 ' "$tmp_dir/macroexpand.map"; then
     cat "$tmp_dir/macroexpand.map" >&2
     exit 1
 fi
-./kvist macroexpand examples/data-literals.kvist '(with-temp-allocator [allocator] (let [buffer (make [dynamic]int)] (defer (delete buffer))))' -o "$tmp_dir/macroexpand-temp.kvist"
+./kvist macroexpand examples/language/data-literals.kvist '(with-temp-allocator [allocator] (let [buffer (make [dynamic]int)] (defer (delete buffer))))' -o "$tmp_dir/macroexpand-temp.kvist"
 assert_file_nonempty "$tmp_dir/macroexpand-temp.kvist" "macroexpand temp output"
 if ! grep -q 'runtime.default-temp-allocator-temp-begin' "$tmp_dir/macroexpand-temp.kvist"; then
     printf 'failed: macroexpand temp output did not include temp begin\n' >&2
@@ -259,75 +247,75 @@ if ! grep -q 'runtime.default-temp-allocator-temp-end' "$tmp_dir/macroexpand-tem
 fi
 
 printf 'tooling: eval main command\n'
-main_eval_output=$(./kvist eval examples/hello.kvist '(main)')
+main_eval_output=$(./kvist eval examples/language/hello.kvist '(main)')
 assert_eq "hello from kvist" "$main_eval_output" "eval main output"
 
 printf 'tooling: sequence example evals\n'
-assert_eq "2" "$(./kvist eval examples/sequence-helpers.kvist '(split-front-length)')" "split-front-length"
-assert_eq "4" "$(./kvist eval examples/sequence-helpers.kvist '(first-kept-square)')" "first-kept-square"
-assert_eq "12" "$(./kvist eval examples/sequence-helpers.kvist '(deferred-total)')" "deferred-total"
-assert_eq "45" "$(./kvist eval examples/sequence-helpers.kvist '(age-for-grace)')" "age-for-grace"
-assert_eq "2" "$(./kvist eval examples/sequence-helpers.kvist '(chunk-count)')" "chunk-count"
-assert_eq "2" "$(./kvist eval examples/sequence-helpers.kvist '(repeated-two-count)')" "repeated-two-count"
-assert_eq "3" "$(./kvist eval examples/sequence-helpers.kvist '(indexed-name-count)')" "indexed-name-count"
-assert_eq "6" "$(./kvist eval examples/sequence-helpers.kvist '(key-value-count)')" "key-value-count"
-assert_eq "3" "$(./kvist eval examples/sequence-helpers.kvist '(even-group-count)')" "even-group-count"
-assert_eq "10" "$(./kvist eval examples/sequence-helpers.kvist '(range-total)')" "range-total"
-assert_eq "3" "$(./kvist eval examples/sequence-helpers.kvist '(repeated-answer-count)')" "repeated-answer-count"
-assert_eq "odin" "$(./kvist eval examples/sequence-helpers.kvist '(repeated-word-last)')" "repeated-word-last"
-assert_eq "8" "$(./kvist eval examples/sequence-helpers.kvist '(iterated-last)')" "iterated-last"
-assert_eq "9" "$(./kvist eval examples/sequence-helpers.kvist '(cycled-total)')" "cycled-total"
-assert_eq "5" "$(./kvist eval examples/sequence-helpers.kvist '(counted-cycle)')" "counted-cycle"
-assert_eq "13" "$(./kvist eval examples/sequence-helpers.kvist '(trimmed-sum)')" "trimmed-sum"
-assert_eq "40" "$(./kvist eval examples/sequence-helpers.kvist '(rest-second-empty-score)')" "rest-second-empty-score"
-assert_eq "4" "$(./kvist eval examples/sequence-helpers.kvist '(concat-reversed-first)')" "concat-reversed-first"
-assert_eq "26" "$(./kvist eval examples/sequence-helpers.kvist '(interposed-total)')" "interposed-total"
-assert_eq "33" "$(./kvist eval examples/sequence-helpers.kvist '(interleaved-total)')" "interleaved-total"
-assert_eq "2" "$(./kvist eval examples/sequence-helpers.kvist '(shuffled-first)')" "shuffled-first"
-assert_eq "2" "$(./kvist eval examples/sequence-helpers.kvist '(shuffled-in-place-first)')" "shuffled-in-place-first"
-assert_eq "2" "$(./kvist eval examples/sequence-helpers.kvist '(sorted-second)')" "sorted-second"
-assert_eq "4" "$(./kvist eval examples/sequence-helpers.kvist '(descending-first)')" "descending-first"
-assert_eq "1" "$(./kvist eval examples/sequence-helpers.kvist '(sorted-in-place-first)')" "sorted-in-place-first"
-assert_eq "4" "$(./kvist eval examples/sequence-helpers.kvist '(reversed-in-place-first)')" "reversed-in-place-first"
-assert_eq "4" "$(./kvist eval examples/sequence-helpers.kvist '(descending-in-place-first)')" "descending-in-place-first"
-assert_eq "12" "$(./kvist eval examples/sequence-helpers.kvist '(doubled-in-place-total)')" "doubled-in-place-total"
-assert_eq "3" "$(./kvist eval examples/sequence-helpers.kvist '(indexed-in-place-second)')" "indexed-in-place-second"
-assert_eq "2" "$(./kvist eval examples/sequence-helpers.kvist '(filtered-in-place-count)')" "filtered-in-place-count"
-assert_eq "1" "$(./kvist eval examples/sequence-helpers.kvist '(removed-in-place-first)')" "removed-in-place-first"
-assert_eq "4" "$(./kvist eval examples/sequence-helpers.kvist '(kept-in-place-first)')" "kept-in-place-first"
-assert_eq "10" "$(./kvist eval examples/sequence-helpers.kvist '(appended-total)')" "appended-total"
-assert_eq "6" "$(./kvist eval examples/sequence-helpers.kvist '(copied-total)')" "copied-total"
-assert_eq "6" "$(./kvist eval examples/sequence-helpers.kvist '(distinct-total)')" "distinct-total"
-assert_eq "2" "$(./kvist eval examples/sequence-helpers.kvist '(first-per-parity-count)')" "first-per-parity-count"
-assert_eq "1" "$(./kvist eval examples/sequence-helpers.kvist '(ragged-chunk-size)')" "ragged-chunk-size"
-assert_eq "4" "$(./kvist eval examples/sequence-helpers.kvist '(run-count)')" "run-count"
-assert_eq "15" "$(./kvist eval examples/sequence-helpers.kvist '(flattened-total)')" "flattened-total"
-assert_eq "4" "$(./kvist eval examples/sequence-helpers.kvist '(threaded-first)')" "threaded-first"
-assert_eq "/health" "$(./kvist eval examples/declarations.kvist '(endpoint-summary)')" "endpoint-summary"
-assert_eq "404" "$(./kvist eval examples/declarations.kvist '(shorthand-status-code)')" "shorthand-status-code"
-assert_eq "36" "$(./kvist eval examples/sequences.kvist '(age-for-ada)')" "age-for-ada"
-assert_eq "3" "$(./kvist eval examples/sequences.kvist '(status-run-count)')" "status-run-count"
-assert_eq "2" "$(./kvist eval examples/sequences.kvist '(active-status-group-count)')" "active-status-group-count"
-assert_eq "2" "$(./kvist eval examples/data-literals.kvist '(temp-buffer-len)')" "temp-buffer-len"
-assert_eq "3" "$(./kvist eval examples/data-literals.kvist '(temp-scoped-buffer-len)')" "temp-scoped-buffer-len"
-assert_eq "1500" "$(./kvist eval examples/core-time-slice.kvist '(duration-ms)')" "duration-ms"
-assert_eq "2" "$(./kvist eval examples/core-time-slice.kvist '(fixed-date-weekday)')" "fixed-date-weekday"
-assert_eq "10" "$(./kvist eval examples/core-time-slice.kvist '(fixed-date-string-length)')" "fixed-date-string-length"
-assert_eq "17" "$(./kvist eval examples/core-time-slice.kvist '(min-max-score)')" "min-max-score"
-assert_eq "2" "$(./kvist eval examples/core-time-slice.kvist '(search-score)')" "search-score"
-assert_eq "49" "$(./kvist eval examples/core-concurrency.kvist '(future-like-square)')" "future-like-square"
-assert_eq "2" "$(./kvist eval examples/core-concurrency.kvist '(mutex-protected-count)')" "mutex-protected-count"
-assert_eq "30" "$(./kvist eval examples/core-container-queue.kvist '(fifo-total)')" "fifo-total"
-assert_eq "60" "$(./kvist eval examples/core-container-queue.kvist '(deque-score)')" "deque-score"
-assert_eq "5" "$(./kvist eval examples/core-container-queue.kvist '(safe-pop-score)')" "safe-pop-score"
-assert_eq "5" "$(./kvist eval examples/core-paths.kvist '(slash-route-name-len)')" "slash-route-name-len"
-assert_eq "16" "$(./kvist eval examples/core-paths.kvist '(slash-clean-score)')" "slash-clean-score"
-assert_eq "15" "$(./kvist eval examples/core-paths.kvist '(filepath-relative-len)')" "filepath-relative-len"
-assert_eq "3" "$(./kvist eval examples/core-paths.kvist '(filepath-extension-len)')" "filepath-extension-len"
-assert_eq "65" "$(./kvist eval examples/core-encoding-formats.kvist '(csv-age-total)')" "csv-age-total"
-assert_eq "3" "$(./kvist eval examples/core-encoding-formats.kvist '(csv-record-count)')" "csv-record-count"
-assert_eq "8080" "$(./kvist eval examples/core-encoding-formats.kvist '(ini-port)')" "ini-port"
-assert_eq "2" "$(./kvist eval examples/core-encoding-formats.kvist '(ini-pair-count)')" "ini-pair-count"
+assert_eq "2" "$(./kvist eval examples/collections/sequence-helpers.kvist '(split-front-length)')" "split-front-length"
+assert_eq "4" "$(./kvist eval examples/collections/sequence-helpers.kvist '(first-kept-square)')" "first-kept-square"
+assert_eq "12" "$(./kvist eval examples/collections/sequence-helpers.kvist '(deferred-total)')" "deferred-total"
+assert_eq "45" "$(./kvist eval examples/collections/sequence-helpers.kvist '(age-for-grace)')" "age-for-grace"
+assert_eq "2" "$(./kvist eval examples/collections/sequence-helpers.kvist '(chunk-count)')" "chunk-count"
+assert_eq "2" "$(./kvist eval examples/collections/sequence-helpers.kvist '(repeated-two-count)')" "repeated-two-count"
+assert_eq "3" "$(./kvist eval examples/collections/sequence-helpers.kvist '(indexed-name-count)')" "indexed-name-count"
+assert_eq "6" "$(./kvist eval examples/collections/sequence-helpers.kvist '(key-value-count)')" "key-value-count"
+assert_eq "3" "$(./kvist eval examples/collections/sequence-helpers.kvist '(even-group-count)')" "even-group-count"
+assert_eq "10" "$(./kvist eval examples/collections/sequence-helpers.kvist '(range-total)')" "range-total"
+assert_eq "3" "$(./kvist eval examples/collections/sequence-helpers.kvist '(repeated-answer-count)')" "repeated-answer-count"
+assert_eq "odin" "$(./kvist eval examples/collections/sequence-helpers.kvist '(repeated-word-last)')" "repeated-word-last"
+assert_eq "8" "$(./kvist eval examples/collections/sequence-helpers.kvist '(iterated-last)')" "iterated-last"
+assert_eq "9" "$(./kvist eval examples/collections/sequence-helpers.kvist '(cycled-total)')" "cycled-total"
+assert_eq "5" "$(./kvist eval examples/collections/sequence-helpers.kvist '(counted-cycle)')" "counted-cycle"
+assert_eq "13" "$(./kvist eval examples/collections/sequence-helpers.kvist '(trimmed-sum)')" "trimmed-sum"
+assert_eq "40" "$(./kvist eval examples/collections/sequence-helpers.kvist '(rest-second-empty-score)')" "rest-second-empty-score"
+assert_eq "4" "$(./kvist eval examples/collections/sequence-helpers.kvist '(concat-reversed-first)')" "concat-reversed-first"
+assert_eq "26" "$(./kvist eval examples/collections/sequence-helpers.kvist '(interposed-total)')" "interposed-total"
+assert_eq "33" "$(./kvist eval examples/collections/sequence-helpers.kvist '(interleaved-total)')" "interleaved-total"
+assert_eq "2" "$(./kvist eval examples/collections/sequence-helpers.kvist '(shuffled-first)')" "shuffled-first"
+assert_eq "2" "$(./kvist eval examples/collections/sequence-helpers.kvist '(shuffled-in-place-first)')" "shuffled-in-place-first"
+assert_eq "2" "$(./kvist eval examples/collections/sequence-helpers.kvist '(sorted-second)')" "sorted-second"
+assert_eq "4" "$(./kvist eval examples/collections/sequence-helpers.kvist '(descending-first)')" "descending-first"
+assert_eq "1" "$(./kvist eval examples/collections/sequence-helpers.kvist '(sorted-in-place-first)')" "sorted-in-place-first"
+assert_eq "4" "$(./kvist eval examples/collections/sequence-helpers.kvist '(reversed-in-place-first)')" "reversed-in-place-first"
+assert_eq "4" "$(./kvist eval examples/collections/sequence-helpers.kvist '(descending-in-place-first)')" "descending-in-place-first"
+assert_eq "12" "$(./kvist eval examples/collections/sequence-helpers.kvist '(doubled-in-place-total)')" "doubled-in-place-total"
+assert_eq "3" "$(./kvist eval examples/collections/sequence-helpers.kvist '(indexed-in-place-second)')" "indexed-in-place-second"
+assert_eq "2" "$(./kvist eval examples/collections/sequence-helpers.kvist '(filtered-in-place-count)')" "filtered-in-place-count"
+assert_eq "1" "$(./kvist eval examples/collections/sequence-helpers.kvist '(removed-in-place-first)')" "removed-in-place-first"
+assert_eq "4" "$(./kvist eval examples/collections/sequence-helpers.kvist '(kept-in-place-first)')" "kept-in-place-first"
+assert_eq "10" "$(./kvist eval examples/collections/sequence-helpers.kvist '(appended-total)')" "appended-total"
+assert_eq "6" "$(./kvist eval examples/collections/sequence-helpers.kvist '(copied-total)')" "copied-total"
+assert_eq "6" "$(./kvist eval examples/collections/sequence-helpers.kvist '(distinct-total)')" "distinct-total"
+assert_eq "2" "$(./kvist eval examples/collections/sequence-helpers.kvist '(first-per-parity-count)')" "first-per-parity-count"
+assert_eq "1" "$(./kvist eval examples/collections/sequence-helpers.kvist '(ragged-chunk-size)')" "ragged-chunk-size"
+assert_eq "4" "$(./kvist eval examples/collections/sequence-helpers.kvist '(run-count)')" "run-count"
+assert_eq "15" "$(./kvist eval examples/collections/sequence-helpers.kvist '(flattened-total)')" "flattened-total"
+assert_eq "4" "$(./kvist eval examples/collections/sequence-helpers.kvist '(threaded-first)')" "threaded-first"
+assert_eq "/health" "$(./kvist eval examples/language/declarations.kvist '(endpoint-summary)')" "endpoint-summary"
+assert_eq "404" "$(./kvist eval examples/language/declarations.kvist '(shorthand-status-code)')" "shorthand-status-code"
+assert_eq "36" "$(./kvist eval examples/collections/sequences.kvist '(age-for-ada)')" "age-for-ada"
+assert_eq "3" "$(./kvist eval examples/collections/sequences.kvist '(status-run-count)')" "status-run-count"
+assert_eq "2" "$(./kvist eval examples/collections/sequences.kvist '(active-status-group-count)')" "active-status-group-count"
+assert_eq "2" "$(./kvist eval examples/language/data-literals.kvist '(temp-buffer-len)')" "temp-buffer-len"
+assert_eq "3" "$(./kvist eval examples/language/data-literals.kvist '(temp-scoped-buffer-len)')" "temp-scoped-buffer-len"
+assert_eq "1500" "$(./kvist eval examples/interop/core/core-time-slice.kvist '(duration-ms)')" "duration-ms"
+assert_eq "2" "$(./kvist eval examples/interop/core/core-time-slice.kvist '(fixed-date-weekday)')" "fixed-date-weekday"
+assert_eq "10" "$(./kvist eval examples/interop/core/core-time-slice.kvist '(fixed-date-string-length)')" "fixed-date-string-length"
+assert_eq "17" "$(./kvist eval examples/interop/core/core-time-slice.kvist '(min-max-score)')" "min-max-score"
+assert_eq "2" "$(./kvist eval examples/interop/core/core-time-slice.kvist '(search-score)')" "search-score"
+assert_eq "49" "$(./kvist eval examples/interop/core/core-concurrency.kvist '(future-like-square)')" "future-like-square"
+assert_eq "2" "$(./kvist eval examples/interop/core/core-concurrency.kvist '(mutex-protected-count)')" "mutex-protected-count"
+assert_eq "30" "$(./kvist eval examples/interop/core/core-container-queue.kvist '(fifo-total)')" "fifo-total"
+assert_eq "60" "$(./kvist eval examples/interop/core/core-container-queue.kvist '(deque-score)')" "deque-score"
+assert_eq "5" "$(./kvist eval examples/interop/core/core-container-queue.kvist '(safe-pop-score)')" "safe-pop-score"
+assert_eq "5" "$(./kvist eval examples/interop/core/core-paths.kvist '(slash-route-name-len)')" "slash-route-name-len"
+assert_eq "16" "$(./kvist eval examples/interop/core/core-paths.kvist '(slash-clean-score)')" "slash-clean-score"
+assert_eq "15" "$(./kvist eval examples/interop/core/core-paths.kvist '(filepath-relative-len)')" "filepath-relative-len"
+assert_eq "3" "$(./kvist eval examples/interop/core/core-paths.kvist '(filepath-extension-len)')" "filepath-extension-len"
+assert_eq "65" "$(./kvist eval examples/interop/core/core-encoding-formats.kvist '(csv-age-total)')" "csv-age-total"
+assert_eq "3" "$(./kvist eval examples/interop/core/core-encoding-formats.kvist '(csv-record-count)')" "csv-record-count"
+assert_eq "8080" "$(./kvist eval examples/interop/core/core-encoding-formats.kvist '(ini-port)')" "ini-port"
+assert_eq "2" "$(./kvist eval examples/interop/core/core-encoding-formats.kvist '(ini-pair-count)')" "ini-pair-count"
 parallel_eval_output=$(
     printf '%s\n' \
         '(duration-ms)' \
@@ -335,74 +323,74 @@ parallel_eval_output=$(
         '(fixed-date-string-length)' \
         '(min-max-score)' \
         '(search-score)' |
-        xargs -P 5 -I FORM ./kvist eval examples/core-time-slice.kvist FORM |
+        xargs -P 5 -I FORM ./kvist eval examples/interop/core/core-time-slice.kvist FORM |
         sort
 )
 parallel_eval_expected=$(printf '10\n1500\n17\n2\n2')
 assert_eq "$parallel_eval_expected" "$parallel_eval_output" "parallel eval output"
-assert_eq "parsed 1" "$(./kvist eval examples/error-handling.kvist "(parse-label \"one\")")" "parse-label"
-assert_eq "not parsed" "$(./kvist eval examples/error-handling.kvist "(parse-label \"missing\")")" "parse-label-missing"
-assert_eq "3" "$(./kvist eval examples/error-handling.kvist "(parsed-total \"one\" \"two\")")" "parsed-total"
-assert_eq "0" "$(./kvist eval examples/error-handling.kvist "(read-byte-count \"tmp/does-not-exist.txt\")")" "read-byte-count-missing"
-tap_age_output=$(./kvist eval examples/tap.kvist '(inspected-age)')
+assert_eq "parsed 1" "$(./kvist eval examples/interop/core/error-handling.kvist "(parse-label \"one\")")" "parse-label"
+assert_eq "not parsed" "$(./kvist eval examples/interop/core/error-handling.kvist "(parse-label \"missing\")")" "parse-label-missing"
+assert_eq "3" "$(./kvist eval examples/interop/core/error-handling.kvist "(parsed-total \"one\" \"two\")")" "parsed-total"
+assert_eq "0" "$(./kvist eval examples/interop/core/error-handling.kvist "(read-byte-count \"tmp/does-not-exist.txt\")")" "read-byte-count-missing"
+tap_age_output=$(./kvist eval examples/collections/tap.kvist '(inspected-age)')
 tap_age_expected=$(printf 'user: User{name = "Ada", age = 36}\nage: 36\n36')
 assert_eq "$tap_age_expected" "$tap_age_output" "inspected-age"
-assert_eq "-1" "$(./kvist eval examples/data-literals.kvist '(lookup-missing-default)')" "lookup-missing-default"
-assert_eq "51" "$(./kvist eval examples/data-literals.kvist '(merged-lookup-total)')" "merged-lookup-total"
-assert_eq "51" "$(./kvist eval examples/data-literals.kvist '(merge-in-place-total)')" "merge-in-place-total"
-assert_eq "Lin" "$(./kvist eval examples/sequences.kvist '(youngest-user-name)')" "youngest-user-name"
-assert_eq "Lin" "$(./kvist eval examples/sequences.kvist '(youngest-user-name-in-place)')" "youngest-user-name-in-place"
+assert_eq "-1" "$(./kvist eval examples/language/data-literals.kvist '(lookup-missing-default)')" "lookup-missing-default"
+assert_eq "51" "$(./kvist eval examples/language/data-literals.kvist '(merged-lookup-total)')" "merged-lookup-total"
+assert_eq "51" "$(./kvist eval examples/language/data-literals.kvist '(merge-in-place-total)')" "merge-in-place-total"
+assert_eq "Lin" "$(./kvist eval examples/collections/sequences.kvist '(youngest-user-name)')" "youngest-user-name"
+assert_eq "Lin" "$(./kvist eval examples/collections/sequences.kvist '(youngest-user-name-in-place)')" "youngest-user-name-in-place"
 
 printf 'tooling: eval check command\n'
-./kvist eval examples/higher-order.kvist '(reduce add 0 (new []int [1 2 3]))' --check
+./kvist eval examples/collections/higher-order.kvist '(threaded-total)' --check
 
 printf 'tooling: eval declaration form\n'
 cat > "$tmp_dir/decl-eval.kvist" <<'EOF'
 (package main)
 (import "core:fmt")
 
-(struct Greeting {
+(defstruct Greeting {
   :message string
 })
 
 (proc main []
   (fmt.println "hello"))
 EOF
-./kvist eval "$tmp_dir/decl-eval.kvist" '(struct Greeting { :message string })' --check
+./kvist eval "$tmp_dir/decl-eval.kvist" '(defstruct Greeting { :message string })' --check
 ./kvist eval "$tmp_dir/decl-eval.kvist" '(import "core:fmt")' --check
 ./kvist eval "$tmp_dir/decl-eval.kvist" '(proc main [] (fmt.println "hello"))' --check
 
 printf 'tooling: eval odin diagnostic mapping\n'
-if ./kvist eval examples/higher-order.kvist '(+ 1 "bad")' --check >"$tmp_dir/bad-eval-check.out" 2>"$tmp_dir/bad-eval-check.err"; then
+if ./kvist eval examples/collections/higher-order.kvist '(+ 1 "bad")' --check >"$tmp_dir/bad-eval-check.out" 2>"$tmp_dir/bad-eval-check.err"; then
     printf 'failed: bad eval check unexpectedly succeeded\n' >&2
     exit 1
 fi
-if ! grep -q 'examples/higher-order.kvist:<eval>:1:1 Error: Cannot convert' "$tmp_dir/bad-eval-check.err"; then
+if ! grep -q 'examples/collections/higher-order.kvist:<eval>:1:1 Error: Cannot convert' "$tmp_dir/bad-eval-check.err"; then
     printf 'failed: bad eval check diagnostic did not point at <eval>\n' >&2
     cat "$tmp_dir/bad-eval-check.err" >&2
     exit 1
 fi
-if ./kvist eval examples/higher-order.kvist '(let [x: int "bad"] x)' --check >"$tmp_dir/bad-eval-let-check.out" 2>"$tmp_dir/bad-eval-let-check.err"; then
+if ./kvist eval examples/collections/higher-order.kvist '(let [x: int "bad"] x)' --check >"$tmp_dir/bad-eval-let-check.out" 2>"$tmp_dir/bad-eval-let-check.err"; then
     printf 'failed: bad eval let check unexpectedly succeeded\n' >&2
     exit 1
 fi
-if ! grep -q 'examples/higher-order.kvist:<eval>:1:14 Error: Cannot convert' "$tmp_dir/bad-eval-let-check.err"; then
+if ! grep -q 'examples/collections/higher-order.kvist:<eval>:1:14 Error: Cannot convert' "$tmp_dir/bad-eval-let-check.err"; then
     printf 'failed: bad eval let check diagnostic did not point at binding value\n' >&2
     cat "$tmp_dir/bad-eval-let-check.err" >&2
     exit 1
 fi
 
 printf 'tooling: legacy eval compile path\n'
-./kvist examples/higher-order.kvist --eval '(reduce add 0 (new []int [1 2 3]))' -o "$tmp_dir/legacy-eval.odin"
+./kvist examples/collections/higher-order.kvist --eval '(threaded-total)' -o "$tmp_dir/legacy-eval.odin"
 legacy_output=$(odin run "$tmp_dir/legacy-eval.odin" -file)
 assert_eq "6" "$legacy_output" "legacy eval output"
 
 printf 'tooling: eval diagnostics\n'
-if ./kvist eval examples/higher-order.kvist '(not 1 2)' >"$tmp_dir/bad.out" 2>"$tmp_dir/bad.err"; then
+if ./kvist eval examples/collections/higher-order.kvist '(not 1 2)' >"$tmp_dir/bad.out" 2>"$tmp_dir/bad.err"; then
     printf 'failed: bad eval unexpectedly succeeded\n' >&2
     exit 1
 fi
-if ! grep -q 'examples/higher-order.kvist:<eval>:1:1: not expects one argument' "$tmp_dir/bad.err"; then
+if ! grep -q 'examples/collections/higher-order.kvist:<eval>:1:1: not expects one argument' "$tmp_dir/bad.err"; then
     printf 'failed: bad eval diagnostic did not point at <eval>\n' >&2
     cat "$tmp_dir/bad.err" >&2
     exit 1
@@ -437,7 +425,7 @@ if command -v emacs >/dev/null 2>&1; then
              (unwind-protect
                  (progn
                    (with-temp-file file
-                     (insert \"(package main)\\n(import \\\"core:fmt\\\")\\n\\n// Adds two ints.\\n(proc add [a: int, b: int] -> int\\n  (+ a b))\\n\\n(proc add-two [a: int, b: int] -> int\\n  (add a b))\\n\\n(proc main []\\n  (fmt.println \\\"from main\\\"))\\n\\n(comment\\n  (add 1 2)\\n  (add-two 1 2)\\n  (with-allocator [allocator context.temp_allocator]\\n    (add 2 1))\\n  (if-ok [value err (read)] value 0)\\n  (main))\\n\"))
+                     (insert \"(package main)\\n(import \\\"core:fmt\\\")\\n\\n// Adds two ints.\\n(defn add [a: int, b: int] -> int\\n  (+ a b))\\n\\n(defn add-two [a: int, b: int] -> int\\n  (add a b))\\n\\n(defn main []\\n  (fmt.println \\\"from main\\\"))\\n\\n(comment\\n  (add 1 2)\\n  (add-two 1 2)\\n  (with-allocator [allocator context.temp_allocator]\\n    (add 2 1))\\n  (if-ok [value err (read)] value 0)\\n  (main))\\n\"))
                    (find-file file)
                    (kvist-mode)
                    (setq kvist-test-source-buffer (current-buffer))
@@ -466,7 +454,7 @@ if command -v emacs >/dev/null 2>&1; then
                      (unless docs
                        (error \"Expected fmt.println docs\")))
                    (let ((docs (kvist--symbol-doc-candidates \"if-ok\")))
-                     (unless (and docs (string-match-p \"Odin error result\" (plist-get (car docs) :doc)))
+                     (unless (and docs (string-match-p \"zero error value\" (plist-get (car docs) :doc)))
                        (error \"Expected if-ok built-in docs, got: %S\" docs)))
                    (with-temp-buffer
                      (insert \"/*\\n * Block docs.\\n * More docs.\\n */\\nthing :: proc() {}\\n\")
@@ -515,7 +503,7 @@ if command -v emacs >/dev/null 2>&1; then
                    (call-interactively (quote kvist-doc-at-point))
                    (let ((doc-text (with-current-buffer kvist-doc-buffer-name
                                      (buffer-substring-no-properties (point-min) (point-max)))))
-                     (unless (string-match-p \"Odin error result\" doc-text)
+                     (unless (string-match-p \"zero error value\" doc-text)
                        (error \"Expected displayed if-ok docs, got: %s\" doc-text)))
                    (let ((defs (xref-backend-definitions (quote kvist) \"add\")))
                      (unless defs

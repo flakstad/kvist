@@ -40,7 +40,7 @@ odin build "$ROOT/cmd/kvist" -out:"$compiler"
 printf 'starting stress server on port %s\n' "$PORT"
 (
     cd "$ROOT"
-    "$compiler" run examples/http-stress-server.kvist --generated "$tmp_dir/http-stress-server.odin"
+    "$compiler" run examples/web/http-stress-server.kvist --generated "$tmp_dir/http-stress-server.odin"
 ) >"$tmp_dir/server.log" 2>&1 &
 server_pid=$!
 

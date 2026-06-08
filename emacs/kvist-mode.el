@@ -45,8 +45,8 @@
 
 (defconst kvist-special-forms
   '("package" "import" "defconst" "defvar" "defstruct" "defenum" "defunion" "defn" "defmacro" "proc" "odin"
-    "let" "do" "if" "when" "cond" "switch" "set!" "return" "defer"
-    "for" "loop" "each" "comment" "new" "make" "get" "nil?" "in" "not-in"
+    "let" "var" "block" "do" "if" "when" "cond" "switch" "set!" "mut!" "return" "defer"
+    "for" "while" "each" "comment" "new" "make" "get" "nil?" "in" "not-in"
     "type" "or-else" "update" "update!" "inc!" "dec!" "toggle!" "negate!"
     "break" "continue" "with-allocator" "with-temp-allocator"
     "when-let" "if-let" "when-ok" "if-ok"
@@ -76,7 +76,7 @@
     ("str" . "kvist:str")
     ("map" . "kvist:map")
     ("set" . "kvist:set")
-    ("struct" . "kvist:struct")
+    ("soa" . "kvist:soa")
     ("io" . "kvist:io")
     ("json" . "kvist:json")
     ("http" . "kvist:http")
@@ -207,7 +207,7 @@
                    (return . 0)
                    (defer . 0)
                    (for . 1)
-                   (loop . 1)
+                   (while . 1)
                    (each . 2)
                    (comment . 0)
                    (with-allocator . 1)
@@ -341,11 +341,14 @@ When REFRESH is non-nil, ignore any cached value."
           (user-error "%s" (string-trim output)))
         parsed))))
 
-(defun kvist--reload-command (source-file)
-  "Return the long-running reload command for SOURCE-FILE."
+(defun kvist--reload-command (source-file &optional watch)
+  "Return the long-running reload command for SOURCE-FILE.
+When WATCH is non-nil, include `--watch'."
   (mapconcat #'shell-quote-argument
-             (list (kvist--executable source-file)
-                   "dev" "--reload" source-file "--json")
+             (append (list (kvist--executable source-file)
+                           "dev" "--reload" source-file)
+                     (when watch (list "--watch"))
+                     (list "--json"))
              " "))
 
 (defun kvist--reload-format-paths (paths)
@@ -357,6 +360,7 @@ When REFRESH is non-nil, ignore any cached value."
          (format "host_dir: %s" (alist-get 'host_dir paths))
          (format "module_binary: %s" (alist-get 'module_binary paths))
          (format "rebuild_command: %s" (alist-get 'rebuild_command paths))
+         (format "watch_command: %s" (alist-get 'watch_command paths))
          (format "run_command: %s" (alist-get 'run_command paths)))
    "\n"))
 
@@ -936,6 +940,21 @@ With prefix argument REFRESH, re-read the path metadata from the CLI."
     (message "Started Kvist reload session in %s" buffer-name)))
 
 ;;;###autoload
+(defun kvist-reload-watch-start ()
+  "Start a watched long-running `kvist dev --reload --watch' session."
+  (interactive)
+  (save-buffer)
+  (let* ((source-file (kvist--reload-source-file))
+         (default-directory (file-name-as-directory (kvist--project-root source-file)))
+         (command (kvist--reload-command source-file t))
+         (buffer-name (kvist--reload-buffer-name source-file)))
+    (let ((buffer (compilation-start command 'compilation-mode (lambda (_mode) buffer-name))))
+      (with-current-buffer buffer
+        (setq-local kvist--reload-last-event nil)
+        (add-hook 'compilation-filter-hook #'kvist--reload-compilation-filter nil t)))
+    (message "Started watched Kvist reload session in %s" buffer-name)))
+
+;;;###autoload
 (defun kvist-reload-rebuild ()
   "Rebuild the reloadable module for the current Kvist buffer."
   (interactive)
@@ -998,6 +1017,7 @@ With prefix argument REFRESH, re-read the path metadata from the CLI."
 (define-key kvist-mode-map (kbd "C-c C-.") #'kvist-doc-at-point)
 (define-key kvist-mode-map (kbd "C-c C-d") #'kvist-doc-at-point)
 (define-key kvist-mode-map (kbd "C-c r s") #'kvist-reload-start)
+(define-key kvist-mode-map (kbd "C-c r w") #'kvist-reload-watch-start)
 (define-key kvist-mode-map (kbd "C-c r r") #'kvist-reload-rebuild)
 (define-key kvist-mode-map (kbd "C-c r p") #'kvist-reload-show-paths)
 (define-key kvist-mode-map (kbd "TAB") #'kvist-complete-at-point)

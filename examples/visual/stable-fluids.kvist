@@ -1,0 +1,533 @@
+// Visual grid demo: stable 2D smoke/fluid solver with mutable f32 buffers.
+(package main)
+(import fmt "core:fmt")
+(import math "core:math")
+(import rl "vendor:raylib")
+
+(def Width: int 1100)
+(def Height: int 720)
+(def Grid-W: int 140)
+(def Grid-H: int 86)
+(def Grid-Cells: int (* Grid-W Grid-H))
+(def Cell-Size: int 7)
+(def Sim-Y: int 116)
+(def Initial-Target-FPS: int 60)
+(def Initial-Steps-Per-Frame: int 2)
+(def Solver-Iterations: int 10)
+(def Dt: f32 0.10)
+(def Diffusion: f32 0.00008)
+(def Viscosity: f32 0.00002)
+(def Density-Dissipation: f32 0.992)
+(def Hud-Font-Path: string "/System/Library/Fonts/Supplemental/Verdana.ttf")
+(def Hud-Font-Size: f32 20.0)
+(def Hud-Font-Atlas-Size: i32 20)
+(def Hud-Font-Spacing: f32 1.0)
+
+(defstruct App-State
+  {:density [dynamic]f32
+   :density0 [dynamic]f32
+   :vx [dynamic]f32
+   :vy [dynamic]f32
+   :vx0 [dynamic]f32
+   :vy0 [dynamic]f32
+   :target-fps int
+   :steps-per-frame int
+   :paused bool
+   :show-velocity bool
+   :has-last-mouse bool
+   :last-mouse-x f32
+   :last-mouse-y f32
+   :frames int
+   :metric-start f64
+   :fps f64
+   :update-ms f64
+   :draw-ms f64})
+
+(defn idx
+  "Convert grid x/y coordinates into a flat array index."
+  [x: int, y: int] -> int
+  (+ x (* y Grid-W)))
+
+(defn rgba
+  "Construct a raylib color from integer channel values."
+  [r: int, g: int, b: int, a: int] -> rl.Color
+  (rl.Color [(u8 r) (u8 g) (u8 b) (u8 a)]))
+
+(defn v2
+  "Construct a raylib 2D vector."
+  [x: f32, y: f32] -> rl.Vector2
+  (rl.Vector2 [x y]))
+
+(defn make-buffer
+  "Allocate a zero-filled dynamic f32 grid buffer."
+  [] -> [dynamic]f32
+  (let [xs (make [dynamic]f32 Grid-Cells)
+        i 0]
+    (while (< i Grid-Cells)
+      (set! xs[i] 0.0)
+      (mut! i += 1))
+    xs))
+
+(defn fill-buffer!
+  "Set every value in a dynamic f32 buffer."
+  [xs: [dynamic]f32, value: f32]
+  (let [i 0
+        n (len xs)]
+    (while (< i n)
+      (set! xs[i] value)
+      (mut! i += 1))))
+
+(defn clear-buffer!
+  "Clear every value in a dynamic f32 buffer."
+  [xs: [dynamic]f32]
+  (fill-buffer! xs 0.0))
+
+(defn set-bounds!
+  "Apply boundary conditions for scalar, horizontal velocity, or vertical velocity fields."
+  [mode: int, xs: [dynamic]f32]
+  (let [x 1]
+    (while (< x (- Grid-W 1))
+      (let [top (idx x 0)
+            top-neighbor (idx x 1)
+            bottom (idx x (- Grid-H 1))
+            bottom-neighbor (idx x (- Grid-H 2))]
+        (if (== mode 2)
+          (do
+            (set! xs[top] (- xs[top-neighbor]))
+            (set! xs[bottom] (- xs[bottom-neighbor])))
+          (do
+            (set! xs[top] xs[top-neighbor])
+            (set! xs[bottom] xs[bottom-neighbor]))))
+      (mut! x += 1)))
+  (let [y 1]
+    (while (< y (- Grid-H 1))
+      (let [left (idx 0 y)
+            left-neighbor (idx 1 y)
+            right (idx (- Grid-W 1) y)
+            right-neighbor (idx (- Grid-W 2) y)]
+        (if (== mode 1)
+          (do
+            (set! xs[left] (- xs[left-neighbor]))
+            (set! xs[right] (- xs[right-neighbor])))
+          (do
+            (set! xs[left] xs[left-neighbor])
+            (set! xs[right] xs[right-neighbor]))))
+      (mut! y += 1)))
+  (let [top-left (idx 0 0)
+        top-left-x (idx 1 0)
+        top-left-y (idx 0 1)
+        top-right (idx (- Grid-W 1) 0)
+        top-right-x (idx (- Grid-W 2) 0)
+        top-right-y (idx (- Grid-W 1) 1)
+        bottom-left (idx 0 (- Grid-H 1))
+        bottom-left-x (idx 1 (- Grid-H 1))
+        bottom-left-y (idx 0 (- Grid-H 2))
+        bottom-right (idx (- Grid-W 1) (- Grid-H 1))
+        bottom-right-x (idx (- Grid-W 2) (- Grid-H 1))
+        bottom-right-y (idx (- Grid-W 1) (- Grid-H 2))]
+    (set! xs[top-left] (* 0.5 (+ xs[top-left-x] xs[top-left-y])))
+    (set! xs[top-right] (* 0.5 (+ xs[top-right-x] xs[top-right-y])))
+    (set! xs[bottom-left] (* 0.5 (+ xs[bottom-left-x] xs[bottom-left-y])))
+    (set! xs[bottom-right] (* 0.5 (+ xs[bottom-right-x] xs[bottom-right-y])))))
+
+(defn lin-solve!
+  "Solve one sparse diffusion/pressure system with Gauss-Seidel relaxation."
+  [mode: int, x: [dynamic]f32, x0: [dynamic]f32, a: f32, c: f32]
+  (let [iteration 0]
+    (while (< iteration Solver-Iterations)
+      (let [y 1]
+        (while (< y (- Grid-H 1))
+          (let [gx 1]
+            (while (< gx (- Grid-W 1))
+              (let [i (idx gx y)
+                    left (- i 1)
+                    right (+ i 1)
+                    up (- i Grid-W)
+                    down (+ i Grid-W)]
+                (set! x[i]
+                  (/ (+ x0[i]
+                        (* a (+ x[left]
+                                x[right]
+                                x[up]
+                                x[down])))
+                     c)))
+              (mut! gx += 1)))
+          (mut! y += 1)))
+      (set-bounds! mode x)
+      (mut! iteration += 1))))
+
+(defn diffuse!
+  "Diffuse a field from x0 into x."
+  [mode: int, x: [dynamic]f32, x0: [dynamic]f32, diff: f32, dt: f32]
+  (let [a (* dt diff (f32 (- Grid-W 2)) (f32 (- Grid-H 2)))]
+    (lin-solve! mode x x0 a (+ 1.0 (* 4.0 a)))))
+
+(defn advect!
+  "Transport field d0 through the velocity field into d."
+  [mode: int, d: [dynamic]f32, d0: [dynamic]f32, u: [dynamic]f32, v: [dynamic]f32, dt: f32]
+  (let [dt-x (* dt (f32 (- Grid-W 2)))
+        dt-y (* dt (f32 (- Grid-H 2)))
+        max-x (- (f32 Grid-W) 1.5)
+        max-y (- (f32 Grid-H) 1.5)
+        y 1]
+    (while (< y (- Grid-H 1))
+      (let [gx 1]
+        (while (< gx (- Grid-W 1))
+          (let [i (idx gx y)
+                back-x (math.clamp (- (f32 gx) (* dt-x u[i])) 0.5 max-x)
+                back-y (math.clamp (- (f32 y) (* dt-y v[i])) 0.5 max-y)
+                x0 (int back-x)
+                y0 (int back-y)
+                x1 (+ x0 1)
+                y1 (+ y0 1)
+                i00 (idx x0 y0)
+                i01 (idx x0 y1)
+                i10 (idx x1 y0)
+                i11 (idx x1 y1)
+                sx1 (- back-x (f32 x0))
+                sx0 (- 1.0 sx1)
+                sy1 (- back-y (f32 y0))
+                sy0 (- 1.0 sy1)]
+            (set! d[i]
+              (+ (* sx0 (+ (* sy0 d0[i00])
+                            (* sy1 d0[i01])))
+                 (* sx1 (+ (* sy0 d0[i10])
+                            (* sy1 d0[i11]))))))
+          (mut! gx += 1)))
+      (mut! y += 1)))
+  (set-bounds! mode d))
+
+(defn project!
+  "Make the velocity field approximately divergence-free."
+  [u: [dynamic]f32, v: [dynamic]f32, p: [dynamic]f32, div: [dynamic]f32]
+  (let [y 1]
+    (while (< y (- Grid-H 1))
+      (let [gx 1]
+        (while (< gx (- Grid-W 1))
+          (let [i (idx gx y)
+                left (- i 1)
+                right (+ i 1)
+                up (- i Grid-W)
+                down (+ i Grid-W)]
+            (set! div[i]
+              (* -0.5
+                 (+ (/ (- u[right] u[left]) (f32 Grid-W))
+                    (/ (- v[down] v[up]) (f32 Grid-H)))))
+            (set! p[i] 0.0))
+          (mut! gx += 1)))
+      (mut! y += 1)))
+  (set-bounds! 0 div)
+  (set-bounds! 0 p)
+  (lin-solve! 0 p div 1.0 4.0)
+  (let [y 1]
+    (while (< y (- Grid-H 1))
+      (let [gx 1]
+        (while (< gx (- Grid-W 1))
+          (let [i (idx gx y)
+                left (- i 1)
+                right (+ i 1)
+                up (- i Grid-W)
+                down (+ i Grid-W)]
+            (set! u[i]
+              (- u[i]
+                 (* 0.5 (f32 Grid-W) (- p[right] p[left]))))
+            (set! v[i]
+              (- v[i]
+                 (* 0.5 (f32 Grid-H) (- p[down] p[up])))))
+          (mut! gx += 1)))
+      (mut! y += 1)))
+  (set-bounds! 1 u)
+  (set-bounds! 2 v))
+
+(defn velocity-step!
+  "Advance velocity through diffusion, projection, advection, and projection."
+  [state: (ptr App-State)]
+  (diffuse! 1 (:vx0 state^) (:vx state^) Viscosity Dt)
+  (diffuse! 2 (:vy0 state^) (:vy state^) Viscosity Dt)
+  (project! (:vx0 state^) (:vy0 state^) (:vx state^) (:vy state^))
+  (advect! 1 (:vx state^) (:vx0 state^) (:vx0 state^) (:vy0 state^) Dt)
+  (advect! 2 (:vy state^) (:vy0 state^) (:vx0 state^) (:vy0 state^) Dt)
+  (project! (:vx state^) (:vy state^) (:vx0 state^) (:vy0 state^)))
+
+(defn density-step!
+  "Advance smoke density through diffusion and velocity advection."
+  [state: (ptr App-State)]
+  (diffuse! 0 (:density0 state^) (:density state^) Diffusion Dt)
+  (advect! 0 (:density state^) (:density0 state^) (:vx state^) (:vy state^) Dt))
+
+(defn fade-density!
+  "Dissipate smoke density and clamp extreme injection values."
+  [density: [dynamic]f32]
+  (let [i 0
+        n (len density)]
+    (while (< i n)
+      (set! density[i] (math.clamp (* density[i] Density-Dissipation) 0.0 220.0))
+      (mut! i += 1))))
+
+(defn step-fluid!
+  "Advance all fluid buffers by one simulation step."
+  [state: (ptr App-State)]
+  (velocity-step! state)
+  (density-step! state)
+  (fade-density! (:density state^)))
+
+(defn add-smoke!
+  "Inject density and velocity into a circular patch."
+  [state: (ptr App-State), gx: int, gy: int, radius: int, amount: f32, fx: f32, fy: f32]
+  (let [r2 (* radius radius)
+        density (:density state^)
+        vx (:vx state^)
+        vy (:vy state^)
+        y (- gy radius)]
+    (while (<= y (+ gy radius))
+      (let [x (- gx radius)]
+        (while (<= x (+ gx radius))
+          (when (and (> x 1)
+                     (< x (- Grid-W 2))
+                     (> y 1)
+                     (< y (- Grid-H 2)))
+            (let [dx (- x gx)
+                  dy (- y gy)
+                  d2 (+ (* dx dx) (* dy dy))]
+              (when (<= d2 r2)
+                (let [i (idx x y)
+                      weight (- 1.0 (/ (f32 d2) (f32 r2)))]
+                  (set! density[i] (+ density[i] (* amount weight)))
+                  (set! vx[i] (+ vx[i] (* fx weight)))
+                  (set! vy[i] (+ vy[i] (* fy weight)))))))
+          (mut! x += 1)))
+      (mut! y += 1))))
+
+(defn seed-field!
+  "Reset all fields and seed a few deterministic smoke plumes."
+  [state: (ptr App-State)]
+  (clear-buffer! (:density state^))
+  (clear-buffer! (:density0 state^))
+  (clear-buffer! (:vx state^))
+  (clear-buffer! (:vy state^))
+  (clear-buffer! (:vx0 state^))
+  (clear-buffer! (:vy0 state^))
+  (add-smoke! state 38 62 5 115.0 2.5 -16.0)
+  (add-smoke! state 70 55 7 150.0 0.0 -22.0)
+  (add-smoke! state 102 64 5 115.0 -2.5 -16.0)
+  (set! (:has-last-mouse state^) false))
+
+(defn grid-start-x
+  "Return the current centered pixel x coordinate for the grid."
+  [] -> int
+  (/ (- (int (rl.GetScreenWidth)) (* Grid-W Cell-Size)) 2))
+
+(defn mouse-grid
+  "Convert the current mouse position into grid coordinates when it is inside the simulation."
+  [] -> [gx: int, gy: int, inside: bool]
+  (let [mx (int (rl.GetMouseX))
+        my (int (rl.GetMouseY))
+        start-x (grid-start-x)]
+    (if (and (>= mx start-x)
+             (< mx (+ start-x (* Grid-W Cell-Size)))
+             (>= my Sim-Y)
+             (< my (+ Sim-Y (* Grid-H Cell-Size))))
+      (return (/ (- mx start-x) Cell-Size)
+              (/ (- my Sim-Y) Cell-Size)
+              true)
+      (return 0 0 false))))
+
+(defn update-source!
+  "Inject smoke and force from mouse input into the fluid field."
+  [state: (ptr App-State)]
+  (let [[gx gy inside] (mouse-grid)
+        mx (f32 (rl.GetMouseX))
+        my (f32 (rl.GetMouseY))]
+    (if inside
+      (do
+        (when (rl.IsMouseButtonDown .LEFT)
+          (let [dx: f32 0.0
+                dy: f32 0.0]
+            (when (:has-last-mouse state^)
+              (set! dx (- mx (:last-mouse-x state^)))
+              (set! dy (- my (:last-mouse-y state^))))
+            (add-smoke! state gx gy 5 80.0 (* dx (f32 0.42)) (* dy (f32 0.42)))))
+        (when (rl.IsMouseButtonDown .RIGHT)
+          (let [dx: f32 0.0
+                dy: f32 0.0]
+            (when (:has-last-mouse state^)
+              (set! dx (- mx (:last-mouse-x state^)))
+              (set! dy (- my (:last-mouse-y state^))))
+            (add-smoke! state gx gy 7 8.0 (* dx (f32 0.78)) (* dy (f32 0.78)))))
+        (set! (:has-last-mouse state^) true)
+        (set! (:last-mouse-x state^) mx)
+        (set! (:last-mouse-y state^) my))
+      (set! (:has-last-mouse state^) false))))
+
+(defn color-for
+  "Map density and speed into a smoke color."
+  [density: f32, vx: f32, vy: f32] -> rl.Color
+  (let [d (math.clamp (/ density 140.0) 0.0 1.0)
+        speed (math.clamp (/ (math.sqrt (+ (* vx vx) (* vy vy))) 8.0) 0.0 1.0)
+        r (int (+ 11.0 (* 210.0 d) (* 22.0 speed)))
+        g (int (+ 15.0 (* 180.0 d) (* 42.0 speed)))
+        b (int (+ 21.0 (* 110.0 d) (* 130.0 speed)))]
+    (rgba r g b 255)))
+
+(defn draw-field
+  "Draw the density field as fixed-size grid cells."
+  [state: (ptr App-State)]
+  (let [start-x (grid-start-x)
+        density (:density state^)
+        vx (:vx state^)
+        vy (:vy state^)
+        y 0]
+    (while (< y Grid-H)
+      (let [x 0]
+        (while (< x Grid-W)
+          (let [i (idx x y)]
+            (rl.DrawRectangle
+              (i32 (+ start-x (* x Cell-Size)))
+              (i32 (+ Sim-Y (* y Cell-Size)))
+              (i32 Cell-Size)
+              (i32 Cell-Size)
+              (color-for density[i] vx[i] vy[i])))
+          (mut! x += 1)))
+      (mut! y += 1))))
+
+(defn draw-velocity
+  "Draw a sparse velocity-vector overlay."
+  [state: (ptr App-State)]
+  (when (:show-velocity state^)
+    (let [start-x (grid-start-x)
+          vx (:vx state^)
+          vy (:vy state^)
+          y 4]
+      (while (< y (- Grid-H 4))
+        (let [x 4]
+          (while (< x (- Grid-W 4))
+            (let [i (idx x y)
+                  px (+ start-x (* x Cell-Size) (/ Cell-Size 2))
+                  py (+ Sim-Y (* y Cell-Size) (/ Cell-Size 2))
+                  dx (int (* vx[i] 0.65))
+                  dy (int (* vy[i] 0.65))]
+              (rl.DrawLine
+                (i32 px)
+                (i32 py)
+                (i32 (+ px dx))
+                (i32 (+ py dy))
+                [210 235 255 88]))
+            (mut! x += 8)))
+        (mut! y += 8)))))
+
+(defn draw-hud-text
+  "Draw one HUD field with the configured readable font."
+  [font: rl.Font, text: cstring, x: f32, y: f32, size: f32, color: rl.Color]
+  (rl.DrawTextEx font text (v2 x y) size Hud-Font-Spacing color))
+
+(defn draw-hud
+  "Draw the fixed-column fluid simulation HUD."
+  [font: rl.Font, state: (ptr App-State)]
+  (let [panel (rl.Rectangle [8 8 (f32 (- (rl.GetScreenWidth) 16)) 96])]
+    (rl.DrawRectangleRounded panel 0.08 8 [0 0 0 195])
+    (rl.DrawRectangleRoundedLines panel 0.08 8 [255 255 255 45])
+    (draw-hud-text font "demo" 18 20 Hud-Font-Size rl.LIGHTGRAY)
+    (draw-hud-text font "stable fluids" 72 20 Hud-Font-Size rl.RAYWHITE)
+    (draw-hud-text font "cells" 224 20 Hud-Font-Size rl.LIGHTGRAY)
+    (draw-hud-text font (fmt.ctprintf "%6d" Grid-Cells) 284 20 Hud-Font-Size rl.RAYWHITE)
+    (draw-hud-text font "fps" 382 20 Hud-Font-Size rl.LIGHTGRAY)
+    (draw-hud-text font (fmt.ctprintf "%6.1f" (:fps state^)) 425 20 Hud-Font-Size rl.RAYWHITE)
+    (draw-hud-text font "update" 520 20 Hud-Font-Size rl.LIGHTGRAY)
+    (draw-hud-text font (fmt.ctprintf "%7.3f ms" (:update-ms state^)) 590 20 Hud-Font-Size rl.RAYWHITE)
+    (draw-hud-text font "draw" 715 20 Hud-Font-Size rl.LIGHTGRAY)
+    (draw-hud-text font (fmt.ctprintf "%7.3f ms" (:draw-ms state^)) 765 20 Hud-Font-Size rl.RAYWHITE)
+    (draw-hud-text font "steps" 18 50 Hud-Font-Size rl.LIGHTGRAY)
+    (draw-hud-text font (fmt.ctprintf "%3d/frame" (:steps-per-frame state^)) 82 50 Hud-Font-Size rl.RAYWHITE)
+    (draw-hud-text font "solve" 215 50 Hud-Font-Size rl.LIGHTGRAY)
+    (draw-hud-text font (fmt.ctprintf "%2d iterations" Solver-Iterations) 272 50 Hud-Font-Size rl.RAYWHITE)
+    (draw-hud-text font "buffers" 418 50 Hud-Font-Size rl.LIGHTGRAY)
+    (draw-hud-text font "density, density0, vx, vy, vx0, vy0 [dynamic]f32" 494 50 17.0 rl.RAYWHITE)
+    (draw-hud-text font "left drag: inject smoke/force   right drag: stir   v: velocity   space: pause   up/down: steps   1/2/3: fps   r: reset" 18 76 16.0 rl.LIGHTGRAY)))
+
+(defn update-fps-metric!
+  "Update the smoothed FPS counter roughly twice per second."
+  [state: (ptr App-State)]
+  (set! (:frames state^) (+ (:frames state^) 1))
+  (let [now (rl.GetTime)
+        elapsed (- now (:metric-start state^))]
+    (when (>= elapsed 0.5)
+      (set! (:fps state^) (/ (f64 (:frames state^)) elapsed))
+      (set! (:frames state^) 0)
+      (set! (:metric-start state^) now))))
+
+(defn handle-input!
+  "Apply keyboard controls to the app state."
+  [state: (ptr App-State)]
+  (when (rl.IsKeyPressed .SPACE)
+    (set! (:paused state^) (not (:paused state^))))
+  (when (rl.IsKeyPressed .V)
+    (set! (:show-velocity state^) (not (:show-velocity state^))))
+  (when (rl.IsKeyPressed .ONE) (set! (:target-fps state^) 30))
+  (when (rl.IsKeyPressed .TWO) (set! (:target-fps state^) 60))
+  (when (rl.IsKeyPressed .THREE) (set! (:target-fps state^) 144))
+  (when (rl.IsKeyPressed .UP)
+    (set! (:steps-per-frame state^) (math.clamp (+ (:steps-per-frame state^) 1) 1 8)))
+  (when (rl.IsKeyPressed .DOWN)
+    (set! (:steps-per-frame state^) (math.clamp (- (:steps-per-frame state^) 1) 1 8)))
+  (when (rl.IsKeyPressed .R) (seed-field! state)))
+
+(defn run-window
+  "Open the raylib window and run the interactive stable-fluids demo."
+  []
+  (rl.SetConfigFlags [.WINDOW_RESIZABLE .WINDOW_HIGHDPI])
+  (rl.InitWindow (i32 Width) (i32 Height) "Kvist stable fluids")
+  (defer (rl.CloseWindow))
+  (rl.SetTargetFPS (i32 Initial-Target-FPS))
+  (let [font (rl.LoadFontEx (cstring Hud-Font-Path) Hud-Font-Atlas-Size nil 0)
+        state (App-State {:density (make-buffer)
+                          :density0 (make-buffer)
+                          :vx (make-buffer)
+                          :vy (make-buffer)
+                          :vx0 (make-buffer)
+                          :vy0 (make-buffer)
+                          :target-fps Initial-Target-FPS
+                          :steps-per-frame Initial-Steps-Per-Frame
+                          :paused false
+                          :show-velocity false
+                          :has-last-mouse false
+                          :last-mouse-x 0
+                          :last-mouse-y 0
+                          :frames 0
+                          :metric-start (rl.GetTime)
+                          :fps 0
+                          :update-ms 0
+                          :draw-ms 0})]
+    (rl.SetTextureFilter font.texture .BILINEAR)
+    (defer (rl.UnloadFont font))
+    (defer (delete state.density))
+    (defer (delete state.density0))
+    (defer (delete state.vx))
+    (defer (delete state.vy))
+    (defer (delete state.vx0))
+    (defer (delete state.vy0))
+    (seed-field! (addr state))
+    (while (not (rl.WindowShouldClose))
+      (handle-input! (addr state))
+      (update-source! (addr state))
+      (rl.SetTargetFPS (i32 state.target-fps))
+      (let [start (rl.GetTime)]
+        (when (not state.paused)
+          (let [step 0]
+            (while (< step state.steps-per-frame)
+              (step-fluid! (addr state))
+              (mut! step += 1)))
+          (set! state.update-ms (* (- (rl.GetTime) start) 1000.0))))
+      (let [draw-start (rl.GetTime)]
+        (rl.BeginDrawing)
+        (rl.ClearBackground [8 11 17 255])
+        (draw-field (addr state))
+        (draw-velocity (addr state))
+        (draw-hud font (addr state))
+        (rl.EndDrawing)
+        (set! state.draw-ms (* (- (rl.GetTime) draw-start) 1000.0)))
+      (update-fps-metric! (addr state)))))
+
+(defn main
+  "Run the visual stable-fluids smoke simulation demo."
+  []
+  (run-window))

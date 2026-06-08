@@ -1,0 +1,268 @@
+// Visual field demo: 2D wave equation with triple-buffered dynamic f32 arrays.
+(package main)
+(import fmt "core:fmt")
+(import math "core:math")
+(import rl "vendor:raylib")
+
+(def Width: int 1100)
+(def Height: int 720)
+(def Grid-W: int 160)
+(def Grid-H: int 86)
+(def Grid-Cells: int (* Grid-W Grid-H))
+(def Cell-Size: int 6)
+(def Sim-Y: int 116)
+(def Initial-Target-FPS: int 60)
+(def Initial-Steps-Per-Frame: int 2)
+(def Damping: f32 0.993)
+(def Hud-Font-Path: string "/System/Library/Fonts/Supplemental/Verdana.ttf")
+(def Hud-Font-Size: f32 20.0)
+(def Hud-Font-Atlas-Size: i32 20)
+(def Hud-Font-Spacing: f32 1.0)
+
+(defstruct App-State
+  {:current [dynamic]f32
+   :previous [dynamic]f32
+   :next [dynamic]f32
+   :target-fps int
+   :steps-per-frame int
+   :paused bool
+   :frames int
+   :metric-start f64
+   :fps f64
+   :update-ms f64
+   :draw-ms f64})
+
+(defn idx
+  "Convert grid x/y coordinates into a flat array index."
+  [x: int, y: int] -> int
+  (+ x (* y Grid-W)))
+
+(defn rgba
+  "Construct a raylib color from integer channel values."
+  [r: int, g: int, b: int, a: int] -> rl.Color
+  (rl.Color [(u8 r) (u8 g) (u8 b) (u8 a)]))
+
+(defn v2
+  "Construct a raylib 2D vector."
+  [x: f32, y: f32] -> rl.Vector2
+  (rl.Vector2 [x y]))
+
+(defn make-buffer
+  "Allocate a zero-filled dynamic f32 grid buffer."
+  [] -> [dynamic]f32
+  (let [xs (make [dynamic]f32 Grid-Cells)
+        i 0]
+    (while (< i Grid-Cells)
+      (set! xs[i] 0.0)
+      (mut! i += 1))
+    xs))
+
+(defn fill-buffer!
+  "Set every value in a dynamic f32 buffer."
+  [xs: [dynamic]f32, value: f32]
+  (let [i 0
+        n (len xs)]
+    (while (< i n)
+      (set! xs[i] value)
+      (mut! i += 1))))
+
+(defn disturb!
+  "Inject wave energy into a small circular patch."
+  [state: ^App-State, gx: int, gy: int, amount: f32]
+  (let [y (- gy 3)]
+    (while (<= y (+ gy 3))
+      (let [x (- gx 3)]
+        (while (<= x (+ gx 3))
+          (when (and (> x 1)
+                     (< x (- Grid-W 2))
+                     (> y 1)
+                     (< y (- Grid-H 2)))
+            (let [dx (- x gx)
+                  dy (- y gy)
+                  d2 (+ (* dx dx) (* dy dy))]
+              (when (<= d2 9)
+                (let [i (idx x y)]
+                  (mut! state.current[i] += amount)))))
+          (mut! x += 1)))
+      (mut! y += 1))))
+
+(defn step-wave!
+  "Advance the wave equation by one finite-difference step and rotate buffers."
+  [state: ^App-State]
+  (let [y 1]
+    (while (< y (- Grid-H 1))
+      (let [x 1]
+        (while (< x (- Grid-W 1))
+          (let [i (idx x y)
+                left (- i 1)
+                right (+ i 1)
+                up (- i Grid-W)
+                down (+ i Grid-W)
+                value (- (* 0.5 (+ state.current[left]
+                                    state.current[right]
+                                    state.current[up]
+                                    state.current[down]))
+                         state.previous[i])]
+            (set! state.next[i] (* value Damping)))
+          (mut! x += 1)))
+      (mut! y += 1)))
+  (let [old state.previous]
+    (set! state.previous state.current)
+    (set! state.current state.next)
+    (set! state.next old)))
+
+(defn update-source!
+  "Inject mouse-driven ripples into the grid."
+  [state: ^App-State]
+  (when (rl.IsMouseButtonDown .LEFT)
+    (let [mx (int (rl.GetMouseX))
+          my (int (rl.GetMouseY))
+          start-x (/ (- (int (rl.GetScreenWidth)) (* Grid-W Cell-Size)) 2)]
+      (when (and (>= mx start-x)
+                 (< mx (+ start-x (* Grid-W Cell-Size)))
+                 (>= my Sim-Y)
+                 (< my (+ Sim-Y (* Grid-H Cell-Size))))
+        (disturb! state
+                  (/ (- mx start-x) Cell-Size)
+                  (/ (- my Sim-Y) Cell-Size)
+                  1.45)))))
+
+(defn color-for
+  "Map a signed wave height to a readable water-like color."
+  [h: f32] -> rl.Color
+  (let [v (math.clamp (* h 0.65) -1.0 1.0)
+        pos (math.clamp v 0.0 1.0)
+        neg (math.clamp (- v) 0.0 1.0)
+        r (int (+ 18.0 (* 122.0 pos)))
+        g (int (+ 35.0 (* 164.0 pos) (* 58.0 neg)))
+        b (int (+ 62.0 (* 185.0 neg) (* 80.0 pos)))]
+    (rgba r g b 255)))
+
+(defn draw-field
+  "Draw the wave field as fixed-size cells."
+  [state: ^App-State]
+  (let [grid-px (* Grid-W Cell-Size)
+        start-x (/ (- (int (rl.GetScreenWidth)) grid-px) 2)
+        y 0]
+    (while (< y Grid-H)
+      (let [x 0]
+        (while (< x Grid-W)
+          (let [i (idx x y)]
+            (rl.DrawRectangle
+              (i32 (+ start-x (* x Cell-Size)))
+              (i32 (+ Sim-Y (* y Cell-Size)))
+              (i32 Cell-Size)
+              (i32 Cell-Size)
+              (color-for state.current[i])))
+          (mut! x += 1)))
+      (mut! y += 1))))
+
+(defn draw-hud-text
+  "Draw one HUD field with the configured readable mono font."
+  [font: rl.Font, text: cstring, x: f32, y: f32, size: f32, color: rl.Color]
+  (rl.DrawTextEx font text (v2 x y) size Hud-Font-Spacing color))
+
+(defn draw-hud
+  "Draw the fixed-column wave simulation HUD."
+  [font: rl.Font, state: ^App-State]
+  (let [panel (rl.Rectangle [8 8 (f32 (- (rl.GetScreenWidth) 16)) 96])]
+    (rl.DrawRectangleRounded panel 0.08 8 [0 0 0 195])
+    (rl.DrawRectangleRoundedLines panel 0.08 8 [255 255 255 45])
+    (draw-hud-text font "demo" 18 20 Hud-Font-Size rl.LIGHTGRAY)
+    (draw-hud-text font "wave ripples" 72 20 Hud-Font-Size rl.RAYWHITE)
+    (draw-hud-text font "cells" 215 20 Hud-Font-Size rl.LIGHTGRAY)
+    (draw-hud-text font (fmt.ctprintf "%6d" Grid-Cells) 275 20 Hud-Font-Size rl.RAYWHITE)
+    (draw-hud-text font "fps" 372 20 Hud-Font-Size rl.LIGHTGRAY)
+    (draw-hud-text font (fmt.ctprintf "%6.1f" state.fps) 415 20 Hud-Font-Size rl.RAYWHITE)
+    (draw-hud-text font "update" 510 20 Hud-Font-Size rl.LIGHTGRAY)
+    (draw-hud-text font (fmt.ctprintf "%7.3f ms" state.update-ms) 580 20 Hud-Font-Size rl.RAYWHITE)
+    (draw-hud-text font "draw" 705 20 Hud-Font-Size rl.LIGHTGRAY)
+    (draw-hud-text font (fmt.ctprintf "%7.3f ms" state.draw-ms) 755 20 Hud-Font-Size rl.RAYWHITE)
+    (draw-hud-text font "steps" 18 50 Hud-Font-Size rl.LIGHTGRAY)
+    (draw-hud-text font (fmt.ctprintf "%3d/frame" state.steps-per-frame) 82 50 Hud-Font-Size rl.RAYWHITE)
+    (draw-hud-text font "buffers" 215 50 Hud-Font-Size rl.LIGHTGRAY)
+    (draw-hud-text font "current, previous, next [dynamic]f32" 292 50 Hud-Font-Size rl.RAYWHITE)
+    (draw-hud-text font "drag/click: inject ripple   space: pause   up/down: steps   1/2/3: fps   r: reset" 18 76 16.0 rl.LIGHTGRAY)))
+
+(defn update-fps-metric!
+  "Update the smoothed FPS counter roughly twice per second."
+  [state: ^App-State]
+  (mut! state.frames += 1)
+  (let [now (rl.GetTime)
+        elapsed (- now state.metric-start)]
+    (when (>= elapsed 0.5)
+      (set! state.fps (/ (f64 state.frames) elapsed))
+      (set! state.frames 0)
+      (set! state.metric-start now))))
+
+(defn reset!
+  "Clear all wave buffers and seed a center impulse."
+  [state: ^App-State]
+  (fill-buffer! state.current 0.0)
+  (fill-buffer! state.previous 0.0)
+  (fill-buffer! state.next 0.0)
+  (disturb! state (/ Grid-W 2) (/ Grid-H 2) 2.2))
+
+(defn handle-input!
+  "Apply keyboard controls to the app state."
+  [state: ^App-State]
+  (when (rl.IsKeyPressed .SPACE)
+    (set! state.paused (not state.paused)))
+  (when (rl.IsKeyPressed .ONE) (set! state.target-fps 30))
+  (when (rl.IsKeyPressed .TWO) (set! state.target-fps 60))
+  (when (rl.IsKeyPressed .THREE) (set! state.target-fps 144))
+  (when (rl.IsKeyPressed .UP)
+    (set! state.steps-per-frame (math.clamp (+ state.steps-per-frame 1) 1 12)))
+  (when (rl.IsKeyPressed .DOWN)
+    (set! state.steps-per-frame (math.clamp (- state.steps-per-frame 1) 1 12)))
+  (when (rl.IsKeyPressed .R) (reset! state)))
+
+(defn run-window
+  "Open the raylib window and run the wave ripple demo."
+  []
+  (rl.SetConfigFlags [.WINDOW_RESIZABLE .WINDOW_HIGHDPI])
+  (rl.InitWindow (i32 Width) (i32 Height) "Kvist wave ripples")
+  (defer (rl.CloseWindow))
+  (rl.SetTargetFPS (i32 Initial-Target-FPS))
+  (let [font (rl.LoadFontEx (cstring Hud-Font-Path) Hud-Font-Atlas-Size nil 0)
+        state (App-State {:current (make-buffer)
+                          :previous (make-buffer)
+                          :next (make-buffer)
+                          :target-fps Initial-Target-FPS
+                          :steps-per-frame Initial-Steps-Per-Frame
+                          :paused false
+                          :frames 0
+                          :metric-start (rl.GetTime)
+                          :fps 0
+                          :update-ms 0
+                          :draw-ms 0})]
+    (rl.SetTextureFilter font.texture .BILINEAR)
+    (defer (rl.UnloadFont font))
+    (defer (delete state.current))
+    (defer (delete state.previous))
+    (defer (delete state.next))
+    (reset! (addr state))
+    (while (not (rl.WindowShouldClose))
+      (handle-input! (addr state))
+      (update-source! (addr state))
+      (rl.SetTargetFPS (i32 state.target-fps))
+      (let [start (rl.GetTime)]
+        (when (not state.paused)
+          (let [step 0]
+            (while (< step state.steps-per-frame)
+              (step-wave! (addr state))
+              (mut! step += 1)))
+          (set! state.update-ms (* (- (rl.GetTime) start) 1000.0))))
+      (let [draw-start (rl.GetTime)]
+        (rl.BeginDrawing)
+        (rl.ClearBackground [13 16 22 255])
+        (draw-field (addr state))
+        (draw-hud font (addr state))
+        (rl.EndDrawing)
+        (set! state.draw-ms (* (- (rl.GetTime) draw-start) 1000.0)))
+      (update-fps-metric! (addr state)))))
+
+(defn main
+  "Run the visual wave ripple field demo."
+  []
+  (run-window))

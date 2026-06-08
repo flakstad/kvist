@@ -1,0 +1,280 @@
+// Visual SOA demo: flocking agents with direct column updates.
+(package main)
+(import fmt "core:fmt")
+(import math "core:math")
+(import rl "vendor:raylib")
+(import soa "kvist:soa")
+
+(def Width: int 1100)
+(def Height: int 720)
+(def Boid-Count: int 420)
+(def Initial-Target-FPS: int 60)
+(def Neighbor-Radius: f32 58.0)
+(def Separation-Radius: f32 18.0)
+(def Max-Speed: f32 145.0)
+(def Min-Speed: f32 55.0)
+(def Hud-Font-Path: string "/System/Library/Fonts/Supplemental/Verdana.ttf")
+(def Hud-Font-Size: f32 20.0)
+(def Hud-Font-Atlas-Size: i32 20)
+(def Hud-Font-Spacing: f32 1.0)
+
+(defstruct Boid
+  {:x f32
+   :y f32
+   :vx f32
+   :vy f32
+   :hue f32})
+
+(defstruct App-State
+  {:boids #soa[dynamic]Boid
+   :target-fps int
+   :paused bool
+   :frames int
+   :metric-start f64
+   :fps f64
+   :update-ms f64
+   :draw-ms f64})
+
+(defn lcg-next
+  "Advance the deterministic random seed and return the next raw integer."
+  [seed: ^u32] -> u32
+  (set! seed^ (+ (* seed^ 1664525) 1013904223))
+  seed^)
+
+(defn rand-unit
+  "Return a repeatable pseudo-random f32 in the half-open range [0, 1)."
+  [seed: ^u32] -> f32
+  (/ (f32 (% (lcg-next seed) 1000000)) 1000000.0))
+
+(defn v2
+  "Construct a raylib 2D vector."
+  [x: f32, y: f32] -> rl.Vector2
+  (rl.Vector2 [x y]))
+
+(defn speed-limit
+  "Clamp a velocity vector between the configured minimum and maximum speeds."
+  [vx: f32, vy: f32] -> [2]f32
+  (let [speed (math.sqrt (+ (* vx vx) (* vy vy)))]
+    (cond
+      (< speed 0.001) ([2]f32 [Min-Speed 0])
+      (> speed Max-Speed) (let [scale (/ Max-Speed speed)]
+                            ([2]f32 [(* vx scale) (* vy scale)]))
+      (< speed Min-Speed) (let [scale (/ Min-Speed speed)]
+                            ([2]f32 [(* vx scale) (* vy scale)]))
+      :else ([2]f32 [vx vy]))))
+
+(defn make-boids
+  "Allocate and initialize the SOA boid buffer."
+  [n: int] -> #soa[dynamic]Boid
+  (let [boids (soa/make Boid n)
+        seed: u32 0x51F00D
+        i 0]
+    (while (< i n)
+      (let [angle (* (rand-unit (addr seed)) 6.28318530718)
+            speed (+ Min-Speed (* (- Max-Speed Min-Speed) (rand-unit (addr seed))))
+            x (+ 80.0 (* (- (f32 Width) 160.0) (rand-unit (addr seed))))
+            y (+ 130.0 (* (- (f32 Height) 180.0) (rand-unit (addr seed))))
+            hue (* 360.0 (rand-unit (addr seed)))]
+        (soa/push! boids (Boid {:x x
+                                :y y
+                                :vx (* speed (math.cos angle))
+                                :vy (* speed (math.sin angle))
+                                :hue hue})))
+      (mut! i += 1))
+    boids))
+
+(defn wrap!
+  "Wrap one boid around the current screen bounds."
+  [boids: ^#soa[dynamic]Boid, i: int, width: f32, height: f32]
+  (when (< boids.x[i] -10.0)
+    (set! boids.x[i] (+ width 10.0)))
+  (when (> boids.x[i] (+ width 10.0))
+    (set! boids.x[i] -10.0))
+  (when (< boids.y[i] 110.0)
+    (set! boids.y[i] (- height 10.0)))
+  (when (> boids.y[i] (+ height 10.0))
+    (set! boids.y[i] 110.0)))
+
+(defn step-boids!
+  "Advance the flock using separation, alignment, cohesion, and mouse steering."
+  [boids: ^#soa[dynamic]Boid, dt: f32, mouse-x: f32, mouse-y: f32, mouse-down: bool, width: f32, height: f32]
+  (let [i 0
+        n (len boids^)
+        neighbor2 (* Neighbor-Radius Neighbor-Radius)
+        sep2 (* Separation-Radius Separation-Radius)]
+    (while (< i n)
+      (let [x boids.x[i]
+            y boids.y[i]
+            vx boids.vx[i]
+            vy boids.vy[i]
+            sep-x: f32 0.0
+            sep-y: f32 0.0
+            align-x: f32 0.0
+            align-y: f32 0.0
+            coh-x: f32 0.0
+            coh-y: f32 0.0
+            count 0
+            j 0]
+        (while (< j n)
+          (when (not (== i j))
+            (let [dx (- boids.x[j] x)
+                  dy (- boids.y[j] y)
+                  dist2 (+ (* dx dx) (* dy dy))]
+              (when (< dist2 neighbor2)
+                (mut! align-x += boids.vx[j])
+                (mut! align-y += boids.vy[j])
+                (mut! coh-x += boids.x[j])
+                (mut! coh-y += boids.y[j])
+                (mut! count += 1)
+                (when (< dist2 sep2)
+                  (mut! sep-x -= dx)
+                  (mut! sep-y -= dy)))))
+          (mut! j += 1))
+        (when (> count 0)
+          (let [inv (/ 1.0 (f32 count))
+                avg-vx (* align-x inv)
+                avg-vy (* align-y inv)
+                center-x (* coh-x inv)
+                center-y (* coh-y inv)]
+            (mut! boids.vx[i] += (* (- avg-vx vx) 0.065))
+            (mut! boids.vy[i] += (* (- avg-vy vy) 0.065))
+            (mut! boids.vx[i] += (* (- center-x x) 0.008))
+            (mut! boids.vy[i] += (* (- center-y y) 0.008))
+            (mut! boids.vx[i] += (* sep-x 0.22))
+            (mut! boids.vy[i] += (* sep-y 0.22))))
+        (when mouse-down
+          (let [dx (- mouse-x x)
+                dy (- mouse-y y)
+                dist2 (+ (* dx dx) (* dy dy) 900.0)]
+            (mut! boids.vx[i] += (* dx (/ 1800.0 dist2)))
+            (mut! boids.vy[i] += (* dy (/ 1800.0 dist2)))))
+        (let [limited (speed-limit boids.vx[i] boids.vy[i])]
+          (set! boids.vx[i] limited[0])
+          (set! boids.vy[i] limited[1]))
+        (mut! boids.x[i] += (* boids.vx[i] dt))
+        (mut! boids.y[i] += (* boids.vy[i] dt))
+        (wrap! boids i width height))
+      (mut! i += 1))))
+
+(defn draw-boid
+  "Draw one boid as a raylib triangle aligned to its velocity."
+  [boids: ^#soa[dynamic]Boid, i: int]
+  (let [x boids.x[i]
+        y boids.y[i]
+        angle (* (math.atan2 boids.vy[i] boids.vx[i]) 57.295779513)
+        color (rl.ColorFromHSV boids.hue[i] 0.64 0.96)]
+    (rl.DrawPoly (v2 x y) 3 7.0 (+ angle 90.0) color)
+    (rl.DrawLineEx (v2 x y)
+                   (v2 (- x (* boids.vx[i] 0.055))
+                       (- y (* boids.vy[i] 0.055)))
+                   1.2
+                   (rl.Fade color 0.32))))
+
+(defn draw-boids
+  "Draw every boid in the SOA buffer."
+  [boids: ^#soa[dynamic]Boid]
+  (let [i 0
+        n (len boids^)]
+    (while (< i n)
+      (draw-boid boids i)
+      (mut! i += 1))))
+
+(defn draw-hud-text
+  "Draw one HUD field with the configured readable mono font."
+  [font: rl.Font, text: cstring, x: f32, y: f32, size: f32, color: rl.Color]
+  (rl.DrawTextEx font text (v2 x y) size Hud-Font-Spacing color))
+
+(defn draw-hud
+  "Draw the fixed-column simulation HUD."
+  [font: rl.Font, state: ^App-State]
+  (let [panel (rl.Rectangle [8 8 (f32 (- (rl.GetScreenWidth) 16)) 94])]
+    (rl.DrawRectangleRounded panel 0.08 8 [0 0 0 190])
+    (rl.DrawRectangleRoundedLines panel 0.08 8 [255 255 255 45])
+    (draw-hud-text font "demo" 18 20 Hud-Font-Size rl.LIGHTGRAY)
+    (draw-hud-text font "flocking #soa" 72 20 Hud-Font-Size rl.RAYWHITE)
+    (draw-hud-text font "boids" 220 20 Hud-Font-Size rl.LIGHTGRAY)
+    (draw-hud-text font (fmt.ctprintf "%5d" (len state.boids)) 280 20 Hud-Font-Size rl.RAYWHITE)
+    (draw-hud-text font "fps" 370 20 Hud-Font-Size rl.LIGHTGRAY)
+    (draw-hud-text font (fmt.ctprintf "%6.1f" state.fps) 414 20 Hud-Font-Size rl.RAYWHITE)
+    (draw-hud-text font "update" 506 20 Hud-Font-Size rl.LIGHTGRAY)
+    (draw-hud-text font (fmt.ctprintf "%7.3f ms" state.update-ms) 574 20 Hud-Font-Size rl.RAYWHITE)
+    (draw-hud-text font "draw" 700 20 Hud-Font-Size rl.LIGHTGRAY)
+    (draw-hud-text font (fmt.ctprintf "%7.3f ms" state.draw-ms) 748 20 Hud-Font-Size rl.RAYWHITE)
+    (draw-hud-text font "target" 885 20 Hud-Font-Size rl.LIGHTGRAY)
+    (draw-hud-text font (fmt.ctprintf "%3d" state.target-fps) 950 20 Hud-Font-Size rl.RAYWHITE)
+    (draw-hud-text font "rules" 18 48 Hud-Font-Size rl.LIGHTGRAY)
+    (draw-hud-text font "separation + alignment + cohesion, direct SOA columns" 72 48 Hud-Font-Size rl.RAYWHITE)
+    (draw-hud-text font "space: pause   drag/click: attract   1/2/3: 30/60/144 fps   r: reset" 18 73 16.0 rl.LIGHTGRAY)))
+
+(defn update-fps-metric!
+  "Update the smoothed FPS counter roughly twice per second."
+  [state: ^App-State]
+  (mut! state.frames += 1)
+  (let [now (rl.GetTime)
+        elapsed (- now state.metric-start)]
+    (when (>= elapsed 0.5)
+      (set! state.fps (/ (f64 state.frames) elapsed))
+      (set! state.frames 0)
+      (set! state.metric-start now))))
+
+(defn reset!
+  "Replace the flock with deterministic initial state."
+  [state: ^App-State]
+  (delete state.boids)
+  (set! state.boids (make-boids Boid-Count)))
+
+(defn handle-input!
+  "Apply keyboard controls to the app state."
+  [state: ^App-State]
+  (when (rl.IsKeyPressed .SPACE)
+    (set! state.paused (not state.paused)))
+  (when (rl.IsKeyPressed .ONE) (set! state.target-fps 30))
+  (when (rl.IsKeyPressed .TWO) (set! state.target-fps 60))
+  (when (rl.IsKeyPressed .THREE) (set! state.target-fps 144))
+  (when (rl.IsKeyPressed .R) (reset! state)))
+
+(defn run-window
+  "Open the raylib window and run the interactive flocking demo."
+  []
+  (rl.SetConfigFlags [.WINDOW_RESIZABLE .WINDOW_HIGHDPI])
+  (rl.InitWindow (i32 Width) (i32 Height) "Kvist flocking SOA")
+  (defer (rl.CloseWindow))
+  (rl.SetTargetFPS (i32 Initial-Target-FPS))
+  (let [font (rl.LoadFontEx (cstring Hud-Font-Path) Hud-Font-Atlas-Size nil 0)
+        state (App-State {:boids (make-boids Boid-Count)
+                          :target-fps Initial-Target-FPS
+                          :paused false
+                          :frames 0
+                          :metric-start (rl.GetTime)
+                          :fps 0
+                          :update-ms 0
+                          :draw-ms 0})]
+    (rl.SetTextureFilter font.texture .BILINEAR)
+    (defer (rl.UnloadFont font))
+    (defer (delete state.boids))
+    (while (not (rl.WindowShouldClose))
+      (handle-input! (addr state))
+      (rl.SetTargetFPS (i32 state.target-fps))
+      (let [start (rl.GetTime)]
+        (when (not state.paused)
+          (step-boids! (addr state.boids)
+                       (rl.GetFrameTime)
+                       (f32 (rl.GetMouseX))
+                       (f32 (rl.GetMouseY))
+                       (rl.IsMouseButtonDown .LEFT)
+                       (f32 (rl.GetScreenWidth))
+                       (f32 (rl.GetScreenHeight)))
+          (set! state.update-ms (* (- (rl.GetTime) start) 1000.0))))
+      (let [draw-start (rl.GetTime)]
+        (rl.BeginDrawing)
+        (rl.ClearBackground [16 19 26 255])
+        (draw-boids (addr state.boids))
+        (draw-hud font (addr state))
+        (rl.EndDrawing)
+        (set! state.draw-ms (* (- (rl.GetTime) draw-start) 1000.0)))
+      (update-fps-metric! (addr state)))))
+
+(defn main
+  "Run the visual flocking SOA demo."
+  []
+  (run-window))

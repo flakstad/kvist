@@ -47,15 +47,15 @@ MAP_N :: 8_000")
         j 0
         i 0
         checksum 0]
-    (for (< j n)
+    (while (< j n)
       (arr/push! base (Score {:value (+ j 1) :bonus (% j 7)}))
       (set! j (+ j 1)))
     (defer (delete base))
-    (for (< i reps)
+    (while (< i reps)
       (let [scores (arr/empty Score n)
             j 0]
         (arr/into! scores (core/slice base))
-        (for (< j n)
+        (while (< j n)
           (let [score (core/get scores j)]
             (core/update! scores j (bump-score score)))
           (set! j (+ j 1)))
@@ -70,15 +70,15 @@ MAP_N :: 8_000")
         j 0
         i 0
         checksum 0]
-    (for (< j n)
+    (while (< j n)
       (arr/push! base (Score {:value (+ j 1) :bonus (% j 7)}))
       (set! j (+ j 1)))
     (defer (delete base))
-    (for (< i reps)
+    (while (< i reps)
       (let [scores (arr/empty Score n)
             j 0]
         (arr/into! scores (core/slice base))
-        (for (< j n)
+        (while (< j n)
           (let [score-ptr (addr (core/get scores j))]
             (bump-score! score-ptr))
           (set! j (+ j 1)))
@@ -93,16 +93,16 @@ MAP_N :: 8_000")
         j 0
         i 0
     checksum 0]
-    (for (< j n)
+    (while (< j n)
       (arr/push! base j)
       (set! j (+ j 1)))
     (defer (delete base))
-    (for (< i reps)
+    (while (< i reps)
       (let [xs (arr/empty int n)
             j 0]
         (arr/into! xs (core/slice base))
         (set! j 0)
-        (for (< j n)
+        (while (< j n)
           (core/update! xs j + 1)
           (set! j (+ j 1)))
         (set! checksum (+ checksum (core/get xs (- n 1))))
@@ -113,10 +113,10 @@ MAP_N :: 8_000")
 (defn bench-map-update! [reps: int, n: int] -> int
   (let [i 0
         checksum 0]
-    (for (< i reps)
-      (let [counts (new map[int]int {})
+    (while (< i reps)
+      (let [counts (map[int]int {})
             j 0]
-        (for (< j n)
+        (while (< j n)
           (core/update! counts (% j 1024) + 1)
           (set! j (+ j 1)))
         (set! checksum (+ checksum (core/get counts 17 0)))

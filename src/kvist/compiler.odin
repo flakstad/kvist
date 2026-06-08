@@ -344,7 +344,7 @@ decl_head_name :: proc(form: CST_Form) -> string {
 
 is_private_decl_head :: proc(head: string) -> bool {
     switch head {
-    case "defconst-", "defvar-", "defstruct-", "defenum-", "defunion-", "defn-", "defmacro-":
+    case "def-", "defvar-", "defstruct-", "defenum-", "defunion-", "defn-", "defmacro-":
         return true
     case:
         return false
@@ -353,7 +353,7 @@ is_private_decl_head :: proc(head: string) -> bool {
 
 is_top_level_decl_head :: proc(head: string) -> bool {
     switch head {
-    case "defconst", "defconst-", "defvar", "defvar-", "defstruct", "defstruct-", "defenum", "defenum-", "defunion", "defunion-", "defn", "defn-", "defmacro", "defmacro-", "proc":
+    case "def", "def-", "defvar", "defvar-", "defstruct", "defstruct-", "defstate", "defenum", "defenum-", "defunion", "defunion-", "defn", "defn-", "defmacro", "defmacro-":
         return true
     case:
         return false
@@ -508,6 +508,74 @@ flatten_package_forms :: proc(files: []Package_File) -> (forms: [dynamic]CST_Top
     return forms
 }
 
+source_package_name_hint :: proc(source: string) -> (name: string, ok: bool) {
+    prefix := "(package"
+    i := 0
+    for i < len(source) {
+        if source[i] == ';' {
+            for i < len(source) && source[i] != '\n' {
+                i += 1
+            }
+            continue
+        }
+        if source[i] == '/' && i+1 < len(source) && source[i+1] == '/' {
+            i += 2
+            for i < len(source) && source[i] != '\n' {
+                i += 1
+            }
+            continue
+        }
+        if source[i] == '/' && i+1 < len(source) && source[i+1] == '*' {
+            i += 2
+            for i+1 < len(source) && !(source[i] == '*' && source[i+1] == '/') {
+                i += 1
+            }
+            if i+1 >= len(source) {
+                return "", false
+            }
+            i += 2
+            continue
+        }
+        if source[i] == '"' {
+            i += 1
+            escaped := false
+            for i < len(source) {
+                ch := source[i]
+                if escaped {
+                    escaped = false
+                } else if ch == '\\' {
+                    escaped = true
+                } else if ch == '"' {
+                    i += 1
+                    break
+                }
+                i += 1
+            }
+            continue
+        }
+        if i+len(prefix) <= len(source) && source[i:i+len(prefix)] == prefix {
+            j := i + len(prefix)
+            if j >= len(source) || !is_whitespace(source[j]) {
+                i += 1
+                continue
+            }
+            for j < len(source) && is_whitespace(source[j]) {
+                j += 1
+            }
+            start := j
+            for j < len(source) && !is_delimiter(source[j]) {
+                j += 1
+            }
+            if start < j {
+                return source[start:j], true
+            }
+            return "", false
+        }
+        i += 1
+    }
+    return "", false
+}
+
 read_root_package_files :: proc(path: string) -> ([]Package_File, Compile_Error, bool) {
     data, read_err := os.read_entire_file_from_path(path, context.allocator)
     if read_err != nil {
@@ -562,6 +630,10 @@ read_root_package_files :: proc(path: string) -> ([]Package_File, Compile_Error,
             return nil, Compile_Error{message = fmt.tprintf("could not read file: %s", file_path)}, false
         }
         file_source := string(data)
+        file_package_hint, ok_package_hint := source_package_name_hint(file_source)
+        if !ok_package_hint || file_package_hint != package_name {
+            continue
+        }
         file_forms, err_file_forms, ok_file_forms := read_top_forms(file_source)
         if !ok_file_forms {
             return nil, err_file_forms, false
@@ -644,6 +716,11 @@ rewrite_symbol_text :: proc(text: string, locals: []string, aliases: []Alias_Pre
         quote_prefix = "'"
         body = body[1:]
     }
+    operator_prefix := ""
+    for len(body) > 0 && (body[0] == '^' || body[0] == '&') {
+        operator_prefix = fmt.tprintf("%s%c", operator_prefix, body[0])
+        body = body[1:]
+    }
     for alias_map in aliases {
         prefix_text := fmt.tprintf("%s/", alias_map.alias)
         if len(body) > len(prefix_text) && body[:len(prefix_text)] == prefix_text {
@@ -654,11 +731,11 @@ rewrite_symbol_text :: proc(text: string, locals: []string, aliases: []Alias_Pre
             if len(alias_map.exports) > 0 && !contains_text(alias_map.exports[:], member) {
                 return "", Compile_Error{message = fmt.tprintf("source package member is private or undefined: %s/%s", alias_map.alias, member), span = span}, false
             }
-            return fmt.tprintf("%s%s__%s", quote_prefix, alias_map.prefix, member), Compile_Error{}, true
+            return fmt.tprintf("%s%s%s__%s", quote_prefix, operator_prefix, alias_map.prefix, member), Compile_Error{}, true
         }
     }
     if prefix != "" && contains_text(locals, body) {
-        return fmt.tprintf("%s%s__%s", quote_prefix, prefix, body), Compile_Error{}, true
+        return fmt.tprintf("%s%s%s__%s", quote_prefix, operator_prefix, prefix, body), Compile_Error{}, true
     }
     return text, Compile_Error{}, true
 }
@@ -691,14 +768,14 @@ rewrite_decl_name :: proc(form: ^CST_Form, prefix: string) {
         return
     }
     switch decl_head_name(form^) {
-    case "defconst", "defconst-", "defvar", "defvar-", "defstruct", "defstruct-", "defenum", "defenum-", "defunion", "defunion-", "defn", "defn-", "defmacro", "defmacro-", "proc":
+    case "def", "def-", "defvar", "defvar-", "defstruct", "defstruct-", "defenum", "defenum-", "defunion", "defunion-", "defn", "defn-", "defmacro", "defmacro-":
         form^.items[1].text = fmt.tprintf("%s__%s", prefix, form^.items[1].text)
     }
 }
 
 type_constructor_symbol :: proc(text: string) -> bool {
     switch text {
-    case "slice", "core/slice", "core-slice", "dynamic", "array", "map", "set", "ptr", "proc":
+    case "slice", "core/slice", "core-slice", "dynamic", "array", "map", "set", "matrix", "ptr", "fn":
         return true
     }
     return false
@@ -905,7 +982,7 @@ rewrite_top_form :: proc(top: CST_Top_Form, locals: []string, aliases: []Alias_P
        len(top.form.items) >= 2 &&
        top.form.items[1].kind == .Symbol {
         head := decl_head_name(top.form)
-        if head == "proc" || head == "defn" || head == "defn-" {
+        if head == "defn" || head == "defn-" {
             return rewrite_proc_like_top_form(top, locals, aliases, prefix)
         }
         if is_top_level_decl_head(head) {
@@ -1780,7 +1857,7 @@ eval_form_head :: proc(form: CST_Form) -> string {
 
 eval_head_is_decl :: proc(head: string) -> bool {
     switch head {
-    case "core/comment", "package", "import", "defconst", "defvar", "defstruct", "defenum", "defunion", "odin", "proc", "defn":
+    case "core/comment", "package", "import", "def", "def-", "defvar", "defvar-", "defstruct", "defstruct-", "defenum", "defenum-", "defunion", "defunion-", "odin", "defn", "defn-":
         return true
     }
     return false

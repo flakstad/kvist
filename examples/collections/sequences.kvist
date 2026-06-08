@@ -1,0 +1,180 @@
+// Exercises core sequence helpers over structs, enums, and strings.
+(package main)
+(import core "kvist:core")
+(import arr "kvist:arr")
+
+(defenum Status [
+  Active
+  Paused
+  Archived
+])
+
+(defstruct User {
+  :name string
+  :age int
+  :status Status
+  :verified bool
+})
+
+(defn active? [user: User] -> bool
+  (== (:status user) .Active))
+
+(defn archived? [user: User] -> bool
+  (== (:status user) .Archived))
+
+(defn adult? [user: User] -> bool
+  (>= (:age user) 18))
+
+(defn young? [user: User] -> bool
+  (< (:age user) 40))
+
+(defn add-age [total: int, user: User] -> int
+  (+ total (:age user)))
+
+(defn active-count [] -> int
+  (let [users ([]User [(User {:name "Ada" :age 36 :status .Active :verified true})
+                           (User {:name "Lin" :age 17 :status .Paused :verified false})
+                           (User {:name "Grace" :age 45 :status .Active :verified true})
+                           (User {:name "Edsger" :age 72 :status .Archived :verified false})])
+        active-users (arr/filter active? users)]
+    (defer (delete active-users))
+    (len active-users)))
+
+(defn active-age-total [] -> int
+  (let [users ([]User [(User {:name "Ada" :age 36 :status .Active :verified true})
+                           (User {:name "Lin" :age 17 :status .Paused :verified false})
+                           (User {:name "Grace" :age 45 :status .Active :verified true})
+                           (User {:name "Edsger" :age 72 :status .Archived :verified false})])
+        active-users (arr/filter active? users)
+        total (arr/reduce add-age 0 active-users)]
+    (defer (delete active-users))
+    total))
+
+(defn first-active-name [] -> string
+  (let [users ([]User [(User {:name "Ada" :age 36 :status .Active :verified true})
+                           (User {:name "Lin" :age 17 :status .Paused :verified false})
+                           (User {:name "Grace" :age 45 :status .Active :verified true})
+                           (User {:name "Edsger" :age 72 :status .Archived :verified false})])
+        active-users (arr/filter active? users)
+        active-names (arr/map :name active-users)
+        name (arr/first active-names)]
+    (defer (delete active-users))
+    (defer (delete active-names))
+    name))
+
+(defn age-for-ada [] -> int
+  (let [users ([]User [(User {:name "Ada" :age 36 :status .Active :verified true})
+                           (User {:name "Lin" :age 17 :status .Paused :verified false})
+                           (User {:name "Grace" :age 45 :status .Active :verified true})
+                           (User {:name "Edsger" :age 72 :status .Archived :verified false})])
+        users-by-name (arr/index-by :name users)
+        ada (core/get users-by-name "Ada")]
+    (defer (delete users-by-name))
+    (:age ada)))
+
+(defn status-run-count [] -> int
+  (let [users ([]User [(User {:name "Ada" :age 36 :status .Active :verified true})
+                           (User {:name "Grace" :age 45 :status .Active :verified true})
+                           (User {:name "Lin" :age 17 :status .Paused :verified false})
+                           (User {:name "Edsger" :age 72 :status .Archived :verified false})])
+        status-runs (arr/partition-by :status users)]
+    (defer (delete status-runs))
+    (len status-runs)))
+
+(defn active-status-group-count [] -> int
+  (let [users ([]User [(User {:name "Ada" :age 36 :status .Active :verified true})
+                           (User {:name "Lin" :age 17 :status .Paused :verified false})
+                           (User {:name "Grace" :age 45 :status .Active :verified true})
+                           (User {:name "Edsger" :age 72 :status .Archived :verified false})])
+        by-status (arr/group-by :status users)
+        active-users (core/get by-status .Active)]
+    (defer
+      (each [_ group by-status]
+        (delete group))
+      (delete by-status))
+    (len active-users)))
+
+(defn youngest-user-name [] -> string
+  (let [users ([]User [(User {:name "Ada" :age 36 :status .Active :verified true})
+                           (User {:name "Lin" :age 17 :status .Paused :verified false})
+                           (User {:name "Grace" :age 45 :status .Active :verified true})
+                           (User {:name "Edsger" :age 72 :status .Archived :verified false})])
+        by-age (arr/sort-by :age users)
+        name (:name (arr/first by-age))]
+    (defer (delete by-age))
+    name))
+
+(defn youngest-user-name-in-place [] -> string
+  (let [users ([dynamic]User [(User {:name "Ada" :age 36 :status .Active :verified true})
+                                  (User {:name "Lin" :age 17 :status .Paused :verified false})
+                                  (User {:name "Grace" :age 45 :status .Active :verified true})
+                                  (User {:name "Edsger" :age 72 :status .Archived :verified false})])]
+    (defer (delete users))
+    (arr/sort-by! :age users)
+    (:name (arr/first users))))
+
+(defn third-user-name [] -> string
+  (let [users ([]User [(User {:name "Ada" :age 36 :status .Active :verified true})
+                           (User {:name "Lin" :age 17 :status .Paused :verified false})
+                           (User {:name "Grace" :age 45 :status .Active :verified true})
+                           (User {:name "Edsger" :age 72 :status .Archived :verified false})])]
+    (:name (arr/nth users 2))))
+
+(defn all-active-users-adults? [] -> bool
+  (let [users ([]User [(User {:name "Ada" :age 36 :status .Active :verified true})
+                           (User {:name "Lin" :age 17 :status .Paused :verified false})
+                           (User {:name "Grace" :age 45 :status .Active :verified true})
+                           (User {:name "Edsger" :age 72 :status .Archived :verified false})])
+        active-users (arr/filter active? users)
+        all-adults? (arr/every? adult? active-users)]
+    (defer (delete active-users))
+    all-adults?))
+
+(defn first-adult-name [] -> string
+  (let [users ([]User [(User {:name "Ada" :age 36 :status .Active :verified true})
+                           (User {:name "Lin" :age 17 :status .Paused :verified false})
+                           (User {:name "Grace" :age 45 :status .Active :verified true})
+                           (User {:name "Edsger" :age 72 :status .Archived :verified false})])
+        [first-adult _] (arr/find adult? users)]
+    (:name first-adult)))
+
+(defn main []
+  (core/println (active-count)))
+
+(core/comment
+  (:name (User {:name "Ada" :age 36 :status .Active :verified true}))
+  ;; => Ada
+
+  (active-count)
+  ;; => 2
+
+  (active-age-total)
+  ;; => 81
+
+  (first-active-name)
+  ;; => Ada
+
+  (age-for-ada)
+  ;; => 36
+
+  (status-run-count)
+  ;; => 3
+
+  (active-status-group-count)
+  ;; => 2
+
+  (youngest-user-name)
+  ;; => Lin
+
+  (youngest-user-name-in-place)
+  ;; => Lin
+
+  (third-user-name)
+  ;; => Grace
+
+  (all-active-users-adults?)
+  ;; => true
+
+  (first-adult-name)
+  ;; => Ada
+)

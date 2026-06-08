@@ -505,7 +505,7 @@ module_definition_from_forms :: proc(accum: ^Loader_Accum, forms: []kvist.CST_To
             continue
         }
 
-        if !kvist.is_symbol(form.items[0], "defconst") && !kvist.is_symbol(form.items[0], "defvar") {
+        if !kvist.is_symbol(form.items[0], "def") && !kvist.is_symbol(form.items[0], "defvar") {
             continue
         }
 
@@ -514,6 +514,9 @@ module_definition_from_forms :: proc(accum: ^Loader_Accum, forms: []kvist.CST_To
         }
 
         binding_name := form.items[1].text
+        if len(binding_name) > 0 && binding_name[len(binding_name)-1] == ':' {
+            binding_name = binding_name[:len(binding_name)-1]
+        }
         value_form := form.items[len(form.items)-1]
         value, value_err, value_ok := kvist_literal_value(value_form)
         if !value_ok {

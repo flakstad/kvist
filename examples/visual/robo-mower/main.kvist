@@ -1,0 +1,656 @@
+// Top-down robo mower sandbox.
+(package main)
+
+(import cli "kvist:cli")
+(import fmt "core:fmt")
+(import os "core:os")
+(import rl "vendor:raylib")
+
+(def Width: int 1160)
+(def Height: int 760)
+(def Target-FPS: int 60)
+(def Fixed-DT: f32 0.016666667)
+(def Low-Battery-Percent: f32 20.0)
+(def Recharge-Rate: f32 16.0)
+(def Undock-Time: f32 1.25)
+(def Undock-Speed: f32 36.0)
+(def Dock-Heading: f32 1.5707964)
+(def Hud-Font-Path: string "/System/Library/Fonts/Supplemental/Verdana.ttf")
+(def Hud-Font-Size: f32 20.0)
+(def Hud-Font-Atlas-Size: i32 20)
+(def Hud-Font-Spacing: f32 1.0)
+(def Hud-Panel-H: f32 198.0)
+(def Button-H: f32 26.0)
+(def Brush-Obstacle: int 0)
+(def Brush-Boundary: int 1)
+(def Brush-Erase: int 2)
+
+(defstruct App-State
+  {:world World
+   :belief Robot-Belief
+   :robot Robot
+   :sensors Sensors
+   :paused bool
+   :sim-speed f32
+   :sim-credit f32
+   :show-grid bool
+   :show-sensors bool
+   :brush-mode int
+   :rain bool
+   :hills bool
+   :reflex-enabled bool
+   :lifted bool
+   :bumper bool
+   :comms-ok bool
+   :charging bool
+   :undocking bool
+   :dock-time f32
+   :battery f32
+   :mission-time f32
+   :frames int
+   :metric-start f64
+   :fps f64
+   :update-ms f64
+   :draw-ms f64})
+
+(defn v2
+  "Construct a raylib 2D vector."
+  [x: f32, y: f32] -> rl.Vector2
+  (rl.Vector2 [x y]))
+
+(defn rect
+  "Construct a raylib rectangle."
+  [x: f32, y: f32, w: f32, h: f32] -> rl.Rectangle
+  (rl.Rectangle [x y w h]))
+
+(defn rgba
+  "Construct a raylib color from integer channel values."
+  [r: int, g: int, b: int, a: int] -> rl.Color
+  (rl.Color [(u8 r) (u8 g) (u8 b) (u8 a)]))
+
+(defn mouse-pos
+  "Return the current mouse position as a raylib vector."
+  [] -> rl.Vector2
+  (v2 (f32 (rl.GetMouseX)) (f32 (rl.GetMouseY))))
+
+(defn clicked?
+  "Return true when the left mouse clicked inside a rectangle."
+  [bounds: rl.Rectangle] -> bool
+  (and (rl.IsMouseButtonPressed .LEFT)
+       (rl.CheckCollisionPointRec (mouse-pos) bounds)))
+
+(defn on-off
+  "Return a short on/off HUD label."
+  [value: bool] -> cstring
+  (when value
+    (return "on"))
+  "off")
+
+(defn ok-fault
+  "Return a short link health HUD label."
+  [value: bool] -> cstring
+  (when value
+    (return "ok"))
+  "fault")
+
+(defn recovery-name
+  "Return a short HUD label for the active collision recovery state."
+  [recovery: int] -> cstring
+  (when (== recovery Recovery-Reverse)
+    (return "reverse"))
+  (when (== recovery Recovery-Turn)
+    (return "turn"))
+  (when (== recovery Recovery-Arc)
+    (return "arc"))
+  (when (== recovery Recovery-PreArc)
+    (return "orient"))
+  "none")
+
+(defn robot-phase
+  "Return the active physical or recovery phase for the HUD."
+  [state: (ptr App-State)] -> cstring
+  (when (<= state.battery (f32 0.0))
+    (return "no-power"))
+  (when state.charging
+    (return "charge"))
+  (when state.undocking
+    (return "undock"))
+  (recovery-name state.robot.recovery))
+
+(defn set-mode!
+  "Set the robot controller mode and prime mode-specific state."
+  [state: (ptr App-State), mode: int]
+  (when (and (== mode Mode-Return)
+             (not (== state.robot.mode Mode-Return)))
+    (set! state.robot.return-source state.robot.mode))
+  (when (not (== mode Mode-Return))
+    (set! state.robot.return-source mode))
+  (set! state.robot.mode mode)
+  (set! state.robot.recovery Recovery-None)
+  (set! state.robot.recovery-time 0.0)
+  (when (== mode Mode-Random)
+    (choose-random-heading! (addr state.robot))))
+
+(defn screen-x
+  "Convert local field x to screen x."
+  [x: f32] -> f32
+  (+ (f32 Field-X) x))
+
+(defn screen-y
+  "Convert local field y to screen y."
+  [y: f32] -> f32
+  (+ (f32 Field-Y) y))
+
+(defn reset-app!
+  "Reset world robot and sensors."
+  [state: (ptr App-State)]
+  (reset-world! (addr state.world))
+  (reset-belief! (addr state.belief))
+  (reset-robot! (addr state.robot))
+  (set! state.paused true)
+  (set! state.sim-credit 0.0)
+  (set! state.charging false)
+  (set! state.undocking false)
+  (set! state.dock-time 0.0)
+  (set! state.battery (f32 100.0))
+  (set! state.mission-time (f32 0.0))
+  (sense! (addr state.world) (addr state.robot) (addr state.sensors))
+  (observe-belief! (addr state.belief) (addr state.robot) (addr state.sensors)))
+
+(defn make-app-state
+  "Allocate a complete simulation state with default robot world and controls."
+  [] -> App-State
+  (let [state (App-State {:world (make-world)
+                          :belief (make-belief)
+                          :robot (make-robot)
+                          :sensors (Sensors {})
+                          :paused false
+                          :sim-speed 1.0
+                          :sim-credit 0.0
+                          :show-grid true
+                          :show-sensors true
+                          :brush-mode Brush-Obstacle
+                          :rain false
+                          :hills false
+                          :reflex-enabled true
+                          :lifted false
+                          :bumper false
+                          :comms-ok true
+                          :charging false
+                          :undocking false
+                          :dock-time 0.0
+                          :battery 100.0
+                          :mission-time 0.0
+                          :frames 0
+                          :metric-start 0.0
+                          :fps 0
+                          :update-ms 0
+                          :draw-ms 0})]
+    (reset-app! (addr state))
+    state))
+
+(defn delete-app-state!
+  "Release dynamic buffers owned by a simulation state."
+  [state: (ptr App-State)]
+  (delete-belief! (addr state.belief))
+  (delete-world! (addr state.world)))
+
+(defn handle-input!
+  "Apply keyboard controls for mode speed pause and reset."
+  [state: (ptr App-State)]
+  (when (rl.IsKeyPressed .SPACE)
+    (set! state.paused (not state.paused)))
+  (when (rl.IsKeyPressed .ONE)
+    (set-mode! state Mode-Random))
+  (when (rl.IsKeyPressed .TWO)
+    (set-mode! state Mode-Boundary))
+  (when (rl.IsKeyPressed .THREE)
+    (set-mode! state Mode-Frontier))
+  (when (rl.IsKeyPressed .FOUR)
+    (set-mode! state Mode-Mapped))
+  (when (rl.IsKeyPressed .FIVE)
+    (set-mode! state Mode-Return))
+  (when (rl.IsKeyPressed .LEFT_BRACKET)
+    (set! state.sim-speed (math.clamp (- state.sim-speed (f32 0.25)) (f32 0.25) (f32 8.0))))
+  (when (rl.IsKeyPressed .RIGHT_BRACKET)
+    (set! state.sim-speed (math.clamp (+ state.sim-speed (f32 0.25)) (f32 0.25) (f32 8.0))))
+  (when (rl.IsKeyPressed .G)
+    (set! state.show-grid (not state.show-grid)))
+  (when (rl.IsKeyPressed .V)
+    (set! state.show-sensors (not state.show-sensors)))
+  (when (rl.IsKeyPressed .R)
+    (reset-app! state)))
+
+(defn handle-mouse-controls!
+  "Apply mouse clicks on fixed HUD controls."
+  [state: (ptr App-State)]
+  (when (clicked? (rect 18 106 78 Button-H))
+    (set-mode! state Mode-Random))
+  (when (clicked? (rect 102 106 98 Button-H))
+    (set-mode! state Mode-Boundary))
+  (when (clicked? (rect 206 106 92 Button-H))
+    (set-mode! state Mode-Frontier))
+  (when (clicked? (rect 304 106 82 Button-H))
+    (set-mode! state Mode-Mapped))
+  (when (clicked? (rect 392 106 70 Button-H))
+    (set-mode! state Mode-Return))
+  (when (clicked? (rect 480 106 34 Button-H))
+    (set! state.sim-speed (math.clamp (- state.sim-speed (f32 0.25)) (f32 0.25) (f32 8.0))))
+  (when (clicked? (rect 520 106 34 Button-H))
+    (set! state.sim-speed (math.clamp (+ state.sim-speed (f32 0.25)) (f32 0.25) (f32 8.0))))
+  (when (clicked? (rect 570 106 74 Button-H))
+    (set! state.paused (not state.paused)))
+  (when (clicked? (rect 650 106 66 Button-H))
+    (reset-app! state))
+  (when (clicked? (rect 730 106 62 Button-H))
+    (set! state.show-grid (not state.show-grid)))
+  (when (clicked? (rect 798 106 62 Button-H))
+    (set! state.show-sensors (not state.show-sensors)))
+  (when (clicked? (rect 866 106 62 Button-H))
+    (set! state.brush-mode Brush-Obstacle))
+  (when (clicked? (rect 934 106 62 Button-H))
+    (set! state.brush-mode Brush-Boundary))
+  (when (clicked? (rect 1002 106 68 Button-H))
+    (set! state.brush-mode Brush-Erase))
+  (when (clicked? (rect 18 138 62 Button-H))
+    (set! state.rain (not state.rain)))
+  (when (clicked? (rect 86 138 62 Button-H))
+    (set! state.hills (not state.hills)))
+  (when (clicked? (rect 154 138 74 Button-H))
+    (set! state.reflex-enabled (not state.reflex-enabled)))
+  (when (clicked? (rect 234 138 62 Button-H))
+    (set! state.lifted (not state.lifted)))
+  (when (clicked? (rect 302 138 76 Button-H))
+    (set! state.bumper (not state.bumper)))
+  (when (clicked? (rect 384 138 62 Button-H))
+    (set! state.comms-ok (not state.comms-ok))))
+
+(defn handle-mouse-edit!
+  "Paint or erase obstacle cells under the mouse."
+  [state: (ptr App-State)]
+  (let [mx (- (int (rl.GetMouseX)) Field-X)
+        my (- (int (rl.GetMouseY)) Field-Y)]
+    (when (and (>= mx 0) (< mx Field-Px-W) (>= my 0) (< my Field-Px-H))
+      (let [cell-x (/ mx Cell-Size)
+            cell-y (/ my Cell-Size)
+            world (addr state.world)]
+        (when (rl.IsMouseButtonDown .LEFT)
+          (when (== state.brush-mode Brush-Boundary)
+            (set-cell! world cell-x cell-y Cell-Boundary))
+          (when (== state.brush-mode Brush-Erase)
+            (set-cell! world cell-x cell-y Cell-Grass))
+          (when (== state.brush-mode Brush-Obstacle)
+            (paint-cell! world cell-x cell-y 1 Cell-Obstacle)))
+        (when (rl.IsMouseButtonDown .RIGHT)
+          (paint-cell! world cell-x cell-y 1 Cell-Grass))))))
+
+(defn base-distance2
+  "Return squared distance from the robot to the charging base."
+  [robot: (ptr Robot)] -> f32
+  (let [dx (- (base-x) (:x robot^))
+        dy (- (base-y) (:y robot^))]
+    (+ (* dx dx) (* dy dy))))
+
+(defn dock-distance2
+  "Return squared distance from the robot to the safe dock pose."
+  [robot: (ptr Robot)] -> f32
+  (let [dx (- (dock-x) (:x robot^))
+        dy (- (dock-y) (:y robot^))]
+    (+ (* dx dx) (* dy dy))))
+
+(defn begin-charging!
+  "Enter the simulated dock charging phase."
+  [state: (ptr App-State)]
+  (set! state.charging true)
+  (set! state.undocking false)
+  (set! state.dock-time 0.0)
+  (set! state.robot.recovery Recovery-None)
+  (set! state.robot.recovery-kind Collision-None)
+  (set-drive-metrics! (addr state.robot) 0.0 0.0 false))
+
+(defn update-mission-state!
+  "Update robot mission policy such as low-battery return-to-base."
+  [state: (ptr App-State), cmd: Command, dt: f32]
+  (mut! state.mission-time += dt)
+  (let [drain (+ (f32 0.16) (* (abs-f32 (:speed cmd)) (f32 0.004)))]
+    (set! state.battery (math.clamp (- state.battery (* dt drain)) (f32 0.0) (f32 100.0))))
+  (when (and (not (== state.robot.mode Mode-Return))
+             (or (<= state.battery Low-Battery-Percent)
+                 (>= state.mission-time (f32 180.0))))
+    (set-mode! state Mode-Return))
+  (when (and (== state.robot.mode Mode-Return)
+             (< (dock-distance2 (addr state.robot)) (f32 1600.0)))
+    (begin-charging! state)))
+
+(defn update-charging!
+  "Apply the real-world charging phase while the robot is docked."
+  [state: (ptr App-State), dt: f32] -> bool
+  (when (not state.charging)
+    (return false))
+  (set-drive-metrics! (addr state.robot) 0.0 0.0 false)
+  (set! state.battery (math.clamp (+ state.battery (* dt Recharge-Rate)) (f32 0.0) (f32 100.0)))
+  (when (>= state.battery (f32 100.0))
+    (set! state.charging false)
+    (set! state.undocking true)
+    (set! state.dock-time 0.0)
+    (set! state.robot.heading Dock-Heading))
+  true)
+
+(defn update-undocking!
+  "Back out from the charger before resuming the previous mowing mode."
+  [state: (ptr App-State), dt: f32] -> bool
+  (when (not state.undocking)
+    (return false))
+  (set! state.robot.heading Dock-Heading)
+  (step-robot! (addr state.world) (addr state.robot) (undock-command) dt)
+  (mut! state.dock-time += dt)
+  (when (>= state.dock-time Undock-Time)
+    (set! state.undocking false)
+    (set! state.dock-time 0.0)
+    (set-mode! state state.robot.return-source))
+  true)
+
+(defn update-simulation!
+  "Run one fixed simulation step."
+  [state: (ptr App-State), dt: f32]
+  (sense! (addr state.world) (addr state.robot) (addr state.sensors))
+  (when (update-charging! state dt)
+    (sense! (addr state.world) (addr state.robot) (addr state.sensors))
+    (observe-belief! (addr state.belief) (addr state.robot) (addr state.sensors))
+    (return))
+  (when (update-undocking! state dt)
+    (sense! (addr state.world) (addr state.robot) (addr state.sensors))
+    (observe-belief! (addr state.belief) (addr state.robot) (addr state.sensors))
+    (return))
+  (let [requested-cmd (controller-command (addr state.robot) (addr state.sensors) (addr state.belief))
+        actual-cmd (actuator-command state requested-cmd)]
+    (update-mission-state! state actual-cmd dt)
+    (step-robot! (addr state.world) (addr state.robot) actual-cmd dt)
+    (sense! (addr state.world) (addr state.robot) (addr state.sensors))
+    (observe-belief! (addr state.belief) (addr state.robot) (addr state.sensors))))
+
+(defn cell-color
+  "Return the color for one world cell."
+  [world: (ptr World), cell: int] -> rl.Color
+  (let [cells (:cells world^)
+        cut (:cut world^)]
+    (when (== cells[cell] Cell-Obstacle)
+      (return (rgba 78 74 68 255)))
+    (when (== cells[cell] Cell-Boundary)
+      (return (rgba 230 54 62 255)))
+    (when (== cells[cell] Cell-Outside)
+      (return (rgba 42 49 56 255)))
+    (when cut[cell]
+      (return (rgba 52 116 65 255)))
+    (rgba 39 139 68 255)))
+
+(defn draw-world
+  "Draw the lawn cells and obstacle grid."
+  [state: (ptr App-State)]
+  (let [world (addr state.world)
+        y 0]
+    (while (< y Grid-H)
+      (let [x 0]
+        (while (< x Grid-W)
+          (let [cell (idx x y)
+                sx (+ Field-X (* x Cell-Size))
+                sy (+ Field-Y (* y Cell-Size))]
+            (rl.DrawRectangle (i32 sx) (i32 sy) (i32 Cell-Size) (i32 Cell-Size) (cell-color world cell)))
+          (mut! x += 1)))
+      (mut! y += 1))
+    (rl.DrawRectangleLines (i32 Field-X) (i32 Field-Y) (i32 Field-Px-W) (i32 Field-Px-H) [235 245 255 150])))
+
+(defn draw-grid
+  "Draw optional cell grid lines over the lawn."
+  []
+  (let [x 0]
+    (while (<= x Grid-W)
+      (let [sx (+ Field-X (* x Cell-Size))]
+        (rl.DrawLine (i32 sx) (i32 Field-Y) (i32 sx) (i32 (+ Field-Y Field-Px-H)) (rgba 255 255 255 22)))
+      (mut! x += 1)))
+  (let [y 0]
+    (while (<= y Grid-H)
+      (let [sy (+ Field-Y (* y Cell-Size))]
+        (rl.DrawLine (i32 Field-X) (i32 sy) (i32 (+ Field-X Field-Px-W)) (i32 sy) (rgba 255 255 255 22)))
+      (mut! y += 1))))
+
+(defn draw-sensor-ray
+  "Draw one distance sensor ray in screen space."
+  [robot: (ptr Robot), angle-offset: f32, distance: f32, color: rl.Color]
+  (let [x (screen-x (:x robot^))
+        y (screen-y (:y robot^))
+        angle (+ (:heading robot^) angle-offset)
+        ex (+ x (* (math.cos angle) distance))
+        ey (+ y (* (math.sin angle) distance))]
+    (rl.DrawLineEx (v2 x y) (v2 ex ey) (f32 2.0) color)))
+
+(defn draw-sensors
+  "Draw the active robot distance sensor rays."
+  [state: (ptr App-State)]
+  (let [robot (addr state.robot)
+        sensors (addr state.sensors)]
+    (draw-sensor-ray robot (f32 0.0) (:front sensors^) (rgba 255 232 120 220))
+    (draw-sensor-ray robot (f32 0.78) (:left sensors^) (rgba 118 196 255 190))
+    (draw-sensor-ray robot (f32 -0.78) (:right sensors^) (rgba 255 142 120 190))))
+
+(defn draw-belief-marker
+  "Draw the robot's last cutting evidence for belief-based modes."
+  [state: (ptr App-State)]
+  (when (== state.robot.mode Mode-Mapped)
+    (rl.DrawCircleLinesV (v2 (screen-x state.belief.last-cut-x)
+                             (screen-y state.belief.last-cut-y))
+                         9
+                         (rgba 255 255 255 210))))
+
+(defn draw-mapped-lanes
+  "Draw the configured mapped-mode lane plan and active target."
+  [state: (ptr App-State)]
+  (when (== state.robot.mode Mode-Mapped)
+    (let [lane 0
+          active state.robot.lane-index
+          target-x (mapped-lane-target-x active)
+          target-y (mapped-lane-y active)]
+      (when (== state.robot.lane-phase Mapped-Phase-Shift)
+        (set! target-x state.robot.lane-shift-x)
+        (set! target-y (mapped-shift-target-y (addr state.robot))))
+      (while (< lane (mapped-lane-count))
+        (let [y (screen-y (mapped-lane-y lane))
+              color (rgba 255 255 255 42)]
+          (when (== lane active)
+            (set! color (rgba 255 224 120 155)))
+          (rl.DrawLineEx (v2 (screen-x (mapped-min-x)) y)
+                         (v2 (screen-x (mapped-max-x)) y)
+                         2.0
+                         color))
+        (mut! lane += 1))
+      (when (== state.robot.lane-phase Mapped-Phase-Shift)
+        (rl.DrawLineEx (v2 (screen-x target-x) (screen-y (mapped-lane-y active)))
+                       (v2 (screen-x target-x) (screen-y target-y))
+                       3.0
+                       (rgba 255 224 120 180)))
+      (rl.DrawCircleV (v2 (screen-x target-x)
+                          (screen-y target-y))
+                      6.0
+                      (rgba 255 224 120 230)))))
+
+(defn draw-base
+  "Draw the charging base along the boundary wire."
+  []
+  (let [x (screen-x (base-x))
+        y (screen-y (base-y))
+        pad (f32 14.0)]
+    (rl.DrawRectangleRounded (rect (- x pad) (- y pad) (* pad 2.0) (* pad 2.0)) 0.22 6 (rgba 68 121 214 230))
+    (rl.DrawRectangleRoundedLines (rect (- x pad) (- y pad) (* pad 2.0) (* pad 2.0)) 0.22 6 (rgba 220 235 255 220))
+    (rl.DrawCircleV (v2 x y) 4.0 rl.RAYWHITE)))
+
+(defn draw-robot
+  "Draw the mower blade disk and body."
+  [state: (ptr App-State)]
+  (let [robot (addr state.robot)
+        x (screen-x (:x robot^))
+        y (screen-y (:y robot^))
+        center (v2 x y)]
+    (rl.DrawCircleV center Blade-Radius [74 184 96 90])
+    (rl.DrawCircleV center (:radius robot^) rl.RAYWHITE)
+    (rl.DrawCircleV center 4.0 [28 32 38 255])))
+
+(defn draw-hud-text
+  "Draw one HUD text field."
+  [font: rl.Font, text: cstring, x: f32, y: f32, size: f32, color: rl.Color]
+  (rl.DrawTextEx font text (v2 x y) size Hud-Font-Spacing color))
+
+(defn draw-button
+  "Draw one clickable HUD button."
+  [font: rl.Font, label: cstring, bounds: rl.Rectangle, active: bool]
+  (let [hover (rl.CheckCollisionPointRec (mouse-pos) bounds)
+        fill (rgba 34 43 52 225)
+        line (rgba 255 255 255 72)
+        text rl.RAYWHITE]
+    (when active
+      (set! fill (rgba 38 112 74 238))
+      (set! line (rgba 154 245 190 180)))
+    (when hover
+      (set! line (rgba 255 255 255 155)))
+    (rl.DrawRectangleRounded bounds 0.18 6 fill)
+    (rl.DrawRectangleRoundedLines bounds 0.18 6 line)
+    (draw-hud-text font label (+ bounds.x 9.0) (+ bounds.y 4.0) 16.0 text)))
+
+(defn draw-hud
+  "Draw fixed-position simulation stats."
+  [font: rl.Font, state: (ptr App-State)]
+  (let [world (addr state.world)
+        belief (addr state.belief)
+        robot (addr state.robot)
+        sensors (addr state.sensors)
+        panel (rect 8 8 (f32 (- (rl.GetScreenWidth) 16)) Hud-Panel-H)]
+    (rl.DrawRectangleRounded panel 0.08 8 [0 0 0 195])
+    (rl.DrawRectangleRoundedLines panel 0.08 8 [255 255 255 45])
+    (draw-hud-text font "mode" 18 20 Hud-Font-Size rl.LIGHTGRAY)
+    (draw-hud-text font (mode-name (:mode robot^)) 76 20 Hud-Font-Size rl.RAYWHITE)
+    (draw-hud-text font "speed" 190 20 Hud-Font-Size rl.LIGHTGRAY)
+    (draw-hud-text font (fmt.ctprintf "%4.2fx" state.sim-speed) 258 20 Hud-Font-Size rl.RAYWHITE)
+    (draw-hud-text font "fps" 370 20 Hud-Font-Size rl.LIGHTGRAY)
+    (draw-hud-text font (fmt.ctprintf "%6.1f" state.fps) 414 20 Hud-Font-Size rl.RAYWHITE)
+    (draw-hud-text font "update" 520 20 Hud-Font-Size rl.LIGHTGRAY)
+    (draw-hud-text font (fmt.ctprintf "%7.3f ms" state.update-ms) 596 20 Hud-Font-Size rl.RAYWHITE)
+    (draw-hud-text font "draw" 755 20 Hud-Font-Size rl.LIGHTGRAY)
+    (draw-hud-text font (fmt.ctprintf "%7.3f ms" state.draw-ms) 808 20 Hud-Font-Size rl.RAYWHITE)
+    (draw-hud-text font "truth" 18 52 Hud-Font-Size rl.LIGHTGRAY)
+    (draw-hud-text font (fmt.ctprintf "%6.2f%%" (coverage-percent world)) 112 52 Hud-Font-Size rl.RAYWHITE)
+    (draw-hud-text font "collisions" 230 52 Hud-Font-Size rl.LIGHTGRAY)
+    (draw-hud-text font (fmt.ctprintf "%5d" (:collisions robot^)) 335 52 Hud-Font-Size rl.RAYWHITE)
+    (draw-hud-text font "front left right wire" 430 52 Hud-Font-Size rl.LIGHTGRAY)
+    (draw-hud-text font (fmt.ctprintf "%5.1f %5.1f %5.1f %5.1f" (:front sensors^) (:left sensors^) (:right sensors^) (:wire sensors^)) 635 52 Hud-Font-Size rl.RAYWHITE)
+    (draw-hud-text font "distance" 18 80 16.0 rl.LIGHTGRAY)
+    (draw-hud-text font (fmt.ctprintf "%7.1f" (:distance robot^)) 94 80 16.0 rl.RAYWHITE)
+    (draw-hud-text font "obstacles" 190 80 16.0 rl.LIGHTGRAY)
+    (draw-hud-text font (fmt.ctprintf "%5d" (:obstacle-count world^)) 278 80 16.0 rl.RAYWHITE)
+    (draw-hud-text font "wire" 350 80 16.0 rl.LIGHTGRAY)
+    (draw-hud-text font (fmt.ctprintf "%5d" (:boundary-count world^)) 398 80 16.0 rl.RAYWHITE)
+    (draw-hud-text font "battery" 475 80 16.0 rl.LIGHTGRAY)
+    (draw-hud-text font (fmt.ctprintf "%5.1f%%" state.battery) 550 80 16.0 rl.RAYWHITE)
+    (draw-hud-text font "time" 640 80 16.0 rl.LIGHTGRAY)
+    (draw-hud-text font (fmt.ctprintf "%6.1fs" state.mission-time) 690 80 16.0 rl.RAYWHITE)
+    (draw-hud-text font "load" 795 80 16.0 rl.LIGHTGRAY)
+    (draw-hud-text font (fmt.ctprintf "%4.2f" (:blade-load sensors^)) 842 80 16.0 rl.RAYWHITE)
+    (draw-hud-text font "known" 912 80 16.0 rl.LIGHTGRAY)
+    (draw-hud-text font (fmt.ctprintf "%5.1f%%" (belief-known-percent belief)) 970 80 16.0 rl.RAYWHITE)
+    (draw-hud-text font "lane" 1050 80 16.0 rl.LIGHTGRAY)
+    (draw-hud-text font (fmt.ctprintf "%2d/%2d" (:lane-index robot^) (mapped-lane-count)) 1094 80 16.0 rl.RAYWHITE)
+    (draw-button font "random" (rect 18 106 78 Button-H) (== (:mode robot^) Mode-Random))
+    (draw-button font "boundary" (rect 102 106 98 Button-H) (== (:mode robot^) Mode-Boundary))
+    (draw-button font "frontier" (rect 206 106 92 Button-H) (== (:mode robot^) Mode-Frontier))
+    (draw-button font "mapped" (rect 304 106 82 Button-H) (== (:mode robot^) Mode-Mapped))
+    (draw-button font "home" (rect 392 106 70 Button-H) (== (:mode robot^) Mode-Return))
+    (draw-button font "-" (rect 480 106 34 Button-H) false)
+    (draw-button font "+" (rect 520 106 34 Button-H) false)
+    (draw-button font "pause" (rect 570 106 74 Button-H) state.paused)
+    (draw-button font "reset" (rect 650 106 66 Button-H) false)
+    (draw-button font "grid" (rect 730 106 62 Button-H) state.show-grid)
+    (draw-button font "rays" (rect 798 106 62 Button-H) state.show-sensors)
+    (draw-button font "obst" (rect 866 106 62 Button-H) (== state.brush-mode Brush-Obstacle))
+    (draw-button font "wire" (rect 934 106 62 Button-H) (== state.brush-mode Brush-Boundary))
+    (draw-button font "erase" (rect 1002 106 68 Button-H) (== state.brush-mode Brush-Erase))
+    (draw-button font "rain" (rect 18 138 62 Button-H) state.rain)
+    (draw-button font "hill" (rect 86 138 62 Button-H) state.hills)
+    (draw-button font "reflex" (rect 154 138 74 Button-H) state.reflex-enabled)
+    (draw-button font "lift" (rect 234 138 62 Button-H) state.lifted)
+    (draw-button font "bumper" (rect 302 138 76 Button-H) state.bumper)
+    (draw-button font "link" (rect 384 138 62 Button-H) state.comms-ok)
+    (draw-hud-text font "robot" 18 168 16.0 rl.LIGHTGRAY)
+    (draw-hud-text font (mode-name (:mode robot^)) 74 168 16.0 rl.RAYWHITE)
+    (draw-hud-text font "blade" 158 168 16.0 rl.LIGHTGRAY)
+    (draw-hud-text font (on-off (:blade-on robot^)) 214 168 16.0 rl.RAYWHITE)
+    (draw-hud-text font "wheel L/R" 274 168 16.0 rl.LIGHTGRAY)
+    (draw-hud-text font (fmt.ctprintf "%7.1f %7.1f" (:left-wheel robot^) (:right-wheel robot^)) 374 168 16.0 rl.RAYWHITE)
+    (draw-hud-text font "battery" 552 168 16.0 rl.LIGHTGRAY)
+    (draw-hud-text font (fmt.ctprintf "%5.1f%%" state.battery) 624 168 16.0 rl.RAYWHITE)
+    (draw-hud-text font "rain" 704 168 16.0 rl.LIGHTGRAY)
+    (draw-hud-text font (on-off state.rain) 752 168 16.0 rl.RAYWHITE)
+    (draw-hud-text font "phase" 812 168 16.0 rl.LIGHTGRAY)
+    (draw-hud-text font (robot-phase state) 872 168 16.0 rl.RAYWHITE)
+    (draw-hud-text font "link" 994 168 16.0 rl.LIGHTGRAY)
+    (draw-hud-text font (ok-fault state.comms-ok) 1040 168 16.0 rl.RAYWHITE)
+    (draw-hud-text font "profile" 18 190 16.0 rl.LIGHTGRAY)
+    (draw-hud-text font (sensor-profile-name (:sensor-profile robot^)) 92 190 16.0 rl.RAYWHITE)))
+
+(defn update-fps-metric!
+  "Update the smoothed FPS counter roughly twice per second."
+  [state: (ptr App-State)]
+  (mut! state.frames += 1)
+  (let [now (rl.GetTime)
+        elapsed (- now state.metric-start)]
+    (when (>= elapsed 0.5)
+      (set! state.fps (/ (f64 state.frames) elapsed))
+      (set! state.frames 0)
+      (set! state.metric-start now))))
+
+(defn run-window
+  "Run the top-down robo mower simulation window."
+  [args: []string]
+  (rl.SetConfigFlags [.WINDOW_RESIZABLE .WINDOW_HIGHDPI])
+  (rl.InitWindow (i32 Width) (i32 Height) "Kvist robo mower")
+  (rl.SetTargetFPS (i32 Target-FPS))
+  (let [font (rl.LoadFontEx (cstring Hud-Font-Path) Hud-Font-Atlas-Size nil 0)
+        state (make-app-state)]
+    (rl.SetTextureFilter font.texture .BILINEAR)
+    (set! state.paused false)
+    (set! state.robot.sensor-profile (parse-robot-profile (cli/option args "--robot" "forward")))
+    (set! state.metric-start (rl.GetTime))
+    (while (not (rl.WindowShouldClose))
+      (handle-input! (addr state))
+      (handle-mouse-controls! (addr state))
+      (handle-mouse-edit! (addr state))
+      (let [update-start (rl.GetTime)]
+        (when (not state.paused)
+          (mut! state.sim-credit += state.sim-speed)
+          (while (>= state.sim-credit (f32 1.0))
+            (update-simulation! (addr state) Fixed-DT)
+            (mut! state.sim-credit -= (f32 1.0))))
+        (set! state.update-ms (* (- (rl.GetTime) update-start) 1000.0)))
+      (let [draw-start (rl.GetTime)]
+        (rl.BeginDrawing)
+        (rl.ClearBackground [18 22 28 255])
+        (draw-world (addr state))
+        (draw-base)
+        (when state.show-grid
+          (draw-grid))
+        (draw-mapped-lanes (addr state))
+        (draw-belief-marker (addr state))
+        (when state.show-sensors
+          (draw-sensors (addr state)))
+        (draw-robot (addr state))
+        (draw-hud font (addr state))
+        (rl.EndDrawing)
+        (set! state.draw-ms (* (- (rl.GetTime) draw-start) 1000.0)))
+      (update-fps-metric! (addr state)))
+    (delete-app-state! (addr state))
+    (rl.UnloadFont font))
+  (rl.CloseWindow))
+
+(defn main
+  "Run headless experiments with --headless, otherwise open the visual simulation."
+  []
+  (if (cli/flag os.args "--headless")
+    (run-headless os.args)
+    (run-window os.args)))

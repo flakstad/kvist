@@ -25,10 +25,10 @@ KEY_MOD :: 1024")
 (defn bench-map-update! [reps: int, n: int] -> int
   (let [i 0
         checksum 0]
-    (for (< i reps)
-      (let [counts (new map[int]int {})
+    (while (< i reps)
+      (let [counts (map[int]int {})
             j 0]
-        (for (< j n)
+        (while (< j n)
           (core/update! counts (% j KEY_MOD) + 1)
           (set! j (+ j 1)))
         (set! checksum (+ checksum (core/get counts 17 0)))

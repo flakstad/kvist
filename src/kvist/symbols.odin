@@ -17,6 +17,11 @@ Imported_Symbol_Record :: struct {
     rank:   int,
 }
 
+Local_Type_Binding :: struct {
+    name: string,
+    ty:   string,
+}
+
 Builtin_Source_Entry :: struct {
     name:     string,
     relative: string,
@@ -36,7 +41,7 @@ KVIST_CANONICAL_IMPORTS_FOR_EDITOR :: [13]Imported_Symbol_Entry{
     {alias = "str", path = "kvist:str"},
     {alias = "map", path = "kvist:map"},
     {alias = "set", path = "kvist:set"},
-    {alias = "struct", path = "kvist:struct"},
+    {alias = "soa", path = "kvist:soa"},
     {alias = "io", path = "kvist:io"},
     {alias = "json", path = "kvist:json"},
     {alias = "http", path = "kvist:http"},
@@ -53,25 +58,28 @@ BUILTIN_SOURCE_ENTRIES :: []Builtin_Source_Entry{
 LANGUAGE_SOURCE_ENTRIES :: []Language_Source_Entry{
     {name = "package", kind = "kvist form", relative = "src/kvist/parse.odin", snippet = "case \"package\":"},
     {name = "import", kind = "kvist form", relative = "src/kvist/parse.odin", snippet = "case \"import\":"},
-    {name = "defconst", kind = "kvist form", relative = "src/kvist/parse.odin", snippet = "case \"defconst\", \"defconst-\":\""},
+    {name = "def", kind = "kvist form", relative = "src/kvist/parse.odin", snippet = "case \"def\", \"def-\":\""},
     {name = "defvar", kind = "kvist form", relative = "src/kvist/parse.odin", snippet = "case \"defvar\", \"defvar-\":\""},
     {name = "defstruct", kind = "kvist form", relative = "src/kvist/parse.odin", snippet = "case \"defstruct\", \"defstruct-\":\""},
     {name = "defenum", kind = "kvist form", relative = "src/kvist/parse.odin", snippet = "case \"defenum\", \"defenum-\":\""},
     {name = "defunion", kind = "kvist form", relative = "src/kvist/parse.odin", snippet = "case \"defunion\", \"defunion-\":\""},
     {name = "defn", kind = "kvist form", relative = "src/kvist/parse.odin", snippet = "case \"defn\", \"defn-\":\""},
+    {name = "fn", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "emit_proc_literal_expr :: proc"},
     {name = "odin", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "case \"odin\":"},
     {name = "let", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "case \"let\":"},
+    {name = "block", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "case \"do\", \"block\":"},
     {name = "do", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "case \"do\":"},
     {name = "if", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "emit_if_like :: proc"},
     {name = "set!", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "case \"set!\":"},
+    {name = "mut!", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "case \"mut!\":"},
     {name = "return", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "case \"return\":"},
     {name = "defer", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "case \"defer\":"},
     {name = "for", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "case \"for\":"},
-    {name = "new", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "if head.text == \"new\""},
     {name = "make", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "if head.text == \"make\""},
     {name = "type", kind = "kvist form", relative = "src/kvist/parse.odin", snippet = "if is_symbol(form.items[0], \"type\")"},
     {name = "break", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "case \"break\":"},
     {name = "continue", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "case \"continue\":"},
+    {name = "while", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "case \"while\":"},
     {name = "with-allocator", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "emit_with_allocator_stmt :: proc"},
     {name = "with-temp-allocator", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "emit_with_temp_allocator_stmt :: proc"},
 }
@@ -900,11 +908,10 @@ repo_root_for_path :: proc(path: string) -> (string, bool) {
         if err == nil {
             if os.exists(marker) {
                 delete(marker)
-                if owned_current == "" {
-                    return current, true
-                }
                 root := strings.clone(current)
-                delete(owned_current)
+                if owned_current != "" {
+                    delete(owned_current)
+                }
                 return root, true
             }
             delete(marker)
@@ -1106,6 +1113,7 @@ editor_symbols_source :: proc(path, source: string) -> (output: string, err: Com
                 return "", local_err, false
             }
             symbols_append_local_package_records(&builder, &seen, file.path, local_output)
+            symbols_append_local_field_records(&builder, &seen, file.path, file.source, file.forms[:])
             context.allocator = result_allocator
             delete(local_output)
             context.allocator = context.temp_allocator
@@ -1123,6 +1131,7 @@ editor_symbols_source :: proc(path, source: string) -> (output: string, err: Com
             return "", local_err, false
         }
         symbols_append_local_package_records(&builder, &seen, path, local_output)
+        symbols_append_local_field_records(&builder, &seen, path, source, forms[:])
         context.allocator = result_allocator
         delete(local_output)
         context.allocator = context.temp_allocator
@@ -1504,6 +1513,247 @@ symbols_write_fields :: proc(builder: ^strings.Builder, source, parent: string, 
     }
 }
 
+symbols_defstruct_field_index :: proc(form: CST_Form) -> (int, bool) {
+    if form.kind != .List || len(form.items) < 3 || form.items[0].kind != .Symbol {
+        return -1, false
+    }
+    head := form.items[0].text
+    if head != "defstruct" && head != "defstruct-" && head != "defstate" {
+        return -1, false
+    }
+    if form.items[1].kind != .Symbol {
+        return -1, false
+    }
+    field_index := 2
+    if len(form.items) >= 4 && form.items[2].kind == .String {
+        field_index = 3
+    }
+    if field_index >= len(form.items) || form.items[field_index].kind != .Brace {
+        return -1, false
+    }
+    return field_index, true
+}
+
+symbols_struct_fields_for_type :: proc(forms: []CST_Top_Form, ty: string) -> (fields: [dynamic]Struct_Field, ok: bool) {
+    normalized_ty := ty
+    if strings.has_prefix(normalized_ty, "^") {
+        normalized_ty = normalized_ty[1:]
+    }
+    for top in forms {
+        form := top.form
+        field_index, ok_fields_index := symbols_defstruct_field_index(form)
+        if !ok_fields_index {
+            continue
+        }
+        source_name := form.items[1].text
+        mapped_name := map_name(source_name)
+        if normalized_ty != source_name && normalized_ty != mapped_name {
+            delete(mapped_name)
+            continue
+        }
+        delete(mapped_name)
+        parsed, err_fields, ok_fields := parse_defstruct_fields(form.items[field_index])
+        if ok_fields {
+            return parsed, true
+        }
+        _ = err_fields
+    }
+    return fields, false
+}
+
+symbols_local_type_lookup :: proc(bindings: []Local_Type_Binding, name: string) -> (string, bool) {
+    for idx := len(bindings)-1; idx >= 0; idx -= 1 {
+        if bindings[idx].name == name {
+            return bindings[idx].ty, true
+        }
+    }
+    return "", false
+}
+
+symbols_local_type_bind :: proc(bindings: ^[dynamic]Local_Type_Binding, name, ty: string) {
+    if name == "" || ty == "" {
+        return
+    }
+    append(bindings, Local_Type_Binding{name = name, ty = ty})
+}
+
+symbols_obvious_local_value_type :: proc(form: CST_Form, bindings: []Local_Type_Binding) -> (string, bool) {
+    if form.kind == .Symbol {
+        ty, ok := symbols_local_type_lookup(bindings, form.text)
+        if ok {
+            return ty, true
+        }
+        mapped_name := map_name(form.text)
+        defer delete(mapped_name)
+        return symbols_local_type_lookup(bindings, mapped_name)
+    }
+    if form.kind == .List && len(form.items) == 2 && form.items[0].kind == .Symbol {
+        arg := form.items[1]
+        if arg.kind == .Brace || arg.kind == .Vector {
+            return map_name(form.items[0].text), true
+        }
+    }
+    return "", false
+}
+
+symbols_write_editor_record :: proc(
+    builder: ^strings.Builder,
+    seen: ^map[string]bool,
+    kind, name: string,
+    source: string,
+    span: Span,
+    detail: string,
+    file_path: string,
+) {
+    key := fmt.tprintf("%s\t%s", kind, name)
+    if seen[key] {
+        return
+    }
+    seen[key] = true
+    line, column := 1, 1
+    if source != "" {
+        line, column, _, _ = source_position(source, span.start)
+    }
+    fmt.sbprintf(builder, "%s\t%s\t%d\t%d\t%s\t\t\t%s\n", kind, name, line, column, detail, file_path)
+}
+
+symbols_write_local_typed_fields :: proc(
+    builder: ^strings.Builder,
+    seen: ^map[string]bool,
+    file_path, source: string,
+    forms: []CST_Top_Form,
+    local_name: string,
+    span: Span,
+    ty: string,
+) {
+    symbols_write_editor_record(builder, seen, "local", local_name, source, span, ty, file_path)
+    fields, ok_fields := symbols_struct_fields_for_type(forms, ty)
+    if !ok_fields {
+        return
+    }
+    defer delete(fields)
+    for field in fields {
+        field_name := field.source_name
+        if field_name == "" {
+            field_name = field.name
+        }
+        name := fmt.tprintf("%s.%s", local_name, field_name)
+        symbols_write_editor_record(builder, seen, "field", name, source, span, ty, file_path)
+        delete(name)
+    }
+}
+
+symbols_local_var_binding :: proc(form: CST_Form, bindings: []Local_Type_Binding) -> (name, ty: string, span: Span, ok: bool) {
+    if form.kind != .List || len(form.items) < 3 || !is_symbol(form.items[0], "defvar") {
+        return "", "", {}, false
+    }
+    target := form.items[1]
+    if target.kind != .Symbol {
+        return "", "", {}, false
+    }
+    raw_name := target.text
+    value_index := 2
+    if len(raw_name) > 0 && raw_name[len(raw_name)-1] == ':' {
+        if len(raw_name) == 1 {
+            return "", "", {}, false
+        }
+        parsed_ty, next_i, err_type, ok_type := parse_type_text_from_forms(form.items[:], 2)
+        if !ok_type || next_i >= len(form.items) {
+            _ = err_type
+            return "", "", {}, false
+        }
+        value_index = next_i
+        raw_name = raw_name[:len(raw_name)-1]
+        return raw_name, parsed_ty, target.span, true
+    }
+    if value_index >= len(form.items) {
+        return "", "", {}, false
+    }
+    inferred_ty, ok_ty := symbols_obvious_local_value_type(form.items[value_index], bindings)
+    if !ok_ty {
+        return "", "", {}, false
+    }
+    return raw_name, inferred_ty, target.span, true
+}
+
+symbols_collect_local_field_records_for_form :: proc(
+    builder: ^strings.Builder,
+    seen: ^map[string]bool,
+    file_path, source: string,
+    top_forms: []CST_Top_Form,
+    form: CST_Form,
+    bindings: ^[dynamic]Local_Type_Binding,
+) {
+    if form.kind != .List || len(form.items) == 0 || form.items[0].kind != .Symbol {
+        for item in form.items {
+            symbols_collect_local_field_records_for_form(builder, seen, file_path, source, top_forms, item, bindings)
+        }
+        return
+    }
+
+    head := form.items[0].text
+    if head == "defn" || head == "defn-" {
+        proc_form := form
+        if len(form.items) > 3 && form.items[2].kind == .String {
+            items: [dynamic]CST_Form
+            defer delete(items)
+            append(&items, form.items[0], form.items[1])
+            for item in form.items[3:] {
+                append(&items, item)
+            }
+            proc_form = CST_Form{kind = .List, items = items, span = form.span}
+        }
+        decl, err_proc, ok_proc := parse_proc_decl(proc_form)
+        if ok_proc {
+            local_bindings: [dynamic]Local_Type_Binding
+            defer delete(local_bindings)
+            for param in decl.params {
+                if param.name != "" && param.ty != "" {
+                    symbols_local_type_bind(&local_bindings, param.name, param.ty)
+                    symbols_write_local_typed_fields(builder, seen, file_path, source, top_forms, param.name, form.span, param.ty)
+                }
+            }
+            symbols_collect_local_field_records_for_forms(builder, seen, file_path, source, top_forms, decl.body[:], &local_bindings)
+        } else {
+            _ = err_proc
+        }
+        return
+    }
+
+    if head == "defvar" {
+        name, ty, span, ok_var := symbols_local_var_binding(form, bindings[:])
+        if ok_var {
+            symbols_local_type_bind(bindings, name, ty)
+            symbols_write_local_typed_fields(builder, seen, file_path, source, top_forms, name, span, ty)
+        }
+    }
+
+    for item in form.items[1:] {
+        symbols_collect_local_field_records_for_form(builder, seen, file_path, source, top_forms, item, bindings)
+    }
+}
+
+symbols_collect_local_field_records_for_forms :: proc(
+    builder: ^strings.Builder,
+    seen: ^map[string]bool,
+    file_path, source: string,
+    top_forms: []CST_Top_Form,
+    forms: []CST_Form,
+    bindings: ^[dynamic]Local_Type_Binding,
+) {
+    for form in forms {
+        symbols_collect_local_field_records_for_form(builder, seen, file_path, source, top_forms, form, bindings)
+    }
+}
+
+symbols_append_local_field_records :: proc(builder: ^strings.Builder, seen: ^map[string]bool, file_path, source: string, forms: []CST_Top_Form) {
+    bindings: [dynamic]Local_Type_Binding
+    defer delete(bindings)
+    for top in forms {
+        symbols_collect_local_field_records_for_form(builder, seen, file_path, source, forms, top.form, &bindings)
+    }
+}
+
 symbols_write_enum_variants :: proc(builder: ^strings.Builder, source, parent: string, variants: CST_Form) {
     #partial switch variants.kind {
     case .Vector:
@@ -1583,20 +1833,28 @@ symbols_source :: proc(source: string) -> (output: string, err: Compile_Error, o
                 path := import_path_text(form.items[2])
                 symbols_write_record_doc(&builder, "import", alias, source, form.items[1].span, path, "", top.doc_lines[:])
             }
-        case "defconst", "defconst-":
+        case "def", "def-":
             if len(form.items) >= 2 && form.items[1].kind == .Symbol {
+                name := form.items[1].text
+                if len(name) > 0 && name[len(name)-1] == ':' {
+                    name = name[:len(name)-1]
+                }
                 doc_lines := top.doc_lines
                 if len(form.items) > 3 && form.items[2].kind == .String {
                     doc_lines = symbols_append_doc_lines(doc_lines[:], symbols_doc_lines_from_string(unquote_string(form.items[2].text))[:])
                 }
                 detail := ""
-                if head == "defconst-" {
+                if head == "def-" {
                     detail = "private"
                 }
-                symbols_write_record_doc(&builder, "const", form.items[1].text, source, form.items[1].span, detail, "", doc_lines[:])
+                symbols_write_record_doc(&builder, "const", name, source, form.items[1].span, detail, "", doc_lines[:])
             }
         case "defvar", "defvar-":
             if len(form.items) >= 2 && form.items[1].kind == .Symbol {
+                name := form.items[1].text
+                if len(name) > 0 && name[len(name)-1] == ':' {
+                    name = name[:len(name)-1]
+                }
                 doc_lines := top.doc_lines
                 if len(form.items) > 3 && form.items[2].kind == .String {
                     doc_lines = symbols_append_doc_lines(doc_lines[:], symbols_doc_lines_from_string(unquote_string(form.items[2].text))[:])
@@ -1605,7 +1863,7 @@ symbols_source :: proc(source: string) -> (output: string, err: Compile_Error, o
                 if head == "defvar-" {
                     detail = "private"
                 }
-                symbols_write_record_doc(&builder, "var", form.items[1].text, source, form.items[1].span, detail, "", doc_lines[:])
+                symbols_write_record_doc(&builder, "var", name, source, form.items[1].span, detail, "", doc_lines[:])
             }
         case "defstruct", "defstruct-":
             if (len(form.items) == 3 || len(form.items) == 4) && form.items[1].kind == .Symbol {

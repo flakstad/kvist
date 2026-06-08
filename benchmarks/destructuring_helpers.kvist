@@ -29,7 +29,7 @@ REPS :: 400")
 (defn build-points [n: int] -> [dynamic]Point
   (let [points (arr/empty Point n)
         i 0]
-    (for (< i n)
+    (while (< i n)
       (arr/push! points
                  (Point {:x i
                          :y (+ i 1)
@@ -42,9 +42,9 @@ REPS :: 400")
   (let [n (len points)
         i 0
         checksum 0]
-    (for (< i reps)
+    (while (< i reps)
       (let [j 0]
-        (for (< j n)
+        (while (< j n)
           (let [point (get points j)]
             (set! checksum (+ checksum (:x point)))
             (set! checksum (+ checksum (:y point)))
@@ -58,9 +58,9 @@ REPS :: 400")
   (let [n (len points)
         i 0
         checksum 0]
-    (for (< i reps)
+    (while (< i reps)
       (let [j 0]
-        (for (< j n)
+        (while (< j n)
           (let [point (get points j)
                 x (:x point)
                 y (:y point)
@@ -78,9 +78,9 @@ REPS :: 400")
   (let [n (len points)
         i 0
         checksum 0]
-    (for (< i reps)
+    (while (< i reps)
       (let [j 0]
-        (for (< j n)
+        (while (< j n)
           (let [idx (% (+ (* j 7) i) n)
                 point (get points idx)]
             (set! checksum (+ checksum (:x point)))
@@ -95,9 +95,9 @@ REPS :: 400")
   (let [n (len points)
         i 0
         checksum 0]
-    (for (< i reps)
+    (while (< i reps)
       (let [j 0]
-        (for (< j n)
+        (while (< j n)
           (let [idx (% (+ (* j 7) i) n)
                 point (get points idx)
                 x (:x point)

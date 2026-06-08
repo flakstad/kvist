@@ -46,7 +46,7 @@
   operation over Odin maps and does not allocate a replacement map."
   [target source]
   (quasiquote
-    (for [key value (unquote source)]
+    (each [key value (unquote source)]
       (core/update! (unquote target) key value))))
 
 (defmacro assoc!
@@ -67,7 +67,7 @@
   (quasiquote
     (core/delete! (unquote target) (unquote key))))
 
-(proc contains?
+(defn contains?
   "Return true when `m` contains `key`.
 
   This lowers to Odin `key in m`; it does not allocate and does not inspect
@@ -75,7 +75,7 @@
   [m: map[$K]$V, key: K] -> bool #force_inline
   (odin "return key in m"))
 
-(proc assoc
+(defn assoc
   "Return a new map containing `m` plus `key` mapped to `value`.
 
   The input map is not mutated. A new Odin map is allocated, all entries from
@@ -83,48 +83,48 @@
   overwritten in the returned map."
   [m: map[$K]$V, key: K, value: V] -> map[K]V #force_inline
   (let [out (map/empty K V (+ (odin "len(m)") 1))]
-    (for [entry-key entry-value m]
+    (each [entry-key entry-value m]
       (core/update! out entry-key entry-value))
     (core/update! out key value)
     out))
 
-(proc dissoc
+(defn dissoc
   "Return a new map like `m` without `key`.
 
   The input map is not mutated. A new Odin map is allocated and entries whose
   key is not equal to `key` are copied into it."
   [m: map[$K]$V, key: K] -> map[K]V #force_inline
   (let [out (map/empty K V (odin "len(m)"))]
-    (for [entry-key entry-value m]
+    (each [entry-key entry-value m]
       (core/when (!= entry-key key)
         (core/update! out entry-key entry-value)))
     out))
 
-(proc merge
+(defn merge
   "Return a new map containing entries from `lhs` and `rhs`.
 
   Neither input map is mutated. Entries from `rhs` win when the same key occurs
   in both maps. The result is allocated once with capacity for both inputs."
   [lhs: map[$K]$V, rhs: map[$K]$V] -> map[K]V #force_inline
   (let [out (map/empty K V (+ (odin "len(lhs)") (odin "len(rhs)")))]
-    (for [key value lhs]
+    (each [key value lhs]
       (core/update! out key value))
-    (for [key value rhs]
+    (each [key value rhs]
       (core/update! out key value))
     out))
 
-(proc keys
+(defn keys
   "Return the keys of `m` in a newly allocated dynamic array.
 
   Map iteration order is Odin map iteration order and is not stable or sorted.
   The returned array is owned by the caller."
   [m: map[$K]$V] -> [dynamic]K #force_inline
   (let [out (arr/empty K (odin "len(m)"))]
-    (for [key _ m]
+    (each [key _ m]
       (arr/push! out key))
     out))
 
-(proc vals
+(defn vals
   "Return the values of `m` in a newly allocated dynamic array.
 
   Values are returned in Odin map iteration order, matching `map/keys` for the
@@ -132,11 +132,11 @@
   is owned by the caller."
   [m: map[$K]$V] -> [dynamic]V #force_inline
   (let [out (arr/empty V (odin "len(m)"))]
-    (for [_ value m]
+    (each [_ value m]
       (arr/push! out value))
     out))
 
-(proc zip
+(defn zip
   "Create a map by pairing keys from `ks` with values from `vs`.
 
   The result contains pairs up to the shorter input length. Extra keys or
@@ -148,7 +148,7 @@
     (core/when (> cap value-count)
       (set! cap value-count))
     (let [out (map/empty K V cap)]
-      (for [key i ks]
+      (each [key i ks]
         (core/when (< i value-count)
           (core/update! out key (arr/get vs i))))
       out)))

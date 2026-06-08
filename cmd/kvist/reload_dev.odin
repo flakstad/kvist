@@ -3,28 +3,20 @@ package main
 import "core:dynlib"
 import "core:fmt"
 import "core:os"
-import "core:strconv"
 import "core:strings"
+import "core:time"
 import kvist "../../src/kvist"
 
 RELOAD_CACHE_DIR :: "reload-apps"
 
-Reload_App_Mode :: enum {
-    Step,
-    Run,
-}
-
 Reload_App_Config :: struct {
     state_type:     string,
     version:        string,
-    mode:           Reload_App_Mode,
-    step_name:      string,
     run_name:       string,
     init_name:      string,
     on_load_name:   string,
     on_unload_name: string,
     package_name:   string,
-    sleep_ms:       int,
 }
 
 Reload_App_Paths :: struct {
@@ -49,6 +41,22 @@ Reload_Exec_Paths :: struct {
 Reload_Build_Result :: struct {
     ok:        bool,
     exit_code: int,
+}
+
+reload_app_symbol_name :: proc(text: string) -> string {
+    mapped := kvist.map_name(text)
+    defer delete(mapped)
+
+    builder := strings.builder_make()
+    defer strings.builder_destroy(&builder)
+    for ch in mapped {
+        if ch == '/' {
+            strings.write_string(&builder, "__")
+        } else {
+            strings.write_rune(&builder, ch)
+        }
+    }
+    return strings.clone(strings.to_string(builder))
 }
 
 delete_reload_app_paths :: proc(paths: ^Reload_App_Paths) {
@@ -190,6 +198,26 @@ reload_app_absolute_path_or_exit :: proc(path: string) -> string {
     return absolute
 }
 
+reload_app_canonical_root_or_exit :: proc(path: string) -> string {
+    absolute := reload_app_absolute_path_or_exit(path)
+    defer delete(absolute)
+
+    if !os.exists(absolute) {
+        err := os.make_directory_all(absolute)
+        if err != nil {
+            fmt.eprintln("failed to create reload app directory: ", absolute)
+            os.exit(1)
+        }
+    }
+
+    canonical, canonical_err := os.get_absolute_path(absolute, context.allocator)
+    if canonical_err != nil {
+        fmt.eprintln("failed to canonicalize reload app directory: ", absolute)
+        os.exit(1)
+    }
+    return canonical
+}
+
 reload_app_config_from_source :: proc(input, source: string) -> (config: Reload_App_Config, err: kvist.Compile_Error, ok: bool) {
     forms, read_err, read_ok := kvist.read_top_forms(source)
     if !read_ok {
@@ -197,8 +225,6 @@ reload_app_config_from_source :: proc(input, source: string) -> (config: Reload_
     }
 
     config.version = strings.clone("dev")
-    config.mode = .Step
-    config.sleep_ms = 1000
     found_defstate := false
 
     for top in forms {
@@ -230,66 +256,53 @@ reload_app_config_from_source :: proc(input, source: string) -> (config: Reload_
             if found_defstate {
                 return config, kvist.Compile_Error{message = "defstate must appear at most once in reload dev mode", span = form.span}, false
             }
-            if len(form.items) != 4 && len(form.items) != 5 {
-                return config, kvist.Compile_Error{message = "reload dev mode requires defstate with fields and reload metadata brace forms", span = form.span}, false
+            metadata_only := len(form.items) == 3 && form.items[2].kind == .Brace
+            if !metadata_only && len(form.items) != 4 && len(form.items) != 5 {
+                return config, kvist.Compile_Error{message = "reload dev mode requires defstate with either metadata only or fields plus metadata brace forms", span = form.span}, false
             }
             if form.items[1].kind != .Symbol {
                 return config, kvist.Compile_Error{message = "defstate expects a symbol name", span = form.items[1].span}, false
             }
             fields_index := 2
             meta_index := 3
-            if len(form.items) == 5 {
+            if metadata_only {
+                meta_index = 2
+            } else if len(form.items) == 5 {
                 if form.items[2].kind != .String {
                     return config, kvist.Compile_Error{message = "defstate docstring must be a string literal", span = form.items[2].span}, false
                 }
                 fields_index = 3
                 meta_index = 4
             }
-            if form.items[fields_index].kind != .Brace {
+            if !metadata_only && form.items[fields_index].kind != .Brace {
                 return config, kvist.Compile_Error{message = "defstate fields must be a brace form", span = form.items[fields_index].span}, false
             }
             if form.items[meta_index].kind != .Brace {
                 return config, kvist.Compile_Error{message = "defstate reload metadata must be a brace form", span = form.items[meta_index].span}, false
             }
             found_defstate = true
-            config.state_type = strings.clone(kvist.map_name(form.items[1].text))
+            config.state_type = reload_app_symbol_name(form.items[1].text)
             meta := form.items[meta_index]
-            i := 0
-            for i < len(meta.items) {
-                if i+1 >= len(meta.items) {
-                return config, kvist.Compile_Error{message = "defstate reload metadata has a missing value", span = meta.span}, false
-            }
-            key_form := meta.items[i]
-            value := meta.items[i+1]
-            if key_form.kind != .Keyword || len(key_form.text) < 2 {
-                return config, kvist.Compile_Error{message = "defstate reload metadata expects keyword keys", span = key_form.span}, false
-            }
-                key := key_form.text[1:]
-                switch key {
-                case "step":
-                    if value.kind != .Symbol {
-                        return config, kvist.Compile_Error{message = "defstate :step must be a symbol", span = value.span}, false
-                    }
-                    if config.run_name != "" {
-                        return config, kvist.Compile_Error{message = "defstate reload metadata cannot specify both :step and :run", span = value.span}, false
-                    }
-                    if config.step_name != "" {
-                        delete(config.step_name)
-                    }
-                    config.mode = .Step
-                    config.step_name = strings.clone(kvist.map_name(value.text))
+			i := 0
+			for i < len(meta.items) {
+				if i+1 >= len(meta.items) {
+					return config, kvist.Compile_Error{message = "defstate reload metadata has a missing value", span = meta.span}, false
+				}
+				key_form := meta.items[i]
+				value := meta.items[i+1]
+				if key_form.kind != .Keyword || len(key_form.text) < 2 {
+					return config, kvist.Compile_Error{message = "defstate reload metadata expects keyword keys", span = key_form.span}, false
+				}
+				key := key_form.text[1:]
+				switch key {
                 case "run":
                     if value.kind != .Symbol {
                         return config, kvist.Compile_Error{message = "defstate :run must be a symbol", span = value.span}, false
                     }
-                    if config.step_name != "" {
-                        return config, kvist.Compile_Error{message = "defstate reload metadata cannot specify both :step and :run", span = value.span}, false
-                    }
                     if config.run_name != "" {
                         delete(config.run_name)
                     }
-                    config.mode = .Run
-                    config.run_name = strings.clone(kvist.map_name(value.text))
+                    config.run_name = reload_app_symbol_name(value.text)
                 case "init":
                     if value.kind == .Nil {
                         config.init_name = ""
@@ -300,7 +313,7 @@ reload_app_config_from_source :: proc(input, source: string) -> (config: Reload_
                         if config.init_name != "" {
                             delete(config.init_name)
                         }
-                        config.init_name = strings.clone(kvist.map_name(value.text))
+                        config.init_name = reload_app_symbol_name(value.text)
                     }
                 case "on-load":
                     if value.kind == .Nil {
@@ -312,7 +325,7 @@ reload_app_config_from_source :: proc(input, source: string) -> (config: Reload_
                         if config.on_load_name != "" {
                             delete(config.on_load_name)
                         }
-                        config.on_load_name = strings.clone(kvist.map_name(value.text))
+                        config.on_load_name = reload_app_symbol_name(value.text)
                     }
                 case "on-unload":
                     if value.kind == .Nil {
@@ -324,7 +337,7 @@ reload_app_config_from_source :: proc(input, source: string) -> (config: Reload_
                         if config.on_unload_name != "" {
                             delete(config.on_unload_name)
                         }
-                        config.on_unload_name = strings.clone(kvist.map_name(value.text))
+                        config.on_unload_name = reload_app_symbol_name(value.text)
                     }
                 case "version":
                     if value.kind != .String {
@@ -334,15 +347,6 @@ reload_app_config_from_source :: proc(input, source: string) -> (config: Reload_
                         delete(config.version)
                     }
                     config.version = kvist.unquote_string(value.text)
-                case "sleep-ms":
-                    if value.kind != .Number {
-                        return config, kvist.Compile_Error{message = "defstate :sleep-ms must be an integer", span = value.span}, false
-                    }
-                    parsed, parsed_ok := strconv.parse_int(value.text)
-                    if !parsed_ok || parsed < 1 {
-                        return config, kvist.Compile_Error{message = "defstate :sleep-ms must be a positive integer", span = value.span}, false
-                    }
-                    config.sleep_ms = parsed
                 case:
                     return config, kvist.Compile_Error{message = fmt.tprintf("unsupported defstate reload metadata option: :%s", key), span = key_form.span}, false
                 }
@@ -354,13 +358,67 @@ reload_app_config_from_source :: proc(input, source: string) -> (config: Reload_
     if !found_defstate {
         return config, kvist.Compile_Error{message = "missing defstate declaration"}, false
     }
-    if config.step_name == "" && config.run_name == "" {
-        return config, kvist.Compile_Error{message = "defstate reload metadata requires :step or :run"}, false
+    if config.run_name == "" {
+        return config, kvist.Compile_Error{message = "defstate reload metadata requires :run"}, false
     }
     if config.package_name == "" {
         config.package_name = strings.clone("main")
     }
     return config, kvist.Compile_Error{}, true
+}
+
+reload_app_file_has_config :: proc(path: string) -> bool {
+    data, read_err := os.read_entire_file_from_path(path, context.allocator)
+    if read_err != nil {
+        return false
+    }
+    defer delete(data)
+
+    _, _, ok := reload_app_config_from_source(path, string(data))
+    return ok
+}
+
+reload_app_conventional_adapter_for_input :: proc(input: string) -> (resolved_input: string, ok: bool) {
+    input_abs, abs_err := os.get_absolute_path(input, context.allocator)
+    if abs_err != nil {
+        return "", false
+    }
+    defer delete(input_abs)
+
+    repo_root, repo_ok := kvist.repo_root_for_path(input_abs)
+    if repo_ok {
+        defer delete(repo_root)
+    }
+
+    dir, _ := os.split_path(input_abs)
+    if dir == "" {
+        return "", false
+    }
+    current := strings.clone(dir)
+
+    for {
+        candidate, join_err := os.join_path({current, "reload.kvist"}, context.allocator)
+        if join_err == nil {
+            if candidate != input_abs && reload_app_file_has_config(candidate) {
+                delete(current)
+                return candidate, true
+            }
+            delete(candidate)
+        }
+
+        if repo_ok && current == repo_root {
+            break
+        }
+        parent, _ := os.split_path(strings.trim_right(current, "/"))
+        if parent == "" || parent == current {
+            break
+        }
+        delete(current)
+        current = strings.clone(parent)
+    }
+
+    delete(current)
+    return "", false
 }
 
 reload_app_primary_input :: proc(input: string) -> (resolved_input: string, ok: bool) {
@@ -430,6 +488,10 @@ reload_app_primary_input :: proc(input: string) -> (resolved_input: string, ok: 
         if file_config_ok {
             return strings.clone(file_path), true
         }
+    }
+
+    if adapter, adapter_ok := reload_app_conventional_adapter_for_input(input); adapter_ok {
+        return adapter, true
     }
 
     return "", false
@@ -596,26 +658,26 @@ compile_path_to_output_or_exit :: proc(input, output_path: string) {
     write_output_or_exit(output_path, output)
 }
 
-reload_app_module_source :: proc(config: Reload_App_Config, app_import_path, kvist_hot_import_path: string) -> string {
+reload_app_module_source :: proc(config: Reload_App_Config, app_import_path, olive_reload_import_path: string) -> string {
     builder := strings.builder_make()
     defer strings.builder_destroy(&builder)
 
     strings.write_string(&builder, "package hot_app_module\n\n")
     strings.write_string(&builder, "import \"base:runtime\"\n")
     fmt.sbprintf(&builder, "import app %q\n", app_import_path)
-    fmt.sbprintf(&builder, "import kvist_hot %q\n\n", kvist_hot_import_path)
+    fmt.sbprintf(&builder, "import olive_reload %q\n\n", olive_reload_import_path)
     strings.write_string(&builder, "@(export)\n")
-    strings.write_string(&builder, "kvist_hot_api_version: u32 = 1\n\n")
+    strings.write_string(&builder, "olive_reload_api_version: u32 = olive_reload.MANIFEST_API_VERSION\n\n")
     strings.write_string(&builder, "@(export)\n")
-    strings.write_string(&builder, "kvist_hot_state_size :: proc \"c\" () -> int {\n    return size_of(app.")
+    strings.write_string(&builder, "olive_reload_state_size :: proc \"c\" () -> int {\n    return size_of(app.")
     strings.write_string(&builder, config.state_type)
     strings.write_string(&builder, ")\n}\n\n")
     strings.write_string(&builder, "@(export)\n")
-    strings.write_string(&builder, "kvist_hot_state_align :: proc \"c\" () -> int {\n    return align_of(app.")
+    strings.write_string(&builder, "olive_reload_state_align :: proc \"c\" () -> int {\n    return align_of(app.")
     strings.write_string(&builder, config.state_type)
     strings.write_string(&builder, ")\n}\n\n")
     strings.write_string(&builder, "@(export)\n")
-    strings.write_string(&builder, "kvist_hot_on_load :: proc \"c\" (state: rawptr, is_reload: bool) {\n    context = runtime.default_context()\n    app_state := (^app.")
+    strings.write_string(&builder, "olive_reload_on_load :: proc \"c\" (state: rawptr, is_reload: bool) {\n    context = runtime.default_context()\n    app_state := (^app.")
     strings.write_string(&builder, config.state_type)
     strings.write_string(&builder, ")(state)\n")
     if config.init_name != "" {
@@ -630,7 +692,7 @@ reload_app_module_source :: proc(config: Reload_App_Config, app_import_path, kvi
     }
     strings.write_string(&builder, "}\n\n")
     strings.write_string(&builder, "@(export)\n")
-    strings.write_string(&builder, "kvist_hot_on_unload :: proc \"c\" (state: rawptr) {\n    context = runtime.default_context()\n    app_state := (^app.")
+    strings.write_string(&builder, "olive_reload_on_unload :: proc \"c\" (state: rawptr) {\n    context = runtime.default_context()\n    app_state := (^app.")
     strings.write_string(&builder, config.state_type)
     strings.write_string(&builder, ")(state)\n")
     if config.on_unload_name != "" {
@@ -640,30 +702,21 @@ reload_app_module_source :: proc(config: Reload_App_Config, app_import_path, kvi
     }
     strings.write_string(&builder, "}\n\n")
     strings.write_string(&builder, "@(export)\n")
-    strings.write_string(&builder, "kvist_hot_app_version :: proc \"c\" () -> cstring {\n    return cstring(")
+    strings.write_string(&builder, "kvist_reload_app_version :: proc \"c\" () -> cstring {\n    return cstring(")
     fmt.sbprintf(&builder, "%q", config.version)
     strings.write_string(&builder, ")\n}\n\n")
     strings.write_string(&builder, "@(export)\n")
-    switch config.mode {
-    case .Step:
-        strings.write_string(&builder, "kvist_hot_app_step :: proc \"c\" (state: rawptr) {\n    context = runtime.default_context()\n    app_state := (^app.")
-        strings.write_string(&builder, config.state_type)
-        strings.write_string(&builder, ")(state)\n    app.")
-        strings.write_string(&builder, config.step_name)
-        strings.write_string(&builder, "(app_state)\n}\n")
-    case .Run:
-        strings.write_string(&builder, "kvist_hot_app_run :: proc \"c\" (state: rawptr, host: rawptr) {\n    context = runtime.default_context()\n    app_state := (^app.")
-        strings.write_string(&builder, config.state_type)
-        strings.write_string(&builder, ")(state)\n    app_host := (^app.reload__Run_Host")
-        strings.write_string(&builder, ")(host)\n    app.")
-        strings.write_string(&builder, config.run_name)
-        strings.write_string(&builder, "(app_state, app_host)\n}\n")
-    }
+    strings.write_string(&builder, "olive_reload_app_run :: proc \"c\" (state: rawptr, host: rawptr) {\n    context = runtime.default_context()\n    app_state := (^app.")
+    strings.write_string(&builder, config.state_type)
+    strings.write_string(&builder, ")(state)\n    app_host := (^app.reload__Run_Host")
+    strings.write_string(&builder, ")(host)\n    app.")
+    strings.write_string(&builder, config.run_name)
+    strings.write_string(&builder, "(app_state, app_host)\n}\n")
 
     return strings.clone(strings.to_string(builder))
 }
 
-reload_app_host_source :: proc(config: Reload_App_Config, input_path, app_import_path, kvist_hot_import_path, hot_app_runtime_import_path, module_binary_path: string, json_output := false) -> string {
+reload_app_host_source :: proc(config: Reload_App_Config, input_path, app_import_path, olive_reload_import_path, module_binary_path: string, json_output := false) -> string {
     builder := strings.builder_make()
     defer strings.builder_destroy(&builder)
 
@@ -674,27 +727,18 @@ reload_app_host_source :: proc(config: Reload_App_Config, input_path, app_import
     if json_output {
         strings.write_string(&builder, "import \"core:strings\"\n")
     }
-    strings.write_string(&builder, "import \"core:time\"\n")
     fmt.sbprintf(&builder, "import app %q\n", app_import_path)
-    fmt.sbprintf(&builder, "import kvist_hot %q\n\n", kvist_hot_import_path)
-    if config.mode == .Run {
-        fmt.sbprintf(&builder, "import reload_runtime %q\n\n", hot_app_runtime_import_path)
-    }
+    fmt.sbprintf(&builder, "import olive_reload %q\n\n", olive_reload_import_path)
 
     strings.write_string(&builder, "App_Symbols :: struct {\n")
-    strings.write_string(&builder, "    api_version: ^u32 `dynlib:\"kvist_hot_api_version\"`,\n")
-    strings.write_string(&builder, "    state_size:  proc \"c\" () -> int `dynlib:\"kvist_hot_state_size\"`,\n")
-    strings.write_string(&builder, "    state_align: proc \"c\" () -> int `dynlib:\"kvist_hot_state_align\"`,\n")
-    strings.write_string(&builder, "    on_load:     proc \"c\" (state: rawptr, is_reload: bool) `dynlib:\"kvist_hot_on_load\"`,\n")
-    strings.write_string(&builder, "    on_unload:   proc \"c\" (state: rawptr) `dynlib:\"kvist_hot_on_unload\"`,\n")
-    strings.write_string(&builder, "    version:     proc \"c\" () -> cstring `dynlib:\"kvist_hot_app_version\"`,\n")
-    switch config.mode {
-    case .Step:
-        strings.write_string(&builder, "    step:        proc \"c\" (state: rawptr) `dynlib:\"kvist_hot_app_step\"`,\n")
-    case .Run:
-        strings.write_string(&builder, "    run:         proc \"c\" (state: rawptr, host: rawptr) `dynlib:\"kvist_hot_app_run\"`,\n")
-    }
+    strings.write_string(&builder, "    version:  proc \"c\" () -> cstring `dynlib:\"kvist_reload_app_version\"`,\n")
+    strings.write_string(&builder, "    run:      proc \"c\" (state: rawptr, host: rawptr) `dynlib:\"olive_reload_app_run\"`,\n")
     strings.write_string(&builder, "    __handle:    dynlib.Library,\n")
+    strings.write_string(&builder, "}\n\n")
+    strings.write_string(&builder, "run :: proc(symbols: ^App_Symbols, state: ^app.")
+    strings.write_string(&builder, config.state_type)
+    strings.write_string(&builder, ", host: ^olive_reload.Run_Host) {\n")
+    strings.write_string(&builder, "    symbols.run(rawptr(state), rawptr(host))\n")
     strings.write_string(&builder, "}\n\n")
     if json_output {
         strings.write_string(&builder, "reload_event_prefix :: \"KVIST_RELOAD_EVENT\\t\"\n\n")
@@ -712,7 +756,7 @@ reload_app_host_source :: proc(config: Reload_App_Config, input_path, app_import
         strings.write_string(&builder, "    }\n")
         strings.write_string(&builder, "    strings.write_byte(builder, '\"')\n")
         strings.write_string(&builder, "}\n\n")
-        strings.write_string(&builder, "reload_emit_event :: proc(event, input_path, package_name, module_binary_path, rebuild_command, version, message: string, generation: int) {\n")
+        strings.write_string(&builder, "reload_emit_event :: proc(event, input_path, package_name, module_binary_path, rebuild_command, message: string, generation: int) {\n")
         strings.write_string(&builder, "    payload := strings.builder_make()\n")
         strings.write_string(&builder, "    defer strings.builder_destroy(&payload)\n")
         strings.write_string(&builder, "    strings.write_string(&payload, \"{\")\n")
@@ -742,10 +786,6 @@ reload_app_host_source :: proc(config: Reload_App_Config, input_path, app_import
         strings.write_string(&builder, "    strings.write_string(&payload, \", \")\n")
         strings.write_string(&builder, "    reload_json_write_escaped_string(&payload, \"generation\")\n")
         strings.write_string(&builder, "    fmt.sbprintf(&payload, \": %d, \", generation)\n")
-        strings.write_string(&builder, "    reload_json_write_escaped_string(&payload, \"version\")\n")
-        strings.write_string(&builder, "    strings.write_string(&payload, \": \")\n")
-        strings.write_string(&builder, "    reload_json_write_escaped_string(&payload, version)\n")
-        strings.write_string(&builder, "    strings.write_string(&payload, \", \")\n")
         strings.write_string(&builder, "    reload_json_write_escaped_string(&payload, \"message\")\n")
         strings.write_string(&builder, "    strings.write_string(&payload, \": \")\n")
         strings.write_string(&builder, "    reload_json_write_escaped_string(&payload, message)\n")
@@ -753,81 +793,41 @@ reload_app_host_source :: proc(config: Reload_App_Config, input_path, app_import
         strings.write_string(&builder, "    fmt.print(reload_event_prefix, strings.to_string(payload))\n")
         strings.write_string(&builder, "}\n\n")
     }
+    strings.write_string(&builder, "reload_event_name :: proc(kind: olive_reload.Reload_Event_Kind) -> string {\n")
+    strings.write_string(&builder, "    switch kind {\n")
+    strings.write_string(&builder, "    case .Started:\n        return \"started\"\n")
+    strings.write_string(&builder, "    case .Reloaded:\n        return \"reloaded\"\n")
+    strings.write_string(&builder, "    case .Restarted:\n        return \"restarted\"\n")
+    strings.write_string(&builder, "    case .Reload_Failed:\n        return \"reload_failed\"\n")
+    strings.write_string(&builder, "    }\n")
+    strings.write_string(&builder, "    return \"unknown\"\n")
+    strings.write_string(&builder, "}\n\n")
+    strings.write_string(&builder, "reload_handle_event :: proc(event: olive_reload.Reload_Event) {\n")
+    if json_output {
+        strings.write_string(&builder, "    reload_emit_event(reload_event_name(event.kind), ")
+        fmt.sbprintf(&builder, "%q, %q, %q, %q", input_path, config.package_name, module_binary_path, fmt.tprintf("kvist dev --reload %q --rebuild", input_path))
+        strings.write_string(&builder, ", event.message, event.generation)\n")
+    } else {
+        strings.write_string(&builder, "    switch event.kind {\n")
+        strings.write_string(&builder, "    case .Started:\n        fmt.printf(\"[reload] started generation=%d\\n\", event.generation)\n")
+        strings.write_string(&builder, "    case .Reloaded:\n        fmt.printf(\"[reload] reloaded generation=%d\\n\", event.generation)\n")
+        strings.write_string(&builder, "    case .Restarted:\n        fmt.printf(\"[reload] restarted generation=%d: %s\\n\", event.generation, event.message)\n")
+        strings.write_string(&builder, "    case .Reload_Failed:\n        fmt.eprintf(\"[reload] reload failed: %s\\n\", event.message)\n")
+        strings.write_string(&builder, "    }\n")
+    }
+    strings.write_string(&builder, "}\n\n")
     strings.write_string(&builder, "main :: proc() {\n")
     fmt.sbprintf(&builder, "    module_path := %q\n", module_binary_path)
-    fmt.sbprintf(&builder, "    rebuild_command := %q\n", fmt.tprintf("kvist dev --reload %q --rebuild", input_path))
-    if config.mode == .Step {
-        fmt.sbprintf(&builder, "    sleep_duration := time.Duration(%d) * time.Millisecond\n", config.sleep_ms)
-    }
     strings.write_string(&builder, "    state := app.")
     strings.write_string(&builder, config.state_type)
     strings.write_string(&builder, "{}\n")
     strings.write_string(&builder, "    symbols := App_Symbols{}\n\n")
-    strings.write_string(&builder, "    reloader, reloader_err, reloader_ok := kvist_hot.new_reloader(module_path)\n")
-    strings.write_string(&builder, "    if !reloader_ok {\n        fmt.eprintln(reloader_err)\n        os.exit(1)\n    }\n")
-    strings.write_string(&builder, "    defer {\n        if reloader.has_loaded {\n            kvist_hot.unload_current_module(&symbols, &state)\n        }\n    }\n\n")
-    strings.write_string(&builder, "    initial_err, initial_ok := kvist_hot.load_initial_module(&reloader, &symbols, &state)\n")
-    strings.write_string(&builder, "    if !initial_ok {\n        fmt.eprintln(initial_err)\n        os.exit(1)\n    }\n\n")
-    if json_output {
-        fmt.sbprintf(&builder, "    reload_emit_event(\"started\", %q, %q, module_path, rebuild_command, string(symbols.version()), \"reload session started\", reloader.generation)\n", input_path, config.package_name)
-    } else {
+    if !json_output {
         fmt.sbprintf(&builder, "    fmt.println(\"[reload] running %s\")\n", config.package_name)
         fmt.sbprintf(&builder, "    fmt.println(%q)\n", fmt.tprintf("[reload] rebuild with: kvist dev --reload %q --rebuild", input_path))
     }
-    switch config.mode {
-    case .Step:
-        strings.write_string(&builder, "    for {\n")
-        strings.write_string(&builder, "        symbols.step(rawptr(&state))\n")
-        if json_output {
-            strings.write_string(&builder, "        // Structured events are emitted only on start and successful/failed reloads.\n")
-        } else {
-            strings.write_string(&builder, "        fmt.printf(\"[reload] generation=%d version=%s\\n\", reloader.generation, string(symbols.version()))\n")
-        }
-        strings.write_string(&builder, "        changed, reload_err, reload_ok := kvist_hot.reload_module_if_source_changed(&reloader, &symbols, &state)\n")
-        if json_output {
-            strings.write_string(&builder, "        if changed && !reload_ok {\n            reload_emit_event(\"reload_failed\", ")
-            fmt.sbprintf(&builder, "%q, %q", input_path, config.package_name)
-            strings.write_string(&builder, ", module_path, rebuild_command, string(symbols.version()), reload_err, reloader.generation)\n            fmt.eprintln(reload_err)\n        }\n")
-            strings.write_string(&builder, "        if changed && reload_ok {\n            reload_emit_event(\"reloaded\", ")
-            fmt.sbprintf(&builder, "%q, %q", input_path, config.package_name)
-            strings.write_string(&builder, ", module_path, rebuild_command, string(symbols.version()), \"reload applied\", reloader.generation)\n        }\n")
-        } else {
-            strings.write_string(&builder, "        if changed && !reload_ok {\n            fmt.eprintln(reload_err)\n        }\n")
-        }
-        strings.write_string(&builder, "        time.sleep(sleep_duration)\n")
-        strings.write_string(&builder, "    }\n")
-    case .Run:
-        strings.write_string(&builder, "    host := reload_runtime.run_host_init(&reloader)\n")
-        strings.write_string(&builder, "    for {\n")
-        strings.write_string(&builder, "        reload_runtime.run_host_begin_cycle(&host)\n")
-        if !json_output {
-            strings.write_string(&builder, "        fmt.printf(\"[reload] generation=%d version=%s\\n\", reloader.generation, string(symbols.version()))\n")
-        }
-        strings.write_string(&builder, "        symbols.run(rawptr(&state), rawptr(&host))\n")
-        if json_output {
-            strings.write_string(&builder, "        if host.checkpoint_error != \"\" {\n            reload_emit_event(\"checkpoint_error\", ")
-            fmt.sbprintf(&builder, "%q, %q", input_path, config.package_name)
-            strings.write_string(&builder, ", module_path, rebuild_command, string(symbols.version()), host.checkpoint_error, reloader.generation)\n            fmt.eprintln(host.checkpoint_error)\n            os.exit(1)\n        }\n")
-        } else {
-            strings.write_string(&builder, "        if host.checkpoint_error != \"\" {\n            fmt.eprintln(host.checkpoint_error)\n            os.exit(1)\n        }\n")
-        }
-        strings.write_string(&builder, "        if host.reload_requested {\n")
-        strings.write_string(&builder, "            changed, reload_err, reload_ok := kvist_hot.reload_module_if_source_changed(&reloader, &symbols, &state)\n")
-        if json_output {
-            strings.write_string(&builder, "            if !reload_ok {\n                reload_emit_event(\"reload_failed\", ")
-            fmt.sbprintf(&builder, "%q, %q", input_path, config.package_name)
-            strings.write_string(&builder, ", module_path, rebuild_command, string(symbols.version()), reload_err, reloader.generation)\n                fmt.eprintln(reload_err)\n                os.exit(1)\n            }\n")
-            strings.write_string(&builder, "            if changed {\n                reload_emit_event(\"reloaded\", ")
-            fmt.sbprintf(&builder, "%q, %q", input_path, config.package_name)
-            strings.write_string(&builder, ", module_path, rebuild_command, string(symbols.version()), \"reload applied\", reloader.generation)\n                continue\n            }\n")
-        } else {
-            strings.write_string(&builder, "            if !reload_ok {\n                fmt.eprintln(reload_err)\n                os.exit(1)\n            }\n")
-            strings.write_string(&builder, "            if changed {\n                continue\n            }\n")
-        }
-        strings.write_string(&builder, "        }\n")
-        strings.write_string(&builder, "        break\n")
-        strings.write_string(&builder, "    }\n")
-    }
+    strings.write_string(&builder, "    status := olive_reload.run_host(module_path, &symbols, &state, run, reload_handle_event)\n")
+    strings.write_string(&builder, "    os.exit(status)\n")
     strings.write_string(&builder, "}\n")
 
     return strings.clone(strings.to_string(builder))
@@ -838,13 +838,8 @@ reload_app_main_source :: proc(config: Reload_App_Config, app_import_path, reloa
     defer strings.builder_destroy(&builder)
 
     strings.write_string(&builder, "package reload_app_main\n\n")
-    if config.mode == .Step {
-        strings.write_string(&builder, "import \"core:time\"\n")
-    }
     fmt.sbprintf(&builder, "import app %q\n", app_import_path)
-    if config.mode == .Run {
-        fmt.sbprintf(&builder, "import reload_runtime %q\n", reload_runtime_import_path)
-    }
+    fmt.sbprintf(&builder, "import reload_runtime %q\n", reload_runtime_import_path)
     strings.write_string(&builder, "\nmain :: proc() {\n")
     strings.write_string(&builder, "    state := app.")
     strings.write_string(&builder, config.state_type)
@@ -864,21 +859,10 @@ reload_app_main_source :: proc(config: Reload_App_Config, app_import_path, reloa
         strings.write_string(&builder, config.on_unload_name)
         strings.write_string(&builder, "(&state)\n")
     }
-    switch config.mode {
-    case .Step:
-        fmt.sbprintf(&builder, "    sleep_duration := time.Duration(%d) * time.Millisecond\n", config.sleep_ms)
-        strings.write_string(&builder, "    for {\n")
-        strings.write_string(&builder, "        app.")
-        strings.write_string(&builder, config.step_name)
-        strings.write_string(&builder, "(&state)\n")
-        strings.write_string(&builder, "        time.sleep(sleep_duration)\n")
-        strings.write_string(&builder, "    }\n")
-    case .Run:
-        strings.write_string(&builder, "    host := reload_runtime.run_host_init(nil)\n")
-        strings.write_string(&builder, "    app.")
-        strings.write_string(&builder, config.run_name)
-        strings.write_string(&builder, "(&state, &host)\n")
-    }
+    strings.write_string(&builder, "    host := reload_runtime.Run_Host{}\n")
+    strings.write_string(&builder, "    app.")
+    strings.write_string(&builder, config.run_name)
+    strings.write_string(&builder, "(&state, &host)\n")
     strings.write_string(&builder, "}\n")
 
     return strings.clone(strings.to_string(builder))
@@ -900,32 +884,24 @@ write_reload_app_generated_sources_or_exit :: proc(input: string, config: Reload
     repo_root := repo_root_value
     defer delete(repo_root)
 
-    kvist_hot_path, hot_join_err := os.join_path({repo_root, "src", "kvist_hot"}, context.allocator)
-    if hot_join_err != nil {
-        fmt.eprintln("failed to build kvist_hot import path")
+    olive_reload_path, olive_reload_err := os.join_path({repo_root, "src", "olive_reload"}, context.allocator)
+    if olive_reload_err != nil {
+        fmt.eprintln("failed to build olive_reload import path")
         os.exit(1)
     }
-    defer delete(kvist_hot_path)
-    reload_runtime_path, reload_runtime_err := os.join_path({repo_root, "src", "kvist_hot_app_runtime"}, context.allocator)
-    if reload_runtime_err != nil {
-        fmt.eprintln("failed to build kvist_hot_app_runtime import path")
-        os.exit(1)
-    }
-    defer delete(reload_runtime_path)
+    defer delete(olive_reload_path)
 
     module_app_import := reload_app_relative_path_or_exit(paths.module_dir, paths.app_dir)
     defer delete(module_app_import)
-    module_hot_import := reload_app_relative_path_or_exit(paths.module_dir, kvist_hot_path)
-    defer delete(module_hot_import)
+    module_olive_reload_import := reload_app_relative_path_or_exit(paths.module_dir, olive_reload_path)
+    defer delete(module_olive_reload_import)
     host_app_import := reload_app_relative_path_or_exit(paths.host_dir, paths.app_dir)
     defer delete(host_app_import)
-    host_hot_import := reload_app_relative_path_or_exit(paths.host_dir, kvist_hot_path)
-    defer delete(host_hot_import)
-    host_reload_runtime_import := reload_app_relative_path_or_exit(paths.host_dir, reload_runtime_path)
-    defer delete(host_reload_runtime_import)
-    module_source := reload_app_module_source(config, module_app_import, module_hot_import)
+    host_olive_reload_import := reload_app_relative_path_or_exit(paths.host_dir, olive_reload_path)
+    defer delete(host_olive_reload_import)
+    module_source := reload_app_module_source(config, module_app_import, module_olive_reload_import)
     defer delete(module_source)
-    host_source := reload_app_host_source(config, input_abs, host_app_import, host_hot_import, host_reload_runtime_import, paths.module_binary, json_output)
+    host_source := reload_app_host_source(config, input_abs, host_app_import, host_olive_reload_import, paths.module_binary, json_output)
     defer delete(host_source)
 
     write_output_or_exit(paths.module_odin, module_source)
@@ -956,67 +932,221 @@ run_process_inherited :: proc(command: []string, working_dir: string) -> int {
 }
 
 build_odin_package :: proc(package_dir, output_path: string, build_mode := "") -> int {
-    args := make([dynamic]string, 0, 6)
-    defer delete(args)
-    append(&args, "odin", "build", package_dir)
-    if build_mode != "" {
+	args := make([dynamic]string, 0, 6)
+	defer delete(args)
+	append(&args, "odin", "build", package_dir)
+	if build_mode != "" {
         append(&args, build_mode)
     }
-    append(&args, fmt.tprintf("-out:%s", output_path))
-    return run_process_inherited(args[:], ".")
+	append(&args, fmt.tprintf("-out:%s", output_path))
+	return run_process_inherited(args[:], ".")
+}
+
+build_reload_app_module :: proc(paths: Reload_App_Paths) -> int {
+	module_tmp := strings.clone(fmt.tprintf("%s.tmp", paths.module_binary))
+	defer delete(module_tmp)
+
+	exit_code := build_odin_package(paths.module_dir, module_tmp, "-build-mode:dll")
+	if exit_code != 0 {
+		if os.exists(module_tmp) {
+			_ = os.remove(module_tmp)
+		}
+		return exit_code
+	}
+	if os.exists(paths.module_binary) {
+		_ = os.remove(paths.module_binary)
+	}
+	if os.rename(module_tmp, paths.module_binary) != nil {
+		fmt.eprintln("failed to publish reload module: ", paths.module_binary)
+		return 1
+	}
+	return 0
 }
 
 build_odin_package_or_exit :: proc(package_dir, output_path: string, build_mode := "") {
-    exit_code := build_odin_package(package_dir, output_path, build_mode)
-    if exit_code != 0 {
-        os.exit(exit_code)
-    }
+	exit_code := build_odin_package(package_dir, output_path, build_mode)
+	if exit_code != 0 {
+		os.exit(exit_code)
+	}
 }
 
 run_odin_package_or_exit :: proc(package_dir: string) {
-    exit_code := run_process_inherited({"odin", "run", package_dir}, ".")
-    os.exit(exit_code)
+	exit_code := run_process_inherited({"odin", "run", package_dir}, ".")
+	os.exit(exit_code)
+}
+
+reload_watch_root_for_input :: proc(input: string) -> string {
+	dir, _ := os.split_path(input)
+	if dir == "" {
+		return strings.clone(".")
+	}
+	return strings.clone(dir)
+}
+
+reload_watch_skip_dir :: proc(name: string) -> bool {
+	return name == ".git" || name == ".kvist-cache" || name == ".worktrees" || name == "build"
+}
+
+newest_kvist_write_time :: proc(path: string) -> (time.Time, bool) {
+	info, stat_err := os.stat(path, context.temp_allocator)
+	if stat_err != nil {
+		return {}, false
+	}
+	if info.type == .Regular {
+		if strings.has_suffix(info.name, ".kvist") {
+			return info.modification_time, true
+		}
+		return {}, false
+	}
+	if info.type != .Directory {
+		return {}, false
+	}
+
+	newest := time.Time{}
+	found := false
+	entries, read_err := os.read_directory_by_path(path, -1, context.temp_allocator)
+	if read_err != nil {
+		return {}, false
+	}
+	for entry in entries {
+		if entry.name == "." || entry.name == ".." || reload_watch_skip_dir(entry.name) {
+			continue
+		}
+		child := entry.fullpath
+		owned_child := false
+		if child == "" {
+			child, _ = os.join_path({path, entry.name}, context.temp_allocator)
+			owned_child = true
+		}
+		child_time, child_found := newest_kvist_write_time(child)
+		if owned_child {
+			delete(child, context.temp_allocator)
+		}
+		if child_found {
+			if !found || time.time_to_unix_nano(child_time) > time.time_to_unix_nano(newest) {
+				newest = child_time
+			}
+			found = true
+		}
+	}
+	return newest, found
+}
+
+reload_app_rebuild_command :: proc(input, root_dir: string, json_output: bool) -> [dynamic]string {
+	args := make([dynamic]string, 0, 8)
+	append(&args, os.args[0], "dev", "--reload", input, "--rebuild", "--generated-dir", root_dir)
+	if json_output {
+		append(&args, "--json")
+	}
+	return args
+}
+
+reload_app_rebuild_for_watch :: proc(input, root_dir: string, json_output: bool) -> int {
+	args := reload_app_rebuild_command(input, root_dir, json_output)
+	defer delete(args)
+	return run_process_inherited(args[:], ".")
+}
+
+run_odin_package_with_reload_watch :: proc(package_dir, input, root_dir: string, json_output: bool) -> int {
+	watch_root := reload_watch_root_for_input(input)
+	defer delete(watch_root)
+
+	last_write, found := newest_kvist_write_time(watch_root)
+	if !found {
+		fmt.eprintln("[reload] watch found no .kvist files under: ", watch_root)
+		return 1
+	}
+
+	process, err := os.process_start(os.Process_Desc{
+		command = {"odin", "run", package_dir},
+		working_dir = ".",
+		stdin = os.stdin,
+		stdout = os.stdout,
+		stderr = os.stderr,
+	})
+	if err != nil {
+		fmt.eprintln("failed to start process: odin")
+		return 1
+	}
+
+	if !json_output {
+		fmt.println("[reload] watching ", watch_root)
+	}
+	debounce := 150 * time.Millisecond
+	for {
+		state, wait_err := os.process_wait(process, timeout = 0)
+		if wait_err == nil && state.exited {
+			return state.exit_code
+		}
+
+		time.sleep(250 * time.Millisecond)
+		current_write, current_found := newest_kvist_write_time(watch_root)
+		if !current_found {
+			continue
+		}
+		if time.time_to_unix_nano(current_write) == time.time_to_unix_nano(last_write) {
+			continue
+		}
+		last_write = current_write
+		time.sleep(debounce)
+		settled_write, settled_found := newest_kvist_write_time(watch_root)
+		if settled_found {
+			last_write = settled_write
+		}
+		if !json_output {
+			fmt.println("[reload] change detected; rebuilding module")
+		}
+		rebuild_status := reload_app_rebuild_for_watch(input, root_dir, json_output)
+		if !json_output {
+			if rebuild_status == 0 {
+				fmt.println("[reload] build ok")
+			} else {
+				fmt.printf("[reload] build failed exit=%d; still watching\n", rebuild_status)
+			}
+		}
+	}
 }
 
 print_reload_app_paths :: proc(input: string, paths: Reload_App_Paths) {
-    fmt.println("mode=reload")
-    fmt.println("input=", input)
-    fmt.println("root_dir=", paths.root_dir)
-    fmt.println("app_dir=", paths.app_dir)
-    fmt.println("module_dir=", paths.module_dir)
-    fmt.println("host_dir=", paths.host_dir)
-    fmt.println("app_odin=", paths.app_odin)
-    fmt.println("module_odin=", paths.module_odin)
-    fmt.println("host_odin=", paths.host_odin)
-    fmt.println("module_binary=", paths.module_binary)
-    fmt.println("rebuild_command=kvist dev --reload ", input, " --rebuild")
-    fmt.println("run_command=kvist dev --reload ", input)
+	fmt.println("mode=reload")
+	fmt.println("input=", input)
+	fmt.println("root_dir=", paths.root_dir)
+	fmt.println("app_dir=", paths.app_dir)
+	fmt.println("module_dir=", paths.module_dir)
+	fmt.println("host_dir=", paths.host_dir)
+	fmt.println("app_odin=", paths.app_odin)
+	fmt.println("module_odin=", paths.module_odin)
+	fmt.println("host_odin=", paths.host_odin)
+	fmt.println("module_binary=", paths.module_binary)
+	fmt.println("rebuild_command=kvist dev --reload ", input, " --rebuild")
+	fmt.println("watch_command=kvist dev --reload ", input, " --watch")
+	fmt.println("run_command=kvist dev --reload ", input)
 }
 
 json_write_escaped_string :: proc(builder: ^strings.Builder, value: string) {
-    strings.write_byte(builder, '"')
-    for ch in value {
-        switch ch {
-        case '\\':
-            strings.write_string(builder, "\\\\")
-        case '"':
-            strings.write_string(builder, "\\\"")
-        case '\n':
-            strings.write_string(builder, "\\n")
-        case '\r':
-            strings.write_string(builder, "\\r")
-        case '\t':
-            strings.write_string(builder, "\\t")
-        case:
-            strings.write_rune(builder, ch)
-        }
-    }
-    strings.write_byte(builder, '"')
+	strings.write_byte(builder, '"')
+	for ch in value {
+		switch ch {
+		case '\\':
+			strings.write_string(builder, "\\\\")
+		case '"':
+			strings.write_string(builder, "\\\"")
+		case '\n':
+			strings.write_string(builder, "\\n")
+		case '\r':
+			strings.write_string(builder, "\\r")
+		case '\t':
+			strings.write_string(builder, "\\t")
+		case:
+			strings.write_rune(builder, ch)
+		}
+	}
+	strings.write_byte(builder, '"')
 }
 
 json_write_key :: proc(builder: ^strings.Builder, key: string) {
-    json_write_escaped_string(builder, key)
-    strings.write_string(builder, ": ")
+	json_write_escaped_string(builder, key)
+	strings.write_string(builder, ": ")
 }
 
 print_reload_app_paths_json :: proc(input: string, paths: Reload_App_Paths) {
@@ -1069,9 +1199,13 @@ print_reload_app_paths_json :: proc(input: string, paths: Reload_App_Paths) {
     json_write_escaped_string(&builder, fmt.tprintf("kvist dev --reload %q --rebuild", input))
     strings.write_string(&builder, ",\n")
 
-    json_write_key(&builder, "run_command")
-    json_write_escaped_string(&builder, fmt.tprintf("kvist dev --reload %q", input))
-    strings.write_string(&builder, "\n}\n")
+	json_write_key(&builder, "watch_command")
+	json_write_escaped_string(&builder, fmt.tprintf("kvist dev --reload %q --watch", input))
+	strings.write_string(&builder, ",\n")
+
+	json_write_key(&builder, "run_command")
+	json_write_escaped_string(&builder, fmt.tprintf("kvist dev --reload %q", input))
+	strings.write_string(&builder, "\n}\n")
 
     fmt.print(strings.to_string(builder))
 }
@@ -1119,7 +1253,7 @@ print_reload_rebuild_result_json :: proc(input: string, paths: Reload_App_Paths,
     fmt.print(strings.to_string(builder))
 }
 
-reload_app_generate_and_build :: proc(input: string, generated_dir := "", rebuild_only, print_paths_only, json_output: bool) {
+reload_app_generate_and_build :: proc(input: string, generated_dir := "", rebuild_only, print_paths_only, json_output, watch: bool) {
     effective_input := strings.clone(input)
     defer delete(effective_input)
     resolved_input, resolved_ok := reload_app_primary_input(input)
@@ -1145,7 +1279,7 @@ reload_app_generate_and_build :: proc(input: string, generated_dir := "", rebuil
     }
     defer delete(root_dir)
 
-    root_abs := reload_app_absolute_path_or_exit(root_dir)
+    root_abs := reload_app_canonical_root_or_exit(root_dir)
     defer delete(root_abs)
 
     paths := reload_app_paths(root_abs)
@@ -1164,21 +1298,25 @@ reload_app_generate_and_build :: proc(input: string, generated_dir := "", rebuil
         return
     }
 
-    module_build_exit_code := build_odin_package(paths.module_dir, paths.module_binary, "-build-mode:dll")
-    if module_build_exit_code != 0 {
-        if rebuild_only && json_output {
-            print_reload_rebuild_result_json(effective_input, paths, Reload_Build_Result{ok = false, exit_code = module_build_exit_code})
-        }
+	module_build_exit_code := build_reload_app_module(paths)
+	if module_build_exit_code != 0 {
+		if rebuild_only && json_output {
+			print_reload_rebuild_result_json(effective_input, paths, Reload_Build_Result{ok = false, exit_code = module_build_exit_code})
+		}
         os.exit(module_build_exit_code)
     }
     if rebuild_only {
         if json_output {
             print_reload_rebuild_result_json(effective_input, paths, Reload_Build_Result{ok = true, exit_code = 0})
-        }
-        return
-    }
+		}
+		return
+	}
 
-    run_odin_package_or_exit(paths.host_dir)
+	if watch {
+		os.exit(run_odin_package_with_reload_watch(paths.host_dir, effective_input, paths.root_dir, json_output))
+	}
+
+	run_odin_package_or_exit(paths.host_dir)
 }
 
 run_odin_package_command :: proc(package_dir, odin_command: string) -> int {
@@ -1212,7 +1350,7 @@ reload_app_generate_and_execute :: proc(input: string, odin_command: string, gen
     }
     defer delete(root_dir)
 
-    root_abs := reload_app_absolute_path_or_exit(root_dir)
+    root_abs := reload_app_canonical_root_or_exit(root_dir)
     defer delete(root_abs)
 
     paths := reload_exec_paths(root_abs)
@@ -1236,7 +1374,7 @@ reload_app_generate_and_execute :: proc(input: string, odin_command: string, gen
     repo_root := repo_root_value
     defer delete(repo_root)
 
-    reload_runtime_path, runtime_join_err := os.join_path({repo_root, "src", "kvist_hot_app_runtime"}, context.allocator)
+    reload_runtime_path, runtime_join_err := os.join_path({repo_root, "src", "olive_reload"}, context.allocator)
     if runtime_join_err != nil {
         fmt.eprintln("failed to build reload runtime import path")
         return 1
@@ -1256,7 +1394,10 @@ reload_app_generate_and_execute :: proc(input: string, odin_command: string, gen
 }
 
 source_declares_reload_app :: proc(input: string) -> bool {
-    _, ok := reload_app_primary_input(input)
+    data := read_source_or_exit(input)
+    defer delete(transmute([]byte)data)
+
+    _, _, ok := reload_app_config_from_source(input, data)
     return ok
 }
 
@@ -1267,11 +1408,12 @@ parse_dev_command :: proc() {
     }
 
     reload_mode := false
-    rebuild_only := false
-    print_paths_only := false
-    json_output := false
-    generated_dir := ""
-    input := ""
+	rebuild_only := false
+	print_paths_only := false
+	json_output := false
+	watch := false
+	generated_dir := ""
+	input := ""
 
     i := 2
     for i < len(os.args) {
@@ -1279,12 +1421,15 @@ parse_dev_command :: proc() {
         case "--reload":
             reload_mode = true
             i += 1
-        case "--rebuild":
-            rebuild_only = true
-            i += 1
-        case "--print-paths":
-            print_paths_only = true
-            i += 1
+		case "--rebuild":
+			rebuild_only = true
+			i += 1
+		case "--watch":
+			watch = true
+			i += 1
+		case "--print-paths":
+			print_paths_only = true
+			i += 1
         case "--json":
             json_output = true
             i += 1
@@ -1306,10 +1451,14 @@ parse_dev_command :: proc() {
         }
     }
 
-    if !reload_mode || input == "" {
-        print_usage()
-        os.exit(2)
-    }
+	if !reload_mode || input == "" {
+		print_usage()
+		os.exit(2)
+	}
+	if watch && (rebuild_only || print_paths_only) {
+		print_usage()
+		os.exit(2)
+	}
 
-    reload_app_generate_and_build(input, generated_dir, rebuild_only, print_paths_only, json_output)
+	reload_app_generate_and_build(input, generated_dir, rebuild_only, print_paths_only, json_output, watch)
 }

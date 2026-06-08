@@ -63,27 +63,6 @@ probe
   editor UX
 ```
 
-## Implementation Direction
-
-The old Python prototype should be treated as superseded rather than gradually
-evolved into the new language.
-
-The serious Kvist compiler/transpiler should be implemented in Odin itself.
-
-Reasons:
-
-- the project is now a real language frontend, not a throwaway syntax sketch
-- implementing it in Odin keeps the toolchain aligned with the host language
-- the emitted-code model, type vocabulary, and interop concerns stay close to
-  the environment Kvist targets
-- long-term maintenance is cleaner if the compiler lives in the same ecosystem
-
-This implies a clean break:
-
-- do not keep stretching the old Python translator
-- do not preserve compatibility with the old mixed-file experiment
-- build the real compiler as a fresh Odin implementation
-
 ## Surface Syntax
 
 The surface grammar uses three primary container shapes:
@@ -379,7 +358,7 @@ Current top-level source forms are:
 
 - `package`
 - `import`
-- `defconst`
+- `def`
 - `defvar`
 - `defstruct`
 - `defenum`
@@ -388,21 +367,62 @@ Current top-level source forms are:
 - `defmacro`
 - `odin`
 
-### `defconst`
+Top-level declarations are public by default in source packages. Add `-` to the
+declaration head for a package-private top-level binding:
+
+- `def-`
+- `defvar-`
+- `defstruct-`
+- `defenum-`
+- `defunion-`
+- `defn-`
+- `defmacro-`
+
+The `-` forms are top-level only. Local declarations are scoped by the current
+Odin block or procedure and do not have public/private variants.
+
+### `def`
+
+`def` declares an immutable value. At top level it lowers to an Odin constant
+declaration. Inside a procedure or block it declares an Odin local constant
+scoped to that block.
 
 ```clojure
-(defconst answer 42)
-(defconst max-size int 1024)
+(def answer 42)
+(def max-size: int 1024)
+```
+
+The package-private top-level form is `def-`:
+
+```clojure
+(def- parse-limit: int 1024)
 ```
 
 ### `defvar`
 
+`defvar` declares a mutable value. At top level it lowers to an Odin variable
+declaration. Inside a procedure or block it creates a mutable runtime local
+scoped to that block.
+
 ```clojure
 (defvar live-port 8080)
-(defvar retries int 3)
+(defvar retries: int 3)
+```
+
+The package-private top-level form is `defvar-`:
+
+```clojure
+(defvar- reload-count: int 0)
 ```
 
 ### `defstruct`
+
+`defstruct` declares an Odin struct type. At top level the type is public by
+default in source packages. Inside a procedure or block it declares a
+compile-time type scoped to that block; declaring the type does not allocate or
+perform runtime work.
+
+The package-private top-level form is `defstruct-`.
 
 `defstruct` is the preferred user-facing fixed-shape declaration form. It
 supports both the direct brace form and the richer docstring/metadata form.
@@ -445,6 +465,10 @@ The current implementation:
 
 ### `defenum`
 
+`defenum` declares an Odin enum type. At top level the type is public by default
+in source packages; use `defenum-` for a package-private top-level enum. Inside
+a procedure or block it declares a compile-time type scoped to that block.
+
 `defenum` is the preferred user-facing enum declaration form. Enums are ordered
 by default and should use sequence syntax when values are implicit.
 
@@ -475,6 +499,11 @@ The docstring-bearing form is:
 ```
 
 ### `defunion`
+
+`defunion` declares an Odin tagged union type. At top level the type is public
+by default in source packages; use `defunion-` for a package-private top-level
+union. Inside a procedure or block it declares a compile-time type scoped to
+that block.
 
 `defunion` is the preferred user-facing tagged union declaration form. It
 denotes a tagged union in the Odin sense, not a C raw union.
@@ -513,9 +542,12 @@ The v0.1 union story should stay deliberately narrow:
 
 ### `defn`
 
-`defn` is the supported source-level function declaration form. `proc` remains
-the spelling for procedure literals and procedure types, but not top-level
-declarations.
+`defn` is the supported source-level named function declaration form. Top-level
+functions are public by default in source packages; use `defn-` for a
+package-private top-level function. Named local functions are not a separate
+declaration form; use `fn` values or top-level helpers.
+
+`fn` is the spelling for function literals and function types.
 
 Functions use a typed signature vector:
 
@@ -562,7 +594,7 @@ relative directory path:
 
 Top-level declarations are public by default. Use the `-` suffixed declaration
 forms for package-private declarations such as `defn-`, `defmacro-`,
-`defconst-`, `defvar-`, `defstruct-`, `defenum-`, and `defunion-`.
+`def-`, `defvar-`, `defstruct-`, `defenum-`, and `defunion-`.
 
 For file-backed `.kvist` programs, `(package ...)` is optional. Kvist currently
 defaults the root package to `main` when compiling from a path. Raw source
@@ -582,7 +614,8 @@ Import them explicitly:
 (import str "kvist:str")
 (import map "kvist:map")
 (import set "kvist:set")
-(import struct "kvist:struct")
+(import soa "kvist:soa")
+(import cli "kvist:cli")
 ```
 
 Then use the qualified helpers normally:
@@ -604,20 +637,30 @@ packages even when they are small. The current bias is:
 - explicit Kvist library imports for ordinary helpers;
 - compiler/language machinery only where syntax or lowering genuinely requires it.
 
-### Empty Collection Constructors
+### Typed Literals And Runtime Constructors
 
-When there is no literal element to infer from, use the package constructors:
+For pure collection literals, put the Odin type in call position:
+
+```clojure
+([dynamic]int [1 2 3])
+([3]int [4 5 6])
+(map[string]int {"one" 1 "two" 2})
+```
+
+When there is no literal element, or when capacity is the point, use the
+package constructors:
 
 ```clojure
 (arr/empty int)
 (arr/empty int 16)
-(arr/dynamic int [1 2 3])
-(arr/fixed int [4 5 6])
 (map/empty string int)
-(map/of string int {"one" 1 "two" 2})
+(map/empty string int 128)
 (set/empty string 8)
-(set/of string ["math" "lisp"])
 ```
+
+Package helpers such as `arr/dynamic`, `arr/fixed`, `map/of`, and `set/of`
+remain available where they improve readability, but they are not a separate
+construction rule.
 
 ### `odin`
 
@@ -639,6 +682,7 @@ The planned core expression forms are:
 - `core/when`
 - `core/cond`
 - `core/switch`
+- `while`
 - `set!`
 - `core/update!`
 - `core/get`
@@ -660,20 +704,21 @@ The parser should recognize these as special forms rather than ordinary calls:
 
 - `package`
 - `import`
-- `defconst`
+- `def`
 - `defvar`
 - `defstruct`
 - `defenum`
 - `defunion`
 - `defn`
 - `defmacro`
-- `proc`
+- `fn`
 - `odin`
 - `let`
 - `do`
 - `if`
 - `core/cond`
 - `core/switch`
+- `while`
 - `set!`
 - `return`
 - `defer`
@@ -702,7 +747,7 @@ Examples:
 (core/println "hello")
 (strings.clone raw allocator)
 (make [dynamic]Route allocator)
-(new []int [1 2 3])
+([]int [1 2 3])
 ```
 
 Qualified Odin names remain normal callable heads:
@@ -729,26 +774,26 @@ This keeps field access semantically distinct from function invocation and
 avoids pretending keywords are first-class callable lookup functions in the
 Clojure sense.
 
-### `proc` by role
+### `fn` By Role
 
-`proc` is intentionally kept narrow.
+`fn` is intentionally kept narrow.
 
-Procedure literal shape:
+Function literal shape:
 
 ```clojure
-(proc [x: int] -> int
+(fn [x: int] -> int
   (+ x 1))
 ```
 
-Procedure type shape:
+Function type shape:
 
 ```clojure
-(defconst Step (proc [int] -> int))
+fn [x: int] -> int
 ```
 
-Top-level function declarations use `defn`, not `proc`.
+Top-level named function declarations use `defn`.
 
-There is no need to make `proc` a generic callable head with more ad hoc
+There is no need to make `fn` a generic callable head with more ad hoc
 variants in the source language.
 
 ### Future macro expansion boundary
@@ -786,7 +831,7 @@ Typed local bindings are allowed:
 Local bindings may be marked with `defer` after the value expression:
 
 ```clojure
-(let [xs (arr/dynamic int [1 2 3]) defer
+(let [xs ([dynamic]int [1 2 3]) defer
       lookup (map/empty string int) defer]
   ...)
 ```
@@ -794,6 +839,50 @@ Local bindings may be marked with `defer` after the value expression:
 This lowers to ordinary local bindings plus `defer delete(...)` at scope exit.
 The marker is currently only supported on named local bindings in `let`.
 Defer-marked bindings cannot escape through the return boundary.
+
+### Local `def*`
+
+Local declarations use the same declaration heads as top-level declarations,
+but only these forms are available locally:
+
+- `def`
+- `defvar`
+- `defstruct`
+- `defenum`
+- `defunion`
+
+Local `def`, `defstruct`, `defenum`, and `defunion` lower to Odin declarations
+inside the current procedure or block. They are compile-time declarations scoped
+to that block; declaring a local type or constant does not allocate storage or
+perform runtime work by itself.
+
+Local `defvar` introduces an ordinary mutable local and lowers to Odin's local
+runtime variable binding:
+
+```clojure
+(defn classify-code [code: int] -> int
+  (def limit: int 99)
+  (defenum Status [OK Large])
+  (defstruct Payload {:code int :status Status})
+  (let [payload (Payload {:code code :status .OK})]
+    (if (> (:code payload) limit) 1 0)))
+
+(defvar player-pos (rl.Vector2 [0 0]))
+(defvar player-vel: rl.Vector2 [0 0])
+```
+
+Local declarations do not have `-` variants because ordinary block scope
+already controls their visibility.
+
+### `block`
+
+`block` creates an explicit scoped Odin block.
+
+```clojure
+(block
+  (defvar dt (rl.GetFrameTime))
+  (step dt))
+```
 
 Two-name multi-return bindings may also carry Odin-style control-flow modifiers:
 
@@ -815,8 +904,8 @@ The current first pass keeps this narrow:
 - `or-return`, `or-break`, and `or-continue` are the supported modifiers;
 - `defer` may follow an `or-*` modifier and applies only on the successful path.
 
-For now, `or-return` follows Odin semantics conservatively by requiring proc
-named returns that match the binding names exactly:
+For now, `or-return` follows Odin semantics conservatively by requiring
+function named returns that match the binding names exactly:
 
 ```clojure
 (defn query [] -> [value: int, ok: bool]
@@ -882,10 +971,10 @@ kvist test path/to/tests.kvist --generated /tmp/generated-tests.odin
 The boundary is deliberate:
 
 - `t/testing` prefixes nested assertion failures with joined context labels
-- `:each` fixtures use procs shaped like
-  `proc(t: ^testing.T, body: proc(t: ^testing.T))`
+- `:each` fixtures use function values shaped in Kvist as
+  `(fn [t: ^testing.T, body: fn [t: ^testing.T]] ...)`
 - `:once` fixtures are setup-only and run once before the first test in the
-  package; they are ordinary zero-argument procs
+  package; they are ordinary zero-argument functions
 - the test CLI accepts Kvist test names and normalizes them to Odin test names
 
 ### `kvist:http`
@@ -1193,6 +1282,15 @@ Mutation remains explicit.
 (set! total^ (+ total^ 1))
 ```
 
+### `mut!`
+
+`mut!` is the explicit compound-assignment form.
+
+```clojure
+(mut! total += x)
+(mut! player-vel.y += (* gravity dt))
+```
+
 ### `update!`
 
 `update!` is the explicit in-structure update form.
@@ -1360,10 +1458,10 @@ This expands in the usual Clojure style:
 Loops and cleanup remain explicit statements/forms:
 
 ```clojure
-(for (< i 10)
+(while (< i 10)
   (fmt.println i))
 
-(for [x xs]
+(each [x xs]
   (fmt.println x))
 
 (defer (free thing))
@@ -1371,23 +1469,23 @@ Loops and cleanup remain explicit statements/forms:
 
 The current direction is:
 
-- `for` for both condition-controlled loops and ordinary collection iteration
-- `each` remains available as the older collection-iteration alias
+- `while` for condition-controlled loops and `each` for ordinary collection iteration
+- `for` is reserved for comprehensions
 
 Counted loops should be written explicitly with surrounding bindings and
 mutation:
 
 ```clojure
 (let [i 0]
-  (for (< i 10)
+  (while (< i 10)
     (fmt.println i)
     (set! i (+ i 1))))
 
-(for [i x xs]
+(each [i x xs]
   (fmt.println i)
   (fmt.println x))
 
-(for [key value lookup]
+(each [key value lookup]
   (fmt.println key)
   (fmt.println value))
 ```
@@ -1459,14 +1557,14 @@ particular, Kvist should not prematurely commit to:
 - lazy semantics
 - transducer semantics without a dedicated design pass
 
-For now, explicit `for` / `each` loops remain the baseline collection
+For now, explicit `each` loops remain the baseline collection
 processing model, and higher-order procedures are supported as a capability
 rather than a frozen standard library design.
 
-Anonymous procedures use `proc` as an expression form:
+Anonymous functions use `fn` as an expression form:
 
 ```clojure
-(map (proc [x: int] -> int
+(map (fn [x: int] -> int
        (+ x 1))
      xs
      allocator)
@@ -1502,7 +1600,7 @@ This keeps the source language close to Clojure in feel while staying honest
 about Odin's underlying no-general-closures model.
 
 `into`, transducers, and collection-building conventions are better treated as a
-separate future design project once the core language, procedure types, and
+separate future design project once the core language, function types, and
 allocation model are more settled.
 
 See `docs/SEQUENCES.md` for the current sequence helper roadmap. The short
@@ -1555,7 +1653,7 @@ The current direction is:
 
 ### Struct construction
 
-Prefer constructor syntax over `(as Type ...)`:
+Prefer constructor syntax with the type in call position:
 
 ```clojure
 (Request {
@@ -1598,30 +1696,28 @@ Shorthand alternatives such as:
 should not be added yet. Keeping union and struct construction on one brace-form
 rule is simpler and more predictable.
 
-### General typed construction
+### General Typed Construction
 
-The language still needs a generic way to construct typed composite values that
-do not have a named nominal constructor shape.
-
-Current draft direction:
+Typed construction and conversion use a single rule: put the type in call
+position.
 
 - named nominal types can be constructed directly: `(Request {...})`
-- anonymous composite types should use an explicit constructor form such as
-  `(new []int [1 2 3])`
+- anonymous composite types can be applied directly: `([]int [1 2 3])`
+- scalar conversions use the same shape: `(f32 n)`
 
 Examples:
 
 ```clojure
-(new []int [1 2 3])
-(new [4]int [1 2 3 4])
-(new map[string]int {"a" 1 "b" 2})
-(new []string [])
-(new map[string]int {})
+([]int [1 2 3])
+([4]int [1 2 3 4])
+(map[string]int {"a" 1 "b" 2})
+([]string [])
+(map[string]int {})
+(f32 n)
+(^f32 raw)
 ```
 
-This keeps construction explicit without forcing every typed literal through a
-general `(as Type ...)` form. It also avoids requiring arbitrary type syntax to
-act as the head of an invocation form in v0.1.
+This keeps construction explicit without a second cast/ascription form.
 
 `make` should remain available for Odin runtime/allocator-backed construction
 rather than being replaced by surface sugar:
@@ -1650,8 +1746,7 @@ types, struct fields, and value-level type arguments such as `chan.create`.
 
 The intended split is:
 
-- named nominal constructor call for structs/unions
-- `new` for typed literal construction
+- type-call construction for structs, unions, arrays, slices, maps, and casts
 - `make` for Odin runtime/allocator-backed construction
 
 ### Composite literal discipline
@@ -1679,8 +1774,8 @@ Bare collection literals should not be relied upon without explicit type context
 in v0.1. In particular, empty literals should stay typed:
 
 ```clojure
-(new []int [])
-(new map[string]int {})
+([]int [])
+(map[string]int {})
 ```
 
 ## Union Use in v0.1
@@ -1736,33 +1831,33 @@ Types should stay visually close to Odin:
 The guiding rule is that type syntax should be readable in a Lisp file without
 trying to redesign Odin's type model.
 
-Procedure types themselves are part of the core language because higher-order
+Function types themselves are part of the core language because higher-order
 procedures depend on them.
 
-### Procedure types
+### Function Types
 
-The current draft is to use `proc` in type position too:
+The current spelling uses `fn` in type position too:
 
 ```clojure
-proc [x: int] -> bool
-proc [x: int, y: int] -> int
-proc [url: URL, key: string] -> [val: string, ok: bool]
+fn [x: int] -> bool
+fn [x: int, y: int] -> int
+fn [url: URL, key: string] -> [val: string, ok: bool]
 ```
 
 That means higher-order procedures can look like:
 
 ```clojure
-(defn find-index [xs: []int, pred: (proc [x: int] -> bool)] -> int
+(defn find-index [xs: []int, pred: (fn [x: int] -> bool)] -> int
   ...)
 ```
 
-This keeps procedure type syntax close to Odin while still fitting naturally
+This keeps function type syntax close to Odin while still fitting naturally
 inside parameter annotations.
 
-The anonymous procedure literal form stays:
+The anonymous function literal form stays:
 
 ```clojure
-(proc [x: int] -> int
+(fn [x: int] -> int
   (+ x 1))
 ```
 
@@ -1778,21 +1873,21 @@ These stay deferred until the core language is stable:
 - procedure calling-convention annotations in source syntax
 - implicit coercion rules beyond what Odin already makes obvious
 
-## Planned Supported Subset
+## Supported Subset
 
-Kvist should not attempt to support all of Odin. The language should only cover
+Kvist does not attempt to support all of Odin. The language covers
 the parts that are common, mechanically lowerable, and worth having in Lisp
 surface syntax.
 
-### Expected core support
+### Core support
 
-- `package`, `import`, `defconst`, `defvar`, `defstruct`, `defenum`, `defunion`, `defn`
-- local bindings with `let`
-- `do`, `if`, `core/when`, `core/cond`
-- `set!`, `return`, `defer`
-- `for`
+- `package`, `import`, `def`, `defvar`, `defstruct`, `defenum`, `defunion`, `defn`
+- local bindings and declarations with `let`, `def`, `defvar`, `defstruct`, `defenum`, and `defunion`
+- `do`, `block`, `if`, `while`, `core/when`, `core/cond`
+- `set!`, `mut!`, `return`, `defer`
+- `each` for iteration and `for` for comprehensions
 - field access, keyed lookup, threading
-- named type construction and generic `new`
+- type-call construction and conversion
 - Odin polymorphic type instantiation with `(type Head Arg...)`
 - procedure values and higher-order procedures
 - raw `odin` escape hatch
@@ -1965,7 +2060,7 @@ and tooling story are more settled.
 
 The current draft semantics are:
 
-- non-void `proc` implicitly returns the final expression of the body
+- non-void `defn` implicitly returns the final expression of the body
 - `void` functions do not synthesize a return value
 - explicit `return` remains available for early exits
 - explicit `return` is always valid at the final site too
@@ -2097,7 +2192,7 @@ Example source:
 This should lower to ordinary Odin with:
 
 - ordinary package/import declarations
-- ordinary `proc` declarations
+- ordinary Odin `proc` declarations
 - ordinary field access
 - direct calls into Odin libraries
 
@@ -2161,12 +2256,13 @@ file-backed dev values, watches, and Emacs integration.
 
 ## Macros
 
-Kvist now has a first real `defmacro` surface.
+Kvist has a source-level `defmacro` surface.
 
 Current rules:
 
 - compile-time only
-- package-local for now
+- public by default at top level in source packages
+- `defmacro-` declares a package-private top-level macro
 - operates on Kvist forms before ordinary parse/lowering
 - expansion stays in source space; there is no runtime macro world
 - no hygiene yet
@@ -2174,14 +2270,15 @@ Current rules:
 The current compiler still carries an explicit built-in macro registry for the
 resource-scope bootstrap forms `with-allocator` and `with-temp-allocator`. The
 simpler binding forms `core/when-let`, `core/if-let`, `core/when-ok`, and `core/if-ok` now come
-through the ordinary compile-time macro path as core package-local macros.
+through the ordinary compile-time macro path as macros from the `kvist:core`
+source package.
 Threading forms `core/->` and `core/->>` are also inspectable through `kvist macroexpand`,
 but they still stay compile-special for now because the compiler uses their
 pipeline shape to manage owned intermediates.
 
 That split is deliberate:
 
-- user-defined `defmacro` already works for package-local source transforms
+- user-defined `defmacro` works for source transforms in source packages
 - the remaining resource-scope bootstrap forms stay compiler-owned until they
   can be moved cleanly onto the same user-visible mechanism without losing
   existing checks
@@ -2227,9 +2324,11 @@ Top-level macros may now expand into multiple top-level forms by returning
           ((unquote name) {}))))))
 ```
 
-Macros may also invoke other package-local macros during expansion. That makes
-recursive declaration DSLs possible, for example emitting one constructor helper
-per union variant from a single top-level form.
+Macros may also invoke other visible macros during expansion. Public macros are
+available through source-package imports; `defmacro-` macros are visible only
+inside their package. That makes recursive declaration DSLs possible, for
+example emitting one constructor helper per union variant from a single
+top-level form.
 
 That same pattern scales to more realistic message/event declarations, where one
 macro can emit:
@@ -2329,7 +2428,7 @@ combinations of existing core forms such as:
 
 - `let`
 - `defer`
-- local `proc` calls
+- local helper calls
 - explicit cleanup
 
 That is a good sign: when a construct can be explained as macro-generated
@@ -2475,9 +2574,9 @@ forms with real validation or lowering complexity:
 - `SwitchExpr` / case clauses
 - `ProcLiteral`
 - composite literal pairs
-- `ForStmt` and `EachStmt`
+- `WhileStmt` and `EachStmt`
 
-Generic calls, operators, simple field access, `get`, `new`, `make`, and raw
+Generic calls, operators, simple field access, `get`, `make`, and raw
 Odin snippets may continue to lower directly from CST while that keeps the code
 simpler.
 
@@ -2528,7 +2627,7 @@ compiler should preserve enough information to:
 The CLI can emit a line-oriented source map with `--map`: generated start/end
 lines paired with the original Kvist byte span. Declaration spans are the
 fallback, and the emitter also records narrower spans for body forms, binding
-assignments, and common statement subforms such as conditions, loop collections,
+assignments, and common statement subforms such as conditions, each collections,
 return values, and assignment values. Diagnostic remapping prefers the narrowest
 generated range and, when Odin reports a generated column, the matching generated
 column range. This lets ordinary Odin type errors point at smaller source forms
@@ -2598,13 +2697,13 @@ The first implementation milestone should remain modest:
 3. build a clean declaration AST
 4. lower a small locked subset to readable Odin
 
-That locked subset should start with:
+That locked subset is:
 
-- `package`, `import`, `defconst`, `defvar`, `defstruct`, `defenum`, `defunion`, `defn`
-- `let`, `do`, `if`, `core/when`, `core/cond`, `core/switch`
-- `set!`, `return`, `defer`, `for`
+- `package`, `import`, `def`, `defvar`, `defstruct`, `defenum`, `defunion`, `defn`
+- `let`, `def`, `defvar`, `defstruct`, `defenum`, `defunion`, `block`, `do`, `if`, `while`, `core/when`, `core/cond`, `core/switch`
+- `set!`, `mut!`, `return`, `defer`, `for`
 - field access, `core/get`, threading
-- named constructors, `new`, `make`
+- type-call constructors, `make`
 - flat multi-return destructuring
 - raw `odin` escape hatch
 

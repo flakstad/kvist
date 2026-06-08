@@ -138,7 +138,7 @@ such as `compile_source` still require an explicit package for now.
 
 ```sh
 odin build cmd/kvist
-./kvist examples/hello.kvist -o /tmp/hello.odin
+./kvist examples/language/hello.kvist -o /tmp/hello.odin
 odin check /tmp/hello.odin -file
 ```
 
@@ -150,7 +150,7 @@ still pass `odin check`.
 Pass `--map /tmp/hello.map` to also write a declaration-level source map:
 
 ```sh
-./kvist examples/hello.kvist -o /tmp/hello.odin --map /tmp/hello.map
+./kvist examples/language/hello.kvist -o /tmp/hello.odin --map /tmp/hello.map
 ```
 
 Run the executable examples through Kvist and then `odin check` with:
@@ -175,26 +175,26 @@ Run CLI and Emacs-tooling integration checks with:
 Generate a scratch runner for one selected form with:
 
 ```sh
-./kvist eval examples/higher-order.kvist '(arr/reduce add 0 (new []int [1 2 3]))'
+./kvist eval examples/collections/higher-order.kvist '(threaded-total)'
 ```
 
 Inspect the generated scratch Odin without running it with:
 
 ```sh
-./kvist expand examples/higher-order.kvist '(arr/reduce add 0 (new []int [1 2 3]))'
+./kvist expand examples/collections/higher-order.kvist '(threaded-total)'
 ```
 
 Inspect frontend macro-style expansion before Odin lowering with:
 
 ```sh
-./kvist macroexpand examples/data-literals.kvist '(with-allocator [allocator context.temp_allocator] (temp-buffer-len))'
+./kvist macroexpand examples/language/data-literals.kvist '(with-allocator [allocator context.temp_allocator] (temp-buffer-len))'
 ```
 
 The CLI can also invoke Odin for generated files directly:
 
 ```sh
-./kvist check examples/hello.kvist
-./kvist run examples/hello.kvist
+./kvist check examples/language/hello.kvist
+./kvist run examples/language/hello.kvist
 ```
 
 The examples cover control flow, collection literals, procedure values,
@@ -363,7 +363,7 @@ The parts that should remain Kvist-specific are:
 - `.kvist` parsing
 - Kvist-to-Odin lowering
 - source mapping from `.kvist` locations to generated `.odin` locations
-- syntax decisions around `let`, literals, proc forms, implicit returns, and
+- syntax decisions around `let`, literals, function forms, implicit returns, and
   raw Odin escape hatches
 
 The likely architecture, if this project moves forward, is:
@@ -402,8 +402,8 @@ Useful targets:
 Examples of the intended shape:
 
 ```clojure
-(new []int [1 2 3])
-(new map[string]int {"a" 1 "b" 2})
+([]int [1 2 3])
+(map[string]int {"a" 1 "b" 2})
 (Person {:name "Andreas" :age 42})
 ```
 
@@ -422,8 +422,17 @@ Do not use Clojure-style `^type` hints for this. In Odin, `^` already means
 pointer, so using it for type hints would make the surface language harder to
 read.
 
-Use named constructors for nominal types and `new` for anonymous typed
-composite literals.
+Use type-call syntax for both nominal and anonymous typed composite literals.
+
+```clojure
+(Person {:name "Ada" :age 36})
+([3]f32 [1 2 3])
+(matrix[2 2]f32 [1 0
+                  0 1])
+(#simd[4]f32 [1 2 3 4])
+(bit_set[Permission; u8] [.Read .Execute])
+(quaternion [0.0 0.0 0.0 1.0])
+```
 
 For Odin polymorphic type constructors, use `(type Head Arg...)` where Odin
 would write `Head(Arg, ...)`. This is intentionally mechanical and exists for
@@ -482,8 +491,8 @@ Person :: struct {
 }
 
 (defn make-person [] -> Person
-  (as Person {:name "Andreas"
-              :age 42}))
+  (Person {:name "Andreas"
+           :age 42}))
 ```
 
 Maps, dynamic arrays, compound literals, and calls:
@@ -493,10 +502,10 @@ Maps, dynamic arrays, compound literals, and calls:
   (route-add
     router
     .Get
-    (as Route {:handler handler
-               :pattern (strings.concatenate
-                          (as []string ["^" pattern "$"])
-                          router.allocator)})))
+    (Route {:handler handler
+            :pattern (strings.concatenate
+                       ([]string ["^" pattern "$"])
+                       router.allocator)})))
 ```
 
 emits Odin-shaped code like:
@@ -516,7 +525,7 @@ Slices, loops, and mutation:
 ```clojure
 (defn sum [xs: []int] -> int
   (let [total 0]
-    (for [x xs]
+    (each [x xs]
       (set! total (+ total x)))
     total))
 ```
@@ -526,7 +535,7 @@ Named and multi-value returns:
 ```clojure
 (defn query-get [url: URL, key: string] -> [val: string, ok: bool] #optional_ok
   (let [q url.query]
-    (for [entry (#force_inline query-iter (& q))]
+    (each [entry (#force_inline query-iter (& q))]
       (core/when (== entry.key key)
         (return entry.value true)))))
 ```
@@ -576,14 +585,14 @@ Switch:
     :else ""))
 ```
 
-Anonymous procs and callbacks:
+Anonymous functions and callbacks:
 
 ```clojure
 (http.route-get
   (& router)
   "/users/(%w+)/comments/(%d+)"
   (http.handler
-    (proc [req: ^http.Request, res: ^http.Response]
+    (fn [req: ^http.Request, res: ^http.Response]
       (http.respond-plain
         res
         (fmt.tprintf "user %s, comment: %s"
@@ -591,7 +600,7 @@ Anonymous procs and callbacks:
                      (get req.url_params 1))))))
 ```
 
-Generated Odin should remain a normal anonymous proc passed to `http.handler`.
+Generated Odin should remain a normal anonymous `proc` passed to `http.handler`.
 
 Attributes and directives should attach to the following form without forcing
 everything into parens:
@@ -652,62 +661,91 @@ foreign_call :: proc(handle: Foreign_Handle) ---
 
 ## Target Forms
 
+Top-level declarations are public by default when loaded through a Kvist source
+package. Use the `-` suffixed declaration forms for package-private names.
+Local declarations do not have public/private variants; they are scoped to the
+current Odin block or procedure.
+
 - `(package name)`, `(import "path")`, `(import alias "path")`
   - explicit Odin-package imports are also available as `(import :odin "path")` and `(import alias :odin "path")`
   - host imports keep Odin package paths like `"core:fmt"`
   - source-package imports load relative package directories of `.kvist` files, e.g. `(import math "support/math")`
-  - Kvist library packages are imported explicitly, e.g. `(import arr "kvist:arr")`, `(import str "kvist:str")`, `(import map "kvist:map")`, `(import set "kvist:set")`, `(import struct "kvist:struct")`
+  - Kvist library packages are imported explicitly, e.g. `(import arr "kvist:arr")`, `(import cli "kvist:cli")`, `(import str "kvist:str")`, `(import map "kvist:map")`, `(import set "kvist:set")`, `(import soa "kvist:soa")`
   - raw Odin names re-exported from a source package can be declared with `(exports [Name ...])`
-- `(defconst name expr)` -> `name :: expr`
-- `(defconst name type expr)` -> `name: type : expr`
-- `(defconst- name expr)` package-private constant
-- `(defvar name expr)` -> `name := expr`
-- `(defvar name type expr)` -> `name: type = expr`
-- `(defvar- name expr)` package-private variable
+- top-level `(def name expr)` -> `name :: expr`
+- top-level `(def name: type expr)` -> `name: type : expr`
+- top-level `(def- name expr)` and `(def- name: type expr)` package-private constants
+- top-level `(defvar name expr)` -> `name := expr`
+- top-level `(defvar name: type expr)` -> `name: type = expr`
+- top-level `(defvar- name expr)` and `(defvar- name: type expr)` package-private variables
 - `(export)` -> attaches `@(export)` to the next top-level declaration
 - `(exports [Name ...])` -> declares additional public source-package names provided by raw Odin forms
-- `(defstruct Name {:field Type ...})`
-- `(defstruct Name "Doc..." {:field type ...})`
-- `(defstruct- Name {:field Type ...})` package-private struct
-- `(defenum Name [A B C])` and `(defenum Name {:A 1 :B 2})`
-- `(defenum Name "Doc..." [A B C])` and `(defenum Name "Doc..." {:A 1 :B 2})`
-- `(defenum- Name [A B C])` package-private enum
-- `(defunion Name {:variant Type ...})`
-- `(defunion Name "Doc..." {:variant Type ...})`
-- `(defunion- Name {:variant Type ...})` package-private union
-- `(defn name [arg: type, ...] -> return-type body...)`
-- `(defn name :abi "c" [arg: type, ...] -> return-type body...)`
-  - `defn` is the canonical source-level declaration form
-  - `defn-` is package-private
-  - `proc` remains available in type positions and anonymous proc literals, not as a top-level declaration alias
+- top-level `(defstruct Name {:field Type ...})`
+- top-level `(defstruct Name "Doc..." {:field type ...})`
+- top-level `(defstruct- Name {:field Type ...})` package-private struct
+- top-level `(defenum Name [A B C])` and `(defenum Name {:A 1 :B 2})`
+- top-level `(defenum Name "Doc..." [A B C])` and `(defenum Name "Doc..." {:A 1 :B 2})`
+- top-level `(defenum- Name [A B C])` package-private enum
+- top-level `(defunion Name {:variant Type ...})`
+- top-level `(defunion Name "Doc..." {:variant Type ...})`
+- top-level `(defunion- Name {:variant Type ...})` package-private union
+- top-level `(defn name [arg: type, ...] -> return-type body...)`
+- top-level `(defn name :abi "c" [arg: type, ...] -> return-type body...)`
+  - `defn-` is the package-private named function form
+  - `fn` is the canonical source-level form for function types and anonymous function literals
   - `:abi "c"` is available for explicit foreign/native entrypoints
   - params and returns use ordinary types like `int`, `string`, `Person`, plus Odin-style container types like `[]string`, `[dynamic]int`, `map[string]int`, and Kvist set types like `set[keyword]`
   - `core/println` is the canonical print helper; `core/doc` and the rest of the non-syntax surface live in real Kvist packages
-- `(defmacro name [arg ...] body...)`
-  - package-local for now; `defmacro-` is package-private
+- top-level `(defmacro name [arg ...] body...)`
+  - `defmacro-` is the package-private macro form
   - expands over Kvist forms before ordinary parse/lowering
   - resource-scope bootstrap macros still exist alongside it during bootstrap
 - top-level and statement `(odin "...")` raw escape hatches
 - `(let [binding value ...] body...)` scoped expression/block, including
   multi-return and struct-field destructuring; a local binding may be followed
   by `defer` to lower to `defer delete(...)` at scope exit
+- local `(def name expr)` and `(def name: type expr)` declare Odin constants scoped to the current block
+- local `(defvar name expr)` and `(defvar name: type expr)` create mutable runtime locals scoped to the current block
+- local `(defstruct Name ...)`, `(defenum Name ...)`, and `(defunion Name ...)` declare compile-time block-scoped Odin types; the declarations themselves do not allocate or run at runtime
+- `(block body...)` -> scoped Odin block
 - `(with-allocator [allocator expr] body...)` scoped `context.allocator`
   override with `defer` restoration
 - `(with-temp-allocator [allocator] body...)` scoped `context.temp_allocator`
   override with temp allocator reset; requires `base:runtime`
 - `(set! place expr)` -> `place = expr`
+- `(mut! place += expr)` and other compound operators -> direct compound assignment
 - `(core/update! target key-or-field expr)` -> direct index/key/field assignment
-- final expression in a non-void proc emits `return <expr>`
+- final expression in a non-void `defn` emits `return <expr>`
 - `(if test then else)`
 - `(core/when test body...)`
-- `(for test body...)`
-- `(for [name collection] body...)` and `(for [key value map] body...)`
+- `(while test body...)`
+- `(each [name collection] body...)` and `(each [key value map] body...)`
 - `(do body...)`
-- `(new Type literal)` typed composite literals
+- `(Type literal)` typed composite literals, including compact Odin type heads
+  such as `(matrix[2 2]f32 [1 2 3 4])`, `(#simd[4]f32 [1 2 3 4])`,
+  `(bit_set[Permission; u8] [.Read .Execute])`, and `([3]f32 [1 2 3])`
+  - Odin's quaternion constructor is available as `(quaternion [x y z w])`,
+    lowering to `quaternion(x=x, y=y, z=z, w=w)`
+- `(type Type)` typeid expressions, such as
+  `(linalg.identity (type matrix[2 2]f32))`
 - `(make Type args...)` runtime/allocator-backed construction
 - `(arr/empty elem-type [capacity])`, `(arr/dynamic elem-type [items...])`, `(arr/fixed elem-type [items...])`
 - `(map/empty key-type value-type [capacity])`, `(map/of key-type value-type {:k v ...})`
 - `(set/empty elem-type [capacity])`, `(set/of elem-type [a b c])`
+- `(soa/make Particle [capacity])`, `(soa/push! particles value...)`, and
+  `(soa/update! particles i :field expr ...)` for dynamic SOA storage and
+  direct indexed column updates
+- `(soa/fill! particles :field value)`, `(soa/scale! particles :field factor)`,
+  `(soa/axpy! particles :dst a :src)`, `(soa/sum-into! total particles :field)`,
+  and `(soa/dot-into! total particles :a :b)` for whole-column SOA loops
+- use `core:math/linalg` directly for matrix/vector operations such as
+  `linalg.mul`, `linalg.transpose`, and `linalg.dot`; matrix values are ordinary
+  typed constructors like `(matrix[2 2]f32 [1 2 3 4])`
+- `cli/*` helpers such as `(cli/flag args "--verbose")`,
+  `(cli/option args "--out" "default")`, `(cli/int-option args "--port" 8080)`,
+  `(or-else (cli/command args) "help")`, `(cli/env "HOME" "")`,
+  `(cli/terminal-size 80 24)`, `(cli/stdout-tty?)`, `(cli/stderr-tty?)`,
+  `(cli/println ...)`, `(cli/eprintln ...)`, and `(cli/exit! code)`
 - `str/*` helpers such as `(str/count s)`, `(str/get s i)`, `(str/slice s start [end])`,
   `(str/contains? s needle)`, `(str/split s sep)`, `(str/join parts sep)`,
   `(str/trim s)`, `(str/trim-prefix s prefix)`, `(str/trim-suffix s suffix)`,
@@ -767,6 +805,23 @@ foreign_call :: proc(handle: Foreign_Handle) ---
     surface. Many helpers are implemented directly in package source; the rest
     lower through a small intrinsic substrate where array-family coverage,
     specialization, or allocation behavior still needs compiler support.
+- `soa/*` helpers such as `(soa/fields T)`, `(soa/types T)`,
+  `(soa/make T capacity)`, `(soa/push! particles particle)`, and
+  `(soa/update! particles i :x (+ x dx) :y (+ y dy))`
+  - `kvist:soa` owns compile-time struct metadata helpers and SOA
+    convenience macros. SOA updates expand to same-named local reads plus direct
+    indexed column writes.
+  - Whole-column helpers such as `(soa/axpy! particles :x dt :vx)` and
+    `(soa/dot-into! total particles :vx :vx)` expand to direct loops over
+    `(len particles)`.
+- `cli/*` helpers for command-line programs:
+  `(cli/flag args name)`, `(cli/option args name fallback)`,
+  `(cli/int-option args name fallback)`, `(cli/command args)`,
+  `(cli/env name fallback)`, `(cli/env? name)`, `(cli/env-int name fallback)`,
+  `(cli/terminal-size fallback-columns fallback-rows)`, `(cli/stdout-tty?)`,
+  `(cli/stderr-tty?)`, stdout/stderr print macros, and `(cli/exit! code)`
+  - `kvist:cli` keeps process/terminal APIs thin over Odin `core:os`,
+    `core:terminal`, and `core:fmt`.
 - map helpers `(map/merge a b)`, `(map/merge! target source)`,
   `(map/zip keys vals)`, `(map/keys m)`, and `(map/vals m)`
 - file-backed dev helpers `(io/read path)` and `(io/write path data)` from

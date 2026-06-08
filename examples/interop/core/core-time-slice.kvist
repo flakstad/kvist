@@ -1,0 +1,75 @@
+// Host interop with core:time and core:slice.
+//
+// This example focuses on APIs that do not need a Kvist wrapper:
+// time.Duration arithmetic is ordinary Odin arithmetic, time formatting writes
+// into caller-provided fixed buffers, and core:slice helpers return explicit
+// bool results for queries that may fail.
+(package main)
+(import core "kvist:core")
+(import time "core:time")
+(import slice "core:slice")
+
+(defn duration-ms [] -> int
+  ;; Duration is a distinct Odin integer type. Multiplication by time constants
+  ;; stays visible and lowers to the same code you would write in Odin.
+  (int (time.duration_milliseconds (* 1500 time.Millisecond))))
+
+(defn fixed-date-weekday [] -> int
+  ;; datetime_to_time returns an explicit ok bool. This is the same shape that
+  ;; core/if-let is designed for: bind the value and the bool, then branch.
+  (core/if-let [t ok (time.datetime_to_time 2024 1 2 3 4 5)]
+    (int (time.weekday t))
+    -1))
+
+(defn fixed-date-string-length [] -> int
+  ;; Odin time formatting writes into caller-provided storage. The returned
+  ;; string is a view into this local buffer, so it must not escape this proc.
+  (core/if-let [t ok (time.datetime_to_time 2024 1 2 3 4 5)]
+    (let [buf ([time.MIN_YYYY_DATE_LEN]u8 [])
+          text (time.to_string_yyyy_mm_dd t (core/slice buf))]
+      (len text))
+    0))
+
+(defn min-max-score [] -> int
+  ;; core:slice min_max also returns an explicit ok bool. No allocation happens
+  ;; here; xs is an ordinary fixed slice literal.
+  (let [xs ([]int [4 1 7 2])]
+    (let [[lo hi ok] (slice.min_max xs)]
+      (if ok
+        (+ (* lo 10) hi)
+        0))))
+
+(defn search-score [] -> int
+  (let [xs ([]int [4 1 7 2])]
+    (core/if-let [idx found (slice.linear_search xs 7)]
+      idx
+      -1)))
+
+(defn main []
+  (core/println (duration-ms)
+               (fixed-date-weekday)
+               (fixed-date-string-length)
+               (min-max-score)
+               (search-score)))
+
+(core/comment
+  ;; Duration conversion.
+  (duration-ms)
+  ;; => 1500
+
+  ;; Weekday is an Odin enum. We cast to int to make the eval result compact.
+  (fixed-date-weekday)
+  ;; => 2
+
+  ;; YYYY-MM-DD fits in the fixed caller-provided buffer.
+  (fixed-date-string-length)
+  ;; => 10
+
+  ;; min=1 and max=7, packed as 1*10+7.
+  (min-max-score)
+  ;; => 17
+
+  ;; linear_search returns [index, found].
+  (search-score)
+  ;; => 2
+)

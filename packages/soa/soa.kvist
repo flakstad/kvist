@@ -1,0 +1,283 @@
+(package soa)
+(import arr "kvist:arr")
+(import core "kvist:core")
+
+(defmacro fields
+  "Return metadata for the fields of a struct value or type.
+
+  This is a compile-time reflection helper that lowers through Kvist's struct
+  metadata support. It is intended for generated code and tooling that needs
+  field names without manually repeating them."
+  [target]
+  (quasiquote
+    (struct-fields (unquote target))))
+
+(defmacro types
+  "Return metadata for the field types of a struct value or type.
+
+  This pairs with `soa/fields` when generated code needs both the field names
+  and their declared Odin types. It is a macro-level helper and does not create
+  a runtime reflection table."
+  [target]
+  (quasiquote
+    (struct-types (unquote target))))
+
+(defmacro- soa-dynamic-type [elem-type]
+  (symbol (str "#soa[dynamic]" (text elem-type))))
+
+(defmacro make
+  "Allocate an empty dynamic struct-of-arrays buffer for `elem-type`.
+
+  `(soa/make Particle)` uses Odin's default dynamic-array capacity.
+  `(soa/make Particle capacity)` reserves the requested capacity up front."
+  [elem-type & rest]
+  (let [soa-type (soa-dynamic-type elem-type)]
+    (if (= (kvist/count rest) 0)
+      (quasiquote
+        (soa-make-raw (unquote soa-type)))
+      (if (= (kvist/count rest) 1)
+        (quasiquote
+          (soa-make-raw (unquote soa-type) (unquote (kvist/first rest))))
+        (error "soa/make expects elem-type and optional capacity")))))
+
+(defmacro push!
+  "Append one or more struct values to a dynamic struct-of-arrays buffer."
+  [particles & values]
+  (quasiquote
+    (arr/push! (unquote particles) (splice values))))
+
+(defmacro reserve!
+  "Reserve capacity for a dynamic struct-of-arrays buffer."
+  [particles capacity]
+  (quasiquote
+    (reserve_soa (addr (unquote particles)) (unquote capacity))))
+
+(defmacro resize!
+  "Resize a dynamic struct-of-arrays buffer to `n` elements."
+  [particles n]
+  (quasiquote
+    (resize_soa (addr (unquote particles)) (unquote n))))
+
+(defmacro clear!
+  "Set the length of a dynamic struct-of-arrays buffer to zero without freeing capacity."
+  [particles]
+  (quasiquote
+    (clear_soa (addr (unquote particles)))))
+
+(defmacro remove-ordered-at!
+  "Remove `index` from a dynamic SOA buffer while preserving element order."
+  [particles index]
+  (quasiquote
+    (ordered_remove_soa (addr (unquote particles)) (unquote index))))
+
+(defmacro remove-unordered-at!
+  "Remove `index` from a dynamic SOA buffer by moving the final element into its slot."
+  [particles index]
+  (quasiquote
+    (unordered_remove_soa (addr (unquote particles)) (unquote index))))
+
+(defmacro zip
+  "Build a struct-of-arrays view from field columns using Odin's `soa_zip`."
+  [& columns]
+  (quasiquote
+    (soa_zip (splice columns))))
+
+(defmacro unzip
+  "Return columns from a struct-of-arrays value using Odin's `soa_unzip`."
+  [particles]
+  (quasiquote
+    (soa_unzip (unquote particles))))
+
+(defmacro- soa-place [target index field]
+  (if (keyword? field)
+    (symbol (str (text target) "." (name field) "[" (text index) "]"))
+    (error "soa/update! field names must be keywords")))
+
+(defmacro- soa-set-fields [target index clauses]
+  (if (nil? clauses)
+    (forms)
+    (if (= (kvist/count clauses) 0)
+      (forms)
+      (if (= (kvist/count clauses) 1)
+        (error "soa/update! expects :field value pairs")
+        (let [field (kvist/first clauses)
+              value (kvist/nth clauses 1)
+              place (soa-place target index field)]
+          (forms
+            (quasiquote
+              (set! (unquote place) (unquote value)))
+            (soa-set-fields target index (kvist/rest (kvist/rest clauses)))))))))
+
+(defmacro- soa-bind-fields [target index clauses body]
+  (if (nil? clauses)
+    body
+    (if (= (kvist/count clauses) 0)
+      body
+      (if (= (kvist/count clauses) 1)
+        (error "soa/update! expects :field value pairs")
+        (let [field (kvist/first clauses)
+              local (symbol (name field))
+              place (soa-place target index field)]
+          (quasiquote
+            (let [(unquote local) (unquote place)]
+              (unquote (soa-bind-fields target index (kvist/rest (kvist/rest clauses)) body)))))))))
+
+(defmacro update!
+  "Update SOA columns at `index` using keyword/value field clauses.
+
+  Each mentioned field is first bound to a same-named local, so update
+  expressions can read the old column values with names like `x`, `vx`, and
+  `mass`. The macro expands to direct indexed column writes."
+  [particles index & clauses]
+  (soa-bind-fields
+    particles
+    index
+    clauses
+    (quasiquote
+      (do
+        (splice (soa-set-fields particles index clauses))))))
+
+(defmacro fill!
+  "Set every element of SOA `field` to `value`."
+  [particles field value]
+  (let [i (symbol "i")
+        n (symbol "n")
+        place (soa-place particles i field)]
+    (quasiquote
+      (let [(unquote i) 0
+            (unquote n) (len (unquote particles))]
+        (while (< (unquote i) (unquote n))
+          (set! (unquote place) (unquote value))
+          (mut! (unquote i) += 1))))))
+
+(defmacro copy!
+  "Copy one SOA column into another column in the same buffer."
+  [particles dst-field src-field]
+  (let [i (symbol "i")
+        n (symbol "n")
+        dst (soa-place particles i dst-field)
+        src (soa-place particles i src-field)]
+    (quasiquote
+      (let [(unquote i) 0
+            (unquote n) (len (unquote particles))]
+        (while (< (unquote i) (unquote n))
+          (set! (unquote dst) (unquote src))
+          (mut! (unquote i) += 1))))))
+
+(defmacro scale!
+  "Multiply every element of SOA `field` by `factor` in place."
+  [particles field factor]
+  (let [i (symbol "i")
+        n (symbol "n")
+        place (soa-place particles i field)]
+    (quasiquote
+      (let [(unquote i) 0
+            (unquote n) (len (unquote particles))]
+        (while (< (unquote i) (unquote n))
+          (mut! (unquote place) *= (unquote factor))
+          (mut! (unquote i) += 1))))))
+
+(defmacro add!
+  "Add `src-field` into `dst-field` element by element in place."
+  [particles dst-field src-field]
+  (let [i (symbol "i")
+        n (symbol "n")
+        dst (soa-place particles i dst-field)
+        src (soa-place particles i src-field)]
+    (quasiquote
+      (let [(unquote i) 0
+            (unquote n) (len (unquote particles))]
+        (while (< (unquote i) (unquote n))
+          (mut! (unquote dst) += (unquote src))
+          (mut! (unquote i) += 1))))))
+
+(defmacro sub!
+  "Subtract `src-field` from `dst-field` element by element in place."
+  [particles dst-field src-field]
+  (let [i (symbol "i")
+        n (symbol "n")
+        dst (soa-place particles i dst-field)
+        src (soa-place particles i src-field)]
+    (quasiquote
+      (let [(unquote i) 0
+            (unquote n) (len (unquote particles))]
+        (while (< (unquote i) (unquote n))
+          (mut! (unquote dst) -= (unquote src))
+          (mut! (unquote i) += 1))))))
+
+(defmacro mul!
+  "Multiply `dst-field` by `src-field` element by element in place."
+  [particles dst-field src-field]
+  (let [i (symbol "i")
+        n (symbol "n")
+        dst (soa-place particles i dst-field)
+        src (soa-place particles i src-field)]
+    (quasiquote
+      (let [(unquote i) 0
+            (unquote n) (len (unquote particles))]
+        (while (< (unquote i) (unquote n))
+          (mut! (unquote dst) *= (unquote src))
+          (mut! (unquote i) += 1))))))
+
+(defmacro axpy!
+  "Perform `dst-field += a * src-field` element by element in place."
+  [particles dst-field a src-field]
+  (let [i (symbol "i")
+        n (symbol "n")
+        dst (soa-place particles i dst-field)
+        src (soa-place particles i src-field)]
+    (quasiquote
+      (let [(unquote i) 0
+            (unquote n) (len (unquote particles))]
+        (while (< (unquote i) (unquote n))
+          (mut! (unquote dst) += (* (unquote a) (unquote src)))
+          (mut! (unquote i) += 1))))))
+
+(defmacro clamp!
+  "Clamp every element of SOA `field` into the inclusive range `[low, high]`."
+  [particles field low high]
+  (let [i (symbol "i")
+        n (symbol "n")
+        place (soa-place particles i field)]
+    (quasiquote
+      (let [(unquote i) 0
+            (unquote n) (len (unquote particles))]
+        (while (< (unquote i) (unquote n))
+          (when (< (unquote place) (unquote low))
+            (set! (unquote place) (unquote low)))
+          (when (> (unquote place) (unquote high))
+            (set! (unquote place) (unquote high)))
+          (mut! (unquote i) += 1))))))
+
+(defmacro sum-into!
+  "Add every element of SOA `field` into mutable accumulator `total`."
+  [total particles field]
+  (let [i (symbol "i")
+        n (symbol "n")
+        place (soa-place particles i field)]
+    (quasiquote
+      (let [(unquote i) 0
+            (unquote n) (len (unquote particles))]
+        (while (< (unquote i) (unquote n))
+          (mut! (unquote total) += (unquote place))
+          (mut! (unquote i) += 1))))))
+
+(defmacro dot-into!
+  "Add the dot product of two SOA columns into mutable accumulator `total`."
+  [total particles a-field b-field]
+  (let [i (symbol "i")
+        n (symbol "n")
+        a (soa-place particles i a-field)
+        b (soa-place particles i b-field)]
+    (quasiquote
+      (let [(unquote i) 0
+            (unquote n) (len (unquote particles))]
+        (while (< (unquote i) (unquote n))
+          (mut! (unquote total) += (* (unquote a) (unquote b)))
+          (mut! (unquote i) += 1))))))
+
+(defmacro norm2-into!
+  "Add the squared Euclidean length of one SOA column into mutable accumulator `total`."
+  [total particles field]
+  (quasiquote
+    (dot-into! (unquote total) (unquote particles) (unquote field) (unquote field))))

@@ -1,0 +1,132 @@
+(package cli)
+(import fmt "core:fmt")
+(import os "core:os")
+(import strconv "core:strconv")
+(import strings "core:strings")
+(import terminal "core:terminal")
+
+(defn flag
+  "Return true when `args` contains the exact command-line flag `name`."
+  [args: []string, name: string] -> bool #force_inline
+  (let [found false]
+    (each [arg args]
+      (when (== arg name)
+        (set! found true)))
+    found))
+
+(defn option
+  "Return the value immediately after option `name`, or `fallback` when absent."
+  [args: []string, name: string, fallback: string] -> string #force_inline
+  (let [value fallback]
+    (each [arg i args]
+      (when (and (== arg name) (< (+ i 1) (len args)))
+        (set! value (get args (+ i 1)))))
+    value))
+
+(defn int-option
+  "Parse the integer value immediately after option `name`, or return `fallback`."
+  [args: []string, name: string, fallback: int] -> int #force_inline
+  (let [value fallback
+        raw (option args name "")]
+    (when (!= raw "")
+      (let [[parsed ok] (strconv.parse_int raw)]
+        (when ok
+          (set! value parsed))))
+    value))
+
+(defn command
+  "Return the first non-flag argument after the executable name."
+  [args: []string] -> [result: string, found: bool] #optional_ok #force_inline
+  (let [candidate ""
+        matched false
+        i 1]
+    (while (and (< i (len args)) (not matched))
+      (let [arg (get args i)]
+        (when (not (strings.has_prefix arg "-"))
+          (set! candidate arg)
+          (set! matched true)))
+      (mut! i += 1))
+    (return candidate matched)))
+
+(defn env
+  "Return environment variable `name`, or `fallback` when it is not set."
+  [name: string, fallback: string] -> string #force_inline
+  (let [[value found] (os.lookup_env name context.allocator)]
+    (if found
+      value
+      fallback)))
+
+(defn env?
+  "Return environment variable `name` and whether it was present."
+  [name: string] -> [result: string, found: bool] #optional_ok #force_inline
+  (let [[env-value present] (os.lookup_env name context.allocator)]
+    (return env-value present)))
+
+(defn env-int
+  "Parse environment variable `name` as an integer, or return `fallback`."
+  [name: string, fallback: int] -> int #force_inline
+  (let [value fallback
+        [raw found] (os.lookup_env name context.allocator)]
+    (when found
+      (defer (delete raw))
+      (let [[parsed ok] (strconv.parse_int raw)]
+        (when ok
+          (set! value parsed))))
+    value))
+
+(defn terminal-size
+  "Return terminal columns and rows from COLUMNS/LINES, falling back when absent."
+  [fallback-columns: int, fallback-rows: int] -> [columns: int, rows: int] #force_inline
+  (return (env-int "COLUMNS" fallback-columns)
+          (env-int "LINES" fallback-rows)))
+
+(defn stdout-tty?
+  "Return true when stdout is attached to an interactive terminal."
+  [] -> bool #force_inline
+  (terminal.is_terminal os.stdout))
+
+(defn stderr-tty?
+  "Return true when stderr is attached to an interactive terminal."
+  [] -> bool #force_inline
+  (terminal.is_terminal os.stderr))
+
+(defn exit!
+  "Terminate the process immediately with exit status `code`."
+  [code: int]
+  (os.exit code))
+
+(defmacro print
+  "Print values to stdout without appending a newline."
+  [& values]
+  (quasiquote
+    (fmt.print (splice values))))
+
+(defmacro println
+  "Print values to stdout followed by a newline."
+  [& values]
+  (quasiquote
+    (fmt.println (splice values))))
+
+(defmacro printf
+  "Write formatted text to stdout."
+  [format & values]
+  (quasiquote
+    (fmt.printf (unquote format) (splice values))))
+
+(defmacro eprint
+  "Print values to stderr without appending a newline."
+  [& values]
+  (quasiquote
+    (fmt.eprint (splice values))))
+
+(defmacro eprintln
+  "Print values to stderr followed by a newline."
+  [& values]
+  (quasiquote
+    (fmt.eprintln (splice values))))
+
+(defmacro eprintf
+  "Write formatted text to stderr."
+  [format & values]
+  (quasiquote
+    (fmt.eprintf (unquote format) (splice values))))

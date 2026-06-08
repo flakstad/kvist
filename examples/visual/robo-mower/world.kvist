@@ -1,0 +1,280 @@
+// Mutable grid world for the robo mower sandbox.
+(package main)
+
+(def Grid-W: int 104)
+(def Grid-H: int 52)
+(def Grid-Cells: int (* Grid-W Grid-H))
+(def Cell-Size: int 10)
+(def Field-Px-W: int (* Grid-W Cell-Size))
+(def Field-Px-H: int (* Grid-H Cell-Size))
+(def Field-X: int 60)
+(def Field-Y: int 206)
+(def Cell-Grass: int 0)
+(def Cell-Obstacle: int 1)
+(def Cell-Boundary: int 2)
+(def Cell-Outside: int 3)
+(def Boundary-X: int 12)
+(def Boundary-Y: int 8)
+(def Boundary-W: int 80)
+(def Boundary-H: int 36)
+(def Base-Cell-X: int 20)
+(def Base-Cell-Y: int Boundary-Y)
+(def Dock-Cell-Y: int (+ Boundary-Y 3))
+
+(defstruct World
+  {:cells [dynamic]int
+   :cut [dynamic]bool
+   :obstacle-count int
+   :boundary-count int})
+
+(defn idx
+  "Convert grid coordinates to a flat cell index."
+  [x: int, y: int] -> int
+  (+ x (* y Grid-W)))
+
+(defn in-bounds?
+  "Return true when a cell coordinate is inside the world."
+  [x: int, y: int] -> bool
+  (and (>= x 0) (< x Grid-W) (>= y 0) (< y Grid-H)))
+
+(defn make-int-buffer
+  "Allocate and fill an integer grid buffer."
+  [value: int] -> [dynamic]int
+  (let [xs (make [dynamic]int Grid-Cells)
+        i 0]
+    (while (< i Grid-Cells)
+      (set! xs[i] value)
+      (mut! i += 1))
+    xs))
+
+(defn make-bool-buffer
+  "Allocate and fill a boolean grid buffer."
+  [value: bool] -> [dynamic]bool
+  (let [xs (make [dynamic]bool Grid-Cells)
+        i 0]
+    (while (< i Grid-Cells)
+      (set! xs[i] value)
+      (mut! i += 1))
+    xs))
+
+(defn make-world
+  "Allocate the mutable world buffers and seed the default field."
+  [] -> World
+  (let [world (World {:cells (make-int-buffer Cell-Outside)
+                      :cut (make-bool-buffer false)
+                      :obstacle-count 0
+                      :boundary-count 0})]
+    (reset-world! (addr world))
+    world))
+
+(defn delete-world!
+  "Release the world buffers."
+  [world: (ptr World)]
+  (delete (:cells world^))
+  (delete (:cut world^)))
+
+(defn clear-world!
+  "Clear all cells to non-mowable outside area."
+  [world: (ptr World)]
+  (let [cells (:cells world^)
+        cut (:cut world^)
+        i 0]
+    (while (< i Grid-Cells)
+      (set! cells[i] Cell-Outside)
+      (set! cut[i] true)
+      (mut! i += 1)))
+  (set! (:obstacle-count world^) 0)
+  (set! (:boundary-count world^) 0))
+
+(defn set-cell!
+  "Set one cell and keep obstacle counts and cut state consistent."
+  [world: (ptr World), x: int, y: int, value: int]
+  (when (not (in-bounds? x y))
+    (return))
+  (let [cells (:cells world^)
+        cut (:cut world^)
+        cell (idx x y)
+        was-obstacle (== cells[cell] Cell-Obstacle)
+        was-boundary (== cells[cell] Cell-Boundary)
+        is-obstacle (== value Cell-Obstacle)
+        is-boundary (== value Cell-Boundary)
+        is-grass (== value Cell-Grass)]
+    (when (and was-obstacle (not is-obstacle))
+      (mut! (:obstacle-count world^) -= 1))
+    (when (and (not was-obstacle) is-obstacle)
+      (mut! (:obstacle-count world^) += 1))
+    (when (and was-boundary (not is-boundary))
+      (mut! (:boundary-count world^) -= 1))
+    (when (and (not was-boundary) is-boundary)
+      (mut! (:boundary-count world^) += 1))
+    (set! cells[cell] value)
+    (when (not is-grass)
+      (set! cut[cell] true))
+    (when is-grass
+      (set! cut[cell] false))))
+
+(defn fill-rect!
+  "Fill a rectangular cell region with one cell value."
+  [world: (ptr World), x0: int, y0: int, w: int, h: int, value: int]
+  (let [y y0]
+    (while (< y (+ y0 h))
+      (let [x x0]
+        (while (< x (+ x0 w))
+          (set-cell! world x y value)
+          (mut! x += 1)))
+      (mut! y += 1))))
+
+(defn mark-rect!
+  "Mark a rectangular obstacle in cell coordinates."
+  [world: (ptr World), x0: int, y0: int, w: int, h: int]
+  (fill-rect! world x0 y0 w h Cell-Obstacle))
+
+(defn mark-boundary-rect!
+  "Draw a closed rectangular boundary wire."
+  [world: (ptr World), x0: int, y0: int, w: int, h: int]
+  (fill-rect! world x0 y0 w 1 Cell-Boundary)
+  (fill-rect! world x0 (+ y0 (- h 1)) w 1 Cell-Boundary)
+  (fill-rect! world x0 y0 1 h Cell-Boundary)
+  (fill-rect! world (+ x0 (- w 1)) y0 1 h Cell-Boundary))
+
+(defn paint-cell!
+  "Paint a small square brush centered on one cell."
+  [world: (ptr World), cx: int, cy: int, radius: int, value: int]
+  (let [y (- cy radius)]
+    (while (<= y (+ cy radius))
+      (let [x (- cx radius)]
+        (while (<= x (+ cx radius))
+          (set-cell! world x y value)
+          (mut! x += 1)))
+      (mut! y += 1))))
+
+(defn reset-world!
+  "Reset the world to grass inside the default boundary wire."
+  [world: (ptr World)]
+  (clear-world! world)
+  (fill-rect! world (+ Boundary-X 1) (+ Boundary-Y 1) (- Boundary-W 2) (- Boundary-H 2) Cell-Grass)
+  (mark-boundary-rect! world Boundary-X Boundary-Y Boundary-W Boundary-H))
+
+(defn cell-blocked?
+  "Return true when a cell is outside the grid or occupied."
+  [world: (ptr World), x: int, y: int] -> bool
+  (when (not (in-bounds? x y))
+    (return true))
+  (let [cells (:cells world^)
+        cell (idx x y)]
+    (not (== cells[cell] Cell-Grass))))
+
+(defn cell-mowable?
+  "Return true when a cell is grass that can be cut."
+  [world: (ptr World), cell: int] -> bool
+  (let [cells (:cells world^)]
+    (== cells[cell] Cell-Grass)))
+
+(defn point-blocked?
+  "Return true when a local field-space point is outside or inside an obstacle."
+  [world: (ptr World), x: f32, y: f32] -> bool
+  (when (or (< x 0.0) (>= x (f32 Field-Px-W)) (< y 0.0) (>= y (f32 Field-Px-H)))
+    (return true))
+  (cell-blocked? world (int (/ x (f32 Cell-Size))) (int (/ y (f32 Cell-Size)))))
+
+(defn point-cell
+  "Return the world cell value at a local field-space point."
+  [world: (ptr World), x: f32, y: f32] -> int
+  (when (or (< x 0.0) (>= x (f32 Field-Px-W)) (< y 0.0) (>= y (f32 Field-Px-H)))
+    (return Cell-Outside))
+  (let [cells (:cells world^)
+        cell-x (int (/ x (f32 Cell-Size)))
+        cell-y (int (/ y (f32 Cell-Size)))
+        cell (idx cell-x cell-y)]
+    cells[cell]))
+
+(defn cell-center-x
+  "Return local field-space x for a cell center."
+  [cell: int] -> f32
+  (let [x (% cell Grid-W)]
+    (+ (* (f32 x) (f32 Cell-Size)) 5.0)))
+
+(defn cell-center-y
+  "Return local field-space y for a cell center."
+  [cell: int] -> f32
+  (let [y (/ cell Grid-W)]
+    (+ (* (f32 y) (f32 Cell-Size)) 5.0)))
+
+(defn base-x
+  "Return local field-space x for the charging base."
+  [] -> f32
+  (+ (* (f32 Base-Cell-X) (f32 Cell-Size)) 5.0))
+
+(defn base-y
+  "Return local field-space y for the charging base."
+  [] -> f32
+  (+ (* (f32 Base-Cell-Y) (f32 Cell-Size)) 5.0))
+
+(defn dock-x
+  "Return local field-space x for the robot's safe dock pose."
+  [] -> f32
+  (base-x))
+
+(defn dock-y
+  "Return local field-space y for the robot's safe dock pose."
+  [] -> f32
+  (+ (* (f32 Dock-Cell-Y) (f32 Cell-Size)) 5.0))
+
+(defn mark-cut!
+  "Mark grass cells under the mower blade as cut."
+  [world: (ptr World), x: f32, y: f32, radius: f32]
+  (let [cells (:cells world^)
+        cut (:cut world^)
+        r2 (* radius radius)
+        cell 0]
+    (while (< cell Grid-Cells)
+      (let [cx (cell-center-x cell)
+            cy (cell-center-y cell)
+            dx (- cx x)
+            dy (- cy y)
+            d2 (+ (* dx dx) (* dy dy))]
+        (when (and (<= d2 r2) (== cells[cell] Cell-Grass))
+          (set! cut[cell] true)))
+      (mut! cell += 1))))
+
+(defn blade-load-at
+  "Return simulated blade resistance from uncut grass under the blade."
+  [world: (ptr World), x: f32, y: f32, radius: f32] -> f32
+  (let [cells (:cells world^)
+        cut (:cut world^)
+        r2 (* radius radius)
+        cell 0
+        grass-count 0
+        uncut-count 0]
+    (while (< cell Grid-Cells)
+      (let [cx (cell-center-x cell)
+            cy (cell-center-y cell)
+            dx (- cx x)
+            dy (- cy y)
+            d2 (+ (* dx dx) (* dy dy))]
+        (when (and (<= d2 r2) (== cells[cell] Cell-Grass))
+          (mut! grass-count += 1)
+          (when (not cut[cell])
+            (mut! uncut-count += 1))))
+      (mut! cell += 1))
+    (when (== grass-count 0)
+      (return 0.0))
+    (/ (f32 uncut-count) (f32 grass-count))))
+
+(defn coverage-percent
+  "Return the percentage of mowable cells that have been cut."
+  [world: (ptr World)] -> f64
+  (let [cells (:cells world^)
+        cut (:cut world^)
+        i 0
+        mowable 0
+        done 0]
+    (while (< i Grid-Cells)
+      (when (== cells[i] Cell-Grass)
+        (mut! mowable += 1)
+        (when cut[i]
+          (mut! done += 1)))
+      (mut! i += 1))
+    (when (== mowable 0)
+      (return 100.0))
+    (* 100.0 (/ (f64 done) (f64 mowable)))))

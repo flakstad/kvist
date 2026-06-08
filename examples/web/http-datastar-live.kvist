@@ -1,0 +1,38 @@
+// Datastar page plus a long-lived SSE stream that stays open until disconnect.
+(package main)
+(import http "kvist:http")
+(import sse "kvist:http/sse")
+(import dstar "kvist:http/datastar")
+(import fmt "core:fmt")
+(import time "core:time")
+
+(def index-html: string "<!doctype html>\n<html lang='en'>\n<head>\n<meta charset='utf-8'>\n<meta name='viewport' content='width=device-width, initial-scale=1'>\n<title>Kvist Datastar Live</title>\n<script type='module' src='https://cdn.jsdelivr.net/gh/starfederation/datastar@main/bundles/datastar.js'></script>\n<style>body { font-family: sans-serif; margin: 2rem; max-width: 42rem; } button { padding: 0.6rem 0.9rem; } #status, #ticks { margin-top: 1rem; }</style>\n</head>\n<body>\n<h1>Kvist Datastar Live</h1>\n<p>This opens one SSE request and leaves it running until the browser disconnects.</p>\n<button id='connect' data-on:click=\"@get('/clock', {openWhenHidden: true})\">Start live stream</button>\n<div id='status'>Idle</div>\n<div>Ticks: <span data-text=\"$ticks ?? 0\">0</span></div>\n<div id='ticks'>Waiting for updates...</div>\n</body>\n</html>")
+
+(sse/on-error on-err [stream err]
+  (when (!= err nil)
+    (fmt.println "datastar client disconnected:" err)))
+
+(sse/on-timeout tick [_op stream]
+  (when (not (sse/closed? stream))
+    (let [count (sse/user-int stream)]
+      (dstar/patch-signals! stream (fmt.tprintf "{{ticks: %d}}" count))
+      (dstar/patch-elements-selector! stream "#ticks" "outer" (fmt.tprintf "<div id='ticks'>Last tick: %d</div>" count))
+      (sse/set-user-int! stream (+ count 1))
+      (sse/schedule-timeout! time.Second stream tick))))
+
+(defn main []
+  (let [router (http/new-router)
+        server (http/new-server)]
+    (defer (http/router-destroy! router))
+
+    (http/get! router "/" [req res]
+      (http/respond-html res index-html))
+
+    (http/get! router "/clock" [req res]
+      (let [stream (sse/new-stream-on-error res on-err)]
+        (dstar/patch-elements-selector! stream "#status" "outer" "<div id='status'>Connected</div>")
+        (dstar/patch-signals! stream "{ticks: 0}")
+        (tick nil stream)))
+
+    (http/server-shutdown-on-interrupt! server)
+    (http/listen-and-serve! server router 6969)))

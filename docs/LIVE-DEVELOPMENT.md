@@ -101,7 +101,7 @@ from open-coding file signatures, imported-helper watching, parsed-definition
 cleanup, and initial-load bookkeeping.
 
 Live modules pass through ordinary top-level macro expansion before
-loading, including core macros plus file-local `defmacro` forms. The runtime
+loading, including core macros plus top-level module `defmacro` forms. The runtime
 surface is still intentionally smaller after expansion than full compiled
 Kvist; the important point is that live modules no longer bypass Kvist's macro
 layer entirely.
@@ -173,7 +173,7 @@ reloads behavior modules that consume them."
 
 The first shared subset between `Kvist/AOT` and `Kvist/Live` should stay small:
 
-- `defconst`
+- `def`
 - `defvar`
 - `defn`
 - `fn`

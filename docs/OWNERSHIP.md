@@ -31,8 +31,8 @@ These forms return owned values in normal Kvist code:
 (make [dynamic]int)
 (make map[string]int)
 
-(new [dynamic]int [1 2 3])
-(new map[string]int {"one" 1 "two" 2})
+([dynamic]int [1 2 3])
+(map[string]int {"one" 1 "two" 2})
 
 (arr/map f xs)
 (arr/filter pred xs)
@@ -183,8 +183,8 @@ These are scalar values, plain values, or borrowed views:
 
 ```clojure
 (User {:name "Ada" :age 36})
-(new []int [1 2 3])
-(new [3]int [1 2 3])
+([]int [1 2 3])
+([3]int [1 2 3])
 
 (arr/first xs)
 (arr/second xs)
@@ -263,18 +263,18 @@ deletion if it is an owned dynamic array. Length-changing helpers require a
 dynamic array because they compact and resize the existing storage:
 
 ```clojure
-(let [xs (new [dynamic]int [3 1 2])]
+(let [xs ([dynamic]int [3 1 2])]
   (defer (delete xs))
   (arr/sort! xs)
   (arr/first xs))
 
-(let [xs (new [dynamic]int [1 2 3 4])]
+(let [xs ([dynamic]int [1 2 3 4])]
   (defer (delete xs))
   (arr/filter! even? xs)
   (len xs))
 
-(let [xs (new [dynamic]int [1 2])
-      more (new []int [3 4])]
+(let [xs ([dynamic]int [1 2])
+      more ([]int [3 4])]
   (defer (delete xs))
   (arr/into! xs more)
   (len xs))
@@ -375,7 +375,7 @@ levels:
 ```clojure
 (let [groups (arr/group-by :status users)]
   (defer
-    (for [_ group groups]
+    (each [_ group groups]
       (delete group))
     (delete groups))
   ...)
@@ -409,7 +409,7 @@ Return the owned result directly when ownership should pass to the caller:
 Slice views borrow from another value. This is fine locally:
 
 ```clojure
-(let [xs (new []int [1 2 3 4])
+(let [xs ([]int [1 2 3 4])
       tail (arr/drop 1 xs)]
   (arr/first tail))
 ```
@@ -419,7 +419,7 @@ But do not return a slice view into data that dies with the proc:
 ```clojure
 ;; Wrong direction: returns a view into a local literal.
 (defn bad [] -> []int
-  (let [xs (new []int [1 2 3])]
+  (let [xs ([]int [1 2 3])]
     (arr/drop 1 xs)))
 ```
 

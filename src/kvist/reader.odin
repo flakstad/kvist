@@ -80,6 +80,57 @@ scan_compact_soa_type :: proc(source: string, start: int) -> (end: int, ok: bool
     return i, true
 }
 
+scan_compact_simd_type :: proc(source: string, start: int) -> (end: int, ok: bool) {
+    prefix := "#simd["
+    body_start := start
+    if start+1 < len(source) && source[start] == '^' && source[start+1] == '#' {
+        body_start = start + 1
+    }
+    if body_start+len(prefix) > len(source) || source[body_start:body_start+len(prefix)] != prefix {
+        return start, false
+    }
+    i := body_start + len(prefix)
+    for i < len(source) && source[i] != ']' {
+        if is_whitespace(source[i]) || source[i] == '(' || source[i] == ')' || source[i] == '{' || source[i] == '}' || source[i] == ',' || source[i] == ';' {
+            return start, false
+        }
+        i += 1
+    }
+    if i >= len(source) || source[i] != ']' {
+        return start, false
+    }
+    i += 1
+    if i >= len(source) || is_symbol_boundary(source[i]) || source[i] == '[' || source[i] == ']' {
+        return start, false
+    }
+    for i < len(source) && !is_delimiter(source[i]) {
+        i += 1
+    }
+    return i, true
+}
+
+scan_compact_bit_set_type :: proc(source: string, start: int) -> (end: int, ok: bool) {
+    prefix := "bit_set["
+    if start+len(prefix) > len(source) || source[start:start+len(prefix)] != prefix {
+        return start, false
+    }
+    i := start + len(prefix)
+    for i < len(source) && source[i] != ']' {
+        if source[i] == '(' || source[i] == ')' || source[i] == '{' || source[i] == '}' {
+            return start, false
+        }
+        i += 1
+    }
+    if i >= len(source) || source[i] != ']' {
+        return start, false
+    }
+    i += 1
+    if i < len(source) && !is_delimiter(source[i]) {
+        return start, false
+    }
+    return i, true
+}
+
 scan_compact_map_type :: proc(source: string, start: int) -> (end: int, ok: bool) {
     if start+4 > len(source) || source[start:start+4] != "map[" {
         return start, false
@@ -87,6 +138,31 @@ scan_compact_map_type :: proc(source: string, start: int) -> (end: int, ok: bool
     i := start + 4
     for i < len(source) && source[i] != ']' {
         if is_whitespace(source[i]) || source[i] == '(' || source[i] == ')' || source[i] == '{' || source[i] == '}' || source[i] == ',' || source[i] == ';' {
+            return start, false
+        }
+        i += 1
+    }
+    if i >= len(source) || source[i] != ']' {
+        return start, false
+    }
+    i += 1
+    if i >= len(source) || is_symbol_boundary(source[i]) || source[i] == '[' || source[i] == ']' {
+        return start, false
+    }
+    for i < len(source) && !is_delimiter(source[i]) {
+        i += 1
+    }
+    return i, true
+}
+
+scan_compact_matrix_type :: proc(source: string, start: int) -> (end: int, ok: bool) {
+    prefix := "matrix["
+    if start+len(prefix) > len(source) || source[start:start+len(prefix)] != prefix {
+        return start, false
+    }
+    i := start + len(prefix)
+    for i < len(source) && source[i] != ']' {
+        if source[i] == '(' || source[i] == ')' || source[i] == '{' || source[i] == '}' || source[i] == ';' {
             return start, false
         }
         i += 1
@@ -120,6 +196,47 @@ scan_compact_set_type :: proc(source: string, start: int) -> (end: int, ok: bool
     }
     i += 1
     if i < len(source) && !is_delimiter(source[i]) {
+        return start, false
+    }
+    return i, true
+}
+
+scan_attached_index_symbol :: proc(source: string, start: int) -> (end: int, ok: bool) {
+    if start >= len(source) || is_delimiter(source[start]) || source[start] == ':' || source[start] == '"' {
+        return start, false
+    }
+    i := start
+    saw_index := false
+    for i < len(source) {
+        if source[i] == '/' && i+1 < len(source) && source[i+1] == '/' {
+            break
+        }
+        if source[i] == '[' {
+            saw_index = true
+            i += 1
+            depth := 1
+            for i < len(source) && depth > 0 {
+                if is_whitespace(source[i]) || source[i] == '(' || source[i] == ')' || source[i] == '{' || source[i] == '}' || source[i] == ',' || source[i] == ';' {
+                    return start, false
+                }
+                if source[i] == '[' {
+                    depth += 1
+                } else if source[i] == ']' {
+                    depth -= 1
+                }
+                i += 1
+            }
+            if depth != 0 {
+                return start, false
+            }
+            continue
+        }
+        if is_delimiter(source[i]) {
+            break
+        }
+        i += 1
+    }
+    if !saw_index {
         return start, false
     }
     return i, true
@@ -192,7 +309,21 @@ tokenize_with_origin :: proc(source: string, source_kind: Source_Kind) -> (token
             }
         }
         if ch == '#' || ch == '^' {
-            end, ok_type := scan_compact_soa_type(source, start)
+            simd_end, ok_simd_type := scan_compact_simd_type(source, start)
+            if ok_simd_type {
+                append(&tokens, make_token(.Symbol, source[start:simd_end], start, simd_end, source_kind))
+                i = simd_end
+                continue
+            }
+            soa_end, ok_soa_type := scan_compact_soa_type(source, start)
+            if ok_soa_type {
+                append(&tokens, make_token(.Symbol, source[start:soa_end], start, soa_end, source_kind))
+                i = soa_end
+                continue
+            }
+        }
+        if ch == 'b' {
+            end, ok_type := scan_compact_bit_set_type(source, start)
             if ok_type {
                 append(&tokens, make_token(.Symbol, source[start:end], start, end, source_kind))
                 i = end
@@ -200,10 +331,16 @@ tokenize_with_origin :: proc(source: string, source_kind: Source_Kind) -> (token
             }
         }
         if ch == 'm' {
-            end, ok_type := scan_compact_map_type(source, start)
-            if ok_type {
-                append(&tokens, make_token(.Symbol, source[start:end], start, end, source_kind))
-                i = end
+            matrix_end, ok_matrix_type := scan_compact_matrix_type(source, start)
+            if ok_matrix_type {
+                append(&tokens, make_token(.Symbol, source[start:matrix_end], start, matrix_end, source_kind))
+                i = matrix_end
+                continue
+            }
+            map_end, ok_map_type := scan_compact_map_type(source, start)
+            if ok_map_type {
+                append(&tokens, make_token(.Symbol, source[start:map_end], start, map_end, source_kind))
+                i = map_end
                 continue
             }
         }
@@ -214,6 +351,11 @@ tokenize_with_origin :: proc(source: string, source_kind: Source_Kind) -> (token
                 i = end
                 continue
             }
+        }
+        if end, ok_indexed := scan_attached_index_symbol(source, start); ok_indexed {
+            append(&tokens, make_token(.Symbol, source[start:end], start, end, source_kind))
+            i = end
+            continue
         }
         if end, ok_number := scan_number(source, start); ok_number {
             append(&tokens, make_token(.Number, source[start:end], start, end, source_kind))

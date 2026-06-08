@@ -8,7 +8,7 @@ history log.
 Kvist has:
 
 - package-by-directory source loading with package-private `def...-` forms
-- package-local macros with quasiquote, shipped DSL packages, and recursive
+- source-package macros with quasiquote, shipped DSL packages, and recursive
   macro expansion
 - inline array, map, and set literals
 - positional calls, named calls, mixed positional plus named-tail calls, and
@@ -44,12 +44,12 @@ semantic rather than mechanical:
 - whether `:or` defaults are worth adding, especially for params
 - whether any future map-oriented destructuring is actually better than
   explicit `get`-style access for Kvist
-- whether proc-value support or broader destructuring forms would still keep
+- whether function-value support or broader destructuring forms would still keep
   lowering obvious
 
 ### 2. Closures And Higher-Order Function Depth
 
-Non-capturing proc values are supported, and there is a narrow pass of
+Non-capturing function values are supported, and there is a narrow pass of
 captured callbacks for compiler-known non-escaping helper sites such as
 `map`, `filter`, `remove`, `keep`, and their bang variants.
 
@@ -94,8 +94,8 @@ Current rule of thumb:
 
 Current package boundary:
 
-- `kvist:str`, `kvist:set`, `kvist:map`, and `kvist:struct` are mostly real
-  package code
+- `kvist:str`, `kvist:set`, `kvist:map`, `kvist:soa`, and `kvist:cli`
+  are mostly real package code
 - `kvist:arr` exposes a broad real package facade, but part of that facade
   still expands to `kvist/arr/...` intrinsics under the hood
 - public package entries in tooling point at package files rather than

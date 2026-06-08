@@ -9,8 +9,8 @@ language/runtime implementation prematurely.
 - Keep manual ownership control available everywhere.
 - Keep `with-temp-allocator` available, but do not make it the default answer
   for ordinary code too early.
-- Add a `with-tracking-allocator` style helper for development builds so a proc
-  body can report leaks at shutdown.
+- Add a `with-tracking-allocator` style helper for development builds so a
+  function body can report leaks at shutdown.
 - Add more allocator/debug helpers in a `dev` package once the ordinary
   ownership story is settled.
 
@@ -120,8 +120,8 @@ The current call surface already includes:
 Future work here should focus on boundary decisions rather than re-arguing the
 base feature:
 
-- whether any of this should ever apply to proc-valued expressions, not just
-  statically known top-level procs
+- whether any of this should ever apply to function-valued expressions, not just
+  statically known top-level functions
 - whether destructuring and call-site named/default conventions should gain a
   shared "options object" story, or stay intentionally separate
 - whether destructuring should widen beyond the current struct-backed

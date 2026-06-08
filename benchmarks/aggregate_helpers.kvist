@@ -7,7 +7,7 @@
 (odin "ORDER_N :: 75_000
 ORDER_REPS :: 40")
 
-(struct Order {
+(defstruct Order {
   :account int
   :amount int
   :discount int
@@ -15,7 +15,7 @@ ORDER_REPS :: 40")
   :region int
 })
 
-(struct Region-Report {
+(defstruct Region-Report {
   :region int
   :revenue int
   :count int
@@ -35,10 +35,10 @@ ORDER_REPS :: 40")
     return out
 }")
 
-(proc settled? [order: Order] -> bool
+(defn settled? [order: Order] -> bool
   (== (:status order) 3))
 
-(proc settle-order [order: Order] -> Order
+(defn settle-order [order: Order] -> Order
   (let [updated order]
     (when (and (== (:status updated) 2)
                (> (:amount updated) 500))
@@ -47,7 +47,7 @@ ORDER_REPS :: 40")
       (set! (:status updated) 3))
     updated))
 
-(proc report-checksum [rows: []Region-Report] -> int
+(defn report-checksum [rows: []Region-Report] -> int
   (let [total 0]
     (each [row rows]
       (set! total (+ total (:revenue row)))
@@ -55,7 +55,7 @@ ORDER_REPS :: 40")
       (set! total (+ total (:count row))))
     total))
 
-(proc rows-from-aggregates [revenue-by-region: map[int]int, count-by-region: map[int]int] -> [dynamic]Region-Report
+(defn rows-from-aggregates [revenue-by-region: map[int]int, count-by-region: map[int]int] -> [dynamic]Region-Report
   (let [rows (make [dynamic]Region-Report)]
     (each [region revenue revenue-by-region]
       (append (& rows)
@@ -65,7 +65,7 @@ ORDER_REPS :: 40")
     (sort-by! :revenue rows)
     rows))
 
-(proc report [name: string, elapsed: time.Duration, checksum: int, track: ^mem.Tracking-Allocator]
+(defn report [name: string, elapsed: time.Duration, checksum: int, track: ^mem.Tracking-Allocator]
   (fmt.printfln "%-17s %9.3f ms allocs=%8v total=%10v peak=%9v live=%v checksum=%v"
                 name
                 (time.duration-milliseconds elapsed)
@@ -75,10 +75,10 @@ ORDER_REPS :: 40")
                 track.current-memory-allocated
                 checksum))
 
-(proc bench-report-group [orders: []Order, reps: int] -> int
+(defn bench-report-group [orders: []Order, reps: int] -> int
   (let [i 0
         checksum 0]
-    (for (< i reps)
+    (while (< i reps)
       (let [work (map settle-order orders)
             rows (make [dynamic]Region-Report)]
         (filter! settled? work)
@@ -101,10 +101,10 @@ ORDER_REPS :: 40")
       (set! i (+ i 1)))
     checksum))
 
-(proc bench-report-aggregate [orders: []Order, reps: int] -> int
+(defn bench-report-aggregate [orders: []Order, reps: int] -> int
   (let [i 0
         checksum 0]
-    (for (< i reps)
+    (while (< i reps)
       (let [work (map settle-order orders)]
         (filter! settled? work)
         (let [revenue-by-region (sum-by :region :amount work)
@@ -118,10 +118,10 @@ ORDER_REPS :: 40")
       (set! i (+ i 1)))
     checksum))
 
-(proc bench-report-loop [orders: []Order, reps: int] -> int
+(defn bench-report-loop [orders: []Order, reps: int] -> int
   (let [i 0
         checksum 0]
-    (for (< i reps)
+    (while (< i reps)
       (let [revenue-by-region (make map[int]int)
             count-by-region (make map[int]int)]
         (each [order orders]
@@ -141,10 +141,10 @@ ORDER_REPS :: 40")
       (set! i (+ i 1)))
     checksum))
 
-(proc run-one [name: string, checksum: int, start: time.Tick, track: ^mem.Tracking-Allocator]
+(defn run-one [name: string, checksum: int, start: time.Tick, track: ^mem.Tracking-Allocator]
   (report name (time.tick-since start) checksum track))
 
-(proc main []
+(defn main []
   (fmt.printfln "ORDER_N=%v ORDER_REPS=%v" ORDER_N ORDER_REPS)
   (let [old-allocator context.allocator
         track: mem.Tracking-Allocator (odin "mem.Tracking_Allocator{}")

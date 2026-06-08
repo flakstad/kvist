@@ -1,0 +1,40 @@
+// Exercises update! over dynamic arrays, maps, and defstruct fields, plus
+// non-mutating update for struct field replacement.
+(package main)
+(import core "kvist:core")
+(defstruct Point
+  {:x :int
+   :y :int})
+
+(defn inc [x: int] -> int
+  (+ x 1))
+
+(defn update-score [] -> int
+  (let [xs ([dynamic]int [1 2 3])
+        lookup (map[string]int {"a" 1 "b" 2})
+        point (Point {:x 4 :y 5})]
+    (defer (delete xs))
+    (defer (delete lookup))
+    (core/update! xs 1 42)
+    (core/update! lookup "a" + 6)
+    (core/update! point :y + 4)
+    (+ (+ (core/get xs 1) (core/get lookup "a"))
+       (:y point))))
+
+(defn updated-point-score [] -> int
+  (let [point (Point {:x 4 :y 5})
+        newer (core/update point :y inc)]
+    ;; `update` returns a modified copy, so the original point stays unchanged.
+    (+ (:y point) (:y newer))))
+
+(defn main []
+  (core/println (update-score))
+  (core/println (updated-point-score)))
+
+(core/comment
+  (update-score)
+  ;; => 58
+
+  (updated-point-score)
+  ;; => 14
+)

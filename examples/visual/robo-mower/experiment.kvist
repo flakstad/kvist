@@ -1,0 +1,206 @@
+// Headless experiment runner for comparing robo mower controllers.
+(package main)
+
+(import time "core:time")
+
+(defstruct Run-Stats
+  {:mode int
+   :run int
+   :steps int
+   :elapsed-s f64
+   :sim-seconds f32
+   :coverage f64
+   :known f64
+   :battery f32
+   :collisions int
+   :distance f32
+   :cutting-s f32
+   :return-s f32
+   :charging-s f32
+   :dock-events int
+   :docked bool})
+
+(defn parse-mode
+  "Parse a CLI mode name into the corresponding controller mode."
+  [name: string] -> int
+  (when (== name "random")
+    (return Mode-Random))
+  (when (== name "boundary")
+    (return Mode-Boundary))
+  (when (== name "frontier")
+    (return Mode-Frontier))
+  (when (== name "mapped")
+    (return Mode-Mapped))
+  (when (== name "return")
+    (return Mode-Return))
+  Mode-Mapped)
+
+(defn parse-robot-profile
+  "Parse a CLI robot sensor profile name."
+  [name: string] -> int
+  (when (== name "bumper")
+    (return Sensor-Bumper))
+  Sensor-Forward)
+
+(defn sensor-profile-name
+  "Return a short label for the robot sensor profile."
+  [profile: int] -> cstring
+  (when (== profile Sensor-Bumper)
+    (return "bumper"))
+  "forward")
+
+(defn docked?
+  "Return true when the robot is at or inside the simulated charging area."
+  [state: (ptr App-State)] -> bool
+  (or state.charging (< (dock-distance2 (addr state.robot)) (f32 1600.0))))
+
+(defn seed-run!
+  "Set a repeatable but distinct random seed for one run."
+  [state: (ptr App-State), run: int]
+  (set! state.robot.seed (+ (u32 0xC0A57) (u32 (* run 747796405)))))
+
+(defn add-benchmark-obstacle!
+  "Place a deterministic obstacle across the first mapped lane."
+  [state: (ptr App-State)]
+  (mark-rect! (addr state.world) 42 9 5 5))
+
+(defn run-experiment
+  "Run one controller mode without rendering and return summary metrics."
+  [mode: int, run: int, seconds: int, obstacle: bool, sensor-profile: int] -> Run-Stats
+  (let [state (make-app-state)
+        steps (* seconds Target-FPS)
+        cutting-steps 0
+        return-steps 0
+        charging-steps 0
+        dock-events 0
+        was-charging false
+        i 0]
+    (seed-run! (addr state) run)
+    (when obstacle
+      (add-benchmark-obstacle! (addr state)))
+    (set-mode! (addr state) mode)
+    (set! state.robot.sensor-profile sensor-profile)
+    (let [start (time.tick_now)]
+      (while (< i steps)
+        (update-simulation! (addr state) Fixed-DT)
+        (when state.robot.blade-on
+          (mut! cutting-steps += 1))
+        (when (== state.robot.mode Mode-Return)
+          (mut! return-steps += 1))
+        (when state.charging
+          (mut! charging-steps += 1))
+        (when (and state.charging (not was-charging))
+          (mut! dock-events += 1))
+        (set! was-charging state.charging)
+        (mut! i += 1))
+      (let [elapsed (time.duration_seconds (time.tick_since start))
+            stats (Run-Stats {:mode mode
+                              :run run
+                              :steps steps
+                              :elapsed-s elapsed
+                              :sim-seconds (f32 seconds)
+                              :coverage (coverage-percent (addr state.world))
+                              :known (belief-known-percent (addr state.belief))
+                              :battery state.battery
+                              :collisions state.robot.collisions
+                              :distance state.robot.distance
+                              :cutting-s (* (f32 cutting-steps) Fixed-DT)
+                              :return-s (* (f32 return-steps) Fixed-DT)
+                              :charging-s (* (f32 charging-steps) Fixed-DT)
+                              :dock-events dock-events
+                              :docked (docked? (addr state))})]
+        (delete-app-state! (addr state))
+        stats))))
+
+(defn print-stats-row
+  "Print one machine-readable experiment row."
+  [kind: cstring, stats: Run-Stats]
+  (fmt.printf
+    "kind=%s mode=%s run=%d sim_s=%.1f elapsed_s=%.6f update_us=%.3f truth=%.2f known=%.2f battery=%.1f collisions=%d distance=%.1f cutting_s=%.1f return_s=%.1f charging_s=%.1f dock_events=%d docked=%s\n"
+    kind
+    (mode-name stats.mode)
+    stats.run
+    stats.sim-seconds
+    stats.elapsed-s
+    (* (/ stats.elapsed-s (f64 stats.steps)) 1000000.0)
+    stats.coverage
+    stats.known
+    stats.battery
+    stats.collisions
+    stats.distance
+    stats.cutting-s
+    stats.return-s
+    stats.charging-s
+    stats.dock-events
+    (on-off stats.docked)))
+
+(defn run-mode-experiments
+  "Run a controller mode repeatedly and print per-run plus average metrics."
+  [mode: int, runs: int, seconds: int, obstacle: bool, sensor-profile: int]
+  (let [run 1
+        total-elapsed (f64 0.0)
+        total-coverage (f64 0.0)
+        total-known (f64 0.0)
+        total-battery (f64 0.0)
+        total-collisions (f64 0.0)
+        total-distance (f64 0.0)
+        total-cutting (f64 0.0)
+        total-return (f64 0.0)
+        total-charging (f64 0.0)
+        total-dock-events 0
+        total-docked 0]
+    (while (<= run runs)
+      (let [stats (run-experiment mode run seconds obstacle sensor-profile)]
+        (print-stats-row "run" stats)
+        (mut! total-elapsed += stats.elapsed-s)
+        (mut! total-coverage += stats.coverage)
+        (mut! total-known += stats.known)
+        (mut! total-battery += (f64 stats.battery))
+        (mut! total-collisions += (f64 stats.collisions))
+        (mut! total-distance += (f64 stats.distance))
+        (mut! total-cutting += (f64 stats.cutting-s))
+        (mut! total-return += (f64 stats.return-s))
+        (mut! total-charging += (f64 stats.charging-s))
+        (mut! total-dock-events += stats.dock-events)
+        (when stats.docked
+          (mut! total-docked += 1)))
+      (mut! run += 1))
+    (let [n (f64 runs)
+          avg (Run-Stats {:mode mode
+                          :run 0
+                          :steps (* seconds Target-FPS)
+                          :elapsed-s (/ total-elapsed n)
+                          :sim-seconds (f32 seconds)
+                          :coverage (/ total-coverage n)
+                          :known (/ total-known n)
+                          :battery (f32 (/ total-battery n))
+                          :collisions (int (/ total-collisions n))
+                          :distance (f32 (/ total-distance n))
+                          :cutting-s (f32 (/ total-cutting n))
+                          :return-s (f32 (/ total-return n))
+                          :charging-s (f32 (/ total-charging n))
+                          :dock-events (/ total-dock-events runs)
+                          :docked (== total-docked runs)})]
+      (print-stats-row "avg" avg))))
+
+(defn run-all-experiments
+  "Run the standard mode comparison set."
+  [runs: int, seconds: int, obstacle: bool, sensor-profile: int]
+  (run-mode-experiments Mode-Random runs seconds obstacle sensor-profile)
+  (run-mode-experiments Mode-Boundary runs seconds obstacle sensor-profile)
+  (run-mode-experiments Mode-Frontier runs seconds obstacle sensor-profile)
+  (run-mode-experiments Mode-Mapped runs seconds obstacle sensor-profile))
+
+(defn run-headless
+  "Run CLI-selected headless robo mower experiments."
+  [args: []string]
+  (let [mode-name-raw (cli/option args "--mode" "all")
+        robot-name-raw (cli/option args "--robot" "forward")
+        seconds (cli/int-option args "--seconds" 180)
+        runs (cli/int-option args "--runs" 3)
+        obstacle (cli/flag args "--obstacle")
+        sensor-profile (parse-robot-profile robot-name-raw)]
+    (fmt.printf "system=kvist-odin demo=robo-mower robot=%s seconds=%d runs=%d obstacle=%s dt=%.6f\n" (sensor-profile-name sensor-profile) seconds runs (on-off obstacle) Fixed-DT)
+    (if (== mode-name-raw "all")
+      (run-all-experiments runs seconds obstacle sensor-profile)
+      (run-mode-experiments (parse-mode mode-name-raw) runs seconds obstacle sensor-profile))))

@@ -29,7 +29,7 @@ trap cleanup EXIT INT TERM
 printf 'building current compiler\n'
 odin build "$ROOT/cmd/kvist" -out:"$compiler"
 printf 'building optimized kvist stress server\n'
-"$compiler" compile "$ROOT/examples/http-stress-server.kvist" -o "$kvist_generated"
+"$compiler" compile "$ROOT/examples/web/http-stress-server.kvist" -o "$kvist_generated"
 odin build "$kvist_generated" -file $ODIN_BENCH_FLAGS -out:"$kvist_bin"
 
 wait_for_server() {

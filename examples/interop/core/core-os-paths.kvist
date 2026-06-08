@@ -1,0 +1,76 @@
+// Host interop with core:os path and file helpers.
+//
+// This example keeps the Odin API visible. Kvist is only changing call syntax:
+// paths are cleaned by core:os, file bytes are owned slices from core:os, and
+// callers still delete those slices when they are done.
+(package main)
+(import os "core:os")
+
+(defn clean-base-length [] -> int
+  (let [[clean err] (os.clean_path "./tmp/../examples/language/hello.kvist" context.allocator)]
+    (if (!= err nil)
+      0
+      (do
+        (defer (delete clean))
+        (len (os.base clean))))))
+
+(defn cwd-base-length [] -> int
+  (let [[cwd err] (os.get_working_directory context.allocator)]
+    (if (!= err nil)
+      0
+      (do
+        (defer (delete cwd))
+        (len (os.base cwd))))))
+
+(defn ensure-demo-dir [] -> os.Error
+  ;; write_entire_file does not create parent directories. Treat an existing
+  ;; tmp directory as success and surface any real filesystem error.
+  (let [err (os.make_directory_all "tmp")]
+    (if (and (!= err nil)
+             (not (os.is_directory "tmp")))
+      err
+      nil)))
+
+(defn write-demo-file [path: string] -> os.Error
+  (let [dir-err (ensure-demo-dir)]
+    (if (!= dir-err nil)
+      dir-err
+      (os.write_entire_file path "hello from core:os"))))
+
+(defn read-demo-length [path: string] -> int
+  ;; core/core/core/if-ok is for Odin APIs whose second return value is an error. It checks
+  ;; for the zero error value and keeps the owned data cleanup local.
+  (core/if-ok [data err (os.read_entire_file path context.allocator)]
+    (do
+      (defer (delete data))
+      (len data))
+    0))
+
+(defn remove-demo-file [path: string] -> os.Error
+  (os.remove path))
+
+(defn main []
+  (core/println (clean-base-length) (cwd-base-length)))
+
+(core/comment
+  ;; clean_path allocates a cleaned path string because we pass an allocator.
+  ;; The proc deletes it before returning, so callers only get a scalar length.
+  (clean-base-length)
+  ;; => 11
+
+  ;; get_working_directory also allocates. This is the common pattern for Odin
+  ;; APIs that return owned data: handle the error, defer delete, then use it.
+  (cwd-base-length)
+  ;; => length of the current checkout directory name
+
+  ;; The file helpers write under ./tmp relative to this source file during
+  ;; kvist eval. Creating the directory is part of the example on purpose.
+  (write-demo-file "tmp/kvist-core-os.txt")
+  ;; => nil
+
+  (read-demo-length "tmp/kvist-core-os.txt")
+  ;; => 18
+
+  (remove-demo-file "tmp/kvist-core-os.txt")
+  ;; => nil
+)

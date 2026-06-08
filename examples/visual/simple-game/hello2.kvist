@@ -1,0 +1,156 @@
+(import fmt "core:fmt")
+(import rl "vendor:raylib")
+
+(defenum Animation-Name
+  [Idle Run])
+
+(defstruct Animation
+  {:texture rl.Texture2D
+   :num-frames int
+   :frame-timer f32
+   :current-frame int
+   :frame-length f32
+   :name Animation-Name})
+
+(defn update-animation [a: ^Animation]
+  (mut! a.frame-timer += (rl.GetFrameTime))
+  (while (> a.frame-timer a.frame-length)
+    (mut! a.current-frame += 1)
+    (mut! a.frame-timer -= a.frame-length)
+    (if (== a.current-frame a.num-frames)
+      (set! a.current-frame 0))))
+
+(defn draw-animation
+  [{:keys [current-frame num-frames texture] :as a}: Animation
+   {:keys [x y] :as pos}: rl.Vector2
+   flip: bool]
+  (let [width (f32 (-> texture :width))
+        height (f32 (-> texture :height))
+        source (rl.Rectangle {:x (/
+                                  (* (f32 current-frame) width)
+                                  (f32 num-frames))
+                              :y 0
+                              :width (/ width (f32 num-frames))
+                              :height height})
+        dest (rl.Rectangle {:x x
+                            :y y
+                            :width (/ width (f32 num-frames))
+                            :height height})]
+    (when flip (set! source.width (- source.width)))
+    (rl.DrawTexturePro
+      texture
+      source
+      dest
+      [(/ (:width dest) 2) (:height dest)]
+      0
+      rl.WHITE)))
+
+(def PixelWindowHeight 180)
+(def Gravity 1000)
+(def RunSpeed 100)
+(def JumpSpeed -300)
+(def PlatformWidth 96)
+(def PlatformHeight 16)
+
+(defstruct Level {:platforms [dynamic]rl.Vector2})
+
+(defn platform-collider [pos: rl.Vector2] -> rl.Rectangle
+  (rl.Rectangle [(:x pos) (:y pos) PlatformWidth PlatformHeight]))
+
+(comment
+  (platform-collider (as rl.Vector2 [10 20]))
+  )
+
+(defn main []
+  (rl.SetConfigFlags [.WINDOW_RESIZABLE])
+  (rl.InitWindow 1920 1080 "My First Game")
+  (rl.SetTargetFPS 500)
+
+  (let [player-pos (rl.Vector2 [0 0])
+        player-vel (rl.Vector2 [0 0])
+        player-grounded? false
+        player-flip? false
+        player-run (Animation {:texture (rl.LoadTexture "eva.png")
+                               :num-frames 3
+                               :frame-length 0.1
+                               :name .Run})
+        player-idle (Animation {:texture (rl.LoadTexture "eva.png")
+                                :num-frames 3
+                                :frame-length 0.5
+                                :name .Idle})
+        current-anim player-idle
+        level (Level {:platforms [(rl.Vector2 [-20 20])]})
+        platform-texture (rl.LoadTexture "platform.png")]
+
+    ;; load level from disk?
+
+    (while (not (rl.WindowShouldClose))
+      (defvar dt (rl.GetFrameTime))
+      (rl.BeginDrawing)
+      (rl.ClearBackground [110 184 168 255])
+
+      ;; Setting gravity on the player
+
+      (mut! player-vel.y += (* dt Gravity))
+
+      ;; Handling keyboard input
+      (cond
+        (rl.IsKeyDown .LEFT)
+        (do
+          (set! player-vel.x (* RunSpeed -1))
+          (set! player-flip? true)
+          (when (not (== (:name current-anim) .Run))
+            (set! current-anim player-run)))
+
+        (rl.IsKeyDown .RIGHT)
+        (do
+          (set! player-vel.x RunSpeed)
+          (set! player-flip? false)
+          (when (not (== (:name current-anim) .Run))
+            (set! current-anim player-run)))
+
+        :else
+        (do
+          (set! player-vel.x 0)
+          (when (not (== (:name current-anim) .Idle))
+            (set! current-anim player-idle))))
+
+      (when (and (rl.IsKeyPressed .SPACE) player-grounded?)
+        (set! player-vel.y JumpSpeed))
+
+      ;; Update player position
+
+      (mut! player-pos += (* player-vel dt))
+      (set! player-grounded? false)
+
+      (defvar player-feet-collider (rl.Rectangle [(- (:x player-pos) 4) (- (:y player-pos) 4) 8 4]))
+      (each [platform level.platforms]
+        (when (and (rl.CheckCollisionRecs player-feet-collider (platform-collider platform))
+                   (> (:y player-vel) 0))
+          (set! player-vel.y 0)
+          (set! player-pos.y (:y platform))
+          (set! player-grounded? true)))
+
+      (update-animation &current-anim)
+
+      (defvar screen-height (f32 (rl.GetScreenHeight)))
+      (defvar camera (rl.Camera2D {:zoom (/ screen-height PixelWindowHeight)
+                                :offset [(f32 (/ (rl.GetScreenWidth) 2))
+                                         (f32 (/ screen-height 2))]
+                                :target player-pos}))
+
+      (rl.BeginMode2D camera)
+      (draw-animation current-anim player-pos player-flip?)
+
+      (each [platform level.platforms]
+        (rl.DrawTextureV platform-texture platform rl.WHITE))
+
+      (rl.DrawRectangleRec player-feet-collider [0 255 0 100])
+      #_(rl.DrawFPS 100 100)
+      #_(rl.DrawText (fmt.ctprintf "%v" player-flip?) 300 300 20 rl.DARKGRAY)
+
+      (rl.EndMode2D)
+
+      (rl.EndDrawing))
+
+    (rl.CloseWindow)))

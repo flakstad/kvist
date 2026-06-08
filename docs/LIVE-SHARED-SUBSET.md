@@ -25,7 +25,7 @@ a strong reason not to.
 The live loader currently accepts these ordinary top-level forms:
 
 - `import` in path-loaded live modules
-- `defconst`
+- `def`
 - `defvar`
 - `defn`
 
@@ -37,11 +37,11 @@ Current constraints:
   `(import "path")`
 - imported live helper files are merged into the root live module rather than
   loaded as separate runtime modules
-- imported helper files currently support ordinary `defconst`, `defvar`, and
+- imported helper files currently support ordinary `def`, `defvar`, and
   `defn`
 - imported helper files may not define `live/module`, `live/command`,
   `live/hook`, `init`, `shutdown`, or `migrate`
-- top-level `defconst` / `defvar` values must still be simple literals
+- top-level `def` / `defvar` values must still be simple literals
 - top-level `defn` is used for live helper functions and same-named entrypoint
   implementations
 - zero-arg top-level `defn init`, `defn migrate`, and `defn shutdown` are
@@ -81,7 +81,7 @@ The live evaluator currently supports:
   - keyword
 - symbols:
   - local bindings
-  - module bindings from top-level `defconst` / `defvar`
+  - module bindings from top-level `def` / `defvar`
 - control flow:
   - `do`
   - `if`
@@ -134,8 +134,8 @@ These are not part of the current shared subset yet:
 - multi-arity functions
 - higher-order function values
 
-Top-level macro expansion is available before live loading, including file-
-local `defmacro` forms and shipped source-package macros such as `kvist:live`.
+Top-level macro expansion is available before live loading, including module
+`defmacro` forms and shipped source-package macros such as `kvist:live`.
 What is still out of scope is arbitrary macro-expanded behavior that lowers
 outside the evaluator's supported runtime subset.
 

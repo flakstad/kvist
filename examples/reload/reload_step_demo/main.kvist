@@ -1,0 +1,46 @@
+(package reload_step_demo)
+
+(import time "core:time")
+(import reload "kvist:reload")
+
+(defstruct Program_State
+  {:jobs-finished int
+   :last-status string})
+
+(defstate App_State
+  {:program Program_State
+   :step-count int
+   :reload-count int
+   :unload-count int}
+  {:run run
+   :init init
+   :on-load on-load
+   :on-unload on-unload
+   :version "v1"})
+
+(defconst delay time.Duration (* 1 time.Second))
+
+(defn init [state: ^App_State]
+  (init-program &state^.program))
+
+(defn on-load [state: ^App_State is-reload: bool]
+  (when is-reload
+    (mut! state^.reload-count += 1)))
+
+(defn on-unload [state: ^App_State]
+  (mut! state^.unload-count += 1))
+
+(defn step [state: ^App_State]
+  (mut! state^.step-count += 1)
+  (run-one-step &state^.program)
+  (print-status state^.step-count
+                state^.reload-count
+                state^.unload-count
+                &state^.program))
+
+(defn run [state: ^App_State host: ^reload/Run_Host]
+  (for true
+    (step state)
+    (time.sleep delay)
+    (when (reload/checkpoint! host)
+      (return))))

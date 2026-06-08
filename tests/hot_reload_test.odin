@@ -4,7 +4,7 @@ import "core:dynlib"
 import "core:os"
 import "core:testing"
 import kvist_hot "../src/kvist_hot"
-import kvist_hot_app_runtime "../src/kvist_hot_app_runtime"
+import olive_reload "../src/olive_reload"
 
 hot_test_on_load_calls: int
 hot_test_on_unload_calls: int
@@ -185,11 +185,10 @@ hot_reload_unload_current_module_runs_on_unload :: proc(t: ^testing.T) {
 
 @(test)
 reload_run_host_checkpoint_without_reloader_returns_false :: proc(t: ^testing.T) {
-    host := kvist_hot_app_runtime.run_host_init(nil)
+    host := olive_reload.Run_Host{}
 
-    should_stop := kvist_hot_app_runtime.checkpoint(&host)
+    should_stop := olive_reload.checkpoint(&host)
 
     testing.expect_value(t, should_stop, false)
-    testing.expect_value(t, host.reload_requested, false)
     testing.expect_value(t, host.checkpoint_error, "")
 }

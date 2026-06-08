@@ -90,7 +90,7 @@ http__handler_next :: proc(handler: ^h.Handler) -> ^h.Handler {
         res-param (symbol (str (name res) ":"))]
     (quasiquote
       (h.handler
-        (proc [(unquote req-param) ^h.Request (unquote res-param) ^h.Response]
+        (fn [(unquote req-param) ^h.Request (unquote res-param) ^h.Response]
           (do
             (splice body)))))))
 
@@ -120,7 +120,7 @@ http__handler_next :: proc(handler: ^h.Handler) -> ^h.Handler {
     (quasiquote
       (h.middleware_proc
         (addr (unquote next))
-        (proc [(unquote self-param) ^h.Handler (unquote req-param) ^h.Request (unquote res-param) ^h.Response]
+        (fn [(unquote self-param) ^h.Handler (unquote req-param) ^h.Request (unquote res-param) ^h.Response]
           (let [(unquote next-binding) (http__handler_next (unquote self))]
             (do
               (splice body))))))))

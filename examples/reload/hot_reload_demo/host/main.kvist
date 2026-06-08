@@ -1,0 +1,65 @@
+(package hot_reload_demo_host)
+
+(import fmt "core:fmt")
+(import time "core:time")
+(import kvist_hot :odin "../../../../src/kvist_hot")
+(import support :odin "../../../../src/kvist_hot_demo_support")
+(import shared :odin "../shared")
+
+(defn library-path [] -> string
+  (kvist_hot.library_filename "build/hot_reload_demo/hot_demo"))
+
+(defn print-current-state [symbols: (ptr support.Hot_Demo_Symbols) state: (ptr shared.State)]
+  (fmt.printf "[tick] module=%s tick=%d reloads=%d unloads=%d message=%s\n"
+              (support.Call_Symbol_Message symbols)
+              (:tick_count state^)
+              (:reload_count state^)
+              (:unload_count state^)
+              (:last_message state^)))
+
+(defn print-after-reload [state: (ptr shared.State)]
+  (fmt.printf "[host] after reload: ticks=%d reloads=%d unloads=%d message=%s\n"
+              (:tick_count state^)
+              (:reload_count state^)
+              (:unload_count state^)
+              (:last_message state^)))
+
+(defn main []
+  (let [path (library-path) defer
+        state (shared.State {})
+        symbols: support.Hot_Demo_Symbols {}
+        [reloader reloader-err reloader-ok] (kvist_hot.new_reloader path)]
+    (if (not reloader-ok)
+      (do
+        (fmt.println reloader-err)
+        (delete reloader-err)
+        (fmt.println "build it first with:")
+        (fmt.printf "  ./kvist examples/reload/hot_reload_demo/shared/shared.kvist -o build/generated/hot_reload_demo/shared/shared.odin\n")
+        (fmt.printf "  ./kvist examples/reload/hot_reload_demo/module/main.kvist -o build/generated/hot_reload_demo/module/main.odin\n")
+        (fmt.printf "  ./kvist examples/reload/hot_reload_demo/host/main.kvist -o build/generated/hot_reload_demo/host/main.odin\n")
+        (fmt.printf "  odin build build/generated/hot_reload_demo/module -build-mode:dll -out:%s\n" path)
+        (fmt.printf "  odin run build/generated/hot_reload_demo/host\n"))
+      (let [[initial-err initial-ok] (kvist_hot.load_initial_module (addr reloader) (addr symbols) (addr state))]
+        (if (not initial-ok)
+          (do
+            (fmt.println "[host] initial load failed:" initial-err)
+            (delete initial-err))
+          (do
+            (fmt.printf "[host] loaded generation %d from %s\n" (:generation reloader) path)
+            (fmt.println "[host] running. rebuild the module shared library to reload in place.")
+            (fmt.println "[host] state lives in the host and survives reload.")
+            (while true
+              (support.Call_Symbol_Tick (addr symbols) (addr state))
+              (print-current-state (addr symbols) (addr state))
+              (time.sleep (* 1 time.Second))
+              (let [[changed reload-err reload-ok]
+                    (kvist_hot.reload_module_if_source_changed (addr reloader)
+                                                               (addr symbols)
+                                                               (addr state))]
+                (if (not reload-ok)
+                  (do
+                    (fmt.println "[host] reload failed:" reload-err)
+                    (delete reload-err))
+                  (core/when changed
+                    (fmt.printf "[host] loaded generation %d from %s\n" (:generation reloader) path)
+                    (print-after-reload (addr state))))))))))))
