@@ -38,9 +38,9 @@
                 state^.unload-count
                 &state^.program))
 
-(defn run [state: ^App_State host: ^reload/Run_Host]
+(defn run [state: ^App_State host: ^reload.Run_Host]
   (for true
     (step state)
     (time.sleep delay)
-    (when (reload/checkpoint! host)
+    (when (reload.checkpoint! host)
       (return))))

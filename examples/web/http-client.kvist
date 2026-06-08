@@ -1,8 +1,8 @@
 // Thin Kvist client surface over vendored odin-http.
 //
-// This keeps the public API small and close to the upstream request/response
+// This keeps the public API small and close to the upstream request.response
 // model. It is suitable for file-backed tooling, HTTP APIs, and tests. The
-// first pass intentionally leaves session/auth middleware out of scope.
+// first pass intentionally leaves session.auth middleware out of scope.
 (package main)
 (import httpc "kvist:http/client")
 
@@ -11,25 +11,25 @@
 })
 
 (defn fetch-ping [] -> bool
-  (let [[res err] (httpc/get "http://127.0.0.1:6969/ping")]
+  (let [[res err] (httpc.get "http://127.0.0.1:6969/ping")]
     (if (== err nil)
       (do
-        (defer (httpc/response-destroy res))
+        (defer (httpc.response-destroy res))
         (== (:status res) .OK))
       false)))
 
 (defn post-greeting [] -> bool
-  (let [req (httpc/new-request .Post)]
-    (defer (httpc/request-destroy req))
-    (httpc/set-header! req "x-api-key" "demo")
-    (httpc/add-cookie! req "session" "abc123")
-    (let [json-err (httpc/with-json req (Greeting {:message "hello"}))]
+  (let [req (httpc.new-request .Post)]
+    (defer (httpc.request-destroy req))
+    (httpc.set-header! req "x-api-key" "demo")
+    (httpc.add-cookie! req "session" "abc123")
+    (let [json-err (httpc.with-json req (Greeting {:message "hello"}))]
       (if (!= json-err nil)
         false
-        (let [[res err] (httpc/request req "http://127.0.0.1:6969/hello")]
+        (let [[res err] (httpc.request req "http://127.0.0.1:6969/hello")]
           (if (== err nil)
             (do
-              (defer (httpc/response-destroy res))
+              (defer (httpc.response-destroy res))
               (== (:status res) .OK))
             false))))))
 

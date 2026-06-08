@@ -100,7 +100,7 @@ host path is the state-owning one above so `kvist_hot` itself sequences
 On the module side, there is a shipped Kvist helper package:
 
 - `(import hot "kvist:hot")`
-- `(hot/defmodule ...)`
+- `(hot.defmodule ...)`
 
 That macro expands the standard `kvist_hot` manifest and exported entrypoints
 for a host-owned state type, so reloadable modules stop hand-writing the same
@@ -144,7 +144,7 @@ Today the generated host has one user callback:
 
 - `:run` names the reloadable app entrypoint
 - `run` receives the durable state root and a reload host handle
-- the app calls `reload/checkpoint!` at one explicit safe boundary
+- the app calls `reload.checkpoint!` at one explicit safe boundary
 
 Good fits:
 
@@ -166,7 +166,7 @@ and `kvist dev --reload ... --rebuild` still performs one manual rebuild. In
 ordinary execution, `kvist check|build|run ...` can point at the normal
 production entrypoint instead of the reload adapter.
 
-In that ordinary execution context, `reload/checkpoint!` becomes a no-op when
+In that ordinary execution context, `reload.checkpoint!` becomes a no-op when
 there is no resident reloader.
 
 For tiny sources that directly declare the reload-app contract through inline
@@ -187,7 +187,7 @@ migration/reset policy.
 
 ## Checkpoint Guidance
 
-`reload/checkpoint!` is the single explicit cooperation point for reload apps.
+`reload.checkpoint!` is the single explicit cooperation point for reload apps.
 
 Treat it as:
 
@@ -222,19 +222,19 @@ Bad checkpoint boundaries:
 Practical examples:
 
 ```clojure
-(defn run [state: (ptr App_State) host: (ptr reload/Run_Host)]
+(defn run [state: (ptr App_State) host: (ptr reload.Run_Host)]
   (while true
     (handle-one-request state)
-    (core/when (reload/checkpoint! host)
+    (core.when (reload.checkpoint! host)
       (return))))
 ```
 
 ```clojure
-(defn run [state: (ptr App_State) host: (ptr reload/Run_Host)]
+(defn run [state: (ptr App_State) host: (ptr reload.Run_Host)]
   (while true
     (pump-events state)
     (dispatch-ready-work state)
-    (core/when (reload/checkpoint! host)
+    (core.when (reload.checkpoint! host)
       (return))))
 ```
 
@@ -375,7 +375,7 @@ For native hot reload, the state model should be:
 
 ### 1. Host-owned durable state
 
-- long-lived app/game/tool state
+- long-lived app.game/tool state
 - survives code reload
 - allocated and freed by the host
 
@@ -432,7 +432,7 @@ It shows:
 - the reusable `kvist_hot.Reloader` workflow in host code
 - the shipped `kvist:hot` macro package on the module side
 - `.kvist` demo sources compiled to Odin as part of the loop
-- pure-Kvist native module contracts via `(hot/defmodule ...)`
+- pure-Kvist native module contracts via `(hot.defmodule ...)`
 - a clean place for later `Kvist/Live` embedding on top
 
 The lowest-ceremony native reload path starts with

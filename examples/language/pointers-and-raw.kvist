@@ -7,7 +7,7 @@
 })
 
 (defn bump! [x: ^int]
-  ;; For a simple pointer symbol, `x^` is the lightest read/write form.
+  ;; For a simple pointer symbol, `x^` is the lightest read.write form.
   (set! x^ (+ x^ 1)))
 
 (defn counter-value [counter: ^Counter] -> int
@@ -21,9 +21,9 @@
     (counter-value (addr counter))))
 
 (defn main []
-  (core/println (counter-after-bump)))
+  (core.println (counter-after-bump)))
 
-(core/comment
+(core.comment
   ;; Prefer `^T`, `addr`, and `x^` in ordinary Kvist code. Keep `(deref ...)`
   ;; for more complex pointer expressions.
   (counter-after-bump)

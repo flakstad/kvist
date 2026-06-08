@@ -15,15 +15,15 @@
 
 (defn struct-defaults-demo [] -> bool
   (let [profile (Profile {:name "Ada"})]
-    (core/println profile)
-    (core/println (:age profile))
-    (core/println (:active? profile))
-    (core/println (:tags profile))
-    (core/println (:home profile))
+    (core.println profile)
+    (core.println (:age profile))
+    (core.println (:active? profile))
+    (core.println (:tags profile))
+    (core.println (:home profile))
     true))
 
 (defn main []
-  (core/println (struct-defaults-demo)))
+  (core.println (struct-defaults-demo)))
 
-(core/comment
+(core.comment
   (struct-defaults-demo))

@@ -194,11 +194,11 @@
 (defn run-headless
   "Run CLI-selected headless robo mower experiments."
   [args: []string]
-  (let [mode-name-raw (cli/option args "--mode" "all")
-        robot-name-raw (cli/option args "--robot" "forward")
-        seconds (cli/int-option args "--seconds" 180)
-        runs (cli/int-option args "--runs" 3)
-        obstacle (cli/flag args "--obstacle")
+  (let [mode-name-raw (cli.option args "--mode" "all")
+        robot-name-raw (cli.option args "--robot" "forward")
+        seconds (cli.int-option args "--seconds" 180)
+        runs (cli.int-option args "--runs" 3)
+        obstacle (cli.flag args "--obstacle")
         sensor-profile (parse-robot-profile robot-name-raw)]
     (fmt.printf "system=kvist-odin demo=robo-mower robot=%s seconds=%d runs=%d obstacle=%s dt=%.6f\n" (sensor-profile-name sensor-profile) seconds runs (on-off obstacle) Fixed-DT)
     (if (== mode-name-raw "all")

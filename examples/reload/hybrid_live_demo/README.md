@@ -14,7 +14,7 @@ standalone hot-reload demo:
 
 - `(import alias :odin "path")` for Odin implementation packages
 - `(import hot "kvist:hot")` for the shipped native module-contract macro
-- `(hot/defmodule ...)` to emit the standard `kvist_hot` entrypoints
+- `(hot.defmodule ...)` to emit the standard `kvist_hot` entrypoints
 
 On the live side, the example now uses the matching shipped live package:
 

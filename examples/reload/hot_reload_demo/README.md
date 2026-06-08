@@ -25,7 +25,7 @@ contract:
 
 - `(import alias :odin "path")` for existing Odin implementation packages
 - `(import hot "kvist:hot")`
-- `(hot/defmodule ...)`
+- `(hot.defmodule ...)`
 
 Under that surface, the generated module still uses `(export)` and `:abi "c"`
 for the actual C-ABI entrypoints.
@@ -61,7 +61,7 @@ The host prints a tick every second.
 While the host is still running:
 
 1. Edit [module/main.kvist](./module/main.kvist).
-2. Change the `hot-demo-version` string passed through `hot/defmodule`.
+2. Change the `hot-demo-version` string passed through `hot.defmodule`.
 3. Rebuild only the shared library:
 
 ```sh

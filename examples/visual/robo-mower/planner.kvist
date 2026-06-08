@@ -58,9 +58,9 @@
 (defn advance-mapped-lane!
   "Advance the pre-programmed mapped sweep lane with wraparound."
   [robot: (ptr Robot)]
-  (mut! (:lane-index robot^) += 1)
-  (when (>= (:lane-index robot^) (mapped-lane-count))
-    (set! (:lane-index robot^) 0)))
+  (mut! robot^.lane-index += 1)
+  (when (>= robot^.lane-index (mapped-lane-count))
+    (set! robot^.lane-index 0)))
 
 (defn mapped-next-lane
   "Return the next mapped sweep lane with wraparound."
@@ -73,18 +73,18 @@
 (defn mapped-current-edge-x
   "Return the edge where the current lane sweep ends."
   [robot: (ptr Robot)] -> f32
-  (mapped-lane-target-x (:lane-index robot^)))
+  (mapped-lane-target-x robot^.lane-index))
 
 (defn begin-mapped-shift!
   "Begin a vertical lane shift at the given x position."
   [robot: (ptr Robot), x: f32]
-  (set! (:lane-phase robot^) Mapped-Phase-Shift)
-  (set! (:lane-shift-x robot^) x))
+  (set! robot^.lane-phase Mapped-Phase-Shift)
+  (set! robot^.lane-shift-x x))
 
 (defn mapped-shift-target-y
   "Return the y coordinate for the vertical shift to the next lane."
   [robot: (ptr Robot)] -> f32
-  (mapped-lane-y (mapped-next-lane (:lane-index robot^))))
+  (mapped-lane-y (mapped-next-lane robot^.lane-index)))
 
 (defn random-bounce-command
   "Drive straight until collision response chooses a new random heading."
@@ -94,11 +94,11 @@
 (defn frontier-target-command
   "Drive toward the nearest unknown cell in the robot's belief map."
   [belief: (ptr Robot-Belief), robot: (ptr Robot)] -> Command
-  (let [cells (:cells belief^)
+  (let [cells belief^.cells
         i 0
         best-score (f32 999999999.0)
-        best-x (:x robot^)
-        best-y (:y robot^)
+        best-x robot^.x
+        best-y robot^.y
         found false]
     (while (< i Grid-Cells)
       (when (== cells[i] Belief-Unknown)
@@ -108,12 +108,12 @@
                      (<= cx (mapped-max-x))
                      (>= cy (mapped-min-y))
                      (<= cy (mapped-max-y)))
-            (let [dx (- cx (:x robot^))
-                  dy (- cy (:y robot^))
+            (let [dx (- cx robot^.x)
+                  dy (- cy robot^.y)
                   d2 (+ (* dx dx) (* dy dy))]
               (when (> d2 Frontier-Min-Target-D2)
                 (let [target-angle (math.atan2 dy dx)
-                      error (abs-f32 (normalize-angle (- target-angle (:heading robot^))))
+                      error (abs-f32 (normalize-angle (- target-angle robot^.heading)))
                       score (+ d2 (* error (f32 6500.0)))]
                   (when (and (< score best-score)
                              (not (belief-obstacle-near? belief cx cy Frontier-Obstacle-Clearance)))
@@ -123,10 +123,10 @@
                     (set! found true))))))))
       (mut! i += 1))
     (when found
-      (let [dx (- best-x (:x robot^))
-            dy (- best-y (:y robot^))
+      (let [dx (- best-x robot^.x)
+            dy (- best-y robot^.y)
             target-angle (math.atan2 dy dx)
-            error (normalize-angle (- target-angle (:heading robot^)))
+            error (normalize-angle (- target-angle robot^.heading))
             abs-error (abs-f32 error)
             speed Frontier-Search-Speed
             turn (math.clamp (* error (f32 2.2)) (f32 -1.9) (f32 1.9))]
@@ -140,15 +140,15 @@
 (defn frontier-command
   "Belief-frontier behavior using blade load and nearest unknown grass."
   [belief: (ptr Robot-Belief), robot: (ptr Robot), sensors: (ptr Sensors)] -> Command
-  (when (and (== (:sensor-profile robot^) Sensor-Forward)
-             (== (:front-kind sensors^) Cell-Obstacle)
-             (< (:front sensors^) (f32 86.0)))
-    (if (> (:left sensors^) (:right sensors^))
+  (when (and (== robot^.sensor-profile Sensor-Forward)
+             (== sensors^.front-kind Cell-Obstacle)
+             (< sensors^.front (f32 86.0)))
+    (if (> sensors^.left sensors^.right)
       (return (command (f32 22.0) (f32 1.65) true))
       (return (command (f32 22.0) (f32 -1.65) true))))
-  (when (and (== (:sensor-profile robot^) Sensor-Forward)
-             (:blocked sensors^))
-    (if (> (:left sensors^) (:right sensors^))
+  (when (and (== robot^.sensor-profile Sensor-Forward)
+             sensors^.blocked)
+    (if (> sensors^.left sensors^.right)
       (return (command (f32 0.0) (f32 1.8) true))
       (return (command (f32 0.0) (f32 -1.8) true))))
   (frontier-target-command belief robot))
@@ -156,36 +156,36 @@
 (defn return-home-command
   "Return to the charging base using a strategy suited to the source mode."
   [robot: (ptr Robot), sensors: (ptr Sensors)] -> Command
-  (when (== (:return-source robot^) Mode-Mapped)
+  (when (== robot^.return-source Mode-Mapped)
     (return (mapped-home-command robot sensors)))
   (wire-home-command robot sensors))
 
 (defn mapped-command
   "Follow a configured back-and-forth lane plan without reading world truth."
   [belief: (ptr Robot-Belief), robot: (ptr Robot), sensors: (ptr Sensors)] -> Command
-  (when (> (:lane-index robot^) (mapped-lane-count))
-    (set! (:lane-index robot^) 0))
-  (when (== (:lane-phase robot^) Mapped-Phase-Shift)
-    (let [shift-x (:lane-shift-x robot^)
+  (when (> robot^.lane-index (mapped-lane-count))
+    (set! robot^.lane-index 0))
+  (when (== robot^.lane-phase Mapped-Phase-Shift)
+    (let [shift-x robot^.lane-shift-x
           next-y (mapped-shift-target-y robot)]
-      (when (> (abs-f32 (- (:x robot^) shift-x)) Mapped-Rejoin-Tolerance)
+      (when (> (abs-f32 (- robot^.x shift-x)) Mapped-Rejoin-Tolerance)
         (let [dir (f32 1.0)
-              rejoin-y (:y robot^)]
-          (when (< next-y (:y robot^))
+              rejoin-y robot^.y]
+          (when (< next-y robot^.y)
             (set! dir -1.0))
-          (set! rejoin-y (math.clamp (+ (:y robot^) (* dir Mapped-Rejoin-Lookahead)) (mapped-min-y) (mapped-max-y)))
+          (set! rejoin-y (math.clamp (+ robot^.y (* dir Mapped-Rejoin-Lookahead)) (mapped-min-y) (mapped-max-y)))
           (return (drive-to-point-with-radius-command robot
                                                       shift-x
                                                       rejoin-y
                                                       Mapped-Shift-Speed
                                                       true
                                                       Mapped-Arrive-R2))))
-      (when (< (abs-f32 (- (:y robot^) next-y)) (f32 8.0))
+      (when (< (abs-f32 (- robot^.y next-y)) (f32 8.0))
         (advance-mapped-lane! robot)
-        (set! (:lane-phase robot^) Mapped-Phase-Sweep)
+        (set! robot^.lane-phase Mapped-Phase-Sweep)
         (return (drive-to-point-with-radius-command robot
-                                                    (mapped-lane-target-x (:lane-index robot^))
-                                                    (mapped-lane-y (:lane-index robot^))
+                                                    (mapped-lane-target-x robot^.lane-index)
+                                                    (mapped-lane-y robot^.lane-index)
                                                     (f32 72.0)
                                                     true
                                                     Mapped-Arrive-R2)))
@@ -196,20 +196,20 @@
                                                   true
                                                   Mapped-Arrive-R2))))
   (let [edge-x (mapped-current-edge-x robot)
-        lane-y (mapped-lane-y (:lane-index robot^))]
-    (when (> (abs-f32 (- (:y robot^) lane-y)) Mapped-Rejoin-Tolerance)
+        lane-y (mapped-lane-y robot^.lane-index)]
+    (when (> (abs-f32 (- robot^.y lane-y)) Mapped-Rejoin-Tolerance)
       (let [dir (f32 1.0)
-            rejoin-x (:x robot^)]
-        (when (< edge-x (:x robot^))
+            rejoin-x robot^.x]
+        (when (< edge-x robot^.x)
           (set! dir -1.0))
-        (set! rejoin-x (math.clamp (+ (:x robot^) (* dir Mapped-Rejoin-Lookahead)) (mapped-min-x) (mapped-max-x)))
+        (set! rejoin-x (math.clamp (+ robot^.x (* dir Mapped-Rejoin-Lookahead)) (mapped-min-x) (mapped-max-x)))
         (return (drive-to-point-with-radius-command robot
                                                     rejoin-x
                                                     lane-y
                                                     Mapped-Shift-Speed
                                                     true
                                                     Mapped-Arrive-R2))))
-    (when (< (abs-f32 (- (:x robot^) edge-x)) (f32 8.0))
+    (when (< (abs-f32 (- robot^.x edge-x)) (f32 8.0))
       (begin-mapped-shift! robot edge-x)
       (return (drive-to-point-with-radius-command robot
                                                   edge-x
@@ -227,13 +227,13 @@
 (defn controller-command
   "Run the selected controller mode."
   [robot: (ptr Robot), sensors: (ptr Sensors), belief: (ptr Robot-Belief)] -> Command
-  (when (== (:mode robot^) Mode-Random)
+  (when (== robot^.mode Mode-Random)
     (return (random-bounce-command robot sensors)))
-  (when (== (:mode robot^) Mode-Boundary)
+  (when (== robot^.mode Mode-Boundary)
     (return (boundary-follow-command robot sensors)))
-  (when (== (:mode robot^) Mode-Mapped)
+  (when (== robot^.mode Mode-Mapped)
     (return (mapped-command belief robot sensors)))
-  (when (== (:mode robot^) Mode-Return)
+  (when (== robot^.mode Mode-Return)
     (return (return-home-command robot sensors)))
   (frontier-command belief robot sensors))
 

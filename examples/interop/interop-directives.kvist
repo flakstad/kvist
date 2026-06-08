@@ -11,10 +11,10 @@
 
 (defn main []
   (let [[value ok] (query-answer)]
-    (core/when ok
-      (core/println value))))
+    (core.when ok
+      (core.println value))))
 
-(core/comment
+(core.comment
   (hidden-answer)
   ;; => 42
 

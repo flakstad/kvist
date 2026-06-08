@@ -16,17 +16,17 @@
 
 (defn fixed-date-weekday [] -> int
   ;; datetime_to_time returns an explicit ok bool. This is the same shape that
-  ;; core/if-let is designed for: bind the value and the bool, then branch.
-  (core/if-let [t ok (time.datetime_to_time 2024 1 2 3 4 5)]
+  ;; core.if-let is designed for: bind the value and the bool, then branch.
+  (core.if-let [t ok (time.datetime_to_time 2024 1 2 3 4 5)]
     (int (time.weekday t))
     -1))
 
 (defn fixed-date-string-length [] -> int
   ;; Odin time formatting writes into caller-provided storage. The returned
   ;; string is a view into this local buffer, so it must not escape this proc.
-  (core/if-let [t ok (time.datetime_to_time 2024 1 2 3 4 5)]
+  (core.if-let [t ok (time.datetime_to_time 2024 1 2 3 4 5)]
     (let [buf ([time.MIN_YYYY_DATE_LEN]u8 [])
-          text (time.to_string_yyyy_mm_dd t (core/slice buf))]
+          text (time.to_string_yyyy_mm_dd t (core.slice buf))]
       (len text))
     0))
 
@@ -41,18 +41,18 @@
 
 (defn search-score [] -> int
   (let [xs ([]int [4 1 7 2])]
-    (core/if-let [idx found (slice.linear_search xs 7)]
+    (core.if-let [idx found (slice.linear_search xs 7)]
       idx
       -1)))
 
 (defn main []
-  (core/println (duration-ms)
+  (core.println (duration-ms)
                (fixed-date-weekday)
                (fixed-date-string-length)
                (min-max-score)
                (search-score)))
 
-(core/comment
+(core.comment
   ;; Duration conversion.
   (duration-ms)
   ;; => 1500

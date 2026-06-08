@@ -6,7 +6,7 @@
 
 (def hot-demo-version: string "module v1")
 
-(hot/defmodule shared.State
+(hot.defmodule shared.State
                 hot-demo-message
                 hot-demo-tick
                 hot-demo-version

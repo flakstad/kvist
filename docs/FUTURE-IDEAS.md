@@ -29,14 +29,14 @@ language/runtime implementation prematurely.
   framework first.
 - Keep the user shape Clojure-like:
   - `(import t "kvist:test")`
-  - `(t/deftest name ...)`
-  - `(t/is expr)`
+  - `(t.deftest name ...)`
+  - `(t.is expr)`
 - Continue lowering that surface to ordinary Odin test declarations and
   assertions.
 
 ## Batteries-Included Surface
 
-- Keep building a Kvist-level library layer on top of Odin core/vendor
+- Keep building a Kvist-level library layer on top of Odin core.vendor
   packages.
 - Prefer a batteries-included experience similar to Odin: many useful things
   should be close at hand without third-party dependency hunting.

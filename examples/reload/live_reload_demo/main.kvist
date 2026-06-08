@@ -7,17 +7,17 @@
 (defn demo-command [runtime: (ptr kvist_live.Runtime)
                     module: (ptr kvist_live.Live_Module)
                     command: (ptr kvist_live.Live_Command)
-                    args: (core/slice kvist_live.Value)] -> [value: kvist_live.Value, err: kvist_live.Runtime_Error, ok: bool]
+                    args: (core.slice kvist_live.Value)] -> [value: kvist_live.Value, err: kvist_live.Runtime_Error, ok: bool]
   (let [count: i64 0
         [entry found] (kvist_live.module_state_get module "count")]
-    (core/when (and found (== (:kind (:value entry^)) .Int))
+    (core.when (and found (== (:kind (:value entry^)) .Int))
       (set! count (:int_value (:value entry^))))
     (set! count (+ count 1))
     (let [next-count (kvist_live.value_int count)
           [message _] (kvist_live.module_state_get_string module "message")]
       (defer (kvist_live.value_delete (addr next-count)))
       (kvist_live.module_state_put module "count" next-count)
-      (fmt.println (fmt.tprintf "[%s] %s (core/count=%d)" (:version module^) message count))
+      (fmt.println (fmt.tprintf "[%s] %s (core.count=%d)" (:version module^) message count))
       (return (kvist_live.value_int count) (kvist_live.Runtime_Error {}) true))))
 
 (defn demo-init [runtime: (ptr kvist_live.Runtime)
@@ -32,7 +32,7 @@
                     old-module: kvist_live.Live_Module
                     new-module: (ptr kvist_live.Live_Module)] -> [err: kvist_live.Runtime_Error, ok: bool]
   (let [[entry found] (kvist_live.state_entries_get_dynamic (:state old-module) "count")]
-    (core/when found
+    (core.when found
       (kvist_live.module_state_put new-module "count" (:value entry)))
     (kvist_live.module_state_put_string new-module "migrated-from" (:version old-module))
     (return (kvist_live.Runtime_Error {}) true)))
@@ -76,10 +76,10 @@
               (do
                 (kvist_live.invoke_command (addr runtime) "tick" nil)
                 (let [[module loaded-ok] (kvist_live.loaded_module (addr runtime) "demo")]
-                  (core/when loaded-ok
+                  (core.when loaded-ok
                     (let [[migrated-from _] (kvist_live.module_state_get_string module "migrated-from")
                           [count-entry count-ok] (kvist_live.module_state_get module "count")]
-                      (core/when count-ok
+                      (core.when count-ok
                         (fmt.println
                           (fmt.tprintf "state survived reload: count=%d migrated-from=%s"
                                        (:int_value (:value count-entry^))

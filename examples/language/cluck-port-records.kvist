@@ -10,24 +10,24 @@
    :tags set[string]})
 
 (defn records-demo [] -> bool
-  (let [tags (set/empty string 2) defer
+  (let [tags (set.empty string 2) defer
         person (Person {:name "Ada"
                         :age 36
                         :tags tags})]
-    (set/add! tags "math")
-    (set/add! tags "lisp")
-    (core/println (:name person))
-    (core/println (:age person))
-    (core/println (:tags person))
-    (core/println (set/contains? (:tags person) "math"))
-    (core/update! person :age 37)
-    (core/println person)
+    (set.add! tags "math")
+    (set.add! tags "lisp")
+    (core.println (:name person))
+    (core.println (:age person))
+    (core.println (:tags person))
+    (core.println (set.contains? (:tags person) "math"))
+    (core.update! person :age 37)
+    (core.println person)
     true))
 
 (defn main []
-  (core/println (records-demo)))
+  (core.println (records-demo)))
 
-(core/comment
+(core.comment
   ;; The surface is close. The visible gap is sets: Kvist still lowers
-  ;; set[T] to map[T]struct{} rather than a dedicated set literal/API.
+  ;; set[T] to map[T]struct{} rather than a dedicated set literal.API.
   (records-demo))

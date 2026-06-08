@@ -4,39 +4,39 @@
 ;; - one constructor helper per message variant
 
 (defmacro emit-message-structs [entries]
-  (if (= (core/count entries) 0)
+  (if (= (core.count entries) 0)
     (forms)
-    (let [entry (arr/first entries)
-          struct-name (arr/nth entry 0)
-          fields (arr/nth entry 1)]
+    (let [entry (arr.first entries)
+          struct-name (arr.nth entry 0)
+          fields (arr.nth entry 1)]
       (forms
         (quasiquote
           (defstruct (unquote struct-name) (unquote fields)))
-        (emit-message-structs (arr/rest entries))))))
+        (emit-message-structs (arr.rest entries))))))
 
 (defmacro emit-message-union-entries [entries]
-  (if (= (core/count entries) 0)
+  (if (= (core.count entries) 0)
     (forms)
-    (let [entry (arr/first entries)
-          struct-name (arr/nth entry 0)
+    (let [entry (arr.first entries)
+          struct-name (arr.nth entry 0)
           tag (keyword (name struct-name))]
       (forms
         tag
         struct-name
-        (emit-message-union-entries (arr/rest entries))))))
+        (emit-message-union-entries (arr.rest entries))))))
 
 (defmacro emit-message-ctors [union-name entries]
-  (if (= (core/count entries) 0)
+  (if (= (core.count entries) 0)
     (forms)
-    (let [entry (arr/first entries)
-          struct-name (arr/nth entry 0)
+    (let [entry (arr.first entries)
+          struct-name (arr.nth entry 0)
           ctor-name (symbol (str "make-" (name union-name) "-" (name struct-name)))
           tag (keyword (name struct-name))]
       (forms
         (quasiquote
           (defn (unquote ctor-name) [value: (unquote struct-name)] -> (unquote union-name)
             ((unquote union-name) {(unquote tag) value})))
-        (emit-message-ctors union-name (arr/rest entries))))))
+        (emit-message-ctors union-name (arr.rest entries))))))
 
 (defmacro defmessages [union-name entries]
   (forms
@@ -54,7 +54,7 @@
 ])
 
 (defn describe-event [event: Event] -> string
-  (core/switch [value event]
+  (core.switch [value event]
     Connected "connected"
     Disconnected "disconnected"
     Data (:payload value)
@@ -64,9 +64,9 @@
   (let [connected (make-Event-Connected (Connected {:id 7}))
         disconnected (make-Event-Disconnected (Disconnected {:id 7 :reason "timeout"}))
         data (make-Event-Data (Data {:id 7 :payload "hello"}))]
-    (core/println (describe-event connected))
-    (core/println (describe-event disconnected))
-    (core/println (describe-event data))))
+    (core.println (describe-event connected))
+    (core.println (describe-event disconnected))
+    (core.println (describe-event data))))
 
 (defn main []
   (macro-messages-demo))

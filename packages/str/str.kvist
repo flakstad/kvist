@@ -5,26 +5,26 @@
 (defmacro slice
   "Return a string slice view of `s`.
 
-  With two indexes, `(str/slice s start end)` lowers to Odin slicing from
-  `start` up to but not including `end`. With one index, `(str/slice s start)`
+  With two indexes, `(str.slice s start end)` lowers to Odin slicing from
+  `start` up to but not including `end`. With one index, `(str.slice s start)`
   slices from `start` to the end of the string. This does not copy bytes; the
   result aliases the original string storage, with the same lifetime and UTF-8
   caveats as ordinary Odin string slicing."
   [s start & rest]
-  (if (= (kvist/count rest) 0)
+  (if (= (kvist.count rest) 0)
     (quasiquote
-      (core/slice (unquote s) (unquote start)))
+      (core.slice (unquote s) (unquote start)))
     (quasiquote
-      (core/slice (unquote s) (unquote start) (unquote (kvist/first rest))))))
+      (core.slice (unquote s) (unquote start) (unquote (kvist.first rest))))))
 
 (defmacro get
   "Return the byte at `index` from `s`.
 
   This is direct indexing, not Unicode scalar or grapheme access. It lowers to
-  the same operation as `core/get` on a string and performs no allocation."
+  the same operation as `core.get` on a string and performs no allocation."
   [s index]
   (quasiquote
-    (core/get (unquote s) (unquote index))))
+    (core.get (unquote s) (unquote index))))
 
 (defn split
   "Split `s` around every occurrence of `separator`.
@@ -42,10 +42,10 @@
   The caller owns that string according to the current allocator."
   [parts separator]
   (quasiquote
-    (join-impl (core/slice (unquote parts) 0) (unquote separator))))
+    (join-impl (core.slice (unquote parts) 0) (unquote separator))))
 
 (defn- join-impl
-  "Implementation helper for `str/join`.
+  "Implementation helper for `str.join`.
 
   Accepts a slice so callers can pass either a dynamic array or a slice through
   the public macro. The returned string is owned by the caller."
@@ -60,14 +60,14 @@
   argument, replacement is limited according to Odin `core:strings.replace`.
   This allocates a new string and leaves the input unchanged."
   [s old new & rest]
-  (if (= (kvist/count rest) 0)
+  (if (= (kvist.count rest) 0)
     (quasiquote
       (replace-impl (unquote s) (unquote old) (unquote new) -1))
     (quasiquote
-      (replace-impl (unquote s) (unquote old) (unquote new) (unquote (kvist/first rest))))))
+      (replace-impl (unquote s) (unquote old) (unquote new) (unquote (kvist.first rest))))))
 
 (defn- replace-impl
-  "Implementation helper for `str/replace`.
+  "Implementation helper for `str.replace`.
 
   `n` follows Odin `core:strings.replace`: `-1` replaces all occurrences,
   positive values limit the number of replacements, and zero returns a string
@@ -88,7 +88,7 @@
 (defn contains?
   "Return true when `needle` occurs anywhere in `s`.
 
-  Matching is byte/string matching as provided by Odin `core:strings.contains`;
+  Matching is byte.string matching as provided by Odin `core:strings.contains`;
   no locale, normalization, or case folding is applied."
   [s: string, needle: string] -> bool #force_inline
   (strings.contains s needle))
@@ -120,7 +120,7 @@
 (defn starts-with?
   "Return true when `s` begins with `prefix`.
 
-  This is a byte/string prefix check using Odin `core:strings.has_prefix`; it
+  This is a byte.string prefix check using Odin `core:strings.has_prefix`; it
   does not allocate and performs no normalization."
   [s: string, prefix: string] -> bool #force_inline
   (strings.has_prefix s prefix))
@@ -128,7 +128,7 @@
 (defn ends-with?
   "Return true when `s` ends with `suffix`.
 
-  This is a byte/string suffix check using Odin `core:strings.has_suffix`; it
+  This is a byte.string suffix check using Odin `core:strings.has_suffix`; it
   does not allocate and performs no normalization."
   [s: string, suffix: string] -> bool #force_inline
   (strings.has_suffix s suffix))

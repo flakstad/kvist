@@ -14,30 +14,30 @@
 
 (defn captured-map-demo [xs: []int] -> [dynamic]int
   (let [offset 10]
-    (arr/map (fn [x: int] -> int
+    (arr.map (fn [x: int] -> int
                (+ x offset))
              xs)))
 
 (defn captured-map-bang-demo [] -> [dynamic]int
   (let [offset 10
         xs [1 2 3]]
-    (arr/map! (fn [x: int] -> int
+    (arr.map! (fn [x: int] -> int
                 (+ x offset))
               xs)
     xs))
 
 (defn main []
   (let [xs [1 2 3] defer]
-    (core/println (fn-literal-demo) (captured-map-demo (core/slice xs 0)) (captured-map-bang-demo))))
+    (core.println (fn-literal-demo) (captured-map-demo (core.slice xs 0)) (captured-map-bang-demo))))
 
-(core/comment
+(core.comment
   ;; Plain non-capturing function literals still work.
   (fn-literal-demo)
   ;; => true
 
   ;; First-cut captured callbacks work for known non-escaping helpers.
   (let [xs [1 2 3] defer]
-    (captured-map-demo (core/slice xs 0)))
+    (captured-map-demo (core.slice xs 0)))
   ;; => [11 12 13]
 
   (captured-map-bang-demo)

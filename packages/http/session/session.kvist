@@ -2,7 +2,7 @@
 (import h "kvist_vendor:http")
 
 (defenum Session-Action
-  "Decision produced by `session/plan`.
+  "Decision produced by `session.plan`.
 
   `Accept` means the request may proceed. `Create` means a new session should be
   established for a safe request. `RefreshCsrf` keeps the session id but writes a
@@ -36,7 +36,7 @@
   "Result of evaluating a request against `Session-Opts`.
 
   `sid` and `csrf` contain the session and token values to accept or write.
-  `set-cookie` tells `session/apply-plan!` whether cookies should be appended to
+  `set-cookie` tells `session.apply-plan!` whether cookies should be appended to
   the response."
   {
   :action Session-Action

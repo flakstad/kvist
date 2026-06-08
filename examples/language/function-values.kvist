@@ -14,11 +14,11 @@
   (> x threshold))
 
 (defn path-len [req: Request] -> int
-  (core/-> req :path len))
+  (core.-> req :path len))
 
 (defn maybe-path-len [req: ^Request] -> int
   ;; Accept a pointer when absence or shared identity is part of the API.
-  (if (core/nil? req)
+  (if (core.nil? req)
     0
     (path-len (deref req))))
 
@@ -26,9 +26,9 @@
   (let [pred: (fn [x: int] -> bool) (fn [x: int] -> bool
                                            (greater-than? 10 x))
         req (Request {:path "/users"})]
-    (core/println (apply-pred pred 12))))
+    (core.println (apply-pred pred 12))))
 
-(core/comment
+(core.comment
   (greater-than? 3 5)
   ;; => true
 

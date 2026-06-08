@@ -6,7 +6,7 @@
   "Create and initialize an HTTP client request for `method`.
 
   The returned request owns vendor request state. Destroy it with
-  `client/request-destroy` after the request has completed."
+  `client.request-destroy` after the request has completed."
   [method: h.Method] -> hc.Request
   (let [req (hc.Request {})]
     (hc.request_init (addr req) method)
@@ -60,13 +60,13 @@
 
   With no extra argument, the vendor default allocation mode is used. With one
   extra argument, that allocation mode is passed through. Destroy allocated body
-  storage with `client/body-destroy` when required by the vendor API."
+  storage with `client.body-destroy` when required by the vendor API."
   [res & rest]
   (if (= (count rest) 0)
     (quasiquote
       (hc.response_body (addr (unquote res))))
     (quasiquote
-      (hc.response_body (addr (unquote res)) (unquote (arr/first rest))))))
+      (hc.response_body (addr (unquote res)) (unquote (arr.first rest))))))
 
 (defmacro response-destroy
   "Destroy response state owned by `res`."

@@ -1,16 +1,16 @@
 ;; A more substantial declaration DSL. The helper macro recursively walks
 ;; union variants and emits one constructor helper per variant.
 (defmacro emit-union-ctors [union-name variants]
-  (if (= (core/count variants) 0)
+  (if (= (core.count variants) 0)
     (forms)
-    (let [tag (arr/first variants)
-          value-type (arr/nth variants 1)
+    (let [tag (arr.first variants)
+          value-type (arr.nth variants 1)
           ctor-name (symbol (str "make-" (name union-name) "-" (name tag)))]
       (forms
         (quasiquote
           (defn (unquote ctor-name) [value: (unquote value-type)] -> (unquote union-name)
             ((unquote union-name) {(unquote tag) value})))
-        (emit-union-ctors union-name (arr/rest (arr/rest variants)))))))
+        (emit-union-ctors union-name (arr.rest (arr.rest variants)))))))
 
 (defmacro defunion+ctors [name variants]
   (forms
@@ -28,9 +28,9 @@
   (let [number (make-Value-i 42)
         text (make-Value-s "kvist")
         flag (make-Value-ok true)]
-    (core/println number)
-    (core/println text)
-    (core/println flag)))
+    (core.println number)
+    (core.println text)
+    (core.println flag)))
 
 (defn main []
   (macro-union-helpers-demo))

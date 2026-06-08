@@ -2,7 +2,7 @@
 //
 // slashpath works on forward-slash paths such as URLs. filepath works with the
 // current operating system's path rules. Some helpers return borrowed slices of
-// their input, while helpers such as clean/join/rel allocate new strings.
+// their input, while helpers such as clean.join/rel allocate new strings.
 (package main)
 (import fp "core:path/filepath")
 (import slash "core:path/slashpath")
@@ -37,13 +37,13 @@
   (len (fp.ext "/tmp/archive.tar.gz")))
 
 (defn main []
-  (core/println
+  (core.println
     (slash-route-name-len)
     (slash-clean-score)
     (filepath-relative-len)
     (filepath-extension-len)))
 
-(core/comment
+(core.comment
   ;; URL-like path handling.
   (slash-route-name-len)
   ;; => 5
@@ -53,7 +53,7 @@
   (slash-clean-score)
   ;; => 16
 
-  ;; OS filepath handling. On this platform this is "assets/site.css".
+  ;; OS filepath handling. On this platform this is "assets.site.css".
   (filepath-relative-len)
   ;; => 15
 

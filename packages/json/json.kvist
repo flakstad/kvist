@@ -7,7 +7,7 @@
   "Encode `value` as JSON and write it to `path`.
 
   The value is marshalled with Odin `core:encoding/json.marshal`, then written
-  with `kvist:io/write`. Temporary encoded bytes are deleted before returning.
+  with `kvist:io.write`. Temporary encoded bytes are deleted before returning.
   The two return values distinguish JSON encoding errors from file write errors."
   [path: string, value: $T] -> [marshal-err: j.Marshal_Error, write-err: os.Error] #force_inline
   (let [[data err] (j.marshal value)]
@@ -15,17 +15,17 @@
       (return err write-err)
       (do
         (defer (delete data))
-        (return nil (io/write path data))))))
+        (return nil (io.write path data))))))
 
 (defn read-as
   "Read `path` and decode its JSON contents as type `T`.
 
-  The file is read with `kvist:io/read`, decoded with Odin
+  The file is read with `kvist:io.read`, decoded with Odin
   `core:encoding/json.unmarshal`, and the temporary file bytes are deleted
   before returning. The result separates file IO errors from JSON decoding
   errors so callers can handle each case precisely."
   [$T: typeid, path: string] -> [value: T, read-err: os.Error, unmarshal-err: j.Unmarshal_Error] #force_inline
-  (let [[data err] (io/read path)]
+  (let [[data err] (io.read path)]
     (if (!= err nil)
       (return value err unmarshal-err)
       (do

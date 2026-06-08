@@ -72,9 +72,9 @@ line-based placeholder format. The current loader and evaluator understand:
   - `defn init [] ...`
   - `defn migrate [] ...`
   - `defn shutdown [] ...`
-- behavior forms including `let`, `if`, `when`, `state/get`, `state/set!`,
-  `state/inc!`, `module/name`, `module/version`, `reload/from-version`,
-  `reload/state-get`, `args/count`, `args/get`, `payload/count`,
+- behavior forms including `let`, `if`, `when`, `state.get`, `state.set!`,
+  `state.inc!`, `module.name`, `module.version`, `reload.from-version`,
+  `reload.state-get`, `args.count`, `args.get`, `payload.count`,
   `payload/get`, `host/call`, variadic `hook/emit`, `+`, `=`, `str`, `cond`,
   direct symbol lookup from module bindings, and ordinary calls to top-level
   `defn` helpers

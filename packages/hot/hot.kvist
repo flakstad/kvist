@@ -3,9 +3,9 @@
 (defmacro defmodule
   "Emit the standard native hot-reload module contract.
 
-  `(hot/defmodule state-type message-export tick-export message-value
+  `(hot.defmodule state-type message-export tick-export message-value
   load-message)` expands to exported C-ABI entrypoints expected by the
-  `kvist_hot` host runtime: API version, state size/alignment, load/unload hooks,
+  `kvist_hot` host runtime: API version, state size.alignment, load.unload hooks,
   a message export, and a tick export. The state storage remains host-owned; the
   generated functions cast the raw state pointer through `kvist_hot` helpers.
 

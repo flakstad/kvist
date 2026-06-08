@@ -83,7 +83,7 @@
 (defn make-circles
   "Allocate and initialize moving circles in SOA storage."
   [n: int] -> #soa[dynamic]Circle
-  (let [circles (soa/make Circle n)
+  (let [circles (soa.make Circle n)
         seed: u32 0xBADC0DE
         i 0]
     (while (< i n)
@@ -92,7 +92,7 @@
             radius (+ 3.0 (* 4.5 (rand-unit (addr seed))))
             x (+ radius (* (- (f32 Width) (* radius 2.0)) (rand-unit (addr seed))))
             y (+ (f32 Sim-Y) radius (* (- (f32 (- Height Sim-Y)) (* radius 2.0)) (rand-unit (addr seed))))]
-        (soa/push! circles (Circle {:x x
+        (soa.push! circles (Circle {:x x
                                     :y y
                                     :vx (* speed (math.cos angle))
                                     :vy (* speed (math.sin angle))
@@ -232,7 +232,7 @@
     (draw-hud-text font "update" 835 20 Hud-Font-Size rl.LIGHTGRAY)
     (draw-hud-text font (fmt.ctprintf "%7.3f ms" state.update-ms) 905 20 Hud-Font-Size rl.RAYWHITE)
     (draw-hud-text font "grid" 18 50 Hud-Font-Size rl.LIGHTGRAY)
-    (draw-hud-text font (fmt.ctprintf "%2d x %2d buckets, mutable head/next arrays" Cells-X Cells-Y) 72 50 Hud-Font-Size rl.RAYWHITE)
+    (draw-hud-text font (fmt.ctprintf "%2d x %2d buckets, mutable head.next arrays" Cells-X Cells-Y) 72 50 Hud-Font-Size rl.RAYWHITE)
     (draw-hud-text font "space: pause   g: grid   1/2/3: 30/60/144 fps   r: reset" 18 76 16.0 rl.LIGHTGRAY)))
 
 (defn update-fps-metric!

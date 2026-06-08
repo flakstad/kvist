@@ -9,7 +9,7 @@
 
 (import "helpers")
 
-(live/defmodule
+(live.defmodule
   {:name "hybrid-inspector"
    :version "v1"}
 
@@ -17,28 +17,28 @@
   (def counter-key "inspect-count")
 
   (defn init []
-    (host/call "host.log" "hybrid live module initialized"))
+    (host.call "host.log" "hybrid live module initialized"))
 
   (defn migrate []
-    (let [old-count (reload/state-get counter-key)]
-      (core/when old-count
-        (state/set! counter-key old-count)))
-    (core/when (reload/from-version)
-      (host/call "host.log"
+    (let [old-count (reload.state-get counter-key)]
+      (core.when old-count
+        (state.set! counter-key old-count)))
+    (core.when (reload.from-version)
+      (host.call "host.log"
                  (str "hybrid live module reloaded from "
-                      (reload/from-version)
+                      (reload.from-version)
                       " to "
-                      (module/version)))))
+                      (module.version)))))
 
   (defn shutdown []
-    (host/call "host.log" "hybrid live module shutting down"))
+    (host.call "host.log" "hybrid live module shutting down"))
 
-  (live/defcommand inspect
-    (let [count (state/inc! counter-key)]
-      (host/call "host.log" (render-inspection count))
-      (hook/emit "after-inspect" count)
+  (live.defcommand inspect
+    (let [count (state.inc! counter-key)]
+      (host.call "host.log" (render-inspection count))
+      (hook.emit "after-inspect" count)
       count))
 
-  (live/defhook after-inspect
-    (host/call "host.log"
-               (str "hook=after-inspect count=" (payload/get 0)))))
+  (live.defhook after-inspect
+    (host.call "host.log"
+               (str "hook=after-inspect count=" (payload.get 0)))))

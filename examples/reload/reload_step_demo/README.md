@@ -6,7 +6,7 @@ same-package program file that holds the logic you would keep extending.
 
 The loop is ordinary Kvist code in `run`. Kvist no longer has a separate
 generated step mode; if your app wants a step-and-sleep loop, write that loop
-directly and call `reload/checkpoint!` at the safe boundary.
+directly and call `reload.checkpoint!` at the safe boundary.
 
 Source:
 
@@ -110,7 +110,7 @@ In this demo:
   subsystem
 - `step` is an ordinary helper called by `run`
 - `run` owns the outer loop, sleeps between steps, and calls
-  `reload/checkpoint!` before returning to the resident host
+  `reload.checkpoint!` before returning to the resident host
 
 So the intended extension point is to keep growing `app.kvist` while
 leaving the reload shell small and boring.

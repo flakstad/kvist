@@ -35,7 +35,7 @@
    :draw-ms f64})
 
 (defn point-index
-  "Convert cloth grid x/y coordinates into a flat point index."
+  "Convert cloth grid x.y coordinates into a flat point index."
   [x: int, y: int] -> int
   (+ x (* y Cloth-W)))
 
@@ -241,7 +241,7 @@
     (draw-hud-text font (fmt.ctprintf "%7.3f ms" state.draw-ms) 902 20 Hud-Font-Size rl.RAYWHITE)
     (draw-hud-text font "storage" 18 50 Hud-Font-Size rl.LIGHTGRAY)
     (draw-hud-text font "x, y, old-x, old-y [dynamic]f32 + pinned [dynamic]bool" 98 50 Hud-Font-Size rl.RAYWHITE)
-    (draw-hud-text font "drag/click: pull cloth   space: pause   1/2/3: 30/60/144 fps   r: reset" 18 76 16.0 rl.LIGHTGRAY)))
+    (draw-hud-text font "drag.click: pull cloth   space: pause   1/2/3: 30/60/144 fps   r: reset" 18 76 16.0 rl.LIGHTGRAY)))
 
 (defn update-fps-metric!
   "Update the smoothed FPS counter roughly twice per second."

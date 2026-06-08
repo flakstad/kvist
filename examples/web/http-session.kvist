@@ -13,15 +13,15 @@
   "")
 
 (defn main []
-  (let [router (http/new-router)
-        server (http/new-server)]
-    (defer (http/router-destroy! router))
-    (http/get! router "/konto" [req res]
-      (let [opts (session/new-opts "sid" "csrf" new-sid csrf-for request-csrf)
-            plan (session/plan req opts)]
-        (session/apply-plan! res opts plan)
-        (if (session/accepted? plan)
-          (http/respond-plain res (:sid plan))
-          (session/reject! res))))
-    (http/server-shutdown-on-interrupt! server)
-    (http/listen-and-serve! server router 6969)))
+  (let [router (http.new-router)
+        server (http.new-server)]
+    (defer (http.router-destroy! router))
+    (http.get! router "/konto" [req res]
+      (let [opts (session.new-opts "sid" "csrf" new-sid csrf-for request-csrf)
+            plan (session.plan req opts)]
+        (session.apply-plan! res opts plan)
+        (if (session.accepted? plan)
+          (http.respond-plain res (:sid plan))
+          (session.reject! res))))
+    (http.server-shutdown-on-interrupt! server)
+    (http.listen-and-serve! server router 6969)))

@@ -722,16 +722,21 @@ rewrite_symbol_text :: proc(text: string, locals: []string, aliases: []Alias_Pre
         body = body[1:]
     }
     for alias_map in aliases {
-        prefix_text := fmt.tprintf("%s/", alias_map.alias)
+        prefix_text := fmt.tprintf("%s.", alias_map.alias)
         if len(body) > len(prefix_text) && body[:len(prefix_text)] == prefix_text {
             member := body[len(prefix_text):]
             if alias_map.preserve_qualified_calls {
                 return text, Compile_Error{}, true
             }
             if len(alias_map.exports) > 0 && !contains_text(alias_map.exports[:], member) {
-                return "", Compile_Error{message = fmt.tprintf("source package member is private or undefined: %s/%s", alias_map.alias, member), span = span}, false
+                return "", Compile_Error{message = fmt.tprintf("source package member is private or undefined: %s.%s", alias_map.alias, member), span = span}, false
             }
             return fmt.tprintf("%s%s%s__%s", quote_prefix, operator_prefix, alias_map.prefix, member), Compile_Error{}, true
+        }
+        old_prefix_text := fmt.tprintf("%s/", alias_map.alias)
+        if len(body) > len(old_prefix_text) && body[:len(old_prefix_text)] == old_prefix_text {
+            member := body[len(old_prefix_text):]
+            return "", Compile_Error{message = fmt.tprintf("use `%s.%s` for package access", alias_map.alias, member), span = span}, false
         }
     }
     if prefix != "" && contains_text(locals, body) {
@@ -775,7 +780,7 @@ rewrite_decl_name :: proc(form: ^CST_Form, prefix: string) {
 
 type_constructor_symbol :: proc(text: string) -> bool {
     switch text {
-    case "slice", "core/slice", "core-slice", "dynamic", "array", "map", "set", "matrix", "ptr", "fn":
+    case "slice", "core.slice", "core-slice", "dynamic", "array", "map", "set", "matrix", "ptr", "fn":
         return true
     }
     return false
@@ -1857,7 +1862,7 @@ eval_form_head :: proc(form: CST_Form) -> string {
 
 eval_head_is_decl :: proc(head: string) -> bool {
     switch head {
-    case "core/comment", "package", "import", "def", "def-", "defvar", "defvar-", "defstruct", "defstruct-", "defenum", "defenum-", "defunion", "defunion-", "odin", "defn", "defn-":
+    case "core.comment", "package", "import", "def", "def-", "defvar", "defvar-", "defstruct", "defstruct-", "defenum", "defenum-", "defunion", "defunion-", "odin", "defn", "defn-":
         return true
     }
     return false

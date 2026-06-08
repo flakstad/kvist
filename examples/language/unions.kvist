@@ -9,7 +9,7 @@
 })
 
 (defn describe [value: Value] -> string
-  (core/switch [v value]
+  (core.switch [v value]
     int "int"
     string v
     :else "nil"))
@@ -17,9 +17,9 @@
 (defn main []
   (let [number (Value {:i 42})
         text (Value {:s "kvist"})]
-    (core/println (describe text))))
+    (core.println (describe text))))
 
-(core/comment
+(core.comment
   (describe (Value {:i 42}))
   ;; => int
 

@@ -40,7 +40,7 @@
     (linalg.dot q unit)))
 
 (defn main []
-  (core/println (matrix-score)
+  (core.println (matrix-score)
                 (vector-score)
                 (transpose-score)
                 (quaternion-score)))

@@ -74,7 +74,7 @@ __kvist_http_sse_set_user_int :: proc(stream: ^h.Sse, value: int) {
   "Define an SSE error callback proc.
 
   `binding` must contain `[stream err]`. The generated proc receives `^h.Sse`
-  and `net.Send_Error` and can be passed to `sse/new-stream-on-error`."
+  and `net.Send_Error` and can be passed to `sse.new-stream-on-error`."
   [name binding & body]
   (let [stream (first binding)
         err (nth binding 1)
@@ -90,7 +90,7 @@ __kvist_http_sse_set_user_int :: proc(stream: ^h.Sse, value: int) {
 
   `binding` must contain `[op stream]`. The generated proc receives
   `^nbio.Operation` and `^h.Sse` and can be passed to
-  `sse/schedule-timeout!`."
+  `sse.schedule-timeout!`."
   [name binding & body]
   (let [op (first binding)
         stream (nth binding 1)

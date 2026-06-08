@@ -25,12 +25,12 @@
     (:x (:home profile))))
 
 (defn profile-has-math-tag? [] -> bool
-  (let [tags (set/empty string 2) defer]
-    (set/add! tags "math")
-    (set/add! tags "lisp")
+  (let [tags (set.empty string 2) defer]
+    (set.add! tags "math")
+    (set.add! tags "lisp")
     (let [profile (Profile {:name "Ada"
                             :tags tags})]
-      (core/contains? (:tags profile) "math"))))
+      (core.contains? (:tags profile) "math"))))
 
 (defn profile-active? [] -> bool
   (let [profile (Profile {:name "Ada"
@@ -47,9 +47,9 @@
   (fmt.tprintf "%s/%d/%t" name age (:active? profile)))
 
 (defn main []
-  (core/println (profile-has-math-tag?)))
+  (core.println (profile-has-math-tag?)))
 
-(core/comment
+(core.comment
   ;; Omitted fields follow ordinary Odin zero-value behavior in the lowered
   ;; struct literal. The nested Point is the zero value Point{x = 0, y = 0}.
   (profile-defaults)

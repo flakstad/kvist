@@ -75,11 +75,11 @@ The main performance question is now:
 
 The focused mutation benchmark now covers:
 
-- `core/update!` on struct fields
-- `core/update` on struct fields
+- `core.update!` on struct fields
+- `core.update` on struct fields
 - explicit pointer mutation
-- `core/update!` on dynamic arrays
-- `core/update!` on maps
+- `core.update!` on dynamic arrays
+- `core.update!` on maps
 
 Current focused mutation run:
 
@@ -90,7 +90,7 @@ Current focused mutation run:
 
 Two fixes mattered here:
 
-1. `core/update!` now lowers simple arithmetic updater cases to compound
+1. `core.update!` now lowers simple arithmetic updater cases to compound
    assignment when possible:
    - `+=`
    - `-=`
@@ -112,8 +112,8 @@ The useful conclusion for now is:
 
 - struct copy-update and pointer mutation are effectively at parity in this
   workload
-- array `core/update!` is also at parity after the lowering fix
-- the map `core/update!` path is also at parity here, with matching allocation
+- array `core.update!` is also at parity after the lowering fix
+- the map `core.update!` path is also at parity here, with matching allocation
   counts and total allocated bytes versus direct Odin
 
 ## Focused Map Update Benchmark
@@ -140,7 +140,7 @@ and allocation behavior.
 
 The source-backed `kvist:arr` benchmark covers:
 
-- intrinsic `arr/*` lowering
+- intrinsic `arr.*` lowering
 - imported `kvist:arr` source-backed lowering
 - direct Odin baselines
 - one fused-loop lower bound for the eager pipeline case
@@ -181,7 +181,7 @@ The important result is not any one number, but the shape:
 - the remove-at bang helpers lower directly to Odin's `ordered_remove` and
   `unordered_remove`; the benchmark setup now uses the same inline bulk-copy
   shape as the direct Odin baseline so this row measures the bang wrapper rather
-  than `arr/into`
+  than `arr.into`
 - remove-at timings still show more run-to-run spread than the allocation shape;
   allocation equality and generated code shape are the stable regression signals
   until the benchmark harness is tightened further
@@ -263,13 +263,13 @@ This benchmark is meant to answer two separate questions:
 
 ## Core Helper Baseline
 
-There is now also a focused `core/*` benchmark for the canonical collection
+There is now also a focused `core.*` benchmark for the canonical collection
 kernel:
 
-- `core/count`
-- `core/get`
-- `core/slice`
-- `core/contains?`
+- `core.count`
+- `core.get`
+- `core.slice`
+- `core.contains?`
 
 Run it with:
 
@@ -288,19 +288,19 @@ Current run shape:
 
 The important result is the shape:
 
-- all measured `core/*` workloads ran with `allocs=0`, `total=0`, and `live=0`
-- `core/count`, `core/get`, `core/slice`, and `core/contains?` lower
+- all measured `core.*` workloads ran with `allocs=0`, `total=0`, and `live=0`
+- `core.count`, `core.get`, `core.slice`, and `core.contains?` lower
   essentially identically to direct Odin in these hot paths
-- the canonical `core/*` move is performance-neutral on the tested workloads
+- the canonical `core.*` move is performance-neutral on the tested workloads
 
 ## Package Surface Baseline
 
 There is now also a focused package-surface benchmark for the moved package
 APIs that are hot and runtime-safe today:
 
-- `str/*` transforms and queries
-- `map/*` constructor plus bang mutation helpers
-- `set/*` constructor plus bang mutation helpers
+- `str.*` transforms and queries
+- `map.*` constructor plus bang mutation helpers
+- `set.*` constructor plus bang mutation helpers
 
 Run it with:
 
@@ -326,4 +326,4 @@ What this says:
 - the map bang/package surface is effectively identical to direct Odin in both
   time and allocation behavior
 - the set bang/package surface is now also at parity after removing the
-  temporary delete-list allocation from `set/intersection!`
+  temporary delete-list allocation from `set.intersection!`

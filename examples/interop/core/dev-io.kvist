@@ -1,6 +1,6 @@
 // File-backed development helpers.
 //
-// This example is for the "I computed/downloaded something once, now I want to
+// This example is for the "I computed.downloaded something once, now I want to
 // reuse it in later evals" workflow. There is no hidden REPL state here:
 // values are saved to ordinary files, then later eval calls read those files.
 (package main)
@@ -31,16 +31,16 @@
   (let [dir-err (ensure-dev-dir)]
     (if (!= dir-err nil)
       dir-err
-      (io/write path text))))
+      (io.write path text))))
 
 (defn read-text [path: string] -> [data: []byte, err: os.Error]
   ;; Ownership of data transfers to the caller.
-  (io/read path))
+  (io.read path))
 
 (defn main []
   (return))
 
-(core/comment
+(core.comment
   ;; These forms are meant for editor eval. They deliberately use real files,
   ;; so the result survives across separate kvist eval processes.
 
@@ -49,10 +49,10 @@
 
   ;; Text files use a small ordinary helper pair. read-text returns owned bytes,
   ;; so delete the bytes directly in the same scope that reads them.
-  (write-text "tmp/kvist-note.txt" "hello")
+  (write-text "tmp.kvist-note.txt" "hello")
   ;; => nil
 
-  (let [[data err] (read-text "tmp/kvist-note.txt")]
+  (let [[data err] (read-text "tmp.kvist-note.txt")]
     (if (!= err nil)
       ""
       (do
@@ -61,35 +61,35 @@
   ;; => hello
 
   ;; JSON is useful for typed cached dev data, but it is not Kvist core syntax.
-  ;; The shipped kvist:json package keeps the surface small: json/write and
-  ;; json/read-as. json/read-as may allocate Note's decoded string fields, so
+  ;; The shipped kvist:json package keeps the surface small: json.write and
+  ;; json.read-as. json.read-as may allocate Note's decoded string fields, so
   ;; delete those fields directly in the same scope that reads them.
   (ensure-dev-dir)
-  (let [[marshal-err write-err] (json/write
-                                  "tmp/kvist-note.json"
+  (let [[marshal-err write-err] (json.write
+                                  "tmp.kvist-note.json"
                                   (Note {:title "hello" :body "from Kvist"}))]
     (and (== marshal-err nil)
          (== write-err nil)))
   ;; => true
 
-  (let [[note read-err unmarshal-err] (json/read-as Note "tmp/kvist-note.json")]
+  (let [[note read-err unmarshal-err] (json.read-as Note "tmp.kvist-note.json")]
     (if (or (!= read-err nil)
             (!= unmarshal-err nil))
       false
       (do
         (defer (delete (:title note)))
         (defer (delete (:body note)))
-        (core/println note)
+        (core.println note)
         true)))
   ;; prints the parsed Note struct, then returns true
 
   (ensure-dev-dir)
-  (let [[marshal-err write-err] (json/write "tmp/kvist-count.json" (Count {:n 42}))]
+  (let [[marshal-err write-err] (json.write "tmp.kvist-count.json" (Count {:n 42}))]
     (and (== marshal-err nil)
          (== write-err nil)))
   ;; => true
 
-  (let [[count read-err unmarshal-err] (json/read-as Count "tmp/kvist-count.json")]
+  (let [[count read-err unmarshal-err] (json.read-as Count "tmp.kvist-count.json")]
     (if (or (!= read-err nil)
             (!= unmarshal-err nil))
       0

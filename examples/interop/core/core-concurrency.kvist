@@ -39,11 +39,11 @@
   ;; only for this scope and released automatically by Odin's deferred_in
   ;; attribute on sync.guard.
   (if (sync.guard (addr (:lock (deref counter))))
-    (core/update! counter^ :value (+ (:value counter^) 1))))
+    (core.update! counter^ :value (+ (:value counter^) 1))))
 
 (defn mutex-protected-count [] -> int
   ;; Two joinable threads mutate shared state. The pointer is passed explicitly,
-  ;; and the main thread joins/destroys the handles before reading the result.
+  ;; and the main thread joins.destroys the handles before reading the result.
   (let [counter (Counter {:lock {} :value 0})
         a (thread.create-and-start-with-poly-data (addr counter) increment-once)
         b (thread.create-and-start-with-poly-data (addr counter) increment-once)]
@@ -54,9 +54,9 @@
     (:value counter)))
 
 (defn main []
-  (core/println (future-like-square) (mutex-protected-count)))
+  (core.println (future-like-square) (mutex-protected-count)))
 
-(core/comment
+(core.comment
   ;; A channel plus a worker thread is the basic future-like pattern. This is
   ;; deliberately not a Kvist abstraction yet; the underlying Odin ownership
   ;; and blocking behavior stay visible.
@@ -64,7 +64,7 @@
   ;; => 49
 
   ;; Shared mutation should be guarded. If you need lots of work items, reach
-  ;; for core:thread's Pool API next; the mutex/channel concepts are the same.
+  ;; for core:thread's Pool API next; the mutex.channel concepts are the same.
   (mutex-protected-count)
   ;; => 2
 )

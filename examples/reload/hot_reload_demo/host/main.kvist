@@ -60,6 +60,6 @@
                   (do
                     (fmt.println "[host] reload failed:" reload-err)
                     (delete reload-err))
-                  (core/when changed
+                  (core.when changed
                     (fmt.printf "[host] loaded generation %d from %s\n" (:generation reloader) path)
                     (print-after-reload (addr state))))))))))))

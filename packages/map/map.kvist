@@ -5,19 +5,19 @@
 (defmacro empty
   "Create an empty Odin map.
 
-  `(map/empty K V)` creates `map[K]V` with Odin's default capacity.
-  `(map/empty K V capacity)` preallocates for approximately `capacity` entries.
+  `(map.empty K V)` creates `map[K]V` with Odin's default capacity.
+  `(map.empty K V capacity)` preallocates for approximately `capacity` entries.
   The map is allocated with the current allocator and must be treated like an
   ordinary Odin map for lifetime and cleanup purposes."
   [key-type value-type & rest]
-  (if (= (kvist/count rest) 0)
+  (if (= (kvist.count rest) 0)
     (quasiquote
       (map-empty (unquote key-type) (unquote value-type)))
     (quasiquote
-      (map-empty (unquote key-type) (unquote value-type) (unquote (kvist/first rest))))))
+      (map-empty (unquote key-type) (unquote value-type) (unquote (kvist.first rest))))))
 
 (defmacro of
-  "Create a map from a literal sequence of key/value entries.
+  "Create a map from a literal sequence of key.value entries.
 
   `entries` is written as Kvist data and lowered to direct Odin map
   construction. Keys are unique by normal Odin map rules; later duplicate keys
@@ -33,11 +33,11 @@
   argument, returns the mapped value when present and the default value when
   absent. This lowers to direct map access and does not scan the map."
   [m key & rest]
-  (if (= (kvist/count rest) 0)
+  (if (= (kvist.count rest) 0)
     (quasiquote
-      (core/get (unquote m) (unquote key)))
+      (core.get (unquote m) (unquote key)))
     (quasiquote
-      (core/get (unquote m) (unquote key) (unquote (kvist/first rest))))))
+      (core.get (unquote m) (unquote key) (unquote (kvist.first rest))))))
 
 (defmacro merge!
   "Mutate `target` by assigning every entry from `source`.
@@ -47,16 +47,16 @@
   [target source]
   (quasiquote
     (each [key value (unquote source)]
-      (core/update! (unquote target) key value))))
+      (core.update! (unquote target) key value))))
 
 (defmacro assoc!
   "Associate `key` with `value` in `target` in place.
 
   This mutates the existing Odin map and returns the updated target expression.
-  It is the map-specific spelling of `core/update!` for key assignment."
+  It is the map-specific spelling of `core.update!` for key assignment."
   [target key value]
   (quasiquote
-    (core/update! (unquote target) (unquote key) (unquote value))))
+    (core.update! (unquote target) (unquote key) (unquote value))))
 
 (defmacro dissoc!
   "Remove `key` from `target` in place.
@@ -65,7 +65,7 @@
   the same behavior as Odin map deletion for a missing key."
   [target key]
   (quasiquote
-    (core/delete! (unquote target) (unquote key))))
+    (core.delete! (unquote target) (unquote key))))
 
 (defn contains?
   "Return true when `m` contains `key`.
@@ -73,7 +73,7 @@
   This lowers to Odin `key in m`; it does not allocate and does not inspect
   values."
   [m: map[$K]$V, key: K] -> bool #force_inline
-  (odin "return key in m"))
+  (core.contains? m key))
 
 (defn assoc
   "Return a new map containing `m` plus `key` mapped to `value`.
@@ -82,10 +82,10 @@
   `m` are copied, and then the requested key is assigned. Existing keys are
   overwritten in the returned map."
   [m: map[$K]$V, key: K, value: V] -> map[K]V #force_inline
-  (let [out (map/empty K V (+ (odin "len(m)") 1))]
+  (let [out (map.empty K V (+ (core.count m) 1))]
     (each [entry-key entry-value m]
-      (core/update! out entry-key entry-value))
-    (core/update! out key value)
+      (core.update! out entry-key entry-value))
+    (core.update! out key value)
     out))
 
 (defn dissoc
@@ -94,10 +94,10 @@
   The input map is not mutated. A new Odin map is allocated and entries whose
   key is not equal to `key` are copied into it."
   [m: map[$K]$V, key: K] -> map[K]V #force_inline
-  (let [out (map/empty K V (odin "len(m)"))]
+  (let [out (map.empty K V (core.count m))]
     (each [entry-key entry-value m]
-      (core/when (!= entry-key key)
-        (core/update! out entry-key entry-value)))
+      (core.when (!= entry-key key)
+        (core.update! out entry-key entry-value)))
     out))
 
 (defn merge
@@ -106,11 +106,11 @@
   Neither input map is mutated. Entries from `rhs` win when the same key occurs
   in both maps. The result is allocated once with capacity for both inputs."
   [lhs: map[$K]$V, rhs: map[$K]$V] -> map[K]V #force_inline
-  (let [out (map/empty K V (+ (odin "len(lhs)") (odin "len(rhs)")))]
+  (let [out (map.empty K V (+ (core.count lhs) (core.count rhs)))]
     (each [key value lhs]
-      (core/update! out key value))
+      (core.update! out key value))
     (each [key value rhs]
-      (core/update! out key value))
+      (core.update! out key value))
     out))
 
 (defn keys
@@ -119,21 +119,21 @@
   Map iteration order is Odin map iteration order and is not stable or sorted.
   The returned array is owned by the caller."
   [m: map[$K]$V] -> [dynamic]K #force_inline
-  (let [out (arr/empty K (odin "len(m)"))]
+  (let [out (arr.empty K (core.count m))]
     (each [key _ m]
-      (arr/push! out key))
+      (arr.push! out key))
     out))
 
 (defn vals
   "Return the values of `m` in a newly allocated dynamic array.
 
-  Values are returned in Odin map iteration order, matching `map/keys` for the
+  Values are returned in Odin map iteration order, matching `map.keys` for the
   same traversal but not guaranteed to be stable or sorted. The returned array
   is owned by the caller."
   [m: map[$K]$V] -> [dynamic]V #force_inline
-  (let [out (arr/empty V (odin "len(m)"))]
+  (let [out (arr.empty V (core.count m))]
     (each [_ value m]
-      (arr/push! out value))
+      (arr.push! out value))
     out))
 
 (defn zip
@@ -143,12 +143,12 @@
   values are ignored. Duplicate keys follow normal map assignment semantics:
   later pairs overwrite earlier pairs."
   [ks: []$K, vs: []$V] -> map[K]V #force_inline
-  (let [value-count (odin "len(vs)")
-        cap (odin "len(ks)")]
-    (core/when (> cap value-count)
+  (let [value-count (core.count vs)
+        cap (core.count ks)]
+    (core.when (> cap value-count)
       (set! cap value-count))
-    (let [out (map/empty K V cap)]
+    (let [out (map.empty K V cap)]
       (each [key i ks]
-        (core/when (< i value-count)
-          (core/update! out key (arr/get vs i))))
+        (core.when (< i value-count)
+          (core.update! out key (arr.get vs i))))
       out)))

@@ -17,8 +17,8 @@
 
 (defn macro-dsl-demo []
   (let [point (make-Point)]
-    (core/println point)
-    (core/println (point-origin? point))))
+    (core.println point)
+    (core.println (point-origin? point))))
 
 (defn main []
   (macro-dsl-demo))

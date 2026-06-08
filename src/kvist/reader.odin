@@ -1,6 +1,7 @@
 package kvist
 
 import "core:strings"
+import "core:fmt"
 
 is_whitespace :: proc(ch: byte) -> bool {
     return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r'
@@ -31,18 +32,27 @@ make_token :: proc(kind: Token_Kind, text: string, start, end: int, source_kind:
 }
 
 scan_compact_bracket_type :: proc(source: string, start: int) -> (end: int, ok: bool) {
-    i := start + 1
-    for i < len(source) && source[i] != ']' {
-        if is_whitespace(source[i]) || source[i] == '(' || source[i] == ')' || source[i] == '{' || source[i] == '}' || source[i] == ',' || source[i] == ';' {
+    i := start
+    if source[start] == '^' {
+        if start+1 >= len(source) || source[start+1] != '[' {
+            return start, false
+        }
+        i = start + 1
+    }
+    for i < len(source) && source[i] == '[' {
+        i += 1
+        for i < len(source) && source[i] != ']' {
+            if is_whitespace(source[i]) || source[i] == '(' || source[i] == ')' || source[i] == '{' || source[i] == '}' || source[i] == ',' || source[i] == ';' {
+                return start, false
+            }
+            i += 1
+        }
+        if i >= len(source) || source[i] != ']' {
             return start, false
         }
         i += 1
     }
-    if i >= len(source) || source[i] != ']' {
-        return start, false
-    }
-    i += 1
-    if i >= len(source) || is_symbol_boundary(source[i]) || source[i] == '[' || source[i] == ']' {
+    if i >= len(source) || is_symbol_boundary(source[i]) || source[i] == ']' || source[i] == '.' {
         return start, false
     }
     for i < len(source) && !is_delimiter(source[i]) {
@@ -201,47 +211,6 @@ scan_compact_set_type :: proc(source: string, start: int) -> (end: int, ok: bool
     return i, true
 }
 
-scan_attached_index_symbol :: proc(source: string, start: int) -> (end: int, ok: bool) {
-    if start >= len(source) || is_delimiter(source[start]) || source[start] == ':' || source[start] == '"' {
-        return start, false
-    }
-    i := start
-    saw_index := false
-    for i < len(source) {
-        if source[i] == '/' && i+1 < len(source) && source[i+1] == '/' {
-            break
-        }
-        if source[i] == '[' {
-            saw_index = true
-            i += 1
-            depth := 1
-            for i < len(source) && depth > 0 {
-                if is_whitespace(source[i]) || source[i] == '(' || source[i] == ')' || source[i] == '{' || source[i] == '}' || source[i] == ',' || source[i] == ';' {
-                    return start, false
-                }
-                if source[i] == '[' {
-                    depth += 1
-                } else if source[i] == ']' {
-                    depth -= 1
-                }
-                i += 1
-            }
-            if depth != 0 {
-                return start, false
-            }
-            continue
-        }
-        if is_delimiter(source[i]) {
-            break
-        }
-        i += 1
-    }
-    if !saw_index {
-        return start, false
-    }
-    return i, true
-}
-
 scan_number :: proc(source: string, start: int) -> (end: int, ok: bool) {
     if start >= len(source) {
         return start, false
@@ -300,7 +269,7 @@ tokenize_with_origin :: proc(source: string, source_kind: Source_Kind) -> (token
             continue
         }
         start := i
-        if ch == '[' {
+        if ch == '[' || ch == '^' {
             end, ok_type := scan_compact_bracket_type(source, start)
             if ok_type {
                 append(&tokens, make_token(.Symbol, source[start:end], start, end, source_kind))
@@ -351,11 +320,6 @@ tokenize_with_origin :: proc(source: string, source_kind: Source_Kind) -> (token
                 i = end
                 continue
             }
-        }
-        if end, ok_indexed := scan_attached_index_symbol(source, start); ok_indexed {
-            append(&tokens, make_token(.Symbol, source[start:end], start, end, source_kind))
-            i = end
-            continue
         }
         if end, ok_number := scan_number(source, start); ok_number {
             append(&tokens, make_token(.Number, source[start:end], start, end, source_kind))
@@ -492,7 +456,7 @@ parse_container :: proc(tokens: []Token, index: ^int, open_kind, close_kind: Tok
     }, {}, true
 }
 
-parse_form :: proc(tokens: []Token, index: ^int) -> (form: CST_Form, err: Compile_Error, ok: bool) {
+parse_primary_form :: proc(tokens: []Token, index: ^int) -> (form: CST_Form, err: Compile_Error, ok: bool) {
     if index^ >= len(tokens) {
         return form, Compile_Error{message = "unexpected end of input"}, false
     }
@@ -540,6 +504,169 @@ parse_form :: proc(tokens: []Token, index: ^int) -> (form: CST_Form, err: Compil
         return form, Compile_Error{message = "unexpected end of input", span = token.span}, false
     }
     return form, Compile_Error{message = "unsupported token", span = token.span}, false
+}
+
+token_is_attached_field_postfix :: proc(token: Token, base: CST_Form) -> bool {
+    return token.kind == .Symbol &&
+           token.span.start == base.span.end &&
+           len(token.text) > 1 &&
+           token.text[0] == '.'
+}
+
+omitted_slice_bound_form :: proc(span: Span) -> CST_Form {
+    return CST_Form{kind = .Symbol, text = "__kvist_omitted", span = span}
+}
+
+form_from_compact_slice_part :: proc(text: string, span: Span) -> CST_Form {
+    if len(text) == 0 {
+        return omitted_slice_bound_form(span)
+    }
+    if text == "true" || text == "false" {
+        return CST_Form{kind = .Bool, text = text, span = span}
+    }
+    if text == "nil" {
+        return CST_Form{kind = .Nil, text = text, span = span}
+    }
+    if number_end, ok_number := scan_number(text, 0); ok_number && number_end == len(text) {
+        return CST_Form{kind = .Number, text = text, span = span}
+    }
+    return CST_Form{kind = .Symbol, text = text, span = span}
+}
+
+split_compact_slice_form :: proc(form: CST_Form) -> (start, end: CST_Form, ok: bool) {
+    if form.kind == .Keyword {
+        if form.text == ":" {
+            return omitted_slice_bound_form(form.span), omitted_slice_bound_form(form.span), true
+        }
+        if len(form.text) > 1 {
+            return omitted_slice_bound_form(form.span), form_from_compact_slice_part(form.text[1:], form.span), true
+        }
+        return {}, {}, false
+    }
+    if form.kind != .Symbol && form.kind != .Number {
+        return {}, {}, false
+    }
+    colon := strings.index(form.text, ":")
+    if colon < 0 {
+        return {}, {}, false
+    }
+    rest := form.text[colon+1:]
+    if strings.index(rest, ":") >= 0 {
+        return {}, {}, false
+    }
+    return form_from_compact_slice_part(form.text[:colon], form.span), form_from_compact_slice_part(rest, form.span), true
+}
+
+attached_slice_bounds :: proc(items: []CST_Form) -> (start, end: CST_Form, ok: bool) {
+    if len(items) == 1 {
+        return split_compact_slice_form(items[0])
+    }
+    if len(items) == 2 {
+        if compact_start, compact_end, ok_compact := split_compact_slice_form(items[0]); ok_compact {
+            if compact_end.kind == .Symbol && compact_end.text == "__kvist_omitted" {
+                return compact_start, items[1], true
+            }
+        }
+        if items[0].kind == .Keyword && items[0].text == ":" {
+            return omitted_slice_bound_form(items[0].span), items[1], true
+        }
+        if items[1].kind == .Keyword {
+            if items[1].text == ":" {
+                return items[0], omitted_slice_bound_form(items[1].span), true
+            }
+            if len(items[1].text) > 1 {
+                return items[0], form_from_compact_slice_part(items[1].text[1:], items[1].span), true
+            }
+        }
+    }
+    if len(items) == 3 && items[1].kind == .Keyword && items[1].text == ":" {
+        return items[0], items[2], true
+    }
+    return {}, {}, false
+}
+
+parse_attached_postfix :: proc(tokens: []Token, index: ^int, base: CST_Form) -> (form: CST_Form, err: Compile_Error, ok: bool) {
+    current := base
+    for index^ < len(tokens) {
+        if token_is_attached_field_postfix(tokens[index^], current) {
+            token := tokens[index^]
+            index^ += 1
+            list_items: [dynamic]CST_Form
+            append(&list_items, CST_Form{kind = .Keyword, text = fmt.tprintf(":%s", token.text[1:]), span = token.span})
+            append(&list_items, current)
+            current = CST_Form{
+                kind = .List,
+                items = list_items,
+                span = make_span(current.span.start, token.span.end, token.span.source),
+            }
+            continue
+        }
+        if tokens[index^].kind != .L_Bracket || tokens[index^].span.start != current.span.end {
+            break
+        }
+        open := tokens[index^]
+        source_kind := open.span.source
+        index^ += 1
+        items: [dynamic]CST_Form
+        for index^ < len(tokens) && tokens[index^].kind != .R_Bracket {
+            if tokens[index^].kind == .Discard {
+                index^ += 1
+                _, err_skip, ok_skip := parse_form(tokens, index)
+                if !ok_skip {
+                    return form, err_skip, false
+                }
+                continue
+            }
+            if tokens[index^].kind == .Line_Comment || tokens[index^].kind == .Block_Comment {
+                index^ += 1
+                continue
+            }
+            item, err_item, ok_item := parse_form(tokens, index)
+            if !ok_item {
+                return form, err_item, false
+            }
+            append(&items, item)
+        }
+        if index^ >= len(tokens) || tokens[index^].kind != .R_Bracket {
+            return form, Compile_Error{message = "missing closing delimiter", span = make_span(open.span.start, open.span.start, source_kind)}, false
+        }
+        close := tokens[index^]
+        index^ += 1
+        if start, end, ok_slice := attached_slice_bounds(items[:]); ok_slice {
+            list_items: [dynamic]CST_Form
+            append(&list_items, CST_Form{kind = .Symbol, text = "__kvist_slice", span = open.span})
+            append(&list_items, current)
+            append(&list_items, start)
+            append(&list_items, end)
+            current = CST_Form{
+                kind = .List,
+                items = list_items,
+                span = make_span(current.span.start, close.span.end, source_kind),
+            }
+            continue
+        }
+        if len(items) != 1 {
+            return form, Compile_Error{message = "attached index expects exactly one expression", span = make_span(open.span.start, close.span.end, source_kind)}, false
+        }
+        list_items: [dynamic]CST_Form
+        append(&list_items, CST_Form{kind = .Symbol, text = "__kvist_index", span = open.span})
+        append(&list_items, current)
+        append(&list_items, items[0])
+        current = CST_Form{
+            kind = .List,
+            items = list_items,
+            span = make_span(current.span.start, close.span.end, source_kind),
+        }
+    }
+    return current, {}, true
+}
+
+parse_form :: proc(tokens: []Token, index: ^int) -> (form: CST_Form, err: Compile_Error, ok: bool) {
+    primary, err_primary, ok_primary := parse_primary_form(tokens, index)
+    if !ok_primary {
+        return form, err_primary, false
+    }
+    return parse_attached_postfix(tokens, index, primary)
 }
 
 is_doc_comment :: proc(text: string) -> bool {

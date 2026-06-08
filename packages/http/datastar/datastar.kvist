@@ -78,7 +78,7 @@ __kvist_http_datastar_redirect :: proc(stream: ^h.Sse, url: string) {
 (defmacro patch-elements-seq!
   "Send several Datastar element patches in order.
 
-  Each element expands to one `datastar/patch-elements!` call."
+  Each element expands to one `datastar.patch-elements!` call."
   [stream & elements]
   (let [calls (map (fn [element]
                      (quasiquote

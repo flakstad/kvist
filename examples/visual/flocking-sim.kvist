@@ -66,7 +66,7 @@
 (defn make-boids
   "Allocate and initialize the SOA boid buffer."
   [n: int] -> #soa[dynamic]Boid
-  (let [boids (soa/make Boid n)
+  (let [boids (soa.make Boid n)
         seed: u32 0x51F00D
         i 0]
     (while (< i n)
@@ -75,7 +75,7 @@
             x (+ 80.0 (* (- (f32 Width) 160.0) (rand-unit (addr seed))))
             y (+ 130.0 (* (- (f32 Height) 180.0) (rand-unit (addr seed))))
             hue (* 360.0 (rand-unit (addr seed)))]
-        (soa/push! boids (Boid {:x x
+        (soa.push! boids (Boid {:x x
                                 :y y
                                 :vx (* speed (math.cos angle))
                                 :vy (* speed (math.sin angle))
@@ -204,7 +204,7 @@
     (draw-hud-text font (fmt.ctprintf "%3d" state.target-fps) 950 20 Hud-Font-Size rl.RAYWHITE)
     (draw-hud-text font "rules" 18 48 Hud-Font-Size rl.LIGHTGRAY)
     (draw-hud-text font "separation + alignment + cohesion, direct SOA columns" 72 48 Hud-Font-Size rl.RAYWHITE)
-    (draw-hud-text font "space: pause   drag/click: attract   1/2/3: 30/60/144 fps   r: reset" 18 73 16.0 rl.LIGHTGRAY)))
+    (draw-hud-text font "space: pause   drag.click: attract   1/2/3: 30/60/144 fps   r: reset" 18 73 16.0 rl.LIGHTGRAY)))
 
 (defn update-fps-metric!
   "Update the smoothed FPS counter roughly twice per second."

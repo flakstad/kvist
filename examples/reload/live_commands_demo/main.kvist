@@ -40,9 +40,9 @@
                                                                    module-config)]
                     (if (not reload-ok)
                       (fmt.eprintln "reload failed:" (:message reload-err))
-                      (core/when changed
+                      (core.when changed
                         (fmt.println "reloaded live module from disk"))))
                   (let [[_ command-err command-ok] (kvist_live.invoke_command (addr runtime) "tick" nil)]
-                    (core/when (not command-ok)
+                    (core.when (not command-ok)
                       (fmt.eprintln "command failed:" (:message command-err))))
                   (time.sleep tick-delay))))))))))

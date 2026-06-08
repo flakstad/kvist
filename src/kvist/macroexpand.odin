@@ -103,7 +103,7 @@ macro_eval_restore_anchor :: proc(previous: string) {
 
 macro_eval_read_path :: proc(raw_path: string, span: Span) -> (path: string, err: Compile_Error, ok: bool) {
     if raw_path == "" {
-        return "", Compile_Error{message = "io/read path must not be empty", span = span}, false
+        return "", Compile_Error{message = "io.read path must not be empty", span = span}, false
     }
     if os.is_absolute_path(raw_path) {
         return strings.clone(raw_path), Compile_Error{}, true
@@ -124,7 +124,7 @@ macro_eval_read_path :: proc(raw_path: string, span: Span) -> (path: string, err
 
     resolved, join_err := os.join_path({base, raw_path}, context.allocator)
     if join_err != nil {
-        return "", Compile_Error{message = fmt.tprintf("could not resolve compile-time io/read path: %s", raw_path), span = span}, false
+        return "", Compile_Error{message = fmt.tprintf("could not resolve compile-time io.read path: %s", raw_path), span = span}, false
     }
     return resolved, Compile_Error{}, true
 }
@@ -360,7 +360,7 @@ core_package_local_macros :: proc(anchor_path: string = ".") -> ([]User_Macro, C
         }
         qualified := clone_user_macro(macro_decl)
         old_name := qualified.name
-        qualified.name = fmt.tprintf("core/%s", old_name)
+        qualified.name = fmt.tprintf("core.%s", old_name)
         delete(old_name)
         append(&macros, macro_decl)
         append(&macros, qualified)
@@ -1113,7 +1113,7 @@ macro_eval_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_
                 return macro_eval_list_builder(.Vector, form, macros, bindings)
             case "brace":
                 return macro_eval_list_builder(.Brace, form, macros, bindings)
-            case "first", "arr/first", "kvist/first":
+            case "first", "arr.first", "kvist.first":
                 if len(form.items) != 2 {
                     return Macro_Value{}, Compile_Error{message = "first expects one argument", span = form.span}, false
                 }
@@ -1129,7 +1129,7 @@ macro_eval_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_
                     return macro_nil_value(), Compile_Error{}, true
                 }
                 return macro_form_value(forms[0]), Compile_Error{}, true
-            case "rest", "arr/rest", "kvist/rest":
+            case "rest", "arr.rest", "kvist.rest":
                 if len(form.items) != 2 {
                     return Macro_Value{}, Compile_Error{message = "rest expects one argument", span = form.span}, false
                 }
@@ -1145,7 +1145,7 @@ macro_eval_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_
                     return macro_forms_value(nil), Compile_Error{}, true
                 }
                 return macro_forms_value(forms[1:]), Compile_Error{}, true
-            case "nth", "arr/nth", "kvist/nth":
+            case "nth", "arr.nth", "kvist.nth":
                 if len(form.items) != 3 {
                     return Macro_Value{}, Compile_Error{message = "nth expects sequence and index", span = form.span}, false
                 }
@@ -1168,7 +1168,7 @@ macro_eval_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_
                     return macro_nil_value(), Compile_Error{}, true
                 }
                 return macro_form_value(forms[index_value.int_value]), Compile_Error{}, true
-            case "core/count", "count", "kvist/count":
+            case "core.count", "count", "kvist.count":
                 if len(form.items) != 2 {
                     return Macro_Value{}, Compile_Error{message = "count expects one argument", span = form.span}, false
                 }
@@ -1191,7 +1191,7 @@ macro_eval_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_
                 case:
                     return macro_int_value(1), Compile_Error{}, true
                 }
-            case "core/slice", "slice":
+            case "core.slice", "slice":
                 if len(form.items) != 3 && len(form.items) != 4 {
                     return Macro_Value{}, Compile_Error{message = "slice expects sequence, start, and optional end", span = form.span}, false
                 }
@@ -1308,9 +1308,9 @@ macro_eval_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_
                     strings.write_string(&builder, text)
                 }
                 return macro_string_value(strings.clone(strings.to_string(builder))), Compile_Error{}, true
-            case "io/read", "io__read":
+            case "io.read", "io__read":
                 if len(form.items) != 2 {
-                    return Macro_Value{}, Compile_Error{message = "io/read expects one path argument", span = form.span}, false
+                    return Macro_Value{}, Compile_Error{message = "io.read expects one path argument", span = form.span}, false
                 }
                 path_value, err_path_value, ok_path_value := macro_eval_expr(form.items[1], macros, bindings)
                 if !ok_path_value {
@@ -1327,7 +1327,7 @@ macro_eval_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_
                 defer delete(path)
                 data, read_err := os.read_entire_file_from_path(path, context.allocator)
                 if read_err != nil {
-                    return Macro_Value{}, Compile_Error{message = fmt.tprintf("compile-time io/read could not read file: %s", path), span = form.items[1].span}, false
+                    return Macro_Value{}, Compile_Error{message = fmt.tprintf("compile-time io.read could not read file: %s", path), span = form.items[1].span}, false
                 }
                 text := strings.clone(string(data))
                 delete(data)

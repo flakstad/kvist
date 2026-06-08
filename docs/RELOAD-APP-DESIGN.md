@@ -19,10 +19,10 @@ Production owns the real app state:
   {:ticks int})
 
 (defn init [state: (ptr App_State)]
-  (set! (:ticks state^) 0))
+  (set! state^.ticks 0))
 
 (defn tick [state: (ptr App_State)]
-  (set! (:ticks state^) (+ (:ticks state^) 1)))
+  (set! state^.ticks (+ state^.ticks 1)))
 
 (defn main []
   (let [state (App_State {})]
@@ -40,14 +40,14 @@ The reload adapter declares the reload contract:
 (import app "app")
 (import reload "kvist:reload")
 
-(defstate app/App_State
+(defstate app.App_State
   {:run run
-   :init app/init})
+   :init app.init})
 
-(defn run [state: (ptr app/App_State) host: (ptr reload/Run_Host)]
+(defn run [state: (ptr app.App_State) host: (ptr reload.Run_Host)]
   (while true
-    (app/tick state)
-    (core/when (reload/checkpoint! host)
+    (app.tick state)
+    (core.when (reload.checkpoint! host)
       (return))))
 ```
 
@@ -138,7 +138,7 @@ That should be enough to say:
 ## `:run` Safe-Boundary Guidance
 
 For `:run`, the most important user obligation is where to place
-`reload/checkpoint!`.
+`reload.checkpoint!`.
 
 The rule is:
 
@@ -171,10 +171,10 @@ So the user guidance is not "call checkpoint every N milliseconds". It is:
 For example:
 
 ```clojure
-(defn run [state: (ptr App_State) host: (ptr reload/Run_Host)]
+(defn run [state: (ptr App_State) host: (ptr reload.Run_Host)]
   (while true
     (process-one-job state)
-    (core/when (reload/checkpoint! host)
+    (core.when (reload.checkpoint! host)
       (return))))
 ```
 
@@ -215,7 +215,7 @@ kvist dev --reload reload.kvist --print-paths --json
 `--watch` starts the resident host and polls the adapter directory recursively
 for `.kvist` changes. On change, Kvist recompiles the adapter package to Odin,
 rebuilds the reloadable dynamic library, and the running app picks it up at the
-next `reload/checkpoint!` boundary.
+next `reload.checkpoint!` boundary.
 
 ## Runtime Model
 
@@ -224,7 +224,7 @@ The runtime model is one callback:
 - the resident host owns one durable state value
 - the reloadable module owns current code
 - `run` owns the app loop
-- `reload/checkpoint!` marks safe boundaries
+- `reload.checkpoint!` marks safe boundaries
 - when `checkpoint!` returns true, `run` returns to the host
 - the host validates state layout and swaps the module
 
@@ -245,13 +245,13 @@ Kvist-facing syntax:
 
 ```clojure
 (import reload "kvist:reload")
-(reload/checkpoint! host)
+(reload.checkpoint! host)
 ```
 
 or:
 
 ```clojure
-(hot/poll-reload! host)
+(hot.poll-reload! host)
 ```
 
 The rule should be:
@@ -263,20 +263,20 @@ The rule should be:
 For example, in a server-style loop:
 
 ```clojure
-(defn run [state: (ptr Server_State) host: (ptr reload/Run_Host)]
+(defn run [state: (ptr Server_State) host: (ptr reload.Run_Host)]
   (while true
     (accept-or-process-one-thing state)
-    (reload/checkpoint! host)))
+    (reload.checkpoint! host)))
 ```
 
 For a framework-owned event loop, the checkpoint may sit in one adapter
 callback:
 
 ```clojure
-(defn run [state: (ptr App_State) host: (ptr reload/Run_Host)]
+(defn run [state: (ptr App_State) host: (ptr reload.Run_Host)]
   (framework/start
     {:on-cycle (fn []
-                 (reload/checkpoint! host))}))
+                 (reload.checkpoint! host))}))
 ```
 
 Those are not final syntax promises. They show the intended architectural
@@ -286,7 +286,7 @@ shape:
 - one explicit checkpoint
 - zero ambient magic inside ordinary application logic
 
-### What `reload/checkpoint!` Would Mean
+### What `reload.checkpoint!` Would Mean
 
 The checkpoint operation should mean:
 
@@ -368,18 +368,18 @@ The workflow has now started moving toward a direct development command.
 For example:
 
 ```sh
-kvist dev --reload app/main.kvist
+kvist dev --reload app.main.kvist
 ```
 
 The current first pass already exists:
 
 - top-level `(defstate Name {fields...} {metadata...})`
-- `kvist dev --reload app/main.kvist`
-- `kvist dev --reload app/main.kvist --rebuild`
-- `kvist dev --reload app/main.kvist --print-paths`
-- `kvist check --reload app/main.kvist`
-- `kvist build --reload app/main.kvist`
-- `kvist run --reload app/main.kvist`
+- `kvist dev --reload app.main.kvist`
+- `kvist dev --reload app.main.kvist --rebuild`
+- `kvist dev --reload app.main.kvist --print-paths`
+- `kvist check --reload app.main.kvist`
+- `kvist build --reload app.main.kvist`
+- `kvist run --reload app.main.kvist`
 
 The current command generates:
 
@@ -471,7 +471,7 @@ Cons:
 ### Option C: CLI-only first step
 
 ```sh
-kvist dev --reload app/main.kvist --state App_State
+kvist dev --reload app.main.kvist --state App_State
 ```
 
 Pros:

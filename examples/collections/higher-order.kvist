@@ -1,4 +1,4 @@
-// Exercises arr generic map/filter/reduce helpers.
+// Exercises arr generic map.filter/reduce helpers.
 (package main)
 (import arr "kvist:arr")
 
@@ -13,31 +13,31 @@
 
 (defn mapped-first [] -> int
   (let [xs ([]int [1 2 3 4])
-        mapped (arr/map inc xs)]
+        mapped (arr.map inc xs)]
     (defer (delete mapped))
-    (arr/first mapped)))
+    (arr.first mapped)))
 
 (defn even-count [] -> int
   (let [xs ([]int [1 2 3 4])
-        mapped (arr/map inc xs)
-        evens (arr/filter even? mapped)]
+        mapped (arr.map inc xs)
+        evens (arr.filter even? mapped)]
     (defer (delete mapped))
     (defer (delete evens))
     (len evens)))
 
 (defn threaded-total [] -> int
   (let [xs ([]int [1 2 3 4])
-        mapped (arr/map inc xs)
-        evens (arr/filter even? mapped)
-        total (arr/reduce add 0 evens)]
+        mapped (arr.map inc xs)
+        evens (arr.filter even? mapped)
+        total (arr.reduce add 0 evens)]
     (defer (delete mapped))
     (defer (delete evens))
     total))
 
 (defn main []
-  (core/println (threaded-total)))
+  (core.println (threaded-total)))
 
-(core/comment
+(core.comment
   (mapped-first)
   ;; => 2
 

@@ -4,9 +4,9 @@
 // - (import live "kvist:live")
 // - (import "path") for helper files
 // - ordinary top-level (defn ...)
-// - (live/defmodule {...} ...)
-// - (live/defcommand name ...)
-// - (live/defhook name ...)
+// - (live.defmodule {...} ...)
+// - (live.defcommand name ...)
+// - (live.defhook name ...)
 // - top-level def / defvar literals
 // - ordinary top-level macro expansion before live loading
 // - source-defined (defn migrate []) on reload
@@ -15,7 +15,7 @@
 
 (import "helpers")
 
-(live/defmodule
+(live.defmodule
   {:name "commands"
    :version "v1"}
 
@@ -24,30 +24,30 @@
   (def counter-key "run-count")
 
   (defn init []
-    (host/call "host.log" "live module initialized"))
+    (host.call "host.log" "live module initialized"))
 
   (defn migrate []
-    (core/when (reload/from-version)
-      (let [old-run-count (reload/state-get "run-count")
-            old-tick-count (reload/state-get "tick-count")]
+    (core.when (reload.from-version)
+      (let [old-run-count (reload.state-get "run-count")
+            old-tick-count (reload.state-get "tick-count")]
         (if (= counter-key "tick-count")
-          (core/when old-run-count
-            (state/set! counter-key old-run-count)
-            (host/call "host.log"
+          (core.when old-run-count
+            (state.set! counter-key old-run-count)
+            (host.call "host.log"
                        (str "migrated counter from run-count to " counter-key)))
-          (core/when old-tick-count
-            (state/set! counter-key old-tick-count)
-            (host/call "host.log"
+          (core.when old-tick-count
+            (state.set! counter-key old-tick-count)
+            (host.call "host.log"
                        (str "migrated counter from tick-count to " counter-key)))))))
 
   (defn shutdown []
-    (host/call "host.log" "live module shutting down"))
+    (host.call "host.log" "live module shutting down"))
 
-  (live/defcommand tick
-    (let [count (state/inc! counter-key)]
+  (live.defcommand tick
+    (let [count (state.inc! counter-key)]
       (render-and-log count)
-      (hook/emit "after-command" count message)
+      (hook.emit "after-command" count message)
       count))
 
-  (live/defhook after-command
-    (log-hook-message "after-command" (payload/get 0) (payload/get 1))))
+  (live.defhook after-command
+    (log-hook-message "after-command" (payload.get 0) (payload.get 1))))

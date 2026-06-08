@@ -33,7 +33,7 @@
    :draw-ms f64})
 
 (defn idx
-  "Convert grid x/y coordinates into a flat array index."
+  "Convert grid x.y coordinates into a flat array index."
   [x: int, y: int] -> int
   (+ x (* y Grid-W)))
 
@@ -182,7 +182,7 @@
     (draw-hud-text font (fmt.ctprintf "%3d/frame" state.steps-per-frame) 82 50 Hud-Font-Size rl.RAYWHITE)
     (draw-hud-text font "buffers" 215 50 Hud-Font-Size rl.LIGHTGRAY)
     (draw-hud-text font "current, previous, next [dynamic]f32" 292 50 Hud-Font-Size rl.RAYWHITE)
-    (draw-hud-text font "drag/click: inject ripple   space: pause   up/down: steps   1/2/3: fps   r: reset" 18 76 16.0 rl.LIGHTGRAY)))
+    (draw-hud-text font "drag.click: inject ripple   space: pause   up.down: steps   1/2/3: fps   r: reset" 18 76 16.0 rl.LIGHTGRAY)))
 
 (defn update-fps-metric!
   "Update the smoothed FPS counter roughly twice per second."

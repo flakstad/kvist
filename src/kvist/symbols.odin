@@ -467,25 +467,19 @@ imported_symbols_scan_odin_dir :: proc(builder: ^strings.Builder, alias, import_
             signature := odin_signature_at_line(source, idx+1)
             doc := odin_trim_doc(odin_preceding_doc(source, idx+1))
             rank := odin_decl_rank(path, name)
-            key_slash := fmt.tprintf("%s/%s", alias, name)
-            existing_rank, found_rank := best_rank[key_slash]
+            key := fmt.tprintf("%s.%s", alias, name)
+            existing_rank, found_rank := best_rank[key]
             if found_rank && existing_rank <= rank {
                 delete(signature)
                 delete(doc)
                 continue
             }
-            if prev, found := best[key_slash]; found {
+            if prev, found := best[key]; found {
                 delete(prev)
             }
-            if prev, found := best[fmt.tprintf("%s.%s", alias, name)]; found {
-                delete(prev)
-            }
-            record_slash := strings.clone(fmt.tprintf("odin\t%s/%s\t%d\t1\t%s\t%s\t%s\t%s\n", alias, name, idx+1, import_path, signature, symbols_escape_doc_text(doc), path))
-            record_dot := strings.clone(fmt.tprintf("odin\t%s.%s\t%d\t1\t%s\t%s\t%s\t%s\n", alias, name, idx+1, import_path, signature, symbols_escape_doc_text(doc), path))
-            best[key_slash] = record_slash
-            best[fmt.tprintf("%s.%s", alias, name)] = record_dot
-            best_rank[key_slash] = rank
-            best_rank[fmt.tprintf("%s.%s", alias, name)] = rank
+            record := strings.clone(fmt.tprintf("odin\t%s.%s\t%d\t1\t%s\t%s\t%s\t%s\n", alias, name, idx+1, import_path, signature, symbols_escape_doc_text(doc), path))
+            best[key] = record
+            best_rank[key] = rank
         }
     }
 
@@ -644,11 +638,6 @@ symbols_append_source_package_records :: proc(builder: ^strings.Builder, seen: ^
         kind_text := kind
         if package_kind != "" {
             kind_text = package_kind
-        }
-        slash_name := fmt.tprintf("%s/%s", alias, name)
-        if !seen[slash_name] {
-            seen[slash_name] = true
-            fmt.sbprintf(builder, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", kind_text, slash_name, line_text, column_text, import_path, signature, doc, package_file)
         }
         dot_name := fmt.tprintf("%s.%s", alias, name)
         if !seen[dot_name] {

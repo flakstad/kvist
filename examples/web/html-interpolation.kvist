@@ -13,25 +13,25 @@
         ratio 1.5
         enabled? true
         archived? false
-        html (html/render
+        html (html.render
                [:section {:data-count count
                           :data-ratio ratio
                           :hidden enabled?
                           :data-state (if enabled? "ready" "hidden")
-                          :data-archived (core/when archived? "true")}
+                          :data-archived (core.when archived? "true")}
                 [:h1 title]
                 [:<>
                  [:h2 title]
                  [:p (+ count 10)]]
                 [:p (status-label enabled?)]
                 [:p (+ count 1)]
-                (core/when archived?
+                (core.when archived?
                   [:p "Archived"])
                 nil
                 (if enabled?
                   "Visible"
                   "Hidden")]) defer]
-    (core/println html)
+    (core.println html)
     true))
 
 (defn main []

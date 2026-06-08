@@ -36,7 +36,7 @@
                            (User {:name "Lin" :age 17 :status .Paused :verified false})
                            (User {:name "Grace" :age 45 :status .Active :verified true})
                            (User {:name "Edsger" :age 72 :status .Archived :verified false})])
-        active-users (arr/filter active? users)]
+        active-users (arr.filter active? users)]
     (defer (delete active-users))
     (len active-users)))
 
@@ -45,8 +45,8 @@
                            (User {:name "Lin" :age 17 :status .Paused :verified false})
                            (User {:name "Grace" :age 45 :status .Active :verified true})
                            (User {:name "Edsger" :age 72 :status .Archived :verified false})])
-        active-users (arr/filter active? users)
-        total (arr/reduce add-age 0 active-users)]
+        active-users (arr.filter active? users)
+        total (arr.reduce add-age 0 active-users)]
     (defer (delete active-users))
     total))
 
@@ -55,9 +55,9 @@
                            (User {:name "Lin" :age 17 :status .Paused :verified false})
                            (User {:name "Grace" :age 45 :status .Active :verified true})
                            (User {:name "Edsger" :age 72 :status .Archived :verified false})])
-        active-users (arr/filter active? users)
-        active-names (arr/map :name active-users)
-        name (arr/first active-names)]
+        active-users (arr.filter active? users)
+        active-names (arr.map :name active-users)
+        name (arr.first active-names)]
     (defer (delete active-users))
     (defer (delete active-names))
     name))
@@ -67,8 +67,8 @@
                            (User {:name "Lin" :age 17 :status .Paused :verified false})
                            (User {:name "Grace" :age 45 :status .Active :verified true})
                            (User {:name "Edsger" :age 72 :status .Archived :verified false})])
-        users-by-name (arr/index-by :name users)
-        ada (core/get users-by-name "Ada")]
+        users-by-name (arr.index-by :name users)
+        ada (core.get users-by-name "Ada")]
     (defer (delete users-by-name))
     (:age ada)))
 
@@ -77,7 +77,7 @@
                            (User {:name "Grace" :age 45 :status .Active :verified true})
                            (User {:name "Lin" :age 17 :status .Paused :verified false})
                            (User {:name "Edsger" :age 72 :status .Archived :verified false})])
-        status-runs (arr/partition-by :status users)]
+        status-runs (arr.partition-by :status users)]
     (defer (delete status-runs))
     (len status-runs)))
 
@@ -86,8 +86,8 @@
                            (User {:name "Lin" :age 17 :status .Paused :verified false})
                            (User {:name "Grace" :age 45 :status .Active :verified true})
                            (User {:name "Edsger" :age 72 :status .Archived :verified false})])
-        by-status (arr/group-by :status users)
-        active-users (core/get by-status .Active)]
+        by-status (arr.group-by :status users)
+        active-users (core.get by-status .Active)]
     (defer
       (each [_ group by-status]
         (delete group))
@@ -99,8 +99,8 @@
                            (User {:name "Lin" :age 17 :status .Paused :verified false})
                            (User {:name "Grace" :age 45 :status .Active :verified true})
                            (User {:name "Edsger" :age 72 :status .Archived :verified false})])
-        by-age (arr/sort-by :age users)
-        name (:name (arr/first by-age))]
+        by-age (arr.sort-by :age users)
+        name (:name (arr.first by-age))]
     (defer (delete by-age))
     name))
 
@@ -110,23 +110,23 @@
                                   (User {:name "Grace" :age 45 :status .Active :verified true})
                                   (User {:name "Edsger" :age 72 :status .Archived :verified false})])]
     (defer (delete users))
-    (arr/sort-by! :age users)
-    (:name (arr/first users))))
+    (arr.sort-by! :age users)
+    (:name (arr.first users))))
 
 (defn third-user-name [] -> string
   (let [users ([]User [(User {:name "Ada" :age 36 :status .Active :verified true})
                            (User {:name "Lin" :age 17 :status .Paused :verified false})
                            (User {:name "Grace" :age 45 :status .Active :verified true})
                            (User {:name "Edsger" :age 72 :status .Archived :verified false})])]
-    (:name (arr/nth users 2))))
+    (:name (arr.nth users 2))))
 
 (defn all-active-users-adults? [] -> bool
   (let [users ([]User [(User {:name "Ada" :age 36 :status .Active :verified true})
                            (User {:name "Lin" :age 17 :status .Paused :verified false})
                            (User {:name "Grace" :age 45 :status .Active :verified true})
                            (User {:name "Edsger" :age 72 :status .Archived :verified false})])
-        active-users (arr/filter active? users)
-        all-adults? (arr/every? adult? active-users)]
+        active-users (arr.filter active? users)
+        all-adults? (arr.every? adult? active-users)]
     (defer (delete active-users))
     all-adults?))
 
@@ -135,13 +135,13 @@
                            (User {:name "Lin" :age 17 :status .Paused :verified false})
                            (User {:name "Grace" :age 45 :status .Active :verified true})
                            (User {:name "Edsger" :age 72 :status .Archived :verified false})])
-        [first-adult _] (arr/find adult? users)]
+        [first-adult _] (arr.find adult? users)]
     (:name first-adult)))
 
 (defn main []
-  (core/println (active-count)))
+  (core.println (active-count)))
 
-(core/comment
+(core.comment
   (:name (User {:name "Ada" :age 36 :status .Active :verified true}))
   ;; => Ada
 

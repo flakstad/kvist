@@ -5,16 +5,16 @@
 (defmacro empty
   "Create an empty Odin set.
 
-  `(set/empty T)` creates a `set[T]` with default capacity.
-  `(set/empty T capacity)` preallocates for approximately `capacity` elements.
+  `(set.empty T)` creates a `set[T]` with default capacity.
+  `(set.empty T capacity)` preallocates for approximately `capacity` elements.
   The set is allocated with the current allocator and has ordinary Odin set
   lifetime."
   [elem-type & rest]
-  (if (= (kvist/count rest) 0)
+  (if (= (kvist.count rest) 0)
     (quasiquote
       (set-empty (unquote elem-type)))
     (quasiquote
-      (set-empty (unquote elem-type) (unquote (kvist/first rest))))))
+      (set-empty (unquote elem-type) (unquote (kvist.first rest))))))
 
 (defmacro of
   "Create a set from `values`.
@@ -32,7 +32,7 @@
   any growth Odin needs for the set itself."
   [s value]
   (quasiquote
-    (core/update! (unquote s) (unquote value) (odin "{}"))))
+    (core.update! (unquote s) (unquote value) (odin "{}"))))
 
 (defmacro remove!
   "Remove `value` from set `s` in place.
@@ -41,45 +41,45 @@
   existing set and does not allocate a replacement set."
   [s value]
   (quasiquote
-    (core/delete! (unquote s) (unquote value))))
+    (core.delete! (unquote s) (unquote value))))
 
 (defmacro union!
   "Mutate `target` so it contains every value from `source`.
 
   Values already present in `target` remain present. This is the in-place
-  version of `set/union` and avoids allocating a new set."
+  version of `set.union` and avoids allocating a new set."
   [target source]
   (quasiquote
     (each [value _ (unquote source)]
-      (core/update! (unquote target) value (odin "{}")))))
+      (core.update! (unquote target) value (odin "{}")))))
 
 (defmacro intersection!
   "Mutate `target` so it keeps only values also present in `source`.
 
   Values not contained by `source` are removed from `target`. This is the
-  in-place version of `set/intersection`."
+  in-place version of `set.intersection`."
   [target source]
   (quasiquote
     (each [value _ (unquote target)]
-      (core/when (not (map/contains? (unquote source) value))
-        (core/delete! (unquote target) value)))))
+      (core.when (not (map.contains? (unquote source) value))
+        (core.delete! (unquote target) value)))))
 
 (defmacro difference!
   "Mutate `target` so it removes every value present in `source`.
 
-  This is the in-place version of `set/difference`; it preserves values from
+  This is the in-place version of `set.difference`; it preserves values from
   `target` that are not members of `source`."
   [target source]
   (quasiquote
     (each [value _ (unquote source)]
-      (core/delete! (unquote target) value))))
+      (core.delete! (unquote target) value))))
 
 (defn contains?
   "Return true when `value` is a member of `s`.
 
-  This lowers to direct set/map membership and does not allocate."
+  This lowers to direct set.map membership and does not allocate."
   [s: set[$T], value: T] -> bool #force_inline
-  (map/contains? s value))
+  (map.contains? s value))
 
 (defn union
   "Return a new set containing all values from `lhs` and `rhs`.
@@ -87,11 +87,11 @@
   Neither input set is mutated. The result is allocated with enough capacity for
   both inputs before values are inserted."
   [lhs: set[$T], rhs: set[$T]] -> set[T] #force_inline
-  (let [out (set/empty T (+ (odin "len(lhs)") (odin "len(rhs)")))]
+  (let [out (set.empty T (+ (core.count lhs) (core.count rhs)))]
     (each [value _ lhs]
-      (core/update! out value (odin "{}")))
+      (core.update! out value (odin "{}")))
     (each [value _ rhs]
-      (core/update! out value (odin "{}")))
+      (core.update! out value (odin "{}")))
     out))
 
 (defn intersection
@@ -101,21 +101,21 @@
   probes the larger one, avoiding unnecessary work while still lowering to
   direct Odin loops and membership checks."
   [lhs: set[$T], rhs: set[$T]] -> set[T] #force_inline
-  (let [lhs-count (odin "len(lhs)")
-        rhs-count (odin "len(rhs)")
+  (let [lhs-count (core.count lhs)
+        rhs-count (core.count rhs)
         cap lhs-count
         scan lhs
         probe rhs]
-    (core/when (> cap rhs-count)
+    (core.when (> cap rhs-count)
       (set! cap rhs-count))
-    (let [out (set/empty T cap)]
-      (core/when (> lhs-count rhs-count)
+    (let [out (set.empty T cap)]
+      (core.when (> lhs-count rhs-count)
         (do
           (set! scan rhs)
           (set! probe lhs)))
       (each [value _ scan]
-        (core/when (map/contains? probe value)
-          (core/update! out value (odin "{}"))))
+        (core.when (map.contains? probe value)
+          (core.update! out value (odin "{}"))))
       out)))
 
 (defn difference
@@ -124,10 +124,10 @@
   Neither input set is mutated. The result is allocated with capacity based on
   `lhs` and populated by direct membership checks against `rhs`."
   [lhs: set[$T], rhs: set[$T]] -> set[T] #force_inline
-  (let [out (set/empty T (odin "len(lhs)"))]
+  (let [out (set.empty T (core.count lhs))]
     (each [value _ lhs]
-      (core/when (not (map/contains? rhs value))
-        (core/update! out value (odin "{}"))))
+      (core.when (not (map.contains? rhs value))
+        (core.update! out value (odin "{}"))))
     out))
 
 (defn subset?
@@ -137,10 +137,10 @@
   value. If `lhs` is larger than `rhs`, it returns false immediately."
   [lhs: set[$T], rhs: set[$T]] -> bool #force_inline
   (let [ok? true]
-    (core/when (> (odin "len(lhs)") (odin "len(rhs)"))
+    (core.when (> (core.count lhs) (core.count rhs))
       (return false))
     (each [value _ lhs]
-      (core/when (not (map/contains? rhs value))
+      (core.when (not (map.contains? rhs value))
         (do
           (set! ok? false)
           (break))))
@@ -149,7 +149,7 @@
 (defn superset?
   "Return true when every value in `rhs` is also present in `lhs`.
 
-  This is equivalent to `(set/subset? rhs lhs)` and has the same short-circuit
+  This is equivalent to `(set.subset? rhs lhs)` and has the same short-circuit
   behavior."
   [lhs: set[$T], rhs: set[$T]] -> bool #force_inline
   (subset? rhs lhs))
@@ -161,16 +161,16 @@
   as soon as a shared value is found."
   [lhs: set[$T], rhs: set[$T]] -> bool #force_inline
   (let [ok? true
-        lhs-count (odin "len(lhs)")
-        rhs-count (odin "len(rhs)")
+        lhs-count (core.count lhs)
+        rhs-count (core.count rhs)
         scan lhs
         probe rhs]
-    (core/when (> lhs-count rhs-count)
+    (core.when (> lhs-count rhs-count)
       (do
         (set! scan rhs)
         (set! probe lhs)))
     (each [value _ scan]
-      (core/when (map/contains? probe value)
+      (core.when (map.contains? probe value)
         (do
           (set! ok? false)
           (break))))
@@ -182,10 +182,10 @@
   The input set is not mutated. A new set is allocated, existing values are
   copied, and `value` is inserted."
   [s: set[$T], value: T] -> set[T] #force_inline
-  (let [out (set/empty T (+ (odin "len(s)") 1))]
+  (let [out (set.empty T (+ (core.count s) 1))]
     (each [entry _ s]
-      (core/update! out entry (odin "{}")))
-    (core/update! out value (odin "{}"))
+      (core.update! out entry (odin "{}")))
+    (core.update! out value (odin "{}"))
     out))
 
 (defn remove
@@ -194,8 +194,8 @@
   The input set is not mutated. A new set is allocated and every value except
   `value` is copied into it."
   [s: set[$T], value: T] -> set[T] #force_inline
-  (let [out (set/empty T (odin "len(s)"))]
+  (let [out (set.empty T (core.count s))]
     (each [entry _ s]
-      (core/when (!= entry value)
-        (core/update! out entry (odin "{}"))))
+      (core.when (!= entry value)
+        (core.update! out entry (odin "{}"))))
     out))

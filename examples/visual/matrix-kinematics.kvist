@@ -1,4 +1,4 @@
-// Visual matrix/linalg demo: nested 2D frames driving an articulated arm.
+// Visual matrix.linalg demo: nested 2D frames driving an articulated arm.
 (package main)
 (import fmt "core:fmt")
 (import linalg "core:math/linalg")
@@ -86,7 +86,7 @@
   (rl.DrawCircleV (screen center p) radius color))
 
 (defn draw-frame
-  "Draw the local x/y axes of a matrix frame at an origin."
+  "Draw the local x.y axes of a matrix frame at an origin."
   [center: rl.Vector2, origin: [2]f32, frame: matrix[2 2]f32, size: f32]
   (draw-world-line center origin (add2 origin (local frame size 0)) 2.5 (rgba 244 115 94 230))
   (draw-world-line center origin (add2 origin (local frame 0 size)) 2.5 (rgba 90 191 137 230)))

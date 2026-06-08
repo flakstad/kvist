@@ -15,7 +15,7 @@
 (defmacro types
   "Return metadata for the field types of a struct value or type.
 
-  This pairs with `soa/fields` when generated code needs both the field names
+  This pairs with `soa.fields` when generated code needs both the field names
   and their declared Odin types. It is a macro-level helper and does not create
   a runtime reflection table."
   [target]
@@ -28,23 +28,23 @@
 (defmacro make
   "Allocate an empty dynamic struct-of-arrays buffer for `elem-type`.
 
-  `(soa/make Particle)` uses Odin's default dynamic-array capacity.
-  `(soa/make Particle capacity)` reserves the requested capacity up front."
+  `(soa.make Particle)` uses Odin's default dynamic-array capacity.
+  `(soa.make Particle capacity)` reserves the requested capacity up front."
   [elem-type & rest]
   (let [soa-type (soa-dynamic-type elem-type)]
-    (if (= (kvist/count rest) 0)
+    (if (= (kvist.count rest) 0)
       (quasiquote
         (soa-make-raw (unquote soa-type)))
-      (if (= (kvist/count rest) 1)
+      (if (= (kvist.count rest) 1)
         (quasiquote
-          (soa-make-raw (unquote soa-type) (unquote (kvist/first rest))))
-        (error "soa/make expects elem-type and optional capacity")))))
+          (soa-make-raw (unquote soa-type) (unquote (kvist.first rest))))
+        (error "soa.make expects elem-type and optional capacity")))))
 
 (defmacro push!
   "Append one or more struct values to a dynamic struct-of-arrays buffer."
   [particles & values]
   (quasiquote
-    (arr/push! (unquote particles) (splice values))))
+    (arr.push! (unquote particles) (splice values))))
 
 (defmacro reserve!
   "Reserve capacity for a dynamic struct-of-arrays buffer."
@@ -91,39 +91,39 @@
 (defmacro- soa-place [target index field]
   (if (keyword? field)
     (symbol (str (text target) "." (name field) "[" (text index) "]"))
-    (error "soa/update! field names must be keywords")))
+    (error "soa.update! field names must be keywords")))
 
 (defmacro- soa-set-fields [target index clauses]
   (if (nil? clauses)
     (forms)
-    (if (= (kvist/count clauses) 0)
+    (if (= (kvist.count clauses) 0)
       (forms)
-      (if (= (kvist/count clauses) 1)
-        (error "soa/update! expects :field value pairs")
-        (let [field (kvist/first clauses)
-              value (kvist/nth clauses 1)
+      (if (= (kvist.count clauses) 1)
+        (error "soa.update! expects :field value pairs")
+        (let [field (kvist.first clauses)
+              value (kvist.nth clauses 1)
               place (soa-place target index field)]
           (forms
             (quasiquote
               (set! (unquote place) (unquote value)))
-            (soa-set-fields target index (kvist/rest (kvist/rest clauses)))))))))
+            (soa-set-fields target index (kvist.rest (kvist.rest clauses)))))))))
 
 (defmacro- soa-bind-fields [target index clauses body]
   (if (nil? clauses)
     body
-    (if (= (kvist/count clauses) 0)
+    (if (= (kvist.count clauses) 0)
       body
-      (if (= (kvist/count clauses) 1)
-        (error "soa/update! expects :field value pairs")
-        (let [field (kvist/first clauses)
+      (if (= (kvist.count clauses) 1)
+        (error "soa.update! expects :field value pairs")
+        (let [field (kvist.first clauses)
               local (symbol (name field))
               place (soa-place target index field)]
           (quasiquote
             (let [(unquote local) (unquote place)]
-              (unquote (soa-bind-fields target index (kvist/rest (kvist/rest clauses)) body)))))))))
+              (unquote (soa-bind-fields target index (kvist.rest (kvist.rest clauses)) body)))))))))
 
 (defmacro update!
-  "Update SOA columns at `index` using keyword/value field clauses.
+  "Update SOA columns at `index` using keyword.value field clauses.
 
   Each mentioned field is first bound to a same-named local, so update
   expressions can read the old column values with names like `x`, `vx`, and

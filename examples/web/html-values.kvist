@@ -3,13 +3,13 @@
 (import html "kvist:html")
 
 (defn values-demo [] -> bool
-  (let [html (html/render
+  (let [html (html.render
                [:section {:hidden false :data-count 3 :data-ratio 1.5}
                 [:h1 "Report"]
                 [:p true]
                 [:p 42]
                 [:p 3.25]]) defer]
-    (core/println html)
+    (core.println html)
     true))
 
 (defn main []

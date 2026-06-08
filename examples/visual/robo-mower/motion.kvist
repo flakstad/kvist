@@ -1,4 +1,4 @@
-// Reusable motion/navigation commands for the robo mower sandbox.
+// Reusable motion.navigation commands for the robo mower sandbox.
 (package main)
 
 (defn abs-f32
@@ -11,13 +11,13 @@
 (defn drive-to-point-with-radius-command
   "Steer toward a point with a caller-selected squared arrival radius."
   [robot: (ptr Robot), tx: f32, ty: f32, speed: f32, blade: bool, arrive-r2: f32] -> Command
-  (let [dx (- tx (:x robot^))
-        dy (- ty (:y robot^))
+  (let [dx (- tx robot^.x)
+        dy (- ty robot^.y)
         d2 (+ (* dx dx) (* dy dy))]
     (when (< d2 arrive-r2)
       (return (command (f32 0.0) (f32 0.0) blade)))
     (let [target-angle (math.atan2 dy dx)
-          error (normalize-angle (- target-angle (:heading robot^)))
+          error (normalize-angle (- target-angle robot^.heading))
           abs-error (abs-f32 error)
           drive-speed speed
           turn (math.clamp (* error (f32 2.4)) (f32 -2.0) (f32 2.0))]
@@ -62,10 +62,10 @@
 (defn smooth-pursuit-command
   "Steer toward a moving path target without stopping to spin in place."
   [robot: (ptr Robot), tx: f32, ty: f32, speed: f32, blade: bool] -> Command
-  (let [dx (- tx (:x robot^))
-        dy (- ty (:y robot^))
+  (let [dx (- tx robot^.x)
+        dy (- ty robot^.y)
         target-angle (math.atan2 dy dx)
-        error (normalize-angle (- target-angle (:heading robot^)))
+        error (normalize-angle (- target-angle robot^.heading))
         abs-error (abs-f32 error)
         drive-speed speed
         turn (math.clamp (* error (f32 2.65)) (f32 -2.15) (f32 2.15))]
@@ -79,7 +79,7 @@
 (defn corner-turn-command
   "Turn at a boundary corner before advancing along the next wire segment."
   [robot: (ptr Robot), target-heading: f32, blade: bool] -> Command
-  (let [error (normalize-angle (- target-heading (:heading robot^)))
+  (let [error (normalize-angle (- target-heading robot^.heading))
         turn (math.clamp (* error (f32 2.8)) (f32 -2.1) (f32 2.1))]
     (when (> (abs-f32 error) (f32 0.16))
       (return (command (f32 0.0) turn blade)))
@@ -92,15 +92,15 @@
         right (boundary-right-x)
         top (boundary-top-y)
         bottom (boundary-bottom-y)
-        wire-distance (:wire sensors^)
+        wire-distance sensors^.wire
         width (- right left)
         height (- bottom top)
         perimeter (* (+ width height) (f32 2.0))
         base-lookahead (f32 92.0)
         corner-advance (f32 16.0)
         corner-lookahead (f32 42.0)
-        x (:x robot^)
-        y (:y robot^)
+        x robot^.x
+        y robot^.y
         top-x (math.clamp x left right)
         right-y (math.clamp y top bottom)
         bottom-x (math.clamp x left right)
@@ -157,7 +157,7 @@
               (set! tx right)
               (set! ty (math.min (+ top corner-lookahead) bottom))
               (let [turn-cmd (corner-turn-command robot Right-Angle blade)]
-                (when (== (:speed turn-cmd) (f32 0.0))
+                (when (== turn-cmd.speed (f32 0.0))
                   (return turn-cmd)))
               (return (smooth-pursuit-command robot tx ty (f32 34.0) blade))))))
       (when (== side 1)
@@ -171,7 +171,7 @@
               (set! tx (math.max (- right corner-lookahead) left))
               (set! ty bottom)
               (let [turn-cmd (corner-turn-command robot Pi blade)]
-                (when (== (:speed turn-cmd) (f32 0.0))
+                (when (== turn-cmd.speed (f32 0.0))
                   (return turn-cmd)))
               (return (smooth-pursuit-command robot tx ty (f32 34.0) blade))))))
       (when (== side 2)
@@ -185,7 +185,7 @@
               (set! tx left)
               (set! ty (math.max (- bottom corner-lookahead) top))
               (let [turn-cmd (corner-turn-command robot (- Right-Angle) blade)]
-                (when (== (:speed turn-cmd) (f32 0.0))
+                (when (== turn-cmd.speed (f32 0.0))
                   (return turn-cmd)))
               (return (smooth-pursuit-command robot tx ty (f32 34.0) blade))))))
       (when (== side 3)
@@ -199,7 +199,7 @@
               (set! tx (math.min (+ left corner-lookahead) right))
               (set! ty top)
               (let [turn-cmd (corner-turn-command robot 0.0 blade)]
-                (when (== (:speed turn-cmd) (f32 0.0))
+                (when (== turn-cmd.speed (f32 0.0))
                   (return turn-cmd)))
               (return (smooth-pursuit-command robot tx ty (f32 34.0) blade))))))
       (set! target (+ progress lookahead))
@@ -229,17 +229,17 @@
 (defn wire-home-command
   "Find the boundary wire and follow it toward the charging base."
   [robot: (ptr Robot), sensors: (ptr Sensors)] -> Command
-  (when (< (+ (* (- (dock-x) (:x robot^)) (- (dock-x) (:x robot^)))
-              (* (- (dock-y) (:y robot^)) (- (dock-y) (:y robot^)))) (f32 1600.0))
+  (when (< (+ (* (- (dock-x) robot^.x) (- (dock-x) robot^.x))
+              (* (- (dock-y) robot^.y) (- (dock-y) robot^.y))) (f32 1600.0))
     (return (command (f32 0.0) (f32 0.0) false)))
-  (when (< (:front sensors^) (f32 28.0))
+  (when (< sensors^.front (f32 28.0))
     (return (command (f32 0.0) (f32 1.8) false)))
   (boundary-follow-with-blade-command robot sensors false))
 
 (defn mapped-home-command
   "Return directly to dock using the robot's estimated pose."
   [robot: (ptr Robot), sensors: (ptr Sensors)] -> Command
-  (when (< (:front sensors^) (f32 28.0))
+  (when (< sensors^.front (f32 28.0))
     (return (command (f32 0.0) (f32 1.8) false)))
   (drive-to-point-command robot (dock-x) (dock-y) (f32 68.0) false))
 

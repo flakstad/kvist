@@ -5,16 +5,16 @@
   "Apply simulated environmental conditions to a requested command."
   [state: (ptr App-State), cmd: Command] -> Command
   (let [scale (f32 1.0)
-        turn (:turn cmd)]
+        turn cmd.turn]
     (when state.rain
       (set! scale (* scale (f32 0.72))))
     (when state.hills
       (set! scale (* scale (f32 0.62)))
       (set! turn (+ turn (f32 0.24))))
-    (command (* (:speed cmd) scale) turn (:blade cmd))))
+    (command (* cmd.speed scale) turn cmd.blade)))
 
 (defn safety-command
-  "Apply independent robot safety/reflex overrides before actuation."
+  "Apply independent robot safety.reflex overrides before actuation."
   [state: (ptr App-State), cmd: Command] -> Command
   (when (not state.reflex-enabled)
     (return cmd))

@@ -80,7 +80,7 @@
        (rl.CheckCollisionPointRec (mouse-pos) bounds)))
 
 (defn on-off
-  "Return a short on/off HUD label."
+  "Return a short on.off HUD label."
   [value: bool] -> cstring
   (when value
     (return "on"))
@@ -287,15 +287,15 @@
 (defn base-distance2
   "Return squared distance from the robot to the charging base."
   [robot: (ptr Robot)] -> f32
-  (let [dx (- (base-x) (:x robot^))
-        dy (- (base-y) (:y robot^))]
+  (let [dx (- (base-x) robot^.x)
+        dy (- (base-y) robot^.y)]
     (+ (* dx dx) (* dy dy))))
 
 (defn dock-distance2
   "Return squared distance from the robot to the safe dock pose."
   [robot: (ptr Robot)] -> f32
-  (let [dx (- (dock-x) (:x robot^))
-        dy (- (dock-y) (:y robot^))]
+  (let [dx (- (dock-x) robot^.x)
+        dy (- (dock-y) robot^.y)]
     (+ (* dx dx) (* dy dy))))
 
 (defn begin-charging!
@@ -312,7 +312,7 @@
   "Update robot mission policy such as low-battery return-to-base."
   [state: (ptr App-State), cmd: Command, dt: f32]
   (mut! state.mission-time += dt)
-  (let [drain (+ (f32 0.16) (* (abs-f32 (:speed cmd)) (f32 0.004)))]
+  (let [drain (+ (f32 0.16) (* (abs-f32 cmd.speed) (f32 0.004)))]
     (set! state.battery (math.clamp (- state.battery (* dt drain)) (f32 0.0) (f32 100.0))))
   (when (and (not (== state.robot.mode Mode-Return))
              (or (<= state.battery Low-Battery-Percent)
@@ -372,8 +372,8 @@
 (defn cell-color
   "Return the color for one world cell."
   [world: (ptr World), cell: int] -> rl.Color
-  (let [cells (:cells world^)
-        cut (:cut world^)]
+  (let [cells world^.cells
+        cut world^.cut]
     (when (== cells[cell] Cell-Obstacle)
       (return (rgba 78 74 68 255)))
     (when (== cells[cell] Cell-Boundary)
@@ -417,9 +417,9 @@
 (defn draw-sensor-ray
   "Draw one distance sensor ray in screen space."
   [robot: (ptr Robot), angle-offset: f32, distance: f32, color: rl.Color]
-  (let [x (screen-x (:x robot^))
-        y (screen-y (:y robot^))
-        angle (+ (:heading robot^) angle-offset)
+  (let [x (screen-x robot^.x)
+        y (screen-y robot^.y)
+        angle (+ robot^.heading angle-offset)
         ex (+ x (* (math.cos angle) distance))
         ey (+ y (* (math.sin angle) distance))]
     (rl.DrawLineEx (v2 x y) (v2 ex ey) (f32 2.0) color)))
@@ -429,9 +429,9 @@
   [state: (ptr App-State)]
   (let [robot (addr state.robot)
         sensors (addr state.sensors)]
-    (draw-sensor-ray robot (f32 0.0) (:front sensors^) (rgba 255 232 120 220))
-    (draw-sensor-ray robot (f32 0.78) (:left sensors^) (rgba 118 196 255 190))
-    (draw-sensor-ray robot (f32 -0.78) (:right sensors^) (rgba 255 142 120 190))))
+    (draw-sensor-ray robot (f32 0.0) sensors^.front (rgba 255 232 120 220))
+    (draw-sensor-ray robot (f32 0.78) sensors^.left (rgba 118 196 255 190))
+    (draw-sensor-ray robot (f32 -0.78) sensors^.right (rgba 255 142 120 190))))
 
 (defn draw-belief-marker
   "Draw the robot's last cutting evidence for belief-based modes."
@@ -487,11 +487,11 @@
   "Draw the mower blade disk and body."
   [state: (ptr App-State)]
   (let [robot (addr state.robot)
-        x (screen-x (:x robot^))
-        y (screen-y (:y robot^))
+        x (screen-x robot^.x)
+        y (screen-y robot^.y)
         center (v2 x y)]
     (rl.DrawCircleV center Blade-Radius [74 184 96 90])
-    (rl.DrawCircleV center (:radius robot^) rl.RAYWHITE)
+    (rl.DrawCircleV center robot^.radius rl.RAYWHITE)
     (rl.DrawCircleV center 4.0 [28 32 38 255])))
 
 (defn draw-hud-text
@@ -526,7 +526,7 @@
     (rl.DrawRectangleRounded panel 0.08 8 [0 0 0 195])
     (rl.DrawRectangleRoundedLines panel 0.08 8 [255 255 255 45])
     (draw-hud-text font "mode" 18 20 Hud-Font-Size rl.LIGHTGRAY)
-    (draw-hud-text font (mode-name (:mode robot^)) 76 20 Hud-Font-Size rl.RAYWHITE)
+    (draw-hud-text font (mode-name robot^.mode) 76 20 Hud-Font-Size rl.RAYWHITE)
     (draw-hud-text font "speed" 190 20 Hud-Font-Size rl.LIGHTGRAY)
     (draw-hud-text font (fmt.ctprintf "%4.2fx" state.sim-speed) 258 20 Hud-Font-Size rl.RAYWHITE)
     (draw-hud-text font "fps" 370 20 Hud-Font-Size rl.LIGHTGRAY)
@@ -538,30 +538,30 @@
     (draw-hud-text font "truth" 18 52 Hud-Font-Size rl.LIGHTGRAY)
     (draw-hud-text font (fmt.ctprintf "%6.2f%%" (coverage-percent world)) 112 52 Hud-Font-Size rl.RAYWHITE)
     (draw-hud-text font "collisions" 230 52 Hud-Font-Size rl.LIGHTGRAY)
-    (draw-hud-text font (fmt.ctprintf "%5d" (:collisions robot^)) 335 52 Hud-Font-Size rl.RAYWHITE)
+    (draw-hud-text font (fmt.ctprintf "%5d" robot^.collisions) 335 52 Hud-Font-Size rl.RAYWHITE)
     (draw-hud-text font "front left right wire" 430 52 Hud-Font-Size rl.LIGHTGRAY)
-    (draw-hud-text font (fmt.ctprintf "%5.1f %5.1f %5.1f %5.1f" (:front sensors^) (:left sensors^) (:right sensors^) (:wire sensors^)) 635 52 Hud-Font-Size rl.RAYWHITE)
+    (draw-hud-text font (fmt.ctprintf "%5.1f %5.1f %5.1f %5.1f" sensors^.front sensors^.left sensors^.right sensors^.wire) 635 52 Hud-Font-Size rl.RAYWHITE)
     (draw-hud-text font "distance" 18 80 16.0 rl.LIGHTGRAY)
-    (draw-hud-text font (fmt.ctprintf "%7.1f" (:distance robot^)) 94 80 16.0 rl.RAYWHITE)
+    (draw-hud-text font (fmt.ctprintf "%7.1f" robot^.distance) 94 80 16.0 rl.RAYWHITE)
     (draw-hud-text font "obstacles" 190 80 16.0 rl.LIGHTGRAY)
-    (draw-hud-text font (fmt.ctprintf "%5d" (:obstacle-count world^)) 278 80 16.0 rl.RAYWHITE)
+    (draw-hud-text font (fmt.ctprintf "%5d" world^.obstacle-count) 278 80 16.0 rl.RAYWHITE)
     (draw-hud-text font "wire" 350 80 16.0 rl.LIGHTGRAY)
-    (draw-hud-text font (fmt.ctprintf "%5d" (:boundary-count world^)) 398 80 16.0 rl.RAYWHITE)
+    (draw-hud-text font (fmt.ctprintf "%5d" world^.boundary-count) 398 80 16.0 rl.RAYWHITE)
     (draw-hud-text font "battery" 475 80 16.0 rl.LIGHTGRAY)
     (draw-hud-text font (fmt.ctprintf "%5.1f%%" state.battery) 550 80 16.0 rl.RAYWHITE)
     (draw-hud-text font "time" 640 80 16.0 rl.LIGHTGRAY)
     (draw-hud-text font (fmt.ctprintf "%6.1fs" state.mission-time) 690 80 16.0 rl.RAYWHITE)
     (draw-hud-text font "load" 795 80 16.0 rl.LIGHTGRAY)
-    (draw-hud-text font (fmt.ctprintf "%4.2f" (:blade-load sensors^)) 842 80 16.0 rl.RAYWHITE)
+    (draw-hud-text font (fmt.ctprintf "%4.2f" sensors^.blade-load) 842 80 16.0 rl.RAYWHITE)
     (draw-hud-text font "known" 912 80 16.0 rl.LIGHTGRAY)
     (draw-hud-text font (fmt.ctprintf "%5.1f%%" (belief-known-percent belief)) 970 80 16.0 rl.RAYWHITE)
     (draw-hud-text font "lane" 1050 80 16.0 rl.LIGHTGRAY)
-    (draw-hud-text font (fmt.ctprintf "%2d/%2d" (:lane-index robot^) (mapped-lane-count)) 1094 80 16.0 rl.RAYWHITE)
-    (draw-button font "random" (rect 18 106 78 Button-H) (== (:mode robot^) Mode-Random))
-    (draw-button font "boundary" (rect 102 106 98 Button-H) (== (:mode robot^) Mode-Boundary))
-    (draw-button font "frontier" (rect 206 106 92 Button-H) (== (:mode robot^) Mode-Frontier))
-    (draw-button font "mapped" (rect 304 106 82 Button-H) (== (:mode robot^) Mode-Mapped))
-    (draw-button font "home" (rect 392 106 70 Button-H) (== (:mode robot^) Mode-Return))
+    (draw-hud-text font (fmt.ctprintf "%2d/%2d" robot^.lane-index (mapped-lane-count)) 1094 80 16.0 rl.RAYWHITE)
+    (draw-button font "random" (rect 18 106 78 Button-H) (== robot^.mode Mode-Random))
+    (draw-button font "boundary" (rect 102 106 98 Button-H) (== robot^.mode Mode-Boundary))
+    (draw-button font "frontier" (rect 206 106 92 Button-H) (== robot^.mode Mode-Frontier))
+    (draw-button font "mapped" (rect 304 106 82 Button-H) (== robot^.mode Mode-Mapped))
+    (draw-button font "home" (rect 392 106 70 Button-H) (== robot^.mode Mode-Return))
     (draw-button font "-" (rect 480 106 34 Button-H) false)
     (draw-button font "+" (rect 520 106 34 Button-H) false)
     (draw-button font "pause" (rect 570 106 74 Button-H) state.paused)
@@ -578,11 +578,11 @@
     (draw-button font "bumper" (rect 302 138 76 Button-H) state.bumper)
     (draw-button font "link" (rect 384 138 62 Button-H) state.comms-ok)
     (draw-hud-text font "robot" 18 168 16.0 rl.LIGHTGRAY)
-    (draw-hud-text font (mode-name (:mode robot^)) 74 168 16.0 rl.RAYWHITE)
+    (draw-hud-text font (mode-name robot^.mode) 74 168 16.0 rl.RAYWHITE)
     (draw-hud-text font "blade" 158 168 16.0 rl.LIGHTGRAY)
-    (draw-hud-text font (on-off (:blade-on robot^)) 214 168 16.0 rl.RAYWHITE)
+    (draw-hud-text font (on-off robot^.blade-on) 214 168 16.0 rl.RAYWHITE)
     (draw-hud-text font "wheel L/R" 274 168 16.0 rl.LIGHTGRAY)
-    (draw-hud-text font (fmt.ctprintf "%7.1f %7.1f" (:left-wheel robot^) (:right-wheel robot^)) 374 168 16.0 rl.RAYWHITE)
+    (draw-hud-text font (fmt.ctprintf "%7.1f %7.1f" robot^.left-wheel robot^.right-wheel) 374 168 16.0 rl.RAYWHITE)
     (draw-hud-text font "battery" 552 168 16.0 rl.LIGHTGRAY)
     (draw-hud-text font (fmt.ctprintf "%5.1f%%" state.battery) 624 168 16.0 rl.RAYWHITE)
     (draw-hud-text font "rain" 704 168 16.0 rl.LIGHTGRAY)
@@ -592,7 +592,7 @@
     (draw-hud-text font "link" 994 168 16.0 rl.LIGHTGRAY)
     (draw-hud-text font (ok-fault state.comms-ok) 1040 168 16.0 rl.RAYWHITE)
     (draw-hud-text font "profile" 18 190 16.0 rl.LIGHTGRAY)
-    (draw-hud-text font (sensor-profile-name (:sensor-profile robot^)) 92 190 16.0 rl.RAYWHITE)))
+    (draw-hud-text font (sensor-profile-name robot^.sensor-profile) 92 190 16.0 rl.RAYWHITE)))
 
 (defn update-fps-metric!
   "Update the smoothed FPS counter roughly twice per second."
@@ -615,7 +615,7 @@
         state (make-app-state)]
     (rl.SetTextureFilter font.texture .BILINEAR)
     (set! state.paused false)
-    (set! state.robot.sensor-profile (parse-robot-profile (cli/option args "--robot" "forward")))
+    (set! state.robot.sensor-profile (parse-robot-profile (cli.option args "--robot" "forward")))
     (set! state.metric-start (rl.GetTime))
     (while (not (rl.WindowShouldClose))
       (handle-input! (addr state))
@@ -651,6 +651,6 @@
 (defn main
   "Run headless experiments with --headless, otherwise open the visual simulation."
   []
-  (if (cli/flag os.args "--headless")
+  (if (cli.flag os.args "--headless")
     (run-headless os.args)
     (run-window os.args)))

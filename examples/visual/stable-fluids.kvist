@@ -1,4 +1,4 @@
-// Visual grid demo: stable 2D smoke/fluid solver with mutable f32 buffers.
+// Visual grid demo: stable 2D smoke.fluid solver with mutable f32 buffers.
 (package main)
 (import fmt "core:fmt")
 (import math "core:math")
@@ -44,7 +44,7 @@
    :draw-ms f64})
 
 (defn idx
-  "Convert grid x/y coordinates into a flat array index."
+  "Convert grid x.y coordinates into a flat array index."
   [x: int, y: int] -> int
   (+ x (* y Grid-W)))
 
@@ -131,7 +131,7 @@
     (set! xs[bottom-right] (* 0.5 (+ xs[bottom-right-x] xs[bottom-right-y])))))
 
 (defn lin-solve!
-  "Solve one sparse diffusion/pressure system with Gauss-Seidel relaxation."
+  "Solve one sparse diffusion.pressure system with Gauss-Seidel relaxation."
   [mode: int, x: [dynamic]f32, x0: [dynamic]f32, a: f32, c: f32]
   (let [iteration 0]
     (while (< iteration Solver-Iterations)
@@ -442,7 +442,7 @@
     (draw-hud-text font (fmt.ctprintf "%2d iterations" Solver-Iterations) 272 50 Hud-Font-Size rl.RAYWHITE)
     (draw-hud-text font "buffers" 418 50 Hud-Font-Size rl.LIGHTGRAY)
     (draw-hud-text font "density, density0, vx, vy, vx0, vy0 [dynamic]f32" 494 50 17.0 rl.RAYWHITE)
-    (draw-hud-text font "left drag: inject smoke/force   right drag: stir   v: velocity   space: pause   up/down: steps   1/2/3: fps   r: reset" 18 76 16.0 rl.LIGHTGRAY)))
+    (draw-hud-text font "left drag: inject smoke.force   right drag: stir   v: velocity   space: pause   up.down: steps   1/2/3: fps   r: reset" 18 76 16.0 rl.LIGHTGRAY)))
 
 (defn update-fps-metric!
   "Update the smoothed FPS counter roughly twice per second."

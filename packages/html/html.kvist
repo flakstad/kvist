@@ -52,7 +52,7 @@
 
 (defmacro- if-form? [form]
   (if (list? form)
-    (if (= (core/count form) 4)
+    (if (= (core.count form) 4)
       (if (symbol? (first form))
         (= (name (first form)) "if")
         false)
@@ -61,12 +61,12 @@
 
 (defmacro- when-form? [form]
   (if (list? form)
-    (if (= (core/count form) 3)
+    (if (= (core.count form) 3)
       (if (symbol? (first form))
         (let [head (name (first form))]
           (if (= head "when")
             true
-            (= head "core/when")))
+            (= head "core.when")))
         false)
       false)
     false))
@@ -77,11 +77,11 @@
       (let [head (name (first form))]
         (if (= head "for")
           true
-          (if (= head "h/for")
+          (if (= head "h.for")
             true
             (if (= head "h__for")
               true
-              (if (= head "html/for")
+              (if (= head "html.for")
                 true
                 (= head "html__for"))))))
       false)
@@ -133,7 +133,7 @@
               (quasiquote (Attr-Value {:text (unquote (text form))})))))))))))))
 
 (defmacro- emit-attr-items [items]
-  (if (= (core/count items) 0)
+  (if (= (core.count items) 0)
     (forms)
     (let [key (nth items 0)
           value (nth items 1)]
@@ -144,7 +144,7 @@
         (emit-attr-items (rest (rest items)))))))
 
 (defmacro- emit-child-items [items]
-  (if (= (core/count items) 0)
+  (if (= (core.count items) 0)
     (forms)
     (forms
       (emit-node (first items))
@@ -164,7 +164,7 @@
       (if (fragment-tag? tag)
         (quasiquote
           (Node {:fragment (Fragment {:children [(splice (emit-child-items tail))]})}))
-        (if (= (core/count tail) 0)
+        (if (= (core.count tail) 0)
           (quasiquote
             (Node {:element (Element {:tag (unquote (text tag))
                                       :attrs []
@@ -248,7 +248,7 @@
         (replace-owned step4 "'" "&#39;")))))
 
 (defn- render-attr-into [builder: ^strings.Builder, attr: Attr]
-  (core/switch [value (:value attr)]
+  (core.switch [value (:value attr)]
     Nothing (noop)
     string
     (do
@@ -263,12 +263,12 @@
     f64
     (fmt.sbprintf builder " %s=\"%g\"" (:name attr) value)
     bool
-    (core/when value
+    (core.when value
       (strings.write_string builder " ")
       (strings.write_string builder (:name attr)))))
 
 (defn- render-node-into [builder: ^strings.Builder, node: Node]
-  (core/switch [value node]
+  (core.switch [value node]
     Nothing (noop)
     Fragment
     (each [child (:children value)]
@@ -331,7 +331,7 @@
   (fmt.sbprintf builder " %s=\"%g\"" name value))
 
 (defn- write-attr-bool [builder: ^strings.Builder, name: string, value: bool]
-  (core/when value
+  (core.when value
     (strings.write_string builder " ")
     (strings.write_string builder name)))
 
@@ -348,7 +348,7 @@
       out)))
 
 (defmacro- emit-template-bindings [out bindings]
-  (if (= (core/count bindings) 0)
+  (if (= (core.count bindings) 0)
     (forms)
     (let [key (nth bindings 0)
           value (nth bindings 1)]
@@ -363,7 +363,7 @@
 
 (defmacro- emit-template-render [template bindings]
   (if (brace? bindings)
-    (if (= (core/count bindings) 0)
+    (if (= (core.count bindings) 0)
       (quasiquote
         (clone-string (unquote template)))
       (let [out (gensym "__html_template")]
@@ -371,7 +371,7 @@
           (let [(unquote out) (clone-string (unquote template))]
             (splice (emit-template-bindings out bindings))
             (unquote out)))))
-    (error "html/render template bindings must be a brace literal")))
+    (error "html.render template bindings must be a brace literal")))
 
 (defmacro- emit-render-attr [builder key value]
   (let [attr-name (text key)]
@@ -379,7 +379,7 @@
       (forms)
       (if (when-form? value)
         (quasiquote
-          (core/when (unquote (nth value 1))
+          (core.when (unquote (nth value 1))
             (do
               (splice (emit-render-attr builder key (nth value 2))))))
     (if (if-form? value)
@@ -411,7 +411,7 @@
                            :value (Attr-Value (unquote value))})))))))))))))
 
 (defmacro- emit-render-attrs [builder items]
-  (if (= (core/count items) 0)
+  (if (= (core.count items) 0)
     (forms)
     (let [key (nth items 0)
           value (nth items 1)]
@@ -420,7 +420,7 @@
         (emit-render-attrs builder (rest (rest items)))))))
 
 (defmacro- emit-render-body [builder body]
-  (if (= (core/count body) 0)
+  (if (= (core.count body) 0)
     (forms)
     (forms
       (emit-render-child builder (first body))
@@ -430,7 +430,7 @@
   (let [bindings (nth form 1)
         body (rest (rest form))]
     (if (vector? bindings)
-      (if (= (core/count bindings) 2)
+      (if (= (core.count bindings) 2)
         (let [name-form (first bindings)
               source-form (nth bindings 1)]
           (if (symbol? name-form)
@@ -438,16 +438,16 @@
               (each [(unquote name-form) (unquote source-form)]
                 (do
                   (splice (emit-render-body builder body)))))
-            (error "html/for binding name must be a symbol")))
-        (error "html/for expects [name collection] bindings"))
-      (error "html/for expects a binding vector"))))
+            (error "html.for binding name must be a symbol")))
+        (error "html.for expects [name collection] bindings"))
+      (error "html.for expects a binding vector"))))
 
 (defmacro- emit-render-child [builder form]
   (if (nil-form? form)
     (forms)
     (if (when-form? form)
       (quasiquote
-        (core/when (unquote (nth form 1))
+        (core.when (unquote (nth form 1))
           (do
             (splice (emit-render-child builder (nth form 2))))))
   (if (if-form? form)
@@ -464,7 +464,7 @@
             tail (rest form)]
         (if (fragment-tag? tag)
           (emit-render-children builder tail)
-          (if (= (core/count tail) 0)
+          (if (= (core.count tail) 0)
             (forms
               (quasiquote (strings.write_string (addr (unquote builder)) (unquote (str "<" (text tag) ">"))))
               (quasiquote (strings.write_string (addr (unquote builder)) (unquote (str "</" (text tag) ">")))))
@@ -501,7 +501,7 @@
                   (render-node-into (addr (unquote builder)) (Node (unquote form)))))))))))))))
 
 (defmacro- emit-render-children [builder items]
-  (if (= (core/count items) 0)
+  (if (= (core.count items) 0)
     (forms)
     (forms
       (emit-render-child builder (first items))
@@ -510,13 +510,13 @@
 (defmacro render
   "Render HTML to an owned HTML string.
 
-  Direct Hiccup-style vector calls like `(html/render [:div ...])` expand to
+  Direct Hiccup-style vector calls like `(html.render [:div ...])` expand to
   builder writes and avoid constructing a full intermediate node tree.
 
-  Template calls like `(html/render \"<h1>{{name}}</h1>\" {:name name})`
+  Template calls like `(html.render \"<h1>{{name}}</h1>\" {:name name})`
   replace `{{key}}` placeholders and return an owned string."
   [form & rest]
-  (if (= (core/count rest) 0)
+  (if (= (core.count rest) 0)
     (if (vector? form)
       (let [builder (gensym "__html_render_builder")]
         (quasiquote
@@ -526,24 +526,24 @@
             (finish-builder (addr (unquote builder))))))
       (quasiquote
         (clone-string (unquote form))))
-    (if (= (core/count rest) 1)
+    (if (= (core.count rest) 1)
       (if (vector? form)
-        (error "html/render Hiccup vectors do not take template bindings")
+        (error "html.render Hiccup vectors do not take template bindings")
         (emit-template-render form (first rest)))
-      (error "html/render expects a Hiccup vector, a template string, or a template plus bindings"))))
+      (error "html.render expects a Hiccup vector, a template string, or a template plus bindings"))))
 
 (defmacro render-file
   "Render a compile-time template file with placeholder bindings.
 
-  `(html/render-file \"home.html\" {:name name})` reads `home.html` at macro
+  `(html.render-file \"home.html\" {:name name})` reads `home.html` at macro
   expansion time, embeds its contents, and emits the same template rendering as
-  `html/render`."
+  `html.render`."
   [path & rest]
-  (if (= (core/count rest) 0)
-    (let [template (io/read path)]
+  (if (= (core.count rest) 0)
+    (let [template (io.read path)]
       (quasiquote
         (clone-string (unquote template))))
-    (if (= (core/count rest) 1)
-      (let [template (io/read path)]
+    (if (= (core.count rest) 1)
+      (let [template (io.read path)]
         (emit-template-render template (first rest)))
-      (error "html/render-file expects a path and optional bindings"))))
+      (error "html.render-file expects a path and optional bindings"))))

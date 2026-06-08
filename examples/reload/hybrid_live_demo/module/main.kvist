@@ -6,7 +6,7 @@
 
 (def hybrid-demo-version: string "native module v1")
 
-(hot/defmodule shared.State
+(hot.defmodule shared.State
                 hybrid-demo-message
                 hybrid-demo-tick
                 hybrid-demo-version

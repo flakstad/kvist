@@ -111,7 +111,7 @@ inventing a new language on top of Odin.
   (+ a b))
 
 (defn main []
-  (core/println (add 20 22)))
+  (core.println (add 20 22)))
 ```
 
 emits:
@@ -281,7 +281,7 @@ Example:
   (+ a b))
 
 (defn main []
-  (core/println (add 1 2)))
+  (core.println (add 1 2)))
 ```
 
 The Odin compiler should only see generated `.odin` files. That keeps normal
@@ -536,7 +536,7 @@ Named and multi-value returns:
 (defn query-get [url: URL, key: string] -> [val: string, ok: bool] #optional_ok
   (let [q url.query]
     (each [entry (#force_inline query-iter (& q))]
-      (core/when (== entry.key key)
+      (core.when (== entry.key key)
         (return entry.value true)))))
 ```
 
@@ -551,10 +551,10 @@ Kvist now keeps Odin-style early-exit result handling explicit:
     (net.percent-decode s allocator)))
 ```
 
-For optional-ok defaults, use the expression form `core/or-else`:
+For optional-ok defaults, use the expression form `core.or-else`:
 
 ```clojure
-(core/or-else (query-get url key) "missing")
+(core.or-else (query-get url key) "missing")
 ```
 
 The important point is still the same: Odin-style result control flow should
@@ -578,7 +578,7 @@ Switch:
 
 ```clojure
 (defn method-string [m: Method] -> string #no_bounds_check
-  (core/switch m
+  (core.switch m
     .Get "GET"
     .Post "POST"
     .Delete "DELETE"
@@ -608,7 +608,7 @@ everything into parens:
 ```clojure
 @(private)
 (defn route-add [router: ^Router, method: Method, route: Route]
-  (core/when (core/not-in method router.routes)
+  (core.when (core.not-in method router.routes)
     (set! (get router.routes method)
           (make [dynamic]Route router.allocator)))
   (append (& (get router.routes method)) route))
@@ -630,7 +630,7 @@ obvious.
   (let [value (strings.trim-space (slice line (+ colon 1)))
         key   (sanitize-key (^ headers) (slice line 0 colon))]
     (defer
-      (core/when (not ok)
+      (core.when (not ok)
         (delete key allocator)
         (set! key "")))
     ...))
@@ -695,7 +695,7 @@ current Odin block or procedure.
   - `fn` is the canonical source-level form for function types and anonymous function literals
   - `:abi "c"` is available for explicit foreign/native entrypoints
   - params and returns use ordinary types like `int`, `string`, `Person`, plus Odin-style container types like `[]string`, `[dynamic]int`, `map[string]int`, and Kvist set types like `set[keyword]`
-  - `core/println` is the canonical print helper; `core/doc` and the rest of the non-syntax surface live in real Kvist packages
+  - `core.println` is the canonical print helper; `core.doc` and the rest of the non-syntax surface live in real Kvist packages
 - top-level `(defmacro name [arg ...] body...)`
   - `defmacro-` is the package-private macro form
   - expands over Kvist forms before ordinary parse/lowering
@@ -714,10 +714,10 @@ current Odin block or procedure.
   override with temp allocator reset; requires `base:runtime`
 - `(set! place expr)` -> `place = expr`
 - `(mut! place += expr)` and other compound operators -> direct compound assignment
-- `(core/update! target key-or-field expr)` -> direct index/key/field assignment
+- `(core.update! target key-or-field expr)` -> direct index/key/field assignment
 - final expression in a non-void `defn` emits `return <expr>`
 - `(if test then else)`
-- `(core/when test body...)`
+- `(core.when test body...)`
 - `(while test body...)`
 - `(each [name collection] body...)` and `(each [key value map] body...)`
 - `(do body...)`
@@ -729,128 +729,135 @@ current Odin block or procedure.
 - `(type Type)` typeid expressions, such as
   `(linalg.identity (type matrix[2 2]f32))`
 - `(make Type args...)` runtime/allocator-backed construction
-- `(arr/empty elem-type [capacity])`, `(arr/dynamic elem-type [items...])`, `(arr/fixed elem-type [items...])`
-- `(map/empty key-type value-type [capacity])`, `(map/of key-type value-type {:k v ...})`
-- `(set/empty elem-type [capacity])`, `(set/of elem-type [a b c])`
-- `(soa/make Particle [capacity])`, `(soa/push! particles value...)`, and
-  `(soa/update! particles i :field expr ...)` for dynamic SOA storage and
+- `(arr.empty elem-type [capacity])`, `(arr.dynamic elem-type [items...])`, `(arr.fixed elem-type [items...])`
+- `(map.empty key-type value-type [capacity])`, `(map.of key-type value-type {:k v ...})`
+- `(set.empty elem-type [capacity])`, `(set.of elem-type [a b c])`
+- `(soa.make Particle [capacity])`, `(soa.push! particles value...)`, and
+  `(soa.update! particles i :field expr ...)` for dynamic SOA storage and
   direct indexed column updates
-- `(soa/fill! particles :field value)`, `(soa/scale! particles :field factor)`,
-  `(soa/axpy! particles :dst a :src)`, `(soa/sum-into! total particles :field)`,
-  and `(soa/dot-into! total particles :a :b)` for whole-column SOA loops
+- `(soa.fill! particles :field value)`, `(soa.scale! particles :field factor)`,
+  `(soa.axpy! particles :dst a :src)`, `(soa.sum-into! total particles :field)`,
+  and `(soa.dot-into! total particles :a :b)` for whole-column SOA loops
 - use `core:math/linalg` directly for matrix/vector operations such as
   `linalg.mul`, `linalg.transpose`, and `linalg.dot`; matrix values are ordinary
   typed constructors like `(matrix[2 2]f32 [1 2 3 4])`
-- `cli/*` helpers such as `(cli/flag args "--verbose")`,
-  `(cli/option args "--out" "default")`, `(cli/int-option args "--port" 8080)`,
-  `(or-else (cli/command args) "help")`, `(cli/env "HOME" "")`,
-  `(cli/terminal-size 80 24)`, `(cli/stdout-tty?)`, `(cli/stderr-tty?)`,
-  `(cli/println ...)`, `(cli/eprintln ...)`, and `(cli/exit! code)`
-- `str/*` helpers such as `(str/count s)`, `(str/get s i)`, `(str/slice s start [end])`,
-  `(str/contains? s needle)`, `(str/split s sep)`, `(str/join parts sep)`,
-  `(str/trim s)`, `(str/trim-prefix s prefix)`, `(str/trim-suffix s suffix)`,
-  `(str/starts-with? s prefix)`, `(str/ends-with? s suffix)`,
-  `(str/index-of s needle)`, `(str/last-index-of s needle)`,
-  `(str/replace s old new [count])`, `(str/lower s)`, `(str/upper s)`
+- `cli.*` helpers such as `(cli.flag args "--verbose")`,
+  `(cli.option args "--out" "default")`, `(cli.int-option args "--port" 8080)`,
+  `(or-else (cli.command args) "help")`, `(cli.env "HOME" "")`,
+  `(cli.terminal-size 80 24)`, `(cli.stdout-tty?)`, `(cli.stderr-tty?)`,
+  `(cli.println ...)`, `(cli.eprintln ...)`, and `(cli.exit! code)`
+- `str.*` helpers such as `(str.count s)`, `(str.get s i)`, `(str.slice s start [end])`,
+  `(str.contains? s needle)`, `(str.split s sep)`, `(str.join parts sep)`,
+  `(str.trim s)`, `(str.trim-prefix s prefix)`, `(str.trim-suffix s suffix)`,
+  `(str.starts-with? s prefix)`, `(str.ends-with? s suffix)`,
+  `(str.index-of s needle)`, `(str.last-index-of s needle)`,
+  `(str.replace s old new [count])`, `(str.lower s)`, `(str.upper s)`
   - `kvist:str` is a shipped `.kvist` package. These helpers lower to direct
     Odin indexing, slicing, or `core:strings` calls.
-- `set/*` helpers such as `(set/contains? s value)`, `(set/union lhs rhs)`,
-  `(set/intersection lhs rhs)`, `(set/difference lhs rhs)`,
-  `(set/union! target source)`, `(set/intersection! target source)`,
-  `(set/difference! target source)`,
-  `(set/subset? lhs rhs)`, `(set/superset? lhs rhs)`,
-  `(set/disjoint? lhs rhs)`, `(set/add s value)`, `(set/add! s value)`,
-  `(set/remove s value)`, `(set/remove! s value)`
+- `set.*` helpers such as `(set.contains? s value)`, `(set.union lhs rhs)`,
+  `(set.intersection lhs rhs)`, `(set.difference lhs rhs)`,
+  `(set.union! target source)`, `(set.intersection! target source)`,
+  `(set.difference! target source)`,
+  `(set.subset? lhs rhs)`, `(set.superset? lhs rhs)`,
+  `(set.disjoint? lhs rhs)`, `(set.add s value)`, `(set.add! s value)`,
+  `(set.remove s value)`, `(set.remove! s value)`
   - `kvist:set` is a shipped `.kvist` package. These helpers lower to direct
     loops, direct constructors, or direct in-place mutations over `map[T]bool`.
-- `map/*` helpers such as `(map/get m key [default])`, `(map/contains? m key)`,
-  `(map/keys m)`, `(map/vals m)`, `(map/zip keys vals)`, `(map/assoc m key value)`,
-  `(map/assoc! target key value)`, `(map/dissoc m key)`, `(map/dissoc! target key)`,
-  `(map/merge lhs rhs)`, `(map/merge! target source)`
+- `map.*` helpers such as `(map.get m key [default])`, `(map.contains? m key)`,
+  `(map.keys m)`, `(map.vals m)`, `(map.zip keys vals)`, `(map.assoc m key value)`,
+  `(map.assoc! target key value)`, `(map.dissoc m key)`, `(map.dissoc! target key)`,
+  `(map.merge lhs rhs)`, `(map.merge! target source)`
   - `kvist:map` is a shipped `.kvist` package. These helpers lower to direct
     constructors, membership checks, loops with explicit preallocation, raw
     indexing, optional-default helpers, or direct in-place mutation.
-- `core/*` helpers such as `(core/count collection)`, `(core/get target key [default])`,
-  `(core/slice target start [end])`, `(core/empty? collection)`,
-  `(core/contains? collection key)`, `(core/update! target key-or-field value-or-updater ...)`,
-  and `(core/update target key-or-field value-or-updater ...)`
+- `core.*` helpers such as `(core.count collection)`, `(core.get target key [default])`,
+  `(core.slice target start [end])`, `(core.empty? collection)`,
+  `(core.contains? collection key)`, `(core.update! target key-or-field value-or-updater ...)`,
+  and `(core.update target key-or-field value-or-updater ...)`
   - `kvist:core` is the small auto-exposed core library.
-  - `core/...` is the canonical qualified home.
+  - `core.*` is the canonical qualified home.
   - These helpers are defined in shipped `.kvist` source and lower through a
     small intrinsic substrate where direct Odin codegen needs it.
-- `arr/*` sequence helpers such as `(arr/map f xs)`, `(arr/filter pred xs)`,
-  `(arr/reduce f init xs)`, `(arr/take n xs)`, `(arr/drop n xs)`,
-  `(arr/take-while pred xs)`, `(arr/drop-while pred xs)`, `(arr/find pred xs)`,
-  `(arr/some? pred xs)`, `(arr/every? pred xs)`, `(arr/first xs)`,
-  `(arr/second xs)`, `(arr/last xs)`, `(arr/nth xs n)`, `(arr/rest xs)`,
-  `(arr/remove pred xs)`, `(arr/map-indexed f xs)`, `(arr/keep f xs)`,
-  `(arr/mapcat f xs)`, `(arr/into [dynamic]T xs)`, `(arr/interpose sep xs)`,
-  `(arr/interleave xs ys)`, `(arr/reverse xs)`, `(arr/shuffle pick xs)`,
-  `(arr/sort xs)`, `(arr/sort-by f xs)`, `(arr/sort-by :field xs)`, mutating
-  `(arr/reverse! xs)`, `(arr/shuffle! pick xs)`, `(arr/sort! xs)`,
-  `(arr/sort-by! f xs)`, `(arr/sort-by! :field xs)`, `(arr/map! f xs)`,
-  `(arr/map-indexed! f xs)`, `(arr/filter! pred xs)`, `(arr/filter! :field xs)`,
-  `(arr/remove! pred xs)`, `(arr/remove! :field xs)`, `(arr/keep! f xs)`,
-  `(arr/into! target xs)`, `(arr/split-at n xs)`, `(arr/partition n xs)`,
-  `(arr/partition-all n xs)`, `(arr/partition-by f xs)`,
-  `(arr/partition-by :field xs)`, `(arr/index-by f xs)`,
-  `(arr/index-by :field xs)`, `(arr/group-by f xs)`, `(arr/group-by :field xs)`,
-  `(arr/count-by f xs)`, `(arr/count-by :field xs)`,
-  `(arr/sum-by key-f value-f xs)`, `(arr/sum-by :key-field :value-field xs)`,
-  `(arr/frequencies xs)`, `(arr/distinct xs)`, `(arr/distinct-by f xs)`,
-  `(arr/distinct-by :field xs)`, plus bounded producers `(arr/range ...)`,
-  `(arr/repeat n x)`, `(arr/repeatedly n f)`, `(arr/iterate n f x)`, and
-  `(arr/cycle n xs)`
+- `arr.*` sequence helpers such as `(arr.map f xs)`, `(arr.filter pred xs)`,
+  `(arr.reduce f init xs)`, `(arr.reduce-indexed f init xs)`,
+  `(arr.take n xs)`, `(arr.drop n xs)`,
+  `(arr.take-while pred xs)`, `(arr.drop-while pred xs)`, `(arr.find pred xs)`,
+  `(arr.find-indexed pred xs)`, `(arr.some? pred xs)`,
+  `(arr.every? pred xs)`, `(arr.min-by f xs)`, `(arr.max-by f xs)`,
+  `(arr.first xs)`,
+  `(arr.second xs)`, `(arr.last xs)`, `(arr.nth xs n)`, `(arr.rest xs)`,
+  `(arr.remove pred xs)`, `(arr.map-indexed f xs)`, `(arr.keep f xs)`,
+  `(arr.mapcat f xs)`, `(arr.into [dynamic]T xs)`, `(arr.interpose sep xs)`,
+  `(arr.interleave xs ys)`, `(arr.reverse xs)`, `(arr.shuffle pick xs)`,
+  `(arr.sort xs)`, `(arr.sort-by f xs)`, `(arr.sort-by :field xs)`, mutating
+  `(arr.reverse! xs)`, `(arr.shuffle! pick xs)`, `(arr.sort! xs)`,
+  `(arr.sort-by! f xs)`, `(arr.sort-by! :field xs)`, `(arr.map! f xs)`,
+  `(arr.map-indexed! f xs)`, `(arr.filter! pred xs)`, `(arr.filter! :field xs)`,
+  `(arr.remove! pred xs)`, `(arr.remove! :field xs)`, `(arr.keep! f xs)`,
+  `(arr.into! target xs)`, `(arr.split-at n xs)`, `(arr.partition n xs)`,
+  `(arr.partition-all n xs)`, `(arr.partition-by f xs)`,
+  `(arr.partition-by :field xs)`, `(arr.index-by f xs)`,
+  `(arr.index-by :field xs)`, `(arr.group-by f xs)`, `(arr.group-by :field xs)`,
+  `(arr.count-by f xs)`, `(arr.count-by :field xs)`,
+  `(arr.sum-by key-f value-f xs)`, `(arr.sum-by :key-field :value-field xs)`,
+  `(arr.frequencies xs)`, `(arr.distinct xs)`, `(arr.distinct-by f xs)`,
+  `(arr.distinct-by :field xs)`, plus bounded producers `(arr.range ...)`,
+  `(arr.repeat n x)`, `(arr.repeatedly n f)`, `(arr.iterate n f x)`, and
+  `(arr.cycle n xs)`
   - `kvist:arr` is a shipped `.kvist` package with the broad sequence helper
     surface. Many helpers are implemented directly in package source; the rest
     lower through a small intrinsic substrate where array-family coverage,
     specialization, or allocation behavior still needs compiler support.
-- `soa/*` helpers such as `(soa/fields T)`, `(soa/types T)`,
-  `(soa/make T capacity)`, `(soa/push! particles particle)`, and
-  `(soa/update! particles i :x (+ x dx) :y (+ y dy))`
+- `soa.*` helpers such as `(soa.fields T)`, `(soa.types T)`,
+  `(soa.make T capacity)`, `(soa.push! particles particle)`, and
+  `(soa.update! particles i :x (+ x dx) :y (+ y dy))`
   - `kvist:soa` owns compile-time struct metadata helpers and SOA
     convenience macros. SOA updates expand to same-named local reads plus direct
     indexed column writes.
-  - Whole-column helpers such as `(soa/axpy! particles :x dt :vx)` and
-    `(soa/dot-into! total particles :vx :vx)` expand to direct loops over
+  - Whole-column helpers such as `(soa.axpy! particles :x dt :vx)` and
+    `(soa.dot-into! total particles :vx :vx)` expand to direct loops over
     `(len particles)`.
-- `cli/*` helpers for command-line programs:
-  `(cli/flag args name)`, `(cli/option args name fallback)`,
-  `(cli/int-option args name fallback)`, `(cli/command args)`,
-  `(cli/env name fallback)`, `(cli/env? name)`, `(cli/env-int name fallback)`,
-  `(cli/terminal-size fallback-columns fallback-rows)`, `(cli/stdout-tty?)`,
-  `(cli/stderr-tty?)`, stdout/stderr print macros, and `(cli/exit! code)`
+- `cli.*` helpers for command-line programs:
+  `(cli.flag args name)`, `(cli.option args name fallback)`,
+  `(cli.int-option args name fallback)`, `(cli.command args)`,
+  `(cli.env name fallback)`, `(cli.env? name)`, `(cli.env-int name fallback)`,
+  `(cli.terminal-size fallback-columns fallback-rows)`, `(cli.stdout-tty?)`,
+  `(cli.stderr-tty?)`, stdout/stderr print macros, and `(cli.exit! code)`
   - `kvist:cli` keeps process/terminal APIs thin over Odin `core:os`,
     `core:terminal`, and `core:fmt`.
-- map helpers `(map/merge a b)`, `(map/merge! target source)`,
-  `(map/zip keys vals)`, `(map/keys m)`, and `(map/vals m)`
-- file-backed dev helpers `(io/read path)` and `(io/write path data)` from
+- map helpers `(map.merge a b)`, `(map.merge! target source)`,
+  `(map.zip keys vals)`, `(map.keys m)`, and `(map.vals m)`
+- file-backed dev helpers `(io.read path)` and `(io.write path data)` from
   `(import io "kvist:io")`; typed JSON file helpers from
   `(import json "kvist:json")`
-- `(core/tap> value)` and `(core/tap> :label value)` for explicit stdout inspection;
+- `(core.tap> value)` and `(core.tap> :label value)` for explicit stdout inspection;
   require `core:fmt` and return the tapped value
-- keywords can stand in for field callbacks in those helpers, e.g. `(arr/map :name users)`,
-  `(arr/index-by :id users)`, `(arr/group-by :status users)`,
-  `(arr/count-by :status users)`, `(arr/sum-by :region :amount orders)`,
-  `(arr/partition-by :status users)`, `(arr/sort-by :age users)`, and
-  `(arr/filter :verified users)`
-- `(:field value)`, `(core/get value key)`, `(core/get map key default)`, `(core/-> value steps...)`, and `(core/->> value steps...)`
+- keywords can stand in for field callbacks in those helpers, e.g. `(arr.map :name users)`,
+  `(arr.index-by :id users)`, `(arr.group-by :status users)`,
+  `(arr.count-by :status users)`, `(arr.sum-by :region :amount orders)`,
+  `(arr.partition-by :status users)`, `(arr.sort-by :age users)`, and
+  `(arr.filter :verified users)`
+- `value.field` for field access; `(:field value)` is compatibility sugar and
+  keyword callback shorthand
+- direct attached indexing such as `cells[(idx x y)]` works in reads, `set!`,
+  and `mut!`
+- `(core.get value key)`, `(core.get map key default)`, `(core.-> value steps...)`, and `(core.->> value steps...)`
 - `(type Head Arg...)` for Odin polymorphic type instantiation in type/value positions
 - `(^ ptr)` and `(& place)` as compatibility sugar; prefer `(deref ptr)` and
   `(addr place)` in user-facing code
-- numbers, booleans, `nil`, and `(core/nil? value)`
+- numbers, booleans, `nil`, and `(core.nil? value)`
 - calls: `(foo a b)` -> `foo(a, b)`
 - operators: `(+ a b)`, `(<= i 10)`, `(and a b)`, etc. emit infix
 
 Pragmatic Odin conveniences beyond the minimal special-form core include
-`(core/contains? collection key)` for generic collection membership,
-`(core/in value collection)`,
-`(core/not-in value collection)`, `(break)`, `(continue)`, and directive expression
+`(core.contains? collection key)` for generic collection membership,
+`(core.in value collection)`,
+`(core.not-in value collection)`, `(break)`, `(continue)`, and directive expression
 wrappers like `(#force_inline call arg)`.
 
 For collection helpers, prefer explicit package names. Cross-family helpers now
-live under `core/`, for example `core/count`, `core/empty?`, and
-`core/contains?`, plus update helpers like `core/update!` and `core/update`.
+live under `core., for example `core.count`, `core.empty?`, and
+`core.contains?`, plus update helpers like `core.update!` and `core.update`.
 Other collection operations should be package-qualified under `arr/`, `map/`,
 `str/`, or `set/`.
 

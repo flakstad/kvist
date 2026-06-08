@@ -159,16 +159,36 @@ resolved_import_path_literal_for_emit :: proc(path_literal: string) -> string {
 
 resolve_kvist_head :: proc(e: ^Emitter, head: string) -> (canonical: string, matched_builtin: bool, err: Compile_Error, ok: bool) {
     slash := strings.index(head, "/")
-    if slash <= 0 {
+    dot := strings.index(head, ".")
+    sep := -1
+    if dot > 0 {
+        sep = dot
+    }
+    if slash > 0 && (sep < 0 || slash < sep) {
+        sep = slash
+    }
+    if sep <= 0 {
         return head, false, Compile_Error{}, true
     }
-    alias := head[:slash]
-    suffix := head[slash+1:]
+    alias := head[:sep]
+    suffix := head[sep+1:]
+    if slash > 0 && slash == sep {
+        switch alias {
+        case "kvist", "core", "arr", "str", "map", "set", "soa", "io", "json", "cli":
+            return "", false, Compile_Error{message = fmt.tprintf("use `%s.%s` for package access", alias, suffix)}, false
+        }
+        for decl in e.decls {
+            import_alias, _, ok_import := kvist_import_alias_for_decl(decl)
+            if ok_import && import_alias == alias {
+                return "", false, Compile_Error{message = fmt.tprintf("use `%s.%s` for package access", alias, suffix)}, false
+            }
+        }
+    }
     if alias == "kvist" {
         return suffix, true, Compile_Error{}, true
     }
-    if alias == "core" || alias == "arr" || alias == "str" || alias == "map" || alias == "set" || alias == "soa" || alias == "io" || alias == "json" {
-        return head, true, Compile_Error{}, true
+    if alias == "core" || alias == "arr" || alias == "str" || alias == "map" || alias == "set" || alias == "soa" || alias == "io" || alias == "json" || alias == "cli" {
+        return fmt.tprintf("%s/%s", alias, suffix), true, Compile_Error{}, true
     }
     for decl in e.decls {
         import_alias, pkg, ok_import := kvist_import_alias_for_decl(decl)
@@ -318,7 +338,7 @@ deprecated_builtin_collection_head_error :: proc(head: CST_Form) -> (Compile_Err
     if !deprecated {
         return Compile_Error{}, false
     }
-    return Compile_Error{message = fmt.tprintf("`%s` is no longer a core helper; use `%s`", head.text, canonical), span = head.span}, true
+    return Compile_Error{message = fmt.tprintf("`%s` is no longer a core helper; use `%s`", head.text, display_head_name(canonical)), span = head.span}, true
 }
 
 Thread_Result_Kind :: enum {
@@ -2281,10 +2301,16 @@ form_is_assignable_place :: proc(form: CST_Form) -> bool {
     switch head.text {
     case "deref", "^":
         return len(form.items) == 2
+    case "__kvist_index":
+        return len(form.items) == 3
     case "core/get", "core-get", "arr/get", "arr-get", "arr/nth":
         return len(form.items) == 3
     }
     return false
+}
+
+form_is_omitted_slice_bound :: proc(form: CST_Form) -> bool {
+    return form.kind == .Symbol && form.text == "__kvist_omitted"
 }
 
 emit_compound_assignment_stmt :: proc(e: ^Emitter, form: CST_Form, op: string) -> (Compile_Error, bool) {
@@ -2469,15 +2495,20 @@ emit_thread_step :: proc(e: ^Emitter, current: string, step: CST_Form, thread_la
     case .Keyword:
         return fmt.tprintf("%s.%s", current, map_name(step.text[1:])), {}, true
     case .Symbol:
-        if thread_last && step.text == "slice" {
+        step_text, _, err_head, ok_head := resolve_kvist_head(e, step.text)
+        if !ok_head {
+            err_head.span = step.span
+            return "", err_head, false
+        }
+        if thread_last && step_text == "slice" {
             return "", Compile_Error{message = "`slice` has moved to `core/slice`", span = step.span}, false
         }
-        if thread_last && step.text == "core/slice" {
+        if thread_last && step_text == "core/slice" {
             return slice_all_expr_text(current), {}, true
         }
         args: [dynamic]string
         append(&args, current)
-        return emit_call_text(map_name(step.text), args[:]), {}, true
+        return emit_call_text(map_name(step_text), args[:]), {}, true
     case .List:
         if len(step.items) == 0 {
             return "", Compile_Error{message = "thread step cannot be an empty list", span = step.span}, false
@@ -2492,11 +2523,17 @@ emit_thread_step :: proc(e: ^Emitter, current: string, step: CST_Form, thread_la
         if head.kind != .Symbol {
             return "", Compile_Error{message = "thread list step expects symbol or keyword head", span = head.span}, false
         }
+        canonical_head, _, err_head, ok_head := resolve_kvist_head(e, head.text)
+        if !ok_head {
+            err_head.span = head.span
+            return "", err_head, false
+        }
+        head.text = canonical_head
         err_deprecated, deprecated := deprecated_builtin_collection_head_error(head)
         if deprecated {
             return "", err_deprecated, false
         }
-        surface_head := head.text
+        surface_head := display_head_name(head.text)
         if thread_last {
             switch head.text {
             case "arr__map":
@@ -2999,12 +3036,26 @@ is_thread_form_head :: proc(head: string, thread_last: bool) -> bool {
 
 thread_surface_name :: proc(thread_last: bool) -> string {
     if thread_last {
-        return "core/->>"
+        return "core.->>"
     }
-    return "core/->"
+    return "core.->"
+}
+
+display_head_name :: proc(head_name: string) -> string {
+    head := source_package_surface_head(head_name)
+    slash := strings.index(head, "/")
+    if slash > 0 {
+        return fmt.tprintf("%s.%s", head[:slash], head[slash+1:])
+    }
+    return head
 }
 
 source_package_surface_head :: proc(head_name: string) -> string {
+    dot := strings.index(head_name, ".")
+    slash := strings.index(head_name, "/")
+    if dot > 0 && (slash < 0 || dot < slash) {
+        return fmt.tprintf("%s/%s", head_name[:dot], head_name[dot+1:])
+    }
     sep := strings.index(head_name, "__")
     if sep <= 0 {
         return head_name
@@ -4703,7 +4754,7 @@ Owned_Local :: struct {
 
 owned_warning_subject :: proc(form: CST_Form) -> string {
     if head, ok := form_head_symbol_text(form); ok {
-        return source_package_surface_head(head)
+        return display_head_name(head)
     }
     #partial switch form.kind {
     case .Vector:
@@ -6083,7 +6134,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
     if deprecated {
         return "", err_deprecated, false
     }
-    surface_head := head.text
+    surface_head := display_head_name(head.text)
 
     if operator_text, err_op, ok_op := emit_operator_expr(e, form); ok_op {
         return operator_text, {}, true
@@ -7400,6 +7451,53 @@ emit_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) 
         }
         if is_symbol(form.items[0], "fn") {
             return emit_proc_literal_expr(e, form)
+        }
+        if is_symbol(form.items[0], "__kvist_index") {
+            if len(form.items) != 3 {
+                return "", Compile_Error{message = "index expression expects target and index", span = form.span}, false
+            }
+            target, err_target, ok_target := emit_expr(e, form.items[1])
+            if !ok_target {
+                return "", err_target, false
+            }
+            index, err_index, ok_index := emit_expr(e, form.items[2])
+            if !ok_index {
+                return "", err_index, false
+            }
+            return fmt.tprintf("(%s)[%s]", target, index), {}, true
+        }
+        if is_symbol(form.items[0], "__kvist_slice") {
+            if len(form.items) != 4 {
+                return "", Compile_Error{message = "slice expression expects target, start, and end", span = form.span}, false
+            }
+            target, err_target, ok_target := emit_expr(e, form.items[1])
+            if !ok_target {
+                return "", err_target, false
+            }
+            start_omitted := form_is_omitted_slice_bound(form.items[2])
+            end_omitted := form_is_omitted_slice_bound(form.items[3])
+            if start_omitted && end_omitted {
+                return fmt.tprintf("(%s)[:]", target), {}, true
+            }
+            if start_omitted {
+                end, err_end, ok_end := emit_expr(e, form.items[3])
+                if !ok_end {
+                    return "", err_end, false
+                }
+                return fmt.tprintf("(%s)[:%s]", target, end), {}, true
+            }
+            start, err_start, ok_start := emit_expr(e, form.items[2])
+            if !ok_start {
+                return "", err_start, false
+            }
+            if end_omitted {
+                return fmt.tprintf("(%s)[%s:]", target, start), {}, true
+            }
+            end, err_end, ok_end := emit_expr(e, form.items[3])
+            if !ok_end {
+                return "", err_end, false
+            }
+            return fmt.tprintf("(%s)[%s:%s]", target, start, end), {}, true
         }
         if form.items[0].kind == .Keyword {
             if len(form.items) != 2 {

@@ -4,18 +4,18 @@
 (import time "core:time")
 (import reload "kvist:reload")
 
-(defstate app/App_State
+(defstate app.App_State
   {:run run
-   :init app/init
-   :on-load app/on-load
-   :on-unload app/on-unload
+   :init app.init
+   :on-load app.on-load
+   :on-unload app.on-unload
    :version "v1"})
 
 (defn run
   "Runs the reloadable application loop and returns at a safe checkpoint."
-  [state: (ptr app/App_State) host: (ptr reload/Run_Host)]
+  [state: (ptr app.App_State) host: (ptr reload.Run_Host)]
   (while true
-    (app/tick state)
-    (time.sleep app/delay)
-    (when (reload/checkpoint! host)
+    (app.tick state)
+    (time.sleep app.delay)
+    (when (reload.checkpoint! host)
       (return))))

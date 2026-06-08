@@ -5,31 +5,31 @@
 (defn strings-demo [] -> bool
   (let [name "kvist"
         greeting (fmt.tprintf "hello %s" name) defer
-        parts (str/split "alpha,beta,gamma" ",") defer
-        joined (str/join parts "/") defer
-        replaced (str/replace joined "/" "-") defer
-        lowered (str/lower replaced) defer
-        uppered (str/upper lowered) defer]
-    (core/println (str/count name))
-    (core/println (str/get name 1))
-    (core/println (str/slice name 1 4))
-    (core/println greeting)
-    (core/println (str/contains? name "vis"))
-    (core/println (str/trim "  kvist  "))
-    (core/println (str/trim-prefix "kvist/core" "kvist/"))
-    (core/println (str/trim-suffix "kvist.txt" ".txt"))
-    (core/println (str/starts-with? uppered "ALPHA"))
-    (core/println (str/ends-with? uppered "GAMMA"))
-    (core/println (str/index-of uppered "-"))
-    (core/println (str/last-index-of uppered "-"))
-    (core/println uppered)
+        parts (str.split "alpha,beta,gamma" ",") defer
+        joined (str.join parts "/") defer
+        replaced (str.replace joined "/" "-") defer
+        lowered (str.lower replaced) defer
+        uppered (str.upper lowered) defer]
+    (core.println (str.count name))
+    (core.println (str.get name 1))
+    (core.println (str.slice name 1 4))
+    (core.println greeting)
+    (core.println (str.contains? name "vis"))
+    (core.println (str.trim "  kvist  "))
+    (core.println (str.trim-prefix "kvist.core" "kvist/"))
+    (core.println (str.trim-suffix "kvist.txt" ".txt"))
+    (core.println (str.starts-with? uppered "ALPHA"))
+    (core.println (str.ends-with? uppered "GAMMA"))
+    (core.println (str.index-of uppered "-"))
+    (core.println (str.last-index-of uppered "-"))
+    (core.println uppered)
     true))
 
 (defn main []
-  (core/println (strings-demo)))
+  (core.println (strings-demo)))
 
-(core/comment
-  ;; Strings now cover direct count/get/slice/contains? plus a curated set of
+(core.comment
+  ;; Strings now cover direct count.get/slice/contains? plus a curated set of
   ;; common Odin string transforms. Formatting is still explicit host-level
   ;; allocation through fmt.
   (strings-demo)

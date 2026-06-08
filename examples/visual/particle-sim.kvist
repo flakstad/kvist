@@ -83,7 +83,7 @@
 (defn make-particles
   "Allocate and initialize n particles inside a dynamic struct-of-arrays buffer."
   [n: int, w: int, h: int] -> #soa[dynamic]Particle
-  (let [particles (soa/make Particle n)
+  (let [particles (soa.make Particle n)
         seed: u32 0xC0FFEE
         i 0]
     (while (< i n)
@@ -92,7 +92,7 @@
             radius (+ 1.5 (* 3.5 (rand-unit (addr seed))))
             x (+ 20.0 (* (- (f32 w) 40.0) (rand-unit (addr seed))))
             y (+ 20.0 (* (- (f32 h) 40.0) (rand-unit (addr seed))))]
-        (soa/push! particles
+        (soa.push! particles
                       (Particle {:x x
                                  :y y
                                  :vx (* speed (math.cos angle))
@@ -210,11 +210,11 @@
     (draw-hud-text font (fmt.ctprintf "%7d" state.particle-count) 110 45 Hud-Font-Size rl.RAYWHITE)
     (draw-hud-text font "drawn" 230 45 Hud-Font-Size rl.LIGHTGRAY)
     (draw-hud-text font (fmt.ctprintf "%7d" (render-count state)) 290 45 Hud-Font-Size rl.RAYWHITE)
-    (draw-hud-text font "cpu/rss" 410 45 Hud-Font-Size rl.LIGHTGRAY)
+    (draw-hud-text font "cpu.rss" 410 45 Hud-Font-Size rl.LIGHTGRAY)
     (draw-hud-text font "sampled externally with scripts/particle_stats.sh" 485 45 Hud-Font-Size rl.RAYWHITE)
     (draw-hud-text
       font
-      "drag/click: attract   space: pause   r: reset   a: antialias   0/1/2/3: 10/30/60/144 fps   4/5/6: 1.2k/10k/50k particles   7/8/9: draw 1.2k/10k/all"
+      "drag.click: attract   space: pause   r: reset   a: antialias   0/1/2/3: 10/30/60/144 fps   4/5/6: 1.2k/10k/50k particles   7/8/9: draw 1.2k/10k/all"
       18 74
       16.0
       rl.LIGHTGRAY)))
@@ -331,7 +331,7 @@
 (defn main
   "Dispatch to headless benchmark mode when --bench is present, otherwise run the window."
   []
-  (if (cli/flag os.args "--bench")
-    (run-bench (cli/int-option os.args "--particles" 50000)
-               (cli/int-option os.args "--steps" 20000))
+  (if (cli.flag os.args "--bench")
+    (run-bench (cli.int-option os.args "--particles" 50000)
+               (cli.int-option os.args "--steps" 20000))
     (run-window)))

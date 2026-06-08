@@ -1,5 +1,5 @@
 (defn render-inspection [count]
-  (str "live-version=" (module/version)
+  (str "live-version=" (module.version)
        " inspect-count=" count
-       " host=" (host/call "host.snapshot")
+       " host=" (host.call "host.snapshot")
        " note=" note))

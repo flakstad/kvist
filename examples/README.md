@@ -3,7 +3,7 @@
 The examples are grouped by intent so the folder names answer what kind of
 thing you are looking at. Most files are meant to be read and evaled form by
 form from Emacs; many keep `main` small and put useful calls in a
-`(core/comment ...)` block.
+`(core.comment ...)` block.
 
 ## Layout
 
@@ -123,7 +123,7 @@ See the demo-local guides for details:
 ```sh
 kvist check examples/interop/core/core-time-slice.kvist
 kvist eval examples/interop/core/core-time-slice.kvist '(duration-ms)'
-kvist macroexpand examples/interop/core/error-handling.kvist '(core/if-ok [data err (os.read_entire_file "tmp/x" context.allocator)] (len data) 0)'
+kvist macroexpand examples/interop/core/error-handling.kvist '(core.if-ok [data err (os.read_entire_file "tmp/x" context.allocator)] (len data) 0)'
 kvist expand examples/collections/sequences.kvist '(age-for-ada)'
 ```
 

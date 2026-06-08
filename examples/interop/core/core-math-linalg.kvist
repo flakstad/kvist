@@ -33,12 +33,12 @@
   (rand.int_max 10))
 
 (defn main []
-  (core/println (rounded-root)
+  (core.println (rounded-root)
                (clamped-score 42)
                (vector-dot)
                (vector-length)))
 
-(core/comment
+(core.comment
   ;; Each small proc is safe to eval independently from Emacs. The main proc is
   ;; only a smoke test; the interesting examples are the forms below.
 

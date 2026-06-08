@@ -29,8 +29,8 @@ It should be very close to `clojure-mode`:
 - font-lock Kvist special forms, keywords, Odin directive symbols, and raw
   `(odin "...")` escape hatches
 - provide indentation overrides for Kvist forms such as `defn`, `defstruct`,
-  `defenum`, `defunion`, `fn`, `let`, `defvar`, `block`, `core/switch`,
-  `core/cond`, and `for`
+  `defenum`, `defunion`, `fn`, `let`, `defvar`, `block`, `core.switch`,
+  `core.cond`, and `for`
 
 The compiler's Odin source remains 4-space indented. The Kvist source format is
 separate and should read like Clojure.
@@ -122,9 +122,9 @@ clearly expand to existing forms, such as allocator setup/teardown,
 `with-*`-style cleanup, and repetitive check/error propagation. The initial
 multi-return convenience macros are:
 
-- `core/when-let` and `core/if-let` for `[value bool expr]`, expanding to destructuring
+- `core.when-let` and `core.if-let` for `[value bool expr]`, expanding to destructuring
   `let` plus a direct boolean condition;
-- `core/when-ok` and `core/if-ok` for `[value err expr]`, expanding to destructuring
+- `core.when-ok` and `core.if-ok` for `[value err expr]`, expanding to destructuring
   `let` plus `(== err {})`.
 
 The bool/error distinction is intentional. Odin procs commonly report success
@@ -152,8 +152,8 @@ A tap system should help inspect values during eval and normal runs without
 changing program semantics. The initial spelling is:
 
 ```clojure
-(core/tap> value)
-(core/tap> :label value)
+(core.tap> value)
+(core.tap> :label value)
 ```
 
 This currently lowers through tiny generated helpers that print to stdout with
@@ -162,18 +162,18 @@ explicitly. That is intentionally modest: it works in normal runs and editor
 evals, it is visible in the generated Odin, and it does not depend on a hidden
 global tap registry.
 
-In practice, `core/tap>` is the expression-friendly version of adding a temporary
+In practice, `core.tap>` is the expression-friendly version of adding a temporary
 print line: wrap a value, see it, and keep passing the same value onward. It is
 especially useful inside a threaded pipeline or nested expression where adding a
 separate statement would force a local binding just for inspection.
 
-`core/tap>` also works as a `core/->` / `core/->>` thread step:
+`core.tap>` also works as a `core.->` / `core.->>` thread step:
 
 ```clojure
-(core/->> users
-     (arr/filter active?)
-     (core/tap> :active)
-     (arr/map :name))
+(core.->> users
+     (arr.filter active?)
+     (core.tap> :active)
+     (arr.map :name))
 ```
 
 The step is ownership-transparent. A tapped owned final value remains owned by
@@ -217,8 +217,8 @@ Initial support should stay boring:
 ```clojure
 (import io "kvist:io")
 
-(io/write "tmp/users.json" text)
-(let [[data err] (io/read "tmp/users.json")]
+(io.write "tmp/users.json" text)
+(let [[data err] (io.read "tmp/users.json")]
   (if (!= err nil)
     0
     (do
@@ -227,9 +227,9 @@ Initial support should stay boring:
 ```
 
 These helpers are intentionally thin wrappers over `core:os`; source files
-must import them explicitly with `(import io "kvist:io")`. `(io/write path
+must import them explicitly with `(import io "kvist:io")`. `(io.write path
 data)` lowers through `os.write_entire_file(path, data)` and returns
-`os.Error`. `(io/read path)` lowers through
+`os.Error`. `(io.read path)` lowers through
 `os.read_entire_file(path, context.allocator)` and returns owned `[]byte` plus
 `os.Error`; callers delete the bytes or return them to transfer ownership.
 
@@ -245,18 +245,18 @@ Saving JSON can also stay boring:
 (import io "kvist:io")
 (import json "kvist:json")
 
-(let [[marshal-err write-err] (json/write "tmp/users.json" user)]
+(let [[marshal-err write-err] (json.write "tmp/users.json" user)]
   (and (== marshal-err nil)
        (== write-err nil)))
 
-(let [[user read-err unmarshal-err] (json/read-as User "tmp/users.json")]
+(let [[user read-err unmarshal-err] (json.read-as User "tmp/users.json")]
   (and (== read-err nil)
        (== unmarshal-err nil)))
 ```
 
 For structured data, continue to require explicit format and type decisions
 rather than inventing a universal printer/reader. The shipped `kvist:json`
-package keeps the surface narrow: `json/write` and `json/read-as`. Odin's JSON
+package keeps the surface narrow: `json.write` and `json.read-as`. Odin's JSON
 unmarshal can allocate strings, slices, dynamic arrays, and maps inside the
 destination value according to that destination type, so callers still own any
 allocations inside a successfully decoded value. For allocation-heavy decoded
@@ -320,7 +320,7 @@ writes the exact stdout from a successful eval run to the named cache file and
 still prints stdout normally.
 
 This is intentionally text-oriented. For structured values, prefer explicit
-`io/write`, `io/read`, `json/write`, and `json/read-as` in Kvist source so
+`io.write`, `io.read`, `json.write`, and `json.read-as` in Kvist source so
 ownership and format choices stay visible.
 
 The Emacs tooling exposes this through ordinary CLI calls:

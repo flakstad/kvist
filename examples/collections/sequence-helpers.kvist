@@ -51,73 +51,73 @@
 
 (defn split-front-length [] -> int
   (let [xs ([]int [1 2 3 4])
-        [front _] (arr/split-at 2 xs)]
+        [front _] (arr.split-at 2 xs)]
     (len front)))
 
 (defn first-kept-square [] -> int
   (let [xs ([]int [1 2 3 4])
-        kept (arr/keep square-even xs)]
+        kept (arr.keep square-even xs)]
     (defer (delete kept))
-    (arr/first kept)))
+    (arr.first kept)))
 
 (defn deferred-total [] -> int
   (let [xs ([]int [1 2 3])]
-    (let [doubled (arr/map double xs) defer
-          evens (arr/filter even? doubled) defer]
-      (arr/reduce add 0 evens))))
+    (let [doubled (arr.map double xs) defer
+          evens (arr.filter even? doubled) defer]
+      (arr.reduce add 0 evens))))
 
 (defn age-for-grace [] -> int
   (let [names ([]string ["Ada" "Lin" "Grace"])
         ages ([]int [36 17 45])
-        ages-by-name (map/zip names ages)]
+        ages-by-name (map.zip names ages)]
     (defer (delete ages-by-name))
-    (core/get ages-by-name "Grace")))
+    (core.get ages-by-name "Grace")))
 
 (defn chunk-count [] -> int
   (let [xs ([]int [1 2 3 4])
-        chunks (arr/partition 2 xs)]
+        chunks (arr.partition 2 xs)]
     (defer (delete chunks))
     (len chunks)))
 
 (defn repeated-two-count [] -> int
   (let [xs ([]int [1 2 2 3])
-        counts (arr/frequencies xs)]
+        counts (arr.frequencies xs)]
     (defer (delete counts))
-    (core/get counts 2)))
+    (core.get counts 2)))
 
 (defn count-by-parity-total [] -> int
   (let [xs ([]int [1 2 3 4 6])
-        counts (arr/count-by parity xs)]
+        counts (arr.count-by parity xs)]
     (defer (delete counts))
-    (+ (core/get counts 0) (core/get counts 1))))
+    (+ (core.get counts 0) (core.get counts 1))))
 
 (defn sum-by-parity-total [] -> int
   (let [xs ([]int [1 2 3 4 6])
-        sums (arr/sum-by parity identity-int xs)]
+        sums (arr.sum-by parity identity-int xs)]
     (defer (delete sums))
-    (+ (core/get sums 0) (core/get sums 1))))
+    (+ (core.get sums 0) (core.get sums 1))))
 
 (defn indexed-name-count [] -> int
   (let [names ([]string ["Ada" "Lin" "Grace"])
-        by-name (arr/index-by name-key names)]
+        by-name (arr.index-by name-key names)]
     (defer (delete by-name))
     (len by-name)))
 
 (defn key-value-count [] -> int
   (let [names ([]string ["Ada" "Lin" "Grace"])
         ages ([]int [36 17 45])
-        ages-by-name (map/zip names ages)
-        name-keys (map/keys ages-by-name)
-        age-values (map/vals ages-by-name)]
+        ages-by-name (map.zip names ages)
+        name-keys (map.keys ages-by-name)
+        age-values (map.vals ages-by-name)]
     (defer (delete ages-by-name))
     (defer (delete name-keys))
     (defer (delete age-values))
-    (+ (core/count name-keys) (core/count age-values))))
+    (+ (core.count name-keys) (core.count age-values))))
 
 (defn even-group-count [] -> int
   (let [xs ([]int [1 2 3 4 6])
-        groups (arr/group-by parity xs)
-        evens (core/get groups 0)]
+        groups (arr.group-by parity xs)
+        evens (core.get groups 0)]
     (defer
       (each [_ group groups]
         (delete group))
@@ -125,194 +125,194 @@
     (len evens)))
 
 (defn range-total [] -> int
-  (let [xs (arr/range 1 5)]
+  (let [xs (arr.range 1 5)]
     (defer (delete xs))
-    (arr/reduce add 0 xs)))
+    (arr.reduce add 0 xs)))
 
 (defn repeated-answer-count [] -> int
-  (let [xs (arr/repeatedly 3 next-answer)]
+  (let [xs (arr.repeatedly 3 next-answer)]
     (defer (delete xs))
     (len xs)))
 
 (defn repeated-word-last [] -> string
-  (let [xs (arr/repeat 3 "odin")]
+  (let [xs (arr.repeat 3 "odin")]
     (defer (delete xs))
-    (arr/last xs)))
+    (arr.last xs)))
 
 (defn iterated-last [] -> int
-  (let [xs (arr/iterate 4 double 1)]
+  (let [xs (arr.iterate 4 double 1)]
     (defer (delete xs))
-    (arr/last xs)))
+    (arr.last xs)))
 
 (defn cycled-total [] -> int
   (let [base ([]int [1 2 3])
-        xs (arr/cycle 5 base)]
+        xs (arr.cycle 5 base)]
     (defer (delete xs))
-    (arr/reduce add 0 xs)))
+    (arr.reduce add 0 xs)))
 
 (defn counted-cycle [] -> int
   (let [base ([]int [1 2])
-        xs (arr/cycle 5 base)]
+        xs (arr.cycle 5 base)]
     (defer (delete xs))
-    (core/count xs)))
+    (core.count xs)))
 
 (defn trimmed-sum [] -> int
   (let [xs ([]int [1 2 3 4 5])
-        head (arr/take 3 xs)
-        tail (arr/drop 2 xs)
-        smalls (arr/take-while small? xs)
-        bigs (arr/drop-while small? xs)]
-    (+ (+ (arr/last head) (arr/first tail))
-       (+ (len smalls) (arr/first bigs)))))
+        head (arr.take 3 xs)
+        tail (arr.drop 2 xs)
+        smalls (arr.take-while small? xs)
+        bigs (arr.drop-while small? xs)]
+    (+ (+ (arr.last head) (arr.first tail))
+       (+ (len smalls) (arr.first bigs)))))
 
 (defn tail-trim-score [] -> int
   (let [xs ([]int [1 2 3 4 5])
-        init (arr/butlast xs)
-        without-two (arr/drop-last 2 xs)]
-    (+ (arr/last init) (len without-two))))
+        init (arr.butlast xs)
+        without-two (arr.drop-last 2 xs)]
+    (+ (arr.last init) (len without-two))))
 
 (defn every-other-total [] -> int
   (let [xs ([]int [1 2 3 4 5])
-        sampled (arr/take-nth 2 xs)]
+        sampled (arr.take-nth 2 xs)]
     (defer (delete sampled))
-    (arr/reduce add 0 sampled)))
+    (arr.reduce add 0 sampled)))
 
 (defn rest-second-empty-score [] -> int
   (let [xs ([]int [10 20 30])
-        tail (arr/rest xs)
-        empty-tail (arr/drop 3 xs)]
-    (if (core/empty? empty-tail)
-      (+ (arr/first tail) (arr/second xs))
+        tail (arr.rest xs)
+        empty-tail (arr.drop 3 xs)]
+    (if (core.empty? empty-tail)
+      (+ (arr.first tail) (arr.second xs))
       0)))
 
 (defn concat-reversed-first [] -> int
   (let [xs ([]int [1 2])
         ys ([]int [3 4])
         joined (concat xs ys)
-        reversed (arr/reverse joined)]
+        reversed (arr.reverse joined)]
     (defer (delete joined))
     (defer (delete reversed))
-    (arr/first reversed)))
+    (arr.first reversed)))
 
 (defn interposed-total [] -> int
   (let [xs ([]int [1 2 3])
-        separated (arr/interpose 10 xs)]
+        separated (arr.interpose 10 xs)]
     (defer (delete separated))
-    (arr/reduce add 0 separated)))
+    (arr.reduce add 0 separated)))
 
 (defn interleaved-total [] -> int
   (let [xs ([]int [1 2 3])
         ys ([]int [10 20])
-        joined (arr/interleave xs ys)]
+        joined (arr.interleave xs ys)]
     (defer (delete joined))
-    (arr/reduce add 0 joined)))
+    (arr.reduce add 0 joined)))
 
 (defn shuffled-first [] -> int
   (let [xs ([]int [1 2 3 4])
-        shuffled (arr/shuffle pick-first xs)]
+        shuffled (arr.shuffle pick-first xs)]
     (defer (delete shuffled))
-    (arr/first shuffled)))
+    (arr.first shuffled)))
 
 (defn shuffled-in-place-first [] -> int
   (let [xs ([dynamic]int [1 2 3 4])]
     (defer (delete xs))
-    (arr/shuffle! pick-first xs)
-    (arr/first xs)))
+    (arr.shuffle! pick-first xs)
+    (arr.first xs)))
 
 (defn sorted-second [] -> int
   (let [xs ([]int [4 1 3 2])
-        sorted (arr/sort xs)]
+        sorted (arr.sort xs)]
     (defer (delete sorted))
-    (arr/second sorted)))
+    (arr.second sorted)))
 
 (defn descending-first [] -> int
   (let [xs ([]int [4 1 3 2])
-        sorted (arr/sort-by negative xs)]
+        sorted (arr.sort-by negative xs)]
     (defer (delete sorted))
-    (arr/first sorted)))
+    (arr.first sorted)))
 
 (defn sorted-in-place-first [] -> int
   (let [xs ([dynamic]int [4 1 3 2])]
     (defer (delete xs))
-    (arr/sort! xs)
-    (arr/first xs)))
+    (arr.sort! xs)
+    (arr.first xs)))
 
 (defn reversed-in-place-first [] -> int
   (let [xs ([dynamic]int [1 2 3 4])]
     (defer (delete xs))
-    (arr/reverse! xs)
-    (arr/first xs)))
+    (arr.reverse! xs)
+    (arr.first xs)))
 
 (defn descending-in-place-first [] -> int
   (let [xs ([dynamic]int [4 1 3 2])]
     (defer (delete xs))
-    (arr/sort-by! negative xs)
-    (arr/first xs)))
+    (arr.sort-by! negative xs)
+    (arr.first xs)))
 
 (defn doubled-in-place-total [] -> int
   (let [xs ([dynamic]int [1 2 3])]
     (defer (delete xs))
-    (arr/map! double xs)
-    (arr/reduce add 0 xs)))
+    (arr.map! double xs)
+    (arr.reduce add 0 xs)))
 
 (defn indexed-in-place-second [] -> int
   (let [xs ([dynamic]int [1 2 3])]
     (defer (delete xs))
-    (arr/map-indexed! add-index xs)
-    (arr/second xs)))
+    (arr.map-indexed! add-index xs)
+    (arr.second xs)))
 
 (defn filtered-in-place-count [] -> int
   (let [xs ([dynamic]int [1 2 3 4])]
     (defer (delete xs))
-    (arr/filter! even? xs)
+    (arr.filter! even? xs)
     (len xs)))
 
 (defn removed-in-place-first [] -> int
   (let [xs ([dynamic]int [1 2 3 4])]
     (defer (delete xs))
-    (arr/remove! even? xs)
-    (arr/first xs)))
+    (arr.remove! even? xs)
+    (arr.first xs)))
 
 (defn kept-in-place-first [] -> int
   (let [xs ([dynamic]int [1 2 3 4])]
     (defer (delete xs))
-    (arr/keep! square-even xs)
-    (arr/first xs)))
+    (arr.keep! square-even xs)
+    (arr.first xs)))
 
 (defn appended-total [] -> int
   (let [xs ([dynamic]int [1 2])
         more ([]int [3 4])]
     (defer (delete xs))
-    (arr/into! xs more)
-    (arr/reduce add 0 xs)))
+    (arr.into! xs more)
+    (arr.reduce add 0 xs)))
 
 (defn copied-total [] -> int
   (let [xs ([]int [1 2 3])
-        copied (arr/into [dynamic]int xs)]
+        copied (arr.into [dynamic]int xs)]
     (defer (delete copied))
-    (arr/reduce add 0 copied)))
+    (arr.reduce add 0 copied)))
 
 (defn distinct-total [] -> int
   (let [xs ([]int [1 2 2 3 3])
-        unique (arr/distinct xs)]
+        unique (arr.distinct xs)]
     (defer (delete unique))
-    (arr/reduce add 0 unique)))
+    (arr.reduce add 0 unique)))
 
 (defn first-per-parity-count [] -> int
   (let [xs ([]int [1 3 2 4 5])
-        unique (arr/distinct-by parity xs)]
+        unique (arr.distinct-by parity xs)]
     (defer (delete unique))
-    (core/count unique)))
+    (core.count unique)))
 
 (defn ragged-chunk-size [] -> int
   (let [xs ([]int [1 2 3 4 5])
-        chunks (arr/partition-all 2 xs)]
+        chunks (arr.partition-all 2 xs)]
     (defer (delete chunks))
-    (len (arr/last chunks))))
+    (len (arr.last chunks))))
 
 (defn run-count [] -> int
   (let [xs ([]int [1 1 2 2 2 3 1])
-        runs (arr/partition-by identity-int xs)]
+        runs (arr.partition-by identity-int xs)]
     (defer (delete runs))
     (len runs)))
 
@@ -320,24 +320,24 @@
   (let [segments ([]Segment [(Segment {:values ([]int [1 2])})
                                  (Segment {:values ([]int [3])})
                                  (Segment {:values ([]int [4 5])})])
-        values (arr/mapcat segment-values segments)]
+        values (arr.mapcat segment-values segments)]
     (defer (delete values))
-    (arr/reduce add 0 values)))
+    (arr.reduce add 0 values)))
 
 (defn threaded-first [] -> int
   (let [xs ([]int [1 2 3 4])
-        without-evens (arr/remove even? xs)
-        indexed (arr/map-indexed add-index (core/slice without-evens))
-        threaded (arr/reverse indexed)]
+        without-evens (arr.remove even? xs)
+        indexed (arr.map-indexed add-index (core.slice without-evens))
+        threaded (arr.reverse indexed)]
     (defer (delete without-evens))
     (defer (delete indexed))
     (defer (delete threaded))
-    (arr/first threaded)))
+    (arr.first threaded)))
 
 (defn main []
-  (core/println (age-for-grace)))
+  (core.println (age-for-grace)))
 
-(core/comment
+(core.comment
   (split-front-length)
   ;; => 2
 
@@ -356,7 +356,7 @@
   (repeated-two-count)
   ;; => 2
 
-  (core/count-by-parity-total)
+  (core.count-by-parity-total)
   ;; => 5
 
   (sum-by-parity-total)

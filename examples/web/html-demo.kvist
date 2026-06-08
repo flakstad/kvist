@@ -4,14 +4,14 @@
 (import h "kvist:html")
 
 (defn html-demo [] -> bool
-  (let [ids (arr/range 1 4) defer
-        page (h/render
+  (let [ids (arr.range 1 4) defer
+        page (h.render
                [:div {:class "border" :onclick "alert('hello!')"}
                 [:button {:class "primary"} "Save"]
                 [:ul
-                 (h/for [id ids]
+                 (h.for [id ids]
                    [:li id])]]) defer]
-    (core/println page)
+    (core.println page)
     true))
 
 (defn main []

@@ -95,7 +95,7 @@ Diagnostics should explain arity and expected literal/value shapes clearly.
 After indexed places are solid, add macros that reduce SOA column boilerplate:
 
 ```clojure
-(soa/update! particles i
+(soa.update! particles i
   :vx (+ vx (* ax dt))
   :vy (+ vy (* ay dt))
   :x  (+ x (* vx dt))
@@ -104,10 +104,10 @@ After indexed places are solid, add macros that reduce SOA column boilerplate:
 
 The macro should expand to explicit column access and mutation.
 
-Status: `kvist:soa` provides `soa/make`, `soa/push!`, and
-`soa/update!`. `soa/update!` binds mentioned fields to same-named locals,
+Status: `kvist:soa` provides `soa.make`, `soa.push!`, and
+`soa.update!`. `soa.update!` binds mentioned fields to same-named locals,
 then emits direct indexed column writes. Whole-column helpers such as
-`soa/axpy!`, `soa/clamp!`, `soa/sum-into!`, and `soa/dot-into!` take the SOA
+`soa.axpy!`, `soa.clamp!`, `soa.sum-into!`, and `soa.dot-into!` take the SOA
 buffer plus keyword field names and expand to direct loops over `(len
 particles)`.
 

@@ -22,5 +22,5 @@
     (intrinsics.simd_reduce_add_ordered doubled)))
 
 (defn main []
-  (core/println (make-permissions)
+  (core.println (make-permissions)
                 (simd-score)))

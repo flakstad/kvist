@@ -28,7 +28,7 @@
 
 (defn deque-score [] -> int
   ;; The same container can behave like a queue or stack depending on which end
-  ;; you push/pop. This is still mutation over an owned Odin value.
+  ;; you push.pop. This is still mutation over an owned Odin value.
   (let [q: (type queue.Queue Job) {}]
     (let [err (queue.init (addr q) 4)]
       (if (!= err nil)
@@ -42,8 +42,8 @@
             (+ (:priority first-job) (:priority second-job))))))))
 
 (defn safe-pop-score [] -> int
-  ;; Safe pop returns value + bool. That is a normal Odin found/ok convention,
-  ;; so Kvist uses core/core/if-let rather than error handling.
+  ;; Safe pop returns value + bool. That is a normal Odin found.ok convention,
+  ;; so Kvist uses core.if-let rather than error handling.
   (let [q: (type queue.Queue int) {}]
     (let [err (queue.init (addr q))]
       (if (!= err nil)
@@ -51,14 +51,14 @@
         (do
           (defer (queue.destroy (addr q)))
           (queue.push-back (addr q) 5)
-          (core/if-let [value ok (queue.pop-front-safe (addr q))]
+          (core.if-let [value ok (queue.pop-front-safe (addr q))]
             value
             0))))))
 
 (defn main []
-  (core/println (fifo-total) (deque-score) (safe-pop-score)))
+  (core.println (fifo-total) (deque-score) (safe-pop-score)))
 
-(core/comment
+(core.comment
   ;; FIFO behavior: push 10, push 20, pop them in the same order.
   (fifo-total)
   ;; => 30
@@ -67,7 +67,7 @@
   (deque-score)
   ;; => 60
 
-  ;; pop-front-safe uses the value/bool convention, not an Odin error.
+  ;; pop-front-safe uses the value.bool convention, not an Odin error.
   (safe-pop-score)
   ;; => 5
 )

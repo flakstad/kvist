@@ -4,23 +4,23 @@
 (import arr "kvist:arr")
 
 (defn discarded-owned-result-demo []
-  (arr/range 3)
-  (core/println "discarded"))
+  (arr.range 3)
+  (core.println "discarded"))
 
 (defn leaked-owned-local-demo []
-  (let [xs (arr/empty int)]
-    (core/println (core/count xs))))
+  (let [xs (arr.empty int)]
+    (core.println (core.count xs))))
 
 (defn overwritten-owned-local-demo []
-  (let [xs (arr/empty int)]
-    (set! xs (arr/empty int))
+  (let [xs (arr.empty int)]
+    (set! xs (arr.empty int))
     (defer (delete xs))
-    (core/println (core/count xs))))
+    (core.println (core.count xs))))
 
 (defn main []
-  (core/println "Run `kvist check examples/collections/ownership-warnings.kvist` to see warnings."))
+  (core.println "Run `kvist check examples/collections/ownership-warnings.kvist` to see warnings."))
 
-(core/comment
+(core.comment
   ;; These are documentation examples for the warning surface. They are meant
   ;; to compile, not to be “correct” ownership style.
   ;;

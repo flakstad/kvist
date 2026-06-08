@@ -21,30 +21,30 @@
    :home Point})
 
 (defn struct-types-demo [] -> bool
-  (let [samples (arr/dynamic float [1.5 2.5 3.5 4.5]) defer
+  (let [samples (arr.dynamic float [1.5 2.5 3.5 4.5]) defer
         profile (Profile {:name "Ada"
                           :age 36
                           :active? true
-                          :favorite-key :math/fp
-                          :scores (arr/dynamic int [10 20 30])
-                          :tags (set/of string ["math" "lisp"])
-                          :window (core/slice samples 1 3)
+                          :favorite-key :math.fp
+                          :scores (arr.dynamic int [10 20 30])
+                          :tags (set.of string ["math" "lisp"])
+                          :window (core.slice samples 1 3)
                           :home (Point {:x 1.0 :y 2.0})})]
-    (core/println (:name profile))
-    (core/println (:tags profile))
-    (core/println (:window profile))
-    (core/println (:home profile))
-    (core/println (arr/count (:scores profile)))
-    (core/println (set/contains? (:tags profile) "math"))
-    (core/println profile)
+    (core.println (:name profile))
+    (core.println (:tags profile))
+    (core.println (:window profile))
+    (core.println (:home profile))
+    (core.println (arr.count (:scores profile)))
+    (core.println (set.contains? (:tags profile) "math"))
+    (core.println profile)
     (delete (:scores profile))
     (delete (:tags profile))
     true))
 
 (defn main []
-  (core/println (struct-types-demo)))
+  (core.println (struct-types-demo)))
 
-(core/comment
+(core.comment
   ;; Two visible Kvist/Odin differences remain here:
   ;; - keyword currently lowers to string values.
   ;; - set[T] lowers to map[T]struct{}.

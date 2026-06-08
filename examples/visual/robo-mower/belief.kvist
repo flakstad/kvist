@@ -40,50 +40,50 @@
 (defn delete-belief!
   "Release robot belief buffers."
   [belief: (ptr Robot-Belief)]
-  (delete (:cells belief^)))
+  (delete belief^.cells))
 
 (defn reset-belief!
   "Clear the robot belief map back to unknown."
   [belief: (ptr Robot-Belief)]
-  (let [cells (:cells belief^)
+  (let [cells belief^.cells
         i 0]
     (while (< i Grid-Cells)
       (set! cells[i] Belief-Unknown)
       (mut! i += 1)))
-  (set! (:visited-count belief^) 0)
-  (set! (:cutting-count belief^) 0)
-  (set! (:obstacle-count belief^) 0)
-  (set! (:wire-count belief^) 0)
-  (set! (:last-cut-x belief^) (dock-x))
-  (set! (:last-cut-y belief^) (dock-y)))
+  (set! belief^.visited-count 0)
+  (set! belief^.cutting-count 0)
+  (set! belief^.obstacle-count 0)
+  (set! belief^.wire-count 0)
+  (set! belief^.last-cut-x (dock-x))
+  (set! belief^.last-cut-y (dock-y)))
 
 (defn belief-mark!
   "Mark one cell in the robot belief map and update counters."
   [belief: (ptr Robot-Belief), x: int, y: int, value: int]
   (when (not (in-bounds? x y))
     (return))
-  (let [cells (:cells belief^)
+  (let [cells belief^.cells
         cell (idx x y)
         old cells[cell]]
     (when (== old value)
       (return))
     (when (== old Belief-Visited)
-      (mut! (:visited-count belief^) -= 1))
+      (mut! belief^.visited-count -= 1))
     (when (== old Belief-Cutting)
-      (mut! (:cutting-count belief^) -= 1))
+      (mut! belief^.cutting-count -= 1))
     (when (== old Belief-Obstacle)
-      (mut! (:obstacle-count belief^) -= 1))
+      (mut! belief^.obstacle-count -= 1))
     (when (== old Belief-Wire)
-      (mut! (:wire-count belief^) -= 1))
+      (mut! belief^.wire-count -= 1))
     (set! cells[cell] value)
     (when (== value Belief-Visited)
-      (mut! (:visited-count belief^) += 1))
+      (mut! belief^.visited-count += 1))
     (when (== value Belief-Cutting)
-      (mut! (:cutting-count belief^) += 1))
+      (mut! belief^.cutting-count += 1))
     (when (== value Belief-Obstacle)
-      (mut! (:obstacle-count belief^) += 1))
+      (mut! belief^.obstacle-count += 1))
     (when (== value Belief-Wire)
-      (mut! (:wire-count belief^) += 1))))
+      (mut! belief^.wire-count += 1))))
 
 (defn belief-mark-point!
   "Mark the belief cell containing a field-space point."
@@ -110,7 +110,7 @@
   [belief: (ptr Robot-Belief), x: f32, y: f32] -> int
   (let [cell-x (int (/ x (f32 Cell-Size)))
         cell-y (int (/ y (f32 Cell-Size)))
-        cells (:cells belief^)
+        cells belief^.cells
         cell 0]
     (when (not (in-bounds? cell-x cell-y))
       (return Belief-Obstacle))
@@ -121,7 +121,7 @@
   "Return true when a known obstacle is near a field-space point."
   [belief: (ptr Robot-Belief), x: f32, y: f32, radius: f32] -> bool
   (let [r2 (* radius radius)
-        cells (:cells belief^)
+        cells belief^.cells
         center-x (int (/ x (f32 Cell-Size)))
         center-y (int (/ y (f32 Cell-Size)))
         cell-radius (+ 1 (int (/ radius (f32 Cell-Size))))
@@ -162,25 +162,25 @@
   "Update robot belief from local sensors and blade load."
   [belief: (ptr Robot-Belief), robot: (ptr Robot), sensors: (ptr Sensors)]
   (let [current-value Belief-Visited]
-    (when (> (:blade-load sensors^) (f32 0.12))
+    (when (> sensors^.blade-load (f32 0.12))
       (set! current-value Belief-Cutting)
-      (set! (:last-cut-x belief^) (:x robot^))
-      (set! (:last-cut-y belief^) (:y robot^)))
-    (when (< (:wire sensors^) (f32 18.0))
+      (set! belief^.last-cut-x robot^.x)
+      (set! belief^.last-cut-y robot^.y))
+    (when (< sensors^.wire (f32 18.0))
       (set! current-value Belief-Wire))
     (if (== current-value Belief-Cutting)
-      (belief-mark-radius! belief (:x robot^) (:y robot^) Blade-Radius current-value)
-      (belief-mark-point! belief (:x robot^) (:y robot^) current-value))
-    (when (< (:front sensors^) (f32 32.0))
-      (let [px (+ (:x robot^) (* (math.cos (:heading robot^)) (:front sensors^)))
-            py (+ (:y robot^) (* (math.sin (:heading robot^)) (:front sensors^)))]
+      (belief-mark-radius! belief robot^.x robot^.y Blade-Radius current-value)
+      (belief-mark-point! belief robot^.x robot^.y current-value))
+    (when (< sensors^.front (f32 32.0))
+      (let [px (+ robot^.x (* (math.cos robot^.heading) sensors^.front))
+            py (+ robot^.y (* (math.sin robot^.heading) sensors^.front))]
         (belief-mark-point! belief px py Belief-Obstacle)))))
 
 (defn belief-known-percent
   "Return percentage of the grid the robot has observed in any form."
   [belief: (ptr Robot-Belief)] -> f64
-  (* 100.0 (/ (f64 (+ (:visited-count belief^)
-                       (:cutting-count belief^)
-                       (:obstacle-count belief^)
-                       (:wire-count belief^)))
+  (* 100.0 (/ (f64 (+ belief^.visited-count
+                       belief^.cutting-count
+                       belief^.obstacle-count
+                       belief^.wire-count))
               (f64 Grid-Cells))))

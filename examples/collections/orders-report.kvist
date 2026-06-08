@@ -25,11 +25,11 @@
 
 (defn settle-order [order: Order] -> Order
   (let [updated order]
-    (core/when (and (== (:status updated) 2)
+    (core.when (and (== (:status updated) 2)
                (> (:amount updated) 100))
-      (core/update! updated :amount (- (:amount updated) (:discount updated)))
-      (core/update! updated :discount 0)
-      (core/update! updated :status 3))
+      (core.update! updated :amount (- (:amount updated) (:discount updated)))
+      (core.update! updated :discount 0)
+      (core.update! updated :status 3))
     updated))
 
 (defn row-score [rows: []Region-Report] -> int
@@ -41,40 +41,40 @@
     total))
 
 (defn sample-orders [] -> [dynamic]Order
-  (arr/dynamic Order [(Order {:id 1 :region 0 :amount 80 :discount 5 :status 1})
+  (arr.dynamic Order [(Order {:id 1 :region 0 :amount 80 :discount 5 :status 1})
                       (Order {:id 2 :region 1 :amount 250 :discount 20 :status 2})
                       (Order {:id 3 :region 1 :amount 140 :discount 10 :status 2})
                       (Order {:id 4 :region 2 :amount 90 :discount 0 :status 3})
                       (Order {:id 5 :region 2 :amount 410 :discount 35 :status 2})]))
 
 (defn rows-from-groups [groups: Order-Groups] -> [dynamic]Region-Report
-  (let [rows (arr/empty Region-Report)]
+  (let [rows (arr.empty Region-Report)]
     (each [region group groups]
       (let [revenue 0]
         (each [order group]
           (set! revenue (+ revenue (:amount order))))
-        (arr/push! rows
+        (arr.push! rows
           (Region-Report {:region region
                           :revenue revenue
                           :count (len group)}))))
-    (arr/sort-by! :revenue rows)
+    (arr.sort-by! :revenue rows)
     rows))
 
 (defn rows-from-aggregates [revenue-by-region: map[int]int, count-by-region: map[int]int] -> [dynamic]Region-Report
-  (let [rows (arr/empty Region-Report)]
+  (let [rows (arr.empty Region-Report)]
     (each [region revenue revenue-by-region]
-      (arr/push! rows
+      (arr.push! rows
         (Region-Report {:region region
                         :revenue revenue
-                        :count (core/get count-by-region region 0)})))
-    (arr/sort-by! :revenue rows)
+                        :count (core.get count-by-region region 0)})))
+    (arr.sort-by! :revenue rows)
     rows))
 
 (defn eager-report-score [] -> int
   (let [orders (sample-orders)
-        settled (arr/map settle-order orders)
-        paid (arr/filter settled? settled)
-        groups (arr/group-by :region paid)
+        settled (arr.map settle-order orders)
+        paid (arr.filter settled? settled)
+        groups (arr.group-by :region paid)
         rows (rows-from-groups groups)]
     (defer
       (delete orders)
@@ -84,13 +84,13 @@
         (delete group))
       (delete groups)
       (delete rows))
-    (row-score (arr/slice rows 0))))
+    (row-score (arr.slice rows 0))))
 
 (defn bang-report-score [] -> int
   (let [orders (sample-orders)
-        work (arr/map settle-order orders)]
-    (arr/filter! settled? work)
-    (let [groups (arr/group-by :region work)
+        work (arr.map settle-order orders)]
+    (arr.filter! settled? work)
+    (let [groups (arr.group-by :region work)
           rows (rows-from-groups groups)]
       (defer
         (delete orders)
@@ -99,14 +99,14 @@
           (delete group))
         (delete groups)
         (delete rows))
-      (row-score (arr/slice rows 0)))))
+      (row-score (arr.slice rows 0)))))
 
 (defn aggregate-helper-report-score [] -> int
   (let [orders (sample-orders)
-        work (arr/map settle-order orders)]
-    (arr/filter! settled? work)
-    (let [revenue-by-region (arr/sum-by :region :amount work)
-          count-by-region (arr/count-by :region work)
+        work (arr.map settle-order orders)]
+    (arr.filter! settled? work)
+    (let [revenue-by-region (arr.sum-by :region :amount work)
+          count-by-region (arr.count-by :region work)
           rows (rows-from-aggregates revenue-by-region count-by-region)]
       (defer
         (delete orders)
@@ -114,20 +114,20 @@
         (delete revenue-by-region)
         (delete count-by-region)
         (delete rows))
-      (row-score (arr/slice rows 0)))))
+      (row-score (arr.slice rows 0)))))
 
 (defn loop-report-score [] -> int
   (let [orders (sample-orders)
-        revenue-by-region (map/empty int int)
-        count-by-region (map/empty int int)]
+        revenue-by-region (map.empty int int)
+        count-by-region (map.empty int int)]
     (each [order orders]
       (let [settled (settle-order order)]
-        (core/when (settled? settled)
-          (set! (core/get revenue-by-region (:region settled))
-                (+ (core/get revenue-by-region (:region settled))
+        (core.when (settled? settled)
+          (set! (core.get revenue-by-region (:region settled))
+                (+ (core.get revenue-by-region (:region settled))
                    (:amount settled)))
-          (set! (core/get count-by-region (:region settled))
-                (+ (core/get count-by-region (:region settled))
+          (set! (core.get count-by-region (:region settled))
+                (+ (core.get count-by-region (:region settled))
                    1)))))
     (let [rows (rows-from-aggregates revenue-by-region count-by-region)]
       (defer
@@ -135,15 +135,15 @@
         (delete revenue-by-region)
         (delete count-by-region)
         (delete rows))
-      (row-score (arr/slice rows 0)))))
+      (row-score (arr.slice rows 0)))))
 
 (defn main []
-  (core/println (eager-report-score))
-  (core/println (bang-report-score))
-  (core/println (aggregate-helper-report-score))
-  (core/println (loop-report-score)))
+  (core.println (eager-report-score))
+  (core.println (bang-report-score))
+  (core.println (aggregate-helper-report-score))
+  (core.println (loop-report-score)))
 
-(core/comment
+(core.comment
   ;; Eager helpers read cleanly when the intermediate collections matter.
   (eager-report-score)
   ;; => 922

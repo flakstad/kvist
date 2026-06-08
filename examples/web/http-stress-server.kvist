@@ -30,28 +30,28 @@
   :note string
 })
 
-(sse/on-error ignore-err [stream err])
+(sse.on-error ignore-err [stream err])
 
-(sse/on-timeout tick [_op stream]
-  (when (not (sse/closed? stream))
-    (let [count (sse/user-int stream)]
-      (sse/send-event! stream "tick" "ok")
-      (sse/set-user-int! stream (+ count 1))
-      (sse/schedule-timeout! time.Second stream tick))))
+(sse.on-timeout tick [_op stream]
+  (when (not (sse.closed? stream))
+    (let [count (sse.user-int stream)]
+      (sse.send-event! stream "tick" "ok")
+      (sse.set-user-int! stream (+ count 1))
+      (sse.schedule-timeout! time.Second stream tick))))
 
 (defn main []
-  (let [router (http/new-router)
-        server (http/new-server)]
-    (defer (http/router-destroy! router))
+  (let [router (http.new-router)
+        server (http.new-server)]
+    (defer (http.router-destroy! router))
 
-    (http/get! router "/ping" [req res]
-      (http/respond-plain res "pong"))
+    (http.get! router "/ping" [req res]
+      (http.respond-plain res "pong"))
 
-    (http/get! router "/empty" [req res]
-      (http/respond-ok res))
+    (http.get! router "/empty" [req res]
+      (http.respond-ok res))
 
-    (http/get! router "/json" [req res]
-      (http/respond-json
+    (http.get! router "/json" [req res]
+      (http.respond-json
         res
         (Json-Reply
           {:message "pong"
@@ -66,18 +66,18 @@
                              :region "eu-north-1"})
            :note "Longer JSON payload for rough comparison."})))
 
-    (http/get! router "/plain" [req res]
-      (http/respond-plain res JSON-STATIC))
+    (http.get! router "/plain" [req res]
+      (http.respond-plain res JSON-STATIC))
 
-    (http/get! router "/events" [req res]
-      (let [stream (sse/new-stream-on-error res ignore-err)]
-        (sse/comment! stream "connected")
-        (sse/retry! stream 1000)
-        (sse/send-event! stream "welcome" "ready")
-        (sse/schedule-timeout! time.Second stream tick)))
+    (http.get! router "/events" [req res]
+      (let [stream (sse.new-stream-on-error res ignore-err)]
+        (sse.comment! stream "connected")
+        (sse.retry! stream 1000)
+        (sse.send-event! stream "welcome" "ready")
+        (sse.schedule-timeout! time.Second stream tick)))
 
-    (http/server-shutdown-on-interrupt! server)
-    (http/listen-and-serve! server router 6969)))
+    (http.server-shutdown-on-interrupt! server)
+    (http.listen-and-serve! server router 6969)))
 
 (comment
   ;; Run deliberately:

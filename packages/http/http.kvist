@@ -25,7 +25,7 @@ http__handler_next :: proc(handler: ^h.Handler) -> ^h.Handler {
   "Create and initialize a new HTTP router value.
 
   The returned router owns vendor router state and must be destroyed with
-  `http/router-destroy!` when it is no longer needed. `http/with-router` is the
+  `http.router-destroy!` when it is no longer needed. `http.with-router` is the
   usual scoped form for this."
   [] -> h.Router
   (let [router (h.Router {})]
@@ -33,7 +33,7 @@ http__handler_next :: proc(handler: ^h.Handler) -> ^h.Handler {
     router))
 
 (defmacro router-destroy!
-  "Destroy a router created by `http/new-router`.
+  "Destroy a router created by `http.new-router`.
 
   This lowers directly to the vendor router destroy call on the router address.
   It does not nil or otherwise invalidate the Kvist binding."
@@ -44,8 +44,8 @@ http__handler_next :: proc(handler: ^h.Handler) -> ^h.Handler {
 (defn new-server
   "Create a new HTTP server value.
 
-  The server starts unbound and is intended to be passed to `http/serve!`,
-  `http/listen!`, or the combined listen-and-serve helpers."
+  The server starts unbound and is intended to be passed to `http.serve!`,
+  `http.listen!`, or the combined listen-and-serve helpers."
   [] -> h.Server
   (h.Server {}))
 
@@ -108,7 +108,7 @@ http__handler_next :: proc(handler: ^h.Handler) -> ^h.Handler {
 
   `binding` must contain `[next-binding req res]`. Inside `body`,
   `next-binding` is bound to the next handler pointer and may be passed to
-  `http/handle!`. The expansion lowers to the vendor middleware proc form."
+  `http.handle!`. The expansion lowers to the vendor middleware proc form."
   [next binding & body]
   (let [next-binding (first binding)
         req (nth binding 1)
@@ -136,7 +136,7 @@ http__handler_next :: proc(handler: ^h.Handler) -> ^h.Handler {
 (defmacro serve!
   "Attach `router` to `server` and start serving.
 
-  This converts the router to a handler with `http/router-handler` and calls the
+  This converts the router to a handler with `http.router-handler` and calls the
   vendor serve operation."
   [server router]
   (quasiquote
@@ -155,7 +155,7 @@ http__handler_next :: proc(handler: ^h.Handler) -> ^h.Handler {
 (defmacro listen-and-serve!
   "Bind `server` to loopback `port` and serve `router`.
 
-  This combines `http/listen!` and router serving through the vendor
+  This combines `http.listen!` and router serving through the vendor
   listen-and-serve operation."
   [server router port]
   (quasiquote
@@ -176,7 +176,7 @@ http__handler_next :: proc(handler: ^h.Handler) -> ^h.Handler {
 (defmacro with-router
   "Evaluate `body` with a scoped router binding.
 
-  The router is created with `http/new-router` and destroyed with `defer` after
+  The router is created with `http.new-router` and destroyed with `defer` after
   the body. Use this when route registration is local to a block or test."
   [binding & body]
   (let [router (first binding)]
@@ -210,7 +210,7 @@ http__handler_next :: proc(handler: ^h.Handler) -> ^h.Handler {
 (defmacro get
   "Register a GET route on `router` for `pattern`.
 
-  Alias for `http/get!`; route registration mutates the router."
+  Alias for `http.get!`; route registration mutates the router."
   [router pattern binding & body]
   (quasiquote
     (get! (unquote router) (unquote pattern) (unquote binding)
@@ -226,7 +226,7 @@ http__handler_next :: proc(handler: ^h.Handler) -> ^h.Handler {
 (defmacro post
   "Register a POST route on `router` for `pattern`.
 
-  Alias for `http/post!`; route registration mutates the router."
+  Alias for `http.post!`; route registration mutates the router."
   [router pattern binding & body]
   (quasiquote
     (post! (unquote router) (unquote pattern) (unquote binding)
@@ -242,7 +242,7 @@ http__handler_next :: proc(handler: ^h.Handler) -> ^h.Handler {
 (defmacro put
   "Register a PUT route on `router` for `pattern`.
 
-  Alias for `http/put!`; route registration mutates the router."
+  Alias for `http.put!`; route registration mutates the router."
   [router pattern binding & body]
   (quasiquote
     (put! (unquote router) (unquote pattern) (unquote binding)
@@ -258,7 +258,7 @@ http__handler_next :: proc(handler: ^h.Handler) -> ^h.Handler {
 (defmacro patch
   "Register a PATCH route on `router` for `pattern`.
 
-  Alias for `http/patch!`; route registration mutates the router."
+  Alias for `http.patch!`; route registration mutates the router."
   [router pattern binding & body]
   (quasiquote
     (patch! (unquote router) (unquote pattern) (unquote binding)
@@ -274,7 +274,7 @@ http__handler_next :: proc(handler: ^h.Handler) -> ^h.Handler {
 (defmacro head
   "Register a HEAD route on `router` for `pattern`.
 
-  Alias for `http/head!`; route registration mutates the router."
+  Alias for `http.head!`; route registration mutates the router."
   [router pattern binding & body]
   (quasiquote
     (head! (unquote router) (unquote pattern) (unquote binding)
@@ -290,7 +290,7 @@ http__handler_next :: proc(handler: ^h.Handler) -> ^h.Handler {
 (defmacro options
   "Register an OPTIONS route on `router` for `pattern`.
 
-  Alias for `http/options!`; route registration mutates the router."
+  Alias for `http.options!`; route registration mutates the router."
   [router pattern binding & body]
   (quasiquote
     (options! (unquote router) (unquote pattern) (unquote binding)
@@ -306,7 +306,7 @@ http__handler_next :: proc(handler: ^h.Handler) -> ^h.Handler {
 (defmacro delete
   "Register a DELETE route on `router` for `pattern`.
 
-  Alias for `http/delete!`; route registration mutates the router."
+  Alias for `http.delete!`; route registration mutates the router."
   [router pattern binding & body]
   (quasiquote
     (delete! (unquote router) (unquote pattern) (unquote binding)
@@ -322,7 +322,7 @@ http__handler_next :: proc(handler: ^h.Handler) -> ^h.Handler {
 (defmacro all
   "Register a route for all HTTP methods on `router` for `pattern`.
 
-  Alias for `http/all!`; route registration mutates the router."
+  Alias for `http.all!`; route registration mutates the router."
   [router pattern binding & body]
   (quasiquote
     (all! (unquote router) (unquote pattern) (unquote binding)
@@ -332,8 +332,8 @@ http__handler_next :: proc(handler: ^h.Handler) -> ^h.Handler {
   "Create a server, install interrupt shutdown, and listen-and-serve `router`.
 
   This is a convenience macro for small programs. For explicit server lifetime
-  control, use `http/new-server`, `http/server-shutdown-on-interrupt!`, and
-  `http/listen-and-serve!` directly."
+  control, use `http.new-server`, `http.server-shutdown-on-interrupt!`, and
+  `http.listen-and-serve!` directly."
   [port router]
   (quasiquote
       (let [server (new-server)]
@@ -456,12 +456,12 @@ http__handler_next :: proc(handler: ^h.Handler) -> ^h.Handler {
   "Create empty rate-limit state.
 
   The returned value owns vendor rate-limit state and should be destroyed with
-  `http/rate-limit-destroy!` when no longer needed."
+  `http.rate-limit-destroy!` when no longer needed."
   [] -> h.Rate_Limit_Data
   (h.Rate_Limit_Data {}))
 
 (defmacro rate-limit-destroy!
-  "Destroy rate-limit state created by `http/new-rate-limit-data`."
+  "Destroy rate-limit state created by `http.new-rate-limit-data`."
   [data]
   (quasiquote
     (h.rate_limit_destroy (addr (unquote data)))))

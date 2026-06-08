@@ -19,7 +19,7 @@
 (defvar hybrid-native-generation: int 0)
 
 (defn render-value [value: kvist_live.Value] -> string
-  (core/switch (:kind value)
+  (core.switch (:kind value)
     .Nil (strings.clone "nil")
     .Bool (if (:bool_value value)
             (strings.clone "true")
@@ -30,7 +30,7 @@
 
 (defn host-log-capability [runtime: (ptr kvist_live.Runtime)
                            capability-name: string
-                           args: (core/slice kvist_live.Value)] -> [value: kvist_live.Value, err: kvist_live.Runtime_Error, ok: bool]
+                           args: (core.slice kvist_live.Value)] -> [value: kvist_live.Value, err: kvist_live.Runtime_Error, ok: bool]
   (if (== (len args) 0)
     (do
       (fmt.println "[host.log]")
@@ -44,7 +44,7 @@
 
 (defn host-snapshot-capability [runtime: (ptr kvist_live.Runtime)
                                 capability-name: string
-                                args: (core/slice kvist_live.Value)] -> [value: kvist_live.Value, err: kvist_live.Runtime_Error, ok: bool]
+                                args: (core.slice kvist_live.Value)] -> [value: kvist_live.Value, err: kvist_live.Runtime_Error, ok: bool]
   (if (== hybrid-state-ptr nil)
     (return (kvist_live.value_nil)
             (kvist_live.Runtime_Error {:message (strings.clone "host state is not ready")})
@@ -145,7 +145,7 @@
                                                                                live-module-config)]
                                 (if (not reload-live-ok)
                                   (fmt.eprintln "live reload failed:" (:message reload-live-err))
-                                  (core/when live-changed
+                                  (core.when live-changed
                                     (fmt.println "[host] reloaded live module from disk"))))
                               (let [[changed reload-err reload-ok]
                                     (kvist_hot.reload_module_if_source_changed (addr reloader)
@@ -155,11 +155,11 @@
                                   (do
                                     (fmt.println "[host] native reload failed:" reload-err)
                                     (delete reload-err))
-                                  (core/when changed
+                                  (core.when changed
                                     (set! hybrid-native-generation (:generation reloader)))))
                               (support.Call_Symbol_Tick (addr symbols) (addr state))
                               (print-native-state (addr symbols) (addr state))
                               (let [[_ command-err command-ok] (kvist_live.invoke_command (addr runtime) "inspect" nil)]
-                                (core/when (not command-ok)
+                                (core.when (not command-ok)
                                   (fmt.eprintln "live command failed:" (:message command-err))))
                               (time.sleep tick-delay))))))))))))))))

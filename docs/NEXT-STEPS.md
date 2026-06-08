@@ -18,12 +18,12 @@ Kvist has:
 - a shipped `html` package with rendering
 - explicit ownership helpers and stricter escape diagnostics
 - a shipped `kvist:test` package with:
-  - `t/deftest`
-  - `t/is`
-  - `t/are`
-  - nested `t/testing`
-  - `t/use-fixtures :each`
-  - setup-only `t/use-fixtures :once`
+  - `t.deftest`
+  - `t.is`
+  - `t.are`
+  - nested `t.testing`
+  - `t.use-fixtures :each`
+  - setup-only `t.use-fixtures :once`
 - CLI and Emacs support for docs, completion, xref, eval, and tests
 
 Current intentional limits worth remembering:
@@ -97,10 +97,10 @@ Current package boundary:
 - `kvist:str`, `kvist:set`, `kvist:map`, `kvist:soa`, and `kvist:cli`
   are mostly real package code
 - `kvist:arr` exposes a broad real package facade, but part of that facade
-  still expands to `kvist/arr/...` intrinsics under the hood
+  still expands to `kvist.arr/...` intrinsics under the hood
 - public package entries in tooling point at package files rather than
   directly at `emit.odin`
-- the remaining intrinsic `arr/*` cases are mostly the wider grouping,
+- the remaining intrinsic `arr.*` cases are mostly the wider grouping,
   partitioning, sorting, and in-place transform helpers where array-family
   coverage, ownership rules, or callback specialization still need the smaller
   compiler substrate

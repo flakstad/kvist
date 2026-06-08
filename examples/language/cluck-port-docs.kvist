@@ -8,13 +8,13 @@
 (defn docs-demo
   "Show doc lookup for both value and function declarations."
   [] -> bool
-  (core/println docs_banner)
-  (core/doc 'docs_banner)
-  (core/doc 'docs_demo)
+  (core.println docs_banner)
+  (core.doc 'docs_banner)
+  (core.doc 'docs_demo)
   true)
 
 (defn main []
-  (core/println (docs-demo)))
+  (core.println (docs-demo)))
 
-(core/comment
+(core.comment
   (docs-demo))

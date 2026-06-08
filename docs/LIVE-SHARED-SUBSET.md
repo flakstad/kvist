@@ -88,17 +88,17 @@ The live evaluator currently supports:
   - `when`
 - `cond`
 - `let`
-- state/runtime interaction:
-  - `state/get`
-  - `state/set!`
-  - `state/inc!`
-  - `module/name`
-  - `module/version`
-  - `reload/from-version`
-  - `reload/state-get`
-  - `args/count`
-  - `args/get`
-  - `payload/count`
+- state.runtime interaction:
+  - `state.get`
+  - `state.set!`
+  - `state.inc!`
+  - `module.name`
+  - `module.version`
+  - `reload.from-version`
+  - `reload.state-get`
+  - `args.count`
+  - `args.get`
+  - `payload.count`
   - `payload/get`
   - `host/call`
   - `hook/emit`
