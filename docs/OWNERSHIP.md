@@ -134,21 +134,13 @@ to the decoded type.
 
 ## Compiler Ownership Knowledge
 
-The compiler should keep an internal list of **known owned producers**. This is
-the source of truth for future diagnostics and examples. The list should stay
+The compiler keeps an internal list of **known owned producers**. The list stays
 small and explicit rather than trying to infer ownership from arbitrary user
 procedures.
 
 That knowledge is for warnings first, not hidden cleanup behavior.
 
-Near-term diagnostics should stay conservative:
-
-- warn when a known owned result is produced and discarded;
-- warn when a known owned result is bound locally and then clearly never
-  deleted, returned, or transferred;
-- warn when a local known-owned binding is overwritten before cleanup.
-
-Current compiler warnings implement the first conservative slice of this:
+Current compiler warnings are conservative:
 
 - discarded owned constructor/allocation results such as `arr.empty`, `arr.dynamic`,
   `map.empty`, `map.of`, `set.empty`, `set.of`, owned `str.*` builders such as
@@ -158,23 +150,22 @@ Current compiler warnings implement the first conservative slice of this:
 - owned `let` locals that are never deleted or returned;
 - owned locals overwritten with `set!` before cleanup.
 
-These warnings should be specific enough to point at the producing form and
-suggest the obvious next step, such as adding `(defer (delete xs))`, returning
+These warnings are specific enough to point at the producing form and suggest a
+concrete remediation, such as adding `(defer (delete xs))`, returning
 the value directly, or cleaning up before `set!`.
 
-The warning pass should also stay conservative around branches: if every `if`,
+The warning pass is conservative around branches: if every `if`,
 `cond`, or `case` branch clearly deletes or returns the owned local, the
-compiler should not warn. If one branch leaks, it should.
+compiler does not warn. If one branch leaks, it warns.
 
-These warnings should avoid cases where ownership is ambiguous, especially:
+These warnings avoid cases where ownership is ambiguous, especially:
 
 - values stored inside structs or other aggregates;
 - values passed through unknown user procedures;
 - branch-heavy flows where escape/transfer is not obvious;
 - nested ownership inside structs, maps, or arrays.
 
-Warnings are the right first step. A stricter mode can be considered later, but
-the initial goal is to help users catch obvious mistakes without pretending the
+The warning system helps users catch obvious mistakes without pretending the
 compiler has a full ownership system.
 
 ## Do Not Delete These
@@ -291,9 +282,9 @@ dynamic array because they compact and resize the existing storage:
     ...))
 ```
 
-The generated Odin stores the old allocator, assigns the requested allocator,
-and restores the old allocator with `defer`. Defers created inside the body run
-before the restore defer, so local `delete` calls still use the scoped
+The generated Odin stores the previous allocator, assigns the requested
+allocator, and restores the previous allocator with `defer`. Defers created
+inside the body run before the restore defer, so local `delete` calls still use the scoped
 allocator. Values returned from the block transfer ownership to the caller, so
 the caller must delete them with the matching allocator discipline.
 

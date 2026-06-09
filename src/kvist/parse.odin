@@ -39,6 +39,61 @@ is_proc_prefix_directive :: proc(text: string) -> bool {
     return text == "#force_inline"
 }
 
+attr_item_text :: proc(form: CST_Form) -> (string, Compile_Error, bool) {
+    #partial switch form.kind {
+    case .Symbol:
+        return strings.clone(map_name(form.text)), {}, true
+    case .String, .Number, .Bool, .Nil:
+        return strings.clone(form.text), {}, true
+    case .List:
+        if len(form.items) == 0 || form.items[0].kind != .Symbol {
+            return "", Compile_Error{message = "attr list items expect a symbol head", span = form.span}, false
+        }
+        builder := strings.builder_make()
+        defer strings.builder_destroy(&builder)
+        strings.write_string(&builder, map_name(form.items[0].text))
+        strings.write_byte(&builder, '(')
+        for item, idx in form.items[1:] {
+            if idx > 0 {
+                strings.write_string(&builder, ", ")
+            }
+            text, err, ok := attr_item_text(item)
+            if !ok {
+                return "", err, false
+            }
+            defer delete(text)
+            strings.write_string(&builder, text)
+        }
+        strings.write_byte(&builder, ')')
+        return strings.clone(strings.to_string(builder)), {}, true
+    case:
+        return "", Compile_Error{message = "attr expects symbols, literals, or list attribute calls", span = form.span}, false
+    }
+    return "", Compile_Error{message = "attr expects symbols, literals, or list attribute calls", span = form.span}, false
+}
+
+attr_raw_text :: proc(form: CST_Form) -> (string, Compile_Error, bool) {
+    if len(form.items) < 2 {
+        return "", Compile_Error{message = "attr expects at least one attribute item", span = form.span}, false
+    }
+    builder := strings.builder_make()
+    defer strings.builder_destroy(&builder)
+    strings.write_string(&builder, "@(")
+    for item, idx in form.items[1:] {
+        if idx > 0 {
+            strings.write_string(&builder, ", ")
+        }
+        text, err, ok := attr_item_text(item)
+        if !ok {
+            return "", err, false
+        }
+        defer delete(text)
+        strings.write_string(&builder, text)
+    }
+    strings.write_byte(&builder, ')')
+    return strings.clone(strings.to_string(builder)), {}, true
+}
+
 normalize_scalar_type_name :: proc(text: string) -> string {
     switch text {
     case "bool":
@@ -167,6 +222,56 @@ normalize_surface_type_symbol :: proc(text: string) -> string {
         }
     }
     return normalize_scalar_type_name(text)
+}
+
+type_constructor_head_text :: proc(text: string) -> bool {
+    switch text {
+    case "slice", "dynamic", "array", "map", "set", "matrix", "ptr", "distinct", "fn", "type":
+        return true
+    }
+    return false
+}
+
+type_alias_candidate_form :: proc(form: CST_Form) -> bool {
+    #partial switch form.kind {
+    case .Symbol:
+        if len(form.text) == 0 {
+            return false
+        }
+        if form.text[0] >= 'A' && form.text[0] <= 'Z' {
+            return true
+        }
+        if strings.contains(form.text, "[") || strings.contains(form.text, "]") ||
+           strings.contains(form.text, ".") || strings.has_prefix(form.text, "^") ||
+           strings.has_prefix(form.text, "#") {
+            return true
+        }
+        normalized := normalize_scalar_type_name(form.text)
+        return normalized == form.text
+    case .List:
+        return len(form.items) > 0 && form.items[0].kind == .Symbol && type_constructor_head_text(form.items[0].text)
+    case .Vector:
+        return true
+    case:
+        return false
+    }
+    return false
+}
+
+type_alias_candidate_from_forms :: proc(forms: []CST_Form, start: int) -> bool {
+    if start >= len(forms) {
+        return false
+    }
+    if type_alias_candidate_form(forms[start]) {
+        return true
+    }
+    if forms[start].kind == .Symbol {
+        switch forms[start].text {
+        case "map", "set", "matrix", "bit_set", "#simd", "#soa":
+            return true
+        }
+    }
+    return false
 }
 
 doc_lines_from_string :: proc(text: string) -> (lines: [dynamic]string) {
@@ -344,6 +449,17 @@ parse_type_text :: proc(form: CST_Form) -> (text: string, err: Compile_Error, ok
             return fmt.tprintf("^%s", pointee_text), {}, true
         }
 
+        if is_symbol(form.items[0], "distinct") {
+            if len(form.items) != 2 {
+                return "", Compile_Error{message = "distinct type expects one base type", span = form.span}, false
+            }
+            base_text, err_base, ok_base := parse_type_text(form.items[1])
+            if !ok_base {
+                return "", err_base, false
+            }
+            return fmt.tprintf("distinct %s", base_text), {}, true
+        }
+
         if is_symbol(form.items[0], "type") {
             if len(form.items) == 2 {
                 return parse_type_text(form.items[1])
@@ -452,12 +568,125 @@ parse_proc_type_text_from_parts :: proc(forms: []CST_Form, start: int) -> (text:
     return strings.clone(strings.to_string(builder)), next, {}, true
 }
 
+parse_single_item_type_vector :: proc(form: CST_Form, label: string) -> (text: string, err: Compile_Error, ok: bool) {
+    if form.kind != .Vector || len(form.items) != 1 {
+        return "", Compile_Error{message = fmt.tprintf("%s type expects one bracket item", label), span = form.span}, false
+    }
+    return parse_type_text(form.items[0])
+}
+
 parse_type_text_from_forms :: proc(forms: []CST_Form, start: int) -> (text: string, next: int, err: Compile_Error, ok: bool) {
     if start >= len(forms) {
         return "", start, Compile_Error{message = "missing type"}, false
     }
     if is_symbol(forms[start], "fn") {
         return parse_proc_type_text_from_parts(forms, start)
+    }
+    if forms[start].kind == .Symbol {
+        switch forms[start].text {
+        case "map":
+            if start+1 < len(forms) && forms[start+1].kind == .Symbol && strings.has_prefix(forms[start+1].text, "[") {
+                return normalize_surface_type_symbol(fmt.tprintf("map%s", forms[start+1].text)), start+2, {}, true
+            }
+            if start+2 >= len(forms) || forms[start+1].kind != .Vector {
+                return "", start, Compile_Error{message = "map type expects [K]V", span = forms[start].span}, false
+            }
+            key_text, err_key, ok_key := parse_single_item_type_vector(forms[start+1], "map key")
+            if !ok_key {
+                return "", start, err_key, false
+            }
+            value_text, next_value, err_value, ok_value := parse_type_text_from_forms(forms, start+2)
+            if !ok_value {
+                return "", start, err_value, false
+            }
+            return fmt.tprintf("map[%s]%s", key_text, value_text), next_value, {}, true
+        case "set":
+            if start+1 >= len(forms) || forms[start+1].kind != .Vector {
+                return "", start, Compile_Error{message = "set type expects [T]", span = forms[start].span}, false
+            }
+            elem_text, err_elem, ok_elem := parse_single_item_type_vector(forms[start+1], "set element")
+            if !ok_elem {
+                return "", start, err_elem, false
+            }
+            return fmt.tprintf("map[%s]struct{{}}", elem_text), start+2, {}, true
+        case "matrix":
+            if start+2 >= len(forms) || forms[start+1].kind != .Vector || len(forms[start+1].items) != 2 {
+                return "", start, Compile_Error{message = "matrix type expects [rows cols]T", span = forms[start].span}, false
+            }
+            rows := forms[start+1].items[0]
+            cols := forms[start+1].items[1]
+            if !(rows.kind == .Symbol || rows.kind == .Number) || !(cols.kind == .Symbol || cols.kind == .Number) {
+                return "", start, Compile_Error{message = "matrix dimensions expect symbols or numbers", span = forms[start+1].span}, false
+            }
+            elem_text, next_elem, err_elem, ok_elem := parse_type_text_from_forms(forms, start+2)
+            if !ok_elem {
+                return "", start, err_elem, false
+            }
+            return fmt.tprintf("matrix[%s, %s]%s", rows.text, cols.text, elem_text), next_elem, {}, true
+        case "bit_set":
+            if start+1 >= len(forms) || forms[start+1].kind != .Vector || len(forms[start+1].items) == 0 || len(forms[start+1].items) > 2 {
+                return "", start, Compile_Error{message = "bit_set type expects [T] or [T Underlying]", span = forms[start].span}, false
+            }
+            elem_text, err_elem, ok_elem := parse_type_text(forms[start+1].items[0])
+            if !ok_elem {
+                return "", start, err_elem, false
+            }
+            if len(forms[start+1].items) == 1 {
+                return fmt.tprintf("bit_set[%s]", elem_text), start+2, {}, true
+            }
+            underlying_text, err_underlying, ok_underlying := parse_type_text(forms[start+1].items[1])
+            if !ok_underlying {
+                return "", start, err_underlying, false
+            }
+            return fmt.tprintf("bit_set[%s; %s]", elem_text, underlying_text), start+2, {}, true
+        case "#simd", "#soa":
+            if start+2 >= len(forms) || forms[start+1].kind != .Vector || len(forms[start+1].items) != 1 {
+                return "", start, Compile_Error{message = fmt.tprintf("%s type expects [N]T", forms[start].text), span = forms[start].span}, false
+            }
+            length := forms[start+1].items[0]
+            if !(length.kind == .Symbol || length.kind == .Number) {
+                return "", start, Compile_Error{message = fmt.tprintf("%s length expects a symbol or number", forms[start].text), span = forms[start+1].span}, false
+            }
+            elem_text, next_elem, err_elem, ok_elem := parse_type_text_from_forms(forms, start+2)
+            if !ok_elem {
+                return "", start, err_elem, false
+            }
+            return fmt.tprintf("%s[%s]%s", forms[start].text, length.text, elem_text), next_elem, {}, true
+        }
+    }
+    if forms[start].kind == .Vector {
+        if start+1 >= len(forms) ||
+           (forms[start+1].kind == .Symbol && len(forms[start+1].text) > 0 && forms[start+1].text[len(forms[start+1].text)-1] == ':') {
+            text, err_text, ok_text := parse_type_text(forms[start])
+            if !ok_text {
+                return "", start, err_text, false
+            }
+            return text, start+1, {}, true
+        }
+        if len(forms[start].items) == 0 {
+            elem_text, next_elem, err_elem, ok_elem := parse_type_text_from_forms(forms, start+1)
+            if !ok_elem {
+                return "", start, err_elem, false
+            }
+            return fmt.tprintf("[]%s", elem_text), next_elem, {}, true
+        }
+        if len(forms[start].items) == 1 {
+            head := forms[start].items[0]
+            if head.kind == .Symbol && head.text == "dynamic" {
+                elem_text, next_elem, err_elem, ok_elem := parse_type_text_from_forms(forms, start+1)
+                if !ok_elem {
+                    return "", start, err_elem, false
+                }
+                return fmt.tprintf("[dynamic]%s", elem_text), next_elem, {}, true
+            }
+            if head.kind == .Symbol || head.kind == .Number {
+                elem_text, next_elem, err_elem, ok_elem := parse_type_text_from_forms(forms, start+1)
+                if !ok_elem {
+                    return "", start, err_elem, false
+                }
+                return fmt.tprintf("[%s]%s", head.text, elem_text), next_elem, {}, true
+            }
+        }
     }
     text, err, ok = parse_type_text(forms[start])
     if !ok {
@@ -950,6 +1179,25 @@ parse_decl :: proc(top_form: CST_Top_Form) -> (decl: AST_Decl, err: Compile_Erro
             doc_lines = append_doc_lines(doc_lines[:], doc_lines_from_string(unquote_string(form.items[2].text))[:])
             value_index = 3
         }
+        if len(form.items[1].text) > 0 && form.items[1].text[len(form.items[1].text)-1] != ':' &&
+           type_alias_candidate_from_forms(form.items[:], value_index) {
+            type_alias, next_alias, err_alias, ok_alias := parse_type_text_from_forms(form.items[:], value_index)
+            if ok_alias && next_alias == len(form.items) {
+                return AST_Decl{
+                    kind = .Const,
+                    span = form.span,
+                    doc_lines = doc_lines,
+                    const_decl = Const_Decl{
+                        name = map_name(form.items[1].text),
+                        is_type_alias = true,
+                        type_alias = type_alias,
+                    },
+                }, {}, true
+            }
+            if !ok_alias && len(form.items) != value_index+1 {
+                return decl, err_alias, false
+            }
+        }
         name, has_ty, ty, value, err_binding, ok_binding := parse_decl_typed_binding(form, head.text, value_index)
         if !ok_binding {
             return decl, err_binding, false
@@ -1110,6 +1358,17 @@ parse_decl :: proc(top_form: CST_Top_Form) -> (decl: AST_Decl, err: Compile_Erro
             span = form.span,
             doc_lines = top_form.doc_lines,
             raw_text = "@(export)",
+        }, {}, true
+    case "attr":
+        raw_text, err_attr, ok_attr := attr_raw_text(form)
+        if !ok_attr {
+            return decl, err_attr, false
+        }
+        return AST_Decl{
+            kind = .Raw,
+            span = form.span,
+            doc_lines = top_form.doc_lines,
+            raw_text = raw_text,
         }, {}, true
     case "exports":
         if len(form.items) != 2 || form.items[1].kind != .Vector {

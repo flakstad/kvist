@@ -16,7 +16,7 @@ standalone hot-reload demo:
 - `(import hot "kvist:hot")` for the shipped native module-contract macro
 - `(hot.defmodule ...)` to emit the standard `kvist_hot` entrypoints
 
-On the live side, the example now uses the matching shipped live package:
+On the live side, the example uses the matching shipped live package:
 
 - `(import live "kvist:live")`
 - `(live.defmodule ...)`
@@ -69,14 +69,14 @@ Edit either live source file:
 Save the file and keep watching the running host. The live command layer
 reloads from source without rebuilding the DLL or restarting the process.
 
-The live side of the host now uses the same reusable helper pattern as the
+The live side of the host uses the same reusable helper pattern as the
 standalone live demo:
 
 - `new_module_reloader(...)`
 - `load_initial_module(...)`
 - `reload_module_if_source_changed(...)`
 
-The native side now uses the matching higher-level `kvist_hot` host path too:
+The native side uses the matching higher-level `kvist_hot` host path too:
 
 - `new_reloader(...)`
 - `load_initial_module(...)`
@@ -88,13 +88,13 @@ The native side now uses the matching higher-level `kvist_hot` host path too:
 - `reload_count` and `unload_count` reflect native DLL swaps
 - the live `inspect` command keeps running once per second
 - the live module logs host-owned native state through `host.snapshot`
-- the live host path is no longer open-coded per demo
+- the live host path uses reusable helper calls
 - changing the native module and the live module exercises two different
   continuity layers in one process
 
 ## Current Limits
 
-The example sources are now pure `.kvist`, but some implementation plumbing
+The example sources are pure `.kvist`, but some implementation plumbing
 still lives in ordinary Odin packages under `src/`:
 
 - the dynlib-tagged symbol tables

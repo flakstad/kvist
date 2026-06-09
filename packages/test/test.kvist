@@ -179,7 +179,7 @@ __kvist_test_once_guard: sync.Once
   (if (nil? doc)
     (forms
       (quasiquote (import "core:testing"))
-      (quasiquote (odin "@(test)"))
+      (quasiquote (attr test))
       (quasiquote
         (defn (unquote name) [t: ^testing.T]
           (unquote (__kvist_test_wrap_once
@@ -187,7 +187,7 @@ __kvist_test_once_guard: sync.Once
                        (quasiquote (do (splice body)))))))))
     (forms
       (quasiquote (import "core:testing"))
-      (quasiquote (odin "@(test)"))
+      (quasiquote (attr test))
       (quasiquote
         (defn (unquote name)
           (unquote doc)

@@ -18,7 +18,7 @@
   count: int
 })
 
-(odin "Order_Groups :: map[int][dynamic]Order")
+(def Order-Groups map[int][dynamic]Order)
 
 (defn settled? [order: Order] -> bool
   (= order.status 3))

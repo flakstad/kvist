@@ -1,6 +1,6 @@
 # Hot Reload Demo
 
-This demo shows the new primary iterative-development direction for Kvist:
+This demo shows the primary iterative-development path for Kvist:
 
 - a normal compiled host process
 - a reloadable shared library
@@ -19,7 +19,7 @@ first answer for broad day-to-day compiled-code iteration.
 
 These sources are all `.kvist`.
 
-The example files themselves are now pure Kvist source. The module side uses a
+The example files are pure Kvist source. The module side uses a
 small shipped Kvist helper package instead of hand-writing the full export
 contract:
 
@@ -30,7 +30,7 @@ contract:
 Under that surface, the generated module still uses `(export)` and `:abi "c"`
 for the actual C-ABI entrypoints.
 
-The dynlib-tagged symbol table and rawptr/state-cast glue now live in the
+The dynlib-tagged symbol table and rawptr/state-cast glue live in the
 implementation support package under `src/`, not inside the example sources.
 
 The host intentionally uses the reusable `kvist_hot` helpers rather than
@@ -76,7 +76,7 @@ with the same host-owned state.
 
 - `tick_count` keeps increasing across reloads
 - `reload_count` increments when the new module is loaded
-- `unload_count` increments when the old module is torn down
+- `unload_count` increments when the previous module is torn down
 - the host process never restarts
 
 This is the important boundary:
@@ -93,7 +93,7 @@ In Emacs or another editor, the workflow would be:
 3. Edit reloadable Kvist module code.
 4. Recompile that Kvist file to generated Odin.
 5. Rebuild only the shared library.
-5. Observe the running process continue with new code and old state.
+5. Observe the running process continue with new code and preserved state.
 
 For a real project, the host shape would usually be:
 
@@ -107,7 +107,7 @@ For a real project, the host shape would usually be:
 
 ## Current Limits
 
-The actual workflow is now `.kvist`-first:
+The workflow is `.kvist`-first:
 
 - edit `*.kvist`
 - re-run `./kvist ... -o ...`

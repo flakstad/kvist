@@ -4,8 +4,8 @@ This note defines the current practical overlap between `Kvist/AOT` and
 `Kvist/Live`.
 
 The goal is not to claim full parity. The goal is to make the shared surface
-explicit so live-runtime work grows toward a future "same source, different
-execution mode" model instead of drifting into a separate live-only DSL.
+explicit so the live runtime stays close to ordinary Kvist instead of drifting
+into a separate live-only DSL.
 
 ## Principle
 
@@ -22,7 +22,7 @@ a strong reason not to.
 
 ## Current Ordinary Top-Level Forms
 
-The live loader currently accepts these ordinary top-level forms:
+The live loader accepts these ordinary top-level forms:
 
 - `import` in path-loaded live modules
 - `def`
@@ -37,7 +37,7 @@ Current constraints:
   `(import "path")`
 - imported live helper files are merged into the root live module rather than
   loaded as separate runtime modules
-- imported helper files currently support ordinary `def`, `defvar`, and
+- imported helper files support ordinary `def`, `defvar`, and
   `defn`
 - imported helper files may not define `live.module`, `live.command`,
   `live.hook`, `init`, `shutdown`, or `migrate`
@@ -59,8 +59,7 @@ Current constraints:
   - marks a hook entrypoint
   - follows the same shape rules as `live.command`
 
-The shipped `kvist:live` package now wraps the most common source patterns
-with:
+The shipped `kvist:live` package wraps the most common source patterns with:
 
 - `live.defmodule`
 - `live.defcommand`
@@ -71,7 +70,7 @@ Those macros lower back into the same structural `live.module`,
 
 ## Current Expression Subset
 
-The live evaluator currently supports:
+The live evaluator supports:
 
 - literals:
   - string
@@ -110,8 +109,7 @@ The live evaluator currently supports:
 
 ## Current Source-Defined Lifecycle Surface
 
-The runtime now recognizes these ordinary zero-arg top-level functions when
-present:
+The runtime recognizes these ordinary zero-arg top-level functions when present:
 
 - `defn init [] ...`
 - `defn migrate [] ...`
@@ -122,7 +120,7 @@ ordinary Kvist `defn` rather than introducing more special top-level forms.
 
 ## Intentional Gaps
 
-These are not part of the current shared subset yet:
+These are not part of the shared subset:
 
 - closures / anonymous `fn`
 - arrays, maps, and struct literals inside behavior bodies

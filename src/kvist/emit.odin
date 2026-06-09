@@ -10190,6 +10190,10 @@ emit_decl :: proc(e: ^Emitter, decl: IR_Decl) -> (Compile_Error, bool) {
             emit_line(e, fmt.tprintf("import %s", path_literal))
         }
     case .Const:
+        if decl.const_decl.is_type_alias {
+            emit_line(e, fmt.tprintf("%s :: %s", decl.const_decl.name, decl.const_decl.type_alias))
+            return Compile_Error{}, true
+        }
         expected_type := ""
         if decl.const_decl.has_ty {
             expected_type = decl.const_decl.ty

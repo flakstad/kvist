@@ -155,9 +155,8 @@
 (defn- mapcat-impl
   "Implementation helper for `arr.mapcat`.
 
-  The output starts with input-sized capacity, matching the old compiler helper,
-  then grows according to Odin dynamic array behavior as concatenated slices are
-  appended."
+  The output starts with input-sized capacity, then grows according to Odin
+  dynamic array behavior as concatenated slices are appended."
   [f: (fn [x: $T] -> []$U), xs: []T] -> [dynamic]U #force_inline
   (let [out (arr.empty U (core.count xs))]
     (each [x xs]

@@ -16,19 +16,11 @@ its surface shape and metaprogramming model, but it preserves the manual,
 inspectable character of systems programming while also exploring native hot
 reload and live development modes.
 
-The current language reference is [LANGUAGE.md](LANGUAGE.md). Deferred ideas that
-should not drive the core implementation yet live in
-[docs/FUTURE-IDEAS.md](docs/FUTURE-IDEAS.md). The current preferred iterative
-development direction is documented in
-[docs/HOT-RELOAD.md](docs/HOT-RELOAD.md). A longer speculative note on an
-optional embedded live runtime lives in
-[docs/LIVE-RUNTIME.md](docs/LIVE-RUNTIME.md), and a more workflow-focused note
-on live iterative development lives in
-[docs/LIVE-DEVELOPMENT.md](docs/LIVE-DEVELOPMENT.md). The current live/compiled
-overlap is tracked in
-[docs/LIVE-SHARED-SUBSET.md](docs/LIVE-SHARED-SUBSET.md). The larger unresolved
-language areas are tracked in [docs/NEXT-STEPS.md](docs/NEXT-STEPS.md).
-The proposed higher-level user surface for native reload development lives in
+The current language reference is [LANGUAGE.md](LANGUAGE.md). Iterative
+development and reload behavior are documented in
+[docs/HOT-RELOAD.md](docs/HOT-RELOAD.md),
+[docs/LIVE-DEVELOPMENT.md](docs/LIVE-DEVELOPMENT.md),
+[docs/LIVE-SHARED-SUBSET.md](docs/LIVE-SHARED-SUBSET.md), and
 [docs/RELOAD-APP-DESIGN.md](docs/RELOAD-APP-DESIGN.md).
 Ownership rules live in [docs/OWNERSHIP.md](docs/OWNERSHIP.md), and
 pointer/value guidance lives in [docs/POINTERS.md](docs/POINTERS.md).
@@ -77,12 +69,10 @@ earn its place through one of:
 If a feature is only a different spelling for ordinary Odin, that is usually
 not enough by itself.
 
-## Plan
+## Current Shape
 
-The first milestone is a small Odin compiler/transpiler that is pleasant enough
-for ordinary `.kvist` packages:
+Kvist is a small Odin compiler/transpiler for ordinary `.kvist` packages:
 
-- one package entry file emits one `.odin` file
 - source packages are directories with `.kvist` files, optionally alongside
   ordinary `.odin` sidecar files
 - top-level Kvist forms use Kvist syntax; raw Odin sidecars remain normal Odin
@@ -100,10 +90,8 @@ The non-goals are just as important:
 - no lazy sequences or unbounded sequence producers
 - no semantic gap between source and generated Odin
 
-If this grows, it should grow by covering more Odin syntax directly where the
-lowering remains obvious: structs, enums, unions, pointers, slices, arrays,
-`defer`, `when`, procedures, packages, and imports. It should not grow by
-inventing a new language on top of Odin.
+The language grows by covering Odin syntax directly where the lowering remains
+obvious, not by inventing a new runtime on top of Odin.
 
 ## Example
 
@@ -131,8 +119,8 @@ main :: proc() {
 }
 ```
 
-For file-backed `.kvist` programs, `package` is optional. Kvist will inject a
-root `package main` when compiling from a path if you omit it. Raw source APIs
+For file-backed `.kvist` programs, `package` is optional. Kvist injects a root
+`package main` when compiling from a path if you omit it. Raw source APIs
 such as `compile_source` still require an explicit package for now.
 
 ## Usage
@@ -161,9 +149,9 @@ Run the executable examples through Kvist and then `odin check` with:
 ```
 
 Ownership stays explicit. Known owned-producing helpers are documented in
-[docs/OWNERSHIP.md](docs/OWNERSHIP.md), and the compiler is expected to grow
+[docs/OWNERSHIP.md](docs/OWNERSHIP.md), and the compiler emits
 conservative warnings for obvious local leaks rather than relying on hidden
-automatic cleanup. The current warning pass catches discarded owned
+automatic cleanup. The warning pass catches discarded owned
 constructors, leaked owned `let` locals, and overwritten owned locals in
 obvious cases.
 
@@ -200,7 +188,7 @@ The CLI can also invoke Odin for generated files directly:
 
 The examples cover control flow, collection literals, procedure values,
 core sequence helpers over scalars and structs, pointer/raw interop,
-source-level procedure directives, named returns, flat multi-return
+source-level declaration attributes and procedure directives, named returns, flat multi-return
 binding, in-place mutation, and a small
 order-report workload that compares eager helpers, bang helpers, and explicit
 aggregate loops.
@@ -325,26 +313,14 @@ answer :: proc() -> int {
 
 ## REPL-Like Development
 
-Odin does not have a Lisp-style stateful REPL, but `kvist` can still aim for
-a useful eval-selection workflow.
+Odin does not have a Lisp-style stateful REPL, but `kvist eval` supports a
+useful eval-selection workflow. It takes one selected form, generates temporary
+Odin around it with file/package context, runs `odin run`, and prints the
+result. This is not an interpreter and not a persistent runtime. It is source
+generation plus Odin's normal compiler.
 
-The idea is to make editor tooling that takes one selected form, generates a
-temporary Odin file around it, runs `odin run`, and prints the result. This is
-not an interpreter and not a persistent runtime. It is source generation plus
-Odin's normal compiler.
-
-Possible levels:
-
-- expression eval: wrap one expression in a generated `main` and print it
-- file-context eval: include package imports, constants, types, and procedures
-  from the current file before running the selected form
-- package eval: compile the current package plus a generated scratch entry point
-- watch/eval loop: keep the temp-file generation and `odin run` invocation fast
-  enough to feel interactive from Emacs
-
-The constraint is important: eval should preserve Odin semantics exactly. If a
-form only works because `kvist` invented a hidden dynamic environment, that
-is the wrong direction.
+Eval preserves Odin semantics exactly. A form works because it compiles as Odin,
+not because `kvist` invented a hidden dynamic environment.
 
 ## Relationship to probe
 
@@ -368,7 +344,7 @@ The parts that should remain Kvist-specific are:
 - syntax decisions around `let`, literals, function forms, implicit returns, and
   raw Odin escape hatches
 
-The likely architecture, if this project moves forward, is:
+The current split is:
 
 ```text
 kvist
@@ -376,19 +352,11 @@ kvist
   basic execution: compile/check/run/eval generated Odin
 
 probe
-  reference implementation and inspiration for richer Odin eval workflows
-
-shared later
-  package discovery, temp workspace, command runner, Emacs result display
+  separate Odin eval workflow reference
 ```
 
-The current `kvist` CLI already owns the basic eval/check/run loop so editor
-tooling can call one tool. `probe` remains useful as a design reference for
-larger package-aware workflows and polished editor interaction.
-
-Do not merge the projects prematurely. `probe` is useful because it makes
-ordinary Odin more interactive. Kvist is a syntax experiment. Keeping them
-separate avoids contaminating a practical tool with speculative syntax work.
+`probe` remains separate. It is useful because it makes ordinary Odin more
+interactive. Kvist owns its parser, lowering, source mapping, and CLI tooling.
 
 ## Data Literals
 
@@ -450,213 +418,6 @@ which lowers to:
 chan.Chan(int)
 ```
 
-## Odin Feature Sketches
-
-These examples are design sketches. They are here to make the proposed surface
-syntax concrete before the implementation commits too hard.
-
-Common top-level declarations should stay in canonical Kvist forms even when
-the target Odin spelling is already compact and readable:
-
-```odin
-package http
-
-import "base:runtime"
-import "core:net"
-import http "../odin-http/"
-
-Requestline_Error :: enum {
-    None,
-    Method_Not_Implemented,
-    Not_Enough_Fields,
-    Invalid_Version_Format,
-}
-
-Requestline :: struct {
-    method: Method,
-    target: union {
-        string,
-        URL,
-    },
-    version: Version,
-}
-```
-
-The Lisp layer should focus first on procedure bodies and expression-heavy code.
-
-Struct literals:
-
-```clojure
-Person :: struct {
-    name: string,
-    age: int,
-}
-
-(defn make-person [] -> Person
-  (Person {name: "Andreas"
-           age: 42}))
-```
-
-Maps, dynamic arrays, compound literals, and calls:
-
-```clojure
-(defn route-get [router: ^Router, pattern: string, handler: Handler]
-  (route-add
-    router
-    .Get
-    (Route {handler: handler
-            pattern: (strings.concatenate
-                       ([]string ["^" pattern "$"])
-                       router.allocator)})))
-```
-
-emits Odin-shaped code like:
-
-```odin
-route_get :: proc(router: ^Router, pattern: string, handler: Handler) {
-    route_add(
-        router,
-        .Get,
-        Route{handler = handler, pattern = strings.concatenate([]string{"^", pattern, "$"}, router.allocator)},
-    )
-}
-```
-
-Slices, loops, and mutation:
-
-```clojure
-(defn sum [xs: []int] -> int
-  (let [total 0]
-    (each [x xs]
-      (set! total (+ total x)))
-    total))
-```
-
-Named and multi-value returns:
-
-```clojure
-(defn query-get [url: URL, key: string] -> [val: string, ok: bool] #optional_ok
-  (let [q url.query]
-    (each [entry (#force_inline query-iter (addr q))]
-      (when (= entry.key key)
-        (return entry.value true)))))
-```
-
-This is one place where explicit `return` remains useful. Implicit final return
-is for the common final-expression case, not a ban on early returns.
-
-Kvist now keeps Odin-style early-exit result handling explicit:
-
-```clojure
-(defn decoded [url: URL, key: string, allocator: runtime.Allocator] -> [val: string, ok: bool]
-  (let [[s ok] (query-get url key) or-return]
-    (net.percent-decode s allocator)))
-```
-
-For optional-ok defaults, use the expression form `or-else`:
-
-```clojure
-(or-else (query-get url key) "missing")
-```
-
-The important point is still the same: Odin-style result control flow should
-stay visible in source, not be hidden behind a fake exception/result
-abstraction.
-
-Pointers should keep Odin's spelling:
-
-```clojure
-(defn bump [x: ^int]
-  (mut! x^ += 1))
-```
-
-Address-of also needs a readable spelling:
-
-```clojure
-(headers-init (addr r.headers) allocator)
-```
-
-Case:
-
-```clojure
-(defn method-string [m: Method] -> string #no_bounds_check
-  (case m
-    .Get "GET"
-    .Post "POST"
-    .Delete "DELETE"
-    :else ""))
-```
-
-Anonymous functions and callbacks:
-
-```clojure
-(http.route-get
-  (addr router)
-  "/users/(%w+)/comments/(%d+)"
-  (http.handler
-    (fn [req: ^http.Request, res: ^http.Response]
-      (http.respond-plain
-        res
-        (fmt.tprintf "user %s, comment: %s"
-                     req.url_params[0]
-                     req.url_params[1])))))
-```
-
-Generated Odin should remain a normal anonymous `proc` passed to `http.handler`.
-
-Attributes and directives should attach to the following form without forcing
-everything into parens:
-
-```clojure
-@(private)
-(defn route-add [router: ^Router, method: Method, route: Route]
-  (when (not-in method router.routes)
-    (set! router.routes[method]
-          (make [dynamic]Route router.allocator)))
-  (append (addr router.routes[method]) route))
-
-(defn headers-count [h: Headers] -> int #force_inline
-  (len h._kv))
-
-(let [entry (#force_inline query-iter (addr q))]
-  ...)
-```
-
-Some attributes/directives may be better left as raw Odin until the syntax is
-obvious.
-
-`defer` and conditional defer:
-
-```clojure
-(defn header-parse [headers: ^Headers, line: string, allocator: runtime.Allocator] -> [key: string, ok: bool]
-  (let [value (strings.trim-space (slice line (+ colon 1)))
-        key   (sanitize-key headers^ (slice line 0 colon))]
-    (defer
-      (when (not ok)
-        (delete key allocator)
-        (set! key "")))
-    ...))
-```
-
-Conditionals as expressions when useful:
-
-```clojure
-(defn classify [n: int] -> string
-  (if (< n 0)
-    "negative"
-    (if (= n 0)
-      "zero"
-      "positive")))
-```
-
-Raw Odin should remain available directly in `.kvist`:
-
-```clojure
-(odin "Foreign_Handle :: distinct rawptr")
-(odin "@(link_name = \"foreign_call\")")
-(odin "foreign_call :: proc(handle: Foreign_Handle) ---")
-```
-
 ## Target Forms
 
 Top-level declarations are public by default when loaded through a Kvist source
@@ -679,11 +440,15 @@ current Odin block or procedure.
   - raw Odin names re-exported from a source package can be declared with `(exports [Name ...])`
 - top-level `(def name expr)` -> `name :: expr`
 - top-level `(def name: type expr)` -> `name: type : expr`
+- top-level `(def Name Type)` declares an Odin type alias, e.g.
+  `(def Handle (distinct rawptr))` and
+  `(def Order-Groups map[int][dynamic]Order)`
 - top-level `(def- name expr)` and `(def- name: type expr)` package-private constants
 - top-level `(defvar name expr)` -> `name := expr`
 - top-level `(defvar name: type expr)` -> `name: type = expr`
 - top-level `(defvar- name expr)` and `(defvar- name: type expr)` package-private variables
 - `(export)` -> attaches `@(export)` to the next top-level declaration
+- `(attr name ...)` -> attaches Odin `@(name, ...)` to the next top-level declaration
 - `(exports [Name ...])` -> declares additional public source-package names provided by raw Odin forms
 - top-level `(defstruct Name {field: Type ...})`
 - top-level `(defstruct Name "Doc..." {field: type ...})`
@@ -696,6 +461,7 @@ current Odin block or procedure.
 - top-level `(defunion- Name {variant: Type ...})` package-private union
 - top-level `(defn name [arg: type, ...] -> return-type body...)`
 - top-level `(defn name :abi "c" [arg: type, ...] -> return-type body...)`
+  - procedure directives such as `#force_inline` and `#optional_ok` are written after the return spec
   - `defn-` is the package-private named function form
   - `fn` is the canonical source-level form for function types and anonymous function literals
   - `:abi "c"` is available for explicit foreign/native entrypoints

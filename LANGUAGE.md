@@ -5,8 +5,7 @@ The source should feel familiar to Clojure programmers while staying honest
 about Odin's execution model: explicit mutation, explicit allocation, direct
 interop, and readable generated `.odin`.
 
-This document describes the current language surface. Deferred ideas belong in
-`docs/FUTURE-IDEAS.md` or focused design notes, not here.
+This document describes the current language surface.
 
 ## File Model
 
@@ -89,6 +88,21 @@ Typed declarations use `name: Type`:
 (defvar current-state: State (State {}))
 ```
 
+Untyped `def` also declares Odin type aliases when the right-hand side is a
+type expression:
+
+```clojure
+(def Handle (distinct rawptr))
+(def Order-Groups map[int][dynamic]Order)
+```
+
+These lower to ordinary Odin aliases:
+
+```odin
+Handle :: distinct rawptr
+Order_Groups :: map[int][dynamic]Order
+```
+
 Local declarations use the same names and are scoped to the current block.
 Local `defstruct`, `defenum`, and `defunion` declare block-scoped Odin types;
 the declarations themselves are compile-time declarations, not runtime
@@ -101,7 +115,8 @@ allocations.
   ...)
 ```
 
-Structs, enums, and unions:
+Structs, enums, unions, transforms, sources, and macros use the same public /
+package-private split at top level:
 
 ```clojure
 (defstruct Point {
@@ -118,6 +133,16 @@ Structs, enums, and unions:
   text: string
   code: int
 })
+
+(deftransform- internal-transform
+  (comp (map normalize)))
+
+(defsource- internal-source [] -> int
+  (open-source)
+  :next next-source-item)
+
+(defmacro- internal-macro [x]
+  ...)
 ```
 
 Functions:
@@ -131,6 +156,9 @@ Functions:
 
 (defn callback :abi "c" [ctx: rawptr] -> void
   ...)
+
+(defn tiny-helper [x: int] -> int #force_inline
+  (+ x 1))
 ```
 
 `fn` is the anonymous function and function-type form:
@@ -181,6 +209,23 @@ Relative imports are resolved by inspecting the target:
 - `core:*`, `base:*`, `vendor:*`, and other Odin package paths remain Odin.
 
 There is no `:odin` import marker.
+
+Use `(export)` to attach Odin `@(export)` to the next top-level declaration.
+Use `(attr name ...)` to attach other Odin declaration attributes to the next
+top-level declaration. Use `(exports [Name ...])` when raw Odin sidecar
+declarations should be exposed through a Kvist source-package import.
+
+```clojure
+(export)
+(defn callback :abi "c" [ctx: rawptr] -> void
+  ...)
+
+(attr private)
+(defn hidden [] -> int #force_inline
+  42)
+
+(exports [Raw_Handle])
+```
 
 ## Types And Constructors
 
@@ -238,6 +283,19 @@ Owned local bindings may use the `defer` marker:
   ...)
 ```
 
+Result bindings may use `or-return`, `or-break`, or `or-continue` guards:
+
+```clojure
+(let [[value ok] (next-item) or-return]
+  value)
+
+(while running
+  (let [[item ok] (next-item) or-break]
+    (println item)))
+```
+
+`or-return` requires named proc returns matching the bound names.
+
 ## Control Flow
 
 ```clojure
@@ -246,7 +304,29 @@ Owned local bindings may use the `defer` marker:
 (while test body...)
 (do body...)
 (block body...)
+(return value...)
+(break)
+(continue)
+(defer body...)
 ```
+
+`defer` emits Odin `defer`. A single expression defers that expression; multiple
+forms defer a block.
+
+Allocator scopes are explicit:
+
+```clojure
+(with-allocator [allocator expr]
+  body...)
+
+(with-temp-allocator [allocator]
+  body...)
+```
+
+`with-allocator` temporarily overrides `context.allocator` and restores it with
+`defer`. `with-temp-allocator` temporarily overrides `context.temp_allocator`,
+resets the temp allocator at scope exit, and rejects owned temp values that
+escape the scope.
 
 Use `cond` when each branch has its own predicate:
 
@@ -311,8 +391,8 @@ bool]` results.
 ```
 
 Sources lower to explicit Odin loops around the state object. They are consumed
-by `each` and transform `into` in the initial surface; they are not general lazy
-sequences or first-class source values yet.
+by `each` and transform `into`. They are not general lazy sequences or
+first-class source values.
 
 Use `for` for eager data-building comprehensions:
 
@@ -339,6 +419,7 @@ Kvist exposes direct Odin-style places:
 ```clojure
 value.field
 xs[i]
+xs[:end]
 xs[start:end]
 xs[start:]
 ```
@@ -348,8 +429,11 @@ The call-shaped equivalents are available too:
 ```clojure
 (get value .field)
 (get xs i)
+(get lookup key default)
+(slice xs)
 (slice xs start end)
 (slice xs start)
+(slice xs 0 end)       ; equivalent to xs[:end]
 ```
 
 Mutation forms:
@@ -358,6 +442,7 @@ Mutation forms:
 (set! place value)             ; assignment
 (mut! place += value)          ; compound assignment
 (update! place f args...)      ; read, apply, write
+(delete! target key)           ; remove map/set key in place
 ```
 
 Examples:
@@ -367,6 +452,16 @@ Examples:
 (mut! particles.vx[i] += ax)
 (update! point.y + 4)
 (update! (get lookup "a") inc)
+(delete! lookup "stale")
+```
+
+Unary mutation helpers are available for common place updates:
+
+```clojure
+(inc! point.x)
+(dec! xs[i])
+(toggle! enabled)
+(negate! velocity.x)
 ```
 
 For a non-mutating copy update, bind a copy and mutate the copy:
@@ -377,32 +472,25 @@ For a non-mutating copy update, bind a copy and mutate the copy:
   next)
 ```
 
-For struct value updates, `assoc` and `update` return a modified copy:
+For struct value field replacement, `assoc` returns a modified copy:
 
 ```clojure
 (assoc user.name "Ada")
-(update user.age inc)
-(update user.age + 10)
 (assoc user.profile.name "Ada")
-(update user.profile.age inc)
-
-;; Compatibility spelling:
-(assoc user .name "Ada")
-(update user .age inc)
-(assoc user .profile.name "Ada")
 ```
 
-These forms require a struct field place such as `user.name` or
-`user.profile.name`, or the compatibility pair `user .name`, with an obvious
-struct target type. They copy the root struct value once, update the selected
-field path on the copy, and return the copy. Dynamic arrays, slices, maps, and
-sets are not path-updated this way; use explicit copying or mutation for those.
+`assoc` requires a struct field place such as `user.name` or
+`user.profile.name` with an obvious struct target type. It copies the root
+struct value once, assigns the selected field path on the copy, and returns the
+copy. Dynamic arrays, slices, maps, and sets are not path-updated this way; use
+explicit copying or mutation for those.
 
-In a `->` pipeline, use a `.field` selector step:
+For value updates that depend on the previous value, bind a copy and mutate the
+copy with `update!`. In a `->` pipeline, use a `.field` selector step with
+`assoc`:
 
 ```clojure
 (-> user
-  (update .age + 10)
   (assoc .profile.name "Ada")
   (assoc .name "Ada"))
 ```
@@ -424,10 +512,10 @@ loops rather than intermediate arrays.
 (transduce paid-order-totals + 0 orders)
 ```
 
-The initial transform surface is intentionally small: `comp` supports `map` and
+The transform surface is intentionally small: `comp` supports `map` and
 `filter` steps with known one-argument functions or field selectors. `into`
-currently returns owned `[dynamic]T` arrays. `transduce` currently supports `+`
-as the reducer. See `docs/FUNCTIONAL-TRANSFORMS.md` for limits and lowering.
+returns owned `[dynamic]T` arrays. `transduce` supports `+` as the reducer. See
+`docs/FUNCTIONAL-TRANSFORMS.md` for limits and lowering.
 
 ## Operators
 
@@ -450,6 +538,13 @@ values once:
 ```
 
 `!=` is intentionally binary.
+
+Directive expression wrappers attach Odin call directives to a call:
+
+```clojure
+(#force_inline inc 41)
+(#force_inline (inc x))
+```
 
 ## Pointers
 
@@ -482,10 +577,28 @@ Small core helpers are auto-exposed. Prefer the bare spelling:
 (get xs i)
 (get lookup key default)
 (slice xs start end)
+(slice xs start)
+(slice xs)
 (empty? xs)
 (contains? lookup key)
+(in value xs)
+(not-in value xs)
 (or-else maybe fallback)
 (nil? value)
+(when-let [value ok (lookup-value key)]
+  ...)
+(if-let [value ok (lookup-value key)]
+  value
+  fallback)
+(when-ok [data err (read-file path)]
+  ...)
+(if-ok [data err (read-file path)]
+  data
+  fallback)
+(tap> value)
+(doc 'println)
+(-> value steps...)
+(->> value steps...)
 ```
 
 Collection helper packages are explicit:

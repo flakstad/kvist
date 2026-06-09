@@ -47,23 +47,12 @@ That keeps `set!` uniform: write to the place you spelled in source.
 - ownership warnings catch a small set of obvious dynamic-allocation mistakes
 - examples show the intended pointer/value split in ordinary code
 
-## What Kvist Does Not Help With Yet
+## Current Limits
 
 - no compile-time pointer-vs-value recommendation
 - no warning for large structs repeatedly copied by value
 - no warning for a pointer parameter that never needs to be a pointer
 - no borrow/lifetime analysis
 
-So today the model is still mostly craft and discipline. The language should
-help more over time, but only conservatively.
-
-## Likely Future Diagnostics
-
-These are good candidates for future warnings:
-
-- taking the address of a temporary
-- passing a large struct by value repeatedly
-- pointer parameters that are never dereferenced
-- local mutation on a copied value where shared mutation was likely intended
-
-These should stay warnings first, not become hidden language magic.
+The pointer model is explicit craft and discipline. Kvist does not add hidden
+borrow checking or ownership magic around pointers.

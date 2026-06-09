@@ -17,8 +17,8 @@ form from Emacs; many keep `main` small and put useful calls in a
 - [`interop/core/`](./interop/core): direct Odin core package interop:
   `core:time`, `core:slice`, `core:path`, `core:os`, `core:thread`,
   `core:encoding`, `core:math/linalg`, matrices, SIMD, and bit sets.
-- [`interop/vendor/`](./interop/vendor): direct vendor package interop,
-  currently raylib and stb/easy_font.
+- [`interop/vendor/`](./interop/vendor): direct vendor package interop:
+  raylib and stb/easy_font.
 - [`interop/`](./interop): general interop directives and raw Odin escape
   hatches.
 - [`web/`](./web): HTML rendering, interpolation, HTTP server/client/session,

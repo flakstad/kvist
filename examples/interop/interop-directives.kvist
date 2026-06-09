@@ -1,9 +1,8 @@
 // Exercises declaration attributes, procedure directives, named returns, and multi-return binding.
 (package main)
 
-(odin "@(private)")
-(odin "#force_inline")
-(defn hidden-answer [] -> int
+(attr private)
+(defn hidden-answer [] -> int #force_inline
   42)
 
 (defn query-answer [] -> [value: int, ok: bool] #optional_ok

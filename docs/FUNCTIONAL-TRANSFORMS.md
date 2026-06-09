@@ -1,6 +1,6 @@
 # Functional Transforms
 
-This note describes the initial reusable fused transform prototype.
+This note describes reusable fused transforms.
 
 The goal is to let reusable, fused functional transforms earn their place in
 Kvist without adding a lazy sequence runtime, hidden collection protocols, or
@@ -8,7 +8,7 @@ opaque lowering.
 
 ## Motivation
 
-Manual `each` loops are always available and should remain the escape hatch for
+Manual `each` loops are always available and remain the escape hatch for
 anything unusual. A transform pipeline is only worth adding if it provides clear
 benefits over hand-written fused loops:
 
@@ -57,7 +57,7 @@ Scalar output is explicit with `transduce`:
   (transduce paid-order-totals + 0 orders))
 ```
 
-The initial transformer forms are deliberately small:
+Supported transformer forms are deliberately small:
 
 ```clojure
 (map f)
@@ -73,7 +73,8 @@ Callbacks can be known one-argument functions or shallow field selectors:
     (map .age)))
 ```
 
-`keep` is not implemented yet.
+Use `map` plus `filter`, or write a direct `each` loop when a transformation
+needs optional-result semantics.
 
 ## Reuse Example
 
@@ -109,7 +110,7 @@ The same transformation can feed a collected result or a scalar result:
   (transduce paid-order-totals + 0 orders))
 ```
 
-Without a reusable transform, `collect-paid-totals` and `sum-paid-totals` would
+Without a reusable transform, `collect-paid-totals` and `sum-paid-totals`
 usually duplicate the same filtering and mapping logic in two manual loops.
 
 ## Intended Lowering
@@ -206,36 +207,23 @@ The first implementation is strict:
   annotation;
 - no hidden lazy seqs, iterators, dynamic dispatch, or boxed elements.
 
-When any of these rules are not met, the compiler should reject the pipeline and
+When any of these rules are not met, the compiler rejects the pipeline and
 suggest the direct `each` loop fallback.
 
 Named `deftransform` declarations are checked for basic shape immediately:
-the spec must be `(comp ...)`, and each step must currently be `(map f)` or
+the spec must be `(comp ...)`, and each step must be `(map f)` or
 `(filter pred)`. Callback existence, callback arity, callback types, and output
 type compatibility are checked at the `into` or `transduce` use site where the
 source and accumulator types are known.
 
-## Open Questions
+## Implemented Surface
 
-- Should `comp` order permanently read top-to-bottom as item flow, as implemented
-  here, rather than classic mathematical composition order?
-- Should `into` support `[]T` output at all, or only owned targets such as
-  `[dynamic]T`, maps, and sets?
-- Should `transduce` support reducer procs beyond the current `+` reducer?
-- Should named transforms be allowed to reference other named transforms?
-- How should source maps represent fused transform steps inside generated loops?
-
-## Implemented Prototype Slice
-
-The first prototype implements:
+The implemented surface is:
 
 1. Parse and store top-level `deftransform` declarations.
 2. Support inline and named `(comp (filter f) (map g))` transform specs.
 3. Implement `(into [dynamic]T transform source)` for slices, fixed arrays, and
    dynamic arrays.
 4. Implement `(transduce transform + init source)` for numeric accumulators.
-5. Add one example that compares reusable transform usage to the manual `each`
+5. Example coverage that compares reusable transform usage to the manual `each`
    version.
-
-Do not expand beyond this until the examples show clear reuse or correctness
-benefit over manual loops.

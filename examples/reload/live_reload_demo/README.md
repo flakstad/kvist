@@ -21,6 +21,6 @@ You should see:
 This example is intentionally non-interactive. It demonstrates the core reload
 and migration model without file watching or a long-running process.
 
-The host source is now pure `.kvist`. It imports the `kvist_live`
+The host source is pure `.kvist`. It imports the `kvist_live`
 implementation package with an ordinary `(import alias "path")` form, and the
-example source itself no longer uses raw Odin escape hatches.
+example source itself uses no raw Odin escape hatches.

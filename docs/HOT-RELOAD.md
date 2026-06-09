@@ -69,7 +69,7 @@ These two mechanisms should complement each other rather than compete.
 
 ## Native Reload Contract
 
-The initial `kvist_hot` contract is intentionally small:
+The `kvist_hot` contract is intentionally small:
 
 - the host owns the durable state root
 - the reloadable module exports a manifest
@@ -179,11 +179,10 @@ Current state-layout behavior is intentionally conservative:
 - the runtime validates state size and alignment on module load/reload
 - if those checks fail, the reload is rejected and the running process keeps the
   previous code loaded
-- there is no field-aware durable-state migration yet
+- field-aware durable-state migration is not part of this contract
 
-That means behavior changes are the intended smooth path today, while durable
-state-shape changes still require either a clean restart or a future explicit
-migration/reset policy.
+That means behavior changes are the smooth path, while durable state-shape
+changes require a clean restart.
 
 ## Checkpoint Guidance
 
@@ -241,8 +240,8 @@ Practical examples:
 If reload feels sluggish, move the checkpoint to a slightly finer safe
 boundary. Do not move it inward so far that correctness becomes unclear.
 
-If a source package needs to publish raw Odin names in that flow, it can now do
-so explicitly with:
+If a source package needs to publish raw Odin names in that flow, declare them
+explicitly with:
 
 ```clojure
 (exports [Run_Host reload__Run_Host])
@@ -284,8 +283,7 @@ The ordinary human-oriented text output remains available without `--json`.
 
 ## Recorded Decisions
 
-These points should now be treated as the working product direction for native
-hot reload.
+These points define the product direction for native hot reload.
 
 ### 1. Native hot reload stays the primary iterative path
 
@@ -355,19 +353,11 @@ So the hot-reload guidance should be:
 - keep transient scratch/runtime-only state outside the durable root when that
   is clearer
 
-### 6. The real remaining ceremony should move into tooling/codegen
+### 6. Reload app tooling owns the generated ceremony
 
-The current system still exposes:
-
-- explicit host code
-- explicit reloadable module code
-- explicit shared state contracts
-
-Those are useful implementation truths, but they should become Kvist's
-responsibility rather than the end user's day-to-day concern.
-
-That points directly toward a first-class reload-app design layered over the
-existing `kvist_hot` runtime pieces.
+The reload app surface uses generated host and module packages around an
+explicit durable state contract. User source keeps the reload boundary visible;
+the CLI owns the generated ceremony around that boundary.
 
 ## State Ownership
 
@@ -407,8 +397,8 @@ That is exactly why `Kvist/Live` still has a role.
 
 ## Relationship To `Kvist/Live`
 
-`Kvist/Live` should now be read as a complementary continuity layer, not as the
-main answer to iterative development.
+`Kvist/Live` is a complementary continuity layer, not the main answer to
+iterative development.
 
 The split is:
 
@@ -416,7 +406,7 @@ The split is:
 - `kvist_live`: reflective/runtime-programmable layer for commands, tooling,
   scripting, and inspection
 
-This is the architecture that seems strongest right now.
+This is the current architecture.
 
 ## Demo
 
@@ -445,7 +435,7 @@ Its companion app-owned runtime example lives in
 It demonstrates the Olive-like split between ordinary production Kvist and a
 small reload adapter.
 
-That follow-on combined example now lives in
+The combined example lives in
 [`examples/reload/hybrid_live_demo`](../examples/reload/hybrid_live_demo/README.md).
 
 It shows:
@@ -454,12 +444,3 @@ It shows:
 - an embedded `kvist_live` runtime in the same host
 - live command reload from `.kvist` source without rebuilding the DLL
 - the two continuity layers cooperating instead of being documented separately
-
-## Next Surface Direction
-
-The next strong step on the native side is to stop exposing the
-mechanism-shaped host/module split directly to users and instead define one
-first-class reload pattern.
-
-That proposed surface is documented in
-[RELOAD-APP-DESIGN.md](./RELOAD-APP-DESIGN.md).

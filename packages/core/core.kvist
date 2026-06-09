@@ -329,8 +329,9 @@
   "Return a shallow copy of a struct with one field replaced.
 
   `(assoc value.field new-value)` copies `value`, assigns `.field` on the
-  copy, and returns the copy. `(assoc value .field new-value)` is also
-  accepted. This is a shallow value update; it does not deep copy owned fields."
+  copy, and returns the copy. In a `->` pipeline, `(assoc .field new-value)`
+  uses the threaded value as the struct target. This is a shallow value update;
+  it does not deep copy owned fields."
   [place-or-target value-or-selector & rest]
   (quasiquote
     (core-assoc (unquote place-or-target) (unquote value-or-selector) (splice rest))))

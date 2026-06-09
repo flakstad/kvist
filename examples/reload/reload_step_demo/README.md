@@ -4,9 +4,9 @@ This is a loop-driven `defstate` reload workflow with a more realistic file
 split: one small reload-app shell file, one durable root state, and a separate
 same-package program file that holds the logic you would keep extending.
 
-The loop is ordinary Kvist code in `run`. Kvist no longer has a separate
-generated step mode; if your app wants a step-and-sleep loop, write that loop
-directly and call `reload.checkpoint!` at the safe boundary.
+The loop is ordinary Kvist code in `run`. If your app wants a step-and-sleep
+loop, write that loop directly and call `reload.checkpoint!` at the safe
+boundary.
 
 Source:
 

@@ -67,6 +67,7 @@ LANGUAGE_SOURCE_ENTRIES :: []Language_Source_Entry{
     {name = "defn", kind = "kvist form", relative = "src/kvist/parse.odin", snippet = "case \"defn\", \"defn-\":"},
     {name = "defmacro", kind = "kvist form", relative = "src/kvist/parse.odin", snippet = "case \"defmacro\", \"defmacro-\":"},
     {name = "defsource", kind = "kvist form", relative = "src/kvist/parse.odin", snippet = "case \"defsource\", \"defsource-\":"},
+    {name = "attr", kind = "kvist form", relative = "src/kvist/parse.odin", snippet = "(attr name ...)"},
     {name = "export", kind = "kvist form", relative = "src/kvist/parse.odin", snippet = "case \"export\":"},
     {name = "exports", kind = "kvist form", relative = "src/kvist/parse.odin", snippet = "case \"exports\":"},
     {name = "fn", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "emit_proc_literal_expr :: proc"},

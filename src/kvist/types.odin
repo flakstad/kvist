@@ -110,10 +110,12 @@ Struct_Decl :: struct {
 }
 
 Const_Decl :: struct {
-    name:   string,
-    has_ty: bool,
-    ty:     string,
-    value:  CST_Form,
+    name:          string,
+    has_ty:        bool,
+    ty:            string,
+    value:         CST_Form,
+    is_type_alias: bool,
+    type_alias:    string,
 }
 
 Var_Decl :: struct {

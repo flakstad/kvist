@@ -1,6 +1,6 @@
 // Exercises raw Odin escapes, pointer dereference, address-of, mutation, and field access.
 
-(odin "Handle :: distinct rawptr")
+(def Handle (distinct rawptr))
 
 (defstruct Counter {
   value: int

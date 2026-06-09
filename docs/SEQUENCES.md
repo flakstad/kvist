@@ -1,17 +1,16 @@
-# Sequence Helper Direction
+# Sequence Helpers
 
-Kvist should grow a useful sequence helper surface, but it should remain Odin:
-simple, eager, direct, and explicit about allocation.
+Kvist's sequence helper surface is Odin-shaped: simple, eager, direct, and
+explicit about allocation.
 
-This is not a Clojure seq runtime. There should be no hidden lazy sequence
-layer, no persistent collection abstraction, and no implicit nil-as-empty
-collection behavior. Helpers should lower to readable generic Odin procedures,
-ordinary indexing, ordinary slicing, ordinary loops, ordinary maps, and ordinary
-dynamic arrays.
+This is not a Clojure seq runtime. There is no hidden lazy sequence layer, no
+persistent collection abstraction, and no implicit nil-as-empty collection
+behavior. Helpers lower to readable generic Odin procedures, ordinary indexing,
+ordinary slicing, ordinary loops, ordinary maps, and ordinary dynamic arrays.
 
-There will not be lazy sequences in Kvist. Producers must always be bounded,
-and helpers must always be one of: eager owned collection builders, borrowed
-slice views, scalar operations, or explicit in-place mutation.
+Kvist has no lazy sequences. Producers are always bounded, and helpers are
+always one of: eager owned collection builders, borrowed slice views, scalar
+operations, or explicit in-place mutation.
 
 ## Principles
 
@@ -210,7 +209,7 @@ Builder helpers such as `arr.map`, `arr.filter`, `arr.remove`,
 `arr.interpose`, `arr.interleave`, `arr.reverse`, `arr.shuffle`,
 `arr.range`, `arr.repeat`, `arr.repeatedly`, `arr.iterate`, bounded
 `arr.cycle`, and `arr.take-nth`
-return owned dynamic arrays. `into` is currently only for explicit dynamic-array
+return owned dynamic arrays. `into` is for explicit dynamic-array
 targets, for example `(arr.into [dynamic]int xs)`. `arr.distinct` and
 `arr.distinct-by` also
 return owned dynamic arrays and use a temporary `map[key]bool` internally, so
@@ -240,7 +239,7 @@ callback is non-escaping. This includes helpers such as `arr.map-indexed`,
 
 `sort` and `sort-by` copy before sorting. They do not mutate the input
 collection, and their result is owned.
-Captured callbacks are not currently supported for `sort-by`; use a named
+Captured callbacks are not supported for `sort-by`; use a named
 non-capturing key function or an explicit context-aware sort helper.
 
 `shuffle` also copies before shuffling. It takes an explicit picker function
@@ -457,34 +456,26 @@ direct aggregate loop. Its expected result is lower allocation than `group-by`,
 but still slower and more allocating than the direct fused loop because
 settling, filtering, summing, and counting remain separate passes.
 
-## Completion Before Transducers
+## Helper Boundaries
 
-The eager sequence library is close to complete enough for ordinary code. The
-remaining pre-transducer work should stay small and direct. Dynamic-array append
-is covered by `into!`; map merge is covered by explicit `merge` and `merge!`.
-Avoid broadening these into a polymorphic collection protocol.
+The eager sequence library is deliberately small and direct. Dynamic-array
+append is covered by `into!`; map merge is covered by explicit `merge` and
+`merge!`. These are concrete helpers, not a polymorphic collection protocol.
 
 Avoid helpers that imply lazy sequence semantics, nil-as-empty behavior, or a
 collection protocol. Prefer an explicit loop in user code when a helper's
 lowering would be surprising.
 
-## Useful Additions After That
+Concrete rules:
 
-These are valuable, but each needs one deliberate design choice before
-implementation:
-
-The main questions are:
-
-- `into` currently constructs an owned dynamic array from a borrowed collection,
-  and `into!` currently means dynamic-array append lowering directly to
-  `append(&target, ..xs)`. Map combination is explicit `merge`/`merge!`. Sets
-  would first need a concrete Odin representation. Treat this as explicit eager
-  construction or mutation, not a polymorphic collection protocol.
+- `into` constructs an owned dynamic array from a borrowed collection,
+  and `into!` means dynamic-array append lowering directly to
+  `append(&target, ..xs)`.
+- map combination is explicit `merge`/`merge!`.
 - `shuffle` and `shuffle!` are implemented with an explicit picker callback. The
   caller owns the randomness policy; Kvist only performs the swaps.
 - `distinct` and `distinct-by` are implemented with temporary `map[key]bool`
-  storage. Broader set-like helpers should keep using ordinary Odin map-backed
-  representations unless a better concrete Odin shape appears.
+  storage.
 
 ## Bounded Producers
 
@@ -505,33 +496,6 @@ Avoid unbounded forms such as plain `cycle`, unbounded `repeat`, unbounded
 `cycle` returns an owned dynamic array containing at most `n` items by cycling
 over the input slice. It returns an empty owned dynamic array when `n <= 0` or
 the input is empty.
-
-## Transducer Path
-
-The current eager helper shape should keep a transducer path open without
-committing to it as implemented language surface. The current focused design
-sketch is in [`FUNCTIONAL-TRANSFORMS.md`](./FUNCTIONAL-TRANSFORMS.md).
-
-Today:
-
-```clojure
-(->> users
-     (arr.filter active?)
-     (arr.map .name)
-     (arr.take 10))
-```
-
-Possible later design:
-
-```clojure
-(deftransform active-names
-  (comp
-    (filter active?)
-    (map .name)))
-```
-
-That later design should still produce plain Odin code. It should not introduce
-a hidden interpreter, persistent collection runtime, or lazy seq system.
 
 ## Threading And Cleanup
 
@@ -580,20 +544,6 @@ threaded pipeline with allocating intermediates is rejected; bind the pipeline i
 `let` so the compiler can emit cleanup, or return the final owned value directly
 from a non-pipelined allocation.
 
-Transducers would improve this by compiling a composed transformation into one
-loop and one owned result:
-
-```clojure
-(arr.into [dynamic]string
-      (comp (arr.filter active?)
-            (arr.map .name)
-            (arr.take 10))
-      users)
-```
-
-That shape can avoid most intermediate allocations, but the final result is
-still owned and must be deleted or returned to transfer ownership.
-
 ## Ownership And Allocation
 
 Sequence helpers need an explicit ownership story:
@@ -619,9 +569,6 @@ Sequence helpers need an explicit ownership story:
   the intermediate dynamic array.
 - Examples that use allocating helpers should show `defer delete(...)` when the
   result lives beyond a trivial expression.
-- Future helper docs should clearly mark whether a helper returns a view or an
-  owned dynamic array.
-
 This is a documentation and examples requirement, not just an implementation
 detail. Kvist should help make Odin ownership easier to see, not easier to
 forget.

@@ -1915,6 +1915,31 @@ reject_macro_expanded_slash_package_access :: proc(t: ^testing.T) {
 }
 
 @(test)
+reject_macro_expanded_slash_package_access_for_custom_alias :: proc(t: ^testing.T) {
+    source := `(package main)
+(import things "kvist:arr")
+
+(defn inc [x: int] -> int
+  (+ x 1))
+
+(defmacro bad-map [f xs]
+  (let [head (symbol "things/map")]
+    (quasiquote
+      ((unquote head) (unquote f) (unquote xs)))))
+
+(defn bad [] -> [dynamic]int
+  (bad-map inc ([]int [1 2 3])))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+    defer delete(err.message)
+    testing.expect_value(t, err.message, "use `things.map` for package access")
+}
+
+@(test)
 reject_eval_macro_expanded_slash_package_access :: proc(t: ^testing.T) {
     source := `(package main)
 
@@ -1932,6 +1957,27 @@ reject_eval_macro_expanded_slash_package_access :: proc(t: ^testing.T) {
     }
     defer delete(err.message)
     testing.expect_value(t, err.message, "use `arr.count` for package access")
+}
+
+@(test)
+reject_eval_macro_expanded_slash_package_access_for_custom_alias :: proc(t: ^testing.T) {
+    source := `(package main)
+(import things "kvist:arr")
+
+(def xs: []int ([]int [1 2 3]))
+
+(defmacro bad-count [xs]
+  (let [head (symbol "things/count")]
+    (quasiquote
+      ((unquote head) (unquote xs)))))`
+
+    _, err, ok := kvist.compile_eval_source_with_map(source, `(bad-count xs)`)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+    defer delete(err.message)
+    testing.expect_value(t, err.message, "use `things.count` for package access")
 }
 
 @(test)
@@ -2432,6 +2478,37 @@ compile_def_and_defvar_forms :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "max_size: int : 1024"), true)
     testing.expect_value(t, strings.contains(output, "live_port: int = 8080"), true)
     testing.expect_value(t, strings.contains(output, "retries := 3"), true)
+}
+
+@(test)
+compile_def_type_alias_forms :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct Order {
+  id: int
+})
+
+(def Handle (distinct rawptr))
+(def Order-Groups map[int][dynamic]Order)
+(def Byte-Slice []byte)
+(def Lane #simd[4]f32)
+
+(defn group-count [groups: Order-Groups] -> int
+  (count groups))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "Handle :: distinct rawptr"), true)
+    testing.expect_value(t, strings.contains(output, "Order_Groups :: map[int][dynamic]Order"), true)
+    testing.expect_value(t, strings.contains(output, "Byte_Slice :: []byte"), true)
+    testing.expect_value(t, strings.contains(output, "Lane :: #simd[4]f32"), true)
+    testing.expect_value(t, strings.contains(output, "group_count :: proc(groups: Order_Groups) -> int"), true)
 }
 
 @(test)
@@ -9979,9 +10056,8 @@ main :: proc() {
 compile_proc_directives_and_declaration_attributes :: proc(t: ^testing.T) {
     source := `(package main)
 
-(odin "@(private)")
-(odin "#force_inline")
-(defn hidden [] -> int
+(attr private)
+(defn hidden [] -> int #force_inline
   1)
 
 (defn query [] -> [value: int, ok: bool] #optional_ok
@@ -10007,6 +10083,19 @@ query :: proc() -> (value: int, ok: bool) #optional_ok {
 }
 `
     testing.expect_value(t, output, expected)
+}
+
+@(test)
+reject_attr_without_items :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(attr)
+(def answer 42)`
+
+    _, err, ok := kvist.compile_source(source)
+    defer delete(err.message)
+    testing.expect_value(t, ok, false)
+    testing.expect_value(t, err.message, "attr expects at least one attribute item")
 }
 
 @(test)

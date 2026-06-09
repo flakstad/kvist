@@ -21,6 +21,7 @@ Loaded_Forms :: struct {
     decls: [dynamic]CST_Top_Form,
     exports: [dynamic]string,
     raw_exports: [dynamic]string,
+    source_aliases: [dynamic]string,
 }
 
 loaded_forms_delete :: proc(forms: ^Loaded_Forms) {
@@ -28,6 +29,7 @@ loaded_forms_delete :: proc(forms: ^Loaded_Forms) {
     delete_borrowed_cst_top_form_slice(&forms.decls)
     delete_string_slice(&forms.exports)
     delete_string_slice(&forms.raw_exports)
+    delete_string_slice(&forms.source_aliases)
     forms^ = Loaded_Forms{}
 }
 
@@ -498,7 +500,7 @@ validate_surface_internal_call_names :: proc(forms: []CST_Top_Form) -> (Compile_
     return Compile_Error{}, true
 }
 
-slash_package_access_message :: proc(text: string) -> (message: string, ok: bool) {
+slash_package_access_message :: proc(text: string, aliases: []string = nil) -> (message: string, ok: bool) {
     slash := strings.index(text, "/")
     if slash <= 0 || slash+1 >= len(text) {
         return "", false
@@ -509,12 +511,16 @@ slash_package_access_message :: proc(text: string) -> (message: string, ok: bool
         member := text[slash+1:]
         return fmt.tprintf("use `%s.%s` for package access", alias, member), true
     }
+    if contains_text(aliases, alias) {
+        member := text[slash+1:]
+        return fmt.tprintf("use `%s.%s` for package access", alias, member), true
+    }
     return "", false
 }
 
-validate_surface_package_slash_access_form :: proc(form: CST_Form) -> (Compile_Error, bool) {
+validate_surface_package_slash_access_form :: proc(form: CST_Form, aliases: []string = nil) -> (Compile_Error, bool) {
     if form.kind == .Symbol {
-        message, bad := slash_package_access_message(form.text)
+        message, bad := slash_package_access_message(form.text, aliases)
         if bad {
             return Compile_Error{message = message, span = form.span}, false
         }
@@ -522,7 +528,7 @@ validate_surface_package_slash_access_form :: proc(form: CST_Form) -> (Compile_E
     #partial switch form.kind {
     case .List, .Vector, .Brace, .Set:
         for item in form.items {
-            err_item, ok_item := validate_surface_package_slash_access_form(item)
+            err_item, ok_item := validate_surface_package_slash_access_form(item, aliases)
             if !ok_item {
                 return err_item, false
             }
@@ -531,9 +537,9 @@ validate_surface_package_slash_access_form :: proc(form: CST_Form) -> (Compile_E
     return Compile_Error{}, true
 }
 
-validate_surface_package_slash_access :: proc(forms: []CST_Top_Form) -> (Compile_Error, bool) {
+validate_surface_package_slash_access :: proc(forms: []CST_Top_Form, aliases: []string = nil) -> (Compile_Error, bool) {
     for top in forms {
-        err_form, ok_form := validate_surface_package_slash_access_form(top.form)
+        err_form, ok_form := validate_surface_package_slash_access_form(top.form, aliases)
         if !ok_form {
             return err_form, false
         }
@@ -602,6 +608,20 @@ delete_string_slice :: proc(values: ^[dynamic]string) {
     }
     delete(values^)
     values^ = nil
+}
+
+append_unique_string_clone :: proc(values: ^[dynamic]string, value: string) {
+    if value == "" || contains_text(values^[:], value) {
+        return
+    }
+    append(values, strings.clone(value))
+}
+
+alias_prefix_names :: proc(aliases: []Alias_Prefix) -> (names: [dynamic]string) {
+    for alias in aliases {
+        append(&names, alias.alias)
+    }
+    return names
 }
 
 clone_cst_form :: proc(form: CST_Form) -> CST_Form {
@@ -1446,7 +1466,7 @@ rewrite_decl_name :: proc(form: ^CST_Form, prefix: string) {
 
 type_constructor_symbol :: proc(text: string) -> bool {
     switch text {
-    case "slice", "dynamic", "array", "map", "set", "matrix", "ptr", "fn":
+    case "slice", "dynamic", "array", "map", "set", "matrix", "ptr", "distinct", "fn", "type":
         return true
     }
     return false
@@ -1657,6 +1677,37 @@ rewrite_top_form :: proc(top: CST_Top_Form, locals: []string, aliases: []Alias_P
             return rewrite_proc_like_top_form(top, locals, aliases, prefix)
         }
         if is_top_level_decl_head(head) {
+            if head == "def" || head == "def-" {
+                value_index := 2
+                if len(top.form.items) > 3 && top.form.items[2].kind == .String {
+                    value_index = 3
+                }
+                if type_alias_candidate_from_forms(top.form.items[:], value_index) {
+                    _, next_type, _, ok_type := parse_type_text_from_forms(top.form.items[:], value_index)
+                    if ok_type && next_type == len(top.form.items) {
+                        rewritten.form = top.form
+                        rewritten.form.items = nil
+                        for item, idx in top.form.items {
+                            if idx == 1 {
+                                renamed := item
+                                renamed.text = fmt.tprintf("%s__%s", prefix, item.text)
+                                append(&rewritten.form.items, renamed)
+                                continue
+                            }
+                            if idx >= value_index {
+                                child, err_child, ok_child := rewrite_type_form_symbols(item, locals, aliases, prefix)
+                                if !ok_child {
+                                    return CST_Top_Form{}, err_child, false
+                                }
+                                append(&rewritten.form.items, child)
+                                continue
+                            }
+                            append(&rewritten.form.items, item)
+                        }
+                        return rewritten, Compile_Error{}, true
+                    }
+                }
+            }
             rewritten.form = top.form
             rewritten.form.items = nil
             for item, idx in top.form.items {
@@ -1930,6 +1981,7 @@ load_source_forms :: proc(dir, prefix: string, loaded_keys, import_keys: ^[dynam
         if self_prefix == "" {
             self_prefix = package_name
         }
+        append_unique_string_clone(&result.source_aliases, package_name)
         if len(raw_exported) > 0 {
             append_import_form_unique(&result.imports, import_keys, synthetic_import_decl(self_prefix, raw_dir))
         }
@@ -1976,6 +2028,10 @@ load_source_forms :: proc(dir, prefix: string, loaded_keys, import_keys: ^[dynam
                 raw_exports = nested_raw_exports,
                 preserve_qualified_calls = import_path == "kvist:core",
             })
+            append_unique_string_clone(&result.source_aliases, alias)
+            for nested_alias in nested.source_aliases {
+                append_unique_string_clone(&result.source_aliases, nested_alias)
+            }
             for form in nested.imports {
                 append_import_form_unique(&result.imports, import_keys, clone_cst_top_form(form))
             }
@@ -2083,6 +2139,10 @@ load_root_file_forms :: proc(path: string) -> (Loaded_Forms, Compile_Error, bool
                 raw_exports = nested_raw_exports,
                 preserve_qualified_calls = import_path == "kvist:core",
             })
+            append_unique_string_clone(&result.source_aliases, alias)
+            for nested_alias in nested.source_aliases {
+                append_unique_string_clone(&result.source_aliases, nested_alias)
+            }
             for form in nested.imports {
                 append_import_form_unique(&result.imports, &import_keys, clone_cst_top_form(form))
             }
@@ -2153,6 +2213,10 @@ load_root_source_forms :: proc(forms: []CST_Top_Form) -> (Loaded_Forms, Compile_
             raw_exports = nested_raw_exports,
             preserve_qualified_calls = import_path == "kvist:core",
         })
+        append_unique_string_clone(&result.source_aliases, alias)
+        for nested_alias in nested.source_aliases {
+            append_unique_string_clone(&result.source_aliases, nested_alias)
+        }
         for form in nested.imports {
             append_import_form_unique(&result.imports, &import_keys, clone_cst_top_form(form))
         }
@@ -2209,7 +2273,7 @@ load_path_expanded_forms :: proc(path: string) -> (expanded: [dynamic]CST_Top_Fo
     if !ok_expand {
         return expanded, macros, err_expand, false
     }
-    err_expanded_slash, ok_expanded_slash := validate_surface_package_slash_access(expanded_forms[:])
+    err_expanded_slash, ok_expanded_slash := validate_surface_package_slash_access(expanded_forms[:], loaded.source_aliases[:])
     if !ok_expanded_slash {
         return expanded, macros, err_expanded_slash, false
     }
@@ -2559,7 +2623,7 @@ compile_source_with_map :: proc(source: string) -> (result: Emit_Result, err: Co
     if !ok_expand {
         return result, clone_compile_error(err_expand, result_allocator), false
     }
-    err_expanded_slash, ok_expanded_slash := validate_surface_package_slash_access(expanded[:])
+    err_expanded_slash, ok_expanded_slash := validate_surface_package_slash_access(expanded[:], loaded.source_aliases[:])
     if !ok_expanded_slash {
         return result, clone_compile_error(err_expanded_slash, result_allocator), false
     }
@@ -2615,7 +2679,7 @@ eval_form_head :: proc(form: CST_Form) -> string {
 
 eval_head_is_decl :: proc(head: string) -> bool {
     switch head {
-    case "comment", "core.comment", "package", "import", "def", "def-", "defvar", "defvar-", "defstruct", "defstruct-", "defenum", "defenum-", "defunion", "defunion-", "odin", "defn", "defn-", "deftransform", "deftransform-", "defsource", "defsource-":
+    case "comment", "core.comment", "package", "import", "def", "def-", "defvar", "defvar-", "defstruct", "defstruct-", "defenum", "defenum-", "defunion", "defunion-", "odin", "attr", "export", "exports", "defn", "defn-", "deftransform", "deftransform-", "defsource", "defsource-":
         return true
     }
     return false
@@ -2675,7 +2739,7 @@ compile_eval_source_with_map :: proc(source, eval_source: string, no_print: bool
     if !ok_expand {
         return result, clone_compile_error(err_expand, result_allocator), false
     }
-    err_expanded_slash, ok_expanded_slash := validate_surface_package_slash_access(expanded[:])
+    err_expanded_slash, ok_expanded_slash := validate_surface_package_slash_access(expanded[:], loaded.source_aliases[:])
     if !ok_expanded_slash {
         return result, clone_compile_error(err_expanded_slash, result_allocator), false
     }
@@ -2699,7 +2763,7 @@ compile_eval_source_with_map :: proc(source, eval_source: string, no_print: bool
         return result, clone_compile_error(err_eval_expand, result_allocator), false
     }
     defer delete_cst_form(&expanded_eval_form)
-    err_eval_slash, ok_eval_slash := validate_surface_package_slash_access_form(expanded_eval_form)
+    err_eval_slash, ok_eval_slash := validate_surface_package_slash_access_form(expanded_eval_form, loaded.source_aliases[:])
     if !ok_eval_slash {
         return result, clone_compile_error(err_eval_slash, result_allocator), false
     }
@@ -2895,6 +2959,8 @@ compile_eval_path_with_map :: proc(path, eval_source: string, no_print: bool = f
         context.allocator = old_allocator
         return result, clone_compile_error(err_aliases, result_allocator), false
     }
+    alias_names := alias_prefix_names(aliases)
+    defer delete(alias_names)
     eval_form, err_eval, ok_eval := read_single_eval_form(eval_source)
     if !ok_eval {
         context.allocator = old_allocator
@@ -2913,7 +2979,7 @@ compile_eval_path_with_map :: proc(path, eval_source: string, no_print: bool = f
         context.allocator = old_allocator
         return result, clone_compile_error(err_eval_expand, result_allocator), false
     }
-    err_eval_slash, ok_eval_slash := validate_surface_package_slash_access_form(expanded_eval_form)
+    err_eval_slash, ok_eval_slash := validate_surface_package_slash_access_form(expanded_eval_form, alias_names[:])
     if !ok_eval_slash {
         context.allocator = old_allocator
         return result, clone_compile_error(err_eval_slash, result_allocator), false

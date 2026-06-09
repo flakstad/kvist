@@ -64,15 +64,15 @@ So these numbers are useful pressure, not a compiler bug by themselves.
 
 The compiler is already doing a good job of mechanical lowering.
 
-The main performance question is now:
+The main performance questions are:
 
 - where should Kvist expose high-level eager helpers with explicit cost?
 - where should we encourage in-place or loop-oriented forms?
-- where do we want future optimization/fusion passes, if any?
+- where are explicit loops the right source-level tool?
 
 ## Mutation Surface Baseline
 
-The focused mutation benchmark now covers:
+The focused mutation benchmark covers:
 
 - `update!` on struct fields
 - copy-update of struct values
@@ -87,27 +87,19 @@ Current focused mutation run:
 - `array-update!`: Kvist `0.303 ms`, direct Odin `0.324 ms`
 - `map-update!`: Kvist `7.676 ms`, direct Odin `9.087 ms`
 
-Two fixes mattered here:
+`update!` lowers simple arithmetic updater cases to compound assignment when
+possible:
 
-1. `update!` now lowers simple arithmetic updater cases to compound
-   assignment when possible:
-   - `+=`
-   - `-=`
-   - `*=`
-   - `/=`
-   - unary `inc` / `dec`
+- `+=`
+- `-=`
+- `*=`
+- `/=`
+- unary `inc` / `dec`
 
-   That removed duplicate place reads for array and map updates.
+The benchmark uses array-backed struct workloads so copy-update versus pointer
+mutation is measurable.
 
-2. The array benchmark was tightened so it measures update cost more directly
-   instead of conflating it with avoidable growth churn from a zero-capacity
-   buffer.
-
-The old local-only struct microbenchmark was useless because Odin optimized it
-below timer resolution. The benchmark now uses array-backed struct workloads so
-copy-update versus pointer mutation is measurable.
-
-The useful conclusion for now is:
+The useful conclusion is:
 
 - struct copy-update and pointer mutation are effectively at parity in this
   workload
@@ -171,14 +163,14 @@ The important result is not any one number, but the shape:
 - the source-backed path is within normal run-to-run noise of the intrinsic
   path on these workloads
 - both stay close to the direct eager Odin baseline
-- source-backed `reverse`, `interpose`, and `interleave` now run in the same
+- source-backed `reverse`, `interpose`, and `interleave` run in the same
   allocation and timing envelope as the intrinsic helpers on the reorder
   workload
-- the source-backed remove-at returning helpers now emit the same bulk-copy shape
+- the source-backed remove-at returning helpers emit the same bulk-copy shape
   as raw Odin: `append(&out, ..xs)` followed by `ordered_remove` or
   `unordered_remove`
 - the remove-at bang helpers lower directly to Odin's `ordered_remove` and
-  `unordered_remove`; the benchmark setup now uses the same inline bulk-copy
+  `unordered_remove`; the benchmark setup uses the same inline bulk-copy
   shape as the direct Odin baseline so this row measures the bang wrapper rather
   than `arr.into`
 - remove-at timings still show more run-to-run spread than the allocation shape;
@@ -187,30 +179,14 @@ The important result is not any one number, but the shape:
 - the fused loop is still much faster when the semantics avoid intermediate
   owned collections entirely
 
-The next benchmark additions should keep targeting the parts of the surface
-where source-level semantics may still hide real cost.
-
 `scripts/bench_source_backed_arr.sh` compares the current working tree against
-`HEAD` by default. During package layout migrations, use `BASE_REF=skip` to run
-only the current compiler and direct Odin baselines when the old compiler cannot
-load renamed package files.
-
-Recommended next cases:
-
-1. `for` loops over arrays, maps, and sets
-2. package-heavy real-world workloads using explicit `kvist:*` imports beyond
-   the focused `arr` benchmark
-3. ownership-helper patterns using `let ... defer` around collection builders
-4. more map-heavy workloads with realistic surrounding code, not just the
-   isolated hot loop
-
-These would tell us whether the current language surface is still lowering as
-cleanly as the older helper benchmarks.
+`HEAD` by default. Use `BASE_REF=skip` to run only the current compiler and
+direct Odin baselines.
 
 ## Captured Callback Baseline
 
-There is now also a focused captured-callback benchmark for the explicit
-helper-with-context lowering:
+The focused captured-callback benchmark covers explicit helper-with-context
+lowering:
 
 - Kvist `map`, `filter`, `remove`, `keep`, and `map!` with captured outer locals
 - Kvist-defined non-escaping callback APIs that receive captured callbacks
@@ -232,8 +208,7 @@ This benchmark is meant to answer two separate questions:
 
 ## Core Helper Baseline
 
-There is now also a focused core helper benchmark for the canonical collection
-kernel:
+The focused core helper benchmark covers the canonical collection kernel:
 
 - `count`
 - `get`
@@ -264,8 +239,8 @@ The important result is the shape:
 
 ## Package Surface Baseline
 
-There is now also a focused package-surface benchmark for package APIs that are
-hot and runtime-safe today:
+The focused package-surface benchmark covers package APIs that are hot and
+runtime-safe:
 
 - `str.*` transforms and queries
 - `map.*` constructor plus bang mutation helpers
@@ -294,5 +269,4 @@ What this says:
 - the string package wrappers stay in the same performance band as direct Odin
 - the map bang/package surface is effectively identical to direct Odin in both
   time and allocation behavior
-- the set bang/package surface is now also at parity after removing the
-  temporary delete-list allocation from `set.intersection!`
+- the set bang/package surface is also at parity

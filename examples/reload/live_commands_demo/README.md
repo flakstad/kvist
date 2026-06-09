@@ -44,7 +44,7 @@ To demonstrate source-defined migration specifically:
 1. change `version:` from `"v1"` to `"v2"`
 2. change `counter-key` from `"run-count"` to `"tick-count"`
 
-The module's own `defn migrate []` should copy the old counter value to the new
+The module's own `defn migrate []` copies the previous counter value to the new
 state key during reload, so the count keeps increasing instead of restarting.
 The demo migration handles both `run-count -> tick-count` and
 `tick-count -> run-count` while you experiment.
@@ -53,8 +53,7 @@ Press `ctrl-c` to stop the demo.
 
 ## Current Scope
 
-This demo now reads a narrow real-Kvist module subset rather than the earlier
-line-based placeholder format. The current loader and evaluator understand:
+The current loader and evaluator understand:
 
 - ordinary top-level macro expansion before live loading, including core
   macros, file-local `defmacro` forms, and shipped source-package macros such
@@ -79,14 +78,14 @@ line-based placeholder format. The current loader and evaluator understand:
   direct symbol lookup from module bindings, and ordinary calls to top-level
   `defn` helpers
 
-If a `live.command` or `live.hook` has no inline body, the loader will use a
+If a `live.command` or `live.hook` has no inline body, the loader uses a
 same-named zero-argument top-level `defn`. Options maps are optional too.
 
 If the module defines zero-argument top-level `defn init`, `defn migrate`, or
-`defn shutdown`, the runtime will invoke them on load, reload migration, and
+`defn shutdown`, the runtime invokes them on load, reload migration, and
 unload/reload respectively.
 
-The demo host now uses the reusable live host helper surface rather than
+The demo host uses the reusable live host helper surface rather than
 open-coding directory signatures:
 
 - `new_module_reloader(...)`
@@ -96,7 +95,7 @@ open-coding directory signatures:
 It watches the `examples/reload/live_commands_demo/live/` directory for `.kvist` file
 changes, so edits to imported helper files trigger reload too.
 
-The demo command now emits hook payload values explicitly:
+The demo command emits hook payload values explicitly:
 
 - the `tick` command emits the current counter and message
 - the `after-command` hook reads those values with `payload.get`
@@ -107,9 +106,9 @@ It still does not evaluate arbitrary Kvist code. This step is about moving the
 live path onto actual language syntax, macro expansion, and a small executable
 shared subset.
 
-The host source is now pure `.kvist`. The example imports `kvist_live` and a
+The host source is pure `.kvist`. The example imports `kvist_live` and a
 small Odin-side helper package with ordinary import forms, and the example file
-itself no longer contains raw Odin escape hatches.
+itself contains no raw Odin escape hatches.
 
 See [../../docs/LIVE-SHARED-SUBSET.md](../../docs/LIVE-SHARED-SUBSET.md) for
 the explicit current overlap the project is treating as the live.compiled
