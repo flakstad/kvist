@@ -1442,6 +1442,45 @@ rewrite_form_symbols :: proc(form: CST_Form, locals: []string, aliases: []Alias_
         rewritten.text = text
         return rewritten, Compile_Error{}, true
     case .List, .Vector, .Brace:
+        if form.kind == .List && len(form.items) > 0 && form.items[0].kind == .Symbol {
+            head := form.items[0].text
+            if head == "make" || head == "alloc" || head == "zero" || head == "transmute" || head == "type-assert" {
+                rewritten.items = nil
+                append(&rewritten.items, form.items[0])
+                type_start := 1
+                if head == "type-assert" {
+                    if len(form.items) > 1 {
+                        value, err_value, ok_value := rewrite_form_symbols(form.items[1], locals, aliases, prefix)
+                        if !ok_value {
+                            return CST_Form{}, err_value, false
+                        }
+                        append(&rewritten.items, value)
+                    }
+                    type_start = 2
+                }
+                if type_start < len(form.items) {
+                    _, next_i, err_type, ok_type := parse_type_text_from_forms(form.items[:], type_start)
+                    if !ok_type {
+                        return CST_Form{}, err_type, false
+                    }
+                    for type_item in form.items[type_start:next_i] {
+                        rewritten_type_item, err_type_item, ok_type_item := rewrite_type_form_symbols(type_item, locals, aliases, prefix)
+                        if !ok_type_item {
+                            return CST_Form{}, err_type_item, false
+                        }
+                        append(&rewritten.items, rewritten_type_item)
+                    }
+                    for item in form.items[next_i:] {
+                        child, err_child, ok_child := rewrite_form_symbols(item, locals, aliases, prefix)
+                        if !ok_child {
+                            return CST_Form{}, err_child, false
+                        }
+                        append(&rewritten.items, child)
+                    }
+                }
+                return rewritten, Compile_Error{}, true
+            }
+        }
         rewritten.items = nil
         for item in form.items {
             child, err_child, ok_child := rewrite_form_symbols(item, locals, aliases, prefix)
@@ -1591,6 +1630,40 @@ rewrite_param_vector_signature :: proc(form: CST_Form, locals: []string, aliases
     return rewritten, Compile_Error{}, true
 }
 
+param_names_from_signature_vector :: proc(form: CST_Form) -> (names: [dynamic]string, err: Compile_Error, ok: bool) {
+    if form.kind != .Vector {
+        return names, Compile_Error{}, true
+    }
+    i := 0
+    for i < len(form.items) {
+        target := form.items[i]
+        if target.kind != .Symbol || len(target.text) == 0 || target.text[len(target.text)-1] != ':' {
+            i += 1
+            continue
+        }
+        append(&names, target.text[:len(target.text)-1])
+        _, next_i, err_type, ok_type := parse_type_text_from_forms(form.items[:], i+1)
+        if !ok_type {
+            return names, err_type, false
+        }
+        i = next_i
+        if i < len(form.items) && is_symbol(form.items[i], "=") {
+            i += 2
+        }
+    }
+    return names, Compile_Error{}, true
+}
+
+locals_without_shadowed_names :: proc(locals: []string, shadowed: []string) -> (out: [dynamic]string) {
+    for local in locals {
+        if contains_text(shadowed, local) {
+            continue
+        }
+        append(&out, local)
+    }
+    return out
+}
+
 rewrite_proc_like_top_form :: proc(top: CST_Top_Form, locals: []string, aliases: []Alias_Prefix, prefix: string) -> (CST_Top_Form, Compile_Error, bool) {
     form := top.form
     rewritten := top
@@ -1606,6 +1679,21 @@ rewrite_proc_like_top_form :: proc(top: CST_Top_Form, locals: []string, aliases:
     }
     if params_index < len(form.items) && form.items[params_index].kind == .String {
         params_index += 1
+    }
+
+    body_locals := locals
+    shadowed_params: [dynamic]string
+    filtered_locals: [dynamic]string
+    if params_index < len(form.items) && form.items[params_index].kind == .Vector {
+        param_names, err_param_names, ok_param_names := param_names_from_signature_vector(form.items[params_index])
+        if !ok_param_names {
+            return CST_Top_Form{}, err_param_names, false
+        }
+        shadowed_params = param_names
+        defer delete(shadowed_params)
+        filtered_locals = locals_without_shadowed_names(locals, shadowed_params[:])
+        defer delete(filtered_locals)
+        body_locals = filtered_locals[:]
     }
 
     i := 0
@@ -1656,7 +1744,7 @@ rewrite_proc_like_top_form :: proc(top: CST_Top_Form, locals: []string, aliases:
             continue
         }
 
-        child, err_child, ok_child := rewrite_form_symbols(item, locals, aliases, prefix)
+        child, err_child, ok_child := rewrite_form_symbols(item, body_locals, aliases, prefix)
         if !ok_child {
             return CST_Top_Form{}, err_child, false
         }

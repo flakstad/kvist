@@ -20,6 +20,23 @@ repo_temp_test_path :: proc(name: string) -> (string, bool) {
     return path, true
 }
 
+count_substring :: proc(text, needle: string) -> int {
+    if len(needle) == 0 {
+        return 0
+    }
+    count := 0
+    offset := 0
+    for offset < len(text) {
+        idx := strings.index(text[offset:], needle)
+        if idx < 0 {
+            break
+        }
+        count += 1
+        offset += idx + len(needle)
+    }
+    return count
+}
+
 @(test)
 compile_hello_program :: proc(t: ^testing.T) {
     source := `(package main)
@@ -3382,6 +3399,50 @@ compile_case_with_ignored_union_payload :: proc(t: ^testing.T) {
 }
 
 @(test)
+compile_case_flat_union_payload_arm_with_do_body :: proc(t: ^testing.T) {
+    source := `(package main)
+(import core "kvist:core")
+
+(defstruct Connected {
+  id: int
+})
+
+(defstruct Disconnected {
+  reason: string
+})
+
+(defunion Event {
+  connected: Connected
+  disconnected: Disconnected
+})
+
+(defn event-score [event: Event] -> int
+  (case event
+    (Connected conn) conn.id
+    (Disconnected disc) (do
+                          (println disc.reason)
+                          0)
+    :else -1))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "case Connected:"), true)
+    testing.expect_value(t, strings.contains(output, "conn := kvist_case_"), true)
+    testing.expect_value(t, strings.contains(output, "return conn.id"), true)
+    testing.expect_value(t, strings.contains(output, "case Disconnected:"), true)
+    testing.expect_value(t, strings.contains(output, "disc := kvist_case_"), true)
+    testing.expect_value(t, strings.contains(output, "fmt.println(disc.reason)"), true)
+    testing.expect_value(t, strings.contains(output, "return 0"), true)
+    testing.expect_value(t, strings.contains(output, "case:\n        return -1"), true)
+}
+
+@(test)
 reject_case_mixing_value_and_type_patterns :: proc(t: ^testing.T) {
     source := `(package main)
 
@@ -4546,8 +4607,8 @@ compile_http_sse_surface_is_explicit :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    testing.expect_value(t, strings.contains(output, "__kvist_http_sse_new_started :: proc(res: ^h.Response) -> ^h.Sse"), true)
-    testing.expect_value(t, strings.contains(output, "stream := __kvist_http_sse_new_started(res)"), true)
+    testing.expect_value(t, strings.contains(output, "sse____kvist_http_sse_new_started :: proc(res: ^h.Response) -> ^h.Sse"), true)
+    testing.expect_value(t, strings.contains(output, "stream := sse____kvist_http_sse_new_started(res)"), true)
     testing.expect_value(t, strings.contains(output, "h.sse_event(stream, h.Sse_Event{comment = \"connected\"})"), true)
     testing.expect_value(t, strings.contains(output, "h.sse_event(stream, h.Sse_Event{retry = 1000})"), true)
     testing.expect_value(t, strings.contains(output, "h.sse_event(stream, h.Sse_Event{event = \"welcome\", data = \"ready\"})"), true)
@@ -6956,6 +7017,9 @@ compile_defsource_each_and_into_consumers :: proc(t: ^testing.T) {
 (defn long-path? [path: string] -> bool
   (> (len path) 5))
 
+(defn path-length [path: string] -> int
+  (len path))
+
 (defsource files [items: []string] -> string
   (open-files items)
   :next next-file
@@ -6971,6 +7035,14 @@ compile_defsource_each_and_into_consumers :: proc(t: ^testing.T) {
   (into [dynamic]string
     (comp
       (filter long-path?))
+    (files items)))
+
+(defn total-long-path-length [items: []string] -> int
+  (transduce
+    (comp
+      (filter long-path?)
+      (map path-length))
+    + 0
     (files items)))`
 
     output, err, ok := kvist.compile_source(source)
@@ -6989,8 +7061,14 @@ compile_defsource_each_and_into_consumers :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "if !kvist_source_ok_"), true)
     testing.expect_value(t, strings.contains(output, "(proc(kvist_source_arg_1: []string) -> [dynamic]string {"), true)
     testing.expect_value(t, strings.contains(output, "kvist_source := files(kvist_source_arg_1)"), true)
+    testing.expect_value(t, strings.contains(output, "defer dispose_files(&kvist_source)\n        kvist_out := make([dynamic]string)"), true)
     testing.expect_value(t, strings.contains(output, "if long_path_p(kvist_item) {"), true)
     testing.expect_value(t, strings.contains(output, "append(&kvist_out, kvist_item)"), true)
+    testing.expect_value(t, strings.contains(output, "(proc(kvist_source_arg_1: []string, kvist_init: int) -> int {"), true)
+    testing.expect_value(t, strings.contains(output, "defer dispose_files(&kvist_source)\n        kvist_acc := kvist_init"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_acc := kvist_init"), true)
+    testing.expect_value(t, strings.contains(output, " := path_length(kvist_item)"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_acc += kvist_xform_"), true)
 }
 
 @(test)
@@ -7022,7 +7100,817 @@ reject_source_call_outside_source_consumer :: proc(t: ^testing.T) {
         return
     }
     defer delete(err.message)
-    testing.expect_value(t, err.message, "source files can currently only be consumed by each or into")
+    testing.expect_value(t, err.message, "source files can currently only be consumed by each, into, or transduce")
+}
+
+@(test)
+reject_defsource_next_wrong_state_parameter :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct File_Source {
+  index: int
+})
+
+(defstruct Other_Source {
+  index: int
+})
+
+(defn open-files [] -> File_Source
+  (File_Source {index: 0}))
+
+(defn next-file [src: ^Other_Source] -> [path: string ok: bool]
+  (return "" false))
+
+(defsource files [] -> string
+  (open-files)
+  :next next-file)
+
+(defn consume [] -> int
+  (let [total 0]
+    (each [path (files)]
+      (set! total (+ total (len path))))
+    total))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+    defer delete(err.message)
+    testing.expect_value(t, err.message, "defsource files :next must take ^File_Source")
+}
+
+@(test)
+reject_defsource_next_wrong_return_shape :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct File_Source {
+  index: int
+})
+
+(defn open-files [] -> File_Source
+  (File_Source {index: 0}))
+
+(defn next-file [src: ^File_Source] -> [path: int ok: bool]
+  (return 0 false))
+
+(defsource files [] -> string
+  (open-files)
+  :next next-file)
+
+(defn consume [] -> int
+  (let [total 0]
+    (each [path (files)]
+      (set! total (+ total (len path))))
+    total))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+    defer delete(err.message)
+    testing.expect_value(t, err.message, "defsource files :next must return [item: string ok: bool]")
+}
+
+@(test)
+reject_defsource_dispose_return_value :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct File_Source {
+  index: int
+})
+
+(defn open-files [] -> File_Source
+  (File_Source {index: 0}))
+
+(defn next-file [src: ^File_Source] -> [path: string ok: bool]
+  (return "" false))
+
+(defn dispose-files [src: ^File_Source] -> int
+  0)
+
+(defsource files [] -> string
+  (open-files)
+  :next next-file
+  :dispose dispose-files)
+
+(defn consume [] -> int
+  (let [total 0]
+    (each [path (files)]
+      (set! total (+ total (len path))))
+    total))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+    defer delete(err.message)
+    testing.expect_value(t, err.message, "defsource files :dispose must not return a value")
+}
+
+@(test)
+compile_parallel_start_result_and_detach :: proc(t: ^testing.T) {
+    source := `(package main)
+(import p "kvist:parallel")
+
+(defn zero [] -> int
+  5)
+
+(defn combine [a: int, b: int, c: int] -> int
+  (+ a b c))
+
+(defn notify [user-id: int]
+  (println user-id))
+
+(defn demo [] -> int
+  (let [zero-task (p.start zero)
+        combine-task (p.start combine 1 2 3)]
+    (p.detach notify 99)
+    (+ (p.result zero-task) (p.result combine-task))))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "import chan \"core:sync/chan\""), true)
+    testing.expect_value(t, strings.contains(output, "import thread \"core:thread\""), true)
+    testing.expect_value(t, strings.contains(output, "zero_task := parallel_start_zero_void_int()"), true)
+    testing.expect_value(t, strings.contains(output, "combine_task := parallel_start_combine_int_int_int_int(1, 2, 3)"), true)
+    testing.expect_value(t, strings.contains(output, "parallel_detach_notify_int(99)"), true)
+    testing.expect_value(t, strings.contains(output, "return (parallel_result(zero_task)) + (parallel_result(combine_task))"), true)
+    testing.expect_value(t, strings.contains(output, "parallel_Task :: struct($T: typeid)"), true)
+    testing.expect_value(t, strings.contains(output, "result: chan.Chan(T),"), true)
+    testing.expect_value(t, strings.contains(output, "thread: ^thread.Thread,"), true)
+    testing.expect_value(t, strings.contains(output, "parallel_Start_Data_zero_void_int :: struct"), true)
+    testing.expect_value(t, strings.contains(output, "chan.send(data.result, zero())"), true)
+    testing.expect_value(t, strings.contains(output, "parallel_start_zero_void_int :: proc() -> parallel_Task(int)"), true)
+    testing.expect_value(t, strings.contains(output, "parallel_Start_Data_combine_int_int_int_int :: struct"), true)
+    testing.expect_value(t, strings.contains(output, "a: int,"), true)
+    testing.expect_value(t, strings.contains(output, "b: int,"), true)
+    testing.expect_value(t, strings.contains(output, "c: int,"), true)
+    testing.expect_value(t, strings.contains(output, "chan.send(data.result, combine(data.a, data.b, data.c))"), true)
+    testing.expect_value(t, strings.contains(output, "parallel_start_combine_int_int_int_int :: proc(a: int, b: int, c: int) -> parallel_Task(int)"), true)
+    testing.expect_value(t, strings.contains(output, "thread.create_and_start_with_poly_data(data, parallel_start_worker_combine_int_int_int_int)"), true)
+    testing.expect_value(t, strings.contains(output, "parallel_result :: proc(task: parallel_Task($T)) -> T"), true)
+    testing.expect_value(t, strings.contains(output, "thread.join(task.thread)"), true)
+    testing.expect_value(t, strings.contains(output, "thread.destroy(task.thread)"), true)
+    testing.expect_value(t, strings.contains(output, "free(task.data)"), true)
+    testing.expect_value(t, strings.contains(output, "chan.destroy(task.result)"), true)
+    testing.expect_value(t, strings.contains(output, "parallel_Detach_Data_notify_int :: struct"), true)
+    testing.expect_value(t, strings.contains(output, "parallel_detach_worker_notify_int :: proc(data: ^parallel_Detach_Data_notify_int)"), true)
+    testing.expect_value(t, strings.contains(output, "notify(data.user_id)"), true)
+    testing.expect_value(t, strings.contains(output, "parallel_detach_notify_int :: proc(user_id: int)"), true)
+    testing.expect_value(t, strings.contains(output, "thread.create_and_start_with_poly_data(data, parallel_detach_worker_notify_int, nil, .Normal, true)"), true)
+    testing.expect_value(t, strings.contains(output, "assert(false, \"parallel.detach could not start worker thread\")"), true)
+}
+
+@(test)
+compile_parallel_repeated_start_reuses_helper :: proc(t: ^testing.T) {
+    source := `(package main)
+(import p "kvist:parallel")
+
+(defn square [x: int] -> int
+  (* x x))
+
+(defn demo [] -> int
+  (let [a (p.start square 1)
+        b (p.start square 2)
+        c (p.start square 3)]
+    (+ (p.result a) (p.result b) (p.result c))))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "a := parallel_start_square_int_int(1)"), true)
+    testing.expect_value(t, strings.contains(output, "b := parallel_start_square_int_int(2)"), true)
+    testing.expect_value(t, strings.contains(output, "c := parallel_start_square_int_int(3)"), true)
+    testing.expect_value(t, count_substring(output, "parallel_start_square_int_int :: proc(x: int) -> parallel_Task(int)"), 1)
+    testing.expect_value(t, count_substring(output, "parallel_start_worker_square_int_int :: proc(data: ^parallel_Start_Data_square_int_int)"), 1)
+}
+
+@(test)
+compile_parallel_map_named_worker :: proc(t: ^testing.T) {
+    source := `(package main)
+(import p "kvist:parallel")
+
+(defn square [x: int] -> int
+  (* x x))
+
+(defn demo [xs: []int] -> [dynamic]int
+  (p.map square xs))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "import os \"core:os\""), true)
+    testing.expect_value(t, strings.contains(output, "return parallel_map_square_int_int((xs)[:], 0)"), true)
+    testing.expect_value(t, strings.contains(output, "parallel_Map_Data_square_int_int :: struct"), true)
+    testing.expect_value(t, strings.contains(output, "xs: []int,"), true)
+    testing.expect_value(t, strings.contains(output, "out: [dynamic]int,"), true)
+    testing.expect_value(t, strings.contains(output, "parallel_map_worker_square_int_int :: proc(data: ^parallel_Map_Data_square_int_int)"), true)
+    testing.expect_value(t, strings.contains(output, "data.out[i] = square(data.xs[i])"), true)
+    testing.expect_value(t, strings.contains(output, "parallel_map_square_int_int :: proc(xs: []int, requested_worker_count: int) -> [dynamic]int"), true)
+    testing.expect_value(t, strings.contains(output, "out := make([dynamic]int, len(xs))"), true)
+    testing.expect_value(t, strings.contains(output, "worker_count := requested_worker_count"), true)
+    testing.expect_value(t, strings.contains(output, "worker_count = os.get_processor_core_count() - 1"), true)
+    testing.expect_value(t, strings.contains(output, "if worker_count > 16"), true)
+    testing.expect_value(t, strings.contains(output, "if worker_count > len(xs)"), true)
+    testing.expect_value(t, strings.contains(output, "thread.create_and_start_with_poly_data(data, parallel_map_worker_square_int_int)"), true)
+    testing.expect_value(t, strings.contains(output, "thread.join(task_thread)"), true)
+    testing.expect_value(t, strings.contains(output, "thread.destroy(task_thread)"), true)
+    testing.expect_value(t, strings.contains(output, "free(data)"), true)
+    testing.expect_value(t, strings.contains(output, "return out"), true)
+}
+
+@(test)
+compile_parallel_map_reuses_helper :: proc(t: ^testing.T) {
+    source := `(package main)
+(import p "kvist:parallel")
+
+(defn square [x: int] -> int
+  (* x x))
+
+(defn demo [xs: []int] -> int
+  (let [a (p.map square xs)
+        b (p.map square xs)]
+    (defer (delete a))
+    (defer (delete b))
+    (+ (count a) (count b))))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, count_substring(output, "parallel_map_square_int_int :: proc(xs: []int, requested_worker_count: int) -> [dynamic]int"), 1)
+    testing.expect_value(t, count_substring(output, "parallel_map_worker_square_int_int :: proc(data: ^parallel_Map_Data_square_int_int)"), 1)
+}
+
+@(test)
+compile_parallel_map_with_worker_count :: proc(t: ^testing.T) {
+    source := `(package main)
+(import p "kvist:parallel")
+
+(defn square [x: int] -> int
+  (* x x))
+
+(defn demo [xs: []int] -> [dynamic]int
+  (p.map-with {workers: 4} square xs))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "return parallel_map_square_int_int((xs)[:], 4)"), true)
+    testing.expect_value(t, strings.contains(output, "parallel_map_square_int_int :: proc(xs: []int, requested_worker_count: int) -> [dynamic]int"), true)
+}
+
+@(test)
+compile_parallel_map_and_map_with_reuse_helper :: proc(t: ^testing.T) {
+    source := `(package main)
+(import p "kvist:parallel")
+
+(defn square [x: int] -> int
+  (* x x))
+
+(defn demo [xs: []int] -> int
+  (let [a (p.map square xs)
+        b (p.map-with {workers: 2} square xs)]
+    (defer (delete a))
+    (defer (delete b))
+    (+ (count a) (count b))))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "a := parallel_map_square_int_int((xs)[:], 0)"), true)
+    testing.expect_value(t, strings.contains(output, "b := parallel_map_square_int_int((xs)[:], 2)"), true)
+    testing.expect_value(t, count_substring(output, "parallel_map_square_int_int :: proc(xs: []int, requested_worker_count: int) -> [dynamic]int"), 1)
+    testing.expect_value(t, count_substring(output, "parallel_map_worker_square_int_int :: proc(data: ^parallel_Map_Data_square_int_int)"), 1)
+}
+
+@(test)
+reject_parallel_start_wrong_arity :: proc(t: ^testing.T) {
+    source := `(package main)
+(import p "kvist:parallel")
+
+(defn combine [a: int, b: int] -> int
+  (+ a b))
+
+(defn demo [] -> int
+  (p.result (p.start combine 1)))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+    defer delete(err.message)
+    testing.expect_value(t, err.message, "parallel.start worker combine expects 2 arguments, got 1")
+}
+
+@(test)
+compile_parallel_start_inline_worker :: proc(t: ^testing.T) {
+    source := `(package main)
+(import p "kvist:parallel")
+
+(defn demo [] -> int
+  (p.result (p.start (fn [x: int] -> int
+                       (+ x 1))
+                     1)))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "return parallel_result(parallel_start_inline_"), true)
+    testing.expect_value(t, strings.contains(output, "(1))"), true)
+    testing.expect_value(t, strings.contains(output, "parallel_start_callback_inline_"), true)
+    testing.expect_value(t, strings.contains(output, " :: proc(x: int) -> int {"), true)
+    testing.expect_value(t, strings.contains(output, "parallel_Start_Data_inline_"), true)
+    testing.expect_value(t, strings.contains(output, "x: int,"), true)
+    testing.expect_value(t, strings.contains(output, "chan.send(data.result, parallel_start_callback_inline_"), true)
+    testing.expect_value(t, strings.contains(output, "(data.x))"), true)
+    testing.expect_value(t, strings.contains(output, "parallel_start_inline_"), true)
+    testing.expect_value(t, strings.contains(output, " :: proc(x: int) -> parallel_Task(int)"), true)
+}
+
+@(test)
+compile_parallel_start_with_captured_inline_worker :: proc(t: ^testing.T) {
+    source := `(package main)
+(import p "kvist:parallel")
+
+(defn demo [] -> int
+  (let [offset 10
+        task (p.start (fn [x: int] -> int
+                        (+ x offset))
+                      5)]
+    (p.result task)))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "task := parallel_start_inline_"), true)
+    testing.expect_value(t, strings.contains(output, "(offset, 5)"), true)
+    testing.expect_value(t, strings.contains(output, "parallel_start_callback_inline_"), true)
+    testing.expect_value(t, strings.contains(output, " :: proc(offset: int, x: int) -> int {"), true)
+    testing.expect_value(t, strings.contains(output, "offset: int,"), true)
+    testing.expect_value(t, strings.contains(output, "x: int,"), true)
+    testing.expect_value(t, strings.contains(output, "data.offset = offset"), true)
+    testing.expect_value(t, strings.contains(output, "data.x = x"), true)
+    testing.expect_value(t, strings.contains(output, "chan.send(data.result, parallel_start_callback_inline_"), true)
+    testing.expect_value(t, strings.contains(output, "(data.offset, data.x))"), true)
+    testing.expect_value(t, strings.contains(output, "parallel_start_inline_"), true)
+    testing.expect_value(t, strings.contains(output, " :: proc(offset: int, x: int) -> parallel_Task(int)"), true)
+}
+
+@(test)
+reject_parallel_start_inline_without_return_value :: proc(t: ^testing.T) {
+    source := `(package main)
+(import p "kvist:parallel")
+
+(defn demo [] -> int
+  (p.result (p.start (fn []
+                       (println 1)))))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+    defer delete(err.message)
+    testing.expect_value(t, err.message, "parallel.start inline worker must return exactly one value")
+}
+
+@(test)
+reject_parallel_detach_return_value :: proc(t: ^testing.T) {
+    source := `(package main)
+(import p "kvist:parallel")
+
+(defn compute [x: int] -> int
+  x)
+
+(defn demo []
+  (p.detach compute 1))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+    defer delete(err.message)
+    testing.expect_value(t, err.message, "parallel.detach worker must not return a value")
+}
+
+@(test)
+compile_parallel_detach_inline_worker :: proc(t: ^testing.T) {
+    source := `(package main)
+(import p "kvist:parallel")
+
+(defn demo []
+  (p.detach (fn []
+              (println 42))))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "parallel_detach_inline_"), true)
+    testing.expect_value(t, strings.contains(output, "()"), true)
+    testing.expect_value(t, strings.contains(output, "parallel_detach_callback_inline_"), true)
+    testing.expect_value(t, strings.contains(output, " :: proc() {"), true)
+    testing.expect_value(t, strings.contains(output, "parallel_Detach_Data_inline_"), true)
+    testing.expect_value(t, strings.contains(output, "parallel_detach_worker_inline_"), true)
+    testing.expect_value(t, strings.contains(output, "parallel_detach_callback_inline_"), true)
+    testing.expect_value(t, strings.contains(output, "thread.create_and_start_with_poly_data(data, parallel_detach_worker_inline_"), true)
+}
+
+@(test)
+compile_parallel_detach_with_captured_inline_worker :: proc(t: ^testing.T) {
+    source := `(package main)
+(import p "kvist:parallel")
+
+(defn observe [x: int]
+  (println x))
+
+(defn demo []
+  (let [offset 10]
+    (p.detach (fn [x: int]
+                (observe (+ x offset)))
+              5)))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "parallel_detach_inline_"), true)
+    testing.expect_value(t, strings.contains(output, "(offset, 5)"), true)
+    testing.expect_value(t, strings.contains(output, "parallel_detach_callback_inline_"), true)
+    testing.expect_value(t, strings.contains(output, " :: proc(offset: int, x: int) {"), true)
+    testing.expect_value(t, strings.contains(output, "offset: int,"), true)
+    testing.expect_value(t, strings.contains(output, "x: int,"), true)
+    testing.expect_value(t, strings.contains(output, "data.offset = offset"), true)
+    testing.expect_value(t, strings.contains(output, "data.x = x"), true)
+    testing.expect_value(t, strings.contains(output, "parallel_detach_callback_inline_"), true)
+    testing.expect_value(t, strings.contains(output, "(data.offset, data.x)"), true)
+}
+
+@(test)
+reject_parallel_detach_inline_return_value :: proc(t: ^testing.T) {
+    source := `(package main)
+(import p "kvist:parallel")
+
+(defn demo []
+  (p.detach (fn [] -> int
+              1)))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+    defer delete(err.message)
+    testing.expect_value(t, err.message, "parallel.detach inline worker must not return a value")
+}
+
+@(test)
+compile_parallel_map_inline_worker :: proc(t: ^testing.T) {
+    source := `(package main)
+(import p "kvist:parallel")
+
+(defn demo [xs: []int] -> [dynamic]int
+  (p.map (fn [x: int] -> int
+           (+ x 1))
+         xs))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "return parallel_map_inline_"), true)
+    testing.expect_value(t, strings.contains(output, "((xs)[:], 0)"), true)
+    testing.expect_value(t, strings.contains(output, "parallel_map_callback_inline_"), true)
+    testing.expect_value(t, strings.contains(output, " :: proc(x: int) -> int {"), true)
+    testing.expect_value(t, strings.contains(output, "data.out[i] = parallel_map_callback_inline_"), true)
+    testing.expect_value(t, strings.contains(output, "(data.xs[i])"), true)
+}
+
+@(test)
+compile_parallel_map_with_captured_inline_worker :: proc(t: ^testing.T) {
+    source := `(package main)
+(import p "kvist:parallel")
+
+(defn demo [xs: []int] -> [dynamic]int
+  (let [offset 10]
+    (p.map-with {workers: 2}
+      (fn [x: int] -> int
+        (+ x offset))
+      xs)))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "parallel_map_callback_inline_"), true)
+    testing.expect_value(t, strings.contains(output, " :: proc(offset: int, x: int) -> int {"), true)
+    testing.expect_value(t, strings.contains(output, "offset: int,"), true)
+    testing.expect_value(t, strings.contains(output, "data.offset = offset"), true)
+    testing.expect_value(t, strings.contains(output, "data.out[i] = parallel_map_callback_inline_"), true)
+    testing.expect_value(t, strings.contains(output, "(data.offset, data.xs[i])"), true)
+    testing.expect_value(t, strings.contains(output, "((xs)[:], 2, offset)"), true)
+}
+
+@(test)
+reject_parallel_map_multi_arg_worker :: proc(t: ^testing.T) {
+    source := `(package main)
+(import p "kvist:parallel")
+
+(defn add [a: int, b: int] -> int
+  (+ a b))
+
+(defn demo [xs: []int] -> [dynamic]int
+  (p.map add xs))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+    defer delete(err.message)
+    testing.expect_value(t, err.message, "parallel.map worker must take exactly one argument")
+}
+
+@(test)
+reject_parallel_map_inline_multi_arg_worker :: proc(t: ^testing.T) {
+    source := `(package main)
+(import p "kvist:parallel")
+
+(defn demo [xs: []int] -> [dynamic]int
+  (p.map (fn [a: int, b: int] -> int
+           (+ a b))
+         xs))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+    defer delete(err.message)
+    testing.expect_value(t, err.message, "parallel.map inline worker must take exactly one argument")
+}
+
+@(test)
+reject_parallel_map_source_type_mismatch :: proc(t: ^testing.T) {
+    source := `(package main)
+(import p "kvist:parallel")
+
+(defn square [x: int] -> int
+  (* x x))
+
+(defn demo [xs: []f64] -> [dynamic]int
+  (p.map square xs))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+    defer delete(err.message)
+    testing.expect_value(t, err.message, "parallel.map worker expects int but source has f64")
+}
+
+@(test)
+reject_parallel_map_with_non_brace_options :: proc(t: ^testing.T) {
+    source := `(package main)
+(import p "kvist:parallel")
+
+(defn square [x: int] -> int
+  (* x x))
+
+(defn demo [xs: []int] -> [dynamic]int
+  (p.map-with 4 square xs))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+    defer delete(err.message)
+    testing.expect_value(t, err.message, "parallel.map-with expects options like {workers: n}")
+}
+
+@(test)
+reject_parallel_map_with_missing_workers :: proc(t: ^testing.T) {
+    source := `(package main)
+(import p "kvist:parallel")
+
+(defn square [x: int] -> int
+  (* x x))
+
+(defn demo [xs: []int] -> [dynamic]int
+  (p.map-with {} square xs))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+    defer delete(err.message)
+    testing.expect_value(t, err.message, "parallel.map-with expects {workers: n}")
+}
+
+@(test)
+reject_parallel_map_with_unknown_option :: proc(t: ^testing.T) {
+    source := `(package main)
+(import p "kvist:parallel")
+
+(defn square [x: int] -> int
+  (* x x))
+
+(defn demo [xs: []int] -> [dynamic]int
+  (p.map-with {threads: 4} square xs))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+    defer delete(err.message)
+    testing.expect_value(t, err.message, "parallel.map-with unknown option: threads")
+}
+
+@(test)
+compile_parallel_each_named_worker :: proc(t: ^testing.T) {
+    source := `(package main)
+(import p "kvist:parallel")
+
+(defn record [x: int]
+  (println x))
+
+(defn demo [xs: []int]
+  (p.each record xs))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "parallel_each_record_int((xs)[:], 0)"), true)
+    testing.expect_value(t, strings.contains(output, "parallel_Each_Data_record_int :: struct"), true)
+    testing.expect_value(t, strings.contains(output, "xs: []int,"), true)
+    testing.expect_value(t, strings.contains(output, "parallel_each_worker_record_int :: proc(data: ^parallel_Each_Data_record_int)"), true)
+    testing.expect_value(t, strings.contains(output, "record(data.xs[i])"), true)
+    testing.expect_value(t, strings.contains(output, "parallel_each_record_int :: proc(xs: []int, requested_worker_count: int)"), true)
+    testing.expect_value(t, strings.contains(output, "worker_count = os.get_processor_core_count() - 1"), true)
+    testing.expect_value(t, strings.contains(output, "if worker_count > 16"), true)
+    testing.expect_value(t, strings.contains(output, "thread.create_and_start_with_poly_data(data, parallel_each_worker_record_int)"), true)
+    testing.expect_value(t, strings.contains(output, "thread.join(task_thread)"), true)
+    testing.expect_value(t, strings.contains(output, "free(data)"), true)
+}
+
+@(test)
+compile_parallel_each_with_captured_inline_worker :: proc(t: ^testing.T) {
+    source := `(package main)
+(import p "kvist:parallel")
+
+(defn demo [xs: []int]
+  (let [offset 10]
+    (p.each-with {workers: 2}
+      (fn [x: int]
+        (println (+ x offset)))
+      xs)))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "parallel_each_callback_inline_"), true)
+    testing.expect_value(t, strings.contains(output, " :: proc(offset: int, x: int) {"), true)
+    testing.expect_value(t, strings.contains(output, "offset: int,"), true)
+    testing.expect_value(t, strings.contains(output, "data.offset = offset"), true)
+    testing.expect_value(t, strings.contains(output, "parallel_each_callback_inline_"), true)
+    testing.expect_value(t, strings.contains(output, "(data.offset, data.xs[i])"), true)
+    testing.expect_value(t, strings.contains(output, "parallel_each_inline_"), true)
+    testing.expect_value(t, strings.contains(output, "((xs)[:], 2, offset)"), true)
+}
+
+@(test)
+reject_parallel_each_return_value :: proc(t: ^testing.T) {
+    source := `(package main)
+(import p "kvist:parallel")
+
+(defn square [x: int] -> int
+  (* x x))
+
+(defn demo [xs: []int]
+  (p.each square xs))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+    defer delete(err.message)
+    testing.expect_value(t, err.message, "parallel.each worker must not return a value")
+}
+
+@(test)
+reject_parallel_each_inline_return_value :: proc(t: ^testing.T) {
+    source := `(package main)
+(import p "kvist:parallel")
+
+(defn demo [xs: []int]
+  (p.each (fn [x: int] -> int
+            x)
+          xs))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+    defer delete(err.message)
+    testing.expect_value(t, err.message, "parallel.each inline worker must not return a value")
+}
+
+@(test)
+reject_parallel_each_with_unknown_option :: proc(t: ^testing.T) {
+    source := `(package main)
+(import p "kvist:parallel")
+
+(defn record [x: int]
+  (println x))
+
+(defn demo [xs: []int]
+  (p.each-with {threads: 4} record xs))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+    defer delete(err.message)
+    testing.expect_value(t, err.message, "parallel.each-with unknown option: threads")
 }
 
 @(test)
@@ -9926,6 +10814,45 @@ compile_mixed_calls_fill_named_and_default_tail_args :: proc(t: ^testing.T) {
 }
 
 @(test)
+compile_general_calls_support_trailing_named_args :: proc(t: ^testing.T) {
+    source := `(package main)
+(import strings "core:strings")
+
+(defn clone-temp [s: string] -> string
+  (let [[out err] (strings.clone s {allocator: context.temp_allocator})]
+    out))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "strings.clone(s, allocator = context.temp_allocator)"), true)
+}
+
+@(test)
+compile_general_dotted_calls_support_pure_named_args :: proc(t: ^testing.T) {
+    source := `(package main)
+(import fmt "core:fmt")
+
+(defn demo []
+  (fmt.println {value: 1 label: "ok"}))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "fmt.println(value = 1, label = \"ok\")"), true)
+}
+
+@(test)
 reject_mixed_call_named_argument_overlapping_positional_argument :: proc(t: ^testing.T) {
     source := `(package main)
 
@@ -10521,10 +11448,10 @@ compile_source_package_preserves_type_forms_in_proc_signatures :: proc(t: ^testi
     pkg_source := `(package groups)
 
 (defn make-groups [] -> (map string (dynamic int))
-  (let [out (odin "make(map[string][dynamic]int)")
-        group (odin "make([dynamic]int, 0, 2)")]
-    (odin "append(&group, 1)")
-    (odin "out[\"a\"] = group")
+  (let [out (make map[string][dynamic]int)
+        group (make [dynamic]int 0 2)]
+    (append (addr group) 1)
+    (set! out["a"] group)
     out))`
     pkg_write_err := os.write_entire_file_from_string(pkg_file, pkg_source)
     testing.expect_value(t, pkg_write_err == nil, true)
@@ -10558,6 +11485,8 @@ compile_source_package_preserves_type_forms_in_proc_signatures :: proc(t: ^testi
     defer delete(output)
 
     testing.expect_value(t, strings.contains(output, "groups__make_groups :: proc() -> map[string][dynamic]int"), true)
+    testing.expect_value(t, strings.contains(output, "out := make(map[string][dynamic]int)"), true)
+    testing.expect_value(t, strings.contains(output, "group := make([dynamic]int, 0, 2)"), true)
     testing.expect_value(t, strings.contains(output, "groups__dynamic"), false)
 }
 
@@ -11772,6 +12701,9 @@ compile_canonical_foreign_import_and_transmute_forms :: proc(t: ^testing.T) {
 (defn empty-flags [] -> bit_set[int; u8]
   (zero bit_set[int; u8]))
 
+(defn allocate-handle [] -> ^Foreign-Handle
+  (alloc Foreign-Handle context.temp_allocator))
+
 (defn main [handle: Foreign-Handle]
   (set! context.user_ptr nil)
   (return))`
@@ -11801,6 +12733,10 @@ next_handler :: proc(handle: Foreign_Handle) -> ^Foreign_Handle {
 
 empty_flags :: proc() -> bit_set[int; u8] {
     return bit_set[int; u8]{}
+}
+
+allocate_handle :: proc() -> ^Foreign_Handle {
+    return new(Foreign_Handle, context.temp_allocator)
 }
 
 main :: proc(handle: Foreign_Handle) {
@@ -12556,7 +13492,7 @@ compile_shipped_arr_source_package_uses_hybrid_resolution :: proc(t: ^testing.T)
     testing.expect_value(t, strings.contains(output, "arr__shuffle_impl :: #force_inline proc(pick: proc(n: int) -> int, xs: []$T) -> [dynamic]T {"), true)
     testing.expect_value(t, strings.contains(output, "shuffled := arr__shuffle_impl(pick_first, (xs)[0:])"), true)
     testing.expect_value(t, strings.contains(output, "arr__sort_impl :: #force_inline proc(xs: []$T) -> [dynamic]T {"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_slice.sort(out[:])"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_slice.sort((out)[:])"), true)
     testing.expect_value(t, strings.contains(output, "sorted := arr__sort_impl((xs)[0:])"), true)
     testing.expect_value(t, strings.contains(output, "kvist_thread_1 := arr__mapcat_impl(pair, (xs)[:])"), true)
     testing.expect_value(t, strings.contains(output, "defer delete(kvist_thread_1)"), true)

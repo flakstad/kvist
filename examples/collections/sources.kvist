@@ -25,6 +25,9 @@
       (= path "src/emit.odin")
       (= path "tests/compiler_test.odin")))
 
+(defn path-length [path: string] -> int
+  (len path))
+
 (defsource files [items: []string] -> string
   (open-files items)
   :next next-file
@@ -46,10 +49,19 @@
     (defer (delete odin-paths))
     (len odin-paths)))
 
+(defn odin-path-length [] -> int
+  (let [paths ([]string ["src/main.odin" "README.md" "src/emit.odin" "tests/compiler_test.odin"])]
+    (transduce
+      (comp
+        (filter odin-path?)
+        (map path-length))
+      + 0
+      (files paths))))
+
 (defn main []
-  (println (+ (total-path-length) (odin-path-count))))
+  (println (+ (total-path-length) (odin-path-count) (odin-path-length))))
 
 (comment
-  (+ (total-path-length) (odin-path-count))
-  ;; => 62
+  (+ (total-path-length) (odin-path-count) (odin-path-length))
+  ;; => 112
 )

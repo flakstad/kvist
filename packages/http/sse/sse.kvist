@@ -4,56 +4,54 @@
 (import net "core:net")
 (import time "core:time")
 
-(odin "
-Stream :: ^h.Sse
-Timeout_Op :: ^nbio.Operation
-Send_Error :: net.Send_Error
-On_Error :: h.Sse_On_Error
+(def Stream ^h.Sse)
+(def Timeout-Op ^nbio.Operation)
+(def Send-Error net.Send_Error)
+(def On-Error h.Sse_On_Error)
 
-__kvist_http_sse_new_started :: proc(res: ^h.Response) -> ^h.Sse {
-	stream := new(h.Sse, context.temp_allocator)
-	h.sse_init(stream, res)
-	h.sse_start(stream)
-	return stream
-}
+(defn- __kvist_http_sse_new_started [res: ^h.Response] -> ^h.Sse
+  (let [stream (alloc h.Sse context.temp_allocator)]
+    (h.sse_init stream res)
+    (h.sse_start stream)
+    stream))
 
-__kvist_http_sse_new_started_on_error :: proc(res: ^h.Response, on_error: h.Sse_On_Error) -> ^h.Sse {
-	stream := new(h.Sse, context.temp_allocator)
-	h.sse_init(stream, res, on_error = on_error)
-	h.sse_start(stream)
-	return stream
-}
+(defn- __kvist_http_sse_new_started_on_error [res: ^h.Response, on-error: h.Sse_On_Error] -> ^h.Sse
+  (let [stream (alloc h.Sse context.temp_allocator)]
+    (h.sse_init stream res {on-error: on-error})
+    (h.sse_start stream)
+    stream))
 
-__kvist_http_sse_schedule_timeout :: proc(delay: time.Duration, stream: ^h.Sse, cb: proc(_: ^nbio.Operation, stream: ^h.Sse)) {
-	if stream == nil || stream.state > .Ending {
-		return
-	}
+(defn- __kvist_http_sse_on_timeout
+  [op: ^nbio.Operation,
+   stream: ^h.Sse,
+   cb: fn [_: ^nbio.Operation, stream: ^h.Sse]]
+  (set! stream.timeout_op nil)
+  (cb op stream))
 
-	if stream.timeout_op != nil {
-		nbio.remove(stream.timeout_op)
-		stream.timeout_op = nil
-	}
+(defn- __kvist_http_sse_schedule_timeout
+  [delay: time.Duration,
+   stream: ^h.Sse,
+   cb: fn [_: ^nbio.Operation, stream: ^h.Sse]]
+  (if (or (= stream nil) (> stream.state .Ending))
+    (return))
 
-	on_timeout :: proc(op: ^nbio.Operation, stream: ^h.Sse, cb: proc(_: ^nbio.Operation, stream: ^h.Sse)) {
-		stream.timeout_op = nil
-		cb(op, stream)
-	}
+  (if (!= stream.timeout_op nil)
+    (do
+      (nbio.remove stream.timeout_op)
+      (set! stream.timeout_op nil)))
 
-	stream.timeout_op = nbio.timeout_poly2(delay, stream, cb, on_timeout, l = stream.r._conn.owning_thread.event_loop)
-}
+  (set! stream.timeout_op
+        (nbio.timeout_poly2 delay stream cb __kvist_http_sse_on_timeout
+                            {l: stream.r._conn.owning_thread.event_loop})))
 
-__kvist_http_sse_closed :: proc(stream: ^h.Sse) -> bool {
-	return stream.state > .Ending
-}
+(defn- __kvist_http_sse_closed [stream: ^h.Sse] -> bool
+  (> stream.state .Ending))
 
-__kvist_http_sse_user_int :: proc(stream: ^h.Sse) -> int {
-	return int(uintptr(stream.user_data))
-}
+(defn- __kvist_http_sse_user_int [stream: ^h.Sse] -> int
+  (int (uintptr stream.user_data)))
 
-__kvist_http_sse_set_user_int :: proc(stream: ^h.Sse, value: int) {
-	stream.user_data = rawptr(uintptr(value))
-}
-")
+(defn- __kvist_http_sse_set_user_int [stream: ^h.Sse, value: int]
+  (set! stream.user_data (rawptr (uintptr value))))
 
 (defmacro new-stream
   "Create and start a server-sent events stream for response `res`.

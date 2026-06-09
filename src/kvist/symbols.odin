@@ -35,12 +35,13 @@ Language_Source_Entry :: struct {
     snippet:  string,
 }
 
-KVIST_CANONICAL_IMPORTS_FOR_EDITOR :: [14]Imported_Symbol_Entry{
+KVIST_CANONICAL_IMPORTS_FOR_EDITOR :: [15]Imported_Symbol_Entry{
     {alias = "core", path = "kvist:core"},
     {alias = "arr", path = "kvist:arr"},
     {alias = "str", path = "kvist:str"},
     {alias = "map", path = "kvist:map"},
     {alias = "set", path = "kvist:set"},
+    {alias = "p", path = "kvist:parallel"},
     {alias = "soa", path = "kvist:soa"},
     {alias = "io", path = "kvist:io"},
     {alias = "json", path = "kvist:json"},

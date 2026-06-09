@@ -9,6 +9,36 @@ Sum_By_Field :: struct {
     value: string,
 }
 
+Parallel_Start_Spec :: struct {
+    worker:        string,
+    params:        []Param,
+    result_ty:     string,
+    captures:      []Param,
+    callback_proc: string,
+}
+
+Parallel_Detach_Spec :: struct {
+    worker:        string,
+    params:        []Param,
+    captures:      []Param,
+    callback_proc: string,
+}
+
+Parallel_Map_Spec :: struct {
+    worker:        string,
+    input_ty:      string,
+    output_ty:     string,
+    captures:      []Param,
+    callback_proc: string,
+}
+
+Parallel_Each_Spec :: struct {
+    worker:        string,
+    input_ty:      string,
+    captures:      []Param,
+    callback_proc: string,
+}
+
 Captured_Proc_Specialization :: struct {
     original_name:         string,
     callback_param_index:  int,
@@ -79,6 +109,11 @@ Emitter_Features :: struct {
     find_fields:      [dynamic]string,
     some_fields:      [dynamic]string,
     every_fields:     [dynamic]string,
+    parallel_result:  bool,
+    parallel_starts:  [dynamic]Parallel_Start_Spec,
+    parallel_detaches: [dynamic]Parallel_Detach_Spec,
+    parallel_maps:    [dynamic]Parallel_Map_Spec,
+    parallel_eaches:   [dynamic]Parallel_Each_Spec,
 }
 
 Emitter :: struct {
@@ -569,6 +604,251 @@ append_unique_sum_by_field :: proc(items: ^[dynamic]Sum_By_Field, key, value: st
         }
     }
     append(items, Sum_By_Field{key = key, value = value})
+}
+
+parallel_params_match :: proc(a, b: []Param) -> bool {
+    if len(a) != len(b) {
+        return false
+    }
+    for param, idx in a {
+        if param.name != b[idx].name || param.ty != b[idx].ty {
+            return false
+        }
+    }
+    return true
+}
+
+append_unique_parallel_start :: proc(items: ^[dynamic]Parallel_Start_Spec, spec: Parallel_Start_Spec) {
+    for item in items^ {
+        if item.worker == spec.worker &&
+           item.result_ty == spec.result_ty &&
+           parallel_params_match(item.params, spec.params) &&
+           parallel_params_match(item.captures, spec.captures) {
+            return
+        }
+    }
+    append(items, spec)
+}
+
+append_unique_parallel_detach :: proc(items: ^[dynamic]Parallel_Detach_Spec, spec: Parallel_Detach_Spec) {
+    for item in items^ {
+        if item.worker == spec.worker &&
+           parallel_params_match(item.params, spec.params) &&
+           parallel_params_match(item.captures, spec.captures) {
+            return
+        }
+    }
+    append(items, spec)
+}
+
+append_unique_parallel_map :: proc(items: ^[dynamic]Parallel_Map_Spec, spec: Parallel_Map_Spec) {
+    for item in items^ {
+        if item.worker == spec.worker &&
+           item.input_ty == spec.input_ty &&
+           item.output_ty == spec.output_ty &&
+           parallel_params_match(item.captures, spec.captures) {
+            return
+        }
+    }
+    append(items, spec)
+}
+
+append_unique_parallel_each :: proc(items: ^[dynamic]Parallel_Each_Spec, spec: Parallel_Each_Spec) {
+    for item in items^ {
+        if item.worker == spec.worker &&
+           item.input_ty == spec.input_ty &&
+           parallel_params_match(item.captures, spec.captures) {
+            return
+        }
+    }
+    append(items, spec)
+}
+
+mark_parallel_start :: proc(e: ^Emitter, spec: Parallel_Start_Spec) {
+    if e.features != nil {
+        append_unique_parallel_start(&e.features.parallel_starts, spec)
+    }
+}
+
+mark_parallel_detach :: proc(e: ^Emitter, spec: Parallel_Detach_Spec) {
+    if e.features != nil {
+        append_unique_parallel_detach(&e.features.parallel_detaches, spec)
+    }
+}
+
+mark_parallel_map :: proc(e: ^Emitter, spec: Parallel_Map_Spec) {
+    if e.features != nil {
+        append_unique_parallel_map(&e.features.parallel_maps, spec)
+    }
+}
+
+mark_parallel_each :: proc(e: ^Emitter, spec: Parallel_Each_Spec) {
+    if e.features != nil {
+        append_unique_parallel_each(&e.features.parallel_eaches, spec)
+    }
+}
+
+mark_parallel_result :: proc(e: ^Emitter) {
+    if e.features != nil {
+        e.features.parallel_result = true
+    }
+}
+
+parallel_type_fragment :: proc(text: string) -> string {
+    builder := strings.builder_make()
+    defer strings.builder_destroy(&builder)
+    for ch in text {
+        if (ch >= 'a' && ch <= 'z') ||
+           (ch >= 'A' && ch <= 'Z') ||
+           (ch >= '0' && ch <= '9') ||
+           ch == '_' {
+            strings.write_byte(&builder, byte(ch))
+        } else {
+            strings.write_byte(&builder, '_')
+        }
+    }
+    return strings.clone(strings.to_string(builder))
+}
+
+parallel_task_type :: proc(result_ty: string) -> string {
+    return fmt.tprintf("parallel_Task(%s)", result_ty)
+}
+
+parallel_task_result_type :: proc(task_ty: string) -> (string, bool) {
+    prefix := "parallel_Task("
+    if !strings.has_prefix(task_ty, prefix) || !strings.has_suffix(task_ty, ")") {
+        return "", false
+    }
+    return task_ty[len(prefix):len(task_ty)-1], true
+}
+
+parallel_params_fragment :: proc(params: []Param) -> string {
+    if len(params) == 0 {
+        return strings.clone("void")
+    }
+    builder := strings.builder_make()
+    defer strings.builder_destroy(&builder)
+    for param, idx in params {
+        if idx > 0 {
+            strings.write_byte(&builder, '_')
+        }
+        fragment := parallel_type_fragment(param.ty)
+        strings.write_string(&builder, fragment)
+        delete(fragment)
+    }
+    return strings.clone(strings.to_string(builder))
+}
+
+parallel_start_data_name :: proc(spec: Parallel_Start_Spec) -> string {
+    params_fragment := parallel_params_fragment(spec.params)
+    result_fragment := parallel_type_fragment(spec.result_ty)
+    defer delete(params_fragment)
+    defer delete(result_fragment)
+    return fmt.tprintf("parallel_Start_Data_%s_%s_%s", spec.worker, params_fragment, result_fragment)
+}
+
+parallel_start_worker_name :: proc(spec: Parallel_Start_Spec) -> string {
+    params_fragment := parallel_params_fragment(spec.params)
+    result_fragment := parallel_type_fragment(spec.result_ty)
+    defer delete(params_fragment)
+    defer delete(result_fragment)
+    return fmt.tprintf("parallel_start_worker_%s_%s_%s", spec.worker, params_fragment, result_fragment)
+}
+
+parallel_start_helper_name :: proc(spec: Parallel_Start_Spec) -> string {
+    params_fragment := parallel_params_fragment(spec.params)
+    result_fragment := parallel_type_fragment(spec.result_ty)
+    defer delete(params_fragment)
+    defer delete(result_fragment)
+    return fmt.tprintf("parallel_start_%s_%s_%s", spec.worker, params_fragment, result_fragment)
+}
+
+parallel_start_callback_name :: proc(spec: Parallel_Start_Spec) -> string {
+    params_fragment := parallel_params_fragment(spec.params)
+    result_fragment := parallel_type_fragment(spec.result_ty)
+    defer delete(params_fragment)
+    defer delete(result_fragment)
+    return fmt.tprintf("parallel_start_callback_%s_%s_%s", spec.worker, params_fragment, result_fragment)
+}
+
+parallel_detach_data_name :: proc(spec: Parallel_Detach_Spec) -> string {
+    params_fragment := parallel_params_fragment(spec.params)
+    defer delete(params_fragment)
+    return fmt.tprintf("parallel_Detach_Data_%s_%s", spec.worker, params_fragment)
+}
+
+parallel_detach_worker_name :: proc(spec: Parallel_Detach_Spec) -> string {
+    params_fragment := parallel_params_fragment(spec.params)
+    defer delete(params_fragment)
+    return fmt.tprintf("parallel_detach_worker_%s_%s", spec.worker, params_fragment)
+}
+
+parallel_detach_helper_name :: proc(spec: Parallel_Detach_Spec) -> string {
+    params_fragment := parallel_params_fragment(spec.params)
+    defer delete(params_fragment)
+    return fmt.tprintf("parallel_detach_%s_%s", spec.worker, params_fragment)
+}
+
+parallel_detach_callback_name :: proc(spec: Parallel_Detach_Spec) -> string {
+    params_fragment := parallel_params_fragment(spec.params)
+    defer delete(params_fragment)
+    return fmt.tprintf("parallel_detach_callback_%s_%s", spec.worker, params_fragment)
+}
+
+parallel_map_data_name :: proc(spec: Parallel_Map_Spec) -> string {
+    input_fragment := parallel_type_fragment(spec.input_ty)
+    output_fragment := parallel_type_fragment(spec.output_ty)
+    defer delete(input_fragment)
+    defer delete(output_fragment)
+    return fmt.tprintf("parallel_Map_Data_%s_%s_%s", spec.worker, input_fragment, output_fragment)
+}
+
+parallel_map_worker_name :: proc(spec: Parallel_Map_Spec) -> string {
+    input_fragment := parallel_type_fragment(spec.input_ty)
+    output_fragment := parallel_type_fragment(spec.output_ty)
+    defer delete(input_fragment)
+    defer delete(output_fragment)
+    return fmt.tprintf("parallel_map_worker_%s_%s_%s", spec.worker, input_fragment, output_fragment)
+}
+
+parallel_map_helper_name :: proc(spec: Parallel_Map_Spec) -> string {
+    input_fragment := parallel_type_fragment(spec.input_ty)
+    output_fragment := parallel_type_fragment(spec.output_ty)
+    defer delete(input_fragment)
+    defer delete(output_fragment)
+    return fmt.tprintf("parallel_map_%s_%s_%s", spec.worker, input_fragment, output_fragment)
+}
+
+parallel_map_callback_name :: proc(spec: Parallel_Map_Spec) -> string {
+    input_fragment := parallel_type_fragment(spec.input_ty)
+    output_fragment := parallel_type_fragment(spec.output_ty)
+    defer delete(input_fragment)
+    defer delete(output_fragment)
+    return fmt.tprintf("parallel_map_callback_%s_%s_%s", spec.worker, input_fragment, output_fragment)
+}
+
+parallel_each_data_name :: proc(spec: Parallel_Each_Spec) -> string {
+    input_fragment := parallel_type_fragment(spec.input_ty)
+    defer delete(input_fragment)
+    return fmt.tprintf("parallel_Each_Data_%s_%s", spec.worker, input_fragment)
+}
+
+parallel_each_worker_name :: proc(spec: Parallel_Each_Spec) -> string {
+    input_fragment := parallel_type_fragment(spec.input_ty)
+    defer delete(input_fragment)
+    return fmt.tprintf("parallel_each_worker_%s_%s", spec.worker, input_fragment)
+}
+
+parallel_each_helper_name :: proc(spec: Parallel_Each_Spec) -> string {
+    input_fragment := parallel_type_fragment(spec.input_ty)
+    defer delete(input_fragment)
+    return fmt.tprintf("parallel_each_%s_%s", spec.worker, input_fragment)
+}
+
+parallel_each_callback_name :: proc(spec: Parallel_Each_Spec) -> string {
+    input_fragment := parallel_type_fragment(spec.input_ty)
+    defer delete(input_fragment)
+    return fmt.tprintf("parallel_each_callback_%s_%s", spec.worker, input_fragment)
 }
 
 mark_core_map_field :: proc(e: ^Emitter, field: string) {
@@ -2077,6 +2357,40 @@ emit_positional_call_with_defaults :: proc(e: ^Emitter, proc_decl: ^Proc_Decl, a
         append(&arg_texts, default_text)
     }
     return arg_texts, Compile_Error{}, true
+}
+
+emit_general_mixed_call_arg_texts :: proc(e: ^Emitter, head_name: string, positional_args: []CST_Form, named_form: CST_Form) -> (arg_texts: [dynamic]string, err: Compile_Error, ok: bool) {
+    for arg, arg_idx in positional_args {
+        arg_text := ""
+        err_arg: Compile_Error
+        ok_arg := false
+        if expected_type, ok_expected := imported_odin_proc_arg_type(e, head_name, arg_idx); ok_expected {
+            arg_text, err_arg, ok_arg = emit_expr_for_expected_type(e, arg, expected_type)
+            delete(expected_type)
+        } else {
+            arg_text, err_arg, ok_arg = emit_expr(e, arg)
+        }
+        if !ok_arg {
+            return arg_texts, err_arg, false
+        }
+        append(&arg_texts, arg_text)
+    }
+
+    named_arg_texts, err_named, ok_named := emit_named_call_arg_texts(e, named_form)
+    if !ok_named {
+        return arg_texts, err_named, false
+    }
+    append(&arg_texts, ..named_arg_texts[:])
+    return arg_texts, Compile_Error{}, true
+}
+
+dotted_head_member_starts_upper :: proc(head_name: string) -> bool {
+    dot := strings.index(head_name, ".")
+    if dot < 0 || dot+1 >= len(head_name) {
+        return false
+    }
+    ch := head_name[dot+1]
+    return ch >= 'A' && ch <= 'Z'
 }
 
 emit_mixed_call_with_defaults :: proc(e: ^Emitter, proc_decl: ^Proc_Decl, positional_args: []CST_Form, named_form: CST_Form, span: Span) -> (arg_texts: [dynamic]string, err: Compile_Error, ok: bool) {
@@ -4571,6 +4885,30 @@ obvious_form_type :: proc(e: ^Emitter, form: CST_Form) -> (string, bool) {
         if form.items[0].text == "transduce" && len(form.items) == 5 {
             return obvious_form_type(e, form.items[3])
         }
+        if form.items[0].text == "parallel-start" {
+            spec, _, ok_spec := parallel_start_signature(e, form)
+            if ok_spec {
+                return parallel_task_type(spec.result_ty), true
+            }
+        }
+        if form.items[0].text == "parallel-map" {
+            spec, _, ok_spec := parallel_map_signature(e, form)
+            if ok_spec {
+                return fmt.tprintf("[dynamic]%s", spec.output_ty), true
+            }
+        }
+        if form.items[0].text == "parallel-map-with" {
+            spec, _, ok_spec := parallel_map_with_signature(e, form)
+            if ok_spec {
+                return fmt.tprintf("[dynamic]%s", spec.output_ty), true
+            }
+        }
+        if form.items[0].text == "parallel-result" && len(form.items) == 2 {
+            task_ty, ok_task_ty := obvious_form_type(e, form.items[1])
+            if ok_task_ty {
+                return parallel_task_result_type(task_ty)
+            }
+        }
         if proc_decl, ok := find_proc_decl(e, head_name); ok && proc_decl.returns.kind == .Single {
             return proc_decl.returns.single_ty, true
         }
@@ -4800,6 +5138,30 @@ obvious_binding_type :: proc(e: ^Emitter, binding: Binding) -> (string, bool) {
         }
         if head == "transduce" && len(binding.value.items) == 5 {
             return obvious_form_type(e, binding.value.items[3])
+        }
+        if head == "parallel-start" {
+            spec, _, ok_spec := parallel_start_signature(e, binding.value)
+            if ok_spec {
+                return parallel_task_type(spec.result_ty), true
+            }
+        }
+        if head == "parallel-map" {
+            spec, _, ok_spec := parallel_map_signature(e, binding.value)
+            if ok_spec {
+                return fmt.tprintf("[dynamic]%s", spec.output_ty), true
+            }
+        }
+        if head == "parallel-map-with" {
+            spec, _, ok_spec := parallel_map_with_signature(e, binding.value)
+            if ok_spec {
+                return fmt.tprintf("[dynamic]%s", spec.output_ty), true
+            }
+        }
+        if head == "parallel-result" && len(binding.value.items) == 2 {
+            task_ty, ok_task_ty := obvious_form_type(e, binding.value.items[1])
+            if ok_task_ty {
+                return parallel_task_result_type(task_ty)
+            }
         }
         head_name := map_name(binding.value.items[0].text)
         if proc_decl, ok := find_proc_decl(e, head_name); ok && proc_decl.returns.kind == .Single {
@@ -7081,6 +7443,82 @@ emit_transform_into_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compil
     return fmt.tprintf("%s(%s)", strings.to_string(builder), source_text), {}, true
 }
 
+emit_transform_transduce_source_expr :: proc(
+    e: ^Emitter,
+    form: CST_Form,
+    transform_form: CST_Form,
+    init_text, acc_ty: string,
+    source_form: CST_Form,
+    source: ^Source_Decl,
+) -> (string, Compile_Error, bool) {
+    state_ty, err_state_ty, ok_state_ty := source_state_type(e, source)
+    if !ok_state_ty {
+        return "", err_state_ty, false
+    }
+    err_protocol, ok_protocol := validate_source_protocol(e, source, state_ty, source_form.span)
+    if !ok_protocol {
+        return "", err_protocol, false
+    }
+    arg_texts, err_args, ok_args := source_call_arg_texts(e, source, source_form)
+    if !ok_args {
+        return "", err_args, false
+    }
+    steps, err_steps, ok_steps := parse_transform_steps(e, transform_form)
+    if !ok_steps {
+        return "", err_steps, false
+    }
+
+    builder := strings.builder_make()
+    defer strings.builder_destroy(&builder)
+    param_texts: [dynamic]string
+    call_arg_texts: [dynamic]string
+    call_args_texts: [dynamic]string
+    defer delete(param_texts)
+    defer delete(call_arg_texts)
+    defer delete(call_args_texts)
+    for param, idx in source.params {
+        arg_name := fmt.tprintf("kvist_source_arg_%d", idx+1)
+        append(&param_texts, fmt.tprintf("%s: %s", arg_name, param.ty))
+        append(&call_arg_texts, arg_name)
+    }
+    append(&param_texts, fmt.tprintf("kvist_init: %s", acc_ty))
+    for arg_text in arg_texts {
+        append(&call_args_texts, arg_text)
+    }
+    append(&call_args_texts, init_text)
+    param_list := strings.join(param_texts[:], ", ", context.allocator)
+    defer delete(param_list)
+    call_args := strings.join(call_args_texts[:], ", ", context.allocator)
+    defer delete(call_args)
+    open_call := source_call_text(e, source, call_arg_texts[:])
+
+    fmt.sbprintf(&builder, "(proc(%s) -> %s %s\n", param_list, acc_ty, "{")
+    fmt.sbprintf(&builder, "    kvist_source := %s\n", open_call)
+    if source.has_dispose {
+        fmt.sbprintf(&builder, "    defer %s(&kvist_source)\n", source.dispose_name)
+    }
+    strings.write_string(&builder, "    kvist_acc := kvist_init\n")
+    strings.write_string(&builder, "    for {\n")
+    fmt.sbprintf(&builder, "        kvist_item, kvist_source_ok := %s(&kvist_source)\n", source.next_name)
+    strings.write_string(&builder, "        if !kvist_source_ok {\n")
+    strings.write_string(&builder, "            break\n")
+    strings.write_string(&builder, "        }\n")
+    value_text, value_ty, close_count, err_body, ok_body := emit_transform_pipeline_body(e, &builder, steps[:], "kvist_item", source.item_ty, 2)
+    if !ok_body {
+        return "", err_body, false
+    }
+    if value_ty != acc_ty {
+        return "", Compile_Error{message = fmt.tprintf("transduce accumulator type is %s, but pipeline produces %s", acc_ty, value_ty), span = form.items[3].span}, false
+    }
+    append_indent(&builder, 2+close_count)
+    fmt.sbprintf(&builder, "kvist_acc += %s\n", value_text)
+    emit_transform_closers(&builder, 2+close_count, close_count)
+    strings.write_string(&builder, "    }\n")
+    strings.write_string(&builder, "    return kvist_acc\n")
+    strings.write_string(&builder, "})")
+    return fmt.tprintf("%s(%s)", strings.to_string(builder), call_args), {}, true
+}
+
 emit_transform_transduce_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) {
     if len(form.items) != 5 {
         return "", Compile_Error{message = "transduce expects transform, reducer, init, and source", span = form.span}, false
@@ -7096,6 +7534,9 @@ emit_transform_transduce_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, C
     init_text, err_init, ok_init := emit_expr_for_expected_type(e, form.items[3], acc_ty)
     if !ok_init {
         return "", err_init, false
+    }
+    if source, ok_source_call := source_call_decl(e, form.items[4]); ok_source_call {
+        return emit_transform_transduce_source_expr(e, form, form.items[1], init_text, acc_ty, form.items[4], source)
     }
     source_ty, ok_source_ty := obvious_form_type(e, form.items[4])
     if !ok_source_ty {
@@ -7135,6 +7576,568 @@ emit_transform_transduce_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, C
     return fmt.tprintf("%s(%s, %s)", strings.to_string(builder), source_text, init_text), {}, true
 }
 
+parallel_start_signature :: proc(e: ^Emitter, form: CST_Form, emit_callback := false) -> (spec: Parallel_Start_Spec, err: Compile_Error, ok: bool) {
+    if len(form.items) < 2 {
+        return spec, Compile_Error{message = "parallel.start expects a worker function", span = form.span}, false
+    }
+    worker_form := form.items[1]
+    if worker_form.kind == .Symbol {
+        worker_name, worker_decl, ok_worker := resolve_proc_call_decl(e, worker_form.text)
+        if !ok_worker {
+            return spec, Compile_Error{message = fmt.tprintf("parallel.start worker must name a known function: %s", worker_form.text), span = worker_form.span}, false
+        }
+        arg_count := len(form.items) - 2
+        if arg_count != len(worker_decl.params) {
+            return spec, Compile_Error{message = fmt.tprintf("parallel.start worker %s expects %d arguments, got %d", worker_form.text, len(worker_decl.params), arg_count), span = form.span}, false
+        }
+        if worker_decl.returns.kind != .Single {
+            return spec, Compile_Error{message = "parallel.start worker must return exactly one value", span = worker_form.span}, false
+        }
+        return Parallel_Start_Spec{
+            worker    = worker_name,
+            params    = worker_decl.params[:],
+            result_ty = worker_decl.returns.single_ty,
+        }, {}, true
+    }
+
+    if worker_form.kind == .List && len(worker_form.items) > 0 && is_symbol(worker_form.items[0], "fn") {
+        parsed, err_parse, ok_parse := parse_proc_literal_form(worker_form)
+        if !ok_parse {
+            return spec, err_parse, false
+        }
+        arg_count := len(form.items) - 2
+        if arg_count != len(parsed.params) {
+            return spec, Compile_Error{message = fmt.tprintf("parallel.start inline worker expects %d arguments, got %d", len(parsed.params), arg_count), span = form.span}, false
+        }
+        if parsed.returns.kind != .Single {
+            return spec, Compile_Error{message = "parallel.start inline worker must return exactly one value", span = worker_form.span}, false
+        }
+        param_names: [dynamic]string
+        for param in parsed.params {
+            append(&param_names, param.name)
+        }
+        captures := collect_proc_literal_captures(e, parsed.body[:], param_names[:])
+        callback_proc := ""
+        if emit_callback {
+            params: [dynamic]Param
+            for capture in captures {
+                append(&params, capture)
+            }
+            for param in parsed.params {
+                append(&params, param)
+            }
+            text, err_proc, ok_proc := emit_proc_literal_text(e, params[:], parsed.returns, parsed.body[:])
+            if !ok_proc {
+                return spec, err_proc, false
+            }
+            callback_proc = text
+        }
+        return Parallel_Start_Spec{
+            worker        = parallel_inline_worker_name(worker_form),
+            params        = parsed.params[:],
+            result_ty     = parsed.returns.single_ty,
+            captures      = captures[:],
+            callback_proc = callback_proc,
+        }, {}, true
+    }
+
+    return spec, Compile_Error{message = "parallel.start expects a known worker function or inline fn", span = worker_form.span}, false
+}
+
+parallel_detach_signature :: proc(e: ^Emitter, form: CST_Form, emit_callback := false) -> (spec: Parallel_Detach_Spec, err: Compile_Error, ok: bool) {
+    if len(form.items) < 2 {
+        return spec, Compile_Error{message = "parallel.detach expects a worker function", span = form.span}, false
+    }
+    worker_form := form.items[1]
+    if worker_form.kind == .Symbol {
+        worker_name, worker_decl, ok_worker := resolve_proc_call_decl(e, worker_form.text)
+        if !ok_worker {
+            return spec, Compile_Error{message = fmt.tprintf("parallel.detach worker must name a known function: %s", worker_form.text), span = worker_form.span}, false
+        }
+        arg_count := len(form.items) - 2
+        if arg_count != len(worker_decl.params) {
+            return spec, Compile_Error{message = fmt.tprintf("parallel.detach worker %s expects %d arguments, got %d", worker_form.text, len(worker_decl.params), arg_count), span = form.span}, false
+        }
+        if worker_decl.returns.kind != .None {
+            return spec, Compile_Error{message = "parallel.detach worker must not return a value", span = worker_form.span}, false
+        }
+        return Parallel_Detach_Spec{
+            worker = worker_name,
+            params = worker_decl.params[:],
+        }, {}, true
+    }
+
+    if worker_form.kind == .List && len(worker_form.items) > 0 && is_symbol(worker_form.items[0], "fn") {
+        parsed, err_parse, ok_parse := parse_proc_literal_form(worker_form)
+        if !ok_parse {
+            return spec, err_parse, false
+        }
+        arg_count := len(form.items) - 2
+        if arg_count != len(parsed.params) {
+            return spec, Compile_Error{message = fmt.tprintf("parallel.detach inline worker expects %d arguments, got %d", len(parsed.params), arg_count), span = form.span}, false
+        }
+        if parsed.returns.kind != .None {
+            return spec, Compile_Error{message = "parallel.detach inline worker must not return a value", span = worker_form.span}, false
+        }
+        param_names: [dynamic]string
+        for param in parsed.params {
+            append(&param_names, param.name)
+        }
+        captures := collect_proc_literal_captures(e, parsed.body[:], param_names[:])
+        callback_proc := ""
+        if emit_callback {
+            params: [dynamic]Param
+            for capture in captures {
+                append(&params, capture)
+            }
+            for param in parsed.params {
+                append(&params, param)
+            }
+            text, err_proc, ok_proc := emit_proc_literal_text(e, params[:], parsed.returns, parsed.body[:])
+            if !ok_proc {
+                return spec, err_proc, false
+            }
+            callback_proc = text
+        }
+        return Parallel_Detach_Spec{
+            worker        = parallel_inline_worker_name(worker_form),
+            params        = parsed.params[:],
+            captures      = captures[:],
+            callback_proc = callback_proc,
+        }, {}, true
+    }
+
+    return spec, Compile_Error{message = "parallel.detach expects a known worker function or inline fn", span = worker_form.span}, false
+}
+
+parallel_inline_worker_name :: proc(worker_form: CST_Form) -> string {
+    return fmt.tprintf("inline_%d_%d", worker_form.span.start, worker_form.span.end)
+}
+
+parallel_map_signature_from_forms :: proc(e: ^Emitter, worker_form, source_form: CST_Form, emit_callback := false) -> (spec: Parallel_Map_Spec, err: Compile_Error, ok: bool) {
+    source_ty, ok_source_ty := obvious_form_type(e, source_form)
+    if !ok_source_ty {
+        return spec, Compile_Error{message = "parallel.map expects a source collection with an obvious type; bind or annotate it first", span = source_form.span}, false
+    }
+    source_elem_ty, ok_source_elem_ty := collection_element_type(source_ty)
+    if !ok_source_elem_ty {
+        return spec, Compile_Error{message = fmt.tprintf("parallel.map expects slice or array source, got %s", source_ty), span = source_form.span}, false
+    }
+    if worker_form.kind == .Symbol {
+        worker_name, worker_decl, ok_worker := resolve_proc_call_decl(e, worker_form.text)
+        if !ok_worker {
+            return spec, Compile_Error{message = fmt.tprintf("parallel.map worker must name a known function: %s", worker_form.text), span = worker_form.span}, false
+        }
+        if len(worker_decl.params) != 1 {
+            return spec, Compile_Error{message = "parallel.map worker must take exactly one argument", span = worker_form.span}, false
+        }
+        if worker_decl.returns.kind != .Single {
+            return spec, Compile_Error{message = "parallel.map worker must return exactly one value", span = worker_form.span}, false
+        }
+        input_ty := worker_decl.params[0].ty
+        if source_elem_ty != input_ty {
+            return spec, Compile_Error{message = fmt.tprintf("parallel.map worker expects %s but source has %s", input_ty, source_elem_ty), span = source_form.span}, false
+        }
+        return Parallel_Map_Spec{
+            worker    = worker_name,
+            input_ty  = input_ty,
+            output_ty = worker_decl.returns.single_ty,
+        }, {}, true
+    }
+
+    if worker_form.kind == .List && len(worker_form.items) > 0 && is_symbol(worker_form.items[0], "fn") {
+        parsed, err_parse, ok_parse := parse_proc_literal_form(worker_form)
+        if !ok_parse {
+            return spec, err_parse, false
+        }
+        if len(parsed.params) != 1 {
+            return spec, Compile_Error{message = "parallel.map inline worker must take exactly one argument", span = worker_form.span}, false
+        }
+        if parsed.returns.kind != .Single {
+            return spec, Compile_Error{message = "parallel.map inline worker must return exactly one value", span = worker_form.span}, false
+        }
+        input_ty := parsed.params[0].ty
+        if source_elem_ty != input_ty {
+            return spec, Compile_Error{message = fmt.tprintf("parallel.map worker expects %s but source has %s", input_ty, source_elem_ty), span = source_form.span}, false
+        }
+
+        capture_names := []string{parsed.params[0].name}
+        captures := collect_proc_literal_captures(e, parsed.body[:], capture_names)
+        callback_proc := ""
+        if emit_callback {
+            params: [dynamic]Param
+            for capture in captures {
+                append(&params, capture)
+            }
+            for param in parsed.params {
+                append(&params, param)
+            }
+            text, err_proc, ok_proc := emit_proc_literal_text(e, params[:], parsed.returns, parsed.body[:])
+            if !ok_proc {
+                return spec, err_proc, false
+            }
+            callback_proc = text
+        }
+        return Parallel_Map_Spec{
+            worker        = parallel_inline_worker_name(worker_form),
+            input_ty      = input_ty,
+            output_ty     = parsed.returns.single_ty,
+            captures      = captures[:],
+            callback_proc = callback_proc,
+        }, {}, true
+    }
+
+    return spec, Compile_Error{message = "parallel.map expects a known one-argument worker function or inline fn", span = worker_form.span}, false
+}
+
+parallel_map_signature :: proc(e: ^Emitter, form: CST_Form, emit_callback := false) -> (spec: Parallel_Map_Spec, err: Compile_Error, ok: bool) {
+    if len(form.items) != 4 {
+        return spec, Compile_Error{message = "parallel.map expects worker and source collection", span = form.span}, false
+    }
+    return parallel_map_signature_from_forms(e, form.items[1], form.items[2], emit_callback)
+}
+
+parallel_map_with_signature :: proc(e: ^Emitter, form: CST_Form, emit_callback := false) -> (spec: Parallel_Map_Spec, err: Compile_Error, ok: bool) {
+    if len(form.items) != 4 {
+        return spec, Compile_Error{message = "parallel.map-with expects options, worker, and source collection", span = form.span}, false
+    }
+    return parallel_map_signature_from_forms(e, form.items[2], form.items[3], emit_callback)
+}
+
+parallel_map_with_worker_count_arg :: proc(e: ^Emitter, options: CST_Form) -> (string, Compile_Error, bool) {
+    if options.kind != .Brace {
+        return "", Compile_Error{message = "parallel.map-with expects options like {workers: n}", span = options.span}, false
+    }
+    if len(options.items) == 0 {
+        return "", Compile_Error{message = "parallel.map-with expects {workers: n}", span = options.span}, false
+    }
+    if len(options.items)%2 != 0 {
+        return "", Compile_Error{message = "parallel.map-with expects option key/value pairs", span = options.span}, false
+    }
+
+    worker_count_text := ""
+    seen_workers := false
+    for i := 0; i < len(options.items); i += 2 {
+        key := options.items[i]
+        value := options.items[i+1]
+        if key.kind != .Symbol || len(key.text) == 0 || key.text[len(key.text)-1] != ':' {
+            return "", Compile_Error{message = "parallel.map-with options must use labels like workers:", span = key.span}, false
+        }
+        option_name := map_name(key.text[:len(key.text)-1])
+        if option_name != "workers" {
+            return "", Compile_Error{message = fmt.tprintf("parallel.map-with unknown option: %s", option_name), span = key.span}, false
+        }
+        if seen_workers {
+            return "", Compile_Error{message = "parallel.map-with duplicate workers option", span = key.span}, false
+        }
+        text, err_value, ok_value := emit_expr_for_expected_type(e, value, "int")
+        if !ok_value {
+            return "", err_value, false
+        }
+        worker_count_text = text
+        seen_workers = true
+    }
+    if !seen_workers {
+        return "", Compile_Error{message = "parallel.map-with expects {workers: n}", span = options.span}, false
+    }
+    return worker_count_text, {}, true
+}
+
+parallel_each_signature_from_forms :: proc(e: ^Emitter, worker_form, source_form: CST_Form, emit_callback := false) -> (spec: Parallel_Each_Spec, err: Compile_Error, ok: bool) {
+    source_ty, ok_source_ty := obvious_form_type(e, source_form)
+    if !ok_source_ty {
+        return spec, Compile_Error{message = "parallel.each expects a source collection with an obvious type; bind or annotate it first", span = source_form.span}, false
+    }
+    source_elem_ty, ok_source_elem_ty := collection_element_type(source_ty)
+    if !ok_source_elem_ty {
+        return spec, Compile_Error{message = fmt.tprintf("parallel.each expects slice or array source, got %s", source_ty), span = source_form.span}, false
+    }
+    if worker_form.kind == .Symbol {
+        worker_name, worker_decl, ok_worker := resolve_proc_call_decl(e, worker_form.text)
+        if !ok_worker {
+            return spec, Compile_Error{message = fmt.tprintf("parallel.each worker must name a known function: %s", worker_form.text), span = worker_form.span}, false
+        }
+        if len(worker_decl.params) != 1 {
+            return spec, Compile_Error{message = "parallel.each worker must take exactly one argument", span = worker_form.span}, false
+        }
+        if worker_decl.returns.kind != .None {
+            return spec, Compile_Error{message = "parallel.each worker must not return a value", span = worker_form.span}, false
+        }
+        input_ty := worker_decl.params[0].ty
+        if source_elem_ty != input_ty {
+            return spec, Compile_Error{message = fmt.tprintf("parallel.each worker expects %s but source has %s", input_ty, source_elem_ty), span = source_form.span}, false
+        }
+        return Parallel_Each_Spec{
+            worker   = worker_name,
+            input_ty = input_ty,
+        }, {}, true
+    }
+
+    if worker_form.kind == .List && len(worker_form.items) > 0 && is_symbol(worker_form.items[0], "fn") {
+        parsed, err_parse, ok_parse := parse_proc_literal_form(worker_form)
+        if !ok_parse {
+            return spec, err_parse, false
+        }
+        if len(parsed.params) != 1 {
+            return spec, Compile_Error{message = "parallel.each inline worker must take exactly one argument", span = worker_form.span}, false
+        }
+        if parsed.returns.kind != .None {
+            return spec, Compile_Error{message = "parallel.each inline worker must not return a value", span = worker_form.span}, false
+        }
+        input_ty := parsed.params[0].ty
+        if source_elem_ty != input_ty {
+            return spec, Compile_Error{message = fmt.tprintf("parallel.each worker expects %s but source has %s", input_ty, source_elem_ty), span = source_form.span}, false
+        }
+
+        capture_names := []string{parsed.params[0].name}
+        captures := collect_proc_literal_captures(e, parsed.body[:], capture_names)
+        callback_proc := ""
+        if emit_callback {
+            params: [dynamic]Param
+            for capture in captures {
+                append(&params, capture)
+            }
+            for param in parsed.params {
+                append(&params, param)
+            }
+            text, err_proc, ok_proc := emit_proc_literal_text(e, params[:], parsed.returns, parsed.body[:])
+            if !ok_proc {
+                return spec, err_proc, false
+            }
+            callback_proc = text
+        }
+        return Parallel_Each_Spec{
+            worker        = parallel_inline_worker_name(worker_form),
+            input_ty      = input_ty,
+            captures      = captures[:],
+            callback_proc = callback_proc,
+        }, {}, true
+    }
+
+    return spec, Compile_Error{message = "parallel.each expects a known one-argument worker function or inline fn", span = worker_form.span}, false
+}
+
+parallel_each_signature :: proc(e: ^Emitter, form: CST_Form, emit_callback := false) -> (spec: Parallel_Each_Spec, err: Compile_Error, ok: bool) {
+    if len(form.items) != 4 {
+        return spec, Compile_Error{message = "parallel.each expects worker and source collection", span = form.span}, false
+    }
+    return parallel_each_signature_from_forms(e, form.items[1], form.items[2], emit_callback)
+}
+
+parallel_each_with_signature :: proc(e: ^Emitter, form: CST_Form, emit_callback := false) -> (spec: Parallel_Each_Spec, err: Compile_Error, ok: bool) {
+    if len(form.items) != 4 {
+        return spec, Compile_Error{message = "parallel.each-with expects options, worker, and source collection", span = form.span}, false
+    }
+    return parallel_each_signature_from_forms(e, form.items[2], form.items[3], emit_callback)
+}
+
+parallel_each_with_worker_count_arg :: proc(e: ^Emitter, options: CST_Form) -> (string, Compile_Error, bool) {
+    if options.kind != .Brace {
+        return "", Compile_Error{message = "parallel.each-with expects options like {workers: n}", span = options.span}, false
+    }
+    if len(options.items) == 0 {
+        return "", Compile_Error{message = "parallel.each-with expects {workers: n}", span = options.span}, false
+    }
+    if len(options.items)%2 != 0 {
+        return "", Compile_Error{message = "parallel.each-with expects option key/value pairs", span = options.span}, false
+    }
+
+    worker_count_text := ""
+    seen_workers := false
+    for i := 0; i < len(options.items); i += 2 {
+        key := options.items[i]
+        value := options.items[i+1]
+        if key.kind != .Symbol || len(key.text) == 0 || key.text[len(key.text)-1] != ':' {
+            return "", Compile_Error{message = "parallel.each-with options must use labels like workers:", span = key.span}, false
+        }
+        option_name := map_name(key.text[:len(key.text)-1])
+        if option_name != "workers" {
+            return "", Compile_Error{message = fmt.tprintf("parallel.each-with unknown option: %s", option_name), span = key.span}, false
+        }
+        if seen_workers {
+            return "", Compile_Error{message = "parallel.each-with duplicate workers option", span = key.span}, false
+        }
+        text, err_value, ok_value := emit_expr_for_expected_type(e, value, "int")
+        if !ok_value {
+            return "", err_value, false
+        }
+        worker_count_text = text
+        seen_workers = true
+    }
+    if !seen_workers {
+        return "", Compile_Error{message = "parallel.each-with expects {workers: n}", span = options.span}, false
+    }
+    return worker_count_text, {}, true
+}
+
+emit_parallel_args_for_params :: proc(e: ^Emitter, args: []CST_Form, params: []Param) -> (arg_texts: [dynamic]string, err: Compile_Error, ok: bool) {
+    for arg, idx in args {
+        arg_text, err_arg, ok_arg := emit_expr_for_expected_type(e, arg, params[idx].ty)
+        if !ok_arg {
+            return arg_texts, err_arg, false
+        }
+        append(&arg_texts, arg_text)
+    }
+    return arg_texts, {}, true
+}
+
+emit_parallel_start_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) {
+    spec, err_spec, ok_spec := parallel_start_signature(e, form, true)
+    if !ok_spec {
+        return "", err_spec, false
+    }
+    arg_texts, err_args, ok_args := emit_parallel_args_for_params(e, form.items[2:], spec.params)
+    if !ok_args {
+        return "", err_args, false
+    }
+    mark_parallel_start(e, spec)
+    call_args: [dynamic]string
+    for capture in spec.captures {
+        append(&call_args, capture.name)
+    }
+    for arg_text in arg_texts {
+        append(&call_args, arg_text)
+    }
+    return emit_call_text(parallel_start_helper_name(spec), call_args[:]), {}, true
+}
+
+emit_parallel_result_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) {
+    if len(form.items) != 2 {
+        return "", Compile_Error{message = "parallel.result expects one task", span = form.span}, false
+    }
+    if form.items[1].kind == .List && len(form.items[1].items) > 0 && form.items[1].items[0].kind == .Symbol && form.items[1].items[0].text == "parallel-start" {
+        _, err_start, ok_start := parallel_start_signature(e, form.items[1])
+        if !ok_start {
+            return "", err_start, false
+        }
+    }
+    task_ty, ok_task_ty := obvious_form_type(e, form.items[1])
+    if !ok_task_ty {
+        return "", Compile_Error{message = "parallel.result expects a task with an obvious type; bind or annotate it first", span = form.items[1].span}, false
+    }
+    if _, ok_result := parallel_task_result_type(task_ty); !ok_result {
+        return "", Compile_Error{message = fmt.tprintf("parallel.result expects a parallel task, got %s", task_ty), span = form.items[1].span}, false
+    }
+    task_text, err_task, ok_task := emit_expr(e, form.items[1])
+    if !ok_task {
+        return "", err_task, false
+    }
+    mark_parallel_result(e)
+    return emit_call_text("parallel_result", []string{task_text}), {}, true
+}
+
+emit_parallel_detach_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) {
+    spec, err_spec, ok_spec := parallel_detach_signature(e, form, true)
+    if !ok_spec {
+        return "", err_spec, false
+    }
+    arg_texts, err_args, ok_args := emit_parallel_args_for_params(e, form.items[2:], spec.params)
+    if !ok_args {
+        return "", err_args, false
+    }
+    mark_parallel_detach(e, spec)
+    call_args: [dynamic]string
+    for capture in spec.captures {
+        append(&call_args, capture.name)
+    }
+    for arg_text in arg_texts {
+        append(&call_args, arg_text)
+    }
+    return emit_call_text(parallel_detach_helper_name(spec), call_args[:]), {}, true
+}
+
+emit_parallel_map_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) {
+    spec, err_spec, ok_spec := parallel_map_signature(e, form, true)
+    if !ok_spec {
+        return "", err_spec, false
+    }
+    source_text, err_source, ok_source := emit_expr(e, form.items[2])
+    if !ok_source {
+        return "", err_source, false
+    }
+    worker_count_text, err_workers, ok_workers := emit_expr_for_expected_type(e, form.items[3], "int")
+    if !ok_workers {
+        return "", err_workers, false
+    }
+    mark_parallel_map(e, spec)
+    args: [dynamic]string
+    append(&args, slice_all_expr_text(source_text))
+    append(&args, worker_count_text)
+    for capture in spec.captures {
+        append(&args, capture.name)
+    }
+    return emit_call_text(parallel_map_helper_name(spec), args[:]), {}, true
+}
+
+emit_parallel_map_with_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) {
+    spec, err_spec, ok_spec := parallel_map_with_signature(e, form, true)
+    if !ok_spec {
+        return "", err_spec, false
+    }
+    worker_count_text, err_workers, ok_workers := parallel_map_with_worker_count_arg(e, form.items[1])
+    if !ok_workers {
+        return "", err_workers, false
+    }
+    source_text, err_source, ok_source := emit_expr(e, form.items[3])
+    if !ok_source {
+        return "", err_source, false
+    }
+    mark_parallel_map(e, spec)
+    args: [dynamic]string
+    append(&args, slice_all_expr_text(source_text))
+    append(&args, worker_count_text)
+    for capture in spec.captures {
+        append(&args, capture.name)
+    }
+    return emit_call_text(parallel_map_helper_name(spec), args[:]), {}, true
+}
+
+emit_parallel_each_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) {
+    spec, err_spec, ok_spec := parallel_each_signature(e, form, true)
+    if !ok_spec {
+        return "", err_spec, false
+    }
+    source_text, err_source, ok_source := emit_expr(e, form.items[2])
+    if !ok_source {
+        return "", err_source, false
+    }
+    worker_count_text, err_workers, ok_workers := emit_expr_for_expected_type(e, form.items[3], "int")
+    if !ok_workers {
+        return "", err_workers, false
+    }
+    mark_parallel_each(e, spec)
+    args: [dynamic]string
+    append(&args, slice_all_expr_text(source_text))
+    append(&args, worker_count_text)
+    for capture in spec.captures {
+        append(&args, capture.name)
+    }
+    return emit_call_text(parallel_each_helper_name(spec), args[:]), {}, true
+}
+
+emit_parallel_each_with_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) {
+    spec, err_spec, ok_spec := parallel_each_with_signature(e, form, true)
+    if !ok_spec {
+        return "", err_spec, false
+    }
+    worker_count_text, err_workers, ok_workers := parallel_each_with_worker_count_arg(e, form.items[1])
+    if !ok_workers {
+        return "", err_workers, false
+    }
+    source_text, err_source, ok_source := emit_expr(e, form.items[3])
+    if !ok_source {
+        return "", err_source, false
+    }
+    mark_parallel_each(e, spec)
+    args: [dynamic]string
+    append(&args, slice_all_expr_text(source_text))
+    append(&args, worker_count_text)
+    for capture in spec.captures {
+        append(&args, capture.name)
+    }
+    return emit_call_text(parallel_each_helper_name(spec), args[:]), {}, true
+}
+
 emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) {
     head := form.items[0]
     if head.kind != .Symbol {
@@ -7170,8 +8173,36 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         return emit_transform_transduce_expr(e, form)
     }
 
+    if head.text == "parallel-start" {
+        return emit_parallel_start_expr(e, form)
+    }
+
+    if head.text == "parallel-result" {
+        return emit_parallel_result_expr(e, form)
+    }
+
+    if head.text == "parallel-detach" {
+        return emit_parallel_detach_expr(e, form)
+    }
+
+    if head.text == "parallel-map" {
+        return emit_parallel_map_expr(e, form)
+    }
+
+    if head.text == "parallel-map-with" {
+        return emit_parallel_map_with_expr(e, form)
+    }
+
+    if head.text == "parallel-each" {
+        return emit_parallel_each_expr(e, form)
+    }
+
+    if head.text == "parallel-each-with" {
+        return emit_parallel_each_with_expr(e, form)
+    }
+
     if _, ok_source := find_source_decl(e, map_name(head.text)); ok_source {
-        return "", Compile_Error{message = fmt.tprintf("source %s can currently only be consumed by each or into", head.text), span = head.span}, false
+        return "", Compile_Error{message = fmt.tprintf("source %s can currently only be consumed by each, into, or transduce", head.text), span = head.span}, false
     }
 
     err_deprecated, deprecated := deprecated_builtin_collection_head_error(head)
@@ -8098,14 +9129,14 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         if len(form.items) < 2 {
             return "", Compile_Error{message = "make expects a type and optional arguments", span = form.span}, false
         }
-        type_text, err_type, ok_type := parse_type_text(form.items[1])
+        type_text, next_i, err_type, ok_type := parse_type_text_from_forms(form.items[:], 1)
         if !ok_type {
             return "", err_type, false
         }
         builder := strings.builder_make()
         defer strings.builder_destroy(&builder)
         fmt.sbprintf(&builder, "make(%s", type_text)
-        for arg in form.items[2:] {
+        for arg in form.items[next_i:] {
             arg_text, err_arg, ok_arg := emit_expr(e, arg)
             if !ok_arg {
                 return "", err_arg, false
@@ -8115,6 +9146,27 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         }
         strings.write_byte(&builder, ')')
         return strings.clone(strings.to_string(builder)), {}, true
+    }
+
+    if head.text == "alloc" {
+        if len(form.items) < 2 {
+            return "", Compile_Error{message = "alloc expects a type and optional allocator", span = form.span}, false
+        }
+        type_text, next_i, err_type, ok_type := parse_type_text_from_forms(form.items[:], 1)
+        if !ok_type {
+            return "", err_type, false
+        }
+        if next_i != len(form.items) && next_i+1 != len(form.items) {
+            return "", Compile_Error{message = "alloc expects a type and optional allocator", span = form.items[next_i].span}, false
+        }
+        if next_i == len(form.items) {
+            return fmt.tprintf("new(%s)", type_text), {}, true
+        }
+        allocator, err_allocator, ok_allocator := emit_expr(e, form.items[next_i])
+        if !ok_allocator {
+            return "", err_allocator, false
+        }
+        return fmt.tprintf("new(%s, %s)", type_text, allocator), {}, true
     }
 
     if len(form.items) == 2 && form.items[1].kind == .Vector {
@@ -8194,6 +9246,9 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
             mark_dynamic_literals(e)
             return emit_brace_literal(e, head_name, form.items[1])
         }
+        if dotted_head_member_starts_upper(head_name) {
+            return emit_brace_literal(e, head_name, form.items[1])
+        }
         if !strings.contains(head_name, ".") {
             if call_name, proc_decl, ok_proc := resolve_proc_call_decl(e, head.text); ok_proc {
                 named_arg_texts, err_named, ok_named := emit_named_call_with_defaults(e, proc_decl, form.items[1])
@@ -8202,13 +9257,13 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
                 }
                 return emit_call_text(call_name, named_arg_texts[:]), {}, true
             }
-            named_arg_texts, err_named, ok_named := emit_named_call_arg_texts(e, form.items[1])
-            if ok_named {
-                return emit_call_text(head_name, named_arg_texts[:]), {}, true
-            }
-            if err_named.message != "" && err_named.message != "named arguments expect field: labels" {
-                return "", err_named, false
-            }
+        }
+        named_arg_texts, err_named, ok_named := emit_named_call_arg_texts(e, form.items[1])
+        if ok_named {
+            return emit_call_text(head_name, named_arg_texts[:]), {}, true
+        }
+        if err_named.message != "" && err_named.message != "named arguments expect field: labels" {
+            return "", err_named, false
         }
         return emit_brace_literal(e, head_name, form.items[1])
     }
@@ -8248,6 +9303,15 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
             return "", err_value, false
         }
         return emit_type_conversion_text(type_text, value_text), {}, true
+    }
+    if len(form.items) >= 3 && form.items[len(form.items)-1].kind == .Brace {
+        arg_texts_with_mixed, err_mixed, ok_mixed := emit_general_mixed_call_arg_texts(e, head_name, form.items[1:len(form.items)-1], form.items[len(form.items)-1])
+        if ok_mixed {
+            return emit_call_text(head_name, arg_texts_with_mixed[:]), {}, true
+        }
+        if err_mixed.message != "" && err_mixed.message != "named arguments expect field: labels" {
+            return "", err_mixed, false
+        }
     }
     for arg, arg_idx in form.items[1:] {
         arg_text := ""
@@ -10508,6 +11572,472 @@ emit_captured_proc_specializations :: proc(e: ^Emitter) -> (Compile_Error, bool)
     return Compile_Error{}, true
 }
 
+emit_parallel_task_type_helper :: proc(e: ^Emitter) {
+    emit_line(e, "parallel_Task :: struct($T: typeid) {")
+    e.indent += 1
+    emit_line(e, "result: chan.Chan(T),")
+    emit_line(e, "thread: ^thread.Thread,")
+    emit_line(e, "data: rawptr,")
+    e.indent -= 1
+    emit_line(e, "}")
+}
+
+emit_parallel_result_helper :: proc(e: ^Emitter) {
+    emit_line(e, "parallel_result :: proc(task: parallel_Task($T)) -> T {")
+    e.indent += 1
+    emit_line(e, "value, ok := chan.recv(task.result)")
+    emit_line(e, "thread.join(task.thread)")
+    emit_line(e, "thread.destroy(task.thread)")
+    emit_line(e, "free(task.data)")
+    emit_line(e, "chan.destroy(task.result)")
+    emit_line(e, "assert(ok, \"parallel task ended without a result\")")
+    emit_line(e, "return value")
+    e.indent -= 1
+    emit_line(e, "}")
+}
+
+parallel_param_list_text :: proc(params: []Param) -> string {
+    if len(params) == 0 {
+        return strings.clone("")
+    }
+    builder := strings.builder_make()
+    defer strings.builder_destroy(&builder)
+    for param, idx in params {
+        if idx > 0 {
+            strings.write_string(&builder, ", ")
+        }
+        fmt.sbprintf(&builder, "%s: %s", param.name, param.ty)
+    }
+    return strings.clone(strings.to_string(builder))
+}
+
+parallel_data_arg_list_text :: proc(params: []Param) -> string {
+    if len(params) == 0 {
+        return strings.clone("")
+    }
+    builder := strings.builder_make()
+    defer strings.builder_destroy(&builder)
+    for param, idx in params {
+        if idx > 0 {
+            strings.write_string(&builder, ", ")
+        }
+        fmt.sbprintf(&builder, "data.%s", param.name)
+    }
+    return strings.clone(strings.to_string(builder))
+}
+
+emit_parallel_task_data_fields :: proc(e: ^Emitter, params: []Param) {
+    for param in params {
+        emit_line(e, fmt.tprintf("%s: %s,", param.name, param.ty))
+    }
+}
+
+emit_parallel_task_data_assignments :: proc(e: ^Emitter, params: []Param) {
+    for param in params {
+        emit_line(e, fmt.tprintf("data.%s = %s", param.name, param.name))
+    }
+}
+
+emit_parallel_start_helper :: proc(e: ^Emitter, spec: Parallel_Start_Spec) {
+    data_name := parallel_start_data_name(spec)
+    worker_name := parallel_start_worker_name(spec)
+    start_name := parallel_start_helper_name(spec)
+    callback_name := parallel_start_callback_name(spec)
+    task_ty := parallel_task_type(spec.result_ty)
+    helper_params: [dynamic]Param
+    for capture in spec.captures {
+        append(&helper_params, capture)
+    }
+    for param in spec.params {
+        append(&helper_params, param)
+    }
+    params_text := parallel_param_list_text(helper_params[:])
+    data_args_text := parallel_data_arg_list_text(helper_params[:])
+    defer delete(data_name)
+    defer delete(worker_name)
+    defer delete(start_name)
+    defer delete(callback_name)
+    defer delete(task_ty)
+    defer delete(params_text)
+    defer delete(data_args_text)
+
+    if spec.callback_proc != "" {
+        emit_named_proc_text(e, callback_name, spec.callback_proc)
+        emit_raw_newline(e)
+    }
+
+    emit_line(e, fmt.tprintf("%s :: struct %s", data_name, "{"))
+    e.indent += 1
+    emit_line(e, fmt.tprintf("result: chan.Chan(%s),", spec.result_ty))
+    emit_parallel_task_data_fields(e, spec.captures)
+    emit_parallel_task_data_fields(e, spec.params)
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_raw_newline(e)
+
+    emit_line(e, fmt.tprintf("%s :: proc(data: ^%s) %s", worker_name, data_name, "{"))
+    e.indent += 1
+    call_name := spec.worker
+    if spec.callback_proc != "" {
+        call_name = callback_name
+    }
+    emit_line(e, fmt.tprintf("chan.send(data.result, %s(%s))", call_name, data_args_text))
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_raw_newline(e)
+
+    emit_line(e, fmt.tprintf("%s :: proc(%s) -> %s %s", start_name, params_text, task_ty, "{"))
+    e.indent += 1
+    emit_line(e, fmt.tprintf("result, err := chan.create(chan.Chan(%s), 1, context.allocator)", spec.result_ty))
+    emit_line(e, "assert(err == .None, \"parallel.start could not create result channel\")")
+    emit_line(e, fmt.tprintf("data := new(%s)", data_name))
+    emit_line(e, "data.result = result")
+    emit_parallel_task_data_assignments(e, spec.captures)
+    emit_parallel_task_data_assignments(e, spec.params)
+    emit_line(e, fmt.tprintf("task_thread := thread.create_and_start_with_poly_data(data, %s)", worker_name))
+    emit_line(e, "assert(task_thread != nil, \"parallel.start could not start worker thread\")")
+    emit_line(e, fmt.tprintf("return %s%sresult = result, thread = task_thread, data = data}", task_ty, "{"))
+    e.indent -= 1
+    emit_line(e, "}")
+}
+
+emit_parallel_detach_helper :: proc(e: ^Emitter, spec: Parallel_Detach_Spec) {
+    data_name := parallel_detach_data_name(spec)
+    worker_name := parallel_detach_worker_name(spec)
+    detach_name := parallel_detach_helper_name(spec)
+    callback_name := parallel_detach_callback_name(spec)
+    helper_params: [dynamic]Param
+    for capture in spec.captures {
+        append(&helper_params, capture)
+    }
+    for param in spec.params {
+        append(&helper_params, param)
+    }
+    params_text := parallel_param_list_text(helper_params[:])
+    data_args_text := parallel_data_arg_list_text(helper_params[:])
+    defer delete(data_name)
+    defer delete(worker_name)
+    defer delete(detach_name)
+    defer delete(callback_name)
+    defer delete(params_text)
+    defer delete(data_args_text)
+
+    if spec.callback_proc != "" {
+        emit_named_proc_text(e, callback_name, spec.callback_proc)
+        emit_raw_newline(e)
+    }
+
+    emit_line(e, fmt.tprintf("%s :: struct %s", data_name, "{"))
+    e.indent += 1
+    emit_parallel_task_data_fields(e, spec.captures)
+    emit_parallel_task_data_fields(e, spec.params)
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_raw_newline(e)
+
+    emit_line(e, fmt.tprintf("%s :: proc(data: ^%s) %s", worker_name, data_name, "{"))
+    e.indent += 1
+    call_name := spec.worker
+    if spec.callback_proc != "" {
+        call_name = callback_name
+    }
+    emit_line(e, fmt.tprintf("%s(%s)", call_name, data_args_text))
+    emit_line(e, "free(data)")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_raw_newline(e)
+
+    emit_line(e, fmt.tprintf("%s :: proc(%s) %s", detach_name, params_text, "{"))
+    e.indent += 1
+    emit_line(e, fmt.tprintf("data := new(%s)", data_name))
+    emit_parallel_task_data_assignments(e, spec.captures)
+    emit_parallel_task_data_assignments(e, spec.params)
+    emit_line(e, fmt.tprintf("task_thread := thread.create_and_start_with_poly_data(data, %s, nil, .Normal, true)", worker_name))
+    emit_line(e, "if task_thread == nil {")
+    e.indent += 1
+    emit_line(e, "free(data)")
+    emit_line(e, "assert(false, \"parallel.detach could not start worker thread\")")
+    e.indent -= 1
+    emit_line(e, "}")
+    e.indent -= 1
+    emit_line(e, "}")
+}
+
+emit_named_proc_text :: proc(e: ^Emitter, name, proc_text: string) {
+    emit_indent(e)
+    strings.write_string(&e.builder, name)
+    strings.write_string(&e.builder, " :: ")
+    strings.write_string(&e.builder, proc_text)
+    strings.write_byte(&e.builder, '\n')
+    e.line += 1
+    for ch in proc_text {
+        if ch == '\n' {
+            e.line += 1
+        }
+    }
+}
+
+emit_parallel_collection_data_struct :: proc(e: ^Emitter, data_name, input_ty, output_ty: string, captures: []Param) {
+    emit_line(e, fmt.tprintf("%s :: struct %s", data_name, "{"))
+    e.indent += 1
+    emit_line(e, fmt.tprintf("xs: []%s,", input_ty))
+    if output_ty != "" {
+        emit_line(e, fmt.tprintf("out: [dynamic]%s,", output_ty))
+    }
+    for capture in captures {
+        emit_line(e, fmt.tprintf("%s: %s,", capture.name, capture.ty))
+    }
+    emit_line(e, "start: int,")
+    emit_line(e, "step: int,")
+    e.indent -= 1
+    emit_line(e, "}")
+}
+
+parallel_data_call_args :: proc(captures: []Param) -> (args: [dynamic]string) {
+    for capture in captures {
+        append(&args, fmt.tprintf("data.%s", capture.name))
+    }
+    append(&args, "data.xs[i]")
+    return args
+}
+
+parallel_callback_call_name :: proc(worker, callback_name, callback_proc: string) -> string {
+    if callback_proc != "" {
+        return callback_name
+    }
+    return worker
+}
+
+emit_parallel_collection_worker_proc :: proc(e: ^Emitter, worker_name, data_name, worker, callback_name, callback_proc: string, captures: []Param, assign_output: bool) {
+    emit_line(e, fmt.tprintf("%s :: proc(data: ^%s) %s", worker_name, data_name, "{"))
+    e.indent += 1
+    emit_line(e, "i := data.start")
+    emit_line(e, "for i < len(data.xs) {")
+    e.indent += 1
+    call_args := parallel_data_call_args(captures)
+    call_name := parallel_callback_call_name(worker, callback_name, callback_proc)
+    call_text := emit_call_text(call_name, call_args[:])
+    if assign_output {
+        emit_line(e, fmt.tprintf("data.out[i] = %s", call_text))
+    } else {
+        emit_line(e, call_text)
+    }
+    emit_line(e, "i += data.step")
+    e.indent -= 1
+    emit_line(e, "}")
+    e.indent -= 1
+    emit_line(e, "}")
+}
+
+emit_parallel_collection_helper_signature :: proc(e: ^Emitter, helper_name, input_ty, output_ty: string, captures: []Param) {
+    helper_signature := strings.builder_make()
+    defer strings.builder_destroy(&helper_signature)
+    fmt.sbprintf(&helper_signature, "%s :: proc(xs: []%s, requested_worker_count: int", helper_name, input_ty)
+    for capture in captures {
+        fmt.sbprintf(&helper_signature, ", %s: %s", capture.name, capture.ty)
+    }
+    if output_ty != "" {
+        fmt.sbprintf(&helper_signature, ") -> [dynamic]%s ", output_ty)
+    } else {
+        strings.write_string(&helper_signature, ") ")
+    }
+    strings.write_byte(&helper_signature, '{')
+    emit_line(e, strings.to_string(helper_signature))
+}
+
+emit_parallel_collection_empty_return_and_worker_count :: proc(e: ^Emitter, empty_return: string) {
+    emit_line(e, "if len(xs) == 0 {")
+    e.indent += 1
+    emit_line(e, empty_return)
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "worker_count := requested_worker_count")
+    emit_line(e, "if worker_count <= 0 {")
+    e.indent += 1
+    emit_line(e, "worker_count = os.get_processor_core_count() - 1")
+    emit_line(e, "if worker_count > 16 {")
+    e.indent += 1
+    emit_line(e, "worker_count = 16")
+    e.indent -= 1
+    emit_line(e, "}")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "if worker_count > len(xs) {")
+    e.indent += 1
+    emit_line(e, "worker_count = len(xs)")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "if worker_count < 1 {")
+    e.indent += 1
+    emit_line(e, "worker_count = 1")
+    e.indent -= 1
+    emit_line(e, "}")
+}
+
+emit_parallel_collection_thread_failure_cleanup :: proc(e: ^Emitter, operation_name: string) {
+    emit_line(e, "free(data)")
+    emit_line(e, "for started in threads {")
+    e.indent += 1
+    emit_line(e, "thread.join(started)")
+    emit_line(e, "thread.destroy(started)")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "for started_data in datas {")
+    e.indent += 1
+    emit_line(e, "free(started_data)")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "delete(threads)")
+    emit_line(e, "delete(datas)")
+    emit_line(e, fmt.tprintf("assert(false, \"parallel.%s could not start worker thread\")", operation_name))
+}
+
+emit_parallel_collection_join_destroy_free :: proc(e: ^Emitter) {
+    emit_line(e, "for task_thread in threads {")
+    e.indent += 1
+    emit_line(e, "thread.join(task_thread)")
+    emit_line(e, "thread.destroy(task_thread)")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "for data in datas {")
+    e.indent += 1
+    emit_line(e, "free(data)")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "delete(threads)")
+    emit_line(e, "delete(datas)")
+}
+
+emit_parallel_collection_thread_launch_and_join :: proc(e: ^Emitter, data_name, worker_name, operation_name: string, captures: []Param, assign_output: bool) {
+    emit_line(e, "threads := make([dynamic]^thread.Thread, 0, worker_count)")
+    emit_line(e, fmt.tprintf("datas := make([dynamic]^%s, 0, worker_count)", data_name))
+    emit_line(e, "for i := 0; i < worker_count; i += 1 {")
+    e.indent += 1
+    emit_line(e, fmt.tprintf("data := new(%s)", data_name))
+    emit_line(e, "data.xs = xs")
+    if assign_output {
+        emit_line(e, "data.out = out")
+    }
+    for capture in captures {
+        emit_line(e, fmt.tprintf("data.%s = %s", capture.name, capture.name))
+    }
+    emit_line(e, "data.start = i")
+    emit_line(e, "data.step = worker_count")
+    emit_line(e, fmt.tprintf("task_thread := thread.create_and_start_with_poly_data(data, %s)", worker_name))
+    emit_line(e, "if task_thread == nil {")
+    e.indent += 1
+    emit_parallel_collection_thread_failure_cleanup(e, operation_name)
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "append(&threads, task_thread)")
+    emit_line(e, "append(&datas, data)")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_parallel_collection_join_destroy_free(e)
+}
+
+emit_parallel_each_helper :: proc(e: ^Emitter, spec: Parallel_Each_Spec) {
+    data_name := parallel_each_data_name(spec)
+    worker_name := parallel_each_worker_name(spec)
+    each_name := parallel_each_helper_name(spec)
+    callback_name := parallel_each_callback_name(spec)
+    defer delete(data_name)
+    defer delete(worker_name)
+    defer delete(each_name)
+    defer delete(callback_name)
+
+    if spec.callback_proc != "" {
+        emit_named_proc_text(e, callback_name, spec.callback_proc)
+        emit_raw_newline(e)
+    }
+
+    emit_parallel_collection_data_struct(e, data_name, spec.input_ty, "", spec.captures)
+    emit_raw_newline(e)
+
+    emit_parallel_collection_worker_proc(e, worker_name, data_name, spec.worker, callback_name, spec.callback_proc, spec.captures, false)
+    emit_raw_newline(e)
+
+    emit_parallel_collection_helper_signature(e, each_name, spec.input_ty, "", spec.captures)
+    e.indent += 1
+    emit_parallel_collection_empty_return_and_worker_count(e, "return")
+    emit_parallel_collection_thread_launch_and_join(e, data_name, worker_name, "each", spec.captures, false)
+    e.indent -= 1
+    emit_line(e, "}")
+}
+
+emit_parallel_map_helper :: proc(e: ^Emitter, spec: Parallel_Map_Spec) {
+    data_name := parallel_map_data_name(spec)
+    worker_name := parallel_map_worker_name(spec)
+    map_name := parallel_map_helper_name(spec)
+    callback_name := parallel_map_callback_name(spec)
+    defer delete(data_name)
+    defer delete(worker_name)
+    defer delete(map_name)
+    defer delete(callback_name)
+
+    if spec.callback_proc != "" {
+        emit_named_proc_text(e, callback_name, spec.callback_proc)
+        emit_raw_newline(e)
+    }
+
+    emit_parallel_collection_data_struct(e, data_name, spec.input_ty, spec.output_ty, spec.captures)
+    emit_raw_newline(e)
+
+    emit_parallel_collection_worker_proc(e, worker_name, data_name, spec.worker, callback_name, spec.callback_proc, spec.captures, true)
+    emit_raw_newline(e)
+
+    emit_parallel_collection_helper_signature(e, map_name, spec.input_ty, spec.output_ty, spec.captures)
+    e.indent += 1
+    emit_line(e, fmt.tprintf("out := make([dynamic]%s, len(xs))", spec.output_ty))
+    emit_parallel_collection_empty_return_and_worker_count(e, "return out")
+    emit_parallel_collection_thread_launch_and_join(e, data_name, worker_name, "map", spec.captures, true)
+    emit_line(e, "return out")
+    e.indent -= 1
+    emit_line(e, "}")
+}
+
+parallel_helpers_needed :: proc(features: Emitter_Features) -> bool {
+    return features.parallel_result ||
+           len(features.parallel_starts) > 0 ||
+           len(features.parallel_detaches) > 0 ||
+           len(features.parallel_maps) > 0 ||
+           len(features.parallel_eaches) > 0
+}
+
+emit_parallel_helpers :: proc(e: ^Emitter, features: Emitter_Features, emitted: ^bool) {
+    if !parallel_helpers_needed(features) {
+        return
+    }
+
+    emit_core_helper_separator(e, emitted)
+    emit_parallel_task_type_helper(e)
+
+    if features.parallel_result {
+        emit_core_helper_separator(e, emitted)
+        emit_parallel_result_helper(e)
+    }
+
+    for spec in features.parallel_starts {
+        emit_core_helper_separator(e, emitted)
+        emit_parallel_start_helper(e, spec)
+    }
+
+    for spec in features.parallel_detaches {
+        emit_core_helper_separator(e, emitted)
+        emit_parallel_detach_helper(e, spec)
+    }
+
+    for spec in features.parallel_maps {
+        emit_core_helper_separator(e, emitted)
+        emit_parallel_map_helper(e, spec)
+    }
+
+    for spec in features.parallel_eaches {
+        emit_core_helper_separator(e, emitted)
+        emit_parallel_each_helper(e, spec)
+    }
+}
+
 emit_core_map_helper :: proc(e: ^Emitter) {
     emit_line(e, "kvist_map :: proc(f: proc(x: $T) -> $U, xs: []T) -> [dynamic]U {")
     e.indent += 1
@@ -11312,7 +12842,8 @@ core_helpers_needed :: proc(features: Emitter_Features) -> bool {
            len(features.remove_in_place_fields) > 0 ||
            len(features.take_while_fields) > 0 || len(features.drop_while_fields) > 0 ||
            len(features.find_fields) > 0 || len(features.some_fields) > 0 ||
-           len(features.every_fields) > 0
+           len(features.every_fields) > 0 ||
+           parallel_helpers_needed(features)
 }
 
 emit_core_helper_separator :: proc(e: ^Emitter, emitted: ^bool) {
@@ -11505,6 +13036,7 @@ emit_core_helpers :: proc(e: ^Emitter, features: Emitter_Features) {
         emit_core_helper_separator(e, &emitted)
         emit_core_every_field_helper(e, field)
     }
+    emit_parallel_helpers(e, features, &emitted)
 }
 
 emit_decls :: proc(decls: []IR_Decl) -> (string, Compile_Error, bool) {

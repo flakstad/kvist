@@ -97,8 +97,8 @@
   "Compatibility helper for Odin-shaped switch lowering.
 
   Clauses are written as case.expression pairs, with `:else expr` for the
-  fallback. Prefer `case` for subject dispatch and `cond` for predicate
-  branches. Source `switch` use emits a compatibility warning."
+  fallback. Prefer `case` for user-facing subject dispatch and `cond` for
+  predicate branches. Source `switch` use emits a compatibility warning."
   [value & clauses]
   (quasiquote
     (core-switch (unquote value) (splice clauses))))

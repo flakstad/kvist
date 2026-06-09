@@ -589,11 +589,11 @@
   over the input where possible."
   [n: int, xs: []$T] -> [arr [slice T]] #force_inline
   (if (<= n 0)
-    (return (odin "make([dynamic][]T)")))
-  (let [out (odin "make([dynamic][]T, 0, len(xs)/n)")
+    (return (make [dynamic][]T)))
+  (let [out (make [dynamic][]T 0 (/ (core.count xs) n))
         start 0]
     (while (<= (+ start n) (core.count xs))
-      (odin "append(&out, xs[start:start+n])")
+      (arr-push! out (core.slice xs start (+ start n)))
       (set! start (+ start n)))
     out))
 
@@ -603,14 +603,14 @@
   Unlike `arr.partition`, the final short group is included."
   [n: int, xs: []$T] -> [arr [slice T]] #force_inline
   (if (<= n 0)
-    (return (odin "make([dynamic][]T)")))
-  (let [out (odin "make([dynamic][]T, 0, (len(xs)+n-1)/n)")
+    (return (make [dynamic][]T)))
+  (let [out (make [dynamic][]T 0 (/ (+ (core.count xs) (- n 1)) n))
         start 0]
     (while (< start (core.count xs))
       (let [end (+ start n)]
         (core.when (> end (core.count xs))
           (set! end (core.count xs)))
-        (odin "append(&out, xs[start:end])"))
+        (arr-push! out (core.slice xs start end)))
       (set! start (+ start n)))
     out))
 
@@ -630,8 +630,8 @@
   "Implementation helper for non-field-selector `arr.partition-by`."
   [f: (fn [x: $T] -> $K), xs: []T] -> [arr [slice T]] #force_inline
   (if (= (core.count xs) 0)
-    (return (odin "make([dynamic][]T)")))
-  (let [out (odin "make([dynamic][]T, 0, len(xs))")
+    (return (make [dynamic][]T)))
+  (let [out (make [dynamic][]T 0 (core.count xs))
         start 0
         last-key (f (core.get xs 0))
         i 1]
@@ -639,11 +639,11 @@
       (let [key (f (core.get xs i))]
         (if (!= key last-key)
           (do
-            (odin "append(&out, xs[start:i])")
+            (arr-push! out (core.slice xs start i))
             (set! start i)
             (set! last-key key))))
       (set! i (+ i 1)))
-    (odin "append(&out, xs[start:])")
+    (arr-push! out (core.slice xs start))
     out))
 
 (defmacro index-by
@@ -661,9 +661,9 @@
 (defn- index-by-impl
   "Implementation helper for non-field-selector `arr.index-by`."
   [f: (fn [x: $T] -> $K), xs: []T] -> map[K]T #force_inline
-  (let [out (odin "make(map[K]T, len(xs))")]
+  (let [out (make (map K T) (core.count xs))]
     (each [x xs]
-      (odin "out[f(x)] = x"))
+      (set! out[(f x)] x))
     out))
 
 (defmacro group-by
@@ -681,13 +681,14 @@
 (defn- group-by-impl
   "Implementation helper for non-field-selector `arr.group-by`."
   [f: (fn [x: $T] -> $K), xs: []T] -> (map K (dynamic T)) #force_inline
-  (let [out (odin "make(map[K][dynamic]T)")]
+  (let [out (make (map K (dynamic T)))]
     (each [x xs]
       (let [key (f x)
-            group (odin "out[key]")]
-        (odin "append(&group, x)")
-        (odin "if len(group) == 8 { reserve(&group, 64) }")
-        (odin "out[key] = group")))
+            group out[key]]
+        (arr-push! group x)
+        (core.when (= (core.count group) 8)
+          (reserve (addr group) 64))
+        (set! out[key] group)))
     out))
 
 (defmacro count-by
@@ -705,9 +706,9 @@
 (defn- count-by-impl
   "Implementation helper for non-field-selector `arr.count-by`."
   [f: (fn [x: $T] -> $K), xs: []T] -> map[K]int #force_inline
-  (let [out (odin "make(map[K]int)")]
+  (let [out (make (map K int))]
     (each [x xs]
-      (odin "out[f(x)] += 1"))
+      (mut! out[(f x)] += 1))
     out))
 
 (defmacro sum-by
@@ -725,9 +726,9 @@
 (defn- sum-by-impl
   "Implementation helper for non-field-selector `arr.sum-by`."
   [key-f: (fn [x: $T] -> $K), value-f: (fn [x: T] -> $V), xs: []T] -> map[K]V #force_inline
-  (let [out (odin "make(map[K]V)")]
+  (let [out (make (map K V))]
     (each [x xs]
-      (odin "out[key_f(x)] += value_f(x)"))
+      (mut! out[(key-f x)] += (value-f x)))
     out))
 
 (defmacro frequencies
@@ -741,9 +742,9 @@
 (defn- frequencies-impl
   "Implementation helper for `arr.frequencies`."
   [xs: []$T] -> map[T]int #force_inline
-  (let [out (odin "make(map[T]int, len(xs))")]
+  (let [out (make (map T int) (core.count xs))]
     (each [x xs]
-      (odin "out[x] += 1"))
+      (mut! out[x] += 1))
     out))
 
 (defmacro distinct
@@ -759,12 +760,12 @@
   "Implementation helper for `arr.distinct`."
   [xs: []$T] -> [dynamic]T #force_inline
   (let [out (arr.empty T (core.count xs))
-        seen (odin "make(map[T]bool, len(xs))") defer]
+        seen (make (map T bool) (core.count xs)) defer]
     (each [x xs]
-      (if (odin "seen[x]")
+      (if seen[x]
         (continue))
-      (odin "seen[x] = true")
-      (odin "append(&out, x)"))
+      (set! seen[x] true)
+      (arr-push! out x))
     out))
 
 (defmacro distinct-by
@@ -783,13 +784,13 @@
   "Implementation helper for non-field-selector `arr.distinct-by`."
   [f: (fn [x: $T] -> $K), xs: []T] -> [dynamic]T #force_inline
   (let [out (arr.empty T (core.count xs))
-        seen (odin "make(map[K]bool, len(xs))") defer]
+        seen (make (map K bool) (core.count xs)) defer]
     (each [x xs]
       (let [key (f x)]
-        (if (odin "seen[key]")
+        (if seen[key]
           (continue))
-        (odin "seen[key] = true")
-        (odin "append(&out, x)")))
+        (set! seen[key] true)
+        (arr-push! out x)))
     out))
 
 (defmacro sort
@@ -806,7 +807,7 @@
   [xs: []$T] -> [dynamic]T #force_inline
   (let [out (arr.empty T (core.count xs))]
     (arr-into! out xs)
-    (odin "kvist_slice.sort(out[:])")
+    (kvist_slice.sort out[:])
     out))
 
 (defmacro sort!
@@ -820,7 +821,7 @@
 (defn- sort!-impl
   "Implementation helper for `arr.sort!`."
   [xs: []$T] #force_inline
-  (odin "kvist_slice.sort(xs)"))
+  (kvist_slice.sort xs))
 
 (defmacro sort-by
   "Return a sorted copy of `xs` ordered by key function `f`.

@@ -1,0 +1,153 @@
+(package main)
+(import p "kvist:parallel")
+
+(defn square [x: int] -> int
+  (* x x))
+
+(defn price [product-id: int] -> int
+  (+ 100 product-id))
+
+(defn stock [product-id: int] -> int
+  (+ 20 product-id))
+
+(defn combine [base: int, price: int, stock: int] -> int
+  (+ base price stock))
+
+(defn record-signup [user-id: int]
+  (println user-id))
+
+(defn observe [x: int]
+  (odin "_ = x"))
+
+(defn one-task [] -> int
+  (let [task (p.start square 12)]
+    (p.result task)))
+
+(defn one-inline-task [] -> int
+  (let [offset 10
+        task (p.start (fn [x: int] -> int
+                        (+ (square x) offset))
+                      12)]
+    (p.result task)))
+
+(defn two-tasks [] -> int
+  (let [price-task (p.start price 7)
+        stock-task (p.start stock 7)]
+    (+ (p.result price-task) (p.result stock-task))))
+
+(defn many-args [] -> int
+  (let [task (p.start combine 10 20 30)]
+    (p.result task)))
+
+(defn burst [] -> int
+  (let [t1 (p.start square 1)
+        t2 (p.start square 2)
+        t3 (p.start square 3)
+        t4 (p.start square 4)
+        t5 (p.start square 5)
+        t6 (p.start square 6)
+        t7 (p.start square 7)
+        t8 (p.start square 8)]
+    (+ (p.result t1)
+       (p.result t2)
+       (p.result t3)
+       (p.result t4)
+       (p.result t5)
+       (p.result t6)
+       (p.result t7)
+       (p.result t8))))
+
+(defn mapped [] -> int
+  (let [xs ([]int [1 2 3 4])
+        ys (p.map square xs)]
+    (defer (delete ys))
+    (let [total 0]
+      (each [y ys]
+        (set! total (+ total y)))
+      total)))
+
+(defn mapped-with [] -> int
+  (let [xs ([]int [1 2 3 4])
+        ys (p.map-with {workers: 2} square xs)]
+    (defer (delete ys))
+    (let [total 0]
+      (each [y ys]
+        (set! total (+ total y)))
+      total)))
+
+(defn mapped-inline [] -> int
+  (let [offset 10
+        xs ([]int [1 2 3 4])
+        ys (p.map (fn [x: int] -> int
+                    (+ (square x) offset))
+                  xs)]
+    (defer (delete ys))
+    (let [total 0]
+      (each [y ys]
+        (set! total (+ total y)))
+      total)))
+
+(defn each-demo [] -> int
+  (let [offset 10
+        xs ([]int [1 2 3 4])]
+    (p.each observe xs)
+    (p.each-with {workers: 2}
+      (fn [x: int]
+        (observe (+ x offset)))
+      xs)
+    (count xs)))
+
+(defn fire-and-forget []
+  (p.detach record-signup 42))
+
+(defn fire-and-forget-inline []
+  (let [offset 10]
+    (p.detach (fn [x: int]
+                (observe (+ x offset)))
+              32)))
+
+(defn main []
+  (println (+ (one-task)
+              (one-inline-task)
+              (two-tasks)
+              (many-args)
+              (burst)
+              (mapped)
+              (mapped-with)
+              (mapped-inline)
+              (each-demo))))
+
+(comment
+  ;; `parallel.start` is compiler-specialized. The generated Odin uses an OS
+  ;; thread plus a one-value channel, and `parallel.result` performs the
+  ;; receive, thread cleanup, task-data free, and channel destroy.
+  (one-task)
+  ;; => 144
+
+  (one-inline-task)
+  ;; => 154
+
+  (two-tasks)
+  ;; => 134
+
+  (many-args)
+  ;; => 60
+
+  (burst)
+  ;; => 204
+
+  (mapped)
+  ;; => 30
+
+  (mapped-with)
+  ;; => 30
+
+  (mapped-inline)
+  ;; => 70
+
+  (each-demo)
+  ;; => 4
+
+  (fire-and-forget-inline)
+  ;; => nil
+)

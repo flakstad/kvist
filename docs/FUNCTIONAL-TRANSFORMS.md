@@ -57,6 +57,18 @@ Scalar output is explicit with `transduce`:
   (transduce paid-order-totals + 0 orders))
 ```
 
+Reusable `defsource` producers can also feed `into` and `transduce`:
+
+```clojure
+(transduce
+  paid-order-totals
+  + 0
+  (orders-from-file path))
+```
+
+For a complete source example that exercises `each`, `into`, `transduce`, and
+`defer`-based disposal, see `examples/collections/log-source.kvist`.
+
 Supported transformer forms are deliberately small:
 
 ```clojure
@@ -161,6 +173,11 @@ Rough Odin shape:
 })(orders, 0)
 ```
 
+When the source is a `defsource` call, `transduce` uses the same protocol as
+`each` and `into`: open source state, defer disposal if present, call `:next`
+until `ok` is false, and update the accumulator without allocating an
+intermediate collection.
+
 These lowerings are intentionally boring. If the generated Odin becomes hard to
 inspect, the feature is drifting.
 
@@ -205,7 +222,8 @@ The first implementation is strict:
   existing ownership conventions;
 - `transduce` requires an obvious accumulator type from the initial value or an
   annotation;
-- no hidden lazy seqs, iterators, dynamic dispatch, or boxed elements.
+- `defsource` calls are consumed directly by `each`, `into`, and `transduce`;
+- no hidden lazy seqs, dynamic dispatch, or boxed elements.
 
 When any of these rules are not met, the compiler rejects the pipeline and
 suggest the direct `each` loop fallback.
@@ -225,5 +243,7 @@ The implemented surface is:
 3. Implement `(into [dynamic]T transform source)` for slices, fixed arrays, and
    dynamic arrays.
 4. Implement `(transduce transform + init source)` for numeric accumulators.
-5. Example coverage that compares reusable transform usage to the manual `each`
+5. Support `defsource` calls as direct inputs to transform `into` and
+   `transduce`.
+6. Add examples that compare reusable transform usage to the manual `each`
    version.

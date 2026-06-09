@@ -344,8 +344,10 @@ Use `cond` when each branch has its own predicate:
   :else "positive")
 ```
 
-Use `case` when one subject is being classified. Value cases, grouped value
-cases, and union/type payload cases all lower to ordinary Odin switches:
+Use `case` when one subject is being classified. Arms are flat pattern and
+expression pairs; use `(do ...)` when an arm needs multiple forms.
+Value cases, grouped value cases, and union/type payload cases all lower to
+ordinary Odin switches:
 
 ```clojure
 (case status
@@ -360,9 +362,15 @@ cases, and union/type payload cases all lower to ordinary Odin switches:
 
 (case event
   (Connected _) "connected"
+  (Disconnected disc) (do
+                        (println disc.reason)
+                        "disconnected")
   (Data data) data.payload
   :else "unknown")
 ```
+
+`switch` remains available for explicit Odin-shaped switch lowering, but `case`
+is the preferred user-facing classification form.
 
 Use `each` for side-effect iteration:
 
@@ -395,11 +403,20 @@ bool]` results.
   (comp
     (filter odin-path?))
   (files root))
+
+(transduce
+  (comp
+    (filter odin-path?)
+    (map path-length))
+  + 0
+  (files root))
 ```
 
 Sources lower to explicit Odin loops around the state object. They are consumed
-by `each` and transform `into`. They are not general lazy sequences or
-first-class source values.
+by `each`, transform `into`, and transform `transduce` in the initial surface;
+they are not general lazy sequences or first-class source values yet.
+See `examples/collections/log-source.kvist` for a disposable source consumed by
+all three forms.
 
 Use `for` for eager data-building comprehensions:
 
@@ -521,7 +538,8 @@ loops rather than intermediate arrays.
 
 The transform surface is intentionally small: `comp` supports `map` and
 `filter` steps with known one-argument functions or field selectors. `into`
-returns owned `[dynamic]T` arrays. `transduce` supports `+` as the reducer. See
+currently returns owned `[dynamic]T` arrays. `transduce` currently supports `+`
+as the reducer and can consume slices, arrays, or `defsource` calls. See
 `docs/FUNCTIONAL-TRANSFORMS.md` for limits and lowering.
 
 ## Operators

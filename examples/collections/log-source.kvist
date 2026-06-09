@@ -1,0 +1,66 @@
+// Source protocol over log-like lines with each, into, and transduce consumers.
+(package main)
+
+(defstruct Log_Source {
+  lines: []string
+  index: int
+  disposed?: bool
+})
+
+(defn open-log-lines [lines: []string] -> Log_Source
+  (Log_Source {lines: lines index: 0 disposed?: false}))
+
+(defn next-log-line [src: ^Log_Source] -> [line: string ok: bool]
+  (if (< src.index (len src.lines))
+    (let [line src.lines[src.index]]
+      (set! src.index (+ src.index 1))
+      (return line true))
+    (return "" false)))
+
+(defn dispose-log-lines [src: ^Log_Source]
+  (set! src.disposed? true))
+
+(defsource log-lines [lines: []string] -> string
+  (open-log-lines lines)
+  :next next-log-line
+  :dispose dispose-log-lines)
+
+(defn error-line? [line: string] -> bool
+  (or (= line "ERROR disk")
+      (= line "ERROR network")))
+
+(defn line-length [line: string] -> int
+  (len line))
+
+(deftransform error-line-lengths
+  (comp
+    (filter error-line?)
+    (map line-length)))
+
+(defn total-log-bytes [] -> int
+  (let [lines ([]string ["INFO boot" "ERROR disk" "WARN hot" "ERROR network"])
+        total 0]
+    (each [line (log-lines lines)]
+      (set! total (+ total (len line))))
+    total))
+
+(defn error-count [] -> int
+  (let [lines ([]string ["INFO boot" "ERROR disk" "WARN hot" "ERROR network"])
+        errors (into [dynamic]string
+                 (comp
+                   (filter error-line?))
+                 (log-lines lines))]
+    (defer (delete errors))
+    (len errors)))
+
+(defn total-error-bytes [] -> int
+  (let [lines ([]string ["INFO boot" "ERROR disk" "WARN hot" "ERROR network"])]
+    (transduce error-line-lengths + 0 (log-lines lines))))
+
+(defn main []
+  (println (+ (total-log-bytes) (error-count) (total-error-bytes))))
+
+(comment
+  (+ (total-log-bytes) (error-count) (total-error-bytes))
+  ;; => 65
+)

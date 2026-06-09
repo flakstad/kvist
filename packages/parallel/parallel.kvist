@@ -1,0 +1,59 @@
+(package parallel)
+(import chan "core:sync/chan")
+(import os "core:os")
+(import thread "core:thread")
+
+(defmacro start
+  "Start `(worker args...)` on another OS thread and return a task handle.
+
+  This is compiler-specialized for known worker functions or inline `fn`
+  literals. The generated Odin uses `core:thread` for execution and a one-value
+  `core:sync/chan` channel for result transport."
+  [worker & args]
+  (quasiquote
+    (parallel-start (unquote worker) (splice args))))
+
+(defmacro result
+  "Block until a task started by `parallel.start` finishes, clean up its
+  thread/channel/task-data resources, and return the worker result."
+  [task]
+  (quasiquote
+    (parallel-result (unquote task))))
+
+(defmacro detach
+  "Start `(worker args...)` on another OS thread without returning a task handle.
+
+  Detached workers may be known named functions or inline `fn` literals. They
+  are for fire-and-forget side effects and must not return a value. The
+  generated thread is self-cleaning and frees its task data after the worker
+  returns."
+  [worker & args]
+  (quasiquote
+    (parallel-detach (unquote worker) (splice args))))
+
+(defmacro map
+  "Apply a named or inline one-argument `worker` to every item in `xs` using a
+  bounded set of OS threads, preserve input order, and return an owned dynamic
+  array."
+  [worker xs]
+  (quasiquote
+    (parallel-map (unquote worker) (unquote xs) 0)))
+
+(defmacro map-with
+  "Like `map`, but accepts `{workers: n}` to control the worker count."
+  [options worker xs]
+  (quasiquote
+    (parallel-map-with (unquote options) (unquote worker) (unquote xs))))
+
+(defmacro each
+  "Apply a named or inline one-argument side-effecting `worker` to every item in
+  `xs` using a bounded set of OS threads."
+  [worker xs]
+  (quasiquote
+    (parallel-each (unquote worker) (unquote xs) 0)))
+
+(defmacro each-with
+  "Like `each`, but accepts `{workers: n}` to control the worker count."
+  [options worker xs]
+  (quasiquote
+    (parallel-each-with (unquote options) (unquote worker) (unquote xs))))

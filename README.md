@@ -506,7 +506,10 @@ current Odin block or procedure.
     lowering to `quaternion(x=x, y=y, z=z, w=w)`
 - `(type Type)` typeid expressions, such as
   `(linalg.identity (type matrix[2 2]f32))`
-- `(make Type args...)` runtime/allocator-backed construction
+- `(make Type args...)` runtime/allocator-backed construction, using the same
+  type parser as declarations, e.g. `(make map[string][dynamic]int)`
+- `(alloc Type)` and `(alloc Type allocator)` heap allocation, lowering to
+  Odin `new(Type)` and `new(Type, allocator)`
 - `(arr.empty elem-type [capacity])`, `(arr.dynamic elem-type [items...])`, `(arr.fixed elem-type [items...])`
 - `(map.empty key-type value-type [capacity])`, `(map.of key-type value-type {"k" v ...})`
 - `(set.empty elem-type [capacity])`, `(set.of elem-type [a b c])`
@@ -631,7 +634,8 @@ current Odin block or procedure.
 - pointer types can be written as `^T` or `(ptr T)`
 - `x^` and `(deref expr)` for pointer dereference; `(addr place)` and `(& place)` for addresses
 - numbers, booleans, `nil`, and `(nil? value)`
-- calls: `(foo a b)` -> `foo(a, b)`
+- calls: `(foo a b)` -> `foo(a, b)`; field-label brace arguments lower to
+  Odin named arguments, e.g. `(foo a {timeout-ms: 50})` -> `foo(a, timeout_ms = 50)`
 - operators: `(= a b)`, `(+ a b)`, `(<= i 10)`, `(and a b)`, etc. emit infix
   - `=`, `<`, `<=`, `>`, and `>=` accept two or more operands and compare
     adjacent values once, e.g. `(< a b c)` means `a < b && b < c`

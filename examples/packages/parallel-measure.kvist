@@ -1,0 +1,123 @@
+// Small measurement harness for kvist:parallel.
+//
+// This is intentionally not a benchmark test. It prints machine-dependent
+// timings that are useful for checking task overhead and whether CPU-bound work
+// benefits from running concurrently on the current system.
+(package main)
+(import os "core:os")
+(import time "core:time")
+(import p "kvist:parallel")
+
+(def Work-Rounds: int 3000000)
+(def Overhead-Tasks: int 200)
+(def Detach-Tasks: int 200)
+
+(defstruct Work-Item {
+  index: int
+  seed: int
+})
+
+(defn elapsed-us [start: time.Time] -> f64
+  (time.duration_microseconds (time.since start)))
+
+(defn burn [seed: int] -> int
+  (let [i 0
+        acc seed]
+    (while (< i Work-Rounds)
+      (set! acc (% (+ (* acc 33) i) 1000003))
+      (set! i (+ i 1)))
+    acc))
+
+(defn tiny [x: int] -> int
+  x)
+
+(defn noop [x: int]
+  (odin "_ = x"))
+
+(defn sequential-four [] -> int
+  (+ (burn 1)
+     (burn 2)
+     (burn 3)
+     (burn 4)))
+
+(defn parallel-four [] -> int
+  (let [a (p.start burn 1)
+        b (p.start burn 2)
+        c (p.start burn 3)
+        d (p.start burn 4)]
+    (+ (p.result a)
+       (p.result b)
+       (p.result c)
+       (p.result d))))
+
+(defn parallel-map-four [] -> int
+  (let [seeds ([]int [1 2 3 4])
+        results (p.map burn seeds)]
+    (defer (delete results))
+    (let [total 0]
+      (each [value results]
+        (set! total (+ total value)))
+      total)))
+
+(defn parallel-each-four [] -> int
+  (let [jobs ([]Work-Item [(Work-Item {index: 0 seed: 1})
+                           (Work-Item {index: 1 seed: 2})
+                           (Work-Item {index: 2 seed: 3})
+                           (Work-Item {index: 3 seed: 4})])
+        results (make [dynamic]int 4)]
+    (defer (delete results))
+    (p.each (fn [job: Work-Item]
+              (set! results[job.index] (burn job.seed)))
+            jobs)
+    (let [total 0]
+      (each [value results]
+        (set! total (+ total value)))
+      total)))
+
+(defn joined-tiny-total [n: int] -> int
+  (let [i 0
+        total 0]
+    (while (< i n)
+      (let [task (p.start tiny i)]
+        (set! total (+ total (p.result task))))
+      (set! i (+ i 1)))
+    total))
+
+(defn detached-noop-total [n: int] -> int
+  (let [i 0]
+    (while (< i n)
+      (p.detach noop i)
+      (set! i (+ i 1)))
+    i))
+
+(defn main []
+  (println "cores" (os.get_processor_core_count))
+  (println "work_rounds" Work-Rounds)
+
+  (let [seq-start (time.now)
+        seq-checksum (sequential-four)
+        seq-us (elapsed-us seq-start)
+        par-start (time.now)
+        par-checksum (parallel-four)
+        par-us (elapsed-us par-start)
+        map-start (time.now)
+        map-checksum (parallel-map-four)
+        map-us (elapsed-us map-start)
+        each-start (time.now)
+        each-checksum (parallel-each-four)
+        each-us (elapsed-us each-start)
+        join-start (time.now)
+        join-checksum (joined-tiny-total Overhead-Tasks)
+        join-us (elapsed-us join-start)
+        detach-start (time.now)
+        detach-count (detached-noop-total Detach-Tasks)
+        detach-us (elapsed-us detach-start)]
+    (println "sequential_us" seq-us "checksum" seq-checksum)
+    (println "parallel_us" par-us "checksum" par-checksum)
+    (println "speedup_x" (/ seq-us par-us))
+    (println "parallel_map_us" map-us "checksum" map-checksum)
+    (println "map_speedup_x" (/ seq-us map-us))
+    (println "parallel_each_us" each-us "checksum" each-checksum)
+    (println "each_speedup_x" (/ seq-us each-us))
+    (println "joined_task_us" join-us "tasks" Overhead-Tasks "avg_us" (/ join-us (f64 Overhead-Tasks)) "checksum" join-checksum)
+    (println "detach_launch_us" detach-us "tasks" Detach-Tasks "avg_us" (/ detach-us (f64 Detach-Tasks)) "count" detach-count)))
