@@ -1,4 +1,4 @@
-// Non-mutating updates for plain struct values.
+// Non-mutating field replacement for plain struct values.
 (package main)
 (import core "kvist:core")
 
@@ -12,21 +12,15 @@
   active?: bool
 })
 
-(defn inc [x: int] -> int
-  (+ x 1))
-
-(defn add-years [age: int, years: int] -> int
-  (+ age years))
-
 (defn birthday [user: User] -> User
-  (update user.age inc))
+  (assoc user.age (+ user.age 1)))
 
 (defn rename [user: User, name: string] -> User
   (assoc user.profile.name name))
 
 (defn retire [user: User] -> User
   (-> user
-    (update .age + 30)
+    (assoc .age (+ user.age 30))
     (assoc .profile.name "Ada Lovelace")
     (assoc .active? false)))
 

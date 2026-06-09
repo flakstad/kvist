@@ -94,10 +94,11 @@
   (forms))
 
 (defmacro switch
-  "Compatibility helper for Odin-style switch lowering.
+  "Lower an Odin-shaped switch over `value`.
 
   Clauses are written as case.expression pairs, with `:else expr` for the
-  fallback. Prefer `case` for new Kvist code."
+  fallback. Use `case` for Kvist value/type classification; use `switch` when
+  writing Odin-style switch clauses directly."
   [value & clauses]
   (quasiquote
     (core-switch (unquote value) (splice clauses))))
@@ -333,17 +334,6 @@
   [place-or-target value-or-selector & rest]
   (quasiquote
     (core-assoc (unquote place-or-target) (unquote value-or-selector) (splice rest))))
-
-(defmacro update
-  "Return a shallow copy of a struct with one field updated.
-
-  `(update value.field f args...)` copies `value`, computes
-  `(f copy.field args...)`, writes that result to the copy, and returns the
-  copy. `(update value .field f args...)` is also accepted. Use `update!` when
-  mutating an existing place is intended."
-  [place-or-target updater-or-selector & rest]
-  (quasiquote
-    (core-update (unquote place-or-target) (unquote updater-or-selector) (splice rest))))
 
 (defmacro delete!
   "Remove `key` from a mutable map-like target in place.

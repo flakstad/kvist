@@ -109,7 +109,7 @@ broadest helper surface and still uses the most compiler substrate.
 Kvist now has a small functional-programming layer that still lowers to explicit
 Odin:
 
-- `assoc` / `update` for value-style struct updates, including nested fields
+- `assoc` for value-style struct field replacement, including nested fields
 - `->` for single-value function pipelines
 - `deftransform`, `comp`, `into`, and `transduce` for reusable fused transform
   pipelines
@@ -123,8 +123,8 @@ implementation:
   inline callbacks, richer stop/error signaling, and stream/event sources
 - parallel processing as a package surface rather than core syntax, probably
   around futures, pools, ordered maps, cancellation, and typed channels
-- pattern matching over unions and structs, including whether `switch` remains
-  only a compatibility spelling while `case` becomes the user-facing form
+- pattern matching over unions and structs, including how much richer `case`
+  should become while `switch` stays the explicit Odin-shaped form
 - persistent immutable data structures, deferred until concrete app-state use
   cases justify a package-level runtime commitment
 

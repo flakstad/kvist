@@ -45,7 +45,7 @@ form from Emacs; many keep `main` small and put useful calls in a
 - [`collections/functional-pipelines.kvist`](./collections/functional-pipelines.kvist):
   eager threaded pipelines, bang-buffer helpers, and direct loop fallback.
 - [`collections/value-updates.kvist`](./collections/value-updates.kvist):
-  shallow non-mutating struct updates with `assoc` and `update`.
+  shallow non-mutating struct field replacement with `assoc`.
 - [`collections/transforms.kvist`](./collections/transforms.kvist):
   reusable fused `deftransform` pipelines with `into` and `transduce`.
 - [`collections/orders-report.kvist`](./collections/orders-report.kvist):

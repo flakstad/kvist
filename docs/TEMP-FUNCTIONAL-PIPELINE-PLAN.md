@@ -37,11 +37,9 @@ After the eager pipeline path feels solid:
 - improved nested owned-result diagnostics for pipeline misuse;
 - fixed imported `arr.reduce` thread-step lowering;
 - added executable functional pipeline examples;
-- added shallow non-mutating struct updates:
+- added shallow non-mutating struct field replacement:
   - preferred spelling: `(assoc value.field new-value)`;
-  - preferred spelling: `(update value.field f args...)`;
-  - compatibility spelling: `(assoc value .field new-value)` and
-    `(update value .field f args...)`.
+  - threaded spelling: `(-> value (assoc .field new-value))`.
 - added an initial reusable fused transform prototype in
   [`FUNCTIONAL-TRANSFORMS.md`](./FUNCTIONAL-TRANSFORMS.md).
 

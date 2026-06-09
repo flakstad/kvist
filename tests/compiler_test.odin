@@ -470,7 +470,7 @@ package_symbols_source_emits_core_update_bang_helper :: proc(t: ^testing.T) {
     defer delete(output)
 
     testing.expect_value(t, strings.contains(output, "macro\tcore.update!\t"), true)
-    testing.expect_value(t, strings.contains(output, "macro\tcore.update\t"), true)
+    testing.expect_value(t, strings.contains(output, "macro\tcore.update\t"), false)
     testing.expect_value(t, strings.contains(output, "macro\tcore.assoc\t"), true)
     testing.expect_value(t, strings.contains(output, "macro\tcore.when\t"), true)
     testing.expect_value(t, strings.contains(output, "macro\tcore.cond\t"), true)
@@ -1768,6 +1768,61 @@ reject_slash_package_access_in_source :: proc(t: ^testing.T) {
     }
     defer delete(err.message)
     testing.expect_value(t, err.message, "use `arr.map` for package access")
+}
+
+@(test)
+reject_internal_lowering_call_names_in_source :: proc(t: ^testing.T) {
+    source := `(package main)
+(import arr "kvist:arr")
+
+(defn inc [x: int] -> int
+  (+ x 1))
+
+(defn bad-core [] -> int
+  (core-count [1 2 3]))
+
+(defn bad-arr [] -> [dynamic]int
+  (arr-map inc [1 2 3]))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+    defer delete(err.message)
+    testing.expect_value(t, err.message, "`core-count` is an internal lowering name; use `count`")
+
+    source_arr := `(package main)
+(import arr "kvist:arr")
+
+(defn inc [x: int] -> int
+  (+ x 1))
+
+(defn bad [] -> [dynamic]int
+  (arr-map inc [1 2 3]))`
+
+    _, err_arr, ok_arr := kvist.compile_source(source_arr)
+    testing.expect_value(t, ok_arr, false)
+    if ok_arr {
+        return
+    }
+    defer delete(err_arr.message)
+    testing.expect_value(t, err_arr.message, "`arr-map` is an internal lowering name; use `arr.map`")
+}
+
+@(test)
+reject_internal_lowering_call_names_in_eval_source :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(def xs: []int ([]int [1 2 3]))`
+
+    _, err, ok := kvist.compile_eval_source_with_map(source, `(core-count xs)`)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+    defer delete(err.message)
+    testing.expect_value(t, err.message, "`core-count` is an internal lowering name; use `count`")
 }
 
 @(test)
@@ -8795,7 +8850,7 @@ compile_update_bang_rejects_non_place :: proc(t: ^testing.T) {
 }
 
 @(test)
-compile_shallow_struct_assoc_and_update_exprs :: proc(t: ^testing.T) {
+compile_shallow_struct_assoc_exprs :: proc(t: ^testing.T) {
     source := `(package main)
 (import core "kvist:core")
 
@@ -8814,10 +8869,8 @@ compile_shallow_struct_assoc_and_update_exprs :: proc(t: ^testing.T) {
 (defn score [] -> int
   (let [point (Point {x: 4 y: 5 name: "old"})
         older (assoc point.name "new")
-        newer (update point.y inc)
-        scaled (update newer.x add-scaled 2 3)
-        legacy (assoc scaled .name "legacy")]
-    (+ point.y newer.y scaled.x (len older.name) (len legacy.name))))`
+        legacy (assoc older .name "legacy")]
+    (+ point.y older.y (len older.name) (len legacy.name))))`
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
@@ -8832,20 +8885,12 @@ compile_shallow_struct_assoc_and_update_exprs :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "kvist_update_1.name = kvist_value"), true)
     testing.expect_value(t, strings.contains(output, "return kvist_update_1"), true)
     testing.expect_value(t, strings.contains(output, "})(point, \"new\")"), true)
-    testing.expect_value(t, strings.contains(output, "newer := (proc(kvist_target: Point) -> Point {"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_update_2 := kvist_target"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_update_2.y += 1"), true)
-    testing.expect_value(t, strings.contains(output, "})(point)"), true)
-    testing.expect_value(t, strings.contains(output, "scaled := (proc(kvist_target: Point, kvist_arg_1: int, kvist_arg_2: int) -> Point {"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_update_3 := kvist_target"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_update_3.x = add_scaled(kvist_update_3.x, kvist_arg_1, kvist_arg_2)"), true)
-    testing.expect_value(t, strings.contains(output, "})(newer, 2, 3)"), true)
     testing.expect_value(t, strings.contains(output, "legacy := (proc(kvist_target: Point, kvist_value: string) -> Point {"), true)
-    testing.expect_value(t, strings.contains(output, "})(scaled, \"legacy\")"), true)
+    testing.expect_value(t, strings.contains(output, "})(older, \"legacy\")"), true)
 }
 
 @(test)
-compile_nested_struct_assoc_and_update_exprs :: proc(t: ^testing.T) {
+compile_nested_struct_assoc_exprs :: proc(t: ^testing.T) {
     source := `(package main)
 
 (defstruct Profile {
@@ -8863,9 +8908,8 @@ compile_nested_struct_assoc_and_update_exprs :: proc(t: ^testing.T) {
 
 (defn score [user: User] -> int
   (let [renamed (assoc user.profile.name "Ada")
-        older (update renamed.profile.age inc)
-        active (assoc older .active? true)]
-    (+ older.profile.age (len renamed.profile.name))))`
+        active (assoc renamed .active? true)]
+    (+ active.profile.age (len renamed.profile.name))))`
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
@@ -8879,14 +8923,11 @@ compile_nested_struct_assoc_and_update_exprs :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "kvist_update_1 := kvist_target"), true)
     testing.expect_value(t, strings.contains(output, "kvist_update_1.profile.name = kvist_value"), true)
     testing.expect_value(t, strings.contains(output, "})(user, \"Ada\")"), true)
-    testing.expect_value(t, strings.contains(output, "older := (proc(kvist_target: User) -> User {"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_update_2.profile.age += 1"), true)
-    testing.expect_value(t, strings.contains(output, "})(renamed)"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_update_3.active_p = kvist_value"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_update_2.active_p = kvist_value"), true)
 }
 
 @(test)
-compile_threaded_shallow_struct_assoc_and_update_exprs :: proc(t: ^testing.T) {
+compile_threaded_shallow_struct_assoc_exprs :: proc(t: ^testing.T) {
     source := `(package main)
 (import core "kvist:core")
 
@@ -8898,7 +8939,6 @@ compile_threaded_shallow_struct_assoc_and_update_exprs :: proc(t: ^testing.T) {
 
 (defn score [user: User] -> int
   (let [updated (-> user
-                  (update .age + 30)
                   (assoc .active? false)
                   (assoc .name "Ada"))]
     (+ updated.age (len updated.name))))`
@@ -8912,13 +8952,12 @@ compile_threaded_shallow_struct_assoc_and_update_exprs :: proc(t: ^testing.T) {
     defer delete(output)
 
     testing.expect_value(t, strings.contains(output, "kvist_update_1 := kvist_target"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_update_1.age += (kvist_arg_1)"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_update_2.active_p = kvist_value"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_update_3.name = kvist_value"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_update_1.active_p = kvist_value"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_update_2.name = kvist_value"), true)
 }
 
 @(test)
-compile_threaded_nested_struct_assoc_and_update_exprs :: proc(t: ^testing.T) {
+compile_threaded_nested_struct_assoc_exprs :: proc(t: ^testing.T) {
     source := `(package main)
 (import core "kvist:core")
 
@@ -8935,7 +8974,6 @@ compile_threaded_nested_struct_assoc_and_update_exprs :: proc(t: ^testing.T) {
 (defn score [user: User] -> int
   (let [updated (-> user
                   (assoc .profile.name "Ada")
-                  (update .profile.age + 2)
                   (assoc .active? true))]
     (+ updated.profile.age (len updated.profile.name))))`
 
@@ -8948,12 +8986,11 @@ compile_threaded_nested_struct_assoc_and_update_exprs :: proc(t: ^testing.T) {
     defer delete(output)
 
     testing.expect_value(t, strings.contains(output, "kvist_update_1.profile.name = kvist_value"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_update_2.profile.age += (kvist_arg_1)"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_update_3.active_p = kvist_value"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_update_2.active_p = kvist_value"), true)
 }
 
 @(test)
-compile_threaded_shallow_struct_update_from_proc_return :: proc(t: ^testing.T) {
+compile_threaded_shallow_struct_assoc_from_proc_return :: proc(t: ^testing.T) {
     source := `(package main)
 (import core "kvist:core")
 
@@ -8970,7 +9007,7 @@ compile_threaded_shallow_struct_update_from_proc_return :: proc(t: ^testing.T) {
 
 (defn score [] -> int
   (let [updated (-> (make-user)
-                  (update .age inc))]
+                  (assoc .age 42))]
     updated.age))`
 
     output, err, ok := kvist.compile_source(source)
@@ -8981,12 +9018,12 @@ compile_threaded_shallow_struct_update_from_proc_return :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    testing.expect_value(t, strings.contains(output, "kvist_update_1.age += 1"), true)
-    testing.expect_value(t, strings.contains(output, "})(make_user())"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_update_1.age = kvist_value"), true)
+    testing.expect_value(t, strings.contains(output, "})(make_user(), 42)"), true)
 }
 
 @(test)
-reject_threaded_shallow_struct_update_unknown_field :: proc(t: ^testing.T) {
+reject_threaded_update_is_removed :: proc(t: ^testing.T) {
     source := `(package main)
 (import core "kvist:core")
 
@@ -8999,7 +9036,7 @@ reject_threaded_shallow_struct_update_unknown_field :: proc(t: ^testing.T) {
 
 (defn bad [user: User] -> User
   (-> user
-    (update .missing inc)))`
+    (update .age inc)))`
 
     _, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, false)
@@ -9007,7 +9044,7 @@ reject_threaded_shallow_struct_update_unknown_field :: proc(t: ^testing.T) {
         return
     }
 
-    testing.expect_value(t, err.message, "core/update could not find field .missing on User")
+    testing.expect_value(t, err.message, "`update` has been removed; bind a copy and use `assoc`, or mutate a place with `update!`")
 }
 
 @(test)
@@ -9029,55 +9066,7 @@ reject_threaded_shallow_struct_assoc_unknown_field :: proc(t: ^testing.T) {
         return
     }
 
-    testing.expect_value(t, err.message, "core/assoc could not find field .missing on User")
-}
-
-@(test)
-reject_threaded_shallow_struct_update_function_literal :: proc(t: ^testing.T) {
-    source := `(package main)
-(import core "kvist:core")
-
-(defstruct User {
-  age: int
-})
-
-(defn bad [user: User] -> User
-  (-> user
-    (update .age (fn [x: int] -> int
-                   x))))`
-
-    _, err, ok := kvist.compile_source(source)
-    testing.expect_value(t, ok, false)
-    if ok {
-        return
-    }
-
-    testing.expect_value(t, err.message, "core/update currently expects an updater function or operator symbol")
-}
-
-@(test)
-reject_threaded_shallow_struct_update_without_obvious_target_type :: proc(t: ^testing.T) {
-    source := `(package main)
-(import core "kvist:core")
-
-(defstruct User {
-  age: int
-})
-
-(defn inc [x: int] -> int
-  (+ x 1))
-
-(defn bad [user: User] -> User
-  (-> (odin "user")
-    (update .age inc)))`
-
-    _, err, ok := kvist.compile_source(source)
-    testing.expect_value(t, ok, false)
-    if ok {
-        return
-    }
-
-    testing.expect_value(t, err.message, "threaded core/update requires an obvious struct type before the .field step; bind or annotate the value first")
+    testing.expect_value(t, err.message, "assoc could not find field .missing on User")
 }
 
 @(test)
@@ -9098,11 +9087,11 @@ reject_shallow_struct_update_non_field_selector :: proc(t: ^testing.T) {
     }
     defer delete(err.message)
 
-    testing.expect_value(t, err.message, "core/assoc expects a field place such as user.name or user.address.city")
+    testing.expect_value(t, err.message, "assoc expects a field place such as user.name or user.address.city")
 }
 
 @(test)
-reject_shallow_struct_update_unknown_field :: proc(t: ^testing.T) {
+reject_update_is_removed :: proc(t: ^testing.T) {
     source := `(package main)
 
 (defstruct Point {
@@ -9113,7 +9102,7 @@ reject_shallow_struct_update_unknown_field :: proc(t: ^testing.T) {
   (+ x 1))
 
 (defn bad [point: Point] -> Point
-  (update point.missing inc))`
+  (update point.x inc))`
 
     _, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, false)
@@ -9122,12 +9111,13 @@ reject_shallow_struct_update_unknown_field :: proc(t: ^testing.T) {
     }
     defer delete(err.message)
 
-    testing.expect_value(t, err.message, "core/update could not find field .missing on Point")
+    testing.expect_value(t, err.message, "`update` has been removed; bind a copy and use `assoc`, or mutate a place with `update!`")
 }
 
 @(test)
-reject_nested_struct_update_unknown_field :: proc(t: ^testing.T) {
+reject_core_update_package_access_is_removed :: proc(t: ^testing.T) {
     source := `(package main)
+(import core "kvist:core")
 
 (defstruct Profile {
   age: int
@@ -9141,7 +9131,7 @@ reject_nested_struct_update_unknown_field :: proc(t: ^testing.T) {
   (+ x 1))
 
 (defn bad [user: User] -> User
-  (update user.profile.missing inc))`
+  (core.update user.profile.age inc))`
 
     _, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, false)
@@ -9150,7 +9140,7 @@ reject_nested_struct_update_unknown_field :: proc(t: ^testing.T) {
     }
     defer delete(err.message)
 
-    testing.expect_value(t, err.message, "core/update could not find field .missing on Profile")
+    testing.expect_value(t, err.message, "`update` has been removed; bind a copy and use `assoc`, or mutate a place with `update!`")
 }
 
 @(test)

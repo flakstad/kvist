@@ -157,6 +157,189 @@ validate_surface_top_level_order :: proc(forms: []CST_Top_Form) -> (Compile_Erro
     return Compile_Error{}, true
 }
 
+canonical_surface_head_for_internal_name :: proc(head: string) -> (canonical: string, ok: bool) {
+    switch head {
+    case "core-count":
+        return "count", true
+    case "core-empty?":
+        return "empty?", true
+    case "core-get":
+        return "get", true
+    case "core-slice":
+        return "slice", true
+    case "core-contains?":
+        return "contains?", true
+    case "core-in":
+        return "in", true
+    case "core-not-in":
+        return "not-in", true
+    case "core-or-else":
+        return "or-else", true
+    case "core-println":
+        return "println", true
+    case "core-tap":
+        return "tap>", true
+    case "core-doc":
+        return "doc", true
+    case "core-switch":
+        return "switch", true
+    case "core-thread-first":
+        return "->", true
+    case "core-thread-last":
+        return "->>", true
+    case "core-update!":
+        return "update!", true
+    case "core-delete!":
+        return "delete!", true
+    case "core-update":
+        return "bind a copy and use update! or set!", true
+    case "arr-map":
+        return "arr.map", true
+    case "arr-filter":
+        return "arr.filter", true
+    case "arr-remove":
+        return "arr.remove", true
+    case "arr-reduce":
+        return "arr.reduce", true
+    case "arr-map-indexed":
+        return "arr.map-indexed", true
+    case "arr-keep":
+        return "arr.keep", true
+    case "arr-mapcat":
+        return "arr.mapcat", true
+    case "arr-map!":
+        return "arr.map!", true
+    case "arr-filter!":
+        return "arr.filter!", true
+    case "arr-remove!":
+        return "arr.remove!", true
+    case "arr-keep!":
+        return "arr.keep!", true
+    case "arr-into":
+        return "arr.into", true
+    case "arr-into!":
+        return "arr.into!", true
+    case "arr-empty":
+        return "arr.empty", true
+    case "arr-dynamic":
+        return "arr.dynamic", true
+    case "arr-fixed":
+        return "arr.fixed", true
+    case "arr-push!":
+        return "arr.push!", true
+    case "arr-shuffle":
+        return "arr.shuffle", true
+    case "arr-sort":
+        return "arr.sort", true
+    case "arr-sort-by":
+        return "arr.sort-by", true
+    case "arr-sort-by!":
+        return "arr.sort-by!", true
+    case "arr-partition":
+        return "arr.partition", true
+    case "arr-partition-all":
+        return "arr.partition-all", true
+    case "arr-partition-by":
+        return "arr.partition-by", true
+    case "arr-index-by":
+        return "arr.index-by", true
+    case "arr-group-by":
+        return "arr.group-by", true
+    case "arr-count-by":
+        return "arr.count-by", true
+    case "arr-sum-by":
+        return "arr.sum-by", true
+    case "arr-frequencies":
+        return "arr.frequencies", true
+    case "arr-distinct":
+        return "arr.distinct", true
+    case "arr-distinct-by":
+        return "arr.distinct-by", true
+    case "arr-take":
+        return "arr.take", true
+    case "arr-drop":
+        return "arr.drop", true
+    case "arr-drop-last":
+        return "arr.drop-last", true
+    case "arr-butlast":
+        return "arr.butlast", true
+    case "arr-split-at":
+        return "arr.split-at", true
+    case "arr-take-while":
+        return "arr.take-while", true
+    case "arr-drop-while":
+        return "arr.drop-while", true
+    case "arr-find":
+        return "arr.find", true
+    case "arr-some?":
+        return "arr.some?", true
+    case "arr-every?":
+        return "arr.every?", true
+    case "arr-get":
+        return "arr.get", true
+    case "map-empty":
+        return "map.empty", true
+    case "map-of":
+        return "map.of", true
+    case "map-dissoc!":
+        return "map.dissoc!", true
+    case "set-empty":
+        return "set.empty", true
+    case "set-of":
+        return "set.of", true
+    case "str-split":
+        return "str.split", true
+    case "str-join":
+        return "str.join", true
+    case "str-replace":
+        return "str.replace", true
+    }
+    return "", false
+}
+
+validate_surface_internal_call_names_form :: proc(form: CST_Form) -> (Compile_Error, bool) {
+    if form.kind == .List && len(form.items) > 0 && form.items[0].kind == .Symbol {
+        head := form.items[0]
+        canonical, deprecated := canonical_surface_head_for_internal_name(head.text)
+        if deprecated {
+            return Compile_Error{
+                message = fmt.tprintf("`%s` is an internal lowering name; use `%s`", head.text, canonical),
+                span = head.span,
+            }, false
+        }
+    }
+    #partial switch form.kind {
+    case .List, .Vector, .Brace, .Set:
+        for item in form.items {
+            err_item, ok_item := validate_surface_internal_call_names_form(item)
+            if !ok_item {
+                return err_item, false
+            }
+        }
+    }
+    return Compile_Error{}, true
+}
+
+validate_surface_internal_call_names :: proc(forms: []CST_Top_Form) -> (Compile_Error, bool) {
+    for top in forms {
+        err_form, ok_form := validate_surface_internal_call_names_form(top.form)
+        if !ok_form {
+            return err_form, false
+        }
+    }
+    return Compile_Error{}, true
+}
+
+validate_package_files_surface_internal_call_names :: proc(files: []Package_File) -> (Compile_Error, bool) {
+    for file in files {
+        err_file, ok_file := validate_surface_internal_call_names(file.forms[:])
+        if !ok_file {
+            return err_file, false
+        }
+    }
+    return Compile_Error{}, true
+}
+
 contains_text :: proc(items: []string, value: string) -> bool {
     for item in items {
         if item == value {
@@ -331,6 +514,39 @@ is_shipped_source_import_path :: proc(path: string) -> bool {
     }
     defer delete(candidate)
     return os.exists(candidate) && os.is_dir(candidate)
+}
+
+is_shipped_package_filesystem_path :: proc(path: string) -> bool {
+    root, ok_root := repo_root_for_path(path)
+    if !ok_root {
+        root, ok_root = repo_root_for_path(".")
+    }
+    if !ok_root {
+        return false
+    }
+    defer delete(root)
+
+    packages_dir, join_err := os.join_path({root, "packages"}, context.allocator)
+    if join_err != nil {
+        return false
+    }
+    defer delete(packages_dir)
+
+    abs_packages, packages_err := os.get_absolute_path(packages_dir, context.allocator)
+    if packages_err != nil {
+        return false
+    }
+    defer delete(abs_packages)
+
+    abs_path, path_err := os.get_absolute_path(path, context.allocator)
+    if path_err != nil {
+        return false
+    }
+    defer delete(abs_path)
+
+    prefix := fmt.tprintf("%s/", abs_packages)
+    defer delete(prefix)
+    return abs_path == abs_packages || strings.has_prefix(abs_path, prefix)
 }
 
 is_source_import_path :: proc(path: string) -> bool {
@@ -1597,6 +1813,12 @@ load_root_file_forms :: proc(path: string) -> (Loaded_Forms, Compile_Error, bool
     if len(files) == 0 {
         return Loaded_Forms{}, Compile_Error{message = fmt.tprintf("could not read file: %s", path)}, false
     }
+    if !is_shipped_package_filesystem_path(path) {
+        err_surface, ok_surface := validate_package_files_surface_internal_call_names(files[:])
+        if !ok_surface {
+            return Loaded_Forms{}, err_surface, false
+        }
+    }
 
     if files[0].package_name != "" {
         dir, _ := os.split_path(path)
@@ -2090,6 +2312,10 @@ compile_source_with_map :: proc(source: string) -> (result: Emit_Result, err: Co
     if !ok_order {
         return result, clone_compile_error(err_order, result_allocator), false
     }
+    err_surface, ok_surface := validate_surface_internal_call_names(forms[:])
+    if !ok_surface {
+        return result, clone_compile_error(err_surface, result_allocator), false
+    }
     loaded, err_load, ok_load := load_root_source_forms(forms[:])
     if !ok_load {
         return result, clone_compile_error(err_load, result_allocator), false
@@ -2142,6 +2368,10 @@ read_single_eval_form :: proc(source: string) -> (form: CST_Form, err: Compile_E
     if len(forms) != 1 {
         return form, Compile_Error{message = "eval expects exactly one form", span = Span{source = .Eval}}, false
     }
+    err_surface, ok_surface := validate_surface_internal_call_names(forms[:])
+    if !ok_surface {
+        return form, err_surface, false
+    }
     return forms[0].form, {}, true
 }
 
@@ -2185,6 +2415,10 @@ compile_eval_source_with_map :: proc(source, eval_source: string, no_print: bool
     err_order, ok_order := validate_surface_top_level_order(forms[:])
     if !ok_order {
         return result, clone_compile_error(err_order, result_allocator), false
+    }
+    err_surface, ok_surface := validate_surface_internal_call_names(forms[:])
+    if !ok_surface {
+        return result, clone_compile_error(err_surface, result_allocator), false
     }
     loaded, err_load, ok_load := load_root_source_forms(forms[:])
     if !ok_load {
