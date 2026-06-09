@@ -1,183 +1,141 @@
 # Next Steps
 
-This note tracks the current areas worth exploring next. It is not a design
+This note tracks the current areas worth improving next. It is not a design
 history log.
 
 ## Current State
 
-Kvist has:
+Kvist now has a coherent small language surface:
 
 - package-by-directory source loading with package-private `def...-` forms
-- source-package macros with quasiquote, shipped DSL packages, and recursive
-  macro expansion
-- inline array, map, and set literals
+- `.kvist` packages that may live beside ordinary `.odin` sidecar files
+- source-package macros with quasiquote and recursive macro expansion
+- inline array, map, set, struct, enum, union, matrix, SOA, SIMD, and compact
+  type forms that lower to Odin-shaped values
+- type-call construction and conversion with `(T value)`
 - positional calls, named calls, mixed positional plus named-tail calls, and
   trailing default parameters for known top-level `defn`
 - positional multi-return binding in `let`
 - dot access for package names, struct fields, and indexed storage paths
-- a shipped `html` package with rendering
-- explicit ownership helpers and stricter escape diagnostics
-- a shipped `kvist:test` package with:
-  - `t.deftest`
-  - `t.is`
-  - `t.are`
-  - nested `t.testing`
-  - `t.use-fixtures :each`
-  - setup-only `t.use-fixtures :once`
-- CLI and Emacs support for docs, completion, xref, eval, and tests
+- indexed and sliced places such as `xs[i]`, `xs[start:end]`, and
+  `particles.vx[i]`
+- `set!`, `mut!`, and place-first `update!`
+- `each` and `while` for loops
+- expression `for` comprehensions with `:let`, `:when`, `:while`, and `:into`
+  for dynamic arrays, maps, and sets
+- non-capturing function values
+- captured callback specialization for known non-escaping helper and user
+  function calls
+- explicit ownership helpers and conservative ownership warnings
+- CLI and editor-oriented commands for compile/check/run/eval/expand,
+  macroexpand, docs, completion, lookup, xref, symbols, and tests
 
-Current intentional limits worth remembering:
+The shipped package layer is also substantial:
 
+- `kvist:arr`
+- `kvist:map`
+- `kvist:set`
+- `kvist:str`
+- `kvist:soa`
+- `kvist:cli`
+- `kvist:html`
+- `kvist:http`
+- `kvist:test`
+- `kvist:hot`, `kvist:reload`, and `kvist:live`
+
+## Intentional Boundaries
+
+These are deliberate boundaries, not accidental missing features:
+
+- no Clojure data model
+- no hidden seq runtime
+- no lazy sequence abstraction
+- no general heap-allocated closure objects
+- no field destructuring; use dot access or explicit locals
+- no broad keyword-as-data model; keywords are used for structural markers such
+  as `:else`, `:when`, `:let`, `:while`, and `:into`
 - named/default/mixed call rewriting is limited to known top-level `defn`
-- named/default/mixed call rewriting does not apply to arbitrary function values
-- field destructuring is intentionally not part of the language; use dot access
-  or explicit locals
+- named/default/mixed call rewriting does not apply to arbitrary function
+  values
 
-## Most Likely Next Areas
+## Most Useful Work Now
 
-### 1. Closures And Higher-Order Function Depth
+### 1. Tooling Polish
 
-Non-capturing function values are supported, and captured callbacks now lower to
-explicit context-passing calls when the compiler can prove the callback does not
-escape. This covers known non-escaping helpers such as `map`, `filter`,
-`remove`, `keep`, `map-indexed`, reducers, scans, min/max helpers, and their
-safe indexed/bang variants, plus Kvist-defined functions whose callback
-parameter is only called directly or forwarded to another non-escaping Kvist
-function.
+The compiler and CLI already expose the right basic operations. The next work is
+to make them feel finished:
 
-Open questions:
+- better `help` output and command-specific help
+- package-aware test discovery/reporting polish
+- clearer package/workspace discovery behavior
+- editor command polish around `eval`, `expand`, `macroexpand`, `doc`,
+  `lookup`, completion, and xref
+- stable diagnostic output that is friendly to `compilation-mode` and
+  `next-error`
 
-- whether to support captured callbacks for indirect callback contexts such as
-  `sort-by`
-- whether explicit context parameters should remain preferred for APIs where
-  callback lifetime or storage is part of the design
+### 2. Diagnostics
 
-### 2. Reusable Functional Transforms
+Kvist deliberately relies on Odin for semantic validation, but frontend errors
+should still be specific when the frontend knows what went wrong.
 
-Reusable fused transforms are now a small functional-programming prototype. The
-next question is whether examples prove clear value over direct `each` loops
-before expanding the surface.
+Good targets:
 
-The current prototype uses:
+- improve generic `unsupported ...` errors where the expected shape is known
+- improve errors around type-call construction, inline typed literals, and
+  callback specialization
+- keep macro/source maps precise enough that generated Odin errors point back
+  to useful Kvist source spans
+- keep ownership warnings conservative but make remediation text concrete
 
-- `deftransform` for named compile-time transform definitions
-- `comp` for top-to-bottom item-flow composition
-- `into` for explicit collection output
-- `transduce` for explicit scalar accumulation
+### 3. Package Boundary Cleanup
 
-See [FUNCTIONAL-TRANSFORMS.md](./FUNCTIONAL-TRANSFORMS.md).
-
-### 3. Functional Programming Discussion Backlog
-
-These are candidate FP-adjacent directions to discuss one by one before any
-implementation decision. They are notes, not accepted feature plans.
-
-1. Immutable-by-default value workflows
-
-   Build on shallow `assoc` / `update` and ordinary Odin value structs. Possible
-   discussion topics: nested value updates, state-transition examples, copy
-   diagnostics, and whether generated `with-*` helpers are useful.
-
-   Decision from discussion: nested `assoc` / `update` over struct fields is a
-   desired future direction. It should lower as one root value copy followed by
-   nested assignment into that copy. Dynamic arrays, slices, maps, and sets are
-   out of scope for this feature because immutable element updates there require
-   explicit copying or persistent data structures.
-
-2. Algebraic data and case analysis
-
-   Build on `defunion` with a readable `case` form that handles both ordinary
-   subject-based value cases and union/type payload cases. This may be the
-   highest-value FP direction because it improves domain modeling without adding
-   a runtime collection abstraction.
-
-   Decision from discussion: prefer `cond` for ordered predicate branching and
-   `case` for subject-based case analysis. `case` should cover value cases,
-   grouped value cases, and union/type payload cases such as `(Connected conn)`.
-   The existing `switch` form should be dropped from the user-facing language
-   after a migration path, rather than growing into a second public case-analysis
-   surface.
-
-3. Explicit parallel processing
-
-   Explore constrained parallel loops or maps over slices/arrays, probably
-   chunked and lowered to `core:thread` / thread-pool work. Any design must make
-   ordering, mutation, output ownership, errors, cancellation, and chunking
-   inspectable.
-
-   Decision from discussion: do not add core `par-each` / `par-map` forms.
-   Parallelism should be explored, if at all, as a higher-level package such as
-   a future `kvist:par`, built over Odin's `core:thread`, thread pools, and
-   typed channels. Promising directions are typed futures/await and eager
-   ordered parallel map over explicit pools, but naming and API surface remain
-   open and must be discussed in detail before any implementation.
-
-4. Immutable data structures
-
-   Persistent vectors/maps/sets would require a real runtime data-structure and
-   allocator story. Near-term alternatives are value structs, explicit owned
-   arrays/maps, immutable views/slices, and possible builder-then-freeze
-   patterns.
-
-   Decision from discussion: defer persistent immutable collections. Kvist
-   should first make typed struct/value workflows excellent with nested
-   `assoc` / `update`, state-transition examples, algebraic data, and explicit
-   owned mutable containers. Full-copy array/map/set helpers may be considered
-   later, but they must be visibly allocating O(n) operations. Persistent
-   vectors/maps/sets should only be revisited as a package-level runtime
-   commitment if concrete app-state use cases make full-copy helpers or explicit
-   mutation insufficient.
-
-5. Function composition and partial application
-
-   Consider only where lowering remains explicit. General heap closures should
-   not become the default; compile-time or non-escaping composition is a better
-   fit unless a concrete use case proves otherwise.
-
-### 4. Package And Tooling Polish
-
-The package model is in place, but there is still room to tighten:
-
-- package diagnostics and error messages
-- project-wide test discovery/reporting polish
-- package-aware editor commands and CLI inspection helpers
-- docs that describe package layout and visibility concisely
-
-### 5. Standard Library Shape
-
-The library surface is real, but it should keep being reviewed against the
-current language direction:
-
-- package boundaries
-- helper naming
-- ownership conventions
-- what belongs in the preferred user-facing surface vs raw Odin interop
-- which helpers belong in the preferred user-facing surface
-- moving as much package behavior as possible into ordinary `.kvist` source
-  macros/functions rather than compiler intrinsics, so long as the lowered Odin
-  remains equally direct and does not add indirection or unnecessary allocation
+The package API is real, but some helpers still lower through compiler-known
+intrinsics when that is the only way to preserve direct Odin output.
 
 Current rule of thumb:
 
-- if something is conceptually package API, tooling and docs should point at a
-  real package file first
-- package macros are preferred over compiler-known helper spellings when a thin
-  wrapper can preserve the same direct Odin shape
-- compiler intrinsics should shrink toward a lower-level substrate used by
-  package code, not remain the primary public surface
+- user-facing helpers should live in package files when possible
+- package macros are preferred over compiler-known public spellings when they
+  preserve the same generated Odin shape
+- compiler intrinsics should remain a small substrate for cases that need
+  frontend knowledge, ownership diagnostics, or callback specialization
+- docs and tooling should point users at package APIs first
 
-Current package boundary:
+The main package to keep reviewing is `kvist:arr`, because it exposes the
+broadest helper surface and still uses the most compiler substrate.
 
-- `kvist:str`, `kvist:set`, `kvist:map`, `kvist:soa`, and `kvist:cli`
-  are mostly real package code
-- `kvist:arr` exposes a broad real package facade, but part of that facade
-  still expands to `arr.*` compiler intrinsics under the hood
-- public package entries in tooling point at package files rather than
-  directly at `emit.odin`
-- the remaining intrinsic `arr.*` cases are mostly the wider grouping,
-  partitioning, sorting, and in-place transform helpers where array-family
-  coverage, ownership rules, or callback specialization still need the smaller
-  compiler substrate
+### 4. Functional Programming Surface
+
+Kvist now has a small functional-programming layer that still lowers to explicit
+Odin:
+
+- `assoc` / `update` for value-style struct updates, including nested fields
+- `->` for single-value function pipelines
+- `deftransform`, `comp`, `into`, and `transduce` for reusable fused transform
+  pipelines
+- `defsource` for reusable stateful producers consumed by `each` and `into`
+- `case` / `cond` as the preferred direction for expression-oriented branching
+
+The next FP-adjacent discussions should be design discussions before more
+implementation:
+
+- source protocol generalization: `transduce`, first-class source values,
+  inline callbacks, richer stop/error signaling, and stream/event sources
+- parallel processing as a package surface rather than core syntax, probably
+  around futures, pools, ordered maps, cancellation, and typed channels
+- pattern matching over unions and structs, including whether `switch` remains
+  only a compatibility spelling while `case` becomes the user-facing form
+- persistent immutable data structures, deferred until concrete app-state use
+  cases justify a package-level runtime commitment
+
+See [FUNCTIONAL-TRANSFORMS.md](./FUNCTIONAL-TRANSFORMS.md).
+
+### 5. Test And Memory Hygiene
+
+The current compiler and example suites pass, but Odin's test memory tracker
+still reports noisy warnings in some negative compiler tests and tooling/symbol
+tests. Those warnings do not currently indicate failing language behavior, but
+they make the test baseline harder to scan and should be cleaned up.
 
 ### 6. Future DSL Work
 
@@ -194,21 +152,29 @@ typed internal structures.
 
 ### 7. Hot Reload And Live Workflow
 
-This work is real but should remain clearly separate from the core language
-surface:
+Native hot reload and the embedded live runtime are useful experiments, but
+they should stay clearly separated from the core language surface.
 
-- native hot reload over ordinary compiled Kvist/Odin code
-- optional embedded live runtime where it materially helps development
+The current split is:
+
+- native hot reload: ordinary compiled Kvist/Odin code with reload lifecycle
+  support
+- live runtime: a smaller interpreted/shared subset for development-time
+  continuity and host-driven commands/hooks
 
 See:
 
 - [HOT-RELOAD.md](./HOT-RELOAD.md)
 - [RELOAD-APP-DESIGN.md](./RELOAD-APP-DESIGN.md)
 - [LIVE-RUNTIME.md](./LIVE-RUNTIME.md)
+- [LIVE-SHARED-SUBSET.md](./LIVE-SHARED-SUBSET.md)
 
-## Current Bias
+## Lower Priority
 
-If there is no stronger pressure from a concrete use case, the next serious
-language-level discussion should be reusable transforms: whether named fused
-pipelines provide enough reuse, correctness, and performance benefit over manual
-`each` loops.
+These ideas are worth preserving, but they should wait for concrete pressure:
+
+- captured callbacks for indirect callback contexts such as `sort-by`
+- broader function-value convenience beyond non-escaping specialization
+- routing DSLs
+- Datalog-style query DSLs
+- larger standard library expansion

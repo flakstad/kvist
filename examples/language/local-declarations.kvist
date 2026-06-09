@@ -9,14 +9,14 @@
   (defunion Value {payload: Payload raw: int})
   (let [payload (Payload {code: code status: .OK})
         value (Value {payload: payload})]
-    (switch [item value]
-      Payload (if (> item.code limit) 1 0)
-      int item
+    (case value
+      (Payload item) (if (> item.code limit) 1 0)
+      (int raw) raw
       :else -1)))
 
 (defn http-label [code: int] -> string
   (defenum Http-Status {OK: 200 Not-Found: 404 Error: 500})
-  (switch (Http-Status code)
+  (case (Http-Status code)
     .OK "ok"
     .Not-Found "missing"
     .Error "error"

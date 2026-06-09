@@ -1,4 +1,4 @@
-// Exercises tagged union construction and narrow type-switch handling.
+// Exercises tagged union construction and type payload case handling.
 (package main)
 
 (defunion Value
@@ -9,9 +9,9 @@
 })
 
 (defn describe [value: Value] -> string
-  (switch [v value]
-    int "int"
-    string v
+  (case value
+    (int _) "int"
+    (string text) text
     :else "nil"))
 
 (defn main []

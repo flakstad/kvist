@@ -7,14 +7,7 @@ import "core:fmt"
 import "core:strings"
 import kvist_live "../src/kvist_live"
 
-last_capability_name: string
-last_capability_arg_count: int
-shutdown_count: int
-test_temp_dir_nonce: int
-
 echo_capability :: proc(runtime: ^kvist_live.Runtime, capability_name: string, args: []kvist_live.Value) -> (kvist_live.Value, kvist_live.Runtime_Error, bool) {
-    last_capability_name = capability_name
-    last_capability_arg_count = len(args)
     return kvist_live.value_string("ok"), kvist_live.Runtime_Error{}, true
 }
 
@@ -26,7 +19,23 @@ module_init_default_mode :: proc(runtime: ^kvist_live.Runtime, module: ^kvist_li
 }
 
 module_shutdown_counter :: proc(runtime: ^kvist_live.Runtime, module: ^kvist_live.Live_Module) {
-    shutdown_count += 1
+}
+
+runtime_event_count :: proc(runtime: ^kvist_live.Runtime, kind: kvist_live.Runtime_Event_Kind, module_name: string = "", detail: string = "") -> int {
+    count := 0
+    for event in runtime.events {
+        if event.kind != kind {
+            continue
+        }
+        if module_name != "" && event.module_name != module_name {
+            continue
+        }
+        if detail != "" && event.detail != detail {
+            continue
+        }
+        count += 1
+    }
+    return count
 }
 
 first_loaded_module :: proc(runtime: ^kvist_live.Runtime) -> (^kvist_live.Live_Module, bool) {
@@ -99,8 +108,7 @@ delete_module_definition :: proc(def: ^kvist_live.Module_Definition) {
 }
 
 fresh_test_dir_name :: proc(prefix: string) -> string {
-    test_temp_dir_nonce += 1
-    return strings.clone(fmt.tprintf("%s_%d_%d", prefix, test_temp_dir_nonce, time.time_to_unix_nano(time.now())))
+    return strings.clone(fmt.tprintf("%s_%d", prefix, time.time_to_unix_nano(time.now())))
 }
 
 @(test)
@@ -277,17 +285,14 @@ live_runtime_registers_and_calls_capabilities :: proc(t: ^testing.T) {
 
     testing.expect_value(t, call_ok, true)
     testing.expect_value(t, call_err.message, "")
-    testing.expect_value(t, last_capability_name, "echo")
-    testing.expect_value(t, last_capability_arg_count, 1)
     testing.expect_value(t, result.kind, kvist_live.Value_Kind.String)
     testing.expect_value(t, result.text, "ok")
-    testing.expect_value(t, len(runtime.events) >= 2, true)
+    testing.expect_value(t, runtime_event_count(&runtime, .Capability_Registered, "echo"), 1)
+    testing.expect_value(t, runtime_event_count(&runtime, .Capability_Called, "echo"), 1)
 }
 
 @(test)
 live_module_reloader_loads_and_reloads_runtime_modules :: proc(t: ^testing.T) {
-    shutdown_count = 0
-
     temp_dir, temp_dir_err := os.temp_directory(context.allocator)
     testing.expect_value(t, temp_dir_err == nil, true)
     if temp_dir_err != nil {
@@ -501,8 +506,6 @@ live_loader_macroexpands_live_module_forms :: proc(t: ^testing.T) {
 
 @(test)
 live_runtime_reloads_modules_with_migration :: proc(t: ^testing.T) {
-    shutdown_count = 0
-
     runtime := kvist_live.new_runtime(kvist_live.Runtime_Config{
         app_name = "tests",
         live_enabled = true,
@@ -609,7 +612,7 @@ live_runtime_reloads_modules_with_migration :: proc(t: ^testing.T) {
     reload_err, reload_ok := kvist_live.reload_module(&runtime, next_def)
     testing.expect_value(t, reload_ok, true)
     testing.expect_value(t, reload_err.message, "")
-    testing.expect_value(t, shutdown_count, 1)
+    testing.expect_value(t, runtime_event_count(&runtime, .Module_Shutdown, "commands", "v1"), 1)
 
     reloaded, reload_found := kvist_live.loaded_module(&runtime, "commands")
     testing.expect_value(t, reload_found, true)

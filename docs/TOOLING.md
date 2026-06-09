@@ -29,7 +29,7 @@ It should be very close to `clojure-mode`:
 - font-lock Kvist special forms, keywords, Odin directive symbols, and raw
   `(odin "...")` escape hatches
 - provide indentation overrides for Kvist forms such as `defn`, `defstruct`,
-  `defenum`, `defunion`, `fn`, `let`, `defvar`, `block`, `switch`,
+  `defenum`, `defunion`, `fn`, `let`, `defvar`, `block`, `case`,
   `cond`, and `for`
 
 The compiler's Odin source remains 4-space indented. The Kvist source format is

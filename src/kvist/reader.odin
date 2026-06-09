@@ -427,10 +427,12 @@ parse_container :: proc(tokens: []Token, index: ^int, open_kind, close_kind: Tok
     for index^ < len(tokens) && tokens[index^].kind != close_kind {
         if tokens[index^].kind == .Discard {
             index^ += 1
-            _, err_skip, ok_skip := parse_form(tokens, index)
+            skipped, err_skip, ok_skip := parse_form(tokens, index)
             if !ok_skip {
+                delete_borrowed_cst_form_slice(&items)
                 return form, err_skip, false
             }
+            delete_borrowed_cst_form(&skipped)
             continue
         }
         if tokens[index^].kind == .Line_Comment || tokens[index^].kind == .Block_Comment {
@@ -439,11 +441,13 @@ parse_container :: proc(tokens: []Token, index: ^int, open_kind, close_kind: Tok
         }
         item, err_item, ok_item := parse_form(tokens, index)
         if !ok_item {
+            delete_borrowed_cst_form_slice(&items)
             return form, err_item, false
         }
         append(&items, item)
     }
     if index^ >= len(tokens) || tokens[index^].kind != close_kind {
+        delete_borrowed_cst_form_slice(&items)
         return form, Compile_Error{message = "missing closing delimiter", span = make_span(start, start, source_kind)}, false
     }
     end := tokens[index^].span.end
@@ -492,10 +496,11 @@ parse_primary_form :: proc(tokens: []Token, index: ^int) -> (form: CST_Form, err
         return parse_form(tokens, index)
     case .Discard:
         index^ += 1
-        _, err_skip, ok_skip := parse_form(tokens, index)
+        skipped, err_skip, ok_skip := parse_form(tokens, index)
         if !ok_skip {
             return form, err_skip, false
         }
+        delete_borrowed_cst_form(&skipped)
         return parse_form(tokens, index)
     case .R_Paren, .R_Bracket, .R_Brace:
         return form, Compile_Error{message = "unexpected closing delimiter", span = token.span}, false
@@ -607,58 +612,69 @@ parse_attached_postfix :: proc(tokens: []Token, index: ^int, base: CST_Form) -> 
         open := tokens[index^]
         source_kind := open.span.source
         index^ += 1
-        items: [dynamic]CST_Form
-        for index^ < len(tokens) && tokens[index^].kind != .R_Bracket {
-            if tokens[index^].kind == .Discard {
-                index^ += 1
-                _, err_skip, ok_skip := parse_form(tokens, index)
-                if !ok_skip {
-                    return form, err_skip, false
+            items: [dynamic]CST_Form
+            for index^ < len(tokens) && tokens[index^].kind != .R_Bracket {
+                if tokens[index^].kind == .Discard {
+                    index^ += 1
+                    skipped, err_skip, ok_skip := parse_form(tokens, index)
+                    if !ok_skip {
+                        delete_borrowed_cst_form(&current)
+                        delete_borrowed_cst_form_slice(&items)
+                        return form, err_skip, false
+                    }
+                    delete_borrowed_cst_form(&skipped)
+                    continue
                 }
-                continue
+                if tokens[index^].kind == .Line_Comment || tokens[index^].kind == .Block_Comment {
+                    index^ += 1
+                    continue
+                }
+                item, err_item, ok_item := parse_form(tokens, index)
+                if !ok_item {
+                    delete_borrowed_cst_form(&current)
+                    delete_borrowed_cst_form_slice(&items)
+                    return form, err_item, false
+                }
+                append(&items, item)
             }
-            if tokens[index^].kind == .Line_Comment || tokens[index^].kind == .Block_Comment {
-                index^ += 1
-                continue
+            if index^ >= len(tokens) || tokens[index^].kind != .R_Bracket {
+                delete_borrowed_cst_form(&current)
+                delete_borrowed_cst_form_slice(&items)
+                return form, Compile_Error{message = "missing closing delimiter", span = make_span(open.span.start, open.span.start, source_kind)}, false
             }
-            item, err_item, ok_item := parse_form(tokens, index)
-            if !ok_item {
-                return form, err_item, false
-            }
-            append(&items, item)
-        }
-        if index^ >= len(tokens) || tokens[index^].kind != .R_Bracket {
-            return form, Compile_Error{message = "missing closing delimiter", span = make_span(open.span.start, open.span.start, source_kind)}, false
-        }
-        close := tokens[index^]
-        index^ += 1
-        if start, end, ok_slice := attached_slice_bounds(items[:]); ok_slice {
+            close := tokens[index^]
+            index^ += 1
+            if start, end, ok_slice := attached_slice_bounds(items[:]); ok_slice {
             list_items: [dynamic]CST_Form
             append(&list_items, CST_Form{kind = .Symbol, text = "__kvist_slice", span = open.span})
             append(&list_items, current)
             append(&list_items, start)
             append(&list_items, end)
             current = CST_Form{
-                kind = .List,
-                items = list_items,
-                span = make_span(current.span.start, close.span.end, source_kind),
+                    kind = .List,
+                    items = list_items,
+                    span = make_span(current.span.start, close.span.end, source_kind),
+                }
+                delete(items)
+                continue
             }
-            continue
-        }
-        if len(items) != 1 {
-            return form, Compile_Error{message = "attached index expects exactly one expression", span = make_span(open.span.start, close.span.end, source_kind)}, false
-        }
+            if len(items) != 1 {
+                delete_borrowed_cst_form(&current)
+                delete_borrowed_cst_form_slice(&items)
+                return form, Compile_Error{message = "attached index expects exactly one expression", span = make_span(open.span.start, close.span.end, source_kind)}, false
+            }
         list_items: [dynamic]CST_Form
         append(&list_items, CST_Form{kind = .Symbol, text = "__kvist_index", span = open.span})
         append(&list_items, current)
         append(&list_items, items[0])
         current = CST_Form{
-            kind = .List,
-            items = list_items,
-            span = make_span(current.span.start, close.span.end, source_kind),
+                kind = .List,
+                items = list_items,
+                span = make_span(current.span.start, close.span.end, source_kind),
+            }
+            delete(items)
         }
-    }
-    return current, {}, true
+        return current, {}, true
 }
 
 parse_form :: proc(tokens: []Token, index: ^int) -> (form: CST_Form, err: Compile_Error, ok: bool) {
@@ -747,7 +763,7 @@ doc_comment_text :: proc(text: string) -> string {
     if len(text) >= 2 && text[0] == '/' && text[1] == '*' {
         return block_doc_comment_text(text)
     }
-    return text
+    return strings.clone(text)
 }
 
 has_blank_line_between :: proc(source: string, start, end: int) -> bool {
@@ -768,8 +784,10 @@ has_blank_line_between :: proc(source: string, start, end: int) -> bool {
 read_top_forms_with_origin :: proc(source: string, source_kind: Source_Kind) -> (forms: [dynamic]CST_Top_Form, err: Compile_Error, ok: bool) {
     tokens, err_tok, ok_tok := tokenize_with_origin(source, source_kind)
     if !ok_tok {
+        delete(tokens)
         return forms, err_tok, false
     }
+    defer delete(tokens)
 
     index := 0
     pending_docs: [dynamic]string
@@ -780,27 +798,33 @@ read_top_forms_with_origin :: proc(source: string, source_kind: Source_Kind) -> 
                 append(&pending_docs, doc_comment_text(tokens[index].text))
                 last_doc_end = tokens[index].span.end
             } else {
-                pending_docs = nil
+                delete_string_slice(&pending_docs)
             }
             index += 1
             continue
         }
         if tokens[index].kind == .Discard {
-            pending_docs = nil
+            delete_string_slice(&pending_docs)
             index += 1
-            _, err_skip, ok_skip := parse_form(tokens[:], &index)
+            skipped, err_skip, ok_skip := parse_form(tokens[:], &index)
             if !ok_skip {
+                delete_borrowed_cst_top_form_slice(&forms)
                 return forms, err_skip, false
             }
+            delete_borrowed_cst_form(&skipped)
             continue
         }
         form, err_form, ok_form := parse_form(tokens[:], &index)
         if !ok_form {
+            delete_string_slice(&pending_docs)
+            delete_borrowed_cst_top_form_slice(&forms)
             return forms, err_form, false
         }
         doc_lines: [dynamic]string
         if len(pending_docs) > 0 && !has_blank_line_between(source, last_doc_end, form.span.start) {
             doc_lines = pending_docs
+        } else {
+            delete_string_slice(&pending_docs)
         }
         append(&forms, CST_Top_Form{
             form = form,
@@ -809,6 +833,7 @@ read_top_forms_with_origin :: proc(source: string, source_kind: Source_Kind) -> 
         })
         pending_docs = nil
     }
+    delete_string_slice(&pending_docs)
     return forms, {}, true
 }
 

@@ -35,7 +35,7 @@ Language_Source_Entry :: struct {
     snippet:  string,
 }
 
-KVIST_CANONICAL_IMPORTS_FOR_EDITOR :: [13]Imported_Symbol_Entry{
+KVIST_CANONICAL_IMPORTS_FOR_EDITOR :: [14]Imported_Symbol_Entry{
     {alias = "core", path = "kvist:core"},
     {alias = "arr", path = "kvist:arr"},
     {alias = "str", path = "kvist:str"},
@@ -44,6 +44,7 @@ KVIST_CANONICAL_IMPORTS_FOR_EDITOR :: [13]Imported_Symbol_Entry{
     {alias = "soa", path = "kvist:soa"},
     {alias = "io", path = "kvist:io"},
     {alias = "json", path = "kvist:json"},
+    {alias = "cli", path = "kvist:cli"},
     {alias = "http", path = "kvist:http"},
     {alias = "httpc", path = "kvist:http/client"},
     {alias = "session", path = "kvist:http/session"},
@@ -58,25 +59,43 @@ BUILTIN_SOURCE_ENTRIES :: []Builtin_Source_Entry{
 LANGUAGE_SOURCE_ENTRIES :: []Language_Source_Entry{
     {name = "package", kind = "kvist form", relative = "src/kvist/parse.odin", snippet = "case \"package\":"},
     {name = "import", kind = "kvist form", relative = "src/kvist/parse.odin", snippet = "case \"import\":"},
-    {name = "def", kind = "kvist form", relative = "src/kvist/parse.odin", snippet = "case \"def\", \"def-\":\""},
-    {name = "defvar", kind = "kvist form", relative = "src/kvist/parse.odin", snippet = "case \"defvar\", \"defvar-\":\""},
-    {name = "defstruct", kind = "kvist form", relative = "src/kvist/parse.odin", snippet = "case \"defstruct\", \"defstruct-\":\""},
-    {name = "defenum", kind = "kvist form", relative = "src/kvist/parse.odin", snippet = "case \"defenum\", \"defenum-\":\""},
-    {name = "defunion", kind = "kvist form", relative = "src/kvist/parse.odin", snippet = "case \"defunion\", \"defunion-\":\""},
-    {name = "defn", kind = "kvist form", relative = "src/kvist/parse.odin", snippet = "case \"defn\", \"defn-\":\""},
+    {name = "def", kind = "kvist form", relative = "src/kvist/parse.odin", snippet = "case \"def\", \"def-\":"},
+    {name = "defvar", kind = "kvist form", relative = "src/kvist/parse.odin", snippet = "case \"defvar\", \"defvar-\":"},
+    {name = "defstruct", kind = "kvist form", relative = "src/kvist/parse.odin", snippet = "case \"defstruct\", \"defstruct-\":"},
+    {name = "defenum", kind = "kvist form", relative = "src/kvist/parse.odin", snippet = "case \"defenum\", \"defenum-\":"},
+    {name = "defunion", kind = "kvist form", relative = "src/kvist/parse.odin", snippet = "case \"defunion\", \"defunion-\":"},
+    {name = "defn", kind = "kvist form", relative = "src/kvist/parse.odin", snippet = "case \"defn\", \"defn-\":"},
+    {name = "defmacro", kind = "kvist form", relative = "src/kvist/parse.odin", snippet = "case \"defmacro\", \"defmacro-\":"},
+    {name = "defsource", kind = "kvist form", relative = "src/kvist/parse.odin", snippet = "case \"defsource\", \"defsource-\":"},
+    {name = "export", kind = "kvist form", relative = "src/kvist/parse.odin", snippet = "case \"export\":"},
+    {name = "exports", kind = "kvist form", relative = "src/kvist/parse.odin", snippet = "case \"exports\":"},
     {name = "fn", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "emit_proc_literal_expr :: proc"},
     {name = "odin", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "case \"odin\":"},
     {name = "let", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "case \"let\":"},
     {name = "block", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "case \"do\", \"block\":"},
     {name = "do", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "case \"do\":"},
     {name = "if", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "emit_if_like :: proc"},
+    {name = "when", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "(when test body...)"},
+    {name = "cond", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "(cond test expr ... :else expr)"},
+    {name = "switch", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "(switch [value test] ... :else expr)"},
     {name = "set!", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "case \"set!\":"},
     {name = "mut!", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "case \"mut!\":"},
+    {name = "update!", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "(update! place f args...)"},
+    {name = "delete!", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "(delete! target key)"},
+    {name = "inc!", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "case \"inc!\", \"dec!\", \"toggle!\", \"negate!\":"},
+    {name = "dec!", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "case \"inc!\", \"dec!\", \"toggle!\", \"negate!\":"},
+    {name = "toggle!", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "case \"inc!\", \"dec!\", \"toggle!\", \"negate!\":"},
+    {name = "negate!", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "case \"inc!\", \"dec!\", \"toggle!\", \"negate!\":"},
     {name = "return", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "case \"return\":"},
     {name = "defer", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "case \"defer\":"},
     {name = "for", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "case \"for\":"},
+    {name = "each", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "case \"each\":"},
     {name = "make", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "if head.text == \"make\""},
+    {name = "get", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "(get target key)"},
+    {name = "slice", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "(slice target start end)"},
     {name = "type", kind = "kvist form", relative = "src/kvist/parse.odin", snippet = "if is_symbol(form.items[0], \"type\")"},
+    {name = "deref", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "if head.text == \"^\" || head.text == \"deref\""},
+    {name = "addr", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "if head.text == \"&\" || head.text == \"addr\""},
     {name = "break", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "case \"break\":"},
     {name = "continue", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "case \"continue\":"},
     {name = "while", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "case \"while\":"},
@@ -582,6 +601,40 @@ symbols_append_unique_records :: proc(builder: ^strings.Builder, seen: ^map[stri
     }
 }
 
+symbols_append_core_helper_alias_records :: proc(builder: ^strings.Builder, seen: ^map[string]bool, output: string) {
+    lines := strings.split_lines(output, context.allocator)
+    defer delete(lines)
+    for line in lines {
+        if line == "" || line == "kind\tname\tline\tcolumn\tdetail\tsignature\tdoc" || line == "kind\tname\tline\tcolumn\tdetail\tsignature\tdoc\tfile" {
+            continue
+        }
+        fields, ok_fields := symbols_split_record_fields(line)
+        _ = ok_fields
+        if len(fields) < 7 {
+            delete(fields)
+            continue
+        }
+        for len(fields) < 8 {
+            append(&fields, "")
+        }
+        name := fields[1]
+        if !strings.has_prefix(name, "core.") || len(name) <= len("core.") {
+            delete(fields)
+            continue
+        }
+        bare_name := name[len("core."):]
+        key := fmt.tprintf("kvist helper\t%s", bare_name)
+        if seen[key] {
+            delete(key)
+            delete(fields)
+            continue
+        }
+        seen[key] = true
+        fmt.sbprintf(builder, "kvist helper\t%s\t%s\t%s\tkvist:core\t%s\t%s\t%s\n", bare_name, fields[2], fields[3], fields[5], fields[6], fields[7])
+        delete(fields)
+    }
+}
+
 symbols_split_record_fields :: proc(line: string) -> (fields: [dynamic]string, ok: bool) {
     rest := line
     for {
@@ -598,7 +651,7 @@ symbols_split_record_fields :: proc(line: string) -> (fields: [dynamic]string, o
 
 symbols_top_level_kind_exported :: proc(kind: string) -> bool {
     switch kind {
-    case "const", "var", "struct", "enum", "union", "proc", "macro":
+    case "const", "var", "struct", "enum", "union", "proc", "macro", "source":
         return true
     case:
         return false
@@ -750,19 +803,22 @@ editor_root_package_files :: proc(path, source: string) -> ([]Package_File, bool
         }
     }
     if package_name == "" {
+        delete_borrowed_cst_top_form_slice(&forms)
         return nil, false
     }
 
     dir, file_name := os.split_path(path)
     if dir == "" {
+        delete_borrowed_cst_top_form_slice(&forms)
         return nil, false
     }
 
     entries, dir_err := os.read_directory_by_path(dir, -1, context.allocator)
     if dir_err != nil {
+        delete_borrowed_cst_top_form_slice(&forms)
         return nil, false
     }
-    defer delete(entries)
+    defer os.file_info_slice_delete(entries, context.allocator)
 
     has_anchor := false
     matched: [dynamic]Package_File
@@ -778,7 +834,7 @@ editor_root_package_files :: proc(path, source: string) -> ([]Package_File, bool
             if is_package_anchor_filename(dir, entry.name) {
                 has_anchor = true
             }
-            append(&matched, Package_File{path = file_path, source = source, package_name = package_name, forms = forms})
+            append(&matched, Package_File{path = file_path, path_owned = true, source = source, package_name = package_name, forms = forms})
             continue
         }
         data, read_err := os.read_entire_file_from_path(file_path, context.allocator)
@@ -788,6 +844,7 @@ editor_root_package_files :: proc(path, source: string) -> ([]Package_File, bool
         file_source := string(data)
         file_forms, _, ok_file_forms := read_top_forms(file_source)
         if !ok_file_forms {
+            delete(data)
             continue
         }
         file_package_name := ""
@@ -798,15 +855,18 @@ editor_root_package_files :: proc(path, source: string) -> ([]Package_File, bool
             }
         }
         if file_package_name != package_name {
+            delete_borrowed_cst_top_form_slice(&file_forms)
+            delete(data)
             continue
         }
         if is_package_anchor_filename(dir, entry.name) {
             has_anchor = true
         }
-        append(&matched, Package_File{path = file_path, source = file_source, package_name = file_package_name, forms = file_forms})
+        append(&matched, Package_File{path = file_path, path_owned = true, source = file_source, package_name = file_package_name, forms = file_forms})
     }
 
     if len(matched) == 0 {
+        delete_borrowed_cst_top_form_slice(&forms)
         return nil, false
     }
     if !has_anchor {
@@ -834,6 +894,7 @@ source_package_symbols_source :: proc(importer_path, import_path: string) -> (pa
     if !ok_files {
         return "", "", clone_compile_error(err_files, result_allocator), false
     }
+    defer package_file_slice_delete(files)
     _, err_package, ok_package := validate_package_files(resolved, files[:])
     if !ok_package {
         return "", "", clone_compile_error(err_package, result_allocator), false
@@ -1006,6 +1067,7 @@ imported_symbols_source :: proc(path, source: string) -> (output: string, err: C
     if !ok_forms {
         return "", clone_compile_error(err_forms, result_allocator), false
     }
+    defer delete_borrowed_cst_top_form_slice(&forms)
     odin_root, have_odin_root := odin_root_path()
     builder := strings.builder_make()
     defer strings.builder_destroy(&builder)
@@ -1028,6 +1090,7 @@ imported_symbols_source :: proc(path, source: string) -> (output: string, err: C
                 delete(resolved)
                 return "", clone_compile_error(err_files, result_allocator), false
             }
+            defer package_file_slice_delete(files)
             _, err_package, ok_package := validate_package_files(resolved, files[:])
             if !ok_package {
                 delete(resolved)
@@ -1113,6 +1176,7 @@ editor_symbols_source :: proc(path, source: string) -> (output: string, err: Com
         if !ok_forms {
             return "", clone_compile_error(err_forms, result_allocator), false
         }
+        defer delete_borrowed_cst_top_form_slice(&forms)
         context.allocator = result_allocator
         local_output, local_err, ok_local := symbols_source(source)
         context.allocator = context.temp_allocator
@@ -1135,6 +1199,9 @@ editor_symbols_source :: proc(path, source: string) -> (output: string, err: Com
             continue
         }
         symbols_append_unique_records(&builder, &seen, package_output)
+        if entry.path == "kvist:core" {
+            symbols_append_core_helper_alias_records(&builder, &seen, package_output)
+        }
         context.allocator = result_allocator
         delete(package_output)
         context.allocator = context.temp_allocator
@@ -1153,6 +1220,7 @@ editor_symbols_source :: proc(path, source: string) -> (output: string, err: Com
                     delete(resolved)
                     return "", err_files, false
                 }
+                defer package_file_slice_delete(files)
                 _, err_package, ok_package := validate_package_files(resolved, files[:])
                 if !ok_package {
                     delete(resolved)
@@ -1186,6 +1254,9 @@ editor_symbols_source :: proc(path, source: string) -> (output: string, err: Com
             context.allocator = context.temp_allocator
             if ok_package {
                 symbols_append_unique_records(&builder, &seen, package_output)
+                if entry.path == "kvist:core" {
+                    symbols_append_core_helper_alias_records(&builder, &seen, package_output)
+                }
                 context.allocator = result_allocator
                 delete(package_output)
                 context.allocator = context.temp_allocator
@@ -1251,6 +1322,7 @@ package_symbols_source :: proc(import_path, alias: string, package_kind: string 
         _ = err_files
         return "", false
     }
+    defer package_file_slice_delete(files)
     _, err_package, ok_package := validate_package_files(resolved, files[:])
     if !ok_package {
         _ = err_package
@@ -1375,6 +1447,21 @@ symbols_proc_signature :: proc(name: string, decl: Proc_Decl) -> string {
     }
 
     strings.write_string(&builder, ")")
+    return strings.to_string(builder)
+}
+
+symbols_source_signature :: proc(name: string, decl: Source_Decl) -> string {
+    builder := strings.builder_make()
+    defer strings.builder_destroy(&builder)
+
+    fmt.sbprintf(&builder, "(%s [", name)
+    for param, idx in decl.params {
+        if idx > 0 {
+            strings.write_string(&builder, ", ")
+        }
+        fmt.sbprintf(&builder, "%s: %s", param.name, param.ty)
+    }
+    fmt.sbprintf(&builder, "] -> %s)", decl.item_ty)
     return strings.to_string(builder)
 }
 
@@ -1797,6 +1884,7 @@ symbols_source :: proc(source: string) -> (output: string, err: Compile_Error, o
     if !ok_forms {
         return "", clone_compile_error(err_forms, result_allocator), false
     }
+    defer delete_borrowed_cst_top_form_slice(&forms)
     builder := strings.builder_make()
     defer strings.builder_destroy(&builder)
     strings.write_string(&builder, "kind\tname\tline\tcolumn\tdetail\tsignature\tdoc\n")
@@ -1969,6 +2057,21 @@ symbols_source :: proc(source: string) -> (output: string, err: Compile_Error, o
                     detail = "private"
                 }
                 symbols_write_record_doc(&builder, "macro", form.items[1].text, source, form.items[1].span, detail, signature, doc_lines[:])
+            }
+        case "defsource", "defsource-":
+            if len(form.items) >= 2 && form.items[1].kind == .Symbol {
+                signature := ""
+                source_decl, err_source, ok_source := parse_source_decl(form)
+                if ok_source {
+                    signature = symbols_source_signature(form.items[1].text, source_decl)
+                } else {
+                    _ = err_source
+                }
+                detail := ""
+                if head == "defsource-" {
+                    detail = "private"
+                }
+                symbols_write_record_doc(&builder, "source", form.items[1].text, source, form.items[1].span, detail, signature, top.doc_lines[:])
             }
         case:
         }

@@ -1,6 +1,5 @@
-// Focused benchmark for canonical core/* helper lowering vs direct Odin.
+// Focused benchmark for canonical bare core-helper lowering vs direct Odin.
 (package main)
-(import core "kvist:core")
 (import arr "kvist:arr")
 (import "core:fmt")
 (import mem "core:mem")
@@ -25,18 +24,18 @@ STRIDE :: 7")
   (report name (time.tick-since start) checksum track))
 
 (defn build-ints [n: int] -> [dynamic]int
-  (let [xs (arr/empty int n)
+  (let [xs (arr.empty int n)
         i 0]
     (while (< i n)
-      (arr/push! xs i)
+      (arr.push! xs i)
       (set! i (+ i 1)))
     xs))
 
 (defn build-keys [n: int] -> [dynamic]int
-  (let [keys (arr/empty int n)
+  (let [keys (arr.empty int n)
         i 0]
     (while (< i n)
-      (arr/push! keys (% (* i 13) N))
+      (arr.push! keys (% (* i 13) N))
       (set! i (+ i 1)))
     keys))
 
@@ -44,7 +43,7 @@ STRIDE :: 7")
   (let [lookup (map[int]int {})
         i 0]
     (while (< i n)
-      (core/update! lookup i (* i 3))
+      (set! lookup[i] (* i 3))
       (set! i (+ i 1)))
     lookup))
 
@@ -54,9 +53,9 @@ STRIDE :: 7")
     (while (< i reps)
       (let [j 0
             total 0
-            n (core/count xs)]
+            n (count xs)]
         (while (< j n)
-          (set! total (+ total (core/get xs j)))
+          (set! total (+ total xs[j]))
           (set! j (+ j STRIDE)))
         (set! checksum (+ checksum total)))
       (set! i (+ i 1)))
@@ -66,10 +65,10 @@ STRIDE :: 7")
   (let [i 0
         checksum 0]
     (while (< i reps)
-      (let [prefix (core/slice xs 128 8192)
-            suffix (core/slice xs 8192)
-            total (+ (+ (core/count prefix) (core/count suffix))
-                     (+ (core/get prefix 0) (core/get suffix 0)))]
+      (let [prefix xs[128:8192]
+            suffix xs[8192:]
+            total (+ (+ (count prefix) (count suffix))
+                     (+ prefix[0] suffix[0]))]
         (set! checksum (+ checksum total)))
       (set! i (+ i 1)))
     checksum))
@@ -80,12 +79,12 @@ STRIDE :: 7")
     (while (< i reps)
       (let [j 0
             total 0
-            n (core/count keys)]
+            n (count keys)]
         (while (< j n)
-          (let [key (core/get keys j)]
-            (when (core/contains? lookup key)
-              (set! total (+ total (core/get lookup key 0))))
-            (set! total (+ total (core/get lookup (+ key N) -1))))
+          (let [key keys[j]]
+            (when (contains? lookup key)
+              (set! total (+ total (get lookup key 0))))
+            (set! total (+ total (get lookup (+ key N) -1))))
           (set! j (+ j 1)))
         (set! checksum (+ checksum total)))
       (set! i (+ i 1)))
@@ -107,12 +106,12 @@ STRIDE :: 7")
 
     (mem.tracking-allocator-reset (& track))
     (let [start (time.tick-now)]
-      (run-one "index-core" (bench-index-core (core/slice xs 0) REPS) start (& track)))
+      (run-one "index-core" (bench-index-core xs[:] REPS) start (& track)))
 
     (mem.tracking-allocator-reset (& track))
     (let [start (time.tick-now)]
-      (run-one "slice-core" (bench-slice-core (core/slice xs 0) REPS) start (& track)))
+      (run-one "slice-core" (bench-slice-core xs[:] REPS) start (& track)))
 
     (mem.tracking-allocator-reset (& track))
     (let [start (time.tick-now)]
-      (run-one "map-core" (bench-map-core lookup (core/slice keys 0) REPS) start (& track)))))
+      (run-one "map-core" (bench-map-core lookup keys[:] REPS) start (& track)))))

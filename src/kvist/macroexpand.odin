@@ -77,8 +77,12 @@ Macro_Value :: struct {
     int_value:    int,
     float_value:  f64,
     string_value: string,
+    owns_string:  bool,
     form:         CST_Form,
+    owns_form:    bool,
     forms:        [dynamic]CST_Form,
+    owns_forms:   bool,
+    owns_form_contents: bool,
 }
 
 Macro_Binding :: struct {
@@ -181,8 +185,16 @@ macro_string_value :: proc(value: string) -> Macro_Value {
     return Macro_Value{kind = .String, string_value = value}
 }
 
+macro_owned_string_value :: proc(value: string) -> Macro_Value {
+    return Macro_Value{kind = .String, string_value = value, owns_string = true}
+}
+
 macro_form_value :: proc(form: CST_Form) -> Macro_Value {
     return Macro_Value{kind = .Form, form = form}
+}
+
+macro_owned_form_value :: proc(form: CST_Form) -> Macro_Value {
+    return Macro_Value{kind = .Form, form = form, owns_form = true}
 }
 
 macro_forms_value :: proc(forms: []CST_Form) -> Macro_Value {
@@ -190,7 +202,80 @@ macro_forms_value :: proc(forms: []CST_Form) -> Macro_Value {
     for form in forms {
         append(&out, form)
     }
-    return Macro_Value{kind = .Forms, forms = out}
+    return Macro_Value{kind = .Forms, forms = out, owns_forms = true}
+}
+
+macro_owned_forms_value :: proc(forms: []CST_Form) -> Macro_Value {
+    out: [dynamic]CST_Form
+    for form in forms {
+        append(&out, form)
+    }
+    return Macro_Value{kind = .Forms, forms = out, owns_forms = true, owns_form_contents = true}
+}
+
+macro_value_clone_backing :: proc(value: Macro_Value) -> Macro_Value {
+    #partial switch value.kind {
+    case .String:
+        if value.owns_string {
+            return macro_owned_string_value(strings.clone(value.string_value))
+        }
+        return value
+    case .Form:
+        if value.owns_form {
+            return macro_owned_form_value(clone_cst_form(value.form))
+        }
+        return value
+    case .Forms:
+        if value.owns_form_contents {
+            cloned := clone_cst_form_slice(value.forms[:])
+            result := macro_owned_forms_value(cloned[:])
+            delete(cloned)
+            return result
+        }
+        return macro_forms_value(value.forms[:])
+    case:
+        return value
+    }
+}
+
+macro_value_delete_backing :: proc(value: ^Macro_Value) {
+    #partial switch value.kind {
+    case .String:
+        if value.owns_string && value.string_value != "" {
+            delete(value.string_value)
+        }
+    case .Form:
+        if value.owns_form {
+            delete_cst_form(&value.form)
+        }
+    case .Forms:
+        if value.owns_forms {
+            if value.owns_form_contents {
+                for i in 0 ..< len(value.forms) {
+                    delete_cst_form(&value.forms[i])
+                }
+            }
+            delete(value.forms)
+        }
+    }
+    value^ = Macro_Value{}
+}
+
+macro_value_borrow :: proc(value: Macro_Value) -> Macro_Value {
+    borrowed := value
+    borrowed.owns_string = false
+    borrowed.owns_form = false
+    borrowed.owns_forms = false
+    borrowed.owns_form_contents = false
+    return borrowed
+}
+
+macro_binding_slice_delete_backing :: proc(bindings: ^[]Macro_Binding) {
+    for i in 0 ..< len(bindings^) {
+        macro_value_delete_backing(&bindings^[i].value)
+    }
+    delete(bindings^)
+    bindings^ = nil
 }
 
 macro_truthy :: proc(value: Macro_Value) -> bool {
@@ -220,13 +305,21 @@ macro_value_equal :: proc(a, b: Macro_Value) -> bool {
     case .String:
         return a.string_value == b.string_value
     case .Form:
-        return macro_form_text(a.form) == macro_form_text(b.form)
+        a_text := macro_form_text(a.form)
+        defer delete(a_text)
+        b_text := macro_form_text(b.form)
+        defer delete(b_text)
+        return a_text == b_text
     case .Forms:
         if len(a.forms) != len(b.forms) {
             return false
         }
         for form, idx in a.forms {
-            if macro_form_text(form) != macro_form_text(b.forms[idx]) {
+            a_text := macro_form_text(form)
+            defer delete(a_text)
+            b_text := macro_form_text(b.forms[idx])
+            defer delete(b_text)
+            if a_text != b_text {
                 return false
             }
         }
@@ -238,18 +331,21 @@ macro_value_equal :: proc(a, b: Macro_Value) -> bool {
 macro_value_to_form :: proc(value: Macro_Value, span: Span) -> (CST_Form, Compile_Error, bool) {
     switch value.kind {
     case .Form:
+        if value.owns_form {
+            return clone_cst_form(value.form), Compile_Error{}, true
+        }
         return value.form, Compile_Error{}, true
     case .Nil:
-        return CST_Form{kind = .Nil, text = "nil", span = span}, Compile_Error{}, true
+        return CST_Form{kind = .Nil, text = strings.clone("nil"), span = span}, Compile_Error{}, true
     case .Bool:
         if value.bool_value {
-            return CST_Form{kind = .Bool, text = "true", span = span}, Compile_Error{}, true
+            return CST_Form{kind = .Bool, text = strings.clone("true"), span = span}, Compile_Error{}, true
         }
-        return CST_Form{kind = .Bool, text = "false", span = span}, Compile_Error{}, true
+        return CST_Form{kind = .Bool, text = strings.clone("false"), span = span}, Compile_Error{}, true
     case .Int:
-        return CST_Form{kind = .Number, text = macro_int_text(value.int_value), span = span}, Compile_Error{}, true
+        return CST_Form{kind = .Number, text = strings.clone(macro_int_text(value.int_value)), span = span}, Compile_Error{}, true
     case .Float:
-        return CST_Form{kind = .Number, text = macro_float_text(value.float_value), span = span}, Compile_Error{}, true
+        return CST_Form{kind = .Number, text = strings.clone(macro_float_text(value.float_value)), span = span}, Compile_Error{}, true
     case .String:
         return CST_Form{kind = .String, text = macro_quote_string(value.string_value), span = span}, Compile_Error{}, true
     case .Forms:
@@ -263,7 +359,7 @@ macro_value_to_forms :: proc(value: Macro_Value, span: Span) -> ([]CST_Form, Com
     case .Forms:
         out: [dynamic]CST_Form
         for form in value.forms {
-            append(&out, form)
+            append(&out, clone_cst_form(form))
         }
         return out[:], Compile_Error{}, true
     case:
@@ -277,35 +373,81 @@ macro_value_to_forms :: proc(value: Macro_Value, span: Span) -> ([]CST_Form, Com
     }
 }
 
+macro_value_to_owned_form :: proc(value: Macro_Value, span: Span) -> (CST_Form, Compile_Error, bool) {
+    switch value.kind {
+    case .Form:
+        return clone_cst_form(value.form), Compile_Error{}, true
+    case .Nil:
+        return CST_Form{kind = .Nil, text = strings.clone("nil"), span = span}, Compile_Error{}, true
+    case .Bool:
+        if value.bool_value {
+            return CST_Form{kind = .Bool, text = strings.clone("true"), span = span}, Compile_Error{}, true
+        }
+        return CST_Form{kind = .Bool, text = strings.clone("false"), span = span}, Compile_Error{}, true
+    case .Int:
+        text := macro_int_text(value.int_value)
+        result := CST_Form{kind = .Number, text = strings.clone(text), span = span}
+        return result, Compile_Error{}, true
+    case .Float:
+        text := macro_float_text(value.float_value)
+        result := CST_Form{kind = .Number, text = strings.clone(text), span = span}
+        return result, Compile_Error{}, true
+    case .String:
+        return CST_Form{kind = .String, text = macro_quote_string(value.string_value), span = span}, Compile_Error{}, true
+    case .Forms:
+        return CST_Form{}, Compile_Error{message = "expected single macro form value", span = span}, false
+    }
+    return CST_Form{}, Compile_Error{message = "unsupported macro value", span = span}, false
+}
+
+macro_value_to_owned_forms :: proc(value: Macro_Value, span: Span) -> ([]CST_Form, Compile_Error, bool) {
+    #partial switch value.kind {
+    case .Forms:
+        out: [dynamic]CST_Form
+        for form in value.forms {
+            append(&out, clone_cst_form(form))
+        }
+        return out[:], Compile_Error{}, true
+    case:
+        form, err, ok := macro_value_to_owned_form(value, span)
+        if !ok {
+            return nil, err, false
+        }
+        out: [dynamic]CST_Form
+        append(&out, form)
+        return out[:], Compile_Error{}, true
+    }
+}
+
 macro_value_to_string :: proc(value: Macro_Value, span: Span) -> (string, Compile_Error, bool) {
     switch value.kind {
     case .String:
-        return value.string_value, Compile_Error{}, true
+        return strings.clone(value.string_value), Compile_Error{}, true
     case .Form:
         #partial switch value.form.kind {
         case .Symbol:
-            return value.form.text, Compile_Error{}, true
+            return strings.clone(value.form.text), Compile_Error{}, true
         case .Keyword:
             if len(value.form.text) > 0 && value.form.text[0] == ':' {
-                return value.form.text[1:], Compile_Error{}, true
+                return strings.clone(value.form.text[1:]), Compile_Error{}, true
             }
-            return value.form.text, Compile_Error{}, true
+            return strings.clone(value.form.text), Compile_Error{}, true
         case .String:
             return unquote_string(value.form.text), Compile_Error{}, true
         case:
             return "", Compile_Error{message = "expected string-like macro value", span = span}, false
         }
     case .Nil:
-        return "", Compile_Error{}, true
+        return strings.clone(""), Compile_Error{}, true
     case .Int:
-        return macro_int_text(value.int_value), Compile_Error{}, true
+        return strings.clone(macro_int_text(value.int_value)), Compile_Error{}, true
     case .Float:
-        return macro_float_text(value.float_value), Compile_Error{}, true
+        return strings.clone(macro_float_text(value.float_value)), Compile_Error{}, true
     case .Bool:
         if value.bool_value {
-            return "true", Compile_Error{}, true
+            return strings.clone("true"), Compile_Error{}, true
         }
-        return "false", Compile_Error{}, true
+        return strings.clone("false"), Compile_Error{}, true
     case .Forms:
         return "", Compile_Error{message = "expected string-like macro value", span = span}, false
     }
@@ -315,7 +457,7 @@ macro_value_to_string :: proc(value: Macro_Value, span: Span) -> (string, Compil
 macro_lookup_binding :: proc(bindings: []Macro_Binding, name: string) -> (Macro_Value, bool) {
     for i := len(bindings) - 1; i >= 0; i -= 1 {
         if bindings[i].name == name {
-            return bindings[i].value, true
+            return macro_value_clone_backing(bindings[i].value), true
         }
     }
     return Macro_Value{}, false
@@ -345,10 +487,12 @@ core_package_local_macros :: proc(anchor_path: string = ".") -> ([]User_Macro, C
     if read_err != nil {
         return nil, Compile_Error{message = fmt.tprintf("could not read shipped core package file: %s", path)}, false
     }
+    defer delete(data)
     forms, err_forms, ok_forms := read_top_forms(string(data))
     if !ok_forms {
         return nil, err_forms, false
     }
+    defer delete_borrowed_cst_top_form_slice(&forms)
     macros: [dynamic]User_Macro
     for top in forms {
         if !is_defmacro_form(top.form) {
@@ -360,7 +504,7 @@ core_package_local_macros :: proc(anchor_path: string = ".") -> ([]User_Macro, C
         }
         qualified := clone_user_macro(macro_decl)
         old_name := qualified.name
-        qualified.name = fmt.tprintf("core.%s", old_name)
+        qualified.name = strings.clone(fmt.tprintf("core.%s", old_name))
         delete(old_name)
         append(&macros, macro_decl)
         append(&macros, qualified)
@@ -629,9 +773,18 @@ parse_user_macro_decl :: proc(top: CST_Top_Form) -> (macro_decl: User_Macro, err
 
     params_index := 2
     doc_lines := top.doc_lines
+    doc_lines_owned := false
     if len(form.items) > 4 && form.items[2].kind == .String {
-        doc_lines = append_doc_lines(doc_lines[:], doc_lines_from_string(unquote_string(form.items[2].text))[:])
+        doc_text := unquote_string(form.items[2].text)
+        extra_doc_lines := doc_lines_from_string(doc_text)
+        doc_lines = append_doc_lines(doc_lines[:], extra_doc_lines[:])
+        doc_lines_owned = true
+        delete(doc_text)
+        delete(extra_doc_lines)
         params_index = 3
+    }
+    defer if doc_lines_owned {
+        delete(doc_lines)
     }
     if params_index >= len(form.items) || form.items[params_index].kind != .Vector {
         return macro_decl, Compile_Error{message = "defmacro expects a parameter vector", span = form.span}, false
@@ -640,10 +793,12 @@ parse_user_macro_decl :: proc(top: CST_Top_Form) -> (macro_decl: User_Macro, err
     if !ok_params {
         return macro_decl, err_params, false
     }
+    defer delete(params.names)
     if params_index+1 >= len(form.items) {
         return macro_decl, Compile_Error{message = "defmacro body is empty", span = form.span}, false
     }
     body: [dynamic]CST_Form
+    defer delete(body)
     for item in form.items[params_index+1:] {
         append(&body, item)
     }
@@ -674,7 +829,15 @@ invoke_user_macro_value :: proc(macro_decl: User_Macro, call: CST_Form, macros: 
     if !ok_bindings {
         return Macro_Value{}, err_bindings, false
     }
-    return macro_eval_sequence(macro_decl.body[:], macros, bindings[:])
+    value, err, ok := macro_eval_sequence(macro_decl.body[:], macros, bindings[:])
+    if !ok {
+        macro_binding_slice_delete_backing(&bindings)
+        return Macro_Value{}, err, false
+    }
+    result := macro_value_clone_backing(value)
+    macro_value_delete_backing(&value)
+    macro_binding_slice_delete_backing(&bindings)
+    return result, Compile_Error{}, true
 }
 
 macro_collect_call_bindings :: proc(macro_decl: User_Macro, call: CST_Form) -> ([]Macro_Binding, Compile_Error, bool) {
@@ -727,15 +890,19 @@ macro_collect_eval_call_bindings :: proc(macro_decl: User_Macro, call: CST_Form,
             if !ok_value {
                 return nil, err_value, false
             }
-            forms, err_forms, ok_forms := macro_value_to_forms(value, arg.span)
+            forms, err_forms, ok_forms := macro_value_to_owned_forms(value, arg.span)
             if !ok_forms {
+                macro_value_delete_backing(&value)
                 return nil, err_forms, false
             }
             for item in forms {
                 append(&rest_out, item)
             }
+            delete(forms)
+            macro_value_delete_backing(&value)
         }
-        append(&out, Macro_Binding{name = macro_decl.params.rest_name, value = macro_forms_value(rest_out[:])})
+        append(&out, Macro_Binding{name = macro_decl.params.rest_name, value = macro_owned_forms_value(rest_out[:])})
+        delete(rest_out)
     }
     return out[:], Compile_Error{}, true
 }
@@ -748,8 +915,10 @@ macro_eval_sequence :: proc(forms: []CST_Form, macros: []User_Macro, bindings: [
     for form in forms {
         next_value, err_next, ok_next := macro_eval_expr(form, macros, bindings)
         if !ok_next {
+            macro_value_delete_backing(&value)
             return Macro_Value{}, err_next, false
         }
+        macro_value_delete_backing(&value)
         value = next_value
     }
     return value, Compile_Error{}, true
@@ -762,15 +931,18 @@ macro_eval_list_builder :: proc(kind: CST_Form_Kind, form: CST_Form, macros: []U
         if !ok_value {
             return Macro_Value{}, err_value, false
         }
-        forms, err_forms, ok_forms := macro_value_to_forms(value, arg.span)
+        forms, err_forms, ok_forms := macro_value_to_owned_forms(value, arg.span)
         if !ok_forms {
+            macro_value_delete_backing(&value)
             return Macro_Value{}, err_forms, false
         }
         for item in forms {
             append(&out.items, item)
         }
+        delete(forms)
+        macro_value_delete_backing(&value)
     }
-    return macro_form_value(out), Compile_Error{}, true
+    return macro_owned_form_value(out), Compile_Error{}, true
 }
 
 macro_list_from_value :: proc(value: Macro_Value, span: Span) -> ([]CST_Form, Compile_Error, bool) {
@@ -815,21 +987,24 @@ macro_subst_form :: proc(form: CST_Form, names: []string, values: []CST_Form) ->
     if form.kind == .Symbol {
         for name, idx in names {
             if form.text == name {
-                return values[idx]
+                return clone_cst_form(values[idx])
             }
         }
-        return form
+        return clone_cst_form(form)
     }
 
     #partial switch form.kind {
     case .List, .Vector, .Brace:
-        out := CST_Form{kind = form.kind, text = form.text, span = form.span}
+        out := CST_Form{kind = form.kind, span = form.span}
+        if form.text != "" {
+            out.text = strings.clone(form.text)
+        }
         for item in form.items {
             append(&out.items, macro_subst_form(item, names, values))
         }
         return out
     case:
-        return form
+        return clone_cst_form(form)
     }
 }
 
@@ -847,14 +1022,16 @@ macro_quasiquote_form :: proc(form: CST_Form, macros: []User_Macro, bindings: []
             if !ok_value {
                 return CST_Form{}, err_value, false
             }
-            return macro_value_to_form(value, form.items[1].span)
+            result, err_form, ok_form := macro_value_to_owned_form(value, form.items[1].span)
+            macro_value_delete_backing(&value)
+            return result, err_form, ok_form
         }
         inner, err_inner, ok_inner := macro_quasiquote_form(form.items[1], macros, bindings, depth-1)
         if !ok_inner {
             return CST_Form{}, err_inner, false
         }
         out := CST_Form{kind = .List, span = form.span}
-        append(&out.items, form.items[0])
+        append(&out.items, clone_cst_form(form.items[0]))
         append(&out.items, inner)
         return out, Compile_Error{}, true
     }
@@ -871,7 +1048,7 @@ macro_quasiquote_form :: proc(form: CST_Form, macros: []User_Macro, bindings: []
             return CST_Form{}, err_inner, false
         }
         out := CST_Form{kind = .List, span = form.span}
-        append(&out.items, form.items[0])
+        append(&out.items, clone_cst_form(form.items[0]))
         append(&out.items, inner)
         return out, Compile_Error{}, true
     }
@@ -887,7 +1064,7 @@ macro_quasiquote_form :: proc(form: CST_Form, macros: []User_Macro, bindings: []
                 return CST_Form{}, err_inner, false
             }
             out := CST_Form{kind = .List, span = form.span}
-            append(&out.items, form.items[0])
+            append(&out.items, clone_cst_form(form.items[0]))
             append(&out.items, inner)
             return out, Compile_Error{}, true
         }
@@ -902,13 +1079,16 @@ macro_quasiquote_form :: proc(form: CST_Form, macros: []User_Macro, bindings: []
                 if !ok_value {
                     return CST_Form{}, err_value, false
                 }
-                forms, err_forms, ok_forms := macro_value_to_forms(value, item.items[1].span)
+                forms, err_forms, ok_forms := macro_value_to_owned_forms(value, item.items[1].span)
                 if !ok_forms {
+                    macro_value_delete_backing(&value)
                     return CST_Form{}, err_forms, false
                 }
                 for expanded in forms {
                     append(&out.items, expanded)
                 }
+                delete(forms)
+                macro_value_delete_backing(&value)
                 continue
             }
             child, err_child, ok_child := macro_quasiquote_form(item, macros, bindings, depth)
@@ -929,13 +1109,16 @@ macro_quasiquote_form :: proc(form: CST_Form, macros: []User_Macro, bindings: []
                 if !ok_value {
                     return CST_Form{}, err_value, false
                 }
-                forms, err_forms, ok_forms := macro_value_to_forms(value, item.items[1].span)
+                forms, err_forms, ok_forms := macro_value_to_owned_forms(value, item.items[1].span)
                 if !ok_forms {
+                    macro_value_delete_backing(&value)
                     return CST_Form{}, err_forms, false
                 }
                 for expanded in forms {
                     append(&out.items, expanded)
                 }
+                delete(forms)
+                macro_value_delete_backing(&value)
                 continue
             }
             child, err_child, ok_child := macro_quasiquote_form(item, macros, bindings, depth)
@@ -956,13 +1139,16 @@ macro_quasiquote_form :: proc(form: CST_Form, macros: []User_Macro, bindings: []
                 if !ok_value {
                     return CST_Form{}, err_value, false
                 }
-                forms, err_forms, ok_forms := macro_value_to_forms(value, item.items[1].span)
+                forms, err_forms, ok_forms := macro_value_to_owned_forms(value, item.items[1].span)
                 if !ok_forms {
+                    macro_value_delete_backing(&value)
                     return CST_Form{}, err_forms, false
                 }
                 for expanded in forms {
                     append(&out.items, expanded)
                 }
+                delete(forms)
+                macro_value_delete_backing(&value)
                 continue
             }
             child, err_child, ok_child := macro_quasiquote_form(item, macros, bindings, depth)
@@ -983,13 +1169,16 @@ macro_quasiquote_form :: proc(form: CST_Form, macros: []User_Macro, bindings: []
                 if !ok_value {
                     return CST_Form{}, err_value, false
                 }
-                forms, err_forms, ok_forms := macro_value_to_forms(value, item.items[1].span)
+                forms, err_forms, ok_forms := macro_value_to_owned_forms(value, item.items[1].span)
                 if !ok_forms {
+                    macro_value_delete_backing(&value)
                     return CST_Form{}, err_forms, false
                 }
                 for expanded in forms {
                     append(&out.items, expanded)
                 }
+                delete(forms)
+                macro_value_delete_backing(&value)
                 continue
             }
             child, err_child, ok_child := macro_quasiquote_form(item, macros, bindings, depth)
@@ -1000,7 +1189,7 @@ macro_quasiquote_form :: proc(form: CST_Form, macros: []User_Macro, bindings: []
         }
         return out, Compile_Error{}, true
     case:
-        return form, Compile_Error{}, true
+        return clone_cst_form(form), Compile_Error{}, true
     }
 }
 
@@ -1023,7 +1212,7 @@ macro_eval_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_
         }
         return macro_float_value(float_value), Compile_Error{}, true
     case .String:
-        return macro_string_value(unquote_string(form.text)), Compile_Error{}, true
+        return macro_owned_string_value(unquote_string(form.text)), Compile_Error{}, true
     case .Keyword:
         return macro_form_value(form), Compile_Error{}, true
     case .Symbol:
@@ -1066,7 +1255,7 @@ macro_eval_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_
                 if !ok_quoted {
                     return Macro_Value{}, err_quoted, false
                 }
-                return macro_form_value(quoted), Compile_Error{}, true
+                return macro_owned_form_value(quoted), Compile_Error{}, true
             case "do":
                 return macro_eval_sequence(form.items[1:], macros, bindings)
             case "if":
@@ -1077,7 +1266,9 @@ macro_eval_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_
                 if !ok_cond {
                     return Macro_Value{}, err_cond, false
                 }
-                if macro_truthy(cond_value) {
+                cond_truthy := macro_truthy(cond_value)
+                macro_value_delete_backing(&cond_value)
+                if cond_truthy {
                     return macro_eval_expr(form.items[2], macros, bindings)
                 }
                 return macro_eval_expr(form.items[3], macros, bindings)
@@ -1086,9 +1277,11 @@ macro_eval_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_
                     return Macro_Value{}, Compile_Error{message = "macro let expects binding vector and body", span = form.span}, false
                 }
                 local: [dynamic]Macro_Binding
+                defer delete(local)
                 for binding in bindings {
                     append(&local, binding)
                 }
+                local_owned_start := len(local)
                 binding_form := form.items[1]
                 if len(binding_form.items)%2 != 0 {
                     return Macro_Value{}, Compile_Error{message = "macro let expects [name value ...] bindings", span = binding_form.span}, false
@@ -1106,7 +1299,14 @@ macro_eval_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_
                     append(&local, Macro_Binding{name = name_form.text, value = value})
                     i += 2
                 }
-                return macro_eval_sequence(form.items[2:], macros, local[:])
+                value, err_value, ok_value := macro_eval_sequence(form.items[2:], macros, local[:])
+                for idx in local_owned_start ..< len(local) {
+                    macro_value_delete_backing(&local[idx].value)
+                }
+                if !ok_value {
+                    return Macro_Value{}, err_value, false
+                }
+                return value, Compile_Error{}, true
             case "list":
                 return macro_eval_list_builder(.List, form, macros, bindings)
             case "vector":
@@ -1123,12 +1323,16 @@ macro_eval_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_
                 }
                 forms, err_forms, ok_forms := macro_list_from_value(value, form.items[1].span)
                 if !ok_forms {
+                    macro_value_delete_backing(&value)
                     return Macro_Value{}, err_forms, false
                 }
                 if len(forms) == 0 {
+                    macro_value_delete_backing(&value)
                     return macro_nil_value(), Compile_Error{}, true
                 }
-                return macro_form_value(forms[0]), Compile_Error{}, true
+                result := macro_owned_form_value(clone_cst_form(forms[0]))
+                macro_value_delete_backing(&value)
+                return result, Compile_Error{}, true
             case "rest", "arr.rest", "kvist.rest":
                 if len(form.items) != 2 {
                     return Macro_Value{}, Compile_Error{message = "rest expects one argument", span = form.span}, false
@@ -1139,12 +1343,18 @@ macro_eval_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_
                 }
                 forms, err_forms, ok_forms := macro_list_from_value(value, form.items[1].span)
                 if !ok_forms {
+                    macro_value_delete_backing(&value)
                     return Macro_Value{}, err_forms, false
                 }
                 if len(forms) <= 1 {
+                    macro_value_delete_backing(&value)
                     return macro_forms_value(nil), Compile_Error{}, true
                 }
-                return macro_forms_value(forms[1:]), Compile_Error{}, true
+                cloned := clone_cst_form_slice(forms[1:])
+                result := macro_owned_forms_value(cloned[:])
+                delete(cloned)
+                macro_value_delete_backing(&value)
+                return result, Compile_Error{}, true
             case "nth", "arr.nth", "kvist.nth":
                 if len(form.items) != 3 {
                     return Macro_Value{}, Compile_Error{message = "nth expects sequence and index", span = form.span}, false
@@ -1155,19 +1365,25 @@ macro_eval_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_
                 }
                 forms, err_forms, ok_forms := macro_list_from_value(seq_value, form.items[1].span)
                 if !ok_forms {
+                    macro_value_delete_backing(&seq_value)
                     return Macro_Value{}, err_forms, false
                 }
                 index_value, err_index, ok_index := macro_eval_expr(form.items[2], macros, bindings)
                 if !ok_index {
+                    macro_value_delete_backing(&seq_value)
                     return Macro_Value{}, err_index, false
                 }
                 if index_value.kind != .Int {
+                    macro_value_delete_backing(&seq_value)
                     return Macro_Value{}, Compile_Error{message = "nth index must be an integer", span = form.items[2].span}, false
                 }
                 if index_value.int_value < 0 || index_value.int_value >= len(forms) {
+                    macro_value_delete_backing(&seq_value)
                     return macro_nil_value(), Compile_Error{}, true
                 }
-                return macro_form_value(forms[index_value.int_value]), Compile_Error{}, true
+                result := macro_owned_form_value(clone_cst_form(forms[index_value.int_value]))
+                macro_value_delete_backing(&seq_value)
+                return result, Compile_Error{}, true
             case "core.count", "count", "kvist.count":
                 if len(form.items) != 2 {
                     return Macro_Value{}, Compile_Error{message = "count expects one argument", span = form.span}, false
@@ -1176,6 +1392,7 @@ macro_eval_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_
                 if !ok_value {
                     return Macro_Value{}, err_value, false
                 }
+                defer macro_value_delete_backing(&value)
                 #partial switch value.kind {
                 case .Forms:
                     return macro_int_value(len(value.forms)), Compile_Error{}, true
@@ -1201,27 +1418,38 @@ macro_eval_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_
                 }
                 forms, err_forms, ok_forms := macro_list_from_value(seq_value, form.items[1].span)
                 if !ok_forms {
+                    macro_value_delete_backing(&seq_value)
                     return Macro_Value{}, err_forms, false
                 }
                 start_value, err_start, ok_start := macro_eval_expr(form.items[2], macros, bindings)
                 if !ok_start {
+                    macro_value_delete_backing(&seq_value)
                     return Macro_Value{}, err_start, false
                 }
                 if start_value.kind != .Int {
+                    macro_value_delete_backing(&seq_value)
                     return Macro_Value{}, Compile_Error{message = "slice start must be an integer", span = form.items[2].span}, false
                 }
                 end := -1
                 if len(form.items) == 4 {
                     end_value, err_end, ok_end := macro_eval_expr(form.items[3], macros, bindings)
                     if !ok_end {
+                        macro_value_delete_backing(&seq_value)
                         return Macro_Value{}, err_end, false
                     }
                     if end_value.kind != .Int {
+                        macro_value_delete_backing(&seq_value)
                         return Macro_Value{}, Compile_Error{message = "slice end must be an integer", span = form.items[3].span}, false
                     }
                     end = end_value.int_value
                 }
-                return macro_forms_value(macro_slice_forms(forms, start_value.int_value, end)), Compile_Error{}, true
+                sliced := macro_slice_forms(forms, start_value.int_value, end)
+                cloned := clone_cst_form_slice(sliced)
+                result := macro_owned_forms_value(cloned[:])
+                delete(cloned)
+                delete(sliced)
+                macro_value_delete_backing(&seq_value)
+                return result, Compile_Error{}, true
             case "concat":
                 out: [dynamic]CST_Form
                 for arg in form.items[1:] {
@@ -1229,15 +1457,20 @@ macro_eval_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_
                     if !ok_value {
                         return Macro_Value{}, err_value, false
                     }
-                    forms, err_forms, ok_forms := macro_value_to_forms(value, arg.span)
+                    forms, err_forms, ok_forms := macro_value_to_owned_forms(value, arg.span)
                     if !ok_forms {
+                        macro_value_delete_backing(&value)
                         return Macro_Value{}, err_forms, false
                     }
                     for item in forms {
                         append(&out, item)
                     }
+                    delete(forms)
+                    macro_value_delete_backing(&value)
                 }
-                return macro_forms_value(out[:]), Compile_Error{}, true
+                result := macro_owned_forms_value(out[:])
+                delete(out)
+                return result, Compile_Error{}, true
             case "forms":
                 out: [dynamic]CST_Form
                 for arg in form.items[1:] {
@@ -1245,15 +1478,20 @@ macro_eval_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_
                     if !ok_value {
                         return Macro_Value{}, err_value, false
                     }
-                    forms, err_forms, ok_forms := macro_value_to_forms(value, arg.span)
+                    forms, err_forms, ok_forms := macro_value_to_owned_forms(value, arg.span)
                     if !ok_forms {
+                        macro_value_delete_backing(&value)
                         return Macro_Value{}, err_forms, false
                     }
                     for item in forms {
                         append(&out, item)
                     }
+                    delete(forms)
+                    macro_value_delete_backing(&value)
                 }
-                return macro_forms_value(out[:]), Compile_Error{}, true
+                result := macro_owned_forms_value(out[:])
+                delete(out)
+                return result, Compile_Error{}, true
             case "subst":
                 if len(form.items) != 4 {
                     return Macro_Value{}, Compile_Error{message = "subst expects template, names, and values", span = form.span}, false
@@ -1286,13 +1524,18 @@ macro_eval_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_
                     return Macro_Value{}, Compile_Error{message = "subst expects the same number of names and values", span = form.span}, false
                 }
                 names: [dynamic]string
+                defer delete(names)
                 for name_form in name_forms {
                     if name_form.kind != .Symbol {
                         return Macro_Value{}, Compile_Error{message = "subst names must be symbols", span = name_form.span}, false
                     }
                     append(&names, name_form.text)
                 }
-                return macro_form_value(macro_subst_form(template_form, names[:], value_forms[:])), Compile_Error{}, true
+                subst_result := macro_owned_form_value(macro_subst_form(template_form, names[:], value_forms[:]))
+                macro_value_delete_backing(&values_value)
+                macro_value_delete_backing(&names_value)
+                macro_value_delete_backing(&template_value)
+                return subst_result, Compile_Error{}, true
             case "str":
                 builder := strings.builder_make()
                 defer strings.builder_destroy(&builder)
@@ -1303,11 +1546,14 @@ macro_eval_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_
                     }
                     text, err_text, ok_text := macro_value_to_string(value, arg.span)
                     if !ok_text {
+                        macro_value_delete_backing(&value)
                         return Macro_Value{}, err_text, false
                     }
                     strings.write_string(&builder, text)
+                    delete(text)
+                    macro_value_delete_backing(&value)
                 }
-                return macro_string_value(strings.clone(strings.to_string(builder))), Compile_Error{}, true
+                return macro_owned_string_value(strings.clone(strings.to_string(builder))), Compile_Error{}, true
             case "io.read", "io__read":
                 if len(form.items) != 2 {
                     return Macro_Value{}, Compile_Error{message = "io.read expects one path argument", span = form.span}, false
@@ -1318,8 +1564,11 @@ macro_eval_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_
                 }
                 raw_path, err_raw_path, ok_raw_path := macro_value_to_string(path_value, form.items[1].span)
                 if !ok_raw_path {
+                    macro_value_delete_backing(&path_value)
                     return Macro_Value{}, err_raw_path, false
                 }
+                defer delete(raw_path)
+                defer macro_value_delete_backing(&path_value)
                 path, err_path, ok_path := macro_eval_read_path(raw_path, form.items[1].span)
                 if !ok_path {
                     return Macro_Value{}, err_path, false
@@ -1331,7 +1580,7 @@ macro_eval_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_
                 }
                 text := strings.clone(string(data))
                 delete(data)
-                return macro_string_value(text), Compile_Error{}, true
+                return macro_owned_string_value(text), Compile_Error{}, true
             case "symbol":
                 if len(form.items) != 2 {
                     return Macro_Value{}, Compile_Error{message = "symbol expects one string argument", span = form.span}, false
@@ -1341,28 +1590,40 @@ macro_eval_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_
                     return Macro_Value{}, err_value, false
                 }
                 if value.kind != .String {
+                    macro_value_delete_backing(&value)
                     return Macro_Value{}, Compile_Error{message = "symbol expects one string argument", span = form.items[1].span}, false
                 }
-                return macro_form_value(CST_Form{kind = .Symbol, text = value.string_value, span = form.span}), Compile_Error{}, true
+                symbol_text := strings.clone(value.string_value)
+                macro_value_delete_backing(&value)
+                return macro_owned_form_value(CST_Form{kind = .Symbol, text = symbol_text, span = form.span}), Compile_Error{}, true
             case "gensym":
                 prefix := "__kvist_gensym"
                 if len(form.items) > 2 {
                     return Macro_Value{}, Compile_Error{message = "gensym expects zero or one string argument", span = form.span}, false
                 }
+                gensym_value := Macro_Value{}
+                gensym_has_value := false
                 if len(form.items) == 2 {
                     value, err_value, ok_value := macro_eval_expr(form.items[1], macros, bindings)
                     if !ok_value {
                         return Macro_Value{}, err_value, false
                     }
                     if value.kind != .String {
+                        macro_value_delete_backing(&value)
                         return Macro_Value{}, Compile_Error{message = "gensym expects zero or one string argument", span = form.items[1].span}, false
                     }
+                    gensym_value = value
+                    gensym_has_value = true
                     prefix = value.string_value
                 }
                 macro_gensym_counter += 1
-                return macro_form_value(CST_Form{
+                gensym_text := strings.clone(fmt.tprintf("%s_%d", prefix, macro_gensym_counter))
+                if gensym_has_value {
+                    macro_value_delete_backing(&gensym_value)
+                }
+                return macro_owned_form_value(CST_Form{
                     kind = .Symbol,
-                    text = fmt.tprintf("%s_%d", prefix, macro_gensym_counter),
+                    text = gensym_text,
                     span = form.span,
                 }), Compile_Error{}, true
             case "keyword":
@@ -1374,9 +1635,12 @@ macro_eval_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_
                     return Macro_Value{}, err_value, false
                 }
                 if value.kind != .String {
+                    macro_value_delete_backing(&value)
                     return Macro_Value{}, Compile_Error{message = "keyword expects one string argument", span = form.items[1].span}, false
                 }
-                return macro_form_value(CST_Form{kind = .Keyword, text = fmt.tprintf(":%s", value.string_value), span = form.span}), Compile_Error{}, true
+                keyword_text := strings.clone(fmt.tprintf(":%s", value.string_value))
+                macro_value_delete_backing(&value)
+                return macro_owned_form_value(CST_Form{kind = .Keyword, text = keyword_text, span = form.span}), Compile_Error{}, true
             case "name":
                 if len(form.items) != 2 {
                     return Macro_Value{}, Compile_Error{message = "name expects one symbol or keyword", span = form.span}, false
@@ -1387,23 +1651,35 @@ macro_eval_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_
                 }
                 single, err_single, ok_single := macro_value_to_form(value, form.items[1].span)
                 if !ok_single {
+                    macro_value_delete_backing(&value)
                     return Macro_Value{}, err_single, false
                 }
                 #partial switch single.kind {
                 case .Symbol:
                     if len(single.text) > 1 && single.text[0] == '.' {
-                        return macro_string_value(single.text[1:]), Compile_Error{}, true
+                        result := macro_owned_string_value(strings.clone(single.text[1:]))
+                        macro_value_delete_backing(&value)
+                        return result, Compile_Error{}, true
                     }
                     if len(single.text) > 1 && single.text[len(single.text)-1] == ':' {
-                        return macro_string_value(single.text[:len(single.text)-1]), Compile_Error{}, true
+                        result := macro_owned_string_value(strings.clone(single.text[:len(single.text)-1]))
+                        macro_value_delete_backing(&value)
+                        return result, Compile_Error{}, true
                     }
-                    return macro_string_value(single.text), Compile_Error{}, true
+                    result := macro_owned_string_value(strings.clone(single.text))
+                    macro_value_delete_backing(&value)
+                    return result, Compile_Error{}, true
                 case .Keyword:
                     if len(single.text) > 0 && single.text[0] == ':' {
-                        return macro_string_value(single.text[1:]), Compile_Error{}, true
+                        result := macro_owned_string_value(strings.clone(single.text[1:]))
+                        macro_value_delete_backing(&value)
+                        return result, Compile_Error{}, true
                     }
-                    return macro_string_value(single.text), Compile_Error{}, true
+                    result := macro_owned_string_value(strings.clone(single.text))
+                    macro_value_delete_backing(&value)
+                    return result, Compile_Error{}, true
                 case:
+                    macro_value_delete_backing(&value)
                     return Macro_Value{}, Compile_Error{message = "name expects one symbol or keyword", span = form.items[1].span}, false
                 }
             case "=":
@@ -1417,13 +1693,18 @@ macro_eval_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_
                 for item in form.items[2:] {
                     current, err_current, ok_current := macro_eval_expr(item, macros, bindings)
                     if !ok_current {
+                        macro_value_delete_backing(&previous)
                         return Macro_Value{}, err_current, false
                     }
                     if !macro_value_equal(previous, current) {
+                        macro_value_delete_backing(&previous)
+                        macro_value_delete_backing(&current)
                         return macro_bool_value(false), Compile_Error{}, true
                     }
+                    macro_value_delete_backing(&previous)
                     previous = current
                 }
+                macro_value_delete_backing(&previous)
                 return macro_bool_value(true), Compile_Error{}, true
             case "form?":
                 if len(form.items) != 2 {
@@ -1433,6 +1714,7 @@ macro_eval_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_
                 if !ok_value {
                     return Macro_Value{}, err_value, false
                 }
+                defer macro_value_delete_backing(&value)
                 return macro_bool_value(value.kind == .Form), Compile_Error{}, true
             case "vector?":
                 if len(form.items) != 2 {
@@ -1442,6 +1724,7 @@ macro_eval_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_
                 if !ok_value {
                     return Macro_Value{}, err_value, false
                 }
+                defer macro_value_delete_backing(&value)
                 if value.kind != .Form {
                     return macro_bool_value(false), Compile_Error{}, true
                 }
@@ -1454,6 +1737,7 @@ macro_eval_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_
                 if !ok_value {
                     return Macro_Value{}, err_value, false
                 }
+                defer macro_value_delete_backing(&value)
                 if value.kind != .Form {
                     return macro_bool_value(false), Compile_Error{}, true
                 }
@@ -1466,6 +1750,7 @@ macro_eval_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_
                 if !ok_value {
                     return Macro_Value{}, err_value, false
                 }
+                defer macro_value_delete_backing(&value)
                 if value.kind != .Form {
                     return macro_bool_value(false), Compile_Error{}, true
                 }
@@ -1478,6 +1763,7 @@ macro_eval_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_
                 if !ok_value {
                     return Macro_Value{}, err_value, false
                 }
+                defer macro_value_delete_backing(&value)
                 if value.kind != .Form {
                     return macro_bool_value(false), Compile_Error{}, true
                 }
@@ -1490,6 +1776,7 @@ macro_eval_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_
                 if !ok_value {
                     return Macro_Value{}, err_value, false
                 }
+                defer macro_value_delete_backing(&value)
                 if value.kind != .Form {
                     return macro_bool_value(false), Compile_Error{}, true
                 }
@@ -1502,6 +1789,7 @@ macro_eval_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_
                 if !ok_value {
                     return Macro_Value{}, err_value, false
                 }
+                defer macro_value_delete_backing(&value)
                 if value.kind != .Form {
                     return macro_bool_value(false), Compile_Error{}, true
                 }
@@ -1516,6 +1804,7 @@ macro_eval_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_
                 if !ok_value {
                     return Macro_Value{}, err_value, false
                 }
+                defer macro_value_delete_backing(&value)
                 if value.kind == .String {
                     return macro_bool_value(true), Compile_Error{}, true
                 }
@@ -1531,6 +1820,7 @@ macro_eval_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_
                 if !ok_value {
                     return Macro_Value{}, err_value, false
                 }
+                defer macro_value_delete_backing(&value)
                 if value.kind == .Int {
                     return macro_bool_value(true), Compile_Error{}, true
                 }
@@ -1549,6 +1839,7 @@ macro_eval_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_
                 if !ok_value {
                     return Macro_Value{}, err_value, false
                 }
+                defer macro_value_delete_backing(&value)
                 if value.kind == .Int {
                     return macro_bool_value(true), Compile_Error{}, true
                 }
@@ -1565,6 +1856,7 @@ macro_eval_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_
                 if !ok_value {
                     return Macro_Value{}, err_value, false
                 }
+                defer macro_value_delete_backing(&value)
                 if value.kind == .Float {
                     return macro_bool_value(true), Compile_Error{}, true
                 }
@@ -1585,6 +1877,7 @@ macro_eval_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_
                 if !ok_value {
                     return Macro_Value{}, err_value, false
                 }
+                defer macro_value_delete_backing(&value)
                 if value.kind == .Bool {
                     return macro_bool_value(true), Compile_Error{}, true
                 }
@@ -1600,6 +1893,7 @@ macro_eval_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_
                 if !ok_value {
                     return Macro_Value{}, err_value, false
                 }
+                defer macro_value_delete_backing(&value)
                 if value.kind == .Nil {
                     return macro_bool_value(true), Compile_Error{}, true
                 }
@@ -1616,39 +1910,56 @@ macro_eval_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_
                     return Macro_Value{}, err_value, false
                 }
                 if value.kind == .String {
-                    return macro_string_value(value.string_value), Compile_Error{}, true
+                    result := macro_owned_string_value(strings.clone(value.string_value))
+                    macro_value_delete_backing(&value)
+                    return result, Compile_Error{}, true
                 }
                 if value.kind == .Int {
-                    return macro_string_value(macro_int_text(value.int_value)), Compile_Error{}, true
+                    result := macro_owned_string_value(strings.clone(macro_int_text(value.int_value)))
+                    macro_value_delete_backing(&value)
+                    return result, Compile_Error{}, true
                 }
                 if value.kind == .Float {
-                    return macro_string_value(macro_float_text(value.float_value)), Compile_Error{}, true
+                    result := macro_owned_string_value(strings.clone(macro_float_text(value.float_value)))
+                    macro_value_delete_backing(&value)
+                    return result, Compile_Error{}, true
                 }
                 if value.kind == .Bool {
                     if value.bool_value {
-                        return macro_string_value("true"), Compile_Error{}, true
+                        return macro_owned_string_value(strings.clone("true")), Compile_Error{}, true
                     }
-                    return macro_string_value("false"), Compile_Error{}, true
+                    return macro_owned_string_value(strings.clone("false")), Compile_Error{}, true
                 }
                 if value.kind == .Nil {
-                    return macro_string_value("nil"), Compile_Error{}, true
+                    return macro_owned_string_value(strings.clone("nil")), Compile_Error{}, true
                 }
                 if value.kind == .Form {
                     #partial switch value.form.kind {
                     case .String:
-                        return macro_string_value(unquote_string(value.form.text)), Compile_Error{}, true
+                        result := macro_owned_string_value(unquote_string(value.form.text))
+                        macro_value_delete_backing(&value)
+                        return result, Compile_Error{}, true
                     case .Symbol:
-                        return macro_string_value(value.form.text), Compile_Error{}, true
+                        result := macro_owned_string_value(strings.clone(value.form.text))
+                        macro_value_delete_backing(&value)
+                        return result, Compile_Error{}, true
                     case .Keyword:
                         if len(value.form.text) > 0 && value.form.text[0] == ':' {
-                            return macro_string_value(value.form.text[1:]), Compile_Error{}, true
+                            result := macro_owned_string_value(strings.clone(value.form.text[1:]))
+                            macro_value_delete_backing(&value)
+                            return result, Compile_Error{}, true
                         }
-                        return macro_string_value(value.form.text), Compile_Error{}, true
+                        result := macro_owned_string_value(strings.clone(value.form.text))
+                        macro_value_delete_backing(&value)
+                        return result, Compile_Error{}, true
                     case .Number, .Bool, .Nil:
-                        return macro_string_value(value.form.text), Compile_Error{}, true
+                        result := macro_owned_string_value(strings.clone(value.form.text))
+                        macro_value_delete_backing(&value)
+                        return result, Compile_Error{}, true
                     case:
                     }
                 }
+                macro_value_delete_backing(&value)
                 return Macro_Value{}, Compile_Error{message = "text expects a scalar literal, symbol, or keyword", span = form.items[1].span}, false
             case "error":
                 if len(form.items) != 2 {
@@ -1660,8 +1971,10 @@ macro_eval_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_
                 }
                 message, err_message, ok_message := macro_value_to_string(value, form.items[1].span)
                 if !ok_message {
+                    macro_value_delete_backing(&value)
                     return Macro_Value{}, err_message, false
                 }
+                macro_value_delete_backing(&value)
                 return Macro_Value{}, Compile_Error{message = message, span = form.items[1].span}, false
             }
         }
@@ -1671,7 +1984,15 @@ macro_eval_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_
                 if !ok_bindings {
                     return Macro_Value{}, err_bindings, false
                 }
-                return macro_eval_sequence(user_macro.body[:], macros, local_bindings[:])
+                value, err, ok := macro_eval_sequence(user_macro.body[:], macros, local_bindings[:])
+                if !ok {
+                    macro_binding_slice_delete_backing(&local_bindings)
+                    return Macro_Value{}, err, false
+                }
+                result := macro_value_clone_backing(value)
+                macro_value_delete_backing(&value)
+                macro_binding_slice_delete_backing(&local_bindings)
+                return result, Compile_Error{}, true
             }
         }
         return macro_form_value(form), Compile_Error{}, true
@@ -1684,10 +2005,12 @@ expand_user_macro_call :: proc(macro_decl: User_Macro, call: CST_Form, macros: [
     if !ok_value {
         return CST_Form{}, err_value, false
     }
-    expanded, err_form, ok_form := macro_value_to_form(value, call.span)
+    expanded, err_form, ok_form := macro_value_to_owned_form(value, call.span)
     if !ok_form {
+        macro_value_delete_backing(&value)
         return CST_Form{}, err_form, false
     }
+    macro_value_delete_backing(&value)
     if expanded.span.start == 0 && expanded.span.end == 0 {
         expanded.span = call.span
     }
@@ -1699,7 +2022,9 @@ expand_user_macro_call_to_forms :: proc(macro_decl: User_Macro, call: CST_Form, 
     if !ok_value {
         return nil, err_value, false
     }
-    return macro_value_to_forms(value, call.span)
+    forms, err_forms, ok_forms := macro_value_to_owned_forms(value, call.span)
+    macro_value_delete_backing(&value)
+    return forms, err_forms, ok_forms
 }
 
 macro_emit_expanded_form :: proc(e: ^Macro_Expander, indent: string, form: CST_Form, macros: []User_Macro, suffix: string = "") -> (Compile_Error, bool) {
@@ -1815,43 +2140,222 @@ macroexpand_cst_form_with_macros :: proc(form: CST_Form, macros: []User_Macro) -
     #partial switch form.kind {
     case .List:
         if len(form.items) > 0 && form.items[0].kind == .Symbol {
+            switch form.items[0].text {
+            case "def", "def-", "defvar", "defvar-":
+                return macroexpand_def_binding_form_preserving_types(form, macros)
+            case "defstruct", "defstruct-", "defunion", "defunion-":
+                return clone_cst_form(form), Compile_Error{}, true
+            case "defn", "defn-":
+                return macroexpand_defn_form_preserving_types(form, macros)
+            }
             if user_macro, ok_user := find_user_macro(macros, form.items[0].text); ok_user {
                 expanded, err_user, ok_user_expand := expand_user_macro_call(user_macro, form, macros)
                 if !ok_user_expand {
                     return CST_Form{}, err_user, false
                 }
+                defer delete_cst_form(&expanded)
                 return macroexpand_cst_form_with_macros(expanded, macros)
             }
             #partial switch builtin_macro_kind(form.items[0].text) {
             case .Thread_First, .Thread_Last:
-                return form, Compile_Error{}, true
+                return clone_cst_form(form), Compile_Error{}, true
             case:
             }
         }
-        expanded = form
-        expanded.items = nil
-        for item in form.items {
+        expanded = CST_Form{kind = form.kind, span = form.span}
+        if form.text != "" {
+            expanded.text = strings.clone(form.text)
+        }
+        for item, idx in form.items {
+            if idx == 0 && item.kind == .List {
+                if _, _, ok_type := parse_type_text(item); ok_type {
+                    append(&expanded.items, clone_cst_form(item))
+                    continue
+                }
+            }
             child, err_child, ok_child := macroexpand_cst_form_with_macros(item, macros)
             if !ok_child {
+                delete_cst_form(&expanded)
                 return CST_Form{}, err_child, false
             }
             append(&expanded.items, child)
         }
         return expanded, Compile_Error{}, true
     case .Vector, .Brace, .Set:
-        expanded = form
-        expanded.items = nil
+        expanded = CST_Form{kind = form.kind, span = form.span}
+        if form.text != "" {
+            expanded.text = strings.clone(form.text)
+        }
         for item in form.items {
             child, err_child, ok_child := macroexpand_cst_form_with_macros(item, macros)
             if !ok_child {
+                delete_cst_form(&expanded)
                 return CST_Form{}, err_child, false
             }
             append(&expanded.items, child)
         }
         return expanded, Compile_Error{}, true
     case:
-        return form, Compile_Error{}, true
+        return clone_cst_form(form), Compile_Error{}, true
     }
+}
+
+macroexpand_def_binding_form_preserving_types :: proc(form: CST_Form, macros: []User_Macro) -> (expanded: CST_Form, err: Compile_Error, ok: bool) {
+    if len(form.items) < 3 {
+        return clone_cst_form(form), Compile_Error{}, true
+    }
+    expanded = CST_Form{kind = form.kind, span = form.span}
+    if form.text != "" {
+        expanded.text = strings.clone(form.text)
+    }
+
+    append(&expanded.items, clone_cst_form(form.items[0]))
+    append(&expanded.items, clone_cst_form(form.items[1]))
+
+    value_index := 2
+    if len(form.items) > 3 && form.items[2].kind == .String {
+        append(&expanded.items, clone_cst_form(form.items[2]))
+        value_index = 3
+    }
+
+    if form.items[1].kind == .Symbol &&
+       len(form.items[1].text) > 0 &&
+       form.items[1].text[len(form.items[1].text)-1] == ':' {
+        _, next_i, err_type, ok_type := parse_type_text_from_forms(form.items[:], value_index)
+        if !ok_type {
+            delete_cst_form(&expanded)
+            return CST_Form{}, err_type, false
+        }
+        for type_item in form.items[value_index:next_i] {
+            append(&expanded.items, clone_cst_form(type_item))
+        }
+        value_index = next_i
+    }
+
+    for item in form.items[value_index:] {
+        child, err_child, ok_child := macroexpand_cst_form_with_macros(item, macros)
+        if !ok_child {
+            delete_cst_form(&expanded)
+            return CST_Form{}, err_child, false
+        }
+        append(&expanded.items, child)
+    }
+    return expanded, Compile_Error{}, true
+}
+
+macroexpand_param_vector_preserving_types :: proc(form: CST_Form, macros: []User_Macro) -> (expanded: CST_Form, err: Compile_Error, ok: bool) {
+    if form.kind != .Vector {
+        return macroexpand_cst_form_with_macros(form, macros)
+    }
+    expanded = CST_Form{kind = form.kind, span = form.span}
+    if form.text != "" {
+        expanded.text = strings.clone(form.text)
+    }
+
+    i := 0
+    for i < len(form.items) {
+        target := form.items[i]
+        append(&expanded.items, clone_cst_form(target))
+        if target.kind != .Symbol || len(target.text) == 0 || target.text[len(target.text)-1] != ':' {
+            i += 1
+            continue
+        }
+        if i+1 >= len(form.items) {
+            i += 1
+            continue
+        }
+        _, next_i, err_type, ok_type := parse_type_text_from_forms(form.items[:], i+1)
+        if !ok_type {
+            delete_cst_form(&expanded)
+            return CST_Form{}, err_type, false
+        }
+        for type_item in form.items[i+1:next_i] {
+            append(&expanded.items, clone_cst_form(type_item))
+        }
+        i = next_i
+        if i < len(form.items) && is_symbol(form.items[i], "=") {
+            append(&expanded.items, clone_cst_form(form.items[i]))
+            if i+1 >= len(form.items) {
+                delete_cst_form(&expanded)
+                return CST_Form{}, Compile_Error{message = "missing default parameter value", span = form.items[i].span}, false
+            }
+            value, err_value, ok_value := macroexpand_cst_form_with_macros(form.items[i+1], macros)
+            if !ok_value {
+                delete_cst_form(&expanded)
+                return CST_Form{}, err_value, false
+            }
+            append(&expanded.items, value)
+            i += 2
+        }
+    }
+    return expanded, Compile_Error{}, true
+}
+
+macroexpand_defn_form_preserving_types :: proc(form: CST_Form, macros: []User_Macro) -> (expanded: CST_Form, err: Compile_Error, ok: bool) {
+    expanded = CST_Form{kind = form.kind, span = form.span}
+    if form.text != "" {
+        expanded.text = strings.clone(form.text)
+    }
+
+    params_index := 2
+    if params_index+1 < len(form.items) &&
+       form.items[params_index].kind == .Keyword &&
+       form.items[params_index].text == ":abi" &&
+       form.items[params_index+1].kind == .String {
+        params_index += 2
+    }
+    if params_index < len(form.items) && form.items[params_index].kind == .String {
+        params_index += 1
+    }
+
+    i := 0
+    for i < len(form.items) {
+        item := form.items[i]
+        if i == params_index {
+            params, err_params, ok_params := macroexpand_param_vector_preserving_types(item, macros)
+            if !ok_params {
+                delete_cst_form(&expanded)
+                return CST_Form{}, err_params, false
+            }
+            append(&expanded.items, params)
+            i += 1
+            continue
+        }
+        if i == params_index+1 && is_symbol(item, "->") {
+            append(&expanded.items, clone_cst_form(item))
+            if i+1 >= len(form.items) {
+                delete_cst_form(&expanded)
+                return CST_Form{}, Compile_Error{message = "missing return spec after '->'", span = item.span}, false
+            }
+            if form.items[i+1].kind == .Vector && vector_is_named_returns(form.items[i+1]) {
+                append(&expanded.items, clone_cst_form(form.items[i+1]))
+                i += 2
+                continue
+            }
+            _, next_i, err_type, ok_type := parse_type_text_from_forms(form.items[:], i+1)
+            if !ok_type {
+                delete_cst_form(&expanded)
+                return CST_Form{}, err_type, false
+            }
+            for type_item in form.items[i+1:next_i] {
+                append(&expanded.items, clone_cst_form(type_item))
+            }
+            i = next_i
+            continue
+        }
+        if i <= params_index {
+            append(&expanded.items, clone_cst_form(item))
+        } else {
+            child, err_child, ok_child := macroexpand_cst_form_with_macros(item, macros)
+            if !ok_child {
+                delete_cst_form(&expanded)
+                return CST_Form{}, err_child, false
+            }
+            append(&expanded.items, child)
+        }
+        i += 1
+    }
+    return expanded, Compile_Error{}, true
 }
 
 write_macro_form_expanded :: proc(builder: ^strings.Builder, form: CST_Form, macros: []User_Macro) -> (Compile_Error, bool) {
@@ -1861,6 +2365,7 @@ write_macro_form_expanded :: proc(builder: ^strings.Builder, form: CST_Form, mac
             if !ok_user_expand {
                 return err_user, false
             }
+            defer delete_cst_form(&expanded)
             return write_macro_form_expanded(builder, expanded, macros)
         }
         switch builtin_macro_kind(form.items[0].text) {
@@ -1887,18 +2392,21 @@ write_macro_form_expanded :: proc(builder: ^strings.Builder, form: CST_Form, mac
             if !ok_expand {
                 return err_expand, false
             }
+            defer delete_borrowed_cst_form(&expanded_when)
             return write_macro_form_expanded(builder, expanded_when, macros)
         case .Thread_First:
             expanded, err_expand, ok_expand := expand_thread_form(form, false)
             if !ok_expand {
                 return err_expand, false
             }
+            defer delete_borrowed_cst_form(&expanded)
             return write_macro_form_expanded(builder, expanded, macros)
         case .Thread_Last:
             expanded, err_expand, ok_expand := expand_thread_form(form, true)
             if !ok_expand {
                 return err_expand, false
             }
+            defer delete_borrowed_cst_form(&expanded)
             return write_macro_form_expanded(builder, expanded, macros)
         case .When_Let:
             expanded, err_expand, ok_expand := macroexpand_when_let(form, macros)
@@ -2058,6 +2566,7 @@ macroexpand_with_allocator :: proc(form: CST_Form, macros: []User_Macro) -> (res
     if !ok_allocator_expr {
         return result, err_allocator_expr, false
     }
+    defer delete_cst_form(&expanded_allocator_expr)
     allocator_expr := macro_form_text(expanded_allocator_expr)
     defer delete(allocator_expr)
 
@@ -2129,6 +2638,7 @@ macroexpand_when_let :: proc(form: CST_Form, macros: []User_Macro) -> (result: E
     if !ok_expand {
         return result, err_expand, false
     }
+    defer delete_borrowed_cst_form(&expanded)
     return macroexpand_form_with_macros(expanded, macros)
 }
 
@@ -2137,6 +2647,7 @@ macroexpand_if_let :: proc(form: CST_Form, macros: []User_Macro) -> (result: Emi
     if !ok_expand {
         return result, err_expand, false
     }
+    defer delete_borrowed_cst_form(&expanded)
     return macroexpand_form_with_macros(expanded, macros)
 }
 
@@ -2145,6 +2656,7 @@ macroexpand_when_ok :: proc(form: CST_Form, macros: []User_Macro) -> (result: Em
     if !ok_expand {
         return result, err_expand, false
     }
+    defer delete_borrowed_cst_form(&expanded)
     return macroexpand_form_with_macros(expanded, macros)
 }
 
@@ -2153,6 +2665,7 @@ macroexpand_if_ok :: proc(form: CST_Form, macros: []User_Macro) -> (result: Emit
     if !ok_expand {
         return result, err_expand, false
     }
+    defer delete_borrowed_cst_form(&expanded)
     return macroexpand_form_with_macros(expanded, macros)
 }
 
@@ -2163,6 +2676,7 @@ macroexpand_form_with_macros :: proc(form: CST_Form, macros: []User_Macro) -> (r
             if !ok_user_expand {
                 return result, err_user, false
             }
+            defer delete_cst_form(&expanded)
             return macroexpand_form_with_macros(expanded, macros)
         }
         switch builtin_macro_kind(form.items[0].text) {
@@ -2175,18 +2689,21 @@ macroexpand_form_with_macros :: proc(form: CST_Form, macros: []User_Macro) -> (r
             if !ok_expand {
                 return result, err_expand, false
             }
+            defer delete_borrowed_cst_form(&expanded)
             return macroexpand_form_with_macros(expanded, macros)
         case .Thread_First:
             expanded, err_expand, ok_expand := expand_thread_form(form, false)
             if !ok_expand {
                 return result, err_expand, false
             }
+            defer delete_borrowed_cst_form(&expanded)
             return macroexpand_form_with_macros(expanded, macros)
         case .Thread_Last:
             expanded, err_expand, ok_expand := expand_thread_form(form, true)
             if !ok_expand {
                 return result, err_expand, false
             }
+            defer delete_borrowed_cst_form(&expanded)
             return macroexpand_form_with_macros(expanded, macros)
         case .When_Let:
             return macroexpand_when_let(form, macros)
@@ -2275,12 +2792,21 @@ macroexpand_top_level_form_with_macros :: proc(form: CST_Form, macros: []User_Ma
             for form_out in forms_out {
                 nested, err_nested, ok_nested := macroexpand_top_level_form_with_macros(form_out, macros)
                 if !ok_nested {
+                    for i in 0 ..< len(forms_out) {
+                        delete_cst_form(&forms_out[i])
+                    }
+                    delete(forms_out)
                     return expanded, err_nested, false
                 }
                 for nested_form in nested {
                     append(&expanded, nested_form)
                 }
+                delete(nested)
             }
+            for i in 0 ..< len(forms_out) {
+                delete_cst_form(&forms_out[i])
+            }
+            delete(forms_out)
             return expanded, Compile_Error{}, true
         }
     }
@@ -2301,42 +2827,49 @@ macroexpand_builtin_runtime_form :: proc(form: CST_Form) -> (expanded: CST_Form,
             if !ok_expand {
                 return CST_Form{}, err_expand, false
             }
+            defer delete_borrowed_cst_form(&expanded_when)
             return macroexpand_builtin_runtime_form(expanded_when)
         case .Thread_First:
             expanded_thread, err_expand, ok_expand := expand_thread_form(form, false)
             if !ok_expand {
                 return CST_Form{}, err_expand, false
             }
+            defer delete_borrowed_cst_form(&expanded_thread)
             return macroexpand_builtin_runtime_form(expanded_thread)
         case .Thread_Last:
             expanded_thread, err_expand, ok_expand := expand_thread_form(form, true)
             if !ok_expand {
                 return CST_Form{}, err_expand, false
             }
+            defer delete_borrowed_cst_form(&expanded_thread)
             return macroexpand_builtin_runtime_form(expanded_thread)
         case .When_Let:
             expanded_when, err_expand, ok_expand := expand_when_let_form(form)
             if !ok_expand {
                 return CST_Form{}, err_expand, false
             }
+            defer delete_borrowed_cst_form(&expanded_when)
             return macroexpand_builtin_runtime_form(expanded_when)
         case .If_Let:
             expanded_if, err_expand, ok_expand := expand_if_let_form(form)
             if !ok_expand {
                 return CST_Form{}, err_expand, false
             }
+            defer delete_borrowed_cst_form(&expanded_if)
             return macroexpand_builtin_runtime_form(expanded_if)
         case .When_Ok:
             expanded_when, err_expand, ok_expand := expand_when_ok_form(form)
             if !ok_expand {
                 return CST_Form{}, err_expand, false
             }
+            defer delete_borrowed_cst_form(&expanded_when)
             return macroexpand_builtin_runtime_form(expanded_when)
         case .If_Ok:
             expanded_if, err_expand, ok_expand := expand_if_ok_form(form)
             if !ok_expand {
                 return CST_Form{}, err_expand, false
             }
+            defer delete_borrowed_cst_form(&expanded_if)
             return macroexpand_builtin_runtime_form(expanded_if)
         case .With_Allocator, .With_Temp_Allocator, .None:
         }
@@ -2371,6 +2904,7 @@ macroexpand_top_forms :: proc(forms: []CST_Top_Form, include_core_macros: bool =
         for macro_decl in initial_macros {
             append(&macros, macro_decl)
         }
+        delete(initial_macros)
     }
     for top in forms {
         if is_defmacro_form(top.form) {
@@ -2385,25 +2919,30 @@ macroexpand_top_forms :: proc(forms: []CST_Top_Form, include_core_macros: bool =
         if !ok_expand {
             return expanded, macros, err_expand, false
         }
-        for rewritten in expanded_forms {
-            if is_defmacro_form(rewritten) {
+        for i in 0 ..< len(expanded_forms) {
+            rewritten := &expanded_forms[i]
+            if is_defmacro_form(rewritten^) {
                 macro_decl, err_macro, ok_macro := parse_user_macro_decl(CST_Top_Form{
-                    form      = rewritten,
+                    form      = rewritten^,
                     doc_lines = top.doc_lines,
                     source    = top.source,
                 })
                 if !ok_macro {
+                    delete_cst_form_slice(&expanded_forms)
                     return expanded, macros, err_macro, false
                 }
                 append(&macros, macro_decl)
+                delete_cst_form(rewritten)
                 continue
             }
             append(&expanded, CST_Top_Form{
-                form      = clone_cst_form(rewritten),
+                form      = rewritten^,
                 doc_lines = clone_string_slice(top.doc_lines[:]),
                 source    = strings.clone(top.source),
             })
+            rewritten^ = CST_Form{}
         }
+        delete(expanded_forms)
     }
     return expanded, macros, Compile_Error{}, true
 }

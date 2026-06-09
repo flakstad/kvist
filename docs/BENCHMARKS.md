@@ -75,7 +75,7 @@ The main performance question is now:
 The focused mutation benchmark now covers:
 
 - `update!` on struct fields
-- `update` on struct fields
+- copy-update of struct values
 - explicit pointer mutation
 - `update!` on dynamic arrays
 - `update!` on maps
@@ -260,12 +260,12 @@ The important result is the shape:
 - all measured core helper workloads ran with `allocs=0`, `total=0`, and `live=0`
 - `count`, `get`, `slice`, and `contains?` lower
   essentially identically to direct Odin in these hot paths
-- the canonical core helper move is performance-neutral on the tested workloads
+- the canonical bare core helpers are performance-neutral on the tested workloads
 
 ## Package Surface Baseline
 
-There is now also a focused package-surface benchmark for the moved package
-APIs that are hot and runtime-safe today:
+There is now also a focused package-surface benchmark for package APIs that are
+hot and runtime-safe today:
 
 - `str.*` transforms and queries
 - `map.*` constructor plus bang mutation helpers

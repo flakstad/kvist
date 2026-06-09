@@ -1,5 +1,7 @@
 // Runtime benchmark for generated eager sequence helpers.
 (package main)
+(import arr "kvist:arr")
+(import map "kvist:map")
 (import "core:fmt")
 (import mem "core:mem")
 (import time "core:time")
@@ -33,22 +35,22 @@ ORDER_REPS :: 40")
   (- x))
 
 (defstruct Sort-Item {
-  :value int
-  :score int
+  value: int
+  score: int
 })
 
 (defstruct Order {
-  :account int
-  :amount int
-  :discount int
-  :status int
-  :region int
+  account: int
+  amount: int
+  discount: int
+  status: int
+  region: int
 })
 
 (defstruct Region-Report {
-  :region int
-  :revenue int
-  :count int
+  region: int
+  revenue: int
+  count: int
 })
 
 (odin "make_sort_items :: proc(n: int) -> [dynamic]Sort_Item {
@@ -77,54 +79,54 @@ make_orders :: proc(n: int) -> [dynamic]Order {
   (+ acc x))
 
 (defn paid-large? [order: Order] -> bool
-  (and (== (:status order) 2)
-       (> (:amount order) 500)))
+  (and (== order.status 2)
+       (> order.amount 500)))
 
 (defn order-net [order: Order] -> int
-  (- (:amount order) (:discount order)))
+  (- order.amount order.discount))
 
 (defn settled? [order: Order] -> bool
-  (== (:status order) 3))
+  (== order.status 3))
 
 (defn settle-order [order: Order] -> Order
   (let [updated order]
-    (when (and (== (:status updated) 2)
-               (> (:amount updated) 500))
-      (set! (:amount updated) (- (:amount updated) (:discount updated)))
-      (set! (:discount updated) 0)
-      (set! (:status updated) 3))
+    (when (and (== updated.status 2)
+               (> updated.amount 500))
+      (set! updated.amount (- updated.amount updated.discount))
+      (set! updated.discount 0)
+      (set! updated.status 3))
     updated))
 
 (defn settle-order! [order: ^Order]
-  (when (and (== (:status (^ order)) 2)
-             (> (:amount (^ order)) 500))
-    (set! (:amount (^ order)) (- (:amount (^ order)) (:discount (^ order))))
-    (set! (:discount (^ order)) 0)
-    (set! (:status (^ order)) 3)))
+  (when (and (== order^.status 2)
+             (> order^.amount 500))
+    (set! order^.amount (- order^.amount order^.discount))
+    (set! order^.discount 0)
+    (set! order^.status 3)))
 
 (defn orders-checksum [orders: []Order] -> int
   (let [total 0]
     (each [order orders]
-      (set! total (+ total (:amount order)))
-      (set! total (+ total (:status order))))
+      (set! total (+ total order.amount))
+      (set! total (+ total order.status)))
     total))
 
 (defn report-checksum [rows: []Region-Report] -> int
   (let [total 0]
     (each [row rows]
-      (set! total (+ total (:revenue row)))
-      (set! total (+ total (* (:region row) 31)))
-      (set! total (+ total (:count row))))
+      (set! total (+ total row.revenue))
+      (set! total (+ total (* row.region 31)))
+      (set! total (+ total row.count)))
     total))
 
 (defn build-report-rows [revenue-by-region: map[int]int, count-by-region: map[int]int] -> [dynamic]Region-Report
   (let [rows (make [dynamic]Region-Report)]
     (each [region revenue revenue-by-region]
       (append (& rows)
-              (Region-Report {:region region
-                              :revenue revenue
-                              :count (get count-by-region region 0)})))
-    (sort-by! :revenue rows)
+              (Region-Report {region: region
+                              revenue: revenue
+                              count: (get count-by-region region 0)})))
+    (arr.sort-by! .revenue rows)
     rows))
 
 (defn report [name: string, elapsed: time.Duration, checksum: int, track: ^mem.Tracking-Allocator]
@@ -141,8 +143,8 @@ make_orders :: proc(n: int) -> [dynamic]Order {
   (let [i 0
         checksum 0]
     (while (< i reps)
-      (let [xs (range 0 N)]
-        (set! checksum (+ checksum (last xs)))
+      (let [xs (arr.range 0 N)]
+        (set! checksum (+ checksum (arr.last xs)))
         (delete xs))
       (set! i (+ i 1)))
     checksum))
@@ -151,8 +153,8 @@ make_orders :: proc(n: int) -> [dynamic]Order {
   (let [i 0
         checksum 0]
     (while (< i reps)
-      (let [mapped (map inc xs)]
-        (set! checksum (+ checksum (last mapped)))
+      (let [mapped (arr.map inc xs)]
+        (set! checksum (+ checksum (arr.last mapped)))
         (delete mapped))
       (set! i (+ i 1)))
     checksum))
@@ -161,7 +163,7 @@ make_orders :: proc(n: int) -> [dynamic]Order {
   (let [i 0
         checksum 0]
     (while (< i reps)
-      (let [filtered (filter even? xs)]
+      (let [filtered (arr.filter even? xs)]
         (set! checksum (+ checksum (count filtered)))
         (delete filtered))
       (set! i (+ i 1)))
@@ -171,8 +173,8 @@ make_orders :: proc(n: int) -> [dynamic]Order {
   (let [i 0
         checksum 0]
     (while (< i reps)
-      (let [sampled (take-nth 3 xs)]
-        (set! checksum (+ checksum (last sampled)))
+      (let [sampled (arr.take-nth 3 xs)]
+        (set! checksum (+ checksum (arr.last sampled)))
         (delete sampled))
       (set! i (+ i 1)))
     checksum))
@@ -181,7 +183,7 @@ make_orders :: proc(n: int) -> [dynamic]Order {
   (let [i 0
         checksum 0]
     (while (< i reps)
-      (let [chunks (partition-all 8 xs)]
+      (let [chunks (arr.partition-all 8 xs)]
         (set! checksum (+ checksum (count chunks)))
         (delete chunks))
       (set! i (+ i 1)))
@@ -191,7 +193,7 @@ make_orders :: proc(n: int) -> [dynamic]Order {
   (let [i 0
         checksum 0]
     (while (< i reps)
-      (let [unique (distinct xs)]
+      (let [unique (arr.distinct xs)]
         (set! checksum (+ checksum (count unique)))
         (delete unique))
       (set! i (+ i 1)))
@@ -201,7 +203,7 @@ make_orders :: proc(n: int) -> [dynamic]Order {
   (let [i 0
         checksum 0]
     (while (< i reps)
-      (let [lookup (zipmap keys values)]
+      (let [lookup (map.zip keys values)]
         (set! checksum (+ checksum (len lookup)))
         (delete lookup))
       (set! i (+ i 1)))
@@ -211,7 +213,7 @@ make_orders :: proc(n: int) -> [dynamic]Order {
   (let [i 0
         checksum 0]
     (while (< i reps)
-      (let [counts (frequencies xs)]
+      (let [counts (arr.frequencies xs)]
         (set! checksum (+ checksum (get counts 1024 0)))
         (delete counts))
       (set! i (+ i 1)))
@@ -221,7 +223,7 @@ make_orders :: proc(n: int) -> [dynamic]Order {
   (let [i 0
         checksum 0]
     (while (< i reps)
-      (let [indexed (index-by identity-int xs)]
+      (let [indexed (arr.index-by identity-int xs)]
         (set! checksum (+ checksum (len indexed)))
         (delete indexed))
       (set! i (+ i 1)))
@@ -231,7 +233,7 @@ make_orders :: proc(n: int) -> [dynamic]Order {
   (let [i 0
         checksum 0]
     (while (< i reps)
-      (let [groups (group-by bucket xs)]
+      (let [groups (arr.group-by bucket xs)]
         (set! checksum (+ checksum (len groups)))
         (each [_ group groups]
           (delete group))
@@ -243,7 +245,7 @@ make_orders :: proc(n: int) -> [dynamic]Order {
   (let [i 0
         checksum 0]
     (while (< i reps)
-      (let [merged (merge lhs rhs)]
+      (let [merged (map.merge lhs rhs)]
         (set! checksum (+ checksum (len merged)))
         (delete merged))
       (set! i (+ i 1)))
@@ -253,8 +255,8 @@ make_orders :: proc(n: int) -> [dynamic]Order {
   (let [i 0
         checksum 0]
     (while (< i reps)
-      (let [sorted (sort xs)]
-        (set! checksum (+ checksum (first sorted)))
+      (let [sorted (arr.sort xs)]
+        (set! checksum (+ checksum (arr.first sorted)))
         (delete sorted))
       (set! i (+ i 1)))
     checksum))
@@ -263,8 +265,8 @@ make_orders :: proc(n: int) -> [dynamic]Order {
   (let [i 0
         checksum 0]
     (while (< i reps)
-      (let [sorted (sort-by negative xs)]
-        (set! checksum (+ checksum (first sorted)))
+      (let [sorted (arr.sort-by negative xs)]
+        (set! checksum (+ checksum (arr.first sorted)))
         (delete sorted))
       (set! i (+ i 1)))
     checksum))
@@ -273,8 +275,8 @@ make_orders :: proc(n: int) -> [dynamic]Order {
   (let [i 0
         checksum 0]
     (while (< i reps)
-      (let [sorted (sort-by :score xs)]
-        (set! checksum (+ checksum (:value (first sorted))))
+      (let [sorted (arr.sort-by .score xs)]
+        (set! checksum (+ checksum (arr.first sorted).value))
         (delete sorted))
       (set! i (+ i 1)))
     checksum))
@@ -283,9 +285,9 @@ make_orders :: proc(n: int) -> [dynamic]Order {
   (let [i 0
         checksum 0]
     (while (< i reps)
-      (let [mapped (map inc xs)
-            filtered (filter even? mapped)
-            total (reduce add 0 filtered)]
+      (let [mapped (arr.map inc xs)
+            filtered (arr.filter even? mapped)
+            total (arr.reduce add 0 filtered)]
         (set! checksum (+ checksum total))
         (delete mapped)
         (delete filtered))
@@ -296,11 +298,12 @@ make_orders :: proc(n: int) -> [dynamic]Order {
   (let [i 0
         checksum 0]
     (while (< i reps)
-      (let [total (->> xs
-                       (map inc)
-                       (filter even?)
-                       (reduce add 0))]
-        (set! checksum (+ checksum total)))
+      (let [mapped (arr.map inc xs)
+            filtered (arr.filter even? mapped)
+            total (arr.reduce add 0 filtered)]
+        (set! checksum (+ checksum total))
+        (delete mapped)
+        (delete filtered))
       (set! i (+ i 1)))
     checksum))
 
@@ -321,10 +324,10 @@ make_orders :: proc(n: int) -> [dynamic]Order {
   (let [i 0
         checksum 0]
     (while (< i reps)
-      (let [work (map inc xs)
+      (let [work (arr.map inc xs)
             total 0]
-        (filter! even? work)
-        (set! total (reduce add 0 work))
+        (arr.filter! even? work)
+        (set! total (arr.reduce add 0 work))
         (set! checksum (+ checksum total))
         (delete work))
       (set! i (+ i 1)))
@@ -334,10 +337,10 @@ make_orders :: proc(n: int) -> [dynamic]Order {
   (let [i 0
         checksum 0]
     (while (< i reps)
-      (let [filtered (filter divisible-by-three? xs)
-            mapped (map triple filtered)
-            head (take 100 mapped)]
-        (set! checksum (+ checksum (reduce add 0 head)))
+      (let [filtered (arr.filter divisible-by-three? xs)
+            mapped (arr.map triple filtered)
+            head (arr.take 100 mapped[:])]
+        (set! checksum (+ checksum (arr.reduce add 0 head)))
         (delete filtered)
         (delete mapped))
       (set! i (+ i 1)))
@@ -363,9 +366,9 @@ make_orders :: proc(n: int) -> [dynamic]Order {
   (let [i 0
         checksum 0]
     (while (< i reps)
-      (let [sorted (sort xs)
-            mapped (map inc sorted)]
-        (set! checksum (+ checksum (first mapped)))
+      (let [sorted (arr.sort xs)
+            mapped (arr.map inc sorted)]
+        (set! checksum (+ checksum (arr.first mapped)))
         (delete sorted)
         (delete mapped))
       (set! i (+ i 1)))
@@ -375,8 +378,8 @@ make_orders :: proc(n: int) -> [dynamic]Order {
   (let [i 0
         checksum 0]
     (while (< i reps)
-      (let [sorted (sort xs)]
-        (set! checksum (+ checksum (+ (first sorted) 1)))
+      (let [sorted (arr.sort xs)]
+        (set! checksum (+ checksum (+ (arr.first sorted) 1)))
         (delete sorted))
       (set! i (+ i 1)))
     checksum))
@@ -385,9 +388,9 @@ make_orders :: proc(n: int) -> [dynamic]Order {
   (let [i 0
         checksum 0]
     (while (< i reps)
-      (let [paid (filter paid-large? orders)
-            net (map order-net paid)
-            total (reduce add 0 net)]
+      (let [paid (arr.filter paid-large? orders)
+            net (arr.map order-net paid)
+            total (arr.reduce add 0 net)]
         (set! checksum (+ checksum total))
         (delete paid)
         (delete net))
@@ -398,11 +401,12 @@ make_orders :: proc(n: int) -> [dynamic]Order {
   (let [i 0
         checksum 0]
     (while (< i reps)
-      (let [total (->> orders
-                       (filter paid-large?)
-                       (map order-net)
-                       (reduce add 0))]
-        (set! checksum (+ checksum total)))
+      (let [paid (arr.filter paid-large? orders)
+            net (arr.map order-net paid)
+            total (arr.reduce add 0 net)]
+        (set! checksum (+ checksum total))
+        (delete paid)
+        (delete net))
       (set! i (+ i 1)))
     checksum))
 
@@ -412,9 +416,9 @@ make_orders :: proc(n: int) -> [dynamic]Order {
     (while (< i reps)
       (let [total 0]
         (each [order orders]
-          (when (and (== (:status order) 2)
-                     (> (:amount order) 500))
-            (set! total (+ total (- (:amount order) (:discount order))))))
+          (when (and (== order.status 2)
+                     (> order.amount 500))
+            (set! total (+ total (- order.amount order.discount)))))
         (set! checksum (+ checksum total)))
       (set! i (+ i 1)))
     checksum))
@@ -423,7 +427,7 @@ make_orders :: proc(n: int) -> [dynamic]Order {
   (let [i 0
         checksum 0]
     (while (< i reps)
-      (map! settle-order orders)
+      (arr.map! settle-order orders)
       (set! checksum (+ checksum (orders-checksum orders)))
       (set! i (+ i 1)))
     checksum))
@@ -432,8 +436,8 @@ make_orders :: proc(n: int) -> [dynamic]Order {
   (let [i 0
         checksum 0]
     (while (< i reps)
-      (let [work (map settle-order orders)]
-        (filter! settled? work)
+      (let [work (arr.map settle-order orders)]
+        (arr.filter! settled? work)
         (set! checksum (+ checksum (orders-checksum (slice work))))
         (delete work))
       (set! i (+ i 1)))
@@ -453,19 +457,19 @@ make_orders :: proc(n: int) -> [dynamic]Order {
   (let [i 0
         checksum 0]
     (while (< i reps)
-      (let [settled (map settle-order orders)
-            paid (filter settled? settled)
-            groups (group-by :region paid)
+      (let [settled (arr.map settle-order orders)
+            paid (arr.filter settled? settled)
+            groups (arr.group-by .region paid)
             rows (make [dynamic]Region-Report)]
         (each [region group groups]
           (let [revenue 0]
             (each [order group]
-              (set! revenue (+ revenue (:amount order))))
+              (set! revenue (+ revenue order.amount)))
             (append (& rows)
-                    (Region-Report {:region region
-                                    :revenue revenue
-                                    :count (len group)}))))
-        (sort-by! :revenue rows)
+                    (Region-Report {region: region
+                                    revenue: revenue
+                                    count: (len group)}))))
+        (arr.sort-by! .revenue rows)
         (set! checksum (+ checksum (report-checksum (slice rows))))
         (delete settled)
         (delete paid)
@@ -480,19 +484,19 @@ make_orders :: proc(n: int) -> [dynamic]Order {
   (let [i 0
         checksum 0]
     (while (< i reps)
-      (let [work (map settle-order orders)
+      (let [work (arr.map settle-order orders)
             rows (make [dynamic]Region-Report)]
-        (filter! settled? work)
-        (let [groups (group-by :region work)]
+        (arr.filter! settled? work)
+        (let [groups (arr.group-by .region work)]
           (each [region group groups]
             (let [revenue 0]
               (each [order group]
-                (set! revenue (+ revenue (:amount order))))
+                (set! revenue (+ revenue order.amount)))
               (append (& rows)
-                      (Region-Report {:region region
-                                      :revenue revenue
-                                      :count (len group)}))))
-          (sort-by! :revenue rows)
+                      (Region-Report {region: region
+                                      revenue: revenue
+                                      count: (len group)}))))
+          (arr.sort-by! .revenue rows)
           (set! checksum (+ checksum (report-checksum (slice rows))))
           (each [_ group groups]
             (delete group))
@@ -511,11 +515,11 @@ make_orders :: proc(n: int) -> [dynamic]Order {
         (each [order orders]
           (let [settled (settle-order order)]
             (when (settled? settled)
-              (set! (get revenue-by-region (:region settled))
-                    (+ (get revenue-by-region (:region settled))
-                       (:amount settled)))
-              (set! (get count-by-region (:region settled))
-                    (+ (get count-by-region (:region settled))
+              (set! (get revenue-by-region settled.region)
+                    (+ (get revenue-by-region settled.region)
+                       settled.amount))
+              (set! (get count-by-region settled.region)
+                    (+ (get count-by-region settled.region)
                        1)))))
         (let [rows (build-report-rows revenue-by-region count-by-region)]
           (set! checksum (+ checksum (report-checksum (slice rows))))
@@ -533,17 +537,17 @@ make_orders :: proc(n: int) -> [dynamic]Order {
                 N REPS SORT_N SORT_REPS ORDER_N ORDER_REPS)
   (let [old-allocator context.allocator
         track: mem.Tracking-Allocator (odin "mem.Tracking_Allocator{}")
-        xs (range 0 N)
-        ys (range N (* N 2))
-        sort-base (range 0 SORT_N)
-        sort-xs (reverse sort-base)
+        xs (arr.range 0 N)
+        ys (arr.range N (* N 2))
+        sort-base (arr.range 0 SORT_N)
+        sort-xs (arr.reverse sort-base)
         sort-items (make-sort-items SORT_N)
         orders (make-orders ORDER_N)
         orders-map (make-orders ORDER_N)
         orders-filter (make-orders ORDER_N)
         orders-ptr (make-orders ORDER_N)
-        lhs (zipmap xs xs)
-        rhs (zipmap ys ys)]
+        lhs (map.zip xs[:] xs[:])
+        rhs (map.zip ys[:] ys[:])]
     (mem.tracking_allocator_init (& track) old-allocator old-allocator)
     (defer (mem.tracking_allocator_destroy (& track)))
     (defer

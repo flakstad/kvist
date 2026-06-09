@@ -54,7 +54,7 @@ compiles to readable Odin.
 - Keep raw escape hatch support via `(odin "...")`.
 - Favor simple, explicit syntax over clever inference.
 - Keep examples small and executable.
-- Prefer Odin-shaped proc return syntax: `(proc name [...] -> type body...)`.
+- Prefer `fn` for function values and anonymous function literals.
 - Prefer implicit final returns for non-void procs instead of explicit
   `(return ...)` in ordinary kvist code.
 - Treat `let` as Clojure-style scoped binding syntax: `(let [x value] body...)`.

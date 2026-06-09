@@ -65,8 +65,6 @@ Package and field access use dot syntax:
 cells[(idx x y)]
 ```
 
-Slash package access such as `arr/map` is not canonical; use `arr.map`.
-
 Keywords are syntax markers. They are used for forms such as `:else`, `:when`,
 `:while`, `:let`, `:into`, and `:abi`. They are not field lookup functions or
 general values.
@@ -250,12 +248,32 @@ Owned local bindings may use the `defer` marker:
 (block body...)
 ```
 
-`switch` uses `:else`:
+Use `cond` when each branch has its own predicate:
 
 ```clojure
-(switch status
+(cond
+  (< n 0) "negative"
+  (= n 0) "zero"
+  :else "positive")
+```
+
+Use `case` when one subject is being classified. Value cases, grouped value
+cases, and union/type payload cases all lower to ordinary Odin switches:
+
+```clojure
+(case status
   .Ready "ready"
   .Done "done"
+  :else "unknown")
+
+(case method
+  [.Get .Head] "read"
+  .Post "write"
+  :else "other")
+
+(case event
+  (Connected _) "connected"
+  (Data data) data.payload
   :else "unknown")
 ```
 
@@ -271,6 +289,30 @@ Use `each` for side-effect iteration:
 (each [x i xs]
   (println i x))
 ```
+
+`defsource` defines a reusable stateful producer. A source has an opener
+expression, a `:next` function, and an optional `:dispose` function. The `:next`
+function takes a pointer to the source state and returns named `[item: T ok:
+bool]` results.
+
+```clojure
+(defsource files [root: string] -> string
+  (open-files root)
+  :next next-file
+  :dispose dispose-files)
+
+(each [path (files root)]
+  (println path))
+
+(into [dynamic]string
+  (comp
+    (filter odin-path?))
+  (files root))
+```
+
+Sources lower to explicit Odin loops around the state object. They are consumed
+by `each` and transform `into` in the initial surface; they are not general lazy
+sequences or first-class source values yet.
 
 Use `for` for eager data-building comprehensions:
 
@@ -335,28 +377,33 @@ For a non-mutating copy update, bind a copy and mutate the copy:
   next)
 ```
 
-For shallow struct value updates, `assoc` and `update` return a modified copy:
+For struct value updates, `assoc` and `update` return a modified copy:
 
 ```clojure
 (assoc user.name "Ada")
 (update user.age inc)
 (update user.age + 10)
+(assoc user.profile.name "Ada")
+(update user.profile.age inc)
 
 ;; Compatibility spelling:
 (assoc user .name "Ada")
 (update user .age inc)
+(assoc user .profile.name "Ada")
 ```
 
-These forms currently require a shallow field place such as `user.name`, or the
-compatibility pair `user .name`, with an obvious struct target type. They copy
-the struct value, update one field on the copy, and return the copy. They do
-not deep-copy owned fields or perform nested path updates.
+These forms require a struct field place such as `user.name` or
+`user.profile.name`, or the compatibility pair `user .name`, with an obvious
+struct target type. They copy the root struct value once, update the selected
+field path on the copy, and return the copy. Dynamic arrays, slices, maps, and
+sets are not path-updated this way; use explicit copying or mutation for those.
 
-In a `->` pipeline, use a shallow `.field` selector step:
+In a `->` pipeline, use a `.field` selector step:
 
 ```clojure
 (-> user
   (update .age + 10)
+  (assoc .profile.name "Ada")
   (assoc .name "Ada"))
 ```
 

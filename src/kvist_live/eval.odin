@@ -570,7 +570,9 @@ eval_list :: proc(module: ^Live_Module, form: kvist.CST_Form, ctx: Eval_Context)
 eval_form :: proc(module: ^Live_Module, form: kvist.CST_Form, ctx: Eval_Context) -> (Value, Runtime_Error, bool) {
     #partial switch form.kind {
     case .String:
-        return value_string(kvist.unquote_string(form.text)), Runtime_Error{}, true
+        unquoted := kvist.unquote_string(form.text)
+        defer delete(unquoted)
+        return value_string(unquoted), Runtime_Error{}, true
     case .Number:
         parsed, ok := strconv.parse_i64(form.text)
         if !ok {

@@ -54,10 +54,10 @@
 ])
 
 (defn describe-event [event: Event] -> string
-  (switch [value event]
-    Connected "connected"
-    Disconnected "disconnected"
-    Data value.payload
+  (case event
+    (Connected _) "connected"
+    (Disconnected _) "disconnected"
+    (Data data) data.payload
     :else "unknown"))
 
 (defn macro-messages-demo []

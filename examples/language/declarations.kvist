@@ -20,7 +20,7 @@
   (int status))
 
 (defn status-label [status: Http-Status] -> string
-  (switch status
+  (case status
     .OK "ok"
     .Not-Found "not found"
     :else "unknown"))

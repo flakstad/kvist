@@ -18,7 +18,7 @@
    on-unload: on-unload
    version: "v1"})
 
-(defconst delay time.Duration (* 1 time.Second))
+(def delay: time.Duration (* 1 time.Second))
 
 (defn init [state: ^App_State]
   (init-program &state^.program))
@@ -39,7 +39,7 @@
                 &state^.program))
 
 (defn run [state: ^App_State host: ^reload.Run_Host]
-  (for true
+  (while true
     (step state)
     (time.sleep delay)
     (when (reload.checkpoint! host)

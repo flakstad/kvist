@@ -1,0 +1,55 @@
+// Reusable source declarations consumed by each and into.
+(package main)
+(import core "kvist:core")
+
+(defstruct File_Source {
+  items: []string
+  index: int
+})
+
+(defn open-files [items: []string] -> File_Source
+  (File_Source {items: items index: 0}))
+
+(defn next-file [src: ^File_Source] -> [path: string ok: bool]
+  (if (< src.index (len src.items))
+    (let [path src.items[src.index]]
+      (set! src.index (+ src.index 1))
+      (return path true))
+    (return "" false)))
+
+(defn dispose-files [src: ^File_Source]
+  (set! src.index 0))
+
+(defn odin-path? [path: string] -> bool
+  (or (= path "src/main.odin")
+      (= path "src/emit.odin")
+      (= path "tests/compiler_test.odin")))
+
+(defsource files [items: []string] -> string
+  (open-files items)
+  :next next-file
+  :dispose dispose-files)
+
+(defn total-path-length [] -> int
+  (let [paths ([]string ["src/main.odin" "README.md" "src/emit.odin" "tests/compiler_test.odin"])
+        total 0]
+    (each [path (files paths)]
+      (set! total (+ total (len path))))
+    total))
+
+(defn odin-path-count [] -> int
+  (let [paths ([]string ["src/main.odin" "README.md" "src/emit.odin" "tests/compiler_test.odin"])
+        odin-paths (into [dynamic]string
+                     (comp
+                       (filter odin-path?))
+                     (files paths))]
+    (defer (delete odin-paths))
+    (len odin-paths)))
+
+(defn main []
+  (println (+ (total-path-length) (odin-path-count))))
+
+(comment
+  (+ (total-path-length) (odin-path-count))
+  ;; => 62
+)

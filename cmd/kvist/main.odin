@@ -35,8 +35,12 @@ print_usage :: proc() {
     fmt.println("  kvist cache rm <name>")
 }
 
+is_help_arg :: proc(text: string) -> bool {
+    return text == "help" || text == "--help" || text == "-h"
+}
+
 is_command :: proc(text: string) -> bool {
-    return text == "compile" || text == "dev" || text == "build" || text == "check" || text == "run" || text == "test" || text == "eval" || text == "expand" || text == "macroexpand" || text == "symbols" || text == "editor-symbols" || text == "lookup" || text == "complete" || text == "doc" || text == "xref" || text == "builtin-symbols" || text == "imported-symbols" || text == "package-symbols" || text == "cache"
+    return is_help_arg(text) || text == "compile" || text == "dev" || text == "build" || text == "check" || text == "run" || text == "test" || text == "eval" || text == "expand" || text == "macroexpand" || text == "symbols" || text == "editor-symbols" || text == "lookup" || text == "complete" || text == "doc" || text == "xref" || text == "builtin-symbols" || text == "imported-symbols" || text == "package-symbols" || text == "cache"
 }
 
 read_source_or_exit :: proc(path: string) -> string {
@@ -303,8 +307,20 @@ run_odin_file :: proc(command, generated_path, source_path, source, eval_source,
     if command == "run" {
         odin_command = "build"
     }
+    package_arg := ""
+    defer {
+        if package_arg != "" {
+            delete(package_arg)
+        }
+    }
     if package_dir != "" {
-        append(&args, "odin", odin_command, package_dir)
+        package_abs, package_abs_err := os.get_absolute_path(package_dir, context.allocator)
+        if package_abs_err != nil {
+            fmt.eprintln("failed to resolve package path: ", package_dir)
+            return 1
+        }
+        package_arg = package_abs
+        append(&args, "odin", odin_command, package_arg)
     } else {
         append(&args, "odin", odin_command, generated_abs, "-file")
     }
@@ -383,6 +399,7 @@ source_dir_has_odin_sidecars :: proc(source_path: string) -> bool {
         return false
     }
     defer os.file_info_slice_delete(entries, context.allocator)
+    has_sidecar := false
     for entry in entries {
         if entry.type != .Regular || !strings.has_suffix(entry.name, ".odin") {
             continue
@@ -390,9 +407,22 @@ source_dir_has_odin_sidecars :: proc(source_path: string) -> bool {
         if strings.has_prefix(entry.name, "kvist-generated-") {
             continue
         }
-        return true
+        entry_path, join_err := os.join_path({source_dir, entry.name}, context.allocator)
+        if join_err != nil {
+            return false
+        }
+        data, read_err := os.read_entire_file_from_path(entry_path, context.allocator)
+        delete(entry_path)
+        if read_err != nil {
+            return false
+        }
+        defer delete(data)
+        if strings.contains(string(data), "main :: proc") {
+            return false
+        }
+        has_sidecar = true
     }
-    return false
+    return has_sidecar
 }
 
 temporary_generated_path_in_source_dir :: proc(source_path: string) -> (path, package_dir: string, ok: bool) {
@@ -1549,6 +1579,8 @@ main :: proc() {
     }
 
     switch os.args[1] {
+    case "help", "--help", "-h":
+        print_usage()
     case "compile":
         parse_compile_command()
     case "dev":

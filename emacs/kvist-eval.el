@@ -48,7 +48,10 @@
   :group 'kvist)
 
 (defconst kvist-declaration-heads
-  '("comment" "package" "import" "const" "struct" "enum" "union" "odin" "proc")
+  '("comment" "package" "import" "odin"
+    "def" "def-" "defconst" "defconst-" "defvar" "defvar-"
+    "defstruct" "defstruct-" "defenum" "defenum-" "defunion" "defunion-"
+    "defn" "defn-" "defmacro" "defmacro-")
   "Kvist forms that are declarations at top level.")
 
 (defvar kvist--last-source-buffer nil)
@@ -536,14 +539,6 @@ CLI cache."
   (let ((default-directory (file-name-as-directory (kvist--project-root))))
     (compilation-start command 'compilation-mode
                        (lambda (_) kvist-test-buffer-name))))
-
-(defun kvist--file-label (source-file)
-  "Return a readable project-relative label for SOURCE-FILE."
-  (let* ((root (file-name-as-directory (kvist--project-root source-file)))
-         (file (expand-file-name source-file)))
-    (if (string-prefix-p root file)
-        (file-relative-name file root)
-      (file-name-nondirectory file))))
 
 (defun kvist--run-buffer-instance-name (source-file)
   "Return a readable run buffer name for SOURCE-FILE."

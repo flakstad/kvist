@@ -163,7 +163,7 @@ suggest the obvious next step, such as adding `(defer (delete xs))`, returning
 the value directly, or cleaning up before `set!`.
 
 The warning pass should also stay conservative around branches: if every `if`,
-`cond`, or `switch` branch clearly deletes or returns the owned local, the
+`cond`, or `case` branch clearly deletes or returns the owned local, the
 compiler should not warn. If one branch leaks, it should.
 
 These warnings should avoid cases where ownership is ambiguous, especially:

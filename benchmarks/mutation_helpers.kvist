@@ -1,6 +1,5 @@
-// Focused benchmark for update!, update, and pointer/value mutation patterns.
+// Focused benchmark for place-first update! and pointer/value mutation patterns.
 (package main)
-(import core "kvist:core")
 (import arr "kvist:arr")
 (import "core:fmt")
 (import mem "core:mem")
@@ -13,8 +12,8 @@ ARRAY_N :: 8_000
 MAP_N :: 8_000")
 
 (defstruct Score
-  {:value int
-   :bonus int})
+  {value: int
+   bonus: int})
 
 (defn inc [x: int] -> int
   (+ x 1))
@@ -34,78 +33,77 @@ MAP_N :: 8_000")
 
 (defn bump-score [score: Score] -> Score
   (let [updated score]
-    (set! updated (core/update updated :value + 3))
-    (set! updated (core/update updated :bonus inc))
+    (update! updated.value + 3)
+    (update! updated.bonus inc)
     updated))
 
 (defn bump-score! [score: ^Score]
-  (core/update! score^ :value + 3)
-  (core/update! score^ :bonus inc))
+  (update! score^.value + 3)
+  (update! score^.bonus inc))
 
 (defn bench-struct-update [reps: int, n: int] -> int
-  (let [base (arr/empty Score n)
+  (let [base (arr.empty Score n)
         j 0
         i 0
         checksum 0]
     (while (< j n)
-      (arr/push! base (Score {:value (+ j 1) :bonus (% j 7)}))
+      (arr.push! base (Score {value: (+ j 1) bonus: (% j 7)}))
       (set! j (+ j 1)))
     (defer (delete base))
     (while (< i reps)
-      (let [scores (arr/empty Score n)
+      (let [scores (arr.empty Score n)
             j 0]
-        (arr/into! scores (core/slice base))
+        (arr.into! scores (slice base))
         (while (< j n)
-          (let [score (core/get scores j)]
-            (core/update! scores j (bump-score score)))
+          (update! scores[j] bump-score)
           (set! j (+ j 1)))
-        (set! checksum (+ checksum (:value (core/get scores (- n 1)))))
-        (set! checksum (+ checksum (:bonus (core/get scores (- n 1)))))
+        (set! checksum (+ checksum scores[(- n 1)].value))
+        (set! checksum (+ checksum scores[(- n 1)].bonus))
         (delete scores))
       (set! i (+ i 1)))
     checksum))
 
 (defn bench-pointer-update [reps: int, n: int] -> int
-  (let [base (arr/empty Score n)
+  (let [base (arr.empty Score n)
         j 0
         i 0
         checksum 0]
     (while (< j n)
-      (arr/push! base (Score {:value (+ j 1) :bonus (% j 7)}))
+      (arr.push! base (Score {value: (+ j 1) bonus: (% j 7)}))
       (set! j (+ j 1)))
     (defer (delete base))
     (while (< i reps)
-      (let [scores (arr/empty Score n)
+      (let [scores (arr.empty Score n)
             j 0]
-        (arr/into! scores (core/slice base))
+        (arr.into! scores (slice base))
         (while (< j n)
-          (let [score-ptr (addr (core/get scores j))]
+          (let [score-ptr (addr scores[j])]
             (bump-score! score-ptr))
           (set! j (+ j 1)))
-        (set! checksum (+ checksum (:value (core/get scores (- n 1)))))
-        (set! checksum (+ checksum (:bonus (core/get scores (- n 1)))))
+        (set! checksum (+ checksum scores[(- n 1)].value))
+        (set! checksum (+ checksum scores[(- n 1)].bonus))
         (delete scores))
       (set! i (+ i 1)))
     checksum))
 
 (defn bench-array-update! [reps: int, n: int] -> int
-  (let [base (arr/empty int n)
+  (let [base (arr.empty int n)
         j 0
         i 0
-    checksum 0]
+        checksum 0]
     (while (< j n)
-      (arr/push! base j)
+      (arr.push! base j)
       (set! j (+ j 1)))
     (defer (delete base))
     (while (< i reps)
-      (let [xs (arr/empty int n)
+      (let [xs (arr.empty int n)
             j 0]
-        (arr/into! xs (core/slice base))
+        (arr.into! xs (slice base))
         (set! j 0)
         (while (< j n)
-          (core/update! xs j + 1)
+          (update! xs[j] + 1)
           (set! j (+ j 1)))
-        (set! checksum (+ checksum (core/get xs (- n 1))))
+        (set! checksum (+ checksum xs[(- n 1)]))
         (delete xs))
       (set! i (+ i 1)))
     checksum))
@@ -117,20 +115,20 @@ MAP_N :: 8_000")
       (let [counts (map[int]int {})
             j 0]
         (while (< j n)
-          (core/update! counts (% j 1024) + 1)
+          (update! counts[(% j 1024)] + 1)
           (set! j (+ j 1)))
-        (set! checksum (+ checksum (core/get counts 17 0)))
+        (set! checksum (+ checksum (get counts 17 0)))
         (delete counts))
       (set! i (+ i 1)))
     checksum))
 
 (defn main []
-(fmt.printfln "STRUCT_REPS=%v STRUCT_N=%v REPS=%v ARRAY_N=%v MAP_N=%v"
-              STRUCT_REPS
-              STRUCT_N
-              REPS
-              ARRAY_N
-              MAP_N)
+  (fmt.printfln "STRUCT_REPS=%v STRUCT_N=%v REPS=%v ARRAY_N=%v MAP_N=%v"
+                STRUCT_REPS
+                STRUCT_N
+                REPS
+                ARRAY_N
+                MAP_N)
   (let [old-allocator context.allocator
         track: mem.Tracking-Allocator (odin "mem.Tracking_Allocator{}")]
     (mem.tracking-allocator-init (& track) old-allocator old-allocator)

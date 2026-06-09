@@ -19,7 +19,7 @@
 (defvar hybrid-native-generation: int 0)
 
 (defn render-value [value: kvist_live.Value] -> string
-  (switch value.kind
+  (case value.kind
     .Nil (strings.clone "nil")
     .Bool (if value.bool_value
             (strings.clone "true")

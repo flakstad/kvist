@@ -10,6 +10,7 @@
 (require 'subr-x)
 (require 'seq)
 (require 'xref)
+(require 'compile)
 
 (defgroup kvist nil
   "Editing support for Kvist."
@@ -44,10 +45,12 @@
   "Prefix used by `kvist dev --reload --json` for structured session events.")
 
 (defconst kvist-special-forms
-  '("package" "import" "defconst" "defvar" "defstruct" "defenum" "defunion" "defn" "defmacro" "proc" "odin"
-    "let" "var" "block" "do" "if" "when" "cond" "switch" "set!" "mut!" "return" "defer"
-    "for" "while" "each" "comment" "new" "make" "get" "nil?" "in" "not-in"
-    "type" "or-else" "update" "update!" "inc!" "dec!" "toggle!" "negate!"
+  '("package" "import" "def" "def-" "defconst" "defconst-" "defvar" "defvar-"
+    "defstruct" "defstruct-" "defenum" "defenum-" "defunion" "defunion-"
+    "defn" "defn-" "defmacro" "defmacro-" "fn" "odin"
+    "let" "block" "do" "if" "when" "cond" "switch" "set!" "mut!" "return" "defer"
+    "for" "while" "each" "comment" "make" "get" "slice" "nil?" "in" "not-in"
+    "type" "or-else" "update!" "inc!" "dec!" "toggle!" "negate!"
     "break" "continue" "with-allocator" "with-temp-allocator"
     "when-let" "if-let" "when-ok" "if-ok"
     "tap>"
@@ -55,17 +58,9 @@
   "Kvist special forms and syntactic heads.")
 
 (defconst kvist-core-helpers
-  '("map" "filter" "remove" "reduce" "map-indexed" "keep" "mapcat"
-    "concat" "merge" "merge!" "into" "into!" "interpose" "interleave"
-    "reverse" "reverse!" "shuffle" "shuffle!" "sort" "sort!" "sort-by"
-    "sort-by!" "map!" "map-indexed!" "filter!" "remove!" "keep!"
-    "split-at" "partition" "partition-all" "partition-by" "zipmap"
-    "index-by" "group-by" "frequencies" "keys" "vals" "distinct"
-    "distinct-by" "range" "repeat" "repeatedly" "iterate" "cycle"
-    "take" "drop" "butlast" "drop-last" "take-nth" "take-while"
-    "drop-while" "find" "some?" "every?" "first" "second" "last"
-    "nth" "rest" "empty?" "count" "contains?")
-  "Kvist helper forms available for basic completion.")
+  '("count" "get" "slice" "empty?" "contains?" "in" "not-in"
+    "nil?" "or-else" "update!" "delete!" "doc" "println")
+  "Bare core helper forms available for basic completion.")
 
 (defconst kvist-completion-builtins
   (append kvist-special-forms kvist-core-helpers)
@@ -195,7 +190,7 @@
                    (struct . 1)
                    (enum . 1)
                    (union . 1)
-                   (proc . 2)
+                   (fn . 2)
                    (odin . 1)
                    (let . 1)
                    (do . 0)
@@ -212,7 +207,6 @@
                    (comment . 0)
                    (with-allocator . 1)
                    (with-temp-allocator . 1)
-                   (new . 1)
                    (make . 1)))
     (kvist--put-indent (car entry) (cdr entry))))
 
@@ -230,6 +224,14 @@
         (locate-dominating-file dir "LANGUAGE.md")
         (locate-dominating-file dir ".git")
         dir)))
+
+(defun kvist--file-label (source-file)
+  "Return a readable project-relative label for SOURCE-FILE."
+  (let* ((root (file-name-as-directory (kvist--project-root source-file)))
+         (file (expand-file-name source-file)))
+    (if (string-prefix-p root file)
+        (file-relative-name file root)
+      (file-name-nondirectory file))))
 
 (defun kvist--executable (&optional start)
   "Return the Kvist executable to use for START."
@@ -625,8 +627,14 @@ When WATCH is non-nil, include `--watch'."
 
 (defun kvist--navigable-symbol-p (symbol)
   "Return non-nil when SYMBOL should be treated as a definition target."
-  (not (member (plist-get symbol :kind)
-               '("kvist form" "kvist helper" "kvist core" "kvist macro" "kvist package"))))
+  (let ((kind (plist-get symbol :kind))
+        (file (plist-get symbol :file)))
+    (cond
+     ((member kind '("kvist helper" "kvist core"))
+      nil)
+     ((member kind '("kvist form" "kvist macro" "kvist package"))
+      (and file (not (string-empty-p file))))
+     (t t))))
 
 (defun kvist--dedupe-symbols-by-name (symbols)
   "Deduplicate SYMBOLS by their :name field, preserving first occurrence."
@@ -689,11 +697,9 @@ When WATCH is non-nil, include `--watch'."
 
 (defun kvist--maybe-auto-import-qualified-symbol (&optional identifier)
   "Insert a canonical Kvist package import for IDENTIFIER when appropriate."
-  (let* ((identifier (or identifier (kvist--identifier-at-point)))
-         (normalized (and identifier (kvist--normalize-qualified-identifier identifier))))
-    (when (and normalized
-               (string-match "\\`\\([^/]+\\)/" normalized))
-      (kvist--ensure-kvist-package-import (match-string 1 normalized)))))
+  (when-let* ((identifier (or identifier (kvist--identifier-at-point)))
+              (package-prefix (kvist--package-prefix identifier)))
+    (kvist--ensure-kvist-package-import (car package-prefix))))
 
 (defun kvist--xref-backend () 'kvist)
 
@@ -701,15 +707,19 @@ When WATCH is non-nil, include `--watch'."
   (kvist--identifier-at-point))
 
 (cl-defmethod xref-backend-definitions ((_backend (eql kvist)) identifier)
-  (let* ((matches (seq-filter
-                   #'kvist--navigable-symbol-p
-                   (or (ignore-errors (kvist--xref-symbols identifier))
-                       (ignore-errors (kvist--lookup-symbols identifier))
-                       (let* ((editor-symbols (ignore-errors (kvist--editor-symbols)))
-                              (editor-matches (seq-filter (lambda (symbol)
-                                                            (kvist--symbol-matches-identifier-p symbol identifier))
-                                                          editor-symbols)))
-                         editor-matches)))))
+  (let* ((xref-matches (seq-filter
+                        #'kvist--navigable-symbol-p
+                        (or (ignore-errors (kvist--xref-symbols identifier)) nil)))
+         (lookup-matches (seq-filter
+                          #'kvist--navigable-symbol-p
+                          (or (ignore-errors (kvist--lookup-symbols identifier)) nil)))
+         (editor-matches (seq-filter
+                          #'kvist--navigable-symbol-p
+                          (let* ((editor-symbols (ignore-errors (kvist--editor-symbols))))
+                            (seq-filter (lambda (symbol)
+                                          (kvist--symbol-matches-identifier-p symbol identifier))
+                                        editor-symbols))))
+         (matches (or xref-matches lookup-matches editor-matches)))
     (mapcar
      (lambda (symbol)
        (let ((file (or (plist-get symbol :file) (buffer-file-name)))
@@ -742,16 +752,11 @@ When WATCH is non-nil, include `--watch'."
 (defun kvist--completion-candidates ()
   "Return completion candidates appropriate for the symbol at point."
   (let* ((identifier (kvist--identifier-at-point))
-         (package-prefix (kvist--package-prefix identifier))
          (symbols (kvist--completion-symbols identifier)))
     (delete-dups
      (mapcar
       (lambda (symbol)
-        (let ((name (plist-get symbol :name)))
-          (if (and package-prefix
-                   (string= (cdr package-prefix) "."))
-              (replace-regexp-in-string "/" "." name t t)
-            (replace-regexp-in-string "\\." "/" name t t))))
+        (replace-regexp-in-string "/" "." (plist-get symbol :name) t t))
       symbols))))
 
 (defun kvist--completion-exit (completed status)
@@ -762,16 +767,12 @@ When WATCH is non-nil, include `--watch'."
 (defun kvist--completion-metadata (identifier)
   "Return symbol metadata alist keyed by display name for IDENTIFIER context."
   (let* ((identifier (or identifier (kvist--identifier-at-point)))
-         (package-prefix (kvist--package-prefix identifier))
          (symbols (kvist--completion-symbols identifier)))
     (let (table)
       (dolist (symbol symbols)
         (let* ((name (plist-get symbol :name))
                (normalized (kvist--normalize-qualified-identifier name))
-               (display (if (and package-prefix
-                                 (string= (cdr package-prefix) "."))
-                            (replace-regexp-in-string "/" "." name t t)
-                          (replace-regexp-in-string "\\." "/" name t t))))
+               (display (replace-regexp-in-string "/" "." name t t)))
           (unless (assoc display table)
             (push (cons display (or (plist-get symbol :signature) normalized)) table))))
       table)))

@@ -58,7 +58,9 @@ new_loader_accum :: proc() -> Loader_Accum {
 kvist_literal_value :: proc(form: kvist.CST_Form) -> (Value, Runtime_Error, bool) {
     #partial switch form.kind {
     case .String:
-        return value_string(kvist.unquote_string(form.text)), Runtime_Error{}, true
+        unquoted := kvist.unquote_string(form.text)
+        defer delete(unquoted)
+        return value_string(unquoted), Runtime_Error{}, true
     case .Number:
         parsed, ok := strconv.parse_i64(form.text)
         if !ok {
@@ -258,37 +260,62 @@ live_macroexpand_input :: proc(raw_forms: []kvist.CST_Top_Form, current_path: st
     loaded_keys: [dynamic]string
     import_keys: [dynamic]string
     visiting: [dynamic]string
+    defer delete(loaded_keys)
+    defer delete(import_keys)
+    defer delete(visiting)
     aliases: [dynamic]kvist.Alias_Prefix
+    defer {
+        for i in 0 ..< len(aliases) {
+            if aliases[i].alias != "" {
+                delete(aliases[i].alias)
+            }
+        }
+        delete(aliases)
+    }
 
     for top in raw_forms {
         alias, import_path, ok_import := kvist.source_import_alias_and_path(top.form, importer_path)
         if !ok_import || !strings.has_prefix(import_path, "kvist:") {
+            if ok_import {
+                delete(alias)
+                delete(import_path)
+            }
             continue
         }
         append(&aliases, kvist.Alias_Prefix{alias = alias, prefix = alias})
         resolved, resolve_err, resolve_ok := kvist.resolve_source_import_path(importer_path, import_path)
+        delete(import_path)
         if !resolve_ok {
             return nil, resolve_err, false
         }
         loaded, load_err, load_ok := kvist.load_source_forms(resolved, alias, &loaded_keys, &import_keys, &visiting)
+        delete(resolved)
         if !load_ok {
             return nil, load_err, false
         }
         for form in loaded.decls {
             append(&forms, clone_loader_top_form(form))
         }
+        kvist.loaded_forms_delete(&loaded)
     }
 
     for top in raw_forms {
-        _, import_path, ok_import := kvist.source_import_alias_and_path(top.form, importer_path)
+        alias, import_path, ok_import := kvist.source_import_alias_and_path(top.form, importer_path)
         if ok_import && strings.has_prefix(import_path, "kvist:") {
+            delete(alias)
+            delete(import_path)
             continue
+        }
+        if ok_import {
+            delete(alias)
+            delete(import_path)
         }
         rewritten, rewrite_err, rewrite_ok := kvist.rewrite_top_form(top, nil, aliases[:], "")
         if !rewrite_ok {
             return nil, rewrite_err, false
         }
         append(&forms, clone_loader_top_form(rewritten))
+        kvist.delete_borrowed_cst_top_form(&rewritten)
     }
 
     return forms, kvist.Compile_Error{}, true
@@ -330,16 +357,20 @@ read_live_top_forms :: proc(source: string, current_path: string = "") -> (forms
     if !read_ok {
         return nil, kvist.clone_compile_error(read_err, result_allocator), false
     }
+    defer kvist.delete_borrowed_cst_top_form_slice(&raw_forms)
 
     macro_input, input_err, input_ok := live_macroexpand_input(raw_forms[:], current_path)
     if !input_ok {
         return nil, kvist.clone_compile_error(input_err, result_allocator), false
     }
+    defer kvist.delete_cst_top_form_slice(&macro_input)
 
     expanded_forms, macros, expand_err, expand_ok := kvist.macroexpand_top_forms(macro_input[:], true, current_path)
     if !expand_ok {
         return nil, kvist.clone_compile_error(expand_err, result_allocator), false
     }
+    defer kvist.delete_cst_top_form_slice(&expanded_forms)
+    defer kvist.delete_user_macro_slice(&macros)
     for top in expanded_forms {
         rewritten, rewrite_err, rewrite_ok := kvist.macroexpand_builtin_runtime_form(top.form)
         if !rewrite_ok {
@@ -351,6 +382,7 @@ read_live_top_forms :: proc(source: string, current_path: string = "") -> (forms
             doc_lines = top.doc_lines,
             source = top.source,
         }))
+        kvist.delete_borrowed_cst_form(&rewritten)
     }
     return forms, kvist.Compile_Error{}, true
 }
@@ -363,9 +395,15 @@ module_definition_from_forms :: proc(accum: ^Loader_Accum, forms: []kvist.CST_To
         }
 
         if kvist.is_symbol(form.items[0], "import") {
-            _, import_path, ok_source_import := kvist.source_import_alias_and_path(form, current_path)
+            alias, import_path, ok_source_import := kvist.source_import_alias_and_path(form, current_path)
             if ok_source_import && strings.has_prefix(import_path, "kvist:") {
+                delete(alias)
+                delete(import_path)
                 continue
+            }
+            if ok_source_import {
+                delete(alias)
+                delete(import_path)
             }
             resolved, import_err, import_ok := resolve_import_path_from_form(form, current_path)
             if !import_ok {
@@ -373,6 +411,7 @@ module_definition_from_forms :: proc(accum: ^Loader_Accum, forms: []kvist.CST_To
             }
 
             imported, imported_err, imported_ok := load_imported_live_file(resolved, import_stack)
+            delete(resolved)
             if !imported_ok {
                 return loader_error(imported_err.message, accum)
             }
@@ -477,6 +516,9 @@ module_definition_from_forms :: proc(accum: ^Loader_Accum, forms: []kvist.CST_To
                 doc = strings.clone(doc),
                 body = clone_cst_form_slice(form.items[body_start:]),
             })
+            if doc != "" {
+                delete(doc)
+            }
             continue
         }
 
@@ -502,6 +544,9 @@ module_definition_from_forms :: proc(accum: ^Loader_Accum, forms: []kvist.CST_To
                 doc = strings.clone(doc),
                 body = clone_cst_form_slice(form.items[body_start:]),
             })
+            if doc != "" {
+                delete(doc)
+            }
             continue
         }
 

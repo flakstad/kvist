@@ -51,12 +51,15 @@ printf 'tooling: check command\n'
 ./kvist check examples/language/hello.kvist --generated "$tmp_dir/check.odin"
 assert_file_nonempty "$tmp_dir/check.odin" "check generated output"
 
+printf 'tooling: check standalone file beside raw Odin programs\n'
+./kvist check benchmarks/aggregate_helpers.kvist
+
 printf 'tooling: check diagnostic mapping\n'
 cat > "$tmp_dir/bad.kvist" <<'EOF'
 (package main)
 (import "core:fmt")
 
-(proc main []
+(defn main []
   (let [x: int "bad"]
     (fmt.println x)))
 EOF
@@ -72,27 +75,27 @@ fi
 cat > "$tmp_dir/bad-statements.kvist" <<'EOF'
 (package main)
 
-(proc main []
+(defn main []
   (return))
 
-(proc if-test [] -> int
+(defn if-test [] -> int
   (if "bad"
     1
     0))
 
-(proc when-test []
+(defn when-test []
   (when "bad"
     (return)))
 
-(proc set-test []
+(defn set-test []
   (let [x 1]
     (set! x "bad")))
 
-(proc each-test []
+(defn each-test []
   (each [x 123]
     (return)))
 
-(proc return-test [] -> int
+(defn return-test [] -> int
   (return "bad"))
 EOF
 if ./kvist check "$tmp_dir/bad-statements.kvist" >"$tmp_dir/bad-statements.out" 2>"$tmp_dir/bad-statements.err"; then
@@ -127,7 +130,7 @@ assert_eq "6" "$eval_output" "eval output"
 assert_file_nonempty "$tmp_dir/eval.odin" "eval generated output"
 
 printf 'tooling: eval tap output\n'
-tap_output=$(./kvist eval examples/collections/tap.kvist '(tap> :answer 42)')
+tap_output=$(./kvist eval examples/collections/tap.kvist '(tap> "answer" 42)')
 tap_expected=$(printf 'answer: 42\n42')
 assert_eq "$tap_expected" "$tap_output" "tap eval output"
 
@@ -149,41 +152,41 @@ cat > "$tmp_dir/dev-io.kvist" <<'EOF'
 (import json "kvist:json")
 
 (defstruct Note {
-  :title string
-  :body string
+  title: string
+  body: string
 })
 
 (defstruct Count {
-  :n int
+  n: int
 })
 
-(proc write-read-count [path: string] -> int
-  (let [write-err (io/write path "kvist")]
+(defn write-read-count [path: string] -> int
+  (let [write-err (io.write path "kvist")]
     (if (!= write-err nil)
       0
-      (let [[data read-err] (io/read path)]
+      (let [[data read-err] (io.read path)]
         (if (!= read-err nil)
           0
           (do
             (defer (delete data))
             (len data)))))))
 
-(proc save-note-json [path: string] -> bool
-  (let [[marshal-err write-err] (json/write path (Note {:title "hello" :body "kvist"}))]
+(defn save-note-json [path: string] -> bool
+  (let [[marshal-err write-err] (json.write path (Note {title: "hello" body: "kvist"}))]
     (and (== marshal-err nil)
          (== write-err nil))))
 
-(proc save-count-json [path: string, n: int] -> bool
-  (let [[marshal-err write-err] (json/write path (Count {:n n}))]
+(defn save-count-json [path: string, n: int] -> bool
+  (let [[marshal-err write-err] (json.write path (Count {n: n}))]
     (and (== marshal-err nil)
          (== write-err nil))))
 
-(proc load-count-json [path: string] -> int
-  (let [[count read-err unmarshal-err] (json/read-as Count path)]
+(defn load-count-json [path: string] -> int
+  (let [[count read-err unmarshal-err] (json.read-as Count path)]
     (if (or (!= read-err nil)
             (!= unmarshal-err nil))
       0
-      (:n count))))
+      count.n)))
 EOF
 file_eval_output=$(./kvist eval "$tmp_dir/dev-io.kvist" "(write-read-count \"$tmp_dir/kvist-cache.txt\")")
 assert_eq "5" "$file_eval_output" "file-backed eval output"
@@ -350,15 +353,15 @@ cat > "$tmp_dir/decl-eval.kvist" <<'EOF'
 (import "core:fmt")
 
 (defstruct Greeting {
-  :message string
+  message: string
 })
 
-(proc main []
+(defn main []
   (fmt.println "hello"))
 EOF
-./kvist eval "$tmp_dir/decl-eval.kvist" '(defstruct Greeting { :message string })' --check
+./kvist eval "$tmp_dir/decl-eval.kvist" '(defstruct Greeting {message: string})' --check
 ./kvist eval "$tmp_dir/decl-eval.kvist" '(import "core:fmt")' --check
-./kvist eval "$tmp_dir/decl-eval.kvist" '(proc main [] (fmt.println "hello"))' --check
+./kvist eval "$tmp_dir/decl-eval.kvist" '(defn main [] (fmt.println "hello"))' --check
 
 printf 'tooling: eval odin diagnostic mapping\n'
 if ./kvist eval examples/collections/higher-order.kvist '(+ 1 "bad")' --check >"$tmp_dir/bad-eval-check.out" 2>"$tmp_dir/bad-eval-check.err"; then
@@ -425,7 +428,7 @@ if command -v emacs >/dev/null 2>&1; then
              (unwind-protect
                  (progn
                    (with-temp-file file
-                     (insert \"(package main)\\n(import \\\"core:fmt\\\")\\n\\n// Adds two ints.\\n(defn add [a: int, b: int] -> int\\n  (+ a b))\\n\\n(defn add-two [a: int, b: int] -> int\\n  (add a b))\\n\\n(defn main []\\n  (fmt.println \\\"from main\\\"))\\n\\n(comment\\n  (add 1 2)\\n  (add-two 1 2)\\n  (with-allocator [allocator context.temp_allocator]\\n    (add 2 1))\\n  (if-ok [value err (read)] value 0)\\n  (main))\\n\"))
+                     (insert \"(package main)\\n(import \\\"core:fmt\\\")\\n(import arr \\\"kvist:arr\\\")\\n\\n// Adds two ints.\\n(defn add [a: int, b: int] -> int\\n  (+ a b))\\n\\n(defn add-two [a: int, b: int] -> int\\n  (add a b))\\n\\n(defn main []\\n  (fmt.println \\\"from main\\\"))\\n\\n(comment\\n  (add 1 2)\\n  (add-two 1 2)\\n  (with-allocator [allocator context.temp_allocator]\\n    (add 2 1))\\n  (if-ok [value err (read)] value 0)\\n  (main))\\n\"))
                    (find-file file)
                    (kvist-mode)
                    (setq kvist-test-source-buffer (current-buffer))
@@ -456,13 +459,6 @@ if command -v emacs >/dev/null 2>&1; then
                    (let ((docs (kvist--symbol-doc-candidates \"if-ok\")))
                      (unless (and docs (string-match-p \"zero error value\" (plist-get (car docs) :doc)))
                        (error \"Expected if-ok built-in docs, got: %S\" docs)))
-                   (with-temp-buffer
-                     (insert \"/*\\n * Block docs.\\n * More docs.\\n */\\nthing :: proc() {}\\n\")
-                     (goto-char (point-min))
-                     (search-forward \"thing ::\")
-                     (let ((doc (kvist--preceding-odin-doc (line-beginning-position))))
-                       (unless (equal doc \"Block docs.\\nMore docs.\")
-                         (error \"Expected block docs, got: %S\" doc))))
                    (with-temp-buffer
                      (kvist-mode)
                      (insert \";; semi\\nafter-semi\\n// slash\\nafter-slash\\n(code) /* block\\nmore */ tail\\n\")
@@ -515,20 +511,20 @@ if command -v emacs >/dev/null 2>&1; then
                      (error \"Expected add-two identifier, got: %S\" (kvist--identifier-at-point)))
                    (let ((defs (xref-backend-definitions (quote kvist) (kvist--identifier-at-point))))
                      (unless defs
-                       (error \"Expected xref definition for same-file hyphenated proc\")))
-                   (let ((defs (xref-backend-definitions (quote kvist) \"map\")))
-                     (unless (and defs (string-match-p \"src/kvist/emit\\\\.odin\" (format \"%S\" defs)))
-                       (error \"Expected implementation xref for Kvist helper map, got: %S\" defs)))
-                   (let ((defs (xref-backend-definitions (quote kvist) \"proc\")))
+                       (error \"Expected xref definition for same-file hyphenated defn\")))
+                   (let ((defs (xref-backend-definitions (quote kvist) \"arr.map\")))
+                     (unless (and defs (string-match-p \"packages/arr/arr\\\\.kvist\" (format \"%S\" defs)))
+                       (error \"Expected package xref for arr.map, got: %S\" defs)))
+                   (let ((defs (xref-backend-definitions (quote kvist) \"defn\")))
                      (unless (and defs (string-match-p \"src/kvist/parse\\\\.odin\" (format \"%S\" defs)))
-                       (error \"Expected implementation xref for Kvist form proc, got: %S\" defs)))
+                       (error \"Expected implementation xref for Kvist form defn, got: %S\" defs)))
                    (let ((defs (xref-backend-definitions (quote kvist) \"fmt.println\")))
                      (unless defs
                        (error \"Expected xref definition for fmt.println\")))
                    (let ((candidates (kvist--completion-candidates)))
                      (unless (and (member \"add\" candidates)
-                                  (member \"proc\" candidates)
-                                  (member \"map\" candidates)
+                                  (member \"defn\" candidates)
+                                  (member \"arr.map\" candidates)
                                   (member \"fmt.println\" candidates))
                        (error \"Expected completion candidates, got: %S\" candidates)))
                    (dolist (binding (list (cons \"C-c C-e\" (quote kvist-eval-form-at-point))
@@ -543,7 +539,7 @@ if command -v emacs >/dev/null 2>&1; then
                                           (cons \"C-c C-w\" (quote kvist-save-form-result))
                                           (cons \"C-c C-l\" (quote kvist-cache-list))
                                           (cons \"C-c C-o\" (quote kvist-cache-open))
-                                          (cons \"C-c C-d\" (quote kvist-cache-rm))))
+                                          (cons \"C-c M-d\" (quote kvist-cache-rm))))
                      (unless (eq (key-binding (kbd (car binding))) (cdr binding))
                        (error \"Missing binding %s\" (car binding))))
                    (goto-char (point-min))
@@ -615,7 +611,7 @@ if command -v emacs >/dev/null 2>&1; then
                      (next-error)
                      (unless (equal (current-buffer) source-buffer)
                        (error \"Expected next-error from source to stay in Kvist source buffer\"))
-                     (unless (= (line-number-at-pos) 6)
+                     (unless (= (line-number-at-pos) 7)
                        (error \"Expected next-error from source to jump to diagnostic line, got %s\"
                               (line-number-at-pos)))
                      (unless (eq next-error-last-buffer (get-buffer kvist-result-buffer-name))

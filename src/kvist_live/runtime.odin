@@ -113,6 +113,7 @@ runtime_delete :: proc(runtime: ^Runtime) {
         if runtime.commands[i].doc != "" {
             delete(runtime.commands[i].doc)
         }
+        delete_cst_form_slice(&runtime.commands[i].body)
     }
     delete(runtime.commands)
 
@@ -126,6 +127,7 @@ runtime_delete :: proc(runtime: ^Runtime) {
         if runtime.hooks[i].doc != "" {
             delete(runtime.hooks[i].doc)
         }
+        delete_cst_form_slice(&runtime.hooks[i].body)
     }
     delete(runtime.hooks)
 

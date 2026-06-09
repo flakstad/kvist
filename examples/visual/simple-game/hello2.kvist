@@ -58,7 +58,7 @@
   (rl.Rectangle [pos.x pos.y PlatformWidth PlatformHeight]))
 
 (comment
-  (platform-collider (as rl.Vector2 [10 20]))
+  (platform-collider (rl.Vector2 [10 20]))
   )
 
 (defn main []

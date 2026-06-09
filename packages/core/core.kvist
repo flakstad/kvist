@@ -94,14 +94,23 @@
   (forms))
 
 (defmacro switch
-  "Dispatch on `value` using Odin-style switch lowering.
+  "Compatibility helper for Odin-style switch lowering.
 
   Clauses are written as case.expression pairs, with `:else expr` for the
-  fallback. Cases lower to direct Odin switch cases; there is no runtime table
-  or dynamic dispatch."
+  fallback. Prefer `case` for new Kvist code."
   [value & clauses]
   (quasiquote
     (core-switch (unquote value) (splice clauses))))
+
+(defmacro case
+  "Dispatch on `value` using value cases, grouped value cases, or type payload cases.
+
+  Use `cond` when each branch has its own predicate. Use `case` when one subject
+  is being classified. Type payload cases are written as `(Type name)` or
+  `(Type _)` and lower to Odin type switches."
+  [value & clauses]
+  (quasiquote
+    (core-case (unquote value) (splice clauses))))
 
 (defmacro ->
   "Thread `value` through `steps` as the first argument.

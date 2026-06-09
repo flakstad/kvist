@@ -785,7 +785,7 @@ current Odin block or procedure.
   `(slice target start [end])`, `(empty? collection)`, `(contains? collection key)`,
   and `(update! place f args...)`
   - `kvist:core` is the small auto-exposed core library.
-  - Prefer the bare spelling in user code; qualified names remain accepted for explicit package references.
+  - Use the bare spelling in user code.
   - These helpers are defined in shipped `.kvist` source and lower through a
     small intrinsic substrate where direct Odin codegen needs it.
 - `arr.*` sequence helpers such as `(arr.map f xs)`, `(arr.filter pred xs)`,

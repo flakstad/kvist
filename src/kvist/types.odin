@@ -154,6 +154,16 @@ Transform_Decl :: struct {
     spec: CST_Form,
 }
 
+Source_Decl :: struct {
+    name:        string,
+    params:      [dynamic]Param,
+    item_ty:     string,
+    state_expr:  CST_Form,
+    next_name:   string,
+    dispose_name: string,
+    has_dispose: bool,
+}
+
 AST_Decl_Kind :: enum {
     Ignored,
     Package,
@@ -165,6 +175,7 @@ AST_Decl_Kind :: enum {
     Union,
     Proc,
     Transform,
+    Source,
     Raw,
 }
 
@@ -181,6 +192,7 @@ AST_Decl :: struct {
     union_decl:   Union_Decl,
     proc_decl:      Proc_Decl,
     transform_decl: Transform_Decl,
+    source_decl:    Source_Decl,
     raw_text:       string,
 }
 

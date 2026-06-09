@@ -188,6 +188,7 @@ compile_all_examples :: proc(t: ^testing.T) {
         "examples/visual/reaction-diffusion.kvist",
         "examples/collections/sequence-helpers.kvist",
         "examples/collections/sequences.kvist",
+        "examples/collections/sources.kvist",
         "examples/visual/spatial-hash-collisions.kvist",
         "examples/collections/tap.kvist",
         "examples/packages/testing.kvist",
@@ -289,7 +290,11 @@ symbols_source_indexes_top_level_forms :: proc(t: ^testing.T) {
 // Returns true for active users.
 // Used by sequence examples.
 (defn active? [user: User] -> bool
-  user.active)`
+  user.active)
+
+(defsource active-users [users: []User] -> User
+  (open-users users)
+  :next next-user)`
 
     output, err, ok := kvist.symbols_source(source)
     testing.expect_value(t, ok, true)
@@ -308,6 +313,7 @@ symbols_source_indexes_top_level_forms :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "union\tValue\t18\t11\t\t\t\n"), true)
     testing.expect_value(t, strings.contains(output, "variant\tValue.i\t19\t3\tValue\t\t\n"), true)
     testing.expect_value(t, strings.contains(output, "const\tmax-age\t23\t6\t\t\t\n"), true)
+    testing.expect_value(t, strings.contains(output, "source\tactive-users\t30\t12\t\t(active-users [users: []User] -> User)\t\n"), true)
     testing.expect_value(t, strings.contains(output, "proc\tactive?\t27\t7\t\t(active? [user: User] -> bool)\tReturns true for active users.\\nUsed by sequence examples.\n"), true)
 }
 
@@ -469,6 +475,7 @@ package_symbols_source_emits_core_update_bang_helper :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "macro\tcore.when\t"), true)
     testing.expect_value(t, strings.contains(output, "macro\tcore.cond\t"), true)
     testing.expect_value(t, strings.contains(output, "macro\tcore.comment\t"), true)
+    testing.expect_value(t, strings.contains(output, "macro\tcore.case\t"), true)
     testing.expect_value(t, strings.contains(output, "macro\tcore.switch\t"), true)
     testing.expect_value(t, strings.contains(output, "macro\tcore.->\t"), true)
     testing.expect_value(t, strings.contains(output, "macro\tcore.->>\t"), true)
@@ -595,8 +602,23 @@ editor_symbols_source_includes_language_forms_and_helpers :: proc(t: ^testing.T)
 
     testing.expect_value(t, strings.contains(output, "kvist form\tlet\t"), true)
     testing.expect_value(t, strings.contains(output, "kvist form\tif\t"), true)
+    testing.expect_value(t, strings.contains(output, "kvist form\tdefsource\t"), true)
+    testing.expect_value(t, strings.contains(output, "kvist form\twhen\t"), true)
+    testing.expect_value(t, strings.contains(output, "kvist form\tcond\t"), true)
+    testing.expect_value(t, strings.contains(output, "kvist form\tswitch\t"), true)
     testing.expect_value(t, strings.contains(output, "kvist form\twhile\t"), true)
+    testing.expect_value(t, strings.contains(output, "kvist form\teach\t"), true)
+    testing.expect_value(t, strings.contains(output, "kvist form\tupdate!\t"), true)
+    testing.expect_value(t, strings.contains(output, "kvist form\tget\t"), true)
+    testing.expect_value(t, strings.contains(output, "kvist form\tslice\t"), true)
+    testing.expect_value(t, strings.contains(output, "kvist form\taddr\t"), true)
+    testing.expect_value(t, strings.contains(output, "kvist form\tderef\t"), true)
     testing.expect_value(t, strings.contains(output, "kvist form\tloop\t"), false)
+    testing.expect_value(t, strings.contains(output, "kvist helper\tprintln\t"), true)
+    testing.expect_value(t, strings.contains(output, "kvist helper\tupdate!\t"), true)
+    testing.expect_value(t, strings.contains(output, "kvist helper\tslice\t"), true)
+    testing.expect_value(t, strings.contains(output, "kvist helper\twhen-let\t"), true)
+    testing.expect_value(t, strings.contains(output, "kvist package\tcore.println\t"), true)
     testing.expect_value(t, strings.contains(output, "kvist package\tarr.map\t"), true)
 }
 
@@ -1376,6 +1398,7 @@ compile_defstruct_rejects_duplicate_fields :: proc(t: ^testing.T) {
     if ok {
         return
     }
+    defer delete(err.message)
     testing.expect_value(t, strings.contains(err.message, "duplicate defstruct field name:"), true)
 }
 
@@ -1392,6 +1415,7 @@ compile_defstruct_rejects_bad_metadata :: proc(t: ^testing.T) {
     if ok {
         return
     }
+    defer delete(err.message)
     testing.expect_value(t, strings.contains(err.message, "expects one element type") || strings.contains(err.message, "expects a numeric length"), true)
 }
 
@@ -1411,6 +1435,7 @@ compile_struct_constructor_rejects_unknown_field :: proc(t: ^testing.T) {
     if ok {
         return
     }
+    defer delete(err.message)
     testing.expect_value(t, strings.contains(err.message, "unknown struct constructor field extra:"), true)
 }
 
@@ -1430,6 +1455,7 @@ compile_struct_constructor_rejects_duplicate_field :: proc(t: ^testing.T) {
     if ok {
         return
     }
+    defer delete(err.message)
     testing.expect_value(t, strings.contains(err.message, "duplicate struct constructor field name:"), true)
 }
 
@@ -1449,6 +1475,7 @@ compile_struct_constructor_rejects_literal_type_mismatch :: proc(t: ^testing.T) 
     if ok {
         return
     }
+    defer delete(err.message)
     testing.expect_value(t, strings.contains(err.message, "struct constructor literal type mismatch for name:") || strings.contains(err.message, "struct constructor literal type mismatch for age:"), true)
 }
 
@@ -1531,6 +1558,9 @@ compile_type_call_position_supports_complex_type_heads :: proc(t: ^testing.T) {
 (defn ptr-cast [x: rawptr] -> ^f32
   ((ptr f32) x))
 
+(defn slice-cast [xs: []i32] -> (slice i32)
+  ((slice i32) xs))
+
 (defn fixed-literal [] -> [3]i32
   ((array 3 i32) [1 2 3]))`
 
@@ -1543,7 +1573,46 @@ compile_type_call_position_supports_complex_type_heads :: proc(t: ^testing.T) {
     defer delete(output)
 
     testing.expect_value(t, strings.contains(output, "return (^f32)(x)"), true)
+    testing.expect_value(t, strings.contains(output, "return ([]i32)(xs)"), true)
     testing.expect_value(t, strings.contains(output, "return [3]i32{1, 2, 3}"), true)
+}
+
+@(test)
+reject_old_core_slice_type_constructor :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn bad [xs: []i32] -> (core.slice i32)
+  xs)`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+    defer delete(err.message)
+    testing.expect_value(t, err.message, "unsupported type form")
+}
+
+@(test)
+compile_typed_def_bindings_preserve_type_forms_during_macroexpand :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(def xs: (slice i32) ([]i32 [1 2]))
+(defvar ys: (slice i32) ([]i32 [3 4]))
+
+(defn score [] -> int
+  (+ (count xs) (count ys)))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "xs: []i32 : []i32{1, 2}"), true)
+    testing.expect_value(t, strings.contains(output, "ys: []i32 = []i32{3, 4}"), true)
 }
 
 @(test)
@@ -1639,6 +1708,66 @@ compile_update_bang_stmt :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "(point).x = 8"), true)
     testing.expect_value(t, strings.contains(output, "point.y = 9"), true)
     testing.expect_value(t, strings.contains(output, "((point).x) + ((point).y)"), true)
+}
+
+@(test)
+compile_canonical_bare_core_helpers :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn score [needle: int] -> int
+  (let [xs ([dynamic]int [1 2 3])
+        lookup (map[string]int {"a" 4})
+        tail (slice xs 1)
+        total (count xs)]
+    (update! xs[0] + 10)
+    (delete! lookup "a")
+    (if (contains? xs needle)
+      (if (in "a" lookup)
+        (if (not-in "b" lookup)
+          (if (empty? (slice tail))
+            0
+            (+ total (get xs 0)))
+          0)
+        0)
+      0)))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "(xs)[1:]"), true)
+    testing.expect_value(t, strings.contains(output, "total := len((xs)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "(xs)[0] += (10)"), true)
+    testing.expect_value(t, strings.contains(output, "delete_key(&(lookup), \"a\")"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_contains_value((xs)[:]"), true)
+    testing.expect_value(t, strings.contains(output, "(\"a\") in (lookup)"), true)
+    testing.expect_value(t, strings.contains(output, "!((\"b\") in (lookup))"), true)
+    testing.expect_value(t, strings.contains(output, "len(((tail)[:])[:]) == 0"), true)
+    testing.expect_value(t, strings.contains(output, "(total) + (xs[0])"), true)
+}
+
+@(test)
+reject_slash_package_access_in_source :: proc(t: ^testing.T) {
+    source := `(package main)
+(import arr "kvist:arr")
+
+(defn inc [x: int] -> int
+  (+ x 1))
+
+(defn bad [] -> [dynamic]int
+  (arr/map inc [1 2 3]))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+    defer delete(err.message)
+    testing.expect_value(t, err.message, "use `arr.map` for package access")
 }
 
 @(test)
@@ -2249,6 +2378,7 @@ compile_local_struct_validates_constructors :: proc(t: ^testing.T) {
     if ok {
         return
     }
+    defer delete(err.message)
     testing.expect_value(t, strings.contains(err.message, "unknown struct constructor field y:"), true)
 }
 
@@ -2290,6 +2420,7 @@ compile_local_declarations_do_not_escape_block_scope :: proc(t: ^testing.T) {
     if ok {
         return
     }
+    defer delete(err.message)
     testing.expect_value(t, strings.contains(err.message, "unknown struct constructor field x:"), true)
 }
 
@@ -2581,6 +2712,95 @@ read_method_p :: proc(method: Method) -> bool {
 }
 
 @(test)
+compile_case_with_value_cases :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defenum Method [
+  Get
+  Post
+  Delete
+])
+
+(defn method-name [method: Method] -> string
+  (case method
+    .Get "GET"
+    .Post "POST"
+    :else "OTHER"))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    expected := `package main
+
+Method :: enum {
+    Get,
+    Post,
+    Delete,
+}
+
+method_name :: proc(method: Method) -> string {
+    #partial switch method {
+    case .Get:
+        return "GET"
+    case .Post:
+        return "POST"
+    case:
+        return "OTHER"
+    }
+}
+`
+    testing.expect_value(t, output, expected)
+}
+
+@(test)
+compile_case_with_grouped_value_cases :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defenum Method [
+  Get
+  Head
+  Post
+])
+
+(defn read-method? [method: Method] -> bool
+  (case method
+    [.Get .Head] true
+    :else false))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    expected := `package main
+
+Method :: enum {
+    Get,
+    Head,
+    Post,
+}
+
+read_method_p :: proc(method: Method) -> bool {
+    #partial switch method {
+    case .Get, .Head:
+        return true
+    case:
+        return false
+    }
+}
+`
+    testing.expect_value(t, output, expected)
+}
+
+@(test)
 compile_explicit_partial_switch :: proc(t: ^testing.T) {
     source := `(package main)
 
@@ -2723,7 +2943,43 @@ reject_nary_not_equal :: proc(t: ^testing.T) {
 
     _, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+    defer delete(err.message)
     testing.expect_value(t, err.message, "!= expects exactly two arguments")
+}
+
+@(test)
+reject_removed_in_question_with_canonical_message :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn bad [lookup: map[string]int, key: string] -> bool
+  (in? key lookup))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+    defer delete(err.message)
+    testing.expect_value(t, err.message, "`in?` has been removed; use `contains?`")
+}
+
+@(test)
+reject_contains_question_string_needle_with_canonical_message :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn bad [] -> bool
+  (contains? "abc" 1))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+    defer delete(err.message)
+    testing.expect_value(t, err.message, "contains? on strings expects a string needle")
 }
 
 @(test)
@@ -2793,6 +3049,148 @@ describe :: proc(value: Value) -> string {
 }
 `
     testing.expect_value(t, output, expected)
+}
+
+@(test)
+compile_case_with_union_payload_patterns :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct Connected {
+  id: int
+})
+
+(defstruct Disconnected {
+  id: int
+  reason: string
+})
+
+(defstruct Data {
+  id: int
+  payload: string
+})
+
+(defunion Event {
+  connected: Connected
+  disconnected: Disconnected
+  data: Data
+})
+
+(defn event-score [event: Event] -> int
+  (case event
+    (Connected conn) conn.id
+    (Disconnected disc) (len disc.reason)
+    (Data data) (len data.payload)
+    :else 0))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "switch kvist_case_"), true)
+    testing.expect_value(t, strings.contains(output, " in event {"), true)
+    testing.expect_value(t, strings.contains(output, "case Connected:"), true)
+    testing.expect_value(t, strings.contains(output, "conn := kvist_case_"), true)
+    testing.expect_value(t, strings.contains(output, "return conn.id"), true)
+    testing.expect_value(t, strings.contains(output, "case Disconnected:"), true)
+    testing.expect_value(t, strings.contains(output, "disc := kvist_case_"), true)
+    testing.expect_value(t, strings.contains(output, "return len(disc.reason)"), true)
+    testing.expect_value(t, strings.contains(output, "case Data:"), true)
+    testing.expect_value(t, strings.contains(output, "data := kvist_case_"), true)
+    testing.expect_value(t, strings.contains(output, "return len(data.payload)"), true)
+    testing.expect_value(t, strings.contains(output, "case:\n        return 0"), true)
+}
+
+@(test)
+compile_case_with_ignored_union_payload :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct Connected {
+  id: int
+})
+
+(defstruct Data {
+  payload: string
+})
+
+(defunion Event {
+  connected: Connected
+  data: Data
+})
+
+(defn event-score [event: Event] -> int
+  (case event
+    (Connected _) 1
+    (Data data) (len data.payload)
+    :else 0))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "case Connected:\n        return 1"), true)
+    testing.expect_value(t, strings.contains(output, "_ := kvist_case_"), false)
+    testing.expect_value(t, strings.contains(output, "data := kvist_case_"), true)
+}
+
+@(test)
+reject_case_mixing_value_and_type_patterns :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct Connected {
+  id: int
+})
+
+(defunion Event {
+  connected: Connected
+})
+
+(defn event-score [event: Event] -> int
+  (case event
+    (Connected conn) conn.id
+    .Other 0
+    :else -1))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+
+    testing.expect_value(t, err.message, "type case expects (Type binding)")
+}
+
+@(test)
+reject_case_type_pattern_shape :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct Connected {
+  id: int
+})
+
+(defunion Event {
+  connected: Connected
+})
+
+(defn event-score [event: Event] -> int
+  (case event
+    (Connected) 1
+    :else 0))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+
+    testing.expect_value(t, err.message, "type case expects (Type binding)")
 }
 
 @(test)
@@ -3328,6 +3726,7 @@ compile_loop_form_is_removed :: proc(t: ^testing.T) {
     if ok {
         return
     }
+    defer delete(err.message)
     testing.expect_value(t, err.message, "`loop` has been removed; use `each` for collection iteration or `while` for condition loops")
 }
 
@@ -3910,6 +4309,22 @@ compile_tap_helper :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "kvist_tap_labeled :: proc(label: string, value: $T) -> T"), true)
     testing.expect_value(t, strings.contains(output, "fmt.print(label)"), true)
     testing.expect_value(t, strings.contains(output, "fmt.println(value)"), true)
+}
+
+@(test)
+reject_tap_label_with_canonical_message :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn bad [] -> int
+  (tap> 1 2))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+    defer delete(err.message)
+    testing.expect_value(t, err.message, "tap> label must be a string literal")
 }
 
 @(test)
@@ -6226,6 +6641,99 @@ compile_inline_functional_transform_into :: proc(t: ^testing.T) {
 }
 
 @(test)
+compile_defsource_each_and_into_consumers :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct File_Source {
+  items: []string
+  index: int
+})
+
+(defn open-files [items: []string] -> File_Source
+  (File_Source {items: items index: 0}))
+
+(defn next-file [src: ^File_Source] -> [path: string ok: bool]
+  (if (< src.index (len src.items))
+    (let [path src.items[src.index]]
+      (set! src.index (+ src.index 1))
+      (return path true))
+    (return "" false)))
+
+(defn dispose-files [src: ^File_Source]
+  (set! src.index 0))
+
+(defn long-path? [path: string] -> bool
+  (> (len path) 5))
+
+(defsource files [items: []string] -> string
+  (open-files items)
+  :next next-file
+  :dispose dispose-files)
+
+(defn total-name-length [items: []string] -> int
+  (let [total 0]
+    (each [path (files items)]
+      (set! total (+ total (len path))))
+    total))
+
+(defn long-paths [items: []string] -> [dynamic]string
+  (into [dynamic]string
+    (comp
+      (filter long-path?))
+    (files items)))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "files :: proc(items: []string) -> File_Source {"), true)
+    testing.expect_value(t, strings.contains(output, "return open_files(items)"), true)
+    testing.expect_value(t, strings.contains(output, "defer dispose_files(&kvist_source_"), true)
+    testing.expect_value(t, strings.contains(output, "path, kvist_source_ok_"), true)
+    testing.expect_value(t, strings.contains(output, " := next_file(&kvist_source_"), true)
+    testing.expect_value(t, strings.contains(output, "if !kvist_source_ok_"), true)
+    testing.expect_value(t, strings.contains(output, "(proc(kvist_source_arg_1: []string) -> [dynamic]string {"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_source := files(kvist_source_arg_1)"), true)
+    testing.expect_value(t, strings.contains(output, "if long_path_p(kvist_item) {"), true)
+    testing.expect_value(t, strings.contains(output, "append(&kvist_out, kvist_item)"), true)
+}
+
+@(test)
+reject_source_call_outside_source_consumer :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct File_Source {
+  items: []string
+  index: int
+})
+
+(defn open-files [items: []string] -> File_Source
+  (File_Source {items: items index: 0}))
+
+(defn next-file [src: ^File_Source] -> [path: string ok: bool]
+  (return "" false))
+
+(defsource files [items: []string] -> string
+  (open-files items)
+  :next next-file)
+
+(defn bad [items: []string] -> int
+  (let [src (files items)]
+    0))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+    testing.expect_value(t, err.message, "source files can currently only be consumed by each or into")
+}
+
+@(test)
 compile_functional_transform_field_selectors :: proc(t: ^testing.T) {
     source := `(package main)
 
@@ -8146,7 +8654,7 @@ compile_update_bang_rejects_target_key_form :: proc(t: ^testing.T) {
     }
     defer delete(err.message)
 
-    testing.expect_value(t, err.message, "core/update! expects updater function or operator")
+    testing.expect_value(t, err.message, "update! expects updater function or operator")
 }
 
 @(test)
@@ -8218,7 +8726,72 @@ compile_mut_bang_assignment_rejects_non_place :: proc(t: ^testing.T) {
     if ok {
         return
     }
+    defer delete(err.message)
     testing.expect_value(t, err.message, "mut! expects an assignable place")
+}
+
+@(test)
+compile_set_bang_rejects_non_place :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn bad [x: int y: int]
+  (set! (+ x y) 1))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+    defer delete(err.message)
+    testing.expect_value(t, err.message, "set! expects an assignable place")
+}
+
+@(test)
+compile_mut_bang_rejects_plain_assignment_operator :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn bad [x: int]
+  (mut! x = 1))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+    defer delete(err.message)
+    testing.expect_value(t, err.message, "mut! does not support =; use set! for plain assignment")
+}
+
+@(test)
+compile_mut_bang_rejects_non_compound_operator :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn bad [x: int]
+  (mut! x + 1))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+    defer delete(err.message)
+    testing.expect_value(t, err.message, "mut! expects a compound assignment operator")
+}
+
+@(test)
+compile_update_bang_rejects_non_place :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn bad [x: int y: int]
+  (update! (+ x y) + 1))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+    defer delete(err.message)
+    testing.expect_value(t, err.message, "update! expects an assignable place")
 }
 
 @(test)
@@ -8272,6 +8845,47 @@ compile_shallow_struct_assoc_and_update_exprs :: proc(t: ^testing.T) {
 }
 
 @(test)
+compile_nested_struct_assoc_and_update_exprs :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct Profile {
+  name: string
+  age: int
+})
+
+(defstruct User {
+  profile: Profile
+  active?: bool
+})
+
+(defn inc [x: int] -> int
+  (+ x 1))
+
+(defn score [user: User] -> int
+  (let [renamed (assoc user.profile.name "Ada")
+        older (update renamed.profile.age inc)
+        active (assoc older .active? true)]
+    (+ older.profile.age (len renamed.profile.name))))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "renamed := (proc(kvist_target: User, kvist_value: string) -> User {"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_update_1 := kvist_target"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_update_1.profile.name = kvist_value"), true)
+    testing.expect_value(t, strings.contains(output, "})(user, \"Ada\")"), true)
+    testing.expect_value(t, strings.contains(output, "older := (proc(kvist_target: User) -> User {"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_update_2.profile.age += 1"), true)
+    testing.expect_value(t, strings.contains(output, "})(renamed)"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_update_3.active_p = kvist_value"), true)
+}
+
+@(test)
 compile_threaded_shallow_struct_assoc_and_update_exprs :: proc(t: ^testing.T) {
     source := `(package main)
 (import core "kvist:core")
@@ -8301,6 +8915,41 @@ compile_threaded_shallow_struct_assoc_and_update_exprs :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "kvist_update_1.age += (kvist_arg_1)"), true)
     testing.expect_value(t, strings.contains(output, "kvist_update_2.active_p = kvist_value"), true)
     testing.expect_value(t, strings.contains(output, "kvist_update_3.name = kvist_value"), true)
+}
+
+@(test)
+compile_threaded_nested_struct_assoc_and_update_exprs :: proc(t: ^testing.T) {
+    source := `(package main)
+(import core "kvist:core")
+
+(defstruct Profile {
+  name: string
+  age: int
+})
+
+(defstruct User {
+  profile: Profile
+  active?: bool
+})
+
+(defn score [user: User] -> int
+  (let [updated (-> user
+                  (assoc .profile.name "Ada")
+                  (update .profile.age + 2)
+                  (assoc .active? true))]
+    (+ updated.profile.age (len updated.profile.name))))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "kvist_update_1.profile.name = kvist_value"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_update_2.profile.age += (kvist_arg_1)"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_update_3.active_p = kvist_value"), true)
 }
 
 @(test)
@@ -8449,7 +9098,7 @@ reject_shallow_struct_update_non_field_selector :: proc(t: ^testing.T) {
     }
     defer delete(err.message)
 
-    testing.expect_value(t, err.message, "core/assoc expects a shallow field place such as user.name")
+    testing.expect_value(t, err.message, "core/assoc expects a field place such as user.name or user.address.city")
 }
 
 @(test)
@@ -8474,6 +9123,34 @@ reject_shallow_struct_update_unknown_field :: proc(t: ^testing.T) {
     defer delete(err.message)
 
     testing.expect_value(t, err.message, "core/update could not find field .missing on Point")
+}
+
+@(test)
+reject_nested_struct_update_unknown_field :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct Profile {
+  age: int
+})
+
+(defstruct User {
+  profile: Profile
+})
+
+(defn inc [x: int] -> int
+  (+ x 1))
+
+(defn bad [user: User] -> User
+  (update user.profile.missing inc))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+    defer delete(err.message)
+
+    testing.expect_value(t, err.message, "core/update could not find field .missing on Profile")
 }
 
 @(test)

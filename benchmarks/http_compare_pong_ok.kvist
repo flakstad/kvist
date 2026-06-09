@@ -2,8 +2,8 @@
 (import http "kvist:http")
 
 (defn main []
-  (let [server (http/new-server)
-        app (http/handler [req res]
-              (http/respond-plain res "pong"))]
-    (http/server-shutdown-on-interrupt! server)
-    (http/listen-and-serve-handler! server app 6969)))
+  (let [server (http.new-server)
+        app (http.handler [req res]
+              (http.respond-plain res "pong"))]
+    (http.server-shutdown-on-interrupt! server)
+    (http.listen-and-serve-handler! server app 6969)))
