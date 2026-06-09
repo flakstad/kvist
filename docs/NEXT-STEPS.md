@@ -67,7 +67,74 @@ The current prototype uses:
 
 See [FUNCTIONAL-TRANSFORMS.md](./FUNCTIONAL-TRANSFORMS.md).
 
-### 3. Package And Tooling Polish
+### 3. Functional Programming Discussion Backlog
+
+These are candidate FP-adjacent directions to discuss one by one before any
+implementation decision. They are notes, not accepted feature plans.
+
+1. Immutable-by-default value workflows
+
+   Build on shallow `assoc` / `update` and ordinary Odin value structs. Possible
+   discussion topics: nested value updates, state-transition examples, copy
+   diagnostics, and whether generated `with-*` helpers are useful.
+
+   Decision from discussion: nested `assoc` / `update` over struct fields is a
+   desired future direction. It should lower as one root value copy followed by
+   nested assignment into that copy. Dynamic arrays, slices, maps, and sets are
+   out of scope for this feature because immutable element updates there require
+   explicit copying or persistent data structures.
+
+2. Algebraic data and case analysis
+
+   Build on `defunion` with a readable `case` form that handles both ordinary
+   subject-based value cases and union/type payload cases. This may be the
+   highest-value FP direction because it improves domain modeling without adding
+   a runtime collection abstraction.
+
+   Decision from discussion: prefer `cond` for ordered predicate branching and
+   `case` for subject-based case analysis. `case` should cover value cases,
+   grouped value cases, and union/type payload cases such as `(Connected conn)`.
+   The existing `switch` form should be dropped from the user-facing language
+   after a migration path, rather than growing into a second public case-analysis
+   surface.
+
+3. Explicit parallel processing
+
+   Explore constrained parallel loops or maps over slices/arrays, probably
+   chunked and lowered to `core:thread` / thread-pool work. Any design must make
+   ordering, mutation, output ownership, errors, cancellation, and chunking
+   inspectable.
+
+   Decision from discussion: do not add core `par-each` / `par-map` forms.
+   Parallelism should be explored, if at all, as a higher-level package such as
+   a future `kvist:par`, built over Odin's `core:thread`, thread pools, and
+   typed channels. Promising directions are typed futures/await and eager
+   ordered parallel map over explicit pools, but naming and API surface remain
+   open and must be discussed in detail before any implementation.
+
+4. Immutable data structures
+
+   Persistent vectors/maps/sets would require a real runtime data-structure and
+   allocator story. Near-term alternatives are value structs, explicit owned
+   arrays/maps, immutable views/slices, and possible builder-then-freeze
+   patterns.
+
+   Decision from discussion: defer persistent immutable collections. Kvist
+   should first make typed struct/value workflows excellent with nested
+   `assoc` / `update`, state-transition examples, algebraic data, and explicit
+   owned mutable containers. Full-copy array/map/set helpers may be considered
+   later, but they must be visibly allocating O(n) operations. Persistent
+   vectors/maps/sets should only be revisited as a package-level runtime
+   commitment if concrete app-state use cases make full-copy helpers or explicit
+   mutation insufficient.
+
+5. Function composition and partial application
+
+   Consider only where lowering remains explicit. General heap closures should
+   not become the default; compile-time or non-escaping composition is a better
+   fit unless a concrete use case proves otherwise.
+
+### 4. Package And Tooling Polish
 
 The package model is in place, but there is still room to tighten:
 
@@ -76,7 +143,7 @@ The package model is in place, but there is still room to tighten:
 - package-aware editor commands and CLI inspection helpers
 - docs that describe package layout and visibility concisely
 
-### 4. Standard Library Shape
+### 5. Standard Library Shape
 
 The library surface is real, but it should keep being reviewed against the
 current language direction:
@@ -112,7 +179,7 @@ Current package boundary:
   coverage, ownership rules, or callback specialization still need the smaller
   compiler substrate
 
-### 5. Future DSL Work
+### 6. Future DSL Work
 
 High-value data DSLs remain attractive, but they are not the next foundational
 step.
@@ -125,7 +192,7 @@ Strong candidates:
 These should build on the current macro system and still lower to explicit,
 typed internal structures.
 
-### 6. Hot Reload And Live Workflow
+### 7. Hot Reload And Live Workflow
 
 This work is real but should remain clearly separate from the core language
 surface:
