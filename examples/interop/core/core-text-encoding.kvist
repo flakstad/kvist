@@ -31,10 +31,10 @@
     (if ok value 0)))
 
 (defn base64-roundtrip-length [] -> int
-  ;; base64.encode and base64.decode allocate owned []byte values. The raw Odin
+  ;; base64.encode and base64.decode allocate owned []byte values. The
   ;; transmute is explicit because Odin distinguishes string from byte slices.
   (let [text "kvist"
-        [encoded encode-err] (base64.encode (odin "transmute([]byte)text"))]
+        [encoded encode-err] (base64.encode (transmute []byte text))]
     (if (!= encode-err nil)
       0
       (do
@@ -53,7 +53,7 @@
         ctx (sha2.Context_256 {})
         digest ([32]byte [])]
     (sha2.init_256 (& ctx))
-    (sha2.update (& ctx) (odin "transmute([]byte)text"))
+    (sha2.update (& ctx) (transmute []byte text))
     (sha2.final (& ctx) (slice digest))
     (let [[encoded err] (hex.encode (slice digest))]
       (if (!= err nil)

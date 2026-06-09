@@ -32,7 +32,7 @@
   any growth Odin needs for the set itself."
   [s value]
   (quasiquote
-    (set! (core.get (unquote s) (unquote value)) (odin "{}"))))
+    (set! (core.get (unquote s) (unquote value)) (zero struct{}))))
 
 (defmacro remove!
   "Remove `value` from set `s` in place.
@@ -51,7 +51,7 @@
   [target source]
   (quasiquote
     (each [value _ (unquote source)]
-      (set! (core.get (unquote target) value) (odin "{}")))))
+      (set! (core.get (unquote target) value) (zero struct{})))))
 
 (defmacro intersection!
   "Mutate `target` so it keeps only values also present in `source`.
@@ -89,9 +89,9 @@
   [lhs: set[$T], rhs: set[$T]] -> set[T] #force_inline
   (let [out (set.empty T (+ (core.count lhs) (core.count rhs)))]
     (each [value _ lhs]
-      (set! (core.get out value) (odin "{}")))
+      (set! (core.get out value) (zero struct{})))
     (each [value _ rhs]
-      (set! (core.get out value) (odin "{}")))
+      (set! (core.get out value) (zero struct{})))
     out))
 
 (defn intersection
@@ -115,7 +115,7 @@
           (set! probe lhs)))
       (each [value _ scan]
         (core.when (map.contains? probe value)
-          (set! (core.get out value) (odin "{}"))))
+          (set! (core.get out value) (zero struct{}))))
       out)))
 
 (defn difference
@@ -127,7 +127,7 @@
   (let [out (set.empty T (core.count lhs))]
     (each [value _ lhs]
       (core.when (not (map.contains? rhs value))
-        (set! (core.get out value) (odin "{}"))))
+        (set! (core.get out value) (zero struct{}))))
     out))
 
 (defn subset?
@@ -184,8 +184,8 @@
   [s: set[$T], value: T] -> set[T] #force_inline
   (let [out (set.empty T (+ (core.count s) 1))]
     (each [entry _ s]
-      (set! (core.get out entry) (odin "{}")))
-    (set! (core.get out value) (odin "{}"))
+      (set! (core.get out entry) (zero struct{})))
+    (set! (core.get out value) (zero struct{}))
     out))
 
 (defn remove
@@ -197,5 +197,5 @@
   (let [out (set.empty T (core.count s))]
     (each [entry _ s]
       (core.when (!= entry value)
-        (set! (core.get out entry) (odin "{}"))))
+        (set! (core.get out entry) (zero struct{}))))
     out))

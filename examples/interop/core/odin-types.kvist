@@ -21,6 +21,12 @@
         doubled (intrinsics.simd_add v v)]
     (intrinsics.simd_reduce_add_ordered doubled)))
 
+(defn zero-point
+  "Construct an explicit zero value using the same type parser as casts."
+  [] -> [2]f32
+  (zero [2]f32))
+
 (defn main []
   (println (make-permissions)
-                (simd-score)))
+                (simd-score)
+                (zero-point)))

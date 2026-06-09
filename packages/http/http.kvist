@@ -3,23 +3,18 @@
 (import net "core:net")
 (import time "core:time")
 
-(odin "
-Request :: h.Request
-Response :: h.Response
-Handler :: h.Handler
+(def Request h.Request)
+(def Response h.Response)
+(def Handler h.Handler)
 
-http__respond_file_content_text :: proc(res: ^h.Response, path: string, content: string, status: h.Status = .OK) {
-	h.respond_file_content(res, path, transmute([]byte)content, status)
-}
+(defn- respond-file-content-text [res: ^h.Response, path: string, content: string, status: h.Status = .OK]
+  (h.respond_file_content res path (transmute []byte content) status))
 
-http__handle_ptr :: proc(handler: ^h.Handler, req: ^h.Request, res: ^h.Response) {
-	handler.handle(handler, req, res)
-}
+(defn- handle-ptr [hnd: ^h.Handler, req: ^h.Request, res: ^h.Response]
+  (hnd.handle hnd req res))
 
-http__handler_next :: proc(handler: ^h.Handler) -> ^h.Handler {
-	return handler.next.(^h.Handler)
-}
-")
+(defn- handler-next [handler: ^h.Handler] -> ^h.Handler
+  (type-assert handler.next ^h.Handler))
 
 (defn new-router
   "Create and initialize a new HTTP router value.
@@ -101,7 +96,7 @@ http__handler_next :: proc(handler: ^h.Handler) -> ^h.Handler {
   manually."
   [handler req res]
   (quasiquote
-    (http__handle_ptr (addr (unquote handler)) (unquote req) (unquote res))))
+    (handle-ptr (addr (unquote handler)) (unquote req) (unquote res))))
 
 (defmacro middleware
   "Create middleware around `next`.
@@ -121,7 +116,7 @@ http__handler_next :: proc(handler: ^h.Handler) -> ^h.Handler {
       (h.middleware_proc
         (addr (unquote next))
         (fn [(unquote self-param) ^h.Handler (unquote req-param) ^h.Request (unquote res-param) ^h.Response]
-          (let [(unquote next-binding) (http__handler_next (unquote self))]
+          (let [(unquote next-binding) (handler-next (unquote self))]
             (do
               (splice body))))))))
 
@@ -407,9 +402,9 @@ http__handler_next :: proc(handler: ^h.Handler) -> ^h.Handler {
   [res path content & rest]
   (if (= (count rest) 0)
     (quasiquote
-      (http__respond_file_content_text (unquote res) (unquote path) (unquote content)))
+      (respond-file-content-text (unquote res) (unquote path) (unquote content)))
     (quasiquote
-      (http__respond_file_content_text (unquote res) (unquote path) (unquote content) (unquote (first rest))))))
+      (respond-file-content-text (unquote res) (unquote path) (unquote content) (unquote (first rest))))))
 
 (defmacro respond-dir
   "Serve a directory response rooted at `base`.

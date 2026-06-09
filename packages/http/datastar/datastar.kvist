@@ -2,57 +2,39 @@
 (import h "kvist_vendor:http")
 (import strings "core:strings")
 
-(odin "
-__kvist_http_datastar_patch_elements :: proc(stream: ^h.Sse, selector, mode, elements: string, use_view_transition: bool) {
-	b: strings.Builder
-	defer strings.builder_destroy(&b)
+(defn- patch-elements-helper [stream: ^h.Sse, selector: string, mode: string, elements: string, use-view-transition: bool]
+  (let [b (strings.Builder {})]
+    (defer (strings.builder_destroy (addr b)))
+    (when (> (len selector) 0)
+      (strings.write_string (addr b) "selector ")
+      (strings.write_string (addr b) selector)
+      (strings.write_string (addr b) "\n"))
+    (when (> (len mode) 0)
+      (strings.write_string (addr b) "mode ")
+      (strings.write_string (addr b) mode)
+      (strings.write_string (addr b) "\n"))
+    (when use-view-transition
+      (strings.write_string (addr b) "useViewTransition true\n"))
+    (strings.write_string (addr b) "elements ")
+    (strings.write_string (addr b) elements)
+    (h.sse_event stream (h.Sse_Event {event: "datastar-patch-elements"
+                                      data: (strings.to_string b)}))))
 
-	if len(selector) > 0 {
-		strings.write_string(&b, \"selector \")
-		strings.write_string(&b, selector)
-		strings.write_string(&b, \"\\n\")
-	}
-	if len(mode) > 0 {
-		strings.write_string(&b, \"mode \")
-		strings.write_string(&b, mode)
-		strings.write_string(&b, \"\\n\")
-	}
-	if use_view_transition {
-		strings.write_string(&b, \"useViewTransition true\\n\")
-	}
-	strings.write_string(&b, \"elements \")
-	strings.write_string(&b, elements)
+(defn- patch-signals-helper [stream: ^h.Sse, signals: string, only-if-missing: bool]
+  (let [b (strings.Builder {})]
+    (defer (strings.builder_destroy (addr b)))
+    (when only-if-missing
+      (strings.write_string (addr b) "onlyIfMissing true\n"))
+    (strings.write_string (addr b) "signals ")
+    (strings.write_string (addr b) signals)
+    (h.sse_event stream (h.Sse_Event {event: "datastar-patch-signals"
+                                      data: (strings.to_string b)}))))
 
-	h.sse_event(stream, h.Sse_Event{
-		event = \"datastar-patch-elements\",
-		data = strings.to_string(b),
-	})
-}
+(defn- execute-script-helper [stream: ^h.Sse, script: string]
+  (patch-elements-helper stream "body" "append" (strings.concatenate ([]string ["<script>" script "</script>"])) false))
 
-__kvist_http_datastar_patch_signals :: proc(stream: ^h.Sse, signals: string, only_if_missing: bool) {
-	b: strings.Builder
-	defer strings.builder_destroy(&b)
-
-	if only_if_missing {
-		strings.write_string(&b, \"onlyIfMissing true\\n\")
-	}
-	strings.write_string(&b, \"signals \")
-	strings.write_string(&b, signals)
-
-	h.sse_event(stream, h.Sse_Event{
-		event = \"datastar-patch-signals\",
-		data = strings.to_string(b),
-	})
-}
-
-__kvist_http_datastar_execute_script :: proc(stream: ^h.Sse, script: string) {
-	__kvist_http_datastar_patch_elements(stream, \"body\", \"append\", strings.concatenate({\"<script>\", script, \"</script>\"}), false)
-}
-
-__kvist_http_datastar_redirect :: proc(stream: ^h.Sse, url: string) {
-	__kvist_http_datastar_execute_script(stream, strings.concatenate({\"window.location = '\", url, \"'\"}))
-}
-")
+(defn- redirect-helper [stream: ^h.Sse, url: string]
+  (execute-script-helper stream (strings.concatenate ([]string ["window.location = '" url "'"]))))
 
 (defmacro patch-elements!
   "Send a Datastar `patch-elements` SSE event.
@@ -61,19 +43,19 @@ __kvist_http_datastar_redirect :: proc(stream: ^h.Sse, url: string) {
   included, so Datastar applies its default patch behavior."
   [stream elements]
   (quasiquote
-    (__kvist_http_datastar_patch_elements (unquote stream) "" "" (unquote elements) false)))
+    (patch-elements-helper (unquote stream) "" "" (unquote elements) false)))
 
 (defmacro patch-elements-selector!
   "Send a Datastar element patch with explicit selector and mode."
   [stream selector mode elements]
   (quasiquote
-    (__kvist_http_datastar_patch_elements (unquote stream) (unquote selector) (unquote mode) (unquote elements) false)))
+    (patch-elements-helper (unquote stream) (unquote selector) (unquote mode) (unquote elements) false)))
 
 (defmacro patch-elements-transition!
   "Send a Datastar element patch using view transition metadata."
   [stream selector mode elements]
   (quasiquote
-    (__kvist_http_datastar_patch_elements (unquote stream) (unquote selector) (unquote mode) (unquote elements) true)))
+    (patch-elements-helper (unquote stream) (unquote selector) (unquote mode) (unquote elements) true)))
 
 (defmacro patch-elements-seq!
   "Send several Datastar element patches in order.
@@ -92,28 +74,28 @@ __kvist_http_datastar_redirect :: proc(stream: ^h.Sse, url: string) {
   "Send a Datastar event that removes elements matching `selector`."
   [stream selector]
   (quasiquote
-    (__kvist_http_datastar_patch_elements (unquote stream) (unquote selector) "remove" "" false)))
+    (patch-elements-helper (unquote stream) (unquote selector) "remove" "" false)))
 
 (defmacro patch-signals!
   "Send a Datastar `patch-signals` SSE event."
   [stream signals]
   (quasiquote
-    (__kvist_http_datastar_patch_signals (unquote stream) (unquote signals) false)))
+    (patch-signals-helper (unquote stream) (unquote signals) false)))
 
 (defmacro patch-signals-missing!
   "Send a Datastar `patch-signals` event only for missing signals."
   [stream signals]
   (quasiquote
-    (__kvist_http_datastar_patch_signals (unquote stream) (unquote signals) true)))
+    (patch-signals-helper (unquote stream) (unquote signals) true)))
 
 (defmacro execute-script!
   "Execute browser JavaScript by appending a script element through Datastar."
   [stream script]
   (quasiquote
-    (__kvist_http_datastar_execute_script (unquote stream) (unquote script))))
+    (execute-script-helper (unquote stream) (unquote script))))
 
 (defmacro redirect!
   "Redirect the browser to `url` through a Datastar script event."
   [stream url]
   (quasiquote
-    (__kvist_http_datastar_redirect (unquote stream) (unquote url))))
+    (redirect-helper (unquote stream) (unquote url))))

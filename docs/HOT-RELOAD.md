@@ -240,15 +240,14 @@ Practical examples:
 If reload feels sluggish, move the checkpoint to a slightly finer safe
 boundary. Do not move it inward so far that correctness becomes unclear.
 
-If a source package needs to publish raw Odin names in that flow, declare them
-explicitly with:
+Source packages publish user-facing runtime types with ordinary public aliases:
 
 ```clojure
-(exports [Run_Host reload__Run_Host])
+(def Run_Host runtime.Run_Host)
 ```
 
-That keeps the public source-package surface explicit instead of relying on
-compiler hardcoding.
+Imported uses such as `reload.Run_Host` lower to the generated Odin name for
+the source package.
 
 ## Tooling Surface
 

@@ -4527,7 +4527,8 @@ compile_http_session_surface_is_explicit :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    testing.expect_value(t, strings.contains(output, "__kvist_http_session_request_method :: proc(req: ^h.Request) -> h.Method"), true)
+    testing.expect_value(t, strings.contains(output, "session__request_method_line :: proc(req: ^h.Request) -> h.Method"), true)
+    testing.expect_value(t, strings.contains(output, "line := (req.line).(h.Requestline)"), true)
     testing.expect_value(t, strings.contains(output, "opts := session__new_opts(\"sid\", \"csrf\", new_sid, csrf_for, request_csrf)"), true)
     testing.expect_value(t, strings.contains(output, "request_csrf :: proc(req: ^h.Request) -> string"), true)
     testing.expect_value(t, strings.contains(output, "plan := session__plan(req, opts)"), true)
@@ -4566,9 +4567,9 @@ compile_http_datastar_surface_is_explicit :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "import strings \"core:strings\""), true)
     testing.expect_value(t, strings.contains(output, "event = \"datastar-patch-elements\""), true)
     testing.expect_value(t, strings.contains(output, "event = \"datastar-patch-signals\""), true)
-    testing.expect_value(t, strings.contains(output, "__kvist_http_datastar_patch_elements(stream, "), true)
-    testing.expect_value(t, strings.contains(output, "__kvist_http_datastar_patch_signals(stream, "), true)
-    testing.expect_value(t, strings.contains(output, "__kvist_http_datastar_execute_script(stream, "), true)
+    testing.expect_value(t, strings.contains(output, "dstar__patch_elements_helper(stream, "), true)
+    testing.expect_value(t, strings.contains(output, "dstar__patch_signals_helper(stream, "), true)
+    testing.expect_value(t, strings.contains(output, "dstar__execute_script_helper(stream, "), true)
     testing.expect_value(t, strings.contains(output, "\"body\", \"append\""), true)
     testing.expect_value(t, strings.contains(output, "window.location = '"), true)
 }
@@ -11381,8 +11382,8 @@ compile_source_with_shipped_reload_package_exposes_run_host_alias :: proc(t: ^te
     defer delete(output)
 
     testing.expect_value(t, strings.contains(output, "import runtime "), true)
-    testing.expect_value(t, strings.contains(output, "Run_Host :: runtime.Run_Host"), true)
     testing.expect_value(t, strings.contains(output, "reload__Run_Host :: runtime.Run_Host"), true)
+    testing.expect_value(t, strings.contains(output, "reload__reload__Run_Host"), false)
     testing.expect_value(t, strings.contains(output, "run :: proc(state: ^App_State, host: ^reload__Run_Host)"), true)
 }
 
@@ -11755,15 +11756,24 @@ compile_source_with_shipped_hot_macro_package :: proc(t: ^testing.T) {
 }
 
 @(test)
-compile_top_level_odin_escape :: proc(t: ^testing.T) {
+compile_canonical_foreign_import_and_transmute_forms :: proc(t: ^testing.T) {
     source := `(package main)
 
 // Foreign handle alias.
-(odin "Foreign_Handle :: distinct rawptr")
-(odin "foreign import sqlite \"system:sqlite3\"")
+(def Foreign-Handle (distinct rawptr))
+(foreign-import sqlite "system:sqlite3")
 
-(defn main []
-  (odin "context.user_ptr = nil")
+(defn bytes [text: string] -> []byte
+  (transmute []byte text))
+
+(defn next-handler [handle: Foreign-Handle] -> ^Foreign-Handle
+  (type-assert handle ^Foreign-Handle))
+
+(defn empty-flags [] -> bit_set[int; u8]
+  (zero bit_set[int; u8]))
+
+(defn main [handle: Foreign-Handle]
+  (set! context.user_ptr nil)
   (return))`
 
     output, err, ok := kvist.compile_source(source)
@@ -11781,12 +11791,41 @@ Foreign_Handle :: distinct rawptr
 
 foreign import sqlite "system:sqlite3"
 
-main :: proc() {
+bytes :: proc(text: string) -> []byte {
+    return transmute([]byte)text
+}
+
+next_handler :: proc(handle: Foreign_Handle) -> ^Foreign_Handle {
+    return (handle).(^Foreign_Handle)
+}
+
+empty_flags :: proc() -> bit_set[int; u8] {
+    return bit_set[int; u8]{}
+}
+
+main :: proc(handle: Foreign_Handle) {
     context.user_ptr = nil
     return
 }
 `
     testing.expect_value(t, output, expected)
+}
+
+@(test)
+reject_foreign_import_in_expression_position :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn bad []
+  (foreign-import sqlite "system:sqlite3"))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        delete(output)
+        return
+    }
+    testing.expect_value(t, strings.contains(err.message, "foreign-import is a top-level declaration form"), true)
+    delete(err.message)
 }
 
 @(test)
@@ -12234,10 +12273,10 @@ compile_shipped_set_source_package_uses_hybrid_resolution :: proc(t: ^testing.T)
     testing.expect_value(t, strings.contains(output, "subset_p := set__subset_p(overlap, merged)"), true)
     testing.expect_value(t, strings.contains(output, "superset_p := set__superset_p(merged, overlap)"), true)
     testing.expect_value(t, strings.contains(output, "disjoint_p := set__disjoint_p(only_base, extra)"), true)
-    testing.expect_value(t, strings.contains(output, "mutable[4] = {}"), true)
+    testing.expect_value(t, strings.contains(output, "mutable[4] = struct{}{}"), true)
     testing.expect_value(t, strings.contains(output, "delete_key(&(mutable), 1)"), true)
     testing.expect_value(t, strings.contains(output, "for value, _ in extra {"), true)
-    testing.expect_value(t, strings.contains(output, "mutable[value] = {}"), true)
+    testing.expect_value(t, strings.contains(output, "mutable[value] = struct{}{}"), true)
     testing.expect_value(t, strings.contains(output, "kvist_set_union_in_place"), false)
     testing.expect_value(t, strings.contains(output, "fmt.println(subset_p, superset_p, disjoint_p, (map_get(&(mutable), 4, false)))"), false)
 }
@@ -12635,7 +12674,7 @@ compile_set_package_helpers :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "subset_p := set__subset_p(overlap, merged)"), true)
     testing.expect_value(t, strings.contains(output, "superset_p := set__superset_p(merged, overlap)"), true)
     testing.expect_value(t, strings.contains(output, "disjoint_p := set__disjoint_p(only_base, extra)"), true)
-    testing.expect_value(t, strings.contains(output, "mutable[4] = {}"), true)
+    testing.expect_value(t, strings.contains(output, "mutable[4] = struct{}{}"), true)
     testing.expect_value(t, strings.contains(output, "delete_key(&(mutable), 1)"), true)
     testing.expect_value(t, strings.contains(output, "kvist_set_union :: proc(lhs, rhs: map[$T]struct{}) -> map[T]struct{}"), false)
     testing.expect_value(t, strings.contains(output, "kvist_set_add :: proc(s: map[$T]struct{}, value: T) -> map[T]struct{}"), false)
@@ -12663,7 +12702,7 @@ compile_set_package_bang_algebra_helpers :: proc(t: ^testing.T) {
     defer delete(output)
 
     testing.expect_value(t, strings.contains(output, "for value, _ in rhs {"), true)
-    testing.expect_value(t, strings.contains(output, "target[value] = {}"), true)
+    testing.expect_value(t, strings.contains(output, "target[value] = struct{}{}"), true)
     testing.expect_value(t, strings.contains(output, "for value, _ in target {"), true)
     testing.expect_value(t, strings.contains(output, "delete_key(&(target), value)"), true)
     testing.expect_value(t, strings.contains(output, "kvist_set_union_in_place"), false)

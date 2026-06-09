@@ -45,23 +45,18 @@
   set-cookie: bool
 })
 
-(odin "
-__kvist_http_session_request_method :: proc(req: ^h.Request) -> h.Method {
-	return req.line.(h.Requestline).method
-}
+(defn- request-method-line [req: ^h.Request] -> h.Method
+  (let [line (type-assert req.line h.Requestline)]
+    line.method))
 
-__kvist_http_session_call_new_sid :: proc(f: proc() -> string) -> string {
-	return f()
-}
+(defn- call-new-sid [f: (fn [] -> string)] -> string
+  (f))
 
-__kvist_http_session_call_sid_string :: proc(f: proc(sid: string) -> string, sid: string) -> string {
-	return f(sid)
-}
+(defn- call-sid-string [f: (fn [sid: string] -> string), sid: string] -> string
+  (f sid))
 
-__kvist_http_session_call_req_string :: proc(f: proc(req: ^h.Request) -> string, req: ^h.Request) -> string {
-	return f(req)
-}
-")
+(defn- call-req-string [f: (fn [req: ^h.Request] -> string), req: ^h.Request] -> string
+  (f req))
 
 (defn new-opts
   "Create default session options.
@@ -101,7 +96,7 @@ __kvist_http_session_call_req_string :: proc(f: proc(req: ^h.Request) -> string,
 (defn expected-csrf
   "Return the expected CSRF token for session id `sid`."
   [sid: string, opts: Session-Opts] -> string
-  (__kvist_http_session_call_sid_string opts.csrf-for sid))
+  (call-sid-string opts.csrf-for sid))
 
 (defmacro accepted?
   "Return true when `plan` is not a reject plan."
@@ -120,7 +115,7 @@ __kvist_http_session_call_req_string :: proc(f: proc(req: ^h.Request) -> string,
 (defn request-method
   "Return the HTTP method from request `req`."
   [req: ^h.Request] -> h.Method
-  (__kvist_http_session_request_method req))
+  (request-method-line req))
 
 (defn plan
   "Plan session and CSRF handling for `req`.
@@ -143,13 +138,13 @@ __kvist_http_session_call_req_string :: proc(f: proc(req: ^h.Request) -> string,
           (Session-Plan {action: .RefreshCsrf sid: sid csrf: csrf set-cookie: true})
 
           (and (= method .Post)
-               (= (__kvist_http_session_call_req_string opts.request-csrf req) csrf))
+               (= (call-req-string opts.request-csrf req) csrf))
           (Session-Plan {action: .Accept sid: sid csrf: csrf set-cookie: false})
 
           :else
           (Session-Plan {action: .Reject sid: sid csrf: csrf set-cookie: false})))
       (if (read-method? method)
-        (let [sid (__kvist_http_session_call_new_sid opts.new-sid)
+        (let [sid (call-new-sid opts.new-sid)
               csrf (expected-csrf sid opts)]
           (Session-Plan {action: .Create sid: sid csrf: csrf set-cookie: true}))
         (Session-Plan {action: .Reject sid: "" csrf: "" set-cookie: false})))))

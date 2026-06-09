@@ -19,9 +19,10 @@
   "demo-session")
 
 (defn csrf-for [sid: string] -> string
-  (odin "if sid == \"demo-session\" { return \"csrf-demo-session\" }")
-  (odin "if sid == \"abc\" { return \"csrf-abc\" }")
-  "")
+  (cond
+    (= sid "demo-session") "csrf-demo-session"
+    (= sid "abc") "csrf-abc"
+    :else ""))
 
 (defn request-csrf-header [req: ^h.Request] -> string
   (let [[token ok] (h.headers_get_unsafe req^.headers "x-csrf")]

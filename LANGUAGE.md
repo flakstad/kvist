@@ -32,10 +32,17 @@ contain both `.kvist` and `.odin` files:
   files by generating a temporary Odin file into the source directory and
   building the package directory.
 
-Raw Odin inside a `.kvist` file is explicit:
+Use `foreign-import` for Odin foreign imports:
 
 ```clojure
-(odin "foreign import sqlite \"system:sqlite3\"")
+(foreign-import sqlite "system:sqlite3")
+```
+
+Raw Odin inside a `.kvist` file is explicit and should be reserved for cases
+without a canonical Kvist form:
+
+```clojure
+(odin "some_odin_only_construct()")
 ```
 
 ## Names
@@ -544,6 +551,18 @@ Directive expression wrappers attach Odin call directives to a call:
 ```clojure
 (#force_inline inc 41)
 (#force_inline (inc x))
+```
+
+`transmute` is explicit and lowers to Odin's `transmute(T)value` form:
+
+```clojure
+(transmute []byte text)
+```
+
+`type-assert` lowers to Odin's selector assertion `value.(T)` form:
+
+```clojure
+(type-assert handler.next ^h.Handler)
 ```
 
 ## Pointers

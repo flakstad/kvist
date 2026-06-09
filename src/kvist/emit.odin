@@ -7141,6 +7141,20 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         return "", Compile_Error{message = "unsupported call head", span = head.span}, false
     }
 
+    if head.text == "zero" {
+        if len(form.items) < 2 {
+            return "", Compile_Error{message = "zero expects a type", span = form.span}, false
+        }
+        type_text, next_i, err_type, ok_type := parse_type_text_from_forms(form.items[:], 1)
+        if !ok_type {
+            return "", err_type, false
+        }
+        if next_i != len(form.items) {
+            return "", Compile_Error{message = "zero expects exactly one type", span = form.items[next_i].span}, false
+        }
+        return fmt.tprintf("%s{{}}", type_text), {}, true
+    }
+
     canonical_head, _, err_head, ok_head := resolve_kvist_head(e, head.text)
     if !ok_head {
         err_head.span = head.span
@@ -7198,6 +7212,49 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
 
     if head.text == "update" || source_package_surface_head(head.text) == "core/update" || head.text == "core-update" {
         return "", Compile_Error{message = "`update` has been removed; bind a copy and use `assoc`, or mutate a place with `update!`", span = form.items[0].span}, false
+    }
+
+    if head.text == "foreign-import" {
+        return "", Compile_Error{message = "foreign-import is a top-level declaration form", span = form.items[0].span}, false
+    }
+
+    if head.text == "transmute" {
+        if len(form.items) < 3 {
+            return "", Compile_Error{message = "transmute expects type and value", span = form.span}, false
+        }
+        type_text, next_i, err_type, ok_type := parse_type_text_from_forms(form.items[:], 1)
+        if !ok_type {
+            return "", err_type, false
+        }
+        if next_i >= len(form.items) {
+            return "", Compile_Error{message = "transmute missing value", span = form.span}, false
+        }
+        if next_i+1 != len(form.items) {
+            return "", Compile_Error{message = "transmute expects exactly one value", span = form.items[next_i+1].span}, false
+        }
+        value, err_value, ok_value := emit_expr(e, form.items[next_i])
+        if !ok_value {
+            return "", err_value, false
+        }
+        return fmt.tprintf("transmute(%s)%s", type_text, value), {}, true
+    }
+
+    if head.text == "type-assert" {
+        if len(form.items) < 3 {
+            return "", Compile_Error{message = "type-assert expects value and type", span = form.span}, false
+        }
+        value, err_value, ok_value := emit_expr(e, form.items[1])
+        if !ok_value {
+            return "", err_value, false
+        }
+        type_text, next_i, err_type, ok_type := parse_type_text_from_forms(form.items[:], 2)
+        if !ok_type {
+            return "", err_type, false
+        }
+        if next_i != len(form.items) {
+            return "", Compile_Error{message = "type-assert expects exactly one type", span = form.items[next_i].span}, false
+        }
+        return fmt.tprintf("(%s).(%s)", value, type_text), {}, true
     }
 
     if head.text == "get" || head.text == "core/get" || head.text == "core-get" {

@@ -582,6 +582,12 @@ parse_type_text_from_forms :: proc(forms: []CST_Form, start: int) -> (text: stri
     if is_symbol(forms[start], "fn") {
         return parse_proc_type_text_from_parts(forms, start)
     }
+    if is_symbol(forms[start], "struct") && start+1 < len(forms) && forms[start+1].kind == .Brace {
+        if len(forms[start+1].items) != 0 {
+            return "", start, Compile_Error{message = "anonymous struct type currently supports only struct{}", span = forms[start].span}, false
+        }
+        return "struct{}", start+2, {}, true
+    }
     if forms[start].kind == .Symbol {
         switch forms[start].text {
         case "map":
@@ -1348,6 +1354,16 @@ parse_decl :: proc(top_form: CST_Top_Form) -> (decl: AST_Decl, err: Compile_Erro
             span = form.span,
             doc_lines = top_form.doc_lines,
             raw_text = unquote_string(form.items[1].text),
+        }, {}, true
+    case "foreign-import":
+        if len(form.items) != 3 || form.items[1].kind != .Symbol || form.items[2].kind != .String {
+            return decl, Compile_Error{message = "foreign-import expects a symbol alias and string path", span = form.span}, false
+        }
+        return AST_Decl{
+            kind = .Raw,
+            span = form.span,
+            doc_lines = top_form.doc_lines,
+            raw_text = fmt.tprintf("foreign import %s %s", map_name(form.items[1].text), form.items[2].text),
         }, {}, true
     case "export":
         if len(form.items) != 1 {

@@ -447,6 +447,7 @@ current Odin block or procedure.
 - top-level `(defvar name expr)` -> `name := expr`
 - top-level `(defvar name: type expr)` -> `name: type = expr`
 - top-level `(defvar- name expr)` and `(defvar- name: type expr)` package-private variables
+- top-level `(foreign-import alias "path")` -> `foreign import alias "path"`
 - `(export)` -> attaches `@(export)` to the next top-level declaration
 - `(attr name ...)` -> attaches Odin `@(name, ...)` to the next top-level declaration
 - `(exports [Name ...])` -> declares additional public source-package names provided by raw Odin forms
@@ -624,6 +625,9 @@ current Odin block or procedure.
   - `value[start:]` <=> `(slice value start)`
 - `(get map key default)`, `(-> value steps...)`, and `(->> value steps...)`
 - `(type Head Arg...)` for Odin polymorphic type instantiation in type/value positions
+- `(transmute Type value)` -> `transmute(Type)value`
+- `(type-assert value Type)` -> `value.(Type)`
+- `(zero Type)` -> `Type{}` for an explicit Odin zero value
 - pointer types can be written as `^T` or `(ptr T)`
 - `x^` and `(deref expr)` for pointer dereference; `(addr place)` and `(& place)` for addresses
 - numbers, booleans, `nil`, and `(nil? value)`
