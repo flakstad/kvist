@@ -1,0 +1,70 @@
+// Demonstrates functional-style collection pipelines with explicit ownership.
+(package main)
+(import arr "kvist:arr")
+
+(defn inc [x: int] -> int
+  (+ x 1))
+
+(defn even? [x: int] -> bool
+  (= (% x 2) 0))
+
+(defn add [acc: int, x: int] -> int
+  (+ acc x))
+
+(defn eager-threaded-total [] -> int
+  (let [xs ([]int [5 1 2 3 4])
+        total (->> xs
+                   (arr.map inc)
+                   (arr.filter even?)
+                   (arr.sort)
+                   (arr.reduce add 0))]
+    total))
+
+(defn eager-owned-values [] -> [dynamic]int
+  (let [xs ([]int [5 1 2 3 4])
+        values (->> xs
+                    (arr.map inc)
+                    (arr.filter even?)
+                    (arr.sort))]
+    values))
+
+(defn bang-buffer-total [] -> int
+  (let [xs ([]int [5 1 2 3 4])
+        work (arr.map inc xs)]
+    (defer (delete work))
+    (arr.filter! even? work)
+    (arr.sort! work)
+    (arr.reduce add 0 work)))
+
+(defn loop-total [] -> int
+  (let [xs ([]int [5 1 2 3 4])
+        total 0]
+    (each [x xs]
+      (let [next (inc x)]
+        (when (even? next)
+          (set! total (+ total next)))))
+    total))
+
+(defn main []
+  (let [values (eager-owned-values)]
+    (defer (delete values))
+    (println (eager-threaded-total)
+             (arr.reduce add 0 values)
+             (bang-buffer-total)
+             (loop-total))))
+
+(comment
+  (eager-threaded-total)
+  ;; => 12
+
+  (let [values (eager-owned-values)]
+    (defer (delete values))
+    (arr.reduce add 0 values))
+  ;; => 12
+
+  (bang-buffer-total)
+  ;; => 12
+
+  (loop-total)
+  ;; => 12
+)

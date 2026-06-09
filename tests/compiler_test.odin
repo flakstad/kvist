@@ -455,7 +455,7 @@ package_symbols_source_supports_shipped_test_package :: proc(t: ^testing.T) {
 }
 
 @(test)
-package_symbols_source_emits_core_update_helpers :: proc(t: ^testing.T) {
+package_symbols_source_emits_core_update_bang_helper :: proc(t: ^testing.T) {
     output, ok := kvist.package_symbols_source("kvist:core", "core")
     testing.expect_value(t, ok, true)
     if !ok {
@@ -465,6 +465,7 @@ package_symbols_source_emits_core_update_helpers :: proc(t: ^testing.T) {
 
     testing.expect_value(t, strings.contains(output, "macro\tcore.update!\t"), true)
     testing.expect_value(t, strings.contains(output, "macro\tcore.update\t"), true)
+    testing.expect_value(t, strings.contains(output, "macro\tcore.assoc\t"), true)
     testing.expect_value(t, strings.contains(output, "macro\tcore.when\t"), true)
     testing.expect_value(t, strings.contains(output, "macro\tcore.cond\t"), true)
     testing.expect_value(t, strings.contains(output, "macro\tcore.comment\t"), true)
@@ -6181,6 +6182,37 @@ compile_threaded_let_binding_keeps_owned_intermediates_alive :: proc(t: ^testing
 }
 
 @(test)
+compile_imported_arr_reduce_thread_step :: proc(t: ^testing.T) {
+    source := `(package main)
+(import arr "kvist:arr")
+
+(defn inc [x: int] -> int
+  (+ x 1))
+
+(defn add [acc: int, x: int] -> int
+  (+ acc x))
+
+(defn total [xs: []int] -> int
+  (let [total (->> xs
+                   (arr.map inc)
+                   (arr.reduce add 0))]
+    total))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "kvist_thread_1 := kvist_map(inc, (xs)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "defer delete(kvist_thread_1)"), true)
+    testing.expect_value(t, strings.contains(output, "total := kvist_reduce(add, 0, (kvist_thread_1)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "arr__reduce(add"), false)
+}
+
+@(test)
 reject_threaded_return_with_allocating_intermediate :: proc(t: ^testing.T) {
     source := `(package main)
 
@@ -6893,7 +6925,23 @@ reject_nested_owned_sequence_result :: proc(t: ^testing.T) {
     _, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, false)
     defer delete(err.message)
-    testing.expect_value(t, err.message, "owned result must be bound or returned; nested owned results would leak")
+    testing.expect_value(t, err.message, "arr.map returns an owned result; bind it so it can be deleted, or return it to transfer ownership")
+}
+
+@(test)
+reject_nested_tapped_owned_sequence_result :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn inc [x: int] -> int
+  (+ x 1))
+
+(defn bad [xs: []int] -> int
+  (arr.first (tap> "mapped" (arr.map inc xs))))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    defer delete(err.message)
+    testing.expect_value(t, err.message, "arr.map returns an owned result; bind it so it can be deleted, or return it to transfer ownership")
 }
 
 @(test)
@@ -7881,22 +7929,29 @@ compile_mut_bang_assignment_rejects_non_place :: proc(t: ^testing.T) {
 }
 
 @(test)
-compile_update_expr_struct_field :: proc(t: ^testing.T) {
+compile_shallow_struct_assoc_and_update_exprs :: proc(t: ^testing.T) {
     source := `(package main)
 (import core "kvist:core")
 
 (defstruct Point {
   x: int
   y: int
+  name: string
 })
 
 (defn inc [x: int] -> int
   (+ x 1))
 
+(defn add-scaled [x: int, scale: int, offset: int] -> int
+  (+ (* x scale) offset))
+
 (defn score [] -> int
-  (let [point (Point {x: 4 y: 5})
-        newer (update point .y inc)]
-    (+ point.y newer.y)))`
+  (let [point (Point {x: 4 y: 5 name: "old"})
+        older (assoc point.name "new")
+        newer (update point.y inc)
+        scaled (update newer.x add-scaled 2 3)
+        legacy (assoc scaled .name "legacy")]
+    (+ point.y newer.y scaled.x (len older.name) (len legacy.name))))`
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
@@ -7906,28 +7961,226 @@ compile_update_expr_struct_field :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    expected := `package main
-
-Point :: struct {
-    x: int,
-    y: int,
+    testing.expect_value(t, strings.contains(output, "older := (proc(kvist_target: Point, kvist_value: string) -> Point {"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_update_1 := kvist_target"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_update_1.name = kvist_value"), true)
+    testing.expect_value(t, strings.contains(output, "return kvist_update_1"), true)
+    testing.expect_value(t, strings.contains(output, "})(point, \"new\")"), true)
+    testing.expect_value(t, strings.contains(output, "newer := (proc(kvist_target: Point) -> Point {"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_update_2 := kvist_target"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_update_2.y += 1"), true)
+    testing.expect_value(t, strings.contains(output, "})(point)"), true)
+    testing.expect_value(t, strings.contains(output, "scaled := (proc(kvist_target: Point, kvist_arg_1: int, kvist_arg_2: int) -> Point {"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_update_3 := kvist_target"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_update_3.x = add_scaled(kvist_update_3.x, kvist_arg_1, kvist_arg_2)"), true)
+    testing.expect_value(t, strings.contains(output, "})(newer, 2, 3)"), true)
+    testing.expect_value(t, strings.contains(output, "legacy := (proc(kvist_target: Point, kvist_value: string) -> Point {"), true)
+    testing.expect_value(t, strings.contains(output, "})(scaled, \"legacy\")"), true)
 }
 
-inc :: proc(x: int) -> int {
-    return (x) + (1)
+@(test)
+compile_threaded_shallow_struct_assoc_and_update_exprs :: proc(t: ^testing.T) {
+    source := `(package main)
+(import core "kvist:core")
+
+(defstruct User {
+  name: string
+  age: int
+  active?: bool
+})
+
+(defn score [user: User] -> int
+  (let [updated (-> user
+                  (update .age + 30)
+                  (assoc .active? false)
+                  (assoc .name "Ada"))]
+    (+ updated.age (len updated.name))))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "kvist_update_1 := kvist_target"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_update_1.age += (kvist_arg_1)"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_update_2.active_p = kvist_value"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_update_3.name = kvist_value"), true)
 }
 
-score :: proc() -> int {
-    point := Point{x = 4, y = 5}
-    newer := proc(value: Point) -> Point {
-        kvist_eval_1 := value
-        (kvist_eval_1).y = inc((kvist_eval_1).y)
-        return kvist_eval_1
-    }(point)
-    return (point.y) + (newer.y)
+@(test)
+compile_threaded_shallow_struct_update_from_proc_return :: proc(t: ^testing.T) {
+    source := `(package main)
+(import core "kvist:core")
+
+(defstruct User {
+  name: string
+  age: int
+})
+
+(defn inc [x: int] -> int
+  (+ x 1))
+
+(defn make-user [] -> User
+  (User {name: "Ada" age: 41}))
+
+(defn score [] -> int
+  (let [updated (-> (make-user)
+                  (update .age inc))]
+    updated.age))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "kvist_update_1.age += 1"), true)
+    testing.expect_value(t, strings.contains(output, "})(make_user())"), true)
 }
-`
-    testing.expect_value(t, output, expected)
+
+@(test)
+reject_threaded_shallow_struct_update_unknown_field :: proc(t: ^testing.T) {
+    source := `(package main)
+(import core "kvist:core")
+
+(defstruct User {
+  age: int
+})
+
+(defn inc [x: int] -> int
+  (+ x 1))
+
+(defn bad [user: User] -> User
+  (-> user
+    (update .missing inc)))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+
+    testing.expect_value(t, err.message, "core/update could not find field .missing on User")
+}
+
+@(test)
+reject_threaded_shallow_struct_assoc_unknown_field :: proc(t: ^testing.T) {
+    source := `(package main)
+(import core "kvist:core")
+
+(defstruct User {
+  age: int
+})
+
+(defn bad [user: User] -> User
+  (-> user
+    (assoc .missing 1)))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+
+    testing.expect_value(t, err.message, "core/assoc could not find field .missing on User")
+}
+
+@(test)
+reject_threaded_shallow_struct_update_function_literal :: proc(t: ^testing.T) {
+    source := `(package main)
+(import core "kvist:core")
+
+(defstruct User {
+  age: int
+})
+
+(defn bad [user: User] -> User
+  (-> user
+    (update .age (fn [x: int] -> int
+                   x))))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+
+    testing.expect_value(t, err.message, "core/update currently expects an updater function or operator symbol")
+}
+
+@(test)
+reject_threaded_shallow_struct_update_without_obvious_target_type :: proc(t: ^testing.T) {
+    source := `(package main)
+(import core "kvist:core")
+
+(defstruct User {
+  age: int
+})
+
+(defn inc [x: int] -> int
+  (+ x 1))
+
+(defn bad [user: User] -> User
+  (-> (odin "user")
+    (update .age inc)))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+
+    testing.expect_value(t, err.message, "threaded core/update requires an obvious struct type before the .field step; bind or annotate the value first")
+}
+
+@(test)
+reject_shallow_struct_update_non_field_selector :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct Point {
+  x: int
+})
+
+(defn bad [point: Point] -> Point
+  (assoc point 1))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+    defer delete(err.message)
+
+    testing.expect_value(t, err.message, "core/assoc expects a shallow field place such as user.name")
+}
+
+@(test)
+reject_shallow_struct_update_unknown_field :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct Point {
+  x: int
+})
+
+(defn inc [x: int] -> int
+  (+ x 1))
+
+(defn bad [point: Point] -> Point
+  (update point.missing inc))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+    defer delete(err.message)
+
+    testing.expect_value(t, err.message, "core/update could not find field .missing on Point")
 }
 
 @(test)
@@ -8665,16 +8918,22 @@ compile_map_bang_supports_single_captured_local_in_fn_literal :: proc(t: ^testin
 }
 
 @(test)
-compile_map_rejects_multiple_captured_locals_in_fn_literal :: proc(t: ^testing.T) {
+compile_map_supports_multiple_captured_locals_in_fn_literal :: proc(t: ^testing.T) {
     source := "(package main)\n\n(defn demo [xs: []int] -> [dynamic]int\n  (let [offset 10\n        scale 2]\n    (arr.map (fn [x: int] -> int\n               (+ (* x scale) offset))\n             xs)))"
 
-    _, err, ok := kvist.compile_source(source)
-    testing.expect_value(t, ok, false)
-    if ok {
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
         return
     }
-    defer delete(err.message)
-    testing.expect_value(t, strings.contains(err.message, "capturing map callback currently supports exactly one captured outer local"), true)
+    defer delete(output)
+    testing.expect_value(t, strings.contains(output, "return kvist_map_2("), true)
+    testing.expect_value(t, strings.contains(output, "proc(scale: int, offset: int, x: int) -> int {"), true)
+    testing.expect_value(t, strings.contains(output, "scale,"), true)
+    testing.expect_value(t, strings.contains(output, "offset,"), true)
+    testing.expect_value(t, strings.contains(output, "(xs)[:]"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_map_2 :: proc(f: proc(c1: $C1, c2: $C2, x: $T) -> $U, c1: C1, c2: C2, xs: []T) -> [dynamic]U {"), true)
 }
 
 @(test)
@@ -8691,7 +8950,112 @@ compile_filter_supports_single_captured_local_in_fn_literal :: proc(t: ^testing.
     testing.expect_value(t, strings.contains(output, "kvist_filter_1("), true)
     testing.expect_value(t, strings.contains(output, "proc(limit: int, x: int) -> bool {"), true)
     testing.expect_value(t, strings.contains(output, "return (x) > (limit)"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_filter_1 :: proc(pred: proc(c1: $C1, x: $T) -> bool, c1: C1, xs: []T) -> [dynamic]T {"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_filter_1 :: proc(f: proc(c1: $C1, x: $T) -> bool, c1: C1, xs: []T) -> [dynamic]T {"), true)
+}
+
+@(test)
+compile_filter_supports_multiple_captured_locals_in_fn_literal :: proc(t: ^testing.T) {
+    source := "(package main)\n\n(defn demo [xs: [dynamic]int] -> [dynamic]int\n  (let [lo 3\n        hi 10]\n    (arr.filter (fn [x: int] -> bool\n                  (and (> x lo) (< x hi)))\n                xs)))"
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+    testing.expect_value(t, strings.contains(output, "kvist_filter_2("), true)
+    testing.expect_value(t, strings.contains(output, "proc(lo: int, hi: int, x: int) -> bool {"), true)
+    testing.expect_value(t, strings.contains(output, "lo,"), true)
+    testing.expect_value(t, strings.contains(output, "hi,"), true)
+    testing.expect_value(t, strings.contains(output, "(xs)[:]"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_filter_2 :: proc(f: proc(c1: $C1, c2: $C2, x: $T) -> bool, c1: C1, c2: C2, xs: []T) -> [dynamic]T {"), true)
+}
+
+@(test)
+compile_user_proc_supports_captured_callback_literal :: proc(t: ^testing.T) {
+    source := "(package main)\n\n(defn apply-one [f: (fn [x: int] -> int), x: int] -> int\n  (f x))\n\n(defn demo [] -> int\n  (let [offset 10]\n    (apply-one (fn [x: int] -> int (+ x offset)) 5)))"
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+    testing.expect_value(t, strings.contains(output, "apply_one__kvist_capture_0_1("), true)
+    testing.expect_value(t, strings.contains(output, "proc(offset: int, x: int) -> int {"), true)
+    testing.expect_value(t, strings.contains(output, "apply_one__kvist_capture_0_1 :: proc(f: proc(c1: $C1, x: int) -> int, kvist_capture_1: C1, x: int) -> int {"), true)
+    testing.expect_value(t, strings.contains(output, "return f(kvist_capture_1, x)"), true)
+}
+
+@(test)
+compile_user_proc_forwards_captured_callback_context :: proc(t: ^testing.T) {
+    source := "(package main)\n\n(defn apply-one [f: (fn [x: int] -> int), x: int] -> int\n  (f x))\n\n(defn apply-twice [f: (fn [x: int] -> int), x: int] -> int\n  (+ (apply-one f x) (apply-one f x)))\n\n(defn demo [] -> int\n  (let [offset 10]\n    (apply-twice (fn [x: int] -> int (+ x offset)) 5)))"
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+    testing.expect_value(t, strings.contains(output, "apply_twice__kvist_capture_0_1("), true)
+    testing.expect_value(t, strings.contains(output, "return (apply_one__kvist_capture_0_1(f, kvist_capture_1, x)) + (apply_one__kvist_capture_0_1(f, kvist_capture_1, x))"), true)
+    testing.expect_value(t, strings.contains(output, "apply_one__kvist_capture_0_1 :: proc(f: proc(c1: $C1, x: int) -> int, kvist_capture_1: C1, x: int) -> int {"), true)
+}
+
+@(test)
+compile_user_proc_rejects_escaping_captured_callback :: proc(t: ^testing.T) {
+    source := "(package main)\n\n(defn escape [f: (fn [x: int] -> int), x: int] -> int\n  (let [g f]\n    (g x)))\n\n(defn demo [] -> int\n  (let [offset 10]\n    (escape (fn [x: int] -> int (+ x offset)) 5)))"
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+    defer delete(err.message)
+    testing.expect_value(t, strings.contains(err.message, "captured callback cannot be passed to escape because callback parameter f may escape"), true)
+}
+
+@(test)
+compile_arr_package_indexed_and_reduce_helpers_support_captured_callbacks :: proc(t: ^testing.T) {
+    source := "(package main)\n(import arr \"kvist:arr\")\n\n(defn demo [xs: []int] -> int\n  (let [offset 10\n        mapped (arr.map-indexed (fn [i: int, x: int] -> int (+ x i offset)) xs) defer\n        total (arr.reduce (fn [acc: int, x: int] -> int (+ acc x offset)) 0 xs)\n        indexed-total (arr.reduce-indexed (fn [acc: int, i: int, x: int] -> int (+ acc x i offset)) 0 xs)]\n    (+ (arr.last mapped) total indexed-total)))"
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+    testing.expect_value(t, strings.contains(output, "arr__map_indexed__kvist_capture_0_1("), true)
+    testing.expect_value(t, strings.contains(output, "arr__reduce_impl__kvist_capture_0_1("), true)
+    testing.expect_value(t, strings.contains(output, "arr__reduce_indexed_impl__kvist_capture_0_1("), true)
+    testing.expect_value(t, strings.contains(output, "proc(c1: $C1, i: int, x: $T) -> $U"), true)
+    testing.expect_value(t, strings.contains(output, "proc(c1: $C1, acc: $U, x: $T) -> U"), true)
+    testing.expect_value(t, strings.contains(output, "proc(c1: $C1, acc: $U, i: int, x: $T) -> U"), true)
+}
+
+@(test)
+compile_arr_package_scan_helpers_support_captured_callbacks :: proc(t: ^testing.T) {
+    source := "(package main)\n(import arr \"kvist:arr\")\n\n(defn demo [xs: []int] -> bool\n  (let [limit 3\n        [found found?] (arr.find (fn [x: int] -> bool (> x limit)) xs)\n        [index indexed-value indexed?] (arr.find-indexed (fn [i: int, x: int] -> bool (and (> x limit) (>= i 0))) xs)\n        [smallest smallest?] (arr.min-by (fn [x: int] -> int (+ x limit)) xs)\n        [largest largest?] (arr.max-by (fn [x: int] -> int (+ x limit)) xs)]\n    (and (= (count (arr.take-while (fn [x: int] -> bool (< x limit)) xs)) 2)\n         (= (count (arr.drop-while (fn [x: int] -> bool (< x limit)) xs)) 2)\n         found? indexed? smallest? largest?\n         (= found 4)\n         (= indexed-value 4)\n         (= smallest 1)\n         (= largest 4)\n         (arr.some? (fn [x: int] -> bool (> x limit)) xs)\n         (not (arr.every? (fn [x: int] -> bool (> x limit)) xs)))))"
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+    testing.expect_value(t, strings.contains(output, "arr__take_while_impl__kvist_capture_0_1("), true)
+    testing.expect_value(t, strings.contains(output, "arr__drop_while_impl__kvist_capture_0_1("), true)
+    testing.expect_value(t, strings.contains(output, "arr__find_impl__kvist_capture_0_1("), true)
+    testing.expect_value(t, strings.contains(output, "arr__find_indexed_impl__kvist_capture_0_1("), true)
+    testing.expect_value(t, strings.contains(output, "arr__min_by_impl__kvist_capture_0_1("), true)
+    testing.expect_value(t, strings.contains(output, "arr__max_by_impl__kvist_capture_0_1("), true)
+    testing.expect_value(t, strings.contains(output, "arr__some_impl__kvist_capture_0_1("), true)
+    testing.expect_value(t, strings.contains(output, "arr__every_impl__kvist_capture_0_1("), true)
 }
 
 @(test)
@@ -8707,7 +9071,7 @@ compile_filter_bang_supports_single_captured_local_in_fn_literal :: proc(t: ^tes
     defer delete(output)
     testing.expect_value(t, strings.contains(output, "kvist_filter_in_place_1("), true)
     testing.expect_value(t, strings.contains(output, "proc(limit: int, x: int) -> bool {"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_filter_in_place_1 :: proc(pred: proc(c1: $C1, x: $T) -> bool, c1: C1, xs: ^[dynamic]T) {"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_filter_in_place_1 :: proc(f: proc(c1: $C1, x: $T) -> bool, c1: C1, xs: ^[dynamic]T) {"), true)
 }
 
 @(test)
@@ -8723,7 +9087,7 @@ compile_remove_supports_single_captured_local_in_fn_literal :: proc(t: ^testing.
     defer delete(output)
     testing.expect_value(t, strings.contains(output, "kvist_remove_1("), true)
     testing.expect_value(t, strings.contains(output, "proc(limit: int, x: int) -> bool {"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_remove_1 :: proc(pred: proc(c1: $C1, x: $T) -> bool, c1: C1, xs: []T) -> [dynamic]T {"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_remove_1 :: proc(f: proc(c1: $C1, x: $T) -> bool, c1: C1, xs: []T) -> [dynamic]T {"), true)
 }
 
 @(test)

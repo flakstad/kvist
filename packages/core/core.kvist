@@ -315,6 +315,27 @@
   (quasiquote
     (core-update! (unquote place) (unquote updater) (splice rest))))
 
+(defmacro assoc
+  "Return a shallow copy of a struct with one field replaced.
+
+  `(assoc value.field new-value)` copies `value`, assigns `.field` on the
+  copy, and returns the copy. `(assoc value .field new-value)` is also
+  accepted. This is a shallow value update; it does not deep copy owned fields."
+  [place-or-target value-or-selector & rest]
+  (quasiquote
+    (core-assoc (unquote place-or-target) (unquote value-or-selector) (splice rest))))
+
+(defmacro update
+  "Return a shallow copy of a struct with one field updated.
+
+  `(update value.field f args...)` copies `value`, computes
+  `(f copy.field args...)`, writes that result to the copy, and returns the
+  copy. `(update value .field f args...)` is also accepted. Use `update!` when
+  mutating an existing place is intended."
+  [place-or-target updater-or-selector & rest]
+  (quasiquote
+    (core-update (unquote place-or-target) (unquote updater-or-selector) (splice rest))))
+
 (defmacro delete!
   "Remove `key` from a mutable map-like target in place.
 
@@ -325,22 +346,6 @@
   [target key]
   (quasiquote
     (core-delete! (unquote target) (unquote key))))
-
-(defmacro update
-  "Return an updated copy of `target`.
-
-  This is the persistent copy/update form for supported target shapes. It leaves
-  the original value unchanged and lowers to explicit copy and update code where
-  supported."
-  [target key-or-field value-or-updater & rest]
-  (if (= (kvist.count rest) 0)
-    (quasiquote
-      (core-update (unquote target) (unquote key-or-field) (unquote value-or-updater)))
-    (quasiquote
-      (core-update (unquote target)
-                         (unquote key-or-field)
-                         (unquote value-or-updater)
-                         (splice rest)))))
 
 (defmacro or-else
   "Return an optional-ok value or a fallback.

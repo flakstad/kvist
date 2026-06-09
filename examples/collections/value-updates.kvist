@@ -1,0 +1,41 @@
+// Shallow non-mutating updates for plain struct values.
+(package main)
+(import core "kvist:core")
+
+(defstruct User {
+  name: string
+  age: int
+  active?: bool
+})
+
+(defn inc [x: int] -> int
+  (+ x 1))
+
+(defn add-years [age: int, years: int] -> int
+  (+ age years))
+
+(defn birthday [user: User] -> User
+  (update user.age inc))
+
+(defn rename [user: User, name: string] -> User
+  (assoc user.name name))
+
+(defn retire [user: User] -> User
+  (-> user
+    (update .age + 30)
+    (assoc .active? false)))
+
+(defn score [] -> int
+  (let [ada (User {name: "Ada" age: 36 active?: true})
+        older (birthday ada)
+        named (rename older "Ada Lovelace")
+        retired (retire named)]
+    (+ ada.age older.age retired.age (len retired.name))))
+
+(defn main []
+  (println (score)))
+
+(comment
+  (score)
+  ;; => 152
+)

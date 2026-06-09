@@ -1,4 +1,4 @@
-// Focused benchmark for first-cut captured callbacks in map/map!.
+// Focused benchmark for captured callbacks in non-escaping helper shapes.
 (package main)
 (import core "kvist:core")
 (import "core:fmt")
@@ -25,10 +25,10 @@ MAP_BANG_REPS :: 80")
   (report name (time.tick-since start) checksum track))
 
 (defn make-base [n: int] -> [dynamic]int
-  (let [xs (arr/empty int n)
+  (let [xs (arr.empty int n)
         i 0]
     (while (< i n)
-      (arr/push! xs i)
+      (arr.push! xs i)
       (set! i (+ i 1)))
     xs))
 
@@ -37,10 +37,10 @@ MAP_BANG_REPS :: 80")
         i 0
         checksum 0]
     (while (< i reps)
-      (let [mapped (map (fn [x: int] -> int
-                          (+ x offset))
-                        xs)]
-        (set! checksum (+ checksum (last mapped)))
+      (let [mapped (arr.map (fn [x: int] -> int
+                              (+ x offset))
+                            xs)]
+        (set! checksum (+ checksum (arr.last mapped)))
         (delete mapped))
       (set! i (+ i 1)))
     checksum))
@@ -50,10 +50,27 @@ MAP_BANG_REPS :: 80")
         i 0
         checksum 0]
     (while (< i reps)
-      (let [mapped (arr/empty int (count xs))]
+      (let [mapped (arr.empty int (count xs))]
         (each [x xs]
-          (arr/push! mapped (+ x offset)))
-        (set! checksum (+ checksum (last mapped)))
+          (arr.push! mapped (+ x offset)))
+        (set! checksum (+ checksum (arr.last mapped)))
+        (delete mapped))
+      (set! i (+ i 1)))
+    checksum))
+
+(defn transform-all [f: (fn [x: int] -> int), xs: []int] -> [dynamic]int
+  (arr.map f xs))
+
+(defn bench-user-map-captured [xs: [dynamic]int, reps: int] -> int
+  (let [scale 2
+        offset 7
+        i 0
+        checksum 0]
+    (while (< i reps)
+      (let [mapped (transform-all (fn [x: int] -> int
+                                    (+ (* x scale) offset))
+                                  (slice xs 0))]
+        (set! checksum (+ checksum (arr.last mapped)))
         (delete mapped))
       (set! i (+ i 1)))
     checksum))
@@ -63,9 +80,9 @@ MAP_BANG_REPS :: 80")
         i 0
         checksum 0]
     (while (< i reps)
-      (let [filtered (filter (fn [x: int] -> bool
-                               (> x limit))
-                             xs)]
+      (let [filtered (arr.filter (fn [x: int] -> bool
+                                   (> x limit))
+                                 xs)]
         (set! checksum (+ checksum (count filtered)))
         (delete filtered))
       (set! i (+ i 1)))
@@ -76,10 +93,10 @@ MAP_BANG_REPS :: 80")
         i 0
         checksum 0]
     (while (< i reps)
-      (let [filtered (arr/empty int (count xs))]
+      (let [filtered (arr.empty int (count xs))]
         (each [x xs]
           (when (> x limit)
-            (arr/push! filtered x)))
+            (arr.push! filtered x)))
         (set! checksum (+ checksum (count filtered)))
         (delete filtered))
       (set! i (+ i 1)))
@@ -90,9 +107,9 @@ MAP_BANG_REPS :: 80")
         i 0
         checksum 0]
     (while (< i reps)
-      (let [filtered (remove (fn [x: int] -> bool
-                               (> x limit))
-                             xs)]
+      (let [filtered (arr.remove (fn [x: int] -> bool
+                                   (> x limit))
+                                 xs)]
         (set! checksum (+ checksum (count filtered)))
         (delete filtered))
       (set! i (+ i 1)))
@@ -103,10 +120,10 @@ MAP_BANG_REPS :: 80")
         i 0
         checksum 0]
     (while (< i reps)
-      (let [filtered (arr/empty int (count xs))]
+      (let [filtered (arr.empty int (count xs))]
         (each [x xs]
           (when (not (> x limit))
-            (arr/push! filtered x)))
+            (arr.push! filtered x)))
         (set! checksum (+ checksum (count filtered)))
         (delete filtered))
       (set! i (+ i 1)))
@@ -117,11 +134,11 @@ MAP_BANG_REPS :: 80")
         i 0
         checksum 0]
     (while (< i reps)
-      (let [kept (keep (fn [x: int] -> [value: int, ok: bool]
-                         (if (> x limit)
-                           (return x true)
-                           (return 0 false)))
-                       xs)]
+      (let [kept (arr.keep (fn [x: int] -> [value: int, ok: bool]
+                             (if (> x limit)
+                               (return x true)
+                               (return 0 false)))
+                           xs)]
         (set! checksum (+ checksum (count kept)))
         (delete kept))
       (set! i (+ i 1)))
@@ -132,10 +149,10 @@ MAP_BANG_REPS :: 80")
         i 0
         checksum 0]
     (while (< i reps)
-      (let [kept (arr/empty int (count xs))]
+      (let [kept (arr.empty int (count xs))]
         (each [x xs]
           (when (> x limit)
-            (arr/push! kept x)))
+            (arr.push! kept x)))
         (set! checksum (+ checksum (count kept)))
         (delete kept))
       (set! i (+ i 1)))
@@ -146,12 +163,12 @@ MAP_BANG_REPS :: 80")
         i 0
         checksum 0]
     (while (< i reps)
-      (let [xs (arr/empty int (count base))]
-        (into! xs base)
-        (map! (fn [x: int] -> int
-                (+ x offset))
-              xs)
-        (set! checksum (+ checksum (last xs)))
+      (let [xs (arr.empty int (count base))]
+        (arr.into! xs base)
+        (arr.map! (fn [x: int] -> int
+                    (+ x offset))
+                  xs)
+        (set! checksum (+ checksum (arr.last xs)))
         (delete xs))
       (set! i (+ i 1)))
     checksum))
@@ -161,13 +178,13 @@ MAP_BANG_REPS :: 80")
         i 0
         checksum 0]
     (while (< i reps)
-      (let [xs (arr/empty int (count base))]
-        (into! xs base)
+      (let [xs (arr.empty int (count base))]
+        (arr.into! xs base)
         (let [j 0]
           (while (< j (count xs))
-            (core/update! xs j + offset)
+            (update! xs[j] + offset)
             (set! j (+ j 1))))
-        (set! checksum (+ checksum (last xs)))
+        (set! checksum (+ checksum (arr.last xs)))
         (delete xs))
       (set! i (+ i 1)))
     checksum))
@@ -195,6 +212,9 @@ MAP_BANG_REPS :: 80")
     (mem.tracking-allocator-reset (& track))
     (let [start (time.tick-now)]
       (run-one "map-loop" (bench-map-loop map-base MAP_REPS) start (& track)))
+    (mem.tracking-allocator-reset (& track))
+    (let [start (time.tick-now)]
+      (run-one "user-map-captured" (bench-user-map-captured map-base MAP_REPS) start (& track)))
     (mem.tracking-allocator-reset (& track))
     (let [start (time.tick-now)]
       (run-one "filter-captured" (bench-filter-captured map-base MAP_REPS) start (& track)))

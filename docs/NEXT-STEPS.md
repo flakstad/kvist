@@ -37,16 +37,20 @@ Current intentional limits worth remembering:
 
 ### 1. Closures And Higher-Order Function Depth
 
-Non-capturing function values are supported, and there is a narrow pass of
-captured callbacks for compiler-known non-escaping helper sites such as
-`map`, `filter`, `remove`, `keep`, and their bang variants.
+Non-capturing function values are supported, and captured callbacks now lower to
+explicit context-passing calls when the compiler can prove the callback does not
+escape. This covers known non-escaping helpers such as `map`, `filter`,
+`remove`, `keep`, `map-indexed`, reducers, scans, min/max helpers, and their
+safe indexed/bang variants, plus Kvist-defined functions whose callback
+parameter is only called directly or forwarded to another non-escaping Kvist
+function.
 
-Questions:
+Open questions:
 
-- whether this should widen beyond the current helper subset
-- whether more than one captured outer local should be supported
-- how far to take captured callbacks before explicit context should remain the
-  preferred style
+- whether to support captured callbacks for indirect callback contexts such as
+  `sort-by`
+- whether explicit context parameters should remain preferred for APIs where
+  callback lifetime or storage is part of the design
 
 ### 2. Package And Tooling Polish
 

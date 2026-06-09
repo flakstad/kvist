@@ -22,9 +22,12 @@ slice views, scalar operations, or explicit in-place mutation.
 - Return dynamic arrays when a helper must build a new collection.
 - Do not hide allocation; generated helpers that allocate should be easy to
   spot in the emitted Odin.
-- Keep callbacks as plain Odin procedure values.
-- Keep callback lowering explicit. First-cut captured callbacks are allowed only
-  for selected non-escaping helper sites, starting with `map` and `map!`.
+- Keep callbacks as plain Odin procedure values when they do not capture.
+- Keep captured callback lowering explicit. Captured callbacks are allowed when
+  the compiler can prove the callback does not escape: builder helpers,
+  indexed helpers, reducers, scans, direct calls inside Kvist-defined
+  functions, and forwarding to other non-escaping Kvist functions. Captures
+  lower to extra proc parameters, not heap closure objects.
 - Let Odin bounds checks and type checking remain visible.
 - Avoid names or behavior that imply Clojure's nullable lazy seq model.
 
@@ -229,8 +232,16 @@ Scalar scan helpers such as `arr.reduce`, `arr.reduce-indexed`, `arr.find`,
 scan in place and return a scalar or small tuple. They do not allocate output
 collections.
 
+Captured callbacks are supported for the ordinary package helper path when the
+callback is non-escaping. This includes helpers such as `arr.map-indexed`,
+`arr.reduce`, `arr.reduce-indexed`, `arr.take-while`, `arr.drop-while`,
+`arr.find`, `arr.find-indexed`, `arr.some?`, `arr.every?`, `arr.min-by`, and
+`arr.max-by`.
+
 `sort` and `sort-by` copy before sorting. They do not mutate the input
 collection, and their result is owned.
+Captured callbacks are not currently supported for `sort-by`; use a named
+non-capturing key function or an explicit context-aware sort helper.
 
 `shuffle` also copies before shuffling. It takes an explicit picker function
 instead of hiding a random generator:

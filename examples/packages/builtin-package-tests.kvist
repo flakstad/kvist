@@ -88,11 +88,12 @@
         mapped-thread (arr.map inc-value xs) defer
         threaded (arr.filter even-value? mapped-thread)
         profile (Profile {name: "Ada" age: 10})
-        updated-profile (update profile .age 11)
+        updated-profile profile
         bucket "unset"
         when-let-result 0
         if-let-result (or-else (query-positive 5) 0)]
     (defer (delete threaded))
+    (set! updated-profile.age 11)
     (when true
       (set! bucket "when"))
     (when-let [value ok (query-positive 7)]

@@ -42,6 +42,10 @@ form from Emacs; many keep `main` small and put useful calls in a
   positional binding for Odin-style multi-return values.
 - [`collections/sequence-helpers.kvist`](./collections/sequence-helpers.kvist):
   broad sequence helper coverage.
+- [`collections/functional-pipelines.kvist`](./collections/functional-pipelines.kvist):
+  eager threaded pipelines, bang-buffer helpers, and direct loop fallback.
+- [`collections/value-updates.kvist`](./collections/value-updates.kvist):
+  shallow non-mutating struct updates with `assoc` and `update`.
 - [`collections/orders-report.kvist`](./collections/orders-report.kvist):
   a more realistic eager data pipeline.
 - [`packages/soa.kvist`](./packages/soa.kvist): struct-of-arrays helper usage.

@@ -40,9 +40,10 @@
         lookup (map.of string int {"a" 1}) defer
         mutable ([dynamic]int [1 2 3]) defer
         profile (Profile {name: "Ada" age: 10})
-        updated-profile (update profile .age 11)
+        updated-profile profile
         missing (or-else (query-missing) 9)]
     (set! mutable[0] 7)
+    (set! updated-profile.age 11)
     (t.is (= (count empty-xs) 0))
     (t.is (empty? empty-xs))
     (t.is (contains? xs 2))

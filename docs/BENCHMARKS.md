@@ -209,10 +209,11 @@ cleanly as the older helper benchmarks.
 
 ## Captured Callback Baseline
 
-There is now also a focused captured-callback benchmark for the first closure
-pass:
+There is now also a focused captured-callback benchmark for the explicit
+helper-with-context lowering:
 
-- Kvist `map`, `filter`, `remove`, `keep`, and `map!` with one captured outer local
+- Kvist `map`, `filter`, `remove`, `keep`, and `map!` with captured outer locals
+- Kvist-defined non-escaping callback APIs that receive captured callbacks
 - direct Odin helper-with-context equivalents
 - direct Odin loop baselines
 

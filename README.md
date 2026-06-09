@@ -16,7 +16,7 @@ its surface shape and metaprogramming model, but it preserves the manual,
 inspectable character of systems programming while also exploring native hot
 reload and live development modes.
 
-The current language draft is [LANGUAGE.md](LANGUAGE.md). Deferred ideas that
+The current language reference is [LANGUAGE.md](LANGUAGE.md). Deferred ideas that
 should not drive the core implementation yet live in
 [docs/FUTURE-IDEAS.md](docs/FUTURE-IDEAS.md). The current preferred iterative
 development direction is documented in
@@ -234,6 +234,7 @@ Odin, run:
 
 ```sh
 ./scripts/bench_closure_helpers.sh
+```
 
 For the focused intrinsic-vs-source-backed `kvist:arr` comparison against
 direct Odin, run:
@@ -536,7 +537,7 @@ Named and multi-value returns:
 ```clojure
 (defn query-get [url: URL, key: string] -> [val: string, ok: bool] #optional_ok
   (let [q url.query]
-    (each [entry (#force_inline query-iter (& q))]
+    (each [entry (#force_inline query-iter (addr q))]
       (when (= entry.key key)
         (return entry.value true)))))
 ```
@@ -566,13 +567,13 @@ Pointers should keep Odin's spelling:
 
 ```clojure
 (defn bump [x: ^int]
-  (set! (^ x) (+ (^ x) 1)))
+  (mut! x^ += 1))
 ```
 
 Address-of also needs a readable spelling:
 
 ```clojure
-(headers-init (& r.headers) allocator)
+(headers-init (addr r.headers) allocator)
 ```
 
 Switch:
@@ -590,7 +591,7 @@ Anonymous functions and callbacks:
 
 ```clojure
 (http.route-get
-  (& router)
+  (addr router)
   "/users/(%w+)/comments/(%d+)"
   (http.handler
     (fn [req: ^http.Request, res: ^http.Response]
@@ -612,12 +613,12 @@ everything into parens:
   (when (not-in method router.routes)
     (set! (get router.routes method)
           (make [dynamic]Route router.allocator)))
-  (append (& (get router.routes method)) route))
+  (append (addr (get router.routes method)) route))
 
 (defn headers-count [h: Headers] -> int #force_inline
   (len h._kv))
 
-(let [entry (#force_inline query-iter (& q))]
+(let [entry (#force_inline query-iter (addr q))]
   ...)
 ```
 
@@ -629,7 +630,7 @@ obvious.
 ```clojure
 (defn header-parse [headers: ^Headers, line: string, allocator: runtime.Allocator] -> [key: string, ok: bool]
   (let [value (strings.trim-space (slice line (+ colon 1)))
-        key   (sanitize-key (^ headers) (slice line 0 colon))]
+        key   (sanitize-key headers^ (slice line 0 colon))]
     (defer
       (when (not ok)
         (delete key allocator)
@@ -650,14 +651,10 @@ Conditionals as expressions when useful:
 
 Raw Odin should remain available directly in `.kvist`:
 
-```odin
-Foreign_Handle :: distinct rawptr
-
-@(link_name = "foreign_call")
-foreign_call :: proc(handle: Foreign_Handle) ---
-
-(defn call [handle: Foreign_Handle]
-  (foreign_call handle))
+```clojure
+(odin "Foreign_Handle :: distinct rawptr")
+(odin "@(link_name = \"foreign_call\")")
+(odin "foreign_call :: proc(handle: Foreign_Handle) ---")
 ```
 
 ## Target Forms
@@ -786,7 +783,7 @@ current Odin block or procedure.
     indexing, optional-default helpers, or direct in-place mutation.
 - auto-exposed core helpers such as `(count collection)`, `(get target key [default])`,
   `(slice target start [end])`, `(empty? collection)`, `(contains? collection key)`,
-  `(update! place f args...)`, and `(update target key-or-field value-or-updater ...)`
+  and `(update! place f args...)`
   - `kvist:core` is the small auto-exposed core library.
   - Prefer the bare spelling in user code; qualified names remain accepted for explicit package references.
   - These helpers are defined in shipped `.kvist` source and lower through a
@@ -861,7 +858,8 @@ current Odin block or procedure.
   - `value[start:]` <=> `(slice value start)`
 - `(get map key default)`, `(-> value steps...)`, and `(->> value steps...)`
 - `(type Head Arg...)` for Odin polymorphic type instantiation in type/value positions
-- `x^` and `(deref expr)` for pointer dereference; `(addr place)` for addresses
+- pointer types can be written as `^T` or `(ptr T)`
+- `x^` and `(deref expr)` for pointer dereference; `(addr place)` and `(& place)` for addresses
 - numbers, booleans, `nil`, and `(nil? value)`
 - calls: `(foo a b)` -> `foo(a, b)`
 - operators: `(= a b)`, `(+ a b)`, `(<= i 10)`, `(and a b)`, etc. emit infix
@@ -876,7 +874,7 @@ Pragmatic Odin conveniences beyond the minimal special-form core include
 wrappers like `(#force_inline call arg)`.
 
 For collection helpers, prefer explicit package names. Cross-family helpers now
-live as bare names, for example `count`, `empty?`, `contains?`, plus update helpers like `update!` and `update`.
+live as bare names, for example `count`, `empty?`, `contains?`, and `update!`.
 Other collection operations should be package-qualified under `arr.`, `map.`, `str.`, or `set.`.
 
 This is deliberately incomplete. Add only forms that map cleanly to Odin.

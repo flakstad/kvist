@@ -1,5 +1,4 @@
-// Exercises update! over dynamic arrays, maps, and defstruct fields, plus
-// non-mutating update for struct field replacement.
+// Exercises update! over dynamic arrays, maps, and defstruct fields.
 (package main)
 (import core "kvist:core")
 (defstruct Point
@@ -22,20 +21,21 @@
     (+ (+ (get xs 1) (get lookup "a"))
        point.y)))
 
-(defn updated-point-score [] -> int
+(defn copied-point-score [] -> int
   (let [point (Point {x: 4 y: 5})
-        newer (update point .y inc)]
-    ;; `update` returns a modified copy, so the original point stays unchanged.
+        newer point]
+    ;; Copy first, then mutate the copy when the original must stay unchanged.
+    (update! newer.y inc)
     (+ point.y newer.y)))
 
 (defn main []
   (println (update-score))
-  (println (updated-point-score)))
+  (println (copied-point-score)))
 
 (comment
   (update-score)
   ;; => 58
 
-  (updated-point-score)
+  (copied-point-score)
   ;; => 14
 )

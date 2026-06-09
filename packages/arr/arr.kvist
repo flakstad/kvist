@@ -14,16 +14,19 @@
 (defmacro map
   "Return a new dynamic array containing `(f x)` for each `x` in `xs`.
 
-  Ordinary callbacks lower through a force-inlined loop helper. Dot field
-  selectors such as `.name` lower through the compiler's specialized field
-  projection support. The result is newly allocated with capacity based on the
-  input count."
+  Symbol callbacks lower through a force-inlined loop helper. Dot selectors and
+  captured `fn` literals lower through the compiler's specialized callback
+  support. The result is newly allocated with capacity based on the input
+  count."
   [f xs]
   (if (field-selector? f)
     (quasiquote
       (arr-map (unquote f) (unquote xs)))
-    (quasiquote
-      (map-impl (unquote f) (core.slice (unquote xs) 0)))))
+    (if (symbol? f)
+      (quasiquote
+        (map-impl (unquote f) (core.slice (unquote xs) 0)))
+      (quasiquote
+        (arr-map (unquote f) (unquote xs))))))
 
 (defmacro filter
   "Return a new dynamic array containing values for which `pred` is true.
@@ -34,8 +37,11 @@
   (if (field-selector? pred)
     (quasiquote
       (arr-filter (unquote pred) (unquote xs)))
-    (quasiquote
-      (filter-impl (unquote pred) (core.slice (unquote xs) 0)))))
+    (if (symbol? pred)
+      (quasiquote
+        (filter-impl (unquote pred) (core.slice (unquote xs) 0)))
+      (quasiquote
+        (arr-filter (unquote pred) (unquote xs))))))
 
 (defmacro remove
   "Return a new dynamic array containing values for which `pred` is false.
@@ -46,8 +52,11 @@
   (if (field-selector? pred)
     (quasiquote
       (arr-remove (unquote pred) (unquote xs)))
-    (quasiquote
-      (remove-impl (unquote pred) (core.slice (unquote xs) 0)))))
+    (if (symbol? pred)
+      (quasiquote
+        (remove-impl (unquote pred) (core.slice (unquote xs) 0)))
+      (quasiquote
+        (arr-remove (unquote pred) (unquote xs))))))
 
 (defmacro reduce
   "Reduce `xs` from left to right using accumulator function `f`.

@@ -1,5 +1,6 @@
-// Demonstrates the current first-cut captured-callback support.
+// Demonstrates captured-callback support for non-escaping helpers.
 (package main)
+(import arr "kvist:arr")
 
 (defn apply-pred [pred: (fn [x: int] -> bool), x: int] -> bool
   (pred x))
@@ -13,10 +14,52 @@
               5))
 
 (defn captured-map-demo [xs: []int] -> [dynamic]int
-  (let [offset 10]
+  (let [scale 2
+        offset 10]
     (arr.map (fn [x: int] -> int
-               (+ x offset))
+               (+ (* x scale) offset))
              xs)))
+
+(defn apply-one [f: (fn [x: int] -> int), x: int] -> int
+  (f x))
+
+(defn transform-all [f: (fn [x: int] -> int), xs: []int] -> [dynamic]int
+  (arr.map f xs))
+
+(defn captured-user-api-demo [xs: []int] -> [dynamic]int
+  (let [scale 3
+        offset 1]
+    (transform-all (fn [x: int] -> int
+                     (+ (* x scale) offset))
+                   xs)))
+
+(defn captured-direct-user-api-demo [] -> int
+  (let [offset 7]
+    (apply-one (fn [x: int] -> int
+                 (+ x offset))
+               5)))
+
+(defn captured-helper-family-demo [xs: []int] -> bool
+  (let [offset 10
+        limit 3
+        mapped (arr.map-indexed (fn [i: int, x: int] -> int
+                                  (+ x i offset))
+                                xs) defer
+        total (arr.reduce (fn [acc: int, x: int] -> int
+                            (+ acc x offset))
+                          0
+                          xs)
+        [found found?] (arr.find (fn [x: int] -> bool
+                                   (> x limit))
+                                 xs)]
+    (and
+      (= (arr.last mapped) 17)
+      (= total 50)
+      found?
+      (= found 4)
+      (arr.some? (fn [x: int] -> bool
+                   (> x limit))
+                 xs))))
 
 (defn captured-map-bang-demo [] -> [dynamic]int
   (let [offset 10
@@ -28,21 +71,41 @@
 
 (defn main []
   (let [xs [1 2 3] defer]
-    (println (fn-literal-demo) (captured-map-demo (slice xs 0)) (captured-map-bang-demo))))
+    (println
+      (fn-literal-demo)
+      (captured-map-demo (slice xs 0))
+      (captured-user-api-demo (slice xs 0))
+      (captured-direct-user-api-demo)
+      (captured-helper-family-demo (slice xs 0))
+      (captured-map-bang-demo))))
 
 (comment
   ;; Plain non-capturing function literals still work.
   (fn-literal-demo)
   ;; => true
 
-  ;; First-cut captured callbacks work for known non-escaping helpers.
+  ;; Captured callbacks work for known non-escaping helpers.
   (let [xs [1 2 3] defer]
     (captured-map-demo (slice xs 0)))
-  ;; => [11 12 13]
+  ;; => [12 14 16]
+
+  ;; They also work through user-defined Kvist functions when the callback is
+  ;; only called directly or forwarded to another non-escaping Kvist function.
+  (let [xs [1 2 3] defer]
+    (captured-user-api-demo (slice xs 0)))
+  ;; => [4 7 10]
+
+  (captured-direct-user-api-demo)
+  ;; => 12
+
+  ;; Indexed helpers, reducers, and scans can use captured callbacks too.
+  (let [xs [1 2 3 4] defer]
+    (captured-helper-family-demo (slice xs 0)))
+  ;; => true
 
   (captured-map-bang-demo)
   ;; => [11 12 13]
 
-  ;; Current boundary: this is only implemented for selected helper call sites
-  ;; and only supports one captured outer local.
+  ;; Current boundary: captured callbacks are not general closure values.
+  ;; They cannot be stored, returned, or passed to an unknown escaping API.
 )
