@@ -28,8 +28,9 @@ After the eager pipeline path feels solid:
 
 - improve captured callback diagnostics and expand support where lowering
   remains obvious;
-- design compile-time fused/transducer-like pipelines only after real eager
-  examples show the allocation pressure.
+- keep the initial compile-time fused transform surface small while examples
+  prove whether `deftransform`, `into`, and `transduce` pay their way over direct
+  loops.
 
 ## Implemented In This Branch
 
@@ -41,6 +42,8 @@ After the eager pipeline path feels solid:
   - preferred spelling: `(update value.field f args...)`;
   - compatibility spelling: `(assoc value .field new-value)` and
     `(update value .field f args...)`.
+- added an initial reusable fused transform prototype in
+  [`FUNCTIONAL-TRANSFORMS.md`](./FUNCTIONAL-TRANSFORMS.md).
 
 ## Non-Goals
 

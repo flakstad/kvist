@@ -46,6 +46,8 @@ form from Emacs; many keep `main` small and put useful calls in a
   eager threaded pipelines, bang-buffer helpers, and direct loop fallback.
 - [`collections/value-updates.kvist`](./collections/value-updates.kvist):
   shallow non-mutating struct updates with `assoc` and `update`.
+- [`collections/transforms.kvist`](./collections/transforms.kvist):
+  reusable fused `deftransform` pipelines with `into` and `transduce`.
 - [`collections/orders-report.kvist`](./collections/orders-report.kvist):
   a more realistic eager data pipeline.
 - [`packages/soa.kvist`](./packages/soa.kvist): struct-of-arrays helper usage.

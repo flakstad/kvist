@@ -52,7 +52,22 @@ Open questions:
 - whether explicit context parameters should remain preferred for APIs where
   callback lifetime or storage is part of the design
 
-### 2. Package And Tooling Polish
+### 2. Reusable Functional Transforms
+
+Reusable fused transforms are now a small functional-programming prototype. The
+next question is whether examples prove clear value over direct `each` loops
+before expanding the surface.
+
+The current prototype uses:
+
+- `deftransform` for named compile-time transform definitions
+- `comp` for top-to-bottom item-flow composition
+- `into` for explicit collection output
+- `transduce` for explicit scalar accumulation
+
+See [FUNCTIONAL-TRANSFORMS.md](./FUNCTIONAL-TRANSFORMS.md).
+
+### 3. Package And Tooling Polish
 
 The package model is in place, but there is still room to tighten:
 
@@ -61,7 +76,7 @@ The package model is in place, but there is still room to tighten:
 - package-aware editor commands and CLI inspection helpers
 - docs that describe package layout and visibility concisely
 
-### 3. Standard Library Shape
+### 4. Standard Library Shape
 
 The library surface is real, but it should keep being reviewed against the
 current language direction:
@@ -97,7 +112,7 @@ Current package boundary:
   coverage, ownership rules, or callback specialization still need the smaller
   compiler substrate
 
-### 4. Future DSL Work
+### 5. Future DSL Work
 
 High-value data DSLs remain attractive, but they are not the next foundational
 step.
@@ -110,7 +125,7 @@ Strong candidates:
 These should build on the current macro system and still lower to explicit,
 typed internal structures.
 
-### 5. Hot Reload And Live Workflow
+### 6. Hot Reload And Live Workflow
 
 This work is real but should remain clearly separate from the core language
 surface:
@@ -127,6 +142,6 @@ See:
 ## Current Bias
 
 If there is no stronger pressure from a concrete use case, the next serious
-language-level discussion should be closure/function-value depth: how much
-capturing convenience Kvist should provide before explicit context remains the
-clearer low-level story.
+language-level discussion should be reusable transforms: whether named fused
+pipelines provide enough reuse, correctness, and performance benefit over manual
+`each` loops.

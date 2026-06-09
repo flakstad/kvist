@@ -424,7 +424,7 @@ decl_head_name :: proc(form: CST_Form) -> string {
 
 is_private_decl_head :: proc(head: string) -> bool {
     switch head {
-    case "def-", "defvar-", "defstruct-", "defenum-", "defunion-", "defn-", "defmacro-":
+    case "def-", "defvar-", "defstruct-", "defenum-", "defunion-", "defn-", "defmacro-", "deftransform-":
         return true
     case:
         return false
@@ -433,7 +433,7 @@ is_private_decl_head :: proc(head: string) -> bool {
 
 is_top_level_decl_head :: proc(head: string) -> bool {
     switch head {
-    case "def", "def-", "defvar", "defvar-", "defstruct", "defstruct-", "defstate", "defenum", "defenum-", "defunion", "defunion-", "defn", "defn-", "defmacro", "defmacro-":
+    case "def", "def-", "defvar", "defvar-", "defstruct", "defstruct-", "defstate", "defenum", "defenum-", "defunion", "defunion-", "defn", "defn-", "defmacro", "defmacro-", "deftransform", "deftransform-":
         return true
     case:
         return false
@@ -942,7 +942,7 @@ rewrite_decl_name :: proc(form: ^CST_Form, prefix: string) {
         return
     }
     switch decl_head_name(form^) {
-    case "def", "def-", "defvar", "defvar-", "defstruct", "defstruct-", "defenum", "defenum-", "defunion", "defunion-", "defn", "defn-", "defmacro", "defmacro-":
+    case "def", "def-", "defvar", "defvar-", "defstruct", "defstruct-", "defenum", "defenum-", "defunion", "defunion-", "defn", "defn-", "defmacro", "defmacro-", "deftransform", "deftransform-":
         form^.items[1].text = fmt.tprintf("%s__%s", prefix, form^.items[1].text)
     }
 }
@@ -2047,7 +2047,7 @@ eval_form_head :: proc(form: CST_Form) -> string {
 
 eval_head_is_decl :: proc(head: string) -> bool {
     switch head {
-    case "core.comment", "package", "import", "def", "def-", "defvar", "defvar-", "defstruct", "defstruct-", "defenum", "defenum-", "defunion", "defunion-", "odin", "defn", "defn-":
+    case "core.comment", "package", "import", "def", "def-", "defvar", "defvar-", "defstruct", "defstruct-", "defenum", "defenum-", "defunion", "defunion-", "odin", "defn", "defn-", "deftransform", "deftransform-":
         return true
     }
     return false

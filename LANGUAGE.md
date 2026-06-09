@@ -360,6 +360,28 @@ In a `->` pipeline, use a shallow `.field` selector step:
   (assoc .name "Ada"))
 ```
 
+## Functional Transforms
+
+`deftransform` defines reusable compile-time transform structure. A transform can
+be collected with `into` or reduced with `transduce`; both lower to fused Odin
+loops rather than intermediate arrays.
+
+```clojure
+(deftransform paid-order-totals
+  (comp
+    (filter paid?)
+    (map order-total)
+    (filter positive?)))
+
+(into [dynamic]int paid-order-totals orders)
+(transduce paid-order-totals + 0 orders)
+```
+
+The initial transform surface is intentionally small: `comp` supports `map` and
+`filter` steps with known one-argument functions or field selectors. `into`
+currently returns owned `[dynamic]T` arrays. `transduce` currently supports `+`
+as the reducer. See `docs/FUNCTIONAL-TRANSFORMS.md` for limits and lowering.
+
 ## Operators
 
 Operators lower to ordinary Odin expressions:

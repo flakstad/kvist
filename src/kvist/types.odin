@@ -149,6 +149,11 @@ Proc_Decl :: struct {
     body:              [dynamic]CST_Form,
 }
 
+Transform_Decl :: struct {
+    name: string,
+    spec: CST_Form,
+}
+
 AST_Decl_Kind :: enum {
     Ignored,
     Package,
@@ -159,6 +164,7 @@ AST_Decl_Kind :: enum {
     Enum,
     Union,
     Proc,
+    Transform,
     Raw,
 }
 
@@ -173,8 +179,9 @@ AST_Decl :: struct {
     struct_decl:  Struct_Decl,
     enum_decl:    Enum_Decl,
     union_decl:   Union_Decl,
-    proc_decl:    Proc_Decl,
-    raw_text:     string,
+    proc_decl:      Proc_Decl,
+    transform_decl: Transform_Decl,
+    raw_text:       string,
 }
 
 IR_Decl :: AST_Decl

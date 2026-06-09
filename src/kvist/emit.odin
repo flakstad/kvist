@@ -20,6 +20,17 @@ Callback_Context :: struct {
     capture_names: [dynamic]string,
 }
 
+Transform_Step_Kind :: enum {
+    Map,
+    Filter,
+}
+
+Transform_Step :: struct {
+    kind:     Transform_Step_Kind,
+    callback: CST_Form,
+    span:     Span,
+}
+
 Emitter_Features :: struct {
     dynamic_literals: bool,
     core_map:         bool,
@@ -1258,6 +1269,16 @@ find_proc_decl :: proc(e: ^Emitter, name: string) -> (^Proc_Decl, bool) {
         decl := &e.decls[idx]
         if decl.kind == .Proc && decl.proc_decl.name == name {
             return &decl.proc_decl, true
+        }
+    }
+    return nil, false
+}
+
+find_transform_decl :: proc(e: ^Emitter, name: string) -> (^Transform_Decl, bool) {
+    for idx in 0..<len(e.decls) {
+        decl := &e.decls[idx]
+        if decl.kind == .Transform && decl.transform_decl.name == name {
+            return &decl.transform_decl, true
         }
     }
     return nil, false
@@ -3626,7 +3647,8 @@ owned_result_head :: proc(name: string) -> bool {
         return true
     }
     switch normalized {
-    case "map/merge",
+    case "into",
+         "map/merge",
          "arr/range", "arr/repeat", "arr/repeatedly", "arr/iterate",
          "io/read":
         return true
@@ -4567,6 +4589,13 @@ obvious_form_type :: proc(e: ^Emitter, form: CST_Form) -> (string, bool) {
            len(form.items) >= 2 {
             return shallow_update_return_type(e, form)
         }
+        if form.items[0].text == "into" && len(form.items) >= 4 {
+            ty, _, _, ok_ty := parse_type_text_from_forms(form.items[:], 1)
+            return ty, ok_ty
+        }
+        if form.items[0].text == "transduce" && len(form.items) == 5 {
+            return obvious_form_type(e, form.items[3])
+        }
         if proc_decl, ok := find_proc_decl(e, head_name); ok && proc_decl.returns.kind == .Single {
             return proc_decl.returns.single_ty, true
         }
@@ -4790,6 +4819,13 @@ obvious_binding_type :: proc(e: ^Emitter, binding: Binding) -> (string, bool) {
             head == "update" || surface_head == "core/update" || head == "core-update") &&
            len(binding.value.items) >= 2 {
             return shallow_update_return_type(e, binding.value)
+        }
+        if head == "into" && len(binding.value.items) >= 4 {
+            ty, _, _, ok_ty := parse_type_text_from_forms(binding.value.items[:], 1)
+            return ty, ok_ty
+        }
+        if head == "transduce" && len(binding.value.items) == 5 {
+            return obvious_form_type(e, binding.value.items[3])
         }
         head_name := map_name(binding.value.items[0].text)
         if proc_decl, ok := find_proc_decl(e, head_name); ok && proc_decl.returns.kind == .Single {
@@ -6697,6 +6733,248 @@ emit_specialized_proc_call_if_needed :: proc(e: ^Emitter, call_name: string, pro
     return emit_call_text(specialized_name, arg_texts[:]), true, Compile_Error{}, true
 }
 
+transform_temp_name :: proc(e: ^Emitter) -> string {
+    e.temp_counter += 1
+    return fmt.tprintf("kvist_xform_%d", e.temp_counter)
+}
+
+transform_step_kind :: proc(head: string) -> (Transform_Step_Kind, bool) {
+    surface := source_package_surface_head(head)
+    switch surface {
+    case "map", "arr/map", "arr-map":
+        return .Map, true
+    case "filter", "arr/filter", "arr-filter":
+        return .Filter, true
+    }
+    return {}, false
+}
+
+transform_spec_form :: proc(e: ^Emitter, form: CST_Form) -> (CST_Form, Compile_Error, bool) {
+    if form.kind == .Symbol {
+        decl, ok_decl := find_transform_decl(e, map_name(form.text))
+        if !ok_decl {
+            return {}, Compile_Error{message = fmt.tprintf("unknown transform: %s", form.text), span = form.span}, false
+        }
+        return decl.spec, {}, true
+    }
+    if form.kind == .List && len(form.items) > 0 && form.items[0].kind == .Symbol && form.items[0].text == "comp" {
+        return form, {}, true
+    }
+    return {}, Compile_Error{message = "transform expects a named transform or (comp ...)", span = form.span}, false
+}
+
+parse_transform_steps :: proc(e: ^Emitter, form: CST_Form) -> (steps: [dynamic]Transform_Step, err: Compile_Error, ok: bool) {
+    spec, err_spec, ok_spec := transform_spec_form(e, form)
+    if !ok_spec {
+        return steps, err_spec, false
+    }
+    if spec.kind != .List || len(spec.items) == 0 || spec.items[0].kind != .Symbol || spec.items[0].text != "comp" {
+        return steps, Compile_Error{message = "transform spec expects (comp ...)", span = spec.span}, false
+    }
+    for step_form in spec.items[1:] {
+        if step_form.kind != .List || len(step_form.items) != 2 || step_form.items[0].kind != .Symbol {
+            return steps, Compile_Error{message = "transform steps currently expect (map f) or (filter pred)", span = step_form.span}, false
+        }
+        kind, ok_kind := transform_step_kind(step_form.items[0].text)
+        if !ok_kind {
+            return steps, Compile_Error{message = "transform steps currently support map and filter", span = step_form.items[0].span}, false
+        }
+        append(&steps, Transform_Step{
+            kind = kind,
+            callback = step_form.items[1],
+            span = step_form.span,
+        })
+    }
+    return steps, {}, true
+}
+
+proc_callback_call :: proc(e: ^Emitter, callback: CST_Form, input_text, input_ty: string) -> (text, return_ty: string, err: Compile_Error, ok: bool) {
+    if field, ok_field := field_from_selector(callback); ok_field {
+        field_ty, ok_field_ty := struct_field_type_for_update(e, input_ty, field)
+        if !ok_field_ty {
+            return "", "", Compile_Error{message = fmt.tprintf("transform callback could not find field .%s on %s", field, input_ty), span = callback.span}, false
+        }
+        return fmt.tprintf("%s.%s", input_text, field), field_ty, {}, true
+    }
+    if callback.kind != .Symbol {
+        return "", "", Compile_Error{message = "transform callback currently expects a function symbol or field selector", span = callback.span}, false
+    }
+    proc_name := map_name(callback.text)
+    proc_decl, ok_proc := find_proc_decl(e, proc_name)
+    if !ok_proc {
+        return "", "", Compile_Error{message = fmt.tprintf("transform callback must be a known one-argument function: %s", callback.text), span = callback.span}, false
+    }
+    if len(proc_decl.params) != 1 {
+        return "", "", Compile_Error{message = "transform callback currently expects a one-argument function", span = callback.span}, false
+    }
+    if proc_decl.params[0].ty != input_ty {
+        return "", "", Compile_Error{message = fmt.tprintf("transform callback expects %s but pipeline has %s", proc_decl.params[0].ty, input_ty), span = callback.span}, false
+    }
+    if proc_decl.returns.kind != .Single {
+        return "", "", Compile_Error{message = "transform callback currently expects a single return value", span = callback.span}, false
+    }
+    return emit_call_text(proc_name, []string{input_text}), proc_decl.returns.single_ty, {}, true
+}
+
+emit_transform_pipeline_body :: proc(
+    e: ^Emitter,
+    builder: ^strings.Builder,
+    steps: []Transform_Step,
+    initial_text, initial_ty: string,
+    depth: int,
+) -> (value_text, value_ty: string, close_count: int, err: Compile_Error, ok: bool) {
+    current_text := initial_text
+    current_ty := initial_ty
+    current_depth := depth
+    for step in steps {
+        switch step.kind {
+        case .Filter:
+            pred_text, pred_ty, err_pred, ok_pred := proc_callback_call(e, step.callback, current_text, current_ty)
+            if !ok_pred {
+                return "", "", 0, err_pred, false
+            }
+            if pred_ty != "bool" {
+                return "", "", 0, Compile_Error{message = fmt.tprintf("filter transform expects bool callback result, got %s", pred_ty), span = step.callback.span}, false
+            }
+            append_indent(builder, current_depth)
+            fmt.sbprintf(builder, "if %s %s\n", pred_text, "{")
+            current_depth += 1
+            close_count += 1
+        case .Map:
+            mapped_text, mapped_ty, err_mapped, ok_mapped := proc_callback_call(e, step.callback, current_text, current_ty)
+            if !ok_mapped {
+                return "", "", 0, err_mapped, false
+            }
+            temp := transform_temp_name(e)
+            append_indent(builder, current_depth)
+            fmt.sbprintf(builder, "%s := %s\n", temp, mapped_text)
+            current_text = temp
+            current_ty = mapped_ty
+        }
+    }
+    return current_text, current_ty, close_count, {}, true
+}
+
+emit_transform_closers :: proc(builder: ^strings.Builder, depth, close_count: int) {
+    current_depth := depth
+    remaining := close_count
+    for remaining > 0 {
+        current_depth -= 1
+        append_indent(builder, current_depth)
+        strings.write_string(builder, "}\n")
+        remaining -= 1
+    }
+}
+
+emit_transform_into_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) {
+    if len(form.items) < 4 {
+        return "", Compile_Error{message = "into transform expects dynamic array type, transform, and source", span = form.span}, false
+    }
+    output_ty, next_i, err_output_ty, ok_output_ty := parse_type_text_from_forms(form.items[:], 1)
+    if !ok_output_ty {
+        return "", err_output_ty, false
+    }
+    if next_i+2 != len(form.items) {
+        return "", Compile_Error{message = "into transform expects dynamic array type, transform, and source", span = form.span}, false
+    }
+    transform_form := form.items[next_i]
+    source_form := form.items[next_i+1]
+    output_elem_ty, ok_output_elem_ty := dynamic_array_element_type(output_ty)
+    if !ok_output_elem_ty {
+        return "", Compile_Error{message = "into transform currently expects a dynamic array type", span = form.items[1].span}, false
+    }
+    source_ty, ok_source_ty := obvious_form_type(e, source_form)
+    if !ok_source_ty {
+        return "", Compile_Error{message = "into transform expects a source with an obvious collection type; bind or annotate it first", span = source_form.span}, false
+    }
+    source_elem_ty, ok_source_elem_ty := collection_element_type(source_ty)
+    if !ok_source_elem_ty {
+        return "", Compile_Error{message = fmt.tprintf("into transform expects slice or array source, got %s", source_ty), span = source_form.span}, false
+    }
+    source_text, err_source, ok_source := emit_expr(e, source_form)
+    if !ok_source {
+        return "", err_source, false
+    }
+    steps, err_steps, ok_steps := parse_transform_steps(e, transform_form)
+    if !ok_steps {
+        return "", err_steps, false
+    }
+
+    builder := strings.builder_make()
+    defer strings.builder_destroy(&builder)
+    fmt.sbprintf(&builder, "(proc(kvist_source: %s) -> %s %s\n", source_ty, output_ty, "{")
+    fmt.sbprintf(&builder, "    kvist_out := make(%s)\n", output_ty)
+    strings.write_string(&builder, "    for kvist_item in kvist_source {\n")
+    value_text, value_ty, close_count, err_body, ok_body := emit_transform_pipeline_body(e, &builder, steps[:], "kvist_item", source_elem_ty, 2)
+    if !ok_body {
+        return "", err_body, false
+    }
+    if value_ty != output_elem_ty {
+        return "", Compile_Error{message = fmt.tprintf("into transform output element type is %s, but pipeline produces %s", output_elem_ty, value_ty), span = form.items[1].span}, false
+    }
+    append_indent(&builder, 2+close_count)
+    fmt.sbprintf(&builder, "append(&kvist_out, %s)\n", value_text)
+    emit_transform_closers(&builder, 2+close_count, close_count)
+    strings.write_string(&builder, "    }\n")
+    strings.write_string(&builder, "    return kvist_out\n")
+    strings.write_string(&builder, "})")
+    return fmt.tprintf("%s(%s)", strings.to_string(builder), source_text), {}, true
+}
+
+emit_transform_transduce_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) {
+    if len(form.items) != 5 {
+        return "", Compile_Error{message = "transduce expects transform, reducer, init, and source", span = form.span}, false
+    }
+    reducer := form.items[2]
+    if reducer.kind != .Symbol || reducer.text != "+" {
+        return "", Compile_Error{message = "transduce currently supports + as reducer", span = reducer.span}, false
+    }
+    acc_ty, ok_acc_ty := obvious_form_type(e, form.items[3])
+    if !ok_acc_ty {
+        return "", Compile_Error{message = "transduce expects an init value with an obvious accumulator type; bind or annotate it first", span = form.items[3].span}, false
+    }
+    init_text, err_init, ok_init := emit_expr_for_expected_type(e, form.items[3], acc_ty)
+    if !ok_init {
+        return "", err_init, false
+    }
+    source_ty, ok_source_ty := obvious_form_type(e, form.items[4])
+    if !ok_source_ty {
+        return "", Compile_Error{message = "transduce expects a source with an obvious collection type; bind or annotate it first", span = form.items[4].span}, false
+    }
+    source_elem_ty, ok_source_elem_ty := collection_element_type(source_ty)
+    if !ok_source_elem_ty {
+        return "", Compile_Error{message = fmt.tprintf("transduce expects slice or array source, got %s", source_ty), span = form.items[4].span}, false
+    }
+    source_text, err_source, ok_source := emit_expr(e, form.items[4])
+    if !ok_source {
+        return "", err_source, false
+    }
+    steps, err_steps, ok_steps := parse_transform_steps(e, form.items[1])
+    if !ok_steps {
+        return "", err_steps, false
+    }
+
+    builder := strings.builder_make()
+    defer strings.builder_destroy(&builder)
+    fmt.sbprintf(&builder, "(proc(kvist_source: %s, kvist_init: %s) -> %s %s\n", source_ty, acc_ty, acc_ty, "{")
+    strings.write_string(&builder, "    kvist_acc := kvist_init\n")
+    strings.write_string(&builder, "    for kvist_item in kvist_source {\n")
+    value_text, value_ty, close_count, err_body, ok_body := emit_transform_pipeline_body(e, &builder, steps[:], "kvist_item", source_elem_ty, 2)
+    if !ok_body {
+        return "", err_body, false
+    }
+    if value_ty != acc_ty {
+        return "", Compile_Error{message = fmt.tprintf("transduce accumulator type is %s, but pipeline produces %s", acc_ty, value_ty), span = form.items[3].span}, false
+    }
+    append_indent(&builder, 2+close_count)
+    fmt.sbprintf(&builder, "kvist_acc += %s\n", value_text)
+    emit_transform_closers(&builder, 2+close_count, close_count)
+    strings.write_string(&builder, "    }\n")
+    strings.write_string(&builder, "    return kvist_acc\n")
+    strings.write_string(&builder, "})")
+    return fmt.tprintf("%s(%s, %s)", strings.to_string(builder), source_text, init_text), {}, true
+}
+
 emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) {
     head := form.items[0]
     if head.kind != .Symbol {
@@ -6709,6 +6987,15 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         return "", err_head, false
     }
     head.text = canonical_head
+
+    if head.text == "into" {
+        return emit_transform_into_expr(e, form)
+    }
+
+    if head.text == "transduce" {
+        return emit_transform_transduce_expr(e, form)
+    }
+
     err_deprecated, deprecated := deprecated_builtin_collection_head_error(head)
     if deprecated {
         return "", err_deprecated, false
@@ -9774,6 +10061,9 @@ emit_decl :: proc(e: ^Emitter, decl: IR_Decl) -> (Compile_Error, bool) {
         }
         e.indent -= 1
         emit_line(e, "}")
+    case .Transform:
+        // Compile-time declaration only; emitted through into/transduce use sites.
+        return {}, true
     case .Raw:
         if raw_is_proc_directive(decl.raw_text) {
             if is_proc_prefix_directive(decl.raw_text) {

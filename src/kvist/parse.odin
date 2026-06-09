@@ -11,6 +11,30 @@ is_proc_directive_symbol :: proc(form: CST_Form) -> bool {
     return form.kind == .Symbol && len(form.text) > 1 && form.text[0] == '#'
 }
 
+is_transform_step_head :: proc(text: string) -> bool {
+    switch text {
+    case "map", "arr/map", "arr-map",
+         "filter", "arr/filter", "arr-filter":
+        return true
+    }
+    return false
+}
+
+validate_transform_spec_shape :: proc(spec: CST_Form) -> (Compile_Error, bool) {
+    if spec.kind != .List || len(spec.items) == 0 || spec.items[0].kind != .Symbol || spec.items[0].text != "comp" {
+        return Compile_Error{message = "deftransform expects (comp ...)", span = spec.span}, false
+    }
+    for step in spec.items[1:] {
+        if step.kind != .List || len(step.items) != 2 || step.items[0].kind != .Symbol {
+            return Compile_Error{message = "transform steps currently expect (map f) or (filter pred)", span = step.span}, false
+        }
+        if !is_transform_step_head(step.items[0].text) {
+            return Compile_Error{message = "transform steps currently support map and filter", span = step.items[0].span}, false
+        }
+    }
+    return {}, true
+}
+
 is_proc_prefix_directive :: proc(text: string) -> bool {
     return text == "#force_inline"
 }
@@ -1060,10 +1084,30 @@ parse_decl :: proc(top_form: CST_Top_Form) -> (decl: AST_Decl, err: Compile_Erro
         }, {}, true
     case "defmacro", "defmacro-":
         return AST_Decl{kind = .Ignored, span = form.span}, {}, true
-        case:
-            return decl, Compile_Error{message = fmt.tprintf("unsupported top-level form: %s", head.text), span = head.span}, false
+    case "deftransform", "deftransform-":
+        if len(form.items) != 3 {
+            return decl, Compile_Error{message = fmt.tprintf("%s expects a name and transform spec", head.text), span = form.span}, false
         }
+        if form.items[1].kind != .Symbol {
+            return decl, Compile_Error{message = fmt.tprintf("%s expects a symbol name", head.text), span = form.items[1].span}, false
+        }
+        err_transform, ok_transform := validate_transform_spec_shape(form.items[2])
+        if !ok_transform {
+            return decl, err_transform, false
+        }
+        return AST_Decl{
+            kind = .Transform,
+            span = form.span,
+            doc_lines = top_form.doc_lines,
+            transform_decl = Transform_Decl{
+                name = map_name(form.items[1].text),
+                spec = form.items[2],
+            },
+        }, {}, true
+    case:
+        return decl, Compile_Error{message = fmt.tprintf("unsupported top-level form: %s", head.text), span = head.span}, false
     }
+}
 
 parse_decls :: proc(forms: []CST_Top_Form) -> (decls: [dynamic]AST_Decl, err: Compile_Error, ok: bool) {
     for form in forms {

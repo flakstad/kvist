@@ -509,7 +509,8 @@ the input is empty.
 ## Transducer Path
 
 The current eager helper shape should keep a transducer path open without
-committing to it now.
+committing to it as implemented language surface. The current focused design
+sketch is in [`FUNCTIONAL-TRANSFORMS.md`](./FUNCTIONAL-TRANSFORMS.md).
 
 Today:
 
@@ -523,9 +524,10 @@ Today:
 Possible later design:
 
 ```clojure
-(comp (arr.filter active?)
-      (arr.map .name)
-      (arr.take 10))
+(deftransform active-names
+  (comp
+    (filter active?)
+    (map .name)))
 ```
 
 That later design should still produce plain Odin code. It should not introduce

@@ -6148,6 +6148,299 @@ compile_sequence_trim_helpers_as_slice_views :: proc(t: ^testing.T) {
 }
 
 @(test)
+compile_named_functional_transform_into_and_transduce :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct Order {
+  status: int
+  amount: int
+  discount: int
+})
+
+(defn paid? [order: Order] -> bool
+  (= order.status 2))
+
+(defn order-total [order: Order] -> int
+  (- order.amount order.discount))
+
+(defn positive? [x: int] -> bool
+  (> x 0))
+
+(deftransform paid-order-totals
+  (comp
+    (filter paid?)
+    (map order-total)
+    (filter positive?)))
+
+(defn collect [orders: []Order] -> [dynamic]int
+  (into [dynamic]int paid-order-totals orders))
+
+(defn total [orders: []Order] -> int
+  (transduce paid-order-totals + 0 orders))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "for kvist_item in kvist_source {"), true)
+    testing.expect_value(t, strings.contains(output, "if paid_p(kvist_item) {"), true)
+    testing.expect_value(t, strings.contains(output, " := order_total(kvist_item)"), true)
+    testing.expect_value(t, strings.contains(output, "if positive_p(kvist_xform_"), true)
+    testing.expect_value(t, strings.contains(output, "append(&kvist_out, kvist_xform_"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_acc += kvist_xform_"), true)
+    testing.expect_value(t, strings.contains(output, "paid_order_totals ::"), false)
+}
+
+@(test)
+compile_inline_functional_transform_into :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn even? [x: int] -> bool
+  (= (% x 2) 0))
+
+(defn inc [x: int] -> int
+  (+ x 1))
+
+(defn values [xs: []int] -> [dynamic]int
+  (into [dynamic]int
+    (comp
+      (filter even?)
+      (map inc))
+    xs))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "if even_p(kvist_item) {"), true)
+    testing.expect_value(t, strings.contains(output, " := inc(kvist_item)"), true)
+    testing.expect_value(t, strings.contains(output, "append(&kvist_out, kvist_xform_"), true)
+}
+
+@(test)
+compile_functional_transform_field_selectors :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct User {
+  age: int
+  active?: bool
+})
+
+(deftransform active-ages
+  (comp
+    (filter .active?)
+    (map .age)))
+
+(defn values [users: []User] -> [dynamic]int
+  (into [dynamic]int active-ages users))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "if kvist_item.active_p {"), true)
+    testing.expect_value(t, strings.contains(output, " := kvist_item.age"), true)
+    testing.expect_value(t, strings.contains(output, "append(&kvist_out, kvist_xform_"), true)
+}
+
+@(test)
+reject_functional_transform_bad_named_spec_early :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(deftransform bad-transform
+  (map inc))
+
+(defn inc [x: int] -> int
+  (+ x 1))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+
+    testing.expect_value(t, err.message, "deftransform expects (comp ...)")
+}
+
+@(test)
+reject_functional_transform_unknown_step :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn values [xs: []int] -> [dynamic]int
+  (into [dynamic]int
+    (comp
+      (take 2))
+    xs))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+
+    testing.expect_value(t, err.message, "transform steps currently support map and filter")
+}
+
+@(test)
+reject_named_functional_transform_unknown_step_early :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(deftransform bad-transform
+  (comp
+    (take 2)))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+
+    testing.expect_value(t, err.message, "transform steps currently support map and filter")
+}
+
+@(test)
+reject_functional_transform_unknown_named_transform :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn values [xs: []int] -> [dynamic]int
+  (into [dynamic]int missing-transform xs))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+
+    testing.expect_value(t, err.message, "unknown transform: missing-transform")
+}
+
+@(test)
+reject_functional_transform_callback_arity :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn between? [x: int y: int] -> bool
+  (and (> x 0) (< x y)))
+
+(defn values [xs: []int] -> [dynamic]int
+  (into [dynamic]int
+    (comp
+      (filter between?))
+    xs))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+
+    testing.expect_value(t, err.message, "transform callback currently expects a one-argument function")
+}
+
+@(test)
+reject_functional_transform_callback_type_mismatch :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn positive? [x: int] -> bool
+  (> x 0))
+
+(defn values [xs: []string] -> [dynamic]string
+  (into [dynamic]string
+    (comp
+      (filter positive?))
+    xs))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+
+    testing.expect_value(t, err.message, "transform callback expects int but pipeline has string")
+}
+
+@(test)
+reject_functional_transform_filter_non_bool :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn inc [x: int] -> int
+  (+ x 1))
+
+(defn values [xs: []int] -> [dynamic]int
+  (into [dynamic]int
+    (comp
+      (filter inc))
+    xs))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+
+    testing.expect_value(t, err.message, "filter transform expects bool callback result, got int")
+}
+
+@(test)
+reject_functional_transform_unsupported_transduce_reducer :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn inc [x: int] -> int
+  (+ x 1))
+
+(defn total [xs: []int] -> int
+  (transduce
+    (comp
+      (map inc))
+    * 1 xs))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+
+    testing.expect_value(t, err.message, "transduce currently supports + as reducer")
+}
+
+@(test)
+reject_functional_transform_output_type_mismatch :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn even? [x: int] -> bool
+  (= (% x 2) 0))
+
+(defn label [x: int] -> string
+  "x")
+
+(defn values [xs: []int] -> [dynamic]int
+  (into [dynamic]int
+    (comp
+      (filter even?)
+      (map label))
+    xs))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+
+    testing.expect_value(t, err.message, "into transform output element type is int, but pipeline produces string")
+}
+
+@(test)
 compile_threaded_let_binding_keeps_owned_intermediates_alive :: proc(t: ^testing.T) {
     source := `(package main)
 
