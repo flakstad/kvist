@@ -605,7 +605,9 @@ editor_symbols_source_includes_language_forms_and_helpers :: proc(t: ^testing.T)
     testing.expect_value(t, strings.contains(output, "kvist form\tdefsource\t"), true)
     testing.expect_value(t, strings.contains(output, "kvist form\twhen\t"), true)
     testing.expect_value(t, strings.contains(output, "kvist form\tcond\t"), true)
-    testing.expect_value(t, strings.contains(output, "kvist form\tswitch\t"), true)
+    testing.expect_value(t, strings.contains(output, "kvist form\tcase\t"), true)
+    testing.expect_value(t, strings.contains(output, "kvist form\tswitch\t"), false)
+    testing.expect_value(t, strings.contains(output, "compatibility syntax\tswitch\t"), true)
     testing.expect_value(t, strings.contains(output, "kvist form\twhile\t"), true)
     testing.expect_value(t, strings.contains(output, "kvist form\teach\t"), true)
     testing.expect_value(t, strings.contains(output, "kvist form\tupdate!\t"), true)
@@ -618,6 +620,7 @@ editor_symbols_source_includes_language_forms_and_helpers :: proc(t: ^testing.T)
     testing.expect_value(t, strings.contains(output, "kvist helper\tupdate!\t"), true)
     testing.expect_value(t, strings.contains(output, "kvist helper\tslice\t"), true)
     testing.expect_value(t, strings.contains(output, "kvist helper\twhen-let\t"), true)
+    testing.expect_value(t, strings.contains(output, "kvist helper\tswitch\t"), false)
     testing.expect_value(t, strings.contains(output, "kvist package\tcore.println\t"), true)
     testing.expect_value(t, strings.contains(output, "kvist package\tarr.map\t"), true)
 }
@@ -1811,6 +1814,53 @@ reject_internal_lowering_call_names_in_source :: proc(t: ^testing.T) {
 }
 
 @(test)
+reject_package_dash_call_names_in_source :: proc(t: ^testing.T) {
+    cases := []struct {
+        source:   string,
+        expected: string,
+    }{
+        {`(package main)
+
+(defn bad [xs: []int] -> [dynamic]int
+  (arr-interpose 0 xs))`, "`arr-interpose` is an internal lowering name; use `arr.interpose`"},
+        {`(package main)
+
+(defn bad [m: map[string]int] -> [dynamic]string
+  (map-keys m))`, "`map-keys` is an internal lowering name; use `map.keys`"},
+        {`(package main)
+
+(defn bad [a: set[int] b: set[int]] -> set[int]
+  (set-union a b))`, "`set-union` is an internal lowering name; use `set.union`"},
+        {`(package main)
+
+(defn bad [s: string] -> string
+  (str-lower s))`, "`str-lower` is an internal lowering name; use `str.lower`"},
+        {`(package main)
+
+(defn bad [path: string]
+  (io-read path))`, "`io-read` is an internal lowering name; use `io.read`"},
+        {`(package main)
+
+(defn bad [value: int]
+  (json-write value))`, "`json-write` is an internal lowering name; use `json.write`"},
+        {`(package main)
+
+(defn bad [args: []string] -> bool
+  (cli-flag args "--verbose"))`, "`cli-flag` is an internal lowering name; use `cli.flag`"},
+    }
+
+    for test_case in cases {
+        _, err, ok := kvist.compile_source(test_case.source)
+        testing.expect_value(t, ok, false)
+        if ok {
+            continue
+        }
+        testing.expect_value(t, err.message, test_case.expected)
+        delete(err.message)
+    }
+}
+
+@(test)
 reject_internal_lowering_call_names_in_eval_source :: proc(t: ^testing.T) {
     source := `(package main)
 
@@ -1823,6 +1873,65 @@ reject_internal_lowering_call_names_in_eval_source :: proc(t: ^testing.T) {
     }
     defer delete(err.message)
     testing.expect_value(t, err.message, "`core-count` is an internal lowering name; use `count`")
+}
+
+@(test)
+reject_slash_package_access_in_eval_source :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(def xs: []int ([]int [1 2 3]))`
+
+    _, err, ok := kvist.compile_eval_source_with_map(source, `(arr/count xs)`)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+    defer delete(err.message)
+    testing.expect_value(t, err.message, "use `arr.count` for package access")
+}
+
+@(test)
+reject_macro_expanded_slash_package_access :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn inc [x: int] -> int
+  (+ x 1))
+
+(defmacro bad-map [f xs]
+  (let [head (symbol "arr/map")]
+    (quasiquote
+      ((unquote head) (unquote f) (unquote xs)))))
+
+(defn bad [] -> [dynamic]int
+  (bad-map inc ([]int [1 2 3])))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+    defer delete(err.message)
+    testing.expect_value(t, err.message, "use `arr.map` for package access")
+}
+
+@(test)
+reject_eval_macro_expanded_slash_package_access :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(def xs: []int ([]int [1 2 3]))
+
+(defmacro bad-count [xs]
+  (let [head (symbol "arr/count")]
+    (quasiquote
+      ((unquote head) (unquote xs)))))`
+
+    _, err, ok := kvist.compile_eval_source_with_map(source, `(bad-count xs)`)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+    defer delete(err.message)
+    testing.expect_value(t, err.message, "use `arr.count` for package access")
 }
 
 @(test)

@@ -203,22 +203,42 @@ canonical_surface_head_for_internal_name :: proc(head: string) -> (canonical: st
         return "arr.reduce", true
     case "arr-map-indexed":
         return "arr.map-indexed", true
+    case "arr-reduce-indexed":
+        return "arr.reduce-indexed", true
     case "arr-keep":
         return "arr.keep", true
     case "arr-mapcat":
         return "arr.mapcat", true
     case "arr-map!":
         return "arr.map!", true
+    case "arr-map-indexed!":
+        return "arr.map-indexed!", true
     case "arr-filter!":
         return "arr.filter!", true
     case "arr-remove!":
         return "arr.remove!", true
+    case "arr-remove-ordered-at":
+        return "arr.remove-ordered-at", true
+    case "arr-remove-ordered-at!":
+        return "arr.remove-ordered-at!", true
+    case "arr-remove-unordered-at":
+        return "arr.remove-unordered-at", true
+    case "arr-remove-unordered-at!":
+        return "arr.remove-unordered-at!", true
     case "arr-keep!":
         return "arr.keep!", true
     case "arr-into":
         return "arr.into", true
     case "arr-into!":
         return "arr.into!", true
+    case "arr-interpose":
+        return "arr.interpose", true
+    case "arr-interleave":
+        return "arr.interleave", true
+    case "arr-reverse":
+        return "arr.reverse", true
+    case "arr-reverse!":
+        return "arr.reverse!", true
     case "arr-empty":
         return "arr.empty", true
     case "arr-dynamic":
@@ -229,8 +249,12 @@ canonical_surface_head_for_internal_name :: proc(head: string) -> (canonical: st
         return "arr.push!", true
     case "arr-shuffle":
         return "arr.shuffle", true
+    case "arr-shuffle!":
+        return "arr.shuffle!", true
     case "arr-sort":
         return "arr.sort", true
+    case "arr-sort!":
+        return "arr.sort!", true
     case "arr-sort-by":
         return "arr.sort-by", true
     case "arr-sort-by!":
@@ -255,6 +279,16 @@ canonical_surface_head_for_internal_name :: proc(head: string) -> (canonical: st
         return "arr.distinct", true
     case "arr-distinct-by":
         return "arr.distinct-by", true
+    case "arr-range":
+        return "arr.range", true
+    case "arr-repeat":
+        return "arr.repeat", true
+    case "arr-repeatedly":
+        return "arr.repeatedly", true
+    case "arr-iterate":
+        return "arr.iterate", true
+    case "arr-cycle":
+        return "arr.cycle", true
     case "arr-take":
         return "arr.take", true
     case "arr-drop":
@@ -275,24 +309,158 @@ canonical_surface_head_for_internal_name :: proc(head: string) -> (canonical: st
         return "arr.some?", true
     case "arr-every?":
         return "arr.every?", true
+    case "arr-find-indexed":
+        return "arr.find-indexed", true
+    case "arr-min-by":
+        return "arr.min-by", true
+    case "arr-max-by":
+        return "arr.max-by", true
+    case "arr-slice":
+        return "arr.slice", true
+    case "arr-first":
+        return "arr.first", true
+    case "arr-second":
+        return "arr.second", true
+    case "arr-nth":
+        return "arr.nth", true
+    case "arr-last":
+        return "arr.last", true
+    case "arr-rest":
+        return "arr.rest", true
     case "arr-get":
         return "arr.get", true
     case "map-empty":
         return "map.empty", true
     case "map-of":
         return "map.of", true
+    case "map-get":
+        return "map.get", true
+    case "map-contains?":
+        return "map.contains?", true
+    case "map-assoc":
+        return "map.assoc", true
+    case "map-assoc!":
+        return "map.assoc!", true
+    case "map-dissoc":
+        return "map.dissoc", true
     case "map-dissoc!":
         return "map.dissoc!", true
+    case "map-merge":
+        return "map.merge", true
+    case "map-merge!":
+        return "map.merge!", true
+    case "map-keys":
+        return "map.keys", true
+    case "map-vals":
+        return "map.vals", true
+    case "map-zip":
+        return "map.zip", true
     case "set-empty":
         return "set.empty", true
     case "set-of":
         return "set.of", true
+    case "set-add":
+        return "set.add", true
+    case "set-add!":
+        return "set.add!", true
+    case "set-remove":
+        return "set.remove", true
+    case "set-remove!":
+        return "set.remove!", true
+    case "set-union":
+        return "set.union", true
+    case "set-union!":
+        return "set.union!", true
+    case "set-intersection":
+        return "set.intersection", true
+    case "set-intersection!":
+        return "set.intersection!", true
+    case "set-difference":
+        return "set.difference", true
+    case "set-difference!":
+        return "set.difference!", true
+    case "set-contains?":
+        return "set.contains?", true
+    case "set-subset?":
+        return "set.subset?", true
+    case "set-superset?":
+        return "set.superset?", true
+    case "set-disjoint?":
+        return "set.disjoint?", true
+    case "str-slice":
+        return "str.slice", true
+    case "str-get":
+        return "str.get", true
     case "str-split":
         return "str.split", true
     case "str-join":
         return "str.join", true
     case "str-replace":
         return "str.replace", true
+    case "str-count":
+        return "str.count", true
+    case "str-contains?":
+        return "str.contains?", true
+    case "str-trim":
+        return "str.trim", true
+    case "str-trim-prefix":
+        return "str.trim-prefix", true
+    case "str-trim-suffix":
+        return "str.trim-suffix", true
+    case "str-starts-with?":
+        return "str.starts-with?", true
+    case "str-ends-with?":
+        return "str.ends-with?", true
+    case "str-index-of":
+        return "str.index-of", true
+    case "str-last-index-of":
+        return "str.last-index-of", true
+    case "str-lower":
+        return "str.lower", true
+    case "str-upper":
+        return "str.upper", true
+    case "io-read":
+        return "io.read", true
+    case "io-write":
+        return "io.write", true
+    case "json-write":
+        return "json.write", true
+    case "json-read-as":
+        return "json.read-as", true
+    case "cli-flag":
+        return "cli.flag", true
+    case "cli-option":
+        return "cli.option", true
+    case "cli-int-option":
+        return "cli.int-option", true
+    case "cli-command":
+        return "cli.command", true
+    case "cli-env":
+        return "cli.env", true
+    case "cli-env?":
+        return "cli.env?", true
+    case "cli-env-int":
+        return "cli.env-int", true
+    case "cli-terminal-size":
+        return "cli.terminal-size", true
+    case "cli-stdout-tty?":
+        return "cli.stdout-tty?", true
+    case "cli-stderr-tty?":
+        return "cli.stderr-tty?", true
+    case "cli-exit!":
+        return "cli.exit!", true
+    case "cli-print":
+        return "cli.print", true
+    case "cli-println":
+        return "cli.println", true
+    case "cli-printf":
+        return "cli.printf", true
+    case "cli-eprint":
+        return "cli.eprint", true
+    case "cli-eprintln":
+        return "cli.eprintln", true
+    case "cli-eprintf":
+        return "cli.eprintf", true
     }
     return "", false
 }
@@ -330,11 +498,58 @@ validate_surface_internal_call_names :: proc(forms: []CST_Top_Form) -> (Compile_
     return Compile_Error{}, true
 }
 
+slash_package_access_message :: proc(text: string) -> (message: string, ok: bool) {
+    slash := strings.index(text, "/")
+    if slash <= 0 || slash+1 >= len(text) {
+        return "", false
+    }
+    alias := text[:slash]
+    switch alias {
+    case "kvist", "core", "arr", "str", "map", "set", "soa", "io", "json", "cli":
+        member := text[slash+1:]
+        return fmt.tprintf("use `%s.%s` for package access", alias, member), true
+    }
+    return "", false
+}
+
+validate_surface_package_slash_access_form :: proc(form: CST_Form) -> (Compile_Error, bool) {
+    if form.kind == .Symbol {
+        message, bad := slash_package_access_message(form.text)
+        if bad {
+            return Compile_Error{message = message, span = form.span}, false
+        }
+    }
+    #partial switch form.kind {
+    case .List, .Vector, .Brace, .Set:
+        for item in form.items {
+            err_item, ok_item := validate_surface_package_slash_access_form(item)
+            if !ok_item {
+                return err_item, false
+            }
+        }
+    }
+    return Compile_Error{}, true
+}
+
+validate_surface_package_slash_access :: proc(forms: []CST_Top_Form) -> (Compile_Error, bool) {
+    for top in forms {
+        err_form, ok_form := validate_surface_package_slash_access_form(top.form)
+        if !ok_form {
+            return err_form, false
+        }
+    }
+    return Compile_Error{}, true
+}
+
 validate_package_files_surface_internal_call_names :: proc(files: []Package_File) -> (Compile_Error, bool) {
     for file in files {
         err_file, ok_file := validate_surface_internal_call_names(file.forms[:])
         if !ok_file {
             return err_file, false
+        }
+        err_slash, ok_slash := validate_surface_package_slash_access(file.forms[:])
+        if !ok_slash {
+            return err_slash, false
         }
     }
     return Compile_Error{}, true
@@ -1994,6 +2209,10 @@ load_path_expanded_forms :: proc(path: string) -> (expanded: [dynamic]CST_Top_Fo
     if !ok_expand {
         return expanded, macros, err_expand, false
     }
+    err_expanded_slash, ok_expanded_slash := validate_surface_package_slash_access(expanded_forms[:])
+    if !ok_expanded_slash {
+        return expanded, macros, err_expanded_slash, false
+    }
     aliases, err_aliases, ok_aliases := collect_root_source_import_aliases(path)
     if !ok_aliases {
         return expanded, macros, err_aliases, false
@@ -2316,6 +2535,10 @@ compile_source_with_map :: proc(source: string) -> (result: Emit_Result, err: Co
     if !ok_surface {
         return result, clone_compile_error(err_surface, result_allocator), false
     }
+    err_slash, ok_slash := validate_surface_package_slash_access(forms[:])
+    if !ok_slash {
+        return result, clone_compile_error(err_slash, result_allocator), false
+    }
     loaded, err_load, ok_load := load_root_source_forms(forms[:])
     if !ok_load {
         return result, clone_compile_error(err_load, result_allocator), false
@@ -2335,6 +2558,10 @@ compile_source_with_map :: proc(source: string) -> (result: Emit_Result, err: Co
     expanded, _, err_expand, ok_expand := macroexpand_top_forms(combined[:], true)
     if !ok_expand {
         return result, clone_compile_error(err_expand, result_allocator), false
+    }
+    err_expanded_slash, ok_expanded_slash := validate_surface_package_slash_access(expanded[:])
+    if !ok_expanded_slash {
+        return result, clone_compile_error(err_expanded_slash, result_allocator), false
     }
     normalized := normalize_expanded_top_forms(expanded[:])
     program, err_program, ok_program := parse_program(normalized[:])
@@ -2371,6 +2598,10 @@ read_single_eval_form :: proc(source: string) -> (form: CST_Form, err: Compile_E
     err_surface, ok_surface := validate_surface_internal_call_names(forms[:])
     if !ok_surface {
         return form, err_surface, false
+    }
+    err_slash, ok_slash := validate_surface_package_slash_access(forms[:])
+    if !ok_slash {
+        return form, err_slash, false
     }
     return forms[0].form, {}, true
 }
@@ -2420,6 +2651,10 @@ compile_eval_source_with_map :: proc(source, eval_source: string, no_print: bool
     if !ok_surface {
         return result, clone_compile_error(err_surface, result_allocator), false
     }
+    err_slash, ok_slash := validate_surface_package_slash_access(forms[:])
+    if !ok_slash {
+        return result, clone_compile_error(err_slash, result_allocator), false
+    }
     loaded, err_load, ok_load := load_root_source_forms(forms[:])
     if !ok_load {
         return result, clone_compile_error(err_load, result_allocator), false
@@ -2439,6 +2674,10 @@ compile_eval_source_with_map :: proc(source, eval_source: string, no_print: bool
     expanded, macros, err_expand, ok_expand := macroexpand_top_forms(combined[:], true)
     if !ok_expand {
         return result, clone_compile_error(err_expand, result_allocator), false
+    }
+    err_expanded_slash, ok_expanded_slash := validate_surface_package_slash_access(expanded[:])
+    if !ok_expanded_slash {
+        return result, clone_compile_error(err_expanded_slash, result_allocator), false
     }
     normalized := normalize_expanded_top_forms(expanded[:])
     program, err_program, ok_program := parse_program(normalized[:])
@@ -2460,6 +2699,10 @@ compile_eval_source_with_map :: proc(source, eval_source: string, no_print: bool
         return result, clone_compile_error(err_eval_expand, result_allocator), false
     }
     defer delete_cst_form(&expanded_eval_form)
+    err_eval_slash, ok_eval_slash := validate_surface_package_slash_access_form(expanded_eval_form)
+    if !ok_eval_slash {
+        return result, clone_compile_error(err_eval_slash, result_allocator), false
+    }
 
     temp_result: Emit_Result
     err_emit: Compile_Error
@@ -2669,6 +2912,11 @@ compile_eval_path_with_map :: proc(path, eval_source: string, no_print: bool = f
     if !ok_eval_expand {
         context.allocator = old_allocator
         return result, clone_compile_error(err_eval_expand, result_allocator), false
+    }
+    err_eval_slash, ok_eval_slash := validate_surface_package_slash_access_form(expanded_eval_form)
+    if !ok_eval_slash {
+        context.allocator = old_allocator
+        return result, clone_compile_error(err_eval_slash, result_allocator), false
     }
     context.allocator = old_allocator
     return compile_program_eval_form_with_map(program, expanded_eval_form, no_print)

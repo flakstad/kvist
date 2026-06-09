@@ -77,7 +77,8 @@ LANGUAGE_SOURCE_ENTRIES :: []Language_Source_Entry{
     {name = "if", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "emit_if_like :: proc"},
     {name = "when", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "(when test body...)"},
     {name = "cond", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "(cond test expr ... :else expr)"},
-    {name = "switch", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "(switch [value test] ... :else expr)"},
+    {name = "case", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "(case value clause ... :else expr)"},
+    {name = "switch", kind = "compatibility syntax", relative = "src/kvist/emit.odin", snippet = "`switch` is compatibility syntax; use `case` or `cond`"},
     {name = "set!", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "case \"set!\":"},
     {name = "mut!", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "case \"mut!\":"},
     {name = "update!", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "(update! place f args...)"},
@@ -623,6 +624,10 @@ symbols_append_core_helper_alias_records :: proc(builder: ^strings.Builder, seen
             continue
         }
         bare_name := name[len("core."):]
+        if bare_name == "switch" {
+            delete(fields)
+            continue
+        }
         key := fmt.tprintf("kvist helper\t%s", bare_name)
         if seen[key] {
             delete(key)
