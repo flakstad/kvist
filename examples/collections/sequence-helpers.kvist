@@ -83,19 +83,19 @@
   (let [xs ([]int [1 2 2 3])
         counts (arr.frequencies xs)]
     (defer (delete counts))
-    (get counts 2)))
+    counts[2]))
 
 (defn count-by-parity-total [] -> int
   (let [xs ([]int [1 2 3 4 6])
         counts (arr.count-by parity xs)]
     (defer (delete counts))
-    (+ (get counts 0) (get counts 1))))
+    (+ counts[0] counts[1])))
 
 (defn sum-by-parity-total [] -> int
   (let [xs ([]int [1 2 3 4 6])
         sums (arr.sum-by parity identity-int xs)]
     (defer (delete sums))
-    (+ (get sums 0) (get sums 1))))
+    (+ sums[0] sums[1])))
 
 (defn indexed-name-count [] -> int
   (let [names ([]string ["Ada" "Lin" "Grace"])
@@ -117,7 +117,7 @@
 (defn even-group-count [] -> int
   (let [xs ([]int [1 2 3 4 6])
         groups (arr.group-by parity xs)
-        evens (get groups 0)]
+        evens groups[0]]
     (defer
       (each [_ group groups]
         (delete group))

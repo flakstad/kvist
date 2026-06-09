@@ -10,8 +10,8 @@
         ident (linalg.identity (type matrix[2 2]f32))
         product (linalg.mul m ident)
         flat (linalg.matrix_flatten product)]
-    (+ (+ (get flat 0) (get flat 1))
-       (+ (get flat 2) (get flat 3)))))
+    (+ (+ flat[0] flat[1])
+       (+ flat[2] flat[3]))))
 
 (defn vector-score
   "Use fixed-vector constructors for dot, length, and normalization."
@@ -29,8 +29,8 @@
   (let [m (matrix[2 2]f32 [1.0 2.0 3.0 4.0])
         t (linalg.transpose m)
         flat (linalg.matrix_flatten t)]
-    (+ (+ (get flat 0) (get flat 1))
-       (+ (get flat 2) (get flat 3)))))
+    (+ (+ flat[0] flat[1])
+       (+ flat[2] flat[3]))))
 
 (defn quaternion-score
   "Construct and normalize a quaternion, then measure alignment with the original."

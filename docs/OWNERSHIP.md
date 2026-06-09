@@ -106,7 +106,7 @@ array. The chunks inside are borrowed slices and must not be deleted:
 ```clojure
 (let [chunks (arr.partition 2 xs)]
   (defer (delete chunks))
-  (arr.first (get chunks 0)))
+  (arr.first chunks[0]))
 ```
 
 `io.read` lowers to `os.read_entire_file(path, context.allocator)`. It returns

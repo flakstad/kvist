@@ -13,7 +13,7 @@
 
 (defn blue-alpha [] -> int
   ;; raylib colors are distinct fixed arrays in the Odin binding.
-  (int (get rl.BLUE 3)))
+  (int rl.BLUE[3]))
 
 (defn point-inside-demo? [] -> bool
   ;; This is a safe terminal eval that still uses real raylib data shapes:

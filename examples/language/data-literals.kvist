@@ -82,11 +82,11 @@
     (defer (delete lookup))
     (defer (delete overrides))
     (map.merge! lookup overrides)
-    (+ (get lookup "one") (get lookup "two") (get lookup "three"))))
+    (+ lookup["one"] lookup["two"] lookup["three"])))
 
 (defn fixed-middle [] -> int
   (let [fixed (arr.fixed int [5 8 13])]
-    (get fixed 1)))
+    fixed[1]))
 
 (defn main []
   (println (lookup-two)))

@@ -3218,6 +3218,7 @@ reject_case_mixing_value_and_type_patterns :: proc(t: ^testing.T) {
     if ok {
         return
     }
+    defer delete(err.message)
 
     testing.expect_value(t, err.message, "type case expects (Type binding)")
 }
@@ -3244,6 +3245,7 @@ reject_case_type_pattern_shape :: proc(t: ^testing.T) {
     if ok {
         return
     }
+    defer delete(err.message)
 
     testing.expect_value(t, err.message, "type case expects (Type binding)")
 }
@@ -3937,6 +3939,53 @@ implicit_core_switch_helper :: proc(t: ^testing.T) {
 }
 
 @(test)
+compile_switch_emits_compatibility_warning :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn classify [n: int] -> string
+  (switch n
+    0 "zero"
+    :else "other"))`
+
+    result, err, ok := kvist.compile_source_with_map(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(t, len(result.warnings), 1)
+    if len(result.warnings) == 1 {
+        testing.expect_value(t, result.warnings[0].message, "`switch` is compatibility syntax; use `case` for subject dispatch or `cond` for predicate branches")
+    }
+}
+
+@(test)
+compile_case_does_not_emit_switch_warning :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn classify [n: int] -> string
+  (case n
+    0 "zero"
+    :else "other"))`
+
+    result, err, ok := kvist.compile_source_with_map(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(t, len(result.warnings), 0)
+}
+
+@(test)
 compile_when_let_macro :: proc(t: ^testing.T) {
     source := `(package main)
 
@@ -4159,7 +4208,7 @@ compile_http_server_surface_is_explicit :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "h.route_get("), true)
     testing.expect_value(t, strings.contains(output, "\"/ping\""), true)
     testing.expect_value(t, strings.contains(output, "h.respond_plain(res, \"pong\")"), true)
-    testing.expect_value(t, strings.contains(output, "h.respond_json(res, Greeting{message = fmt.tprintf(\"hello %s\", params[0])})"), true)
+    testing.expect_value(t, strings.contains(output, "h.respond_json(res, Greeting{message = fmt.tprintf(\"hello %s\", (params)[0])})"), true)
     testing.expect_value(t, strings.contains(output, "h.server_shutdown_on_interrupt(&server)"), true)
     testing.expect_value(t, strings.contains(output, "h.listen_and_serve(&server, h.router_handler(&router), net.Endpoint{address = net.IP4_Loopback, port = 6969})"), true)
 }
@@ -6785,6 +6834,7 @@ reject_source_call_outside_source_consumer :: proc(t: ^testing.T) {
     if ok {
         return
     }
+    defer delete(err.message)
     testing.expect_value(t, err.message, "source files can currently only be consumed by each or into")
 }
 
@@ -6833,6 +6883,7 @@ reject_functional_transform_bad_named_spec_early :: proc(t: ^testing.T) {
     if ok {
         return
     }
+    defer delete(err.message)
 
     testing.expect_value(t, err.message, "deftransform expects (comp ...)")
 }
@@ -6852,6 +6903,7 @@ reject_functional_transform_unknown_step :: proc(t: ^testing.T) {
     if ok {
         return
     }
+    defer delete(err.message)
 
     testing.expect_value(t, err.message, "transform steps currently support map and filter")
 }
@@ -6869,6 +6921,7 @@ reject_named_functional_transform_unknown_step_early :: proc(t: ^testing.T) {
     if ok {
         return
     }
+    defer delete(err.message)
 
     testing.expect_value(t, err.message, "transform steps currently support map and filter")
 }
@@ -6885,6 +6938,7 @@ reject_functional_transform_unknown_named_transform :: proc(t: ^testing.T) {
     if ok {
         return
     }
+    defer delete(err.message)
 
     testing.expect_value(t, err.message, "unknown transform: missing-transform")
 }
@@ -6907,6 +6961,7 @@ reject_functional_transform_callback_arity :: proc(t: ^testing.T) {
     if ok {
         return
     }
+    defer delete(err.message)
 
     testing.expect_value(t, err.message, "transform callback currently expects a one-argument function")
 }
@@ -6929,6 +6984,7 @@ reject_functional_transform_callback_type_mismatch :: proc(t: ^testing.T) {
     if ok {
         return
     }
+    defer delete(err.message)
 
     testing.expect_value(t, err.message, "transform callback expects int but pipeline has string")
 }
@@ -6951,6 +7007,7 @@ reject_functional_transform_filter_non_bool :: proc(t: ^testing.T) {
     if ok {
         return
     }
+    defer delete(err.message)
 
     testing.expect_value(t, err.message, "filter transform expects bool callback result, got int")
 }
@@ -6973,6 +7030,7 @@ reject_functional_transform_unsupported_transduce_reducer :: proc(t: ^testing.T)
     if ok {
         return
     }
+    defer delete(err.message)
 
     testing.expect_value(t, err.message, "transduce currently supports + as reducer")
 }
@@ -6999,6 +7057,7 @@ reject_functional_transform_output_type_mismatch :: proc(t: ^testing.T) {
     if ok {
         return
     }
+    defer delete(err.message)
 
     testing.expect_value(t, err.message, "into transform output element type is int, but pipeline produces string")
 }
@@ -9043,6 +9102,7 @@ reject_threaded_update_is_removed :: proc(t: ^testing.T) {
     if ok {
         return
     }
+    defer delete(err.message)
 
     testing.expect_value(t, err.message, "`update` has been removed; bind a copy and use `assoc`, or mutate a place with `update!`")
 }
@@ -9065,6 +9125,7 @@ reject_threaded_shallow_struct_assoc_unknown_field :: proc(t: ^testing.T) {
     if ok {
         return
     }
+    defer delete(err.message)
 
     testing.expect_value(t, err.message, "assoc could not find field .missing on User")
 }

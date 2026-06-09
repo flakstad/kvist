@@ -15,10 +15,10 @@
     (defer (delete xs))
     (defer (delete lookup))
     (set! xs[1] 42)
-    (update! (get lookup "a") + 6)
+    (update! lookup["a"] + 6)
     (update! point.y + 4)
     (update! point.y inc)
-    (+ (+ (get xs 1) (get lookup "a"))
+    (+ (+ xs[1] lookup["a"])
        point.y)))
 
 (defn copied-point-score [] -> int

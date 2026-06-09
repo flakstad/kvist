@@ -94,11 +94,11 @@
   (forms))
 
 (defmacro switch
-  "Lower an Odin-shaped switch over `value`.
+  "Compatibility helper for Odin-shaped switch lowering.
 
   Clauses are written as case.expression pairs, with `:else expr` for the
-  fallback. Use `case` for Kvist value/type classification; use `switch` when
-  writing Odin-style switch clauses directly."
+  fallback. Prefer `case` for subject dispatch and `cond` for predicate
+  branches. Source `switch` use emits a compatibility warning."
   [value & clauses]
   (quasiquote
     (core-switch (unquote value) (splice clauses))))

@@ -58,10 +58,10 @@
     (count orders)))
 
 (defn pointer-update-score [] -> int
-  (let [orders (sample-orders)]
+    (let [orders (sample-orders)]
     (defer (delete orders))
     (each [_ idx orders]
-      (settle-order! (addr (get orders idx))))
+      (settle-order! (addr orders[idx])))
     (order-score (arr.slice orders 0))))
 
 (defn main []

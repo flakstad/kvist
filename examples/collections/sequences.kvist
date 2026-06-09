@@ -87,7 +87,7 @@
                            (User {name: "Grace" age: 45 status: .Active verified: true})
                            (User {name: "Edsger" age: 72 status: .Archived verified: false})])
         by-status (arr.group-by .status users)
-        active-users (get by-status .Active)]
+        active-users by-status[.Active]]
     (defer
       (each [_ group by-status]
         (delete group))

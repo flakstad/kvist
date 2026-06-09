@@ -24,8 +24,8 @@
       0
       (do
         (defer (delete-csv-records records))
-        (let [[a ok-a] (strconv.parse-int (get (get records 1) 1))
-              [b ok-b] (strconv.parse-int (get (get records 2) 1))]
+        (let [[a ok-a] (strconv.parse-int records[1][1])
+              [b ok-b] (strconv.parse-int records[2][1])]
           (if (and ok-a ok-b)
             (+ a b)
             0))))))

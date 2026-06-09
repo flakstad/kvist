@@ -6,27 +6,37 @@ ownership runtime for pointers. The current rule is simple:
 - pass small values by value
 - pass large or shared mutable values by pointer
 - use slices for shared contiguous read/write data
-- use `addr` and `deref` only when identity or mutation through a reference
-  is actually required
+- use address-of and dereference only when identity or mutation through a
+  reference is actually required
 
 Source style:
 
 ```clojure
 ^Order
+(ptr Order)
 (addr order)
+(& order)
 total^
+(deref total)
 (set! total^ (+ total^ 1))
 ```
 
-Use `x^` for the simple symbol case. Keep `(deref ...)` for more complex
-expressions such as `(deref (get ptrs i))`.
+Pointer types can be written as `^T` or `(ptr T)`. Prefer `^T` when it reads
+cleanly in a type position; use `(ptr T)` when a call-shaped type is clearer.
+
+Address-of can be written as `(addr place)` or `(& place)`. Prefer `addr` in
+ordinary code because it is easy to search for and does not visually collide
+with variadic parameter syntax.
+
+Use `x^` for the simple pointer-symbol case. Keep `(deref ...)` for more
+complex expressions such as `(deref ptrs[i])`.
 
 Writable places:
 
 ```clojure
 (set! total^ (+ total^ 1))
 (set! order^.amount 42)
-(set! (get xs i) 9)
+(set! xs[i] 9)
 ```
 
 That keeps `set!` uniform: write to the place you spelled in source.

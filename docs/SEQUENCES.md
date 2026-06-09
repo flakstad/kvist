@@ -405,11 +405,11 @@ detail before a scalar result, or when the update needs custom state:
   (each [order orders]
     (let [settled (settle-order order)]
       (when (settled? settled)
-        (set! (get revenue-by-region settled.region)
-              (+ (get revenue-by-region settled.region)
+        (set! revenue-by-region[settled.region]
+              (+ revenue-by-region[settled.region]
                  settled.amount))
-        (set! (get count-by-region settled.region)
-              (+ (get count-by-region settled.region)
+        (set! count-by-region[settled.region]
+              (+ count-by-region[settled.region]
                  1))))))
 ```
 

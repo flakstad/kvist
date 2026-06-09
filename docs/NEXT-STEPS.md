@@ -124,7 +124,7 @@ implementation:
 - parallel processing as a package surface rather than core syntax, probably
   around futures, pools, ordered maps, cancellation, and typed channels
 - pattern matching over unions and structs, including how much richer `case`
-  should become while `switch` stays the explicit Odin-shaped form
+  should become while `switch` remains compatibility syntax with a warning
 - persistent immutable data structures, deferred until concrete app-state use
   cases justify a package-level runtime commitment
 
@@ -132,10 +132,9 @@ See [FUNCTIONAL-TRANSFORMS.md](./FUNCTIONAL-TRANSFORMS.md).
 
 ### 5. Test And Memory Hygiene
 
-The current compiler and example suites pass, but Odin's test memory tracker
-still reports noisy warnings in some negative compiler tests and tooling/symbol
-tests. Those warnings do not currently indicate failing language behavior, but
-they make the test baseline harder to scan and should be cleaned up.
+The current compiler and example suites pass, and the negative compiler tests
+should keep deleting owned diagnostic messages so Odin's memory tracker remains
+quiet. Keep that baseline clean as new diagnostics and tooling tests are added.
 
 ### 6. Future DSL Work
 

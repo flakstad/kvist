@@ -387,6 +387,16 @@ emit_warning :: proc(e: ^Emitter, message: string, span: Span) {
     append(e.warnings, Compile_Warning{message = strings.clone(message), span = span})
 }
 
+emit_switch_compat_warning :: proc(e: ^Emitter, form: CST_Form) {
+    if len(form.items) == 0 || form.items[0].kind != .Symbol {
+        return
+    }
+    head := form.items[0]
+    if head.text == "switch" || head.text == "core-switch" {
+        emit_warning(e, "`switch` is compatibility syntax; use `case` for subject dispatch or `cond` for predicate branches", head.span)
+    }
+}
+
 mark_core_map :: proc(e: ^Emitter) {
     if e.features != nil {
         e.features.core_map = true
@@ -9347,6 +9357,8 @@ emit_switch_case_label :: proc(e: ^Emitter, clause: CST_Form, type_switch: bool)
 }
 
 emit_switch_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Return_Spec, force_partial: bool = false) -> (Compile_Error, bool) {
+    emit_switch_compat_warning(e, form)
+
     if len(form.items) < 4 {
         return Compile_Error{message = "switch expects subject and at least one clause", span = form.span}, false
     }

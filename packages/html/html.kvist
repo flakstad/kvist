@@ -248,7 +248,7 @@
         (replace-owned step4 "'" "&#39;")))))
 
 (defn- render-attr-into [builder: ^strings.Builder, attr: Attr]
-  (core.switch [value attr.value]
+  (core.case [value attr.value]
     Nothing (noop)
     string
     (do
@@ -268,7 +268,7 @@
       (strings.write_string builder attr.name))))
 
 (defn- render-node-into [builder: ^strings.Builder, node: Node]
-  (core.switch [value node]
+  (core.case [value node]
     Nothing (noop)
     Fragment
     (each [child value.children]

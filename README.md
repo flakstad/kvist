@@ -576,11 +576,11 @@ Address-of also needs a readable spelling:
 (headers-init (addr r.headers) allocator)
 ```
 
-Switch:
+Case:
 
 ```clojure
 (defn method-string [m: Method] -> string #no_bounds_check
-  (switch m
+  (case m
     .Get "GET"
     .Post "POST"
     .Delete "DELETE"
@@ -598,8 +598,8 @@ Anonymous functions and callbacks:
       (http.respond-plain
         res
         (fmt.tprintf "user %s, comment: %s"
-                     (get req.url_params 0)
-                     (get req.url_params 1))))))
+                     req.url_params[0]
+                     req.url_params[1])))))
 ```
 
 Generated Odin should remain a normal anonymous `proc` passed to `http.handler`.
@@ -611,9 +611,9 @@ everything into parens:
 @(private)
 (defn route-add [router: ^Router, method: Method, route: Route]
   (when (not-in method router.routes)
-    (set! (get router.routes method)
+    (set! router.routes[method]
           (make [dynamic]Route router.allocator)))
-  (append (addr (get router.routes method)) route))
+  (append (addr router.routes[method]) route))
 
 (defn headers-count [h: Headers] -> int #force_inline
   (len h._kv))

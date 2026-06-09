@@ -24,8 +24,8 @@
   (println (counter-after-bump)))
 
 (comment
-  ;; Prefer `^T`, `addr`, and `x^` in ordinary Kvist code. Keep `(deref ...)`
-  ;; for more complex pointer expressions.
+  ;; Prefer `^T`, `addr`, and `x^` in ordinary Kvist code. `(ptr T)`,
+  ;; `(& place)`, and `(deref ...)` are the call-shaped equivalents.
   (counter-after-bump)
   ;; => 42
 )
