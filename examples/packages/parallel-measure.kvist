@@ -32,7 +32,7 @@
   x)
 
 (defn noop [x: int]
-  (odin "_ = x"))
+  (discard x))
 
 (defn sequential-four [] -> int
   (+ (burn 1)

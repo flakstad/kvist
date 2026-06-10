@@ -90,6 +90,7 @@ LANGUAGE_SOURCE_ENTRIES :: []Language_Source_Entry{
     {name = "toggle!", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "case \"inc!\", \"dec!\", \"toggle!\", \"negate!\":"},
     {name = "negate!", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "case \"inc!\", \"dec!\", \"toggle!\", \"negate!\":"},
     {name = "return", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "case \"return\":"},
+    {name = "discard", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "(discard expr...)"},
     {name = "defer", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "case \"defer\":"},
     {name = "for", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "case \"for\":"},
     {name = "each", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "case \"each\":"},

@@ -119,10 +119,11 @@ Const_Decl :: struct {
 }
 
 Var_Decl :: struct {
-    name:   string,
-    has_ty: bool,
-    ty:     string,
-    value:  CST_Form,
+    name:      string,
+    has_ty:    bool,
+    ty:        string,
+    has_value: bool,
+    value:     CST_Form,
 }
 
 Enum_Variant :: struct {
@@ -148,6 +149,7 @@ Proc_Decl :: struct {
     returns:           Return_Spec,
     prefix_directives: [dynamic]string,
     suffix_directives: [dynamic]string,
+    where_constraints: [dynamic]CST_Form,
     body:              [dynamic]CST_Form,
 }
 

@@ -446,6 +446,8 @@ current Odin block or procedure.
 - top-level `(def- name expr)` and `(def- name: type expr)` package-private constants
 - top-level `(defvar name expr)` -> `name := expr`
 - top-level `(defvar name: type expr)` -> `name: type = expr`
+- top-level `(defvar name: type)` -> `name: type`, a typed zero-value mutable
+  declaration
 - top-level `(defvar- name expr)` and `(defvar- name: type expr)` package-private variables
 - top-level `(foreign-import alias "path")` -> `foreign import alias "path"`
 - `(export)` -> attaches `@(export)` to the next top-level declaration
@@ -463,6 +465,8 @@ current Odin block or procedure.
 - top-level `(defn name [arg: type, ...] -> return-type body...)`
 - top-level `(defn name :abi "c" [arg: type, ...] -> return-type body...)`
   - procedure directives such as `#force_inline` and `#optional_ok` are written after the return spec
+  - Odin polymorphic constraints are written after directives as
+    `(where expr)`, e.g. `(where (intrinsics.type-is-comparable T))`
   - `defn-` is the package-private named function form
   - `fn` is the canonical source-level form for function types and anonymous function literals
   - `:abi "c"` is available for explicit foreign/native entrypoints
@@ -477,7 +481,8 @@ current Odin block or procedure.
   positional multi-return binding; a local binding may be followed
   by `defer` to lower to `defer delete(...)` at scope exit
 - local `(def name expr)` and `(def name: type expr)` declare Odin constants scoped to the current block
-- local `(defvar name expr)` and `(defvar name: type expr)` create mutable runtime locals scoped to the current block
+- local `(defvar name expr)`, `(defvar name: type expr)`, and
+  `(defvar name: type)` create mutable runtime locals scoped to the current block
 - local `(defstruct Name ...)`, `(defenum Name ...)`, and `(defunion Name ...)` declare compile-time block-scoped Odin types; the declarations themselves do not allocate or run at runtime
 - `(block body...)` -> scoped Odin block
 - `(with-allocator [allocator expr] body...)` scoped `context.allocator`
@@ -490,6 +495,8 @@ current Odin block or procedure.
   - `(set! place value)` assigns a value
   - `(mut! place += value)` applies a compound operator mutation
   - `(update! place f args...)` reads `place`, applies `f`, and writes the result
+- `(discard expr...)` intentionally emits `_ = expr` for ignored non-owned
+  values, such as callback parameters that must keep a required signature
 - final expression in a non-void `defn` emits `return <expr>`
 - `(if test then else)`
 - `(when test body...)`
@@ -645,7 +652,8 @@ Pragmatic Odin conveniences beyond the minimal special-form core include
 `(contains? collection key)` for generic collection membership,
 `(in value collection)`,
 `(not-in value collection)`, `(break)`, `(continue)`, and directive expression
-wrappers like `(#force_inline call arg)`.
+wrappers like `(#force_inline call arg)`. Caller intrinsics can be written
+directly as `#caller_location` and `(#caller_expression expr)`.
 
 For collection helpers, prefer explicit package names. Cross-family helpers now
 live as bare names, for example `count`, `empty?`, `contains?`, and `update!`.

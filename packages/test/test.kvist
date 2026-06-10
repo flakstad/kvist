@@ -3,107 +3,98 @@
 (import "base:intrinsics")
 (import core "kvist:core")
 (import reflect "core:reflect")
+(import rt "base:runtime")
 (import "core:strings")
 (import "core:sync")
 (import "core:testing")
 
-(odin "
-__kvist_test_context_lock: sync.Mutex
-__kvist_test_context_stacks: map[uintptr][dynamic]string
+(defvar __kvist_test_context_lock: sync.Mutex)
+(defvar __kvist_test_context_stacks: map[uintptr][dynamic]string)
+(defvar __kvist_test_once_guard: sync.Once)
 
-__kvist_test_context_cleanup :: proc(user_data: rawptr) {
-	key := uintptr(user_data)
+(defn- __kvist_test_context_cleanup [user-data: rawptr]
+  (let [key (uintptr user-data)]
+    (sync.mutex-lock (& __kvist_test_context_lock))
+    (defer (sync.mutex-unlock (& __kvist_test_context_lock)))
 
-	sync.mutex_lock(&__kvist_test_context_lock)
-	defer sync.mutex_unlock(&__kvist_test_context_lock)
+    (let [[stack ok] __kvist_test_context_stacks[key]]
+      (if (not ok)
+        (return))
+      (each [msg stack]
+        (delete msg))
+      (delete stack)
+      (delete! __kvist_test_context_stacks key)
+      (if (= (len __kvist_test_context_stacks) 0)
+        (delete __kvist_test_context_stacks)))))
 
-	stack, ok := __kvist_test_context_stacks[key]
-	if !ok {
-		return
-	}
-	for msg in stack {
-		delete(msg)
-	}
-	delete(stack)
-	delete_key(&__kvist_test_context_stacks, key)
-	if len(__kvist_test_context_stacks) == 0 {
-		delete(__kvist_test_context_stacks)
-	}
-}
+(defn- __kvist_test_context_prefix [t: ^testing.T] -> string
+  (let [key (uintptr t)]
+    (sync.mutex-lock (& __kvist_test_context_lock))
+    (let [[stack ok] __kvist_test_context_stacks[key]]
+      (if (or (not ok) (= (count stack) 0))
+        (do
+          (sync.mutex-unlock (& __kvist_test_context_lock))
+          (return "")))
+      (let [[prefix _] (strings.join stack[:] " > " {allocator: context.temp-allocator})]
+        (sync.mutex-unlock (& __kvist_test_context_lock))
+        prefix))))
 
-__kvist_test_context_prefix :: proc(t: ^testing.T) -> string {
-	key := uintptr(t)
+(defn- __kvist_test_push_context [t: ^testing.T, message: string]
+  (let [key (uintptr t)
+        [cloned clone-err] (strings.clone message)]
+    (assert (= clone-err nil) "kvist:test could not clone t.testing message")
 
-	sync.mutex_lock(&__kvist_test_context_lock)
-	stack, ok := __kvist_test_context_stacks[key]
-	if !ok || len(stack) == 0 {
-		sync.mutex_unlock(&__kvist_test_context_lock)
-		return \"\"
-	}
-	prefix, _ := strings.join(stack[:], \" > \", allocator=context.temp_allocator)
-	sync.mutex_unlock(&__kvist_test_context_lock)
-	return prefix
-}
+    (sync.mutex-lock (& __kvist_test_context_lock))
+    (defer (sync.mutex-unlock (& __kvist_test_context_lock)))
 
-__kvist_test_push_context :: proc(t: ^testing.T, message: string) {
-	key := uintptr(t)
-	cloned, clone_err := strings.clone(message)
-	assert(clone_err == nil, \"kvist:test could not clone t.testing message\")
+    (let [[stack existed] __kvist_test_context_stacks[key]]
+      (if (not existed)
+        (testing.cleanup t __kvist_test_context_cleanup (rawptr t)))
+      (append (& stack) cloned)
+      (set! __kvist_test_context_stacks[key] stack))))
 
-	sync.mutex_lock(&__kvist_test_context_lock)
-	defer sync.mutex_unlock(&__kvist_test_context_lock)
+(defn- __kvist_test_pop_context [t: ^testing.T]
+  (let [key (uintptr t)]
+    (sync.mutex-lock (& __kvist_test_context_lock))
+    (defer (sync.mutex-unlock (& __kvist_test_context_lock)))
 
-	stack, existed := __kvist_test_context_stacks[key]
-	if !existed {
-		testing.cleanup(t, __kvist_test_context_cleanup, rawptr(t))
-	}
-	append(&stack, cloned)
-	__kvist_test_context_stacks[key] = stack
-}
+    (let [[stack ok] __kvist_test_context_stacks[key]]
+      (if (or (not ok) (= (count stack) 0))
+        (return))
+      (delete stack[(- (count stack) 1)])
+      (resize (& stack) (- (count stack) 1))
+      (set! __kvist_test_context_stacks[key] stack))))
 
-__kvist_test_pop_context :: proc(t: ^testing.T) {
-	key := uintptr(t)
+(defn- __kvist_test_expect
+  [t: ^testing.T,
+   ok: bool,
+   msg: string = "",
+   expr: string = (#caller_expression ok),
+   loc: rt.Source_Code_Location = #caller_location] -> bool
+  (if ok
+    (return true))
+  (let [prefix (__kvist_test_context_prefix t)]
+    (if (= prefix "")
+      (return (testing.expect t ok msg {expr: expr loc: loc})))
+    (if (= msg "")
+      (return (testing.expectf t ok "%s: expected %v to be true" prefix expr {loc: loc})))
+    (testing.expectf t ok "%s: %s" prefix msg {loc: loc})))
 
-	sync.mutex_lock(&__kvist_test_context_lock)
-	defer sync.mutex_unlock(&__kvist_test_context_lock)
-
-	stack, ok := __kvist_test_context_stacks[key]
-	if !ok || len(stack) == 0 {
-		return
-	}
-	delete(stack[len(stack)-1])
-	resize(&stack, len(stack)-1)
-	__kvist_test_context_stacks[key] = stack
-}
-
-__kvist_test_expect :: proc(t: ^testing.T, ok: bool, msg := \"\", expr := #caller_expression(ok), loc := #caller_location) -> bool {
-	if ok {
-		return true
-	}
-	prefix := __kvist_test_context_prefix(t)
-	if prefix == \"\" {
-		return testing.expect(t, ok, msg, expr=expr, loc=loc)
-	}
-	if msg == \"\" {
-		return testing.expectf(t, ok, \"%s: expected %v to be true\", prefix, expr, loc=loc)
-	}
-	return testing.expectf(t, ok, \"%s: %s\", prefix, msg, loc=loc)
-}
-
-__kvist_test_expect_value :: proc(t: ^testing.T, value, expected: $T, loc := #caller_location, value_expr := #caller_expression(value)) -> bool where intrinsics.type_is_comparable(T) {
-	ok := value == expected || reflect.is_nil(value) && reflect.is_nil(expected)
-	if ok {
-		return true
-	}
-	prefix := __kvist_test_context_prefix(t)
-	if prefix == \"\" {
-		return testing.expect_value(t, value, expected, loc=loc, value_expr=value_expr)
-	}
-	return testing.expectf(t, ok, \"%s: expected %v to be %v, got %v\", prefix, value_expr, expected, value, loc=loc)
-}
-
-__kvist_test_once_guard: sync.Once
-")
+(defn- __kvist_test_expect_value
+  [t: ^testing.T,
+   value: $T,
+   expected: T,
+   loc: rt.Source_Code_Location = #caller_location,
+   value-expr: string = (#caller_expression value)] -> bool
+  (where (intrinsics.type-is-comparable T))
+  (let [ok (or (= value expected)
+               (and (reflect.is-nil value) (reflect.is-nil expected)))]
+    (if ok
+      (return true))
+    (let [prefix (__kvist_test_context_prefix t)]
+      (if (= prefix "")
+        (return (testing.expect-value t value expected {loc: loc value-expr: value-expr})))
+      (testing.expectf t ok "%s: expected %v to be %v, got %v" prefix value-expr expected value {loc: loc}))))
 
 (defmacro- __kvist_test_wrap_each
   [body]

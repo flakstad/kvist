@@ -171,6 +171,7 @@ Mutation uses the same place model:
 (set! place value)         ;; assign
 (mut! place += value)      ;; compound operator mutation
 (update! place f args...)  ;; functional mutation
+(discard expr...)          ;; intentional ignore for non-owned values
 ```
 
 `for` is the expression form for building owned collections from other

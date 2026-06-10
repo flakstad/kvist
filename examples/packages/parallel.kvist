@@ -17,7 +17,7 @@
   (println user-id))
 
 (defn observe [x: int]
-  (odin "_ = x"))
+  (discard x))
 
 (defn one-task [] -> int
   (let [task (p.start square 12)]

@@ -949,14 +949,26 @@ is_public_decl_head :: proc(head: string) -> bool {
     return is_top_level_decl_head(head) && !is_private_decl_head(head)
 }
 
+decl_symbol_name :: proc(form: CST_Form) -> (string, bool) {
+    if form.kind != .List || len(form.items) < 2 || form.items[1].kind != .Symbol {
+        return "", false
+    }
+    text := form.items[1].text
+    if len(text) > 0 && text[len(text)-1] == ':' {
+        text = text[:len(text)-1]
+    }
+    return text, true
+}
+
 collect_local_decl_names :: proc(forms: []CST_Top_Form) -> (names: [dynamic]string) {
     for top in forms {
         form := top.form
-        if form.kind != .List || len(form.items) < 2 || form.items[1].kind != .Symbol {
+        name, ok_name := decl_symbol_name(form)
+        if !ok_name {
             continue
         }
         if is_top_level_decl_head(decl_head_name(form)) {
-            append(&names, form.items[1].text)
+            append(&names, name)
         }
     }
     return names
@@ -978,11 +990,12 @@ collect_public_decl_names :: proc(forms: []CST_Top_Form) -> (names: [dynamic]str
             }
             continue
         }
-        if len(form.items) < 2 || form.items[1].kind != .Symbol {
+        name, ok_name := decl_symbol_name(form)
+        if !ok_name {
             continue
         }
         if is_public_decl_head(decl_head_name(form)) {
-            append(&names, form.items[1].text)
+            append(&names, name)
         }
     }
     return names
@@ -2767,7 +2780,7 @@ eval_form_head :: proc(form: CST_Form) -> string {
 
 eval_head_is_decl :: proc(head: string) -> bool {
     switch head {
-    case "comment", "core.comment", "package", "import", "def", "def-", "defvar", "defvar-", "defstruct", "defstruct-", "defenum", "defenum-", "defunion", "defunion-", "odin", "attr", "export", "exports", "defn", "defn-", "deftransform", "deftransform-", "defsource", "defsource-":
+    case "comment", "core.comment", "package", "import", "foreign-import", "def", "def-", "defvar", "defvar-", "defstruct", "defstruct-", "defenum", "defenum-", "defunion", "defunion-", "odin", "attr", "export", "exports", "defn", "defn-", "deftransform", "deftransform-", "defsource", "defsource-":
         return true
     }
     return false

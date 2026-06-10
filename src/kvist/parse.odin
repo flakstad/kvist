@@ -1001,6 +1001,18 @@ parse_proc_decl :: proc(form: CST_Form) -> (decl: Proc_Decl, err: Compile_Error,
         }
         body_index += 1
     }
+    where_constraints: [dynamic]CST_Form
+    for body_index < len(form.items) &&
+        form.items[body_index].kind == .List &&
+        len(form.items[body_index].items) > 0 &&
+        is_symbol(form.items[body_index].items[0], "where") {
+        where_form := form.items[body_index]
+        if len(where_form.items) != 2 {
+            return decl, Compile_Error{message = "where expects exactly one constraint expression", span = where_form.span}, false
+        }
+        append(&where_constraints, where_form.items[1])
+        body_index += 1
+    }
     if body_index >= len(form.items) {
         return decl, Compile_Error{message = "proc body is empty", span = form.span}, false
     }
@@ -1015,6 +1027,7 @@ parse_proc_decl :: proc(form: CST_Form) -> (decl: Proc_Decl, err: Compile_Error,
         returns           = returns,
         prefix_directives = prefix_directives,
         suffix_directives = suffix_directives,
+        where_constraints = where_constraints,
         body              = body,
     }, {}, true
 }
@@ -1095,10 +1108,12 @@ parse_decl_typed_binding :: proc(
     form: CST_Form,
     head_name: string,
     value_index: int,
+    allow_typed_missing_value := false,
 ) -> (
     name: string,
     has_ty: bool,
     ty: string,
+    has_value: bool,
     value: CST_Form,
     err: Compile_Error,
     ok: bool,
@@ -1106,25 +1121,28 @@ parse_decl_typed_binding :: proc(
     raw_name := form.items[1].text
     if len(raw_name) > 0 && raw_name[len(raw_name)-1] == ':' {
         if len(raw_name) == 1 {
-            return "", false, "", {}, Compile_Error{message = fmt.tprintf("%s expects a name before :", head_name), span = form.items[1].span}, false
+            return "", false, "", false, {}, Compile_Error{message = fmt.tprintf("%s expects a name before :", head_name), span = form.items[1].span}, false
         }
         type_text, next_i, err_type, ok_type := parse_type_text_from_forms(form.items[:], value_index)
         if !ok_type {
-            return "", false, "", {}, err_type, false
+            return "", false, "", false, {}, err_type, false
         }
         if next_i >= len(form.items) {
-            return "", false, "", {}, Compile_Error{message = fmt.tprintf("typed %s missing value", head_name), span = form.span}, false
+            if allow_typed_missing_value {
+                return map_name(raw_name[:len(raw_name)-1]), true, type_text, false, {}, {}, true
+            }
+            return "", false, "", false, {}, Compile_Error{message = fmt.tprintf("typed %s missing value", head_name), span = form.span}, false
         }
         if next_i+1 != len(form.items) {
-            return "", false, "", {}, Compile_Error{message = fmt.tprintf("%s expects exactly one value", head_name), span = form.items[next_i+1].span}, false
+            return "", false, "", false, {}, Compile_Error{message = fmt.tprintf("%s expects exactly one value", head_name), span = form.items[next_i+1].span}, false
         }
-        return map_name(raw_name[:len(raw_name)-1]), true, type_text, form.items[next_i], {}, true
+        return map_name(raw_name[:len(raw_name)-1]), true, type_text, true, form.items[next_i], {}, true
     }
 
     if len(form.items) != value_index+1 {
-        return "", false, "", {}, Compile_Error{message = fmt.tprintf("typed %s expects a name ending in ':'", head_name), span = form.items[1].span}, false
+        return "", false, "", false, {}, Compile_Error{message = fmt.tprintf("typed %s expects a name ending in ':'", head_name), span = form.items[1].span}, false
     }
-    return map_name(raw_name), false, "", form.items[value_index], {}, true
+    return map_name(raw_name), false, "", true, form.items[value_index], {}, true
 }
 
 parse_decl :: proc(top_form: CST_Top_Form) -> (decl: AST_Decl, err: Compile_Error, ok: bool) {
@@ -1204,7 +1222,7 @@ parse_decl :: proc(top_form: CST_Top_Form) -> (decl: AST_Decl, err: Compile_Erro
                 return decl, err_alias, false
             }
         }
-        name, has_ty, ty, value, err_binding, ok_binding := parse_decl_typed_binding(form, head.text, value_index)
+        name, has_ty, ty, _, value, err_binding, ok_binding := parse_decl_typed_binding(form, head.text, value_index)
         if !ok_binding {
             return decl, err_binding, false
         }
@@ -1233,15 +1251,16 @@ parse_decl :: proc(top_form: CST_Top_Form) -> (decl: AST_Decl, err: Compile_Erro
             doc_lines = append_doc_lines(doc_lines[:], doc_lines_from_string(unquote_string(form.items[2].text))[:])
             value_index = 3
         }
-        name, has_ty, ty, value, err_binding, ok_binding := parse_decl_typed_binding(form, head.text, value_index)
+        name, has_ty, ty, has_value, value, err_binding, ok_binding := parse_decl_typed_binding(form, head.text, value_index, true)
         if !ok_binding {
             return decl, err_binding, false
         }
         var_decl := Var_Decl{
-            name   = name,
-            has_ty = has_ty,
-            ty     = ty,
-            value  = value,
+            name      = name,
+            has_ty    = has_ty,
+            ty        = ty,
+            has_value = has_value,
+            value     = value,
         }
         return AST_Decl{
             kind = .Var,

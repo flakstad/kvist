@@ -2258,6 +2258,35 @@ closest_proc_param_keyword :: proc(proc_decl: ^Proc_Decl, name: string) -> (stri
     return best, true
 }
 
+emit_default_expr_for_call :: proc(e: ^Emitter, default_form: CST_Form, provided_names: []string, provided_forms: []CST_Form) -> (string, Compile_Error, bool) {
+    if default_form.kind == .List &&
+       len(default_form.items) == 2 &&
+       is_symbol(default_form.items[0], "#caller_expression") &&
+       default_form.items[1].kind == .Symbol {
+        referenced_name := map_name(default_form.items[1].text)
+        defer delete(referenced_name)
+        for name, idx in provided_names {
+            if name == referenced_name && idx < len(provided_forms) {
+                target_text, err_target, ok_target := emit_expr(e, provided_forms[idx])
+                if !ok_target {
+                    return "", err_target, false
+                }
+                return fmt.tprintf("#caller_expression(%s)", target_text), {}, true
+            }
+        }
+    }
+    return emit_expr(e, default_form)
+}
+
+default_is_odin_caller_intrinsic :: proc(form: CST_Form) -> bool {
+    if is_symbol(form, "#caller_location") {
+        return true
+    }
+    return form.kind == .List &&
+           len(form.items) == 2 &&
+           is_symbol(form.items[0], "#caller_expression")
+}
+
 emit_named_call_with_defaults :: proc(e: ^Emitter, proc_decl: ^Proc_Decl, form: CST_Form) -> (arg_texts: [dynamic]string, err: Compile_Error, ok: bool) {
     if form.kind != .Brace {
         return arg_texts, Compile_Error{message = "named arguments expect a brace form", span = form.span}, false
@@ -2265,6 +2294,10 @@ emit_named_call_with_defaults :: proc(e: ^Emitter, proc_decl: ^Proc_Decl, form: 
 
     named_values := make([dynamic]Brace_Pair, 0, len(form.items)/2)
     defer delete(named_values)
+    provided_names := make([dynamic]string, 0, len(form.items)/2)
+    defer delete(provided_names)
+    provided_forms := make([dynamic]CST_Form, 0, len(form.items)/2)
+    defer delete(provided_forms)
 
     seen: [dynamic]string
     for i := 0; i < len(form.items); i += 2 {
@@ -2295,6 +2328,8 @@ emit_named_call_with_defaults :: proc(e: ^Emitter, proc_decl: ^Proc_Decl, form: 
             return arg_texts, err_value, false
         }
         append(&named_values, Brace_Pair{key = field_name, value = value_text})
+        append(&provided_names, field_name)
+        append(&provided_forms, value)
     }
 
     for param, param_idx in proc_decl.params {
@@ -2310,7 +2345,10 @@ emit_named_call_with_defaults :: proc(e: ^Emitter, proc_decl: ^Proc_Decl, form: 
             continue
         }
         if param.has_default {
-            default_text, err_default, ok_default := emit_expr(e, param.default_value)
+            if default_is_odin_caller_intrinsic(param.default_value) {
+                continue
+            }
+            default_text, err_default, ok_default := emit_default_expr_for_call(e, param.default_value, provided_names[:], provided_forms[:])
             if !ok_default {
                 return arg_texts, err_default, false
             }
@@ -2338,19 +2376,29 @@ emit_positional_call_with_defaults :: proc(e: ^Emitter, proc_decl: ^Proc_Decl, a
         return arg_texts, Compile_Error{message = fmt.tprintf("%s expects at most %d arguments", proc_decl.name, len(proc_decl.params)), span = span}, false
     }
 
-    for arg in args {
+    provided_names := make([dynamic]string, 0, len(args))
+    defer delete(provided_names)
+    provided_forms := make([dynamic]CST_Form, 0, len(args))
+    defer delete(provided_forms)
+
+    for arg, arg_idx in args {
         arg_text, err_arg, ok_arg := emit_expr(e, arg)
         if !ok_arg {
             return arg_texts, err_arg, false
         }
         append(&arg_texts, arg_text)
+        append(&provided_names, proc_decl.params[arg_idx].name)
+        append(&provided_forms, arg)
     }
     for idx := len(args); idx < len(proc_decl.params); idx += 1 {
         param := proc_decl.params[idx]
         if !param.has_default {
             return arg_texts, Compile_Error{message = fmt.tprintf("%s expects at least %d arguments", proc_decl.name, idx+1), span = span}, false
         }
-        default_text, err_default, ok_default := emit_expr(e, param.default_value)
+        if default_is_odin_caller_intrinsic(param.default_value) {
+            continue
+        }
+        default_text, err_default, ok_default := emit_default_expr_for_call(e, param.default_value, provided_names[:], provided_forms[:])
         if !ok_default {
             return arg_texts, err_default, false
         }
@@ -2400,6 +2448,10 @@ emit_mixed_call_with_defaults :: proc(e: ^Emitter, proc_decl: ^Proc_Decl, positi
 
     named_values := make([dynamic]Brace_Pair, 0, len(named_form.items)/2)
     defer delete(named_values)
+    provided_names := make([dynamic]string, 0, len(positional_args)+len(named_form.items)/2)
+    defer delete(provided_names)
+    provided_forms := make([dynamic]CST_Form, 0, len(positional_args)+len(named_form.items)/2)
+    defer delete(provided_forms)
 
     seen: [dynamic]string
     for i := 0; i < len(named_form.items); i += 2 {
@@ -2430,6 +2482,8 @@ emit_mixed_call_with_defaults :: proc(e: ^Emitter, proc_decl: ^Proc_Decl, positi
             return arg_texts, err_value, false
         }
         append(&named_values, Brace_Pair{key = field_name, value = value_text})
+        append(&provided_names, field_name)
+        append(&provided_forms, value)
     }
 
     for arg, idx in positional_args {
@@ -2444,6 +2498,8 @@ emit_mixed_call_with_defaults :: proc(e: ^Emitter, proc_decl: ^Proc_Decl, positi
             }
         }
         append(&arg_texts, arg_text)
+        append(&provided_names, param.name)
+        append(&provided_forms, arg)
     }
 
     for idx := len(positional_args); idx < len(proc_decl.params); idx += 1 {
@@ -2460,7 +2516,10 @@ emit_mixed_call_with_defaults :: proc(e: ^Emitter, proc_decl: ^Proc_Decl, positi
             continue
         }
         if param.has_default {
-            default_text, err_default, ok_default := emit_expr(e, param.default_value)
+            if default_is_odin_caller_intrinsic(param.default_value) {
+                continue
+            }
+            default_text, err_default, ok_default := emit_default_expr_for_call(e, param.default_value, provided_names[:], provided_forms[:])
             if !ok_default {
                 return arg_texts, err_default, false
             }
@@ -3682,15 +3741,52 @@ source_package_surface_head :: proc(head_name: string) -> string {
         return fmt.tprintf("%s/%s", head_name[:dot], head_name[dot+1:])
     }
     sep := strings.index(head_name, "__")
-    if sep <= 0 {
-        return head_name
+    if sep > 0 {
+        pkg := head_name[:sep]
+        member := head_name[sep+2:]
+        if source_package_prefix_text(pkg) {
+            if strings.has_suffix(member, "_impl") {
+                member = member[:len(member)-len("_impl")]
+            } else if strings.has_suffix(member, "-impl") {
+                member = member[:len(member)-len("-impl")]
+            }
+            member = source_package_surface_member_name(member)
+            return fmt.tprintf("%s/%s", pkg, member)
+        }
     }
-    pkg := head_name[:sep]
-    member := head_name[sep+2:]
-    if source_package_prefix_text(pkg) {
-        return fmt.tprintf("%s/%s", pkg, member)
+    dash := strings.index(head_name, "-")
+    if dash > 0 {
+        pkg := head_name[:dash]
+        if source_package_shorthand_prefix_text(pkg) {
+            return fmt.tprintf("%s/%s", pkg, head_name[dash+1:])
+        }
     }
     return head_name
+}
+
+source_package_surface_member_name :: proc(member: string) -> string {
+    builder := strings.builder_make()
+    defer strings.builder_destroy(&builder)
+    i := 0
+    for i < len(member) {
+        if strings.has_prefix(member[i:], "_bang") {
+            strings.write_byte(&builder, '!')
+            i += len("_bang")
+        } else if strings.has_prefix(member[i:], "-bang") {
+            strings.write_byte(&builder, '!')
+            i += len("-bang")
+        } else if strings.has_prefix(member[i:], "_p") {
+            strings.write_byte(&builder, '?')
+            i += len("_p")
+        } else if member[i] == '_' {
+            strings.write_byte(&builder, '-')
+            i += 1
+        } else {
+            strings.write_byte(&builder, member[i])
+            i += 1
+        }
+    }
+    return strings.clone(strings.to_string(builder))
 }
 
 source_package_prefix_text :: proc(pkg: string) -> bool {
@@ -3704,6 +3800,14 @@ source_package_prefix_text :: proc(pkg: string) -> bool {
         return false
     }
     return true
+}
+
+source_package_shorthand_prefix_text :: proc(pkg: string) -> bool {
+    switch pkg {
+    case "arr", "map", "set", "str", "io", "json", "cli", "html", "http", "httpc", "session", "sse", "dstar", "parallel", "p", "soa":
+        return true
+    }
+    return false
 }
 
 thread_owned_result_head :: proc(head_name: string) -> bool {
@@ -5539,6 +5643,12 @@ analyze_owned_scope_body :: proc(e: ^Emitter, forms: []CST_Form, can_transfer_fi
                     _ = owned_locals_remove_last(live, map_name(item.text))
                 }
             }
+        case "discard":
+            for item in form.items[1:] {
+                if form_produces_owned_value(item) {
+                    emit_warning(e, discarded_owned_warning_message(item), item.span)
+                }
+            }
         case "set!":
             if len(form.items) == 3 && form.items[1].kind == .Symbol {
                 name := map_name(form.items[1].text)
@@ -7009,6 +7119,17 @@ emit_union_constructor :: proc(e: ^Emitter, union_decl: ^Union_Decl, arg: CST_Fo
 emit_directive_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) {
     if len(form.items) < 2 || form.items[0].kind != .Symbol || len(form.items[0].text) == 0 || form.items[0].text[0] != '#' {
         return "", Compile_Error{message = "invalid directive expression", span = form.span}, false
+    }
+
+    if form.items[0].text == "#caller_expression" {
+        if len(form.items) != 2 {
+            return "", Compile_Error{message = "#caller_expression expects exactly one expression", span = form.span}, false
+        }
+        target_text, err_target, ok_target := emit_expr(e, form.items[1])
+        if !ok_target {
+            return "", err_target, false
+        }
+        return fmt.tprintf("#caller_expression(%s)", target_text), {}, true
     }
 
     target := form.items[1]
@@ -10118,7 +10239,10 @@ emit_local_var_stmt :: proc(e: ^Emitter, form: CST_Form) -> (Compile_Error, bool
             return err_type, false
         }
         if next_i >= len(form.items) {
-            return Compile_Error{message = "typed defvar missing value", span = target.span}, false
+            local_name := map_name(name[:len(name)-1])
+            emit_line(e, fmt.tprintf("%s: %s", local_name, parsed_ty))
+            bind_local_type(e, local_name, parsed_ty)
+            return {}, true
         }
         ty = parsed_ty
         value_index = next_i
@@ -10897,6 +11021,24 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
         }
         emit_line_mapped(e, strings.clone(strings.to_string(line_builder)), form.items[1].span)
         return {}, true
+    case "discard":
+        if len(form.items) < 2 {
+            return Compile_Error{message = "discard expects at least one expression", span = form.span}, false
+        }
+        for item in form.items[1:] {
+            if !form_produces_owned_value(item) {
+                err_owned, bad_owned := owned_result_usage_error(item, false)
+                if bad_owned {
+                    return err_owned, false
+                }
+            }
+            expr, err_expr, ok_expr := emit_expr(e, item)
+            if !ok_expr {
+                return err_expr, false
+            }
+            emit_prefixed_expr_mapped(e, "_ = ", expr, item.span)
+        }
+        return {}, true
     case "break":
         if len(form.items) != 1 {
             return Compile_Error{message = "break does not take arguments", span = form.span}, false
@@ -11289,6 +11431,24 @@ emit_proc_suffix_directives :: proc(e: ^Emitter, directives: []string) {
     }
 }
 
+emit_proc_where_constraints :: proc(e: ^Emitter, constraints: []CST_Form) -> (Compile_Error, bool) {
+    if len(constraints) == 0 {
+        return {}, true
+    }
+    strings.write_string(&e.builder, " where ")
+    for constraint, idx in constraints {
+        if idx > 0 {
+            strings.write_string(&e.builder, " && ")
+        }
+        text, err_text, ok_text := emit_expr(e, constraint)
+        if !ok_text {
+            return err_text, false
+        }
+        strings.write_string(&e.builder, text)
+    }
+    return {}, true
+}
+
 emit_decl :: proc(e: ^Emitter, decl: IR_Decl) -> (Compile_Error, bool) {
     for line in decl.doc_lines {
         emit_line(e, line)
@@ -11329,6 +11489,13 @@ emit_decl :: proc(e: ^Emitter, decl: IR_Decl) -> (Compile_Error, bool) {
             emit_line(e, fmt.tprintf("%s :: %s", decl.const_decl.name, value))
         }
     case .Var:
+        if !decl.var_decl.has_value {
+            if !decl.var_decl.has_ty {
+                return Compile_Error{message = "defvar without a value requires an explicit type", span = decl.span}, false
+            }
+            emit_line(e, fmt.tprintf("%s: %s", decl.var_decl.name, decl.var_decl.ty))
+            return {}, true
+        }
         expected_type := ""
         if decl.var_decl.has_ty {
             expected_type = decl.var_decl.ty
@@ -11406,10 +11573,29 @@ emit_decl :: proc(e: ^Emitter, decl: IR_Decl) -> (Compile_Error, bool) {
             if idx > 0 {
                 strings.write_string(&e.builder, ", ")
             }
+            if decl.proc_decl.params[idx].has_default &&
+               default_is_odin_caller_intrinsic(decl.proc_decl.params[idx].default_value) {
+                default_text, err_default, ok_default := emit_expr(e, decl.proc_decl.params[idx].default_value)
+                if !ok_default {
+                    return err_default, false
+                }
+                fmt.sbprintf(
+                    &e.builder,
+                    "%s: %s = %s",
+                    decl.proc_decl.params[idx].name,
+                    decl.proc_decl.params[idx].ty,
+                    default_text,
+                )
+                idx += 1
+                continue
+            }
             ty := decl.proc_decl.params[idx].ty
             fmt.sbprintf(&e.builder, "%s", decl.proc_decl.params[idx].name)
             next_idx := idx + 1
-            for next_idx < len(decl.proc_decl.params) && decl.proc_decl.params[next_idx].ty == ty {
+            for next_idx < len(decl.proc_decl.params) &&
+                decl.proc_decl.params[next_idx].ty == ty &&
+                !(decl.proc_decl.params[next_idx].has_default &&
+                  default_is_odin_caller_intrinsic(decl.proc_decl.params[next_idx].default_value)) {
                 fmt.sbprintf(&e.builder, ", %s", decl.proc_decl.params[next_idx].name)
                 next_idx += 1
             }
@@ -11420,6 +11606,10 @@ emit_decl :: proc(e: ^Emitter, decl: IR_Decl) -> (Compile_Error, bool) {
         emit_return_spec(e, decl.proc_decl.returns)
         emit_proc_suffix_directives(e, e.pending_suffix_directives[:])
         emit_proc_suffix_directives(e, decl.proc_decl.suffix_directives[:])
+        err_where, ok_where := emit_proc_where_constraints(e, decl.proc_decl.where_constraints[:])
+        if !ok_where {
+            return err_where, false
+        }
         clear(&e.pending_prefix_directives)
         clear(&e.pending_suffix_directives)
         strings.write_string(&e.builder, " {")
