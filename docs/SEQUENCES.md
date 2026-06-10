@@ -149,11 +149,17 @@ These helpers are already in scope and should remain small:
 (get m k default)
 (slice xs start end)
 (contains? collection key)
+(in value collection)
+(not-in value collection)
+(update! place f args...)
+(assoc value.field new-value)
+(delete! map key)
 ```
 
 Cross-family collection helpers live in `kvist:core`: `count`,
-`empty?`, `get`, `slice`, and `contains?`. Other
-collection operations should use explicit package names such as `arr.*`, `map.*`, `str.*`, or `set.*`.
+`empty?`, `get`, `slice`, `contains?`, `in`, `not-in`, `update!`, `assoc`,
+and `delete!`. Other collection operations should use explicit package names
+such as `arr.*`, `map.*`, `str.*`, or `set.*`.
 
 The access and trimming helpers use the direct Odin representation where
 possible. Direct access syntax and call-shaped helpers are equivalent where both
@@ -171,8 +177,22 @@ Mutation uses the same place model:
 (set! place value)         ;; assign
 (mut! place += value)      ;; compound operator mutation
 (update! place f args...)  ;; functional mutation
+(delete! map key)          ;; remove a map key in place
+(inc! place)               ;; unary place mutation; also dec!, toggle!, negate!
 (discard expr...)          ;; intentional ignore for non-owned values
 ```
+
+`assoc` is the shallow non-mutating value-update counterpart:
+
+```clojure
+(assoc user.name "Ada")
+(-> user
+  (assoc .name "Ada")
+  (assoc .active? true))
+```
+
+It copies the root struct value, updates the selected field on the copy, and
+returns the copy. It does not deep-copy owned fields.
 
 `for` is the expression form for building owned collections from other
 collections:

@@ -50,7 +50,7 @@ reload_app_symbol_name :: proc(text: string) -> string {
     builder := strings.builder_make()
     defer strings.builder_destroy(&builder)
     for ch in mapped {
-        if ch == '/' {
+        if ch == '/' || ch == '.' {
             strings.write_string(&builder, "__")
         } else {
             strings.write_rune(&builder, ch)

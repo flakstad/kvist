@@ -1,0 +1,40 @@
+;; Macro authoring examples: validation, multiple returned forms, gensym, and
+;; field-selector inspection.
+
+(defmacro deffield-name [const-name field]
+  (if (field-selector? field)
+    (let [typed-name (symbol (str (name const-name) ":"))]
+      (quasiquote
+        (def (unquote typed-name) string (unquote (name field)))))
+    (error "deffield-name expects a field selector such as .name")))
+
+(defmacro defstring-fn [fn-name value]
+  (let [tmp (gensym "value")]
+    (quasiquote
+      (defn (unquote fn-name) [] -> string
+        (let [(unquote tmp) (unquote value)]
+          (unquote tmp))))))
+
+(defmacro defentity [name fields]
+  (if (brace? fields)
+    (let [make-name (symbol (str "make-" (name name)))]
+      (forms
+        (quasiquote
+          (defstruct (unquote name) (unquote fields)))
+        (quasiquote
+          (defn (unquote make-name) [] -> (unquote name)
+            ((unquote name) {})))))
+    (error "defentity expects a brace field map")))
+
+(defentity User {name: string age: int})
+(deffield-name User-Name-Field .name)
+(defstring-fn greeting "hello")
+
+(defn macro-authoring-demo [] -> string
+  (let [user (make-User)]
+    (if (= User-Name-Field "name")
+      (greeting)
+      user.name)))
+
+(defn main []
+  (println (macro-authoring-demo)))

@@ -25,7 +25,8 @@ kvist xref file.kvist symbol
 
 `kvist eval` and `kvist expand` generate scratch Odin with the surrounding file
 context. `eval` runs the scratch program; `expand` prints the generated Odin.
-`macroexpand` shows frontend macro expansion before Odin lowering.
+`macroexpand` shows frontend macro expansion before Odin lowering. See
+[MACROS.md](MACROS.md) for the macro authoring surface.
 
 ## Source Maps And Diagnostics
 

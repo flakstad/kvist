@@ -13,7 +13,7 @@
 
 (defn run
   "Runs the reloadable application loop and returns at a safe checkpoint."
-  [state: (ptr app.App_State) host: (ptr reload.Run_Host)]
+  [state: ^app.App_State host: ^reload.Run_Host]
   (while true
     (app.tick state)
     (time.sleep app.delay)

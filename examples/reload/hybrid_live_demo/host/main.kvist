@@ -15,7 +15,7 @@
 (def live-module-config: kvist_live.Module_Load_Config
   (kvist_live.Module_Load_Config {}))
 
-(defvar hybrid-state-ptr: (ptr shared.State) nil)
+(defvar hybrid-state-ptr: ^shared.State nil)
 (defvar hybrid-native-generation: int 0)
 
 (defn render-value [value: kvist_live.Value] -> string
@@ -28,7 +28,7 @@
     [.String .Handle] (strings.clone value.text)
     :else (strings.clone "")))
 
-(defn host-log-capability [runtime: (ptr kvist_live.Runtime)
+(defn host-log-capability [runtime: ^kvist_live.Runtime
                            capability-name: string
                            args: (slice kvist_live.Value)] -> [value: kvist_live.Value, err: kvist_live.Runtime_Error, ok: bool]
   (if (= (len args) 0)
@@ -42,7 +42,7 @@
           (delete rendered)))
       (return (kvist_live.value_nil) (kvist_live.Runtime_Error {}) true))))
 
-(defn host-snapshot-capability [runtime: (ptr kvist_live.Runtime)
+(defn host-snapshot-capability [runtime: ^kvist_live.Runtime
                                 capability-name: string
                                 args: (slice kvist_live.Value)] -> [value: kvist_live.Value, err: kvist_live.Runtime_Error, ok: bool]
   (if (= hybrid-state-ptr nil)
@@ -60,7 +60,7 @@
 (defn library-path [] -> string
   (kvist_hot.library_filename "build/hybrid_live_demo/hybrid_demo"))
 
-(defn print-native-state [symbols: (ptr support.Hybrid_Demo_Symbols) state: (ptr shared.State)]
+(defn print-native-state [symbols: ^support.Hybrid_Demo_Symbols state: ^shared.State]
   (fmt.printf "[native] module=%s tick=%d reloads=%d unloads=%d message=%s\n"
               (support.Call_Symbol_Message symbols)
               state^.tick_count

@@ -20,7 +20,7 @@
   ;; Accept a pointer when absence or shared identity is part of the API.
   (if (nil? req)
     0
-    (path-len (deref req))))
+    (path-len req^)))
 
 (defn main []
   (let [pred: (fn [x: int] -> bool) (fn [x: int] -> bool

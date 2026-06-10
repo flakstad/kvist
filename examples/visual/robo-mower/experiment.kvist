@@ -51,17 +51,17 @@
 
 (defn docked?
   "Return true when the robot is at or inside the simulated charging area."
-  [state: (ptr App-State)] -> bool
+  [state: ^App-State] -> bool
   (or state.charging (< (dock-distance2 (addr state.robot)) (f32 1600.0))))
 
 (defn seed-run!
   "Set a repeatable but distinct random seed for one run."
-  [state: (ptr App-State), run: int]
+  [state: ^App-State, run: int]
   (set! state.robot.seed (+ (u32 0xC0A57) (u32 (* run 747796405)))))
 
 (defn add-benchmark-obstacle!
   "Place a deterministic obstacle across the first mapped lane."
-  [state: (ptr App-State)]
+  [state: ^App-State]
   (mark-rect! (addr state.world) 42 9 5 5))
 
 (defn run-experiment

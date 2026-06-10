@@ -5627,6 +5627,23 @@ cli_reload_command_discovers_sibling_reload_adapter :: proc(t: ^testing.T) {
     testing.expect_value(t, state.exit_code, 0)
     testing.expect_value(t, strings.contains(string(stdout), fmt.tprintf(`"input": "%s"`, reload_path)), true)
     testing.expect_value(t, strings.contains(string(stdout), "reload.kvist"), true)
+
+    check_state, check_stdout, check_stderr, check_exec_err := os.process_exec(
+        os.Process_Desc{
+            command = {kvist_bin, "check", reload_path},
+            working_dir = repo_root,
+        },
+        context.allocator,
+    )
+    defer delete(check_stdout)
+    defer delete(check_stderr)
+
+    testing.expect_value(t, check_exec_err == nil, true)
+    if check_exec_err != nil {
+        return
+    }
+    testing.expect_value(t, check_state.exited, true)
+    testing.expect_value(t, check_state.exit_code, 0)
 }
 
 @(test)
@@ -6381,25 +6398,46 @@ macroexpand_rejects_binding_macro_shapes :: proc(t: ^testing.T) {
   value)`)
     testing.expect_value(t, ok_if_let, false)
     defer delete(err_if_let.message)
-    testing.expect_value(t, err_if_let.message, "if-let expects [value bool expr], then, and else")
+    testing.expect_value(t, err_if_let.message, "while expanding macro if-let: if-let expects [value bool expr], then, and else")
 
     _, err_when_let, ok_when_let := kvist.macroexpand_source(`(when-let [value 1 (query)]
   value)`)
     testing.expect_value(t, ok_when_let, false)
     defer delete(err_when_let.message)
-    testing.expect_value(t, err_when_let.message, "when-let expects [value bool expr] binding")
+    testing.expect_value(t, err_when_let.message, "while expanding macro when-let: when-let expects [value bool expr] binding")
 
     _, err_when_ok, ok_when_ok := kvist.macroexpand_source(`(when-ok [data (read-text path)]
   data)`)
     testing.expect_value(t, ok_when_ok, false)
     defer delete(err_when_ok.message)
-    testing.expect_value(t, err_when_ok.message, "when-ok expects [value err expr] binding")
+    testing.expect_value(t, err_when_ok.message, "while expanding macro when-ok: when-ok expects [value err expr] binding")
 
     _, err_if_ok, ok_if_ok := kvist.macroexpand_source(`(if-ok [data err (read-text path)]
   data)`)
     testing.expect_value(t, ok_if_ok, false)
     defer delete(err_if_ok.message)
-    testing.expect_value(t, err_if_ok.message, "if-ok expects [value err expr], then, and else")
+    testing.expect_value(t, err_if_ok.message, "while expanding macro if-ok: if-ok expects [value err expr], then, and else")
+}
+
+@(test)
+macroexpand_reports_user_macro_error_context :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defmacro fail-fast []
+  (error "bad shape"))
+
+(defmacro outer []
+  (fail-fast))`
+
+    _, err_direct, ok_direct := kvist.macroexpand_eval_source_with_map(source, `(fail-fast)`)
+    testing.expect_value(t, ok_direct, false)
+    defer delete(err_direct.message)
+    testing.expect_value(t, err_direct.message, "while expanding macro fail-fast: bad shape")
+
+    _, err_nested, ok_nested := kvist.macroexpand_eval_source_with_map(source, `(outer)`)
+    testing.expect_value(t, ok_nested, false)
+    defer delete(err_nested.message)
+    testing.expect_value(t, err_nested.message, "while expanding macro outer: while expanding macro fail-fast: bad shape")
 }
 
 @(test)

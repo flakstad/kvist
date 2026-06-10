@@ -241,7 +241,7 @@
 
 (defn velocity-step!
   "Advance velocity through diffusion, projection, advection, and projection."
-  [state: (ptr App-State)]
+  [state: ^App-State]
   (diffuse! 1 state^.vx0 state^.vx Viscosity Dt)
   (diffuse! 2 state^.vy0 state^.vy Viscosity Dt)
   (project! state^.vx0 state^.vy0 state^.vx state^.vy)
@@ -251,7 +251,7 @@
 
 (defn density-step!
   "Advance smoke density through diffusion and velocity advection."
-  [state: (ptr App-State)]
+  [state: ^App-State]
   (diffuse! 0 state^.density0 state^.density Diffusion Dt)
   (advect! 0 state^.density state^.density0 state^.vx state^.vy Dt))
 
@@ -266,14 +266,14 @@
 
 (defn step-fluid!
   "Advance all fluid buffers by one simulation step."
-  [state: (ptr App-State)]
+  [state: ^App-State]
   (velocity-step! state)
   (density-step! state)
   (fade-density! state^.density))
 
 (defn add-smoke!
   "Inject density and velocity into a circular patch."
-  [state: (ptr App-State), gx: int, gy: int, radius: int, amount: f32, fx: f32, fy: f32]
+  [state: ^App-State, gx: int, gy: int, radius: int, amount: f32, fx: f32, fy: f32]
   (let [r2 (* radius radius)
         density state^.density
         vx state^.vx
@@ -300,7 +300,7 @@
 
 (defn seed-field!
   "Reset all fields and seed a few deterministic smoke plumes."
-  [state: (ptr App-State)]
+  [state: ^App-State]
   (clear-buffer! state^.density)
   (clear-buffer! state^.density0)
   (clear-buffer! state^.vx)
@@ -334,7 +334,7 @@
 
 (defn update-source!
   "Inject smoke and force from mouse input into the fluid field."
-  [state: (ptr App-State)]
+  [state: ^App-State]
   (let [[gx gy inside] (mouse-grid)
         mx (f32 (rl.GetMouseX))
         my (f32 (rl.GetMouseY))]
@@ -371,7 +371,7 @@
 
 (defn draw-field
   "Draw the density field as fixed-size grid cells."
-  [state: (ptr App-State)]
+  [state: ^App-State]
   (let [start-x (grid-start-x)
         density state^.density
         vx state^.vx
@@ -392,7 +392,7 @@
 
 (defn draw-velocity
   "Draw a sparse velocity-vector overlay."
-  [state: (ptr App-State)]
+  [state: ^App-State]
   (when state^.show-velocity
     (let [start-x (grid-start-x)
           vx state^.vx
@@ -422,7 +422,7 @@
 
 (defn draw-hud
   "Draw the fixed-column fluid simulation HUD."
-  [font: rl.Font, state: (ptr App-State)]
+  [font: rl.Font, state: ^App-State]
   (let [panel (rl.Rectangle [8 8 (f32 (- (rl.GetScreenWidth) 16)) 96])]
     (rl.DrawRectangleRounded panel 0.08 8 [0 0 0 195])
     (rl.DrawRectangleRoundedLines panel 0.08 8 [255 255 255 45])
@@ -446,7 +446,7 @@
 
 (defn update-fps-metric!
   "Update the smoothed FPS counter roughly twice per second."
-  [state: (ptr App-State)]
+  [state: ^App-State]
   (set! state^.frames (+ state^.frames 1))
   (let [now (rl.GetTime)
         elapsed (- now state^.metric-start)]
@@ -457,7 +457,7 @@
 
 (defn handle-input!
   "Apply keyboard controls to the app state."
-  [state: (ptr App-State)]
+  [state: ^App-State]
   (when (rl.IsKeyPressed .SPACE)
     (set! state^.paused (not state^.paused)))
   (when (rl.IsKeyPressed .V)

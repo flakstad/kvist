@@ -51,6 +51,8 @@ The stronger case for Kvist is narrower:
 - first-class native hot-reload patterns over ordinary compiled code
 - optional live-module reload over a stable host capability surface
 
+See [docs/MACROS.md](docs/MACROS.md) for the current macro authoring surface.
+
 The important win is not "Odin, but with parens". The important win is:
 
 - Lisp-grade metaprogramming over systems code
@@ -440,9 +442,11 @@ current Odin block or procedure.
   - raw Odin names re-exported from a source package can be declared with `(exports [Name ...])`
 - top-level `(def name expr)` -> `name :: expr`
 - top-level `(def name: type expr)` -> `name: type : expr`
-- top-level `(def Name Type)` declares an Odin type alias, e.g.
+- top-level `(def Name Type)` declares an Odin type alias when the value
+  position parses as a type and the name is not written with `:`, e.g.
   `(def Handle (distinct rawptr))` and
-  `(def Order-Groups map[int][dynamic]Order)`
+  `(def Order-Groups map[int][dynamic]Order)`. Use `(def name: Type value)`
+  for a typed constant value.
 - top-level `(def- name expr)` and `(def- name: type expr)` package-private constants
 - top-level `(defvar name expr)` -> `name := expr`
 - top-level `(defvar name: type expr)` -> `name: type = expr`
@@ -475,7 +479,20 @@ current Odin block or procedure.
 - top-level `(defmacro name [arg ...] body...)`
   - `defmacro-` is the package-private macro form
   - expands over Kvist forms before ordinary parse/lowering
-  - resource-scope bootstrap macros still exist alongside it during bootstrap
+  - macro authoring uses `quote`, `quasiquote`, `unquote`, `splice`, `forms`,
+    `symbol`, `keyword`, `gensym`, `error`, and form predicates such as
+    `list?`, `vector?`, `brace?`, `symbol?`, and `field-selector?`
+- subsystem declaration forms are ordinary top-level syntax owned by a focused
+  Kvist subsystem:
+  - `(deftransform name (comp ...))` defines a reusable fused transform for
+    `into` and `transduce`
+  - `(defsource name [args...] -> Item state-expr :next next-proc [:dispose dispose-proc])`
+    defines a bounded producer protocol for `each`, `into`, and `transduce`
+  - `(defstate State {metadata...})` declares a reload-app state boundary and
+    reload cooperation metadata
+  - `live.module`, `live.command`, and `live.hook` are structural forms consumed
+    by the live loader; the `kvist:live` package provides `live.defmodule`,
+    `live.defcommand`, and `live.defhook` wrappers
 - top-level and statement `(odin "...")` raw escape hatches
 - `(let [binding value ...] body...)` scoped expression/block, including
   positional multi-return binding; a local binding may be followed
@@ -495,6 +512,16 @@ current Odin block or procedure.
   - `(set! place value)` assigns a value
   - `(mut! place += value)` applies a compound operator mutation
   - `(update! place f args...)` reads `place`, applies `f`, and writes the result
+  - `(delete! map key)` removes a key from a mutable map-like target in place
+  - `(inc! place)`, `(dec! place)`, `(toggle! place)`, and `(negate! place)`
+    are short place mutations for the common unary cases
+- shallow value update:
+  - `(assoc value.field new-value)` copies the root struct value, assigns the
+    selected field on the copy, and returns the copy
+  - in `->` pipelines, `(assoc .field new-value)` uses the threaded value as
+    the root struct target
+  - `assoc` is a shallow struct copy/update helper; it does not deep-copy owned
+    fields
 - `(discard expr...)` intentionally emits `_ = expr` for ignored non-owned
   values, such as callback parameters that must keep a required signature
 - final expression in a non-void `defn` emits `return <expr>`
@@ -560,7 +587,8 @@ current Odin block or procedure.
     indexing, optional-default helpers, or direct in-place mutation.
 - auto-exposed core helpers such as `(count collection)`, `(get target key [default])`,
   `(slice target start [end])`, `(empty? collection)`, `(contains? collection key)`,
-  and `(update! place f args...)`
+  `(in value collection)`, `(not-in value collection)`, `(update! place f args...)`,
+  `(assoc value.field new-value)`, `(delete! target key)`, and `(or-else expr fallback)`
   - `kvist:core` is the small auto-exposed core library.
   - Use the bare spelling in user code.
   - These helpers are defined in shipped `.kvist` source and lower through a
@@ -627,7 +655,7 @@ current Odin block or procedure.
   `(arr.partition-by .status users)`, `(arr.sort-by .age users)`, and
   `(arr.filter .verified users)`.
 - direct attached indexing such as `cells[(idx x y)]` works in reads, `set!`,
-  and `mut!`
+  `mut!`, and `update!`
 - direct access syntax has call-shaped equivalents:
   - `value.field` <=> `(get value .field)`
   - `value[index]` <=> `(get value index)`
@@ -638,8 +666,11 @@ current Odin block or procedure.
 - `(transmute Type value)` -> `transmute(Type)value`
 - `(type-assert value Type)` -> `value.(Type)`
 - `(zero Type)` -> `Type{}` for an explicit Odin zero value
-- pointer types can be written as `^T` or `(ptr T)`
-- `x^` and `(deref expr)` for pointer dereference; `(addr place)` and `(& place)` for addresses
+- pointer types use `^T` in ordinary code; `(ptr Type)` remains useful for
+  compound pointee type expressions
+- `x^` dereferences simple pointer symbols; `(deref expr)` handles compound
+  pointer expressions when call-shaped syntax is clearer
+- `(addr place)` takes an address; `(& place)` is the Odin-shaped equivalent
 - numbers, booleans, `nil`, and `(nil? value)`
 - calls: `(foo a b)` -> `foo(a, b)`; field-label brace arguments lower to
   Odin named arguments, e.g. `(foo a {timeout-ms: 50})` -> `foo(a, timeout_ms = 50)`
@@ -651,12 +682,14 @@ current Odin block or procedure.
 Pragmatic Odin conveniences beyond the minimal special-form core include
 `(contains? collection key)` for generic collection membership,
 `(in value collection)`,
-`(not-in value collection)`, `(break)`, `(continue)`, and directive expression
-wrappers like `(#force_inline call arg)`. Caller intrinsics can be written
-directly as `#caller_location` and `(#caller_expression expr)`.
+`(not-in value collection)`, `(break)`, `(continue)`, unary place mutations
+such as `(inc! place)`, and directive expression wrappers like
+`(#force_inline call arg)`. Caller intrinsics can be written directly as
+`#caller_location` and `(#caller_expression expr)`.
 
 For collection helpers, prefer explicit package names. Cross-family helpers now
-live as bare names, for example `count`, `empty?`, `contains?`, and `update!`.
+live as bare names, for example `count`, `empty?`, `contains?`, `assoc`, and
+`update!`.
 Other collection operations should be package-qualified under `arr.`, `map.`, `str.`, or `set.`.
 
 This is deliberately incomplete. Add only forms that map cleanly to Odin.
@@ -669,3 +702,13 @@ This is deliberately incomplete. Add only forms that map cleanly to Odin.
 - Add forms only when their Odin output is obvious.
 - Prefer an explicit raw Odin escape hatch over guessing.
 - Treat `odin check` as the source of truth.
+
+## Source Style
+
+- Commas are reader whitespace. They may be used to separate dense inline typed
+  parameters, but they are never required by the language.
+- Prefer `^T`, `addr`, and `x^` in ordinary pointer code. Use `(ptr Type)`,
+  `(& place)`, and `(deref expr)` when the call-shaped spelling is clearer.
+- Prefer direct place syntax such as `value.field`, `xs[i]`, and `xs[start:end]`
+  when it reads naturally. Use `get`, `slice`, `addr`, and `deref` when the
+  call-shaped spelling makes macro generation or complex expressions clearer.

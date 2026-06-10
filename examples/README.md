@@ -36,6 +36,8 @@ form from Emacs; many keep `main` small and put useful calls in a
   literal, and tiny `main`.
 - [`language/data-literals.kvist`](./language/data-literals.kvist): arrays,
   maps, type-call literals, allocator helpers, and literal expansion.
+- [`language/macro-authoring.kvist`](./language/macro-authoring.kvist):
+  validation, form predicates, `forms`, `gensym`, and field-selector handling.
 - [`language/cluck-port-packages.kvist`](./language/cluck-port-packages.kvist):
   relative `.kvist` source imports.
 - [`language/multi-return-bindings.kvist`](./language/multi-return-bindings.kvist):

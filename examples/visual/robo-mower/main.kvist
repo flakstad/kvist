@@ -108,7 +108,7 @@
 
 (defn robot-phase
   "Return the active physical or recovery phase for the HUD."
-  [state: (ptr App-State)] -> cstring
+  [state: ^App-State] -> cstring
   (when (<= state.battery (f32 0.0))
     (return "no-power"))
   (when state.charging
@@ -119,7 +119,7 @@
 
 (defn set-mode!
   "Set the robot controller mode and prime mode-specific state."
-  [state: (ptr App-State), mode: int]
+  [state: ^App-State, mode: int]
   (when (and (= mode Mode-Return)
              (not (= state.robot.mode Mode-Return)))
     (set! state.robot.return-source state.robot.mode))
@@ -143,7 +143,7 @@
 
 (defn reset-app!
   "Reset world robot and sensors."
-  [state: (ptr App-State)]
+  [state: ^App-State]
   (reset-world! (addr state.world))
   (reset-belief! (addr state.belief))
   (reset-robot! (addr state.robot))
@@ -191,13 +191,13 @@
 
 (defn delete-app-state!
   "Release dynamic buffers owned by a simulation state."
-  [state: (ptr App-State)]
+  [state: ^App-State]
   (delete-belief! (addr state.belief))
   (delete-world! (addr state.world)))
 
 (defn handle-input!
   "Apply keyboard controls for mode speed pause and reset."
-  [state: (ptr App-State)]
+  [state: ^App-State]
   (when (rl.IsKeyPressed .SPACE)
     (set! state.paused (not state.paused)))
   (when (rl.IsKeyPressed .ONE)
@@ -223,7 +223,7 @@
 
 (defn handle-mouse-controls!
   "Apply mouse clicks on fixed HUD controls."
-  [state: (ptr App-State)]
+  [state: ^App-State]
   (when (clicked? (rect 18 106 78 Button-H))
     (set-mode! state Mode-Random))
   (when (clicked? (rect 102 106 98 Button-H))
@@ -267,7 +267,7 @@
 
 (defn handle-mouse-edit!
   "Paint or erase obstacle cells under the mouse."
-  [state: (ptr App-State)]
+  [state: ^App-State]
   (let [mx (- (int (rl.GetMouseX)) Field-X)
         my (- (int (rl.GetMouseY)) Field-Y)]
     (when (and (>= mx 0) (< mx Field-Px-W) (>= my 0) (< my Field-Px-H))
@@ -286,21 +286,21 @@
 
 (defn base-distance2
   "Return squared distance from the robot to the charging base."
-  [robot: (ptr Robot)] -> f32
+  [robot: ^Robot] -> f32
   (let [dx (- (base-x) robot^.x)
         dy (- (base-y) robot^.y)]
     (+ (* dx dx) (* dy dy))))
 
 (defn dock-distance2
   "Return squared distance from the robot to the safe dock pose."
-  [robot: (ptr Robot)] -> f32
+  [robot: ^Robot] -> f32
   (let [dx (- (dock-x) robot^.x)
         dy (- (dock-y) robot^.y)]
     (+ (* dx dx) (* dy dy))))
 
 (defn begin-charging!
   "Enter the simulated dock charging phase."
-  [state: (ptr App-State)]
+  [state: ^App-State]
   (set! state.charging true)
   (set! state.undocking false)
   (set! state.dock-time 0.0)
@@ -310,7 +310,7 @@
 
 (defn update-mission-state!
   "Update robot mission policy such as low-battery return-to-base."
-  [state: (ptr App-State), cmd: Command, dt: f32]
+  [state: ^App-State, cmd: Command, dt: f32]
   (mut! state.mission-time += dt)
   (let [drain (+ (f32 0.16) (* (abs-f32 cmd.speed) (f32 0.004)))]
     (set! state.battery (math.clamp (- state.battery (* dt drain)) (f32 0.0) (f32 100.0))))
@@ -324,7 +324,7 @@
 
 (defn update-charging!
   "Apply the real-world charging phase while the robot is docked."
-  [state: (ptr App-State), dt: f32] -> bool
+  [state: ^App-State, dt: f32] -> bool
   (when (not state.charging)
     (return false))
   (set-drive-metrics! (addr state.robot) 0.0 0.0 false)
@@ -338,7 +338,7 @@
 
 (defn update-undocking!
   "Back out from the charger before resuming the previous mowing mode."
-  [state: (ptr App-State), dt: f32] -> bool
+  [state: ^App-State, dt: f32] -> bool
   (when (not state.undocking)
     (return false))
   (set! state.robot.heading Dock-Heading)
@@ -352,7 +352,7 @@
 
 (defn update-simulation!
   "Run one fixed simulation step."
-  [state: (ptr App-State), dt: f32]
+  [state: ^App-State, dt: f32]
   (sense! (addr state.world) (addr state.robot) (addr state.sensors))
   (when (update-charging! state dt)
     (sense! (addr state.world) (addr state.robot) (addr state.sensors))
@@ -371,7 +371,7 @@
 
 (defn cell-color
   "Return the color for one world cell."
-  [world: (ptr World), cell: int] -> rl.Color
+  [world: ^World, cell: int] -> rl.Color
   (let [cells world^.cells
         cut world^.cut]
     (when (= cells[cell] Cell-Obstacle)
@@ -386,7 +386,7 @@
 
 (defn draw-world
   "Draw the lawn cells and obstacle grid."
-  [state: (ptr App-State)]
+  [state: ^App-State]
   (let [world (addr state.world)
         y 0]
     (while (< y Grid-H)
@@ -416,7 +416,7 @@
 
 (defn draw-sensor-ray
   "Draw one distance sensor ray in screen space."
-  [robot: (ptr Robot), angle-offset: f32, distance: f32, color: rl.Color]
+  [robot: ^Robot, angle-offset: f32, distance: f32, color: rl.Color]
   (let [x (screen-x robot^.x)
         y (screen-y robot^.y)
         angle (+ robot^.heading angle-offset)
@@ -426,7 +426,7 @@
 
 (defn draw-sensors
   "Draw the active robot distance sensor rays."
-  [state: (ptr App-State)]
+  [state: ^App-State]
   (let [robot (addr state.robot)
         sensors (addr state.sensors)]
     (draw-sensor-ray robot (f32 0.0) sensors^.front (rgba 255 232 120 220))
@@ -435,7 +435,7 @@
 
 (defn draw-belief-marker
   "Draw the robot's last cutting evidence for belief-based modes."
-  [state: (ptr App-State)]
+  [state: ^App-State]
   (when (= state.robot.mode Mode-Mapped)
     (rl.DrawCircleLinesV (v2 (screen-x state.belief.last-cut-x)
                              (screen-y state.belief.last-cut-y))
@@ -444,7 +444,7 @@
 
 (defn draw-mapped-lanes
   "Draw the configured mapped-mode lane plan and active target."
-  [state: (ptr App-State)]
+  [state: ^App-State]
   (when (= state.robot.mode Mode-Mapped)
     (let [lane 0
           active state.robot.lane-index
@@ -485,7 +485,7 @@
 
 (defn draw-robot
   "Draw the mower blade disk and body."
-  [state: (ptr App-State)]
+  [state: ^App-State]
   (let [robot (addr state.robot)
         x (screen-x robot^.x)
         y (screen-y robot^.y)
@@ -517,7 +517,7 @@
 
 (defn draw-hud
   "Draw fixed-position simulation stats."
-  [font: rl.Font, state: (ptr App-State)]
+  [font: rl.Font, state: ^App-State]
   (let [world (addr state.world)
         belief (addr state.belief)
         robot (addr state.robot)
@@ -596,7 +596,7 @@
 
 (defn update-fps-metric!
   "Update the smoothed FPS counter roughly twice per second."
-  [state: (ptr App-State)]
+  [state: ^App-State]
   (mut! state.frames += 1)
   (let [now (rl.GetTime)
         elapsed (- now state.metric-start)]

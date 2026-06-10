@@ -52,9 +52,9 @@
   (let [text "kvist"
         ctx (sha2.Context_256 {})
         digest ([32]byte [])]
-    (sha2.init_256 (& ctx))
-    (sha2.update (& ctx) (transmute []byte text))
-    (sha2.final (& ctx) (slice digest))
+    (sha2.init_256 (addr ctx))
+    (sha2.update (addr ctx) (transmute []byte text))
+    (sha2.final (addr ctx) (slice digest))
     (let [[encoded err] (hex.encode (slice digest))]
       (if (!= err nil)
         0

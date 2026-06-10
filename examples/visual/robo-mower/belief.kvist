@@ -39,12 +39,12 @@
 
 (defn delete-belief!
   "Release robot belief buffers."
-  [belief: (ptr Robot-Belief)]
+  [belief: ^Robot-Belief]
   (delete belief^.cells))
 
 (defn reset-belief!
   "Clear the robot belief map back to unknown."
-  [belief: (ptr Robot-Belief)]
+  [belief: ^Robot-Belief]
   (let [cells belief^.cells
         i 0]
     (while (< i Grid-Cells)
@@ -59,7 +59,7 @@
 
 (defn belief-mark!
   "Mark one cell in the robot belief map and update counters."
-  [belief: (ptr Robot-Belief), x: int, y: int, value: int]
+  [belief: ^Robot-Belief, x: int, y: int, value: int]
   (when (not (in-bounds? x y))
     (return))
   (let [cells belief^.cells
@@ -87,12 +87,12 @@
 
 (defn belief-mark-point!
   "Mark the belief cell containing a field-space point."
-  [belief: (ptr Robot-Belief), x: f32, y: f32, value: int]
+  [belief: ^Robot-Belief, x: f32, y: f32, value: int]
   (belief-mark! belief (int (/ x (f32 Cell-Size))) (int (/ y (f32 Cell-Size))) value))
 
 (defn belief-mark-radius!
   "Mark belief cells inside a circular robot observation footprint."
-  [belief: (ptr Robot-Belief), x: f32, y: f32, radius: f32, value: int]
+  [belief: ^Robot-Belief, x: f32, y: f32, radius: f32, value: int]
   (let [r2 (* radius radius)
         cell 0]
     (while (< cell Grid-Cells)
@@ -107,7 +107,7 @@
 
 (defn belief-cell-at-point
   "Return the belief value at a field-space point."
-  [belief: (ptr Robot-Belief), x: f32, y: f32] -> int
+  [belief: ^Robot-Belief, x: f32, y: f32] -> int
   (let [cell-x (int (/ x (f32 Cell-Size)))
         cell-y (int (/ y (f32 Cell-Size)))
         cells belief^.cells
@@ -119,7 +119,7 @@
 
 (defn belief-obstacle-near?
   "Return true when a known obstacle is near a field-space point."
-  [belief: (ptr Robot-Belief), x: f32, y: f32, radius: f32] -> bool
+  [belief: ^Robot-Belief, x: f32, y: f32, radius: f32] -> bool
   (let [r2 (* radius radius)
         cells belief^.cells
         center-x (int (/ x (f32 Cell-Size)))
@@ -145,7 +145,7 @@
 
 (defn belief-line-clear?
   "Return true when the straight path to a target avoids known obstacles."
-  [belief: (ptr Robot-Belief), ax: f32, ay: f32, bx: f32, by: f32] -> bool
+  [belief: ^Robot-Belief, ax: f32, ay: f32, bx: f32, by: f32] -> bool
   (let [steps 14
         i 1]
     (while (<= i steps)
@@ -160,7 +160,7 @@
 
 (defn observe-belief!
   "Update robot belief from local sensors and blade load."
-  [belief: (ptr Robot-Belief), robot: (ptr Robot), sensors: (ptr Sensors)]
+  [belief: ^Robot-Belief, robot: ^Robot, sensors: ^Sensors]
   (let [current-value Belief-Visited]
     (when (> sensors^.blade-load (f32 0.12))
       (set! current-value Belief-Cutting)
@@ -178,7 +178,7 @@
 
 (defn belief-known-percent
   "Return percentage of the grid the robot has observed in any form."
-  [belief: (ptr Robot-Belief)] -> f64
+  [belief: ^Robot-Belief] -> f64
   (* 100.0 (/ (f64 (+ belief^.visited-count
                        belief^.cutting-count
                        belief^.obstacle-count

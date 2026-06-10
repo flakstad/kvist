@@ -57,7 +57,7 @@
 
 (defn advance-mapped-lane!
   "Advance the pre-programmed mapped sweep lane with wraparound."
-  [robot: (ptr Robot)]
+  [robot: ^Robot]
   (mut! robot^.lane-index += 1)
   (when (>= robot^.lane-index (mapped-lane-count))
     (set! robot^.lane-index 0)))
@@ -72,28 +72,28 @@
 
 (defn mapped-current-edge-x
   "Return the edge where the current lane sweep ends."
-  [robot: (ptr Robot)] -> f32
+  [robot: ^Robot] -> f32
   (mapped-lane-target-x robot^.lane-index))
 
 (defn begin-mapped-shift!
   "Begin a vertical lane shift at the given x position."
-  [robot: (ptr Robot), x: f32]
+  [robot: ^Robot, x: f32]
   (set! robot^.lane-phase Mapped-Phase-Shift)
   (set! robot^.lane-shift-x x))
 
 (defn mapped-shift-target-y
   "Return the y coordinate for the vertical shift to the next lane."
-  [robot: (ptr Robot)] -> f32
+  [robot: ^Robot] -> f32
   (mapped-lane-y (mapped-next-lane robot^.lane-index)))
 
 (defn random-bounce-command
   "Drive straight until collision response chooses a new random heading."
-  [_robot: (ptr Robot), _sensors: (ptr Sensors)] -> Command
+  [_robot: ^Robot, _sensors: ^Sensors] -> Command
   (command (f32 62.0) (f32 0.0) true))
 
 (defn frontier-target-command
   "Drive toward the nearest unknown cell in the robot's belief map."
-  [belief: (ptr Robot-Belief), robot: (ptr Robot)] -> Command
+  [belief: ^Robot-Belief, robot: ^Robot] -> Command
   (let [cells belief^.cells
         i 0
         best-score (f32 999999999.0)
@@ -139,7 +139,7 @@
 
 (defn frontier-command
   "Belief-frontier behavior using blade load and nearest unknown grass."
-  [belief: (ptr Robot-Belief), robot: (ptr Robot), sensors: (ptr Sensors)] -> Command
+  [belief: ^Robot-Belief, robot: ^Robot, sensors: ^Sensors] -> Command
   (when (and (= robot^.sensor-profile Sensor-Forward)
              (= sensors^.front-kind Cell-Obstacle)
              (< sensors^.front (f32 86.0)))
@@ -155,14 +155,14 @@
 
 (defn return-home-command
   "Return to the charging base using a strategy suited to the source mode."
-  [robot: (ptr Robot), sensors: (ptr Sensors)] -> Command
+  [robot: ^Robot, sensors: ^Sensors] -> Command
   (when (= robot^.return-source Mode-Mapped)
     (return (mapped-home-command robot sensors)))
   (wire-home-command robot sensors))
 
 (defn mapped-command
   "Follow a configured back-and-forth lane plan without reading world truth."
-  [belief: (ptr Robot-Belief), robot: (ptr Robot), sensors: (ptr Sensors)] -> Command
+  [belief: ^Robot-Belief, robot: ^Robot, sensors: ^Sensors] -> Command
   (when (> robot^.lane-index (mapped-lane-count))
     (set! robot^.lane-index 0))
   (when (= robot^.lane-phase Mapped-Phase-Shift)
@@ -226,7 +226,7 @@
 
 (defn controller-command
   "Run the selected controller mode."
-  [robot: (ptr Robot), sensors: (ptr Sensors), belief: (ptr Robot-Belief)] -> Command
+  [robot: ^Robot, sensors: ^Sensors, belief: ^Robot-Belief] -> Command
   (when (= robot^.mode Mode-Random)
     (return (random-bounce-command robot sensors)))
   (when (= robot^.mode Mode-Boundary)

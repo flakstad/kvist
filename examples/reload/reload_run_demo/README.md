@@ -66,6 +66,6 @@ owns `App_State`; the reload adapter imports `main.kvist` as `app` and only
 declares which state type and lifecycle functions the resident host should
 preserve.
 
-The reload `run` function takes the durable state plus `(ptr reload.Run_Host)`.
+The reload `run` function takes the durable state plus `^reload.Run_Host`.
 When `reload.checkpoint!` returns true, `run` should return so the resident
 host can swap the rebuilt module at a safe boundary.

@@ -824,6 +824,13 @@ find_user_macro :: proc(macros: []User_Macro, name: string) -> (User_Macro, bool
     return User_Macro{}, false
 }
 
+macro_error_with_expansion_context :: proc(macro_decl: User_Macro, err: Compile_Error) -> Compile_Error {
+    return Compile_Error{
+        message = fmt.tprintf("while expanding macro %s: %s", macro_decl.name, err.message),
+        span    = err.span,
+    }
+}
+
 invoke_user_macro_value :: proc(macro_decl: User_Macro, call: CST_Form, macros: []User_Macro) -> (Macro_Value, Compile_Error, bool) {
     bindings, err_bindings, ok_bindings := macro_collect_call_bindings(macro_decl, call)
     if !ok_bindings {
@@ -832,7 +839,7 @@ invoke_user_macro_value :: proc(macro_decl: User_Macro, call: CST_Form, macros: 
     value, err, ok := macro_eval_sequence(macro_decl.body[:], macros, bindings[:])
     if !ok {
         macro_binding_slice_delete_backing(&bindings)
-        return Macro_Value{}, err, false
+        return Macro_Value{}, macro_error_with_expansion_context(macro_decl, err), false
     }
     result := macro_value_clone_backing(value)
     macro_value_delete_backing(&value)
@@ -1987,7 +1994,7 @@ macro_eval_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_
                 value, err, ok := macro_eval_sequence(user_macro.body[:], macros, local_bindings[:])
                 if !ok {
                     macro_binding_slice_delete_backing(&local_bindings)
-                    return Macro_Value{}, err, false
+                    return Macro_Value{}, macro_error_with_expansion_context(user_macro, err), false
                 }
                 result := macro_value_clone_backing(value)
                 macro_value_delete_backing(&value)

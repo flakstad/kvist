@@ -221,7 +221,7 @@ Bad checkpoint boundaries:
 Practical examples:
 
 ```clojure
-(defn run [state: (ptr App_State) host: (ptr reload.Run_Host)]
+(defn run [state: ^App_State host: ^reload.Run_Host]
   (while true
     (handle-one-request state)
     (when (reload.checkpoint! host)
@@ -229,7 +229,7 @@ Practical examples:
 ```
 
 ```clojure
-(defn run [state: (ptr App_State) host: (ptr reload.Run_Host)]
+(defn run [state: ^App_State host: ^reload.Run_Host]
   (while true
     (pump-events state)
     (dispatch-ready-work state)

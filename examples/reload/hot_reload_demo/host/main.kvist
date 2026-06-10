@@ -9,7 +9,7 @@
 (defn library-path [] -> string
   (kvist_hot.library_filename "build/hot_reload_demo/hot_demo"))
 
-(defn print-current-state [symbols: (ptr support.Hot_Demo_Symbols) state: (ptr shared.State)]
+(defn print-current-state [symbols: ^support.Hot_Demo_Symbols state: ^shared.State]
   (fmt.printf "[tick] module=%s tick=%d reloads=%d unloads=%d message=%s\n"
               (support.Call_Symbol_Message symbols)
               state^.tick_count
@@ -17,7 +17,7 @@
               state^.unload_count
               state^.last_message))
 
-(defn print-after-reload [state: (ptr shared.State)]
+(defn print-after-reload [state: ^shared.State]
   (fmt.printf "[host] after reload: ticks=%d reloads=%d unloads=%d message=%s\n"
               state^.tick_count
               state^.reload_count

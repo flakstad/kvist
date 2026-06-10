@@ -16,10 +16,10 @@ Production owns the real app state:
 
 (defstruct App-State {ticks: int})
 
-(defn init [state: (ptr App-State)]
+(defn init [state: ^App-State]
   (set! state^.ticks 0))
 
-(defn tick [state: (ptr App-State)]
+(defn tick [state: ^App-State]
   (set! state^.ticks (+ state^.ticks 1)))
 ```
 
@@ -35,7 +35,7 @@ The reload adapter declares the reload contract:
   {run: run
    init: app.init})
 
-(defn run [state: (ptr app.App-State), host: (ptr reload.Run-Host)]
+(defn run [state: ^app.App-State host: ^reload.Run-Host]
   (while true
     (app.tick state)
     (when (reload.checkpoint! host)

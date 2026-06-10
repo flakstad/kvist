@@ -17,29 +17,29 @@
 
 (defn init-program
   "Initializes the nested request-handling program state."
-  [program: (ptr Program_State)]
+  [program: ^Program_State]
   (set! program^.last-route "boot")
   (set! program^.last-response "program initialized"))
 
 (defn init
   "Initializes the durable app state before the first run."
-  [state: (ptr App_State)]
-  (init-program (& state^.program)))
+  [state: ^App_State]
+  (init-program (addr state^.program)))
 
 (defn on-load
   "Records reload entries after the first load."
-  [state: (ptr App_State) is-reload: bool]
+  [state: ^App_State is-reload: bool]
   (when is-reload
     (set! state^.reload-count (+ state^.reload-count 1))))
 
 (defn on-unload
   "Records module unloads before a reload swap."
-  [state: (ptr App_State)]
+  [state: ^App_State]
   (set! state^.unload-count (+ state^.unload-count 1)))
 
 (defn handle-request
   "Runs one synthetic request and returns the response text."
-  [program: (ptr Program_State)] -> string
+  [program: ^Program_State] -> string
   (set! program^.request-count (+ program^.request-count 1))
   (if (= program^.request-count 1)
     (set! program^.last-route "/warmup")
@@ -49,7 +49,7 @@
 
 (defn print-status
   "Prints the current synthetic request and reload counters."
-  [reload-count: int unload-count: int program: (ptr Program_State)]
+  [reload-count: int unload-count: int program: ^Program_State]
   (fmt.printf
     "[run] requests=%d reloads=%d unloads=%d route=%s response=%s\n"
     program^.request-count
@@ -60,15 +60,15 @@
 
 (defn tick
   "Runs one production application iteration."
-  [state: (ptr App_State)]
-  (handle-request (& state^.program))
+  [state: ^App_State]
+  (handle-request (addr state^.program))
   (print-status state^.reload-count
                 state^.unload-count
-                (& state^.program)))
+                (addr state^.program)))
 
 (defn run
   "Runs the production application loop without reload machinery."
-  [state: (ptr App_State)]
+  [state: ^App_State]
   (while true
     (tick state)
     (time.sleep delay)))

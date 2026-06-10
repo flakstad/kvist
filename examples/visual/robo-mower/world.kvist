@@ -69,13 +69,13 @@
 
 (defn delete-world!
   "Release the world buffers."
-  [world: (ptr World)]
+  [world: ^World]
   (delete world^.cells)
   (delete world^.cut))
 
 (defn clear-world!
   "Clear all cells to non-mowable outside area."
-  [world: (ptr World)]
+  [world: ^World]
   (let [cells world^.cells
         cut world^.cut
         i 0]
@@ -88,7 +88,7 @@
 
 (defn set-cell!
   "Set one cell and keep obstacle counts and cut state consistent."
-  [world: (ptr World), x: int, y: int, value: int]
+  [world: ^World, x: int, y: int, value: int]
   (when (not (in-bounds? x y))
     (return))
   (let [cells world^.cells
@@ -115,7 +115,7 @@
 
 (defn fill-rect!
   "Fill a rectangular cell region with one cell value."
-  [world: (ptr World), x0: int, y0: int, w: int, h: int, value: int]
+  [world: ^World, x0: int, y0: int, w: int, h: int, value: int]
   (let [y y0]
     (while (< y (+ y0 h))
       (let [x x0]
@@ -126,12 +126,12 @@
 
 (defn mark-rect!
   "Mark a rectangular obstacle in cell coordinates."
-  [world: (ptr World), x0: int, y0: int, w: int, h: int]
+  [world: ^World, x0: int, y0: int, w: int, h: int]
   (fill-rect! world x0 y0 w h Cell-Obstacle))
 
 (defn mark-boundary-rect!
   "Draw a closed rectangular boundary wire."
-  [world: (ptr World), x0: int, y0: int, w: int, h: int]
+  [world: ^World, x0: int, y0: int, w: int, h: int]
   (fill-rect! world x0 y0 w 1 Cell-Boundary)
   (fill-rect! world x0 (+ y0 (- h 1)) w 1 Cell-Boundary)
   (fill-rect! world x0 y0 1 h Cell-Boundary)
@@ -139,7 +139,7 @@
 
 (defn paint-cell!
   "Paint a small square brush centered on one cell."
-  [world: (ptr World), cx: int, cy: int, radius: int, value: int]
+  [world: ^World, cx: int, cy: int, radius: int, value: int]
   (let [y (- cy radius)]
     (while (<= y (+ cy radius))
       (let [x (- cx radius)]
@@ -150,14 +150,14 @@
 
 (defn reset-world!
   "Reset the world to grass inside the default boundary wire."
-  [world: (ptr World)]
+  [world: ^World]
   (clear-world! world)
   (fill-rect! world (+ Boundary-X 1) (+ Boundary-Y 1) (- Boundary-W 2) (- Boundary-H 2) Cell-Grass)
   (mark-boundary-rect! world Boundary-X Boundary-Y Boundary-W Boundary-H))
 
 (defn cell-blocked?
   "Return true when a cell is outside the grid or occupied."
-  [world: (ptr World), x: int, y: int] -> bool
+  [world: ^World, x: int, y: int] -> bool
   (when (not (in-bounds? x y))
     (return true))
   (let [cells world^.cells
@@ -166,20 +166,20 @@
 
 (defn cell-mowable?
   "Return true when a cell is grass that can be cut."
-  [world: (ptr World), cell: int] -> bool
+  [world: ^World, cell: int] -> bool
   (let [cells world^.cells]
     (= cells[cell] Cell-Grass)))
 
 (defn point-blocked?
   "Return true when a local field-space point is outside or inside an obstacle."
-  [world: (ptr World), x: f32, y: f32] -> bool
+  [world: ^World, x: f32, y: f32] -> bool
   (when (or (< x 0.0) (>= x (f32 Field-Px-W)) (< y 0.0) (>= y (f32 Field-Px-H)))
     (return true))
   (cell-blocked? world (int (/ x (f32 Cell-Size))) (int (/ y (f32 Cell-Size)))))
 
 (defn point-cell
   "Return the world cell value at a local field-space point."
-  [world: (ptr World), x: f32, y: f32] -> int
+  [world: ^World, x: f32, y: f32] -> int
   (when (or (< x 0.0) (>= x (f32 Field-Px-W)) (< y 0.0) (>= y (f32 Field-Px-H)))
     (return Cell-Outside))
   (let [cells world^.cells
@@ -222,7 +222,7 @@
 
 (defn mark-cut!
   "Mark grass cells under the mower blade as cut."
-  [world: (ptr World), x: f32, y: f32, radius: f32]
+  [world: ^World, x: f32, y: f32, radius: f32]
   (let [cells world^.cells
         cut world^.cut
         r2 (* radius radius)
@@ -239,7 +239,7 @@
 
 (defn blade-load-at
   "Return simulated blade resistance from uncut grass under the blade."
-  [world: (ptr World), x: f32, y: f32, radius: f32] -> f32
+  [world: ^World, x: f32, y: f32, radius: f32] -> f32
   (let [cells world^.cells
         cut world^.cut
         r2 (* radius radius)
@@ -263,7 +263,7 @@
 
 (defn coverage-percent
   "Return the percentage of mowable cells that have been cut."
-  [world: (ptr World)] -> f64
+  [world: ^World] -> f64
   (let [cells world^.cells
         cut world^.cut
         i 0

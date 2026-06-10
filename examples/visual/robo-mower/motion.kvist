@@ -10,7 +10,7 @@
 
 (defn drive-to-point-with-radius-command
   "Steer toward a point with a caller-selected squared arrival radius."
-  [robot: (ptr Robot), tx: f32, ty: f32, speed: f32, blade: bool, arrive-r2: f32] -> Command
+  [robot: ^Robot, tx: f32, ty: f32, speed: f32, blade: bool, arrive-r2: f32] -> Command
   (let [dx (- tx robot^.x)
         dy (- ty robot^.y)
         d2 (+ (* dx dx) (* dy dy))]
@@ -29,7 +29,7 @@
 
 (defn drive-to-point-command
   "Steer toward a point, spinning in place before driving on large heading errors."
-  [robot: (ptr Robot), tx: f32, ty: f32, speed: f32, blade: bool] -> Command
+  [robot: ^Robot, tx: f32, ty: f32, speed: f32, blade: bool] -> Command
   (drive-to-point-with-radius-command robot tx ty speed blade (f32 625.0)))
 
 (defn boundary-left-x
@@ -61,7 +61,7 @@
 
 (defn smooth-pursuit-command
   "Steer toward a moving path target without stopping to spin in place."
-  [robot: (ptr Robot), tx: f32, ty: f32, speed: f32, blade: bool] -> Command
+  [robot: ^Robot, tx: f32, ty: f32, speed: f32, blade: bool] -> Command
   (let [dx (- tx robot^.x)
         dy (- ty robot^.y)
         target-angle (math.atan2 dy dx)
@@ -78,7 +78,7 @@
 
 (defn corner-turn-command
   "Turn at a boundary corner before advancing along the next wire segment."
-  [robot: (ptr Robot), target-heading: f32, blade: bool] -> Command
+  [robot: ^Robot, target-heading: f32, blade: bool] -> Command
   (let [error (normalize-angle (- target-heading robot^.heading))
         turn (math.clamp (* error (f32 2.8)) (f32 -2.1) (f32 2.1))]
     (when (> (abs-f32 error) (f32 0.16))
@@ -87,7 +87,7 @@
 
 (defn boundary-follow-with-blade-command
   "Follow the configured boundary wire with the wire centered under the robot."
-  [robot: (ptr Robot), sensors: (ptr Sensors), blade: bool] -> Command
+  [robot: ^Robot, sensors: ^Sensors, blade: bool] -> Command
   (let [left (boundary-left-x)
         right (boundary-right-x)
         top (boundary-top-y)
@@ -223,12 +223,12 @@
 
 (defn boundary-follow-command
   "Follow the boundary wire with the blade enabled."
-  [robot: (ptr Robot), sensors: (ptr Sensors)] -> Command
+  [robot: ^Robot, sensors: ^Sensors] -> Command
   (boundary-follow-with-blade-command robot sensors true))
 
 (defn wire-home-command
   "Find the boundary wire and follow it toward the charging base."
-  [robot: (ptr Robot), sensors: (ptr Sensors)] -> Command
+  [robot: ^Robot, sensors: ^Sensors] -> Command
   (when (< (+ (* (- (dock-x) robot^.x) (- (dock-x) robot^.x))
               (* (- (dock-y) robot^.y) (- (dock-y) robot^.y))) (f32 1600.0))
     (return (command (f32 0.0) (f32 0.0) false)))
@@ -238,7 +238,7 @@
 
 (defn mapped-home-command
   "Return directly to dock using the robot's estimated pose."
-  [robot: (ptr Robot), sensors: (ptr Sensors)] -> Command
+  [robot: ^Robot, sensors: ^Sensors] -> Command
   (when (< sensors^.front (f32 28.0))
     (return (command (f32 0.0) (f32 1.8) false)))
   (drive-to-point-command robot (dock-x) (dock-y) (f32 68.0) false))

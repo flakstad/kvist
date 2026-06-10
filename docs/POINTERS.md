@@ -13,12 +13,16 @@ Source style:
 
 ```clojure
 ^Order
-(ptr Order)
 (addr order)
-(& order)
 total^
+```
+
+Supported alternate forms:
+
+```clojure
+(ptr Order)
+(& order)
 (deref total)
-(set! total^ (+ total^ 1))
 ```
 
 Pointer types can be written as `^T` or `(ptr T)`. Prefer `^T` when it reads
@@ -28,8 +32,9 @@ Address-of can be written as `(addr place)` or `(& place)`. Prefer `addr` in
 ordinary code because it is easy to search for and does not visually collide
 with variadic parameter syntax.
 
-Use `x^` for the simple pointer-symbol case. Keep `(deref ...)` for more
-complex expressions such as `(deref ptrs[i])`.
+Use `x^` for the simple pointer-symbol case. Keep `(deref ...)` for compound
+pointer expressions where suffix syntax would be hard to read, such as
+`(deref ptrs[i])`.
 
 Writable places:
 

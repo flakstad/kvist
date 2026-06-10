@@ -24,8 +24,8 @@
   (println (counter-after-bump)))
 
 (comment
-  ;; Prefer `^T`, `addr`, and `x^` in ordinary Kvist code. `(ptr T)`,
-  ;; `(& place)`, and `(deref ...)` are the call-shaped equivalents.
+  ;; Prefer `^T`, `addr`, and `x^` in ordinary Kvist code. Use `(ptr Type)`
+  ;; for compound pointee type expressions when that is clearer.
   (counter-after-bump)
   ;; => 42
 )

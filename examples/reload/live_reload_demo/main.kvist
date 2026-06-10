@@ -4,9 +4,9 @@
 (import fmt "core:fmt")
 (import kvist_live "../../../src/kvist_live")
 
-(defn demo-command [runtime: (ptr kvist_live.Runtime)
-                    module: (ptr kvist_live.Live_Module)
-                    command: (ptr kvist_live.Live_Command)
+(defn demo-command [runtime: ^kvist_live.Runtime
+                    module: ^kvist_live.Live_Module
+                    command: ^kvist_live.Live_Command
                     args: (slice kvist_live.Value)] -> [value: kvist_live.Value, err: kvist_live.Runtime_Error, ok: bool]
   (let [count: i64 0
         [entry found] (kvist_live.module_state_get module "count")]
@@ -20,17 +20,17 @@
       (fmt.println (fmt.tprintf "[%s] %s (count=%d)" module^.version message count))
       (return (kvist_live.value_int count) (kvist_live.Runtime_Error {}) true))))
 
-(defn demo-init [runtime: (ptr kvist_live.Runtime)
-                 module: (ptr kvist_live.Live_Module)] -> [err: kvist_live.Runtime_Error, ok: bool]
+(defn demo-init [runtime: ^kvist_live.Runtime
+                 module: ^kvist_live.Live_Module] -> [err: kvist_live.Runtime_Error, ok: bool]
   (kvist_live.register_command runtime
                                module
                                "tick"
                                "Print the live message and increment count."
                                demo-command))
 
-(defn demo-migrate [runtime: (ptr kvist_live.Runtime)
+(defn demo-migrate [runtime: ^kvist_live.Runtime
                     old-module: kvist_live.Live_Module
-                    new-module: (ptr kvist_live.Live_Module)] -> [err: kvist_live.Runtime_Error, ok: bool]
+                    new-module: ^kvist_live.Live_Module] -> [err: kvist_live.Runtime_Error, ok: bool]
   (let [[entry found] (kvist_live.state_entries_get_dynamic old-module.state "count")]
     (when found
       (kvist_live.module_state_put new-module "count" entry.value))
