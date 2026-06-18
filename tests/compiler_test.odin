@@ -7808,7 +7808,7 @@ reject_parallel_map_with_unknown_option :: proc(t: ^testing.T) {
 }
 
 @(test)
-compile_parallel_each_named_worker :: proc(t: ^testing.T) {
+compile_parallel_for_named_worker :: proc(t: ^testing.T) {
     source := `(package main)
 (import p "kvist:parallel")
 
@@ -7816,7 +7816,7 @@ compile_parallel_each_named_worker :: proc(t: ^testing.T) {
   (println x))
 
 (defn demo [xs: []int]
-  (p.each record xs))`
+  (p.for record xs))`
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
@@ -7826,27 +7826,27 @@ compile_parallel_each_named_worker :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    testing.expect_value(t, strings.contains(output, "parallel_each_record_int((xs)[:], 0)"), true)
-    testing.expect_value(t, strings.contains(output, "parallel_Each_Data_record_int :: struct"), true)
+    testing.expect_value(t, strings.contains(output, "parallel_for_record_int((xs)[:], 0)"), true)
+    testing.expect_value(t, strings.contains(output, "parallel_For_Data_record_int :: struct"), true)
     testing.expect_value(t, strings.contains(output, "xs: []int,"), true)
-    testing.expect_value(t, strings.contains(output, "parallel_each_worker_record_int :: proc(data: ^parallel_Each_Data_record_int)"), true)
+    testing.expect_value(t, strings.contains(output, "parallel_for_worker_record_int :: proc(data: ^parallel_For_Data_record_int)"), true)
     testing.expect_value(t, strings.contains(output, "record(data.xs[i])"), true)
-    testing.expect_value(t, strings.contains(output, "parallel_each_record_int :: proc(xs: []int, requested_worker_count: int)"), true)
+    testing.expect_value(t, strings.contains(output, "parallel_for_record_int :: proc(xs: []int, requested_worker_count: int)"), true)
     testing.expect_value(t, strings.contains(output, "worker_count = os.get_processor_core_count() - 1"), true)
     testing.expect_value(t, strings.contains(output, "if worker_count > 16"), true)
-    testing.expect_value(t, strings.contains(output, "thread.create_and_start_with_poly_data(data, parallel_each_worker_record_int)"), true)
+    testing.expect_value(t, strings.contains(output, "thread.create_and_start_with_poly_data(data, parallel_for_worker_record_int)"), true)
     testing.expect_value(t, strings.contains(output, "thread.join(task_thread)"), true)
     testing.expect_value(t, strings.contains(output, "free(data)"), true)
 }
 
 @(test)
-compile_parallel_each_with_captured_inline_worker :: proc(t: ^testing.T) {
+compile_parallel_for_with_captured_inline_worker :: proc(t: ^testing.T) {
     source := `(package main)
 (import p "kvist:parallel")
 
 (defn demo [xs: []int]
   (let [offset 10]
-    (p.each-with {workers: 2}
+    (p.for-with {workers: 2}
       (fn [x: int]
         (println (+ x offset)))
       xs)))`
@@ -7859,18 +7859,18 @@ compile_parallel_each_with_captured_inline_worker :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    testing.expect_value(t, strings.contains(output, "parallel_each_callback_inline_"), true)
+    testing.expect_value(t, strings.contains(output, "parallel_for_callback_inline_"), true)
     testing.expect_value(t, strings.contains(output, " :: proc(offset: int, x: int) {"), true)
     testing.expect_value(t, strings.contains(output, "offset: int,"), true)
     testing.expect_value(t, strings.contains(output, "data.offset = offset"), true)
-    testing.expect_value(t, strings.contains(output, "parallel_each_callback_inline_"), true)
+    testing.expect_value(t, strings.contains(output, "parallel_for_callback_inline_"), true)
     testing.expect_value(t, strings.contains(output, "(data.offset, data.xs[i])"), true)
-    testing.expect_value(t, strings.contains(output, "parallel_each_inline_"), true)
+    testing.expect_value(t, strings.contains(output, "parallel_for_inline_"), true)
     testing.expect_value(t, strings.contains(output, "((xs)[:], 2, offset)"), true)
 }
 
 @(test)
-reject_parallel_each_return_value :: proc(t: ^testing.T) {
+reject_parallel_for_return_value :: proc(t: ^testing.T) {
     source := `(package main)
 (import p "kvist:parallel")
 
@@ -7878,7 +7878,7 @@ reject_parallel_each_return_value :: proc(t: ^testing.T) {
   (* x x))
 
 (defn demo [xs: []int]
-  (p.each square xs))`
+  (p.for square xs))`
 
     _, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, false)
@@ -7886,16 +7886,16 @@ reject_parallel_each_return_value :: proc(t: ^testing.T) {
         return
     }
     defer delete(err.message)
-    testing.expect_value(t, err.message, "parallel.each worker must not return a value")
+    testing.expect_value(t, err.message, "parallel.for worker must not return a value")
 }
 
 @(test)
-reject_parallel_each_inline_return_value :: proc(t: ^testing.T) {
+reject_parallel_for_inline_return_value :: proc(t: ^testing.T) {
     source := `(package main)
 (import p "kvist:parallel")
 
 (defn demo [xs: []int]
-  (p.each (fn [x: int] -> int
+  (p.for (fn [x: int] -> int
             x)
           xs))`
 
@@ -7905,11 +7905,11 @@ reject_parallel_each_inline_return_value :: proc(t: ^testing.T) {
         return
     }
     defer delete(err.message)
-    testing.expect_value(t, err.message, "parallel.each inline worker must not return a value")
+    testing.expect_value(t, err.message, "parallel.for inline worker must not return a value")
 }
 
 @(test)
-reject_parallel_each_with_unknown_option :: proc(t: ^testing.T) {
+reject_parallel_for_with_unknown_option :: proc(t: ^testing.T) {
     source := `(package main)
 (import p "kvist:parallel")
 
@@ -7917,7 +7917,7 @@ reject_parallel_each_with_unknown_option :: proc(t: ^testing.T) {
   (println x))
 
 (defn demo [xs: []int]
-  (p.each-with {threads: 4} record xs))`
+  (p.for-with {threads: 4} record xs))`
 
     _, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, false)
@@ -7925,7 +7925,7 @@ reject_parallel_each_with_unknown_option :: proc(t: ^testing.T) {
         return
     }
     defer delete(err.message)
-    testing.expect_value(t, err.message, "parallel.each-with unknown option: threads")
+    testing.expect_value(t, err.message, "parallel.for-with unknown option: threads")
 }
 
 @(test)

@@ -45,15 +45,15 @@
   (quasiquote
     (parallel-map-with (unquote options) (unquote worker) (unquote xs))))
 
-(defmacro each
+(defmacro for
   "Apply a named or inline one-argument side-effecting `worker` to every item in
   `xs` using a bounded set of OS threads."
   [worker xs]
   (quasiquote
-    (parallel-each (unquote worker) (unquote xs) 0)))
+    (parallel-for (unquote worker) (unquote xs) 0)))
 
-(defmacro each-with
+(defmacro for-with
   "Like `for`, but accepts `{workers: n}` to control the worker count."
   [options worker xs]
   (quasiquote
-    (parallel-each-with (unquote options) (unquote worker) (unquote xs))))
+    (parallel-for-with (unquote options) (unquote worker) (unquote xs))))

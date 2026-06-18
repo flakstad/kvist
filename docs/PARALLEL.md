@@ -100,17 +100,17 @@ generated thread data for each worker:
   ...)
 ```
 
-Side-effecting parallel iteration uses `p.each`:
+Side-effecting parallel iteration uses `p.for`:
 
 ```clojure
-(p.each send-email users)
-(p.each-with {workers: 4}
+(p.for send-email users)
+(p.for-with {workers: 4}
   (fn [user: User]
     (send-email-with-template template user))
   users)
 ```
 
-`p.each` and `p.each-with` use the same worker-count policy and inline-capture
+`p.for` and `p.for-with` use the same worker-count policy and inline-capture
 lowering as `p.map`, but workers must not return a value. They are for
 side-effecting work where allocating and discarding a result array would be the
 wrong shape.
@@ -120,7 +120,7 @@ The current implementation is intentionally narrow:
 - `p.start` workers must be known named workers or inline `fn` literals;
 - `p.map` workers must be known named one-argument functions or inline
   one-argument `fn` literals;
-- `p.each` workers must be known named or inline one-argument workers with no
+- `p.for` workers must be known named or inline one-argument workers with no
   return value;
 - `p.start` workers must return exactly one value;
 - `p.detach` workers must be known named workers or inline `fn` literals with
@@ -185,7 +185,7 @@ odin run cmd/kvist -- run examples/packages/parallel-measure.kvist
 ```
 
 It compares four CPU-bound calls run sequentially with the same four calls run
-through `p.start` / `p.result`, `p.map`, and `p.each`, then measures tiny task
+through `p.start` / `p.result`, `p.map`, and `p.for`, then measures tiny task
 start/result overhead and detached launch overhead. The numbers are
 machine-dependent and should be treated as smoke measurements, not as a formal
 benchmark.
@@ -200,8 +200,8 @@ parallel_us 15973.000000000002 checksum 1463214
 speedup_x 3.9190508983910344
 parallel_map_us 15952.999999999998 checksum 1463214
 map_speedup_x 3.9239641446749833
-parallel_each_us 15926 checksum 1463214
-each_speedup_x 3.9306166017832473
+parallel_for_us 15926 checksum 1463214
+for_speedup_x 3.9306166017832473
 joined_task_us 5305 tasks 200 avg_us 26.524999999999999 checksum 19900
 detach_launch_us 2617 tasks 200 avg_us 13.085 count 200
 ```
@@ -257,10 +257,10 @@ The implemented approach is compiler specialization:
   worker thread data.
 - `p.map-with` expands to an internal `parallel-map-with` form that passes an
   explicit worker count to the same helper.
-- `p.each` expands to an internal `parallel-each` form that emits the same
+- `p.for` expands to an internal `parallel-for` form that emits the same
   bounded thread-striding shape without an output array.
-- `p.each-with` expands to an internal `parallel-each-with` form that passes an
-  explicit worker count to the same `each` helper.
+- `p.for-with` expands to an internal `parallel-for-with` form that passes an
+  explicit worker count to the same `for` helper.
 
 The important implementation choice is that `p.map` is not implemented as
 one `p.start` per item. It generates a bounded helper directly so tiny per-item

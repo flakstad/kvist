@@ -59,14 +59,14 @@
         (set! total (+ total value)))
       total)))
 
-(defn parallel-each-four [] -> int
+(defn parallel-for-four [] -> int
   (let [jobs ([]Work-Item [(Work-Item {index: 0 seed: 1})
                            (Work-Item {index: 1 seed: 2})
                            (Work-Item {index: 2 seed: 3})
                            (Work-Item {index: 3 seed: 4})])
         results (make [dynamic]int 4)]
     (defer (delete results))
-    (p.each (fn [job: Work-Item]
+    (p.for (fn [job: Work-Item]
               (set! results[job.index] (burn job.seed)))
             jobs)
     (let [total 0]
@@ -103,9 +103,9 @@
         map-start (time.now)
         map-checksum (parallel-map-four)
         map-us (elapsed-us map-start)
-        each-start (time.now)
-        each-checksum (parallel-each-four)
-        each-us (elapsed-us each-start)
+        for-start (time.now)
+        for-checksum (parallel-for-four)
+        for-us (elapsed-us for-start)
         join-start (time.now)
         join-checksum (joined-tiny-total Overhead-Tasks)
         join-us (elapsed-us join-start)
@@ -117,7 +117,7 @@
     (println "speedup_x" (/ seq-us par-us))
     (println "parallel_map_us" map-us "checksum" map-checksum)
     (println "map_speedup_x" (/ seq-us map-us))
-    (println "parallel_each_us" each-us "checksum" each-checksum)
-    (println "each_speedup_x" (/ seq-us each-us))
+    (println "parallel_for_us" for-us "checksum" for-checksum)
+    (println "for_speedup_x" (/ seq-us for-us))
     (println "joined_task_us" join-us "tasks" Overhead-Tasks "avg_us" (/ join-us (f64 Overhead-Tasks)) "checksum" join-checksum)
     (println "detach_launch_us" detach-us "tasks" Detach-Tasks "avg_us" (/ detach-us (f64 Detach-Tasks)) "count" detach-count)))

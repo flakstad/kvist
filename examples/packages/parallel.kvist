@@ -87,11 +87,11 @@
         (set! total (+ total y)))
       total)))
 
-(defn each-demo [] -> int
+(defn for-demo [] -> int
   (let [offset 10
         xs ([]int [1 2 3 4])]
-    (p.each observe xs)
-    (p.each-with {workers: 2}
+    (p.for observe xs)
+    (p.for-with {workers: 2}
       (fn [x: int]
         (observe (+ x offset)))
       xs)
@@ -115,7 +115,7 @@
               (mapped)
               (mapped-with)
               (mapped-inline)
-              (each-demo))))
+              (for-demo))))
 
 (comment
   ;; `parallel.start` is compiler-specialized. The generated Odin uses an OS
@@ -145,7 +145,7 @@
   (mapped-inline)
   ;; => 70
 
-  (each-demo)
+  (for-demo)
   ;; => 4
 
   (fire-and-forget-inline)
