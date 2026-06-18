@@ -94,14 +94,17 @@
       (= (name form) "nil")
       false)))
 
+(defmacro- html-name [form context]
+  (if (symbol? form)
+    (if (= (text form) (name form))
+      (name form)
+      (error (str context " must use bare names without trailing :")))
+    (error (str context " must be a bare symbol"))))
+
 (defmacro- fragment-tag? [tag]
-  (if (keyword? tag)
-    (if (= (text tag) ":<>")
-      true
-      (= (name tag) "<>"))
-    (if (symbol? tag)
-      (= (name tag) "<>")
-      false)))
+  (if (symbol? tag)
+    (= (html-name tag "html tag") "<>")
+    false))
 
 (defmacro- emit-attr-value [form]
     (if (nil-form? form)
@@ -120,7 +123,7 @@
       (if (bool? form)
         (quasiquote (Attr-Value {bool: (unquote form)}))
         (if (keyword? form)
-          (quasiquote (Attr-Value {text: (unquote (text form))}))
+          (error "html attribute values do not accept keywords; use a string")
           (if (if-form? form)
             (quasiquote
               (if-attr-value (unquote (nth form 1))
@@ -139,7 +142,7 @@
           value (nth items 1)]
       (forms
         (quasiquote
-          (Attr {name: (unquote (name key))
+          (Attr {name: (unquote (html-name key "html attr"))
                  value: (unquote (emit-attr-value value))}))
         (emit-attr-items (rest (rest items)))))))
 
@@ -160,23 +163,24 @@
                  (Node {none: (Nothing {})})))
   (if (vector? form)
     (let [tag (first form)
-          tail (rest form)]
+          tail (rest form)
+          tag-name (html-name tag "html tag")]
       (if (fragment-tag? tag)
         (quasiquote
           (Node {fragment: (Fragment {children: [(splice (emit-child-items tail))]})}))
         (if (= (core.count tail) 0)
           (quasiquote
-            (Node {element: (Element {tag: (unquote (name tag))
+            (Node {element: (Element {tag: (unquote tag-name)
                                       attrs: []
                                       children: []})}))
           (let [candidate (first tail)]
             (if (brace? candidate)
               (quasiquote
-                (Node {element: (Element {tag: (unquote (name tag))
+                (Node {element: (Element {tag: (unquote tag-name)
                                           attrs: [(splice (emit-attr-items candidate))]
                                           children: [(splice (emit-child-items (rest tail)))]} )}))
               (quasiquote
-                (Node {element: (Element {tag: (unquote (name tag))
+                (Node {element: (Element {tag: (unquote tag-name)
                                           attrs: []
                                           children: [(splice (emit-child-items tail))]})})))))))
     (if (string? form)
@@ -188,7 +192,7 @@
         (if (bool? form)
           (quasiquote (Node {bool: (unquote form)}))
           (if (keyword? form)
-            (quasiquote (Node {text: (unquote (text form))}))
+            (error "html child values do not accept keywords; use a string")
             (if (if-form? form)
               (quasiquote
                 (if-node (unquote (nth form 1))
@@ -203,9 +207,9 @@
 (defmacro- html
   "Expand a Hiccup-style HTML vector tree into an internal typed node.
 
-  Element vectors use the shape `[:tag {attr: value...} child...]`; the attrs map
-  is optional. `[:<> child...]` creates a fragment with no wrapper element.
-  Literal strings, ints, floats, bools, keywords, and nested vectors are converted
+  Element vectors use the shape `[tag {attr value...} child...]`; the attrs map
+  is optional. `[<> child...]` creates a fragment with no wrapper element.
+  Literal strings, ints, floats, bools, and nested vectors are converted
   directly to typed node values.
 
   Attribute and child positions may contain ordinary Kvist expressions when the
@@ -357,7 +361,7 @@
           (set! (unquote out)
                 (replace-owned
                   (unquote out)
-                  (unquote (str "{{" (name key) "}}"))
+                  (unquote (str "{{" (html-name key "html template binding") "}}"))
                   (unquote value))))
         (emit-template-bindings out (rest (rest bindings)))))))
 
@@ -374,7 +378,7 @@
     (error "html.render template bindings must be a brace literal")))
 
 (defmacro- emit-render-attr [builder key value]
-  (let [attr-name (name key)]
+  (let [attr-name (html-name key "html attr")]
     (if (nil-form? value)
       (forms)
       (if (when-form? value)
@@ -402,8 +406,7 @@
               (quasiquote
                 (write-attr-bool (addr (unquote builder)) (unquote attr-name) (unquote value)))
               (if (keyword? value)
-                (quasiquote
-                  (write-attr-string (addr (unquote builder)) (unquote attr-name) (unquote (text value))))
+                (error "html attribute values do not accept keywords; use a string")
                 (quasiquote
                   (render-attr-into
                     (addr (unquote builder))
@@ -461,25 +464,26 @@
       (emit-render-for builder form)
     (if (vector? form)
       (let [tag (first form)
-            tail (rest form)]
+            tail (rest form)
+            tag-name (html-name tag "html tag")]
         (if (fragment-tag? tag)
           (emit-render-children builder tail)
           (if (= (core.count tail) 0)
             (forms
-              (quasiquote (strings.write_string (addr (unquote builder)) (unquote (str "<" (name tag) ">"))))
-              (quasiquote (strings.write_string (addr (unquote builder)) (unquote (str "</" (name tag) ">")))))
+              (quasiquote (strings.write_string (addr (unquote builder)) (unquote (str "<" tag-name ">"))))
+              (quasiquote (strings.write_string (addr (unquote builder)) (unquote (str "</" tag-name ">")))))
             (let [candidate (first tail)]
               (if (brace? candidate)
                 (forms
-                  (quasiquote (strings.write_string (addr (unquote builder)) (unquote (str "<" (name tag)))))
+                  (quasiquote (strings.write_string (addr (unquote builder)) (unquote (str "<" tag-name))))
                   (emit-render-attrs builder candidate)
                   (quasiquote (strings.write_string (addr (unquote builder)) ">"))
                   (emit-render-children builder (rest tail))
-                  (quasiquote (strings.write_string (addr (unquote builder)) (unquote (str "</" (name tag) ">")))))
+                  (quasiquote (strings.write_string (addr (unquote builder)) (unquote (str "</" tag-name ">")))))
                 (forms
-                  (quasiquote (strings.write_string (addr (unquote builder)) (unquote (str "<" (name tag) ">"))))
+                  (quasiquote (strings.write_string (addr (unquote builder)) (unquote (str "<" tag-name ">"))))
                   (emit-render-children builder tail)
-                  (quasiquote (strings.write_string (addr (unquote builder)) (unquote (str "</" (name tag) ">"))))))))))
+                  (quasiquote (strings.write_string (addr (unquote builder)) (unquote (str "</" tag-name ">"))))))))))
       (if (string? form)
         (quasiquote
           (write-escaped (addr (unquote builder)) (unquote form)))
@@ -495,8 +499,7 @@
                   (strings.write_string (addr (unquote builder)) "true")
                   (strings.write_string (addr (unquote builder)) "false")))
               (if (keyword? form)
-                (quasiquote
-                  (write-escaped (addr (unquote builder)) (unquote (text form))))
+                (error "html child values do not accept keywords; use a string")
                 (quasiquote
                   (render-node-into (addr (unquote builder)) (Node (unquote form)))))))))))))))
 
@@ -510,10 +513,10 @@
 (defmacro render
   "Render HTML to an owned HTML string.
 
-  Direct Hiccup-style vector calls like `(html.render [:div ...])` expand to
+  Direct Hiccup-style vector calls like `(html.render [div ...])` expand to
   builder writes and avoid constructing a full intermediate node tree.
 
-  Template calls like `(html.render \"<h1>{{name}}</h1>\" {name: name})`
+  Template calls like `(html.render \"<h1>{{name}}</h1>\" {name name})`
   replace `{{key}}` placeholders and return an owned string."
   [form & rest]
   (if (= (core.count rest) 0)
@@ -535,7 +538,7 @@
 (defmacro render-file
   "Render a compile-time template file with placeholder bindings.
 
-  `(html.render-file \"home.html\" {name: name})` reads `home.html` at macro
+  `(html.render-file \"home.html\" {name name})` reads `home.html` at macro
   expansion time, embeds its contents, and emits the same template rendering as
   `html.render`."
   [path & rest]

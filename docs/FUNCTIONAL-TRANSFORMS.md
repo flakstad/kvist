@@ -50,6 +50,9 @@ Collection output is explicit with `into`:
   (into [dynamic]int paid-order-totals orders))
 ```
 
+`into` returns a fresh owned dynamic array. Use `arr.into!` when appending into
+an existing dynamic array.
+
 Scalar output is explicit with `transduce`:
 
 ```clojure
@@ -219,7 +222,7 @@ The first implementation is strict:
   selectors with obvious input and output types;
 - `into` must name the concrete output type;
 - dynamic array `into` owns the returned array, and callers delete it using the
-  existing ownership conventions;
+  existing ownership conventions; append into existing arrays with `arr.into!`;
 - `transduce` requires an obvious accumulator type from the initial value or an
   annotation;
 - `defsource` calls are consumed directly by `for`, `into`, and `transduce`;

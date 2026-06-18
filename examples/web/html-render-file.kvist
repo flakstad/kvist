@@ -6,8 +6,8 @@
   (let [message "The template file was embedded when this source compiled."
         html (h.render-file
                "html-template.html"
-               {name: "Bob"
-                message: message}) :defer]
+               {name "Bob"
+                message message}) :defer]
     (println html)
     true))
 

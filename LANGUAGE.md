@@ -520,8 +520,9 @@ loops rather than intermediate arrays.
 
 The transform surface is intentionally small: `comp` supports `map` and
 `filter` steps with known one-argument functions or field selectors. `into`
-currently returns owned `[dynamic]T` arrays. `transduce` currently supports `+`
-as the reducer and can consume slices, arrays, or `defsource` calls. See
+currently returns fresh owned `[dynamic]T` arrays; append into an existing
+dynamic array with `arr.into!`. `transduce` currently supports `+` as the
+reducer and can consume slices, arrays, or `defsource` calls. See
 `docs/FUNCTIONAL-TRANSFORMS.md` for limits and lowering.
 
 ## Operators

@@ -152,17 +152,17 @@ Point :: struct {
 @(test)
 compile_all_examples :: proc(t: ^testing.T) {
     examples := [?]string{
-        "examples/language/cluck-port-arrays.kvist",
-        "examples/language/cluck-port-docs.kvist",
-        "examples/language/cluck-port-maps-sets.kvist",
-        "examples/language/cluck-port-multi-return.kvist",
-        "examples/language/cluck-port-packages.kvist",
-        "examples/language/cluck-port-records.kvist",
-        "examples/language/cluck-port-loops.kvist",
-        "examples/language/cluck-port-strings.kvist",
-        "examples/language/cluck-port-struct-defaults.kvist",
-        "examples/language/cluck-port-struct-introspection.kvist",
-        "examples/language/cluck-port-struct-types.kvist",
+        "examples/coverage/cluck-port/cluck-port-arrays.kvist",
+        "examples/coverage/cluck-port/cluck-port-docs.kvist",
+        "examples/coverage/cluck-port/cluck-port-maps-sets.kvist",
+        "examples/coverage/cluck-port/cluck-port-multi-return.kvist",
+        "examples/coverage/cluck-port/cluck-port-packages.kvist",
+        "examples/coverage/cluck-port/cluck-port-records.kvist",
+        "examples/coverage/cluck-port/cluck-port-loops.kvist",
+        "examples/coverage/cluck-port/cluck-port-strings.kvist",
+        "examples/coverage/cluck-port/cluck-port-struct-defaults.kvist",
+        "examples/coverage/cluck-port/cluck-port-struct-introspection.kvist",
+        "examples/coverage/cluck-port/cluck-port-struct-types.kvist",
         "examples/language/closures.kvist",
         "examples/language/control-flow.kvist",
         "examples/interop/core/core-concurrency.kvist",
@@ -233,7 +233,7 @@ compile_all_examples :: proc(t: ^testing.T) {
 
 @(test)
 compile_eval_path_rewrites_source_package_aliases :: proc(t: ^testing.T) {
-    output, err, ok := kvist.compile_eval_path("examples/language/cluck-port-packages.kvist", "(math.sum-range 0 5)")
+    output, err, ok := kvist.compile_eval_path("examples/coverage/cluck-port/cluck-port-packages.kvist", "(math.sum-range 0 5)")
     testing.expect_value(t, ok, true)
     if !ok {
         testing.expect_value(t, err.message, "")
@@ -865,7 +865,7 @@ editor_symbols_source_includes_source_package_imports :: proc(t: ^testing.T) {
 (import html "kvist:html")
 
 (defn main []
-  (html.render [:div "ok"]))`
+  (html.render [div "ok"]))`
 
     path, ok_path := repo_temp_test_path(".tmp-html-editor-symbols.kvist")
     testing.expect_value(t, ok_path, true)
@@ -1104,23 +1104,23 @@ compile_path_supports_html_expression_interpolation :: proc(t: ^testing.T) {
   (let [archived? false
         ids (arr.range 1 4) :defer]
     (html.render
-      [:section {data-count: count
-                 data-ratio: ratio
-                 hidden: enabled?
-                 data-state: (if enabled? "ready" "hidden")
-                 data-archived: (when archived? "true")}
-       [:h1 title]
-       [:<>
-        [:h2 title]
-        [:p (+ count 10)]]
-       [:p (status-label enabled?)]
-       [:p (+ count 1)]
+      [section {data-count count
+                data-ratio ratio
+                hidden enabled?
+                data-state (if enabled? "ready" "hidden")
+                data-archived (when archived? "true")}
+       [h1 title]
+       [<>
+        [h2 title]
+        [p (+ count 10)]]
+       [p (status-label enabled?)]
+       [p (+ count 1)]
        (when archived?
-         [:p "Archived"])
+         [p "Archived"])
        nil
-       [:ul
+       [ul
         (html.for [id ids]
-          [:li id])]
+          [li id])]
        (if enabled?
          "Visible"
          "Hidden")])))`
@@ -1165,12 +1165,12 @@ compile_path_direct_html_render_emits_builder_writes :: proc(t: ^testing.T) {
 
 (defn demo [title: string, enabled?: bool] -> string
   (html.render
-    [:section {class: "panel"
-               hidden: enabled?
-               data-state: (if enabled? "on" "off")}
-     [:h1 title]
+    [section {class "panel"
+              hidden enabled?
+              data-state (if enabled? "on" "off")}
+     [h1 title]
      (when enabled?
-       [:span "Ready & <ok>"])]))`
+       [span "Ready & <ok>"])]))`
 
     write_err := os.write_entire_file_from_string(path, source)
     testing.expect_value(t, write_err == nil, true)
@@ -1196,6 +1196,60 @@ compile_path_direct_html_render_emits_builder_writes :: proc(t: ^testing.T) {
 }
 
 @(test)
+compile_path_html_render_rejects_keyword_tags :: proc(t: ^testing.T) {
+    path, ok_path := repo_temp_test_path(".tmp-html-keyword-tag-test.kvist")
+    testing.expect_value(t, ok_path, true)
+    if !ok_path {
+        return
+    }
+    defer delete(path)
+    defer os.remove(path)
+
+    source := `(import html "kvist:html")
+
+(defn demo [] -> string
+  (html.render [:div "ok"]))`
+
+    write_err := os.write_entire_file_from_string(path, source)
+    testing.expect_value(t, write_err == nil, true)
+    if write_err != nil {
+        return
+    }
+
+    _, err, ok := kvist.compile_path(path)
+    testing.expect_value(t, ok, false)
+    defer delete(err.message)
+    testing.expect_value(t, strings.contains(err.message, "html tag must be a bare symbol"), true)
+}
+
+@(test)
+compile_path_html_render_rejects_label_attrs :: proc(t: ^testing.T) {
+    path, ok_path := repo_temp_test_path(".tmp-html-label-attr-test.kvist")
+    testing.expect_value(t, ok_path, true)
+    if !ok_path {
+        return
+    }
+    defer delete(path)
+    defer os.remove(path)
+
+    source := `(import html "kvist:html")
+
+(defn demo [] -> string
+  (html.render [div {class: "panel"} "ok"]))`
+
+    write_err := os.write_entire_file_from_string(path, source)
+    testing.expect_value(t, write_err == nil, true)
+    if write_err != nil {
+        return
+    }
+
+    _, err, ok := kvist.compile_path(path)
+    testing.expect_value(t, ok, false)
+    defer delete(err.message)
+    testing.expect_value(t, strings.contains(err.message, "html attr must use bare names without trailing :"), true)
+}
+
+@(test)
 compile_path_html_render_supports_template_bindings :: proc(t: ^testing.T) {
     path, ok_path := repo_temp_test_path(".tmp-html-template-render-test.kvist")
     testing.expect_value(t, ok_path, true)
@@ -1208,7 +1262,7 @@ compile_path_html_render_supports_template_bindings :: proc(t: ^testing.T) {
     source := `(import html "kvist:html")
 
 (defn demo [name: string] -> string
-  (html.render "<h1>{{name}}</h1>" {name: name}))`
+  (html.render "<h1>{{name}}</h1>" {name name}))`
 
     write_err := os.write_entire_file_from_string(path, source)
     testing.expect_value(t, write_err == nil, true)
@@ -1264,7 +1318,7 @@ compile_path_html_render_file_embeds_template_at_compile_time :: proc(t: ^testin
 (import html "kvist:html")
 
 (defn demo [name: string] -> string
-  (html.render-file "home.html" {name: name}))`
+  (html.render-file "home.html" {name name}))`
 
     source_write_err := os.write_entire_file_from_string(main_path, source)
     testing.expect_value(t, source_write_err == nil, true)
@@ -5501,7 +5555,7 @@ cli_test_command_runs_builtin_package_suite :: proc(t: ^testing.T) {
     }
     defer delete(kvist_bin)
 
-    path, join_err := os.join_path({repo_root, "examples", "packages", "builtin-package-tests.kvist"}, context.allocator)
+    path, join_err := os.join_path({repo_root, "examples", "coverage", "packages", "builtin-package-tests.kvist"}, context.allocator)
     testing.expect_value(t, join_err == nil, true)
     if join_err != nil {
         return
@@ -5543,7 +5597,7 @@ cli_test_command_runs_http_and_html_package_suite :: proc(t: ^testing.T) {
     }
     defer delete(kvist_bin)
 
-    path, join_err := os.join_path({repo_root, "examples", "packages", "http-and-html-package-tests.kvist"}, context.allocator)
+    path, join_err := os.join_path({repo_root, "examples", "coverage", "packages", "http-and-html-package-tests.kvist"}, context.allocator)
     testing.expect_value(t, join_err == nil, true)
     if join_err != nil {
         return
@@ -5585,7 +5639,7 @@ cli_test_command_runs_test_package_suite :: proc(t: ^testing.T) {
     }
     defer delete(kvist_bin)
 
-    path, join_err := os.join_path({repo_root, "examples", "packages", "test-package-tests.kvist"}, context.allocator)
+    path, join_err := os.join_path({repo_root, "examples", "coverage", "packages", "test-package-tests.kvist"}, context.allocator)
     testing.expect_value(t, join_err == nil, true)
     if join_err != nil {
         return
@@ -5627,7 +5681,7 @@ cli_test_command_runs_arr_package_suite :: proc(t: ^testing.T) {
     }
     defer delete(kvist_bin)
 
-    path, join_err := os.join_path({repo_root, "examples", "packages", "arr-package-tests.kvist"}, context.allocator)
+    path, join_err := os.join_path({repo_root, "examples", "coverage", "packages", "arr-package-tests.kvist"}, context.allocator)
     testing.expect_value(t, join_err == nil, true)
     if join_err != nil {
         return
@@ -5669,7 +5723,7 @@ cli_test_command_runs_package_edge_suite :: proc(t: ^testing.T) {
     }
     defer delete(kvist_bin)
 
-    path, join_err := os.join_path({repo_root, "examples", "packages", "package-edge-tests.kvist"}, context.allocator)
+    path, join_err := os.join_path({repo_root, "examples", "coverage", "packages", "package-edge-tests.kvist"}, context.allocator)
     testing.expect_value(t, join_err == nil, true)
     if join_err != nil {
         return
@@ -11385,7 +11439,7 @@ compile_path_defaults_missing_package_to_main :: proc(t: ^testing.T) {
 
 @(test)
 compile_path_supports_multi_file_source_package_directory :: proc(t: ^testing.T) {
-    output, err, ok := kvist.compile_path("examples/language/cluck-port-packages.kvist")
+    output, err, ok := kvist.compile_path("examples/coverage/cluck-port/cluck-port-packages.kvist")
     testing.expect_value(t, ok, true)
     if !ok {
         testing.expect_value(t, err.message, "")

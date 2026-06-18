@@ -331,7 +331,8 @@
   "Copy `xs` into a new array value of `out-type`.
 
   Use this to convert between compatible array-family representations. The
-  input is not mutated."
+  input is not mutated. Use `arr.into!` to append into an existing dynamic
+  array."
   [out-type xs]
   (quasiquote
     (arr-into (unquote out-type) (unquote xs))))

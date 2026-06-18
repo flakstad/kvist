@@ -1,6 +1,6 @@
 (package main)
 
-(import "../support/math")
+(import "../../support/math")
 
 (def banner
   "package demo")

@@ -209,7 +209,8 @@ Builder helpers such as `arr.map`, `arr.filter`, `arr.remove`,
 `arr.range`, `arr.repeat`, `arr.repeatedly`, `arr.iterate`, bounded
 `arr.cycle`, and `arr.take-nth`
 return owned dynamic arrays. `into` is for explicit dynamic-array
-targets, for example `(arr.into [dynamic]int xs)`. `arr.distinct` and
+result types, for example `(arr.into [dynamic]int xs)`. Use `arr.into!` to
+append into an existing dynamic array. `arr.distinct` and
 `arr.distinct-by` also
 return owned dynamic arrays and use a temporary `map[key]bool` internally, so
 the value or key must be valid as an Odin map key. `map.zip`, `arr.index-by`,
@@ -468,7 +469,7 @@ lowering would be surprising.
 Concrete rules:
 
 - `into` constructs an owned dynamic array from a borrowed collection,
-  and `into!` means dynamic-array append lowering directly to
+  and `arr.into!` means dynamic-array append lowering directly to
   `append(&target, ..xs)`.
 - map combination is explicit `merge`/`merge!`.
 - `shuffle` and `shuffle!` are implemented with an explicit picker callback. The

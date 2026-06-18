@@ -23,6 +23,7 @@ run_odin() {
 }
 
 find examples/collections \
+     examples/coverage \
      examples/interop \
      examples/language \
      examples/packages \

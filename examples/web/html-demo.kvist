@@ -6,11 +6,11 @@
 (defn html-demo [] -> bool
   (let [ids (arr.range 1 4) :defer
         page (h.render
-               [:div {class: "border" onclick: "alert('hello!')"}
-                [:button {class: "primary"} "Save"]
-                [:ul
+               [div {class "border" onclick "alert('hello!')"}
+                [button {class "primary"} "Save"]
+                [ul
                  (h.for [id ids]
-                   [:li id])]]) :defer]
+                   [li id])]]) :defer]
     (println page)
     true))
 

@@ -4,9 +4,9 @@
 
 (defn render-demo [] -> bool
   (let [html (html.render
-               [:div {class: "border"}
-                [:button {class: "primary"} "Save & Close"]
-                [:span "Status <ok>"]]) :defer]
+               [div {class "border"}
+                [button {class "primary"} "Save & Close"]
+                [span "Status <ok>"]]) :defer]
     (println html)
     true))
 
