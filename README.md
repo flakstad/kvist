@@ -15,8 +15,28 @@ running programs. It draws from Lisp and Clojure in its source shape and
 metaprogramming model, but it does not introduce a hidden runtime, seq layer, or
 garbage-collected object model. The generated Odin remains the program.
 
-Kvist source shows the program that runs: allocation, mutation, imports,
-pointers, and cleanup are visible in the code.
+## Quickstart
+
+Install the [Odin compiler](https://odin-lang.org/docs/install/), then build
+the Kvist CLI:
+
+```sh
+odin build cmd/kvist -out:kvist
+```
+
+Create `hello.kvist`. All it takes is a `defn main` in a `.kvist` file:
+
+```clojure
+(defn main []
+  (println "hello from kvist"))
+```
+
+Run it:
+
+```sh
+$ ./kvist run hello.kvist
+hello from kvist
+```
 
 ## Coming From Odin Or Clojure
 
@@ -34,15 +54,8 @@ execution model, and procedure arguments are immutable by default.
 
 ## What It Looks Like
 
-This is all it takes to write hello world:
-
-```clojure
-(defn main []
-  (println "hello from kvist"))
-```
-
-Here is a slightly larger example with a struct, a typed function, a loop, and
-owned data cleaned up with `:defer`:
+A slightly larger example with a struct, a typed function, a loop, and owned
+data cleaned up with `:defer`:
 
 ```clojure
 (defstruct Order {
@@ -67,58 +80,195 @@ owned data cleaned up with `:defer`:
 ## Reading Kvist Syntax
 
 Kvist uses Lisp-style forms: the first item says what is happening, and the rest
-are arguments. Types are written after names with `:`.
+are arguments. Types are written after names with `:`. Commas are optional
+whitespace; the examples usually omit them.
+
+Files can start with a package and imports. For a tiny `main` program, both are
+optional unless you need named imports:
 
 ```clojure
-(defn paid-total [orders: []Order] -> int  ;; name, typed args, return type
+(package main)
+(import fmt "core:fmt")
+(import arr "kvist:arr")
+
+(defn main []
+  (fmt.println "hello"))
+```
+
+```clojure
+(println "hello" 42)          ;; function call
+(+ 1 2 3)                     ;; operator call
+(fmt.tprintf "user-%d" (+ id 1))  ;; nested call
+(len ([]int [10 20 30]))      ;; slice literal
+(get {"Ada" 42 "Lin" 37} name 0)  ;; lookup name, fallback 0
+```
+
+Names are written in the source style and mapped to Odin names when needed:
+
+```clojure
+active?     ;; active_p
+push!       ;; push_bang
+user.name   ;; field access
+fmt.println ;; package-qualified call
+```
+
+Top-level values use `def`. Mutable top-level state uses `defvar`:
+
+```clojure
+(def default-port: int 8080)
+(defvar request-count 0)
+
+(defn bump! [] -> int
+  (inc! request-count)
+  request-count)
+```
+
+Local bindings use square brackets, and the body returns its final expression:
+
+```clojure
+(let [name "Ada"
+      score (+ 20 22)]
+  (fmt.tprintf "%s: %d" name score))
+```
+
+Use `do` when a branch or callback needs several expressions:
+
+```clojure
+(do
+  (println "loading")
+  (load-users))
+```
+
+Conditionals are expressions. `:else` is a keyword marker, not a value:
+
+```clojure
+(defn label [score: int] -> string
+  (if (>= score 100)
+    "complete"
+    "in progress"))
+
+(when debug?
+  (println "score" score))
+```
+
+`cond` and `case` cover the larger branches:
+
+```clojure
+(cond
+  (< n 0) "negative"
+  (= n 0) "zero"
+  :else "positive")
+
+(case status
+  .Pending "waiting"
+  .Running "moving"
+  .Done "finished"
+  :else "unknown")
+```
+
+Loops read like other forms:
+
+```clojure
+(for [name names]
+  (println name))
+
+(for [name i names]
+  (println i name))
+```
+
+Typed collection literals say what kind of Odin value they produce:
+
+```clojure
+([]int [1 2 3])                  ;; slice
+([3]int [1 2 3])                 ;; fixed array
+(map[string]int {"ok" 200})      ;; map
+(arr.dynamic int [1 2 3])        ;; owned dynamic array
+```
+
+Structs are declared with fields, built with type-call syntax, and read with
+field access:
+
+```clojure
+(defstruct User {
+  name: string
+  age: int
+})
+
+(let [user (User {name: "Ada" age: 36})]
+  (println user.name user.age))
+```
+
+Threading works for left-to-right data flow:
+
+```clojure
+(-> (User {name: "Ada" age: 36})
+    .name
+    len)
+```
+
+Anonymous functions use `fn`. Captured callbacks work with helpers that call
+the function directly:
+
+```clojure
+(arr.map (fn [x: int] -> int
+           (+ x 1))
+         xs)
+```
+
+Function parameters also use square brackets. This defines `paid-total`; it
+takes `orders` as `[]Order`, returns `int`, and returns the final expression in
+the body:
+
+```clojure
+(defn paid-total [orders: []Order] -> int
   (transduce paid-amounts + 0 orders))
-;; The final expression is the return value.
 ```
 
-Read that as: define a procedure named `paid-total`; it takes one parameter,
-`orders`, typed as `[]Order`; it returns `int`; the body is one expression. If a
-non-void function body ends with an expression, that final expression is the
-return value.
-
-Parameters live in a vector because they are structured data, not a comma list:
+Return specs can be a single type or named multiple return values:
 
 ```clojure
-(defn move! [x: ^f32 y: ^f32 dx: f32 dy: f32]  ;; pointer params
-  (mut! x^ += dx)  ;; x^ dereferences
-  (mut! y^ += dy))
-```
-
-Calls are lists. Named arguments are passed with a map form. Any
-omitted argument uses its explicit default, or the type's zero value if it has
-no default:
-
-```clojure
-(move! &x &y 4 2)
-(move! {x: &x y: &y dx: 4 dy: 2})
-(move! {x: &x y: &y})  ;; dx and dy become f32{}
-```
-
-`^T` is a pointer type, `value^` dereferences, and `&value` takes an address.
-The same operations are also available as forms: `(ptr T)`, `(deref value)`,
-and `(addr value)`.
-
-Return specs can be a single type, multiple positional values, or named return
-values:
-
-```clojure
-(defn parse-count [text: string] -> [value: int, ok: bool]  ;; named returns
+(defn parse-count [text: string] -> [value: int, ok: bool]
   ...)
 
-(defn bounds [xs: []int] -> [int int]  ;; positional returns
+(defn divmod [n: int, d: int] -> [q: int, r: int]
   ...)
 ```
 
-Multiple return values bind positionally:
+Multiple return values bind by position:
 
 ```clojure
 (let [[value ok] (parse-count "42")]  ;; destructures return values
   (when ok
     (println value)))
+```
+
+The `:or-*` markers are early-exit helpers for `value, ok` style calls:
+
+```clojure
+(defn parse-required [text: string] -> [value: int, ok: bool]
+  (let [[value ok] (parse-count text) :or-return]
+    (return value true)))
+```
+
+Kvist then adds syntax for the systems parts. Named arguments are passed with a
+map form. Any omitted argument uses its explicit default, or the type's zero
+value if it has no default:
+
+```clojure
+(draw-label "hud" "READY" {x: 40 y: 24})
+(draw-label "hud" {text: "READY"})  ;; x and y use their zero values
+```
+
+Pointers use `^`, `^` after a value, and `&`. The same operations are also
+available as forms: `(ptr T)`, `(deref value)`, and `(addr value)`.
+
+```clojure
+(defn move! [x: ^f32 y: ^f32 dx: f32 dy: f32]  ;; pointer params
+  (mut! x^ += dx)  ;; dereference and compound assignment
+  (mut! y^ += dy))
+
+(move! &x &y 4 2)
+(move! {x: &x y: &y dx: 4 dy: 2})
 ```
 
 ## Small Core, Real Libraries
@@ -170,41 +320,6 @@ small, regular language:
 - use `check`, `run`, `eval`, and reload tooling without a separate interpreter
 
 The generated Odin is still there when you want to inspect it.
-
-## Quickstart
-
-Install the [Odin compiler](https://odin-lang.org/docs/install/), then build
-the Kvist CLI:
-
-```sh
-odin build cmd/kvist -out:kvist
-```
-
-Create `hello.kvist`:
-
-```clojure
-(defn main []
-  (println "hello from kvist"))
-```
-
-Run it:
-
-```sh
-./kvist run hello.kvist
-```
-
-Check or build it without running:
-
-```sh
-./kvist check hello.kvist
-./kvist build hello.kvist
-```
-
-Inspect the Odin that Kvist generated:
-
-```sh
-./kvist run hello.kvist --generated hello.odin
-```
 
 ## Whirlwind Tour
 

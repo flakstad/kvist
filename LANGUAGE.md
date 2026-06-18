@@ -273,10 +273,10 @@ procedure-like allocation operation:
   total)
 ```
 
-Flat positional multi-return binding is supported:
+Multiple return values bind by position using a binding vector:
 
 ```clojure
-(let [value ok (lookup key)]
+(let [[value ok] (lookup key)]
   (if ok value fallback))
 ```
 
