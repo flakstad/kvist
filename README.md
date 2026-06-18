@@ -4,16 +4,16 @@
 
 # Kvist
 
-Kvist - A Practical Lisp for Systems Programming
+A practical Lisp for systems programming.
 
 Kvist is a general-purpose Lisp-shaped language for writing fast programs and
-small binaries. It combines expression-oriented syntax and macros with explicit
-ownership and memory management.
+small binaries. It gives you expression-oriented syntax, macros, explicit
+ownership, and direct memory management.
 
-Kvist compiles to readable Odin and uses Odin for checking, building, and
-running programs. It draws from Lisp and Clojure in its source shape and
-metaprogramming model, but it does not introduce a hidden runtime, seq layer, or
-garbage-collected object model. The generated Odin remains the program.
+Kvist transpiles to readable Odin and uses Odin for checking, building, and
+running programs. The syntax draws from Lisp and Clojure, but the execution
+model stays close to Odin: no hidden runtime, no seq layer, no garbage-collected
+object model.
 
 ## Quickstart
 
@@ -40,17 +40,27 @@ hello from kvist
 
 ## Coming From Odin Or Clojure
 
-For Odin developers, Kvist keeps explicit imports, concrete structs, enums,
-unions, pointers, slices, dynamic arrays, `defer`, `delete`, and mutation.
-The difference is syntax: those pieces are written as expression-oriented forms
-with macros and data transformation helpers.
+For Odin developers, Kvist is close to Odin by design. It transpiles to Odin,
+uses Odin for checking and building, and tries to expose Odin's syntax and
+features directly instead of inventing parallel meanings. Types are Odin types,
+`^T` is still a pointer type, slices and dynamic arrays are still Odin-shaped,
+and `defer`, `delete`, foreign imports, `core:*`, `base:*`, and `vendor:*`
+packages are all part of the normal workflow. Kvist code can sit next to Odin
+files in the same package, and the generated Odin is meant to be readable. The
+extra layer is there for expression-oriented code, macros, and source
+transformations, not for hiding the target language.
 
-For Clojure developers, Kvist borrows the shape, not the runtime. It is eager,
-mutable, and ownership-oriented. Values are not persistent by default,
-collection helpers allocate owned buffers, and mutation is expected.
-The `kvist:arr` package provides collection operations in both fresh-result and
-mutating bang forms. Functional patterns are available where they fit the
-execution model, and procedure arguments are immutable by default.
+For Clojure developers, Kvist deliberately copies Clojure's excellent Lisp
+syntax as far as it fits an eager, mutable systems language: small
+parenthesized forms, data literals, `let`, `when`, `cond`, threading, macros,
+field selectors, and a collection library that feels familiar. The similarity
+is at the source level. There is no dynamic runtime, lazy sequence layer,
+persistent collection model, or garbage-collected object graph. Values are
+owned by ordinary generated code, and collection helpers allocate owned buffers
+unless you call a bang variant that mutates existing storage. `kvist:arr`
+brings over much of the spirit of Clojure's core sequence library with
+fresh-result helpers such as `arr.map` and `arr.filter`, plus mutating helpers
+such as `arr.map!`, `arr.filter!`, and `arr.into!`.
 
 ## What It Looks Like
 
