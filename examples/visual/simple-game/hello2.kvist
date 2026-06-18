@@ -124,7 +124,7 @@
       (set! player-grounded? false)
 
       (defvar player-feet-collider (rl.Rectangle [(- player-pos.x 4) (- player-pos.y 4) 8 4]))
-      (each [platform level.platforms]
+      (for [platform level.platforms]
         (when (and (rl.CheckCollisionRecs player-feet-collider (platform-collider platform))
                    (> player-vel.y 0))
           (set! player-vel.y 0)
@@ -142,7 +142,7 @@
       (rl.BeginMode2D camera)
       (draw-animation current-anim player-pos player-flip?)
 
-      (each [platform level.platforms]
+      (for [platform level.platforms]
         (rl.DrawTextureV platform-texture platform rl.WHITE))
 
       (rl.DrawRectangleRec player-feet-collider [0 255 0 100])

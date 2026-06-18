@@ -54,17 +54,15 @@ Print generated paths and canonical commands:
 The adapter form points at the production state type:
 
 ```clojure
-(defstate app.App_State
-  {run: run
-   init: app.init
-   on-load: app.on-load
-   on-unload: app.on-unload})
+(def Reload_State app.App_State)
+
+(defn init [state: ^Reload_State]
+  (app.init state))
 ```
 
-That metadata-only `defstate` does not emit a new struct. The production app
-owns `App_State`; the reload adapter imports `main.kvist` as `app` and only
-declares which state type and lifecycle functions the resident host should
-preserve.
+The production app owns `App_State`; the reload adapter imports `main.kvist` as
+`app`, aliases the durable state as `Reload_State`, and provides conventional
+lifecycle functions for the resident host.
 
 The reload `run` function takes the durable state plus `^reload.Run_Host`.
 When `reload.checkpoint!` returns true, `run` should return so the resident

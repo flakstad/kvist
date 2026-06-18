@@ -8,7 +8,7 @@ opaque lowering.
 
 ## Motivation
 
-Manual `each` loops are always available and remain the escape hatch for
+Manual `for` loops are always available and remain the escape hatch for
 anything unusual. A transform pipeline is only worth adding if it provides clear
 benefits over hand-written fused loops:
 
@@ -66,7 +66,7 @@ Reusable `defsource` producers can also feed `into` and `transduce`:
   (orders-from-file path))
 ```
 
-For a complete source example that exercises `each`, `into`, `transduce`, and
+For a complete source example that exercises `for`, `into`, `transduce`, and
 `defer`-based disposal, see `examples/collections/log-source.kvist`.
 
 Supported transformer forms are deliberately small:
@@ -85,7 +85,7 @@ Callbacks can be known one-argument functions or shallow field selectors:
     (map .age)))
 ```
 
-Use `map` plus `filter`, or write a direct `each` loop when a transformation
+Use `map` plus `filter`, or write a direct `for` loop when a transformation
 needs optional-result semantics.
 
 ## Reuse Example
@@ -174,14 +174,14 @@ Rough Odin shape:
 ```
 
 When the source is a `defsource` call, `transduce` uses the same protocol as
-`each` and `into`: open source state, defer disposal if present, call `:next`
+`for` and `into`: open source state, defer disposal if present, call `:next`
 until `ok` is false, and update the accumulator without allocating an
 intermediate collection.
 
 These lowerings are intentionally boring. If the generated Odin becomes hard to
 inspect, the feature is drifting.
 
-## Comparison With Manual `each`
+## Comparison With Manual `for`
 
 The equivalent manual collection loop is clear, but it mixes traversal,
 conditionals, temporary names, result allocation, and append placement:
@@ -189,7 +189,7 @@ conditionals, temporary names, result allocation, and append placement:
 ```clojure
 (defn collect-paid-totals-manual [orders: []Order] -> [dynamic]int
   (let [out (arr.empty int)]
-    (each [order orders]
+    (for [order orders]
       (when (paid? order)
         (let [total (order-total order)]
           (when (positive? total)
@@ -222,11 +222,11 @@ The first implementation is strict:
   existing ownership conventions;
 - `transduce` requires an obvious accumulator type from the initial value or an
   annotation;
-- `defsource` calls are consumed directly by `each`, `into`, and `transduce`;
+- `defsource` calls are consumed directly by `for`, `into`, and `transduce`;
 - no hidden lazy seqs, dynamic dispatch, or boxed elements.
 
 When any of these rules are not met, the compiler rejects the pipeline and
-suggest the direct `each` loop fallback.
+suggest the direct `for` loop fallback.
 
 Named `deftransform` declarations are checked for basic shape immediately:
 the spec must be `(comp ...)`, and each step must be `(map f)` or
@@ -245,5 +245,5 @@ The implemented surface is:
 4. Implement `(transduce transform + init source)` for numeric accumulators.
 5. Support `defsource` calls as direct inputs to transform `into` and
    `transduce`.
-6. Add examples that compare reusable transform usage to the manual `each`
+6. Add examples that compare reusable transform usage to the manual `for`
    version.

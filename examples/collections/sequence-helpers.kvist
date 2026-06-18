@@ -62,8 +62,8 @@
 
 (defn deferred-total [] -> int
   (let [xs ([]int [1 2 3])]
-    (let [doubled (arr.map double xs) defer
-          evens (arr.filter even? doubled) defer]
+    (let [doubled (arr.map double xs) :defer
+          evens (arr.filter even? doubled) :defer]
       (arr.reduce add 0 evens))))
 
 (defn age-for-grace [] -> int
@@ -119,7 +119,7 @@
         groups (arr.group-by parity xs)
         evens groups[0]]
     (defer
-      (each [_ group groups]
+      (for [_ group groups]
         (delete group))
       (delete groups))
     (len evens)))

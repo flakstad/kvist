@@ -11,7 +11,7 @@
   "Return a dynamic array of even integers below LIMIT."
   [limit: int] -> [dynamic]int
   (let [out (arr.empty int)]
-    (each [i (arr.range 0 limit)]
+    (for [i (arr.range 0 limit)]
       (when (even-step? i)
         (arr.push! out i)))
     out))

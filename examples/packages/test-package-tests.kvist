@@ -12,8 +12,8 @@
   (set! each-ran (+ each-ran 1))
   (body t))
 
-(t.use-fixtures once: once-fixture)
-(t.use-fixtures each: each-fixture)
+(t.use-fixtures :once once-fixture)
+(t.use-fixtures :each each-fixture)
 
 (t.deftest test-package-fixtures-and-assertions
   (t.testing "fixtures"

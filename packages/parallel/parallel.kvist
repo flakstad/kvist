@@ -53,7 +53,7 @@
     (parallel-each (unquote worker) (unquote xs) 0)))
 
 (defmacro each-with
-  "Like `each`, but accepts `{workers: n}` to control the worker count."
+  "Like `for`, but accepts `{workers: n}` to control the worker count."
   [options worker xs]
   (quasiquote
     (parallel-each-with (unquote options) (unquote worker) (unquote xs))))

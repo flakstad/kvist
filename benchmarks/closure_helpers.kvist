@@ -51,7 +51,7 @@ MAP_BANG_REPS :: 80")
         checksum 0]
     (while (< i reps)
       (let [mapped (arr.empty int (count xs))]
-        (each [x xs]
+        (for [x xs]
           (arr.push! mapped (+ x offset)))
         (set! checksum (+ checksum (arr.last mapped)))
         (delete mapped))
@@ -94,7 +94,7 @@ MAP_BANG_REPS :: 80")
         checksum 0]
     (while (< i reps)
       (let [filtered (arr.empty int (count xs))]
-        (each [x xs]
+        (for [x xs]
           (when (> x limit)
             (arr.push! filtered x)))
         (set! checksum (+ checksum (count filtered)))
@@ -121,7 +121,7 @@ MAP_BANG_REPS :: 80")
         checksum 0]
     (while (< i reps)
       (let [filtered (arr.empty int (count xs))]
-        (each [x xs]
+        (for [x xs]
           (when (not (> x limit))
             (arr.push! filtered x)))
         (set! checksum (+ checksum (count filtered)))
@@ -150,7 +150,7 @@ MAP_BANG_REPS :: 80")
         checksum 0]
     (while (< i reps)
       (let [kept (arr.empty int (count xs))]
-        (each [x xs]
+        (for [x xs]
           (when (> x limit)
             (arr.push! kept x)))
         (set! checksum (+ checksum (count kept)))

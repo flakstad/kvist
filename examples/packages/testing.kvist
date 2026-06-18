@@ -10,8 +10,8 @@
 (defn each-fixture [t: ^testing.T, body: fn [t: ^testing.T]]
   (body t))
 
-(t.use-fixtures once: once-fixture)
-(t.use-fixtures each: each-fixture)
+(t.use-fixtures :once once-fixture)
+(t.use-fixtures :each each-fixture)
 
 (t.deftest sample-arithmetic
   "Basic assertions over ordinary Kvist expressions."

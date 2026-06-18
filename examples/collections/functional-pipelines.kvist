@@ -39,7 +39,7 @@
 (defn loop-total [] -> int
   (let [xs ([]int [5 1 2 3 4])
         total 0]
-    (each [x xs]
+    (for [x xs]
       (let [next (inc x)]
         (when (even? next)
           (set! total (+ total next)))))

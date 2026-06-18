@@ -58,7 +58,7 @@
 
 (defn collect-paid-totals-manual [] -> [dynamic]int
   (let [out (arr.empty int)]
-    (each [order (sample-orders)]
+    (for [order (sample-orders)]
       (when (paid? order)
         (let [total (order-total order)]
           (when (positive? total)
@@ -67,7 +67,7 @@
 
 (defn sum-paid-totals-manual [] -> int
   (let [total 0]
-    (each [order (sample-orders)]
+    (for [order (sample-orders)]
       (when (paid? order)
         (let [mapped-total (order-total order)]
           (when (positive? mapped-total)

@@ -10,7 +10,7 @@
    tags: set[string]})
 
 (defn records-demo [] -> bool
-  (let [tags (set.empty string 2) defer
+  (let [tags (set.empty string 2) :defer
         person (Person {name: "Ada"
                         age: 36
                         tags: tags})]

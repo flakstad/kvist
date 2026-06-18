@@ -194,28 +194,6 @@ Mutation uses the same place model:
 It copies the root struct value, updates the selected field on the copy, and
 returns the copy. It does not deep-copy owned fields.
 
-`for` is the expression form for building owned collections from other
-collections:
-
-```clojure
-(for [user users :let [decade (* (/ user.age 10) 10)] :when user.active]
-  :into [dynamic]Row
-  (Row {name: user.name decade: decade}))
-
-(for [user users :when user.active]
-  :into map[string]User
-  [user.id user])
-
-(for [user users :while (< user.age 65) :when user.active]
-  :into set[string]
-  user.id)
-```
-
-Without `:into`, Kvist infers a `[dynamic]T` result when the yielded expression
-has an obvious type. Map output requires a yielded `[key value]` vector. Set
-output inserts the yielded value as the member. Use `each` when the loop exists
-for side effects, mutation, logging, or early return.
-
 `arr.first`, `arr.second`, `arr.last`, and `arr.nth` lower to indexing.
 Direct expression indexes can be written as attached brackets, for example
 `cells[(idx x y)]`, and work in reads, `set!`, and `mut!` places.
@@ -380,7 +358,7 @@ For hot paths, prefer one of these shapes:
 - use bang helpers such as `arr.sort!`, `arr.reverse!`, `arr.shuffle!`, `arr.map!`, `arr.filter!`,
   `arr.remove!`, `arr.keep!`, `arr.into!`, and `map.merge!` when mutating existing storage is the
   right Odin choice;
-- write an explicit `each` loop when one pass and no intermediate collection is
+- write an explicit `for` loop when one pass and no intermediate collection is
   needed;
 - avoid `arr.group-by` when only aggregate totals are needed. Use `arr.count-by` or
   `arr.sum-by` for simple aggregate maps, or accumulate directly into maps for
@@ -422,7 +400,7 @@ detail before a scalar result, or when the update needs custom state:
 ```clojure
 (let [revenue-by-region (make map[int]int)
       count-by-region (make map[int]int)]
-  (each [order orders]
+  (for [order orders]
     (let [settled (settle-order order)]
       (when (settled? settled)
         (set! revenue-by-region[settled.region]

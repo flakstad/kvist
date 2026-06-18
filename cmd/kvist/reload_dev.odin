@@ -225,7 +225,7 @@ reload_app_config_from_source :: proc(input, source: string) -> (config: Reload_
     }
 
     config.version = strings.clone("dev")
-    found_defstate := false
+    found_reload_state := false
 
     for top in forms {
         form := top.form
@@ -252,114 +252,62 @@ reload_app_config_from_source :: proc(input, source: string) -> (config: Reload_
         }
 
         switch form.items[0].text {
-        case "defstate":
-            if found_defstate {
-                return config, kvist.Compile_Error{message = "defstate must appear at most once in reload dev mode", span = form.span}, false
-            }
-            metadata_only := len(form.items) == 3 && form.items[2].kind == .Brace
-            if !metadata_only && len(form.items) != 4 && len(form.items) != 5 {
-                return config, kvist.Compile_Error{message = "reload dev mode requires defstate with either metadata only or fields plus metadata brace forms", span = form.span}, false
-            }
-            if form.items[1].kind != .Symbol {
-                return config, kvist.Compile_Error{message = "defstate expects a symbol name", span = form.items[1].span}, false
-            }
-            fields_index := 2
-            meta_index := 3
-            if metadata_only {
-                meta_index = 2
-            } else if len(form.items) == 5 {
-                if form.items[2].kind != .String {
-                    return config, kvist.Compile_Error{message = "defstate docstring must be a string literal", span = form.items[2].span}, false
+        case "def":
+            if len(form.items) >= 2 && form.items[1].kind == .Symbol {
+                name := reload_app_symbol_name(form.items[1].text)
+                defer delete(name)
+                if name == "Reload_State" {
+                    found_reload_state = true
+                    if config.state_type != "" {
+                        delete(config.state_type)
+                    }
+                    config.state_type = strings.clone("Reload_State")
+                    continue
                 }
-                fields_index = 3
-                meta_index = 4
-            }
-            if !metadata_only && form.items[fields_index].kind != .Brace {
-                return config, kvist.Compile_Error{message = "defstate fields must be a brace form", span = form.items[fields_index].span}, false
-            }
-            if form.items[meta_index].kind != .Brace {
-                return config, kvist.Compile_Error{message = "defstate reload metadata must be a brace form", span = form.items[meta_index].span}, false
-            }
-            found_defstate = true
-            config.state_type = reload_app_symbol_name(form.items[1].text)
-            meta := form.items[meta_index]
-            i := 0
-            for i < len(meta.items) {
-                if i+1 >= len(meta.items) {
-                    return config, kvist.Compile_Error{message = "defstate reload metadata has a missing value", span = meta.span}, false
-                }
-                key_form := meta.items[i]
-                value := meta.items[i+1]
-                if key_form.kind != .Symbol || len(key_form.text) < 2 || key_form.text[len(key_form.text)-1] != ':' {
-                    return config, kvist.Compile_Error{message = "defstate reload metadata expects field labels like run:", span = key_form.span}, false
-                }
-                key := key_form.text[:len(key_form.text)-1]
-                switch key {
-                case "run":
-                    if value.kind != .Symbol {
-                        return config, kvist.Compile_Error{message = "defstate run: must be a symbol", span = value.span}, false
-                    }
-                    if config.run_name != "" {
-                        delete(config.run_name)
-                    }
-                    config.run_name = reload_app_symbol_name(value.text)
-                case "init":
-                    if value.kind == .Nil {
-                        config.init_name = ""
-                    } else {
-                        if value.kind != .Symbol {
-                            return config, kvist.Compile_Error{message = "defstate init: must be a symbol or nil", span = value.span}, false
-                        }
-                        if config.init_name != "" {
-                            delete(config.init_name)
-                        }
-                        config.init_name = reload_app_symbol_name(value.text)
-                    }
-                case "on-load":
-                    if value.kind == .Nil {
-                        config.on_load_name = ""
-                    } else {
-                        if value.kind != .Symbol {
-                            return config, kvist.Compile_Error{message = "defstate on-load: must be a symbol or nil", span = value.span}, false
-                        }
-                        if config.on_load_name != "" {
-                            delete(config.on_load_name)
-                        }
-                        config.on_load_name = reload_app_symbol_name(value.text)
-                    }
-                case "on-unload":
-                    if value.kind == .Nil {
-                        config.on_unload_name = ""
-                    } else {
-                        if value.kind != .Symbol {
-                            return config, kvist.Compile_Error{message = "defstate on-unload: must be a symbol or nil", span = value.span}, false
-                        }
-                        if config.on_unload_name != "" {
-                            delete(config.on_unload_name)
-                        }
-                        config.on_unload_name = reload_app_symbol_name(value.text)
-                    }
-                case "version":
-                    if value.kind != .String {
-                        return config, kvist.Compile_Error{message = "defstate version: must be a string", span = value.span}, false
-                    }
+                if name == "Reload_Version" && len(form.items) == 3 && form.items[2].kind == .String {
                     if config.version != "" {
                         delete(config.version)
                     }
-                    config.version = kvist.unquote_string(value.text)
-                case:
-                    return config, kvist.Compile_Error{message = fmt.tprintf("unsupported defstate reload metadata option: %s:", key), span = key_form.span}, false
+                    config.version = kvist.unquote_string(form.items[2].text)
+                    continue
                 }
-                i += 2
+            }
+        case "defn":
+            if len(form.items) >= 2 && form.items[1].kind == .Symbol {
+                name := reload_app_symbol_name(form.items[1].text)
+                defer delete(name)
+                switch name {
+                case "run":
+                    if config.run_name != "" {
+                        delete(config.run_name)
+                    }
+                    config.run_name = strings.clone(name)
+                case "init":
+                    if config.init_name != "" {
+                        delete(config.init_name)
+                    }
+                    config.init_name = strings.clone(name)
+                case "on_load":
+                    if config.on_load_name != "" {
+                        delete(config.on_load_name)
+                    }
+                    config.on_load_name = strings.clone(name)
+                case "on_unload":
+                    if config.on_unload_name != "" {
+                        delete(config.on_unload_name)
+                    }
+                    config.on_unload_name = strings.clone(name)
+                case:
+                }
             }
         }
     }
 
-    if !found_defstate {
-        return config, kvist.Compile_Error{message = "missing defstate declaration"}, false
+    if !found_reload_state {
+        return config, kvist.Compile_Error{message = "reload mode requires a top-level `(def Reload_State <State_Type>)` alias"}, false
     }
     if config.run_name == "" {
-        return config, kvist.Compile_Error{message = "defstate reload metadata requires run:"}, false
+        return config, kvist.Compile_Error{message = "reload mode requires a top-level `run` function"}, false
     }
     if config.package_name == "" {
         config.package_name = strings.clone("main")
@@ -798,6 +746,7 @@ reload_app_host_source :: proc(config: Reload_App_Config, input_path, app_import
     strings.write_string(&builder, "    case .Started:\n        return \"started\"\n")
     strings.write_string(&builder, "    case .Reloaded:\n        return \"reloaded\"\n")
     strings.write_string(&builder, "    case .Restarted:\n        return \"restarted\"\n")
+    strings.write_string(&builder, "    case .Resource_Changed:\n        return \"resource_changed\"\n")
     strings.write_string(&builder, "    case .Reload_Failed:\n        return \"reload_failed\"\n")
     strings.write_string(&builder, "    }\n")
     strings.write_string(&builder, "    return \"unknown\"\n")
@@ -812,6 +761,7 @@ reload_app_host_source :: proc(config: Reload_App_Config, input_path, app_import
         strings.write_string(&builder, "    case .Started:\n        fmt.printf(\"[reload] started generation=%d\\n\", event.generation)\n")
         strings.write_string(&builder, "    case .Reloaded:\n        fmt.printf(\"[reload] reloaded generation=%d\\n\", event.generation)\n")
         strings.write_string(&builder, "    case .Restarted:\n        fmt.printf(\"[reload] restarted generation=%d: %s\\n\", event.generation, event.message)\n")
+        strings.write_string(&builder, "    case .Resource_Changed:\n        fmt.printf(\"[reload] resource changed: %s\\n\", event.message)\n")
         strings.write_string(&builder, "    case .Reload_Failed:\n        fmt.eprintf(\"[reload] reload failed: %s\\n\", event.message)\n")
         strings.write_string(&builder, "    }\n")
     }

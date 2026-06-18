@@ -487,9 +487,9 @@ current Odin block or procedure.
   - `(deftransform name (comp ...))` defines a reusable fused transform for
     `into` and `transduce`
   - `(defsource name [args...] -> Item state-expr :next next-proc [:dispose dispose-proc])`
-    defines a bounded producer protocol for `each`, `into`, and `transduce`
-  - `(defstate State {metadata...})` declares a reload-app state boundary and
-    reload cooperation metadata
+    defines a bounded producer protocol for `for`, `into`, and `transduce`
+  - reload apps declare `(def Reload_State <State-Type>)` and conventional
+    `run`, `init`, `on-load`, and `on-unload` functions
   - `live.module`, `live.command`, and `live.hook` are structural forms consumed
     by the live loader; the `kvist:live` package provides `live.defmodule`,
     `live.defcommand`, and `live.defhook` wrappers
@@ -528,10 +528,7 @@ current Odin block or procedure.
 - `(if test then else)`
 - `(when test body...)`
 - `(while test body...)`
-- `(each [name collection] body...)` and `(each [key value map] body...)`
-- `(for [x xs :let [y expr] :when pred :while pred] :into [dynamic]T value)`
-  builds an owned dynamic array; `:into map[K]V` expects yielded `[key value]`,
-  and `:into set[T]` inserts yielded member values
+- `(for [name collection] body...)` and `(for [key value map] body...)`
 - `(do body...)`
 - `(Type literal)` typed composite literals, including compact Odin type heads
   such as `(matrix[2 2]f32 [1 2 3 4])`, `(#simd[4]f32 [1 2 3 4])`,

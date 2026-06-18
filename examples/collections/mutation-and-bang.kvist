@@ -33,7 +33,7 @@
 
 (defn order-score [orders: []Order] -> int
   (let [total 0]
-    (each [order orders]
+    (for [order orders]
       (set! total (+ total order.amount))
       (set! total (+ total order.status)))
     total))
@@ -60,7 +60,7 @@
 (defn pointer-update-score [] -> int
     (let [orders (sample-orders)]
     (defer (delete orders))
-    (each [_ idx orders]
+    (for [_ idx orders]
       (settle-order! (addr orders[idx])))
     (order-score (arr.slice orders 0))))
 

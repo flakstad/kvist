@@ -12,8 +12,8 @@
 (defn delete-csv-records [records: (slice (slice string))]
   ;; csv.read_all_from_string returns an outer slice, each record slice, and
   ;; cloned field strings. Clean them in the reverse shape shown in Odin's docs.
-  (each [record records]
-    (each [field record]
+  (for [record records]
+    (for [field record]
       (delete field))
     (delete record))
   (delete records))

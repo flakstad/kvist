@@ -4,16 +4,21 @@
 (import time "core:time")
 (import reload "kvist:reload")
 
-(defstate app.App_State
-  {run: run
-   init: app.init
-   on-load: app.on-load
-   on-unload: app.on-unload
-   version: "v1"})
+(def Reload_State app.App_State)
+(def Reload_Version "v1")
+
+(defn init [state: ^Reload_State]
+  (app.init state))
+
+(defn on-load [state: ^Reload_State is-reload: bool]
+  (app.on-load state is-reload))
+
+(defn on-unload [state: ^Reload_State]
+  (app.on-unload state))
 
 (defn run
   "Runs the reloadable application loop and returns at a safe checkpoint."
-  [state: ^app.App_State host: ^reload.Run_Host]
+  [state: ^Reload_State host: ^reload.Run_Host]
   (while true
     (app.tick state)
     (time.sleep app.delay)

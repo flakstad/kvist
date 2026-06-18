@@ -55,7 +55,7 @@
         results (p.map burn seeds)]
     (defer (delete results))
     (let [total 0]
-      (each [value results]
+      (for [value results]
         (set! total (+ total value)))
       total)))
 
@@ -70,7 +70,7 @@
               (set! results[job.index] (burn job.seed)))
             jobs)
     (let [total 0]
-      (each [value results]
+      (for [value results]
         (set! total (+ total value)))
       total)))
 

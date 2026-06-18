@@ -36,7 +36,7 @@
       (fmt.println "[host.log]")
       (return (kvist_live.value_nil) (kvist_live.Runtime_Error {}) true))
     (do
-      (each [arg args]
+      (for [arg args]
         (let [rendered (render-value arg)]
           (fmt.println "[host.log] " rendered)
           (delete rendered)))
@@ -79,7 +79,7 @@
   (fmt.println ""))
 
 (defn main []
-  (let [path (library-path) defer
+  (let [path (library-path) :defer
         state (shared.State {})
         symbols: support.Hybrid_Demo_Symbols {}
         [reloader reloader-err reloader-ok] (kvist_hot.new_reloader path)]

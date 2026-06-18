@@ -25,7 +25,7 @@
               state^.last_message))
 
 (defn main []
-  (let [path (library-path) defer
+  (let [path (library-path) :defer
         state (shared.State {})
         symbols: support.Hot_Demo_Symbols {}
         [reloader reloader-err reloader-ok] (kvist_hot.new_reloader path)]

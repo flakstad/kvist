@@ -25,7 +25,7 @@
     profile.home.x))
 
 (defn profile-has-math-tag? [] -> bool
-  (let [tags (set.empty string 2) defer]
+  (let [tags (set.empty string 2) :defer]
     (set.add! tags "math")
     (set.add! tags "lisp")
     (let [profile (Profile {name: "Ada"

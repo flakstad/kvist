@@ -31,11 +31,12 @@ The reload adapter declares the reload contract:
 (import app "app")
 (import reload "kvist:reload")
 
-(defstate app.App-State
-  {run: run
-   init: app.init})
+(def Reload_State app.App-State)
 
-(defn run [state: ^app.App-State host: ^reload.Run-Host]
+(defn init [state: ^Reload_State]
+  (app.init state))
+
+(defn run [state: ^Reload_State host: ^reload.Run-Host]
   (while true
     (app.tick state)
     (when (reload.checkpoint! host)
@@ -44,14 +45,10 @@ The reload adapter declares the reload contract:
 
 ## Modes
 
-`run:` is the general mode. The app owns its loop and calls
-`reload.checkpoint!` at a safe boundary.
-
-`step:` is the shell-owned loop mode. Kvist owns the outer loop and calls a user
-step function repeatedly.
-
-Both modes use the same durable `defstate` boundary. The difference is only who
-owns the outer runtime loop.
+`run` is the general mode. The app owns its loop and calls
+`reload.checkpoint!` at a safe boundary. The durable state boundary is the
+ordinary top-level `(def Reload_State <State-Type>)` alias; lifecycle hooks use
+conventional names such as `init`, `on-load`, and `on-unload`.
 
 ## CLI
 
@@ -91,9 +88,10 @@ path.
 
 ## Backend
 
-Kvist vendors Olive's reload runtime under `src/olive_reload`. The Kvist CLI
-owns `.kvist` compilation, source import rebasing, generated paths, JSON command
-discovery, and `.kvist` watching.
+Kvist vendors Olive's reload runtime under `src/olive_reload` and should track
+that runtime as upstream Olive code rather than a Kvist fork. The Kvist CLI owns
+`.kvist` compilation, source import rebasing, generated paths, JSON command
+discovery, `.kvist` watching, and the public `kvist:reload` package shape.
 
 Generated reload modules export Olive-compatible symbols such as
 `olive_reload_api_version`, `olive_reload_state_size`, and

@@ -35,10 +35,10 @@
       nil)))
 
 (t.deftest core-package-edge-cases
-  (let [xs [1 2 3] defer
-        empty-xs (arr.dynamic int []) defer
-        lookup (map.of string int {"a" 1}) defer
-        mutable ([dynamic]int [1 2 3]) defer
+  (let [xs [1 2 3] :defer
+        empty-xs (arr.dynamic int []) :defer
+        lookup (map.of string int {"a" 1}) :defer
+        mutable ([dynamic]int [1 2 3]) :defer
         profile (Profile {name: "Ada" age: 10})
         updated-profile profile
         missing (or-else (query-missing) 9)]
@@ -56,21 +56,21 @@
     (t.is (= missing 9))))
 
 (t.deftest map-package-edge-cases
-  (let [empty-map (map.empty string int) defer
-        base (map.of string int {"a" 1 "b" 2}) defer
-        other (map.of string int {"b" 20}) defer
-        merged (map.merge base other) defer
-        assoced (map.assoc base "c" 3) defer
-        trimmed (map.dissoc base "missing") defer
-        keys (map.keys empty-map) defer
-        vals (map.vals empty-map) defer
-        empty-keys (arr.dynamic string []) defer
-        empty-vals (arr.dynamic int []) defer
-        zipped-empty (map.zip (slice empty-keys 0) (slice empty-vals 0)) defer
-        short-keys (arr.dynamic string ["a" "b" "c"]) defer
-        short-vals (arr.dynamic int [10 20]) defer
-        zipped-short (map.zip (slice short-keys 0) (slice short-vals 0)) defer
-        mutable (map.of string int {}) defer]
+  (let [empty-map (map.empty string int) :defer
+        base (map.of string int {"a" 1 "b" 2}) :defer
+        other (map.of string int {"b" 20}) :defer
+        merged (map.merge base other) :defer
+        assoced (map.assoc base "c" 3) :defer
+        trimmed (map.dissoc base "missing") :defer
+        keys (map.keys empty-map) :defer
+        vals (map.vals empty-map) :defer
+        empty-keys (arr.dynamic string []) :defer
+        empty-vals (arr.dynamic int []) :defer
+        zipped-empty (map.zip (slice empty-keys 0) (slice empty-vals 0)) :defer
+        short-keys (arr.dynamic string ["a" "b" "c"]) :defer
+        short-vals (arr.dynamic int [10 20]) :defer
+        zipped-short (map.zip (slice short-keys 0) (slice short-vals 0)) :defer
+        mutable (map.of string int {}) :defer]
     (map.assoc! mutable "x" 1)
     (map.assoc! mutable "x" 2)
     (map.dissoc! mutable "missing")
@@ -89,17 +89,17 @@
     (t.is (= (map.get mutable "b" 0) 20))))
 
 (t.deftest set-package-edge-cases
-  (let [empty-set (set.of int []) defer
-        lhs (set.of int [1 2 3]) defer
-        rhs (set.of int [3 4]) defer
-        disjoint-rhs (set.of int [7 8]) defer
-        unioned (set.union lhs empty-set) defer
-        intersected (set.intersection lhs disjoint-rhs) defer
-        differed (set.difference lhs empty-set) defer
-        same (set.add lhs 2) defer
-        removed-missing (set.remove lhs 9) defer
-        mutable (set.of int []) defer
-        remove-four (set.of int [4]) defer]
+  (let [empty-set (set.of int []) :defer
+        lhs (set.of int [1 2 3]) :defer
+        rhs (set.of int [3 4]) :defer
+        disjoint-rhs (set.of int [7 8]) :defer
+        unioned (set.union lhs empty-set) :defer
+        intersected (set.intersection lhs disjoint-rhs) :defer
+        differed (set.difference lhs empty-set) :defer
+        same (set.add lhs 2) :defer
+        removed-missing (set.remove lhs 9) :defer
+        mutable (set.of int []) :defer
+        remove-four (set.of int [4]) :defer]
     (set.add! mutable 1)
     (set.add! mutable 1)
     (set.remove! mutable 9)
@@ -121,12 +121,12 @@
     (t.is (not (set.contains? mutable 4)))))
 
 (t.deftest str-package-edge-cases
-  (let [parts (str.split "abc" ",") defer
-        empty-parts (arr.dynamic string []) defer
-        joined-empty (str.join empty-parts ",") defer
-        replaced-once (str.replace "a-a-a" "-" "_" 1) defer
-        lowered (str.lower "MiXeD") defer
-        uppered (str.upper "MiXeD") defer]
+  (let [parts (str.split "abc" ",") :defer
+        empty-parts (arr.dynamic string []) :defer
+        joined-empty (str.join empty-parts ",") :defer
+        replaced-once (str.replace "a-a-a" "-" "_" 1) :defer
+        lowered (str.lower "MiXeD") :defer
+        uppered (str.upper "MiXeD") :defer]
     (t.is (= (str.count "") 0))
     (t.is (= (str.get "abc" 1) 98))
     (t.is (= (str.slice "abc" 1 1) ""))
@@ -146,7 +146,7 @@
 
 (t.deftest soa-package-edge-cases
   (let [fields (soa.fields 'Profile)
-        types (soa.types 'Profile) defer]
+        types (soa.types 'Profile) :defer]
     (t.is (= (count fields) 2))
     (t.is (= (map.get types "missing" "none") "none"))
     (t.is (= (map.get types "name" "") "string"))))

@@ -4648,7 +4648,7 @@ emit_result_binding_guard :: proc(e: ^Emitter, binding: Binding, returns: Return
     case "or-return":
         if !named_returns_match_binding_pattern(returns, binding.pattern[:]) {
             return Compile_Error{
-                message = "or-return currently requires proc named returns matching the binding names exactly",
+                message = ":or-return currently requires proc named returns matching the binding names exactly",
                 span = binding.value.span,
             }, false
         }
@@ -5339,7 +5339,7 @@ emit_let_value_binding_assignment :: proc(e: ^Emitter, binding: Binding) -> (Com
         if inner.deferred_delete {
             delete_name, ok_delete_name := binding_delete_target_name(inner)
             if !ok_delete_name {
-                return Compile_Error{message = "defer binding marker is only supported on delete-able local bindings", span = inner.value.span}, false
+                return Compile_Error{message = ":defer binding marker is only supported on delete-able local bindings", span = inner.value.span}, false
             }
             emit_line(e, fmt.tprintf("defer delete(%s)", delete_name))
         }
@@ -5500,6 +5500,26 @@ owned_locals_remove_last :: proc(live: ^[dynamic]Owned_Local, name: string) -> b
     return true
 }
 
+brace_directly_contains_owned_name :: proc(form: CST_Form, name: string) -> bool {
+    if form.kind != .Brace || len(form.items)%2 != 0 {
+        return false
+    }
+    for i := 1; i < len(form.items); i += 2 {
+        value := form.items[i]
+        if value.kind == .Symbol && map_name(value.text) == name {
+            return true
+        }
+    }
+    return false
+}
+
+composite_literal_transfers_owned_name :: proc(form: CST_Form, name: string) -> bool {
+    return form.kind == .List &&
+           len(form.items) == 2 &&
+           form.items[0].kind == .Symbol &&
+           brace_directly_contains_owned_name(form.items[1], name)
+}
+
 form_head_symbol_text :: proc(form: CST_Form) -> (string, bool) {
     if form.kind != .List || len(form.items) == 0 || form.items[0].kind != .Symbol {
         return "", false
@@ -5564,6 +5584,9 @@ form_transfers_owned_name :: proc(form: CST_Form, name: string, can_transfer_fin
             if item.kind == .Symbol && map_name(item.text) == name {
                 return true
             }
+            if composite_literal_transfers_owned_name(item, name) {
+                return true
+            }
         }
     }
 
@@ -5607,6 +5630,10 @@ form_transfers_owned_name :: proc(form: CST_Form, name: string, can_transfer_fin
         return true
     }
 
+    if can_transfer_final && composite_literal_transfers_owned_name(form, name) {
+        return true
+    }
+
     return false
 }
 
@@ -5628,6 +5655,14 @@ analyze_owned_scope_body :: proc(e: ^Emitter, forms: []CST_Form, can_transfer_fi
             continue
         }
 
+        if final_in_scope && can_transfer_final {
+            for i := len(live[:]) - 1; i >= 0; i -= 1 {
+                if composite_literal_transfers_owned_name(form, live[i].name) {
+                    _ = owned_locals_remove_last(live, live[i].name)
+                }
+            }
+        }
+
         head, ok := form_head_symbol_text(form)
         if !ok {
             if form_produces_owned_value(form) && !(final_in_scope && can_transfer_final) {
@@ -5641,6 +5676,12 @@ analyze_owned_scope_body :: proc(e: ^Emitter, forms: []CST_Form, can_transfer_fi
             for item in form.items[1:] {
                 if item.kind == .Symbol {
                     _ = owned_locals_remove_last(live, map_name(item.text))
+                    continue
+                }
+                for i := len(live[:]) - 1; i >= 0; i -= 1 {
+                    if composite_literal_transfers_owned_name(item, live[i].name) {
+                        _ = owned_locals_remove_last(live, live[i].name)
+                    }
                 }
             }
         case "discard":
@@ -8323,7 +8364,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
     }
 
     if _, ok_source := find_source_decl(e, map_name(head.text)); ok_source {
-        return "", Compile_Error{message = fmt.tprintf("source %s can currently only be consumed by each, into, or transduce", head.text), span = head.span}, false
+        return "", Compile_Error{message = fmt.tprintf("source %s can currently only be consumed by for, into, or transduce", head.text), span = head.span}, false
     }
 
     err_deprecated, deprecated := deprecated_builtin_collection_head_error(head)
@@ -9491,400 +9532,6 @@ emit_type_application_expr :: proc(e: ^Emitter, type_form: CST_Form, args: []CST
     }
 }
 
-parse_for_comprehension_clauses :: proc(bindings: CST_Form) -> (clauses: [dynamic]For_Comprehension_Clause, err: Compile_Error, ok: bool) {
-    if bindings.kind != .Vector {
-        return clauses, Compile_Error{message = "for comprehension expects a binding vector", span = bindings.span}, false
-    }
-    i := 0
-    for i < len(bindings.items) {
-        item := bindings.items[i]
-        if item.kind == .Keyword {
-            switch item.text {
-            case ":when":
-                if i+1 >= len(bindings.items) {
-                    return clauses, Compile_Error{message = ":when expects a predicate expression", span = item.span}, false
-                }
-                append(&clauses, For_Comprehension_Clause{
-                    kind      = .When,
-                    predicate = bindings.items[i+1],
-                })
-                i += 2
-                continue
-            case ":while":
-                if i+1 >= len(bindings.items) {
-                    return clauses, Compile_Error{message = ":while expects a predicate expression", span = item.span}, false
-                }
-                append(&clauses, For_Comprehension_Clause{
-                    kind      = .While,
-                    predicate = bindings.items[i+1],
-                })
-                i += 2
-                continue
-            case ":let":
-                if i+1 >= len(bindings.items) {
-                    return clauses, Compile_Error{message = ":let expects a binding vector", span = item.span}, false
-                }
-                let_bindings := bindings.items[i+1]
-                if let_bindings.kind != .Vector {
-                    return clauses, Compile_Error{message = ":let expects a binding vector", span = let_bindings.span}, false
-                }
-                if len(let_bindings.items) == 0 {
-                    return clauses, Compile_Error{message = ":let expects at least one binding", span = let_bindings.span}, false
-                }
-                if len(let_bindings.items)%2 != 0 {
-                    return clauses, Compile_Error{message = ":let expects name/value pairs", span = let_bindings.span}, false
-                }
-                for j := 0; j < len(let_bindings.items); j += 2 {
-                    if let_bindings.items[j].kind != .Symbol {
-                        return clauses, Compile_Error{message = ":let binding expects a symbol", span = let_bindings.items[j].span}, false
-                    }
-                }
-                append(&clauses, For_Comprehension_Clause{
-                    kind     = .Let,
-                    bindings = let_bindings,
-                })
-                i += 2
-                continue
-            case:
-                return clauses, Compile_Error{message = fmt.tprintf("unsupported for comprehension clause %s", item.text), span = item.span}, false
-            }
-        }
-        if item.kind != .Symbol {
-            return clauses, Compile_Error{message = "for comprehension binding expects a symbol", span = item.span}, false
-        }
-        if i+1 >= len(bindings.items) {
-            return clauses, Compile_Error{message = "for comprehension binding expects a collection expression", span = item.span}, false
-        }
-        append(&clauses, For_Comprehension_Clause{
-            kind       = .Binding,
-            name       = map_name(item.text),
-            collection = bindings.items[i+1],
-        })
-        i += 2
-    }
-    if len(clauses) == 0 {
-        return clauses, Compile_Error{message = "for comprehension expects at least one binding", span = bindings.span}, false
-    }
-    return clauses, {}, true
-}
-
-bind_for_comprehension_clause_types :: proc(e: ^Emitter, clauses: []For_Comprehension_Clause) {
-    for clause in clauses {
-        switch clause.kind {
-        case .Binding:
-            coll_ty, ok_coll_ty := obvious_form_type(e, clause.collection)
-            if !ok_coll_ty {
-                continue
-            }
-            elem_ty, ok_elem_ty := collection_element_type(coll_ty)
-            if ok_elem_ty {
-                bind_local_type(e, clause.name, elem_ty)
-            }
-        case .Let:
-            for i := 0; i < len(clause.bindings.items); i += 2 {
-                name_form := clause.bindings.items[i]
-                value_form := clause.bindings.items[i+1]
-                if ty, ok_ty := obvious_form_type(e, value_form); ok_ty {
-                    bind_local_type(e, map_name(name_form.text), ty)
-                }
-            }
-        case .When, .While:
-            continue
-        }
-    }
-}
-
-for_comprehension_output_kind :: proc(type_text: string) -> (kind: For_Comprehension_Output_Kind, key_ty, value_ty: string, ok: bool) {
-    if elem, ok_elem := dynamic_array_element_type(type_text); ok_elem {
-        return .Dynamic_Array, "", elem, true
-    }
-    if key, value, ok_map := map_type_parts(type_text); ok_map {
-        if value == "struct{}" {
-            return .Set, key, value, true
-        }
-        return .Map, key, value, true
-    }
-    return .Dynamic_Array, "", "", false
-}
-
-collect_for_comprehension_captures :: proc(e: ^Emitter, clauses: []For_Comprehension_Clause, yield_form: CST_Form) -> (captures: [dynamic]Param) {
-    bound_names: [dynamic]string
-    for clause in clauses {
-        switch clause.kind {
-        case .Binding:
-            collect_proc_literal_captures_from_form(e, clause.collection, bound_names[:], &captures)
-            append(&bound_names, clause.name)
-        case .When, .While:
-            collect_proc_literal_captures_from_form(e, clause.predicate, bound_names[:], &captures)
-        case .Let:
-            for i := 0; i < len(clause.bindings.items); i += 2 {
-                name_form := clause.bindings.items[i]
-                value_form := clause.bindings.items[i+1]
-                collect_proc_literal_captures_from_form(e, value_form, bound_names[:], &captures)
-                append(&bound_names, map_name(name_form.text))
-            }
-        }
-    }
-    collect_proc_literal_captures_from_form(e, yield_form, bound_names[:], &captures)
-    return captures
-}
-
-emit_for_comprehension_proc_params :: proc(captures: []Param) -> string {
-    if len(captures) == 0 {
-        return ""
-    }
-    builder := strings.builder_make()
-    defer strings.builder_destroy(&builder)
-    for capture, idx in captures {
-        if idx > 0 {
-            strings.write_string(&builder, ", ")
-        }
-        strings.write_string(&builder, capture.name)
-        strings.write_string(&builder, ": ")
-        strings.write_string(&builder, capture.ty)
-    }
-    return strings.clone(strings.to_string(builder))
-}
-
-emit_for_comprehension_call_args :: proc(captures: []Param) -> string {
-    if len(captures) == 0 {
-        return ""
-    }
-    builder := strings.builder_make()
-    defer strings.builder_destroy(&builder)
-    for capture, idx in captures {
-        if idx > 0 {
-            strings.write_string(&builder, ", ")
-        }
-        strings.write_string(&builder, capture.name)
-    }
-    return strings.clone(strings.to_string(builder))
-}
-
-emit_for_comprehension_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) {
-    if len(form.items) < 3 || form.items[1].kind != .Vector {
-        return "", Compile_Error{message = "for comprehension expects bindings and one yield expression", span = form.span}, false
-    }
-
-    clauses, err_clauses, ok_clauses := parse_for_comprehension_clauses(form.items[1])
-    if !ok_clauses {
-        return "", err_clauses, false
-    }
-
-    body_index := 2
-    out_type := ""
-    if body_index < len(form.items) && form.items[body_index].kind == .Keyword && form.items[body_index].text == ":into" {
-        if body_index+1 >= len(form.items) {
-            return "", Compile_Error{message = ":into expects a dynamic array type", span = form.items[body_index].span}, false
-        }
-        type_text, err_type, ok_type := parse_type_text(form.items[body_index+1])
-        if !ok_type {
-            return "", err_type, false
-        }
-        out_type = type_text
-        body_index += 2
-    }
-    if len(form.items)-body_index != 1 {
-        return "", Compile_Error{message = "for comprehension expects exactly one yield expression", span = form.span}, false
-    }
-
-    yield_form := form.items[body_index]
-    push_local_type_scope(e)
-    bind_for_comprehension_clause_types(e, clauses[:])
-    if out_type == "" {
-        yield_ty, err_yield_ty, ok_yield_ty := infer_literal_value_type(e, yield_form)
-        if !ok_yield_ty {
-            pop_local_type_scope(e)
-            return "", Compile_Error{
-                message = fmt.tprintf("cannot infer for comprehension output type: %s; add :into [dynamic]T", err_yield_ty.message),
-                span = yield_form.span,
-            }, false
-        }
-        out_type = fmt.tprintf("[dynamic]%s", yield_ty)
-    }
-    output_kind, output_key_ty, output_value_ty, ok_output := for_comprehension_output_kind(out_type)
-    if !ok_output {
-        pop_local_type_scope(e)
-        return "", Compile_Error{message = "for comprehension :into expects [dynamic]T, map[K]V, or set[T]", span = form.span}, false
-    }
-
-    collection_texts: [dynamic]string
-    collection_owned: [dynamic]bool
-    predicate_texts: [dynamic]string
-    let_value_texts: [dynamic]string
-    for clause in clauses {
-        switch clause.kind {
-        case .Binding:
-            coll_text, err_coll, ok_coll := emit_expr(e, clause.collection)
-            if !ok_coll {
-                pop_local_type_scope(e)
-                return "", err_coll, false
-            }
-            append(&collection_texts, coll_text)
-            append(&collection_owned, loop_collection_needs_temp_binding(clause.collection))
-        case .When, .While:
-            pred_text, err_pred, ok_pred := emit_expr(e, clause.predicate)
-            if !ok_pred {
-                pop_local_type_scope(e)
-                return "", err_pred, false
-            }
-            append(&predicate_texts, pred_text)
-        case .Let:
-            for i := 0; i < len(clause.bindings.items); i += 2 {
-                value_text, err_value, ok_value := emit_expr(e, clause.bindings.items[i+1])
-                if !ok_value {
-                    pop_local_type_scope(e)
-                    return "", err_value, false
-                }
-                append(&let_value_texts, value_text)
-            }
-        }
-    }
-
-    captures := collect_for_comprehension_captures(e, clauses[:], yield_form)
-    proc_params := emit_for_comprehension_proc_params(captures[:])
-    proc_args := emit_for_comprehension_call_args(captures[:])
-
-    yield_text := ""
-    map_key_text := ""
-    map_value_text := ""
-    set_value_text := ""
-    switch output_kind {
-    case .Dynamic_Array:
-        yield, err_yield, ok_yield := emit_expr_for_expected_type(e, yield_form, output_value_ty)
-        if !ok_yield {
-            pop_local_type_scope(e)
-            return "", err_yield, false
-        }
-        yield_text = yield
-    case .Map:
-        if yield_form.kind != .Vector || len(yield_form.items) != 2 {
-            pop_local_type_scope(e)
-            return "", Compile_Error{message = "for comprehension map output expects yielded [key value]", span = yield_form.span}, false
-        }
-        key_text, err_key, ok_key := emit_expr_for_expected_type(e, yield_form.items[0], output_key_ty)
-        if !ok_key {
-            pop_local_type_scope(e)
-            return "", err_key, false
-        }
-        value_text, err_value, ok_value := emit_expr_for_expected_type(e, yield_form.items[1], output_value_ty)
-        if !ok_value {
-            pop_local_type_scope(e)
-            return "", err_value, false
-        }
-        map_key_text = key_text
-        map_value_text = value_text
-    case .Set:
-        value_text, err_value, ok_value := emit_expr_for_expected_type(e, yield_form, output_key_ty)
-        if !ok_value {
-            pop_local_type_scope(e)
-            return "", err_value, false
-        }
-        set_value_text = value_text
-    }
-    pop_local_type_scope(e)
-
-    builder := strings.builder_make()
-    defer strings.builder_destroy(&builder)
-    strings.write_string(&builder, "(proc(")
-    strings.write_string(&builder, proc_params)
-    strings.write_string(&builder, ") -> ")
-    strings.write_string(&builder, out_type)
-    strings.write_string(&builder, " {\n")
-    strings.write_string(&builder, "    out := make(")
-    strings.write_string(&builder, out_type)
-    strings.write_string(&builder, ")\n")
-
-    depth := 1
-    coll_idx := 0
-    pred_idx := 0
-    let_idx := 0
-    for clause in clauses {
-        switch clause.kind {
-        case .Binding:
-            coll_text := collection_texts[coll_idx]
-            if collection_owned[coll_idx] {
-                e.temp_counter += 1
-                temp := fmt.tprintf("kvist_for_%d", e.temp_counter)
-                append_indent(&builder, depth)
-                strings.write_string(&builder, temp)
-                strings.write_string(&builder, " := ")
-                strings.write_string(&builder, coll_text)
-                strings.write_byte(&builder, '\n')
-                append_indent(&builder, depth)
-                strings.write_string(&builder, "defer delete(")
-                strings.write_string(&builder, temp)
-                strings.write_string(&builder, ")\n")
-                coll_text = temp
-            }
-            append_indent(&builder, depth)
-            strings.write_string(&builder, "for ")
-            strings.write_string(&builder, clause.name)
-            strings.write_string(&builder, " in ")
-            strings.write_string(&builder, coll_text)
-            strings.write_string(&builder, " {\n")
-            depth += 1
-            coll_idx += 1
-        case .When:
-            append_indent(&builder, depth)
-            strings.write_string(&builder, "if !(")
-            strings.write_string(&builder, predicate_texts[pred_idx])
-            strings.write_string(&builder, ") {\n")
-            append_indent(&builder, depth+1)
-            strings.write_string(&builder, "continue\n")
-            append_indent(&builder, depth)
-            strings.write_string(&builder, "}\n")
-            pred_idx += 1
-        case .While:
-            append_indent(&builder, depth)
-            strings.write_string(&builder, "if !(")
-            strings.write_string(&builder, predicate_texts[pred_idx])
-            strings.write_string(&builder, ") {\n")
-            append_indent(&builder, depth+1)
-            strings.write_string(&builder, "break\n")
-            append_indent(&builder, depth)
-            strings.write_string(&builder, "}\n")
-            pred_idx += 1
-        case .Let:
-            for i := 0; i < len(clause.bindings.items); i += 2 {
-                name := map_name(clause.bindings.items[i].text)
-                append_indent(&builder, depth)
-                strings.write_string(&builder, name)
-                strings.write_string(&builder, " := ")
-                strings.write_string(&builder, let_value_texts[let_idx])
-                strings.write_byte(&builder, '\n')
-                let_idx += 1
-            }
-        }
-    }
-
-    append_indent(&builder, depth)
-    switch output_kind {
-    case .Dynamic_Array:
-        append_indented_multiline(&builder, emit_call_text("append", []string{"&out", yield_text}), "", "")
-    case .Map:
-        strings.write_string(&builder, "out[")
-        strings.write_string(&builder, map_key_text)
-        strings.write_string(&builder, "] = ")
-        strings.write_string(&builder, map_value_text)
-    case .Set:
-        strings.write_string(&builder, "out[")
-        strings.write_string(&builder, set_value_text)
-        strings.write_string(&builder, "] = {}")
-    }
-    strings.write_byte(&builder, '\n')
-    for depth > 1 {
-        depth -= 1
-        append_indent(&builder, depth)
-        strings.write_string(&builder, "}\n")
-    }
-    strings.write_string(&builder, "    return out\n")
-    strings.write_string(&builder, "})(")
-    strings.write_string(&builder, proc_args)
-    strings.write_string(&builder, ")")
-    return strings.clone(strings.to_string(builder)), {}, true
-}
-
 emit_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) {
     #partial switch form.kind {
     case .String:
@@ -9986,9 +9633,6 @@ emit_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) 
             }
             return unquote_string(form.items[1].text), {}, true
         }
-        if is_symbol(form.items[0], "for") {
-            return emit_for_comprehension_expr(e, form)
-        }
         if is_symbol(form.items[0], "type") {
             type_text, err_type, ok_type := parse_type_text(form)
             if !ok_type {
@@ -10004,27 +9648,6 @@ emit_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) 
         return emit_inferred_literal(e, form)
     }
     return "", Compile_Error{message = "unsupported expression", span = form.span}, false
-}
-
-For_Comprehension_Clause_Kind :: enum {
-    Binding,
-    When,
-    While,
-    Let,
-}
-
-For_Comprehension_Clause :: struct {
-    kind:       For_Comprehension_Clause_Kind,
-    name:       string,
-    collection: CST_Form,
-    predicate:  CST_Form,
-    bindings:   CST_Form,
-}
-
-For_Comprehension_Output_Kind :: enum {
-    Dynamic_Array,
-    Map,
-    Set,
 }
 
 type_text_is_slice :: proc(text: string) -> bool {
@@ -10061,31 +9684,31 @@ append_indent :: proc(builder: ^strings.Builder, depth: int) {
 }
 
 Binding :: struct {
-    is_destructure: bool,
+    is_destructure:    bool,
     is_result_binding: bool,
-    name:           string,
-    pattern:        [dynamic]string,
-    is_typed:       bool,
-    ty:             string,
-    deferred_delete: bool,
-    or_modifier:    string,
-    target_span:    Span,
-    value:          CST_Form,
+    name:              string,
+    pattern:           [dynamic]string,
+    is_typed:          bool,
+    ty:                string,
+    deferred_delete:   bool,
+    or_modifier:       string,
+    target_span:       Span,
+    value:             CST_Form,
 }
 
 let_binding_has_defer_marker :: proc(items: []CST_Form, idx: int) -> bool {
     return idx < len(items) &&
-        items[idx].kind == .Symbol &&
-        items[idx].text == "defer"
+           items[idx].kind == .Keyword &&
+           items[idx].text == ":defer"
 }
 
 let_binding_or_modifier :: proc(items: []CST_Form, idx: int) -> (string, bool) {
-    if idx >= len(items) || items[idx].kind != .Symbol {
+    if idx >= len(items) || items[idx].kind != .Keyword {
         return "", false
     }
     switch items[idx].text {
-    case "or-return", "or-break", "or-continue":
-        return items[idx].text, true
+    case ":or-return", ":or-break", ":or-continue":
+        return items[idx].text[1:], true
     case:
         return "", false
     }
@@ -10126,16 +9749,16 @@ parse_let_bindings :: proc(form: CST_Form) -> (bindings: [dynamic]Binding, err: 
                     next_i += 1
                 }
             } else if let_binding_has_defer_marker(form.items[:], i+2) {
-                return bindings, Compile_Error{message = "defer binding marker is only supported on named local bindings or [value ok/err] or-* bindings", span = form.items[i+2].span}, false
+                return bindings, Compile_Error{message = ":defer binding marker is only supported on named local bindings or [value ok/err] :or-* bindings", span = form.items[i+2].span}, false
             }
             append(&bindings, Binding{
-                is_destructure = !has_or_modifier,
+                is_destructure    = !has_or_modifier,
                 is_result_binding = has_or_modifier,
-                pattern = names,
-                deferred_delete = deferred_delete,
-                or_modifier = or_modifier,
-                target_span = target.span,
-                value = form.items[i+1],
+                pattern           = names,
+                deferred_delete   = deferred_delete,
+                or_modifier       = or_modifier,
+                target_span       = target.span,
+                value             = form.items[i+1],
             })
             i = next_i
         case .Symbol:
@@ -10152,12 +9775,12 @@ parse_let_bindings :: proc(form: CST_Form) -> (bindings: [dynamic]Binding, err: 
                 }
                 deferred_delete := let_binding_has_defer_marker(form.items[:], next_i+1)
                 append(&bindings, Binding{
-                    name = map_name(target.text[:len(target.text)-1]),
-                    is_typed = true,
-                    ty = type_text,
+                    name            = map_name(target.text[:len(target.text)-1]),
+                    is_typed        = true,
+                    ty              = type_text,
                     deferred_delete = deferred_delete,
-                    target_span = target.span,
-                    value = form.items[next_i],
+                    target_span     = target.span,
+                    value           = form.items[next_i],
                 })
                 i = next_i + 1
                 if deferred_delete {
@@ -10169,10 +9792,10 @@ parse_let_bindings :: proc(form: CST_Form) -> (bindings: [dynamic]Binding, err: 
                 }
                 deferred_delete := let_binding_has_defer_marker(form.items[:], i+2)
                 append(&bindings, Binding{
-                    name = map_name(target.text),
+                    name            = map_name(target.text),
                     deferred_delete = deferred_delete,
-                    target_span = target.span,
-                    value = form.items[i+1],
+                    target_span     = target.span,
+                    value           = form.items[i+1],
                 })
                 i += 2
                 if deferred_delete {
@@ -10918,7 +10541,7 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
                 if binding.is_result_binding && binding.or_modifier == "or-return" {
                     if !named_returns_match_binding_pattern(returns, binding.pattern[:]) {
                         return Compile_Error{
-                            message = "or-return currently requires proc named returns matching the binding names exactly",
+                            message = ":or-return currently requires proc named returns matching the binding names exactly",
                             span = binding.value.span,
                         }, false
                     }
@@ -10934,7 +10557,7 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
             if binding.deferred_delete {
                 delete_name, ok_delete_name := binding_delete_target_name(binding)
                 if !ok_delete_name {
-                    return Compile_Error{message = "defer binding marker is only supported on delete-able local bindings", span = binding.value.span}, false
+                    return Compile_Error{message = ":defer binding marker is only supported on delete-able local bindings", span = binding.value.span}, false
                 }
                 emit_line(e, fmt.tprintf("defer delete(%s)", delete_name))
             }
@@ -11159,18 +10782,10 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
         emit_line(e, fmt.tprintf("fmt.println(%q)", text))
         return {}, true
     case "loop":
-        return Compile_Error{message = "`loop` has been removed; use `each` for collection iteration or `while` for condition loops", span = form.span}, false
-    case "for":
-        if last_in_proc && returns.kind != .None {
-            expr, err_expr, ok_expr := emit_expr(e, form)
-            if !ok_expr {
-                return err_expr, false
-            }
-            emit_prefixed_expr_mapped(e, "return ", expr, form.span)
-            return {}, true
-        }
-        return Compile_Error{message = "`for` is a comprehension; use `each` for collection loops or `while` for condition loops", span = form.span}, false
+        return Compile_Error{message = "`loop` has been removed; use `for` for collection iteration or `while` for condition loops", span = form.span}, false
     case "each":
+        return Compile_Error{message = "`each` has been removed; use `for` for collection iteration", span = form.span}, false
+    case "for":
         if len(form.items) >= 3 && form.items[1].kind == .Vector {
             binding := form.items[1]
             body_start := 2
@@ -11198,7 +10813,7 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
             }
             return Compile_Error{message = fmt.tprintf("%s expects [value collection] or [first second collection]", canonical_head_text), span = form.span}, false
         }
-        return Compile_Error{message = "each expects [value collection] or [first second collection] and body", span = form.span}, false
+        return Compile_Error{message = "for expects [value collection] or [first second collection] and body", span = form.span}, false
     case "while":
         if len(form.items) < 3 {
             return Compile_Error{message = "while expects condition and body", span = form.span}, false

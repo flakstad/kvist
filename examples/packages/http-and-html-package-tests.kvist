@@ -59,15 +59,15 @@
   true)
 
 (t.deftest html-package-surface
-  (let [ids (arr.range 1 4) defer
+  (let [ids (arr.range 1 4) :defer
         rendered (html.render
                    [:div {class: "panel"
                           hidden: false}
                     [:<> [:span "A&B"] (when true [:strong "ok"])]
                     [:ul
                      (html.for [id ids]
-                       [:li id])]]) defer
-        templated (html.render "<p>{{name}}</p>" {name: "Ada"}) defer]
+                       [:li id])]]) :defer
+        templated (html.render "<p>{{name}}</p>" {name: "Ada"}) :defer]
     (t.is (= rendered "<div class=\"panel\"><span>A&amp;B</span><strong>ok</strong><ul><li>1</li><li>2</li><li>3</li></ul></div>"))
     (t.is (= templated "<p>Ada</p>"))))
 
@@ -86,7 +86,7 @@
                       [:span "Ready <ok>"])
                     (if archived?
                       [:p "Archived"]
-                      [:p "Live"])]) defer]
+                      [:p "Live"])]) :defer]
     (t.is (= rendered "<section class=\"panel\" data-count=\"3\" data-state=\"ready\"><h1>Dashboard &amp; Ops</h1><span>Ready &lt;ok&gt;</span><p>Live</p></section>"))))
 
 (t.deftest http-package-basic-surface
@@ -103,7 +103,7 @@
     (defer (http.rate-limit-destroy! data))
     (http.handle! app (addr req) (addr res))
     (let [[sid ok] (http.request-cookie (addr req) "sid")
-          cookies (http.request-cookies (addr req)) defer]
+          cookies (http.request-cookies (addr req)) :defer]
       (t.is ok)
       (t.is (= sid "abc"))
       (t.is (= (map.get cookies "csrf" "") "csrf-abc")))

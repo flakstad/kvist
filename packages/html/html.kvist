@@ -255,7 +255,7 @@
       (strings.write_string builder " ")
       (strings.write_string builder attr.name)
       (strings.write_string builder "=\"")
-      (let [escaped (escape-html value) defer]
+      (let [escaped (escape-html value) :defer]
         (strings.write_string builder escaped))
       (strings.write_string builder "\""))
     int
@@ -271,22 +271,22 @@
   (core.case [value node]
     Nothing (noop)
     Fragment
-    (each [child value.children]
+    (for [child value.children]
       (render-node-into builder child))
     Element
     (do
       (strings.write_string builder "<")
       (strings.write_string builder value.tag)
-      (each [attr value.attrs]
+      (for [attr value.attrs]
         (render-attr-into builder attr))
       (strings.write_string builder ">")
-      (each [child value.children]
+      (for [child value.children]
         (render-node-into builder child))
       (strings.write_string builder "</")
       (strings.write_string builder value.tag)
       (strings.write_string builder ">"))
     string
-    (let [escaped (escape-html value) defer]
+    (let [escaped (escape-html value) :defer]
       (strings.write_string builder escaped))
     int
     (fmt.sbprintf builder "%d" value)
@@ -313,7 +313,7 @@
         out))))
 
 (defn- write-escaped [builder: ^strings.Builder, value: string]
-  (let [escaped (escape-html value) defer]
+  (let [escaped (escape-html value) :defer]
     (strings.write_string builder escaped)))
 
 (defn- write-attr-string [builder: ^strings.Builder, name: string, value: string]
@@ -435,7 +435,7 @@
               source-form (nth bindings 1)]
           (if (symbol? name-form)
             (quasiquote
-              (each [(unquote name-form) (unquote source-form)]
+              (for [(unquote name-form) (unquote source-form)]
                 (do
                   (splice (emit-render-body builder body)))))
             (error "html.for binding name must be a symbol")))

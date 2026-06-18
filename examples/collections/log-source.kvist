@@ -1,4 +1,4 @@
-// Source protocol over log-like lines with each, into, and transduce consumers.
+// Source protocol over log-like lines with for, into, and transduce consumers.
 (package main)
 
 (defstruct Log_Source {
@@ -40,7 +40,7 @@
 (defn total-log-bytes [] -> int
   (let [lines ([]string ["INFO boot" "ERROR disk" "WARN hot" "ERROR network"])
         total 0]
-    (each [line (log-lines lines)]
+    (for [line (log-lines lines)]
       (set! total (+ total (len line))))
     total))
 

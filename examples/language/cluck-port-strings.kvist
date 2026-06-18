@@ -4,12 +4,12 @@
 
 (defn strings-demo [] -> bool
   (let [name "kvist"
-        greeting (fmt.tprintf "hello %s" name) defer
-        parts (str.split "alpha,beta,gamma" ",") defer
-        joined (str.join parts "/") defer
-        replaced (str.replace joined "/" "-") defer
-        lowered (str.lower replaced) defer
-        uppered (str.upper lowered) defer]
+        greeting (fmt.tprintf "hello %s" name) :defer
+        parts (str.split "alpha,beta,gamma" ",") :defer
+        joined (str.join parts "/") :defer
+        replaced (str.replace joined "/" "-") :defer
+        lowered (str.lower replaced) :defer
+        uppered (str.upper lowered) :defer]
     (println (str.count name))
     (println (str.get name 1))
     (println (str.slice name 1 4))

@@ -50,7 +50,7 @@ ORDER_REPS :: 40")
 
 (defn report-checksum [rows: []Region-Report] -> int
   (let [total 0]
-    (each [row rows]
+    (for [row rows]
       (set! total (+ total row.revenue))
       (set! total (+ total (* row.region 31)))
       (set! total (+ total row.count)))
@@ -58,7 +58,7 @@ ORDER_REPS :: 40")
 
 (defn rows-from-aggregates [revenue-by-region: map[int]int, count-by-region: map[int]int] -> [dynamic]Region-Report
   (let [rows (make [dynamic]Region-Report)]
-    (each [region revenue revenue-by-region]
+    (for [region revenue revenue-by-region]
       (append (& rows)
               (Region-Report {region: region
                               revenue: revenue
@@ -84,9 +84,9 @@ ORDER_REPS :: 40")
             rows (make [dynamic]Region-Report)]
         (arr.filter! settled? work)
         (let [groups (arr.group-by .region work)]
-          (each [region group groups]
+          (for [region group groups]
             (let [revenue 0]
-              (each [order group]
+              (for [order group]
                 (set! revenue (+ revenue order.amount)))
               (append (& rows)
                       (Region-Report {region: region
@@ -94,7 +94,7 @@ ORDER_REPS :: 40")
                                       count: (len group)}))))
           (arr.sort-by! .revenue rows)
           (set! checksum (+ checksum (report-checksum (slice rows))))
-          (each [_ group groups]
+          (for [_ group groups]
             (delete group))
           (delete groups))
         (delete work)
@@ -125,7 +125,7 @@ ORDER_REPS :: 40")
     (while (< i reps)
       (let [revenue-by-region (make map[int]int)
             count-by-region (make map[int]int)]
-        (each [order orders]
+        (for [order orders]
           (let [settled (settle-order order)]
             (when (settled? settled)
               (set! (get revenue-by-region settled.region)

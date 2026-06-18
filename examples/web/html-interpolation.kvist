@@ -30,7 +30,7 @@
                 nil
                 (if enabled?
                   "Visible"
-                  "Hidden")]) defer]
+                  "Hidden")]) :defer]
     (println html)
     true))
 

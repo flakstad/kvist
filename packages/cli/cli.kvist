@@ -9,7 +9,7 @@
   "Return true when `args` contains the exact command-line flag `name`."
   [args: []string, name: string] -> bool #force_inline
   (let [found false]
-    (each [arg args]
+    (for [arg args]
       (when (= arg name)
         (set! found true)))
     found))
@@ -18,7 +18,7 @@
   "Return the value immediately after option `name`, or `fallback` when absent."
   [args: []string, name: string, fallback: string] -> string #force_inline
   (let [value fallback]
-    (each [arg i args]
+    (for [arg i args]
       (when (and (= arg name) (< (+ i 1) (len args)))
         (set! value (get args (+ i 1)))))
     value))

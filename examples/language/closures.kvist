@@ -44,7 +44,7 @@
         limit 3
         mapped (arr.map-indexed (fn [i: int, x: int] -> int
                                   (+ x i offset))
-                                xs) defer
+                                xs) :defer
         total (arr.reduce (fn [acc: int, x: int] -> int
                             (+ acc x offset))
                           0
@@ -70,7 +70,7 @@
     xs))
 
 (defn main []
-  (let [xs [1 2 3] defer]
+  (let [xs [1 2 3] :defer]
     (println
       (fn-literal-demo)
       (captured-map-demo (slice xs 0))
@@ -85,13 +85,13 @@
   ;; => true
 
   ;; Captured callbacks work for known non-escaping helpers.
-  (let [xs [1 2 3] defer]
+  (let [xs [1 2 3] :defer]
     (captured-map-demo (slice xs 0)))
   ;; => [12 14 16]
 
   ;; They also work through user-defined Kvist functions when the callback is
   ;; only called directly or forwarded to another non-escaping Kvist function.
-  (let [xs [1 2 3] defer]
+  (let [xs [1 2 3] :defer]
     (captured-user-api-demo (slice xs 0)))
   ;; => [4 7 10]
 
@@ -99,7 +99,7 @@
   ;; => 12
 
   ;; Indexed helpers, reducers, and scans can use captured callbacks too.
-  (let [xs [1 2 3 4] defer]
+  (let [xs [1 2 3 4] :defer]
     (captured-helper-family-demo (slice xs 0)))
   ;; => true
 

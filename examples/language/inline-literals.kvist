@@ -1,17 +1,17 @@
 // Demonstrates direct inline dynamic array, map, and set literals.
 
 (defn inline-literals-demo [] -> int
-  (let [xs [1 2 3] defer
-        lookup {"one" 1 "two" 2} defer
-        tags #{"math" "lisp"} defer]
+  (let [xs [1 2 3] :defer
+        lookup {"one" 1 "two" 2} :defer
+        tags #{"math" "lisp"} :defer]
     (println tags)
     (+ (arr.count xs)
        (get lookup "one"))))
 
 (defn typed-empty-inline-literals-demo [] -> int
-  (let [xs: [dynamic]int [] defer
-        lookup: map[string]int {} defer
-        tags: set[string] #{} defer]
+  (let [xs: [dynamic]int [] :defer
+        lookup: map[string]int {} :defer
+        tags: set[string] #{} :defer]
     (println lookup tags)
     (arr.count xs)))
 

@@ -34,7 +34,7 @@
 
 (defn row-score [rows: []Region-Report] -> int
   (let [total 0]
-    (each [row rows]
+    (for [row rows]
       (set! total (+ total row.revenue))
       (set! total (+ total (* row.region 31)))
       (set! total (+ total row.count)))
@@ -49,9 +49,9 @@
 
 (defn rows-from-groups [groups: Order-Groups] -> [dynamic]Region-Report
   (let [rows (arr.empty Region-Report)]
-    (each [region group groups]
+    (for [region group groups]
       (let [revenue 0]
-        (each [order group]
+        (for [order group]
           (set! revenue (+ revenue order.amount)))
         (arr.push! rows
           (Region-Report {region: region
@@ -62,7 +62,7 @@
 
 (defn rows-from-aggregates [revenue-by-region: map[int]int, count-by-region: map[int]int] -> [dynamic]Region-Report
   (let [rows (arr.empty Region-Report)]
-    (each [region revenue revenue-by-region]
+    (for [region revenue revenue-by-region]
       (arr.push! rows
         (Region-Report {region: region
                         revenue: revenue
@@ -80,7 +80,7 @@
       (delete orders)
       (delete settled)
       (delete paid)
-      (each [_ group groups]
+      (for [_ group groups]
         (delete group))
       (delete groups)
       (delete rows))
@@ -95,7 +95,7 @@
       (defer
         (delete orders)
         (delete work)
-        (each [_ group groups]
+        (for [_ group groups]
           (delete group))
         (delete groups)
         (delete rows))
@@ -120,7 +120,7 @@
   (let [orders (sample-orders)
         revenue-by-region (map.empty int int)
         count-by-region (map.empty int int)]
-    (each [order orders]
+    (for [order orders]
       (let [settled (settle-order order)]
         (when (settled? settled)
           (set! revenue-by-region[settled.region]

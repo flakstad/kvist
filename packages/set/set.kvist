@@ -50,7 +50,7 @@
   version of `set.union` and avoids allocating a new set."
   [target source]
   (quasiquote
-    (each [value _ (unquote source)]
+    (for [value _ (unquote source)]
       (set! (core.get (unquote target) value) (zero struct{})))))
 
 (defmacro intersection!
@@ -60,7 +60,7 @@
   in-place version of `set.intersection`."
   [target source]
   (quasiquote
-    (each [value _ (unquote target)]
+    (for [value _ (unquote target)]
       (core.when (not (map.contains? (unquote source) value))
         (core.delete! (unquote target) value)))))
 
@@ -71,7 +71,7 @@
   `target` that are not members of `source`."
   [target source]
   (quasiquote
-    (each [value _ (unquote source)]
+    (for [value _ (unquote source)]
       (core.delete! (unquote target) value))))
 
 (defn contains?
@@ -88,9 +88,9 @@
   both inputs before values are inserted."
   [lhs: set[$T], rhs: set[$T]] -> set[T] #force_inline
   (let [out (set.empty T (+ (core.count lhs) (core.count rhs)))]
-    (each [value _ lhs]
+    (for [value _ lhs]
       (set! (core.get out value) (zero struct{})))
-    (each [value _ rhs]
+    (for [value _ rhs]
       (set! (core.get out value) (zero struct{})))
     out))
 
@@ -113,7 +113,7 @@
         (do
           (set! scan rhs)
           (set! probe lhs)))
-      (each [value _ scan]
+      (for [value _ scan]
         (core.when (map.contains? probe value)
           (set! (core.get out value) (zero struct{}))))
       out)))
@@ -125,7 +125,7 @@
   `lhs` and populated by direct membership checks against `rhs`."
   [lhs: set[$T], rhs: set[$T]] -> set[T] #force_inline
   (let [out (set.empty T (core.count lhs))]
-    (each [value _ lhs]
+    (for [value _ lhs]
       (core.when (not (map.contains? rhs value))
         (set! (core.get out value) (zero struct{}))))
     out))
@@ -139,7 +139,7 @@
   (let [ok? true]
     (core.when (> (core.count lhs) (core.count rhs))
       (return false))
-    (each [value _ lhs]
+    (for [value _ lhs]
       (core.when (not (map.contains? rhs value))
         (do
           (set! ok? false)
@@ -169,7 +169,7 @@
       (do
         (set! scan rhs)
         (set! probe lhs)))
-    (each [value _ scan]
+    (for [value _ scan]
       (core.when (map.contains? probe value)
         (do
           (set! ok? false)
@@ -183,7 +183,7 @@
   copied, and `value` is inserted."
   [s: set[$T], value: T] -> set[T] #force_inline
   (let [out (set.empty T (+ (core.count s) 1))]
-    (each [entry _ s]
+    (for [entry _ s]
       (set! (core.get out entry) (zero struct{})))
     (set! (core.get out value) (zero struct{}))
     out))
@@ -195,7 +195,7 @@
   `value` is copied into it."
   [s: set[$T], value: T] -> set[T] #force_inline
   (let [out (set.empty T (core.count s))]
-    (each [entry _ s]
+    (for [entry _ s]
       (core.when (!= entry value)
         (set! (core.get out entry) (zero struct{}))))
     out))

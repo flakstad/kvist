@@ -1,6 +1,6 @@
 # Reload Loop Demo
 
-This is a loop-driven `defstate` reload workflow with a more realistic file
+This is a loop-driven `Reload_State` reload workflow with a more realistic file
 split: one small reload-app shell file, one durable root state, and a separate
 same-package program file that holds the logic you would keep extending.
 
@@ -84,10 +84,11 @@ JSON payloads for `started`, `reloaded`, and reload failure events.
 
 Current shape of the source contract:
 
-- one top-level `(defstate Name {fields...} {metadata...})`
-- fields map first, reload-lifetime/config map second
-- required metadata: `run:`
-- optional metadata: `init:`, `on-load:`, `on-unload:`, `version:`
+- ordinary state declarations, usually `defstruct`
+- one top-level `(def Reload_State <State-Type>)` alias
+- a top-level `run` function
+- optional conventional hooks: `init`, `on-load`, `on-unload`
+- optional `(def Reload_Version "...")`
 
 When to use this shape:
 

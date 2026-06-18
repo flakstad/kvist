@@ -91,8 +91,8 @@ cat > "$tmp_dir/bad-statements.kvist" <<'EOF'
   (let [x 1]
     (set! x "bad")))
 
-(defn each-test []
-  (each [x 123]
+(defn for-test []
+  (for [x 123]
     (return)))
 
 (defn return-test [] -> int
@@ -106,7 +106,7 @@ for expected in \
     "$tmp_dir/bad-statements.kvist:7:7 Error: Non-boolean condition" \
     "$tmp_dir/bad-statements.kvist:12:9 Error: Non-boolean condition" \
     "$tmp_dir/bad-statements.kvist:17:13 Error: Cannot convert" \
-    "$tmp_dir/bad-statements.kvist:20:12 Error: Cannot iterate" \
+    "$tmp_dir/bad-statements.kvist:20:11 Error: Cannot iterate" \
     "$tmp_dir/bad-statements.kvist:24:11 Error: Cannot convert"
 do
     if ! grep -q "$expected" "$tmp_dir/bad-statements.err"; then

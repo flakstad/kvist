@@ -1,4 +1,4 @@
-// Reusable source declarations consumed by each and into.
+// Reusable source declarations consumed by for and into.
 (package main)
 (import core "kvist:core")
 
@@ -36,7 +36,7 @@
 (defn total-path-length [] -> int
   (let [paths ([]string ["src/main.odin" "README.md" "src/emit.odin" "tests/compiler_test.odin"])
         total 0]
-    (each [path (files paths)]
+    (for [path (files paths)]
       (set! total (+ total (len path))))
     total))
 

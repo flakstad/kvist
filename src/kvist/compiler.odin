@@ -938,7 +938,7 @@ is_private_decl_head :: proc(head: string) -> bool {
 
 is_top_level_decl_head :: proc(head: string) -> bool {
     switch head {
-    case "def", "def-", "defvar", "defvar-", "defstruct", "defstruct-", "defstate", "defenum", "defenum-", "defunion", "defunion-", "defn", "defn-", "defmacro", "defmacro-", "deftransform", "deftransform-", "defsource", "defsource-":
+    case "def", "def-", "defvar", "defvar-", "defstruct", "defstruct-", "defenum", "defenum-", "defunion", "defunion-", "defn", "defn-", "defmacro", "defmacro-", "deftransform", "deftransform-", "defsource", "defsource-":
         return true
     case:
         return false
@@ -1153,6 +1153,13 @@ rewrite_relative_odin_import_form :: proc(importer_path: string, top: CST_Top_Fo
 
     base_dir, _ := os.split_path(importer_path)
     if base_dir == "" {
+        resolved, abs_err := os.get_absolute_path(raw_path, context.allocator)
+        if abs_err != nil {
+            return rewritten
+        }
+        defer delete(resolved)
+        delete(form.items[path_index].text)
+        form.items[path_index].text = fmt.tprintf("%q", resolved)
         return rewritten
     }
     resolved, join_err := os.join_path({base_dir, raw_path}, context.allocator)
@@ -1172,7 +1179,7 @@ collect_root_source_import_aliases :: proc(path: string) -> ([]Alias_Prefix, Com
     if len(files) > 0 && files[0].package_name != "" {
         dir, _ := os.split_path(path)
         if dir == "" {
-            return nil, Compile_Error{message = fmt.tprintf("could not resolve root package directory: %s", path)}, false
+            dir = "."
         }
         _, err_package, ok_package := validate_package_files(dir, files[:])
         if !ok_package {
@@ -1290,7 +1297,7 @@ read_root_package_files :: proc(path: string) -> ([]Package_File, Compile_Error,
 
     dir, _ := os.split_path(path)
     if dir == "" {
-        return nil, Compile_Error{message = fmt.tprintf("could not resolve root package directory: %s", path)}, false
+        dir = "."
     }
     entries, dir_err := os.read_directory_by_path(dir, -1, context.allocator)
     if dir_err != nil {
@@ -2195,7 +2202,7 @@ load_root_file_forms :: proc(path: string) -> (Loaded_Forms, Compile_Error, bool
     if files[0].package_name != "" {
         dir, _ := os.split_path(path)
         if dir == "" {
-            return Loaded_Forms{}, Compile_Error{message = fmt.tprintf("could not resolve root package directory: %s", path)}, false
+            dir = "."
         }
         _, err_package, ok_package := validate_package_files(dir, files[:])
         if !ok_package {
@@ -2269,7 +2276,12 @@ load_root_file_forms :: proc(path: string) -> (Loaded_Forms, Compile_Error, bool
                 continue
             }
             if head == "import" {
-                append_import_form_unique(&result.imports, &import_keys, top)
+                dir, _ := os.split_path(file.path)
+                if dir == "" {
+                    append_import_form_unique(&result.imports, &import_keys, rewrite_relative_odin_import_form(file.path, top))
+                } else {
+                    append_import_form_unique(&result.imports, &import_keys, top)
+                }
                 continue
             }
             rewritten, err_rewrite, ok_rewrite := rewrite_top_form(top, locals[:], aliases[:], "")

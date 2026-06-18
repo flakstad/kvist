@@ -49,7 +49,7 @@
     "defstruct" "defstruct-" "defenum" "defenum-" "defunion" "defunion-"
     "defn" "defn-" "defmacro" "defmacro-" "fn" "odin"
     "let" "block" "do" "if" "when" "cond" "switch" "set!" "mut!" "return" "defer"
-    "for" "while" "each" "comment" "make" "get" "slice" "nil?" "in" "not-in"
+    "for" "while" "comment" "make" "get" "slice" "nil?" "in" "not-in"
     "type" "or-else" "update!" "inc!" "dec!" "toggle!" "negate!"
     "break" "continue" "with-allocator" "with-temp-allocator"
     "when-let" "if-let" "when-ok" "if-ok"
@@ -201,9 +201,8 @@
                    (set! . 1)
                    (return . 0)
                    (defer . 0)
-                   (for . 1)
                    (while . 1)
-                   (each . 2)
+                   (for . 2)
                    (comment . 0)
                    (with-allocator . 1)
                    (with-temp-allocator . 1)

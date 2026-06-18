@@ -7,13 +7,13 @@
 (import runtime "base:runtime")
 
 (defn local-buffer-count [] -> int
-  (let [buffer (arr.empty int) defer]
+  (let [buffer (arr.empty int) :defer]
     (arr.push! buffer 1 2 3 4)
     (count buffer)))
 
 (defn temp-allocator-buffer-count [] -> int
   (with-allocator [allocator context.temp_allocator]
-    (let [buffer (arr.empty int) defer]
+    (let [buffer (arr.empty int) :defer]
       (arr.push! buffer 5 6 7)
       (count buffer))))
 
@@ -40,7 +40,7 @@
   ;; Expand one form when you want to inspect the ownership shape directly:
   ;;   kvist macroexpand examples/collections/ownership-helpers.kvist
   ;;     '(with-allocator [allocator context.temp_allocator]
-  ;;        (let [buffer (arr.empty int) defer]
+  ;;        (let [buffer (arr.empty int) :defer]
   ;;          (arr.push! buffer 1 2 3)
   ;;          (count buffer)))
 )

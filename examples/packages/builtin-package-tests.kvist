@@ -67,9 +67,9 @@
       nil)))
 
 (t.deftest core-package-surface
-  (let [xs [1 2 3 4] defer
-        lookup (map.of int int {1 10 2 20}) defer
-        mutable ([dynamic]int [1 2 3]) defer
+  (let [xs [1 2 3 4] :defer
+        lookup (map.of int int {1 10 2 20}) :defer
+        mutable ([dynamic]int [1 2 3]) :defer
         prefix (slice xs 1 3)]
     (set! mutable[1] 9)
     (t.is (= (count xs) 4))
@@ -82,10 +82,10 @@
     (t.is (= (get mutable 1) 9))))
 
 (t.deftest core-package-extended-surface
-  (let [xs [1 2 3 4] defer
-        arr-copy (arr.into [dynamic]int xs) defer
-        lookup (map.of int int {1 10 2 20}) defer
-        mapped-thread (arr.map inc-value xs) defer
+  (let [xs [1 2 3 4] :defer
+        arr-copy (arr.into [dynamic]int xs) :defer
+        lookup (map.of int int {1 10 2 20}) :defer
+        mapped-thread (arr.map inc-value xs) :defer
         threaded (arr.filter even-value? mapped-thread)
         profile (Profile {name: "Ada" age: 10})
         updated-profile profile
@@ -128,12 +128,12 @@
     (t.is (= (or-else (cli.command args) "none") "serve"))))
 
 (t.deftest arr-package-surface
-  (let [xs (arr.range 1 6) defer
-        mapped (arr.map inc-value (slice xs 0)) defer
-        filtered (arr.filter even-value? (slice xs 0)) defer
-        removed (arr.remove even-value? (slice xs 0)) defer
-        repeated (arr.repeat 3 9) defer
-        mutable (arr.dynamic int [1 2 3]) defer]
+  (let [xs (arr.range 1 6) :defer
+        mapped (arr.map inc-value (slice xs 0)) :defer
+        filtered (arr.filter even-value? (slice xs 0)) :defer
+        removed (arr.remove even-value? (slice xs 0)) :defer
+        repeated (arr.repeat 3 9) :defer
+        mutable (arr.dynamic int [1 2 3]) :defer]
     (arr.map! inc-value mutable)
     (arr.filter! even-value? mutable)
     (arr.push! mutable 8)
@@ -149,44 +149,44 @@
     (t.is (= (get mutable (- (count mutable) 1)) 8))))
 
 (t.deftest arr-package-extended-surface
-  (let [xs (arr.range 1 6) defer
-        indexed (arr.map-indexed add-index (slice xs 0)) defer
-        kept (arr.keep keep-even (slice xs 0)) defer
-        interposed (arr.interpose 0 (slice xs 0)) defer
-        left (arr.dynamic int [1 2 3]) defer
-        right (arr.dynamic int [9 8 7]) defer
-        interleaved (arr.interleave left right) defer
-        reversed (arr.reverse (slice xs 0)) defer
+  (let [xs (arr.range 1 6) :defer
+        indexed (arr.map-indexed add-index (slice xs 0)) :defer
+        kept (arr.keep keep-even (slice xs 0)) :defer
+        interposed (arr.interpose 0 (slice xs 0)) :defer
+        left (arr.dynamic int [1 2 3]) :defer
+        right (arr.dynamic int [9 8 7]) :defer
+        interleaved (arr.interleave left right) :defer
+        reversed (arr.reverse (slice xs 0)) :defer
         taken (arr.take 3 (slice xs 0))
         dropped (arr.drop 2 (slice xs 0))
         drop-last-two (arr.drop-last 2 (slice xs 0))
         split-front (slice xs 0 0)
         split-back (slice xs 0 0)
-        partitions (arr.partition 2 (slice xs 0)) defer
-        partitions-all (arr.partition-all 4 (slice xs 0)) defer
-        partitioned (arr.partition-by even-value? (slice xs 0)) defer
-        counts (arr.count-by even-value? (slice xs 0)) defer
-        sums (arr.sum-by even-value? inc-value (slice xs 0)) defer
-        freq-source (arr.dynamic int [1 1 2 3 3 3]) defer
-        distinct-source (arr.dynamic int [1 1 2 2 3 3]) defer
-        freqs (arr.frequencies freq-source) defer
-        distincts (arr.distinct distinct-source) defer
-        reversed! (arr.dynamic int [1 2 3]) defer
-        shuffled! (arr.dynamic int [1 2 3]) defer
-        mapped! (arr.dynamic int [1 2 3]) defer
-        indexed! (arr.dynamic int [1 2 3]) defer
-        kept! (arr.dynamic int [1 2 3 4]) defer
-        removed! (arr.dynamic int [1 2 3 4]) defer
-        target (arr.dynamic int [9]) defer
+        partitions (arr.partition 2 (slice xs 0)) :defer
+        partitions-all (arr.partition-all 4 (slice xs 0)) :defer
+        partitioned (arr.partition-by even-value? (slice xs 0)) :defer
+        counts (arr.count-by even-value? (slice xs 0)) :defer
+        sums (arr.sum-by even-value? inc-value (slice xs 0)) :defer
+        freq-source (arr.dynamic int [1 1 2 3 3 3]) :defer
+        distinct-source (arr.dynamic int [1 1 2 2 3 3]) :defer
+        freqs (arr.frequencies freq-source) :defer
+        distincts (arr.distinct distinct-source) :defer
+        reversed! (arr.dynamic int [1 2 3]) :defer
+        shuffled! (arr.dynamic int [1 2 3]) :defer
+        mapped! (arr.dynamic int [1 2 3]) :defer
+        indexed! (arr.dynamic int [1 2 3]) :defer
+        kept! (arr.dynamic int [1 2 3 4]) :defer
+        removed! (arr.dynamic int [1 2 3 4]) :defer
+        target (arr.dynamic int [9]) :defer
         take-while-below (arr.take-while below-four? (slice xs 0))
         drop-while-below (arr.drop-while below-four? (slice xs 0))
-        repeated-twice (arr.repeat 2 7) defer
-        every-below (arr.dynamic int [1 2 3]) defer
+        repeated-twice (arr.repeat 2 7) :defer
+        every-below (arr.dynamic int [1 2 3]) :defer
         every-below-slice (slice every-below 0)
-        take-nth-two (arr.take-nth 2 (slice xs 0)) defer
-        iterated (arr.iterate 3 inc-value 1) defer
+        take-nth-two (arr.take-nth 2 (slice xs 0)) :defer
+        iterated (arr.iterate 3 inc-value 1) :defer
         cycle-base ([]int [1 2])
-        cycled (arr.cycle 5 cycle-base) defer]
+        cycled (arr.cycle 5 cycle-base) :defer]
     (let [[front back] (arr.split-at 2 (slice xs 0))]
       (set! split-front front)
       (set! split-back back))
@@ -243,20 +243,20 @@
 (t.deftest arr-package-field-selector-surface
   (let [members (arr.dynamic Member [(Member {name: "Ada" score: 10 active: true})
                                      (Member {name: "Lin" score: 20 active: false})
-                                     (Member {name: "Ada" score: 30 active: true})]) defer
-        names (arr.map .name (slice members 0)) defer
-        active (arr.filter .active (slice members 0)) defer
-        inactive (arr.remove .active (slice members 0)) defer
+                                     (Member {name: "Ada" score: 30 active: true})]) :defer
+        names (arr.map .name (slice members 0)) :defer
+        active (arr.filter .active (slice members 0)) :defer
+        inactive (arr.remove .active (slice members 0)) :defer
         grouped (arr.group-by .active (slice members 0))
-        counted (arr.count-by .active (slice members 0)) defer
-        summed (arr.sum-by .active .score (slice members 0)) defer
-        unique-members (arr.distinct-by .name (slice members 0)) defer
-        partitions (arr.partition-by .active (slice members 0)) defer
+        counted (arr.count-by .active (slice members 0)) :defer
+        summed (arr.sum-by .active .score (slice members 0)) :defer
+        unique-members (arr.distinct-by .name (slice members 0)) :defer
+        partitions (arr.partition-by .active (slice members 0)) :defer
         active-prefix (arr.take-while .active active)
         inactive-tail (arr.drop-while .active members)
-        empty-members (arr.dynamic Member []) defer]
+        empty-members (arr.dynamic Member []) :defer]
     (defer
-      (each [_ group grouped]
+      (for [_ group grouped]
         (delete group))
       (delete grouped))
     (let [[found-member found-ok] (arr.find .active (slice members 0))]
@@ -276,18 +276,18 @@
       (t.is (= (count inactive-tail) 2)))))
 
 (t.deftest map-package-surface
-  (let [base (map.of string int {"a" 1 "b" 2}) defer
-        overrides (map.of string int {"b" 20 "c" 30}) defer
-        merged (map.merge base overrides) defer
-        assoced (map.assoc merged "z" 99) defer
-        trimmed (map.dissoc assoced "b") defer
-        key-list (map.keys merged) defer
-        value-list (map.vals merged) defer
-        zip-keys (arr.dynamic string ["x" "y" "z"]) defer
-        zip-vals (arr.dynamic int [10 20]) defer
-        zipped (map.zip (slice zip-keys 0) (slice zip-vals 0)) defer
-        mutable (map.of string int {"seed" 1}) defer
-        fresh (map.empty string int 2) defer]
+  (let [base (map.of string int {"a" 1 "b" 2}) :defer
+        overrides (map.of string int {"b" 20 "c" 30}) :defer
+        merged (map.merge base overrides) :defer
+        assoced (map.assoc merged "z" 99) :defer
+        trimmed (map.dissoc assoced "b") :defer
+        key-list (map.keys merged) :defer
+        value-list (map.vals merged) :defer
+        zip-keys (arr.dynamic string ["x" "y" "z"]) :defer
+        zip-vals (arr.dynamic int [10 20]) :defer
+        zipped (map.zip (slice zip-keys 0) (slice zip-vals 0)) :defer
+        mutable (map.of string int {"seed" 1}) :defer
+        fresh (map.empty string int 2) :defer]
     (set! (get fresh "alpha") 11)
     (map.assoc! mutable "extra" 7)
     (map.dissoc! mutable "seed")
@@ -306,15 +306,15 @@
     (t.is (= (map.get mutable "c" 0) 30))))
 
 (t.deftest set-package-surface
-  (let [lhs (set.of int [1 2 3]) defer
-        rhs (set.of int [3 4]) defer
-        unioned (set.union lhs rhs) defer
-        intersected (set.intersection lhs rhs) defer
-        differed (set.difference lhs rhs) defer
-        bigger (set.add lhs 9) defer
-        smaller (set.remove bigger 2) defer
-        mutable (set.of int [1 2 3]) defer
-        removed (set.of int [2]) defer]
+  (let [lhs (set.of int [1 2 3]) :defer
+        rhs (set.of int [3 4]) :defer
+        unioned (set.union lhs rhs) :defer
+        intersected (set.intersection lhs rhs) :defer
+        differed (set.difference lhs rhs) :defer
+        bigger (set.add lhs 9) :defer
+        smaller (set.remove bigger 2) :defer
+        mutable (set.of int [1 2 3]) :defer
+        removed (set.of int [2]) :defer]
     (set.add! mutable 5)
     (set.remove! mutable 1)
     (set.union! mutable rhs)
@@ -339,11 +339,11 @@
         without-suffix (str.trim-suffix "kvist.txt" ".txt")
         starts? (str.starts-with? trimmed "K")
         ends? (str.ends-with? trimmed "re")
-        parts (str.split "a,b,c" ",") defer
-        joined (str.join parts "-") defer
-        replaced (str.replace joined "-" "_") defer
-        lowered (str.lower replaced) defer
-        uppered (str.upper lowered) defer]
+        parts (str.split "a,b,c" ",") :defer
+        joined (str.join parts "-") :defer
+        replaced (str.replace joined "-" "_") :defer
+        lowered (str.lower replaced) :defer
+        uppered (str.upper lowered) :defer]
     (t.is (= (str.count trimmed) 10))
     (t.is (= (str.slice trimmed 0 5) "Kvist"))
     (t.is (str.contains? trimmed "Core"))
@@ -360,7 +360,7 @@
 
 (t.deftest soa-package-surface
   (let [fields (soa.fields 'Profile)
-        types (soa.types 'Profile) defer]
+        types (soa.types 'Profile) :defer]
     (t.is (= (count fields) 2))
     (t.is (= (get fields 0) "name"))
     (t.is (= (get fields 1) "age"))

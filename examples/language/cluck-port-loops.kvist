@@ -3,33 +3,33 @@
 (import arr "kvist:arr")
 
 (defn loop-index-demo [] -> [dynamic]int
-  (let [xs (arr.dynamic int [10 20 30]) defer
+  (let [xs (arr.dynamic int [10 20 30]) :defer
         out (arr.empty int)]
-    (each [i x xs]
+    (for [i x xs]
       (arr.push! out (+ x i)))
     out))
 
 (defn loop-break-demo [] -> int
-  (let [xs (arr.dynamic int [3 5 8 13 21]) defer
+  (let [xs (arr.dynamic int [3 5 8 13 21]) :defer
         found 0]
-    (each [x xs]
+    (for [x xs]
       (when (> x 10)
         (set! found x)
         (break)))
     found))
 
 (defn loop-continue-demo [] -> [dynamic]int
-  (let [xs (arr.dynamic int [0 1 2 3 4 5]) defer
+  (let [xs (arr.dynamic int [0 1 2 3 4 5]) :defer
         out (arr.empty int)]
-    (each [x xs]
+    (for [x xs]
       (when (= 0 (% x 2))
         (continue))
       (arr.push! out x))
     out))
 
 (defn main []
-  (let [indexed (loop-index-demo) defer
-        continued (loop-continue-demo) defer]
+  (let [indexed (loop-index-demo) :defer
+        continued (loop-continue-demo) :defer]
     (println indexed)
     (println (loop-break-demo))
     (println continued)))

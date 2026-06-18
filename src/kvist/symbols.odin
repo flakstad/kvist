@@ -93,7 +93,6 @@ LANGUAGE_SOURCE_ENTRIES :: []Language_Source_Entry{
     {name = "discard", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "(discard expr...)"},
     {name = "defer", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "case \"defer\":"},
     {name = "for", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "case \"for\":"},
-    {name = "each", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "case \"each\":"},
     {name = "make", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "if head.text == \"make\""},
     {name = "get", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "(get target key)"},
     {name = "slice", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "(slice target start end)"},
@@ -1594,7 +1593,7 @@ symbols_defstruct_field_index :: proc(form: CST_Form) -> (int, bool) {
         return -1, false
     }
     head := form.items[0].text
-    if head != "defstruct" && head != "defstruct-" && head != "defstate" {
+    if head != "defstruct" && head != "defstruct-" {
         return -1, false
     }
     if form.items[1].kind != .Symbol {
@@ -1969,25 +1968,6 @@ symbols_source :: proc(source: string) -> (output: string, err: Compile_Error, o
                     detail = "private"
                 }
                 symbols_write_record_doc(&builder, "struct", name, source, form.items[1].span, detail, signature, doc_lines[:])
-                symbols_write_fields(&builder, source, name, form.items[field_index])
-            }
-        case "defstate":
-            if (len(form.items) == 3 || len(form.items) == 4 || len(form.items) == 5) && form.items[1].kind == .Symbol {
-                name := form.items[1].text
-                doc_lines := top.doc_lines
-                field_index := 2
-                if len(form.items) >= 4 && form.items[2].kind == .String {
-                    doc_lines = symbols_append_doc_lines(doc_lines[:], symbols_doc_lines_from_string(unquote_string(form.items[2].text))[:])
-                    field_index = 3
-                }
-                signature := ""
-                fields_sig, err_fields, ok_fields_sig := parse_defstruct_fields(form.items[field_index])
-                if ok_fields_sig {
-                    signature = symbols_struct_signature(name, fields_sig[:])
-                } else {
-                    _ = err_fields
-                }
-                symbols_write_record_doc(&builder, "struct", name, source, form.items[1].span, "state", signature, doc_lines[:])
                 symbols_write_fields(&builder, source, name, form.items[field_index])
             }
         case "defenum", "defenum-":

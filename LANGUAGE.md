@@ -71,9 +71,9 @@ Package and field access use dot syntax:
 cells[(idx x y)]
 ```
 
-Keywords are syntax markers. They are used for forms such as `:else`, `:when`,
-`:while`, `:let`, `:into`, and `:abi`. They are not field lookup functions or
-general values.
+Keywords are syntax markers. They are used for forms such as `:else`, `:abi`,
+`:next`, `:dispose`, `:defer`, `:or-return`, `:or-break`, and `:or-continue`.
+They are not field lookup functions or general values.
 
 ## Declarations
 
@@ -283,25 +283,25 @@ Flat positional multi-return binding is supported:
 Field destructuring is not part of the language. Use dot access or explicit
 local bindings.
 
-Owned local bindings may use the `defer` marker:
+Owned local bindings may use the `:defer` marker:
 
 ```clojure
-(let [xs (arr.empty int) defer]
+(let [xs (arr.empty int) :defer]
   ...)
 ```
 
-Result bindings may use `or-return`, `or-break`, or `or-continue` guards:
+Result bindings may use `:or-return`, `:or-break`, or `:or-continue` guards:
 
 ```clojure
-(let [[value ok] (next-item) or-return]
+(let [[value ok] (next-item) :or-return]
   value)
 
 (while running
-  (let [[item ok] (next-item) or-break]
+  (let [[item ok] (next-item) :or-break]
     (println item)))
 ```
 
-`or-return` requires named proc returns matching the bound names.
+`:or-return` requires named proc returns matching the bound names.
 
 ## Control Flow
 
@@ -372,16 +372,16 @@ ordinary Odin switches:
 `switch` remains available for explicit Odin-shaped switch lowering, but `case`
 is the preferred user-facing classification form.
 
-Use `each` for side-effect iteration:
+Use `for` for side-effect iteration:
 
 ```clojure
-(each [x xs]
+(for [x xs]
   (println x))
 
-(each [k v lookup]
+(for [k v lookup]
   (println k v))
 
-(each [x i xs]
+(for [x i xs]
   (println i x))
 ```
 
@@ -396,7 +396,7 @@ bool]` results.
   :next next-file
   :dispose dispose-files)
 
-(each [path (files root)]
+(for [path (files root)]
   (println path))
 
 (into [dynamic]string
@@ -413,28 +413,10 @@ bool]` results.
 ```
 
 Sources lower to explicit Odin loops around the state object. They are consumed
-by `each`, transform `into`, and transform `transduce` in the initial surface;
+by `for`, transform `into`, and transform `transduce` in the initial surface;
 they are not general lazy sequences or first-class source values yet.
 See `examples/collections/log-source.kvist` for a disposable source consumed by
 all three forms.
-
-Use `for` for eager data-building comprehensions:
-
-```clojure
-(for [user users :let [decade (* (/ user.age 10) 10)] :when user.active]
-  :into [dynamic]Row
-  (Row {name: user.name decade: decade}))
-
-(for [user users :when user.active]
-  :into map[string]User
-  [user.id user])
-
-(for [user users :when user.active]
-  :into set[string]
-  user.id)
-```
-
-`for` supports `:let`, `:when`, `:while`, and `:into`.
 
 ## Places And Mutation
 

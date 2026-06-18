@@ -1268,10 +1268,7 @@ parse_decl :: proc(top_form: CST_Top_Form) -> (decl: AST_Decl, err: Compile_Erro
             doc_lines = doc_lines,
             var_decl = var_decl,
         }, {}, true
-    case "defstruct", "defstruct-", "defstate":
-        if head.text == "defstate" && len(form.items) == 3 && form.items[1].kind == .Symbol && form.items[2].kind == .Brace {
-            return AST_Decl{kind = .Ignored, span = form.span}, {}, true
-        }
+    case "defstruct", "defstruct-":
         if len(form.items) != 3 && len(form.items) != 4 && len(form.items) != 5 {
             return decl, Compile_Error{message = fmt.tprintf("%s expects a name, optional docstring, a brace field form, and optional brace metadata form", head.text), span = form.span}, false
         }

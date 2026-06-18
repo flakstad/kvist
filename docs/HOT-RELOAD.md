@@ -169,10 +169,10 @@ production entrypoint instead of the reload adapter.
 In that ordinary execution context, `reload.checkpoint!` becomes a no-op when
 there is no resident reloader.
 
-For tiny sources that directly declare the reload-app contract through inline
-`defstate` metadata, plain `kvist check|build|run main.kvist` can still
-route through the generated production wrapper. Larger projects should keep
-that contract in a separate reload adapter.
+For tiny sources that directly declare `(def Reload_State <State-Type>)` and a
+reload `run` function, plain `kvist check|build|run main.kvist` can still route
+through the generated production wrapper. Larger projects should keep that
+contract in a separate reload adapter.
 
 Current state-layout behavior is intentionally conservative:
 
@@ -426,7 +426,7 @@ It shows:
 
 The lowest-ceremony native reload path starts with
 [`examples/reload/reload_step_demo`](../examples/reload/reload_step_demo/README.md).
-It demonstrates the loop-shaped `defstate` reload workflow and the CLI shape
+It demonstrates the loop-shaped `Reload_State` reload workflow and the CLI shape
 intended for editor tooling.
 
 Its companion app-owned runtime example lives in

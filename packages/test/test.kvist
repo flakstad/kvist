@@ -20,7 +20,7 @@
     (let [[stack ok] __kvist_test_context_stacks[key]]
       (if (not ok)
         (return))
-      (each [msg stack]
+      (for [msg stack]
         (delete msg))
       (delete stack)
       (delete! __kvist_test_context_stacks key)
@@ -266,11 +266,11 @@
 (defmacro use-fixtures
   "Install fixtures for tests defined later in the same package file.
 
-  `(t.use-fixtures each: f...)` wraps each test body in the listed fixtures.
+  `(t.use-fixtures :each f...)` wraps each test body in the listed fixtures.
   Each fixture is called as `(f t body-proc)`, where `body-proc` is a proc taking
   `^testing.T`.
 
-  `(t.use-fixtures once: f...)` runs setup procs once before the first wrapped
+  `(t.use-fixtures :once f...)` runs setup procs once before the first wrapped
   test body executes. Current `:once` fixtures are setup-only and do not receive
   a teardown continuation."
   [scope & fixtures]
@@ -298,4 +298,4 @@
                 (do
                   (__kvist_test_ensure_once)
                   (unquote body)))))))
-      (error "t.use-fixtures currently supports only each: and once:"))))
+      (error "t.use-fixtures currently supports only :each and :once"))))

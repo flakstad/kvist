@@ -102,7 +102,7 @@ SHUFFLE_REPS :: 160")
         checksum 0]
     (while (< i reps)
       (let [total 0]
-        (each [x xs]
+        (for [x xs]
           (let [mapped (inc-value x)]
             (when (and (even-value? mapped)
                        (not (divisible-by-three? mapped)))
@@ -473,7 +473,7 @@ SHUFFLE_REPS :: 160")
     (while (< i reps)
       (let [groups (arr.group-by parity xs)]
         (defer
-          (each [_ group groups]
+          (for [_ group groups]
             (delete group))
           (delete groups))
         (set! checksum (+ checksum (odin "len(groups)")))
@@ -488,7 +488,7 @@ SHUFFLE_REPS :: 160")
     (while (< i reps)
       (let [groups (pkgarr.group-by parity xs)]
         (defer
-          (each [_ group groups]
+          (for [_ group groups]
             (delete group))
           (delete groups))
         (set! checksum (+ checksum (odin "len(groups)")))

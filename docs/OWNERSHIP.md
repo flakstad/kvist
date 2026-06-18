@@ -89,8 +89,8 @@ Use `defer delete` for local owned values:
 For ordinary local scopes, Kvist also supports a binding-level `defer` marker:
 
 ```clojure
-(let [active-users (arr.filter active? users) defer
-      names (arr.map .name active-users) defer]
+(let [active-users (arr.filter active? users) :defer
+      names (arr.map .name active-users) :defer]
   ...)
 ```
 
@@ -310,11 +310,11 @@ For ordinary local owned values, prefer `let` bindings marked with trailing
 `defer`:
 
 ```clojure
-(let [active (arr.filter active? users) defer]
+(let [active (arr.filter active? users) :defer]
   (count active))
 
-(let [active (arr.filter active? users) defer
-      names (arr.map .name active) defer]
+(let [active (arr.filter active? users) :defer
+      names (arr.map .name active) :defer]
   (count names))
 ```
 
@@ -366,7 +366,7 @@ levels:
 ```clojure
 (let [groups (arr.group-by .status users)]
   (defer
-    (each [_ group groups]
+    (for [_ group groups]
       (delete group))
     (delete groups))
   ...)

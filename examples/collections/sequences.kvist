@@ -89,7 +89,7 @@
         by-status (arr.group-by .status users)
         active-users by-status[.Active]]
     (defer
-      (each [_ group by-status]
+      (for [_ group by-status]
         (delete group))
       (delete by-status))
     (len active-users)))

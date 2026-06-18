@@ -7,9 +7,9 @@
 (import set "kvist:set")
 
 (defn maps_and_sets_demo [] -> int
-  (let [m (map.empty string string) defer
-        tags (set.empty string) defer
-        featured (set.empty string) defer
+  (let [m (map.empty string string) :defer
+        tags (set.empty string) :defer
+        featured (set.empty string) :defer
         total 0]
     (set! (get m "name") "Ada")
     (set! (get m "lang") "Kvist")
@@ -19,22 +19,22 @@
     (set.add! featured "compiled")
     (set! (get m "lang") "Reset Kvist")
     (set.add! tags "mutable")
-    (let [all-tags (set.union tags featured) defer
-          shared (set.intersection tags featured) defer
-          missing (set.difference all-tags shared) defer
-          promoted (set.add shared "systems") defer
-          narrowed (set.remove promoted "native") defer]
+    (let [all-tags (set.union tags featured) :defer
+          shared (set.intersection tags featured) :defer
+          missing (set.difference all-tags shared) :defer
+          promoted (set.add shared "systems") :defer
+          narrowed (set.remove promoted "native") :defer]
       (println (set.subset? shared all-tags))
       (println (set.superset? all-tags shared))
       (println (set.disjoint? narrowed featured))
       (set.remove! tags "lisp")
-      (each [tag _ missing]
+      (for [tag _ missing]
         (println "missing" tag)))
-    (each [key value m]
+    (for [key value m]
       (println key value)
       (set! total (+ total (str.count key)))
       (set! total (+ total (str.count value))))
-    (each [tag _ tags]
+    (for [tag _ tags]
       (println tag)
       (set! total (+ total (str.count tag))))
     total))

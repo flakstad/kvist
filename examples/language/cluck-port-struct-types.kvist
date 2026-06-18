@@ -21,7 +21,7 @@
    home: Point})
 
 (defn struct-types-demo [] -> bool
-  (let [samples (arr.dynamic float [1.5 2.5 3.5 4.5]) defer
+  (let [samples (arr.dynamic float [1.5 2.5 3.5 4.5]) :defer
         profile (Profile {name: "Ada"
                           age: 36
                           active?: true

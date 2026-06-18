@@ -4,9 +4,9 @@
 (import arr "kvist:arr")
 
 (defn arrays-demo [] -> int
-  (let [xs (arr.dynamic int [1 2 3]) defer
+  (let [xs (arr.dynamic int [1 2 3]) :defer
         ys (arr.fixed int [4 5 6])
-        zeros (arr.empty int) defer
+        zeros (arr.empty int) :defer
         view (arr.slice xs 1 3)]
     (arr.push! xs 4)
     (arr.push! zeros 0 0 0)

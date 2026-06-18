@@ -7,7 +7,7 @@
         html (h.render-file
                "html-template.html"
                {name: "Bob"
-                message: message}) defer]
+                message: message}) :defer]
     (println html)
     true))
 

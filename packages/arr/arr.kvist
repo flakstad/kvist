@@ -116,7 +116,7 @@
   mutated, and the result is allocated with capacity based on the input count."
   [f: (fn [i: int, x: $T] -> $U), xs: []T] -> [dynamic]U #force_inline
   (let [out (arr.empty U (core.count xs))]
-    (each [x i xs]
+    (for [x i xs]
       (arr-push! out (f i x)))
     out))
 
@@ -136,7 +136,7 @@
   "Implementation helper for symbol-callback `arr.keep`."
   [f: (fn [x: $T] -> [value: $U, ok: bool]), xs: []T] -> [dynamic]U #force_inline
   (let [out (arr.empty U (core.count xs))]
-    (each [x xs]
+    (for [x xs]
       (let [[value ok] (f x)]
         (core.when ok
           (arr-push! out value))))
@@ -159,7 +159,7 @@
   dynamic array behavior as concatenated slices are appended."
   [f: (fn [x: $T] -> []$U), xs: []T] -> [dynamic]U #force_inline
   (let [out (arr.empty U (core.count xs))]
-    (each [x xs]
+    (for [x xs]
       (arr-into! out (f x)))
     out))
 
@@ -190,7 +190,7 @@
 (defn- map!-impl
   "Implementation helper for symbol-callback `arr.map!`."
   [f: (fn [x: $T] -> T), xs: []T] #force_inline
-  (each [x i xs]
+  (for [x i xs]
     (set! xs[i] (f x))))
 
 (defmacro map-indexed!
@@ -205,7 +205,7 @@
 (defn- map-indexed!-impl
   "Implementation helper for `arr.map-indexed!`."
   [f: (fn [i: int, x: $T] -> T), xs: []T] #force_inline
-  (each [x i xs]
+  (for [x i xs]
     (set! xs[i] (f i x))))
 
 (defmacro filter!
@@ -228,7 +228,7 @@
   [pred: (fn [x: $T] -> bool), xs: (ptr (dynamic T))] #force_inline
   (let [data (deref xs)
         write 0]
-    (each [x data]
+    (for [x data]
       (core.when (pred x)
         (set! data[write] x)
         (set! write (+ write 1))))
@@ -254,7 +254,7 @@
   [pred: (fn [x: $T] -> bool), xs: (ptr (dynamic T))] #force_inline
   (let [data (deref xs)
         write 0]
-    (each [x data]
+    (for [x data]
       (core.when (not (pred x))
         (set! data[write] x)
         (set! write (+ write 1))))
@@ -320,7 +320,7 @@
   [f: (fn [x: $T] -> [value: T, ok: bool]), xs: (ptr (dynamic T))] #force_inline
   (let [data (deref xs)
         write 0]
-    (each [x data]
+    (for [x data]
       (let [[value ok] (f x)]
         (core.when ok
           (set! data[write] value)
@@ -364,7 +364,7 @@
     (set! cap (- (* n 2) 1))
     (let [out (arr.empty T cap)]
       (arr-push! out (core.get xs 0))
-      (each [x (core.slice xs 1)]
+      (for [x (core.slice xs 1)]
         (arr-push! out sep)
         (arr-push! out x))
       out)))
@@ -662,7 +662,7 @@
   "Implementation helper for non-field-selector `arr.index-by`."
   [f: (fn [x: $T] -> $K), xs: []T] -> map[K]T #force_inline
   (let [out (make (map K T) (core.count xs))]
-    (each [x xs]
+    (for [x xs]
       (set! out[(f x)] x))
     out))
 
@@ -682,7 +682,7 @@
   "Implementation helper for non-field-selector `arr.group-by`."
   [f: (fn [x: $T] -> $K), xs: []T] -> (map K (dynamic T)) #force_inline
   (let [out (make (map K (dynamic T)))]
-    (each [x xs]
+    (for [x xs]
       (let [key (f x)
             group out[key]]
         (arr-push! group x)
@@ -707,7 +707,7 @@
   "Implementation helper for non-field-selector `arr.count-by`."
   [f: (fn [x: $T] -> $K), xs: []T] -> map[K]int #force_inline
   (let [out (make (map K int))]
-    (each [x xs]
+    (for [x xs]
       (mut! out[(f x)] += 1))
     out))
 
@@ -727,7 +727,7 @@
   "Implementation helper for non-field-selector `arr.sum-by`."
   [key-f: (fn [x: $T] -> $K), value-f: (fn [x: T] -> $V), xs: []T] -> map[K]V #force_inline
   (let [out (make (map K V))]
-    (each [x xs]
+    (for [x xs]
       (mut! out[(key-f x)] += (value-f x)))
     out))
 
@@ -743,7 +743,7 @@
   "Implementation helper for `arr.frequencies`."
   [xs: []$T] -> map[T]int #force_inline
   (let [out (make (map T int) (core.count xs))]
-    (each [x xs]
+    (for [x xs]
       (mut! out[x] += 1))
     out))
 
@@ -760,8 +760,8 @@
   "Implementation helper for `arr.distinct`."
   [xs: []$T] -> [dynamic]T #force_inline
   (let [out (arr.empty T (core.count xs))
-        seen (make (map T bool) (core.count xs)) defer]
-    (each [x xs]
+        seen (make (map T bool) (core.count xs)) :defer]
+    (for [x xs]
       (if seen[x]
         (continue))
       (set! seen[x] true)
@@ -784,8 +784,8 @@
   "Implementation helper for non-field-selector `arr.distinct-by`."
   [f: (fn [x: $T] -> $K), xs: []T] -> [dynamic]T #force_inline
   (let [out (arr.empty T (core.count xs))
-        seen (make (map K bool) (core.count xs)) defer]
-    (each [x xs]
+        seen (make (map K bool) (core.count xs)) :defer]
+    (for [x xs]
       (let [key (f x)]
         (if seen[key]
           (continue))
@@ -894,7 +894,7 @@
   keeping callback dispatch visible to the compiler."
   [f: (fn [x: $T] -> $U), xs: []T] -> [dynamic]U #force_inline
   (let [out (arr.empty U (core.count xs))]
-    (each [x xs]
+    (for [x xs]
       (arr-push! out (f x)))
     out))
 
@@ -905,7 +905,7 @@
   elements in a single pass."
   [pred: (fn [x: $T] -> bool), xs: []T] -> [dynamic]T #force_inline
   (let [out (arr.empty T (core.count xs))]
-    (each [x xs]
+    (for [x xs]
       (core.when (pred x)
         (arr-push! out x)))
     out))
@@ -917,7 +917,7 @@
   which the predicate is false."
   [pred: (fn [x: $T] -> bool), xs: []T] -> [dynamic]T #force_inline
   (let [out (arr.empty T (core.count xs))]
-    (each [x xs]
+    (for [x xs]
       (core.when (not (pred x))
         (arr-push! out x)))
     out))
@@ -929,7 +929,7 @@
   allocates nothing."
   [f: (fn [acc: $U, x: $T] -> U), init: U, xs: []T] -> U #force_inline
   (let [acc init]
-    (each [x xs]
+    (for [x xs]
       (set! acc (f acc x)))
     acc))
 
@@ -940,7 +940,7 @@
   accumulator, so it allocates nothing."
   [f: (fn [acc: $U, i: int, x: $T] -> U), init: U, xs: []T] -> U #force_inline
   (let [acc init]
-    (each [x i xs]
+    (for [x i xs]
       (set! acc (f acc i x)))
     acc))
 
@@ -1116,7 +1116,7 @@
   "Implementation helper for non-field-selector `arr.some?`."
   [pred: (fn [x: $T] -> bool), xs: []T] -> bool #force_inline
   (let [result false]
-    (each [x xs]
+    (for [x xs]
       (core.when (pred x)
         (do
           (set! result true)
@@ -1127,7 +1127,7 @@
   "Implementation helper for non-field-selector `arr.every?`."
   [pred: (fn [x: $T] -> bool), xs: []T] -> bool #force_inline
   (let [result true]
-    (each [x xs]
+    (for [x xs]
       (core.when (not (pred x))
         (do
           (set! result false)
@@ -1137,7 +1137,7 @@
 (defn- find-impl
   "Implementation helper for non-field-selector `arr.find`."
   [pred: (fn [x: $T] -> bool), xs: []T] -> [value: T, ok: bool] #force_inline
-  (each [x xs]
+  (for [x xs]
     (core.when (pred x)
       (return x true)))
   (return value false))
@@ -1145,7 +1145,7 @@
 (defn- find-indexed-impl
   "Implementation helper for `arr.find-indexed`."
   [pred: (fn [i: int, x: $T] -> bool), xs: []T] -> [index: int, value: T, ok: bool] #force_inline
-  (each [x i xs]
+  (for [x i xs]
     (core.when (pred i x)
       (return i x true)))
   (return -1 value false))
@@ -1187,7 +1187,7 @@
 (defn- take-while-impl
   "Implementation helper for non-field-selector `arr.take-while`."
   [pred: (fn [x: $T] -> bool), xs: []T] -> []T #force_inline
-  (each [x i xs]
+  (for [x i xs]
     (core.when (not (pred x))
       (return (core.slice xs 0 i))))
   xs)
@@ -1195,7 +1195,7 @@
 (defn- drop-while-impl
   "Implementation helper for non-field-selector `arr.drop-while`."
   [pred: (fn [x: $T] -> bool), xs: []T] -> []T #force_inline
-  (each [x i xs]
+  (for [x i xs]
     (core.when (not (pred x))
       (return (core.slice xs i))))
   (core.slice xs (core.count xs)))
