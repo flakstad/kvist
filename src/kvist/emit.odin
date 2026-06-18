@@ -2382,7 +2382,7 @@ emit_positional_call_with_defaults :: proc(e: ^Emitter, proc_decl: ^Proc_Decl, a
     defer delete(provided_forms)
 
     for arg, arg_idx in args {
-        arg_text, err_arg, ok_arg := emit_expr(e, arg)
+        arg_text, err_arg, ok_arg := emit_expr_for_expected_type(e, arg, proc_decl.params[arg_idx].ty)
         if !ok_arg {
             return arg_texts, err_arg, false
         }
@@ -2488,7 +2488,7 @@ emit_mixed_call_with_defaults :: proc(e: ^Emitter, proc_decl: ^Proc_Decl, positi
 
     for arg, idx in positional_args {
         param := proc_decl.params[idx]
-        arg_text, err_arg, ok_arg := emit_expr(e, arg)
+        arg_text, err_arg, ok_arg := emit_expr_for_expected_type(e, arg, param.ty)
         if !ok_arg {
             return arg_texts, err_arg, false
         }
@@ -4122,10 +4122,22 @@ owned_result_usage_error :: proc(form: CST_Form, allow_root_owned: bool) -> (Com
 }
 
 emit_expr_for_expected_type :: proc(e: ^Emitter, form: CST_Form, expected_type := "") -> (string, Compile_Error, bool) {
-    if expected_type != "" && (form.kind == .Vector || form.kind == .Brace || form.kind == .Set) {
+    if expected_type != "" && !strings.contains(expected_type, "$") && (form.kind == .Vector || form.kind == .Brace || form.kind == .Set) {
         return emit_inferred_literal(e, form, expected_type)
     }
-    return emit_expr(e, form)
+    text, err, ok := emit_expr(e, form)
+    if !ok {
+        return "", err, false
+    }
+    if expected_type != "" && type_text_is_slice(expected_type) && form.kind == .Symbol {
+        actual_type, ok_actual := obvious_form_type(e, form)
+        expected_elem, ok_expected_elem := collection_element_type(expected_type)
+        actual_elem, ok_actual_elem := dynamic_array_element_type(actual_type)
+        if ok_actual && ok_expected_elem && ok_actual_elem && expected_elem == actual_elem {
+            return slice_all_expr_text(text), {}, true
+        }
+    }
+    return text, {}, true
 }
 
 returned_binding_name :: proc(form: CST_Form) -> (string, bool) {

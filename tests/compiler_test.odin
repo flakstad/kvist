@@ -4790,6 +4790,38 @@ compile_let_defer_scope :: proc(t: ^testing.T) {
 }
 
 @(test)
+compile_dynamic_array_local_borrows_as_slice_argument :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct Order {
+  amount: int
+})
+
+(defn total [orders: []Order] -> int
+  (let [sum 0]
+    (for [order orders]
+      (mut! sum += order.amount))
+    sum))
+
+(defn main []
+  (let [orders [(Order {amount: 120})
+                (Order {amount: 80})] :defer]
+    (println (total orders))))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "orders := [dynamic]Order{Order{amount = 120}, Order{amount = 80}}"), true)
+    testing.expect_value(t, strings.contains(output, "defer delete(orders)"), true)
+    testing.expect_value(t, strings.contains(output, "fmt.println(total((orders)[:]))"), true)
+}
+
+@(test)
 compile_with_temp_allocator_final_scalar_use :: proc(t: ^testing.T) {
     source := `(package main)
 (import core "kvist:core")
