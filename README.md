@@ -38,29 +38,52 @@ $ ./kvist run hello.kvist
 hello from kvist
 ```
 
-## Coming From Odin Or Clojure
+## Coming From...
 
-For Odin developers, Kvist is close to Odin by design. It transpiles to Odin,
-uses Odin for checking and building, and tries to expose Odin's syntax and
-features directly instead of inventing parallel meanings. Types are Odin types,
-`^T` is still a pointer type, slices and dynamic arrays are still Odin-shaped,
-and `defer`, `delete`, foreign imports, `core:*`, `base:*`, and `vendor:*`
-packages are all part of the normal workflow. Kvist code can sit next to Odin
-files in the same package, and the generated Odin is meant to be readable. The
-extra layer is there for expression-oriented code, macros, and source
-transformations, not for hiding the target language.
+### Odin
 
-For Clojure developers, Kvist deliberately copies Clojure's excellent Lisp
-syntax as far as it fits an eager, mutable systems language: small
-parenthesized forms, data literals, `let`, `when`, `cond`, threading, macros,
-field selectors, and a collection library that feels familiar. The similarity
-is at the source level. There is no dynamic runtime, lazy sequence layer,
-persistent collection model, or garbage-collected object graph. Values are
-owned by ordinary generated code, and collection helpers allocate owned buffers
-unless you call a bang variant that mutates existing storage. `kvist:arr`
-brings over much of the spirit of Clojure's core sequence library with
-fresh-result helpers such as `arr.map` and `arr.filter`, plus mutating helpers
-such as `arr.map!`, `arr.filter!`, and `arr.into!`.
+Odin is a beautifully designed systems language: concrete data, explicit
+allocation, fast builds, simple packages, strong tooling, and a standard library
+with a lot of practical taste. Kvist is close to Odin by design. It transpiles
+to Odin, uses Odin for checking and building, and tries to expose Odin's syntax
+and features directly instead of inventing parallel meanings. Types are Odin
+types, `^T` is still a pointer type, slices and dynamic arrays are still
+Odin-shaped, and `defer`, `delete`, foreign imports, `core:*`, `base:*`, and
+`vendor:*` packages are all part of the normal workflow.
+
+Kvist code can sit next to Odin files in the same package, and the generated
+Odin is meant to be readable. The extra layer is there for expression-oriented
+code, macros, and source transformations. Put another way: Kvist likes Odin a
+lot; it just wants to write it as a Lisp.
+
+### Clojure
+
+Kvist deliberately copies Clojure's excellent Lisp syntax as far as it fits an
+eager, mutable systems language: small parenthesized forms, data literals,
+`let`, `when`, `cond`, threading, macros, field selectors, and a collection
+library that feels familiar. The similarity is at the source level. There is no
+dynamic runtime, lazy sequence layer, persistent collection model, or
+garbage-collected object graph.
+
+Values are owned by ordinary generated code, and collection helpers allocate
+owned buffers unless you call a bang variant that mutates existing storage.
+`kvist:arr` brings over much of the spirit of Clojure's core sequence library
+with fresh-result helpers such as `arr.map` and `arr.filter`, plus mutating
+helpers such as `arr.map!`, `arr.filter!`, and `arr.into!`.
+
+## Why It Exists
+
+Kvist is for programs that need low-level control and still benefit from a
+small, regular language:
+
+- write data-oriented code directly
+- keep ownership, allocation, and deletion visible
+- use macros for declarations, DSLs, generated glue, and editor-friendly source
+  transformations
+- inspect the generated code when performance, debugging, or interop matters
+- use `check`, `run`, `eval`, and reload tooling without a separate interpreter
+
+The generated Odin is still there when you want to inspect it.
 
 ## What It Looks Like
 
@@ -149,7 +172,7 @@ Use `do` when a branch or callback needs several expressions:
   (load-users))
 ```
 
-Conditionals are expressions. `:else` is a keyword marker, not a value:
+Conditionals are expressions:
 
 ```clojure
 (defn label [score: int] -> string
@@ -161,7 +184,8 @@ Conditionals are expressions. `:else` is a keyword marker, not a value:
   (println "score" score))
 ```
 
-`cond` and `case` cover the larger branches:
+`cond` and `case` cover the larger branches. `:else` is a keyword marker, not a
+value:
 
 ```clojure
 (cond
@@ -192,7 +216,7 @@ Typed collection literals say what kind of Odin value they produce:
 ([]int [1 2 3])                  ;; slice
 ([3]int [1 2 3])                 ;; fixed array
 (map[string]int {"ok" 200})      ;; map
-(arr.dynamic int [1 2 3])        ;; owned dynamic array
+([dynamic]int [1 2 3])           ;; owned dynamic array
 ```
 
 Structs are declared with fields, built with type-call syntax, and read with
@@ -269,12 +293,40 @@ value if it has no default:
 (draw-label "hud" {text: "READY"})  ;; x and y use their zero values
 ```
 
-Pointers use `^`, `^` after a value, and `&`. The same operations are also
-available as forms: `(ptr T)`, `(deref value)`, and `(addr value)`.
+Pointers are for shared identity, optional values, and in-place updates. `^T`
+is a pointer type, `value^` dereferences, and `&value` takes an address. The
+same operations are also available as forms: `(ptr T)`, `(deref value)`, and
+`(addr value)`.
 
 ```clojure
-(defn move! [x: ^f32 y: ^f32 dx: f32 dy: f32]  ;; pointer params
-  (mut! x^ += dx)  ;; dereference and compound assignment
+(defstruct Score {
+  value: int
+  bonus: int
+})
+
+(defn apply-bonus [score: Score] -> Score
+  ;; Value-style update: return a changed copy.
+  (let [updated score]
+    (mut! updated.value += updated.bonus)
+    (set! updated.bonus 0)
+    updated))
+
+(defn apply-bonus! [score: ^Score]
+  ;; Pointer-style update: mutate the caller's value.
+  (mut! score^.value += score^.bonus)
+  (set! score^.bonus 0))
+
+(defn main []
+  (let [score (Score {value: 10 bonus: 5})]
+    (apply-bonus! &score)
+    (println score.value)))
+```
+
+Use pointers in calls either positionally or with named arguments:
+
+```clojure
+(defn move! [x: ^f32 y: ^f32 dx: f32 dy: f32]
+  (mut! x^ += dx)
   (mut! y^ += dy))
 
 (move! &x &y 4 2)
@@ -316,20 +368,6 @@ compiles its source into generated Odin and builds the package with sibling Odin
 files included, so direct Odin code stays available for low-level boundaries,
 bindings, and cases where the target language is the clearest tool. See the
 [language reference](LANGUAGE.md) for the full file model.
-
-## Why It Exists
-
-Kvist is for programs that need low-level control and still benefit from a
-small, regular language:
-
-- write data-oriented code directly
-- keep ownership, allocation, and deletion visible
-- use macros for declarations, DSLs, generated glue, and editor-friendly source
-  transformations
-- inspect the generated code when performance, debugging, or interop matters
-- use `check`, `run`, `eval`, and reload tooling without a separate interpreter
-
-The generated Odin is still there when you want to inspect it.
 
 ## Whirlwind Tour
 
