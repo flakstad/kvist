@@ -4,11 +4,11 @@
 
 # Kvist
 
-A practical Lisp for systems programming, with its feet on the ground.
+Kvist - A Practical Lisp for Systems Programming
 
-Kvist is a Lisp-shaped language for writing explicit, data-oriented systems
-code. It combines expression-oriented syntax and macros with ownership and
-memory semantics that stay close to the machine.
+Kvist is a general-purpose Lisp-shaped language for writing fast, compact
+programs. It combines expression-oriented syntax and macros with explicit
+ownership and memory semantics that stay close to the machine.
 
 Kvist compiles to readable Odin and uses Odin for checking, building, and
 running programs. It draws from Lisp and Clojure in its source shape and
@@ -37,6 +37,16 @@ immutable by default.
 
 ## What It Looks Like
 
+This is all it takes to write hello world:
+
+```clojure
+(defn main []
+  (println "hello from kvist"))
+```
+
+Here is a slightly larger example with a struct, a typed function, a loop, and
+owned data cleaned up with `:defer`:
+
 ```clojure
 (defstruct Order {
   customer: string
@@ -57,19 +67,15 @@ immutable by default.
     (println (paid-total orders))))
 ```
 
-This is ordinary Kvist: explicit data, typed parameters, direct loops, visible
-mutation, and local ownership cleanup with `:defer`.
-
 ## Reading Kvist Syntax
 
 Kvist uses Lisp-style forms: the first item says what is happening, and the rest
 are arguments. Types are written after names with `:`.
 
 ```clojure
-(defn paid-total [orders: []Order] -> int
-;;    ^ name      ^ parameter vector  ^ return type
+(defn paid-total [orders: []Order] -> int  ;; name, typed args, return type
   (transduce paid-amounts + 0 orders))
-;; ^ final expression returns
+;; The final expression is the return value.
 ```
 
 Read that as: define a procedure named `paid-total`; it takes one parameter,
@@ -80,8 +86,7 @@ return value.
 Parameters live in a vector because they are structured data, not a comma list:
 
 ```clojure
-(defn move! [x: ^f32 y: ^f32 dx: f32 dy: f32]
-;;              ^ pointer type
+(defn move! [x: ^f32 y: ^f32 dx: f32 dy: f32]  ;; pointer params
   (mut! x^ += dx)  ;; x^ dereferences
   (mut! y^ += dy))
 ```
@@ -95,20 +100,17 @@ Return specs can be a single type, multiple positional values, or named return
 values:
 
 ```clojure
-(defn parse-count [text: string] -> [value: int, ok: bool]
-;;                                 ^ named multi-return
+(defn parse-count [text: string] -> [value: int, ok: bool]  ;; named returns
   ...)
 
-(defn bounds [xs: []int] -> [int int]
-;;                          ^ positional multi-return
+(defn bounds [xs: []int] -> [int int]  ;; positional returns
   ...)
 ```
 
 Multiple return values bind positionally:
 
 ```clojure
-(let [[value ok] (parse-count "42")]
-;;   ^ destructures return values by position
+(let [[value ok] (parse-count "42")]  ;; destructures return values
   (when ok
     (println value)))
 ```
@@ -466,6 +468,21 @@ fresh owned dynamic arrays, while bang helpers such as `arr.map!`,
 
 (defn sort-users! [users: [dynamic]User]
   (arr.sort-by! .name users))
+```
+
+Target packages are just imports too. A tiny Raylib window starts like this:
+
+```clojure
+(import rl "vendor:raylib")
+
+(defn main []
+  (rl.InitWindow 800 450 "Kvist + Raylib")
+  (defer (rl.CloseWindow))
+  (while (not (rl.WindowShouldClose))
+    (rl.BeginDrawing)
+    (rl.ClearBackground rl.RAYWHITE)
+    (rl.DrawText "hello from kvist" 280 210 24 rl.DARKGRAY)
+    (rl.EndDrawing)))
 ```
 
 ## Repository Map
