@@ -10711,7 +10711,7 @@ compile_named_function_calls_fill_missing_default_args :: proc(t: ^testing.T) {
 }
 
 @(test)
-reject_missing_required_named_argument_without_default :: proc(t: ^testing.T) {
+compile_named_function_calls_fill_missing_args_with_zero_values :: proc(t: ^testing.T) {
     source := `(package main)
 
 (defn greet [name: string, punctuation: string = "!"] -> string
@@ -10720,14 +10720,15 @@ reject_missing_required_named_argument_without_default :: proc(t: ^testing.T) {
 (defn main [] -> string
   (greet {punctuation: "?"}))`
 
-    _, err, ok := kvist.compile_source(source)
-    testing.expect_value(t, ok, false)
-    if ok {
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
         return
     }
-    defer delete(err.message)
-    testing.expect_value(t, strings.contains(err.message, "missing required named arguments: name:"), true)
-    testing.expect_value(t, strings.contains(err.message, "valid named args: name:, punctuation:"), true)
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "return greet(name = string{}, punctuation = \"?\")"), true)
 }
 
 @(test)
@@ -10887,7 +10888,7 @@ reject_mixed_call_named_argument_overlapping_positional_argument :: proc(t: ^tes
 }
 
 @(test)
-reject_mixed_call_missing_required_named_tail_argument :: proc(t: ^testing.T) {
+compile_mixed_calls_fill_missing_tail_args_with_zero_values :: proc(t: ^testing.T) {
     source := `(package main)
 
 (defn place [name: string, x: int, y: int, label: string = "ok"] -> string
@@ -10896,14 +10897,15 @@ reject_mixed_call_missing_required_named_tail_argument :: proc(t: ^testing.T) {
 (defn main [] -> string
   (place "enemy" {x: 10}))`
 
-    _, err, ok := kvist.compile_source(source)
-    testing.expect_value(t, ok, false)
-    if ok {
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
         return
     }
-    defer delete(err.message)
-    testing.expect_value(t, strings.contains(err.message, "missing required arguments after positional prefix: y:"), true)
-    testing.expect_value(t, strings.contains(err.message, "valid named args: name:, x:, y:, label:"), true)
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "return place(\"enemy\", x = 10, y = int{}, label = \"ok\")"), true)
 }
 
 @(test)

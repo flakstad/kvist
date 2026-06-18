@@ -6,34 +6,31 @@
 
 Kvist - A Practical Lisp for Systems Programming
 
-Kvist is a general-purpose Lisp-shaped language for writing fast, compact
-programs. It combines expression-oriented syntax and macros with explicit
-ownership and memory semantics that stay close to the machine.
+Kvist is a general-purpose Lisp-shaped language for writing fast programs and
+small binaries. It combines expression-oriented syntax and macros with explicit
+ownership and memory management.
 
 Kvist compiles to readable Odin and uses Odin for checking, building, and
 running programs. It draws from Lisp and Clojure in its source shape and
 metaprogramming model, but it does not introduce a hidden runtime, seq layer, or
 garbage-collected object model. The generated Odin remains the program.
 
-Kvist code is structural enough to bend with macros, explicit enough to trust,
-and close enough to the generated program that there is nowhere for surprises to
-hide.
+Kvist source shows the program that runs: allocation, mutation, imports,
+pointers, and cleanup are visible in the code.
 
 ## Coming From Odin Or Clojure
 
-For Odin developers, Kvist keeps the important semantics on the surface:
-explicit imports, concrete structs, enums, unions, pointers, slices, dynamic
-arrays, `defer`, `delete`, and ordinary mutation. The difference is source
-shape: Kvist gives those pieces expression-oriented syntax, macros, and compact
-data transformation forms while still producing readable Odin.
+For Odin developers, Kvist keeps explicit imports, concrete structs, enums,
+unions, pointers, slices, dynamic arrays, `defer`, `delete`, and mutation.
+The difference is syntax: those pieces are written as expression-oriented forms
+with macros and data transformation helpers.
 
 For Clojure developers, Kvist borrows the shape, not the runtime. It is eager,
 mutable, and ownership-oriented. Values are not persistent by default,
-collection helpers allocate ordinary owned buffers, and mutation is a normal
-part of the language. The `kvist:arr` package provides many familiar collection
-operations in both fresh-result and mutating bang forms. Functional patterns are
-available where they fit the execution model, and procedure arguments are
-immutable by default.
+collection helpers allocate owned buffers, and mutation is expected.
+The `kvist:arr` package provides collection operations in both fresh-result and
+mutating bang forms. Functional patterns are available where they fit the
+execution model, and procedure arguments are immutable by default.
 
 ## What It Looks Like
 
@@ -91,10 +88,19 @@ Parameters live in a vector because they are structured data, not a comma list:
   (mut! y^ += dy))
 ```
 
-Pointer syntax is compact: `^T` is a pointer type, `value^` dereferences, and
-`&value` takes an address. Kvist also provides explicit Lisp forms for the same
-operations when that reads better in a macro or nested form: `(ptr T)`,
-`(deref value)`, and `(addr value)`.
+Calls are lists. Named arguments are passed with a map form. Any
+omitted argument uses its explicit default, or the type's zero value if it has
+no default:
+
+```clojure
+(move! &x &y 4 2)
+(move! {x: &x y: &y dx: 4 dy: 2})
+(move! {x: &x y: &y})  ;; dx and dy become f32{}
+```
+
+`^T` is a pointer type, `value^` dereferences, and `&value` takes an address.
+The same operations are also available as forms: `(ptr T)`, `(deref value)`,
+and `(addr value)`.
 
 Return specs can be a single type, multiple positional values, or named return
 values:
@@ -120,18 +126,27 @@ Multiple return values bind positionally:
 Kvist keeps the core language small. Most programs are built from a short set of
 declarations and control forms, plus explicit package imports:
 
-- declarations: `package`, `import`, `def`, `defvar`, `defstruct`, `defenum`,
-  `defunion`, `defn`, `defmacro`, `deftransform`, `defsource`
-- local structure: `let`, `do`, `block`, `fn`
-- control flow: `if`, `when`, `cond`, `case`, `while`, `for`, `break`,
-  `continue`, `return`, `defer`
-- mutation and places: `set!`, `mut!`, `update!`, `inc!`, `dec!`, `toggle!`,
-  `delete!`, `get`, `slice`, `addr`, `deref`
-- construction and interop: type-call syntax, `make`, `type`, `foreign-import`,
-  `odin`, `attr`, `export`, `exports`
+```clojure
+;; declarations
+package import def defvar defstruct defenum defunion
+defn defmacro deftransform defsource
 
-More functionality lives in ordinary libraries. Shipped Kvist packages provide
-array, map, set, string, HTML, test, CLI, source, and struct-of-arrays helpers.
+;; local structure
+let do block fn
+
+;; control flow
+if when cond case while for break continue return defer
+
+;; mutation and places
+set! mut! update! inc! dec! toggle! delete!
+get slice addr deref
+
+;; construction and interop
+type-call make type foreign-import odin attr export exports
+```
+
+More functionality lives in libraries. Shipped Kvist packages provide array,
+map, set, string, HTML, test, CLI, source, and struct-of-arrays helpers.
 Odin's `core:*`, `base:*`, and `vendor:*` packages can be imported directly, so
 Kvist code can use Odin's standard library and vendored packages without wrapper
 APIs.
@@ -144,18 +159,17 @@ bindings, and cases where the target language is the clearest tool. See the
 
 ## Why It Exists
 
-Kvist is for programs that want systems-level control without giving up the
-leverage of a small, regular language:
+Kvist is for programs that need low-level control and still benefit from a
+small, regular language:
 
-- write data-oriented code with less ceremony
+- write data-oriented code directly
 - keep ownership, allocation, and deletion visible
 - use macros for declarations, DSLs, generated glue, and editor-friendly source
   transformations
 - inspect the generated code when performance, debugging, or interop matters
 - use `check`, `run`, `eval`, and reload tooling without a separate interpreter
 
-The result is a small systems language with a friendly source shape and an
-inspectable output. Less ceremony, same floorboards.
+The generated Odin is still there when you want to inspect it.
 
 ## Quickstart
 
@@ -194,7 +208,7 @@ Inspect the Odin that Kvist generated:
 
 ## Whirlwind Tour
 
-This is the quick spin, not the full manual.
+The main pieces fit on one page.
 
 ### Data, Loops, And Mutation
 
@@ -249,9 +263,9 @@ Typed literals make the resulting shape explicit:
 
 Kvist uses type-call syntax for construction and conversion: `(T value)` means
 "construct or convert this value as `T`." There is no separate `new` form for
-ordinary values, and struct construction is just the struct type applied to a
-brace literal. Use `make` for runtime allocation, such as creating an empty
-dynamic array with capacity.
+values. Struct construction is the struct type applied to a brace literal. Use
+`make` for runtime allocation, such as creating an empty dynamic array with
+capacity.
 
 ```clojure
 (i32 count)                ;; conversion
@@ -259,7 +273,7 @@ dynamic array with capacity.
 (make [dynamic]int 0 128) ;; runtime allocation
 ```
 
-### Control Flow Stays Familiar
+### Control Flow
 
 Use `if`, `when`, `case`, `while`, and `for` as expression-oriented forms:
 
@@ -280,8 +294,8 @@ Use `if`, `when`, `case`, `while`, and `for` as expression-oriented forms:
 
 ### Ownership Is Part Of The Code
 
-Owned dynamic arrays and maps are ordinary values. When a local owns memory, say
-what should happen to it:
+Owned dynamic arrays and maps need cleanup. Use `defer` when a local owns
+memory:
 
 ```clojure
 (import arr "kvist:arr")
@@ -294,7 +308,7 @@ what should happen to it:
       (println x))))
 ```
 
-For the common local-binding case, `:defer` is just the tidy spelling:
+For local bindings, `:defer` expands to cleanup at the end of the scope:
 
 ```clojure
 (import arr "kvist:arr")
@@ -313,8 +327,8 @@ There is no hidden collector cleaning up behind the scenes. See
 
 ### Results Can Be Direct Too
 
-Multiple return values bind positionally, and guard markers keep the "try this
-or leave" pattern compact:
+Multiple return values bind positionally. Guard markers handle the common
+"return early on failure" cases:
 
 ```clojure
 (import strconv "core:strconv")
@@ -338,8 +352,7 @@ form:
   (println value))
 ```
 
-For `value, err` APIs, use `when-ok` and `if-ok`. The success branch is still
-ordinary Kvist, so owned results stay visible:
+For `value, err` APIs, use `when-ok` and `if-ok`:
 
 ```clojure
 (import os "core:os")
@@ -394,8 +407,7 @@ removing boilerplate while keeping the generated code visible. See
       (do (splice body)))))
 ```
 
-The shipped HTML package uses that macro surface for a compact Hiccup-style DSL
-that stays close to real HTML:
+The HTML package uses macros for Hiccup-style HTML:
 
 ```clojure
 (import html "kvist:html")
@@ -408,9 +420,9 @@ that stays close to real HTML:
 
 ### Escape Hatches
 
-Kvist has ordinary package imports for both Kvist source packages and target
-packages. Raw Odin is available deliberately at the boundary. See the
-[language reference](LANGUAGE.md) for the complete form list:
+Kvist imports both Kvist source packages and Odin target packages. Raw Odin is
+available at the boundary. See the [language reference](LANGUAGE.md) for the
+complete form list:
 
 ```clojure
 (import fmt "core:fmt")
@@ -443,8 +455,7 @@ that workflow.
 
 ## Packages
 
-Kvist ships small source packages that are meant to read like ordinary Kvist,
-not like a separate standard-library runtime:
+Kvist ships source packages for common work:
 
 - `kvist:arr` for dynamic array helpers
 - `kvist:map` and `kvist:set` for owned collection helpers
@@ -454,11 +465,9 @@ not like a separate standard-library runtime:
 - `kvist:soa` for struct-of-arrays helpers
 - `kvist:test` for package-level tests
 
-`kvist:arr` is intentionally substantial. It provides many of the everyday
-collection operations Clojure programmers reach for, but with explicit
-ownership: helpers such as `arr.map`, `arr.filter`, and `arr.sort-by` return
-fresh owned dynamic arrays, while bang helpers such as `arr.map!`,
-`arr.filter!`, `arr.sort-by!`, and `arr.into!` mutate existing storage.
+`kvist:arr` covers common dynamic-array operations. `arr.map`, `arr.filter`,
+and `arr.sort-by` return fresh owned dynamic arrays. `arr.map!`, `arr.filter!`,
+`arr.sort-by!`, and `arr.into!` mutate existing storage.
 
 ```clojure
 (import arr "kvist:arr")
@@ -470,7 +479,7 @@ fresh owned dynamic arrays, while bang helpers such as `arr.map!`,
   (arr.sort-by! .name users))
 ```
 
-Target packages are just imports too. A tiny Raylib window starts like this:
+Odin packages are imported directly. Here is Raylib:
 
 ```clojure
 (import rl "vendor:raylib")
@@ -511,6 +520,6 @@ Target packages are just imports too. A tiny Raylib window starts like this:
 
 Kvist is alpha software: syntax and package APIs are still moving, but the
 compiler, source packages, examples, tests, editor commands, and reload workflow
-are active. The bar for new language forms is simple: the generated Odin should
-be readable and lower as expected. When syntax changes, the repository is kept
-canonical rather than carrying old compatibility spellings.
+are active. New language forms should lower to readable Odin. When syntax
+changes, the repository is kept canonical rather than carrying compatibility
+spellings.

@@ -2287,6 +2287,10 @@ default_is_odin_caller_intrinsic :: proc(form: CST_Form) -> bool {
            is_symbol(form.items[0], "#caller_expression")
 }
 
+zero_value_for_type_text :: proc(ty: string) -> string {
+    return fmt.tprintf("%s{{}}", ty)
+}
+
 emit_named_call_with_defaults :: proc(e: ^Emitter, proc_decl: ^Proc_Decl, form: CST_Form) -> (arg_texts: [dynamic]string, err: Compile_Error, ok: bool) {
     if form.kind != .Brace {
         return arg_texts, Compile_Error{message = "named arguments expect a brace form", span = form.span}, false
@@ -2355,17 +2359,7 @@ emit_named_call_with_defaults :: proc(e: ^Emitter, proc_decl: ^Proc_Decl, form: 
             append(&arg_texts, fmt.tprintf("%s = %s", param.name, default_text))
             continue
         }
-        missing: [dynamic]string
-        append(&missing, label_text(param.name))
-        for later_idx := param_idx + 1; later_idx < len(proc_decl.params); later_idx += 1 {
-            later := proc_decl.params[later_idx]
-            if !later.has_default {
-                append(&missing, label_text(later.name))
-            }
-        }
-        message := fmt.tprintf("missing required named arguments: %s", join_strings(missing[:], ", "))
-        delete_string_slice(&missing)
-        return arg_texts, Compile_Error{message = named_arg_message_with_valid_keys(message, proc_decl), span = form.span}, false
+        append(&arg_texts, fmt.tprintf("%s = %s", param.name, zero_value_for_type_text(param.ty)))
     }
 
     return arg_texts, Compile_Error{}, true
@@ -2393,7 +2387,8 @@ emit_positional_call_with_defaults :: proc(e: ^Emitter, proc_decl: ^Proc_Decl, a
     for idx := len(args); idx < len(proc_decl.params); idx += 1 {
         param := proc_decl.params[idx]
         if !param.has_default {
-            return arg_texts, Compile_Error{message = fmt.tprintf("%s expects at least %d arguments", proc_decl.name, idx+1), span = span}, false
+            append(&arg_texts, zero_value_for_type_text(param.ty))
+            continue
         }
         if default_is_odin_caller_intrinsic(param.default_value) {
             continue
@@ -2526,17 +2521,7 @@ emit_mixed_call_with_defaults :: proc(e: ^Emitter, proc_decl: ^Proc_Decl, positi
             append(&arg_texts, fmt.tprintf("%s = %s", param.name, default_text))
             continue
         }
-        missing: [dynamic]string
-        append(&missing, label_text(param.name))
-        for later_idx := idx + 1; later_idx < len(proc_decl.params); later_idx += 1 {
-            later := proc_decl.params[later_idx]
-            if !later.has_default {
-                append(&missing, label_text(later.name))
-            }
-        }
-        message := fmt.tprintf("missing required arguments after positional prefix: %s", join_strings(missing[:], ", "))
-        delete_string_slice(&missing)
-        return arg_texts, Compile_Error{message = named_arg_message_with_valid_keys(message, proc_decl), span = span}, false
+        append(&arg_texts, fmt.tprintf("%s = %s", param.name, zero_value_for_type_text(param.ty)))
     }
 
     return arg_texts, Compile_Error{}, true
