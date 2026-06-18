@@ -1,9 +1,10 @@
-// Non-mutating field replacement for plain struct values.
+// Non-mutating field replacement and field updates for plain struct values.
 (package main)
 (import core "kvist:core")
 
 (defstruct Profile {
   name: string
+  visits: int
 })
 
 (defstruct User {
@@ -13,28 +14,32 @@
 })
 
 (defn birthday [user: User] -> User
-  (assoc user.age (+ user.age 1)))
+  (update user.age inc))
+
+(defn visit [user: User] -> User
+  (update user.profile.visits inc))
 
 (defn rename [user: User, name: string] -> User
   (assoc user.profile.name name))
 
 (defn retire [user: User] -> User
   (-> user
-    (assoc .age (+ user.age 30))
+    (update .age + 30)
     (assoc .profile.name "Ada Lovelace")
     (assoc .active? false)))
 
 (defn score [] -> int
-  (let [ada (User {profile: (Profile {name: "Ada"}) age: 36 active?: true})
+  (let [ada (User {profile: (Profile {name: "Ada" visits: 1}) age: 36 active?: true})
         older (birthday ada)
-        named (rename older "Ada Lovelace")
+        visited (visit older)
+        named (rename visited "Ada Lovelace")
         retired (retire named)]
-    (+ ada.age older.age retired.age (len retired.profile.name))))
+    (+ ada.age older.age retired.age retired.profile.visits (len retired.profile.name))))
 
 (defn main []
   (println (score)))
 
 (comment
   (score)
-  ;; => 152
+  ;; => 154
 )

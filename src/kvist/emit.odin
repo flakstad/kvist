@@ -2603,6 +2603,12 @@ emit_operator_text :: proc(op: string, arg_texts: []string, span: Span) -> (stri
 
 emit_update_rhs :: proc(e: ^Emitter, fn_form: CST_Form, arg_texts: []string) -> (string, Compile_Error, bool) {
     if fn_form.kind == .Symbol {
+        if fn_form.text == "inc" && len(arg_texts) == 1 {
+            return fmt.tprintf("(%s) + 1", arg_texts[0]), {}, true
+        }
+        if fn_form.text == "dec" && len(arg_texts) == 1 {
+            return fmt.tprintf("(%s) - 1", arg_texts[0]), {}, true
+        }
         if operator_text, err_op, ok_op := emit_operator_text(fn_form.text, arg_texts, fn_form.span); ok_op {
             return operator_text, {}, true
         } else if err_op.message != "" {
@@ -2726,6 +2732,23 @@ shallow_assoc_args :: proc(form: CST_Form) -> (target: CST_Form, fields: [dynami
     return {}, fields, {}, {}, Compile_Error{message = "assoc expects place and value, or target, field selector, and value", span = form.span}, false
 }
 
+shallow_update_args :: proc(form: CST_Form) -> (target: CST_Form, fields: [dynamic]string, field_span: Span, updater: CST_Form, rest: []CST_Form, err: Compile_Error, ok: bool) {
+    if len(form.items) >= 3 {
+        place_target, place_fields, place_span, ok_place := field_path_place_parts(form.items[1])
+        if ok_place {
+            return place_target, place_fields, place_span, form.items[2], form.items[3:], {}, true
+        }
+    }
+    if len(form.items) >= 4 {
+        selector_fields, ok_field := field_path_from_selector(form.items[2])
+        if !ok_field {
+            return {}, fields, {}, {}, form.items[:0], Compile_Error{message = "update expects a field selector such as .name or .address.city", span = form.items[2].span}, false
+        }
+        return form.items[1], selector_fields, form.items[2].span, form.items[3], form.items[4:], {}, true
+    }
+    return {}, fields, {}, {}, form.items[:0], Compile_Error{message = "update expects place and updater, or target, field selector, and updater", span = form.span}, false
+}
+
 shallow_update_return_type :: proc(e: ^Emitter, form: CST_Form) -> (string, bool) {
     if form.kind != .List || len(form.items) < 2 {
         return "", false
@@ -2763,6 +2786,62 @@ emit_shallow_assoc_copy_expr :: proc(e: ^Emitter, target_text, target_ty: string
                        target_ty, field_ty, target_ty, "{", temp, target_field, temp, target_text, value_text), {}, true
 }
 
+emit_shallow_update_copy_expr :: proc(e: ^Emitter, target_text, target_ty: string, fields: []string, field_span: Span, updater_form: CST_Form, rest_forms: []CST_Form) -> (string, Compile_Error, bool) {
+    field_ty, err_field_ty, ok_field_ty := struct_field_type_for_update_path(e, target_ty, fields, "update", field_span)
+    if !ok_field_ty {
+        return "", err_field_ty, false
+    }
+    field_text := field_access_text("kvist_target", fields)
+    arg_texts: [dynamic]string
+    append(&arg_texts, field_text)
+    rest_texts: [dynamic]string
+    rest_names: [dynamic]string
+    rest_types: [dynamic]string
+    defer delete(rest_texts)
+    defer delete(rest_names)
+    defer delete(rest_types)
+    for rest_form, idx in rest_forms {
+        rest_ty, ok_rest_ty := obvious_form_type(e, rest_form)
+        if !ok_rest_ty {
+            return "", Compile_Error{message = "update expects extra updater arguments with obvious types; bind or annotate the value first", span = rest_form.span}, false
+        }
+        rest_text, err_rest, ok_rest := emit_expr(e, rest_form)
+        if !ok_rest {
+            return "", err_rest, false
+        }
+        rest_name := fmt.tprintf("kvist_arg_%d", idx)
+        append(&rest_names, rest_name)
+        append(&rest_types, rest_ty)
+        append(&rest_texts, rest_text)
+        append(&arg_texts, rest_name)
+    }
+    value_text, err_value, ok_value := emit_update_rhs(e, updater_form, arg_texts[:])
+    if !ok_value {
+        return "", err_value, false
+    }
+    temp := shallow_update_temp_name(e)
+    target_field := field_access_text(temp, fields)
+    params_builder := strings.builder_make()
+    defer strings.builder_destroy(&params_builder)
+    call_builder := strings.builder_make()
+    defer strings.builder_destroy(&call_builder)
+    for name, idx in rest_names {
+        fmt.sbprintf(&params_builder, ", %s: %s", name, rest_types[idx])
+        fmt.sbprintf(&call_builder, ", %s", rest_texts[idx])
+    }
+    return fmt.tprintf("(proc(kvist_target: %s%s) -> %s %s\n    %s := kvist_target\n    %s = %s\n    return %s\n})(%s%s)",
+                       target_ty,
+                       strings.to_string(params_builder),
+                       target_ty,
+                       "{",
+                       temp,
+                       target_field,
+                       value_text,
+                       temp,
+                       target_text,
+                       strings.to_string(call_builder)), {}, true
+}
+
 emit_shallow_assoc_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) {
     target_form, fields, field_span, value_form, err_args, ok_args := shallow_assoc_args(form)
     if !ok_args {
@@ -2779,11 +2858,34 @@ emit_shallow_assoc_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile
     return emit_shallow_assoc_copy_expr(e, target_text, target_ty, fields[:], field_span, value_form)
 }
 
+emit_shallow_update_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) {
+    target_form, fields, field_span, updater_form, rest_forms, err_args, ok_args := shallow_update_args(form)
+    if !ok_args {
+        return "", err_args, false
+    }
+    target_ty, ok_ty := obvious_form_type(e, target_form)
+    if !ok_ty {
+        return "", Compile_Error{message = "update expects a target with an obvious struct type; bind or annotate the value first", span = target_form.span}, false
+    }
+    target_text, err_target, ok_target := emit_expr(e, target_form)
+    if !ok_target {
+        return "", err_target, false
+    }
+    return emit_shallow_update_copy_expr(e, target_text, target_ty, fields[:], field_span, updater_form, rest_forms)
+}
+
 emit_thread_shallow_assoc_expr :: proc(e: ^Emitter, current, target_ty: string, fields: []string, field_span: Span, value_form: CST_Form) -> (string, Compile_Error, bool) {
     if target_ty == "" {
         return "", Compile_Error{message = "threaded assoc requires an obvious struct type before the .field step; bind or annotate the value first", span = field_span}, false
     }
     return emit_shallow_assoc_copy_expr(e, current, target_ty, fields, field_span, value_form)
+}
+
+emit_thread_shallow_update_expr :: proc(e: ^Emitter, current, target_ty: string, fields: []string, field_span: Span, updater_form: CST_Form, rest_forms: []CST_Form) -> (string, Compile_Error, bool) {
+    if target_ty == "" {
+        return "", Compile_Error{message = "threaded update requires an obvious struct type before the .field step; bind or annotate the value first", span = field_span}, false
+    }
+    return emit_shallow_update_copy_expr(e, current, target_ty, fields, field_span, updater_form, rest_forms)
 }
 
 comparison_odin_op :: proc(op: string) -> string {
@@ -3139,11 +3241,16 @@ head_is_core_assoc :: proc(head: string) -> bool {
            source_package_surface_head(head) == "core/assoc"
 }
 
+head_is_core_update :: proc(head: string) -> bool {
+    return head == "update" || head == "core/update" || head == "core-update" ||
+           source_package_surface_head(head) == "core/update"
+}
+
 thread_step_is_shallow_value_update :: proc(step: CST_Form, thread_last: bool) -> bool {
     if thread_last || step.kind != .List || len(step.items) < 2 || step.items[0].kind != .Symbol {
         return false
     }
-    if !head_is_core_assoc(step.items[0].text) {
+    if !head_is_core_assoc(step.items[0].text) && !head_is_core_update(step.items[0].text) {
         return false
     }
     _, ok_field := field_path_from_selector(step.items[1])
@@ -3163,9 +3270,6 @@ emit_thread_step :: proc(e: ^Emitter, current: string, step: CST_Form, thread_la
         }
         if thread_last && (step_text == "slice" || step_text == "core/slice" || step_text == "core-slice") {
             return slice_all_expr_text(current), {}, true
-        }
-        if step_text == "update" || source_package_surface_head(step_text) == "core/update" || step_text == "core-update" {
-            return "", Compile_Error{message = "`update` has been removed; bind a copy and use `assoc`, or mutate a place with `update!`", span = step.span}, false
         }
         args: [dynamic]string
         append(&args, current)
@@ -3194,9 +3298,6 @@ emit_thread_step :: proc(e: ^Emitter, current: string, step: CST_Form, thread_la
         if deprecated {
             return "", err_deprecated, false
         }
-        if head.text == "update" || source_package_surface_head(head.text) == "core/update" || head.text == "core-update" {
-            return "", Compile_Error{message = "`update` has been removed; bind a copy and use `assoc`, or mutate a place with `update!`", span = head.span}, false
-        }
         surface_head := display_head_name(head.text)
         if !thread_last && head_is_core_assoc(head.text) {
             if len(step.items) != 3 {
@@ -3207,6 +3308,16 @@ emit_thread_step :: proc(e: ^Emitter, current: string, step: CST_Form, thread_la
                 return "", Compile_Error{message = "assoc thread step expects a field selector such as .name or .address.city", span = step.items[1].span}, false
             }
             return emit_thread_shallow_assoc_expr(e, current, current_ty, fields[:], step.items[1].span, step.items[2])
+        }
+        if !thread_last && head_is_core_update(head.text) {
+            if len(step.items) < 3 {
+                return "", Compile_Error{message = "update thread step expects .field and updater", span = step.span}, false
+            }
+            fields, ok_field := field_path_from_selector(step.items[1])
+            if !ok_field {
+                return "", Compile_Error{message = "update thread step expects a field selector such as .name or .address.city", span = step.items[1].span}, false
+            }
+            return emit_thread_shallow_update_expr(e, current, current_ty, fields[:], step.items[1].span, step.items[2], step.items[3:])
         }
         if thread_last {
             switch head.text {
@@ -4958,6 +5069,14 @@ infer_literal_value_type :: proc(e: ^Emitter, form: CST_Form) -> (string, Compil
 }
 
 obvious_form_type :: proc(e: ^Emitter, form: CST_Form) -> (string, bool) {
+    if target_form, fields, field_span, ok_place := field_path_place_parts(form); ok_place {
+        target_ty, ok_target_ty := obvious_form_type(e, target_form)
+        if !ok_target_ty {
+            return "", false
+        }
+        ty, _, ok_ty := struct_field_type_for_update_path(e, target_ty, fields[:], "field access", field_span)
+        return ty, ok_ty
+    }
     if form.kind == .Symbol {
         return lookup_local_type(e, map_name(form.text))
     }
@@ -4975,7 +5094,7 @@ obvious_form_type :: proc(e: ^Emitter, form: CST_Form) -> (string, bool) {
     if form.kind == .List && len(form.items) > 0 && form.items[0].kind == .Symbol {
         head_name := map_name(form.items[0].text)
         surface_head := source_package_surface_head(form.items[0].text)
-        if (form.items[0].text == "assoc" || surface_head == "core/assoc" || form.items[0].text == "core-assoc") &&
+        if (head_is_core_assoc(form.items[0].text) || head_is_core_update(form.items[0].text)) &&
            len(form.items) >= 2 {
             return shallow_update_return_type(e, form)
         }
@@ -5229,7 +5348,7 @@ obvious_binding_type :: proc(e: ^Emitter, binding: Binding) -> (string, bool) {
     if binding.value.kind == .List && len(binding.value.items) > 0 && binding.value.items[0].kind == .Symbol {
         head := binding.value.items[0].text
         surface_head := source_package_surface_head(head)
-        if (head == "assoc" || surface_head == "core/assoc" || head == "core-assoc") &&
+        if (head_is_core_assoc(head) || head_is_core_update(head)) &&
            len(binding.value.items) >= 2 {
             return shallow_update_return_type(e, binding.value)
         }
@@ -8400,10 +8519,6 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         return "", Compile_Error{message = "`as` has been removed; use type-call syntax like (T x)", span = form.items[0].span}, false
     }
 
-    if head.text == "update" || source_package_surface_head(head.text) == "core/update" || head.text == "core-update" {
-        return "", Compile_Error{message = "`update` has been removed; bind a copy and use `assoc`, or mutate a place with `update!`", span = form.items[0].span}, false
-    }
-
     if head.text == "foreign-import" {
         return "", Compile_Error{message = "foreign-import is a top-level declaration form", span = form.items[0].span}, false
     }
@@ -9256,6 +9371,9 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
     assoc_head := source_package_surface_head(head.text)
     if head.text == "assoc" || assoc_head == "core/assoc" || head.text == "core-assoc" {
         return emit_shallow_assoc_expr(e, form)
+    }
+    if head_is_core_update(head.text) {
+        return emit_shallow_update_expr(e, form)
     }
 
     if head.text == "->" || head.text == "core-thread-first" {

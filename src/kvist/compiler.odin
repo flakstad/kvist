@@ -194,7 +194,7 @@ canonical_surface_head_for_internal_name :: proc(head: string) -> (canonical: st
     case "core-delete!":
         return "delete!", true
     case "core-update":
-        return "bind a copy and use update! or set!", true
+        return "update", true
     case "arr-map":
         return "arr.map", true
     case "arr-filter":

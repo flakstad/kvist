@@ -336,6 +336,17 @@
   (quasiquote
     (core-assoc (unquote place-or-target) (unquote value-or-selector) (splice rest))))
 
+(defmacro update
+  "Return a shallow copy of a struct with one field updated by a function.
+
+  `(update value.field f args...)` copies `value`, assigns
+  `(f value.field args...)` on the copy, and returns the copy. In a `->`
+  pipeline, `(update .field f args...)` uses the threaded value as the struct
+  target. This is a shallow value update; it does not deep copy owned fields."
+  [place-or-target updater-or-selector & rest]
+  (quasiquote
+    (core-update (unquote place-or-target) (unquote updater-or-selector) (splice rest))))
+
 (defmacro delete!
   "Remove `key` from a mutable map-like target in place.
 

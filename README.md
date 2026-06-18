@@ -1,6 +1,6 @@
-<p align="center">
+<div align="center">
   <img src="kvist.png" alt="Kvist logo" width="288">
-</p>
+</div>
 
 # Kvist
 
@@ -44,12 +44,12 @@ hello from kvist
 
 Odin is a beautifully designed systems language: concrete data, explicit
 allocation, fast builds, simple packages, strong tooling, and a standard library
-with a lot of practical taste. Kvist is close to Odin by design. It transpiles
-to Odin, uses Odin for checking and building, and tries to expose Odin's syntax
-and features directly instead of inventing parallel meanings. Types are Odin
-types, `^T` is still a pointer type, slices and dynamic arrays are still
-Odin-shaped, and `defer`, `delete`, foreign imports, `core:*`, `base:*`, and
-`vendor:*` packages are all part of the normal workflow.
+with a lot of practical taste. Kvist transpiles to Odin, uses Odin for checking
+and building, and tries to expose Odin's syntax and features directly instead of
+inventing parallel meanings. Types are Odin types, `^T` is still a pointer type,
+slices and dynamic arrays are still Odin-shaped, and `defer`, `delete`, foreign
+imports, `core:*`, `base:*`, and `vendor:*` packages are all part of the normal
+workflow.
 
 Kvist code can sit next to Odin files in the same package, and the generated
 Odin is meant to be readable. The extra layer is there for expression-oriented
@@ -58,18 +58,20 @@ lot; it just wants to write it as a Lisp.
 
 ### Clojure
 
-Kvist deliberately copies Clojure's excellent Lisp syntax as far as it fits an
-eager, mutable systems language: small parenthesized forms, data literals,
-`let`, `when`, `cond`, threading, macros, field selectors, and a collection
-library that feels familiar. The similarity is at the source level. There is no
-dynamic runtime, lazy sequence layer, persistent collection model, or
+For Clojure developers, Kvist is meant to make systems programming more
+approachable without pretending it is still Clojure. It deliberately copies
+Clojure's excellent Lisp syntax as far as it fits an eager, mutable systems
+language, including small parenthesized forms, data literals, `let`, `when`,
+`cond`, threading, macros, field selectors, and a collection library that feels
+familiar. But be aware, the similarity is at the syntactic level only. There is
+no dynamic runtime, lazy sequence abstraction, persistent collections or
 garbage-collected object graph.
 
-Values are owned by ordinary generated code, and collection helpers allocate
-owned buffers unless you call a bang variant that mutates existing storage.
-`kvist:arr` brings over much of the spirit of Clojure's core sequence library
-with fresh-result helpers such as `arr.map` and `arr.filter`, plus mutating
-helpers such as `arr.map!`, `arr.filter!`, and `arr.into!`.
+If you miss Clojure's sequence library, start with `kvist:arr`. It has familiar
+helpers such as `arr.map`, `arr.filter`, `arr.reduce`, `arr.some?`, and
+`arr.every?`, but they operate on concrete arrays and slices, not lazy seqs.
+Fresh-result helpers return owned dynamic arrays; bang variants such as
+`arr.map!`, `arr.filter!`, and `arr.into!` mutate existing storage.
 
 ## Why It Exists
 
@@ -306,6 +308,23 @@ same operations are also available as forms: `(ptr T)`, `(deref value)`, and
 
 (defn apply-bonus [score: Score] -> Score
   ;; Value-style update: return a changed copy.
+  (-> score
+      (update .value + score.bonus)
+      (assoc .bonus 0)))
+
+(defstruct Player {
+  name: string
+  score: Score
+})
+
+(defn award-bonus [player: Player] -> Player
+  ;; Nested field update: copy Player, then update score.value.
+  (-> player
+      (update .score.value + player.score.bonus)
+      (assoc .score.bonus 0)))
+
+(defn apply-bonus-manual [score: Score] -> Score
+  ;; Same idea written out with a local copy.
   (let [updated score]
     (mut! updated.value += updated.bonus)
     (set! updated.bonus 0)
@@ -317,9 +336,11 @@ same operations are also available as forms: `(ptr T)`, `(deref value)`, and
   (set! score^.bonus 0))
 
 (defn main []
-  (let [score (Score {value: 10 bonus: 5})]
+  (let [score (Score {value: 10 bonus: 5})
+        updated (apply-bonus score)]
+    (println score.value updated.value)  ;; original and copy
     (apply-bonus! &score)
-    (println score.value)))
+    (println score.value)))              ;; mutated original
 ```
 
 Use pointers in calls either positionally or with named arguments:
@@ -351,7 +372,7 @@ if when cond case while for break continue return defer
 
 ;; mutation and places
 set! mut! update! inc! dec! toggle! delete!
-get slice addr deref
+assoc update get slice addr deref
 
 ;; construction and interop
 type-call make type foreign-import odin attr export exports
@@ -370,8 +391,6 @@ bindings, and cases where the target language is the clearest tool. See the
 [language reference](LANGUAGE.md) for the full file model.
 
 ## Whirlwind Tour
-
-The main pieces fit on one page.
 
 ### Data, Loops, And Mutation
 

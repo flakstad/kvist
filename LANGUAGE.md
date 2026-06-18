@@ -470,35 +470,35 @@ Unary mutation helpers are available for common place updates:
 (negate! velocity.x)
 ```
 
-For a non-mutating copy update, bind a copy and mutate the copy:
-
-```clojure
-(let [next point]
-  (update! next.y inc)
-  next)
-```
-
-For struct value field replacement, `assoc` returns a modified copy:
+For non-mutating struct value updates, `assoc` and `update` return modified
+copies:
 
 ```clojure
 (assoc user.name "Ada")
 (assoc user.profile.name "Ada")
+(update user.age inc)
+(update user.profile.age + 1)
 ```
 
-`assoc` requires a struct field place such as `user.name` or
-`user.profile.name` with an obvious struct target type. It copies the root
-struct value once, assigns the selected field path on the copy, and returns the
+Both forms require a struct field place such as `user.name` or
+`user.profile.name` with an obvious struct target type. They copy the root
+struct value once, update the selected field path on the copy, and return the
 copy. Dynamic arrays, slices, maps, and sets are not path-updated this way; use
 explicit copying or mutation for those.
 
-For value updates that depend on the previous value, bind a copy and mutate the
-copy with `update!`. In a `->` pipeline, use a `.field` selector step with
-`assoc`:
+In a `->` pipeline, use a `.field` selector step:
 
 ```clojure
 (-> user
   (assoc .profile.name "Ada")
+  (update .profile.age + 1)
   (assoc .name "Ada"))
+```
+
+`update!` is the mutating counterpart:
+
+```clojure
+(update! user.profile.age + 1)
 ```
 
 ## Functional Transforms

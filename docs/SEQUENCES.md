@@ -153,13 +153,14 @@ These helpers are already in scope and should remain small:
 (not-in value collection)
 (update! place f args...)
 (assoc value.field new-value)
+(update value.field f args...)
 (delete! map key)
 ```
 
 Cross-family collection helpers live in `kvist:core`: `count`,
 `empty?`, `get`, `slice`, `contains?`, `in`, `not-in`, `update!`, `assoc`,
-and `delete!`. Other collection operations should use explicit package names
-such as `arr.*`, `map.*`, `str.*`, or `set.*`.
+`update`, and `delete!`. Other collection operations should use explicit
+package names such as `arr.*`, `map.*`, `str.*`, or `set.*`.
 
 The access and trimming helpers use the direct Odin representation where
 possible. Direct access syntax and call-shaped helpers are equivalent where both
@@ -182,17 +183,20 @@ Mutation uses the same place model:
 (discard expr...)          ;; intentional ignore for non-owned values
 ```
 
-`assoc` is the shallow non-mutating value-update counterpart:
+`assoc` and `update` are the shallow non-mutating value-update counterparts:
 
 ```clojure
 (assoc user.name "Ada")
+(update user.age inc)
+(update user.profile.age + 1)
 (-> user
   (assoc .name "Ada")
+  (update .profile.age + 1)
   (assoc .active? true))
 ```
 
-It copies the root struct value, updates the selected field on the copy, and
-returns the copy. It does not deep-copy owned fields.
+They copy the root struct value, update the selected field on the copy, and
+return the copy. They do not deep-copy owned fields.
 
 `arr.first`, `arr.second`, `arr.last`, and `arr.nth` lower to indexing.
 Direct expression indexes can be written as attached brackets, for example

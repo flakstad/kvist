@@ -480,7 +480,7 @@ package_symbols_source_supports_shipped_test_package :: proc(t: ^testing.T) {
 }
 
 @(test)
-package_symbols_source_emits_core_update_bang_helper :: proc(t: ^testing.T) {
+package_symbols_source_emits_core_update_helpers :: proc(t: ^testing.T) {
     output, ok := kvist.package_symbols_source("kvist:core", "core")
     testing.expect_value(t, ok, true)
     if !ok {
@@ -489,7 +489,7 @@ package_symbols_source_emits_core_update_bang_helper :: proc(t: ^testing.T) {
     defer delete(output)
 
     testing.expect_value(t, strings.contains(output, "macro\tcore.update!\t"), true)
-    testing.expect_value(t, strings.contains(output, "macro\tcore.update\t"), false)
+    testing.expect_value(t, strings.contains(output, "macro\tcore.update\t"), true)
     testing.expect_value(t, strings.contains(output, "macro\tcore.assoc\t"), true)
     testing.expect_value(t, strings.contains(output, "macro\tcore.when\t"), true)
     testing.expect_value(t, strings.contains(output, "macro\tcore.cond\t"), true)
@@ -10172,7 +10172,7 @@ compile_threaded_shallow_struct_assoc_from_proc_return :: proc(t: ^testing.T) {
 }
 
 @(test)
-reject_threaded_update_is_removed :: proc(t: ^testing.T) {
+compile_threaded_shallow_struct_update_exprs :: proc(t: ^testing.T) {
     source := `(package main)
 (import core "kvist:core")
 
@@ -10187,14 +10187,15 @@ reject_threaded_update_is_removed :: proc(t: ^testing.T) {
   (-> user
     (update .age inc)))`
 
-    _, err, ok := kvist.compile_source(source)
-    testing.expect_value(t, ok, false)
-    if ok {
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
         return
     }
-    defer delete(err.message)
+    defer delete(output)
 
-    testing.expect_value(t, err.message, "`update` has been removed; bind a copy and use `assoc`, or mutate a place with `update!`")
+    testing.expect_value(t, strings.contains(output, "kvist_update_1.age = (kvist_target.age) + 1"), true)
 }
 
 @(test)
@@ -10242,31 +10243,31 @@ reject_shallow_struct_update_non_field_selector :: proc(t: ^testing.T) {
 }
 
 @(test)
-reject_update_is_removed :: proc(t: ^testing.T) {
+compile_shallow_struct_update_exprs :: proc(t: ^testing.T) {
     source := `(package main)
 
 (defstruct Point {
   x: int
 })
 
-(defn inc [x: int] -> int
-  (+ x 1))
+(defn good [point: Point] -> Point
+  (update point.x + 2))`
 
-(defn bad [point: Point] -> Point
-  (update point.x inc))`
-
-    _, err, ok := kvist.compile_source(source)
-    testing.expect_value(t, ok, false)
-    if ok {
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
         return
     }
-    defer delete(err.message)
+    defer delete(output)
 
-    testing.expect_value(t, err.message, "`update` has been removed; bind a copy and use `assoc`, or mutate a place with `update!`")
+    testing.expect_value(t, strings.contains(output, "proc(kvist_target: Point, kvist_arg_0: int) -> Point"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_update_1.x = (kvist_target.x) + (kvist_arg_0)"), true)
+    testing.expect_value(t, strings.contains(output, "})(point, 2)"), true)
 }
 
 @(test)
-reject_core_update_package_access_is_removed :: proc(t: ^testing.T) {
+compile_nested_struct_update_exprs :: proc(t: ^testing.T) {
     source := `(package main)
 (import core "kvist:core")
 
@@ -10281,17 +10282,18 @@ reject_core_update_package_access_is_removed :: proc(t: ^testing.T) {
 (defn inc [x: int] -> int
   (+ x 1))
 
-(defn bad [user: User] -> User
+(defn good [user: User] -> User
   (core.update user.profile.age inc))`
 
-    _, err, ok := kvist.compile_source(source)
-    testing.expect_value(t, ok, false)
-    if ok {
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
         return
     }
-    defer delete(err.message)
+    defer delete(output)
 
-    testing.expect_value(t, err.message, "`update` has been removed; bind a copy and use `assoc`, or mutate a place with `update!`")
+    testing.expect_value(t, strings.contains(output, "kvist_update_1.profile.age = (kvist_target.profile.age) + 1"), true)
 }
 
 @(test)
