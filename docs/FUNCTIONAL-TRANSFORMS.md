@@ -156,6 +156,48 @@ loop syntax for keys and values separate:
   lookup)
 ```
 
+When a loop needs keys too, use the map-shaped `for :transform` binding. The
+transform still runs on values:
+
+```clojure
+(for [key total lookup :transform paid-totals]
+  (println key total))
+```
+
+`arr.range` and `arr.repeat` are normally eager owned array helpers. In
+transform-source position, the compiler lowers them directly to counted loops
+instead:
+
+```clojure
+(transduce (filter even?) + 0 (arr.range 0 100))
+(transduce (map inc) + 0 (arr.repeat 4 2))
+(for [x (arr.range 10 0 -1) :transform (map inc)]
+  (println x))
+```
+
+### Transform Source Optimizations
+
+| Source form | Transform positions | Lowering |
+| --- | --- | --- |
+| slices, fixed arrays, dynamic arrays | `into`, `arr.into!`, `transduce`, `for :transform` | direct `for` loop over elements |
+| maps | `into`, `arr.into!`, `transduce`, `for :transform` | direct map loop over values |
+| maps with keys | `for [key value map :transform xf]` | direct map loop, transform values, bind key separately |
+| `defiter` calls | `into`, `arr.into!`, `transduce`, `for :transform` | direct `next` loop with `:dispose` cleanup when present |
+| `arr.range` | `into`, `arr.into!`, `transduce`, `for :transform` | direct counted loop, no range array allocation |
+| `arr.repeat` | `into`, `arr.into!`, `transduce`, `for :transform` | direct counted loop over a cached repeated value, no repeat array allocation |
+
+Ordinary calls still keep their ordinary semantics: `(arr.range ...)` and
+`(arr.repeat ...)` outside transform-source position return owned dynamic
+arrays.
+
+### Map Entries
+
+Map transforms currently consume values. `for [key value map :transform xf]`
+is the key-aware surface: the transform runs on each value and the loop body can
+also use the key. `into` and `transduce` do not yet expose implicit entry/pair
+values. If Kvist grows that surface, it should first choose an explicit entry
+representation instead of making map values sometimes mean entries.
+
 For a complete iterator example that exercises `for`, `into`, `transduce`, and
 `:dispose` cleanup, see
 [examples/collections/log-source.kvist](../examples/collections/log-source.kvist).
@@ -355,13 +397,18 @@ The current implementation is strict:
   annotation, and the reducer must be `+`, a known two-argument function, or an
   inline `fn` literal returning the accumulator type;
 - map sources feed values into `into`, `arr.into!`, `transduce`, and
-  `for :transform`; use ordinary `(for [key value m] ...)` when keys matter;
+  `for :transform`; `(for [key value m :transform transform] ...)` keeps the
+  key available while transforming the value;
+- `arr.range` and `arr.repeat` sources in transform positions lower to direct
+  loops and do not allocate the owned arrays that ordinary calls return;
 - `defiter` calls are consumed directly by `for`, `into`, and `transduce`;
 - `for` accepts `[value source :transform transform]` for the same fused item
   flow;
-- `for` also accepts `[index value source :transform transform]`; `index`
-  counts values that reach the loop body after filtering, dropping, and
-  expanding;
+- `for` also accepts `[index value source :transform transform]` for arrays and
+  slices; `index` counts values that reach the loop body after filtering,
+  dropping, and expanding;
+- for maps, `[key value source :transform transform]` binds the map key and the
+  transformed value;
 - no hidden lazy seqs, dynamic dispatch, or boxed elements.
 
 When any of these rules are not met, the compiler rejects the pipeline and

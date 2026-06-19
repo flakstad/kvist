@@ -14,6 +14,9 @@
     (= text "two") (return 2 true)
     :else (return 0 false)))
 
+(defn checked-step [value: int] -> [next: int, err: os.Error]
+  (return (+ value 1) nil))
+
 (defn parse-label [text: string] -> string
   ;; if-let checks the boolean result directly. There is no implicit truthiness
   ;; and no special error handling here.
@@ -30,6 +33,18 @@
     (when-let [[value ok] (parse-demo-int b)]
       (set! total (+ total value)))
     total))
+
+(defn parsed-pair-total [a: string, b: string] -> int
+  (if-let [[left ok] (parse-demo-int a)
+           [right ok] (parse-demo-int b)]
+    (+ left right)
+    0))
+
+(defn checked-total [seed: int] -> int
+  (if-ok [[a err] (checked-step seed)
+          [b err] (checked-step a)]
+    (+ a b)
+    0))
 
 (defn read-byte-count [path: string] -> int
   ;; if-ok is for Odin APIs that return an error value. On success, data is an
@@ -61,6 +76,12 @@
 
   (parsed-total "one" "two")
   ;; => 3
+
+  (parsed-pair-total "one" "missing")
+  ;; => 0
+
+  (checked-total 1)
+  ;; => 5
 
   ;; Error-return helpers answer "did the Odin operation return the zero error?"
   ;; A missing file follows the else branch and returns 0.

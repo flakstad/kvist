@@ -70,6 +70,25 @@ Transform_Step :: struct {
     span:     Span,
 }
 
+Transform_Range_Source :: struct {
+    start_text: string,
+    end_text:   string,
+    step_text:  string,
+}
+
+Transform_Direct_Source_Kind :: enum {
+    Range,
+    Repeat,
+}
+
+Transform_Direct_Source :: struct {
+    kind:              Transform_Direct_Source_Kind,
+    item_ty:           string,
+    range:             Transform_Range_Source,
+    repeat_count_text: string,
+    repeat_value_text: string,
+}
+
 Emitter_Features :: struct {
     dynamic_literals: bool,
     core_map:         bool,
@@ -2526,6 +2545,34 @@ emit_mixed_call_with_defaults :: proc(e: ^Emitter, proc_decl: ^Proc_Decl, positi
     return arg_texts, Compile_Error{}, true
 }
 
+bit_operator_name :: proc(op: string) -> string {
+    switch op {
+    case "bit-and", "core/bit-and", "core-bit-and":
+        return "bit-and"
+    case "bit-or", "core/bit-or", "core-bit-or":
+        return "bit-or"
+    case "bit-xor", "core/bit-xor", "core-bit-xor":
+        return "bit-xor"
+    case "bit-not", "core/bit-not", "core-bit-not":
+        return "bit-not"
+    case "bit-shift-left", "core/bit-shift-left", "core-bit-shift-left":
+        return "bit-shift-left"
+    case "bit-shift-right", "core/bit-shift-right", "core-bit-shift-right":
+        return "bit-shift-right"
+    case "bit-and-not", "core/bit-and-not", "core-bit-and-not":
+        return "bit-and-not"
+    case "bit-test", "core/bit-test", "core-bit-test":
+        return "bit-test"
+    case "bit-set", "core/bit-set", "core-bit-set":
+        return "bit-set"
+    case "bit-clear", "core/bit-clear", "core-bit-clear":
+        return "bit-clear"
+    case "bit-flip", "core/bit-flip", "core-bit-flip":
+        return "bit-flip"
+    }
+    return ""
+}
+
 emit_operator_text :: proc(op: string, arg_texts: []string, span: Span) -> (string, Compile_Error, bool) {
     if op == "not" {
         if len(arg_texts) != 1 {
@@ -2541,6 +2588,69 @@ emit_operator_text :: proc(op: string, arg_texts: []string, span: Span) -> (stri
         joiner := " && "
         if op == "or" {
             joiner = " || "
+        }
+        builder := strings.builder_make()
+        defer strings.builder_destroy(&builder)
+        for arg_text, idx in arg_texts {
+            if idx > 0 {
+                strings.write_string(&builder, joiner)
+            }
+            fmt.sbprintf(&builder, "(%s)", arg_text)
+        }
+        return strings.clone(strings.to_string(builder)), {}, true
+    }
+
+    if bit_op := bit_operator_name(op); bit_op != "" {
+        switch bit_op {
+        case "bit-not":
+            if len(arg_texts) != 1 {
+                return "", Compile_Error{message = "bit-not expects one argument", span = span}, false
+            }
+            return fmt.tprintf("~(%s)", arg_texts[0]), {}, true
+        case "bit-shift-left", "bit-shift-right":
+            if len(arg_texts) != 2 {
+                return "", Compile_Error{message = fmt.tprintf("%s expects exactly two arguments", bit_op), span = span}, false
+            }
+            odin_op := "<<"
+            if bit_op == "bit-shift-right" {
+                odin_op = ">>"
+            }
+            return fmt.tprintf("(%s) %s (%s)", arg_texts[0], odin_op, arg_texts[1]), {}, true
+        case "bit-and-not":
+            if len(arg_texts) != 2 {
+                return "", Compile_Error{message = "bit-and-not expects exactly two arguments", span = span}, false
+            }
+            return fmt.tprintf("(%s) & ~(%s)", arg_texts[0], arg_texts[1]), {}, true
+        case "bit-test":
+            if len(arg_texts) != 2 {
+                return "", Compile_Error{message = "bit-test expects exactly two arguments", span = span}, false
+            }
+            return fmt.tprintf("((%s) & (1 << uint(%s))) != 0", arg_texts[0], arg_texts[1]), {}, true
+        case "bit-set":
+            if len(arg_texts) != 2 {
+                return "", Compile_Error{message = "bit-set expects exactly two arguments", span = span}, false
+            }
+            return fmt.tprintf("(%s) | (1 << uint(%s))", arg_texts[0], arg_texts[1]), {}, true
+        case "bit-clear":
+            if len(arg_texts) != 2 {
+                return "", Compile_Error{message = "bit-clear expects exactly two arguments", span = span}, false
+            }
+            return fmt.tprintf("(%s) & ~(1 << uint(%s))", arg_texts[0], arg_texts[1]), {}, true
+        case "bit-flip":
+            if len(arg_texts) != 2 {
+                return "", Compile_Error{message = "bit-flip expects exactly two arguments", span = span}, false
+            }
+            return fmt.tprintf("(%s) ~ (1 << uint(%s))", arg_texts[0], arg_texts[1]), {}, true
+        }
+
+        if len(arg_texts) < 2 {
+            return "", Compile_Error{message = fmt.tprintf("%s expects at least two arguments", bit_op), span = span}, false
+        }
+        joiner := " & "
+        if bit_op == "bit-or" {
+            joiner = " | "
+        } else if bit_op == "bit-xor" {
+            joiner = " ~ "
         }
         builder := strings.builder_make()
         defer strings.builder_destroy(&builder)
@@ -4162,6 +4272,69 @@ form_is_owned_result :: proc(form: CST_Form) -> bool {
     return false
 }
 
+owned_direct_source_allowed_in_transform_source_slot :: proc(parent: CST_Form, item_index: int) -> bool {
+    if parent.kind != .List || len(parent.items) == 0 || parent.items[0].kind != .Symbol {
+        return false
+    }
+    raw_head := parent.items[0].text
+    head := source_package_surface_head(raw_head)
+    if raw_head == "transduce" || head == "transduce" {
+        return len(parent.items) == 5 && item_index == 4 && form_is_direct_transform_source_call(parent.items[item_index])
+    }
+    if raw_head == "into" || raw_head == "arr.into!" || raw_head == "arr/into!" || raw_head == "arr-into!" ||
+       head == "into" || head == "arr/into!" || head == "arr-into!" {
+        return item_index == len(parent.items)-1 && form_is_direct_transform_source_call(parent.items[item_index])
+    }
+    if (raw_head == "for" || head == "for") && len(parent.items) >= 3 && parent.items[1].kind == .Vector {
+        binding := parent.items[1]
+        return (len(binding.items) == 4 &&
+                item_index == 1 &&
+                binding.items[2].kind == .Keyword &&
+                binding.items[2].text == ":transform" &&
+                form_is_direct_transform_source_call(binding.items[1])) ||
+               (len(binding.items) == 5 &&
+                item_index == 1 &&
+                binding.items[3].kind == .Keyword &&
+                binding.items[3].text == ":transform" &&
+                form_is_direct_transform_source_call(binding.items[2]))
+    }
+    return false
+}
+
+transform_direct_source_item_index :: proc(form: CST_Form) -> (int, bool) {
+    if form.kind != .List || len(form.items) == 0 || form.items[0].kind != .Symbol {
+        return -1, false
+    }
+    raw_head := form.items[0].text
+    head := source_package_surface_head(raw_head)
+    if raw_head == "transduce" || head == "transduce" {
+        if len(form.items) == 5 && form_is_direct_transform_source_call(form.items[4]) {
+            return 4, true
+        }
+    }
+    if raw_head == "into" || raw_head == "arr.into!" || raw_head == "arr/into!" || raw_head == "arr-into!" ||
+       head == "into" || head == "arr/into!" || head == "arr-into!" {
+        idx := len(form.items) - 1
+        if idx >= 0 && form_is_direct_transform_source_call(form.items[idx]) {
+            return idx, true
+        }
+    }
+    return -1, false
+}
+
+owned_direct_source_args_usage_error :: proc(form: CST_Form) -> (Compile_Error, bool) {
+    if !form_is_direct_transform_source_call(form) {
+        return {}, false
+    }
+    for item in form.items[1:] {
+        err_item, bad_item := owned_result_usage_error(item, false)
+        if bad_item {
+            return err_item, true
+        }
+    }
+    return {}, false
+}
+
 owned_result_usage_error :: proc(form: CST_Form, allow_root_owned: bool) -> (Compile_Error, bool) {
     if form.kind == .List && len(form.items) > 0 &&
        form.items[0].kind == .Symbol && form.items[0].text == "tap>" &&
@@ -4192,6 +4365,23 @@ owned_result_usage_error :: proc(form: CST_Form, allow_root_owned: bool) -> (Com
         }
     }
 
+    if skip_index, ok_skip := transform_direct_source_item_index(form); ok_skip {
+        for item, idx in form.items {
+            if idx == skip_index {
+                err_source, bad_source := owned_direct_source_args_usage_error(item)
+                if bad_source {
+                    return err_source, true
+                }
+                continue
+            }
+            err_item, bad_item := owned_result_usage_error(item, false)
+            if bad_item {
+                return err_item, true
+            }
+        }
+        return {}, false
+    }
+
     #partial switch form.kind {
     case .List, .Vector, .Brace, .Set:
         start := 0
@@ -4206,7 +4396,15 @@ owned_result_usage_error :: proc(form: CST_Form, allow_root_owned: bool) -> (Com
         if start > len(form.items) {
             start = len(form.items)
         }
-        for item in form.items[start:] {
+        for item, item_index in form.items[start:] {
+            absolute_index := start + item_index
+            if owned_direct_source_allowed_in_transform_source_slot(form, absolute_index) {
+                err_source, bad_source := owned_direct_source_args_usage_error(item)
+                if bad_source {
+                    return err_source, true
+                }
+                continue
+            }
             err_item, bad_item := owned_result_usage_error(item, false)
             if bad_item {
                 return err_item, true
@@ -6062,7 +6260,7 @@ emit_source_each_loop :: proc(e: ^Emitter, source_form: CST_Form, source: ^Sourc
     return {}, true
 }
 
-emit_transform_for_body :: proc(e: ^Emitter, steps: []Transform_Step, initial_text, initial_ty, index_name, value_name: string, body: []CST_Form) -> (Compile_Error, bool) {
+emit_transform_for_body :: proc(e: ^Emitter, steps: []Transform_Step, initial_text, initial_ty, index_name, value_name, key_name, key_ty: string, body: []CST_Form) -> (Compile_Error, bool) {
     base_indent := e.indent
     value_text, value_ty, close_count, err_pipeline, ok_pipeline := emit_transform_pipeline_body(e, &e.builder, steps, initial_text, initial_ty, base_indent)
     if !ok_pipeline {
@@ -6074,6 +6272,9 @@ emit_transform_for_body :: proc(e: ^Emitter, steps: []Transform_Step, initial_te
     push_local_type_scope(e)
     if len(index_name) > 0 {
         bind_local_type(e, index_name, "int")
+    }
+    if len(key_name) > 0 {
+        bind_local_type(e, key_name, key_ty)
     }
     bind_local_type(e, value_name, value_ty)
     err_body, ok_body := emit_body_forms(e, body, Return_Spec{kind = .None})
@@ -6096,6 +6297,14 @@ emit_transform_for_collection_loop_body :: proc(e: ^Emitter, coll_form: CST_Form
     if !ok_source_elem_ty {
         return Compile_Error{message = fmt.tprintf("for :transform expects slice, array, or map source, got %s", coll_ty), span = coll_form.span}, false
     }
+    key_name := ""
+    key_ty := ""
+    loop_index_name := index_name
+    if map_key_ty, _, ok_map := map_type_parts(coll_ty); ok_map {
+        key_ty = map_key_ty
+        key_name = index_name
+        loop_index_name = ""
+    }
     steps, err_steps, ok_steps := parse_transform_steps(e, transform_form)
     if !ok_steps {
         return err_steps, false
@@ -6104,12 +6313,12 @@ emit_transform_for_collection_loop_body :: proc(e: ^Emitter, coll_form: CST_Form
     if !ok_prelude {
         return err_prelude, false
     }
-    if len(index_name) > 0 {
-        emit_line(e, fmt.tprintf("%s := 0", index_name))
+    if len(loop_index_name) > 0 {
+        emit_line(e, fmt.tprintf("%s := 0", loop_index_name))
     }
-    emit_line(e, transform_source_loop_header(coll_ty, coll_text))
+    emit_line(e, transform_source_loop_header(coll_ty, coll_text, key_name))
     e.indent += 1
-    err_body, ok_body := emit_transform_for_body(e, steps[:], "kvist_item", source_elem_ty, index_name, value_name, body)
+    err_body, ok_body := emit_transform_for_body(e, steps[:], "kvist_item", source_elem_ty, loop_index_name, value_name, key_name, key_ty, body)
     e.indent -= 1
     if !ok_body {
         return err_body, false
@@ -6119,6 +6328,73 @@ emit_transform_for_collection_loop_body :: proc(e: ^Emitter, coll_form: CST_Form
 }
 
 emit_transform_for_collection_loop :: proc(e: ^Emitter, coll_form: CST_Form, index_name, value_name: string, transform_form: CST_Form, body: []CST_Form) -> (Compile_Error, bool) {
+    if form_is_arr_range_call(coll_form) {
+        spec, err_spec, ok_spec := transform_range_source(e, coll_form)
+        if !ok_spec {
+            return err_spec, false
+        }
+        steps, err_steps, ok_steps := parse_transform_steps(e, transform_form)
+        if !ok_steps {
+            return err_steps, false
+        }
+        err_prelude, ok_prelude := emit_transform_state_prelude(e, &e.builder, steps[:], e.indent)
+        if !ok_prelude {
+            return err_prelude, false
+        }
+        range_start := transform_temp_name(e)
+        range_end := transform_temp_name(e)
+        range_step := transform_temp_name(e)
+        if len(index_name) > 0 {
+            emit_line(e, fmt.tprintf("%s := 0", index_name))
+        }
+        emit_line(e, fmt.tprintf("%s := %s", range_start, spec.start_text))
+        emit_line(e, fmt.tprintf("%s := %s", range_end, spec.end_text))
+        emit_line(e, fmt.tprintf("%s := %s", range_step, spec.step_text))
+        emit_transform_range_loop_open(&e.builder, e.indent, "kvist_item", range_start, range_end, range_step)
+        e.indent += 1
+        err_body, ok_body := emit_transform_for_body(e, steps[:], "kvist_item", "int", index_name, value_name, "", "", body)
+        if !ok_body {
+            return err_body, false
+        }
+        emit_line(e, fmt.tprintf("kvist_item += %s", range_step))
+        e.indent -= 1
+        emit_line(e, "}")
+        return {}, true
+    }
+    if form_is_arr_repeat_call(coll_form) {
+        spec, err_spec, ok_spec := transform_direct_source(e, coll_form)
+        if !ok_spec {
+            return err_spec, false
+        }
+        steps, err_steps, ok_steps := parse_transform_steps(e, transform_form)
+        if !ok_steps {
+            return err_steps, false
+        }
+        err_prelude, ok_prelude := emit_transform_state_prelude(e, &e.builder, steps[:], e.indent)
+        if !ok_prelude {
+            return err_prelude, false
+        }
+        repeat_count := transform_temp_name(e)
+        repeat_value := transform_temp_name(e)
+        repeat_i := transform_temp_name(e)
+        if len(index_name) > 0 {
+            emit_line(e, fmt.tprintf("%s := 0", index_name))
+        }
+        emit_line(e, fmt.tprintf("%s := %s", repeat_count, spec.repeat_count_text))
+        emit_line(e, fmt.tprintf("%s := %s", repeat_value, spec.repeat_value_text))
+        emit_line(e, fmt.tprintf("%s := 0", repeat_i))
+        emit_line(e, fmt.tprintf("for %s < %s %s", repeat_i, repeat_count, "{"))
+        e.indent += 1
+        emit_line(e, fmt.tprintf("kvist_item := %s", repeat_value))
+        err_body, ok_body := emit_transform_for_body(e, steps[:], "kvist_item", spec.item_ty, index_name, value_name, "", "", body)
+        if !ok_body {
+            return err_body, false
+        }
+        emit_line(e, fmt.tprintf("%s += 1", repeat_i))
+        e.indent -= 1
+        emit_line(e, "}")
+        return {}, true
+    }
     coll_ty, ok_coll_ty := obvious_form_type(e, coll_form)
     if !ok_coll_ty {
         return Compile_Error{message = "for :transform expects a collection with an obvious type; bind or annotate it first", span = coll_form.span}, false
@@ -6199,7 +6475,7 @@ emit_transform_for_source_loop :: proc(e: ^Emitter, source_form: CST_Form, sourc
     emit_line(e, "break")
     e.indent -= 1
     emit_line(e, "}")
-    err_body, ok_body := emit_transform_for_body(e, steps[:], "kvist_item", source.item_ty, index_name, value_name, body)
+    err_body, ok_body := emit_transform_for_body(e, steps[:], "kvist_item", source.item_ty, index_name, value_name, "", "", body)
     e.indent -= 1
     if !ok_body {
         return err_body, false
@@ -7087,6 +7363,19 @@ emit_operator_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Erro
         return strings.clone(strings.to_string(builder)), {}, true
     }
 
+    if bit_op := bit_operator_name(op); bit_op != "" {
+        arg_texts: [dynamic]string
+        defer delete(arg_texts)
+        for arg in form.items[1:] {
+            value, err_value, ok_value := emit_expr(e, arg)
+            if !ok_value {
+                return "", err_value, false
+            }
+            append(&arg_texts, value)
+        }
+        return emit_operator_text(bit_op, arg_texts[:], form.span)
+    }
+
     if op == "+" || op == "*" || op == "/" || op == "%" {
         if len(form.items) < 3 {
             return "", Compile_Error{message = fmt.tprintf("%s expects at least two arguments", op), span = form.span}, false
@@ -7635,6 +7924,110 @@ source_call_decl :: proc(e: ^Emitter, form: CST_Form) -> (^Source_Decl, bool) {
     }
     name := map_name(form.items[0].text)
     return find_source_decl(e, name)
+}
+
+form_is_arr_range_call :: proc(form: CST_Form) -> bool {
+    if form.kind != .List || len(form.items) == 0 || form.items[0].kind != .Symbol {
+        return false
+    }
+    head := form.items[0].text
+    return head == "arr.range" || head == "arr/range" || head == "arr-range" ||
+           head == "range-impl" || head == "arr.range-impl" ||
+           head == "arr/range-impl" || head == "arr-range-impl" ||
+           head == "range_impl" || head == "arr.range_impl" ||
+           head == "arr/range_impl" || head == "arr-range_impl" ||
+           head == "arr__range_impl" || head == "arr__range-impl"
+}
+
+form_is_arr_repeat_call :: proc(form: CST_Form) -> bool {
+    if form.kind != .List || len(form.items) == 0 || form.items[0].kind != .Symbol {
+        return false
+    }
+    head := form.items[0].text
+    return head == "arr.repeat" || head == "arr/repeat" || head == "arr-repeat" ||
+           head == "repeat" || head == "arr__repeat"
+}
+
+form_is_direct_transform_source_call :: proc(form: CST_Form) -> bool {
+    return form_is_arr_range_call(form) || form_is_arr_repeat_call(form)
+}
+
+transform_range_source :: proc(e: ^Emitter, form: CST_Form) -> (spec: Transform_Range_Source, err: Compile_Error, ok: bool) {
+    if !form_is_arr_range_call(form) {
+        return spec, {}, false
+    }
+    arg_count := len(form.items) - 1
+    if arg_count < 1 || arg_count > 3 {
+        return spec, Compile_Error{message = "arr.range expects end, start/end, or start/end/step", span = form.span}, false
+    }
+
+    spec.start_text = "0"
+    spec.step_text = "1"
+    if arg_count == 1 {
+        end_text, err_end, ok_end := emit_expr_for_expected_type(e, form.items[1], "int")
+        if !ok_end {
+            return spec, err_end, false
+        }
+        spec.end_text = end_text
+        return spec, {}, true
+    }
+
+    start_text, err_start, ok_start := emit_expr_for_expected_type(e, form.items[1], "int")
+    if !ok_start {
+        return spec, err_start, false
+    }
+    end_text, err_end, ok_end := emit_expr_for_expected_type(e, form.items[2], "int")
+    if !ok_end {
+        return spec, err_end, false
+    }
+    spec.start_text = start_text
+    spec.end_text = end_text
+    if arg_count == 3 {
+        step_text, err_step, ok_step := emit_expr_for_expected_type(e, form.items[3], "int")
+        if !ok_step {
+            return spec, err_step, false
+        }
+        spec.step_text = step_text
+    }
+    return spec, {}, true
+}
+
+transform_direct_source :: proc(e: ^Emitter, form: CST_Form) -> (spec: Transform_Direct_Source, err: Compile_Error, ok: bool) {
+    if form_is_arr_range_call(form) {
+        range_spec, err_range, ok_range := transform_range_source(e, form)
+        if !ok_range {
+            return spec, err_range, false
+        }
+        spec.kind = .Range
+        spec.item_ty = "int"
+        spec.range = range_spec
+        return spec, {}, true
+    }
+
+    if form_is_arr_repeat_call(form) {
+        if len(form.items) != 3 {
+            return spec, Compile_Error{message = "arr.repeat expects count and value", span = form.span}, false
+        }
+        item_ty, ok_item_ty := obvious_form_type(e, form.items[2])
+        if !ok_item_ty {
+            return spec, Compile_Error{message = "arr.repeat transform source expects a repeated value with an obvious type; bind or annotate it first", span = form.items[2].span}, false
+        }
+        count_text, err_count, ok_count := emit_expr_for_expected_type(e, form.items[1], "int")
+        if !ok_count {
+            return spec, err_count, false
+        }
+        value_text, err_value, ok_value := emit_expr_for_expected_type(e, form.items[2], item_ty)
+        if !ok_value {
+            return spec, err_value, false
+        }
+        spec.kind = .Repeat
+        spec.item_ty = item_ty
+        spec.repeat_count_text = count_text
+        spec.repeat_value_text = value_text
+        return spec, {}, true
+    }
+
+    return spec, {}, false
 }
 
 source_state_type :: proc(e: ^Emitter, source: ^Source_Decl) -> (string, Compile_Error, bool) {
@@ -8296,6 +8689,58 @@ emit_transform_into_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compil
     if !ok_output_elem_ty {
         return "", Compile_Error{message = "into transform currently expects a dynamic array type", span = form.items[1].span}, false
     }
+    if form_is_direct_transform_source_call(source_form) {
+        source_spec, err_source, ok_source := transform_direct_source(e, source_form)
+        if !ok_source {
+            return "", err_source, false
+        }
+        steps, err_steps, ok_steps := parse_transform_steps(e, transform_form)
+        if !ok_steps {
+            return "", err_steps, false
+        }
+        captures, err_captures, ok_captures := transform_step_capture_params(e, steps[:])
+        if !ok_captures {
+            return "", err_captures, false
+        }
+
+        builder := strings.builder_make()
+        defer strings.builder_destroy(&builder)
+        param_texts: [dynamic]string
+        call_texts: [dynamic]string
+        defer delete(param_texts)
+        defer delete(call_texts)
+        for capture in captures {
+            append(&param_texts, fmt.tprintf("%s: %s", capture.name, capture.ty))
+            append(&call_texts, capture.name)
+        }
+        append_transform_direct_source_proc_params(&param_texts, &call_texts, source_spec)
+        param_list := strings.join(param_texts[:], ", ", context.allocator)
+        defer delete(param_list)
+        call_args := strings.join(call_texts[:], ", ", context.allocator)
+        defer delete(call_args)
+        fmt.sbprintf(&builder, "(proc(%s) -> %s %s\n", param_list, output_ty, "{")
+        fmt.sbprintf(&builder, "    kvist_out := make(%s)\n", output_ty)
+        err_prelude, ok_prelude := emit_transform_state_prelude(e, &builder, steps[:], 1)
+        if !ok_prelude {
+            return "", err_prelude, false
+        }
+        emit_transform_direct_source_loop_open(&builder, 1, "kvist_item", source_spec)
+        value_text, value_ty, close_count, err_body, ok_body := emit_transform_pipeline_body(e, &builder, steps[:], "kvist_item", source_spec.item_ty, 2)
+        if !ok_body {
+            return "", err_body, false
+        }
+        if value_ty != output_elem_ty {
+            return "", Compile_Error{message = fmt.tprintf("into transform output element type is %s, but pipeline produces %s", output_elem_ty, value_ty), span = form.items[1].span}, false
+        }
+        append_indent(&builder, 2+close_count)
+        fmt.sbprintf(&builder, "append(&kvist_out, %s)\n", value_text)
+        emit_transform_closers(&builder, 2+close_count, close_count)
+        emit_transform_direct_source_loop_step(&builder, 2, source_spec)
+        strings.write_string(&builder, "    }\n")
+        strings.write_string(&builder, "    return kvist_out\n")
+        strings.write_string(&builder, "})")
+        return fmt.tprintf("%s(%s)", strings.to_string(builder), call_args), {}, true
+    }
     if source, ok_source_call := source_call_decl(e, source_form); ok_source_call {
         return emit_transform_into_source_expr(e, form, output_ty, output_elem_ty, transform_form, source_form, source)
     }
@@ -8342,7 +8787,7 @@ emit_transform_into_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compil
     if !ok_prelude {
         return "", err_prelude, false
     }
-    fmt.sbprintf(&builder, "    %s\n", transform_source_loop_header(source_ty, "kvist_source"))
+    fmt.sbprintf(&builder, "    %s\n", transform_source_loop_header(source_ty, "kvist_source", ""))
     value_text, value_ty, close_count, err_body, ok_body := emit_transform_pipeline_body(e, &builder, steps[:], "kvist_item", source_elem_ty, 2)
     if !ok_body {
         return "", err_body, false
@@ -8463,6 +8908,58 @@ emit_transform_into_bang_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, C
     if !ok_target {
         return "", err_target, false
     }
+    if form_is_direct_transform_source_call(source_form) {
+        source_spec, err_source, ok_source := transform_direct_source(e, source_form)
+        if !ok_source {
+            return "", err_source, false
+        }
+        steps, err_steps, ok_steps := parse_transform_steps(e, transform_form)
+        if !ok_steps {
+            return "", err_steps, false
+        }
+        captures, err_captures, ok_captures := transform_step_capture_params(e, steps[:])
+        if !ok_captures {
+            return "", err_captures, false
+        }
+
+        builder := strings.builder_make()
+        defer strings.builder_destroy(&builder)
+        param_texts: [dynamic]string
+        call_texts: [dynamic]string
+        defer delete(param_texts)
+        defer delete(call_texts)
+        append(&param_texts, fmt.tprintf("kvist_out: ^%s", target_ty))
+        append(&call_texts, address_of_expr_text(target_text))
+        for capture in captures {
+            append(&param_texts, fmt.tprintf("%s: %s", capture.name, capture.ty))
+            append(&call_texts, capture.name)
+        }
+        append_transform_direct_source_proc_params(&param_texts, &call_texts, source_spec)
+        param_list := strings.join(param_texts[:], ", ", context.allocator)
+        defer delete(param_list)
+        call_args := strings.join(call_texts[:], ", ", context.allocator)
+        defer delete(call_args)
+        fmt.sbprintf(&builder, "(proc(%s) %s\n", param_list, "{")
+        err_prelude, ok_prelude := emit_transform_state_prelude(e, &builder, steps[:], 1)
+        if !ok_prelude {
+            return "", err_prelude, false
+        }
+        emit_transform_direct_source_loop_open(&builder, 1, "kvist_item", source_spec)
+        value_text, value_ty, close_count, err_body, ok_body := emit_transform_pipeline_body(e, &builder, steps[:], "kvist_item", source_spec.item_ty, 2)
+        if !ok_body {
+            return "", err_body, false
+        }
+        if value_ty != target_elem_ty {
+            return "", Compile_Error{message = fmt.tprintf("into! transform target element type is %s, but pipeline produces %s", target_elem_ty, value_ty), span = form.items[1].span}, false
+        }
+        append_indent(&builder, 2+close_count)
+        fmt.sbprintf(&builder, "append(kvist_out, %s)\n", value_text)
+        emit_transform_closers(&builder, 2+close_count, close_count)
+        emit_transform_direct_source_loop_step(&builder, 2, source_spec)
+        strings.write_string(&builder, "    }\n")
+        strings.write_string(&builder, "})")
+        return fmt.tprintf("%s(%s)", strings.to_string(builder), call_args), {}, true
+    }
     if source, ok_source_call := source_call_decl(e, source_form); ok_source_call {
         return emit_transform_into_bang_source_expr(e, form, target_ty, target_elem_ty, target_text, transform_form, source_form, source)
     }
@@ -8510,7 +9007,7 @@ emit_transform_into_bang_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, C
     if !ok_prelude {
         return "", err_prelude, false
     }
-    fmt.sbprintf(&builder, "    %s\n", transform_source_loop_header(source_ty, "kvist_source"))
+    fmt.sbprintf(&builder, "    %s\n", transform_source_loop_header(source_ty, "kvist_source", ""))
     value_text, value_ty, close_count, err_body, ok_body := emit_transform_pipeline_body(e, &builder, steps[:], "kvist_item", source_elem_ty, 2)
     if !ok_body {
         return "", err_body, false
@@ -8638,6 +9135,70 @@ emit_transform_transduce_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, C
     if !ok_init {
         return "", err_init, false
     }
+    if form_is_direct_transform_source_call(form.items[4]) {
+        source_spec, err_source, ok_source := transform_direct_source(e, form.items[4])
+        if !ok_source {
+            return "", err_source, false
+        }
+        steps, err_steps, ok_steps := parse_transform_steps(e, form.items[1])
+        if !ok_steps {
+            return "", err_steps, false
+        }
+        captures, err_captures, ok_captures := transform_step_capture_params(e, steps[:])
+        if !ok_captures {
+            return "", err_captures, false
+        }
+        reducer_captures, err_reducer_captures, ok_reducer_captures := transform_fn_capture_params(e, reducer)
+        if !ok_reducer_captures {
+            return "", err_reducer_captures, false
+        }
+        defer delete(reducer_captures)
+        for capture in reducer_captures {
+            append_capture_param_unique(&captures, capture)
+        }
+
+        builder := strings.builder_make()
+        defer strings.builder_destroy(&builder)
+        param_texts: [dynamic]string
+        call_texts: [dynamic]string
+        defer delete(param_texts)
+        defer delete(call_texts)
+        for capture in captures {
+            append(&param_texts, fmt.tprintf("%s: %s", capture.name, capture.ty))
+            append(&call_texts, capture.name)
+        }
+        append_transform_direct_source_proc_params(&param_texts, &call_texts, source_spec)
+        append(&param_texts, fmt.tprintf("kvist_init: %s", acc_ty))
+        append(&call_texts, init_text)
+        param_list := strings.join(param_texts[:], ", ", context.allocator)
+        defer delete(param_list)
+        call_args := strings.join(call_texts[:], ", ", context.allocator)
+        defer delete(call_args)
+        fmt.sbprintf(&builder, "(proc(%s) -> %s %s\n", param_list, acc_ty, "{")
+        strings.write_string(&builder, "    kvist_acc := kvist_init\n")
+        err_prelude, ok_prelude := emit_transform_state_prelude(e, &builder, steps[:], 1)
+        if !ok_prelude {
+            return "", err_prelude, false
+        }
+        emit_transform_direct_source_loop_open(&builder, 1, "kvist_item", source_spec)
+        value_text, value_ty, close_count, err_body, ok_body := emit_transform_pipeline_body(e, &builder, steps[:], "kvist_item", source_spec.item_ty, 2)
+        if !ok_body {
+            return "", err_body, false
+        }
+        reduce_text, err_reduce, ok_reduce := transform_reduce_update_text(e, reducer, "kvist_acc", acc_ty, value_text, value_ty)
+        if !ok_reduce {
+            return "", err_reduce, false
+        }
+        append_indent(&builder, 2+close_count)
+        strings.write_string(&builder, reduce_text)
+        strings.write_string(&builder, "\n")
+        emit_transform_closers(&builder, 2+close_count, close_count)
+        emit_transform_direct_source_loop_step(&builder, 2, source_spec)
+        strings.write_string(&builder, "    }\n")
+        strings.write_string(&builder, "    return kvist_acc\n")
+        strings.write_string(&builder, "})")
+        return fmt.tprintf("%s(%s)", strings.to_string(builder), call_args), {}, true
+    }
     if source, ok_source_call := source_call_decl(e, form.items[4]); ok_source_call {
         return emit_transform_transduce_source_expr(e, form, form.items[1], reducer, init_text, acc_ty, form.items[4], source)
     }
@@ -8694,7 +9255,7 @@ emit_transform_transduce_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, C
     if !ok_prelude {
         return "", err_prelude, false
     }
-    fmt.sbprintf(&builder, "    %s\n", transform_source_loop_header(source_ty, "kvist_source"))
+    fmt.sbprintf(&builder, "    %s\n", transform_source_loop_header(source_ty, "kvist_source", ""))
     value_text, value_ty, close_count, err_body, ok_body := emit_transform_pipeline_body(e, &builder, steps[:], "kvist_item", source_elem_ty, 2)
     if !ok_body {
         return "", err_body, false
@@ -10720,11 +11281,74 @@ transform_source_value_type :: proc(type_text: string) -> (string, bool) {
     return collection_element_type(type_text)
 }
 
-transform_source_loop_header :: proc(source_ty, source_text: string) -> string {
+transform_source_loop_header :: proc(source_ty, source_text, key_name: string) -> string {
     if type_text_is_map(source_ty) {
+        if len(key_name) > 0 {
+            return fmt.tprintf("for %s, kvist_item in %s %s", key_name, source_text, "{")
+        }
         return fmt.tprintf("for _, kvist_item in %s %s", source_text, "{")
     }
     return fmt.tprintf("for kvist_item in %s %s", source_text, "{")
+}
+
+append_transform_range_proc_params :: proc(param_texts, call_texts: ^[dynamic]string, spec: Transform_Range_Source) {
+    append(param_texts, "kvist_range_start: int")
+    append(param_texts, "kvist_range_end: int")
+    append(param_texts, "kvist_range_step: int")
+    append(call_texts, spec.start_text)
+    append(call_texts, spec.end_text)
+    append(call_texts, spec.step_text)
+}
+
+append_transform_direct_source_proc_params :: proc(param_texts, call_texts: ^[dynamic]string, spec: Transform_Direct_Source) {
+    switch spec.kind {
+    case .Range:
+        append_transform_range_proc_params(param_texts, call_texts, spec.range)
+    case .Repeat:
+        append(param_texts, "kvist_repeat_count: int")
+        append(param_texts, fmt.tprintf("kvist_repeat_value: %s", spec.item_ty))
+        append(call_texts, spec.repeat_count_text)
+        append(call_texts, spec.repeat_value_text)
+    }
+}
+
+emit_transform_range_loop_open :: proc(builder: ^strings.Builder, depth: int, item_name, start_name, end_name, step_name: string) {
+    append_indent(builder, depth)
+    fmt.sbprintf(builder, "%s := %s\n", item_name, start_name)
+    append_indent(builder, depth)
+    fmt.sbprintf(builder, "for ((%s > 0) && (%s < %s)) || ((%s < 0) && (%s > %s)) %s\n",
+        step_name,
+        item_name,
+        end_name,
+        step_name,
+        item_name,
+        end_name,
+        "{",
+    )
+}
+
+emit_transform_direct_source_loop_open :: proc(builder: ^strings.Builder, depth: int, item_name: string, spec: Transform_Direct_Source) {
+    switch spec.kind {
+    case .Range:
+        emit_transform_range_loop_open(builder, depth, item_name, "kvist_range_start", "kvist_range_end", "kvist_range_step")
+    case .Repeat:
+        append_indent(builder, depth)
+        strings.write_string(builder, "kvist_repeat_i := 0\n")
+        append_indent(builder, depth)
+        strings.write_string(builder, "for kvist_repeat_i < kvist_repeat_count {\n")
+        append_indent(builder, depth+1)
+        fmt.sbprintf(builder, "%s := kvist_repeat_value\n", item_name)
+    }
+}
+
+emit_transform_direct_source_loop_step :: proc(builder: ^strings.Builder, depth: int, spec: Transform_Direct_Source) {
+    append_indent(builder, depth)
+    switch spec.kind {
+    case .Range:
+        strings.write_string(builder, "kvist_item += kvist_range_step\n")
+    case .Repeat:
+        strings.write_string(builder, "kvist_repeat_i += 1\n")
+    }
 }
 
 dynamic_array_element_type :: proc(type_text: string) -> (string, bool) {

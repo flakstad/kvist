@@ -190,6 +190,30 @@
       + 0
       lookup)))
 
+(defn sum-map-keys-and-values-for [] -> int
+  (let [lookup (map[string]int {"aa" 1 "b" -2 "ccc" 3}) :defer
+        total 0]
+    (for [key value lookup :transform (comp
+                                        (filter (fn [value: int] -> bool (> value 0)))
+                                        (map (fn [value: int] -> int (+ value 1))))]
+      (set! total (+ total (count key)))
+      (set! total (+ total value)))
+    total))
+
+(defn sum-range-transform [] -> int
+  (transduce
+    (comp
+      (filter (fn [value: int] -> bool (= (% value 2) 0)))
+      (map (fn [value: int] -> int (+ value 1))))
+    + 0
+    (arr.range 0 8)))
+
+(defn sum-repeat-transform [] -> int
+  (transduce
+    (map (fn [value: int] -> int (+ value 1)))
+    + 0
+    (arr.repeat 4 2)))
+
 (defn collect-inline-keep-discounts [] -> [dynamic]int
   (let [minimum 4]
     (into [dynamic]int
@@ -354,6 +378,9 @@
                 (sum-inline-fn-paid-totals)
                 (weighted-inline-fn-paid-totals)
                 (sum-map-values-transform)
+                (sum-map-keys-and-values-for)
+                (sum-range-transform)
+                (sum-repeat-transform)
                 (sum-indexed-inline-fn-ages)
                 (sum-inline-fn-for)
                 totals[0]

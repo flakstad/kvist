@@ -81,6 +81,10 @@ addr deref ptr type transmute type-assert
 
 ; threading and inspection
 -> ->> tap> doc
+
+; bit operations
+bit-and bit-or bit-xor bit-not bit-shift-left bit-shift-right
+bit-and-not bit-test bit-set bit-clear bit-flip
 ```
 
 ## Source Files, Packages, And Names
@@ -1053,6 +1057,26 @@ The common helper macros for multi-return APIs are also available:
 Use `when-let` and `if-let` for `value, ok` style APIs. Use `when-ok` and
 `if-ok` for `value, err` style APIs.
 
+Each binding form can also contain several dependent pairs. Evaluation stops at
+the first false `ok` or non-zero `err`:
+
+```clojure
+(if-let [[user ok] (find-user id)
+         [profile ok] (find-profile user.profile-id)]
+  (render-profile profile)
+  fallback)
+
+(if-ok [[data err] (read-file path)
+        [cfg err]  (parse-config data)]
+  (validate-config cfg)
+  fallback)
+```
+
+These chains are local branch selection. They do not return errors
+automatically and they do not accept `let` binding modifiers such as
+`:or-return`, `:defer`, or `:errdefer`. Use `let` with those modifiers when a
+step owns resources that must be cleaned up before later failures can branch.
+
 `when-let` is the statement form for `value, ok`:
 
 ```clojure
@@ -1072,7 +1096,8 @@ Use it when failure should simply skip a side effect or local mutation.
   0)
 ```
 
-Use it when both the success and failure paths should produce a value.
+Use it when both the success and failure paths should produce a value. With
+several binding pairs, the else branch is used when any `ok` is false.
 
 `when-ok` is the statement form for `value, err`:
 
@@ -1095,7 +1120,8 @@ do nothing.
   0)
 ```
 
-Use it when the failure path should produce a fallback value.
+Use it when the failure path should produce a fallback value. With several
+binding pairs, the failure branch is used when any `err` is non-zero.
 
 The main distinction is:
 
@@ -1537,6 +1563,8 @@ Operators lower to ordinary Odin expressions:
 (and ok ready)
 (or cached? fresh?)
 (not done)
+(bit-and flags mask)
+(bit-shift-left major 22)
 ```
 
 `and`, `or`, and `not` are boolean operators. They lower to Odin `&&`, `||`,
@@ -1572,6 +1600,23 @@ values once:
 ```
 
 `!=` is intentionally binary.
+
+Bit operations use Clojure-style names and lower to ordinary Odin integer
+operators:
+
+```clojure
+(bit-and a b c)          ; a & b & c
+(bit-or a b c)           ; a | b | c
+(bit-xor a b)            ; a ~ b
+(bit-not mask)           ; ~mask
+(bit-shift-left x n)     ; x << n
+(bit-shift-right x n)    ; x >> n
+(bit-and-not flags mask) ; flags & ~mask
+(bit-test flags index)   ; bit at index is set
+(bit-set flags index)    ; set bit at index
+(bit-clear flags index)  ; clear bit at index
+(bit-flip flags index)   ; toggle bit at index
+```
 
 Directive expression wrappers attach Odin call directives to a call:
 
@@ -1784,12 +1829,17 @@ Odin loops rather than intermediate arrays.
   0 orders)
 
 (transduce (filter positive?) + 0 lookup) ; map values
+(transduce (filter even?) + 0 (arr.range 0 100)) ; direct loop, no range array
+(transduce (map inc) + 0 (arr.repeat 4 2)) ; direct loop, no repeat array
 
 (for [total orders :transform paid-order-totals]
   (println total))
 
 (for [idx total orders :transform paid-order-totals]
   (println idx total))
+
+(for [key total lookup :transform (filter positive?)]
+  (println key total))
 ```
 
 The current transform surface is intentionally small:
@@ -1803,6 +1853,8 @@ The current transform surface is intentionally small:
 - `transduce` supports `+`, known two-argument reducers, and inline `fn`
   reducers
 - inputs can be slices, arrays, dynamic arrays, maps, or `defiter` calls
+- `arr.range` and `arr.repeat` inputs in transform positions lower to direct
+  loops instead of allocating helper arrays
 
 See [FUNCTIONAL-TRANSFORMS.md](FUNCTIONAL-TRANSFORMS.md) for limits and
 lowering.

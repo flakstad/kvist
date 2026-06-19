@@ -1,0 +1,45 @@
+// Demonstrates Clojure-style bit operation names over Odin integer operators.
+(package main)
+
+(def ReadFlag: u32 0x01)
+(def WriteFlag: u32 0x02)
+(def ExecFlag: u32 0x04)
+
+(defn make-version [major: u32, minor: u32, patch: u32] -> u32
+  (bit-or
+    (bit-shift-left major 22)
+    (bit-shift-left minor 12)
+    patch))
+
+(defn version-major [version: u32] -> u32
+  (bit-and (bit-shift-right version 22) 0x7F))
+
+(defn read-write-mask [] -> u32
+  (bit-or ReadFlag WriteFlag))
+
+(defn readable? [mask: u32] -> bool
+  (!= (bit-and mask ReadFlag) 0))
+
+(defn without-write [mask: u32] -> u32
+  (bit-and-not mask WriteFlag))
+
+(defn mark-visited [visited: u64, index: int] -> u64
+  (bit-set visited index))
+
+(defn visited? [visited: u64, index: int] -> bool
+  (bit-test visited index))
+
+(defn toggle-visited [visited: u64, index: int] -> u64
+  (bit-flip visited index))
+
+(defn clear-visited [visited: u64, index: int] -> u64
+  (bit-clear visited index))
+
+(defn main []
+  (let [version (make-version 1 2 3)
+        visited (mark-visited 0 5)]
+    (println (version-major version)
+             (readable? (read-write-mask))
+             (= (without-write (read-write-mask)) ReadFlag)
+             (visited? visited 5)
+             (visited? (clear-visited (toggle-visited visited 5) 5) 5))))

@@ -224,124 +224,154 @@
   (quasiquote
     (core-contains? (unquote collection) (unquote key))))
 
-(defmacro when-let
-  "Bind a value and boolean result, then run `body` when the boolean is true.
-
-  The binding must be `[[value-name ok-name] expr]`, where `expr` returns two
-  values. Both names are bound with `let`; `body` runs only when `ok-name` is
-  true. This is useful for Odin optional-ok style APIs."
-  [binding & body]
+(defmacro- bool-binding-name
+  [binding]
   (if (vector? binding)
     (if (= (kvist.count binding) 2)
-      (if (vector? (kvist.first binding))
-        (if (= (kvist.count (kvist.first binding)) 2)
-          (if (symbol? (kvist.first (kvist.first binding)))
-            (if (symbol? (kvist.nth (kvist.first binding) 1))
-              (if (= (kvist.count body) 1)
-                (quasiquote
-                  (let [(unquote (kvist.first binding))
-                        (unquote (kvist.nth binding 1))]
-                    (if (unquote (kvist.nth (kvist.first binding) 1))
-                      (unquote (kvist.first body)))))
-                (quasiquote
-                  (let [(unquote (kvist.first binding))
-                        (unquote (kvist.nth binding 1))]
-                    (if (unquote (kvist.nth (kvist.first binding) 1))
-                      (do
-                        (splice body))))))
-              (error "when-let expects [[value bool] expr] binding"))
-            (error "when-let expects [[value bool] expr] binding"))
-          (error "when-let expects [[value bool] expr] binding"))
-        (error "when-let expects [[value bool] expr] binding"))
-      (error "when-let expects [[value bool] expr] binding"))
-    (error "when-let expects [[value bool] expr] binding")))
+      (if (symbol? (kvist.first binding))
+        (if (symbol? (kvist.nth binding 1))
+          (kvist.nth binding 1)
+          (error "let binding macros expect [value bool] bindings"))
+        (error "let binding macros expect [value bool] bindings"))
+      (error "let binding macros expect [value bool] bindings"))
+    (error "let binding macros expect [value bool] bindings")))
+
+(defmacro- err-binding-name
+  [binding]
+  (if (vector? binding)
+    (if (= (kvist.count binding) 2)
+      (if (symbol? (kvist.first binding))
+        (if (symbol? (kvist.nth binding 1))
+          (kvist.nth binding 1)
+          (error "error binding macros expect [value err] bindings"))
+        (error "error binding macros expect [value err] bindings"))
+      (error "error binding macros expect [value err] bindings"))
+    (error "error binding macros expect [value err] bindings")))
+
+(defmacro- when-let-chain
+  [bindings body]
+  (if (= (kvist.count bindings) 0)
+    (cond-body body)
+    (let [binding (kvist.first bindings)
+          expr (kvist.nth bindings 1)
+          ok-name (bool-binding-name binding)]
+      (quasiquote
+        (let [(unquote binding)
+              (unquote expr)]
+          (if (unquote ok-name)
+            (unquote (when-let-chain (kvist.rest (kvist.rest bindings)) body))))))))
+
+(defmacro- if-let-chain
+  [bindings then-expr else-expr]
+  (let [binding (kvist.first bindings)
+        expr (kvist.nth bindings 1)
+        ok-name (bool-binding-name binding)
+        rest-bindings (kvist.rest (kvist.rest bindings))]
+    (quasiquote
+      (let [(unquote binding)
+            (unquote expr)]
+        (if (unquote ok-name)
+          (unquote (if (= (kvist.count rest-bindings) 0)
+                     then-expr
+                     (if-let-chain rest-bindings then-expr else-expr)))
+          (unquote else-expr))))))
+
+(defmacro- when-ok-chain
+  [bindings body]
+  (if (= (kvist.count bindings) 0)
+    (cond-body body)
+    (let [binding (kvist.first bindings)
+          expr (kvist.nth bindings 1)
+          err-name (err-binding-name binding)]
+      (quasiquote
+        (let [(unquote binding)
+              (unquote expr)]
+          (if (= (unquote err-name) {})
+            (unquote (when-ok-chain (kvist.rest (kvist.rest bindings)) body))))))))
+
+(defmacro- if-ok-chain
+  [bindings then-expr else-expr]
+  (let [binding (kvist.first bindings)
+        expr (kvist.nth bindings 1)
+        err-name (err-binding-name binding)
+        rest-bindings (kvist.rest (kvist.rest bindings))]
+    (quasiquote
+      (let [(unquote binding)
+            (unquote expr)]
+        (if (= (unquote err-name) {})
+          (unquote (if (= (kvist.count rest-bindings) 0)
+                     then-expr
+                     (if-ok-chain rest-bindings then-expr else-expr)))
+          (unquote else-expr))))))
+
+(defmacro- ensure-let-bindings-even
+  [bindings message]
+  (if (= (kvist.count bindings) 0)
+    bindings
+    (if (= (kvist.count bindings) 1)
+      (error message)
+      (if (= (kvist.count bindings) 2)
+        bindings
+        (do
+          (ensure-let-bindings-even (kvist.rest (kvist.rest bindings)) message)
+          bindings)))))
+
+(defmacro- ensure-let-bindings
+  [bindings message]
+  (if (vector? bindings)
+    (if (= (kvist.count bindings) 0)
+      (error message)
+      (ensure-let-bindings-even bindings message))
+    (error message)))
+
+(defmacro when-let
+  "Bind value/boolean results, then run `body` when all booleans are true.
+
+  The binding vector contains one or more `[value-name ok-name] expr` pairs.
+  Each expression returns two values. Evaluation stops at the first false
+  boolean; `body` runs only when every boolean is true."
+  [bindings & body]
+  (when-let-chain
+    (ensure-let-bindings bindings "when-let expects [value bool] expr binding pairs")
+    body))
 
 (defmacro if-let
-  "Bind a value and boolean result, then choose between two expressions.
+  "Bind value/boolean results, then choose between two expressions.
 
-  The binding must be `[[value-name ok-name] expr]`, followed by a then
-  expression and an else expression. The then branch is used when `ok-name` is
-  true; otherwise the else branch is used."
-  [binding & body]
+  The binding vector contains one or more `[value-name ok-name] expr` pairs.
+  The then branch is selected only when every boolean is true; otherwise the
+  else branch is selected."
+  [bindings & body]
   (if (= (kvist.count body) 2)
-    (if (vector? binding)
-      (if (= (kvist.count binding) 2)
-        (if (vector? (kvist.first binding))
-          (if (= (kvist.count (kvist.first binding)) 2)
-            (if (symbol? (kvist.first (kvist.first binding)))
-              (if (symbol? (kvist.nth (kvist.first binding) 1))
-                (quasiquote
-                  (let [(unquote (kvist.first binding))
-                        (unquote (kvist.nth binding 1))]
-                    (if (unquote (kvist.nth (kvist.first binding) 1))
-                      (unquote (kvist.first body))
-                      (unquote (kvist.nth body 1)))))
-                (error "if-let expects [[value bool] expr] binding"))
-              (error "if-let expects [[value bool] expr] binding"))
-            (error "if-let expects [[value bool] expr] binding"))
-          (error "if-let expects [[value bool] expr] binding"))
-        (error "if-let expects [[value bool] expr] binding"))
-      (error "if-let expects [[value bool] expr] binding"))
+    (if-let-chain
+      (ensure-let-bindings bindings "if-let expects [value bool] expr binding pairs")
+      (kvist.first body)
+      (kvist.nth body 1))
     (error "if-let expects [[value bool] expr], then, and else")))
 
 (defmacro when-ok
-  "Bind a value and error result, then run `body` when the error is nil.
+  "Bind value/error results, then run `body` when all errors are nil.
 
-  The binding must be `[[value-name err-name] expr]`, where `expr` returns a
-  value and an Odin error. `body` runs only when `err-name` equals Odin's zero
-  error value `{}`."
-  [binding & body]
-  (if (vector? binding)
-    (if (= (kvist.count binding) 2)
-      (if (vector? (kvist.first binding))
-        (if (= (kvist.count (kvist.first binding)) 2)
-          (if (symbol? (kvist.first (kvist.first binding)))
-            (if (symbol? (kvist.nth (kvist.first binding) 1))
-              (if (= (kvist.count body) 1)
-                (quasiquote
-                  (let [(unquote (kvist.first binding))
-                        (unquote (kvist.nth binding 1))]
-                    (if (= (unquote (kvist.nth (kvist.first binding) 1)) {})
-                      (unquote (kvist.first body)))))
-                (quasiquote
-                  (let [(unquote (kvist.first binding))
-                        (unquote (kvist.nth binding 1))]
-                    (if (= (unquote (kvist.nth (kvist.first binding) 1)) {})
-                      (do
-                        (splice body))))))
-              (error "when-ok expects [[value err] expr] binding"))
-            (error "when-ok expects [[value err] expr] binding"))
-          (error "when-ok expects [[value err] expr] binding"))
-        (error "when-ok expects [[value err] expr] binding"))
-      (error "when-ok expects [[value err] expr] binding"))
-    (error "when-ok expects [[value err] expr] binding")))
+  The binding vector contains one or more `[value-name err-name] expr` pairs.
+  Evaluation stops at the first non-zero error; `body` runs only when every
+  error equals Odin's zero error value `{}`."
+  [bindings & body]
+  (when-ok-chain
+    (ensure-let-bindings bindings "when-ok expects [value err] expr binding pairs")
+    body))
 
 (defmacro if-ok
-  "Bind a value and error result, then choose between success and error branches.
+  "Bind value/error results, then choose between success and error branches.
 
-  The binding must be `[[value-name err-name] expr]`, followed by a success
-  expression and a failure expression. The success branch is selected when
-  `err-name` equals Odin's zero error value `{}`."
-  [binding & body]
+  The binding vector contains one or more `[value-name err-name] expr` pairs.
+  The success branch is selected only when every error equals Odin's zero error
+  value `{}`; otherwise the failure branch is selected."
+  [bindings & body]
   (if (= (kvist.count body) 2)
-    (if (vector? binding)
-      (if (= (kvist.count binding) 2)
-        (if (vector? (kvist.first binding))
-          (if (= (kvist.count (kvist.first binding)) 2)
-            (if (symbol? (kvist.first (kvist.first binding)))
-              (if (symbol? (kvist.nth (kvist.first binding) 1))
-                (quasiquote
-                  (let [(unquote (kvist.first binding))
-                        (unquote (kvist.nth binding 1))]
-                    (if (= (unquote (kvist.nth (kvist.first binding) 1)) {})
-                      (unquote (kvist.first body))
-                      (unquote (kvist.nth body 1)))))
-                (error "if-ok expects [[value err] expr] binding"))
-              (error "if-ok expects [[value err] expr] binding"))
-            (error "if-ok expects [[value err] expr] binding"))
-          (error "if-ok expects [[value err] expr] binding"))
-        (error "if-ok expects [[value err] expr] binding"))
-      (error "if-ok expects [[value err] expr] binding"))
+    (if-ok-chain
+      (ensure-let-bindings bindings "if-ok expects [value err] expr binding pairs")
+      (kvist.first body)
+      (kvist.nth body 1))
     (error "if-ok expects [[value err] expr], then, and else")))
 
 (defmacro update!

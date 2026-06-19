@@ -345,9 +345,25 @@ make_orders :: proc(n: int) -> [dynamic]Order {
       (set! i (+ i 1)))
     checksum))
 
+(defn bench-pipeline-transform-range [reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (while (< i reps)
+      (set! checksum (+ checksum (transduce inc-evens + 0 (arr.range 0 N))))
+      (set! i (+ i 1)))
+    checksum))
+
+(defn bench-pipeline-transform-repeat [reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (while (< i reps)
+      (set! checksum (+ checksum (transduce inc-evens + 0 (arr.repeat N 1))))
+      (set! i (+ i 1)))
+    checksum))
+
 (defn bench-pipeline-transform-inline [xs: []int, reps: int] -> int
   (let [i 0
-    checksum 0]
+        checksum 0]
     (while (< i reps)
       (let [one 1]
         (set! checksum
@@ -676,6 +692,12 @@ make_orders :: proc(n: int) -> [dynamic]Order {
     (mem.tracking_allocator_reset &track)
     (let [start (time.tick_now)]
       (run-one "pipe-transform" (bench-pipeline-transform (slice xs) REPS) start &track))
+    (mem.tracking_allocator_reset &track)
+    (let [start (time.tick_now)]
+      (run-one "pipe-transform-range" (bench-pipeline-transform-range REPS) start &track))
+    (mem.tracking_allocator_reset &track)
+    (let [start (time.tick_now)]
+      (run-one "pipe-transform-repeat" (bench-pipeline-transform-repeat REPS) start &track))
     (mem.tracking_allocator_reset &track)
     (let [start (time.tick_now)]
       (run-one "pipe-transform-inline" (bench-pipeline-transform-inline (slice xs) REPS) start &track))

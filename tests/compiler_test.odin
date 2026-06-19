@@ -2891,7 +2891,7 @@ compile_supports_aliased_kvist_package_imports :: proc(t: ^testing.T) {
 
     testing.expect_value(t, strings.contains(output, "xs := make([dynamic]int)"), true)
     testing.expect_value(t, strings.contains(output, "append(&(xs), 1, 2, 3)"), true)
-    testing.expect_value(t, strings.contains(output, "return len(xs)"), true)
+    testing.expect_value(t, strings.contains(output, "return len((xs)[:])"), true)
     testing.expect_value(t, strings.contains(output, "kvist:arr"), false)
 }
 
@@ -3190,7 +3190,37 @@ compile_operator_forms :: proc(t: ^testing.T) {
   (= status .OK .OK))
 
 (defn missing-key [lookup: map[string]int, key: string] -> bool
-  (not (contains? lookup key)))`
+  (not (contains? lookup key)))
+
+(defn pack-version [major: u32, minor: u32, patch: u32] -> u32
+  (bit-or
+    (bit-shift-left major 22)
+    (bit-shift-left minor 12)
+    patch))
+
+(defn unpack-major [version: u32] -> u32
+  (bit-and (bit-shift-right version 22) 0x7F))
+
+(defn toggle-bit [flags: u64, index: int] -> u64
+  (bit-flip flags index))
+
+(defn clear-bit [flags: u64, index: int] -> u64
+  (bit-clear flags index))
+
+(defn set-bit [flags: u64, index: int] -> u64
+  (bit-set flags index))
+
+(defn bit-set? [flags: u64, index: int] -> bool
+  (bit-test flags index))
+
+(defn remove-mask [flags: u32, mask: u32] -> u32
+  (bit-and-not flags mask))
+
+(defn invert-mask [mask: u32] -> u32
+  (bit-not mask))
+
+(defn xor-mask [a: u32, b: u32] -> u32
+  (bit-xor a b))`
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
@@ -3211,6 +3241,15 @@ compile_operator_forms :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, ": Status = .OK"), true)
     testing.expect_value(t, strings.contains(output, "contains_key :: proc(lookup: map[string]int, key: string) -> bool {\n    return (key) in (lookup)\n}"), true)
     testing.expect_value(t, strings.contains(output, "missing_key :: proc(lookup: map[string]int, key: string) -> bool {\n    return !((key) in (lookup))\n}"), true)
+    testing.expect_value(t, strings.contains(output, "return ((major) << (22)) | ((minor) << (12)) | (patch)"), true)
+    testing.expect_value(t, strings.contains(output, "return ((version) >> (22)) & (0x7F)"), true)
+    testing.expect_value(t, strings.contains(output, "return (flags) ~ (1 << uint(index))"), true)
+    testing.expect_value(t, strings.contains(output, "return (flags) & ~(1 << uint(index))"), true)
+    testing.expect_value(t, strings.contains(output, "return (flags) | (1 << uint(index))"), true)
+    testing.expect_value(t, strings.contains(output, "return ((flags) & (1 << uint(index))) != 0"), true)
+    testing.expect_value(t, strings.contains(output, "return (flags) & ~(mask)"), true)
+    testing.expect_value(t, strings.contains(output, "return ~(mask)"), true)
+    testing.expect_value(t, strings.contains(output, "return (a) ~ (b)"), true)
 }
 
 @(test)
@@ -4088,6 +4127,35 @@ main :: proc() -> int {
 }
 
 @(test)
+compile_chained_if_let_macro :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn query [n: int] -> [value: int, found: bool]
+  (if (> n 0)
+    (return n true)
+    (return 0 false)))
+
+(defn main [] -> int
+  (if-let [[a ok] (query 1)
+           [b ok] (query a)]
+    (+ a b)
+    0))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "a, ok := query(1)"), true)
+    testing.expect_value(t, strings.contains(output, "if ok {\n        b, ok := query(a)"), true)
+    testing.expect_value(t, strings.contains(output, "return (a) + (b)"), true)
+    testing.expect_value(t, strings.contains(output, "return 0"), true)
+}
+
+@(test)
 compile_if_ok_macro :: proc(t: ^testing.T) {
     source := `(package main)
 (import os "core:os")
@@ -4111,6 +4179,34 @@ compile_if_ok_macro :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "value, err := read_count()"), true)
     testing.expect_value(t, strings.contains(output, "if (err) == ({})"), true)
     testing.expect_value(t, strings.contains(output, "return value"), true)
+    testing.expect_value(t, strings.contains(output, "return 0"), true)
+}
+
+@(test)
+compile_chained_if_ok_macro :: proc(t: ^testing.T) {
+    source := `(package main)
+(import os "core:os")
+
+(defn read-count [n: int] -> [value: int, err: os.Error]
+  (return n nil))
+
+(defn main [] -> int
+  (if-ok [[a err] (read-count 1)
+          [b err] (read-count a)]
+    (+ a b)
+    0))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "a, err := read_count(1)"), true)
+    testing.expect_value(t, strings.contains(output, "if (err) == ({}) {\n        b, err := read_count(a)"), true)
+    testing.expect_value(t, strings.contains(output, "return (a) + (b)"), true)
     testing.expect_value(t, strings.contains(output, "return 0"), true)
 }
 
@@ -4249,10 +4345,10 @@ compile_http_client_surface_is_explicit :: proc(t: ^testing.T) {
     defer delete(output)
 
     testing.expect_value(t, strings.contains(output, "vendor/odin-http/client"), true)
-    testing.expect_value(t, strings.contains(output, "httpc__new_request :: proc(method: h.Method) -> hc.Request"), true)
+    testing.expect_value(t, strings.contains(output, "client__new_request :: proc(method: h.Method) -> hc.Request"), true)
     testing.expect_value(t, strings.contains(output, "res, err := hc.get(\"http://127.0.0.1:6969/ping\")"), true)
     testing.expect_value(t, strings.contains(output, "defer hc.response_destroy(&res)"), true)
-    testing.expect_value(t, strings.contains(output, "req := httpc__new_request(.Post)"), true)
+    testing.expect_value(t, strings.contains(output, "req := client__new_request(.Post)"), true)
     testing.expect_value(t, strings.contains(output, "defer hc.request_destroy(&req)"), true)
     testing.expect_value(t, strings.contains(output, "h.headers_set_unsafe(&(req.headers), \"x-api-key\", \"demo\")"), true)
     testing.expect_value(t, strings.contains(output, "append(&(req.cookies), h.Cookie{name = \"session\", value = \"abc123\"})"), true)
@@ -6268,6 +6364,24 @@ macroexpand_if_let :: proc(t: ^testing.T) {
 }
 
 @(test)
+macroexpand_chained_if_let :: proc(t: ^testing.T) {
+    output, err, ok := kvist.macroexpand_source(`(if-let [[a ok] (query 1)
+         [b ok] (query a)]
+  (+ a b)
+  0)`)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    expected := `(let [[a ok] (query 1)] (if ok (let [[b ok] (query a)] (if ok (+ a b) 0)) 0))
+`
+    testing.expect_value(t, output, expected)
+}
+
+@(test)
 macroexpand_when_ok :: proc(t: ^testing.T) {
     output, err, ok := kvist.macroexpand_source(`(when-ok [[data err] (read-text path)]
   (use data))`)
@@ -6296,6 +6410,24 @@ macroexpand_if_ok :: proc(t: ^testing.T) {
     defer delete(output)
 
     expected := `(let [[data err] (read-text path)] (if (= err {}) (core-count data) 0))
+`
+    testing.expect_value(t, output, expected)
+}
+
+@(test)
+macroexpand_chained_if_ok :: proc(t: ^testing.T) {
+    output, err, ok := kvist.macroexpand_source(`(if-ok [[data err] (read-text path)
+        [cfg err] (parse data)]
+  (use cfg)
+  0)`)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    expected := `(let [[data err] (read-text path)] (if (= err {}) (let [[cfg err] (parse data)] (if (= err {}) (use cfg) 0)) 0))
 `
     testing.expect_value(t, output, expected)
 }
@@ -6394,13 +6526,13 @@ macroexpand_rejects_binding_macro_shapes :: proc(t: ^testing.T) {
   value)`)
     testing.expect_value(t, ok_when_let, false)
     defer delete(err_when_let.message)
-    testing.expect_value(t, err_when_let.message, "while expanding macro when-let: when-let expects [[value bool] expr] binding")
+    testing.expect_value(t, strings.contains(err_when_let.message, "when-let expects [value bool] expr binding pairs"), true)
 
     _, err_when_ok, ok_when_ok := kvist.macroexpand_source(`(when-ok [data (read-text path)]
   data)`)
     testing.expect_value(t, ok_when_ok, false)
     defer delete(err_when_ok.message)
-    testing.expect_value(t, err_when_ok.message, "while expanding macro when-ok: when-ok expects [[value err] expr] binding")
+    testing.expect_value(t, strings.contains(err_when_ok.message, "error binding macros expect [value err] bindings"), true)
 
     _, err_if_ok, ok_if_ok := kvist.macroexpand_source(`(if-ok [[data err] (read-text path)]
   data)`)
@@ -8254,6 +8386,13 @@ compile_functional_transform_map_value_sources :: proc(t: ^testing.T) {
   (let [total 0]
     (for [value lookup :transform positive-increments]
       (set! total (+ total value)))
+    total))
+
+(defn loop-key-total [lookup: map[string]int] -> int
+  (let [total 0]
+    (for [key value lookup :transform positive-increments]
+      (set! total (+ total (count key)))
+      (set! total (+ total value)))
     total))`
 
     output, err, ok := kvist.compile_source(source)
@@ -8266,9 +8405,101 @@ compile_functional_transform_map_value_sources :: proc(t: ^testing.T) {
 
     testing.expect_value(t, strings.contains(output, "for _, kvist_item in kvist_source {"), true)
     testing.expect_value(t, strings.contains(output, "for _, kvist_item in lookup {"), true)
+    testing.expect_value(t, strings.contains(output, "for key, kvist_item in lookup {"), true)
     testing.expect_value(t, strings.contains(output, "kvist_acc +="), true)
     testing.expect_value(t, strings.contains(output, "append(&kvist_out,"), true)
     testing.expect_value(t, strings.contains(output, "append(kvist_out,"), true)
+}
+
+@(test)
+compile_functional_transform_arr_range_sources :: proc(t: ^testing.T) {
+    source := `(package main)
+(import arr "kvist:arr")
+
+(defn even? [x: int] -> bool
+  (= (% x 2) 0))
+
+(defn inc [x: int] -> int
+  (+ x 1))
+
+(deftransform even-increments
+  (filter even?)
+  (map inc))
+
+(defn collect [] -> [dynamic]int
+  (into [dynamic]int even-increments (arr.range 0 6)))
+
+(defn append-values [out: [dynamic]int]
+  (arr.into! out even-increments (arr.range 0 6 2)))
+
+(defn total [] -> int
+  (transduce even-increments + 0 (arr.range 6)))
+
+(defn loop-total [] -> int
+  (let [total 0]
+    (for [value (arr.range 5 -1 -2) :transform even-increments]
+      (set! total (+ total value)))
+    total))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "kvist_range_start: int"), true)
+    testing.expect_value(t, strings.contains(output, "arr__range_impl(0, 6, 1)"), false)
+    testing.expect_value(t, strings.contains(output, "for ((kvist_range_step > 0) && (kvist_item < kvist_range_end))"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_item += kvist_range_step"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_acc +="), true)
+}
+
+@(test)
+compile_functional_transform_arr_repeat_sources :: proc(t: ^testing.T) {
+    source := `(package main)
+(import arr "kvist:arr")
+
+(defn positive? [x: int] -> bool
+  (> x 0))
+
+(defn inc [x: int] -> int
+  (+ x 1))
+
+(deftransform positive-increments
+  (filter positive?)
+  (map inc))
+
+(defn collect [] -> [dynamic]int
+  (into [dynamic]int positive-increments (arr.repeat 3 4)))
+
+(defn append-values [out: [dynamic]int]
+  (arr.into! out positive-increments (arr.repeat 2 4)))
+
+(defn total [] -> int
+  (transduce positive-increments + 0 (arr.repeat 3 4)))
+
+(defn loop-total [] -> int
+  (let [total 0]
+    (for [value (arr.repeat 3 4) :transform positive-increments]
+      (set! total (+ total value)))
+    total))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "kvist_repeat_count: int"), true)
+    testing.expect_value(t, strings.contains(output, "arr__repeat(3, 4)"), false)
+    testing.expect_value(t, strings.contains(output, "for kvist_repeat_i < kvist_repeat_count {"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_item := kvist_repeat_value"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_repeat_i += 1"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_acc +="), true)
 }
 
 @(test)

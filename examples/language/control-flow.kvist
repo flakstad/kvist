@@ -85,6 +85,13 @@
     (method-name method)
     "UNKNOWN"))
 
+(defn both-readable? [left: string, right: string] -> bool
+  (if-let [[left-method left-found] (lookup-method left)
+           [right-method right-found] (lookup-method right)]
+    (and (read-method? left-method)
+         (read-method? right-method))
+    false))
+
 (defn main []
   (let [xs (arr.dynamic int [1 2 3])
         event (Event {connected: (Connected {id: 7})})]
@@ -121,4 +128,7 @@
 
   (method-title "PATCH")
   ;; => UNKNOWN
+
+  (both-readable? "GET" "HEAD")
+  ;; => true
 )
