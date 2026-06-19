@@ -1756,8 +1756,14 @@ Odin loops rather than intermediate arrays.
 (into [dynamic]int paid-order-totals orders)
 (transduce paid-order-totals + 0 orders)
 
+(into [dynamic]int (map order-total) orders)
+(transduce (filter paid?) + 0 orders)
+
 (for [total orders :transform paid-order-totals]
   (println total))
+
+(for [idx total orders :transform paid-order-totals]
+  (println idx total))
 ```
 
 The current transform surface is intentionally small:

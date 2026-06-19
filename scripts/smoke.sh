@@ -53,7 +53,7 @@ run odin build cmd/kvist
 run ./kvist check examples/language/hello.kvist
 assert_eq "hello from kvist" "$(capture ./kvist run examples/language/hello.kvist)" "hello"
 assert_eq "18" "$(capture ./kvist run examples/collections/package-tour.kvist)" "package tour"
-assert_eq "65" "$(capture ./kvist run examples/collections/log-source.kvist)" "log source"
+assert_eq "112" "$(capture ./kvist run examples/collections/log-source.kvist)" "log source"
 
 run ./kvist doc examples/collections/log-source.kvist log-lines >/dev/null
 run ./kvist lookup examples/collections/log-source.kvist log-lines >/dev/null

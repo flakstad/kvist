@@ -57,10 +57,32 @@
   (let [lines ([]string ["INFO boot" "ERROR disk" "WARN hot" "ERROR network"])]
     (transduce error-line-lengths + 0 (log-lines lines))))
 
+(defn total-error-bytes-for [] -> int
+  (let [lines ([]string ["INFO boot" "ERROR disk" "WARN hot" "ERROR network"])
+        total 0]
+    (for [length (log-lines lines) :transform error-line-lengths]
+      (set! total (+ total length)))
+    total))
+
+(defn total-error-bytes-indexed-for [] -> int
+  (let [lines ([]string ["INFO boot" "ERROR disk" "WARN hot" "ERROR network"])
+        total 0]
+    (for [idx length (log-lines lines) :transform error-line-lengths]
+      (set! total (+ total idx length)))
+    total))
+
 (defn main []
-  (println (+ (total-log-bytes) (error-count) (total-error-bytes))))
+  (println (+ (total-log-bytes)
+              (error-count)
+              (total-error-bytes)
+              (total-error-bytes-for)
+              (total-error-bytes-indexed-for))))
 
 (comment
-  (+ (total-log-bytes) (error-count) (total-error-bytes))
-  ;; => 65
+  (+ (total-log-bytes)
+     (error-count)
+     (total-error-bytes)
+     (total-error-bytes-for)
+     (total-error-bytes-indexed-for))
+  ;; => 112
 )

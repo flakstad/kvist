@@ -42,6 +42,19 @@ Anonymous transforms use the same `comp` form inline:
   users)
 ```
 
+A single step can also stand alone in a transform position:
+
+```clojure
+(into [dynamic]int (map score) users)
+(transduce (filter active?) + 0 users)
+(for [score users :transform (map .score)]
+  (println score))
+```
+
+These forms are contextual compile-time transform syntax. They are accepted by
+`deftransform`, `into`, `arr.into!`, `transduce`, and `for :transform`; they
+are not runtime values.
+
 Collection output is explicit with `into`:
 
 ```clojure
@@ -50,7 +63,11 @@ Collection output is explicit with `into`:
 ```
 
 `into` returns a fresh owned dynamic array. Use `arr.into!` when appending into
-an existing dynamic array.
+an existing dynamic array:
+
+```clojure
+(arr.into! existing paid-order-totals orders)
+```
 
 Scalar output is explicit with `transduce`:
 
@@ -88,6 +105,9 @@ Loops can consume the same transform directly:
 ```clojure
 (for [total orders :transform paid-order-totals]
   (println total))
+
+(for [idx total orders :transform paid-order-totals]
+  (println idx total))
 ```
 
 The same iterator call can be the input to a fused scalar reduction:
@@ -272,12 +292,16 @@ The current implementation is strict:
 - `drop` and `drop-while` skip values that reach that step without allocating;
 - `into` must name the concrete output type;
 - dynamic array `into` owns the returned array, and callers delete it using the
-  existing ownership conventions; append into existing arrays with `arr.into!`;
+  existing ownership conventions; append into existing arrays with
+  `(arr.into! target transform source)`;
 - `transduce` requires an obvious accumulator type from the initial value or an
   annotation, and the reducer must be `+` or a known two-argument function;
 - `defiter` calls are consumed directly by `for`, `into`, and `transduce`;
 - `for` accepts `[value source :transform transform]` for the same fused item
   flow;
+- `for` also accepts `[index value source :transform transform]`; `index`
+  counts values that reach the loop body after filtering, dropping, and
+  expanding;
 - no hidden lazy seqs, dynamic dispatch, or boxed elements.
 
 When any of these rules are not met, the compiler rejects the pipeline and
@@ -293,7 +317,8 @@ and accumulator types are known.
 
 - transform specs support `map`, `map-indexed`, `mapcat`, `filter`, `remove`,
   `keep`, `take`, `take-while`, `drop`, and `drop-while`
-- `into` currently targets fresh owned `[dynamic]T` arrays
+- `into` currently targets fresh owned `[dynamic]T` arrays; `arr.into!`
+  appends into existing dynamic arrays
 - `transduce` supports `+` and known two-argument reducers
 - inputs may be slices, fixed arrays, dynamic arrays, or `defiter` calls
 - anything cleverer should usually be a direct `for` loop

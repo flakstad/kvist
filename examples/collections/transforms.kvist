@@ -98,6 +98,11 @@
 (defn collect-paid-totals [] -> [dynamic]int
   (into [dynamic]int paid-order-totals (sample-orders)))
 
+(defn append-paid-totals [] -> [dynamic]int
+  (let [out (arr.empty int)]
+    (arr.into! out paid-order-totals (sample-orders))
+    out))
+
 (defn sum-paid-totals [] -> int
   (transduce paid-order-totals + 0 (sample-orders)))
 
@@ -112,6 +117,14 @@
 
 (defn collect-all-ages-inline [] -> [dynamic]int
   (into [dynamic]int (map .age) (sample-users)))
+
+(defn append-paid-orders-inline [] -> [dynamic]Order
+  (let [out (arr.empty Order)]
+    (arr.into! out (filter paid?) (sample-orders))
+    out))
+
+(defn sum-order-totals-inline [] -> int
+  (transduce (map order-total) + 0 (sample-orders)))
 
 (defn collect-nonzero-paid-discounts [] -> [dynamic]int
   (into [dynamic]int nonzero-paid-discounts (sample-orders)))
@@ -161,6 +174,12 @@
       (set! total (+ total value)))
     total))
 
+(defn sum-paid-totals-indexed-for [] -> int
+  (let [total 0]
+    (for [idx value (sample-orders) :transform paid-order-totals]
+      (set! total (+ total idx value)))
+    total))
+
 (defn sum-active-ages-for-inline [] -> int
   (let [total 0]
     (for [age (sample-users) :transform (comp
@@ -191,6 +210,7 @@
   (let [totals (collect-paid-totals)
         ages (collect-active-ages)
         all-ages (collect-all-ages-inline)
+        paid-inline (append-paid-orders-inline)
         discounts (collect-nonzero-paid-discounts)
         first-total (collect-first-paid-total)
         leading-ages (collect-leading-young-ages)
@@ -198,11 +218,13 @@
         after-young-prefix (collect-ages-after-young-prefix)
         indexed-ages (collect-indexed-active-ages)
         parts (collect-paid-order-parts)
+        appended-totals (append-paid-totals)
         manual-totals (collect-paid-totals-manual)]
     (defer
       (delete totals)
       (delete ages)
       (delete all-ages)
+      (delete paid-inline)
       (delete discounts)
       (delete first-total)
       (delete leading-ages)
@@ -210,6 +232,7 @@
       (delete after-young-prefix)
       (delete indexed-ages)
       (delete parts)
+      (delete appended-totals)
       (delete manual-totals))
     (println (+ (sum-paid-totals)
                 (sum-paid-totals-manual)
@@ -223,7 +246,9 @@
                 (sum-indexed-active-ages)
                 (sum-paid-order-parts)
                 (sum-paid-totals-for)
+                (sum-paid-totals-indexed-for)
                 (sum-active-ages-for-inline)
+                (sum-order-totals-inline)
                 totals[0]
                 totals[1]
                 ages[0]
@@ -231,6 +256,8 @@
                 all-ages[0]
                 all-ages[1]
                 all-ages[2]
+                paid-inline[0].amount
+                paid-inline[1].amount
                 discounts[0]
                 discounts[1]
                 first-total[0]
@@ -244,6 +271,8 @@
                 parts[1]
                 parts[2]
                 parts[3]
+                appended-totals[0]
+                appended-totals[1]
                 manual-totals[0]
                 manual-totals[1]))))
 

@@ -319,7 +319,9 @@ uses an Odin-shaped callback returning `(value, ok)` and writes kept values back
 into the same dynamic array; the value type must match the array element type.
 `into!` appends the values from one collection into an existing dynamic array
 target. It lowers directly to Odin `append(&target, ..xs)`-style code, mutates
-the target, and does not create a new owned result.
+the target, and does not create a new owned result. With transforms, use
+`(arr.into! target transform source)` to append the fused pipeline output
+without allocating an intermediate array.
 
 String helpers stay close to Odin `core:strings`. `kvist:str` is a shipped
 `.kvist` package. `str.count`, `str.get`, `str.slice`, `str.contains?`,

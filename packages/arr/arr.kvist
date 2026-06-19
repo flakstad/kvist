@@ -341,10 +341,14 @@
   "Append all elements from `xs` into dynamic array `target`.
 
   This mutates `target` and does not allocate a replacement array, though Odin
-  may grow the target's backing storage."
-  [target xs]
-  (quasiquote
-    (arr-into! (unquote target) (unquote xs))))
+  may grow the target's backing storage. With three arguments, append the
+  results of a fused transform over `xs`."
+  [target xs & rest]
+  (if (= (kvist.count rest) 0)
+    (quasiquote
+      (arr-into! (unquote target) (unquote xs)))
+    (quasiquote
+      (arr-into! (unquote target) (unquote xs) (unquote (kvist.first rest))))))
 
 (defmacro interpose
   "Return a new dynamic array with `sep` inserted between input elements.

@@ -6983,6 +6983,7 @@ compile_sequence_trim_helpers_as_slice_views :: proc(t: ^testing.T) {
 @(test)
 compile_named_functional_transform_into_and_transduce :: proc(t: ^testing.T) {
     source := `(package main)
+(import arr "kvist:arr")
 
 (defstruct Order {
   status: int
@@ -7008,6 +7009,9 @@ compile_named_functional_transform_into_and_transduce :: proc(t: ^testing.T) {
 (defn collect [orders: []Order] -> [dynamic]int
   (into [dynamic]int paid-order-totals orders))
 
+(defn append [out: [dynamic]int, orders: []Order]
+  (arr.into! out paid-order-totals orders))
+
 (defn total [orders: []Order] -> int
   (transduce paid-order-totals + 0 orders))`
 
@@ -7024,6 +7028,8 @@ compile_named_functional_transform_into_and_transduce :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, " := order_total(kvist_item)"), true)
     testing.expect_value(t, strings.contains(output, "if positive_p(kvist_xform_"), true)
     testing.expect_value(t, strings.contains(output, "append(&kvist_out, kvist_xform_"), true)
+    testing.expect_value(t, strings.contains(output, "(proc(kvist_out: ^[dynamic]int, kvist_source: []Order) {"), true)
+    testing.expect_value(t, strings.contains(output, "append(kvist_out, kvist_xform_"), true)
     testing.expect_value(t, strings.contains(output, "kvist_acc += kvist_xform_"), true)
     testing.expect_value(t, strings.contains(output, "paid_order_totals ::"), false)
 }
@@ -7061,6 +7067,7 @@ compile_inline_functional_transform_into :: proc(t: ^testing.T) {
 @(test)
 compile_defiter_each_into_and_transduce_consumers :: proc(t: ^testing.T) {
     source := `(package main)
+(import arr "kvist:arr")
 
 (defstruct File_Source {
   items: []string
@@ -7109,6 +7116,39 @@ compile_defiter_each_into_and_transduce_consumers :: proc(t: ^testing.T) {
       (filter long-path?)
       (map path-length))
     + 0
+    (files items)))
+
+(defn total-long-path-length-for [items: []string] -> int
+  (let [total 0]
+    (for [length (files items) :transform (comp
+                                            (filter long-path?)
+                                            (map path-length))]
+      (set! total (+ total length)))
+    total))
+
+(defn named-total-long-path-length-for [items: []string] -> int
+  (let [total 0]
+    (for [length (files items) :transform long-path-lengths]
+      (set! total (+ total length)))
+    total))
+
+(defn indexed-total-long-path-length-for [items: []string] -> int
+  (let [total 0]
+    (for [idx length (files items) :transform long-path-lengths]
+      (set! total (+ total idx length)))
+    total))
+
+(defn append-long-path-lengths [out: [dynamic]int, items: []string]
+  (arr.into! out long-path-lengths (files items)))
+
+(deftransform long-path-lengths
+  (filter long-path?)
+  (map path-length))
+
+(defn total-long-path-length-named [items: []string] -> int
+  (transduce
+    long-path-lengths
+    + 0
     (files items)))`
 
     output, err, ok := kvist.compile_source(source)
@@ -7135,6 +7175,13 @@ compile_defiter_each_into_and_transduce_consumers :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "kvist_acc := kvist_init"), true)
     testing.expect_value(t, strings.contains(output, " := path_length(kvist_item)"), true)
     testing.expect_value(t, strings.contains(output, "kvist_acc += kvist_xform_"), true)
+    testing.expect_value(t, strings.contains(output, "length := kvist_xform_"), true)
+    testing.expect_value(t, strings.contains(output, "total = (total) + (length)"), true)
+    testing.expect_value(t, strings.contains(output, "idx := 0"), true)
+    testing.expect_value(t, strings.contains(output, "total = (total) + (idx) + (length)"), true)
+    testing.expect_value(t, strings.contains(output, "idx += 1"), true)
+    testing.expect_value(t, strings.contains(output, "(proc(kvist_out: ^[dynamic]int, kvist_source_arg_1: []string) {"), true)
+    testing.expect_value(t, strings.contains(output, "append(kvist_out, kvist_xform_"), true)
 }
 
 @(test)
@@ -8084,6 +8131,8 @@ compile_for_functional_transform :: proc(t: ^testing.T) {
   (let [sum 0]
     (for [value xs :transform inc-evens]
       (set! sum (+ sum value)))
+    (for [idx value xs :transform inc-evens]
+      (set! sum (+ sum idx value)))
     sum))`
 
     output, err, ok := kvist.compile_source(source)
@@ -8098,6 +8147,9 @@ compile_for_functional_transform :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "kvist_xform_"), true)
     testing.expect_value(t, strings.contains(output, "value := kvist_xform_"), true)
     testing.expect_value(t, strings.contains(output, "sum = (sum) + (value)"), true)
+    testing.expect_value(t, strings.contains(output, "idx := 0"), true)
+    testing.expect_value(t, strings.contains(output, "sum = (sum) + (idx) + (value)"), true)
+    testing.expect_value(t, strings.contains(output, "idx += 1"), true)
 }
 
 @(test)
@@ -8123,6 +8175,69 @@ compile_functional_transform_single_step_named_spec :: proc(t: ^testing.T) {
 
     testing.expect_value(t, strings.contains(output, "kvist_xform_"), true)
     testing.expect_value(t, strings.contains(output, "append(&kvist_out"), true)
+}
+
+@(test)
+compile_contextual_single_step_transforms :: proc(t: ^testing.T) {
+    source := `(package main)
+(import arr "kvist:arr")
+
+(defn inc [x: int] -> int
+  (+ x 1))
+
+(defn even? [x: int] -> bool
+  (= (% x 2) 0))
+
+(defn collect [xs: []int] -> [dynamic]int
+  (into [dynamic]int (map inc) xs))
+
+(defn append [out: [dynamic]int, xs: []int]
+  (arr.into! out (filter even?) xs))
+
+(defn total [xs: []int] -> int
+  (transduce (map inc) + 0 xs))
+
+(defn loop-total [xs: []int] -> int
+  (let [sum 0]
+    (for [value xs :transform (filter even?)]
+      (set! sum (+ sum value)))
+    sum))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "append(&kvist_out, kvist_xform_"), true)
+    testing.expect_value(t, strings.contains(output, "append(kvist_out, kvist_item)"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_acc +="), true)
+    testing.expect_value(t, strings.contains(output, "if even_p(kvist_item) {"), true)
+    testing.expect_value(t, strings.contains(output, "map ::"), false)
+    testing.expect_value(t, strings.contains(output, "filter ::"), false)
+}
+
+@(test)
+reject_transform_step_as_runtime_value :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn inc [x: int] -> int
+  (+ x 1))
+
+(defn bad []
+  (let [xf (map inc)]
+    (return)))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+    defer delete(err.message)
+
+    testing.expect_value(t, strings.contains(err.message, "map"), true)
 }
 
 @(test)

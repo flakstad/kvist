@@ -5154,6 +5154,13 @@ obvious_form_type :: proc(e: ^Emitter, form: CST_Form) -> (string, bool) {
     if form.kind == .List && len(form.items) > 0 && form.items[0].kind == .Symbol {
         head_name := map_name(form.items[0].text)
         surface_head := source_package_surface_head(form.items[0].text)
+        if (surface_head == "arr/empty" || head_name == "arr_empty" || head_name == "arr__empty") &&
+           (len(form.items) == 2 || len(form.items) == 3) {
+            elem_ty, _, ok_elem_ty := parse_type_text(form.items[1])
+            if ok_elem_ty {
+                return fmt.tprintf("[dynamic]%s", elem_ty), true
+            }
+        }
         if (head_is_core_assoc(form.items[0].text) || head_is_core_update(form.items[0].text)) &&
            len(form.items) >= 2 {
             return shallow_update_return_type(e, form)
@@ -5408,6 +5415,14 @@ obvious_binding_type :: proc(e: ^Emitter, binding: Binding) -> (string, bool) {
     if binding.value.kind == .List && len(binding.value.items) > 0 && binding.value.items[0].kind == .Symbol {
         head := binding.value.items[0].text
         surface_head := source_package_surface_head(head)
+        head_name := map_name(head)
+        if (surface_head == "arr/empty" || head_name == "arr_empty" || head_name == "arr__empty") &&
+           (len(binding.value.items) == 2 || len(binding.value.items) == 3) {
+            elem_ty, _, ok_elem_ty := parse_type_text(binding.value.items[1])
+            if ok_elem_ty {
+                return fmt.tprintf("[dynamic]%s", elem_ty), true
+            }
+        }
         if (head_is_core_assoc(head) || head_is_core_update(head)) &&
            len(binding.value.items) >= 2 {
             return shallow_update_return_type(e, binding.value)
@@ -5443,7 +5458,6 @@ obvious_binding_type :: proc(e: ^Emitter, binding: Binding) -> (string, bool) {
                 return parallel_task_result_type(task_ty)
             }
         }
-        head_name := map_name(binding.value.items[0].text)
         if proc_decl, ok := find_proc_decl(e, head_name); ok && proc_decl.returns.kind == .Single {
             return proc_decl.returns.single_ty, true
         }
@@ -6048,7 +6062,7 @@ emit_source_each_loop :: proc(e: ^Emitter, source_form: CST_Form, source: ^Sourc
     return {}, true
 }
 
-emit_transform_for_body :: proc(e: ^Emitter, steps: []Transform_Step, initial_text, initial_ty, value_name: string, body: []CST_Form) -> (Compile_Error, bool) {
+emit_transform_for_body :: proc(e: ^Emitter, steps: []Transform_Step, initial_text, initial_ty, index_name, value_name: string, body: []CST_Form) -> (Compile_Error, bool) {
     base_indent := e.indent
     value_text, value_ty, close_count, err_pipeline, ok_pipeline := emit_transform_pipeline_body(e, &e.builder, steps, initial_text, initial_ty, base_indent)
     if !ok_pipeline {
@@ -6058,6 +6072,9 @@ emit_transform_for_body :: proc(e: ^Emitter, steps: []Transform_Step, initial_te
     e.indent = base_indent + close_count
     emit_line(e, fmt.tprintf("%s := %s", value_name, value_text))
     push_local_type_scope(e)
+    if len(index_name) > 0 {
+        bind_local_type(e, index_name, "int")
+    }
     bind_local_type(e, value_name, value_ty)
     err_body, ok_body := emit_body_forms(e, body, Return_Spec{kind = .None})
     pop_local_type_scope(e)
@@ -6065,11 +6082,16 @@ emit_transform_for_body :: proc(e: ^Emitter, steps: []Transform_Step, initial_te
     if !ok_body {
         return err_body, false
     }
+    if len(index_name) > 0 {
+        e.indent = base_indent + close_count
+        emit_line(e, fmt.tprintf("%s += 1", index_name))
+        e.indent = base_indent
+    }
     emit_transform_closers(&e.builder, base_indent+close_count, close_count)
     return {}, true
 }
 
-emit_transform_for_collection_loop_body :: proc(e: ^Emitter, coll_form: CST_Form, coll_text, coll_ty, value_name: string, transform_form: CST_Form, body: []CST_Form) -> (Compile_Error, bool) {
+emit_transform_for_collection_loop_body :: proc(e: ^Emitter, coll_form: CST_Form, coll_text, coll_ty, index_name, value_name: string, transform_form: CST_Form, body: []CST_Form) -> (Compile_Error, bool) {
     source_elem_ty, ok_source_elem_ty := collection_element_type(coll_ty)
     if !ok_source_elem_ty {
         return Compile_Error{message = fmt.tprintf("for :transform expects slice or array source, got %s", coll_ty), span = coll_form.span}, false
@@ -6082,9 +6104,12 @@ emit_transform_for_collection_loop_body :: proc(e: ^Emitter, coll_form: CST_Form
     if !ok_prelude {
         return err_prelude, false
     }
+    if len(index_name) > 0 {
+        emit_line(e, fmt.tprintf("%s := 0", index_name))
+    }
     emit_line(e, fmt.tprintf("for kvist_item in %s %s", coll_text, "{"))
     e.indent += 1
-    err_body, ok_body := emit_transform_for_body(e, steps[:], "kvist_item", source_elem_ty, value_name, body)
+    err_body, ok_body := emit_transform_for_body(e, steps[:], "kvist_item", source_elem_ty, index_name, value_name, body)
     e.indent -= 1
     if !ok_body {
         return err_body, false
@@ -6093,7 +6118,7 @@ emit_transform_for_collection_loop_body :: proc(e: ^Emitter, coll_form: CST_Form
     return {}, true
 }
 
-emit_transform_for_collection_loop :: proc(e: ^Emitter, coll_form: CST_Form, value_name: string, transform_form: CST_Form, body: []CST_Form) -> (Compile_Error, bool) {
+emit_transform_for_collection_loop :: proc(e: ^Emitter, coll_form: CST_Form, index_name, value_name: string, transform_form: CST_Form, body: []CST_Form) -> (Compile_Error, bool) {
     coll_ty, ok_coll_ty := obvious_form_type(e, coll_form)
     if !ok_coll_ty {
         return Compile_Error{message = "for :transform expects a collection with an obvious type; bind or annotate it first", span = coll_form.span}, false
@@ -6107,7 +6132,7 @@ emit_transform_for_collection_loop :: proc(e: ^Emitter, coll_form: CST_Form, val
         if !ok_coll {
             return err_coll, false
         }
-        return emit_transform_for_collection_loop_body(e, coll_form, coll, coll_ty, value_name, transform_form, body)
+        return emit_transform_for_collection_loop_body(e, coll_form, coll, coll_ty, index_name, value_name, transform_form, body)
     }
 
     coll, err_coll, ok_coll := emit_expr(e, coll_form)
@@ -6121,7 +6146,7 @@ emit_transform_for_collection_loop :: proc(e: ^Emitter, coll_form: CST_Form, val
     push_local_type_scope(e)
     emit_prefixed_expr_mapped(e, fmt.tprintf("%s := ", temp), coll, coll_form.span)
     emit_line(e, fmt.tprintf("defer delete(%s)", temp))
-    err_loop, ok_loop := emit_transform_for_collection_loop_body(e, coll_form, temp, coll_ty, value_name, transform_form, body)
+    err_loop, ok_loop := emit_transform_for_collection_loop_body(e, coll_form, temp, coll_ty, index_name, value_name, transform_form, body)
     pop_local_type_scope(e)
     if !ok_loop {
         return err_loop, false
@@ -6131,7 +6156,7 @@ emit_transform_for_collection_loop :: proc(e: ^Emitter, coll_form: CST_Form, val
     return {}, true
 }
 
-emit_transform_for_source_loop :: proc(e: ^Emitter, source_form: CST_Form, source: ^Source_Decl, value_name: string, transform_form: CST_Form, body: []CST_Form) -> (Compile_Error, bool) {
+emit_transform_for_source_loop :: proc(e: ^Emitter, source_form: CST_Form, source: ^Source_Decl, index_name, value_name: string, transform_form: CST_Form, body: []CST_Form) -> (Compile_Error, bool) {
     state_ty, err_state_ty, ok_state_ty := source_state_type(e, source)
     if !ok_state_ty {
         return err_state_ty, false
@@ -6163,6 +6188,9 @@ emit_transform_for_source_loop :: proc(e: ^Emitter, source_form: CST_Form, sourc
     if !ok_prelude {
         return err_prelude, false
     }
+    if len(index_name) > 0 {
+        emit_line(e, fmt.tprintf("%s := 0", index_name))
+    }
     emit_line(e, "for {")
     e.indent += 1
     emit_line(e, fmt.tprintf("kvist_item, %s := %s(&%s)", ok_name, source.next_name, temp))
@@ -6171,7 +6199,7 @@ emit_transform_for_source_loop :: proc(e: ^Emitter, source_form: CST_Form, sourc
     emit_line(e, "break")
     e.indent -= 1
     emit_line(e, "}")
-    err_body, ok_body := emit_transform_for_body(e, steps[:], "kvist_item", source.item_ty, value_name, body)
+    err_body, ok_body := emit_transform_for_body(e, steps[:], "kvist_item", source.item_ty, index_name, value_name, body)
     e.indent -= 1
     if !ok_body {
         return err_body, false
@@ -8176,6 +8204,145 @@ emit_transform_into_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compil
     return fmt.tprintf("%s(%s)", strings.to_string(builder), source_text), {}, true
 }
 
+emit_transform_into_bang_source_expr :: proc(
+    e: ^Emitter,
+    form: CST_Form,
+    target_ty, target_elem_ty, target_text: string,
+    transform_form, source_form: CST_Form,
+    source: ^Source_Decl,
+) -> (string, Compile_Error, bool) {
+    state_ty, err_state_ty, ok_state_ty := source_state_type(e, source)
+    if !ok_state_ty {
+        return "", err_state_ty, false
+    }
+    err_protocol, ok_protocol := validate_source_protocol(e, source, state_ty, source_form.span)
+    if !ok_protocol {
+        return "", err_protocol, false
+    }
+    arg_texts, err_args, ok_args := source_call_arg_texts(e, source, source_form)
+    if !ok_args {
+        return "", err_args, false
+    }
+    steps, err_steps, ok_steps := parse_transform_steps(e, transform_form)
+    if !ok_steps {
+        return "", err_steps, false
+    }
+
+    builder := strings.builder_make()
+    defer strings.builder_destroy(&builder)
+    param_texts: [dynamic]string
+    call_arg_texts: [dynamic]string
+    call_texts: [dynamic]string
+    defer delete(param_texts)
+    defer delete(call_arg_texts)
+    defer delete(call_texts)
+    append(&param_texts, fmt.tprintf("kvist_out: ^%s", target_ty))
+    append(&call_texts, address_of_expr_text(target_text))
+    for param, idx in source.params {
+        arg_name := fmt.tprintf("kvist_source_arg_%d", idx+1)
+        append(&param_texts, fmt.tprintf("%s: %s", arg_name, param.ty))
+        append(&call_arg_texts, arg_name)
+    }
+    for arg_text in arg_texts {
+        append(&call_texts, arg_text)
+    }
+    param_list := strings.join(param_texts[:], ", ", context.allocator)
+    defer delete(param_list)
+    call_args := strings.join(call_texts[:], ", ", context.allocator)
+    defer delete(call_args)
+    open_call := source_call_text(e, source, call_arg_texts[:])
+
+    fmt.sbprintf(&builder, "(proc(%s) %s\n", param_list, "{")
+    fmt.sbprintf(&builder, "    kvist_source := %s\n", open_call)
+    if source.has_dispose {
+        fmt.sbprintf(&builder, "    defer %s(&kvist_source)\n", source.dispose_name)
+    }
+    err_prelude, ok_prelude := emit_transform_state_prelude(e, &builder, steps[:], 1)
+    if !ok_prelude {
+        return "", err_prelude, false
+    }
+    strings.write_string(&builder, "    for {\n")
+    fmt.sbprintf(&builder, "        kvist_item, kvist_source_ok := %s(&kvist_source)\n", source.next_name)
+    strings.write_string(&builder, "        if !kvist_source_ok {\n")
+    strings.write_string(&builder, "            break\n")
+    strings.write_string(&builder, "        }\n")
+    value_text, value_ty, close_count, err_body, ok_body := emit_transform_pipeline_body(e, &builder, steps[:], "kvist_item", source.item_ty, 2)
+    if !ok_body {
+        return "", err_body, false
+    }
+    if value_ty != target_elem_ty {
+        return "", Compile_Error{message = fmt.tprintf("into! transform target element type is %s, but pipeline produces %s", target_elem_ty, value_ty), span = form.items[1].span}, false
+    }
+    append_indent(&builder, 2+close_count)
+    fmt.sbprintf(&builder, "append(kvist_out, %s)\n", value_text)
+    emit_transform_closers(&builder, 2+close_count, close_count)
+    strings.write_string(&builder, "    }\n")
+    strings.write_string(&builder, "})")
+    return fmt.tprintf("%s(%s)", strings.to_string(builder), call_args), {}, true
+}
+
+emit_transform_into_bang_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) {
+    if len(form.items) != 4 {
+        return "", Compile_Error{message = "into! transform expects target, transform, and source", span = form.span}, false
+    }
+    target_form := form.items[1]
+    transform_form := form.items[2]
+    source_form := form.items[3]
+    target_ty, ok_target_ty := obvious_form_type(e, target_form)
+    if !ok_target_ty {
+        return "", Compile_Error{message = "into! transform expects a target with an obvious dynamic array type; bind or annotate it first", span = target_form.span}, false
+    }
+    target_elem_ty, ok_target_elem_ty := dynamic_array_element_type(target_ty)
+    if !ok_target_elem_ty {
+        return "", Compile_Error{message = "into! transform currently expects a dynamic array target", span = target_form.span}, false
+    }
+    target_text, err_target, ok_target := emit_expr(e, target_form)
+    if !ok_target {
+        return "", err_target, false
+    }
+    if source, ok_source_call := source_call_decl(e, source_form); ok_source_call {
+        return emit_transform_into_bang_source_expr(e, form, target_ty, target_elem_ty, target_text, transform_form, source_form, source)
+    }
+    source_ty, ok_source_ty := obvious_form_type(e, source_form)
+    if !ok_source_ty {
+        return "", Compile_Error{message = "into! transform expects a source with an obvious collection type; bind or annotate it first", span = source_form.span}, false
+    }
+    source_elem_ty, ok_source_elem_ty := collection_element_type(source_ty)
+    if !ok_source_elem_ty {
+        return "", Compile_Error{message = fmt.tprintf("into! transform expects slice or array source, got %s", source_ty), span = source_form.span}, false
+    }
+    source_text, err_source, ok_source := emit_expr(e, source_form)
+    if !ok_source {
+        return "", err_source, false
+    }
+    steps, err_steps, ok_steps := parse_transform_steps(e, transform_form)
+    if !ok_steps {
+        return "", err_steps, false
+    }
+
+    builder := strings.builder_make()
+    defer strings.builder_destroy(&builder)
+    fmt.sbprintf(&builder, "(proc(kvist_out: ^%s, kvist_source: %s) %s\n", target_ty, source_ty, "{")
+    err_prelude, ok_prelude := emit_transform_state_prelude(e, &builder, steps[:], 1)
+    if !ok_prelude {
+        return "", err_prelude, false
+    }
+    strings.write_string(&builder, "    for kvist_item in kvist_source {\n")
+    value_text, value_ty, close_count, err_body, ok_body := emit_transform_pipeline_body(e, &builder, steps[:], "kvist_item", source_elem_ty, 2)
+    if !ok_body {
+        return "", err_body, false
+    }
+    if value_ty != target_elem_ty {
+        return "", Compile_Error{message = fmt.tprintf("into! transform target element type is %s, but pipeline produces %s", target_elem_ty, value_ty), span = target_form.span}, false
+    }
+    append_indent(&builder, 2+close_count)
+    fmt.sbprintf(&builder, "append(kvist_out, %s)\n", value_text)
+    emit_transform_closers(&builder, 2+close_count, close_count)
+    strings.write_string(&builder, "    }\n")
+    strings.write_string(&builder, "})")
+    return fmt.tprintf("%s(%s, %s)", strings.to_string(builder), address_of_expr_text(target_text), source_text), {}, true
+}
+
 emit_transform_transduce_source_expr :: proc(
     e: ^Emitter,
     form: CST_Form,
@@ -9476,8 +9643,11 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
     }
 
     if head.text == "arr-into!" || head.text == "arr/into!" {
+        if len(form.items) == 4 {
+            return emit_transform_into_bang_expr(e, form)
+        }
         if len(form.items) != 3 {
-            return "", Compile_Error{message = "into! expects target and collection", span = form.span}, false
+            return "", Compile_Error{message = "into! expects target and collection, or target, transform, and source", span = form.span}, false
         }
         target, err_target, ok_target := emit_expr(e, form.items[1])
         if !ok_target {
@@ -11545,9 +11715,27 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
                     append(&body, item)
                 }
                 if source, ok_source_call := source_call_decl(e, coll_form); ok_source_call {
-                    return emit_transform_for_source_loop(e, coll_form, source, value_name, transform_form, body[:])
+                    return emit_transform_for_source_loop(e, coll_form, source, "", value_name, transform_form, body[:])
                 }
-                return emit_transform_for_collection_loop(e, coll_form, value_name, transform_form, body[:])
+                return emit_transform_for_collection_loop(e, coll_form, "", value_name, transform_form, body[:])
+            }
+            if len(binding.items) == 5 &&
+               binding.items[0].kind == .Symbol &&
+               binding.items[1].kind == .Symbol &&
+               binding.items[3].kind == .Keyword &&
+               binding.items[3].text == ":transform" {
+                index_name := map_name(binding.items[0].text)
+                value_name := map_name(binding.items[1].text)
+                coll_form := binding.items[2]
+                transform_form := binding.items[4]
+                body: [dynamic]CST_Form
+                for item in form.items[body_start:] {
+                    append(&body, item)
+                }
+                if source, ok_source_call := source_call_decl(e, coll_form); ok_source_call {
+                    return emit_transform_for_source_loop(e, coll_form, source, index_name, value_name, transform_form, body[:])
+                }
+                return emit_transform_for_collection_loop(e, coll_form, index_name, value_name, transform_form, body[:])
             }
             if len(binding.items) == 2 && binding.items[0].kind == .Symbol {
                 value_name := map_name(binding.items[0].text)
@@ -11571,9 +11759,9 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
                 }
                 return emit_for_in_loop(e, coll_form, first_name, second_name, body[:])
             }
-            return Compile_Error{message = fmt.tprintf("%s expects [value collection], [value collection :transform transform], or [first second collection]", canonical_head_text), span = form.span}, false
+            return Compile_Error{message = fmt.tprintf("%s expects [value collection], [value collection :transform transform], [index value collection :transform transform], or [first second collection]", canonical_head_text), span = form.span}, false
         }
-        return Compile_Error{message = "for expects [value collection], [value collection :transform transform], or [first second collection] and body", span = form.span}, false
+        return Compile_Error{message = "for expects [value collection], [value collection :transform transform], [index value collection :transform transform], or [first second collection] and body", span = form.span}, false
     case "while":
         if len(form.items) < 3 {
             return Compile_Error{message = "while expects condition and body", span = form.span}, false
