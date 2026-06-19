@@ -139,6 +139,31 @@ updated copies, or mutate them explicitly through pointers when that is the righ
   (set! score^.bonus 0))
 ```
 
+## Fused Data Transforms
+
+For repeated data shaping, Kvist can compile a transform pipeline into the
+same kind of direct Odin loop you would write by hand. The transform describes
+the item flow once; `into`, `transduce`, and `for :transform` choose how to
+consume it.
+
+```clojure
+(deftransform paid-totals
+  (filter paid?)
+  (map order-total)
+  (filter positive?))
+
+(into [dynamic]int paid-totals orders)      ; collect
+(transduce paid-totals + 0 orders)          ; reduce
+(transduce paid-totals max 0 orders)        ; reduce with a built-in reducer
+
+(for [total orders :transform paid-totals]  ; loop
+  (println total))
+```
+
+These forms do not build lazy sequences or intermediate arrays. See
+[docs/FUNCTIONAL-TRANSFORMS.md](docs/FUNCTIONAL-TRANSFORMS.md) and
+[examples/collections/data-transforms.kvist](examples/collections/data-transforms.kvist).
+
 ## Ownership Is Part Of The Code
 
 Owned dynamic arrays and maps need cleanup. Use `defer` when a local owns
@@ -224,7 +249,7 @@ development workflows, see [docs/LIVE-DEVELOPMENT.md](docs/LIVE-DEVELOPMENT.md).
 - [docs/HTML.md](docs/HTML.md) - HTML rendering
 - [docs/HTTP.md](docs/HTTP.md) - HTTP server/client/SSE helpers
 - [docs/TESTING.md](docs/TESTING.md) - tests, assertions, fixtures, and table checks
-- [docs/FUNCTIONAL-TRANSFORMS.md](docs/FUNCTIONAL-TRANSFORMS.md) - `deftransform`, `defiter`, `into`, `transduce`
+- [docs/FUNCTIONAL-TRANSFORMS.md](docs/FUNCTIONAL-TRANSFORMS.md) - fused data transforms
 - [docs/PARALLEL.md](docs/PARALLEL.md) - tasks and parallel collection helpers
 - [docs/TOOLING.md](docs/TOOLING.md) - CLI/editor tooling
 - [docs/LIVE-DEVELOPMENT.md](docs/LIVE-DEVELOPMENT.md) - resident reload and scratch eval workflows

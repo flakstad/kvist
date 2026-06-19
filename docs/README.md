@@ -6,6 +6,7 @@ the tooling, and the ownership rules that matter in real programs.
 Start here:
 
 - [LANGUAGE.md](LANGUAGE.md) - core language reference
+- [FUNCTIONAL-TRANSFORMS.md](FUNCTIONAL-TRANSFORMS.md) - fused data transforms with `into`, `transduce`, and `for`
 - [TOOLING.md](TOOLING.md) - CLI and editor-facing tooling
 - [SEQUENCES.md](SEQUENCES.md) - collection helpers and their ownership model
 - [PACKAGES.md](PACKAGES.md) - shipped `kvist:*` package index
@@ -16,7 +17,6 @@ Start here:
 
 Focused references:
 
-- [FUNCTIONAL-TRANSFORMS.md](FUNCTIONAL-TRANSFORMS.md) - `deftransform`, `defiter`, `into`, `transduce`
 - [PARALLEL.md](PARALLEL.md) - `kvist:parallel`
 - [LIVE-DEVELOPMENT.md](LIVE-DEVELOPMENT.md) - resident reload and scratch eval workflows
 

@@ -1,6 +1,7 @@
 // Reusable fused functional transforms.
 (package main)
 (import arr "kvist:arr")
+(import map "kvist:map")
 
 (defstruct Order {
   status: int
@@ -115,6 +116,15 @@
 (defn sum-active-ages-with-reducer [] -> int
   (transduce active-ages add-int 0 (sample-users)))
 
+(defn min-paid-total [] -> int
+  (transduce paid-order-totals min 999 (sample-orders)))
+
+(defn max-paid-total [] -> int
+  (transduce paid-order-totals max 0 (sample-orders)))
+
+(defn collect-order-statuses [] -> set[int]
+  (into set[int] (map .status) (sample-orders)))
+
 (defn collect-all-ages-inline [] -> [dynamic]int
   (into [dynamic]int (map .age) (sample-users)))
 
@@ -199,6 +209,27 @@
       (set! total (+ total (count key)))
       (set! total (+ total value)))
     total))
+
+(defn sum-map-entry-transform [] -> int
+  (let [lookup (map[string]int {"aa" 1 "b" -2 "ccc" 3}) :defer]
+    (transduce
+      (comp
+        (filter (fn [entry: (map.entry string int)] -> bool (> entry.value 0)))
+        (map (fn [entry: (map.entry string int)] -> int (+ (count entry.key) entry.value))))
+      + 0
+      (map.entries lookup))))
+
+(defn sum-map-entry-into-map [] -> int
+  (let [lookup (map[string]int {"aa" 1 "b" -2 "ccc" 3}) :defer
+        bumped (into map[string]int
+                 (comp
+                   (filter (fn [entry: (map.entry string int)] -> bool (> entry.value 0)))
+                   (map (fn [entry: (map.entry string int)] -> (map.entry string int)
+                          ((map.entry string int) {key: entry.key value: (+ entry.value 1)}))))
+                 (map.entries lookup)) :defer]
+    (+ (map.get bumped "aa" 0)
+       (map.get bumped "b" 0)
+       (map.get bumped "ccc" 0))))
 
 (defn sum-range-transform [] -> int
   (transduce
@@ -341,6 +372,7 @@
         after-young-prefix (collect-ages-after-young-prefix)
         indexed-ages (collect-indexed-active-ages)
         parts (collect-paid-order-parts)
+        statuses (collect-order-statuses)
         appended-totals (append-paid-totals)
         manual-totals (collect-paid-totals-manual)]
     (defer
@@ -358,12 +390,15 @@
       (delete after-young-prefix)
       (delete indexed-ages)
       (delete parts)
+      (delete statuses)
       (delete appended-totals)
       (delete manual-totals))
     (println (+ (sum-paid-totals)
                 (sum-paid-totals-manual)
                 (sum-active-ages)
                 (sum-active-ages-with-reducer)
+                (min-paid-total)
+                (max-paid-total)
                 (sum-nonzero-paid-discounts)
                 (sum-first-paid-total)
                 (sum-leading-young-ages)
@@ -373,12 +408,15 @@
                 (sum-paid-order-parts)
                 (sum-paid-totals-for)
                 (sum-paid-totals-indexed-for)
+                (count statuses)
                 (sum-active-ages-for-inline)
                 (sum-order-totals-inline)
                 (sum-inline-fn-paid-totals)
                 (weighted-inline-fn-paid-totals)
                 (sum-map-values-transform)
                 (sum-map-keys-and-values-for)
+                (sum-map-entry-transform)
+                (sum-map-entry-into-map)
                 (sum-range-transform)
                 (sum-repeat-transform)
                 (sum-indexed-inline-fn-ages)
@@ -426,6 +464,16 @@
 
   (sum-active-ages-with-reducer)
   ;; => 64
+
+  (min-paid-total)
+  ;; => 35
+
+  (max-paid-total)
+  ;; => 90
+
+  (let [statuses (collect-order-statuses) :defer]
+    (count statuses))
+  ;; => 2
 
   (sum-nonzero-paid-discounts)
   ;; => 15

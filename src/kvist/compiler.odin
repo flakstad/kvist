@@ -1142,6 +1142,9 @@ append_source_package_marker_exports :: proc(names: ^[dynamic]string, import_pat
     if import_path == "kvist:html" && !contains_text(names^[:], "for") {
         append(names, "for")
     }
+    if import_path == "kvist:map" && !contains_text(names^[:], "entry") {
+        append(names, "entry")
+    }
 }
 
 source_import_alias_and_path :: proc(form: CST_Form, importer_path: string = ".") -> (alias, path: string, ok: bool) {

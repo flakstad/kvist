@@ -1,13 +1,31 @@
 # Functional Transforms
 
-This document describes the current fused-transform surface: reusable streaming
-pipelines that lower to direct Odin loops. Use them when the item flow is clear
-and you want fewer hand-written traversal loops.
+Functional transforms are Kvist's main tool for reusable data shaping. They
+let you write one item-flow pipeline and consume it as a collection, scalar
+reduction, or loop, while the compiler still emits direct fused Odin loops.
+
+Use them when you would otherwise duplicate the same filtering and mapping in
+several hand-written loops.
+
+```clojure
+(deftransform paid-order-totals
+  (filter paid?)
+  (map order-total)
+  (filter positive?))
+
+(into [dynamic]int paid-order-totals orders)
+(transduce paid-order-totals + 0 orders)
+(for [total orders :transform paid-order-totals]
+  (println total))
+```
+
+No lazy sequences are built. No intermediate arrays are created unless you ask
+for one with `into`.
 
 ## When To Use Them
 
 Manual `for` loops are always available and remain the escape hatch for
-anything unusual. A transform pipeline is only worth adding if it provides clear
+anything unusual. A transform pipeline is worth using when it provides clear
 benefits over hand-written fused loops:
 
 - reusable transformation definitions
@@ -74,14 +92,21 @@ Collection output is explicit with `into`:
 ```clojure
 (defn paid-totals [orders: []Order] -> [dynamic]int
   (into [dynamic]int paid-order-totals orders))
+
+(defn order-statuses [orders: []Order] -> set[int]
+  (into set[int] (map .status) orders))
 ```
 
-`into` returns a fresh owned dynamic array. Use `arr.into!` when appending into
-an existing dynamic array:
+`into` returns a fresh owned dynamic array, map, or set. Use `arr.into!` when
+appending into an existing dynamic array:
 
 ```clojure
 (arr.into! existing paid-order-totals orders)
 ```
+
+When the source has an obvious count, `into` reserves output capacity in the
+generated Odin loop. This is only a capacity hint; filters can still produce
+fewer values.
 
 Scalar output is explicit with `transduce`:
 
@@ -90,9 +115,13 @@ Scalar output is explicit with `transduce`:
   (transduce paid-order-totals + 0 orders))
 ```
 
-Reducers can be `+`, a known two-argument function, or an inline `fn` literal:
+Reducers can be `+`, `min`, `max`, a known two-argument function, or an inline
+`fn` literal:
 
 ```clojure
+(transduce paid-order-totals min 999 orders)
+(transduce paid-order-totals max 0 orders)
+
 (let [weight 2]
   (transduce paid-order-totals
     (fn [acc: int, total: int] -> int (+ acc (* total weight)))
@@ -164,12 +193,33 @@ transform still runs on values:
   (println key total))
 ```
 
+When a transform itself should consume both key and value, opt in with
+`map.entries`. Entry values have type `(map.entry K V)` and fields `key` and
+`value`:
+
+```clojure
+(transduce
+  (map (fn [entry: (map.entry string int)] -> int
+         (+ (count entry.key) entry.value)))
+  + 0
+  (map.entries lookup))
+
+(into map[string]int
+  (map (fn [entry: (map.entry string int)] -> (map.entry string int)
+         ((map.entry string int) {key: entry.key value: (+ entry.value 1)})))
+  (map.entries lookup))
+
+(into set[string]
+  (map (fn [entry: (map.entry string int)] -> string entry.key))
+  (map.entries lookup))
+```
+
 `arr.range` and `arr.repeat` are normally eager owned array helpers. In
 transform-source position, the compiler lowers them directly to counted loops
 instead:
 
 ```clojure
-(transduce (filter even?) + 0 (arr.range 0 100))
+(transduce (filter even?) max 0 (arr.range 0 100))
 (transduce (map inc) + 0 (arr.repeat 4 2))
 (for [x (arr.range 10 0 -1) :transform (map inc)]
   (println x))
@@ -182,6 +232,7 @@ instead:
 | slices, fixed arrays, dynamic arrays | `into`, `arr.into!`, `transduce`, `for :transform` | direct `for` loop over elements |
 | maps | `into`, `arr.into!`, `transduce`, `for :transform` | direct map loop over values |
 | maps with keys | `for [key value map :transform xf]` | direct map loop, transform values, bind key separately |
+| `map.entries` | `into`, `arr.into!`, `transduce`, `for :transform` | direct map loop over explicit `(map.entry K V)` values |
 | `defiter` calls | `into`, `arr.into!`, `transduce`, `for :transform` | direct `next` loop with `:dispose` cleanup when present |
 | `arr.range` | `into`, `arr.into!`, `transduce`, `for :transform` | direct counted loop, no range array allocation |
 | `arr.repeat` | `into`, `arr.into!`, `transduce`, `for :transform` | direct counted loop over a cached repeated value, no repeat array allocation |
@@ -192,11 +243,10 @@ arrays.
 
 ### Map Entries
 
-Map transforms currently consume values. `for [key value map :transform xf]`
-is the key-aware surface: the transform runs on each value and the loop body can
-also use the key. `into` and `transduce` do not yet expose implicit entry/pair
-values. If Kvist grows that surface, it should first choose an explicit entry
-representation instead of making map values sometimes mean entries.
+Map transforms consume values by default. `for [key value map :transform xf]`
+keeps the key available while transforming values. `map.entries` is the
+explicit entry surface for `into`, `arr.into!`, `transduce`, and
+`for :transform`; it does not allocate an entries array.
 
 For a complete iterator example that exercises `for`, `into`, `transduce`, and
 `:dispose` cleanup, see
@@ -289,7 +339,7 @@ Rough Odin shape:
 
 ```odin
 (proc(kvist_source: []Order) -> [dynamic]int {
-    kvist_out := make([dynamic]int)
+    kvist_out := make([dynamic]int, 0, len(kvist_source))
     for kvist_item in kvist_source {
         if paid_p(kvist_item) {
             kvist_value_1 := order_total(kvist_item)
@@ -302,12 +352,14 @@ Rough Odin shape:
 })(orders)
 ```
 
-`transduce` lowers to the same fused item flow with an accumulator. `+` emits
-direct accumulator addition; known two-argument reducers and inline `fn`
-reducers emit direct calls:
+`transduce` lowers to the same fused item flow with an accumulator. `+`, `min`,
+and `max` emit direct accumulator updates; known two-argument reducers and
+inline `fn` reducers emit direct calls:
 
 ```clojure
 (transduce paid-order-totals + 0 orders)
+(transduce paid-order-totals min 999 orders)
+(transduce paid-order-totals max 0 orders)
 (transduce paid-order-totals add-int 0 orders)
 (transduce paid-order-totals
   (fn [acc: int, total: int] -> int (+ acc total))
@@ -393,12 +445,20 @@ The current implementation is strict:
 - dynamic array `into` owns the returned array, and callers delete it using the
   existing ownership conventions; append into existing arrays with
   `(arr.into! target transform source)`;
+- `into` reserves capacity for counted collection sources when the count is
+  obvious to the lowering;
+- map `into` owns the returned map and expects the pipeline to produce
+  `(map.entry K V)` values for an output type `map[K]V`;
+- set `into` owns the returned set and expects the pipeline to produce values
+  of the set element type;
 - `transduce` requires an obvious accumulator type from the initial value or an
-  annotation, and the reducer must be `+`, a known two-argument function, or an
-  inline `fn` literal returning the accumulator type;
+  annotation, and the reducer must be `+`, `min`, `max`, a known two-argument
+  function, or an inline `fn` literal returning the accumulator type;
 - map sources feed values into `into`, `arr.into!`, `transduce`, and
   `for :transform`; `(for [key value m :transform transform] ...)` keeps the
   key available while transforming the value;
+- `map.entries` feeds explicit `(map.entry K V)` values with `key` and `value`
+  fields through the same fused transform positions;
 - `arr.range` and `arr.repeat` sources in transform positions lower to direct
   loops and do not allocate the owned arrays that ordinary calls return;
 - `defiter` calls are consumed directly by `for`, `into`, and `transduce`;
@@ -414,6 +474,11 @@ The current implementation is strict:
 When any of these rules are not met, the compiler rejects the pipeline and
 suggests the direct `for` loop fallback.
 
+Reducers do not currently have a Clojure-style `reduced` protocol for
+short-circuiting arbitrary reductions. Transform steps such as `take` and
+`take-while` can still stop the source loop early, but a reducer callback cannot
+yet request early termination.
+
 Named `deftransform` declarations are checked for basic shape immediately.
 The spec may be a single step, `(comp ...)`, or several step forms after the
 name. Callback existence, callback arity, callback types, and output type
@@ -424,10 +489,11 @@ and accumulator types are known.
 
 - transform specs support `map`, `map-indexed`, `mapcat`, `filter`, `remove`,
   `keep`, `take`, `take-while`, `drop`, and `drop-while`
-- `into` currently targets fresh owned `[dynamic]T` arrays; `arr.into!`
-  appends into existing dynamic arrays
-- `transduce` supports `+`, known two-argument reducers, and inline `fn`
-  reducers
+- `into` currently targets fresh owned `[dynamic]T` arrays, owned `map[K]V`
+  maps, and owned `set[T]` sets; `arr.into!` appends into existing dynamic
+  arrays
+- `transduce` supports `+`, `min`, `max`, known two-argument reducers, and
+  inline `fn` reducers
 - inputs may be slices, fixed arrays, dynamic arrays, maps, or `defiter` calls
 - inline `fn` callbacks are compile-time syntax in transform positions, not
   runtime closure values

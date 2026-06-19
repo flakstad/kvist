@@ -8412,6 +8412,124 @@ compile_functional_transform_map_value_sources :: proc(t: ^testing.T) {
 }
 
 @(test)
+compile_functional_transform_map_entry_sources :: proc(t: ^testing.T) {
+    source := `(package main)
+(import arr "kvist:arr")
+(import map "kvist:map")
+
+(defn entry-score [entry: (map.entry string int)] -> int
+  (+ (count entry.key) entry.value))
+
+(defn keep-positive-entry? [entry: (map.entry string int)] -> bool
+  (> entry.value 0))
+
+(deftransform entry-scores
+  (filter keep-positive-entry?)
+  (map entry-score))
+
+(defn collect [lookup: map[string]int] -> [dynamic]int
+  (into [dynamic]int entry-scores (map.entries lookup)))
+
+(defn bump-entry [entry: (map.entry string int)] -> (map.entry string int)
+  ((map.entry string int) {key: entry.key value: (+ entry.value 1)}))
+
+(defn collect-map [lookup: map[string]int] -> map[string]int
+  (into map[string]int
+    (comp
+      (filter keep-positive-entry?)
+      (map bump-entry))
+    (map.entries lookup)))
+
+(defn collect-inferred-empty [] -> map[string]int
+  (let [lookup (map.empty string int)]
+    (defer (delete lookup))
+    (map.assoc! lookup "a" 1)
+    (into map[string]int (map bump-entry) (map.entries lookup))))
+
+(defn collect-inferred-of [] -> map[string]int
+  (let [lookup (map.of string int {"a" 1})]
+    (defer (delete lookup))
+    (into map[string]int (map bump-entry) (map.entries lookup))))
+
+(defn append-values [out: [dynamic]int, lookup: map[string]int]
+  (arr.into! out entry-scores (map.entries lookup)))
+
+(defn total [lookup: map[string]int] -> int
+  (transduce entry-scores + 0 (map.entries lookup)))
+
+(defn loop-total [lookup: map[string]int] -> int
+  (let [total 0]
+    (for [entry (map.entries lookup) :transform entry-scores]
+      (set! total (+ total entry)))
+    total))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "Kvist_Map_Entry :: struct($K: typeid, $V: typeid) {"), true)
+    testing.expect_value(t, strings.contains(output, "entry_score :: proc(entry: Kvist_Map_Entry(string, int)) -> int"), true)
+    testing.expect_value(t, strings.contains(output, "for kvist_entry_key, kvist_entry_value in kvist_source {"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_item := Kvist_Map_Entry(string, int){key = kvist_entry_key, value = kvist_entry_value}"), true)
+    testing.expect_value(t, strings.contains(output, "append(&kvist_out,"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_out[(kvist_xform_"), true)
+    testing.expect_value(t, strings.contains(output, ").key] = (kvist_xform_"), true)
+    testing.expect_value(t, strings.contains(output, ").value"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_out := make(map[string]int, len(kvist_source))"), true)
+    testing.expect_value(t, strings.contains(output, "append(kvist_out,"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_acc +="), true)
+}
+
+@(test)
+compile_functional_transform_min_max_reducers :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn smallest [xs: []int] -> int
+  (transduce (filter (fn [x: int] -> bool (> x 0))) min 999 xs))
+
+(defn largest [xs: []int] -> int
+  (transduce (filter (fn [x: int] -> bool (> x 0))) max 0 xs))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "if kvist_item < kvist_acc { kvist_acc = kvist_item }"), true)
+    testing.expect_value(t, strings.contains(output, "if kvist_item > kvist_acc { kvist_acc = kvist_item }"), true)
+}
+
+@(test)
+compile_functional_transform_into_set :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn even? [x: int] -> bool
+  (= (% x 2) 0))
+
+(defn collect [xs: []int] -> set[int]
+  (into set[int] (filter even?) xs))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "collect :: proc(xs: []int) -> map[int]struct{} {"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_out := make(map[int]struct{}, len(kvist_source))"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_out[kvist_item] = struct{}{}"), true)
+}
+
+@(test)
 compile_functional_transform_arr_range_sources :: proc(t: ^testing.T) {
     source := `(package main)
 (import arr "kvist:arr")
@@ -8904,7 +9022,7 @@ reject_functional_transform_output_type_mismatch :: proc(t: ^testing.T) {
     }
     defer delete(err.message)
 
-    testing.expect_value(t, err.message, "into transform output element type is int, but pipeline produces string")
+    testing.expect_value(t, err.message, "into transform output value type is int, but pipeline produces string")
 }
 
 @(test)

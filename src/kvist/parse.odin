@@ -475,6 +475,22 @@ parse_type_text :: proc(form: CST_Form) -> (text: string, err: Compile_Error, ok
             return fmt.tprintf("map[%s]%s", key_text, value_text), {}, true
         }
 
+        if is_symbol(form.items[0], "map.entry") || is_symbol(form.items[0], "map/entry") ||
+           is_symbol(form.items[0], "map-entry") || is_symbol(form.items[0], "map__entry") {
+            if len(form.items) != 3 {
+                return "", Compile_Error{message = "map.entry type expects key and value types", span = form.span}, false
+            }
+            key_text, err_key, ok_key := parse_type_text(form.items[1])
+            if !ok_key {
+                return "", err_key, false
+            }
+            value_text, err_value, ok_value := parse_type_text(form.items[2])
+            if !ok_value {
+                return "", err_value, false
+            }
+            return fmt.tprintf("Kvist_Map_Entry(%s, %s)", key_text, value_text), {}, true
+        }
+
         if is_symbol(form.items[0], "matrix") {
             if len(form.items) != 4 || !(form.items[1].kind == .Symbol || form.items[1].kind == .Number) || !(form.items[2].kind == .Symbol || form.items[2].kind == .Number) {
                 return "", Compile_Error{message = "matrix type expects row count, column count, and element type", span = form.span}, false

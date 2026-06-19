@@ -39,6 +39,15 @@
     (quasiquote
       (core.get (unquote m) (unquote key) (unquote (kvist.first rest))))))
 
+(defmacro entries
+  "Use key/value entry values from `m` as an explicit transform source.
+
+  This is transform-only. It does not allocate an entries array; ordinary maps
+  still feed values to transforms."
+  [m]
+  (quasiquote
+    (map-entries (unquote m))))
+
 (defmacro merge!
   "Mutate `target` by assigning every entry from `source`.
 

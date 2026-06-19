@@ -1,0 +1,78 @@
+// Fused data transforms: one item flow, several outputs.
+(package main)
+
+(defstruct Order {
+  status: int
+  amount: int
+  discount: int
+})
+
+(defn paid? [order: Order] -> bool
+  (= order.status 2))
+
+(defn net [order: Order] -> int
+  (- order.amount order.discount))
+
+(defn positive? [x: int] -> bool
+  (> x 0))
+
+(deftransform paid-nets
+  (filter paid?)
+  (map net)
+  (filter positive?))
+
+(defn sample-orders [] -> [4]Order
+  ([4]Order [(Order {status: 2 amount: 100 discount: 10})
+             (Order {status: 1 amount: 40 discount: 0})
+             (Order {status: 2 amount: 80 discount: 5})
+             (Order {status: 2 amount: 30 discount: 30})]))
+
+(defn collect-paid-nets [] -> [dynamic]int
+  (into [dynamic]int paid-nets (sample-orders)))
+
+(defn total-paid-net [] -> int
+  (transduce paid-nets + 0 (sample-orders)))
+
+(defn best-paid-net [] -> int
+  (transduce paid-nets max 0 (sample-orders)))
+
+(defn paid-statuses [] -> set[int]
+  (into set[int]
+    (comp
+      (filter paid?)
+      (map .status))
+    (sample-orders)))
+
+(defn total-paid-net-for [] -> int
+  (let [total 0]
+    (for [value (sample-orders) :transform paid-nets]
+      (set! total (+ total value)))
+    total))
+
+(defn main []
+  (let [nets (collect-paid-nets)
+        statuses (paid-statuses)]
+    (defer
+      (delete nets)
+      (delete statuses))
+    (println (+ (total-paid-net)
+                (best-paid-net)
+                (total-paid-net-for)
+                nets[0]
+                nets[1]
+                (count statuses)))))
+
+(comment
+  ;; The same transform can collect, reduce, or drive a loop.
+  (collect-paid-nets)
+  ;; => [90 75]
+
+  (total-paid-net)
+  ;; => 165
+
+  (best-paid-net)
+  ;; => 90
+
+  (total-paid-net-for)
+  ;; => 165
+)

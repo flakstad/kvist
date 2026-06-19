@@ -887,6 +887,8 @@ specific constructors with optional capacity arguments:
 empty map. The optional numeric argument is a capacity hint. These helpers are
 often the clearest choice when you want to build a collection incrementally with
 `append`, `arr.into!`, `map.assoc!`, `map.merge!`, or direct indexed updates.
+`let` can infer local binding types from `arr.empty`, `map.empty`, and `map.of`
+calls.
 
 There is no separate object-construction runtime. Struct construction is just
 type-call syntax over a brace literal.
@@ -1827,8 +1829,20 @@ Odin loops rather than intermediate arrays.
 (transduce paid-order-totals
   (fn [acc: int, total: int] -> int (+ acc total))
   0 orders)
+(transduce paid-order-totals min 999 orders)
+(transduce paid-order-totals max 0 orders)
 
 (transduce (filter positive?) + 0 lookup) ; map values
+(transduce
+  (map (fn [entry: (map.entry string int)] -> int entry.value))
+  + 0
+  (map.entries lookup)) ; explicit map entries
+(into map[string]int
+  (map (fn [entry: (map.entry string int)] -> (map.entry string int) entry))
+  (map.entries lookup)) ; build a map from entries
+(into set[string]
+  (map (fn [entry: (map.entry string int)] -> string entry.key))
+  (map.entries lookup)) ; build a set from values
 (transduce (filter even?) + 0 (arr.range 0 100)) ; direct loop, no range array
 (transduce (map inc) + 0 (arr.repeat 4 2)) ; direct loop, no repeat array
 
@@ -1849,10 +1863,17 @@ The current transform surface is intentionally small:
 - `comp` composes steps and named transforms
 - callbacks can be known functions, inline `fn` literals with explicit return
   types, or field selectors where the step supports selectors
-- `into` currently returns fresh owned `[dynamic]T` arrays
-- `transduce` supports `+`, known two-argument reducers, and inline `fn`
-  reducers
+- `into` currently returns fresh owned `[dynamic]T` arrays, owned maps, and
+  owned sets
+- `transduce` supports `+`, `min`, `max`, known two-argument reducers, and
+  inline `fn` reducers
 - inputs can be slices, arrays, dynamic arrays, maps, or `defiter` calls
+- `into` can build owned dynamic arrays, owned maps, or owned sets; map output
+  expects `(map.entry K V)` values
+- `into` reserves capacity for counted collection sources when the count is
+  obvious to the lowering
+- map inputs transform values by default; `(map.entries m)` transforms explicit
+  `(map.entry K V)` values with `key` and `value` fields
 - `arr.range` and `arr.repeat` inputs in transform positions lower to direct
   loops instead of allocating helper arrays
 

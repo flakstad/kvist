@@ -89,6 +89,26 @@ Transform_Direct_Source :: struct {
     repeat_value_text: string,
 }
 
+Transform_Map_Entries_Source :: struct {
+    source_text: string,
+    source_ty:   string,
+    entry_ty:    string,
+}
+
+Transform_Into_Output_Kind :: enum {
+    Dynamic_Array,
+    Map,
+    Set,
+}
+
+Transform_Into_Output :: struct {
+    kind:       Transform_Into_Output_Kind,
+    output_ty:  string,
+    value_ty:   string,
+    map_key_ty: string,
+    map_val_ty: string,
+}
+
 Emitter_Features :: struct {
     dynamic_literals: bool,
     core_map:         bool,
@@ -104,6 +124,7 @@ Emitter_Features :: struct {
     core_get_or_default: bool,
     core_contains_value: bool,
     core_into:        bool,
+    map_entry:        bool,
     core_map_in_place: bool,
     core_map_in_place_capture_max: int,
     core_filter_in_place: bool,
@@ -525,6 +546,12 @@ mark_core_contains_value :: proc(e: ^Emitter) {
 mark_core_into :: proc(e: ^Emitter) {
     if e.features != nil {
         e.features.core_into = true
+    }
+}
+
+mark_map_entry :: proc(e: ^Emitter) {
+    if e.features != nil {
+        e.features.map_entry = true
     }
 }
 
@@ -2739,6 +2766,14 @@ shallow_update_temp_name :: proc(e: ^Emitter) -> string {
 }
 
 struct_field_type_for_update :: proc(e: ^Emitter, target_ty, field: string) -> (string, bool) {
+    if key_ty, value_ty, ok_entry := map_entry_type_parts(target_ty); ok_entry {
+        switch field {
+        case "key":
+            return key_ty, true
+        case "value":
+            return value_ty, true
+        }
+    }
     if struct_decl, ok_struct := find_struct_decl(e, target_ty); ok_struct {
         if struct_field, ok_field := find_struct_field(struct_decl, field); ok_field {
             return struct_field.ty, true
@@ -5621,6 +5656,22 @@ obvious_binding_type :: proc(e: ^Emitter, binding: Binding) -> (string, bool) {
                 return fmt.tprintf("[dynamic]%s", elem_ty), true
             }
         }
+        if (surface_head == "map/empty" || head_name == "map_empty" || head_name == "map__empty") &&
+           (len(binding.value.items) == 3 || len(binding.value.items) == 4) {
+            key_ty, _, ok_key_ty := parse_type_text(binding.value.items[1])
+            value_ty, _, ok_value_ty := parse_type_text(binding.value.items[2])
+            if ok_key_ty && ok_value_ty {
+                return fmt.tprintf("map[%s]%s", key_ty, value_ty), true
+            }
+        }
+        if (surface_head == "map/of" || head_name == "map_of" || head_name == "map__of") &&
+           len(binding.value.items) == 4 {
+            key_ty, _, ok_key_ty := parse_type_text(binding.value.items[1])
+            value_ty, _, ok_value_ty := parse_type_text(binding.value.items[2])
+            if ok_key_ty && ok_value_ty {
+                return fmt.tprintf("map[%s]%s", key_ty, value_ty), true
+            }
+        }
         if (head_is_core_assoc(head) || head_is_core_update(head)) &&
            len(binding.value.items) >= 2 {
             return shallow_update_return_type(e, binding.value)
@@ -6391,6 +6442,33 @@ emit_transform_for_collection_loop :: proc(e: ^Emitter, coll_form: CST_Form, ind
             return err_body, false
         }
         emit_line(e, fmt.tprintf("%s += 1", repeat_i))
+        e.indent -= 1
+        emit_line(e, "}")
+        return {}, true
+    }
+    if form_is_map_entries_call(coll_form) {
+        spec, err_spec, ok_spec := transform_map_entries_source(e, coll_form)
+        if !ok_spec {
+            return err_spec, false
+        }
+        steps, err_steps, ok_steps := parse_transform_steps(e, transform_form)
+        if !ok_steps {
+            return err_steps, false
+        }
+        err_prelude, ok_prelude := emit_transform_state_prelude(e, &e.builder, steps[:], e.indent)
+        if !ok_prelude {
+            return err_prelude, false
+        }
+        if len(index_name) > 0 {
+            emit_line(e, fmt.tprintf("%s := 0", index_name))
+        }
+        emit_line(e, fmt.tprintf("for kvist_entry_key, kvist_entry_value in %s %s", spec.source_text, "{"))
+        e.indent += 1
+        emit_line(e, fmt.tprintf("kvist_item := %s%skey = kvist_entry_key, value = kvist_entry_value%s", spec.entry_ty, "{", "}"))
+        err_body, ok_body := emit_transform_for_body(e, steps[:], "kvist_item", spec.entry_ty, index_name, value_name, "", "", body)
+        if !ok_body {
+            return err_body, false
+        }
         e.indent -= 1
         emit_line(e, "}")
         return {}, true
@@ -7952,6 +8030,15 @@ form_is_direct_transform_source_call :: proc(form: CST_Form) -> bool {
     return form_is_arr_range_call(form) || form_is_arr_repeat_call(form)
 }
 
+form_is_map_entries_call :: proc(form: CST_Form) -> bool {
+    if form.kind != .List || len(form.items) == 0 || form.items[0].kind != .Symbol {
+        return false
+    }
+    head := form.items[0].text
+    surface := source_package_surface_head(head)
+    return surface == "map/entries" || head == "map-entries" || head == "map_entries"
+}
+
 transform_range_source :: proc(e: ^Emitter, form: CST_Form) -> (spec: Transform_Range_Source, err: Compile_Error, ok: bool) {
     if !form_is_arr_range_call(form) {
         return spec, {}, false
@@ -8028,6 +8115,32 @@ transform_direct_source :: proc(e: ^Emitter, form: CST_Form) -> (spec: Transform
     }
 
     return spec, {}, false
+}
+
+transform_map_entries_source :: proc(e: ^Emitter, form: CST_Form) -> (spec: Transform_Map_Entries_Source, err: Compile_Error, ok: bool) {
+    if !form_is_map_entries_call(form) {
+        return spec, {}, false
+    }
+    if len(form.items) != 2 {
+        return spec, Compile_Error{message = "map.entries expects one map source", span = form.span}, false
+    }
+    source_ty, ok_source_ty := obvious_form_type(e, form.items[1])
+    if !ok_source_ty {
+        return spec, Compile_Error{message = "map.entries expects a map with an obvious type; bind or annotate it first", span = form.items[1].span}, false
+    }
+    key_ty, value_ty, ok_map := map_type_parts(source_ty)
+    if !ok_map {
+        return spec, Compile_Error{message = fmt.tprintf("map.entries expects map source, got %s", source_ty), span = form.items[1].span}, false
+    }
+    source_text, err_source, ok_source := emit_expr(e, form.items[1])
+    if !ok_source {
+        return spec, err_source, false
+    }
+    mark_map_entry(e)
+    spec.source_text = source_text
+    spec.source_ty = source_ty
+    spec.entry_ty = fmt.tprintf("Kvist_Map_Entry(%s, %s)", key_ty, value_ty)
+    return spec, {}, true
 }
 
 source_state_type :: proc(e: ^Emitter, source: ^Source_Decl) -> (string, Compile_Error, bool) {
@@ -8573,6 +8686,16 @@ transform_reduce_update_text :: proc(e: ^Emitter, reducer: CST_Form, acc_text, a
         }
         return fmt.tprintf("%s += %s", acc_text, value_text), {}, true
     }
+    if reducer.text == "min" || reducer.text == "max" {
+        if acc_ty != value_ty {
+            return "", Compile_Error{message = fmt.tprintf("%s reducer expects pipeline value %s to match accumulator %s", reducer.text, value_ty, acc_ty), span = reducer.span}, false
+        }
+        op := "<"
+        if reducer.text == "max" {
+            op = ">"
+        }
+        return fmt.tprintf("if %s %s %s %s %s = %s %s", value_text, op, acc_text, "{", acc_text, value_text, "}"), {}, true
+    }
     proc_name := map_name(reducer.text)
     proc_decl, ok_proc := find_proc_decl(e, proc_name)
     if !ok_proc {
@@ -8674,20 +8797,21 @@ emit_transform_into_source_expr :: proc(
 
 emit_transform_into_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) {
     if len(form.items) < 4 {
-        return "", Compile_Error{message = "into transform expects dynamic array type, transform, and source", span = form.span}, false
+        return "", Compile_Error{message = "into transform expects output type, transform, and source", span = form.span}, false
     }
     output_ty, next_i, err_output_ty, ok_output_ty := parse_type_text_from_forms(form.items[:], 1)
     if !ok_output_ty {
         return "", err_output_ty, false
     }
     if next_i+2 != len(form.items) {
-        return "", Compile_Error{message = "into transform expects dynamic array type, transform, and source", span = form.span}, false
+        return "", Compile_Error{message = "into transform expects output type, transform, and source", span = form.span}, false
     }
     transform_form := form.items[next_i]
     source_form := form.items[next_i+1]
-    output_elem_ty, ok_output_elem_ty := dynamic_array_element_type(output_ty)
-    if !ok_output_elem_ty {
-        return "", Compile_Error{message = "into transform currently expects a dynamic array type", span = form.items[1].span}, false
+    output_spec, err_output_spec, ok_output_spec := transform_into_output_spec(output_ty)
+    if !ok_output_spec {
+        err_output_spec.span = form.items[1].span
+        return "", err_output_spec, false
     }
     if form_is_direct_transform_source_call(source_form) {
         source_spec, err_source, ok_source := transform_direct_source(e, source_form)
@@ -8719,7 +8843,7 @@ emit_transform_into_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compil
         call_args := strings.join(call_texts[:], ", ", context.allocator)
         defer delete(call_args)
         fmt.sbprintf(&builder, "(proc(%s) -> %s %s\n", param_list, output_ty, "{")
-        fmt.sbprintf(&builder, "    kvist_out := make(%s)\n", output_ty)
+        fmt.sbprintf(&builder, "    kvist_out := %s\n", transform_into_make_text(output_spec, ""))
         err_prelude, ok_prelude := emit_transform_state_prelude(e, &builder, steps[:], 1)
         if !ok_prelude {
             return "", err_prelude, false
@@ -8729,11 +8853,10 @@ emit_transform_into_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compil
         if !ok_body {
             return "", err_body, false
         }
-        if value_ty != output_elem_ty {
-            return "", Compile_Error{message = fmt.tprintf("into transform output element type is %s, but pipeline produces %s", output_elem_ty, value_ty), span = form.items[1].span}, false
+        if value_ty != output_spec.value_ty {
+            return "", Compile_Error{message = fmt.tprintf("into transform output value type is %s, but pipeline produces %s", output_spec.value_ty, value_ty), span = form.items[1].span}, false
         }
-        append_indent(&builder, 2+close_count)
-        fmt.sbprintf(&builder, "append(&kvist_out, %s)\n", value_text)
+        emit_transform_into_output_write(&builder, 2+close_count, output_spec, value_text)
         emit_transform_closers(&builder, 2+close_count, close_count)
         emit_transform_direct_source_loop_step(&builder, 2, source_spec)
         strings.write_string(&builder, "    }\n")
@@ -8742,19 +8865,42 @@ emit_transform_into_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compil
         return fmt.tprintf("%s(%s)", strings.to_string(builder), call_args), {}, true
     }
     if source, ok_source_call := source_call_decl(e, source_form); ok_source_call {
-        return emit_transform_into_source_expr(e, form, output_ty, output_elem_ty, transform_form, source_form, source)
+        if output_spec.kind != .Dynamic_Array {
+            return "", Compile_Error{message = "into transform over defiter sources currently expects a dynamic array output type", span = form.items[1].span}, false
+        }
+        return emit_transform_into_source_expr(e, form, output_ty, output_spec.value_ty, transform_form, source_form, source)
     }
-    source_ty, ok_source_ty := obvious_form_type(e, source_form)
-    if !ok_source_ty {
-        return "", Compile_Error{message = "into transform expects a source with an obvious collection type; bind or annotate it first", span = source_form.span}, false
-    }
-    source_elem_ty, ok_source_elem_ty := transform_source_value_type(source_ty)
-    if !ok_source_elem_ty {
-        return "", Compile_Error{message = fmt.tprintf("into transform expects slice, array, or map source, got %s", source_ty), span = source_form.span}, false
-    }
-    source_text, err_source, ok_source := emit_expr(e, source_form)
-    if !ok_source {
-        return "", err_source, false
+    source_ty := ""
+    source_elem_ty := ""
+    source_text := ""
+    map_entries_spec: Transform_Map_Entries_Source
+    source_is_map_entries := form_is_map_entries_call(source_form)
+    if source_is_map_entries {
+        spec, err_entries, ok_entries := transform_map_entries_source(e, source_form)
+        if !ok_entries {
+            return "", err_entries, false
+        }
+        map_entries_spec = spec
+        source_ty = spec.source_ty
+        source_elem_ty = spec.entry_ty
+        source_text = spec.source_text
+    } else {
+        ok_source_ty := false
+        source_ty, ok_source_ty = obvious_form_type(e, source_form)
+        if !ok_source_ty {
+            return "", Compile_Error{message = "into transform expects a source with an obvious collection type; bind or annotate it first", span = source_form.span}, false
+        }
+        ok_source_elem_ty := false
+        source_elem_ty, ok_source_elem_ty = transform_source_value_type(source_ty)
+        if !ok_source_elem_ty {
+            return "", Compile_Error{message = fmt.tprintf("into transform expects slice, array, or map source, got %s", source_ty), span = source_form.span}, false
+        }
+        err_source: Compile_Error
+        ok_source := false
+        source_text, err_source, ok_source = emit_expr(e, source_form)
+        if !ok_source {
+            return "", err_source, false
+        }
     }
     steps, err_steps, ok_steps := parse_transform_steps(e, transform_form)
     if !ok_steps {
@@ -8782,21 +8928,24 @@ emit_transform_into_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compil
     call_args := strings.join(call_texts[:], ", ", context.allocator)
     defer delete(call_args)
     fmt.sbprintf(&builder, "(proc(%s) -> %s %s\n", param_list, output_ty, "{")
-    fmt.sbprintf(&builder, "    kvist_out := make(%s)\n", output_ty)
+    fmt.sbprintf(&builder, "    kvist_out := %s\n", transform_into_make_text(output_spec, "len(kvist_source)"))
     err_prelude, ok_prelude := emit_transform_state_prelude(e, &builder, steps[:], 1)
     if !ok_prelude {
         return "", err_prelude, false
     }
-    fmt.sbprintf(&builder, "    %s\n", transform_source_loop_header(source_ty, "kvist_source", ""))
+    if source_is_map_entries {
+        emit_transform_map_entries_loop_open(&builder, 1, "kvist_item", "kvist_source", map_entries_spec)
+    } else {
+        fmt.sbprintf(&builder, "    %s\n", transform_source_loop_header(source_ty, "kvist_source", ""))
+    }
     value_text, value_ty, close_count, err_body, ok_body := emit_transform_pipeline_body(e, &builder, steps[:], "kvist_item", source_elem_ty, 2)
     if !ok_body {
         return "", err_body, false
     }
-    if value_ty != output_elem_ty {
-        return "", Compile_Error{message = fmt.tprintf("into transform output element type is %s, but pipeline produces %s", output_elem_ty, value_ty), span = form.items[1].span}, false
+    if value_ty != output_spec.value_ty {
+        return "", Compile_Error{message = fmt.tprintf("into transform output value type is %s, but pipeline produces %s", output_spec.value_ty, value_ty), span = form.items[1].span}, false
     }
-    append_indent(&builder, 2+close_count)
-    fmt.sbprintf(&builder, "append(&kvist_out, %s)\n", value_text)
+    emit_transform_into_output_write(&builder, 2+close_count, output_spec, value_text)
     emit_transform_closers(&builder, 2+close_count, close_count)
     strings.write_string(&builder, "    }\n")
     strings.write_string(&builder, "    return kvist_out\n")
@@ -8963,17 +9112,37 @@ emit_transform_into_bang_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, C
     if source, ok_source_call := source_call_decl(e, source_form); ok_source_call {
         return emit_transform_into_bang_source_expr(e, form, target_ty, target_elem_ty, target_text, transform_form, source_form, source)
     }
-    source_ty, ok_source_ty := obvious_form_type(e, source_form)
-    if !ok_source_ty {
-        return "", Compile_Error{message = "into! transform expects a source with an obvious collection type; bind or annotate it first", span = source_form.span}, false
-    }
-    source_elem_ty, ok_source_elem_ty := transform_source_value_type(source_ty)
-    if !ok_source_elem_ty {
-        return "", Compile_Error{message = fmt.tprintf("into! transform expects slice, array, or map source, got %s", source_ty), span = source_form.span}, false
-    }
-    source_text, err_source, ok_source := emit_expr(e, source_form)
-    if !ok_source {
-        return "", err_source, false
+    source_ty := ""
+    source_elem_ty := ""
+    source_text := ""
+    map_entries_spec: Transform_Map_Entries_Source
+    source_is_map_entries := form_is_map_entries_call(source_form)
+    if source_is_map_entries {
+        spec, err_entries, ok_entries := transform_map_entries_source(e, source_form)
+        if !ok_entries {
+            return "", err_entries, false
+        }
+        map_entries_spec = spec
+        source_ty = spec.source_ty
+        source_elem_ty = spec.entry_ty
+        source_text = spec.source_text
+    } else {
+        ok_source_ty := false
+        source_ty, ok_source_ty = obvious_form_type(e, source_form)
+        if !ok_source_ty {
+            return "", Compile_Error{message = "into! transform expects a source with an obvious collection type; bind or annotate it first", span = source_form.span}, false
+        }
+        ok_source_elem_ty := false
+        source_elem_ty, ok_source_elem_ty = transform_source_value_type(source_ty)
+        if !ok_source_elem_ty {
+            return "", Compile_Error{message = fmt.tprintf("into! transform expects slice, array, or map source, got %s", source_ty), span = source_form.span}, false
+        }
+        err_source: Compile_Error
+        ok_source := false
+        source_text, err_source, ok_source = emit_expr(e, source_form)
+        if !ok_source {
+            return "", err_source, false
+        }
     }
     steps, err_steps, ok_steps := parse_transform_steps(e, transform_form)
     if !ok_steps {
@@ -9007,7 +9176,11 @@ emit_transform_into_bang_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, C
     if !ok_prelude {
         return "", err_prelude, false
     }
-    fmt.sbprintf(&builder, "    %s\n", transform_source_loop_header(source_ty, "kvist_source", ""))
+    if source_is_map_entries {
+        emit_transform_map_entries_loop_open(&builder, 1, "kvist_item", "kvist_source", map_entries_spec)
+    } else {
+        fmt.sbprintf(&builder, "    %s\n", transform_source_loop_header(source_ty, "kvist_source", ""))
+    }
     value_text, value_ty, close_count, err_body, ok_body := emit_transform_pipeline_body(e, &builder, steps[:], "kvist_item", source_elem_ty, 2)
     if !ok_body {
         return "", err_body, false
@@ -9202,17 +9375,37 @@ emit_transform_transduce_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, C
     if source, ok_source_call := source_call_decl(e, form.items[4]); ok_source_call {
         return emit_transform_transduce_source_expr(e, form, form.items[1], reducer, init_text, acc_ty, form.items[4], source)
     }
-    source_ty, ok_source_ty := obvious_form_type(e, form.items[4])
-    if !ok_source_ty {
-        return "", Compile_Error{message = "transduce expects a source with an obvious collection type; bind or annotate it first", span = form.items[4].span}, false
-    }
-    source_elem_ty, ok_source_elem_ty := transform_source_value_type(source_ty)
-    if !ok_source_elem_ty {
-        return "", Compile_Error{message = fmt.tprintf("transduce expects slice, array, or map source, got %s", source_ty), span = form.items[4].span}, false
-    }
-    source_text, err_source, ok_source := emit_expr(e, form.items[4])
-    if !ok_source {
-        return "", err_source, false
+    source_ty := ""
+    source_elem_ty := ""
+    source_text := ""
+    map_entries_spec: Transform_Map_Entries_Source
+    source_is_map_entries := form_is_map_entries_call(form.items[4])
+    if source_is_map_entries {
+        spec, err_entries, ok_entries := transform_map_entries_source(e, form.items[4])
+        if !ok_entries {
+            return "", err_entries, false
+        }
+        map_entries_spec = spec
+        source_ty = spec.source_ty
+        source_elem_ty = spec.entry_ty
+        source_text = spec.source_text
+    } else {
+        ok_source_ty := false
+        source_ty, ok_source_ty = obvious_form_type(e, form.items[4])
+        if !ok_source_ty {
+            return "", Compile_Error{message = "transduce expects a source with an obvious collection type; bind or annotate it first", span = form.items[4].span}, false
+        }
+        ok_source_elem_ty := false
+        source_elem_ty, ok_source_elem_ty = transform_source_value_type(source_ty)
+        if !ok_source_elem_ty {
+            return "", Compile_Error{message = fmt.tprintf("transduce expects slice, array, or map source, got %s", source_ty), span = form.items[4].span}, false
+        }
+        err_source: Compile_Error
+        ok_source := false
+        source_text, err_source, ok_source = emit_expr(e, form.items[4])
+        if !ok_source {
+            return "", err_source, false
+        }
     }
     steps, err_steps, ok_steps := parse_transform_steps(e, form.items[1])
     if !ok_steps {
@@ -9255,7 +9448,11 @@ emit_transform_transduce_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, C
     if !ok_prelude {
         return "", err_prelude, false
     }
-    fmt.sbprintf(&builder, "    %s\n", transform_source_loop_header(source_ty, "kvist_source", ""))
+    if source_is_map_entries {
+        emit_transform_map_entries_loop_open(&builder, 1, "kvist_item", "kvist_source", map_entries_spec)
+    } else {
+        fmt.sbprintf(&builder, "    %s\n", transform_source_loop_header(source_ty, "kvist_source", ""))
+    }
     value_text, value_ty, close_count, err_body, ok_body := emit_transform_pipeline_body(e, &builder, steps[:], "kvist_item", source_elem_ty, 2)
     if !ok_body {
         return "", err_body, false
@@ -11291,6 +11488,13 @@ transform_source_loop_header :: proc(source_ty, source_text, key_name: string) -
     return fmt.tprintf("for kvist_item in %s %s", source_text, "{")
 }
 
+emit_transform_map_entries_loop_open :: proc(builder: ^strings.Builder, depth: int, item_name, source_text: string, spec: Transform_Map_Entries_Source) {
+    append_indent(builder, depth)
+    fmt.sbprintf(builder, "for kvist_entry_key, kvist_entry_value in %s %s\n", source_text, "{")
+    append_indent(builder, depth+1)
+    fmt.sbprintf(builder, "%s := %s%skey = kvist_entry_key, value = kvist_entry_value%s\n", item_name, spec.entry_ty, "{", "}")
+}
+
 append_transform_range_proc_params :: proc(param_texts, call_texts: ^[dynamic]string, spec: Transform_Range_Source) {
     append(param_texts, "kvist_range_start: int")
     append(param_texts, "kvist_range_end: int")
@@ -11356,6 +11560,70 @@ dynamic_array_element_type :: proc(type_text: string) -> (string, bool) {
         return "", false
     }
     return type_text[len("[dynamic]"):], true
+}
+
+map_entry_type_parts :: proc(type_text: string) -> (key, value: string, ok: bool) {
+    prefix := "Kvist_Map_Entry("
+    if !strings.has_prefix(type_text, prefix) || !strings.has_suffix(type_text, ")") {
+        return "", "", false
+    }
+    inner := type_text[len(prefix):len(type_text)-1]
+    comma := strings.index(inner, ",")
+    if comma <= 0 || comma+1 >= len(inner) {
+        return "", "", false
+    }
+    return strings.trim_space(inner[:comma]), strings.trim_space(inner[comma+1:]), true
+}
+
+transform_into_output_spec :: proc(output_ty: string) -> (spec: Transform_Into_Output, err: Compile_Error, ok: bool) {
+    spec.output_ty = output_ty
+    if elem_ty, ok_elem := dynamic_array_element_type(output_ty); ok_elem {
+        spec.kind = .Dynamic_Array
+        spec.value_ty = elem_ty
+        return spec, {}, true
+    }
+    if key_ty, value_ty, ok_map := map_type_parts(output_ty); ok_map && value_ty == "struct{}" {
+        spec.kind = .Set
+        spec.map_key_ty = key_ty
+        spec.map_val_ty = value_ty
+        spec.value_ty = key_ty
+        return spec, {}, true
+    }
+    if key_ty, value_ty, ok_map := map_type_parts(output_ty); ok_map {
+        spec.kind = .Map
+        spec.map_key_ty = key_ty
+        spec.map_val_ty = value_ty
+        spec.value_ty = fmt.tprintf("Kvist_Map_Entry(%s, %s)", key_ty, value_ty)
+        return spec, {}, true
+    }
+    return spec, Compile_Error{message = "into transform expects a dynamic array, map, or set output type"}, false
+}
+
+emit_transform_into_output_write :: proc(builder: ^strings.Builder, depth: int, spec: Transform_Into_Output, value_text: string) {
+    append_indent(builder, depth)
+    switch spec.kind {
+    case .Dynamic_Array:
+        fmt.sbprintf(builder, "append(&kvist_out, %s)\n", value_text)
+    case .Map:
+        fmt.sbprintf(builder, "kvist_out[(%s).key] = (%s).value\n", value_text, value_text)
+    case .Set:
+        fmt.sbprintf(builder, "kvist_out[%s] = struct%s%s\n", value_text, "{}", "{}")
+    }
+}
+
+transform_into_make_text :: proc(spec: Transform_Into_Output, capacity_text: string) -> string {
+    if capacity_text == "" {
+        return fmt.tprintf("make(%s)", spec.output_ty)
+    }
+    switch spec.kind {
+    case .Dynamic_Array:
+        return fmt.tprintf("make(%s, 0, %s)", spec.output_ty, capacity_text)
+    case .Map:
+        return fmt.tprintf("make(%s, %s)", spec.output_ty, capacity_text)
+    case .Set:
+        return fmt.tprintf("make(%s, %s)", spec.output_ty, capacity_text)
+    }
+    return fmt.tprintf("make(%s)", spec.output_ty)
 }
 
 append_indent :: proc(builder: ^strings.Builder, depth: int) {
@@ -13978,6 +14246,15 @@ emit_core_map_in_place_capture_helper :: proc(e: ^Emitter, capture_count: int) {
     emit_line(e, "}")
 }
 
+emit_map_entry_type_helper :: proc(e: ^Emitter) {
+    emit_line(e, "Kvist_Map_Entry :: struct($K: typeid, $V: typeid) {")
+    e.indent += 1
+    emit_line(e, "key: K,")
+    emit_line(e, "value: V,")
+    e.indent -= 1
+    emit_line(e, "}")
+}
+
 emit_core_keep_helper :: proc(e: ^Emitter) {
     emit_line(e, "kvist_keep :: proc(f: proc(x: $T) -> ($U, bool), xs: []T) -> [dynamic]U {")
     e.indent += 1
@@ -14441,6 +14718,7 @@ core_helpers_needed :: proc(features: Emitter_Features) -> bool {
            features.core_get_or_default ||
            features.core_contains_value ||
            features.core_into ||
+           features.map_entry ||
            features.core_map_in_place || features.core_map_in_place_capture_max > 0 ||
            features.core_filter_in_place || features.core_filter_in_place_capture_max > 0 ||
            features.core_remove_in_place || features.core_remove_in_place_capture_max > 0 ||
@@ -14482,6 +14760,10 @@ emit_core_helpers :: proc(e: ^Emitter, features: Emitter_Features) {
 
     emit_raw_newline(e)
     emitted := false
+    if features.map_entry {
+        emit_core_helper_separator(e, &emitted)
+        emit_map_entry_type_helper(e)
+    }
     if features.core_map {
         emit_core_helper_separator(e, &emitted)
         emit_core_map_helper(e)

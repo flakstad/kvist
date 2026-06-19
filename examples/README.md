@@ -15,7 +15,8 @@ fixtures live under `coverage/` so the tutorial path stays readable.
 - [`language/macro-authoring.kvist`](./language/macro-authoring.kvist) - practical macro writing
 - [`collections/sequences.kvist`](./collections/sequences.kvist) - collection helpers over structs
 - [`collections/package-tour.kvist`](./collections/package-tour.kvist) - `arr`/`map`/`set`/`str` ownership basics
-- [`collections/transforms.kvist`](./collections/transforms.kvist) - `deftransform`, `into`, `transduce`
+- [`collections/data-transforms.kvist`](./collections/data-transforms.kvist) - fused transforms with `into`, `transduce`, and `for`
+- [`collections/transforms.kvist`](./collections/transforms.kvist) - broader transform feature coverage
 - [`collections/log-source.kvist`](./collections/log-source.kvist) - `defiter` with `for`, `into`, `transduce`, and cleanup
 - [`collections/orders-report.kvist`](./collections/orders-report.kvist) - realistic collection pipeline
 - [`web/html-demo.kvist`](./web/html-demo.kvist) - HTML DSL
