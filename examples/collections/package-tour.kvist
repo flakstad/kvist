@@ -1,0 +1,31 @@
+// Small tour of common collection/text packages and ownership cleanup.
+(package main)
+(import core "kvist:core")
+(import map "kvist:map")
+(import set "kvist:set")
+(import str "kvist:str")
+
+(defn count-names [] -> int
+  (let [names (str.split "ada,lin,ada,grace" ",") :defer
+        seen (set.empty string) :defer
+        counts (map.empty string int) :defer]
+    (for [name names]
+      (set.add! seen name)
+      (if (map.contains? counts name)
+        (update! counts[name] + 1)
+        (set! counts[name] 1)))
+    (+ (count seen) (map.get counts "ada" 0))))
+
+(defn shout-names [] -> string
+  (let [names (str.split "ada,lin,grace" ",") :defer
+        joined (str.join names "|") :defer]
+    (str.upper joined)))
+
+(defn main []
+  (let [label (shout-names) :defer]
+    (println (+ (count-names) (count label)))))
+
+(comment
+  (+ (count-names) (let [label (shout-names) :defer] (count label)))
+  ;; => 18
+)

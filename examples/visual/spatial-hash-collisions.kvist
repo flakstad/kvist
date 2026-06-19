@@ -68,7 +68,7 @@
   "Fill a dynamic int buffer with one value."
   [xs: [dynamic]int, value: int]
   (let [i 0
-        n (len xs)]
+        n (count xs)]
     (while (< i n)
       (set! xs[i] value)
       (mut! i += 1))))
@@ -117,7 +117,7 @@
   (set! state.collisions 0)
   (set! state.pairs-tested 0)
   (let [i 0
-        n (len state.circles)]
+        n (count state.circles)]
     (while (< i n)
       (set! state.circles.hit[i] false)
       (mut! state.circles.x[i] += (* state.circles.vx[i] dt))
@@ -148,7 +148,7 @@
   "Mark colliding circles by checking only neighboring spatial-hash buckets."
   [state: ^App-State]
   (let [i 0
-        n (len state.circles)]
+        n (count state.circles)]
     (while (< i n)
       (let [cell state.circles.cell[i]
             cx (% cell Cells-X)
@@ -200,7 +200,7 @@
   "Draw every circle, highlighting broadphase collision hits."
   [state: ^App-State]
   (let [i 0
-        n (len state.circles)]
+        n (count state.circles)]
     (while (< i n)
       (let [color (rgba 106 190 255 150)]
         (when state.circles.hit[i]
@@ -222,7 +222,7 @@
     (draw-hud-text font "demo" 18 20 Hud-Font-Size rl.LIGHTGRAY)
     (draw-hud-text font "spatial hash" 72 20 Hud-Font-Size rl.RAYWHITE)
     (draw-hud-text font "circles" 218 20 Hud-Font-Size rl.LIGHTGRAY)
-    (draw-hud-text font (fmt.ctprintf "%5d" (len state.circles)) 298 20 Hud-Font-Size rl.RAYWHITE)
+    (draw-hud-text font (fmt.ctprintf "%5d" (count state.circles)) 298 20 Hud-Font-Size rl.RAYWHITE)
     (draw-hud-text font "pairs" 385 20 Hud-Font-Size rl.LIGHTGRAY)
     (draw-hud-text font (fmt.ctprintf "%7d" state.pairs-tested) 445 20 Hud-Font-Size rl.RAYWHITE)
     (draw-hud-text font "hits" 560 20 Hud-Font-Size rl.LIGHTGRAY)

@@ -12,7 +12,7 @@
       0
       (do
         (defer (delete clean))
-        (len (os.base clean))))))
+        (count (os.base clean))))))
 
 (defn cwd-base-length [] -> int
   (let [[cwd err] (os.get_working_directory context.allocator)]
@@ -20,7 +20,7 @@
       0
       (do
         (defer (delete cwd))
-        (len (os.base cwd))))))
+        (count (os.base cwd))))))
 
 (defn ensure-demo-dir [] -> os.Error
   ;; write_entire_file does not create parent directories. Treat an existing
@@ -43,7 +43,7 @@
   (if-ok [[data err] (os.read_entire_file path context.allocator)]
     (do
       (defer (delete data))
-      (len data))
+      (count data))
     0))
 
 (defn remove-demo-file [path: string] -> os.Error

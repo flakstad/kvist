@@ -9,11 +9,14 @@ fixtures live under `coverage/` so the tutorial path stays readable.
 - [`language/hello.kvist`](./language/hello.kvist) - smallest program
 - [`language/data-literals.kvist`](./language/data-literals.kvist) - typed arrays, maps, structs, allocators
 - [`language/control-flow.kvist`](./language/control-flow.kvist) - `if`, `when`, `while`, `for`, `case`
+- [`language/errdefer.kvist`](./language/errdefer.kvist) - failure-only cleanup for owned return values
 - [`language/function-values.kvist`](./language/function-values.kvist) - `fn` and function types
 - [`language/closures.kvist`](./language/closures.kvist) - captured callback boundaries
 - [`language/macro-authoring.kvist`](./language/macro-authoring.kvist) - practical macro writing
 - [`collections/sequences.kvist`](./collections/sequences.kvist) - collection helpers over structs
+- [`collections/package-tour.kvist`](./collections/package-tour.kvist) - `arr`/`map`/`set`/`str` ownership basics
 - [`collections/transforms.kvist`](./collections/transforms.kvist) - `deftransform`, `into`, `transduce`
+- [`collections/log-source.kvist`](./collections/log-source.kvist) - `defiter` with `for`, `into`, `transduce`, and cleanup
 - [`collections/orders-report.kvist`](./collections/orders-report.kvist) - realistic collection pipeline
 - [`web/html-demo.kvist`](./web/html-demo.kvist) - HTML DSL
 - [`web/http-server.kvist`](./web/http-server.kvist) - HTTP server

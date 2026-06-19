@@ -99,7 +99,7 @@
   "Advance the flock using separation, alignment, cohesion, and mouse steering."
   [boids: ^#soa[dynamic]Boid, dt: f32, mouse-x: f32, mouse-y: f32, mouse-down: bool, width: f32, height: f32]
   (let [i 0
-        n (len boids^)
+        n (count boids^)
         neighbor2 (* Neighbor-Radius Neighbor-Radius)
         sep2 (* Separation-Radius Separation-Radius)]
     (while (< i n)
@@ -174,7 +174,7 @@
   "Draw every boid in the SOA buffer."
   [boids: ^#soa[dynamic]Boid]
   (let [i 0
-        n (len boids^)]
+        n (count boids^)]
     (while (< i n)
       (draw-boid boids i)
       (mut! i += 1))))
@@ -193,7 +193,7 @@
     (draw-hud-text font "demo" 18 20 Hud-Font-Size rl.LIGHTGRAY)
     (draw-hud-text font "flocking #soa" 72 20 Hud-Font-Size rl.RAYWHITE)
     (draw-hud-text font "boids" 220 20 Hud-Font-Size rl.LIGHTGRAY)
-    (draw-hud-text font (fmt.ctprintf "%5d" (len state.boids)) 280 20 Hud-Font-Size rl.RAYWHITE)
+    (draw-hud-text font (fmt.ctprintf "%5d" (count state.boids)) 280 20 Hud-Font-Size rl.RAYWHITE)
     (draw-hud-text font "fps" 370 20 Hud-Font-Size rl.LIGHTGRAY)
     (draw-hud-text font (fmt.ctprintf "%6.1f" state.fps) 414 20 Hud-Font-Size rl.RAYWHITE)
     (draw-hud-text font "update" 506 20 Hud-Font-Size rl.LIGHTGRAY)

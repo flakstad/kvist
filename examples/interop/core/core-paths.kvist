@@ -12,14 +12,14 @@
   ;; into that string unless called with new=true, so use them before delete.
   (let [route (slash.join ([]string ["api" "v1" "users.json"]))]
     (defer (delete route))
-    (len (slash.name route))))
+    (count (slash.name route))))
 
 (defn slash-clean-score [] -> int
   ;; clean is lexical; it does not touch the filesystem.
   (let [path (slash.clean "/api//v1/../users/./active.json")]
     (defer (delete path))
-    (+ (len (slash.base path))
-       (len (slash.ext path)))))
+    (+ (count (slash.base path))
+       (count (slash.ext path)))))
 
 (defn filepath-relative-len [] -> int
   ;; filepath.rel allocates and returns an enum error. The .None case owns the
@@ -29,12 +29,12 @@
       0
       (do
         (defer (delete rel))
-        (len rel)))))
+        (count rel)))))
 
 (defn filepath-extension-len [] -> int
   ;; ext is a borrowed slice from its input string when called without new=true.
   ;; No allocation or delete is needed here.
-  (len (fp.ext "/tmp/archive.tar.gz")))
+  (count (fp.ext "/tmp/archive.tar.gz")))
 
 (defn main []
   (println

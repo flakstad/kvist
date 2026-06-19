@@ -31,7 +31,7 @@
 (defn host-log-capability [runtime: ^kvist_live.Runtime
                            capability-name: string
                            args: (slice kvist_live.Value)] -> [value: kvist_live.Value, err: kvist_live.Runtime_Error, ok: bool]
-  (if (= (len args) 0)
+  (if (= (count args) 0)
     (do
       (fmt.println "[host.log]")
       (return (kvist_live.value_nil) (kvist_live.Runtime_Error {}) true))

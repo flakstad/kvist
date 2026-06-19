@@ -56,7 +56,7 @@
         (arr.push! rows
           (Region-Report {region: region
                           revenue: revenue
-                          count: (len group)}))))
+                          count: (count group)}))))
     (arr.sort-by! .revenue rows)
     rows))
 

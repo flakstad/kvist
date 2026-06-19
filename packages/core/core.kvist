@@ -93,16 +93,6 @@
   [& body]
   (forms))
 
-(defmacro switch
-  "Compatibility helper for Odin-shaped switch lowering.
-
-  Clauses are written as case.expression pairs, with `:else expr` for the
-  fallback. Prefer `case` for user-facing subject dispatch and `cond` for
-  predicate branches. Source `switch` use emits a compatibility warning."
-  [value & clauses]
-  (quasiquote
-    (core-switch (unquote value) (splice clauses))))
-
 (defmacro case
   "Dispatch on `value` using value cases, grouped value cases, or type payload cases.
 
@@ -138,6 +128,15 @@
 
   For arrays, slices, maps, sets, and strings this lowers to the appropriate
   direct Odin length operation. Strings are counted in bytes."
+  [collection]
+  (quasiquote
+    (core-count (unquote collection))))
+
+(defmacro len
+  "Alias for `count`.
+
+  Prefer `count` in Kvist code. `len` is accepted for Odin familiarity and
+  lowers through the same core count path."
   [collection]
   (quasiquote
     (core-count (unquote collection))))
@@ -192,24 +191,6 @@
   [collection key]
   (quasiquote
     (core-contains? (unquote collection) (unquote key))))
-
-(defmacro in
-  "Return true when `value` is present in `collection`.
-
-  This lowers to Odin's `in` operation. Prefer package-specific predicates when
-  you need collection-specific behavior documented at the call site."
-  [value collection]
-  (quasiquote
-    (core-in (unquote value) (unquote collection))))
-
-(defmacro not-in
-  "Return true when `value` is absent from `collection`.
-
-  This is the negated form of `core.in` and lowers directly to Odin membership
-  code."
-  [value collection]
-  (quasiquote
-    (core-not-in (unquote value) (unquote collection))))
 
 (defmacro when-let
   "Bind a value and boolean result, then run `body` when the boolean is true.

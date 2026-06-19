@@ -1,0 +1,27 @@
+// Demonstrates :errdefer for owned values returned on success.
+(package main)
+(import "core:fmt")
+
+(defvar fake-error-token: int 1)
+
+(defn fake-error [] -> rawptr
+  (transmute rawptr (addr fake-error-token)))
+
+(defn read-buffer [] -> [data: [dynamic]byte, err: rawptr]
+  (return ([dynamic]byte [1 2 3]) nil))
+
+(defn load-buffer [fail-after-read: bool] -> [data: [dynamic]byte, err: rawptr]
+  (let [[data err] (read-buffer) :or-return :errdefer]
+    (if fail-after-read
+      (do
+        (set! err (fake-error))
+        (return)))
+    (return data err)))
+
+(defn main []
+  (let [[data err] (load-buffer false)]
+    (if (= err nil)
+      (do
+        (defer (delete data))
+        (fmt.println (count data)))
+      (fmt.println "load failed"))))

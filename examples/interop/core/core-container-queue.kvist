@@ -26,6 +26,11 @@
           (+ (queue.pop-front (addr q))
              (queue.pop-front (addr q))))))))
 
+(defn generic-constructor-empty? [] -> bool
+  ;; Generic type-call sugar for imported Odin types.
+  (let [q (queue.Queue int {})]
+    (= (queue.len q) 0)))
+
 (defn deque-score [] -> int
   ;; The same container can behave like a queue or stack depending on which end
   ;; you push.pop. This is still mutation over an owned Odin value.
@@ -56,7 +61,7 @@
             0))))))
 
 (defn main []
-  (println (fifo-total) (deque-score) (safe-pop-score)))
+  (println (fifo-total) (deque-score) (safe-pop-score) (generic-constructor-empty?)))
 
 (comment
   ;; FIFO behavior: push 10, push 20, pop them in the same order.
@@ -70,4 +75,7 @@
   ;; pop-front-safe uses the value.bool convention, not an Odin error.
   (safe-pop-score)
   ;; => 5
+
+  (generic-constructor-empty?)
+  ;; => true
 )

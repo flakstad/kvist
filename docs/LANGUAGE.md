@@ -55,18 +55,18 @@ The most common forms are:
 
 ```clojure
 ; file and package structure
-package import export exports attr foreign-import odin
+package import @export @private @exports foreign-import odin
 
 ; declarations
 def def- defvar defvar- defstruct defstruct- defenum defenum-
 defunion defunion- defn defn- defmacro defmacro-
-deftransform deftransform- defsource defsource-
+deftransform deftransform- defiter defiter-
 
 ; local structure
 let do block fn comment
 
 ; control flow
-if when cond case switch while for return discard break continue defer
+if when cond case while for return discard break continue defer
 when-let if-let when-ok if-ok
 
 ; mutation and places
@@ -159,8 +159,8 @@ Field selectors such as `.name` and `.age` are not values by themselves. They
 are special shorthand in supported places such as `get`, `assoc`, `update`,
 `arr.map`, `arr.filter`, and similar helpers.
 
-Keywords like `:else`, `:next`, `:dispose`, `:defer`, and `:or-return` are
-syntax markers, not ordinary runtime values.
+Keywords like `:else`, `:next`, `:dispose`, `:defer`, `:errdefer`, and
+`:or-return` are syntax markers, not ordinary runtime values.
 
 ### Imports And Exports
 
@@ -182,21 +182,21 @@ Relative imports are resolved by inspecting the target:
 
 There is no `:odin` import marker.
 
-Use `(export)` to attach Odin `@(export)` to the next top-level declaration.
-Use `(attr name ...)` to attach other Odin declaration attributes to the next
-top-level declaration. Use `(exports [Name ...])` when raw Odin sidecar
+Use `@export` to attach Odin `@(export)` to the next top-level declaration.
+Use `@private` to attach Odin `@(private)` to the next top-level declaration.
+Use `@exports [Name ...]` when raw Odin sidecar
 declarations should be exposed through a Kvist source-package import.
 
 ```clojure
-(export)
+@export
 (defn callback :abi "c" [ctx: rawptr] -> void
   ...)
 
-(attr private)
+@private
 (defn hidden [] -> int #force_inline
   42)
 
-(exports [Raw_Handle])
+@exports [Raw_Handle]
 ```
 
 ## Types, Values, And Data Shapes
@@ -389,7 +389,7 @@ that inferred type later in the signature:
 
 ```clojure
 (defn contains? [m: map[$K]$V, key: K] -> bool
-  (in key m))
+  (contains? m key))
 
 (defn write-json [path: string, value: $T] -> os.Error
   ...)
@@ -512,9 +512,9 @@ package-private split at top level:
 (deftransform- internal-transform
   (comp (map normalize)))
 
-(defsource- internal-source [] -> int
-  (open-source)
-  :next next-source-item)
+(defiter- internal-source [] -> Source_State yields int
+  :next next-source-item
+  (open-source))
 
 (defmacro- internal-macro [x]
   ...)
@@ -624,7 +624,7 @@ Kvist keeps Odin's direct multi-return model:
   (return (/ n d) (% n d)))
 
 (defn parse-count [text: string] -> [value: int, ok: bool]
-  (return (len text) true))
+  (return (count text) true))
 ```
 
 Multiple return values bind positionally:
@@ -702,7 +702,7 @@ Use this shape when calling Odin-style APIs that return an explicit error value:
   (if-ok [[data err] (os.read_entire_file path context.allocator)]
     (do
       (defer (delete data))
-      (len data))
+      (count data))
     0))
 ```
 
@@ -765,6 +765,19 @@ Use `(type T)` for Odin `typeid` expressions:
 ```clojure
 (linalg.identity (type matrix[2 2]f32))
 ```
+
+For Odin polymorphic struct literals, the type constructor can be used directly
+when the final argument is a vector or brace literal:
+
+```clojure
+(queue.Queue int {})
+(sc.State_Def Door-State {id: .Closed})
+```
+
+These lower to Odin generic type instantiation, for example
+`queue.Queue(int){}` and `sc.State_Def(Door_State){...}`. Use `(type ...)`
+when you need the type value itself, such as a parameter type, return type, or
+`typeid` argument.
 
 Use `make` for runtime or allocator-backed construction where Odin uses a
 procedure-like allocation operation:
@@ -901,6 +914,33 @@ the guard succeeds:
   ...)
 ```
 
+Use `:errdefer` when an owned value should be returned on success but cleaned
+up if the function later returns an error:
+
+```clojure
+(defn load-buffer [path: string] -> [data: [dynamic]byte, err: rawptr]
+  (let [[data err] (read-buffer path) :or-return :errdefer]
+    (if (invalid-buffer? data)
+      (do
+        (set! err (validation-error))
+        (return)))
+    (return data err)))
+```
+
+`:errdefer` lowers to an ordinary deferred conditional cleanup:
+
+```odin
+defer {
+    if err != nil {
+        delete(data)
+    }
+}
+```
+
+It is only supported on `[value err]` bindings with `:or-return` in a
+tail-position `let`, so the generated `defer` runs when the function exits. Use
+`:defer` for unconditional scope cleanup.
+
 ### Guarded Multi-Return Bindings
 
 Result bindings may use `:or-return`, `:or-break`, or `:or-continue` guards:
@@ -926,6 +966,8 @@ These guards are shorthand for a very common Odin-style pattern:
 - `:or-return` means "if the success condition failed, return now"
 - `:or-break` means "if it failed, stop this loop"
 - `:or-continue` means "if it failed, skip this iteration"
+- `:errdefer` may follow `[value err] ... :or-return` to delete `value` only
+  when the function exits with a non-nil `err`
 
 They are designed for `value, ok` style bindings where the second bound value is
 the success flag. More generally, they check the last bound value only. For
@@ -979,7 +1021,7 @@ Use it when both the success and failure paths should produce a value.
 ```clojure
 (when-ok [[data err] (os.read_entire_file path context.allocator)]
   (defer (delete data))
-  (println (len data)))
+  (println (count data)))
 ```
 
 Use it when the success branch performs work but the failure branch can simply
@@ -991,7 +1033,7 @@ do nothing.
 (if-ok [[data err] (os.read_entire_file path context.allocator)]
   (do
     (defer (delete data))
-    (len data))
+    (count data))
   0)
 ```
 
@@ -1014,7 +1056,7 @@ slots. You may assign to them and then use a naked `return`:
 (defn parse-required [text: string] -> [value: int, ok: bool]
   (if (= text "")
     (return))
-  (set! value (len text))
+  (set! value (count text))
   (set! ok true)
   (return))
 ```
@@ -1038,10 +1080,17 @@ That is why `:or-return` works naturally with named returns:
     (return data err)))
 ```
 
-If `os.read_entire_file` fails here, `:or-return` performs a naked `return`,
-which returns the current named result slots. Since the `let` binding has not
-completed, those slots are still at their zero values unless you assigned them
-earlier.
+For `:or-return`, the binding names must match the named return slots exactly.
+Kvist assigns the result into those slots before checking the guard. If
+`os.read_entire_file` fails, `err` is already set, so the naked return produced
+by `:or-return` returns the captured error.
+
+Because `:or-return` assigns into named return slots, `:errdefer` observes the
+same `err` slot at function exit. If later code sets `err` and returns, the
+owned first value is deleted. If `err` is still nil on success, ownership stays
+with the returned value. For that reason, `:errdefer` is rejected in non-tail
+`let` forms where Odin would run the generated `defer` at block exit instead of
+function exit.
 
 ## Control Flow
 
@@ -1133,45 +1182,16 @@ ordinary Odin switches:
 (case event
   (Connected conn) conn.id
   (Disconnected _) 0
-  (Data data) (len data.payload)
+  (Data data) (count data.payload)
   :else -1)
 ```
 
 Use `_` when a type payload case should match the variant without binding the
 payload.
 
-`switch` remains available for explicit Odin-shaped switch lowering, but `case`
-is the preferred user-facing classification form.
-
-### `switch`
-
-`switch` is compatibility syntax. It lowers more directly to Odin switch forms,
-including explicit type-switch style bindings:
-
-```clojure
-(switch method
-  .Get "GET"
-  .Post "POST"
-  :else "OTHER")
-
-(switch [v value]
-  int "int"
-  string v
-  :else "nil")
-```
-
-For ordinary subject classification, prefer `case`. For predicate branches,
-prefer `cond`. Kvist emits a compatibility warning for ordinary `switch`
-because `case` and `cond` are the intended surface forms.
-
-`#partial` currently applies to `switch` only:
-
-```clojure
-(#partial
-  (switch n
-    0 "zero"
-    :else "other"))
-```
+`case` may lower to Odin `switch` or `#partial switch` internally. Those are
+generated Odin details, not Kvist source forms. Kvist source uses `case` for
+subject dispatch and `cond` for predicate branches.
 
 ### `for`
 
@@ -1292,8 +1312,9 @@ The practical ownership rules are:
 - if a proc returns an owned value, ownership transfers to the caller
 - borrowed views must not be deleted
 - there is no hidden runtime cleanup beyond the `defer` or `:defer` you write
-- `:defer` is scope cleanup for ordinary owned values; source producers use
-  `:dispose` in their `defsource` declaration to name producer-state cleanup
+- `:defer` is scope cleanup for ordinary owned values
+- `:errdefer` is failure-only cleanup for `[value err] :or-return` bindings
+- iterators use `:dispose` in their `defiter` declaration to name producer-state cleanup
 
 Common owned values:
 
@@ -1454,9 +1475,33 @@ Operators lower to ordinary Odin expressions:
 (+ a b)
 (* x y)
 (and ok ready)
-(or cached fresh)
+(or cached? fresh?)
 (not done)
 ```
+
+`and`, `or`, and `not` are boolean operators. They lower to Odin `&&`, `||`,
+and `!`; they do not return one of their input values.
+
+This is intentionally different from Clojure:
+
+```clojure
+; Kvist: boolean expression
+(or cached? fresh?)
+
+; Kvist: optional-ok fallback
+(or-else (lookup-cache key) fallback)
+```
+
+The Clojure pattern of returning the first truthy value does not work in Kvist:
+
+```clojure
+; Clojure-style, not Kvist
+(or cached-value fallback-value)
+```
+
+Use `or-else` when the expression returns `[value, ok]` and you want a fallback
+value. Kvist does not have Clojure-style truthiness: values are not treated as
+conditions unless their type is actually boolean.
 
 `=`, `<`, `<=`, `>`, and `>=` support two or more operands and compare adjacent
 values once:
@@ -1471,8 +1516,8 @@ values once:
 Directive expression wrappers attach Odin call directives to a call:
 
 ```clojure
-(#force_inline inc 41)
-(#force_inline (inc x))
+(inc 41 #force_inline)
+(inc x #force_inline)
 ```
 
 `transmute` is explicit and lowers to Odin's `transmute(T)value` form:
@@ -1501,8 +1546,6 @@ Small core helpers are auto-exposed. Prefer the bare spelling:
 (slice xs)
 (empty? xs)
 (contains? lookup key)
-(in value xs)
-(not-in value xs)
 (or-else maybe fallback)
 (nil? value)
 (tap> value)
@@ -1515,10 +1558,27 @@ Small core helpers are auto-exposed. Prefer the bare spelling:
 `->` threads a value into the next form as the first argument. `->>` threads it
 as the last argument.
 
-`count` lowers to `len`. `empty?` checks whether `len` is zero. `contains?`,
-`in`, and `not-in` lower to Odin membership checks. `or-else` expects a
-`[value, ok]` expression and returns either the value or the fallback. `nil?`
-lowers to a direct `nil` comparison.
+`count` lowers to Odin `len`. `len` is accepted as an alias for Odin
+familiarity, but `count` is the canonical Kvist spelling. `empty?` checks
+whether `len` is zero.
+
+`contains?` is the cross-family membership predicate:
+
+```clojure
+(contains? lookup key)   ; map/set-style membership
+(contains? xs value)     ; array/slice/dynamic-array equality scan
+(contains? text needle)  ; string contains, when needle is string
+```
+
+Use `(not (contains? collection value))` for absence. When membership depends
+on a predicate instead of equality, use an array helper such as `arr.some?`:
+
+```clojure
+(arr.some? (fn [x: int] -> bool (> x 10)) xs)
+```
+
+`or-else` expects a `[value, ok]` expression and returns either the value or the
+fallback. `nil?` lowers to a direct `nil` comparison.
 
 `tap>` prints a value for inspection and returns that same value unchanged. The
 labeled form requires a string literal label:
@@ -1566,41 +1626,61 @@ See [SEQUENCES.md](SEQUENCES.md) for collection helpers and ownership details.
 
 ## Compile-Time Forms
 
-### Sources And Transforms
+### Iterators And Transforms
 
-`defsource` defines a reusable stateful producer. A source has an opener
-expression, a `:next` function, and an optional `:dispose` function. The
-`:next` function takes a pointer to the source state and returns named
-`[item: T ok: bool]` results.
+`defiter` defines a reusable stateful producer for `for`, `into`, and
+`transduce`. The header names both types: the opener state returned by the
+generated function, and the item type yielded by `:next`.
 
 ```clojure
-(defsource files [root: string] -> string
-  (open-files root)
+(defstruct File_Source {
+  items: []string
+  index: int
+})
+
+(defn next-file [src: ^File_Source] -> [path: string ok: bool]
+  (if (< src.index (count src.items))
+    (let [path src.items[src.index]]
+      (set! src.index (+ src.index 1))
+      (return path true))
+    (return "" false)))
+
+(defn dispose-files [src: ^File_Source]
+  (set! src.index 0))
+
+(defiter files [items: []string] -> File_Source yields string
   :next next-file
-  :dispose dispose-files)
+  :dispose dispose-files
+  (File_Source {items: items index: 0}))
 ```
 
-The opener's state type must be obvious to the compiler. `:next` must take
-`^State` and return `[item: T ok: bool]`. `:dispose`, when present, must take
-`^State` and return no value; consumers defer it after opening the source.
-
-Sources are consumed by `for`, `into`, and `transduce`:
+This emits an ordinary opener function:
 
 ```clojure
-(for [path (files root)]
+(files items) ; returns File_Source
+```
+
+Consumers call `:next` with `^File_Source` until `ok` is false. `:dispose`,
+when present, must take `^File_Source` and return no value; consumers defer it
+after opening the iterator.
+
+Iterators are consumed by `for`, `into`, and `transduce`:
+
+```clojure
+(for [path (files items)]
   (println path))
 
 (into [dynamic]string
   (comp
     (filter odin-path?))
-  (files root))
+  (files items))
 
 (transduce
   (comp
     (filter odin-path?)
     (map path-length))
   + 0
-  (files root))
+  (files items))
 ```
 
 `deftransform` defines reusable compile-time transform structure. A transform
@@ -1624,7 +1704,7 @@ The current transform surface is intentionally small:
 - callbacks must be known one-argument functions or field selectors
 - `into` currently returns fresh owned `[dynamic]T` arrays
 - `transduce` currently supports `+` as the reducer
-- source inputs can be slices, arrays, dynamic arrays, or `defsource` calls
+- inputs can be slices, arrays, dynamic arrays, or `defiter` calls
 
 See [FUNCTIONAL-TRANSFORMS.md](FUNCTIONAL-TRANSFORMS.md) for limits and
 lowering.

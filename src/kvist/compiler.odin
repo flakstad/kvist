@@ -171,10 +171,6 @@ canonical_surface_head_for_internal_name :: proc(head: string) -> (canonical: st
         return "slice", true
     case "core-contains?":
         return "contains?", true
-    case "core-in":
-        return "in", true
-    case "core-not-in":
-        return "not-in", true
     case "core-or-else":
         return "or-else", true
     case "core-println":
@@ -183,8 +179,6 @@ canonical_surface_head_for_internal_name :: proc(head: string) -> (canonical: st
         return "tap>", true
     case "core-doc":
         return "doc", true
-    case "core-switch":
-        return "switch", true
     case "core-thread-first":
         return "->", true
     case "core-thread-last":
@@ -929,7 +923,7 @@ decl_head_name :: proc(form: CST_Form) -> string {
 
 is_private_decl_head :: proc(head: string) -> bool {
     switch head {
-    case "def-", "defvar-", "defstruct-", "defenum-", "defunion-", "defn-", "defmacro-", "deftransform-", "defsource-":
+    case "def-", "defvar-", "defstruct-", "defenum-", "defunion-", "defn-", "defmacro-", "deftransform-", "defiter-":
         return true
     case:
         return false
@@ -938,7 +932,7 @@ is_private_decl_head :: proc(head: string) -> bool {
 
 is_top_level_decl_head :: proc(head: string) -> bool {
     switch head {
-    case "def", "def-", "defvar", "defvar-", "defstruct", "defstruct-", "defenum", "defenum-", "defunion", "defunion-", "defn", "defn-", "defmacro", "defmacro-", "deftransform", "deftransform-", "defsource", "defsource-":
+    case "def", "def-", "defvar", "defvar-", "defstruct", "defstruct-", "defenum", "defenum-", "defunion", "defunion-", "defn", "defn-", "defmacro", "defmacro-", "deftransform", "deftransform-", "defiter", "defiter-":
         return true
     case:
         return false
@@ -980,7 +974,7 @@ collect_public_decl_names :: proc(forms: []CST_Top_Form) -> (names: [dynamic]str
         if form.kind != .List || len(form.items) == 0 {
             continue
         }
-        if is_symbol(form.items[0], "exports") {
+        if is_symbol(form.items[0], "@exports") {
             if len(form.items) == 2 && form.items[1].kind == .Vector {
                 for item in form.items[1].items {
                     if item.kind == .Symbol && !contains_text(names[:], item.text) {
@@ -999,6 +993,58 @@ collect_public_decl_names :: proc(forms: []CST_Top_Form) -> (names: [dynamic]str
         }
     }
     return names
+}
+
+directive_list_form :: proc(head: string, span: Span, rest: []CST_Form = nil) -> CST_Form {
+    items: [dynamic]CST_Form
+    append(&items, CST_Form{kind = .Symbol, text = head, span = span})
+    for item in rest {
+        append(&items, item)
+    }
+    return CST_Form{kind = .List, items = items, span = span}
+}
+
+normalize_top_level_directives :: proc(forms: ^[dynamic]CST_Top_Form) -> (Compile_Error, bool) {
+    write := 0
+    i := 0
+    for i < len(forms^) {
+        top := forms^[i]
+        form := top.form
+        if form.kind == .Symbol && form.text == "@exports" {
+            if i+1 >= len(forms^) || forms^[i+1].form.kind != .Vector {
+                return Compile_Error{message = "@exports expects one vector of symbol names", span = form.span}, false
+            }
+            vector := forms^[i+1].form
+            for item in vector.items {
+                if item.kind != .Symbol {
+                    return Compile_Error{message = "@exports expects symbol names", span = item.span}, false
+                }
+            }
+            rest := [?]CST_Form{vector}
+            top.form = directive_list_form("@exports", form.span, rest[:])
+            forms^[write] = top
+            write += 1
+            i += 2
+            continue
+        }
+        forms^[write] = top
+        write += 1
+        i += 1
+    }
+    resize(forms, write)
+    return Compile_Error{}, true
+}
+
+read_kvist_top_forms :: proc(source: string) -> ([dynamic]CST_Top_Form, Compile_Error, bool) {
+    forms, err_forms, ok_forms := read_top_forms(source)
+    if !ok_forms {
+        return nil, err_forms, false
+    }
+    err_directives, ok_directives := normalize_top_level_directives(&forms)
+    if !ok_directives {
+        return nil, err_directives, false
+    }
+    return forms, Compile_Error{}, true
 }
 
 valid_odin_decl_name :: proc(text: string) -> bool {
@@ -1272,7 +1318,7 @@ read_root_package_files :: proc(path: string) -> ([]Package_File, Compile_Error,
         return nil, Compile_Error{message = fmt.tprintf("could not read file: %s", path)}, false
     }
     source := string(data)
-    forms, err_forms, ok_forms := read_top_forms(source)
+    forms, err_forms, ok_forms := read_kvist_top_forms(source)
     if !ok_forms {
         return nil, err_forms, false
     }
@@ -1324,7 +1370,7 @@ read_root_package_files :: proc(path: string) -> ([]Package_File, Compile_Error,
         if !ok_package_hint || file_package_hint != package_name {
             continue
         }
-        file_forms, err_file_forms, ok_file_forms := read_top_forms(file_source)
+        file_forms, err_file_forms, ok_file_forms := read_kvist_top_forms(file_source)
         if !ok_file_forms {
             return nil, err_file_forms, false
         }
@@ -1518,7 +1564,7 @@ rewrite_decl_name :: proc(form: ^CST_Form, prefix: string) {
         return
     }
     switch decl_head_name(form^) {
-    case "def", "def-", "defvar", "defvar-", "defstruct", "defstruct-", "defenum", "defenum-", "defunion", "defunion-", "defn", "defn-", "defmacro", "defmacro-", "deftransform", "deftransform-", "defsource", "defsource-":
+    case "def", "def-", "defvar", "defvar-", "defstruct", "defstruct-", "defenum", "defenum-", "defunion", "defunion-", "defn", "defn-", "defmacro", "defmacro-", "deftransform", "deftransform-", "defiter", "defiter-":
         form^.items[1].text = fmt.tprintf("%s__%s", prefix, form^.items[1].text)
     }
 }
@@ -1760,6 +1806,26 @@ rewrite_proc_like_top_form :: proc(top: CST_Top_Form, locals: []string, aliases:
                 }
                 append(&rewritten.form.items, rewritten_type_item)
             }
+            if (decl_head_name(form) == "defiter" || decl_head_name(form) == "defiter-") &&
+               next_i < len(form.items) && is_symbol(form.items[next_i], "yields") {
+                append(&rewritten.form.items, form.items[next_i])
+                if next_i+1 >= len(form.items) {
+                    return CST_Top_Form{}, Compile_Error{message = "missing item type after 'yields'", span = form.items[next_i].span}, false
+                }
+                _, next_item_i, err_item_type, ok_item_type := parse_type_text_from_forms(form.items[:], next_i+1)
+                if !ok_item_type {
+                    return CST_Top_Form{}, err_item_type, false
+                }
+                for type_item in form.items[next_i+1:next_item_i] {
+                    rewritten_type_item, err_type_item, ok_type_item := rewrite_type_form_symbols(type_item, locals, aliases, prefix)
+                    if !ok_type_item {
+                        return CST_Top_Form{}, err_type_item, false
+                    }
+                    append(&rewritten.form.items, rewritten_type_item)
+                }
+                i = next_item_i
+                continue
+            }
             i = next_i
             continue
         }
@@ -1781,7 +1847,7 @@ rewrite_top_form :: proc(top: CST_Top_Form, locals: []string, aliases: []Alias_P
        len(top.form.items) >= 2 &&
        top.form.items[1].kind == .Symbol {
         head := decl_head_name(top.form)
-        if head == "defn" || head == "defn-" || head == "defsource" || head == "defsource-" {
+        if head == "defn" || head == "defn-" || head == "defiter" || head == "defiter-" {
             return rewrite_proc_like_top_form(top, locals, aliases, prefix)
         }
         if is_top_level_decl_head(head) {
@@ -1903,7 +1969,7 @@ read_package_files :: proc(dir: string) -> ([]Package_File, Compile_Error, bool)
             return nil, Compile_Error{message = fmt.tprintf("could not read file: %s", path)}, false
         }
         source := string(data)
-        forms, err_forms, ok_forms := read_top_forms(source)
+        forms, err_forms, ok_forms := read_kvist_top_forms(source)
         if !ok_forms {
             return nil, err_forms, false
         }
@@ -2700,7 +2766,7 @@ compile_source_with_map :: proc(source: string) -> (result: Emit_Result, err: Co
     context.allocator = context.temp_allocator
     defer context.allocator = old_allocator
 
-    forms, err_forms, ok_forms := read_top_forms(source)
+    forms, err_forms, ok_forms := read_kvist_top_forms(source)
     if !ok_forms {
         return result, clone_compile_error(err_forms, result_allocator), false
     }
@@ -2792,7 +2858,7 @@ eval_form_head :: proc(form: CST_Form) -> string {
 
 eval_head_is_decl :: proc(head: string) -> bool {
     switch head {
-    case "comment", "core.comment", "package", "import", "foreign-import", "def", "def-", "defvar", "defvar-", "defstruct", "defstruct-", "defenum", "defenum-", "defunion", "defunion-", "odin", "attr", "export", "exports", "defn", "defn-", "deftransform", "deftransform-", "defsource", "defsource-":
+    case "comment", "core.comment", "package", "import", "foreign-import", "def", "def-", "defvar", "defvar-", "defstruct", "defstruct-", "defenum", "defenum-", "defunion", "defunion-", "odin", "@exports", "defn", "defn-", "deftransform", "deftransform-", "defiter", "defiter-":
         return true
     }
     return false
@@ -2816,7 +2882,7 @@ compile_eval_source_with_map :: proc(source, eval_source: string, no_print: bool
     context.allocator = context.temp_allocator
     defer context.allocator = old_allocator
 
-    forms, err_forms, ok_forms := read_top_forms(source)
+    forms, err_forms, ok_forms := read_kvist_top_forms(source)
     if !ok_forms {
         return result, clone_compile_error(err_forms, result_allocator), false
     }

@@ -131,7 +131,7 @@
    mouse-y: f32
    mouse-down: bool]
   (let [i 0
-        n (len particles^)
+        n (count particles^)
         width (f32 w)
         height (f32 h)]
     (while (< i n)

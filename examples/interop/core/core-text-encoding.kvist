@@ -24,7 +24,7 @@
       0
       (do
         (defer (delete words))
-        (len words)))))
+        (count words)))))
 
 (defn parsed-score [] -> int
   (let [[value ok] (strconv.parse_int "42")]
@@ -44,7 +44,7 @@
             0
             (do
               (defer (delete decoded))
-              (len decoded))))))))
+              (count decoded))))))))
 
 (defn sha256-hex-length [] -> int
   ;; sha2 uses an explicit context, update, and final call. hex.encode then
@@ -60,7 +60,7 @@
         0
         (do
           (defer (delete encoded))
-          (len encoded))))))
+          (count encoded))))))
 
 (defn main []
   (println (useful-line? "user:Ada active=true")

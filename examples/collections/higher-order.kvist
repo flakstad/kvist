@@ -23,7 +23,7 @@
         evens (arr.filter even? mapped)]
     (defer (delete mapped))
     (defer (delete evens))
-    (len evens)))
+    (count evens)))
 
 (defn threaded-total [] -> int
   (let [xs ([]int [1 2 3 4])

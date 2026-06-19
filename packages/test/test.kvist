@@ -170,7 +170,7 @@
   (if (nil? doc)
     (forms
       (quasiquote (import "core:testing"))
-      (quasiquote (attr test))
+      (quasiquote @test)
       (quasiquote
         (defn (unquote name) [t: ^testing.T]
           (unquote (__kvist_test_wrap_once
@@ -178,7 +178,7 @@
                        (quasiquote (do (splice body)))))))))
     (forms
       (quasiquote (import "core:testing"))
-      (quasiquote (attr test))
+      (quasiquote @test)
       (quasiquote
         (defn (unquote name)
           (unquote doc)

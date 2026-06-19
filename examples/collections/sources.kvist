@@ -1,4 +1,4 @@
-// Reusable source declarations consumed by for and into.
+// Reusable iterator declarations consumed by for, into, and transduce.
 (package main)
 (import core "kvist:core")
 
@@ -11,7 +11,7 @@
   (File_Source {items: items index: 0}))
 
 (defn next-file [src: ^File_Source] -> [path: string ok: bool]
-  (if (< src.index (len src.items))
+  (if (< src.index (count src.items))
     (let [path src.items[src.index]]
       (set! src.index (+ src.index 1))
       (return path true))
@@ -26,18 +26,18 @@
       (= path "tests/compiler_test.odin")))
 
 (defn path-length [path: string] -> int
-  (len path))
+  (count path))
 
-(defsource files [items: []string] -> string
-  (open-files items)
+(defiter files [items: []string] -> File_Source yields string
   :next next-file
-  :dispose dispose-files)
+  :dispose dispose-files
+  (open-files items))
 
 (defn total-path-length [] -> int
   (let [paths ([]string ["src/main.odin" "README.md" "src/emit.odin" "tests/compiler_test.odin"])
         total 0]
     (for [path (files paths)]
-      (set! total (+ total (len path))))
+      (set! total (+ total (count path))))
     total))
 
 (defn odin-path-count [] -> int
@@ -47,7 +47,7 @@
                        (filter odin-path?))
                      (files paths))]
     (defer (delete odin-paths))
-    (len odin-paths)))
+    (count odin-paths)))
 
 (defn odin-path-length [] -> int
   (let [paths ([]string ["src/main.odin" "README.md" "src/emit.odin" "tests/compiler_test.odin"])]

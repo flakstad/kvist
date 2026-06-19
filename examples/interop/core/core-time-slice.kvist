@@ -27,7 +27,7 @@
   (if-let [[t ok] (time.datetime_to_time 2024 1 2 3 4 5)]
     (let [buf ([time.MIN_YYYY_DATE_LEN]u8 [])
           text (time.to_string_yyyy_mm_dd t (slice buf))]
-      (len text))
+      (count text))
     0))
 
 (defn min-max-score [] -> int

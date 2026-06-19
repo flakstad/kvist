@@ -422,16 +422,6 @@ emit_warning :: proc(e: ^Emitter, message: string, span: Span) {
     append(e.warnings, Compile_Warning{message = strings.clone(message), span = span})
 }
 
-emit_switch_compat_warning :: proc(e: ^Emitter, form: CST_Form) {
-    if len(form.items) == 0 || form.items[0].kind != .Symbol {
-        return
-    }
-    head := form.items[0]
-    if head.text == "switch" || head.text == "core-switch" {
-        emit_warning(e, "`switch` is compatibility syntax; use `case` for subject dispatch or `cond` for predicate branches", head.span)
-    }
-}
-
 mark_core_map :: proc(e: ^Emitter) {
     if e.features != nil {
         e.features.core_map = true
@@ -4468,7 +4458,7 @@ form_escape_deferred_binding_span_names :: proc(form: CST_Form, names: []string,
                 }
             }
             return {}, false
-        case "case", "core-case", "switch", "core-switch":
+        case "case", "core-case":
             return switch_escape_deferred_binding_span_names(form, names, returns)
         case "with-allocator", "with-temp-allocator":
             if len(form.items) >= 3 {
@@ -4635,7 +4625,7 @@ form_escape_owned_temp_result_span_names :: proc(form: CST_Form, names: []string
                 }
             }
             return {}, false
-        case "case", "core-case", "switch", "core-switch":
+        case "case", "core-case":
             return switch_escape_owned_temp_result_span_names(form, names, returns)
         case "with-allocator", "with-temp-allocator":
             if len(form.items) >= 3 {
@@ -4688,6 +4678,21 @@ let_defer_return_error :: proc(bindings: []Binding, body: []CST_Form, last_in_pr
     return {}, false
 }
 
+let_errdefer_tail_error :: proc(bindings: []Binding, last_in_proc: bool) -> (Compile_Error, bool) {
+    if last_in_proc {
+        return {}, false
+    }
+    for binding in bindings {
+        if binding.err_deferred_delete {
+            return Compile_Error{
+                message = ":errdefer is only supported in tail-position let forms",
+                span    = binding.target_span,
+            }, true
+        }
+    }
+    return {}, false
+}
+
 emit_binding_assignment :: proc(e: ^Emitter, binding: Binding, value: string) {
     if binding.is_destructure || binding.is_result_binding {
         line_builder := strings.builder_make()
@@ -4715,6 +4720,35 @@ binding_delete_target_name :: proc(binding: Binding) -> (string, bool) {
         return binding.pattern[0], true
     }
     return "", false
+}
+
+emit_binding_deferred_delete :: proc(e: ^Emitter, binding: Binding) -> (Compile_Error, bool) {
+    delete_name, ok_delete_name := binding_delete_target_name(binding)
+    if !ok_delete_name {
+        return Compile_Error{message = ":defer binding marker is only supported on delete-able local bindings", span = binding.value.span}, false
+    }
+    emit_line(e, fmt.tprintf("defer delete(%s)", delete_name))
+    return {}, true
+}
+
+emit_binding_err_deferred_delete :: proc(e: ^Emitter, binding: Binding) -> (Compile_Error, bool) {
+    delete_name, ok_delete_name := binding_delete_target_name(binding)
+    if !ok_delete_name {
+        return Compile_Error{message = ":errdefer binding marker is only supported on delete-able local bindings", span = binding.value.span}, false
+    }
+    if !binding.is_result_binding || binding.or_modifier != "or-return" || len(binding.pattern) != 2 || binding.pattern[1] != "err" {
+        return Compile_Error{message = ":errdefer is only supported on [value err] :or-return bindings", span = binding.value.span}, false
+    }
+    emit_line(e, "defer {")
+    e.indent += 1
+    emit_line(e, "if err != nil {")
+    e.indent += 1
+    emit_line(e, fmt.tprintf("delete(%s)", delete_name))
+    e.indent -= 1
+    emit_line(e, "}")
+    e.indent -= 1
+    emit_line(e, "}")
+    return {}, true
 }
 
 named_returns_match_binding_pattern :: proc(returns: Return_Spec, pattern: []string) -> bool {
@@ -5415,6 +5449,10 @@ emit_let_value_binding_assignment :: proc(e: ^Emitter, binding: Binding) -> (Com
     if !ok_bind {
         return err_bind, false
     }
+    err_tail, bad_tail := let_errdefer_tail_error(inner_bindings[:], false)
+    if bad_tail {
+        return err_tail, false
+    }
     body := let_form.items[2:]
     if len(body) == 0 {
         return Compile_Error{message = "let expects bindings and body", span = let_form.span}, false
@@ -5453,11 +5491,16 @@ emit_let_value_binding_assignment :: proc(e: ^Emitter, binding: Binding) -> (Com
             return err_guard, false
         }
         if inner.deferred_delete {
-            delete_name, ok_delete_name := binding_delete_target_name(inner)
-            if !ok_delete_name {
-                return Compile_Error{message = ":defer binding marker is only supported on delete-able local bindings", span = inner.value.span}, false
+            err_defer, ok_defer := emit_binding_deferred_delete(e, inner)
+            if !ok_defer {
+                return err_defer, false
             }
-            emit_line(e, fmt.tprintf("defer delete(%s)", delete_name))
+        }
+        if inner.err_deferred_delete {
+            err_defer, ok_defer := emit_binding_err_deferred_delete(e, inner)
+            if !ok_defer {
+                return err_defer, false
+            }
         }
         if ty, ok_ty := obvious_binding_type(e, inner); ok_ty {
             bind_local_type(e, inner.name, ty)
@@ -5738,7 +5781,7 @@ form_transfers_owned_name :: proc(form: CST_Form, name: string, can_transfer_fin
         return any_branch
     }
 
-    if ok && (head == "case" || head == "core-case" || head == "switch" || head == "core-switch") {
+    if ok && (head == "case" || head == "core-case") {
         return switch_transfers_owned_name(form, name, can_transfer_final)
     }
 
@@ -5831,7 +5874,7 @@ analyze_owned_scope_body :: proc(e: ^Emitter, forms: []CST_Form, can_transfer_fi
                 if binding.is_destructure || (!has_delete_name && binding.name == "") {
                     continue
                 }
-                if binding_value_produces_owned_value(binding) || binding.deferred_delete {
+                if binding_value_produces_owned_value(binding) || binding.deferred_delete || binding.err_deferred_delete {
                     owned_name := binding.name
                     if owned_name == "" {
                         owned_name = delete_name
@@ -5844,7 +5887,7 @@ analyze_owned_scope_body :: proc(e: ^Emitter, forms: []CST_Form, can_transfer_fi
                 skip_warning := false
                 for binding in bindings {
                     delete_name, ok_delete_name := binding_delete_target_name(binding)
-                    if ok_delete_name && delete_name == live[i].name && binding.deferred_delete {
+                    if ok_delete_name && delete_name == live[i].name && (binding.deferred_delete || binding.err_deferred_delete) {
                         skip_warning = true
                         break
                     }
@@ -6898,8 +6941,12 @@ emit_operator_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Erro
         return emit_nary_comparison_expr(e, op, form.items[1:], form.span)
     }
 
-    if op == "in?" {
-        return "", Compile_Error{message = "`in?` has been removed; use `contains?`", span = form.items[0].span}, false
+    if op == "in?" || op == "in" || op == "core/in" || op == "core-in" {
+        return "", Compile_Error{message = "`in` has been removed; use `contains?`", span = form.items[0].span}, false
+    }
+
+    if op == "not-in?" || op == "not-in" || op == "core/not-in" || op == "core-not-in" {
+        return "", Compile_Error{message = "`not-in` has been removed; use `(not (contains? collection value))`", span = form.items[0].span}, false
     }
 
     if op == "contains?" || op == "core/contains?" || op == "core-contains?" {
@@ -6932,24 +6979,6 @@ emit_operator_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Erro
             }
         }
         return fmt.tprintf("(%s) in (%s)", key, collection), {}, true
-    }
-
-    if op == "in" || op == "not-in" || op == "core/in" || op == "core-in" || op == "core/not-in" || op == "core-not-in" {
-        if len(form.items) != 3 {
-            return "", Compile_Error{message = fmt.tprintf("%s expects exactly two arguments", display_head_name(op)), span = form.span}, false
-        }
-        lhs, err_lhs, ok_lhs := emit_expr(e, form.items[1])
-        if !ok_lhs {
-            return "", err_lhs, false
-        }
-        rhs, err_rhs, ok_rhs := emit_expr(e, form.items[2])
-        if !ok_rhs {
-            return "", err_rhs, false
-        }
-        if op == "not-in" || op == "core/not-in" || op == "core-not-in" {
-            return fmt.tprintf("!((%s) in (%s))", lhs, rhs), {}, true
-        }
-        return fmt.tprintf("(%s) in (%s)", lhs, rhs), {}, true
     }
 
     return "", {}, false
@@ -7309,6 +7338,14 @@ emit_directive_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Err
     return fmt.tprintf("%s %s", form.items[0].text, target_text), {}, true
 }
 
+is_call_directive_symbol :: proc(form: CST_Form) -> bool {
+    return form.kind == .Symbol &&
+           len(form.text) > 0 &&
+           form.text[0] == '#' &&
+           !strings.has_prefix(form.text, "#soa[") &&
+           !strings.has_prefix(form.text, "#simd[")
+}
+
 captured_callback_arg_context :: proc(e: ^Emitter, arg: CST_Form) -> (proc_text: string, capture_names: [dynamic]string, captured: bool, err: Compile_Error, ok: bool) {
     if arg.kind == .Symbol {
         name := map_name(arg.text)
@@ -7406,21 +7443,14 @@ source_call_decl :: proc(e: ^Emitter, form: CST_Form) -> (^Source_Decl, bool) {
 }
 
 source_state_type :: proc(e: ^Emitter, source: ^Source_Decl) -> (string, Compile_Error, bool) {
-    push_local_type_scope(e)
-    defer pop_local_type_scope(e)
-    for param in source.params {
-        bind_local_type(e, param.name, param.ty)
-    }
-    if ty, ok_ty := obvious_form_type(e, source.state_expr); ok_ty {
-        return ty, {}, true
-    }
-    return "", Compile_Error{message = fmt.tprintf("defsource %s state expression must have an obvious type", source.name), span = source.state_expr.span}, false
+    _ = e
+    return source.state_ty, {}, true
 }
 
 source_call_arg_texts :: proc(e: ^Emitter, source: ^Source_Decl, form: CST_Form) -> (arg_texts: [dynamic]string, err: Compile_Error, ok: bool) {
     provided := len(form.items) - 1
     if provided != len(source.params) {
-        return arg_texts, Compile_Error{message = fmt.tprintf("source %s expects %d arguments, got %d", source.name, len(source.params), provided), span = form.span}, false
+        return arg_texts, Compile_Error{message = fmt.tprintf("iterator %s expects %d arguments, got %d", source.name, len(source.params), provided), span = form.span}, false
     }
     for arg, idx in form.items[1:] {
         expected_ty := source.params[idx].ty
@@ -7440,28 +7470,28 @@ source_call_text :: proc(e: ^Emitter, source: ^Source_Decl, arg_texts: []string)
 validate_source_protocol :: proc(e: ^Emitter, source: ^Source_Decl, state_ty: string, span: Span) -> (Compile_Error, bool) {
     next_decl, ok_next := find_proc_decl(e, source.next_name)
     if !ok_next {
-        return Compile_Error{message = fmt.tprintf("defsource %s :next must name a known function: %s", source.name, source.next_name), span = span}, false
+        return Compile_Error{message = fmt.tprintf("defiter %s :next must name a known function: %s", source.name, source.next_name), span = span}, false
     }
     expected_state_ptr := fmt.tprintf("^%s", state_ty)
     if len(next_decl.params) != 1 || next_decl.params[0].ty != expected_state_ptr {
-        return Compile_Error{message = fmt.tprintf("defsource %s :next must take %s", source.name, expected_state_ptr), span = span}, false
+        return Compile_Error{message = fmt.tprintf("defiter %s :next must take %s", source.name, expected_state_ptr), span = span}, false
     }
     if next_decl.returns.kind != .Named ||
        len(next_decl.returns.named) != 2 ||
        next_decl.returns.named[0].ty != source.item_ty ||
        next_decl.returns.named[1].ty != "bool" {
-        return Compile_Error{message = fmt.tprintf("defsource %s :next must return [item: %s ok: bool]", source.name, source.item_ty), span = span}, false
+        return Compile_Error{message = fmt.tprintf("defiter %s :next must return [item: %s ok: bool]", source.name, source.item_ty), span = span}, false
     }
     if source.has_dispose {
         dispose_decl, ok_dispose := find_proc_decl(e, source.dispose_name)
         if !ok_dispose {
-            return Compile_Error{message = fmt.tprintf("defsource %s :dispose must name a known function: %s", source.name, source.dispose_name), span = span}, false
+            return Compile_Error{message = fmt.tprintf("defiter %s :dispose must name a known function: %s", source.name, source.dispose_name), span = span}, false
         }
         if len(dispose_decl.params) != 1 || dispose_decl.params[0].ty != expected_state_ptr {
-            return Compile_Error{message = fmt.tprintf("defsource %s :dispose must take %s", source.name, expected_state_ptr), span = span}, false
+            return Compile_Error{message = fmt.tprintf("defiter %s :dispose must take %s", source.name, expected_state_ptr), span = span}, false
         }
         if dispose_decl.returns.kind != .None {
-            return Compile_Error{message = fmt.tprintf("defsource %s :dispose must not return a value", source.name), span = span}, false
+            return Compile_Error{message = fmt.tprintf("defiter %s :dispose must not return a value", source.name), span = span}, false
         }
     }
     return {}, true
@@ -8422,6 +8452,22 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         return "", Compile_Error{message = "unsupported call head", span = head.span}, false
     }
 
+    if len(form.items) > 1 && is_call_directive_symbol(form.items[len(form.items)-1]) {
+        directive := form.items[len(form.items)-1]
+        stripped_items: [dynamic]CST_Form
+        defer delete(stripped_items)
+        for item in form.items[:len(form.items)-1] {
+            append(&stripped_items, item)
+        }
+        stripped := form
+        stripped.items = stripped_items
+        target_text, err_target, ok_target := emit_call_like(e, stripped)
+        if !ok_target {
+            return "", err_target, false
+        }
+        return fmt.tprintf("%s %s", directive.text, target_text), {}, true
+    }
+
     if head.text == "zero" {
         if len(form.items) < 2 {
             return "", Compile_Error{message = "zero expects a type", span = form.span}, false
@@ -8480,7 +8526,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
     }
 
     if _, ok_source := find_source_decl(e, map_name(head.text)); ok_source {
-        return "", Compile_Error{message = fmt.tprintf("source %s can currently only be consumed by for, into, or transduce", head.text), span = head.span}, false
+        return "", Compile_Error{message = fmt.tprintf("iterator %s can currently only be consumed by for, into, or transduce", head.text), span = head.span}, false
     }
 
     err_deprecated, deprecated := deprecated_builtin_collection_head_error(head)
@@ -9284,8 +9330,11 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         if !ok_collection {
             return "", err_collection, false
         }
-        collection_ty, _ := obvious_form_type(e, form.items[1])
-        if !strings.has_prefix(collection_ty, "map[") && collection_ty != "string" && collection_ty != "cstring" {
+        collection_ty, known_collection_ty := obvious_form_type(e, form.items[1])
+        if known_collection_ty &&
+           collection_ty != "string" &&
+           collection_ty != "cstring" &&
+           !strings.has_prefix(collection_ty, "map[") {
             collection = slice_all_expr_text(collection)
         }
         if head.text == "count" || head.text == "core/count" || head.text == "core-count" {
@@ -9585,6 +9634,10 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         }
         return emit_type_conversion_text(type_text, value_text), {}, true
     }
+    generic_ctor, err_generic_ctor, ok_generic_ctor := emit_generic_type_constructor_call(e, form)
+    if ok_generic_ctor || err_generic_ctor.message != "" {
+        return generic_ctor, err_generic_ctor, ok_generic_ctor
+    }
     if len(form.items) >= 3 && form.items[len(form.items)-1].kind == .Brace {
         arg_texts_with_mixed, err_mixed, ok_mixed := emit_general_mixed_call_arg_texts(e, head_name, form.items[1:len(form.items)-1], form.items[len(form.items)-1])
         if ok_mixed {
@@ -9649,6 +9702,45 @@ emit_type_application_expr :: proc(e: ^Emitter, type_form: CST_Form, args: []CST
         }
         return emit_type_conversion_text(type_text, value_text), {}, true
     }
+}
+
+generic_type_constructor_call_candidate :: proc(head: CST_Form) -> bool {
+    if head.kind != .Symbol || len(head.text) == 0 {
+        return false
+    }
+    if head.text[0] >= 'A' && head.text[0] <= 'Z' {
+        return true
+    }
+    dot := strings.last_index(head.text, ".")
+    return dot >= 0 && dot+1 < len(head.text) && head.text[dot+1] >= 'A' && head.text[dot+1] <= 'Z'
+}
+
+emit_generic_type_constructor_call :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) {
+    if len(form.items) < 3 || !generic_type_constructor_call_candidate(form.items[0]) {
+        return "", Compile_Error{}, false
+    }
+    if _, ok_expected := imported_odin_proc_arg_type(e, map_name(form.items[0].text), 0); ok_expected {
+        return "", Compile_Error{}, false
+    }
+
+    value := form.items[len(form.items)-1]
+    if value.kind != .Vector && value.kind != .Brace {
+        return "", Compile_Error{}, false
+    }
+
+    type_form := CST_Form{
+        kind  = .List,
+        span  = form.span,
+        items = make([dynamic]CST_Form, 0, len(form.items)),
+    }
+    append(&type_form.items, CST_Form{kind = .Symbol, text = "type", span = form.items[0].span})
+    for item in form.items[:len(form.items)-1] {
+        append(&type_form.items, item)
+    }
+
+    result, err, ok := emit_type_application_expr(e, type_form, form.items[len(form.items)-1:], form.span)
+    delete(type_form.items)
+    return result, err, ok
 }
 
 emit_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) {
@@ -9803,22 +9895,29 @@ append_indent :: proc(builder: ^strings.Builder, depth: int) {
 }
 
 Binding :: struct {
-    is_destructure:    bool,
-    is_result_binding: bool,
-    name:              string,
-    pattern:           [dynamic]string,
-    is_typed:          bool,
-    ty:                string,
-    deferred_delete:   bool,
-    or_modifier:       string,
-    target_span:       Span,
-    value:             CST_Form,
+    is_destructure:      bool,
+    is_result_binding:   bool,
+    name:                string,
+    pattern:             [dynamic]string,
+    is_typed:            bool,
+    ty:                  string,
+    deferred_delete:     bool,
+    err_deferred_delete: bool,
+    or_modifier:         string,
+    target_span:         Span,
+    value:               CST_Form,
 }
 
 let_binding_has_defer_marker :: proc(items: []CST_Form, idx: int) -> bool {
     return idx < len(items) &&
            items[idx].kind == .Keyword &&
            items[idx].text == ":defer"
+}
+
+let_binding_has_errdefer_marker :: proc(items: []CST_Form, idx: int) -> bool {
+    return idx < len(items) &&
+           items[idx].kind == .Keyword &&
+           items[idx].text == ":errdefer"
 }
 
 let_binding_or_modifier :: proc(items: []CST_Form, idx: int) -> (string, bool) {
@@ -9854,6 +9953,7 @@ parse_let_bindings :: proc(form: CST_Form) -> (bindings: [dynamic]Binding, err: 
             }
             or_modifier, has_or_modifier := let_binding_or_modifier(form.items[:], i+2)
             deferred_delete := false
+            err_deferred_delete := false
             next_i := i + 2
             if has_or_modifier {
                 if len(names) != 2 {
@@ -9863,21 +9963,43 @@ parse_let_bindings :: proc(form: CST_Form) -> (bindings: [dynamic]Binding, err: 
                     return bindings, Compile_Error{message = "or-* let binding requires [value ok] or [value err]", span = target.span}, false
                 }
                 next_i += 1
-                deferred_delete = let_binding_has_defer_marker(form.items[:], next_i)
-                if deferred_delete {
-                    next_i += 1
+                for next_i < len(form.items) {
+                    if let_binding_has_defer_marker(form.items[:], next_i) {
+                        if deferred_delete {
+                            return bindings, Compile_Error{message = "duplicate :defer binding marker", span = form.items[next_i].span}, false
+                        }
+                        deferred_delete = true
+                        next_i += 1
+                    } else if let_binding_has_errdefer_marker(form.items[:], next_i) {
+                        if err_deferred_delete {
+                            return bindings, Compile_Error{message = "duplicate :errdefer binding marker", span = form.items[next_i].span}, false
+                        }
+                        err_deferred_delete = true
+                        next_i += 1
+                    } else {
+                        break
+                    }
+                }
+                if deferred_delete && err_deferred_delete {
+                    return bindings, Compile_Error{message = "use either :defer or :errdefer, not both", span = target.span}, false
+                }
+                if err_deferred_delete && (or_modifier != "or-return" || names[1] != "err") {
+                    return bindings, Compile_Error{message = ":errdefer is only supported on [value err] :or-return bindings", span = target.span}, false
                 }
             } else if let_binding_has_defer_marker(form.items[:], i+2) {
                 return bindings, Compile_Error{message = ":defer binding marker is only supported on named local bindings or [value ok/err] :or-* bindings", span = form.items[i+2].span}, false
+            } else if let_binding_has_errdefer_marker(form.items[:], i+2) {
+                return bindings, Compile_Error{message = ":errdefer is only supported on [value err] :or-return bindings", span = form.items[i+2].span}, false
             }
             append(&bindings, Binding{
-                is_destructure    = !has_or_modifier,
-                is_result_binding = has_or_modifier,
-                pattern           = names,
-                deferred_delete   = deferred_delete,
-                or_modifier       = or_modifier,
-                target_span       = target.span,
-                value             = form.items[i+1],
+                is_destructure      = !has_or_modifier,
+                is_result_binding   = has_or_modifier,
+                pattern             = names,
+                deferred_delete     = deferred_delete,
+                err_deferred_delete = err_deferred_delete,
+                or_modifier         = or_modifier,
+                target_span         = target.span,
+                value               = form.items[i+1],
             })
             i = next_i
         case .Symbol:
@@ -10344,8 +10466,6 @@ emit_switch_case_label :: proc(e: ^Emitter, clause: CST_Form, type_switch: bool)
 }
 
 emit_switch_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Return_Spec, force_partial: bool = false) -> (Compile_Error, bool) {
-    emit_switch_compat_warning(e, form)
-
     if len(form.items) < 4 {
         return Compile_Error{message = "switch expects subject and at least one clause", span = form.span}, false
     }
@@ -10590,19 +10710,7 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
     case "comment", "core/comment":
         return {}, true
     case "#partial":
-        if len(form.items) < 2 || !is_symbol(form.items[1], "switch") {
-            return Compile_Error{message = "#partial currently expects a switch form", span = form.span}, false
-        }
-        switch_items: [dynamic]CST_Form
-        for item in form.items[1:] {
-            append(&switch_items, item)
-        }
-        switch_form := CST_Form{
-            kind  = .List,
-            items = switch_items,
-            span  = form.span,
-        }
-        return emit_switch_stmt(e, switch_form, last_in_proc, returns, true)
+        return Compile_Error{message = "#partial is not Kvist syntax; use case or cond", span = form.span}, false
     case "let":
         if len(form.items) < 3 {
             return Compile_Error{message = "let expects bindings and body", span = form.span}, false
@@ -10610,6 +10718,10 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
         bindings, err_bind, ok_bind := parse_let_bindings(form.items[1])
         if !ok_bind {
             return err_bind, false
+        }
+        err_tail, bad_tail := let_errdefer_tail_error(bindings[:], last_in_proc)
+        if bad_tail {
+            return err_tail, false
         }
         body: [dynamic]CST_Form
         for item in form.items[2:] {
@@ -10674,11 +10786,16 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
                 return err_guard, false
             }
             if binding.deferred_delete {
-                delete_name, ok_delete_name := binding_delete_target_name(binding)
-                if !ok_delete_name {
-                    return Compile_Error{message = ":defer binding marker is only supported on delete-able local bindings", span = binding.value.span}, false
+                err_defer, ok_defer := emit_binding_deferred_delete(e, binding)
+                if !ok_defer {
+                    return err_defer, false
                 }
-                emit_line(e, fmt.tprintf("defer delete(%s)", delete_name))
+            }
+            if binding.err_deferred_delete {
+                err_defer, ok_defer := emit_binding_err_deferred_delete(e, binding)
+                if !ok_defer {
+                    return err_defer, false
+                }
             }
             if ty, ok_ty := obvious_binding_type(e, binding); ok_ty {
                 bind_local_type(e, binding.name, ty)
@@ -10722,7 +10839,7 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
     case "case", "core-case":
         return emit_case_stmt(e, form, last_in_proc, returns)
     case "switch", "core-switch":
-        return emit_switch_stmt(e, form, last_in_proc, returns)
+        return Compile_Error{message = "`switch` has been removed; use `case` for subject dispatch or `cond` for predicate branches", span = head.span}, false
     case "return":
         if len(form.items) == 1 {
             emit_line(e, "return")
@@ -10801,7 +10918,7 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
             deferred := form.items[1]
             if deferred.kind == .List && len(deferred.items) > 0 && deferred.items[0].kind == .Symbol {
                 switch deferred.items[0].text {
-                case "if", "when", "cond", "case", "core-case", "switch", "core-switch", "let", "do":
+                case "if", "when", "cond", "case", "core-case", "let", "do":
                 case:
                     expr, err_expr, ok_expr := emit_expr(e, deferred)
                     if !ok_expr {
@@ -11043,6 +11160,10 @@ emit_eval_print_stmt :: proc(e: ^Emitter, form: CST_Form) -> (Compile_Error, boo
         bindings, err_bind, ok_bind := parse_let_bindings(form.items[1])
         if !ok_bind {
             return err_bind, false
+        }
+        err_tail, bad_tail := let_errdefer_tail_error(bindings[:], false)
+        if bad_tail {
+            return err_tail, false
         }
 
         emit_line(e, "{")
@@ -11360,22 +11481,15 @@ emit_decl :: proc(e: ^Emitter, decl: IR_Decl) -> (Compile_Error, bool) {
         return {}, true
     case .Source:
         source_decl := decl.source_decl
+        state_ty := source_decl.state_ty
         push_local_type_scope(e)
         defer pop_local_type_scope(e)
         for param in source_decl.params {
             bind_local_type(e, param.name, param.ty)
         }
-        state_ty, err_state_ty, ok_state_ty := source_state_type(e, &source_decl)
-        if !ok_state_ty {
-            return err_state_ty, false
-        }
         err_protocol, ok_protocol := validate_source_protocol(e, &source_decl, state_ty, decl.span)
         if !ok_protocol {
             return err_protocol, false
-        }
-        state_text, err_state, ok_state := emit_expr_for_expected_type(e, source_decl.state_expr, state_ty)
-        if !ok_state {
-            return err_state, false
         }
         emit_indent(e)
         fmt.sbprintf(&e.builder, "%s :: proc(", source_decl.name)
@@ -11388,7 +11502,10 @@ emit_decl :: proc(e: ^Emitter, decl: IR_Decl) -> (Compile_Error, bool) {
         fmt.sbprintf(&e.builder, ") -> %s %s", state_ty, "{")
         emit_raw_newline(e)
         e.indent += 1
-        emit_prefixed_expr_mapped(e, "return ", state_text, source_decl.state_expr.span)
+        err_body, ok_body := emit_body_forms(e, source_decl.body[:], Return_Spec{kind = .Single, single_ty = state_ty})
+        if !ok_body {
+            return err_body, false
+        }
         e.indent -= 1
         emit_line(e, "}")
     case .Raw:

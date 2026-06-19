@@ -27,7 +27,7 @@ contract:
 - `(import hot "kvist:hot")`
 - `(hot.defmodule ...)`
 
-Under that surface, the generated module still uses `(export)` and `:abi "c"`
+Under that surface, the generated module still uses `@export` and `:abi "c"`
 for the actual C-ABI entrypoints.
 
 The dynlib-tagged symbol table and rawptr/state-cast glue live in the

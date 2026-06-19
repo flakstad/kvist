@@ -11,6 +11,28 @@ paths:
 This is an index, not a full API reference. For exact signatures, read the
 package source and runnable examples.
 
+## Start With Examples
+
+- [examples/collections/package-tour.kvist](../examples/collections/package-tour.kvist) -
+  `arr`, `map`, `set`, and `str` together with `:defer` cleanup.
+- [examples/collections/sequences.kvist](../examples/collections/sequences.kvist) -
+  array helpers over structs, grouping, sorting, and lookup.
+- [examples/collections/transforms.kvist](../examples/collections/transforms.kvist) -
+  `deftransform`, `into`, and `transduce`.
+- [examples/collections/log-source.kvist](../examples/collections/log-source.kvist) -
+  `defiter` with `for`, `into`, `transduce`, and cleanup.
+
+## Ownership Rules
+
+- Helpers ending in `!` mutate an existing value and do not return a new owned
+  collection.
+- Helpers that build dynamic arrays, maps, sets, or strings return owned values;
+  bind them with `:defer`, delete them manually, or return ownership.
+- Slice helpers such as `arr.slice`, `arr.take`, `arr.drop`, and `str.slice`
+  return borrowed views.
+- `arr.group-by` returns an owned map whose values are owned dynamic arrays;
+  delete each group before deleting the map.
+
 ## Core
 
 - `kvist:core` - auto-exposed core macros and helpers such as `when`, `cond`,

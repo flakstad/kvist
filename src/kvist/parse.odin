@@ -1034,37 +1034,43 @@ parse_proc_decl :: proc(form: CST_Form) -> (decl: Proc_Decl, err: Compile_Error,
 
 parse_source_decl :: proc(form: CST_Form) -> (decl: Source_Decl, err: Compile_Error, ok: bool) {
     if len(form.items) < 8 {
-        return decl, Compile_Error{message = "defsource expects name, params, return type, state expression, :next, and optional :dispose", span = form.span}, false
+        return decl, Compile_Error{message = "defiter expects name, params, -> state type, yields item type, :next, optional :dispose, and body", span = form.span}, false
     }
     name_form := form.items[1]
     if name_form.kind != .Symbol {
-        return decl, Compile_Error{message = "defsource expects a symbol name", span = name_form.span}, false
+        return decl, Compile_Error{message = "defiter expects a symbol name", span = name_form.span}, false
     }
     params, err_params, ok_params := parse_param_vector(form.items[2])
     if !ok_params {
         return decl, err_params, false
     }
     if !is_symbol(form.items[3], "->") {
-        return decl, Compile_Error{message = "defsource expects -> item type after params", span = form.items[3].span}, false
+        return decl, Compile_Error{message = "defiter expects -> state type after params", span = form.items[3].span}, false
     }
-    item_ty, next_i, err_item_ty, ok_item_ty := parse_type_text_from_forms(form.items[:], 4)
+    state_ty, next_i, err_state_ty, ok_state_ty := parse_type_text_from_forms(form.items[:], 4)
+    if !ok_state_ty {
+        return decl, err_state_ty, false
+    }
+    if next_i >= len(form.items) {
+        return decl, Compile_Error{message = "defiter expects yields item type after state type", span = form.span}, false
+    }
+    if !is_symbol(form.items[next_i], "yields") {
+        return decl, Compile_Error{message = "defiter expects yields item type after state type", span = form.items[next_i].span}, false
+    }
+    item_ty, body_i, err_item_ty, ok_item_ty := parse_type_text_from_forms(form.items[:], next_i+1)
     if !ok_item_ty {
         return decl, err_item_ty, false
     }
-    if next_i >= len(form.items) {
-        return decl, Compile_Error{message = "defsource missing state expression", span = form.span}, false
+    if body_i >= len(form.items) {
+        return decl, Compile_Error{message = "defiter expects :next, optional :dispose, and body", span = form.span}, false
     }
-    state_expr := form.items[next_i]
-    i := next_i + 1
+    i := body_i
     next_name := ""
     dispose_name := ""
     has_dispose := false
     saw_next := false
-    for i < len(form.items) {
+    for i < len(form.items) && form.items[i].kind == .Keyword {
         key := form.items[i]
-        if key.kind != .Keyword {
-            return decl, Compile_Error{message = "defsource options expect keyword/value pairs", span = key.span}, false
-        }
         if i+1 >= len(form.items) {
             return decl, Compile_Error{message = fmt.tprintf("%s expects a function symbol", key.text), span = key.span}, false
         }
@@ -1075,29 +1081,37 @@ parse_source_decl :: proc(form: CST_Form) -> (decl: Source_Decl, err: Compile_Er
         switch key.text {
         case ":next":
             if saw_next {
-                return decl, Compile_Error{message = "defsource has duplicate :next", span = key.span}, false
+                return decl, Compile_Error{message = "defiter has duplicate :next", span = key.span}, false
             }
             next_name = map_name(value.text)
             saw_next = true
         case ":dispose":
             if has_dispose {
-                return decl, Compile_Error{message = "defsource has duplicate :dispose", span = key.span}, false
+                return decl, Compile_Error{message = "defiter has duplicate :dispose", span = key.span}, false
             }
             dispose_name = map_name(value.text)
             has_dispose = true
         case:
-            return decl, Compile_Error{message = fmt.tprintf("unsupported defsource option: %s", key.text), span = key.span}, false
+            return decl, Compile_Error{message = fmt.tprintf("unsupported defiter option: %s", key.text), span = key.span}, false
         }
         i += 2
     }
     if !saw_next {
-        return decl, Compile_Error{message = "defsource expects :next", span = form.span}, false
+        return decl, Compile_Error{message = "defiter expects :next", span = form.span}, false
+    }
+    if i >= len(form.items) {
+        return decl, Compile_Error{message = "defiter body is empty", span = form.span}, false
+    }
+    body: [dynamic]CST_Form
+    for item in form.items[i:] {
+        append(&body, item)
     }
     return Source_Decl{
         name = map_name(name_form.text),
         params = params,
+        state_ty = state_ty,
         item_ty = item_ty,
-        state_expr = state_expr,
+        body = body,
         next_name = next_name,
         dispose_name = dispose_name,
         has_dispose = has_dispose,
@@ -1147,6 +1161,14 @@ parse_decl_typed_binding :: proc(
 
 parse_decl :: proc(top_form: CST_Top_Form) -> (decl: AST_Decl, err: Compile_Error, ok: bool) {
     form := top_form.form
+    if form.kind == .Symbol && len(form.text) > 1 && form.text[0] == '@' {
+        return AST_Decl{
+            kind = .Raw,
+            span = form.span,
+            doc_lines = top_form.doc_lines,
+            raw_text = fmt.tprintf("@(%s)", form.text[1:]),
+        }, {}, true
+    }
     if form.kind != .List || len(form.items) == 0 {
         return decl, Compile_Error{message = "expected top-level list form", span = form.span}, false
     }
@@ -1382,36 +1404,21 @@ parse_decl :: proc(top_form: CST_Top_Form) -> (decl: AST_Decl, err: Compile_Erro
             raw_text = fmt.tprintf("foreign import %s %s", map_name(form.items[1].text), form.items[2].text),
         }, {}, true
     case "export":
-        if len(form.items) != 1 {
-            return decl, Compile_Error{message = "export does not take arguments", span = form.span}, false
-        }
-        return AST_Decl{
-            kind = .Raw,
-            span = form.span,
-            doc_lines = top_form.doc_lines,
-            raw_text = "@(export)",
-        }, {}, true
+        return decl, Compile_Error{message = "`(export)` has been removed; use `@export`", span = form.span}, false
     case "attr":
-        raw_text, err_attr, ok_attr := attr_raw_text(form)
-        if !ok_attr {
-            return decl, err_attr, false
-        }
-        return AST_Decl{
-            kind = .Raw,
-            span = form.span,
-            doc_lines = top_form.doc_lines,
-            raw_text = raw_text,
-        }, {}, true
-    case "exports":
+        return decl, Compile_Error{message = "`(attr name)` has been removed; use `@name`", span = form.span}, false
+    case "@exports":
         if len(form.items) != 2 || form.items[1].kind != .Vector {
-            return decl, Compile_Error{message = "exports expects one vector of symbol names", span = form.span}, false
+            return decl, Compile_Error{message = "@exports expects one vector of symbol names", span = form.span}, false
         }
         for item in form.items[1].items {
             if item.kind != .Symbol {
-                return decl, Compile_Error{message = "exports expects symbol names", span = item.span}, false
+                return decl, Compile_Error{message = "@exports expects symbol names", span = item.span}, false
             }
         }
         return AST_Decl{kind = .Ignored, span = form.span}, {}, true
+    case "exports":
+        return decl, Compile_Error{message = "`(exports [Name])` has been removed; use `@exports [Name]`", span = form.span}, false
     case "defn", "defn-":
         doc_lines := top_form.doc_lines
         proc_form := form
@@ -1465,7 +1472,7 @@ parse_decl :: proc(top_form: CST_Top_Form) -> (decl: AST_Decl, err: Compile_Erro
                 spec = form.items[2],
             },
         }, {}, true
-    case "defsource", "defsource-":
+    case "defiter", "defiter-":
         source_decl, err_source, ok_source := parse_source_decl(form)
         if !ok_source {
             return decl, err_source, false

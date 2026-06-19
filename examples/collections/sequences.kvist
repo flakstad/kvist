@@ -38,7 +38,7 @@
                            (User {name: "Edsger" age: 72 status: .Archived verified: false})])
         active-users (arr.filter active? users)]
     (defer (delete active-users))
-    (len active-users)))
+    (count active-users)))
 
 (defn active-age-total [] -> int
   (let [users ([]User [(User {name: "Ada" age: 36 status: .Active verified: true})
@@ -79,7 +79,7 @@
                            (User {name: "Edsger" age: 72 status: .Archived verified: false})])
         status-runs (arr.partition-by .status users)]
     (defer (delete status-runs))
-    (len status-runs)))
+    (count status-runs)))
 
 (defn active-status-group-count [] -> int
   (let [users ([]User [(User {name: "Ada" age: 36 status: .Active verified: true})
@@ -92,7 +92,7 @@
       (for [_ group by-status]
         (delete group))
       (delete by-status))
-    (len active-users)))
+    (count active-users)))
 
 (defn youngest-user-name [] -> string
   (let [users ([]User [(User {name: "Ada" age: 36 status: .Active verified: true})

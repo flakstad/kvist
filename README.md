@@ -215,7 +215,7 @@ development workflows, see [docs/LIVE-DEVELOPMENT.md](docs/LIVE-DEVELOPMENT.md).
 - [docs/HTML.md](docs/HTML.md) - HTML rendering
 - [docs/HTTP.md](docs/HTTP.md) - HTTP server/client/SSE helpers
 - [docs/TESTING.md](docs/TESTING.md) - tests, assertions, fixtures, and table checks
-- [docs/FUNCTIONAL-TRANSFORMS.md](docs/FUNCTIONAL-TRANSFORMS.md) - `deftransform`, `into`, `transduce`
+- [docs/FUNCTIONAL-TRANSFORMS.md](docs/FUNCTIONAL-TRANSFORMS.md) - `deftransform`, `defiter`, `into`, `transduce`
 - [docs/PARALLEL.md](docs/PARALLEL.md) - tasks and parallel collection helpers
 - [docs/TOOLING.md](docs/TOOLING.md) - CLI/editor tooling
 - [docs/LIVE-DEVELOPMENT.md](docs/LIVE-DEVELOPMENT.md) - resident reload and scratch eval workflows

@@ -52,7 +52,7 @@
     (Disconnected disc) (do
                           (println disc.reason)
                           0)
-    (Data data) (len data.payload)
+    (Data data) (count data.payload)
     :else -1))
 
 (defn sum [xs: []int] -> int

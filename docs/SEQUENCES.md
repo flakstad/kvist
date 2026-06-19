@@ -175,8 +175,6 @@ work:
 (get m k default)
 (slice xs start end)
 (contains? collection key)
-(in value collection)
-(not-in value collection)
 (update! place f args...)
 (assoc value.field new-value)
 (update value.field f args...)
@@ -184,9 +182,11 @@ work:
 ```
 
 Cross-family collection helpers live in `kvist:core`: `count`,
-`empty?`, `get`, `slice`, `contains?`, `in`, `not-in`, `update!`, `assoc`,
-`update`, and `delete!`. Other collection operations should use explicit
-package names such as `arr.*`, `map.*`, `str.*`, or `set.*`.
+`empty?`, `get`, `slice`, `contains?`, `update!`, `assoc`, `update`, and
+`delete!`. Other collection operations should use explicit package names such
+as `arr.*`, `map.*`, `str.*`, or `set.*`.
+
+`len` is accepted as an alias for `count`, but examples use `count`.
 
 The access and trimming helpers use the direct Odin representation where
 possible. Direct access syntax and call-shaped helpers are equivalent where both

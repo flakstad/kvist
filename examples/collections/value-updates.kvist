@@ -34,7 +34,7 @@
         visited (visit older)
         named (rename visited "Ada Lovelace")
         retired (retire named)]
-    (+ ada.age older.age retired.age retired.profile.visits (len retired.profile.name))))
+    (+ ada.age older.age retired.age retired.profile.visits (count retired.profile.name))))
 
 (defn main []
   (println (score)))

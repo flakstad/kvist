@@ -67,10 +67,10 @@ LANGUAGE_SOURCE_ENTRIES :: []Language_Source_Entry{
     {name = "defunion", kind = "kvist form", relative = "src/kvist/parse.odin", snippet = "case \"defunion\", \"defunion-\":"},
     {name = "defn", kind = "kvist form", relative = "src/kvist/parse.odin", snippet = "case \"defn\", \"defn-\":"},
     {name = "defmacro", kind = "kvist form", relative = "src/kvist/parse.odin", snippet = "case \"defmacro\", \"defmacro-\":"},
-    {name = "defsource", kind = "kvist form", relative = "src/kvist/parse.odin", snippet = "case \"defsource\", \"defsource-\":"},
-    {name = "attr", kind = "kvist form", relative = "src/kvist/parse.odin", snippet = "(attr name ...)"},
-    {name = "export", kind = "kvist form", relative = "src/kvist/parse.odin", snippet = "case \"export\":"},
-    {name = "exports", kind = "kvist form", relative = "src/kvist/parse.odin", snippet = "case \"exports\":"},
+    {name = "defiter", kind = "kvist form", relative = "src/kvist/parse.odin", snippet = "case \"defiter\", \"defiter-\":"},
+    {name = "@export", kind = "kvist form", relative = "src/kvist/parse.odin", snippet = "@export"},
+    {name = "@private", kind = "kvist form", relative = "src/kvist/parse.odin", snippet = "@private"},
+    {name = "@exports", kind = "kvist form", relative = "src/kvist/parse.odin", snippet = "@exports [Name ...]"},
     {name = "fn", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "emit_proc_literal_expr :: proc"},
     {name = "odin", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "case \"odin\":"},
     {name = "let", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "case \"let\":"},
@@ -80,7 +80,6 @@ LANGUAGE_SOURCE_ENTRIES :: []Language_Source_Entry{
     {name = "when", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "(when test body...)"},
     {name = "cond", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "(cond test expr ... :else expr)"},
     {name = "case", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "(case value clause ... :else expr)"},
-    {name = "switch", kind = "compatibility syntax", relative = "src/kvist/emit.odin", snippet = "`switch` is compatibility syntax; use `case` or `cond`"},
     {name = "set!", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "case \"set!\":"},
     {name = "mut!", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "case \"mut!\":"},
     {name = "update!", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "(update! place f args...)"},
@@ -626,10 +625,6 @@ symbols_append_core_helper_alias_records :: proc(builder: ^strings.Builder, seen
             continue
         }
         bare_name := name[len("core."):]
-        if bare_name == "switch" {
-            delete(fields)
-            continue
-        }
         key := fmt.tprintf("kvist helper\t%s", bare_name)
         if seen[key] {
             delete(key)
@@ -797,7 +792,7 @@ symbols_append_local_package_records :: proc(builder: ^strings.Builder, seen: ^m
 }
 
 editor_root_package_files :: proc(path, source: string) -> ([]Package_File, bool) {
-    forms, err_forms, ok_forms := read_top_forms(source)
+	forms, err_forms, ok_forms := read_kvist_top_forms(source)
     if !ok_forms {
         _ = err_forms
         return nil, false
@@ -849,7 +844,7 @@ editor_root_package_files :: proc(path, source: string) -> ([]Package_File, bool
             continue
         }
         file_source := string(data)
-        file_forms, _, ok_file_forms := read_top_forms(file_source)
+		file_forms, _, ok_file_forms := read_kvist_top_forms(file_source)
         if !ok_file_forms {
             delete(data)
             continue
@@ -1070,7 +1065,7 @@ imported_symbols_source :: proc(path, source: string) -> (output: string, err: C
     context.allocator = context.temp_allocator
     defer context.allocator = old_allocator
 
-    forms, err_forms, ok_forms := read_top_forms(source)
+	forms, err_forms, ok_forms := read_kvist_top_forms(source)
     if !ok_forms {
         return "", clone_compile_error(err_forms, result_allocator), false
     }
@@ -1179,7 +1174,7 @@ editor_symbols_source :: proc(path, source: string) -> (output: string, err: Com
             append(&files_for_imports, file)
         }
     } else {
-        forms, err_forms, ok_forms := read_top_forms(source)
+		forms, err_forms, ok_forms := read_kvist_top_forms(source)
         if !ok_forms {
             return "", clone_compile_error(err_forms, result_allocator), false
         }
@@ -1468,7 +1463,7 @@ symbols_source_signature :: proc(name: string, decl: Source_Decl) -> string {
         }
         fmt.sbprintf(&builder, "%s: %s", param.name, param.ty)
     }
-    fmt.sbprintf(&builder, "] -> %s)", decl.item_ty)
+    fmt.sbprintf(&builder, "] -> %s yields %s)", decl.state_ty, decl.item_ty)
     return strings.to_string(builder)
 }
 
@@ -1887,7 +1882,7 @@ symbols_source :: proc(source: string) -> (output: string, err: Compile_Error, o
     context.allocator = context.temp_allocator
     defer context.allocator = old_allocator
 
-    forms, err_forms, ok_forms := read_top_forms(source)
+	forms, err_forms, ok_forms := read_kvist_top_forms(source)
     if !ok_forms {
         return "", clone_compile_error(err_forms, result_allocator), false
     }
@@ -2046,7 +2041,7 @@ symbols_source :: proc(source: string) -> (output: string, err: Compile_Error, o
                 }
                 symbols_write_record_doc(&builder, "macro", form.items[1].text, source, form.items[1].span, detail, signature, doc_lines[:])
             }
-        case "defsource", "defsource-":
+        case "defiter", "defiter-":
             if len(form.items) >= 2 && form.items[1].kind == .Symbol {
                 signature := ""
                 source_decl, err_source, ok_source := parse_source_decl(form)
@@ -2056,10 +2051,10 @@ symbols_source :: proc(source: string) -> (output: string, err: Compile_Error, o
                     _ = err_source
                 }
                 detail := ""
-                if head == "defsource-" {
+                if head == "defiter-" {
                     detail = "private"
                 }
-                symbols_write_record_doc(&builder, "source", form.items[1].text, source, form.items[1].span, detail, signature, top.doc_lines[:])
+                symbols_write_record_doc(&builder, "iterator", form.items[1].text, source, form.items[1].span, detail, signature, top.doc_lines[:])
             }
         case:
         }

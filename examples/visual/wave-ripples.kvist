@@ -61,7 +61,7 @@
   "Set every value in a dynamic f32 buffer."
   [xs: [dynamic]f32, value: f32]
   (let [i 0
-        n (len xs)]
+        n (count xs)]
     (while (< i n)
       (set! xs[i] value)
       (mut! i += 1))))

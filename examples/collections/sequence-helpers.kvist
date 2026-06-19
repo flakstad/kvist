@@ -52,7 +52,7 @@
 (defn split-front-length [] -> int
   (let [xs ([]int [1 2 3 4])
         [front _] (arr.split-at 2 xs)]
-    (len front)))
+    (count front)))
 
 (defn first-kept-square [] -> int
   (let [xs ([]int [1 2 3 4])
@@ -77,7 +77,7 @@
   (let [xs ([]int [1 2 3 4])
         chunks (arr.partition 2 xs)]
     (defer (delete chunks))
-    (len chunks)))
+    (count chunks)))
 
 (defn repeated-two-count [] -> int
   (let [xs ([]int [1 2 2 3])
@@ -101,7 +101,7 @@
   (let [names ([]string ["Ada" "Lin" "Grace"])
         by-name (arr.index-by name-key names)]
     (defer (delete by-name))
-    (len by-name)))
+    (count by-name)))
 
 (defn key-value-count [] -> int
   (let [names ([]string ["Ada" "Lin" "Grace"])
@@ -122,7 +122,7 @@
       (for [_ group groups]
         (delete group))
       (delete groups))
-    (len evens)))
+    (count evens)))
 
 (defn range-total [] -> int
   (let [xs (arr.range 1 5)]
@@ -132,7 +132,7 @@
 (defn repeated-answer-count [] -> int
   (let [xs (arr.repeatedly 3 next-answer)]
     (defer (delete xs))
-    (len xs)))
+    (count xs)))
 
 (defn repeated-word-last [] -> string
   (let [xs (arr.repeat 3 "odin")]
@@ -163,13 +163,13 @@
         smalls (arr.take-while small? xs)
         bigs (arr.drop-while small? xs)]
     (+ (+ (arr.last head) (arr.first tail))
-       (+ (len smalls) (arr.first bigs)))))
+       (+ (count smalls) (arr.first bigs)))))
 
 (defn tail-trim-score [] -> int
   (let [xs ([]int [1 2 3 4 5])
         init (arr.butlast xs)
         without-two (arr.drop-last 2 xs)]
-    (+ (arr.last init) (len without-two))))
+    (+ (arr.last init) (count without-two))))
 
 (defn every-other-total [] -> int
   (let [xs ([]int [1 2 3 4 5])
@@ -265,7 +265,7 @@
   (let [xs ([dynamic]int [1 2 3 4])]
     (defer (delete xs))
     (arr.filter! even? xs)
-    (len xs)))
+    (count xs)))
 
 (defn removed-in-place-first [] -> int
   (let [xs ([dynamic]int [1 2 3 4])]
@@ -308,13 +308,13 @@
   (let [xs ([]int [1 2 3 4 5])
         chunks (arr.partition-all 2 xs)]
     (defer (delete chunks))
-    (len (arr.last chunks))))
+    (count (arr.last chunks))))
 
 (defn run-count [] -> int
   (let [xs ([]int [1 1 2 2 2 3 1])
         runs (arr.partition-by identity-int xs)]
     (defer (delete runs))
-    (len runs)))
+    (count runs)))
 
 (defn flattened-total [] -> int
   (let [segments ([]Segment [(Segment {values: ([]int [1 2])})

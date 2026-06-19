@@ -60,17 +60,43 @@ Scalar output is explicit with `transduce`:
   (transduce paid-order-totals + 0 orders))
 ```
 
-Reusable `defsource` producers can also feed `into` and `transduce`:
+Reusable `defiter` producers can feed `for`, `into`, and `transduce`. The
+header says what the opener returns and what `:next` yields:
+
+```clojure
+(defstruct Log_Source {
+  lines: []string
+  index: int
+})
+
+(defn next-log-line [src: ^Log_Source] -> [line: string ok: bool]
+  (if (< src.index (count src.lines))
+    (let [line src.lines[src.index]]
+      (set! src.index (+ src.index 1))
+      (return line true))
+    (return "" false)))
+
+(defiter log-lines [lines: []string] -> Log_Source yields string
+  :next next-log-line
+  (Log_Source {lines: lines index: 0}))
+
+(for [line (log-lines lines)]
+  (println line))
+```
+
+The same iterator call can be the input to a fused scalar reduction:
 
 ```clojure
 (transduce
-  paid-order-totals
+  (comp
+    (filter error-line?)
+    (map line-length))
   + 0
-  (orders-from-file path))
+  (log-lines lines))
 ```
 
-For a complete source example that exercises `for`, `into`, `transduce`, and
-`defer`-based disposal, see
+For a complete iterator example that exercises `for`, `into`, `transduce`, and
+`:dispose` cleanup, see
 [examples/collections/log-source.kvist](../examples/collections/log-source.kvist).
 
 Supported transformer forms are deliberately small:
@@ -177,10 +203,10 @@ Rough Odin shape:
 })(orders, 0)
 ```
 
-When the source is a `defsource` call, `transduce` uses the same protocol as
-`for` and `into`: open source state, defer disposal if present, call `:next`
+When the input is a `defiter` call, `transduce` uses the same protocol as
+`for` and `into`: open iterator state, defer disposal if present, call `:next`
 until `ok` is false, and update the accumulator without allocating an
-intermediate collection.
+intermediate collection. This is the main reason `defiter` exists.
 
 The generated Odin should stay easy to inspect.
 
@@ -225,7 +251,7 @@ The current implementation is strict:
   existing ownership conventions; append into existing arrays with `arr.into!`;
 - `transduce` requires an obvious accumulator type from the initial value or an
   annotation;
-- `defsource` calls are consumed directly by `for`, `into`, and `transduce`;
+- `defiter` calls are consumed directly by `for`, `into`, and `transduce`;
 - no hidden lazy seqs, dynamic dispatch, or boxed elements.
 
 When any of these rules are not met, the compiler rejects the pipeline and
@@ -235,14 +261,14 @@ Named `deftransform` declarations are checked for basic shape immediately:
 the spec must be `(comp ...)`, and each step must be `(map f)` or
 `(filter pred)`. Callback existence, callback arity, callback types, and output
 type compatibility are checked at the `into` or `transduce` use site where the
-source and accumulator types are known.
+input and accumulator types are known.
 
 ## Current Limits
 
 - transform specs are `(comp ...)` with `(map f)` and `(filter pred)` steps
 - `into` currently targets fresh owned `[dynamic]T` arrays
 - `transduce` currently supports `+` reducers for numeric accumulators
-- sources may be slices, fixed arrays, dynamic arrays, or `defsource` calls
+- inputs may be slices, fixed arrays, dynamic arrays, or `defiter` calls
 - anything cleverer should usually be a direct `for` loop
 
 ## Examples
@@ -250,6 +276,6 @@ source and accumulator types are known.
 - [examples/collections/transforms.kvist](../examples/collections/transforms.kvist) -
   reusable transforms over ordinary arrays
 - [examples/collections/log-source.kvist](../examples/collections/log-source.kvist) -
-  `defsource`, `for`, `into`, `transduce`, and cleanup in one place
+  `defiter`, `for`, `into`, `transduce`, and cleanup in one place
 - [examples/collections/sources.kvist](../examples/collections/sources.kvist) -
-  smaller source declarations consumed by collection forms
+  smaller iterator declarations consumed by collection forms

@@ -72,7 +72,7 @@
   "Set every value in a dynamic f32 buffer."
   [xs: [dynamic]f32, value: f32]
   (let [i 0
-        n (len xs)]
+        n (count xs)]
     (while (< i n)
       (set! xs[i] value)
       (mut! i += 1))))
@@ -259,7 +259,7 @@
   "Dissipate smoke density and clamp extreme injection values."
   [density: [dynamic]f32]
   (let [i 0
-        n (len density)]
+        n (count density)]
     (while (< i n)
       (set! density[i] (math.clamp (* density[i] Density-Dissipation) 0.0 220.0))
       (mut! i += 1))))

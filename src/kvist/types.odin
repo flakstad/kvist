@@ -161,8 +161,9 @@ Transform_Decl :: struct {
 Source_Decl :: struct {
     name:        string,
     params:      [dynamic]Param,
+    state_ty:    string,
     item_ty:     string,
-    state_expr:  CST_Form,
+    body:        [dynamic]CST_Form,
     next_name:   string,
     dispose_name: string,
     has_dispose: bool,

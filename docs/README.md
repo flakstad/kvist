@@ -16,7 +16,7 @@ Start here:
 
 Focused references:
 
-- [FUNCTIONAL-TRANSFORMS.md](FUNCTIONAL-TRANSFORMS.md) - `deftransform`, `into`, `transduce`
+- [FUNCTIONAL-TRANSFORMS.md](FUNCTIONAL-TRANSFORMS.md) - `deftransform`, `defiter`, `into`, `transduce`
 - [PARALLEL.md](PARALLEL.md) - `kvist:parallel`
 - [LIVE-DEVELOPMENT.md](LIVE-DEVELOPMENT.md) - resident reload and scratch eval workflows
 

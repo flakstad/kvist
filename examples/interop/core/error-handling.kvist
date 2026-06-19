@@ -38,7 +38,7 @@
   (if-ok [[data err] (os.read_entire_file path context.allocator)]
     (do
       (defer (delete data))
-      (len data))
+      (count data))
     0))
 
 (defn print-byte-count [path: string]
@@ -46,7 +46,7 @@
   ;; "read, check err == {}, then use the owned result and delete it".
   (when-ok [[data err] (os.read_entire_file path context.allocator)]
     (defer (delete data))
-    (fmt.println (len data))))
+    (fmt.println (count data))))
 
 (defn main []
   (fmt.println (parse-label "one")))

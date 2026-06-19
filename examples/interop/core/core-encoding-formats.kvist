@@ -36,7 +36,7 @@
       0
       (do
         (defer (delete-csv-records records))
-        (len records)))))
+        (count records)))))
 
 (defn ini-port [] -> int
   ;; The iterator keeps the current section on the iterator. key.value/section
