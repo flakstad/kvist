@@ -17,14 +17,14 @@
 (defn fixed-date-weekday [] -> int
   ;; datetime_to_time returns an explicit ok bool. This is the same shape that
   ;; if-let is designed for: bind the value and the bool, then branch.
-  (if-let [t ok (time.datetime_to_time 2024 1 2 3 4 5)]
+  (if-let [[t ok] (time.datetime_to_time 2024 1 2 3 4 5)]
     (int (time.weekday t))
     -1))
 
 (defn fixed-date-string-length [] -> int
   ;; Odin time formatting writes into caller-provided storage. The returned
   ;; string is a view into this local buffer, so it must not escape this proc.
-  (if-let [t ok (time.datetime_to_time 2024 1 2 3 4 5)]
+  (if-let [[t ok] (time.datetime_to_time 2024 1 2 3 4 5)]
     (let [buf ([time.MIN_YYYY_DATE_LEN]u8 [])
           text (time.to_string_yyyy_mm_dd t (slice buf))]
       (len text))
@@ -41,7 +41,7 @@
 
 (defn search-score [] -> int
   (let [xs ([]int [4 1 7 2])]
-    (if-let [idx found (slice.linear_search xs 7)]
+    (if-let [[idx found] (slice.linear_search xs 7)]
       idx
       -1)))
 

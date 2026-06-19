@@ -30,5 +30,5 @@
       (return value err unmarshal-err)
       (do
         (defer (delete data))
-        (let [decode-err (j.unmarshal data (& value))]
+        (let [decode-err (j.unmarshal data &value)]
           (return value nil decode-err))))))

@@ -14,8 +14,8 @@
 
 (defn- __kvist_test_context_cleanup [user-data: rawptr]
   (let [key (uintptr user-data)]
-    (sync.mutex-lock (& __kvist_test_context_lock))
-    (defer (sync.mutex-unlock (& __kvist_test_context_lock)))
+    (sync.mutex-lock &__kvist_test_context_lock)
+    (defer (sync.mutex-unlock &__kvist_test_context_lock))
 
     (let [[stack ok] __kvist_test_context_stacks[key]]
       (if (not ok)
@@ -29,14 +29,14 @@
 
 (defn- __kvist_test_context_prefix [t: ^testing.T] -> string
   (let [key (uintptr t)]
-    (sync.mutex-lock (& __kvist_test_context_lock))
+    (sync.mutex-lock &__kvist_test_context_lock)
     (let [[stack ok] __kvist_test_context_stacks[key]]
       (if (or (not ok) (= (count stack) 0))
         (do
-          (sync.mutex-unlock (& __kvist_test_context_lock))
+          (sync.mutex-unlock &__kvist_test_context_lock)
           (return "")))
       (let [[prefix _] (strings.join stack[:] " > " {allocator: context.temp-allocator})]
-        (sync.mutex-unlock (& __kvist_test_context_lock))
+        (sync.mutex-unlock &__kvist_test_context_lock)
         prefix))))
 
 (defn- __kvist_test_push_context [t: ^testing.T, message: string]
@@ -44,25 +44,25 @@
         [cloned clone-err] (strings.clone message)]
     (assert (= clone-err nil) "kvist:test could not clone t.testing message")
 
-    (sync.mutex-lock (& __kvist_test_context_lock))
-    (defer (sync.mutex-unlock (& __kvist_test_context_lock)))
+    (sync.mutex-lock &__kvist_test_context_lock)
+    (defer (sync.mutex-unlock &__kvist_test_context_lock))
 
     (let [[stack existed] __kvist_test_context_stacks[key]]
       (if (not existed)
         (testing.cleanup t __kvist_test_context_cleanup (rawptr t)))
-      (append (& stack) cloned)
+      (append &stack cloned)
       (set! __kvist_test_context_stacks[key] stack))))
 
 (defn- __kvist_test_pop_context [t: ^testing.T]
   (let [key (uintptr t)]
-    (sync.mutex-lock (& __kvist_test_context_lock))
-    (defer (sync.mutex-unlock (& __kvist_test_context_lock)))
+    (sync.mutex-lock &__kvist_test_context_lock)
+    (defer (sync.mutex-unlock &__kvist_test_context_lock))
 
     (let [[stack ok] __kvist_test_context_stacks[key]]
       (if (or (not ok) (= (count stack) 0))
         (return))
       (delete stack[(- (count stack) 1)])
-      (resize (& stack) (- (count stack) 1))
+      (resize &stack (- (count stack) 1))
       (set! __kvist_test_context_stacks[key] stack))))
 
 (defn- __kvist_test_expect
@@ -290,7 +290,7 @@
               (unquote setup)))
           (quasiquote
             (defn- __kvist_test_ensure_once []
-              (sync.once_do (& __kvist_test_once_guard) __kvist_test_run_once_fixtures)))
+              (sync.once_do &__kvist_test_once_guard __kvist_test_run_once_fixtures)))
           (quasiquote
             (defmacro- __kvist_test_wrap_once
               [body]

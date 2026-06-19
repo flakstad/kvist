@@ -96,7 +96,7 @@
     (set! updated-profile.age 11)
     (when true
       (set! bucket "when"))
-    (when-let [value ok (query-positive 7)]
+    (when-let [[value ok] (query-positive 7)]
       (set! when-let-result value))
     (t.is (= (ensure-test-dir) nil))
     (t.is (= (io.write "tmp.core-package-read.txt" "core package") nil))

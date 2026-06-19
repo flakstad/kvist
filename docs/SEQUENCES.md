@@ -30,11 +30,19 @@ operations, or explicit in-place mutation.
 - Let Odin bounds checks and type checking remain visible.
 - Avoid names or behavior that imply Clojure's nullable lazy seq model.
 
-## Current Core
+## Current Surface
 
-These helpers are already in scope and should remain small:
+These helpers are the current core and shipped package surface for sequence-like
+work:
 
 ```clojure
+(arr.count xs)
+(arr.empty T)
+(arr.empty T capacity)
+(arr.dynamic T [items...])
+(arr.fixed T [items...])
+(arr.get xs i)
+(arr.slice xs start end)
 (arr.map f xs)
 (arr.filter pred xs)
 (arr.remove pred xs)
@@ -65,8 +73,23 @@ These helpers are already in scope and should remain small:
 (arr.remove! pred xs)
 (arr.remove! .field xs)
 (arr.keep! f xs)
+(arr.push! target values...)
 (arr.into! target xs)
+(arr.remove-ordered-at xs index)
+(arr.remove-ordered-at! xs index)
+(arr.remove-unordered-at xs index)
+(arr.remove-unordered-at! xs index)
+(map.empty K V)
+(map.empty K V capacity)
+(map.of K V {entries...})
+(map.get m key)
+(map.get m key default)
+(map.contains? m key)
 (map.merge! target source)
+(map.assoc m key value)
+(map.assoc! target key value)
+(map.dissoc m key)
+(map.dissoc! target key)
 (arr.split-at n xs)
 (arr.partition n xs)
 (arr.partition-all n xs)
@@ -128,6 +151,9 @@ These helpers are already in scope and should remain small:
 (str.replace s old new [count])
 (str.lower s)
 (str.upper s)
+(set.empty T)
+(set.empty T capacity)
+(set.of T [values...])
 (set.contains? s value)
 (set.union lhs rhs)
 (set.intersection lhs rhs)
@@ -172,6 +198,9 @@ xs[i]          ;; (get xs i)
 xs[start:end]  ;; (slice xs start end)
 ```
 
+`arr.get` and `arr.slice` are package-qualified wrappers over the same direct
+access operations.
+
 Mutation uses the same place model:
 
 ```clojure
@@ -203,9 +232,13 @@ Direct expression indexes can be written as attached brackets, for example
 `cells[(idx x y)]`, and work in reads, `set!`, and `mut!` places.
 `empty?` lowers to `len`. `arr.rest`, `arr.take`, `arr.drop`, `arr.butlast`,
 `arr.drop-last`, `arr.take-while`, and `arr.drop-while` return non-owning slice
-views. Three-argument `get` is a map
-helper: it uses Odin's
-comma-ok lookup and returns the supplied default when the key is absent.
+views. Three-argument `get` and `map.get` are map helpers: they use Odin's
+comma-ok lookup and return the supplied default when the key is absent.
+
+Array constructors and mutators stay explicit: `arr.empty` creates an owned
+empty dynamic array, optionally with capacity; `arr.dynamic` creates an owned
+dynamic array from literal items; `arr.fixed` creates a fixed array value; and
+`arr.push!` appends one or more values to an existing dynamic array.
 
 Builder helpers such as `arr.map`, `arr.filter`, `arr.remove`,
 `arr.map-indexed`, `arr.keep`, `arr.mapcat`, `concat`, `arr.into`,
@@ -234,6 +267,24 @@ Scalar scan helpers such as `arr.reduce`, `arr.reduce-indexed`, `arr.find`,
 `arr.find-indexed`, `arr.some?`, `arr.every?`, `arr.min-by`, and `arr.max-by`
 scan in place and return a scalar or small tuple. They do not allocate output
 collections.
+
+Indexed removal comes in ordered and unordered forms. `arr.remove-ordered-at`
+and `arr.remove-unordered-at` copy first and return owned dynamic arrays.
+`arr.remove-ordered-at!` mutates in place while preserving order.
+`arr.remove-unordered-at!` mutates in place and may move the final element into
+the removed slot.
+
+Edge behavior is intentionally boring:
+
+- `arr.take`, `arr.drop`, `arr.drop-last`, and `arr.split-at` clamp negative or
+  too-large counts to the valid slice range.
+- `arr.partition` and `arr.partition-all` return an empty owned dynamic array
+  when `n <= 0`.
+- `arr.range` returns an empty owned dynamic array when `step == 0`.
+- `arr.take-nth`, `arr.repeat`, `arr.repeatedly`, `arr.iterate`, and
+  `arr.cycle` return empty owned dynamic arrays for non-positive counts.
+- `map.zip` pairs up to the shorter input length and ignores extra keys or
+  values.
 
 Captured callbacks are supported for the ordinary package helper path when the
 callback is non-escaping. This includes helpers such as `arr.map-indexed`,
@@ -276,12 +327,13 @@ String helpers stay close to Odin `core:strings`. `kvist:str` is a shipped
 `str.starts-with?`, `str.ends-with?`, `str.index-of`, `str.last-index-of`,
 `str.replace`, `str.lower`, and `str.upper` lower to direct indexing,
 slicing, or `strings.*` calls.
-`str.split` returns an owned dynamic array of string slices. `str.join` and
-`str.replace` return owned strings and should be deleted or returned like
-other owned values.
+`str.split` returns an owned `[]string` of string slices. `str.join`,
+`str.replace`, `str.lower`, and `str.upper` return owned strings and should be
+deleted or returned like other owned values. Trimming and slicing helpers return
+borrowed string views.
 
 Set helpers stay explicit about the underlying Odin representation: a set is
-`map[T]bool` in the emitted code. `kvist:set` is a shipped `.kvist` package.
+`map[T]struct{}` in the emitted code. `kvist:set` is a shipped `.kvist` package.
 Helpers such as `set.empty`, `set.of`, `set.contains?`, `set.union`,
 `set.intersection`, `set.difference`, `set.union!`, `set.intersection!`,
 `set.difference!`, `set.add`, `set.add!`, `set.remove`, `set.remove!`,
@@ -296,6 +348,8 @@ package with helpers such as `map.empty`, `map.of`, `map.get`,
 Those lower to plain Odin
 constructors, membership checks, preallocated dynamic arrays, raw indexing,
 optional-default helpers, direct key/value loops, or direct in-place mutation.
+Two-argument `map.get` returns Odin's optional-ok lookup result; three-argument
+`map.get` returns the supplied default when the key is absent.
 
 `kvist:arr` is a shipped `.kvist` package with the broad sequence helper
 surface. Many helpers are implemented directly in package source, including
@@ -305,7 +359,8 @@ and `arr.max-by`, and the ordinary function-predicate path for
 `arr.take-while`, `arr.drop-while`, `arr.find`, `arr.find-indexed`,
 `arr.some?`, and `arr.every?` via `#force_inline` loops. Constructors like `arr.empty`,
 `arr.dynamic`, `arr.fixed`, mutators like `arr.push!`, `arr.map!`,
-`arr.filter!`, `arr.remove!`, `arr.keep!`, and the wider grouping,
+`arr.filter!`, `arr.remove!`, `arr.keep!`, ordered/unordered indexed removal,
+and the wider grouping,
 partitioning, and sorting helper surface still lower through a smaller
 intrinsic substrate where that keeps codegen and allocation behavior direct.
 
@@ -439,14 +494,6 @@ The important benchmark patterns are:
 - `report-bang`: mutable working buffer before grouping.
 - `report-loop`: direct aggregate maps and final report rows only.
 
-At the time of writing, the report benchmark shows the intended shape:
-
-```text
-report-eager  materializes settled orders, paid orders, groups, and rows
-report-bang   materializes one working order buffer, groups, and rows
-report-loop   accumulates maps directly and materializes final rows only
-```
-
 `report-loop` is the fastest and least allocating version because the workload
 only needs per-region totals, not actual grouped order slices. `count-by` and
 `sum-by` cover the common middle ground where aggregate maps are meaningful
@@ -456,8 +503,8 @@ is still the right helper.
 The `examples/collections/orders-report.kvist` example also includes an
 `aggregate-helper-report-score` variant that uses `sum-by` and `count-by`. The
 focused aggregate benchmark compares that shape with the grouped version and a
-direct aggregate loop. Its expected result is lower allocation than `group-by`,
-but still slower and more allocating than the direct fused loop because
+direct aggregate loop. That helper shape allocates less than `group-by`, but it
+is still slower and more allocating than the direct fused loop because
 settling, filtering, summing, and counting remain separate passes.
 
 ## Helper Boundaries
@@ -555,9 +602,16 @@ Sequence helpers need an explicit ownership story:
 - Slice-view helpers such as `rest`, `take`, `drop`, `butlast`, `drop-last`,
   `take-while`, `drop-while`, and `split-at` do not own data and must not be
   deleted.
-- Dynamic-array helpers such as `arr.map`, `arr.filter`, `arr.remove`, `arr.map-indexed`,
-  `arr.keep`, `arr.mapcat`, `concat`, `arr.reverse`, `arr.shuffle`, `arr.sort`, `arr.sort-by`, and
-  `arr.take-nth` allocate and return owned dynamic arrays.
+- Dynamic-array helpers such as `arr.empty`, `arr.dynamic`, `arr.map`,
+  `arr.filter`, `arr.remove`, `arr.map-indexed`, `arr.keep`, `arr.mapcat`,
+  `concat`, `arr.into`, `arr.reverse`, `arr.shuffle`, `arr.sort`,
+  `arr.sort-by`, `arr.take-nth`, `arr.remove-ordered-at`, and
+  `arr.remove-unordered-at` allocate and return owned dynamic arrays.
+- `arr.fixed` returns an Odin fixed array value, not owned dynamic storage.
+- `arr.push!`, `arr.into!`, `arr.map!`, `arr.map-indexed!`, `arr.filter!`,
+  `arr.remove!`, `arr.keep!`, `arr.reverse!`, `arr.shuffle!`, `arr.sort!`,
+  `arr.sort-by!`, `arr.remove-ordered-at!`, and `arr.remove-unordered-at!`
+  mutate existing array storage and do not return owned replacement arrays.
 - Scalar scan helpers such as `arr.reduce`, `arr.reduce-indexed`, `arr.find`,
   `arr.find-indexed`, `arr.some?`, `arr.every?`, `arr.min-by`, and `arr.max-by`
   do not allocate output collections.
@@ -565,9 +619,17 @@ Sequence helpers need an explicit ownership story:
   outer dynamic array, but their slice chunks borrow the input collection.
 - `map.merge`, `map.zip`, `arr.index-by`, `arr.count-by`, `arr.sum-by`, and `arr.frequencies`
   allocate and return owned maps.
+- `map.empty`, `map.of`, `map.assoc`, `map.dissoc`, `set.empty`, `set.of`,
+  `set.union`, `set.intersection`, `set.difference`, `set.add`, and
+  `set.remove` allocate and return owned maps/set maps.
+- `map.assoc!`, `map.dissoc!`, `map.merge!`, `set.add!`, `set.remove!`,
+  `set.union!`, `set.intersection!`, and `set.difference!` mutate existing
+  map/set storage.
 - `map.keys` and `map.vals` allocate and return owned dynamic arrays copied from a map.
 - `arr.group-by` allocates an owned map and one owned dynamic array per key. Delete
   the groups, then delete the map.
+- `str.split` returns an owned `[]string`; `str.join`, `str.replace`,
+  `str.lower`, and `str.upper` return owned strings.
 - Owned helper results must be bound or returned. Nested owned results such as
   `(arr.first (arr.map f xs))` are rejected because there is no visible place to delete
   the intermediate dynamic array.
@@ -577,5 +639,5 @@ This is a documentation and examples requirement, not just an implementation
 detail. Kvist should help make Odin ownership easier to see, not easier to
 forget.
 
-See `docs/OWNERSHIP.md` for the broader ownership rules used by examples and
+See `docs/LANGUAGE.md` for the broader ownership rules used by examples and
 tooling.

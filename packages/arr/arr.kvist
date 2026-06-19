@@ -269,7 +269,7 @@
   [xs: []$T, index: int] -> [dynamic]T #force_inline
   (let [out (arr.empty T (core.count xs))]
     (arr-into! out xs)
-    (ordered_remove (& out) index)
+    (ordered_remove &out index)
     out))
 
 (defmacro remove-ordered-at!
@@ -290,7 +290,7 @@
   [xs: []$T, index: int] -> [dynamic]T #force_inline
   (let [out (arr.empty T (core.count xs))]
     (arr-into! out xs)
-    (unordered_remove (& out) index)
+    (unordered_remove &out index)
     out))
 
 (defmacro remove-unordered-at!

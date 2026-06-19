@@ -51,7 +51,7 @@
         (do
           (defer (queue.destroy (addr q)))
           (queue.push-back (addr q) 5)
-          (if-let [value ok (queue.pop-front-safe (addr q))]
+          (if-let [[value ok] (queue.pop-front-safe (addr q))]
             value
             0))))))
 

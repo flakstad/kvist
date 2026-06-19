@@ -125,7 +125,7 @@
   Requests without a valid existing session on non-read methods are rejected."
   [req: ^h.Request, opts: Session-Opts] -> Session-Plan
   (let [method (request-method req)]
-    (if-let [sid sid-ok (request-sid req opts)]
+    (if-let [[sid sid-ok] (request-sid req opts)]
       (let [csrf (expected-csrf sid opts)
             [csrf-cookie-token csrf-cookie-ok] (request-csrf-cookie req opts)]
         (cond

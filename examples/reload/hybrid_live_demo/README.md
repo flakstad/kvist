@@ -3,7 +3,7 @@
 This demo combines the two iterative-development paths Kvist is steering
 toward:
 
-- native hot reload for ordinary compiled code
+- resident reload for ordinary compiled code
 - `Kvist/Live` for commands and runtime inspection
 
 The host process is written in `.kvist`, the reloadable module is written in

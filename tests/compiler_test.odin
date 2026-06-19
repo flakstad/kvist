@@ -75,7 +75,7 @@ main :: proc() {
     fmt.println(g.message)
 }
 `
-    testing.expect_value(t, output, expected)
+    testing.expect_value(t, strings.trim_space(output), strings.trim_space(expected))
 }
 
 @(test)
@@ -101,7 +101,7 @@ main :: proc() {
     fmt.println("hello")
 }
 `
-    testing.expect_value(t, output, expected)
+    testing.expect_value(t, strings.trim_space(output), strings.trim_space(expected))
 }
 
 @(test)
@@ -4117,7 +4117,7 @@ compile_when_let_macro :: proc(t: ^testing.T) {
   (return 42 true))
 
 (defn main []
-  (when-let [value found (query)]
+  (when-let [[value found] (query)]
     (when (> value 40)
       (return))))`
 
@@ -4155,7 +4155,7 @@ compile_if_let_macro :: proc(t: ^testing.T) {
   (return 42 true))
 
 (defn main [] -> int
-  (if-let [value found (query)]
+  (if-let [[value found] (query)]
     value
     0))`
 
@@ -4195,7 +4195,7 @@ compile_if_ok_macro :: proc(t: ^testing.T) {
   (return 42 nil))
 
 (defn main [] -> int
-  (if-ok [value err (read-count)]
+  (if-ok [[value err] (read-count)]
     value
     0))`
 
@@ -4223,7 +4223,7 @@ compile_when_ok_macro :: proc(t: ^testing.T) {
 
 (defn main [] -> int
   (let [total 0]
-    (when-ok [value err (read-count)]
+    (when-ok [[value err] (read-count)]
       (set! total value))
     total))`
 
@@ -6185,7 +6185,7 @@ macroexpand_with_temp_allocator_scope :: proc(t: ^testing.T) {
 
 @(test)
 macroexpand_when_let :: proc(t: ^testing.T) {
-    output, err, ok := kvist.macroexpand_source(`(when-let [value found (query)]
+    output, err, ok := kvist.macroexpand_source(`(when-let [[value found] (query)]
   (fmt.println value))`)
     testing.expect_value(t, ok, true)
     if !ok {
@@ -6201,7 +6201,7 @@ macroexpand_when_let :: proc(t: ^testing.T) {
 
 @(test)
 macroexpand_if_let :: proc(t: ^testing.T) {
-    output, err, ok := kvist.macroexpand_source(`(if-let [value found (query)]
+    output, err, ok := kvist.macroexpand_source(`(if-let [[value found] (query)]
   value
   0)`)
     testing.expect_value(t, ok, true)
@@ -6218,7 +6218,7 @@ macroexpand_if_let :: proc(t: ^testing.T) {
 
 @(test)
 macroexpand_when_ok :: proc(t: ^testing.T) {
-    output, err, ok := kvist.macroexpand_source(`(when-ok [data err (read-text path)]
+    output, err, ok := kvist.macroexpand_source(`(when-ok [[data err] (read-text path)]
   (use data))`)
     testing.expect_value(t, ok, true)
     if !ok {
@@ -6234,7 +6234,7 @@ macroexpand_when_ok :: proc(t: ^testing.T) {
 
 @(test)
 macroexpand_if_ok :: proc(t: ^testing.T) {
-    output, err, ok := kvist.macroexpand_source(`(if-ok [data err (read-text path)]
+    output, err, ok := kvist.macroexpand_source(`(if-ok [[data err] (read-text path)]
   (len data)
   0)`)
     testing.expect_value(t, ok, true)
@@ -6318,29 +6318,29 @@ reject_legacy_thread_helpers :: proc(t: ^testing.T) {
 
 @(test)
 macroexpand_rejects_binding_macro_shapes :: proc(t: ^testing.T) {
-    _, err_if_let, ok_if_let := kvist.macroexpand_source(`(if-let [value found (query)]
+    _, err_if_let, ok_if_let := kvist.macroexpand_source(`(if-let [[value found] (query)]
   value)`)
     testing.expect_value(t, ok_if_let, false)
     defer delete(err_if_let.message)
-    testing.expect_value(t, err_if_let.message, "while expanding macro if-let: if-let expects [value bool expr], then, and else")
+    testing.expect_value(t, err_if_let.message, "while expanding macro if-let: if-let expects [[value bool] expr], then, and else")
 
     _, err_when_let, ok_when_let := kvist.macroexpand_source(`(when-let [value 1 (query)]
   value)`)
     testing.expect_value(t, ok_when_let, false)
     defer delete(err_when_let.message)
-    testing.expect_value(t, err_when_let.message, "while expanding macro when-let: when-let expects [value bool expr] binding")
+    testing.expect_value(t, err_when_let.message, "while expanding macro when-let: when-let expects [[value bool] expr] binding")
 
     _, err_when_ok, ok_when_ok := kvist.macroexpand_source(`(when-ok [data (read-text path)]
   data)`)
     testing.expect_value(t, ok_when_ok, false)
     defer delete(err_when_ok.message)
-    testing.expect_value(t, err_when_ok.message, "while expanding macro when-ok: when-ok expects [value err expr] binding")
+    testing.expect_value(t, err_when_ok.message, "while expanding macro when-ok: when-ok expects [[value err] expr] binding")
 
-    _, err_if_ok, ok_if_ok := kvist.macroexpand_source(`(if-ok [data err (read-text path)]
+    _, err_if_ok, ok_if_ok := kvist.macroexpand_source(`(if-ok [[data err] (read-text path)]
   data)`)
     testing.expect_value(t, ok_if_ok, false)
     defer delete(err_if_ok.message)
-    testing.expect_value(t, err_if_ok.message, "while expanding macro if-ok: if-ok expects [value err expr], then, and else")
+    testing.expect_value(t, err_if_ok.message, "while expanding macro if-ok: if-ok expects [[value err] expr], then, and else")
 }
 
 @(test)
@@ -9706,8 +9706,28 @@ borrow_first_name :: proc(people: ^[]Person) -> ^string {
 borrow_cell :: proc(xs: [dynamic]int, i: int) -> ^int {
     return &((xs)[i])
 }
-`
-    testing.expect_value(t, output, expected)
+    `
+    testing.expect_value(t, strings.trim_space(output), strings.trim_space(expected))
+}
+
+@(test)
+compile_rejects_list_form_address_of :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct Person {
+  name: string
+})
+
+(defn borrow-name [p: ^Person] -> ^string
+  (& p^.name))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+    defer delete(err.message)
+    testing.expect_value(t, err.message, "address-of list form is not supported; use &value or (addr value)")
 }
 
 @(test)

@@ -1,7 +1,8 @@
 # Kvist Examples
 
-Examples are grouped by what they demonstrate. Coverage fixtures live under
-`coverage/` so the tutorial path stays readable.
+Examples are grouped by what they demonstrate. Start with the small ones, then
+move into the larger demos once the core syntax feels familiar. Coverage
+fixtures live under `coverage/` so the tutorial path stays readable.
 
 ## Start Here
 
@@ -22,7 +23,7 @@ Examples are grouped by what they demonstrate. Coverage fixtures live under
 
 - `language/` - core syntax and declarations
 - `collections/` - arrays, maps, ownership, transforms, pipelines
-- `packages/` - package demos and measurements
+- `packages/` - package demos, tests, and measurements
 - `coverage/` - compiler/package fixtures used by tests and scripts
 - `interop/` - direct Odin package/vendor interop
 - `web/` - HTML, HTTP, SSE, Datastar
@@ -57,6 +58,16 @@ Check the ordinary example sweep:
 ```
 
 That script also checks `coverage/`.
+
+## Package Examples
+
+Package examples are the practical companion to the docs:
+
+- [`packages/testing.kvist`](./packages/testing.kvist) - `kvist:test`
+- [`packages/parallel.kvist`](./packages/parallel.kvist) - `kvist:parallel`
+- [`packages/soa.kvist`](./packages/soa.kvist) - `kvist:soa`
+
+For the package map, see [`../docs/PACKAGES.md`](../docs/PACKAGES.md).
 
 ## Visual Examples
 

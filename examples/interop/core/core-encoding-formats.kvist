@@ -49,7 +49,7 @@
           (break))
         (when (and (= it.section "server")
                    (= key "port"))
-          (when-let [parsed ok (strconv.parse-int value)]
+          (when-let [[parsed ok] (strconv.parse-int value)]
             (set! port parsed)))))
     port))
 

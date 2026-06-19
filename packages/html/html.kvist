@@ -309,8 +309,8 @@
   attrs produce no output. The returned string is owned by the caller."
   [node: Node] -> string
   (let [builder (strings.builder_make)]
-    (defer (strings.builder_destroy (& builder)))
-    (render-node-into (& builder) node)
+    (defer (strings.builder_destroy &builder))
+    (render-node-into &builder node)
     (let [[out err] (strings.clone (strings.to_string builder))]
       (if (!= err nil)
         ""

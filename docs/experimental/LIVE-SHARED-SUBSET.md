@@ -1,11 +1,7 @@
-# Live Shared Subset
+# Experimental: Live Shared Subset
 
 This note defines the current practical overlap between `Kvist/AOT` and
 `Kvist/Live`.
-
-The goal is not to claim full parity. The goal is to make the shared surface
-explicit so the live runtime stays close to ordinary Kvist instead of drifting
-into a separate live-only DSL.
 
 ## Principle
 
@@ -17,8 +13,7 @@ Keep live-only forms narrow and structural:
 - `live.command`
 - `live.hook`
 
-Everything else should move toward ordinary Kvist surface area unless there is
-a strong reason not to.
+Everything else in this document is the currently supported shared surface.
 
 ## Current Ordinary Top-Level Forms
 
@@ -138,12 +133,5 @@ outside the evaluator's supported runtime subset.
 
 ## Why This Matters
 
-If the live path is worth continuing, it has to converge on this shape:
-
-- ordinary Kvist definitions for most source
-- a thin live annotation layer for runtime-only concerns
-- the possibility that the same module body could eventually run:
-  - interpreted in development
-  - compiled ahead-of-time in production
-
-That makes this document a design constraint, not just a feature list.
+This document is the current contract for the ordinary Kvist forms that the
+live loader and evaluator accept.

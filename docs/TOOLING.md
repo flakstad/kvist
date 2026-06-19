@@ -2,7 +2,9 @@
 
 Kvist tooling is built around source generation plus Odin execution. The CLI
 lowers `.kvist` source to Odin, invokes Odin when requested, and maps diagnostics
-back to Kvist source spans where the compiler has source-map information.
+back to Kvist source spans where the compiler has source-map information. The
+loop is intentionally direct: write Kvist, ask Odin to check or run it, and use
+the remapped diagnostics to get back to the source quickly.
 
 ## CLI Commands
 
@@ -10,23 +12,34 @@ Common commands:
 
 ```sh
 kvist compile file.kvist -o file.odin
+kvist build file.kvist
 kvist check file.kvist
 kvist run file.kvist
+kvist test file-or-dir.kvist
+kvist test file.kvist --names test_one,test_two
 kvist eval file.kvist '(form)'
 kvist expand file.kvist '(form)'
 kvist macroexpand file.kvist '(form)'
-kvist test file-or-dir.kvist
 kvist doc file.kvist symbol
 kvist lookup file.kvist symbol
 kvist symbols file.kvist
-kvist completion file.kvist prefix
+kvist editor-symbols file.kvist identifier
+kvist complete file.kvist prefix
 kvist xref file.kvist symbol
+kvist builtin-symbols
+kvist imported-symbols file.kvist
+kvist package-symbols kvist:arr arr
 ```
 
 `kvist eval` and `kvist expand` generate scratch Odin with the surrounding file
 context. `eval` runs the scratch program; `expand` prints the generated Odin.
 `macroexpand` shows frontend macro expansion before Odin lowering. See
-[MACROS.md](MACROS.md) for the macro authoring surface.
+[MACROS.md](MACROS.md) for the macro authoring surface. See
+[LIVE-DEVELOPMENT.md](LIVE-DEVELOPMENT.md) for how scratch evaluation fits into
+the broader live-development workflow alongside resident reload sessions.
+
+`kvist test --names ...` runs selected tests from a file. Use it when you want a
+tighter feedback loop than the full test file.
 
 ## Source Maps And Diagnostics
 
@@ -48,6 +61,7 @@ The Emacs integration shells out to the `kvist` CLI. It provides:
 - expand selected form to generated Odin
 - macroexpand selected form
 - show documentation, lookup, completion, xref, and symbol output
+- list builtin, imported, and package symbols
 - save eval stdout to the Kvist cache
 - list, open, and remove cached eval outputs
 

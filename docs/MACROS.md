@@ -14,6 +14,9 @@ Use macros when the shape of the source is the important part:
 
 Prefer ordinary functions when runtime values are enough.
 
+Macros are excellent when syntax is the problem; prefer a function when runtime
+values are enough.
+
 ## Basic Form
 
 ```clojure
@@ -28,6 +31,9 @@ Macro parameters receive source forms. A rest parameter is written as `& name`
 at the end of the parameter vector and receives zero or more forms.
 
 Use `defmacro-` for package-private macros.
+
+For a small runnable version of this shape, see
+[examples/language/macros.kvist](../examples/language/macros.kvist).
 
 ## Quoting
 
@@ -187,3 +193,14 @@ kvist expand file.kvist '(some-expression)'
 
 Macro code should produce clear Kvist forms first; readable Odin follows from
 that.
+
+## Examples
+
+- [examples/language/macros.kvist](../examples/language/macros.kvist) - small
+  expression macro
+- [examples/language/macro-dsl.kvist](../examples/language/macro-dsl.kvist) -
+  macro that emits several top-level forms
+- [examples/language/macro-messages.kvist](../examples/language/macro-messages.kvist) -
+  declaration DSL with generated structs, union entries, and constructors
+- [packages/html/html.kvist](../packages/html/html.kvist) - real shipped macro
+  package with form inspection, validation, and generated rendering code

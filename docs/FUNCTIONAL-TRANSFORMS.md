@@ -1,25 +1,25 @@
 # Functional Transforms
 
-This note describes reusable fused transforms.
+This document describes the current fused-transform surface: reusable
+`map`/`filter` pipelines that lower to direct Odin loops. Use them when the item
+flow is clear and you want fewer hand-written traversal loops.
 
-The goal is to let reusable, fused functional transforms earn their place in
-Kvist without adding a lazy sequence runtime, hidden collection protocols, or
-opaque lowering.
-
-## Motivation
+## When To Use Them
 
 Manual `for` loops are always available and remain the escape hatch for
 anything unusual. A transform pipeline is only worth adding if it provides clear
 benefits over hand-written fused loops:
 
-- reusable transformation definitions;
-- direct expression of item flow without traversal boilerplate;
-- compiler-owned loop mechanics for filtering, appending, reducing, and cleanup;
-- fused Odin loops for common pipelines without intermediate arrays;
-- strict diagnostics when the compiler cannot keep the lowering obvious.
+- reusable transformation definitions
+- direct expression of item flow without traversal boilerplate
+- compiler-owned loop mechanics for filtering, appending, reducing, and cleanup
+- fused Odin loops for common pipelines without intermediate arrays
+- strict diagnostics when the compiler cannot keep the lowering obvious
 
 The important distinction is that the pipeline describes per-item transforms,
 while `into` and `transduce` choose the concrete execution target.
+
+If a transform makes the code harder to read, use a direct `for` loop instead.
 
 ## Current Surface
 
@@ -70,7 +70,8 @@ Reusable `defsource` producers can also feed `into` and `transduce`:
 ```
 
 For a complete source example that exercises `for`, `into`, `transduce`, and
-`defer`-based disposal, see `examples/collections/log-source.kvist`.
+`defer`-based disposal, see
+[examples/collections/log-source.kvist](../examples/collections/log-source.kvist).
 
 Supported transformer forms are deliberately small:
 
@@ -128,7 +129,7 @@ The same transformation can feed a collected result or a scalar result:
 Without a reusable transform, `collect-paid-totals` and `sum-paid-totals`
 usually duplicate the same filtering and mapping logic in two manual loops.
 
-## Intended Lowering
+## Current Lowering
 
 `into` over a dynamic array lowers to one readable Odin loop:
 
@@ -181,8 +182,7 @@ When the source is a `defsource` call, `transduce` uses the same protocol as
 until `ok` is false, and update the accumulator without allocating an
 intermediate collection.
 
-These lowerings are intentionally boring. If the generated Odin becomes hard to
-inspect, the feature is drifting.
+The generated Odin should stay easy to inspect.
 
 ## Comparison With Manual `for`
 
@@ -214,7 +214,7 @@ is meaningfully easier to verify:
 
 ## Type And Ownership Rules
 
-The first implementation is strict:
+The current implementation is strict:
 
 - `deftransform` is compile-time structure, not a runtime value;
 - transform steps must be known forms in known positions;
@@ -229,7 +229,7 @@ The first implementation is strict:
 - no hidden lazy seqs, dynamic dispatch, or boxed elements.
 
 When any of these rules are not met, the compiler rejects the pipeline and
-suggest the direct `for` loop fallback.
+suggests the direct `for` loop fallback.
 
 Named `deftransform` declarations are checked for basic shape immediately:
 the spec must be `(comp ...)`, and each step must be `(map f)` or
@@ -237,16 +237,19 @@ the spec must be `(comp ...)`, and each step must be `(map f)` or
 type compatibility are checked at the `into` or `transduce` use site where the
 source and accumulator types are known.
 
-## Implemented Surface
+## Current Limits
 
-The implemented surface is:
+- transform specs are `(comp ...)` with `(map f)` and `(filter pred)` steps
+- `into` currently targets fresh owned `[dynamic]T` arrays
+- `transduce` currently supports `+` reducers for numeric accumulators
+- sources may be slices, fixed arrays, dynamic arrays, or `defsource` calls
+- anything cleverer should usually be a direct `for` loop
 
-1. Parse and store top-level `deftransform` declarations.
-2. Support inline and named `(comp (filter f) (map g))` transform specs.
-3. Implement `(into [dynamic]T transform source)` for slices, fixed arrays, and
-   dynamic arrays.
-4. Implement `(transduce transform + init source)` for numeric accumulators.
-5. Support `defsource` calls as direct inputs to transform `into` and
-   `transduce`.
-6. Add examples that compare reusable transform usage to the manual `for`
-   version.
+## Examples
+
+- [examples/collections/transforms.kvist](../examples/collections/transforms.kvist) -
+  reusable transforms over ordinary arrays
+- [examples/collections/log-source.kvist](../examples/collections/log-source.kvist) -
+  `defsource`, `for`, `into`, `transduce`, and cleanup in one place
+- [examples/collections/sources.kvist](../examples/collections/sources.kvist) -
+  smaller source declarations consumed by collection forms

@@ -9357,7 +9357,11 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         return deref_expr_text(target), {}, true
     }
 
-    if head.text == "&" || head.text == "addr" {
+    if head.text == "&" {
+        return "", Compile_Error{message = "address-of list form is not supported; use &value or (addr value)", span = form.span}, false
+    }
+
+    if head.text == "addr" {
         if len(form.items) != 2 {
             return "", Compile_Error{message = fmt.tprintf("%s expects one addressable expression", head.text), span = form.span}, false
         }
