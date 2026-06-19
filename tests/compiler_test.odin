@@ -1496,6 +1496,31 @@ compile_defstruct_rejects_bad_metadata :: proc(t: ^testing.T) {
 }
 
 @(test)
+compile_defstruct_using_field :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct Logger {
+  level: int
+})
+
+(defstruct App {
+  logger: Logger :using
+  port: int
+})`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "using logger: Logger,"), true)
+    testing.expect_value(t, strings.contains(output, "port: int,"), true)
+}
+
+@(test)
 compile_struct_constructor_rejects_unknown_field :: proc(t: ^testing.T) {
     source := `(package main)
 
@@ -4772,6 +4797,56 @@ compile_let_or_break_err_binding_with_defer :: proc(t: ^testing.T) {
 }
 
 @(test)
+compile_let_binding_with_defer_with_cleanup :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn close-buffer [data: [dynamic]byte]
+  (delete data))
+
+(defn load []
+  (let [data ([dynamic]byte [1 2]) :defer-with close-buffer]
+    (println (count data))))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "defer close_buffer(data)"), true)
+}
+
+@(test)
+compile_result_binding_with_defer_with_cleanup :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn read-text [path: string] -> [data: [dynamic]byte, err: rawptr]
+  (return ([dynamic]byte [1 2]) nil))
+
+(defn close-buffer [data: [dynamic]byte]
+  (delete data))
+
+(defn load [path: string]
+  (while true
+    (let [[data err] (read-text path) :or-break :defer-with close-buffer]
+      (println (count data)))
+    (break)))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "data, err := read_text(path)"), true)
+    testing.expect_value(t, strings.contains(output, "defer close_buffer(data)"), true)
+}
+
+@(test)
 compile_let_or_return_err_binding_with_errdefer :: proc(t: ^testing.T) {
     source := `(package main)
 
@@ -4836,7 +4911,21 @@ reject_let_errdefer_with_defer :: proc(t: ^testing.T) {
     _, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, false)
     defer delete(err.message)
-    testing.expect_value(t, err.message, "use either :defer or :errdefer, not both")
+    testing.expect_value(t, err.message, "use only one cleanup marker: :defer, :errdefer, or :defer-with")
+}
+
+@(test)
+reject_let_defer_with_without_cleanup :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn load []
+  (let [data ([dynamic]byte [1 2]) :defer-with]
+    (println data)))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    defer delete(err.message)
+    testing.expect_value(t, err.message, ":defer-with expects a cleanup function")
 }
 
 @(test)
@@ -7921,23 +8010,119 @@ compile_functional_transform_field_selectors :: proc(t: ^testing.T) {
 }
 
 @(test)
-reject_functional_transform_bad_named_spec_early :: proc(t: ^testing.T) {
+compile_functional_transform_map_indexed :: proc(t: ^testing.T) {
     source := `(package main)
 
-(deftransform bad-transform
-  (map inc))
+(defn add-index [i: int x: int] -> int
+  (+ i x))
 
-(defn inc [x: int] -> int
-  (+ x 1))`
+(deftransform indexed
+  (filter even?)
+  (map-indexed add-index))
 
-    _, err, ok := kvist.compile_source(source)
-    testing.expect_value(t, ok, false)
-    if ok {
+(defn even? [x: int] -> bool
+  (= (% x 2) 0))
+
+(defn total [xs: []int] -> int
+  (transduce indexed + 0 xs))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
         return
     }
-    defer delete(err.message)
+    defer delete(output)
 
-    testing.expect_value(t, err.message, "deftransform expects (comp ...)")
+    testing.expect_value(t, strings.contains(output, " := 0"), true)
+    testing.expect_value(t, strings.contains(output, "add_index(kvist_xform_"), true)
+    testing.expect_value(t, strings.contains(output, " += 1"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_acc +="), true)
+}
+
+@(test)
+compile_functional_transform_mapcat :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn pair [x: int] -> [2]int
+  ([2]int [x (+ x 1)]))
+
+(deftransform pairs
+  (mapcat pair))
+
+(defn total [xs: []int] -> int
+  (transduce pairs + 0 xs))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "pair(kvist_item)"), true)
+    testing.expect_value(t, strings.contains(output, "for kvist_xform_"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_acc +="), true)
+}
+
+@(test)
+compile_for_functional_transform :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn inc [x: int] -> int
+  (+ x 1))
+
+(defn even? [x: int] -> bool
+  (= (% x 2) 0))
+
+(deftransform inc-evens
+  (map inc)
+  (filter even?))
+
+(defn total [xs: []int] -> int
+  (let [sum 0]
+    (for [value xs :transform inc-evens]
+      (set! sum (+ sum value)))
+    sum))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "for kvist_item in xs {"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_xform_"), true)
+    testing.expect_value(t, strings.contains(output, "value := kvist_xform_"), true)
+    testing.expect_value(t, strings.contains(output, "sum = (sum) + (value)"), true)
+}
+
+@(test)
+compile_functional_transform_single_step_named_spec :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn inc [x: int] -> int
+  (+ x 1))
+
+(deftransform increments
+  (map inc))
+
+(defn values [xs: []int] -> [dynamic]int
+  (into [dynamic]int increments xs))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "kvist_xform_"), true)
+    testing.expect_value(t, strings.contains(output, "append(&kvist_out"), true)
 }
 
 @(test)
@@ -7947,7 +8132,7 @@ reject_functional_transform_unknown_step :: proc(t: ^testing.T) {
 (defn values [xs: []int] -> [dynamic]int
   (into [dynamic]int
     (comp
-      (take 2))
+      (partition 2))
     xs))`
 
     _, err, ok := kvist.compile_source(source)
@@ -7957,7 +8142,7 @@ reject_functional_transform_unknown_step :: proc(t: ^testing.T) {
     }
     defer delete(err.message)
 
-    testing.expect_value(t, err.message, "transform steps currently support map and filter")
+    testing.expect_value(t, err.message, "transform steps currently support map, map-indexed, mapcat, filter, remove, keep, take, take-while, drop, and drop-while")
 }
 
 @(test)
@@ -7966,7 +8151,7 @@ reject_named_functional_transform_unknown_step_early :: proc(t: ^testing.T) {
 
 (deftransform bad-transform
   (comp
-    (take 2)))`
+    (partition 2)))`
 
     _, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, false)
@@ -7975,7 +8160,7 @@ reject_named_functional_transform_unknown_step_early :: proc(t: ^testing.T) {
     }
     defer delete(err.message)
 
-    testing.expect_value(t, err.message, "transform steps currently support map and filter")
+    testing.expect_value(t, err.message, "transform steps currently support map, map-indexed, mapcat, filter, remove, keep, take, take-while, drop, and drop-while")
 }
 
 @(test)
@@ -8084,7 +8269,7 @@ reject_functional_transform_unsupported_transduce_reducer :: proc(t: ^testing.T)
     }
     defer delete(err.message)
 
-    testing.expect_value(t, err.message, "transduce currently supports + as reducer")
+    testing.expect_value(t, err.message, "transduce reducer must be + or a known two-argument function: *")
 }
 
 @(test)

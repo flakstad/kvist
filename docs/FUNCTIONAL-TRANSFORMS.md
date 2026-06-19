@@ -1,8 +1,8 @@
 # Functional Transforms
 
-This document describes the current fused-transform surface: reusable
-`map`/`filter` pipelines that lower to direct Odin loops. Use them when the item
-flow is clear and you want fewer hand-written traversal loops.
+This document describes the current fused-transform surface: reusable streaming
+pipelines that lower to direct Odin loops. Use them when the item flow is clear
+and you want fewer hand-written traversal loops.
 
 ## When To Use Them
 
@@ -27,10 +27,9 @@ Named transforms use `deftransform`:
 
 ```clojure
 (deftransform paid-order-totals
-  (comp
-    (filter paid?)
-    (map order-total)
-    (filter positive?)))
+  (filter paid?)
+  (map order-total)
+  (filter positive?))
 ```
 
 Anonymous transforms use the same `comp` form inline:
@@ -84,6 +83,13 @@ header says what the opener returns and what `:next` yields:
   (println line))
 ```
 
+Loops can consume the same transform directly:
+
+```clojure
+(for [total orders :transform paid-order-totals]
+  (println total))
+```
+
 The same iterator call can be the input to a fused scalar reduction:
 
 ```clojure
@@ -103,7 +109,15 @@ Supported transformer forms are deliberately small:
 
 ```clojure
 (map f)
+(map-indexed f)
+(mapcat f)
 (filter pred)
+(remove pred)
+(keep f)
+(take n)
+(take-while pred)
+(drop n)
+(drop-while pred)
 ```
 
 Callbacks can be known one-argument functions or shallow field selectors:
@@ -115,8 +129,7 @@ Callbacks can be known one-argument functions or shallow field selectors:
     (map .age)))
 ```
 
-Use `map` plus `filter`, or write a direct `for` loop when a transformation
-needs optional-result semantics.
+`keep` callbacks return `[value: T ok: bool]`.
 
 ## Reuse Example
 
@@ -140,10 +153,9 @@ The same transformation can feed a collected result or a scalar result:
   (> n 0))
 
 (deftransform paid-order-totals
-  (comp
-    (filter paid?)
-    (map order-total)
-    (filter positive?)))
+  (filter paid?)
+  (map order-total)
+  (filter positive?))
 
 (defn collect-paid-totals [orders: []Order] -> [dynamic]int
   (into [dynamic]int paid-order-totals orders))
@@ -180,10 +192,12 @@ Rough Odin shape:
 })(orders)
 ```
 
-`transduce` lowers to the same fused item flow with an accumulator:
+`transduce` lowers to the same fused item flow with an accumulator. `+` emits
+direct accumulator addition; a known two-argument reducer emits a direct call:
 
 ```clojure
 (transduce paid-order-totals + 0 orders)
+(transduce paid-order-totals add-int 0 orders)
 ```
 
 Rough Odin shape:
@@ -246,28 +260,41 @@ The current implementation is strict:
 - transform steps must be known forms in known positions;
 - `map` and `filter` callbacks must be known one-argument functions or field
   selectors with obvious input and output types;
+- `map-indexed` callbacks must be known two-argument functions taking
+  `(int, current-item)`;
+- `mapcat` callbacks must return borrowed slices or fixed arrays in the first
+  version; owned dynamic-array results are rejected until cleanup semantics are
+  explicit;
+- `keep` callbacks must be known one-argument functions returning
+  `[value: T ok: bool]`;
+- `take` counts values that reach that step and breaks the source loop early
+  when the count is exhausted;
+- `drop` and `drop-while` skip values that reach that step without allocating;
 - `into` must name the concrete output type;
 - dynamic array `into` owns the returned array, and callers delete it using the
   existing ownership conventions; append into existing arrays with `arr.into!`;
 - `transduce` requires an obvious accumulator type from the initial value or an
-  annotation;
+  annotation, and the reducer must be `+` or a known two-argument function;
 - `defiter` calls are consumed directly by `for`, `into`, and `transduce`;
+- `for` accepts `[value source :transform transform]` for the same fused item
+  flow;
 - no hidden lazy seqs, dynamic dispatch, or boxed elements.
 
 When any of these rules are not met, the compiler rejects the pipeline and
 suggests the direct `for` loop fallback.
 
-Named `deftransform` declarations are checked for basic shape immediately:
-the spec must be `(comp ...)`, and each step must be `(map f)` or
-`(filter pred)`. Callback existence, callback arity, callback types, and output
-type compatibility are checked at the `into` or `transduce` use site where the
-input and accumulator types are known.
+Named `deftransform` declarations are checked for basic shape immediately.
+The spec may be a single step, `(comp ...)`, or several step forms after the
+name. Callback existence, callback arity, callback types, and output type
+compatibility are checked at the `into` or `transduce` use site where the source
+and accumulator types are known.
 
 ## Current Limits
 
-- transform specs are `(comp ...)` with `(map f)` and `(filter pred)` steps
+- transform specs support `map`, `map-indexed`, `mapcat`, `filter`, `remove`,
+  `keep`, `take`, `take-while`, `drop`, and `drop-while`
 - `into` currently targets fresh owned `[dynamic]T` arrays
-- `transduce` currently supports `+` reducers for numeric accumulators
+- `transduce` supports `+` and known two-argument reducers
 - inputs may be slices, fixed arrays, dynamic arrays, or `defiter` calls
 - anything cleverer should usually be a direct `for` loop
 

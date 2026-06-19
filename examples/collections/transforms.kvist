@@ -23,16 +23,67 @@
 (defn positive? [x: int] -> bool
   (> x 0))
 
+(defn zero? [x: int] -> bool
+  (= x 0))
+
+(defn under-40? [x: int] -> bool
+  (< x 40))
+
+(defn paid-discount [order: Order] -> [value: int ok: bool]
+  (return order.discount (paid? order)))
+
+(defn order-parts [order: Order] -> [2]int
+  ([2]int [order.amount order.discount]))
+
+(defn add-int [acc: int, x: int] -> int
+  (+ acc x))
+
+(defn add-index [i: int, x: int] -> int
+  (+ i x))
+
+(deftransform paid-orders
+  (filter paid?))
+
 (deftransform paid-order-totals
-  (comp
-    (filter paid?)
-    (map order-total)
-    (filter positive?)))
+  paid-orders
+  (map order-total)
+  (filter positive?))
 
 (deftransform active-ages
+  (filter .active?)
+  (map .age))
+
+(deftransform nonzero-paid-discounts
+  (keep paid-discount)
+  (remove zero?))
+
+(deftransform first-paid-total
   (comp
-    (filter .active?)
-    (map .age)))
+    paid-orders
+    (take 1)
+    (map order-total)))
+
+(deftransform leading-young-ages
+  (map .age)
+  (take-while under-40?))
+
+(deftransform after-first-paid-total
+  paid-orders
+  (drop 1)
+  (map order-total))
+
+(deftransform ages-after-young-prefix
+  (map .age)
+  (drop-while under-40?))
+
+(deftransform indexed-active-ages
+  (filter .active?)
+  (map .age)
+  (map-indexed add-index))
+
+(deftransform paid-order-parts
+  paid-orders
+  (mapcat order-parts))
 
 (defn sample-orders [] -> [3]Order
   ([3]Order [(Order {status: 2 amount: 100 discount: 10})
@@ -56,6 +107,68 @@
 (defn sum-active-ages [] -> int
   (transduce active-ages + 0 (sample-users)))
 
+(defn sum-active-ages-with-reducer [] -> int
+  (transduce active-ages add-int 0 (sample-users)))
+
+(defn collect-all-ages-inline [] -> [dynamic]int
+  (into [dynamic]int (map .age) (sample-users)))
+
+(defn collect-nonzero-paid-discounts [] -> [dynamic]int
+  (into [dynamic]int nonzero-paid-discounts (sample-orders)))
+
+(defn sum-nonzero-paid-discounts [] -> int
+  (transduce nonzero-paid-discounts + 0 (sample-orders)))
+
+(defn collect-first-paid-total [] -> [dynamic]int
+  (into [dynamic]int first-paid-total (sample-orders)))
+
+(defn sum-first-paid-total [] -> int
+  (transduce first-paid-total + 0 (sample-orders)))
+
+(defn collect-leading-young-ages [] -> [dynamic]int
+  (into [dynamic]int leading-young-ages (sample-users)))
+
+(defn sum-leading-young-ages [] -> int
+  (transduce leading-young-ages + 0 (sample-users)))
+
+(defn collect-after-first-paid-total [] -> [dynamic]int
+  (into [dynamic]int after-first-paid-total (sample-orders)))
+
+(defn sum-after-first-paid-total [] -> int
+  (transduce after-first-paid-total + 0 (sample-orders)))
+
+(defn collect-ages-after-young-prefix [] -> [dynamic]int
+  (into [dynamic]int ages-after-young-prefix (sample-users)))
+
+(defn sum-ages-after-young-prefix [] -> int
+  (transduce ages-after-young-prefix + 0 (sample-users)))
+
+(defn collect-indexed-active-ages [] -> [dynamic]int
+  (into [dynamic]int indexed-active-ages (sample-users)))
+
+(defn sum-indexed-active-ages [] -> int
+  (transduce indexed-active-ages + 0 (sample-users)))
+
+(defn collect-paid-order-parts [] -> [dynamic]int
+  (into [dynamic]int paid-order-parts (sample-orders)))
+
+(defn sum-paid-order-parts [] -> int
+  (transduce paid-order-parts + 0 (sample-orders)))
+
+(defn sum-paid-totals-for [] -> int
+  (let [total 0]
+    (for [value (sample-orders) :transform paid-order-totals]
+      (set! total (+ total value)))
+    total))
+
+(defn sum-active-ages-for-inline [] -> int
+  (let [total 0]
+    (for [age (sample-users) :transform (comp
+                                          (filter .active?)
+                                          (map .age))]
+      (set! total (+ total age)))
+    total))
+
 (defn collect-paid-totals-manual [] -> [dynamic]int
   (let [out (arr.empty int)]
     (for [order (sample-orders)]
@@ -77,18 +190,60 @@
 (defn main []
   (let [totals (collect-paid-totals)
         ages (collect-active-ages)
+        all-ages (collect-all-ages-inline)
+        discounts (collect-nonzero-paid-discounts)
+        first-total (collect-first-paid-total)
+        leading-ages (collect-leading-young-ages)
+        after-first-total (collect-after-first-paid-total)
+        after-young-prefix (collect-ages-after-young-prefix)
+        indexed-ages (collect-indexed-active-ages)
+        parts (collect-paid-order-parts)
         manual-totals (collect-paid-totals-manual)]
     (defer
       (delete totals)
       (delete ages)
+      (delete all-ages)
+      (delete discounts)
+      (delete first-total)
+      (delete leading-ages)
+      (delete after-first-total)
+      (delete after-young-prefix)
+      (delete indexed-ages)
+      (delete parts)
       (delete manual-totals))
     (println (+ (sum-paid-totals)
                 (sum-paid-totals-manual)
                 (sum-active-ages)
+                (sum-active-ages-with-reducer)
+                (sum-nonzero-paid-discounts)
+                (sum-first-paid-total)
+                (sum-leading-young-ages)
+                (sum-after-first-paid-total)
+                (sum-ages-after-young-prefix)
+                (sum-indexed-active-ages)
+                (sum-paid-order-parts)
+                (sum-paid-totals-for)
+                (sum-active-ages-for-inline)
                 totals[0]
                 totals[1]
                 ages[0]
                 ages[1]
+                all-ages[0]
+                all-ages[1]
+                all-ages[2]
+                discounts[0]
+                discounts[1]
+                first-total[0]
+                leading-ages[0]
+                after-first-total[0]
+                after-young-prefix[0]
+                after-young-prefix[1]
+                indexed-ages[0]
+                indexed-ages[1]
+                parts[0]
+                parts[1]
+                parts[2]
+                parts[3]
                 manual-totals[0]
                 manual-totals[1]))))
 
@@ -100,5 +255,35 @@
   ;; => 125
 
   (sum-active-ages)
+  ;; => 64
+
+  (sum-active-ages-with-reducer)
+  ;; => 64
+
+  (sum-nonzero-paid-discounts)
+  ;; => 15
+
+  (sum-first-paid-total)
+  ;; => 90
+
+  (sum-leading-young-ages)
+  ;; => 36
+
+  (sum-after-first-paid-total)
+  ;; => 35
+
+  (sum-ages-after-young-prefix)
+  ;; => 69
+
+  (sum-indexed-active-ages)
+  ;; => 65
+
+  (sum-paid-order-parts)
+  ;; => 155
+
+  (sum-paid-totals-for)
+  ;; => 125
+
+  (sum-active-ages-for-inline)
   ;; => 64
 )

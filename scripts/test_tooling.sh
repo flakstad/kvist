@@ -47,6 +47,66 @@ if ! grep -q "$(printf 'field\tUser.name')" "$tmp_dir/symbols.tsv"; then
     exit 1
 fi
 
+printf 'tooling: editor symbol commands\n'
+./kvist editor-symbols examples/collections/log-source.kvist log-lines > "$tmp_dir/editor-symbols.tsv"
+if ! grep -q "$(printf 'iterator\tlog-lines')" "$tmp_dir/editor-symbols.tsv"; then
+    printf 'failed: editor-symbols output did not include log-lines iterator\n' >&2
+    cat "$tmp_dir/editor-symbols.tsv" >&2
+    exit 1
+fi
+if ! grep -q 'log-source.kvist' "$tmp_dir/editor-symbols.tsv"; then
+    printf 'failed: editor-symbols output did not include source file\n' >&2
+    cat "$tmp_dir/editor-symbols.tsv" >&2
+    exit 1
+fi
+
+./kvist lookup examples/collections/log-source.kvist log-lines > "$tmp_dir/lookup.tsv"
+if ! grep -q "$(printf 'iterator\tlog-lines')" "$tmp_dir/lookup.tsv"; then
+    printf 'failed: lookup output did not include log-lines iterator\n' >&2
+    cat "$tmp_dir/lookup.tsv" >&2
+    exit 1
+fi
+
+./kvist complete examples/collections/log-source.kvist log > "$tmp_dir/complete.tsv"
+if ! grep -q "$(printf 'iterator\tlog-lines')" "$tmp_dir/complete.tsv"; then
+    printf 'failed: complete output did not include log-lines iterator\n' >&2
+    cat "$tmp_dir/complete.tsv" >&2
+    exit 1
+fi
+
+./kvist doc examples/collections/log-source.kvist log-lines > "$tmp_dir/doc.txt"
+if ! grep -q 'iterator log-lines' "$tmp_dir/doc.txt"; then
+    printf 'failed: doc output did not include log-lines heading\n' >&2
+    cat "$tmp_dir/doc.txt" >&2
+    exit 1
+fi
+if ! grep -q '(log-lines \[lines: \[\]string\] -> Log_Source yields string)' "$tmp_dir/doc.txt"; then
+    printf 'failed: doc output did not include iterator signature\n' >&2
+    cat "$tmp_dir/doc.txt" >&2
+    exit 1
+fi
+
+./kvist xref examples/collections/log-source.kvist log-lines > "$tmp_dir/xref.txt"
+if ! grep -q "$(printf 'log-source.kvist:23:10\titerator\tlog-lines')" "$tmp_dir/xref.txt"; then
+    printf 'failed: xref output did not point at log-lines definition\n' >&2
+    cat "$tmp_dir/xref.txt" >&2
+    exit 1
+fi
+
+./kvist imported-symbols examples/collections/sequences.kvist > "$tmp_dir/imported-symbols.tsv"
+if ! grep -q "$(printf 'macro\tarr.map')" "$tmp_dir/imported-symbols.tsv"; then
+    printf 'failed: imported-symbols output did not include arr.map\n' >&2
+    cat "$tmp_dir/imported-symbols.tsv" >&2
+    exit 1
+fi
+
+./kvist package-symbols kvist:arr arr > "$tmp_dir/package-symbols.tsv"
+if ! grep -q "$(printf 'macro\tarr.map')" "$tmp_dir/package-symbols.tsv"; then
+    printf 'failed: package-symbols output did not include arr.map\n' >&2
+    cat "$tmp_dir/package-symbols.tsv" >&2
+    exit 1
+fi
+
 printf 'tooling: check command\n'
 ./kvist check examples/language/hello.kvist --generated "$tmp_dir/check.odin"
 assert_file_nonempty "$tmp_dir/check.odin" "check generated output"

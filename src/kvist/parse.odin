@@ -14,25 +14,73 @@ is_proc_directive_symbol :: proc(form: CST_Form) -> bool {
 is_transform_step_head :: proc(text: string) -> bool {
     switch text {
     case "map", "arr/map", "arr-map",
-         "filter", "arr/filter", "arr-filter":
+         "map-indexed", "arr/map-indexed", "arr-map-indexed",
+         "mapcat", "arr/mapcat", "arr-mapcat",
+         "filter", "arr/filter", "arr-filter",
+         "remove", "arr/remove", "arr-remove",
+         "keep", "arr/keep", "arr-keep",
+         "take", "arr/take", "arr-take",
+         "take-while", "arr/take-while", "arr-take-while",
+         "drop", "arr/drop", "arr-drop",
+         "drop-while", "arr/drop-while", "arr-drop-while":
         return true
     }
     return false
 }
 
 validate_transform_spec_shape :: proc(spec: CST_Form) -> (Compile_Error, bool) {
-    if spec.kind != .List || len(spec.items) == 0 || spec.items[0].kind != .Symbol || spec.items[0].text != "comp" {
-        return Compile_Error{message = "deftransform expects (comp ...)", span = spec.span}, false
+    if spec.kind == .Symbol {
+        return {}, true
     }
-    for step in spec.items[1:] {
-        if step.kind != .List || len(step.items) != 2 || step.items[0].kind != .Symbol {
-            return Compile_Error{message = "transform steps currently expect (map f) or (filter pred)", span = step.span}, false
+    if spec.kind != .List || len(spec.items) == 0 || spec.items[0].kind != .Symbol {
+        return Compile_Error{message = "transform expects a named transform, (comp ...), or a transform step", span = spec.span}, false
+    }
+    head := spec.items[0].text
+    if head == "comp" {
+        for step in spec.items[1:] {
+            err, ok := validate_transform_spec_shape(step)
+            if !ok {
+                return err, false
+            }
         }
-        if !is_transform_step_head(step.items[0].text) {
-            return Compile_Error{message = "transform steps currently support map and filter", span = step.items[0].span}, false
-        }
+        return {}, true
+    }
+    if !is_transform_step_head(head) {
+        return Compile_Error{message = "transform steps currently support map, map-indexed, mapcat, filter, remove, keep, take, take-while, drop, and drop-while", span = spec.items[0].span}, false
+    }
+    expected_len := 2
+    if len(spec.items) != expected_len {
+        return Compile_Error{message = "transform steps expect one argument", span = spec.span}, false
     }
     return {}, true
+}
+
+transform_comp_spec_from_forms :: proc(forms: []CST_Form, span: Span) -> CST_Form {
+    items: [dynamic]CST_Form
+    append(&items, CST_Form{kind = .Symbol, text = "comp", span = span})
+    for form in forms {
+        append(&items, form)
+    }
+    return CST_Form{kind = .List, items = items, span = span}
+}
+
+parse_transform_spec_forms :: proc(forms: []CST_Form, span: Span) -> (CST_Form, Compile_Error, bool) {
+    if len(forms) == 0 {
+        return {}, Compile_Error{message = "deftransform expects at least one transform step", span = span}, false
+    }
+    if len(forms) == 1 {
+        err, ok := validate_transform_spec_shape(forms[0])
+        if !ok {
+            return {}, err, false
+        }
+        return forms[0], {}, true
+    }
+    spec := transform_comp_spec_from_forms(forms, span)
+    err, ok := validate_transform_spec_shape(spec)
+    if !ok {
+        return {}, err, false
+    }
+    return spec, {}, true
 }
 
 is_proc_prefix_directive :: proc(text: string) -> bool {
@@ -807,10 +855,16 @@ parse_struct_fields :: proc(form: CST_Form) -> (fields: [dynamic]Struct_Field, e
         if !ok_type {
             return fields, err_type, false
         }
+        using_field := false
+        if next_i < len(form.items) && form.items[next_i].kind == .Keyword && form.items[next_i].text == ":using" {
+            using_field = true
+            next_i += 1
+        }
         append(&fields, Struct_Field{
             name        = field_name,
             source_name = source_name,
             ty          = type_text,
+            is_using    = using_field,
         })
         i = next_i
     }
@@ -848,10 +902,16 @@ parse_defstruct_fields :: proc(form: CST_Form) -> (fields: [dynamic]Struct_Field
         if !ok_type {
             return fields, err_type, false
         }
+        using_field := false
+        if next_i < len(form.items) && form.items[next_i].kind == .Keyword && form.items[next_i].text == ":using" {
+            using_field = true
+            next_i += 1
+        }
         append(&fields, Struct_Field{
             name        = field_name,
             source_name = source_name,
             ty          = type_text,
+            is_using    = using_field,
         })
         i = next_i
     }
@@ -1453,13 +1513,13 @@ parse_decl :: proc(top_form: CST_Top_Form) -> (decl: AST_Decl, err: Compile_Erro
     case "defmacro", "defmacro-":
         return AST_Decl{kind = .Ignored, span = form.span}, {}, true
     case "deftransform", "deftransform-":
-        if len(form.items) != 3 {
+        if len(form.items) < 3 {
             return decl, Compile_Error{message = fmt.tprintf("%s expects a name and transform spec", head.text), span = form.span}, false
         }
         if form.items[1].kind != .Symbol {
             return decl, Compile_Error{message = fmt.tprintf("%s expects a symbol name", head.text), span = form.items[1].span}, false
         }
-        err_transform, ok_transform := validate_transform_spec_shape(form.items[2])
+        spec, err_transform, ok_transform := parse_transform_spec_forms(form.items[2:], form.span)
         if !ok_transform {
             return decl, err_transform, false
         }
@@ -1469,7 +1529,7 @@ parse_decl :: proc(top_form: CST_Top_Form) -> (decl: AST_Decl, err: Compile_Erro
             doc_lines = top_form.doc_lines,
             transform_decl = Transform_Decl{
                 name = map_name(form.items[1].text),
-                spec = form.items[2],
+                spec = spec,
             },
         }, {}, true
     case "defiter", "defiter-":

@@ -59,7 +59,7 @@ ORDER_REPS :: 40")
 (defn rows-from-aggregates [revenue-by-region: map[int]int, count-by-region: map[int]int] -> [dynamic]Region-Report
   (let [rows (make [dynamic]Region-Report)]
     (for [region revenue revenue-by-region]
-      (append (& rows)
+      (append (addr rows)
               (Region-Report {region: region
                               revenue: revenue
                               count: (get count-by-region region 0)})))
@@ -88,7 +88,7 @@ ORDER_REPS :: 40")
             (let [revenue 0]
               (for [order group]
                 (set! revenue (+ revenue order.amount)))
-              (append (& rows)
+              (append (addr rows)
                       (Region-Report {region: region
                                       revenue: revenue
                                       count: (len group)}))))
@@ -150,19 +150,19 @@ ORDER_REPS :: 40")
   (let [old-allocator context.allocator
         track: mem.Tracking-Allocator (odin "mem.Tracking_Allocator{}")
         orders (make-orders ORDER_N)]
-    (mem.tracking-allocator-init (& track) old-allocator old-allocator)
+    (mem.tracking-allocator-init (addr track) old-allocator old-allocator)
     (defer
-      (mem.tracking-allocator-destroy (& track))
+      (mem.tracking-allocator-destroy (addr track))
       (delete orders))
-    (set! context.allocator (mem.tracking-allocator (& track)))
+    (set! context.allocator (mem.tracking-allocator (addr track)))
     (defer (odin "context.allocator = old_allocator"))
 
-    (mem.tracking-allocator-reset (& track))
+    (mem.tracking-allocator-reset (addr track))
     (let [start (time.tick-now)]
-      (run-one "report-group" (bench-report-group (slice orders) ORDER_REPS) start (& track)))
-    (mem.tracking-allocator-reset (& track))
+      (run-one "report-group" (bench-report-group (slice orders) ORDER_REPS) start (addr track)))
+    (mem.tracking-allocator-reset (addr track))
     (let [start (time.tick-now)]
-      (run-one "report-aggregate" (bench-report-aggregate (slice orders) ORDER_REPS) start (& track)))
-    (mem.tracking-allocator-reset (& track))
+      (run-one "report-aggregate" (bench-report-aggregate (slice orders) ORDER_REPS) start (addr track)))
+    (mem.tracking-allocator-reset (addr track))
     (let [start (time.tick-now)]
-      (run-one "report-loop" (bench-report-loop (slice orders) ORDER_REPS) start (& track)))))
+      (run-one "report-loop" (bench-report-loop (slice orders) ORDER_REPS) start (addr track)))))

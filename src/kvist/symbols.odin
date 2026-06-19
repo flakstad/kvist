@@ -1532,6 +1532,9 @@ symbols_struct_signature :: proc(name: string, fields: []Struct_Field) -> string
         strings.write_string(&builder, ":")
         strings.write_string(&builder, " ")
         strings.write_string(&builder, field.ty)
+        if field.is_using {
+            strings.write_string(&builder, " :using")
+        }
     }
     strings.write_string(&builder, "})")
     return strings.to_string(builder)

@@ -12,6 +12,19 @@
     (hc.request_init (addr req) method)
     req))
 
+(defmacro with-request
+  "Evaluate `body` with a scoped HTTP client request binding.
+
+  `binding` must contain `[req method]`. The request is created with
+  `client.new-request` and destroyed with `defer` after the body exits."
+  [binding & body]
+  (let [req (first binding)
+        method (nth binding 1)]
+    (quasiquote
+      (let [(unquote req) (new-request (unquote method))]
+        (defer (request-destroy (unquote req)))
+        (splice body)))))
+
 (defmacro request
   "Send initialized request `req` to `target`.
 

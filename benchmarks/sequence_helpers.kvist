@@ -78,6 +78,23 @@ make_orders :: proc(n: int) -> [dynamic]Order {
 (defn add [acc: int, x: int] -> int
   (+ acc x))
 
+(defn add-index [i: int, x: int] -> int
+  (+ i x))
+
+(deftransform inc-evens
+  (map inc)
+  (filter even?))
+
+(deftransform first-divisible-triples
+  (filter divisible-by-three?)
+  (take 100)
+  (map triple))
+
+(deftransform indexed-inc-evens
+  (map inc)
+  (filter even?)
+  (map-indexed add-index))
+
 (defn paid-large? [order: Order] -> bool
   (and (== order.status 2)
        (> order.amount 500)))
@@ -122,7 +139,7 @@ make_orders :: proc(n: int) -> [dynamic]Order {
 (defn build-report-rows [revenue-by-region: map[int]int, count-by-region: map[int]int] -> [dynamic]Region-Report
   (let [rows (make [dynamic]Region-Report)]
     (for [region revenue revenue-by-region]
-      (append (& rows)
+      (append &rows
               (Region-Report {region: region
                               revenue: revenue
                               count: (get count-by-region region 0)})))
@@ -320,6 +337,22 @@ make_orders :: proc(n: int) -> [dynamic]Order {
       (set! i (+ i 1)))
     checksum))
 
+(defn bench-pipeline-transform [xs: []int, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (while (< i reps)
+      (set! checksum (+ checksum (transduce inc-evens + 0 xs)))
+      (set! i (+ i 1)))
+    checksum))
+
+(defn bench-pipeline-transform-indexed [xs: []int, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (while (< i reps)
+      (set! checksum (+ checksum (transduce indexed-inc-evens + 0 xs)))
+      (set! i (+ i 1)))
+    checksum))
+
 (defn bench-pipeline-bang-copy [xs: []int, reps: int] -> int
   (let [i 0
         checksum 0]
@@ -359,6 +392,14 @@ make_orders :: proc(n: int) -> [dynamic]Order {
             (when (== taken 100)
               (break))))
         (set! checksum (+ checksum total)))
+      (set! i (+ i 1)))
+    checksum))
+
+(defn bench-pipeline-filter-map-take-transform [xs: []int, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (while (< i reps)
+      (set! checksum (+ checksum (transduce first-divisible-triples + 0 xs)))
       (set! i (+ i 1)))
     checksum))
 
@@ -448,7 +489,7 @@ make_orders :: proc(n: int) -> [dynamic]Order {
         checksum 0]
     (while (< i reps)
       (for [_ idx orders]
-        (settle-order! (& (get orders idx))))
+        (settle-order! (addr orders[idx])))
       (set! checksum (+ checksum (orders-checksum orders)))
       (set! i (+ i 1)))
     checksum))
@@ -465,7 +506,7 @@ make_orders :: proc(n: int) -> [dynamic]Order {
           (let [revenue 0]
             (for [order group]
               (set! revenue (+ revenue order.amount)))
-            (append (& rows)
+            (append &rows
                     (Region-Report {region: region
                                     revenue: revenue
                                     count: (len group)}))))
@@ -492,7 +533,7 @@ make_orders :: proc(n: int) -> [dynamic]Order {
             (let [revenue 0]
               (for [order group]
                 (set! revenue (+ revenue order.amount)))
-              (append (& rows)
+              (append &rows
                       (Region-Report {region: region
                                       revenue: revenue
                                       count: (len group)}))))
@@ -548,8 +589,8 @@ make_orders :: proc(n: int) -> [dynamic]Order {
         orders-ptr (make-orders ORDER_N)
         lhs (map.zip xs[:] xs[:])
         rhs (map.zip ys[:] ys[:])]
-    (mem.tracking_allocator_init (& track) old-allocator old-allocator)
-    (defer (mem.tracking_allocator_destroy (& track)))
+    (mem.tracking_allocator_init &track old-allocator old-allocator)
+    (defer (mem.tracking_allocator_destroy &track))
     (defer
       (delete xs)
       (delete ys)
@@ -562,99 +603,108 @@ make_orders :: proc(n: int) -> [dynamic]Order {
       (delete orders-ptr)
       (delete lhs)
       (delete rhs))
-    (set! context.allocator (mem.tracking_allocator (& track)))
+    (set! context.allocator (mem.tracking_allocator &track))
     (defer (odin "context.allocator = old_allocator"))
 
-    (mem.tracking_allocator_reset (& track))
+    (mem.tracking_allocator_reset &track)
     (let [start (time.tick_now)]
-      (run-one "range" (bench-range REPS) start (& track)))
-    (mem.tracking_allocator_reset (& track))
+      (run-one "range" (bench-range REPS) start &track))
+    (mem.tracking_allocator_reset &track)
     (let [start (time.tick_now)]
-      (run-one "map" (bench-map (slice xs) REPS) start (& track)))
-    (mem.tracking_allocator_reset (& track))
+      (run-one "map" (bench-map (slice xs) REPS) start &track))
+    (mem.tracking_allocator_reset &track)
     (let [start (time.tick_now)]
-      (run-one "filter" (bench-filter (slice xs) REPS) start (& track)))
-    (mem.tracking_allocator_reset (& track))
+      (run-one "filter" (bench-filter (slice xs) REPS) start &track))
+    (mem.tracking_allocator_reset &track)
     (let [start (time.tick_now)]
-      (run-one "take-nth" (bench-take-nth (slice xs) REPS) start (& track)))
-    (mem.tracking_allocator_reset (& track))
+      (run-one "take-nth" (bench-take-nth (slice xs) REPS) start &track))
+    (mem.tracking_allocator_reset &track)
     (let [start (time.tick_now)]
-      (run-one "partition-all" (bench-partition-all (slice xs) REPS) start (& track)))
-    (mem.tracking_allocator_reset (& track))
+      (run-one "partition-all" (bench-partition-all (slice xs) REPS) start &track))
+    (mem.tracking_allocator_reset &track)
     (let [start (time.tick_now)]
-      (run-one "distinct" (bench-distinct (slice xs) REPS) start (& track)))
-    (mem.tracking_allocator_reset (& track))
+      (run-one "distinct" (bench-distinct (slice xs) REPS) start &track))
+    (mem.tracking_allocator_reset &track)
     (let [start (time.tick_now)]
-      (run-one "zipmap" (bench-zipmap (slice xs) (slice ys) REPS) start (& track)))
-    (mem.tracking_allocator_reset (& track))
+      (run-one "zipmap" (bench-zipmap (slice xs) (slice ys) REPS) start &track))
+    (mem.tracking_allocator_reset &track)
     (let [start (time.tick_now)]
-      (run-one "frequencies" (bench-frequencies (slice xs) REPS) start (& track)))
-    (mem.tracking_allocator_reset (& track))
+      (run-one "frequencies" (bench-frequencies (slice xs) REPS) start &track))
+    (mem.tracking_allocator_reset &track)
     (let [start (time.tick_now)]
-      (run-one "index-by" (bench-index-by (slice xs) REPS) start (& track)))
-    (mem.tracking_allocator_reset (& track))
+      (run-one "index-by" (bench-index-by (slice xs) REPS) start &track))
+    (mem.tracking_allocator_reset &track)
     (let [start (time.tick_now)]
-      (run-one "group-by" (bench-group-by (slice xs) REPS) start (& track)))
-    (mem.tracking_allocator_reset (& track))
+      (run-one "group-by" (bench-group-by (slice xs) REPS) start &track))
+    (mem.tracking_allocator_reset &track)
     (let [start (time.tick_now)]
-      (run-one "merge" (bench-merge lhs rhs REPS) start (& track)))
-    (mem.tracking_allocator_reset (& track))
+      (run-one "merge" (bench-merge lhs rhs REPS) start &track))
+    (mem.tracking_allocator_reset &track)
     (let [start (time.tick_now)]
-      (run-one "sort" (bench-sort (slice sort-xs) SORT_REPS) start (& track)))
-    (mem.tracking_allocator_reset (& track))
+      (run-one "sort" (bench-sort (slice sort-xs) SORT_REPS) start &track))
+    (mem.tracking_allocator_reset &track)
     (let [start (time.tick_now)]
-      (run-one "sort-by" (bench-sort-by (slice sort-base) SORT_REPS) start (& track)))
-    (mem.tracking_allocator_reset (& track))
+      (run-one "sort-by" (bench-sort-by (slice sort-base) SORT_REPS) start &track))
+    (mem.tracking_allocator_reset &track)
     (let [start (time.tick_now)]
-      (run-one "sort-by-field" (bench-sort-by-field (slice sort-items) SORT_REPS) start (& track)))
-    (mem.tracking_allocator_reset (& track))
+      (run-one "sort-by-field" (bench-sort-by-field (slice sort-items) SORT_REPS) start &track))
+    (mem.tracking_allocator_reset &track)
     (let [start (time.tick_now)]
-      (run-one "pipe-map-filter" (bench-pipeline-map-filter-reduce (slice xs) REPS) start (& track)))
-    (mem.tracking_allocator_reset (& track))
+      (run-one "pipe-map-filter" (bench-pipeline-map-filter-reduce (slice xs) REPS) start &track))
+    (mem.tracking_allocator_reset &track)
     (let [start (time.tick_now)]
-      (run-one "pipe-threaded" (bench-pipeline-threaded (slice xs) REPS) start (& track)))
-    (mem.tracking_allocator_reset (& track))
+      (run-one "pipe-threaded" (bench-pipeline-threaded (slice xs) REPS) start &track))
+    (mem.tracking_allocator_reset &track)
     (let [start (time.tick_now)]
-      (run-one "pipe-loop" (bench-pipeline-loop (slice xs) REPS) start (& track)))
-    (mem.tracking_allocator_reset (& track))
+      (run-one "pipe-loop" (bench-pipeline-loop (slice xs) REPS) start &track))
+    (mem.tracking_allocator_reset &track)
     (let [start (time.tick_now)]
-      (run-one "pipe-bang-copy" (bench-pipeline-bang-copy (slice xs) REPS) start (& track)))
-    (mem.tracking_allocator_reset (& track))
+      (run-one "pipe-transform" (bench-pipeline-transform (slice xs) REPS) start &track))
+    (mem.tracking_allocator_reset &track)
     (let [start (time.tick_now)]
-      (run-one "pipe-filter-map" (bench-pipeline-filter-map-take (slice xs) REPS) start (& track)))
-    (mem.tracking_allocator_reset (& track))
+      (run-one "pipe-transform-indexed" (bench-pipeline-transform-indexed (slice xs) REPS) start &track))
+    (mem.tracking_allocator_reset &track)
     (let [start (time.tick_now)]
-      (run-one "pipe-filter-loop" (bench-pipeline-filter-map-take-loop (slice xs) REPS) start (& track)))
-    (mem.tracking_allocator_reset (& track))
+      (run-one "pipe-bang-copy" (bench-pipeline-bang-copy (slice xs) REPS) start &track))
+    (mem.tracking_allocator_reset &track)
     (let [start (time.tick_now)]
-      (run-one "pipe-sort-map" (bench-pipeline-sort-map (slice sort-xs) SORT_REPS) start (& track)))
-    (mem.tracking_allocator_reset (& track))
+      (run-one "pipe-filter-map" (bench-pipeline-filter-map-take (slice xs) REPS) start &track))
+    (mem.tracking_allocator_reset &track)
     (let [start (time.tick_now)]
-      (run-one "pipe-sort-loop" (bench-pipeline-sort-loop (slice sort-xs) SORT_REPS) start (& track)))
-    (mem.tracking_allocator_reset (& track))
+      (run-one "pipe-filter-loop" (bench-pipeline-filter-map-take-loop (slice xs) REPS) start &track))
+    (mem.tracking_allocator_reset &track)
     (let [start (time.tick_now)]
-      (run-one "orders-revenue" (bench-orders-revenue (slice orders) ORDER_REPS) start (& track)))
-    (mem.tracking_allocator_reset (& track))
+      (run-one "pipe-filter-transform" (bench-pipeline-filter-map-take-transform (slice xs) REPS) start &track))
+    (mem.tracking_allocator_reset &track)
     (let [start (time.tick_now)]
-      (run-one "orders-threaded" (bench-orders-revenue-threaded (slice orders) ORDER_REPS) start (& track)))
-    (mem.tracking_allocator_reset (& track))
+      (run-one "pipe-sort-map" (bench-pipeline-sort-map (slice sort-xs) SORT_REPS) start &track))
+    (mem.tracking_allocator_reset &track)
     (let [start (time.tick_now)]
-      (run-one "orders-loop" (bench-orders-revenue-loop (slice orders) ORDER_REPS) start (& track)))
-    (mem.tracking_allocator_reset (& track))
+      (run-one "pipe-sort-loop" (bench-pipeline-sort-loop (slice sort-xs) SORT_REPS) start &track))
+    (mem.tracking_allocator_reset &track)
     (let [start (time.tick_now)]
-      (run-one "orders-map!" (bench-orders-update-map! (slice orders-map) ORDER_REPS) start (& track)))
-    (mem.tracking_allocator_reset (& track))
+      (run-one "orders-revenue" (bench-orders-revenue (slice orders) ORDER_REPS) start &track))
+    (mem.tracking_allocator_reset &track)
     (let [start (time.tick_now)]
-      (run-one "orders-filter!" (bench-orders-update-filter! (slice orders-filter) ORDER_REPS) start (& track)))
-    (mem.tracking_allocator_reset (& track))
+      (run-one "orders-threaded" (bench-orders-revenue-threaded (slice orders) ORDER_REPS) start &track))
+    (mem.tracking_allocator_reset &track)
     (let [start (time.tick_now)]
-      (run-one "orders-ptr-loop" (bench-orders-update-pointer-loop (slice orders-ptr) ORDER_REPS) start (& track)))
-    (mem.tracking_allocator_reset (& track))
+      (run-one "orders-loop" (bench-orders-revenue-loop (slice orders) ORDER_REPS) start &track))
+    (mem.tracking_allocator_reset &track)
     (let [start (time.tick_now)]
-      (run-one "report-eager" (bench-report-eager (slice orders) ORDER_REPS) start (& track)))
-    (mem.tracking_allocator_reset (& track))
+      (run-one "orders-map!" (bench-orders-update-map! (slice orders-map) ORDER_REPS) start &track))
+    (mem.tracking_allocator_reset &track)
     (let [start (time.tick_now)]
-      (run-one "report-bang" (bench-report-bang (slice orders) ORDER_REPS) start (& track)))
-    (mem.tracking_allocator_reset (& track))
+      (run-one "orders-filter!" (bench-orders-update-filter! (slice orders-filter) ORDER_REPS) start &track))
+    (mem.tracking_allocator_reset &track)
     (let [start (time.tick_now)]
-      (run-one "report-loop" (bench-report-loop (slice orders) ORDER_REPS) start (& track)))))
+      (run-one "orders-ptr-loop" (bench-orders-update-pointer-loop (slice orders-ptr) ORDER_REPS) start &track))
+    (mem.tracking_allocator_reset &track)
+    (let [start (time.tick_now)]
+      (run-one "report-eager" (bench-report-eager (slice orders) ORDER_REPS) start &track))
+    (mem.tracking_allocator_reset &track)
+    (let [start (time.tick_now)]
+      (run-one "report-bang" (bench-report-bang (slice orders) ORDER_REPS) start &track))
+    (mem.tracking_allocator_reset &track)
+    (let [start (time.tick_now)]
+      (run-one "report-loop" (bench-report-loop (slice orders) ORDER_REPS) start &track))))

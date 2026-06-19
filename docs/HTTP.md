@@ -32,6 +32,19 @@ router, register routes, then listen.
     (http.listen-and-serve! server router 6969)))
 ```
 
+For a scoped router, use `http.with-router`. It creates the router, binds it for
+the body, and destroys it when the scope exits:
+
+```clojure
+(http.with-router [router]
+  (let [server (http.new-server)]
+    (http.get! router "/ping" [req res]
+      (http.respond-plain res "pong"))
+
+    (http.server-shutdown-on-interrupt! server)
+    (http.listen-and-serve! server router 6969)))
+```
+
 Routes bind request and response pointers:
 
 ```clojure
@@ -133,12 +146,12 @@ Good. Magic sessions are where bugs rent office space.
 `kvist:http/client` mirrors the explicit lifetime style:
 
 ```clojure
-(import httpc "kvist:http/client")
+(import client "kvist:http/client")
 
-(let [[res err] (httpc.get "http://127.0.0.1:6969/ping")]
+(let [[res err] (client.get "http://127.0.0.1:6969/ping")]
   (if (= err nil)
     (do
-      (defer (httpc.response-destroy res))
+      (defer (client.response-destroy res))
       (= res.status .OK))
     false))
 ```
@@ -146,12 +159,22 @@ Good. Magic sessions are where bugs rent office space.
 For custom requests:
 
 ```clojure
-(let [req (httpc.new-request .Post)]
-  (defer (httpc.request-destroy req))
-  (httpc.set-header! req "x-api-key" "demo")
-  (httpc.add-cookie! req "session" "abc")
-  (httpc.with-json req value)
-  (httpc.request req "http://127.0.0.1:6969/hello"))
+(let [req (client.new-request .Post)]
+  (defer (client.request-destroy req))
+  (client.set-header! req "x-api-key" "demo")
+  (client.add-cookie! req "session" "abc")
+  (client.with-json req value)
+  (client.request req "http://127.0.0.1:6969/hello"))
+```
+
+Or use `client.with-request` for the scoped form:
+
+```clojure
+(client.with-request [req .Post]
+  (client.set-header! req "x-api-key" "demo")
+  (client.add-cookie! req "session" "abc")
+  (client.with-json req value)
+  (client.request req "http://127.0.0.1:6969/hello"))
 ```
 
 Destroy request and response state when you own it.

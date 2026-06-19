@@ -74,6 +74,7 @@ Struct_Field :: struct {
     name:        string,
     source_name: string,
     ty:          string,
+    is_using:    bool,
 }
 
 Union_Variant :: struct {

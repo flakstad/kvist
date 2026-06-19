@@ -4,32 +4,31 @@
 // model. It is suitable for file-backed tooling, HTTP APIs, and tests. The
 // first pass intentionally leaves session.auth middleware out of scope.
 (package main)
-(import httpc "kvist:http/client")
+(import client "kvist:http/client")
 
 (defstruct Greeting {
   message: string
 })
 
 (defn fetch-ping [] -> bool
-  (let [[res err] (httpc.get "http://127.0.0.1:6969/ping")]
+  (let [[res err] (client.get "http://127.0.0.1:6969/ping")]
     (if (= err nil)
       (do
-        (defer (httpc.response-destroy res))
+        (defer (client.response-destroy res))
         (= res.status .OK))
       false)))
 
 (defn post-greeting [] -> bool
-  (let [req (httpc.new-request .Post)]
-    (defer (httpc.request-destroy req))
-    (httpc.set-header! req "x-api-key" "demo")
-    (httpc.add-cookie! req "session" "abc123")
-    (let [json-err (httpc.with-json req (Greeting {message: "hello"}))]
+  (client.with-request [req .Post]
+    (client.set-header! req "x-api-key" "demo")
+    (client.add-cookie! req "session" "abc123")
+    (let [json-err (client.with-json req (Greeting {message: "hello"}))]
       (if (!= json-err nil)
         false
-        (let [[res err] (httpc.request req "http://127.0.0.1:6969/hello")]
+        (let [[res err] (client.request req "http://127.0.0.1:6969/hello")]
           (if (= err nil)
             (do
-              (defer (httpc.response-destroy res))
+              (defer (client.response-destroy res))
               (= res.status .OK))
             false))))))
 

@@ -181,6 +181,7 @@ The CLI is built around the normal edit/check/run loop:
 ./kvist check examples/language/hello.kvist
 ./kvist run examples/language/hello.kvist
 ./kvist test examples/coverage/packages/test-package-tests.kvist
+./scripts/smoke.sh
 ```
 
 It also supports source-aware evaluation and expansion:
@@ -190,6 +191,14 @@ It also supports source-aware evaluation and expansion:
 ./kvist expand examples/collections/higher-order.kvist '(threaded-total)'
 ./kvist macroexpand examples/language/data-literals.kvist \
   '(with-allocator [allocator context.temp_allocator] (temp-buffer-len))'
+```
+
+Editor-oriented symbol queries use the same CLI:
+
+```sh
+./kvist doc examples/collections/log-source.kvist log-lines
+./kvist lookup examples/collections/log-source.kvist log-lines
+./kvist complete examples/collections/log-source.kvist log
 ```
 
 For the full surface, see [docs/TOOLING.md](docs/TOOLING.md). For live

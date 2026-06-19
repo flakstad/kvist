@@ -41,6 +41,48 @@ the broader live-development workflow alongside resident reload sessions.
 `kvist test --names ...` runs selected tests from a file. Use it when you want a
 tighter feedback loop than the full test file.
 
+## Symbol And Editor Queries
+
+Symbol commands print tab-separated rows so editors and shell tools can consume
+the same output:
+
+```sh
+kvist lookup examples/collections/log-source.kvist log-lines
+kvist complete examples/collections/log-source.kvist log
+kvist xref examples/collections/log-source.kvist log-lines
+```
+
+The first two commands include the shared header plus matching symbol rows, for
+example:
+
+```text
+kind	name	line	column	detail	signature	doc	file
+iterator	log-lines	23	10		(log-lines [lines: []string] -> Log_Source yields string)		examples/collections/log-source.kvist
+```
+
+`doc` renders the same data for humans:
+
+```sh
+kvist doc examples/collections/log-source.kvist log-lines
+```
+
+```text
+iterator log-lines
+(log-lines [lines: []string] -> Log_Source yields string)
+examples/collections/log-source.kvist:23
+```
+
+Package queries use the same row shape:
+
+```sh
+kvist imported-symbols examples/collections/sequences.kvist
+kvist package-symbols kvist:arr arr
+```
+
+Use `imported-symbols` for the packages visible from one file and
+`package-symbols` when an editor wants to inspect a package before it is
+imported.
+
 ## Source Maps And Diagnostics
 
 `compile --map path` writes a line-oriented source map. Declaration mappings are

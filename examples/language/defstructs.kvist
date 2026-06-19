@@ -17,6 +17,15 @@
    tags: set[string]
    home: Point})
 
+(defstruct Named
+  "Reusable name payload."
+  {name: string})
+
+(defstruct Named-Score
+  "Uses Odin's using field promotion for the embedded name."
+  {named: Named :using
+   score: int})
+
 (defn profile-defaults [] -> Profile
   (Profile {name: "Ada"}))
 
@@ -45,6 +54,11 @@
 (defn profile-summary-from [profile: Profile] -> string
   (fmt.tprintf "%s/%d/%t" profile.name profile.age profile.active_p))
 
+(defn promoted-name [] -> string
+  (let [score (Named-Score {named: (Named {name: "Ada"})
+                            score: 42})]
+    score.name))
+
 (defn main []
   (println (profile-has-math-tag?)))
 
@@ -68,4 +82,9 @@
 
   (profile-summary-from (Profile {name: "Ada" age: 36 active?: true}))
   ;; => "Ada/36/true"
+
+  ;; :using lowers to Odin's using field modifier, so the embedded field's
+  ;; members are promoted by Odin.
+  (promoted-name)
+  ;; => "Ada"
 )

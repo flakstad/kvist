@@ -159,8 +159,9 @@ Field selectors such as `.name` and `.age` are not values by themselves. They
 are special shorthand in supported places such as `get`, `assoc`, `update`,
 `arr.map`, `arr.filter`, and similar helpers.
 
-Keywords like `:else`, `:next`, `:dispose`, `:defer`, `:errdefer`, and
-`:or-return` are syntax markers, not ordinary runtime values.
+Keywords like `:else`, `:next`, `:dispose`, `:defer`, `:defer-with`,
+`:errdefer`, `:using`, and `:or-return` are syntax markers, not ordinary
+runtime values.
 
 ### Imports And Exports
 
@@ -298,6 +299,37 @@ tokens:
   weights: [4]f32
 })
 ```
+
+Use `:using` after a field type when you want Odin to promote the embedded
+field's members onto the containing struct. This is useful for composition:
+the containing value still stores a normal named field, but callers can access
+the embedded field's members directly through the outer value.
+
+```clojure
+(defstruct Logger {
+  level: int
+})
+
+(defstruct App {
+  logger: Logger :using
+  config: Config
+})
+
+(defn app-level [app: App] -> int
+  app.level) ; promoted from app.logger.level by Odin
+```
+
+This lowers to:
+
+```odin
+App :: struct {
+    using logger: Logger,
+    config: Config,
+}
+```
+
+Use ordinary fields when you want explicit access such as `app.logger.level`.
+Use `:using` when Odin's field/procedure promotion is the intended API.
 
 The parser also accepts vector shorthands in `defstruct` field metadata:
 `[slice T]`, `[arr T]`, `[set T]`, and `[fixed-arr N T]`. These lower to
@@ -906,11 +938,37 @@ Owned local bindings may use the `:defer` marker:
 ```
 
 This is shorthand for a matching `defer (delete xs)` at the end of the scope.
+Use `:defer-with` when cleanup is a function other than `delete`:
+
+```clojure
+(let [file (open-file path) :defer-with close-file]
+  ...)
+```
+
+This lowers to:
+
+```odin
+file := open_file(path)
+defer close_file(file)
+```
+
+Cleanup markers are mutually exclusive. Use `:defer` for `delete(value)`,
+`:defer-with` for `cleanup(value)`, or `:errdefer` for failure-only cleanup of
+returned owned values.
+
 For guarded multi-return bindings, `:defer` deletes the first bound value after
 the guard succeeds:
 
 ```clojure
 (let [[data err] (read-text path) :or-return :defer]
+  ...)
+```
+
+`:defer-with` works the same way for guarded multi-return bindings, but calls
+the named cleanup function on the first bound value:
+
+```clojure
+(let [[file err] (open-file path) :or-return :defer-with close-file]
   ...)
 ```
 
@@ -1311,8 +1369,10 @@ The practical ownership rules are:
 - if a local value owns dynamic storage, delete it or return it
 - if a proc returns an owned value, ownership transfers to the caller
 - borrowed views must not be deleted
-- there is no hidden runtime cleanup beyond the `defer` or `:defer` you write
+- there is no hidden runtime cleanup beyond the `defer`, `:defer`, or
+  `:defer-with` you write
 - `:defer` is scope cleanup for ordinary owned values
+- `:defer-with` is scope cleanup through a named cleanup function
 - `:errdefer` is failure-only cleanup for `[value err] :or-return` bindings
 - iterators use `:dispose` in their `defiter` declaration to name producer-state cleanup
 
@@ -1689,21 +1749,25 @@ Odin loops rather than intermediate arrays.
 
 ```clojure
 (deftransform paid-order-totals
-  (comp
-    (filter paid?)
-    (map order-total)
-    (filter positive?)))
+  (filter paid?)
+  (map order-total)
+  (filter positive?))
 
 (into [dynamic]int paid-order-totals orders)
 (transduce paid-order-totals + 0 orders)
+
+(for [total orders :transform paid-order-totals]
+  (println total))
 ```
 
 The current transform surface is intentionally small:
 
-- `comp` supports `map` and `filter`
+- transform specs support `map`, `map-indexed`, `mapcat`, `filter`, `remove`,
+  `keep`, `take`, `take-while`, `drop`, and `drop-while`
+- `comp` composes steps and named transforms
 - callbacks must be known one-argument functions or field selectors
 - `into` currently returns fresh owned `[dynamic]T` arrays
-- `transduce` currently supports `+` as the reducer
+- `transduce` supports `+` and known two-argument reducers
 - inputs can be slices, arrays, dynamic arrays, or `defiter` calls
 
 See [FUNCTIONAL-TRANSFORMS.md](FUNCTIONAL-TRANSFORMS.md) for limits and

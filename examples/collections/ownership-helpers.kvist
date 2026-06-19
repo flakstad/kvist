@@ -6,6 +6,9 @@
 
 (import runtime "base:runtime")
 
+(defn close-int-buffer [buffer: [dynamic]int]
+  (delete buffer))
+
 (defn local-buffer-count [] -> int
   (let [buffer (arr.empty int) :defer]
     (arr.push! buffer 1 2 3 4)
@@ -24,6 +27,11 @@
       (arr.push! buffer 8 9)
       (count buffer))))
 
+(defn custom-cleanup-buffer-count [] -> int
+  (let [buffer (arr.empty int) :defer-with close-int-buffer]
+    (arr.push! buffer 10 11 12)
+    (count buffer)))
+
 (defn main []
   (println (local-buffer-count)))
 
@@ -36,6 +44,9 @@
 
   (temp-scope-buffer-count)
   ;; => 2
+
+  (custom-cleanup-buffer-count)
+  ;; => 3
 
   ;; Expand one form when you want to inspect the ownership shape directly:
   ;;   kvist macroexpand examples/collections/ownership-helpers.kvist

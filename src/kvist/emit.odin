@@ -53,11 +53,20 @@ Callback_Context :: struct {
 Transform_Step_Kind :: enum {
     Map,
     Filter,
+    Remove,
+    Keep,
+    Take,
+    Take_While,
+    Drop,
+    Drop_While,
+    Map_Indexed,
+    Mapcat,
 }
 
 Transform_Step :: struct {
     kind:     Transform_Step_Kind,
     callback: CST_Form,
+    state_name: string,
     span:     Span,
 }
 
@@ -4653,7 +4662,7 @@ form_may_escape_owned_temp_result :: proc(form: CST_Form, returns: Return_Spec) 
 
 let_defer_return_error :: proc(bindings: []Binding, body: []CST_Form, last_in_proc: bool, returns: Return_Spec) -> (Compile_Error, bool) {
     for binding in bindings {
-        if !binding.deferred_delete {
+        if !binding.deferred_delete && !binding.defer_with_cleanup {
             continue
         }
         delete_name, ok_delete_name := binding_delete_target_name(binding)
@@ -4669,9 +4678,13 @@ let_defer_return_error :: proc(bindings: []Binding, body: []CST_Form, last_in_pr
             }
         }
         if err_span, ok := body_escape_deferred_binding_span_names(body, names[:], returns); ok {
+            message := "defer-marked binding cannot be returned; remove defer or transfer ownership explicitly"
+            if binding.defer_with_cleanup {
+                message = "defer-with binding cannot be returned; remove cleanup marker or transfer ownership explicitly"
+            }
             return Compile_Error{
-                message = "defer-marked binding cannot be returned; remove defer or transfer ownership explicitly",
-                span = err_span,
+                message = message,
+                span    = err_span,
             }, true
         }
     }
@@ -4728,6 +4741,19 @@ emit_binding_deferred_delete :: proc(e: ^Emitter, binding: Binding) -> (Compile_
         return Compile_Error{message = ":defer binding marker is only supported on delete-able local bindings", span = binding.value.span}, false
     }
     emit_line(e, fmt.tprintf("defer delete(%s)", delete_name))
+    return {}, true
+}
+
+emit_binding_defer_with_cleanup :: proc(e: ^Emitter, binding: Binding) -> (Compile_Error, bool) {
+    delete_name, ok_delete_name := binding_delete_target_name(binding)
+    if !ok_delete_name {
+        return Compile_Error{message = ":defer-with binding marker is only supported on cleanable local bindings", span = binding.value.span}, false
+    }
+    cleanup, err_cleanup, ok_cleanup := emit_expr(e, binding.cleanup)
+    if !ok_cleanup {
+        return err_cleanup, false
+    }
+    emit_line(e, fmt.tprintf("defer %s(%s)", cleanup, delete_name))
     return {}, true
 }
 
@@ -5496,6 +5522,12 @@ emit_let_value_binding_assignment :: proc(e: ^Emitter, binding: Binding) -> (Com
                 return err_defer, false
             }
         }
+        if inner.defer_with_cleanup {
+            err_defer, ok_defer := emit_binding_defer_with_cleanup(e, inner)
+            if !ok_defer {
+                return err_defer, false
+            }
+        }
         if inner.err_deferred_delete {
             err_defer, ok_defer := emit_binding_err_deferred_delete(e, inner)
             if !ok_defer {
@@ -5874,7 +5906,7 @@ analyze_owned_scope_body :: proc(e: ^Emitter, forms: []CST_Form, can_transfer_fi
                 if binding.is_destructure || (!has_delete_name && binding.name == "") {
                     continue
                 }
-                if binding_value_produces_owned_value(binding) || binding.deferred_delete || binding.err_deferred_delete {
+                if binding_value_produces_owned_value(binding) || binding.deferred_delete || binding.err_deferred_delete || binding.defer_with_cleanup {
                     owned_name := binding.name
                     if owned_name == "" {
                         owned_name = delete_name
@@ -5887,7 +5919,7 @@ analyze_owned_scope_body :: proc(e: ^Emitter, forms: []CST_Form, can_transfer_fi
                 skip_warning := false
                 for binding in bindings {
                     delete_name, ok_delete_name := binding_delete_target_name(binding)
-                    if ok_delete_name && delete_name == live[i].name && (binding.deferred_delete || binding.err_deferred_delete) {
+                    if ok_delete_name && delete_name == live[i].name && (binding.deferred_delete || binding.err_deferred_delete || binding.defer_with_cleanup) {
                         skip_warning = true
                         break
                     }
@@ -6009,6 +6041,141 @@ emit_source_each_loop :: proc(e: ^Emitter, source_form: CST_Form, source: ^Sourc
         return err_body, false
     }
     e.indent -= 1
+    emit_line(e, "}")
+    pop_local_type_scope(e)
+    e.indent -= 1
+    emit_line(e, "}")
+    return {}, true
+}
+
+emit_transform_for_body :: proc(e: ^Emitter, steps: []Transform_Step, initial_text, initial_ty, value_name: string, body: []CST_Form) -> (Compile_Error, bool) {
+    base_indent := e.indent
+    value_text, value_ty, close_count, err_pipeline, ok_pipeline := emit_transform_pipeline_body(e, &e.builder, steps, initial_text, initial_ty, base_indent)
+    if !ok_pipeline {
+        return err_pipeline, false
+    }
+
+    e.indent = base_indent + close_count
+    emit_line(e, fmt.tprintf("%s := %s", value_name, value_text))
+    push_local_type_scope(e)
+    bind_local_type(e, value_name, value_ty)
+    err_body, ok_body := emit_body_forms(e, body, Return_Spec{kind = .None})
+    pop_local_type_scope(e)
+    e.indent = base_indent
+    if !ok_body {
+        return err_body, false
+    }
+    emit_transform_closers(&e.builder, base_indent+close_count, close_count)
+    return {}, true
+}
+
+emit_transform_for_collection_loop_body :: proc(e: ^Emitter, coll_form: CST_Form, coll_text, coll_ty, value_name: string, transform_form: CST_Form, body: []CST_Form) -> (Compile_Error, bool) {
+    source_elem_ty, ok_source_elem_ty := collection_element_type(coll_ty)
+    if !ok_source_elem_ty {
+        return Compile_Error{message = fmt.tprintf("for :transform expects slice or array source, got %s", coll_ty), span = coll_form.span}, false
+    }
+    steps, err_steps, ok_steps := parse_transform_steps(e, transform_form)
+    if !ok_steps {
+        return err_steps, false
+    }
+    err_prelude, ok_prelude := emit_transform_state_prelude(e, &e.builder, steps[:], e.indent)
+    if !ok_prelude {
+        return err_prelude, false
+    }
+    emit_line(e, fmt.tprintf("for kvist_item in %s %s", coll_text, "{"))
+    e.indent += 1
+    err_body, ok_body := emit_transform_for_body(e, steps[:], "kvist_item", source_elem_ty, value_name, body)
+    e.indent -= 1
+    if !ok_body {
+        return err_body, false
+    }
+    emit_line(e, "}")
+    return {}, true
+}
+
+emit_transform_for_collection_loop :: proc(e: ^Emitter, coll_form: CST_Form, value_name: string, transform_form: CST_Form, body: []CST_Form) -> (Compile_Error, bool) {
+    coll_ty, ok_coll_ty := obvious_form_type(e, coll_form)
+    if !ok_coll_ty {
+        return Compile_Error{message = "for :transform expects a collection with an obvious type; bind or annotate it first", span = coll_form.span}, false
+    }
+    if !loop_collection_needs_temp_binding(coll_form) {
+        err_owned, bad_owned := owned_result_usage_error(coll_form, false)
+        if bad_owned {
+            return err_owned, false
+        }
+        coll, err_coll, ok_coll := emit_expr(e, coll_form)
+        if !ok_coll {
+            return err_coll, false
+        }
+        return emit_transform_for_collection_loop_body(e, coll_form, coll, coll_ty, value_name, transform_form, body)
+    }
+
+    coll, err_coll, ok_coll := emit_expr(e, coll_form)
+    if !ok_coll {
+        return err_coll, false
+    }
+    e.temp_counter += 1
+    temp := fmt.tprintf("kvist_loop_%d", e.temp_counter)
+    emit_line(e, "{")
+    e.indent += 1
+    push_local_type_scope(e)
+    emit_prefixed_expr_mapped(e, fmt.tprintf("%s := ", temp), coll, coll_form.span)
+    emit_line(e, fmt.tprintf("defer delete(%s)", temp))
+    err_loop, ok_loop := emit_transform_for_collection_loop_body(e, coll_form, temp, coll_ty, value_name, transform_form, body)
+    pop_local_type_scope(e)
+    if !ok_loop {
+        return err_loop, false
+    }
+    e.indent -= 1
+    emit_line(e, "}")
+    return {}, true
+}
+
+emit_transform_for_source_loop :: proc(e: ^Emitter, source_form: CST_Form, source: ^Source_Decl, value_name: string, transform_form: CST_Form, body: []CST_Form) -> (Compile_Error, bool) {
+    state_ty, err_state_ty, ok_state_ty := source_state_type(e, source)
+    if !ok_state_ty {
+        return err_state_ty, false
+    }
+    err_protocol, ok_protocol := validate_source_protocol(e, source, state_ty, source_form.span)
+    if !ok_protocol {
+        return err_protocol, false
+    }
+    arg_texts, err_args, ok_args := source_call_arg_texts(e, source, source_form)
+    if !ok_args {
+        return err_args, false
+    }
+    steps, err_steps, ok_steps := parse_transform_steps(e, transform_form)
+    if !ok_steps {
+        return err_steps, false
+    }
+    source_text := source_call_text(e, source, arg_texts[:])
+    temp := source_temp_name(e)
+    ok_name := source_ok_name(e)
+
+    emit_line(e, "{")
+    e.indent += 1
+    push_local_type_scope(e)
+    emit_prefixed_expr_mapped(e, fmt.tprintf("%s := ", temp), source_text, source_form.span)
+    if source.has_dispose {
+        emit_line(e, fmt.tprintf("defer %s(&%s)", source.dispose_name, temp))
+    }
+    err_prelude, ok_prelude := emit_transform_state_prelude(e, &e.builder, steps[:], e.indent)
+    if !ok_prelude {
+        return err_prelude, false
+    }
+    emit_line(e, "for {")
+    e.indent += 1
+    emit_line(e, fmt.tprintf("kvist_item, %s := %s(&%s)", ok_name, source.next_name, temp))
+    emit_line(e, fmt.tprintf("if !%s %s", ok_name, "{"))
+    e.indent += 1
+    emit_line(e, "break")
+    e.indent -= 1
+    emit_line(e, "}")
+    err_body, ok_body := emit_transform_for_body(e, steps[:], "kvist_item", source.item_ty, value_name, body)
+    e.indent -= 1
+    if !ok_body {
+        return err_body, false
+    }
     emit_line(e, "}")
     pop_local_type_scope(e)
     e.indent -= 1
@@ -7498,12 +7665,31 @@ validate_source_protocol :: proc(e: ^Emitter, source: ^Source_Decl, state_ty: st
 }
 
 transform_step_kind :: proc(head: string) -> (Transform_Step_Kind, bool) {
+    if head == "map-indexed" {
+        return .Map_Indexed, true
+    }
     surface := source_package_surface_head(head)
     switch surface {
     case "map", "arr/map", "arr-map":
         return .Map, true
     case "filter", "arr/filter", "arr-filter":
         return .Filter, true
+    case "remove", "arr/remove", "arr-remove":
+        return .Remove, true
+    case "keep", "arr/keep", "arr-keep":
+        return .Keep, true
+    case "take", "arr/take", "arr-take":
+        return .Take, true
+    case "take-while", "arr/take-while", "arr-take-while":
+        return .Take_While, true
+    case "drop", "arr/drop", "arr-drop":
+        return .Drop, true
+    case "drop-while", "arr/drop-while", "arr-drop-while":
+        return .Drop_While, true
+    case "map-indexed", "arr/map-indexed", "arr-map-indexed":
+        return .Map_Indexed, true
+    case "mapcat", "arr/mapcat", "arr-mapcat":
+        return .Mapcat, true
     }
     return {}, false
 }
@@ -7516,33 +7702,59 @@ transform_spec_form :: proc(e: ^Emitter, form: CST_Form) -> (CST_Form, Compile_E
         }
         return decl.spec, {}, true
     }
-    if form.kind == .List && len(form.items) > 0 && form.items[0].kind == .Symbol && form.items[0].text == "comp" {
-        return form, {}, true
+    if form.kind == .List && len(form.items) > 0 && form.items[0].kind == .Symbol {
+        if form.items[0].text == "comp" {
+            return form, {}, true
+        }
+        if _, ok_kind := transform_step_kind(form.items[0].text); ok_kind {
+            return form, {}, true
+        }
+        return {}, Compile_Error{message = "transform steps currently support map, map-indexed, mapcat, filter, remove, keep, take, take-while, drop, and drop-while", span = form.items[0].span}, false
     }
-    return {}, Compile_Error{message = "transform expects a named transform or (comp ...)", span = form.span}, false
+    return {}, Compile_Error{message = "transform expects a named transform, (comp ...), or a transform step", span = form.span}, false
+}
+
+parse_transform_steps_into :: proc(e: ^Emitter, form: CST_Form, steps: ^[dynamic]Transform_Step) -> (Compile_Error, bool) {
+    spec, err_spec, ok_spec := transform_spec_form(e, form)
+    if !ok_spec {
+        return err_spec, false
+    }
+    if spec.kind != .List || len(spec.items) == 0 || spec.items[0].kind != .Symbol {
+        return Compile_Error{message = "transform spec expects (comp ...) or a transform step", span = spec.span}, false
+    }
+    if spec.items[0].text == "comp" {
+        for step_form in spec.items[1:] {
+            err_step, ok_step := parse_transform_steps_into(e, step_form, steps)
+            if !ok_step {
+                return err_step, false
+            }
+        }
+        return {}, true
+    }
+    if len(spec.items) != 2 {
+        return Compile_Error{message = "transform steps expect one argument", span = spec.span}, false
+    }
+    kind, ok_kind := transform_step_kind(spec.items[0].text)
+    if !ok_kind {
+        return Compile_Error{message = "transform steps currently support map, map-indexed, mapcat, filter, remove, keep, take, take-while, drop, and drop-while", span = spec.items[0].span}, false
+    }
+    state_name := ""
+    if kind == .Take || kind == .Drop || kind == .Drop_While || kind == .Map_Indexed {
+        state_name = transform_temp_name(e)
+    }
+    append(steps, Transform_Step{
+        kind = kind,
+        callback = spec.items[1],
+        state_name = state_name,
+        span = spec.span,
+    })
+    return {}, true
 }
 
 parse_transform_steps :: proc(e: ^Emitter, form: CST_Form) -> (steps: [dynamic]Transform_Step, err: Compile_Error, ok: bool) {
-    spec, err_spec, ok_spec := transform_spec_form(e, form)
-    if !ok_spec {
-        return steps, err_spec, false
-    }
-    if spec.kind != .List || len(spec.items) == 0 || spec.items[0].kind != .Symbol || spec.items[0].text != "comp" {
-        return steps, Compile_Error{message = "transform spec expects (comp ...)", span = spec.span}, false
-    }
-    for step_form in spec.items[1:] {
-        if step_form.kind != .List || len(step_form.items) != 2 || step_form.items[0].kind != .Symbol {
-            return steps, Compile_Error{message = "transform steps currently expect (map f) or (filter pred)", span = step_form.span}, false
-        }
-        kind, ok_kind := transform_step_kind(step_form.items[0].text)
-        if !ok_kind {
-            return steps, Compile_Error{message = "transform steps currently support map and filter", span = step_form.items[0].span}, false
-        }
-        append(&steps, Transform_Step{
-            kind = kind,
-            callback = step_form.items[1],
-            span = step_form.span,
-        })
+    err_steps, ok_steps := parse_transform_steps_into(e, form, &steps)
+    if !ok_steps {
+        return steps, err_steps, false
     }
     return steps, {}, true
 }
@@ -7575,6 +7787,68 @@ proc_callback_call :: proc(e: ^Emitter, callback: CST_Form, input_text, input_ty
     return emit_call_text(proc_name, []string{input_text}), proc_decl.returns.single_ty, {}, true
 }
 
+indexed_callback_call :: proc(e: ^Emitter, callback: CST_Form, index_text, input_text, input_ty: string) -> (text, return_ty: string, err: Compile_Error, ok: bool) {
+    if callback.kind != .Symbol {
+        return "", "", Compile_Error{message = "map-indexed transform currently expects a function symbol", span = callback.span}, false
+    }
+    proc_name := map_name(callback.text)
+    proc_decl, ok_proc := find_proc_decl(e, proc_name)
+    if !ok_proc {
+        return "", "", Compile_Error{message = fmt.tprintf("map-indexed transform must name a known two-argument function: %s", callback.text), span = callback.span}, false
+    }
+    if len(proc_decl.params) != 2 || proc_decl.params[0].ty != "int" || proc_decl.params[1].ty != input_ty {
+        return "", "", Compile_Error{message = fmt.tprintf("map-indexed transform callback must be (fn [int %s] -> T)", input_ty), span = callback.span}, false
+    }
+    if proc_decl.returns.kind != .Single {
+        return "", "", Compile_Error{message = "map-indexed transform callback currently expects a single return value", span = callback.span}, false
+    }
+    return emit_call_text(proc_name, []string{index_text, input_text}), proc_decl.returns.single_ty, {}, true
+}
+
+keep_callback_call :: proc(e: ^Emitter, callback: CST_Form, input_text, input_ty: string) -> (text, value_ty: string, err: Compile_Error, ok: bool) {
+    if callback.kind != .Symbol {
+        return "", "", Compile_Error{message = "keep transform currently expects a function symbol", span = callback.span}, false
+    }
+    proc_name := map_name(callback.text)
+    proc_decl, ok_proc := find_proc_decl(e, proc_name)
+    if !ok_proc {
+        return "", "", Compile_Error{message = fmt.tprintf("keep transform must name a known one-argument function: %s", callback.text), span = callback.span}, false
+    }
+    if len(proc_decl.params) != 1 {
+        return "", "", Compile_Error{message = "keep transform currently expects a one-argument function", span = callback.span}, false
+    }
+    if proc_decl.params[0].ty != input_ty {
+        return "", "", Compile_Error{message = fmt.tprintf("keep transform callback expects %s but pipeline has %s", proc_decl.params[0].ty, input_ty), span = callback.span}, false
+    }
+    if proc_decl.returns.kind != .Named || len(proc_decl.returns.named) != 2 || proc_decl.returns.named[1].ty != "bool" {
+        return "", "", Compile_Error{message = "keep transform callback must return [value: T ok: bool]", span = callback.span}, false
+    }
+    return emit_call_text(proc_name, []string{input_text}), proc_decl.returns.named[0].ty, {}, true
+}
+
+emit_transform_state_prelude :: proc(e: ^Emitter, builder: ^strings.Builder, steps: []Transform_Step, depth: int) -> (Compile_Error, bool) {
+    for step in steps {
+        if step.kind != .Take && step.kind != .Drop && step.kind != .Drop_While && step.kind != .Map_Indexed {
+            continue
+        }
+        if step.kind == .Drop_While {
+            append_indent(builder, depth)
+            fmt.sbprintf(builder, "%s := true\n", step.state_name)
+        } else if step.kind == .Map_Indexed {
+            append_indent(builder, depth)
+            fmt.sbprintf(builder, "%s := 0\n", step.state_name)
+        } else {
+            limit_text, err_limit, ok_limit := emit_expr(e, step.callback)
+            if !ok_limit {
+                return err_limit, false
+            }
+            append_indent(builder, depth)
+            fmt.sbprintf(builder, "%s := %s\n", step.state_name, limit_text)
+        }
+    }
+    return {}, true
+}
+
 emit_transform_pipeline_body :: proc(
     e: ^Emitter,
     builder: ^strings.Builder,
@@ -7585,7 +7859,11 @@ emit_transform_pipeline_body :: proc(
     current_text := initial_text
     current_ty := initial_ty
     current_depth := depth
+    inside_mapcat := false
     for step in steps {
+        if inside_mapcat && (step.kind == .Take || step.kind == .Take_While) {
+            return "", "", 0, Compile_Error{message = "take and take-while after mapcat need cross-loop termination and are not supported yet", span = step.span}, false
+        }
         switch step.kind {
         case .Filter:
             pred_text, pred_ty, err_pred, ok_pred := proc_callback_call(e, step.callback, current_text, current_ty)
@@ -7599,6 +7877,120 @@ emit_transform_pipeline_body :: proc(
             fmt.sbprintf(builder, "if %s %s\n", pred_text, "{")
             current_depth += 1
             close_count += 1
+        case .Remove:
+            pred_text, pred_ty, err_pred, ok_pred := proc_callback_call(e, step.callback, current_text, current_ty)
+            if !ok_pred {
+                return "", "", 0, err_pred, false
+            }
+            if pred_ty != "bool" {
+                return "", "", 0, Compile_Error{message = fmt.tprintf("remove transform expects bool callback result, got %s", pred_ty), span = step.callback.span}, false
+            }
+            append_indent(builder, current_depth)
+            fmt.sbprintf(builder, "if !(%s) %s\n", pred_text, "{")
+            current_depth += 1
+            close_count += 1
+        case .Keep:
+            keep_text, keep_ty, err_keep, ok_keep := keep_callback_call(e, step.callback, current_text, current_ty)
+            if !ok_keep {
+                return "", "", 0, err_keep, false
+            }
+            value_temp := transform_temp_name(e)
+            ok_temp := transform_temp_name(e)
+            append_indent(builder, current_depth)
+            fmt.sbprintf(builder, "%s, %s := %s\n", value_temp, ok_temp, keep_text)
+            append_indent(builder, current_depth)
+            fmt.sbprintf(builder, "if %s %s\n", ok_temp, "{")
+            current_text = value_temp
+            current_ty = keep_ty
+            current_depth += 1
+            close_count += 1
+        case .Take:
+            append_indent(builder, current_depth)
+            fmt.sbprintf(builder, "if %s <= 0 %s\n", step.state_name, "{")
+            append_indent(builder, current_depth+1)
+            strings.write_string(builder, "break\n")
+            append_indent(builder, current_depth)
+            strings.write_string(builder, "}\n")
+            append_indent(builder, current_depth)
+            fmt.sbprintf(builder, "%s -= 1\n", step.state_name)
+        case .Take_While:
+            pred_text, pred_ty, err_pred, ok_pred := proc_callback_call(e, step.callback, current_text, current_ty)
+            if !ok_pred {
+                return "", "", 0, err_pred, false
+            }
+            if pred_ty != "bool" {
+                return "", "", 0, Compile_Error{message = fmt.tprintf("take-while transform expects bool callback result, got %s", pred_ty), span = step.callback.span}, false
+            }
+            append_indent(builder, current_depth)
+            fmt.sbprintf(builder, "if !(%s) %s\n", pred_text, "{")
+            append_indent(builder, current_depth+1)
+            strings.write_string(builder, "break\n")
+            append_indent(builder, current_depth)
+            strings.write_string(builder, "}\n")
+        case .Drop:
+            append_indent(builder, current_depth)
+            fmt.sbprintf(builder, "if %s > 0 %s\n", step.state_name, "{")
+            append_indent(builder, current_depth+1)
+            fmt.sbprintf(builder, "%s -= 1\n", step.state_name)
+            append_indent(builder, current_depth+1)
+            strings.write_string(builder, "continue\n")
+            append_indent(builder, current_depth)
+            strings.write_string(builder, "}\n")
+        case .Drop_While:
+            pred_text, pred_ty, err_pred, ok_pred := proc_callback_call(e, step.callback, current_text, current_ty)
+            if !ok_pred {
+                return "", "", 0, err_pred, false
+            }
+            if pred_ty != "bool" {
+                return "", "", 0, Compile_Error{message = fmt.tprintf("drop-while transform expects bool callback result, got %s", pred_ty), span = step.callback.span}, false
+            }
+            append_indent(builder, current_depth)
+            fmt.sbprintf(builder, "if %s %s\n", step.state_name, "{")
+            append_indent(builder, current_depth+1)
+            fmt.sbprintf(builder, "if %s %s\n", pred_text, "{")
+            append_indent(builder, current_depth+2)
+            strings.write_string(builder, "continue\n")
+            append_indent(builder, current_depth+1)
+            strings.write_string(builder, "}\n")
+            append_indent(builder, current_depth+1)
+            fmt.sbprintf(builder, "%s = false\n", step.state_name)
+            append_indent(builder, current_depth)
+            strings.write_string(builder, "}\n")
+        case .Map_Indexed:
+            mapped_text, mapped_ty, err_mapped, ok_mapped := indexed_callback_call(e, step.callback, step.state_name, current_text, current_ty)
+            if !ok_mapped {
+                return "", "", 0, err_mapped, false
+            }
+            temp := transform_temp_name(e)
+            append_indent(builder, current_depth)
+            fmt.sbprintf(builder, "%s := %s\n", temp, mapped_text)
+            append_indent(builder, current_depth)
+            fmt.sbprintf(builder, "%s += 1\n", step.state_name)
+            current_text = temp
+            current_ty = mapped_ty
+        case .Mapcat:
+            mapped_text, mapped_ty, err_mapped, ok_mapped := proc_callback_call(e, step.callback, current_text, current_ty)
+            if !ok_mapped {
+                return "", "", 0, err_mapped, false
+            }
+            if type_text_is_dynamic_array(mapped_ty) {
+                return "", "", 0, Compile_Error{message = "mapcat transform callback currently expects a borrowed slice or fixed array result, not an owned dynamic array", span = step.callback.span}, false
+            }
+            inner_ty, ok_inner_ty := collection_element_type(mapped_ty)
+            if !ok_inner_ty {
+                return "", "", 0, Compile_Error{message = fmt.tprintf("mapcat transform expects array-family callback result, got %s", mapped_ty), span = step.callback.span}, false
+            }
+            mapped_temp := transform_temp_name(e)
+            inner_temp := transform_temp_name(e)
+            append_indent(builder, current_depth)
+            fmt.sbprintf(builder, "%s := %s\n", mapped_temp, mapped_text)
+            append_indent(builder, current_depth)
+            fmt.sbprintf(builder, "for %s in %s %s\n", inner_temp, slice_all_expr_text(mapped_temp), "{")
+            current_text = inner_temp
+            current_ty = inner_ty
+            current_depth += 1
+            close_count += 1
+            inside_mapcat = true
         case .Map:
             mapped_text, mapped_ty, err_mapped, ok_mapped := proc_callback_call(e, step.callback, current_text, current_ty)
             if !ok_mapped {
@@ -7623,6 +8015,31 @@ emit_transform_closers :: proc(builder: ^strings.Builder, depth, close_count: in
         strings.write_string(builder, "}\n")
         remaining -= 1
     }
+}
+
+transform_reduce_update_text :: proc(e: ^Emitter, reducer: CST_Form, acc_text, acc_ty, value_text, value_ty: string) -> (string, Compile_Error, bool) {
+    if reducer.kind != .Symbol {
+        return "", Compile_Error{message = "transduce reducer currently expects + or a known two-argument function", span = reducer.span}, false
+    }
+    if reducer.text == "+" {
+        if acc_ty != value_ty {
+            return "", Compile_Error{message = fmt.tprintf("+ reducer expects pipeline value %s to match accumulator %s", value_ty, acc_ty), span = reducer.span}, false
+        }
+        return fmt.tprintf("%s += %s", acc_text, value_text), {}, true
+    }
+    proc_name := map_name(reducer.text)
+    proc_decl, ok_proc := find_proc_decl(e, proc_name)
+    if !ok_proc {
+        return "", Compile_Error{message = fmt.tprintf("transduce reducer must be + or a known two-argument function: %s", reducer.text), span = reducer.span}, false
+    }
+    if len(proc_decl.params) != 2 ||
+       proc_decl.params[0].ty != acc_ty ||
+       proc_decl.params[1].ty != value_ty ||
+       proc_decl.returns.kind != .Single ||
+       proc_decl.returns.single_ty != acc_ty {
+        return "", Compile_Error{message = fmt.tprintf("transduce reducer must be (fn [%s %s] -> %s)", acc_ty, value_ty, acc_ty), span = reducer.span}, false
+    }
+    return fmt.tprintf("%s = %s", acc_text, emit_call_text(proc_name, []string{acc_text, value_text})), {}, true
 }
 
 emit_transform_into_source_expr :: proc(
@@ -7672,6 +8089,10 @@ emit_transform_into_source_expr :: proc(
         fmt.sbprintf(&builder, "    defer %s(&kvist_source)\n", source.dispose_name)
     }
     fmt.sbprintf(&builder, "    kvist_out := make(%s)\n", output_ty)
+    err_prelude, ok_prelude := emit_transform_state_prelude(e, &builder, steps[:], 1)
+    if !ok_prelude {
+        return "", err_prelude, false
+    }
     strings.write_string(&builder, "    for {\n")
     fmt.sbprintf(&builder, "        kvist_item, kvist_source_ok := %s(&kvist_source)\n", source.next_name)
     strings.write_string(&builder, "        if !kvist_source_ok {\n")
@@ -7734,6 +8155,10 @@ emit_transform_into_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compil
     defer strings.builder_destroy(&builder)
     fmt.sbprintf(&builder, "(proc(kvist_source: %s) -> %s %s\n", source_ty, output_ty, "{")
     fmt.sbprintf(&builder, "    kvist_out := make(%s)\n", output_ty)
+    err_prelude, ok_prelude := emit_transform_state_prelude(e, &builder, steps[:], 1)
+    if !ok_prelude {
+        return "", err_prelude, false
+    }
     strings.write_string(&builder, "    for kvist_item in kvist_source {\n")
     value_text, value_ty, close_count, err_body, ok_body := emit_transform_pipeline_body(e, &builder, steps[:], "kvist_item", source_elem_ty, 2)
     if !ok_body {
@@ -7755,6 +8180,7 @@ emit_transform_transduce_source_expr :: proc(
     e: ^Emitter,
     form: CST_Form,
     transform_form: CST_Form,
+    reducer: CST_Form,
     init_text, acc_ty: string,
     source_form: CST_Form,
     source: ^Source_Decl,
@@ -7806,6 +8232,10 @@ emit_transform_transduce_source_expr :: proc(
         fmt.sbprintf(&builder, "    defer %s(&kvist_source)\n", source.dispose_name)
     }
     strings.write_string(&builder, "    kvist_acc := kvist_init\n")
+    err_prelude, ok_prelude := emit_transform_state_prelude(e, &builder, steps[:], 1)
+    if !ok_prelude {
+        return "", err_prelude, false
+    }
     strings.write_string(&builder, "    for {\n")
     fmt.sbprintf(&builder, "        kvist_item, kvist_source_ok := %s(&kvist_source)\n", source.next_name)
     strings.write_string(&builder, "        if !kvist_source_ok {\n")
@@ -7815,11 +8245,13 @@ emit_transform_transduce_source_expr :: proc(
     if !ok_body {
         return "", err_body, false
     }
-    if value_ty != acc_ty {
-        return "", Compile_Error{message = fmt.tprintf("transduce accumulator type is %s, but pipeline produces %s", acc_ty, value_ty), span = form.items[3].span}, false
+    reduce_text, err_reduce, ok_reduce := transform_reduce_update_text(e, reducer, "kvist_acc", acc_ty, value_text, value_ty)
+    if !ok_reduce {
+        return "", err_reduce, false
     }
     append_indent(&builder, 2+close_count)
-    fmt.sbprintf(&builder, "kvist_acc += %s\n", value_text)
+    strings.write_string(&builder, reduce_text)
+    strings.write_string(&builder, "\n")
     emit_transform_closers(&builder, 2+close_count, close_count)
     strings.write_string(&builder, "    }\n")
     strings.write_string(&builder, "    return kvist_acc\n")
@@ -7832,9 +8264,6 @@ emit_transform_transduce_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, C
         return "", Compile_Error{message = "transduce expects transform, reducer, init, and source", span = form.span}, false
     }
     reducer := form.items[2]
-    if reducer.kind != .Symbol || reducer.text != "+" {
-        return "", Compile_Error{message = "transduce currently supports + as reducer", span = reducer.span}, false
-    }
     acc_ty, ok_acc_ty := obvious_form_type(e, form.items[3])
     if !ok_acc_ty {
         return "", Compile_Error{message = "transduce expects an init value with an obvious accumulator type; bind or annotate it first", span = form.items[3].span}, false
@@ -7844,7 +8273,7 @@ emit_transform_transduce_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, C
         return "", err_init, false
     }
     if source, ok_source_call := source_call_decl(e, form.items[4]); ok_source_call {
-        return emit_transform_transduce_source_expr(e, form, form.items[1], init_text, acc_ty, form.items[4], source)
+        return emit_transform_transduce_source_expr(e, form, form.items[1], reducer, init_text, acc_ty, form.items[4], source)
     }
     source_ty, ok_source_ty := obvious_form_type(e, form.items[4])
     if !ok_source_ty {
@@ -7867,16 +8296,22 @@ emit_transform_transduce_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, C
     defer strings.builder_destroy(&builder)
     fmt.sbprintf(&builder, "(proc(kvist_source: %s, kvist_init: %s) -> %s %s\n", source_ty, acc_ty, acc_ty, "{")
     strings.write_string(&builder, "    kvist_acc := kvist_init\n")
+    err_prelude, ok_prelude := emit_transform_state_prelude(e, &builder, steps[:], 1)
+    if !ok_prelude {
+        return "", err_prelude, false
+    }
     strings.write_string(&builder, "    for kvist_item in kvist_source {\n")
     value_text, value_ty, close_count, err_body, ok_body := emit_transform_pipeline_body(e, &builder, steps[:], "kvist_item", source_elem_ty, 2)
     if !ok_body {
         return "", err_body, false
     }
-    if value_ty != acc_ty {
-        return "", Compile_Error{message = fmt.tprintf("transduce accumulator type is %s, but pipeline produces %s", acc_ty, value_ty), span = form.items[3].span}, false
+    reduce_text, err_reduce, ok_reduce := transform_reduce_update_text(e, reducer, "kvist_acc", acc_ty, value_text, value_ty)
+    if !ok_reduce {
+        return "", err_reduce, false
     }
     append_indent(&builder, 2+close_count)
-    fmt.sbprintf(&builder, "kvist_acc += %s\n", value_text)
+    strings.write_string(&builder, reduce_text)
+    strings.write_string(&builder, "\n")
     emit_transform_closers(&builder, 2+close_count, close_count)
     strings.write_string(&builder, "    }\n")
     strings.write_string(&builder, "    return kvist_acc\n")
@@ -9903,6 +10338,8 @@ Binding :: struct {
     ty:                  string,
     deferred_delete:     bool,
     err_deferred_delete: bool,
+    defer_with_cleanup:  bool,
+    cleanup:             CST_Form,
     or_modifier:         string,
     target_span:         Span,
     value:               CST_Form,
@@ -9918,6 +10355,12 @@ let_binding_has_errdefer_marker :: proc(items: []CST_Form, idx: int) -> bool {
     return idx < len(items) &&
            items[idx].kind == .Keyword &&
            items[idx].text == ":errdefer"
+}
+
+let_binding_has_defer_with_marker :: proc(items: []CST_Form, idx: int) -> bool {
+    return idx < len(items) &&
+           items[idx].kind == .Keyword &&
+           items[idx].text == ":defer-with"
 }
 
 let_binding_or_modifier :: proc(items: []CST_Form, idx: int) -> (string, bool) {
@@ -9954,6 +10397,8 @@ parse_let_bindings :: proc(form: CST_Form) -> (bindings: [dynamic]Binding, err: 
             or_modifier, has_or_modifier := let_binding_or_modifier(form.items[:], i+2)
             deferred_delete := false
             err_deferred_delete := false
+            defer_with_cleanup := false
+            cleanup := CST_Form{}
             next_i := i + 2
             if has_or_modifier {
                 if len(names) != 2 {
@@ -9976,12 +10421,32 @@ parse_let_bindings :: proc(form: CST_Form) -> (bindings: [dynamic]Binding, err: 
                         }
                         err_deferred_delete = true
                         next_i += 1
+                    } else if let_binding_has_defer_with_marker(form.items[:], next_i) {
+                        if defer_with_cleanup {
+                            return bindings, Compile_Error{message = "duplicate :defer-with binding marker", span = form.items[next_i].span}, false
+                        }
+                        if next_i+1 >= len(form.items) {
+                            return bindings, Compile_Error{message = ":defer-with expects a cleanup function", span = form.items[next_i].span}, false
+                        }
+                        defer_with_cleanup = true
+                        cleanup = form.items[next_i+1]
+                        next_i += 2
                     } else {
                         break
                     }
                 }
-                if deferred_delete && err_deferred_delete {
-                    return bindings, Compile_Error{message = "use either :defer or :errdefer, not both", span = target.span}, false
+                cleanup_count := 0
+                if deferred_delete {
+                    cleanup_count += 1
+                }
+                if err_deferred_delete {
+                    cleanup_count += 1
+                }
+                if defer_with_cleanup {
+                    cleanup_count += 1
+                }
+                if cleanup_count > 1 {
+                    return bindings, Compile_Error{message = "use only one cleanup marker: :defer, :errdefer, or :defer-with", span = target.span}, false
                 }
                 if err_deferred_delete && (or_modifier != "or-return" || names[1] != "err") {
                     return bindings, Compile_Error{message = ":errdefer is only supported on [value err] :or-return bindings", span = target.span}, false
@@ -9990,6 +10455,8 @@ parse_let_bindings :: proc(form: CST_Form) -> (bindings: [dynamic]Binding, err: 
                 return bindings, Compile_Error{message = ":defer binding marker is only supported on named local bindings or [value ok/err] :or-* bindings", span = form.items[i+2].span}, false
             } else if let_binding_has_errdefer_marker(form.items[:], i+2) {
                 return bindings, Compile_Error{message = ":errdefer is only supported on [value err] :or-return bindings", span = form.items[i+2].span}, false
+            } else if let_binding_has_defer_with_marker(form.items[:], i+2) {
+                return bindings, Compile_Error{message = ":defer-with binding marker is only supported on named local bindings or [value ok/err] :or-* bindings", span = form.items[i+2].span}, false
             }
             append(&bindings, Binding{
                 is_destructure      = !has_or_modifier,
@@ -9997,6 +10464,8 @@ parse_let_bindings :: proc(form: CST_Form) -> (bindings: [dynamic]Binding, err: 
                 pattern             = names,
                 deferred_delete     = deferred_delete,
                 err_deferred_delete = err_deferred_delete,
+                defer_with_cleanup  = defer_with_cleanup,
+                cleanup             = cleanup,
                 or_modifier         = or_modifier,
                 target_span         = target.span,
                 value               = form.items[i+1],
@@ -10014,34 +10483,67 @@ parse_let_bindings :: proc(form: CST_Form) -> (bindings: [dynamic]Binding, err: 
                 if next_i >= len(form.items) {
                     return bindings, Compile_Error{message = "typed binding missing value", span = target.span}, false
                 }
-                deferred_delete := let_binding_has_defer_marker(form.items[:], next_i+1)
+                deferred_delete := false
+                defer_with_cleanup := false
+                cleanup := CST_Form{}
+                marker_i := next_i + 1
+                if let_binding_has_defer_marker(form.items[:], marker_i) {
+                    deferred_delete = true
+                    marker_i += 1
+                } else if let_binding_has_defer_with_marker(form.items[:], marker_i) {
+                    if marker_i+1 >= len(form.items) {
+                        return bindings, Compile_Error{message = ":defer-with expects a cleanup function", span = form.items[marker_i].span}, false
+                    }
+                    defer_with_cleanup = true
+                    cleanup = form.items[marker_i+1]
+                    marker_i += 2
+                } else if let_binding_has_errdefer_marker(form.items[:], marker_i) {
+                    return bindings, Compile_Error{message = ":errdefer is only supported on [value err] :or-return bindings", span = form.items[marker_i].span}, false
+                }
                 append(&bindings, Binding{
-                    name            = map_name(target.text[:len(target.text)-1]),
-                    is_typed        = true,
-                    ty              = type_text,
-                    deferred_delete = deferred_delete,
-                    target_span     = target.span,
-                    value           = form.items[next_i],
+                    name               = map_name(target.text[:len(target.text)-1]),
+                    is_typed           = true,
+                    ty                 = type_text,
+                    deferred_delete    = deferred_delete,
+                    defer_with_cleanup = defer_with_cleanup,
+                    cleanup            = cleanup,
+                    target_span        = target.span,
+                    value              = form.items[next_i],
                 })
                 i = next_i + 1
-                if deferred_delete {
-                    i += 1
+                if deferred_delete || defer_with_cleanup {
+                    i = marker_i
                 }
             } else {
                 if i+1 >= len(form.items) {
                     return bindings, Compile_Error{message = "binding missing value", span = target.span}, false
                 }
-                deferred_delete := let_binding_has_defer_marker(form.items[:], i+2)
-                append(&bindings, Binding{
-                    name            = map_name(target.text),
-                    deferred_delete = deferred_delete,
-                    target_span     = target.span,
-                    value           = form.items[i+1],
-                })
-                i += 2
-                if deferred_delete {
-                    i += 1
+                deferred_delete := false
+                defer_with_cleanup := false
+                cleanup := CST_Form{}
+                next_i := i + 2
+                if let_binding_has_defer_marker(form.items[:], next_i) {
+                    deferred_delete = true
+                    next_i += 1
+                } else if let_binding_has_defer_with_marker(form.items[:], next_i) {
+                    if next_i+1 >= len(form.items) {
+                        return bindings, Compile_Error{message = ":defer-with expects a cleanup function", span = form.items[next_i].span}, false
+                    }
+                    defer_with_cleanup = true
+                    cleanup = form.items[next_i+1]
+                    next_i += 2
+                } else if let_binding_has_errdefer_marker(form.items[:], next_i) {
+                    return bindings, Compile_Error{message = ":errdefer is only supported on [value err] :or-return bindings", span = form.items[next_i].span}, false
                 }
+                append(&bindings, Binding{
+                    name               = map_name(target.text),
+                    deferred_delete    = deferred_delete,
+                    defer_with_cleanup = defer_with_cleanup,
+                    cleanup            = cleanup,
+                    target_span        = target.span,
+                    value              = form.items[i+1],
+                })
+                i = next_i
             }
         case .Brace:
             return bindings, Compile_Error{message = "field destructuring has been removed; use dot access or explicit local bindings", span = target.span}, false
@@ -10791,6 +11293,12 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
                     return err_defer, false
                 }
             }
+            if binding.defer_with_cleanup {
+                err_defer, ok_defer := emit_binding_defer_with_cleanup(e, binding)
+                if !ok_defer {
+                    return err_defer, false
+                }
+            }
             if binding.err_deferred_delete {
                 err_defer, ok_defer := emit_binding_err_deferred_delete(e, binding)
                 if !ok_defer {
@@ -11025,6 +11533,22 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
         if len(form.items) >= 3 && form.items[1].kind == .Vector {
             binding := form.items[1]
             body_start := 2
+            if len(binding.items) == 4 &&
+               binding.items[0].kind == .Symbol &&
+               binding.items[2].kind == .Keyword &&
+               binding.items[2].text == ":transform" {
+                value_name := map_name(binding.items[0].text)
+                coll_form := binding.items[1]
+                transform_form := binding.items[3]
+                body: [dynamic]CST_Form
+                for item in form.items[body_start:] {
+                    append(&body, item)
+                }
+                if source, ok_source_call := source_call_decl(e, coll_form); ok_source_call {
+                    return emit_transform_for_source_loop(e, coll_form, source, value_name, transform_form, body[:])
+                }
+                return emit_transform_for_collection_loop(e, coll_form, value_name, transform_form, body[:])
+            }
             if len(binding.items) == 2 && binding.items[0].kind == .Symbol {
                 value_name := map_name(binding.items[0].text)
                 coll_form := binding.items[1]
@@ -11047,9 +11571,9 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
                 }
                 return emit_for_in_loop(e, coll_form, first_name, second_name, body[:])
             }
-            return Compile_Error{message = fmt.tprintf("%s expects [value collection] or [first second collection]", canonical_head_text), span = form.span}, false
+            return Compile_Error{message = fmt.tprintf("%s expects [value collection], [value collection :transform transform], or [first second collection]", canonical_head_text), span = form.span}, false
         }
-        return Compile_Error{message = "for expects [value collection] or [first second collection] and body", span = form.span}, false
+        return Compile_Error{message = "for expects [value collection], [value collection :transform transform], or [first second collection] and body", span = form.span}, false
     case "while":
         if len(form.items) < 3 {
             return Compile_Error{message = "while expects condition and body", span = form.span}, false
@@ -11371,7 +11895,11 @@ emit_decl :: proc(e: ^Emitter, decl: IR_Decl) -> (Compile_Error, bool) {
         emit_raw_newline(e)
         e.indent += 1
         for field in decl.struct_decl.fields {
-            emit_line(e, fmt.tprintf("%s: %s,", field.name, field.ty))
+            prefix := ""
+            if field.is_using {
+                prefix = "using "
+            }
+            emit_line(e, fmt.tprintf("%s%s: %s,", prefix, field.name, field.ty))
         }
         e.indent -= 1
         emit_line(e, "}")

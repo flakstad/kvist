@@ -631,6 +631,8 @@ symbols_command :: proc(input: string) {
 
 editor_symbols_command :: proc(input: string, identifier := "") {
     data := read_source_or_exit(input)
+    defer delete(transmute([]byte)data)
+
     output, err, ok := kvist.editor_symbols_source(input, data)
     if !ok {
         fmt.eprintln(err.message)
@@ -835,6 +837,8 @@ delete_cli_symbol_row :: proc(row: Cli_Symbol_Row) {
 
 lookup_symbol_rows_or_exit :: proc(input, identifier: string) -> [dynamic]Cli_Symbol_Row {
     data := read_source_or_exit(input)
+    defer delete(transmute([]byte)data)
+
     output, err, ok := kvist.editor_symbols_source(input, data)
     if !ok {
         fmt.eprintln(err.message)
@@ -1041,6 +1045,8 @@ xref_command :: proc(input, identifier: string) {
 
 complete_command :: proc(input: string, prefix := "") {
     data := read_source_or_exit(input)
+    defer delete(transmute([]byte)data)
+
     output, err, ok := kvist.editor_symbols_source(input, data)
     if !ok {
         fmt.eprintln(err.message)
@@ -1054,6 +1060,8 @@ complete_command :: proc(input: string, prefix := "") {
 
 lookup_command :: proc(input, identifier: string) {
     data := read_source_or_exit(input)
+    defer delete(transmute([]byte)data)
+
     output, err, ok := kvist.editor_symbols_source(input, data)
     if !ok {
         fmt.eprintln(err.message)
