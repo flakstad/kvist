@@ -6092,9 +6092,9 @@ emit_transform_for_body :: proc(e: ^Emitter, steps: []Transform_Step, initial_te
 }
 
 emit_transform_for_collection_loop_body :: proc(e: ^Emitter, coll_form: CST_Form, coll_text, coll_ty, index_name, value_name: string, transform_form: CST_Form, body: []CST_Form) -> (Compile_Error, bool) {
-    source_elem_ty, ok_source_elem_ty := collection_element_type(coll_ty)
+    source_elem_ty, ok_source_elem_ty := transform_source_value_type(coll_ty)
     if !ok_source_elem_ty {
-        return Compile_Error{message = fmt.tprintf("for :transform expects slice or array source, got %s", coll_ty), span = coll_form.span}, false
+        return Compile_Error{message = fmt.tprintf("for :transform expects slice, array, or map source, got %s", coll_ty), span = coll_form.span}, false
     }
     steps, err_steps, ok_steps := parse_transform_steps(e, transform_form)
     if !ok_steps {
@@ -6107,7 +6107,7 @@ emit_transform_for_collection_loop_body :: proc(e: ^Emitter, coll_form: CST_Form
     if len(index_name) > 0 {
         emit_line(e, fmt.tprintf("%s := 0", index_name))
     }
-    emit_line(e, fmt.tprintf("for kvist_item in %s %s", coll_text, "{"))
+    emit_line(e, transform_source_loop_header(coll_ty, coll_text))
     e.indent += 1
     err_body, ok_body := emit_transform_for_body(e, steps[:], "kvist_item", source_elem_ty, index_name, value_name, body)
     e.indent -= 1
@@ -7787,6 +7787,88 @@ parse_transform_steps :: proc(e: ^Emitter, form: CST_Form) -> (steps: [dynamic]T
     return steps, {}, true
 }
 
+transform_proc_literal_call :: proc(e: ^Emitter, callback: CST_Form, expected_params: []Param, label := "transform fn callback") -> (text: string, returns: Return_Spec, err: Compile_Error, ok: bool) {
+	if callback.kind != .List || len(callback.items) == 0 || !is_symbol(callback.items[0], "fn") {
+		return "", {}, {}, false
+	}
+    parsed, err_parse, ok_parse := parse_proc_literal_form(callback)
+    if !ok_parse {
+        return "", {}, err_parse, false
+	}
+	if len(parsed.params) != len(expected_params) {
+		return "", {}, Compile_Error{message = fmt.tprintf("%s expects %d parameters", label, len(expected_params)), span = callback.span}, false
+	}
+	for expected, idx in expected_params {
+		if parsed.params[idx].ty != expected.ty {
+			return "", {}, Compile_Error{message = fmt.tprintf("%s parameter %s must be %s", label, parsed.params[idx].name, expected.ty), span = callback.span}, false
+		}
+	}
+
+	param_names: [dynamic]string
+	defer delete(param_names)
+	for param in parsed.params {
+		append(&param_names, param.name)
+	}
+	captures := collect_proc_literal_captures(e, parsed.body[:], param_names[:])
+	defer delete(captures)
+
+    proc_params: [dynamic]Param
+    call_args: [dynamic]string
+    defer delete(proc_params)
+    defer delete(call_args)
+    for capture in captures {
+        append(&proc_params, capture)
+        append(&call_args, capture.name)
+    }
+    for param in parsed.params {
+        append(&proc_params, param)
+    }
+    for expected in expected_params {
+        append(&call_args, expected.name)
+    }
+
+    proc_text, err_proc, ok_proc := emit_proc_literal_text(e, proc_params[:], parsed.returns, parsed.body[:])
+    if !ok_proc {
+        return "", {}, err_proc, false
+    }
+	return emit_call_text(proc_text, call_args[:]), parsed.returns, {}, true
+}
+
+transform_fn_capture_params :: proc(e: ^Emitter, callback: CST_Form) -> (captures: [dynamic]Param, err: Compile_Error, ok: bool) {
+	if callback.kind != .List || len(callback.items) == 0 || !is_symbol(callback.items[0], "fn") {
+		return captures, {}, true
+	}
+	parsed, err_parse, ok_parse := parse_proc_literal_form(callback)
+	if !ok_parse {
+		return captures, err_parse, false
+	}
+	param_names: [dynamic]string
+	defer delete(param_names)
+	for param in parsed.params {
+		append(&param_names, param.name)
+	}
+	callback_captures := collect_proc_literal_captures(e, parsed.body[:], param_names[:])
+	defer delete(callback_captures)
+	for capture in callback_captures {
+		append_capture_param_unique(&captures, capture)
+	}
+	return captures, {}, true
+}
+
+transform_step_capture_params :: proc(e: ^Emitter, steps: []Transform_Step) -> (captures: [dynamic]Param, err: Compile_Error, ok: bool) {
+	for step in steps {
+		callback_captures, err_callback, ok_callback := transform_fn_capture_params(e, step.callback)
+		if !ok_callback {
+			return captures, err_callback, false
+		}
+		defer delete(callback_captures)
+		for capture in callback_captures {
+			append_capture_param_unique(&captures, capture)
+		}
+	}
+	return captures, {}, true
+}
+
 proc_callback_call :: proc(e: ^Emitter, callback: CST_Form, input_text, input_ty: string) -> (text, return_ty: string, err: Compile_Error, ok: bool) {
     if field, ok_field := field_from_selector(callback); ok_field {
         field_ty, ok_field_ty := struct_field_type_for_update(e, input_ty, field)
@@ -7795,8 +7877,18 @@ proc_callback_call :: proc(e: ^Emitter, callback: CST_Form, input_text, input_ty
         }
         return fmt.tprintf("%s.%s", input_text, field), field_ty, {}, true
     }
+    if callback.kind == .List && len(callback.items) > 0 && is_symbol(callback.items[0], "fn") {
+        text, returns, err_literal, ok_literal := transform_proc_literal_call(e, callback, []Param{{name = input_text, ty = input_ty}})
+        if !ok_literal {
+            return "", "", err_literal, false
+        }
+        if returns.kind != .Single {
+            return "", "", Compile_Error{message = "transform fn callback requires an explicit single return type", span = callback.span}, false
+        }
+        return text, returns.single_ty, {}, true
+    }
     if callback.kind != .Symbol {
-        return "", "", Compile_Error{message = "transform callback currently expects a function symbol or field selector", span = callback.span}, false
+        return "", "", Compile_Error{message = "transform callback currently expects a function symbol, field selector, or fn literal", span = callback.span}, false
     }
     proc_name := map_name(callback.text)
     proc_decl, ok_proc := find_proc_decl(e, proc_name)
@@ -7816,8 +7908,18 @@ proc_callback_call :: proc(e: ^Emitter, callback: CST_Form, input_text, input_ty
 }
 
 indexed_callback_call :: proc(e: ^Emitter, callback: CST_Form, index_text, input_text, input_ty: string) -> (text, return_ty: string, err: Compile_Error, ok: bool) {
+    if callback.kind == .List && len(callback.items) > 0 && is_symbol(callback.items[0], "fn") {
+        text, returns, err_literal, ok_literal := transform_proc_literal_call(e, callback, []Param{{name = index_text, ty = "int"}, {name = input_text, ty = input_ty}}, "map-indexed transform fn callback")
+        if !ok_literal {
+            return "", "", err_literal, false
+        }
+        if returns.kind != .Single {
+            return "", "", Compile_Error{message = "map-indexed transform fn callback requires an explicit single return type", span = callback.span}, false
+        }
+        return text, returns.single_ty, {}, true
+    }
     if callback.kind != .Symbol {
-        return "", "", Compile_Error{message = "map-indexed transform currently expects a function symbol", span = callback.span}, false
+        return "", "", Compile_Error{message = "map-indexed transform currently expects a function symbol or fn literal", span = callback.span}, false
     }
     proc_name := map_name(callback.text)
     proc_decl, ok_proc := find_proc_decl(e, proc_name)
@@ -7834,8 +7936,18 @@ indexed_callback_call :: proc(e: ^Emitter, callback: CST_Form, index_text, input
 }
 
 keep_callback_call :: proc(e: ^Emitter, callback: CST_Form, input_text, input_ty: string) -> (text, value_ty: string, err: Compile_Error, ok: bool) {
+    if callback.kind == .List && len(callback.items) > 0 && is_symbol(callback.items[0], "fn") {
+        text, returns, err_literal, ok_literal := transform_proc_literal_call(e, callback, []Param{{name = input_text, ty = input_ty}})
+        if !ok_literal {
+            return "", "", err_literal, false
+        }
+        if returns.kind != .Named || len(returns.named) != 2 || returns.named[1].ty != "bool" {
+            return "", "", Compile_Error{message = "keep transform fn callback must return [value: T ok: bool]", span = callback.span}, false
+        }
+        return text, returns.named[0].ty, {}, true
+    }
     if callback.kind != .Symbol {
-        return "", "", Compile_Error{message = "keep transform currently expects a function symbol", span = callback.span}, false
+        return "", "", Compile_Error{message = "keep transform currently expects a function symbol or fn literal", span = callback.span}, false
     }
     proc_name := map_name(callback.text)
     proc_decl, ok_proc := find_proc_decl(e, proc_name)
@@ -8046,9 +8158,22 @@ emit_transform_closers :: proc(builder: ^strings.Builder, depth, close_count: in
 }
 
 transform_reduce_update_text :: proc(e: ^Emitter, reducer: CST_Form, acc_text, acc_ty, value_text, value_ty: string) -> (string, Compile_Error, bool) {
-    if reducer.kind != .Symbol {
-        return "", Compile_Error{message = "transduce reducer currently expects + or a known two-argument function", span = reducer.span}, false
-    }
+	if reducer.kind == .List && len(reducer.items) > 0 && is_symbol(reducer.items[0], "fn") {
+		text, returns, err_literal, ok_literal := transform_proc_literal_call(e, reducer, []Param{{name = acc_text, ty = acc_ty}, {name = value_text, ty = value_ty}}, "transduce fn reducer")
+		if !ok_literal {
+			return "", err_literal, false
+		}
+		if returns.kind != .Single {
+			return "", Compile_Error{message = "transduce fn reducer requires an explicit single return type", span = reducer.span}, false
+		}
+		if returns.single_ty != acc_ty {
+			return "", Compile_Error{message = fmt.tprintf("transduce fn reducer must return %s", acc_ty), span = reducer.span}, false
+		}
+		return fmt.tprintf("%s = %s", acc_text, text), {}, true
+	}
+	if reducer.kind != .Symbol {
+		return "", Compile_Error{message = "transduce reducer currently expects +, a known two-argument function, or a fn literal", span = reducer.span}, false
+	}
     if reducer.text == "+" {
         if acc_ty != value_ty {
             return "", Compile_Error{message = fmt.tprintf("+ reducer expects pipeline value %s to match accumulator %s", value_ty, acc_ty), span = reducer.span}, false
@@ -8058,7 +8183,7 @@ transform_reduce_update_text :: proc(e: ^Emitter, reducer: CST_Form, acc_text, a
     proc_name := map_name(reducer.text)
     proc_decl, ok_proc := find_proc_decl(e, proc_name)
     if !ok_proc {
-        return "", Compile_Error{message = fmt.tprintf("transduce reducer must be + or a known two-argument function: %s", reducer.text), span = reducer.span}, false
+        return "", Compile_Error{message = fmt.tprintf("transduce reducer must be +, a known two-argument function, or a fn literal: %s", reducer.text), span = reducer.span}, false
     }
     if len(proc_decl.params) != 2 ||
        proc_decl.params[0].ty != acc_ty ||
@@ -8093,21 +8218,33 @@ emit_transform_into_source_expr :: proc(
     if !ok_steps {
         return "", err_steps, false
     }
-
-    builder := strings.builder_make()
+	captures, err_captures, ok_captures := transform_step_capture_params(e, steps[:])
+	if !ok_captures {
+		return "", err_captures, false
+	}
+	builder := strings.builder_make()
     defer strings.builder_destroy(&builder)
     param_texts: [dynamic]string
     call_arg_texts: [dynamic]string
+    call_texts: [dynamic]string
     defer delete(param_texts)
     defer delete(call_arg_texts)
+    defer delete(call_texts)
+    for capture in captures {
+        append(&param_texts, fmt.tprintf("%s: %s", capture.name, capture.ty))
+        append(&call_texts, capture.name)
+    }
     for param, idx in source.params {
         arg_name := fmt.tprintf("kvist_source_arg_%d", idx+1)
         append(&param_texts, fmt.tprintf("%s: %s", arg_name, param.ty))
         append(&call_arg_texts, arg_name)
     }
+    for arg_text in arg_texts {
+        append(&call_texts, arg_text)
+    }
     param_list := strings.join(param_texts[:], ", ", context.allocator)
     defer delete(param_list)
-    call_args := strings.join(arg_texts[:], ", ", context.allocator)
+    call_args := strings.join(call_texts[:], ", ", context.allocator)
     defer delete(call_args)
     open_call := source_call_text(e, source, call_arg_texts[:])
 
@@ -8166,9 +8303,9 @@ emit_transform_into_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compil
     if !ok_source_ty {
         return "", Compile_Error{message = "into transform expects a source with an obvious collection type; bind or annotate it first", span = source_form.span}, false
     }
-    source_elem_ty, ok_source_elem_ty := collection_element_type(source_ty)
+    source_elem_ty, ok_source_elem_ty := transform_source_value_type(source_ty)
     if !ok_source_elem_ty {
-        return "", Compile_Error{message = fmt.tprintf("into transform expects slice or array source, got %s", source_ty), span = source_form.span}, false
+        return "", Compile_Error{message = fmt.tprintf("into transform expects slice, array, or map source, got %s", source_ty), span = source_form.span}, false
     }
     source_text, err_source, ok_source := emit_expr(e, source_form)
     if !ok_source {
@@ -8178,16 +8315,34 @@ emit_transform_into_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compil
     if !ok_steps {
         return "", err_steps, false
     }
+	captures, err_captures, ok_captures := transform_step_capture_params(e, steps[:])
+	if !ok_captures {
+		return "", err_captures, false
+	}
 
-    builder := strings.builder_make()
+	builder := strings.builder_make()
     defer strings.builder_destroy(&builder)
-    fmt.sbprintf(&builder, "(proc(kvist_source: %s) -> %s %s\n", source_ty, output_ty, "{")
+    param_texts: [dynamic]string
+    call_texts: [dynamic]string
+    defer delete(param_texts)
+    defer delete(call_texts)
+    for capture in captures {
+        append(&param_texts, fmt.tprintf("%s: %s", capture.name, capture.ty))
+        append(&call_texts, capture.name)
+    }
+    append(&param_texts, fmt.tprintf("kvist_source: %s", source_ty))
+    append(&call_texts, source_text)
+    param_list := strings.join(param_texts[:], ", ", context.allocator)
+    defer delete(param_list)
+    call_args := strings.join(call_texts[:], ", ", context.allocator)
+    defer delete(call_args)
+    fmt.sbprintf(&builder, "(proc(%s) -> %s %s\n", param_list, output_ty, "{")
     fmt.sbprintf(&builder, "    kvist_out := make(%s)\n", output_ty)
     err_prelude, ok_prelude := emit_transform_state_prelude(e, &builder, steps[:], 1)
     if !ok_prelude {
         return "", err_prelude, false
     }
-    strings.write_string(&builder, "    for kvist_item in kvist_source {\n")
+    fmt.sbprintf(&builder, "    %s\n", transform_source_loop_header(source_ty, "kvist_source"))
     value_text, value_ty, close_count, err_body, ok_body := emit_transform_pipeline_body(e, &builder, steps[:], "kvist_item", source_elem_ty, 2)
     if !ok_body {
         return "", err_body, false
@@ -8201,7 +8356,7 @@ emit_transform_into_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compil
     strings.write_string(&builder, "    }\n")
     strings.write_string(&builder, "    return kvist_out\n")
     strings.write_string(&builder, "})")
-    return fmt.tprintf("%s(%s)", strings.to_string(builder), source_text), {}, true
+    return fmt.tprintf("%s(%s)", strings.to_string(builder), call_args), {}, true
 }
 
 emit_transform_into_bang_source_expr :: proc(
@@ -8227,8 +8382,12 @@ emit_transform_into_bang_source_expr :: proc(
     if !ok_steps {
         return "", err_steps, false
     }
+	captures, err_captures, ok_captures := transform_step_capture_params(e, steps[:])
+	if !ok_captures {
+		return "", err_captures, false
+	}
 
-    builder := strings.builder_make()
+	builder := strings.builder_make()
     defer strings.builder_destroy(&builder)
     param_texts: [dynamic]string
     call_arg_texts: [dynamic]string
@@ -8238,6 +8397,10 @@ emit_transform_into_bang_source_expr :: proc(
     defer delete(call_texts)
     append(&param_texts, fmt.tprintf("kvist_out: ^%s", target_ty))
     append(&call_texts, address_of_expr_text(target_text))
+    for capture in captures {
+        append(&param_texts, fmt.tprintf("%s: %s", capture.name, capture.ty))
+        append(&call_texts, capture.name)
+    }
     for param, idx in source.params {
         arg_name := fmt.tprintf("kvist_source_arg_%d", idx+1)
         append(&param_texts, fmt.tprintf("%s: %s", arg_name, param.ty))
@@ -8307,9 +8470,9 @@ emit_transform_into_bang_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, C
     if !ok_source_ty {
         return "", Compile_Error{message = "into! transform expects a source with an obvious collection type; bind or annotate it first", span = source_form.span}, false
     }
-    source_elem_ty, ok_source_elem_ty := collection_element_type(source_ty)
+    source_elem_ty, ok_source_elem_ty := transform_source_value_type(source_ty)
     if !ok_source_elem_ty {
-        return "", Compile_Error{message = fmt.tprintf("into! transform expects slice or array source, got %s", source_ty), span = source_form.span}, false
+        return "", Compile_Error{message = fmt.tprintf("into! transform expects slice, array, or map source, got %s", source_ty), span = source_form.span}, false
     }
     source_text, err_source, ok_source := emit_expr(e, source_form)
     if !ok_source {
@@ -8319,15 +8482,35 @@ emit_transform_into_bang_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, C
     if !ok_steps {
         return "", err_steps, false
     }
+	captures, err_captures, ok_captures := transform_step_capture_params(e, steps[:])
+	if !ok_captures {
+		return "", err_captures, false
+	}
 
-    builder := strings.builder_make()
+	builder := strings.builder_make()
     defer strings.builder_destroy(&builder)
-    fmt.sbprintf(&builder, "(proc(kvist_out: ^%s, kvist_source: %s) %s\n", target_ty, source_ty, "{")
+    param_texts: [dynamic]string
+    call_texts: [dynamic]string
+    defer delete(param_texts)
+    defer delete(call_texts)
+    append(&param_texts, fmt.tprintf("kvist_out: ^%s", target_ty))
+    append(&call_texts, address_of_expr_text(target_text))
+    for capture in captures {
+        append(&param_texts, fmt.tprintf("%s: %s", capture.name, capture.ty))
+        append(&call_texts, capture.name)
+    }
+    append(&param_texts, fmt.tprintf("kvist_source: %s", source_ty))
+    append(&call_texts, source_text)
+    param_list := strings.join(param_texts[:], ", ", context.allocator)
+    defer delete(param_list)
+    call_args := strings.join(call_texts[:], ", ", context.allocator)
+    defer delete(call_args)
+    fmt.sbprintf(&builder, "(proc(%s) %s\n", param_list, "{")
     err_prelude, ok_prelude := emit_transform_state_prelude(e, &builder, steps[:], 1)
     if !ok_prelude {
         return "", err_prelude, false
     }
-    strings.write_string(&builder, "    for kvist_item in kvist_source {\n")
+    fmt.sbprintf(&builder, "    %s\n", transform_source_loop_header(source_ty, "kvist_source"))
     value_text, value_ty, close_count, err_body, ok_body := emit_transform_pipeline_body(e, &builder, steps[:], "kvist_item", source_elem_ty, 2)
     if !ok_body {
         return "", err_body, false
@@ -8340,14 +8523,14 @@ emit_transform_into_bang_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, C
     emit_transform_closers(&builder, 2+close_count, close_count)
     strings.write_string(&builder, "    }\n")
     strings.write_string(&builder, "})")
-    return fmt.tprintf("%s(%s, %s)", strings.to_string(builder), address_of_expr_text(target_text), source_text), {}, true
+    return fmt.tprintf("%s(%s)", strings.to_string(builder), call_args), {}, true
 }
 
 emit_transform_transduce_source_expr :: proc(
-    e: ^Emitter,
-    form: CST_Form,
-    transform_form: CST_Form,
-    reducer: CST_Form,
+	e: ^Emitter,
+	form: CST_Form,
+	transform_form: CST_Form,
+	reducer: CST_Form,
     init_text, acc_ty: string,
     source_form: CST_Form,
     source: ^Source_Decl,
@@ -8368,8 +8551,20 @@ emit_transform_transduce_source_expr :: proc(
     if !ok_steps {
         return "", err_steps, false
     }
+	captures, err_captures, ok_captures := transform_step_capture_params(e, steps[:])
+	if !ok_captures {
+		return "", err_captures, false
+	}
+	reducer_captures, err_reducer_captures, ok_reducer_captures := transform_fn_capture_params(e, reducer)
+	if !ok_reducer_captures {
+		return "", err_reducer_captures, false
+	}
+	defer delete(reducer_captures)
+	for capture in reducer_captures {
+		append_capture_param_unique(&captures, capture)
+	}
 
-    builder := strings.builder_make()
+	builder := strings.builder_make()
     defer strings.builder_destroy(&builder)
     param_texts: [dynamic]string
     call_arg_texts: [dynamic]string
@@ -8377,6 +8572,10 @@ emit_transform_transduce_source_expr :: proc(
     defer delete(param_texts)
     defer delete(call_arg_texts)
     defer delete(call_args_texts)
+    for capture in captures {
+        append(&param_texts, fmt.tprintf("%s: %s", capture.name, capture.ty))
+        append(&call_args_texts, capture.name)
+    }
     for param, idx in source.params {
         arg_name := fmt.tprintf("kvist_source_arg_%d", idx+1)
         append(&param_texts, fmt.tprintf("%s: %s", arg_name, param.ty))
@@ -8446,9 +8645,9 @@ emit_transform_transduce_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, C
     if !ok_source_ty {
         return "", Compile_Error{message = "transduce expects a source with an obvious collection type; bind or annotate it first", span = form.items[4].span}, false
     }
-    source_elem_ty, ok_source_elem_ty := collection_element_type(source_ty)
+    source_elem_ty, ok_source_elem_ty := transform_source_value_type(source_ty)
     if !ok_source_elem_ty {
-        return "", Compile_Error{message = fmt.tprintf("transduce expects slice or array source, got %s", source_ty), span = form.items[4].span}, false
+        return "", Compile_Error{message = fmt.tprintf("transduce expects slice, array, or map source, got %s", source_ty), span = form.items[4].span}, false
     }
     source_text, err_source, ok_source := emit_expr(e, form.items[4])
     if !ok_source {
@@ -8458,16 +8657,44 @@ emit_transform_transduce_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, C
     if !ok_steps {
         return "", err_steps, false
     }
+	captures, err_captures, ok_captures := transform_step_capture_params(e, steps[:])
+	if !ok_captures {
+		return "", err_captures, false
+	}
+	reducer_captures, err_reducer_captures, ok_reducer_captures := transform_fn_capture_params(e, reducer)
+	if !ok_reducer_captures {
+		return "", err_reducer_captures, false
+	}
+	defer delete(reducer_captures)
+	for capture in reducer_captures {
+		append_capture_param_unique(&captures, capture)
+	}
 
-    builder := strings.builder_make()
+	builder := strings.builder_make()
     defer strings.builder_destroy(&builder)
-    fmt.sbprintf(&builder, "(proc(kvist_source: %s, kvist_init: %s) -> %s %s\n", source_ty, acc_ty, acc_ty, "{")
+    param_texts: [dynamic]string
+    call_texts: [dynamic]string
+    defer delete(param_texts)
+    defer delete(call_texts)
+    for capture in captures {
+        append(&param_texts, fmt.tprintf("%s: %s", capture.name, capture.ty))
+        append(&call_texts, capture.name)
+    }
+    append(&param_texts, fmt.tprintf("kvist_source: %s", source_ty))
+    append(&param_texts, fmt.tprintf("kvist_init: %s", acc_ty))
+    append(&call_texts, source_text)
+    append(&call_texts, init_text)
+    param_list := strings.join(param_texts[:], ", ", context.allocator)
+    defer delete(param_list)
+    call_args := strings.join(call_texts[:], ", ", context.allocator)
+    defer delete(call_args)
+    fmt.sbprintf(&builder, "(proc(%s) -> %s %s\n", param_list, acc_ty, "{")
     strings.write_string(&builder, "    kvist_acc := kvist_init\n")
     err_prelude, ok_prelude := emit_transform_state_prelude(e, &builder, steps[:], 1)
     if !ok_prelude {
         return "", err_prelude, false
     }
-    strings.write_string(&builder, "    for kvist_item in kvist_source {\n")
+    fmt.sbprintf(&builder, "    %s\n", transform_source_loop_header(source_ty, "kvist_source"))
     value_text, value_ty, close_count, err_body, ok_body := emit_transform_pipeline_body(e, &builder, steps[:], "kvist_item", source_elem_ty, 2)
     if !ok_body {
         return "", err_body, false
@@ -8483,7 +8710,7 @@ emit_transform_transduce_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, C
     strings.write_string(&builder, "    }\n")
     strings.write_string(&builder, "    return kvist_acc\n")
     strings.write_string(&builder, "})")
-    return fmt.tprintf("%s(%s, %s)", strings.to_string(builder), source_text, init_text), {}, true
+    return fmt.tprintf("%s(%s)", strings.to_string(builder), call_args), {}, true
 }
 
 parallel_start_signature :: proc(e: ^Emitter, form: CST_Form, emit_callback := false) -> (spec: Parallel_Start_Spec, err: Compile_Error, ok: bool) {
@@ -10484,6 +10711,20 @@ collection_element_type :: proc(type_text: string) -> (string, bool) {
         }
     }
     return "", false
+}
+
+transform_source_value_type :: proc(type_text: string) -> (string, bool) {
+    if _, value_ty, ok_map := map_type_parts(type_text); ok_map {
+        return value_ty, true
+    }
+    return collection_element_type(type_text)
+}
+
+transform_source_loop_header :: proc(source_ty, source_text: string) -> string {
+    if type_text_is_map(source_ty) {
+        return fmt.tprintf("for _, kvist_item in %s %s", source_text, "{")
+    }
+    return fmt.tprintf("for kvist_item in %s %s", source_text, "{")
 }
 
 dynamic_array_element_type :: proc(type_text: string) -> (string, bool) {

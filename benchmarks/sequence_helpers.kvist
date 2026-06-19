@@ -345,6 +345,22 @@ make_orders :: proc(n: int) -> [dynamic]Order {
       (set! i (+ i 1)))
     checksum))
 
+(defn bench-pipeline-transform-inline [xs: []int, reps: int] -> int
+  (let [i 0
+    checksum 0]
+    (while (< i reps)
+      (let [one 1]
+        (set! checksum
+              (+ checksum
+                 (transduce
+                   (comp
+                     (map (fn [x: int] -> int (+ x one)))
+                     (filter (fn [x: int] -> bool (== (% x 2) 0))))
+                   (fn [acc: int, x: int] -> int (+ acc x))
+                   0 xs))))
+      (set! i (+ i 1)))
+    checksum))
+
 (defn bench-pipeline-transform-indexed [xs: []int, reps: int] -> int
   (let [i 0
         checksum 0]
@@ -660,6 +676,9 @@ make_orders :: proc(n: int) -> [dynamic]Order {
     (mem.tracking_allocator_reset &track)
     (let [start (time.tick_now)]
       (run-one "pipe-transform" (bench-pipeline-transform (slice xs) REPS) start &track))
+    (mem.tracking_allocator_reset &track)
+    (let [start (time.tick_now)]
+      (run-one "pipe-transform-inline" (bench-pipeline-transform-inline (slice xs) REPS) start &track))
     (mem.tracking_allocator_reset &track)
     (let [start (time.tick_now)]
       (run-one "pipe-transform-indexed" (bench-pipeline-transform-indexed (slice xs) REPS) start &track))

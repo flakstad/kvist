@@ -55,6 +55,20 @@ These forms are contextual compile-time transform syntax. They are accepted by
 `deftransform`, `into`, `arr.into!`, `transduce`, and `for :transform`; they
 are not runtime values.
 
+Inline `fn` callbacks are also accepted in transform steps when their parameter
+and return types are explicit. Captured locals are passed into the generated
+Odin helper proc as ordinary parameters, so the item loop still fuses:
+
+```clojure
+(let [minimum 40]
+  (into [dynamic]int
+    (comp
+      (filter (fn [order: Order] -> bool (= order.status 2)))
+      (map (fn [order: Order] -> int (- order.amount order.discount)))
+      (filter (fn [total: int] -> bool (> total minimum))))
+    orders))
+```
+
 Collection output is explicit with `into`:
 
 ```clojure
@@ -74,6 +88,15 @@ Scalar output is explicit with `transduce`:
 ```clojure
 (defn paid-total [orders: []Order] -> int
   (transduce paid-order-totals + 0 orders))
+```
+
+Reducers can be `+`, a known two-argument function, or an inline `fn` literal:
+
+```clojure
+(let [weight 2]
+  (transduce paid-order-totals
+    (fn [acc: int, total: int] -> int (+ acc (* total weight)))
+    0 orders))
 ```
 
 Reusable `defiter` producers can feed `for`, `into`, and `transduce`. The
@@ -121,6 +144,18 @@ The same iterator call can be the input to a fused scalar reduction:
   (log-lines lines))
 ```
 
+Map sources feed their values through transforms. This keeps the existing map
+loop syntax for keys and values separate:
+
+```clojure
+(transduce
+  (comp
+    (filter positive?)
+    (map inc))
+  + 0
+  lookup)
+```
+
 For a complete iterator example that exercises `for`, `into`, `transduce`, and
 `:dispose` cleanup, see
 [examples/collections/log-source.kvist](../examples/collections/log-source.kvist).
@@ -140,7 +175,8 @@ Supported transformer forms are deliberately small:
 (drop-while pred)
 ```
 
-Callbacks can be known one-argument functions or shallow field selectors:
+Callbacks can be known functions, inline `fn` literals, or shallow field
+selectors where the step allows selectors:
 
 ```clojure
 (deftransform active-ages
@@ -149,7 +185,19 @@ Callbacks can be known one-argument functions or shallow field selectors:
     (map .age)))
 ```
 
-`keep` callbacks return `[value: T ok: bool]`.
+`map-indexed` callbacks take `(int, current-item)`. `keep` callbacks return
+`[value: T ok: bool]`.
+
+```clojure
+(into [dynamic]int
+  (keep (fn [order: Order] -> [value: int ok: bool]
+          (return order.discount (> order.discount 0))))
+  orders)
+
+(transduce
+  (map-indexed (fn [idx: int, age: int] -> int (+ idx age)))
+  + 0 ages)
+```
 
 ## Reuse Example
 
@@ -213,11 +261,15 @@ Rough Odin shape:
 ```
 
 `transduce` lowers to the same fused item flow with an accumulator. `+` emits
-direct accumulator addition; a known two-argument reducer emits a direct call:
+direct accumulator addition; known two-argument reducers and inline `fn`
+reducers emit direct calls:
 
 ```clojure
 (transduce paid-order-totals + 0 orders)
 (transduce paid-order-totals add-int 0 orders)
+(transduce paid-order-totals
+  (fn [acc: int, total: int] -> int (+ acc total))
+  0 orders)
 ```
 
 Rough Odin shape:
@@ -278,15 +330,20 @@ The current implementation is strict:
 
 - `deftransform` is compile-time structure, not a runtime value;
 - transform steps must be known forms in known positions;
-- `map` and `filter` callbacks must be known one-argument functions or field
-  selectors with obvious input and output types;
-- `map-indexed` callbacks must be known two-argument functions taking
-  `(int, current-item)`;
+- `map`, `filter`, `remove`, `take-while`, `drop-while`, and `mapcat`
+  callbacks must be known one-argument functions or inline `fn` literals with
+  obvious input and output types;
+- `map`, `filter`, `remove`, `take-while`, and `drop-while` also accept shallow
+  field selectors where the field type matches the step;
+- `map-indexed` callbacks must be known two-argument functions or inline `fn`
+  literals taking `(int, current-item)`;
 - `mapcat` callbacks must return borrowed slices or fixed arrays in the first
   version; owned dynamic-array results are rejected until cleanup semantics are
   explicit;
-- `keep` callbacks must be known one-argument functions returning
-  `[value: T ok: bool]`;
+- `keep` callbacks must be known one-argument functions or inline `fn`
+  literals returning `[value: T ok: bool]`;
+- inline `fn` transform callbacks require explicit parameter and return types;
+- captured locals inside inline `fn` callbacks must have obvious local types;
 - `take` counts values that reach that step and breaks the source loop early
   when the count is exhausted;
 - `drop` and `drop-while` skip values that reach that step without allocating;
@@ -295,7 +352,10 @@ The current implementation is strict:
   existing ownership conventions; append into existing arrays with
   `(arr.into! target transform source)`;
 - `transduce` requires an obvious accumulator type from the initial value or an
-  annotation, and the reducer must be `+` or a known two-argument function;
+  annotation, and the reducer must be `+`, a known two-argument function, or an
+  inline `fn` literal returning the accumulator type;
+- map sources feed values into `into`, `arr.into!`, `transduce`, and
+  `for :transform`; use ordinary `(for [key value m] ...)` when keys matter;
 - `defiter` calls are consumed directly by `for`, `into`, and `transduce`;
 - `for` accepts `[value source :transform transform]` for the same fused item
   flow;
@@ -319,8 +379,11 @@ and accumulator types are known.
   `keep`, `take`, `take-while`, `drop`, and `drop-while`
 - `into` currently targets fresh owned `[dynamic]T` arrays; `arr.into!`
   appends into existing dynamic arrays
-- `transduce` supports `+` and known two-argument reducers
-- inputs may be slices, fixed arrays, dynamic arrays, or `defiter` calls
+- `transduce` supports `+`, known two-argument reducers, and inline `fn`
+  reducers
+- inputs may be slices, fixed arrays, dynamic arrays, maps, or `defiter` calls
+- inline `fn` callbacks are compile-time syntax in transform positions, not
+  runtime closure values
 - anything cleverer should usually be a direct `for` loop
 
 ## Examples

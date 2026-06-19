@@ -126,6 +126,89 @@
 (defn sum-order-totals-inline [] -> int
   (transduce (map order-total) + 0 (sample-orders)))
 
+(defn collect-inline-fn-paid-totals [] -> [dynamic]int
+  (let [minimum 40]
+    (into [dynamic]int
+      (comp
+        (filter (fn [order: Order] -> bool
+                  (= order.status 2)))
+        (map (fn [order: Order] -> int
+               (- order.amount order.discount)))
+        (filter (fn [total: int] -> bool
+                  (> total minimum))))
+      (sample-orders))))
+
+(defn append-inline-fn-paid-totals [] -> [dynamic]int
+  (let [out (arr.empty int)
+        minimum 40]
+    (arr.into! out
+      (comp
+        (filter (fn [order: Order] -> bool
+                  (= order.status 2)))
+        (map (fn [order: Order] -> int
+               (- order.amount order.discount)))
+        (filter (fn [total: int] -> bool
+                  (> total minimum))))
+      (sample-orders))
+    out))
+
+(defn sum-inline-fn-paid-totals [] -> int
+  (let [minimum 40]
+    (transduce
+      (comp
+        (filter (fn [order: Order] -> bool
+                  (= order.status 2)))
+        (map (fn [order: Order] -> int
+               (- order.amount order.discount)))
+        (filter (fn [total: int] -> bool
+                  (> total minimum))))
+      + 0
+      (sample-orders))))
+
+(defn weighted-inline-fn-paid-totals [] -> int
+  (let [minimum 40
+        weight 2]
+    (transduce
+      (comp
+        (filter (fn [order: Order] -> bool
+                  (= order.status 2)))
+        (map (fn [order: Order] -> int
+               (- order.amount order.discount)))
+        (filter (fn [total: int] -> bool
+                  (> total minimum))))
+      (fn [acc: int, total: int] -> int
+        (+ acc (* total weight)))
+      0
+      (sample-orders))))
+
+(defn sum-map-values-transform [] -> int
+  (let [lookup (map[string]int {"a" 1 "b" -2 "c" 3}) :defer]
+    (transduce
+      (comp
+        (filter (fn [value: int] -> bool (> value 0)))
+        (map (fn [value: int] -> int (+ value 1))))
+      + 0
+      lookup)))
+
+(defn collect-inline-keep-discounts [] -> [dynamic]int
+  (let [minimum 4]
+    (into [dynamic]int
+      (keep (fn [order: Order] -> [value: int ok: bool]
+              (return order.discount
+                      (and (= order.status 2)
+                           (> order.discount minimum)))))
+      (sample-orders))))
+
+(defn sum-indexed-inline-fn-ages [] -> int
+  (transduce
+    (comp
+      (filter .active?)
+      (map .age)
+      (map-indexed (fn [idx: int, age: int] -> int
+                     (+ idx age))))
+    + 0
+    (sample-users)))
+
 (defn collect-nonzero-paid-discounts [] -> [dynamic]int
   (into [dynamic]int nonzero-paid-discounts (sample-orders)))
 
@@ -188,6 +271,19 @@
       (set! total (+ total age)))
     total))
 
+(defn sum-inline-fn-for [] -> int
+  (let [minimum 40
+        total 0]
+    (for [value (sample-orders) :transform (comp
+                                             (filter (fn [order: Order] -> bool
+                                                       (= order.status 2)))
+                                             (map (fn [order: Order] -> int
+                                                    (- order.amount order.discount)))
+                                             (filter (fn [value: int] -> bool
+                                                       (> value minimum))))]
+      (set! total (+ total value)))
+    total))
+
 (defn collect-paid-totals-manual [] -> [dynamic]int
   (let [out (arr.empty int)]
     (for [order (sample-orders)]
@@ -211,6 +307,9 @@
         ages (collect-active-ages)
         all-ages (collect-all-ages-inline)
         paid-inline (append-paid-orders-inline)
+        fn-totals (collect-inline-fn-paid-totals)
+        fn-appended (append-inline-fn-paid-totals)
+        fn-discounts (collect-inline-keep-discounts)
         discounts (collect-nonzero-paid-discounts)
         first-total (collect-first-paid-total)
         leading-ages (collect-leading-young-ages)
@@ -225,6 +324,9 @@
       (delete ages)
       (delete all-ages)
       (delete paid-inline)
+      (delete fn-totals)
+      (delete fn-appended)
+      (delete fn-discounts)
       (delete discounts)
       (delete first-total)
       (delete leading-ages)
@@ -249,6 +351,11 @@
                 (sum-paid-totals-indexed-for)
                 (sum-active-ages-for-inline)
                 (sum-order-totals-inline)
+                (sum-inline-fn-paid-totals)
+                (weighted-inline-fn-paid-totals)
+                (sum-map-values-transform)
+                (sum-indexed-inline-fn-ages)
+                (sum-inline-fn-for)
                 totals[0]
                 totals[1]
                 ages[0]
@@ -258,6 +365,10 @@
                 all-ages[2]
                 paid-inline[0].amount
                 paid-inline[1].amount
+                fn-totals[0]
+                fn-appended[0]
+                fn-discounts[0]
+                fn-discounts[1]
                 discounts[0]
                 discounts[1]
                 first-total[0]

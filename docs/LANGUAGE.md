@@ -1613,10 +1613,22 @@ Small core helpers are auto-exposed. Prefer the bare spelling:
 (doc 'println)
 (-> value steps...)
 (->> value steps...)
+(doto value setup-calls...)
 ```
 
 `->` threads a value into the next form as the first argument. `->>` threads it
 as the last argument.
+
+`doto` evaluates a value once, passes it as the first argument to each setup
+call, and returns the original value. Use it for Odin-style mutating setup APIs
+whose calls return void or status values rather than the configured object:
+
+```clojure
+(let [configured (doto (addr cfg)
+                   (set-port! 6969)
+                   (enable-secure!))]
+  configured^.port)
+```
 
 `count` lowers to Odin `len`. `len` is accepted as an alias for Odin
 familiarity, but `count` is the canonical Kvist spelling. `empty?` checks
@@ -1759,6 +1771,20 @@ Odin loops rather than intermediate arrays.
 (into [dynamic]int (map order-total) orders)
 (transduce (filter paid?) + 0 orders)
 
+(let [minimum 40]
+  (into [dynamic]int
+    (comp
+      (filter (fn [order: Order] -> bool (= order.status 2)))
+      (map (fn [order: Order] -> int (- order.amount order.discount)))
+      (filter (fn [total: int] -> bool (> total minimum))))
+    orders))
+
+(transduce paid-order-totals
+  (fn [acc: int, total: int] -> int (+ acc total))
+  0 orders)
+
+(transduce (filter positive?) + 0 lookup) ; map values
+
 (for [total orders :transform paid-order-totals]
   (println total))
 
@@ -1771,10 +1797,12 @@ The current transform surface is intentionally small:
 - transform specs support `map`, `map-indexed`, `mapcat`, `filter`, `remove`,
   `keep`, `take`, `take-while`, `drop`, and `drop-while`
 - `comp` composes steps and named transforms
-- callbacks must be known one-argument functions or field selectors
+- callbacks can be known functions, inline `fn` literals with explicit return
+  types, or field selectors where the step supports selectors
 - `into` currently returns fresh owned `[dynamic]T` arrays
-- `transduce` supports `+` and known two-argument reducers
-- inputs can be slices, arrays, dynamic arrays, or `defiter` calls
+- `transduce` supports `+`, known two-argument reducers, and inline `fn`
+  reducers
+- inputs can be slices, arrays, dynamic arrays, maps, or `defiter` calls
 
 See [FUNCTIONAL-TRANSFORMS.md](FUNCTIONAL-TRANSFORMS.md) for limits and
 lowering.

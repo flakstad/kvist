@@ -6331,6 +6331,21 @@ macroexpand_thread_last :: proc(t: ^testing.T) {
 }
 
 @(test)
+macroexpand_doto_threads_target_through_setup_calls :: proc(t: ^testing.T) {
+    output, err, ok := kvist.macroexpand_source(`(doto req (set-header! "x-api-key" key) (enable-retry!))`)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "(let [kvist_doto_"), true)
+    testing.expect_value(t, strings.contains(output, "(set-header! kvist_doto_"), true)
+    testing.expect_value(t, strings.contains(output, "(enable-retry! kvist_doto_"), true)
+}
+
+@(test)
 reject_legacy_thread_helpers :: proc(t: ^testing.T) {
     source := `(package main)
 
@@ -8088,6 +8103,175 @@ compile_functional_transform_map_indexed :: proc(t: ^testing.T) {
 }
 
 @(test)
+compile_functional_transform_inline_fn_callbacks :: proc(t: ^testing.T) {
+    source := `(package main)
+(import arr "kvist:arr")
+
+(defn keep-large [x: int] -> [value: int, ok: bool]
+  (if (> x 10)
+    (return x true)
+    (return 0 false)))
+
+(defn collect [xs: []int] -> [dynamic]int
+  (let [limit 2
+        offset 1]
+    (into [dynamic]int
+      (comp
+        (filter (fn [x: int] -> bool (> x limit)))
+        (map (fn [x: int] -> int (+ x offset))))
+      xs)))
+
+(defn append [out: [dynamic]int, xs: []int]
+  (let [limit 2]
+    (arr.into! out
+      (filter (fn [x: int] -> bool (> x limit)))
+      xs)))
+
+(defn total [xs: []int] -> int
+  (let [limit 2
+        offset 1]
+    (transduce
+      (comp
+        (filter (fn [x: int] -> bool (> x limit)))
+        (map (fn [x: int] -> int (+ x offset))))
+      + 0 xs)))
+
+(defn weighted-total [xs: []int] -> int
+  (let [scale 3]
+    (transduce
+      (filter (fn [x: int] -> bool (> x 1)))
+      (fn [acc: int, x: int] -> int (+ acc (* x scale)))
+      0 xs)))
+
+(defn indexed-total [xs: []int] -> int
+  (let [offset 10]
+    (transduce
+      (map-indexed (fn [i: int, x: int] -> int (+ i x offset)))
+      + 0 xs)))
+
+(defn kept [xs: []int] -> [dynamic]int
+  (into [dynamic]int
+    (keep (fn [x: int] -> [value: int, ok: bool]
+            (if (> x 10)
+              (return x true)
+              (return 0 false))))
+    xs))
+
+(defn loop-total [xs: []int] -> int
+  (let [limit 2
+        total 0]
+    (for [x xs :transform (filter (fn [x: int] -> bool (> x limit)))]
+      (set! total (+ total x)))
+    total))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+	testing.expect_value(t, strings.contains(output, "proc(limit: int, x: int) -> bool"), true)
+	testing.expect_value(t, strings.contains(output, "proc(offset: int, x: int) -> int"), true)
+	testing.expect_value(t, strings.contains(output, "proc(scale: int, acc: int, x: int) -> int"), true)
+	testing.expect_value(t, strings.contains(output, "proc(offset: int, i: int, x: int) -> int"), true)
+    testing.expect_value(t, strings.contains(output, "-> (value: int, ok: bool)"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_acc +="), true)
+    testing.expect_value(t, strings.contains(output, "append(kvist_out, kvist_item)"), true)
+    testing.expect_value(t, strings.contains(output, "append(&kvist_out, kvist_xform_"), true)
+}
+
+@(test)
+compile_defiter_transform_inline_fn_callbacks :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct Num_Source {
+  xs: []int
+  idx: int
+})
+
+(defn next-num [src: ^Num_Source] -> [value: int ok: bool]
+  (if (< src.idx (count src.xs))
+    (let [value src.xs[src.idx]]
+      (set! src.idx (+ src.idx 1))
+      (return value true))
+    (return 0 false)))
+
+(defiter nums [xs: []int] -> Num_Source yields int
+  :next next-num
+  (Num_Source {xs: xs idx: 0}))
+
+(defn total [xs: []int] -> int
+  (let [limit 2
+        offset 1]
+    (transduce
+      (comp
+        (filter (fn [x: int] -> bool (> x limit)))
+        (map (fn [x: int] -> int (+ x offset))))
+      + 0
+      (nums xs))))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "(proc(limit: int, offset: int, kvist_source_arg_1: []int, kvist_init: int) -> int"), true)
+    testing.expect_value(t, strings.contains(output, "proc(limit: int, x: int) -> bool"), true)
+    testing.expect_value(t, strings.contains(output, "proc(offset: int, x: int) -> int"), true)
+    testing.expect_value(t, strings.contains(output, "next_num(&kvist_source)"), true)
+}
+
+@(test)
+compile_functional_transform_map_value_sources :: proc(t: ^testing.T) {
+    source := `(package main)
+(import arr "kvist:arr")
+
+(defn positive? [x: int] -> bool
+  (> x 0))
+
+(defn inc [x: int] -> int
+  (+ x 1))
+
+(deftransform positive-increments
+  (filter positive?)
+  (map inc))
+
+(defn collect [lookup: map[string]int] -> [dynamic]int
+  (into [dynamic]int positive-increments lookup))
+
+(defn append-values [out: [dynamic]int, lookup: map[string]int]
+  (arr.into! out positive-increments lookup))
+
+(defn total [lookup: map[string]int] -> int
+  (transduce positive-increments + 0 lookup))
+
+(defn loop-total [lookup: map[string]int] -> int
+  (let [total 0]
+    (for [value lookup :transform positive-increments]
+      (set! total (+ total value)))
+    total))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "for _, kvist_item in kvist_source {"), true)
+    testing.expect_value(t, strings.contains(output, "for _, kvist_item in lookup {"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_acc +="), true)
+    testing.expect_value(t, strings.contains(output, "append(&kvist_out,"), true)
+    testing.expect_value(t, strings.contains(output, "append(kvist_out,"), true)
+}
+
+@(test)
 compile_functional_transform_mapcat :: proc(t: ^testing.T) {
     source := `(package main)
 
@@ -8384,7 +8568,85 @@ reject_functional_transform_unsupported_transduce_reducer :: proc(t: ^testing.T)
     }
     defer delete(err.message)
 
-    testing.expect_value(t, err.message, "transduce reducer must be + or a known two-argument function: *")
+    testing.expect_value(t, err.message, "transduce reducer must be +, a known two-argument function, or a fn literal: *")
+}
+
+@(test)
+reject_functional_transform_inline_fn_missing_return :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn values [xs: []int] -> [dynamic]int
+  (into [dynamic]int
+    (filter (fn [x: int] (> x 0)))
+    xs))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+    defer delete(err.message)
+
+    testing.expect_value(t, err.message, "transform fn callback requires an explicit single return type")
+}
+
+@(test)
+reject_functional_transform_inline_map_indexed_arity :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn total [xs: []int] -> int
+  (transduce
+    (map-indexed (fn [x: int] -> int x))
+    + 0 xs))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+    defer delete(err.message)
+
+    testing.expect_value(t, err.message, "map-indexed transform fn callback expects 2 parameters")
+}
+
+@(test)
+reject_functional_transform_inline_reducer_arity :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn total [xs: []int] -> int
+  (transduce
+    (map (fn [x: int] -> int x))
+    (fn [x: int] -> int x)
+    0 xs))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+    defer delete(err.message)
+
+    testing.expect_value(t, err.message, "transduce fn reducer expects 2 parameters")
+}
+
+@(test)
+reject_functional_transform_inline_reducer_missing_return :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn total [xs: []int] -> int
+  (transduce
+    (map (fn [x: int] -> int x))
+    (fn [acc: int, x: int] (+ acc x))
+    0 xs))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+    defer delete(err.message)
+
+    testing.expect_value(t, err.message, "transduce fn reducer requires an explicit single return type")
 }
 
 @(test)

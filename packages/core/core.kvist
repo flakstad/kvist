@@ -123,6 +123,38 @@
   (quasiquote
     (core-thread-last (unquote value) (splice steps))))
 
+(defmacro- doto-step
+  [target step]
+  (if (list? step)
+    (if (= (kvist.count step) 0)
+      (error "doto step cannot be empty")
+      (let [head (kvist.first step)
+            args (kvist.rest step)]
+        (quasiquote
+          ((unquote head) (unquote target) (splice args)))))
+    (error "doto steps must be calls")))
+
+(defmacro- doto-step-forms
+  [target steps]
+  (if (= (kvist.count steps) 0)
+    (forms)
+    (forms
+      (doto-step target (kvist.first steps))
+      (doto-step-forms target (kvist.rest steps)))))
+
+(defmacro doto
+  "Evaluate `value`, pass it as the first argument to each setup call, then
+  return the original value.
+
+  Use this for Odin-style mutating setup APIs where the calls return void or
+  status values rather than the configured object."
+  [value & steps]
+  (let [target (gensym "kvist_doto")]
+    (quasiquote
+      (let [(unquote target) (unquote value)]
+        (splice (doto-step-forms target steps))
+        (unquote target)))))
+
 (defmacro count
   "Return the size of a collection or string.
 
