@@ -935,14 +935,14 @@ repo_root_for_path :: proc(path: string) -> (string, bool) {
         }
     }
     current_end := len(current)
-    for current_end > 1 && current[current_end-1] == '/' {
+    for current_end > 1 && is_path_separator(current[current_end-1]) {
         current_end -= 1
     }
     current = current[:current_end]
     if current != "" && !os.is_dir(current) {
         last_slash := -1
         for i := len(current) - 1; i >= 0; i -= 1 {
-            if current[i] == '/' {
+            if is_path_separator(current[i]) {
                 last_slash = i
                 break
             }
@@ -969,13 +969,13 @@ repo_root_for_path :: proc(path: string) -> (string, bool) {
             delete(marker)
         }
         trimmed_end := len(current)
-        for trimmed_end > 1 && current[trimmed_end-1] == '/' {
+        for trimmed_end > 1 && is_path_separator(current[trimmed_end-1]) {
             trimmed_end -= 1
         }
         trimmed := current[:trimmed_end]
         last_slash := -1
         for i := len(trimmed) - 1; i >= 0; i -= 1 {
-            if trimmed[i] == '/' {
+            if is_path_separator(trimmed[i]) {
                 last_slash = i
                 break
             }
@@ -995,6 +995,10 @@ repo_root_for_path :: proc(path: string) -> (string, bool) {
         delete(owned_current)
     }
     return "", false
+}
+
+is_path_separator :: proc(ch: byte) -> bool {
+    return ch == '/' || ch == '\\'
 }
 
 file_location_for_snippet :: proc(root, relative, snippet: string) -> (file: string, line, column: int, ok: bool) {

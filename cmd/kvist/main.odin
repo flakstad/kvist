@@ -274,6 +274,14 @@ cleanup_odin_output_arg :: proc(out_path, out_arg: string) {
     }
 }
 
+odin_output_executable_path :: proc(generated_abs: string) -> string {
+    suffix := ".bin"
+    when ODIN_OS == .Windows {
+        suffix = ".exe"
+    }
+    return strings.clone(fmt.tprintf("%s%s", generated_abs, suffix))
+}
+
 print_compile_warnings :: proc(path, source, eval_source: string, warnings: []kvist.Compile_Warning) {
     for warning in warnings {
         formatted := ""
@@ -330,7 +338,7 @@ run_odin_file :: proc(command, generated_path, source_path, source, eval_source,
     out_path := ""
     out_arg := ""
     if command == "build" || command == "run" || command == "test" {
-        out_path = strings.clone(fmt.tprintf("%s.bin", generated_abs))
+        out_path = odin_output_executable_path(generated_abs)
         out_arg = strings.clone(fmt.tprintf("-out:%s", out_path))
         append(&args, out_arg)
     }
@@ -1130,8 +1138,9 @@ test_command :: proc(input, generated_path, test_names: string) -> int {
     }
     defer cleanup_generated(path, temp_dir, generated_path, package_dir)
 
-    extra_args := make([dynamic]string, 0, 1)
+    extra_args := make([dynamic]string, 0, 2)
     defer delete(extra_args)
+    append(&extra_args, "-define:ODIN_TEST_THREADS=1")
     if test_names != "" {
         normalized_test_names := normalize_test_names_arg(test_names)
         defer delete(normalized_test_names)

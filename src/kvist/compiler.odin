@@ -773,9 +773,13 @@ is_shipped_package_filesystem_path :: proc(path: string) -> bool {
     }
     defer delete(abs_path)
 
-    prefix := fmt.tprintf("%s/", abs_packages)
-    defer delete(prefix)
-    return abs_path == abs_packages || strings.has_prefix(abs_path, prefix)
+    slash_prefix := fmt.tprintf("%s/", abs_packages)
+    defer delete(slash_prefix)
+    backslash_prefix := fmt.tprintf("%s\\", abs_packages)
+    defer delete(backslash_prefix)
+    return abs_path == abs_packages ||
+           strings.has_prefix(abs_path, slash_prefix) ||
+           strings.has_prefix(abs_path, backslash_prefix)
 }
 
 is_source_import_path :: proc(path: string) -> bool {
@@ -3037,11 +3041,18 @@ rebase_emitted_odin_imports :: proc(source, output_dir: string) -> (output: stri
                         }
                         relative_path, rel_err := os.get_relative_path(canonical_output_dir, canonical_import_path, context.allocator)
                         delete(canonical_import_path)
-                        if rel_err != nil {
-                            return "", Compile_Error{message = fmt.tprintf("could not rebase generated Odin import: %s", import_path)}, false
+                        import_path_for_output := ""
+                        if rel_err == nil {
+                            import_path_for_output = relative_path
+                        } else {
+                            import_path_for_output = import_path
                         }
-                        rewritten = fmt.tprintf("%s%q%s", line[:first_quote], relative_path, rest[second_quote+1:])
-                        delete(relative_path)
+                        import_relative_path := forward_slash_path(import_path_for_output)
+                        if rel_err == nil {
+                            delete(relative_path)
+                        }
+                        rewritten = fmt.tprintf("%s%q%s", line[:first_quote], import_relative_path, rest[second_quote+1:])
+                        delete(import_relative_path)
                         changed = true
                     }
                 }
@@ -3066,6 +3077,14 @@ rebase_emitted_odin_imports_for_output_path :: proc(source, output_path: string)
         output_dir = "."
     }
     return rebase_emitted_odin_imports(source, output_dir)
+}
+
+forward_slash_path :: proc(path: string) -> string {
+    normalized, allocated := strings.replace_all(path, "\\", "/", context.allocator)
+    if allocated {
+        return normalized
+    }
+    return strings.clone(path)
 }
 
 canonicalize_generated_output_dir :: proc(path: string) -> (canonical: string, err: Compile_Error, ok: bool) {

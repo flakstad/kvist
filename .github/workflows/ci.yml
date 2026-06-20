@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            exe_suffix: ""
+          - os: ubuntu-latest
+            exe_suffix: ""
+          - os: windows-latest
+            exe_suffix: ".exe"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: laytan/setup-odin@v2.12.2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Show Odin version
+        shell: bash
+        run: odin version
+
+      - name: Run unit tests
+        shell: bash
+        run: |
+          odin test cmd/kvist -define:ODIN_TEST_LOG_LEVEL=warning
+          odin test tests -define:ODIN_TEST_LOG_LEVEL=warning
+
+      - name: Build CLI
+        shell: bash
+        run: odin build cmd/kvist -out:./kvist${{ matrix.exe_suffix }}
+
+      - name: Smoke test CLI
+        shell: bash
+        run: |
+          ./kvist${{ matrix.exe_suffix }} check examples/language/hello.kvist
+          test "$(./kvist${{ matrix.exe_suffix }} run examples/language/hello.kvist)" = "hello from kvist"
+          test "$(./kvist${{ matrix.exe_suffix }} run examples/collections/package-tour.kvist)" = "18"
+          ./kvist${{ matrix.exe_suffix }} doc examples/collections/log-source.kvist log-lines >/dev/null
+          ./kvist${{ matrix.exe_suffix }} lookup examples/collections/log-source.kvist log-lines >/dev/null
+          ./kvist${{ matrix.exe_suffix }} complete examples/collections/log-source.kvist log >/dev/null
