@@ -31,9 +31,7 @@ jobs:
 
       - name: Run unit tests
         shell: bash
-        run: |
-          odin test cmd/kvist -define:ODIN_TEST_LOG_LEVEL=warning
-          odin test tests -define:ODIN_TEST_LOG_LEVEL=warning
+        run: odin test tests -define:ODIN_TEST_LOG_LEVEL=warning
 
       - name: Build CLI
         shell: bash

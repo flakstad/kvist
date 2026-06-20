@@ -6147,6 +6147,9 @@ analyze_owned_scope_body :: proc(e: ^Emitter, forms: []CST_Form, can_transfer_fi
         case "set!":
             if len(form.items) == 3 && form.items[1].kind == .Symbol {
                 name := map_name(form.items[1].text)
+                if name == "" {
+                    continue
+                }
                 if owned_locals_find_last(live[:], name) >= 0 {
                     emit_warning(e, fmt.tprintf("owned local %s is overwritten before cleanup; delete it or return it before set!", name), form.items[1].span)
                     _ = owned_locals_remove_last(live, name)
@@ -6174,11 +6177,17 @@ analyze_owned_scope_body :: proc(e: ^Emitter, forms: []CST_Form, can_transfer_fi
                     if owned_name == "" {
                         owned_name = delete_name
                     }
+                    if owned_name == "" {
+                        continue
+                    }
                     append(live, Owned_Local{name = owned_name, span = form.items[0].span})
                 }
             }
             analyze_owned_scope_body(e, form.items[2:], final_in_scope && can_transfer_final, live)
             for i := start; i < len(live); i += 1 {
+                if live[i].name == "" {
+                    continue
+                }
                 skip_warning := false
                 for binding in bindings {
                     delete_name, ok_delete_name := binding_delete_target_name(binding)

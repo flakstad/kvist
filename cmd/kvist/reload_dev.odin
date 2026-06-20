@@ -174,10 +174,16 @@ reload_exec_default_root :: proc(input: string) -> string {
 reload_app_relative_path_or_exit :: proc(base_dir, target: string) -> string {
     path, err := os.get_relative_path(base_dir, target, context.allocator)
     if err != nil {
-        fmt.eprintln("failed to compute relative path")
-        os.exit(1)
+        path = strings.clone(target)
     }
-    return path
+    normalized, allocated := strings.replace_all(path, "\\", "/", context.allocator)
+    if allocated {
+        delete(path)
+        return normalized
+    }
+    out := strings.clone(path)
+    delete(path)
+    return out
 }
 
 reload_app_absolute_path_or_exit :: proc(path: string) -> string {

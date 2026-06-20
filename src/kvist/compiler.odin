@@ -1501,6 +1501,25 @@ rewrite_symbol_text :: proc(text: string, locals: []string, aliases: []Alias_Pre
     if prefix != "" && contains_text(locals, body) {
         return fmt.tprintf("%s%s%s__%s", quote_prefix, operator_prefix, prefix, body), Compile_Error{}, true
     }
+    if len(body) > 0 && body[0] == '[' {
+        close := -1
+        for ch, i in body {
+            if ch == ']' {
+                close = i
+                break
+            }
+        }
+        if close >= 0 && close+1 < len(body) {
+            suffix := body[close+1:]
+            rewritten_suffix, err_suffix, ok_suffix := rewrite_symbol_text(suffix, locals, aliases, prefix, span)
+            if !ok_suffix {
+                return "", err_suffix, false
+            }
+            if rewritten_suffix != suffix {
+                return fmt.tprintf("%s%s%s%s", quote_prefix, operator_prefix, body[:close+1], rewritten_suffix), Compile_Error{}, true
+            }
+        }
+    }
     return text, Compile_Error{}, true
 }
 
@@ -1858,6 +1877,21 @@ rewrite_top_form :: proc(top: CST_Top_Form, locals: []string, aliases: []Alias_P
             return rewrite_proc_like_top_form(top, locals, aliases, prefix)
         }
         if is_top_level_decl_head(head) {
+            if head == "defenum" || head == "defenum-" {
+                renamed := top
+                renamed.form = top.form
+                renamed.form.items = nil
+                for item, idx in top.form.items {
+                    if idx == 1 {
+                        name := item
+                        name.text = fmt.tprintf("%s__%s", prefix, item.text)
+                        append(&renamed.form.items, name)
+                    } else {
+                        append(&renamed.form.items, clone_cst_form(item))
+                    }
+                }
+                return renamed, Compile_Error{}, true
+            }
             if head == "def" || head == "def-" {
                 value_index := 2
                 if len(top.form.items) > 3 && top.form.items[2].kind == .String {

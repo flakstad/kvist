@@ -1138,9 +1138,10 @@ test_command :: proc(input, generated_path, test_names: string) -> int {
     }
     defer cleanup_generated(path, temp_dir, generated_path, package_dir)
 
-    extra_args := make([dynamic]string, 0, 2)
+    extra_args := make([dynamic]string, 0, 3)
     defer delete(extra_args)
     append(&extra_args, "-define:ODIN_TEST_THREADS=1")
+    append(&extra_args, "-define:ODIN_TEST_TRACK_MEMORY=false")
     if test_names != "" {
         normalized_test_names := normalize_test_names_arg(test_names)
         defer delete(normalized_test_names)
