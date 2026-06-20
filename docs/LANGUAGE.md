@@ -1829,6 +1829,13 @@ Odin loops rather than intermediate arrays.
 (transduce paid-order-totals
   (fn [acc: int, total: int] -> int (+ acc total))
   0 orders)
+(transduce paid-order-totals
+  (fn [sum: int, total: int] -> int
+    (let [next (+ sum total)]
+      (if (>= next 100)
+        (reduced next)
+        next)))
+  0 orders)
 (transduce paid-order-totals min 999 orders)
 (transduce paid-order-totals max 0 orders)
 
@@ -1866,7 +1873,8 @@ The current transform surface is intentionally small:
 - `into` currently returns fresh owned `[dynamic]T` arrays, owned maps, and
   owned sets
 - `transduce` supports `+`, `min`, `max`, known two-argument reducers, and
-  inline `fn` reducers
+  inline `fn` reducers; inline reducers can use direct-branch `reduced` to
+  stop early, optionally inside a simple reducer-local `let`
 - inputs can be slices, arrays, dynamic arrays, maps, or `defiter` calls
 - `into` can build owned dynamic arrays, owned maps, or owned sets; map output
   expects `(map.entry K V)` values

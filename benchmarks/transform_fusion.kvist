@@ -1,0 +1,148 @@
+// Focused benchmark for fused transforms.
+(package main)
+(import arr "kvist:arr")
+(import "core:fmt")
+(import mem "core:mem")
+(import time "core:time")
+
+(odin "N :: 100_000
+REPS :: 100
+LIMIT :: 250_000")
+
+(defn inc [x: int] -> int
+  (+ x 1))
+
+(defn even? [x: int] -> bool
+  (= (% x 2) 0))
+
+(deftransform inc-evens
+  (map inc)
+  (filter even?))
+
+(defn report [name: string, elapsed: time.Duration, checksum: int, track: ^mem.Tracking-Allocator]
+  (fmt.printfln "%-16s %9.3f ms allocs=%8v total=%10v peak=%9v live=%v checksum=%v"
+                name
+                (time.duration-milliseconds elapsed)
+                track.total-allocation-count
+                track.total-memory-allocated
+                track.peak-memory-allocated
+                track.current-memory-allocated
+                checksum))
+
+(defn run-one [name: string, checksum: int, start: time.Tick, track: ^mem.Tracking-Allocator]
+  (report name (time.tick-since start) checksum track))
+
+(defn bench-manual-sum [xs: []int, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (while (< i reps)
+      (let [total 0]
+        (for [x xs]
+          (let [y (+ x 1)]
+            (when (even? y)
+              (set! total (+ total y)))))
+        (set! checksum (+ checksum total)))
+      (set! i (+ i 1)))
+    checksum))
+
+(defn bench-manual-collect [xs: []int, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (while (< i reps)
+      (let [ys (make [dynamic]int 0 (count xs))]
+        (for [x xs]
+          (let [y (+ x 1)]
+            (when (even? y)
+              (append &ys y))))
+        (set! checksum (+ checksum (count ys)))
+        (set! checksum (+ checksum (arr.last ys)))
+        (delete ys))
+      (set! i (+ i 1)))
+    checksum))
+
+(defn bench-into [xs: []int, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (while (< i reps)
+      (let [ys (into [dynamic]int inc-evens xs)]
+        (set! checksum (+ checksum (count ys)))
+        (set! checksum (+ checksum (arr.last ys)))
+        (delete ys))
+      (set! i (+ i 1)))
+    checksum))
+
+(defn bench-transduce [xs: []int, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (while (< i reps)
+      (set! checksum (+ checksum (transduce inc-evens + 0 xs)))
+      (set! i (+ i 1)))
+    checksum))
+
+(defn bench-manual-reduced [xs: []int, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (while (< i reps)
+      (let [total 0]
+        (for [x xs]
+          (let [y (+ x 1)]
+            (when (even? y)
+              (let [next (+ total y)]
+                (set! total next)
+                (when (>= next LIMIT)
+                  (break))))))
+        (set! checksum (+ checksum total)))
+      (set! i (+ i 1)))
+    checksum))
+
+(defn bench-reduced [xs: []int, reps: int] -> int
+  (let [i 0
+        checksum 0]
+    (while (< i reps)
+      (set! checksum
+            (+ checksum
+               (transduce inc-evens
+                 (fn [sum: int, x: int] -> int
+                   (let [next (+ sum x)]
+                     (if (>= next LIMIT)
+                       (reduced next)
+                       next)))
+                 0
+                 xs)))
+      (set! i (+ i 1)))
+    checksum))
+
+(defn main []
+  (fmt.printfln "N=%v REPS=%v LIMIT=%v" N REPS LIMIT)
+  (let [xs (arr.range 0 N)
+        old-allocator context.allocator
+        track: mem.Tracking-Allocator (odin "mem.Tracking_Allocator{}")]
+    (defer (delete xs))
+    (mem.tracking-allocator-init &track old-allocator old-allocator)
+    (defer (mem.tracking-allocator-destroy &track))
+    (set! context.allocator (mem.tracking-allocator &track))
+    (defer (odin "context.allocator = old_allocator"))
+
+    (mem.tracking-allocator-reset &track)
+    (let [start (time.tick-now)]
+      (run-one "manual-sum" (bench-manual-sum (slice xs) REPS) start &track))
+
+    (mem.tracking-allocator-reset &track)
+    (let [start (time.tick-now)]
+      (run-one "transduce" (bench-transduce (slice xs) REPS) start &track))
+
+    (mem.tracking-allocator-reset &track)
+    (let [start (time.tick-now)]
+      (run-one "manual-collect" (bench-manual-collect (slice xs) REPS) start &track))
+
+    (mem.tracking-allocator-reset &track)
+    (let [start (time.tick-now)]
+      (run-one "into" (bench-into (slice xs) REPS) start &track))
+
+    (mem.tracking-allocator-reset &track)
+    (let [start (time.tick-now)]
+      (run-one "manual-reduced" (bench-manual-reduced (slice xs) REPS) start &track))
+
+    (mem.tracking-allocator-reset &track)
+    (let [start (time.tick-now)]
+      (run-one "reduced" (bench-reduced (slice xs) REPS) start &track))))

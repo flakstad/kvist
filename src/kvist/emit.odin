@@ -8663,17 +8663,151 @@ emit_transform_closers :: proc(builder: ^strings.Builder, depth, close_count: in
     }
 }
 
+form_contains_reduced :: proc(form: CST_Form) -> bool {
+    #partial switch form.kind {
+    case .Symbol:
+        return form.text == "reduced"
+    case .List, .Vector, .Brace, .Set:
+        for item in form.items {
+            if form_contains_reduced(item) {
+                return true
+            }
+        }
+    case:
+    }
+    return false
+}
+
+emit_reduced_branch_update_text :: proc(e: ^Emitter, form: CST_Form, acc_text, acc_ty: string) -> (string, Compile_Error, bool) {
+    if form.kind == .List && len(form.items) > 0 && is_symbol(form.items[0], "reduced") {
+        if len(form.items) != 2 {
+            return "", Compile_Error{message = "reduced expects one value", span = form.span}, false
+        }
+        value_text, err_value, ok_value := emit_expr_for_expected_type(e, form.items[1], acc_ty)
+        if !ok_value {
+            return "", err_value, false
+        }
+        return fmt.tprintf("%s = %s; break", acc_text, value_text), {}, true
+    }
+    if form_contains_reduced(form) {
+        return "", Compile_Error{message = "reduced in transduce fn reducers is currently supported only as a direct reducer branch", span = form.span}, false
+    }
+    value_text, err_value, ok_value := emit_expr_for_expected_type(e, form, acc_ty)
+    if !ok_value {
+        return "", err_value, false
+    }
+    return fmt.tprintf("%s = %s", acc_text, value_text), {}, true
+}
+
+emit_reduced_body_update_text :: proc(e: ^Emitter, form: CST_Form, acc_text, acc_ty: string) -> (string, Compile_Error, bool) {
+    if form.kind == .List && len(form.items) > 0 && is_symbol(form.items[0], "if") {
+        if len(form.items) != 4 {
+            return "", Compile_Error{message = "reduced transduce fn reducer if expects test, then, and else", span = form.span}, false
+        }
+        test_text, err_test, ok_test := emit_expr(e, form.items[1])
+        if !ok_test {
+            return "", err_test, false
+        }
+        then_text, err_then, ok_then := emit_reduced_body_update_text(e, form.items[2], acc_text, acc_ty)
+        if !ok_then {
+            return "", err_then, false
+        }
+        else_text, err_else, ok_else := emit_reduced_body_update_text(e, form.items[3], acc_text, acc_ty)
+        if !ok_else {
+            return "", err_else, false
+        }
+        return fmt.tprintf("if %s %s %s %s else %s %s %s", test_text, "{", then_text, "}", "{", else_text, "}"), {}, true
+    }
+    if form.kind == .List && len(form.items) > 0 && is_symbol(form.items[0], "let") {
+        if len(form.items) != 3 {
+            return "", Compile_Error{message = "reduced transduce fn reducer let expects bindings and one body expression", span = form.span}, false
+        }
+        bindings, err_bind, ok_bind := parse_let_bindings(form.items[1])
+        if !ok_bind {
+            return "", err_bind, false
+        }
+        builder := strings.builder_make()
+        defer strings.builder_destroy(&builder)
+        push_local_type_scope(e)
+        defer pop_local_type_scope(e)
+        for binding in bindings {
+            if binding.is_destructure || binding.is_result_binding || binding.deferred_delete || binding.err_deferred_delete || binding.defer_with_cleanup {
+                return "", Compile_Error{message = "reduced transduce fn reducer let supports only simple local bindings", span = binding.target_span}, false
+            }
+            value_text, err_value, ok_value := emit_expr_for_expected_type(e, binding.value, binding.ty)
+            if !ok_value {
+                return "", err_value, false
+            }
+            fmt.sbprintf(&builder, "%s := %s\n", binding.name, value_text)
+            if ty, ok_ty := obvious_binding_type(e, binding); ok_ty {
+                bind_local_type(e, binding.name, ty)
+            }
+        }
+        body_text, err_body, ok_body := emit_reduced_body_update_text(e, form.items[2], acc_text, acc_ty)
+        if !ok_body {
+            return "", err_body, false
+        }
+        strings.write_string(&builder, body_text)
+        return strings.clone(strings.to_string(builder)), {}, true
+    }
+    return emit_reduced_branch_update_text(e, form, acc_text, acc_ty)
+}
+
+write_transform_reduce_text :: proc(builder: ^strings.Builder, depth: int, text: string) {
+    lines := strings.split_lines(text, context.allocator)
+    defer delete(lines)
+    for line in lines {
+        append_indent(builder, depth)
+        strings.write_string(builder, line)
+        strings.write_string(builder, "\n")
+    }
+}
+
+transform_reduced_reduce_update_text :: proc(e: ^Emitter, reducer: CST_Form, acc_text, acc_ty, value_text: string, parsed: Proc_Literal) -> (string, Compile_Error, bool) {
+    if len(parsed.body) != 1 {
+        return "", Compile_Error{message = "reduced transduce fn reducer currently expects a single body expression", span = reducer.span}, false
+    }
+    prefix := fmt.tprintf("%s := %s\n%s := %s\n", parsed.params[0].name, acc_text, parsed.params[1].name, value_text)
+    body := parsed.body[0]
+    body_text, err_body, ok_body := emit_reduced_body_update_text(e, body, acc_text, acc_ty)
+    if !ok_body {
+        return "", err_body, false
+    }
+    return fmt.tprintf("%s%s", prefix, body_text), {}, true
+}
+
 transform_reduce_update_text :: proc(e: ^Emitter, reducer: CST_Form, acc_text, acc_ty, value_text, value_ty: string) -> (string, Compile_Error, bool) {
 	if reducer.kind == .List && len(reducer.items) > 0 && is_symbol(reducer.items[0], "fn") {
-		text, returns, err_literal, ok_literal := transform_proc_literal_call(e, reducer, []Param{{name = acc_text, ty = acc_ty}, {name = value_text, ty = value_ty}}, "transduce fn reducer")
-		if !ok_literal {
-			return "", err_literal, false
-		}
+        parsed, err_parse, ok_parse := parse_proc_literal_form(reducer)
+        if !ok_parse {
+            return "", err_parse, false
+        }
+        if len(parsed.params) != 2 {
+            return "", Compile_Error{message = "transduce fn reducer expects 2 parameters", span = reducer.span}, false
+        }
+        if parsed.params[0].ty != acc_ty {
+            return "", Compile_Error{message = fmt.tprintf("transduce fn reducer parameter %s must be %s", parsed.params[0].name, acc_ty), span = reducer.span}, false
+        }
+        if parsed.params[1].ty != value_ty {
+            return "", Compile_Error{message = fmt.tprintf("transduce fn reducer parameter %s must be %s", parsed.params[1].name, value_ty), span = reducer.span}, false
+        }
+        returns := parsed.returns
 		if returns.kind != .Single {
 			return "", Compile_Error{message = "transduce fn reducer requires an explicit single return type", span = reducer.span}, false
 		}
 		if returns.single_ty != acc_ty {
 			return "", Compile_Error{message = fmt.tprintf("transduce fn reducer must return %s", acc_ty), span = reducer.span}, false
+		}
+        if form_contains_reduced(reducer) {
+            push_local_type_scope(e)
+            bind_local_type(e, parsed.params[0].name, acc_ty)
+            bind_local_type(e, parsed.params[1].name, value_ty)
+            defer pop_local_type_scope(e)
+            return transform_reduced_reduce_update_text(e, reducer, acc_text, acc_ty, value_text, parsed)
+        }
+		text, _, err_literal, ok_literal := transform_proc_literal_call(e, reducer, []Param{{name = acc_text, ty = acc_ty}, {name = value_text, ty = value_ty}}, "transduce fn reducer")
+		if !ok_literal {
+			return "", err_literal, false
 		}
 		return fmt.tprintf("%s = %s", acc_text, text), {}, true
 	}
@@ -9285,9 +9419,7 @@ emit_transform_transduce_source_expr :: proc(
     if !ok_reduce {
         return "", err_reduce, false
     }
-    append_indent(&builder, 2+close_count)
-    strings.write_string(&builder, reduce_text)
-    strings.write_string(&builder, "\n")
+    write_transform_reduce_text(&builder, 2+close_count, reduce_text)
     emit_transform_closers(&builder, 2+close_count, close_count)
     strings.write_string(&builder, "    }\n")
     strings.write_string(&builder, "    return kvist_acc\n")
@@ -9362,9 +9494,7 @@ emit_transform_transduce_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, C
         if !ok_reduce {
             return "", err_reduce, false
         }
-        append_indent(&builder, 2+close_count)
-        strings.write_string(&builder, reduce_text)
-        strings.write_string(&builder, "\n")
+        write_transform_reduce_text(&builder, 2+close_count, reduce_text)
         emit_transform_closers(&builder, 2+close_count, close_count)
         emit_transform_direct_source_loop_step(&builder, 2, source_spec)
         strings.write_string(&builder, "    }\n")
@@ -9461,9 +9591,7 @@ emit_transform_transduce_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, C
     if !ok_reduce {
         return "", err_reduce, false
     }
-    append_indent(&builder, 2+close_count)
-    strings.write_string(&builder, reduce_text)
-    strings.write_string(&builder, "\n")
+    write_transform_reduce_text(&builder, 2+close_count, reduce_text)
     emit_transform_closers(&builder, 2+close_count, close_count)
     strings.write_string(&builder, "    }\n")
     strings.write_string(&builder, "    return kvist_acc\n")

@@ -38,6 +38,10 @@ The live layer is an embeddable runtime with:
 The console is a client of that runtime. The runtime itself owns module loading,
 handler lookup, state storage, and reload failure behavior.
 
+See [RESIDENT-CONSOLE.md](./RESIDENT-CONSOLE.md) for a related future console
+shape that combines scratch evaluation, resident reload, and live command
+modules into a controlled development command channel.
+
 ## Host / Live Split
 
 Static host responsibilities:

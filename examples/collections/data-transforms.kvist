@@ -36,6 +36,16 @@
 (defn best-paid-net [] -> int
   (transduce paid-nets max 0 (sample-orders)))
 
+(defn paid-net-until [limit: int] -> int
+  (transduce paid-nets
+    (fn [total: int, value: int] -> int
+      (let [next (+ total value)]
+        (if (>= next limit)
+          (reduced next)
+          next)))
+    0
+    (sample-orders)))
+
 (defn paid-statuses [] -> set[int]
   (into set[int]
     (comp
@@ -57,6 +67,7 @@
       (delete statuses))
     (println (+ (total-paid-net)
                 (best-paid-net)
+                (paid-net-until 100)
                 (total-paid-net-for)
                 nets[0]
                 nets[1]
@@ -72,6 +83,9 @@
 
   (best-paid-net)
   ;; => 90
+
+  (paid-net-until 100)
+  ;; => 165
 
   (total-paid-net-for)
   ;; => 165

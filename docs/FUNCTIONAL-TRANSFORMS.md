@@ -128,6 +128,22 @@ Reducers can be `+`, `min`, `max`, a known two-argument function, or an inline
     0 orders))
 ```
 
+Inline reducers can stop the source loop early with `reduced`:
+
+```clojure
+(transduce paid-order-totals
+  (fn [sum: int, total: int] -> int
+    (let [next (+ sum total)]
+      (if (>= next 100)
+        (reduced next)
+        next)))
+  0 orders)
+```
+
+`reduced` is reducer control flow, not a runtime wrapper value. It is currently
+only valid as a direct branch in an inline `transduce` reducer body, optionally
+inside a simple reducer-local `let`.
+
 Reusable `defiter` producers can feed `for`, `into`, and `transduce`. The
 header says what the opener returns and what `:next` yields:
 
@@ -454,6 +470,9 @@ The current implementation is strict:
 - `transduce` requires an obvious accumulator type from the initial value or an
   annotation, and the reducer must be `+`, `min`, `max`, a known two-argument
   function, or an inline `fn` literal returning the accumulator type;
+- `reduced` is supported only inside inline `transduce` reducers, as a direct
+  reducer branch such as `(if test (reduced value) next-acc)`, optionally inside
+  a simple reducer-local `let`;
 - map sources feed values into `into`, `arr.into!`, `transduce`, and
   `for :transform`; `(for [key value m :transform transform] ...)` keeps the
   key available while transforming the value;
@@ -474,11 +493,6 @@ The current implementation is strict:
 When any of these rules are not met, the compiler rejects the pipeline and
 suggests the direct `for` loop fallback.
 
-Reducers do not currently have a Clojure-style `reduced` protocol for
-short-circuiting arbitrary reductions. Transform steps such as `take` and
-`take-while` can still stop the source loop early, but a reducer callback cannot
-yet request early termination.
-
 Named `deftransform` declarations are checked for basic shape immediately.
 The spec may be a single step, `(comp ...)`, or several step forms after the
 name. Callback existence, callback arity, callback types, and output type
@@ -493,7 +507,8 @@ and accumulator types are known.
   maps, and owned `set[T]` sets; `arr.into!` appends into existing dynamic
   arrays
 - `transduce` supports `+`, `min`, `max`, known two-argument reducers, and
-  inline `fn` reducers
+  inline `fn` reducers; inline reducers can use direct-branch `reduced` to
+  stop early
 - inputs may be slices, fixed arrays, dynamic arrays, maps, or `defiter` calls
 - inline `fn` callbacks are compile-time syntax in transform positions, not
   runtime closure values
@@ -501,6 +516,11 @@ and accumulator types are known.
 
 ## Examples
 
+- [examples/collections/data-transforms.kvist](../examples/collections/data-transforms.kvist) -
+  small first-read example for `into`, `transduce`, `for :transform`, set
+  output, and `reduced`
+- [benchmarks/transform_fusion.kvist](../benchmarks/transform_fusion.kvist) -
+  focused manual loop / `into` / `transduce` / `reduced` comparison
 - [examples/collections/transforms.kvist](../examples/collections/transforms.kvist) -
   reusable transforms over ordinary arrays
 - [examples/collections/log-source.kvist](../examples/collections/log-source.kvist) -

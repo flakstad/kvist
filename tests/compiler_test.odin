@@ -8507,6 +8507,56 @@ compile_functional_transform_min_max_reducers :: proc(t: ^testing.T) {
 }
 
 @(test)
+compile_functional_transform_reduced_reducer :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn stop-at [xs: []int] -> int
+  (transduce (filter (fn [x: int] -> bool (> x 0)))
+    (fn [sum: int, x: int] -> int
+      (if (> (+ sum x) 10)
+        (reduced (+ sum x))
+        (+ sum x)))
+    0 xs))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "sum := kvist_acc"), true)
+    testing.expect_value(t, strings.contains(output, "x := kvist_item"), true)
+    testing.expect_value(t, strings.contains(output, "if ((sum) + (x)) > (10) { kvist_acc = (sum) + (x); break } else { kvist_acc = (sum) + (x) }"), true)
+}
+
+@(test)
+compile_functional_transform_reduced_reducer_let :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn stop-at [xs: []int] -> int
+  (transduce (filter (fn [x: int] -> bool (> x 0)))
+    (fn [sum: int, x: int] -> int
+      (let [next (+ sum x)]
+        (if (> next 10)
+          (reduced next)
+          next)))
+    0 xs))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "next := (sum) + (x)"), true)
+    testing.expect_value(t, strings.contains(output, "if (next) > (10) { kvist_acc = next; break } else { kvist_acc = next }"), true)
+}
+
+@(test)
 compile_functional_transform_into_set :: proc(t: ^testing.T) {
     source := `(package main)
 
