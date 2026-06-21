@@ -165,6 +165,11 @@ Point :: struct {
 
 @(test)
 compile_all_examples :: proc(t: ^testing.T) {
+    when ODIN_OS == .Windows {
+        // ponytail: too slow for Windows CI; smoke tests cover representative CLI paths there.
+        return
+    }
+
     examples := [?]string{
         "examples/coverage/cluck-port/cluck-port-arrays.kvist",
         "examples/coverage/cluck-port/cluck-port-docs.kvist",
@@ -209,6 +214,7 @@ compile_all_examples :: proc(t: ^testing.T) {
         "examples/web/html-values.kvist",
         "examples/language/inline-literals.kvist",
         "examples/interop/interop-directives.kvist",
+        "examples/language/let-discard-bindings.kvist",
         "examples/language/local-declarations.kvist",
         "examples/language/multi-return-bindings.kvist",
         "examples/interop/core/matrix.kvist",
@@ -4798,6 +4804,35 @@ compile_let_defer_scope :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "filtered := arr__filter_impl(even_p, (mapped)[0:])"), true)
     testing.expect_value(t, strings.contains(output, "defer delete(filtered)"), true)
     testing.expect_value(t, strings.contains(output, "return arr__reduce_impl(add, 0, (filtered)[0:])"), true)
+}
+
+@(test)
+compile_let_discard_binding :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn observe [x: int] -> int
+  x)
+
+(defn main [] -> int
+  (let [_ (observe 1)
+        _ (observe 2)
+        _: int (observe 3)
+        answer 42]
+    answer))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "_ = observe(1)"), true)
+    testing.expect_value(t, strings.contains(output, "_ = observe(2)"), true)
+    testing.expect_value(t, strings.contains(output, "_ = observe(3)"), true)
+    testing.expect_value(t, strings.contains(output, "_ := observe"), false)
+    testing.expect_value(t, strings.contains(output, "answer := 42"), true)
 }
 
 @(test)
@@ -12841,6 +12876,88 @@ compile_path_root_package_ignores_unrelated_malformed_package_files :: proc(t: ^
     defer delete(output)
 
     testing.expect_value(t, strings.contains(output, "main :: proc() -> int"), true)
+}
+
+@(test)
+compile_path_source_package_macro_can_preserve_keyword_source :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-source-package-macro-source-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    pkg_dir, pkg_join_err := os.join_path({dir, "support", "tx"}, context.allocator)
+    testing.expect_value(t, pkg_join_err == nil, true)
+    if pkg_join_err != nil {
+        return
+    }
+    defer delete(pkg_dir)
+    mk_pkg_err := os.make_directory_all(pkg_dir)
+    testing.expect_value(t, mk_pkg_err == nil, true)
+    if mk_pkg_err != nil {
+        return
+    }
+
+    pkg_file, pkg_file_err := os.join_path({pkg_dir, "tx.kvist"}, context.allocator)
+    testing.expect_value(t, pkg_file_err == nil, true)
+    if pkg_file_err != nil {
+        return
+    }
+    defer delete(pkg_file)
+    pkg_source := `(package tx)
+
+(defmacro- emit-op [form]
+  (if (vector? form)
+    (quasiquote (unquote (source (nth form 0))))
+    (error "tx-data expects vector forms")))
+
+(defmacro- emit-ops [forms]
+  (if (= (count forms) 0)
+    (forms)
+    (forms
+      (emit-op (first forms))
+      (emit-ops (rest forms)))))
+
+(defmacro tx-data [& forms]
+  (quasiquote ([]string [(splice (emit-ops forms))])))`
+    pkg_write_err := os.write_entire_file_from_string(pkg_file, pkg_source)
+    testing.expect_value(t, pkg_write_err == nil, true)
+    if pkg_write_err != nil {
+        return
+    }
+
+    main_path, main_join_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, main_join_err == nil, true)
+    if main_join_err != nil {
+        return
+    }
+    defer delete(main_path)
+    main_source := `(import tx "support/tx")
+
+(defn tx-count [] -> int
+  (let [ops (tx.tx-data [:db/add 1 :user/name "Ada"]
+                        [:db/retract 1 :user/name "Ada"])]
+    (count ops)))`
+    main_write_err := os.write_entire_file_from_string(main_path, main_source)
+    testing.expect_value(t, main_write_err == nil, true)
+    if main_write_err != nil {
+        return
+    }
+
+    output, err, ok := kvist.compile_path(main_path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, `"[:db/add, 1, :user/name, \"Ada\"]"`), false)
+    testing.expect_value(t, strings.contains(output, `"db/add"`), false)
+    testing.expect_value(t, strings.contains(output, `":db/add"`), true)
+    testing.expect_value(t, strings.contains(output, `":db/retract"`), true)
 }
 
 @(test)

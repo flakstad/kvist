@@ -1908,6 +1908,22 @@ macro_eval_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_
                     return macro_bool_value(false), Compile_Error{}, true
                 }
                 return macro_bool_value(value.form.kind == .Nil), Compile_Error{}, true
+            case "source":
+                if len(form.items) != 2 {
+                    return Macro_Value{}, Compile_Error{message = "source expects one argument", span = form.span}, false
+                }
+                value, err_value, ok_value := macro_eval_expr(form.items[1], macros, bindings)
+                if !ok_value {
+                    return Macro_Value{}, err_value, false
+                }
+                single, err_single, ok_single := macro_value_to_form(value, form.items[1].span)
+                if !ok_single {
+                    macro_value_delete_backing(&value)
+                    return Macro_Value{}, err_single, false
+                }
+                result := macro_owned_string_value(macro_form_text(single))
+                macro_value_delete_backing(&value)
+                return result, Compile_Error{}, true
             case "text":
                 if len(form.items) != 2 {
                     return Macro_Value{}, Compile_Error{message = "text expects one argument", span = form.span}, false

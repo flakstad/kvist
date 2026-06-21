@@ -4951,6 +4951,8 @@ emit_binding_assignment :: proc(e: ^Emitter, binding: Binding, value: string) {
         }
         fmt.sbprintf(&line_builder, " := %s", value)
         emit_prefixed_expr_mapped(e, "", strings.clone(strings.to_string(line_builder)), binding.value.span)
+    } else if binding.name == "" {
+        emit_prefixed_expr_mapped(e, "_ = ", value, binding.value.span)
     } else if binding.is_typed {
         emit_prefixed_expr_mapped(e, fmt.tprintf("%s: %s = ", binding.name, binding.ty), value, binding.value.span)
     } else {
@@ -11940,8 +11942,12 @@ parse_let_bindings :: proc(form: CST_Form) -> (bindings: [dynamic]Binding, err: 
                 } else if let_binding_has_errdefer_marker(form.items[:], marker_i) {
                     return bindings, Compile_Error{message = ":errdefer is only supported on [value err] :or-return bindings", span = form.items[marker_i].span}, false
                 }
+                name := map_name(target.text[:len(target.text)-1])
+                if name == "_" {
+                    name = ""
+                }
                 append(&bindings, Binding{
-                    name               = map_name(target.text[:len(target.text)-1]),
+                    name               = name,
                     is_typed           = true,
                     ty                 = type_text,
                     deferred_delete    = deferred_delete,
@@ -11975,8 +11981,12 @@ parse_let_bindings :: proc(form: CST_Form) -> (bindings: [dynamic]Binding, err: 
                 } else if let_binding_has_errdefer_marker(form.items[:], next_i) {
                     return bindings, Compile_Error{message = ":errdefer is only supported on [value err] :or-return bindings", span = form.items[next_i].span}, false
                 }
+                name := map_name(target.text)
+                if name == "_" {
+                    name = ""
+                }
                 append(&bindings, Binding{
-                    name               = map_name(target.text),
+                    name               = name,
                     deferred_delete    = deferred_delete,
                     defer_with_cleanup = defer_with_cleanup,
                     cleanup            = cleanup,

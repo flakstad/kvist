@@ -1,0 +1,15 @@
+// `_` in a let binding evaluates the expression and discards the result.
+(package main)
+(import "core:fmt")
+
+(defn observe [label: string, x: int] -> int
+  (fmt.println label x)
+  x)
+
+(defn main [] -> int
+  (let [_ (observe "first" 1)
+        _ (observe "second" 2)
+        _: int (observe "typed" 3)
+        result (observe "kept" 42)]
+    result))
+

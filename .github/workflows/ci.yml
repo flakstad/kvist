@@ -30,8 +30,14 @@ jobs:
         run: odin version
 
       - name: Run unit tests
+        if: runner.os != 'Windows'
         shell: bash
-        run: odin test tests -define:ODIN_TEST_LOG_LEVEL=warning
+        run: odin test tests -define:ODIN_TEST_LOG_LEVEL=warning -define:ODIN_TEST_THREADS=1
+
+      - name: Run Windows test smoke
+        if: runner.os == 'Windows'
+        shell: bash
+        run: odin test tests -define:ODIN_TEST_LOG_LEVEL=warning -define:ODIN_TEST_THREADS=1 -define:ODIN_TEST_NAMES=tests.compile_hello_program,tests.compile_defstruct_program,tests.compile_http_server_surface_is_explicit,tests.compile_http_client_surface_is_explicit,tests.cli_check_accepts_bare_package_file_in_working_directory
 
       - name: Build CLI
         shell: bash

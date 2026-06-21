@@ -116,9 +116,13 @@ Constructors and text helpers:
 (name .field)       ;; "field"
 (name :else)        ;; "else"
 (text form-or-value)
+(source :db/add)    ;; ":db/add"
 (str "prefix-" (name sym))
 (gensym "tmp")
 ```
+
+Use `source` when the original token spelling is data, such as EDN-style
+keywords in DSLs. `name` and `text` normalize symbols and keywords.
 
 Use `error` for macro validation failures:
 
