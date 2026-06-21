@@ -2,7 +2,7 @@
 ;; field-selector inspection.
 
 (defmacro deffield-name [const-name field]
-  (if (field-selector? field)
+  (if (and (symbol? const-name) (field-selector? field))
     (let [typed-name (symbol (str (name const-name) ":"))]
       (quasiquote
         (def (unquote typed-name) string (unquote (name field)))))
@@ -14,6 +14,17 @@
       (defn (unquote fn-name) [] -> string
         (let [(unquote tmp) (unquote value)]
           (unquote tmp))))))
+
+(defmacro tag-kind [tag]
+  (if (contains? ["info" "warn"] (name tag))
+    (quote "shown")
+    (quote "hidden")))
+
+(defmacro compact-fields? [fields]
+  (if (and (brace? fields)
+           (<= (count fields) 4))
+    (quote true)
+    (quote false)))
 
 (defmacro defentity [name fields]
   (if (brace? fields)
@@ -29,10 +40,14 @@
 (defentity User {name: string age: int})
 (deffield-name User-Name-Field .name)
 (defstring-fn greeting "hello")
+(def Tag-Label: string (tag-kind info))
+(def Compact-User-Fields: bool (compact-fields? {name: string age: int}))
 
 (defn macro-authoring-demo [] -> string
   (let [user (make-User)]
-    (if (= User-Name-Field "name")
+    (if (and (= User-Name-Field "name")
+             (= Tag-Label "shown")
+             Compact-User-Fields)
       (greeting)
       user.name)))
 

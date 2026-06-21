@@ -1,5 +1,6 @@
 package kvist
 
+import "core:fmt"
 import "core:strings"
 
 is_whitespace :: proc(ch: byte) -> bool {
@@ -419,12 +420,31 @@ tokenize :: proc(source: string) -> (tokens: [dynamic]Token, err: Compile_Error,
     return tokenize_with_origin(source, .File)
 }
 
+delimiter_text :: proc(kind: Token_Kind) -> string {
+    #partial switch kind {
+    case .L_Paren:
+        return "("
+    case .R_Paren:
+        return ")"
+    case .L_Bracket:
+        return "["
+    case .R_Bracket:
+        return "]"
+    case .L_Brace, .L_Set_Brace:
+        return "{"
+    case .R_Brace:
+        return "}"
+    case:
+        return "delimiter"
+    }
+}
+
 parse_container :: proc(tokens: []Token, index: ^int, open_kind, close_kind: Token_Kind, out_kind: CST_Form_Kind) -> (form: CST_Form, err: Compile_Error, ok: bool) {
     start := tokens[index^].span.start
     source_kind := tokens[index^].span.source
     index^ += 1
     items: [dynamic]CST_Form
-    for index^ < len(tokens) && tokens[index^].kind != close_kind {
+    for index^ < len(tokens) && tokens[index^].kind != close_kind && tokens[index^].kind != .EOF {
         if tokens[index^].kind == .Discard {
             index^ += 1
             skipped, err_skip, ok_skip := parse_form(tokens, index)
@@ -448,7 +468,7 @@ parse_container :: proc(tokens: []Token, index: ^int, open_kind, close_kind: Tok
     }
     if index^ >= len(tokens) || tokens[index^].kind != close_kind {
         delete_borrowed_cst_form_slice(&items)
-        return form, Compile_Error{message = "missing closing delimiter", span = make_span(start, start, source_kind)}, false
+        return form, Compile_Error{message = fmt.tprintf("missing closing delimiter `%s` for `%s` opened here", delimiter_text(close_kind), delimiter_text(open_kind)), span = make_span(start, start, source_kind)}, false
     }
     end := tokens[index^].span.end
     index^ += 1
@@ -503,7 +523,7 @@ parse_primary_form :: proc(tokens: []Token, index: ^int) -> (form: CST_Form, err
         delete_borrowed_cst_form(&skipped)
         return parse_form(tokens, index)
     case .R_Paren, .R_Bracket, .R_Brace:
-        return form, Compile_Error{message = "unexpected closing delimiter", span = token.span}, false
+        return form, Compile_Error{message = fmt.tprintf("unexpected closing delimiter `%s`", delimiter_text(token.kind)), span = token.span}, false
     case .EOF:
         return form, Compile_Error{message = "unexpected end of input", span = token.span}, false
     }
@@ -613,7 +633,7 @@ parse_attached_postfix :: proc(tokens: []Token, index: ^int, base: CST_Form) -> 
         source_kind := open.span.source
         index^ += 1
             items: [dynamic]CST_Form
-            for index^ < len(tokens) && tokens[index^].kind != .R_Bracket {
+            for index^ < len(tokens) && tokens[index^].kind != .R_Bracket && tokens[index^].kind != .EOF {
                 if tokens[index^].kind == .Discard {
                     index^ += 1
                     skipped, err_skip, ok_skip := parse_form(tokens, index)
@@ -640,7 +660,7 @@ parse_attached_postfix :: proc(tokens: []Token, index: ^int, base: CST_Form) -> 
             if index^ >= len(tokens) || tokens[index^].kind != .R_Bracket {
                 delete_borrowed_cst_form(&current)
                 delete_borrowed_cst_form_slice(&items)
-                return form, Compile_Error{message = "missing closing delimiter", span = make_span(open.span.start, open.span.start, source_kind)}, false
+                return form, Compile_Error{message = "missing closing delimiter `]` for `[` opened here", span = make_span(open.span.start, open.span.start, source_kind)}, false
             }
             close := tokens[index^]
             index^ += 1

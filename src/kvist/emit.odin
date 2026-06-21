@@ -4449,7 +4449,43 @@ owned_result_usage_error :: proc(form: CST_Form, allow_root_owned: bool) -> (Com
     return {}, false
 }
 
+form_head_is_case :: proc(form: CST_Form) -> bool {
+    return len(form.items) > 0 &&
+           (is_symbol(form.items[0], "case") ||
+            is_symbol(form.items[0], "core-case") ||
+            is_symbol(form.items[0], "core/case") ||
+            is_symbol(form.items[0], "core.case"))
+}
+
+form_head_is_do :: proc(form: CST_Form) -> bool {
+    return len(form.items) > 0 && (is_symbol(form.items[0], "do") || is_symbol(form.items[0], "block"))
+}
+
+form_head_is_statement_only :: proc(form: CST_Form) -> (string, bool) {
+    if form.kind != .List || len(form.items) == 0 || form.items[0].kind != .Symbol {
+        return "", false
+    }
+    head := form.items[0].text
+    switch head {
+    case "when", "core/when", "for", "while", "defer", "errdefer", "set!", "mut!", "inc!", "dec!", "toggle!", "negate!", "return":
+        return head, true
+    }
+    return "", false
+}
+
 emit_expr_for_expected_type :: proc(e: ^Emitter, form: CST_Form, expected_type := "") -> (string, Compile_Error, bool) {
+    if form.kind == .List && len(form.items) > 0 && is_symbol(form.items[0], "if") {
+        return emit_if_expr(e, form, expected_type)
+    }
+    if form.kind == .List && len(form.items) > 0 && is_symbol(form.items[0], "let") {
+        return emit_block_expr(e, form, expected_type)
+    }
+    if form.kind == .List && form_head_is_do(form) {
+        return emit_block_expr(e, form, expected_type)
+    }
+    if form.kind == .List && form_head_is_case(form) {
+        return emit_case_expr(e, form, expected_type)
+    }
     if expected_type != "" && !strings.contains(expected_type, "$") && (form.kind == .Vector || form.kind == .Brace || form.kind == .Set) {
         return emit_inferred_literal(e, form, expected_type)
     }
@@ -4457,8 +4493,15 @@ emit_expr_for_expected_type :: proc(e: ^Emitter, form: CST_Form, expected_type :
     if !ok {
         return "", err, false
     }
-    if expected_type != "" && type_text_is_slice(expected_type) && form.kind == .Symbol {
+    if expected_type != "" && type_text_is_slice(expected_type) {
         actual_type, ok_actual := obvious_form_type(e, form)
+        if !ok_actual && form.kind == .List && len(form.items) >= 2 {
+            parsed_type, _, ok_parsed_type := parse_type_text(form.items[0])
+            if ok_parsed_type {
+                actual_type = parsed_type
+                ok_actual = true
+            }
+        }
         expected_elem, ok_expected_elem := collection_element_type(expected_type)
         actual_elem, ok_actual_elem := dynamic_array_element_type(actual_type)
         if ok_actual && ok_expected_elem && ok_actual_elem && expected_elem == actual_elem {
@@ -4466,6 +4509,137 @@ emit_expr_for_expected_type :: proc(e: ^Emitter, form: CST_Form, expected_type :
         }
     }
     return text, {}, true
+}
+
+emit_block_expr :: proc(e: ^Emitter, form: CST_Form, expected_type := "") -> (string, Compile_Error, bool) {
+    ty := expected_type
+    if ty == "" {
+        return "", Compile_Error{message = "block expression needs an expected type; add a let binding type or use it where the type is known", span = form.span}, false
+    }
+    body := []CST_Form{form}
+    captures := collect_proc_literal_captures(e, body, nil)
+    defer delete(captures)
+    proc_text, err_proc, ok_proc := emit_proc_literal_text(e, captures[:], Return_Spec{kind = .Single, single_ty = ty}, body)
+    if !ok_proc {
+        return "", err_proc, false
+    }
+    args: [dynamic]string
+    defer delete(args)
+    for capture in captures {
+        append(&args, capture.name)
+    }
+    return fmt.tprintf("(%s)(%s)", proc_text, strings.join(args[:], ", ", context.temp_allocator)), {}, true
+}
+
+branch_type_mismatch_error :: proc(e: ^Emitter, lhs, rhs: CST_Form, what: string, span: Span) -> (Compile_Error, bool) {
+    lhs_ty, ok_lhs_ty := obvious_form_type(e, lhs)
+    rhs_ty, ok_rhs_ty := obvious_form_type(e, rhs)
+    if ok_lhs_ty && ok_rhs_ty && lhs_ty != rhs_ty {
+        return Compile_Error{message = fmt.tprintf("%s branches have different obvious types: %s and %s", what, lhs_ty, rhs_ty), span = span}, true
+    }
+    return {}, false
+}
+
+emit_if_expr :: proc(e: ^Emitter, form: CST_Form, expected_type := "") -> (string, Compile_Error, bool) {
+    if len(form.items) != 4 {
+        return "", Compile_Error{message = "if expression expects test, then, and else", span = form.span}, false
+    }
+    if err_branch, bad_branch := branch_type_mismatch_error(e, form.items[2], form.items[3], "if expression", form.span); bad_branch {
+        return "", err_branch, false
+    }
+    test, err_test, ok_test := emit_expr(e, form.items[1])
+    if !ok_test {
+        return "", err_test, false
+    }
+    then_value, err_then, ok_then := emit_expr_for_expected_type(e, form.items[2], expected_type)
+    if !ok_then {
+        return "", err_then, false
+    }
+    else_value, err_else, ok_else := emit_expr_for_expected_type(e, form.items[3], expected_type)
+    if !ok_else {
+        return "", err_else, false
+    }
+    return fmt.tprintf("(%s if %s else %s)", then_value, test, else_value), {}, true
+}
+
+emit_case_clause_test_expr :: proc(e: ^Emitter, subject: string, clause: CST_Form) -> (string, Compile_Error, bool) {
+    if clause.kind == .Vector {
+        if len(clause.items) == 0 {
+            return "", Compile_Error{message = "case expression group expects at least one value", span = clause.span}, false
+        }
+        builder := strings.builder_make()
+        defer strings.builder_destroy(&builder)
+        for item, idx in clause.items {
+            item_text, err_item, ok_item := emit_expr(e, item)
+            if !ok_item {
+                return "", err_item, false
+            }
+            if idx > 0 {
+                strings.write_string(&builder, " || ")
+            }
+            fmt.sbprintf(&builder, "(%s == %s)", subject, item_text)
+        }
+        return strings.clone(strings.to_string(builder)), {}, true
+    }
+    item_text, err_item, ok_item := emit_expr(e, clause)
+    if !ok_item {
+        return "", err_item, false
+    }
+    return fmt.tprintf("%s == %s", subject, item_text), {}, true
+}
+
+emit_case_expr :: proc(e: ^Emitter, form: CST_Form, expected_type := "") -> (string, Compile_Error, bool) {
+    if len(form.items) < 4 {
+        return "", Compile_Error{message = "case expression expects subject, clauses, and :else", span = form.span}, false
+    }
+    if (len(form.items)-2)%2 != 0 {
+        return "", Compile_Error{message = "case expression expects clause/body pairs", span = form.span}, false
+    }
+    if case_has_type_payload_patterns(form) {
+        return emit_block_expr(e, form, expected_type)
+    }
+    subject, err_subject, ok_subject := emit_expr(e, form.items[1])
+    if !ok_subject {
+        return "", err_subject, false
+    }
+    if !is_else_keyword(form.items[len(form.items)-2]) {
+        return "", Compile_Error{message = "case expression requires final :else clause", span = form.span}, false
+    }
+
+    else_form := form.items[len(form.items)-1]
+    i_check := 2
+    for i_check < len(form.items)-2 {
+        if is_else_keyword(form.items[i_check]) {
+            return "", Compile_Error{message = "case expression :else must be the final clause", span = form.items[i_check].span}, false
+        }
+        if err_branch, bad_branch := branch_type_mismatch_error(e, form.items[i_check+1], else_form, "case expression", form.span); bad_branch {
+            return "", err_branch, false
+        }
+        i_check += 2
+    }
+
+    result, err_result, ok_result := emit_expr_for_expected_type(e, form.items[len(form.items)-1], expected_type)
+    if !ok_result {
+        return "", err_result, false
+    }
+    i := len(form.items) - 4
+    for i >= 2 {
+        clause := form.items[i]
+        if is_else_keyword(clause) {
+            return "", Compile_Error{message = "case expression :else must be the final clause", span = clause.span}, false
+        }
+        test, err_test, ok_test := emit_case_clause_test_expr(e, subject, clause)
+        if !ok_test {
+            return "", err_test, false
+        }
+        value, err_value, ok_value := emit_expr_for_expected_type(e, form.items[i+1], expected_type)
+        if !ok_value {
+            return "", err_value, false
+        }
+        result = fmt.tprintf("(%s if %s else %s)", value, test, result)
+        i -= 2
+    }
+    return result, {}, true
 }
 
 returned_binding_name :: proc(form: CST_Form) -> (string, bool) {
@@ -7482,6 +7656,24 @@ emit_operator_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Erro
             fmt.sbprintf(&builder, "(%s)", value)
         }
         return strings.clone(strings.to_string(builder)), {}, true
+    }
+
+    if op == "min" || op == "max" {
+        if len(form.items) < 3 {
+            return "", Compile_Error{message = fmt.tprintf("%s expects at least two arguments", op), span = form.span}, false
+        }
+        result, err_result, ok_result := emit_expr(e, form.items[1])
+        if !ok_result {
+            return "", err_result, false
+        }
+        for arg in form.items[2:] {
+            value, err_value, ok_value := emit_expr(e, arg)
+            if !ok_value {
+                return "", err_value, false
+            }
+            result = fmt.tprintf("%s(%s, %s)", op, result, value)
+        }
+        return result, {}, true
     }
 
     if op == "-" {
@@ -11507,6 +11699,18 @@ emit_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) 
         if is_symbol(form.items[0], "proc") {
             return "", Compile_Error{message = "`proc` has been removed; use `fn` for function literals and function types, or `defn` for named functions", span = form.items[0].span}, false
         }
+        if head, ok_statement := form_head_is_statement_only(form); ok_statement {
+            return "", Compile_Error{message = fmt.tprintf("%s is a statement and cannot be used as an expression", display_head_name(head)), span = form.items[0].span}, false
+        }
+        if is_symbol(form.items[0], "if") {
+            return emit_if_expr(e, form)
+        }
+        if is_symbol(form.items[0], "let") || form_head_is_do(form) {
+            return emit_block_expr(e, form)
+        }
+        if form_head_is_case(form) {
+            return emit_case_expr(e, form)
+        }
         if is_symbol(form.items[0], "fn") {
             return emit_proc_literal_expr(e, form)
         }
@@ -12580,7 +12784,14 @@ emit_case_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns:
 
 emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Return_Spec) -> (Compile_Error, bool) {
     if form.kind != .List {
-        expr, err_expr, ok_expr := emit_expr(e, form)
+        expr: string
+        err_expr: Compile_Error
+        ok_expr: bool
+        if last_in_proc && returns.kind == .Single {
+            expr, err_expr, ok_expr = emit_expr_for_expected_type(e, form, returns.single_ty)
+        } else {
+            expr, err_expr, ok_expr = emit_expr(e, form)
+        }
         if !ok_expr {
             return err_expr, false
         }
@@ -12600,7 +12811,14 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
 
     head := form.items[0]
     if head.kind != .Symbol {
-        expr, err_expr, ok_expr := emit_expr(e, form)
+        expr: string
+        err_expr: Compile_Error
+        ok_expr: bool
+        if last_in_proc && returns.kind == .Single {
+            expr, err_expr, ok_expr = emit_expr_for_expected_type(e, form, returns.single_ty)
+        } else {
+            expr, err_expr, ok_expr = emit_expr(e, form)
+        }
         if !ok_expr {
             return err_expr, false
         }
@@ -12812,7 +13030,14 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
             if bad_owned {
                 return err_owned, false
             }
-            value, err_value, ok_value := emit_expr(e, form.items[1])
+            value: string
+            err_value: Compile_Error
+            ok_value: bool
+            if returns.kind == .Single {
+                value, err_value, ok_value = emit_expr_for_expected_type(e, form.items[1], returns.single_ty)
+            } else {
+                value, err_value, ok_value = emit_expr(e, form.items[1])
+            }
             if !ok_value {
                 return err_value, false
             }
@@ -13085,7 +13310,14 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
                 return err_owned, false
             }
         }
-        expr, err_expr, ok_expr := emit_expr(e, form)
+        expr: string
+        err_expr: Compile_Error
+        ok_expr: bool
+        if last_in_proc && returns.kind == .Single {
+            expr, err_expr, ok_expr = emit_expr_for_expected_type(e, form, returns.single_ty)
+        } else {
+            expr, err_expr, ok_expr = emit_expr(e, form)
+        }
         if !ok_expr {
             return err_expr, false
         }

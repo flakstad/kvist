@@ -291,6 +291,12 @@ macro_truthy :: proc(value: Macro_Value) -> bool {
 
 macro_value_equal :: proc(a, b: Macro_Value) -> bool {
     if a.kind != b.kind {
+        if a.kind == .Int && b.kind == .Float {
+            return f64(a.int_value) == b.float_value
+        }
+        if a.kind == .Float && b.kind == .Int {
+            return a.float_value == f64(b.int_value)
+        }
         return false
     }
     switch a.kind {
@@ -326,6 +332,26 @@ macro_value_equal :: proc(a, b: Macro_Value) -> bool {
         return true
     }
     return false
+}
+
+macro_value_number :: proc(value: Macro_Value) -> (f64, bool) {
+    #partial switch value.kind {
+    case .Int:
+        return f64(value.int_value), true
+    case .Float:
+        return value.float_value, true
+    case .Form:
+        if value.form.kind == .Number {
+            parsed_int, ok_int := strconv.parse_int(value.form.text)
+            if ok_int {
+                return f64(parsed_int), true
+            }
+            parsed_float, ok_float := strconv.parse_f64(value.form.text)
+            return parsed_float, ok_float
+        }
+    case:
+    }
+    return 0, false
 }
 
 macro_value_to_form :: proc(value: Macro_Value, span: Span) -> (CST_Form, Compile_Error, bool) {
@@ -1265,6 +1291,43 @@ macro_eval_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_
                 return macro_owned_form_value(quoted), Compile_Error{}, true
             case "do":
                 return macro_eval_sequence(form.items[1:], macros, bindings)
+            case "not", "core.not":
+                if len(form.items) != 2 {
+                    return Macro_Value{}, Compile_Error{message = "not expects one argument", span = form.span}, false
+                }
+                value, err_value, ok_value := macro_eval_expr(form.items[1], macros, bindings)
+                if !ok_value {
+                    return Macro_Value{}, err_value, false
+                }
+                truthy := macro_truthy(value)
+                macro_value_delete_backing(&value)
+                return macro_bool_value(!truthy), Compile_Error{}, true
+            case "and":
+                for arg in form.items[1:] {
+                    value, err_value, ok_value := macro_eval_expr(arg, macros, bindings)
+                    if !ok_value {
+                        return Macro_Value{}, err_value, false
+                    }
+                    truthy := macro_truthy(value)
+                    macro_value_delete_backing(&value)
+                    if !truthy {
+                        return macro_bool_value(false), Compile_Error{}, true
+                    }
+                }
+                return macro_bool_value(true), Compile_Error{}, true
+            case "or":
+                for arg in form.items[1:] {
+                    value, err_value, ok_value := macro_eval_expr(arg, macros, bindings)
+                    if !ok_value {
+                        return Macro_Value{}, err_value, false
+                    }
+                    truthy := macro_truthy(value)
+                    macro_value_delete_backing(&value)
+                    if truthy {
+                        return macro_bool_value(true), Compile_Error{}, true
+                    }
+                }
+                return macro_bool_value(false), Compile_Error{}, true
             case "if":
                 if len(form.items) != 4 {
                     return Macro_Value{}, Compile_Error{message = "if expects condition, then, and else", span = form.span}, false
@@ -1279,6 +1342,84 @@ macro_eval_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_
                     return macro_eval_expr(form.items[2], macros, bindings)
                 }
                 return macro_eval_expr(form.items[3], macros, bindings)
+            case "cond":
+                if len(form.items) < 3 {
+                    return Macro_Value{}, Compile_Error{message = "cond expects at least one clause", span = form.span}, false
+                }
+                if (len(form.items)-1)%2 != 0 {
+                    return Macro_Value{}, Compile_Error{message = "cond expects test/body pairs", span = form.span}, false
+                }
+                i := 1
+                for i < len(form.items) {
+                    test_form := form.items[i]
+                    if test_form.kind == .Keyword && test_form.text == ":else" {
+                        if i+2 < len(form.items) {
+                            return Macro_Value{}, Compile_Error{message = "cond :else must be the final clause", span = test_form.span}, false
+                        }
+                        return macro_eval_expr(form.items[i+1], macros, bindings)
+                    }
+                    test_value, err_test, ok_test := macro_eval_expr(test_form, macros, bindings)
+                    if !ok_test {
+                        return Macro_Value{}, err_test, false
+                    }
+                    truthy := macro_truthy(test_value)
+                    macro_value_delete_backing(&test_value)
+                    if truthy {
+                        return macro_eval_expr(form.items[i+1], macros, bindings)
+                    }
+                    i += 2
+                }
+                return macro_nil_value(), Compile_Error{}, true
+            case "case":
+                if len(form.items) < 4 {
+                    return Macro_Value{}, Compile_Error{message = "case expects subject and clauses", span = form.span}, false
+                }
+                if (len(form.items)-2)%2 != 0 {
+                    return Macro_Value{}, Compile_Error{message = "case expects clause/body pairs", span = form.span}, false
+                }
+                subject, err_subject, ok_subject := macro_eval_expr(form.items[1], macros, bindings)
+                if !ok_subject {
+                    return Macro_Value{}, err_subject, false
+                }
+                defer macro_value_delete_backing(&subject)
+                i := 2
+                for i < len(form.items) {
+                    clause := form.items[i]
+                    if clause.kind == .Keyword && clause.text == ":else" {
+                        if i+2 < len(form.items) {
+                            return Macro_Value{}, Compile_Error{message = "case :else must be the final clause", span = clause.span}, false
+                        }
+                        return macro_eval_expr(form.items[i+1], macros, bindings)
+                    }
+                    matched := false
+                    if clause.kind == .Vector {
+                        for item in clause.items {
+                            value, err_value, ok_value := macro_eval_expr(item, macros, bindings)
+                            if !ok_value {
+                                return Macro_Value{}, err_value, false
+                            }
+                            if macro_value_equal(subject, value) {
+                                matched = true
+                            }
+                            macro_value_delete_backing(&value)
+                            if matched {
+                                break
+                            }
+                        }
+                    } else {
+                        value, err_value, ok_value := macro_eval_expr(clause, macros, bindings)
+                        if !ok_value {
+                            return Macro_Value{}, err_value, false
+                        }
+                        matched = macro_value_equal(subject, value)
+                        macro_value_delete_backing(&value)
+                    }
+                    if matched {
+                        return macro_eval_expr(form.items[i+1], macros, bindings)
+                    }
+                    i += 2
+                }
+                return macro_nil_value(), Compile_Error{}, true
             case "let":
                 if len(form.items) < 3 || form.items[1].kind != .Vector {
                     return Macro_Value{}, Compile_Error{message = "macro let expects binding vector and body", span = form.span}, false
@@ -1713,6 +1854,85 @@ macro_eval_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_
                 }
                 macro_value_delete_backing(&previous)
                 return macro_bool_value(true), Compile_Error{}, true
+            case "<", "<=", ">", ">=":
+                if len(form.items) < 3 {
+                    return Macro_Value{}, Compile_Error{message = fmt.tprintf("%s expects at least two arguments", head.text), span = form.span}, false
+                }
+                previous, err_previous, ok_previous := macro_eval_expr(form.items[1], macros, bindings)
+                if !ok_previous {
+                    return Macro_Value{}, err_previous, false
+                }
+                previous_number, ok_previous_number := macro_value_number(previous)
+                if !ok_previous_number {
+                    macro_value_delete_backing(&previous)
+                    return Macro_Value{}, Compile_Error{message = fmt.tprintf("%s expects numeric arguments", head.text), span = form.items[1].span}, false
+                }
+                macro_value_delete_backing(&previous)
+                for item in form.items[2:] {
+                    current, err_current, ok_current := macro_eval_expr(item, macros, bindings)
+                    if !ok_current {
+                        return Macro_Value{}, err_current, false
+                    }
+                    current_number, ok_current_number := macro_value_number(current)
+                    if !ok_current_number {
+                        macro_value_delete_backing(&current)
+                        return Macro_Value{}, Compile_Error{message = fmt.tprintf("%s expects numeric arguments", head.text), span = item.span}, false
+                    }
+                    macro_value_delete_backing(&current)
+                    matched := false
+                    switch head.text {
+                    case "<":
+                        matched = previous_number < current_number
+                    case "<=":
+                        matched = previous_number <= current_number
+                    case ">":
+                        matched = previous_number > current_number
+                    case ">=":
+                        matched = previous_number >= current_number
+                    }
+                    if !matched {
+                        return macro_bool_value(false), Compile_Error{}, true
+                    }
+                    previous_number = current_number
+                }
+                return macro_bool_value(true), Compile_Error{}, true
+            case "contains?", "core.contains?", "core-contains?":
+                if len(form.items) != 3 {
+                    return Macro_Value{}, Compile_Error{message = "contains? expects collection and value", span = form.span}, false
+                }
+                collection, err_collection, ok_collection := macro_eval_expr(form.items[1], macros, bindings)
+                if !ok_collection {
+                    return Macro_Value{}, err_collection, false
+                }
+                needle, err_needle, ok_needle := macro_eval_expr(form.items[2], macros, bindings)
+                if !ok_needle {
+                    macro_value_delete_backing(&collection)
+                    return Macro_Value{}, err_needle, false
+                }
+                defer macro_value_delete_backing(&collection)
+                defer macro_value_delete_backing(&needle)
+                if collection.kind == .String {
+                    if needle.kind != .String {
+                        return Macro_Value{}, Compile_Error{message = "contains? on strings expects a string needle", span = form.items[2].span}, false
+                    }
+                    return macro_bool_value(strings.contains(collection.string_value, needle.string_value)), Compile_Error{}, true
+                }
+                forms, err_forms, ok_forms := macro_list_from_value(collection, form.items[1].span)
+                if !ok_forms {
+                    return Macro_Value{}, err_forms, false
+                }
+                for candidate_form in forms {
+                    candidate, _, ok_candidate := macro_eval_expr(candidate_form, macros, bindings)
+                    if !ok_candidate {
+                        candidate = macro_form_value(candidate_form)
+                    }
+                    if macro_value_equal(candidate, needle) {
+                        macro_value_delete_backing(&candidate)
+                        return macro_bool_value(true), Compile_Error{}, true
+                    }
+                    macro_value_delete_backing(&candidate)
+                }
+                return macro_bool_value(false), Compile_Error{}, true
             case "form?":
                 if len(form.items) != 2 {
                     return Macro_Value{}, Compile_Error{message = "form? expects one argument", span = form.span}, false

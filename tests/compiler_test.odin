@@ -119,6 +119,333 @@ main :: proc() {
 }
 
 @(test)
+compile_if_expression_in_let_binding :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn pick [second?: bool] -> int
+  (let [index (if second? 1 0)]
+    index))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "index := (1 if second_p else 0)"), true)
+}
+
+@(test)
+reject_if_expression_without_else :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn pick [second?: bool] -> int
+  (let [index (if second? 1)]
+    index))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    defer delete(err.message)
+    testing.expect_value(t, err.message, "if expression expects test, then, and else")
+}
+
+@(test)
+reject_when_expression_in_let_binding :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn pick [second?: bool] -> int
+  (let [index (when second? 1)]
+    index))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    defer delete(err.message)
+    testing.expect_value(t, err.message, "if expression expects test, then, and else")
+}
+
+@(test)
+compile_cond_expression_in_let_binding :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn sign [n: int] -> int
+  (let [value (cond
+                (< n 0) -1
+                (= n 0) 0
+                :else 1)]
+    value))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "value := (-1 if (n) < (0) else (0 if (n) == (0) else 1))"), true)
+}
+
+@(test)
+compile_case_expression_in_let_binding :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn label [n: int] -> string
+  (let [value (case n
+                1 "one"
+                [2 3] "few"
+                :else "many")]
+    value))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, `value := ("one" if n == 1 else ("few" if (n == 2) || (n == 3) else "many"))`), true)
+}
+
+@(test)
+reject_case_expression_without_else :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn label [n: int] -> string
+  (let [value (case n
+                1 "one")]
+    value))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    defer delete(err.message)
+    testing.expect_value(t, err.message, "case expression requires final :else clause")
+}
+
+@(test)
+compile_min_max_expressions :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn clampish [x: int lo: int hi: int] -> int
+  (max lo (min x hi)))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "return max(lo, min(x, hi))"), true)
+}
+
+@(test)
+compile_direct_dynamic_array_expr_borrows_as_slice_argument :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn total [xs: []int] -> int
+  (count xs))
+
+(defn demo [] -> int
+  (total ([dynamic]int [1 2 3])))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "return total(([dynamic]int{1, 2, 3})[:])"), true)
+}
+
+@(test)
+compile_let_expression_with_expected_type :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn id [x: int] -> int
+  x)
+
+(defn demo [] -> int
+  (id (let [base 40]
+        (+ base 2))))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "return id(\n        (proc() -> int {"), true)
+    testing.expect_value(t, strings.contains(output, "base := 40"), true)
+    testing.expect_value(t, strings.contains(output, "return (base) + (2)"), true)
+}
+
+@(test)
+compile_do_expression_with_expected_type :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn demo [] -> int
+  (let [value: int (do
+                    (println "side")
+                    7)]
+    value))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "value: int = (proc() -> int {"), true)
+    testing.expect_value(t, strings.contains(output, `fmt.println("side")`), true)
+    testing.expect_value(t, strings.contains(output, "return 7"), true)
+}
+
+@(test)
+compile_final_let_expression_uses_proc_return_type :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn demo [] -> int
+  (let [base 40]
+    (+ base 2)))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "return (base) + (2)"), true)
+}
+
+@(test)
+reject_untyped_block_expression_without_expected_type :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn demo []
+  (let [value (do
+                (println "side")
+                1)]
+    (println value)))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    defer delete(err.message)
+    testing.expect_value(t, err.message, "block expression needs an expected type; add a let binding type or use it where the type is known")
+}
+
+@(test)
+reject_if_expression_with_obvious_branch_type_mismatch :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn demo [flag: bool] -> string
+  (let [value: string (if flag "ok" true)]
+    value))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    defer delete(err.message)
+    testing.expect_value(t, err.message, "if expression branches have different obvious types: string and bool")
+}
+
+@(test)
+reject_case_expression_with_obvious_branch_type_mismatch :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn demo [mode: int] -> string
+  (let [value: string (case mode
+                        0 "zero"
+                        :else true)]
+    value))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    defer delete(err.message)
+    testing.expect_value(t, err.message, "case expression branches have different obvious types: string and bool")
+}
+
+@(test)
+compile_type_payload_case_expression_with_expected_type :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct Connected {id: int})
+(defstruct Disconnected {reason: string})
+(defunion Event {
+  connected: Connected
+  disconnected: Disconnected
+})
+
+(defn score [event: Event] -> int
+  (let [value: int (case event
+                    (Connected conn) conn.id
+                    (Disconnected _) 0
+                    :else -1)]
+    value))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "value: int = (proc(event: Event) -> int {"), true)
+    testing.expect_value(t, strings.contains(output, "switch kvist_case_"), true)
+    testing.expect_value(t, strings.contains(output, "return conn.id"), true)
+}
+
+@(test)
+compile_grouped_enum_case_expression :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defenum Method [Get Head Post])
+
+(defn cost [method: Method] -> int
+  (let [value (case method
+                [.Get .Head] 1
+                .Post 2
+                :else 3)]
+    value))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "value := (1 if (method == .Get) || (method == .Head) else (2 if method == .Post else 3))"), true)
+}
+
+@(test)
+reject_statement_only_form_in_expression_position :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn demo [] -> int
+  (let [value: int (while true
+                    (return 1))]
+    value))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    defer delete(err.message)
+    testing.expect_value(t, err.message, "while is a statement and cannot be used as an expression")
+}
+
+@(test)
 compile_defstruct_program :: proc(t: ^testing.T) {
     source := `(package main)
 
@@ -2281,6 +2608,28 @@ main :: proc() {
 }
 `
     testing.expect_value(t, output, expected)
+}
+
+@(test)
+reader_reports_expected_missing_closing_delimiter :: proc(t: ^testing.T) {
+    _, err, ok := kvist.compile_source(`(package main)
+
+(defn demo []
+  (println "unterminated"`)
+    testing.expect_value(t, ok, false)
+    defer delete(err.message)
+    testing.expect_value(t, err.message, "missing closing delimiter `)` for `(` opened here")
+}
+
+@(test)
+reader_reports_actual_unexpected_closing_delimiter :: proc(t: ^testing.T) {
+    _, err, ok := kvist.compile_source(`(package main)
+
+(defn demo []
+  (println "extra")) )`)
+    testing.expect_value(t, ok, false)
+    defer delete(err.message)
+    testing.expect_value(t, err.message, "unexpected closing delimiter `)`")
 }
 
 @(test)
@@ -6061,6 +6410,34 @@ compile_let_defer_final_case_scalar_use :: proc(t: ^testing.T) {
 }
 
 @(test)
+compile_typed_block_expression_preserves_defer_and_source_map :: proc(t: ^testing.T) {
+    source := `(package main)
+(import core "kvist:core")
+
+(defn total [] -> int
+  (let [answer: int (do
+                      (let [xs ([dynamic]int [1 2 3]) :defer]
+                        (count xs)))]
+    answer))`
+
+    result, err, ok := kvist.compile_source_with_map(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(t, len(result.warnings), 0)
+    testing.expect_value(t, len(result.source_map) > 0, true)
+    testing.expect_value(t, strings.contains(result.output, "answer: int = (proc() -> int {"), true)
+    testing.expect_value(t, strings.contains(result.output, "defer delete(xs)"), true)
+    testing.expect_value(t, strings.contains(result.output, "return len((xs)[:])"), true)
+}
+
+@(test)
 compile_let_defer_binding :: proc(t: ^testing.T) {
     source := `(package main)
 
@@ -6424,6 +6801,141 @@ macroexpand_if_let :: proc(t: ^testing.T) {
     expected := `(let [[value found] (query)] (if found value 0))
 `
     testing.expect_value(t, output, expected)
+}
+
+@(test)
+macroexpand_evaluates_and_or_in_macro_predicates :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defmacro emit-flag []
+  (if (and (symbol? (quote if))
+           (or (= (name (quote if)) "when")
+               (= (name (quote if)) "if")))
+    (quote (def matched true))
+    (quote (def missed true))))
+
+(emit-flag)`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "matched :: true"), true)
+    testing.expect_value(t, strings.contains(output, "missed"), false)
+}
+
+@(test)
+macroexpand_evaluates_cond_and_case_in_macro_predicates :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defmacro emit-kind [head]
+  (case (cond
+          (= (name head) "if") "branch"
+          (= (name head) "when") "branch"
+          :else "other")
+    "branch" (quote (def branch-kind true))
+    ["other" "unknown"] (quote (def other-kind true))
+    :else (quote (def missed-kind true))))
+
+(emit-kind if)
+(emit-kind let)`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "branch_kind :: true"), true)
+    testing.expect_value(t, strings.contains(output, "other_kind :: true"), true)
+    testing.expect_value(t, strings.contains(output, "missed_kind"), false)
+}
+
+@(test)
+macroexpand_evaluates_guard_style_cond_with_not :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defmacro aggregate-find? [form]
+  (cond
+    (not (list? form)) false
+    (not (or (= (count form) 2)
+             (= (count form) 3))) false
+    (not (symbol? (first form))) false
+    :else true))
+
+(defmacro emit-aggregate [form]
+  (if (aggregate-find? form)
+    (forms (quote (def aggregate-ok true)))
+    (forms)))
+
+(emit-aggregate (count ?x))
+(emit-aggregate 42)`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "aggregate_ok :: true"), true)
+}
+
+@(test)
+macroexpand_evaluates_contains_in_macro_predicates :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defmacro emit-aggregate-op [op]
+  (if (contains? ["count" "count-distinct" "min" "max" "sum" "avg"] (name op))
+    (forms (quote (def aggregate-op true)))
+    (forms)))
+
+(emit-aggregate-op sum)
+(emit-aggregate-op median)`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "aggregate_op :: true"), true)
+    testing.expect_value(t, strings.contains(output, "median"), false)
+}
+
+@(test)
+macroexpand_evaluates_numeric_comparisons_in_macro_predicates :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defmacro emit-small-form [form]
+  (cond
+    (<= (count form) 1) (quote (def one-or-less true))
+    (< (count form) 4) (quote (def small-form true))
+    :else (quote (def large-form true))))
+
+(emit-small-form (a b))
+(emit-small-form (a b c d))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "small_form :: true"), true)
+    testing.expect_value(t, strings.contains(output, "large_form :: true"), true)
+    testing.expect_value(t, strings.contains(output, "one_or_less"), false)
 }
 
 @(test)

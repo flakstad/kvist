@@ -46,6 +46,27 @@
     (= n 0) "zero"
     :else "positive"))
 
+(defn branch-index [first?: bool] -> int
+  (let [index (if first? 0 1)]
+    index))
+
+(defn movement-cost [method: Method] -> int
+  (let [cost (case method
+               [.Get .Head] 1
+               .Post 2
+               :else 3)]
+    cost))
+
+(defn clamp-score [score: int] -> int
+  (max 0 (min score 100)))
+
+(defn adjusted-score [score: int] -> int
+  (let [value: int (do
+                     (println "adjusting")
+                     (let [clamped (clamp-score score)]
+                       (+ clamped 1)))]
+    value))
+
 (defn event-score [event: Event] -> int
   (case event
     (Connected conn) conn.id
@@ -107,6 +128,18 @@
 
   (classify -1)
   ;; => negative
+
+  (branch-index false)
+  ;; => 1
+
+  (movement-cost .Post)
+  ;; => 2
+
+  (clamp-score 120)
+  ;; => 100
+
+  (adjusted-score 41)
+  ;; => 42
 
   (event-score (Event {connected: (Connected {id: 7})}))
   ;; => 7
