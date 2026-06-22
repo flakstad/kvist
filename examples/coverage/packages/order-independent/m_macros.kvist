@@ -1,0 +1,7 @@
+(package order-independent)
+
+(defmacro- emit-box [n]
+  (quasiquote (Box {value: (unquote n)})))
+
+(defmacro make-box [n]
+  (emit-box n))

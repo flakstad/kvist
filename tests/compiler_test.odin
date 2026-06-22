@@ -6340,6 +6340,48 @@ cli_test_command_runs_package_edge_suite :: proc(t: ^testing.T) {
 }
 
 @(test)
+cli_test_command_runs_package_file_order_suite :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-package-file-order-suite-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    repo_root := compiler_test_repo_root()
+    kvist_bin, bin_ok := build_test_kvist_binary(t, repo_root, dir)
+    if !bin_ok {
+        return
+    }
+    defer delete(kvist_bin)
+
+    path, join_err := os.join_path({repo_root, "examples", "coverage", "packages", "package-file-order-tests.kvist"}, context.allocator)
+    testing.expect_value(t, join_err == nil, true)
+    if join_err != nil {
+        return
+    }
+    defer delete(path)
+
+    state, stdout, stderr, exec_err := os.process_exec(
+        os.Process_Desc{
+            command = {kvist_bin, "test", path},
+            working_dir = repo_root,
+        },
+        context.allocator,
+    )
+    defer delete(stdout)
+    defer delete(stderr)
+
+    testing.expect_value(t, exec_err == nil, true)
+    if exec_err != nil {
+        return
+    }
+    testing.expect_value(t, state.exited, true)
+    testing.expect_value(t, state.exit_code, 0)
+}
+
+@(test)
 compile_let_defer_final_if_scalar_use :: proc(t: ^testing.T) {
     source := `(package main)
 (import core "kvist:core")
@@ -13565,6 +13607,120 @@ compile_path_source_package_macro_can_preserve_keyword_source :: proc(t: ^testin
     testing.expect_value(t, strings.contains(output, `"db/add"`), false)
     testing.expect_value(t, strings.contains(output, `":db/add"`), true)
     testing.expect_value(t, strings.contains(output, `":db/retract"`), true)
+}
+
+@(test)
+compile_path_package_files_are_order_independent :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-package-file-order-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    pkg_dir, pkg_dir_err := os.join_path({dir, "order-independent"}, context.allocator)
+    testing.expect_value(t, pkg_dir_err == nil, true)
+    if pkg_dir_err != nil {
+        return
+    }
+    defer delete(pkg_dir)
+    mk_pkg_err := os.make_directory_all(pkg_dir)
+    testing.expect_value(t, mk_pkg_err == nil, true)
+    if mk_pkg_err != nil {
+        return
+    }
+
+    types_path, types_path_err := os.join_path({pkg_dir, "a_types.kvist"}, context.allocator)
+    testing.expect_value(t, types_path_err == nil, true)
+    if types_path_err != nil {
+        return
+    }
+    defer delete(types_path)
+    types_source := `(package order-independent)
+
+(defstruct Box {value: int})`
+    types_write_err := os.write_entire_file_from_string(types_path, types_source)
+    testing.expect_value(t, types_write_err == nil, true)
+    if types_write_err != nil {
+        return
+    }
+
+    macros_path, macros_path_err := os.join_path({pkg_dir, "m_macros.kvist"}, context.allocator)
+    testing.expect_value(t, macros_path_err == nil, true)
+    if macros_path_err != nil {
+        return
+    }
+    defer delete(macros_path)
+    macros_source := `(package order-independent)
+
+(defmacro- emit-box [n]
+  (quasiquote (Box {value: (unquote n)})))
+
+(defmacro make-box [n]
+  (emit-box n))`
+    macros_write_err := os.write_entire_file_from_string(macros_path, macros_source)
+    testing.expect_value(t, macros_write_err == nil, true)
+    if macros_write_err != nil {
+        return
+    }
+
+    runtime_path, runtime_path_err := os.join_path({pkg_dir, "z_runtime.kvist"}, context.allocator)
+    testing.expect_value(t, runtime_path_err == nil, true)
+    if runtime_path_err != nil {
+        return
+    }
+    defer delete(runtime_path)
+    runtime_source := `(package order-independent)
+
+(defn read-box [] -> int
+  (let [box (make-box 42)]
+    box.value))`
+    runtime_write_err := os.write_entire_file_from_string(runtime_path, runtime_source)
+    testing.expect_value(t, runtime_write_err == nil, true)
+    if runtime_write_err != nil {
+        return
+    }
+
+    main_path, main_path_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, main_path_err == nil, true)
+    if main_path_err != nil {
+        return
+    }
+    defer delete(main_path)
+    main_source := `(package tests)
+
+(import p "./order-independent")
+
+(defn main [] -> int
+  (p.read-box))`
+    main_write_err := os.write_entire_file_from_string(main_path, main_source)
+    testing.expect_value(t, main_write_err == nil, true)
+    if main_write_err != nil {
+        return
+    }
+
+    output, err, ok := kvist.compile_path(main_path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "Box :: struct"), true)
+    testing.expect_value(t, strings.contains(output, "read_box :: proc() -> int"), true)
+
+    eval_result, eval_err, ok_eval := kvist.compile_eval_path(main_path, "(main)")
+    testing.expect_value(t, ok_eval, true)
+    if !ok_eval {
+        testing.expect_value(t, eval_err.message, "")
+        return
+    }
+    defer delete(eval_result)
+
+    testing.expect_value(t, strings.contains(eval_result, "p__read_box :: proc() -> int"), true)
+    testing.expect_value(t, strings.contains(eval_result, "box := p__Box{value = 42}"), true)
 }
 
 @(test)

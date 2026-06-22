@@ -1,0 +1,7 @@
+(package tests)
+
+(import t "kvist:test")
+(import p "./order-independent")
+
+(t.deftest package-file-order-independent
+  (t.is (= (p.read-box) 42)))

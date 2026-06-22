@@ -1,0 +1,5 @@
+(package order-independent)
+
+(defn read-box [] -> int
+  (let [box (make-box 42)]
+    box.value))

@@ -1,0 +1,3 @@
+(package order-independent)
+
+(defstruct Box {value: int})

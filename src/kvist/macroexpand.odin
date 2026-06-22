@@ -3437,6 +3437,10 @@ macroexpand_top_forms :: proc(forms: []CST_Top_Form, include_core_macros: bool =
                 return expanded, macros, err_macro, false
             }
             append(&macros, macro_decl)
+        }
+    }
+    for top in forms {
+        if is_defmacro_form(top.form) {
             continue
         }
         expanded_forms, err_expand, ok_expand := macroexpand_top_level_form_with_macros(top.form, macros[:])
