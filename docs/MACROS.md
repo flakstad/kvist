@@ -105,6 +105,20 @@ Sequence helpers for form collections:
 (slice xs start end)
 ```
 
+Small form-sequence transforms are available when macro code needs to inspect
+or rewrite source lists:
+
+```clojure
+(some? pred xs)
+(every? pred xs)
+(map f xs)
+(filter pred xs)
+```
+
+These are macro-time helpers over source forms, not runtime `kvist:arr`
+helpers. `pred` and `f` are unary macro-time function names such as `symbol?`,
+`keyword?`, `source`, `name`, `text`, or a unary user macro.
+
 Constructors and text helpers:
 
 ```clojure
@@ -121,8 +135,24 @@ Constructors and text helpers:
 (gensym "tmp")
 ```
 
+Macro-time string helpers use the same package-shaped names as runtime
+`kvist:str` where the behavior matches:
+
+```clojure
+(str.count text)
+(str.slice text start)
+(str.slice text start end)
+(str.contains? text needle)
+(str.starts-with? text prefix)
+(str.ends-with? text suffix)
+```
+
 Use `source` when the original token spelling is data, such as EDN-style
 keywords in DSLs. `name` and `text` normalize symbols and keywords.
+
+Macro-time helpers intentionally cover only source forms and simple scalar
+values. If a helper operates on runtime arrays, maps, sets, or owned strings,
+use the ordinary package helper in runtime Kvist code instead.
 
 Use `error` for macro validation failures:
 

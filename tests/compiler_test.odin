@@ -6509,6 +6509,39 @@ reject_returning_defer_binding_inside_call :: proc(t: ^testing.T) {
 }
 
 @(test)
+compile_defer_binding_passed_as_borrowed_slice_to_copied_result :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct Query {
+  xs: [dynamic]int
+})
+
+(defstruct Result {
+  query: Query
+})
+
+(defn copy-query [xs: []int] -> Query
+  (let [out (make [dynamic]int)]
+    (arr.into! out xs)
+    (Query {xs: out})))
+
+(defn ok [] -> Result
+  (let [xs ([dynamic]int [1 2]) :defer]
+    (Result {query: (copy-query (slice xs 0))})))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "defer delete(xs)"), true)
+    testing.expect_value(t, strings.contains(output, "copy_query((xs)[0:])"), true)
+}
+
+@(test)
 reject_returning_defer_binding_through_local_wrapper :: proc(t: ^testing.T) {
     source := `(package main)
 
@@ -6936,6 +6969,68 @@ macroexpand_evaluates_numeric_comparisons_in_macro_predicates :: proc(t: ^testin
     testing.expect_value(t, strings.contains(output, "small_form :: true"), true)
     testing.expect_value(t, strings.contains(output, "large_form :: true"), true)
     testing.expect_value(t, strings.contains(output, "one_or_less"), false)
+}
+
+@(test)
+macroexpand_evaluates_string_helpers_in_macro_predicates :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defmacro reverse-attr? [form]
+  (and (keyword? form)
+       (str.starts-with? (source form) ":_")
+       (str.ends-with? (str.slice (source form) 1) "friend")
+       (= (str.count (source form)) 13)))
+
+(defmacro emit-reverse [form]
+  (if (and (reverse-attr? form)
+           (str.contains? (source form) "user"))
+    (quote (def reverse-attr true))
+    (quote (def normal-attr true))))
+
+(emit-reverse :_user/friend)`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "reverse_attr :: true"), true)
+    testing.expect_value(t, strings.contains(output, "normal_attr"), false)
+}
+
+@(test)
+macroexpand_evaluates_sequence_helpers :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defmacro query-var? [form]
+  (and (symbol? form)
+       (str.starts-with? (source form) "?")))
+
+(defmacro emit-vars [vars]
+  (if (every? query-var? vars)
+    (let [names (map source vars)
+          kept (filter query-var? vars)]
+      (if (and (some? string? names)
+               (= (count kept) 2))
+        (quote (def vars-ok true))
+        (quote (def vars-bad true))))
+    (quote (def vars-bad true))))
+
+(emit-vars [?x ?y])`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "vars_ok :: true"), true)
+    testing.expect_value(t, strings.contains(output, "vars_bad"), false)
 }
 
 @(test)

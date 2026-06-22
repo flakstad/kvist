@@ -4805,16 +4805,29 @@ form_escape_deferred_binding_span_names :: proc(form: CST_Form, names: []string,
     if !form_mentions_any_binding_name(form, names) {
         return {}, false
     }
+    if return_spec_is_non_owned_scalar(returns) {
+        return {}, false
+    }
+    if form_is_borrowed_view_of_tracked_name(form, names) {
+        return {}, false
+    }
 
     #partial switch form.kind {
     case .Symbol:
         return form.span, true
     case .Vector, .Brace, .Set:
-        return form.span, true
+        for item in form.items {
+            if span, ok := form_escape_deferred_binding_span_names(item, names, returns); ok {
+                return span, true
+            }
+        }
+        return {}, false
     case .List:
         if len(form.items) == 0 || form.items[0].kind != .Symbol {
-            if !return_spec_is_non_owned_scalar(returns) {
-                return form.span, true
+            for item in form.items {
+                if span, ok := form_escape_deferred_binding_span_names(item, names, returns); ok {
+                    return span, true
+                }
             }
             return {}, false
         }
@@ -4882,8 +4895,10 @@ form_escape_deferred_binding_span_names :: proc(form: CST_Form, names: []string,
             }
             return {}, false
         case:
-            if !return_spec_is_non_owned_scalar(returns) {
-                return form.span, true
+            for item in form.items[1:] {
+                if span, ok := form_escape_deferred_binding_span_names(item, names, returns); ok {
+                    return span, true
+                }
             }
             return {}, false
         }
@@ -4960,9 +4975,24 @@ switch_may_escape_owned_temp_result :: proc(form: CST_Form, returns: Return_Spec
     return switch_may_escape_owned_temp_result_names(form, nil, returns)
 }
 
+form_is_borrowed_view_of_tracked_name :: proc(form: CST_Form, names: []string) -> bool {
+    if form.kind != .List || len(form.items) < 2 || form.items[0].kind != .Symbol {
+        return false
+    }
+    head := form.items[0].text
+    if head != "slice" && head != "core/slice" && head != "core-slice" && head != "arr/slice" {
+        return false
+    }
+    source := form.items[1]
+    return source.kind == .Symbol && binding_names_contain(names, map_name(source.text))
+}
+
 form_escape_owned_temp_result_span_names :: proc(form: CST_Form, names: []string, returns: Return_Spec) -> (Span, bool) {
-    if form_is_owned_temp_escape_result(form) {
+    if len(names) == 0 && form_is_owned_temp_escape_result(form) {
         return form.span, true
+    }
+    if len(names) > 0 && return_spec_is_non_owned_scalar(returns) {
+        return {}, false
     }
 
     #partial switch form.kind {
@@ -4979,7 +5009,18 @@ form_escape_owned_temp_result_span_names :: proc(form: CST_Form, names: []string
         }
         return {}, false
     case .List:
+        if form_is_borrowed_view_of_tracked_name(form, names) {
+            return {}, false
+        }
         if len(form.items) == 0 || form.items[0].kind != .Symbol {
+            if len(names) > 0 {
+                for item in form.items {
+                    if span, ok := form_escape_owned_temp_result_span_names(item, names, returns); ok {
+                        return span, true
+                    }
+                }
+                return {}, false
+            }
             if !return_spec_is_non_owned_scalar(returns) {
                 return form.span, true
             }
@@ -5049,6 +5090,14 @@ form_escape_owned_temp_result_span_names :: proc(form: CST_Form, names: []string
             }
             return {}, false
         case:
+            if len(names) > 0 {
+                for item in form.items[1:] {
+                    if span, ok := form_escape_owned_temp_result_span_names(item, names, returns); ok {
+                        return span, true
+                    }
+                }
+                return {}, false
+            }
             if !return_spec_is_non_owned_scalar(returns) {
                 return form.span, true
             }

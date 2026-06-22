@@ -186,6 +186,9 @@ Cross-family collection helpers live in `kvist:core`: `count`,
 `delete!`. Other collection operations should use explicit package names such
 as `arr.*`, `map.*`, `str.*`, or `set.*`.
 
+Macro-time helpers with similar names operate on source forms; see
+[MACROS.md](MACROS.md) for that smaller compile-time surface.
+
 `len` is accepted as an alias for `count`, but examples use `count`.
 
 The access and trimming helpers use the direct Odin representation where
