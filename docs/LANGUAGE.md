@@ -1227,6 +1227,12 @@ result still warns.
 `defer` emits Odin `defer`. A single expression defers that expression;
 multiple forms defer a block.
 
+Inside `for` or `while`, `defer` still follows Odin scope rules: it runs when
+the surrounding scope exits, not automatically after each iteration. Kvist warns
+on direct loop-body `defer` forms. Wrap the iteration body in `(block ...)` when
+you want a per-iteration scope, or clean up explicitly at the end of the loop
+body.
+
 ### `cond`
 
 Use `cond` when each branch has its own predicate:

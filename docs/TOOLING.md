@@ -12,7 +12,7 @@ Common commands:
 
 ```sh
 kvist compile file.kvist -o file.odin
-kvist build file.kvist
+kvist build file.kvist --out dist/app
 kvist check file.kvist
 kvist run file.kvist
 kvist test file-or-dir.kvist
@@ -33,6 +33,23 @@ kvist package-symbols kvist:arr arr
 
 `kvist eval` and `kvist expand` generate scratch Odin with the surrounding file
 context. `eval` runs the scratch program; `expand` prints the generated Odin.
+
+`kvist build` invokes Odin and writes the final executable when `--out` is
+provided. The generated Odin file stays temporary unless `--generated` is used
+for inspection.
+
+## Package Resolution
+
+`kvist:*` imports resolve shipped packages independently of the current working
+directory. Lookup order is:
+
+- `KVIST_PACKAGES_DIR`, when it points directly at a packages directory.
+- `KVIST_HOME/packages`.
+- `packages` or `share/kvist/packages` next to the running `kvist` executable.
+- the repository `packages/` directory during source checkout development.
+
+This lets an installed `kvist` binary work from application repositories without
+being launched from the Kvist source tree.
 `macroexpand` shows frontend macro expansion before Odin lowering. See
 [MACROS.md](MACROS.md) for the macro authoring surface. See
 [LIVE-DEVELOPMENT.md](LIVE-DEVELOPMENT.md) for how scratch evaluation fits into

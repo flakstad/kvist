@@ -4088,6 +4088,11 @@ thread_owned_result_head :: proc(head_name: string) -> bool {
          "str/replace", "str-replace",
          "str/lower",
          "str/upper",
+         "strings/clone",
+         "strings/join",
+         "strings/replace",
+         "strings/to_lower",
+         "strings/to_upper",
          "arr/take-nth":
         return true
     }
@@ -4117,6 +4122,13 @@ thread_view_result_head :: proc(head_name: string) -> bool {
          "core/slice",
          "arr/slice",
          "arr/rest",
+         "str/slice",
+         "str/trim",
+         "str/trim-prefix",
+         "str/trim-suffix",
+         "strings/trim_space",
+         "strings/trim_prefix",
+         "strings/trim_suffix",
          "arr/split-at", "arr-split-at":
         return true
     }
@@ -4305,6 +4317,31 @@ form_is_owned_result :: proc(form: CST_Form) -> bool {
         return kind == .Owned || kind == .Owned_Borrowing
     }
     return false
+}
+
+form_is_borrowed_view_result :: proc(form: CST_Form) -> bool {
+    if form.kind != .List || len(form.items) == 0 || form.items[0].kind != .Symbol {
+        return false
+    }
+    if form.items[0].text == "tap>" && (len(form.items) == 2 || len(form.items) == 3) {
+        return form_is_borrowed_view_result(form.items[len(form.items)-1])
+    }
+    if thread_view_result_head(form.items[0].text) {
+        return true
+    }
+    if is_thread_form(form, true) || is_thread_form(form, false) {
+        kind := thread_form_final_kind(nil, form, is_thread_form_head(form.items[0].text, true))
+        return kind == .View
+    }
+    return false
+}
+
+borrowed_delete_warning_message :: proc(form: CST_Form) -> string {
+    subject := "borrowed view"
+    if head, ok := form_head_symbol_text(form); ok {
+        subject = display_head_name(head)
+    }
+    return fmt.tprintf("%s returns a borrowed view; do not delete it, delete the owner instead", subject)
 }
 
 owned_direct_source_allowed_in_transform_source_slot :: proc(parent: CST_Form, item_index: int) -> bool {
@@ -5444,6 +5481,10 @@ type_text_is_dynamic_array :: proc(text: string) -> bool {
     return len(text) >= 9 && text[:9] == "[dynamic]"
 }
 
+type_text_is_pointer_to_dynamic_array :: proc(text: string) -> bool {
+    return len(text) >= 10 && text[:10] == "^[dynamic]"
+}
+
 type_text_is_slice_or_fixed_array :: proc(text: string) -> bool {
     return len(text) >= 2 && text[0] == '[' && !type_text_is_dynamic_array(text) ||
            type_text_is_soa(text) && !type_text_is_dynamic_soa(text)
@@ -6269,6 +6310,14 @@ form_transfers_owned_name :: proc(form: CST_Form, name: string, can_transfer_fin
         }
     }
 
+    if ok && (head == "append" || head == "arr/push!" || head == "arr-push!") {
+        for item in form.items[1:] {
+            if item.kind == .Symbol && map_name(item.text) == name {
+                return true
+            }
+        }
+    }
+
     if ok && head == "let" && len(form.items) >= 3 {
         return body_deletes_or_returns_name(form.items[2:], name, can_transfer_final)
     }
@@ -6369,6 +6418,12 @@ analyze_owned_scope_body :: proc(e: ^Emitter, forms: []CST_Form, can_transfer_fi
                     emit_warning(e, discarded_owned_warning_message(item), item.span)
                 }
             }
+        case "delete":
+            for item in form.items[1:] {
+                if form_is_borrowed_view_result(item) {
+                    emit_warning(e, borrowed_delete_warning_message(item), item.span)
+                }
+            }
         case "set!":
             if len(form.items) == 3 && form.items[1].kind == .Symbol {
                 name := map_name(form.items[1].text)
@@ -6393,6 +6448,9 @@ analyze_owned_scope_body :: proc(e: ^Emitter, forms: []CST_Form, can_transfer_fi
             }
             start := len(live)
             for binding in bindings {
+                if (binding.deferred_delete || binding.defer_with_cleanup) && form_is_borrowed_view_result(binding.value) {
+                    emit_warning(e, borrowed_delete_warning_message(binding.value), binding.value.span)
+                }
                 delete_name, has_delete_name := binding_delete_target_name(binding)
                 if binding.is_destructure || (!has_delete_name && binding.name == "") {
                     continue
@@ -6433,6 +6491,61 @@ analyze_owned_scope_body :: proc(e: ^Emitter, forms: []CST_Form, can_transfer_fi
                 emit_warning(e, discarded_owned_warning_message(form), form.span)
             }
         }
+    }
+}
+
+lint_defer_in_loop_form :: proc(e: ^Emitter, form: CST_Form, in_loop_scope: bool) {
+    if form.kind != .List || len(form.items) == 0 {
+        for item in form.items {
+            lint_defer_in_loop_form(e, item, in_loop_scope)
+        }
+        return
+    }
+
+    head, ok := form_head_symbol_text(form)
+    if !ok {
+        for item in form.items {
+            lint_defer_in_loop_form(e, item, in_loop_scope)
+        }
+        return
+    }
+
+    if head == "defer" && in_loop_scope {
+        emit_warning(e, "defer inside loop runs when the surrounding scope exits, not after each iteration; wrap the iteration body in block or clean up explicitly", form.span)
+        return
+    }
+
+    switch head {
+    case "for":
+        if len(form.items) > 2 {
+            lint_defer_in_loop_body(e, form.items[2:], true)
+        }
+        return
+    case "while":
+        if len(form.items) > 2 {
+            lint_defer_in_loop_body(e, form.items[2:], true)
+        }
+        return
+    case "block":
+        if len(form.items) > 1 {
+            lint_defer_in_loop_body(e, form.items[1:], false)
+        }
+        return
+    case "let", "with-allocator", "with-temp-allocator":
+        if len(form.items) > 2 {
+            lint_defer_in_loop_body(e, form.items[2:], false)
+        }
+        return
+    }
+
+    for item in form.items[1:] {
+        lint_defer_in_loop_form(e, item, in_loop_scope)
+    }
+}
+
+lint_defer_in_loop_body :: proc(e: ^Emitter, forms: []CST_Form, in_loop_scope: bool) {
+    for form in forms {
+        lint_defer_in_loop_form(e, form, in_loop_scope)
     }
 }
 
@@ -10788,6 +10901,8 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         } else if known_target_ty && type_text_is_pointer_to_dynamic_soa(target_ty) {
             call_name = "append_soa"
             append(&arg_texts, target)
+        } else if known_target_ty && type_text_is_pointer_to_dynamic_array(target_ty) {
+            append(&arg_texts, target)
         } else {
             append(&arg_texts, fmt.tprintf("&(%s)", target))
         }
@@ -13686,6 +13801,7 @@ emit_decl :: proc(e: ^Emitter, decl: IR_Decl) -> (Compile_Error, bool) {
         proc_live: [dynamic]Owned_Local
         analyze_owned_scope_body(e, decl.proc_decl.body[:], decl.proc_decl.returns.kind != .None, &proc_live)
         delete(proc_live)
+        lint_defer_in_loop_body(e, decl.proc_decl.body[:], false)
         push_local_type_scope(e)
         defer pop_local_type_scope(e)
         for param in decl.proc_decl.params {

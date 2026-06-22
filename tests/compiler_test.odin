@@ -10486,6 +10486,104 @@ warn_discarded_owned_sequence_result :: proc(t: ^testing.T) {
 }
 
 @(test)
+warn_defer_inside_loop_runs_at_surrounding_scope_exit :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn main [xs: []int]
+  (for [x xs]
+    (defer (println x)))
+  (return))`
+
+    result, err, ok := kvist.compile_source_with_map(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(t, len(result.warnings), 1)
+    if len(result.warnings) == 1 {
+        testing.expect_value(t, result.warnings[0].message, "defer inside loop runs when the surrounding scope exits, not after each iteration; wrap the iteration body in block or clean up explicitly")
+    }
+}
+
+@(test)
+allow_defer_inside_loop_block_scope :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn main [xs: []int]
+  (for [x xs]
+    (block
+      (defer (println x))))
+  (return))`
+
+    result, err, ok := kvist.compile_source_with_map(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(t, len(result.warnings), 0)
+}
+
+@(test)
+warn_discarded_owned_core_strings_result :: proc(t: ^testing.T) {
+    source := `(package main)
+(import strings "core:strings")
+
+(defn main [s: string]
+  (strings.clone s)
+  (return))`
+
+    result, err, ok := kvist.compile_source_with_map(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(t, len(result.warnings), 1)
+    if len(result.warnings) == 1 {
+        testing.expect_value(t, result.warnings[0].message, "owned result from strings.clone is discarded; bind it, delete it, or return it")
+    }
+}
+
+@(test)
+warn_defer_marked_borrowed_string_view :: proc(t: ^testing.T) {
+    source := `(package main)
+(import str "kvist:str")
+
+(defn main [s: string]
+  (let [trimmed (str.trim s) :defer]
+    (println trimmed)))`
+
+    result, err, ok := kvist.compile_source_with_map(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(t, len(result.warnings), 1)
+    if len(result.warnings) == 1 {
+        testing.expect_value(t, result.warnings[0].message, "str.trim returns a borrowed view; do not delete it, delete the owner instead")
+    }
+}
+
+@(test)
 reject_legacy_unqualified_sequence_helpers :: proc(t: ^testing.T) {
     source := `(package main)
 
@@ -13270,6 +13368,97 @@ compile_path_supports_multi_file_source_package_directory :: proc(t: ^testing.T)
 }
 
 @(test)
+compile_path_resolves_shipped_packages_from_env_dir :: proc(t: ^testing.T) {
+    old_packages_dir, had_packages_dir := os.lookup_env("KVIST_PACKAGES_DIR", context.allocator)
+    defer if had_packages_dir {
+        _ = os.set_env("KVIST_PACKAGES_DIR", old_packages_dir)
+        delete(old_packages_dir)
+    } else {
+        _ = os.unset_env("KVIST_PACKAGES_DIR")
+    }
+
+    dir, dir_err := os.make_directory_temp("", "kvist-packages-env-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    packages_dir, packages_join_err := os.join_path({dir, "packages"}, context.allocator)
+    testing.expect_value(t, packages_join_err == nil, true)
+    if packages_join_err != nil {
+        return
+    }
+    defer delete(packages_dir)
+    mk_packages_err := os.make_directory_all(packages_dir)
+    testing.expect_value(t, mk_packages_err == nil, true)
+    if mk_packages_err != nil {
+        return
+    }
+
+    toy_dir, toy_join_err := os.join_path({packages_dir, "toy"}, context.allocator)
+    testing.expect_value(t, toy_join_err == nil, true)
+    if toy_join_err != nil {
+        return
+    }
+    defer delete(toy_dir)
+    mk_toy_err := os.make_directory_all(toy_dir)
+    testing.expect_value(t, mk_toy_err == nil, true)
+    if mk_toy_err != nil {
+        return
+    }
+
+    toy_path, toy_path_err := os.join_path({toy_dir, "toy.kvist"}, context.allocator)
+    testing.expect_value(t, toy_path_err == nil, true)
+    if toy_path_err != nil {
+        return
+    }
+    defer delete(toy_path)
+    toy_write_err := os.write_entire_file_from_string(toy_path, `(package toy)
+
+(defn id [x: int] -> int
+  x)`)
+    testing.expect_value(t, toy_write_err == nil, true)
+    if toy_write_err != nil {
+        return
+    }
+
+    main_path, main_path_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, main_path_err == nil, true)
+    if main_path_err != nil {
+        return
+    }
+    defer delete(main_path)
+    main_write_err := os.write_entire_file_from_string(main_path, `(package main)
+(import toy "kvist:toy")
+
+(defn main [] -> int
+  (toy.id 42))`)
+    testing.expect_value(t, main_write_err == nil, true)
+    if main_write_err != nil {
+        return
+    }
+
+    set_err := os.set_env("KVIST_PACKAGES_DIR", packages_dir)
+    testing.expect_value(t, set_err == nil, true)
+    if set_err != nil {
+        return
+    }
+
+    output, err, ok := kvist.compile_path(main_path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "toy__id :: proc(x: int) -> int"), true)
+    testing.expect_value(t, strings.contains(output, "return toy__id(42)"), true)
+}
+
+@(test)
 compile_source_package_preserves_type_forms_in_proc_signatures :: proc(t: ^testing.T) {
     dir, dir_err := os.make_directory_temp("", "kvist-source-package-type-forms-*", context.allocator)
     testing.expect_value(t, dir_err == nil, true)
@@ -15926,6 +16115,32 @@ compile_shipped_arr_source_package_uses_hybrid_resolution :: proc(t: ^testing.T)
     testing.expect_value(t, strings.contains(output, "kvist_find"), false)
     testing.expect_value(t, strings.contains(output, "kvist_some_p"), false)
     testing.expect_value(t, strings.contains(output, "kvist_every_p"), false)
+}
+
+@(test)
+compile_arr_push_accepts_pointer_to_dynamic_array :: proc(t: ^testing.T) {
+    source := `(package main)
+(import arr "kvist:arr")
+
+(defn add-byte! [buf: (ptr (dynamic byte)) b: byte]
+  (arr.push! buf b))
+
+(defn main []
+  (let [buf ([dynamic]byte [])]
+    (defer (delete buf))
+    (add-byte! (addr buf) 42)))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "add_byte_bang :: proc(buf: ^[dynamic]byte, b: byte)"), true)
+    testing.expect_value(t, strings.contains(output, "append(buf, b)"), true)
+    testing.expect_value(t, strings.contains(output, "append(&(buf), b)"), false)
 }
 
 @(test)

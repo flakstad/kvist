@@ -997,6 +997,127 @@ repo_root_for_path :: proc(path: string) -> (string, bool) {
     return "", false
 }
 
+existing_dir_clone :: proc(path: string) -> (string, bool) {
+    if path != "" && os.exists(path) && os.is_dir(path) {
+        return strings.clone(path), true
+    }
+    return "", false
+}
+
+kvist_packages_dir_from_env :: proc() -> (string, bool) {
+    packages_dir, found_packages := os.lookup_env("KVIST_PACKAGES_DIR", context.allocator)
+    if found_packages {
+        defer delete(packages_dir)
+        if dir, ok := existing_dir_clone(packages_dir); ok {
+            return dir, true
+        }
+    }
+
+    home_dir, found_home := os.lookup_env("KVIST_HOME", context.allocator)
+    if found_home {
+        defer delete(home_dir)
+        candidate, join_err := os.join_path({home_dir, "packages"}, context.allocator)
+        if join_err == nil {
+            defer delete(candidate)
+            if dir, ok := existing_dir_clone(candidate); ok {
+                return dir, true
+            }
+        }
+    }
+    return "", false
+}
+
+kvist_packages_dir_from_base :: proc(base: string) -> (string, bool) {
+    candidate, join_err := os.join_path({base, "packages"}, context.allocator)
+    if join_err == nil {
+        defer delete(candidate)
+        if dir, ok := existing_dir_clone(candidate); ok {
+            return dir, true
+        }
+    }
+
+    share_candidate, share_join_err := os.join_path({base, "share", "kvist", "packages"}, context.allocator)
+    if share_join_err == nil {
+        defer delete(share_candidate)
+        if dir, ok := existing_dir_clone(share_candidate); ok {
+            return dir, true
+        }
+    }
+
+    parent, _ := os.split_path(base)
+    if parent != "" && parent != base {
+        parent_candidate, parent_join_err := os.join_path({parent, "packages"}, context.allocator)
+        if parent_join_err == nil {
+            defer delete(parent_candidate)
+            if dir, ok := existing_dir_clone(parent_candidate); ok {
+                return dir, true
+            }
+        }
+
+        parent_share_candidate, parent_share_join_err := os.join_path({parent, "share", "kvist", "packages"}, context.allocator)
+        if parent_share_join_err == nil {
+            defer delete(parent_share_candidate)
+            if dir, ok := existing_dir_clone(parent_share_candidate); ok {
+                return dir, true
+            }
+        }
+    }
+
+    return "", false
+}
+
+kvist_packages_dir_from_executable :: proc() -> (string, bool) {
+    if len(os.args) == 0 || os.args[0] == "" {
+        return "", false
+    }
+
+    executable_path := os.args[0]
+    owned_executable := ""
+    if !os.is_absolute_path(executable_path) {
+        absolute, abs_err := os.get_absolute_path(executable_path, context.allocator)
+        if abs_err == nil {
+            executable_path = absolute
+            owned_executable = absolute
+        }
+    }
+    if owned_executable != "" {
+        defer delete(owned_executable)
+    }
+
+    executable_dir, _ := os.split_path(executable_path)
+    if executable_dir == "" {
+        return "", false
+    }
+    return kvist_packages_dir_from_base(executable_dir)
+}
+
+kvist_packages_dir :: proc(anchor_path: string = ".") -> (string, bool) {
+    if dir, ok := kvist_packages_dir_from_env(); ok {
+        return dir, true
+    }
+
+    if dir, ok := kvist_packages_dir_from_executable(); ok {
+        return dir, true
+    }
+
+    root, ok_root := repo_root_for_path(anchor_path)
+    if !ok_root {
+        root, ok_root = repo_root_for_path(".")
+    }
+    if ok_root {
+        defer delete(root)
+        candidate, join_err := os.join_path({root, "packages"}, context.allocator)
+        if join_err == nil {
+            defer delete(candidate)
+            if dir, ok := existing_dir_clone(candidate); ok {
+                return dir, true
+            }
+        }
+    }
+
+    return "", false
+}
+
 is_path_separator :: proc(ch: byte) -> bool {
     return ch == '/' || ch == '\\'
 }

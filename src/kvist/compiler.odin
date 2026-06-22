@@ -731,13 +731,13 @@ is_shipped_source_import_path :: proc(path: string) -> bool {
     if !strings.has_prefix(path, "kvist:") {
         return false
     }
-    root, ok_root := repo_root_for_path(".")
-    if !ok_root {
+    packages_dir, ok_packages := kvist_packages_dir(".")
+    if !ok_packages {
         return false
     }
-    defer delete(root)
+    defer delete(packages_dir)
     package_name := path[len("kvist:"):]
-    candidate, join_err := os.join_path({root, "packages", package_name}, context.allocator)
+    candidate, join_err := os.join_path({packages_dir, package_name}, context.allocator)
     if join_err != nil {
         return false
     }
@@ -746,17 +746,8 @@ is_shipped_source_import_path :: proc(path: string) -> bool {
 }
 
 is_shipped_package_filesystem_path :: proc(path: string) -> bool {
-    root, ok_root := repo_root_for_path(path)
-    if !ok_root {
-        root, ok_root = repo_root_for_path(".")
-    }
-    if !ok_root {
-        return false
-    }
-    defer delete(root)
-
-    packages_dir, join_err := os.join_path({root, "packages"}, context.allocator)
-    if join_err != nil {
+    packages_dir, ok_packages := kvist_packages_dir(path)
+    if !ok_packages {
         return false
     }
     defer delete(packages_dir)
@@ -870,15 +861,12 @@ resolve_shipped_source_import_path :: proc(importer_path, import_path: string) -
     if package_name == "" {
         return "", Compile_Error{message = fmt.tprintf("could not resolve shipped source import: %s", import_path)}, false
     }
-    root, ok_root := repo_root_for_path(importer_path)
-    if !ok_root {
-        root, ok_root = repo_root_for_path(".")
-    }
-    if !ok_root {
+    packages_dir, ok_packages := kvist_packages_dir(importer_path)
+    if !ok_packages {
         return "", Compile_Error{message = fmt.tprintf("could not resolve shipped source import: %s", import_path)}, false
     }
-    defer delete(root)
-    candidate, join_err := os.join_path({root, "packages", package_name}, context.allocator)
+    defer delete(packages_dir)
+    candidate, join_err := os.join_path({packages_dir, package_name}, context.allocator)
     if join_err != nil || !os.exists(candidate) {
         if join_err == nil {
             delete(candidate)

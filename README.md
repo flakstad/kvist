@@ -205,6 +205,7 @@ The CLI is built around the normal edit/check/run loop:
 ```sh
 ./kvist check examples/language/hello.kvist
 ./kvist run examples/language/hello.kvist
+./kvist build examples/language/hello.kvist --out dist/hello
 ./kvist test examples/coverage/packages/test-package-tests.kvist
 ./scripts/smoke.sh
 ```

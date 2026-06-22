@@ -16,7 +16,10 @@
 (defn main
   "Exercise the kvist:cli package helpers without depending on process args."
   []
-  (let [port (demo-port)]
+  (let [port (demo-port)
+        overlay-entry (cli.env-entry "KVIST_CLI_PACKAGE_TEST" "1") :defer
+        overlay (cli.env-overlay ([]string [overlay-entry]))]
+    (defer (cli.delete-env! overlay))
     (when (cli.flag os.args "--tty")
       (let [[columns rows] (cli.terminal-size 80 24)]
         (cli.println "stdout-tty?" (cli.stdout-tty?) "size" columns rows)))

@@ -8,6 +8,10 @@ paths:
 (import http "kvist:http")
 ```
 
+Installed tools resolve these packages without depending on cwd. Set
+`KVIST_PACKAGES_DIR` to a packages directory, or `KVIST_HOME` to a Kvist install
+root containing `packages/`, when packaging Kvist outside the source checkout.
+
 This is an index, not a full API reference. For exact signatures, read the
 package source and runnable examples.
 
@@ -58,7 +62,8 @@ See [SEQUENCES.md](SEQUENCES.md) for collection ownership and helper behavior.
 - `kvist:json` - JSON read/write helpers built on Odin
   `core:encoding/json`.
 - `kvist:cli` - command-line flags, options, environment variables, terminal
-  size, TTY checks, exit, and print helpers.
+  size, TTY checks, temp directories, process execution, env overlays, exit,
+  and print helpers.
 
 ## Web
 

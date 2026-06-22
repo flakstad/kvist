@@ -14,7 +14,7 @@ print_usage :: proc() {
     fmt.println("  kvist <input.kvist> [-o output.odin] [--map output.map] [--eval form] [--no-print]")
     fmt.println("  kvist compile <input.kvist> [-o output.odin] [--map output.map]")
     fmt.println("  kvist dev --reload <input.kvist> [--rebuild] [--watch] [--generated-dir dir] [--print-paths] [--json]")
-    fmt.println("  kvist build <input.kvist> [--generated output.odin] [--reload] [--generated-dir dir]")
+    fmt.println("  kvist build <input.kvist> [--out output-binary] [--generated output.odin] [--reload] [--generated-dir dir]")
     fmt.println("  kvist check <input.kvist> [--generated output.odin] [--reload] [--generated-dir dir]")
     fmt.println("  kvist run <input.kvist> [--generated output.odin] [--reload] [--generated-dir dir]")
     fmt.println("  kvist test <input.kvist> [--generated output.odin] [--names test1,test2]")
@@ -264,9 +264,11 @@ remap_odin_output_locations :: proc(output, generated_path, source_path, source,
     return strings.clone(strings.to_string(builder))
 }
 
-cleanup_odin_output_arg :: proc(out_path, out_arg: string) {
+cleanup_odin_output_arg :: proc(out_path, out_arg: string, remove_output := true) {
     if out_path != "" {
-        _ = os.remove(out_path)
+        if remove_output {
+            _ = os.remove(out_path)
+        }
         delete(out_path)
     }
     if out_arg != "" {
@@ -295,7 +297,36 @@ print_compile_warnings :: proc(path, source, eval_source: string, warnings: []kv
     }
 }
 
-run_odin_file :: proc(command, generated_path, source_path, source, eval_source, save_name: string, source_map: []kvist.Source_Map_Entry, extra_args: []string = nil, package_dir := "") -> int {
+ensure_output_parent_dir :: proc(path: string) -> bool {
+    dir, _ := os.split_path(path)
+    if dir == "" {
+        return true
+    }
+    err := os.make_directory_all(dir)
+    if err != nil && err != .Exist {
+        fmt.eprintln("failed to create output directory: ", dir)
+        return false
+    }
+    return true
+}
+
+absolute_output_path :: proc(path: string) -> (string, bool) {
+    if os.is_absolute_path(path) {
+        return strings.clone(path), true
+    }
+    cwd, cwd_err := os.get_absolute_path(".", context.allocator)
+    if cwd_err != nil {
+        return "", false
+    }
+    defer delete(cwd)
+    joined, join_err := os.join_path({cwd, path}, context.allocator)
+    if join_err != nil {
+        return "", false
+    }
+    return joined, true
+}
+
+run_odin_file :: proc(command, generated_path, source_path, source, eval_source, save_name: string, source_map: []kvist.Source_Map_Entry, extra_args: []string = nil, package_dir := "", binary_output_path := "") -> int {
     source_dir, _ := os.split_path(source_path)
     working_dir := source_dir
     if working_dir == "" {
@@ -337,12 +368,27 @@ run_odin_file :: proc(command, generated_path, source_path, source, eval_source,
     }
     out_path := ""
     out_arg := ""
+    remove_out_path := true
     if command == "build" || command == "run" || command == "test" {
-        out_path = odin_output_executable_path(generated_abs)
+        if binary_output_path != "" {
+            requested_out_abs, out_abs_ok := absolute_output_path(binary_output_path)
+            if !out_abs_ok {
+                fmt.eprintln("failed to resolve output path: ", binary_output_path)
+                return 1
+            }
+            if !ensure_output_parent_dir(requested_out_abs) {
+                delete(requested_out_abs)
+                return 1
+            }
+            out_path = requested_out_abs
+            remove_out_path = false
+        } else {
+            out_path = odin_output_executable_path(generated_abs)
+        }
         out_arg = strings.clone(fmt.tprintf("-out:%s", out_path))
         append(&args, out_arg)
     }
-    defer cleanup_odin_output_arg(out_path, out_arg)
+    defer cleanup_odin_output_arg(out_path, out_arg, remove_out_path)
     state, stdout, stderr, err := os.process_exec(
         os.Process_Desc{command = args[:], working_dir = working_dir},
         context.allocator,
@@ -1091,7 +1137,7 @@ package_symbols_command :: proc(import_path, alias: string) {
     fmt.print(output)
 }
 
-run_generated_command :: proc(input, generated_path, odin_command: string) -> int {
+run_generated_command :: proc(input, generated_path, odin_command: string, binary_output_path := "") -> int {
     data := read_source_or_exit(input)
     defer delete(transmute([]byte)data)
 
@@ -1113,7 +1159,7 @@ run_generated_command :: proc(input, generated_path, odin_command: string) -> in
     }
     defer cleanup_generated(path, temp_dir, generated_path, package_dir)
 
-    return run_odin_file(odin_command, path, input, data, "", "", result.source_map[:], package_dir = package_dir)
+    return run_odin_file(odin_command, path, input, data, "", "", result.source_map[:], package_dir = package_dir, binary_output_path = binary_output_path)
 }
 
 test_command :: proc(input, generated_path, test_names: string) -> int {
@@ -1301,6 +1347,7 @@ parse_run_or_check_command :: proc(odin_command: string) {
     input := ""
     generated_path := ""
     generated_dir := ""
+    binary_output_path := ""
     reload_mode := false
 
     i := 2
@@ -1323,6 +1370,13 @@ parse_run_or_check_command :: proc(odin_command: string) {
             }
             generated_dir = os.args[i+1]
             i += 2
+        case "--out":
+            if odin_command != "build" || i+1 >= len(os.args) {
+                print_usage()
+                os.exit(2)
+            }
+            binary_output_path = os.args[i+1]
+            i += 2
         case:
             if input == "" {
                 input = os.args[i]
@@ -1340,7 +1394,7 @@ parse_run_or_check_command :: proc(odin_command: string) {
     }
 
     if reload_mode {
-        if generated_path != "" {
+        if generated_path != "" || binary_output_path != "" {
             print_usage()
             os.exit(2)
         }
@@ -1348,10 +1402,14 @@ parse_run_or_check_command :: proc(odin_command: string) {
     }
 
     if generated_path == "" && source_declares_reload_app(input) {
+        if binary_output_path != "" {
+            print_usage()
+            os.exit(2)
+        }
         os.exit(reload_app_generate_and_execute(input, odin_command, generated_dir))
     }
 
-    os.exit(run_generated_command(input, generated_path, odin_command))
+    os.exit(run_generated_command(input, generated_path, odin_command, binary_output_path))
 }
 
 parse_test_command :: proc() {

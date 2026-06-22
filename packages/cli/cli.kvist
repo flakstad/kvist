@@ -5,6 +5,13 @@
 (import strings "core:strings")
 (import terminal "core:terminal")
 
+(defstruct RunResult {
+  state: os.Process_State
+  stdout: []byte
+  stderr: []byte
+  err: os.Error
+})
+
 (defn flag
   "Return true when `args` contains the exact command-line flag `name`."
   [args: []string, name: string] -> bool #force_inline
@@ -73,6 +80,71 @@
         (when ok
           (set! value parsed))))
     value))
+
+(defn env-entry
+  "Return an owned `KEY=VALUE` environment entry for process execution."
+  [name: string, value: string] -> string #force_inline
+  (let [[entry _] (strings.join ([]string [name value]) "=")]
+    entry))
+
+(defn env-overlay
+  "Return an owned environment slice with current environment plus `overrides`.
+
+  `overrides` must contain `KEY=VALUE` entries, such as values produced by
+  `cli.env-entry`. Delete the returned array with `cli.delete-env!` after use."
+  [overrides: []string] -> [dynamic]string #force_inline
+  (let [[base err] (os.environ context.allocator)]
+    (if (!= err nil)
+      (return ([dynamic]string [])))
+    (let [out (make [dynamic]string 0 (+ (len base) (len overrides)))]
+      (for [entry base]
+        (append (addr out) entry))
+      (for [entry overrides]
+        (let [cloned (strings.clone entry)]
+          (append (addr out) cloned)))
+      out)))
+
+(defn delete-env!
+  "Delete an environment array returned from `cli.env-overlay`."
+  [env: [dynamic]string]
+  (for [entry env]
+    (delete entry))
+  (delete env))
+
+(defn temp-dir
+  "Create a temporary directory and return its owned path."
+  [pattern: string] -> [path: string, err: os.Error] #force_inline
+  (os.make_directory_temp "" pattern context.allocator))
+
+(defn remove-all!
+  "Remove a file tree. Useful as a cleanup function for `:defer-with`."
+  [path: string] -> os.Error #force_inline
+  (os.remove_all path))
+
+(defn run
+  "Run `command` in `working-dir`, capturing stdout and stderr."
+  [command: []string, working-dir: string] -> RunResult #force_inline
+  (let [[state stdout stderr err] (os.process_exec (os.Process_Desc {
+                                                      command: command
+                                                      working_dir: working-dir})
+                                                    context.allocator)]
+    (RunResult {state: state stdout: stdout stderr: stderr err: err})))
+
+(defn run-with-env
+  "Run `command` in `working-dir` with explicit `env`, capturing output."
+  [command: []string, working-dir: string, env: []string] -> RunResult #force_inline
+  (let [[state stdout stderr err] (os.process_exec (os.Process_Desc {
+                                                      command: command
+                                                      working_dir: working-dir
+                                                      env: env})
+                                                    context.allocator)]
+    (RunResult {state: state stdout: stdout stderr: stderr err: err})))
+
+(defn delete-run-result!
+  "Delete captured process output buffers in a `RunResult`."
+  [result: RunResult]
+  (delete result.stdout)
+  (delete result.stderr))
 
 (defn terminal-size
   "Return terminal columns and rows from COLUMNS/LINES, falling back when absent."
