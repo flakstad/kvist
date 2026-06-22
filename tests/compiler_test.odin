@@ -210,6 +210,105 @@ compile_case_expression_in_let_binding :: proc(t: ^testing.T) {
 }
 
 @(test)
+compile_owned_let_branch_case_in_return_position :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defenum Step-Kind [One Two])
+
+(defstruct Step {
+  kind: Step-Kind
+})
+
+(defn owned-from-case [step: Step] -> [dynamic]int
+  (case step.kind
+    .One
+      (let [out (make [dynamic]int)]
+        (arr.push! out 1)
+        out)
+    :else
+      (let [out (make [dynamic]int)]
+        (arr.push! out 2)
+        out)))`
+
+    result, err, ok := kvist.compile_source_with_map(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(t, len(result.warnings), 0)
+    testing.expect_value(t, strings.contains(result.output, "return out"), true)
+}
+
+@(test)
+compile_owned_let_branch_mixed_with_owned_call_case :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defenum Step-Kind [One Two])
+
+(defstruct Step {
+  kind: Step-Kind
+})
+
+(defn make-one [] -> [dynamic]int
+  (let [out (make [dynamic]int)]
+    (arr.push! out 1)
+    out))
+
+(defn owned-from-mixed-case [step: Step] -> [dynamic]int
+  (case step.kind
+    .One
+      (let [out (make [dynamic]int)]
+        (arr.push! out 10)
+        out)
+    :else
+      (make-one)))`
+
+    result, err, ok := kvist.compile_source_with_map(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(t, len(result.warnings), 0)
+    testing.expect_value(t, strings.contains(result.output, "return out"), true)
+    testing.expect_value(t, strings.contains(result.output, "return make_one()"), true)
+}
+
+@(test)
+reject_defer_owned_let_branch_case_return :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defenum Step-Kind [One Two])
+
+(defstruct Step {
+  kind: Step-Kind
+})
+
+(defn owned-from-case [step: Step] -> [dynamic]int
+  (case step.kind
+    .One
+      (let [out (make [dynamic]int) :defer]
+        (arr.push! out 1)
+        out)
+    :else
+      (make [dynamic]int)))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    defer delete(err.message)
+    testing.expect_value(t, err.message, "defer-marked binding cannot be returned; remove defer or transfer ownership explicitly")
+}
+
+@(test)
 reject_case_expression_without_else :: proc(t: ^testing.T) {
     source := `(package main)
 
