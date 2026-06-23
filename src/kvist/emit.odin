@@ -4588,6 +4588,18 @@ form_head_is_do :: proc(form: CST_Form) -> bool {
     return len(form.items) > 0 && (is_symbol(form.items[0], "do") || is_symbol(form.items[0], "block"))
 }
 
+form_head_is_cond_thread :: proc(form: CST_Form) -> bool {
+    return len(form.items) > 0 &&
+           (is_symbol(form.items[0], "cond->") ||
+            is_symbol(form.items[0], "core-cond-thread"))
+}
+
+form_head_is_as_thread :: proc(form: CST_Form) -> bool {
+    return len(form.items) > 0 &&
+           (is_symbol(form.items[0], "as->") ||
+            is_symbol(form.items[0], "core-as-thread"))
+}
+
 form_head_is_statement_only :: proc(form: CST_Form) -> (string, bool) {
     if form.kind != .List || len(form.items) == 0 || form.items[0].kind != .Symbol {
         return "", false
@@ -4603,6 +4615,12 @@ form_head_is_statement_only :: proc(form: CST_Form) -> (string, bool) {
 emit_expr_for_expected_type :: proc(e: ^Emitter, form: CST_Form, expected_type := "") -> (string, Compile_Error, bool) {
     if form.kind == .List && len(form.items) > 0 && is_symbol(form.items[0], "if") {
         return emit_if_expr(e, form, expected_type)
+    }
+    if form.kind == .List && form_head_is_cond_thread(form) {
+        return emit_cond_thread_expr(e, form, expected_type)
+    }
+    if form.kind == .List && form_head_is_as_thread(form) {
+        return emit_as_thread_expr(e, form, expected_type)
     }
     if form.kind == .List && len(form.items) > 0 && is_symbol(form.items[0], "let") {
         return emit_block_expr(e, form, expected_type)
@@ -4656,6 +4674,225 @@ emit_block_expr :: proc(e: ^Emitter, form: CST_Form, expected_type := "") -> (st
         append(&args, capture.name)
     }
     return fmt.tprintf("(%s)(%s)", proc_text, strings.join(args[:], ", ", context.temp_allocator)), {}, true
+}
+
+make_list_form :: proc(items: []CST_Form, span: Span) -> CST_Form {
+    built: [dynamic]CST_Form
+    for item in items {
+        append(&built, item)
+    }
+    return CST_Form{
+        kind  = .List,
+        items = built,
+        span  = span,
+    }
+}
+
+make_vector_form :: proc(items: []CST_Form, span: Span) -> CST_Form {
+    built: [dynamic]CST_Form
+    for item in items {
+        append(&built, item)
+    }
+    return CST_Form{
+        kind  = .Vector,
+        items = built,
+        span  = span,
+    }
+}
+
+obvious_as_thread_type :: proc(e: ^Emitter, form: CST_Form) -> (string, bool) {
+    if !form_head_is_as_thread(form) || len(form.items) < 4 || form.items[2].kind != .Symbol {
+        return "", false
+    }
+    name := map_name(form.items[2].text)
+    current_ty, ok_current_ty := obvious_form_type(e, form.items[1])
+    if !ok_current_ty {
+        return "", false
+    }
+    for step in form.items[3:] {
+        push_local_type_scope(e)
+        bind_local_type(e, name, current_ty)
+        next_ty, ok_next_ty := obvious_form_type(e, step)
+        pop_local_type_scope(e)
+        if !ok_next_ty {
+            return "", false
+        }
+        current_ty = next_ty
+    }
+    return current_ty, true
+}
+
+replace_symbol_in_form :: proc(form: CST_Form, from, to: string, shadowed := false) -> CST_Form {
+    if target_form, fields, field_span, ok_place := field_path_place_parts(form); ok_place {
+        replaced_target := replace_symbol_in_form(target_form, from, to, shadowed)
+        if len(fields) == 0 {
+            return replaced_target
+        }
+        current := replaced_target
+        for field in fields {
+            current = make_list_form({make_symbol_form("__kvist_field", field_span), current, make_symbol_form(field, field_span)}, field_span)
+        }
+        return current
+    }
+
+    #partial switch form.kind {
+    case .Symbol:
+        if !shadowed && map_name(form.text) == from {
+            return make_symbol_form(to, form.span)
+        }
+        return form
+    case .List:
+        if len(form.items) > 0 && is_symbol(form.items[0], "fn") && len(form.items) > 1 && form.items[1].kind == .Vector {
+            shadowed_body := shadowed
+            params, _, ok_params := parse_param_vector(form.items[1])
+            if ok_params {
+                for param in params {
+                    if param.name == from {
+                        shadowed_body = true
+                        break
+                    }
+                }
+            }
+            items: [dynamic]CST_Form
+            append(&items, form.items[0])
+            append(&items, form.items[1])
+            for item in form.items[2:] {
+                append(&items, replace_symbol_in_form(item, from, to, shadowed_body))
+            }
+            return make_list_form(items[:], form.span)
+        }
+        if len(form.items) > 0 && is_symbol(form.items[0], "let") && len(form.items) > 1 && form.items[1].kind == .Vector {
+            items: [dynamic]CST_Form
+            append(&items, form.items[0])
+            bindings_items: [dynamic]CST_Form
+            binding_shadowed := shadowed
+            for i := 0; i < len(form.items[1].items); i += 2 {
+                if i+1 >= len(form.items[1].items) {
+                    append(&bindings_items, form.items[1].items[i])
+                    break
+                }
+                name_form := form.items[1].items[i]
+                value_form := form.items[1].items[i+1]
+                append(&bindings_items, name_form)
+                append(&bindings_items, replace_symbol_in_form(value_form, from, to, binding_shadowed))
+                if name_form.kind == .Symbol && map_name(name_form.text) == from {
+                    binding_shadowed = true
+                }
+            }
+            append(&items, make_vector_form(bindings_items[:], form.items[1].span))
+            for item in form.items[2:] {
+                append(&items, replace_symbol_in_form(item, from, to, binding_shadowed))
+            }
+            return make_list_form(items[:], form.span)
+        }
+        if form_head_is_as_thread(form) && len(form.items) >= 3 && form.items[2].kind == .Symbol {
+            items: [dynamic]CST_Form
+            append(&items, form.items[0])
+            append(&items, replace_symbol_in_form(form.items[1], from, to, shadowed))
+            append(&items, form.items[2])
+            nested_shadowed := shadowed || map_name(form.items[2].text) == from
+            for item in form.items[3:] {
+                append(&items, replace_symbol_in_form(item, from, to, nested_shadowed))
+            }
+            return make_list_form(items[:], form.span)
+        }
+        items: [dynamic]CST_Form
+        for item in form.items {
+            append(&items, replace_symbol_in_form(item, from, to, shadowed))
+        }
+        return make_list_form(items[:], form.span)
+    case .Vector:
+        items: [dynamic]CST_Form
+        for item in form.items {
+            append(&items, replace_symbol_in_form(item, from, to, shadowed))
+        }
+        return make_vector_form(items[:], form.span)
+    case .Brace, .Set:
+        items: [dynamic]CST_Form
+        for item in form.items {
+            append(&items, replace_symbol_in_form(item, from, to, shadowed))
+        }
+        return CST_Form{
+            kind  = form.kind,
+            items = items,
+            span  = form.span,
+            text  = form.text,
+        }
+    case:
+        return form
+    }
+    return form
+}
+
+emit_cond_thread_expr :: proc(e: ^Emitter, form: CST_Form, expected_type := "") -> (string, Compile_Error, bool) {
+    if len(form.items) < 4 || ((len(form.items)-2) % 2) != 0 {
+        return "", Compile_Error{message = "cond-> expects an initial expression followed by test and step pairs", span = form.span}, false
+    }
+
+    ty := expected_type
+    if ty == "" {
+        inferred_ty, ok_inferred_ty := obvious_form_type(e, form.items[1])
+        if !ok_inferred_ty {
+            return "", Compile_Error{message = "cond-> expects an initial expression with an obvious type; bind or annotate it first", span = form.items[1].span}, false
+        }
+        ty = inferred_ty
+    }
+
+    name := thread_temp_name(e)
+    current := make_symbol_form(name, form.span)
+    body: [dynamic]CST_Form
+    for i := 2; i < len(form.items); i += 2 {
+        test := form.items[i]
+        step := form.items[i+1]
+        threaded := make_list_form({make_symbol_form("->", step.span), current, step}, step.span)
+        branch := make_list_form({make_symbol_form("if", test.span), test, threaded, current}, test.span)
+        assign := make_list_form({make_symbol_form("set!", branch.span), current, branch}, branch.span)
+        append(&body, assign)
+    }
+    initial_bindings := make_vector_form({make_symbol_form(name, form.span), form.items[1]}, form.span)
+    items: [dynamic]CST_Form
+    append(&items, make_symbol_form("let", form.span))
+    append(&items, initial_bindings)
+    for item in body {
+        append(&items, item)
+    }
+    append(&items, current)
+    top := make_list_form(items[:], form.span)
+    return emit_block_expr(e, top, ty)
+}
+
+emit_as_thread_expr :: proc(e: ^Emitter, form: CST_Form, expected_type := "") -> (string, Compile_Error, bool) {
+    if len(form.items) < 4 {
+        return "", Compile_Error{message = "as-> expects an initial expression, a name, and at least one step", span = form.span}, false
+    }
+    if form.items[2].kind != .Symbol {
+        return "", Compile_Error{message = "as-> expects a symbol binding name", span = form.items[2].span}, false
+    }
+
+    ty := expected_type
+    if ty == "" {
+        inferred_ty, ok_inferred_ty := obvious_as_thread_type(e, form)
+        if !ok_inferred_ty {
+            return "", Compile_Error{message = "as-> expression needs an expected type; add a let binding type or use it where the type is known", span = form.span}, false
+        }
+        ty = inferred_ty
+    }
+
+    from_name := map_name(form.items[2].text)
+    bindings_items: [dynamic]CST_Form
+    current_name := thread_temp_name(e)
+    append(&bindings_items, make_symbol_form(current_name, form.span))
+    append(&bindings_items, form.items[1])
+    for i := 3; i < len(form.items); i += 1 {
+        next_name := thread_temp_name(e)
+        step_form := replace_symbol_in_form(form.items[i], from_name, current_name)
+        append(&bindings_items, make_symbol_form(next_name, form.items[i].span))
+        append(&bindings_items, step_form)
+        current_name = next_name
+    }
+    bindings := make_vector_form(bindings_items[:], form.span)
+    top := make_list_form({make_symbol_form("let", form.span), bindings, make_symbol_form(current_name, form.span)}, form.span)
+    return emit_block_expr(e, top, ty)
 }
 
 branch_type_mismatch_error :: proc(e: ^Emitter, lhs, rhs: CST_Form, what: string, span: Span) -> (Compile_Error, bool) {
@@ -5755,6 +5992,12 @@ obvious_form_type :: proc(e: ^Emitter, form: CST_Form) -> (string, bool) {
            len(form.items) >= 2 {
             return shallow_update_return_type(e, form)
         }
+        if form_head_is_cond_thread(form) && len(form.items) >= 2 {
+            return obvious_form_type(e, form.items[1])
+        }
+        if form_head_is_as_thread(form) {
+            return obvious_as_thread_type(e, form)
+        }
         if form.items[0].text == "into" && len(form.items) >= 4 {
             ty, _, _, ok_ty := parse_type_text_from_forms(form.items[:], 1)
             return ty, ok_ty
@@ -6032,6 +6275,12 @@ obvious_binding_type :: proc(e: ^Emitter, binding: Binding) -> (string, bool) {
         if (head_is_core_assoc(head) || head_is_core_update(head)) &&
            len(binding.value.items) >= 2 {
             return shallow_update_return_type(e, binding.value)
+        }
+        if form_head_is_cond_thread(binding.value) && len(binding.value.items) >= 2 {
+            return obvious_form_type(e, binding.value.items[1])
+        }
+        if form_head_is_as_thread(binding.value) {
+            return obvious_as_thread_type(e, binding.value)
         }
         if head == "into" && len(binding.value.items) >= 4 {
             ty, _, _, ok_ty := parse_type_text_from_forms(binding.value.items[:], 1)
@@ -11629,6 +11878,14 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
 
     if head.text == "->>" || head.text == "core-thread-last" {
         return emit_thread_expr(e, form, true)
+    }
+
+    if head.text == "cond->" || head.text == "core-cond-thread" {
+        return emit_cond_thread_expr(e, form)
+    }
+
+    if head.text == "as->" || head.text == "core-as-thread" {
+        return emit_as_thread_expr(e, form)
     }
 
     if head.text == "soa-make-raw" {

@@ -11664,6 +11664,83 @@ clone_path :: proc(req: Request, allocator: rawptr) -> string {
 }
 
 @(test)
+compile_cond_thread_exprs :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct Request {
+  content-type: keyword
+  authenticated?: bool
+  trace-id: int
+})
+
+(defn add-trace [req: Request, trace-id: int] -> Request
+  (assoc req.trace-id trace-id))
+
+(defn refine [req: Request, json?: bool, auth?: bool, trace?: bool] -> Request
+  (cond-> req
+    json? (assoc .content-type :json)
+    auth? (assoc .authenticated? true)
+    trace? (update .trace-id + 10)))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "refine :: proc(req: Request, json_p, auth_p, trace_p: bool) -> Request"), true)
+    testing.expect_value(t, strings.contains(output, "(proc(req: Request, json_p: bool, auth_p: bool, trace_p: bool) -> Request {"), true)
+    testing.expect_value(t, strings.contains(output, "if json_p"), true)
+    testing.expect_value(t, strings.contains(output, "content_type = kvist_value"), true)
+    testing.expect_value(t, strings.contains(output, "authenticated_p = kvist_value"), true)
+    testing.expect_value(t, strings.contains(output, "trace_id = (kvist_target.trace_id) + (kvist_arg_0)"), true)
+}
+
+@(test)
+compile_as_thread_exprs :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct Profile {
+  visits: int
+})
+
+(defstruct User {
+  profile: Profile
+  age: int
+})
+
+(defn visit [user: User] -> User
+  (update user.profile.visits + 1))
+
+(defn attach-bonus [bonus: int, user: User] -> User
+  (update user.age + bonus))
+
+(defn score [user: User, bonus: int] -> int
+  (as-> user x
+    (visit x)
+    (attach-bonus bonus x)
+    (+ x.age x.profile.visits)))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "score :: proc(user: User, bonus: int) -> int"), true)
+    testing.expect_value(t, strings.contains(output, "(proc(user: User, bonus: int) -> int {"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_thread_"), true)
+    testing.expect_value(t, strings.contains(output, "visit(kvist_thread_"), true)
+    testing.expect_value(t, strings.contains(output, "attach_bonus(bonus, kvist_thread_"), true)
+    testing.expect_value(t, strings.contains(output, ".age) + (kvist_thread_"), true)
+    testing.expect_value(t, strings.contains(output, "return kvist_thread_"), true)
+}
+
+@(test)
 compile_pointer_deref_and_address_of :: proc(t: ^testing.T) {
     source := `(package main)
 

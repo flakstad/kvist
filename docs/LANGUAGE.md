@@ -80,7 +80,7 @@ make alloc delete zero with-allocator with-temp-allocator
 addr deref ptr type transmute type-assert
 
 ; threading and inspection
--> ->> tap> doc
+-> ->> cond-> as-> tap> doc
 
 ; bit operations
 bit-and bit-or bit-xor bit-not bit-shift-left bit-shift-right
@@ -1735,11 +1735,49 @@ Small core helpers are auto-exposed. Prefer the bare spelling:
 (doc 'println)
 (-> value steps...)
 (->> value steps...)
+(cond-> value test step...)
+(as-> value name expr...)
 (doto value setup-calls...)
 ```
 
 `->` threads a value into the next form as the first argument. `->>` threads it
 as the last argument.
+
+`cond->` conditionally applies first-argument thread steps. It is useful when
+one value is refined by several independent flags and each enabled branch should
+continue from the value produced by earlier enabled branches:
+
+```clojure
+(cond-> req
+  json? (assoc .content-type :json)
+  auth? (assoc .authenticated? true)
+  trace? (update .trace-id + 10))
+```
+
+The conditions and steps are evaluated in order. Each condition controls exactly
+one step. A true condition applies the step as if it were written with `->`; a
+false condition leaves the current value unchanged. The result has the same
+shape as the initial value because every step is a first-argument refinement of
+that value. When several updates share one condition, use an ordinary `if` or a
+helper function instead of repeating that condition in `cond->`.
+
+`as->` binds a name to the current value and rebinds that same name after each
+step expression. Use it when the value does not naturally thread into only the
+first or last argument position, or when the pipeline ends by projecting the
+threaded value into a different type:
+
+```clojure
+(as-> user x
+  (visit x)
+  (attach-bonus bonus x)
+  (+ x.age x.profile.visits))
+```
+
+The name is visible anywhere inside each step, including field access such as
+`x.profile.visits`. Each step receives the result of the previous step through
+that name, and the result of the whole form is the final step expression. Unlike
+`->` and `cond->`, `as->` can change type across steps; the example starts with
+a `User` and returns an `int`.
 
 `doto` evaluates a value once, passes it as the first argument to each setup
 call, and returns the original value. Use it for Odin-style mutating setup APIs

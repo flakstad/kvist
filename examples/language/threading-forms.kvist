@@ -1,0 +1,54 @@
+// Demonstrates two value-threading forms:
+// - cond-> for optional same-shape refinements controlled by independent flags
+// - as-> for named threading where the value appears in different positions or
+//   changes type by the end of the pipeline
+(package main)
+
+(defstruct Request {
+  content-type: keyword
+  authenticated?: bool
+  trace-id: int
+})
+
+(defstruct Profile {
+  visits: int
+})
+
+(defstruct User {
+  profile: Profile
+  age: int
+})
+
+(defn prepare-request [req: Request, json?: bool, auth?: bool, trace?: bool] -> Request
+  ;; Each true flag applies one update to the current Request. False flags leave
+  ;; the accumulated Request unchanged.
+  (cond-> req
+    json? (assoc .content-type :json)
+    auth? (assoc .authenticated? true)
+    trace? (update .trace-id + 10)))
+
+(defn visit [user: User] -> User
+  (update user.profile.visits + 1))
+
+(defn attach-bonus [bonus: int, user: User] -> User
+  (update user.age + bonus))
+
+(defn engagement-score [user: User, bonus: int] -> int
+  ;; `as->` names each intermediate value as x. The pipeline starts as User,
+  ;; passes x in first and second argument positions, then returns an int.
+  (as-> user x
+    (visit x)
+    (attach-bonus bonus x)
+    (+ x.age x.profile.visits)))
+
+(defn main []
+  (println (prepare-request (Request {content-type: :html authenticated?: false trace-id: 1}) true false true))
+  (println (engagement-score (User {profile: (Profile {visits: 1}) age: 3}) 10)))
+
+(comment
+  (prepare-request (Request {content-type: :html authenticated?: false trace-id: 1}) true false true)
+  ;; => (Request {content-type: :json authenticated?: false trace-id: 11})
+
+  (engagement-score (User {profile: (Profile {visits: 1}) age: 3}) 10)
+  ;; => 15
+)
