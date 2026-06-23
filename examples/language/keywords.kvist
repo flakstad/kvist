@@ -1,0 +1,62 @@
+// Demonstrates first-class keyword values in ordinary Odin-shaped Kvist code.
+(package main)
+
+(defstruct Config {
+  mode: keyword
+  backend: keyword
+  name: string
+})
+
+(defstruct Job {
+  state: keyword
+  label: string
+})
+
+(defn default-config [] -> Config
+  (Config {mode: :dev
+           backend: :sqlite
+           name: "local"}))
+
+(defn next-job-state [state: keyword, attempts: int] -> keyword
+  (case state
+    :queued (if (> attempts 0) :retrying :running)
+    :retrying :running
+    :running :done
+    :done :done
+    :else :unknown))
+
+(defn state-rank [state: keyword] -> int
+  (case state
+    :queued 0
+    :retrying 1
+    :running 2
+    :done 3
+    :else -1))
+
+(defn keyword-literals-demo [] -> int
+  (let [job (Job {state: :queued label: "thumbnail"})
+        transitions {:queued 1 :running 2 :done 3} :defer
+        enabled #{:dev :test} :defer]
+    (println enabled)
+    (+ (state-rank job.state)
+       (get transitions :running))))
+
+(defn main []
+  (let [config (default-config)]
+    (println config.mode config.backend config.name)
+    (println (next-job-state :queued 0))
+    (println (keyword-literals-demo))))
+
+(comment
+  (default-config)
+  ;; => (Config {mode: :dev backend: :sqlite name: "local"})
+
+  (next-job-state :queued 0)
+  ;; => :running
+
+  (next-job-state :running 0)
+  ;; => :done
+
+  (keyword-literals-demo)
+  ;; => 2
+)

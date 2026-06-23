@@ -12,15 +12,29 @@
 })
 
 (defstruct State {
+  mode: keyword
   values: []int
   fixed: [3]int
   buffer: [dynamic]int
   lookup: map[string]int
+  states: map[keyword]int
 })
 
 (defn user-name [] -> string
   (let [user (User {name: "Ada" age: 36})]
     user.name))
+
+(defn state-mode [] -> keyword
+  (let [buffer (arr.dynamic int [21 34]) :defer
+        lookup (map.of string int {"one" 1 "two" 2}) :defer
+        states {:ready 1 :done 2} :defer
+        state (State {mode: :dev
+                      values: [1 2 3]
+                      fixed: [5 8 13]
+                      buffer: buffer
+                      lookup: lookup
+                      states: states})]
+    state.mode))
 
 (defn dynamic-first [] -> int
   (let [buffer-literal (arr.dynamic int [21 34])]
@@ -95,6 +109,9 @@
   ;; Struct construction is just Odin struct construction in parens.
   (user-name)
   ;; => Ada
+
+  (state-mode)
+  ;; => :dev
 
   ;; A dynamic array literal owns storage. Bind it and delete it in the same
   ;; scope unless you are returning ownership to the caller.

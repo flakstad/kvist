@@ -110,6 +110,7 @@ Transform_Into_Output :: struct {
 }
 
 Emitter_Features :: struct {
+    keyword_type:     bool,
     dynamic_literals: bool,
     core_map:         bool,
     core_map_capture_max: int,
@@ -1187,7 +1188,7 @@ emit_brace_pair_texts :: proc(e: ^Emitter, form: CST_Form, keyword_fields := tru
 
         #partial switch key.kind {
         case .Keyword:
-            return pairs, Compile_Error{message = "keywords are syntax markers, not brace labels or map keys; use field labels like name: or ordinary key values", span = key.span}, false
+            append(&pairs, Brace_Pair{key = keyword_literal_text(e, key.text), value = value_text})
         case .Symbol:
             if len(key.text) > 1 && key.text[len(key.text)-1] == ':' {
                 if keyword_fields {
@@ -1766,10 +1767,99 @@ type_text_is_builtin_odin_scalar :: proc(text: string) -> bool {
          "uint", "u8", "u16", "u32", "u64", "u128",
          "uintptr", "rune", "byte",
          "f16", "f32", "f64", "complex32", "complex64", "complex128",
-         "string", "cstring", "rawptr", "any":
+         "string", "cstring", "rawptr", "any", "keyword":
         return true
     }
     return false
+}
+
+type_text_uses_keyword :: proc(text: string) -> bool {
+    trimmed := strings.trim_space(text)
+    if trimmed == "" {
+        return false
+    }
+    needle := "keyword"
+    limit := len(trimmed) - len(needle)
+    for i := 0; i <= limit; i += 1 {
+        if trimmed[i:i+len(needle)] != needle {
+            continue
+        }
+        before_ok := i == 0
+        if !before_ok {
+            ch := trimmed[i-1]
+            before_ok = !((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '_')
+        }
+        after_ok := i+len(needle) == len(trimmed)
+        if !after_ok {
+            ch := trimmed[i+len(needle)]
+            after_ok = !((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '_')
+        }
+        if before_ok && after_ok {
+            return true
+        }
+    }
+    return false
+}
+
+mark_keyword_type :: proc(e: ^Emitter) {
+    e.features.keyword_type = true
+}
+
+mark_keyword_type_for_text :: proc(e: ^Emitter, text: string) {
+    if type_text_uses_keyword(text) {
+        mark_keyword_type(e)
+    }
+}
+
+mark_keyword_type_for_return_spec :: proc(e: ^Emitter, returns: Return_Spec) {
+    #partial switch returns.kind {
+    case .Single:
+        mark_keyword_type_for_text(e, returns.single_ty)
+    case .Named:
+        for field in returns.named {
+            mark_keyword_type_for_text(e, field.ty)
+        }
+    }
+}
+
+mark_decl_keyword_usage :: proc(e: ^Emitter, decl: IR_Decl) {
+    #partial switch decl.kind {
+    case .Const:
+        if decl.const_decl.is_type_alias {
+            mark_keyword_type_for_text(e, decl.const_decl.type_alias)
+        }
+        if decl.const_decl.has_ty {
+            mark_keyword_type_for_text(e, decl.const_decl.ty)
+        }
+    case .Var:
+        if decl.var_decl.has_ty {
+            mark_keyword_type_for_text(e, decl.var_decl.ty)
+        }
+    case .Struct:
+        for field in decl.struct_decl.fields {
+            mark_keyword_type_for_text(e, field.ty)
+        }
+    case .Union:
+        for variant in decl.union_decl.variants {
+            mark_keyword_type_for_text(e, variant.ty)
+        }
+    case .Proc:
+        for param in decl.proc_decl.params {
+            mark_keyword_type_for_text(e, param.ty)
+        }
+        mark_keyword_type_for_return_spec(e, decl.proc_decl.returns)
+    case .Source:
+        for param in decl.source_decl.params {
+            mark_keyword_type_for_text(e, param.ty)
+        }
+        mark_keyword_type_for_text(e, decl.source_decl.state_ty)
+        mark_keyword_type_for_text(e, decl.source_decl.item_ty)
+    }
+}
+
+keyword_literal_text :: proc(e: ^Emitter, text: string) -> string {
+    mark_keyword_type(e)
+    return emit_type_conversion_text("keyword", fmt.tprintf("%q", text))
 }
 
 type_text_needs_conversion_parens :: proc(text: string) -> bool {
@@ -5555,7 +5645,8 @@ infer_literal_value_type :: proc(e: ^Emitter, form: CST_Form) -> (string, Compil
     case .Bool:
         return "bool", Compile_Error{}, true
     case .Keyword:
-        return "", Compile_Error{message = "keywords are syntax markers, not values; use a string, enum value, field label, or field selector", span = form.span}, false
+        mark_keyword_type(e)
+        return "keyword", Compile_Error{}, true
     case .Symbol:
         if ty, ok := lookup_local_type(e, map_name(form.text)); ok {
             return ty, Compile_Error{}, true
@@ -7309,6 +7400,10 @@ parse_proc_literal_form :: proc(form: CST_Form) -> (Proc_Literal, Compile_Error,
 }
 
 emit_proc_literal_text :: proc(e: ^Emitter, params: []Param, returns: Return_Spec, body: []CST_Form) -> (string, Compile_Error, bool) {
+    for param in params {
+        mark_keyword_type_for_text(e, param.ty)
+    }
+    mark_keyword_type_for_return_spec(e, returns)
     sub := Emitter{
         builder     = strings.builder_make(),
         indent      = 1,
@@ -7939,6 +8034,15 @@ find_struct_decl :: proc(e: ^Emitter, name: string) -> (^Struct_Decl, bool) {
     return nil, false
 }
 
+enum_type_exists :: proc(e: ^Emitter, name: string) -> bool {
+    for decl in e.decls {
+        if decl.kind == .Enum && decl.enum_decl.name == name {
+            return true
+        }
+    }
+    return false
+}
+
 find_struct_field :: proc(struct_decl: ^Struct_Decl, name: string) -> (^Struct_Field, bool) {
     for i in 0..<len(struct_decl.fields) {
         if struct_decl.fields[i].name == name {
@@ -8138,6 +8242,11 @@ literal_matches_struct_field_type :: proc(e: ^Emitter, ty: string, value: CST_Fo
             return true
         }
         return value.kind != .String && value.kind != .Number
+    case "keyword":
+        if value.kind == .Keyword {
+            return true
+        }
+        return value.kind != .String && value.kind != .Number && value.kind != .Bool
     }
 
     nested_struct, ok_nested := find_struct_decl(e, ty)
@@ -11713,6 +11822,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         if !ok_type {
             return "", err_type, false
         }
+        mark_keyword_type_for_text(e, type_text)
         value_text, err_value, ok_value := emit_expr(e, form.items[1])
         if !ok_value {
             return "", err_value, false
@@ -11759,6 +11869,7 @@ emit_type_application_expr :: proc(e: ^Emitter, type_form: CST_Form, args: []CST
     if !ok_type {
         return "", err_type, false
     }
+    mark_keyword_type_for_text(e, type_text)
 
     value := args[0]
     #partial switch value.kind {
@@ -11848,7 +11959,7 @@ emit_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) 
         }
         return map_name(form.text), {}, true
     case .Keyword:
-        return "", Compile_Error{message = "keywords are syntax markers, not values; use a string, enum value, field label, or field selector", span = form.span}, false
+        return keyword_literal_text(e, form.text), {}, true
     case .List:
         if len(form.items) == 0 {
             return "", Compile_Error{message = "empty list expression", span = form.span}, false
@@ -12792,7 +12903,7 @@ emit_switch_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, return
 
     type_switch := is_type_switch_subject(form.items[1])
     emit_indent(e)
-    if !type_switch && (force_partial || switch_has_else_clause(form)) {
+    if !type_switch && force_partial {
         strings.write_string(&e.builder, "#partial ")
     }
     strings.write_string(&e.builder, "switch ")
@@ -12813,7 +12924,7 @@ emit_switch_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, return
         }
         strings.write_string(&e.builder, subject)
         prefix_len := len("switch ")
-        if !type_switch && (force_partial || switch_has_else_clause(form)) {
+        if !type_switch && force_partial {
             prefix_len = len("#partial switch ")
         }
         record_current_line_fragment_map(e, prefix_len, subject, form.items[1].span)
@@ -12943,7 +13054,13 @@ emit_case_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns:
     if case_has_type_payload_patterns(form) {
         return emit_case_type_payload_stmt(e, form, last_in_proc, returns)
     }
-    return emit_switch_stmt(e, form, last_in_proc, returns)
+    force_partial := false
+    if subject_ty, ok_subject_ty := known_form_type(e, form.items[1]); ok_subject_ty {
+        if enum_type_exists(e, subject_ty) {
+            force_partial = true
+        }
+    }
+    return emit_switch_stmt(e, form, last_in_proc, returns, force_partial)
 }
 
 emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Return_Spec) -> (Compile_Error, bool) {
@@ -13693,6 +13810,7 @@ emit_proc_where_constraints :: proc(e: ^Emitter, constraints: []CST_Form) -> (Co
 }
 
 emit_decl :: proc(e: ^Emitter, decl: IR_Decl) -> (Compile_Error, bool) {
+    mark_decl_keyword_usage(e, decl)
     for line in decl.doc_lines {
         emit_line(e, line)
     }
@@ -14799,6 +14917,10 @@ emit_map_entry_type_helper :: proc(e: ^Emitter) {
     emit_line(e, "}")
 }
 
+emit_keyword_type_helper :: proc(e: ^Emitter) {
+    emit_line(e, "keyword :: distinct string")
+}
+
 emit_core_keep_helper :: proc(e: ^Emitter) {
     emit_line(e, "kvist_keep :: proc(f: proc(x: $T) -> ($U, bool), xs: []T) -> [dynamic]U {")
     e.indent += 1
@@ -15256,7 +15378,8 @@ emit_core_every_field_helper :: proc(e: ^Emitter, field: string) {
 }
 
 core_helpers_needed :: proc(features: Emitter_Features) -> bool {
-    return features.core_map || features.core_map_capture_max > 0 || features.core_filter || features.core_filter_capture_max > 0 || features.core_reduce ||
+    return features.keyword_type ||
+           features.core_map || features.core_map_capture_max > 0 || features.core_filter || features.core_filter_capture_max > 0 || features.core_reduce ||
            features.core_remove || features.core_remove_capture_max > 0 || features.core_keep || features.core_keep_capture_max > 0 ||
            features.core_concat ||
            features.core_get_or_default ||
@@ -15304,6 +15427,10 @@ emit_core_helpers :: proc(e: ^Emitter, features: Emitter_Features) {
 
     emit_raw_newline(e)
     emitted := false
+    if features.keyword_type {
+        emit_core_helper_separator(e, &emitted)
+        emit_keyword_type_helper(e)
+    }
     if features.map_entry {
         emit_core_helper_separator(e, &emitted)
         emit_map_entry_type_helper(e)

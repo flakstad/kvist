@@ -22,7 +22,16 @@
     .Error "error"
     :else "unknown"))
 
+(defn http-tag [code: int] -> keyword
+  (defenum Http-Status {OK: 200 Not-Found: 404 Error: 500})
+  (case (Http-Status code)
+    .OK :ok
+    .Not-Found :missing
+    .Error :error
+    :else :unknown))
+
 (defn main []
   (println (classify-code 42))
   (println (classify-code 120))
-  (println (http-label 404)))
+  (println (http-label 404))
+  (println (http-tag 404)))

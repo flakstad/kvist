@@ -72,9 +72,9 @@ kvist_literal_value :: proc(form: kvist.CST_Form) -> (Value, Runtime_Error, bool
     case .Nil:
         return value_nil(), Runtime_Error{}, true
     case .Keyword:
-        return Value{}, Runtime_Error{message = strings.clone("keywords are syntax markers, not live values; use a string, integer, bool, or nil")}, false
+        return value_keyword(form.text), Runtime_Error{}, true
     case:
-        return Value{}, Runtime_Error{message = strings.clone("unsupported literal in live module; expected string, int, bool, or nil")}, false
+        return Value{}, Runtime_Error{message = strings.clone("unsupported literal in live module; expected string, int, bool, keyword, or nil")}, false
     }
 }
 

@@ -23,6 +23,20 @@ Import the package and pass a vector tree to `html.render`:
   (println page))
 ```
 
+Kvist documents the bare-tag style as the primary path:
+
+```clojure
+[div {class "panel"} ...]
+```
+
+For normal Hiccup familiarity, the package also accepts keyword tags and
+keyword attr names:
+
+```clojure
+[:div {:class "panel"}
+ [:h1 "Status"]]
+```
+
 String text and string attributes are HTML-escaped. Integers, floats, and bools
 render as text values. Boolean attributes render as a bare attribute when true
 and disappear when false:
@@ -64,8 +78,9 @@ Attributes and children can use ordinary Kvist expressions:
      [p "Archived"])])
 ```
 
-Use strings for HTML attribute and child text. Keywords are rejected here; they
-are syntax markers in Kvist, not HTML values.
+Use strings for HTML attribute and child text. Keyword tags and keyword attr
+names are accepted for Hiccup compatibility, but keyword values are still
+rejected in attrs and children; use strings there.
 
 ## Loops
 

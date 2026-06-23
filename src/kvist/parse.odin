@@ -152,6 +152,8 @@ normalize_scalar_type_name :: proc(text: string) -> string {
         return "f64"
     case "string":
         return "string"
+    case "keyword":
+        return "keyword"
     case "char":
         return "rune"
     case:

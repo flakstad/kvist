@@ -8,6 +8,7 @@ fixtures live under `coverage/` so the tutorial path stays readable.
 
 - [`language/hello.kvist`](./language/hello.kvist) - smallest program
 - [`language/data-literals.kvist`](./language/data-literals.kvist) - typed arrays, maps, structs, allocators
+- [`language/keywords.kvist`](./language/keywords.kvist) - first-class `keyword` values in structs, `case`, maps, and sets
 - [`language/control-flow.kvist`](./language/control-flow.kvist) - `if`, `when`, `while`, `for`, `case`
 - [`language/errdefer.kvist`](./language/errdefer.kvist) - failure-only cleanup for owned return values
 - [`language/function-values.kvist`](./language/function-values.kvist) - `fn` and function types

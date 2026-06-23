@@ -163,9 +163,20 @@ Field selectors such as `.name` and `.age` are not values by themselves. They
 are special shorthand in supported places such as `get`, `assoc`, `update`,
 `arr.map`, `arr.filter`, and similar helpers.
 
-Keywords like `:else`, `:next`, `:dispose`, `:defer`, `:defer-with`,
-`:errdefer`, `:using`, and `:or-return` are syntax markers, not ordinary
-runtime values.
+Keywords are ordinary values of type `keyword`. They are useful for lightweight
+symbolic data in otherwise Odin-shaped code:
+
+```clojure
+(defstruct Config {
+  mode: keyword
+})
+
+(Config {mode: :dev})
+```
+
+Kvist still uses specific keyword literals positionally in some forms. For
+example, `:defer`, `:errdefer`, `:using`, `:or-return`, `:next`, `:dispose`,
+and `:else` act as markers in those syntactic slots.
 
 ### Imports And Exports
 
@@ -218,6 +229,40 @@ Strings are plain Odin strings. They are values, not objects with methods.
 Boolean literals are `true` and `false`. `nil` is the nil value used for
 pointers and other Odin values that accept nil.
 
+### Keywords
+
+`keyword` is a symbolic scalar for tags, modes, states, and other
+closed-world labels:
+
+```clojure
+:dev
+:queued
+:not-found
+```
+
+At lowering time, Kvist emits:
+
+```odin
+keyword :: distinct string
+```
+
+That keeps the runtime model Odin-shaped: a keyword is just a distinct string
+value, not an interned dynamic object. Equality, map keys, set membership, and
+struct fields therefore work through ordinary Odin value semantics.
+
+Use `keyword` when the value is symbolic and stable:
+
+```clojure
+(defstruct Result {
+  status: keyword
+})
+
+(Result {status: :ok})
+```
+
+Prefer `string` when the value is user-facing text, open-ended input, or needs
+full text processing.
+
 ### Fixed Arrays
 
 A fixed array stores a known number of elements inline:
@@ -260,6 +305,7 @@ Maps are associative containers:
 
 ```clojure
 (map[string]int {"ok" 200 "missing" 404})
+(map[keyword]int {:ok 200 :missing 404})
 ```
 
 Like dynamic arrays, maps own storage when created and must be deleted when
@@ -775,7 +821,9 @@ containers:
 ```clojure
 [1 2 3]                  ; [dynamic]int
 {"one" 1 "two" 2}        ; map[string]int
+{:ready 1 :done 2}       ; map[keyword]int
 #{"math" "lisp"}         ; set[string]
+#{:dev :prod}            ; set[keyword]
 ```
 
 These literals create owned values. Delete them when a local binding owns them:
@@ -783,7 +831,9 @@ These literals create owned values. Delete them when a local binding owns them:
 ```clojure
 (let [xs [1 2 3] :defer
       lookup {"one" 1 "two" 2} :defer
-      tags #{"math" "lisp"} :defer]
+      states {:ready 1 :done 2} :defer
+      tags #{"math" "lisp"} :defer
+      modes #{:dev :prod} :defer]
   ...)
 ```
 
@@ -792,8 +842,21 @@ Empty inline literals need type context:
 ```clojure
 (let [xs: [dynamic]int [] :defer
       lookup: map[string]int {} :defer
-      tags: set[string] #{} :defer]
+      states: map[keyword]int {} :defer
+      tags: set[string] #{} :defer
+      modes: set[keyword] #{} :defer]
   ...)
+```
+
+Use `keyword` when the value is a symbolic tag rather than user-facing text:
+
+```clojure
+(defstruct Job {
+  state: keyword
+  label: string
+})
+
+(Job {state: :queued label: "thumbnail"})
 ```
 
 Use `(type T)` for Odin `typeid` expressions:
@@ -1271,6 +1334,12 @@ ordinary Odin switches:
   .Post "write"
   :else "other")
 
+(case state
+  :queued 0
+  :running 1
+  :done 2
+  :else -1)
+
 (case event
   (Connected conn) conn.id
   (Disconnected _) 0
@@ -1742,7 +1811,7 @@ Typical examples:
 (arr.map .name users)
 (arr.filter .active users)
 (map.get lookup key default)
-(set.contains? tags "ready")
+(set.contains? tags :ready)
 (str.trim input)
 (cli.option args "--out" "out.txt")
 ```

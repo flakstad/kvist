@@ -32,6 +32,12 @@ at the end of the parameter vector and receives zero or more forms.
 
 Use `defmacro-` for package-private macros.
 
+Macros see source keywords such as `:else` and `:db/add` as source forms. That
+is separate from ordinary runtime `keyword` values in Kvist code. Macro-time
+`keyword?`, `keyword`, `name`, and `source` work on the source representation;
+after expansion, ordinary lowering turns keyword literals in emitted code into
+runtime `keyword` values.
+
 For a small runnable version of this shape, see
 [examples/language/macros.kvist](../examples/language/macros.kvist).
 
@@ -94,6 +100,9 @@ The macro evaluator provides predicates for source shapes:
 (nil? x)
 ```
 
+`keyword?` here means "is this source form spelled like `:name`?", not "does
+this runtime expression have type `keyword`?".
+
 Sequence helpers for form collections:
 
 ```clojure
@@ -149,6 +158,14 @@ Macro-time string helpers use the same package-shaped names as runtime
 
 Use `source` when the original token spelling is data, such as EDN-style
 keywords in DSLs. `name` and `text` normalize symbols and keywords.
+
+Use `keyword` when a macro needs to emit a keyword literal back into ordinary
+Kvist code:
+
+```clojure
+(defmacro else-branch []
+  (keyword "else"))
+```
 
 Macro-time helpers intentionally cover only source forms and simple scalar
 values. If a helper operates on runtime arrays, maps, sets, or owned strings,

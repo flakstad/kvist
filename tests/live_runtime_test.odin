@@ -1096,6 +1096,63 @@ live_runtime_evaluates_cond_clauses :: proc(t: ^testing.T) {
 }
 
 @(test)
+live_runtime_keyword_values_compare_and_format :: proc(t: ^testing.T) {
+    queued := kvist_live.value_keyword(":queued")
+    defer kvist_live.value_delete(&queued)
+    queued_2 := kvist_live.value_keyword(":queued")
+    defer kvist_live.value_delete(&queued_2)
+    done := kvist_live.value_keyword(":done")
+    defer kvist_live.value_delete(&done)
+
+    testing.expect_value(t, kvist_live.values_equal(queued, queued_2), true)
+    testing.expect_value(t, kvist_live.values_equal(queued, done), false)
+
+    text := kvist_live.value_text(queued)
+    defer delete(text)
+    testing.expect_value(t, text, ":queued")
+}
+
+@(test)
+live_runtime_evaluates_keyword_literals_and_equality :: proc(t: ^testing.T) {
+    runtime := kvist_live.new_runtime(kvist_live.Runtime_Config{
+        app_name = "tests",
+        live_enabled = true,
+    })
+    defer kvist_live.runtime_delete(&runtime)
+
+    def := must_parse_module(t, `(live.module {name: "keyword-demo" version: "v1"})
+(def current-state :queued)
+(defn tick []
+  (if (= current-state :queued)
+    :ready
+    :unknown))
+(live.command tick)`)
+    defer {
+        kvist_live.state_entry_slice_delete(&def.initial_state)
+        kvist_live.delete_behavior_definition_slice(&def.functions)
+        kvist_live.delete_behavior_definition_slice(&def.commands)
+        kvist_live.delete_behavior_definition_slice(&def.hooks)
+        if def.name != "" {
+            delete(def.name)
+        }
+        if def.version != "" {
+            delete(def.version)
+        }
+    }
+
+    load_err, load_ok := kvist_live.load_module(&runtime, def)
+    testing.expect_value(t, load_ok, true)
+    testing.expect_value(t, load_err.message, "")
+
+    result, invoke_err, invoke_ok := kvist_live.invoke_command(&runtime, "tick", nil)
+    defer kvist_live.value_delete(&result)
+    testing.expect_value(t, invoke_ok, true)
+    testing.expect_value(t, invoke_err.message, "")
+    testing.expect_value(t, result.kind, kvist_live.Value_Kind.Keyword)
+    testing.expect_value(t, result.text, ":ready")
+}
+
+@(test)
 live_runtime_runs_source_defined_lifecycle_functions :: proc(t: ^testing.T) {
     runtime := kvist_live.new_runtime(kvist_live.Runtime_Config{
         app_name = "tests",

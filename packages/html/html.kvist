@@ -99,7 +99,9 @@
     (if (= (text form) (name form))
       (name form)
       (error (str context " must use bare names without trailing :")))
-    (error (str context " must be a bare symbol"))))
+    (if (keyword? form)
+      (name form)
+      (error (str context " must be a bare symbol or keyword")))))
 
 (defmacro- fragment-tag? [tag]
   (if (symbol? tag)
@@ -208,9 +210,11 @@
   "Expand a Hiccup-style HTML vector tree into an internal typed node.
 
   Element vectors use the shape `[tag {attr value...} child...]`; the attrs map
-  is optional. `[<> child...]` creates a fragment with no wrapper element.
-  Literal strings, ints, floats, bools, and nested vectors are converted
-  directly to typed node values.
+  is optional. Tags and attr names may be written either as bare symbols such
+  as `div` and `class`, or as keywords such as `:div` and `:class`. `[<>
+  child...]` creates a fragment with no wrapper element. Literal strings, ints,
+  floats, bools, and nested vectors are converted directly to typed node
+  values.
 
   Attribute and child positions may contain ordinary Kvist expressions when the
   expression evaluates to the corresponding HTML union type. `nil` and

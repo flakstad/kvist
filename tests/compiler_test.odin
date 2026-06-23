@@ -1641,7 +1641,7 @@ compile_path_direct_html_render_emits_builder_writes :: proc(t: ^testing.T) {
 }
 
 @(test)
-compile_path_html_render_rejects_keyword_tags :: proc(t: ^testing.T) {
+compile_path_html_render_accepts_keyword_tags_and_attrs :: proc(t: ^testing.T) {
     path, ok_path := repo_temp_test_path(".tmp-html-keyword-tag-test.kvist")
     testing.expect_value(t, ok_path, true)
     if !ok_path {
@@ -1653,7 +1653,7 @@ compile_path_html_render_rejects_keyword_tags :: proc(t: ^testing.T) {
     source := `(import html "kvist:html")
 
 (defn demo [] -> string
-  (html.render [:div "ok"]))`
+  (html.render [:div {:class "panel" :data-state "ready"} [:span "ok"]]))`
 
     write_err := os.write_entire_file_from_string(path, source)
     testing.expect_value(t, write_err == nil, true)
@@ -1661,10 +1661,18 @@ compile_path_html_render_rejects_keyword_tags :: proc(t: ^testing.T) {
         return
     }
 
-    _, err, ok := kvist.compile_path(path)
-    testing.expect_value(t, ok, false)
-    defer delete(err.message)
-    testing.expect_value(t, strings.contains(err.message, "html tag must be a bare symbol"), true)
+    output, err, ok := kvist.compile_path(path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, `strings.write_string(&__html_render_builder`), true)
+    testing.expect_value(t, strings.contains(output, `"class", "panel"`), true)
+    testing.expect_value(t, strings.contains(output, `"data-state", "ready"`), true)
+    testing.expect_value(t, strings.contains(output, `"</span>"`), true)
 }
 
 @(test)
@@ -11228,6 +11236,193 @@ import rl "vendor:raylib"
 rect :: proc(frame: int, width: f32, frames: int, height: f32) -> rl.Rectangle {
     return rl.Rectangle{x = ((f32(frame)) * (width)) / (f32(frames)), y = 0, width = (width) / (f32(frames)), height = height}
 }
+`
+    testing.expect_value(t, output, expected)
+}
+
+@(test)
+compile_keyword_literal_and_type :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn mode [] -> keyword
+  :dev)`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    expected := `package main
+
+mode :: proc() -> keyword {
+    return keyword(":dev")
+}
+
+keyword :: distinct string
+`
+    testing.expect_value(t, output, expected)
+}
+
+@(test)
+compile_case_with_keyword_values :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn score [mode: keyword] -> int
+  (case mode
+    :dev 1
+    :prod 2
+    :else 0))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    expected := `package main
+
+score :: proc(mode: keyword) -> int {
+    switch mode {
+    case keyword(":dev"):
+        return 1
+    case keyword(":prod"):
+        return 2
+    case:
+        return 0
+    }
+}
+
+keyword :: distinct string
+`
+    testing.expect_value(t, output, expected)
+}
+
+@(test)
+compile_case_stmt_with_keyword_subject_uses_plain_switch :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn rank [state: keyword] -> int
+  (case state
+    :queued 0
+    :done 1
+    :else -1))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    expected := `package main
+
+rank :: proc(state: keyword) -> int {
+    switch state {
+    case keyword(":queued"):
+        return 0
+    case keyword(":done"):
+        return 1
+    case:
+        return -1
+    }
+}
+
+keyword :: distinct string
+`
+    testing.expect_value(t, output, expected)
+}
+
+@(test)
+compile_keyword_key_map_literal :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn states [] -> map[keyword]int
+  {:ready 1
+   :done 2})`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    expected := `#+feature dynamic-literals
+package main
+
+states :: proc() -> map[keyword]int {
+    return map[keyword]int{keyword(":ready") = 1, keyword(":done") = 2}
+}
+
+keyword :: distinct string
+`
+    testing.expect_value(t, output, expected)
+}
+
+@(test)
+compile_keyword_struct_field_and_comparison :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct Config {
+  mode: keyword
+})
+
+(defn dev? [cfg: Config] -> bool
+  (= cfg.mode :dev))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    expected := `package main
+
+Config :: struct {
+    mode: keyword,
+}
+
+dev_p :: proc(cfg: Config) -> bool {
+    return (cfg.mode) == (keyword(":dev"))
+}
+
+keyword :: distinct string
+`
+    testing.expect_value(t, output, expected)
+}
+
+@(test)
+compile_keyword_set_literal :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn modes [] -> set[keyword]
+  #{:dev :prod})`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    expected := `#+feature dynamic-literals
+package main
+
+modes :: proc() -> map[keyword]struct{} {
+    return map[keyword]struct{}{keyword(":dev") = {}, keyword(":prod") = {}}
+}
+
+keyword :: distinct string
 `
     testing.expect_value(t, output, expected)
 }

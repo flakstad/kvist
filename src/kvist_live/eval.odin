@@ -137,7 +137,7 @@ value_text :: proc(value: Value) -> string {
         return strings.clone("false")
     case .Int:
         return strings.clone(fmt.tprintf("%d", value.int_value))
-    case .String, .Handle:
+    case .String, .Keyword, .Handle:
         return strings.clone(value.text)
     }
     return strings.clone("")
@@ -154,7 +154,7 @@ values_equal :: proc(a, b: Value) -> bool {
         return a.bool_value == b.bool_value
     case .Int:
         return a.int_value == b.int_value
-    case .String, .Handle:
+    case .String, .Keyword, .Handle:
         return a.text == b.text
     }
     return false
@@ -584,7 +584,7 @@ eval_form :: proc(module: ^Live_Module, form: kvist.CST_Form, ctx: Eval_Context)
     case .Nil:
         return value_nil(), Runtime_Error{}, true
     case .Keyword:
-        return Value{}, Runtime_Error{message = strings.clone("keywords are syntax markers, not live values; use a string, integer, bool, or nil")}, false
+        return value_keyword(form.text), Runtime_Error{}, true
     case .Symbol:
         if value, ok := find_binding(ctx.bindings, form.text); ok {
             return value_clone(value), Runtime_Error{}, true

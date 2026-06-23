@@ -19,13 +19,17 @@ value_string :: proc(v: string) -> Value {
     return Value{kind = .String, text = strings.clone(v)}
 }
 
+value_keyword :: proc(v: string) -> Value {
+    return Value{kind = .Keyword, text = strings.clone(v)}
+}
+
 value_handle :: proc(v: string) -> Value {
     return Value{kind = .Handle, text = strings.clone(v)}
 }
 
 value_delete :: proc(value: ^Value) {
     #partial switch value.kind {
-    case .String, .Handle:
+    case .String, .Keyword, .Handle:
         if value.text != "" {
             delete(value.text)
         }
@@ -37,7 +41,7 @@ value_delete :: proc(value: ^Value) {
 value_clone :: proc(value: Value) -> Value {
     cloned := value
     #partial switch value.kind {
-    case .String, .Handle:
+    case .String, .Keyword, .Handle:
         cloned.text = strings.clone(value.text)
     case:
     }

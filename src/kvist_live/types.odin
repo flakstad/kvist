@@ -7,6 +7,7 @@ Value_Kind :: enum {
     Bool,
     Int,
     String,
+    Keyword,
     Handle,
 }
 
