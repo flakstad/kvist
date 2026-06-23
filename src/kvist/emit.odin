@@ -4203,19 +4203,19 @@ thread_owned_borrowing_result_head :: proc(head_name: string) -> bool {
 thread_view_result_head :: proc(head_name: string) -> bool {
     head := source_package_surface_head(head_name)
     switch head {
-    case "arr/take", "arr-take", "arr__take",
-         "arr/drop", "arr-drop", "arr__drop",
-         "arr/drop-last", "arr-drop-last", "arr__drop_last",
-         "arr/butlast", "arr-butlast", "arr__butlast",
-         "arr/take-while", "arr-take-while",
-         "arr/drop-while", "arr-drop-while",
-         "core/slice",
-         "arr/slice",
-         "arr/rest",
-         "str/slice",
-         "str/trim",
-         "str/trim-prefix",
-         "str/trim-suffix",
+    case "arr/take", "arr.take", "arr-take", "arr__take",
+         "arr/drop", "arr.drop", "arr-drop", "arr__drop",
+         "arr/drop-last", "arr.drop-last", "arr-drop-last", "arr__drop_last",
+         "arr/butlast", "arr.butlast", "arr-butlast", "arr__butlast",
+         "arr/take-while", "arr.take-while", "arr-take-while",
+         "arr/drop-while", "arr.drop-while", "arr-drop-while",
+         "slice", "core/slice", "core-slice",
+         "arr/slice", "arr.slice",
+         "arr/rest", "arr.rest",
+         "str/slice", "str.slice",
+         "str/trim", "str.trim",
+         "str/trim-prefix", "str.trim-prefix",
+         "str/trim-suffix", "str.trim-suffix",
          "strings/trim_space",
          "strings/trim_prefix",
          "strings/trim_suffix",
@@ -4385,7 +4385,10 @@ owned_result_head :: proc(name: string) -> bool {
     switch normalized {
     case "into",
          "map/merge",
+         "set/union", "set/intersection", "set/difference",
          "arr/range", "arr/repeat", "arr/repeatedly", "arr/iterate",
+         "str/split", "str/join", "str/replace", "str/lower", "str/upper",
+         "html/render",
          "io/read":
         return true
     }
@@ -6566,9 +6569,20 @@ loop_collection_needs_temp_binding :: proc(form: CST_Form) -> bool {
     return form_is_owned_result(form) || form_is_owned_allocation_result(form) || form_is_owned_constructor_result(form)
 }
 
+Owned_Local_State :: enum {
+    Live,
+    Moved,
+}
+
 Owned_Local :: struct {
     name: string,
     span: Span,
+    state: Owned_Local_State,
+}
+
+Borrowed_Local :: struct {
+    name:       string,
+    owner_name: string,
 }
 
 owned_warning_subject :: proc(form: CST_Form) -> string {
@@ -6612,12 +6626,21 @@ owned_locals_find_last :: proc(live: []Owned_Local, name: string) -> int {
     return -1
 }
 
-owned_locals_remove_last :: proc(live: ^[dynamic]Owned_Local, name: string) -> bool {
+owned_locals_live_find_last :: proc(live: []Owned_Local, name: string) -> int {
+    for i := len(live) - 1; i >= 0; i -= 1 {
+        if live[i].name == name && live[i].state == .Live {
+            return i
+        }
+    }
+    return -1
+}
+
+owned_locals_mark_moved_last :: proc(live: ^[dynamic]Owned_Local, name: string) -> bool {
     idx := owned_locals_find_last(live[:], name)
     if idx < 0 {
         return false
     }
-    ordered_remove(live, idx)
+    live[idx].state = .Moved
     return true
 }
 
@@ -6675,6 +6698,126 @@ body_deletes_name :: proc(forms: []CST_Form, name: string) -> bool {
     return false
 }
 
+borrowed_locals_find :: proc(borrowed: []Borrowed_Local, name: string) -> int {
+    for i := len(borrowed) - 1; i >= 0; i -= 1 {
+        if borrowed[i].name == name {
+            return i
+        }
+    }
+    return -1
+}
+
+form_direct_borrow_owner_name :: proc(form: CST_Form) -> (string, bool) {
+    if !form_is_borrowed_view_result(form) || form.kind != .List || len(form.items) < 2 {
+        return "", false
+    }
+    head, ok_head := form_head_symbol_text(form)
+    if !ok_head {
+        return "", false
+    }
+    normalized := source_package_surface_head(head)
+    owner_idx := 1
+    switch normalized {
+    case "arr/take", "arr.take", "arr-take",
+         "arr/drop", "arr.drop", "arr-drop",
+         "arr/drop-last", "arr.drop-last", "arr-drop-last",
+         "arr/take-while", "arr.take-while", "arr-take-while",
+         "arr/drop-while", "arr.drop-while", "arr-drop-while",
+         "arr/split-at", "arr-split-at":
+        owner_idx = 2
+    }
+    if owner_idx < len(form.items) && form.items[owner_idx].kind == .Symbol {
+        return map_name(form.items[owner_idx].text), true
+    }
+    return "", false
+}
+
+emit_borrowed_escape_warning :: proc(e: ^Emitter, owner_name: string, span: Span) {
+    if owner_name == "" {
+        return
+    }
+    emit_warning(e, fmt.tprintf("borrowed value escapes owner %s", owner_name), span)
+}
+
+borrowed_escape_owner_name :: proc(form: CST_Form, borrowed: []Borrowed_Local, live: []Owned_Local) -> (string, bool) {
+    if form.kind == .Symbol {
+        name := map_name(form.text)
+        if idx := borrowed_locals_find(borrowed, name); idx >= 0 {
+            if owned_locals_live_find_last(live, borrowed[idx].owner_name) >= 0 {
+                return borrowed[idx].owner_name, true
+            }
+        }
+        return "", false
+    }
+    if owner, ok := form_direct_borrow_owner_name(form); ok {
+        if owned_locals_live_find_last(live, owner) >= 0 {
+            return owner, true
+        }
+    }
+    if form.kind == .Vector || form.kind == .Set {
+        for item in form.items {
+            if owner, ok := borrowed_escape_owner_name(item, borrowed, live); ok {
+                return owner, true
+            }
+        }
+    }
+    if form.kind == .Brace {
+        for i := 1; i < len(form.items); i += 2 {
+            if owner, ok := borrowed_escape_owner_name(form.items[i], borrowed, live); ok {
+                return owner, true
+            }
+        }
+    }
+    if form.kind == .List && len(form.items) == 2 && form.items[1].kind == .Brace {
+        return borrowed_escape_owner_name(form.items[1], borrowed, live)
+    }
+    return "", false
+}
+
+warn_if_borrowed_escape :: proc(e: ^Emitter, form: CST_Form, borrowed: []Borrowed_Local, live: []Owned_Local) {
+    if owner, ok := borrowed_escape_owner_name(form, borrowed, live); ok {
+        emit_borrowed_escape_warning(e, owner, form.span)
+    }
+}
+
+form_transfers_owned_args :: proc(form: CST_Form) -> bool {
+    head, ok := form_head_symbol_text(form)
+    if !ok {
+        return false
+    }
+    normalized := source_package_surface_head(head)
+    switch normalized {
+    case "append", "arr/push!", "arr.push!", "arr-push!":
+        return true
+    }
+    return false
+}
+
+mark_transferred_owned_args :: proc(form: CST_Form, live: ^[dynamic]Owned_Local) {
+    if !form_transfers_owned_args(form) {
+        return
+    }
+    for item in form.items[2:] {
+        if item.kind == .Symbol {
+            _ = owned_locals_mark_moved_last(live, map_name(item.text))
+        }
+    }
+}
+
+warn_use_after_transfer_form :: proc(e: ^Emitter, form: CST_Form, live: []Owned_Local) {
+    if form.kind == .Symbol {
+        name := map_name(form.text)
+        idx := owned_locals_find_last(live, name)
+        if idx >= 0 && live[idx].state == .Moved {
+            emit_warning(e, fmt.tprintf("owned local %s is used after ownership transfer", name), form.span)
+        }
+        return
+    }
+    for item in form.items {
+        warn_use_after_transfer_form(e, item, live)
+    }
+}
+
 switch_transfers_owned_name :: proc(form: CST_Form, name: string, can_transfer_final: bool) -> bool {
     if len(form.items) < 4 {
         return false
@@ -6711,8 +6854,8 @@ form_transfers_owned_name :: proc(form: CST_Form, name: string, can_transfer_fin
         }
     }
 
-    if ok && (head == "append" || head == "arr/push!" || head == "arr-push!") {
-        for item in form.items[1:] {
+    if ok && form_transfers_owned_args(form) {
+        for item in form.items[2:] {
             if item.kind == .Symbol && map_name(item.text) == name {
                 return true
             }
@@ -6775,19 +6918,32 @@ body_deletes_or_returns_name :: proc(forms: []CST_Form, name: string, can_transf
     return false
 }
 
-analyze_owned_scope_body :: proc(e: ^Emitter, forms: []CST_Form, can_transfer_final: bool, live: ^[dynamic]Owned_Local) {
+analyze_owned_branch_body :: proc(e: ^Emitter, forms: []CST_Form, can_transfer_final: bool, live: []Owned_Local, borrowed: []Borrowed_Local) {
+    branch_live: [dynamic]Owned_Local
+    branch_borrowed: [dynamic]Borrowed_Local
+    append(&branch_live, ..live)
+    append(&branch_borrowed, ..borrowed)
+    analyze_owned_scope_body(e, forms, can_transfer_final, &branch_live, &branch_borrowed)
+    delete(branch_live)
+    delete(branch_borrowed)
+}
+
+analyze_owned_scope_body :: proc(e: ^Emitter, forms: []CST_Form, can_transfer_final: bool, live: ^[dynamic]Owned_Local, borrowed: ^[dynamic]Borrowed_Local) {
     for form, idx in forms {
         final_in_scope := idx == len(forms)-1
+        warn_use_after_transfer_form(e, form, live[:])
 
         if form.kind == .Symbol && final_in_scope && can_transfer_final {
-            _ = owned_locals_remove_last(live, map_name(form.text))
+            warn_if_borrowed_escape(e, form, borrowed[:], live[:])
+            _ = owned_locals_mark_moved_last(live, map_name(form.text))
             continue
         }
 
         if final_in_scope && can_transfer_final {
+            warn_if_borrowed_escape(e, form, borrowed[:], live[:])
             for i := len(live[:]) - 1; i >= 0; i -= 1 {
-                if composite_literal_transfers_owned_name(form, live[i].name) {
-                    _ = owned_locals_remove_last(live, live[i].name)
+                if live[i].state == .Live && composite_literal_transfers_owned_name(form, live[i].name) {
+                    _ = owned_locals_mark_moved_last(live, live[i].name)
                 }
             }
         }
@@ -6803,15 +6959,17 @@ analyze_owned_scope_body :: proc(e: ^Emitter, forms: []CST_Form, can_transfer_fi
         switch head {
         case "return":
             for item in form.items[1:] {
+                warn_if_borrowed_escape(e, item, borrowed[:], live[:])
                 if item.kind == .Symbol {
-                    _ = owned_locals_remove_last(live, map_name(item.text))
+                    _ = owned_locals_mark_moved_last(live, map_name(item.text))
                     continue
                 }
                 for i := len(live[:]) - 1; i >= 0; i -= 1 {
-                    if composite_literal_transfers_owned_name(item, live[i].name) {
-                        _ = owned_locals_remove_last(live, live[i].name)
+                    if live[i].state == .Live && composite_literal_transfers_owned_name(item, live[i].name) {
+                        _ = owned_locals_mark_moved_last(live, live[i].name)
                     }
                 }
+                mark_transferred_owned_args(item, live)
             }
         case "discard":
             for item in form.items[1:] {
@@ -6824,6 +6982,9 @@ analyze_owned_scope_body :: proc(e: ^Emitter, forms: []CST_Form, can_transfer_fi
                 if form_is_borrowed_view_result(item) {
                     emit_warning(e, borrowed_delete_warning_message(item), item.span)
                 }
+                if item.kind == .Symbol {
+                    _ = owned_locals_mark_moved_last(live, map_name(item.text))
+                }
             }
         case "set!":
             if len(form.items) == 3 && form.items[1].kind == .Symbol {
@@ -6831,9 +6992,9 @@ analyze_owned_scope_body :: proc(e: ^Emitter, forms: []CST_Form, can_transfer_fi
                 if name == "" {
                     continue
                 }
-                if owned_locals_find_last(live[:], name) >= 0 {
+                if owned_locals_live_find_last(live[:], name) >= 0 {
                     emit_warning(e, fmt.tprintf("owned local %s is overwritten before cleanup; delete it or return it before set!", name), form.items[1].span)
-                    _ = owned_locals_remove_last(live, name)
+                    _ = owned_locals_mark_moved_last(live, name)
                 }
                 if form_produces_owned_value(form.items[2]) {
                     append(live, Owned_Local{name = name, span = form.items[1].span})
@@ -6848,9 +7009,15 @@ analyze_owned_scope_body :: proc(e: ^Emitter, forms: []CST_Form, can_transfer_fi
                 continue
             }
             start := len(live)
+            borrowed_start := len(borrowed)
             for binding in bindings {
                 if (binding.deferred_delete || binding.defer_with_cleanup) && form_is_borrowed_view_result(binding.value) {
                     emit_warning(e, borrowed_delete_warning_message(binding.value), binding.value.span)
+                }
+                if !binding.is_destructure && binding.name != "" && form_is_borrowed_view_result(binding.value) {
+                    if owner, ok_owner := form_direct_borrow_owner_name(binding.value); ok_owner && owned_locals_live_find_last(live[:], owner) >= 0 {
+                        append(borrowed, Borrowed_Local{name = binding.name, owner_name = owner})
+                    }
                 }
                 delete_name, has_delete_name := binding_delete_target_name(binding)
                 if binding.is_destructure || (!has_delete_name && binding.name == "") {
@@ -6867,9 +7034,9 @@ analyze_owned_scope_body :: proc(e: ^Emitter, forms: []CST_Form, can_transfer_fi
                     append(live, Owned_Local{name = owned_name, span = form.items[0].span})
                 }
             }
-            analyze_owned_scope_body(e, form.items[2:], final_in_scope && can_transfer_final, live)
+            analyze_owned_scope_body(e, form.items[2:], final_in_scope && can_transfer_final, live, borrowed)
             for i := start; i < len(live); i += 1 {
-                if live[i].name == "" {
+                if live[i].name == "" || live[i].state == .Moved {
                     continue
                 }
                 skip_warning := false
@@ -6885,9 +7052,34 @@ analyze_owned_scope_body :: proc(e: ^Emitter, forms: []CST_Form, can_transfer_fi
                 }
             }
             resize(live, start)
+            resize(borrowed, borrowed_start)
         case "do":
-            analyze_owned_scope_body(e, form.items[1:], final_in_scope && can_transfer_final, live)
+            analyze_owned_scope_body(e, form.items[1:], final_in_scope && can_transfer_final, live, borrowed)
+        case "if":
+            if len(form.items) >= 3 {
+                analyze_owned_branch_body(e, []CST_Form{form.items[2]}, final_in_scope && can_transfer_final, live[:], borrowed[:])
+            }
+            if len(form.items) >= 4 {
+                analyze_owned_branch_body(e, []CST_Form{form.items[3]}, final_in_scope && can_transfer_final, live[:], borrowed[:])
+            }
+        case "cond":
+            if len(form.items) >= 4 {
+                i := 2
+                for i < len(form.items) {
+                    analyze_owned_branch_body(e, []CST_Form{form.items[i]}, final_in_scope && can_transfer_final, live[:], borrowed[:])
+                    i += 2
+                }
+            }
+        case "case", "core-case":
+            if len(form.items) >= 4 {
+                i := 3
+                for i < len(form.items) {
+                    analyze_owned_branch_body(e, []CST_Form{form.items[i]}, final_in_scope && can_transfer_final, live[:], borrowed[:])
+                    i += 2
+                }
+            }
         case:
+            mark_transferred_owned_args(form, live)
             if form_produces_owned_value(form) && !(final_in_scope && can_transfer_final) {
                 emit_warning(e, discarded_owned_warning_message(form), form.span)
             }
@@ -14249,8 +14441,10 @@ emit_decl :: proc(e: ^Emitter, decl: IR_Decl) -> (Compile_Error, bool) {
         emit_line(e, "}")
     case .Proc:
         proc_live: [dynamic]Owned_Local
-        analyze_owned_scope_body(e, decl.proc_decl.body[:], decl.proc_decl.returns.kind != .None, &proc_live)
+        proc_borrowed: [dynamic]Borrowed_Local
+        analyze_owned_scope_body(e, decl.proc_decl.body[:], decl.proc_decl.returns.kind != .None, &proc_live, &proc_borrowed)
         delete(proc_live)
+        delete(proc_borrowed)
         lint_defer_in_loop_body(e, decl.proc_decl.body[:], false)
         push_local_type_scope(e)
         defer pop_local_type_scope(e)

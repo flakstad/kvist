@@ -1543,10 +1543,48 @@ the result type:
   count)
 ```
 
-The compiler also has conservative ownership warnings for obvious mistakes such
-as discarding known owned results, forgetting to clean up a local owned value,
-or overwriting one with `set!` before cleanup. These warnings are advisory.
-They do not mean Kvist has an automatic ownership system.
+The compiler also has conservative ownership warnings for obvious mistakes.
+These warnings are advisory. They do not mean Kvist has an automatic ownership
+system, and they do not change generated Odin.
+
+`kvist check` reports these warnings with source locations:
+
+```text
+warning: owned result from arr.range is discarded; bind it, delete it, or return it
+warning: owned local xs is never deleted or returned; add (defer (delete xs)) or return it
+warning: owned local xs is overwritten before cleanup; delete it or return it before set!
+warning: owned local xs is used after ownership transfer
+warning: borrowed value escapes owner xs
+```
+
+The pass is intentionally conservative. It recognizes known owned-result
+helpers such as `arr.range`, `arr.empty`, `map.empty`, `set.union`, `str.split`,
+`str.join`, and `html.render`; known borrowed-view helpers such as `slice`,
+`arr.slice`, `arr.take`, `arr.drop`, `arr.rest`, `str.slice`, and `str.trim`;
+and known ownership transfers such as `delete`, returning an owned local, and
+passing an owned local into owner-taking collection operations.
+
+For example:
+
+```clojure
+(defn bad-view [] -> []int
+  (let [xs (arr.range 0 10) :defer]
+    (arr.slice xs 0 3)))
+```
+
+This warns because the returned slice is a borrowed view into `xs`, and `xs` is
+deleted when the `let` scope exits.
+
+Valid local use of the same borrowed view does not warn:
+
+```clojure
+(defn local-view-use [] -> int
+  (let [xs (arr.range 0 10) :defer]
+    (count (arr.slice xs 0 3))))
+```
+
+See `examples/collections/ownership-warnings.kvist` for a small warning
+surface tour.
 
 ### The Implicit `context`
 

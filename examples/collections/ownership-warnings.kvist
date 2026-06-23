@@ -17,6 +17,15 @@
     (defer (delete xs))
     (println (count xs))))
 
+(defn use-after-transfer-demo []
+  (let [xs (arr.empty int)]
+    (delete xs)
+    (println (count xs))))
+
+(defn borrowed-escape-demo [] -> []int
+  (let [xs (arr.range 0 10) :defer]
+    (arr.slice xs 0 3)))
+
 (defn main []
   (println "Run `kvist check examples/collections/ownership-warnings.kvist` to see warnings."))
 
@@ -31,7 +40,11 @@
   ;; - owned value is discarded; bind it, delete it, or return it
   ;; - owned local xs is never deleted or returned
   ;; - owned local xs is overwritten before cleanup
+  ;; - owned local xs is used after ownership transfer
+  ;; - borrowed value escapes owner xs
   (discarded-owned-result-demo)
   (leaked-owned-local-demo)
   (overwritten-owned-local-demo)
+  (use-after-transfer-demo)
+  (borrowed-escape-demo)
 )
