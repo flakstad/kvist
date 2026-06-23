@@ -14,6 +14,7 @@ fixtures live under `coverage/` so the tutorial path stays readable.
 - [`language/errdefer.kvist`](./language/errdefer.kvist) - failure-only cleanup for owned return values
 - [`language/function-values.kvist`](./language/function-values.kvist) - `fn` and function types
 - [`language/closures.kvist`](./language/closures.kvist) - captured callback boundaries
+- [`language/odin-polymorphism.kvist`](./language/odin-polymorphism.kvist) - `$T`, `where`, generic formatting, and Odin procedure groups
 - [`language/macro-authoring.kvist`](./language/macro-authoring.kvist) - practical macro writing
 - [`collections/sequences.kvist`](./collections/sequences.kvist) - collection helpers over structs
 - [`collections/package-tour.kvist`](./collections/package-tour.kvist) - `arr`/`map`/`set`/`str` ownership basics

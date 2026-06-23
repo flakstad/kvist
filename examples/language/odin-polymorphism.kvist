@@ -1,0 +1,44 @@
+// Demonstrates Odin polymorphism features as used from Kvist.
+(package main)
+
+(import fmt "core:fmt")
+(import intrinsics "base:intrinsics")
+
+(defstruct User {
+  name: string
+  age: int
+})
+
+(defn debug-str
+  "Return an owned debug string using Odin's generic formatter."
+  [value: $T] -> string
+  (fmt.aprintf "%v" value))
+
+(defn same?
+  "Compare two values when Odin says the type is comparable."
+  [value: $T, expected: T] -> bool
+  (where (intrinsics.type-is-comparable T))
+  (= value expected))
+
+(defn render-int [value: int] -> string
+  (fmt.aprintf "int:%d" value))
+
+(defn render-user [user: User] -> string
+  (fmt.aprintf "user:%s/%d" user.name user.age))
+
+// Odin procedure groups are available through the raw Odin escape hatch today.
+// The names here are emitted Odin names, so `render-int` is `render_int`.
+(odin "render :: proc{render_int, render_user}")
+
+(defn render-supported [value: $T] -> string
+  (render value))
+
+(defn main []
+  (let [user (User {name: "Ada" age: 36})
+        described (debug-str user) :defer
+        rendered-user (render-supported user) :defer
+        rendered-int (render-supported 7) :defer]
+    (println described)
+    (println (same? 7 7))
+    (println rendered-user)
+    (println rendered-int)))
