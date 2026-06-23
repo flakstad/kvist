@@ -490,6 +490,48 @@ compile_final_let_expression_uses_proc_return_type :: proc(t: ^testing.T) {
 }
 
 @(test)
+compile_final_do_expression_uses_proc_return_type :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn demo [] -> int
+  (do
+    (println "side")
+    7))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, `fmt.println("side")`), true)
+    testing.expect_value(t, strings.contains(output, "return 7"), true)
+}
+
+@(test)
+compile_final_block_expression_uses_proc_return_type :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn demo [] -> int
+  (block
+    (def base 40)
+    (+ base 2)))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "base :: 40"), true)
+    testing.expect_value(t, strings.contains(output, "return (base) + (2)"), true)
+}
+
+@(test)
 reject_untyped_block_expression_without_expected_type :: proc(t: ^testing.T) {
     source := `(package main)
 
@@ -4710,6 +4752,32 @@ compile_if_let_expression_with_expected_type :: proc(t: ^testing.T) {
 }
 
 @(test)
+compile_final_if_let_uses_proc_return_type :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn query [] -> [value: int, found: bool]
+  (return 42 true))
+
+(defn demo [] -> int
+  (if-let [[x found] (query)]
+    x
+    0))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "x, found := query()"), true)
+    testing.expect_value(t, strings.contains(output, "if found {"), true)
+    testing.expect_value(t, strings.contains(output, "return x"), true)
+    testing.expect_value(t, strings.contains(output, "return 0"), true)
+}
+
+@(test)
 compile_chained_if_let_macro :: proc(t: ^testing.T) {
     source := `(package main)
 
@@ -4789,6 +4857,33 @@ compile_if_ok_expression_with_expected_type :: proc(t: ^testing.T) {
 
     testing.expect_value(t, strings.contains(output, "x, err := read_count()"), true)
     testing.expect_value(t, strings.contains(output, "value: int = (proc() -> int {"), true)
+    testing.expect_value(t, strings.contains(output, "if (err) == ({}) {"), true)
+    testing.expect_value(t, strings.contains(output, "return x"), true)
+    testing.expect_value(t, strings.contains(output, "return 0"), true)
+}
+
+@(test)
+compile_final_if_ok_uses_proc_return_type :: proc(t: ^testing.T) {
+    source := `(package main)
+(import os "core:os")
+
+(defn read-count [] -> [value: int, err: os.Error]
+  (return 42 nil))
+
+(defn demo [] -> int
+  (if-ok [[x err] (read-count)]
+    x
+    0))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "x, err := read_count()"), true)
     testing.expect_value(t, strings.contains(output, "if (err) == ({}) {"), true)
     testing.expect_value(t, strings.contains(output, "return x"), true)
     testing.expect_value(t, strings.contains(output, "return 0"), true)
@@ -5447,6 +5542,53 @@ reject_untyped_with_allocator_expression :: proc(t: ^testing.T) {
     testing.expect_value(t, ok, false)
     defer delete(err.message)
     testing.expect_value(t, err.message, "block expression needs an expected type; add a let binding type or use it where the type is known")
+}
+
+@(test)
+compile_final_with_allocator_uses_proc_return_type :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn id [x: int] -> int
+  x)
+
+(defn demo [] -> int
+  (with-allocator [allocator context.temp_allocator]
+    (id 42)))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "context.allocator = allocator"), true)
+    testing.expect_value(t, strings.contains(output, "return id(42)"), true)
+}
+
+@(test)
+compile_final_with_temp_allocator_uses_proc_return_type :: proc(t: ^testing.T) {
+    source := `(package main)
+(import runtime "base:runtime")
+
+(defn id [x: int] -> int
+  x)
+
+(defn demo [] -> int
+  (with-temp-allocator [allocator]
+    (id 42)))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "runtime.default_temp_allocator_temp_begin()"), true)
+    testing.expect_value(t, strings.contains(output, "return id(42)"), true)
 }
 
 @(test)
