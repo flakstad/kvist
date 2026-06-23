@@ -4617,6 +4617,30 @@ form_head_is_as_thread :: proc(form: CST_Form) -> bool {
             is_symbol(form.items[0], "core-as-thread"))
 }
 
+form_head_is_when_guard :: proc(form: CST_Form) -> (string, bool) {
+    if len(form.items) == 0 || form.items[0].kind != .Symbol {
+        return "", false
+    }
+    switch form.items[0].text {
+    case "when-let", "when-ok":
+        return form.items[0].text, true
+    }
+    return "", false
+}
+
+form_head_is_if_guard :: proc(form: CST_Form) -> Builtin_Macro_Kind {
+    if len(form.items) == 0 || form.items[0].kind != .Symbol {
+        return .None
+    }
+    kind := builtin_macro_kind(form.items[0].text)
+    #partial switch kind {
+    case .If_Let, .If_Ok:
+        return kind
+    case:
+        return .None
+    }
+}
+
 form_head_is_statement_only :: proc(form: CST_Form) -> (string, bool) {
     if form.kind != .List || len(form.items) == 0 || form.items[0].kind != .Symbol {
         return "", false
@@ -4629,12 +4653,74 @@ form_head_is_statement_only :: proc(form: CST_Form) -> (string, bool) {
     return "", false
 }
 
+when_guard_expression_error :: proc(head: string, span: Span) -> Compile_Error {
+    replacement := "if-let"
+    if head == "when-ok" {
+        replacement = "if-ok"
+    }
+    return Compile_Error{
+        message = fmt.tprintf("%s is a statement and cannot be used as an expression; use %s when both branches produce a value", head, replacement),
+        span    = span,
+    }
+}
+
+expand_if_guard_expr :: proc(e: ^Emitter, form: CST_Form, expected_type := "") -> (string, Compile_Error, bool) {
+    kind := form_head_is_if_guard(form)
+    expanded: CST_Form
+    err_expand: Compile_Error
+    ok_expand: bool
+    #partial switch kind {
+    case .If_Let:
+        expanded, err_expand, ok_expand = expand_if_let_form(form)
+    case .If_Ok:
+        expanded, err_expand, ok_expand = expand_if_ok_form(form)
+    case:
+        return "", Compile_Error{}, false
+    }
+    if !ok_expand {
+        return "", err_expand, false
+    }
+    defer delete_borrowed_cst_form(&expanded)
+    return emit_expr_for_expected_type(e, expanded, expected_type)
+}
+
+emit_guard_stmt :: proc(e: ^Emitter, form: CST_Form, kind: Builtin_Macro_Kind, last_in_proc: bool, returns: Return_Spec) -> (Compile_Error, bool) {
+    expanded: CST_Form
+    err_expand: Compile_Error
+    ok_expand: bool
+    #partial switch kind {
+    case .When_Let:
+        expanded, err_expand, ok_expand = expand_when_let_form(form)
+    case .If_Let:
+        expanded, err_expand, ok_expand = expand_if_let_form(form)
+    case .When_Ok:
+        expanded, err_expand, ok_expand = expand_when_ok_form(form)
+    case .If_Ok:
+        expanded, err_expand, ok_expand = expand_if_ok_form(form)
+    case:
+        return Compile_Error{}, false
+    }
+    if !ok_expand {
+        return err_expand, false
+    }
+    defer delete_borrowed_cst_form(&expanded)
+    return emit_stmt(e, expanded, last_in_proc, returns)
+}
+
 emit_expr_for_expected_type :: proc(e: ^Emitter, form: CST_Form, expected_type := "") -> (string, Compile_Error, bool) {
     if form.kind == .List && len(form.items) > 0 && is_symbol(form.items[0], "if") {
         return emit_if_expr(e, form, expected_type)
     }
     if form.kind == .List && form_head_is_when(form) {
         return emit_when_expr(e, form, expected_type)
+    }
+    if form.kind == .List {
+        if head, ok_when_guard := form_head_is_when_guard(form); ok_when_guard {
+            return "", when_guard_expression_error(head, form.items[0].span), false
+        }
+        if form_head_is_if_guard(form) != .None {
+            return expand_if_guard_expr(e, form, expected_type)
+        }
     }
     if form.kind == .List && form_head_is_cond_thread(form) {
         return emit_cond_thread_expr(e, form, expected_type)
@@ -12493,6 +12579,12 @@ emit_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) 
         if form_head_is_when(form) {
             return emit_when_expr(e, form)
         }
+        if head, ok_when_guard := form_head_is_when_guard(form); ok_when_guard {
+            return "", when_guard_expression_error(head, form.items[0].span), false
+        }
+        if form_head_is_if_guard(form) != .None {
+            return expand_if_guard_expr(e, form)
+        }
         if is_symbol(form.items[0], "let") || form_head_is_do(form) {
             return emit_block_expr(e, form)
         }
@@ -13656,6 +13748,7 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
     case .When:
     case .Thread_First, .Thread_Last:
     case .When_Let, .If_Let, .When_Ok, .If_Ok:
+        return emit_guard_stmt(e, form, builtin_macro_kind(head.text), last_in_proc, returns)
     case .None:
     }
 

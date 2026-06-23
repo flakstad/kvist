@@ -550,6 +550,14 @@ builtin_macro_kind :: proc(head: string) -> Builtin_Macro_Kind {
         return .Thread_First
     case "core-thread-last":
         return .Thread_Last
+    case "when-let":
+        return .When_Let
+    case "if-let":
+        return .If_Let
+    case "when-ok":
+        return .When_Ok
+    case "if-ok":
+        return .If_Ok
     }
     return .None
 }
@@ -681,20 +689,57 @@ parse_binding_condition_macro :: proc(form: CST_Form, name, binding_label: strin
 }
 
 expand_when_let_form :: proc(form: CST_Form) -> (expanded: CST_Form, err: Compile_Error, ok: bool) {
-    bindings, condition, err_bind, ok_bind := parse_binding_condition_macro(form, "when-let", "[[value bool] expr]")
+    if len(form.items) < 3 || form.items[1].kind != .Vector {
+        return expanded, Compile_Error{message = "when-let expects [[value bool] expr] binding and body", span = form.span}, false
+    }
+    if len(form.items[1].items) == 0 {
+        return expanded, Compile_Error{message = "when-let expects [value bool] expr binding pairs", span = form.items[1].span}, false
+    }
+    return expand_when_guard_chain(form.items[1], 0, form.items[2:], form.span, form.items[0].span, "when-let", "[value bool]", false)
+}
+
+expand_when_guard_chain :: proc(bindings_form: CST_Form, idx: int, body: []CST_Form, span, head_span: Span, name, binding_label: string, error_guard: bool) -> (expanded: CST_Form, err: Compile_Error, ok: bool) {
+    if idx >= len(bindings_form.items) {
+        if len(body) == 1 {
+            return body[0], {}, true
+        }
+        do_form := CST_Form{kind = .List, span = span}
+        append(&do_form.items, macro_symbol("do", head_span))
+        for item in body {
+            append(&do_form.items, item)
+        }
+        return do_form, {}, true
+    }
+    binding, condition, err_bind, ok_bind := guard_binding_pair(bindings_form, idx, name, binding_label)
     if !ok_bind {
         return expanded, err_bind, false
     }
-    when_form := CST_Form{kind = .List, span = form.span}
-    append(&when_form.items, macro_symbol("when", form.items[0].span))
-    append(&when_form.items, condition)
-    for item in form.items[2:] {
+
+    nested_body := body
+    nested_form: CST_Form
+    if idx+2 < len(bindings_form.items) {
+        next, err_next, ok_next := expand_when_guard_chain(bindings_form, idx+2, body, span, head_span, name, binding_label, error_guard)
+        if !ok_next {
+            return expanded, err_next, false
+        }
+        nested_form = next
+        nested_body = []CST_Form{nested_form}
+    }
+
+    when_form := CST_Form{kind = .List, span = span}
+    append(&when_form.items, macro_symbol("when", head_span))
+    if error_guard {
+        append(&when_form.items, macro_error_success_condition(condition))
+    } else {
+        append(&when_form.items, condition)
+    }
+    for item in nested_body {
         append(&when_form.items, item)
     }
 
-    expanded = CST_Form{kind = .List, span = form.span}
-    append(&expanded.items, macro_symbol("let", form.items[0].span))
-    append(&expanded.items, bindings)
+    expanded = CST_Form{kind = .List, span = span}
+    append(&expanded.items, macro_symbol("let", head_span))
+    append(&expanded.items, binding)
     append(&expanded.items, when_form)
     return expanded, {}, true
 }
@@ -703,62 +748,76 @@ expand_if_let_form :: proc(form: CST_Form) -> (expanded: CST_Form, err: Compile_
     if len(form.items) != 4 {
         return expanded, Compile_Error{message = "if-let expects [[value bool] expr], then, and else", span = form.span}, false
     }
-    bindings, condition, err_bind, ok_bind := parse_binding_condition_macro(form, "if-let", "[[value bool] expr]")
-    if !ok_bind {
-        return expanded, err_bind, false
+    if form.items[1].kind != .Vector {
+        return expanded, Compile_Error{message = "if-let expects [[value bool] expr] binding", span = form.items[1].span}, false
     }
-
-    if_form := CST_Form{kind = .List, span = form.span}
-    append(&if_form.items, macro_symbol("if", form.items[0].span))
-    append(&if_form.items, condition)
-    append(&if_form.items, form.items[2])
-    append(&if_form.items, form.items[3])
-
-    expanded = CST_Form{kind = .List, span = form.span}
-    append(&expanded.items, macro_symbol("let", form.items[0].span))
-    append(&expanded.items, bindings)
-    append(&expanded.items, if_form)
-    return expanded, {}, true
+    return expand_if_guard_chain(form.items[1], 0, form.items[2], form.items[3], form.span, form.items[0].span, "if-let", "[value bool]", false)
 }
 
 expand_when_ok_form :: proc(form: CST_Form) -> (expanded: CST_Form, err: Compile_Error, ok: bool) {
-    bindings, condition, err_bind, ok_bind := parse_binding_condition_macro(form, "when-ok", "[[value err] expr]")
-    if !ok_bind {
-        return expanded, err_bind, false
+    if len(form.items) < 3 || form.items[1].kind != .Vector {
+        return expanded, Compile_Error{message = "when-ok expects [[value err] expr] binding and body", span = form.span}, false
     }
-
-    when_form := CST_Form{kind = .List, span = form.span}
-    append(&when_form.items, macro_symbol("when", form.items[0].span))
-    append(&when_form.items, macro_error_success_condition(condition))
-    for item in form.items[2:] {
-        append(&when_form.items, item)
+    if len(form.items[1].items) == 0 {
+        return expanded, Compile_Error{message = "when-ok expects [value err] expr binding pairs", span = form.items[1].span}, false
     }
-
-    expanded = CST_Form{kind = .List, span = form.span}
-    append(&expanded.items, macro_symbol("let", form.items[0].span))
-    append(&expanded.items, bindings)
-    append(&expanded.items, when_form)
-    return expanded, {}, true
+    return expand_when_guard_chain(form.items[1], 0, form.items[2:], form.span, form.items[0].span, "when-ok", "[value err]", true)
 }
 
 expand_if_ok_form :: proc(form: CST_Form) -> (expanded: CST_Form, err: Compile_Error, ok: bool) {
     if len(form.items) != 4 {
         return expanded, Compile_Error{message = "if-ok expects [[value err] expr], then, and else", span = form.span}, false
     }
-    bindings, condition, err_bind, ok_bind := parse_binding_condition_macro(form, "if-ok", "[[value err] expr]")
+    if form.items[1].kind != .Vector {
+        return expanded, Compile_Error{message = "if-ok expects [[value err] expr] binding", span = form.items[1].span}, false
+    }
+    return expand_if_guard_chain(form.items[1], 0, form.items[2], form.items[3], form.span, form.items[0].span, "if-ok", "[value err]", true)
+}
+
+guard_binding_pair :: proc(bindings_form: CST_Form, idx: int, name, binding_label: string) -> (binding: CST_Form, condition: CST_Form, err: Compile_Error, ok: bool) {
+    if len(bindings_form.items) == 0 || len(bindings_form.items)%2 != 0 || idx+1 >= len(bindings_form.items) {
+        return binding, condition, Compile_Error{message = fmt.tprintf("%s expects %s expr binding pairs", name, binding_label), span = bindings_form.span}, false
+    }
+    destructure := bindings_form.items[idx]
+    if destructure.kind != .Vector || len(destructure.items) != 2 || destructure.items[0].kind != .Symbol || destructure.items[1].kind != .Symbol {
+        return binding, condition, Compile_Error{message = fmt.tprintf("%s expects %s expr binding pairs", name, binding_label), span = destructure.span}, false
+    }
+
+    binding = CST_Form{kind = .Vector, span = bindings_form.span}
+    append(&binding.items, destructure)
+    append(&binding.items, bindings_form.items[idx+1])
+    condition = destructure.items[1]
+    return binding, condition, {}, true
+}
+
+expand_if_guard_chain :: proc(bindings_form: CST_Form, idx: int, then_expr, else_expr: CST_Form, span, head_span: Span, name, binding_label: string, error_guard: bool) -> (expanded: CST_Form, err: Compile_Error, ok: bool) {
+    binding, condition, err_bind, ok_bind := guard_binding_pair(bindings_form, idx, name, binding_label)
     if !ok_bind {
         return expanded, err_bind, false
     }
 
-    if_form := CST_Form{kind = .List, span = form.span}
-    append(&if_form.items, macro_symbol("if", form.items[0].span))
-    append(&if_form.items, macro_error_success_condition(condition))
-    append(&if_form.items, form.items[2])
-    append(&if_form.items, form.items[3])
+    branch_then := then_expr
+    if idx+2 < len(bindings_form.items) {
+        nested, err_nested, ok_nested := expand_if_guard_chain(bindings_form, idx+2, then_expr, else_expr, span, head_span, name, binding_label, error_guard)
+        if !ok_nested {
+            return expanded, err_nested, false
+        }
+        branch_then = nested
+    }
 
-    expanded = CST_Form{kind = .List, span = form.span}
-    append(&expanded.items, macro_symbol("let", form.items[0].span))
-    append(&expanded.items, bindings)
+    if_form := CST_Form{kind = .List, span = span}
+    append(&if_form.items, macro_symbol("if", head_span))
+    if error_guard {
+        append(&if_form.items, macro_error_success_condition(condition))
+    } else {
+        append(&if_form.items, condition)
+    }
+    append(&if_form.items, branch_then)
+    append(&if_form.items, else_expr)
+
+    expanded = CST_Form{kind = .List, span = span}
+    append(&expanded.items, macro_symbol("let", head_span))
+    append(&expanded.items, binding)
     append(&expanded.items, if_form)
     return expanded, {}, true
 }
@@ -2675,7 +2734,11 @@ macroexpand_cst_form_with_macros :: proc(form: CST_Form, macros: []User_Macro) -
                 return macroexpand_defn_form_preserving_types(form, macros)
             }
             builtin_kind := builtin_macro_kind(form.items[0].text)
-            if builtin_kind != .When {
+            if builtin_kind != .When &&
+               builtin_kind != .When_Let &&
+               builtin_kind != .If_Let &&
+               builtin_kind != .When_Ok &&
+               builtin_kind != .If_Ok {
                 if user_macro, ok_user := find_user_macro(macros, form.items[0].text); ok_user {
                     expanded, err_user, ok_user_expand := expand_user_macro_call(user_macro, form, macros)
                     if !ok_user_expand {

@@ -4625,6 +4625,24 @@ main :: proc() {
 }
 
 @(test)
+reject_when_let_expression_position :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn query [] -> [value: int, found: bool]
+  (return 42 true))
+
+(defn demo [] -> int
+  (let [value: int (when-let [[x found] (query)]
+                     x)]
+    value))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    defer delete(err.message)
+    testing.expect_value(t, err.message, "when-let is a statement and cannot be used as an expression; use if-let when both branches produce a value")
+}
+
+@(test)
 compile_if_let_macro :: proc(t: ^testing.T) {
     source := `(package main)
 
@@ -4685,7 +4703,10 @@ compile_if_let_expression_with_expected_type :: proc(t: ^testing.T) {
     defer delete(output)
 
     testing.expect_value(t, strings.contains(output, "x, found := query()"), true)
-    testing.expect_value(t, strings.contains(output, "value: int = (x if found else 0)"), true)
+    testing.expect_value(t, strings.contains(output, "value: int = (proc() -> int {"), true)
+    testing.expect_value(t, strings.contains(output, "if found {"), true)
+    testing.expect_value(t, strings.contains(output, "return x"), true)
+    testing.expect_value(t, strings.contains(output, "return 0"), true)
 }
 
 @(test)
@@ -4767,7 +4788,10 @@ compile_if_ok_expression_with_expected_type :: proc(t: ^testing.T) {
     defer delete(output)
 
     testing.expect_value(t, strings.contains(output, "x, err := read_count()"), true)
-    testing.expect_value(t, strings.contains(output, "value: int = (x if (err) == ({}) else 0)"), true)
+    testing.expect_value(t, strings.contains(output, "value: int = (proc() -> int {"), true)
+    testing.expect_value(t, strings.contains(output, "if (err) == ({}) {"), true)
+    testing.expect_value(t, strings.contains(output, "return x"), true)
+    testing.expect_value(t, strings.contains(output, "return 0"), true)
 }
 
 @(test)
@@ -4824,6 +4848,25 @@ compile_when_ok_macro :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "if (err) == ({})"), true)
     testing.expect_value(t, strings.contains(output, "total = value"), true)
     testing.expect_value(t, strings.contains(output, "return total"), true)
+}
+
+@(test)
+reject_when_ok_expression_position :: proc(t: ^testing.T) {
+    source := `(package main)
+(import os "core:os")
+
+(defn read-count [] -> [value: int, err: os.Error]
+  (return 42 nil))
+
+(defn demo [] -> int
+  (let [value: int (when-ok [[x err] (read-count)]
+                     x)]
+    value))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    defer delete(err.message)
+    testing.expect_value(t, err.message, "when-ok is a statement and cannot be used as an expression; use if-ok when both branches produce a value")
 }
 
 @(test)
