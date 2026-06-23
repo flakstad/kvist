@@ -4588,6 +4588,14 @@ form_head_is_do :: proc(form: CST_Form) -> bool {
     return len(form.items) > 0 && (is_symbol(form.items[0], "do") || is_symbol(form.items[0], "block"))
 }
 
+form_head_is_when :: proc(form: CST_Form) -> bool {
+    return len(form.items) > 0 &&
+           (is_symbol(form.items[0], "when") ||
+            is_symbol(form.items[0], "core/when") ||
+            is_symbol(form.items[0], "core.when") ||
+            is_symbol(form.items[0], "core-when"))
+}
+
 form_head_is_cond_thread :: proc(form: CST_Form) -> bool {
     return len(form.items) > 0 &&
            (is_symbol(form.items[0], "cond->") ||
@@ -4606,7 +4614,7 @@ form_head_is_statement_only :: proc(form: CST_Form) -> (string, bool) {
     }
     head := form.items[0].text
     switch head {
-    case "when", "core/when", "for", "while", "defer", "errdefer", "set!", "mut!", "inc!", "dec!", "toggle!", "negate!", "return":
+    case "for", "while", "defer", "errdefer", "set!", "mut!", "inc!", "dec!", "toggle!", "negate!", "return":
         return head, true
     }
     return "", false
@@ -4615,6 +4623,9 @@ form_head_is_statement_only :: proc(form: CST_Form) -> (string, bool) {
 emit_expr_for_expected_type :: proc(e: ^Emitter, form: CST_Form, expected_type := "") -> (string, Compile_Error, bool) {
     if form.kind == .List && len(form.items) > 0 && is_symbol(form.items[0], "if") {
         return emit_if_expr(e, form, expected_type)
+    }
+    if form.kind == .List && form_head_is_when(form) {
+        return emit_when_expr(e, form, expected_type)
     }
     if form.kind == .List && form_head_is_cond_thread(form) {
         return emit_cond_thread_expr(e, form, expected_type)
@@ -4924,6 +4935,47 @@ emit_if_expr :: proc(e: ^Emitter, form: CST_Form, expected_type := "") -> (strin
         return "", err_else, false
     }
     return fmt.tprintf("(%s if %s else %s)", then_value, test, else_value), {}, true
+}
+
+emit_when_expr :: proc(e: ^Emitter, form: CST_Form, expected_type := "") -> (string, Compile_Error, bool) {
+    if len(form.items) < 3 {
+        return "", Compile_Error{message = "when expression expects test and body", span = form.span}, false
+    }
+
+    ty := expected_type
+    if ty == "" && len(form.items) == 3 {
+        inferred_ty, ok_inferred_ty := obvious_form_type(e, form.items[2])
+        if ok_inferred_ty {
+            ty = inferred_ty
+        }
+    }
+    if ty == "" {
+        return "", Compile_Error{message = "when expression needs an expected type; add a let binding type or use it where the type is known", span = form.span}, false
+    }
+    mark_keyword_type_for_text(e, ty)
+
+    test, err_test, ok_test := emit_expr(e, form.items[1])
+    if !ok_test {
+        return "", err_test, false
+    }
+
+    then_form := form.items[2]
+    if len(form.items) > 3 {
+        items: [dynamic]CST_Form
+        defer delete(items)
+        append(&items, make_symbol_form("do", form.span))
+        for item in form.items[2:] {
+            append(&items, item)
+        }
+        then_form = CST_Form{kind = .List, items = items, span = form.span}
+    }
+
+    then_value, err_then, ok_then := emit_expr_for_expected_type(e, then_form, ty)
+    if !ok_then {
+        return "", err_then, false
+    }
+
+    return fmt.tprintf("(%s if %s else %s)", then_value, test, zero_value_for_type_text(ty)), {}, true
 }
 
 emit_case_clause_test_expr :: proc(e: ^Emitter, subject: string, clause: CST_Form) -> (string, Compile_Error, bool) {
@@ -12237,6 +12289,9 @@ emit_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) 
         if is_symbol(form.items[0], "if") {
             return emit_if_expr(e, form)
         }
+        if form_head_is_when(form) {
+            return emit_when_expr(e, form)
+        }
         if is_symbol(form.items[0], "let") || form_head_is_do(form) {
             return emit_block_expr(e, form)
         }
@@ -13540,7 +13595,15 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
         e.indent -= 1
         emit_line(e, "}")
         return {}, true
-    case "when", "core/when":
+    case "when", "core/when", "core.when", "core-when":
+        if last_in_proc && returns.kind == .Single {
+            value, err_value, ok_value := emit_expr_for_expected_type(e, form, returns.single_ty)
+            if !ok_value {
+                return err_value, false
+            }
+            emit_prefixed_expr_mapped(e, "return ", value, form.span)
+            return {}, true
+        }
         expanded, err_when, ok_when := expand_when_form(form)
         if !ok_when {
             return err_when, false

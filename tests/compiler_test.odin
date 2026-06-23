@@ -152,17 +152,78 @@ reject_if_expression_without_else :: proc(t: ^testing.T) {
 }
 
 @(test)
-reject_when_expression_in_let_binding :: proc(t: ^testing.T) {
+compile_when_expression_in_let_binding :: proc(t: ^testing.T) {
     source := `(package main)
 
 (defn pick [second?: bool] -> int
   (let [index (when second? 1)]
     index))`
 
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "index := (1 if second_p else int{})"), true)
+}
+
+@(test)
+compile_when_expression_in_return_position :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn pick [second?: bool] -> int
+  (when second? 1))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "return (1 if second_p else int{})"), true)
+}
+
+@(test)
+compile_typed_multiform_when_expression :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn pick [second?: bool] -> int
+  (let [index: int (when second?
+                     (println "picked")
+                     1)]
+    index))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "index: int = "), true)
+    testing.expect_value(t, strings.contains(output, "if second_p else int{}"), true)
+}
+
+@(test)
+reject_untyped_multiform_when_expression :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn pick [second?: bool] -> int
+  (let [index (when second?
+                (println "picked")
+                1)]
+    index))`
+
     _, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, false)
     defer delete(err.message)
-    testing.expect_value(t, err.message, "if expression expects test, then, and else")
+    testing.expect_value(t, err.message, "when expression needs an expected type; add a let binding type or use it where the type is known")
 }
 
 @(test)

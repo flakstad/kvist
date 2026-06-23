@@ -969,6 +969,19 @@ type-call syntax over a brace literal.
 
 The final expression in the body is the value of the `let`.
 
+`if` is an expression when both branches produce a value. `when` can also be
+used as an expression when the result type is known:
+
+```clojure
+(defn selected-index [selected?: bool] -> int
+  (when selected? 1))
+```
+
+The false branch of a `when` expression is the zero value for the expected type.
+In the example above, false returns `int{}`. A single-form body can often provide
+the type in a local binding; multi-form `when` expressions need an explicit
+expected type from the surrounding context.
+
 Use `do` when a branch or callback needs several expressions:
 
 ```clojure

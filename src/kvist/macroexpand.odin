@@ -540,6 +540,8 @@ core_package_local_macros :: proc(anchor_path: string = ".") -> ([]User_Macro, C
 
 builtin_macro_kind :: proc(head: string) -> Builtin_Macro_Kind {
     switch head {
+    case "when", "core/when", "core.when", "core-when":
+        return .When
     case "with-allocator":
         return .With_Allocator
     case "with-temp-allocator":
@@ -2672,15 +2674,18 @@ macroexpand_cst_form_with_macros :: proc(form: CST_Form, macros: []User_Macro) -
             case "defn", "defn-":
                 return macroexpand_defn_form_preserving_types(form, macros)
             }
-            if user_macro, ok_user := find_user_macro(macros, form.items[0].text); ok_user {
-                expanded, err_user, ok_user_expand := expand_user_macro_call(user_macro, form, macros)
-                if !ok_user_expand {
-                    return CST_Form{}, err_user, false
+            builtin_kind := builtin_macro_kind(form.items[0].text)
+            if builtin_kind != .When {
+                if user_macro, ok_user := find_user_macro(macros, form.items[0].text); ok_user {
+                    expanded, err_user, ok_user_expand := expand_user_macro_call(user_macro, form, macros)
+                    if !ok_user_expand {
+                        return CST_Form{}, err_user, false
+                    }
+                    defer delete_cst_form(&expanded)
+                    return macroexpand_cst_form_with_macros(expanded, macros)
                 }
-                defer delete_cst_form(&expanded)
-                return macroexpand_cst_form_with_macros(expanded, macros)
             }
-            #partial switch builtin_macro_kind(form.items[0].text) {
+            #partial switch builtin_kind {
             case .Thread_First, .Thread_Last:
                 return clone_cst_form(form), Compile_Error{}, true
             case:
