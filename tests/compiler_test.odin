@@ -13556,6 +13556,85 @@ compile_proc_where_constraints :: proc(t: ^testing.T) {
 }
 
 @(test)
+compile_def_overload_proc_group :: proc(t: ^testing.T) {
+    source := `(package main)
+(import fmt "core:fmt")
+
+(defstruct User {name: string})
+
+(defn render-int [value: int] -> string
+  (fmt.aprintf "int:%d" value))
+
+(defn render-user [user: User] -> string
+  (fmt.aprintf "user:%s" user.name))
+
+(def render (overload render-int render-user))
+
+(defn render-supported [value: $T] -> string
+  (render value))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "render :: proc{render_int, render_user}"), true)
+    testing.expect_value(t, strings.contains(output, "return render(value)"), true)
+}
+
+@(test)
+compile_local_def_overload_proc_group :: proc(t: ^testing.T) {
+    source := `(package main)
+(import fmt "core:fmt")
+
+(defn render-int [value: int] -> string
+  (fmt.aprintf "int:%d" value))
+
+(defn render-string [value: string] -> string
+  (fmt.aprintf "string:%s" value))
+
+(defn main [] -> string
+  (def render (overload render-int render-string))
+  (render 1))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "    render :: proc{render_int, render_string}"), true)
+    testing.expect_value(t, strings.contains(output, "return render(1)"), true)
+}
+
+@(test)
+reject_empty_def_overload :: proc(t: ^testing.T) {
+    source := `(package main)
+(def render (overload))`
+
+    _, err, ok := kvist.compile_source(source)
+    defer delete(err.message)
+    testing.expect_value(t, ok, false)
+    testing.expect_value(t, err.message, "overload expects at least one function name")
+}
+
+@(test)
+reject_typed_def_overload :: proc(t: ^testing.T) {
+    source := `(package main)
+(def render: int (overload render-int))`
+
+    _, err, ok := kvist.compile_source(source)
+    defer delete(err.message)
+    testing.expect_value(t, ok, false)
+    testing.expect_value(t, err.message, "overload def cannot have an explicit type")
+}
+
+@(test)
 reject_old_attr_form :: proc(t: ^testing.T) {
     source := `(package main)
 
@@ -14180,6 +14259,82 @@ compile_source_package_preserves_type_forms_in_proc_signatures :: proc(t: ^testi
     testing.expect_value(t, strings.contains(output, "out := make(map[string][dynamic]int)"), true)
     testing.expect_value(t, strings.contains(output, "group := make([dynamic]int, 0, 2)"), true)
     testing.expect_value(t, strings.contains(output, "groups__dynamic"), false)
+}
+
+@(test)
+compile_source_package_rewrites_overload_members :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-source-package-overload-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    pkg_dir, join_pkg_err := os.join_path({dir, "support"}, context.allocator)
+    testing.expect_value(t, join_pkg_err == nil, true)
+    if join_pkg_err != nil {
+        return
+    }
+    defer delete(pkg_dir)
+    mk_pkg_err := os.make_directory_all(pkg_dir)
+    testing.expect_value(t, mk_pkg_err == nil, true)
+    if mk_pkg_err != nil {
+        return
+    }
+
+    pkg_file, pkg_join_err := os.join_path({pkg_dir, "support.kvist"}, context.allocator)
+    testing.expect_value(t, pkg_join_err == nil, true)
+    if pkg_join_err != nil {
+        return
+    }
+    defer delete(pkg_file)
+    pkg_source := `(package support)
+(import fmt "core:fmt")
+
+(defn render-int [value: int] -> string
+  (fmt.aprintf "int:%d" value))
+
+(defn render-string [value: string] -> string
+  (fmt.aprintf "string:%s" value))
+
+(def render (overload render-int render-string))
+
+(defn render-supported [value: $T] -> string
+  (render value))`
+    pkg_write_err := os.write_entire_file_from_string(pkg_file, pkg_source)
+    testing.expect_value(t, pkg_write_err == nil, true)
+    if pkg_write_err != nil {
+        return
+    }
+
+    main_path, main_join_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, main_join_err == nil, true)
+    if main_join_err != nil {
+        return
+    }
+    defer delete(main_path)
+    main_source := `(package main)
+(import support "support")
+
+(defn main [] -> string
+  (support.render-supported 42))`
+    main_write_err := os.write_entire_file_from_string(main_path, main_source)
+    testing.expect_value(t, main_write_err == nil, true)
+    if main_write_err != nil {
+        return
+    }
+
+    output, err, ok := kvist.compile_path(main_path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "support__render :: proc{support__render_int, support__render_string}"), true)
+    testing.expect_value(t, strings.contains(output, "return support__render(value)"), true)
 }
 
 @(test)

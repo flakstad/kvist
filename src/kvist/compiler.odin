@@ -1885,6 +1885,37 @@ rewrite_top_form :: proc(top: CST_Top_Form, locals: []string, aliases: []Alias_P
                 if len(top.form.items) > 3 && top.form.items[2].kind == .String {
                     value_index = 3
                 }
+                if value_index < len(top.form.items) &&
+                   top.form.items[value_index].kind == .List &&
+                   len(top.form.items[value_index].items) > 0 &&
+                   is_symbol(top.form.items[value_index].items[0], "overload") {
+                    rewritten.form = top.form
+                    rewritten.form.items = nil
+                    for item, idx in top.form.items {
+                        if idx == 1 {
+                            renamed := item
+                            renamed.text = fmt.tprintf("%s__%s", prefix, item.text)
+                            append(&rewritten.form.items, renamed)
+                            continue
+                        }
+                        if idx == value_index {
+                            overload_form := item
+                            overload_form.items = nil
+                            append(&overload_form.items, item.items[0])
+                            for member in item.items[1:] {
+                                child, err_child, ok_child := rewrite_form_symbols(member, locals, aliases, prefix)
+                                if !ok_child {
+                                    return CST_Top_Form{}, err_child, false
+                                }
+                                append(&overload_form.items, child)
+                            }
+                            append(&rewritten.form.items, overload_form)
+                            continue
+                        }
+                        append(&rewritten.form.items, item)
+                    }
+                    return rewritten, Compile_Error{}, true
+                }
                 if type_alias_candidate_from_forms(top.form.items[:], value_index) {
                     _, next_type, _, ok_type := parse_type_text_from_forms(top.form.items[:], value_index)
                     if ok_type && next_type == len(top.form.items) {

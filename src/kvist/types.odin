@@ -117,6 +117,8 @@ Const_Decl :: struct {
     value:         CST_Form,
     is_type_alias: bool,
     type_alias:    string,
+    is_overload:   bool,
+    overload_members: [dynamic]string,
 }
 
 Var_Decl :: struct {

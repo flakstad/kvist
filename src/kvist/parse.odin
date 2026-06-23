@@ -1237,6 +1237,29 @@ parse_decl_typed_binding :: proc(
     return map_name(raw_name), false, "", true, form.items[value_index], {}, true
 }
 
+form_is_overload_rhs :: proc(form: CST_Form) -> bool {
+    return form.kind == .List &&
+           len(form.items) > 0 &&
+           form.items[0].kind == .Symbol &&
+           form.items[0].text == "overload"
+}
+
+parse_overload_members :: proc(form: CST_Form) -> (members: [dynamic]string, err: Compile_Error, ok: bool) {
+    if !form_is_overload_rhs(form) {
+        return members, {}, false
+    }
+    if len(form.items) < 2 {
+        return members, Compile_Error{message = "overload expects at least one function name", span = form.span}, false
+    }
+    for item in form.items[1:] {
+        if item.kind != .Symbol {
+            return members, Compile_Error{message = "overload members must be symbols", span = item.span}, false
+        }
+        append(&members, map_name(item.text))
+    }
+    return members, {}, true
+}
+
 parse_decl :: proc(top_form: CST_Top_Form) -> (decl: AST_Decl, err: Compile_Error, ok: bool) {
     form := top_form.form
     if form.kind == .Symbol && len(form.text) > 1 && form.text[0] == '@' {
@@ -1325,6 +1348,25 @@ parse_decl :: proc(top_form: CST_Top_Form) -> (decl: AST_Decl, err: Compile_Erro
         name, has_ty, ty, _, value, err_binding, ok_binding := parse_decl_typed_binding(form, head.text, value_index)
         if !ok_binding {
             return decl, err_binding, false
+        }
+        if form_is_overload_rhs(value) {
+            if has_ty {
+                return decl, Compile_Error{message = "overload def cannot have an explicit type", span = value.span}, false
+            }
+            members, err_members, ok_members := parse_overload_members(value)
+            if !ok_members {
+                return decl, err_members, false
+            }
+            return AST_Decl{
+                kind = .Const,
+                span = form.span,
+                doc_lines = doc_lines,
+                const_decl = Const_Decl{
+                    name = name,
+                    is_overload = true,
+                    overload_members = members,
+                },
+            }, {}, true
         }
         const_decl := Const_Decl{
             name   = name,

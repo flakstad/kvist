@@ -14453,6 +14453,20 @@ emit_decl :: proc(e: ^Emitter, decl: IR_Decl) -> (Compile_Error, bool) {
             emit_line(e, fmt.tprintf("import %s", path_literal))
         }
     case .Const:
+        if decl.const_decl.is_overload {
+            emit_indent(e)
+            strings.write_string(&e.builder, decl.const_decl.name)
+            strings.write_string(&e.builder, " :: proc{")
+            for member, idx in decl.const_decl.overload_members {
+                if idx > 0 {
+                    strings.write_string(&e.builder, ", ")
+                }
+                strings.write_string(&e.builder, member)
+            }
+            strings.write_string(&e.builder, "}")
+            emit_raw_newline(e)
+            return Compile_Error{}, true
+        }
         if decl.const_decl.is_type_alias {
             emit_line(e, fmt.tprintf("%s :: %s", decl.const_decl.name, decl.const_decl.type_alias))
             return Compile_Error{}, true

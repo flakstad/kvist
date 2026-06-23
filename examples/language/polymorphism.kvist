@@ -1,4 +1,4 @@
-// Demonstrates Odin polymorphism features as used from Kvist.
+// Demonstrates Kvist polymorphism, constraints, and overload declarations.
 (package main)
 
 (import fmt "core:fmt")
@@ -10,7 +10,7 @@
 })
 
 (defn debug-str
-  "Return an owned debug string using Odin's generic formatter."
+  "Return an owned debug string using generic formatting."
   [value: $T] -> string
   (fmt.aprintf "%v" value))
 
@@ -26,9 +26,8 @@
 (defn render-user [user: User] -> string
   (fmt.aprintf "user:%s/%d" user.name user.age))
 
-// Odin procedure groups are available through the raw Odin escape hatch today.
-// The names here are emitted Odin names, so `render-int` is `render_int`.
-(odin "render :: proc{render_int, render_user}")
+// `overload` declares an explicit overload set.
+(def render (overload render-int render-user))
 
 (defn render-supported [value: $T] -> string
   (render value))

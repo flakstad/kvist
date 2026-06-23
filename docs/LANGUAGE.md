@@ -79,6 +79,9 @@ make alloc delete zero with-allocator with-temp-allocator
 ; pointers and types
 addr deref ptr type transmute type-assert
 
+; polymorphism
+overload
+
 ; threading and inspection
 -> ->> cond-> as-> tap> doc
 
@@ -646,23 +649,22 @@ signature:
   (= value expected))
 ```
 
-### Odin Polymorphism And Reflection
+### Polymorphism, Formatting, And Overloads
 
-Kvist exposes Odin's parametric polymorphism directly. A type prefixed with `$`
-introduces an inferred type parameter, and the unprefixed name refers to that
-same type later in the signature:
+Kvist supports parametric polymorphism through `$` type parameters. A type
+prefixed with `$` introduces an inferred type parameter, and the unprefixed name
+refers to that same type later in the signature:
 
 ```clojure
 (defn debug-str [value: $T] -> string
   (fmt.aprintf "%v" value))
 ```
 
-This lowers to an Odin polymorphic procedure. The `fmt` package accepts
-different value types through Odin's `any`-based formatting machinery, so this
-kind of helper is useful for debugging and tooling. The returned string is
-owned because `fmt.aprintf` returns an allocator-backed string. Use
-`fmt.tprintf` for temporary-allocator strings that are consumed immediately and
-not deleted manually.
+The `fmt` package accepts different value types, so this kind of helper is
+useful for debugging and tooling. The returned string is owned because
+`fmt.aprintf` returns an allocator-backed string. Use `fmt.tprintf` for
+temporary-allocator strings that are consumed immediately and not deleted
+manually.
 
 Use `$T: typeid` when the caller passes a type explicitly:
 
@@ -673,7 +675,7 @@ Use `$T: typeid` when the caller passes a type explicitly:
 (read-as (type Config) "config.json")
 ```
 
-Use `where` when a generic helper should only accept types that satisfy an Odin
+Use `where` when a generic helper should only accept types that satisfy a
 compile-time predicate:
 
 ```clojure
@@ -684,8 +686,7 @@ compile-time predicate:
   (= value expected))
 ```
 
-For ad hoc overloading, Odin has explicit procedure groups. Kvist does not yet
-have a dedicated syntax for procedure groups; use raw Odin when you need one:
+For ad hoc overloading, use `def` with an `overload` right-hand side:
 
 ```clojure
 (defn render-int [value: int] -> string
@@ -694,16 +695,24 @@ have a dedicated syntax for procedure groups; use raw Odin when you need one:
 (defn render-user [user: User] -> string
   (fmt.aprintf "user:%s" user.name))
 
-;; Raw Odin uses emitted Odin names, so `render-int` is `render_int`.
-(odin "render :: proc{render_int, render_user}")
+(def render (overload render-int render-user))
 
 (defn render-supported [value: $T] -> string
   (render value))
 ```
 
-Odin resolves the procedure group at each specialized call site. If no overload
-matches, Odin reports the supported overloads. A future Kvist syntax may cover
-this pattern directly, but raw Odin keeps the generated program explicit today.
+The same form works for local `def` declarations inside a function body when
+the overload set is only useful in that local scope.
+
+This lowers to:
+
+```odin
+render :: proc{render_int, render_user}
+```
+
+Overload members are written with normal Kvist names. Resolution happens at
+each specialized call site. If no overload matches, the generated program
+reports the supported overloads.
 
 Anonymous functions use `fn`:
 
