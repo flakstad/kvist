@@ -4768,7 +4768,11 @@ emit_expr_for_expected_type :: proc(e: ^Emitter, form: CST_Form, expected_type :
 emit_block_expr :: proc(e: ^Emitter, form: CST_Form, expected_type := "") -> (string, Compile_Error, bool) {
     ty := expected_type
     if ty == "" {
-        return "", Compile_Error{message = "block expression needs an expected type; add a let binding type or use it where the type is known", span = form.span}, false
+        label := "block"
+        if form.kind == .List && len(form.items) > 0 && form.items[0].kind == .Symbol {
+            label = display_head_name(form.items[0].text)
+        }
+        return "", Compile_Error{message = fmt.tprintf("%s expression needs an expected type; add a let binding type or use it where the type is known", label), span = form.span}, false
     }
     body := []CST_Form{form}
     captures := collect_proc_literal_captures(e, body, nil)

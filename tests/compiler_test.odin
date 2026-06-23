@@ -532,13 +532,29 @@ compile_final_block_expression_uses_proc_return_type :: proc(t: ^testing.T) {
 }
 
 @(test)
-reject_untyped_block_expression_without_expected_type :: proc(t: ^testing.T) {
+reject_untyped_do_expression_without_expected_type :: proc(t: ^testing.T) {
     source := `(package main)
 
 (defn demo []
   (let [value (do
                 (println "side")
                 1)]
+    (println value)))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    defer delete(err.message)
+    testing.expect_value(t, err.message, "do expression needs an expected type; add a let binding type or use it where the type is known")
+}
+
+@(test)
+reject_untyped_block_expression_without_expected_type :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn demo []
+  (let [value (block
+                (def base 1)
+                base)]
     (println value)))`
 
     _, err, ok := kvist.compile_source(source)
@@ -5541,7 +5557,7 @@ reject_untyped_with_allocator_expression :: proc(t: ^testing.T) {
     _, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, false)
     defer delete(err.message)
-    testing.expect_value(t, err.message, "block expression needs an expected type; add a let binding type or use it where the type is known")
+    testing.expect_value(t, err.message, "with-allocator expression needs an expected type; add a let binding type or use it where the type is known")
 }
 
 @(test)
