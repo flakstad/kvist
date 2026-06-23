@@ -4664,6 +4664,31 @@ main :: proc() -> int {
 }
 
 @(test)
+compile_if_let_expression_with_expected_type :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn query [] -> [value: int, found: bool]
+  (return 42 true))
+
+(defn demo [] -> int
+  (let [value: int (if-let [[x found] (query)]
+                     x
+                     0)]
+    value))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "x, found := query()"), true)
+    testing.expect_value(t, strings.contains(output, "value: int = (x if found else 0)"), true)
+}
+
+@(test)
 compile_chained_if_let_macro :: proc(t: ^testing.T) {
     source := `(package main)
 
@@ -4717,6 +4742,32 @@ compile_if_ok_macro :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "if (err) == ({})"), true)
     testing.expect_value(t, strings.contains(output, "return value"), true)
     testing.expect_value(t, strings.contains(output, "return 0"), true)
+}
+
+@(test)
+compile_if_ok_expression_with_expected_type :: proc(t: ^testing.T) {
+    source := `(package main)
+(import os "core:os")
+
+(defn read-count [] -> [value: int, err: os.Error]
+  (return 42 nil))
+
+(defn demo [] -> int
+  (let [value: int (if-ok [[x err] (read-count)]
+                     x
+                     0)]
+    value))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "x, err := read_count()"), true)
+    testing.expect_value(t, strings.contains(output, "value: int = (x if (err) == ({}) else 0)"), true)
 }
 
 @(test)
@@ -5287,6 +5338,72 @@ main :: proc() {
 }
 `
     testing.expect_value(t, output, expected)
+}
+
+@(test)
+compile_with_allocator_expression_with_expected_type :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn id [x: int] -> int
+  x)
+
+(defn demo [] -> int
+  (let [value: int (with-allocator [allocator context.temp_allocator]
+                     (id 42))]
+    value))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "value: int = (proc() -> int {"), true)
+    testing.expect_value(t, strings.contains(output, "context.allocator = allocator"), true)
+    testing.expect_value(t, strings.contains(output, "return id(42)"), true)
+}
+
+@(test)
+compile_with_temp_allocator_expression_with_expected_type :: proc(t: ^testing.T) {
+    source := `(package main)
+(import runtime "base:runtime")
+
+(defn id [x: int] -> int
+  x)
+
+(defn demo [] -> int
+  (let [value: int (with-temp-allocator [allocator]
+                     (id 42))]
+    value))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "value: int = (proc() -> int {"), true)
+    testing.expect_value(t, strings.contains(output, "runtime.default_temp_allocator_temp_begin()"), true)
+    testing.expect_value(t, strings.contains(output, "return id(42)"), true)
+}
+
+@(test)
+reject_untyped_with_allocator_expression :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn demo []
+  (let [value (with-allocator [allocator context.temp_allocator]
+                42)]
+    value))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    defer delete(err.message)
+    testing.expect_value(t, err.message, "block expression needs an expected type; add a let binding type or use it where the type is known")
 }
 
 @(test)

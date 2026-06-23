@@ -4596,6 +4596,12 @@ form_head_is_when :: proc(form: CST_Form) -> bool {
             is_symbol(form.items[0], "core-when"))
 }
 
+form_head_is_allocator_scope :: proc(form: CST_Form) -> bool {
+    return len(form.items) > 0 &&
+           (is_symbol(form.items[0], "with-allocator") ||
+            is_symbol(form.items[0], "with-temp-allocator"))
+}
+
 form_head_is_cond_thread :: proc(form: CST_Form) -> bool {
     return len(form.items) > 0 &&
            (is_symbol(form.items[0], "cond->") ||
@@ -4637,6 +4643,9 @@ emit_expr_for_expected_type :: proc(e: ^Emitter, form: CST_Form, expected_type :
         return emit_block_expr(e, form, expected_type)
     }
     if form.kind == .List && form_head_is_do(form) {
+        return emit_block_expr(e, form, expected_type)
+    }
+    if form.kind == .List && form_head_is_allocator_scope(form) {
         return emit_block_expr(e, form, expected_type)
     }
     if form.kind == .List && form_head_is_case(form) {
@@ -12293,6 +12302,9 @@ emit_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) 
             return emit_when_expr(e, form)
         }
         if is_symbol(form.items[0], "let") || form_head_is_do(form) {
+            return emit_block_expr(e, form)
+        }
+        if form_head_is_allocator_scope(form) {
             return emit_block_expr(e, form)
         }
         if form_head_is_case(form) {

@@ -1534,6 +1534,15 @@ Allocator scopes are explicit:
 allocator state at scope exit, and rejects obvious owned values that would
 escape that short-lived allocation scope.
 
+Allocator scopes can also produce a value when the surrounding context provides
+the result type:
+
+```clojure
+(let [count: int (with-temp-allocator [allocator]
+                   (parse-count input))]
+  count)
+```
+
 The compiler also has conservative ownership warnings for obvious mistakes such
 as discarding known owned results, forgetting to clean up a local owned value,
 or overwriting one with `set!` before cleanup. These warnings are advisory.
