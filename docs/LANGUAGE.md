@@ -188,9 +188,19 @@ Imports are uniform:
 ```clojure
 (import "core:fmt")
 (import fmt "core:fmt")
+(import "kvist:arr")
 (import arr "kvist:arr")
 (import support "support")
 ```
+
+When the alias is omitted, Kvist derives the package name from the last path
+segment and exposes the package's public helpers as bare names. For example,
+`(import "core:fmt")` exposes `fmt.println`, and `(import "kvist:arr")`
+exposes both `arr.map` and bare `map`.
+
+Bare package helpers are enabled only for imports written without an alias.
+Explicit aliases such as `(import arr "kvist:arr")` keep calls qualified as
+`arr.map`.
 
 Relative imports are resolved by inspecting the target:
 

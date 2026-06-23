@@ -1,0 +1,65 @@
+// Imports kvist:arr without naming an alias, so its public helpers are bare.
+(package main)
+(import "kvist:arr")
+
+(defstruct Order {
+  id: int
+  region: string
+  amount: int
+  settled?: bool
+})
+
+(defn sample-orders [] -> [dynamic]Order
+  (arr.dynamic Order [(Order {id: 1 region: "north" amount: 80 settled?: true})
+                      (Order {id: 2 region: "west" amount: 35 settled?: false})
+                      (Order {id: 3 region: "north" amount: 120 settled?: true})
+                      (Order {id: 4 region: "south" amount: 40 settled?: true})
+                      (Order {id: 5 region: "west" amount: 95 settled?: true})]))
+
+(defn settled? [order: Order] -> bool
+  order.settled?)
+
+(defn amount [order: Order] -> int
+  order.amount)
+
+(defn region [order: Order] -> string
+  order.region)
+
+(defn high-value? [amount: int] -> bool
+  (>= amount 75))
+
+(defn add [acc: int, amount: int] -> int
+  (+ acc amount))
+
+(defn settled-high-value-total [] -> int
+  (let [orders (sample-orders) :defer
+        settled (filter settled? orders) :defer
+        amounts (map amount settled) :defer
+        high-value (filter high-value? amounts) :defer]
+    (reduce add 0 high-value)))
+
+(defn settled-north-count [] -> int
+  (let [orders (sample-orders) :defer
+        settled (filter settled? orders) :defer
+        counts (count-by region settled) :defer]
+    counts["north"]))
+
+(defn sorted-high-value-count [] -> int
+  (let [orders (sample-orders) :defer
+        settled (filter settled? orders) :defer
+        amounts (map amount settled) :defer
+        high-value (filter high-value? amounts) :defer
+        sorted (sort high-value) :defer]
+    (count sorted)))
+
+(defn main []
+  (println (+ (settled-high-value-total)
+              (settled-north-count)
+              (sorted-high-value-count))))
+
+(comment
+  (+ (settled-high-value-total)
+     (settled-north-count)
+     (sorted-high-value-count))
+  ;; => 300
+)

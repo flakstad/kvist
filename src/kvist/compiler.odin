@@ -12,6 +12,7 @@ Alias_Prefix :: struct {
     exports: [dynamic]string,
     raw_exports: [dynamic]string,
     preserve_qualified_calls: bool,
+    allow_unqualified_exports: bool,
 }
 
 Loaded_Forms :: struct {
@@ -616,6 +617,23 @@ alias_prefix_names :: proc(aliases: []Alias_Prefix) -> (names: [dynamic]string) 
         append(&names, alias.alias)
     }
     return names
+}
+
+source_import_form_is_unaliased :: proc(form: CST_Form) -> bool {
+    return form.kind == .List &&
+           len(form.items) == 2 &&
+           is_symbol(form.items[0], "import") &&
+           form.items[1].kind == .String
+}
+
+core_bare_symbol :: proc(text: string) -> bool {
+    switch text {
+    case "count", "empty?", "get", "slice", "contains?", "or-else",
+         "println", "tap>", "doc", "->", "->>", "update!", "delete!",
+         "update":
+        return true
+    }
+    return false
 }
 
 clone_cst_form :: proc(form: CST_Form) -> CST_Form {
@@ -1443,6 +1461,7 @@ collect_root_source_import_aliases_from_files :: proc(files: []Package_File) -> 
                 exports = exports,
                 raw_exports = raw_exports,
                 preserve_qualified_calls = import_path == "kvist:core",
+                allow_unqualified_exports = source_import_form_is_unaliased(top.form),
             })
             delete(import_path)
         }
@@ -1450,7 +1469,33 @@ collect_root_source_import_aliases_from_files :: proc(files: []Package_File) -> 
     return aliases[:], Compile_Error{}, true
 }
 
-rewrite_symbol_text :: proc(text: string, locals: []string, aliases: []Alias_Prefix, prefix: string, span: Span = {}) -> (string, Compile_Error, bool) {
+bare_source_import_symbol_text :: proc(body: string, aliases: []Alias_Prefix, span: Span) -> (text: string, matched: bool, err: Compile_Error, ok: bool) {
+    if core_bare_symbol(body) {
+        return "", false, Compile_Error{}, true
+    }
+    matched_alias := ""
+    matched_prefix := ""
+    for alias_map in aliases {
+        if !alias_map.allow_unqualified_exports {
+            continue
+        }
+        if !contains_text(alias_map.exports[:], body) {
+            continue
+        }
+        if matched {
+            return "", false, Compile_Error{message = fmt.tprintf("ambiguous bare source package member `%s`; use `%s.%s` or `%s.%s`", body, matched_alias, body, alias_map.alias, body), span = span}, false
+        }
+        matched = true
+        matched_alias = alias_map.alias
+        matched_prefix = alias_map.prefix
+    }
+    if !matched {
+        return "", false, Compile_Error{}, true
+    }
+    return fmt.tprintf("%s__%s", matched_prefix, body), true, Compile_Error{}, true
+}
+
+rewrite_symbol_text :: proc(text: string, locals: []string, aliases: []Alias_Prefix, prefix: string, span: Span = {}, allow_bare_import: bool = false) -> (string, Compile_Error, bool) {
     quote_prefix := ""
     body := text
     if len(body) > 0 && body[0] == '\'' {
@@ -1489,6 +1534,15 @@ rewrite_symbol_text :: proc(text: string, locals: []string, aliases: []Alias_Pre
     if prefix != "" && contains_text(locals, body) {
         return fmt.tprintf("%s%s%s__%s", quote_prefix, operator_prefix, prefix, body), Compile_Error{}, true
     }
+    if allow_bare_import && quote_prefix == "" && operator_prefix == "" && !strings.contains_any(body, "./") {
+        bare_text, matched_bare, err_bare, ok_bare := bare_source_import_symbol_text(body, aliases, span)
+        if !ok_bare {
+            return "", err_bare, false
+        }
+        if matched_bare {
+            return bare_text, Compile_Error{}, true
+        }
+    }
     if len(body) > 0 && body[0] == '[' {
         close := -1
         for ch, i in body {
@@ -1511,11 +1565,11 @@ rewrite_symbol_text :: proc(text: string, locals: []string, aliases: []Alias_Pre
     return text, Compile_Error{}, true
 }
 
-rewrite_form_symbols :: proc(form: CST_Form, locals: []string, aliases: []Alias_Prefix, prefix: string) -> (CST_Form, Compile_Error, bool) {
+rewrite_form_symbols :: proc(form: CST_Form, locals: []string, aliases: []Alias_Prefix, prefix: string, allow_bare_import: bool = false) -> (CST_Form, Compile_Error, bool) {
     rewritten := form
     #partial switch form.kind {
     case .Symbol:
-        text, err_text, ok_text := rewrite_symbol_text(form.text, locals, aliases, prefix, form.span)
+        text, err_text, ok_text := rewrite_symbol_text(form.text, locals, aliases, prefix, form.span, allow_bare_import)
         if !ok_text {
             return CST_Form{}, err_text, false
         }
@@ -1562,8 +1616,8 @@ rewrite_form_symbols :: proc(form: CST_Form, locals: []string, aliases: []Alias_
             }
         }
         rewritten.items = nil
-        for item in form.items {
-            child, err_child, ok_child := rewrite_form_symbols(item, locals, aliases, prefix)
+        for item, idx in form.items {
+            child, err_child, ok_child := rewrite_form_symbols(item, locals, aliases, prefix, form.kind == .List && idx == 0)
             if !ok_child {
                 return CST_Form{}, err_child, false
             }
@@ -2226,6 +2280,7 @@ load_source_forms :: proc(dir, prefix: string, loaded_keys, import_keys: ^[dynam
             prefix = strings.clone(self_prefix),
             exports = alias_exports,
             raw_exports = alias_raw_exports,
+            allow_unqualified_exports = false,
         })
     }
 
@@ -2261,6 +2316,7 @@ load_source_forms :: proc(dir, prefix: string, loaded_keys, import_keys: ^[dynam
                 exports = nested_exports,
                 raw_exports = nested_raw_exports,
                 preserve_qualified_calls = import_path == "kvist:core",
+                allow_unqualified_exports = source_import_form_is_unaliased(top.form),
             })
             append_unique_string_clone(&result.source_aliases, alias)
             for nested_alias in nested.source_aliases {
@@ -2372,6 +2428,7 @@ load_root_file_forms :: proc(path: string) -> (Loaded_Forms, Compile_Error, bool
                 exports = nested_exports,
                 raw_exports = nested_raw_exports,
                 preserve_qualified_calls = import_path == "kvist:core",
+                allow_unqualified_exports = source_import_form_is_unaliased(top.form),
             })
             append_unique_string_clone(&result.source_aliases, alias)
             for nested_alias in nested.source_aliases {
@@ -2451,6 +2508,7 @@ load_root_source_forms :: proc(forms: []CST_Top_Form) -> (Loaded_Forms, Compile_
             exports = nested_exports,
             raw_exports = nested_raw_exports,
             preserve_qualified_calls = import_path == "kvist:core",
+            allow_unqualified_exports = source_import_form_is_unaliased(top.form),
         })
         append_unique_string_clone(&result.source_aliases, alias)
         for nested_alias in nested.source_aliases {
@@ -2519,6 +2577,9 @@ load_path_expanded_forms :: proc(path: string) -> (expanded: [dynamic]CST_Top_Fo
     aliases, err_aliases, ok_aliases := collect_root_source_import_aliases(path)
     if !ok_aliases {
         return expanded, macros, err_aliases, false
+    }
+    for &alias in aliases {
+        alias.allow_unqualified_exports = false
     }
     locals := collect_local_decl_names(expanded_forms[:])
     rewritten_expanded: [dynamic]CST_Top_Form

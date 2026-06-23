@@ -22,6 +22,21 @@ several hand-written loops.
 No lazy sequences are built. No intermediate arrays are created unless you ask
 for one with `into`.
 
+Files that lean heavily on array-style data shaping can import `kvist:arr`
+without an alias and use the package helpers bare:
+
+```clojure
+(import "kvist:arr")
+
+(defn active-names [users: []User] -> [dynamic]string
+  (let [active (filter .active? users) :defer]
+    (map .name active)))
+```
+
+That style keeps eager helper calls visually close to transform specs. It is
+available for unaliased Kvist source-package imports; explicit aliases such as
+`(import arr "kvist:arr")` still use `arr.map`, `arr.filter`, and so on.
+
 ## When To Use Them
 
 Manual `for` loops are always available and remain the escape hatch for

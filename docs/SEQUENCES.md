@@ -36,6 +36,10 @@ These helpers are the current core and shipped package surface for sequence-like
 work:
 
 ```clojure
+(import "kvist:arr") ; exposes arr helpers as bare names too
+
+(map f xs)
+(filter pred xs)
 (arr.count xs)
 (arr.empty T)
 (arr.empty T capacity)
@@ -183,8 +187,10 @@ work:
 
 Cross-family collection helpers live in `kvist:core`: `count`,
 `empty?`, `get`, `slice`, `contains?`, `update!`, `assoc`, `update`, and
-`delete!`. Other collection operations should use explicit package names such
-as `arr.*`, `map.*`, `str.*`, or `set.*`.
+`delete!`. Other collection operations usually use explicit package names such
+as `arr.*`, `map.*`, `str.*`, or `set.*`. Unaliased imports such as
+`(import "kvist:arr")` may also use public package helpers bare, such as
+`map`, `filter`, and `reduce`.
 
 Macro-time helpers with similar names operate on source forms; see
 [MACROS.md](MACROS.md) for that smaller compile-time surface.
