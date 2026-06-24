@@ -1585,7 +1585,7 @@ macro_eval_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_
                         return macro_eval_expr(form.items[i+1], macros, bindings)
                     }
                     matched := false
-                    if clause.kind == .Vector {
+                    if clause.kind == .Set {
                         for item in clause.items {
                             value, err_value, ok_value := macro_eval_expr(item, macros, bindings)
                             if !ok_value {

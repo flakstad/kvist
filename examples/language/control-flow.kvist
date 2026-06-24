@@ -30,7 +30,7 @@
 
 (defn read-method? [method: Method] -> bool
   (case method
-    [.Get .Head] true
+    #{.Get .Head} true
     :else false))
 
 (defn method-name [method: Method] -> string
@@ -52,7 +52,7 @@
 
 (defn movement-cost [method: Method] -> int
   (let [cost (case method
-               [.Get .Head] 1
+               #{.Get .Head} 1
                .Post 2
                :else 3)]
     cost))

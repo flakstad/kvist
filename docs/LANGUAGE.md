@@ -1421,7 +1421,7 @@ ordinary Odin switches:
   :else "unknown")
 
 (case method
-  [.Get .Head] "read"
+  #{.Get .Head} "read"
   .Post "write"
   :else "other")
 
@@ -1437,6 +1437,10 @@ ordinary Odin switches:
   (Data data) (count data.payload)
   :else -1)
 ```
+
+Set clauses group several values for one arm. Vector clauses are ordinary
+fixed-array value literals; dynamic arrays and slices are not comparable case
+subjects.
 
 Use `_` when a type payload case should match the variant without binding the
 payload.
