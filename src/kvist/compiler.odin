@@ -1225,6 +1225,10 @@ rewrite_relative_odin_import_form :: proc(importer_path: string, top: CST_Top_Fo
     if join_err != nil {
         return rewritten
     }
+    if !os.exists(resolved) {
+        delete(resolved)
+        return rewritten
+    }
     delete(form.items[path_index].text)
     form.items[path_index].text = fmt.tprintf("%q", resolved)
     return rewritten
@@ -2459,12 +2463,7 @@ load_root_file_forms :: proc(path: string) -> (Loaded_Forms, Compile_Error, bool
                 continue
             }
             if head == "import" {
-                dir, _ := os.split_path(file.path)
-                if dir == "" {
-                    append_import_form_unique(&result.imports, &import_keys, rewrite_relative_odin_import_form(file.path, top))
-                } else {
-                    append_import_form_unique(&result.imports, &import_keys, top)
-                }
+                append_import_form_unique(&result.imports, &import_keys, rewrite_relative_odin_import_form(file.path, top))
                 continue
             }
             rewritten, err_rewrite, ok_rewrite := rewrite_top_form(top, locals[:], aliases[:], "")
@@ -3103,6 +3102,16 @@ compile_path :: proc(path: string) -> (output: string, err: Compile_Error, ok: b
     }
     defer delete(result.source_map)
     defer compile_warning_slice_delete(result.warnings)
+    source_dir, _ := os.split_path(path)
+    if source_dir == "" {
+        source_dir = "."
+    }
+    rebased, err_rebase, ok_rebase := rebase_emitted_odin_imports(result.output, source_dir)
+    delete(result.output)
+    if !ok_rebase {
+        return "", err_rebase, false
+    }
+    result.output = rebased
     return result.output, {}, true
 }
 
@@ -3119,7 +3128,13 @@ compile_path_with_map :: proc(path: string) -> (result: Emit_Result, err: Compil
         return result, clone_compile_error(err_program, result_allocator), false
     }
     context.allocator = old_allocator
-    return compile_program_with_map(program)
+    err_compile: Compile_Error
+    ok_compile: bool
+    result, err_compile, ok_compile = compile_program_with_map(program)
+    if !ok_compile {
+        return result, err_compile, false
+    }
+    return result, {}, true
 }
 
 rebase_emitted_odin_imports :: proc(source, output_dir: string) -> (output: string, err: Compile_Error, ok: bool) {
@@ -3151,7 +3166,12 @@ rebase_emitted_odin_imports :: proc(source, output_dir: string) -> (output: stri
                     if os.is_absolute_path(import_path) {
                         canonical_import_path, import_path_err := os.get_absolute_path(import_path, context.allocator)
                         if import_path_err != nil {
-                            return "", Compile_Error{message = fmt.tprintf("could not canonicalize generated Odin import: %s", import_path)}, false
+                            strings.write_string(&builder, rewritten)
+                            if i < len(source) {
+                                strings.write_byte(&builder, '\n')
+                            }
+                            line_start = i + 1
+                            continue
                         }
                         relative_path, rel_err := os.get_relative_path(canonical_output_dir, canonical_import_path, context.allocator)
                         delete(canonical_import_path)

@@ -182,6 +182,11 @@ odin_root_path :: proc() -> (string, bool) {
 
 odin_import_dir :: proc(root, import_path: string) -> (string, bool) {
     switch {
+    case os.is_absolute_path(import_path):
+        if os.exists(import_path) && os.is_dir(import_path) {
+            return strings.clone(import_path), true
+        }
+        return "", false
     case strings.has_prefix(import_path, "core:"):
         path, err := os.join_path({root, "core", import_path[5:]}, context.allocator)
         if err != nil {

@@ -4930,7 +4930,7 @@ compile_if_ok_macro :: proc(t: ^testing.T) {
     defer delete(output)
 
     testing.expect_value(t, strings.contains(output, "value, err := read_count()"), true)
-    testing.expect_value(t, strings.contains(output, "if (err) == ({})"), true)
+    testing.expect_value(t, strings.contains(output, "if (err) == (os.Error{})"), true)
     testing.expect_value(t, strings.contains(output, "return value"), true)
     testing.expect_value(t, strings.contains(output, "return 0"), true)
 }
@@ -4959,7 +4959,7 @@ compile_if_ok_expression_with_expected_type :: proc(t: ^testing.T) {
 
     testing.expect_value(t, strings.contains(output, "x, err := read_count()"), true)
     testing.expect_value(t, strings.contains(output, "value: int = (proc() -> int {"), true)
-    testing.expect_value(t, strings.contains(output, "if (err) == ({}) {"), true)
+    testing.expect_value(t, strings.contains(output, "if (err) == (os.Error{}) {"), true)
     testing.expect_value(t, strings.contains(output, "return x"), true)
     testing.expect_value(t, strings.contains(output, "return 0"), true)
 }
@@ -4986,7 +4986,7 @@ compile_final_if_ok_uses_proc_return_type :: proc(t: ^testing.T) {
     defer delete(output)
 
     testing.expect_value(t, strings.contains(output, "x, err := read_count()"), true)
-    testing.expect_value(t, strings.contains(output, "if (err) == ({}) {"), true)
+    testing.expect_value(t, strings.contains(output, "if (err) == (os.Error{}) {"), true)
     testing.expect_value(t, strings.contains(output, "return x"), true)
     testing.expect_value(t, strings.contains(output, "return 0"), true)
 }
@@ -5014,7 +5014,7 @@ compile_chained_if_ok_macro :: proc(t: ^testing.T) {
     defer delete(output)
 
     testing.expect_value(t, strings.contains(output, "a, err := read_count(1)"), true)
-    testing.expect_value(t, strings.contains(output, "if (err) == ({}) {\n        b, err := read_count(a)"), true)
+    testing.expect_value(t, strings.contains(output, "if (err) == (os.Error{}) {\n        b, err := read_count(a)"), true)
     testing.expect_value(t, strings.contains(output, "return (a) + (b)"), true)
     testing.expect_value(t, strings.contains(output, "return 0"), true)
 }
@@ -5042,7 +5042,7 @@ compile_when_ok_macro :: proc(t: ^testing.T) {
     defer delete(output)
 
     testing.expect_value(t, strings.contains(output, "value, err := read_count()"), true)
-    testing.expect_value(t, strings.contains(output, "if (err) == ({})"), true)
+    testing.expect_value(t, strings.contains(output, "if (err) == (os.Error{})"), true)
     testing.expect_value(t, strings.contains(output, "total = value"), true)
     testing.expect_value(t, strings.contains(output, "return total"), true)
 }
@@ -15364,6 +15364,84 @@ raw_value :: proc() -> int {
 }
 
 @(test)
+compile_imported_enum_case_stmt_uses_partial_switch :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-imported-enum-case-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    support_dir, support_dir_err := os.join_path({dir, "support"}, context.allocator)
+    testing.expect_value(t, support_dir_err == nil, true)
+    if support_dir_err != nil {
+        return
+    }
+    defer delete(support_dir)
+    mk_err := os.make_directory_all(support_dir)
+    testing.expect_value(t, mk_err == nil, true)
+    if mk_err != nil {
+        return
+    }
+
+    odin_path, odin_path_err := os.join_path({support_dir, "support.odin"}, context.allocator)
+    testing.expect_value(t, odin_path_err == nil, true)
+    if odin_path_err != nil {
+        return
+    }
+    defer delete(odin_path)
+    odin_source := `package support
+
+Kind :: enum {
+    One,
+    Two,
+    Three,
+}
+
+Value :: struct {
+    kind: Kind,
+}
+`
+    odin_write_err := os.write_entire_file_from_string(odin_path, odin_source)
+    testing.expect_value(t, odin_write_err == nil, true)
+    if odin_write_err != nil {
+        return
+    }
+
+    main_path, main_path_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, main_path_err == nil, true)
+    if main_path_err != nil {
+        return
+    }
+    defer delete(main_path)
+    source := `(package main)
+(import support "support")
+
+(defn label [value: support.Value] -> string
+  (case value.kind
+    .One "one"
+    .Two "two"
+    :else "other"))`
+    write_err := os.write_entire_file_from_string(main_path, source)
+    testing.expect_value(t, write_err == nil, true)
+    if write_err != nil {
+        return
+    }
+
+    output, err, ok := kvist.compile_path(main_path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "#partial switch value.kind"), true)
+    testing.expect_value(t, strings.contains(output, "case:"), true)
+}
+
+@(test)
 compile_source_package_rebases_local_odin_import_without_marker :: proc(t: ^testing.T) {
     dir, dir_err := os.make_directory_temp("", "kvist-source-package-raw-import-*", context.allocator)
     testing.expect_value(t, dir_err == nil, true)
@@ -15454,7 +15532,7 @@ raw_value :: proc() -> int {
     defer delete(output)
 
     testing.expect_value(t, strings.contains(output, "import raw "), true)
-    testing.expect_value(t, strings.contains(output, "/support/raw\""), true)
+    testing.expect_value(t, strings.contains(output, "\"support/raw\""), true)
     testing.expect_value(t, strings.contains(output, "raw.raw_value()"), true)
     testing.expect_value(t, strings.contains(output, "wrap__value()"), true)
 }
@@ -15611,7 +15689,7 @@ raw_value :: proc() -> int {
     defer delete(output)
 
     testing.expect_value(t, strings.contains(output, "import support "), true)
-    testing.expect_value(t, strings.contains(output, "/support\""), true)
+    testing.expect_value(t, strings.contains(output, "\"support\""), true)
     testing.expect_value(t, strings.contains(output, "support__kvist_value()"), true)
     testing.expect_value(t, strings.contains(output, "support.raw_value()"), true)
 }

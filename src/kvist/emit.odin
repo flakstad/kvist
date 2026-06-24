@@ -2159,6 +2159,50 @@ odin_import_type_fields_from_dir :: proc(alias, dir, type_name: string) -> (fiel
     return fields, false
 }
 
+odin_import_enum_exists_from_dir :: proc(dir, type_name: string) -> bool {
+    if !os.exists(dir) {
+        return false
+    }
+    entries, err := os.read_directory_by_path(dir, -1, context.allocator)
+    if err != nil {
+        return false
+    }
+    defer os.file_info_slice_delete(entries, context.allocator)
+
+    for entry in entries {
+        if entry.type != .Regular || !strings.has_suffix(entry.name, ".odin") {
+            continue
+        }
+        path, join_err := os.join_path({dir, entry.name}, context.allocator)
+        if join_err != nil {
+            continue
+        }
+        data, read_err := os.read_entire_file_from_path(path, context.allocator)
+        delete(path)
+        if read_err != nil {
+            continue
+        }
+        source := string(data)
+        lines := strings.split_lines(source, context.allocator)
+
+        for line in lines {
+            rhs, ok_decl := odin_decl_rhs_from_line(line, type_name)
+            if !ok_decl {
+                continue
+            }
+            if strings.has_prefix(rhs, "enum") {
+                delete(lines)
+                delete(data)
+                return true
+            }
+            break
+        }
+        delete(lines)
+        delete(data)
+    }
+    return false
+}
+
 odin_proc_param_types_from_text :: proc(params_text: string) -> (types: [dynamic]string) {
     parts := split_top_level_commas(params_text)
     defer delete(parts)
@@ -2328,6 +2372,40 @@ imported_odin_type_fields :: proc(e: ^Emitter, type_text: string) -> (fields: [d
         return odin_import_type_fields_from_dir(alias, dir, member)
     }
     return fields, false
+}
+
+imported_odin_enum_type_exists :: proc(e: ^Emitter, type_text: string) -> bool {
+    alias, member, ok_parts := imported_odin_type_parts(type_text)
+    if !ok_parts {
+        return false
+    }
+
+    for decl in e.decls {
+        if !import_decl_alias_matches(decl, alias) {
+            continue
+        }
+        raw := decl.import_decl.path
+        if len(raw) >= 2 && raw[0] == '"' && raw[len(raw)-1] == '"' {
+            raw = unquote_string(raw)
+        }
+        if strings.has_prefix(raw, "kvist:") {
+            return false
+        }
+        odin_root, ok_root := odin_root_path()
+        if !ok_root {
+            continue
+        }
+        defer delete(odin_root)
+        dir, ok_dir := odin_import_dir(odin_root, raw)
+        if !ok_dir {
+            continue
+        }
+        defer delete(dir)
+        if odin_import_enum_exists_from_dir(dir, member) {
+            return true
+        }
+    }
+    return false
 }
 
 proc_param_keyword_names :: proc(proc_decl: ^Proc_Decl) -> (names: [dynamic]string) {
@@ -5158,7 +5236,7 @@ emit_case_expr :: proc(e: ^Emitter, form: CST_Form, expected_type := "") -> (str
         return "", err_vector_group, false
     }
     subject_ty := ""
-    if known_subject_ty, ok_subject_ty := known_form_type(e, form.items[1]); ok_subject_ty {
+    if known_subject_ty, ok_subject_ty := obvious_form_type(e, form.items[1]); ok_subject_ty {
         subject_ty = known_subject_ty
     }
     subject, err_subject, ok_subject := emit_expr(e, form.items[1])
@@ -6158,7 +6236,63 @@ infer_literal_value_type :: proc(e: ^Emitter, form: CST_Form) -> (string, Compil
     return "", Compile_Error{message = "unsupported inline literal type inference", span = form.span}, false
 }
 
+indexed_symbol_type :: proc(e: ^Emitter, text: string, span: Span) -> (string, bool) {
+    open := strings.index(text, "[")
+    if open <= 0 {
+        return "", false
+    }
+    rest := text[open+1:]
+    close_rel := strings.index(rest, "]")
+    if close_rel < 0 {
+        return "", false
+    }
+    close := open + 1 + close_rel
+    base_text := text[:open]
+    suffix := text[close+1:]
+
+    base_ty, ok_base_ty := obvious_form_type(e, CST_Form{kind = .Symbol, text = base_text, span = span})
+    if !ok_base_ty {
+        return "", false
+    }
+
+    elem_ty: string
+    if _, value_ty, ok_map := map_type_parts(base_ty); ok_map {
+        elem_ty = value_ty
+    } else {
+        ok_elem_ty: bool
+        elem_ty, ok_elem_ty = collection_element_type(base_ty)
+        if !ok_elem_ty {
+            return "", false
+        }
+    }
+
+    if suffix == "" {
+        return elem_ty, true
+    }
+    if len(suffix) > 1 && suffix[0] == '.' {
+        fields, ok_fields := split_field_path_text(suffix[1:])
+        if ok_fields {
+            defer delete(fields)
+            field_ty, _, ok_field_ty := struct_field_type_for_update_path(e, elem_ty, fields[:], "field access", span)
+            if ok_field_ty {
+                return field_ty, true
+            }
+        }
+    }
+    return "", false
+}
+
 obvious_form_type :: proc(e: ^Emitter, form: CST_Form) -> (string, bool) {
+    if form.kind == .List && len(form.items) == 3 && is_symbol(form.items[0], "__kvist_index") {
+        target_ty, ok_target_ty := obvious_form_type(e, form.items[1])
+        if !ok_target_ty {
+            return "", false
+        }
+        if _, value_ty, ok_map := map_type_parts(target_ty); ok_map {
+            return value_ty, true
+        }
+        return collection_element_type(target_ty)
+    }
     if target_form, fields, field_span, ok_place := field_path_place_parts(form); ok_place {
         target_ty, ok_target_ty := obvious_form_type(e, target_form)
         if !ok_target_ty {
@@ -6168,6 +6302,15 @@ obvious_form_type :: proc(e: ^Emitter, form: CST_Form) -> (string, bool) {
         return ty, ok_ty
     }
     if form.kind == .Symbol {
+        if symbol_is_simple_deref_suffix(form.text) {
+            if ty, ok := lookup_local_type(e, map_name(form.text[:len(form.text)-1])); ok && len(ty) > 0 && ty[0] == '^' {
+                return ty[1:], true
+            }
+            return "", false
+        }
+        if ty, ok := indexed_symbol_type(e, form.text, form.span); ok {
+            return ty, true
+        }
         return lookup_local_type(e, map_name(form.text))
     }
     if form.kind == .Number || form.kind == .String || form.kind == .Bool {
@@ -6405,6 +6548,21 @@ known_form_type :: proc(e: ^Emitter, form: CST_Form) -> (string, bool) {
             }
             return "", false
         }
+        dot := strings.index(name, ".")
+        if dot > 0 && dot+1 < len(name) {
+            base_name := map_name(name[:dot])
+            defer delete(base_name)
+            if target_ty, ok_target := lookup_local_type(e, base_name); ok_target {
+                fields, ok_fields := split_field_path_text(name[dot+1:])
+                if ok_fields {
+                    defer delete(fields)
+                    field_ty, _, ok_field_ty := struct_field_type_for_update_path(e, target_ty, fields[:], "field access", form.span)
+                    if ok_field_ty {
+                        return field_ty, true
+                    }
+                }
+            }
+        }
         return lookup_local_type(e, map_name(name))
     }
     return "", false
@@ -6418,12 +6576,15 @@ obvious_binding_type :: proc(e: ^Emitter, binding: Binding) -> (string, bool) {
         return binding.ty, true
     }
     if binding.value.kind == .Symbol {
-        return lookup_local_type(e, map_name(binding.value.text))
+        return obvious_form_type(e, binding.value)
     }
     if binding.value.kind == .Number || binding.value.kind == .String || binding.value.kind == .Bool {
         if ty, _, ok := infer_literal_value_type(e, binding.value); ok {
             return ty, true
         }
+    }
+    if ty, ok := obvious_form_type(e, binding.value); ok {
+        return ty, true
     }
     if binding.value.kind == .List && len(binding.value.items) == 2 && binding.value.items[0].kind == .Symbol && binding.value.items[1].kind == .Brace {
         head_name := map_name(binding.value.items[0].text)
@@ -6526,6 +6687,24 @@ obvious_binding_type :: proc(e: ^Emitter, binding: Binding) -> (string, bool) {
         }
     }
     return "", false
+}
+
+bind_obvious_binding_types :: proc(e: ^Emitter, binding: Binding) {
+    if binding.is_destructure || binding.is_result_binding {
+        if binding.value.kind == .List && len(binding.value.items) > 0 && binding.value.items[0].kind == .Symbol {
+            head_name := map_name(binding.value.items[0].text)
+            defer delete(head_name)
+            if proc_decl, ok := find_proc_decl(e, head_name); ok && proc_decl.returns.kind == .Named && len(proc_decl.returns.named) == len(binding.pattern) {
+                for name, idx in binding.pattern {
+                    bind_local_type(e, name, proc_decl.returns.named[idx].ty)
+                }
+            }
+        }
+        return
+    }
+    if ty, ok_ty := obvious_binding_type(e, binding); ok_ty {
+        bind_local_type(e, binding.name, ty)
+    }
 }
 
 binding_value_is_let :: proc(binding: Binding) -> bool {
@@ -8681,6 +8860,9 @@ enum_type_exists :: proc(e: ^Emitter, name: string) -> bool {
             return true
         }
     }
+    if imported_odin_enum_type_exists(e, name) {
+        return true
+    }
     return false
 }
 
@@ -9854,9 +10036,7 @@ emit_reduced_body_update_text :: proc(e: ^Emitter, form: CST_Form, acc_text, acc
                 return "", err_value, false
             }
             fmt.sbprintf(&builder, "%s := %s\n", binding.name, value_text)
-            if ty, ok_ty := obvious_binding_type(e, binding); ok_ty {
-                bind_local_type(e, binding.name, ty)
-            }
+            bind_obvious_binding_types(e, binding)
         }
         body_text, err_body, ok_body := emit_reduced_body_update_text(e, form.items[2], acc_text, acc_ty)
         if !ok_body {
@@ -13748,7 +13928,7 @@ emit_case_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns:
     }
     force_partial := false
     subject_ty := ""
-    if known_subject_ty, ok_subject_ty := known_form_type(e, form.items[1]); ok_subject_ty {
+    if known_subject_ty, ok_subject_ty := obvious_form_type(e, form.items[1]); ok_subject_ty {
         subject_ty = known_subject_ty
         if enum_type_exists(e, known_subject_ty) {
             force_partial = true
@@ -13949,9 +14129,7 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
                     return err_defer, false
                 }
             }
-            if ty, ok_ty := obvious_binding_type(e, binding); ok_ty {
-                bind_local_type(e, binding.name, ty)
-            }
+            bind_obvious_binding_types(e, binding)
         }
         err_body, ok_body := emit_body_forms(e, body[:], returns_when_final(last_in_proc, returns))
         if !ok_body {
