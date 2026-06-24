@@ -1167,6 +1167,37 @@ surround_with_braces :: proc(prefix, inner: string) -> string {
     return strings.clone(strings.to_string(builder))
 }
 
+odin_quote_string_value :: proc(text: string) -> string {
+    builder := strings.builder_make()
+    defer strings.builder_destroy(&builder)
+    strings.write_byte(&builder, '"')
+    for i := 0; i < len(text); i += 1 {
+        ch := text[i]
+        switch ch {
+        case '\\':
+            strings.write_string(&builder, "\\\\")
+        case '"':
+            strings.write_string(&builder, "\\\"")
+        case '\n':
+            strings.write_string(&builder, "\\n")
+        case '\r':
+            strings.write_string(&builder, "\\r")
+        case '\t':
+            strings.write_string(&builder, "\\t")
+        case:
+            strings.write_byte(&builder, ch)
+        }
+    }
+    strings.write_byte(&builder, '"')
+    return strings.clone(strings.to_string(builder))
+}
+
+emit_string_literal_text :: proc(form: CST_Form) -> string {
+    unquoted := unquote_string(form.text)
+    defer delete(unquoted)
+    return odin_quote_string_value(unquoted)
+}
+
 Brace_Pair :: struct {
     key:   string,
     value: string,
@@ -1203,7 +1234,7 @@ emit_brace_pair_texts :: proc(e: ^Emitter, form: CST_Form, keyword_fields := tru
             }
             append(&pairs, Brace_Pair{key = key_text, value = value_text})
         case .String:
-            append(&pairs, Brace_Pair{key = key.text, value = value_text})
+            append(&pairs, Brace_Pair{key = emit_string_literal_text(key), value = value_text})
         case:
             key_text, err_key, ok_key := emit_expr(e, key)
             if !ok_key {
@@ -3604,7 +3635,7 @@ emit_thread_step :: proc(e: ^Emitter, current: string, step: CST_Form, thread_la
             label_form := step.items[1]
             label := ""
             if label_form.kind == .String {
-                label = label_form.text
+                label = emit_string_literal_text(label_form)
             } else {
                 return "", Compile_Error{message = "tap> label must be a string literal", span = label_form.span}, false
             }
@@ -11686,7 +11717,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         label_form := form.items[1]
         label: string
         if label_form.kind == .String {
-            label = label_form.text
+            label = emit_string_literal_text(label_form)
         } else {
             return "", Compile_Error{message = "tap> label must be a string literal", span = label_form.span}, false
         }
@@ -12542,7 +12573,7 @@ emit_generic_type_constructor_call :: proc(e: ^Emitter, form: CST_Form) -> (stri
 emit_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) {
     #partial switch form.kind {
     case .String:
-        return form.text, {}, true
+        return emit_string_literal_text(form), {}, true
     case .Number:
         return form.text, {}, true
     case .Bool:

@@ -119,6 +119,30 @@ main :: proc() {
 }
 
 @(test)
+compile_multiline_string_literal :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(def Query: string "[:find ?name
+ :in [?email ...]
+ :where [?e :user/email ?email]
+        [?e :user/name \"Ada\"]]")
+
+(defn query [] -> string
+  Query)`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, `Query: string : "[:find ?name\n :in [?email ...]\n :where [?e :user/email ?email]\n        [?e :user/name \"Ada\"]]"`), true)
+    testing.expect_value(t, strings.contains(output, "Query: string : \"[:find ?name\n"), false)
+}
+
+@(test)
 compile_if_expression_in_let_binding :: proc(t: ^testing.T) {
     source := `(package main)
 
@@ -761,6 +785,7 @@ compile_all_examples :: proc(t: ^testing.T) {
         "examples/interop/interop-directives.kvist",
         "examples/language/let-discard-bindings.kvist",
         "examples/language/local-declarations.kvist",
+        "examples/language/multiline-strings.kvist",
         "examples/language/multi-return-bindings.kvist",
         "examples/interop/core/matrix.kvist",
         "examples/visual/matrix-kinematics.kvist",

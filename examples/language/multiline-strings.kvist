@@ -1,0 +1,19 @@
+// Demonstrates multi-line Kvist string literals for EDN-style text.
+(package main)
+
+(def Query: string "
+[:find ?name
+ :in [?email ...]
+ :where [?e :user/email ?email]
+        [?e :user/name ?name]]
+")
+
+(def Transaction: string "
+[{:db/id 1
+  :user/email \"ada@example.test\"
+  :user/name \"Ada\"}]
+")
+
+(defn main []
+  (println Query)
+  (println Transaction))
