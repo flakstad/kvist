@@ -940,7 +940,7 @@ symbols_source_indexes_top_level_forms :: proc(t: ^testing.T) {
 (defn active? [user: User] -> bool
   user.active)
 
-(defiter active-users [users: []User] -> User_Source yields User
+(defiter active-users [users: []User] -> User_Source :yield User
   :next next-user
   (open-users users))`
 
@@ -961,7 +961,7 @@ symbols_source_indexes_top_level_forms :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "union\tValue\t18\t11\t\t\t\n"), true)
     testing.expect_value(t, strings.contains(output, "variant\tValue.i\t19\t3\tValue\t\t\n"), true)
     testing.expect_value(t, strings.contains(output, "const\tmax-age\t23\t6\t\t\t\n"), true)
-    testing.expect_value(t, strings.contains(output, "iterator\tactive-users\t30\t10\t\t(active-users [users: []User] -> User_Source yields User)\t\n"), true)
+    testing.expect_value(t, strings.contains(output, "iterator\tactive-users\t30\t10\t\t(active-users [users: []User] -> User_Source :yield User)\t\n"), true)
     testing.expect_value(t, strings.contains(output, "proc\tactive?\t27\t7\t\t(active? [user: User] -> bool)\tReturns true for active users.\\nUsed by sequence examples.\n"), true)
 }
 
@@ -8705,7 +8705,7 @@ compile_defiter_each_into_and_transduce_consumers :: proc(t: ^testing.T) {
 (defn path-length [path: string] -> int
   (len path))
 
-(defiter files [items: []string] -> File_Source yields string
+(defiter files [items: []string] -> File_Source :yield string
   :next next-file
   :dispose dispose-files
   (open-files items))
@@ -8811,7 +8811,7 @@ reject_source_call_outside_source_consumer :: proc(t: ^testing.T) {
 (defn next-file [src: ^File_Source] -> [path: string ok: bool]
   (return "" false))
 
-(defiter files [items: []string] -> File_Source yields string
+(defiter files [items: []string] -> File_Source :yield string
   :next next-file
   (open-files items))
 
@@ -8846,7 +8846,7 @@ reject_defiter_next_wrong_state_parameter :: proc(t: ^testing.T) {
 (defn next-file [src: ^Other_Source] -> [path: string ok: bool]
   (return "" false))
 
-(defiter files [] -> File_Source yields string
+(defiter files [] -> File_Source :yield string
   :next next-file
   (open-files))
 
@@ -8879,7 +8879,7 @@ reject_defiter_next_wrong_return_shape :: proc(t: ^testing.T) {
 (defn next-file [src: ^File_Source] -> [path: int ok: bool]
   (return 0 false))
 
-(defiter files [] -> File_Source yields string
+(defiter files [] -> File_Source :yield string
   :next next-file
   (open-files))
 
@@ -8915,7 +8915,7 @@ reject_defiter_dispose_return_value :: proc(t: ^testing.T) {
 (defn dispose-files [src: ^File_Source] -> int
   0)
 
-(defiter files [] -> File_Source yields string
+(defiter files [] -> File_Source :yield string
   :next next-file
   :dispose dispose-files
   (open-files))
@@ -9795,7 +9795,7 @@ compile_defiter_transform_inline_fn_callbacks :: proc(t: ^testing.T) {
       (return value true))
     (return 0 false)))
 
-(defiter nums [xs: []int] -> Num_Source yields int
+(defiter nums [xs: []int] -> Num_Source :yield int
   :next next-num
   (Num_Source {xs: xs idx: 0}))
 

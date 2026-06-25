@@ -20,7 +20,7 @@
 (defn dispose-log-lines [src: ^Log_Source]
   (set! src.disposed? true))
 
-(defiter log-lines [lines: []string] -> Log_Source yields string
+(defiter log-lines [lines: []string] -> Log_Source :yield string
   :next next-log-line
   :dispose dispose-log-lines
   (open-log-lines lines))

@@ -80,7 +80,7 @@ if ! grep -q 'iterator log-lines' "$tmp_dir/doc.txt"; then
     cat "$tmp_dir/doc.txt" >&2
     exit 1
 fi
-if ! grep -q '(log-lines \[lines: \[\]string\] -> Log_Source yields string)' "$tmp_dir/doc.txt"; then
+if ! grep -q '(log-lines \[lines: \[\]string\] -> Log_Source :yield string)' "$tmp_dir/doc.txt"; then
     printf 'failed: doc output did not include iterator signature\n' >&2
     cat "$tmp_dir/doc.txt" >&2
     exit 1

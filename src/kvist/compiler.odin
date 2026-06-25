@@ -1912,10 +1912,12 @@ rewrite_proc_like_top_form :: proc(top: CST_Top_Form, locals: []string, aliases:
                 append(&rewritten.form.items, rewritten_type_item)
             }
             if (decl_head_name(form) == "defiter" || decl_head_name(form) == "defiter-") &&
-               next_i < len(form.items) && is_symbol(form.items[next_i], "yields") {
+               next_i < len(form.items) &&
+               form.items[next_i].kind == .Keyword &&
+               form.items[next_i].text == ":yield" {
                 append(&rewritten.form.items, form.items[next_i])
                 if next_i+1 >= len(form.items) {
-                    return CST_Top_Form{}, Compile_Error{message = "missing item type after 'yields'", span = form.items[next_i].span}, false
+                    return CST_Top_Form{}, Compile_Error{message = "missing item type after ':yield'", span = form.items[next_i].span}, false
                 }
                 _, next_item_i, err_item_type, ok_item_type := parse_type_text_from_forms(form.items[:], next_i+1)
                 if !ok_item_type {

@@ -1600,7 +1600,7 @@ symbols_source_signature :: proc(name: string, decl: Source_Decl) -> string {
         }
         fmt.sbprintf(&builder, "%s: %s", param.name, param.ty)
     }
-    fmt.sbprintf(&builder, "] -> %s yields %s)", decl.state_ty, decl.item_ty)
+    fmt.sbprintf(&builder, "] -> %s :yield %s)", decl.state_ty, decl.item_ty)
     return strings.to_string(builder)
 }
 

@@ -196,7 +196,7 @@ header says what the opener returns and what `:next` yields:
       (return line true))
     (return "" false)))
 
-(defiter log-lines [lines: []string] -> Log_Source yields string
+(defiter log-lines [lines: []string] -> Log_Source :yield string
   :next next-log-line
   (Log_Source {lines: lines index: 0}))
 

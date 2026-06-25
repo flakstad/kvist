@@ -180,8 +180,8 @@ symbolic data in otherwise Odin-shaped code:
 ```
 
 Kvist still uses specific keyword literals positionally in some forms. For
-example, `:defer`, `:errdefer`, `:using`, `:or-return`, `:next`, `:dispose`,
-and `:else` act as markers in those syntactic slots.
+example, `:defer`, `:errdefer`, `:using`, `:or-return`, `:yield`, `:next`,
+`:dispose`, and `:else` act as markers in those syntactic slots.
 
 ### Imports And Exports
 
@@ -608,7 +608,7 @@ package-private split at top level:
 (deftransform- internal-transform
   (comp (map normalize)))
 
-(defiter- internal-source [] -> Source_State yields int
+(defiter- internal-source [] -> Source_State :yield int
   :next next-source-item
   (open-source))
 
@@ -2029,7 +2029,7 @@ generated function, and the item type yielded by `:next`.
 (defn dispose-files [src: ^File_Source]
   (set! src.index 0))
 
-(defiter files [items: []string] -> File_Source yields string
+(defiter files [items: []string] -> File_Source :yield string
   :next next-file
   :dispose dispose-files
   (File_Source {items: items index: 0}))

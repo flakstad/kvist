@@ -28,7 +28,7 @@
 (defn path-length [path: string] -> int
   (count path))
 
-(defiter files [items: []string] -> File_Source yields string
+(defiter files [items: []string] -> File_Source :yield string
   :next next-file
   :dispose dispose-files
   (open-files items))

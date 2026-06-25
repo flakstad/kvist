@@ -74,7 +74,7 @@ example:
 
 ```text
 kind	name	line	column	detail	signature	doc	file
-iterator	log-lines	23	10		(log-lines [lines: []string] -> Log_Source yields string)		examples/collections/log-source.kvist
+iterator	log-lines	23	10		(log-lines [lines: []string] -> Log_Source :yield string)		examples/collections/log-source.kvist
 ```
 
 `doc` renders the same data for humans:
@@ -85,7 +85,7 @@ kvist doc examples/collections/log-source.kvist log-lines
 
 ```text
 iterator log-lines
-(log-lines [lines: []string] -> Log_Source yields string)
+(log-lines [lines: []string] -> Log_Source :yield string)
 examples/collections/log-source.kvist:23
 ```
 

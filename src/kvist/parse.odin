@@ -1123,7 +1123,7 @@ parse_proc_decl :: proc(form: CST_Form) -> (decl: Proc_Decl, err: Compile_Error,
 
 parse_source_decl :: proc(form: CST_Form) -> (decl: Source_Decl, err: Compile_Error, ok: bool) {
     if len(form.items) < 8 {
-        return decl, Compile_Error{message = "defiter expects name, params, -> state type, yields item type, :next, optional :dispose, and body", span = form.span}, false
+        return decl, Compile_Error{message = "defiter expects name, params, -> state type, :yield item type, :next, optional :dispose, and body", span = form.span}, false
     }
     name_form := form.items[1]
     if name_form.kind != .Symbol {
@@ -1141,10 +1141,10 @@ parse_source_decl :: proc(form: CST_Form) -> (decl: Source_Decl, err: Compile_Er
         return decl, err_state_ty, false
     }
     if next_i >= len(form.items) {
-        return decl, Compile_Error{message = "defiter expects yields item type after state type", span = form.span}, false
+        return decl, Compile_Error{message = "defiter expects :yield item type after state type", span = form.span}, false
     }
-    if !is_symbol(form.items[next_i], "yields") {
-        return decl, Compile_Error{message = "defiter expects yields item type after state type", span = form.items[next_i].span}, false
+    if form.items[next_i].kind != .Keyword || form.items[next_i].text != ":yield" {
+        return decl, Compile_Error{message = "defiter expects :yield item type after state type", span = form.items[next_i].span}, false
     }
     item_ty, body_i, err_item_ty, ok_item_ty := parse_type_text_from_forms(form.items[:], next_i+1)
     if !ok_item_ty {
