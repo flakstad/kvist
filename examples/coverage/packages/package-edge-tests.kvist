@@ -126,7 +126,13 @@
         joined-empty (str.join empty-parts ",") :defer
         replaced-once (str.replace "a-a-a" "-" "_" 1) :defer
         lowered (str.lower "MiXeD") :defer
-        uppered (str.upper "MiXeD") :defer]
+        uppered (str.upper "MiXeD") :defer
+        builder (str.builder)
+        unescaped (str.unescape "a\\nb\\t\\\"c") :defer
+        unknown-escape (str.unescape "a\\qb") :defer]
+    (defer (str.destroy! (addr builder)))
+    (str.write! (addr builder) "hi")
+    (str.write! (addr builder) "!")
     (t.is (= (str.count "") 0))
     (t.is (= (str.get "abc" 1) 98))
     (t.is (= (str.slice "abc" 1 1) ""))
@@ -142,7 +148,11 @@
     (t.is (str.starts-with? "abc" ""))
     (t.is (str.ends-with? "abc" ""))
     (t.is (= lowered "mixed"))
-    (t.is (= uppered "MIXED"))))
+    (t.is (= uppered "MIXED"))
+    (let [built (str.finish (addr builder)) :defer]
+      (t.is (= built "hi!")))
+    (t.is (= unescaped "a\nb\t\"c"))
+    (t.is (= unknown-escape "a\\qb"))))
 
 (t.deftest soa-package-edge-cases
   (let [fields (soa.fields 'Profile)

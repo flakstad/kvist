@@ -70,6 +70,7 @@ work:
 (arr.sort-by! .field xs)
 (arr.map! f xs)
 (arr.map-indexed! f xs)
+(arr.fill! xs value)
 (arr.filter! pred xs)
 (arr.filter! .field xs)
 (arr.remove! pred xs)
@@ -186,10 +187,10 @@ work:
 Cross-family collection helpers live in `kvist:core`: `count`,
 `empty?`, `get`, `slice`, `contains?`, `update!`, `assoc`, `update`, and
 `delete!`. Other collection operations usually use explicit package names such
-as `arr.*`, `map.*`, `str.*`, or `set.*`. Explicit `:refer` imports such as
-`(import "kvist:arr" :refer [count map filter reduce split-at keep first partition partition-all drop drop-last take-nth interpose interleave reverse sort sort-by range repeat repeatedly iterate cycle])` may also use public package helpers bare, such as
-`map`, `filter`, and `reduce`, but package-qualified calls are clearer in
-introductory code because they keep the eager array helper model visible.
+as `arr.*`, `map.*`, `str.*`, or `set.*`. Explicit `:refer` imports may also
+use public package helpers bare, such as `map`, `filter`, `reduce`, and
+`fill!`, but package-qualified calls are clearer in introductory code because
+they keep the eager array helper model visible.
 
 Macro-time helpers with similar names operate on source forms; see
 [MACROS.md](MACROS.md) for that smaller compile-time surface.
@@ -255,7 +256,10 @@ Builder helpers such as `arr.map`, `arr.filter`, `arr.remove`,
 `arr.cycle`, and `arr.take-nth`
 return owned dynamic arrays. `into` is for explicit dynamic-array
 result types, for example `(arr.into [dynamic]int xs)`. Use `arr.into!` to
-append into an existing dynamic array. `arr.distinct` and
+append into an existing dynamic array. When `arr.range`, `arr.repeat`,
+`arr.repeatedly`, `arr.iterate`, `arr.cycle`, or `arr.take-nth` is used
+directly as an ordinary `for` source, the compiler emits a counted loop instead
+of building the owned dynamic array. `arr.distinct` and
 `arr.distinct-by` also
 return owned dynamic arrays and use a temporary `map[key]bool` internally, so
 the value or key must be valid as an Odin map key. `map.zip`, `arr.index-by`,
@@ -297,13 +301,11 @@ Edge behavior is intentionally boring:
 Captured callbacks are supported for the ordinary package helper path when the
 callback is non-escaping. This includes helpers such as `arr.map-indexed`,
 `arr.reduce`, `arr.reduce-indexed`, `arr.take-while`, `arr.drop-while`,
-`arr.find`, `arr.find-indexed`, `arr.some?`, `arr.every?`, `arr.min-by`, and
-`arr.max-by`.
+`arr.find`, `arr.find-indexed`, `arr.some?`, `arr.every?`, `arr.min-by`,
+`arr.max-by`, `arr.sort-by`, and `arr.sort-by!`.
 
 `sort` and `sort-by` copy before sorting. They do not mutate the input
 collection, and their result is owned.
-Captured callbacks are not supported for `sort-by`; use a named
-non-capturing key function or an explicit context-aware sort helper.
 
 `shuffle` also copies before shuffling. It takes an explicit picker function
 instead of hiding a random generator:
@@ -320,8 +322,8 @@ and lets user code choose whether the random source is deterministic, seeded,
 or the current Odin context generator.
 
 Bang helpers are explicitly mutating statement forms. `reverse!`, `sort!`,
-`sort-by!`, `map!`, and `map-indexed!` mutate the passed slice or dynamic array
-in place and do not return an owned value. `filter!`, `remove!`, and `keep!`
+`sort-by!`, `map!`, `map-indexed!`, and `fill!` mutate the passed slice or
+dynamic array in place and do not return an owned value. `filter!`, `remove!`, and `keep!`
 resize the collection, so they require an owned dynamic array binding. `keep!`
 uses an Odin-shaped callback returning `(value, ok)` and writes kept values back
 into the same dynamic array; the value type must match the array element type.
@@ -335,12 +337,15 @@ String helpers stay close to Odin `core:strings`. `kvist:str` is a shipped
 `.kvist` package. `str.count`, `str.get`, `str.slice`, `str.contains?`,
 `str.split`, `str.join`, `str.trim`, `str.trim-prefix`, `str.trim-suffix`,
 `str.starts-with?`, `str.ends-with?`, `str.index-of`, `str.last-index-of`,
-`str.replace`, `str.lower`, and `str.upper` lower to direct indexing,
-slicing, or `strings.*` calls.
+`str.replace`, `str.lower`, `str.upper`, `str.builder`, `str.write!`,
+`str.finish`, `str.destroy!`, and `str.unescape` lower to direct indexing,
+slicing, builder, or `strings.*` calls.
 `str.split` returns an owned `[]string` of string slices. `str.join`,
-`str.replace`, `str.lower`, and `str.upper` return owned strings and should be
-deleted or returned like other owned values. Trimming and slicing helpers return
-borrowed string views.
+`str.replace`, `str.lower`, `str.upper`, and `str.unescape` return owned
+strings and should be deleted or returned like other owned values. Trimming and
+slicing helpers return borrowed string views. `str.finish` clones the current
+builder contents into an owned string; destroy the builder separately with
+`str.destroy!`.
 
 Set helpers stay explicit about the underlying Odin representation: a set is
 `map[T]struct{}` in the emitted code. `kvist:set` is a shipped `.kvist` package.
@@ -369,9 +374,9 @@ and `arr.max-by`, and the ordinary function-predicate path for
 `arr.take-while`, `arr.drop-while`, `arr.find`, `arr.find-indexed`,
 `arr.some?`, and `arr.every?` via `#force_inline` loops. Constructors like `arr.empty`,
 `arr.dynamic`, `arr.fixed`, mutators like `arr.push!`, `arr.map!`,
-`arr.filter!`, `arr.remove!`, `arr.keep!`, ordered/unordered indexed removal,
-and the wider grouping,
-partitioning, and sorting helper surface still lower through a smaller
+`arr.fill!`, `arr.filter!`, `arr.remove!`, `arr.keep!`, ordered/unordered
+indexed removal, and the wider grouping, partitioning, and sorting helper
+surface still lower through a smaller
 intrinsic substrate where that keeps codegen and allocation behavior direct.
 
 Dot selectors are field selectors in supported higher-order helper positions.
@@ -425,9 +430,10 @@ For hot paths, prefer one of these shapes:
 
 - use slice-view helpers such as `take`, `drop`, `butlast`, `drop-last`,
   `rest`, and `split-at` when a borrowed view is enough;
-- use bang helpers such as `arr.sort!`, `arr.reverse!`, `arr.shuffle!`, `arr.map!`, `arr.filter!`,
-  `arr.remove!`, `arr.keep!`, `arr.into!`, and `map.merge!` when mutating existing storage is the
-  right Odin choice;
+- use bang helpers such as `arr.sort!`, `arr.reverse!`, `arr.shuffle!`,
+  `arr.map!`, `arr.fill!`, `arr.filter!`, `arr.remove!`, `arr.keep!`,
+  `arr.into!`, and `map.merge!` when mutating existing storage is the right
+  Odin choice;
 - write an explicit `for` loop when one pass and no intermediate collection is
   needed;
 - avoid `arr.group-by` when only aggregate totals are needed. Use `arr.count-by` or
@@ -626,7 +632,7 @@ Sequence helpers need an explicit ownership story:
   `arr.sort-by`, `arr.take-nth`, `arr.remove-ordered-at`, and
   `arr.remove-unordered-at` allocate and return owned dynamic arrays.
 - `arr.fixed` returns an Odin fixed array value, not owned dynamic storage.
-- `arr.push!`, `arr.into!`, `arr.map!`, `arr.map-indexed!`, `arr.filter!`,
+- `arr.push!`, `arr.into!`, `arr.map!`, `arr.map-indexed!`, `arr.fill!`, `arr.filter!`,
   `arr.remove!`, `arr.keep!`, `arr.reverse!`, `arr.shuffle!`, `arr.sort!`,
   `arr.sort-by!`, `arr.remove-ordered-at!`, and `arr.remove-unordered-at!`
   mutate existing array storage and do not return owned replacement arrays.

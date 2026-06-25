@@ -208,6 +208,21 @@
   (for [x i xs]
     (set! xs[i] (f i x))))
 
+(defmacro fill!
+  "Replace every element of `xs` with `value`.
+
+  This mutates the passed slice or dynamic array in place and does not change
+  its length."
+  [xs value]
+  (quasiquote
+    (fill!-impl (core.slice (unquote xs) 0) (unquote value))))
+
+(defn- fill!-impl
+  "Implementation helper for `arr.fill!`."
+  [xs: []$T, value: T] #force_inline
+  (for [_ i xs]
+    (set! xs[i] value)))
+
 (defmacro filter!
   "Remove elements from `xs` in place when `pred` is false.
 

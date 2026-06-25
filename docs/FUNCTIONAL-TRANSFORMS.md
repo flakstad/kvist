@@ -266,13 +266,27 @@ When a transform itself should consume both key and value, opt in with
   (map.entries lookup))
 ```
 
-`arr.range` and `arr.repeat` are normally eager owned array helpers. In
-transform-source position, the compiler lowers them directly to counted loops
-instead:
+`arr.range`, `arr.repeat`, `arr.repeatedly`, `arr.iterate`, `arr.cycle`, and
+`arr.take-nth` are normally eager owned array helpers. In transform-source
+position, the compiler lowers `arr.range` and `arr.repeat` directly to counted
+loops instead. All six lower this way when used directly as ordinary `for`
+sources:
 
 ```clojure
 (transduce (filter even?) max 0 (arr.range 0 100))
 (transduce (map inc) + 0 (arr.repeat 4 2))
+(for [x (arr.range 10)]
+  (println x))
+(for [x (arr.repeat 4 2)]
+  (println x))
+(for [x (arr.repeatedly 4 next-value)]
+  (println x))
+(for [x (arr.iterate 4 double 1)]
+  (println x))
+(for [x (arr.cycle 6 xs)]
+  (println x))
+(for [x (arr.take-nth 2 xs)]
+  (println x))
 (for [x (arr.range 10 0 -1) :transform (map inc)]
   (println x))
 ```
@@ -286,12 +300,17 @@ instead:
 | maps with keys | `for [key value map :transform xf]` | direct map loop, transform values, bind key separately |
 | `map.entries` | `into`, `arr.into!`, `transduce`, `for :transform` | direct map loop over explicit `(map.entry K V)` values |
 | `defiter` calls | `into`, `arr.into!`, `transduce`, `for :transform` | direct `next` loop with `:dispose` cleanup when present |
-| `arr.range` | `into`, `arr.into!`, `transduce`, `for :transform` | direct counted loop, no range array allocation |
-| `arr.repeat` | `into`, `arr.into!`, `transduce`, `for :transform` | direct counted loop over a cached repeated value, no repeat array allocation |
+| `arr.range` | ordinary `for`, `into`, `arr.into!`, `transduce`, `for :transform` | direct counted loop, no range array allocation |
+| `arr.repeat` | ordinary `for`, `into`, `arr.into!`, `transduce`, `for :transform` | direct counted loop over a cached repeated value, no repeat array allocation |
+| `arr.repeatedly` | ordinary `for` | direct counted loop that calls the producer once per iteration, no result array allocation |
+| `arr.iterate` | ordinary `for` | direct counted loop over the current value, no result array allocation |
+| `arr.cycle` | ordinary `for` | direct counted loop over the input slice, no result array allocation |
+| `arr.take-nth` | ordinary `for` | direct strided loop over the input slice, no result array allocation |
 
 Ordinary calls still keep their ordinary semantics: `(arr.range ...)` and
-`(arr.repeat ...)` outside transform-source position return owned dynamic
-arrays.
+`(arr.repeat ...)` outside these source positions, and `(arr.repeatedly ...)`
+`(arr.iterate ...)`, `(arr.cycle ...)`, or `(arr.take-nth ...)` outside
+ordinary `for` source position, return owned dynamic arrays.
 
 ### Map Entries
 

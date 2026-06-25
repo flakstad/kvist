@@ -2144,8 +2144,10 @@ The current transform surface is intentionally small:
   obvious to the lowering
 - map inputs transform values by default; `(map.entries m)` transforms explicit
   `(map.entry K V)` values with `key` and `value` fields
-- `arr.range` and `arr.repeat` inputs in transform positions lower to direct
-  loops instead of allocating helper arrays
+- `arr.range`, `arr.repeat`, `arr.repeatedly`, `arr.iterate`, `arr.cycle`,
+  and `arr.take-nth` inputs used directly as ordinary `for` sources lower to
+  direct loops instead of allocating helper arrays; `arr.range` and
+  `arr.repeat` also get this treatment in transform positions
 
 See [FUNCTIONAL-TRANSFORMS.md](FUNCTIONAL-TRANSFORMS.md) for limits and
 lowering.

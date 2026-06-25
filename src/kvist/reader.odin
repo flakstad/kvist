@@ -121,10 +121,14 @@ scan_compact_simd_type :: proc(source: string, start: int) -> (end: int, ok: boo
 
 scan_compact_bit_set_type :: proc(source: string, start: int) -> (end: int, ok: bool) {
     prefix := "bit_set["
-    if start+len(prefix) > len(source) || source[start:start+len(prefix)] != prefix {
+    body_start := start
+    if source[start] == '^' {
+        body_start = start + 1
+    }
+    if body_start+len(prefix) > len(source) || source[body_start:body_start+len(prefix)] != prefix {
         return start, false
     }
-    i := start + len(prefix)
+    i := body_start + len(prefix)
     for i < len(source) && source[i] != ']' {
         if source[i] == '(' || source[i] == ')' || source[i] == '{' || source[i] == '}' {
             return start, false
@@ -142,10 +146,14 @@ scan_compact_bit_set_type :: proc(source: string, start: int) -> (end: int, ok: 
 }
 
 scan_compact_map_type :: proc(source: string, start: int) -> (end: int, ok: bool) {
-    if start+4 > len(source) || source[start:start+4] != "map[" {
+    body_start := start
+    if source[start] == '^' {
+        body_start = start + 1
+    }
+    if body_start+4 > len(source) || source[body_start:body_start+4] != "map[" {
         return start, false
     }
-    i := start + 4
+    i := body_start + 4
     for i < len(source) && source[i] != ']' {
         if is_whitespace(source[i]) || source[i] == '(' || source[i] == ')' || source[i] == '{' || source[i] == '}' || source[i] == ',' || source[i] == ';' {
             return start, false
@@ -167,10 +175,14 @@ scan_compact_map_type :: proc(source: string, start: int) -> (end: int, ok: bool
 
 scan_compact_matrix_type :: proc(source: string, start: int) -> (end: int, ok: bool) {
     prefix := "matrix["
-    if start+len(prefix) > len(source) || source[start:start+len(prefix)] != prefix {
+    body_start := start
+    if source[start] == '^' {
+        body_start = start + 1
+    }
+    if body_start+len(prefix) > len(source) || source[body_start:body_start+len(prefix)] != prefix {
         return start, false
     }
-    i := start + len(prefix)
+    i := body_start + len(prefix)
     for i < len(source) && source[i] != ']' {
         if source[i] == '(' || source[i] == ')' || source[i] == '{' || source[i] == '}' || source[i] == ';' {
             return start, false
@@ -191,10 +203,14 @@ scan_compact_matrix_type :: proc(source: string, start: int) -> (end: int, ok: b
 }
 
 scan_compact_set_type :: proc(source: string, start: int) -> (end: int, ok: bool) {
-    if start+4 > len(source) || source[start:start+4] != "set[" {
+    body_start := start
+    if source[start] == '^' {
+        body_start = start + 1
+    }
+    if body_start+4 > len(source) || source[body_start:body_start+4] != "set[" {
         return start, false
     }
-    i := start + 4
+    i := body_start + 4
     for i < len(source) && source[i] != ']' {
         if is_whitespace(source[i]) || source[i] == '(' || source[i] == ')' || source[i] == '{' || source[i] == '}' || source[i] == ',' || source[i] == ';' {
             return start, false
@@ -291,7 +307,7 @@ tokenize_with_origin :: proc(source: string, source_kind: Source_Kind) -> (token
                 continue
             }
         }
-        if ch == 'b' {
+        if ch == 'b' || ch == '^' {
             end, ok_type := scan_compact_bit_set_type(source, start)
             if ok_type {
                 append(&tokens, make_token(.Symbol, source[start:end], start, end, source_kind))
@@ -299,7 +315,7 @@ tokenize_with_origin :: proc(source: string, source_kind: Source_Kind) -> (token
                 continue
             }
         }
-        if ch == 'm' {
+        if ch == 'm' || ch == '^' {
             matrix_end, ok_matrix_type := scan_compact_matrix_type(source, start)
             if ok_matrix_type {
                 append(&tokens, make_token(.Symbol, source[start:matrix_end], start, matrix_end, source_kind))
@@ -313,7 +329,7 @@ tokenize_with_origin :: proc(source: string, source_kind: Source_Kind) -> (token
                 continue
             }
         }
-        if ch == 's' {
+        if ch == 's' || ch == '^' {
             end, ok_type := scan_compact_set_type(source, start)
             if ok_type {
                 append(&tokens, make_token(.Symbol, source[start:end], start, end, source_kind))

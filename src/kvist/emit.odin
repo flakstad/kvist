@@ -135,7 +135,9 @@ Emitter_Features :: struct {
     core_keep_in_place: bool,
     core_keep_in_place_capture_max: int,
     core_sort_by:     bool,
+    core_sort_by_capture_max: int,
     core_sort_by_in_place: bool,
+    core_sort_by_in_place_capture_max: int,
     core_tap:         bool,
     core_strings:     bool,
     core_fmt:         bool,
@@ -332,6 +334,8 @@ deprecated_builtin_collection_head :: proc(head: string) -> (canonical: string, 
         return "arr/map!", true
     case "map-indexed!":
         return "arr/map-indexed!", true
+    case "fill!":
+        return "arr/fill!", true
     case "filter!":
         return "arr/filter!", true
     case "remove!":
@@ -610,9 +614,21 @@ mark_core_sort_by :: proc(e: ^Emitter) {
     }
 }
 
+mark_core_sort_by_capture :: proc(e: ^Emitter, capture_count: int) {
+    if e.features != nil && capture_count > e.features.core_sort_by_capture_max {
+        e.features.core_sort_by_capture_max = capture_count
+    }
+}
+
 mark_core_sort_by_in_place :: proc(e: ^Emitter) {
     if e.features != nil {
         e.features.core_sort_by_in_place = true
+    }
+}
+
+mark_core_sort_by_in_place_capture :: proc(e: ^Emitter, capture_count: int) {
+    if e.features != nil && capture_count > e.features.core_sort_by_in_place_capture_max {
+        e.features.core_sort_by_in_place_capture_max = capture_count
     }
 }
 
@@ -6108,8 +6124,26 @@ type_text_is_map :: proc(text: string) -> bool {
     return len(text) >= 4 && text[:4] == "map["
 }
 
+type_text_is_pointer_to_map :: proc(text: string) -> bool {
+    return len(text) >= 5 && text[0] == '^' && type_text_is_map(text[1:])
+}
+
 type_text_is_set :: proc(text: string) -> bool {
     return len(text) >= 4 && text[:4] == "set["
+}
+
+map_index_target_text :: proc(e: ^Emitter, form: CST_Form, emitted: string) -> string {
+    if ty, ok_ty := obvious_form_type(e, form); ok_ty && type_text_is_pointer_to_map(ty) {
+        return deref_expr_text(emitted)
+    }
+    return emitted
+}
+
+map_mutation_target_text :: proc(e: ^Emitter, form: CST_Form, emitted: string) -> string {
+    if ty, ok_ty := obvious_form_type(e, form); ok_ty && type_text_is_pointer_to_map(ty) {
+        return emitted
+    }
+    return address_of_expr_text(emitted)
 }
 
 type_text_is_owned_result :: proc(text: string) -> bool {
@@ -7494,7 +7528,338 @@ emit_for_in_loop_body :: proc(e: ^Emitter, coll_form: CST_Form, coll_text, first
     return {}, true
 }
 
+emit_for_range_loop :: proc(e: ^Emitter, coll_form: CST_Form, first_name, second_name: string, body: []CST_Form) -> (Compile_Error, bool) {
+    spec, err_spec, ok_spec := transform_range_source(e, coll_form)
+    if !ok_spec {
+        return err_spec, false
+    }
+
+    range_start := loop_temp_name(e, "range_start")
+    range_end := loop_temp_name(e, "range_end")
+    range_step := loop_temp_name(e, "range_step")
+    range_item := loop_temp_name(e, "range_item")
+    range_index := ""
+    if second_name != "" {
+        range_index = loop_temp_name(e, "range_index")
+    }
+
+    emit_line(e, "{")
+    e.indent += 1
+    push_local_type_scope(e)
+    emit_line(e, fmt.tprintf("%s := %s", range_start, spec.start_text))
+    emit_line(e, fmt.tprintf("%s := %s", range_end, spec.end_text))
+    emit_line(e, fmt.tprintf("%s := %s", range_step, spec.step_text))
+    if range_index != "" {
+        emit_line(e, fmt.tprintf("%s := 0", range_index))
+    }
+    emit_transform_range_loop_open(&e.builder, e.indent, range_item, range_start, range_end, range_step)
+    e.indent += 1
+    push_local_type_scope(e)
+    if second_name != "" {
+        emit_line(e, fmt.tprintf("%s := %s", first_name, range_item))
+        emit_line(e, fmt.tprintf("%s := %s", second_name, range_index))
+    } else {
+        emit_line(e, fmt.tprintf("%s := %s", first_name, range_item))
+    }
+    err_body, ok_body := emit_body_forms(e, body, Return_Spec{kind = .None})
+    pop_local_type_scope(e)
+    if !ok_body {
+        e.indent -= 1
+        pop_local_type_scope(e)
+        e.indent -= 1
+        return err_body, false
+    }
+    if range_index != "" {
+        emit_line(e, fmt.tprintf("%s += 1", range_index))
+    }
+    emit_line(e, fmt.tprintf("%s += %s", range_item, range_step))
+    e.indent -= 1
+    emit_line(e, "}")
+    pop_local_type_scope(e)
+    e.indent -= 1
+    emit_line(e, "}")
+    return {}, true
+}
+
+emit_for_repeat_loop :: proc(e: ^Emitter, coll_form: CST_Form, first_name, second_name: string, body: []CST_Form) -> (Compile_Error, bool) {
+    if len(coll_form.items) != 3 {
+        return Compile_Error{message = "arr.repeat expects count and value", span = coll_form.span}, false
+    }
+
+    count_text, err_count, ok_count := emit_expr_for_expected_type(e, coll_form.items[1], "int")
+    if !ok_count {
+        return err_count, false
+    }
+    value_text, err_value, ok_value := emit_expr(e, coll_form.items[2])
+    if !ok_value {
+        return err_value, false
+    }
+
+    repeat_count := loop_temp_name(e, "repeat_count")
+    repeat_value := loop_temp_name(e, "repeat_value")
+    repeat_index := loop_temp_name(e, "repeat_index")
+
+    emit_line(e, "{")
+    e.indent += 1
+    push_local_type_scope(e)
+    emit_line(e, fmt.tprintf("%s := %s", repeat_count, count_text))
+    emit_line(e, fmt.tprintf("%s := %s", repeat_value, value_text))
+    emit_line(e, fmt.tprintf("%s := 0", repeat_index))
+    emit_line(e, fmt.tprintf("for %s < %s %s", repeat_index, repeat_count, "{"))
+    e.indent += 1
+    push_local_type_scope(e)
+    emit_line(e, fmt.tprintf("%s := %s", first_name, repeat_value))
+    if second_name != "" {
+        emit_line(e, fmt.tprintf("%s := %s", second_name, repeat_index))
+    }
+    err_body, ok_body := emit_body_forms(e, body, Return_Spec{kind = .None})
+    pop_local_type_scope(e)
+    if !ok_body {
+        e.indent -= 1
+        pop_local_type_scope(e)
+        e.indent -= 1
+        return err_body, false
+    }
+    emit_line(e, fmt.tprintf("%s += 1", repeat_index))
+    e.indent -= 1
+    emit_line(e, "}")
+    pop_local_type_scope(e)
+    e.indent -= 1
+    emit_line(e, "}")
+    return {}, true
+}
+
+emit_for_repeatedly_loop :: proc(e: ^Emitter, coll_form: CST_Form, first_name, second_name: string, body: []CST_Form) -> (Compile_Error, bool) {
+    if len(coll_form.items) != 3 {
+        return Compile_Error{message = "arr.repeatedly expects count and function", span = coll_form.span}, false
+    }
+
+    count_text, err_count, ok_count := emit_expr_for_expected_type(e, coll_form.items[1], "int")
+    if !ok_count {
+        return err_count, false
+    }
+    producer_text, err_producer, ok_producer := emit_expr(e, coll_form.items[2])
+    if !ok_producer {
+        return err_producer, false
+    }
+
+    repeated_count := loop_temp_name(e, "repeatedly_count")
+    repeated_producer := loop_temp_name(e, "repeatedly_producer")
+    repeated_index := loop_temp_name(e, "repeatedly_index")
+
+    emit_line(e, "{")
+    e.indent += 1
+    push_local_type_scope(e)
+    emit_line(e, fmt.tprintf("%s := %s", repeated_count, count_text))
+    emit_line(e, fmt.tprintf("%s := %s", repeated_producer, producer_text))
+    emit_line(e, fmt.tprintf("%s := 0", repeated_index))
+    emit_line(e, fmt.tprintf("for %s < %s %s", repeated_index, repeated_count, "{"))
+    e.indent += 1
+    push_local_type_scope(e)
+    emit_line(e, fmt.tprintf("%s := %s", first_name, emit_call_text(repeated_producer, []string{})))
+    if second_name != "" {
+        emit_line(e, fmt.tprintf("%s := %s", second_name, repeated_index))
+    }
+    err_body, ok_body := emit_body_forms(e, body, Return_Spec{kind = .None})
+    pop_local_type_scope(e)
+    if !ok_body {
+        e.indent -= 1
+        pop_local_type_scope(e)
+        e.indent -= 1
+        return err_body, false
+    }
+    emit_line(e, fmt.tprintf("%s += 1", repeated_index))
+    e.indent -= 1
+    emit_line(e, "}")
+    pop_local_type_scope(e)
+    e.indent -= 1
+    emit_line(e, "}")
+    return {}, true
+}
+
+emit_for_iterate_loop :: proc(e: ^Emitter, coll_form: CST_Form, first_name, second_name: string, body: []CST_Form) -> (Compile_Error, bool) {
+    if len(coll_form.items) != 4 {
+        return Compile_Error{message = "arr.iterate expects count, function, and initial value", span = coll_form.span}, false
+    }
+
+    count_text, err_count, ok_count := emit_expr_for_expected_type(e, coll_form.items[1], "int")
+    if !ok_count {
+        return err_count, false
+    }
+    step_text, err_step, ok_step := emit_expr(e, coll_form.items[2])
+    if !ok_step {
+        return err_step, false
+    }
+    init_text, err_init, ok_init := emit_expr(e, coll_form.items[3])
+    if !ok_init {
+        return err_init, false
+    }
+
+    iterate_count := loop_temp_name(e, "iterate_count")
+    iterate_step := loop_temp_name(e, "iterate_step")
+    iterate_current := loop_temp_name(e, "iterate_current")
+    iterate_index := loop_temp_name(e, "iterate_index")
+
+    emit_line(e, "{")
+    e.indent += 1
+    push_local_type_scope(e)
+    emit_line(e, fmt.tprintf("%s := %s", iterate_count, count_text))
+    emit_line(e, fmt.tprintf("%s := %s", iterate_step, step_text))
+    emit_line(e, fmt.tprintf("%s := %s", iterate_current, init_text))
+    emit_line(e, fmt.tprintf("%s := 0", iterate_index))
+    emit_line(e, fmt.tprintf("for %s < %s %s", iterate_index, iterate_count, "{"))
+    e.indent += 1
+    push_local_type_scope(e)
+    emit_line(e, fmt.tprintf("%s := %s", first_name, iterate_current))
+    if second_name != "" {
+        emit_line(e, fmt.tprintf("%s := %s", second_name, iterate_index))
+    }
+    err_body, ok_body := emit_body_forms(e, body, Return_Spec{kind = .None})
+    pop_local_type_scope(e)
+    if !ok_body {
+        e.indent -= 1
+        pop_local_type_scope(e)
+        e.indent -= 1
+        return err_body, false
+    }
+    emit_line(e, fmt.tprintf("%s = %s", iterate_current, emit_call_text(iterate_step, []string{iterate_current})))
+    emit_line(e, fmt.tprintf("%s += 1", iterate_index))
+    e.indent -= 1
+    emit_line(e, "}")
+    pop_local_type_scope(e)
+    e.indent -= 1
+    emit_line(e, "}")
+    return {}, true
+}
+
+emit_for_cycle_loop :: proc(e: ^Emitter, coll_form: CST_Form, first_name, second_name: string, body: []CST_Form) -> (Compile_Error, bool) {
+    if len(coll_form.items) != 3 {
+        return Compile_Error{message = "arr.cycle expects count and collection", span = coll_form.span}, false
+    }
+
+    count_text, err_count, ok_count := emit_expr_for_expected_type(e, coll_form.items[1], "int")
+    if !ok_count {
+        return err_count, false
+    }
+    coll_text, err_coll, ok_coll := emit_expr(e, coll_form.items[2])
+    if !ok_coll {
+        return err_coll, false
+    }
+
+    cycle_count := loop_temp_name(e, "cycle_count")
+    cycle_source := loop_temp_name(e, "cycle_source")
+    cycle_size := loop_temp_name(e, "cycle_size")
+    cycle_index := loop_temp_name(e, "cycle_index")
+
+    emit_line(e, "{")
+    e.indent += 1
+    push_local_type_scope(e)
+    emit_line(e, fmt.tprintf("%s := %s", cycle_count, count_text))
+    emit_line(e, fmt.tprintf("%s := %s", cycle_source, slice_all_expr_text(coll_text)))
+    emit_line(e, fmt.tprintf("%s := len(%s)", cycle_size, cycle_source))
+    emit_line(e, fmt.tprintf("%s := 0", cycle_index))
+    emit_line(e, fmt.tprintf("for %s < %s && %s > 0 %s", cycle_index, cycle_count, cycle_size, "{"))
+    e.indent += 1
+    push_local_type_scope(e)
+    emit_line(e, fmt.tprintf("%s := %s[%s %% %s]", first_name, cycle_source, cycle_index, cycle_size))
+    if second_name != "" {
+        emit_line(e, fmt.tprintf("%s := %s", second_name, cycle_index))
+    }
+    err_body, ok_body := emit_body_forms(e, body, Return_Spec{kind = .None})
+    pop_local_type_scope(e)
+    if !ok_body {
+        e.indent -= 1
+        pop_local_type_scope(e)
+        e.indent -= 1
+        return err_body, false
+    }
+    emit_line(e, fmt.tprintf("%s += 1", cycle_index))
+    e.indent -= 1
+    emit_line(e, "}")
+    pop_local_type_scope(e)
+    e.indent -= 1
+    emit_line(e, "}")
+    return {}, true
+}
+
+emit_for_take_nth_loop :: proc(e: ^Emitter, coll_form: CST_Form, first_name, second_name: string, body: []CST_Form) -> (Compile_Error, bool) {
+    if len(coll_form.items) != 3 {
+        return Compile_Error{message = "arr.take-nth expects count and collection", span = coll_form.span}, false
+    }
+
+    step_text, err_step, ok_step := emit_expr_for_expected_type(e, coll_form.items[1], "int")
+    if !ok_step {
+        return err_step, false
+    }
+    coll_text, err_coll, ok_coll := emit_expr(e, coll_form.items[2])
+    if !ok_coll {
+        return err_coll, false
+    }
+
+    take_step := loop_temp_name(e, "take_nth_step")
+    take_source := loop_temp_name(e, "take_nth_source")
+    take_source_index := loop_temp_name(e, "take_nth_source_index")
+    take_result_index := ""
+    if second_name != "" {
+        take_result_index = loop_temp_name(e, "take_nth_index")
+    }
+
+    emit_line(e, "{")
+    e.indent += 1
+    push_local_type_scope(e)
+    emit_line(e, fmt.tprintf("%s := %s", take_step, step_text))
+    emit_line(e, fmt.tprintf("%s := %s", take_source, slice_all_expr_text(coll_text)))
+    emit_line(e, fmt.tprintf("%s := 0", take_source_index))
+    if take_result_index != "" {
+        emit_line(e, fmt.tprintf("%s := 0", take_result_index))
+    }
+    emit_line(e, fmt.tprintf("for %s > 0 && %s < len(%s) %s", take_step, take_source_index, take_source, "{"))
+    e.indent += 1
+    push_local_type_scope(e)
+    emit_line(e, fmt.tprintf("%s := %s[%s]", first_name, take_source, take_source_index))
+    if second_name != "" {
+        emit_line(e, fmt.tprintf("%s := %s", second_name, take_result_index))
+    }
+    err_body, ok_body := emit_body_forms(e, body, Return_Spec{kind = .None})
+    pop_local_type_scope(e)
+    if !ok_body {
+        e.indent -= 1
+        pop_local_type_scope(e)
+        e.indent -= 1
+        return err_body, false
+    }
+    emit_line(e, fmt.tprintf("%s += %s", take_source_index, take_step))
+    if take_result_index != "" {
+        emit_line(e, fmt.tprintf("%s += 1", take_result_index))
+    }
+    e.indent -= 1
+    emit_line(e, "}")
+    pop_local_type_scope(e)
+    e.indent -= 1
+    emit_line(e, "}")
+    return {}, true
+}
+
 emit_for_in_loop :: proc(e: ^Emitter, coll_form: CST_Form, first_name, second_name: string, body: []CST_Form) -> (Compile_Error, bool) {
+    if form_is_arr_range_call(coll_form) {
+        return emit_for_range_loop(e, coll_form, first_name, second_name, body)
+    }
+    if form_is_arr_repeat_call(coll_form) {
+        return emit_for_repeat_loop(e, coll_form, first_name, second_name, body)
+    }
+    if form_is_arr_repeatedly_call(coll_form) {
+        return emit_for_repeatedly_loop(e, coll_form, first_name, second_name, body)
+    }
+    if form_is_arr_iterate_call(coll_form) {
+        return emit_for_iterate_loop(e, coll_form, first_name, second_name, body)
+    }
+    if form_is_arr_cycle_call(coll_form) {
+        return emit_for_cycle_loop(e, coll_form, first_name, second_name, body)
+    }
+    if form_is_arr_take_nth_call(coll_form) {
+        return emit_for_take_nth_loop(e, coll_form, first_name, second_name, body)
+    }
+
     if !loop_collection_needs_temp_binding(coll_form) {
         err_owned, bad_owned := owned_result_usage_error(coll_form, false)
         if bad_owned {
@@ -8031,9 +8396,25 @@ emit_sort_by_callback_call :: proc(e: ^Emitter, callback: CST_Form, collection: 
         ), {}, true
     }
 
+    if callback.kind == .Symbol {
+        if ctx, ok_context := lookup_callback_context(e, map_name(callback.text)); ok_context {
+            mark_core_sort_by_capture(e, len(ctx.capture_names))
+            return capture_helper_call_text("kvist_sort_by", map_name(callback.text), ctx.capture_names[:], collection), {}, true
+        }
+    }
+
     if callback_name, ok_callback := plain_symbol_callback(callback); ok_callback {
         mark_core_sort_by_callback(e, callback_name)
         return emit_call_text(sort_by_callback_helper_name(callback_name), []string{collection}), {}, true
+    }
+
+    proc_text, capture_names, captured, err_capture, ok_capture := captured_unary_callback_proc(e, callback, "sort-by", .Value)
+    if !ok_capture {
+        return "", err_capture, false
+    }
+    if captured {
+        mark_core_sort_by_capture(e, len(capture_names))
+        return capture_helper_call_text("kvist_sort_by", proc_text, capture_names[:], collection), {}, true
     }
 
     f, err_f, ok_f := emit_expr(e, callback)
@@ -8050,9 +8431,25 @@ emit_sort_by_in_place_callback_call :: proc(e: ^Emitter, callback: CST_Form, col
         return emit_call_text(fmt.tprintf("kvist_sort_by_in_place_field_%s", field), []string{collection}), {}, true
     }
 
+    if callback.kind == .Symbol {
+        if ctx, ok_context := lookup_callback_context(e, map_name(callback.text)); ok_context {
+            mark_core_sort_by_in_place_capture(e, len(ctx.capture_names))
+            return capture_helper_call_text("kvist_sort_by_in_place", map_name(callback.text), ctx.capture_names[:], collection), {}, true
+        }
+    }
+
     if callback_name, ok_callback := plain_symbol_callback(callback); ok_callback {
         mark_core_sort_by_in_place_callback(e, callback_name)
         return emit_call_text(sort_by_callback_helper_name(callback_name, true), []string{collection}), {}, true
+    }
+
+    proc_text, capture_names, captured, err_capture, ok_capture := captured_unary_callback_proc(e, callback, "sort-by!", .Value)
+    if !ok_capture {
+        return "", err_capture, false
+    }
+    if captured {
+        mark_core_sort_by_in_place_capture(e, len(capture_names))
+        return capture_helper_call_text("kvist_sort_by_in_place", proc_text, capture_names[:], collection), {}, true
     }
 
     f, err_f, ok_f := emit_expr(e, callback)
@@ -8382,6 +8779,39 @@ capture_call_arg_text :: proc(capture_count: int, item: string) -> string {
         strings.write_string(&builder, ", ")
     }
     strings.write_string(&builder, item)
+    return strings.clone(strings.to_string(builder))
+}
+
+capture_data_call_arg_text :: proc(capture_count: int, item: string) -> string {
+    builder := strings.builder_make()
+    defer strings.builder_destroy(&builder)
+    for idx in 0..<capture_count {
+        if idx > 0 {
+            strings.write_string(&builder, ", ")
+        }
+        fmt.sbprintf(&builder, "data.c%d", idx+1)
+    }
+    if capture_count > 0 {
+        strings.write_string(&builder, ", ")
+    }
+    strings.write_string(&builder, item)
+    return strings.clone(strings.to_string(builder))
+}
+
+capture_concrete_proc_type_text :: proc(capture_count: int, item_name, item_ty, return_text: string) -> string {
+    builder := strings.builder_make()
+    defer strings.builder_destroy(&builder)
+    strings.write_string(&builder, "proc(")
+    for idx in 0..<capture_count {
+        if idx > 0 {
+            strings.write_string(&builder, ", ")
+        }
+        fmt.sbprintf(&builder, "c%d: C%d", idx+1, idx+1)
+    }
+    if capture_count > 0 {
+        strings.write_string(&builder, ", ")
+    }
+    fmt.sbprintf(&builder, "%s: %s) -> %s", item_name, item_ty, return_text)
     return strings.clone(strings.to_string(builder))
 }
 
@@ -8820,6 +9250,9 @@ emit_operator_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Erro
             }
             if strings.has_prefix(ty, "map[") {
                 return fmt.tprintf("(%s) in (%s)", key, collection), {}, true
+            }
+            if type_text_is_pointer_to_map(ty) {
+                return fmt.tprintf("(%s) in (%s)", key, deref_expr_text(collection)), {}, true
             }
             if strings.has_prefix(ty, "[]") || strings.has_prefix(ty, "[dynamic]") || (len(ty) > 1 && ty[0] == '[') {
                 mark_core_contains_value(e)
@@ -9289,6 +9722,11 @@ transform_temp_name :: proc(e: ^Emitter) -> string {
     return fmt.tprintf("kvist_xform_%d", e.temp_counter)
 }
 
+loop_temp_name :: proc(e: ^Emitter, stem: string) -> string {
+    e.temp_counter += 1
+    return fmt.tprintf("kvist_loop_%s_%d", stem, e.temp_counter)
+}
+
 source_temp_name :: proc(e: ^Emitter) -> string {
     e.temp_counter += 1
     return fmt.tprintf("kvist_source_%d", e.temp_counter)
@@ -9327,6 +9765,45 @@ form_is_arr_repeat_call :: proc(form: CST_Form) -> bool {
     head := form.items[0].text
     return head == "arr.repeat" || head == "arr/repeat" || head == "arr-repeat" ||
            head == "repeat" || head == "arr__repeat"
+}
+
+form_is_arr_repeatedly_call :: proc(form: CST_Form) -> bool {
+    if form.kind != .List || len(form.items) == 0 || form.items[0].kind != .Symbol {
+        return false
+    }
+    head := form.items[0].text
+    return head == "arr.repeatedly" || head == "arr/repeatedly" || head == "arr-repeatedly" ||
+           head == "repeatedly" || head == "arr__repeatedly"
+}
+
+form_is_arr_iterate_call :: proc(form: CST_Form) -> bool {
+    if form.kind != .List || len(form.items) == 0 || form.items[0].kind != .Symbol {
+        return false
+    }
+    head := form.items[0].text
+    return head == "arr.iterate" || head == "arr/iterate" || head == "arr-iterate" ||
+           head == "iterate" || head == "arr__iterate"
+}
+
+form_is_arr_cycle_call :: proc(form: CST_Form) -> bool {
+    if form.kind != .List || len(form.items) == 0 || form.items[0].kind != .Symbol {
+        return false
+    }
+    head := form.items[0].text
+    return head == "arr.cycle" || head == "arr/cycle" || head == "arr-cycle" ||
+           head == "cycle" || head == "arr__cycle"
+}
+
+form_is_arr_take_nth_call :: proc(form: CST_Form) -> bool {
+    if form.kind != .List || len(form.items) == 0 || form.items[0].kind != .Symbol {
+        return false
+    }
+    head := form.items[0].text
+    surface := source_package_surface_head(head)
+    return surface == "arr/take-nth" ||
+           head == "arr.take-nth" || head == "arr/take-nth" || head == "arr-take-nth" ||
+           head == "arr.take_nth" || head == "arr/take_nth" || head == "arr-take_nth" ||
+           head == "take-nth" || head == "take_nth" || head == "arr__take_nth"
 }
 
 form_is_direct_transform_source_call :: proc(form: CST_Form) -> bool {
@@ -11632,6 +12109,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         if !ok_target {
             return "", err_target, false
         }
+        map_target := map_index_target_text(e, form.items[1], target)
         if field, ok_field := selector_accesses_field(e, form.items[1], form.items[2]); ok_field {
             if len(form.items) == 4 {
                 return "", Compile_Error{message = "get field access does not support a default value", span = form.items[2].span}, false
@@ -11648,9 +12126,9 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
                 return "", err_default, false
             }
             mark_core_get_or_default(e)
-            return emit_call_text("kvist_get_or_default", []string{target, key, default_value}), {}, true
+            return emit_call_text("kvist_get_or_default", []string{map_target, key, default_value}), {}, true
         }
-        return fmt.tprintf("%s[%s]", target, key), {}, true
+        return fmt.tprintf("%s[%s]", map_target, key), {}, true
     }
 
     if head.text == "arr/count" || head.text == "str/count" {
@@ -12088,7 +12566,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         if !ok_key {
             return "", err_key, false
         }
-        return emit_call_text("delete_key", []string{address_of_expr_text(target), key}), {}, true
+        return emit_call_text("delete_key", []string{map_mutation_target_text(e, form.items[1], target), key}), {}, true
     }
 
     if head.text == "arr-into" || head.text == "arr/into" {
@@ -14351,7 +14829,7 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
         if !ok_key {
             return err_key, false
         }
-        emit_line(e, emit_call_text("delete_key", []string{address_of_expr_text(target), key}))
+        emit_line(e, emit_call_text("delete_key", []string{map_mutation_target_text(e, form.items[1], target), key}))
         return {}, true
     case "doc", "core/doc", "core-doc":
         if len(form.items) != 2 {
@@ -15996,6 +16474,63 @@ emit_core_sort_by_in_place_helper :: proc(e: ^Emitter) {
     emit_line(e, "}")
 }
 
+emit_core_sort_by_capture_helper :: proc(e: ^Emitter, capture_count: int, in_place: bool = false) {
+    params := capture_proc_param_text(capture_count, "x", "$T", "$K")
+    defer delete(params)
+    proc_ty := capture_concrete_proc_type_text(capture_count, "x", "T", "K")
+    defer delete(proc_ty)
+    call_a := capture_data_call_arg_text(capture_count, "a")
+    defer delete(call_a)
+    call_b := capture_data_call_arg_text(capture_count, "b")
+    defer delete(call_b)
+    helper := capture_helper_name("kvist_sort_by", capture_count)
+    if in_place {
+        helper = capture_helper_name("kvist_sort_by_in_place", capture_count)
+    }
+    if in_place {
+        emit_line(e, fmt.tprintf("%s :: proc(%s, xs: []T) %s", helper, params, "{"))
+    } else {
+        emit_line(e, fmt.tprintf("%s :: proc(%s, xs: []T) -> [dynamic]T %s", helper, params, "{"))
+    }
+    e.indent += 1
+    if !in_place {
+        emit_line(e, "out := make([dynamic]T, 0, len(xs))")
+        emit_line(e, "append(&out, ..xs)")
+    }
+    emit_line(e, "Context :: struct {")
+    e.indent += 1
+    emit_line(e, fmt.tprintf("f: %s,", proc_ty))
+    for idx in 0..<capture_count {
+        emit_line(e, fmt.tprintf("c%d: C%d,", idx+1, idx+1))
+    }
+    e.indent -= 1
+    emit_line(e, "}")
+    context_fields: [dynamic]string
+    defer delete(context_fields)
+    append(&context_fields, "f = f")
+    for idx in 0..<capture_count {
+        append(&context_fields, fmt.tprintf("c%d = c%d", idx+1, idx+1))
+    }
+    context_text := strings.join(context_fields[:], ", ", context.allocator)
+    defer delete(context_text)
+    emit_line(e, fmt.tprintf("ctx := Context{%s}", context_text))
+    target := "xs"
+    if !in_place {
+        target = "out[:]"
+    }
+    emit_line(e, fmt.tprintf("kvist_slice.sort_by_with_data(%s, proc(a, b: T, user_data: rawptr) -> bool %s", target, "{"))
+    e.indent += 1
+    emit_line(e, "data := (^Context)(user_data)")
+    emit_line(e, fmt.tprintf("return data.f(%s) < data.f(%s)", call_a, call_b))
+    e.indent -= 1
+    emit_line(e, "}, rawptr(&ctx))")
+    if !in_place {
+        emit_line(e, "return out")
+    }
+    e.indent -= 1
+    emit_line(e, "}")
+}
+
 emit_core_sort_by_field_helper :: proc(e: ^Emitter, field: string) {
     emit_line(e, fmt.tprintf("kvist_sort_by_field_%s :: proc($Key: typeid, xs: []$T) -> [dynamic]T %s", field, "{"))
     e.indent += 1
@@ -16297,7 +16832,9 @@ core_helpers_needed :: proc(features: Emitter_Features) -> bool {
            features.core_remove_in_place || features.core_remove_in_place_capture_max > 0 ||
            features.core_keep_in_place || features.core_keep_in_place_capture_max > 0 ||
            features.core_sort_by ||
+           features.core_sort_by_capture_max > 0 ||
            features.core_sort_by_in_place ||
+           features.core_sort_by_in_place_capture_max > 0 ||
            features.core_tap ||
            len(features.map_fields) > 0 || len(features.index_by_fields) > 0 ||
            len(features.group_by_fields) > 0 ||
@@ -16445,9 +16982,17 @@ emit_core_helpers :: proc(e: ^Emitter, features: Emitter_Features) {
         emit_core_helper_separator(e, &emitted)
         emit_core_sort_by_helper(e)
     }
+    for capture_count in 1..=features.core_sort_by_capture_max {
+        emit_core_helper_separator(e, &emitted)
+        emit_core_sort_by_capture_helper(e, capture_count)
+    }
     if features.core_sort_by_in_place {
         emit_core_helper_separator(e, &emitted)
         emit_core_sort_by_in_place_helper(e)
+    }
+    for capture_count in 1..=features.core_sort_by_in_place_capture_max {
+        emit_core_helper_separator(e, &emitted)
+        emit_core_sort_by_capture_helper(e, capture_count, true)
     }
     for callback in features.sort_by_callbacks {
         emit_core_helper_separator(e, &emitted)
@@ -16737,7 +17282,9 @@ emit_core_fmt_import :: proc(e: ^Emitter, emitted: ^bool, needed: bool) {
 
 features_need_core_slice_sort_import :: proc(features: Emitter_Features) -> bool {
     return features.core_sort_by ||
+           features.core_sort_by_capture_max > 0 ||
            features.core_sort_by_in_place ||
+           features.core_sort_by_in_place_capture_max > 0 ||
            len(features.sort_by_fields) > 0 ||
            len(features.sort_by_in_place_fields) > 0 ||
            len(features.sort_by_callbacks) > 0 ||

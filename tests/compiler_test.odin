@@ -1411,6 +1411,7 @@ editor_symbols_source_includes_arr_and_map_mutation_packages :: proc(t: ^testing
     defer delete(output)
 
     testing.expect_value(t, strings.contains(output, "kvist package\tarr.map!\t"), true)
+    testing.expect_value(t, strings.contains(output, "kvist package\tarr.fill!\t"), true)
     testing.expect_value(t, strings.contains(output, "kvist package\tarr.dynamic\t"), true)
     testing.expect_value(t, strings.contains(output, "kvist package\tarr.push!\t"), true)
     testing.expect_value(t, strings.contains(output, "kvist package\tarr.sort-by!\t"), true)
@@ -7656,6 +7657,56 @@ macroexpand_evaluates_string_helpers_in_macro_predicates :: proc(t: ^testing.T) 
 }
 
 @(test)
+macroexpand_evaluates_parse_int_and_digit_helpers :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defmacro emit-parsed [form]
+  (let [n (parse-int (source form))]
+    (if n
+      (quasiquote (def parsed (unquote n)))
+      (quote (def parsed-failed true)))))
+
+(defmacro emit-zero [form]
+  (let [n (str.parse-int (source form))]
+    (if n
+      (quasiquote (def parsed-zero (unquote n)))
+      (quote (def parsed-zero-failed true)))))
+
+(defmacro emit-invalid [form]
+  (if (parse-int (source form))
+    (quote (def invalid-parsed true))
+    (quote (def invalid-rejected true))))
+
+(defmacro emit-digits [form]
+  (if (and (digit? (source form))
+           (every? str.digit? ["1" "2" "3"]))
+    (quote (def digits-ok true))
+    (quote (def digits-bad true))))
+
+(emit-parsed 42)
+(emit-zero 0)
+(emit-invalid nope)
+(emit-digits 7)`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "parsed :: 42"), true)
+    testing.expect_value(t, strings.contains(output, "parsed_zero :: 0"), true)
+    testing.expect_value(t, strings.contains(output, "invalid_rejected :: true"), true)
+    testing.expect_value(t, strings.contains(output, "digits_ok :: true"), true)
+    testing.expect_value(t, strings.contains(output, "parsed_failed"), false)
+    testing.expect_value(t, strings.contains(output, "parsed_zero_failed"), false)
+    testing.expect_value(t, strings.contains(output, "invalid_parsed"), false)
+    testing.expect_value(t, strings.contains(output, "digits_bad"), false)
+}
+
+@(test)
 macroexpand_evaluates_sequence_helpers :: proc(t: ^testing.T) {
     source := `(package main)
 
@@ -7685,6 +7736,34 @@ macroexpand_evaluates_sequence_helpers :: proc(t: ^testing.T) {
 
     testing.expect_value(t, strings.contains(output, "vars_ok :: true"), true)
     testing.expect_value(t, strings.contains(output, "vars_bad"), false)
+}
+
+@(test)
+macroexpand_evaluates_reduce_helper :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defmacro add-source-int [acc form]
+  (let [n (parse-int (source form))]
+    (if n
+      (+ acc n)
+      (error (str "expected integer literal: " (source form))))))
+
+(defmacro emit-sum [forms]
+  (let [total (reduce add-source-int 0 forms)]
+    (quasiquote
+      (def folded-total (unquote total)))))
+
+(emit-sum [10 20 12])`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "folded_total :: 42"), true)
 }
 
 @(test)
@@ -9946,6 +10025,220 @@ compile_functional_transform_arr_range_sources :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "for ((kvist_range_step > 0) && (kvist_item < kvist_range_end))"), true)
     testing.expect_value(t, strings.contains(output, "kvist_item += kvist_range_step"), true)
     testing.expect_value(t, strings.contains(output, "kvist_acc +="), true)
+}
+
+@(test)
+compile_for_over_arr_range_lowers_to_counted_loop :: proc(t: ^testing.T) {
+    source := `(package main)
+(import arr "kvist:arr")
+
+(defn total [n: int] -> int
+  (let [sum 0]
+    (for [i (arr.range 0 n)]
+      (set! sum (+ sum i)))
+    sum))
+
+(defn indexed-total [] -> int
+  (let [sum 0]
+    (for [value idx (arr.range 2 8 2)]
+      (set! sum (+ sum idx value)))
+    sum))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "arr__range_impl(0, n, 1)"), false)
+    testing.expect_value(t, strings.contains(output, "arr__range_impl(2, 8, 2)"), false)
+    testing.expect_value(t, strings.contains(output, "defer delete(kvist_loop_"), false)
+    testing.expect_value(t, strings.contains(output, "for ((kvist_loop_range_step_"), true)
+    testing.expect_value(t, strings.contains(output, "value := kvist_loop_range_item_"), true)
+    testing.expect_value(t, strings.contains(output, "idx := kvist_loop_range_index_"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_loop_range_index_"), true)
+}
+
+@(test)
+compile_for_over_arr_repeat_lowers_to_counted_loop :: proc(t: ^testing.T) {
+    source := `(package main)
+(import arr "kvist:arr")
+
+(defn total [] -> int
+  (let [sum 0]
+    (for [value (arr.repeat 3 4)]
+      (set! sum (+ sum value)))
+    sum))
+
+(defn indexed-total [] -> int
+  (let [sum 0]
+    (for [value idx (arr.repeat 2 5)]
+      (set! sum (+ sum idx value)))
+    sum))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "arr__repeat(3, 4)"), false)
+    testing.expect_value(t, strings.contains(output, "arr__repeat(2, 5)"), false)
+    testing.expect_value(t, strings.contains(output, "defer delete(kvist_loop_"), false)
+    testing.expect_value(t, strings.contains(output, "for kvist_loop_repeat_index_"), true)
+    testing.expect_value(t, strings.contains(output, "value := kvist_loop_repeat_value_"), true)
+    testing.expect_value(t, strings.contains(output, "idx := kvist_loop_repeat_index_"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_loop_repeat_index_"), true)
+}
+
+@(test)
+compile_for_over_arr_repeatedly_lowers_to_counted_loop :: proc(t: ^testing.T) {
+    source := `(package main)
+(import arr "kvist:arr")
+
+(defn next-value [] -> int
+  7)
+
+(defn total [] -> int
+  (let [sum 0]
+    (for [value (arr.repeatedly 3 next-value)]
+      (set! sum (+ sum value)))
+    sum))
+
+(defn indexed-total [] -> int
+  (let [sum 0]
+    (for [value idx (arr.repeatedly 2 next-value)]
+      (set! sum (+ sum idx value)))
+    sum))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "arr__repeatedly(3, next_value)"), false)
+    testing.expect_value(t, strings.contains(output, "arr__repeatedly(2, next_value)"), false)
+    testing.expect_value(t, strings.contains(output, "defer delete(kvist_loop_"), false)
+    testing.expect_value(t, strings.contains(output, "for kvist_loop_repeatedly_index_"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_loop_repeatedly_producer_"), true)
+    testing.expect_value(t, strings.contains(output, "value := kvist_loop_repeatedly_producer_"), true)
+    testing.expect_value(t, strings.contains(output, "idx := kvist_loop_repeatedly_index_"), true)
+}
+
+@(test)
+compile_for_over_arr_iterate_lowers_to_counted_loop :: proc(t: ^testing.T) {
+    source := `(package main)
+(import arr "kvist:arr")
+
+(defn double [x: int] -> int
+  (* x 2))
+
+(defn total [] -> int
+  (let [sum 0]
+    (for [value (arr.iterate 4 double 1)]
+      (set! sum (+ sum value)))
+    sum))
+
+(defn indexed-total [] -> int
+  (let [sum 0]
+    (for [value idx (arr.iterate 3 double 1)]
+      (set! sum (+ sum idx value)))
+    sum))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "arr__iterate(4, double, 1)"), false)
+    testing.expect_value(t, strings.contains(output, "arr__iterate(3, double, 1)"), false)
+    testing.expect_value(t, strings.contains(output, "defer delete(kvist_loop_"), false)
+    testing.expect_value(t, strings.contains(output, "for kvist_loop_iterate_index_"), true)
+    testing.expect_value(t, strings.contains(output, "value := kvist_loop_iterate_current_"), true)
+    testing.expect_value(t, strings.contains(output, "idx := kvist_loop_iterate_index_"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_loop_iterate_current_"), true)
+    testing.expect_value(t, strings.contains(output, "= kvist_loop_iterate_step_"), true)
+}
+
+@(test)
+compile_for_over_arr_cycle_lowers_to_counted_loop :: proc(t: ^testing.T) {
+    source := `(package main)
+(import arr "kvist:arr")
+
+(defn total [] -> int
+  (let [sum 0
+        xs ([]int [1 2])]
+    (for [value (arr.cycle 5 xs)]
+      (set! sum (+ sum value)))
+    sum))
+
+(defn indexed-total [] -> int
+  (let [sum 0
+        xs ([]int [3 4])]
+    (for [value idx (arr.cycle 3 xs)]
+      (set! sum (+ sum idx value)))
+    sum))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "arr__cycle(5, xs)"), false)
+    testing.expect_value(t, strings.contains(output, "arr__cycle(3, xs)"), false)
+    testing.expect_value(t, strings.contains(output, "defer delete(kvist_loop_"), false)
+    testing.expect_value(t, strings.contains(output, "kvist_loop_cycle_source_"), true)
+    testing.expect_value(t, strings.contains(output, "for kvist_loop_cycle_index_"), true)
+    testing.expect_value(t, strings.contains(output, "&& kvist_loop_cycle_size_"), true)
+    testing.expect_value(t, strings.contains(output, "value := kvist_loop_cycle_source_"), true)
+    testing.expect_value(t, strings.contains(output, "idx := kvist_loop_cycle_index_"), true)
+}
+
+@(test)
+compile_for_over_arr_take_nth_lowers_to_strided_loop :: proc(t: ^testing.T) {
+    source := `(package main)
+(import arr "kvist:arr")
+
+(defn total [xs: []int] -> int
+  (let [sum 0]
+    (for [value (arr.take-nth 2 xs)]
+      (set! sum (+ sum value)))
+    sum))
+
+(defn indexed-total [xs: []int] -> int
+  (let [sum 0]
+    (for [value idx (arr.take-nth 3 xs)]
+      (set! sum (+ sum idx value)))
+    sum))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "arr__take_nth(2, xs)"), false)
+    testing.expect_value(t, strings.contains(output, "arr__take_nth(3, xs)"), false)
+    testing.expect_value(t, strings.contains(output, "defer delete(kvist_loop_"), false)
+    testing.expect_value(t, strings.contains(output, "for kvist_loop_take_nth_step_"), true)
+    testing.expect_value(t, strings.contains(output, "value := kvist_loop_take_nth_source_"), true)
+    testing.expect_value(t, strings.contains(output, "idx := kvist_loop_take_nth_index_"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_loop_take_nth_source_index_"), true)
 }
 
 @(test)
@@ -14046,6 +14339,44 @@ compile_arr_package_scan_helpers_support_captured_callbacks :: proc(t: ^testing.
 }
 
 @(test)
+compile_arr_sort_by_supports_captured_callbacks :: proc(t: ^testing.T) {
+    source := "(package main)\n(import arr \"kvist:arr\")\n\n(defn demo [xs: []int] -> int\n  (let [offset 10\n        sorted (arr.sort-by (fn [x: int] -> int (+ x offset)) xs) :defer]\n    (arr.last sorted)))"
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+    testing.expect_value(t, strings.contains(output, "sorted := kvist_sort_by_1("), true)
+    testing.expect_value(t, strings.contains(output, "proc(offset: int, x: int) -> int {"), true)
+    testing.expect_value(t, strings.contains(output, "return (x) + (offset)"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_sort_by_1 :: proc(f: proc(c1: $C1, x: $T) -> $K, c1: C1, xs: []T) -> [dynamic]T {"), true)
+    testing.expect_value(t, strings.contains(output, "Context :: struct {"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_slice.sort_by_with_data(out[:], proc(a, b: T, user_data: rawptr) -> bool {"), true)
+    testing.expect_value(t, strings.contains(output, "return data.f(data.c1, a) < data.f(data.c1, b)"), true)
+}
+
+@(test)
+compile_arr_sort_by_bang_supports_captured_callbacks :: proc(t: ^testing.T) {
+    source := "(package main)\n(import arr \"kvist:arr\")\n\n(defn demo [xs: [dynamic]int] -> int\n  (let [offset 10]\n    (arr.sort-by! (fn [x: int] -> int (+ x offset)) xs)\n    (arr.last xs)))"
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+    testing.expect_value(t, strings.contains(output, "kvist_sort_by_in_place_1("), true)
+    testing.expect_value(t, strings.contains(output, "proc(offset: int, x: int) -> int {"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_sort_by_in_place_1 :: proc(f: proc(c1: $C1, x: $T) -> $K, c1: C1, xs: []T) {"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_slice.sort_by_with_data(xs, proc(a, b: T, user_data: rawptr) -> bool {"), true)
+    testing.expect_value(t, strings.contains(output, "return data.f(data.c1, a) < data.f(data.c1, b)"), true)
+}
+
+@(test)
 compile_filter_bang_supports_single_captured_local_in_fn_literal :: proc(t: ^testing.T) {
     source := "(package main)\n\n(defn demo [xs: [dynamic]int] -> [dynamic]int\n  (let [limit 10]\n    (arr.filter! (fn [x: int] -> bool\n                   (> x limit))\n                 xs)\n    xs))"
 
@@ -16822,14 +17153,22 @@ compile_string_package_helpers :: proc(t: ^testing.T) {
         replaced-all (str.replace joined "-" "_")
         replaced-one (str.replace joined "-" "_" 1)
         lowered (str.lower replaced-all)
-        uppered (str.upper lowered)]
+        uppered (str.upper lowered)
+        builder (str.builder)
+        unescaped (str.unescape "a\\nb")]
     (defer (delete parts))
     (defer (delete joined))
     (defer (delete replaced-all))
     (defer (delete replaced-one))
     (defer (delete lowered))
     (defer (delete uppered))
-    (println trimmed without-prefix without-suffix starts? ends? first-dash last-dash uppered)))`
+    (defer (delete unescaped))
+    (defer (str.destroy! (addr builder)))
+    (str.write! (addr builder) "hi")
+    (str.write! (addr builder) "!")
+    (let [built (str.finish (addr builder))]
+      (defer (delete built))
+      (println trimmed without-prefix without-suffix starts? ends? first-dash last-dash uppered built unescaped))))`
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
@@ -16865,6 +17204,24 @@ compile_string_package_helpers :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "return strings.to_lower(s)"), true)
     testing.expect_value(t, strings.contains(output, "lowered := str__lower(replaced_all)"), true)
     testing.expect_value(t, strings.contains(output, "uppered := str__upper(lowered)"), true)
+    testing.expect_value(t, strings.contains(output, "str__builder :: #force_inline proc() -> strings.Builder {"), true)
+    testing.expect_value(t, strings.contains(output, "return strings.builder_make()"), true)
+    testing.expect_value(t, strings.contains(output, "str__write_bang :: #force_inline proc(builder: ^strings.Builder, value: string) {"), true)
+    testing.expect_value(t, strings.contains(output, "strings.write_string(builder, value)"), true)
+    testing.expect_value(t, strings.contains(output, "str__finish :: #force_inline proc(builder: ^strings.Builder) -> string {"), true)
+    testing.expect_value(t, strings.contains(output, "out, err := strings.clone(strings.to_string(builder^))"), true)
+    testing.expect_value(t, strings.contains(output, "str__destroy_bang :: #force_inline proc(builder: ^strings.Builder) {"), true)
+    testing.expect_value(t, strings.contains(output, "strings.builder_destroy(builder)"), true)
+    testing.expect_value(t, strings.contains(output, "builder := str__builder()"), true)
+    testing.expect_value(t, strings.contains(output, "str__write_bang(&builder, \"hi\")"), true)
+    testing.expect_value(t, strings.contains(output, "built := str__finish(&builder)"), true)
+    testing.expect_value(t, strings.contains(output, "defer delete(built)"), true)
+    testing.expect_value(t, strings.contains(output, "defer str__destroy_bang(&builder)"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_str_unescape :: proc(s: string) -> string {"), true)
+    testing.expect_value(t, strings.contains(output, "str__unescape :: #force_inline proc(s: string) -> string {"), true)
+    testing.expect_value(t, strings.contains(output, "return kvist_str_unescape(s)"), true)
+    testing.expect_value(t, strings.contains(output, "unescaped := str__unescape(\"a\\\\nb\")"), true)
+    testing.expect_value(t, strings.contains(output, "defer delete(unescaped)"), true)
     testing.expect_value(t, strings.contains(output, "kvist_str_replace :: proc(s, old, new: string, n: int) -> string"), false)
 }
 
@@ -17248,6 +17605,7 @@ compile_shipped_arr_source_package_uses_hybrid_resolution :: proc(t: ^testing.T)
     (arr.push! mutable total)
     (arr.map! inc-value mutable)
     (arr.map-indexed! add-index mutable)
+    (arr.fill! mutable 8)
     (arr.reverse! mutable)
     (arr.filter! even-value? mutable)
     (arr.remove! even-value? mutable)
@@ -17308,6 +17666,8 @@ compile_shipped_arr_source_package_uses_hybrid_resolution :: proc(t: ^testing.T)
     testing.expect_value(t, strings.contains(output, "indexed := arr__map_indexed(add_index, xs)"), true)
     testing.expect_value(t, strings.contains(output, "arr__map_indexed_bang_impl :: #force_inline proc(f: proc(i: int, x: $T) -> T, xs: []T) {"), true)
     testing.expect_value(t, strings.contains(output, "arr__map_indexed_bang_impl(add_index, (mutable)[0:])"), true)
+    testing.expect_value(t, strings.contains(output, "arr__fill_bang_impl :: #force_inline proc(xs: []$T, value: T) {"), true)
+    testing.expect_value(t, strings.contains(output, "arr__fill_bang_impl((mutable)[0:], 8)"), true)
     testing.expect_value(t, strings.contains(output, "arr__reverse_bang_impl :: #force_inline proc(xs: []$T) {"), true)
     testing.expect_value(t, strings.contains(output, "arr__reverse_bang_impl((mutable)[0:])"), true)
     testing.expect_value(t, strings.contains(output, "arr__filter_impl :: #force_inline proc(pred: proc(x: $T) -> bool, xs: []T) -> [dynamic]T {"), true)
@@ -17410,6 +17770,72 @@ compile_arr_push_accepts_pointer_to_dynamic_array :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "add_byte_bang :: proc(buf: ^[dynamic]byte, b: byte)"), true)
     testing.expect_value(t, strings.contains(output, "append(buf, b)"), true)
     testing.expect_value(t, strings.contains(output, "append(&(buf), b)"), false)
+}
+
+@(test)
+compile_pointer_to_set_type_constructors :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn count-caret [seen: ^set[string]] -> int
+  (count (deref seen)))
+
+(defn count-list [seen: (ptr (set string))] -> int
+  (count (deref seen)))
+
+(defn count-map [seen: ^map[string]int] -> int
+  (count (deref seen)))
+
+(defn count-bit-set [flags: ^bit_set[int; u8]] -> int
+  0)
+
+(defn count-matrix [m: ^matrix[2, 2]f32] -> int
+  0)`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "count_caret :: proc(seen: ^map[string]struct{}) -> int"), true)
+    testing.expect_value(t, strings.contains(output, "count_list :: proc(seen: ^map[string]struct{}) -> int"), true)
+    testing.expect_value(t, strings.contains(output, "count_map :: proc(seen: ^map[string]int) -> int"), true)
+    testing.expect_value(t, strings.contains(output, "count_bit_set :: proc(flags: ^bit_set[int; u8]) -> int"), true)
+    testing.expect_value(t, strings.contains(output, "count_matrix :: proc(m: ^matrix[2, 2]f32) -> int"), true)
+    testing.expect_value(t, strings.contains(output, "return len(seen^)"), true)
+}
+
+@(test)
+compile_pointer_to_map_and_set_mutation_helpers :: proc(t: ^testing.T) {
+    source := `(package main)
+(import map "kvist:map")
+(import set "kvist:set")
+
+(defn mark-seen! [seen: ^set[string], lookup: ^map[string]int] -> bool
+  (set.add! seen "a")
+  (set.remove! seen "b")
+  (map.assoc! lookup "a" 1)
+  (map.dissoc! lookup "z")
+  (contains? seen "a"))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "mark_seen_bang :: proc(seen: ^map[string]struct{}, lookup: ^map[string]int) -> bool"), true)
+    testing.expect_value(t, strings.contains(output, "seen^[\"a\"] = struct{}{}"), true)
+    testing.expect_value(t, strings.contains(output, "delete_key(seen, \"b\")"), true)
+    testing.expect_value(t, strings.contains(output, "lookup^[\"a\"] = 1"), true)
+    testing.expect_value(t, strings.contains(output, "delete_key(lookup, \"z\")"), true)
+    testing.expect_value(t, strings.contains(output, "return (\"a\") in (seen^)"), true)
+    testing.expect_value(t, strings.contains(output, "delete_key(&(seen)"), false)
+    testing.expect_value(t, strings.contains(output, "lookup[\"a\"] = 1"), false)
 }
 
 @(test)

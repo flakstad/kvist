@@ -212,6 +212,8 @@ canonical_surface_head_for_internal_name :: proc(head: string) -> (canonical: st
         return "arr.map!", true
     case "arr-map-indexed!":
         return "arr.map-indexed!", true
+    case "arr-fill!":
+        return "arr.fill!", true
     case "arr-filter!":
         return "arr.filter!", true
     case "arr-remove!":

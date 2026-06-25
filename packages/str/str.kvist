@@ -149,6 +149,77 @@
   [s: string, needle: string] -> int #force_inline
   (strings.last_index s needle))
 
+(defn builder
+  "Create a string builder.
+
+  Destroy it with `str.destroy!` when done. Use `str.finish` to clone the
+  current contents into an owned string before destroying the builder."
+  [] -> strings.Builder #force_inline
+  (strings.builder_make))
+
+(defn write!
+  "Append `value` to a string builder."
+  [builder: ^strings.Builder, value: string] #force_inline
+  (strings.write_string builder value))
+
+(defn finish
+  "Clone the current builder contents into an owned string.
+
+  The builder remains valid after this call and must still be destroyed by the
+  caller."
+  [builder: ^strings.Builder] -> string #force_inline
+  (let [[out err] (strings.clone (strings.to_string (deref builder)))]
+    (if (!= err nil)
+      ""
+      out)))
+
+(defn destroy!
+  "Destroy a string builder created with `str.builder`."
+  [builder: ^strings.Builder] #force_inline
+  (strings.builder_destroy builder))
+
+(odin "kvist_str_unescape :: proc(s: string) -> string {
+    builder := strings.builder_make()
+    defer strings.builder_destroy(&builder)
+    i := 0
+    for i < len(s) {
+        if s[i] == byte(92) && i+1 < len(s) {
+            i += 1
+            switch s[i] {
+            case byte(110):
+                strings.write_byte(&builder, byte(10))
+            case byte(114):
+                strings.write_byte(&builder, byte(13))
+            case byte(116):
+                strings.write_byte(&builder, byte(9))
+            case byte(34):
+                strings.write_byte(&builder, byte(34))
+            case byte(92):
+                strings.write_byte(&builder, byte(92))
+            case:
+                strings.write_byte(&builder, byte(92))
+                strings.write_byte(&builder, s[i])
+            }
+        } else {
+            strings.write_byte(&builder, s[i])
+        }
+        i += 1
+    }
+    out, err := strings.clone(strings.to_string(builder))
+    if err != nil {
+        return \"\"
+    }
+    return out
+}")
+
+(defn unescape
+  "Return an owned copy of `s` with common backslash escapes decoded.
+
+  Supports `\\n`, `\\r`, `\\t`, `\\\"`, and `\\\\`. Unknown escapes are kept as
+  a literal backslash plus the escaped byte."
+  [s: string] -> string #force_inline
+  (return (odin "kvist_str_unescape(s)")))
+
 (defn lower
   "Return a lower-case copy of `s`.
 

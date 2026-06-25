@@ -1185,6 +1185,24 @@ macro_apply_unary_function :: proc(fn_form: CST_Form, arg: Macro_Value, macros: 
             return Macro_Value{}, err_text, false
         }
         return macro_owned_string_value(text), Compile_Error{}, true
+    case "parse-int", "str.parse-int":
+        text, err_text, ok_text := macro_value_to_string(arg, fn_form.span)
+        if !ok_text {
+            return Macro_Value{}, err_text, false
+        }
+        defer delete(text)
+        parsed, ok_parsed := strconv.parse_int(text)
+        if !ok_parsed {
+            return macro_nil_value(), Compile_Error{}, true
+        }
+        return macro_int_value(parsed), Compile_Error{}, true
+    case "digit?", "str.digit?":
+        text, err_text, ok_text := macro_value_to_string(arg, fn_form.span)
+        if !ok_text {
+            return Macro_Value{}, err_text, false
+        }
+        defer delete(text)
+        return macro_bool_value(len(text) == 1 && text[0] >= '0' && text[0] <= '9'), Compile_Error{}, true
     case:
         if user_macro, ok_user := find_user_macro(macros, fn_form.text); ok_user {
             if user_macro.params.has_rest || len(user_macro.params.names) != 1 {
@@ -1207,6 +1225,42 @@ macro_apply_unary_function :: proc(fn_form: CST_Form, arg: Macro_Value, macros: 
         }
     }
     return Macro_Value{}, Compile_Error{message = fmt.tprintf("unknown macro sequence helper function: %s", fn_form.text), span = fn_form.span}, false
+}
+
+macro_apply_user_function :: proc(fn_form: CST_Form, args: []Macro_Value, macros: []User_Macro, bindings: []Macro_Binding) -> (Macro_Value, Compile_Error, bool) {
+    if fn_form.kind != .Symbol {
+        fn_text := macro_form_text(fn_form)
+        defer delete(fn_text)
+        return Macro_Value{}, Compile_Error{message = fmt.tprintf("unsupported macro function: %s", fn_text), span = fn_form.span}, false
+    }
+    user_macro, ok_user := find_user_macro(macros, fn_form.text)
+    if !ok_user {
+        return Macro_Value{}, Compile_Error{message = fmt.tprintf("unsupported macro function: %s", fn_form.text), span = fn_form.span}, false
+    }
+    if user_macro.params.has_rest || len(user_macro.params.names) != len(args) {
+        return Macro_Value{}, Compile_Error{message = fmt.tprintf("%s must take %d arguments for this macro helper", user_macro.name, len(args)), span = fn_form.span}, false
+    }
+
+    local: [dynamic]Macro_Binding
+    defer delete(local)
+    for binding in bindings {
+        append(&local, binding)
+    }
+    local_owned_start := len(local)
+    for arg, idx in args {
+        append(&local, Macro_Binding{name = user_macro.params.names[idx], value = macro_value_clone_backing(arg)})
+    }
+
+    value, err_value, ok_value := macro_eval_sequence(user_macro.body[:], macros, local[:])
+    for idx in local_owned_start ..< len(local) {
+        macro_value_delete_backing(&local[idx].value)
+    }
+    if !ok_value {
+        return Macro_Value{}, macro_error_with_expansion_context(user_macro, err_value), false
+    }
+    result := macro_value_clone_backing(value)
+    macro_value_delete_backing(&value)
+    return result, Compile_Error{}, true
 }
 
 macro_subst_form :: proc(form: CST_Form, names: []string, values: []CST_Form) -> CST_Form {
@@ -2028,6 +2082,42 @@ macro_eval_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_
                     macro_value_delete_backing(&value)
                     return Macro_Value{}, Compile_Error{message = "name expects one symbol or keyword", span = form.items[1].span}, false
                 }
+            case "+":
+                int_sum := 0
+                float_sum := 0.0
+                all_int := true
+                for item in form.items[1:] {
+                    value, err_value, ok_value := macro_eval_expr(item, macros, bindings)
+                    if !ok_value {
+                        return Macro_Value{}, err_value, false
+                    }
+                    if value.kind == .Int {
+                        int_sum += value.int_value
+                        float_sum += f64(value.int_value)
+                        macro_value_delete_backing(&value)
+                        continue
+                    }
+                    if value.kind == .Form && value.form.kind == .Number {
+                        parsed_int, ok_int := strconv.parse_int(value.form.text)
+                        if ok_int {
+                            int_sum += parsed_int
+                            float_sum += f64(parsed_int)
+                            macro_value_delete_backing(&value)
+                            continue
+                        }
+                    }
+                    number, ok_number := macro_value_number(value)
+                    macro_value_delete_backing(&value)
+                    if !ok_number {
+                        return Macro_Value{}, Compile_Error{message = "+ expects numeric arguments", span = item.span}, false
+                    }
+                    all_int = false
+                    float_sum += number
+                }
+                if all_int {
+                    return macro_int_value(int_sum), Compile_Error{}, true
+                }
+                return macro_float_value(float_sum), Compile_Error{}, true
             case "=":
                 if len(form.items) < 3 {
                     return Macro_Value{}, Compile_Error{message = "= expects at least two arguments", span = form.span}, false
@@ -2188,6 +2278,40 @@ macro_eval_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_
                     return Macro_Value{}, Compile_Error{message = "ends-with? expects string arguments", span = form.span}, false
                 }
                 return macro_bool_value(strings.has_suffix(text.string_value, suffix.string_value)), Compile_Error{}, true
+            case "parse-int", "str.parse-int":
+                if len(form.items) != 2 {
+                    return Macro_Value{}, Compile_Error{message = "parse-int expects one string", span = form.span}, false
+                }
+                value, err_value, ok_value := macro_eval_expr(form.items[1], macros, bindings)
+                if !ok_value {
+                    return Macro_Value{}, err_value, false
+                }
+                defer macro_value_delete_backing(&value)
+                text, err_text, ok_text := macro_value_to_string(value, form.items[1].span)
+                if !ok_text {
+                    return Macro_Value{}, err_text, false
+                }
+                defer delete(text)
+                parsed, ok_parsed := strconv.parse_int(text)
+                if !ok_parsed {
+                    return macro_nil_value(), Compile_Error{}, true
+                }
+                return macro_int_value(parsed), Compile_Error{}, true
+            case "digit?", "str.digit?":
+                if len(form.items) != 2 {
+                    return Macro_Value{}, Compile_Error{message = "digit? expects one string", span = form.span}, false
+                }
+                value, err_value, ok_value := macro_eval_expr(form.items[1], macros, bindings)
+                if !ok_value {
+                    return Macro_Value{}, err_value, false
+                }
+                defer macro_value_delete_backing(&value)
+                text, err_text, ok_text := macro_value_to_string(value, form.items[1].span)
+                if !ok_text {
+                    return Macro_Value{}, err_text, false
+                }
+                defer delete(text)
+                return macro_bool_value(len(text) == 1 && text[0] >= '0' && text[0] <= '9'), Compile_Error{}, true
             case "some?", "every?":
                 if len(form.items) != 3 {
                     return Macro_Value{}, Compile_Error{message = fmt.tprintf("%s expects predicate and sequence", head.text), span = form.span}, false
@@ -2275,6 +2399,36 @@ macro_eval_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_
                     }
                 }
                 return macro_owned_form_value(out), Compile_Error{}, true
+            case "reduce":
+                if len(form.items) != 4 {
+                    return Macro_Value{}, Compile_Error{message = "reduce expects reducer, initial value, and sequence", span = form.span}, false
+                }
+                acc, err_acc, ok_acc := macro_eval_expr(form.items[2], macros, bindings)
+                if !ok_acc {
+                    return Macro_Value{}, err_acc, false
+                }
+                seq_value, err_seq, ok_seq := macro_eval_expr(form.items[3], macros, bindings)
+                if !ok_seq {
+                    macro_value_delete_backing(&acc)
+                    return Macro_Value{}, err_seq, false
+                }
+                defer macro_value_delete_backing(&seq_value)
+                forms, err_forms, ok_forms := macro_list_from_value(seq_value, form.items[3].span)
+                if !ok_forms {
+                    macro_value_delete_backing(&acc)
+                    return Macro_Value{}, err_forms, false
+                }
+                for item in forms {
+                    item_value := macro_form_value(item)
+                    args := [?]Macro_Value{acc, item_value}
+                    next_acc, err_next, ok_next := macro_apply_user_function(form.items[1], args[:], macros, bindings)
+                    macro_value_delete_backing(&acc)
+                    if !ok_next {
+                        return Macro_Value{}, err_next, false
+                    }
+                    acc = next_acc
+                }
+                return acc, Compile_Error{}, true
             case "form?":
                 if len(form.items) != 2 {
                     return Macro_Value{}, Compile_Error{message = "form? expects one argument", span = form.span}, false

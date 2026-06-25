@@ -122,11 +122,14 @@ or rewrite source lists:
 (every? pred xs)
 (map f xs)
 (filter pred xs)
+(reduce reducer init xs)
 ```
 
 These are macro-time helpers over source forms, not runtime `kvist:arr`
 helpers. `pred` and `f` are unary macro-time function names such as `symbol?`,
-`keyword?`, `source`, `name`, `text`, or a unary user macro.
+`keyword?`, `source`, `name`, `text`, or a unary user macro. `reduce` calls a
+user macro named by `reducer` with `[acc item]` arguments and returns the final
+accumulator.
 
 Constructors and text helpers:
 
@@ -154,10 +157,16 @@ Macro-time string helpers use the same package-shaped names as runtime
 (str.contains? text needle)
 (str.starts-with? text prefix)
 (str.ends-with? text suffix)
+(parse-int text)       ;; int or nil
+(str.parse-int text)   ;; package-shaped alias
+(digit? text)
+(str.digit? text)
 ```
 
 Use `source` when the original token spelling is data, such as EDN-style
-keywords in DSLs. `name` and `text` normalize symbols and keywords.
+keywords in DSLs. `name` and `text` normalize symbols and keywords. `parse-int`
+returns an integer on success and `nil` on failure, so `0` remains a valid
+truthy parsed result in macro conditionals.
 
 Use `keyword` when a macro needs to emit a keyword literal back into ordinary
 Kvist code:

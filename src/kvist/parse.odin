@@ -477,6 +477,17 @@ parse_type_text :: proc(form: CST_Form) -> (text: string, err: Compile_Error, ok
             return fmt.tprintf("map[%s]%s", key_text, value_text), {}, true
         }
 
+        if is_symbol(form.items[0], "set") {
+            if len(form.items) != 2 {
+                return "", Compile_Error{message = "set type expects one element type", span = form.span}, false
+            }
+            elem_text, err_elem, ok_elem := parse_type_text(form.items[1])
+            if !ok_elem {
+                return "", err_elem, false
+            }
+            return fmt.tprintf("map[%s]struct{{}}", elem_text), {}, true
+        }
+
         if is_symbol(form.items[0], "map.entry") || is_symbol(form.items[0], "map/entry") ||
            is_symbol(form.items[0], "map-entry") || is_symbol(form.items[0], "map__entry") {
             if len(form.items) != 3 {
