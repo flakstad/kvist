@@ -17291,6 +17291,11 @@ features_need_core_slice_sort_import :: proc(features: Emitter_Features) -> bool
            len(features.sort_by_in_place_callbacks) > 0
 }
 
+output_needs_core_slice_import :: proc(output: string, features: Emitter_Features) -> bool {
+    return features_need_core_slice_sort_import(features) ||
+           strings.contains(output, "kvist_slice.")
+}
+
 features_need_core_strings_import :: proc(features: Emitter_Features) -> bool {
     return features.core_strings
 }
@@ -17369,6 +17374,10 @@ inject_imports_into_output_header :: proc(output: string, imports: []string) -> 
             if strings.has_prefix(trimmed, "package ") {
                 saw_package = true
                 insert_at = next_offset
+                offset = next_offset
+                continue
+            }
+            if trimmed == "" || strings.has_prefix(trimmed, "#+") || strings.has_prefix(trimmed, "//") {
                 offset = next_offset
                 continue
             }
@@ -17472,7 +17481,7 @@ emit_decls_with_source_map :: proc(decls: []IR_Decl) -> (Emit_Result, Compile_Er
     emit_core_helpers(&e, features)
     output := strings.clone(strings.to_string(e.builder))
     late_imports: [dynamic]string
-    if !emitted_core_slice_import && features_need_core_slice_sort_import(features) &&
+    if !emitted_core_slice_import && output_needs_core_slice_import(output, features) &&
        !output_has_import_line(output, "import kvist_slice \"core:slice\"") {
         append(&late_imports, "import kvist_slice \"core:slice\"")
     }
@@ -17606,7 +17615,7 @@ emit_eval_decls_with_source_map :: proc(decls: []IR_Decl, eval_form: CST_Form, n
     emit_core_helpers(&e, features)
     output := strings.clone(strings.to_string(e.builder))
     late_imports: [dynamic]string
-    if !emitted_core_slice_import && features_need_core_slice_sort_import(features) &&
+    if !emitted_core_slice_import && output_needs_core_slice_import(output, features) &&
        !output_has_import_line(output, "import kvist_slice \"core:slice\"") {
         append(&late_imports, "import kvist_slice \"core:slice\"")
     }

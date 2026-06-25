@@ -7767,6 +7767,68 @@ macroexpand_evaluates_reduce_helper :: proc(t: ^testing.T) {
 }
 
 @(test)
+macroexpand_recursive_macro_dsl_does_not_overflow_stack :: proc(t: ^testing.T) {
+    builder := strings.builder_make()
+    defer strings.builder_destroy(&builder)
+    strings.write_string(&builder, `(package main)
+
+(defmacro- map-id [items]
+  (if (= (count items) 0)
+    0
+    (if (= (source (first items)) ":db/id")
+      (nth items 1)
+      (map-id (rest (rest items))))))
+
+(defmacro- emit-map-attrs [e items]
+  (if (= (count items) 0)
+    (forms)
+    (if (= (source (first items)) ":db/id")
+      (emit-map-attrs e (rest (rest items)))
+      (concat
+        (forms
+          (quasiquote (println (unquote e)
+                               (unquote (source (first items)))
+                               (unquote (count (nth items 1))))))
+        (emit-map-attrs e (rest (rest items)))))))
+
+(defmacro- emit-item [form]
+  (emit-map-attrs (map-id form) form))
+
+(defmacro- emit-items [forms]
+  (if (= (count forms) 0)
+    (forms)
+    (concat
+      (emit-item (first forms))
+      (emit-items (rest forms)))))
+
+(defmacro many-maps [& forms]
+  (quasiquote
+    (do
+      (splice (emit-items forms)))))
+
+(defn main []
+  (many-maps
+`)
+    for i in 0 ..< 20 {
+        fmt.sbprintf(&builder, "    %s:db/id %d :name \"n%d\" :aka [\"x\" \"y\"] :children [%d]%s\n", "{", i+1, i+1, i+10, "}")
+    }
+    strings.write_string(&builder, `  ))`)
+
+    source := strings.clone(strings.to_string(builder))
+    defer delete(source)
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "fmt.println(1, \":name\", 1)"), true)
+    testing.expect_value(t, strings.contains(output, "fmt.println(20, \":children\", 1)"), true)
+}
+
+@(test)
 macroexpand_chained_if_let :: proc(t: ^testing.T) {
     output, err, ok := kvist.macroexpand_source(`(if-let [[a ok] (query 1)
          [b ok] (query a)]
@@ -17684,6 +17746,7 @@ compile_shipped_arr_source_package_uses_hybrid_resolution :: proc(t: ^testing.T)
     testing.expect_value(t, strings.contains(output, "shuffled := arr__shuffle_impl(pick_first, (xs)[0:])"), true)
     testing.expect_value(t, strings.contains(output, "arr__sort_impl :: #force_inline proc(xs: []$T) -> [dynamic]T {"), true)
     testing.expect_value(t, strings.contains(output, "kvist_slice.sort((out)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "import kvist_slice \"core:slice\""), true)
     testing.expect_value(t, strings.contains(output, "sorted := arr__sort_impl((xs)[0:])"), true)
     testing.expect_value(t, strings.contains(output, "kvist_thread_1 := arr__mapcat_impl(pair, (xs)[:])"), true)
     testing.expect_value(t, strings.contains(output, "defer delete(kvist_thread_1)"), true)

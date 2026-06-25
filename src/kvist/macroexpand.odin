@@ -1473,6 +1473,253 @@ macro_quasiquote_form :: proc(form: CST_Form, macros: []User_Macro, bindings: []
     }
 }
 
+macro_eval_contains_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_Binding) -> (Macro_Value, Compile_Error, bool) {
+    if len(form.items) != 3 {
+        return Macro_Value{}, Compile_Error{message = "contains? expects collection and value", span = form.span}, false
+    }
+    collection, err_collection, ok_collection := macro_eval_expr(form.items[1], macros, bindings)
+    if !ok_collection {
+        return Macro_Value{}, err_collection, false
+    }
+    needle, err_needle, ok_needle := macro_eval_expr(form.items[2], macros, bindings)
+    if !ok_needle {
+        macro_value_delete_backing(&collection)
+        return Macro_Value{}, err_needle, false
+    }
+    defer macro_value_delete_backing(&collection)
+    defer macro_value_delete_backing(&needle)
+    if collection.kind == .String {
+        if needle.kind != .String {
+            return Macro_Value{}, Compile_Error{message = "contains? on strings expects a string needle", span = form.items[2].span}, false
+        }
+        return macro_bool_value(strings.contains(collection.string_value, needle.string_value)), Compile_Error{}, true
+    }
+    forms, err_forms, ok_forms := macro_list_from_value(collection, form.items[1].span)
+    if !ok_forms {
+        return Macro_Value{}, err_forms, false
+    }
+    for candidate_form in forms {
+        candidate, _, ok_candidate := macro_eval_expr(candidate_form, macros, bindings)
+        if !ok_candidate {
+            candidate = macro_form_value(candidate_form)
+        }
+        if macro_value_equal(candidate, needle) {
+            macro_value_delete_backing(&candidate)
+            return macro_bool_value(true), Compile_Error{}, true
+        }
+        macro_value_delete_backing(&candidate)
+    }
+    return macro_bool_value(false), Compile_Error{}, true
+}
+
+macro_eval_string_contains_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_Binding) -> (Macro_Value, Compile_Error, bool) {
+    if len(form.items) != 3 {
+        return Macro_Value{}, Compile_Error{message = "str.contains? expects string and needle", span = form.span}, false
+    }
+    haystack, err_haystack, ok_haystack := macro_eval_expr(form.items[1], macros, bindings)
+    if !ok_haystack {
+        return Macro_Value{}, err_haystack, false
+    }
+    needle, err_needle, ok_needle := macro_eval_expr(form.items[2], macros, bindings)
+    if !ok_needle {
+        macro_value_delete_backing(&haystack)
+        return Macro_Value{}, err_needle, false
+    }
+    defer macro_value_delete_backing(&haystack)
+    defer macro_value_delete_backing(&needle)
+    if haystack.kind != .String || needle.kind != .String {
+        return Macro_Value{}, Compile_Error{message = "str.contains? expects string arguments", span = form.span}, false
+    }
+    return macro_bool_value(strings.contains(haystack.string_value, needle.string_value)), Compile_Error{}, true
+}
+
+macro_eval_string_affix_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_Binding, starts: bool) -> (Macro_Value, Compile_Error, bool) {
+    if len(form.items) != 3 {
+        return Macro_Value{}, Compile_Error{message = "string affix helper expects string and affix", span = form.span}, false
+    }
+    text, err_text, ok_text := macro_eval_expr(form.items[1], macros, bindings)
+    if !ok_text {
+        return Macro_Value{}, err_text, false
+    }
+    affix, err_affix, ok_affix := macro_eval_expr(form.items[2], macros, bindings)
+    if !ok_affix {
+        macro_value_delete_backing(&text)
+        return Macro_Value{}, err_affix, false
+    }
+    defer macro_value_delete_backing(&text)
+    defer macro_value_delete_backing(&affix)
+    if text.kind != .String || affix.kind != .String {
+        return Macro_Value{}, Compile_Error{message = "string affix helper expects string arguments", span = form.span}, false
+    }
+    if starts {
+        return macro_bool_value(strings.has_prefix(text.string_value, affix.string_value)), Compile_Error{}, true
+    }
+    return macro_bool_value(strings.has_suffix(text.string_value, affix.string_value)), Compile_Error{}, true
+}
+
+macro_eval_parse_int_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_Binding) -> (Macro_Value, Compile_Error, bool) {
+    if len(form.items) != 2 {
+        return Macro_Value{}, Compile_Error{message = "parse-int expects one string", span = form.span}, false
+    }
+    value, err_value, ok_value := macro_eval_expr(form.items[1], macros, bindings)
+    if !ok_value {
+        return Macro_Value{}, err_value, false
+    }
+    defer macro_value_delete_backing(&value)
+    text, err_text, ok_text := macro_value_to_string(value, form.items[1].span)
+    if !ok_text {
+        return Macro_Value{}, err_text, false
+    }
+    defer delete(text)
+    parsed, ok_parsed := strconv.parse_int(text)
+    if !ok_parsed {
+        return macro_nil_value(), Compile_Error{}, true
+    }
+    return macro_int_value(parsed), Compile_Error{}, true
+}
+
+macro_eval_digit_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_Binding) -> (Macro_Value, Compile_Error, bool) {
+    if len(form.items) != 2 {
+        return Macro_Value{}, Compile_Error{message = "digit? expects one string", span = form.span}, false
+    }
+    value, err_value, ok_value := macro_eval_expr(form.items[1], macros, bindings)
+    if !ok_value {
+        return Macro_Value{}, err_value, false
+    }
+    defer macro_value_delete_backing(&value)
+    text, err_text, ok_text := macro_value_to_string(value, form.items[1].span)
+    if !ok_text {
+        return Macro_Value{}, err_text, false
+    }
+    defer delete(text)
+    return macro_bool_value(len(text) == 1 && text[0] >= '0' && text[0] <= '9'), Compile_Error{}, true
+}
+
+macro_eval_some_every_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_Binding, every: bool) -> (Macro_Value, Compile_Error, bool) {
+    if len(form.items) != 3 {
+        return Macro_Value{}, Compile_Error{message = "macro sequence predicate helper expects predicate and sequence", span = form.span}, false
+    }
+    seq_value, err_seq, ok_seq := macro_eval_expr(form.items[2], macros, bindings)
+    if !ok_seq {
+        return Macro_Value{}, err_seq, false
+    }
+    defer macro_value_delete_backing(&seq_value)
+    forms, err_forms, ok_forms := macro_list_from_value(seq_value, form.items[2].span)
+    if !ok_forms {
+        return Macro_Value{}, err_forms, false
+    }
+    for item in forms {
+        item_value := macro_form_value(item)
+        result, err_result, ok_result := macro_apply_unary_function(form.items[1], item_value, macros, bindings)
+        if !ok_result {
+            return Macro_Value{}, err_result, false
+        }
+        truthy := macro_truthy(result)
+        macro_value_delete_backing(&result)
+        if !every && truthy {
+            return macro_bool_value(true), Compile_Error{}, true
+        }
+        if every && !truthy {
+            return macro_bool_value(false), Compile_Error{}, true
+        }
+    }
+    return macro_bool_value(every), Compile_Error{}, true
+}
+
+macro_eval_map_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_Binding) -> (Macro_Value, Compile_Error, bool) {
+    if len(form.items) != 3 {
+        return Macro_Value{}, Compile_Error{message = "map expects function and sequence", span = form.span}, false
+    }
+    seq_value, err_seq, ok_seq := macro_eval_expr(form.items[2], macros, bindings)
+    if !ok_seq {
+        return Macro_Value{}, err_seq, false
+    }
+    defer macro_value_delete_backing(&seq_value)
+    forms, err_forms, ok_forms := macro_list_from_value(seq_value, form.items[2].span)
+    if !ok_forms {
+        return Macro_Value{}, err_forms, false
+    }
+    out := CST_Form{kind = .Vector, span = form.span}
+    for item in forms {
+        item_value := macro_form_value(item)
+        mapped, err_mapped, ok_mapped := macro_apply_unary_function(form.items[1], item_value, macros, bindings)
+        if !ok_mapped {
+            delete_cst_form(&out)
+            return Macro_Value{}, err_mapped, false
+        }
+        mapped_form, err_form, ok_form := macro_value_to_owned_form(mapped, item.span)
+        macro_value_delete_backing(&mapped)
+        if !ok_form {
+            delete_cst_form(&out)
+            return Macro_Value{}, err_form, false
+        }
+        append(&out.items, mapped_form)
+    }
+    return macro_owned_form_value(out), Compile_Error{}, true
+}
+
+macro_eval_filter_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_Binding) -> (Macro_Value, Compile_Error, bool) {
+    if len(form.items) != 3 {
+        return Macro_Value{}, Compile_Error{message = "filter expects predicate and sequence", span = form.span}, false
+    }
+    seq_value, err_seq, ok_seq := macro_eval_expr(form.items[2], macros, bindings)
+    if !ok_seq {
+        return Macro_Value{}, err_seq, false
+    }
+    defer macro_value_delete_backing(&seq_value)
+    forms, err_forms, ok_forms := macro_list_from_value(seq_value, form.items[2].span)
+    if !ok_forms {
+        return Macro_Value{}, err_forms, false
+    }
+    out := CST_Form{kind = .Vector, span = form.span}
+    for item in forms {
+        item_value := macro_form_value(item)
+        keep, err_keep, ok_keep := macro_apply_unary_function(form.items[1], item_value, macros, bindings)
+        if !ok_keep {
+            delete_cst_form(&out)
+            return Macro_Value{}, err_keep, false
+        }
+        truthy := macro_truthy(keep)
+        macro_value_delete_backing(&keep)
+        if truthy {
+            append(&out.items, clone_cst_form(item))
+        }
+    }
+    return macro_owned_form_value(out), Compile_Error{}, true
+}
+
+macro_eval_reduce_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_Binding) -> (Macro_Value, Compile_Error, bool) {
+    if len(form.items) != 4 {
+        return Macro_Value{}, Compile_Error{message = "reduce expects reducer, initial value, and sequence", span = form.span}, false
+    }
+    acc, err_acc, ok_acc := macro_eval_expr(form.items[2], macros, bindings)
+    if !ok_acc {
+        return Macro_Value{}, err_acc, false
+    }
+    seq_value, err_seq, ok_seq := macro_eval_expr(form.items[3], macros, bindings)
+    if !ok_seq {
+        macro_value_delete_backing(&acc)
+        return Macro_Value{}, err_seq, false
+    }
+    defer macro_value_delete_backing(&seq_value)
+    forms, err_forms, ok_forms := macro_list_from_value(seq_value, form.items[3].span)
+    if !ok_forms {
+        macro_value_delete_backing(&acc)
+        return Macro_Value{}, err_forms, false
+    }
+    for item in forms {
+        item_value := macro_form_value(item)
+        args := [?]Macro_Value{acc, item_value}
+        next_acc, err_next, ok_next := macro_apply_user_function(form.items[1], args[:], macros, bindings)
+        macro_value_delete_backing(&acc)
+        if !ok_next {
+            return Macro_Value{}, err_next, false
+        }
+        acc = next_acc
+    }
+    return acc, Compile_Error{}, true
+}
+
 macro_eval_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_Binding) -> (Macro_Value, Compile_Error, bool) {
     #partial switch form.kind {
     case .Nil:
@@ -2185,250 +2432,25 @@ macro_eval_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_
                 }
                 return macro_bool_value(true), Compile_Error{}, true
             case "contains?", "core.contains?", "core-contains?":
-                if len(form.items) != 3 {
-                    return Macro_Value{}, Compile_Error{message = "contains? expects collection and value", span = form.span}, false
-                }
-                collection, err_collection, ok_collection := macro_eval_expr(form.items[1], macros, bindings)
-                if !ok_collection {
-                    return Macro_Value{}, err_collection, false
-                }
-                needle, err_needle, ok_needle := macro_eval_expr(form.items[2], macros, bindings)
-                if !ok_needle {
-                    macro_value_delete_backing(&collection)
-                    return Macro_Value{}, err_needle, false
-                }
-                defer macro_value_delete_backing(&collection)
-                defer macro_value_delete_backing(&needle)
-                if collection.kind == .String {
-                    if needle.kind != .String {
-                        return Macro_Value{}, Compile_Error{message = "contains? on strings expects a string needle", span = form.items[2].span}, false
-                    }
-                    return macro_bool_value(strings.contains(collection.string_value, needle.string_value)), Compile_Error{}, true
-                }
-                forms, err_forms, ok_forms := macro_list_from_value(collection, form.items[1].span)
-                if !ok_forms {
-                    return Macro_Value{}, err_forms, false
-                }
-                for candidate_form in forms {
-                    candidate, _, ok_candidate := macro_eval_expr(candidate_form, macros, bindings)
-                    if !ok_candidate {
-                        candidate = macro_form_value(candidate_form)
-                    }
-                    if macro_value_equal(candidate, needle) {
-                        macro_value_delete_backing(&candidate)
-                        return macro_bool_value(true), Compile_Error{}, true
-                    }
-                    macro_value_delete_backing(&candidate)
-                }
-                return macro_bool_value(false), Compile_Error{}, true
+                return macro_eval_contains_expr(form, macros, bindings)
             case "str.contains?":
-                if len(form.items) != 3 {
-                    return Macro_Value{}, Compile_Error{message = "str.contains? expects string and needle", span = form.span}, false
-                }
-                haystack, err_haystack, ok_haystack := macro_eval_expr(form.items[1], macros, bindings)
-                if !ok_haystack {
-                    return Macro_Value{}, err_haystack, false
-                }
-                needle, err_needle, ok_needle := macro_eval_expr(form.items[2], macros, bindings)
-                if !ok_needle {
-                    macro_value_delete_backing(&haystack)
-                    return Macro_Value{}, err_needle, false
-                }
-                defer macro_value_delete_backing(&haystack)
-                defer macro_value_delete_backing(&needle)
-                if haystack.kind != .String || needle.kind != .String {
-                    return Macro_Value{}, Compile_Error{message = "str.contains? expects string arguments", span = form.span}, false
-                }
-                return macro_bool_value(strings.contains(haystack.string_value, needle.string_value)), Compile_Error{}, true
+                return macro_eval_string_contains_expr(form, macros, bindings)
             case "starts-with?", "str.starts-with?":
-                if len(form.items) != 3 {
-                    return Macro_Value{}, Compile_Error{message = "starts-with? expects string and prefix", span = form.span}, false
-                }
-                text, err_text, ok_text := macro_eval_expr(form.items[1], macros, bindings)
-                if !ok_text {
-                    return Macro_Value{}, err_text, false
-                }
-                prefix, err_prefix, ok_prefix := macro_eval_expr(form.items[2], macros, bindings)
-                if !ok_prefix {
-                    macro_value_delete_backing(&text)
-                    return Macro_Value{}, err_prefix, false
-                }
-                defer macro_value_delete_backing(&text)
-                defer macro_value_delete_backing(&prefix)
-                if text.kind != .String || prefix.kind != .String {
-                    return Macro_Value{}, Compile_Error{message = "starts-with? expects string arguments", span = form.span}, false
-                }
-                return macro_bool_value(strings.has_prefix(text.string_value, prefix.string_value)), Compile_Error{}, true
+                return macro_eval_string_affix_expr(form, macros, bindings, true)
             case "ends-with?", "str.ends-with?":
-                if len(form.items) != 3 {
-                    return Macro_Value{}, Compile_Error{message = "ends-with? expects string and suffix", span = form.span}, false
-                }
-                text, err_text, ok_text := macro_eval_expr(form.items[1], macros, bindings)
-                if !ok_text {
-                    return Macro_Value{}, err_text, false
-                }
-                suffix, err_suffix, ok_suffix := macro_eval_expr(form.items[2], macros, bindings)
-                if !ok_suffix {
-                    macro_value_delete_backing(&text)
-                    return Macro_Value{}, err_suffix, false
-                }
-                defer macro_value_delete_backing(&text)
-                defer macro_value_delete_backing(&suffix)
-                if text.kind != .String || suffix.kind != .String {
-                    return Macro_Value{}, Compile_Error{message = "ends-with? expects string arguments", span = form.span}, false
-                }
-                return macro_bool_value(strings.has_suffix(text.string_value, suffix.string_value)), Compile_Error{}, true
+                return macro_eval_string_affix_expr(form, macros, bindings, false)
             case "parse-int", "str.parse-int":
-                if len(form.items) != 2 {
-                    return Macro_Value{}, Compile_Error{message = "parse-int expects one string", span = form.span}, false
-                }
-                value, err_value, ok_value := macro_eval_expr(form.items[1], macros, bindings)
-                if !ok_value {
-                    return Macro_Value{}, err_value, false
-                }
-                defer macro_value_delete_backing(&value)
-                text, err_text, ok_text := macro_value_to_string(value, form.items[1].span)
-                if !ok_text {
-                    return Macro_Value{}, err_text, false
-                }
-                defer delete(text)
-                parsed, ok_parsed := strconv.parse_int(text)
-                if !ok_parsed {
-                    return macro_nil_value(), Compile_Error{}, true
-                }
-                return macro_int_value(parsed), Compile_Error{}, true
+                return macro_eval_parse_int_expr(form, macros, bindings)
             case "digit?", "str.digit?":
-                if len(form.items) != 2 {
-                    return Macro_Value{}, Compile_Error{message = "digit? expects one string", span = form.span}, false
-                }
-                value, err_value, ok_value := macro_eval_expr(form.items[1], macros, bindings)
-                if !ok_value {
-                    return Macro_Value{}, err_value, false
-                }
-                defer macro_value_delete_backing(&value)
-                text, err_text, ok_text := macro_value_to_string(value, form.items[1].span)
-                if !ok_text {
-                    return Macro_Value{}, err_text, false
-                }
-                defer delete(text)
-                return macro_bool_value(len(text) == 1 && text[0] >= '0' && text[0] <= '9'), Compile_Error{}, true
+                return macro_eval_digit_expr(form, macros, bindings)
             case "some?", "every?":
-                if len(form.items) != 3 {
-                    return Macro_Value{}, Compile_Error{message = fmt.tprintf("%s expects predicate and sequence", head.text), span = form.span}, false
-                }
-                seq_value, err_seq, ok_seq := macro_eval_expr(form.items[2], macros, bindings)
-                if !ok_seq {
-                    return Macro_Value{}, err_seq, false
-                }
-                defer macro_value_delete_backing(&seq_value)
-                forms, err_forms, ok_forms := macro_list_from_value(seq_value, form.items[2].span)
-                if !ok_forms {
-                    return Macro_Value{}, err_forms, false
-                }
-                for item in forms {
-                    item_value := macro_form_value(item)
-                    result, err_result, ok_result := macro_apply_unary_function(form.items[1], item_value, macros, bindings)
-                    if !ok_result {
-                        return Macro_Value{}, err_result, false
-                    }
-                    truthy := macro_truthy(result)
-                    macro_value_delete_backing(&result)
-                    if head.text == "some?" && truthy {
-                        return macro_bool_value(true), Compile_Error{}, true
-                    }
-                    if head.text == "every?" && !truthy {
-                        return macro_bool_value(false), Compile_Error{}, true
-                    }
-                }
-                return macro_bool_value(head.text == "every?"), Compile_Error{}, true
+                return macro_eval_some_every_expr(form, macros, bindings, head.text == "every?")
             case "map":
-                if len(form.items) != 3 {
-                    return Macro_Value{}, Compile_Error{message = "map expects function and sequence", span = form.span}, false
-                }
-                seq_value, err_seq, ok_seq := macro_eval_expr(form.items[2], macros, bindings)
-                if !ok_seq {
-                    return Macro_Value{}, err_seq, false
-                }
-                defer macro_value_delete_backing(&seq_value)
-                forms, err_forms, ok_forms := macro_list_from_value(seq_value, form.items[2].span)
-                if !ok_forms {
-                    return Macro_Value{}, err_forms, false
-                }
-                out := CST_Form{kind = .Vector, span = form.span}
-                for item in forms {
-                    item_value := macro_form_value(item)
-                    mapped, err_mapped, ok_mapped := macro_apply_unary_function(form.items[1], item_value, macros, bindings)
-                    if !ok_mapped {
-                        delete_cst_form(&out)
-                        return Macro_Value{}, err_mapped, false
-                    }
-                    mapped_form, err_form, ok_form := macro_value_to_owned_form(mapped, item.span)
-                    macro_value_delete_backing(&mapped)
-                    if !ok_form {
-                        delete_cst_form(&out)
-                        return Macro_Value{}, err_form, false
-                    }
-                    append(&out.items, mapped_form)
-                }
-                return macro_owned_form_value(out), Compile_Error{}, true
+                return macro_eval_map_expr(form, macros, bindings)
             case "filter":
-                if len(form.items) != 3 {
-                    return Macro_Value{}, Compile_Error{message = "filter expects predicate and sequence", span = form.span}, false
-                }
-                seq_value, err_seq, ok_seq := macro_eval_expr(form.items[2], macros, bindings)
-                if !ok_seq {
-                    return Macro_Value{}, err_seq, false
-                }
-                defer macro_value_delete_backing(&seq_value)
-                forms, err_forms, ok_forms := macro_list_from_value(seq_value, form.items[2].span)
-                if !ok_forms {
-                    return Macro_Value{}, err_forms, false
-                }
-                out := CST_Form{kind = .Vector, span = form.span}
-                for item in forms {
-                    item_value := macro_form_value(item)
-                    keep, err_keep, ok_keep := macro_apply_unary_function(form.items[1], item_value, macros, bindings)
-                    if !ok_keep {
-                        delete_cst_form(&out)
-                        return Macro_Value{}, err_keep, false
-                    }
-                    truthy := macro_truthy(keep)
-                    macro_value_delete_backing(&keep)
-                    if truthy {
-                        append(&out.items, clone_cst_form(item))
-                    }
-                }
-                return macro_owned_form_value(out), Compile_Error{}, true
+                return macro_eval_filter_expr(form, macros, bindings)
             case "reduce":
-                if len(form.items) != 4 {
-                    return Macro_Value{}, Compile_Error{message = "reduce expects reducer, initial value, and sequence", span = form.span}, false
-                }
-                acc, err_acc, ok_acc := macro_eval_expr(form.items[2], macros, bindings)
-                if !ok_acc {
-                    return Macro_Value{}, err_acc, false
-                }
-                seq_value, err_seq, ok_seq := macro_eval_expr(form.items[3], macros, bindings)
-                if !ok_seq {
-                    macro_value_delete_backing(&acc)
-                    return Macro_Value{}, err_seq, false
-                }
-                defer macro_value_delete_backing(&seq_value)
-                forms, err_forms, ok_forms := macro_list_from_value(seq_value, form.items[3].span)
-                if !ok_forms {
-                    macro_value_delete_backing(&acc)
-                    return Macro_Value{}, err_forms, false
-                }
-                for item in forms {
-                    item_value := macro_form_value(item)
-                    args := [?]Macro_Value{acc, item_value}
-                    next_acc, err_next, ok_next := macro_apply_user_function(form.items[1], args[:], macros, bindings)
-                    macro_value_delete_backing(&acc)
-                    if !ok_next {
-                        return Macro_Value{}, err_next, false
-                    }
-                    acc = next_acc
-                }
-                return acc, Compile_Error{}, true
+                return macro_eval_reduce_expr(form, macros, bindings)
             case "form?":
                 if len(form.items) != 2 {
                     return Macro_Value{}, Compile_Error{message = "form? expects one argument", span = form.span}, false
