@@ -18,8 +18,8 @@
   (return (+ value 1) nil))
 
 (defn parse-label [text: string] -> string
-  ;; if-let checks the boolean result directly. There is no implicit truthiness
-  ;; and no special error handling here.
+  ;; if-let checks the boolean result directly. There is no implicit condition
+  ;; coercion and no special error handling here.
   (if-let [[value ok] (parse-demo-int text)]
     (fmt.tprintf "parsed %d" value)
     "not parsed"))

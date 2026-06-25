@@ -19,7 +19,7 @@
   (t.testing "fixtures"
     (t.is (= once-ran 1))
     (t.is (> each-ran 0)))
-  (t.testing "truthiness"
+  (t.testing "boolean assertions"
     (t.is true)
     (t.is (not false))
     (t.is (= (+ 2 3) 5)))

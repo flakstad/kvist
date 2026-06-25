@@ -1,8 +1,9 @@
 # Functional Transforms
 
 Functional transforms are Kvist's main tool for reusable data shaping. They
-let you write one item-flow pipeline and consume it as a collection, scalar
-reduction, or loop, while the compiler still emits direct fused Odin loops.
+are compile-time pipeline structure, not runtime values. They let you write one
+item-flow pipeline and consume it as a collection, scalar reduction, or loop,
+while the compiler still emits direct fused Odin loops.
 
 Use them when you would otherwise duplicate the same filtering and mapping in
 several hand-written loops.
@@ -20,22 +21,33 @@ several hand-written loops.
 ```
 
 No lazy sequences are built. No intermediate arrays are created unless you ask
-for one with `into`.
+for one with `into`. Transform specs are accepted only in transform positions
+such as `deftransform`, `into`, `arr.into!`, `transduce`, and `for :transform`.
 
-Files that lean heavily on array-style data shaping can import `kvist:arr`
-without an alias and use the package helpers bare:
+Ordinary eager collection helpers should usually stay package-qualified in
+introductory code so their array-specific ownership is visible:
 
 ```clojure
-(import "kvist:arr")
+(import arr "kvist:arr")
 
 (defn active-names [users: []User] -> [dynamic]string
-  (let [active (filter .active? users) :defer]
-    (map .name active)))
+  (let [active (arr.filter .active? users) :defer]
+    (arr.map .name active)))
 ```
 
-That style keeps eager helper calls visually close to transform specs. It is
-available for unaliased Kvist source-package imports; explicit aliases such as
-`(import arr "kvist:arr")` still use `arr.map`, `arr.filter`, and so on.
+Transform steps intentionally keep the shorter contextual syntax:
+
+```clojure
+(into [dynamic]string
+  (comp
+    (filter .active?)
+    (map .name))
+  users)
+```
+
+Kvist can expose package helpers as bare names for unaliased Kvist
+source-package imports, but qualified helpers are the clearer default when
+teaching the eager helper surface.
 
 ## When To Use Them
 
@@ -56,7 +68,9 @@ If a transform makes the code harder to read, use a direct `for` loop instead.
 
 ## Current Surface
 
-Named transforms use `deftransform`:
+Named transforms use `deftransform`. A named transform is compile-time
+structure that can be reused in transform positions; it is not a first-class
+runtime value:
 
 ```clojure
 (deftransform paid-order-totals

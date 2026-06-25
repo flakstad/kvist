@@ -36,6 +36,8 @@ Use this document as a reference, not a tutorial:
 
 - start with the sections on files, names, types, declarations, and calls if
   you want the core language model
+- read [FALSE-FRIENDS.md](FALSE-FRIENDS.md) early if you know Clojure or other
+  Lisps; several familiar-looking forms keep Odin-shaped semantics
 - read the ownership and pointer sections before writing larger programs
 - use the focused docs for helper-library surfaces such as sequences,
   transforms, macros, and tooling
@@ -819,7 +821,7 @@ and `:or-return`, Kvist checks the last returned value only.
   and a non-zero error means failure
 
 The earlier returned values are just ordinary bound results. They are not
-packed into a special tuple object and they are not inspected for truthiness.
+packed into a special tuple object and they are not inspected as conditions.
 
 So these two forms are applying the same rule to different final return types:
 
@@ -904,7 +906,9 @@ containers:
 #{:dev :prod}            ; set[keyword]
 ```
 
-These literals create owned values. Delete them when a local binding owns them:
+These are owned values, not persistent Clojure data structures. Delete them
+when a local binding owns them, return them to transfer ownership, or pass them
+to an API that takes ownership:
 
 ```clojure
 (let [xs [1 2 3] :defer
@@ -1059,6 +1063,9 @@ The false branch of a `when` expression is the zero value for the expected type.
 In the example above, false returns `int{}`. A single-form body can often provide
 the type in a local binding; multi-form `when` expressions need an explicit
 expected type from the surrounding context.
+
+Use value-producing `when` when that zero value is the intended fallback. When
+the false branch carries meaning, prefer `if` and spell both branches out.
 
 Use `do` when a branch or callback needs several expressions:
 
@@ -1284,8 +1291,8 @@ The main distinction is:
 - `when-let` / `if-let`: the second value is a `bool`
 - `when-ok` / `if-ok`: the second value is an error object or error pointer
 
-There is no implicit truthiness and no automatic exception model. Success and
-failure stay explicit in the source.
+There is no implicit condition coercion and no automatic exception model.
+Conditions are boolean, and success and failure stay explicit in the source.
 
 ### Named Returns And Naked `return`
 
@@ -1799,7 +1806,8 @@ This is intentionally different from Clojure:
 (or-else (lookup-cache key) fallback)
 ```
 
-The Clojure pattern of returning the first truthy value does not work in Kvist:
+The Clojure pattern of returning the first non-false/nil value does not work in
+Kvist:
 
 ```clojure
 ; Clojure-style, not Kvist
@@ -1807,8 +1815,8 @@ The Clojure pattern of returning the first truthy value does not work in Kvist:
 ```
 
 Use `or-else` when the expression returns `[value, ok]` and you want a fallback
-value. Kvist does not have Clojure-style truthiness: values are not treated as
-conditions unless their type is actually boolean.
+value. Kvist does not treat arbitrary values as conditions; condition
+expressions must be boolean.
 
 `=`, `<`, `<=`, `>`, and `>=` support two or more operands and compare adjacent
 values once:

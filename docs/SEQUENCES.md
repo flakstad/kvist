@@ -36,10 +36,8 @@ These helpers are the current core and shipped package surface for sequence-like
 work:
 
 ```clojure
-(import "kvist:arr") ; exposes arr helpers as bare names too
+(import arr "kvist:arr")
 
-(map f xs)
-(filter pred xs)
 (arr.count xs)
 (arr.empty T)
 (arr.empty T capacity)
@@ -190,7 +188,8 @@ Cross-family collection helpers live in `kvist:core`: `count`,
 `delete!`. Other collection operations usually use explicit package names such
 as `arr.*`, `map.*`, `str.*`, or `set.*`. Unaliased imports such as
 `(import "kvist:arr")` may also use public package helpers bare, such as
-`map`, `filter`, and `reduce`.
+`map`, `filter`, and `reduce`, but package-qualified calls are clearer in
+introductory code because they keep the eager array helper model visible.
 
 Macro-time helpers with similar names operate on source forms; see
 [MACROS.md](MACROS.md) for that smaller compile-time surface.
@@ -571,6 +570,11 @@ data flow much easier to read:
      (arr.take 10))
 ```
 
+This is convenience syntax for ordinary eager work. It can be perfectly fine in
+non-hot paths, but it does not fuse those eager helpers: `arr.filter` allocates
+an owned result, `arr.map` allocates another owned result, and `arr.take`
+returns a borrowed slice view.
+
 The hard part is ownership. If a thread step allocates and its result is passed
 directly into the next step, the compiler must not lose the only handle to that
 owned value.
@@ -587,6 +591,9 @@ Production-style code can always bind owned intermediate results explicitly:
 ```
 
 This is slightly noisier, but it is honest and emits obvious Odin.
+
+For serious hot paths, use a fused transform, a bang-helper working buffer, or
+an explicit loop instead of a chain of eager owned builders.
 
 For threaded pipelines in `let` bindings, Kvist lowers allocating intermediate
 steps to named temporaries and emits cleanup for those generated temporaries:

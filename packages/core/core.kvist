@@ -74,8 +74,8 @@
   "Evaluate test.expression clauses from left to right.
 
   Clauses are written as `test expr` pairs, with `:else expr` as the final
-  fallback. The first truthy test selects its expression. This is a macro, not a
-  runtime dispatcher, and lowers to ordinary conditional code."
+  fallback. The first true boolean test selects its expression. This is a macro,
+  not a runtime dispatcher, and lowers to ordinary conditional code."
   [& clauses]
   (if (= (kvist.count clauses) 0)
     (error "cond expects at least one clause")

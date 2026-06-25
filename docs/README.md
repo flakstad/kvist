@@ -5,6 +5,8 @@ the tooling, and the ownership rules that matter in real programs.
 
 Start here:
 
+- [FALSE-FRIENDS.md](FALSE-FRIENDS.md) - Clojure/Lisp-looking forms whose
+  Kvist semantics stay Odin-shaped
 - [LANGUAGE.md](LANGUAGE.md) - core language reference
 - [FUNCTIONAL-TRANSFORMS.md](FUNCTIONAL-TRANSFORMS.md) - fused data transforms with `into`, `transduce`, and `for`
 - [TOOLING.md](TOOLING.md) - CLI and editor-facing tooling

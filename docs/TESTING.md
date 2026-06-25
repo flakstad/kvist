@@ -54,7 +54,7 @@ result from the underlying assertion helper.
 
 Equality forms of shape `(= actual expected)` use value-aware reporting when
 possible, so failures can show both sides. Ordinary boolean expressions are
-checked as truthy-or-not, which is exactly as dramatic as it needs to be.
+checked as true or false.
 
 ## Context
 

@@ -95,10 +95,16 @@ Kvist is designed to feel familiar to Clojure programmers, but its semantics
 are those of a native, ownership-oriented systems language. There is no dynamic
 runtime, no lazy sequence abstraction, no persistent collection model, and no
 garbage collection. Package `kvist:arr` provides familiar functions such as
-`map`, `filter`, and `reduce`, but they operate on concrete arrays and slices.
+`arr.map`, `arr.filter`, and `arr.reduce`, but they operate on concrete arrays
+and slices.
 Some functions return new owned results, and mutation-oriented variants like
-`map!` update existing storage directly. Kvist also provides transforms and
-transducers.
+`arr.map!` update existing storage directly. Kvist also provides compile-time
+fused transforms for allocation-free item pipelines.
+
+If you know Clojure or another Lisp, read
+[docs/FALSE-FRIENDS.md](docs/FALSE-FRIENDS.md) early. Forms such as `for`,
+`when`, `fn`, vector literals, field selectors, and transform steps are
+intentionally Odin-shaped even when their spelling looks familiar.
 
 ## A Quick Look
 
@@ -194,6 +200,14 @@ For local bindings, `:defer` expands to cleanup at the end of the scope:
 Use `:defer`, return the owned value, or pass it to an API that takes ownership.
 There is no hidden collector cleaning up behind the scenes. See
 [docs/LANGUAGE.md](docs/LANGUAGE.md) for the ownership and allocator rules.
+
+Inline collection literals follow the same rule. In common expression contexts,
+`[1 2 3]` creates owned dynamic array storage, not a persistent vector value:
+
+```clojure
+(let [xs [1 2 3] :defer]
+  (println (count xs)))
+```
 
 For the full language surface, see [docs/LANGUAGE.md](docs/LANGUAGE.md). For
 more runnable examples, see [examples/README.md](examples/README.md).
