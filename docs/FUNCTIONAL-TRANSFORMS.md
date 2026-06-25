@@ -45,9 +45,16 @@ Transform steps intentionally keep the shorter contextual syntax:
   users)
 ```
 
-Kvist can expose package helpers as bare names for unaliased Kvist
-source-package imports, but qualified helpers are the clearer default when
-teaching the eager helper surface.
+Files that lean heavily on array-style data shaping can opt into selected bare
+`kvist:arr` helpers with `:refer`:
+
+```clojure
+(import "kvist:arr" :refer [map filter])
+```
+
+That style keeps eager helper calls visually close to transform specs. It is an
+explicit opt-in; `(import arr "kvist:arr")` keeps calls qualified as `arr.map`,
+`arr.filter`, and so on.
 
 ## When To Use Them
 

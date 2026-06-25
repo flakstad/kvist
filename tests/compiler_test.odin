@@ -1,7 +1,7 @@
 package tests
 
 import "base:runtime"
-import "core:fmt"
+import fmt "core:fmt"
 import "core:os"
 import "core:strings"
 import "core:testing"
@@ -54,7 +54,7 @@ json_field_contains_path :: proc(text, field, path: string) -> bool {
 @(test)
 compile_hello_program :: proc(t: ^testing.T) {
     source := `(package main)
-(import "core:fmt")
+(import fmt "core:fmt")
 
 // Greets from Kvist.
 (defstruct Greeting {
@@ -77,7 +77,7 @@ compile_hello_program :: proc(t: ^testing.T) {
 
     expected := `package main
 
-import "core:fmt"
+import fmt "core:fmt"
 
 // Greets from Kvist.
 Greeting :: struct {
@@ -878,7 +878,7 @@ compile_eval_path_rewrites_source_package_aliases :: proc(t: ^testing.T) {
 @(test)
 compile_eval_source_generates_scratch_main :: proc(t: ^testing.T) {
     source := `(package app)
-(import "core:fmt")
+(import fmt "core:fmt")
 
 (defn add [a: int, b: int] -> int
   (+ a b))
@@ -896,7 +896,7 @@ compile_eval_source_generates_scratch_main :: proc(t: ^testing.T) {
 
     expected := `package main
 
-import "core:fmt"
+import fmt "core:fmt"
 
 add :: proc(a, b: int) -> int {
     return (a) + (b)
@@ -1060,7 +1060,7 @@ symbols_source_includes_proc_default_values_in_signatures :: proc(t: ^testing.T)
 symbols_source_includes_dot_access_param_signatures :: proc(t: ^testing.T) {
     source := `(package main)
 
-(import "core:fmt")
+(import fmt "core:fmt")
 
 (defstruct Point {
   x: int
@@ -1660,7 +1660,7 @@ editor_symbols_source_includes_relative_source_package_imports :: proc(t: ^testi
     }
     defer delete(main_path)
     main_source := `(package demo)
-(import "support/math")
+(import math "support/math")
 
 (defn main [] -> int
   (math.sum-range 0 5))`
@@ -1979,7 +1979,7 @@ compile_path_html_render_file_embeds_template_at_compile_time :: proc(t: ^testin
 @(test)
 compile_eval_source_can_emit_statement_runner :: proc(t: ^testing.T) {
     source := `(package main)
-(import "core:fmt")
+(import fmt "core:fmt")
 
 (defn add [a: int, b: int] -> int
   (+ a b))`
@@ -1994,7 +1994,7 @@ compile_eval_source_can_emit_statement_runner :: proc(t: ^testing.T) {
 
     expected := `package main
 
-import "core:fmt"
+import fmt "core:fmt"
 
 add :: proc(a, b: int) -> int {
     return (a) + (b)
@@ -2746,12 +2746,12 @@ compile_get_field_selector_and_enum_key :: proc(t: ^testing.T) {
 @(test)
 compile_eval_source_deduplicates_import_declaration_form :: proc(t: ^testing.T) {
     source := `(package main)
-(import "core:fmt")
+(import fmt "core:fmt")
 
 (defn main []
   (fmt.println "hello"))`
 
-    output, err, ok := kvist.compile_eval_source(source, `(import "core:fmt")`)
+    output, err, ok := kvist.compile_eval_source(source, `(import fmt "core:fmt")`)
     testing.expect_value(t, ok, true)
     if !ok {
         testing.expect_value(t, err.message, "")
@@ -2761,7 +2761,7 @@ compile_eval_source_deduplicates_import_declaration_form :: proc(t: ^testing.T) 
 
     expected := `package main
 
-import "core:fmt"
+import fmt "core:fmt"
 
 main :: proc() {
 }
@@ -2797,7 +2797,7 @@ main :: proc() {
 @(test)
 compile_eval_source_can_load_main_defn_declaration_form :: proc(t: ^testing.T) {
     source := `(package main)
-(import "core:fmt")
+(import fmt "core:fmt")
 
 (defn main []
   (fmt.println "hello"))`
@@ -2813,7 +2813,7 @@ compile_eval_source_can_load_main_defn_declaration_form :: proc(t: ^testing.T) {
 
     expected := `package main
 
-import "core:fmt"
+import fmt "core:fmt"
 
 main :: proc() {
     fmt.println("hello")
@@ -3243,7 +3243,7 @@ Http_Status :: enum {
 @(test)
 compile_def_and_defvar_forms :: proc(t: ^testing.T) {
     source := `(package main)
-(import "core:sync")
+(import sync "core:sync")
 
 (def answer 42)
 (def max-size: int 1024)
@@ -3553,6 +3553,46 @@ compile_supports_aliased_kvist_package_imports :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "append(&(xs), 1, 2, 3)"), true)
     testing.expect_value(t, strings.contains(output, "return len((xs)[:])"), true)
     testing.expect_value(t, strings.contains(output, "kvist:arr"), false)
+}
+
+@(test)
+compile_supports_explicit_refer_kvist_package_imports :: proc(t: ^testing.T) {
+    source := `(package main)
+(import "kvist:arr" :refer [empty push! count])
+
+(defn demo [] -> int
+  (let [xs (empty int)]
+    (push! xs 1 2 3)
+    (+ (count xs) (arr.count xs))))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "xs := make([dynamic]int)"), true)
+    testing.expect_value(t, strings.contains(output, "append(&(xs), 1, 2, 3)"), true)
+    testing.expect_value(t, strings.contains(output, "return (len((xs)[:])) + (len((xs)[:]))"), true)
+}
+
+@(test)
+reject_path_only_imports :: proc(t: ^testing.T) {
+    source := `(package main)
+(import "kvist:arr")
+
+(defn demo [] -> int
+  1)`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+    defer delete(err.message)
+    testing.expect_value(t, strings.contains(err.message, "import expects alias plus string path, or string path plus :refer vector"), true)
 }
 
 @(test)
@@ -4580,7 +4620,7 @@ compile_each_form_is_removed :: proc(t: ^testing.T) {
 @(test)
 compile_defer_forms :: proc(t: ^testing.T) {
     source := `(package main)
-(import "core:fmt")
+(import fmt "core:fmt")
 
 (defn main []
   (let [x 1]
@@ -4600,7 +4640,7 @@ compile_defer_forms :: proc(t: ^testing.T) {
 
     expected := `package main
 
-import "core:fmt"
+import fmt "core:fmt"
 
 main :: proc() {
     x := 1
@@ -5341,7 +5381,7 @@ compile_http_datastar_surface_is_explicit :: proc(t: ^testing.T) {
 compile_tap_helper :: proc(t: ^testing.T) {
     source := `(package main)
 (import core "kvist:core")
-(import "core:fmt")
+(import fmt "core:fmt")
 
 (defn main []
   (let [answer (tap> "answer" 42)
@@ -5385,7 +5425,7 @@ reject_tap_label_with_canonical_message :: proc(t: ^testing.T) {
 compile_tap_thread_steps :: proc(t: ^testing.T) {
     source := `(package main)
 (import core "kvist:core")
-(import "core:fmt")
+(import fmt "core:fmt")
 
 (defn inc [x: int] -> int
   (+ x 1))
@@ -6139,9 +6179,9 @@ compile_shipped_test_macro_package :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    testing.expect_value(t, strings.contains(output, "import \"core:testing\""), true)
+    testing.expect_value(t, strings.contains(output, "import t__testing \"core:testing\""), true)
     testing.expect_value(t, strings.contains(output, "@(test)"), true)
-    testing.expect_value(t, strings.contains(output, "sample :: proc(t: ^testing.T) {"), true)
+    testing.expect_value(t, strings.contains(output, "sample :: proc(t: ^t__testing.T) {"), true)
     testing.expect_value(t, strings.contains(output, "t____kvist_test_expect(t, true, \"\")"), true)
 }
 
@@ -6245,9 +6285,9 @@ compile_extended_shipped_test_macro_package :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    testing.expect_value(t, strings.contains(output, "sample :: proc(t: ^testing.T) {"), true)
+    testing.expect_value(t, strings.contains(output, "sample :: proc(t: ^t__testing.T) {"), true)
     testing.expect_value(t, strings.contains(output, "each_fixture("), true)
-    testing.expect_value(t, strings.contains(output, "proc(t: ^testing.T) {"), true)
+    testing.expect_value(t, strings.contains(output, "proc(t: ^t__testing.T) {"), true)
     testing.expect_value(t, strings.contains(output, "t____kvist_test_push_context(t, \"numbers\")"), true)
     testing.expect_value(t, strings.contains(output, "t____kvist_test_push_context(t, \"parity\")"), true)
     testing.expect_value(t, strings.contains(output, "defer t____kvist_test_pop_context(t)"), true)
@@ -13371,7 +13411,7 @@ compile_named_function_calls_fill_missing_default_args :: proc(t: ^testing.T) {
 }
 
 @(test)
-compile_named_function_calls_fill_missing_args_with_zero_values :: proc(t: ^testing.T) {
+reject_named_function_calls_missing_required_args :: proc(t: ^testing.T) {
     source := `(package main)
 
 (defn greet [name: string, punctuation: string = "!"] -> string
@@ -13380,15 +13420,14 @@ compile_named_function_calls_fill_missing_args_with_zero_values :: proc(t: ^test
 (defn main [] -> string
   (greet {punctuation: "?"}))`
 
-    output, err, ok := kvist.compile_source(source)
-    testing.expect_value(t, ok, true)
-    if !ok {
-        testing.expect_value(t, err.message, "")
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
         return
     }
-    defer delete(output)
+    defer delete(err.message)
 
-    testing.expect_value(t, strings.contains(output, "return greet(name = string{}, punctuation = \"?\")"), true)
+    testing.expect_value(t, strings.contains(err.message, "greet missing required argument name:"), true)
 }
 
 @(test)
@@ -13548,7 +13587,7 @@ reject_mixed_call_named_argument_overlapping_positional_argument :: proc(t: ^tes
 }
 
 @(test)
-compile_mixed_calls_fill_missing_tail_args_with_zero_values :: proc(t: ^testing.T) {
+reject_mixed_calls_missing_required_tail_args :: proc(t: ^testing.T) {
     source := `(package main)
 
 (defn place [name: string, x: int, y: int, label: string = "ok"] -> string
@@ -13557,15 +13596,14 @@ compile_mixed_calls_fill_missing_tail_args_with_zero_values :: proc(t: ^testing.
 (defn main [] -> string
   (place "enemy" {x: 10}))`
 
-    output, err, ok := kvist.compile_source(source)
-    testing.expect_value(t, ok, true)
-    if !ok {
-        testing.expect_value(t, err.message, "")
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
         return
     }
-    defer delete(output)
+    defer delete(err.message)
 
-    testing.expect_value(t, strings.contains(output, "return place(\"enemy\", x = 10, y = int{}, label = \"ok\")"), true)
+    testing.expect_value(t, strings.contains(err.message, "place missing required argument y:"), true)
 }
 
 @(test)
@@ -13693,7 +13731,7 @@ query :: proc() -> (value: int, ok: bool) #optional_ok {
 @(test)
 compile_proc_where_constraints :: proc(t: ^testing.T) {
     source := `(package main)
-(import "base:intrinsics")
+(import intrinsics "base:intrinsics")
 
 (defn same? [value: $T, expected: T] -> bool
   (where (intrinsics.type-is-comparable T))
@@ -15246,7 +15284,7 @@ lower_rejects_duplicate_package :: proc(t: ^testing.T) {
 lower_rejects_import_after_declarations :: proc(t: ^testing.T) {
     source := `(package main)
 (def answer 42)
-(import "core:fmt")`
+(import fmt "core:fmt")`
 
     _, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, false)
@@ -15258,7 +15296,7 @@ lower_rejects_import_after_declarations :: proc(t: ^testing.T) {
     formatted := kvist.format_compile_error("bad.kvist", source, err)
     defer delete(formatted)
     expected := `bad.kvist:3:1: import declarations must appear before other declarations
-  (import "core:fmt")
+  (import fmt "core:fmt")
   ^
 `
     testing.expect_value(t, formatted, expected)
@@ -15268,7 +15306,7 @@ lower_rejects_import_after_declarations :: proc(t: ^testing.T) {
 compile_plain_odin_import_paths :: proc(t: ^testing.T) {
     source := `(package main)
 (import kvist_live "../../../src/kvist_live")
-(import "core:fmt")
+(import fmt "core:fmt")
 
 (defn main []
   (return))`
@@ -15285,7 +15323,7 @@ compile_plain_odin_import_paths :: proc(t: ^testing.T) {
 
 import kvist_live "../../../src/kvist_live"
 
-import "core:fmt"
+import fmt "core:fmt"
 
 main :: proc() {
     return

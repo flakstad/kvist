@@ -1,7 +1,7 @@
 // Exercises additional eager sequence helpers and ownership cleanup.
 (package main)
 (import core "kvist:core")
-(import "kvist:arr")
+(import "kvist:arr" :refer [map filter reduce split-at keep first partition frequencies count-by sum-by index-by group-by range repeatedly repeat last iterate cycle take drop take-while drop-while drop-last butlast take-nth rest second concat reverse interpose interleave sort shuffle shuffle! sort-by sort! reverse! sort-by! map! map-indexed! filter! remove! keep! into into! distinct distinct-by partition-all partition-by mapcat remove map-indexed])
 (import map "kvist:map")
 
 (defn even? [x: int] -> bool

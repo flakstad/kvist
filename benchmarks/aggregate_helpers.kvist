@@ -1,7 +1,7 @@
 // Focused benchmark for report-style aggregate helpers.
 (package main)
 (import arr "kvist:arr")
-(import "core:fmt")
+(import fmt "core:fmt")
 (import mem "core:mem")
 (import time "core:time")
 

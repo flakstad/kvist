@@ -1,6 +1,6 @@
 // Port of the Cluck reset string demo, using ordinary Odin string operations.
 (import str "kvist:str")
-(import "core:fmt")
+(import fmt "core:fmt")
 
 (defn strings-demo [] -> bool
   (let [name "kvist"

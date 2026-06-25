@@ -2,7 +2,7 @@
 // and omitted-field defaults through ordinary Odin struct construction.
 (package main)
 (import core "kvist:core")
-(import "core:fmt")
+(import fmt "core:fmt")
 (import set "kvist:set")
 (defstruct Point
   "A 2D point."

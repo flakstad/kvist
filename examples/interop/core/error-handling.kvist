@@ -4,7 +4,7 @@
 // present, or valid. Use when-ok/if-ok for APIs whose second value is an Odin
 // error object where the zero value means success.
 (package main)
-(import "core:fmt")
+(import fmt "core:fmt")
 (import io "kvist:io")
 (import os "core:os")
 

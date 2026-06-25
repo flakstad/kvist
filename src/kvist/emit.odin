@@ -2535,6 +2535,13 @@ zero_value_for_type_text :: proc(ty: string) -> string {
     return fmt.tprintf("%s{{}}", ty)
 }
 
+missing_required_arg_error :: proc(proc_name, param_name: string, span: Span) -> Compile_Error {
+    return Compile_Error{
+        message = fmt.tprintf("%s missing required argument %s", proc_name, label_text(param_name)),
+        span = span,
+    }
+}
+
 emit_named_call_with_defaults :: proc(e: ^Emitter, proc_decl: ^Proc_Decl, form: CST_Form) -> (arg_texts: [dynamic]string, err: Compile_Error, ok: bool) {
     if form.kind != .Brace {
         return arg_texts, Compile_Error{message = "named arguments expect a brace form", span = form.span}, false
@@ -2603,7 +2610,7 @@ emit_named_call_with_defaults :: proc(e: ^Emitter, proc_decl: ^Proc_Decl, form: 
             append(&arg_texts, fmt.tprintf("%s = %s", param.name, default_text))
             continue
         }
-        append(&arg_texts, fmt.tprintf("%s = %s", param.name, zero_value_for_type_text(param.ty)))
+        return arg_texts, missing_required_arg_error(proc_decl.name, param.name, form.span), false
     }
 
     return arg_texts, Compile_Error{}, true
@@ -2631,8 +2638,7 @@ emit_positional_call_with_defaults :: proc(e: ^Emitter, proc_decl: ^Proc_Decl, a
     for idx := len(args); idx < len(proc_decl.params); idx += 1 {
         param := proc_decl.params[idx]
         if !param.has_default {
-            append(&arg_texts, zero_value_for_type_text(param.ty))
-            continue
+            return arg_texts, missing_required_arg_error(proc_decl.name, param.name, span), false
         }
         if default_is_odin_caller_intrinsic(param.default_value) {
             continue
@@ -2765,7 +2771,7 @@ emit_mixed_call_with_defaults :: proc(e: ^Emitter, proc_decl: ^Proc_Decl, positi
             append(&arg_texts, fmt.tprintf("%s = %s", param.name, default_text))
             continue
         }
-        append(&arg_texts, fmt.tprintf("%s = %s", param.name, zero_value_for_type_text(param.ty)))
+        return arg_texts, missing_required_arg_error(proc_decl.name, param.name, named_form.span), false
     }
 
     return arg_texts, Compile_Error{}, true
@@ -14703,6 +14709,9 @@ emit_decl :: proc(e: ^Emitter, decl: IR_Decl) -> (Compile_Error, bool) {
     case .Package:
         emit_line(e, fmt.tprintf("package %s", decl.package_name))
     case .Import:
+        if decl.import_decl.has_refer {
+            return Compile_Error{message = "import :refer is only supported for Kvist source package imports", span = decl.span}, false
+        }
         if decl_is_kvist_import(decl) {
             return Compile_Error{}, true
         }
@@ -17190,7 +17199,8 @@ decl_matches :: proc(a, b: IR_Decl) -> bool {
     if a.kind == .Import {
         return a.import_decl.path == b.import_decl.path &&
                a.import_decl.alias == b.import_decl.alias &&
-               a.import_decl.has_alias == b.import_decl.has_alias
+               a.import_decl.has_alias == b.import_decl.has_alias &&
+               a.import_decl.has_refer == b.import_decl.has_refer
     }
     a_name := decl_name(a)
     if a_name == "" {

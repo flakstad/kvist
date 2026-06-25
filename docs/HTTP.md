@@ -68,8 +68,7 @@ The route macros cover the common methods:
 (http.all! router path [req res] ...)
 ```
 
-Non-bang aliases such as `http.get` exist too, but they still register routes
-and therefore still mutate the router.
+Route registration mutates the router, so route macros use bang names only.
 
 Response helpers stay close to the vendor API:
 

@@ -1,12 +1,12 @@
 (package test)
 
-(import "base:intrinsics")
+(import intrinsics "base:intrinsics")
 (import core "kvist:core")
 (import reflect "core:reflect")
 (import rt "base:runtime")
-(import "core:strings")
-(import "core:sync")
-(import "core:testing")
+(import strings "core:strings")
+(import sync "core:sync")
+(import otesting "core:testing")
 
 (defvar __kvist_test_context_lock: sync.Mutex)
 (defvar __kvist_test_context_stacks: map[uintptr][dynamic]string)
@@ -27,7 +27,7 @@
       (if (= (len __kvist_test_context_stacks) 0)
         (delete __kvist_test_context_stacks)))))
 
-(defn- __kvist_test_context_prefix [t: ^testing.T] -> string
+(defn- __kvist_test_context_prefix [t: ^otesting.T] -> string
   (let [key (uintptr t)]
     (sync.mutex-lock &__kvist_test_context_lock)
     (let [[stack ok] __kvist_test_context_stacks[key]]
@@ -39,7 +39,7 @@
         (sync.mutex-unlock &__kvist_test_context_lock)
         prefix))))
 
-(defn- __kvist_test_push_context [t: ^testing.T, message: string]
+(defn- __kvist_test_push_context [t: ^otesting.T, message: string]
   (let [key (uintptr t)
         [cloned clone-err] (strings.clone message)]
     (assert (= clone-err nil) "kvist:test could not clone t.testing message")
@@ -49,11 +49,11 @@
 
     (let [[stack existed] __kvist_test_context_stacks[key]]
       (if (not existed)
-        (testing.cleanup t __kvist_test_context_cleanup (rawptr t)))
+        (otesting.cleanup t __kvist_test_context_cleanup (rawptr t)))
       (append &stack cloned)
       (set! __kvist_test_context_stacks[key] stack))))
 
-(defn- __kvist_test_pop_context [t: ^testing.T]
+(defn- __kvist_test_pop_context [t: ^otesting.T]
   (let [key (uintptr t)]
     (sync.mutex-lock &__kvist_test_context_lock)
     (defer (sync.mutex-unlock &__kvist_test_context_lock))
@@ -66,7 +66,7 @@
       (set! __kvist_test_context_stacks[key] stack))))
 
 (defn- __kvist_test_expect
-  [t: ^testing.T,
+  [t: ^otesting.T,
    ok: bool,
    msg: string = "",
    expr: string = (#caller_expression ok),
@@ -75,13 +75,13 @@
     (return true))
   (let [prefix (__kvist_test_context_prefix t)]
     (if (= prefix "")
-      (return (testing.expect t ok msg {expr: expr loc: loc})))
+      (return (otesting.expect t ok msg {expr: expr loc: loc})))
     (if (= msg "")
-      (return (testing.expectf t ok "%s: expected %v to be true" prefix expr {loc: loc})))
-    (testing.expectf t ok "%s: %s" prefix msg {loc: loc})))
+      (return (otesting.expectf t ok "%s: expected %v to be true" prefix expr {loc: loc})))
+    (otesting.expectf t ok "%s: %s" prefix msg {loc: loc})))
 
 (defn- __kvist_test_expect_value
-  [t: ^testing.T,
+  [t: ^otesting.T,
    value: $T,
    expected: T,
    loc: rt.Source_Code_Location = #caller_location,
@@ -93,8 +93,8 @@
       (return true))
     (let [prefix (__kvist_test_context_prefix t)]
       (if (= prefix "")
-        (return (testing.expect-value t value expected {loc: loc value-expr: value-expr})))
-      (testing.expectf t ok "%s: expected %v to be %v, got %v" prefix value-expr expected value {loc: loc}))))
+        (return (otesting.expect-value t value expected {loc: loc value-expr: value-expr})))
+      (otesting.expectf t ok "%s: expected %v to be %v, got %v" prefix value-expr expected value {loc: loc}))))
 
 (defmacro- __kvist_test_wrap_each
   [body]
@@ -110,7 +110,7 @@
     body
     (quasiquote
       ((unquote (first fixtures)) t
-       (fn [t: ^testing.T]
+       (fn [t: (unquote (symbol (str "^" (name (quote testing)) ".T")))]
          (unquote (emit-fixture-chain body (rest fixtures))))))))
 
 (defmacro- emit-once-fixtures
@@ -169,20 +169,20 @@
   [name doc body]
   (if (nil? doc)
     (forms
-      (quasiquote (import "core:testing"))
+      (quasiquote (import testing "core:testing"))
       (quasiquote @test)
       (quasiquote
-        (defn (unquote name) [t: ^testing.T]
+        (defn (unquote name) [t: (unquote (symbol (str "^" (name (quote testing)) ".T")))]
           (unquote (__kvist_test_wrap_once
                      (__kvist_test_wrap_each
                        (quasiquote (do (splice body)))))))))
     (forms
-      (quasiquote (import "core:testing"))
+      (quasiquote (import testing "core:testing"))
       (quasiquote @test)
       (quasiquote
         (defn (unquote name)
           (unquote doc)
-          [t: ^testing.T]
+          [t: (unquote (symbol (str "^" (name (quote testing)) ".T")))]
           (unquote (__kvist_test_wrap_once
                      (__kvist_test_wrap_each
                        (quasiquote (do (splice body)))))))))))

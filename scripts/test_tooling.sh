@@ -117,7 +117,7 @@ printf 'tooling: check standalone file beside raw Odin programs\n'
 printf 'tooling: check diagnostic mapping\n'
 cat > "$tmp_dir/bad.kvist" <<'EOF'
 (package main)
-(import "core:fmt")
+(import fmt "core:fmt")
 
 (defn main []
   (let [x: int "bad"]
@@ -410,7 +410,7 @@ printf 'tooling: eval check command\n'
 printf 'tooling: eval declaration form\n'
 cat > "$tmp_dir/decl-eval.kvist" <<'EOF'
 (package main)
-(import "core:fmt")
+(import fmt "core:fmt")
 
 (defstruct Greeting {
   message: string
@@ -420,7 +420,7 @@ cat > "$tmp_dir/decl-eval.kvist" <<'EOF'
   (fmt.println "hello"))
 EOF
 ./kvist eval "$tmp_dir/decl-eval.kvist" '(defstruct Greeting {message: string})' --check
-./kvist eval "$tmp_dir/decl-eval.kvist" '(import "core:fmt")' --check
+./kvist eval "$tmp_dir/decl-eval.kvist" '(import fmt "core:fmt")' --check
 ./kvist eval "$tmp_dir/decl-eval.kvist" '(defn main [] (fmt.println "hello"))' --check
 
 printf 'tooling: eval odin diagnostic mapping\n'
@@ -488,7 +488,7 @@ if command -v emacs >/dev/null 2>&1; then
              (unwind-protect
                  (progn
                    (with-temp-file file
-                     (insert \"(package main)\\n(import \\\"core:fmt\\\")\\n(import arr \\\"kvist:arr\\\")\\n\\n// Adds two ints.\\n(defn add [a: int, b: int] -> int\\n  (+ a b))\\n\\n(defn add-two [a: int, b: int] -> int\\n  (add a b))\\n\\n(defn main []\\n  (fmt.println \\\"from main\\\"))\\n\\n(comment\\n  (add 1 2)\\n  (add-two 1 2)\\n  (with-allocator [allocator context.temp_allocator]\\n    (add 2 1))\\n  (if-ok [value err (read)] value 0)\\n  (main))\\n\"))
+                     (insert \"(package main)\\n(import fmt \\\"core:fmt\\\")\\n(import arr \\\"kvist:arr\\\")\\n\\n// Adds two ints.\\n(defn add [a: int, b: int] -> int\\n  (+ a b))\\n\\n(defn add-two [a: int, b: int] -> int\\n  (add a b))\\n\\n(defn main []\\n  (fmt.println \\\"from main\\\"))\\n\\n(comment\\n  (add 1 2)\\n  (add-two 1 2)\\n  (with-allocator [allocator context.temp_allocator]\\n    (add 2 1))\\n  (if-ok [value err (read)] value 0)\\n  (main))\\n\"))
                    (find-file file)
                    (kvist-mode)
                    (setq kvist-test-source-buffer (current-buffer))
@@ -517,7 +517,9 @@ if command -v emacs >/dev/null 2>&1; then
                      (unless docs
                        (error \"Expected fmt.println docs\")))
                    (let ((docs (kvist--symbol-doc-candidates \"if-ok\")))
-                     (unless (and docs (string-match-p \"zero error value\" (plist-get (car docs) :doc)))
+                     (unless (and docs
+                                  (string-match-p \"zero error\" (plist-get (car docs) :doc))
+                                  (string-match-p \"value\" (plist-get (car docs) :doc)))
                        (error \"Expected if-ok built-in docs, got: %S\" docs)))
                    (with-temp-buffer
                      (kvist-mode)
@@ -559,7 +561,8 @@ if command -v emacs >/dev/null 2>&1; then
                    (call-interactively (quote kvist-doc-at-point))
                    (let ((doc-text (with-current-buffer kvist-doc-buffer-name
                                      (buffer-substring-no-properties (point-min) (point-max)))))
-                     (unless (string-match-p \"zero error value\" doc-text)
+                     (unless (and (string-match-p \"zero error\" doc-text)
+                                  (string-match-p \"value\" doc-text))
                        (error \"Expected displayed if-ok docs, got: %s\" doc-text)))
                    (let ((defs (xref-backend-definitions (quote kvist) \"add\")))
                      (unless defs

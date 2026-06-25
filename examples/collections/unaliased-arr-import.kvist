@@ -1,6 +1,6 @@
-// Imports kvist:arr without naming an alias, so its public helpers are bare.
+// Uses :refer to opt selected kvist:arr helpers into bare names.
 (package main)
-(import "kvist:arr")
+(import "kvist:arr" :refer [map filter reduce count-by sort])
 
 (defstruct Order {
   id: int

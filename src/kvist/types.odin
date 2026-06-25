@@ -103,6 +103,8 @@ Import_Decl :: struct {
     alias:      string,
     path:       string,
     has_alias:  bool,
+    has_refer:  bool,
+    refer_names: [dynamic]string,
 }
 
 Struct_Decl :: struct {

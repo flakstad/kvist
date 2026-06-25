@@ -188,21 +188,20 @@ and `:else` act as markers in those syntactic slots.
 Imports are uniform:
 
 ```clojure
-(import "core:fmt")
 (import fmt "core:fmt")
-(import "kvist:arr")
 (import arr "kvist:arr")
+(import "kvist:arr" :refer [map filter reduce])
 (import support "support")
 ```
 
-When the alias is omitted, Kvist derives the package name from the last path
-segment and exposes the package's public helpers as bare names. For example,
-`(import "core:fmt")` exposes `fmt.println`, and `(import "kvist:arr")`
-exposes both `arr.map` and bare `map`.
+Imports either name an alias explicitly or opt into selected bare helpers with
+`:refer`. `(import arr "kvist:arr")` exposes qualified names such as `arr.map`.
+`(import "kvist:arr" :refer [map filter reduce])` exposes those helpers bare
+and also keeps the package's default qualified alias available.
 
-Bare package helpers are enabled only for imports written without an alias.
-Explicit aliases such as `(import arr "kvist:arr")` keep calls qualified as
-`arr.map`.
+Plain path-only imports are not valid Kvist source. Use an alias for ordinary
+package access, or use `:refer` when a file intentionally wants selected public
+helpers bare.
 
 Relative imports are resolved by inspecting the target:
 

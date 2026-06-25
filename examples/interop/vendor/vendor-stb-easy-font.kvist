@@ -5,7 +5,7 @@
 // directly instead of adding an abstraction layer.
 (package main)
 (import core "kvist:core")
-(import "core:fmt")
+(import fmt "core:fmt")
 (import easy "vendor:stb/easy_font")
 
 (defn text-width [] -> int

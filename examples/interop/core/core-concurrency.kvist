@@ -7,7 +7,7 @@
 // spelling needed for polymorphic host types like chan.Chan(int).
 (package main)
 (import core "kvist:core")
-(import "core:sync")
+(import sync "core:sync")
 (import chan "core:sync/chan")
 (import thread "core:thread")
 

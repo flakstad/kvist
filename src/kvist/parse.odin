@@ -1293,11 +1293,29 @@ parse_decl :: proc(top_form: CST_Top_Form) -> (decl: AST_Decl, err: Compile_Erro
         }, {}, true
     case "import":
         if len(form.items) == 2 && form.items[1].kind == .String {
+            return decl, Compile_Error{message = "import expects alias plus string path, or string path plus :refer vector", span = form.span}, false
+        }
+        if len(form.items) == 4 &&
+           form.items[1].kind == .String &&
+           form.items[2].kind == .Keyword &&
+           form.items[2].text == ":refer" &&
+           form.items[3].kind == .Vector {
+            refer_names: [dynamic]string
+            for item in form.items[3].items {
+                if item.kind != .Symbol {
+                    return decl, Compile_Error{message = "import :refer expects a vector of symbols", span = item.span}, false
+                }
+                append(&refer_names, item.text)
+            }
             return AST_Decl{
                 kind = .Import,
                 span = form.span,
                 doc_lines = top_form.doc_lines,
-                import_decl = Import_Decl{path = form.items[1].text},
+                import_decl = Import_Decl{
+                    path = form.items[1].text,
+                    has_refer = true,
+                    refer_names = refer_names,
+                },
             }, {}, true
         }
         if len(form.items) == 3 && form.items[1].kind == .Symbol && form.items[2].kind == .String {
@@ -1312,7 +1330,7 @@ parse_decl :: proc(top_form: CST_Top_Form) -> (decl: AST_Decl, err: Compile_Erro
                 },
             }, {}, true
         }
-        return decl, Compile_Error{message = "import expects a string path or alias plus string path", span = form.span}, false
+        return decl, Compile_Error{message = "import expects alias plus string path, or string path plus :refer vector", span = form.span}, false
     case "def", "def-":
         if len(form.items) < 3 {
             return decl, Compile_Error{message = "def expects a name, optional docstring, optional type, and value", span = form.span}, false

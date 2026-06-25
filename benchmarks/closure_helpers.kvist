@@ -1,7 +1,7 @@
 // Focused benchmark for captured callbacks in non-escaping helper shapes.
 (package main)
 (import core "kvist:core")
-(import "core:fmt")
+(import fmt "core:fmt")
 (import mem "core:mem")
 (import time "core:time")
 (import arr "kvist:arr")

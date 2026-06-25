@@ -1,6 +1,6 @@
 // Demonstrates :errdefer for owned values returned on success.
 (package main)
-(import "core:fmt")
+(import fmt "core:fmt")
 
 (defvar fake-error-token: int 1)
 

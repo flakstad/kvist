@@ -202,29 +202,11 @@
     (route h.route_get (unquote router) (unquote pattern) (unquote binding)
       (splice body))))
 
-(defmacro get
-  "Register a GET route on `router` for `pattern`.
-
-  Alias for `http.get!`; route registration mutates the router."
-  [router pattern binding & body]
-  (quasiquote
-    (get! (unquote router) (unquote pattern) (unquote binding)
-      (splice body))))
-
 (defmacro post!
   "Register a POST route on `router` for `pattern`."
   [router pattern binding & body]
   (quasiquote
     (route h.route_post (unquote router) (unquote pattern) (unquote binding)
-      (splice body))))
-
-(defmacro post
-  "Register a POST route on `router` for `pattern`.
-
-  Alias for `http.post!`; route registration mutates the router."
-  [router pattern binding & body]
-  (quasiquote
-    (post! (unquote router) (unquote pattern) (unquote binding)
       (splice body))))
 
 (defmacro put!
@@ -234,29 +216,11 @@
     (route h.route_put (unquote router) (unquote pattern) (unquote binding)
       (splice body))))
 
-(defmacro put
-  "Register a PUT route on `router` for `pattern`.
-
-  Alias for `http.put!`; route registration mutates the router."
-  [router pattern binding & body]
-  (quasiquote
-    (put! (unquote router) (unquote pattern) (unquote binding)
-      (splice body))))
-
 (defmacro patch!
   "Register a PATCH route on `router` for `pattern`."
   [router pattern binding & body]
   (quasiquote
     (route h.route_patch (unquote router) (unquote pattern) (unquote binding)
-      (splice body))))
-
-(defmacro patch
-  "Register a PATCH route on `router` for `pattern`.
-
-  Alias for `http.patch!`; route registration mutates the router."
-  [router pattern binding & body]
-  (quasiquote
-    (patch! (unquote router) (unquote pattern) (unquote binding)
       (splice body))))
 
 (defmacro head!
@@ -266,29 +230,11 @@
     (route h.route_head (unquote router) (unquote pattern) (unquote binding)
       (splice body))))
 
-(defmacro head
-  "Register a HEAD route on `router` for `pattern`.
-
-  Alias for `http.head!`; route registration mutates the router."
-  [router pattern binding & body]
-  (quasiquote
-    (head! (unquote router) (unquote pattern) (unquote binding)
-      (splice body))))
-
 (defmacro options!
   "Register an OPTIONS route on `router` for `pattern`."
   [router pattern binding & body]
   (quasiquote
     (route h.route_options (unquote router) (unquote pattern) (unquote binding)
-      (splice body))))
-
-(defmacro options
-  "Register an OPTIONS route on `router` for `pattern`.
-
-  Alias for `http.options!`; route registration mutates the router."
-  [router pattern binding & body]
-  (quasiquote
-    (options! (unquote router) (unquote pattern) (unquote binding)
       (splice body))))
 
 (defmacro delete!
@@ -298,29 +244,11 @@
     (route h.route_delete (unquote router) (unquote pattern) (unquote binding)
       (splice body))))
 
-(defmacro delete
-  "Register a DELETE route on `router` for `pattern`.
-
-  Alias for `http.delete!`; route registration mutates the router."
-  [router pattern binding & body]
-  (quasiquote
-    (delete! (unquote router) (unquote pattern) (unquote binding)
-      (splice body))))
-
 (defmacro all!
   "Register a route for all HTTP methods on `router` for `pattern`."
   [router pattern binding & body]
   (quasiquote
     (route h.route_all (unquote router) (unquote pattern) (unquote binding)
-      (splice body))))
-
-(defmacro all
-  "Register a route for all HTTP methods on `router` for `pattern`.
-
-  Alias for `http.all!`; route registration mutates the router."
-  [router pattern binding & body]
-  (quasiquote
-    (all! (unquote router) (unquote pattern) (unquote binding)
       (splice body))))
 
 (defmacro listen

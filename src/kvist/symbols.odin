@@ -153,6 +153,13 @@ import_entry_from_form :: proc(form: CST_Form) -> (Imported_Symbol_Entry, bool) 
         return {}, false
     }
     if len(form.items) == 2 && form.items[1].kind == .String {
+        return {}, false
+    }
+    if len(form.items) == 4 &&
+       form.items[1].kind == .String &&
+       form.items[2].kind == .Keyword &&
+       form.items[2].text == ":refer" &&
+       form.items[3].kind == .Vector {
         path := import_path_text(form.items[1])
         alias := import_default_alias(path)
         if alias == "" {

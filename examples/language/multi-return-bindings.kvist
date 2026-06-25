@@ -1,6 +1,6 @@
 // Exercises positional multi-return binding. Struct fields use dot access.
 (package main)
-(import "core:fmt")
+(import fmt "core:fmt")
 
 (defn divmod [n: int, d: int] -> [q: int, r: int]
   (return (/ n d) (% n d)))

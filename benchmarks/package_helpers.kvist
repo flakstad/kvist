@@ -4,7 +4,7 @@
 (import map "kvist:map")
 (import set "kvist:set")
 (import str "kvist:str")
-(import "core:fmt")
+(import fmt "core:fmt")
 (import mem "core:mem")
 (import time "core:time")
 

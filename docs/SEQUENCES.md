@@ -186,8 +186,8 @@ work:
 Cross-family collection helpers live in `kvist:core`: `count`,
 `empty?`, `get`, `slice`, `contains?`, `update!`, `assoc`, `update`, and
 `delete!`. Other collection operations usually use explicit package names such
-as `arr.*`, `map.*`, `str.*`, or `set.*`. Unaliased imports such as
-`(import "kvist:arr")` may also use public package helpers bare, such as
+as `arr.*`, `map.*`, `str.*`, or `set.*`. Explicit `:refer` imports such as
+`(import "kvist:arr" :refer [count map filter reduce split-at keep first partition partition-all drop drop-last take-nth interpose interleave reverse sort sort-by range repeat repeatedly iterate cycle])` may also use public package helpers bare, such as
 `map`, `filter`, and `reduce`, but package-qualified calls are clearer in
 introductory code because they keep the eager array helper model visible.
 

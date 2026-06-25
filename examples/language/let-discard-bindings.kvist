@@ -1,6 +1,6 @@
 // `_` in a let binding evaluates the expression and discards the result.
 (package main)
-(import "core:fmt")
+(import fmt "core:fmt")
 
 (defn observe [label: string, x: int] -> int
   (fmt.println label x)

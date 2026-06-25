@@ -11,6 +11,7 @@ Alias_Prefix :: struct {
     prefix:  string,
     exports: [dynamic]string,
     raw_exports: [dynamic]string,
+    refer_names: [dynamic]string,
     preserve_qualified_calls: bool,
     allow_unqualified_exports: bool,
 }
@@ -44,6 +45,7 @@ alias_prefix_slice_delete :: proc(aliases: ^[dynamic]Alias_Prefix) {
         }
         delete_string_slice(&aliases^[i].exports)
         delete_string_slice(&aliases^[i].raw_exports)
+        delete_string_slice(&aliases^[i].refer_names)
     }
     delete(aliases^)
     aliases^ = nil
@@ -619,11 +621,26 @@ alias_prefix_names :: proc(aliases: []Alias_Prefix) -> (names: [dynamic]string) 
     return names
 }
 
-source_import_form_is_unaliased :: proc(form: CST_Form) -> bool {
+source_import_form_has_refer :: proc(form: CST_Form) -> bool {
     return form.kind == .List &&
-           len(form.items) == 2 &&
+           len(form.items) == 4 &&
            is_symbol(form.items[0], "import") &&
-           form.items[1].kind == .String
+           form.items[1].kind == .String &&
+           form.items[2].kind == .Keyword &&
+           form.items[2].text == ":refer" &&
+           form.items[3].kind == .Vector
+}
+
+source_import_refer_names :: proc(form: CST_Form) -> (names: [dynamic]string) {
+    if !source_import_form_has_refer(form) {
+        return names
+    }
+    for item in form.items[3].items {
+        if item.kind == .Symbol && !contains_text(names[:], item.text) {
+            append(&names, strings.clone(item.text))
+        }
+    }
+    return names
 }
 
 core_bare_symbol :: proc(text: string) -> bool {
@@ -736,6 +753,9 @@ append_import_form_unique :: proc(forms: ^[dynamic]CST_Top_Form, seen: ^[dynamic
             key = fmt.tprintf("%s|%s", import_default_alias(path), path)
         } else if len(form.form.items) == 3 && form.form.items[1].kind == .Symbol && form.form.items[2].kind == .String {
             key = fmt.tprintf("%s|%s", form.form.items[1].text, import_path_text(form.form.items[2]))
+        } else if source_import_form_has_refer(form.form) {
+            path := import_path_text(form.form.items[1])
+            key = fmt.tprintf("%s|%s", import_default_alias(path), path)
         }
     }
     if contains_text(seen[:], key) {
@@ -1162,6 +1182,13 @@ source_import_alias_and_path :: proc(form: CST_Form, importer_path: string = "."
         return "", "", false
     }
     if len(form.items) == 2 && form.items[1].kind == .String {
+        return "", "", false
+    }
+    if len(form.items) == 4 &&
+       form.items[1].kind == .String &&
+       form.items[2].kind == .Keyword &&
+       form.items[2].text == ":refer" &&
+       form.items[3].kind == .Vector {
         path = import_path_text(form.items[1])
         if !is_source_import_path_from(importer_path, path) {
             delete(path)
@@ -1465,7 +1492,8 @@ collect_root_source_import_aliases_from_files :: proc(files: []Package_File) -> 
                 exports = exports,
                 raw_exports = raw_exports,
                 preserve_qualified_calls = import_path == "kvist:core",
-                allow_unqualified_exports = source_import_form_is_unaliased(top.form),
+                refer_names = source_import_refer_names(top.form),
+                allow_unqualified_exports = source_import_form_has_refer(top.form),
             })
             delete(import_path)
         }
@@ -1481,6 +1509,9 @@ bare_source_import_symbol_text :: proc(body: string, aliases: []Alias_Prefix, sp
     matched_prefix := ""
     for alias_map in aliases {
         if !alias_map.allow_unqualified_exports {
+            continue
+        }
+        if !contains_text(alias_map.refer_names[:], body) {
             continue
         }
         if !contains_text(alias_map.exports[:], body) {
@@ -2320,7 +2351,8 @@ load_source_forms :: proc(dir, prefix: string, loaded_keys, import_keys: ^[dynam
                 exports = nested_exports,
                 raw_exports = nested_raw_exports,
                 preserve_qualified_calls = import_path == "kvist:core",
-                allow_unqualified_exports = source_import_form_is_unaliased(top.form),
+                refer_names = source_import_refer_names(top.form),
+                allow_unqualified_exports = source_import_form_has_refer(top.form),
             })
             append_unique_string_clone(&result.source_aliases, alias)
             for nested_alias in nested.source_aliases {
@@ -2432,7 +2464,8 @@ load_root_file_forms :: proc(path: string) -> (Loaded_Forms, Compile_Error, bool
                 exports = nested_exports,
                 raw_exports = nested_raw_exports,
                 preserve_qualified_calls = import_path == "kvist:core",
-                allow_unqualified_exports = source_import_form_is_unaliased(top.form),
+                refer_names = source_import_refer_names(top.form),
+                allow_unqualified_exports = source_import_form_has_refer(top.form),
             })
             append_unique_string_clone(&result.source_aliases, alias)
             for nested_alias in nested.source_aliases {
@@ -2507,7 +2540,8 @@ load_root_source_forms :: proc(forms: []CST_Top_Form) -> (Loaded_Forms, Compile_
             exports = nested_exports,
             raw_exports = nested_raw_exports,
             preserve_qualified_calls = import_path == "kvist:core",
-            allow_unqualified_exports = source_import_form_is_unaliased(top.form),
+            refer_names = source_import_refer_names(top.form),
+            allow_unqualified_exports = source_import_form_has_refer(top.form),
         })
         append_unique_string_clone(&result.source_aliases, alias)
         for nested_alias in nested.source_aliases {

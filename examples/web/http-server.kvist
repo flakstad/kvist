@@ -3,7 +3,7 @@
 // This is server-side only for now. It keeps the public surface small while
 // staying close to the underlying request.response router model.
 (package main)
-(import "core:fmt")
+(import fmt "core:fmt")
 (import http "kvist:http")
 
 (defstruct Greeting {

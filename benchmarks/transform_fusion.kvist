@@ -1,7 +1,7 @@
 // Focused benchmark for fused transforms.
 (package main)
 (import arr "kvist:arr")
-(import "core:fmt")
+(import fmt "core:fmt")
 (import mem "core:mem")
 (import time "core:time")
 

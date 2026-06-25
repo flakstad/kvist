@@ -18,7 +18,7 @@ fixtures live under `coverage/` so the tutorial path stays readable.
 - [`language/macro-authoring.kvist`](./language/macro-authoring.kvist) - practical macro writing
 - [`collections/sequences.kvist`](./collections/sequences.kvist) - collection helpers over structs
 - [`collections/package-tour.kvist`](./collections/package-tour.kvist) - `arr`/`map`/`set`/`str` ownership basics
-- [`collections/unaliased-arr-import.kvist`](./collections/unaliased-arr-import.kvist) - direct `kvist:arr` import with bare array helpers
+- [`collections/unaliased-arr-import.kvist`](./collections/unaliased-arr-import.kvist) - explicit `:refer` import with bare array helpers
 - [`collections/data-transforms.kvist`](./collections/data-transforms.kvist) - fused transforms with `into`, `transduce`, and `for`
 - [`collections/transforms.kvist`](./collections/transforms.kvist) - broader transform feature coverage
 - [`collections/log-source.kvist`](./collections/log-source.kvist) - `defiter` with `for`, `into`, `transduce`, and cleanup

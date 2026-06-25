@@ -1,6 +1,6 @@
 // Exercises positional, named, mixed, and defaulted calls in API-shaped code.
 (package main)
-(import "core:fmt")
+(import fmt "core:fmt")
 
 (defn connect-db [host: string, port: int = 5432, timeout-ms: int = 5000, pool-size: int = 8] -> string
   (fmt.tprintf "db://%s:%d timeout=%d pool=%d" host port timeout-ms pool-size))

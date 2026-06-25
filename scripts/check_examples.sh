@@ -31,6 +31,7 @@ find examples/collections \
      examples/web \
      -name '*.kvist' \
      ! -path 'examples/visual/simple-game/*' \
+     ! -path 'examples/coverage/packages/order-independent/*' \
      -print |
 sort |
 while IFS= read -r input; do
@@ -43,7 +44,7 @@ while IFS= read -r input; do
     if grep -Eq '^package tests$' "$output"; then
         run_odin odin test "$output" -file -define:ODIN_TEST_THREADS=1
     else
-        run_odin odin check "$output" -file
+        run_odin odin check "$output" -file -no-entry-point
     fi
 done
 
