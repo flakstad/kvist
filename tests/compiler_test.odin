@@ -5775,12 +5775,19 @@ compile_let_discard_binding :: proc(t: ^testing.T) {
 (defn observe [x: int] -> int
   x)
 
+(defn query [x: int] -> [value: int, ok: bool]
+  (return x true))
+
 (defn main [] -> int
   (let [_ (observe 1)
         _ (observe 2)
         _: int (observe 3)
+        [_ ok] (query 4)
+        [value _] (query 5)
         answer 42]
-    answer))`
+    (if ok
+      (+ answer value)
+      answer)))`
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
@@ -5794,6 +5801,8 @@ compile_let_discard_binding :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "_ = observe(2)"), true)
     testing.expect_value(t, strings.contains(output, "_ = observe(3)"), true)
     testing.expect_value(t, strings.contains(output, "_ := observe"), false)
+    testing.expect_value(t, strings.contains(output, "_, ok := query(4)"), true)
+    testing.expect_value(t, strings.contains(output, "value, _ := query(5)"), true)
     testing.expect_value(t, strings.contains(output, "answer := 42"), true)
 }
 
@@ -10104,6 +10113,10 @@ compile_for_over_arr_range_lowers_to_counted_loop :: proc(t: ^testing.T) {
   (let [sum 0]
     (for [value idx (arr.range 2 8 2)]
       (set! sum (+ sum idx value)))
+    (for [_ (arr.range 0 2)]
+      (set! sum (+ sum 1)))
+    (for [_ (arr.range 0 2)]
+      (set! sum (+ sum 1)))
     sum))`
 
     output, err, ok := kvist.compile_source(source)
@@ -10120,6 +10133,8 @@ compile_for_over_arr_range_lowers_to_counted_loop :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "for ((kvist_loop_range_step_"), true)
     testing.expect_value(t, strings.contains(output, "value := kvist_loop_range_item_"), true)
     testing.expect_value(t, strings.contains(output, "idx := kvist_loop_range_index_"), true)
+    testing.expect_value(t, strings.contains(output, "_ = kvist_loop_range_item_"), true)
+    testing.expect_value(t, strings.contains(output, "_ := kvist_loop_range_item_"), false)
     testing.expect_value(t, strings.contains(output, "kvist_loop_range_index_"), true)
 }
 

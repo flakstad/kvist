@@ -5833,7 +5833,7 @@ emit_binding_assignment :: proc(e: ^Emitter, binding: Binding, value: string) {
             if idx > 0 {
                 strings.write_string(&line_builder, ", ")
             }
-            strings.write_string(&line_builder, name)
+            strings.write_string(&line_builder, binding_output_name(name))
         }
         fmt.sbprintf(&line_builder, " := %s", value)
         emit_prefixed_expr_mapped(e, "", strings.clone(strings.to_string(line_builder)), binding.value.span)
@@ -5851,7 +5851,9 @@ binding_delete_target_name :: proc(binding: Binding) -> (string, bool) {
         return binding.name, true
     }
     if binding.is_result_binding && len(binding.pattern) > 0 {
-        return binding.pattern[0], true
+        if binding.pattern[0] != "" {
+            return binding.pattern[0], true
+        }
     }
     return "", false
 }
@@ -5903,6 +5905,9 @@ named_returns_match_binding_pattern :: proc(returns: Return_Spec, pattern: []str
         return false
     }
     for item, idx in pattern {
+        if item == "" {
+            return false
+        }
         if returns.named[idx].name != item {
             return false
         }
@@ -6736,7 +6741,9 @@ bind_obvious_binding_types :: proc(e: ^Emitter, binding: Binding) {
             defer delete(head_name)
             if proc_decl, ok := find_proc_decl(e, head_name); ok && proc_decl.returns.kind == .Named && len(proc_decl.returns.named) == len(binding.pattern) {
                 for name, idx in binding.pattern {
-                    bind_local_type(e, name, proc_decl.returns.named[idx].ty)
+                    if name != "" {
+                        bind_local_type(e, name, proc_decl.returns.named[idx].ty)
+                    }
                 }
             }
         }
@@ -6851,7 +6858,7 @@ emit_result_binding_named_return_assignment :: proc(e: ^Emitter, binding: Bindin
         if idx > 0 {
             strings.write_string(&line_builder, ", ")
         }
-        strings.write_string(&line_builder, name)
+        strings.write_string(&line_builder, binding_output_name(name))
     }
     fmt.sbprintf(&line_builder, " = %s", value)
     emit_prefixed_expr_mapped(e, "", strings.clone(strings.to_string(line_builder)), binding.value.span)
@@ -7503,12 +7510,12 @@ lint_defer_in_loop_body :: proc(e: ^Emitter, forms: []CST_Form, in_loop_scope: b
 emit_for_in_loop_body :: proc(e: ^Emitter, coll_form: CST_Form, coll_text, first_name, second_name: string, body: []CST_Form) -> (Compile_Error, bool) {
     emit_indent(e)
     strings.write_string(&e.builder, "for ")
-    strings.write_string(&e.builder, first_name)
-    prefix_len := len("for ") + len(first_name)
+    strings.write_string(&e.builder, binding_output_name(first_name))
+    prefix_len := len("for ") + len(binding_output_name(first_name))
     if second_name != "" {
         strings.write_string(&e.builder, ", ")
-        strings.write_string(&e.builder, second_name)
-        prefix_len += len(", ") + len(second_name)
+        strings.write_string(&e.builder, binding_output_name(second_name))
+        prefix_len += len(", ") + len(binding_output_name(second_name))
     }
     strings.write_string(&e.builder, " in ")
     prefix_len += len(" in ")
@@ -7556,10 +7563,10 @@ emit_for_range_loop :: proc(e: ^Emitter, coll_form: CST_Form, first_name, second
     e.indent += 1
     push_local_type_scope(e)
     if second_name != "" {
-        emit_line(e, fmt.tprintf("%s := %s", first_name, range_item))
-        emit_line(e, fmt.tprintf("%s := %s", second_name, range_index))
+        emit_loop_binding_assignment(e, first_name, range_item)
+        emit_loop_binding_assignment(e, second_name, range_index)
     } else {
-        emit_line(e, fmt.tprintf("%s := %s", first_name, range_item))
+        emit_loop_binding_assignment(e, first_name, range_item)
     }
     err_body, ok_body := emit_body_forms(e, body, Return_Spec{kind = .None})
     pop_local_type_scope(e)
@@ -7608,9 +7615,9 @@ emit_for_repeat_loop :: proc(e: ^Emitter, coll_form: CST_Form, first_name, secon
     emit_line(e, fmt.tprintf("for %s < %s %s", repeat_index, repeat_count, "{"))
     e.indent += 1
     push_local_type_scope(e)
-    emit_line(e, fmt.tprintf("%s := %s", first_name, repeat_value))
+    emit_loop_binding_assignment(e, first_name, repeat_value)
     if second_name != "" {
-        emit_line(e, fmt.tprintf("%s := %s", second_name, repeat_index))
+        emit_loop_binding_assignment(e, second_name, repeat_index)
     }
     err_body, ok_body := emit_body_forms(e, body, Return_Spec{kind = .None})
     pop_local_type_scope(e)
@@ -7656,9 +7663,9 @@ emit_for_repeatedly_loop :: proc(e: ^Emitter, coll_form: CST_Form, first_name, s
     emit_line(e, fmt.tprintf("for %s < %s %s", repeated_index, repeated_count, "{"))
     e.indent += 1
     push_local_type_scope(e)
-    emit_line(e, fmt.tprintf("%s := %s", first_name, emit_call_text(repeated_producer, []string{})))
+    emit_loop_binding_assignment(e, first_name, emit_call_text(repeated_producer, []string{}))
     if second_name != "" {
-        emit_line(e, fmt.tprintf("%s := %s", second_name, repeated_index))
+        emit_loop_binding_assignment(e, second_name, repeated_index)
     }
     err_body, ok_body := emit_body_forms(e, body, Return_Spec{kind = .None})
     pop_local_type_scope(e)
@@ -7710,9 +7717,9 @@ emit_for_iterate_loop :: proc(e: ^Emitter, coll_form: CST_Form, first_name, seco
     emit_line(e, fmt.tprintf("for %s < %s %s", iterate_index, iterate_count, "{"))
     e.indent += 1
     push_local_type_scope(e)
-    emit_line(e, fmt.tprintf("%s := %s", first_name, iterate_current))
+    emit_loop_binding_assignment(e, first_name, iterate_current)
     if second_name != "" {
-        emit_line(e, fmt.tprintf("%s := %s", second_name, iterate_index))
+        emit_loop_binding_assignment(e, second_name, iterate_index)
     }
     err_body, ok_body := emit_body_forms(e, body, Return_Spec{kind = .None})
     pop_local_type_scope(e)
@@ -7761,9 +7768,9 @@ emit_for_cycle_loop :: proc(e: ^Emitter, coll_form: CST_Form, first_name, second
     emit_line(e, fmt.tprintf("for %s < %s && %s > 0 %s", cycle_index, cycle_count, cycle_size, "{"))
     e.indent += 1
     push_local_type_scope(e)
-    emit_line(e, fmt.tprintf("%s := %s[%s %% %s]", first_name, cycle_source, cycle_index, cycle_size))
+    emit_loop_binding_assignment(e, first_name, fmt.tprintf("%s[%s %% %s]", cycle_source, cycle_index, cycle_size))
     if second_name != "" {
-        emit_line(e, fmt.tprintf("%s := %s", second_name, cycle_index))
+        emit_loop_binding_assignment(e, second_name, cycle_index)
     }
     err_body, ok_body := emit_body_forms(e, body, Return_Spec{kind = .None})
     pop_local_type_scope(e)
@@ -7816,9 +7823,9 @@ emit_for_take_nth_loop :: proc(e: ^Emitter, coll_form: CST_Form, first_name, sec
     emit_line(e, fmt.tprintf("for %s > 0 && %s < len(%s) %s", take_step, take_source_index, take_source, "{"))
     e.indent += 1
     push_local_type_scope(e)
-    emit_line(e, fmt.tprintf("%s := %s[%s]", first_name, take_source, take_source_index))
+    emit_loop_binding_assignment(e, first_name, fmt.tprintf("%s[%s]", take_source, take_source_index))
     if second_name != "" {
-        emit_line(e, fmt.tprintf("%s := %s", second_name, take_result_index))
+        emit_loop_binding_assignment(e, second_name, take_result_index)
     }
     err_body, ok_body := emit_body_forms(e, body, Return_Spec{kind = .None})
     pop_local_type_scope(e)
@@ -7919,14 +7926,16 @@ emit_source_each_loop :: proc(e: ^Emitter, source_form: CST_Form, source: ^Sourc
     }
     emit_line(e, "for {")
     e.indent += 1
-    emit_line(e, fmt.tprintf("%s, %s := %s(&%s)", value_name, ok_name, source.next_name, temp))
+    emit_line(e, fmt.tprintf("%s, %s := %s(&%s)", binding_output_name(value_name), ok_name, source.next_name, temp))
     emit_line(e, fmt.tprintf("if !%s %s", ok_name, "{"))
     e.indent += 1
     emit_line(e, "break")
     e.indent -= 1
     emit_line(e, "}")
     push_local_type_scope(e)
-    bind_local_type(e, value_name, source.item_ty)
+    if !is_discard_binding_name(value_name) {
+        bind_local_type(e, value_name, source.item_ty)
+    }
     err_body, ok_body := emit_body_forms(e, body, Return_Spec{kind = .None})
     pop_local_type_scope(e)
     if !ok_body {
@@ -7948,22 +7957,24 @@ emit_transform_for_body :: proc(e: ^Emitter, steps: []Transform_Step, initial_te
     }
 
     e.indent = base_indent + close_count
-    emit_line(e, fmt.tprintf("%s := %s", value_name, value_text))
+    emit_loop_binding_assignment(e, value_name, value_text)
     push_local_type_scope(e)
-    if len(index_name) > 0 {
+    if !is_discard_binding_name(index_name) {
         bind_local_type(e, index_name, "int")
     }
-    if len(key_name) > 0 {
+    if !is_discard_binding_name(key_name) {
         bind_local_type(e, key_name, key_ty)
     }
-    bind_local_type(e, value_name, value_ty)
+    if !is_discard_binding_name(value_name) {
+        bind_local_type(e, value_name, value_ty)
+    }
     err_body, ok_body := emit_body_forms(e, body, Return_Spec{kind = .None})
     pop_local_type_scope(e)
     e.indent = base_indent
     if !ok_body {
         return err_body, false
     }
-    if len(index_name) > 0 {
+    if !is_discard_binding_name(index_name) {
         e.indent = base_indent + close_count
         emit_line(e, fmt.tprintf("%s += 1", index_name))
         e.indent = base_indent
@@ -7993,7 +8004,7 @@ emit_transform_for_collection_loop_body :: proc(e: ^Emitter, coll_form: CST_Form
     if !ok_prelude {
         return err_prelude, false
     }
-    if len(loop_index_name) > 0 {
+    if !is_discard_binding_name(loop_index_name) {
         emit_line(e, fmt.tprintf("%s := 0", loop_index_name))
     }
     emit_line(e, transform_source_loop_header(coll_ty, coll_text, key_name))
@@ -8024,7 +8035,7 @@ emit_transform_for_collection_loop :: proc(e: ^Emitter, coll_form: CST_Form, ind
         range_start := transform_temp_name(e)
         range_end := transform_temp_name(e)
         range_step := transform_temp_name(e)
-        if len(index_name) > 0 {
+        if !is_discard_binding_name(index_name) {
             emit_line(e, fmt.tprintf("%s := 0", index_name))
         }
         emit_line(e, fmt.tprintf("%s := %s", range_start, spec.start_text))
@@ -8057,7 +8068,7 @@ emit_transform_for_collection_loop :: proc(e: ^Emitter, coll_form: CST_Form, ind
         repeat_count := transform_temp_name(e)
         repeat_value := transform_temp_name(e)
         repeat_i := transform_temp_name(e)
-        if len(index_name) > 0 {
+        if !is_discard_binding_name(index_name) {
             emit_line(e, fmt.tprintf("%s := 0", index_name))
         }
         emit_line(e, fmt.tprintf("%s := %s", repeat_count, spec.repeat_count_text))
@@ -8088,7 +8099,7 @@ emit_transform_for_collection_loop :: proc(e: ^Emitter, coll_form: CST_Form, ind
         if !ok_prelude {
             return err_prelude, false
         }
-        if len(index_name) > 0 {
+        if !is_discard_binding_name(index_name) {
             emit_line(e, fmt.tprintf("%s := 0", index_name))
         }
         emit_line(e, fmt.tprintf("for kvist_entry_key, kvist_entry_value in %s %s", spec.source_text, "{"))
@@ -8171,7 +8182,7 @@ emit_transform_for_source_loop :: proc(e: ^Emitter, source_form: CST_Form, sourc
     if !ok_prelude {
         return err_prelude, false
     }
-    if len(index_name) > 0 {
+    if !is_discard_binding_name(index_name) {
         emit_line(e, fmt.tprintf("%s := 0", index_name))
     }
     emit_line(e, "for {")
@@ -10518,7 +10529,11 @@ emit_reduced_body_update_text :: proc(e: ^Emitter, form: CST_Form, acc_text, acc
             if !ok_value {
                 return "", err_value, false
             }
-            fmt.sbprintf(&builder, "%s := %s\n", binding.name, value_text)
+            if is_discard_binding_name(binding.name) {
+                fmt.sbprintf(&builder, "_ = %s\n", value_text)
+            } else {
+                fmt.sbprintf(&builder, "%s := %s\n", binding.name, value_text)
+            }
             bind_obvious_binding_types(e, binding)
         }
         body_text, err_body, ok_body := emit_reduced_body_update_text(e, form.items[2], acc_text, acc_ty)
@@ -13591,6 +13606,34 @@ Binding :: struct {
     value:               CST_Form,
 }
 
+discard_mapped_name :: proc(text: string) -> string {
+    name := map_name(text)
+    if name == "_" {
+        delete(name)
+        return ""
+    }
+    return name
+}
+
+binding_output_name :: proc(name: string) -> string {
+    if name == "" {
+        return "_"
+    }
+    return name
+}
+
+is_discard_binding_name :: proc(name: string) -> bool {
+    return name == "" || name == "_"
+}
+
+emit_loop_binding_assignment :: proc(e: ^Emitter, name, value: string) {
+    if is_discard_binding_name(name) {
+        emit_line(e, fmt.tprintf("_ = %s", value))
+    } else {
+        emit_line(e, fmt.tprintf("%s := %s", name, value))
+    }
+}
+
 let_binding_has_defer_marker :: proc(items: []CST_Form, idx: int) -> bool {
     return idx < len(items) &&
            items[idx].kind == .Keyword &&
@@ -13638,7 +13681,7 @@ parse_let_bindings :: proc(form: CST_Form) -> (bindings: [dynamic]Binding, err: 
                 if part.kind != .Symbol {
                     return bindings, Compile_Error{message = "multi-return binding expects symbols", span = part.span}, false
                 }
-                append(&names, map_name(part.text))
+                append(&names, discard_mapped_name(part.text))
             }
             or_modifier, has_or_modifier := let_binding_or_modifier(form.items[:], i+2)
             deferred_delete := false
@@ -13746,10 +13789,7 @@ parse_let_bindings :: proc(form: CST_Form) -> (bindings: [dynamic]Binding, err: 
                 } else if let_binding_has_errdefer_marker(form.items[:], marker_i) {
                     return bindings, Compile_Error{message = ":errdefer is only supported on [value err] :or-return bindings", span = form.items[marker_i].span}, false
                 }
-                name := map_name(target.text[:len(target.text)-1])
-                if name == "_" {
-                    name = ""
-                }
+                name := discard_mapped_name(target.text[:len(target.text)-1])
                 append(&bindings, Binding{
                     name               = name,
                     is_typed           = true,
@@ -13785,10 +13825,7 @@ parse_let_bindings :: proc(form: CST_Form) -> (bindings: [dynamic]Binding, err: 
                 } else if let_binding_has_errdefer_marker(form.items[:], next_i) {
                     return bindings, Compile_Error{message = ":errdefer is only supported on [value err] :or-return bindings", span = form.items[next_i].span}, false
                 }
-                name := map_name(target.text)
-                if name == "_" {
-                    name = ""
-                }
+                name := discard_mapped_name(target.text)
                 append(&bindings, Binding{
                     name               = name,
                     deferred_delete    = deferred_delete,
