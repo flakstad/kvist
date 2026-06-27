@@ -38,11 +38,11 @@ Compiler-provided Kvist packages such as `arr`, `str`, `map`, `set`, `soa`,
 and `matrix` also provide docs through the editor integration.
 
 `kvist-eval` shells out to the `kvist` CLI for eval, build, check, and run commands.
-The CLI generates temporary Odin and invokes Odin itself. Build the local
-compiler first:
+The CLI generates temporary Odin and invokes Odin itself. Put the compiler on
+Emacs' `exec-path`, or customize `kvist-command` to an executable path:
 
-```sh
-odin build cmd/kvist
+```elisp
+(setq kvist-command "kvist")
 ```
 
 When the CLI reports Kvist diagnostics, the result buffer uses

@@ -22,7 +22,8 @@
   :group 'kvist)
 
 (defcustom kvist-command "kvist"
-  "Fallback Kvist executable used when no local checkout binary is found."
+  "Kvist executable used by editor commands.
+Use a command name on `exec-path' or an explicit executable path."
   :type 'string
   :group 'kvist)
 
@@ -234,16 +235,12 @@
 
 (defun kvist--executable (&optional start)
   "Return the Kvist executable to use for START."
-  (let* ((root (file-name-as-directory (kvist--project-root start)))
-         (default-root (file-name-as-directory (kvist--project-root default-directory)))
-         (local (expand-file-name "kvist" root))
-         (default-local (expand-file-name "kvist" default-root))
-         (fallback (executable-find kvist-command)))
-    (cond
-     ((file-executable-p local) local)
-     ((file-executable-p default-local) default-local)
-     (fallback fallback)
-     (t (error "Could not find kvist executable; run `odin build cmd/kvist'")))))
+  (ignore start)
+  (or (executable-find kvist-command)
+      (and (file-name-absolute-p kvist-command)
+           (file-executable-p kvist-command)
+           kvist-command)
+      (error "Could not find kvist executable `%s' on `exec-path'" kvist-command)))
 
 (defun kvist--buffer-missing-closers ()
   "Return closing delimiters needed to make the current buffer parseable."

@@ -10,3 +10,4 @@ __pycache__/
 /examples/.DS_Store
 /examples/**/.DS_Store
 /examples/.kvist-symbols-*.tmp
+/tmp

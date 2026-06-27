@@ -496,15 +496,12 @@ is_defmacro_form :: proc(form: CST_Form) -> bool {
 }
 
 core_package_local_macros :: proc(anchor_path: string = ".") -> ([]User_Macro, Compile_Error, bool) {
-    root, ok_root := repo_root_for_path(anchor_path)
-    if !ok_root {
-        root, ok_root = repo_root_for_path(".")
+    packages_dir, ok_packages := kvist_packages_dir(anchor_path)
+    if !ok_packages {
+        return nil, Compile_Error{message = "could not resolve shipped packages for core macro loading"}, false
     }
-    if !ok_root {
-        return nil, Compile_Error{message = "could not find kvist repo root for core macro loading"}, false
-    }
-    defer delete(root)
-    path, join_err := os.join_path({root, "packages", "core", "core.kvist"}, context.allocator)
+    defer delete(packages_dir)
+    path, join_err := os.join_path({packages_dir, "core", "core.kvist"}, context.allocator)
     if join_err != nil {
         return nil, Compile_Error{message = "could not resolve shipped core package file"}, false
     }

@@ -14790,6 +14790,231 @@ compile_path_resolves_shipped_packages_from_env_dir :: proc(t: ^testing.T) {
 }
 
 @(test)
+cli_check_loads_core_macros_outside_repo_with_packages_env :: proc(t: ^testing.T) {
+    repo_root := compiler_test_repo_root()
+
+    old_packages_dir, had_packages_dir := os.lookup_env("KVIST_PACKAGES_DIR", context.allocator)
+    defer if had_packages_dir {
+        _ = os.set_env("KVIST_PACKAGES_DIR", old_packages_dir)
+        delete(old_packages_dir)
+    } else {
+        _ = os.unset_env("KVIST_PACKAGES_DIR")
+    }
+
+    dir, dir_err := os.make_directory_temp("", "kvist-core-macros-env-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    main_path, main_join_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, main_join_err == nil, true)
+    if main_join_err != nil {
+        return
+    }
+    defer delete(main_path)
+    main_write_err := os.write_entire_file_from_string(main_path, `(package main)
+
+(defn main []
+  (when true
+    (println "hello from kvist")))`)
+    testing.expect_value(t, main_write_err == nil, true)
+    if main_write_err != nil {
+        return
+    }
+
+    packages_dir, packages_join_err := os.join_path({repo_root, "packages"}, context.allocator)
+    testing.expect_value(t, packages_join_err == nil, true)
+    if packages_join_err != nil {
+        return
+    }
+    defer delete(packages_dir)
+    set_err := os.set_env("KVIST_PACKAGES_DIR", packages_dir)
+    testing.expect_value(t, set_err == nil, true)
+    if set_err != nil {
+        return
+    }
+
+    kvist_bin, bin_ok := build_test_kvist_binary(t, repo_root, dir)
+    if !bin_ok {
+        return
+    }
+    defer delete(kvist_bin)
+
+    state, stdout, stderr, exec_err := os.process_exec(
+        os.Process_Desc{
+            command = {kvist_bin, "check", "main.kvist"},
+            working_dir = dir,
+        },
+        context.allocator,
+    )
+    defer delete(stdout)
+    defer delete(stderr)
+
+    testing.expect_value(t, exec_err == nil, true)
+    if exec_err != nil {
+        return
+    }
+    testing.expect_value(t, state.exited, true)
+    testing.expect_value(t, state.exit_code, 0)
+    testing.expect_value(t, strings.contains(string(stderr), "core macro loading"), false)
+}
+
+@(test)
+cli_resolves_packages_from_path_symlink_install_layout :: proc(t: ^testing.T) {
+    when ODIN_OS == .Windows {
+        return
+    }
+
+	repo_root := compiler_test_repo_root()
+
+	old_path, had_path := os.lookup_env("PATH", context.allocator)
+	defer if had_path {
+		delete(old_path)
+	}
+
+    dir, dir_err := os.make_directory_temp("", "kvist-path-symlink-install-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    install_bin, install_bin_err := os.join_path({dir, "install", "bin"}, context.allocator)
+    testing.expect_value(t, install_bin_err == nil, true)
+    if install_bin_err != nil {
+        return
+    }
+    defer delete(install_bin)
+    path_bin, path_bin_err := os.join_path({dir, "path-bin"}, context.allocator)
+    testing.expect_value(t, path_bin_err == nil, true)
+    if path_bin_err != nil {
+        return
+    }
+    defer delete(path_bin)
+    packages_parent, packages_parent_err := os.join_path({dir, "install", "share", "kvist"}, context.allocator)
+    testing.expect_value(t, packages_parent_err == nil, true)
+    if packages_parent_err != nil {
+        return
+    }
+    defer delete(packages_parent)
+
+    mk_install_err := os.make_directory_all(install_bin)
+    mk_path_err := os.make_directory_all(path_bin)
+    mk_packages_err := os.make_directory_all(packages_parent)
+    testing.expect_value(t, mk_install_err == nil, true)
+    testing.expect_value(t, mk_path_err == nil, true)
+    testing.expect_value(t, mk_packages_err == nil, true)
+    if mk_install_err != nil || mk_path_err != nil || mk_packages_err != nil {
+        return
+    }
+
+    kvist_bin, bin_ok := build_test_kvist_binary(t, repo_root, install_bin)
+    if !bin_ok {
+        return
+    }
+    defer delete(kvist_bin)
+
+    repo_packages, repo_packages_err := os.join_path({repo_root, "packages"}, context.allocator)
+    testing.expect_value(t, repo_packages_err == nil, true)
+    if repo_packages_err != nil {
+        return
+    }
+    defer delete(repo_packages)
+    installed_packages, installed_packages_err := os.join_path({packages_parent, "packages"}, context.allocator)
+    testing.expect_value(t, installed_packages_err == nil, true)
+    if installed_packages_err != nil {
+        return
+    }
+    defer delete(installed_packages)
+    packages_link_err := os.symlink(repo_packages, installed_packages)
+    testing.expect_value(t, packages_link_err == nil, true)
+    if packages_link_err != nil {
+        return
+    }
+
+    path_kvist, path_kvist_err := os.join_path({path_bin, "kvist"}, context.allocator)
+    testing.expect_value(t, path_kvist_err == nil, true)
+    if path_kvist_err != nil {
+        return
+    }
+    defer delete(path_kvist)
+    link_err := os.symlink(kvist_bin, path_kvist)
+    testing.expect_value(t, link_err == nil, true)
+    if link_err != nil {
+        return
+    }
+
+    main_path, main_join_err := os.join_path({dir, "hello.kvist"}, context.allocator)
+    testing.expect_value(t, main_join_err == nil, true)
+    if main_join_err != nil {
+        return
+    }
+    defer delete(main_path)
+    main_write_err := os.write_entire_file_from_string(main_path, `(package main)
+
+(defn main []
+  (println "hello from kvist"))`)
+    testing.expect_value(t, main_write_err == nil, true)
+    if main_write_err != nil {
+        return
+    }
+
+	path_value := fmt.tprintf("PATH=%s", path_bin)
+	if had_path {
+		path_value = fmt.tprintf("PATH=%s%c%s", path_bin, os.Path_List_Separator, old_path)
+	}
+	path_entry := strings.clone(path_value)
+	defer delete(path_entry)
+
+	inherited_env, env_err := os.environ(context.allocator)
+	testing.expect_value(t, env_err == nil, true)
+	if env_err != nil {
+		return
+	}
+	defer {
+		for entry in inherited_env {
+			delete(entry)
+		}
+		delete(inherited_env)
+	}
+
+	env_vars := make([dynamic]string, 0, len(inherited_env)+1)
+	defer delete(env_vars)
+	append(&env_vars, path_entry)
+	for entry in inherited_env {
+		if strings.has_prefix(entry, "PATH=") ||
+		   strings.has_prefix(entry, "KVIST_PACKAGES_DIR=") ||
+		   strings.has_prefix(entry, "KVIST_HOME=") {
+			continue
+		}
+		append(&env_vars, entry)
+	}
+
+	state, stdout, stderr, exec_err := os.process_exec(
+		os.Process_Desc{
+			command = {"kvist", "check", main_path},
+			working_dir = dir,
+			env = env_vars[:],
+		},
+		context.allocator,
+	)
+    defer delete(stdout)
+    defer delete(stderr)
+
+    testing.expect_value(t, exec_err == nil, true)
+    if exec_err != nil {
+        return
+    }
+    testing.expect_value(t, state.exited, true)
+    testing.expect_value(t, state.exit_code, 0)
+    testing.expect_value(t, strings.contains(string(stderr), "core macro loading"), false)
+}
+
+@(test)
 compile_source_package_preserves_type_forms_in_proc_signatures :: proc(t: ^testing.T) {
     dir, dir_err := os.make_directory_temp("", "kvist-source-package-type-forms-*", context.allocator)
     testing.expect_value(t, dir_err == nil, true)

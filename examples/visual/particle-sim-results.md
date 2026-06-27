@@ -2,8 +2,8 @@
 
 Measured on June 6, 2026 from:
 
-- Kvist worktree: `/Users/andreas/Projects/kvist/.worktrees/agent-particle-sim`
-- Clojure repo: `/Users/andreas/Projects/fast`
+- Kvist worktree: a local Kvist checkout
+- Clojure repo: a local checkout of the comparison project
 
 All headless runs simulate 50,000 particles with rendering disabled. The in-app
 elapsed time excludes process startup and warmup. CPU/RSS are sampled externally
@@ -18,16 +18,16 @@ with `scripts/particle_stats.sh`.
 Commands:
 
 ```sh
-cd /Users/andreas/Projects/kvist/.worktrees/agent-particle-sim
+cd /path/to/kvist
 ./kvist examples/visual/particle-sim.kvist -o /tmp/kvist-particle-sim.odin
 odin build /tmp/kvist-particle-sim.odin -file -out:build/particle-sim
 scripts/particle_stats.sh -- build/particle-sim --bench --particles 50000 --steps 20000
 ```
 
 ```sh
-cd /Users/andreas/Projects/fast
-/Users/andreas/Projects/kvist/.worktrees/agent-particle-sim/scripts/particle_stats.sh -- clojure -M:particle-sim --bench --backend struct --particles 50000 --steps 20000
-/Users/andreas/Projects/kvist/.worktrees/agent-particle-sim/scripts/particle_stats.sh -- clojure -M:particle-sim --bench --backend persistent --particles 50000 --steps 5000
+cd /path/to/comparison-project
+/path/to/kvist/scripts/particle_stats.sh -- clojure -M:particle-sim --bench --backend struct --particles 50000 --steps 20000
+/path/to/kvist/scripts/particle_stats.sh -- clojure -M:particle-sim --bench --backend persistent --particles 50000 --steps 5000
 ```
 
 Notes:

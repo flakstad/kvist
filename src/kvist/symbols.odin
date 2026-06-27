@@ -1085,7 +1085,34 @@ kvist_packages_dir_from_executable :: proc() -> (string, bool) {
 
     executable_path := os.args[0]
     owned_executable := ""
-    if !os.is_absolute_path(executable_path) {
+    if !os.is_absolute_path(executable_path) && !strings.contains(executable_path, "/") && !strings.contains(executable_path, "\\") {
+        path_env, found_path := os.lookup_env("PATH", context.allocator)
+        if found_path {
+            defer delete(path_env)
+            dirs, split_err := os.split_path_list(path_env, context.allocator)
+            if split_err == nil {
+                defer {
+                    for dir in dirs {
+                        delete(dir)
+                    }
+                    delete(dirs)
+                }
+                for dir in dirs {
+                    candidate, join_err := os.join_path({dir, executable_path}, context.allocator)
+                    if join_err != nil {
+                        continue
+                    }
+                    if os.exists(candidate) && !os.is_dir(candidate) {
+                        executable_path = candidate
+                        owned_executable = candidate
+                        break
+                    }
+                    delete(candidate)
+                }
+            }
+        }
+    }
+    if owned_executable == "" && !os.is_absolute_path(executable_path) {
         absolute, abs_err := os.get_absolute_path(executable_path, context.allocator)
         if abs_err == nil {
             executable_path = absolute
@@ -1095,6 +1122,46 @@ kvist_packages_dir_from_executable :: proc() -> (string, bool) {
     if owned_executable != "" {
         defer delete(owned_executable)
     }
+
+    resolved_path := executable_path
+    owned_resolved := ""
+    defer if owned_resolved != "" {
+        delete(owned_resolved)
+    }
+    for _ in 0 ..< 8 {
+        link_target, link_err := os.read_link(resolved_path, context.allocator)
+        if link_err != nil {
+            break
+        }
+
+        target_path := link_target
+        owned_target := ""
+        if !os.is_absolute_path(link_target) {
+            executable_dir, _ := os.split_path(resolved_path)
+            joined, join_err := os.join_path({executable_dir, link_target}, context.allocator)
+            if join_err != nil {
+                delete(link_target)
+                break
+            }
+            target_path = joined
+            owned_target = joined
+        }
+
+        absolute, abs_err := os.get_absolute_path(target_path, context.allocator)
+        if owned_target != "" {
+            delete(owned_target)
+        }
+        delete(link_target)
+        if abs_err != nil {
+            break
+        }
+        if owned_resolved != "" {
+            delete(owned_resolved)
+        }
+        owned_resolved = absolute
+        resolved_path = absolute
+    }
+    executable_path = resolved_path
 
     executable_dir, _ := os.split_path(executable_path)
     if executable_dir == "" {
