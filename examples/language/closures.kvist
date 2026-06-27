@@ -1,3 +1,6 @@
+// Copyright (c) Andreas Flakstad and Kvist contributors
+// SPDX-License-Identifier: MIT
+
 // Demonstrates captured-callback support for non-escaping helpers.
 (package main)
 (import arr "kvist:arr")

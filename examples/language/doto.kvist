@@ -1,3 +1,6 @@
+// Copyright (c) Andreas Flakstad and Kvist contributors
+// SPDX-License-Identifier: MIT
+
 // Demonstrates doto for Odin-style mutating setup calls.
 (package main)
 

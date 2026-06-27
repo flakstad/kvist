@@ -1,3 +1,6 @@
+// Copyright (c) Andreas Flakstad and Kvist contributors
+// SPDX-License-Identifier: MIT
+
 // File-backed development helpers.
 //
 // This example is for the "I computed.downloaded something once, now I want to

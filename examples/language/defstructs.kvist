@@ -1,3 +1,6 @@
+// Copyright (c) Andreas Flakstad and Kvist contributors
+// SPDX-License-Identifier: MIT
+
 // Exercises defstruct docstrings, Malli-like field metadata, nested structs,
 // and omitted-field defaults through ordinary Odin struct construction.
 (package main)

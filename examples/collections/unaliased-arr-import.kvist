@@ -1,3 +1,6 @@
+// Copyright (c) Andreas Flakstad and Kvist contributors
+// SPDX-License-Identifier: MIT
+
 // Uses :refer to opt selected kvist:arr helpers into bare names.
 (package main)
 (import "kvist:arr" :refer [map filter reduce count-by sort])

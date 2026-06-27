@@ -1,3 +1,6 @@
+// Copyright (c) Andreas Flakstad and Kvist contributors
+// SPDX-License-Identifier: MIT
+
 // Thin Kvist surface over vendored odin-http.
 //
 // This is server-side only for now. It keeps the public surface small while

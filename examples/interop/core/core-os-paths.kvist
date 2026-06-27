@@ -1,3 +1,6 @@
+// Copyright (c) Andreas Flakstad and Kvist contributors
+// SPDX-License-Identifier: MIT
+
 // Host interop with core:os path and file helpers.
 //
 // This example keeps the Odin API visible. Kvist is only changing call syntax:

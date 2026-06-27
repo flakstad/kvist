@@ -1,3 +1,6 @@
+// Copyright (c) Andreas Flakstad and Kvist contributors
+// SPDX-License-Identifier: MIT
+
 // Demonstrates Clojure-style bit operation names over Odin integer operators.
 (package main)
 

@@ -1,3 +1,6 @@
+// Copyright (c) Andreas Flakstad and Kvist contributors
+// SPDX-License-Identifier: MIT
+
 // Exercises positional multi-return binding. Struct fields use dot access.
 (package main)
 (import fmt "core:fmt")

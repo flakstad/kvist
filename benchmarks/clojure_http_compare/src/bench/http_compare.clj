@@ -1,3 +1,6 @@
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
+
 (ns bench.http-compare
   (:require [cheshire.core :as json]
             [org.httpkit.server :as hk])

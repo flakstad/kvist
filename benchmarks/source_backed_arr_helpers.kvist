@@ -1,3 +1,6 @@
+// Copyright (c) Andreas Flakstad and Kvist contributors
+// SPDX-License-Identifier: MIT
+
 // Focused benchmark for intrinsic vs source-backed kvist:arr helpers.
 (package main)
 (import arr "kvist:arr")

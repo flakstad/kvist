@@ -1,3 +1,6 @@
+// Copyright (c) Andreas Flakstad and Kvist contributors
+// SPDX-License-Identifier: MIT
+
 // Port of the Cluck reset arrays demo, using Kvist/Odin array ownership rules.
 (package main)
 (import core "kvist:core")

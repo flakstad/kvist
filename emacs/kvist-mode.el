@@ -1,4 +1,6 @@
 ;;; kvist-mode.el --- Major mode for Kvist -*- lexical-binding: t; -*-
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
 
 ;; Kvist is a Clojure-shaped syntax that lowers to Odin.  Editing should behave
 ;; like Clojure editing first, with small Kvist-specific font-lock and

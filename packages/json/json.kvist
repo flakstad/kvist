@@ -1,3 +1,6 @@
+// Copyright (c) Andreas Flakstad and Kvist contributors
+// SPDX-License-Identifier: MIT
+
 (package json)
 (import io "kvist:io")
 (import j "core:encoding/json")

@@ -1,3 +1,6 @@
+// Copyright (c) Andreas Flakstad and Kvist contributors
+// SPDX-License-Identifier: MIT
+
 // Exercises positional, named, mixed, and defaulted calls in API-shaped code.
 (package main)
 (import fmt "core:fmt")

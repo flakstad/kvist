@@ -1,3 +1,6 @@
+// Copyright (c) Andreas Flakstad and Kvist contributors
+// SPDX-License-Identifier: MIT
+
 // Small measurement harness for kvist:parallel.
 //
 // This is intentionally not a benchmark test. It prints machine-dependent

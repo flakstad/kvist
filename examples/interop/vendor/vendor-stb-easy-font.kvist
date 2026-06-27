@@ -1,3 +1,6 @@
+// Copyright (c) Andreas Flakstad and Kvist contributors
+// SPDX-License-Identifier: MIT
+
 // Host interop with a vendor package: vendor:stb/easy_font.
 //
 // vendor:stb/easy_font is small and terminal-safe, so it is a good first vendor

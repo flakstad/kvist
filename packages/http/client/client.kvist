@@ -1,3 +1,6 @@
+// Copyright (c) Andreas Flakstad and Kvist contributors
+// SPDX-License-Identifier: MIT
+
 (package client)
 (import h "kvist_vendor:http")
 (import hc "kvist_vendor:http/client")

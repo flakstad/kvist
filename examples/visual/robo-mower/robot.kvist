@@ -1,3 +1,6 @@
+// Copyright (c) Andreas Flakstad and Kvist contributors
+// SPDX-License-Identifier: MIT
+
 // Robot kinematics and sensors for the robo mower sandbox.
 (package main)
 (import math "core:math")

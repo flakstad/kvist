@@ -1,3 +1,6 @@
+// Copyright (c) Andreas Flakstad and Kvist contributors
+// SPDX-License-Identifier: MIT
+
 ;; A more substantial declaration DSL. The helper macro recursively walks
 ;; union variants and emits one constructor helper per variant.
 (defmacro emit-union-ctors [union-name variants]

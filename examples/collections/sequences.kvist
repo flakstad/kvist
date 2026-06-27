@@ -1,3 +1,6 @@
+// Copyright (c) Andreas Flakstad and Kvist contributors
+// SPDX-License-Identifier: MIT
+
 // Exercises core sequence helpers over structs, enums, and strings.
 (package main)
 (import core "kvist:core")

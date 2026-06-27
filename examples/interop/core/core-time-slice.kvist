@@ -1,3 +1,6 @@
+// Copyright (c) Andreas Flakstad and Kvist contributors
+// SPDX-License-Identifier: MIT
+
 // Host interop with core:time and core:slice.
 //
 // This example focuses on APIs that do not need a Kvist wrapper:

@@ -1,3 +1,6 @@
+// Copyright (c) Andreas Flakstad and Kvist contributors
+// SPDX-License-Identifier: MIT
+
 (defn render-inspection [count]
   (str "live-version=" (module.version)
        " inspect-count=" count

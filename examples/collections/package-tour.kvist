@@ -1,3 +1,6 @@
+// Copyright (c) Andreas Flakstad and Kvist contributors
+// SPDX-License-Identifier: MIT
+
 // Small tour of common collection/text packages and ownership cleanup.
 (package main)
 (import core "kvist:core")

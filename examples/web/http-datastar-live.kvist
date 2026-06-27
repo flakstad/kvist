@@ -1,3 +1,6 @@
+// Copyright (c) Andreas Flakstad and Kvist contributors
+// SPDX-License-Identifier: MIT
+
 // Datastar page plus a long-lived SSE stream that stays open until disconnect.
 (package main)
 (import http "kvist:http")

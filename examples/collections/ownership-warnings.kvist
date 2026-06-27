@@ -1,3 +1,6 @@
+// Copyright (c) Andreas Flakstad and Kvist contributors
+// SPDX-License-Identifier: MIT
+
 // Compiles successfully, but should produce conservative ownership warnings.
 (package main)
 (import core "kvist:core")

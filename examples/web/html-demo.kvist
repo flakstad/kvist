@@ -1,3 +1,6 @@
+// Copyright (c) Andreas Flakstad and Kvist contributors
+// SPDX-License-Identifier: MIT
+
 // A shipped source package macro that renders Hiccup-style HTML data.
 (package main)
 (import arr "kvist:arr")

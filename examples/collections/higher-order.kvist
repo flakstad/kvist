@@ -1,3 +1,6 @@
+// Copyright (c) Andreas Flakstad and Kvist contributors
+// SPDX-License-Identifier: MIT
+
 // Exercises arr generic map.filter/reduce helpers.
 (package main)
 (import arr "kvist:arr")

@@ -1,3 +1,6 @@
+// Copyright (c) Andreas Flakstad and Kvist contributors
+// SPDX-License-Identifier: MIT
+
 // Host interop with core math, random, and linalg packages.
 //
 // These calls are intentionally plain. Kvist does not wrap the math packages:

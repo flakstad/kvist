@@ -1,3 +1,6 @@
+// Copyright (c) Andreas Flakstad and Kvist contributors
+// SPDX-License-Identifier: MIT
+
 ;; A small declaration DSL. This macro expands to multiple top-level forms:
 ;; one defstruct and one constructor helper.
 (defmacro defentity [name fields]

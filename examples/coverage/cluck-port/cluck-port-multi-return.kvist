@@ -1,3 +1,6 @@
+// Copyright (c) Andreas Flakstad and Kvist contributors
+// SPDX-License-Identifier: MIT
+
 // Port of the Cluck reset multi-return demo.
 (package main)
 (defn half-and-ok [x: int] -> [value: int, ok: bool]

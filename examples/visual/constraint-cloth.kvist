@@ -1,3 +1,6 @@
+// Copyright (c) Andreas Flakstad and Kvist contributors
+// SPDX-License-Identifier: MIT
+
 // Visual constraint demo: Verlet cloth with pinned anchors and distance solves.
 (package main)
 (import fmt "core:fmt")

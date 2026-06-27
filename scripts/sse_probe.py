@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Copyright (c) Andreas Flakstad and Kvist contributors
+# SPDX-License-Identifier: MIT
+
 import argparse
 import asyncio
 import json

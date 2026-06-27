@@ -269,3 +269,12 @@ development workflows, see [docs/LIVE-DEVELOPMENT.md](docs/LIVE-DEVELOPMENT.md).
 - [docs/TOOLING.md](docs/TOOLING.md) - CLI/editor tooling
 - [docs/LIVE-DEVELOPMENT.md](docs/LIVE-DEVELOPMENT.md) - resident reload and scratch eval workflows
 - [examples/README.md](examples/README.md) - example guide
+
+## License
+
+Kvist is licensed under the MIT License. See [LICENSE](LICENSE).
+
+Programs written in Kvist, and Odin code generated from user-authored Kvist
+source, are not required to use the MIT License merely because they were
+compiled with Kvist. Code copied from Kvist packages or runtime support remains
+under its applicable license.

@@ -1,3 +1,6 @@
+// Copyright (c) Andreas Flakstad and Kvist contributors
+// SPDX-License-Identifier: MIT
+
 ;; A more realistic systems DSL. One declaration expands into:
 ;; - one defstruct per message payload
 ;; - one tagged union over those payloads

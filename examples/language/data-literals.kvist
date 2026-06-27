@@ -1,3 +1,6 @@
+// Copyright (c) Andreas Flakstad and Kvist contributors
+// SPDX-License-Identifier: MIT
+
 // Exercises structs, field access, typed collection literals, map lookup, and make.
 (package main)
 (import core "kvist:core")
