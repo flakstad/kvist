@@ -190,12 +190,14 @@ Imports are uniform:
 ```clojure
 (import fmt "core:fmt")
 (import arr "kvist:arr")
+(import "kvist:arr" :as arr)
 (import "kvist:arr" :refer [map filter reduce])
 (import support "support")
 ```
 
 Imports either name an alias explicitly or opt into selected bare helpers with
-`:refer`. `(import arr "kvist:arr")` exposes qualified names such as `arr.map`.
+`:refer`. `(import arr "kvist:arr")` and `(import "kvist:arr" :as arr)` both
+expose qualified names such as `arr.map`.
 `(import "kvist:arr" :refer [map filter reduce])` exposes those helpers bare
 and also keeps the package's default qualified alias available.
 
@@ -1982,7 +1984,7 @@ Most broader collection and package helper surfaces are not part of the core
 language. Import them explicitly:
 
 ```clojure
-(import arr "kvist:arr")
+(import "kvist:arr" :as arr)
 (import map "kvist:map")
 (import set "kvist:set")
 (import bit "kvist:bit")

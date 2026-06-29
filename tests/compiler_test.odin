@@ -819,6 +819,7 @@ compile_all_examples :: proc(t: ^testing.T) {
         "examples/web/http-datastar.kvist",
         "examples/web/http-datastar-live.kvist",
         "examples/language/hello.kvist",
+        "examples/collections/functional-pipelines.kvist",
         "examples/collections/higher-order.kvist",
         "examples/web/html-demo.kvist",
         "examples/web/html-interpolation.kvist",
@@ -915,7 +916,7 @@ main :: proc() {
 @(test)
 symbols_source_indexes_top_level_forms :: proc(t: ^testing.T) {
     source := `(package main)
-(import strings "core:strings")
+(import "core:strings" :as strings)
 
 /*
  * A user record.
@@ -956,7 +957,7 @@ symbols_source_indexes_top_level_forms :: proc(t: ^testing.T) {
     defer delete(output)
 
     testing.expect_value(t, strings.contains(output, "kind\tname\tline\tcolumn\tdetail\tsignature\tdoc\n"), true)
-    testing.expect_value(t, strings.contains(output, "import\tstrings\t2\t9\tcore:strings\t\t\n"), true)
+    testing.expect_value(t, strings.contains(output, "import\tstrings\t2\t28\tcore:strings\t\t\n"), true)
     testing.expect_value(t, strings.contains(output, "struct\tUser\t8\t12\t\t(User {name: string active: bool})\tA user record.\\nOwned by caller.\n"), true)
     testing.expect_value(t, strings.contains(output, "field\tUser.name\t9\t3\tUser\t\t\n"), true)
     testing.expect_value(t, strings.contains(output, "enum\tStatus\t13\t10\t\t\t\n"), true)
@@ -1161,7 +1162,7 @@ package_symbols_source_emits_bit_helpers :: proc(t: ^testing.T) {
 @(test)
 imported_symbols_source_indexes_odin_imports :: proc(t: ^testing.T) {
     source := `(package main)
-(import fmt "core:fmt")`
+(import "core:fmt" :as fmt)`
 
     output, err, ok := kvist.imported_symbols_source("/tmp/imported-symbols-test.kvist", source)
     testing.expect_value(t, ok, true)
@@ -3575,6 +3576,30 @@ compile_supports_aliased_kvist_package_imports :: proc(t: ^testing.T) {
 }
 
 @(test)
+compile_supports_as_kvist_package_imports :: proc(t: ^testing.T) {
+    source := `(package main)
+(import "kvist:arr" :as a)
+
+(defn demo [] -> int
+  (let [xs (a.empty int)]
+    (a.push! xs 1 2 3)
+    (a.count xs)))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "xs := make([dynamic]int)"), true)
+    testing.expect_value(t, strings.contains(output, "append(&(xs), 1, 2, 3)"), true)
+    testing.expect_value(t, strings.contains(output, "return len((xs)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "kvist:arr"), false)
+}
+
+@(test)
 compile_supports_explicit_refer_kvist_package_imports :: proc(t: ^testing.T) {
     source := `(package main)
 (import "kvist:arr" :refer [empty push! count])
@@ -3611,7 +3636,7 @@ reject_path_only_imports :: proc(t: ^testing.T) {
         return
     }
     defer delete(err.message)
-    testing.expect_value(t, strings.contains(err.message, "import expects alias plus string path, or string path plus :refer vector"), true)
+    testing.expect_value(t, strings.contains(err.message, "import expects alias plus string path, string path plus :as alias, or string path plus :refer vector"), true)
 }
 
 @(test)
@@ -14744,6 +14769,30 @@ compile_path_resolves_shipped_packages_from_env_dir :: proc(t: ^testing.T) {
     mk_packages_err := os.make_directory_all(packages_dir)
     testing.expect_value(t, mk_packages_err == nil, true)
     if mk_packages_err != nil {
+        return
+    }
+
+    core_dir, core_join_err := os.join_path({packages_dir, "core"}, context.allocator)
+    testing.expect_value(t, core_join_err == nil, true)
+    if core_join_err != nil {
+        return
+    }
+    defer delete(core_dir)
+    mk_core_err := os.make_directory_all(core_dir)
+    testing.expect_value(t, mk_core_err == nil, true)
+    if mk_core_err != nil {
+        return
+    }
+
+    core_path, core_path_err := os.join_path({core_dir, "core.kvist"}, context.allocator)
+    testing.expect_value(t, core_path_err == nil, true)
+    if core_path_err != nil {
+        return
+    }
+    defer delete(core_path)
+    core_write_err := os.write_entire_file_from_string(core_path, `(package core)`)
+    testing.expect_value(t, core_write_err == nil, true)
+    if core_write_err != nil {
         return
     }
 

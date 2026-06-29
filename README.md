@@ -176,7 +176,7 @@ Owned dynamic arrays and maps need cleanup. Use `defer` when a local owns
 memory:
 
 ```clojure
-(import arr "kvist:arr")
+(import "kvist:arr" :as arr)
 
 (defn print-range []
   (let [xs (arr.range 0 8)]
@@ -188,7 +188,7 @@ memory:
 For local bindings, `:defer` expands to cleanup at the end of the scope:
 
 ```clojure
-(import arr "kvist:arr")
+(import "kvist:arr" :as arr)
 
 (defn print-squares []
   (let [xs (arr.range 0 8) :defer ; :defer is let-binding sugar for defer/delete.

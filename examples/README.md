@@ -16,7 +16,7 @@ fixtures live under `coverage/` so the tutorial path stays readable.
 - [`language/closures.kvist`](./language/closures.kvist) - captured callback boundaries
 - [`language/polymorphism.kvist`](./language/polymorphism.kvist) - `$T`, `where`, generic formatting, and overload declarations
 - [`language/macro-authoring.kvist`](./language/macro-authoring.kvist) - practical macro writing
-- [`collections/sequences.kvist`](./collections/sequences.kvist) - collection helpers over structs
+- [`collections/sequences.kvist`](./collections/sequences.kvist) - collection helpers over structs with `:as` imports
 - [`collections/package-tour.kvist`](./collections/package-tour.kvist) - `arr`/`map`/`set`/`str` ownership basics
 - [`collections/unaliased-arr-import.kvist`](./collections/unaliased-arr-import.kvist) - explicit `:refer` import with bare array helpers
 - [`collections/data-transforms.kvist`](./collections/data-transforms.kvist) - fused transforms with `into`, `transduce`, and `for`

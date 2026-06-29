@@ -3,7 +3,7 @@
 
 ;; Demonstrates functional-style collection pipelines with explicit ownership.
 (package main)
-(import arr "kvist:arr")
+(import "kvist:arr" :as arr)
 
 (defn inc [x: int] -> int
   (+ x 1))

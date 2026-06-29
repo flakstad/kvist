@@ -5,6 +5,7 @@ paths:
 
 ```clojure
 (import arr "kvist:arr")
+(import "kvist:arr" :as arr)
 (import http "kvist:http")
 ```
 

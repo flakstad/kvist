@@ -1307,7 +1307,23 @@ parse_decl :: proc(top_form: CST_Top_Form) -> (decl: AST_Decl, err: Compile_Erro
         }, {}, true
     case "import":
         if len(form.items) == 2 && form.items[1].kind == .String {
-            return decl, Compile_Error{message = "import expects alias plus string path, or string path plus :refer vector", span = form.span}, false
+            return decl, Compile_Error{message = "import expects alias plus string path, string path plus :as alias, or string path plus :refer vector", span = form.span}, false
+        }
+        if len(form.items) == 4 &&
+           form.items[1].kind == .String &&
+           form.items[2].kind == .Keyword &&
+           form.items[2].text == ":as" &&
+           form.items[3].kind == .Symbol {
+            return AST_Decl{
+                kind = .Import,
+                span = form.span,
+                doc_lines = top_form.doc_lines,
+                import_decl = Import_Decl{
+                    alias     = map_name(form.items[3].text),
+                    path      = form.items[1].text,
+                    has_alias = true,
+                },
+            }, {}, true
         }
         if len(form.items) == 4 &&
            form.items[1].kind == .String &&
@@ -1344,7 +1360,7 @@ parse_decl :: proc(top_form: CST_Top_Form) -> (decl: AST_Decl, err: Compile_Erro
                 },
             }, {}, true
         }
-        return decl, Compile_Error{message = "import expects alias plus string path, or string path plus :refer vector", span = form.span}, false
+        return decl, Compile_Error{message = "import expects alias plus string path, string path plus :as alias, or string path plus :refer vector", span = form.span}, false
     case "def", "def-":
         if len(form.items) < 3 {
             return decl, Compile_Error{message = "def expects a name, optional docstring, optional type, and value", span = form.span}, false

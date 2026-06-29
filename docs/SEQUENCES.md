@@ -36,7 +36,7 @@ These helpers are the current core and shipped package surface for sequence-like
 work:
 
 ```clojure
-(import arr "kvist:arr")
+(import "kvist:arr" :as arr)
 
 (arr.count xs)
 (arr.empty T)

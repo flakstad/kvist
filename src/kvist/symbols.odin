@@ -171,6 +171,10 @@ import_entry_from_form :: proc(form: CST_Form) -> (Imported_Symbol_Entry, bool) 
         }
         return Imported_Symbol_Entry{alias = alias, path = path}, true
     }
+    if import_form_has_as(form) {
+        path := import_path_text(form.items[1])
+        return Imported_Symbol_Entry{alias = map_name(form.items[3].text), path = path}, true
+    }
     if len(form.items) == 3 && form.items[1].kind == .Symbol && form.items[2].kind == .String {
         path := import_path_text(form.items[2])
         return Imported_Symbol_Entry{alias = map_name(form.items[1].text), path = path}, true
@@ -2125,6 +2129,10 @@ symbols_source :: proc(source: string) -> (output: string, err: Compile_Error, o
                 if alias != "" {
                     symbols_write_record_doc(&builder, "import", alias, source, form.items[1].span, path, "", top.doc_lines[:])
                 }
+            } else if import_form_has_as(form) {
+                alias := form.items[3].text
+                path := import_path_text(form.items[1])
+                symbols_write_record_doc(&builder, "import", alias, source, form.items[3].span, path, "", top.doc_lines[:])
             } else if len(form.items) == 3 && form.items[1].kind == .Symbol && form.items[2].kind == .String {
                 alias := form.items[1].text
                 path := import_path_text(form.items[2])

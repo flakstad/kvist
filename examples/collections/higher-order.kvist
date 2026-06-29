@@ -3,7 +3,7 @@
 
 ;; Exercises arr generic map.filter/reduce helpers.
 (package main)
-(import arr "kvist:arr")
+(import "kvist:arr" :as arr)
 
 (defn inc [x: int] -> int
   (+ x 1))

@@ -28,7 +28,7 @@ Ordinary eager collection helpers should usually stay package-qualified in
 introductory code so their array-specific ownership is visible:
 
 ```clojure
-(import arr "kvist:arr")
+(import "kvist:arr" :as arr)
 
 (defn active-names [users: []User] -> [dynamic]string
   (let [active (arr.filter .active? users) :defer]
@@ -54,7 +54,8 @@ Files that lean heavily on array-style data shaping can opt into selected bare
 
 That style keeps eager helper calls visually close to transform specs. It is an
 explicit opt-in; `(import arr "kvist:arr")` keeps calls qualified as `arr.map`,
-`arr.filter`, and so on.
+`arr.filter`, and so on. `(import "kvist:arr" :as arr)` is the equivalent
+Clojure-style alias spelling.
 
 ## When To Use Them
 

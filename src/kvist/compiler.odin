@@ -636,6 +636,16 @@ source_import_form_has_refer :: proc(form: CST_Form) -> bool {
            form.items[3].kind == .Vector
 }
 
+import_form_has_as :: proc(form: CST_Form) -> bool {
+    return form.kind == .List &&
+           len(form.items) == 4 &&
+           is_symbol(form.items[0], "import") &&
+           form.items[1].kind == .String &&
+           form.items[2].kind == .Keyword &&
+           form.items[2].text == ":as" &&
+           form.items[3].kind == .Symbol
+}
+
 source_import_refer_names :: proc(form: CST_Form) -> (names: [dynamic]string) {
     if !source_import_form_has_refer(form) {
         return names
@@ -761,6 +771,8 @@ append_import_form_unique :: proc(forms: ^[dynamic]CST_Top_Form, seen: ^[dynamic
         } else if source_import_form_has_refer(form.form) {
             path := import_path_text(form.form.items[1])
             key = fmt.tprintf("%s|%s", import_default_alias(path), path)
+        } else if import_form_has_as(form.form) {
+            key = fmt.tprintf("%s|%s", form.form.items[3].text, import_path_text(form.form.items[1]))
         }
     }
     if contains_text(seen[:], key) {
@@ -1201,6 +1213,14 @@ source_import_alias_and_path :: proc(form: CST_Form, importer_path: string = "."
         }
         return import_default_alias(path), path, true
     }
+    if import_form_has_as(form) {
+        path = import_path_text(form.items[1])
+        if !is_source_import_path_from(importer_path, path) {
+            delete(path)
+            return "", "", false
+        }
+        return map_name(form.items[3].text), path, true
+    }
     if len(form.items) == 3 && form.items[1].kind == .Symbol && form.items[2].kind == .String {
         path = import_path_text(form.items[2])
         if !is_source_import_path_from(importer_path, path) {
@@ -1225,6 +1245,9 @@ rewrite_relative_odin_import_form :: proc(importer_path: string, top: CST_Top_Fo
     }
     if len(form.items) == 3 && form.items[1].kind == .Symbol && form.items[2].kind == .String {
         path_index = 2
+    }
+    if import_form_has_as(form^) {
+        path_index = 1
     }
     if path_index < 0 {
         return rewritten
