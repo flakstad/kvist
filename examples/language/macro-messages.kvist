@@ -61,7 +61,7 @@
     (Connected _) "connected"
     (Disconnected _) "disconnected"
     (Data data) data.payload
-    :else "unknown"))
+    "unknown"))
 
 (defn macro-messages-demo []
   (let [connected (make-Event-Connected (Connected {id: 7}))

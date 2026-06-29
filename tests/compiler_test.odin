@@ -282,8 +282,9 @@ compile_case_expression_in_let_binding :: proc(t: ^testing.T) {
 (defn label [n: int] -> string
   (let [value (case n
                 1 "one"
-                #{2 3} "few"
-                :else "many")]
+                2 "few"
+                3 "few"
+                "many")]
     value))`
 
     output, err, ok := kvist.compile_source(source)
@@ -294,7 +295,7 @@ compile_case_expression_in_let_binding :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    testing.expect_value(t, strings.contains(output, `value := ("one" if n == 1 else ("few" if (n == 2) || (n == 3) else "many"))`), true)
+    testing.expect_value(t, strings.contains(output, `value := ("one" if n == 1 else ("few" if n == 2 else ("few" if n == 3 else "many")))`), true)
 }
 
 @(test)
@@ -313,10 +314,9 @@ compile_owned_let_branch_case_in_return_position :: proc(t: ^testing.T) {
       (let [out (make [dynamic]int)]
         (arr.push! out 1)
         out)
-    :else
-      (let [out (make [dynamic]int)]
-        (arr.push! out 2)
-        out)))`
+    (let [out (make [dynamic]int)]
+      (arr.push! out 2)
+      out)))`
 
     result, err, ok := kvist.compile_source_with_map(source)
     testing.expect_value(t, ok, true)
@@ -353,8 +353,7 @@ compile_owned_let_branch_mixed_with_owned_call_case :: proc(t: ^testing.T) {
       (let [out (make [dynamic]int)]
         (arr.push! out 10)
         out)
-    :else
-      (make-one)))`
+    (make-one)))`
 
     result, err, ok := kvist.compile_source_with_map(source)
     testing.expect_value(t, ok, true)
@@ -387,8 +386,7 @@ reject_defer_owned_let_branch_case_return :: proc(t: ^testing.T) {
       (let [out (make [dynamic]int) :defer]
         (arr.push! out 1)
         out)
-    :else
-      (make [dynamic]int)))`
+    (make [dynamic]int)))`
 
     _, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, false)
@@ -397,7 +395,7 @@ reject_defer_owned_let_branch_case_return :: proc(t: ^testing.T) {
 }
 
 @(test)
-reject_case_expression_without_else :: proc(t: ^testing.T) {
+reject_case_expression_without_default :: proc(t: ^testing.T) {
     source := `(package main)
 
 (defn label [n: int] -> string
@@ -408,7 +406,7 @@ reject_case_expression_without_else :: proc(t: ^testing.T) {
     _, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, false)
     defer delete(err.message)
-    testing.expect_value(t, err.message, "case expression requires final :else clause")
+    testing.expect_value(t, err.message, "case expression expects subject, clause/body pairs, and default")
 }
 
 @(test)
@@ -611,7 +609,7 @@ reject_case_expression_with_obvious_branch_type_mismatch :: proc(t: ^testing.T) 
 (defn demo [mode: int] -> string
   (let [value: string (case mode
                         0 "zero"
-                        :else true)]
+                        true)]
     value))`
 
     _, err, ok := kvist.compile_source(source)
@@ -635,7 +633,7 @@ compile_type_payload_case_expression_with_expected_type :: proc(t: ^testing.T) {
   (let [value: int (case event
                     (Connected conn) conn.id
                     (Disconnected _) 0
-                    :else -1)]
+                    -1)]
     value))`
 
     output, err, ok := kvist.compile_source(source)
@@ -652,16 +650,17 @@ compile_type_payload_case_expression_with_expected_type :: proc(t: ^testing.T) {
 }
 
 @(test)
-compile_grouped_enum_case_expression :: proc(t: ^testing.T) {
+compile_repeated_enum_case_expression :: proc(t: ^testing.T) {
     source := `(package main)
 
 (defenum Method [Get Head Post])
 
 (defn cost [method: Method] -> int
   (let [value (case method
-                #{.Get .Head} 1
+                .Get 1
+                .Head 1
                 .Post 2
-                :else 3)]
+                3)]
     value))`
 
     output, err, ok := kvist.compile_source(source)
@@ -672,7 +671,7 @@ compile_grouped_enum_case_expression :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    testing.expect_value(t, strings.contains(output, "value := (1 if (method == .Get) || (method == .Head) else (2 if method == .Post else 3))"), true)
+    testing.expect_value(t, strings.contains(output, "value := (1 if method == .Get else (1 if method == .Head else (2 if method == .Post else 3)))"), true)
 }
 
 @(test)
@@ -682,7 +681,7 @@ compile_case_vector_clause_matches_vector_value :: proc(t: ^testing.T) {
 (defn score [xs: [2]int] -> int
   (let [value (case xs
                 [1 2] 1
-                :else 0)]
+                0)]
     value))`
 
     output, err, ok := kvist.compile_source(source)
@@ -697,7 +696,7 @@ compile_case_vector_clause_matches_vector_value :: proc(t: ^testing.T) {
 }
 
 @(test)
-reject_old_vector_grouped_case_expression_syntax :: proc(t: ^testing.T) {
+reject_vector_case_expression_clause_for_non_fixed_array_subject :: proc(t: ^testing.T) {
     source := `(package main)
 
 (defenum Method [Get Head Post])
@@ -706,13 +705,13 @@ reject_old_vector_grouped_case_expression_syntax :: proc(t: ^testing.T) {
   (let [value (case method
                 [.Get .Head] 1
                 .Post 2
-                :else 3)]
+                3)]
     value))`
 
     _, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, false)
     defer delete(err.message)
-    testing.expect_value(t, err.message, "case vector clauses match fixed-array values; use set syntax #{...} for grouped values")
+    testing.expect_value(t, err.message, "case vector clauses only match fixed-array values")
 }
 
 @(test)
@@ -3771,7 +3770,7 @@ compile_case_with_value_cases :: proc(t: ^testing.T) {
   (case method
     .Get "GET"
     .Post "POST"
-    :else "OTHER"))`
+    "OTHER"))`
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
@@ -3804,7 +3803,7 @@ method_name :: proc(method: Method) -> string {
 }
 
 @(test)
-compile_case_with_grouped_value_cases :: proc(t: ^testing.T) {
+compile_case_with_repeated_value_cases :: proc(t: ^testing.T) {
     source := `(package main)
 
 (defenum Method [
@@ -3815,8 +3814,9 @@ compile_case_with_grouped_value_cases :: proc(t: ^testing.T) {
 
 (defn read-method? [method: Method] -> bool
   (case method
-    #{.Get .Head} true
-    :else false))`
+    .Get true
+    .Head true
+    false))`
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
@@ -3836,7 +3836,9 @@ Method :: enum {
 
 read_method_p :: proc(method: Method) -> bool {
     #partial switch method {
-    case .Get, .Head:
+    case .Get:
+        return true
+    case .Head:
         return true
     case:
         return false
@@ -3847,7 +3849,7 @@ read_method_p :: proc(method: Method) -> bool {
 }
 
 @(test)
-reject_old_vector_grouped_case_statement_syntax :: proc(t: ^testing.T) {
+reject_vector_case_statement_clause_for_non_fixed_array_subject :: proc(t: ^testing.T) {
     source := `(package main)
 
 (defenum Method [
@@ -3859,12 +3861,12 @@ reject_old_vector_grouped_case_statement_syntax :: proc(t: ^testing.T) {
 (defn read-method? [method: Method] -> bool
   (case method
     [.Get .Head] true
-    :else false))`
+    false))`
 
     _, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, false)
     defer delete(err.message)
-    testing.expect_value(t, err.message, "case vector clauses match fixed-array values; use set syntax #{...} for grouped values")
+    testing.expect_value(t, err.message, "case vector clauses only match fixed-array values")
 }
 
 @(test)
@@ -4122,7 +4124,7 @@ compile_case_with_union_type_payload :: proc(t: ^testing.T) {
   (case value
     (int _) "int"
     (string v) v
-    :else "nil"))`
+    "nil"))`
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
@@ -4198,7 +4200,7 @@ compile_case_with_union_payload_patterns :: proc(t: ^testing.T) {
     (Connected conn) conn.id
     (Disconnected disc) (len disc.reason)
     (Data data) (len data.payload)
-    :else 0))`
+    0))`
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
@@ -4243,7 +4245,7 @@ compile_case_with_ignored_union_payload :: proc(t: ^testing.T) {
   (case event
     (Connected _) 1
     (Data data) (len data.payload)
-    :else 0))`
+    0))`
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
@@ -4282,7 +4284,7 @@ compile_case_flat_union_payload_arm_with_do_body :: proc(t: ^testing.T) {
     (Disconnected disc) (do
                           (println disc.reason)
                           0)
-    :else -1))`
+    -1))`
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
@@ -4318,7 +4320,7 @@ reject_case_mixing_value_and_type_patterns :: proc(t: ^testing.T) {
   (case event
     (Connected conn) conn.id
     .Other 0
-    :else -1))`
+    -1))`
 
     _, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, false)
@@ -4345,7 +4347,7 @@ reject_case_type_pattern_shape :: proc(t: ^testing.T) {
 (defn event-score [event: Event] -> int
   (case event
     (Connected) 1
-    :else 0))`
+    0))`
 
     _, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, false)
@@ -4800,7 +4802,7 @@ compile_case_does_not_emit_switch_warning :: proc(t: ^testing.T) {
 (defn classify [n: int] -> string
   (case n
     0 "zero"
-    :else "other"))`
+    "other"))`
 
     result, err, ok := kvist.compile_source_with_map(source)
     testing.expect_value(t, ok, true)
@@ -7103,7 +7105,7 @@ compile_let_defer_final_case_scalar_use :: proc(t: ^testing.T) {
     (case mode
       0 0
       1 (count xs)
-      :else 2)))`
+      2)))`
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
@@ -7579,8 +7581,9 @@ macroexpand_evaluates_cond_and_case_in_macro_predicates :: proc(t: ^testing.T) {
           (= (name head) "when") "branch"
           :else "other")
     "branch" (quote (def branch-kind true))
-    #{"other" "unknown"} (quote (def other-kind true))
-    :else (quote (def missed-kind true))))
+    "other" (quote (def other-kind true))
+    "unknown" (quote (def other-kind true))
+    (quote (def missed-kind true))))
 
 (emit-kind if)
 (emit-kind let)`
@@ -7596,6 +7599,29 @@ macroexpand_evaluates_cond_and_case_in_macro_predicates :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "branch_kind :: true"), true)
     testing.expect_value(t, strings.contains(output, "other_kind :: true"), true)
     testing.expect_value(t, strings.contains(output, "missed_kind"), false)
+}
+
+@(test)
+macroexpand_case_set_clause_is_not_grouped_match :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defmacro emit-kind []
+  (case "other"
+    #{"other" "unknown"} (quote (def grouped-match true))
+    (quote (def default-match true))))
+
+(emit-kind)`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "default_match :: true"), true)
+    testing.expect_value(t, strings.contains(output, "grouped_match"), false)
 }
 
 @(test)
@@ -12191,9 +12217,10 @@ compile_case_with_keyword_values :: proc(t: ^testing.T) {
 
 (defn score [mode: keyword] -> int
   (case mode
+    :else 9
     :dev 1
     :prod 2
-    :else 0))`
+    0))`
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
@@ -12207,6 +12234,8 @@ compile_case_with_keyword_values :: proc(t: ^testing.T) {
 
 score :: proc(mode: keyword) -> int {
     switch mode {
+    case keyword(":else"):
+        return 9
     case keyword(":dev"):
         return 1
     case keyword(":prod"):
@@ -12229,7 +12258,7 @@ compile_case_stmt_with_keyword_subject_uses_plain_switch :: proc(t: ^testing.T) 
   (case state
     :queued 0
     :done 1
-    :else -1))`
+    -1))`
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
@@ -12265,7 +12294,7 @@ compile_case_stmt_with_int_subject_uses_plain_switch :: proc(t: ^testing.T) {
   (case slot
     0 10
     1 20
-    :else 0))`
+    0))`
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
@@ -12298,7 +12327,7 @@ compile_case_stmt_vector_clause_matches_vector_value :: proc(t: ^testing.T) {
 (defn score [xs: [2]int] -> int
   (case xs
     [1 2] 1
-    :else 0))`
+    0))`
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
@@ -12318,12 +12347,12 @@ reject_case_vector_clause_with_dynamic_array_subject :: proc(t: ^testing.T) {
 (defn score [xs: [dynamic]int] -> int
   (case xs
     [1 2] 1
-    :else 0))`
+    0))`
 
     _, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, false)
     defer delete(err.message)
-    testing.expect_value(t, err.message, "case vector clauses match fixed-array values; use set syntax #{...} for grouped values")
+    testing.expect_value(t, err.message, "case vector clauses only match fixed-array values")
 }
 
 @(test)
@@ -12603,7 +12632,7 @@ compile_thread_first_forms :: proc(t: ^testing.T) {
 (defn method-name [method: Method] -> string
   (case method
     .Get "GET"
-    :else "OTHER"))
+    "OTHER"))
 
 (defn describe [req: Request] -> string
   (-> req .method method-name))
@@ -16161,7 +16190,7 @@ Value :: struct {
   (case value.kind
     .One "one"
     .Two "two"
-    :else "other"))`
+    "other"))`
     write_err := os.write_entire_file_from_string(main_path, source)
     testing.expect_value(t, write_err == nil, true)
     if write_err != nil {

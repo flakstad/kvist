@@ -15,7 +15,7 @@
   (case value
     (int _) "int"
     (string text) text
-    :else "nil"))
+    "nil"))
 
 (defn main []
   (let [number (Value {i: 42})

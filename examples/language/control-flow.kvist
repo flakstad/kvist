@@ -1,7 +1,7 @@
 ;; Copyright (c) Andreas Flakstad and Kvist contributors
 ;; SPDX-License-Identifier: MIT
 
-;; Exercises conditionals, value cases, grouped cases, loops, and name mapping.
+;; Exercises conditionals, value cases, loops, and name mapping.
 (package main)
 (import core "kvist:core")
 (import arr "kvist:arr")
@@ -33,15 +33,16 @@
 
 (defn read-method? [method: Method] -> bool
   (case method
-    #{.Get .Head} true
-    :else false))
+    .Get true
+    .Head true
+    false))
 
 (defn method-name [method: Method] -> string
   (case method
     .Get "GET"
     .Head "HEAD"
     .Post "POST"
-    :else "OTHER"))
+    "OTHER"))
 
 (defn classify [n: int] -> string
   (cond
@@ -55,9 +56,10 @@
 
 (defn movement-cost [method: Method] -> int
   (let [cost (case method
-               #{.Get .Head} 1
+               .Get 1
+               .Head 1
                .Post 2
-               :else 3)]
+               3)]
     cost))
 
 (defn clamp-score [score: int] -> int
@@ -77,7 +79,7 @@
                           (println disc.reason)
                           0)
     (Data data) (count data.payload)
-    :else -1))
+    -1))
 
 (defn sum [xs: []int] -> int
   (let [total 0]

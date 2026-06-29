@@ -1865,11 +1865,11 @@ macro_eval_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_
                 }
                 return macro_nil_value(), Compile_Error{}, true
             case "case":
-                if len(form.items) < 4 {
-                    return Macro_Value{}, Compile_Error{message = "case expects subject and clauses", span = form.span}, false
+                if len(form.items) < 5 {
+                    return Macro_Value{}, Compile_Error{message = "case expects subject, clause/body pairs, and default", span = form.span}, false
                 }
-                if (len(form.items)-2)%2 != 0 {
-                    return Macro_Value{}, Compile_Error{message = "case expects clause/body pairs", span = form.span}, false
+                if len(form.items)%2 == 0 {
+                    return Macro_Value{}, Compile_Error{message = "case expects clause/body pairs followed by default", span = form.span}, false
                 }
                 subject, err_subject, ok_subject := macro_eval_expr(form.items[1], macros, bindings)
                 if !ok_subject {
@@ -1877,43 +1877,20 @@ macro_eval_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_
                 }
                 defer macro_value_delete_backing(&subject)
                 i := 2
-                for i < len(form.items) {
+                for i < len(form.items)-1 {
                     clause := form.items[i]
-                    if clause.kind == .Keyword && clause.text == ":else" {
-                        if i+2 < len(form.items) {
-                            return Macro_Value{}, Compile_Error{message = "case :else must be the final clause", span = clause.span}, false
-                        }
-                        return macro_eval_expr(form.items[i+1], macros, bindings)
+                    value, err_value, ok_value := macro_eval_expr(clause, macros, bindings)
+                    if !ok_value {
+                        return Macro_Value{}, err_value, false
                     }
-                    matched := false
-                    if clause.kind == .Set {
-                        for item in clause.items {
-                            value, err_value, ok_value := macro_eval_expr(item, macros, bindings)
-                            if !ok_value {
-                                return Macro_Value{}, err_value, false
-                            }
-                            if macro_value_equal(subject, value) {
-                                matched = true
-                            }
-                            macro_value_delete_backing(&value)
-                            if matched {
-                                break
-                            }
-                        }
-                    } else {
-                        value, err_value, ok_value := macro_eval_expr(clause, macros, bindings)
-                        if !ok_value {
-                            return Macro_Value{}, err_value, false
-                        }
-                        matched = macro_value_equal(subject, value)
-                        macro_value_delete_backing(&value)
-                    }
+                    matched := macro_value_equal(subject, value)
+                    macro_value_delete_backing(&value)
                     if matched {
                         return macro_eval_expr(form.items[i+1], macros, bindings)
                     }
                     i += 2
                 }
-                return macro_nil_value(), Compile_Error{}, true
+                return macro_eval_expr(form.items[len(form.items)-1], macros, bindings)
             case "let":
                 if len(form.items) < 3 || form.items[1].kind != .Vector {
                     return Macro_Value{}, Compile_Error{message = "macro let expects binding vector and body", span = form.span}, false

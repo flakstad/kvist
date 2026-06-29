@@ -29,7 +29,7 @@
             (strings.clone "false"))
     .Int (strings.clone (fmt.tprintf "%d" value.int_value))
     [.String .Handle] (strings.clone value.text)
-    :else (strings.clone "")))
+    (strings.clone "")))
 
 (defn host-log-capability [runtime: ^kvist_live.Runtime
                            capability-name: string

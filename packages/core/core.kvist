@@ -97,11 +97,12 @@
   (forms))
 
 (defmacro case
-  "Dispatch on `value` using value cases, grouped value cases, or type payload cases.
+  "Dispatch on `value` using value cases or type payload cases.
 
   Use `cond` when each branch has its own predicate. Use `case` when one subject
-  is being classified. Type payload cases are written as `(Type name)` or
-  `(Type _)` and lower to Odin type switches."
+  is being classified. Clauses are `test expr` pairs followed by a naked default
+  expression. Type payload cases are written as `(Type name)` or `(Type _)` and
+  lower to Odin type switches."
   [value & clauses]
   (quasiquote
     (core-case (unquote value) (splice clauses))))

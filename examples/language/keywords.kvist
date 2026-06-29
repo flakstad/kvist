@@ -26,7 +26,7 @@
     :retrying :running
     :running :done
     :done :done
-    :else :unknown))
+    :unknown))
 
 (defn state-rank [state: keyword] -> int
   (case state
@@ -34,7 +34,7 @@
     :retrying 1
     :running 2
     :done 3
-    :else -1))
+    -1))
 
 (defn keyword-literals-demo [] -> int
   (let [job (Job {state: :queued label: "thumbnail"})

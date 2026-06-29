@@ -15,7 +15,7 @@
     (case value
       (Payload item) (if (> item.code limit) 1 0)
       (int raw) raw
-      :else -1)))
+      -1)))
 
 (defn http-label [code: int] -> string
   (defenum Http-Status {OK: 200 Not-Found: 404 Error: 500})
@@ -23,7 +23,7 @@
     .OK "ok"
     .Not-Found "missing"
     .Error "error"
-    :else "unknown"))
+    "unknown"))
 
 (defn http-tag [code: int] -> keyword
   (defenum Http-Status {OK: 200 Not-Found: 404 Error: 500})
@@ -31,7 +31,7 @@
     .OK :ok
     .Not-Found :missing
     .Error :error
-    :else :unknown))
+    :unknown))
 
 (defn main []
   (println (classify-code 42))

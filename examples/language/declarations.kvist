@@ -27,7 +27,7 @@
   (case status
     .OK "ok"
     .Not-Found "not found"
-    :else "unknown"))
+    "unknown"))
 
 (defn endpoint-summary [] -> string
   (let [endpoint (Endpoint {path: "/health" status: .OK tag: :health})]

@@ -181,7 +181,7 @@ symbolic data in otherwise Odin-shaped code:
 
 Kvist still uses specific keyword literals positionally in some forms. For
 example, `:defer`, `:errdefer`, `:using`, `:or-return`, `:yield`, `:next`,
-`:dispose`, and `:else` act as markers in those syntactic slots.
+`:dispose`, and `cond`'s `:else` act as markers in those syntactic slots.
 
 ### Imports And Exports
 
@@ -577,7 +577,7 @@ These forms are also valid directly inside a function body:
     (case value
       (Payload item) (if (> item.code limit) 1 0)
       (int raw) raw
-      :else -1)))
+      -1)))
 ```
 
 This does not mean Kvist creates a new enum, struct, or union every time the
@@ -1417,38 +1417,39 @@ Vector clauses are also accepted when a branch needs several body forms:
 ### `case`
 
 Use `case` when one subject is being classified. Arms are flat pattern and
-expression pairs; use `(do ...)` when an arm needs multiple forms.
+expression pairs followed by a naked default expression. Use `(do ...)` when an
+arm needs multiple forms.
 
-Value cases, grouped value cases, and union/type payload cases all lower to
-ordinary Odin switches:
+Value cases and union/type payload cases all lower to ordinary Odin switches:
 
 ```clojure
 (case status
   .Ready "ready"
   .Done "done"
-  :else "unknown")
+  "unknown")
 
 (case method
-  #{.Get .Head} "read"
+  .Get "read"
+  .Head "read"
   .Post "write"
-  :else "other")
+  "other")
 
 (case state
   :queued 0
   :running 1
   :done 2
-  :else -1)
+  -1)
 
 (case event
   (Connected conn) conn.id
   (Disconnected _) 0
   (Data data) (count data.payload)
-  :else -1)
+  -1)
 ```
 
-Set clauses group several values for one arm. Vector clauses are ordinary
-fixed-array value literals; dynamic arrays and slices are not comparable case
-subjects.
+Vector clauses are ordinary fixed-array value literals; dynamic arrays and
+slices are not comparable case subjects. Repeat arms when several values share
+one result.
 
 Use `_` when a type payload case should match the variant without binding the
 payload.

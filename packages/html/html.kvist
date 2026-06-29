@@ -276,7 +276,8 @@
     bool
     (core.when value
       (strings.write_string builder " ")
-      (strings.write_string builder attr.name))))
+      (strings.write_string builder attr.name))
+    (noop)))
 
 (defn- render-node-into [builder: ^strings.Builder, node: Node]
   (core.case [value node]
@@ -306,7 +307,8 @@
     bool
     (if value
       (strings.write_string builder "true")
-      (strings.write_string builder "false"))))
+      (strings.write_string builder "false"))
+    (noop)))
 
 (defn- render-node
   "Render a HTML node tree to an owned HTML string.

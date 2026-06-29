@@ -83,7 +83,7 @@ LANGUAGE_SOURCE_ENTRIES :: []Language_Source_Entry{
     {name = "if", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "emit_if_like :: proc"},
     {name = "when", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "(when test body...)"},
     {name = "cond", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "(cond test expr ... :else expr)"},
-    {name = "case", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "(case value clause ... :else expr)"},
+    {name = "case", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "(case value clause ... default)"},
     {name = "set!", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "case \"set!\":"},
     {name = "mut!", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "case \"mut!\":"},
     {name = "update!", kind = "kvist form", relative = "src/kvist/emit.odin", snippet = "(update! place f args...)"},

@@ -21,7 +21,7 @@ Use this page as a quick mental-model check when reading examples.
 | `let` binding | Immutable local | Ordinary local storage. It can be assigned with `set!` when the binding is a valid place. |
 | `when` expression | False returns `nil` | False returns the expected type's zero value when used as an expression. |
 | `or` / `and` | Return one input value | Boolean operators only. Arbitrary values are not conditions. |
-| `:dev`, `:else`, `:defer` | One keyword model | Runtime keyword literals and syntactic marker keywords share spelling but are interpreted by position. |
+| `:dev`, `:else`, `:defer` | One keyword model | Runtime keyword literals and syntactic marker keywords share spelling by position; `:else` is only special in `cond`. |
 
 ## Ownership In Pipelines
 

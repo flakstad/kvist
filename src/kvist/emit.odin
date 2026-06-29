@@ -5215,24 +5215,6 @@ emit_when_expr :: proc(e: ^Emitter, form: CST_Form, expected_type := "") -> (str
 }
 
 emit_case_clause_test_expr :: proc(e: ^Emitter, subject, subject_ty: string, clause: CST_Form) -> (string, Compile_Error, bool) {
-    if clause.kind == .Set {
-        if len(clause.items) == 0 {
-            return "", Compile_Error{message = "case expression group expects at least one value", span = clause.span}, false
-        }
-        builder := strings.builder_make()
-        defer strings.builder_destroy(&builder)
-        for item, idx in clause.items {
-            item_text, err_item, ok_item := emit_expr(e, item)
-            if !ok_item {
-                return "", err_item, false
-            }
-            if idx > 0 {
-                strings.write_string(&builder, " || ")
-            }
-            fmt.sbprintf(&builder, "(%s == %s)", subject, item_text)
-        }
-        return strings.clone(strings.to_string(builder)), {}, true
-    }
     item_text: string
     err_item: Compile_Error
     ok_item: bool
@@ -5248,11 +5230,11 @@ emit_case_clause_test_expr :: proc(e: ^Emitter, subject, subject_ty: string, cla
 }
 
 emit_case_expr :: proc(e: ^Emitter, form: CST_Form, expected_type := "") -> (string, Compile_Error, bool) {
-    if len(form.items) < 4 {
-        return "", Compile_Error{message = "case expression expects subject, clauses, and :else", span = form.span}, false
+    if len(form.items) < 5 {
+        return "", Compile_Error{message = "case expression expects subject, clause/body pairs, and default", span = form.span}, false
     }
-    if (len(form.items)-2)%2 != 0 {
-        return "", Compile_Error{message = "case expression expects clause/body pairs", span = form.span}, false
+    if len(form.items)%2 == 0 {
+        return "", Compile_Error{message = "case expression expects clause/body pairs followed by default", span = form.span}, false
     }
     if case_has_type_payload_patterns(form) {
         return emit_block_expr(e, form, expected_type)
@@ -5268,16 +5250,9 @@ emit_case_expr :: proc(e: ^Emitter, form: CST_Form, expected_type := "") -> (str
     if !ok_subject {
         return "", err_subject, false
     }
-    if !is_else_keyword(form.items[len(form.items)-2]) {
-        return "", Compile_Error{message = "case expression requires final :else clause", span = form.span}, false
-    }
-
     else_form := form.items[len(form.items)-1]
     i_check := 2
-    for i_check < len(form.items)-2 {
-        if is_else_keyword(form.items[i_check]) {
-            return "", Compile_Error{message = "case expression :else must be the final clause", span = form.items[i_check].span}, false
-        }
+    for i_check < len(form.items)-1 {
         if err_branch, bad_branch := branch_type_mismatch_error(e, form.items[i_check+1], else_form, "case expression", form.span); bad_branch {
             return "", err_branch, false
         }
@@ -5288,12 +5263,9 @@ emit_case_expr :: proc(e: ^Emitter, form: CST_Form, expected_type := "") -> (str
     if !ok_result {
         return "", err_result, false
     }
-    i := len(form.items) - 4
+    i := len(form.items) - 3
     for i >= 2 {
         clause := form.items[i]
-        if is_else_keyword(clause) {
-            return "", Compile_Error{message = "case expression :else must be the final clause", span = clause.span}, false
-        }
         test, err_test, ok_test := emit_case_clause_test_expr(e, subject, subject_ty, clause)
         if !ok_test {
             return "", err_test, false
@@ -14194,12 +14166,8 @@ case_type_payload_pattern :: proc(clause: CST_Form) -> (ty, binding: string, ign
 
 case_has_type_payload_patterns :: proc(form: CST_Form) -> bool {
     i := 2
-    for i < len(form.items) {
+    for i < len(form.items)-1 {
         clause := form.items[i]
-        if is_else_keyword(clause) {
-            i += 2
-            continue
-        }
         if clause.kind == .List {
             return true
         }
@@ -14219,10 +14187,10 @@ case_vector_group_syntax_error :: proc(e: ^Emitter, form: CST_Form) -> (Compile_
     }
 
     i := 2
-    for i < len(form.items) {
+    for i < len(form.items)-1 {
         clause := form.items[i]
         if clause.kind == .Vector {
-            return Compile_Error{message = strings.clone("case vector clauses match fixed-array values; use set syntax #{...} for grouped values"), span = clause.span}, true
+            return Compile_Error{message = strings.clone("case vector clauses only match fixed-array values"), span = clause.span}, true
         }
         i += 2
     }
@@ -14230,49 +14198,11 @@ case_vector_group_syntax_error :: proc(e: ^Emitter, form: CST_Form) -> (Compile_
 }
 
 emit_switch_case_label :: proc(e: ^Emitter, clause: CST_Form, type_switch: bool, subject_ty := "") -> (string, Compile_Error, bool) {
-    if is_else_keyword(clause) {
-        return "case:", {}, true
-    }
-
     if type_switch {
         if clause.kind == .Symbol {
             return fmt.tprintf("case %s:", map_name(clause.text)), {}, true
         }
-        if clause.kind == .Set {
-            builder := strings.builder_make()
-            defer strings.builder_destroy(&builder)
-            strings.write_string(&builder, "case ")
-            for item, idx in clause.items {
-                if item.kind != .Symbol {
-                    return "", Compile_Error{message = "type-switch case group expects symbols", span = item.span}, false
-                }
-                if idx > 0 {
-                    strings.write_string(&builder, ", ")
-                }
-                strings.write_string(&builder, map_name(item.text))
-            }
-            strings.write_string(&builder, ":")
-            return strings.clone(strings.to_string(builder)), {}, true
-        }
-        return "", Compile_Error{message = "type-switch case expects a type symbol or set group of types", span = clause.span}, false
-    }
-
-    if clause.kind == .Set {
-        builder := strings.builder_make()
-        defer strings.builder_destroy(&builder)
-        strings.write_string(&builder, "case ")
-        for item, idx in clause.items {
-            item_text, err_item, ok_item := emit_expr(e, item)
-            if !ok_item {
-                return "", err_item, false
-            }
-            if idx > 0 {
-                strings.write_string(&builder, ", ")
-            }
-            strings.write_string(&builder, item_text)
-        }
-        strings.write_string(&builder, ":")
-        return strings.clone(strings.to_string(builder)), {}, true
+        return "", Compile_Error{message = "type-switch case expects a type symbol", span = clause.span}, false
     }
 
     clause_text: string
@@ -14290,8 +14220,11 @@ emit_switch_case_label :: proc(e: ^Emitter, clause: CST_Form, type_switch: bool,
 }
 
 emit_switch_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Return_Spec, force_partial: bool = false, subject_ty := "") -> (Compile_Error, bool) {
-    if len(form.items) < 4 {
-        return Compile_Error{message = "switch expects subject and at least one clause", span = form.span}, false
+    if len(form.items) < 5 {
+        return Compile_Error{message = "case expects subject, clause/body pairs, and default", span = form.span}, false
+    }
+    if len(form.items)%2 == 0 {
+        return Compile_Error{message = "case expects clause/body pairs followed by default", span = form.span}, false
     }
 
     type_switch := is_type_switch_subject(form.items[1])
@@ -14327,23 +14260,9 @@ emit_switch_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, return
 
     branch_returns := returns_when_final(last_in_proc, returns)
     i := 2
-    saw_else := false
-    for i < len(form.items) {
-        if i+1 >= len(form.items) {
-            return Compile_Error{message = "switch clause missing body", span = form.span}, false
-        }
-
+    for i < len(form.items)-1 {
         clause := form.items[i]
         body := form.items[i+1]
-
-        if is_else_keyword(clause) {
-            if i+2 < len(form.items) {
-                return Compile_Error{message = "switch :else must be the final clause", span = clause.span}, false
-            }
-            saw_else = true
-        } else if saw_else {
-            return Compile_Error{message = "switch cannot have clauses after :else", span = clause.span}, false
-        }
 
         label, err_label, ok_label := emit_switch_case_label(e, clause, type_switch, subject_ty)
         if !ok_label {
@@ -14362,13 +14281,25 @@ emit_switch_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, return
         i += 2
     }
 
+    default_form := form.items[len(form.items)-1]
+    emit_line_mapped(e, "case:", default_form.span)
+    e.indent += 1
+    err_default, ok_default := emit_stmt(e, default_form, last_in_proc, branch_returns)
+    if !ok_default {
+        return err_default, false
+    }
+    e.indent -= 1
+
     emit_line(e, "}")
     return {}, true
 }
 
 emit_case_type_payload_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Return_Spec) -> (Compile_Error, bool) {
-    if len(form.items) < 4 {
-        return Compile_Error{message = "case expects subject and at least one clause", span = form.span}, false
+    if len(form.items) < 5 {
+        return Compile_Error{message = "case expects subject, clause/body pairs, and default", span = form.span}, false
+    }
+    if len(form.items)%2 == 0 {
+        return Compile_Error{message = "case expects clause/body pairs followed by default", span = form.span}, false
     }
 
     subject, err_subject, ok_subject := emit_expr(e, form.items[1])
@@ -14390,32 +14321,9 @@ emit_case_type_payload_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: b
 
     branch_returns := returns_when_final(last_in_proc, returns)
     i := 2
-    saw_else := false
-    for i < len(form.items) {
-        if i+1 >= len(form.items) {
-            return Compile_Error{message = "case clause missing body", span = form.span}, false
-        }
-
+    for i < len(form.items)-1 {
         clause := form.items[i]
         body := form.items[i+1]
-
-        if is_else_keyword(clause) {
-            if i+2 < len(form.items) {
-                return Compile_Error{message = "case :else must be the final clause", span = clause.span}, false
-            }
-            saw_else = true
-            emit_line_mapped(e, "case:", clause.span)
-            e.indent += 1
-            err_body, ok_body := emit_stmt(e, body, last_in_proc, branch_returns)
-            if !ok_body {
-                return err_body, false
-            }
-            e.indent -= 1
-            i += 2
-            continue
-        } else if saw_else {
-            return Compile_Error{message = "case cannot have clauses after :else", span = clause.span}, false
-        }
 
         ty, binding, ignored, err_pattern, ok_pattern := case_type_payload_pattern(clause)
         if !ok_pattern {
@@ -14438,6 +14346,15 @@ emit_case_type_payload_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: b
 
         i += 2
     }
+
+    default_form := form.items[len(form.items)-1]
+    emit_line_mapped(e, "case:", default_form.span)
+    e.indent += 1
+    err_default, ok_default := emit_stmt(e, default_form, last_in_proc, branch_returns)
+    if !ok_default {
+        return err_default, false
+    }
+    e.indent -= 1
 
     emit_line(e, "}")
     return {}, true
