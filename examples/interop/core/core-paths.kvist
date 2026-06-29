@@ -1,11 +1,11 @@
-// Copyright (c) Andreas Flakstad and Kvist contributors
-// SPDX-License-Identifier: MIT
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
 
-// Host interop with core:path/slashpath and core:path/filepath.
-//
-// slashpath works on forward-slash paths such as URLs. filepath works with the
-// current operating system's path rules. Some helpers return borrowed slices of
-// their input, while helpers such as clean.join/rel allocate new strings.
+;; Host interop with core:path/slashpath and core:path/filepath.
+;;
+;; slashpath works on forward-slash paths such as URLs. filepath works with the
+;; current operating system's path rules. Some helpers return borrowed slices of
+;; their input, while helpers such as clean.join/rel allocate new strings.
 (package main)
 (import fp "core:path/filepath")
 (import slash "core:path/slashpath")

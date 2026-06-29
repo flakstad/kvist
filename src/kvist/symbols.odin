@@ -279,6 +279,13 @@ odin_signature_at_line :: proc(source: string, line_start: int) -> string {
 
 odin_clean_doc_comment_line :: proc(line: string) -> string {
     text := strings.trim_left(line, " \t")
+    if strings.has_prefix(text, ";") {
+        idx := 0
+        for idx < len(text) && text[idx] == ';' {
+            idx += 1
+        }
+        return strings.trim_left(text[idx:], " \t")
+    }
     if strings.has_prefix(text, "///") {
         return strings.trim_left(text[3:], " \t")
     }
@@ -345,6 +352,8 @@ doc_scan:
         line := lines[idx]
         trimmed := strings.trim_space(line)
         switch {
+        case strings.has_prefix(trimmed, ";"):
+            append(&docs, odin_clean_doc_comment_line(line))
         case strings.has_prefix(trimmed, "//"):
             append(&docs, odin_clean_doc_comment_line(line))
         case strings.has_suffix(trimmed, "*/"):

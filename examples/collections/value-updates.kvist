@@ -1,7 +1,7 @@
-// Copyright (c) Andreas Flakstad and Kvist contributors
-// SPDX-License-Identifier: MIT
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
 
-// Non-mutating field replacement and field updates for plain struct values.
+;; Non-mutating field replacement and field updates for plain struct values.
 (package main)
 (import core "kvist:core")
 

@@ -1,13 +1,13 @@
-// Copyright (c) Andreas Flakstad and Kvist contributors
-// SPDX-License-Identifier: MIT
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
 
-// Host interop with core:thread, core:sync, and core:sync/chan.
-//
-// Odin concurrency is explicit: OS threads, thread pools, channels, mutexes,
-// atomics, and allocators. There is no hidden green-thread runtime and no
-// Clojure-style derefable future in core. This file shows the boring Odin
-// shapes directly, with Kvist only providing parens and the small `(type ...)`
-// spelling needed for polymorphic host types like chan.Chan(int).
+;; Host interop with core:thread, core:sync, and core:sync/chan.
+;;
+;; Odin concurrency is explicit: OS threads, thread pools, channels, mutexes,
+;; atomics, and allocators. There is no hidden green-thread runtime and no
+;; Clojure-style derefable future in core. This file shows the boring Odin
+;; shapes directly, with Kvist only providing parens and the small `(type ...)`
+;; spelling needed for polymorphic host types like chan.Chan(int).
 (package main)
 (import core "kvist:core")
 (import sync "core:sync")

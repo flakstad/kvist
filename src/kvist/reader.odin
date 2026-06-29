@@ -793,10 +793,14 @@ block_doc_comment_text :: proc(text: string) -> string {
 
 doc_comment_text :: proc(text: string) -> string {
     if len(text) >= 1 && text[0] == ';' {
+        idx := 0
+        for idx < len(text) && text[idx] == ';' {
+            idx += 1
+        }
         builder := strings.builder_make()
         defer strings.builder_destroy(&builder)
         strings.write_string(&builder, "//")
-        strings.write_string(&builder, text[1:])
+        strings.write_string(&builder, text[idx:])
         return strings.clone(strings.to_string(builder))
     }
     if len(text) >= 2 && text[0] == '/' && text[1] == '*' {

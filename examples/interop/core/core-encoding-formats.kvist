@@ -1,11 +1,11 @@
-// Copyright (c) Andreas Flakstad and Kvist contributors
-// SPDX-License-Identifier: MIT
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
 
-// Host interop with core:encoding/csv and core:encoding/ini.
-//
-// These packages are ordinary Odin parsers. CSV read_all allocates nested
-// records and cloned field strings by default. The INI iterator shown here is
-// allocation-free because it walks borrowed slices of the input string.
+;; Host interop with core:encoding/csv and core:encoding/ini.
+;;
+;; These packages are ordinary Odin parsers. CSV read_all allocates nested
+;; records and cloned field strings by default. The INI iterator shown here is
+;; allocation-free because it walks borrowed slices of the input string.
 (package main)
 (import core "kvist:core")
 (import csv "core:encoding/csv")

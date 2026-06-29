@@ -59,7 +59,7 @@ compile_hello_program :: proc(t: ^testing.T) {
     source := `(package main)
 (import fmt "core:fmt")
 
-// Greets from Kvist.
+;; Greets from Kvist.
 (defstruct Greeting {
   message: string
 })
@@ -938,8 +938,8 @@ symbols_source_indexes_top_level_forms :: proc(t: ^testing.T) {
 
 (def max-age: int 120)
 
-// Returns true for active users.
-// Used by sequence examples.
+;; Returns true for active users.
+;; Used by sequence examples.
 (defn active? [user: User] -> bool
   user.active)
 
@@ -2935,7 +2935,7 @@ reader_preserves_top_form_source_text :: proc(t: ^testing.T) {
     context.allocator = context.temp_allocator
     defer context.allocator = old_allocator
 
-    source := `// Doc.
+    source := `;; Doc.
 (package main)
 
 (def answer 42)`
@@ -3196,9 +3196,9 @@ format_declaration_source_map :: proc(t: ^testing.T) {
 compile_const_and_enum_forms :: proc(t: ^testing.T) {
     source := `(package main)
 
-// Default answer for bootstrapping.
+;; Default answer for bootstrapping.
 (def answer 42)
-; Maximum configured size.
+;; Maximum configured size.
 (def max-size: int 1024)
 
 (defenum Method [
@@ -3850,7 +3850,7 @@ reject_partial_source_form :: proc(t: ^testing.T) {
 compile_union_decl_and_constructor :: proc(t: ^testing.T) {
     source := `(package main)
 
-// Tagged sum for testing constructors.
+;; Tagged sum for testing constructors.
 (defunion Value {
   i: int
   s: string
@@ -16863,7 +16863,7 @@ compile_source_with_shipped_hot_macro_package :: proc(t: ^testing.T) {
 compile_canonical_foreign_import_and_transmute_forms :: proc(t: ^testing.T) {
     source := `(package main)
 
-// Foreign handle alias.
+;; Foreign handle alias.
 (def Foreign-Handle (distinct rawptr))
 (foreign-import sqlite "system:sqlite3")
 

@@ -1,7 +1,7 @@
-// Copyright (c) Andreas Flakstad and Kvist contributors
-// SPDX-License-Identifier: MIT
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
 
-// Long-lived SSE stream with periodic updates until the client disconnects.
+;; Long-lived SSE stream with periodic updates until the client disconnects.
 (package main)
 (import http "kvist:http")
 (import sse "kvist:http/sse")

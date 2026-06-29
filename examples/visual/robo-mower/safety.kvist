@@ -1,7 +1,7 @@
-// Copyright (c) Andreas Flakstad and Kvist contributors
-// SPDX-License-Identifier: MIT
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
 
-// Environment, safety, and physical actuator gates.
+;; Environment, safety, and physical actuator gates.
 (package main)
 
 (defn environment-command

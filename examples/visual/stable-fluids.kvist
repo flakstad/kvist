@@ -1,7 +1,7 @@
-// Copyright (c) Andreas Flakstad and Kvist contributors
-// SPDX-License-Identifier: MIT
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
 
-// Visual grid demo: stable 2D smoke.fluid solver with mutable f32 buffers.
+;; Visual grid demo: stable 2D smoke.fluid solver with mutable f32 buffers.
 (package main)
 (import fmt "core:fmt")
 (import math "core:math")

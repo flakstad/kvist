@@ -1,11 +1,11 @@
-// Copyright (c) Andreas Flakstad and Kvist contributors
-// SPDX-License-Identifier: MIT
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
 
-// Small measurement harness for kvist:parallel.
-//
-// This is intentionally not a benchmark test. It prints machine-dependent
-// timings that are useful for checking task overhead and whether CPU-bound work
-// benefits from running concurrently on the current system.
+;; Small measurement harness for kvist:parallel.
+;;
+;; This is intentionally not a benchmark test. It prints machine-dependent
+;; timings that are useful for checking task overhead and whether CPU-bound work
+;; benefits from running concurrently on the current system.
 (package main)
 (import os "core:os")
 (import time "core:time")

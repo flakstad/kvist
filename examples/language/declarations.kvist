@@ -1,10 +1,10 @@
-// Copyright (c) Andreas Flakstad and Kvist contributors
-// SPDX-License-Identifier: MIT
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
 
-// Exercises doc comments, import aliases, constants, explicit enums, and structs.
+;; Exercises doc comments, import aliases, constants, explicit enums, and structs.
 (package main)
 
-// Default port for examples.
+;; Default port for examples.
 (def default-port: int 8080)
 
 (defenum Http-Status

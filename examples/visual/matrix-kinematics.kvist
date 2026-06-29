@@ -1,7 +1,7 @@
-// Copyright (c) Andreas Flakstad and Kvist contributors
-// SPDX-License-Identifier: MIT
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
 
-// Visual matrix.linalg demo: nested 2D frames driving an articulated arm.
+;; Visual matrix.linalg demo: nested 2D frames driving an articulated arm.
 (package main)
 (import fmt "core:fmt")
 (import linalg "core:math/linalg")

@@ -1,7 +1,7 @@
-// Copyright (c) Andreas Flakstad and Kvist contributors
-// SPDX-License-Identifier: MIT
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
 
-// Exercises update! over dynamic arrays, maps, and defstruct fields.
+;; Exercises update! over dynamic arrays, maps, and defstruct fields.
 (package main)
 (import core "kvist:core")
 (defstruct Point

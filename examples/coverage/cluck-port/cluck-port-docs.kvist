@@ -1,7 +1,7 @@
-// Copyright (c) Andreas Flakstad and Kvist contributors
-// SPDX-License-Identifier: MIT
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
 
-// Close port of the Cluck reset docs demo.
+;; Close port of the Cluck reset docs demo.
 (package main)
 (import core "kvist:core")
 (def docs_banner

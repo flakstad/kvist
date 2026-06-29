@@ -1,7 +1,7 @@
-// Copyright (c) Andreas Flakstad and Kvist contributors
-// SPDX-License-Identifier: MIT
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
 
-// `_` in a let binding evaluates the expression and discards the result.
+;; `_` in a let binding evaluates the expression and discards the result.
 (package main)
 (import fmt "core:fmt")
 

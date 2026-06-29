@@ -1,7 +1,7 @@
-// Copyright (c) Andreas Flakstad and Kvist contributors
-// SPDX-License-Identifier: MIT
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
 
-// Runtime benchmark for generated eager sequence helpers.
+;; Runtime benchmark for generated eager sequence helpers.
 (package main)
 (import arr "kvist:arr")
 (import map "kvist:map")

@@ -1,7 +1,7 @@
-// Copyright (c) Andreas Flakstad and Kvist contributors
-// SPDX-License-Identifier: MIT
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
 
-// Demonstrates Clojure-style bit operation names over Odin integer operators.
+;; Demonstrates Clojure-style bit operation names over Odin integer operators.
 (package main)
 
 (def ReadFlag: u32 0x01)

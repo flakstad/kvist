@@ -1,8 +1,8 @@
-// Copyright (c) Andreas Flakstad and Kvist contributors
-// SPDX-License-Identifier: MIT
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
 
-// Port of the Cluck reset map.set demo. Sets lower to map[T]struct{}, but
-// there is now an explicit set helper surface for basic set algebra.
+;; Port of the Cluck reset map.set demo. Sets lower to map[T]struct{}, but
+;; there is now an explicit set helper surface for basic set algebra.
 (package main)
 (import core "kvist:core")
 (import str "kvist:str")

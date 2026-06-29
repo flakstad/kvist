@@ -1,7 +1,7 @@
-// Copyright (c) Andreas Flakstad and Kvist contributors
-// SPDX-License-Identifier: MIT
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
 
-// Focused benchmark for canonical bare core-helper lowering vs direct Odin.
+;; Focused benchmark for canonical bare core-helper lowering vs direct Odin.
 (package main)
 (import arr "kvist:arr")
 (import fmt "core:fmt")

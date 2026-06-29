@@ -1,7 +1,7 @@
-// Copyright (c) Andreas Flakstad and Kvist contributors
-// SPDX-License-Identifier: MIT
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
 
-// Visual SOA demo: flocking agents with direct column updates.
+;; Visual SOA demo: flocking agents with direct column updates.
 (package main)
 (import fmt "core:fmt")
 (import math "core:math")

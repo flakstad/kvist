@@ -1,7 +1,7 @@
-// Copyright (c) Andreas Flakstad and Kvist contributors
-// SPDX-License-Identifier: MIT
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
 
-// Headless experiment runner for comparing robo mower controllers.
+;; Headless experiment runner for comparing robo mower controllers.
 (package main)
 
 (import time "core:time")

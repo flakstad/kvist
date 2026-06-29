@@ -1,11 +1,11 @@
-// Copyright (c) Andreas Flakstad and Kvist contributors
-// SPDX-License-Identifier: MIT
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
 
-// Thin Kvist client surface over vendored odin-http.
-//
-// This keeps the public API small and close to the upstream request.response
-// model. It is suitable for file-backed tooling, HTTP APIs, and tests. The
-// first pass intentionally leaves session.auth middleware out of scope.
+;; Thin Kvist client surface over vendored odin-http.
+;;
+;; This keeps the public API small and close to the upstream request.response
+;; model. It is suitable for file-backed tooling, HTTP APIs, and tests. The
+;; first pass intentionally leaves session.auth middleware out of scope.
 (package main)
 (import client "kvist:http/client")
 

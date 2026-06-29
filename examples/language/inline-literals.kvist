@@ -1,7 +1,7 @@
-// Copyright (c) Andreas Flakstad and Kvist contributors
-// SPDX-License-Identifier: MIT
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
 
-// Demonstrates direct inline dynamic array, map, and set literals.
+;; Demonstrates direct inline dynamic array, map, and set literals.
 
 (defn inline-literals-demo [] -> int
   (let [xs [1 2 3] :defer

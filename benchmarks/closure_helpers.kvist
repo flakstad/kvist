@@ -1,7 +1,7 @@
-// Copyright (c) Andreas Flakstad and Kvist contributors
-// SPDX-License-Identifier: MIT
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
 
-// Focused benchmark for captured callbacks in non-escaping helper shapes.
+;; Focused benchmark for captured callbacks in non-escaping helper shapes.
 (package main)
 (import core "kvist:core")
 (import fmt "core:fmt")

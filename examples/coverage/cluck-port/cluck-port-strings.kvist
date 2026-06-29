@@ -1,7 +1,7 @@
-// Copyright (c) Andreas Flakstad and Kvist contributors
-// SPDX-License-Identifier: MIT
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
 
-// Port of the Cluck reset string demo, using ordinary Odin string operations.
+;; Port of the Cluck reset string demo, using ordinary Odin string operations.
 (import str "kvist:str")
 (import fmt "core:fmt")
 

@@ -1,7 +1,7 @@
-// Copyright (c) Andreas Flakstad and Kvist contributors
-// SPDX-License-Identifier: MIT
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
 
-// Robot-owned belief map built from sensors and odometry.
+;; Robot-owned belief map built from sensors and odometry.
 (package main)
 
 (def Belief-Unknown: int 0)

@@ -1,10 +1,10 @@
-// Copyright (c) Andreas Flakstad and Kvist contributors
-// SPDX-License-Identifier: MIT
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
 
-// Thin Kvist surface over vendored odin-http.
-//
-// This is server-side only for now. It keeps the public surface small while
-// staying close to the underlying request.response router model.
+;; Thin Kvist surface over vendored odin-http.
+;;
+;; This is server-side only for now. It keeps the public surface small while
+;; staying close to the underlying request.response router model.
 (package main)
 (import fmt "core:fmt")
 (import http "kvist:http")

@@ -1,11 +1,11 @@
-// Copyright (c) Andreas Flakstad and Kvist contributors
-// SPDX-License-Identifier: MIT
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
 
-// Host interop with core math, random, and linalg packages.
-//
-// These calls are intentionally plain. Kvist does not wrap the math packages:
-// scalar math, vector construction, linalg helpers, and rand calls lower to the
-// same Odin APIs you would call in a normal Odin file.
+;; Host interop with core math, random, and linalg packages.
+;;
+;; These calls are intentionally plain. Kvist does not wrap the math packages:
+;; scalar math, vector construction, linalg helpers, and rand calls lower to the
+;; same Odin APIs you would call in a normal Odin file.
 (package main)
 (import math "core:math")
 (import rand "core:math/rand")

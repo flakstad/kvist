@@ -1,7 +1,7 @@
-// Copyright (c) Andreas Flakstad and Kvist contributors
-// SPDX-License-Identifier: MIT
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
 
-// Exercises structs, field access, typed collection literals, map lookup, and make.
+;; Exercises structs, field access, typed collection literals, map lookup, and make.
 (package main)
 (import core "kvist:core")
 (import arr "kvist:arr")
@@ -49,9 +49,9 @@
     (defer (delete buffer))
     (count buffer)))
 
-// with-allocator temporarily changes context.allocator for the body. This is
-// useful when a whole operation should allocate from a caller-provided allocator.
-// The dynamic array still owns storage and is still deleted explicitly.
+;; with-allocator temporarily changes context.allocator for the body. This is
+;; useful when a whole operation should allocate from a caller-provided allocator.
+;; The dynamic array still owns storage and is still deleted explicitly.
 (defn temp-buffer-len [] -> int
   (with-allocator [allocator context.temp_allocator]
     (let [buffer (arr.empty int)]
@@ -59,9 +59,9 @@
       (arr.into! buffer (arr.dynamic int [1 2]))
       (count buffer))))
 
-// with-temp-allocator starts Odin's temp allocator scope and ends it at block
-// exit. This is good for scratch work that cannot escape the block. Kvist
-// rejects obvious attempts to return owned values allocated inside this scope.
+;; with-temp-allocator starts Odin's temp allocator scope and ends it at block
+;; exit. This is good for scratch work that cannot escape the block. Kvist
+;; rejects obvious attempts to return owned values allocated inside this scope.
 (defn temp-scoped-buffer-len [] -> int
   (with-temp-allocator [allocator]
     (let [buffer (arr.empty int)]

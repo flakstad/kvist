@@ -1,7 +1,7 @@
-// Copyright (c) Andreas Flakstad and Kvist contributors
-// SPDX-License-Identifier: MIT
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
 
-// Mutable grid world for the robo mower sandbox.
+;; Mutable grid world for the robo mower sandbox.
 (package main)
 
 (def Grid-W: int 104)

@@ -1,7 +1,7 @@
-// Copyright (c) Andreas Flakstad and Kvist contributors
-// SPDX-License-Identifier: MIT
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
 
-// Demonstrates functional-style collection pipelines with explicit ownership.
+;; Demonstrates functional-style collection pipelines with explicit ownership.
 (package main)
 (import arr "kvist:arr")
 

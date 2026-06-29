@@ -1,11 +1,11 @@
-// Copyright (c) Andreas Flakstad and Kvist contributors
-// SPDX-License-Identifier: MIT
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
 
-// Host interop with core:os path and file helpers.
-//
-// This example keeps the Odin API visible. Kvist is only changing call syntax:
-// paths are cleaned by core:os, file bytes are owned slices from core:os, and
-// callers still delete those slices when they are done.
+;; Host interop with core:os path and file helpers.
+;;
+;; This example keeps the Odin API visible. Kvist is only changing call syntax:
+;; paths are cleaned by core:os, file bytes are owned slices from core:os, and
+;; callers still delete those slices when they are done.
 (package main)
 (import os "core:os")
 

@@ -1,11 +1,11 @@
-// Copyright (c) Andreas Flakstad and Kvist contributors
-// SPDX-License-Identifier: MIT
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
 
-// Boolean success and Odin error success are separate conventions.
-//
-// Use when-let/if-let for APIs that return an explicit bool such as ok, found,
-// present, or valid. Use when-ok/if-ok for APIs whose second value is an Odin
-// error object where the zero value means success.
+;; Boolean success and Odin error success are separate conventions.
+;;
+;; Use when-let/if-let for APIs that return an explicit bool such as ok, found,
+;; present, or valid. Use when-ok/if-ok for APIs whose second value is an Odin
+;; error object where the zero value means success.
 (package main)
 (import fmt "core:fmt")
 (import io "kvist:io")

@@ -1,5 +1,5 @@
-// Copyright (c) Andreas Flakstad and Kvist contributors
-// SPDX-License-Identifier: MIT
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
 
 ;; A small package-local macro. This stays in source space and lowers away
 ;; before ordinary Kvist parsing and Odin emission.

@@ -1,7 +1,7 @@
-// Copyright (c) Andreas Flakstad and Kvist contributors
-// SPDX-License-Identifier: MIT
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
 
-// A small end-to-end order report using eager helpers, in-place helpers, and loops.
+;; A small end-to-end order report using eager helpers, in-place helpers, and loops.
 (package main)
 (import core "kvist:core")
 (import arr "kvist:arr")

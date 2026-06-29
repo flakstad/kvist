@@ -1,7 +1,7 @@
-// Copyright (c) Andreas Flakstad and Kvist contributors
-// SPDX-License-Identifier: MIT
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
 
-// Odin matrix and vector constructors paired with direct linalg calls.
+;; Odin matrix and vector constructors paired with direct linalg calls.
 (package main)
 (import core "kvist:core")
 (import linalg "core:math/linalg")

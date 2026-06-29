@@ -1,15 +1,15 @@
-// Copyright (c) Andreas Flakstad and Kvist contributors
-// SPDX-License-Identifier: MIT
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
 
-// Raylib particle simulation written as Kvist forms and lowered to Odin.
-//
-// Window mode:
-//   ./kvist examples/visual/particle-sim.kvist -o /tmp/kvist-particle-sim.odin
-//   odin build /tmp/kvist-particle-sim.odin -file -out:build/particle-sim
-//   scripts/particle_stats.sh -- build/particle-sim
-//
-// Headless benchmark mode:
-//   scripts/particle_stats.sh -- build/particle-sim --bench --particles 50000 --steps 20000
+;; Raylib particle simulation written as Kvist forms and lowered to Odin.
+;;
+;; Window mode:
+;;   ./kvist examples/visual/particle-sim.kvist -o /tmp/kvist-particle-sim.odin
+;;   odin build /tmp/kvist-particle-sim.odin -file -out:build/particle-sim
+;;   scripts/particle_stats.sh -- build/particle-sim
+;;
+;; Headless benchmark mode:
+;;   scripts/particle_stats.sh -- build/particle-sim --bench --particles 50000 --steps 20000
 (package main)
 (import cli "kvist:cli")
 (import fmt "core:fmt")

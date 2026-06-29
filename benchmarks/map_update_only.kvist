@@ -1,7 +1,7 @@
-// Copyright (c) Andreas Flakstad and Kvist contributors
-// SPDX-License-Identifier: MIT
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
 
-// Focused benchmark for map update! lowering with minimal surrounding noise.
+;; Focused benchmark for map update! lowering with minimal surrounding noise.
 (package main)
 (import fmt "core:fmt")
 (import mem "core:mem")

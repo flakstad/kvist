@@ -1,11 +1,11 @@
-// Copyright (c) Andreas Flakstad and Kvist contributors
-// SPDX-License-Identifier: MIT
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
 
-// Host interop with a vendor package: vendor:stb/easy_font.
-//
-// vendor:stb/easy_font is small and terminal-safe, so it is a good first vendor
-// example. It exposes Odin structs.arrays and simple procs; Kvist calls them
-// directly instead of adding an abstraction layer.
+;; Host interop with a vendor package: vendor:stb/easy_font.
+;;
+;; vendor:stb/easy_font is small and terminal-safe, so it is a good first vendor
+;; example. It exposes Odin structs.arrays and simple procs; Kvist calls them
+;; directly instead of adding an abstraction layer.
 (package main)
 (import core "kvist:core")
 (import fmt "core:fmt")

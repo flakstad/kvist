@@ -1,11 +1,11 @@
-// Copyright (c) Andreas Flakstad and Kvist contributors
-// SPDX-License-Identifier: MIT
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
 
-// File-backed development helpers.
-//
-// This example is for the "I computed.downloaded something once, now I want to
-// reuse it in later evals" workflow. There is no hidden REPL state here:
-// values are saved to ordinary files, then later eval calls read those files.
+;; File-backed development helpers.
+;;
+;; This example is for the "I computed.downloaded something once, now I want to
+;; reuse it in later evals" workflow. There is no hidden REPL state here:
+;; values are saved to ordinary files, then later eval calls read those files.
 (package main)
 (import io "kvist:io")
 (import json "kvist:json")
@@ -20,9 +20,9 @@
   n: int
 })
 
-// The examples below write under ./tmp. Odin's write helpers do not create
-// parent directories, so production code should create the directory first or
-// surface that error. Here we keep the directory policy explicit and boring.
+;; The examples below write under ./tmp. Odin's write helpers do not create
+;; parent directories, so production code should create the directory first or
+;; surface that error. Here we keep the directory policy explicit and boring.
 (defn ensure-dev-dir [] -> os.Error
   (let [err (os.make_directory_all "tmp")]
     (if (and (!= err nil)

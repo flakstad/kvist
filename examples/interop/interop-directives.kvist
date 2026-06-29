@@ -1,7 +1,7 @@
-// Copyright (c) Andreas Flakstad and Kvist contributors
-// SPDX-License-Identifier: MIT
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
 
-// Exercises declaration attributes, procedure directives, named returns, and multi-return binding.
+;; Exercises declaration attributes, procedure directives, named returns, and multi-return binding.
 (package main)
 
 @private

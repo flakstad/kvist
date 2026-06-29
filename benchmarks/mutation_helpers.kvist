@@ -1,7 +1,7 @@
-// Copyright (c) Andreas Flakstad and Kvist contributors
-// SPDX-License-Identifier: MIT
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
 
-// Focused benchmark for place-first update! and pointer/value mutation patterns.
+;; Focused benchmark for place-first update! and pointer/value mutation patterns.
 (package main)
 (import arr "kvist:arr")
 (import fmt "core:fmt")

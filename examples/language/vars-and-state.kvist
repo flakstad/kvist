@@ -1,7 +1,7 @@
-// Copyright (c) Andreas Flakstad and Kvist contributors
-// SPDX-License-Identifier: MIT
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
 
-// Exercises def and defvar together with explicit top-level mutation.
+;; Exercises def and defvar together with explicit top-level mutation.
 (package main)
 
 (def default-port: int 8080)

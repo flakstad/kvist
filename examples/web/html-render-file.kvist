@@ -1,7 +1,7 @@
-// Copyright (c) Andreas Flakstad and Kvist contributors
-// SPDX-License-Identifier: MIT
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
 
-// Render an HTML template file at compile time and replace placeholders at runtime.
+;; Render an HTML template file at compile time and replace placeholders at runtime.
 (package main)
 (import h "kvist:html")
 

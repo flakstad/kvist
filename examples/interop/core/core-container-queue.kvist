@@ -1,12 +1,12 @@
-// Copyright (c) Andreas Flakstad and Kvist contributors
-// SPDX-License-Identifier: MIT
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
 
-// Host interop with core:container/queue.
-//
-// Odin has concrete generic containers in core. This queue is a dynamically
-// resizing double-ended ring buffer; it is not a persistent collection and it
-// owns backing storage after queue.init. Production code should destroy it in
-// the same scope unless ownership is returned.
+;; Host interop with core:container/queue.
+;;
+;; Odin has concrete generic containers in core. This queue is a dynamically
+;; resizing double-ended ring buffer; it is not a persistent collection and it
+;; owns backing storage after queue.init. Production code should destroy it in
+;; the same scope unless ownership is returned.
 (package main)
 (import queue "core:container/queue")
 

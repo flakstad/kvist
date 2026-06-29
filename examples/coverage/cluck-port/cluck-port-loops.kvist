@@ -1,7 +1,7 @@
-// Copyright (c) Andreas Flakstad and Kvist contributors
-// SPDX-License-Identifier: MIT
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
 
-// Close port of the Cluck reset loop demos.
+;; Close port of the Cluck reset loop demos.
 (package main)
 (import arr "kvist:arr")
 

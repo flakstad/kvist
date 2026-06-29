@@ -1,7 +1,7 @@
-// Copyright (c) Andreas Flakstad and Kvist contributors
-// SPDX-License-Identifier: MIT
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
 
-// Exercises tagged union construction and type payload case handling.
+;; Exercises tagged union construction and type payload case handling.
 (package main)
 
 (defunion Value

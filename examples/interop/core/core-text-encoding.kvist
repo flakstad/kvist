@@ -1,12 +1,12 @@
-// Copyright (c) Andreas Flakstad and Kvist contributors
-// SPDX-License-Identifier: MIT
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
 
-// Host interop with core text, parsing, encoding, and crypto packages.
-//
-// This file shows the ordinary Odin shape for string work: some helpers return
-// plain booleans or integers, while encoding.parsing helpers may return owned
-// slices plus errors. Owned slices are deleted in the same proc that consumes
-// them unless ownership is deliberately returned to the caller.
+;; Host interop with core text, parsing, encoding, and crypto packages.
+;;
+;; This file shows the ordinary Odin shape for string work: some helpers return
+;; plain booleans or integers, while encoding.parsing helpers may return owned
+;; slices plus errors. Owned slices are deleted in the same proc that consumes
+;; them unless ownership is deliberately returned to the caller.
 (package main)
 (import core "kvist:core")
 (import strings "core:strings")

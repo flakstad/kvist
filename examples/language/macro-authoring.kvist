@@ -1,5 +1,5 @@
-// Copyright (c) Andreas Flakstad and Kvist contributors
-// SPDX-License-Identifier: MIT
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
 
 ;; Macro authoring examples: validation, multiple returned forms, gensym, and
 ;; field-selector inspection.

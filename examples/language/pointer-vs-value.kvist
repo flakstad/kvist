@@ -1,8 +1,8 @@
-// Copyright (c) Andreas Flakstad and Kvist contributors
-// SPDX-License-Identifier: MIT
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
 
-// Contrasts value-style updates that return a new struct with pointer-style
-// updates that mutate shared state in place.
+;; Contrasts value-style updates that return a new struct with pointer-style
+;; updates that mutate shared state in place.
 (package main)
 (import core "kvist:core")
 

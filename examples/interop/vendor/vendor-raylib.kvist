@@ -1,12 +1,12 @@
-// Copyright (c) Andreas Flakstad and Kvist contributors
-// SPDX-License-Identifier: MIT
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
 
-// Host interop with vendor:raylib.
-//
-// This file shows that Kvist can call a real graphics binding without wrapping
-// it in a Kvist-specific abstraction. The calls are ordinary Odin calls with
-// parens around them. The render proc opens a window, so it is left as an
-// explicit eval target rather than something main runs by default.
+;; Host interop with vendor:raylib.
+;;
+;; This file shows that Kvist can call a real graphics binding without wrapping
+;; it in a Kvist-specific abstraction. The calls are ordinary Odin calls with
+;; parens around them. The render proc opens a window, so it is left as an
+;; explicit eval target rather than something main runs by default.
 (package main)
 (import core "kvist:core")
 (import rl "vendor:raylib")

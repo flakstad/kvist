@@ -1,18 +1,18 @@
-// Copyright (c) Andreas Flakstad and Kvist contributors
-// SPDX-License-Identifier: MIT
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
 
-// Edit this file while the live commands demo runs.
-//
-// The current live loader reads a narrow real-Kvist subset:
-// - (import live "kvist:live")
-// - (import "path") for helper files
-// - ordinary top-level (defn ...)
-// - (live.defmodule {...} ...)
-// - (live.defcommand name ...)
-// - (live.defhook name ...)
-// - top-level def / defvar literals
-// - ordinary top-level macro expansion before live loading
-// - source-defined (defn migrate []) on reload
+;; Edit this file while the live commands demo runs.
+;;
+;; The current live loader reads a narrow real-Kvist subset:
+;; - (import live "kvist:live")
+;; - (import "path") for helper files
+;; - ordinary top-level (defn ...)
+;; - (live.defmodule {...} ...)
+;; - (live.defcommand name ...)
+;; - (live.defhook name ...)
+;; - top-level def / defvar literals
+;; - ordinary top-level macro expansion before live loading
+;; - source-defined (defn migrate []) on reload
 
 (import live "kvist:live")
 

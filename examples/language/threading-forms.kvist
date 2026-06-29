@@ -1,10 +1,10 @@
-// Copyright (c) Andreas Flakstad and Kvist contributors
-// SPDX-License-Identifier: MIT
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
 
-// Demonstrates two value-threading forms:
-// - cond-> for optional same-shape refinements controlled by independent flags
-// - as-> for named threading where the value appears in different positions or
-//   changes type by the end of the pipeline
+;; Demonstrates two value-threading forms:
+;; - cond-> for optional same-shape refinements controlled by independent flags
+;; - as-> for named threading where the value appears in different positions or
+;;   changes type by the end of the pipeline
 (package main)
 
 (defstruct Request {

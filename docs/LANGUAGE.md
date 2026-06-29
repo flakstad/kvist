@@ -2221,8 +2221,8 @@ See [MACROS.md](MACROS.md) for the full macro authoring surface.
 
 ## Documentation And Comments
 
-The repository uses comment forms such as `;`, `;;`, and `//` for line
-comments. Block comments are also supported. Ignoring the next form is
+Use `;;` for line comments. Kvist also accepts `;` and `//` comments for
+compatibility. Block comments are also supported. Ignoring the next form is
 supported with `#_`:
 
 ```clojure
@@ -2233,7 +2233,7 @@ Immediately preceding comments without a blank line also attach as doc text.
 Supported declarations may also take inline docstrings:
 
 ```clojure
-// Parse a port number from a string.
+;; Parse a port number from a string.
 (defn parse-port
   "Parse a port number from a string."
   [s: string] -> int

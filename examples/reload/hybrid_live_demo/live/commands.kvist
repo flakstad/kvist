@@ -1,12 +1,12 @@
-// Copyright (c) Andreas Flakstad and Kvist contributors
-// SPDX-License-Identifier: MIT
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
 
-// Edit this file or helpers.kvist while the hybrid demo runs.
-//
-// The host process keeps running while:
-// - the native hot-reload module is rebuilt as a DLL
-// - this live module is reloaded from source
-// - top-level Kvist macros are expanded before the live subset runs
+;; Edit this file or helpers.kvist while the hybrid demo runs.
+;;
+;; The host process keeps running while:
+;; - the native hot-reload module is rebuilt as a DLL
+;; - this live module is reloaded from source
+;; - top-level Kvist macros are expanded before the live subset runs
 
 (import live "kvist:live")
 

@@ -1,7 +1,7 @@
-// Copyright (c) Andreas Flakstad and Kvist contributors
-// SPDX-License-Identifier: MIT
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
 
-// Reusable motion.navigation commands for the robo mower sandbox.
+;; Reusable motion.navigation commands for the robo mower sandbox.
 (package main)
 
 (defn abs-f32

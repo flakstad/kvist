@@ -1,7 +1,7 @@
-// Copyright (c) Andreas Flakstad and Kvist contributors
-// SPDX-License-Identifier: MIT
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
 
-// Controller policies for the robo mower sandbox.
+;; Controller policies for the robo mower sandbox.
 (package main)
 
 (def Mapped-Phase-Sweep: int 0)

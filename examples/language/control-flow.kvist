@@ -1,7 +1,7 @@
-// Copyright (c) Andreas Flakstad and Kvist contributors
-// SPDX-License-Identifier: MIT
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
 
-// Exercises conditionals, value cases, grouped cases, loops, and name mapping.
+;; Exercises conditionals, value cases, grouped cases, loops, and name mapping.
 (package main)
 (import core "kvist:core")
 (import arr "kvist:arr")
@@ -93,8 +93,8 @@
     (= name "DELETE") (return .Delete true)
     :else (return .Get false)))
 
-// when-let is a core binding macro for Odin-style multi-returns with an
-// explicit boolean such as ok, found, present, or valid.
+;; when-let is a core binding macro for Odin-style multi-returns with an
+;; explicit boolean such as ok, found, present, or valid.
 (defn method-score [name: string] -> int
   (let [score 0]
     (when-let [[method found] (lookup-method name)]
@@ -102,8 +102,8 @@
         (set! score 10)))
     score))
 
-// if-let is the expression variant. Use it when the false branch should
-// produce a value instead of just doing nothing.
+;; if-let is the expression variant. Use it when the false branch should
+;; produce a value instead of just doing nothing.
 (defn method-title [name: string] -> string
   (if-let [[method found] (lookup-method name)]
     (method-name method)
