@@ -1144,6 +1144,21 @@ package_symbols_source_emits_core_update_helpers :: proc(t: ^testing.T) {
 }
 
 @(test)
+package_symbols_source_emits_bit_helpers :: proc(t: ^testing.T) {
+    output, ok := kvist.package_symbols_source("kvist:bit", "bit")
+    testing.expect_value(t, ok, true)
+    if !ok {
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "macro\tbit.and\t"), true)
+    testing.expect_value(t, strings.contains(output, "macro\tbit.or\t"), true)
+    testing.expect_value(t, strings.contains(output, "macro\tbit.shift-left\t"), true)
+    testing.expect_value(t, strings.contains(output, "macro\tbit.test\t"), true)
+}
+
+@(test)
 imported_symbols_source_indexes_odin_imports :: proc(t: ^testing.T) {
     source := `(package main)
 (import fmt "core:fmt")`
@@ -3886,6 +3901,7 @@ wrap_int :: proc(n: int) -> Value {
 compile_operator_forms :: proc(t: ^testing.T) {
     source := `(package main)
 (import core "kvist:core")
+(import bit "kvist:bit")
 
 (defn score [a: int, b: int, ok: bool] -> int
   (if (and ok (> a b))
@@ -3918,34 +3934,34 @@ compile_operator_forms :: proc(t: ^testing.T) {
   (not (contains? lookup key)))
 
 (defn pack-version [major: u32, minor: u32, patch: u32] -> u32
-  (bit-or
-    (bit-shift-left major 22)
-    (bit-shift-left minor 12)
+  (bit.or
+    (bit.shift-left major 22)
+    (bit.shift-left minor 12)
     patch))
 
 (defn unpack-major [version: u32] -> u32
-  (bit-and (bit-shift-right version 22) 0x7F))
+  (bit.and (bit.shift-right version 22) 0x7F))
 
 (defn toggle-bit [flags: u64, index: int] -> u64
-  (bit-flip flags index))
+  (bit.flip flags index))
 
 (defn clear-bit [flags: u64, index: int] -> u64
-  (bit-clear flags index))
+  (bit.clear flags index))
 
 (defn set-bit [flags: u64, index: int] -> u64
-  (bit-set flags index))
+  (bit.set flags index))
 
 (defn bit-set? [flags: u64, index: int] -> bool
-  (bit-test flags index))
+  (bit.test flags index))
 
 (defn remove-mask [flags: u32, mask: u32] -> u32
-  (bit-and-not flags mask))
+  (bit.and-not flags mask))
 
 (defn invert-mask [mask: u32] -> u32
-  (bit-not mask))
+  (bit.not mask))
 
 (defn xor-mask [a: u32, b: u32] -> u32
-  (bit-xor a b))`
+  (bit.xor a b))`
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)

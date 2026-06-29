@@ -1,0 +1,59 @@
+// Copyright (c) Andreas Flakstad and Kvist contributors
+// SPDX-License-Identifier: MIT
+
+(package bit)
+
+(defmacro and
+  "Bitwise and. Lowers to Odin `&`."
+  [& values]
+  (quasiquote (bit-and (splice values))))
+
+(defmacro or
+  "Bitwise or. Lowers to Odin `|`."
+  [& values]
+  (quasiquote (bit-or (splice values))))
+
+(defmacro xor
+  "Bitwise xor. Lowers to Odin `~`."
+  [& values]
+  (quasiquote (bit-xor (splice values))))
+
+(defmacro not
+  "Bitwise complement. Lowers to Odin `~value`."
+  [value]
+  (quasiquote (bit-not (unquote value))))
+
+(defmacro shift-left
+  "Shift left. Lowers to Odin `<<`."
+  [value amount]
+  (quasiquote (bit-shift-left (unquote value) (unquote amount))))
+
+(defmacro shift-right
+  "Shift right. Lowers to Odin `>>`."
+  [value amount]
+  (quasiquote (bit-shift-right (unquote value) (unquote amount))))
+
+(defmacro and-not
+  "Clear mask bits. Lowers to Odin `value & ~mask`."
+  [value mask]
+  (quasiquote (bit-and-not (unquote value) (unquote mask))))
+
+(defmacro test
+  "Return true when the bit at `index` is set."
+  [value index]
+  (quasiquote (bit-test (unquote value) (unquote index))))
+
+(defmacro set
+  "Return `value` with the bit at `index` set."
+  [value index]
+  (quasiquote (bit-set (unquote value) (unquote index))))
+
+(defmacro clear
+  "Return `value` with the bit at `index` cleared."
+  [value index]
+  (quasiquote (bit-clear (unquote value) (unquote index))))
+
+(defmacro flip
+  "Return `value` with the bit at `index` toggled."
+  [value index]
+  (quasiquote (bit-flip (unquote value) (unquote index))))

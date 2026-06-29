@@ -1,42 +1,43 @@
 ;; Copyright (c) Andreas Flakstad and Kvist contributors
 ;; SPDX-License-Identifier: MIT
 
-;; Demonstrates Clojure-style bit operation names over Odin integer operators.
+;; Demonstrates bit operations over Odin integer operators.
 (package main)
+(import bit "kvist:bit")
 
 (def ReadFlag: u32 0x01)
 (def WriteFlag: u32 0x02)
 (def ExecFlag: u32 0x04)
 
 (defn make-version [major: u32, minor: u32, patch: u32] -> u32
-  (bit-or
-    (bit-shift-left major 22)
-    (bit-shift-left minor 12)
+  (bit.or
+    (bit.shift-left major 22)
+    (bit.shift-left minor 12)
     patch))
 
 (defn version-major [version: u32] -> u32
-  (bit-and (bit-shift-right version 22) 0x7F))
+  (bit.and (bit.shift-right version 22) 0x7F))
 
 (defn read-write-mask [] -> u32
-  (bit-or ReadFlag WriteFlag))
+  (bit.or ReadFlag WriteFlag))
 
 (defn readable? [mask: u32] -> bool
-  (!= (bit-and mask ReadFlag) 0))
+  (!= (bit.and mask ReadFlag) 0))
 
 (defn without-write [mask: u32] -> u32
-  (bit-and-not mask WriteFlag))
+  (bit.and-not mask WriteFlag))
 
 (defn mark-visited [visited: u64, index: int] -> u64
-  (bit-set visited index))
+  (bit.set visited index))
 
 (defn visited? [visited: u64, index: int] -> bool
-  (bit-test visited index))
+  (bit.test visited index))
 
 (defn toggle-visited [visited: u64, index: int] -> u64
-  (bit-flip visited index))
+  (bit.flip visited index))
 
 (defn clear-visited [visited: u64, index: int] -> u64
-  (bit-clear visited index))
+  (bit.clear visited index))
 
 (defn main []
   (let [version (make-version 1 2 3)

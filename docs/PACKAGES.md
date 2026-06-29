@@ -42,6 +42,8 @@ package source and runnable examples.
 - `kvist:core` - auto-exposed core macros and helpers such as `when`, `cond`,
   `case`, threading, `count`, `get`, `slice`, `contains?`, guards, value update,
   `doc`, `nil?`, `tap>`, and `println`.
+- `kvist:bit` - bitwise integer operators such as `and`, `or`, `xor`,
+  `shift-left`, `shift-right`, `test`, `set`, `clear`, and `flip`.
 
 ## Collections And Text
 

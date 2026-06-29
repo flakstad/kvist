@@ -88,8 +88,8 @@ overload
 -> ->> cond-> as-> tap> doc
 
 ; bit operations
-bit-and bit-or bit-xor bit-not bit-shift-left bit-shift-right
-bit-and-not bit-test bit-set bit-clear bit-flip
+bit.and bit.or bit.xor bit.not bit.shift-left bit.shift-right
+bit.and-not bit.test bit.set bit.clear bit.flip
 ```
 
 ## Source Files, Packages, And Names
@@ -1788,8 +1788,8 @@ Operators lower to ordinary Odin expressions:
 (and ok ready)
 (or cached? fresh?)
 (not done)
-(bit-and flags mask)
-(bit-shift-left major 22)
+(bit.and flags mask)
+(bit.shift-left major 22)
 ```
 
 `and`, `or`, and `not` are boolean operators. They lower to Odin `&&`, `||`,
@@ -1827,21 +1827,23 @@ values once:
 
 `!=` is intentionally binary.
 
-Bit operations use Clojure-style names and lower to ordinary Odin integer
+Bit operations live in `kvist:bit` and lower to ordinary Odin integer
 operators:
 
 ```clojure
-(bit-and a b c)          ; a & b & c
-(bit-or a b c)           ; a | b | c
-(bit-xor a b)            ; a ~ b
-(bit-not mask)           ; ~mask
-(bit-shift-left x n)     ; x << n
-(bit-shift-right x n)    ; x >> n
-(bit-and-not flags mask) ; flags & ~mask
-(bit-test flags index)   ; bit at index is set
-(bit-set flags index)    ; set bit at index
-(bit-clear flags index)  ; clear bit at index
-(bit-flip flags index)   ; toggle bit at index
+(import bit "kvist:bit")
+
+(bit.and a b c)          ; a & b & c
+(bit.or a b c)           ; a | b | c
+(bit.xor a b)            ; a ~ b
+(bit.not mask)           ; ~mask
+(bit.shift-left x n)     ; x << n
+(bit.shift-right x n)    ; x >> n
+(bit.and-not flags mask) ; flags & ~mask
+(bit.test flags index)   ; bit at index is set
+(bit.set flags index)    ; set bit at index
+(bit.clear flags index)  ; clear bit at index
+(bit.flip flags index)   ; toggle bit at index
 ```
 
 Directive expression wrappers attach Odin call directives to a call:
@@ -1983,6 +1985,7 @@ language. Import them explicitly:
 (import arr "kvist:arr")
 (import map "kvist:map")
 (import set "kvist:set")
+(import bit "kvist:bit")
 (import str "kvist:str")
 (import cli "kvist:cli")
 (import soa "kvist:soa")

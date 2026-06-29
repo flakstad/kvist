@@ -38,8 +38,9 @@ Language_Source_Entry :: struct {
     snippet:  string,
 }
 
-KVIST_CANONICAL_IMPORTS_FOR_EDITOR :: [15]Imported_Symbol_Entry{
+KVIST_CANONICAL_IMPORTS_FOR_EDITOR :: [16]Imported_Symbol_Entry{
     {alias = "core", path = "kvist:core"},
+    {alias = "bit", path = "kvist:bit"},
     {alias = "arr", path = "kvist:arr"},
     {alias = "str", path = "kvist:str"},
     {alias = "map", path = "kvist:map"},

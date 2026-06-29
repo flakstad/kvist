@@ -302,7 +302,7 @@ resolve_kvist_head :: proc(e: ^Emitter, head: string) -> (canonical: string, mat
     if alias == "kvist" {
         return suffix, true, Compile_Error{}, true
     }
-    if alias == "core" || alias == "arr" || alias == "str" || alias == "map" || alias == "set" || alias == "soa" || alias == "io" || alias == "json" || alias == "cli" {
+    if alias == "core" || alias == "bit" || alias == "arr" || alias == "str" || alias == "map" || alias == "set" || alias == "soa" || alias == "io" || alias == "json" || alias == "cli" {
         return fmt.tprintf("%s/%s", alias, suffix), true, Compile_Error{}, true
     }
     for decl in e.decls {
@@ -2798,27 +2798,27 @@ emit_mixed_call_with_defaults :: proc(e: ^Emitter, proc_decl: ^Proc_Decl, positi
 
 bit_operator_name :: proc(op: string) -> string {
     switch op {
-    case "bit-and", "core/bit-and", "core-bit-and":
+    case "bit-and":
         return "bit-and"
-    case "bit-or", "core/bit-or", "core-bit-or":
+    case "bit-or":
         return "bit-or"
-    case "bit-xor", "core/bit-xor", "core-bit-xor":
+    case "bit-xor":
         return "bit-xor"
-    case "bit-not", "core/bit-not", "core-bit-not":
+    case "bit-not":
         return "bit-not"
-    case "bit-shift-left", "core/bit-shift-left", "core-bit-shift-left":
+    case "bit-shift-left":
         return "bit-shift-left"
-    case "bit-shift-right", "core/bit-shift-right", "core-bit-shift-right":
+    case "bit-shift-right":
         return "bit-shift-right"
-    case "bit-and-not", "core/bit-and-not", "core-bit-and-not":
+    case "bit-and-not":
         return "bit-and-not"
-    case "bit-test", "core/bit-test", "core-bit-test":
+    case "bit-test":
         return "bit-test"
-    case "bit-set", "core/bit-set", "core-bit-set":
+    case "bit-set":
         return "bit-set"
-    case "bit-clear", "core/bit-clear", "core-bit-clear":
+    case "bit-clear":
         return "bit-clear"
-    case "bit-flip", "core/bit-flip", "core-bit-flip":
+    case "bit-flip":
         return "bit-flip"
     }
     return ""
@@ -4268,7 +4268,7 @@ source_package_prefix_text :: proc(pkg: string) -> bool {
 
 source_package_shorthand_prefix_text :: proc(pkg: string) -> bool {
     switch pkg {
-    case "arr", "map", "set", "str", "io", "json", "cli", "html", "http", "httpc", "session", "sse", "dstar", "parallel", "p", "soa":
+    case "arr", "map", "set", "bit", "str", "io", "json", "cli", "html", "http", "httpc", "session", "sse", "dstar", "parallel", "p", "soa":
         return true
     }
     return false
