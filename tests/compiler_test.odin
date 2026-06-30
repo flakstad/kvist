@@ -12098,6 +12098,32 @@ main :: proc() {
 }
 
 @(test)
+compile_typed_vector_literal_passes_element_type_to_let_items :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct Entry {
+  attrs: [dynamic]string
+})
+
+(defn entries [] -> [dynamic]Entry
+  ([dynamic]Entry
+    [(let [attrs ([dynamic]string ["name" "email"])]
+       (Entry {attrs: attrs}))]))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "return [dynamic]Entry{"), true)
+    testing.expect_value(t, strings.contains(output, "(proc() -> Entry {"), true)
+    testing.expect_value(t, strings.contains(output, "attrs := [dynamic]string{\"name\", \"email\"}"), true)
+}
+
+@(test)
 compile_type_call_expression_for_positional_odin_aggregates :: proc(t: ^testing.T) {
     source := `(package main)
 (import rl "vendor:raylib")

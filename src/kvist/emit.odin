@@ -1283,9 +1283,16 @@ emit_brace_pairs :: proc(e: ^Emitter, form: CST_Form, keyword_fields := true) ->
     return strings.clone(strings.to_string(builder)), {}, true
 }
 
-emit_vector_item_texts :: proc(e: ^Emitter, form: CST_Form) -> (items: [dynamic]string, err: Compile_Error, ok: bool) {
+emit_vector_item_texts :: proc(e: ^Emitter, form: CST_Form, expected_item_type := "") -> (items: [dynamic]string, err: Compile_Error, ok: bool) {
     for item in form.items {
-        text, err_item, ok_item := emit_expr(e, item)
+        text: string
+        err_item: Compile_Error
+        ok_item: bool
+        if expected_item_type != "" {
+            text, err_item, ok_item = emit_expr_for_expected_type(e, item, expected_item_type)
+        } else {
+            text, err_item, ok_item = emit_expr(e, item)
+        }
         if !ok_item {
             return items, err_item, false
         }
@@ -1299,7 +1306,10 @@ emit_vector_items :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error
     if !ok_items {
         return "", err_items, false
     }
+    return emit_vector_items_text(items[:]), {}, true
+}
 
+emit_vector_items_text :: proc(items: []string) -> string {
     builder := strings.builder_make()
     defer strings.builder_destroy(&builder)
     for text, idx in items {
@@ -1308,7 +1318,7 @@ emit_vector_items :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error
         }
         strings.write_string(&builder, text)
     }
-    return strings.clone(strings.to_string(builder)), {}, true
+    return strings.clone(strings.to_string(builder))
 }
 
 emit_quaternion_vector_constructor :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) {
@@ -1420,15 +1430,13 @@ emit_dynamic_soa_vector_literal :: proc(e: ^Emitter, type_text: string, form: CS
 }
 
 emit_vector_literal :: proc(e: ^Emitter, prefix: string, form: CST_Form) -> (string, Compile_Error, bool) {
-    items, err_items, ok_items := emit_vector_item_texts(e, form)
+    expected_item_type, _ := collection_element_type(prefix)
+    items, err_items, ok_items := emit_vector_item_texts(e, form, expected_item_type)
     if !ok_items {
         return "", err_items, false
     }
     if !has_multiline_items(items[:]) {
-        inner, err_inner, ok_inner := emit_vector_items(e, form)
-        if !ok_inner {
-            return "", err_inner, false
-        }
+        inner := emit_vector_items_text(items[:])
         return surround_with_braces(prefix, inner), {}, true
     }
 
