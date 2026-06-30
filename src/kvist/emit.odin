@@ -6546,6 +6546,37 @@ emit_inferred_literal :: proc(e: ^Emitter, form: CST_Form, expected_type := "") 
     return "", Compile_Error{message = "internal error: expected literal form", span = form.span}, false
 }
 
+emit_typed_literal_value :: proc(e: ^Emitter, type_form: CST_Form, type_text: string, value: CST_Form) -> (string, Compile_Error, bool, bool) {
+    #partial switch value.kind {
+    case .Vector:
+        if type_form_needs_dynamic_literals(type_form) {
+            mark_dynamic_literals(e)
+        }
+        if type_text_is_dynamic_soa(type_text) {
+            text, err, ok := emit_dynamic_soa_vector_literal(e, type_text, value)
+            return text, err, ok, true
+        }
+        text, err, ok := emit_vector_literal(e, type_text, value)
+        return text, err, ok, true
+    case .Brace:
+        struct_decl, ok_struct := find_struct_decl(e, type_text)
+        if ok_struct {
+            err_struct, ok_struct_ctor := validate_struct_constructor(e, struct_decl, value)
+            if !ok_struct_ctor {
+                return "", err_struct, false, true
+            }
+            text, err, ok := emit_struct_brace_literal(e, struct_decl, value)
+            return text, err, ok, true
+        }
+        text, err, ok := emit_inferred_literal(e, value, type_text)
+        return text, err, ok, true
+    case .Set:
+        text, err, ok := emit_inferred_literal(e, value, type_text)
+        return text, err, ok, true
+    }
+    return "", Compile_Error{}, false, false
+}
+
 push_local_type_scope :: proc(e: ^Emitter) {
     append(&e.local_type_scope_marks, len(e.local_types))
     append(&e.local_struct_scope_marks, len(e.local_structs))
@@ -13054,13 +13085,8 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
                 if !ok_type {
                     return "", err_type, false
                 }
-                if type_form_needs_dynamic_literals(head) {
-                    mark_dynamic_literals(e)
-                }
-                if type_text_is_dynamic_soa(type_text) {
-                    return emit_dynamic_soa_vector_literal(e, type_text, form.items[1])
-                }
-                return emit_vector_literal(e, type_text, form.items[1])
+                text, err_literal, ok_literal, _ := emit_typed_literal_value(e, head, type_text, form.items[1])
+                return text, err_literal, ok_literal
             }
         } else {
             imported_fields, ok_imported_type := imported_odin_type_fields(e, head_name)
@@ -13070,23 +13096,16 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
                 if !ok_type {
                     return "", err_type, false
                 }
-                if type_form_needs_dynamic_literals(head) {
-                    mark_dynamic_literals(e)
-                }
-                return emit_vector_literal(e, type_text, form.items[1])
+                text, err_literal, ok_literal, _ := emit_typed_literal_value(e, head, type_text, form.items[1])
+                return text, err_literal, ok_literal
             }
             if _, ok_expected := imported_odin_proc_arg_type(e, head_name, 0); !ok_expected {
                 type_text, err_type, ok_type := parse_type_text(head)
                 if !ok_type {
                     return "", err_type, false
                 }
-                if type_form_needs_dynamic_literals(head) {
-                    mark_dynamic_literals(e)
-                }
-                if type_text_is_dynamic_soa(type_text) {
-                    return emit_dynamic_soa_vector_literal(e, type_text, form.items[1])
-                }
-                return emit_vector_literal(e, type_text, form.items[1])
+                text, err_literal, ok_literal, _ := emit_typed_literal_value(e, head, type_text, form.items[1])
+                return text, err_literal, ok_literal
             }
         }
     }
@@ -13096,8 +13115,8 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         if !ok_type {
             return "", err_type, false
         }
-        mark_dynamic_literals(e)
-        return emit_inferred_literal(e, form.items[1], type_text)
+        text, err_literal, ok_literal, _ := emit_typed_literal_value(e, head, type_text, form.items[1])
+        return text, err_literal, ok_literal
     }
 
     if head.text == "quaternion" {
@@ -13229,34 +13248,14 @@ emit_type_application_expr :: proc(e: ^Emitter, type_form: CST_Form, args: []CST
     mark_keyword_type_for_text(e, type_text)
 
     value := args[0]
-    #partial switch value.kind {
-    case .Vector:
-        if type_form_needs_dynamic_literals(type_form) {
-            mark_dynamic_literals(e)
-        }
-        if type_text_is_dynamic_soa(type_text) {
-            return emit_dynamic_soa_vector_literal(e, type_text, value)
-        }
-        return emit_vector_literal(e, type_text, value)
-    case .Brace:
-        struct_decl, ok_struct := find_struct_decl(e, type_text)
-        if ok_struct {
-            err_struct, ok_struct_ctor := validate_struct_constructor(e, struct_decl, value)
-            if !ok_struct_ctor {
-                return "", err_struct, false
-            }
-            return emit_struct_brace_literal(e, struct_decl, value)
-        }
-        return emit_inferred_literal(e, value, type_text)
-    case .Set:
-        return emit_inferred_literal(e, value, type_text)
-    case:
-        value_text, err_value, ok_value := emit_expr(e, value)
-        if !ok_value {
-            return "", err_value, false
-        }
-        return emit_type_conversion_text(type_text, value_text), {}, true
+    if text, err_literal, ok_literal, handled := emit_typed_literal_value(e, type_form, type_text, value); handled {
+        return text, err_literal, ok_literal
     }
+    value_text, err_value, ok_value := emit_expr(e, value)
+    if !ok_value {
+        return "", err_value, false
+    }
+    return emit_type_conversion_text(type_text, value_text), {}, true
 }
 
 generic_type_constructor_call_candidate :: proc(head: CST_Form) -> bool {
