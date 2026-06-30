@@ -6147,6 +6147,16 @@ type_text_is_set :: proc(text: string) -> bool {
     return len(text) >= 4 && text[:4] == "set["
 }
 
+set_element_type :: proc(text: string) -> (string, bool) {
+    if type_text_is_set(text) && strings.has_suffix(text, "]") {
+        return text[4:len(text)-1], true
+    }
+    if key_ty, value_ty, ok_map := map_type_parts(text); ok_map && value_ty == "struct{}" {
+        return key_ty, true
+    }
+    return "", false
+}
+
 map_index_target_text :: proc(e: ^Emitter, form: CST_Form, emitted: string) -> string {
     if ty, ok_ty := obvious_form_type(e, form); ok_ty && type_text_is_pointer_to_map(ty) {
         return deref_expr_text(emitted)
@@ -6443,7 +6453,7 @@ obvious_form_type :: proc(e: ^Emitter, form: CST_Form) -> (string, bool) {
 }
 
 emit_set_literal :: proc(e: ^Emitter, elem_type: string, form: CST_Form) -> (string, Compile_Error, bool) {
-    values, err_values, ok_values := emit_vector_item_texts(e, form)
+    values, err_values, ok_values := emit_vector_item_texts(e, form, elem_type)
     if !ok_values {
         return "", err_values, false
     }
@@ -6514,21 +6524,21 @@ emit_inferred_literal :: proc(e: ^Emitter, form: CST_Form, expected_type := "") 
     case .Set:
         elem_ty := ""
         if expected_type != "" {
-            key_ty, value_ty, ok_map := map_type_parts(expected_type)
-            if !ok_map || value_ty != "struct{}" {
+            expected_elem, ok_elem := set_element_type(expected_type)
+            if !ok_elem {
                 return "", Compile_Error{message = fmt.tprintf("set literal does not match expected type %s", expected_type), span = form.span}, false
             }
-            elem_ty = key_ty
+            elem_ty = expected_elem
         } else {
             inferred, err_inferred, ok_inferred := infer_literal_value_type(e, form)
             if !ok_inferred {
                 return "", err_inferred, false
             }
-            key_ty, value_ty, ok_map := map_type_parts(inferred)
-            if !ok_map || value_ty != "struct{}" {
+            inferred_elem, ok_elem := set_element_type(inferred)
+            if !ok_elem {
                 return "", Compile_Error{message = "internal error inferring set literal type", span = form.span}, false
             }
-            elem_ty = key_ty
+            elem_ty = inferred_elem
         }
         mark_dynamic_literals(e)
         return emit_set_literal(e, elem_ty, form)
@@ -13081,6 +13091,15 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         }
     }
 
+    if len(form.items) == 2 && form.items[1].kind == .Set {
+        type_text, err_type, ok_type := parse_type_text(head)
+        if !ok_type {
+            return "", err_type, false
+        }
+        mark_dynamic_literals(e)
+        return emit_inferred_literal(e, form.items[1], type_text)
+    }
+
     if head.text == "quaternion" {
         return emit_quaternion_arg_constructor(e, form.items[1:], form.span)
     }
@@ -13228,6 +13247,8 @@ emit_type_application_expr :: proc(e: ^Emitter, type_form: CST_Form, args: []CST
             }
             return emit_struct_brace_literal(e, struct_decl, value)
         }
+        return emit_inferred_literal(e, value, type_text)
+    case .Set:
         return emit_inferred_literal(e, value, type_text)
     case:
         value_text, err_value, ok_value := emit_expr(e, value)

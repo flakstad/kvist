@@ -12150,6 +12150,26 @@ compile_typed_map_literal_passes_value_type_to_let_values :: proc(t: ^testing.T)
 }
 
 @(test)
+compile_typed_set_literal_passes_element_type_to_let_items :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn tags [] -> set[string]
+  (set[string] #{(let [tag "name"] tag)}))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "tags :: proc() -> map[string]struct{}"), true)
+    testing.expect_value(t, strings.contains(output, "(proc() -> string {"), true)
+    testing.expect_value(t, strings.contains(output, "tag := \"name\""), true)
+}
+
+@(test)
 compile_type_call_expression_for_positional_odin_aggregates :: proc(t: ^testing.T) {
     source := `(package main)
 (import rl "vendor:raylib")
