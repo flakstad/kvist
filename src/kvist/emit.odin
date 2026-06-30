@@ -1222,7 +1222,7 @@ Brace_Pair :: struct {
     value: string,
 }
 
-emit_brace_pair_texts :: proc(e: ^Emitter, form: CST_Form, keyword_fields := true) -> (pairs: [dynamic]Brace_Pair, err: Compile_Error, ok: bool) {
+emit_brace_pair_texts :: proc(e: ^Emitter, form: CST_Form, keyword_fields := true, expected_key_type := "", expected_value_type := "") -> (pairs: [dynamic]Brace_Pair, err: Compile_Error, ok: bool) {
     i := 0
     for i < len(form.items) {
         if i+1 >= len(form.items) {
@@ -1231,7 +1231,14 @@ emit_brace_pair_texts :: proc(e: ^Emitter, form: CST_Form, keyword_fields := tru
 
         key := form.items[i]
         val := form.items[i+1]
-        value_text, err_value, ok_value := emit_expr(e, val)
+        value_text: string
+        err_value: Compile_Error
+        ok_value: bool
+        if expected_value_type != "" {
+            value_text, err_value, ok_value = emit_expr_for_expected_type(e, val, expected_value_type)
+        } else {
+            value_text, err_value, ok_value = emit_expr(e, val)
+        }
         if !ok_value {
             return pairs, err_value, false
         }
@@ -1247,7 +1254,14 @@ emit_brace_pair_texts :: proc(e: ^Emitter, form: CST_Form, keyword_fields := tru
                     continue
                 }
             }
-            key_text, err_key, ok_key := emit_expr(e, key)
+            key_text: string
+            err_key: Compile_Error
+            ok_key: bool
+            if expected_key_type != "" {
+                key_text, err_key, ok_key = emit_expr_for_expected_type(e, key, expected_key_type)
+            } else {
+                key_text, err_key, ok_key = emit_expr(e, key)
+            }
             if !ok_key {
                 return pairs, err_key, false
             }
@@ -1255,7 +1269,14 @@ emit_brace_pair_texts :: proc(e: ^Emitter, form: CST_Form, keyword_fields := tru
         case .String:
             append(&pairs, Brace_Pair{key = emit_string_literal_text(key), value = value_text})
         case:
-            key_text, err_key, ok_key := emit_expr(e, key)
+            key_text: string
+            err_key: Compile_Error
+            ok_key: bool
+            if expected_key_type != "" {
+                key_text, err_key, ok_key = emit_expr_for_expected_type(e, key, expected_key_type)
+            } else {
+                key_text, err_key, ok_key = emit_expr(e, key)
+            }
             if !ok_key {
                 return pairs, err_key, false
             }
@@ -1271,7 +1292,10 @@ emit_brace_pairs :: proc(e: ^Emitter, form: CST_Form, keyword_fields := true) ->
     if !ok_pairs {
         return "", err_pairs, false
     }
+    return emit_brace_pairs_text(pairs[:]), {}, true
+}
 
+emit_brace_pairs_text :: proc(pairs: []Brace_Pair) -> string {
     builder := strings.builder_make()
     defer strings.builder_destroy(&builder)
     for pair, idx in pairs {
@@ -1280,7 +1304,7 @@ emit_brace_pairs :: proc(e: ^Emitter, form: CST_Form, keyword_fields := true) ->
         }
         fmt.sbprintf(&builder, "%s = %s", pair.key, pair.value)
     }
-    return strings.clone(strings.to_string(builder)), {}, true
+    return strings.clone(strings.to_string(builder))
 }
 
 emit_vector_item_texts :: proc(e: ^Emitter, form: CST_Form, expected_item_type := "") -> (items: [dynamic]string, err: Compile_Error, ok: bool) {
@@ -1458,7 +1482,13 @@ emit_brace_literal :: proc(e: ^Emitter, prefix: string, form: CST_Form) -> (stri
         return "", Compile_Error{message = "positional aggregate literals use vector syntax", span = form.span}, false
     }
 
-    pairs, err_pairs, ok_pairs := emit_brace_pair_texts(e, form, keyword_fields)
+    expected_key_type := ""
+    expected_value_type := ""
+    if key_ty, value_ty, ok_map := map_type_parts(prefix); ok_map {
+        expected_key_type = key_ty
+        expected_value_type = value_ty
+    }
+    pairs, err_pairs, ok_pairs := emit_brace_pair_texts(e, form, keyword_fields, expected_key_type, expected_value_type)
     if !ok_pairs {
         return "", err_pairs, false
     }
@@ -1471,10 +1501,7 @@ emit_brace_literal :: proc(e: ^Emitter, prefix: string, form: CST_Form) -> (stri
         }
     }
     if !multiline {
-        inner, err_inner, ok_inner := emit_brace_pairs(e, form, keyword_fields)
-        if !ok_inner {
-            return "", err_inner, false
-        }
+        inner := emit_brace_pairs_text(pairs[:])
         return surround_with_braces(prefix, inner), {}, true
     }
 
