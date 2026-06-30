@@ -123,6 +123,27 @@
             (do
               (splice body))))))))
 
+(defmacro middleware-ptr
+  "Create middleware around next handler pointer `next`.
+
+  This is useful for reusable middleware functions that receive `^http.Handler`
+  and return `http.Handler`."
+  [next binding & body]
+  (let [next-binding (first binding)
+        req (nth binding 1)
+        res (nth binding 2)
+        self (symbol "__http_middleware_self")
+        self-param (symbol (str (name self) ":"))
+        req-param (symbol (str (name req) ":"))
+        res-param (symbol (str (name res) ":"))]
+    (quasiquote
+      (h.middleware_proc
+        (unquote next)
+        (fn [(unquote self-param) ^h.Handler (unquote req-param) ^h.Request (unquote res-param) ^h.Response]
+          (let [(unquote next-binding) (handler-next (unquote self))]
+            (do
+              (splice body))))))))
+
 (defmacro router-handler
   "Return the vendor handler value for `router`.
 
@@ -198,60 +219,376 @@
        (handler [(unquote req) (unquote res)]
          (splice body))))))
 
-(defmacro get!
+(defmacro- route-handler
+  "Private route registration helper for prebuilt handler values."
+  [adder router pattern handler]
+  (quasiquote
+    ((unquote adder)
+     (addr (unquote router))
+     (unquote pattern)
+     (unquote handler))))
+
+(defmacro route-get!
   "Register a GET route on `router` for `pattern`."
   [router pattern binding & body]
   (quasiquote
     (route h.route_get (unquote router) (unquote pattern) (unquote binding)
       (splice body))))
 
-(defmacro post!
+(defmacro route-post!
   "Register a POST route on `router` for `pattern`."
   [router pattern binding & body]
   (quasiquote
     (route h.route_post (unquote router) (unquote pattern) (unquote binding)
       (splice body))))
 
-(defmacro put!
+(defmacro route-put!
   "Register a PUT route on `router` for `pattern`."
   [router pattern binding & body]
   (quasiquote
     (route h.route_put (unquote router) (unquote pattern) (unquote binding)
       (splice body))))
 
-(defmacro patch!
+(defmacro route-patch!
   "Register a PATCH route on `router` for `pattern`."
   [router pattern binding & body]
   (quasiquote
     (route h.route_patch (unquote router) (unquote pattern) (unquote binding)
       (splice body))))
 
-(defmacro head!
+(defmacro route-head!
   "Register a HEAD route on `router` for `pattern`."
   [router pattern binding & body]
   (quasiquote
     (route h.route_head (unquote router) (unquote pattern) (unquote binding)
       (splice body))))
 
-(defmacro options!
+(defmacro route-options!
   "Register an OPTIONS route on `router` for `pattern`."
   [router pattern binding & body]
   (quasiquote
     (route h.route_options (unquote router) (unquote pattern) (unquote binding)
       (splice body))))
 
-(defmacro delete!
+(defmacro route-delete!
   "Register a DELETE route on `router` for `pattern`."
   [router pattern binding & body]
   (quasiquote
     (route h.route_delete (unquote router) (unquote pattern) (unquote binding)
       (splice body))))
 
-(defmacro all!
+(defmacro route-all!
   "Register a route for all HTTP methods on `router` for `pattern`."
   [router pattern binding & body]
   (quasiquote
     (route h.route_all (unquote router) (unquote pattern) (unquote binding)
+      (splice body))))
+
+(defmacro- route-head-outside-routes-error
+  [method]
+  (error (str "http." (name method) " is route syntax and must be used inside http.routes")))
+
+(defmacro GET
+  "Route syntax for `http.routes`."
+  [path binding & body]
+  (route-head-outside-routes-error (quote GET)))
+
+(defmacro POST
+  "Route syntax for `http.routes`."
+  [path binding & body]
+  (route-head-outside-routes-error (quote POST)))
+
+(defmacro PUT
+  "Route syntax for `http.routes`."
+  [path binding & body]
+  (route-head-outside-routes-error (quote PUT)))
+
+(defmacro PATCH
+  "Route syntax for `http.routes`."
+  [path binding & body]
+  (route-head-outside-routes-error (quote PATCH)))
+
+(defmacro HEAD
+  "Route syntax for `http.routes`."
+  [path binding & body]
+  (route-head-outside-routes-error (quote HEAD)))
+
+(defmacro OPTIONS
+  "Route syntax for `http.routes`."
+  [path binding & body]
+  (route-head-outside-routes-error (quote OPTIONS)))
+
+(defmacro DELETE
+  "Route syntax for `http.routes`."
+  [path binding & body]
+  (route-head-outside-routes-error (quote DELETE)))
+
+(defmacro ANY
+  "Route syntax for `http.routes`."
+  [path binding & body]
+  (route-head-outside-routes-error (quote ANY)))
+
+(defmacro context
+  "Context syntax for `http.routes`."
+  [path args & body]
+  (error "http.context is route syntax and must be used inside http.routes"))
+
+(defmacro- route-dsl-adder
+  [method]
+  (case (name method)
+    "GET" (quote h.route_get)
+    "http__GET" (quote h.route_get)
+    "POST" (quote h.route_post)
+    "http__POST" (quote h.route_post)
+    "PUT" (quote h.route_put)
+    "http__PUT" (quote h.route_put)
+    "PATCH" (quote h.route_patch)
+    "http__PATCH" (quote h.route_patch)
+    "HEAD" (quote h.route_head)
+    "http__HEAD" (quote h.route_head)
+    "OPTIONS" (quote h.route_options)
+    "http__OPTIONS" (quote h.route_options)
+    "DELETE" (quote h.route_delete)
+    "http__DELETE" (quote h.route_delete)
+    "ANY" (quote h.route_all)
+    "http__ANY" (quote h.route_all)
+    "ALL" (quote h.route_all)
+    "http__ALL" (quote h.route_all)
+    (error (str "unknown route method: " (source method)))))
+
+(defmacro- prefixed-route-pattern
+  [prefix pattern]
+  (if (not (string? pattern))
+    (error "routes context currently expects literal string route paths")
+    (str prefix (text pattern))))
+
+(defmacro- route-register-wrapped-step
+  [adder router pattern current mws]
+  (if (= (count mws) 0)
+    (quasiquote
+      (route-handler
+        (unquote adder)
+        (unquote router)
+        (unquote pattern)
+        (unquote current)))
+    (let [mw (first mws)
+          wrapped (gensym "http-handler")]
+      (quasiquote
+        (let [(unquote wrapped) ((unquote mw) (addr (unquote current)))]
+          (unquote (route-register-wrapped-step adder router pattern wrapped (rest mws))))))))
+
+(defmacro- route-register-wrapped
+  [adder router pattern handler mws]
+  (let [base (gensym "http-handler")]
+    (quasiquote
+      (let [(unquote base) (unquote handler)]
+        (unquote (route-register-wrapped-step adder router pattern base mws))))))
+
+(defmacro- route-dsl-route
+  [router prefix mws form]
+  (if (< (count form) 4)
+    (error "routes expects route forms like (GET path [req res] ...)")
+    (let [method (first form)
+          pattern (prefixed-route-pattern prefix (nth form 1))
+          binding (nth form 2)
+          body (rest (rest (rest form)))]
+      (if (not (symbol? method))
+        (error "routes expects route method symbols like GET or POST")
+        (let [adder (route-dsl-adder method)
+              base (quasiquote
+                     (handler (unquote binding)
+                       (splice body)))]
+          (route-register-wrapped adder router pattern base mws))))))
+
+(defmacro- route-context-form
+  [router prefix mws form]
+  (if (< (count form) 3)
+    (error "context expects a path prefix and route forms")
+    (let [context-prefix (nth form 1)]
+      (if (not (string? context-prefix))
+        (error "context expects a literal string path prefix")
+        (let [tail (rest (rest form))
+              args (first tail)]
+          (if (vector? args)
+            (if (not (= (count args) 0))
+              (error "context route param bindings are not supported yet; use req^.url_params in the route body")
+              (route-dsl-forms router
+                               (str prefix (text context-prefix))
+                               mws
+                               (rest tail)))
+            (route-dsl-forms router
+                             (str prefix (text context-prefix))
+                             mws
+                             tail)))))))
+
+(defmacro- route-middleware-form
+  [router prefix mws form]
+  (if (< (count form) 3)
+    (error "middleware expects a vector of middleware and route forms")
+    (let [new-mws (nth form 1)]
+      (if (not (vector? new-mws))
+        (error "middleware expects a vector of middleware")
+        (route-dsl-forms router
+                         prefix
+                         (concat mws (route-vector-items new-mws))
+                         (rest (rest form)))))))
+
+(defmacro- route-vector-items
+  [items]
+  (if (= (count items) 0)
+    (forms)
+    (concat
+      (forms (first items))
+      (route-vector-items (rest items)))))
+
+(defmacro- route-dsl-form
+  [router prefix mws form]
+  (if (not (list? form))
+    (error "routes expects route forms like (GET path [req res] ...)")
+    (let [head (first form)]
+      (if (not (symbol? head))
+        (error "routes expects route method symbols like GET or POST")
+        (case (name head)
+          "context" (route-context-form router prefix mws form)
+          "http__context" (route-context-form router prefix mws form)
+          "middleware" (route-middleware-form router prefix mws form)
+          "http__middleware" (route-middleware-form router prefix mws form)
+          "route-map" (route-dsl-map-form router prefix mws form)
+          "http__route-map" (route-dsl-map-form router prefix mws form)
+          (route-dsl-route router prefix mws form))))))
+
+(defmacro- route-dsl-forms
+  [router prefix mws forms]
+  (if (= (count forms) 0)
+    (forms)
+    (concat
+      (forms
+        (route-dsl-form router prefix mws (first forms)))
+      (route-dsl-forms router prefix mws (rest forms)))))
+
+(defmacro routes
+  "Register route forms on `router`.
+
+  This is syntax sugar over the mutating `http.route-get!` family. Route heads
+  are deliberately declarative inside this form:
+
+  `(http.routes router (GET \"/ping\" [req res] ...))`"
+  [router & body]
+  (quasiquote
+    (do
+      (splice (route-dsl-forms router "" (forms) body)))))
+
+(defmacro- route-map-method-forms
+  [router prefix mws path methods]
+  (if (= (count methods) 0)
+    (forms)
+    (if (= (count methods) 1)
+      (error "route-map method maps expect method/handler pairs")
+      (let [method (first methods)
+            handler-name (nth methods 1)
+            adder (route-dsl-adder method)
+            pattern (prefixed-route-pattern prefix path)
+            base (quasiquote
+                   (handler [req res]
+                     ((unquote handler-name) req res)))]
+        (if (not (keyword? method))
+          (error "route-map method keys must be keywords like :GET or :POST")
+          (concat
+            (forms
+              (route-register-wrapped adder router pattern base mws))
+            (route-map-method-forms router prefix mws path (rest (rest methods)))))))))
+
+(defmacro- route-map-forms
+  [router prefix mws route-map]
+  (if (= (count route-map) 0)
+    (forms)
+    (if (= (count route-map) 1)
+      (error "route-map expects path/method-map pairs")
+      (let [path (first route-map)
+            methods (nth route-map 1)]
+        (if (not (string? path))
+          (error "route-map path keys must be literal strings")
+          (if (not (brace? methods))
+            (error "route-map values must be method maps")
+            (concat
+              (route-map-method-forms router prefix mws path methods)
+              (route-map-forms router prefix mws (rest (rest route-map))))))))))
+
+(defmacro- route-dsl-map-form
+  [router prefix mws form]
+  (if (< (count form) 2)
+    (error "route-map inside routes expects a literal map")
+    (let [route-map (nth form 1)]
+      (if (not (brace? route-map))
+        (error "route-map expects a literal map")
+        (route-map-forms router prefix mws route-map)))))
+
+(defmacro route-map
+  "Register exact path routes from a literal route map.
+
+  The route map shape is `{path {:METHOD handler}}`. Handlers are called with
+  `[req res]`. Use `http.routes` for path params, contexts, or middleware."
+  [router route-map]
+  (if (not (brace? route-map))
+    (error "route-map expects a literal map")
+    (quasiquote
+      (do
+        (splice (route-map-forms router "" (forms) route-map))))))
+
+(defmacro get!
+  "Register a GET route on `router` for `pattern`."
+  [router pattern binding & body]
+  (quasiquote
+    (route-get! (unquote router) (unquote pattern) (unquote binding)
+      (splice body))))
+
+(defmacro post!
+  "Register a POST route on `router` for `pattern`."
+  [router pattern binding & body]
+  (quasiquote
+    (route-post! (unquote router) (unquote pattern) (unquote binding)
+      (splice body))))
+
+(defmacro put!
+  "Register a PUT route on `router` for `pattern`."
+  [router pattern binding & body]
+  (quasiquote
+    (route-put! (unquote router) (unquote pattern) (unquote binding)
+      (splice body))))
+
+(defmacro patch!
+  "Register a PATCH route on `router` for `pattern`."
+  [router pattern binding & body]
+  (quasiquote
+    (route-patch! (unquote router) (unquote pattern) (unquote binding)
+      (splice body))))
+
+(defmacro head!
+  "Register a HEAD route on `router` for `pattern`."
+  [router pattern binding & body]
+  (quasiquote
+    (route-head! (unquote router) (unquote pattern) (unquote binding)
+      (splice body))))
+
+(defmacro options!
+  "Register an OPTIONS route on `router` for `pattern`."
+  [router pattern binding & body]
+  (quasiquote
+    (route-options! (unquote router) (unquote pattern) (unquote binding)
+      (splice body))))
+
+(defmacro delete!
+  "Register a DELETE route on `router` for `pattern`."
+  [router pattern binding & body]
+  (quasiquote
+    (route-delete! (unquote router) (unquote pattern) (unquote binding)
+      (splice body))))
+
+(defmacro all!
+  "Register a route for all HTTP methods on `router` for `pattern`."
+  [router pattern binding & body]
+  (quasiquote
+    (route-all! (unquote router) (unquote pattern) (unquote binding)
       (splice body))))
 
 (defmacro listen

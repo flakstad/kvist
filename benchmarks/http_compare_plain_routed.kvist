@@ -11,8 +11,9 @@
         server (http.new-server)]
     (defer (http.router-destroy! router))
 
-    (http.get! router "/" [req res]
-      (http.respond-plain res JSON-STATIC))
+    (http.routes router
+      (GET "/" [req res]
+        (http.respond-plain res JSON-STATIC)))
 
     (http.server-shutdown-on-interrupt! server)
     (http.listen-and-serve! server router 6969)))

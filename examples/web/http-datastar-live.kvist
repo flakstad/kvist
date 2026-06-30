@@ -28,14 +28,15 @@
         server (http.new-server)]
     (defer (http.router-destroy! router))
 
-    (http.get! router "/" [req res]
-      (http.respond-html res index-html))
+    (http.routes router
+      (GET "/" [req res]
+        (http.respond-html res index-html))
 
-    (http.get! router "/clock" [req res]
-      (let [stream (sse.new-stream-on-error res on-err)]
-        (dstar.patch-elements-selector! stream "#status" "outer" "<div id='status'>Connected</div>")
-        (dstar.patch-signals! stream "{ticks: 0}")
-        (tick nil stream)))
+      (GET "/clock" [req res]
+        (let [stream (sse.new-stream-on-error res on-err)]
+          (dstar.patch-elements-selector! stream "#status" "outer" "<div id='status'>Connected</div>")
+          (dstar.patch-signals! stream "{ticks: 0}")
+          (tick nil stream))))
 
     (http.server-shutdown-on-interrupt! server)
     (http.listen-and-serve! server router 6969)))

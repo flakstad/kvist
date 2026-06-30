@@ -18,14 +18,15 @@
         server (http.new-server)]
     (defer (http.router-destroy! router))
 
-    (http.get! router "/ping" [req res]
-      (http.respond-plain res "pong"))
+    (http.routes router
+      (GET "/ping" [req res]
+        (http.respond-plain res "pong"))
 
-    (http.get! router "/hello/(%w+)" [req res]
-      (let [params req^.url_params]
-        (http.respond-json
-          res
-          (Greeting {message: (fmt.tprintf "hello %s" params[0])}))))
+      (GET "/hello/(%w+)" [req res]
+        (let [params req^.url_params]
+          (http.respond-json
+            res
+            (Greeting {message: (fmt.tprintf "hello %s" params[0])})))))
 
     (http.server-shutdown-on-interrupt! server)
     (http.listen-and-serve! server router 6969)))

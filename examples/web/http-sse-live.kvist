@@ -24,12 +24,13 @@
         server (http.new-server)]
     (defer (http.router-destroy! router))
 
-    (http.get! router "/events" [req res]
-      (let [stream (sse.new-stream-on-error res on-err)]
-        (sse.comment! stream "connected")
-        (sse.retry! stream 1000)
-        (sse.send-event! stream "welcome" "ready")
-        (sse.schedule-timeout! time.Second stream tick)))
+    (http.routes router
+      (GET "/events" [req res]
+        (let [stream (sse.new-stream-on-error res on-err)]
+          (sse.comment! stream "connected")
+          (sse.retry! stream 1000)
+          (sse.send-event! stream "welcome" "ready")
+          (sse.schedule-timeout! time.Second stream tick))))
 
     (http.server-shutdown-on-interrupt! server)
     (http.listen-and-serve! server router 6969)))

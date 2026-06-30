@@ -61,6 +61,13 @@
     (sse.close! stream))
   true)
 
+(defn route-map-demo [req: ^h.Request, res: ^h.Response]
+  (http.respond-plain res "route-map"))
+
+(defn compile-middleware [handler: ^h.Handler] -> h.Handler
+  (http.middleware-ptr handler [next req res]
+    (next^.handle next req res)))
+
 (t.deftest html-package-surface
   (let [ids (arr.range 1 4) :defer
         rendered (html.render
@@ -104,6 +111,28 @@
               (http.set-cookie! res0 "session" "abc"))]
     (defer (http.router-destroy! router))
     (defer (http.rate-limit-destroy! data))
+    (http.route-get! router "/explicit" [req1 res1]
+      (http.respond-plain res1 "explicit"))
+    (http.routes router
+      (http.GET "/dsl" [req1 res1]
+        (http.respond-plain res1 "dsl"))
+      (http.ANY "/any" [req1 res1]
+        (http.respond-plain res1 "any"))
+      (http.context "/ctx" []
+        (http.GET "/nested" [req1 res1]
+          (http.respond-plain res1 "nested"))
+        (http.middleware [compile-middleware]
+          (http.POST "/wrapped" [req1 res1]
+            (http.respond-ok res1))
+          (http.route-map
+            {"/mapped-wrapped" {:GET route-map-demo}})))
+      (http.POST "/dsl" [req1 res1]
+        (http.respond-ok res1))
+      (http.route-map
+        {"/mapped-in-routes" {:GET route-map-demo}}))
+    (http.route-map router
+      {"/mapped" {:GET route-map-demo
+                  :POST route-map-demo}})
     (http.handle! app (addr req) (addr res))
     (let [[sid ok] (http.request-cookie (addr req) "sid")
           cookies (http.request-cookies (addr req)) :defer]

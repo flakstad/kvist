@@ -25,8 +25,9 @@ router, register routes, then listen.
         server (http.new-server)]
     (defer (http.router-destroy! router))
 
-    (http.get! router "/ping" [req res]
-      (http.respond-plain res "pong"))
+    (http.routes router
+      (http.GET "/ping" [req res]
+        (http.respond-plain res "pong")))
 
     (http.server-shutdown-on-interrupt! server)
     (http.listen-and-serve! server router 6969)))
@@ -38,8 +39,9 @@ the body, and destroys it when the scope exits:
 ```clojure
 (http.with-router [router]
   (let [server (http.new-server)]
-    (http.get! router "/ping" [req res]
-      (http.respond-plain res "pong"))
+    (http.routes router
+      (http.GET "/ping" [req res]
+        (http.respond-plain res "pong")))
 
     (http.server-shutdown-on-interrupt! server)
     (http.listen-and-serve! server router 6969)))
@@ -48,27 +50,97 @@ the body, and destroys it when the scope exits:
 Routes bind request and response pointers:
 
 ```clojure
-(http.get! router "/hello/(%w+)" [req res]
-  (let [params req^.url_params]
-    (http.respond-plain res params[0])))
+(http.routes router
+  (http.GET "/hello/(%w+)" [req res]
+    (let [params req^.url_params]
+      (http.respond-plain res params[0]))))
 ```
 
-Route registration mutates the router. Bang names are not decoration here.
+`http.routes` is only syntax sugar; it still registers routes on the router.
 
 ## Routes And Responses
 
 The route macros cover the common methods:
 
 ```clojure
-(http.get! router path [req res] ...)
-(http.post! router path [req res] ...)
-(http.put! router path [req res] ...)
-(http.patch! router path [req res] ...)
-(http.delete! router path [req res] ...)
-(http.all! router path [req res] ...)
+(http.routes router
+  (http.GET path [req res] ...)
+  (http.POST path [req res] ...)
+  (http.PUT path [req res] ...)
+  (http.PATCH path [req res] ...)
+  (http.HEAD path [req res] ...)
+  (http.OPTIONS path [req res] ...)
+  (http.DELETE path [req res] ...)
+  (http.ANY path [req res] ...))
 ```
 
-Route registration mutates the router, so route macros use bang names only.
+Use `context` to give nested routes a literal path prefix:
+
+```clojure
+(http.routes router
+  (http.context "/konto" []
+    (http.GET "" [req res] ...)
+    (http.GET "/samtaler" [req res] ...)
+    (http.GET "/samtaler/(%d+)" [req res] ...)))
+```
+
+The empty vector mirrors Compojure's `context` shape. Named context bindings are
+not supported yet; read captures from `req^.url_params` in the route body.
+
+Use `middleware` inside `http.routes` to wrap a group of routes with reusable
+handler-to-handler functions:
+
+```clojure
+(defn require-session [handler: ^http.Handler] -> http.Handler
+  (http.middleware-ptr handler [next req res]
+    (next^.handle next req res)))
+
+(http.routes router
+  (http.middleware [require-session]
+    (http.GET "/konto" [req res] ...)))
+```
+
+For exact path tables, `http.route-map` registers handlers from a literal map.
+Handlers receive `[req res]`:
+
+```clojure
+(http.route-map router
+  {"/" {:GET home}
+   "/health" {:GET health}
+   "/robots.txt" {:GET robots}
+   "/webhooks/stripe" {:POST stripe-webhook}})
+```
+
+Inside `http.routes`, `route-map` inherits the current `context` prefix and
+`middleware` stack:
+
+```clojure
+(http.routes router
+  (http.route-map
+    {"/" {:GET home}
+     "/health" {:GET health}})
+
+  (http.context "/konto" []
+    (http.middleware [require-session]
+      (http.route-map
+        {"" {:GET konto}
+         "/samtaler" {:GET samtaler}}))))
+```
+
+For explicit registration, use the mutating route helpers:
+
+```clojure
+(http.route-get! router path [req res] ...)
+(http.route-post! router path [req res] ...)
+(http.route-put! router path [req res] ...)
+(http.route-patch! router path [req res] ...)
+(http.route-head! router path [req res] ...)
+(http.route-options! router path [req res] ...)
+(http.route-delete! router path [req res] ...)
+(http.route-all! router path [req res] ...)
+```
+
+The older `http.get!`, `http.post!`, and related names remain as aliases.
 
 Response helpers stay close to the vendor API:
 
@@ -94,13 +166,23 @@ Use `http.respond-html` with strings you already trust or rendered with
   ...)
 ```
 
-`http.middleware` wraps a next handler and can call it with `http.handle!`:
+`http.middleware` wraps a next handler value:
 
 ```clojure
 (let [mw (http.middleware app [next req res]
            (http.set-cookie! res "visited" "yes")
-           (http.handle! next req res))]
+           (next^.handle next req res))]
   ...)
+```
+
+`http.middleware-ptr` is the same shape for functions that receive a next
+handler pointer:
+
+```clojure
+(defn visited [handler: ^http.Handler] -> http.Handler
+  (http.middleware-ptr handler [next req res]
+    (http.set-cookie! res "visited" "yes")
+    (next^.handle next req res)))
 ```
 
 Rate limiting is middleware-shaped too:
@@ -185,12 +267,13 @@ For a short SSE response, `sse.with-stream` is enough:
 ```clojure
 (import sse "kvist:http/sse")
 
-(http.get! router "/events" [req res]
-  (sse.with-stream [stream res]
-    (sse.comment! stream "connected")
-    (sse.retry! stream 1000)
-    (sse.send-event! stream "welcome" "ready")
-    (sse.close! stream)))
+(http.routes router
+  (http.GET "/events" [req res]
+    (sse.with-stream [stream res]
+      (sse.comment! stream "connected")
+      (sse.retry! stream 1000)
+      (sse.send-event! stream "welcome" "ready")
+      (sse.close! stream))))
 ```
 
 For long-lived streams, define callbacks:
