@@ -9,46 +9,53 @@
 
 (defstruct Order {
   id: int
-  region: int
+  region: keyword
   amount: int
   discount: int
-  status: int
+  status: keyword
 })
 
 (defstruct Region-Report {
-  region: int
+  region: keyword
   revenue: int
   count: int
 })
 
-(def Order-Groups map[int][dynamic]Order)
+(def Order-Groups map[keyword][dynamic]Order)
 
 (defn settled? [order: Order] -> bool
-  (= order.status 3))
+  (= order.status :order/settled))
 
 (defn settle-order [order: Order] -> Order
   (let [updated order]
-    (when (and (= updated.status 2)
+    (when (and (= updated.status :order/authorized)
                (> updated.amount 100))
       (set! updated.amount (- updated.amount updated.discount))
       (set! updated.discount 0)
-      (set! updated.status 3))
+      (set! updated.status :order/settled))
     updated))
+
+(defn region-score [region: keyword] -> int
+  (case region
+    :region/north 0
+    :region/west 1
+    :region/south 2
+    0))
 
 (defn row-score [rows: []Region-Report] -> int
   (let [total 0]
     (for [row rows]
       (set! total (+ total row.revenue))
-      (set! total (+ total (* row.region 31)))
+      (set! total (+ total (* (region-score row.region) 31)))
       (set! total (+ total row.count)))
     total))
 
 (defn sample-orders [] -> [dynamic]Order
-  (arr.dynamic Order [(Order {id: 1 region: 0 amount: 80 discount: 5 status: 1})
-                      (Order {id: 2 region: 1 amount: 250 discount: 20 status: 2})
-                      (Order {id: 3 region: 1 amount: 140 discount: 10 status: 2})
-                      (Order {id: 4 region: 2 amount: 90 discount: 0 status: 3})
-                      (Order {id: 5 region: 2 amount: 410 discount: 35 status: 2})]))
+  (arr.dynamic Order [(Order {id: 1 region: :region/north amount: 80 discount: 5 status: :order/draft})
+                      (Order {id: 2 region: :region/west amount: 250 discount: 20 status: :order/authorized})
+                      (Order {id: 3 region: :region/west amount: 140 discount: 10 status: :order/authorized})
+                      (Order {id: 4 region: :region/south amount: 90 discount: 0 status: :order/settled})
+                      (Order {id: 5 region: :region/south amount: 410 discount: 35 status: :order/authorized})]))
 
 (defn rows-from-groups [groups: Order-Groups] -> [dynamic]Region-Report
   (let [rows (arr.empty Region-Report)]
@@ -63,7 +70,7 @@
     (arr.sort-by! .revenue rows)
     rows))
 
-(defn rows-from-aggregates [revenue-by-region: map[int]int, count-by-region: map[int]int] -> [dynamic]Region-Report
+(defn rows-from-aggregates [revenue-by-region: map[keyword]int, count-by-region: map[keyword]int] -> [dynamic]Region-Report
   (let [rows (arr.empty Region-Report)]
     (for [region revenue revenue-by-region]
       (arr.push! rows
@@ -121,8 +128,8 @@
 
 (defn loop-report-score [] -> int
   (let [orders (sample-orders)
-        revenue-by-region (map.empty int int)
-        count-by-region (map.empty int int)]
+        revenue-by-region (map.empty keyword int)
+        count-by-region (map.empty keyword int)]
     (for [order orders]
       (let [settled (settle-order order)]
         (when (settled? settled)

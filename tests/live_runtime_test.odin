@@ -1100,11 +1100,11 @@ live_runtime_evaluates_cond_clauses :: proc(t: ^testing.T) {
 
 @(test)
 live_runtime_keyword_values_compare_and_format :: proc(t: ^testing.T) {
-    queued := kvist_live.value_keyword(":queued")
+    queued := kvist_live.value_keyword(":job/queued")
     defer kvist_live.value_delete(&queued)
-    queued_2 := kvist_live.value_keyword(":queued")
+    queued_2 := kvist_live.value_keyword(":job/queued")
     defer kvist_live.value_delete(&queued_2)
-    done := kvist_live.value_keyword(":done")
+    done := kvist_live.value_keyword(":job/done")
     defer kvist_live.value_delete(&done)
 
     testing.expect_value(t, kvist_live.values_equal(queued, queued_2), true)
@@ -1112,7 +1112,7 @@ live_runtime_keyword_values_compare_and_format :: proc(t: ^testing.T) {
 
     text := kvist_live.value_text(queued)
     defer delete(text)
-    testing.expect_value(t, text, ":queued")
+    testing.expect_value(t, text, ":job/queued")
 }
 
 @(test)
@@ -1124,11 +1124,11 @@ live_runtime_evaluates_keyword_literals_and_equality :: proc(t: ^testing.T) {
     defer kvist_live.runtime_delete(&runtime)
 
     def := must_parse_module(t, `(live.module {name: "keyword-demo" version: "v1"})
-(def current-state :queued)
+(def current-state :job/queued)
 (defn tick []
-  (if (= current-state :queued)
-    :ready
-    :unknown))
+  (if (= current-state :job/queued)
+    :job/ready
+    :job/unknown))
 (live.command tick)`)
     defer {
         kvist_live.state_entry_slice_delete(&def.initial_state)
@@ -1152,7 +1152,7 @@ live_runtime_evaluates_keyword_literals_and_equality :: proc(t: ^testing.T) {
     testing.expect_value(t, invoke_ok, true)
     testing.expect_value(t, invoke_err.message, "")
     testing.expect_value(t, result.kind, kvist_live.Value_Kind.Keyword)
-    testing.expect_value(t, result.text, ":ready")
+    testing.expect_value(t, result.text, ":job/ready")
 }
 
 @(test)

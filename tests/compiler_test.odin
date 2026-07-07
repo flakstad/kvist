@@ -12284,6 +12284,32 @@ keyword :: distinct string
 }
 
 @(test)
+compile_namespaced_keyword_literal :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn status [] -> keyword
+  :job/queued)`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    expected := `package main
+
+status :: proc() -> keyword {
+    return keyword(":job/queued")
+}
+
+keyword :: distinct string
+`
+    testing.expect_value(t, output, expected)
+}
+
+@(test)
 compile_case_with_keyword_values :: proc(t: ^testing.T) {
     source := `(package main)
 
@@ -12432,8 +12458,8 @@ compile_keyword_key_map_literal :: proc(t: ^testing.T) {
     source := `(package main)
 
 (defn states [] -> map[keyword]int
-  {:ready 1
-   :done 2})`
+  {:job/ready 1
+   :job/done 2})`
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
@@ -12447,7 +12473,7 @@ compile_keyword_key_map_literal :: proc(t: ^testing.T) {
 package main
 
 states :: proc() -> map[keyword]int {
-    return map[keyword]int{keyword(":ready") = 1, keyword(":done") = 2}
+    return map[keyword]int{keyword(":job/ready") = 1, keyword(":job/done") = 2}
 }
 
 keyword :: distinct string
@@ -12494,7 +12520,7 @@ compile_keyword_set_literal :: proc(t: ^testing.T) {
     source := `(package main)
 
 (defn modes [] -> set[keyword]
-  #{:dev :prod})`
+  #{:env/dev :env/prod})`
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
@@ -12508,7 +12534,7 @@ compile_keyword_set_literal :: proc(t: ^testing.T) {
 package main
 
 modes :: proc() -> map[keyword]struct{} {
-    return map[keyword]struct{}{keyword(":dev") = {}, keyword(":prod") = {}}
+    return map[keyword]struct{}{keyword(":env/dev") = {}, keyword(":env/prod") = {}}
 }
 
 keyword :: distinct string

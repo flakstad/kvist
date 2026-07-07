@@ -474,8 +474,8 @@ Use an explicit loop when even those aggregate maps are just implementation
 detail before a scalar result, or when the update needs custom state:
 
 ```clojure
-(let [revenue-by-region (make map[int]int)
-      count-by-region (make map[int]int)]
+(let [revenue-by-region (make map[keyword]int)
+      count-by-region (make map[keyword]int)]
   (for [order orders]
     (let [settled (settle-order order)]
       (when (settled? settled)

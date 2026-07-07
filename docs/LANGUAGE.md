@@ -176,7 +176,7 @@ symbolic data in otherwise Odin-shaped code:
   mode: keyword
 })
 
-(Config {mode: :dev})
+(Config {mode: :env/dev})
 ```
 
 Kvist still uses specific keyword literals positionally in some forms. For
@@ -254,6 +254,7 @@ closed-world labels:
 :dev
 :queued
 :not-found
+:http/status
 ```
 
 At lowering time, Kvist emits:
@@ -265,6 +266,10 @@ keyword :: distinct string
 That keeps the runtime model Odin-shaped: a keyword is just a distinct string
 value, not an interned dynamic object. Equality, map keys, set membership, and
 struct fields therefore work through ordinary Odin value semantics.
+
+Keywords may include `/` for Clojure-style grouping, such as `:job/queued` or
+`:http/status`. The namespace part is ordinary data, not package or import
+resolution.
 
 Use `keyword` when the value is symbolic and stable:
 
@@ -902,9 +907,9 @@ containers:
 ```clojure
 [1 2 3]                  ; [dynamic]int
 {"one" 1 "two" 2}        ; map[string]int
-{:ready 1 :done 2}       ; map[keyword]int
+{:job/ready 1 :job/done 2} ; map[keyword]int
 #{"math" "lisp"}         ; set[string]
-#{:dev :prod}            ; set[keyword]
+#{:env/dev :env/prod}    ; set[keyword]
 ```
 
 These are owned values, not persistent Clojure data structures. Delete them
@@ -914,9 +919,9 @@ to an API that takes ownership:
 ```clojure
 (let [xs [1 2 3] :defer
       lookup {"one" 1 "two" 2} :defer
-      states {:ready 1 :done 2} :defer
+      states {:job/ready 1 :job/done 2} :defer
       tags #{"math" "lisp"} :defer
-      modes #{:dev :prod} :defer]
+      modes #{:env/dev :env/prod} :defer]
   ...)
 ```
 
@@ -939,7 +944,7 @@ Use `keyword` when the value is a symbolic tag rather than user-facing text:
   label: string
 })
 
-(Job {state: :queued label: "thumbnail"})
+(Job {state: :job/queued label: "thumbnail"})
 ```
 
 Use `(type T)` for Odin `typeid` expressions:

@@ -16,49 +16,49 @@
 })
 
 (defn default-config [] -> Config
-  (Config {mode: :dev
-           backend: :sqlite
+  (Config {mode: :env/dev
+           backend: :db/sqlite
            name: "local"}))
 
 (defn next-job-state [state: keyword, attempts: int] -> keyword
   (case state
-    :queued (if (> attempts 0) :retrying :running)
-    :retrying :running
-    :running :done
-    :done :done
-    :unknown))
+    :job/queued (if (> attempts 0) :job/retrying :job/running)
+    :job/retrying :job/running
+    :job/running :job/done
+    :job/done :job/done
+    :job/unknown))
 
 (defn state-rank [state: keyword] -> int
   (case state
-    :queued 0
-    :retrying 1
-    :running 2
-    :done 3
+    :job/queued 0
+    :job/retrying 1
+    :job/running 2
+    :job/done 3
     -1))
 
 (defn keyword-literals-demo [] -> int
-  (let [job (Job {state: :queued label: "thumbnail"})
-        transitions {:queued 1 :running 2 :done 3} :defer
-        enabled #{:dev :test} :defer]
+  (let [job (Job {state: :job/queued label: "thumbnail"})
+        transitions {:job/queued 1 :job/running 2 :job/done 3} :defer
+        enabled #{:env/dev :env/test} :defer]
     (println enabled)
     (+ (state-rank job.state)
-       (get transitions :running))))
+       (get transitions :job/running))))
 
 (defn main []
   (let [config (default-config)]
     (println config.mode config.backend config.name)
-    (println (next-job-state :queued 0))
+    (println (next-job-state :job/queued 0))
     (println (keyword-literals-demo))))
 
 (comment
   (default-config)
-  ;; => (Config {mode: :dev backend: :sqlite name: "local"})
+  ;; => (Config {mode: :env/dev backend: :db/sqlite name: "local"})
 
-  (next-job-state :queued 0)
-  ;; => :running
+  (next-job-state :job/queued 0)
+  ;; => :job/running
 
-  (next-job-state :running 0)
-  ;; => :done
+  (next-job-state :job/running 0)
+  ;; => :job/done
 
   (keyword-literals-demo)
   ;; => 2

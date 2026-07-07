@@ -30,8 +30,8 @@
 (defn state-mode [] -> keyword
   (let [buffer (arr.dynamic int [21 34]) :defer
         lookup (map.of string int {"one" 1 "two" 2}) :defer
-        states {:ready 1 :done 2} :defer
-        state (State {mode: :dev
+        states {:state/ready 1 :state/done 2} :defer
+        state (State {mode: :env/dev
                       values: [1 2 3]
                       fixed: [5 8 13]
                       buffer: buffer
@@ -114,7 +114,7 @@
   ;; => Ada
 
   (state-mode)
-  ;; => :dev
+  ;; => :env/dev
 
   ;; A dynamic array literal owns storage. Bind it and delete it in the same
   ;; scope unless you are returning ownership to the caller.
