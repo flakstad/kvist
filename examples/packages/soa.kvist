@@ -2,7 +2,7 @@
 ;; SPDX-License-Identifier: MIT
 
 ;; Demonstrates Odin struct-of-arrays storage with ordinary Kvist collection
-;; operations. #soa lives in the type; arr.push! dispatches to append_soa.
+;; operations. #soa lives in the type; soa.push! expands to append_soa.
 (package main)
 (import core "kvist:core")
 (import arr "kvist:arr")
@@ -28,8 +28,8 @@
   (let [particles (soa.make Particle 2)
         score: f32 0]
     (defer (delete particles))
-    (soa.push! particles (Particle {mass: 1 velocity: 3 id: 10}))
-    (soa.push! particles (Particle {mass: 2 velocity: 4 id: 20}))
+    (soa.push! (addr particles) (Particle {mass: 1 velocity: 3 id: 10}))
+    (soa.push! (addr particles) (Particle {mass: 2 velocity: 4 id: 20}))
     (soa.update! particles 0 .mass 12 .velocity (+ velocity 1))
     (soa.axpy! particles .mass 0.5 .velocity)
     (soa.clamp! particles .mass 0.0 10.0)

@@ -19,7 +19,7 @@
    active?: bool
    favorite-key: string
    scores: [dynamic]int
-   tags: set[string]
+   tags: (map string (struct {}))
    window: []float
    home: Point})
 
@@ -48,5 +48,5 @@
   (println (struct-types-demo)))
 
 (comment
-  ;; set[T] lowers to map[T]struct{}.
+  ;; (map T (struct {})) lowers to map[T]struct{}.
   (struct-types-demo))

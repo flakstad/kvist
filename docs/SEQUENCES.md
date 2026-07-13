@@ -195,7 +195,7 @@ they keep the eager array helper model visible.
 Macro-time helpers with similar names operate on source forms; see
 [MACROS.md](MACROS.md) for that smaller compile-time surface.
 
-`len` is accepted as an alias for `count`, but examples use `count`.
+Use `count` for collection length in Kvist source; it lowers to Odin `len`.
 
 The access and trimming helpers use the direct Odin representation where
 possible. Direct access syntax and call-shaped helpers are equivalent where both
@@ -247,7 +247,8 @@ comma-ok lookup and return the supplied default when the key is absent.
 Array constructors and mutators stay explicit: `arr.empty` creates an owned
 empty dynamic array, optionally with capacity; `arr.dynamic` creates an owned
 dynamic array from literal items; `arr.fixed` creates a fixed array value; and
-`arr.push!` appends one or more values to an existing dynamic array.
+`arr.push!` appends one or more values to an addressable dynamic array value.
+Pointer targets can call Odin `append` directly.
 
 Builder helpers such as `arr.map`, `arr.filter`, `arr.remove`,
 `arr.map-indexed`, `arr.keep`, `arr.mapcat`, `concat`, `arr.into`,
@@ -258,8 +259,11 @@ return owned dynamic arrays. `into` is for explicit dynamic-array
 result types, for example `(arr.into [dynamic]int xs)`. Use `arr.into!` to
 append into an existing dynamic array. When `arr.range`, `arr.repeat`,
 `arr.repeatedly`, `arr.iterate`, `arr.cycle`, or `arr.take-nth` is used
-directly as an ordinary `for` source, the compiler emits a counted loop instead
-of building the owned dynamic array. `arr.distinct` and
+as an ordinary value, it returns an owned dynamic array. `arr.range`,
+`arr.repeat`, `arr.repeatedly`, `arr.iterate`, `arr.cycle`, and `arr.take-nth`
+stream through `for` or transform consumers without allocating that owned
+dynamic array because they are backed by source-owned iterators.
+`arr.distinct` and
 `arr.distinct-by` also
 return owned dynamic arrays and use a temporary `map[key]bool` internally, so
 the value or key must be valid as an Odin map key. `map.zip`, `arr.index-by`,
@@ -328,8 +332,9 @@ resize the collection, so they require an owned dynamic array binding. `keep!`
 uses an Odin-shaped callback returning `(value, ok)` and writes kept values back
 into the same dynamic array; the value type must match the array element type.
 `into!` appends the values from one collection into an existing dynamic array
-target. It lowers directly to Odin `append(&target, ..xs)`-style code, mutates
-the target, and does not create a new owned result. With transforms, use
+target. Plain two-argument use is source-owned and lowers to an explicit loop
+that appends each item. It mutates the target and does not create a new owned
+result. With transforms, use
 `(arr.into! target transform source)` to append the fused pipeline output
 without allocating an intermediate array.
 
@@ -536,8 +541,7 @@ lowering would be surprising.
 Concrete rules:
 
 - `into` constructs an owned dynamic array from a borrowed collection,
-  and `arr.into!` means dynamic-array append lowering directly to
-  `append(&target, ..xs)`.
+  and plain `arr.into!` appends through a source-owned loop.
 - map combination is explicit `merge`/`merge!`.
 - `shuffle` and `shuffle!` are implemented with an explicit picker callback. The
   caller owns the randomness policy; Kvist only performs the swaps.

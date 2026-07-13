@@ -1,0 +1,59 @@
+// Copyright (c) Andreas Flakstad and Kvist contributors
+// SPDX-License-Identifier: MIT
+
+(package bit)
+
+(defmacro and
+  "Bitwise and. Lowers to Odin `&`."
+  [& values]
+  `(odin-infix "&" ~@values))
+
+(defmacro or
+  "Bitwise or. Lowers to Odin `|`."
+  [& values]
+  `(odin-infix "|" ~@values))
+
+(defmacro xor
+  "Bitwise xor. Lowers to Odin `~`."
+  [& values]
+  `(odin-infix "~" ~@values))
+
+(defmacro not
+  "Bitwise complement. Lowers to Odin `~value`."
+  [value]
+  `(odin-prefix "~" ~value))
+
+(defmacro shift-left
+  "Shift left. Lowers to Odin `<<`."
+  [value amount]
+  `(odin-infix "<<" ~value ~amount))
+
+(defmacro shift-right
+  "Shift right. Lowers to Odin `>>`."
+  [value amount]
+  `(odin-infix ">>" ~value ~amount))
+
+(defmacro and-not
+  "Clear mask bits. Lowers to Odin `value & ~mask`."
+  [value mask]
+  `(odin-infix "&" ~value (odin-prefix "~" ~mask)))
+
+(defmacro test
+  "Return true when the bit at `index` is set."
+  [value index]
+  `(!= (odin-infix "&" ~value (odin-infix "<<" 1 (uint ~index))) 0))
+
+(defmacro set
+  "Return `value` with the bit at `index` set."
+  [value index]
+  `(odin-infix "|" ~value (odin-infix "<<" 1 (uint ~index))))
+
+(defmacro clear
+  "Return `value` with the bit at `index` cleared."
+  [value index]
+  `(odin-infix "&" ~value (odin-prefix "~" (odin-infix "<<" 1 (uint ~index)))))
+
+(defmacro flip
+  "Return `value` with the bit at `index` toggled."
+  [value index]
+  `(odin-infix "~" ~value (odin-infix "<<" 1 (uint ~index))))

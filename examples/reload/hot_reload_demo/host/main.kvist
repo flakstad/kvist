@@ -5,8 +5,8 @@
 
 (import fmt "core:fmt")
 (import time "core:time")
-(import kvist_hot "../../../../src/kvist_hot")
-(import support "../../../../src/kvist_hot_demo_support")
+(import kvist_hot "../../../../src/odin/kvist_hot")
+(import support "../../../../src/odin/kvist_hot_demo_support")
 (import shared "../shared")
 
 (defn library-path [] -> string

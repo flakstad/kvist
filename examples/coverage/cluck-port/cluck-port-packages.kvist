@@ -12,6 +12,7 @@
   (println banner)
   (println (math.sum-range 0 5))
   (let [evens (math.evens-under math.default-limit)]
+    (defer (delete evens))
     (println evens))
   true)
 

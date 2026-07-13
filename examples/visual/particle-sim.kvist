@@ -11,10 +11,10 @@
 ;; Headless benchmark mode:
 ;;   scripts/particle_stats.sh -- build/particle-sim --bench --particles 50000 --steps 20000
 (package main)
-(import cli "kvist:cli")
 (import fmt "core:fmt")
 (import math "core:math")
 (import os "core:os")
+(import strconv "core:strconv")
 (import rl "vendor:raylib")
 (import soa "kvist:soa")
 (import time "core:time")
@@ -26,6 +26,22 @@
 (def Initial-Target-FPS: int 60)
 (def Bench-DT: f32 0.016666667)
 (def Bench-Warmup-Steps: int 120)
+
+(defn- arg-flag? [args: []string, name: string] -> bool
+  (let [found false]
+    (for [arg args]
+      (when (= arg name)
+        (set! found true)))
+    found))
+
+(defn- int-arg [args: []string, name: string, fallback: int] -> int
+  (let [value fallback]
+    (for [arg i args]
+      (when (and (= arg name) (< (+ i 1) (count args)))
+        (let [[parsed ok] (strconv.parse_int (get args (+ i 1)))]
+          (when ok
+            (set! value parsed)))))
+    value))
 (def Hud-Font-Path: string "/System/Library/Fonts/Supplemental/Verdana.ttf")
 (def Hud-Font-Size: f32 20.0)
 (def Hud-Font-Atlas-Size: i32 20)
@@ -95,7 +111,7 @@
             radius (+ 1.5 (* 3.5 (rand-unit (addr seed))))
             x (+ 20.0 (* (- (f32 w) 40.0) (rand-unit (addr seed))))
             y (+ 20.0 (* (- (f32 h) 40.0) (rand-unit (addr seed))))]
-        (soa.push! particles
+        (soa.push! (addr particles)
                       (Particle {x: x
                                  y: y
                                  vx: (* speed (math.cos angle))
@@ -334,7 +350,7 @@
 (defn main
   "Dispatch to headless benchmark mode when --bench is present, otherwise run the window."
   []
-  (if (cli.flag os.args "--bench")
-    (run-bench (cli.int-option os.args "--particles" 50000)
-               (cli.int-option os.args "--steps" 20000))
+  (if (arg-flag? os.args "--bench")
+    (run-bench (int-arg os.args "--particles" 50000)
+               (int-arg os.args "--steps" 20000))
     (run-window)))

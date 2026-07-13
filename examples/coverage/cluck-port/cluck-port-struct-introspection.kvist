@@ -14,7 +14,7 @@
   "Example struct for metadata introspection."
   {name: string
    age: int
-   tags: set[string]
+   tags: (map string (struct {}))
    home: Point})
 
 (defn struct-introspection-demo [] -> bool

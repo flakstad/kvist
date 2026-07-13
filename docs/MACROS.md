@@ -21,10 +21,9 @@ values are enough.
 
 ```clojure
 (defmacro unless [condition & body]
-  (quasiquote
-    (if (unquote condition)
-      (do)
-      (do (splice body)))))
+  `(if ~condition
+     (do)
+     (do ~@body)))
 ```
 
 Macro parameters receive source forms. A rest parameter is written as `& name`
@@ -34,32 +33,38 @@ Use `defmacro-` for package-private macros.
 
 Macros see source keywords such as `:else` and `:db/add` as source forms. That
 is separate from ordinary runtime `keyword` values in Kvist code. Macro-time
-`keyword?`, `keyword`, `name`, and `source` work on the source representation;
-after expansion, ordinary lowering turns keyword literals in emitted code into
-runtime `keyword` values.
+`keyword?`, `keyword`, `name`, and `source` work on the source
+representation; after expansion, ordinary lowering turns keyword literals in
+emitted code into runtime `keyword` values.
 
 For a small runnable version of this shape, see
 [examples/language/macros.kvist](../examples/language/macros.kvist).
 
 ## Quoting
 
-`quote` returns one form without evaluating it in the macro evaluator.
+`'form` is reader syntax for `(quote form)`: it returns one form without
+evaluating it in the macro evaluator.
 
-`quasiquote` builds a form while allowing selected parts to be evaluated:
-
-```clojure
-(quasiquote
-  (defn (unquote fn-name) [] -> int
-    (unquote value)))
-```
-
-`unquote` inserts one evaluated macro value. `splice` inserts zero or more
-forms into a quasiquoted list, vector, or brace literal.
+Backtick is reader syntax for `quasiquote`. It builds a form while allowing
+selected parts to be evaluated:
 
 ```clojure
-(quasiquote
-  (do (splice body)))
+`(defn ~fn-name [] -> int
+   ~value)
 ```
+
+`~` is reader syntax for `unquote` and inserts one evaluated macro value.
+`~@` is reader syntax for `splice` and inserts zero or more forms into a
+quasiquoted list, vector, or brace literal.
+
+```clojure
+`(do ~@body)
+```
+
+The long forms `quote`, `quasiquote`, `unquote`, and `splice` remain valid.
+The reader syntax is the preferred spelling for macro code.
+Kvist backtick is simple quasiquote sugar; it does not auto-qualify symbols or
+create Clojure-style auto-gensyms.
 
 ## Returning Forms
 
@@ -70,11 +75,9 @@ multiple forms with `forms`:
 (defmacro defentity [name fields]
   (let [make-name (symbol (str "make-" (name name)))]
     (forms
-      (quasiquote
-        (defstruct (unquote name) (unquote fields)))
-      (quasiquote
-        (defn (unquote make-name) [] -> (unquote name)
-          ((unquote name) {}))))))
+      `(defstruct ~name ~fields)
+      `(defn ~make-name [] -> ~name
+         (~name {})))))
 ```
 
 `concat` also returns a sequence of forms by concatenating evaluated form
@@ -89,19 +92,32 @@ The macro evaluator provides predicates for source shapes:
 (list? x)
 (vector? x)
 (brace? x)
+(set? x)
 (symbol? x)
 (keyword? x)
-(field-selector? x)
 (string? x)
 (number? x)
-(int? x)
-(float? x)
-(bool? x)
-(nil? x)
 ```
 
 `keyword?` here means "is this source form spelled like `:name`?", not "does
 this runtime expression have type `keyword`?".
+
+More specific literal classifiers, such as integer, float, boolean, or nil
+checks, should be local macro helpers over `source`, `number?`, `symbol?`, and
+ordinary string predicates.
+Field selector predicates should use the same local-helper style:
+
+```clojure
+(defmacro- field-selector? [form]
+  (and (symbol? form)
+       (> (count (source form)) 1)
+       (= (slice (source form) 0 1) ".")))
+```
+
+Field-place decomposition should also be local macro source. For example,
+`assoc`-style macros can split `user.profile.name` into target `user` and
+selector `.profile.name` with private helpers over `source`, `count`, `slice`,
+and `symbol`; this is ordinary source code, not evaluator knowledge.
 
 Sequence helpers for form collections:
 
@@ -110,26 +126,44 @@ Sequence helpers for form collections:
 (rest xs)
 (nth xs i)
 (count xs)
+(contains? xs value)
 (slice xs start)
 (slice xs start end)
+(concat xs ys ...)
+(not value)
+(and a b ...)
+(or a b ...)
+(parse-int text) ;; int or nil
 ```
 
-Small form-sequence transforms are available when macro code needs to inspect
-or rewrite source lists:
+Small form-sequence transforms can be written as ordinary recursive macros when
+macro code needs to inspect or rewrite source lists:
 
 ```clojure
-(some? pred xs)
-(every? pred xs)
-(map f xs)
-(filter pred xs)
-(reduce reducer init xs)
+(defmacro source-map [f #form values]
+  (if (= (count values) 0)
+    (forms)
+    (concat
+      (forms (f (first values)))
+      (source-map f (rest values)))))
+
+(defmacro source-filter [pred #form values]
+  (if (= (count values) 0)
+    (forms)
+    (let [head (first values)
+          tail (source-filter pred (rest values))]
+      (if (pred head)
+        (concat (forms head) tail)
+        tail))))
 ```
 
-These are macro-time helpers over source forms, not runtime `kvist:arr`
+These are macro-time operations over source forms, not runtime `kvist:arr`
 helpers. `pred` and `f` are unary macro-time function names such as `symbol?`,
-`keyword?`, `source`, `name`, `text`, or a unary user macro. `reduce` calls a
-user macro named by `reducer` with `[acc item]` arguments and returns the final
-accumulator.
+`keyword?`, `source`, `name`, `text`, or a unary user macro. The evaluator
+supports calling a macro-time symbol parameter in head position, so `(pred x)`
+resolves to the symbol passed for `pred`. Write folds the same way, as ordinary
+recursive macros over `first`, `rest`, and `count`; the evaluator does not
+provide separate `map`, `filter`, or `reduce` helpers.
 
 Constructors and text helpers:
 
@@ -141,35 +175,27 @@ Constructors and text helpers:
 (keyword "else")
 (name .field)       ;; "field"
 (name :else)        ;; "else"
+(name pkg.member)   ;; "member" for rewritten source-package symbols
 (text form-or-value)
 (source :db/add)    ;; ":db/add"
 (str "prefix-" (name sym))
 (gensym "tmp")
-```
-
-Macro-time string helpers use the same package-shaped names as runtime
-`kvist:str` where the behavior matches:
-
-```clojure
-(str.count text)
-(str.slice text start)
-(str.slice text start end)
-(str.contains? text needle)
-(str.starts-with? text prefix)
-(str.ends-with? text suffix)
-(parse-int text)       ;; int or nil
-(str.parse-int text)   ;; package-shaped alias
-(digit? text)
-(str.digit? text)
+(subst template names values)
 ```
 
 Use `source` when the original token spelling is data, such as EDN-style
-keywords in DSLs. `name` and `text` normalize symbols and keywords. `parse-int`
-returns an integer on success and `nil` on failure, so `0` remains a valid
-truthy parsed result in macro conditionals.
+keywords in DSLs. `name` and `text` normalize symbols and keywords. When a
+macro receives a source form whose package-qualified symbol was rewritten for
+emission, `name` reports the original member name rather than the generated
+implementation symbol, so package DSLs do not need generated-name checks.
+`parse-int` returns an integer on success and `nil` on failure, so `0`
+remains a valid truthy parsed result in macro conditionals.
 
-Use `keyword` when a macro needs to emit a keyword literal back into ordinary
-Kvist code:
+Use `subst` for template-style source replacement. `names` and `values`
+are source-form lists of the same length.
+
+Use `keyword` when a macro needs to emit a keyword literal back into
+ordinary Kvist code:
 
 ```clojure
 (defmacro else-branch []
@@ -184,26 +210,25 @@ Use `error` for macro validation failures:
 
 ```clojure
 (if (field-selector? field)
-  ...
+  field
   (error "expected a field selector such as .name"))
 ```
 
 Errors raised while expanding macros include the macro expansion context.
 
-## Compile-Time IO
+## Compile-Time Files
 
-`io.read` is available to macros and resolves relative paths against the source
-file being compiled:
+`kvist.read-file` is available to macros and resolves relative paths against the
+source file being compiled:
 
 ```clojure
 (defmacro def-template []
-  (let [text (io.read "template.html")]
-    (quasiquote
-      (def template: string (unquote text)))))
+  (let [text (kvist.read-file "template.html")]
+    `(def template: string ~text)))
 ```
 
 Use this for small source assets or generated constants. Runtime file work
-belongs in ordinary Kvist code.
+belongs in ordinary Kvist code such as `io.read`.
 
 ## Hygiene
 
@@ -213,9 +238,8 @@ Kvist macros are explicit source rewriting, not a hygienic macro system. Use
 ```clojure
 (defmacro once [expr]
   (let [tmp (gensym "value")]
-    (quasiquote
-      (let [(unquote tmp) (unquote expr)]
-        (unquote tmp)))))
+    `(let [~tmp ~expr]
+       ~tmp)))
 ```
 
 Package-qualified symbols and generated symbols are emitted exactly as source
@@ -226,8 +250,7 @@ symbol:
 
 ```clojure
 (let [typed-name (symbol (str (name const-name) ":"))]
-  (quasiquote
-    (def (unquote typed-name) string "value")))
+  `(def ~typed-name string "value"))
 ```
 
 This expands to a normal typed declaration such as:
@@ -262,5 +285,5 @@ that.
   macro that emits several top-level forms
 - [examples/language/macro-messages.kvist](../examples/language/macro-messages.kvist) -
   declaration DSL with generated structs, union entries, and constructors
-- [packages/html/html.kvist](../packages/html/html.kvist) - real shipped macro
+- [kvist-lang/html](https://github.com/kvist-lang/html/blob/main/html.kvist) - an external package built from public macro facilities
   package with form inspection, validation, and generated rendering code

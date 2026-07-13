@@ -12,10 +12,9 @@ Start here:
 - [TOOLING.md](TOOLING.md) - CLI and editor-facing tooling
 - [SEQUENCES.md](SEQUENCES.md) - collection helpers and their ownership model
 - [PACKAGES.md](PACKAGES.md) - shipped `kvist:*` package index
-- [HTML.md](HTML.md) - HTML rendering with `kvist:html`
-- [HTTP.md](HTTP.md) - HTTP server/client/SSE helpers
 - [TESTING.md](TESTING.md) - tests, assertions, fixtures, and table checks
 - [MACROS.md](MACROS.md) - macro authoring
+- [CORE-BOOTSTRAP.md](CORE-BOOTSTRAP.md) - plan for shrinking compiler-owned core behavior
 
 Focused references:
 
@@ -23,3 +22,6 @@ Focused references:
 - [LIVE-DEVELOPMENT.md](LIVE-DEVELOPMENT.md) - resident reload and scratch eval workflows
 
 Experimental notes live under `docs/experimental/`.
+
+Optional official packages and their documentation are linked from
+[PACKAGES.md](PACKAGES.md).

@@ -482,12 +482,18 @@
   (defer (rl.CloseWindow))
   (rl.SetTargetFPS (i32 Initial-Target-FPS))
   (let [font (rl.LoadFontEx (cstring Hud-Font-Path) Hud-Font-Atlas-Size nil 0)
-        state (App-State {density: (make-buffer)
-                          density0: (make-buffer)
-                          vx: (make-buffer)
-                          vy: (make-buffer)
-                          vx0: (make-buffer)
-                          vy0: (make-buffer)
+        density (make-buffer)
+        density0 (make-buffer)
+        vx (make-buffer)
+        vy (make-buffer)
+        vx0 (make-buffer)
+        vy0 (make-buffer)
+        state (App-State {density: density
+                          density0: density0
+                          vx: vx
+                          vy: vy
+                          vx0: vx0
+                          vy0: vy0
                           target-fps: Initial-Target-FPS
                           steps-per-frame: Initial-Steps-Per-Frame
                           paused: false

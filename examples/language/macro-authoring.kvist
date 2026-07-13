@@ -7,16 +7,14 @@
 (defmacro deffield-name [const-name field]
   (if (and (symbol? const-name) (field-selector? field))
     (let [typed-name (symbol (str (name const-name) ":"))]
-      (quasiquote
-        (def (unquote typed-name) string (unquote (name field)))))
+      `(def ~typed-name string ~(name field)))
     (error "deffield-name expects a field selector such as .name")))
 
 (defmacro defstring-fn [fn-name value]
   (let [tmp (gensym "value")]
-    (quasiquote
-      (defn (unquote fn-name) [] -> string
-        (let [(unquote tmp) (unquote value)]
-          (unquote tmp))))))
+    `(defn ~fn-name [] -> string
+       (let [~tmp ~value]
+         ~tmp))))
 
 (defmacro tag-kind [tag]
   (if (contains? ["info" "warn"] (name tag))
@@ -33,11 +31,9 @@
   (if (brace? fields)
     (let [make-name (symbol (str "make-" (name name)))]
       (forms
-        (quasiquote
-          (defstruct (unquote name) (unquote fields)))
-        (quasiquote
-          (defn (unquote make-name) [] -> (unquote name)
-            ((unquote name) {})))))
+        `(defstruct ~name ~fields)
+        `(defn ~make-name [] -> ~name
+           (~name {}))))
     (error "defentity expects a brace field map")))
 
 (defentity User {name: string age: int})

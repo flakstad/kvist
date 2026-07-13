@@ -4,10 +4,10 @@
 ;; Top-down robo mower sandbox.
 (package main)
 
-(import cli "kvist:cli")
 (import fmt "core:fmt")
 (import os "core:os")
 (import rl "vendor:raylib")
+(import strconv "core:strconv")
 
 (def Width: int 1160)
 (def Height: int 760)
@@ -23,6 +23,27 @@
 (def Hud-Font-Atlas-Size: i32 20)
 (def Hud-Font-Spacing: f32 1.0)
 (def Hud-Panel-H: f32 198.0)
+
+(defn- arg-flag? [args: []string, name: string] -> bool
+  (let [found false]
+    (for [arg args]
+      (when (= arg name)
+        (set! found true)))
+    found))
+
+(defn- arg-option [args: []string, name: string, fallback: string] -> string
+  (let [value fallback]
+    (for [arg i args]
+      (when (and (= arg name) (< (+ i 1) (count args)))
+        (set! value (get args (+ i 1)))))
+    value))
+
+(defn- arg-int-option [args: []string, name: string, fallback: int] -> int
+  (let [raw (arg-option args name "")]
+    (if (= raw "")
+      (return fallback))
+    (let [[value ok] (strconv.parse-int raw)]
+      (if ok value fallback))))
 (def Button-H: f32 26.0)
 (def Brush-Obstacle: int 0)
 (def Brush-Boundary: int 1)
@@ -618,7 +639,7 @@
         state (make-app-state)]
     (rl.SetTextureFilter font.texture .BILINEAR)
     (set! state.paused false)
-    (set! state.robot.sensor-profile (parse-robot-profile (cli.option args "--robot" "forward")))
+    (set! state.robot.sensor-profile (parse-robot-profile (arg-option args "--robot" "forward")))
     (set! state.metric-start (rl.GetTime))
     (while (not (rl.WindowShouldClose))
       (handle-input! (addr state))
@@ -654,6 +675,6 @@
 (defn main
   "Run headless experiments with --headless, otherwise open the visual simulation."
   []
-  (if (cli.flag os.args "--headless")
+  (if (arg-flag? os.args "--headless")
     (run-headless os.args)
     (run-window os.args)))

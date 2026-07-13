@@ -15,7 +15,7 @@ current_exe="$tmp_dir/package-current"
 direct_exe="$tmp_dir/package-direct"
 
 printf 'building current compiler\n'
-odin build "$ROOT/cmd/kvist" -out:"$compiler"
+odin build "$ROOT/src/cli/kvist" -out:"$compiler"
 
 "$compiler" "$ROOT/benchmarks/package_helpers.kvist" -o "$generated"
 odin build "$generated" -file -o:speed -out:"$current_exe"

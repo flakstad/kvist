@@ -17,7 +17,7 @@
   (> x threshold))
 
 (defn path-len [req: Request] -> int
-  (-> req .path len))
+  (-> req .path count))
 
 (defn maybe-path-len [req: ^Request] -> int
   ;; Accept a pointer when absence or shared identity is part of the API.

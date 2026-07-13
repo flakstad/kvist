@@ -49,8 +49,8 @@
     0
     (sample-orders)))
 
-(defn paid-statuses [] -> set[int]
-  (into set[int]
+(defn paid-statuses [] -> (map int (struct {}))
+  (into (map int (struct {}))
     (comp
       (filter paid?)
       (map .status))

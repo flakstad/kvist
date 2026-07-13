@@ -1,0 +1,629 @@
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
+
+(package core)
+
+(defmacro count
+  "Return the size of a collection or string.
+
+  For arrays, slices, maps, sets, and strings this lowers to the appropriate
+  direct Odin length operation. Strings are counted in bytes."
+  [collection]
+  `(odin-call "len" ~collection))
+
+(defmacro get
+  "Index or look up `key` in `target`.
+
+  Dot selectors read fields, matching `target.field`. Arrays, slices, fixed
+  arrays, and strings use direct indexing, matching `target[index]`. Maps
+  support an optional default value: `(get m k default)` returns `default` when
+  `k` is absent. The operation is selected at compile time from the target
+  shape."
+  [target key & rest]
+  (if (= (count rest) 0)
+    `(odin-get ~target ~key)
+    `(odin-get ~target ~key ~(first rest))))
+
+(defmacro slice
+  "Return a slice view of `target`.
+
+  With no bounds, returns `target[:]`. With one bound, slices from that start
+  index to the end. With two bounds, slices from start up to but not including
+  end. This is the call-shaped equivalent of attached slice syntax like
+  `target[start:end]`. It does not copy elements or bytes."
+  [target & rest]
+  (if (= (count rest) 0)
+    `(odin-slice ~target)
+    (if (= (count rest) 1)
+      `(odin-slice ~target ~(first rest))
+      `(odin-slice ~target ~(first rest) ~(nth rest 1)))))
+
+(defmacro empty?
+  "Return true when `collection` contains no elements.
+
+  This lowers to a direct length check for supported collection shapes and
+  strings. It allocates nothing."
+  [collection]
+  `(= (odin-call "len" ~collection) 0))
+
+(defmacro contains?
+  "Return true when `collection` contains `key`.
+
+  Maps and sets use direct membership checks. Array-family collections scan for
+  an equal value. The lowering is chosen at compile time from the collection
+  expression."
+  [collection key]
+  `(odin-contains ~collection ~key))
+
+(defmacro nil?
+  "Return true when `value` is nil.
+
+  This lowers to a direct nil comparison and allocates nothing."
+  [value]
+  `(= ~value nil))
+
+(defmacro or-else
+  "Return an optional-ok value or a fallback.
+
+  `expr` must return `[value, ok]`. When `ok` is true, the value is returned;
+  otherwise `fallback` is returned. This expands to direct conditional code."
+  [expr fallback]
+  `(odin-infix "or_else" ~expr ~fallback))
+
+(defmacro- cond-body
+  [forms]
+  (if (= (count forms) 0)
+    `(do)
+    (if (= (count forms) 1)
+      (first forms)
+      `(do
+         ~@forms))))
+
+(defmacro- cond-chain
+  [style & clauses]
+  (if (= (count clauses) 0)
+    (error "cond expects at least one clause")
+    (if (= style :vector)
+      (let [clause (first clauses)]
+        (if (not (vector? clause))
+          (error "cond expects vector clauses or test.body pairs")
+          (if (= (count clause) 0)
+            (error "cond expects vector clauses or test.body pairs")
+            (if (= (first clause) :else)
+              (if (= (count clauses) 1)
+                (cond-body (rest clause))
+                (error "cond :else must be the final clause"))
+              (if (= (count clauses) 1)
+                `(if ~(first clause)
+                   ~(cond-body (rest clause)))
+                `(if ~(first clause)
+                   ~(cond-body (rest clause))
+                   (cond-chain :vector ~@(rest clauses))))))))
+      (if (= (count clauses) 1)
+        (error "cond expects test.body pairs")
+        (if (= (first clauses) :else)
+          (if (= (count clauses) 2)
+            (nth clauses 1)
+            (error "cond :else must be the final clause"))
+          (if (= (count clauses) 2)
+            `(if ~(first clauses)
+               ~(nth clauses 1))
+            `(if ~(first clauses)
+               ~(nth clauses 1)
+               (cond-chain :pairs ~@(rest (rest clauses))))))))))
+
+(defmacro cond
+  "Evaluate test.expression clauses from left to right.
+
+  Clauses are written as `test expr` pairs, with `:else expr` as the final
+  fallback. The first true boolean test selects its expression. This is a macro,
+  not a runtime dispatcher, and lowers to ordinary conditional code."
+  [& clauses]
+  (if (= (count clauses) 0)
+    (error "cond expects at least one clause")
+    (if (vector? (first clauses))
+      `(cond-chain :vector ~@clauses)
+      `(cond-chain :pairs ~@clauses))))
+
+(defmacro update!
+  "Apply a function to the current value at a place and write the result back.
+
+  `(update! place f args...)` reads the current place value and writes
+  `(f current args...)`. Use `set!` for direct assignment and `mut!` for
+  compound operator mutation."
+  [place updater & rest]
+  (cond
+    (symbol? updater)
+    (let [op (name updater)
+          argc (count rest)]
+      (cond
+        (and (= op "inc") (= argc 0)) `(mut! ~place += 1)
+        (and (= op "dec") (= argc 0)) `(mut! ~place -= 1)
+        (and (= op "+") (= argc 1)) `(mut! ~place += ~(first rest))
+        (and (= op "-") (= argc 1)) `(mut! ~place -= ~(first rest))
+        (and (= op "*") (= argc 1)) `(mut! ~place *= ~(first rest))
+        (and (= op "/") (= argc 1)) `(mut! ~place /= ~(first rest))
+        :else `(set! ~place (~updater ~place ~@rest))))
+
+    :else
+    (error "update! expects updater function or operator")))
+
+(defmacro- field-place
+  [place index]
+  (let [text (source place)
+        message "field place helper expects a field place such as user.name or user.address.city"]
+    (if (= index (count text))
+      nil
+      (if (= (slice text index (+ index 1)) ".")
+        (if (> index 0)
+          (list (symbol (slice text 0 index)) (symbol (slice text index)))
+          (error message))
+        (let [found (field-place place (+ index 1))]
+          (if (= index 0)
+            (if found
+              found
+              (error message))
+            found))))))
+
+(defmacro assoc
+  "Return a shallow copy of a struct with one field replaced.
+
+  `(assoc value.field new-value)` copies `value`, assigns `.field` on the
+  copy, and returns the copy. In a `->` pipeline, `(assoc .field new-value)`
+  uses the threaded value as the struct target. This is a shallow value update;
+  it does not deep copy owned fields."
+  [place-or-target value-or-selector & rest]
+  (if (= (count rest) 0)
+    (let [place (field-place place-or-target 0)
+          target (first place)
+          selector (nth place 1)]
+      `(copy-with ~target ~selector ~value-or-selector))
+      `(copy-with ~place-or-target ~value-or-selector ~(first rest))))
+
+(defmacro update
+  "Return a shallow copy of a struct with one field updated by a function.
+
+  `(update value.field f args...)` copies `value`, assigns
+  `(f value.field args...)` on the copy, and returns the copy. In a `->`
+  pipeline, `(update .field f args...)` uses the threaded value as the struct
+  target. This is a shallow value update; it does not deep copy owned fields."
+  [place-or-target updater-or-selector & rest]
+  (if (= (count rest) 0)
+    (let [place (field-place place-or-target 0)
+          target (first place)
+          selector (nth place 1)]
+      `(copy-update ~target ~selector ~updater-or-selector))
+    `(copy-update
+       ~place-or-target
+       ~updater-or-selector
+       ~(first rest)
+       ~@(rest rest))))
+
+(defmacro delete!
+  "Remove `key` from a mutable map-like target in place.
+
+  This lowers to Odin `delete_key` with no wrapper procedure and no allocation.
+  Missing keys are allowed. Sets are represented as Odin maps internally, so
+  package code can use this for set member removal as well as ordinary map key
+  removal."
+  [target key]
+  `(delete_key (mut ~target) ~key))
+
+(defmacro when
+  "Evaluate `body` only when `test` is true.
+
+  This is the expression-level conditional helper for side effects and simple
+  guarded code. It expands to Kvist's core conditional lowering, so it does not
+  introduce a callback or runtime dispatch layer."
+  [test & body]
+  (cond
+    (= (count body) 1)
+    `(if ~test
+       ~(first body)
+       (zero))
+
+    :else
+    `(if ~test
+       (do
+         ~@body)
+       (zero))))
+
+(defmacro- tuple-binding-name
+  [binding message]
+  (cond
+    (not (vector? binding)) (error message)
+    (not (= (count binding) 2)) (error message)
+    (not (symbol? (first binding))) (error message)
+    (not (symbol? (nth binding 1))) (error message)
+    :else (nth binding 1)))
+
+(defmacro- when-let-chain
+  [bindings body]
+  (cond
+    (= (count bindings) 0)
+    (cond-body body)
+
+    :else
+    (let [binding (first bindings)
+          expr (nth bindings 1)
+          ok-name (tuple-binding-name binding "let binding macros expect [value bool] bindings")]
+      `(let [~binding
+             ~expr]
+         (if ~ok-name
+           ~(when-let-chain (rest (rest bindings)) body))))))
+
+(defmacro- if-let-chain
+  [bindings then-expr else-expr]
+  (let [binding (first bindings)
+        expr (nth bindings 1)
+        ok-name (tuple-binding-name binding "let binding macros expect [value bool] bindings")
+        rest-bindings (rest (rest bindings))]
+    `(let [~binding
+           ~expr]
+       (if ~ok-name
+         ~(cond
+            (= (count rest-bindings) 0) then-expr
+            :else (if-let-chain rest-bindings then-expr else-expr))
+         ~else-expr))))
+
+(defmacro- when-ok-chain
+  [bindings body]
+  (cond
+    (= (count bindings) 0)
+    (cond-body body)
+
+    :else
+    (let [binding (first bindings)
+          expr (nth bindings 1)
+          err-name (tuple-binding-name binding "error binding macros expect [value err] bindings")]
+      `(let [~binding
+             ~expr]
+         (if (= ~err-name {})
+           ~(when-ok-chain (rest (rest bindings)) body))))))
+
+(defmacro- if-ok-chain
+  [bindings then-expr else-expr]
+  (let [binding (first bindings)
+        expr (nth bindings 1)
+        err-name (tuple-binding-name binding "error binding macros expect [value err] bindings")
+        rest-bindings (rest (rest bindings))]
+    `(let [~binding
+           ~expr]
+       (if (= ~err-name {})
+         ~(cond
+            (= (count rest-bindings) 0) then-expr
+            :else (if-ok-chain rest-bindings then-expr else-expr))
+         ~else-expr))))
+
+(defmacro- ensure-let-bindings
+  [bindings message & checked]
+  (cond
+    (and (= (count checked) 0) (not (vector? bindings)))
+    (error message)
+
+    (= (count bindings) 0)
+    (error message)
+
+    (= (count bindings) 1)
+    (error message)
+
+    (= (count bindings) 2)
+    bindings
+
+    :else
+    (do
+      (ensure-let-bindings (rest (rest bindings)) message true)
+      bindings)))
+
+(defmacro when-let
+  "Bind value/boolean results, then run `body` when all booleans are true.
+
+  The binding vector contains one or more `[value-name ok-name] expr` pairs.
+  Each expression returns two values. Evaluation stops at the first false
+  boolean; `body` runs only when every boolean is true."
+  [bindings & body]
+  (when-let-chain
+    (ensure-let-bindings bindings "when-let expects [value bool] expr binding pairs")
+    body))
+
+(defmacro if-let
+  "Bind value/boolean results, then choose between two expressions.
+
+  The binding vector contains one or more `[value-name ok-name] expr` pairs.
+  The then branch is selected only when every boolean is true; otherwise the
+  else branch is selected."
+  [bindings & body]
+  (cond
+    (= (count body) 2)
+    (if-let-chain
+      (ensure-let-bindings bindings "if-let expects [value bool] expr binding pairs")
+      (first body)
+      (nth body 1))
+
+    :else
+    (error "if-let expects [[value bool] expr], then, and else")))
+
+(defmacro when-ok
+  "Bind value/error results, then run `body` when all errors are nil.
+
+  The binding vector contains one or more `[value-name err-name] expr` pairs.
+  Evaluation stops at the first non-zero error; `body` runs only when every
+  error equals Odin's zero error value `{}`."
+  [bindings & body]
+  (when-ok-chain
+    (ensure-let-bindings bindings "when-ok expects [value err] expr binding pairs")
+    body))
+
+(defmacro if-ok
+  "Bind value/error results, then choose between success and error branches.
+
+  The binding vector contains one or more `[value-name err-name] expr` pairs.
+  The success branch is selected only when every error equals Odin's zero error
+  value `{}`; otherwise the failure branch is selected."
+  [bindings & body]
+  (cond
+    (= (count body) 2)
+    (if-ok-chain
+      (ensure-let-bindings bindings "if-ok expects [value err] expr binding pairs")
+      (first body)
+      (nth body 1))
+
+    :else
+    (error "if-ok expects [[value err] expr], then, and else")))
+
+(defmacro println
+  "Print values followed by a newline.
+
+  This is the core convenience wrapper for formatted console output. It lowers
+  to Odin `fmt` output and requests the required import automatically."
+  [& values]
+  `(fmt.println ~@values))
+
+(defmacro tap>
+  "Print `value` for debugging and return it unchanged.
+
+  An optional label may be supplied to identify the tap point. Because the input
+  value is returned, `tap>` can be inserted into pipelines without changing the
+  data flowing through them."
+  [value & rest]
+  (cond
+    (= (count rest) 0)
+    (let [target (gensym "kvist_tap")]
+      `(let [~target ~value]
+         (println ~target)
+         ~target))
+
+    (and (= (count rest) 1) (string? value))
+    (let [target (gensym "kvist_tap")]
+      `(let [~target ~(first rest)]
+         (fmt.print ~value)
+         (fmt.print ": ")
+         (println ~target)
+         ~target))
+
+    (= (count rest) 1)
+    (error "tap> label must be a string literal")
+
+    true
+    (error "tap> expects value or label and value")))
+
+(defmacro- thread-first-step
+  [current step]
+  (cond
+    (and (symbol? step)
+         (> (count (source step)) 1)
+         (= (slice (source step) 0 1) "."))
+    `(get ~current ~step)
+
+    (not (list? step))
+    (cond
+      (or (symbol? step) (keyword? step)) `(~step ~current)
+      :else (error "unsupported thread step in macroexpand"))
+
+    (= (count step) 0)
+    (error "thread step cannot be an empty list")
+
+    (and (symbol? (first step))
+         (> (count (source (first step))) 1)
+         (= (slice (source (first step)) 0 1) "."))
+    (cond
+      (= (count step) 1) `(get ~current ~(first step))
+      :else (error "field selector thread step does not take arguments"))
+
+    (= (name (first step)) "tap>")
+    `(~(first step) ~@(rest step) ~current)
+
+    :else
+    `(~(first step) ~current ~@(rest step))))
+
+(defmacro- thread-first-forms
+  [current steps]
+  (cond
+    (= (count steps) 0)
+    current
+
+    :else
+    (thread-first-forms
+      (thread-first-step current (first steps))
+      (rest steps))))
+
+(defmacro ->
+  "Thread `value` through `steps` as the first argument.
+
+  Each step receives the result of the previous step in first-argument position.
+  A bare symbol step becomes `(step current)`, while a list step inserts the
+  current value after the head. This is a compile-time rewrite."
+  [value & steps]
+  (thread-first-forms value steps))
+
+(defmacro- thread-last-forms
+  [current steps]
+  (cond
+    (= (count steps) 0)
+    current
+
+    :else
+    (let [step (first steps)]
+      (thread-last-forms
+        (cond
+          (and (list? step) (= (count step) 0))
+          (error "thread step cannot be an empty list")
+
+          (list? step)
+          `(~(first step) ~@(rest step) ~current)
+
+          (or (symbol? step) (keyword? step))
+          `(~step ~current)
+
+          :else
+          (error "unsupported thread step in macroexpand"))
+        (rest steps)))))
+
+(defmacro ->>
+  "Thread `value` through `steps` as the last argument.
+
+  Each step receives the result of the previous step in final-argument position.
+  This is useful for collection-style pipelines and expands at compile time
+  without creating intermediate function wrappers."
+  [value & steps]
+  (thread-last-forms value steps))
+
+(defmacro- cond-thread-forms
+  [target clauses]
+  (cond
+    (= (count clauses) 0)
+    (forms)
+
+    (= (count clauses) 1)
+    (error "cond-> expects test.step pairs")
+
+    :else
+    (forms
+      `(set! ~target
+         (if ~(first clauses)
+           ~(thread-first-step target (nth clauses 1))
+           ~target))
+      (cond-thread-forms target (rest (rest clauses))))))
+
+(defmacro cond->
+  "Conditionally thread `value` through first-argument steps.
+
+  Clauses are test.step pairs. Each true test updates the threaded value with
+  the corresponding `->` step; false tests leave it unchanged."
+  [value & clauses]
+  (let [target (gensym "kvist_cond_thread")]
+    `(let [~target ~value]
+       ~@(cond-thread-forms target clauses)
+       ~target)))
+
+(defmacro- doto-forms
+  [target steps]
+  (cond
+    (= (count steps) 0)
+    (forms)
+
+    (not (list? (first steps)))
+    (error "doto steps must be calls")
+
+    (= (count (first steps)) 0)
+    (error "doto step cannot be empty")
+
+    :else
+    (forms
+      `(~(first (first steps)) ~target ~@(rest (first steps)))
+      (doto-forms target (rest steps)))))
+
+(defmacro doto
+  "Evaluate `value`, pass it as the first argument to each setup call, then
+  return the original value.
+
+  Use this for Odin-style mutating setup APIs where the calls return void or
+  status values rather than the configured object."
+  [value & steps]
+  (let [target (gensym "kvist_doto")]
+    `(let [~target ~value]
+       ~@(doto-forms target steps)
+       ~target)))
+
+(defmacro- case-type-switch-clauses
+  [binding clauses]
+  (cond
+    (= (count clauses) 0)
+    (error "case expects subject, clause/body pairs, and default")
+
+    (= (count clauses) 1)
+    (forms
+      (first clauses))
+
+    (= (count clauses) 2)
+    (error "case expects clause/body pairs followed by default")
+
+    :else
+    (forms
+      `(~(first clauses) ~binding)
+      (nth clauses 1)
+      (case-type-switch-clauses binding (rest (rest clauses))))))
+
+(defmacro- case-value-chain
+  [target clauses]
+  (cond
+    (= (count clauses) 0)
+    (error "case expects subject, clause/body pairs, and default")
+
+    (= (count clauses) 1)
+    (first clauses)
+
+    (= (count clauses) 2)
+    (error "case expects clause/body pairs followed by default")
+
+    (list? (first clauses))
+    (error "type-case expects (Type binding)")
+
+    :else
+    `(if (= ~target ~(first clauses))
+       ~(nth clauses 1)
+       ~(case-value-chain target (rest (rest clauses))))))
+
+(defmacro case
+  "Dispatch on `value` using value cases or type payload cases.
+
+  Use `cond` when each branch has its own predicate. Use `case` when one subject
+  is being classified. Clauses are `test expr` pairs followed by a naked default
+  expression. Type payload cases are written as `(Type name)` or `(Type _)` and
+  lower to Odin type switches."
+  [value & clauses]
+  (cond
+    (< (count clauses) 3)
+    (error "case expects subject, clause/body pairs, and default")
+
+    (and (vector? value)
+         (= (count value) 2)
+         (symbol? (first value)))
+    `(type-case
+       ~(nth value 1)
+       ~@(case-type-switch-clauses (first value) clauses))
+
+    (list? (first clauses))
+    `(type-case ~value ~@clauses)
+
+    :else
+    (let [target (gensym "kvist_case")]
+      `(let [~target ~value]
+         ~(case-value-chain target clauses)))))
+
+(defmacro comment
+  "Ignore all body forms at compile time.
+
+  Use this for scratch forms, examples, or temporarily disabled code in a Kvist
+  file. The body is not emitted to Odin and is not evaluated."
+  [& body]
+  (forms))
+
+(defmacro doc
+  "Print documentation for `name`.
+
+  `name` is resolved through the current source declarations. This is
+  a developer-facing helper for interactive use and examples, not a general
+  runtime reflection API."
+  [name]
+  `(println (source-doc ~name)))

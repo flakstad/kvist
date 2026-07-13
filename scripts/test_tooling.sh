@@ -7,7 +7,7 @@ set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$ROOT"
 
-odin build cmd/kvist
+odin build src/cli/kvist
 PATH="$ROOT:$PATH"
 export PATH
 
@@ -92,14 +92,14 @@ if ! grep -q '(log-lines \[lines: \[\]string\] -> Log_Source :yield string)' "$t
 fi
 
 ./kvist xref examples/collections/log-source.kvist log-lines > "$tmp_dir/xref.txt"
-if ! grep -q "$(printf 'log-source.kvist:23:10\titerator\tlog-lines')" "$tmp_dir/xref.txt"; then
+if ! grep -q "$(printf 'log-source.kvist:26:10\titerator\tlog-lines')" "$tmp_dir/xref.txt"; then
     printf 'failed: xref output did not point at log-lines definition\n' >&2
     cat "$tmp_dir/xref.txt" >&2
     exit 1
 fi
 
 ./kvist imported-symbols examples/collections/sequences.kvist > "$tmp_dir/imported-symbols.tsv"
-if ! grep -q "$(printf 'macro\tarr.map')" "$tmp_dir/imported-symbols.tsv"; then
+if ! grep -q "$(printf 'kvist package\tarr.map')" "$tmp_dir/imported-symbols.tsv"; then
     printf 'failed: imported-symbols output did not include arr.map\n' >&2
     cat "$tmp_dir/imported-symbols.tsv" >&2
     exit 1
@@ -209,63 +209,6 @@ assert_eq "6" "$(cat "$saved_path")" "saved cache content"
 assert_eq "sum" "$(KVIST_CACHE_DIR="$cache_dir" ./kvist cache list)" "cache list"
 KVIST_CACHE_DIR="$cache_dir" ./kvist cache rm sum
 assert_eq "" "$(KVIST_CACHE_DIR="$cache_dir" ./kvist cache list)" "cache list after rm"
-
-printf 'tooling: eval file-backed dev helpers\n'
-cat > "$tmp_dir/dev-io.kvist" <<'EOF'
-(package main)
-(import io "kvist:io")
-(import json "kvist:json")
-
-(defstruct Note {
-  title: string
-  body: string
-})
-
-(defstruct Count {
-  n: int
-})
-
-(defn write-read-count [path: string] -> int
-  (let [write-err (io.write path "kvist")]
-    (if (!= write-err nil)
-      0
-      (let [[data read-err] (io.read path)]
-        (if (!= read-err nil)
-          0
-          (do
-            (defer (delete data))
-            (len data)))))))
-
-(defn save-note-json [path: string] -> bool
-  (let [[marshal-err write-err] (json.write path (Note {title: "hello" body: "kvist"}))]
-    (and (== marshal-err nil)
-         (== write-err nil))))
-
-(defn save-count-json [path: string, n: int] -> bool
-  (let [[marshal-err write-err] (json.write path (Count {n: n}))]
-    (and (== marshal-err nil)
-         (== write-err nil))))
-
-(defn load-count-json [path: string] -> int
-  (let [[count read-err unmarshal-err] (json.read-as Count path)]
-    (if (or (!= read-err nil)
-            (!= unmarshal-err nil))
-      0
-      count.n)))
-EOF
-file_eval_output=$(./kvist eval "$tmp_dir/dev-io.kvist" "(write-read-count \"$tmp_dir/kvist-cache.txt\")")
-assert_eq "5" "$file_eval_output" "file-backed eval output"
-json_eval_output=$(./kvist eval "$tmp_dir/dev-io.kvist" "(save-note-json \"$tmp_dir/kvist-note.json\")")
-assert_eq "true" "$json_eval_output" "json save eval output"
-if ! grep -q '"title":"hello"' "$tmp_dir/kvist-note.json"; then
-    printf 'failed: explicit json.marshal did not write expected JSON\n' >&2
-    cat "$tmp_dir/kvist-note.json" >&2
-    exit 1
-fi
-count_save_output=$(./kvist eval "$tmp_dir/dev-io.kvist" "(save-count-json \"$tmp_dir/kvist-count.json\" 42)")
-assert_eq "true" "$count_save_output" "json count save eval output"
-count_load_output=$(./kvist eval "$tmp_dir/dev-io.kvist" "(load-count-json \"$tmp_dir/kvist-count.json\")")
-assert_eq "42" "$count_load_output" "json load eval output"
 
 printf 'tooling: expand command\n'
 ./kvist expand examples/language/data-literals.kvist '(temp-buffer-len)' -o "$tmp_dir/expand.odin"
@@ -396,10 +339,10 @@ parallel_eval_output=$(
 )
 parallel_eval_expected=$(printf '10\n1500\n17\n2\n2')
 assert_eq "$parallel_eval_expected" "$parallel_eval_output" "parallel eval output"
-assert_eq "parsed 1" "$(./kvist eval examples/interop/core/error-handling.kvist "(parse-label \"one\")")" "parse-label"
-assert_eq "not parsed" "$(./kvist eval examples/interop/core/error-handling.kvist "(parse-label \"missing\")")" "parse-label-missing"
-assert_eq "3" "$(./kvist eval examples/interop/core/error-handling.kvist "(parsed-total \"one\" \"two\")")" "parsed-total"
-assert_eq "0" "$(./kvist eval examples/interop/core/error-handling.kvist "(read-byte-count \"tmp/does-not-exist.txt\")")" "read-byte-count-missing"
+assert_eq "3 rem 2" "$(./kvist eval examples/language/multi-return-bindings.kvist "(quotient-label 17 5)")" "multi-return-label"
+assert_eq "42" "$(./kvist eval examples/language/multi-return-bindings.kvist "(parsed-or-zero \"42\")")" "multi-return-success"
+assert_eq "0" "$(./kvist eval examples/language/multi-return-bindings.kvist "(parsed-or-zero \"missing\")")" "multi-return-fallback"
+assert_eq "0" "$(./kvist eval examples/interop/core/core-os-paths.kvist "(read-demo-length \"tmp/does-not-exist.txt\")")" "read-demo-missing"
 tap_age_output=$(./kvist eval examples/collections/tap.kvist '(inspected-age)')
 tap_age_expected=$(printf 'user: User{name = "Ada", age = 36}\nage: 36\n36')
 assert_eq "$tap_age_expected" "$tap_age_output" "inspected-age"
@@ -581,11 +524,11 @@ if command -v emacs >/dev/null 2>&1; then
                      (unless defs
                        (error \"Expected xref definition for same-file hyphenated defn\")))
                    (let ((defs (xref-backend-definitions (quote kvist) \"arr.map\")))
-                     (unless (and defs (string-match-p \"packages/arr/arr\\\\.kvist\" (format \"%S\" defs)))
+                     (unless (and defs (string-match-p \"src/kvist/arr/arr\\\\.kvist\" (format \"%S\" defs)))
                        (error \"Expected package xref for arr.map, got: %S\" defs)))
                    (let ((defs (xref-backend-definitions (quote kvist) \"defn\")))
-                     (unless (and defs (string-match-p \"src/kvist/parse\\\\.odin\" (format \"%S\" defs)))
-                       (error \"Expected implementation xref for Kvist form defn, got: %S\" defs)))
+                     (unless (and defs (string-match-p \"kvist form defn\" (format \"%S\" defs)))
+                       (error \"Expected form xref for defn, got: %S\" defs)))
                    (let ((defs (xref-backend-definitions (quote kvist) \"fmt.println\")))
                      (unless defs
                        (error \"Expected xref definition for fmt.println\")))

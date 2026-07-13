@@ -7,9 +7,9 @@
 (import fmt "core:fmt")
 (import strings "core:strings")
 (import time "core:time")
-(import kvist_hot "../../../../src/kvist_hot")
-(import kvist_live "../../../../src/kvist_live")
-(import support "../../../../src/kvist_hot_demo_support")
+(import kvist_hot "../../../../src/odin/kvist_hot")
+(import kvist_live "../../../../src/odin/kvist_live")
+(import support "../../../../src/odin/kvist_hot_demo_support")
 (import shared "../shared")
 
 (def module-path: string "examples/reload/hybrid_live_demo/live/commands.kvist")

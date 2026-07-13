@@ -5,7 +5,7 @@
 (import core "kvist:core")
 
 (import fmt "core:fmt")
-(import kvist_live "../../../src/kvist_live")
+(import kvist_live "../../../src/odin/kvist_live")
 
 (defn demo-command [runtime: ^kvist_live.Runtime
                     module: ^kvist_live.Live_Module

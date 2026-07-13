@@ -8,7 +8,7 @@ import "core:testing"
 import "core:time"
 import "core:fmt"
 import "core:strings"
-import kvist_live "../src/kvist_live"
+import kvist_live "../src/odin/kvist_live"
 
 echo_capability :: proc(runtime: ^kvist_live.Runtime, capability_name: string, args: []kvist_live.Value) -> (kvist_live.Value, kvist_live.Runtime_Error, bool) {
     return kvist_live.value_string("ok"), kvist_live.Runtime_Error{}, true

@@ -125,8 +125,8 @@
 (defn max-paid-total [] -> int
   (transduce paid-order-totals max 0 (sample-orders)))
 
-(defn collect-order-statuses [] -> set[int]
-  (into set[int] (map .status) (sample-orders)))
+(defn collect-order-statuses [] -> (map int (struct {}))
+  (into (map int (struct {})) (map .status) (sample-orders)))
 
 (defn collect-all-ages-inline [] -> [dynamic]int
   (into [dynamic]int (map .age) (sample-users)))

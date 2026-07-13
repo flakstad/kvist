@@ -10,7 +10,7 @@
   "A small fixed-shape person struct."
   {name: string
    age: int
-   tags: set[string]})
+   tags: (map string (struct {}))})
 
 (defn records-demo [] -> bool
   (let [tags (set.empty string 2) :defer
@@ -31,6 +31,5 @@
   (println (records-demo)))
 
 (comment
-  ;; The surface is close. The visible gap is sets: Kvist still lowers
-  ;; set[T] to map[T]struct{} rather than a dedicated set literal.API.
+  ;; Sets are ordinary map[T]struct{} values in this port.
   (records-demo))

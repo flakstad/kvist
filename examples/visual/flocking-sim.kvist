@@ -78,7 +78,7 @@
             x (+ 80.0 (* (- (f32 Width) 160.0) (rand-unit (addr seed))))
             y (+ 130.0 (* (- (f32 Height) 180.0) (rand-unit (addr seed))))
             hue (* 360.0 (rand-unit (addr seed)))]
-        (soa.push! boids (Boid {x: x
+        (soa.push! (addr boids) (Boid {x: x
                                 y: y
                                 vx: (* speed (math.cos angle))
                                 vy: (* speed (math.sin angle))
@@ -244,7 +244,8 @@
   (defer (rl.CloseWindow))
   (rl.SetTargetFPS (i32 Initial-Target-FPS))
   (let [font (rl.LoadFontEx (cstring Hud-Font-Path) Hud-Font-Atlas-Size nil 0)
-        state (App-State {boids: (make-boids Boid-Count)
+        boids (make-boids Boid-Count)
+        state (App-State {boids: boids
                           target-fps: Initial-Target-FPS
                           paused: false
                           frames: 0

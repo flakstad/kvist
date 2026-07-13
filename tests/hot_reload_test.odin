@@ -7,8 +7,8 @@ import "core:dynlib"
 import "core:os"
 import "core:strings"
 import "core:testing"
-import kvist_hot "../src/kvist_hot"
-import olive_reload "../src/olive_reload"
+import kvist_hot "../src/odin/kvist_hot"
+import olive_reload "../src/odin/olive_reload"
 
 hot_test_on_load_calls: int
 hot_test_on_unload_calls: int

@@ -73,14 +73,17 @@
     xs))
 
 (defn main []
-  (let [xs [1 2 3] :defer]
+  (let [xs [1 2 3] :defer
+        captured-mapped (captured-map-demo (slice xs 0)) :defer
+        user-api-mapped (captured-user-api-demo (slice xs 0)) :defer
+        mapped (captured-map-bang-demo) :defer]
     (println
       (fn-literal-demo)
-      (captured-map-demo (slice xs 0))
-      (captured-user-api-demo (slice xs 0))
+      captured-mapped
+      user-api-mapped
       (captured-direct-user-api-demo)
       (captured-helper-family-demo (slice xs 0))
-      (captured-map-bang-demo))))
+      mapped)))
 
 (comment
   ;; Plain non-capturing function literals still work.

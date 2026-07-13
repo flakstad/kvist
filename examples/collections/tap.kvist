@@ -35,7 +35,7 @@
         mapped (arr.map plus-one xs)]
     (defer (delete xs))
     (defer (delete mapped))
-    (tap> "mapped" mapped)
+    (discard (tap> "mapped" mapped))
     (let [evens (arr.filter even? mapped)
           total (arr.reduce add 0 evens)]
       (defer (delete evens))

@@ -1,0 +1,195 @@
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
+
+(package set)
+(import map "kvist:map")
+
+(defmacro empty
+  "Create an empty Odin set.
+
+  `(set.empty T)` creates a `(map T (struct {}))` with default capacity.
+  `(set.empty T capacity)` preallocates for approximately `capacity` elements.
+  The set is allocated with the current allocator and has ordinary Odin set
+  lifetime."
+  [elem-type & rest]
+  (if (= (count rest) 0)
+    `(make (map ~elem-type (struct {})))
+    `(make (map ~elem-type (struct {})) ~(first rest))))
+
+(defmacro of
+  "Create a set from `values`.
+
+  Duplicate values collapse to one set member. The result is a newly allocated
+  Odin set whose element type is `elem-type`."
+  [elem-type values]
+  `((map ~elem-type (struct {})) #{~@(slice values 0)}))
+
+(defmacro add!
+  "Add `value` to set `s` in place.
+
+  This mutates the existing set and performs no replacement allocation beyond
+  any growth Odin needs for the set itself."
+  [s value]
+  `(set! (get ~s ~value) (zero struct{})))
+
+(defmacro remove!
+  "Remove `value` from set `s` in place.
+
+  Removing a value that is not present is allowed. The operation mutates the
+  existing set and does not allocate a replacement set."
+  [s value]
+  `(delete! ~s ~value))
+
+(defmacro union!
+  "Mutate `target` so it contains every value from `source`.
+
+  Values already present in `target` remain present. This is the in-place
+  version of `set.union` and avoids allocating a new set."
+  [target source]
+  `(for [value _ ~source]
+     (set! (get ~target value) (zero struct{}))))
+
+(defmacro intersection!
+  "Mutate `target` so it keeps only values also present in `source`.
+
+  Values not contained by `source` are removed from `target`. This is the
+  in-place version of `set.intersection`."
+  [target source]
+  `(for [value _ ~target]
+     (when (not (map.contains? ~source value))
+       (delete! ~target value))))
+
+(defmacro difference!
+  "Mutate `target` so it removes every value present in `source`.
+
+  This is the in-place version of `set.difference`; it preserves values from
+  `target` that are not members of `source`."
+  [target source]
+  `(for [value _ ~source]
+     (delete! ~target value)))
+
+(defn contains?
+  "Return true when `value` is a member of `s`.
+
+  This lowers to direct set.map membership and does not allocate."
+  [s: (map $T (struct {})), value: T] -> bool #force_inline
+  (map.contains? s value))
+
+(defn union
+  "Return a new set containing all values from `lhs` and `rhs`.
+
+  Neither input set is mutated. The result is allocated with enough capacity for
+  both inputs before values are inserted."
+  [lhs: (map $T (struct {})), rhs: (map $T (struct {}))] -> (map T (struct {})) #force_inline
+  (let [out (set.empty T (+ (count lhs) (count rhs)))]
+    (for [value _ lhs]
+      (set! (get out value) (zero struct{})))
+    (for [value _ rhs]
+      (set! (get out value) (zero struct{})))
+    out))
+
+(defn intersection
+  "Return a new set containing values present in both `lhs` and `rhs`.
+
+  Neither input set is mutated. The implementation scans the smaller set and
+  probes the larger one, avoiding unnecessary work while still lowering to
+  direct Odin loops and membership checks."
+  [lhs: (map $T (struct {})), rhs: (map $T (struct {}))] -> (map T (struct {})) #force_inline
+  (let [lhs-count (count lhs)
+        rhs-count (count rhs)
+        cap lhs-count
+        scan lhs
+        probe rhs]
+    (when (> cap rhs-count)
+      (set! cap rhs-count))
+    (let [out (set.empty T cap)]
+      (when (> lhs-count rhs-count)
+        (do
+          (set! scan rhs)
+          (set! probe lhs)))
+      (for [value _ scan]
+        (when (map.contains? probe value)
+          (set! (get out value) (zero struct{}))))
+      out)))
+
+(defn difference
+  "Return a new set containing values from `lhs` that are absent from `rhs`.
+
+  Neither input set is mutated. The result is allocated with capacity based on
+  `lhs` and populated by direct membership checks against `rhs`."
+  [lhs: (map $T (struct {})), rhs: (map $T (struct {}))] -> (map T (struct {})) #force_inline
+  (let [out (set.empty T (count lhs))]
+    (for [value _ lhs]
+      (when (not (map.contains? rhs value))
+        (set! (get out value) (zero struct{}))))
+    out))
+
+(defn subset?
+  "Return true when every value in `lhs` is also present in `rhs`.
+
+  This performs direct membership checks and short-circuits on the first missing
+  value. If `lhs` is larger than `rhs`, it returns false immediately."
+  [lhs: (map $T (struct {})), rhs: (map $T (struct {}))] -> bool #force_inline
+  (let [ok? true]
+    (when (> (count lhs) (count rhs))
+      (return false))
+    (for [value _ lhs]
+      (when (not (map.contains? rhs value))
+        (do
+          (set! ok? false)
+          (break))))
+    ok?))
+
+(defn superset?
+  "Return true when every value in `rhs` is also present in `lhs`.
+
+  This is equivalent to `(set.subset? rhs lhs)` and has the same short-circuit
+  behavior."
+  [lhs: (map $T (struct {})), rhs: (map $T (struct {}))] -> bool #force_inline
+  (subset? rhs lhs))
+
+(defn disjoint?
+  "Return true when `lhs` and `rhs` have no values in common.
+
+  The implementation scans the smaller set and probes the larger one, stopping
+  as soon as a shared value is found."
+  [lhs: (map $T (struct {})), rhs: (map $T (struct {}))] -> bool #force_inline
+  (let [ok? true
+        lhs-count (count lhs)
+        rhs-count (count rhs)
+        scan lhs
+        probe rhs]
+    (when (> lhs-count rhs-count)
+      (do
+        (set! scan rhs)
+        (set! probe lhs)))
+    (for [value _ scan]
+      (when (map.contains? probe value)
+        (do
+          (set! ok? false)
+          (break))))
+    ok?))
+
+(defn add
+  "Return a new set containing all values from `s` plus `value`.
+
+  The input set is not mutated. A new set is allocated, existing values are
+  copied, and `value` is inserted."
+  [s: (map $T (struct {})), value: T] -> (map T (struct {})) #force_inline
+  (let [out (set.empty T (+ (count s) 1))]
+    (for [entry _ s]
+      (set! (get out entry) (zero struct{})))
+    (set! (get out value) (zero struct{}))
+    out))
+
+(defn remove
+  "Return a new set like `s` without `value`.
+
+  The input set is not mutated. A new set is allocated and every value except
+  `value` is copied into it."
+  [s: (map $T (struct {})), value: T] -> (map T (struct {})) #force_inline
+  (let [out (set.empty T (count s))]
+    (for [entry _ s]
+      (when (!= entry value)
+        (set! (get out entry) (zero struct{}))))
+    out))

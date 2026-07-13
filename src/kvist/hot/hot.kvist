@@ -1,0 +1,39 @@
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
+
+(package hot)
+
+(defmacro defmodule
+  "Emit the standard native hot-reload module contract.
+
+  `(hot.defmodule state-type message-export tick-export message-value
+  load-message)` expands to exported C-ABI entrypoints expected by the
+  `kvist_hot` host runtime: API version, state size.alignment, load.unload hooks,
+  a message export, and a tick export. The state storage remains host-owned; the
+  generated functions cast the raw state pointer through `kvist_hot` helpers.
+
+  This macro is intentionally a source package wrapper around the native
+  contract so module authors can write the common shape without hand-emitting the
+  boilerplate exports."
+  [state-type message-export tick-export message-value load-message]
+  (forms
+    `@export
+    `(defvar kvist-hot-api-version: u32 1)
+    `@export
+    `(defn kvist-hot-state-size :abi "c" [] -> int
+       (kvist_hot.State_Size ~state-type))
+    `@export
+    `(defn kvist-hot-state-align :abi "c" [] -> int
+       (kvist_hot.State_Align ~state-type))
+    `@export
+    `(defn kvist-hot-on-load :abi "c" [state: rawptr is-reload: bool]
+       (kvist_hot.On_Load ~state-type state is-reload ~load-message))
+    `@export
+    `(defn kvist-hot-on-unload :abi "c" [state: rawptr]
+       (kvist_hot.On_Unload ~state-type state))
+    `@export
+    `(defn ~message-export :abi "c" [] -> cstring
+       (cstring ~message-value))
+    `@export
+    `(defn ~tick-export :abi "c" [state: rawptr]
+       (kvist_hot.Tick ~state-type state ~message-value))))

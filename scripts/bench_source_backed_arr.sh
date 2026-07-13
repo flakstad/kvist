@@ -16,13 +16,13 @@ base_dir="$tmp_dir/base"
 base_bin="$tmp_dir/kvist-base"
 
 printf 'building current compiler\n'
-odin build "$ROOT/cmd/kvist" -out:"$current_bin"
+odin build "$ROOT/src/cli/kvist" -out:"$current_bin"
 
 if [ "$BASE_REF" != "skip" ]; then
     printf 'building base compiler from %s\n' "$BASE_REF"
     mkdir -p "$base_dir"
     git -C "$ROOT" archive "$BASE_REF" | tar -x -C "$base_dir"
-    odin build "$base_dir/cmd/kvist" -out:"$base_bin"
+    odin build "$base_dir/src/cli/kvist" -out:"$base_bin"
 fi
 
 run_bench() {

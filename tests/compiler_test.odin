@@ -7,8 +7,11 @@ import "base:runtime"
 import fmt "core:fmt"
 import "core:os"
 import "core:strings"
+import "core:sync"
 import "core:testing"
-import kvist "../src/kvist"
+import kvist "../src/odin/kvist"
+
+test_env_mutex: sync.Mutex
 
 repo_temp_test_path :: proc(name: string) -> (string, bool) {
     root, ok_root := kvist.repo_root_for_path(".")
@@ -52,6 +55,32 @@ json_field_contains_path :: proc(text, field, path: string) -> bool {
     escaped_path, _ := strings.replace_all(path, "\\", "\\\\", context.temp_allocator)
     return strings.contains(text, fmt.tprintf(`"%s": "%s"`, field, path)) ||
            strings.contains(text, fmt.tprintf(`"%s": "%s"`, field, escaped_path))
+}
+
+@(test)
+compiler_entry_type_parts_are_package_neutral :: proc(t: ^testing.T) {
+    key_ty, value_ty, ok := kvist.entry_type_parts("third_party.entry(string, map[int]string)")
+    testing.expect_value(t, ok, true)
+    testing.expect_value(t, key_ty, "string")
+    testing.expect_value(t, value_ty, "map[int]string")
+
+    _, _, ok = kvist.entry_type_parts("map__raw.pair(string, int)")
+    testing.expect_value(t, ok, false)
+}
+
+@(test)
+proc_resolution_does_not_guess_transitive_generated_names :: proc(t: ^testing.T) {
+    decls := []kvist.IR_Decl{
+        {
+            kind = .Proc,
+            proc_decl = kvist.Proc_Decl{name = "outer__support__work"},
+        },
+    }
+    emitter := kvist.Emitter{decls = decls}
+
+    call_name, _, ok := kvist.resolve_proc_call_decl(&emitter, "support/work")
+    defer delete(call_name)
+    testing.expect_value(t, ok, false)
 }
 
 @(test)
@@ -212,7 +241,9 @@ compile_when_expression_in_return_position :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    testing.expect_value(t, strings.contains(output, "return (1 if second_p else int{})"), true)
+    testing.expect_value(t, strings.contains(output, "if second_p"), true)
+    testing.expect_value(t, strings.contains(output, "return 1"), true)
+    testing.expect_value(t, strings.contains(output, "return int{}"), true)
 }
 
 @(test)
@@ -250,7 +281,32 @@ reject_untyped_multiform_when_expression :: proc(t: ^testing.T) {
     _, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, false)
     defer delete(err.message)
-    testing.expect_value(t, err.message, "when expression needs an expected type; add a let binding type or use it where the type is known")
+    testing.expect_value(t, err.message, "do expression needs an expected type; add a let binding type or use it where the type is known")
+}
+
+@(test)
+third_party_macro_can_use_expected_zero :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defmacro default-if [test value]
+  (quasiquote
+    (if (unquote test)
+      (unquote value)
+      (zero))))
+
+(defn pick [second?: bool] -> int
+  (let [index (default-if second? 1)]
+    index))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "index := (1 if second_p else int{})"), true)
 }
 
 @(test)
@@ -295,12 +351,18 @@ compile_case_expression_in_let_binding :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    testing.expect_value(t, strings.contains(output, `value := ("one" if n == 1 else ("few" if n == 2 else ("few" if n == 3 else "many")))`), true)
+    testing.expect_value(t, strings.contains(output, "kvist_case_"), true)
+    testing.expect_value(t, strings.contains(output, `if (kvist_case_`), true)
+    testing.expect_value(t, strings.contains(output, `== (1)`), true)
+    testing.expect_value(t, strings.contains(output, `== (2)`), true)
+    testing.expect_value(t, strings.contains(output, `== (3)`), true)
+    testing.expect_value(t, strings.contains(output, `value := `), true)
 }
 
 @(test)
 compile_owned_let_branch_case_in_return_position :: proc(t: ^testing.T) {
     source := `(package main)
+(import arr "kvist:arr")
 
 (defenum Step-Kind [One Two])
 
@@ -335,6 +397,7 @@ compile_owned_let_branch_case_in_return_position :: proc(t: ^testing.T) {
 @(test)
 compile_owned_let_branch_mixed_with_owned_call_case :: proc(t: ^testing.T) {
     source := `(package main)
+(import arr "kvist:arr")
 
 (defenum Step-Kind [One Two])
 
@@ -406,7 +469,7 @@ reject_case_expression_without_default :: proc(t: ^testing.T) {
     _, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, false)
     defer delete(err.message)
-    testing.expect_value(t, err.message, "case expression expects subject, clause/body pairs, and default")
+    testing.expect_value(t, err.message, "while expanding macro case: case expects subject, clause/body pairs, and default")
 }
 
 @(test)
@@ -615,7 +678,7 @@ reject_case_expression_with_obvious_branch_type_mismatch :: proc(t: ^testing.T) 
     _, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, false)
     defer delete(err.message)
-    testing.expect_value(t, err.message, "case expression branches have different obvious types: string and bool")
+    testing.expect_value(t, err.message, "if expression branches have different obvious types: string and bool")
 }
 
 @(test)
@@ -671,7 +734,10 @@ compile_repeated_enum_case_expression :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    testing.expect_value(t, strings.contains(output, "value := (1 if method == .Get else (1 if method == .Head else (2 if method == .Post else 3)))"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_case_"), true)
+    testing.expect_value(t, strings.contains(output, "== (.Get)"), true)
+    testing.expect_value(t, strings.contains(output, "== (.Head)"), true)
+    testing.expect_value(t, strings.contains(output, "== (.Post)"), true)
 }
 
 @(test)
@@ -692,11 +758,11 @@ compile_case_vector_clause_matches_vector_value :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    testing.expect_value(t, strings.contains(output, "value := (1 if xs == [2]int{1, 2} else 0)"), true)
+    testing.expect_value(t, strings.contains(output, "== ([2]int{1, 2})"), true)
 }
 
 @(test)
-reject_vector_case_expression_clause_for_non_fixed_array_subject :: proc(t: ^testing.T) {
+compile_vector_case_expression_clause_uses_source_equality :: proc(t: ^testing.T) {
     source := `(package main)
 
 (defenum Method [Get Head Post])
@@ -708,10 +774,16 @@ reject_vector_case_expression_clause_for_non_fixed_array_subject :: proc(t: ^tes
                 3)]
     value))`
 
-    _, err, ok := kvist.compile_source(source)
-    testing.expect_value(t, ok, false)
-    defer delete(err.message)
-    testing.expect_value(t, err.message, "case vector clauses only match fixed-array values")
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, ".Get"), true)
+    testing.expect_value(t, strings.contains(output, ".Head"), true)
 }
 
 @(test)
@@ -738,7 +810,7 @@ compile_defstruct_program :: proc(t: ^testing.T) {
   {name: string
    age: int
    active?: bool
-   tags: set[string]
+   tags: (map string (struct {}))
    scores: [dynamic]int
    home: Point})
 
@@ -806,28 +878,19 @@ compile_all_examples :: proc(t: ^testing.T) {
         "examples/visual/constraint-cloth.kvist",
         "examples/language/data-literals.kvist",
         "examples/language/declarations.kvist",
-        "examples/interop/core/dev-io.kvist",
         "examples/language/defstructs.kvist",
-        "examples/interop/core/error-handling.kvist",
         "examples/visual/flocking-sim.kvist",
-        "examples/web/http-client.kvist",
-        "examples/web/http-server.kvist",
-        "examples/web/http-session.kvist",
-        "examples/web/http-sse.kvist",
-        "examples/web/http-sse-live.kvist",
-        "examples/web/http-datastar.kvist",
-        "examples/web/http-datastar-live.kvist",
         "examples/language/hello.kvist",
         "examples/collections/functional-pipelines.kvist",
         "examples/collections/higher-order.kvist",
-        "examples/web/html-demo.kvist",
-        "examples/web/html-interpolation.kvist",
-        "examples/web/html-render.kvist",
-        "examples/web/html-values.kvist",
         "examples/language/inline-literals.kvist",
         "examples/interop/interop-directives.kvist",
         "examples/language/let-discard-bindings.kvist",
         "examples/language/local-declarations.kvist",
+        "examples/language/macro-authoring.kvist",
+        "examples/language/macro-dsl.kvist",
+        "examples/language/macro-messages.kvist",
+        "examples/language/macro-union-helpers.kvist",
         "examples/language/multiline-strings.kvist",
         "examples/language/multi-return-bindings.kvist",
         "examples/interop/core/matrix.kvist",
@@ -1125,7 +1188,7 @@ package_symbols_source_emits_core_update_helpers :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "macro\tcore.update!\t"), true)
     testing.expect_value(t, strings.contains(output, "macro\tcore.update\t"), true)
     testing.expect_value(t, strings.contains(output, "macro\tcore.assoc\t"), true)
-    testing.expect_value(t, strings.contains(output, "macro\tcore.len\t"), true)
+    testing.expect_value(t, strings.contains(output, "macro\tcore.len\t"), false)
     testing.expect_value(t, strings.contains(output, "macro\tcore.when\t"), true)
     testing.expect_value(t, strings.contains(output, "macro\tcore.cond\t"), true)
     testing.expect_value(t, strings.contains(output, "macro\tcore.comment\t"), true)
@@ -1207,7 +1270,7 @@ editor_symbols_source_merges_context_surfaces :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "kind\tname\tline\tcolumn\tdetail\tsignature\tdoc\tfile\n"), true)
     testing.expect_value(t, strings.contains(output, "struct\tGreeting\t"), true)
     testing.expect_value(t, strings.contains(output, "proc\tmain\t"), true)
-    testing.expect_value(t, strings.contains(output, "kvist package\tarr.push!\t"), true)
+    testing.expect_value(t, strings.contains(output, "kvist package\tarr.push!\t"), false)
     testing.expect_value(t, strings.contains(output, "kvist package\tcore.println\t"), true)
     testing.expect_value(t, strings.contains(output, "odin\tfmt.println\t"), true)
 }
@@ -1269,23 +1332,28 @@ editor_symbols_source_includes_language_forms_and_helpers :: proc(t: ^testing.T)
     testing.expect_value(t, strings.contains(output, "kvist form\tlet\t"), true)
     testing.expect_value(t, strings.contains(output, "kvist form\tif\t"), true)
     testing.expect_value(t, strings.contains(output, "kvist form\tdefiter\t"), true)
-    testing.expect_value(t, strings.contains(output, "kvist form\twhen\t"), true)
-    testing.expect_value(t, strings.contains(output, "kvist form\tcond\t"), true)
-    testing.expect_value(t, strings.contains(output, "kvist form\tcase\t"), true)
+    testing.expect_value(t, strings.contains(output, "kvist form\twhen\t"), false)
+    testing.expect_value(t, strings.contains(output, "kvist form\tcond\t"), false)
+    testing.expect_value(t, strings.contains(output, "kvist form\tcase\t"), false)
     testing.expect_value(t, strings.contains(output, "kvist form\tswitch\t"), false)
     testing.expect_value(t, strings.contains(output, "compatibility syntax\tswitch\t"), false)
     testing.expect_value(t, strings.contains(output, "kvist form\twhile\t"), true)
     testing.expect_value(t, strings.contains(output, "kvist form\tfor\t"), true)
     testing.expect_value(t, strings.contains(output, "kvist form\tdiscard\t"), true)
-    testing.expect_value(t, strings.contains(output, "kvist form\tupdate!\t"), true)
-    testing.expect_value(t, strings.contains(output, "kvist form\tget\t"), true)
-    testing.expect_value(t, strings.contains(output, "kvist form\tslice\t"), true)
+    testing.expect_value(t, strings.contains(output, "kvist form\tupdate!\t"), false)
+    testing.expect_value(t, strings.contains(output, "kvist form\tdelete!\t"), false)
+    testing.expect_value(t, strings.contains(output, "kvist form\tget\t"), false)
+    testing.expect_value(t, strings.contains(output, "kvist form\tslice\t"), false)
     testing.expect_value(t, strings.contains(output, "kvist form\taddr\t"), true)
     testing.expect_value(t, strings.contains(output, "kvist form\tderef\t"), true)
     testing.expect_value(t, strings.contains(output, "kvist form\tloop\t"), false)
     testing.expect_value(t, strings.contains(output, "kvist helper\tprintln\t"), true)
+    testing.expect_value(t, strings.contains(output, "kvist helper\tcase\t"), true)
     testing.expect_value(t, strings.contains(output, "kvist helper\tupdate!\t"), true)
+    testing.expect_value(t, strings.contains(output, "kvist helper\tdelete!\t"), true)
+    testing.expect_value(t, strings.contains(output, "kvist helper\tget\t"), true)
     testing.expect_value(t, strings.contains(output, "kvist helper\tslice\t"), true)
+    testing.expect_value(t, strings.contains(output, "kvist helper\tcond\t"), true)
     testing.expect_value(t, strings.contains(output, "kvist helper\twhen-let\t"), true)
     testing.expect_value(t, strings.contains(output, "kvist helper\tswitch\t"), false)
     testing.expect_value(t, strings.contains(output, "kvist package\tcore.println\t"), true)
@@ -1398,6 +1466,35 @@ editor_symbols_source_includes_core_package_helpers :: proc(t: ^testing.T) {
 }
 
 @(test)
+editor_symbols_source_does_not_preload_unimported_shipped_packages :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn main [] -> int
+  1)`
+
+    path, ok_path := repo_temp_test_path(".tmp-no-shipped-preload-editor-symbols.kvist")
+    testing.expect_value(t, ok_path, true)
+    if !ok_path {
+        return
+    }
+    defer delete(path)
+
+    output, err, ok := kvist.editor_symbols_source(path, source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "kvist package\tcore.println\t"), true)
+    testing.expect_value(t, strings.contains(output, "kvist package\tarr.map\t"), false)
+    testing.expect_value(t, strings.contains(output, "kvist package\tstr.split\t"), false)
+    testing.expect_value(t, strings.contains(output, "kvist package\thtml.render\t"), false)
+    testing.expect_value(t, strings.contains(output, "kvist package\tcli.flag\t"), false)
+}
+
+@(test)
 editor_symbols_source_includes_arr_and_map_mutation_packages :: proc(t: ^testing.T) {
     source := `(package main)
 (import arr "kvist:arr")
@@ -1449,7 +1546,7 @@ editor_symbols_source_includes_soa_package_helpers :: proc(t: ^testing.T) {
 (defn main []
   (let [profiles (soa.make Profile 4)]
     (defer (delete profiles))
-    (println (soa.fields 'Profile) (soa.types 'Profile) (len profiles))))`
+    (println (soa.fields 'Profile) (soa.types 'Profile) (count profiles))))`
 
     path, ok_path := repo_temp_test_path(".tmp-soa-editor-symbols.kvist")
     testing.expect_value(t, ok_path, true)
@@ -1474,25 +1571,55 @@ editor_symbols_source_includes_soa_package_helpers :: proc(t: ^testing.T) {
 }
 
 @(test)
-editor_symbols_source_includes_cli_package_helpers :: proc(t: ^testing.T) {
-    source := `(package main)
-(import cli "kvist:cli")
-
-(defn main []
-  (let [args ([]string ["tool" "serve" "--port" "8080"])]
-    (cli.println (cli.flag args "--debug")
-                 (cli.option args "--port" "3000")
-                 (cli.int-option args "--port" 3000)
-                 (or-else (cli.command args) "none"))))`
-
-    path, ok_path := repo_temp_test_path(".tmp-cli-editor-symbols.kvist")
-    testing.expect_value(t, ok_path, true)
-    if !ok_path {
+editor_symbols_source_does_not_preload_unimported_relative_packages :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-editor-relative-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
         return
     }
-    defer delete(path)
+    defer os.remove_all(dir)
+    defer delete(dir)
 
-    output, err, ok := kvist.editor_symbols_source(path, source)
+    tools_dir, tools_dir_err := os.join_path({dir, "tools"}, context.allocator)
+    testing.expect_value(t, tools_dir_err == nil, true)
+    if tools_dir_err != nil {
+        return
+    }
+    defer delete(tools_dir)
+
+    mk_tools_err := os.make_directory_all(tools_dir)
+    testing.expect_value(t, mk_tools_err == nil, true)
+    if mk_tools_err != nil {
+        return
+    }
+
+    tools_path, tools_path_err := os.join_path({tools_dir, "tools.kvist"}, context.allocator)
+    testing.expect_value(t, tools_path_err == nil, true)
+    if tools_path_err != nil {
+        return
+    }
+    defer delete(tools_path)
+    tools_write_err := os.write_entire_file_from_string(tools_path, `(package tools)
+
+(defn answer [] -> int
+  42)`)
+    testing.expect_value(t, tools_write_err == nil, true)
+    if tools_write_err != nil {
+        return
+    }
+
+    main_path, main_path_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, main_path_err == nil, true)
+    if main_path_err != nil {
+        return
+    }
+    defer delete(main_path)
+
+    main_source := `(package main)
+
+(defn main [] -> int
+  1)`
+    output, err, ok := kvist.editor_symbols_source(main_path, main_source)
     testing.expect_value(t, ok, true)
     if !ok {
         testing.expect_value(t, err.message, "")
@@ -1500,36 +1627,67 @@ editor_symbols_source_includes_cli_package_helpers :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    testing.expect_value(t, strings.contains(output, "kvist package\tcli.flag\t"), true)
-    testing.expect_value(t, strings.contains(output, "kvist package\tcli.option\t"), true)
-    testing.expect_value(t, strings.contains(output, "kvist package\tcli.int-option\t"), true)
-    testing.expect_value(t, strings.contains(output, "kvist package\tcli.command\t"), true)
-    testing.expect_value(t, strings.contains(output, "kvist package\tcli.println\t"), true)
+    testing.expect_value(t, strings.contains(output, "kvist package\ttools.answer\t"), false)
+    testing.expect_value(t, strings.contains(output, tools_path), false)
 }
 
 @(test)
-editor_symbols_source_includes_source_package_imports :: proc(t: ^testing.T) {
-    source := `(package main)
-(import html "kvist:html")
-
-(defn main []
-  (html.render [div "ok"]))`
-
-    path, ok_path := repo_temp_test_path(".tmp-html-editor-symbols.kvist")
-    testing.expect_value(t, ok_path, true)
-    if !ok_path {
+editor_symbols_source_includes_generic_export_markers :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-editor-export-marker-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
         return
     }
-    defer delete(path)
+    defer os.remove_all(dir)
+    defer delete(dir)
 
-    write_err := os.write_entire_file(path, transmute([]byte)source)
-    testing.expect_value(t, write_err == nil, true)
-    if write_err != nil {
+    pkg_dir, pkg_dir_err := os.join_path({dir, "tools"}, context.allocator)
+    testing.expect_value(t, pkg_dir_err == nil, true)
+    if pkg_dir_err != nil {
         return
     }
-    defer os.remove(path)
+    defer delete(pkg_dir)
+    mk_pkg_err := os.make_directory_all(pkg_dir)
+    testing.expect_value(t, mk_pkg_err == nil, true)
+    if mk_pkg_err != nil {
+        return
+    }
 
-    output, err, ok := kvist.editor_symbols_source(path, source)
+    pkg_path, pkg_path_err := os.join_path({pkg_dir, "tools.kvist"}, context.allocator)
+    testing.expect_value(t, pkg_path_err == nil, true)
+    if pkg_path_err != nil {
+        return
+    }
+    defer delete(pkg_path)
+    pkg_source := `(package tools)
+(@exports [marker])
+
+(defn visible [] -> int
+  1)`
+    pkg_write_err := os.write_entire_file_from_string(pkg_path, pkg_source)
+    testing.expect_value(t, pkg_write_err == nil, true)
+    if pkg_write_err != nil {
+        return
+    }
+
+    main_path, main_path_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, main_path_err == nil, true)
+    if main_path_err != nil {
+        return
+    }
+    defer delete(main_path)
+    main_source := `(package main)
+(import tools "./tools")
+
+(defn main [] -> int
+  (tools.visible))`
+    main_write_err := os.write_entire_file_from_string(main_path, main_source)
+    testing.expect_value(t, main_write_err == nil, true)
+    if main_write_err != nil {
+        return
+    }
+
+    output, err, ok := kvist.editor_symbols_source(main_path, main_source)
     testing.expect_value(t, ok, true)
     if !ok {
         testing.expect_value(t, err.message, "")
@@ -1537,15 +1695,8 @@ editor_symbols_source_includes_source_package_imports :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    testing.expect_value(t, strings.contains(output, "macro\thtml.render\t"), true)
-    testing.expect_value(t, strings.contains(output, "macro\thtml.render-file\t"), true)
-    testing.expect_value(t, strings.contains(output, "macro\thtml.for\t"), true)
-    testing.expect_value(t, strings.contains(output, "macro\thtml.html\t"), false)
-    testing.expect_value(t, strings.contains(output, "struct\thtml.Element\t"), false)
-    testing.expect_value(t, strings.contains(output, "union\thtml.Node\t"), false)
-    testing.expect_value(t, strings.contains(output, "packages/html/html.kvist"), true)
-    testing.expect_value(t, strings.contains(output, "html.emit-node"), false)
-    testing.expect_value(t, strings.contains(output, "html.render-node-into"), false)
+    testing.expect_value(t, strings.contains(output, "macro\ttools.marker\t"), true)
+    testing.expect_value(t, strings.contains(output, "proc\ttools.visible\t"), true)
 }
 
 @(test)
@@ -1731,271 +1882,6 @@ editor_symbols_source_includes_relative_source_package_imports :: proc(t: ^testi
 }
 
 @(test)
-compile_path_supports_html_expression_interpolation :: proc(t: ^testing.T) {
-    path, ok_path := repo_temp_test_path(".tmp-html-interpolation-test.kvist")
-    testing.expect_value(t, ok_path, true)
-    if !ok_path {
-        return
-    }
-    defer delete(path)
-    defer os.remove(path)
-
-    source := `(import arr "kvist:arr")
-(import html "kvist:html")
-
-(defn status-label [enabled?: bool] -> string
-  (if enabled?
-    "Ready"
-    "Hidden"))
-
-(defn demo [title: string, count: int, ratio: float, enabled?: bool] -> string
-  (let [archived? false
-        ids (arr.range 1 4) :defer]
-    (html.render
-      [section {data-count count
-                data-ratio ratio
-                hidden enabled?
-                data-state (if enabled? "ready" "hidden")
-                data-archived (when archived? "true")}
-       [h1 title]
-       [<>
-        [h2 title]
-        [p (+ count 10)]]
-       [p (status-label enabled?)]
-       [p (+ count 1)]
-       (when archived?
-         [p "Archived"])
-       nil
-       [ul
-        (html.for [id ids]
-          [li id])]
-       (if enabled?
-         "Visible"
-         "Hidden")])))`
-
-    write_err := os.write_entire_file_from_string(path, source)
-    testing.expect_value(t, write_err == nil, true)
-    if write_err != nil {
-        return
-    }
-
-    output, err, ok := kvist.compile_path(path)
-    testing.expect_value(t, ok, true)
-    if !ok {
-        testing.expect_value(t, err.message, "")
-        return
-    }
-    defer delete(output)
-
-    testing.expect_value(t, strings.contains(output, `ids := arr__range_impl(1, 4, 1)`), true)
-    testing.expect_value(t, strings.contains(output, `html__render_attr_into(&__html_render_builder`), true)
-    testing.expect_value(t, strings.contains(output, `value = html__Attr_Value(count)`), true)
-    testing.expect_value(t, strings.contains(output, `value = html__Attr_Value(ratio)`), true)
-    testing.expect_value(t, strings.contains(output, `value = html__Attr_Value(enabled_p)`), true)
-    testing.expect_value(t, strings.contains(output, `if enabled_p`), true)
-    testing.expect_value(t, strings.contains(output, `for id in ids`), true)
-    testing.expect_value(t, strings.contains(output, `html__render_node_into(&__html_render_builder`), true)
-    testing.expect_value(t, strings.contains(output, `html__Node(html__Element{tag = "section"`), false)
-    testing.expect_value(t, strings.contains(output, `children = []html__Node`), false)
-}
-
-@(test)
-compile_path_direct_html_render_emits_builder_writes :: proc(t: ^testing.T) {
-    path, ok_path := repo_temp_test_path(".tmp-html-direct-render-test.kvist")
-    testing.expect_value(t, ok_path, true)
-    if !ok_path {
-        return
-    }
-    defer delete(path)
-    defer os.remove(path)
-
-    source := `(import html "kvist:html")
-
-(defn demo [title: string, enabled?: bool] -> string
-  (html.render
-    [section {class "panel"
-              hidden enabled?
-              data-state (if enabled? "on" "off")}
-     [h1 title]
-     (when enabled?
-       [span "Ready & <ok>"])]))`
-
-    write_err := os.write_entire_file_from_string(path, source)
-    testing.expect_value(t, write_err == nil, true)
-    if write_err != nil {
-        return
-    }
-
-    output, err, ok := kvist.compile_path(path)
-    testing.expect_value(t, ok, true)
-    if !ok {
-        testing.expect_value(t, err.message, "")
-        return
-    }
-    defer delete(output)
-
-    testing.expect_value(t, strings.contains(output, `strings.write_string(&__html_render_builder`), true)
-    testing.expect_value(t, strings.contains(output, `"<section"`), true)
-    testing.expect_value(t, strings.contains(output, `html__write_attr_string(&__html_render_builder`), true)
-    testing.expect_value(t, strings.contains(output, `html__render_attr_into(&__html_render_builder`), true)
-    testing.expect_value(t, strings.contains(output, `if enabled_p`), true)
-    testing.expect_value(t, strings.contains(output, `html__Node(html__Element{tag = "section"`), false)
-    testing.expect_value(t, strings.contains(output, `children = []html__Node`), false)
-}
-
-@(test)
-compile_path_html_render_accepts_keyword_tags_and_attrs :: proc(t: ^testing.T) {
-    path, ok_path := repo_temp_test_path(".tmp-html-keyword-tag-test.kvist")
-    testing.expect_value(t, ok_path, true)
-    if !ok_path {
-        return
-    }
-    defer delete(path)
-    defer os.remove(path)
-
-    source := `(import html "kvist:html")
-
-(defn demo [] -> string
-  (html.render [:div {:class "panel" :data-state "ready"} [:span "ok"]]))`
-
-    write_err := os.write_entire_file_from_string(path, source)
-    testing.expect_value(t, write_err == nil, true)
-    if write_err != nil {
-        return
-    }
-
-    output, err, ok := kvist.compile_path(path)
-    testing.expect_value(t, ok, true)
-    if !ok {
-        testing.expect_value(t, err.message, "")
-        return
-    }
-    defer delete(output)
-
-    testing.expect_value(t, strings.contains(output, `strings.write_string(&__html_render_builder`), true)
-    testing.expect_value(t, strings.contains(output, `"class", "panel"`), true)
-    testing.expect_value(t, strings.contains(output, `"data-state", "ready"`), true)
-    testing.expect_value(t, strings.contains(output, `"</span>"`), true)
-}
-
-@(test)
-compile_path_html_render_rejects_label_attrs :: proc(t: ^testing.T) {
-    path, ok_path := repo_temp_test_path(".tmp-html-label-attr-test.kvist")
-    testing.expect_value(t, ok_path, true)
-    if !ok_path {
-        return
-    }
-    defer delete(path)
-    defer os.remove(path)
-
-    source := `(import html "kvist:html")
-
-(defn demo [] -> string
-  (html.render [div {class: "panel"} "ok"]))`
-
-    write_err := os.write_entire_file_from_string(path, source)
-    testing.expect_value(t, write_err == nil, true)
-    if write_err != nil {
-        return
-    }
-
-    _, err, ok := kvist.compile_path(path)
-    testing.expect_value(t, ok, false)
-    defer delete(err.message)
-    testing.expect_value(t, strings.contains(err.message, "html attr must use bare names without trailing :"), true)
-}
-
-@(test)
-compile_path_html_render_supports_template_bindings :: proc(t: ^testing.T) {
-    path, ok_path := repo_temp_test_path(".tmp-html-template-render-test.kvist")
-    testing.expect_value(t, ok_path, true)
-    if !ok_path {
-        return
-    }
-    defer delete(path)
-    defer os.remove(path)
-
-    source := `(import html "kvist:html")
-
-(defn demo [name: string] -> string
-  (html.render "<h1>{{name}}</h1>" {name name}))`
-
-    write_err := os.write_entire_file_from_string(path, source)
-    testing.expect_value(t, write_err == nil, true)
-    if write_err != nil {
-        return
-    }
-
-    output, err, ok := kvist.compile_path(path)
-    testing.expect_value(t, ok, true)
-    if !ok {
-        testing.expect_value(t, err.message, "")
-        return
-    }
-    defer delete(output)
-
-    testing.expect_value(t, strings.contains(output, `__html_template`), true)
-    testing.expect_value(t, strings.contains(output, `html__clone_string("<h1>{{name}}</h1>")`), true)
-    testing.expect_value(t, strings.contains(output, `html__replace_owned(__html_template`), true)
-    testing.expect_value(t, strings.contains(output, `"{{name}}"`), true)
-    testing.expect_value(t, strings.contains(output, `return __html_template`), true)
-}
-
-@(test)
-compile_path_html_render_file_embeds_template_at_compile_time :: proc(t: ^testing.T) {
-    dir, dir_err := os.make_directory_temp("", "kvist-html-render-file-*", context.allocator)
-    testing.expect_value(t, dir_err == nil, true)
-    if dir_err != nil {
-        return
-    }
-    defer os.remove_all(dir)
-    defer delete(dir)
-
-    template_path, template_join_err := os.join_path({dir, "home.html"}, context.allocator)
-    testing.expect_value(t, template_join_err == nil, true)
-    if template_join_err != nil {
-        return
-    }
-    defer delete(template_path)
-    template_write_err := os.write_entire_file_from_string(template_path, "<main>{{name}}</main>")
-    testing.expect_value(t, template_write_err == nil, true)
-    if template_write_err != nil {
-        return
-    }
-
-    main_path, main_join_err := os.join_path({dir, "main.kvist"}, context.allocator)
-    testing.expect_value(t, main_join_err == nil, true)
-    if main_join_err != nil {
-        return
-    }
-    defer delete(main_path)
-
-    source := `(package main)
-(import html "kvist:html")
-
-(defn demo [name: string] -> string
-  (html.render-file "home.html" {name name}))`
-
-    source_write_err := os.write_entire_file_from_string(main_path, source)
-    testing.expect_value(t, source_write_err == nil, true)
-    if source_write_err != nil {
-        return
-    }
-
-    output, err, ok := kvist.compile_path(main_path)
-    testing.expect_value(t, ok, true)
-    if !ok {
-        testing.expect_value(t, err.message, "")
-        return
-    }
-    defer delete(output)
-
-    testing.expect_value(t, strings.contains(output, `html__clone_string("<main>{{name}}</main>")`), true)
-    testing.expect_value(t, strings.contains(output, `"home.html"`), false)
-    testing.expect_value(t, strings.contains(output, `os.read_entire_file`), false)
-}
-
-@(test)
 compile_eval_source_can_emit_statement_runner :: proc(t: ^testing.T) {
     source := `(package main)
 (import fmt "core:fmt")
@@ -2029,18 +1915,17 @@ main :: proc() {
 @(test)
 compile_eval_source_prints_block_forms_as_statements :: proc(t: ^testing.T) {
     source := `(package main)
-(import io "kvist:io")
 (import os "core:os")
 
 (defn load-note [path: string] -> [data: []byte, err: os.Error]
-  (io.read path))`
+  (os.read_entire_file path context.allocator))`
 
     output, err, ok := kvist.compile_eval_source(source, `(let [[data err] (load-note "tmp/kvist-note.txt")]
   (if (!= err nil)
     0
     (do
       (defer (delete data))
-      (len data))))`)
+      (count data))))`)
     testing.expect_value(t, ok, true)
     if !ok {
         testing.expect_value(t, err.message, "")
@@ -2049,10 +1934,8 @@ compile_eval_source_prints_block_forms_as_statements :: proc(t: ^testing.T) {
     defer delete(output)
 
     testing.expect_value(t, strings.contains(output, `import os "core:os"`), true)
-    testing.expect_value(t, strings.contains(output, "io__read :: #force_inline proc(path: string) -> (data: []byte, err: os.Error)"), true)
     testing.expect_value(t, strings.contains(output, "return os.read_entire_file(path, context.allocator)"), true)
     testing.expect_value(t, strings.contains(output, "load_note :: proc(path: string) -> (data: []byte, err: os.Error)"), true)
-    testing.expect_value(t, strings.contains(output, "return io__read(path)"), true)
     testing.expect_value(t, strings.contains(output, `data, err := load_note("tmp/kvist-note.txt")`), true)
     testing.expect_value(t, strings.contains(output, "fmt.println(len(data))"), true)
 }
@@ -2140,8 +2023,8 @@ compile_defstruct_rejects_bad_metadata :: proc(t: ^testing.T) {
     source := `(package main)
 
 (defstruct Broken
-  {tags: [set]
-   scores: [fixed-arr int]})`
+  {tags: [slice]
+   scores: [array int]})`
 
     _, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, false)
@@ -2149,7 +2032,34 @@ compile_defstruct_rejects_bad_metadata :: proc(t: ^testing.T) {
         return
     }
     defer delete(err.message)
-    testing.expect_value(t, strings.contains(err.message, "expects one element type") || strings.contains(err.message, "expects a numeric length"), true)
+    testing.expect_value(t, strings.contains(err.message, "expects one element type") || strings.contains(err.message, "invalid defstruct field type metadata"), true)
+}
+
+@(test)
+compile_defstruct_rejects_package_shaped_type_metadata :: proc(t: ^testing.T) {
+    sources := []string{
+        `(package main)
+
+(defstruct Broken
+  {items: [arr int]})`,
+        `(package main)
+
+(defstruct Broken
+  {items: [fixed-arr 4 int]})`,
+        `(package main)
+
+(defstruct Broken
+  {items: [set int]})`,
+    }
+    for source in sources {
+        _, err, ok := kvist.compile_source(source)
+        testing.expect_value(t, ok, false)
+        if ok {
+            continue
+        }
+        defer delete(err.message)
+        testing.expect_value(t, strings.contains(err.message, "invalid defstruct field type metadata"), true)
+    }
 }
 
 @(test)
@@ -2336,19 +2246,23 @@ compile_type_call_position_supports_complex_type_heads :: proc(t: ^testing.T) {
 }
 
 @(test)
-reject_old_core_slice_type_constructor :: proc(t: ^testing.T) {
+compile_generic_type_constructor_form :: proc(t: ^testing.T) {
     source := `(package main)
+(odin "Box :: struct($T: typeid) {value: T}")
 
-(defn bad [xs: []i32] -> (core.slice i32)
-  xs)`
+(defn box [x: i32] -> (Box i32)
+  ((Box i32) {value: x}))`
 
-    _, err, ok := kvist.compile_source(source)
-    testing.expect_value(t, ok, false)
-    if ok {
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
         return
     }
-    defer delete(err.message)
-    testing.expect_value(t, err.message, "unsupported type form")
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "box :: proc(x: i32) -> Box(i32)"), true)
+    testing.expect_value(t, strings.contains(output, "return Box(i32){value = x}"), true)
 }
 
 @(test)
@@ -2472,11 +2386,18 @@ compile_update_bang_stmt :: proc(t: ^testing.T) {
 compile_canonical_bare_core_helpers :: proc(t: ^testing.T) {
     source := `(package main)
 
+(defstruct Point {
+  x: int
+})
+
 (defn score [needle: int] -> int
   (let [xs ([dynamic]int [1 2 3])
         lookup (map[string]int {"a" 4})
         tail (slice xs 1)
-        total (count xs)]
+        total (count xs)
+        point (Point {x: 1})
+        associated (assoc point.x total)
+        updated (update associated.x + 1)]
     (update! xs[0] + 10)
     (delete! lookup "a")
     (if (contains? xs needle)
@@ -2484,7 +2405,7 @@ compile_canonical_bare_core_helpers :: proc(t: ^testing.T) {
         (if (not (contains? lookup "b"))
           (if (empty? (slice tail))
             0
-            (+ total (get xs 0)))
+            (+ total (get xs 0) (get updated .x)))
           0)
         0)
       0)))`
@@ -2498,14 +2419,98 @@ compile_canonical_bare_core_helpers :: proc(t: ^testing.T) {
     defer delete(output)
 
     testing.expect_value(t, strings.contains(output, "(xs)[1:]"), true)
-    testing.expect_value(t, strings.contains(output, "total := len((xs)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "(xs)[0] += (10)"), true)
+    testing.expect_value(t, strings.contains(output, "total := len(xs)"), true)
+    testing.expect_value(t, strings.contains(output, "(xs)[0] += 10"), true)
     testing.expect_value(t, strings.contains(output, "delete_key(&(lookup), \"a\")"), true)
     testing.expect_value(t, strings.contains(output, "kvist_contains_value((xs)[:]"), true)
     testing.expect_value(t, strings.contains(output, "(\"a\") in (lookup)"), true)
     testing.expect_value(t, strings.contains(output, "!((\"b\") in (lookup))"), true)
-    testing.expect_value(t, strings.contains(output, "len((tail)[:]) == 0"), true)
-    testing.expect_value(t, strings.contains(output, "(total) + (xs[0])"), true)
+    testing.expect_value(t, strings.contains(output, "(len((tail)[:])) == (0)"), true)
+    testing.expect_value(t, strings.contains(output, "associated := (proc(kvist_target: Point, kvist_value: int) -> Point {"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_update_1.x = kvist_value"), true)
+    testing.expect_value(t, strings.contains(output, "updated := (proc(kvist_target: Point, kvist_arg_0: int) -> Point {"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_update_2.x = (kvist_target.x) + (kvist_arg_0)"), true)
+    testing.expect_value(t, strings.contains(output, "(total) + (xs[0]) + ((updated).x)"), true)
+}
+
+@(test)
+third_party_source_package_can_alias_core_escape :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-core-alias-escape-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    support_dir, support_dir_err := os.join_path({dir, "support"}, context.allocator)
+    testing.expect_value(t, support_dir_err == nil, true)
+    if support_dir_err != nil {
+        return
+    }
+    defer delete(support_dir)
+
+    mk_err := os.make_directory_all(support_dir)
+    testing.expect_value(t, mk_err == nil, true)
+    if mk_err != nil {
+        return
+    }
+
+    support_path, support_path_err := os.join_path({support_dir, "support.kvist"}, context.allocator)
+    testing.expect_value(t, support_path_err == nil, true)
+    if support_path_err != nil {
+        return
+    }
+    defer delete(support_path)
+
+    support_source := `(package support)
+(import k "kvist:core")
+
+(defn count [xs: []int] -> int
+  (k.count xs))
+
+(defn tail [xs: []int] -> []int
+  (k.slice xs 1))
+
+(defn first [xs: []int] -> int
+  (k.get xs 0))`
+    support_write_err := os.write_entire_file_from_string(support_path, support_source)
+    testing.expect_value(t, support_write_err == nil, true)
+    if support_write_err != nil {
+        return
+    }
+
+    main_path, main_path_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, main_path_err == nil, true)
+    if main_path_err != nil {
+        return
+    }
+    defer delete(main_path)
+
+    main_source := `(package main)
+(import s "support")
+
+(defn main [] -> int
+  (let [xs ([]int [1 2 3])]
+    (+ (s.count xs) (s.first (s.tail xs)))))`
+    main_write_err := os.write_entire_file_from_string(main_path, main_source)
+    testing.expect_value(t, main_write_err == nil, true)
+    if main_write_err != nil {
+        return
+    }
+
+    output, err, ok := kvist.compile_path(main_path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "s__count :: proc(xs: []int) -> int {"), true)
+    testing.expect_value(t, strings.contains(output, "return len(xs)"), true)
+    testing.expect_value(t, strings.contains(output, "return (xs)[1:]"), true)
+    testing.expect_value(t, strings.contains(output, "return xs[0]"), true)
 }
 
 @(test)
@@ -2530,46 +2535,309 @@ reject_slash_package_access_in_source :: proc(t: ^testing.T) {
 
 @(test)
 reject_internal_lowering_call_names_in_source :: proc(t: ^testing.T) {
-    source := `(package main)
-(import arr "kvist:arr")
+    source_prim := `(package main)
 
-(defn inc [x: int] -> int
-  (+ x 1))
+(defn bad [] -> int
+  (kvist-prim-count [1 2 3]))`
 
-(defn bad-core [] -> int
-  (core-count [1 2 3]))
+    _, err_prim, ok_prim := kvist.compile_source(source_prim)
+    testing.expect_value(t, ok_prim, false)
+    if ok_prim {
+        return
+    }
+    defer delete(err_prim.message)
+    testing.expect_value(t, err_prim.message, "`kvist-prim-count` is an internal lowering name")
 
-(defn bad-arr [] -> [dynamic]int
-  (arr-map inc [1 2 3]))`
+    source_underscore_prim := `(package main)
 
-    _, err, ok := kvist.compile_source(source)
+(defn bad [] -> int
+  (kvist_prim_bit_or 1 2))`
+
+    _, err_underscore_prim, ok_underscore_prim := kvist.compile_source(source_underscore_prim)
+    testing.expect_value(t, ok_underscore_prim, false)
+    if ok_underscore_prim {
+        return
+    }
+    defer delete(err_underscore_prim.message)
+    testing.expect_value(t, err_underscore_prim.message, "`kvist_prim_bit_or` is an internal lowering name")
+
+    source_empty := `(package main)
+
+(defn bad [] -> bool
+  (kvist-prim-empty? [1 2 3]))`
+
+    _, err_empty, ok_empty := kvist.compile_source(source_empty)
+    testing.expect_value(t, ok_empty, false)
+    if ok_empty {
+        return
+    }
+    defer delete(err_empty.message)
+    testing.expect_value(t, err_empty.message, "`kvist-prim-empty?` is an internal lowering name")
+
+    source_contains := `(package main)
+
+(defn bad [] -> bool
+  (kvist-prim-contains? [1 2 3] 2))`
+
+    _, err_contains, ok_contains := kvist.compile_source(source_contains)
+    testing.expect_value(t, ok_contains, false)
+    if ok_contains {
+        return
+    }
+    defer delete(err_contains.message)
+    testing.expect_value(t, err_contains.message, "`kvist-prim-contains?` is an internal lowering name")
+
+    source_slice := `(package main)
+
+(defn bad [] -> []int
+  (kvist-prim-slice [1 2 3]))`
+
+    _, err_slice, ok_slice := kvist.compile_source(source_slice)
+    testing.expect_value(t, ok_slice, false)
+    if ok_slice {
+        return
+    }
+    defer delete(err_slice.message)
+    testing.expect_value(t, err_slice.message, "`kvist-prim-slice` is an internal lowering name")
+
+    source_get := `(package main)
+
+(defn bad [] -> int
+  (kvist-prim-get [1 2 3] 0))`
+
+    _, err_get, ok_get := kvist.compile_source(source_get)
+    testing.expect_value(t, ok_get, false)
+    if ok_get {
+        return
+    }
+    defer delete(err_get.message)
+    testing.expect_value(t, err_get.message, "`kvist-prim-get` is an internal lowering name")
+
+    source_or_else := `(package main)
+
+(defn query [] -> [value: int, ok: bool] #optional_ok
+  (return 1 true))
+
+(defn bad [] -> int
+  (kvist-prim-or-else (query) 0))`
+
+    _, err_or_else, ok_or_else := kvist.compile_source(source_or_else)
+    testing.expect_value(t, ok_or_else, false)
+    if ok_or_else {
+        return
+    }
+    defer delete(err_or_else.message)
+    testing.expect_value(t, err_or_else.message, "`kvist-prim-or-else` is an internal lowering name")
+
+    source_println := `(package main)
+
+(defn bad []
+  (kvist-prim-println "hello"))`
+
+    _, err_println, ok_println := kvist.compile_source(source_println)
+    testing.expect_value(t, ok_println, false)
+    if ok_println {
+        return
+    }
+    defer delete(err_println.message)
+    testing.expect_value(t, err_println.message, "`kvist-prim-println` is an internal lowering name")
+
+    source_tap := `(package main)
+
+(defn bad [] -> int
+  (kvist-prim-tap 1))`
+
+    _, err_tap, ok_tap := kvist.compile_source(source_tap)
+    testing.expect_value(t, ok_tap, false)
+    if ok_tap {
+        return
+    }
+    defer delete(err_tap.message)
+    testing.expect_value(t, err_tap.message, "`kvist-prim-tap` is an internal lowering name")
+
+    source_doc := `(package main)
+
+(defn bad []
+  (kvist-prim-doc 'println))`
+
+    _, err_doc, ok_doc := kvist.compile_source(source_doc)
+    testing.expect_value(t, ok_doc, false)
+    if ok_doc {
+        return
+    }
+    defer delete(err_doc.message)
+    testing.expect_value(t, err_doc.message, "`kvist-prim-doc` is an internal lowering name")
+
+    source_update_bang := `(package main)
+
+(defn bad [xs: [dynamic]int]
+  (kvist-prim-update! xs[0] + 1))`
+
+    _, err_update_bang, ok_update_bang := kvist.compile_source(source_update_bang)
+    testing.expect_value(t, ok_update_bang, false)
+    if ok_update_bang {
+        return
+    }
+    defer delete(err_update_bang.message)
+    testing.expect_value(t, err_update_bang.message, "`kvist-prim-update!` is an internal lowering name")
+
+    source_assoc := `(package main)
+
+(defstruct Point {
+  x: int
+})
+
+(defn bad [point: Point] -> Point
+  (kvist-prim-assoc point .x 1))`
+
+    _, err_assoc, ok_assoc := kvist.compile_source(source_assoc)
+    testing.expect_value(t, ok_assoc, false)
+    if ok_assoc {
+        return
+    }
+    defer delete(err_assoc.message)
+    testing.expect_value(t, err_assoc.message, "`kvist-prim-assoc` is an internal lowering name")
+
+    source_update := `(package main)
+
+(defstruct Point {
+  x: int
+})
+
+(defn bad [point: Point] -> Point
+  (kvist-prim-update point .x + 1))`
+
+    _, err_update, ok_update := kvist.compile_source(source_update)
+    testing.expect_value(t, ok_update, false)
+    if ok_update {
+        return
+    }
+    defer delete(err_update.message)
+    testing.expect_value(t, err_update.message, "`kvist-prim-update` is an internal lowering name")
+
+    source_case := `(package main)
+
+(defn bad [n: int] -> int
+  (kvist-prim-case n
+    1 10
+    0))`
+
+    _, err_case, ok_case := kvist.compile_source(source_case)
+    testing.expect_value(t, ok_case, false)
+    if ok_case {
+        return
+    }
+    defer delete(err_case.message)
+    testing.expect_value(t, err_case.message, "`kvist-prim-case` is an internal lowering name")
+
+    source_thread_first := `(package main)
+
+(defn bad [x: int] -> int
+  (kvist-prim-thread-first x (+ 1)))`
+
+    _, err_thread_first, ok_thread_first := kvist.compile_source(source_thread_first)
+    testing.expect_value(t, ok_thread_first, false)
+    if ok_thread_first {
+        return
+    }
+    defer delete(err_thread_first.message)
+    testing.expect_value(t, err_thread_first.message, "`kvist-prim-thread-first` is an internal lowering name")
+
+    source_thread_last := `(package main)
+
+(defn bad [x: int] -> int
+  (kvist-prim-thread-last x (+ 1)))`
+
+    _, err_thread_last, ok_thread_last := kvist.compile_source(source_thread_last)
+    testing.expect_value(t, ok_thread_last, false)
+    if ok_thread_last {
+        return
+    }
+    defer delete(err_thread_last.message)
+    testing.expect_value(t, err_thread_last.message, "`kvist-prim-thread-last` is an internal lowering name")
+
+    source_delete := `(package main)
+
+(defn bad [lookup: map[string]int]
+  (kvist-prim-delete! lookup "a"))`
+
+    _, err_delete, ok_delete := kvist.compile_source(source_delete)
+    testing.expect_value(t, ok_delete, false)
+    if ok_delete {
+        return
+    }
+    defer delete(err_delete.message)
+    testing.expect_value(t, err_delete.message, "`kvist-prim-delete!` is an internal lowering name")
+
+}
+
+@(test)
+reject_internal_lowering_call_names_in_imported_source_package :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-imported-internal-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    bad_dir, bad_dir_err := os.join_path({dir, "packages", "bad"}, context.allocator)
+    testing.expect_value(t, bad_dir_err == nil, true)
+    if bad_dir_err != nil {
+        return
+    }
+    defer delete(bad_dir)
+
+    mk_err := os.make_directory_all(bad_dir)
+    testing.expect_value(t, mk_err == nil, true)
+    if mk_err != nil {
+        return
+    }
+
+    bad_path, bad_path_err := os.join_path({bad_dir, "bad.kvist"}, context.allocator)
+    testing.expect_value(t, bad_path_err == nil, true)
+    if bad_path_err != nil {
+        return
+    }
+    defer delete(bad_path)
+
+    bad_write_err := os.write_entire_file_from_string(bad_path, `(package bad)
+
+(defn count [xs: []int] -> int
+  (kvist-prim-count xs))`)
+    testing.expect_value(t, bad_write_err == nil, true)
+    if bad_write_err != nil {
+        return
+    }
+
+    main_path, main_path_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, main_path_err == nil, true)
+    if main_path_err != nil {
+        return
+    }
+    defer delete(main_path)
+
+    main_write_err := os.write_entire_file_from_string(main_path, `(package main)
+(import bad "packages/bad")
+
+(defn main [xs: []int] -> int
+  (bad.count xs))`)
+    testing.expect_value(t, main_write_err == nil, true)
+    if main_write_err != nil {
+        return
+    }
+
+    _, err, ok := kvist.compile_path(main_path)
     testing.expect_value(t, ok, false)
     if ok {
         return
     }
     defer delete(err.message)
-    testing.expect_value(t, err.message, "`core-count` is an internal lowering name; use `count`")
-
-    source_arr := `(package main)
-(import arr "kvist:arr")
-
-(defn inc [x: int] -> int
-  (+ x 1))
-
-(defn bad [] -> [dynamic]int
-  (arr-map inc [1 2 3]))`
-
-    _, err_arr, ok_arr := kvist.compile_source(source_arr)
-    testing.expect_value(t, ok_arr, false)
-    if ok_arr {
-        return
-    }
-    defer delete(err_arr.message)
-    testing.expect_value(t, err_arr.message, "`arr-map` is an internal lowering name; use `arr.map`")
+    testing.expect_value(t, err.message, "`kvist-prim-count` is an internal lowering name")
 }
 
 @(test)
-reject_package_dash_call_names_in_source :: proc(t: ^testing.T) {
+compile_leaves_package_dash_call_names_as_plain_calls :: proc(t: ^testing.T) {
     cases := []struct {
         source:   string,
         expected: string,
@@ -2577,42 +2845,74 @@ reject_package_dash_call_names_in_source :: proc(t: ^testing.T) {
         {`(package main)
 
 (defn bad [xs: []int] -> [dynamic]int
-  (arr-interpose 0 xs))`, "`arr-interpose` is an internal lowering name; use `arr.interpose`"},
+  (arr-interpose 0 xs))`, "arr_interpose(0, xs)"},
         {`(package main)
 
 (defn bad [m: map[string]int] -> [dynamic]string
-  (map-keys m))`, "`map-keys` is an internal lowering name; use `map.keys`"},
+  (map-keys m))`, "map_keys(m)"},
         {`(package main)
 
-(defn bad [a: set[int] b: set[int]] -> set[int]
-  (set-union a b))`, "`set-union` is an internal lowering name; use `set.union`"},
+(defn bad [a: (map int (struct {})) b: (map int (struct {}))] -> (map int (struct {}))
+  (set-union a b))`, "set_union(a, b)"},
         {`(package main)
 
 (defn bad [s: string] -> string
-  (str-lower s))`, "`str-lower` is an internal lowering name; use `str.lower`"},
+  (str-lower s))`, "str_lower(s)"},
         {`(package main)
 
 (defn bad [path: string]
-  (io-read path))`, "`io-read` is an internal lowering name; use `io.read`"},
+  (io-read path))`, "io_read(path)"},
         {`(package main)
 
 (defn bad [value: int]
-  (json-write value))`, "`json-write` is an internal lowering name; use `json.write`"},
+  (json-write value))`, "json_write(value)"},
         {`(package main)
 
 (defn bad [args: []string] -> bool
-  (cli-flag args "--verbose"))`, "`cli-flag` is an internal lowering name; use `cli.flag`"},
+  (cli-flag args "--verbose"))`, "cli_flag(args, \"--verbose\")"},
     }
 
     for test_case in cases {
-        _, err, ok := kvist.compile_source(test_case.source)
-        testing.expect_value(t, ok, false)
-        if ok {
+        output, err, ok := kvist.compile_source(test_case.source)
+        testing.expect_value(t, ok, true)
+        if !ok {
+            testing.expect_value(t, err.message, "")
             continue
         }
-        testing.expect_value(t, err.message, test_case.expected)
-        delete(err.message)
+        testing.expect_value(t, strings.contains(output, test_case.expected), true)
+        delete(output)
     }
+}
+
+@(test)
+compile_leaves_unimported_shipped_package_calls_unresolved :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn inc [x: int] -> int
+  (+ x 1))
+
+(defn dot [xs: []int] -> [dynamic]int
+  (arr.map inc xs))
+
+(defn slash [xs: []int] -> [dynamic]int
+  (arr/map inc xs))
+
+(defn official [value: int]
+  (html.render value))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "arr.map(inc, xs)"), true)
+    testing.expect_value(t, strings.contains(output, "arr/map(inc, xs)"), true)
+    testing.expect_value(t, strings.contains(output, "html.render(value)"), true)
+    testing.expect_value(t, strings.contains(output, "arr__map_impl"), false)
+    testing.expect_value(t, strings.contains(output, "html/render"), false)
 }
 
 @(test)
@@ -2621,18 +2921,139 @@ reject_internal_lowering_call_names_in_eval_source :: proc(t: ^testing.T) {
 
 (def xs: []int ([]int [1 2 3]))`
 
-    _, err, ok := kvist.compile_eval_source_with_map(source, `(core-count xs)`)
-    testing.expect_value(t, ok, false)
-    if ok {
+    _, err_prim, ok_prim := kvist.compile_eval_source_with_map(source, `(kvist-prim-count xs)`)
+    testing.expect_value(t, ok_prim, false)
+    if ok_prim {
         return
     }
-    defer delete(err.message)
-    testing.expect_value(t, err.message, "`core-count` is an internal lowering name; use `count`")
+    defer delete(err_prim.message)
+    testing.expect_value(t, err_prim.message, "`kvist-prim-count` is an internal lowering name")
+
+    _, err_empty, ok_empty := kvist.compile_eval_source_with_map(source, `(kvist-prim-empty? xs)`)
+    testing.expect_value(t, ok_empty, false)
+    if ok_empty {
+        return
+    }
+    defer delete(err_empty.message)
+    testing.expect_value(t, err_empty.message, "`kvist-prim-empty?` is an internal lowering name")
+
+    _, err_contains, ok_contains := kvist.compile_eval_source_with_map(source, `(kvist-prim-contains? xs 2)`)
+    testing.expect_value(t, ok_contains, false)
+    if ok_contains {
+        return
+    }
+    defer delete(err_contains.message)
+    testing.expect_value(t, err_contains.message, "`kvist-prim-contains?` is an internal lowering name")
+
+    _, err_slice, ok_slice := kvist.compile_eval_source_with_map(source, `(kvist-prim-slice xs)`)
+    testing.expect_value(t, ok_slice, false)
+    if ok_slice {
+        return
+    }
+    defer delete(err_slice.message)
+    testing.expect_value(t, err_slice.message, "`kvist-prim-slice` is an internal lowering name")
+
+    _, err_get, ok_get := kvist.compile_eval_source_with_map(source, `(kvist-prim-get xs 0)`)
+    testing.expect_value(t, ok_get, false)
+    if ok_get {
+        return
+    }
+    defer delete(err_get.message)
+    testing.expect_value(t, err_get.message, "`kvist-prim-get` is an internal lowering name")
+
+    _, err_or_else, ok_or_else := kvist.compile_eval_source_with_map(source, `(kvist-prim-or-else (query) 0)`)
+    testing.expect_value(t, ok_or_else, false)
+    if ok_or_else {
+        return
+    }
+    defer delete(err_or_else.message)
+    testing.expect_value(t, err_or_else.message, "`kvist-prim-or-else` is an internal lowering name")
+
+    _, err_println, ok_println := kvist.compile_eval_source_with_map(source, `(kvist-prim-println "hello")`)
+    testing.expect_value(t, ok_println, false)
+    if ok_println {
+        return
+    }
+    defer delete(err_println.message)
+    testing.expect_value(t, err_println.message, "`kvist-prim-println` is an internal lowering name")
+
+    _, err_tap, ok_tap := kvist.compile_eval_source_with_map(source, `(kvist-prim-tap 1)`)
+    testing.expect_value(t, ok_tap, false)
+    if ok_tap {
+        return
+    }
+    defer delete(err_tap.message)
+    testing.expect_value(t, err_tap.message, "`kvist-prim-tap` is an internal lowering name")
+
+    _, err_doc, ok_doc := kvist.compile_eval_source_with_map(source, `(kvist-prim-doc 'println)`)
+    testing.expect_value(t, ok_doc, false)
+    if ok_doc {
+        return
+    }
+    defer delete(err_doc.message)
+    testing.expect_value(t, err_doc.message, "`kvist-prim-doc` is an internal lowering name")
+
+    _, err_update_bang, ok_update_bang := kvist.compile_eval_source_with_map(source, `(kvist-prim-update! xs[0] + 1)`)
+    testing.expect_value(t, ok_update_bang, false)
+    if ok_update_bang {
+        return
+    }
+    defer delete(err_update_bang.message)
+    testing.expect_value(t, err_update_bang.message, "`kvist-prim-update!` is an internal lowering name")
+
+    _, err_assoc, ok_assoc := kvist.compile_eval_source_with_map(source, `(kvist-prim-assoc xs .x 1)`)
+    testing.expect_value(t, ok_assoc, false)
+    if ok_assoc {
+        return
+    }
+    defer delete(err_assoc.message)
+    testing.expect_value(t, err_assoc.message, "`kvist-prim-assoc` is an internal lowering name")
+
+    _, err_update, ok_update := kvist.compile_eval_source_with_map(source, `(kvist-prim-update xs .x + 1)`)
+    testing.expect_value(t, ok_update, false)
+    if ok_update {
+        return
+    }
+    defer delete(err_update.message)
+    testing.expect_value(t, err_update.message, "`kvist-prim-update` is an internal lowering name")
+
+    _, err_case, ok_case := kvist.compile_eval_source_with_map(source, `(kvist-prim-case 1 1 10 0)`)
+    testing.expect_value(t, ok_case, false)
+    if ok_case {
+        return
+    }
+    defer delete(err_case.message)
+    testing.expect_value(t, err_case.message, "`kvist-prim-case` is an internal lowering name")
+
+    _, err_thread_first, ok_thread_first := kvist.compile_eval_source_with_map(source, `(kvist-prim-thread-first 1 (+ 1))`)
+    testing.expect_value(t, ok_thread_first, false)
+    if ok_thread_first {
+        return
+    }
+    defer delete(err_thread_first.message)
+    testing.expect_value(t, err_thread_first.message, "`kvist-prim-thread-first` is an internal lowering name")
+
+    _, err_thread_last, ok_thread_last := kvist.compile_eval_source_with_map(source, `(kvist-prim-thread-last 1 (+ 1))`)
+    testing.expect_value(t, ok_thread_last, false)
+    if ok_thread_last {
+        return
+    }
+    defer delete(err_thread_last.message)
+    testing.expect_value(t, err_thread_last.message, "`kvist-prim-thread-last` is an internal lowering name")
+
+    _, err_delete, ok_delete := kvist.compile_eval_source_with_map(source, `(kvist-prim-delete! xs 1)`)
+    testing.expect_value(t, ok_delete, false)
+    if ok_delete {
+        return
+    }
+    defer delete(err_delete.message)
+    testing.expect_value(t, err_delete.message, "`kvist-prim-delete!` is an internal lowering name")
 }
 
 @(test)
 reject_slash_package_access_in_eval_source :: proc(t: ^testing.T) {
     source := `(package main)
+(import arr "kvist:arr")
 
 (def xs: []int ([]int [1 2 3]))`
 
@@ -2648,6 +3069,7 @@ reject_slash_package_access_in_eval_source :: proc(t: ^testing.T) {
 @(test)
 reject_macro_expanded_slash_package_access :: proc(t: ^testing.T) {
     source := `(package main)
+(import arr "kvist:arr")
 
 (defn inc [x: int] -> int
   (+ x 1))
@@ -2697,6 +3119,7 @@ reject_macro_expanded_slash_package_access_for_custom_alias :: proc(t: ^testing.
 @(test)
 reject_eval_macro_expanded_slash_package_access :: proc(t: ^testing.T) {
     source := `(package main)
+(import arr "kvist:arr")
 
 (def xs: []int ([]int [1 2 3]))
 
@@ -2970,6 +3393,44 @@ reader_preserves_top_form_source_text :: proc(t: ^testing.T) {
 }
 
 @(test)
+reader_expands_quote_syntax_to_core_forms :: proc(t: ^testing.T) {
+    old_allocator := context.allocator
+    temp_scope := runtime.default_temp_allocator_temp_begin()
+    defer runtime.default_temp_allocator_temp_end(temp_scope)
+    context.allocator = context.temp_allocator
+    defer context.allocator = old_allocator
+
+    source := "'answer\n`(def ~name ~@body)"
+
+    forms, err, ok := kvist.read_top_forms(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+
+    testing.expect_value(t, len(forms), 2)
+    testing.expect_value(t, forms[0].form.kind, kvist.CST_Form_Kind.List)
+    testing.expect_value(t, len(forms[0].form.items), 2)
+    testing.expect_value(t, forms[0].form.items[0].text, "quote")
+    testing.expect_value(t, forms[0].form.items[1].text, "answer")
+    testing.expect_value(t, forms[0].source, "'answer")
+
+    qq := forms[1].form
+    testing.expect_value(t, qq.kind, kvist.CST_Form_Kind.List)
+    testing.expect_value(t, len(qq.items), 2)
+    testing.expect_value(t, qq.items[0].text, "quasiquote")
+    template := qq.items[1]
+    testing.expect_value(t, template.kind, kvist.CST_Form_Kind.List)
+    testing.expect_value(t, template.items[0].text, "def")
+    testing.expect_value(t, template.items[1].items[0].text, "unquote")
+    testing.expect_value(t, template.items[1].items[1].text, "name")
+    testing.expect_value(t, template.items[2].items[0].text, "splice")
+    testing.expect_value(t, template.items[2].items[1].text, "body")
+    testing.expect_value(t, forms[1].source, "`(def ~name ~@body)")
+}
+
+@(test)
 reader_converts_semicolon_doc_comments :: proc(t: ^testing.T) {
     old_allocator := context.allocator
     temp_scope := runtime.default_temp_allocator_temp_begin()
@@ -3066,6 +3527,54 @@ reader_classifies_inline_collection_literals :: proc(t: ^testing.T) {
     testing.expect_value(t, forms[0].form.items[2].kind, kvist.CST_Form_Kind.Vector)
     testing.expect_value(t, forms[1].form.items[2].kind, kvist.CST_Form_Kind.Brace)
     testing.expect_value(t, forms[2].form.items[2].kind, kvist.CST_Form_Kind.Set)
+}
+
+@(test)
+reader_classifies_inline_regex_literals :: proc(t: ^testing.T) {
+    old_allocator := context.allocator
+    temp_scope := runtime.default_temp_allocator_temp_begin()
+    defer runtime.default_temp_allocator_temp_end(temp_scope)
+    context.allocator = context.temp_allocator
+    defer context.allocator = old_allocator
+
+    source := `(def digits #"\d+")
+(def quoted #"a\"b")`
+
+    forms, err, ok := kvist.read_top_forms(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+
+    testing.expect_value(t, forms[0].form.items[2].kind, kvist.CST_Form_Kind.Regex)
+    testing.expect_value(t, forms[0].form.items[2].text, `#"\d+"`)
+    digits := kvist.unquote_regex_literal(forms[0].form.items[2].text)
+    defer delete(digits)
+    testing.expect_value(t, digits, `\d+`)
+
+    testing.expect_value(t, forms[1].form.items[2].kind, kvist.CST_Form_Kind.Regex)
+    quoted := kvist.unquote_regex_literal(forms[1].form.items[2].text)
+    defer delete(quoted)
+    testing.expect_value(t, quoted, `a"b`)
+}
+
+@(test)
+compile_inline_regex_literal_emits_pattern_string :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn pattern [] -> string
+  #"\d+")`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, `return "\\d+"`), true)
 }
 
 @(test)
@@ -3527,7 +4036,7 @@ compile_malli_types_and_empty_collection_constructors :: proc(t: ^testing.T) {
 (import map "kvist:map")
 (import set "kvist:set")
 
-(defn score [xs: [dynamic]int, tags: set[string]] -> int
+(defn score [xs: [dynamic]int, tags: (map string (struct {}))] -> int
     (let [out (arr.empty int 4)
         lookup (map.empty string int)
         seen (set.empty string 8)]
@@ -3569,8 +4078,8 @@ compile_supports_aliased_kvist_package_imports :: proc(t: ^testing.T) {
     defer delete(output)
 
     testing.expect_value(t, strings.contains(output, "xs := make([dynamic]int)"), true)
-    testing.expect_value(t, strings.contains(output, "append(&(xs), 1, 2, 3)"), true)
-    testing.expect_value(t, strings.contains(output, "return len((xs)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "append(&xs, 1, 2, 3)"), true)
+    testing.expect_value(t, strings.contains(output, "return len(xs)"), true)
     testing.expect_value(t, strings.contains(output, "kvist:arr"), false)
 }
 
@@ -3593,8 +4102,8 @@ compile_supports_as_kvist_package_imports :: proc(t: ^testing.T) {
     defer delete(output)
 
     testing.expect_value(t, strings.contains(output, "xs := make([dynamic]int)"), true)
-    testing.expect_value(t, strings.contains(output, "append(&(xs), 1, 2, 3)"), true)
-    testing.expect_value(t, strings.contains(output, "return len((xs)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "append(&xs, 1, 2, 3)"), true)
+    testing.expect_value(t, strings.contains(output, "return len(xs)"), true)
     testing.expect_value(t, strings.contains(output, "kvist:arr"), false)
 }
 
@@ -3617,8 +4126,73 @@ compile_supports_explicit_refer_kvist_package_imports :: proc(t: ^testing.T) {
     defer delete(output)
 
     testing.expect_value(t, strings.contains(output, "xs := make([dynamic]int)"), true)
-    testing.expect_value(t, strings.contains(output, "append(&(xs), 1, 2, 3)"), true)
-    testing.expect_value(t, strings.contains(output, "return (len((xs)[:])) + (len((xs)[:]))"), true)
+    testing.expect_value(t, strings.contains(output, "append(&xs, 1, 2, 3)"), true)
+    testing.expect_value(t, strings.contains(output, "arr__count :: #force_inline proc(xs: []$T) -> int {"), true)
+    testing.expect_value(t, strings.contains(output, "len("), true)
+    testing.expect_value(t, strings.contains(output, "arr__count((xs)[:])"), true)
+}
+
+@(test)
+compile_core_helpers_and_source_refer_collisions_resolve_by_core_surface :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-core-refer-collision-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    shadow_path, shadow_join_err := os.join_path({dir, "shadow.kvist"}, context.allocator)
+    testing.expect_value(t, shadow_join_err == nil, true)
+    if shadow_join_err != nil {
+        return
+    }
+    defer delete(shadow_path)
+    shadow_source := `(package shadow)
+
+(defmacro len [x]
+  (quasiquote 999))
+
+(defmacro cond-> [x & forms]
+  (quasiquote 999))`
+    shadow_write_err := os.write_entire_file_from_string(shadow_path, shadow_source)
+    testing.expect_value(t, shadow_write_err == nil, true)
+    if shadow_write_err != nil {
+        return
+    }
+
+    main_path, main_join_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, main_join_err == nil, true)
+    if main_join_err != nil {
+        return
+    }
+    defer delete(main_path)
+    main_source := `(package main)
+(import "./shadow" :refer [len cond->])
+
+(defn demo [] -> int
+  (let [xs ([]int [1 2 3])]
+    (+ (count xs)
+       (len xs)
+       (cond-> 1
+         true (+ 1)))))`
+    main_write_err := os.write_entire_file_from_string(main_path, main_source)
+    testing.expect_value(t, main_write_err == nil, true)
+    if main_write_err != nil {
+        return
+    }
+
+    output, err, ok := kvist.compile_path(main_path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "len(xs)"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_cond_thread"), true)
+    testing.expect_value(t, strings.contains(output, "999"), true)
 }
 
 @(test)
@@ -3652,7 +4226,7 @@ compile_rejects_unknown_kvist_package_import :: proc(t: ^testing.T) {
         return
     }
     defer delete(err.message)
-    testing.expect_value(t, strings.contains(err.message, "could not resolve shipped source import: kvist:not-a-package"), true)
+    testing.expect_value(t, strings.contains(err.message, "could not resolve source package import: kvist:not-a-package"), true)
 }
 
 @(test)
@@ -3709,7 +4283,7 @@ compile_struct_types_reports_source_surface :: proc(t: ^testing.T) {
   {name: string
    active?: bool
    favorite-key: string
-   tags: set[string]
+   tags: (map string (struct {}))
    scores: [dynamic]int
    window: []float})
 
@@ -3724,7 +4298,7 @@ compile_struct_types_reports_source_surface :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    testing.expect_value(t, strings.contains(output, "\"tags\" = \"set[string]\""), true)
+    testing.expect_value(t, strings.contains(output, "\"tags\" = \"map[string]struct{}\""), true)
     testing.expect_value(t, strings.contains(output, "\"scores\" = \"[dynamic]int\""), true)
     testing.expect_value(t, strings.contains(output, "\"window\" = \"[]float\""), true)
     testing.expect_value(t, strings.contains(output, "\"active?\" = \"bool\""), true)
@@ -3757,6 +4331,100 @@ compile_shipped_struct_source_package_uses_wrapper_resolution :: proc(t: ^testin
 }
 
 @(test)
+compile_canonical_struct_introspection_forms :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct Profile
+  {name: string
+   active?: bool})
+
+(defn main []
+  (println (struct-fields 'Profile) (struct-types 'Profile)))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "fmt.println([]string{\"name\", \"active?\"}, map[string]string{"), true)
+    testing.expect_value(t, strings.contains(output, "\"name\" = \"string\""), true)
+    testing.expect_value(t, strings.contains(output, "\"active?\" = \"bool\""), true)
+}
+
+@(test)
+reject_slash_struct_introspection_compiler_aliases :: proc(t: ^testing.T) {
+    fields_source := `(package main)
+
+(defstruct Profile
+  {name: string})
+
+(defn main []
+  (println (struct/fields 'Profile)))`
+
+    output_fields, err_fields, ok_fields := kvist.compile_source(fields_source)
+    testing.expect_value(t, ok_fields, true)
+    if !ok_fields {
+        testing.expect_value(t, err_fields.message, "")
+        return
+    }
+    defer delete(output_fields)
+    testing.expect_value(t, strings.contains(output_fields, "[]string{\"name\"}"), false)
+    testing.expect_value(t, strings.contains(output_fields, "struct/fields"), true)
+
+    types_source := `(package main)
+
+(defstruct Profile
+  {name: string})
+
+(defn main []
+  (println (struct/types 'Profile)))`
+
+    output_types, err_types, ok_types := kvist.compile_source(types_source)
+    testing.expect_value(t, ok_types, true)
+    if !ok_types {
+        testing.expect_value(t, err_types.message, "")
+        return
+    }
+    defer delete(output_types)
+    testing.expect_value(t, strings.contains(output_types, "map[string]string{"), false)
+    testing.expect_value(t, strings.contains(output_types, "struct/types"), true)
+}
+
+@(test)
+reject_public_soa_struct_introspection_as_compiler_form :: proc(t: ^testing.T) {
+    fields_source := `(package main)
+(import soa "kvist:soa")
+
+(defstruct Profile
+  {name: string})
+
+(defn main []
+  (println (soa/fields 'Profile)))`
+
+    _, err_fields, ok_fields := kvist.compile_source(fields_source)
+    testing.expect_value(t, ok_fields, false)
+    defer delete(err_fields.message)
+    testing.expect_value(t, err_fields.message, "use `soa.fields` for package access")
+
+    types_source := `(package main)
+(import soa "kvist:soa")
+
+(defstruct Profile
+  {name: string})
+
+(defn main []
+  (println (soa/types 'Profile)))`
+
+    _, err_types, ok_types := kvist.compile_source(types_source)
+    testing.expect_value(t, ok_types, false)
+    defer delete(err_types.message)
+    testing.expect_value(t, err_types.message, "use `soa.types` for package access")
+}
+
+@(test)
 compile_case_with_value_cases :: proc(t: ^testing.T) {
     source := `(package main)
 
@@ -3780,26 +4448,14 @@ compile_case_with_value_cases :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    expected := `package main
-
-Method :: enum {
-    Get,
-    Post,
-    Delete,
-}
-
-method_name :: proc(method: Method) -> string {
-    #partial switch method {
-    case .Get:
-        return "GET"
-    case .Post:
-        return "POST"
-    case:
-        return "OTHER"
-    }
-}
-`
-    testing.expect_value(t, output, expected)
+    testing.expect_value(t, strings.contains(output, "method_name :: proc(method: Method) -> string {"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_case_"), true)
+    testing.expect_value(t, strings.contains(output, "if (kvist_case_"), true)
+    testing.expect_value(t, strings.contains(output, "== (.Get)"), true)
+    testing.expect_value(t, strings.contains(output, "else if (kvist_case_"), true)
+    testing.expect_value(t, strings.contains(output, "== (.Post)"), true)
+    testing.expect_value(t, strings.contains(output, "return \"OTHER\""), true)
+    testing.expect_value(t, strings.contains(output, "#partial switch method"), false)
 }
 
 @(test)
@@ -3826,30 +4482,17 @@ compile_case_with_repeated_value_cases :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    expected := `package main
-
-Method :: enum {
-    Get,
-    Head,
-    Post,
-}
-
-read_method_p :: proc(method: Method) -> bool {
-    #partial switch method {
-    case .Get:
-        return true
-    case .Head:
-        return true
-    case:
-        return false
-    }
-}
-`
-    testing.expect_value(t, output, expected)
+    testing.expect_value(t, strings.contains(output, "read_method_p :: proc(method: Method) -> bool {"), true)
+    testing.expect_value(t, strings.contains(output, "if (kvist_case_"), true)
+    testing.expect_value(t, strings.contains(output, "== (.Get)"), true)
+    testing.expect_value(t, strings.contains(output, "else if (kvist_case_"), true)
+    testing.expect_value(t, strings.contains(output, "== (.Head)"), true)
+    testing.expect_value(t, strings.contains(output, "return false"), true)
+    testing.expect_value(t, strings.contains(output, "#partial switch method"), false)
 }
 
 @(test)
-reject_vector_case_statement_clause_for_non_fixed_array_subject :: proc(t: ^testing.T) {
+compile_vector_case_statement_clause_uses_source_equality :: proc(t: ^testing.T) {
     source := `(package main)
 
 (defenum Method [
@@ -3863,10 +4506,16 @@ reject_vector_case_statement_clause_for_non_fixed_array_subject :: proc(t: ^test
     [.Get .Head] true
     false))`
 
-    _, err, ok := kvist.compile_source(source)
-    testing.expect_value(t, ok, false)
-    defer delete(err.message)
-    testing.expect_value(t, err.message, "case vector clauses only match fixed-array values")
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, ".Get"), true)
+    testing.expect_value(t, strings.contains(output, ".Head"), true)
 }
 
 @(test)
@@ -4011,13 +4660,14 @@ compile_operator_forms :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "missing_key :: proc(lookup: map[string]int, key: string) -> bool {\n    return !((key) in (lookup))\n}"), true)
     testing.expect_value(t, strings.contains(output, "return ((major) << (22)) | ((minor) << (12)) | (patch)"), true)
     testing.expect_value(t, strings.contains(output, "return ((version) >> (22)) & (0x7F)"), true)
-    testing.expect_value(t, strings.contains(output, "return (flags) ~ (1 << uint(index))"), true)
-    testing.expect_value(t, strings.contains(output, "return (flags) & ~(1 << uint(index))"), true)
-    testing.expect_value(t, strings.contains(output, "return (flags) | (1 << uint(index))"), true)
-    testing.expect_value(t, strings.contains(output, "return ((flags) & (1 << uint(index))) != 0"), true)
-    testing.expect_value(t, strings.contains(output, "return (flags) & ~(mask)"), true)
+    testing.expect_value(t, strings.contains(output, "return (flags) ~ ((1) << (uint(index)))"), true)
+    testing.expect_value(t, strings.contains(output, "return (flags) & (~((1) << (uint(index))))"), true)
+    testing.expect_value(t, strings.contains(output, "return (flags) | ((1) << (uint(index)))"), true)
+    testing.expect_value(t, strings.contains(output, "return ((flags) & ((1) << (uint(index)))) != (0)"), true)
+    testing.expect_value(t, strings.contains(output, "return (flags) & (~(mask))"), true)
     testing.expect_value(t, strings.contains(output, "return ~(mask)"), true)
     testing.expect_value(t, strings.contains(output, "return (a) ~ (b)"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_prim_bit"), false)
 }
 
 @(test)
@@ -4093,7 +4743,6 @@ compile_explicit_core_package_helpers :: proc(t: ^testing.T) {
     (let [xs [1 2 3]
         lookup {"one" 1}]
     (println (count xs)
-             (len xs)
              (empty? xs)
              (contains? xs 2)
              (contains? lookup "one"))))`
@@ -4106,7 +4755,7 @@ compile_explicit_core_package_helpers :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    testing.expect_value(t, strings.contains(output, "len((xs)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "len(xs)"), true)
     testing.expect_value(t, strings.contains(output, "kvist_contains_value((xs)[:], 2)"), true)
     testing.expect_value(t, strings.contains(output, "(\"one\") in (lookup)"), true)
 }
@@ -4198,8 +4847,8 @@ compile_case_with_union_payload_patterns :: proc(t: ^testing.T) {
 (defn event-score [event: Event] -> int
   (case event
     (Connected conn) conn.id
-    (Disconnected disc) (len disc.reason)
-    (Data data) (len data.payload)
+    (Disconnected disc) (count disc.reason)
+    (Data data) (count data.payload)
     0))`
 
     output, err, ok := kvist.compile_source(source)
@@ -4244,7 +4893,7 @@ compile_case_with_ignored_union_payload :: proc(t: ^testing.T) {
 (defn event-score [event: Event] -> int
   (case event
     (Connected _) 1
-    (Data data) (len data.payload)
+    (Data data) (count data.payload)
     0))`
 
     output, err, ok := kvist.compile_source(source)
@@ -4329,7 +4978,35 @@ reject_case_mixing_value_and_type_patterns :: proc(t: ^testing.T) {
     }
     defer delete(err.message)
 
-    testing.expect_value(t, err.message, "type case expects (Type binding)")
+    testing.expect_value(t, err.message, "type-case expects (Type binding)")
+}
+
+@(test)
+reject_case_value_then_type_pattern :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct Connected {
+  id: int
+})
+
+(defunion Event {
+  connected: Connected
+})
+
+(defn event-score [event: Event] -> int
+  (case event
+    nil 0
+    (Connected conn) conn.id
+    -1))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+    defer delete(err.message)
+
+    testing.expect_value(t, strings.contains(err.message, "type-case expects (Type binding)"), true)
 }
 
 @(test)
@@ -4356,7 +5033,7 @@ reject_case_type_pattern_shape :: proc(t: ^testing.T) {
     }
     defer delete(err.message)
 
-    testing.expect_value(t, err.message, "type case expects (Type binding)")
+    testing.expect_value(t, err.message, "type-case expects (Type binding)")
 }
 
 @(test)
@@ -4796,6 +5473,25 @@ implicit_core_comment_helper :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "main :: proc()"), true)
 }
 
+@(test)
+implicit_core_comment_helper_inside_function :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn main []
+  (comment
+    (missing.package "ignored"))
+  (return))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+    testing.expect_value(t, strings.contains(output, "missing"), false)
+}
+
 compile_case_does_not_emit_switch_warning :: proc(t: ^testing.T) {
     source := `(package main)
 
@@ -4870,7 +5566,7 @@ reject_when_let_expression_position :: proc(t: ^testing.T) {
     _, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, false)
     defer delete(err.message)
-    testing.expect_value(t, err.message, "when-let is a statement and cannot be used as an expression; use if-let when both branches produce a value")
+    testing.expect_value(t, err.message, "if expression expects test, then, and else")
 }
 
 @(test)
@@ -4934,10 +5630,7 @@ compile_if_let_expression_with_expected_type :: proc(t: ^testing.T) {
     defer delete(output)
 
     testing.expect_value(t, strings.contains(output, "x, found := query()"), true)
-    testing.expect_value(t, strings.contains(output, "value: int = (proc() -> int {"), true)
-    testing.expect_value(t, strings.contains(output, "if found {"), true)
-    testing.expect_value(t, strings.contains(output, "return x"), true)
-    testing.expect_value(t, strings.contains(output, "return 0"), true)
+    testing.expect_value(t, strings.contains(output, "value: int = (x if found else 0)"), true)
 }
 
 @(test)
@@ -5045,10 +5738,7 @@ compile_if_ok_expression_with_expected_type :: proc(t: ^testing.T) {
     defer delete(output)
 
     testing.expect_value(t, strings.contains(output, "x, err := read_count()"), true)
-    testing.expect_value(t, strings.contains(output, "value: int = (proc() -> int {"), true)
-    testing.expect_value(t, strings.contains(output, "if (err) == (os.Error{}) {"), true)
-    testing.expect_value(t, strings.contains(output, "return x"), true)
-    testing.expect_value(t, strings.contains(output, "return 0"), true)
+    testing.expect_value(t, strings.contains(output, "value: int = (x if (err) == ({}) else 0)"), true)
 }
 
 @(test)
@@ -5150,278 +5840,7 @@ reject_when_ok_expression_position :: proc(t: ^testing.T) {
     _, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, false)
     defer delete(err.message)
-    testing.expect_value(t, err.message, "when-ok is a statement and cannot be used as an expression; use if-ok when both branches produce a value")
-}
-
-@(test)
-compile_file_dev_helpers :: proc(t: ^testing.T) {
-    source := `(package main)
-(import io "kvist:io")
-(import os "core:os")
-
-(defn read-file [path: string] -> [data: []byte, err: os.Error]
-  (io.read path))
-
-(defn write-text [path: string, text: string] -> os.Error
-  (io.write path text))
-
-(defn read-count [path: string] -> int
-  (let [[data err] (io.read path)]
-    (if (!= err nil)
-      0
-      (do
-        (defer (delete data))
-        (len data)))))`
-
-    output, err, ok := kvist.compile_source(source)
-    testing.expect_value(t, ok, true)
-    if !ok {
-        testing.expect_value(t, err.message, "")
-        return
-    }
-    defer delete(output)
-
-    testing.expect_value(t, strings.contains(output, "read_file :: proc(path: string) -> (data: []byte, err: os.Error)"), true)
-    testing.expect_value(t, strings.contains(output, "io__read :: #force_inline proc(path: string) -> (data: []byte, err: os.Error)"), true)
-    testing.expect_value(t, strings.contains(output, "io__write :: #force_inline proc(path: string, data: $T) -> os.Error"), true)
-    testing.expect_value(t, strings.contains(output, "return io__read(path)"), true)
-    testing.expect_value(t, strings.contains(output, "return io__write(path, text)"), true)
-    testing.expect_value(t, strings.contains(output, "data, err := io__read(path)"), true)
-    testing.expect_value(t, strings.contains(output, "defer delete(data)"), true)
-}
-
-@(test)
-compile_json_interop_is_explicit :: proc(t: ^testing.T) {
-    source := `(package main)
-(import json "kvist:json")
-
-(defstruct User {
-  name: string
-  age: int
-})
-
-(defn save-user [path: string, user: User] -> bool
-  (let [[marshal-err write-err] (json.write path user)]
-    (and (= marshal-err nil)
-         (= write-err nil))))
-
-(defn load-user [path: string] -> bool
-  (let [[user read-err unmarshal-err] (json.read-as User path)]
-    (and (= read-err nil)
-         (= unmarshal-err nil))))`
-
-    output, err, ok := kvist.compile_source(source)
-    testing.expect_value(t, ok, true)
-    if !ok {
-        testing.expect_value(t, err.message, "")
-        return
-    }
-    defer delete(output)
-
-    testing.expect_value(t, strings.contains(output, "json__write :: #force_inline proc"), true)
-    testing.expect_value(t, strings.contains(output, "json__read_as :: #force_inline proc"), true)
-    testing.expect_value(t, strings.contains(output, "marshal_err, write_err := json__write(path, user)"), true)
-    testing.expect_value(t, strings.contains(output, "user, read_err, unmarshal_err := json__read_as(User, path)"), true)
-}
-
-@(test)
-compile_http_server_surface_is_explicit :: proc(t: ^testing.T) {
-    output, err, ok := kvist.compile_path("examples/web/http-server.kvist")
-    testing.expect_value(t, ok, true)
-    if !ok {
-        testing.expect_value(t, err.message, "")
-        return
-    }
-    defer delete(output)
-
-    testing.expect_value(t, contains_path(output, "vendor/odin-http"), true)
-    testing.expect_value(t, strings.contains(output, "http__new_router :: proc() -> h.Router"), true)
-    testing.expect_value(t, strings.contains(output, "http__new_server :: proc() -> h.Server"), true)
-    testing.expect_value(t, strings.contains(output, "router := http__new_router()"), true)
-    testing.expect_value(t, strings.contains(output, "server := http__new_server()"), true)
-    testing.expect_value(t, strings.contains(output, "defer h.router_destroy(&router)"), true)
-    testing.expect_value(t, strings.contains(output, "h.router_init(&router)"), true)
-    testing.expect_value(t, strings.contains(output, "h.route_get("), true)
-    testing.expect_value(t, strings.contains(output, "\"/ping\""), true)
-    testing.expect_value(t, strings.contains(output, "h.respond_plain(res, \"pong\")"), true)
-    testing.expect_value(t, strings.contains(output, "h.respond_json(res, Greeting{message = fmt.tprintf(\"hello %s\", (params)[0])})"), true)
-    testing.expect_value(t, strings.contains(output, "h.server_shutdown_on_interrupt(&server)"), true)
-    testing.expect_value(t, strings.contains(output, "h.listen_and_serve(&server, h.router_handler(&router), net.Endpoint{address = net.IP4_Loopback, port = 6969})"), true)
-}
-
-@(test)
-compile_http_client_surface_is_explicit :: proc(t: ^testing.T) {
-    output, err, ok := kvist.compile_path("examples/web/http-client.kvist")
-    testing.expect_value(t, ok, true)
-    if !ok {
-        testing.expect_value(t, err.message, "")
-        return
-    }
-    defer delete(output)
-
-    testing.expect_value(t, contains_path(output, "vendor/odin-http/client"), true)
-    testing.expect_value(t, strings.contains(output, "client__new_request :: proc(method: h.Method) -> hc.Request"), true)
-    testing.expect_value(t, strings.contains(output, "res, err := hc.get(\"http://127.0.0.1:6969/ping\")"), true)
-    testing.expect_value(t, strings.contains(output, "defer hc.response_destroy(&res)"), true)
-    testing.expect_value(t, strings.contains(output, "req := client__new_request(.Post)"), true)
-    testing.expect_value(t, strings.contains(output, "defer hc.request_destroy(&req)"), true)
-    testing.expect_value(t, strings.contains(output, "h.headers_set_unsafe(&(req.headers), \"x-api-key\", \"demo\")"), true)
-    testing.expect_value(t, strings.contains(output, "append(&(req.cookies), h.Cookie{name = \"session\", value = \"abc123\"})"), true)
-    testing.expect_value(t, strings.contains(output, "json_err := hc.with_json(&req, Greeting{message = \"hello\"})"), true)
-    testing.expect_value(t, strings.contains(output, "res, err := hc.request(&req, \"http://127.0.0.1:6969/hello\")"), true)
-}
-
-@(test)
-compile_http_handler_surface_is_explicit :: proc(t: ^testing.T) {
-    path, ok_path := repo_temp_test_path(".tmp-http-handler-test.kvist")
-    testing.expect_value(t, ok_path, true)
-    if !ok_path {
-        return
-    }
-    defer delete(path)
-    defer os.remove(path)
-
-    source := `(package main)
-(import http "kvist:http")
-
-(defn main []
-  (let [router (http.new-router)
-        server (http.new-server)]
-    (defer (http.router-destroy! router))
-    (http.get! router "/ping" [req res]
-      (http.respond-plain res "pong"))
-    (let [app (http.router-handler router)]
-      (http.server-shutdown-on-interrupt! server)
-      (http.listen! server 6969)
-      (http.serve-handler! server app))))`
-
-    write_err := os.write_entire_file_from_string(path, source)
-    testing.expect_value(t, write_err == nil, true)
-    if write_err != nil {
-        return
-    }
-
-    output, err, ok := kvist.compile_path(path)
-    testing.expect_value(t, ok, true)
-    if !ok {
-        testing.expect_value(t, err.message, "")
-        return
-    }
-    defer delete(output)
-
-    testing.expect_value(t, strings.contains(output, "app := h.router_handler(&router)"), true)
-    testing.expect_value(t, strings.contains(output, "h.listen(&server, net.Endpoint{address = net.IP4_Loopback, port = 6969})"), true)
-    testing.expect_value(t, strings.contains(output, "h.serve(&server, app)"), true)
-}
-
-@(test)
-compile_http_rate_limit_surface_is_explicit :: proc(t: ^testing.T) {
-    path, ok_path := repo_temp_test_path(".tmp-http-rate-limit-test.kvist")
-    testing.expect_value(t, ok_path, true)
-    if !ok_path {
-        return
-    }
-    defer delete(path)
-    defer os.remove(path)
-
-    source := `(package main)
-(import http "kvist:http")
-(import time "core:time")
-
-(defn main []
-  (let [router (http.new-router)
-        server (http.new-server)
-        opts (http.new-rate-limit-opts (* 60 time.Second) 100)
-        data (http.new-rate-limit-data)]
-    (defer (http.router-destroy! router))
-    (defer (http.rate-limit-destroy! data))
-    (http.get! router "/ping" [req res]
-      (http.respond-plain res "pong"))
-    (let [base (http.router-handler router)
-          app (http.rate-limit data base opts)]
-      (http.server-shutdown-on-interrupt! server)
-      (http.listen! server 6969)
-      (http.serve-handler! server app))))`
-
-    write_err := os.write_entire_file_from_string(path, source)
-    testing.expect_value(t, write_err == nil, true)
-    if write_err != nil {
-        return
-    }
-
-    output, err, ok := kvist.compile_path(path)
-    testing.expect_value(t, ok, true)
-    if !ok {
-        testing.expect_value(t, err.message, "")
-        return
-    }
-    defer delete(output)
-
-    testing.expect_value(t, strings.contains(output, "http__new_rate_limit_opts :: proc(window: time.Duration, max: int) -> h.Rate_Limit_Opts"), true)
-    testing.expect_value(t, strings.contains(output, "http__new_rate_limit_data :: proc() -> h.Rate_Limit_Data"), true)
-    testing.expect_value(t, strings.contains(output, "opts := http__new_rate_limit_opts((60) * (time.Second), 100)"), true)
-    testing.expect_value(t, strings.contains(output, "data := http__new_rate_limit_data()"), true)
-    testing.expect_value(t, strings.contains(output, "defer h.rate_limit_destroy(&data)"), true)
-    testing.expect_value(t, strings.contains(output, "base := h.router_handler(&router)"), true)
-    testing.expect_value(t, strings.contains(output, "app := h.rate_limit(&data, &base, &opts)"), true)
-    testing.expect_value(t, strings.contains(output, "h.serve(&server, app)"), true)
-}
-
-@(test)
-compile_http_session_surface_is_explicit :: proc(t: ^testing.T) {
-    output, err, ok := kvist.compile_path("examples/web/http-session.kvist")
-    testing.expect_value(t, ok, true)
-    if !ok {
-        testing.expect_value(t, err.message, "")
-        return
-    }
-    defer delete(output)
-
-    testing.expect_value(t, strings.contains(output, "session__request_method_line :: proc(req: ^h.Request) -> h.Method"), true)
-    testing.expect_value(t, strings.contains(output, "line := (req.line).(h.Requestline)"), true)
-    testing.expect_value(t, strings.contains(output, "opts := session__new_opts(\"sid\", \"csrf\", new_sid, csrf_for, request_csrf)"), true)
-    testing.expect_value(t, strings.contains(output, "request_csrf :: proc(req: ^h.Request) -> string"), true)
-    testing.expect_value(t, strings.contains(output, "plan := session__plan(req, opts)"), true)
-    testing.expect_value(t, strings.contains(output, "if (plan.action) != (.Reject)"), true)
-    testing.expect_value(t, strings.contains(output, "append(&(res^.cookies)"), true)
-}
-
-@(test)
-compile_http_sse_surface_is_explicit :: proc(t: ^testing.T) {
-    output, err, ok := kvist.compile_path("examples/web/http-sse.kvist")
-    testing.expect_value(t, ok, true)
-    if !ok {
-        testing.expect_value(t, err.message, "")
-        return
-    }
-    defer delete(output)
-
-    testing.expect_value(t, strings.contains(output, "sse____kvist_http_sse_new_started :: proc(res: ^h.Response) -> ^h.Sse"), true)
-    testing.expect_value(t, strings.contains(output, "stream := sse____kvist_http_sse_new_started(res)"), true)
-    testing.expect_value(t, strings.contains(output, "h.sse_event(stream, h.Sse_Event{comment = \"connected\"})"), true)
-    testing.expect_value(t, strings.contains(output, "h.sse_event(stream, h.Sse_Event{retry = 1000})"), true)
-    testing.expect_value(t, strings.contains(output, "h.sse_event(stream, h.Sse_Event{event = \"welcome\", data = \"ready\"})"), true)
-    testing.expect_value(t, strings.contains(output, "h.sse_end(stream)"), true)
-}
-
-@(test)
-compile_http_datastar_surface_is_explicit :: proc(t: ^testing.T) {
-    output, err, ok := kvist.compile_path("examples/web/http-datastar.kvist")
-    testing.expect_value(t, ok, true)
-    if !ok {
-        testing.expect_value(t, err.message, "")
-        return
-    }
-    defer delete(output)
-
-    testing.expect_value(t, strings.contains(output, "import strings \"core:strings\""), true)
-    testing.expect_value(t, strings.contains(output, "event = \"datastar-patch-elements\""), true)
-    testing.expect_value(t, strings.contains(output, "event = \"datastar-patch-signals\""), true)
-    testing.expect_value(t, strings.contains(output, "dstar__patch_elements_helper(stream, "), true)
-    testing.expect_value(t, strings.contains(output, "dstar__patch_signals_helper(stream, "), true)
-    testing.expect_value(t, strings.contains(output, "dstar__execute_script_helper(stream, "), true)
-    testing.expect_value(t, strings.contains(output, "\"body\", \"append\""), true)
-    testing.expect_value(t, strings.contains(output, "window.location = '"), true)
+    testing.expect_value(t, err.message, "if expression expects test, then, and else")
 }
 
 @(test)
@@ -5444,12 +5863,14 @@ compile_tap_helper :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    testing.expect_value(t, strings.contains(output, "answer := kvist_tap_labeled(\"answer\", 42)"), true)
-    testing.expect_value(t, strings.contains(output, "owned := kvist_tap_labeled(\"owned\", [dynamic]int{1, 2, 3})"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_tap :: proc(value: $T) -> T"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_tap_labeled :: proc(label: string, value: $T) -> T"), true)
-    testing.expect_value(t, strings.contains(output, "fmt.print(label)"), true)
-    testing.expect_value(t, strings.contains(output, "fmt.println(value)"), true)
+    testing.expect_value(t, strings.contains(output, "fmt.print(\"answer\")"), true)
+    testing.expect_value(t, strings.contains(output, "fmt.print(\"owned\")"), true)
+    testing.expect_value(t, strings.contains(output, "fmt.print(\": \")"), true)
+    testing.expect_value(t, strings.contains(output, "fmt.println(kvist_tap"), true)
+    testing.expect_value(t, strings.contains(output, "answer := kvist_tap"), true)
+    testing.expect_value(t, strings.contains(output, "owned := kvist_tap"), true)
+    testing.expect_value(t, strings.contains(output, "tap_impl"), false)
+    testing.expect_value(t, strings.contains(output, "tap_labeled_impl"), false)
 }
 
 @(test)
@@ -5465,13 +5886,1089 @@ reject_tap_label_with_canonical_message :: proc(t: ^testing.T) {
         return
     }
     defer delete(err.message)
-    testing.expect_value(t, err.message, "tap> label must be a string literal")
+    testing.expect_value(t, err.message, "while expanding macro tap>: tap> label must be a string literal")
+}
+
+@(test)
+compile_source_package_can_use_inline_tap_style_macro :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-inline-tap-package-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    pkg_dir, pkg_dir_err := os.join_path({dir, "support"}, context.allocator)
+    testing.expect_value(t, pkg_dir_err == nil, true)
+    if pkg_dir_err != nil {
+        return
+    }
+    defer delete(pkg_dir)
+    mk_pkg_err := os.make_directory_all(pkg_dir)
+    testing.expect_value(t, mk_pkg_err == nil, true)
+    if mk_pkg_err != nil {
+        return
+    }
+
+    pkg_path, pkg_path_err := os.join_path({pkg_dir, "support.kvist"}, context.allocator)
+    testing.expect_value(t, pkg_path_err == nil, true)
+    if pkg_path_err != nil {
+        return
+    }
+    defer delete(pkg_path)
+    pkg_source := `(package support)
+(import core "kvist:core")
+(import fmt "core:fmt")
+
+(defmacro peek [label value]
+  (cond
+   (string? label)
+    (let [target (gensym "support_peek")]
+      (quasiquote
+        (let [(unquote target) (unquote value)]
+          (fmt.print (unquote label))
+          (fmt.print ": ")
+          (println (unquote target))
+          (unquote target))))
+   true
+    (error "support.peek label must be a string literal")))`
+    pkg_write_err := os.write_entire_file_from_string(pkg_path, pkg_source)
+    testing.expect_value(t, pkg_write_err == nil, true)
+    if pkg_write_err != nil {
+        return
+    }
+
+    main_path, main_path_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, main_path_err == nil, true)
+    if main_path_err != nil {
+        return
+    }
+    defer delete(main_path)
+    main_source := `(package main)
+(import support "support")
+(import arr "kvist:arr")
+
+(defn demo [] -> int
+  (let [xs (support.peek "xs" (arr.range 3)) :defer]
+    (count xs)))`
+    main_write_err := os.write_entire_file_from_string(main_path, main_source)
+    testing.expect_value(t, main_write_err == nil, true)
+    if main_write_err != nil {
+        return
+    }
+
+    result, err, ok := kvist.compile_path_with_map(main_path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(t, strings.contains(result.output, "fmt.print(\"xs\")"), true)
+    testing.expect_value(t, strings.contains(result.output, "fmt.print(\": \")"), true)
+    testing.expect_value(t, strings.contains(result.output, "fmt.println(support_peek"), true)
+    testing.expect_value(t, strings.contains(result.output, "support_peek_"), true)
+    testing.expect_value(t, strings.contains(result.output, "xs := support_peek"), true)
+    testing.expect_value(t, strings.contains(result.output, "defer delete(xs)"), true)
+    testing.expect_value(t, len(result.warnings), 0)
+}
+
+@(test)
+compile_doc_macro_uses_source_doc_expression :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn greet
+  "Say hello."
+  []
+  (println "hello"))
+
+(defn main []
+  (doc 'greet))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, `fmt.println("Say hello.")`), true)
+    testing.expect_value(t, strings.contains(output, "kvist-prim-doc"), false)
+}
+
+@(test)
+compile_source_package_can_use_source_doc_macro :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-source-doc-package-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    pkg_dir, pkg_dir_err := os.join_path({dir, "support"}, context.allocator)
+    testing.expect_value(t, pkg_dir_err == nil, true)
+    if pkg_dir_err != nil {
+        return
+    }
+    defer delete(pkg_dir)
+    mk_pkg_err := os.make_directory_all(pkg_dir)
+    testing.expect_value(t, mk_pkg_err == nil, true)
+    if mk_pkg_err != nil {
+        return
+    }
+
+    pkg_path, pkg_path_err := os.join_path({pkg_dir, "support.kvist"}, context.allocator)
+    testing.expect_value(t, pkg_path_err == nil, true)
+    if pkg_path_err != nil {
+        return
+    }
+    defer delete(pkg_path)
+    pkg_source := `(package support)
+
+(defmacro show-doc [name]
+  (quasiquote
+    (println (source-doc (unquote name)))))`
+    pkg_write_err := os.write_entire_file_from_string(pkg_path, pkg_source)
+    testing.expect_value(t, pkg_write_err == nil, true)
+    if pkg_write_err != nil {
+        return
+    }
+
+    main_path, main_path_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, main_path_err == nil, true)
+    if main_path_err != nil {
+        return
+    }
+    defer delete(main_path)
+    main_source := `(package main)
+(import support "support")
+
+(defn target
+  "Package macro can read this doc."
+  []
+  (return))
+
+(defn main []
+  (support.show-doc 'target))`
+    main_write_err := os.write_entire_file_from_string(main_path, main_source)
+    testing.expect_value(t, main_write_err == nil, true)
+    if main_write_err != nil {
+        return
+    }
+
+    output, err, ok := kvist.compile_path(main_path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, `fmt.println("Package macro can read this doc.")`), true)
+    testing.expect_value(t, strings.contains(output, "kvist-prim-doc"), false)
+}
+
+@(test)
+compile_source_package_can_use_odin_call_macro :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-odin-call-package-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    pkg_dir, pkg_dir_err := os.join_path({dir, "support"}, context.allocator)
+    testing.expect_value(t, pkg_dir_err == nil, true)
+    if pkg_dir_err != nil {
+        return
+    }
+    defer delete(pkg_dir)
+    mk_pkg_err := os.make_directory_all(pkg_dir)
+    testing.expect_value(t, mk_pkg_err == nil, true)
+    if mk_pkg_err != nil {
+        return
+    }
+
+    pkg_path, pkg_path_err := os.join_path({pkg_dir, "support.kvist"}, context.allocator)
+    testing.expect_value(t, pkg_path_err == nil, true)
+    if pkg_path_err != nil {
+        return
+    }
+    defer delete(pkg_path)
+    pkg_source := `(package support)
+
+(defmacro size [value]
+  (quasiquote
+    (odin-call "len" (unquote value))))`
+    pkg_write_err := os.write_entire_file_from_string(pkg_path, pkg_source)
+    testing.expect_value(t, pkg_write_err == nil, true)
+    if pkg_write_err != nil {
+        return
+    }
+
+    main_path, main_path_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, main_path_err == nil, true)
+    if main_path_err != nil {
+        return
+    }
+    defer delete(main_path)
+    main_source := `(package main)
+(import support "support")
+
+(defn demo [xs: []int] -> int
+  (support.size xs))`
+    main_write_err := os.write_entire_file_from_string(main_path, main_source)
+    testing.expect_value(t, main_write_err == nil, true)
+    if main_write_err != nil {
+        return
+    }
+
+    result, err, ok := kvist.compile_path_with_map(main_path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(t, strings.contains(result.output, "return len(xs)"), true)
+    testing.expect_value(t, strings.contains(result.output, "kvist_prim_count"), false)
+    testing.expect_value(t, len(result.warnings), 0)
+}
+
+@(test)
+compile_source_package_can_use_neutral_macro_time_helpers :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-macro-helpers-package-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    pkg_dir, pkg_dir_err := os.join_path({dir, "support"}, context.allocator)
+    testing.expect_value(t, pkg_dir_err == nil, true)
+    if pkg_dir_err != nil {
+        return
+    }
+    defer delete(pkg_dir)
+    mk_pkg_err := os.make_directory_all(pkg_dir)
+    testing.expect_value(t, mk_pkg_err == nil, true)
+    if mk_pkg_err != nil {
+        return
+    }
+
+    pkg_path, pkg_path_err := os.join_path({pkg_dir, "support.kvist"}, context.allocator)
+    testing.expect_value(t, pkg_path_err == nil, true)
+    if pkg_path_err != nil {
+        return
+    }
+    defer delete(pkg_path)
+    pkg_source := `(package support)
+
+(defmacro pick-known [items]
+  (if (and (= (count items) 3)
+           (contains? items "green")
+           (not (contains? (slice items 1) "red")))
+    (quasiquote "ok")
+    (quasiquote "bad")))`
+    pkg_write_err := os.write_entire_file_from_string(pkg_path, pkg_source)
+    testing.expect_value(t, pkg_write_err == nil, true)
+    if pkg_write_err != nil {
+        return
+    }
+
+    main_path, main_path_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, main_path_err == nil, true)
+    if main_path_err != nil {
+        return
+    }
+    defer delete(main_path)
+    main_source := `(package main)
+(import support "support")
+
+(defn demo [] -> string
+  (support.pick-known ["red" "green" "blue"]))`
+    main_write_err := os.write_entire_file_from_string(main_path, main_source)
+    testing.expect_value(t, main_write_err == nil, true)
+    if main_write_err != nil {
+        return
+    }
+
+    result, err, ok := kvist.compile_path_with_map(main_path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(t, strings.contains(result.output, `return "ok"`), true)
+    testing.expect_value(t, len(result.warnings), 0)
+}
+
+@(test)
+compile_source_package_macro_name_uses_source_member_name :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-macro-source-name-package-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    pkg_dir, pkg_dir_err := os.join_path({dir, "support"}, context.allocator)
+    testing.expect_value(t, pkg_dir_err == nil, true)
+    if pkg_dir_err != nil {
+        return
+    }
+    defer delete(pkg_dir)
+    mk_pkg_err := os.make_directory_all(pkg_dir)
+    testing.expect_value(t, mk_pkg_err == nil, true)
+    if mk_pkg_err != nil {
+        return
+    }
+
+    pkg_path, pkg_path_err := os.join_path({pkg_dir, "support.kvist"}, context.allocator)
+    testing.expect_value(t, pkg_path_err == nil, true)
+    if pkg_path_err != nil {
+        return
+    }
+    defer delete(pkg_path)
+    pkg_source := `(package support)
+
+(defmacro marker []
+  (quote true))
+
+(defmacro expect-marker-head [form]
+  (if (= (name (first form)) "marker")
+    (quote (def matched true))
+    (quote (def missed true))))`
+    pkg_write_err := os.write_entire_file_from_string(pkg_path, pkg_source)
+    testing.expect_value(t, pkg_write_err == nil, true)
+    if pkg_write_err != nil {
+        return
+    }
+
+    main_path, main_path_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, main_path_err == nil, true)
+    if main_path_err != nil {
+        return
+    }
+    defer delete(main_path)
+    main_source := `(package main)
+(import support "support")
+
+(support.expect-marker-head (support.marker))
+
+(defn demo [] -> bool
+  matched)`
+    main_write_err := os.write_entire_file_from_string(main_path, main_source)
+    testing.expect_value(t, main_write_err == nil, true)
+    if main_write_err != nil {
+        return
+    }
+
+    result, err, ok := kvist.compile_path_with_map(main_path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(t, strings.contains(result.output, "matched :: true"), true)
+    testing.expect_value(t, strings.contains(result.output, "missed :: true"), false)
+    testing.expect_value(t, len(result.warnings), 0)
+}
+
+@(test)
+compile_source_package_can_use_mutating_odin_target :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-mut-target-package-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    pkg_dir, pkg_dir_err := os.join_path({dir, "support"}, context.allocator)
+    testing.expect_value(t, pkg_dir_err == nil, true)
+    if pkg_dir_err != nil {
+        return
+    }
+    defer delete(pkg_dir)
+    mk_pkg_err := os.make_directory_all(pkg_dir)
+    testing.expect_value(t, mk_pkg_err == nil, true)
+    if mk_pkg_err != nil {
+        return
+    }
+
+    pkg_path, pkg_path_err := os.join_path({pkg_dir, "support.kvist"}, context.allocator)
+    testing.expect_value(t, pkg_path_err == nil, true)
+    if pkg_path_err != nil {
+        return
+    }
+    defer delete(pkg_path)
+    pkg_source := `(package support)
+
+(defmacro drop-key! [target key]
+  (quasiquote
+    (delete_key (mut (unquote target)) (unquote key))))`
+    pkg_write_err := os.write_entire_file_from_string(pkg_path, pkg_source)
+    testing.expect_value(t, pkg_write_err == nil, true)
+    if pkg_write_err != nil {
+        return
+    }
+
+    main_path, main_path_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, main_path_err == nil, true)
+    if main_path_err != nil {
+        return
+    }
+    defer delete(main_path)
+    main_source := `(package main)
+(import support "support")
+
+(defn local! []
+  (let [lookup (map[string]int {"a" 1}) :defer]
+    (support.drop-key! lookup "a")))
+
+(defn borrowed! [lookup: ^map[string]int]
+  (support.drop-key! lookup "b"))`
+    main_write_err := os.write_entire_file_from_string(main_path, main_source)
+    testing.expect_value(t, main_write_err == nil, true)
+    if main_write_err != nil {
+        return
+    }
+
+    result, err, ok := kvist.compile_path_with_map(main_path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(t, strings.contains(result.output, "delete_key(&(lookup), \"a\")"), true)
+    testing.expect_value(t, strings.contains(result.output, "delete_key(lookup, \"b\")"), true)
+    testing.expect_value(t, strings.contains(result.output, "kvist_prim_delete"), false)
+    testing.expect_value(t, len(result.warnings), 0)
+}
+
+@(test)
+compile_source_package_can_use_odin_contains_macro :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-odin-contains-package-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    pkg_dir, pkg_dir_err := os.join_path({dir, "support"}, context.allocator)
+    testing.expect_value(t, pkg_dir_err == nil, true)
+    if pkg_dir_err != nil {
+        return
+    }
+    defer delete(pkg_dir)
+    mk_pkg_err := os.make_directory_all(pkg_dir)
+    testing.expect_value(t, mk_pkg_err == nil, true)
+    if mk_pkg_err != nil {
+        return
+    }
+
+    pkg_path, pkg_path_err := os.join_path({pkg_dir, "support.kvist"}, context.allocator)
+    testing.expect_value(t, pkg_path_err == nil, true)
+    if pkg_path_err != nil {
+        return
+    }
+    defer delete(pkg_path)
+    pkg_source := `(package support)
+
+(defmacro has? [collection key]
+  (quasiquote
+    (odin-contains (unquote collection) (unquote key))))`
+    pkg_write_err := os.write_entire_file_from_string(pkg_path, pkg_source)
+    testing.expect_value(t, pkg_write_err == nil, true)
+    if pkg_write_err != nil {
+        return
+    }
+
+    main_path, main_path_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, main_path_err == nil, true)
+    if main_path_err != nil {
+        return
+    }
+    defer delete(main_path)
+    main_source := `(package main)
+(import support "support")
+
+(defn scan [xs: []int, needle: int] -> bool
+  (support.has? xs needle))
+
+(defn lookup [m: map[string]int, key: string] -> bool
+  (support.has? m key))
+
+(defn lookup-ptr [m: ^map[string]int, key: string] -> bool
+  (support.has? m key))
+
+(defn text [s: string, needle: string] -> bool
+  (support.has? s needle))`
+    main_write_err := os.write_entire_file_from_string(main_path, main_source)
+    testing.expect_value(t, main_write_err == nil, true)
+    if main_write_err != nil {
+        return
+    }
+
+    result, err, ok := kvist.compile_path_with_map(main_path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(t, strings.contains(result.output, "return kvist_contains_value((xs)[:], needle)"), true)
+    testing.expect_value(t, strings.contains(result.output, "return (key) in (m)"), true)
+    testing.expect_value(t, strings.contains(result.output, "return (key) in (m^)"), true)
+    testing.expect_value(t, strings.contains(result.output, "return strings.contains(s, needle)"), true)
+    testing.expect_value(t, strings.contains(result.output, "kvist_prim_contains"), false)
+    testing.expect_value(t, len(result.warnings), 0)
+}
+
+@(test)
+compile_source_package_can_use_odin_get_macro :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-odin-get-package-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    pkg_dir, pkg_dir_err := os.join_path({dir, "support"}, context.allocator)
+    testing.expect_value(t, pkg_dir_err == nil, true)
+    if pkg_dir_err != nil {
+        return
+    }
+    defer delete(pkg_dir)
+    mk_pkg_err := os.make_directory_all(pkg_dir)
+    testing.expect_value(t, mk_pkg_err == nil, true)
+    if mk_pkg_err != nil {
+        return
+    }
+
+    pkg_path, pkg_path_err := os.join_path({pkg_dir, "support.kvist"}, context.allocator)
+    testing.expect_value(t, pkg_path_err == nil, true)
+    if pkg_path_err != nil {
+        return
+    }
+    defer delete(pkg_path)
+    pkg_source := `(package support)
+
+(defmacro at [target key]
+  (quasiquote
+    (odin-get (unquote target) (unquote key))))
+
+(defmacro at-or [target key fallback]
+  (quasiquote
+    (odin-get (unquote target) (unquote key) (unquote fallback))))`
+    pkg_write_err := os.write_entire_file_from_string(pkg_path, pkg_source)
+    testing.expect_value(t, pkg_write_err == nil, true)
+    if pkg_write_err != nil {
+        return
+    }
+
+    main_path, main_path_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, main_path_err == nil, true)
+    if main_path_err != nil {
+        return
+    }
+    defer delete(main_path)
+    main_source := `(package main)
+(import support "support")
+
+(defstruct User {
+  name: string
+  score: int
+})
+
+(defn score [xs: []int, m: map[string]int, user: User] -> int
+  (+ (support.at xs 1)
+     (support.at-or m "missing" 40)
+     (support.at user .score)))`
+    main_write_err := os.write_entire_file_from_string(main_path, main_source)
+    testing.expect_value(t, main_write_err == nil, true)
+    if main_write_err != nil {
+        return
+    }
+
+    result, err, ok := kvist.compile_path_with_map(main_path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(t, strings.contains(result.output, "return (xs[1]) + (kvist_get_or_default(m, \"missing\", 40)) + ((user).score)"), true)
+    testing.expect_value(t, strings.contains(result.output, "kvist_prim_get"), false)
+    testing.expect_value(t, len(result.warnings), 0)
+}
+
+@(test)
+compile_source_package_can_use_odin_slice_macro :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-odin-slice-package-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    pkg_dir, pkg_dir_err := os.join_path({dir, "support"}, context.allocator)
+    testing.expect_value(t, pkg_dir_err == nil, true)
+    if pkg_dir_err != nil {
+        return
+    }
+    defer delete(pkg_dir)
+    mk_pkg_err := os.make_directory_all(pkg_dir)
+    testing.expect_value(t, mk_pkg_err == nil, true)
+    if mk_pkg_err != nil {
+        return
+    }
+
+    pkg_path, pkg_path_err := os.join_path({pkg_dir, "support.kvist"}, context.allocator)
+    testing.expect_value(t, pkg_path_err == nil, true)
+    if pkg_path_err != nil {
+        return
+    }
+    defer delete(pkg_path)
+    pkg_source := `(package support)
+
+(defmacro view [target]
+  (quasiquote
+    (odin-slice (unquote target))))
+
+(defmacro suffix [target start]
+  (quasiquote
+    (odin-slice (unquote target) (unquote start))))
+
+(defmacro window [target start end]
+  (quasiquote
+    (odin-slice (unquote target) (unquote start) (unquote end))))`
+    pkg_write_err := os.write_entire_file_from_string(pkg_path, pkg_source)
+    testing.expect_value(t, pkg_write_err == nil, true)
+    if pkg_write_err != nil {
+        return
+    }
+
+    main_path, main_path_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, main_path_err == nil, true)
+    if main_path_err != nil {
+        return
+    }
+    defer delete(main_path)
+    main_source := `(package main)
+(import support "support")
+
+(defn all [xs: [dynamic]int] -> []int
+  (support.view xs))
+
+(defn rest [xs: []int] -> []int
+  (support.suffix xs 1))
+
+(defn middle [xs: []int] -> []int
+  (support.window xs 1 3))`
+    main_write_err := os.write_entire_file_from_string(main_path, main_source)
+    testing.expect_value(t, main_write_err == nil, true)
+    if main_write_err != nil {
+        return
+    }
+
+    result, err, ok := kvist.compile_path_with_map(main_path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(t, strings.contains(result.output, "return (xs)[:]"), true)
+    testing.expect_value(t, strings.contains(result.output, "return (xs)[1:]"), true)
+    testing.expect_value(t, strings.contains(result.output, "return (xs)[1:3]"), true)
+    testing.expect_value(t, strings.contains(result.output, "kvist_prim_slice"), false)
+    testing.expect_value(t, len(result.warnings), 0)
+}
+
+@(test)
+warn_defer_direct_odin_slice_view :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn demo [xs: []int, s: string]
+  (let [window (odin-slice xs) :defer
+        suffix (odin-slice s 1) :defer]
+    (println (count window) (count suffix))))`
+
+    result, err, ok := kvist.compile_source_with_map(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(t, strings.contains(result.output, "window := (xs)[:]"), true)
+    testing.expect_value(t, strings.contains(result.output, "suffix := (s)[1:]"), true)
+    testing.expect_value(t, len(result.warnings), 2)
+    if len(result.warnings) == 2 {
+        testing.expect_value(t, strings.contains(result.warnings[0].message, "borrowed view"), true)
+        testing.expect_value(t, strings.contains(result.warnings[1].message, "borrowed view"), true)
+    }
+}
+
+@(test)
+compile_source_package_can_use_source_update_macro :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-source-update-package-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    pkg_dir, pkg_dir_err := os.join_path({dir, "support"}, context.allocator)
+    testing.expect_value(t, pkg_dir_err == nil, true)
+    if pkg_dir_err != nil {
+        return
+    }
+    defer delete(pkg_dir)
+    mk_pkg_err := os.make_directory_all(pkg_dir)
+    testing.expect_value(t, mk_pkg_err == nil, true)
+    if mk_pkg_err != nil {
+        return
+    }
+
+    pkg_path, pkg_path_err := os.join_path({pkg_dir, "support.kvist"}, context.allocator)
+    testing.expect_value(t, pkg_path_err == nil, true)
+    if pkg_path_err != nil {
+        return
+    }
+    defer delete(pkg_path)
+    pkg_source := `(package support)
+
+(defmacro update-ish! [place updater & rest]
+  (let [op (name updater)]
+    (cond
+      (and (= op "+") (= (count rest) 1))
+      (quasiquote
+        (mut! (unquote place) += (unquote (first rest))))
+      :else
+      (quasiquote
+        (set! (unquote place) ((unquote updater) (unquote place)))))))`
+    pkg_write_err := os.write_entire_file_from_string(pkg_path, pkg_source)
+    testing.expect_value(t, pkg_write_err == nil, true)
+    if pkg_write_err != nil {
+        return
+    }
+
+    main_path, main_path_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, main_path_err == nil, true)
+    if main_path_err != nil {
+        return
+    }
+    defer delete(main_path)
+    main_source := `(package main)
+(import support "support")
+
+(defn inc [x: int] -> int
+  (+ x 1))
+
+(defn demo [] -> int
+  (let [xs ([dynamic]int [1 2 3])
+        total 4]
+    (defer (delete xs))
+    (support.update-ish! xs[1] + 10)
+    (support.update-ish! total inc)
+    (+ (get xs 1) total)))`
+    main_write_err := os.write_entire_file_from_string(main_path, main_source)
+    testing.expect_value(t, main_write_err == nil, true)
+    if main_write_err != nil {
+        return
+    }
+
+    result, err, ok := kvist.compile_path_with_map(main_path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(t, strings.contains(result.output, "(xs)[1] += 10"), true)
+    testing.expect_value(t, strings.contains(result.output, "total = inc(total)"), true)
+    testing.expect_value(t, strings.contains(result.output, "kvist_prim_update"), false)
+    testing.expect_value(t, len(result.warnings), 0)
+}
+
+@(test)
+compile_source_package_can_use_copy_with_macro :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-copy-with-package-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    pkg_dir, pkg_dir_err := os.join_path({dir, "support"}, context.allocator)
+    testing.expect_value(t, pkg_dir_err == nil, true)
+    if pkg_dir_err != nil {
+        return
+    }
+    defer delete(pkg_dir)
+    mk_pkg_err := os.make_directory_all(pkg_dir)
+    testing.expect_value(t, mk_pkg_err == nil, true)
+    if mk_pkg_err != nil {
+        return
+    }
+
+    pkg_path, pkg_path_err := os.join_path({pkg_dir, "support.kvist"}, context.allocator)
+    testing.expect_value(t, pkg_path_err == nil, true)
+    if pkg_path_err != nil {
+        return
+    }
+    defer delete(pkg_path)
+    pkg_source := `(package support)
+
+(defmacro- first-dot-index-loop [text index]
+  (if (= index (count text))
+    -1
+    (if (= (slice text index (+ index 1)) ".")
+      index
+      (first-dot-index-loop text (+ index 1)))))
+
+(defmacro- first-dot-index [text]
+  (first-dot-index-loop text 0))
+
+(defmacro- field-target [place]
+  (let [text (source place)
+        dot (first-dot-index text)]
+    (if (> dot 0)
+      (symbol (slice text 0 dot))
+      (error "field place helper expects a field place such as user.name or user.address.city"))))
+
+(defmacro- field-selector [place]
+  (let [text (source place)
+        dot (first-dot-index text)]
+    (if (> dot 0)
+      (symbol (slice text dot))
+      (error "field place helper expects a field place such as user.name or user.address.city"))))
+
+(defmacro replacing [place value]
+  (let [target (field-target place)
+        selector (field-selector place)]
+    (quasiquote
+      (copy-with (unquote target) (unquote selector) (unquote value)))))
+
+(defmacro replacing-on [target selector value]
+  (quasiquote
+    (copy-with (unquote target) (unquote selector) (unquote value))))`
+    pkg_write_err := os.write_entire_file_from_string(pkg_path, pkg_source)
+    testing.expect_value(t, pkg_write_err == nil, true)
+    if pkg_write_err != nil {
+        return
+    }
+
+    main_path, main_path_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, main_path_err == nil, true)
+    if main_path_err != nil {
+        return
+    }
+    defer delete(main_path)
+    main_source := `(package main)
+(import support "support")
+
+(defstruct Profile {
+  name: string
+})
+
+(defstruct User {
+  profile: Profile
+  active?: bool
+})
+
+(defn rename [user: User] -> User
+  (let [renamed (support.replacing user.profile.name "Ada")]
+    (support.replacing-on renamed .active? true)))`
+    main_write_err := os.write_entire_file_from_string(main_path, main_source)
+    testing.expect_value(t, main_write_err == nil, true)
+    if main_write_err != nil {
+        return
+    }
+
+    result, err, ok := kvist.compile_path_with_map(main_path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(t, strings.contains(result.output, "kvist_update_1.profile.name = kvist_value"), true)
+    testing.expect_value(t, strings.contains(result.output, "kvist_update_2.active_p = kvist_value"), true)
+    testing.expect_value(t, strings.contains(result.output, "kvist_prim_assoc"), false)
+    testing.expect_value(t, len(result.warnings), 0)
+}
+
+@(test)
+compile_source_package_can_use_copy_update_macro :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-copy-update-package-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    pkg_dir, pkg_dir_err := os.join_path({dir, "support"}, context.allocator)
+    testing.expect_value(t, pkg_dir_err == nil, true)
+    if pkg_dir_err != nil {
+        return
+    }
+    defer delete(pkg_dir)
+    mk_pkg_err := os.make_directory_all(pkg_dir)
+    testing.expect_value(t, mk_pkg_err == nil, true)
+    if mk_pkg_err != nil {
+        return
+    }
+
+    pkg_path, pkg_path_err := os.join_path({pkg_dir, "support.kvist"}, context.allocator)
+    testing.expect_value(t, pkg_path_err == nil, true)
+    if pkg_path_err != nil {
+        return
+    }
+    defer delete(pkg_path)
+    pkg_source := `(package support)
+
+(defmacro- first-dot-index-loop [text index]
+  (if (= index (count text))
+    -1
+    (if (= (slice text index (+ index 1)) ".")
+      index
+      (first-dot-index-loop text (+ index 1)))))
+
+(defmacro- first-dot-index [text]
+  (first-dot-index-loop text 0))
+
+(defmacro- field-target [place]
+  (let [text (source place)
+        dot (first-dot-index text)]
+    (if (> dot 0)
+      (symbol (slice text 0 dot))
+      (error "field place helper expects a field place such as user.name or user.address.city"))))
+
+(defmacro- field-selector [place]
+  (let [text (source place)
+        dot (first-dot-index text)]
+    (if (> dot 0)
+      (symbol (slice text dot))
+      (error "field place helper expects a field place such as user.name or user.address.city"))))
+
+(defmacro changing [place f & args]
+  (let [target (field-target place)
+        selector (field-selector place)]
+    (quasiquote
+      (copy-update (unquote target) (unquote selector) (unquote f) (splice args)))))
+
+(defmacro changing-on [target selector f & args]
+  (quasiquote
+    (copy-update (unquote target) (unquote selector) (unquote f) (splice args))))`
+    pkg_write_err := os.write_entire_file_from_string(pkg_path, pkg_source)
+    testing.expect_value(t, pkg_write_err == nil, true)
+    if pkg_write_err != nil {
+        return
+    }
+
+    main_path, main_path_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, main_path_err == nil, true)
+    if main_path_err != nil {
+        return
+    }
+    defer delete(main_path)
+    main_source := `(package main)
+(import support "support")
+
+(defstruct Profile {
+  visits: int
+})
+
+(defstruct User {
+  profile: Profile
+  score: int
+})
+
+(defn add [x: int delta: int] -> int
+  (+ x delta))
+
+(defn bump [user: User] -> User
+  (let [visited (support.changing user.profile.visits inc)]
+    (support.changing-on visited .score add 10)))`
+    main_write_err := os.write_entire_file_from_string(main_path, main_source)
+    testing.expect_value(t, main_write_err == nil, true)
+    if main_write_err != nil {
+        return
+    }
+
+    result, err, ok := kvist.compile_path_with_map(main_path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(t, strings.contains(result.output, "kvist_update_1.profile.visits = (kvist_target.profile.visits) + 1"), true)
+    testing.expect_value(t, strings.contains(result.output, "kvist_update_2.score = add(kvist_target.score, kvist_arg_0)"), true)
+    testing.expect_value(t, strings.contains(result.output, "kvist_prim_update"), false)
+    testing.expect_value(t, len(result.warnings), 0)
 }
 
 @(test)
 compile_tap_thread_steps :: proc(t: ^testing.T) {
     source := `(package main)
 (import core "kvist:core")
+(import arr "kvist:arr")
 (import fmt "core:fmt")
 
 (defn inc [x: int] -> int
@@ -5507,13 +7004,16 @@ compile_tap_thread_steps :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    testing.expect_value(t, strings.contains(output, "answer := kvist_tap_labeled(\"answer\", inc(41))"), true)
-    testing.expect_value(t, strings.contains(output, "mapped := kvist_tap_labeled(\"mapped\", kvist_map(inc, (xs)[:]))"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_thread_1 := kvist_map(inc, (xs)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "fmt.print(\"answer\")"), true)
+    testing.expect_value(t, strings.contains(output, "fmt.print(\"mapped\")"), true)
+    testing.expect_value(t, strings.contains(output, "arr__map_impl(inc, (xs)[0:])"), true)
     testing.expect_value(t, strings.contains(output, "defer delete(kvist_thread_1)"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_thread_2 := kvist_filter(even_p, (kvist_tap_labeled(\"mapped\", kvist_thread_1))[:])"), true)
-    testing.expect_value(t, strings.contains(output, "defer delete(kvist_thread_2)"), true)
-    testing.expect_value(t, strings.contains(output, "total := kvist_reduce(add, 0, (kvist_thread_2)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "fmt.println(kvist_tap"), true)
+    testing.expect_value(t, strings.contains(output, "proc(xs: []int) -> [dynamic]int"), true)
+    testing.expect_value(t, strings.contains(output, "tap_labeled_impl"), false)
+    testing.expect_value(t, strings.contains(output, "arr__filter_impl("), true)
+    testing.expect_value(t, strings.contains(output, "even_p,"), true)
+    testing.expect_value(t, strings.contains(output, "total := arr__reduce_impl(add, 0,"), true)
 }
 
 @(test)
@@ -5596,7 +7096,7 @@ compile_with_allocator_scope :: proc(t: ^testing.T) {
   (with-allocator [allocator context.temp_allocator]
     (let [buffer (make [dynamic]int)]
       (defer (delete buffer))
-      (arr.into! buffer ([]int [1 2]))
+      (odin "append(&(buffer), ..[]int{1, 2})")
       (return))))`
 
     output, err, ok := kvist.compile_source(source)
@@ -5634,7 +7134,7 @@ compile_with_temp_allocator_scope :: proc(t: ^testing.T) {
   (with-temp-allocator [allocator]
     (let [buffer (make [dynamic]int)]
       (defer (delete buffer))
-      (arr.into! buffer ([]int [1 2]))
+      (odin "append(&(buffer), ..[]int{1, 2})")
       (return))))`
 
     output, err, ok := kvist.compile_source(source)
@@ -5906,7 +7406,7 @@ compile_with_temp_allocator_final_scalar_use :: proc(t: ^testing.T) {
 
     testing.expect_value(t, strings.contains(output, "runtime.default_temp_allocator_temp_begin"), true)
     testing.expect_value(t, strings.contains(output, "defer delete(xs)"), true)
-    testing.expect_value(t, strings.contains(output, "return len((xs)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "return len(xs)"), true)
 }
 
 @(test)
@@ -6194,7 +7694,312 @@ compile_or_else_optional_ok_expression :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    testing.expect_value(t, strings.contains(output, "return query() or_else 7"), true)
+    testing.expect_value(t, strings.contains(output, "return (query()) or_else (7)"), true)
+}
+
+@(test)
+compile_source_package_can_use_odin_infix_or_else :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-or-else-package-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    pkg_dir, pkg_dir_err := os.join_path({dir, "support"}, context.allocator)
+    testing.expect_value(t, pkg_dir_err == nil, true)
+    if pkg_dir_err != nil {
+        return
+    }
+    defer delete(pkg_dir)
+    mk_pkg_err := os.make_directory_all(pkg_dir)
+    testing.expect_value(t, mk_pkg_err == nil, true)
+    if mk_pkg_err != nil {
+        return
+    }
+
+    pkg_path, pkg_path_err := os.join_path({pkg_dir, "support.kvist"}, context.allocator)
+    testing.expect_value(t, pkg_path_err == nil, true)
+    if pkg_path_err != nil {
+        return
+    }
+    defer delete(pkg_path)
+    pkg_source := `(package support)
+
+(defmacro fallback [expr value]
+  (quasiquote
+    (odin-infix "or_else" (unquote expr) (unquote value))))`
+    pkg_write_err := os.write_entire_file_from_string(pkg_path, pkg_source)
+    testing.expect_value(t, pkg_write_err == nil, true)
+    if pkg_write_err != nil {
+        return
+    }
+
+    main_path, main_path_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, main_path_err == nil, true)
+    if main_path_err != nil {
+        return
+    }
+    defer delete(main_path)
+    main_source := `(package main)
+(import support "support")
+
+(defn query [] -> [value: int, ok: bool] #optional_ok
+  (return 42 true))
+
+(defn total [] -> int
+  (support.fallback (query) 7))`
+    main_write_err := os.write_entire_file_from_string(main_path, main_source)
+    testing.expect_value(t, main_write_err == nil, true)
+    if main_write_err != nil {
+        return
+    }
+
+    result, err, ok := kvist.compile_path_with_map(main_path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(t, strings.contains(result.output, "return (query()) or_else (7)"), true)
+    testing.expect_value(t, strings.contains(result.output, "kvist_prim_or_else"), false)
+    testing.expect_value(t, len(result.warnings), 0)
+}
+
+@(test)
+compile_imported_macro_package_can_define_source_sequence_helpers :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-macro-seq-package-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    pkg_dir, pkg_dir_err := os.join_path({dir, "support"}, context.allocator)
+    testing.expect_value(t, pkg_dir_err == nil, true)
+    if pkg_dir_err != nil {
+        return
+    }
+    defer delete(pkg_dir)
+    mk_pkg_err := os.make_directory_all(pkg_dir)
+    testing.expect_value(t, mk_pkg_err == nil, true)
+    if mk_pkg_err != nil {
+        return
+    }
+
+    support_path, support_path_err := os.join_path({pkg_dir, "support.kvist"}, context.allocator)
+    testing.expect_value(t, support_path_err == nil, true)
+    if support_path_err != nil {
+        return
+    }
+    defer delete(support_path)
+    support_source := `(package support)
+
+(defmacro map [f #form values]
+  (if (= (count values) 0)
+    (forms)
+    (concat
+      (forms (f (first values)))
+      (map f (rest values)))))
+
+(defmacro filter [pred #form values]
+  (if (= (count values) 0)
+    (forms)
+    (let [head (first values)
+          tail (filter pred (rest values))]
+      (if (pred head)
+        (concat (forms head) tail)
+        tail))))
+
+(defmacro emit-summary [items]
+  (let [names (map source items)
+        symbols (filter symbol? items)]
+    (forms
+      (quasiquote
+        (def imported-names-count (unquote (count names))))
+      (quasiquote
+        (def imported-symbols-count (unquote (count symbols)))))))`
+    support_write_err := os.write_entire_file_from_string(support_path, support_source)
+    testing.expect_value(t, support_write_err == nil, true)
+    if support_write_err != nil {
+        return
+    }
+
+    main_path, main_path_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, main_path_err == nil, true)
+    if main_path_err != nil {
+        return
+    }
+    defer delete(main_path)
+    main_source := `(package main)
+(import support "support")
+
+(support.emit-summary [aa 7 bb])`
+    main_write_err := os.write_entire_file_from_string(main_path, main_source)
+    testing.expect_value(t, main_write_err == nil, true)
+    if main_write_err != nil {
+        return
+    }
+
+    output, err, ok := kvist.compile_path(main_path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "imported_names_count :: 3"), true)
+    testing.expect_value(t, strings.contains(output, "imported_symbols_count :: 2"), true)
+}
+
+@(test)
+compile_imported_macro_package_can_define_private_set_predicate_helper :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-macro-set-p-helper-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    pkg_dir, pkg_dir_err := os.join_path({dir, "support"}, context.allocator)
+    testing.expect_value(t, pkg_dir_err == nil, true)
+    if pkg_dir_err != nil {
+        return
+    }
+    defer delete(pkg_dir)
+    mk_pkg_err := os.make_directory_all(pkg_dir)
+    testing.expect_value(t, mk_pkg_err == nil, true)
+    if mk_pkg_err != nil {
+        return
+    }
+
+    support_path, support_path_err := os.join_path({pkg_dir, "support.kvist"}, context.allocator)
+    testing.expect_value(t, support_path_err == nil, true)
+    if support_path_err != nil {
+        return
+    }
+    defer delete(support_path)
+    support_source := `(package support)
+
+(defmacro- set? [form]
+  (= (count form) 2))
+
+(defmacro emit-helper-result [items]
+  (if (set? items)
+    (quasiquote
+      (def helper-result true))
+    (quasiquote
+      (def helper-result false))))`
+    support_write_err := os.write_entire_file_from_string(support_path, support_source)
+    testing.expect_value(t, support_write_err == nil, true)
+    if support_write_err != nil {
+        return
+    }
+
+    main_path, main_path_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, main_path_err == nil, true)
+    if main_path_err != nil {
+        return
+    }
+    defer delete(main_path)
+    main_source := `(package main)
+(import support "support")
+
+(support.emit-helper-result [aa bb])`
+    main_write_err := os.write_entire_file_from_string(main_path, main_source)
+    testing.expect_value(t, main_write_err == nil, true)
+    if main_write_err != nil {
+        return
+    }
+
+    output, err, ok := kvist.compile_path(main_path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "helper_result :: true"), true)
+}
+
+@(test)
+compile_imported_macro_package_can_shadow_core_macro_helper_with_private_macro :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-macro-shadow-helper-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    pkg_dir, pkg_dir_err := os.join_path({dir, "support"}, context.allocator)
+    testing.expect_value(t, pkg_dir_err == nil, true)
+    if pkg_dir_err != nil {
+        return
+    }
+    defer delete(pkg_dir)
+    mk_pkg_err := os.make_directory_all(pkg_dir)
+    testing.expect_value(t, mk_pkg_err == nil, true)
+    if mk_pkg_err != nil {
+        return
+    }
+
+    support_path, support_path_err := os.join_path({pkg_dir, "support.kvist"}, context.allocator)
+    testing.expect_value(t, support_path_err == nil, true)
+    if support_path_err != nil {
+        return
+    }
+    defer delete(support_path)
+    support_source := `(package support)
+
+(defmacro- count [form]
+  (if (= (source form) "marked")
+    7
+    0))
+
+(defmacro emit-helper-result [marker]
+  (quasiquote
+    (def helper-result: int (unquote (count marker)))))`
+    support_write_err := os.write_entire_file_from_string(support_path, support_source)
+    testing.expect_value(t, support_write_err == nil, true)
+    if support_write_err != nil {
+        return
+    }
+
+    main_path, main_path_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, main_path_err == nil, true)
+    if main_path_err != nil {
+        return
+    }
+    defer delete(main_path)
+    main_source := `(package main)
+(import support "support")
+
+(support.emit-helper-result marked)`
+    main_write_err := os.write_entire_file_from_string(main_path, main_source)
+    testing.expect_value(t, main_write_err == nil, true)
+    if main_write_err != nil {
+        return
+    }
+
+    output, err, ok := kvist.compile_path(main_path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "helper_result: int : 7"), true)
 }
 
 @(test)
@@ -6267,7 +8072,7 @@ build_test_kvist_binary :: proc(t: ^testing.T, repo_root, dir: string) -> (path:
 
     state, stdout, stderr, exec_err := os.process_exec(
         os.Process_Desc{
-            command = {"odin", "build", "cmd/kvist", fmt.tprintf("-out:%s", bin_path)},
+            command = {"odin", "build", "src/cli/kvist", fmt.tprintf("-out:%s", bin_path)},
             working_dir = repo_root,
         },
         context.allocator,
@@ -6286,7 +8091,108 @@ build_test_kvist_binary :: proc(t: ^testing.T, repo_root, dir: string) -> (path:
         delete(bin_path)
         return "", false
     }
+    repo_source, repo_source_err := os.join_path({repo_root, "src", "kvist"}, context.allocator)
+    testing.expect_value(t, repo_source_err == nil, true)
+    if repo_source_err != nil {
+        delete(bin_path)
+        return "", false
+    }
+    defer delete(repo_source)
+
+    install_source_parent, install_source_parent_err := os.join_path({dir, "src"}, context.allocator)
+    testing.expect_value(t, install_source_parent_err == nil, true)
+    if install_source_parent_err != nil {
+        delete(bin_path)
+        return "", false
+    }
+    defer delete(install_source_parent)
+
+    install_source, install_source_err := os.join_path({install_source_parent, "kvist"}, context.allocator)
+    testing.expect_value(t, install_source_err == nil, true)
+    if install_source_err != nil {
+        delete(bin_path)
+        return "", false
+    }
+    defer delete(install_source)
+
+    if os.exists(install_source_parent) {
+        testing.expect_value(t, os.is_dir(install_source_parent), true)
+        if !os.is_dir(install_source_parent) {
+            delete(bin_path)
+            return "", false
+        }
+    } else {
+        mk_source_parent_err := os.make_directory_all(install_source_parent)
+        testing.expect_value(t, mk_source_parent_err == nil, true)
+        if mk_source_parent_err != nil {
+            delete(bin_path)
+            return "", false
+        }
+    }
+
+    if !os.exists(install_source) {
+        link_err := os.symlink(repo_source, install_source)
+        testing.expect_value(t, link_err == nil, true)
+        if link_err != nil {
+            delete(bin_path)
+            return "", false
+        }
+    }
+
+    repo_odin, repo_odin_err := os.join_path({repo_root, "src", "odin"}, context.allocator)
+    testing.expect_value(t, repo_odin_err == nil, true)
+    if repo_odin_err != nil {
+        delete(bin_path)
+        return "", false
+    }
+    defer delete(repo_odin)
+
+    install_odin, install_odin_err := os.join_path({install_source_parent, "odin"}, context.allocator)
+    testing.expect_value(t, install_odin_err == nil, true)
+    if install_odin_err != nil {
+        delete(bin_path)
+        return "", false
+    }
+    defer delete(install_odin)
+
+    if !os.exists(install_odin) {
+        link_err := os.symlink(repo_odin, install_odin)
+        testing.expect_value(t, link_err == nil, true)
+        if link_err != nil {
+            delete(bin_path)
+            return "", false
+        }
+    }
     return bin_path, true
+}
+
+test_env_slice_delete :: proc(values: ^[dynamic]string) {
+    for value in values^ {
+        delete(value)
+    }
+    delete(values^)
+    values^ = nil
+}
+
+test_child_env_without_kvist_vars :: proc(extra: []string) -> ([dynamic]string, bool) {
+    inherited_env, env_err := os.environ(context.allocator)
+    if env_err != nil {
+        return nil, false
+    }
+    defer delete(inherited_env)
+
+    env_vars := make([dynamic]string, 0, len(inherited_env)+len(extra))
+    for entry in extra {
+        append(&env_vars, strings.clone(entry))
+    }
+    for entry in inherited_env {
+        if strings.has_prefix(entry, "KVIST_ROOT=") || strings.has_prefix(entry, "KVIST_ROOT=") {
+            delete(entry)
+            continue
+        }
+        append(&env_vars, entry)
+    }
+    return env_vars, true
 }
 
 @(test)
@@ -6425,9 +8331,9 @@ compile_shipped_test_once_fixtures :: proc(t: ^testing.T) {
     testing.expect_value(t, exec_err == nil, true)
     if exec_err != nil {
         return
-    }
-    testing.expect_value(t, state.exited, true)
-    testing.expect_value(t, state.exit_code, 0)
+	}
+	testing.expect_value(t, state.exited, true)
+	testing.expect_value(t, state.exit_code, 0)
 }
 
 @(test)
@@ -6660,16 +8566,16 @@ cli_reload_command_discovers_sibling_reload_adapter :: proc(t: ^testing.T) {
     defer delete(reload_path)
     reload_source := `(package demo_reload)
 (import app "main")
-(import reload "kvist:reload")
+(import r "kvist:reload")
 
 (def Reload_State app.App_State)
 
 (defn init [state: ^Reload_State]
   (app.init state))
 
-(defn run [state: ^Reload_State host: ^reload.Run_Host]
+(defn run [state: ^Reload_State host: ^r.Run_Host]
   (app.tick state)
-  (when (reload.checkpoint! host)
+  (when (r.checkpoint! host)
     (return)))`
     reload_write_err := os.write_entire_file_from_string(reload_path, reload_source)
     testing.expect_value(t, reload_write_err == nil, true)
@@ -6718,6 +8624,186 @@ cli_reload_command_discovers_sibling_reload_adapter :: proc(t: ^testing.T) {
     }
     testing.expect_value(t, check_state.exited, true)
     testing.expect_value(t, check_state.exit_code, 0)
+}
+
+@(test)
+cli_reload_command_resolves_runtime_from_configured_root :: proc(t: ^testing.T) {
+    sync.lock(&test_env_mutex)
+    defer sync.unlock(&test_env_mutex)
+
+    dir, dir_err := os.make_directory_temp("", "kvist-reload-home-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    core_dir, core_dir_err := os.join_path({dir, "core"}, context.allocator)
+    testing.expect_value(t, core_dir_err == nil, true)
+    if core_dir_err != nil {
+        return
+    }
+    defer delete(core_dir)
+    mk_core_err := os.make_directory_all(core_dir)
+    testing.expect_value(t, mk_core_err == nil, true)
+    if mk_core_err != nil {
+        return
+    }
+    core_path, core_path_err := os.join_path({core_dir, "core.kvist"}, context.allocator)
+    testing.expect_value(t, core_path_err == nil, true)
+    if core_path_err != nil {
+        return
+    }
+    defer delete(core_path)
+    core_write_err := os.write_entire_file_from_string(core_path, `(package core)`)
+    testing.expect_value(t, core_write_err == nil, true)
+    if core_write_err != nil {
+        return
+    }
+
+    reload_dir, reload_dir_err := os.join_path({dir, "reload"}, context.allocator)
+    testing.expect_value(t, reload_dir_err == nil, true)
+    if reload_dir_err != nil {
+        return
+    }
+    defer delete(reload_dir)
+    mk_reload_err := os.make_directory_all(reload_dir)
+    testing.expect_value(t, mk_reload_err == nil, true)
+    if mk_reload_err != nil {
+        return
+    }
+    reload_pkg_path, reload_pkg_path_err := os.join_path({reload_dir, "reload.kvist"}, context.allocator)
+    testing.expect_value(t, reload_pkg_path_err == nil, true)
+    if reload_pkg_path_err != nil {
+        return
+    }
+    defer delete(reload_pkg_path)
+    reload_pkg_source := `(package reload)
+
+(defstruct Run_Host {})
+
+(defn checkpoint! [host: ^Run_Host] -> bool
+  false)`
+    reload_pkg_write_err := os.write_entire_file_from_string(reload_pkg_path, reload_pkg_source)
+    testing.expect_value(t, reload_pkg_write_err == nil, true)
+    if reload_pkg_write_err != nil {
+        return
+    }
+
+    runtime_dir, runtime_dir_err := os.join_path({dir, "odin", "olive_reload"}, context.allocator)
+    testing.expect_value(t, runtime_dir_err == nil, true)
+    if runtime_dir_err != nil {
+        return
+    }
+    defer delete(runtime_dir)
+    mk_runtime_err := os.make_directory_all(runtime_dir)
+    testing.expect_value(t, mk_runtime_err == nil, true)
+    if mk_runtime_err != nil {
+        return
+    }
+
+    app_path, app_path_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, app_path_err == nil, true)
+    if app_path_err != nil {
+        return
+    }
+    defer delete(app_path)
+    app_source := `(package demo_app)
+
+(defstruct App_State
+  {ticks: int})
+
+(defn tick [state: ^App_State]
+  (mut! state^.ticks += 1))`
+    app_write_err := os.write_entire_file_from_string(app_path, app_source)
+    testing.expect_value(t, app_write_err == nil, true)
+    if app_write_err != nil {
+        return
+    }
+
+    adapter_path, adapter_path_err := os.join_path({dir, "reload.kvist"}, context.allocator)
+    testing.expect_value(t, adapter_path_err == nil, true)
+    if adapter_path_err != nil {
+        return
+    }
+    defer delete(adapter_path)
+    adapter_source := `(package demo_reload)
+(import app "main")
+(import reload "kvist:reload")
+
+(def Reload_State app.App_State)
+
+(defn run [state: ^Reload_State host: ^reload.Run_Host]
+  (app.tick state))`
+    adapter_write_err := os.write_entire_file_from_string(adapter_path, adapter_source)
+    testing.expect_value(t, adapter_write_err == nil, true)
+    if adapter_write_err != nil {
+        return
+    }
+
+    generated_dir, generated_dir_err := os.join_path({dir, "generated"}, context.allocator)
+    testing.expect_value(t, generated_dir_err == nil, true)
+    if generated_dir_err != nil {
+        return
+    }
+    defer delete(generated_dir)
+
+    repo_root := compiler_test_repo_root()
+    kvist_bin, bin_ok := build_test_kvist_binary(t, repo_root, dir)
+    if !bin_ok {
+        return
+    }
+    defer delete(kvist_bin)
+
+    root_env := fmt.tprintf("KVIST_ROOT=%s", dir)
+    child_env, child_env_ok := test_child_env_without_kvist_vars({root_env})
+    testing.expect_value(t, child_env_ok, true)
+    if !child_env_ok {
+        return
+    }
+    defer test_env_slice_delete(&child_env)
+
+    state, stdout, stderr, exec_err := os.process_exec(
+        os.Process_Desc{
+            command = {kvist_bin, "dev", "--reload", app_path, "--generated-dir", generated_dir, "--print-paths", "--json"},
+            working_dir = dir,
+            env = child_env[:],
+        },
+        context.allocator,
+    )
+    defer delete(stdout)
+    defer delete(stderr)
+
+    testing.expect_value(t, exec_err == nil, true)
+    if exec_err != nil {
+        return
+    }
+    testing.expect_value(t, state.exited, true)
+    testing.expect_value(t, state.exit_code, 0)
+    if !state.exited || state.exit_code != 0 {
+        testing.expect_value(t, string(stderr), "")
+        return
+    }
+
+    module_path, module_path_err := os.join_path({generated_dir, "module", "main.odin"}, context.allocator)
+    testing.expect_value(t, module_path_err == nil, true)
+    if module_path_err != nil {
+        return
+    }
+    defer delete(module_path)
+    module_source, module_read_err := os.read_entire_file_from_path(module_path, context.allocator)
+    testing.expect_value(t, module_read_err == nil, true)
+    if module_read_err != nil {
+        return
+    }
+    defer delete(module_source)
+
+    module_forward, _ := strings.replace_all(string(module_source), "\\", "/", context.temp_allocator)
+    testing.expect_value(t, strings.contains(module_forward, "import olive_reload "), true)
+    testing.expect_value(t, strings.contains(module_forward, "odin/olive_reload"), true)
+    testing.expect_value(t, strings.contains(module_forward, "runtime/dev"), false)
+    testing.expect_value(t, strings.contains(module_forward, "src/odin/olive_reload"), false)
 }
 
 @(test)
@@ -6805,53 +8891,6 @@ cli_test_command_runs_builtin_package_suite :: proc(t: ^testing.T) {
     defer delete(kvist_bin)
 
     path, join_err := os.join_path({repo_root, "examples", "coverage", "packages", "builtin-package-tests.kvist"}, context.allocator)
-    testing.expect_value(t, join_err == nil, true)
-    if join_err != nil {
-        return
-    }
-    defer delete(path)
-
-    state, stdout, stderr, exec_err := os.process_exec(
-        os.Process_Desc{
-            command = {kvist_bin, "test", path},
-            working_dir = repo_root,
-        },
-        context.allocator,
-    )
-    defer delete(stdout)
-    defer delete(stderr)
-
-    testing.expect_value(t, exec_err == nil, true)
-    if exec_err != nil {
-        return
-    }
-    testing.expect_value(t, state.exited, true)
-    testing.expect_value(t, state.exit_code, 0)
-}
-
-@(test)
-cli_test_command_runs_http_and_html_package_suite :: proc(t: ^testing.T) {
-    when ODIN_OS == .Windows {
-        // ponytail: Windows runner stack-overflows compiling this large generated suite; keep Mac/Linux execution.
-        return
-    }
-
-    dir, dir_err := os.make_directory_temp("", "kvist-http-html-package-suite-*", context.allocator)
-    testing.expect_value(t, dir_err == nil, true)
-    if dir_err != nil {
-        return
-    }
-    defer os.remove_all(dir)
-    defer delete(dir)
-
-    repo_root := compiler_test_repo_root()
-    kvist_bin, bin_ok := build_test_kvist_binary(t, repo_root, dir)
-    if !bin_ok {
-        return
-    }
-    defer delete(kvist_bin)
-
-    path, join_err := os.join_path({repo_root, "examples", "coverage", "packages", "http-and-html-package-tests.kvist"}, context.allocator)
     testing.expect_value(t, join_err == nil, true)
     if join_err != nil {
         return
@@ -7069,7 +9108,7 @@ compile_let_defer_final_if_scalar_use :: proc(t: ^testing.T) {
     defer delete(output)
 
     testing.expect_value(t, strings.contains(output, "defer delete(xs)"), true)
-    testing.expect_value(t, strings.contains(output, "return len((xs)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "return len(xs)"), true)
 }
 
 @(test)
@@ -7092,7 +9131,7 @@ compile_let_defer_final_cond_scalar_use :: proc(t: ^testing.T) {
     defer delete(output)
 
     testing.expect_value(t, strings.contains(output, "defer delete(xs)"), true)
-    testing.expect_value(t, strings.contains(output, "return len((xs)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "return len(xs)"), true)
 }
 
 @(test)
@@ -7116,7 +9155,7 @@ compile_let_defer_final_case_scalar_use :: proc(t: ^testing.T) {
     defer delete(output)
 
     testing.expect_value(t, strings.contains(output, "defer delete(xs)"), true)
-    testing.expect_value(t, strings.contains(output, "return len((xs)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "return len(xs)"), true)
 }
 
 @(test)
@@ -7144,7 +9183,64 @@ compile_typed_block_expression_preserves_defer_and_source_map :: proc(t: ^testin
     testing.expect_value(t, len(result.source_map) > 0, true)
     testing.expect_value(t, strings.contains(result.output, "answer: int = (proc() -> int {"), true)
     testing.expect_value(t, strings.contains(result.output, "defer delete(xs)"), true)
-    testing.expect_value(t, strings.contains(result.output, "return len((xs)[:])"), true)
+    testing.expect_value(t, strings.contains(result.output, "return len(xs)"), true)
+}
+
+@(test)
+compile_typed_block_expression_captures_field_selector_root :: proc(t: ^testing.T) {
+    source := `(package main)
+(import arr "kvist:arr")
+
+(defstruct Bucket
+  {entries: []int})
+
+(defn copy-entries [bucket: Bucket] -> [dynamic]int
+  (let [copied: [dynamic]int
+          (arr.into [dynamic]int (slice bucket.entries 0))]
+    copied))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "proc(bucket: Bucket) -> [dynamic]int"), true)
+}
+
+@(test)
+compile_nested_owned_argument_transfer_does_not_delete_temporary :: proc(t: ^testing.T) {
+    source := `(package main)
+(import arr "kvist:arr")
+
+(defstruct Node
+  {values: [dynamic]int})
+
+(defn inc [value: int] -> int
+  (+ value 1))
+
+(defn node [values: [dynamic]int] -> Node
+  (Node {values: values}))
+
+(defn add-node! [node-value: Node] -> int
+  1)
+
+(defn map-and-add! [values: []int] -> int
+  (let [result (add-node! (node (arr.map inc values)))]
+    result))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "kvist_thread_"), true)
+    testing.expect_value(t, strings.contains(output, "defer delete(kvist_thread_"), false)
 }
 
 @(test)
@@ -7221,6 +9317,7 @@ reject_returning_defer_binding_inside_call :: proc(t: ^testing.T) {
 @(test)
 compile_defer_binding_passed_as_borrowed_slice_to_copied_result :: proc(t: ^testing.T) {
     source := `(package main)
+(import arr "kvist:arr")
 
 (defstruct Query {
   xs: [dynamic]int
@@ -7404,17 +9501,134 @@ reject_returning_owned_result_from_with_temp_allocator_in_final_if_points_to_ali
 }
 
 @(test)
-reject_returning_slurp_result_from_with_temp_allocator :: proc(t: ^testing.T) {
-    source := `(package main)
-(import io "kvist:io")
+reject_returning_destructured_source_owned_result_from_with_temp_allocator :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-temp-owned-destructured-source-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    pkg_dir, pkg_dir_err := os.join_path({dir, "support"}, context.allocator)
+    testing.expect_value(t, pkg_dir_err == nil, true)
+    if pkg_dir_err != nil {
+        return
+    }
+    defer delete(pkg_dir)
+    mk_pkg_err := os.make_directory_all(pkg_dir)
+    testing.expect_value(t, mk_pkg_err == nil, true)
+    if mk_pkg_err != nil {
+        return
+    }
+
+    pkg_path, pkg_path_err := os.join_path({pkg_dir, "support.kvist"}, context.allocator)
+    testing.expect_value(t, pkg_path_err == nil, true)
+    if pkg_path_err != nil {
+        return
+    }
+    defer delete(pkg_path)
+    pkg_source := `(package support)
 (import os "core:os")
+
+(defn read-base [path: string] -> [data: []byte, err: os.Error] #force_inline
+  (os.read_entire_file path context.allocator))`
+    pkg_write_err := os.write_entire_file_from_string(pkg_path, pkg_source)
+    testing.expect_value(t, pkg_write_err == nil, true)
+    if pkg_write_err != nil {
+        return
+    }
+
+    main_path, main_path_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, main_path_err == nil, true)
+    if main_path_err != nil {
+        return
+    }
+    defer delete(main_path)
+    main_source := `(package main)
 (import runtime "base:runtime")
+(import support "support")
 
-(defn bad [path: string] -> [data: []byte, err: os.Error]
+(defn bad [path: string] -> []byte
   (with-temp-allocator [allocator]
-    (io.read path)))`
+    (let [[data err] (support.read-base path)]
+      data)))`
+    main_write_err := os.write_entire_file_from_string(main_path, main_source)
+    testing.expect_value(t, main_write_err == nil, true)
+    if main_write_err != nil {
+        return
+    }
 
-    _, err, ok := kvist.compile_source(source)
+    _, err, ok := kvist.compile_path_with_map(main_path)
+    testing.expect_value(t, ok, false)
+    defer delete(err.message)
+    testing.expect_value(t, err.message, "owned value cannot escape with-temp-allocator; allocate it outside the temp scope or copy it before returning")
+}
+
+@(test)
+reject_returning_conditionally_assigned_third_party_owned_result_from_with_temp_allocator :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-temp-owned-conditional-source-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    pkg_dir, pkg_dir_err := os.join_path({dir, "support"}, context.allocator)
+    testing.expect_value(t, pkg_dir_err == nil, true)
+    if pkg_dir_err != nil {
+        return
+    }
+    defer delete(pkg_dir)
+    mk_pkg_err := os.make_directory_all(pkg_dir)
+    testing.expect_value(t, mk_pkg_err == nil, true)
+    if mk_pkg_err != nil {
+        return
+    }
+
+    pkg_path, pkg_path_err := os.join_path({pkg_dir, "support.kvist"}, context.allocator)
+    testing.expect_value(t, pkg_path_err == nil, true)
+    if pkg_path_err != nil {
+        return
+    }
+    defer delete(pkg_path)
+    pkg_source := `(package support)
+
+(defn copy [xs: []int] -> [dynamic]int #force_inline
+  (let [out (make [dynamic]int)]
+    (for [x xs]
+      (append (addr out) x))
+    out))`
+    pkg_write_err := os.write_entire_file_from_string(pkg_path, pkg_source)
+    testing.expect_value(t, pkg_write_err == nil, true)
+    if pkg_write_err != nil {
+        return
+    }
+
+    main_path, main_path_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, main_path_err == nil, true)
+    if main_path_err != nil {
+        return
+    }
+    defer delete(main_path)
+    main_source := `(package main)
+(import runtime "base:runtime")
+(import support "support")
+
+(defn bad [xs: []int fallback: [dynamic]int flag: bool] -> [dynamic]int
+  (with-temp-allocator [allocator]
+    (let [out fallback]
+      (if flag
+        (set! out (support.copy xs)))
+      out)))`
+    main_write_err := os.write_entire_file_from_string(main_path, main_source)
+    testing.expect_value(t, main_write_err == nil, true)
+    if main_write_err != nil {
+        return
+    }
+
+    _, err, ok := kvist.compile_path_with_map(main_path)
     testing.expect_value(t, ok, false)
     defer delete(err.message)
     testing.expect_value(t, err.message, "owned value cannot escape with-temp-allocator; allocate it outside the temp scope or copy it before returning")
@@ -7514,6 +9728,22 @@ macroexpand_with_temp_allocator_scope :: proc(t: ^testing.T) {
 }
 
 @(test)
+macroexpand_bare_when_uses_source_macro :: proc(t: ^testing.T) {
+    output, err, ok := kvist.macroexpand_source(`(when ready?
+  (run))`)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    expected := `(if ready? (run) (zero))
+`
+    testing.expect_value(t, output, expected)
+}
+
+@(test)
 macroexpand_when_let :: proc(t: ^testing.T) {
     output, err, ok := kvist.macroexpand_source(`(when-let [[value found] (query)]
   (fmt.println value))`)
@@ -7572,18 +9802,69 @@ macroexpand_evaluates_and_or_in_macro_predicates :: proc(t: ^testing.T) {
 }
 
 @(test)
-macroexpand_evaluates_cond_and_case_in_macro_predicates :: proc(t: ^testing.T) {
+macroexpand_accepts_quote_reader_syntax :: proc(t: ^testing.T) {
+    source := "(package main)\n\n" +
+              "(defmacro my-when [condition & body]\n" +
+              "  `(if ~condition\n" +
+              "     (do ~@body)))\n\n" +
+              "(defn demo [ok?: bool] -> int\n" +
+              "  (my-when ok?\n" +
+              "    (return 42))\n" +
+              "  0)\n\n" +
+              "(defmacro emit-answer []\n" +
+              "  '(def Answer 7))\n\n" +
+              "(emit-answer)"
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "if ok_p {"), true)
+    testing.expect_value(t, strings.contains(output, "return 42"), true)
+    testing.expect_value(t, strings.contains(output, "Answer :: 7"), true)
+}
+
+@(test)
+macro_boolean_helpers_use_bare_core_names :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defmacro emit-flag []
+  (if (and (not false)
+                 (or false true))
+    (quote (def bare-bool true))
+    (quote (def bare-bool false))))
+
+(emit-flag)`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "bare_bool :: true"), true)
+}
+
+@(test)
+macroexpand_evaluates_cond_in_macro_predicates :: proc(t: ^testing.T) {
     source := `(package main)
 
 (defmacro emit-kind [head]
-  (case (cond
-          (= (name head) "if") "branch"
-          (= (name head) "when") "branch"
-          :else "other")
-    "branch" (quote (def branch-kind true))
-    "other" (quote (def other-kind true))
-    "unknown" (quote (def other-kind true))
-    (quote (def missed-kind true))))
+  (let [kind (cond
+               (= (name head) "if") "branch"
+               (= (name head) "when") "branch"
+               :else "other")]
+    (cond
+      (= kind "branch") (quote (def branch-kind true))
+      (= kind "other") (quote (def other-kind true))
+      (= kind "unknown") (quote (def other-kind true))
+      :else (quote (def missed-kind true)))))
 
 (emit-kind if)
 (emit-kind let)`
@@ -7602,13 +9883,15 @@ macroexpand_evaluates_cond_and_case_in_macro_predicates :: proc(t: ^testing.T) {
 }
 
 @(test)
-macroexpand_case_set_clause_is_not_grouped_match :: proc(t: ^testing.T) {
+macroexpand_user_macros_can_define_case_like_dispatch_with_cond :: proc(t: ^testing.T) {
     source := `(package main)
 
 (defmacro emit-kind []
-  (case "other"
-    #{"other" "unknown"} (quote (def grouped-match true))
-    (quote (def default-match true))))
+  (let [kind "other"]
+    (cond
+      (= kind "known") (quote (def known-match true))
+      (= kind "other") (quote (def other-match true))
+      :else (quote (def default-match true)))))
 
 (emit-kind)`
 
@@ -7620,8 +9903,84 @@ macroexpand_case_set_clause_is_not_grouped_match :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    testing.expect_value(t, strings.contains(output, "default_match :: true"), true)
-    testing.expect_value(t, strings.contains(output, "grouped_match"), false)
+    testing.expect_value(t, strings.contains(output, "other_match :: true"), true)
+    testing.expect_value(t, strings.contains(output, "default_match"), false)
+}
+
+@(test)
+macroexpand_user_macros_can_define_literal_classifiers :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defmacro literal-int? [form #form]
+  (and (number? form)
+       (not (contains? (source form) "."))
+       (not (contains? (source form) "e"))
+       (not (contains? (source form) "E"))))
+
+(defmacro literal-float? [form #form]
+  (and (number? form)
+       (not (literal-int? form))))
+
+(defmacro literal-bool? [form #form]
+  (let [text (source form)]
+    (or (= text "true")
+        (= text "false"))))
+
+(defmacro emit-classifiers []
+  (if (and (literal-int? 12)
+           (literal-float? 1.5)
+           (literal-float? 1e2)
+           (literal-bool? true)
+           (literal-bool? false)
+           (not (literal-int? 1.5))
+           (not (literal-bool? maybe)))
+    (quote (def literal-classifiers-ok true))
+    (quote (def literal-classifiers-bad true))))
+
+(emit-classifiers)`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "literal_classifiers_ok :: true"), true)
+    testing.expect_value(t, strings.contains(output, "literal_classifiers_bad"), false)
+}
+
+@(test)
+macroexpand_user_macros_can_define_field_selector_predicate :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defmacro field-selector-form? [form]
+  (and (symbol? form)
+       (> (count (source form)) 1)
+       (= (slice (source form) 0 1) ".")))
+
+(defmacro emit-field-selector-check [field plain keyword]
+  (let [items (quote (user.name .title))]
+    (if (and (field-selector-form? field)
+           (field-selector-form? (nth items 1))
+           (not (field-selector-form? plain))
+           (not (field-selector-form? keyword)))
+      (quote (def field-selector-ok true))
+      (quote (def field-selector-bad true)))))
+
+(emit-field-selector-check .name name :name)`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "field_selector_ok :: true"), true)
+    testing.expect_value(t, strings.contains(output, "field_selector_bad"), false)
 }
 
 @(test)
@@ -7632,7 +9991,7 @@ macroexpand_evaluates_guard_style_cond_with_not :: proc(t: ^testing.T) {
   (cond
     (not (list? form)) false
     (not (or (= (count form) 2)
-             (= (count form) 3))) false
+                         (= (count form) 3))) false
     (not (symbol? (first form))) false
     :else true))
 
@@ -7709,15 +10068,27 @@ macroexpand_evaluates_numeric_comparisons_in_macro_predicates :: proc(t: ^testin
 macroexpand_evaluates_string_helpers_in_macro_predicates :: proc(t: ^testing.T) {
     source := `(package main)
 
+(defmacro source-starts-with? [text prefix]
+  (if (> (count prefix) (count text))
+    false
+    (= (slice text 0 (count prefix)) prefix)))
+
+(defmacro source-ends-with? [text suffix]
+  (let [text-len (count text)
+        suffix-len (count suffix)]
+    (if (> suffix-len text-len)
+      false
+      (= (slice text (- text-len suffix-len)) suffix))))
+
 (defmacro reverse-attr? [form]
   (and (keyword? form)
-       (str.starts-with? (source form) ":_")
-       (str.ends-with? (str.slice (source form) 1) "friend")
-       (= (str.count (source form)) 13)))
+             (source-starts-with? (source form) ":_")
+             (source-ends-with? (slice (source form) 1) "friend")
+             (= (count (source form)) 13)))
 
 (defmacro emit-reverse [form]
   (if (and (reverse-attr? form)
-           (str.contains? (source form) "user"))
+                 (contains? (source form) "user"))
     (quote (def reverse-attr true))
     (quote (def normal-attr true))))
 
@@ -7736,29 +10107,71 @@ macroexpand_evaluates_string_helpers_in_macro_predicates :: proc(t: ^testing.T) 
 }
 
 @(test)
-macroexpand_evaluates_parse_int_and_digit_helpers :: proc(t: ^testing.T) {
+macroexpand_user_macros_can_define_decimal_parser :: proc(t: ^testing.T) {
     source := `(package main)
 
+(defmacro digit-value [s]
+  (cond
+    (= s "0") 0
+    (= s "1") 1
+    (= s "2") 2
+    (= s "3") 3
+    (= s "4") 4
+    (= s "5") 5
+    (= s "6") 6
+    (= s "7") 7
+    (= s "8") 8
+    (= s "9") 9
+    :else nil))
+
+(defmacro times-ten [n]
+  (+ n n n n n n n n n n))
+
+(defmacro parse-decimal-loop [text index acc]
+  (if (= index (count text))
+    acc
+    (let [digit (digit-value (slice text index (+ index 1)))]
+      (if digit
+        (parse-decimal-loop text (+ index 1) (+ (times-ten acc) digit))
+        nil))))
+
+(defmacro parse-decimal [text]
+  (if (= (count text) 0)
+    nil
+    (parse-decimal-loop text 0 0)))
+
 (defmacro emit-parsed [form]
-  (let [n (parse-int (source form))]
+  (let [n (parse-decimal (source form))]
     (if n
       (quasiquote (def parsed (unquote n)))
       (quote (def parsed-failed true)))))
 
 (defmacro emit-zero [form]
-  (let [n (str.parse-int (source form))]
+  (let [n (parse-decimal (source form))]
     (if n
       (quasiquote (def parsed-zero (unquote n)))
       (quote (def parsed-zero-failed true)))))
 
 (defmacro emit-invalid [form]
-  (if (parse-int (source form))
+  (if (parse-decimal (source form))
     (quote (def invalid-parsed true))
     (quote (def invalid-rejected true))))
 
+(defmacro decimal-digit? [form]
+  (let [s (source form)]
+    (and (= (count s) 1)
+               (contains? "0123456789" s))))
+
+(defmacro source-every? [predicate #form values]
+  (if (= (count values) 0)
+    true
+    (if (predicate (first values))
+      (source-every? predicate (rest values))
+      false)))
+
 (defmacro emit-digits [form]
-  (if (and (digit? (source form))
-           (every? str.digit? ["1" "2" "3"]))
+  (if (and (decimal-digit? form)
+                 (source-every? decimal-digit? [1 2 3]))
     (quote (def digits-ok true))
     (quote (def digits-bad true))))
 
@@ -7786,19 +10199,123 @@ macroexpand_evaluates_parse_int_and_digit_helpers :: proc(t: ^testing.T) {
 }
 
 @(test)
+macroexpand_user_macros_can_define_form_substitution :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defmacro- subst-symbol [form names values]
+  (if (= (count names) 0)
+    form
+    (if (= (source form) (source (first names)))
+      (first values)
+      (subst-symbol form (rest names) (rest values)))))
+
+(defmacro- subst-items [items names values]
+  (if (= (count items) 0)
+    (forms)
+    (concat
+      (forms (subst-form (first items) names values))
+      (subst-items (rest items) names values))))
+
+(defmacro- subst-form [form names values]
+  (if (= (count names) (count values))
+    (if (symbol? form)
+      (subst-symbol form names values)
+      (if (list? form)
+        (list (subst-items form names values))
+        (if (vector? form)
+          (vector (subst-items form names values))
+          (if (brace? form)
+            (brace (subst-items form names values))
+            form))))
+    (error "subst-form expects the same number of names and values")))
+
+(defmacro emit-answer []
+  (subst-form '(defn answer [] -> int (+ x 1))
+              (vector 'x)
+              (vector 41)))
+
+(emit-answer)`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "answer :: proc() -> int"), true)
+    testing.expect_value(t, strings.contains(output, "return (41) + (1)"), true)
+}
+
+@(test)
+macroexpand_user_macros_can_define_nil_predicate :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defmacro local-nil? [form]
+  (if (= form nil)
+    true
+    (if (form? form)
+      (= (text form) "nil")
+      false)))
+
+(defmacro emit-nil-flag [form]
+  (if (local-nil? form)
+    (quote (def saw-nil true))
+    (quote (def saw-value true))))
+
+(emit-nil-flag nil)`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "saw_nil :: true"), true)
+    testing.expect_value(t, strings.contains(output, "saw_value"), false)
+}
+
+@(test)
 macroexpand_evaluates_sequence_helpers :: proc(t: ^testing.T) {
     source := `(package main)
 
 (defmacro query-var? [form]
-  (and (symbol? form)
-       (str.starts-with? (source form) "?")))
+  (let [text (source form)]
+    (and (symbol? form)
+               (> (count text) 0)
+               (= (slice text 0 1) "?"))))
+
+(defmacro map [f #form values]
+  (if (= (count values) 0)
+    (forms)
+    (concat
+      (forms (f (first values)))
+      (map f (rest values)))))
+
+(defmacro filter [pred #form values]
+  (if (= (count values) 0)
+    (forms)
+    (let [head (first values)
+          tail (filter pred (rest values))]
+      (if (pred head)
+        (concat (forms head) tail)
+        tail))))
+
+(defmacro source-some? [predicate #form values]
+  (> (count (filter predicate values)) 0))
+
+(defmacro source-every? [predicate #form values]
+  (= (count (filter predicate values)) (count values)))
 
 (defmacro emit-vars [vars]
-  (if (every? query-var? vars)
+  (if (source-every? query-var? vars)
     (let [names (map source vars)
           kept (filter query-var? vars)]
-      (if (and (some? string? names)
-               (= (count kept) 2))
+      (if (and (source-some? string? names)
+                     (= (count kept) 2))
         (quote (def vars-ok true))
         (quote (def vars-bad true))))
     (quote (def vars-bad true))))
@@ -7818,17 +10335,53 @@ macroexpand_evaluates_sequence_helpers :: proc(t: ^testing.T) {
 }
 
 @(test)
-macroexpand_evaluates_reduce_helper :: proc(t: ^testing.T) {
+macroexpand_user_macros_can_define_recursive_fold :: proc(t: ^testing.T) {
     source := `(package main)
 
+(defmacro digit-value [s]
+  (cond
+    (= s "0") 0
+    (= s "1") 1
+    (= s "2") 2
+    (= s "3") 3
+    (= s "4") 4
+    (= s "5") 5
+    (= s "6") 6
+    (= s "7") 7
+    (= s "8") 8
+    (= s "9") 9
+    :else nil))
+
+(defmacro times-ten [n]
+  (+ n n n n n n n n n n))
+
+(defmacro parse-decimal-loop [text index acc]
+  (if (= index (count text))
+    acc
+    (let [digit (digit-value (slice text index (+ index 1)))]
+      (if digit
+        (parse-decimal-loop text (+ index 1) (+ (times-ten acc) digit))
+        nil))))
+
+(defmacro parse-decimal [text]
+  (if (= (count text) 0)
+    nil
+    (parse-decimal-loop text 0 0)))
+
 (defmacro add-source-int [acc form]
-  (let [n (parse-int (source form))]
+  (let [n (parse-decimal (source form))]
     (if n
       (+ acc n)
       (error (str "expected integer literal: " (source form))))))
 
+(defmacro sum-source-ints [forms acc]
+  (if (= (count forms) 0)
+    acc
+    (sum-source-ints (rest forms)
+                     (add-source-int acc (first forms)))))
+
 (defmacro emit-sum [forms]
-  (let [total (reduce add-source-int 0 forms)]
+  (let [total (sum-source-ints forms 0)]
     (quasiquote
       (def folded-total (unquote total)))))
 
@@ -7843,6 +10396,62 @@ macroexpand_evaluates_reduce_helper :: proc(t: ^testing.T) {
     defer delete(output)
 
     testing.expect_value(t, strings.contains(output, "folded_total :: 42"), true)
+}
+
+@(test)
+macro_transform_helpers_use_bare_core_names :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defmacro source-length [acc form]
+  (+ acc (count (source form))))
+
+(defmacro map [f #form values]
+  (if (= (count values) 0)
+    (forms)
+    (concat
+      (forms (f (first values)))
+      (map f (rest values)))))
+
+(defmacro filter [pred #form values]
+  (if (= (count values) 0)
+    (forms)
+    (let [head (first values)
+          tail (filter pred (rest values))]
+      (if (pred head)
+        (concat (forms head) tail)
+        tail))))
+
+(defmacro source-total [items acc]
+  (if (= (count items) 0)
+    acc
+    (source-total (rest items)
+                  (source-length acc (first items)))))
+
+(defmacro emit-transform-summary [items]
+  (let [names (map source items)
+        symbols (filter symbol? items)
+        total (source-total items 0)]
+    (forms
+      (quasiquote
+        (def macro-names-count (unquote (count names))))
+      (quasiquote
+        (def macro-symbols-count (unquote (count symbols))))
+      (quasiquote
+        (def macro-source-total (unquote total))))))
+
+(emit-transform-summary [aa 7 bb])`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "macro_names_count :: 3"), true)
+    testing.expect_value(t, strings.contains(output, "macro_symbols_count :: 2"), true)
+    testing.expect_value(t, strings.contains(output, "macro_source_total :: 5"), true)
 }
 
 @(test)
@@ -7944,7 +10553,7 @@ macroexpand_when_ok :: proc(t: ^testing.T) {
 @(test)
 macroexpand_if_ok :: proc(t: ^testing.T) {
     output, err, ok := kvist.macroexpand_source(`(if-ok [[data err] (read-text path)]
-  (len data)
+  (count data)
   0)`)
     testing.expect_value(t, ok, true)
     if !ok {
@@ -7953,7 +10562,7 @@ macroexpand_if_ok :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    expected := `(let [[data err] (read-text path)] (if (= err {}) (core-count data) 0))
+    expected := `(let [[data err] (read-text path)] (if (= err {}) (odin-call "len" data) 0))
 `
     testing.expect_value(t, output, expected)
 }
@@ -7986,7 +10595,7 @@ macroexpand_thread_first :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    expected := `(method-name req.method)
+    expected := `(method-name (odin-get req .method))
 `
     testing.expect_value(t, output, expected)
 }
@@ -8001,7 +10610,7 @@ macroexpand_thread_last :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    expected := `(core-count (arr.map inc (arr.filter even? xs)))
+    expected := `(odin-call "len" (arr.map inc (arr.filter even? xs)))
 `
     testing.expect_value(t, output, expected)
 }
@@ -8024,6 +10633,7 @@ macroexpand_doto_threads_target_through_setup_calls :: proc(t: ^testing.T) {
 @(test)
 reject_legacy_thread_helpers :: proc(t: ^testing.T) {
     source := `(package main)
+(import arr "kvist:arr")
 
 (defn main [xs: []int] -> int
   (->> xs
@@ -8045,7 +10655,7 @@ reject_legacy_thread_helpers :: proc(t: ^testing.T) {
 })
 
 (defn main [req: Request] -> int
-  (-> req .path len))`
+  (-> req .path count))`
 
     {
         output_thread_first, err_thread_first, ok_thread_first := kvist.compile_source(source)
@@ -8072,11 +10682,17 @@ macroexpand_rejects_binding_macro_shapes :: proc(t: ^testing.T) {
     defer delete(err_when_let.message)
     testing.expect_value(t, strings.contains(err_when_let.message, "when-let expects [value bool] expr binding pairs"), true)
 
+    _, err_when_let_tuple, ok_when_let_tuple := kvist.macroexpand_source(`(when-let [[value 1] (query)]
+  value)`)
+    testing.expect_value(t, ok_when_let_tuple, false)
+    defer delete(err_when_let_tuple.message)
+    testing.expect_value(t, strings.contains(err_when_let_tuple.message, "while expanding macro tuple-binding-name: let binding macros expect [value bool] bindings"), true)
+
     _, err_when_ok, ok_when_ok := kvist.macroexpand_source(`(when-ok [data (read-text path)]
   data)`)
     testing.expect_value(t, ok_when_ok, false)
     defer delete(err_when_ok.message)
-    testing.expect_value(t, strings.contains(err_when_ok.message, "error binding macros expect [value err] bindings"), true)
+    testing.expect_value(t, strings.contains(err_when_ok.message, "while expanding macro tuple-binding-name: error binding macros expect [value err] bindings"), true)
 
     _, err_if_ok, ok_if_ok := kvist.macroexpand_source(`(if-ok [[data err] (read-text path)]
   data)`)
@@ -8182,12 +10798,12 @@ macroexpand_gensym_creates_stable_symbol_within_expansion :: proc(t: ^testing.T)
 
     testing.expect_value(t, strings.contains(output.output, "(let [__tmp_"), true)
     testing.expect_value(t, strings.contains(output.output, "(if __tmp_"), true)
-    testing.expect_value(t, strings.contains(output.output, "(core-println __tmp_"), true)
+    testing.expect_value(t, strings.contains(output.output, "(fmt.println __tmp_"), true)
 }
 
 @(test)
-compile_path_macro_io_read_uses_source_relative_file_at_compile_time :: proc(t: ^testing.T) {
-    dir, dir_err := os.make_directory_temp("", "kvist-macro-io-read-*", context.allocator)
+compile_path_macro_read_file_uses_source_relative_file_at_compile_time :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-macro-read-file-*", context.allocator)
     testing.expect_value(t, dir_err == nil, true)
     if dir_err != nil {
         return
@@ -8216,10 +10832,9 @@ compile_path_macro_io_read_uses_source_relative_file_at_compile_time :: proc(t: 
     defer delete(main_path)
 
     source := `(package main)
-(import io "kvist:io")
 
 (defmacro def-template []
-  (let [text (io.read "template.html")]
+  (let [text (read-file "template.html")]
     (quasiquote
       (def template: string (unquote text)))))
 
@@ -8247,8 +10862,8 @@ compile_path_macro_io_read_uses_source_relative_file_at_compile_time :: proc(t: 
 }
 
 @(test)
-compile_path_macro_io_read_reports_missing_compile_time_file :: proc(t: ^testing.T) {
-    dir, dir_err := os.make_directory_temp("", "kvist-macro-io-read-missing-*", context.allocator)
+compile_path_macro_read_file_reports_missing_compile_time_file :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-macro-read-file-missing-*", context.allocator)
     testing.expect_value(t, dir_err == nil, true)
     if dir_err != nil {
         return
@@ -8264,10 +10879,9 @@ compile_path_macro_io_read_reports_missing_compile_time_file :: proc(t: ^testing
     defer delete(main_path)
 
     source := `(package main)
-(import io "kvist:io")
 
 (defmacro def-template []
-  (let [text (io.read "missing.html")]
+  (let [text (read-file "missing.html")]
     (quasiquote
       (def template: string (unquote text)))))
 
@@ -8285,8 +10899,98 @@ compile_path_macro_io_read_reports_missing_compile_time_file :: proc(t: ^testing
         return
     }
     defer delete(err.message)
-    testing.expect_value(t, strings.contains(err.message, "compile-time io.read could not read file:"), true)
+    testing.expect_value(t, strings.contains(err.message, "compile-time read-file could not read file:"), true)
     testing.expect_value(t, strings.contains(err.message, "missing.html"), true)
+}
+
+@(test)
+macro_kvist_read_file_alias_is_not_macro_helper :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defmacro def-template []
+  (let [text (kvist.read-file "template.html")]
+    (quasiquote
+      (def template: string (unquote text)))))
+
+(def-template)`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+    testing.expect_value(t, strings.contains(output, "template.html"), true)
+    testing.expect_value(t, strings.contains(output, "Compile-time"), false)
+}
+
+@(test)
+macro_sequence_helpers_use_auto_referred_core_names :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defmacro emit-counts [items]
+  (forms
+    (quasiquote
+      (def macro-count: int (unquote (count items))))
+    (quasiquote
+      (def macro-count-again: int (unquote (count items))))))
+
+(emit-counts [1 2 3])`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+    testing.expect_value(t, strings.contains(output, "macro_count: int : 3"), true)
+    testing.expect_value(t, strings.contains(output, "macro_count_again: int : 3"), true)
+}
+
+@(test)
+macro_contains_helper_uses_auto_referred_core_name :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defmacro emit-contains [items]
+  (forms
+    (quasiquote
+      (def macro-has-two: bool (unquote (contains? items 2))))
+    (quasiquote
+      (def macro-has-two-again: bool (unquote (contains? items 2))))))
+
+(emit-contains [1 2 3])`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+    testing.expect_value(t, strings.contains(output, "macro_has_two: bool : true"), true)
+    testing.expect_value(t, strings.contains(output, "macro_has_two_again: bool : true"), true)
+}
+
+@(test)
+macro_qualified_kvist_helpers_are_ordinary_source_calls :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defmacro emit-count [items]
+  (quasiquote
+    (def macro-count: int (unquote (kvist.count items)))))
+
+(emit-count [1 2 3])`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+    testing.expect_value(t, strings.contains(output, "macro_count: int : 3"), false)
 }
 
 @(test)
@@ -8357,14 +11061,14 @@ compile_source_with_recursive_macro_dsl :: proc(t: ^testing.T) {
 (defmacro emit-union-ctors [union-name variants]
   (if (= (count variants) 0)
     (forms)
-    (let [tag (arr.first variants)
-          value-type (arr.nth variants 1)
+    (let [tag (first variants)
+          value-type (nth variants 1)
           ctor-name (symbol (str "make-" (name union-name) "-" (name tag)))]
       (forms
         (quasiquote
           (defn (unquote ctor-name) [value: (unquote value-type)] -> (unquote union-name)
             ((unquote union-name) {(unquote tag) value})))
-        (emit-union-ctors union-name (arr.rest (arr.rest variants)))))))
+        (emit-union-ctors union-name (rest (rest variants)))))))
 
 (defmacro defunion+ctors [name variants]
   (forms
@@ -8400,37 +11104,37 @@ compile_source_with_message_family_macro :: proc(t: ^testing.T) {
 (defmacro emit-message-structs [entries]
   (if (= (count entries) 0)
     (forms)
-    (let [entry (arr.first entries)
-          struct-name (arr.nth entry 0)
-          fields (arr.nth entry 1)]
+    (let [entry (first entries)
+          struct-name (nth entry 0)
+          fields (nth entry 1)]
       (forms
         (quasiquote
           (defstruct (unquote struct-name) (unquote fields)))
-        (emit-message-structs (arr.rest entries))))))
+        (emit-message-structs (rest entries))))))
 
 (defmacro emit-message-union-entries [entries]
   (if (= (count entries) 0)
     (forms)
-    (let [entry (arr.first entries)
-          struct-name (arr.nth entry 0)
+    (let [entry (first entries)
+          struct-name (nth entry 0)
           tag (symbol (str (name struct-name) ":"))]
       (forms
         tag
         struct-name
-        (emit-message-union-entries (arr.rest entries))))))
+        (emit-message-union-entries (rest entries))))))
 
 (defmacro emit-message-ctors [union-name entries]
   (if (= (count entries) 0)
     (forms)
-    (let [entry (arr.first entries)
-          struct-name (arr.nth entry 0)
+    (let [entry (first entries)
+          struct-name (nth entry 0)
           ctor-name (symbol (str "make-" (name union-name) "-" (name struct-name)))
           tag (symbol (str (name struct-name) ":"))]
       (forms
         (quasiquote
           (defn (unquote ctor-name) [value: (unquote struct-name)] -> (unquote union-name)
             ((unquote union-name) {(unquote tag) value})))
-        (emit-message-ctors union-name (arr.rest entries))))))
+        (emit-message-ctors union-name (rest entries))))))
 
 (defmacro defmessages [union-name entries]
   (forms
@@ -8507,6 +11211,7 @@ main :: proc() {
 @(test)
 compile_core_higher_order_helpers_and_slice_exprs :: proc(t: ^testing.T) {
     source := `(package main)
+(import arr "kvist:arr")
 (import core "kvist:core")
 
 (defn inc [x: int] -> int
@@ -8523,10 +11228,7 @@ compile_core_higher_order_helpers_and_slice_exprs :: proc(t: ^testing.T) {
         mapped (arr.map inc xs)
         tail (slice mapped 1)
         evens (arr.filter even? mapped)
-        total (->> xs
-                   (arr.map inc)
-                   (arr.filter even?)
-                   (arr.reduce add 0))
+        total (count evens)
         middle (slice mapped 0 1)]
     (defer (delete mapped))
     (defer (delete evens))
@@ -8540,63 +11242,13 @@ compile_core_higher_order_helpers_and_slice_exprs :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    expected := `package main
-
-inc :: proc(x: int) -> int {
-    return (x) + (1)
-}
-
-even_p :: proc(x: int) -> bool {
-    return ((x) % (2)) == (0)
-}
-
-add :: proc(acc, x: int) -> int {
-    return (acc) + (x)
-}
-
-main :: proc() {
-    xs := []int{1, 2, 3, 4}
-    mapped := kvist_map(inc, (xs)[:])
-    tail := (mapped)[1:]
-    evens := kvist_filter(even_p, (mapped)[:])
-    kvist_thread_1 := kvist_map(inc, (xs)[:])
-    defer delete(kvist_thread_1)
-    kvist_thread_2 := kvist_filter(even_p, (kvist_thread_1)[:])
-    defer delete(kvist_thread_2)
-    total := kvist_reduce(add, 0, (kvist_thread_2)[:])
-    middle := (mapped)[0:1]
-    defer delete(mapped)
-    defer delete(evens)
-    return
-}
-
-kvist_map :: proc(f: proc(x: $T) -> $U, xs: []T) -> [dynamic]U {
-    out := make([dynamic]U, 0, len(xs))
-    for x in xs {
-        append(&out, f(x))
-    }
-    return out
-}
-
-kvist_filter :: proc(pred: proc(x: $T) -> bool, xs: []T) -> [dynamic]T {
-    out := make([dynamic]T, 0, len(xs))
-    for x in xs {
-        if pred(x) {
-            append(&out, x)
-        }
-    }
-    return out
-}
-
-kvist_reduce :: proc(f: proc(acc: $U, x: $T) -> U, init: U, xs: []T) -> U {
-    acc := init
-    for x in xs {
-        acc = f(acc, x)
-    }
-    return acc
-}
-`
-    testing.expect_value(t, output, expected)
+    testing.expect_value(t, strings.contains(output, "mapped := arr__map_impl(inc, (xs)[0:])"), true)
+    testing.expect_value(t, strings.contains(output, "evens := arr__filter_impl(even_p, (mapped)[0:])"), true)
+    testing.expect_value(t, strings.contains(output, "total := len(evens)"), true)
+    testing.expect_value(t, strings.contains(output, "defer delete(mapped)"), true)
+    testing.expect_value(t, strings.contains(output, "defer delete(evens)"), true)
+    testing.expect_value(t, strings.contains(output, "arr__map_impl :: #force_inline proc"), true)
+    testing.expect_value(t, strings.contains(output, "arr__filter_impl :: #force_inline proc"), true)
 }
 
 @(test)
@@ -8655,9 +11307,10 @@ compile_sequence_trim_helpers_as_slice_views :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "without_two := arr__drop_last(2, xs)"), true)
     testing.expect_value(t, strings.contains(output, "small_prefix := arr__take_while_impl(keep_p, (xs)[0:])"), true)
     testing.expect_value(t, strings.contains(output, "large_suffix := arr__drop_while_impl(keep_p, (xs)[0:])"), true)
-    testing.expect_value(t, strings.contains(output, "threaded_count := len((arr__drop_last(1, xs))[:])"), true)
+    testing.expect_value(t, strings.contains(output, "threaded_count := len(arr__drop_last(1, xs))"), true)
     testing.expect_value(t, strings.contains(output, "arr__take :: #force_inline proc(n: int, xs: []$T) -> []T"), true)
     testing.expect_value(t, strings.contains(output, "return (xs)[0:limit]"), true)
+    testing.expect_value(t, strings.contains(output, "#borrowed"), false)
     testing.expect_value(t, strings.contains(output, "arr__drop :: #force_inline proc(n: int, xs: []$T) -> []T"), true)
     testing.expect_value(t, strings.contains(output, "return (xs)[start:]"), true)
     testing.expect_value(t, strings.contains(output, "arr__drop_last :: #force_inline proc(n: int, xs: []$T) -> []T"), true)
@@ -8723,6 +11376,7 @@ compile_named_functional_transform_into_and_transduce :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "append(kvist_out, kvist_xform_"), true)
     testing.expect_value(t, strings.contains(output, "kvist_acc += kvist_xform_"), true)
     testing.expect_value(t, strings.contains(output, "paid_order_totals ::"), false)
+    testing.expect_value(t, strings.contains(output, "kvist-prim-dynamic-array-into"), false)
 }
 
 @(test)
@@ -8769,7 +11423,7 @@ compile_defiter_each_into_and_transduce_consumers :: proc(t: ^testing.T) {
   (File_Source {items: items index: 0}))
 
 (defn next-file [src: ^File_Source] -> [path: string ok: bool]
-  (if (< src.index (len src.items))
+  (if (< src.index (count src.items))
     (let [path src.items[src.index]]
       (set! src.index (+ src.index 1))
       (return path true))
@@ -8779,10 +11433,10 @@ compile_defiter_each_into_and_transduce_consumers :: proc(t: ^testing.T) {
   (set! src.index 0))
 
 (defn long-path? [path: string] -> bool
-  (> (len path) 5))
+  (> (count path) 5))
 
 (defn path-length [path: string] -> int
-  (len path))
+  (count path))
 
 (defiter files [items: []string] -> File_Source :yield string
   :next next-file
@@ -8792,7 +11446,7 @@ compile_defiter_each_into_and_transduce_consumers :: proc(t: ^testing.T) {
 (defn total-name-length [items: []string] -> int
   (let [total 0]
     (for [path (files items)]
-      (set! total (+ total (len path))))
+      (set! total (+ total (count path))))
     total))
 
 (defn long-paths [items: []string] -> [dynamic]string
@@ -8876,7 +11530,7 @@ compile_defiter_each_into_and_transduce_consumers :: proc(t: ^testing.T) {
 }
 
 @(test)
-reject_source_call_outside_source_consumer :: proc(t: ^testing.T) {
+compile_defiter_call_materializes_in_expression_context :: proc(t: ^testing.T) {
     source := `(package main)
 
 (defstruct File_Source {
@@ -8896,15 +11550,111 @@ reject_source_call_outside_source_consumer :: proc(t: ^testing.T) {
 
 (defn bad [items: []string] -> int
   (let [src (files items)]
-    0))`
+    (count src)))`
 
-    _, err, ok := kvist.compile_source(source)
-    testing.expect_value(t, ok, false)
-    if ok {
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
         return
     }
-    defer delete(err.message)
-    testing.expect_value(t, err.message, "iterator files can currently only be consumed by for, into, or transduce")
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "src := (proc(kvist_source_arg_1: []string) -> [dynamic]string {"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_source := files(kvist_source_arg_1)"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_item, kvist_source_ok := next_file(&kvist_source)"), true)
+    testing.expect_value(t, strings.contains(output, "append(&kvist_out, kvist_item)"), true)
+}
+
+@(test)
+compile_source_package_macro_can_expand_to_private_defiter :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-defiter-package-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    pkg_dir, pkg_dir_err := os.join_path({dir, "support"}, context.allocator)
+    testing.expect_value(t, pkg_dir_err == nil, true)
+    if pkg_dir_err != nil {
+        return
+    }
+    defer delete(pkg_dir)
+    mk_pkg_err := os.make_directory_all(pkg_dir)
+    testing.expect_value(t, mk_pkg_err == nil, true)
+    if mk_pkg_err != nil {
+        return
+    }
+
+    pkg_path, pkg_path_err := os.join_path({pkg_dir, "support.kvist"}, context.allocator)
+    testing.expect_value(t, pkg_path_err == nil, true)
+    if pkg_path_err != nil {
+        return
+    }
+    defer delete(pkg_path)
+    pkg_source := `(package support)
+
+(defstruct- Num-Source {
+  current: int
+  end: int
+})
+
+(defn- next-num [src: ^Num-Source] -> [value: int ok: bool]
+  (if (< src.current src.end)
+    (let [value src.current]
+      (set! src.current (+ src.current 1))
+      (return value true))
+    (return 0 false)))
+
+(defiter- nums-impl [end: int] -> Num-Source :yield int
+  :next next-num
+  (Num-Source {current: 0 end: end}))
+
+(defmacro nums [end]
+  (quasiquote
+    (support__nums_impl (unquote end))))`
+    pkg_write_err := os.write_entire_file_from_string(pkg_path, pkg_source)
+    testing.expect_value(t, pkg_write_err == nil, true)
+    if pkg_write_err != nil {
+        return
+    }
+
+    main_path, main_path_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, main_path_err == nil, true)
+    if main_path_err != nil {
+        return
+    }
+    defer delete(main_path)
+    main_source := `(package main)
+(import support "support")
+
+(defn inc [x: int] -> int
+  (+ x 1))
+
+(defn demo [n: int] -> int
+  (transduce
+    (map inc)
+    + 0
+    (support.nums n)))`
+    main_write_err := os.write_entire_file_from_string(main_path, main_source)
+    testing.expect_value(t, main_write_err == nil, true)
+    if main_write_err != nil {
+        return
+    }
+
+    output, err, ok := kvist.compile_path(main_path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "support__nums_impl :: proc(end: int) -> support__Num_Source {"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_source := support__nums_impl(kvist_source_arg_1)"), true)
+    testing.expect_value(t, strings.contains(output, "support__next_num(&kvist_source)"), true)
 }
 
 @(test)
@@ -8932,7 +11682,7 @@ reject_defiter_next_wrong_state_parameter :: proc(t: ^testing.T) {
 (defn consume [] -> int
   (let [total 0]
     (for [path (files)]
-      (set! total (+ total (len path))))
+      (set! total (+ total (count path))))
     total))`
 
     _, err, ok := kvist.compile_source(source)
@@ -8965,7 +11715,7 @@ reject_defiter_next_wrong_return_shape :: proc(t: ^testing.T) {
 (defn consume [] -> int
   (let [total 0]
     (for [path (files)]
-      (set! total (+ total (len path))))
+      (set! total (+ total (count path))))
     total))`
 
     _, err, ok := kvist.compile_source(source)
@@ -9002,7 +11752,7 @@ reject_defiter_dispose_return_value :: proc(t: ^testing.T) {
 (defn consume [] -> int
   (let [total 0]
     (for [path (files)]
-      (set! total (+ total (len path))))
+      (set! total (+ total (count path))))
     total))`
 
     _, err, ok := kvist.compile_source(source)
@@ -9015,7 +11765,7 @@ reject_defiter_dispose_return_value :: proc(t: ^testing.T) {
 }
 
 @(test)
-compile_parallel_start_result_and_detach :: proc(t: ^testing.T) {
+compile_thread_start_result_and_detach :: proc(t: ^testing.T) {
     source := `(package main)
 (import p "kvist:parallel")
 
@@ -9044,34 +11794,35 @@ compile_parallel_start_result_and_detach :: proc(t: ^testing.T) {
 
     testing.expect_value(t, strings.contains(output, "import chan \"core:sync/chan\""), true)
     testing.expect_value(t, strings.contains(output, "import thread \"core:thread\""), true)
-    testing.expect_value(t, strings.contains(output, "zero_task := parallel_start_zero_void_int()"), true)
-    testing.expect_value(t, strings.contains(output, "combine_task := parallel_start_combine_int_int_int_int(1, 2, 3)"), true)
-    testing.expect_value(t, strings.contains(output, "parallel_detach_notify_int(99)"), true)
-    testing.expect_value(t, strings.contains(output, "return (parallel_result(zero_task)) + (parallel_result(combine_task))"), true)
+    testing.expect_value(t, strings.contains(output, "zero_task := thread_start_zero_void_int()"), true)
+    testing.expect_value(t, strings.contains(output, "combine_task := thread_start_combine_int_int_int_int(1, 2, 3)"), true)
+    testing.expect_value(t, strings.contains(output, "thread_detach_notify_int(99)"), true)
+    testing.expect_value(t, strings.contains(output, "return (p__result_impl(zero_task)) + (p__result_impl(combine_task))"), true)
     testing.expect_value(t, strings.contains(output, "parallel_Task :: struct($T: typeid)"), true)
     testing.expect_value(t, strings.contains(output, "result: chan.Chan(T),"), true)
     testing.expect_value(t, strings.contains(output, "thread: ^thread.Thread,"), true)
-    testing.expect_value(t, strings.contains(output, "parallel_Start_Data_zero_void_int :: struct"), true)
+    testing.expect_value(t, strings.contains(output, "thread_Start_Data_zero_void_int :: struct"), true)
     testing.expect_value(t, strings.contains(output, "chan.send(data.result, zero())"), true)
-    testing.expect_value(t, strings.contains(output, "parallel_start_zero_void_int :: proc() -> parallel_Task(int)"), true)
-    testing.expect_value(t, strings.contains(output, "parallel_Start_Data_combine_int_int_int_int :: struct"), true)
+    testing.expect_value(t, strings.contains(output, "thread_start_zero_void_int :: proc() -> parallel_Task(int)"), true)
+    testing.expect_value(t, strings.contains(output, "thread_Start_Data_combine_int_int_int_int :: struct"), true)
     testing.expect_value(t, strings.contains(output, "a: int,"), true)
     testing.expect_value(t, strings.contains(output, "b: int,"), true)
     testing.expect_value(t, strings.contains(output, "c: int,"), true)
     testing.expect_value(t, strings.contains(output, "chan.send(data.result, combine(data.a, data.b, data.c))"), true)
-    testing.expect_value(t, strings.contains(output, "parallel_start_combine_int_int_int_int :: proc(a: int, b: int, c: int) -> parallel_Task(int)"), true)
-    testing.expect_value(t, strings.contains(output, "thread.create_and_start_with_poly_data(data, parallel_start_worker_combine_int_int_int_int)"), true)
-    testing.expect_value(t, strings.contains(output, "parallel_result :: proc(task: parallel_Task($T)) -> T"), true)
+    testing.expect_value(t, strings.contains(output, "thread_start_combine_int_int_int_int :: proc(a: int, b: int, c: int) -> parallel_Task(int)"), true)
+    testing.expect_value(t, strings.contains(output, "thread.create_and_start_with_poly_data(data, thread_start_worker_combine_int_int_int_int)"), true)
+    testing.expect_value(t, strings.contains(output, "p__result_impl :: #force_inline proc(task: parallel_Task($T)) -> T"), true)
+    testing.expect_value(t, strings.contains(output, "parallel_result :: proc"), false)
     testing.expect_value(t, strings.contains(output, "thread.join(task.thread)"), true)
     testing.expect_value(t, strings.contains(output, "thread.destroy(task.thread)"), true)
     testing.expect_value(t, strings.contains(output, "free(task.data)"), true)
     testing.expect_value(t, strings.contains(output, "chan.destroy(task.result)"), true)
-    testing.expect_value(t, strings.contains(output, "parallel_Detach_Data_notify_int :: struct"), true)
-    testing.expect_value(t, strings.contains(output, "parallel_detach_worker_notify_int :: proc(data: ^parallel_Detach_Data_notify_int)"), true)
+    testing.expect_value(t, strings.contains(output, "thread_Detach_Data_notify_int :: struct"), true)
+    testing.expect_value(t, strings.contains(output, "thread_detach_worker_notify_int :: proc(data: ^thread_Detach_Data_notify_int)"), true)
     testing.expect_value(t, strings.contains(output, "notify(data.user_id)"), true)
-    testing.expect_value(t, strings.contains(output, "parallel_detach_notify_int :: proc(user_id: int)"), true)
-    testing.expect_value(t, strings.contains(output, "thread.create_and_start_with_poly_data(data, parallel_detach_worker_notify_int, nil, .Normal, true)"), true)
-    testing.expect_value(t, strings.contains(output, "assert(false, \"parallel.detach could not start worker thread\")"), true)
+    testing.expect_value(t, strings.contains(output, "thread_detach_notify_int :: proc(user_id: int)"), true)
+    testing.expect_value(t, strings.contains(output, "thread.create_and_start_with_poly_data(data, thread_detach_worker_notify_int, nil, .Normal, true)"), true)
+    testing.expect_value(t, strings.contains(output, "assert(false, \"thread-detach could not start worker thread\")"), true)
 }
 
 @(test)
@@ -9096,15 +11847,15 @@ compile_parallel_repeated_start_reuses_helper :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    testing.expect_value(t, strings.contains(output, "a := parallel_start_square_int_int(1)"), true)
-    testing.expect_value(t, strings.contains(output, "b := parallel_start_square_int_int(2)"), true)
-    testing.expect_value(t, strings.contains(output, "c := parallel_start_square_int_int(3)"), true)
-    testing.expect_value(t, count_substring(output, "parallel_start_square_int_int :: proc(x: int) -> parallel_Task(int)"), 1)
-    testing.expect_value(t, count_substring(output, "parallel_start_worker_square_int_int :: proc(data: ^parallel_Start_Data_square_int_int)"), 1)
+    testing.expect_value(t, strings.contains(output, "a := thread_start_square_int_int(1)"), true)
+    testing.expect_value(t, strings.contains(output, "b := thread_start_square_int_int(2)"), true)
+    testing.expect_value(t, strings.contains(output, "c := thread_start_square_int_int(3)"), true)
+    testing.expect_value(t, count_substring(output, "thread_start_square_int_int :: proc(x: int) -> parallel_Task(int)"), 1)
+    testing.expect_value(t, count_substring(output, "thread_start_worker_square_int_int :: proc(data: ^thread_Start_Data_square_int_int)"), 1)
 }
 
 @(test)
-compile_parallel_map_named_worker :: proc(t: ^testing.T) {
+compile_thread_map_named_worker :: proc(t: ^testing.T) {
     source := `(package main)
 (import p "kvist:parallel")
 
@@ -9123,27 +11874,27 @@ compile_parallel_map_named_worker :: proc(t: ^testing.T) {
     defer delete(output)
 
     testing.expect_value(t, strings.contains(output, "import os \"core:os\""), true)
-    testing.expect_value(t, strings.contains(output, "return parallel_map_square_int_int((xs)[:], 0)"), true)
-    testing.expect_value(t, strings.contains(output, "parallel_Map_Data_square_int_int :: struct"), true)
-    testing.expect_value(t, strings.contains(output, "xs: []int,"), true)
-    testing.expect_value(t, strings.contains(output, "out: [dynamic]int,"), true)
-    testing.expect_value(t, strings.contains(output, "parallel_map_worker_square_int_int :: proc(data: ^parallel_Map_Data_square_int_int)"), true)
-    testing.expect_value(t, strings.contains(output, "data.out[i] = square(data.xs[i])"), true)
-    testing.expect_value(t, strings.contains(output, "parallel_map_square_int_int :: proc(xs: []int, requested_worker_count: int) -> [dynamic]int"), true)
-    testing.expect_value(t, strings.contains(output, "out := make([dynamic]int, len(xs))"), true)
+    testing.expect_value(t, strings.contains(output, "return p__map_impl(square, xs, 0)"), true)
+    testing.expect_value(t, strings.contains(output, "p__map_impl :: #force_inline proc(f: proc(x: $T) -> $U, xs: []T, requested_worker_count: int) -> [dynamic]U"), true)
+    testing.expect_value(t, strings.contains(output, "p__map_worker :: proc(f: proc(x: $T) -> $U, xs: []T, out: ^[dynamic]U, start, step: int) -> bool"), true)
+    testing.expect_value(t, strings.contains(output, "(out^)[i] = f((xs)[i])"), true)
+    testing.expect_value(t, strings.contains(output, "out := make([dynamic]U, len(xs))"), true)
     testing.expect_value(t, strings.contains(output, "worker_count := requested_worker_count"), true)
-    testing.expect_value(t, strings.contains(output, "worker_count = os.get_processor_core_count() - 1"), true)
-    testing.expect_value(t, strings.contains(output, "if worker_count > 16"), true)
-    testing.expect_value(t, strings.contains(output, "if worker_count > len(xs)"), true)
-    testing.expect_value(t, strings.contains(output, "thread.create_and_start_with_poly_data(data, parallel_map_worker_square_int_int)"), true)
-    testing.expect_value(t, strings.contains(output, "thread.join(task_thread)"), true)
-    testing.expect_value(t, strings.contains(output, "thread.destroy(task_thread)"), true)
-    testing.expect_value(t, strings.contains(output, "free(data)"), true)
+    testing.expect_value(t, strings.contains(output, "worker_count = (os.get_processor_core_count()) - (1)"), true)
+    testing.expect_value(t, strings.contains(output, "if (worker_count) > (16)"), true)
+    testing.expect_value(t, strings.contains(output, "if (worker_count) > (source_count)"), true)
+    testing.expect_value(t, strings.contains(output, "append(&tasks, thread_start_p__map_worker_"), true)
+    testing.expect_value(t, strings.contains(output, "chan.send(data.result, p__map_worker(data.f, data.xs, data.out, data.start, data.step))"), true)
+    testing.expect_value(t, strings.contains(output, "_ = p__result_impl((tasks)[i])"), true)
+    testing.expect_value(t, strings.contains(output, "thread.join(task.thread)"), true)
+    testing.expect_value(t, strings.contains(output, "thread.destroy(task.thread)"), true)
+    testing.expect_value(t, strings.contains(output, "free(task.data)"), true)
     testing.expect_value(t, strings.contains(output, "return out"), true)
+    testing.expect_value(t, strings.contains(output, "thread_map_square_int_int"), false)
 }
 
 @(test)
-compile_parallel_map_reuses_helper :: proc(t: ^testing.T) {
+compile_thread_map_reuses_helper :: proc(t: ^testing.T) {
     source := `(package main)
 (import p "kvist:parallel")
 
@@ -9165,12 +11916,14 @@ compile_parallel_map_reuses_helper :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    testing.expect_value(t, count_substring(output, "parallel_map_square_int_int :: proc(xs: []int, requested_worker_count: int) -> [dynamic]int"), 1)
-    testing.expect_value(t, count_substring(output, "parallel_map_worker_square_int_int :: proc(data: ^parallel_Map_Data_square_int_int)"), 1)
+    testing.expect_value(t, count_substring(output, "p__map_impl :: #force_inline proc(f: proc(x: $T) -> $U, xs: []T, requested_worker_count: int) -> [dynamic]U"), 1)
+    testing.expect_value(t, count_substring(output, "p__map_worker :: proc(f: proc(x: $T) -> $U, xs: []T, out: ^[dynamic]U, start, step: int) -> bool"), 1)
+    testing.expect_value(t, strings.contains(output, "thread_start_worker_p__map_worker_"), true)
+    testing.expect_value(t, strings.contains(output, "thread_map_square_int_int"), false)
 }
 
 @(test)
-compile_parallel_map_with_worker_count :: proc(t: ^testing.T) {
+compile_thread_map_with_worker_count :: proc(t: ^testing.T) {
     source := `(package main)
 (import p "kvist:parallel")
 
@@ -9188,12 +11941,13 @@ compile_parallel_map_with_worker_count :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    testing.expect_value(t, strings.contains(output, "return parallel_map_square_int_int((xs)[:], 4)"), true)
-    testing.expect_value(t, strings.contains(output, "parallel_map_square_int_int :: proc(xs: []int, requested_worker_count: int) -> [dynamic]int"), true)
+    testing.expect_value(t, strings.contains(output, "return p__map_impl(square, xs, 4)"), true)
+    testing.expect_value(t, strings.contains(output, "p__map_impl :: #force_inline proc(f: proc(x: $T) -> $U, xs: []T, requested_worker_count: int) -> [dynamic]U"), true)
+    testing.expect_value(t, strings.contains(output, "thread_map_square_int_int"), false)
 }
 
 @(test)
-compile_parallel_map_and_map_with_reuse_helper :: proc(t: ^testing.T) {
+compile_thread_map_and_map_with_reuse_helper :: proc(t: ^testing.T) {
     source := `(package main)
 (import p "kvist:parallel")
 
@@ -9215,14 +11969,15 @@ compile_parallel_map_and_map_with_reuse_helper :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    testing.expect_value(t, strings.contains(output, "a := parallel_map_square_int_int((xs)[:], 0)"), true)
-    testing.expect_value(t, strings.contains(output, "b := parallel_map_square_int_int((xs)[:], 2)"), true)
-    testing.expect_value(t, count_substring(output, "parallel_map_square_int_int :: proc(xs: []int, requested_worker_count: int) -> [dynamic]int"), 1)
-    testing.expect_value(t, count_substring(output, "parallel_map_worker_square_int_int :: proc(data: ^parallel_Map_Data_square_int_int)"), 1)
+    testing.expect_value(t, strings.contains(output, "a := p__map_impl(square, xs, 0)"), true)
+    testing.expect_value(t, strings.contains(output, "b := p__map_impl(square, xs, 2)"), true)
+    testing.expect_value(t, count_substring(output, "p__map_impl :: #force_inline proc(f: proc(x: $T) -> $U, xs: []T, requested_worker_count: int) -> [dynamic]U"), 1)
+    testing.expect_value(t, count_substring(output, "p__map_worker :: proc(f: proc(x: $T) -> $U, xs: []T, out: ^[dynamic]U, start, step: int) -> bool"), 1)
+    testing.expect_value(t, strings.contains(output, "thread_map_square_int_int"), false)
 }
 
 @(test)
-reject_parallel_start_wrong_arity :: proc(t: ^testing.T) {
+reject_thread_start_wrong_arity :: proc(t: ^testing.T) {
     source := `(package main)
 (import p "kvist:parallel")
 
@@ -9238,11 +11993,106 @@ reject_parallel_start_wrong_arity :: proc(t: ^testing.T) {
         return
     }
     defer delete(err.message)
-    testing.expect_value(t, err.message, "parallel.start worker combine expects 2 arguments, got 1")
+    testing.expect_value(t, err.message, "thread-start worker combine expects 2 arguments, got 1")
 }
 
 @(test)
-compile_parallel_start_inline_worker :: proc(t: ^testing.T) {
+compile_source_package_can_use_thread_start :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-thread-start-package-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    pkg_dir, pkg_dir_err := os.join_path({dir, "support"}, context.allocator)
+    testing.expect_value(t, pkg_dir_err == nil, true)
+    if pkg_dir_err != nil {
+        return
+    }
+    defer delete(pkg_dir)
+    mk_pkg_err := os.make_directory_all(pkg_dir)
+    testing.expect_value(t, mk_pkg_err == nil, true)
+    if mk_pkg_err != nil {
+        return
+    }
+
+    pkg_path, pkg_path_err := os.join_path({pkg_dir, "support.kvist"}, context.allocator)
+    testing.expect_value(t, pkg_path_err == nil, true)
+    if pkg_path_err != nil {
+        return
+    }
+    defer delete(pkg_path)
+    pkg_source := `(package support)
+
+(odin "support_Task :: struct($T: typeid) {
+    result: chan.Chan(T),
+    thread: ^thread.Thread,
+    data: rawptr,
+}")
+
+(defmacro start
+  [worker & args]
+  (quasiquote
+    (thread-start support_Task (unquote worker) (splice args))))
+
+(defn result
+  [task: (support_Task $T)] -> T #force_inline
+  (let [[value ok] (chan.recv task.result)]
+    (thread.join task.thread)
+    (thread.destroy task.thread)
+    (free task.data)
+    (chan.destroy task.result)
+    (assert ok "task ended without a result")
+    value))`
+    pkg_write_err := os.write_entire_file_from_string(pkg_path, pkg_source)
+    testing.expect_value(t, pkg_write_err == nil, true)
+    if pkg_write_err != nil {
+        return
+    }
+
+    main_path, main_path_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, main_path_err == nil, true)
+    if main_path_err != nil {
+        return
+    }
+    defer delete(main_path)
+    main_source := `(package main)
+(import support "support")
+
+(defn square [x: int] -> int
+  (* x x))
+
+(defn demo [] -> int
+  (support.result (support.start square 6)))`
+    main_write_err := os.write_entire_file_from_string(main_path, main_source)
+    testing.expect_value(t, main_write_err == nil, true)
+    if main_write_err != nil {
+        return
+    }
+
+    output, err, ok := kvist.compile_path(main_path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "import chan \"core:sync/chan\""), true)
+    testing.expect_value(t, strings.contains(output, "import thread \"core:thread\""), true)
+    testing.expect_value(t, strings.contains(output, "support_Task :: struct($T: typeid)"), true)
+    testing.expect_value(t, strings.contains(output, "return support__result(thread_start_square_int_int(6))"), true)
+    testing.expect_value(t, strings.contains(output, "thread_Start_Data_square_int_int :: struct"), true)
+    testing.expect_value(t, strings.contains(output, "thread_start_square_int_int :: proc(x: int) -> support_Task(int)"), true)
+    testing.expect_value(t, strings.contains(output, "return support_Task(int){result = result, thread = task_thread, data = data}"), true)
+    testing.expect_value(t, strings.contains(output, "parallel_Task"), false)
+    testing.expect_value(t, strings.contains(output, "kvist:parallel"), false)
+}
+
+@(test)
+compile_thread_start_inline_worker :: proc(t: ^testing.T) {
     source := `(package main)
 (import p "kvist:parallel")
 
@@ -9259,20 +12109,20 @@ compile_parallel_start_inline_worker :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    testing.expect_value(t, strings.contains(output, "return parallel_result(parallel_start_inline_"), true)
+    testing.expect_value(t, strings.contains(output, "return p__result_impl(thread_start_inline_"), true)
     testing.expect_value(t, strings.contains(output, "(1))"), true)
-    testing.expect_value(t, strings.contains(output, "parallel_start_callback_inline_"), true)
+    testing.expect_value(t, strings.contains(output, "thread_start_callback_inline_"), true)
     testing.expect_value(t, strings.contains(output, " :: proc(x: int) -> int {"), true)
-    testing.expect_value(t, strings.contains(output, "parallel_Start_Data_inline_"), true)
+    testing.expect_value(t, strings.contains(output, "thread_Start_Data_inline_"), true)
     testing.expect_value(t, strings.contains(output, "x: int,"), true)
-    testing.expect_value(t, strings.contains(output, "chan.send(data.result, parallel_start_callback_inline_"), true)
+    testing.expect_value(t, strings.contains(output, "chan.send(data.result, thread_start_callback_inline_"), true)
     testing.expect_value(t, strings.contains(output, "(data.x))"), true)
-    testing.expect_value(t, strings.contains(output, "parallel_start_inline_"), true)
+    testing.expect_value(t, strings.contains(output, "thread_start_inline_"), true)
     testing.expect_value(t, strings.contains(output, " :: proc(x: int) -> parallel_Task(int)"), true)
 }
 
 @(test)
-compile_parallel_start_with_captured_inline_worker :: proc(t: ^testing.T) {
+compile_thread_start_with_captured_inline_worker :: proc(t: ^testing.T) {
     source := `(package main)
 (import p "kvist:parallel")
 
@@ -9291,22 +12141,22 @@ compile_parallel_start_with_captured_inline_worker :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    testing.expect_value(t, strings.contains(output, "task := parallel_start_inline_"), true)
+    testing.expect_value(t, strings.contains(output, "task := thread_start_inline_"), true)
     testing.expect_value(t, strings.contains(output, "(offset, 5)"), true)
-    testing.expect_value(t, strings.contains(output, "parallel_start_callback_inline_"), true)
+    testing.expect_value(t, strings.contains(output, "thread_start_callback_inline_"), true)
     testing.expect_value(t, strings.contains(output, " :: proc(offset: int, x: int) -> int {"), true)
     testing.expect_value(t, strings.contains(output, "offset: int,"), true)
     testing.expect_value(t, strings.contains(output, "x: int,"), true)
     testing.expect_value(t, strings.contains(output, "data.offset = offset"), true)
     testing.expect_value(t, strings.contains(output, "data.x = x"), true)
-    testing.expect_value(t, strings.contains(output, "chan.send(data.result, parallel_start_callback_inline_"), true)
+    testing.expect_value(t, strings.contains(output, "chan.send(data.result, thread_start_callback_inline_"), true)
     testing.expect_value(t, strings.contains(output, "(data.offset, data.x))"), true)
-    testing.expect_value(t, strings.contains(output, "parallel_start_inline_"), true)
+    testing.expect_value(t, strings.contains(output, "thread_start_inline_"), true)
     testing.expect_value(t, strings.contains(output, " :: proc(offset: int, x: int) -> parallel_Task(int)"), true)
 }
 
 @(test)
-reject_parallel_start_inline_without_return_value :: proc(t: ^testing.T) {
+reject_thread_start_inline_without_return_value :: proc(t: ^testing.T) {
     source := `(package main)
 (import p "kvist:parallel")
 
@@ -9320,11 +12170,11 @@ reject_parallel_start_inline_without_return_value :: proc(t: ^testing.T) {
         return
     }
     defer delete(err.message)
-    testing.expect_value(t, err.message, "parallel.start inline worker must return exactly one value")
+    testing.expect_value(t, err.message, "thread-start inline worker must return exactly one value")
 }
 
 @(test)
-reject_parallel_detach_return_value :: proc(t: ^testing.T) {
+reject_thread_detach_return_value :: proc(t: ^testing.T) {
     source := `(package main)
 (import p "kvist:parallel")
 
@@ -9340,11 +12190,87 @@ reject_parallel_detach_return_value :: proc(t: ^testing.T) {
         return
     }
     defer delete(err.message)
-    testing.expect_value(t, err.message, "parallel.detach worker must not return a value")
+    testing.expect_value(t, err.message, "thread-detach worker must not return a value")
 }
 
 @(test)
-compile_parallel_detach_inline_worker :: proc(t: ^testing.T) {
+compile_source_package_can_use_thread_detach :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-thread-detach-package-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    pkg_dir, pkg_dir_err := os.join_path({dir, "support"}, context.allocator)
+    testing.expect_value(t, pkg_dir_err == nil, true)
+    if pkg_dir_err != nil {
+        return
+    }
+    defer delete(pkg_dir)
+    mk_pkg_err := os.make_directory_all(pkg_dir)
+    testing.expect_value(t, mk_pkg_err == nil, true)
+    if mk_pkg_err != nil {
+        return
+    }
+
+    pkg_path, pkg_path_err := os.join_path({pkg_dir, "support.kvist"}, context.allocator)
+    testing.expect_value(t, pkg_path_err == nil, true)
+    if pkg_path_err != nil {
+        return
+    }
+    defer delete(pkg_path)
+    pkg_source := `(package support)
+
+(defmacro later
+  [worker & args]
+  (quasiquote
+    (thread-detach (unquote worker) (splice args))))`
+    pkg_write_err := os.write_entire_file_from_string(pkg_path, pkg_source)
+    testing.expect_value(t, pkg_write_err == nil, true)
+    if pkg_write_err != nil {
+        return
+    }
+
+    main_path, main_path_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, main_path_err == nil, true)
+    if main_path_err != nil {
+        return
+    }
+    defer delete(main_path)
+    main_source := `(package main)
+(import support "support")
+
+(defn notify [user-id: int]
+  (println user-id))
+
+(defn demo []
+  (support.later notify 42))`
+    main_write_err := os.write_entire_file_from_string(main_path, main_source)
+    testing.expect_value(t, main_write_err == nil, true)
+    if main_write_err != nil {
+        return
+    }
+
+    output, err, ok := kvist.compile_path(main_path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "import thread \"core:thread\""), true)
+    testing.expect_value(t, strings.contains(output, "thread_detach_notify_int(42)"), true)
+    testing.expect_value(t, strings.contains(output, "thread_Detach_Data_notify_int :: struct"), true)
+    testing.expect_value(t, strings.contains(output, "thread.create_and_start_with_poly_data(data, thread_detach_worker_notify_int, nil, .Normal, true)"), true)
+    testing.expect_value(t, strings.contains(output, "parallel_detach"), false)
+    testing.expect_value(t, strings.contains(output, "kvist:parallel"), false)
+}
+
+@(test)
+compile_thread_detach_inline_worker :: proc(t: ^testing.T) {
     source := `(package main)
 (import p "kvist:parallel")
 
@@ -9360,18 +12286,18 @@ compile_parallel_detach_inline_worker :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    testing.expect_value(t, strings.contains(output, "parallel_detach_inline_"), true)
+    testing.expect_value(t, strings.contains(output, "thread_detach_inline_"), true)
     testing.expect_value(t, strings.contains(output, "()"), true)
-    testing.expect_value(t, strings.contains(output, "parallel_detach_callback_inline_"), true)
+    testing.expect_value(t, strings.contains(output, "thread_detach_callback_inline_"), true)
     testing.expect_value(t, strings.contains(output, " :: proc() {"), true)
-    testing.expect_value(t, strings.contains(output, "parallel_Detach_Data_inline_"), true)
-    testing.expect_value(t, strings.contains(output, "parallel_detach_worker_inline_"), true)
-    testing.expect_value(t, strings.contains(output, "parallel_detach_callback_inline_"), true)
-    testing.expect_value(t, strings.contains(output, "thread.create_and_start_with_poly_data(data, parallel_detach_worker_inline_"), true)
+    testing.expect_value(t, strings.contains(output, "thread_Detach_Data_inline_"), true)
+    testing.expect_value(t, strings.contains(output, "thread_detach_worker_inline_"), true)
+    testing.expect_value(t, strings.contains(output, "thread_detach_callback_inline_"), true)
+    testing.expect_value(t, strings.contains(output, "thread.create_and_start_with_poly_data(data, thread_detach_worker_inline_"), true)
 }
 
 @(test)
-compile_parallel_detach_with_captured_inline_worker :: proc(t: ^testing.T) {
+compile_thread_detach_with_captured_inline_worker :: proc(t: ^testing.T) {
     source := `(package main)
 (import p "kvist:parallel")
 
@@ -9392,20 +12318,20 @@ compile_parallel_detach_with_captured_inline_worker :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    testing.expect_value(t, strings.contains(output, "parallel_detach_inline_"), true)
+    testing.expect_value(t, strings.contains(output, "thread_detach_inline_"), true)
     testing.expect_value(t, strings.contains(output, "(offset, 5)"), true)
-    testing.expect_value(t, strings.contains(output, "parallel_detach_callback_inline_"), true)
+    testing.expect_value(t, strings.contains(output, "thread_detach_callback_inline_"), true)
     testing.expect_value(t, strings.contains(output, " :: proc(offset: int, x: int) {"), true)
     testing.expect_value(t, strings.contains(output, "offset: int,"), true)
     testing.expect_value(t, strings.contains(output, "x: int,"), true)
     testing.expect_value(t, strings.contains(output, "data.offset = offset"), true)
     testing.expect_value(t, strings.contains(output, "data.x = x"), true)
-    testing.expect_value(t, strings.contains(output, "parallel_detach_callback_inline_"), true)
+    testing.expect_value(t, strings.contains(output, "thread_detach_callback_inline_"), true)
     testing.expect_value(t, strings.contains(output, "(data.offset, data.x)"), true)
 }
 
 @(test)
-reject_parallel_detach_inline_return_value :: proc(t: ^testing.T) {
+reject_thread_detach_inline_return_value :: proc(t: ^testing.T) {
     source := `(package main)
 (import p "kvist:parallel")
 
@@ -9419,11 +12345,11 @@ reject_parallel_detach_inline_return_value :: proc(t: ^testing.T) {
         return
     }
     defer delete(err.message)
-    testing.expect_value(t, err.message, "parallel.detach inline worker must not return a value")
+    testing.expect_value(t, err.message, "thread-detach inline worker must not return a value")
 }
 
 @(test)
-compile_parallel_map_inline_worker :: proc(t: ^testing.T) {
+compile_thread_map_inline_worker :: proc(t: ^testing.T) {
     source := `(package main)
 (import p "kvist:parallel")
 
@@ -9440,16 +12366,15 @@ compile_parallel_map_inline_worker :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    testing.expect_value(t, strings.contains(output, "return parallel_map_inline_"), true)
-    testing.expect_value(t, strings.contains(output, "((xs)[:], 0)"), true)
-    testing.expect_value(t, strings.contains(output, "parallel_map_callback_inline_"), true)
-    testing.expect_value(t, strings.contains(output, " :: proc(x: int) -> int {"), true)
-    testing.expect_value(t, strings.contains(output, "data.out[i] = parallel_map_callback_inline_"), true)
-    testing.expect_value(t, strings.contains(output, "(data.xs[i])"), true)
+    testing.expect_value(t, strings.contains(output, "return p__map_impl("), true)
+    testing.expect_value(t, strings.contains(output, "proc(x: int) -> int {"), true)
+    testing.expect_value(t, strings.contains(output, "append(&tasks, thread_start_p__map_worker"), true)
+    testing.expect_value(t, strings.contains(output, "chan.send(data.result, p__map_worker(data.f, data.xs, data.out, data.start, data.step))"), true)
+    testing.expect_value(t, strings.contains(output, "thread_map_"), false)
 }
 
 @(test)
-compile_parallel_map_with_captured_inline_worker :: proc(t: ^testing.T) {
+compile_thread_map_with_captured_inline_worker :: proc(t: ^testing.T) {
     source := `(package main)
 (import p "kvist:parallel")
 
@@ -9468,17 +12393,153 @@ compile_parallel_map_with_captured_inline_worker :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    testing.expect_value(t, strings.contains(output, "parallel_map_callback_inline_"), true)
-    testing.expect_value(t, strings.contains(output, " :: proc(offset: int, x: int) -> int {"), true)
-    testing.expect_value(t, strings.contains(output, "offset: int,"), true)
-    testing.expect_value(t, strings.contains(output, "data.offset = offset"), true)
-    testing.expect_value(t, strings.contains(output, "data.out[i] = parallel_map_callback_inline_"), true)
-    testing.expect_value(t, strings.contains(output, "(data.offset, data.xs[i])"), true)
-    testing.expect_value(t, strings.contains(output, "((xs)[:], 2, offset)"), true)
+    testing.expect_value(t, strings.contains(output, "p__map_impl__kvist_capture_0_1"), true)
+    testing.expect_value(t, strings.contains(output, "proc(offset: int, x: int) -> int {"), true)
+    testing.expect_value(t, strings.contains(output, "p__map_worker__kvist_capture_0_1"), true)
+    testing.expect_value(t, strings.contains(output, "data.kvist_capture_1 = kvist_capture_1"), true)
+    testing.expect_value(t, strings.contains(output, "p__map_worker__kvist_capture_0_1(data.f, data.kvist_capture_1, data.xs, data.out, data.start, data.step)"), true)
+    testing.expect_value(t, strings.contains(output, "f(kvist_capture_1, (xs)[i])"), true)
+    testing.expect_value(t, strings.contains(output, "thread_map_"), false)
 }
 
 @(test)
-reject_parallel_map_multi_arg_worker :: proc(t: ^testing.T) {
+compile_source_package_thread_start_specializes_generic_proc_argument :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-thread-start-generic-package-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    pkg_dir, pkg_dir_err := os.join_path({dir, "support"}, context.allocator)
+    testing.expect_value(t, pkg_dir_err == nil, true)
+    if pkg_dir_err != nil {
+        return
+    }
+    defer delete(pkg_dir)
+    mk_pkg_err := os.make_directory_all(pkg_dir)
+    testing.expect_value(t, mk_pkg_err == nil, true)
+    if mk_pkg_err != nil {
+        return
+    }
+
+    pkg_path, pkg_path_err := os.join_path({pkg_dir, "support.kvist"}, context.allocator)
+    testing.expect_value(t, pkg_path_err == nil, true)
+    if pkg_path_err != nil {
+        return
+    }
+    defer delete(pkg_path)
+    pkg_source := `(package support)
+(import chan "core:sync/chan")
+(import thread "core:thread")
+
+(odin "support_Task :: struct($T: typeid) {
+    result: chan.Chan(T),
+    thread: ^thread.Thread,
+    data: rawptr,
+}")
+
+(defn result [task: (support_Task $T)] -> T #force_inline
+  (let [[value ok] (chan.recv task.result)]
+    (thread.join task.thread)
+    (thread.destroy task.thread)
+    (free task.data)
+    (chan.destroy task.result)
+    (assert ok "support task ended without result")
+    value))
+
+(defn worker [f: (fn [x: $T] -> $U), x: T] -> U
+  (f x))
+
+(defmacro run-one [f x]
+  (quasiquote
+    (result (thread-start support_Task worker (unquote f) (unquote x)))))`
+    pkg_write_err := os.write_entire_file_from_string(pkg_path, pkg_source)
+    testing.expect_value(t, pkg_write_err == nil, true)
+    if pkg_write_err != nil {
+        return
+    }
+
+    main_path, main_path_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, main_path_err == nil, true)
+    if main_path_err != nil {
+        return
+    }
+    defer delete(main_path)
+    main_source := `(package main)
+(import support "support")
+
+(defn inc-one [x: int] -> int
+  (+ x 1))
+
+(defn demo [x: int] -> int
+  (support.run-one inc-one x))
+
+(defn main []
+  (println (demo 4)))`
+    main_write_err := os.write_entire_file_from_string(main_path, main_source)
+    testing.expect_value(t, main_write_err == nil, true)
+    if main_write_err != nil {
+        return
+    }
+
+    output, err, ok := kvist.compile_path(main_path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "f: proc(x: int) -> int,"), true)
+    testing.expect_value(t, strings.contains(output, "result: chan.Chan(int),"), true)
+    testing.expect_value(t, strings.contains(output, "x: int,"), true)
+    testing.expect_value(t, strings.contains(output, "$int"), false)
+
+    odin_dir, odin_dir_err := os.join_path({dir, "generated"}, context.allocator)
+    testing.expect_value(t, odin_dir_err == nil, true)
+    if odin_dir_err != nil {
+        return
+    }
+    defer delete(odin_dir)
+    mk_odin_err := os.make_directory_all(odin_dir)
+    testing.expect_value(t, mk_odin_err == nil, true)
+    if mk_odin_err != nil {
+        return
+    }
+    odin_path, odin_path_err := os.join_path({odin_dir, "main.odin"}, context.allocator)
+    testing.expect_value(t, odin_path_err == nil, true)
+    if odin_path_err != nil {
+        return
+    }
+    defer delete(odin_path)
+    odin_write_err := os.write_entire_file_from_string(odin_path, output)
+    testing.expect_value(t, odin_write_err == nil, true)
+    if odin_write_err != nil {
+        return
+    }
+
+    repo_root := compiler_test_repo_root()
+    state, stdout, stderr, exec_err := os.process_exec(
+        os.Process_Desc{
+            command     = {"odin", "check", odin_dir},
+            working_dir = repo_root,
+        },
+        context.allocator,
+    )
+    defer delete(stdout)
+    defer delete(stderr)
+    testing.expect_value(t, exec_err == nil, true)
+    if exec_err != nil {
+        return
+    }
+    testing.expect_value(t, state.exited, true)
+    testing.expect_value(t, state.exit_code, 0)
+}
+
+@(test)
+reject_thread_map_multi_arg_worker :: proc(t: ^testing.T) {
     source := `(package main)
 (import p "kvist:parallel")
 
@@ -9494,11 +12555,11 @@ reject_parallel_map_multi_arg_worker :: proc(t: ^testing.T) {
         return
     }
     defer delete(err.message)
-    testing.expect_value(t, err.message, "parallel.map worker must take exactly one argument")
+    testing.expect_value(t, err.message, "expected proc(x: int) -> int callback, got proc(int, int) -> int")
 }
 
 @(test)
-reject_parallel_map_inline_multi_arg_worker :: proc(t: ^testing.T) {
+reject_thread_map_inline_multi_arg_worker :: proc(t: ^testing.T) {
     source := `(package main)
 (import p "kvist:parallel")
 
@@ -9513,11 +12574,11 @@ reject_parallel_map_inline_multi_arg_worker :: proc(t: ^testing.T) {
         return
     }
     defer delete(err.message)
-    testing.expect_value(t, err.message, "parallel.map inline worker must take exactly one argument")
+    testing.expect_value(t, err.message, "expected proc(x: int) -> int callback, got proc(int, int) -> int")
 }
 
 @(test)
-reject_parallel_map_source_type_mismatch :: proc(t: ^testing.T) {
+reject_thread_map_source_type_mismatch :: proc(t: ^testing.T) {
     source := `(package main)
 (import p "kvist:parallel")
 
@@ -9533,11 +12594,11 @@ reject_parallel_map_source_type_mismatch :: proc(t: ^testing.T) {
         return
     }
     defer delete(err.message)
-    testing.expect_value(t, err.message, "parallel.map worker expects int but source has f64")
+    testing.expect_value(t, err.message, "expected proc(x: f64) -> int callback, got proc(int) -> int")
 }
 
 @(test)
-reject_parallel_map_with_non_brace_options :: proc(t: ^testing.T) {
+reject_thread_map_with_non_brace_options :: proc(t: ^testing.T) {
     source := `(package main)
 (import p "kvist:parallel")
 
@@ -9553,11 +12614,11 @@ reject_parallel_map_with_non_brace_options :: proc(t: ^testing.T) {
         return
     }
     defer delete(err.message)
-    testing.expect_value(t, err.message, "parallel.map-with expects options like {workers: n}")
+    testing.expect_value(t, err.message, "while expanding macro p__map-with: parallel.map-with expects options like {workers: n}")
 }
 
 @(test)
-reject_parallel_map_with_missing_workers :: proc(t: ^testing.T) {
+reject_thread_map_with_missing_workers :: proc(t: ^testing.T) {
     source := `(package main)
 (import p "kvist:parallel")
 
@@ -9573,11 +12634,11 @@ reject_parallel_map_with_missing_workers :: proc(t: ^testing.T) {
         return
     }
     defer delete(err.message)
-    testing.expect_value(t, err.message, "parallel.map-with expects {workers: n}")
+    testing.expect_value(t, err.message, "while expanding macro p__map-with: parallel.map-with expects {workers: n}")
 }
 
 @(test)
-reject_parallel_map_with_unknown_option :: proc(t: ^testing.T) {
+reject_thread_map_with_unknown_option :: proc(t: ^testing.T) {
     source := `(package main)
 (import p "kvist:parallel")
 
@@ -9593,11 +12654,11 @@ reject_parallel_map_with_unknown_option :: proc(t: ^testing.T) {
         return
     }
     defer delete(err.message)
-    testing.expect_value(t, err.message, "parallel.map-with unknown option: threads")
+    testing.expect_value(t, err.message, "while expanding macro p__map-with: parallel.map-with unknown option: threads")
 }
 
 @(test)
-compile_parallel_for_named_worker :: proc(t: ^testing.T) {
+compile_thread_for_named_worker :: proc(t: ^testing.T) {
     source := `(package main)
 (import p "kvist:parallel")
 
@@ -9615,21 +12676,21 @@ compile_parallel_for_named_worker :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    testing.expect_value(t, strings.contains(output, "parallel_for_record_int((xs)[:], 0)"), true)
-    testing.expect_value(t, strings.contains(output, "parallel_For_Data_record_int :: struct"), true)
-    testing.expect_value(t, strings.contains(output, "xs: []int,"), true)
-    testing.expect_value(t, strings.contains(output, "parallel_for_worker_record_int :: proc(data: ^parallel_For_Data_record_int)"), true)
-    testing.expect_value(t, strings.contains(output, "record(data.xs[i])"), true)
-    testing.expect_value(t, strings.contains(output, "parallel_for_record_int :: proc(xs: []int, requested_worker_count: int)"), true)
-    testing.expect_value(t, strings.contains(output, "worker_count = os.get_processor_core_count() - 1"), true)
-    testing.expect_value(t, strings.contains(output, "if worker_count > 16"), true)
-    testing.expect_value(t, strings.contains(output, "thread.create_and_start_with_poly_data(data, parallel_for_worker_record_int)"), true)
-    testing.expect_value(t, strings.contains(output, "thread.join(task_thread)"), true)
-    testing.expect_value(t, strings.contains(output, "free(data)"), true)
+    testing.expect_value(t, strings.contains(output, "p__for_impl(record, xs, 0)"), true)
+    testing.expect_value(t, strings.contains(output, "p__for_impl :: #force_inline proc(f: proc(x: $T), xs: []T, requested_worker_count: int)"), true)
+    testing.expect_value(t, strings.contains(output, "p__for_worker :: proc(f: proc(x: $T), xs: []T, start, step: int) -> bool"), true)
+    testing.expect_value(t, strings.contains(output, "f((xs)[i])"), true)
+    testing.expect_value(t, strings.contains(output, "worker_count = (os.get_processor_core_count()) - (1)"), true)
+    testing.expect_value(t, strings.contains(output, "if (worker_count) > (16)"), true)
+    testing.expect_value(t, strings.contains(output, "append(&tasks, thread_start_p__for_worker_"), true)
+    testing.expect_value(t, strings.contains(output, "chan.send(data.result, p__for_worker(data.f, data.xs, data.start, data.step))"), true)
+    testing.expect_value(t, strings.contains(output, "thread.join(task.thread)"), true)
+    testing.expect_value(t, strings.contains(output, "free(task.data)"), true)
+    testing.expect_value(t, strings.contains(output, "thread_for_record_int"), false)
 }
 
 @(test)
-compile_parallel_for_with_captured_inline_worker :: proc(t: ^testing.T) {
+compile_thread_for_with_captured_inline_worker :: proc(t: ^testing.T) {
     source := `(package main)
 (import p "kvist:parallel")
 
@@ -9648,18 +12709,17 @@ compile_parallel_for_with_captured_inline_worker :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    testing.expect_value(t, strings.contains(output, "parallel_for_callback_inline_"), true)
-    testing.expect_value(t, strings.contains(output, " :: proc(offset: int, x: int) {"), true)
-    testing.expect_value(t, strings.contains(output, "offset: int,"), true)
-    testing.expect_value(t, strings.contains(output, "data.offset = offset"), true)
-    testing.expect_value(t, strings.contains(output, "parallel_for_callback_inline_"), true)
-    testing.expect_value(t, strings.contains(output, "(data.offset, data.xs[i])"), true)
-    testing.expect_value(t, strings.contains(output, "parallel_for_inline_"), true)
-    testing.expect_value(t, strings.contains(output, "((xs)[:], 2, offset)"), true)
+    testing.expect_value(t, strings.contains(output, "p__for_impl__kvist_capture_0_1"), true)
+    testing.expect_value(t, strings.contains(output, "proc(offset: int, x: int) {"), true)
+    testing.expect_value(t, strings.contains(output, "p__for_worker__kvist_capture_0_1"), true)
+    testing.expect_value(t, strings.contains(output, "data.kvist_capture_1 = kvist_capture_1"), true)
+    testing.expect_value(t, strings.contains(output, "p__for_worker__kvist_capture_0_1(data.f, data.kvist_capture_1, data.xs, data.start, data.step)"), true)
+    testing.expect_value(t, strings.contains(output, "f(kvist_capture_1, (xs)[i])"), true)
+    testing.expect_value(t, strings.contains(output, "thread_for_"), false)
 }
 
 @(test)
-reject_parallel_for_return_value :: proc(t: ^testing.T) {
+reject_thread_for_return_value :: proc(t: ^testing.T) {
     source := `(package main)
 (import p "kvist:parallel")
 
@@ -9675,11 +12735,11 @@ reject_parallel_for_return_value :: proc(t: ^testing.T) {
         return
     }
     defer delete(err.message)
-    testing.expect_value(t, err.message, "parallel.for worker must not return a value")
+    testing.expect_value(t, err.message, "expected proc(x: int) callback, got proc(int) -> int")
 }
 
 @(test)
-reject_parallel_for_inline_return_value :: proc(t: ^testing.T) {
+reject_thread_for_inline_return_value :: proc(t: ^testing.T) {
     source := `(package main)
 (import p "kvist:parallel")
 
@@ -9694,11 +12754,11 @@ reject_parallel_for_inline_return_value :: proc(t: ^testing.T) {
         return
     }
     defer delete(err.message)
-    testing.expect_value(t, err.message, "parallel.for inline worker must not return a value")
+    testing.expect_value(t, err.message, "expected proc(x: int) callback, got proc(int) -> int")
 }
 
 @(test)
-reject_parallel_for_with_unknown_option :: proc(t: ^testing.T) {
+reject_thread_for_with_unknown_option :: proc(t: ^testing.T) {
     source := `(package main)
 (import p "kvist:parallel")
 
@@ -9714,7 +12774,229 @@ reject_parallel_for_with_unknown_option :: proc(t: ^testing.T) {
         return
     }
     defer delete(err.message)
-    testing.expect_value(t, err.message, "parallel.for-with unknown option: threads")
+    testing.expect_value(t, err.message, "while expanding macro p__for-with: parallel.for-with unknown option: threads")
+}
+
+@(test)
+compile_source_package_can_build_parallel_collection_helpers_with_thread_start :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-thread-collection-package-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    pkg_dir, pkg_dir_err := os.join_path({dir, "support"}, context.allocator)
+    testing.expect_value(t, pkg_dir_err == nil, true)
+    if pkg_dir_err != nil {
+        return
+    }
+    defer delete(pkg_dir)
+    mk_pkg_err := os.make_directory_all(pkg_dir)
+    testing.expect_value(t, mk_pkg_err == nil, true)
+    if mk_pkg_err != nil {
+        return
+    }
+
+    pkg_path, pkg_path_err := os.join_path({pkg_dir, "support.kvist"}, context.allocator)
+    testing.expect_value(t, pkg_path_err == nil, true)
+    if pkg_path_err != nil {
+        return
+    }
+    defer delete(pkg_path)
+    pkg_source := `(package support)
+(import chan "core:sync/chan")
+(import os "core:os")
+(import thread "core:thread")
+
+(odin "support_Task :: struct($T: typeid) {
+    result: chan.Chan(T),
+    thread: ^thread.Thread,
+    data: rawptr,
+}")
+
+(defn- result
+  [task: (support_Task $T)] -> T #force_inline
+  (let [[value ok] (chan.recv task.result)]
+    (thread.join task.thread)
+    (thread.destroy task.thread)
+    (free task.data)
+    (chan.destroy task.result)
+    (assert ok "support task ended without result")
+    value))
+
+(defn- worker-count
+  [requested: int, n: int] -> int #force_inline
+  (let [worker-count requested]
+    (when (<= worker-count 0)
+      (set! worker-count (- (os.get_processor_core_count) 1)))
+    (when (> worker-count n)
+      (set! worker-count n))
+    (when (< worker-count 1)
+      (set! worker-count 1))
+    worker-count))
+
+(defn- map-worker
+  [f: (fn [x: $T] -> $U), xs: []T, out: (ptr (dynamic U)), start: int, step: int] -> bool
+  (let [i start]
+    (while (< i (count xs))
+      (set! (deref out)[i] (f xs[i]))
+      (set! i (+ i step)))
+    true))
+
+(defn- map-impl
+  [f: (fn [x: $T] -> $U), xs: []T, requested-workers: int] -> [dynamic]U #force_inline
+  (let [out (make [dynamic]U (count xs))]
+    (when (= (count xs) 0)
+      (return out))
+    (let [workers (worker-count requested-workers (count xs))
+          tasks (make (dynamic (support_Task bool)) 0 workers) :defer
+          i 0]
+      (while (< i workers)
+        (append (addr tasks) (thread-start support_Task map-worker f xs (addr out) i workers))
+        (set! i (+ i 1)))
+      (set! i 0)
+      (while (< i (count tasks))
+        (discard (result tasks[i]))
+        (set! i (+ i 1))))
+    out))
+
+(defn- for-worker
+  [f: (fn [x: $T]), xs: []T, start: int, step: int] -> bool
+  (let [i start]
+    (while (< i (count xs))
+      (f xs[i])
+      (set! i (+ i step)))
+    true))
+
+(defn- for-impl
+  [f: (fn [x: $T]), xs: []T, requested-workers: int] #force_inline
+  (when (= (count xs) 0)
+    (return))
+  (let [workers (worker-count requested-workers (count xs))
+        tasks (make (dynamic (support_Task bool)) 0 workers) :defer
+        i 0]
+    (while (< i workers)
+      (append (addr tasks) (thread-start support_Task for-worker f xs i workers))
+      (set! i (+ i 1)))
+    (set! i 0)
+    (while (< i (count tasks))
+      (discard (result tasks[i]))
+      (set! i (+ i 1)))))
+
+(defmacro map-workers
+  [worker xs]
+  (quasiquote
+    (map-impl (unquote worker) (unquote xs) 0)))
+
+(defmacro for-workers
+  [worker xs]
+  (quasiquote
+    (for-impl (unquote worker) (unquote xs) 0)))`
+    pkg_write_err := os.write_entire_file_from_string(pkg_path, pkg_source)
+    testing.expect_value(t, pkg_write_err == nil, true)
+    if pkg_write_err != nil {
+        return
+    }
+
+    main_path, main_path_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, main_path_err == nil, true)
+    if main_path_err != nil {
+        return
+    }
+    defer delete(main_path)
+    main_source := `(package main)
+(import support "support")
+
+(defn observe [x: int]
+  (println x))
+
+(defn mapped [xs: []int] -> [dynamic]int
+  (let [offset 10]
+    (support.map-workers
+      (fn [x: int] -> int
+        (+ x offset))
+      xs)))
+
+(defn observe-all [xs: []int]
+  (support.for-workers observe xs))
+
+(defn main []
+  (let [xs ([dynamic]int [1 2 3]) :defer
+        ys (mapped xs) :defer]
+    (observe-all xs)
+    (println (count ys))))`
+    main_write_err := os.write_entire_file_from_string(main_path, main_source)
+    testing.expect_value(t, main_write_err == nil, true)
+    if main_write_err != nil {
+        return
+    }
+
+    output, err, ok := kvist.compile_path(main_path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "import os \"core:os\""), true)
+    testing.expect_value(t, strings.contains(output, "support_Task :: struct($T: typeid)"), true)
+    testing.expect_value(t, strings.contains(output, "import thread \"core:thread\""), true)
+    testing.expect_value(t, strings.contains(output, "support__map_impl__kvist_capture_0_1"), true)
+    testing.expect_value(t, strings.contains(output, "support__map_worker__kvist_capture_0_1"), true)
+    testing.expect_value(t, strings.contains(output, "proc(offset: int, x: int) -> int {"), true)
+    testing.expect_value(t, strings.contains(output, "support__map_worker__kvist_capture_0_1(data.f, data.kvist_capture_1, data.xs, data.out, data.start, data.step)"), true)
+    testing.expect_value(t, strings.contains(output, "f(kvist_capture_1, (xs)[i])"), true)
+    testing.expect_value(t, strings.contains(output, "support__for_impl(observe, xs, 0)"), true)
+    testing.expect_value(t, strings.contains(output, "support__map_impl :: #force_inline proc(f: proc(x: $T) -> $U, xs: []T, requested_workers: int) -> [dynamic]U"), true)
+    testing.expect_value(t, strings.contains(output, "support__for_impl :: #force_inline proc(f: proc(x: $T), xs: []T, requested_workers: int)"), true)
+    testing.expect_value(t, strings.contains(output, "append(&tasks, thread_start_support__map_worker_"), true)
+    testing.expect_value(t, strings.contains(output, "append(&tasks, thread_start_support__for_worker_"), true)
+    testing.expect_value(t, strings.contains(output, "kvist:parallel"), false)
+    testing.expect_value(t, strings.contains(output, "thread_map_square_int_int"), false)
+    testing.expect_value(t, strings.contains(output, "thread_for_observe_int"), false)
+
+    odin_dir, odin_dir_err := os.join_path({dir, "generated"}, context.allocator)
+    testing.expect_value(t, odin_dir_err == nil, true)
+    if odin_dir_err != nil {
+        return
+    }
+    defer delete(odin_dir)
+    mk_odin_err := os.make_directory_all(odin_dir)
+    testing.expect_value(t, mk_odin_err == nil, true)
+    if mk_odin_err != nil {
+        return
+    }
+    odin_path, odin_path_err := os.join_path({odin_dir, "main.odin"}, context.allocator)
+    testing.expect_value(t, odin_path_err == nil, true)
+    if odin_path_err != nil {
+        return
+    }
+    defer delete(odin_path)
+    odin_write_err := os.write_entire_file_from_string(odin_path, output)
+    testing.expect_value(t, odin_write_err == nil, true)
+    if odin_write_err != nil {
+        return
+    }
+
+    repo_root := compiler_test_repo_root()
+    state, stdout, stderr, exec_err := os.process_exec(
+        os.Process_Desc{
+            command     = {"odin", "check", odin_dir},
+            working_dir = repo_root,
+        },
+        context.allocator,
+    )
+    defer delete(stdout)
+    defer delete(stderr)
+    testing.expect_value(t, exec_err == nil, true)
+    if exec_err != nil {
+        return
+    }
+    testing.expect_value(t, state.exited, true)
+    testing.expect_value(t, state.exit_code, 0)
 }
 
 @(test)
@@ -9984,6 +13266,12 @@ compile_functional_transform_map_entry_sources :: proc(t: ^testing.T) {
       (map bump-entry))
     (map.entries lookup)))
 
+(defn collect-map-inline [lookup: map[string]int] -> map[string]int
+  (into map[string]int
+    (map (fn [entry: (map.entry string int)] -> (map.entry string int)
+           ((map.entry string int) {key: entry.key value: (+ entry.value 1)})))
+    (map.entries lookup)))
+
 (defn collect-inferred-empty [] -> map[string]int
   (let [lookup (map.empty string int)]
     (defer (delete lookup))
@@ -10015,10 +13303,10 @@ compile_functional_transform_map_entry_sources :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    testing.expect_value(t, strings.contains(output, "Kvist_Map_Entry :: struct($K: typeid, $V: typeid) {"), true)
-    testing.expect_value(t, strings.contains(output, "entry_score :: proc(entry: Kvist_Map_Entry(string, int)) -> int"), true)
-    testing.expect_value(t, strings.contains(output, "for kvist_entry_key, kvist_entry_value in kvist_source {"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_item := Kvist_Map_Entry(string, int){key = kvist_entry_key, value = kvist_entry_value}"), true)
+    testing.expect_value(t, strings.contains(output, "import map__raw "), true)
+    testing.expect_value(t, strings.contains(output, "entry_score :: proc(entry: map__raw.entry(string, int)) -> int"), true)
+    testing.expect_value(t, strings.contains(output, "for key, value in kvist_source {"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_item := map__raw.entry(string, int){key = key, value = value}"), true)
     testing.expect_value(t, strings.contains(output, "append(&kvist_out,"), true)
     testing.expect_value(t, strings.contains(output, "kvist_out[(kvist_xform_"), true)
     testing.expect_value(t, strings.contains(output, ").key] = (kvist_xform_"), true)
@@ -10026,6 +13314,7 @@ compile_functional_transform_map_entry_sources :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "kvist_out := make(map[string]int, len(kvist_source))"), true)
     testing.expect_value(t, strings.contains(output, "append(kvist_out,"), true)
     testing.expect_value(t, strings.contains(output, "kvist_acc +="), true)
+    testing.expect_value(t, strings.contains(output, "kvist-prim-map-entries"), false)
 }
 
 @(test)
@@ -10107,8 +13396,8 @@ compile_functional_transform_into_set :: proc(t: ^testing.T) {
 (defn even? [x: int] -> bool
   (= (% x 2) 0))
 
-(defn collect [xs: []int] -> set[int]
-  (into set[int] (filter even?) xs))`
+(defn collect [xs: []int] -> (map int (struct {}))
+  (into (map int (struct {})) (filter even?) xs))`
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
@@ -10161,15 +13450,14 @@ compile_functional_transform_arr_range_sources :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    testing.expect_value(t, strings.contains(output, "kvist_range_start: int"), true)
+    testing.expect_value(t, strings.contains(output, "arr__range_impl"), true)
     testing.expect_value(t, strings.contains(output, "arr__range_impl(0, 6, 1)"), false)
-    testing.expect_value(t, strings.contains(output, "for ((kvist_range_step > 0) && (kvist_item < kvist_range_end))"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_item += kvist_range_step"), true)
+    testing.expect_value(t, strings.contains(output, "arr__range_next(&kvist_source"), true)
     testing.expect_value(t, strings.contains(output, "kvist_acc +="), true)
 }
 
 @(test)
-compile_for_over_arr_range_lowers_to_counted_loop :: proc(t: ^testing.T) {
+compile_for_over_arr_range_uses_source_defined_iterator :: proc(t: ^testing.T) {
     source := `(package main)
 (import arr "kvist:arr")
 
@@ -10197,19 +13485,19 @@ compile_for_over_arr_range_lowers_to_counted_loop :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    testing.expect_value(t, strings.contains(output, "arr__range_impl(0, n, 1)"), false)
-    testing.expect_value(t, strings.contains(output, "arr__range_impl(2, 8, 2)"), false)
     testing.expect_value(t, strings.contains(output, "defer delete(kvist_loop_"), false)
-    testing.expect_value(t, strings.contains(output, "for ((kvist_loop_range_step_"), true)
-    testing.expect_value(t, strings.contains(output, "value := kvist_loop_range_item_"), true)
-    testing.expect_value(t, strings.contains(output, "idx := kvist_loop_range_index_"), true)
-    testing.expect_value(t, strings.contains(output, "_ = kvist_loop_range_item_"), true)
-    testing.expect_value(t, strings.contains(output, "_ := kvist_loop_range_item_"), false)
-    testing.expect_value(t, strings.contains(output, "kvist_loop_range_index_"), true)
+    testing.expect_value(t, strings.contains(output, "arr__range_impl(0, n, 1)"), true)
+    testing.expect_value(t, strings.contains(output, "arr__range_next(&kvist_source_"), true)
+    testing.expect_value(t, strings.contains(output, "value, kvist_source_ok_"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_loop_source_index_"), true)
+    testing.expect_value(t, strings.contains(output, "idx := kvist_loop_source_index_"), true)
+    testing.expect_value(t, strings.contains(output, "_ = _"), false)
+    testing.expect_value(t, strings.contains(output, "_ := "), false)
+    testing.expect_value(t, strings.contains(output, "kvist_loop_source_index_"), true)
 }
 
 @(test)
-compile_for_over_arr_repeat_lowers_to_counted_loop :: proc(t: ^testing.T) {
+compile_for_over_arr_repeat_uses_source_defined_iterator :: proc(t: ^testing.T) {
     source := `(package main)
 (import arr "kvist:arr")
 
@@ -10233,17 +13521,17 @@ compile_for_over_arr_repeat_lowers_to_counted_loop :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    testing.expect_value(t, strings.contains(output, "arr__repeat(3, 4)"), false)
-    testing.expect_value(t, strings.contains(output, "arr__repeat(2, 5)"), false)
+    testing.expect_value(t, strings.contains(output, "arr__repeat_impl(3, 4)"), true)
+    testing.expect_value(t, strings.contains(output, "arr__repeat_impl(2, 5)"), true)
     testing.expect_value(t, strings.contains(output, "defer delete(kvist_loop_"), false)
-    testing.expect_value(t, strings.contains(output, "for kvist_loop_repeat_index_"), true)
-    testing.expect_value(t, strings.contains(output, "value := kvist_loop_repeat_value_"), true)
-    testing.expect_value(t, strings.contains(output, "idx := kvist_loop_repeat_index_"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_loop_repeat_index_"), true)
+    testing.expect_value(t, strings.contains(output, "arr__repeat_next(&kvist_source_"), true)
+    testing.expect_value(t, strings.contains(output, "value, kvist_source_ok_"), true)
+    testing.expect_value(t, strings.contains(output, "idx := kvist_loop_source_index_"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_loop_source_index_"), true)
 }
 
 @(test)
-compile_for_over_arr_repeatedly_lowers_to_counted_loop :: proc(t: ^testing.T) {
+compile_for_over_arr_repeatedly_uses_source_defined_iterator :: proc(t: ^testing.T) {
     source := `(package main)
 (import arr "kvist:arr")
 
@@ -10273,14 +13561,15 @@ compile_for_over_arr_repeatedly_lowers_to_counted_loop :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "arr__repeatedly(3, next_value)"), false)
     testing.expect_value(t, strings.contains(output, "arr__repeatedly(2, next_value)"), false)
     testing.expect_value(t, strings.contains(output, "defer delete(kvist_loop_"), false)
-    testing.expect_value(t, strings.contains(output, "for kvist_loop_repeatedly_index_"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_loop_repeatedly_producer_"), true)
-    testing.expect_value(t, strings.contains(output, "value := kvist_loop_repeatedly_producer_"), true)
-    testing.expect_value(t, strings.contains(output, "idx := kvist_loop_repeatedly_index_"), true)
+    testing.expect_value(t, strings.contains(output, "arr__repeatedly_impl(3, next_value)"), true)
+    testing.expect_value(t, strings.contains(output, "arr__repeatedly_impl(2, next_value)"), true)
+    testing.expect_value(t, strings.contains(output, "arr__repeatedly_next(&kvist_source_"), true)
+    testing.expect_value(t, strings.contains(output, "value, kvist_source_ok_"), true)
+    testing.expect_value(t, strings.contains(output, "idx := kvist_loop_source_index_"), true)
 }
 
 @(test)
-compile_for_over_arr_iterate_lowers_to_counted_loop :: proc(t: ^testing.T) {
+compile_for_over_arr_iterate_uses_source_defined_iterator :: proc(t: ^testing.T) {
     source := `(package main)
 (import arr "kvist:arr")
 
@@ -10310,15 +13599,15 @@ compile_for_over_arr_iterate_lowers_to_counted_loop :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "arr__iterate(4, double, 1)"), false)
     testing.expect_value(t, strings.contains(output, "arr__iterate(3, double, 1)"), false)
     testing.expect_value(t, strings.contains(output, "defer delete(kvist_loop_"), false)
-    testing.expect_value(t, strings.contains(output, "for kvist_loop_iterate_index_"), true)
-    testing.expect_value(t, strings.contains(output, "value := kvist_loop_iterate_current_"), true)
-    testing.expect_value(t, strings.contains(output, "idx := kvist_loop_iterate_index_"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_loop_iterate_current_"), true)
-    testing.expect_value(t, strings.contains(output, "= kvist_loop_iterate_step_"), true)
+    testing.expect_value(t, strings.contains(output, "arr__iterate_impl(4, double, 1)"), true)
+    testing.expect_value(t, strings.contains(output, "arr__iterate_impl(3, double, 1)"), true)
+    testing.expect_value(t, strings.contains(output, "arr__iterate_next(&kvist_source_"), true)
+    testing.expect_value(t, strings.contains(output, "value, kvist_source_ok_"), true)
+    testing.expect_value(t, strings.contains(output, "idx := kvist_loop_source_index_"), true)
 }
 
 @(test)
-compile_for_over_arr_cycle_lowers_to_counted_loop :: proc(t: ^testing.T) {
+compile_for_over_arr_cycle_uses_source_defined_iterator :: proc(t: ^testing.T) {
     source := `(package main)
 (import arr "kvist:arr")
 
@@ -10347,15 +13636,15 @@ compile_for_over_arr_cycle_lowers_to_counted_loop :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "arr__cycle(5, xs)"), false)
     testing.expect_value(t, strings.contains(output, "arr__cycle(3, xs)"), false)
     testing.expect_value(t, strings.contains(output, "defer delete(kvist_loop_"), false)
-    testing.expect_value(t, strings.contains(output, "kvist_loop_cycle_source_"), true)
-    testing.expect_value(t, strings.contains(output, "for kvist_loop_cycle_index_"), true)
-    testing.expect_value(t, strings.contains(output, "&& kvist_loop_cycle_size_"), true)
-    testing.expect_value(t, strings.contains(output, "value := kvist_loop_cycle_source_"), true)
-    testing.expect_value(t, strings.contains(output, "idx := kvist_loop_cycle_index_"), true)
+    testing.expect_value(t, strings.contains(output, "arr__cycle_impl(5, xs)"), true)
+    testing.expect_value(t, strings.contains(output, "arr__cycle_impl(3, xs)"), true)
+    testing.expect_value(t, strings.contains(output, "arr__cycle_next(&kvist_source_"), true)
+    testing.expect_value(t, strings.contains(output, "value, kvist_source_ok_"), true)
+    testing.expect_value(t, strings.contains(output, "idx := kvist_loop_source_index_"), true)
 }
 
 @(test)
-compile_for_over_arr_take_nth_lowers_to_strided_loop :: proc(t: ^testing.T) {
+compile_for_over_arr_take_nth_uses_source_defined_iterator :: proc(t: ^testing.T) {
     source := `(package main)
 (import arr "kvist:arr")
 
@@ -10382,10 +13671,11 @@ compile_for_over_arr_take_nth_lowers_to_strided_loop :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "arr__take_nth(2, xs)"), false)
     testing.expect_value(t, strings.contains(output, "arr__take_nth(3, xs)"), false)
     testing.expect_value(t, strings.contains(output, "defer delete(kvist_loop_"), false)
-    testing.expect_value(t, strings.contains(output, "for kvist_loop_take_nth_step_"), true)
-    testing.expect_value(t, strings.contains(output, "value := kvist_loop_take_nth_source_"), true)
-    testing.expect_value(t, strings.contains(output, "idx := kvist_loop_take_nth_index_"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_loop_take_nth_source_index_"), true)
+    testing.expect_value(t, strings.contains(output, "arr__take_nth_impl(2, xs)"), true)
+    testing.expect_value(t, strings.contains(output, "arr__take_nth_impl(3, xs)"), true)
+    testing.expect_value(t, strings.contains(output, "arr__take_nth_next(&kvist_source_"), true)
+    testing.expect_value(t, strings.contains(output, "value, kvist_source_ok_"), true)
+    testing.expect_value(t, strings.contains(output, "idx := kvist_loop_source_index_"), true)
 }
 
 @(test)
@@ -10426,11 +13716,11 @@ compile_functional_transform_arr_repeat_sources :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    testing.expect_value(t, strings.contains(output, "kvist_repeat_count: int"), true)
-    testing.expect_value(t, strings.contains(output, "arr__repeat(3, 4)"), false)
-    testing.expect_value(t, strings.contains(output, "for kvist_repeat_i < kvist_repeat_count {"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_item := kvist_repeat_value"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_repeat_i += 1"), true)
+    testing.expect_value(t, strings.contains(output, "arr__repeat_impl"), true)
+    testing.expect_value(t, strings.contains(output, "arr__repeat_next(&kvist_source"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_source_arg_2: $T"), false)
+    testing.expect_value(t, strings.contains(output, "(proc(kvist_source_arg_1: int, kvist_source_arg_2: int, kvist_init: int) -> int"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_out := make([dynamic]int)"), true)
     testing.expect_value(t, strings.contains(output, "kvist_acc +="), true)
 }
 
@@ -10608,12 +13898,52 @@ reject_functional_transform_unknown_step :: proc(t: ^testing.T) {
 }
 
 @(test)
-reject_named_functional_transform_unknown_step_early :: proc(t: ^testing.T) {
-    source := `(package main)
+reject_named_functional_transform_unknown_step_when_used :: proc(t: ^testing.T) {
+    declaration_only_source := `(package main)
 
 (deftransform bad-transform
   (comp
     (partition 2)))`
+
+    declaration_output, declaration_err, declaration_ok := kvist.compile_source(declaration_only_source)
+    testing.expect_value(t, declaration_ok, true)
+    if !declaration_ok {
+        testing.expect_value(t, declaration_err.message, "")
+        return
+    }
+    defer delete(declaration_output)
+
+    source := `(package main)
+
+(deftransform bad-transform
+  (comp
+    (partition 2)))
+
+(defn values [xs: []int] -> [dynamic]int
+  (into [dynamic]int bad-transform xs))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+    defer delete(err.message)
+
+    testing.expect_value(t, err.message, "transform steps currently support map, map-indexed, mapcat, filter, remove, keep, take, take-while, drop, and drop-while")
+}
+
+@(test)
+reject_generated_shaped_functional_transform_step :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn inc [x: int] -> int
+  (+ x 1))
+
+(defn values [xs: []int] -> [dynamic]int
+  (into [dynamic]int
+    (comp
+      (arr__map inc))
+    xs))`
 
     _, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, false)
@@ -10842,6 +14172,7 @@ reject_functional_transform_output_type_mismatch :: proc(t: ^testing.T) {
 @(test)
 compile_threaded_let_binding_keeps_owned_intermediates_alive :: proc(t: ^testing.T) {
     source := `(package main)
+(import arr "kvist:arr")
 
 (defstruct User {
   name: string
@@ -10866,11 +14197,14 @@ compile_threaded_let_binding_keeps_owned_intermediates_alive :: proc(t: ^testing
     }
     defer delete(output)
 
-    testing.expect_value(t, strings.contains(output, "kvist_thread_1 := kvist_filter_field_active((users)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_thread_1 := arr__filter_impl__kvist_field_0_active(type_of(((users)[0:])[0]), (users)[0:])"), true)
     testing.expect_value(t, strings.contains(output, "defer delete(kvist_thread_1)"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_thread_2 := kvist_map_field_name(type_of(((kvist_thread_1)[:])[0].name), (kvist_thread_1)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "defer delete(kvist_thread_2)"), true)
-    testing.expect_value(t, strings.contains(output, "active_names := arr__take(1, (kvist_thread_2)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_thread_2 := (kvist_thread_1)[0:]"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_thread_3 := arr__map_impl__kvist_field_0_name(type_of((kvist_thread_2)[0]), type_of((kvist_thread_2)[0].name), kvist_thread_2)"), true)
+    testing.expect_value(t, strings.contains(output, "defer delete(kvist_thread_3)"), true)
+    testing.expect_value(t, strings.contains(output, "active_names := arr__take(1,"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_filter_field_active"), false)
+    testing.expect_value(t, strings.contains(output, "kvist_map_field_name"), false)
 }
 
 @(test)
@@ -10898,15 +14232,15 @@ compile_imported_arr_reduce_thread_step :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    testing.expect_value(t, strings.contains(output, "kvist_thread_1 := kvist_map(inc, (xs)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_thread_1 := arr__map_impl(inc, (xs)[0:])"), true)
     testing.expect_value(t, strings.contains(output, "defer delete(kvist_thread_1)"), true)
-    testing.expect_value(t, strings.contains(output, "total := kvist_reduce(add, 0, (kvist_thread_1)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "arr__reduce(add"), false)
+    testing.expect_value(t, strings.contains(output, "total := arr__reduce_impl(add, 0,"), true)
 }
 
 @(test)
 reject_threaded_return_with_allocating_intermediate :: proc(t: ^testing.T) {
     source := `(package main)
+(import arr "kvist:arr")
 
 (defn inc [x: int] -> int
   (+ x 1))
@@ -10923,12 +14257,13 @@ reject_threaded_return_with_allocating_intermediate :: proc(t: ^testing.T) {
     _, err, ok := kvist.compile_source(source)
     defer delete(err.message)
     testing.expect_value(t, ok, false)
-    testing.expect_value(t, err.message, "threaded return has an allocating intermediate; bind the pipeline with let so Kvist can emit cleanup")
+    testing.expect_value(t, err.message, "cannot return a borrowed view that depends on an owned intermediate; bind the pipeline locally or return an owned result")
 }
 
 @(test)
 reject_returning_threaded_view_of_owned_intermediate :: proc(t: ^testing.T) {
     source := `(package main)
+(import arr "kvist:arr")
 
 (defstruct User {
   name: string
@@ -10945,12 +14280,13 @@ reject_returning_threaded_view_of_owned_intermediate :: proc(t: ^testing.T) {
     _, err, ok := kvist.compile_source(source)
     defer delete(err.message)
     testing.expect_value(t, ok, false)
-    testing.expect_value(t, err.message, "cannot return a threaded slice view that borrows from an owned intermediate; return an owned result or keep the pipeline local")
+    testing.expect_value(t, err.message, "cannot return a borrowed view that depends on an owned intermediate; return an owned result or keep the pipeline local")
 }
 
 @(test)
 compile_additional_sequence_helpers :: proc(t: ^testing.T) {
     source := `(package main)
+(import arr "kvist:arr")
 
 (defn even? [x: int] -> bool
   (= (% x 2) 0))
@@ -10966,38 +14302,19 @@ compile_additional_sequence_helpers :: proc(t: ^testing.T) {
 (defn pair [x: int] -> []int
   ([]int [x (+ x 10)]))
 
-(defn neg [x: int] -> int
-  (- x))
-
-(defn pick-first [n: int] -> int
-  0)
-
 (defn main []
   (let [xs ([]int [1 2 3])
-        mutable ([dynamic]int [1 2 3])
         ys ([]int [4 5])
         without-evens (arr.remove even? xs)
         kept (arr.keep keep-even xs)
-        joined (concat without-evens ys)
-        copied (arr.into [dynamic]int xs)
-        descending (arr.sort-by neg joined)
+        joined (arr.concat without-evens ys)
         threaded-sorted (->> xs
                              (arr.remove even?)
-                             (arr.keep keep-even))
-        tail-last (arr.last joined)]
-    (defer (delete mutable))
+                             (arr.keep keep-even))]
     (defer (delete without-evens))
     (defer (delete kept))
     (defer (delete joined))
-    (defer (delete copied))
-    (defer (delete descending))
     (defer (delete threaded-sorted))
-    (arr.sort-by! neg xs)
-    (arr.map! neg mutable)
-    (arr.filter! even? mutable)
-    (arr.remove! even? mutable)
-    (arr.keep! keep-even mutable)
-    (arr.into! mutable ys)
     (return)))`
 
     output, err, ok := kvist.compile_source(source)
@@ -11008,34 +14325,18 @@ compile_additional_sequence_helpers :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    testing.expect_value(t, strings.contains(output, "without_evens := kvist_remove(even_p, (xs)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "kept := kvist_keep(keep_even, (xs)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "joined := kvist_concat((without_evens)[:], (ys)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "copied := kvist_into([dynamic]int, (xs)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "descending := kvist_sort_by_callback_neg((joined)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "import kvist_slice \"core:slice\""), true)
-    testing.expect_value(t, strings.contains(output, "kvist_thread_1 := kvist_remove(even_p, (xs)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "without_evens := arr__remove_impl(even_p, (xs)[0:])"), true)
+    testing.expect_value(t, strings.contains(output, "kept := arr__keep_impl(keep_even, (xs)[0:])"), true)
+    testing.expect_value(t, strings.contains(output, "joined := arr__concat((without_evens)[:], ys)"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_thread_1 := arr__remove_impl(even_p, (xs)[0:])"), true)
     testing.expect_value(t, strings.contains(output, "defer delete(kvist_thread_1)"), true)
-    testing.expect_value(t, strings.contains(output, "threaded_sorted := kvist_keep(keep_even, (kvist_thread_1)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_sort_by_in_place_callback_neg((xs)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_map_in_place(neg, (mutable)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_filter_in_place(even_p, &(mutable))"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_remove_in_place(even_p, &(mutable))"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_keep_in_place(keep_even, &(mutable))"), true)
-    testing.expect_value(t, strings.contains(output, "append(&(mutable), ..(ys)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "tail_last := (joined)[len(joined)-1]"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_remove :: proc(pred: proc(x: $T) -> bool, xs: []T) -> [dynamic]T"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_keep :: proc(f: proc(x: $T) -> ($U, bool), xs: []T) -> [dynamic]U"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_into :: proc($Out: typeid, xs: []$T) -> Out"), true)
+    testing.expect_value(t, strings.contains(output, "threaded_sorted := arr__keep_impl(keep_even,"), true)
+    testing.expect_value(t, strings.contains(output, "arr__concat :: #force_inline proc(xs: []$T, ys: []T) -> [dynamic]T"), true)
+    testing.expect_value(t, strings.contains(output, "arr__remove_impl :: #force_inline proc(pred: proc(x: $T) -> bool, xs: []T) -> [dynamic]T"), true)
+    testing.expect_value(t, strings.contains(output, "arr__keep_impl :: #force_inline proc(f: proc(x: $T) -> (value: $U, ok: bool), xs: []T) -> [dynamic]U"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_concat :: proc"), false)
     testing.expect_value(t, strings.contains(output, "kvist_sort :: proc(xs: []$T) -> [dynamic]T"), false)
-    testing.expect_value(t, strings.contains(output, "kvist_sort_by_callback_neg :: proc(xs: []$T) -> [dynamic]T"), true)
-    testing.expect_value(t, strings.contains(output, "return neg(a) < neg(b)"), true)
     testing.expect_value(t, strings.contains(output, "kvist_sort_in_place :: proc(xs: []$T)"), false)
-    testing.expect_value(t, strings.contains(output, "kvist_sort_by_in_place_callback_neg :: proc(xs: []$T)"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_map_in_place :: proc(f: proc(x: $T) -> T, xs: []T)"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_filter_in_place :: proc(pred: proc(x: $T) -> bool, xs: ^[dynamic]T)"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_remove_in_place :: proc(pred: proc(x: $T) -> bool, xs: ^[dynamic]T)"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_keep_in_place :: proc(f: proc(x: $T) -> (T, bool), xs: ^[dynamic]T)"), true)
 }
 
 @(test)
@@ -11100,10 +14401,10 @@ compile_chunking_and_zipmap_sequence_helpers :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "distinct_parity := arr__distinct_by_impl(parity, (xs)[0:])"), true)
     testing.expect_value(t, strings.contains(output, "for _, group in by_parity {"), true)
     testing.expect_value(t, strings.contains(output, "delete(group)"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_thread_1 := kvist_remove(even_p, (xs)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_thread_1 := arr__remove_impl(even_p, (xs)[0:])"), true)
     testing.expect_value(t, strings.contains(output, "defer delete(kvist_thread_1)"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_thread_2 := arr__distinct_impl((kvist_thread_1)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "defer delete(kvist_thread_2)"), true)
+    testing.expect_value(t, strings.contains(output, "arr__distinct_impl("), true)
+    testing.expect_value(t, strings.contains(output, "defer delete(kvist_thread_"), true)
     testing.expect_value(t, strings.contains(output, "threaded := arr__partition_by_impl(identity,"), true)
     testing.expect_value(t, strings.contains(output, "arr__split_at :: #force_inline proc(n: int, xs: []$T) -> (left: []T, right: []T) {"), true)
     testing.expect_value(t, strings.contains(output, "arr__partition :: #force_inline proc(n: int, xs: []$T) -> [dynamic][]T {"), true)
@@ -11186,7 +14487,8 @@ compile_map_constructing_sequence_helpers :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "value_list := map__vals(overrides)"), true)
     testing.expect_value(t, strings.contains(output, "kvist_thread_1 := map__keys(merged)"), true)
     testing.expect_value(t, strings.contains(output, "defer delete(kvist_thread_1)"), true)
-    testing.expect_value(t, strings.contains(output, "key_count := len((kvist_thread_1)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "key_count := len("), true)
+    testing.expect_value(t, strings.contains(output, "map__keys(merged)"), true)
     testing.expect_value(t, strings.contains(output, "for key, value in overrides {"), true)
     testing.expect_value(t, strings.contains(output, "base[key] = value"), true)
     testing.expect_value(t, strings.contains(output, "map__arr__index_by_impl :: #force_inline proc(f: proc(x: $T) -> $K, xs: []T) -> map[K]T {"), true)
@@ -11257,16 +14559,31 @@ compile_bounded_sequence_producers :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    testing.expect_value(t, strings.contains(output, "xs := arr__range_impl(1, 5, 1)"), true)
-    testing.expect_value(t, strings.contains(output, "ys := arr__repeat(3, \"x\")"), true)
-    testing.expect_value(t, strings.contains(output, "zs := arr__repeatedly(2, next)"), true)
-    testing.expect_value(t, strings.contains(output, "powers := arr__iterate(4, double, 1)"), true)
-    testing.expect_value(t, strings.contains(output, "cycled := arr__cycle(5, []int{1, 2})"), true)
-    testing.expect_value(t, strings.contains(output, "arr__range_impl :: #force_inline proc(start, end, step: int) -> [dynamic]int {"), true)
-    testing.expect_value(t, strings.contains(output, "arr__repeat :: #force_inline proc(n: int, value: $T) -> [dynamic]T {"), true)
-    testing.expect_value(t, strings.contains(output, "arr__repeatedly :: #force_inline proc(n: int, f: proc() -> $T) -> [dynamic]T {"), true)
-    testing.expect_value(t, strings.contains(output, "arr__iterate :: #force_inline proc(n: int, f: proc(x: $T) -> T, init: T) -> [dynamic]T {"), true)
-    testing.expect_value(t, strings.contains(output, "arr__cycle :: #force_inline proc(n: int, xs: []$T) -> [dynamic]T {"), true)
+    testing.expect_value(t, strings.contains(output, "xs := (proc(kvist_source_arg_1: int, kvist_source_arg_2: int, kvist_source_arg_3: int) -> [dynamic]int {"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_source := arr__range_impl(kvist_source_arg_1, kvist_source_arg_2, kvist_source_arg_3)"), true)
+    testing.expect_value(t, strings.contains(output, "arr__range_next(&kvist_source)"), true)
+    testing.expect_value(t, strings.contains(output, "append(&kvist_out, kvist_item)"), true)
+    testing.expect_value(t, strings.contains(output, "ys := (proc(kvist_source_arg_1: int, kvist_source_arg_2: string) -> [dynamic]string {"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_source := arr__repeat_impl(kvist_source_arg_1, kvist_source_arg_2)"), true)
+    testing.expect_value(t, strings.contains(output, "arr__repeat_next(&kvist_source)"), true)
+    testing.expect_value(t, strings.contains(output, "zs := (proc(kvist_source_arg_1: int, kvist_source_arg_2: proc() -> int) -> [dynamic]int {"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_source := arr__repeatedly_impl(kvist_source_arg_1, kvist_source_arg_2)"), true)
+    testing.expect_value(t, strings.contains(output, "arr__repeatedly_next(&kvist_source)"), true)
+    testing.expect_value(t, strings.contains(output, "powers := (proc(kvist_source_arg_1: int, kvist_source_arg_2: proc(x: int) -> int, kvist_source_arg_3: int) -> [dynamic]int {"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_source := arr__iterate_impl(kvist_source_arg_1, kvist_source_arg_2, kvist_source_arg_3)"), true)
+    testing.expect_value(t, strings.contains(output, "arr__iterate_next(&kvist_source)"), true)
+    testing.expect_value(t, strings.contains(output, "cycled := (proc(kvist_source_arg_1: int, kvist_source_arg_2: []int) -> [dynamic]int {"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_source := arr__cycle_impl(kvist_source_arg_1, kvist_source_arg_2)"), true)
+    testing.expect_value(t, strings.contains(output, "arr__cycle_next(&kvist_source)"), true)
+    testing.expect_value(t, strings.contains(output, "arr__range_impl :: proc(start: int, end: int, step: int) -> arr__Range_Source {"), true)
+    testing.expect_value(t, strings.contains(output, "arr__Repeat_Source :: struct($T: typeid) {value: T, index: int, count: int}"), true)
+    testing.expect_value(t, strings.contains(output, "arr__repeat_impl :: proc(n: int, value: $T) -> arr__Repeat_Source(T) {"), true)
+    testing.expect_value(t, strings.contains(output, "arr__Repeatedly_Source :: struct($T: typeid) {f: proc() -> T, zero: T, index: int, count: int}"), true)
+    testing.expect_value(t, strings.contains(output, "arr__repeatedly_impl :: proc(n: int, f: proc() -> $T) -> arr__Repeatedly_Source(T) {"), true)
+    testing.expect_value(t, strings.contains(output, "arr__Iterate_Source :: struct($T: typeid) {f: proc(x: T) -> T, current: T, index: int, count: int}"), true)
+    testing.expect_value(t, strings.contains(output, "arr__iterate_impl :: proc(n: int, f: proc(x: $T) -> T, init: T) -> arr__Iterate_Source(T) {"), true)
+    testing.expect_value(t, strings.contains(output, "arr__Cycle_Source :: struct($T: typeid) {xs: []T, zero: T, index: int, count: int, size: int}"), true)
+    testing.expect_value(t, strings.contains(output, "arr__cycle_impl :: proc(n: int, xs: []$T) -> arr__Cycle_Source(T) {"), true)
     testing.expect_value(t, strings.contains(output, "kvist_range"), false)
     testing.expect_value(t, strings.contains(output, "kvist_repeat"), false)
     testing.expect_value(t, strings.contains(output, "kvist_repeatedly"), false)
@@ -11277,6 +14594,7 @@ compile_bounded_sequence_producers :: proc(t: ^testing.T) {
 @(test)
 compile_field_selector_callbacks_for_sequence_helpers :: proc(t: ^testing.T) {
     source := `(package main)
+(import arr "kvist:arr")
 
 (defstruct User {
   name: string
@@ -11301,7 +14619,9 @@ compile_field_selector_callbacks_for_sequence_helpers :: proc(t: ^testing.T) {
         unverified (arr.remove .verified users)
         [first ok] (arr.find .verified users)
         any? (arr.some? .verified users)
-        all? (arr.every? .verified verified)]
+        all? (arr.every? .verified verified)
+        prefix (arr.take-while .verified users)
+        suffix (arr.drop-while .verified users)]
     (defer
       (for [_ group by-verified]
         (delete group))
@@ -11319,40 +14639,63 @@ compile_field_selector_callbacks_for_sequence_helpers :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    testing.expect_value(t, strings.contains(output, "names := kvist_map_field_name(type_of(((users)[:])[0].name), (users)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "by_name := kvist_index_by_field_name(type_of(((users)[:])[0].name), (users)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "by_verified := kvist_group_by_field_verified(type_of(((users)[:])[0].verified), (users)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "count_by_verified := kvist_count_by_field_verified(type_of(((users)[:])[0].verified), (users)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "sum_by_verified := kvist_sum_by_fields_verified_amount(type_of(((users)[:])[0].verified), type_of(((users)[:])[0].amount), (users)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "groups := kvist_partition_by_field_verified(type_of(((users)[:])[0].verified), (users)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "distinct_names := kvist_distinct_by_field_name(type_of(((users)[:])[0].name), (users)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "sorted := kvist_sort_by_field_name(type_of(((users)[:])[0].name), (users)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_sort_by_in_place_field_name((mutated)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_filter_in_place_field_verified(&(mutated))"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_remove_in_place_field_verified(&(mutated))"), true)
-    testing.expect_value(t, strings.contains(output, "verified := kvist_filter_field_verified((users)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "unverified := kvist_remove_field_verified((users)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "first, ok := kvist_find_field_verified((users)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "any_p := kvist_some_p_field_verified((users)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "all_p := kvist_every_p_field_verified((verified)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_map_field_name :: proc($Field_Type: typeid, xs: []$T) -> [dynamic]Field_Type"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_index_by_field_name :: proc($Key: typeid, xs: []$T) -> map[Key]T"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_group_by_field_verified :: proc($Key: typeid, xs: []$T) -> map[Key][dynamic]T"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_count_by_field_verified :: proc($Key: typeid, xs: []$T) -> map[Key]int"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_sum_by_fields_verified_amount :: proc($Key: typeid, $Value: typeid, xs: []$T) -> map[Key]Value"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_partition_by_field_verified :: proc($Key: typeid, xs: []$T) -> [dynamic][]T"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_distinct_by_field_name :: proc($Key: typeid, xs: []$T) -> [dynamic]T"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_sort_by_field_name :: proc($Key: typeid, xs: []$T) -> [dynamic]T"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_slice.sort_by(out[:], proc(a, b: T) -> bool"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_sort_by_in_place_field_name :: proc(xs: []$T)"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_slice.sort_by(xs, proc(a, b: T) -> bool"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_filter_in_place_field_verified :: proc(xs: ^[dynamic]$T)"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_remove_in_place_field_verified :: proc(xs: ^[dynamic]$T)"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_filter_field_verified :: proc(xs: []$T) -> [dynamic]T"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_remove_field_verified :: proc(xs: []$T) -> [dynamic]T"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_find_field_verified :: proc(xs: []$T) -> (value: T, ok: bool)"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_some_p_field_verified :: proc(xs: []$T) -> bool"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_every_p_field_verified :: proc(xs: []$T) -> bool"), true)
+    testing.expect_value(t, strings.contains(output, "names := arr__map_impl__kvist_field_0_name(type_of(((users)[0:])[0]), type_of(((users)[0:])[0].name), (users)[0:])"), true)
+    testing.expect_value(t, strings.contains(output, "by_name := arr__index_by_impl__kvist_field_0_name(type_of(((users)[0:])[0]), type_of(((users)[0:])[0].name), (users)[0:])"), true)
+    testing.expect_value(t, strings.contains(output, "by_verified := arr__group_by_impl__kvist_field_0_verified(type_of(((users)[0:])[0]), type_of(((users)[0:])[0].verified), (users)[0:])"), true)
+    testing.expect_value(t, strings.contains(output, "count_by_verified := arr__count_by_impl__kvist_field_0_verified(type_of(((users)[0:])[0]), type_of(((users)[0:])[0].verified), (users)[0:])"), true)
+    testing.expect_value(t, strings.contains(output, "sum_by_verified := arr__sum_by_impl__kvist_field_0_verified__kvist_field_1_amount(type_of(((users)[0:])[0]), type_of(((users)[0:])[0].verified), type_of(((users)[0:])[0].amount), (users)[0:])"), true)
+    testing.expect_value(t, strings.contains(output, "groups := arr__partition_by_impl__kvist_field_0_verified(type_of(((users)[0:])[0]), type_of(((users)[0:])[0].verified), (users)[0:])"), true)
+    testing.expect_value(t, strings.contains(output, "distinct_names := arr__distinct_by_impl__kvist_field_0_name(type_of(((users)[0:])[0]), type_of(((users)[0:])[0].name), (users)[0:])"), true)
+    testing.expect_value(t, strings.contains(output, "sorted := arr__sort_by_impl__kvist_field_0_name(type_of(((users)[0:])[0]), type_of(((users)[0:])[0].name), (users)[0:])"), true)
+    testing.expect_value(t, strings.contains(output, "arr__sort_by_bang_impl__kvist_field_0_name(type_of(((mutated)[0:])[0]), type_of(((mutated)[0:])[0].name), (mutated)[0:])"), true)
+    testing.expect_value(t, strings.contains(output, "arr__filter_bang_impl__kvist_field_0_verified(type_of(((&mutated)^)[0]), &mutated)"), true)
+    testing.expect_value(t, strings.contains(output, "arr__remove_bang_impl__kvist_field_0_verified(type_of(((&mutated)^)[0]), &mutated)"), true)
+    testing.expect_value(t, strings.contains(output, "verified := arr__filter_impl__kvist_field_0_verified(type_of(((users)[0:])[0]), (users)[0:])"), true)
+    testing.expect_value(t, strings.contains(output, "unverified := arr__remove_impl__kvist_field_0_verified(type_of(((users)[0:])[0]), (users)[0:])"), true)
+    testing.expect_value(t, strings.contains(output, "first, ok := arr__find_impl__kvist_field_0_verified(type_of(((users)[0:])[0]), (users)[0:])"), true)
+    testing.expect_value(t, strings.contains(output, "any_p := arr__some_impl__kvist_field_0_verified(type_of(((users)[0:])[0]), (users)[0:])"), true)
+    testing.expect_value(t, strings.contains(output, "all_p := arr__every_impl__kvist_field_0_verified(type_of(((verified)[0:])[0]), (verified)[0:])"), true)
+    testing.expect_value(t, strings.contains(output, "prefix := arr__take_while_impl__kvist_field_0_verified(type_of(((users)[0:])[0]), (users)[0:])"), true)
+    testing.expect_value(t, strings.contains(output, "suffix := arr__drop_while_impl__kvist_field_0_verified(type_of(((users)[0:])[0]), (users)[0:])"), true)
+    testing.expect_value(t, strings.contains(output, "arr__map_impl__kvist_field_0_name :: proc($T: typeid, $U: typeid, xs: []T) -> [dynamic]U"), true)
+    testing.expect_value(t, strings.contains(output, "arr__index_by_impl__kvist_field_0_name :: proc($T: typeid, $K: typeid, xs: []T) -> map[K]T"), true)
+    testing.expect_value(t, strings.contains(output, "arr__group_by_impl__kvist_field_0_verified :: proc($T: typeid, $K: typeid, xs: []T) -> map[K][dynamic]T"), true)
+    testing.expect_value(t, strings.contains(output, "arr__count_by_impl__kvist_field_0_verified :: proc($T: typeid, $K: typeid, xs: []T) -> map[K]int"), true)
+    testing.expect_value(t, strings.contains(output, "arr__sum_by_impl__kvist_field_0_verified__kvist_field_1_amount :: proc($T: typeid, $K: typeid, $V: typeid, xs: []T) -> map[K]V"), true)
+    testing.expect_value(t, strings.contains(output, "arr__partition_by_impl__kvist_field_0_verified :: proc($T: typeid, $K: typeid, xs: []T) -> [dynamic][]T"), true)
+    testing.expect_value(t, strings.contains(output, "arr__distinct_by_impl__kvist_field_0_name :: proc($T: typeid, $K: typeid, xs: []T) -> [dynamic]T"), true)
+    testing.expect_value(t, strings.contains(output, "arr__sort_by_impl__kvist_field_0_name :: proc($T: typeid, $K: typeid, xs: []T) -> [dynamic]T"), true)
+    testing.expect_value(t, strings.contains(output, "arr__sort_by_bang_impl__kvist_field_0_name :: proc($T: typeid, $K: typeid, xs: []T)"), true)
+    testing.expect_value(t, strings.contains(output, "arr__sort_by_items_bang :: proc(items: []arr__Sort_By_Item($K, $T))"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_slice.sort_by(items, proc(a, b: arr__Sort_By_Item(K, T)) -> bool"), true)
+    testing.expect_value(t, strings.contains(output, "append(&items, arr__Sort_By_Item(K, T){key = x.name, value = x})"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_sort_by_field_name"), false)
+    testing.expect_value(t, strings.contains(output, "kvist_sort_by_in_place_field_name"), false)
+    testing.expect_value(t, strings.contains(output, "arr__filter_bang_impl__kvist_field_0_verified :: proc($T: typeid, xs: ^[dynamic]T)"), true)
+    testing.expect_value(t, strings.contains(output, "arr__remove_bang_impl__kvist_field_0_verified :: proc($T: typeid, xs: ^[dynamic]T)"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_filter_in_place_field_verified"), false)
+    testing.expect_value(t, strings.contains(output, "kvist_remove_in_place_field_verified"), false)
+    testing.expect_value(t, strings.contains(output, "arr__filter_impl__kvist_field_0_verified :: proc($T: typeid, xs: []T) -> [dynamic]T"), true)
+    testing.expect_value(t, strings.contains(output, "arr__remove_impl__kvist_field_0_verified :: proc($T: typeid, xs: []T) -> [dynamic]T"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_map_field_name"), false)
+    testing.expect_value(t, strings.contains(output, "kvist_filter_field_verified"), false)
+    testing.expect_value(t, strings.contains(output, "kvist_remove_field_verified"), false)
+    testing.expect_value(t, strings.contains(output, "arr__find_impl__kvist_field_0_verified :: proc($T: typeid, xs: []T) -> (value: T, ok: bool)"), true)
+    testing.expect_value(t, strings.contains(output, "arr__some_impl__kvist_field_0_verified :: proc($T: typeid, xs: []T) -> bool"), true)
+    testing.expect_value(t, strings.contains(output, "arr__every_impl__kvist_field_0_verified :: proc($T: typeid, xs: []T) -> bool"), true)
+    testing.expect_value(t, strings.contains(output, "arr__take_while_impl__kvist_field_0_verified :: proc($T: typeid, xs: []T) -> []T"), true)
+    testing.expect_value(t, strings.contains(output, "arr__drop_while_impl__kvist_field_0_verified :: proc($T: typeid, xs: []T) -> []T"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_find_field_verified"), false)
+    testing.expect_value(t, strings.contains(output, "kvist_some_p_field_verified"), false)
+    testing.expect_value(t, strings.contains(output, "kvist_every_p_field_verified"), false)
+    testing.expect_value(t, strings.contains(output, "kvist_take_while_field_verified"), false)
+    testing.expect_value(t, strings.contains(output, "kvist_drop_while_field_verified"), false)
+    testing.expect_value(t, strings.contains(output, "kvist_index_by_field_name"), false)
+    testing.expect_value(t, strings.contains(output, "kvist_group_by_field_verified"), false)
+    testing.expect_value(t, strings.contains(output, "kvist_count_by_field_verified"), false)
+    testing.expect_value(t, strings.contains(output, "kvist_partition_by_field_verified"), false)
+    testing.expect_value(t, strings.contains(output, "kvist_distinct_by_field_name"), false)
+    testing.expect_value(t, strings.contains(output, "kvist_sum_by_fields_verified_amount"), false)
 }
 
 @(test)
@@ -11365,9 +14708,17 @@ compile_sequence_indexing_helpers :: proc(t: ^testing.T) {
   (let [xs ([]int [10 20 30])
         a (arr.first xs)
         b (arr.second xs)
-        c (arr.nth xs 2)
+        c (arr.nth 2 xs)
         n (count xs)
         tail (arr.rest xs)
+        threaded-first (->> xs
+                            (arr.first))
+        threaded-second (->> xs
+                             (arr.second))
+        threaded-nth (->> xs
+                         (arr.nth 2))
+        threaded-last (->> xs
+                           (arr.last))
         threaded (->> xs
                       (arr.rest)
                       (count))]
@@ -11384,15 +14735,20 @@ compile_sequence_indexing_helpers :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "a := xs[0]"), true)
     testing.expect_value(t, strings.contains(output, "b := xs[1]"), true)
     testing.expect_value(t, strings.contains(output, "c := xs[2]"), true)
-    testing.expect_value(t, strings.contains(output, "n := len((xs)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "n := len(xs)"), true)
     testing.expect_value(t, strings.contains(output, "tail := (xs)[1:]"), true)
-    testing.expect_value(t, strings.contains(output, "threaded := len((((xs)[:])[1:])[:])"), true)
+    testing.expect_value(t, strings.contains(output, "threaded_first := xs[0]"), true)
+    testing.expect_value(t, strings.contains(output, "threaded_second := xs[1]"), true)
+    testing.expect_value(t, strings.contains(output, "threaded_nth := xs[2]"), true)
+    testing.expect_value(t, strings.contains(output, "threaded_last := xs[(len(xs)) - (1)]"), true)
+    testing.expect_value(t, strings.contains(output, "threaded := len((xs)[1:])"), true)
     testing.expect_value(t, strings.contains(output, "arr__rest(xs)"), false)
 }
 
 @(test)
 allow_returning_owned_sequence_result :: proc(t: ^testing.T) {
     source := `(package main)
+(import arr "kvist:arr")
 
 (defn inc [x: int] -> int
   (+ x 1))
@@ -11408,12 +14764,13 @@ allow_returning_owned_sequence_result :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    testing.expect_value(t, strings.contains(output, "return kvist_map(inc, (xs)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "return arr__map_impl(inc, (xs)[0:])"), true)
 }
 
 @(test)
 warn_discarded_owned_sequence_result :: proc(t: ^testing.T) {
     source := `(package main)
+(import arr "kvist:arr")
 
 (defn inc [x: int] -> int
   (+ x 1))
@@ -11435,6 +14792,439 @@ warn_discarded_owned_sequence_result :: proc(t: ^testing.T) {
     testing.expect_value(t, len(result.warnings), 1)
     if len(result.warnings) == 1 {
         testing.expect_value(t, result.warnings[0].message, "owned result from arr.map is discarded; bind it, delete it, or return it")
+    }
+}
+
+@(test)
+warn_discarded_third_party_dynamic_array_result_from_alloc_shape :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-owned-return-package-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    pkg_dir, pkg_dir_err := os.join_path({dir, "support"}, context.allocator)
+    testing.expect_value(t, pkg_dir_err == nil, true)
+    if pkg_dir_err != nil {
+        return
+    }
+    defer delete(pkg_dir)
+    mk_pkg_err := os.make_directory_all(pkg_dir)
+    testing.expect_value(t, mk_pkg_err == nil, true)
+    if mk_pkg_err != nil {
+        return
+    }
+
+    pkg_path, pkg_path_err := os.join_path({pkg_dir, "support.kvist"}, context.allocator)
+    testing.expect_value(t, pkg_path_err == nil, true)
+    if pkg_path_err != nil {
+        return
+    }
+    defer delete(pkg_path)
+    pkg_source := `(package support)
+(import core "kvist:core")
+
+(defn join [xs: []$T, ys: []T] -> [dynamic]T #force_inline
+  (let [out (make [dynamic]T 0 (+ (core.count xs) (core.count ys)))]
+    (for [x xs]
+      (append (addr out) x))
+    (for [y ys]
+      (append (addr out) y))
+    out))`
+    pkg_write_err := os.write_entire_file_from_string(pkg_path, pkg_source)
+    testing.expect_value(t, pkg_write_err == nil, true)
+    if pkg_write_err != nil {
+        return
+    }
+
+    main_path, main_path_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, main_path_err == nil, true)
+    if main_path_err != nil {
+        return
+    }
+    defer delete(main_path)
+    main_source := `(package main)
+(import support "support")
+
+(defn demo []
+  (let [xs ([]int [1])
+        ys ([]int [2])]
+    (support.join xs ys)
+    (return)))`
+    main_write_err := os.write_entire_file_from_string(main_path, main_source)
+    testing.expect_value(t, main_write_err == nil, true)
+    if main_write_err != nil {
+        return
+    }
+
+    result, err, ok := kvist.compile_path_with_map(main_path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(t, strings.contains(result.output, "support__join :: #force_inline proc(xs: []$T, ys: []T) -> [dynamic]T"), true)
+    testing.expect_value(t, strings.contains(result.output, "#owned"), false)
+    testing.expect_value(t, strings.contains(result.output, "support__join(xs, ys)"), true)
+    testing.expect_value(t, len(result.warnings), 1)
+    if len(result.warnings) == 1 {
+        testing.expect_value(t, result.warnings[0].message, "owned result from support.join is discarded; bind it, delete it, or return it")
+    }
+}
+
+@(test)
+compile_does_not_infer_third_party_dynamic_array_when_input_may_be_returned :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-owned-return-package-negative-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    pkg_dir, pkg_dir_err := os.join_path({dir, "support"}, context.allocator)
+    testing.expect_value(t, pkg_dir_err == nil, true)
+    if pkg_dir_err != nil {
+        return
+    }
+    defer delete(pkg_dir)
+    mk_pkg_err := os.make_directory_all(pkg_dir)
+    testing.expect_value(t, mk_pkg_err == nil, true)
+    if mk_pkg_err != nil {
+        return
+    }
+
+    pkg_path, pkg_path_err := os.join_path({pkg_dir, "support.kvist"}, context.allocator)
+    testing.expect_value(t, pkg_path_err == nil, true)
+    if pkg_path_err != nil {
+        return
+    }
+    defer delete(pkg_path)
+    pkg_source := `(package support)
+
+(defn keep-or-new [xs: [dynamic]int, allocate?: bool] -> [dynamic]int #force_inline
+  (if allocate?
+    (make [dynamic]int)
+    xs))`
+    pkg_write_err := os.write_entire_file_from_string(pkg_path, pkg_source)
+    testing.expect_value(t, pkg_write_err == nil, true)
+    if pkg_write_err != nil {
+        return
+    }
+
+    main_path, main_path_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, main_path_err == nil, true)
+    if main_path_err != nil {
+        return
+    }
+    defer delete(main_path)
+    main_source := `(package main)
+(import support "support")
+
+(defn demo []
+  (let [xs (make [dynamic]int)]
+    (defer (delete xs))
+    (support.keep-or-new xs false)
+    (return)))`
+    main_write_err := os.write_entire_file_from_string(main_path, main_source)
+    testing.expect_value(t, main_write_err == nil, true)
+    if main_write_err != nil {
+        return
+    }
+
+    result, err, ok := kvist.compile_path_with_map(main_path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(t, strings.contains(result.output, "support__keep_or_new :: #force_inline proc("), true)
+    testing.expect_value(t, strings.contains(result.output, ") -> [dynamic]int"), true)
+    testing.expect_value(t, strings.contains(result.output, "#owned"), false)
+    testing.expect_value(t, len(result.warnings), 0)
+}
+
+@(test)
+warn_discarded_third_party_named_owned_bytes_from_alloc_shape :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-owned-named-bytes-package-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    pkg_dir, pkg_dir_err := os.join_path({dir, "support"}, context.allocator)
+    testing.expect_value(t, pkg_dir_err == nil, true)
+    if pkg_dir_err != nil {
+        return
+    }
+    defer delete(pkg_dir)
+    mk_pkg_err := os.make_directory_all(pkg_dir)
+    testing.expect_value(t, mk_pkg_err == nil, true)
+    if mk_pkg_err != nil {
+        return
+    }
+
+    pkg_path, pkg_path_err := os.join_path({pkg_dir, "support.kvist"}, context.allocator)
+    testing.expect_value(t, pkg_path_err == nil, true)
+    if pkg_path_err != nil {
+        return
+    }
+    defer delete(pkg_path)
+    pkg_source := `(package support)
+(import ops "core:os")
+
+(defn read-bytes [path: string] -> [data: []byte, err: ops.Error] #force_inline
+  (ops.read_entire_file path context.allocator))`
+    pkg_write_err := os.write_entire_file_from_string(pkg_path, pkg_source)
+    testing.expect_value(t, pkg_write_err == nil, true)
+    if pkg_write_err != nil {
+        return
+    }
+
+    main_path, main_path_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, main_path_err == nil, true)
+    if main_path_err != nil {
+        return
+    }
+    defer delete(main_path)
+    main_source := `(package main)
+(import support "support")
+
+(defn main [path: string]
+  (support.read-bytes path)
+  (return))`
+    main_write_err := os.write_entire_file_from_string(main_path, main_source)
+    testing.expect_value(t, main_write_err == nil, true)
+    if main_write_err != nil {
+        return
+    }
+
+    result, err, ok := kvist.compile_path_with_map(main_path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(t, strings.contains(result.output, "support__read_bytes :: #force_inline proc(path: string) -> (data: []byte, err: ops.Error)"), true)
+    testing.expect_value(t, strings.contains(result.output, "#owned"), false)
+    testing.expect_value(t, strings.contains(result.output, "return ops.read_entire_file(path, context.allocator)"), true)
+    testing.expect_value(t, len(result.warnings), 1)
+    if len(result.warnings) == 1 {
+        testing.expect_value(t, result.warnings[0].message, "owned result from support.read-bytes is discarded; bind it, delete it, or return it")
+    }
+}
+
+@(test)
+warn_discarded_third_party_destructured_owned_wrapper_result :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-owned-destructured-wrapper-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    pkg_dir, pkg_dir_err := os.join_path({dir, "support"}, context.allocator)
+    testing.expect_value(t, pkg_dir_err == nil, true)
+    if pkg_dir_err != nil {
+        return
+    }
+    defer delete(pkg_dir)
+    mk_pkg_err := os.make_directory_all(pkg_dir)
+    testing.expect_value(t, mk_pkg_err == nil, true)
+    if mk_pkg_err != nil {
+        return
+    }
+
+    pkg_path, pkg_path_err := os.join_path({pkg_dir, "support.kvist"}, context.allocator)
+    testing.expect_value(t, pkg_path_err == nil, true)
+    if pkg_path_err != nil {
+        return
+    }
+    defer delete(pkg_path)
+    pkg_source := `(package support)
+(import os "core:os")
+
+(defn read-base [path: string] -> [data: []byte, err: os.Error] #force_inline
+  (os.read_entire_file path context.allocator))
+
+(defn read-wrapper [path: string] -> []byte #force_inline
+  (let [[data err] (read-base path)]
+    data))`
+    pkg_write_err := os.write_entire_file_from_string(pkg_path, pkg_source)
+    testing.expect_value(t, pkg_write_err == nil, true)
+    if pkg_write_err != nil {
+        return
+    }
+
+    main_path, main_path_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, main_path_err == nil, true)
+    if main_path_err != nil {
+        return
+    }
+    defer delete(main_path)
+    main_source := `(package main)
+(import support "support")
+
+(defn main [path: string]
+  (support.read-wrapper path)
+  (return))`
+    main_write_err := os.write_entire_file_from_string(main_path, main_source)
+    testing.expect_value(t, main_write_err == nil, true)
+    if main_write_err != nil {
+        return
+    }
+
+    result, err, ok := kvist.compile_path_with_map(main_path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(t, strings.contains(result.output, "support__read_base :: #force_inline proc(path: string) -> (data: []byte, err: os.Error)"), true)
+    testing.expect_value(t, strings.contains(result.output, "support__read_wrapper :: #force_inline proc(path: string) -> []byte"), true)
+    testing.expect_value(t, strings.contains(result.output, "#owned"), false)
+    testing.expect_value(t, len(result.warnings), 1)
+    if len(result.warnings) == 1 {
+        testing.expect_value(t, result.warnings[0].message, "owned result from support.read-wrapper is discarded; bind it, delete it, or return it")
+    }
+}
+
+@(test)
+warn_discarded_third_party_macro_impl_result_from_actual_decl :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-owned-impl-package-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    pkg_dir, pkg_dir_err := os.join_path({dir, "support"}, context.allocator)
+    testing.expect_value(t, pkg_dir_err == nil, true)
+    if pkg_dir_err != nil {
+        return
+    }
+    defer delete(pkg_dir)
+    mk_pkg_err := os.make_directory_all(pkg_dir)
+    testing.expect_value(t, mk_pkg_err == nil, true)
+    if mk_pkg_err != nil {
+        return
+    }
+
+    pkg_path, pkg_path_err := os.join_path({pkg_dir, "support.kvist"}, context.allocator)
+    testing.expect_value(t, pkg_path_err == nil, true)
+    if pkg_path_err != nil {
+        return
+    }
+    defer delete(pkg_path)
+    pkg_source := `(package support)
+(import core "kvist:core")
+
+(defn- join-impl [xs: []$T, ys: []T] -> [dynamic]T #force_inline
+  (let [out (make [dynamic]T 0 (+ (core.count xs) (core.count ys)))]
+    (for [x xs]
+      (append (addr out) x))
+    (for [y ys]
+      (append (addr out) y))
+    out))
+
+(defmacro join [xs ys]
+  (quasiquote
+    (join-impl (unquote xs) (unquote ys))))`
+    pkg_write_err := os.write_entire_file_from_string(pkg_path, pkg_source)
+    testing.expect_value(t, pkg_write_err == nil, true)
+    if pkg_write_err != nil {
+        return
+    }
+
+    main_path, main_path_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, main_path_err == nil, true)
+    if main_path_err != nil {
+        return
+    }
+    defer delete(main_path)
+    main_source := `(package main)
+(import support "support")
+
+(defn demo []
+  (let [xs ([]int [1])
+        ys ([]int [2])]
+    (support.join xs ys)
+    (return)))`
+    main_write_err := os.write_entire_file_from_string(main_path, main_source)
+    testing.expect_value(t, main_write_err == nil, true)
+    if main_write_err != nil {
+        return
+    }
+
+    result, err, ok := kvist.compile_path_with_map(main_path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(t, strings.contains(result.output, "support__join_impl :: #force_inline proc(xs: []$T, ys: []T) -> [dynamic]T"), true)
+    testing.expect_value(t, strings.contains(result.output, "#owned"), false)
+    testing.expect_value(t, strings.contains(result.output, "support__join_impl(xs, ys)"), true)
+    testing.expect_value(t, len(result.warnings), 1)
+    if len(result.warnings) == 1 {
+        testing.expect_value(t, result.warnings[0].message, "owned result from support.join is discarded; bind it, delete it, or return it")
+    }
+}
+
+@(test)
+warn_discarded_transform_into_result_from_output_type :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn inc [x: int] -> int
+  (+ x 1))
+
+(deftransform increments
+  (map inc))
+
+(defn main [xs: []int]
+  (into [dynamic]int increments xs)
+  (return))`
+
+    result, err, ok := kvist.compile_source_with_map(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(t, strings.contains(result.output, "append(&kvist_out"), true)
+    testing.expect_value(t, len(result.warnings), 1)
+    if len(result.warnings) == 1 {
+        testing.expect_value(t, result.warnings[0].message, "owned result from into is discarded; bind it, delete it, or return it")
     }
 }
 
@@ -11487,7 +15277,7 @@ allow_defer_inside_loop_block_scope :: proc(t: ^testing.T) {
 }
 
 @(test)
-warn_discarded_owned_core_strings_result :: proc(t: ^testing.T) {
+compile_direct_core_strings_result_without_owned_warning :: proc(t: ^testing.T) {
     source := `(package main)
 (import strings "core:strings")
 
@@ -11505,10 +15295,725 @@ warn_discarded_owned_core_strings_result :: proc(t: ^testing.T) {
     defer delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
+    testing.expect_value(t, len(result.warnings), 0)
+}
+
+@(test)
+warn_discarded_inferred_owned_string_proc_result :: proc(t: ^testing.T) {
+    source := `(package main)
+(import strings "core:strings")
+
+(defn clone-owned [s: string] -> string
+  (let [[out err] (strings.clone s)]
+    out))
+
+(defn main [s: string]
+  (clone-owned s)
+  (return))`
+
+    result, err, ok := kvist.compile_source_with_map(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(t, strings.contains(result.output, "#owned"), false)
     testing.expect_value(t, len(result.warnings), 1)
     if len(result.warnings) == 1 {
-        testing.expect_value(t, result.warnings[0].message, "owned result from strings.clone is discarded; bind it, delete it, or return it")
+        testing.expect_value(t, result.warnings[0].message, "owned result from clone-owned is discarded; bind it, delete it, or return it")
     }
+}
+
+@(test)
+warn_discarded_inferred_owned_string_proc_with_owned_early_return :: proc(t: ^testing.T) {
+    source := `(package main)
+(import strings "core:strings")
+
+(defn lower-or-upper [s: string flag: bool] -> string
+  (when flag
+    (return (strings.to_lower s)))
+  (strings.to_upper s))
+
+(defn main [s: string]
+  (lower-or-upper s true)
+  (return))`
+
+    result, err, ok := kvist.compile_source_with_map(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(t, strings.contains(result.output, "#owned"), false)
+    testing.expect_value(t, len(result.warnings), 1)
+    if len(result.warnings) == 1 {
+        testing.expect_value(t, result.warnings[0].message, "owned result from lower-or-upper is discarded; bind it, delete it, or return it")
+    }
+}
+
+@(test)
+warn_discarded_third_party_inferred_owned_string_proc_result :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-source-owned-string-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    pkg_dir, pkg_dir_err := os.join_path({dir, "support"}, context.allocator)
+    testing.expect_value(t, pkg_dir_err == nil, true)
+    if pkg_dir_err != nil {
+        return
+    }
+    defer delete(pkg_dir)
+    mk_pkg_err := os.make_directory_all(pkg_dir)
+    testing.expect_value(t, mk_pkg_err == nil, true)
+    if mk_pkg_err != nil {
+        return
+    }
+
+    pkg_path, pkg_path_err := os.join_path({pkg_dir, "support.kvist"}, context.allocator)
+    testing.expect_value(t, pkg_path_err == nil, true)
+    if pkg_path_err != nil {
+        return
+    }
+    defer delete(pkg_path)
+    pkg_source := `(package support)
+(import strings "core:strings")
+
+(defn join-two [a: string, b: string] -> string #force_inline
+  (let [builder (strings.builder_make)]
+    (defer (strings.builder_destroy (addr builder)))
+    (strings.write_string (addr builder) a)
+    (strings.write_string (addr builder) b)
+    (let [[out err] (strings.clone (strings.to_string builder))]
+      (if (!= err nil)
+        ""
+        out))))`
+    pkg_write_err := os.write_entire_file_from_string(pkg_path, pkg_source)
+    testing.expect_value(t, pkg_write_err == nil, true)
+    if pkg_write_err != nil {
+        return
+    }
+
+    main_path, main_path_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, main_path_err == nil, true)
+    if main_path_err != nil {
+        return
+    }
+    defer delete(main_path)
+    main_source := `(package main)
+(import support "support")
+
+(defn main []
+  (support.join-two "a" "b")
+  (return))`
+    main_write_err := os.write_entire_file_from_string(main_path, main_source)
+    testing.expect_value(t, main_write_err == nil, true)
+    if main_write_err != nil {
+        return
+    }
+
+    result, err, ok := kvist.compile_path_with_map(main_path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(t, strings.contains(result.output, "support__join_two :: #force_inline proc(a, b: string) -> string {"), true)
+    testing.expect_value(t, strings.contains(result.output, "out, err := strings.clone(strings.to_string(builder))"), true)
+    testing.expect_value(t, strings.contains(result.output, "#owned"), false)
+    testing.expect_value(t, len(result.warnings), 1)
+    if len(result.warnings) == 1 {
+        testing.expect_value(t, result.warnings[0].message, "owned result from support.join-two is discarded; bind it, delete it, or return it")
+    }
+}
+
+@(test)
+warn_discarded_third_party_owned_string_wrapper_result :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-source-owned-string-wrapper-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    pkg_dir, pkg_dir_err := os.join_path({dir, "support"}, context.allocator)
+    testing.expect_value(t, pkg_dir_err == nil, true)
+    if pkg_dir_err != nil {
+        return
+    }
+    defer delete(pkg_dir)
+    mk_pkg_err := os.make_directory_all(pkg_dir)
+    testing.expect_value(t, mk_pkg_err == nil, true)
+    if mk_pkg_err != nil {
+        return
+    }
+
+    pkg_path, pkg_path_err := os.join_path({pkg_dir, "support.kvist"}, context.allocator)
+    testing.expect_value(t, pkg_path_err == nil, true)
+    if pkg_path_err != nil {
+        return
+    }
+    defer delete(pkg_path)
+    pkg_source := `(package support)
+(import strings "core:strings")
+
+(defn clone-base [s: string] -> string #force_inline
+  (let [[out err] (strings.clone s)]
+    out))
+
+(defn clone-wrapper [s: string] -> string #force_inline
+  (clone-base s))`
+    pkg_write_err := os.write_entire_file_from_string(pkg_path, pkg_source)
+    testing.expect_value(t, pkg_write_err == nil, true)
+    if pkg_write_err != nil {
+        return
+    }
+
+    main_path, main_path_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, main_path_err == nil, true)
+    if main_path_err != nil {
+        return
+    }
+    defer delete(main_path)
+    main_source := `(package main)
+(import support "support")
+
+(defn main [s: string]
+  (support.clone-wrapper s)
+  (return))`
+    main_write_err := os.write_entire_file_from_string(main_path, main_source)
+    testing.expect_value(t, main_write_err == nil, true)
+    if main_write_err != nil {
+        return
+    }
+
+    result, err, ok := kvist.compile_path_with_map(main_path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(t, strings.contains(result.output, "support__clone_base :: #force_inline proc(s: string) -> string"), true)
+    testing.expect_value(t, strings.contains(result.output, "support__clone_wrapper :: #force_inline proc(s: string) -> string"), true)
+    testing.expect_value(t, strings.contains(result.output, "#owned"), false)
+    testing.expect_value(t, len(result.warnings), 1)
+    if len(result.warnings) == 1 {
+        testing.expect_value(t, result.warnings[0].message, "owned result from support.clone-wrapper is discarded; bind it, delete it, or return it")
+    }
+}
+
+@(test)
+warn_discarded_third_party_replaced_string_from_alloc_shape :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-source-owned-replace-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    pkg_dir, pkg_dir_err := os.join_path({dir, "support"}, context.allocator)
+    testing.expect_value(t, pkg_dir_err == nil, true)
+    if pkg_dir_err != nil {
+        return
+    }
+    defer delete(pkg_dir)
+    mk_pkg_err := os.make_directory_all(pkg_dir)
+    testing.expect_value(t, mk_pkg_err == nil, true)
+    if mk_pkg_err != nil {
+        return
+    }
+
+    pkg_path, pkg_path_err := os.join_path({pkg_dir, "support.kvist"}, context.allocator)
+    testing.expect_value(t, pkg_path_err == nil, true)
+    if pkg_path_err != nil {
+        return
+    }
+    defer delete(pkg_path)
+    pkg_source := `(package support)
+(import strings "core:strings")
+
+(defn replace-all [s: string, old: string, new: string] -> string #force_inline
+  (let [[out _] (strings.replace s old new -1)]
+    out))`
+    pkg_write_err := os.write_entire_file_from_string(pkg_path, pkg_source)
+    testing.expect_value(t, pkg_write_err == nil, true)
+    if pkg_write_err != nil {
+        return
+    }
+
+    main_path, main_path_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, main_path_err == nil, true)
+    if main_path_err != nil {
+        return
+    }
+    defer delete(main_path)
+    main_source := `(package main)
+(import support "support")
+
+(defn main [s: string]
+  (support.replace-all s "x" "y")
+  (return))`
+    main_write_err := os.write_entire_file_from_string(main_path, main_source)
+    testing.expect_value(t, main_write_err == nil, true)
+    if main_write_err != nil {
+        return
+    }
+
+    result, err, ok := kvist.compile_path_with_map(main_path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(t, strings.contains(result.output, "support__replace_all :: #force_inline proc(s, old, new: string) -> string"), true)
+    testing.expect_value(t, strings.contains(result.output, "out, _ := strings.replace(s, old, new, -1)"), true)
+    testing.expect_value(t, strings.contains(result.output, "#owned"), false)
+    testing.expect_value(t, len(result.warnings), 1)
+    if len(result.warnings) == 1 {
+        testing.expect_value(t, result.warnings[0].message, "owned result from support.replace-all is discarded; bind it, delete it, or return it")
+    }
+}
+
+@(test)
+warn_discarded_third_party_named_return_assignment_owned_string :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-source-owned-named-set-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    pkg_dir, pkg_dir_err := os.join_path({dir, "support"}, context.allocator)
+    testing.expect_value(t, pkg_dir_err == nil, true)
+    if pkg_dir_err != nil {
+        return
+    }
+    defer delete(pkg_dir)
+    mk_pkg_err := os.make_directory_all(pkg_dir)
+    testing.expect_value(t, mk_pkg_err == nil, true)
+    if mk_pkg_err != nil {
+        return
+    }
+
+    pkg_path, pkg_path_err := os.join_path({pkg_dir, "support.kvist"}, context.allocator)
+    testing.expect_value(t, pkg_path_err == nil, true)
+    if pkg_path_err != nil {
+        return
+    }
+    defer delete(pkg_path)
+    pkg_source := `(package support)
+(import strings "core:strings")
+
+(defn lower-named [s: string] -> [out: string, ok: bool] #force_inline
+  (set! out (strings.to_lower s))
+  (set! ok true)
+  (return out ok))`
+    pkg_write_err := os.write_entire_file_from_string(pkg_path, pkg_source)
+    testing.expect_value(t, pkg_write_err == nil, true)
+    if pkg_write_err != nil {
+        return
+    }
+
+    main_path, main_path_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, main_path_err == nil, true)
+    if main_path_err != nil {
+        return
+    }
+    defer delete(main_path)
+    main_source := `(package main)
+(import support "support")
+
+(defn main [s: string]
+  (support.lower-named s)
+  (return))`
+    main_write_err := os.write_entire_file_from_string(main_path, main_source)
+    testing.expect_value(t, main_write_err == nil, true)
+    if main_write_err != nil {
+        return
+    }
+
+    result, err, ok := kvist.compile_path_with_map(main_path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(t, strings.contains(result.output, "support__lower_named :: #force_inline proc(s: string) -> (out: string, ok: bool)"), true)
+    testing.expect_value(t, strings.contains(result.output, "out = strings.to_lower(s)"), true)
+    testing.expect_value(t, strings.contains(result.output, "#owned"), false)
+    testing.expect_value(t, len(result.warnings), 1)
+    if len(result.warnings) == 1 {
+        testing.expect_value(t, result.warnings[0].message, "owned result from support.lower-named is discarded; bind it, delete it, or return it")
+    }
+}
+
+@(test)
+warn_discarded_third_party_conditional_assignment_owned_string :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-source-owned-branch-set-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    pkg_dir, pkg_dir_err := os.join_path({dir, "support"}, context.allocator)
+    testing.expect_value(t, pkg_dir_err == nil, true)
+    if pkg_dir_err != nil {
+        return
+    }
+    defer delete(pkg_dir)
+    mk_pkg_err := os.make_directory_all(pkg_dir)
+    testing.expect_value(t, mk_pkg_err == nil, true)
+    if mk_pkg_err != nil {
+        return
+    }
+
+    pkg_path, pkg_path_err := os.join_path({pkg_dir, "support.kvist"}, context.allocator)
+    testing.expect_value(t, pkg_path_err == nil, true)
+    if pkg_path_err != nil {
+        return
+    }
+    defer delete(pkg_path)
+    pkg_source := `(package support)
+(import strings "core:strings")
+
+(defn normalize [s: string upper?: bool] -> string #force_inline
+  (let [out ""]
+    (if upper?
+      (set! out (strings.to_upper s))
+      (set! out (strings.to_lower s)))
+    out))`
+    pkg_write_err := os.write_entire_file_from_string(pkg_path, pkg_source)
+    testing.expect_value(t, pkg_write_err == nil, true)
+    if pkg_write_err != nil {
+        return
+    }
+
+    main_path, main_path_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, main_path_err == nil, true)
+    if main_path_err != nil {
+        return
+    }
+    defer delete(main_path)
+    main_source := `(package main)
+(import support "support")
+
+(defn main [s: string]
+  (support.normalize s true)
+  (return))`
+    main_write_err := os.write_entire_file_from_string(main_path, main_source)
+    testing.expect_value(t, main_write_err == nil, true)
+    if main_write_err != nil {
+        return
+    }
+
+    result, err, ok := kvist.compile_path_with_map(main_path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(t, strings.contains(result.output, "support__normalize :: #force_inline proc(s: string, upper_p: bool) -> string"), true)
+    testing.expect_value(t, strings.contains(result.output, "out = strings.to_upper(s)"), true)
+    testing.expect_value(t, strings.contains(result.output, "out = strings.to_lower(s)"), true)
+    testing.expect_value(t, strings.contains(result.output, "#owned"), false)
+    testing.expect_value(t, len(result.warnings), 1)
+    if len(result.warnings) == 1 {
+        testing.expect_value(t, result.warnings[0].message, "owned result from support.normalize is discarded; bind it, delete it, or return it")
+    }
+}
+
+@(test)
+warn_discarded_third_party_type_case_assignment_owned_string :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-source-owned-type-case-set-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    pkg_dir, pkg_dir_err := os.join_path({dir, "support"}, context.allocator)
+    testing.expect_value(t, pkg_dir_err == nil, true)
+    if pkg_dir_err != nil {
+        return
+    }
+    defer delete(pkg_dir)
+    mk_pkg_err := os.make_directory_all(pkg_dir)
+    testing.expect_value(t, mk_pkg_err == nil, true)
+    if mk_pkg_err != nil {
+        return
+    }
+
+    pkg_path, pkg_path_err := os.join_path({pkg_dir, "support.kvist"}, context.allocator)
+    testing.expect_value(t, pkg_path_err == nil, true)
+    if pkg_path_err != nil {
+        return
+    }
+    defer delete(pkg_path)
+    pkg_source := `(package support)
+(import strings "core:strings")
+
+(defstruct Upper {
+  value: string
+})
+
+(defstruct Lower {
+  value: string
+})
+
+(defunion Mode {
+  upper: Upper
+  lower: Lower
+})
+
+(defn normalize-mode [mode: Mode s: string] -> string #force_inline
+  (let [out ""]
+    (case mode
+      (Upper _) (set! out (strings.to_upper s))
+      (Lower _) (set! out (strings.to_lower s))
+      (set! out (strings.to_lower s)))
+    out))`
+    pkg_write_err := os.write_entire_file_from_string(pkg_path, pkg_source)
+    testing.expect_value(t, pkg_write_err == nil, true)
+    if pkg_write_err != nil {
+        return
+    }
+
+    main_path, main_path_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, main_path_err == nil, true)
+    if main_path_err != nil {
+        return
+    }
+    defer delete(main_path)
+    main_source := `(package main)
+(import support "support")
+
+(defn main [mode: support.Mode s: string]
+  (support.normalize-mode mode s)
+  (return))`
+    main_write_err := os.write_entire_file_from_string(main_path, main_source)
+    testing.expect_value(t, main_write_err == nil, true)
+    if main_write_err != nil {
+        return
+    }
+
+    result, err, ok := kvist.compile_path_with_map(main_path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(t, strings.contains(result.output, "support__normalize_mode :: #force_inline proc(mode: support__Mode, s: string) -> string"), true)
+    testing.expect_value(t, strings.contains(result.output, "out = strings.to_upper(s)"), true)
+    testing.expect_value(t, strings.contains(result.output, "out = strings.to_lower(s)"), true)
+    testing.expect_value(t, strings.contains(result.output, "#owned"), false)
+    testing.expect_value(t, len(result.warnings), 1)
+    if len(result.warnings) == 1 {
+        testing.expect_value(t, result.warnings[0].message, "owned result from support.normalize-mode is discarded; bind it, delete it, or return it")
+    }
+}
+
+@(test)
+compile_does_not_infer_owned_string_when_alloc_or_input_parameter_returned :: proc(t: ^testing.T) {
+    source := `(package main)
+(import strings "core:strings")
+
+(defn replace-or-original [s: string, old: string, new: string] -> string
+  (let [[updated allocated?] (strings.replace s old new -1)]
+    (if allocated?
+      updated
+      s)))
+
+(defn main [s: string]
+  (replace-or-original s "x" "y")
+  (return))`
+
+    result, err, ok := kvist.compile_source_with_map(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(t, strings.contains(result.output, "#owned"), false)
+    testing.expect_value(t, len(result.warnings), 0)
+}
+
+@(test)
+compile_does_not_infer_third_party_owned_string_when_only_one_if_branch_allocates :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-mixed-owned-if-package-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    pkg_dir, pkg_dir_err := os.join_path({dir, "support"}, context.allocator)
+    testing.expect_value(t, pkg_dir_err == nil, true)
+    if pkg_dir_err != nil {
+        return
+    }
+    defer delete(pkg_dir)
+    mk_pkg_err := os.make_directory_all(pkg_dir)
+    testing.expect_value(t, mk_pkg_err == nil, true)
+    if mk_pkg_err != nil {
+        return
+    }
+
+    pkg_path, pkg_path_err := os.join_path({pkg_dir, "support.kvist"}, context.allocator)
+    testing.expect_value(t, pkg_path_err == nil, true)
+    if pkg_path_err != nil {
+        return
+    }
+    defer delete(pkg_path)
+    pkg_source := `(package support)
+(import strings "core:strings")
+
+(defn lower-or-default [s: string allocate?: bool] -> string #force_inline
+  (if allocate?
+    (strings.to_lower s)
+    "default"))`
+    pkg_write_err := os.write_entire_file_from_string(pkg_path, pkg_source)
+    testing.expect_value(t, pkg_write_err == nil, true)
+    if pkg_write_err != nil {
+        return
+    }
+
+    main_path, main_path_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, main_path_err == nil, true)
+    if main_path_err != nil {
+        return
+    }
+    defer delete(main_path)
+    main_source := `(package main)
+(import support "support")
+
+(defn main [s: string]
+  (support.lower-or-default s false)
+  (return))`
+    main_write_err := os.write_entire_file_from_string(main_path, main_source)
+    testing.expect_value(t, main_write_err == nil, true)
+    if main_write_err != nil {
+        return
+    }
+
+    result, err, ok := kvist.compile_path_with_map(main_path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(t, strings.contains(result.output, "support__lower_or_default :: #force_inline proc"), true)
+    testing.expect_value(t, strings.contains(result.output, "return strings.to_lower(s)"), true)
+    testing.expect_value(t, strings.contains(result.output, "return \"default\""), true)
+    testing.expect_value(t, strings.contains(result.output, "#owned"), false)
+    testing.expect_value(t, len(result.warnings), 0)
+}
+
+@(test)
+compile_does_not_infer_owned_string_when_early_return_uses_input_parameter :: proc(t: ^testing.T) {
+    source := `(package main)
+(import strings "core:strings")
+
+(defn lower-or-original-early [s: string flag: bool] -> string
+  (when flag
+    (return s))
+  (strings.to_lower s))
+
+(defn main [s: string]
+  (lower-or-original-early s true)
+  (return))`
+
+    result, err, ok := kvist.compile_source_with_map(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(t, strings.contains(result.output, "#owned"), false)
+    testing.expect_value(t, len(result.warnings), 0)
+}
+
+@(test)
+compile_does_not_infer_owned_string_after_named_return_overwrite :: proc(t: ^testing.T) {
+    source := `(package main)
+(import strings "core:strings")
+
+(defn lower-or-original [s: string flag: bool] -> [out: string, ok: bool]
+  (set! out (strings.to_lower s))
+  (when flag
+    (set! out s))
+  (set! ok true)
+  (return out ok))
+
+(defn main [s: string]
+  (lower-or-original s true)
+  (return))`
+
+    result, err, ok := kvist.compile_source_with_map(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(t, strings.contains(result.output, "#owned"), false)
+    testing.expect_value(t, len(result.warnings), 0)
 }
 
 @(test)
@@ -11537,142 +16042,845 @@ warn_defer_marked_borrowed_string_view :: proc(t: ^testing.T) {
 }
 
 @(test)
-reject_legacy_unqualified_sequence_helpers :: proc(t: ^testing.T) {
+warn_defer_inferred_borrowed_odin_string_view_result :: proc(t: ^testing.T) {
+    source := `(package main)
+(import strings "core:strings")
+
+(defn trim-view [s: string] -> string
+  (strings.trim_space s))
+
+(defn trim-cutset-view [s: string] -> string
+  (strings.trim s " \t"))
+
+(defn trim-prefix-view [s: string] -> string
+  (strings.trim_prefix s "kvist."))
+
+(defn trim-suffix-view [s: string] -> string
+  (strings.trim_suffix s ".txt"))
+
+(defn main [s: string]
+  (let [trimmed (trim-view s) :defer
+        trimmed-cutset (trim-cutset-view s) :defer
+        without-prefix (trim-prefix-view s) :defer
+        without-suffix (trim-suffix-view s) :defer]
+    (println trimmed trimmed-cutset without-prefix without-suffix)))`
+
+    result, err, ok := kvist.compile_source_with_map(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(t, strings.contains(result.output, "#borrowed"), false)
+    testing.expect_value(t, len(result.warnings), 4)
+    if len(result.warnings) == 4 {
+        testing.expect_value(t, result.warnings[0].message, "trim-view returns a borrowed view; do not delete it, delete the owner instead")
+        testing.expect_value(t, result.warnings[1].message, "trim-cutset-view returns a borrowed view; do not delete it, delete the owner instead")
+        testing.expect_value(t, result.warnings[2].message, "trim-prefix-view returns a borrowed view; do not delete it, delete the owner instead")
+        testing.expect_value(t, result.warnings[3].message, "trim-suffix-view returns a borrowed view; do not delete it, delete the owner instead")
+    }
+}
+
+@(test)
+warn_third_party_odin_string_alias_owned_and_borrowed_results :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-source-odin-string-alias-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    pkg_dir, pkg_dir_err := os.join_path({dir, "support"}, context.allocator)
+    testing.expect_value(t, pkg_dir_err == nil, true)
+    if pkg_dir_err != nil {
+        return
+    }
+    defer delete(pkg_dir)
+    mk_pkg_err := os.make_directory_all(pkg_dir)
+    testing.expect_value(t, mk_pkg_err == nil, true)
+    if mk_pkg_err != nil {
+        return
+    }
+
+    pkg_path, pkg_path_err := os.join_path({pkg_dir, "support.kvist"}, context.allocator)
+    testing.expect_value(t, pkg_path_err == nil, true)
+    if pkg_path_err != nil {
+        return
+    }
+    defer delete(pkg_path)
+    pkg_source := `(package support)
+(import s "core:strings")
+
+(defn lower-copy [value: string] -> string #force_inline
+  (s.to_lower value))
+
+(defn trim-view [value: string] -> string #force_inline
+  (s.trim_space value))`
+    pkg_write_err := os.write_entire_file_from_string(pkg_path, pkg_source)
+    testing.expect_value(t, pkg_write_err == nil, true)
+    if pkg_write_err != nil {
+        return
+    }
+
+    main_path, main_path_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, main_path_err == nil, true)
+    if main_path_err != nil {
+        return
+    }
+    defer delete(main_path)
+    main_source := `(package main)
+(import support "support")
+
+(defn main [value: string]
+  (support.lower-copy value)
+  (let [view (support.trim-view value) :defer]
+    (println view))
+  (return))`
+    main_write_err := os.write_entire_file_from_string(main_path, main_source)
+    testing.expect_value(t, main_write_err == nil, true)
+    if main_write_err != nil {
+        return
+    }
+
+    result, err, ok := kvist.compile_path_with_map(main_path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(t, strings.contains(result.output, "support__lower_copy :: #force_inline proc(value: string) -> string"), true)
+    testing.expect_value(t, strings.contains(result.output, "return s.to_lower(value)"), true)
+    testing.expect_value(t, strings.contains(result.output, "support__trim_view :: #force_inline proc(value: string) -> string"), true)
+    testing.expect_value(t, strings.contains(result.output, "return s.trim_space(value)"), true)
+    testing.expect_value(t, strings.contains(result.output, "#owned"), false)
+    testing.expect_value(t, strings.contains(result.output, "#borrowed"), false)
+    testing.expect_value(t, len(result.warnings), 2)
+    if len(result.warnings) == 2 {
+        testing.expect_value(t, result.warnings[0].message, "owned result from support.lower-copy is discarded; bind it, delete it, or return it")
+        testing.expect_value(t, result.warnings[1].message, "support.trim-view returns a borrowed view; do not delete it, delete the owner instead")
+    }
+}
+
+@(test)
+warn_defer_third_party_borrowed_view_returned_through_local :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-source-borrowed-local-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    pkg_dir, pkg_dir_err := os.join_path({dir, "support"}, context.allocator)
+    testing.expect_value(t, pkg_dir_err == nil, true)
+    if pkg_dir_err != nil {
+        return
+    }
+    defer delete(pkg_dir)
+    mk_pkg_err := os.make_directory_all(pkg_dir)
+    testing.expect_value(t, mk_pkg_err == nil, true)
+    if mk_pkg_err != nil {
+        return
+    }
+
+    pkg_path, pkg_path_err := os.join_path({pkg_dir, "support.kvist"}, context.allocator)
+    testing.expect_value(t, pkg_path_err == nil, true)
+    if pkg_path_err != nil {
+        return
+    }
+    defer delete(pkg_path)
+    pkg_source := `(package support)
+(import strings "core:strings")
+
+(defn trim-local [s: string] -> string #force_inline
+  (let [view (strings.trim_space s)]
+    view))`
+    pkg_write_err := os.write_entire_file_from_string(pkg_path, pkg_source)
+    testing.expect_value(t, pkg_write_err == nil, true)
+    if pkg_write_err != nil {
+        return
+    }
+
+    main_path, main_path_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, main_path_err == nil, true)
+    if main_path_err != nil {
+        return
+    }
+    defer delete(main_path)
+    main_source := `(package main)
+(import support "support")
+
+(defn main [s: string]
+  (let [trimmed (support.trim-local s) :defer]
+    (println trimmed)))`
+    main_write_err := os.write_entire_file_from_string(main_path, main_source)
+    testing.expect_value(t, main_write_err == nil, true)
+    if main_write_err != nil {
+        return
+    }
+
+    result, err, ok := kvist.compile_path_with_map(main_path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(t, strings.contains(result.output, "support__trim_local :: #force_inline proc(s: string) -> string"), true)
+    testing.expect_value(t, strings.contains(result.output, "view := strings.trim_space(s)"), true)
+    testing.expect_value(t, strings.contains(result.output, "#borrowed"), false)
+    testing.expect_value(t, len(result.warnings), 1)
+    if len(result.warnings) == 1 {
+        testing.expect_value(t, result.warnings[0].message, "support.trim-local returns a borrowed view; do not delete it, delete the owner instead")
+    }
+}
+
+@(test)
+warn_defer_third_party_borrowed_helper_returned_through_local :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-source-borrowed-helper-local-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    pkg_dir, pkg_dir_err := os.join_path({dir, "support"}, context.allocator)
+    testing.expect_value(t, pkg_dir_err == nil, true)
+    if pkg_dir_err != nil {
+        return
+    }
+    defer delete(pkg_dir)
+    mk_pkg_err := os.make_directory_all(pkg_dir)
+    testing.expect_value(t, mk_pkg_err == nil, true)
+    if mk_pkg_err != nil {
+        return
+    }
+
+    pkg_path, pkg_path_err := os.join_path({pkg_dir, "support.kvist"}, context.allocator)
+    testing.expect_value(t, pkg_path_err == nil, true)
+    if pkg_path_err != nil {
+        return
+    }
+    defer delete(pkg_path)
+    pkg_source := `(package support)
+(import strings "core:strings")
+
+(defn base-view [s: string] -> string #force_inline
+  (strings.trim_space s))
+
+(defn wrapper-view [s: string] -> string #force_inline
+  (let [view (base-view s)]
+    view))`
+    pkg_write_err := os.write_entire_file_from_string(pkg_path, pkg_source)
+    testing.expect_value(t, pkg_write_err == nil, true)
+    if pkg_write_err != nil {
+        return
+    }
+
+    main_path, main_path_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, main_path_err == nil, true)
+    if main_path_err != nil {
+        return
+    }
+    defer delete(main_path)
+    main_source := `(package main)
+(import support "support")
+
+(defn main [s: string]
+  (let [trimmed (support.wrapper-view s) :defer]
+    (println trimmed)))`
+    main_write_err := os.write_entire_file_from_string(main_path, main_source)
+    testing.expect_value(t, main_write_err == nil, true)
+    if main_write_err != nil {
+        return
+    }
+
+    result, err, ok := kvist.compile_path_with_map(main_path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(t, strings.contains(result.output, "support__base_view :: #force_inline proc(s: string) -> string"), true)
+    testing.expect_value(t, strings.contains(result.output, "support__wrapper_view :: #force_inline proc(s: string) -> string"), true)
+    testing.expect_value(t, strings.contains(result.output, "#borrowed"), false)
+    testing.expect_value(t, len(result.warnings), 1)
+    if len(result.warnings) == 1 {
+        testing.expect_value(t, result.warnings[0].message, "support.wrapper-view returns a borrowed view; do not delete it, delete the owner instead")
+    }
+}
+
+@(test)
+warn_defer_third_party_named_return_assignment_borrowed_view :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-source-borrowed-named-set-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    pkg_dir, pkg_dir_err := os.join_path({dir, "support"}, context.allocator)
+    testing.expect_value(t, pkg_dir_err == nil, true)
+    if pkg_dir_err != nil {
+        return
+    }
+    defer delete(pkg_dir)
+    mk_pkg_err := os.make_directory_all(pkg_dir)
+    testing.expect_value(t, mk_pkg_err == nil, true)
+    if mk_pkg_err != nil {
+        return
+    }
+
+    pkg_path, pkg_path_err := os.join_path({pkg_dir, "support.kvist"}, context.allocator)
+    testing.expect_value(t, pkg_path_err == nil, true)
+    if pkg_path_err != nil {
+        return
+    }
+    defer delete(pkg_path)
+    pkg_source := `(package support)
+(import strings "core:strings")
+
+(defn named-view [s: string] -> [out: string, ok: bool] #force_inline
+  (set! out (strings.trim_space s))
+  (set! ok true)
+  (return out ok))`
+    pkg_write_err := os.write_entire_file_from_string(pkg_path, pkg_source)
+    testing.expect_value(t, pkg_write_err == nil, true)
+    if pkg_write_err != nil {
+        return
+    }
+
+    main_path, main_path_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, main_path_err == nil, true)
+    if main_path_err != nil {
+        return
+    }
+    defer delete(main_path)
+    main_source := `(package main)
+(import support "support")
+
+(defn main [s: string]
+  (delete (support.named-view s)))`
+    main_write_err := os.write_entire_file_from_string(main_path, main_source)
+    testing.expect_value(t, main_write_err == nil, true)
+    if main_write_err != nil {
+        return
+    }
+
+    result, err, ok := kvist.compile_path_with_map(main_path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(t, strings.contains(result.output, "support__named_view :: #force_inline proc(s: string) -> (out: string, ok: bool)"), true)
+    testing.expect_value(t, strings.contains(result.output, "out = strings.trim_space(s)"), true)
+    testing.expect_value(t, strings.contains(result.output, "#borrowed"), false)
+    testing.expect_value(t, len(result.warnings), 1)
+    if len(result.warnings) == 1 {
+        testing.expect_value(t, result.warnings[0].message, "support.named-view returns a borrowed view; do not delete it, delete the owner instead")
+    }
+}
+
+@(test)
+warn_defer_third_party_conditional_assignment_borrowed_view :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-source-borrowed-branch-set-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    pkg_dir, pkg_dir_err := os.join_path({dir, "support"}, context.allocator)
+    testing.expect_value(t, pkg_dir_err == nil, true)
+    if pkg_dir_err != nil {
+        return
+    }
+    defer delete(pkg_dir)
+    mk_pkg_err := os.make_directory_all(pkg_dir)
+    testing.expect_value(t, mk_pkg_err == nil, true)
+    if mk_pkg_err != nil {
+        return
+    }
+
+    pkg_path, pkg_path_err := os.join_path({pkg_dir, "support.kvist"}, context.allocator)
+    testing.expect_value(t, pkg_path_err == nil, true)
+    if pkg_path_err != nil {
+        return
+    }
+    defer delete(pkg_path)
+    pkg_source := `(package support)
+(import strings "core:strings")
+
+(defn trim-choice [s: string prefix?: bool] -> string #force_inline
+  (let [view ""]
+    (if prefix?
+      (set! view (strings.trim_prefix s "kvist."))
+      (set! view (strings.trim_suffix s ".txt")))
+    view))`
+    pkg_write_err := os.write_entire_file_from_string(pkg_path, pkg_source)
+    testing.expect_value(t, pkg_write_err == nil, true)
+    if pkg_write_err != nil {
+        return
+    }
+
+    main_path, main_path_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, main_path_err == nil, true)
+    if main_path_err != nil {
+        return
+    }
+    defer delete(main_path)
+    main_source := `(package main)
+(import support "support")
+
+(defn main [s: string]
+  (let [trimmed (support.trim-choice s true) :defer]
+    (println trimmed)))`
+    main_write_err := os.write_entire_file_from_string(main_path, main_source)
+    testing.expect_value(t, main_write_err == nil, true)
+    if main_write_err != nil {
+        return
+    }
+
+    result, err, ok := kvist.compile_path_with_map(main_path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(t, strings.contains(result.output, "support__trim_choice :: #force_inline proc(s: string, prefix_p: bool) -> string"), true)
+    testing.expect_value(t, strings.contains(result.output, "view = strings.trim_prefix(s, \"kvist.\")"), true)
+    testing.expect_value(t, strings.contains(result.output, "view = strings.trim_suffix(s, \".txt\")"), true)
+    testing.expect_value(t, strings.contains(result.output, "#borrowed"), false)
+    testing.expect_value(t, len(result.warnings), 1)
+    if len(result.warnings) == 1 {
+        testing.expect_value(t, result.warnings[0].message, "support.trim-choice returns a borrowed view; do not delete it, delete the owner instead")
+    }
+}
+
+@(test)
+warn_defer_third_party_type_case_assignment_borrowed_view :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-source-borrowed-type-case-set-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    pkg_dir, pkg_dir_err := os.join_path({dir, "support"}, context.allocator)
+    testing.expect_value(t, pkg_dir_err == nil, true)
+    if pkg_dir_err != nil {
+        return
+    }
+    defer delete(pkg_dir)
+    mk_pkg_err := os.make_directory_all(pkg_dir)
+    testing.expect_value(t, mk_pkg_err == nil, true)
+    if mk_pkg_err != nil {
+        return
+    }
+
+    pkg_path, pkg_path_err := os.join_path({pkg_dir, "support.kvist"}, context.allocator)
+    testing.expect_value(t, pkg_path_err == nil, true)
+    if pkg_path_err != nil {
+        return
+    }
+    defer delete(pkg_path)
+    pkg_source := `(package support)
+(import strings "core:strings")
+
+(defstruct Prefix {
+  marker: string
+})
+
+(defstruct Suffix {
+  marker: string
+})
+
+(defunion TrimMode {
+  prefix: Prefix
+  suffix: Suffix
+})
+
+(defn trim-mode [mode: TrimMode s: string] -> string #force_inline
+  (let [view ""]
+    (case mode
+      (Prefix _) (set! view (strings.trim_prefix s "kvist."))
+      (Suffix _) (set! view (strings.trim_suffix s ".txt"))
+      (set! view (strings.trim_space s)))
+    view))`
+    pkg_write_err := os.write_entire_file_from_string(pkg_path, pkg_source)
+    testing.expect_value(t, pkg_write_err == nil, true)
+    if pkg_write_err != nil {
+        return
+    }
+
+    main_path, main_path_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, main_path_err == nil, true)
+    if main_path_err != nil {
+        return
+    }
+    defer delete(main_path)
+    main_source := `(package main)
+(import support "support")
+
+(defn main [mode: support.TrimMode s: string]
+  (let [trimmed (support.trim-mode mode s) :defer]
+    (println trimmed)))`
+    main_write_err := os.write_entire_file_from_string(main_path, main_source)
+    testing.expect_value(t, main_write_err == nil, true)
+    if main_write_err != nil {
+        return
+    }
+
+    result, err, ok := kvist.compile_path_with_map(main_path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(t, strings.contains(result.output, "support__trim_mode :: #force_inline proc(mode: support__TrimMode, s: string) -> string"), true)
+    testing.expect_value(t, strings.contains(result.output, "view = strings.trim_prefix(s, \"kvist.\")"), true)
+    testing.expect_value(t, strings.contains(result.output, "view = strings.trim_suffix(s, \".txt\")"), true)
+    testing.expect_value(t, strings.contains(result.output, "view = strings.trim_space(s)"), true)
+    testing.expect_value(t, strings.contains(result.output, "#borrowed"), false)
+    testing.expect_value(t, len(result.warnings), 1)
+    if len(result.warnings) == 1 {
+        testing.expect_value(t, result.warnings[0].message, "support.trim-mode returns a borrowed view; do not delete it, delete the owner instead")
+    }
+}
+
+@(test)
+warn_defer_third_party_destructured_borrowed_wrapper_result :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-source-borrowed-destructured-wrapper-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    pkg_dir, pkg_dir_err := os.join_path({dir, "support"}, context.allocator)
+    testing.expect_value(t, pkg_dir_err == nil, true)
+    if pkg_dir_err != nil {
+        return
+    }
+    defer delete(pkg_dir)
+    mk_pkg_err := os.make_directory_all(pkg_dir)
+    testing.expect_value(t, mk_pkg_err == nil, true)
+    if mk_pkg_err != nil {
+        return
+    }
+
+    pkg_path, pkg_path_err := os.join_path({pkg_dir, "support.kvist"}, context.allocator)
+    testing.expect_value(t, pkg_path_err == nil, true)
+    if pkg_path_err != nil {
+        return
+    }
+    defer delete(pkg_path)
+    pkg_source := `(package support)
+(import strings "core:strings")
+
+(defn trim-pair [s: string] -> [view: string, ok: bool] #force_inline
+  (return (strings.trim_space s) true))
+
+(defn trim-wrapper [s: string] -> string #force_inline
+  (let [[view ok] (trim-pair s)]
+    view))`
+    pkg_write_err := os.write_entire_file_from_string(pkg_path, pkg_source)
+    testing.expect_value(t, pkg_write_err == nil, true)
+    if pkg_write_err != nil {
+        return
+    }
+
+    main_path, main_path_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, main_path_err == nil, true)
+    if main_path_err != nil {
+        return
+    }
+    defer delete(main_path)
+    main_source := `(package main)
+(import support "support")
+
+(defn main [s: string]
+  (let [trimmed (support.trim-wrapper s) :defer]
+    (println trimmed)))`
+    main_write_err := os.write_entire_file_from_string(main_path, main_source)
+    testing.expect_value(t, main_write_err == nil, true)
+    if main_write_err != nil {
+        return
+    }
+
+    result, err, ok := kvist.compile_path_with_map(main_path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(t, strings.contains(result.output, "support__trim_pair :: #force_inline proc(s: string) -> (view: string, ok: bool)"), true)
+    testing.expect_value(t, strings.contains(result.output, "support__trim_wrapper :: #force_inline proc(s: string) -> string"), true)
+    testing.expect_value(t, strings.contains(result.output, "#borrowed"), false)
+    testing.expect_value(t, len(result.warnings), 1)
+    if len(result.warnings) == 1 {
+        testing.expect_value(t, result.warnings[0].message, "support.trim-wrapper returns a borrowed view; do not delete it, delete the owner instead")
+    }
+}
+
+@(test)
+compile_does_not_keep_borrowed_local_after_owned_reassignment :: proc(t: ^testing.T) {
+    source := `(package main)
+(import strings "core:strings")
+
+(defn lower-after-view [s: string] -> string
+  (let [view (strings.trim_space s)]
+    (set! view (strings.to_lower view))
+    view))
+
+(defn main [s: string]
+  (let [owned (lower-after-view s) :defer]
+    (println owned)))`
+
+    result, err, ok := kvist.compile_source_with_map(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(t, strings.contains(result.output, "#borrowed"), false)
+    testing.expect_value(t, strings.contains(result.output, "#owned"), false)
+    testing.expect_value(t, len(result.warnings), 0)
+}
+
+@(test)
+warn_defer_inferred_borrowed_slice_result :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn take-one [xs: []int] -> []int
+  (slice xs 0 1))
+
+(defn take-one-wrapper [xs: []int] -> []int
+  (take-one xs))
+
+(defn split-one [xs: []int] -> [left: []int, right: []int]
+  (return (slice xs 0 1) (slice xs 1)))
+
+(defn prefix-until-zero [xs: []int] -> []int
+  (for [x i xs]
+    (when (= x 0)
+      (return (slice xs 0 i))))
+  xs)
+
+(defn drop-first-byte [s: string] -> string
+  (if (> (count s) 0)
+    (slice s 1)
+    s))
+
+(defn main [xs: []int]
+  (let [prefix (take-one xs) :defer
+        wrapped (take-one-wrapper xs) :defer
+        scanned (prefix-until-zero xs) :defer
+        suffix (drop-first-byte "abc") :defer]
+    (delete (split-one xs))
+    (println (count prefix) (count wrapped) (count scanned) suffix)))`
+
+    result, err, ok := kvist.compile_source_with_map(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(t, strings.contains(result.output, "#borrowed"), false)
+    testing.expect_value(t, len(result.warnings), 5)
+    if len(result.warnings) == 5 {
+        testing.expect_value(t, result.warnings[0].message, "take-one returns a borrowed view; do not delete it, delete the owner instead")
+        testing.expect_value(t, result.warnings[1].message, "take-one-wrapper returns a borrowed view; do not delete it, delete the owner instead")
+        testing.expect_value(t, result.warnings[2].message, "prefix-until-zero returns a borrowed view; do not delete it, delete the owner instead")
+        testing.expect_value(t, result.warnings[3].message, "drop-first-byte returns a borrowed view; do not delete it, delete the owner instead")
+        testing.expect_value(t, result.warnings[4].message, "split-one returns a borrowed view; do not delete it, delete the owner instead")
+    }
+}
+
+@(test)
+warn_defer_third_party_conditional_borrowed_view_with_zero_fallback :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-source-borrowed-zero-branch-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    pkg_dir, pkg_dir_err := os.join_path({dir, "support"}, context.allocator)
+    testing.expect_value(t, pkg_dir_err == nil, true)
+    if pkg_dir_err != nil {
+        return
+    }
+    defer delete(pkg_dir)
+    mk_pkg_err := os.make_directory_all(pkg_dir)
+    testing.expect_value(t, mk_pkg_err == nil, true)
+    if mk_pkg_err != nil {
+        return
+    }
+
+    pkg_path, pkg_path_err := os.join_path({pkg_dir, "support.kvist"}, context.allocator)
+    testing.expect_value(t, pkg_path_err == nil, true)
+    if pkg_path_err != nil {
+        return
+    }
+    defer delete(pkg_path)
+    pkg_source := `(package support)
+(import strings "core:strings")
+
+(defn maybe-tail [xs: []int, take?: bool] -> []int #force_inline
+  (if take?
+    (slice xs 1)
+    nil))
+
+(defn maybe-trim [s: string, trim?: bool] -> string #force_inline
+  (if trim?
+    (strings.trim_space s)
+    ""))
+
+(defn maybe-split [s: string, split?: bool] -> []string #force_inline
+  (if split?
+    (strings.split s " ")
+    nil))
+
+(defn trim-or-label [s: string, trim?: bool] -> string #force_inline
+  (if trim?
+    (strings.trim_space s)
+    "default"))`
+    pkg_write_err := os.write_entire_file_from_string(pkg_path, pkg_source)
+    testing.expect_value(t, pkg_write_err == nil, true)
+    if pkg_write_err != nil {
+        return
+    }
+
+    main_path, main_path_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, main_path_err == nil, true)
+    if main_path_err != nil {
+        return
+    }
+    defer delete(main_path)
+    main_source := `(package main)
+(import support "support")
+
+(defn main [xs: []int, s: string, choose?: bool]
+  (support.maybe-split s choose?)
+  (let [tail (support.maybe-tail xs choose?) :defer
+        trimmed (support.maybe-trim s choose?) :defer]
+    (delete (support.trim-or-label s choose?))
+    (println (count tail) trimmed)))`
+    main_write_err := os.write_entire_file_from_string(main_path, main_source)
+    testing.expect_value(t, main_write_err == nil, true)
+    if main_write_err != nil {
+        return
+    }
+
+    result, err, ok := kvist.compile_path_with_map(main_path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(t, strings.contains(result.output, "support__maybe_tail :: #force_inline proc(xs: []int, take_p: bool) -> []int"), true)
+    testing.expect_value(t, strings.contains(result.output, "support__maybe_trim :: #force_inline proc(s: string, trim_p: bool) -> string"), true)
+    testing.expect_value(t, strings.contains(result.output, "support__maybe_split :: #force_inline proc(s: string, split_p: bool) -> []string"), true)
+    testing.expect_value(t, strings.contains(result.output, "support__trim_or_label :: #force_inline proc(s: string, trim_p: bool) -> string"), true)
+    testing.expect_value(t, strings.contains(result.output, "#borrowed"), false)
+    testing.expect_value(t, strings.contains(result.output, "#owned"), false)
+    testing.expect_value(t, len(result.warnings), 3)
+    if len(result.warnings) == 3 {
+        testing.expect_value(t, result.warnings[0].message, "owned result from support.maybe-split is discarded; bind it, delete it, or return it")
+        testing.expect_value(t, result.warnings[1].message, "support.maybe-tail returns a borrowed view; do not delete it, delete the owner instead")
+        testing.expect_value(t, result.warnings[2].message, "support.maybe-trim returns a borrowed view; do not delete it, delete the owner instead")
+    }
+}
+
+@(test)
+compile_leaves_legacy_unqualified_helpers_as_plain_calls :: proc(t: ^testing.T) {
     source := `(package main)
 
 (defn inc [x: int] -> int
   (+ x 1))
 
-(defn main []
-  (let [xs ([]int [1 2 3])
-        ys (map inc xs)
-        first-y (->> xs
-                     (map inc)
-                     (first))]
-    (defer (delete ys))
-    (println first-y)))`
-
-    _, err, ok := kvist.compile_source(source)
-    testing.expect_value(t, ok, false)
-    testing.expect_value(t, err.message, "`map` is no longer a core helper; use `arr.map`")
-    delete(err.message)
-
-    source = `(package main)
-
-(defn even? [x: int] -> bool
-  (= (% x 2) 0))
-
-(defn main [xs: []int]
-  (arr.filter even? xs)
-  (filter even? xs)
+(defn main [xs: []int, path: string]
+  (map inc xs)
+  (filter inc xs)
+  (range 5)
+  (zipmap xs xs)
+  (slurp path)
   (return))`
 
-    _, err, ok = kvist.compile_source(source)
-    testing.expect_value(t, ok, false)
-    testing.expect_value(t, err.message, "`filter` is no longer a core helper; use `arr.filter`")
-    delete(err.message)
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
 
-    source = `(package main)
-
-(defn main []
-  (let [xs (range 5)]
-    (defer (delete xs))
-    (return)))`
-
-    _, err, ok = kvist.compile_source(source)
-    testing.expect_value(t, ok, false)
-    testing.expect_value(t, err.message, "`range` is no longer a core helper; use `arr.range`")
-    delete(err.message)
-
-    source = `(package main)
-
-(defn main [xs: []int]
-  (first xs))`
-
-    _, err, ok = kvist.compile_source(source)
-    testing.expect_value(t, ok, false)
-    testing.expect_value(t, err.message, "`first` is no longer a core helper; use `arr.first`")
-    delete(err.message)
-
-    source = `(package main)
-
-(defn main [xs: []int]
-  (rest xs))`
-
-    _, err, ok = kvist.compile_source(source)
-    testing.expect_value(t, ok, false)
-    testing.expect_value(t, err.message, "`rest` is no longer a core helper; use `arr.rest`")
-    delete(err.message)
-
-    source = `(package main)
-
-(defn main [keys: []string, vals: []int]
-  (zipmap keys vals))`
-
-    _, err, ok = kvist.compile_source(source)
-    testing.expect_value(t, ok, false)
-    testing.expect_value(t, err.message, "`zipmap` is no longer a core helper; use `map.zip`")
-    delete(err.message)
-
-    source = `(package main)
-
-(defn main [lhs: map[string]int, rhs: map[string]int]
-  (merge lhs rhs))`
-
-    _, err, ok = kvist.compile_source(source)
-    testing.expect_value(t, ok, false)
-    testing.expect_value(t, err.message, "`merge` is no longer a core helper; use `map.merge`")
-    delete(err.message)
-
-    source = `(package main)
-
-(defn main [target: map[string]int, source: map[string]int]
-  (merge! target source)
-  (return))`
-
-    _, err, ok = kvist.compile_source(source)
-    testing.expect_value(t, ok, false)
-    testing.expect_value(t, err.message, "`merge!` is no longer a core helper; use `map.merge!`")
-    delete(err.message)
-
-    source = `(package main)
-
-(defn main [xs: []int]
-  (into! xs xs)
-  (return))`
-
-    _, err, ok = kvist.compile_source(source)
-    testing.expect_value(t, ok, false)
-    testing.expect_value(t, err.message, "`into!` is no longer a core helper; use `arr.into!`")
-    delete(err.message)
-
-    source = `(package main)
-
-(defn main [path: string]
-  (slurp path))`
-
-    _, err, ok = kvist.compile_source(source)
-    testing.expect_value(t, ok, false)
-    testing.expect_value(t, err.message, "`slurp` is no longer a core helper; use `io.read`")
-    delete(err.message)
-
-    source = `(package main)
-(import io "kvist:io")
-
-(defn main [path: string, text: string]
-  (io.write path text)
-  (spit path text)
-  (return))`
-
-    _, err, ok = kvist.compile_source(source)
-    testing.expect_value(t, ok, false)
-    testing.expect_value(t, err.message, "`spit` is no longer a core helper; use `io.write`")
-    delete(err.message)
+    testing.expect_value(t, strings.contains(output, "map(inc, xs)"), true)
+    testing.expect_value(t, strings.contains(output, "filter(inc, xs)"), true)
+    testing.expect_value(t, strings.contains(output, "range(5)"), true)
+    testing.expect_value(t, strings.contains(output, "zipmap(xs, xs)"), true)
+    testing.expect_value(t, strings.contains(output, "slurp(path)"), true)
+    testing.expect_value(t, strings.contains(output, "arr/"), false)
+    testing.expect_value(t, strings.contains(output, "map/zip"), false)
+    testing.expect_value(t, strings.contains(output, "io/read"), false)
 }
 
 @(test)
 report_namespaced_sequence_helper_errors_with_surface_name :: proc(t: ^testing.T) {
     source := `(package main)
+(import arr "kvist:arr")
 
 (defn inc [x: int] -> int
   (+ x 1))
@@ -11684,27 +16892,34 @@ report_namespaced_sequence_helper_errors_with_surface_name :: proc(t: ^testing.T
     _, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, false)
     defer delete(err.message)
-    testing.expect_value(t, err.message, "arr.map expects function and collection")
+    testing.expect_value(t, err.message, "arr.map expects 2 arguments")
 }
 
 @(test)
-report_namespaced_thread_helper_errors_with_surface_name :: proc(t: ^testing.T) {
+compile_threaded_map_zip_requires_imported_map_package :: proc(t: ^testing.T) {
     source := `(package main)
+(import map "kvist:map")
 
-(defn main [xs: []int]
-  (->> xs
-       (map.zip))
-  (return))`
+(defn main [vals: []int] -> map[string]int
+  (let [out (->> vals
+                 (map.zip ([]string ["a" "b"])))]
+    out))`
 
-    _, err, ok := kvist.compile_source(source)
-    testing.expect_value(t, ok, false)
-    defer delete(err.message)
-    testing.expect_value(t, err.message, "map.zip thread step expects one key collection argument")
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+    testing.expect_value(t, strings.contains(output, "out := map__zip("), true)
+    testing.expect_value(t, strings.contains(output, "return out"), true)
 }
 
 @(test)
 reject_nested_owned_sequence_result :: proc(t: ^testing.T) {
     source := `(package main)
+(import arr "kvist:arr")
 
 (defn inc [x: int] -> int
   (+ x 1))
@@ -11719,8 +16934,83 @@ reject_nested_owned_sequence_result :: proc(t: ^testing.T) {
 }
 
 @(test)
+compile_transfers_owned_result_into_composite_literal :: proc(t: ^testing.T) {
+    source := `(package main)
+(import arr "kvist:arr")
+
+(defstruct Batch {
+  values: [dynamic]int
+})
+
+(defn inc [x: int] -> int
+  (+ x 1))
+
+(defn make-batch [xs: []int] -> Batch
+  (Batch {values: (arr.map inc xs)}))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    delete(output)
+}
+
+@(test)
+compile_transfers_owned_result_through_composite_wrapper :: proc(t: ^testing.T) {
+    source := `(package main)
+(import arr "kvist:arr")
+
+(defstruct Batch {
+  values: [dynamic]int
+})
+
+(defn inc [x: int] -> int
+  (+ x 1))
+
+(defn wrap [values: [dynamic]int] -> Batch
+  (Batch {values: values}))
+
+(defn make-batch [xs: []int] -> Batch
+  (wrap (arr.map inc xs)))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    delete(output)
+}
+
+@(test)
+compile_binds_owned_result_from_both_if_branches :: proc(t: ^testing.T) {
+    source := `(package main)
+(import arr "kvist:arr")
+
+(defn inc [x: int] -> int
+  (+ x 1))
+
+(defn choose-map [xs: []int, choose?: bool] -> [dynamic]int
+  (let [values (if choose?
+                 (arr.map inc xs)
+                 (arr.map inc xs))]
+    values))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    delete(output)
+}
+
+@(test)
 reject_nested_tapped_owned_sequence_result :: proc(t: ^testing.T) {
     source := `(package main)
+(import arr "kvist:arr")
 
 (defn inc [x: int] -> int
   (+ x 1))
@@ -11735,12 +17025,16 @@ reject_nested_tapped_owned_sequence_result :: proc(t: ^testing.T) {
 }
 
 @(test)
-warn_discarded_slurp_result :: proc(t: ^testing.T) {
+warn_discarded_regex_owned_results_from_alloc_shape :: proc(t: ^testing.T) {
     source := `(package main)
-(import io "kvist:io")
+(import re "kvist:regex")
 
-(defn main []
-  (io.read "cache.json")
+(defn bad-compile []
+  (re.compile #"^a+$")
+  (return))
+
+(defn bad-match [compiled: re.Regex]
+  (re.match compiled "aaa")
   (return))`
 
     result, err, ok := kvist.compile_source_with_map(source)
@@ -11752,9 +17046,93 @@ warn_discarded_slurp_result :: proc(t: ^testing.T) {
     defer delete(result.output)
     defer delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(t, strings.contains(result.output, "re__compile :: #force_inline proc(pattern: re__Pattern) -> (value: re__Regex, err: re__Error)"), true)
+    testing.expect_value(t, strings.contains(result.output, "re__match :: #force_inline proc(compiled: re__Regex, s: string) -> (capture: re__Capture, ok: bool)"), true)
+    testing.expect_value(t, strings.contains(result.output, "#owned"), false)
+    testing.expect_value(t, len(result.warnings), 2)
+    if len(result.warnings) == 2 {
+        testing.expect_value(t, result.warnings[0].message, "owned result from re.compile is discarded; bind it, delete it, or return it")
+        testing.expect_value(t, result.warnings[1].message, "owned result from re.match is discarded; bind it, delete it, or return it")
+    }
+}
+
+@(test)
+warn_discarded_third_party_regex_owned_result_from_alloc_shape :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-owned-regex-package-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    pkg_dir, pkg_dir_err := os.join_path({dir, "support"}, context.allocator)
+    testing.expect_value(t, pkg_dir_err == nil, true)
+    if pkg_dir_err != nil {
+        return
+    }
+    defer delete(pkg_dir)
+    mk_pkg_err := os.make_directory_all(pkg_dir)
+    testing.expect_value(t, mk_pkg_err == nil, true)
+    if mk_pkg_err != nil {
+        return
+    }
+
+    pkg_path, pkg_path_err := os.join_path({pkg_dir, "support.kvist"}, context.allocator)
+    testing.expect_value(t, pkg_path_err == nil, true)
+    if pkg_path_err != nil {
+        return
+    }
+    defer delete(pkg_path)
+    pkg_source := `(package support)
+(import r "core:text/regex")
+
+(def Regex r.Regular_Expression)
+(def Error r.Error)
+
+(defn compile [pattern: string] -> [value: Regex, err: Error] #force_inline
+  (r.create pattern))`
+    pkg_write_err := os.write_entire_file_from_string(pkg_path, pkg_source)
+    testing.expect_value(t, pkg_write_err == nil, true)
+    if pkg_write_err != nil {
+        return
+    }
+
+    main_path, main_path_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, main_path_err == nil, true)
+    if main_path_err != nil {
+        return
+    }
+    defer delete(main_path)
+    main_source := `(package main)
+(import support "support")
+
+(defn main []
+  (support.compile #"^a+$")
+  (return))`
+    main_write_err := os.write_entire_file_from_string(main_path, main_source)
+    testing.expect_value(t, main_write_err == nil, true)
+    if main_write_err != nil {
+        return
+    }
+
+    result, err, ok := kvist.compile_path_with_map(main_path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(t, strings.contains(result.output, "support__compile :: #force_inline proc(pattern: string) -> (value: support__Regex, err: support__Error)"), true)
+    testing.expect_value(t, strings.contains(result.output, "return r.create(pattern)"), true)
+    testing.expect_value(t, strings.contains(result.output, "#owned"), false)
     testing.expect_value(t, len(result.warnings), 1)
     if len(result.warnings) == 1 {
-        testing.expect_value(t, result.warnings[0].message, "owned result from io.read is discarded; bind it, delete it, or return it")
+        testing.expect_value(t, result.warnings[0].message, "owned result from support.compile is discarded; bind it, delete it, or return it")
     }
 }
 
@@ -11803,10 +17181,39 @@ main :: proc() {
 }
 
 @(test)
+compile_macro_generated_make_type_uses_type_context :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defmacro dynamic [elem-type]
+  (quasiquote
+    (not-a-type-constructor (unquote elem-type))))
+
+(defmacro empty [elem-type]
+  (quasiquote
+    (make (dynamic (unquote elem-type)))))
+
+(defn main []
+  (let [xs (empty int)]
+    (defer (delete xs))
+    (return)))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "xs := make([dynamic]int)"), true)
+}
+
+@(test)
 compile_soa_type_call_column_access_and_push :: proc(t: ^testing.T) {
     source := `(package main)
 (import core "kvist:core")
 (import arr "kvist:arr")
+(import soa "kvist:soa")
 
 (defstruct Particle {
   mass: f32
@@ -11821,14 +17228,14 @@ compile_soa_type_call_column_access_and_push :: proc(t: ^testing.T) {
 
 (defn add-particle! [particles: ^#soa[dynamic]Particle
                      particle: Particle]
-  (arr.push! particles particle)
+  (append_soa particles particle)
   (return))
 
 (defn dynamic-score [] -> f32
   (let [particles (#soa[dynamic]Particle
                     [(Particle {mass: 1 id: 10})])]
     (defer (delete particles))
-    (arr.push! particles (Particle {mass: 2 id: 20}))
+    (soa.push! (addr particles) (Particle {mass: 2 id: 20}))
     (set! particles.mass[0] 12)
     (+ (arr.get particles.mass 0)
        (arr.get particles 1).mass)))`
@@ -11850,7 +17257,7 @@ compile_soa_type_call_column_access_and_push :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "particles := (proc() -> #soa[dynamic]Particle {"), true)
     testing.expect_value(t, strings.contains(output, "out := make(#soa[dynamic]Particle)"), true)
     testing.expect_value(t, strings.contains(output, "append_soa(&out, Particle{"), true)
-    testing.expect_value(t, strings.contains(output, "append_soa(&(particles), Particle{"), true)
+    testing.expect_value(t, strings.contains(output, "append_soa(&particles, Particle{"), true)
     testing.expect_value(t, strings.contains(output, "(particles.mass)[0] = 12"), true)
     testing.expect_value(t, strings.contains(output, "return (particles.mass[0]) + (particles[1].mass)"), true)
 }
@@ -11869,7 +17276,7 @@ compile_soa_convenience_macros :: proc(t: ^testing.T) {
 (defn update-one [] -> f32
   (let [particles (soa.make Particle 2)]
     (defer (delete particles))
-    (soa.push! particles (Particle {x: 1 vx: 2 mass: 3}))
+    (soa.push! (addr particles) (Particle {x: 1 vx: 2 mass: 3}))
     (soa.update! particles 0
       .vx (+ vx 10)
       .x (+ x vx))
@@ -11884,11 +17291,34 @@ compile_soa_convenience_macros :: proc(t: ^testing.T) {
     defer delete(output)
 
     testing.expect_value(t, strings.contains(output, "particles := make(#soa[dynamic]Particle, 0, 2)"), true)
-    testing.expect_value(t, strings.contains(output, "append(&(particles), Particle{x = 1, vx = 2, mass = 3})"), true)
+    testing.expect_value(t, strings.contains(output, "append_soa(&particles, Particle{x = 1, vx = 2, mass = 3})"), true)
     testing.expect_value(t, strings.contains(output, "vx := particles.vx[0]"), true)
     testing.expect_value(t, strings.contains(output, "x := particles.x[0]"), true)
     testing.expect_value(t, strings.contains(output, "particles.vx[0] = (vx) + (10)"), true)
     testing.expect_value(t, strings.contains(output, "particles.x[0] = (x) + (vx)"), true)
+}
+
+@(test)
+reject_soa_make_raw_as_compiler_form :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct Particle {
+  x: f32
+})
+
+(defn main []
+  (soa-make-raw #soa[dynamic]Particle 7))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "soa_make_raw(#soa[dynamic]Particle, 7)"), true)
+    testing.expect_value(t, strings.contains(output, "make(#soa[dynamic]Particle, 0, 7)"), false)
 }
 
 @(test)
@@ -11904,8 +17334,8 @@ compile_soa_column_helpers :: proc(t: ^testing.T) {
 (defn update-columns [] -> f32
   (let [particles (soa.make Particle 2)]
     (defer (delete particles))
-    (soa.push! particles (Particle {x: 1 vx: 2}))
-    (soa.push! particles (Particle {x: 3 vx: 4}))
+    (soa.push! (addr particles) (Particle {x: 1 vx: 2}))
+    (soa.push! (addr particles) (Particle {x: 3 vx: 4}))
     (soa.axpy! particles .x 0.5 .vx)
     (soa.clamp! particles .x 0.0 4.0)
     (let [total: f32 0]
@@ -12153,8 +17583,8 @@ compile_typed_map_literal_passes_value_type_to_let_values :: proc(t: ^testing.T)
 compile_typed_set_literal_passes_element_type_to_let_items :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defn tags [] -> set[string]
-  (set[string] #{(let [tag "name"] tag)}))`
+(defn tags [] -> (map string (struct {}))
+  ((map string (struct {})) #{(let [tag "name"] tag)}))`
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
@@ -12328,28 +17758,15 @@ compile_case_with_keyword_values :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    expected := `package main
-
-score :: proc(mode: keyword) -> int {
-    switch mode {
-    case keyword(":else"):
-        return 9
-    case keyword(":dev"):
-        return 1
-    case keyword(":prod"):
-        return 2
-    case:
-        return 0
-    }
-}
-
-keyword :: distinct string
-`
-    testing.expect_value(t, output, expected)
+    testing.expect_value(t, strings.contains(output, "score :: proc(mode: keyword) -> int {"), true)
+    testing.expect_value(t, strings.contains(output, "== (keyword(\":else\"))"), true)
+    testing.expect_value(t, strings.contains(output, "== (keyword(\":dev\"))"), true)
+    testing.expect_value(t, strings.contains(output, "== (keyword(\":prod\"))"), true)
+    testing.expect_value(t, strings.contains(output, "switch mode"), false)
 }
 
 @(test)
-compile_case_stmt_with_keyword_subject_uses_plain_switch :: proc(t: ^testing.T) {
+compile_case_stmt_with_keyword_subject_uses_source_conditionals :: proc(t: ^testing.T) {
     source := `(package main)
 
 (defn rank [state: keyword] -> int
@@ -12366,26 +17783,15 @@ compile_case_stmt_with_keyword_subject_uses_plain_switch :: proc(t: ^testing.T) 
     }
     defer delete(output)
 
-    expected := `package main
-
-rank :: proc(state: keyword) -> int {
-    switch state {
-    case keyword(":queued"):
-        return 0
-    case keyword(":done"):
-        return 1
-    case:
-        return -1
-    }
-}
-
-keyword :: distinct string
-`
-    testing.expect_value(t, output, expected)
+    testing.expect_value(t, strings.contains(output, "rank :: proc(state: keyword) -> int {"), true)
+    testing.expect_value(t, strings.contains(output, "== (keyword(\":queued\"))"), true)
+    testing.expect_value(t, strings.contains(output, "== (keyword(\":done\"))"), true)
+    testing.expect_value(t, strings.contains(output, "return -1"), true)
+    testing.expect_value(t, strings.contains(output, "switch state"), false)
 }
 
 @(test)
-compile_case_stmt_with_int_subject_uses_plain_switch :: proc(t: ^testing.T) {
+compile_case_stmt_with_int_subject_uses_source_conditionals :: proc(t: ^testing.T) {
     source := `(package main)
 
 (defn slot-value [slot: int] -> int
@@ -12402,20 +17808,11 @@ compile_case_stmt_with_int_subject_uses_plain_switch :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    expected := `package main
-
-slot_value :: proc(slot: int) -> int {
-    switch slot {
-    case 0:
-        return 10
-    case 1:
-        return 20
-    case:
-        return 0
-    }
-}
-`
-    testing.expect_value(t, output, expected)
+    testing.expect_value(t, strings.contains(output, "slot_value :: proc(slot: int) -> int {"), true)
+    testing.expect_value(t, strings.contains(output, "== (0)"), true)
+    testing.expect_value(t, strings.contains(output, "== (1)"), true)
+    testing.expect_value(t, strings.contains(output, "return 0"), true)
+    testing.expect_value(t, strings.contains(output, "switch slot"), false)
 }
 
 @(test)
@@ -12435,11 +17832,11 @@ compile_case_stmt_vector_clause_matches_vector_value :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    testing.expect_value(t, strings.contains(output, "switch xs {\n    case [2]int{1, 2}:"), true)
+    testing.expect_value(t, strings.contains(output, "== ([2]int{1, 2})"), true)
 }
 
 @(test)
-reject_case_vector_clause_with_dynamic_array_subject :: proc(t: ^testing.T) {
+compile_case_vector_clause_with_dynamic_array_subject_uses_source_equality :: proc(t: ^testing.T) {
     source := `(package main)
 
 (defn score [xs: [dynamic]int] -> int
@@ -12447,10 +17844,15 @@ reject_case_vector_clause_with_dynamic_array_subject :: proc(t: ^testing.T) {
     [1 2] 1
     0))`
 
-    _, err, ok := kvist.compile_source(source)
-    testing.expect_value(t, ok, false)
-    defer delete(err.message)
-    testing.expect_value(t, err.message, "case vector clauses only match fixed-array values")
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "== ([dynamic]int{1, 2})"), true)
 }
 
 @(test)
@@ -12519,7 +17921,7 @@ keyword :: distinct string
 compile_keyword_set_literal :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defn modes [] -> set[keyword]
+(defn modes [] -> (map keyword (struct {}))
   #{:env/dev :env/prod})`
 
     output, err, ok := kvist.compile_source(source)
@@ -12746,36 +18148,15 @@ compile_thread_first_forms :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    expected := `package main
-
-Method :: enum {
-    Get,
-    Post,
-}
-
-Request :: struct {
-    method: Method,
-    path: string,
-}
-
-method_name :: proc(method: Method) -> string {
-    #partial switch method {
-    case .Get:
-        return "GET"
-    case:
-        return "OTHER"
-    }
-}
-
-describe :: proc(req: Request) -> string {
-    return method_name(req.method)
-}
-
-clone_path :: proc(req: Request, allocator: rawptr) -> string {
-    return clone_string(req.path, allocator)
-}
-`
-    testing.expect_value(t, output, expected)
+    testing.expect_value(t, strings.contains(output, "Method :: enum {"), true)
+    testing.expect_value(t, strings.contains(output, "Request :: struct {"), true)
+    testing.expect_value(t, strings.contains(output, "method_name :: proc(method: Method) -> string {"), true)
+    testing.expect_value(t, strings.contains(output, "== (.Get)"), true)
+    testing.expect_value(t, strings.contains(output, "return \"OTHER\""), true)
+    testing.expect_value(t, strings.contains(output, "describe :: proc(req: Request) -> string {"), true)
+    testing.expect_value(t, strings.contains(output, "return method_name((req).method)"), true)
+    testing.expect_value(t, strings.contains(output, "return clone_string((req).path, allocator)"), true)
+    testing.expect_value(t, strings.contains(output, "#partial switch method"), false)
 }
 
 @(test)
@@ -12806,7 +18187,8 @@ compile_cond_thread_exprs :: proc(t: ^testing.T) {
     defer delete(output)
 
     testing.expect_value(t, strings.contains(output, "refine :: proc(req: Request, json_p, auth_p, trace_p: bool) -> Request"), true)
-    testing.expect_value(t, strings.contains(output, "(proc(req: Request, json_p: bool, auth_p: bool, trace_p: bool) -> Request {"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_cond_thread_"), true)
+    testing.expect_value(t, strings.contains(output, "return kvist_cond_thread_"), true)
     testing.expect_value(t, strings.contains(output, "if json_p"), true)
     testing.expect_value(t, strings.contains(output, "content_type = kvist_value"), true)
     testing.expect_value(t, strings.contains(output, "authenticated_p = kvist_value"), true)
@@ -13033,10 +18415,10 @@ score :: proc() -> int {
     xs := [dynamic]int{1, 2, 3}
     lookup := map[string]int{"a" = 1}
     point := Point{x = 4, y = 5}
-    (xs)[1] += (40)
-    (xs)[2] += (3)
-    lookup["a"] += (6)
-    point.y += (4)
+    (xs)[1] += 40
+    (xs)[2] += 3
+    lookup["a"] += 6
+    point.y += 4
     point.y += 1
     return (xs[1]) + (lookup["a"]) + (point.y)
 }
@@ -13077,7 +18459,7 @@ compile_place_style_update_bang :: proc(t: ^testing.T) {
 
     testing.expect_value(t, strings.contains(output, "point.x = add_scaled(point.x, 2, 3)"), true)
     testing.expect_value(t, strings.contains(output, "point.name = trim_demo(point.name)"), true)
-    testing.expect_value(t, strings.contains(output, "total += (5)"), true)
+    testing.expect_value(t, strings.contains(output, "total += 5"), true)
 }
 
 @(test)
@@ -13097,7 +18479,7 @@ compile_update_bang_rejects_target_key_form :: proc(t: ^testing.T) {
     }
     defer delete(err.message)
 
-    testing.expect_value(t, err.message, "update! expects updater function or operator")
+    testing.expect_value(t, err.message, "while expanding macro update!: update! expects updater function or operator")
 }
 
 @(test)
@@ -13234,7 +18616,7 @@ compile_update_bang_rejects_non_place :: proc(t: ^testing.T) {
         return
     }
     defer delete(err.message)
-    testing.expect_value(t, err.message, "update! expects an assignable place")
+    testing.expect_value(t, err.message, "mut! expects an assignable place")
 }
 
 @(test)
@@ -13258,7 +18640,7 @@ compile_shallow_struct_assoc_exprs :: proc(t: ^testing.T) {
   (let [point (Point {x: 4 y: 5 name: "old"})
         older (assoc point.name "new")
         legacy (assoc older .name "legacy")]
-    (+ point.y older.y (len older.name) (len legacy.name))))`
+    (+ point.y older.y (count older.name) (count legacy.name))))`
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
@@ -13297,7 +18679,7 @@ compile_nested_struct_assoc_exprs :: proc(t: ^testing.T) {
 (defn score [user: User] -> int
   (let [renamed (assoc user.profile.name "Ada")
         active (assoc renamed .active? true)]
-    (+ active.profile.age (len renamed.profile.name))))`
+    (+ active.profile.age (count renamed.profile.name))))`
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
@@ -13329,7 +18711,7 @@ compile_threaded_shallow_struct_assoc_exprs :: proc(t: ^testing.T) {
   (let [updated (-> user
                   (assoc .active? false)
                   (assoc .name "Ada"))]
-    (+ updated.age (len updated.name))))`
+    (+ updated.age (count updated.name))))`
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
@@ -13363,7 +18745,7 @@ compile_threaded_nested_struct_assoc_exprs :: proc(t: ^testing.T) {
   (let [updated (-> user
                   (assoc .profile.name "Ada")
                   (assoc .active? true))]
-    (+ updated.profile.age (len updated.profile.name))))`
+    (+ updated.profile.age (count updated.profile.name))))`
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
@@ -13478,7 +18860,7 @@ reject_shallow_struct_update_non_field_selector :: proc(t: ^testing.T) {
     }
     defer delete(err.message)
 
-    testing.expect_value(t, err.message, "assoc expects a field place such as user.name or user.address.city")
+    testing.expect_value(t, err.message, "while expanding macro assoc: while expanding macro field-place: field place helper expects a field place such as user.name or user.address.city")
 }
 
 @(test)
@@ -13575,6 +18957,9 @@ compile_nil_predicate :: proc(t: ^testing.T) {
 (defn has-user [p: ^User] -> bool
   (not (nil? p)))
 
+(defn has-user-qualified [p: ^User] -> bool
+  (not (core.nil? p)))
+
 (defn print-user [p: ^User]
   (when (nil? p)
     (return)))`
@@ -13594,6 +18979,10 @@ User :: struct {
 }
 
 has_user :: proc(p: ^User) -> bool {
+    return !((p) == (nil))
+}
+
+has_user_qualified :: proc(p: ^User) -> bool {
     return !((p) == (nil))
 }
 
@@ -13774,6 +19163,7 @@ main :: proc() {
 compile_inline_collection_literals :: proc(t: ^testing.T) {
     source := `(package main)
 (import core "kvist:core")
+(import arr "kvist:arr")
 
 (defn score [] -> int
   (let [xs [1 2 3] :defer
@@ -13791,33 +19181,23 @@ compile_inline_collection_literals :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    expected := `#+feature dynamic-literals
-package main
-
-import "core:fmt"
-
-score :: proc() -> int {
-    xs := [dynamic]int{1, 2, 3}
-    defer delete(xs)
-    lookup := map[string]int{"one" = 1, "two" = 2}
-    defer delete(lookup)
-    tags := map[string]struct{}{"math" = {}, "lisp" = {}}
-    defer delete(tags)
-    fmt.println(tags)
-    return (len(xs)) + (lookup["one"])
-}
-`
-    testing.expect_value(t, output, expected)
+    testing.expect_value(t, strings.contains(output, "#+feature dynamic-literals"), true)
+    testing.expect_value(t, strings.contains(output, "arr__count :: #force_inline proc(xs: []$T) -> int {"), true)
+    testing.expect_value(t, strings.contains(output, "xs := [dynamic]int{1, 2, 3}"), true)
+    testing.expect_value(t, strings.contains(output, "lookup := map[string]int{\"one\" = 1, \"two\" = 2}"), true)
+    testing.expect_value(t, strings.contains(output, "tags := map[string]struct{}{\"math\" = {}, \"lisp\" = {}}"), true)
+    testing.expect_value(t, strings.contains(output, "return (arr__count((xs)[:])) + (lookup[\"one\"])"), true)
 }
 
 @(test)
 compile_typed_empty_inline_collection_literals :: proc(t: ^testing.T) {
     source := `(package main)
+(import arr "kvist:arr")
 
 (defn score [] -> int
   (let [xs: [dynamic]int [] :defer
         lookup: map[string]int {} :defer
-        tags: set[string] #{} :defer]
+        tags: (map string (struct {})) #{} :defer]
     (println lookup tags)
     (arr.count xs)))`
 
@@ -13829,23 +19209,670 @@ compile_typed_empty_inline_collection_literals :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    expected := `#+feature dynamic-literals
-package main
-
-import "core:fmt"
-
-score :: proc() -> int {
-    xs: [dynamic]int = [dynamic]int{}
-    defer delete(xs)
-    lookup: map[string]int = map[string]int{}
-    defer delete(lookup)
-    tags: map[string]struct{} = map[string]struct{}{}
-    defer delete(tags)
-    fmt.println(lookup, tags)
-    return len(xs)
+    testing.expect_value(t, strings.contains(output, "#+feature dynamic-literals"), true)
+    testing.expect_value(t, strings.contains(output, "arr__count :: #force_inline proc(xs: []$T) -> int {"), true)
+    testing.expect_value(t, strings.contains(output, "xs: [dynamic]int = [dynamic]int{}"), true)
+    testing.expect_value(t, strings.contains(output, "lookup: map[string]int = map[string]int{}"), true)
+    testing.expect_value(t, strings.contains(output, "tags: map[string]struct{} = map[string]struct{}{}"), true)
+    testing.expect_value(t, strings.contains(output, "return arr__count((xs)[:])"), true)
 }
-`
-    testing.expect_value(t, output, expected)
+
+@(test)
+compile_leaves_unimported_arr_count_and_constructors_unresolved :: proc(t: ^testing.T) {
+    cases := []struct {
+        source:   string,
+        expected: string,
+    }{
+        {`(package main)
+
+(defn score [xs: []int] -> int
+  (arr.count xs))`, "arr.count(xs)"},
+        {`(package main)
+
+(defn score [xs: []int] -> int
+  (arr.get xs 0))`, "arr.get(xs, 0)"},
+        {`(package main)
+
+(defn score [xs: []int] -> []int
+  (arr.slice xs 1))`, "arr.slice(xs, 1)"},
+        {`(package main)
+
+(defn score [] -> int
+  (let [xs (arr.empty int)]
+    (count xs)))`, "arr.empty(int)"},
+        {`(package main)
+
+(defn score [] -> int
+  (let [xs (arr.dynamic int [1 2])]
+    (count xs)))`, "xs := arr.dynamic(int, kvist_thread_1)"},
+        {`(package main)
+
+(defn score [] -> int
+  (let [xs (arr.fixed int [1 2])]
+    (count xs)))`, "xs := arr.fixed(int, kvist_thread_1)"},
+    }
+
+    for test_case in cases {
+        output, err, ok := kvist.compile_source(test_case.source)
+        testing.expect_value(t, ok, true)
+        if !ok {
+            testing.expect_value(t, err.message, "")
+            continue
+        }
+        testing.expect_value(t, strings.contains(output, test_case.expected), true)
+        delete(output)
+    }
+}
+
+@(test)
+compile_leaves_unimported_direct_arr_sequence_helpers_unresolved :: proc(t: ^testing.T) {
+    cases := []struct {
+        source:   string,
+        expected: string,
+    }{
+        {`(package main)
+
+(defn score [xs: []int] -> []int
+  (arr.take 2 xs))`, "arr.take(2, xs)"},
+        {`(package main)
+
+(defn score [xs: []int] -> []int
+  (arr.drop 1 xs))`, "arr.drop(1, xs)"},
+        {`(package main)
+
+(defn score [xs: []int] -> []int
+  (arr.drop-last 1 xs))`, "arr.drop_last(1, xs)"},
+        {`(package main)
+
+(defn score [xs: []int] -> []int
+  (arr.butlast xs))`, "arr.butlast(xs)"},
+        {`(package main)
+
+(defn score [xs: []int] -> int
+  (arr.first xs))`, "arr.first"},
+        {`(package main)
+
+(defn score [xs: []int] -> int
+  (arr.second xs))`, "arr.second"},
+        {`(package main)
+
+(defn score [xs: []int] -> int
+  (arr.last xs))`, "arr.last"},
+        {`(package main)
+
+(defn score [xs: []int] -> int
+  (arr.nth 2 xs))`, "arr.nth"},
+        {`(package main)
+
+(defn score [xs: []int] -> []int
+  (arr.rest xs))`, "arr.rest"},
+        {`(package main)
+
+(defn add-index [i: int, x: int] -> int
+  (+ i x))
+
+(defn score [xs: []int] -> [dynamic]int
+  (arr.map-indexed add-index xs))`, "arr.map_indexed(add_index, xs)"},
+        {`(package main)
+
+(defn pair [x: int] -> []int
+  ([]int [x x]))
+
+(defn score [xs: []int] -> [dynamic]int
+  (arr.mapcat pair xs))`, "arr.mapcat(pair, xs)"},
+        {`(package main)
+
+(defn score [xs: []int] -> [left: []int, right: []int]
+  (arr.split-at 1 xs))`, "arr.split_at(1, xs)"},
+        {`(package main)
+
+(defn score [xs: []int] -> [dynamic][]int
+  (arr.partition 2 xs))`, "arr.partition(2, xs)"},
+        {`(package main)
+
+(defn score [xs: []int] -> [dynamic][]int
+  (arr.partition-all 2 xs))`, "arr.partition_all(2, xs)"},
+        {`(package main)
+
+(defn score [xs: []int] -> [dynamic]int
+  (arr.take-nth 2 xs))`, "arr.take_nth(2, xs)"},
+        {`(package main)
+
+(defn score [] -> [dynamic]int
+  (arr.range 3))`, "arr.range(3)"},
+        {`(package main)
+
+(defn score [] -> [dynamic]int
+  (arr.repeat 2 9))`, "arr.repeat(2, 9)"},
+        {`(package main)
+
+(defn next [] -> int
+  1)
+
+(defn score [] -> [dynamic]int
+  (arr.repeatedly 2 next))`, "arr.repeatedly(2, next)"},
+        {`(package main)
+
+(defn inc [x: int] -> int
+  (+ x 1))
+
+(defn score [] -> [dynamic]int
+  (arr.iterate 2 inc 0))`, "arr.iterate(2, inc, 0)"},
+        {`(package main)
+
+(defn score [xs: []int] -> [dynamic]int
+  (arr.cycle 2 xs))`, "arr.cycle(2, xs)"},
+        {`(package main)
+
+(defn score [xs: []int] -> map[int]int
+  (arr.frequencies xs))`, "arr.frequencies(xs)"},
+        {`(package main)
+
+(defn score [xs: []int] -> [dynamic]int
+  (arr.distinct xs))`, "arr.distinct(xs)"},
+        {`(package main)
+
+(defn score [xs: []int] -> [dynamic]int
+  (arr.reverse xs))`, "arr.reverse(xs)"},
+        {`(package main)
+
+(defn score [xs: [dynamic]int]
+  (arr.reverse! xs))`, "arr.reverse_bang(xs)"},
+        {`(package main)
+
+(defn pick-first [n: int] -> int
+  0)
+
+(defn score [xs: []int] -> [dynamic]int
+  (arr.shuffle pick-first xs))`, "arr.shuffle(pick_first, xs)"},
+        {`(package main)
+
+(defn pick-first [n: int] -> int
+  0)
+
+(defn score [xs: [dynamic]int]
+  (arr.shuffle! pick-first xs))`, "arr.shuffle_bang(pick_first, xs)"},
+        {`(package main)
+
+(defn score [xs: []int] -> [dynamic]int
+  (arr.sort xs))`, "arr.sort(xs)"},
+        {`(package main)
+
+(defn score [xs: [dynamic]int]
+  (arr.sort! xs))`, "arr.sort_bang(xs)"},
+    }
+
+    for test_case in cases {
+        output, err, ok := kvist.compile_source(test_case.source)
+        testing.expect_value(t, ok, true)
+        if !ok {
+            testing.expect_value(t, err.message, "")
+            continue
+        }
+        testing.expect_value(t, strings.contains(output, test_case.expected), true)
+        delete(output)
+    }
+}
+
+@(test)
+compile_does_not_classify_unimported_arr_view_helper_as_borrowed :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn score [xs: []int] -> int
+  (let [prefix (arr.take 2 xs) :defer]
+    (count prefix)))`
+
+    result, err, ok := kvist.compile_source_with_map(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(t, strings.contains(result.output, "arr.take(2, xs)"), true)
+    testing.expect_value(t, len(result.warnings), 0)
+}
+
+@(test)
+compile_leaves_unimported_for_arr_sequence_source_unresolved :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn score [] -> int
+  (let [total 0]
+    (for [value (arr.repeat 2 9)]
+      (set! total (+ total value)))
+    total))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "arr.repeat(2, 9)"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_loop_repeat_index_"), false)
+}
+
+@(test)
+compile_leaves_unimported_direct_arr_callback_helpers_unresolved :: proc(t: ^testing.T) {
+    cases := []struct {
+        source:   string,
+        expected: string,
+    }{
+        {`(package main)
+
+(defn inc [x: int] -> int
+  (+ x 1))
+
+(defn score [xs: []int] -> [dynamic]int
+  (arr.map inc xs))`, "arr.map(inc, xs)"},
+        {`(package main)
+
+(defn positive? [x: int] -> bool
+  (> x 0))
+
+(defn score [xs: []int] -> [dynamic]int
+  (arr.filter positive? xs))`, "arr.filter(positive_p, xs)"},
+        {`(package main)
+
+(defn positive? [x: int] -> bool
+  (> x 0))
+
+(defn score [xs: []int] -> [dynamic]int
+  (arr.remove positive? xs))`, "arr.remove(positive_p, xs)"},
+        {`(package main)
+
+(defn keep-positive [x: int] -> [value: int, ok: bool]
+  (return x (> x 0)))
+
+(defn score [xs: []int] -> [dynamic]int
+  (arr.keep keep-positive xs))`, "arr.keep(keep_positive, xs)"},
+        {`(package main)
+
+(defn add [acc: int, x: int] -> int
+  (+ acc x))
+
+(defn score [xs: []int] -> int
+  (arr.reduce add 0 xs))`, "arr.reduce(add, 0, xs)"},
+        {`(package main)
+
+(defn identity [x: int] -> int
+  x)
+
+(defn score [xs: []int] -> [dynamic]int
+  (arr.sort-by identity xs))`, "arr.sort_by(identity, xs)"},
+        {`(package main)
+
+(defn identity [x: int] -> int
+  x)
+
+(defn score [xs: [dynamic]int]
+  (arr.sort-by! identity xs))`, "arr.sort_by_bang(identity, xs)"},
+        {`(package main)
+
+(defn identity [x: int] -> int
+  x)
+
+(defn score [xs: []int] -> [dynamic][]int
+  (arr.partition-by identity xs))`, "arr.partition_by(identity, xs)"},
+        {`(package main)
+
+(defn identity [x: int] -> int
+  x)
+
+(defn score [xs: []int] -> map[int]int
+  (arr.index-by identity xs))`, "arr.index_by(identity, xs)"},
+        {`(package main)
+
+(defn identity [x: int] -> int
+  x)
+
+(defn score [xs: []int] -> map[int][dynamic]int
+  (arr.group-by identity xs))`, "arr.group_by(identity, xs)"},
+        {`(package main)
+
+(defn identity [x: int] -> int
+  x)
+
+(defn score [xs: []int] -> map[int]int
+  (arr.count-by identity xs))`, "arr.count_by(identity, xs)"},
+        {`(package main)
+
+(defn identity [x: int] -> int
+  x)
+
+(defn score [xs: []int] -> map[int]int
+  (arr.sum-by identity identity xs))`, "arr.sum_by(identity, identity, xs)"},
+        {`(package main)
+
+(defn identity [x: int] -> int
+  x)
+
+(defn score [xs: []int] -> [dynamic]int
+  (arr.distinct-by identity xs))`, "arr.distinct_by(identity, xs)"},
+        {`(package main)
+
+(defn positive? [x: int] -> bool
+  (> x 0))
+
+(defn score [xs: []int] -> []int
+  (arr.take-while positive? xs))`, "arr.take_while(positive_p, xs)"},
+        {`(package main)
+
+(defn positive? [x: int] -> bool
+  (> x 0))
+
+(defn score [xs: []int] -> []int
+  (arr.drop-while positive? xs))`, "arr.drop_while(positive_p, xs)"},
+        {`(package main)
+
+(defn positive? [x: int] -> bool
+  (> x 0))
+
+(defn score [xs: []int] -> [value: int, ok: bool]
+  (arr.find positive? xs))`, "arr.find(positive_p, xs)"},
+        {`(package main)
+
+(defn positive? [x: int] -> bool
+  (> x 0))
+
+(defn score [xs: []int] -> bool
+  (arr.some? positive? xs))`, "arr.some_p(positive_p, xs)"},
+        {`(package main)
+
+(defn positive? [x: int] -> bool
+  (> x 0))
+
+(defn score [xs: []int] -> bool
+  (arr.every? positive? xs))`, "arr.every_p(positive_p, xs)"},
+        {`(package main)
+
+(defn positive? [i: int, x: int] -> bool
+  (> x i))
+
+(defn score [xs: []int] -> [index: int, value: int, ok: bool]
+  (arr.find-indexed positive? xs))`, "arr.find_indexed(positive_p, xs)"},
+        {`(package main)
+
+(defn identity [x: int] -> int
+  x)
+
+(defn score [xs: []int] -> [value: int, ok: bool]
+  (arr.min-by identity xs))`, "arr.min_by(identity, xs)"},
+        {`(package main)
+
+(defn identity [x: int] -> int
+  x)
+
+(defn score [xs: []int] -> [value: int, ok: bool]
+  (arr.max-by identity xs))`, "arr.max_by(identity, xs)"},
+        {`(package main)
+
+(defn score [xs: [dynamic]int]
+  (arr.push! xs 1))`, "arr.push_bang(xs, 1)"},
+        {`(package main)
+
+(defn inc [x: int] -> int
+  x)
+
+(defn score [xs: [dynamic]int]
+  (arr.map! inc xs))`, "arr.map_bang(inc, xs)"},
+        {`(package main)
+
+(defn positive? [x: int] -> bool
+  true)
+
+(defn score [xs: [dynamic]int]
+  (arr.filter! positive? xs))`, "arr.filter_bang(positive_p, xs)"},
+        {`(package main)
+
+(defn positive? [x: int] -> bool
+  true)
+
+(defn score [xs: [dynamic]int]
+  (arr.remove! positive? xs))`, "arr.remove_bang(positive_p, xs)"},
+        {`(package main)
+
+(defn keep-one [x: int] -> [value: int, ok: bool]
+  (return x true))
+
+(defn score [xs: [dynamic]int]
+  (arr.keep! keep-one xs))`, "arr.keep_bang(keep_one, xs)"},
+        {`(package main)
+
+(defn score [xs: []int] -> [dynamic]int
+  (arr.into [dynamic]int xs))`, "arr.into([dynamic]int, xs)"},
+        {`(package main)
+
+(defn score [xs: [dynamic]int]
+  (arr.into! xs ([]int [1 2])))`, "arr.into_bang(xs, []int{1, 2})"},
+    }
+
+    for test_case in cases {
+        output, err, ok := kvist.compile_source(test_case.source)
+        testing.expect_value(t, ok, true)
+        if !ok {
+            testing.expect_value(t, err.message, "")
+            continue
+        }
+        testing.expect_value(t, strings.contains(output, test_case.expected), true)
+        delete(output)
+    }
+}
+
+@(test)
+compile_leaves_unimported_threaded_package_get_and_slice_unresolved :: proc(t: ^testing.T) {
+    cases := []struct {
+        source:   string,
+        expected: string,
+    }{
+        {`(package main)
+
+(defn score [xs: []int] -> int
+  (->> xs
+       (arr.first)))`, "arr.first"},
+        {`(package main)
+
+(defn score [xs: []int] -> int
+  (->> xs
+       (arr.second)))`, "arr.second"},
+        {`(package main)
+
+(defn score [xs: []int] -> int
+  (->> xs
+       (arr.last)))`, "arr.last"},
+        {`(package main)
+
+(defn score [xs: []int] -> int
+  (->> xs
+       (arr.nth 2)))`, "arr.nth"},
+        {`(package main)
+
+(defn score [xs: []int] -> []int
+  (->> xs
+       (arr.rest)))`, "arr.rest"},
+    }
+
+    for test_case in cases {
+        output, err, ok := kvist.compile_source(test_case.source)
+        testing.expect_value(t, ok, true)
+        if !ok {
+            testing.expect_value(t, err.message, "")
+            continue
+        }
+        testing.expect_value(t, strings.contains(output, test_case.expected), true)
+        delete(output)
+    }
+}
+
+@(test)
+compile_leaves_unimported_threaded_package_sequence_helpers_unresolved :: proc(t: ^testing.T) {
+    cases := []struct {
+        source:   string,
+        expected: string,
+    }{
+        {`(package main)
+
+(defn pair [x: int] -> []int
+  ([]int [x x]))
+
+(defn score [xs: []int] -> [dynamic]int
+  (let [out (->> xs
+                 (arr.mapcat pair))]
+    out))`, "arr.mapcat(pair, xs)"},
+        {`(package main)
+
+(defn score [keys: []string, vals: []int] -> map[string]int
+  (let [out (->> vals
+                 (map.zip keys))]
+    out))`, "map.zip(keys, vals)"},
+        {`(package main)
+
+(defn inc [x: int] -> int
+  (+ x 1))
+
+(defn score [xs: []int] -> [dynamic]int
+  (let [out (->> xs
+                 (arr.map inc))]
+    out))`, "arr.map(inc, xs)"},
+        {`(package main)
+
+(defn positive? [x: int] -> bool
+  (> x 0))
+
+(defn score [xs: []int] -> [dynamic]int
+  (let [out (->> xs
+                 (arr.filter positive?))]
+    out))`, "arr.filter(positive_p, xs)"},
+        {`(package main)
+
+(defn positive? [x: int] -> bool
+  (> x 0))
+
+(defn score [xs: []int] -> [dynamic]int
+  (let [out (->> xs
+                 (arr.remove positive?))]
+    out))`, "arr.remove(positive_p, xs)"},
+        {`(package main)
+
+(defn keep-positive [x: int] -> [value: int, ok: bool]
+  (return x (> x 0)))
+
+(defn score [xs: []int] -> [dynamic]int
+  (let [out (->> xs
+                 (arr.keep keep-positive))]
+    out))`, "arr.keep(keep_positive, xs)"},
+        {`(package main)
+
+(defn positive? [x: int] -> bool
+  (> x 0))
+
+(defn score [xs: []int] -> []int
+  (->> xs
+       (arr.take-while positive?)))`, "arr.take_while(positive_p, xs)"},
+    }
+
+    for test_case in cases {
+        output, err, ok := kvist.compile_source(test_case.source)
+        testing.expect_value(t, ok, true)
+        if !ok {
+            testing.expect_value(t, err.message, "")
+            continue
+        }
+        testing.expect_value(t, strings.contains(output, test_case.expected), true)
+        delete(output)
+    }
+}
+
+@(test)
+compile_leaves_unimported_set_helpers_unresolved :: proc(t: ^testing.T) {
+    cases := []struct {
+        source:   string,
+        expected: string,
+    }{
+        {`(package main)
+
+(defn score [s: (map int (struct {}))] -> bool
+  (set.contains? s 1))`, "set.contains_p(s, 1)"},
+        {`(package main)
+
+(defn score [lhs: (map int (struct {})), rhs: (map int (struct {}))] -> (map int (struct {}))
+  (set.union lhs rhs))`, "set.union(lhs, rhs)"},
+        {`(package main)
+
+(defn score [lhs: (map int (struct {})), rhs: (map int (struct {}))] -> (map int (struct {}))
+  (set.intersection lhs rhs))`, "set.intersection(lhs, rhs)"},
+        {`(package main)
+
+(defn score [lhs: (map int (struct {})), rhs: (map int (struct {}))] -> (map int (struct {}))
+  (set.difference lhs rhs))`, "set.difference(lhs, rhs)"},
+        {`(package main)
+
+(defn score [s: (map int (struct {}))] -> (map int (struct {}))
+  (set.add s 1))`, "set.add(s, 1)"},
+        {`(package main)
+
+(defn score [s: (map int (struct {}))] -> (map int (struct {}))
+  (set.remove s 1))`, "set.remove(s, 1)"},
+        {`(package main)
+
+(defn score [lhs: (map int (struct {})), rhs: (map int (struct {}))] -> bool
+  (set.subset? lhs rhs))`, "set.subset_p(lhs, rhs)"},
+        {`(package main)
+
+(defn score [lhs: (map int (struct {})), rhs: (map int (struct {}))] -> bool
+  (set.superset? lhs rhs))`, "set.superset_p(lhs, rhs)"},
+        {`(package main)
+
+(defn score [lhs: (map int (struct {})), rhs: (map int (struct {}))] -> bool
+  (set.disjoint? lhs rhs))`, "set.disjoint_p(lhs, rhs)"},
+        {`(package main)
+
+(defn score [] -> int
+  (let [s (set.empty int)]
+    (count s)))`, "set.empty(int)"},
+        {`(package main)
+
+(defn score [] -> int
+  (let [s (set.of int [1 2])]
+    (count s)))`, "s := set.of(int, kvist_thread_1)"},
+        {`(package main)
+
+(defn score [s: (map int (struct {}))]
+  (set.add! s 1))`, "set.add_bang(s, 1)"},
+        {`(package main)
+
+(defn score [s: (map int (struct {}))]
+  (set.remove! s 1))`, "set.remove_bang(s, 1)"},
+        {`(package main)
+
+(defn score [target: (map int (struct {})), source: (map int (struct {}))]
+  (set.union! target source))`, "set.union_bang(target, source)"},
+        {`(package main)
+
+(defn score [target: (map int (struct {})), source: (map int (struct {}))]
+  (set.intersection! target source))`, "set.intersection_bang(target, source)"},
+        {`(package main)
+
+(defn score [target: (map int (struct {})), source: (map int (struct {}))]
+  (set.difference! target source))`, "set.difference_bang(target, source)"},
+    }
+
+    for test_case in cases {
+        output, err, ok := kvist.compile_source(test_case.source)
+        testing.expect_value(t, ok, true)
+        if !ok {
+            testing.expect_value(t, err.message, "")
+            continue
+        }
+        testing.expect_value(t, strings.contains(output, test_case.expected), true)
+        delete(output)
+    }
 }
 
 @(test)
@@ -14409,7 +20436,7 @@ reject_old_exports_form :: proc(t: ^testing.T) {
 
 @(test)
 compile_map_supports_single_captured_local_in_fn_literal :: proc(t: ^testing.T) {
-    source := "(package main)\n\n(defn demo [xs: []int] -> [dynamic]int\n  (let [offset 10]\n    (arr.map (fn [x: int] -> int\n               (+ x offset))\n             xs)))"
+    source := "(package main)\n(import arr \"kvist:arr\")\n\n(defn demo [xs: []int] -> [dynamic]int\n  (let [offset 10]\n    (arr.map (fn [x: int] -> int\n               (+ x offset))\n             xs)))"
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
@@ -14418,17 +20445,18 @@ compile_map_supports_single_captured_local_in_fn_literal :: proc(t: ^testing.T) 
         return
     }
     defer delete(output)
-    testing.expect_value(t, strings.contains(output, "return kvist_map_1("), true)
+    testing.expect_value(t, strings.contains(output, "return arr__map_impl__kvist_capture_0_1("), true)
     testing.expect_value(t, strings.contains(output, "proc(offset: int, x: int) -> int {"), true)
     testing.expect_value(t, strings.contains(output, "return (x) + (offset)"), true)
     testing.expect_value(t, strings.contains(output, "offset,"), true)
-    testing.expect_value(t, strings.contains(output, "(xs)[:]"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_map_1 :: proc(f: proc(c1: $C1, x: $T) -> $U, c1: C1, xs: []T) -> [dynamic]U {"), true)
+    testing.expect_value(t, strings.contains(output, "xs)"), true)
+    testing.expect_value(t, strings.contains(output, "arr__map_impl__kvist_capture_0_1 :: proc(f: proc(c1: $C1, x: $T) -> $U, kvist_capture_1: C1, xs: []T) -> [dynamic]U {"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_map_1"), false)
 }
 
 @(test)
 compile_map_bang_supports_single_captured_local_in_fn_literal :: proc(t: ^testing.T) {
-    source := "(package main)\n\n(defn demo [xs: [dynamic]int] -> [dynamic]int\n  (let [offset 10]\n    (arr.map! (fn [x: int] -> int\n                (+ x offset))\n              xs)\n    xs))"
+    source := "(package main)\n(import arr \"kvist:arr\")\n\n(defn demo [xs: [dynamic]int] -> [dynamic]int\n  (let [offset 10]\n    (arr.map! (fn [x: int] -> int\n                (+ x offset))\n              xs)\n    xs))"
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
@@ -14437,17 +20465,18 @@ compile_map_bang_supports_single_captured_local_in_fn_literal :: proc(t: ^testin
         return
     }
     defer delete(output)
-    testing.expect_value(t, strings.contains(output, "kvist_map_in_place_1("), true)
+    testing.expect_value(t, strings.contains(output, "arr__map_bang_impl__kvist_capture_0_1("), true)
     testing.expect_value(t, strings.contains(output, "proc(offset: int, x: int) -> int {"), true)
     testing.expect_value(t, strings.contains(output, "return (x) + (offset)"), true)
     testing.expect_value(t, strings.contains(output, "offset,"), true)
-    testing.expect_value(t, strings.contains(output, "(xs)[:]"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_map_in_place_1 :: proc(f: proc(c1: $C1, x: $T) -> T, c1: C1, xs: []T) {"), true)
+    testing.expect_value(t, strings.contains(output, "xs)"), true)
+    testing.expect_value(t, strings.contains(output, "arr__map_bang_impl__kvist_capture_0_1 :: proc(f: proc(c1: $C1, x: $T) -> T, kvist_capture_1: C1, xs: []T) {"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_map_in_place_1"), false)
 }
 
 @(test)
 compile_map_supports_multiple_captured_locals_in_fn_literal :: proc(t: ^testing.T) {
-    source := "(package main)\n\n(defn demo [xs: []int] -> [dynamic]int\n  (let [offset 10\n        scale 2]\n    (arr.map (fn [x: int] -> int\n               (+ (* x scale) offset))\n             xs)))"
+    source := "(package main)\n(import arr \"kvist:arr\")\n\n(defn demo [xs: []int] -> [dynamic]int\n  (let [offset 10\n        scale 2]\n    (arr.map (fn [x: int] -> int\n               (+ (* x scale) offset))\n             xs)))"
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
@@ -14456,17 +20485,18 @@ compile_map_supports_multiple_captured_locals_in_fn_literal :: proc(t: ^testing.
         return
     }
     defer delete(output)
-    testing.expect_value(t, strings.contains(output, "return kvist_map_2("), true)
+    testing.expect_value(t, strings.contains(output, "return arr__map_impl__kvist_capture_0_2("), true)
     testing.expect_value(t, strings.contains(output, "proc(scale: int, offset: int, x: int) -> int {"), true)
     testing.expect_value(t, strings.contains(output, "scale,"), true)
     testing.expect_value(t, strings.contains(output, "offset,"), true)
-    testing.expect_value(t, strings.contains(output, "(xs)[:]"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_map_2 :: proc(f: proc(c1: $C1, c2: $C2, x: $T) -> $U, c1: C1, c2: C2, xs: []T) -> [dynamic]U {"), true)
+    testing.expect_value(t, strings.contains(output, "xs)"), true)
+    testing.expect_value(t, strings.contains(output, "arr__map_impl__kvist_capture_0_2 :: proc(f: proc(c1: $C1, c2: $C2, x: $T) -> $U, kvist_capture_1: C1, kvist_capture_2: C2, xs: []T) -> [dynamic]U {"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_map_2"), false)
 }
 
 @(test)
 compile_filter_supports_single_captured_local_in_fn_literal :: proc(t: ^testing.T) {
-    source := "(package main)\n\n(defn demo [xs: [dynamic]int] -> [dynamic]int\n  (let [limit 10]\n    (arr.filter (fn [x: int] -> bool\n                  (> x limit))\n                xs)))"
+    source := "(package main)\n(import arr \"kvist:arr\")\n\n(defn demo [xs: [dynamic]int] -> [dynamic]int\n  (let [limit 10]\n    (arr.filter (fn [x: int] -> bool\n                  (> x limit))\n                xs)))"
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
@@ -14475,15 +20505,16 @@ compile_filter_supports_single_captured_local_in_fn_literal :: proc(t: ^testing.
         return
     }
     defer delete(output)
-    testing.expect_value(t, strings.contains(output, "kvist_filter_1("), true)
+    testing.expect_value(t, strings.contains(output, "arr__filter_impl__kvist_capture_0_1("), true)
     testing.expect_value(t, strings.contains(output, "proc(limit: int, x: int) -> bool {"), true)
     testing.expect_value(t, strings.contains(output, "return (x) > (limit)"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_filter_1 :: proc(f: proc(c1: $C1, x: $T) -> bool, c1: C1, xs: []T) -> [dynamic]T {"), true)
+    testing.expect_value(t, strings.contains(output, "arr__filter_impl__kvist_capture_0_1 :: proc(pred: proc(c1: $C1, x: $T) -> bool, kvist_capture_1: C1, xs: []T) -> [dynamic]T {"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_filter_1"), false)
 }
 
 @(test)
 compile_filter_supports_multiple_captured_locals_in_fn_literal :: proc(t: ^testing.T) {
-    source := "(package main)\n\n(defn demo [xs: [dynamic]int] -> [dynamic]int\n  (let [lo 3\n        hi 10]\n    (arr.filter (fn [x: int] -> bool\n                  (and (> x lo) (< x hi)))\n                xs)))"
+    source := "(package main)\n(import arr \"kvist:arr\")\n\n(defn demo [xs: [dynamic]int] -> [dynamic]int\n  (let [lo 3\n        hi 10]\n    (arr.filter (fn [x: int] -> bool\n                  (and (> x lo) (< x hi)))\n                xs)))"
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
@@ -14492,12 +20523,13 @@ compile_filter_supports_multiple_captured_locals_in_fn_literal :: proc(t: ^testi
         return
     }
     defer delete(output)
-    testing.expect_value(t, strings.contains(output, "kvist_filter_2("), true)
+    testing.expect_value(t, strings.contains(output, "arr__filter_impl__kvist_capture_0_2("), true)
     testing.expect_value(t, strings.contains(output, "proc(lo: int, hi: int, x: int) -> bool {"), true)
     testing.expect_value(t, strings.contains(output, "lo,"), true)
     testing.expect_value(t, strings.contains(output, "hi,"), true)
-    testing.expect_value(t, strings.contains(output, "(xs)[:]"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_filter_2 :: proc(f: proc(c1: $C1, c2: $C2, x: $T) -> bool, c1: C1, c2: C2, xs: []T) -> [dynamic]T {"), true)
+    testing.expect_value(t, strings.contains(output, "xs)"), true)
+    testing.expect_value(t, strings.contains(output, "arr__filter_impl__kvist_capture_0_2 :: proc(pred: proc(c1: $C1, c2: $C2, x: $T) -> bool, kvist_capture_1: C1, kvist_capture_2: C2, xs: []T) -> [dynamic]T {"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_filter_2"), false)
 }
 
 @(test)
@@ -14515,6 +20547,22 @@ compile_user_proc_supports_captured_callback_literal :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "proc(offset: int, x: int) -> int {"), true)
     testing.expect_value(t, strings.contains(output, "apply_one__kvist_capture_0_1 :: proc(f: proc(c1: $C1, x: int) -> int, kvist_capture_1: C1, x: int) -> int {"), true)
     testing.expect_value(t, strings.contains(output, "return f(kvist_capture_1, x)"), true)
+}
+
+@(test)
+compile_user_proc_supports_field_selector_callback :: proc(t: ^testing.T) {
+    source := "(package main)\n\n(defstruct User {name: string})\n\n(defn project-one [f: (fn [x: $T] -> $K), x: T] -> K\n  (f x))\n\n(defn demo [u: User] -> string\n  (project-one .name u))"
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+    testing.expect_value(t, strings.contains(output, "return project_one__kvist_field_0_name(type_of(u), type_of((u).name), u)"), true)
+    testing.expect_value(t, strings.contains(output, "project_one__kvist_field_0_name :: proc($T: typeid, $K: typeid, x: T) -> K {"), true)
+    testing.expect_value(t, strings.contains(output, "return x.name"), true)
 }
 
 @(test)
@@ -14587,6 +20635,27 @@ compile_arr_package_scan_helpers_support_captured_callbacks :: proc(t: ^testing.
 }
 
 @(test)
+compile_arr_sort_by_named_callbacks_are_source_owned :: proc(t: ^testing.T) {
+    source := "(package main)\n(import arr \"kvist:arr\")\n\n(defn identity [x: int] -> int x)\n\n(defn demo [xs: [dynamic]int] -> int\n  (let [sorted (arr.sort-by identity xs) :defer]\n    (arr.sort-by! identity xs)\n    (+ (arr.last sorted) (arr.last xs))))"
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+    testing.expect_value(t, strings.contains(output, "sorted := arr__sort_by_impl(identity,"), true)
+    testing.expect_value(t, strings.contains(output, "arr__sort_by_bang_impl(identity,"), true)
+    testing.expect_value(t, strings.contains(output, "arr__Sort_By_Item :: struct($K: typeid, $T: typeid) {key: K, value: T}"), true)
+    testing.expect_value(t, strings.contains(output, "arr__sort_by_items_bang((items)[0:])"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_sort_by_callback_identity"), false)
+    testing.expect_value(t, strings.contains(output, "kvist_sort_by_in_place_callback_identity"), false)
+    testing.expect_value(t, strings.contains(output, "kvist_sort_by :: proc"), false)
+    testing.expect_value(t, strings.contains(output, "kvist_sort_by_in_place :: proc"), false)
+}
+
+@(test)
 compile_arr_sort_by_supports_captured_callbacks :: proc(t: ^testing.T) {
     source := "(package main)\n(import arr \"kvist:arr\")\n\n(defn demo [xs: []int] -> int\n  (let [offset 10\n        sorted (arr.sort-by (fn [x: int] -> int (+ x offset)) xs) :defer]\n    (arr.last sorted)))"
 
@@ -14597,13 +20666,14 @@ compile_arr_sort_by_supports_captured_callbacks :: proc(t: ^testing.T) {
         return
     }
     defer delete(output)
-    testing.expect_value(t, strings.contains(output, "sorted := kvist_sort_by_1("), true)
+    testing.expect_value(t, strings.contains(output, "sorted := arr__sort_by_impl__kvist_capture_0_1("), true)
     testing.expect_value(t, strings.contains(output, "proc(offset: int, x: int) -> int {"), true)
     testing.expect_value(t, strings.contains(output, "return (x) + (offset)"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_sort_by_1 :: proc(f: proc(c1: $C1, x: $T) -> $K, c1: C1, xs: []T) -> [dynamic]T {"), true)
-    testing.expect_value(t, strings.contains(output, "Context :: struct {"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_slice.sort_by_with_data(out[:], proc(a, b: T, user_data: rawptr) -> bool {"), true)
-    testing.expect_value(t, strings.contains(output, "return data.f(data.c1, a) < data.f(data.c1, b)"), true)
+    testing.expect_value(t, strings.contains(output, "arr__sort_by_impl__kvist_capture_0_1 :: proc(f: proc(c1: $C1, x: $T) -> $K, kvist_capture_1: C1, xs: []T) -> [dynamic]T {"), true)
+    testing.expect_value(t, strings.contains(output, "append(&items, arr__Sort_By_Item(K, T){key = f(kvist_capture_1, x), value = x})"), true)
+    testing.expect_value(t, strings.contains(output, "arr__sort_by_items_bang((items)[0:])"), true)
+    testing.expect_value(t, strings.contains(output, "append(&out, item.value)"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_sort_by_1"), false)
 }
 
 @(test)
@@ -14617,16 +20687,18 @@ compile_arr_sort_by_bang_supports_captured_callbacks :: proc(t: ^testing.T) {
         return
     }
     defer delete(output)
-    testing.expect_value(t, strings.contains(output, "kvist_sort_by_in_place_1("), true)
+    testing.expect_value(t, strings.contains(output, "arr__sort_by_bang_impl__kvist_capture_0_1("), true)
     testing.expect_value(t, strings.contains(output, "proc(offset: int, x: int) -> int {"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_sort_by_in_place_1 :: proc(f: proc(c1: $C1, x: $T) -> $K, c1: C1, xs: []T) {"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_slice.sort_by_with_data(xs, proc(a, b: T, user_data: rawptr) -> bool {"), true)
-    testing.expect_value(t, strings.contains(output, "return data.f(data.c1, a) < data.f(data.c1, b)"), true)
+    testing.expect_value(t, strings.contains(output, "arr__sort_by_bang_impl__kvist_capture_0_1 :: proc(f: proc(c1: $C1, x: $T) -> $K, kvist_capture_1: C1, xs: []T) {"), true)
+    testing.expect_value(t, strings.contains(output, "append(&items, arr__Sort_By_Item(K, T){key = f(kvist_capture_1, x), value = x})"), true)
+    testing.expect_value(t, strings.contains(output, "arr__sort_by_items_bang((items)[0:])"), true)
+    testing.expect_value(t, strings.contains(output, "xs[i] = item.value"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_sort_by_in_place_1"), false)
 }
 
 @(test)
 compile_filter_bang_supports_single_captured_local_in_fn_literal :: proc(t: ^testing.T) {
-    source := "(package main)\n\n(defn demo [xs: [dynamic]int] -> [dynamic]int\n  (let [limit 10]\n    (arr.filter! (fn [x: int] -> bool\n                   (> x limit))\n                 xs)\n    xs))"
+    source := "(package main)\n(import arr \"kvist:arr\")\n\n(defn demo [xs: [dynamic]int] -> [dynamic]int\n  (let [limit 10]\n    (arr.filter! (fn [x: int] -> bool\n                   (> x limit))\n                 xs)\n    xs))"
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
@@ -14635,14 +20707,15 @@ compile_filter_bang_supports_single_captured_local_in_fn_literal :: proc(t: ^tes
         return
     }
     defer delete(output)
-    testing.expect_value(t, strings.contains(output, "kvist_filter_in_place_1("), true)
+    testing.expect_value(t, strings.contains(output, "arr__filter_bang_impl__kvist_capture_0_1("), true)
     testing.expect_value(t, strings.contains(output, "proc(limit: int, x: int) -> bool {"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_filter_in_place_1 :: proc(f: proc(c1: $C1, x: $T) -> bool, c1: C1, xs: ^[dynamic]T) {"), true)
+    testing.expect_value(t, strings.contains(output, "arr__filter_bang_impl__kvist_capture_0_1 :: proc(pred: proc(c1: $C1, x: $T) -> bool, kvist_capture_1: C1, xs: ^[dynamic]T) {"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_filter_in_place_1"), false)
 }
 
 @(test)
 compile_remove_supports_single_captured_local_in_fn_literal :: proc(t: ^testing.T) {
-    source := "(package main)\n\n(defn demo [xs: [dynamic]int] -> [dynamic]int\n  (let [limit 10]\n    (arr.remove (fn [x: int] -> bool\n                  (> x limit))\n                xs)))"
+    source := "(package main)\n(import arr \"kvist:arr\")\n\n(defn demo [xs: [dynamic]int] -> [dynamic]int\n  (let [limit 10]\n    (arr.remove (fn [x: int] -> bool\n                  (> x limit))\n                xs)))"
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
@@ -14651,14 +20724,15 @@ compile_remove_supports_single_captured_local_in_fn_literal :: proc(t: ^testing.
         return
     }
     defer delete(output)
-    testing.expect_value(t, strings.contains(output, "kvist_remove_1("), true)
+    testing.expect_value(t, strings.contains(output, "arr__remove_impl__kvist_capture_0_1("), true)
     testing.expect_value(t, strings.contains(output, "proc(limit: int, x: int) -> bool {"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_remove_1 :: proc(f: proc(c1: $C1, x: $T) -> bool, c1: C1, xs: []T) -> [dynamic]T {"), true)
+    testing.expect_value(t, strings.contains(output, "arr__remove_impl__kvist_capture_0_1 :: proc(pred: proc(c1: $C1, x: $T) -> bool, kvist_capture_1: C1, xs: []T) -> [dynamic]T {"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_remove_1"), false)
 }
 
 @(test)
 compile_keep_supports_single_captured_local_in_fn_literal :: proc(t: ^testing.T) {
-    source := "(package main)\n\n(defn demo [xs: [dynamic]int] -> [dynamic]int\n  (let [limit 10]\n    (arr.keep (fn [x: int] -> [value: int, ok: bool]\n                (if (> x limit)\n                  (return x true)\n                  (return 0 false)))\n              xs)))"
+    source := "(package main)\n(import arr \"kvist:arr\")\n\n(defn demo [xs: [dynamic]int] -> [dynamic]int\n  (let [limit 10]\n    (arr.keep (fn [x: int] -> [value: int, ok: bool]\n                (if (> x limit)\n                  (return x true)\n                  (return 0 false)))\n              xs)))"
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
@@ -14667,9 +20741,10 @@ compile_keep_supports_single_captured_local_in_fn_literal :: proc(t: ^testing.T)
         return
     }
     defer delete(output)
-    testing.expect_value(t, strings.contains(output, "kvist_keep_1("), true)
+    testing.expect_value(t, strings.contains(output, "arr__keep_impl__kvist_capture_0_1("), true)
     testing.expect_value(t, strings.contains(output, "proc(limit: int, x: int) -> (value: int, ok: bool) {"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_keep_1 :: proc(f: proc(c1: $C1, x: $T) -> ($U, bool), c1: C1, xs: []T) -> [dynamic]U {"), true)
+    testing.expect_value(t, strings.contains(output, "arr__keep_impl__kvist_capture_0_1 :: proc(f: proc(c1: $C1, x: $T) -> (value: $U, ok: bool), kvist_capture_1: C1, xs: []T) -> [dynamic]U {"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_keep_1"), false)
 }
 
 @(test)
@@ -14870,16 +20945,11 @@ compile_path_supports_multi_file_source_package_directory :: proc(t: ^testing.T)
 }
 
 @(test)
-compile_path_resolves_shipped_packages_from_env_dir :: proc(t: ^testing.T) {
-    old_packages_dir, had_packages_dir := os.lookup_env("KVIST_PACKAGES_DIR", context.allocator)
-    defer if had_packages_dir {
-        _ = os.set_env("KVIST_PACKAGES_DIR", old_packages_dir)
-        delete(old_packages_dir)
-    } else {
-        _ = os.unset_env("KVIST_PACKAGES_DIR")
-    }
+compile_path_resolves_shipped_packages_from_configured_root :: proc(t: ^testing.T) {
+    sync.lock(&test_env_mutex)
+    defer sync.unlock(&test_env_mutex)
 
-    dir, dir_err := os.make_directory_temp("", "kvist-packages-env-*", context.allocator)
+    dir, dir_err := os.make_directory_temp("", "kvist-home-src-*", context.allocator)
     testing.expect_value(t, dir_err == nil, true)
     if dir_err != nil {
         return
@@ -14887,19 +20957,19 @@ compile_path_resolves_shipped_packages_from_env_dir :: proc(t: ^testing.T) {
     defer os.remove_all(dir)
     defer delete(dir)
 
-    packages_dir, packages_join_err := os.join_path({dir, "packages"}, context.allocator)
-    testing.expect_value(t, packages_join_err == nil, true)
-    if packages_join_err != nil {
+    source_root, source_root_err := os.join_path({dir, "src", "kvist"}, context.allocator)
+    testing.expect_value(t, source_root_err == nil, true)
+    if source_root_err != nil {
         return
     }
-    defer delete(packages_dir)
-    mk_packages_err := os.make_directory_all(packages_dir)
-    testing.expect_value(t, mk_packages_err == nil, true)
-    if mk_packages_err != nil {
+    defer delete(source_root)
+    mk_source_root_err := os.make_directory_all(source_root)
+    testing.expect_value(t, mk_source_root_err == nil, true)
+    if mk_source_root_err != nil {
         return
     }
 
-    core_dir, core_join_err := os.join_path({packages_dir, "core"}, context.allocator)
+    core_dir, core_join_err := os.join_path({source_root, "core"}, context.allocator)
     testing.expect_value(t, core_join_err == nil, true)
     if core_join_err != nil {
         return
@@ -14923,7 +20993,7 @@ compile_path_resolves_shipped_packages_from_env_dir :: proc(t: ^testing.T) {
         return
     }
 
-    toy_dir, toy_join_err := os.join_path({packages_dir, "toy"}, context.allocator)
+    toy_dir, toy_join_err := os.join_path({source_root, "toy"}, context.allocator)
     testing.expect_value(t, toy_join_err == nil, true)
     if toy_join_err != nil {
         return
@@ -14966,9 +21036,266 @@ compile_path_resolves_shipped_packages_from_env_dir :: proc(t: ^testing.T) {
         return
     }
 
-    set_err := os.set_env("KVIST_PACKAGES_DIR", packages_dir)
-    testing.expect_value(t, set_err == nil, true)
-    if set_err != nil {
+    repo_root := compiler_test_repo_root()
+    kvist_bin, bin_ok := build_test_kvist_binary(t, repo_root, dir)
+    if !bin_ok {
+        return
+    }
+    defer delete(kvist_bin)
+
+    output_path, output_join_err := os.join_path({dir, "main.odin"}, context.allocator)
+    testing.expect_value(t, output_join_err == nil, true)
+    if output_join_err != nil {
+        return
+    }
+    defer delete(output_path)
+
+    root_env := fmt.tprintf("KVIST_ROOT=%s", source_root)
+    child_env, child_env_ok := test_child_env_without_kvist_vars({root_env})
+    testing.expect_value(t, child_env_ok, true)
+    if !child_env_ok {
+        return
+    }
+    defer test_env_slice_delete(&child_env)
+
+    state, stdout, stderr, exec_err := os.process_exec(
+        os.Process_Desc{
+            command = {kvist_bin, "compile", main_path, "-o", output_path},
+            working_dir = dir,
+            env = child_env[:],
+        },
+        context.allocator,
+    )
+    defer delete(stdout)
+    defer delete(stderr)
+
+    testing.expect_value(t, exec_err == nil, true)
+    if exec_err != nil {
+        return
+    }
+    testing.expect_value(t, state.exited, true)
+    testing.expect_value(t, state.exit_code, 0)
+    if !state.exited || state.exit_code != 0 {
+        testing.expect_value(t, string(stderr), "")
+        return
+    }
+
+    output, read_err := os.read_entire_file_from_path(output_path, context.allocator)
+    testing.expect_value(t, read_err == nil, true)
+    if read_err != nil {
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(string(output), "toy__id :: proc(x: int) -> int"), true)
+    testing.expect_value(t, strings.contains(string(output), "return toy__id(42)"), true)
+}
+
+@(test)
+compile_and_symbols_resolve_kvist_imports_from_configured_root :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-home-flat-root-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    core_dir, core_dir_err := os.join_path({dir, "core"}, context.allocator)
+    testing.expect_value(t, core_dir_err == nil, true)
+    if core_dir_err != nil {
+        return
+    }
+    defer delete(core_dir)
+    mk_core_err := os.make_directory_all(core_dir)
+    testing.expect_value(t, mk_core_err == nil, true)
+    if mk_core_err != nil {
+        return
+    }
+    core_path, core_path_err := os.join_path({core_dir, "core.kvist"}, context.allocator)
+    testing.expect_value(t, core_path_err == nil, true)
+    if core_path_err != nil {
+        return
+    }
+    defer delete(core_path)
+    core_write_err := os.write_entire_file_from_string(core_path, `(package core)`)
+    testing.expect_value(t, core_write_err == nil, true)
+    if core_write_err != nil {
+        return
+    }
+
+    toy_dir, toy_dir_err := os.join_path({dir, "toy"}, context.allocator)
+    testing.expect_value(t, toy_dir_err == nil, true)
+    if toy_dir_err != nil {
+        return
+    }
+    defer delete(toy_dir)
+    mk_toy_err := os.make_directory_all(toy_dir)
+    testing.expect_value(t, mk_toy_err == nil, true)
+    if mk_toy_err != nil {
+        return
+    }
+    toy_path, toy_path_err := os.join_path({toy_dir, "toy.kvist"}, context.allocator)
+    testing.expect_value(t, toy_path_err == nil, true)
+    if toy_path_err != nil {
+        return
+    }
+    defer delete(toy_path)
+    toy_write_err := os.write_entire_file_from_string(toy_path, `(package toy)
+
+(defn id [x: int] -> int
+  x)`)
+    testing.expect_value(t, toy_write_err == nil, true)
+    if toy_write_err != nil {
+        return
+    }
+
+    main_path, main_path_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, main_path_err == nil, true)
+    if main_path_err != nil {
+        return
+    }
+    defer delete(main_path)
+    main_write_err := os.write_entire_file_from_string(main_path, `(package main)
+(import toy "kvist:toy")
+
+(defn main [] -> int
+  (toy.id 42))`)
+    testing.expect_value(t, main_write_err == nil, true)
+    if main_write_err != nil {
+        return
+    }
+
+    repo_root := compiler_test_repo_root()
+    kvist_bin, bin_ok := build_test_kvist_binary(t, repo_root, dir)
+    if !bin_ok {
+        return
+    }
+    defer delete(kvist_bin)
+
+    output_path, output_path_err := os.join_path({dir, "main.odin"}, context.allocator)
+    testing.expect_value(t, output_path_err == nil, true)
+    if output_path_err != nil {
+        return
+    }
+    defer delete(output_path)
+
+    root_env := fmt.tprintf("KVIST_ROOT=%s", dir)
+    child_env, child_env_ok := test_child_env_without_kvist_vars({root_env})
+    testing.expect_value(t, child_env_ok, true)
+    if !child_env_ok {
+        return
+    }
+    defer test_env_slice_delete(&child_env)
+
+    state, stdout, stderr, exec_err := os.process_exec(
+        os.Process_Desc{
+            command = {kvist_bin, "compile", main_path, "-o", output_path},
+            working_dir = dir,
+            env = child_env[:],
+        },
+        context.allocator,
+    )
+    defer delete(stdout)
+    defer delete(stderr)
+
+    testing.expect_value(t, exec_err == nil, true)
+    if exec_err != nil {
+        return
+    }
+    testing.expect_value(t, state.exited, true)
+    testing.expect_value(t, state.exit_code, 0)
+    if !state.exited || state.exit_code != 0 {
+        testing.expect_value(t, string(stderr), "")
+        return
+    }
+
+    output, read_err := os.read_entire_file_from_path(output_path, context.allocator)
+    testing.expect_value(t, read_err == nil, true)
+    if read_err != nil {
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(string(output), "toy__id :: proc(x: int) -> int"), true)
+    testing.expect_value(t, strings.contains(string(output), "return toy__id(42)"), true)
+
+    symbols_state, symbols_stdout, symbols_stderr, symbols_exec_err := os.process_exec(
+        os.Process_Desc{
+            command = {kvist_bin, "package-symbols", "kvist:toy", "toy"},
+            working_dir = dir,
+            env = child_env[:],
+        },
+        context.allocator,
+    )
+    defer delete(symbols_stdout)
+    defer delete(symbols_stderr)
+
+    testing.expect_value(t, symbols_exec_err == nil, true)
+    if symbols_exec_err != nil {
+        return
+    }
+    testing.expect_value(t, symbols_state.exited, true)
+    testing.expect_value(t, symbols_state.exit_code, 0)
+    if !symbols_state.exited || symbols_state.exit_code != 0 {
+        testing.expect_value(t, string(symbols_stderr), "")
+        return
+    }
+    testing.expect_value(t, strings.contains(string(symbols_stdout), "toy.id"), true)
+}
+
+@(test)
+compile_and_symbols_resolve_relative_source_package_imports :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-relative-package-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    toy_dir, toy_join_err := os.join_path({dir, "packages", "toy"}, context.allocator)
+    testing.expect_value(t, toy_join_err == nil, true)
+    if toy_join_err != nil {
+        return
+    }
+    defer delete(toy_dir)
+
+    mk_toy_err := os.make_directory_all(toy_dir)
+    testing.expect_value(t, mk_toy_err == nil, true)
+    if mk_toy_err != nil {
+        return
+    }
+
+    toy_path, toy_path_err := os.join_path({toy_dir, "toy.kvist"}, context.allocator)
+    testing.expect_value(t, toy_path_err == nil, true)
+    if toy_path_err != nil {
+        return
+    }
+    defer delete(toy_path)
+    toy_write_err := os.write_entire_file_from_string(toy_path, `(package toy)
+
+(defn id [x: int] -> int
+  x)`)
+    testing.expect_value(t, toy_write_err == nil, true)
+    if toy_write_err != nil {
+        return
+    }
+
+    main_path, main_path_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, main_path_err == nil, true)
+    if main_path_err != nil {
+        return
+    }
+    defer delete(main_path)
+    main_source := `(package main)
+(import toy "packages/toy")
+
+(defn main [] -> int
+  (toy.id 42))`
+    main_write_err := os.write_entire_file_from_string(main_path, main_source)
+    testing.expect_value(t, main_write_err == nil, true)
+    if main_write_err != nil {
         return
     }
 
@@ -14982,19 +21309,258 @@ compile_path_resolves_shipped_packages_from_env_dir :: proc(t: ^testing.T) {
 
     testing.expect_value(t, strings.contains(output, "toy__id :: proc(x: int) -> int"), true)
     testing.expect_value(t, strings.contains(output, "return toy__id(42)"), true)
+
+    symbols, symbols_err, symbols_ok := kvist.editor_symbols_source(main_path, main_source)
+    testing.expect_value(t, symbols_ok, true)
+    if !symbols_ok {
+        testing.expect_value(t, symbols_err.message, "")
+        return
+    }
+    defer delete(symbols)
+    testing.expect_value(t, strings.contains(symbols, "source import\ttoy\t1\t1\tpackages/toy"), true)
+    testing.expect_value(t, strings.contains(symbols, "proc\ttoy.id\t"), true)
+    testing.expect_value(t, strings.contains(symbols, toy_path), true)
 }
 
 @(test)
-cli_check_loads_core_macros_outside_repo_with_packages_env :: proc(t: ^testing.T) {
-    repo_root := compiler_test_repo_root()
-
-    old_packages_dir, had_packages_dir := os.lookup_env("KVIST_PACKAGES_DIR", context.allocator)
-    defer if had_packages_dir {
-        _ = os.set_env("KVIST_PACKAGES_DIR", old_packages_dir)
-        delete(old_packages_dir)
-    } else {
-        _ = os.unset_env("KVIST_PACKAGES_DIR")
+third_party_source_package_uses_auto_referred_core_helpers :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-third-party-bare-core-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
     }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    pkg_dir, pkg_join_err := os.join_path({dir, "support"}, context.allocator)
+    testing.expect_value(t, pkg_join_err == nil, true)
+    if pkg_join_err != nil {
+        return
+    }
+    defer delete(pkg_dir)
+
+    mk_pkg_err := os.make_directory_all(pkg_dir)
+    testing.expect_value(t, mk_pkg_err == nil, true)
+    if mk_pkg_err != nil {
+        return
+    }
+
+    pkg_file, pkg_file_err := os.join_path({pkg_dir, "support.kvist"}, context.allocator)
+    testing.expect_value(t, pkg_file_err == nil, true)
+    if pkg_file_err != nil {
+        return
+    }
+    defer delete(pkg_file)
+    pkg_source := `(package support)
+
+(defn summarize [xs: []int] -> int
+  (let [lookup (make (map int int))
+        total 0
+        i 0]
+    (for [x xs]
+      (set! (get lookup x) x))
+    (delete! lookup 0)
+    (while (< i (count xs))
+      (let [x (get xs i)]
+        (when (contains? lookup x)
+          (set! total (+ total x))))
+      (inc! i))
+    total))`
+    pkg_write_err := os.write_entire_file_from_string(pkg_file, pkg_source)
+    testing.expect_value(t, pkg_write_err == nil, true)
+    if pkg_write_err != nil {
+        return
+    }
+
+    main_path, main_path_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, main_path_err == nil, true)
+    if main_path_err != nil {
+        return
+    }
+    defer delete(main_path)
+    main_source := `(package main)
+(import support "support")
+
+(defn main [] -> int
+  (support.summarize ([]int [0 1 2])))`
+    main_write_err := os.write_entire_file_from_string(main_path, main_source)
+    testing.expect_value(t, main_write_err == nil, true)
+    if main_write_err != nil {
+        return
+    }
+
+    output, err, ok := kvist.compile_path(main_path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "support__summarize :: proc(xs: []int) -> int"), true)
+    testing.expect_value(t, strings.contains(output, "len(xs)"), true)
+    testing.expect_value(t, strings.contains(output, "delete_key(&(lookup), 0)"), true)
+    testing.expect_value(t, strings.contains(output, "support__count"), false)
+    testing.expect_value(t, strings.contains(output, "support__get"), false)
+    testing.expect_value(t, strings.contains(output, "support__when"), false)
+    testing.expect_value(t, strings.contains(output, "support__delete"), false)
+}
+
+@(test)
+third_party_source_package_macro_uses_bare_when_dsl :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-third-party-bare-when-dsl-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    pkg_dir, pkg_join_err := os.join_path({dir, "support"}, context.allocator)
+    testing.expect_value(t, pkg_join_err == nil, true)
+    if pkg_join_err != nil {
+        return
+    }
+    defer delete(pkg_dir)
+    mk_pkg_err := os.make_directory_all(pkg_dir)
+    testing.expect_value(t, mk_pkg_err == nil, true)
+    if mk_pkg_err != nil {
+        return
+    }
+
+    pkg_file, pkg_file_err := os.join_path({pkg_dir, "support.kvist"}, context.allocator)
+    testing.expect_value(t, pkg_file_err == nil, true)
+    if pkg_file_err != nil {
+        return
+    }
+    defer delete(pkg_file)
+    pkg_source := `(package support)
+
+(defmacro- when-form? [form]
+  (if (list? form)
+    (if (= (count form) 3)
+      (if (symbol? (first form))
+        (= (name (first form)) "when")
+        false)
+      false)
+    false))
+
+(defmacro emit [form]
+  (if (when-form? form)
+    (quasiquote
+      (if (unquote (nth form 1))
+        (unquote (nth form 2))
+        "skip"))
+    form))`
+    pkg_write_err := os.write_entire_file_from_string(pkg_file, pkg_source)
+    testing.expect_value(t, pkg_write_err == nil, true)
+    if pkg_write_err != nil {
+        return
+    }
+
+    main_path, main_path_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, main_path_err == nil, true)
+    if main_path_err != nil {
+        return
+    }
+    defer delete(main_path)
+    main_source := `(package main)
+(import support "support")
+
+(defn demo [ready?: bool] -> string
+  (support.emit
+    (when ready? "ready")))`
+    main_write_err := os.write_entire_file_from_string(main_path, main_source)
+    testing.expect_value(t, main_write_err == nil, true)
+    if main_write_err != nil {
+        return
+    }
+
+    output, err, ok := kvist.compile_path(main_path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "if ready_p"), true)
+    testing.expect_value(t, strings.contains(output, "return \"ready\""), true)
+    testing.expect_value(t, strings.contains(output, "return \"skip\""), true)
+    testing.expect_value(t, strings.contains(output, "support__when"), false)
+}
+
+@(test)
+compile_relative_core_directory_does_not_shadow_installed_core_macros :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-core-relative-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    core_dir, core_join_err := os.join_path({dir, "packages", "core"}, context.allocator)
+    testing.expect_value(t, core_join_err == nil, true)
+    if core_join_err != nil {
+        return
+    }
+    defer delete(core_dir)
+
+    mk_core_err := os.make_directory_all(core_dir)
+    testing.expect_value(t, mk_core_err == nil, true)
+    if mk_core_err != nil {
+        return
+    }
+
+    core_path, core_path_err := os.join_path({core_dir, "core.kvist"}, context.allocator)
+    testing.expect_value(t, core_path_err == nil, true)
+    if core_path_err != nil {
+        return
+    }
+    defer delete(core_path)
+    core_write_err := os.write_entire_file_from_string(core_path, `(package core)
+
+(defmacro when [test & body]
+  (quasiquote 123))`)
+    testing.expect_value(t, core_write_err == nil, true)
+    if core_write_err != nil {
+        return
+    }
+
+    main_path, main_path_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, main_path_err == nil, true)
+    if main_path_err != nil {
+        return
+    }
+    defer delete(main_path)
+    main_write_err := os.write_entire_file_from_string(main_path, `(package main)
+
+(defn main [] -> int
+  (when true 7))`)
+    testing.expect_value(t, main_write_err == nil, true)
+    if main_write_err != nil {
+        return
+    }
+
+    output, err, ok := kvist.compile_path(main_path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "return 123"), false)
+    testing.expect_value(t, strings.contains(output, "return 7"), true)
+}
+
+@(test)
+cli_check_loads_core_macros_outside_repo_with_root :: proc(t: ^testing.T) {
+    sync.lock(&test_env_mutex)
+    defer sync.unlock(&test_env_mutex)
+
+    repo_root := compiler_test_repo_root()
 
     dir, dir_err := os.make_directory_temp("", "kvist-core-macros-env-*", context.allocator)
     testing.expect_value(t, dir_err == nil, true)
@@ -15020,17 +21586,12 @@ cli_check_loads_core_macros_outside_repo_with_packages_env :: proc(t: ^testing.T
         return
     }
 
-    packages_dir, packages_join_err := os.join_path({repo_root, "packages"}, context.allocator)
-    testing.expect_value(t, packages_join_err == nil, true)
-    if packages_join_err != nil {
+    source_root, source_root_err := os.join_path({repo_root, "src", "kvist"}, context.allocator)
+    testing.expect_value(t, source_root_err == nil, true)
+    if source_root_err != nil {
         return
     }
-    defer delete(packages_dir)
-    set_err := os.set_env("KVIST_PACKAGES_DIR", packages_dir)
-    testing.expect_value(t, set_err == nil, true)
-    if set_err != nil {
-        return
-    }
+    defer delete(source_root)
 
     kvist_bin, bin_ok := build_test_kvist_binary(t, repo_root, dir)
     if !bin_ok {
@@ -15038,10 +21599,19 @@ cli_check_loads_core_macros_outside_repo_with_packages_env :: proc(t: ^testing.T
     }
     defer delete(kvist_bin)
 
+    root_env := fmt.tprintf("KVIST_ROOT=%s", source_root)
+    child_env, child_env_ok := test_child_env_without_kvist_vars({root_env})
+    testing.expect_value(t, child_env_ok, true)
+    if !child_env_ok {
+        return
+    }
+    defer test_env_slice_delete(&child_env)
+
     state, stdout, stderr, exec_err := os.process_exec(
         os.Process_Desc{
             command = {kvist_bin, "check", "main.kvist"},
             working_dir = dir,
+            env = child_env[:],
         },
         context.allocator,
     )
@@ -15058,17 +21628,68 @@ cli_check_loads_core_macros_outside_repo_with_packages_env :: proc(t: ^testing.T
 }
 
 @(test)
-cli_resolves_packages_from_path_symlink_install_layout :: proc(t: ^testing.T) {
+cli_root_rejects_invalid_configured_root_without_fallback :: proc(t: ^testing.T) {
+    sync.lock(&test_env_mutex)
+    defer sync.unlock(&test_env_mutex)
+
+    dir, dir_err := os.make_directory_temp("", "kvist-invalid-root-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    repo_root := compiler_test_repo_root()
+    kvist_bin, bin_ok := build_test_kvist_binary(t, repo_root, dir)
+    if !bin_ok {
+        return
+    }
+    defer delete(kvist_bin)
+
+    invalid_root, invalid_root_err := os.join_path({dir, "missing-root"}, context.allocator)
+    testing.expect_value(t, invalid_root_err == nil, true)
+    if invalid_root_err != nil {
+        return
+    }
+    defer delete(invalid_root)
+    root_env := fmt.tprintf("KVIST_ROOT=%s", invalid_root)
+    child_env, child_env_ok := test_child_env_without_kvist_vars({root_env})
+    testing.expect_value(t, child_env_ok, true)
+    if !child_env_ok {
+        return
+    }
+    defer test_env_slice_delete(&child_env)
+
+    state, stdout, stderr, exec_err := os.process_exec(
+        os.Process_Desc{
+            command = {kvist_bin, "root"},
+            working_dir = dir,
+            env = child_env[:],
+        },
+        context.allocator,
+    )
+    defer delete(stdout)
+    defer delete(stderr)
+    testing.expect_value(t, exec_err == nil, true)
+    if exec_err != nil {
+        return
+    }
+    testing.expect_value(t, state.exited, true)
+    testing.expect_value(t, state.exit_code, 1)
+    testing.expect_value(t, strings.contains(string(stderr), "could not resolve Kvist package root"), true)
+}
+
+@(test)
+cli_resolves_packages_from_symlink_install_layout :: proc(t: ^testing.T) {
+    sync.lock(&test_env_mutex)
+    defer sync.unlock(&test_env_mutex)
+
     when ODIN_OS == .Windows {
         return
     }
 
 	repo_root := compiler_test_repo_root()
-
-	old_path, had_path := os.lookup_env("PATH", context.allocator)
-	defer if had_path {
-		delete(old_path)
-	}
 
     dir, dir_err := os.make_directory_temp("", "kvist-path-symlink-install-*", context.allocator)
     testing.expect_value(t, dir_err == nil, true)
@@ -15090,20 +21711,18 @@ cli_resolves_packages_from_path_symlink_install_layout :: proc(t: ^testing.T) {
         return
     }
     defer delete(path_bin)
-    packages_parent, packages_parent_err := os.join_path({dir, "install", "share", "kvist"}, context.allocator)
-    testing.expect_value(t, packages_parent_err == nil, true)
-    if packages_parent_err != nil {
+    source_parent, source_parent_err := os.join_path({dir, "install"}, context.allocator)
+    testing.expect_value(t, source_parent_err == nil, true)
+    if source_parent_err != nil {
         return
     }
-    defer delete(packages_parent)
+    defer delete(source_parent)
 
     mk_install_err := os.make_directory_all(install_bin)
     mk_path_err := os.make_directory_all(path_bin)
-    mk_packages_err := os.make_directory_all(packages_parent)
     testing.expect_value(t, mk_install_err == nil, true)
     testing.expect_value(t, mk_path_err == nil, true)
-    testing.expect_value(t, mk_packages_err == nil, true)
-    if mk_install_err != nil || mk_path_err != nil || mk_packages_err != nil {
+    if mk_install_err != nil || mk_path_err != nil {
         return
     }
 
@@ -15113,21 +21732,35 @@ cli_resolves_packages_from_path_symlink_install_layout :: proc(t: ^testing.T) {
     }
     defer delete(kvist_bin)
 
-    repo_packages, repo_packages_err := os.join_path({repo_root, "packages"}, context.allocator)
-    testing.expect_value(t, repo_packages_err == nil, true)
-    if repo_packages_err != nil {
+    helper_source, helper_source_err := os.join_path({install_bin, "src"}, context.allocator)
+    testing.expect_value(t, helper_source_err == nil, true)
+    if helper_source_err != nil {
         return
     }
-    defer delete(repo_packages)
-    installed_packages, installed_packages_err := os.join_path({packages_parent, "packages"}, context.allocator)
-    testing.expect_value(t, installed_packages_err == nil, true)
-    if installed_packages_err != nil {
+    defer delete(helper_source)
+    _ = os.remove_all(helper_source)
+
+    repo_source, repo_source_err := os.join_path({repo_root, "src", "kvist"}, context.allocator)
+    testing.expect_value(t, repo_source_err == nil, true)
+    if repo_source_err != nil {
         return
     }
-    defer delete(installed_packages)
-    packages_link_err := os.symlink(repo_packages, installed_packages)
-    testing.expect_value(t, packages_link_err == nil, true)
-    if packages_link_err != nil {
+    defer delete(repo_source)
+    repo_core, repo_core_err := os.join_path({repo_source, "core"}, context.allocator)
+    testing.expect_value(t, repo_core_err == nil, true)
+    if repo_core_err != nil {
+        return
+    }
+    defer delete(repo_core)
+    installed_source, installed_source_err := os.join_path({source_parent, "core"}, context.allocator)
+    testing.expect_value(t, installed_source_err == nil, true)
+    if installed_source_err != nil {
+        return
+    }
+    defer delete(installed_source)
+    source_link_err := os.symlink(repo_core, installed_source)
+    testing.expect_value(t, source_link_err == nil, true)
+    if source_link_err != nil {
         return
     }
 
@@ -15142,6 +21775,13 @@ cli_resolves_packages_from_path_symlink_install_layout :: proc(t: ^testing.T) {
     if link_err != nil {
         return
     }
+
+    child_env, child_env_ok := test_child_env_without_kvist_vars(nil)
+    testing.expect_value(t, child_env_ok, true)
+    if !child_env_ok {
+        return
+    }
+    defer test_env_slice_delete(&child_env)
 
     main_path, main_join_err := os.join_path({dir, "hello.kvist"}, context.allocator)
     testing.expect_value(t, main_join_err == nil, true)
@@ -15158,42 +21798,35 @@ cli_resolves_packages_from_path_symlink_install_layout :: proc(t: ^testing.T) {
         return
     }
 
-	path_value := fmt.tprintf("PATH=%s", path_bin)
-	if had_path {
-		path_value = fmt.tprintf("PATH=%s%c%s", path_bin, os.Path_List_Separator, old_path)
-	}
-	path_entry := strings.clone(path_value)
-	defer delete(path_entry)
-
-	inherited_env, env_err := os.environ(context.allocator)
-	testing.expect_value(t, env_err == nil, true)
-	if env_err != nil {
-		return
-	}
-	defer {
-		for entry in inherited_env {
-			delete(entry)
-		}
-		delete(inherited_env)
-	}
-
-	env_vars := make([dynamic]string, 0, len(inherited_env)+1)
-	defer delete(env_vars)
-	append(&env_vars, path_entry)
-	for entry in inherited_env {
-		if strings.has_prefix(entry, "PATH=") ||
-		   strings.has_prefix(entry, "KVIST_PACKAGES_DIR=") ||
-		   strings.has_prefix(entry, "KVIST_HOME=") {
-			continue
-		}
-		append(&env_vars, entry)
-	}
+    root_state, root_stdout, root_stderr, root_exec_err := os.process_exec(
+		os.Process_Desc{
+			command = {path_kvist, "root"},
+			working_dir = dir,
+			env = child_env[:],
+		},
+		context.allocator,
+	)
+    defer delete(root_stdout)
+    defer delete(root_stderr)
+    testing.expect_value(t, root_exec_err == nil, true)
+    if root_exec_err != nil {
+        return
+    }
+    testing.expect_value(t, root_state.exited, true)
+    testing.expect_value(t, root_state.exit_code, 0)
+    expected_root, expected_root_err := os.get_absolute_path(source_parent, context.allocator)
+    testing.expect_value(t, expected_root_err == nil, true)
+    if expected_root_err != nil {
+        return
+    }
+    defer delete(expected_root)
+    testing.expect_value(t, strings.trim_space(string(root_stdout)), expected_root)
 
 	state, stdout, stderr, exec_err := os.process_exec(
 		os.Process_Desc{
-			command = {"kvist", "check", main_path},
+			command = {path_kvist, "check", main_path},
 			working_dir = dir,
-			env = env_vars[:],
+			env = child_env[:],
 		},
 		context.allocator,
 	)
@@ -15283,6 +21916,77 @@ compile_source_package_preserves_type_forms_in_proc_signatures :: proc(t: ^testi
 }
 
 @(test)
+compile_source_package_can_define_set_type_name :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-source-package-set-type-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    pkg_dir, join_pkg_err := os.join_path({dir, "support"}, context.allocator)
+    testing.expect_value(t, join_pkg_err == nil, true)
+    if join_pkg_err != nil {
+        return
+    }
+    defer delete(pkg_dir)
+    mk_pkg_err := os.make_directory_all(pkg_dir)
+    testing.expect_value(t, mk_pkg_err == nil, true)
+    if mk_pkg_err != nil {
+        return
+    }
+
+    pkg_file, pkg_join_err := os.join_path({pkg_dir, "support.kvist"}, context.allocator)
+    testing.expect_value(t, pkg_join_err == nil, true)
+    if pkg_join_err != nil {
+        return
+    }
+    defer delete(pkg_file)
+    pkg_source := `(package support)
+
+(def set (distinct int))
+
+(defn wrap [value: int] -> set
+  (set value))`
+    pkg_write_err := os.write_entire_file_from_string(pkg_file, pkg_source)
+    testing.expect_value(t, pkg_write_err == nil, true)
+    if pkg_write_err != nil {
+        return
+    }
+
+    main_path, main_join_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, main_join_err == nil, true)
+    if main_join_err != nil {
+        return
+    }
+    defer delete(main_path)
+    main_source := `(package main)
+(import support "support")
+
+(defn main [] -> int
+  (int (support.wrap 42)))`
+    main_write_err := os.write_entire_file_from_string(main_path, main_source)
+    testing.expect_value(t, main_write_err == nil, true)
+    if main_write_err != nil {
+        return
+    }
+
+    output, err, ok := kvist.compile_path(main_path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "support__set :: distinct int"), true)
+    testing.expect_value(t, strings.contains(output, "support__wrap :: proc(value: int) -> support__set"), true)
+    testing.expect_value(t, strings.contains(output, "return support__set(value)"), true)
+    testing.expect_value(t, strings.contains(output, "-> set"), false)
+}
+
+@(test)
 compile_source_package_rewrites_overload_members :: proc(t: ^testing.T) {
     dir, dir_err := os.make_directory_temp("", "kvist-source-package-overload-*", context.allocator)
     testing.expect_value(t, dir_err == nil, true)
@@ -15356,6 +22060,95 @@ compile_source_package_rewrites_overload_members :: proc(t: ^testing.T) {
 
     testing.expect_value(t, strings.contains(output, "support__render :: proc{support__render_int, support__render_string}"), true)
     testing.expect_value(t, strings.contains(output, "return support__render(value)"), true)
+}
+
+@(test)
+compile_source_package_preserves_nested_imports_and_raw_prefixes :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-nested-source-package-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    inner_dir, inner_dir_err := os.join_path({dir, "inner"}, context.allocator)
+    testing.expect_value(t, inner_dir_err == nil, true)
+    if inner_dir_err != nil {
+        return
+    }
+    defer delete(inner_dir)
+    facade_dir, facade_dir_err := os.join_path({dir, "facade"}, context.allocator)
+    testing.expect_value(t, facade_dir_err == nil, true)
+    if facade_dir_err != nil {
+        return
+    }
+    defer delete(facade_dir)
+    testing.expect_value(t, os.make_directory_all(inner_dir) == nil, true)
+    testing.expect_value(t, os.make_directory_all(facade_dir) == nil, true)
+
+    inner_path, inner_path_err := os.join_path({inner_dir, "inner.kvist"}, context.allocator)
+    testing.expect_value(t, inner_path_err == nil, true)
+    if inner_path_err != nil {
+        return
+    }
+    defer delete(inner_path)
+    inner_source := `(package inner)
+(import fmt "core:fmt")
+
+(defn answer [] -> int
+  42)
+
+(defn rendered [] -> string
+  (fmt.tprintf "%d" (answer)))
+
+(odin "inner__Raw_Box :: struct { value: int }")
+
+(defn raw-box-value [box: inner__Raw_Box] -> int
+  box.value)
+
+(odin "inner__raw_answer :: proc() -> int { return inner__answer() }")`
+    testing.expect_value(t, os.write_entire_file_from_string(inner_path, inner_source) == nil, true)
+
+    facade_path, facade_path_err := os.join_path({facade_dir, "facade.kvist"}, context.allocator)
+    testing.expect_value(t, facade_path_err == nil, true)
+    if facade_path_err != nil {
+        return
+    }
+    defer delete(facade_path)
+    facade_source := `(package facade)
+(import inner "../inner")
+
+(defn rendered [] -> string
+  (inner.rendered))`
+    testing.expect_value(t, os.write_entire_file_from_string(facade_path, facade_source) == nil, true)
+
+    main_path, main_path_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, main_path_err == nil, true)
+    if main_path_err != nil {
+        return
+    }
+    defer delete(main_path)
+    main_source := `(package main)
+(import api "facade")
+
+(defn main [] -> string
+  (api.rendered))`
+    testing.expect_value(t, os.write_entire_file_from_string(main_path, main_source) == nil, true)
+
+    output, err, ok := kvist.compile_path(main_path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, `import fmt "core:fmt"`), true)
+    testing.expect_value(t, strings.contains(output, "api__inner__raw_answer :: proc"), true)
+    testing.expect_value(t, strings.contains(output, "box: api__inner__Raw_Box"), true)
+    testing.expect_value(t, strings.contains(output, "return api__inner__answer()"), true)
+    testing.expect_value(t, strings.contains(output, "return api__inner__rendered()"), true)
 }
 
 @(test)
@@ -16133,7 +22926,7 @@ lower_rejects_import_after_declarations :: proc(t: ^testing.T) {
 @(test)
 compile_plain_odin_import_paths :: proc(t: ^testing.T) {
     source := `(package main)
-(import kvist_live "../../../src/kvist_live")
+(import kvist_live "../../../src/odin/kvist_live")
 (import fmt "core:fmt")
 
 (defn main []
@@ -16149,7 +22942,7 @@ compile_plain_odin_import_paths :: proc(t: ^testing.T) {
 
     expected := `package main
 
-import kvist_live "../../../src/kvist_live"
+import kvist_live "../../../src/odin/kvist_live"
 
 import fmt "core:fmt"
 
@@ -16230,7 +23023,7 @@ raw_value :: proc() -> int {
 }
 
 @(test)
-compile_imported_enum_case_stmt_uses_partial_switch :: proc(t: ^testing.T) {
+compile_imported_enum_case_stmt_uses_source_conditionals :: proc(t: ^testing.T) {
     dir, dir_err := os.make_directory_temp("", "kvist-imported-enum-case-*", context.allocator)
     testing.expect_value(t, dir_err == nil, true)
     if dir_err != nil {
@@ -16303,8 +23096,11 @@ Value :: struct {
     }
     defer delete(output)
 
-    testing.expect_value(t, strings.contains(output, "#partial switch value.kind"), true)
-    testing.expect_value(t, strings.contains(output, "case:"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_case_"), true)
+    testing.expect_value(t, strings.contains(output, "== (.One)"), true)
+    testing.expect_value(t, strings.contains(output, "== (.Two)"), true)
+    testing.expect_value(t, strings.contains(output, "return \"other\""), true)
+    testing.expect_value(t, strings.contains(output, "#partial switch value.kind"), false)
 }
 
 @(test)
@@ -16381,8 +23177,8 @@ raw_value :: proc() -> int {
     source := `(package main)
 (import wrap "support/wrap")
 
-(defn main [] -> int
-  (wrap.value))`
+(defn main []
+  (println (wrap.value)))`
     write_err := os.write_entire_file_from_string(main_path, source)
     testing.expect_value(t, write_err == nil, true)
     if write_err != nil {
@@ -16401,6 +23197,38 @@ raw_value :: proc() -> int {
     testing.expect_value(t, strings.contains(output, "\"support/raw\""), true)
     testing.expect_value(t, strings.contains(output, "raw.raw_value()"), true)
     testing.expect_value(t, strings.contains(output, "wrap__value()"), true)
+
+    repo_root := compiler_test_repo_root()
+    kvist_bin, bin_ok := build_test_kvist_binary(t, repo_root, dir)
+    if !bin_ok {
+        return
+    }
+    defer delete(kvist_bin)
+    child_env, child_env_ok := test_child_env_without_kvist_vars(nil)
+    testing.expect_value(t, child_env_ok, true)
+    if !child_env_ok {
+        return
+    }
+    defer test_env_slice_delete(&child_env)
+    state, stdout, stderr, exec_err := os.process_exec(
+        os.Process_Desc{
+            command = {kvist_bin, "check", "main.kvist"},
+            working_dir = dir,
+            env = child_env[:],
+        },
+        context.allocator,
+    )
+    defer delete(stdout)
+    defer delete(stderr)
+    testing.expect_value(t, exec_err == nil, true)
+    if exec_err != nil {
+        return
+    }
+    testing.expect_value(t, state.exited, true)
+    testing.expect_value(t, state.exit_code, 0)
+    if !state.exited || state.exit_code != 0 {
+        testing.expect_value(t, string(stderr), "")
+    }
 }
 
 @(test)
@@ -16554,10 +23382,10 @@ raw_value :: proc() -> int {
     }
     defer delete(output)
 
-    testing.expect_value(t, strings.contains(output, "import support "), true)
+    testing.expect_value(t, strings.contains(output, "import support__raw "), true)
     testing.expect_value(t, strings.contains(output, "\"support\""), true)
     testing.expect_value(t, strings.contains(output, "support__kvist_value()"), true)
-    testing.expect_value(t, strings.contains(output, "support.raw_value()"), true)
+    testing.expect_value(t, strings.contains(output, "support__raw.raw_value()"), true)
 }
 
 @(test)
@@ -16683,6 +23511,53 @@ compile_source_with_shipped_reload_package_exposes_run_host_alias :: proc(t: ^te
     testing.expect_value(t, strings.contains(output, "reload__Run_Host :: runtime.Run_Host"), true)
     testing.expect_value(t, strings.contains(output, "reload__reload__Run_Host"), false)
     testing.expect_value(t, strings.contains(output, "run :: proc(state: ^Reload_State, host: ^reload__Run_Host)"), true)
+}
+
+@(test)
+compile_source_with_shipped_reload_package_allows_any_import_alias :: proc(t: ^testing.T) {
+    tmp_dir, tmp_dir_err := os.make_directory_temp("", "kvist-reload-alias-package-*", context.allocator)
+    testing.expect_value(t, tmp_dir_err == nil, true)
+    if tmp_dir_err != nil {
+        return
+    }
+    defer os.remove_all(tmp_dir)
+    defer delete(tmp_dir)
+
+    path, join_err := os.join_path({tmp_dir, "kvist-reload-alias-test.kvist"}, context.allocator)
+    testing.expect_value(t, join_err == nil, true)
+    if join_err != nil {
+        return
+    }
+    defer delete(path)
+
+    source := `(package main)
+(import r "kvist:reload")
+
+(defstruct App_State
+  {requests: int})
+
+(def Reload_State App_State)
+
+(defn run [state: ^Reload_State host: ^r.Run_Host]
+  (when (r.checkpoint! host)
+    (return)))`
+    write_err := os.write_entire_file_from_string(path, source)
+    testing.expect_value(t, write_err == nil, true)
+    if write_err != nil {
+        return
+    }
+
+    output, err, ok := kvist.compile_path(path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "r__Run_Host :: runtime.Run_Host"), true)
+    testing.expect_value(t, strings.contains(output, "run :: proc(state: ^Reload_State, host: ^r__Run_Host)"), true)
+    testing.expect_value(t, strings.contains(output, "r__checkpoint_bang(host)"), true)
 }
 
 @(test)
@@ -16892,15 +23767,9 @@ compile_output_rebased_for_tmp_path_uses_canonical_relative_import :: proc(t: ^t
     }
     defer delete(rebased)
 
-    repo_root_value, repo_ok := kvist.repo_root_for_path(".")
-    testing.expect_value(t, repo_ok, true)
-    if !repo_ok {
-        return
-    }
-    repo_root := repo_root_value
-    defer delete(repo_root)
+    repo_root := compiler_test_repo_root()
 
-    runtime_path, runtime_path_err := os.join_path({repo_root, "src", "olive_reload"}, context.allocator)
+    runtime_path, runtime_path_err := os.join_path({repo_root, "src", "odin", "olive_reload"}, context.allocator)
     testing.expect_value(t, runtime_path_err == nil, true)
     if runtime_path_err != nil {
         return
@@ -16924,7 +23793,7 @@ compile_output_rebased_for_tmp_path_uses_canonical_relative_import :: proc(t: ^t
     rebased_forward, _ := strings.replace_all(rebased, "\\", "/", context.temp_allocator)
     testing.expect_value(t, strings.contains(rebased_forward, "import runtime "), true)
     testing.expect_value(t, strings.contains(rebased_forward, "olive_reload"), true)
-    testing.expect_value(t, strings.contains(rebased, "\\src\\olive_reload"), false)
+    testing.expect_value(t, strings.contains(rebased, "\\src\\odin\\olive_reload"), false)
 }
 
 @(test)
@@ -17002,6 +23871,27 @@ compile_source_package_exports_raw_odin_names :: proc(t: ^testing.T) {
 }
 
 @(test)
+compile_duplicate_plain_raw_declarations_emit_once :: proc(t: ^testing.T) {
+    source := `(package main)
+(odin "Shared_Raw_Handle :: distinct rawptr")
+(odin "Shared_Raw_Handle :: distinct rawptr")
+
+(defn use-handle [handle: Shared_Raw_Handle] -> Shared_Raw_Handle
+  handle)`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, count_substring(output, "Shared_Raw_Handle :: distinct rawptr"), 1)
+    testing.expect_value(t, strings.contains(output, "use_handle :: proc(handle: Shared_Raw_Handle) -> Shared_Raw_Handle"), true)
+}
+
+@(test)
 compile_source_with_shipped_hot_macro_package :: proc(t: ^testing.T) {
     tmp_dir, tmp_dir_err := os.make_directory_temp("", "kvist-hot-macro-*", context.allocator)
     testing.expect_value(t, tmp_dir_err == nil, true)
@@ -17019,7 +23909,7 @@ compile_source_with_shipped_hot_macro_package :: proc(t: ^testing.T) {
 
     source := `(package main)
 (import hot "kvist:hot")
-(import kvist_hot "../../../src/kvist_hot")
+(import kvist_hot "../../../src/odin/kvist_hot")
 (import shared "../shared")
 
 (def version: string "module v1")
@@ -17044,7 +23934,7 @@ compile_source_with_shipped_hot_macro_package :: proc(t: ^testing.T) {
     }
     defer delete(output)
 
-    testing.expect_value(t, strings.contains(output, `import kvist_hot "../../../src/kvist_hot"`), true)
+    testing.expect_value(t, strings.contains(output, `import kvist_hot "../../../src/odin/kvist_hot"`), true)
     testing.expect_value(t, strings.contains(output, `kvist_hot_api_version: u32 = 1`), true)
     testing.expect_value(t, strings.contains(output, `demo_message :: proc "c" () -> cstring`), true)
     testing.expect_value(t, strings.contains(output, `demo_tick :: proc "c" (state: rawptr)`), true)
@@ -17261,6 +24151,40 @@ compile_does_not_warn_for_owned_local_transferred_into_final_composite :: proc(t
 }
 
 @(test)
+compile_does_not_warn_for_owned_local_transferred_into_later_composite_binding :: proc(t: ^testing.T) {
+    source := `(package main)
+(import arr "kvist:arr")
+
+(defstruct Box {
+  xs: [dynamic]int
+})
+
+(defn demo [] -> int
+  (let [xs (arr.empty int)
+        box (Box {xs: xs})]
+    (defer (delete box.xs))
+    (count box.xs)))
+
+(defn managed-alias [] -> int
+  (let [xs (arr.empty int) :defer
+        box (Box {xs: xs})]
+    (arr.push! xs 1)
+    (count box.xs)))`
+
+    result, err, ok := kvist.compile_source_with_map(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(t, len(result.warnings), 0)
+}
+
+@(test)
 compile_does_not_warn_for_owned_local_transferred_into_returned_composite :: proc(t: ^testing.T) {
     source := `(package main)
 (import arr "kvist:arr")
@@ -17358,6 +24282,76 @@ compile_does_not_warn_for_owned_local_deleted_in_all_if_branches :: proc(t: ^tes
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, len(result.warnings), 0)
+}
+
+@(test)
+compile_warns_for_owned_local_used_after_deleted_in_all_if_branches :: proc(t: ^testing.T) {
+    source := `(package main)
+(import arr "kvist:arr")
+
+(defn demo [flag: bool]
+  (let [xs (arr.empty int)]
+    (if flag
+      (delete xs)
+      (delete xs))
+    (println (count xs))))`
+
+    result, err, ok := kvist.compile_source_with_map(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(t, len(result.warnings), 1)
+    if len(result.warnings) == 1 {
+        testing.expect_value(t, result.warnings[0].message, "owned local xs is used after ownership transfer")
+    }
+}
+
+@(test)
+compile_warns_for_owned_local_used_after_deleted_in_all_type_case_branches :: proc(t: ^testing.T) {
+    source := `(package main)
+(import arr "kvist:arr")
+
+(defstruct Connected {
+  id: int
+})
+
+(defstruct Disconnected {
+  reason: string
+})
+
+(defunion Event {
+  connected: Connected
+  disconnected: Disconnected
+})
+
+(defn demo [event: Event]
+  (let [xs (arr.empty int)]
+    (case event
+      (Connected _) (delete xs)
+      (Disconnected _) (delete xs)
+      (delete xs))
+    (println (count xs))))`
+
+    result, err, ok := kvist.compile_source_with_map(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(t, len(result.warnings), 1)
+    if len(result.warnings) == 1 {
+        testing.expect_value(t, result.warnings[0].message, "owned local xs is used after ownership transfer")
+    }
 }
 
 @(test)
@@ -17523,6 +24517,186 @@ compile_warns_for_borrowed_value_escaping_in_returned_composite :: proc(t: ^test
 }
 
 @(test)
+compile_warns_for_third_party_conditional_borrowed_assignment_escaping_owner :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-borrowed-escape-branch-set-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    pkg_dir, pkg_dir_err := os.join_path({dir, "support"}, context.allocator)
+    testing.expect_value(t, pkg_dir_err == nil, true)
+    if pkg_dir_err != nil {
+        return
+    }
+    defer delete(pkg_dir)
+    mk_pkg_err := os.make_directory_all(pkg_dir)
+    testing.expect_value(t, mk_pkg_err == nil, true)
+    if mk_pkg_err != nil {
+        return
+    }
+
+    pkg_path, pkg_path_err := os.join_path({pkg_dir, "support.kvist"}, context.allocator)
+    testing.expect_value(t, pkg_path_err == nil, true)
+    if pkg_path_err != nil {
+        return
+    }
+    defer delete(pkg_path)
+    pkg_source := `(package support)
+
+(defn left [xs: []int] -> []int #force_inline
+  (slice xs 0 2))
+
+(defn right [xs: []int] -> []int #force_inline
+  (slice xs 1 3))`
+    pkg_write_err := os.write_entire_file_from_string(pkg_path, pkg_source)
+    testing.expect_value(t, pkg_write_err == nil, true)
+    if pkg_write_err != nil {
+        return
+    }
+
+    main_path, main_path_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, main_path_err == nil, true)
+    if main_path_err != nil {
+        return
+    }
+    defer delete(main_path)
+    main_source := `(package main)
+(import arr "kvist:arr")
+(import support "support")
+
+(defn bad-view [flag?: bool] -> []int
+  (let [xs (arr.range 0 10) :defer
+        view: []int ([]int [])]
+    (if flag?
+      (set! view (support.left xs))
+      (set! view (support.right xs)))
+    view))`
+    main_write_err := os.write_entire_file_from_string(main_path, main_source)
+    testing.expect_value(t, main_write_err == nil, true)
+    if main_write_err != nil {
+        return
+    }
+
+    result, err, ok := kvist.compile_path_with_map(main_path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(t, strings.contains(result.output, "support__left :: #force_inline proc(xs: []int) -> []int"), true)
+    testing.expect_value(t, strings.contains(result.output, "support__right :: #force_inline proc(xs: []int) -> []int"), true)
+    testing.expect_value(t, strings.contains(result.output, "#borrowed"), false)
+    testing.expect_value(t, len(result.warnings), 1)
+    if len(result.warnings) == 1 {
+        testing.expect_value(t, result.warnings[0].message, "borrowed value escapes owner xs")
+    }
+}
+
+@(test)
+compile_warns_for_third_party_type_case_borrowed_assignment_escaping_owner :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-borrowed-escape-type-case-set-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    pkg_dir, pkg_dir_err := os.join_path({dir, "support"}, context.allocator)
+    testing.expect_value(t, pkg_dir_err == nil, true)
+    if pkg_dir_err != nil {
+        return
+    }
+    defer delete(pkg_dir)
+    mk_pkg_err := os.make_directory_all(pkg_dir)
+    testing.expect_value(t, mk_pkg_err == nil, true)
+    if mk_pkg_err != nil {
+        return
+    }
+
+    pkg_path, pkg_path_err := os.join_path({pkg_dir, "support.kvist"}, context.allocator)
+    testing.expect_value(t, pkg_path_err == nil, true)
+    if pkg_path_err != nil {
+        return
+    }
+    defer delete(pkg_path)
+    pkg_source := `(package support)
+
+(defn left [xs: []int] -> []int #force_inline
+  (slice xs 0 2))
+
+(defn right [xs: []int] -> []int #force_inline
+  (slice xs 1 3))`
+    pkg_write_err := os.write_entire_file_from_string(pkg_path, pkg_source)
+    testing.expect_value(t, pkg_write_err == nil, true)
+    if pkg_write_err != nil {
+        return
+    }
+
+    main_path, main_path_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, main_path_err == nil, true)
+    if main_path_err != nil {
+        return
+    }
+    defer delete(main_path)
+    main_source := `(package main)
+(import arr "kvist:arr")
+(import support "support")
+
+(defstruct Connected {
+  id: int
+})
+
+(defstruct Disconnected {
+  reason: string
+})
+
+(defunion Event {
+  connected: Connected
+  disconnected: Disconnected
+})
+
+(defn bad-view [event: Event] -> []int
+  (let [xs (arr.range 0 10) :defer
+        view: []int ([]int [])]
+    (case event
+      (Connected _) (set! view (support.left xs))
+      (Disconnected _) (set! view (support.right xs))
+      (set! view (support.left xs)))
+    view))`
+    main_write_err := os.write_entire_file_from_string(main_path, main_source)
+    testing.expect_value(t, main_write_err == nil, true)
+    if main_write_err != nil {
+        return
+    }
+
+    result, err, ok := kvist.compile_path_with_map(main_path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(t, strings.contains(result.output, "support__left :: #force_inline proc(xs: []int) -> []int"), true)
+    testing.expect_value(t, strings.contains(result.output, "support__right :: #force_inline proc(xs: []int) -> []int"), true)
+    testing.expect_value(t, strings.contains(result.output, "#borrowed"), false)
+    testing.expect_value(t, len(result.warnings), 1)
+    if len(result.warnings) == 1 {
+        testing.expect_value(t, result.warnings[0].message, "borrowed value escapes owner xs")
+    }
+}
+
+@(test)
 compile_warns_for_use_after_transfer_inside_branch :: proc(t: ^testing.T) {
     source := `(package main)
 (import arr "kvist:arr")
@@ -17579,6 +24753,60 @@ compile_warns_for_use_after_known_owner_taking_call :: proc(t: ^testing.T) {
 }
 
 @(test)
+compile_warns_for_direct_append_ownership_transfer :: proc(t: ^testing.T) {
+    source := `(package main)
+(import arr "kvist:arr")
+
+(defn demo []
+  (let [dst (arr.empty [dynamic]int) :defer
+        xs (arr.empty int)]
+    (append (addr dst) xs)
+    (println (count xs))))`
+
+    result, err, ok := kvist.compile_source_with_map(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(t, len(result.warnings), 1)
+    if len(result.warnings) == 1 {
+        testing.expect_value(t, result.warnings[0].message, "owned local xs is used after ownership transfer")
+    }
+}
+
+@(test)
+compile_does_not_treat_generated_append_names_as_ownership_transfer :: proc(t: ^testing.T) {
+    source := `(package main)
+(import arr "kvist:arr")
+
+(foreign-import support "support")
+
+(defn demo []
+  (let [dst (arr.empty [dynamic]int) :defer
+        xs (arr.empty int)]
+    (support__append (addr dst) xs)
+    (println (count xs))
+    (delete xs)))`
+
+    result, err, ok := kvist.compile_source_with_map(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(t, len(result.warnings), 0)
+}
+
+@(test)
 compile_does_not_warn_for_valid_ownership_diagnostic_cases :: proc(t: ^testing.T) {
     source := `(package main)
 (import arr "kvist:arr")
@@ -17610,6 +24838,7 @@ compile_does_not_warn_for_valid_ownership_diagnostic_cases :: proc(t: ^testing.T
 @(test)
 compile_warns_for_discarded_owned_result :: proc(t: ^testing.T) {
     source := `(package main)
+(import arr "kvist:arr")
 
 (defn demo []
   (arr.range 3)
@@ -17679,11 +24908,19 @@ compile_string_package_helpers :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "str__split :: #force_inline proc(s, separator: string) -> []string {"), true)
     testing.expect_value(t, strings.contains(output, "return strings.split(s, separator)"), true)
     testing.expect_value(t, strings.contains(output, "str__join_impl :: #force_inline proc(parts: []string, separator: string) -> string {"), true)
-    testing.expect_value(t, strings.contains(output, "out, _ := strings.join(parts, separator)"), true)
+    testing.expect_value(t, strings.contains(output, "str__builder := strings.builder_make()"), true)
+    testing.expect_value(t, strings.contains(output, "defer strings.builder_destroy(&str__builder)"), true)
+    testing.expect_value(t, strings.contains(output, "strings.write_string(&str__builder, separator)"), true)
+    testing.expect_value(t, strings.contains(output, "strings.write_string(&str__builder, parts[i])"), true)
+    testing.expect_value(t, strings.contains(output, "out, err := strings.clone(strings.to_string(str__builder))"), true)
+    testing.expect_value(t, strings.contains(output, "#owned"), false)
     testing.expect_value(t, strings.contains(output, "parts := str__split(\"a,b,c\", \",\")"), true)
     testing.expect_value(t, strings.contains(output, "joined := str__join_impl((parts)[0:], \"-\")"), true)
     testing.expect_value(t, strings.contains(output, "str__trim :: #force_inline proc(s: string) -> string {"), true)
-    testing.expect_value(t, strings.contains(output, "return strings.trim_space(s)"), true)
+    testing.expect_value(t, strings.contains(output, "start := strings.index_proc(s, strings.is_space, false)"), true)
+    testing.expect_value(t, strings.contains(output, "_, width := utf8.decode_rune_in_string((s)[last:])"), true)
+    testing.expect_value(t, strings.contains(output, "return (s)[start:(last) + (width)]"), true)
+    testing.expect_value(t, strings.contains(output, "#borrowed"), false)
     testing.expect_value(t, strings.contains(output, "str__starts_with_p :: #force_inline proc(s, prefix: string) -> bool {"), true)
     testing.expect_value(t, strings.contains(output, "return strings.has_prefix(s, prefix)"), true)
     testing.expect_value(t, strings.contains(output, "trimmed := str__trim(name)"), true)
@@ -17699,6 +24936,7 @@ compile_string_package_helpers :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "replaced_one := str__replace_impl(joined, \"-\", \"_\", 1)"), true)
     testing.expect_value(t, strings.contains(output, "str__lower :: #force_inline proc(s: string) -> string {"), true)
     testing.expect_value(t, strings.contains(output, "return strings.to_lower(s)"), true)
+    testing.expect_value(t, strings.contains(output, "#owned"), false)
     testing.expect_value(t, strings.contains(output, "lowered := str__lower(replaced_all)"), true)
     testing.expect_value(t, strings.contains(output, "uppered := str__upper(lowered)"), true)
     testing.expect_value(t, strings.contains(output, "str__builder :: #force_inline proc() -> strings.Builder {"), true)
@@ -17714,12 +24952,57 @@ compile_string_package_helpers :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "built := str__finish(&builder)"), true)
     testing.expect_value(t, strings.contains(output, "defer delete(built)"), true)
     testing.expect_value(t, strings.contains(output, "defer str__destroy_bang(&builder)"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_str_unescape :: proc(s: string) -> string {"), true)
     testing.expect_value(t, strings.contains(output, "str__unescape :: #force_inline proc(s: string) -> string {"), true)
-    testing.expect_value(t, strings.contains(output, "return kvist_str_unescape(s)"), true)
+    testing.expect_value(t, strings.contains(output, "str__builder := strings.builder_make()"), true)
+    testing.expect_value(t, strings.contains(output, "defer strings.builder_destroy(&str__builder)"), true)
+    testing.expect_value(t, strings.contains(output, "if ((s[i]) == (byte(92))) && (((i) + (1)) < (len(s))) {"), true)
+    testing.expect_value(t, strings.contains(output, "strings.write_byte(&str__builder, byte(10))"), true)
+    testing.expect_value(t, strings.contains(output, "strings.write_byte(&str__builder, s[i])"), true)
+    testing.expect_value(t, strings.contains(output, "out, err := strings.clone(strings.to_string(str__builder))"), true)
     testing.expect_value(t, strings.contains(output, "unescaped := str__unescape(\"a\\\\nb\")"), true)
     testing.expect_value(t, strings.contains(output, "defer delete(unescaped)"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_str_unescape"), false)
     testing.expect_value(t, strings.contains(output, "kvist_str_replace :: proc(s, old, new: string, n: int) -> string"), false)
+}
+
+@(test)
+compile_regex_package_helpers :: proc(t: ^testing.T) {
+    source := `(package main)
+(import re "kvist:regex")
+
+(defn demo [] -> bool
+  (and (re.matches? #"\d+" "abc123")
+       (not (re.matches? #"^\d+$" "abc123"))))
+
+(defn compiled-demo [] -> bool
+  (let [[compiled err] (re.compile #"^a+$")]
+    (if (!= err nil)
+      false
+      (do
+        (let [owned-compiled compiled :defer-with re.destroy!]
+          (re.matches-compiled? owned-compiled "aaa"))))))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, `import rx "core:text/regex"`), true)
+    testing.expect_value(t, strings.contains(output, "re__Pattern :: string"), true)
+    testing.expect_value(t, strings.contains(output, "re__Regex :: rx.Regular_Expression"), true)
+    testing.expect_value(t, strings.contains(output, "re__compile :: #force_inline proc(pattern: re__Pattern) -> (value: re__Regex, err: re__Error) {"), true)
+    testing.expect_value(t, strings.contains(output, "return rx.create(pattern)"), true)
+    testing.expect_value(t, strings.contains(output, "re__matches_p :: #force_inline proc(pattern: re__Pattern, s: string) -> bool {"), true)
+    testing.expect_value(t, strings.contains(output, `re__matches_p("\\d+", "abc123")`), true)
+    testing.expect_value(t, strings.contains(output, `re__matches_p("^\\d+$", "abc123")`), true)
+    testing.expect_value(t, strings.contains(output, `compiled, err := re__compile("^a+$")`), true)
+    testing.expect_value(t, strings.contains(output, "owned_compiled := compiled"), true)
+    testing.expect_value(t, strings.contains(output, "defer re__destroy_bang(owned_compiled)"), true)
+    testing.expect_value(t, strings.contains(output, `re__matches_compiled_p(owned_compiled, "aaa")`), true)
+    testing.expect_value(t, strings.contains(output, "#owned"), false)
 }
 
 @(test)
@@ -17777,13 +25060,18 @@ compile_shipped_str_source_package_uses_hybrid_resolution :: proc(t: ^testing.T)
     testing.expect_value(t, strings.contains(output, "initial := trimmed[0]"), true)
     testing.expect_value(t, strings.contains(output, "tail := (trimmed)[1:]"), true)
     testing.expect_value(t, strings.contains(output, "str__trim :: #force_inline proc(s: string) -> string {"), true)
-    testing.expect_value(t, strings.contains(output, "return strings.trim_space(s)"), true)
+    testing.expect_value(t, strings.contains(output, `import utf8 "core:unicode/utf8"`), true)
+    testing.expect_value(t, strings.contains(output, "start := strings.index_proc(s, strings.is_space, false)"), true)
+    testing.expect_value(t, strings.contains(output, "_, width := utf8.decode_rune_in_string((s)[last:])"), true)
+    testing.expect_value(t, strings.contains(output, "return (s)[start:(last) + (width)]"), true)
+    testing.expect_value(t, strings.contains(output, "#borrowed"), false)
     testing.expect_value(t, strings.contains(output, "str__starts_with_p :: #force_inline proc(s, prefix: string) -> bool {"), true)
     testing.expect_value(t, strings.contains(output, "return strings.has_prefix(s, prefix)"), true)
     testing.expect_value(t, strings.contains(output, "str__lower :: #force_inline proc(s: string) -> string {"), true)
     testing.expect_value(t, strings.contains(output, "return strings.to_lower(s)"), true)
     testing.expect_value(t, strings.contains(output, "str__upper :: #force_inline proc(s: string) -> string {"), true)
     testing.expect_value(t, strings.contains(output, "return strings.to_upper(s)"), true)
+    testing.expect_value(t, strings.contains(output, "#owned"), false)
     testing.expect_value(t, strings.contains(output, "trimmed := str__trim(name)"), true)
     testing.expect_value(t, strings.contains(output, "starts_p := str__starts_with_p(trimmed, \"K\")"), true)
     testing.expect_value(t, strings.contains(output, "lowered := str__lower(trimmed)"), true)
@@ -17792,6 +25080,455 @@ compile_shipped_str_source_package_uses_hybrid_resolution :: proc(t: ^testing.T)
     testing.expect_value(t, strings.contains(output, "joined := str__join_impl((parts)[0:], \"-\")"), true)
     testing.expect_value(t, strings.contains(output, "replaced := str__replace_impl(joined, \"-\", \":\", 1)"), true)
     testing.expect_value(t, strings.contains(output, "fmt.println(str__count(trimmed), initial, str__count(tail), starts_p, uppered, joined, replaced)"), true)
+}
+
+@(test)
+compile_leaves_unimported_direct_str_helpers_unresolved :: proc(t: ^testing.T) {
+    cases := []struct {
+        name:    string,
+        expr:    string,
+        expected: string,
+    }{
+        {"count", `(str.count s)`, `str.count(s)`},
+        {"contains", `(str.contains? s "x")`, `str.contains_p`},
+        {"split", `(str.split s ",")`, `str.split(s, ",")`},
+        {"join", `(str.join parts ",")`, `str.join(parts, ",")`},
+        {"trim", `(str.trim s)`, `str.trim(s)`},
+        {"trim-prefix", `(str.trim-prefix s "x")`, `str.trim_prefix(s, "x")`},
+        {"trim-suffix", `(str.trim-suffix s "x")`, `str.trim_suffix(s, "x")`},
+        {"starts-with", `(str.starts-with? s "x")`, `str.starts_with_p(s, "x")`},
+        {"ends-with", `(str.ends-with? s "x")`, `str.ends_with_p(s, "x")`},
+        {"index-of", `(str.index-of s "x")`, `str.index_of(s, "x")`},
+        {"last-index-of", `(str.last-index-of s "x")`, `str.last_index_of(s, "x")`},
+        {"replace", `(str.replace s "x" "y")`, `str.replace(s, "x", "y")`},
+        {"lower", `(str.lower s)`, `str.lower(s)`},
+        {"upper", `(str.upper s)`, `str.upper(s)`},
+        {"builder", `(str.builder)`, `str.builder()`},
+        {"write", `(str.write! b "x")`, `str.write_bang`},
+        {"finish", `(str.finish b)`, `str.finish(b)`},
+        {"destroy", `(str.destroy! b)`, `str.destroy_bang(b)`},
+        {"unescape", `(str.unescape s)`, `str.unescape(s)`},
+        {"get", `(str.get s 0)`, `str.get(s, 0)`},
+        {"slice", `(str.slice s 1)`, `str.slice(s, 1)`},
+    }
+
+    for c in cases {
+        source := fmt.tprintf(`(package main)
+
+(defn demo [s: string parts: []string b: rawptr]
+  %s)`, c.expr)
+
+        output, err, ok := kvist.compile_source(source)
+        testing.expect_value(t, ok, true)
+        if !ok {
+            testing.expect_value(t, err.message, c.name)
+            continue
+        }
+        testing.expect_value(t, strings.contains(output, c.expected), true)
+        testing.expect_value(t, strings.contains(output, "core:strings"), false)
+        delete(output)
+    }
+}
+
+@(test)
+compile_does_not_classify_unimported_str_owned_helper_as_owned :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn demo [s: string]
+  (discard (str.split s ",")))`
+
+    result, err, ok := kvist.compile_source_with_map(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(t, strings.contains(result.output, "str.split(s, \",\")"), true)
+    testing.expect_value(t, len(result.warnings), 0)
+}
+
+@(test)
+warn_discarded_imported_str_split_owned_result :: proc(t: ^testing.T) {
+    source := `(package main)
+(import str "kvist:str")
+
+(defn demo [s: string]
+  (discard (str.split s ",")))`
+
+    result, err, ok := kvist.compile_source_with_map(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(t, strings.contains(result.output, "str__split(s, \",\")"), true)
+    testing.expect_value(t, len(result.warnings), 1)
+    if len(result.warnings) == 1 {
+        testing.expect_value(t, result.warnings[0].message, "owned result from str.split is discarded; bind it, delete it, or return it")
+    }
+}
+
+@(test)
+warn_discarded_third_party_split_slice_from_alloc_shape :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-source-owned-split-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    pkg_dir, pkg_dir_err := os.join_path({dir, "support"}, context.allocator)
+    testing.expect_value(t, pkg_dir_err == nil, true)
+    if pkg_dir_err != nil {
+        return
+    }
+    defer delete(pkg_dir)
+    mk_pkg_err := os.make_directory_all(pkg_dir)
+    testing.expect_value(t, mk_pkg_err == nil, true)
+    if mk_pkg_err != nil {
+        return
+    }
+
+    pkg_path, pkg_path_err := os.join_path({pkg_dir, "support.kvist"}, context.allocator)
+    testing.expect_value(t, pkg_path_err == nil, true)
+    if pkg_path_err != nil {
+        return
+    }
+    defer delete(pkg_path)
+    pkg_source := `(package support)
+(import strings "core:strings")
+
+(defn split-words [s: string] -> []string #force_inline
+  (strings.split s " "))`
+    pkg_write_err := os.write_entire_file_from_string(pkg_path, pkg_source)
+    testing.expect_value(t, pkg_write_err == nil, true)
+    if pkg_write_err != nil {
+        return
+    }
+
+    main_path, main_path_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, main_path_err == nil, true)
+    if main_path_err != nil {
+        return
+    }
+    defer delete(main_path)
+    main_source := `(package main)
+(import support "support")
+
+(defn main [s: string]
+  (support.split-words s)
+  (return))`
+    main_write_err := os.write_entire_file_from_string(main_path, main_source)
+    testing.expect_value(t, main_write_err == nil, true)
+    if main_write_err != nil {
+        return
+    }
+
+    result, err, ok := kvist.compile_path_with_map(main_path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(t, strings.contains(result.output, "support__split_words :: #force_inline proc(s: string) -> []string"), true)
+    testing.expect_value(t, strings.contains(result.output, "return strings.split(s, \" \")"), true)
+    testing.expect_value(t, strings.contains(result.output, "#owned"), false)
+    testing.expect_value(t, len(result.warnings), 1)
+    if len(result.warnings) == 1 {
+        testing.expect_value(t, result.warnings[0].message, "owned result from support.split-words is discarded; bind it, delete it, or return it")
+    }
+}
+
+@(test)
+compile_does_not_infer_owned_slice_for_borrowed_slice_return :: proc(t: ^testing.T) {
+    source := `(package main)
+(import core "kvist:core")
+
+(defn tail [xs: []int] -> []int
+  (core.slice xs 1))
+
+(defn main [xs: []int]
+  (tail xs)
+  (return))`
+
+    result, err, ok := kvist.compile_source_with_map(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(t, strings.contains(result.output, "#owned"), false)
+    testing.expect_value(t, len(result.warnings), 0)
+}
+
+@(test)
+warn_discarded_imported_str_finish_owned_result :: proc(t: ^testing.T) {
+    source := `(package main)
+(import str "kvist:str")
+
+(defn demo []
+  (let [builder (str.builder)]
+    (defer (str.destroy! (addr builder)))
+    (discard (str.finish (addr builder)))))`
+
+    result, err, ok := kvist.compile_source_with_map(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(t, strings.contains(result.output, "str__finish(&builder)"), true)
+    testing.expect_value(t, len(result.warnings), 1)
+    if len(result.warnings) == 1 {
+        testing.expect_value(t, result.warnings[0].message, "owned result from str.finish is discarded; bind it, delete it, or return it")
+    }
+}
+
+@(test)
+compile_leaves_unimported_direct_map_helpers_unresolved :: proc(t: ^testing.T) {
+    cases := []struct {
+        source:   string,
+        expected: string,
+    }{
+        {`(package main)
+
+(defn score [m: map[string]int] -> int
+  (map.get m "x" 0))`, `map.get(m, "x", 0)`},
+        {`(package main)
+
+(defn score [m: map[string]int] -> bool
+  (map.contains? m "x"))`, `map.contains_p(m, "x")`},
+        {`(package main)
+
+(defn score [m: map[string]int] -> map[string]int
+  (map.assoc m "x" 1))`, `map.assoc(m, "x", 1)`},
+        {`(package main)
+
+(defn score [m: map[string]int] -> map[string]int
+  (map.dissoc m "x"))`, `map.dissoc(m, "x")`},
+        {`(package main)
+
+(defn score [m: map[string]int, n: map[string]int] -> map[string]int
+  (map.merge m n))`, `map.merge(m, n)`},
+        {`(package main)
+
+(defn score [m: map[string]int] -> [dynamic]string
+  (map.keys m))`, `map.keys(m)`},
+        {`(package main)
+
+(defn score [m: map[string]int] -> [dynamic]int
+  (map.vals m))`, `map.vals(m)`},
+        {`(package main)
+
+(defn score [keys: []string, vals: []int] -> map[string]int
+  (map.zip keys vals))`, "map.zip(keys, vals)"},
+        {`(package main)
+
+(defn score [] -> int
+  (let [m (map.empty string int)]
+    (count m)))`, "map.empty(string, int)"},
+        {`(package main)
+
+(defn score [] -> int
+  (let [m (map.of string int {"a" 1})]
+    (count m)))`, `m := map.of(string, int, kvist_thread_1)`},
+        {`(package main)
+
+(defn score [m: map[string]int]
+  (map.assoc! m "x" 1))`, `map.assoc_bang(m, "x", 1)`},
+        {`(package main)
+
+(defn score [m: map[string]int, n: map[string]int]
+  (map.merge! m n))`, "map.merge_bang(m, n)"},
+        {`(package main)
+
+(defn score [m: map[string]int]
+  (map.dissoc! m "x"))`, `map.dissoc_bang(m, "x")`},
+    }
+
+    for test_case in cases {
+        output, err, ok := kvist.compile_source(test_case.source)
+        testing.expect_value(t, ok, true)
+        if !ok {
+            testing.expect_value(t, err.message, "")
+            continue
+        }
+        testing.expect_value(t, strings.contains(output, test_case.expected), true)
+        delete(output)
+    }
+}
+
+@(test)
+compile_leaves_unimported_threaded_core_package_helpers_unresolved :: proc(t: ^testing.T) {
+    cases := []struct {
+        source:   string,
+        expected: string,
+    }{
+        {`(package main)
+
+(defn demo [s: string]
+  (-> s (str.trim)))`, "str.trim"},
+        {`(package main)
+
+(defn demo [s: string] -> bool
+  (-> s (str.contains? "x")))`, `str.contains_p`},
+        {`(package main)
+
+(defn demo [s: string] -> string
+  (-> s (str.unescape)))`, "str.unescape"},
+        {`(package main)
+
+(defn demo [b: rawptr]
+  (-> b (str.write! "x")))`, `str.write_bang`},
+        {`(package main)
+
+(defn demo [b: rawptr] -> string
+  (-> b (str.finish)))`, "str.finish"},
+        {`(package main)
+
+(defn score [m: map[string]int] -> int
+  (let [ks (->> m
+                (map.keys))]
+    (count ks)))`, "map.keys"},
+        {`(package main)
+
+(defn score [m: map[string]int] -> int
+  (let [vs (->> m
+                (map.vals))]
+    (count vs)))`, "map.vals"},
+        {`(package main)
+
+(defn score [xs: []int] -> int
+  (let [ys (->> xs
+                (arr.take 2))]
+    (count ys)))`, "arr.take"},
+        {`(package main)
+
+(defn score [xs: []int] -> int
+  (let [ys (->> xs
+                (arr.drop 1))]
+    (count ys)))`, "arr.drop"},
+        {`(package main)
+
+(defn score [xs: []int] -> int
+  (let [ys (->> xs
+                (arr.drop-last 1))]
+    (count ys)))`, "arr.drop_last"},
+        {`(package main)
+
+(defn score [xs: []int] -> int
+  (let [ys (->> xs
+                (arr.butlast))]
+    (count ys)))`, "arr.butlast"},
+        {`(package main)
+
+(defn score [xs: []int] -> int
+  (let [ys (->> xs
+                (arr.partition 2))]
+    (count ys)))`, "arr.partition"},
+        {`(package main)
+
+(defn score [xs: []int] -> int
+  (let [ys (->> xs
+                (arr.partition-all 2))]
+    (count ys)))`, "arr.partition_all"},
+        {`(package main)
+
+(defn score [xs: []int] -> int
+  (let [ys (->> xs
+                (arr.distinct))]
+    (count ys)))`, "arr.distinct"},
+        {`(package main)
+
+(defn score [xs: []int] -> int
+  (let [ys (->> xs
+                (arr.sort))]
+    (count ys)))`, "arr.sort"},
+    }
+
+    for c in cases {
+        output, err, ok := kvist.compile_source(c.source)
+        testing.expect_value(t, ok, true)
+        if !ok {
+            testing.expect_value(t, err.message, "")
+            continue
+        }
+        testing.expect_value(t, strings.contains(output, c.expected), true)
+        delete(output)
+    }
+}
+
+@(test)
+compile_leaves_unimported_official_package_helpers_unresolved :: proc(t: ^testing.T) {
+    cases := []struct {
+        source:   string,
+        expected: string,
+    }{
+        {`(package main)
+(import os "core:os")
+
+(defn write-file [path: string, data: []byte] -> os.Error
+  (io.write path data))`, "io.write(path, data)"},
+        {`(package main)
+
+(defstruct User {
+  name: string
+})
+
+(defn save-user [path: string, user: User]
+  (let [[marshal-err write-err] (json.write path user)]
+    (return)))`, "json.write(path, user)"},
+        {`(package main)
+
+(defn debug? [args: []string] -> bool
+  (cli.flag args "--debug"))`, `cli.flag(args, "--debug")`},
+        {`(package main)
+
+(defn demo [] -> string
+  (html.render [div "ok"]))`, "html.render{div, \"ok\"}"},
+        {`(package main)
+
+(defn demo [] -> string
+  (html.render-file "home.html"))`, "html.render_file"},
+        {`(package main)
+(import os "core:os")
+
+(defn write-file [path: string, data: []byte] -> os.Error
+  (-> path
+      (io.write data)))`, "io.write(path, data)"},
+    }
+
+    for test_case in cases {
+        output, err, ok := kvist.compile_source(test_case.source)
+        testing.expect_value(t, ok, true)
+        if !ok {
+            testing.expect_value(t, err.message, "")
+            continue
+        }
+        testing.expect_value(t, strings.contains(output, test_case.expected), true)
+        delete(output)
+    }
 }
 
 @(test)
@@ -17975,8 +25712,8 @@ compile_shipped_map_source_package_uses_hybrid_resolution :: proc(t: ^testing.T)
     testing.expect_value(t, strings.contains(output, "map__zip :: #force_inline proc(ks: []$K, vs: []$V) -> map[K]V {"), true)
     testing.expect_value(t, strings.contains(output, "map__assoc :: #force_inline proc(m: map[$K]$V, key: K, value: V) -> map[K]V {"), true)
     testing.expect_value(t, strings.contains(output, "map__dissoc :: #force_inline proc(m: map[$K]$V, key: K) -> map[K]V {"), true)
-    testing.expect_value(t, strings.contains(output, "value_count := len((vs)[:])"), true)
-    testing.expect_value(t, strings.contains(output, "cap := len((ks)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "value_count := len(vs)"), true)
+    testing.expect_value(t, strings.contains(output, "cap := len(ks)"), true)
     testing.expect_value(t, strings.contains(output, "if (cap) > (value_count) {"), true)
     testing.expect_value(t, strings.contains(output, "out := make(map[K]V, cap)"), true)
     testing.expect_value(t, strings.contains(output, "if (i) < (value_count) {"), true)
@@ -17987,7 +25724,8 @@ compile_shipped_map_source_package_uses_hybrid_resolution :: proc(t: ^testing.T)
     testing.expect_value(t, strings.contains(output, "mutable := map[string]int{\"seed\" = 1}"), true)
     testing.expect_value(t, strings.contains(output, "key_list := map__keys(base)"), true)
     testing.expect_value(t, strings.contains(output, "value_list := map__vals(overrides)"), true)
-    testing.expect_value(t, strings.contains(output, "zipped := map__zip([dynamic]string{\"x\", \"y\", \"z\"}, [dynamic]int{10, 20})"), true)
+    testing.expect_value(t, strings.contains(output, "zipped := map__zip("), true)
+    testing.expect_value(t, strings.contains(output, "\"x\", \"y\", \"z\""), true)
     testing.expect_value(t, strings.contains(output, "has_a_p := map__contains_p(merged, \"a\")"), true)
     testing.expect_value(t, strings.contains(output, "read_a := merged[\"a\"]"), true)
     testing.expect_value(t, strings.contains(output, "mutable[\"extra\"] = 7"), true)
@@ -17995,7 +25733,7 @@ compile_shipped_map_source_package_uses_hybrid_resolution :: proc(t: ^testing.T)
     testing.expect_value(t, strings.contains(output, "for key, value in overrides {"), true)
     testing.expect_value(t, strings.contains(output, "mutable[key] = value"), true)
     testing.expect_value(t, strings.contains(output, "kvist_merge_in_place(&(mutable), overrides)"), false)
-    testing.expect_value(t, strings.contains(output, "fmt.println(has_a_p, read_a, len((key_list)[:]), len((value_list)[:]), kvist_get_or_default(zipped, \"x\", 0))"), true)
+    testing.expect_value(t, strings.contains(output, "fmt.println(has_a_p, read_a, len(key_list), len(value_list), kvist_get_or_default(zipped, \"x\", 0))"), true)
 }
 
 @(test)
@@ -18061,7 +25799,7 @@ compile_shipped_arr_source_package_uses_hybrid_resolution :: proc(t: ^testing.T)
         first-by-get (arr.get xs 0)
         a (arr.first xs)
         b (arr.second xs)
-        c (arr.nth xs 2)
+        c (arr.nth 2 xs)
         z (arr.last xs)
         window (arr.slice xs 1 3)
         prefix (arr.take 2 xs)
@@ -18132,31 +25870,40 @@ compile_shipped_arr_source_package_uses_hybrid_resolution :: proc(t: ^testing.T)
     testing.expect_value(t, strings.contains(output, "seed := [dynamic]int{10, 20, 30, 40}"), true)
     testing.expect_value(t, strings.contains(output, "fixed := [3]int{4, 5, 6}"), true)
     testing.expect_value(t, strings.contains(output, "xs := (seed)[0:]"), true)
-    testing.expect_value(t, strings.contains(output, "total := len(xs)"), true)
-    testing.expect_value(t, strings.contains(output, "arr__range_impl :: #force_inline proc(start, end, step: int) -> [dynamic]int {"), true)
-    testing.expect_value(t, strings.contains(output, "numbers := arr__range_impl(1, 5, 1)"), true)
+    testing.expect_value(t, strings.contains(output, "arr__count :: #force_inline proc(xs: []$T) -> int {"), true)
+    testing.expect_value(t, strings.contains(output, "total := arr__count(xs)"), true)
+    testing.expect_value(t, strings.contains(output, "arr__range_impl :: proc(start: int, end: int, step: int) -> arr__Range_Source {"), true)
+    testing.expect_value(t, strings.contains(output, "numbers := (proc(kvist_source_arg_1: int, kvist_source_arg_2: int, kvist_source_arg_3: int) -> [dynamic]int {"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_source := arr__range_impl(kvist_source_arg_1, kvist_source_arg_2, kvist_source_arg_3)"), true)
     testing.expect_value(t, strings.contains(output, "first_by_get := xs[0]"), true)
     testing.expect_value(t, strings.contains(output, "a := xs[0]"), true)
     testing.expect_value(t, strings.contains(output, "b := xs[1]"), true)
     testing.expect_value(t, strings.contains(output, "c := xs[2]"), true)
     testing.expect_value(t, strings.contains(output, "z := xs[(len(xs)) - (1)]"), true)
+    testing.expect_value(t, strings.contains(output, "z := (xs)[len(xs)-1]"), false)
     testing.expect_value(t, strings.contains(output, "window := (xs)[1:3]"), true)
     testing.expect_value(t, strings.contains(output, "arr__take :: #force_inline proc(n: int, xs: []$T) -> []T"), true)
     testing.expect_value(t, strings.contains(output, "arr__drop :: #force_inline proc(n: int, xs: []$T) -> []T"), true)
+    testing.expect_value(t, strings.contains(output, "#borrowed"), false)
     testing.expect_value(t, strings.contains(output, "arr__drop_last :: #force_inline proc(n: int, xs: []$T) -> []T"), true)
     testing.expect_value(t, strings.contains(output, "prefix := arr__take(2, xs)"), true)
     testing.expect_value(t, strings.contains(output, "suffix := arr__drop(1, xs)"), true)
     testing.expect_value(t, strings.contains(output, "without_tail := arr__drop_last(2, xs)"), true)
-    testing.expect_value(t, strings.contains(output, "arr__take_nth :: #force_inline proc(n: int, xs: []$T) -> [dynamic]T {"), true)
-    testing.expect_value(t, strings.contains(output, "sampled := arr__take_nth(2, xs)"), true)
-    testing.expect_value(t, strings.contains(output, "arr__repeat :: #force_inline proc(n: int, value: $T) -> [dynamic]T {"), true)
-    testing.expect_value(t, strings.contains(output, "repeated := arr__repeat(3, 9)"), true)
-    testing.expect_value(t, strings.contains(output, "arr__repeatedly :: #force_inline proc(n: int, f: proc() -> $T) -> [dynamic]T {"), true)
-    testing.expect_value(t, strings.contains(output, "generated := arr__repeatedly(2, next_value)"), true)
-    testing.expect_value(t, strings.contains(output, "arr__iterate :: #force_inline proc(n: int, f: proc(x: $T) -> T, init: T) -> [dynamic]T {"), true)
-    testing.expect_value(t, strings.contains(output, "powers := arr__iterate(4, double, 1)"), true)
-    testing.expect_value(t, strings.contains(output, "arr__cycle :: #force_inline proc(n: int, xs: []$T) -> [dynamic]T {"), true)
-    testing.expect_value(t, strings.contains(output, "cycled := arr__cycle(5, xs)"), true)
+    testing.expect_value(t, strings.contains(output, "arr__Take_Nth_Source :: struct($T: typeid) {step: int, xs: []T, zero: T, index: int}"), true)
+    testing.expect_value(t, strings.contains(output, "arr__take_nth_impl :: proc(n: int, xs: []$T) -> arr__Take_Nth_Source(T) {"), true)
+    testing.expect_value(t, strings.contains(output, "sampled := (proc(kvist_source_arg_1: int, kvist_source_arg_2: []int) -> [dynamic]int {"), true)
+    testing.expect_value(t, strings.contains(output, "arr__Repeat_Source :: struct($T: typeid) {value: T, index: int, count: int}"), true)
+    testing.expect_value(t, strings.contains(output, "arr__repeat_impl :: proc(n: int, value: $T) -> arr__Repeat_Source(T) {"), true)
+    testing.expect_value(t, strings.contains(output, "repeated := (proc(kvist_source_arg_1: int, kvist_source_arg_2: int) -> [dynamic]int {"), true)
+    testing.expect_value(t, strings.contains(output, "arr__Repeatedly_Source :: struct($T: typeid) {f: proc() -> T, zero: T, index: int, count: int}"), true)
+    testing.expect_value(t, strings.contains(output, "arr__repeatedly_impl :: proc(n: int, f: proc() -> $T) -> arr__Repeatedly_Source(T) {"), true)
+    testing.expect_value(t, strings.contains(output, "generated := (proc(kvist_source_arg_1: int, kvist_source_arg_2: proc() -> int) -> [dynamic]int {"), true)
+    testing.expect_value(t, strings.contains(output, "arr__Iterate_Source :: struct($T: typeid) {f: proc(x: T) -> T, current: T, index: int, count: int}"), true)
+    testing.expect_value(t, strings.contains(output, "arr__iterate_impl :: proc(n: int, f: proc(x: $T) -> T, init: T) -> arr__Iterate_Source(T) {"), true)
+    testing.expect_value(t, strings.contains(output, "powers := (proc(kvist_source_arg_1: int, kvist_source_arg_2: proc(x: int) -> int, kvist_source_arg_3: int) -> [dynamic]int {"), true)
+    testing.expect_value(t, strings.contains(output, "arr__Cycle_Source :: struct($T: typeid) {xs: []T, zero: T, index: int, count: int, size: int}"), true)
+    testing.expect_value(t, strings.contains(output, "arr__cycle_impl :: proc(n: int, xs: []$T) -> arr__Cycle_Source(T) {"), true)
+    testing.expect_value(t, strings.contains(output, "cycled := (proc(kvist_source_arg_1: int, kvist_source_arg_2: []int) -> [dynamic]int {"), true)
     testing.expect_value(t, strings.contains(output, "arr__map_impl :: #force_inline proc(f: proc(x: $T) -> $U, xs: []T) -> [dynamic]U {"), true)
     testing.expect_value(t, strings.contains(output, "mapped := arr__map_impl(inc_value, (xs)[0:])"), true)
     testing.expect_value(t, strings.contains(output, "arr__map_indexed :: #force_inline proc(f: proc(i: int, x: $T) -> $U, xs: []T) -> [dynamic]U {"), true)
@@ -18183,9 +25930,10 @@ compile_shipped_arr_source_package_uses_hybrid_resolution :: proc(t: ^testing.T)
     testing.expect_value(t, strings.contains(output, "kvist_slice.sort((out)[:])"), true)
     testing.expect_value(t, strings.contains(output, "import kvist_slice \"core:slice\""), true)
     testing.expect_value(t, strings.contains(output, "sorted := arr__sort_impl((xs)[0:])"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_thread_1 := arr__mapcat_impl(pair, (xs)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_thread_1 := arr__mapcat_impl(pair, (xs)[0:])"), true)
     testing.expect_value(t, strings.contains(output, "defer delete(kvist_thread_1)"), true)
-    testing.expect_value(t, strings.contains(output, "threaded_flat_count := len((kvist_thread_1)[:])"), true)
+    testing.expect_value(t, strings.contains(output, "threaded_flat_count := len("), true)
+    testing.expect_value(t, strings.contains(output, "arr__mapcat_impl(pair,"), true)
     testing.expect_value(t, strings.contains(output, "arr__reduce_impl :: #force_inline proc(f: proc(acc: $U, x: $T) -> U, init: U, xs: []T) -> U {"), true)
     testing.expect_value(t, strings.contains(output, "reduced := arr__reduce_impl(add_values, 0, (xs)[0:])"), true)
     testing.expect_value(t, strings.contains(output, "arr__take_while_impl :: #force_inline proc(pred: proc(x: $T) -> bool, xs: []T) -> []T {"), true)
@@ -18198,7 +25946,7 @@ compile_shipped_arr_source_package_uses_hybrid_resolution :: proc(t: ^testing.T)
     testing.expect_value(t, strings.contains(output, "first_big, found_big_p := arr__find_impl(big_p, (xs)[0:])"), true)
     testing.expect_value(t, strings.contains(output, "any_big_p := arr__some_impl(big_p, (xs)[0:])"), true)
     testing.expect_value(t, strings.contains(output, "all_big_p := arr__every_impl(big_p, (xs)[0:])"), true)
-    testing.expect_value(t, strings.contains(output, "append(&(mutable), total)"), true)
+    testing.expect_value(t, strings.contains(output, "append(&mutable, total)"), true)
     testing.expect_value(t, strings.contains(output, "arr__map_bang_impl :: #force_inline proc(f: proc(x: $T) -> T, xs: []T) {"), true)
     testing.expect_value(t, strings.contains(output, "arr__map_bang_impl(inc_value, (mutable)[0:])"), true)
     testing.expect_value(t, strings.contains(output, "arr__filter_bang_impl :: #force_inline proc(pred: proc(x: $T) -> bool, xs: ^[dynamic]T) {"), true)
@@ -18211,9 +25959,9 @@ compile_shipped_arr_source_package_uses_hybrid_resolution :: proc(t: ^testing.T)
     testing.expect_value(t, strings.contains(output, "arr__sort_bang_impl((mutable)[0:])"), true)
     testing.expect_value(t, strings.contains(output, "tail := (xs)[1:]"), true)
     testing.expect_value(t, strings.contains(output, "init := arr__butlast(xs)"), true)
-    testing.expect_value(t, strings.contains(output, "out := make([dynamic]T, 0, ((len((xs)[:])) + ((n) - (1))) / (n))"), true)
-    testing.expect_value(t, strings.contains(output, "out := make([dynamic]T, 0, n)"), true)
-    testing.expect_value(t, strings.contains(output, "out := make([dynamic]int, 0, arr__count)"), true)
+    testing.expect_value(t, strings.contains(output, "arr__take_nth_next(&kvist_source)"), true)
+    testing.expect_value(t, strings.contains(output, "arr__cycle_next(&kvist_source)"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_out := make([dynamic]int)"), true)
     testing.expect_value(t, strings.contains(output, "return (xs)[0:i]"), true)
     testing.expect_value(t, strings.contains(output, "return (xs)[i:]"), true)
     testing.expect_value(t, strings.contains(output, "fmt.println(len(fixed), total, first_by_get, a, b, c, z, first_big, found_big_p, any_big_p, all_big_p"), true)
@@ -18245,12 +25993,10 @@ compile_shipped_arr_source_package_uses_hybrid_resolution :: proc(t: ^testing.T)
 }
 
 @(test)
-compile_arr_push_accepts_pointer_to_dynamic_array :: proc(t: ^testing.T) {
+compile_odin_append_accepts_pointer_to_dynamic_array :: proc(t: ^testing.T) {
     source := `(package main)
-(import arr "kvist:arr")
-
 (defn add-byte! [buf: (ptr (dynamic byte)) b: byte]
-  (arr.push! buf b))
+  (append buf b))
 
 (defn main []
   (let [buf ([dynamic]byte [])]
@@ -18274,10 +26020,10 @@ compile_arr_push_accepts_pointer_to_dynamic_array :: proc(t: ^testing.T) {
 compile_pointer_to_set_type_constructors :: proc(t: ^testing.T) {
     source := `(package main)
 
-(defn count-caret [seen: ^set[string]] -> int
+(defn count-caret [seen: (ptr (map string (struct {})))] -> int
   (count (deref seen)))
 
-(defn count-list [seen: (ptr (set string))] -> int
+(defn count-list [seen: (ptr (map string (struct {})))] -> int
   (count (deref seen)))
 
 (defn count-map [seen: ^map[string]int] -> int
@@ -18311,7 +26057,7 @@ compile_pointer_to_map_and_set_mutation_helpers :: proc(t: ^testing.T) {
 (import map "kvist:map")
 (import set "kvist:set")
 
-(defn mark-seen! [seen: ^set[string], lookup: ^map[string]int] -> bool
+(defn mark-seen! [seen: (ptr (map string (struct {}))), lookup: ^map[string]int] -> bool
   (set.add! seen "a")
   (set.remove! seen "b")
   (map.assoc! lookup "a" 1)

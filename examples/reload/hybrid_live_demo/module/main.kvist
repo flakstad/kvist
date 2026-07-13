@@ -4,7 +4,7 @@
 (package hybrid_live_demo_module)
 
 (import hot "kvist:hot")
-(import kvist_hot "../../../../src/kvist_hot")
+(import kvist_hot "../../../../src/odin/kvist_hot")
 (import shared "../shared")
 
 (def hybrid-demo-version: string "native module v1")

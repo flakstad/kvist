@@ -1,0 +1,320 @@
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
+
+(package test)
+
+(import intrinsics "base:intrinsics")
+(import reflect "core:reflect")
+(import rt "base:runtime")
+(import strings "core:strings")
+(import sync "core:sync")
+(import otesting "core:testing")
+
+(defvar __kvist_test_context_lock: sync.Mutex)
+(defvar __kvist_test_context_stacks: map[uintptr][dynamic]string)
+(defvar __kvist_test_once_guard: sync.Once)
+
+(defn- __kvist_test_context_cleanup [user-data: rawptr]
+  (let [key (uintptr user-data)]
+    (sync.mutex-lock &__kvist_test_context_lock)
+    (defer (sync.mutex-unlock &__kvist_test_context_lock))
+
+    (let [[stack ok] __kvist_test_context_stacks[key]]
+      (if (not ok)
+        (return))
+      (for [msg stack]
+        (delete msg))
+      (delete stack)
+      (delete! __kvist_test_context_stacks key)
+      (if (= (count __kvist_test_context_stacks) 0)
+        (do
+          (delete __kvist_test_context_stacks)
+          (set! __kvist_test_context_stacks nil))))))
+
+(defn- __kvist_test_context_prefix [t: ^otesting.T] -> string
+  (let [key (uintptr t)]
+    (sync.mutex-lock &__kvist_test_context_lock)
+    (let [[stack ok] __kvist_test_context_stacks[key]]
+      (if (or (not ok) (= (count stack) 0))
+        (do
+          (sync.mutex-unlock &__kvist_test_context_lock)
+          (return "")))
+      (let [[prefix _] (strings.join stack[:] " > " {allocator: context.temp-allocator})]
+        (sync.mutex-unlock &__kvist_test_context_lock)
+        prefix))))
+
+(defn- __kvist_test_push_context [t: ^otesting.T, message: string]
+  (let [key (uintptr t)
+        [cloned clone-err] (strings.clone message)]
+    (assert (= clone-err nil) "kvist:test could not clone t.testing message")
+
+    (sync.mutex-lock &__kvist_test_context_lock)
+    (defer (sync.mutex-unlock &__kvist_test_context_lock))
+
+    (let [[stack existed] __kvist_test_context_stacks[key]]
+      (if (not existed)
+        (otesting.cleanup t __kvist_test_context_cleanup (rawptr t)))
+      (append &stack cloned)
+      (set! __kvist_test_context_stacks[key] stack))))
+
+(defn- __kvist_test_pop_context [t: ^otesting.T]
+  (let [key (uintptr t)]
+    (sync.mutex-lock &__kvist_test_context_lock)
+    (defer (sync.mutex-unlock &__kvist_test_context_lock))
+
+    (let [[stack ok] __kvist_test_context_stacks[key]]
+      (if (or (not ok) (= (count stack) 0))
+        (return))
+      (delete stack[(- (count stack) 1)])
+      (resize &stack (- (count stack) 1))
+      (set! __kvist_test_context_stacks[key] stack))))
+
+(defn- __kvist_test_expect
+  [t: ^otesting.T,
+   ok: bool,
+   msg: string = "",
+   expr: string = (#caller_expression ok),
+   loc: rt.Source_Code_Location = #caller_location] -> bool
+  (if ok
+    (return true))
+  (let [prefix (__kvist_test_context_prefix t)]
+    (if (= prefix "")
+      (return (otesting.expect t ok msg {expr: expr loc: loc})))
+    (if (= msg "")
+      (return (otesting.expectf t ok "%s: expected %v to be true" prefix expr {loc: loc})))
+    (otesting.expectf t ok "%s: %s" prefix msg {loc: loc})))
+
+(defn- __kvist_test_expect_value
+  [t: ^otesting.T,
+   value: $T,
+   expected: T,
+   loc: rt.Source_Code_Location = #caller_location,
+   value-expr: string = (#caller_expression value)] -> bool
+  (where (intrinsics.type-is-comparable T))
+  (let [ok (or (= value expected)
+               (and (reflect.is-nil value) (reflect.is-nil expected)))]
+    (if ok
+      (return true))
+    (let [prefix (__kvist_test_context_prefix t)]
+      (if (= prefix "")
+        (return (otesting.expect-value t value expected {loc: loc value-expr: value-expr})))
+      (otesting.expectf t ok "%s: expected %v to be %v, got %v" prefix value-expr expected value {loc: loc}))))
+
+(defmacro- __kvist_test_wrap_each
+  [body]
+  body)
+
+(defmacro- __kvist_test_wrap_once
+  [body]
+  body)
+
+(defmacro- emit-fixture-chain-template-body
+  [fixtures]
+  (if (= (count fixtures) 0)
+    '(unquote body)
+    `(~(first fixtures) t
+      (fn [t: ~(symbol (str "^" (name 'testing) ".T"))]
+        ~(emit-fixture-chain-template-body (rest fixtures))))))
+
+(defmacro- emit-fixture-chain-template
+  [fixtures]
+  (list (forms 'quasiquote (emit-fixture-chain-template-body fixtures))))
+
+(defmacro- emit-once-fixtures
+  [fixtures]
+  (if (= (count fixtures) 0)
+    (forms)
+    `(do
+       (~(first fixtures))
+       ~@(emit-once-fixtures (rest fixtures)))))
+
+(defmacro- field-selector?
+  [form]
+  (and (symbol? form)
+       (> (count (source form)) 1)
+       (= (slice (source form) 0 1) ".")))
+
+(defmacro- emit-is
+  [expr msg]
+  (if (list? expr)
+    (let [head (first expr)]
+      (if (symbol? head)
+        (if (= (name head) "=")
+          (if (= (count expr) 3)
+            (if (= msg nil)
+              (if (field-selector? (nth expr 1))
+                `(__kvist_test_expect t (= ~(nth expr 1) ~(nth expr 2)))
+                (if (field-selector? (nth expr 2))
+                  `(__kvist_test_expect t (= ~(nth expr 1) ~(nth expr 2)))
+                  `(__kvist_test_expect_value t ~(nth expr 1) ~(nth expr 2))))
+              `(__kvist_test_expect t (= ~(nth expr 1) ~(nth expr 2)) ~msg))
+            (error "t.is with = expects exactly two operands"))
+          (if (= (name head) "not")
+            (if (= (count expr) 2)
+              (if (= msg nil)
+                `(__kvist_test_expect t (not ~(nth expr 1)))
+                `(__kvist_test_expect t (not ~(nth expr 1)) ~msg))
+              (error "t.is with not expects exactly one operand"))
+            (if (= msg nil)
+              `(__kvist_test_expect t ~expr)
+              `(__kvist_test_expect t ~expr ~msg))))
+        (if (= msg nil)
+          `(__kvist_test_expect t ~expr)
+          `(__kvist_test_expect t ~expr ~msg))))
+    (if (= msg nil)
+      `(__kvist_test_expect t ~expr)
+      `(__kvist_test_expect t ~expr ~msg))))
+
+(defmacro- emit-deftest
+  [name doc body]
+  (if (= doc nil)
+    (forms
+      `(import testing "core:testing")
+      `@test
+      `(defn ~name [t: ~(symbol (str "^" (name 'testing) ".T"))]
+         ~(__kvist_test_wrap_once
+            (__kvist_test_wrap_each
+              `(do ~@body)))))
+    (forms
+      `(import testing "core:testing")
+      `@test
+      `(defn ~name
+         ~doc
+         [t: ~(symbol (str "^" (name 'testing) ".T"))]
+         ~(__kvist_test_wrap_once
+            (__kvist_test_wrap_each
+              `(do ~@body)))))))
+
+(defmacro- emit-are
+  [argv expr values]
+  (let [n (count argv)
+        row (slice values 0 n)
+        remaining (slice values n)]
+    (if (= (count values) 0)
+      (forms)
+      (if (= (count row) n)
+        `(do
+           (is ~(subst-form expr argv row))
+           ~@(emit-are argv expr remaining))
+        (error "t.are expects a multiple of the binding count")))))
+
+(defmacro- subst-symbol
+  [form names values]
+  (if (= (count names) 0)
+    form
+    (if (= (source form) (source (first names)))
+      (first values)
+      (subst-symbol form (rest names) (rest values)))))
+
+(defmacro- subst-items
+  [items names values]
+  (if (= (count items) 0)
+    (forms)
+    (concat
+      (forms (subst-form (first items) names values))
+      (subst-items (rest items) names values))))
+
+(defmacro- subst-form
+  [form names values]
+  (if (= (count names) (count values))
+    (if (symbol? form)
+      (subst-symbol form names values)
+      (if (list? form)
+        (list (subst-items form names values))
+        (if (vector? form)
+          (vector (subst-items form names values))
+          (if (brace? form)
+            (brace (subst-items form names values))
+            form))))
+    (error "subst-form expects the same number of names and values")))
+
+(defmacro deftest
+  "Define an executable Kvist test.
+
+  `(t.deftest name body...)` lowers to an Odin `@(test)` proc named `name` with a
+  `^testing.T` parameter bound as `t` inside the body. A string immediately after
+  the test name becomes the generated proc docstring:
+
+  `(t.deftest parses-empty-input \"Empty input is valid.\" ...)`
+
+  Tests should use `t.is` for assertions so failures are reported through Odin's
+  testing package and include any active `t.testing` context."
+  [name & body]
+  (let [maybe-doc (first body)]
+    (if (string? maybe-doc)
+      (emit-deftest name maybe-doc (rest body))
+      (emit-deftest name nil body))))
+
+(defmacro is
+  "Assert that `expr` is true, with an optional failure message.
+
+  `(t.is expr)` records a test failure when `expr` is false. `(t.is expr
+  \"message\")` uses the message in the failure report. Equality forms of shape
+  `(= actual expected)` lower to Odin's value-aware expectation helper so reports
+  include both values. Equality against implicit selectors such as `.OK` lowers
+  as a boolean expression so Odin can infer the selector type; `(not expr)` also
+  gets direct specialized lowering.
+
+  `t.is` returns the boolean result from the underlying Odin assertion helper."
+  [expr & rest]
+  (if (= (count rest) 0)
+    (emit-is expr nil)
+    (if (= (count rest) 1)
+      (emit-is expr (first rest))
+      (error "t.is expects an expression and optional message"))))
+
+(defmacro testing
+  "Run `body` with an additional assertion context message.
+
+  Nested `t.testing` forms are joined in failure output, so a failing assertion
+  reports the path of surrounding contexts. The context is scoped with `defer`,
+  and is removed even when the body returns early."
+  [message & body]
+  `(do
+     (__kvist_test_push_context t ~message)
+     (defer (__kvist_test_pop_context t))
+     ~@body))
+
+(defmacro are
+  "Repeat one assertion template over rows of values.
+
+  `argv` is a binding vector used inside `expr`. `values` are consumed in rows
+  the same length as `argv`; each row substitutes into `expr` and expands to one
+  `t.is` assertion. The number of values must be an exact multiple of the binding
+  count.
+
+  Example shape: `(t.are [x y] (= (+ x y) 10) 1 9 4 6)`."
+  [argv expr & values]
+  (if (= (count argv) 0)
+    (error "t.are expects a non-empty binding vector")
+    (emit-are argv expr values)))
+
+(defmacro use-fixtures
+  "Install fixtures for tests defined later in the same package file.
+
+  `(t.use-fixtures :each f...)` wraps each test body in the listed fixtures.
+  Each fixture is called as `(f t body-proc)`, where `body-proc` is a proc taking
+  `^testing.T`.
+
+  `(t.use-fixtures :once f...)` runs setup procs once before the first wrapped
+  test body executes. Current `:once` fixtures are setup-only and do not receive
+  a teardown continuation."
+  [scope & fixtures]
+  (if (= (name scope) "each")
+    (let [fixture-body (emit-fixture-chain-template fixtures)]
+      `(defmacro- __kvist_test_wrap_each
+         [body]
+         ~fixture-body))
+    (if (= (name scope) "once")
+      (let [setup (emit-once-fixtures fixtures)]
+        (forms
+          `(defn- __kvist_test_run_once_fixtures []
+             ~setup)
+          `(defn- __kvist_test_ensure_once []
+             (sync.once_do &__kvist_test_once_guard __kvist_test_run_once_fixtures))
+          `(defmacro- __kvist_test_wrap_once
+             [body]
+             `(do
+                (__kvist_test_ensure_once)
+                ~body))))
+      (error "t.use-fixtures currently supports only :each and :once"))))

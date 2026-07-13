@@ -25,7 +25,7 @@ repository, and build the Kvist CLI from the repo root:
 ```sh
 git clone https://github.com/kvist-lang/kvist.git
 cd kvist
-odin build cmd/kvist
+odin build src/cli/kvist
 ```
 
 Add a main function to a `hello.kvist` file:
@@ -246,9 +246,9 @@ development workflows, see [docs/LIVE-DEVELOPMENT.md](docs/LIVE-DEVELOPMENT.md).
 
 ## Repository Map
 
-- `src/kvist/` - compiler implementation
-- `cmd/kvist/` - CLI
-- `packages/` - shipped Kvist source packages
+- `src/odin/` - compiler, runtime, and support Odin packages
+- `src/kvist/` - shipped Kvist source packages
+- `src/cli/kvist/` - CLI
 - `examples/` - runnable examples and package coverage
 - `tests/` - compiler tests
 - `docs/` - focused notes for deeper topics
@@ -261,8 +261,8 @@ development workflows, see [docs/LIVE-DEVELOPMENT.md](docs/LIVE-DEVELOPMENT.md).
 - [docs/MACROS.md](docs/MACROS.md) - macro authoring
 - [docs/SEQUENCES.md](docs/SEQUENCES.md) - collection helpers
 - [docs/PACKAGES.md](docs/PACKAGES.md) - shipped package index
-- [docs/HTML.md](docs/HTML.md) - HTML rendering
-- [docs/HTTP.md](docs/HTTP.md) - HTTP server/client/SSE helpers
+- [kvist-lang/html](https://github.com/kvist-lang/html) - optional HTML rendering package
+- [kvist-lang/http](https://github.com/kvist-lang/http) - optional HTTP package
 - [docs/TESTING.md](docs/TESTING.md) - tests, assertions, fixtures, and table checks
 - [docs/FUNCTIONAL-TRANSFORMS.md](docs/FUNCTIONAL-TRANSFORMS.md) - fused data transforms
 - [docs/PARALLEL.md](docs/PARALLEL.md) - tasks and parallel collection helpers

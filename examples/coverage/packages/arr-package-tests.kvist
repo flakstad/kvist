@@ -71,7 +71,7 @@
     (t.is (= (get three-arg 0) 5))
     (t.is (= (get three-arg 2) 1))
     (t.is (= (arr.second xs) 20))
-    (t.is (= (arr.nth xs 2) 30))
+    (t.is (= (arr.nth 2 xs) 30))
     (t.is (= (count tail) 3))
     (t.is (= (arr.first tail) 20))
     (t.is (= (count init) 3))

@@ -95,7 +95,7 @@
             radius (+ 3.0 (* 4.5 (rand-unit (addr seed))))
             x (+ radius (* (- (f32 Width) (* radius 2.0)) (rand-unit (addr seed))))
             y (+ (f32 Sim-Y) radius (* (- (f32 (- Height Sim-Y)) (* radius 2.0)) (rand-unit (addr seed))))]
-        (soa.push! circles (Circle {x: x
+        (soa.push! (addr circles) (Circle {x: x
                                     y: y
                                     vx: (* speed (math.cos angle))
                                     vy: (* speed (math.sin angle))
@@ -277,9 +277,12 @@
   (defer (rl.CloseWindow))
   (rl.SetTargetFPS (i32 Initial-Target-FPS))
   (let [font (rl.LoadFontEx (cstring Hud-Font-Path) Hud-Font-Atlas-Size nil 0)
-        state (App-State {circles: (make-circles Circle-Count)
-                          head: (make-int-buffer Bucket-Count -1)
-                          next: (make-int-buffer Circle-Count -1)
+        circles (make-circles Circle-Count)
+        head (make-int-buffer Bucket-Count -1)
+        next (make-int-buffer Circle-Count -1)
+        state (App-State {circles: circles
+                          head: head
+                          next: next
                           target-fps: Initial-Target-FPS
                           paused: false
                           show-grid: true

@@ -4,10 +4,9 @@
 ;; A small package-local macro. This stays in source space and lowers away
 ;; before ordinary Kvist parsing and Odin emission.
 (defmacro unless [condition & body]
-  (quasiquote
-    (if (unquote condition)
-      (do)
-      (do (splice body)))))
+  `(if ~condition
+     (do)
+     (do ~@body)))
 
 (defn classify [n: int] -> string
   (unless (> n 0)

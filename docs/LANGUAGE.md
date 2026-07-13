@@ -139,6 +139,14 @@ without a canonical Kvist form:
 (odin "some_odin_only_construct()")
 ```
 
+Use `odin-infix` and `odin-prefix` when a macro needs to splice Kvist
+subexpressions into a raw Odin operator expression:
+
+```clojure
+(odin-infix "&" flags mask)
+(odin-prefix "~" mask)
+```
+
 ### Names And Symbols
 
 Kvist maps source identifiers predictably to Odin names:
@@ -244,6 +252,34 @@ as `string`, `cstring`, `rune`, and `byte`.
 Strings are plain Odin strings. They are values, not objects with methods.
 Boolean literals are `true` and `false`. `nil` is the nil value used for
 pointers and other Odin values that accept nil.
+
+Regex pattern literals use Clojure-shaped `#"..."`
+syntax and lower to Odin
+strings while preserving regex backslashes:
+
+```clojure
+#"\d+"
+```
+
+Use `kvist:regex` for compiled regex ownership and matching helpers:
+
+```clojure
+(import re "kvist:regex")
+
+(re.matches? #"\d+" "abc123")
+```
+
+Compiled regexes and capture arrays are ordinary owned Odin values; destroy
+them with `regex.destroy!` and `regex.destroy-capture!` when using the explicit
+compile or match APIs. For scoped locals, use `:defer-with`:
+
+```clojure
+(let [[compiled err] (re.compile #"^a+$")]
+  (if (= err nil)
+    (let [owned compiled :defer-with re.destroy!]
+      (re.matches-compiled? owned "aaa"))
+    false))
+```
 
 ### Keywords
 
@@ -402,10 +438,9 @@ App :: struct {
 Use ordinary fields when you want explicit access such as `app.logger.level`.
 Use `:using` when Odin's field/procedure promotion is the intended API.
 
-The parser also accepts vector shorthands in `defstruct` field metadata:
-`[slice T]`, `[arr T]`, `[set T]`, and `[fixed-arr N T]`. These lower to
-`[]T`, `[dynamic]T`, `map[T]struct{}`, and `[N]T` respectively. Prefer the
-ordinary type spelling in new code unless the shorthand is clearer in context.
+The parser also accepts `[slice T]` as a vector shorthand in `defstruct` field
+metadata. It lowers to `[]T`. Use ordinary type spelling such as `[dynamic]T`,
+`[N]T`, and `(set T)` for dynamic arrays, fixed arrays, and sets.
 
 ### Enums
 
@@ -654,6 +689,30 @@ Directive wrappers such as `#force_inline` can appear on function declarations:
 (defn query [] -> [value: int, ok: bool] #optional_ok
   (return 42 true))
 ```
+
+Use `#owned` for source procedures whose return type alone does not prove
+ownership, such as an allocated slice or string returned from an Odin API:
+
+```clojure
+(defn read-bytes [path: string] -> [data: []byte, err: os.Error] #owned
+  (os.read_entire_file path context.allocator))
+```
+
+`#owned` is a Kvist ownership-analysis directive. It is not emitted into the
+generated Odin proc signature.
+
+Use `#borrowed` for source procedures that return a borrowed view into a
+compatible string or slice argument:
+
+```clojure
+(defn trim-view [s: string] -> string #borrowed
+  (strings.trim_space s))
+```
+
+For a `string` result, Kvist treats the first `string` parameter as the owner.
+For a slice result, Kvist treats the first compatible slice or dynamic-array
+parameter as the owner. `#borrowed` is also an ownership-analysis directive and
+is not emitted into the generated Odin proc signature.
 
 Other Odin-style proc directives stay available in the same position when you
 need them.
@@ -1653,12 +1712,13 @@ warning: owned local xs is used after ownership transfer
 warning: borrowed value escapes owner xs
 ```
 
-The pass is intentionally conservative. It recognizes known owned-result
-helpers such as `arr.range`, `arr.empty`, `map.empty`, `set.union`, `str.split`,
-`str.join`, and `html.render`; known borrowed-view helpers such as `slice`,
-`arr.slice`, `arr.take`, `arr.drop`, `arr.rest`, `str.slice`, and `str.trim`;
-and known ownership transfers such as `delete`, returning an owned local, and
-passing an owned local into owner-taking collection operations.
+The pass is intentionally conservative. It recognizes owned results from source
+proc return types, source procs marked `#owned`, known owned-result helper
+shapes such as `arr.range`, `arr.empty`, `map.empty`, and `set.union`;
+borrowed views from source procs marked `#borrowed`; known borrowed-view helper
+shapes such as `slice`, `arr.slice`, and `arr.rest`; and known ownership
+transfers such as `delete`, returning an owned local, and passing an owned local
+into owner-taking collection operations.
 
 For example:
 
@@ -1949,9 +2009,8 @@ whose calls return void or status values rather than the configured object:
   configured^.port)
 ```
 
-`count` lowers to Odin `len`. `len` is accepted as an alias for Odin
-familiarity, but `count` is the canonical Kvist spelling. `empty?` checks
-whether `len` is zero.
+`count` lowers to Odin `len`. `count` is the canonical Kvist spelling.
+`empty?` checks whether the lowered Odin length is zero.
 
 `contains?` is the cross-family membership predicate:
 
@@ -1995,13 +2054,12 @@ language. Import them explicitly:
 (import set "kvist:set")
 (import bit "kvist:bit")
 (import str "kvist:str")
-(import cli "kvist:cli")
 (import soa "kvist:soa")
 ```
 
-This is a representative list, not a complete package catalog. Shipped Kvist
-packages live under `packages/`; package-specific behavior belongs in package
-docs, package source, and runnable examples.
+This is a representative list, not a complete package catalog. Package-specific
+behavior belongs in package docs, package source, and runnable examples. The
+current shipped-package source lives under `src/kvist/`.
 
 Typical examples:
 
@@ -2011,7 +2069,6 @@ Typical examples:
 (map.get lookup key default)
 (set.contains? tags :ready)
 (str.trim input)
-(cli.option args "--out" "out.txt")
 ```
 
 See [SEQUENCES.md](SEQUENCES.md) for collection helpers and ownership details.
@@ -2123,8 +2180,8 @@ Odin loops rather than intermediate arrays.
 (into set[string]
   (map (fn [entry: (map.entry string int)] -> string entry.key))
   (map.entries lookup)) ; build a set from values
-(transduce (filter even?) + 0 (arr.range 0 100)) ; direct loop, no range array
-(transduce (map inc) + 0 (arr.repeat 4 2)) ; direct loop, no repeat array
+(transduce (filter even?) + 0 (arr.range 0 100)) ; source loop, no range array
+(transduce (map inc) + 0 (arr.repeat 4 2)) ; source loop, no repeat array
 
 (for [total orders :transform paid-order-totals]
   (println total))
@@ -2155,10 +2212,10 @@ The current transform surface is intentionally small:
   obvious to the lowering
 - map inputs transform values by default; `(map.entries m)` transforms explicit
   `(map.entry K V)` values with `key` and `value` fields
-- `arr.range`, `arr.repeat`, `arr.repeatedly`, `arr.iterate`, `arr.cycle`,
-  and `arr.take-nth` inputs used directly as ordinary `for` sources lower to
-  direct loops instead of allocating helper arrays; `arr.range` and
-  `arr.repeat` also get this treatment in transform positions
+- `arr.range`, `arr.repeat`, `arr.repeatedly`, `arr.iterate`, `arr.cycle`, and
+  `arr.take-nth` inputs used directly as `for` or transform sources lower
+  through the generic source protocol instead of allocating helper arrays;
+  ordinary expression use materializes the iterator to an owned dynamic array
 
 See [FUNCTIONAL-TRANSFORMS.md](FUNCTIONAL-TRANSFORMS.md) for limits and
 lowering.
@@ -2184,7 +2241,7 @@ storage:
 
 (let [particles (soa.make Particle 10000)]
   (defer (delete particles))
-  (soa.push! particles (Particle {x: 0 y: 0 vx: 1 vy: 1}))
+  (soa.push! (addr particles) (Particle {x: 0 y: 0 vx: 1 vy: 1}))
   (soa.update! particles i .x (+ x dx) .y (+ y dy)))
 ```
 

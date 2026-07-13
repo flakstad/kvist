@@ -43,10 +43,13 @@ for inspection.
 `kvist:*` imports resolve shipped packages independently of the current working
 directory. Lookup order is:
 
-- `KVIST_PACKAGES_DIR`, when it points directly at a packages directory.
-- `KVIST_HOME/packages`.
-- `packages` or `share/kvist/packages` next to the running `kvist` executable.
-- the repository `packages/` directory during source checkout development.
+- `KVIST_ROOT`, when explicitly set to a root containing `core/core.kvist`.
+- the parent of an installed `bin/kvist`, with packages directly under that
+  root.
+- `src/kvist` beside a compiler binary built at the source checkout root.
+
+`kvist root` prints the selected root. Resolution does not probe the current
+directory or importing repository.
 
 This lets an installed `kvist` binary work from application repositories without
 being launched from the Kvist source tree.

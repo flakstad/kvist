@@ -6,23 +6,14 @@
 
 (import t "kvist:test")
 (import arr "kvist:arr")
-(import cli "kvist:cli")
-(import io "kvist:io")
-(import json "kvist:json")
 (import map "kvist:map")
 (import set "kvist:set")
 (import str "kvist:str")
 (import soa "kvist:soa")
-(import os "core:os")
 
 (defstruct Profile {
   name: string
   age: int
-})
-
-(defstruct Note {
-  title: string
-  body: string
 })
 
 (defstruct Member {
@@ -62,13 +53,6 @@
     (return x true)
     (return 0 false)))
 
-(defn ensure-test-dir [] -> os.Error
-  (let [err (os.make_directory_all "tmp")]
-    (if (and (!= err nil)
-             (not (os.is_directory "tmp")))
-      err
-      nil)))
-
 (t.deftest core-package-surface
   (let [xs [1 2 3 4] :defer
         lookup (map.of int int {1 10 2 20}) :defer
@@ -101,13 +85,6 @@
       (set! bucket "when"))
     (when-let [[value ok] (query-positive 7)]
       (set! when-let-result value))
-    (t.is (= (ensure-test-dir) nil))
-    (t.is (= (io.write "tmp.core-package-read.txt" "core package") nil))
-    (defer (os.remove "tmp.core-package-read.txt"))
-    (let [[data err] (io.read "tmp.core-package-read.txt")]
-      (defer (delete data))
-      (t.is (= err nil))
-      (t.is (> (count data) 0)))
     (t.is (= bucket "when"))
     (t.is (= when-let-result 7))
     (t.is (= if-let-result 5))
@@ -121,14 +98,6 @@
     (t.is (= (get threaded 0) 2))
     (t.is (= (count arr-copy) 4))
     (t.is (= (get arr-copy 3) 4))))
-
-(t.deftest cli-package-surface
-  (let [args ([]string ["tool" "serve" "--port" "8080" "--debug"])]
-    (t.is (cli.flag args "--debug"))
-    (t.is (= (cli.option args "--port" "3000") "8080"))
-    (t.is (= (cli.int-option args "--port" 3000) 8080))
-    (t.is (= (cli.int-option args "--missing" 3000) 3000))
-    (t.is (= (or-else (cli.command args) "none") "serve"))))
 
 (t.deftest arr-package-surface
   (let [xs (arr.range 1 6) :defer
@@ -369,25 +338,3 @@
     (t.is (= (get fields 1) "age"))
     (t.is (= (map.get types "name" "") "string"))
     (t.is (= (map.get types "age" "") "int"))))
-
-(t.deftest io-and-json-package-surface
-  (t.is (= (ensure-test-dir) nil))
-  (let [text-path "tmp.builtin-package-tests.txt"
-        json-path "tmp.builtin-package-tests.json"]
-    (defer (os.remove text-path))
-    (defer (os.remove json-path))
-    (t.is (= (io.write text-path "hello kvist") nil))
-    (let [[data read-err] (io.read text-path)]
-      (defer (delete data))
-      (t.is (= read-err nil))
-      (t.is (= (string data) "hello kvist")))
-    (let [[marshal-err write-err] (json.write json-path (Note {title: "hello" body: "world"}))]
-      (t.is (= marshal-err nil))
-      (t.is (= write-err nil)))
-    (let [[note read-err unmarshal-err] (json.read-as Note json-path)]
-      (defer (delete note.title))
-      (defer (delete note.body))
-      (t.is (= read-err nil))
-      (t.is (= unmarshal-err nil))
-      (t.is (= note.title "hello"))
-      (t.is (= note.body "world")))))

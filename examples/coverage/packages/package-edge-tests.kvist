@@ -2,26 +2,17 @@
 ;; SPDX-License-Identifier: MIT
 
 (package tests)
-(import core "kvist:core")
 
 (import t "kvist:test")
 (import arr "kvist:arr")
-(import io "kvist:io")
-(import json "kvist:json")
 (import map "kvist:map")
 (import set "kvist:set")
 (import str "kvist:str")
 (import soa "kvist:soa")
-(import os "core:os")
 
 (defstruct Profile {
   name: string
   age: int
-})
-
-(defstruct Note {
-  title: string
-  body: string
 })
 
 (defn inc-value [x: int] -> int
@@ -29,13 +20,6 @@
 
 (defn query-missing [] -> [value: int, ok: bool] #optional_ok
   (return 0 false))
-
-(defn ensure-test-dir [] -> os.Error
-  (let [err (os.make_directory_all "tmp")]
-    (if (and (!= err nil)
-             (not (os.is_directory "tmp")))
-      err
-      nil)))
 
 (t.deftest core-package-edge-cases
   (let [xs [1 2 3] :defer
@@ -163,23 +147,3 @@
     (t.is (= (count fields) 2))
     (t.is (= (map.get types "missing" "none") "none"))
     (t.is (= (map.get types "name" "") "string"))))
-
-(t.deftest io-and-json-package-edge-cases
-  (t.is (= (ensure-test-dir) nil))
-  (let [missing-path "tmp.does-not-exist.kvist"
-        invalid-json-path "tmp.invalid.json"
-        json-path "tmp.package-edge-tests.json"]
-    (defer (os.remove invalid-json-path))
-    (defer (os.remove json-path))
-    (let [[missing-data missing-err] (io.read missing-path)]
-      (defer (delete missing-data))
-      (t.is (!= missing-err nil)))
-    (t.is (= (io.write invalid-json-path "{oops") nil))
-    (let [[note read-err unmarshal-err] (json.read-as Note invalid-json-path)]
-      (defer (delete note.title))
-      (defer (delete note.body))
-      (t.is (= read-err nil))
-      (t.is (!= unmarshal-err nil)))
-    (let [[marshal-err write-err] (json.write json-path (Note {title: "hello" body: "world"}))]
-      (t.is (= marshal-err nil))
-      (t.is (= write-err nil)))))

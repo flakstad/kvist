@@ -74,14 +74,7 @@ Use a command name on `exec-path' or an explicit executable path."
     ("str" . "kvist:str")
     ("map" . "kvist:map")
     ("set" . "kvist:set")
-    ("soa" . "kvist:soa")
-    ("io" . "kvist:io")
-    ("json" . "kvist:json")
-    ("http" . "kvist:http")
-    ("httpc" . "kvist:http/client")
-    ("session" . "kvist:http/session")
-    ("sse" . "kvist:http/sse")
-    ("dstar" . "kvist:http/datastar"))
+    ("soa" . "kvist:soa"))
   "Canonical explicit imports for compiler-provided Kvist packages.")
 
 (defvar-local kvist--editor-symbol-cache nil
@@ -222,7 +215,7 @@ Use a command name on `exec-path' or an explicit executable path."
          (dir (if (and path (file-directory-p path))
                   path
                 (file-name-directory (expand-file-name path)))))
-    (or (locate-dominating-file dir "cmd/kvist/main.odin")
+    (or (locate-dominating-file dir "src/cli/kvist/main.odin")
         (locate-dominating-file dir "LANGUAGE.md")
         (locate-dominating-file dir ".git")
         dir)))

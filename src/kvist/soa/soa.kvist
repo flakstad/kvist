@@ -1,0 +1,265 @@
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
+
+(package soa)
+(import arr "kvist:arr")
+
+(defmacro fields
+  "Return metadata for the fields of a struct value or type.
+
+  This is a compile-time reflection helper that lowers through Kvist's struct
+  metadata support. It is intended for generated code and tooling that needs
+  field names without manually repeating them."
+  [target]
+  `(struct-fields ~target))
+
+(defmacro types
+  "Return metadata for the field types of a struct value or type.
+
+  This pairs with `soa.fields` when generated code needs both the field names
+  and their declared Odin types. It is a macro-level helper and does not create
+  a runtime reflection table."
+  [target]
+  `(struct-types ~target))
+
+(defmacro- soa-dynamic-type [elem-type]
+  (symbol (str "#soa[dynamic]" (text elem-type))))
+
+(defmacro make
+  "Allocate an empty dynamic struct-of-arrays buffer for `elem-type`.
+
+  `(soa.make Particle)` uses Odin's default dynamic-array capacity.
+  `(soa.make Particle capacity)` reserves the requested capacity up front."
+  [elem-type & rest]
+  (let [soa-type (soa-dynamic-type elem-type)]
+    (if (= (count rest) 0)
+      `(make ~soa-type)
+      (if (= (count rest) 1)
+        `(make ~soa-type 0 ~(first rest))
+        (error "soa.make expects elem-type and optional capacity")))))
+
+(defmacro push!
+  "Append one or more struct values to a dynamic struct-of-arrays buffer."
+  [particles & values]
+  `(append_soa ~particles ~@values))
+
+(defmacro reserve!
+  "Reserve capacity for a dynamic struct-of-arrays buffer."
+  [particles capacity]
+  `(reserve_soa (addr ~particles) ~capacity))
+
+(defmacro resize!
+  "Resize a dynamic struct-of-arrays buffer to `n` elements."
+  [particles n]
+  `(resize_soa (addr ~particles) ~n))
+
+(defmacro clear!
+  "Set the length of a dynamic struct-of-arrays buffer to zero without freeing capacity."
+  [particles]
+  `(clear_soa (addr ~particles)))
+
+(defmacro remove-ordered-at!
+  "Remove `index` from a dynamic SOA buffer while preserving element order."
+  [particles index]
+  `(ordered_remove_soa (addr ~particles) ~index))
+
+(defmacro remove-unordered-at!
+  "Remove `index` from a dynamic SOA buffer by moving the final element into its slot."
+  [particles index]
+  `(unordered_remove_soa (addr ~particles) ~index))
+
+(defmacro zip
+  "Build a struct-of-arrays view from field columns using Odin's `soa_zip`."
+  [& columns]
+  `(soa_zip ~@columns))
+
+(defmacro unzip
+  "Return columns from a struct-of-arrays value using Odin's `soa_unzip`."
+  [particles]
+  `(soa_unzip ~particles))
+
+(defmacro- field-selector?
+  [form]
+  (and (symbol? form)
+       (> (count (source form)) 1)
+       (= (slice (source form) 0 1) ".")))
+
+(defmacro- soa-place [target index field]
+  (if (field-selector? field)
+    (symbol (str (text target) "." (name field) "[" (text index) "]"))
+    (error "SOA field names must be dot selectors like `.x`")))
+
+(defmacro- soa-set-fields [target index clauses]
+  (if (= clauses nil)
+    (forms)
+    (if (= (count clauses) 0)
+      (forms)
+      (if (= (count clauses) 1)
+        (error "soa.update! expects .field value pairs")
+        (let [field (first clauses)
+              value (nth clauses 1)
+              place (soa-place target index field)]
+          (forms
+            `(set! ~place ~value)
+            (soa-set-fields target index (rest (rest clauses)))))))))
+
+(defmacro- soa-bind-fields [target index clauses body]
+  (if (= clauses nil)
+    body
+    (if (= (count clauses) 0)
+      body
+      (if (= (count clauses) 1)
+        (error "soa.update! expects .field value pairs")
+        (let [field (first clauses)
+              local (symbol (name field))
+              place (soa-place target index field)]
+          `(let [~local ~place]
+             ~(soa-bind-fields target index (rest (rest clauses)) body)))))))
+
+(defmacro update!
+  "Update SOA columns at `index` using `.field value` clauses.
+
+  Each mentioned field is first bound to a same-named local, so update
+  expressions can read the old column values with names like `x`, `vx`, and
+  `mass`. The macro expands to direct indexed column writes."
+  [particles index & clauses]
+  (soa-bind-fields
+    particles
+    index
+    clauses
+    `(do
+       ~@(soa-set-fields particles index clauses))))
+
+(defmacro fill!
+  "Set every element of SOA `field` to `value`."
+  [particles field value]
+  (let [i (symbol "i")
+        n (symbol "n")
+        place (soa-place particles i field)]
+    `(let [~i 0
+           ~n (count ~particles)]
+       (while (< ~i ~n)
+         (set! ~place ~value)
+         (mut! ~i += 1)))))
+
+(defmacro copy!
+  "Copy one SOA column into another column in the same buffer."
+  [particles dst-field src-field]
+  (let [i (symbol "i")
+        n (symbol "n")
+        dst (soa-place particles i dst-field)
+        src (soa-place particles i src-field)]
+    `(let [~i 0
+           ~n (count ~particles)]
+       (while (< ~i ~n)
+         (set! ~dst ~src)
+         (mut! ~i += 1)))))
+
+(defmacro scale!
+  "Multiply every element of SOA `field` by `factor` in place."
+  [particles field factor]
+  (let [i (symbol "i")
+        n (symbol "n")
+        place (soa-place particles i field)]
+    `(let [~i 0
+           ~n (count ~particles)]
+       (while (< ~i ~n)
+         (mut! ~place *= ~factor)
+         (mut! ~i += 1)))))
+
+(defmacro add!
+  "Add `src-field` into `dst-field` element by element in place."
+  [particles dst-field src-field]
+  (let [i (symbol "i")
+        n (symbol "n")
+        dst (soa-place particles i dst-field)
+        src (soa-place particles i src-field)]
+    `(let [~i 0
+           ~n (count ~particles)]
+       (while (< ~i ~n)
+         (mut! ~dst += ~src)
+         (mut! ~i += 1)))))
+
+(defmacro sub!
+  "Subtract `src-field` from `dst-field` element by element in place."
+  [particles dst-field src-field]
+  (let [i (symbol "i")
+        n (symbol "n")
+        dst (soa-place particles i dst-field)
+        src (soa-place particles i src-field)]
+    `(let [~i 0
+           ~n (count ~particles)]
+       (while (< ~i ~n)
+         (mut! ~dst -= ~src)
+         (mut! ~i += 1)))))
+
+(defmacro mul!
+  "Multiply `dst-field` by `src-field` element by element in place."
+  [particles dst-field src-field]
+  (let [i (symbol "i")
+        n (symbol "n")
+        dst (soa-place particles i dst-field)
+        src (soa-place particles i src-field)]
+    `(let [~i 0
+           ~n (count ~particles)]
+       (while (< ~i ~n)
+         (mut! ~dst *= ~src)
+         (mut! ~i += 1)))))
+
+(defmacro axpy!
+  "Perform `dst-field += a * src-field` element by element in place."
+  [particles dst-field a src-field]
+  (let [i (symbol "i")
+        n (symbol "n")
+        dst (soa-place particles i dst-field)
+        src (soa-place particles i src-field)]
+    `(let [~i 0
+           ~n (count ~particles)]
+       (while (< ~i ~n)
+         (mut! ~dst += (* ~a ~src))
+         (mut! ~i += 1)))))
+
+(defmacro clamp!
+  "Clamp every element of SOA `field` into the inclusive range `[low, high]`."
+  [particles field low high]
+  (let [i (symbol "i")
+        n (symbol "n")
+        place (soa-place particles i field)]
+    `(let [~i 0
+           ~n (count ~particles)]
+       (while (< ~i ~n)
+         (when (< ~place ~low)
+           (set! ~place ~low))
+         (when (> ~place ~high)
+           (set! ~place ~high))
+         (mut! ~i += 1)))))
+
+(defmacro sum-into!
+  "Add every element of SOA `field` into mutable accumulator `total`."
+  [total particles field]
+  (let [i (symbol "i")
+        n (symbol "n")
+        place (soa-place particles i field)]
+    `(let [~i 0
+           ~n (count ~particles)]
+       (while (< ~i ~n)
+         (mut! ~total += ~place)
+         (mut! ~i += 1)))))
+
+(defmacro dot-into!
+  "Add the dot product of two SOA columns into mutable accumulator `total`."
+  [total particles a-field b-field]
+  (let [i (symbol "i")
+        n (symbol "n")
+        a (soa-place particles i a-field)
+        b (soa-place particles i b-field)]
+    `(let [~i 0
+           ~n (count ~particles)]
+       (while (< ~i ~n)
+         (mut! ~total += (* ~a ~b))
+         (mut! ~i += 1)))))
+
+(defmacro norm2-into!
+  "Add the squared Euclidean length of one SOA column into mutable accumulator `total`."
+  [total particles field]
+  `(dot-into! ~total ~particles ~field ~field))

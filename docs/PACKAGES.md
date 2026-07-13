@@ -1,97 +1,71 @@
-# Shipped Packages
+# Kvist Packages
 
-Kvist ships source packages under `packages/`. Import them with `kvist:*`
-paths:
+Kvist ships its language and runtime support as source packages. Installed
+packages live directly under the Kvist root and use `kvist:*` imports:
 
 ```clojure
 (import arr "kvist:arr")
-(import "kvist:arr" :as arr)
-(import http "kvist:http")
+(import test "kvist:test")
 ```
 
-Installed tools resolve these packages without depending on cwd. Set
-`KVIST_PACKAGES_DIR` to a packages directory, or `KVIST_HOME` to a Kvist install
-root containing `packages/`, when packaging Kvist outside the source checkout.
+`core` is referred automatically. Use an explicit `kvist:core` import only to
+disambiguate a package definition that shadows a core name.
 
-This is an index, not a full API reference. For exact signatures, read the
-package source and runnable examples.
+Run `kvist root` to print the active package root. Resolution uses `KVIST_ROOT`
+when set; otherwise it uses the installed `bin/kvist` layout or `src/kvist`
+beside a source-built compiler. It never searches the current directory or an
+importing repository for shipped packages.
 
-## Start With Examples
+## Shipped Language Packages
 
-- [examples/collections/package-tour.kvist](../examples/collections/package-tour.kvist) -
-  `arr`, `map`, `set`, and `str` together with `:defer` cleanup.
-- [examples/collections/sequences.kvist](../examples/collections/sequences.kvist) -
-  array helpers over structs, grouping, sorting, and lookup.
-- [examples/collections/transforms.kvist](../examples/collections/transforms.kvist) -
-  `deftransform`, `into`, and `transduce`.
-- [examples/collections/log-source.kvist](../examples/collections/log-source.kvist) -
-  `defiter` with `for`, `into`, `transduce`, and cleanup.
+- `kvist:core` - auto-referred macros and basic helpers.
+- `kvist:bit` - bitwise integer operations.
+- `kvist:arr` - concrete array, slice, transform, and sorting helpers.
+- `kvist:map` - map construction and update helpers.
+- `kvist:set` - set operations over map-backed storage.
+- `kvist:str` - string views, builders, transforms, and search helpers.
+- `kvist:soa` - source macros around Odin struct-of-arrays storage.
+- `kvist:parallel` - task and bounded parallel collection helpers.
+- `kvist:test` - tests, assertions, fixtures, and table checks.
+- `kvist:regex` - owned regular-expression compilation and matching helpers.
 
-## Ownership Rules
+See [SEQUENCES.md](SEQUENCES.md), [PARALLEL.md](PARALLEL.md), and
+[TESTING.md](TESTING.md) for the larger package surfaces.
 
-- Helpers ending in `!` mutate an existing value and do not return a new owned
-  collection.
-- Helpers that build dynamic arrays, maps, sets, or strings return owned values;
-  bind them with `:defer`, delete them manually, or return ownership.
-- Slice helpers such as `arr.slice`, `arr.take`, `arr.drop`, and `str.slice`
-  return borrowed views.
-- `arr.group-by` returns an owned map whose values are owned dynamic arrays;
-  delete each group before deleting the map.
+## Shipped Development Support
 
-## Core
+- `kvist:reload` - checkpoints for resident reload hosts.
+- `kvist:hot` - hot-reload module export macros.
+- `kvist:live` - live module, command, and hook declarations.
 
-- `kvist:core` - auto-exposed core macros and helpers such as `when`, `cond`,
-  `case`, threading, `count`, `get`, `slice`, `contains?`, guards, value update,
-  `doc`, `nil?`, `tap>`, and `println`.
-- `kvist:bit` - bitwise integer operators such as `and`, `or`, `xor`,
-  `shift-left`, `shift-right`, `test`, `set`, `clear`, and `flip`.
+The supporting Odin runtime is installed under `odin/olive_reload`. See
+[LIVE-DEVELOPMENT.md](LIVE-DEVELOPMENT.md) for the workflow.
 
-## Collections And Text
+## Optional Official Packages
 
-- `kvist:arr` - dynamic-array, slice, indexing, mapping, filtering, reducing,
-  grouping, sorting, partitioning, and in-place array helpers.
-- `kvist:map` - map constructors, lookup, merge, association, dissociation,
-  keys, values, and zip helpers.
-- `kvist:set` - set constructors and set operations over Kvist's
-  `map[T]struct{}` representation.
-- `kvist:str` - string count, indexing, slicing, split, join, replace, trim,
-  prefix/suffix checks, case conversion, and search helpers.
+Official non-core packages are maintained as independent source repositories:
 
-See [SEQUENCES.md](SEQUENCES.md) for collection ownership and helper behavior.
+- [kvist-lang/io](https://github.com/kvist-lang/io)
+- [kvist-lang/json](https://github.com/kvist-lang/json)
+- [kvist-lang/cli](https://github.com/kvist-lang/cli)
+- [kvist-lang/html](https://github.com/kvist-lang/html)
+- [kvist-lang/http](https://github.com/kvist-lang/http)
 
-## IO And Data
+Place dependencies in the application repository and import their folders
+relative to the declaring Kvist file:
 
-- `kvist:io` - small read/write wrappers around Odin file IO.
-- `kvist:json` - JSON read/write helpers built on Odin
-  `core:encoding/json`.
-- `kvist:cli` - command-line flags, options, environment variables, terminal
-  size, TTY checks, temp directories, process execution, env overlays, exit,
-  and print helpers.
+```clojure
+(import json "deps/json")
+(import http "deps/http")
+```
 
-## Web
+The compiler does not fetch, register, or recognize these package names.
+Copied directories, Git submodules, and other ways of populating `deps/` have
+the same semantics because a dependency is simply a folder.
 
-- `kvist:html` - HTML rendering macros and runtime renderer helpers.
-- `kvist:http` - HTTP server/router helpers over `kvist_vendor:http`.
-- `kvist:http/client` - HTTP client request helpers.
-- `kvist:http/session` - cookie session and CSRF planning helpers.
-- `kvist:http/sse` - server-sent events stream helpers.
-- `kvist:http/datastar` - Datastar SSE patch helpers.
+## Ownership
 
-See [HTML.md](HTML.md) and [HTTP.md](HTTP.md) for the friendly tour.
-
-## Testing And Concurrency
-
-- `kvist:test` - test declarations, assertions, fixtures, and nested test
-  context helpers. See [TESTING.md](TESTING.md).
-- `kvist:parallel` - task start/result/detach and bounded parallel map/for
-  helpers. See [PARALLEL.md](PARALLEL.md).
-
-## Compile-Time And Runtime Support
-
-- `kvist:soa` - struct-of-arrays compile-time helpers around Odin `#soa`
-  storage.
-- `kvist:reload` - checkpoint helper for resident reload hosts.
-- `kvist:hot` - hot-reload module export macro.
-- `kvist:live` - live module, command, and hook declaration macros.
-
-Live and reload workflows are covered in [LIVE-DEVELOPMENT.md](LIVE-DEVELOPMENT.md).
+Helpers ending in `!` generally mutate existing storage. Helpers returning new
+dynamic arrays, maps, sets, strings, or compiled regular expressions return
+owned values; delete them explicitly, bind them with `:defer`, or return the
+ownership. Slice and string-view helpers return borrowed views.

@@ -4,7 +4,7 @@
 (package hot_reload_demo_module)
 
 (import hot "kvist:hot")
-(import kvist_hot "../../../../src/kvist_hot")
+(import kvist_hot "../../../../src/odin/kvist_hot")
 (import shared "../shared")
 
 (def hot-demo-version: string "module v1")

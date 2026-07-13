@@ -268,10 +268,11 @@ When a transform itself should consume both key and value, opt in with
 ```
 
 `arr.range`, `arr.repeat`, `arr.repeatedly`, `arr.iterate`, `arr.cycle`, and
-`arr.take-nth` are normally eager owned array helpers. In transform-source
-position, the compiler lowers `arr.range` and `arr.repeat` directly to counted
-loops instead. All six lower this way when used directly as ordinary `for`
-sources:
+`arr.take-nth` are normally eager owned array helpers. `arr.range`,
+`arr.repeat`, `arr.repeatedly`, `arr.iterate`, `arr.cycle`, and `arr.take-nth`
+are defined as source iterators in `arr.kvist`: source consumers stream them
+without allocating, and ordinary expression use materializes them to owned
+dynamic arrays through the generic `defiter` expression path.
 
 ```clojure
 (transduce (filter even?) max 0 (arr.range 0 100))
@@ -301,17 +302,16 @@ sources:
 | maps with keys | `for [key value map :transform xf]` | direct map loop, transform values, bind key separately |
 | `map.entries` | `into`, `arr.into!`, `transduce`, `for :transform` | direct map loop over explicit `(map.entry K V)` values |
 | `defiter` calls | `into`, `arr.into!`, `transduce`, `for :transform` | direct `next` loop with `:dispose` cleanup when present |
-| `arr.range` | ordinary `for`, `into`, `arr.into!`, `transduce`, `for :transform` | direct counted loop, no range array allocation |
-| `arr.repeat` | ordinary `for`, `into`, `arr.into!`, `transduce`, `for :transform` | direct counted loop over a cached repeated value, no repeat array allocation |
-| `arr.repeatedly` | ordinary `for` | direct counted loop that calls the producer once per iteration, no result array allocation |
-| `arr.iterate` | ordinary `for` | direct counted loop over the current value, no result array allocation |
-| `arr.cycle` | ordinary `for` | direct counted loop over the input slice, no result array allocation |
-| `arr.take-nth` | ordinary `for` | direct strided loop over the input slice, no result array allocation |
+| `arr.range` | ordinary `for`, `into`, `arr.into!`, `transduce`, `for :transform`; expression contexts materialize to `[dynamic]int` | source-owned `defiter` loop, no range array allocation in source consumers |
+| `arr.repeat` | ordinary `for`, `into`, `arr.into!`, `transduce`, `for :transform`; expression contexts materialize to `[dynamic]T` | source-owned `defiter` loop over a cached repeated value, no repeat array allocation in source consumers |
+| `arr.repeatedly` | ordinary `for`, `into`, `arr.into!`, `transduce`, `for :transform`; expression contexts materialize to `[dynamic]T` | source-owned `defiter` loop that calls the producer once per yielded item, no result array allocation in source consumers |
+| `arr.iterate` | ordinary `for`, `into`, `arr.into!`, `transduce`, `for :transform`; expression contexts materialize to `[dynamic]T` | source-owned `defiter` loop over the current value, no result array allocation in source consumers |
+| `arr.cycle` | ordinary `for`, `into`, `arr.into!`, `transduce`, `for :transform`; expression contexts materialize to `[dynamic]T` | source-owned `defiter` loop over the input slice, no result array allocation in source consumers |
+| `arr.take-nth` | ordinary `for`, `into`, `arr.into!`, `transduce`, `for :transform`; expression contexts materialize to `[dynamic]T` | source-owned `defiter` strided loop over the input slice, no result array allocation in source consumers |
 
-Ordinary calls still keep their ordinary semantics: `(arr.range ...)` and
-`(arr.repeat ...)` outside these source positions, and `(arr.repeatedly ...)`
-`(arr.iterate ...)`, `(arr.cycle ...)`, or `(arr.take-nth ...)` outside
-ordinary `for` source position, return owned dynamic arrays.
+Ordinary calls still keep their ordinary semantics: `(arr.range ...)`,
+`(arr.repeat ...)`, `(arr.repeatedly ...)`, `(arr.iterate ...)`,
+`(arr.cycle ...)`, and `(arr.take-nth ...)` return owned dynamic arrays.
 
 ### Map Entries
 
@@ -534,8 +534,9 @@ The current implementation is strict:
   key available while transforming the value;
 - `map.entries` feeds explicit `(map.entry K V)` values with `key` and `value`
   fields through the same fused transform positions;
-- `arr.range` and `arr.repeat` sources in transform positions lower to direct
-  loops and do not allocate the owned arrays that ordinary calls return;
+- `arr.range`, `arr.repeat`, `arr.repeatedly`, `arr.iterate`, `arr.cycle`, and
+  `arr.take-nth` sources in transform positions lower through the generic source
+  protocol and do not allocate the owned arrays that ordinary calls return;
 - `defiter` calls are consumed directly by `for`, `into`, and `transduce`;
 - `for` accepts `[value source :transform transform]` for the same fused item
   flow;

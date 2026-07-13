@@ -1,0 +1,1171 @@
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
+
+(package arr)
+(import core "kvist:core")
+(import kvist_slice "core:slice")
+
+(defn count
+  "Return the number of elements in an array-family value.
+
+  This lowers to the same direct length operation as core.count; it is O(1)
+  and allocates nothing."
+  [xs: []$T] -> int #force_inline
+  (core.count xs))
+
+(defn concat
+  "Return a new dynamic array containing `xs` followed by `ys`."
+  [xs: []$T, ys: []T] -> [dynamic]T #force_inline
+  (let [out (arr.empty T (+ (core.count xs) (core.count ys)))]
+    (for [x xs]
+      (append (addr out) x))
+    (for [y ys]
+      (append (addr out) y))
+    out))
+
+(defmacro map
+  "Return a new dynamic array containing `(f x)` for each `x` in `xs`.
+
+  Callbacks lower through a force-inlined loop helper. Dot selectors and
+  captured `fn` literals specialize through generic source callback support.
+  The result is newly allocated with capacity based on the input count."
+  [f xs]
+  `(map-impl ~f (core.slice ~xs 0)))
+
+(defmacro filter
+  "Return a new dynamic array containing values for which `pred` is true.
+
+  The input is not mutated. The result is allocated once with input-sized
+  capacity and populated by a direct loop."
+  [pred xs]
+  `(filter-impl ~pred (core.slice ~xs 0)))
+
+(defmacro remove
+  "Return a new dynamic array containing values for which `pred` is false.
+
+  This is the complement of `arr.filter`. The input is not mutated; the result
+  is allocated once and populated by a direct loop."
+  [pred xs]
+  `(remove-impl ~pred (core.slice ~xs 0)))
+
+(defmacro reduce
+  "Reduce `xs` from left to right using accumulator function `f`.
+
+  `f` receives the current accumulator and one element, and must return the next
+  accumulator. `init` is returned for an empty input. This lowers to a direct
+  loop and does not allocate."
+  [f init xs]
+  `(reduce-impl ~f ~init (core.slice ~xs 0)))
+
+(defmacro reduce-indexed
+  "Reduce `xs` with a callback that also receives the current index.
+
+  `f` receives the current accumulator, zero-based index, and element, and must
+  return the next accumulator. `init` is returned for an empty input. This lowers
+  to a direct loop and does not allocate."
+  [f init xs]
+  `(reduce-indexed-impl ~f ~init (core.slice ~xs 0)))
+
+(defmacro empty
+  "Create an empty dynamic array of `elem-type`.
+
+  `(arr.empty T)` uses default capacity. `(arr.empty T capacity)` reserves
+  capacity for efficient appends. The returned dynamic array is owned by the
+  caller."
+  [elem-type & rest]
+  (if (= (count rest) 0)
+    `(make (dynamic ~elem-type))
+    `(make (dynamic ~elem-type) 0 ~(first rest))))
+
+(defmacro dynamic
+  "Create a dynamic array of `elem-type` from literal `items`.
+
+  The result is an owned dynamic array. Use this when the array needs to grow or
+  be passed to APIs expecting `[dynamic]T`."
+  [elem-type items]
+  `((dynamic ~elem-type) ~items))
+
+(defmacro fixed
+  "Create a fixed array of `elem-type` from literal `items`.
+
+  The result is an Odin fixed-size array value. It does not allocate dynamic
+  storage and its length is known from the literal item count."
+  [elem-type items]
+  `((array ~(count items) ~elem-type) ~items))
+
+(defn map-indexed
+  "Return a new dynamic array by calling `f` with each index and value.
+
+  The callback receives the zero-based index and the element. The input is not
+  mutated, and the result is allocated with capacity based on the input count."
+  [f: (fn [i: int, x: $T] -> $U), xs: []T] -> [dynamic]U #force_inline
+  (let [out (arr.empty U (core.count xs))]
+    (for [x i xs]
+      (append (addr out) (f i x)))
+    out))
+
+(defmacro keep
+  "Map each element with `f` and keep only successful results.
+
+  `f` must return `[value, ok]`. Values whose `ok` result is true are appended
+  to a newly allocated dynamic array; false results are skipped."
+  [f xs]
+  `(keep-impl ~f (core.slice ~xs 0)))
+
+(defn- keep-impl
+  "Implementation helper for symbol-callback `arr.keep`."
+  [f: (fn [x: $T] -> [value: $U, ok: bool]), xs: []T] -> [dynamic]U #force_inline
+  (let [out (arr.empty U (core.count xs))]
+    (for [x xs]
+      (let [[value ok] (f x)]
+        (when ok
+          (append (addr out) value))))
+    out))
+
+(defmacro mapcat
+  "Map each element to a slice and concatenate the slices.
+
+  `f` is called for each input element and must return an array-family value.
+  The output is a newly allocated dynamic array containing all returned elements
+  in order."
+  [f xs]
+  `(mapcat-impl ~f (core.slice ~xs 0)))
+
+(defn- mapcat-impl
+  "Implementation helper for `arr.mapcat`.
+
+  The output starts with input-sized capacity, then grows according to Odin
+  dynamic array behavior as concatenated slices are appended."
+  [f: (fn [x: $T] -> []$U), xs: []T] -> [dynamic]U #force_inline
+  (let [out (arr.empty U (core.count xs))]
+    (for [x xs]
+      (for [y (f x)]
+        (append (addr out) y)))
+    out))
+
+(defmacro push!
+  "Append one or more `values` to dynamic array `xs` in place.
+
+  This mutates the target array and follows Odin dynamic array growth behavior.
+  No replacement array is returned."
+  [xs & values]
+  `(append (addr ~xs) ~@values))
+
+(defmacro- field-selector?
+  [form]
+  (and (symbol? form)
+       (> (count (source form)) 1)
+       (= (slice (source form) 0 1) ".")))
+
+(defmacro map!
+  "Replace each element of dynamic array `xs` with `(f x)`.
+
+  This mutates the array in place. It is intended for transformations where the
+  output element type is the same as the input element type."
+  [f xs]
+  (if (field-selector? f)
+    (error "arr.map! field selectors cannot replace whole elements; use an explicit function")
+    `(map!-impl ~f (core.slice ~xs 0))))
+
+(defn- map!-impl
+  "Implementation helper for symbol-callback `arr.map!`."
+  [f: (fn [x: $T] -> T), xs: []T] #force_inline
+  (for [x i xs]
+    (set! xs[i] (f x))))
+
+(defmacro map-indexed!
+  "Replace each element of dynamic array `xs` with `(f x i)`.
+
+  The callback receives the zero-based index and current element. The array
+  is mutated in place."
+  [f xs]
+  `(map-indexed!-impl ~f (core.slice ~xs 0)))
+
+(defn- map-indexed!-impl
+  "Implementation helper for `arr.map-indexed!`."
+  [f: (fn [i: int, x: $T] -> T), xs: []T] #force_inline
+  (for [x i xs]
+    (set! xs[i] (f i x))))
+
+(defmacro fill!
+  "Replace every element of `xs` with `value`.
+
+  This mutates the passed slice or dynamic array in place and does not change
+  its length."
+  [xs value]
+  `(fill!-impl (core.slice ~xs 0) ~value))
+
+(defn- fill!-impl
+  "Implementation helper for `arr.fill!`."
+  [xs: []$T, value: T] #force_inline
+  (for [_ i xs]
+    (set! xs[i] value)))
+
+(defmacro filter!
+  "Remove elements from `xs` in place when `pred` is false.
+
+  The dynamic array keeps elements that satisfy `pred`. This avoids allocating a
+  replacement array."
+  [pred xs]
+  `(filter!-impl ~pred (addr ~xs)))
+
+(defn- filter!-impl
+  "Implementation helper for symbol-callback `arr.filter!`."
+  [pred: (fn [x: $T] -> bool), xs: (ptr (dynamic T))] #force_inline
+  (let [data (deref xs)
+        write 0]
+    (for [x data]
+      (when (pred x)
+        (set! data[write] x)
+        (set! write (+ write 1))))
+    (resize xs write)))
+
+(defmacro remove!
+  "Remove elements from `xs` in place when `pred` is true.
+
+  This is the in-place complement of `arr.filter!` and avoids allocating a
+  replacement array."
+  [pred xs]
+  `(remove!-impl ~pred (addr ~xs)))
+
+(defn- remove!-impl
+  "Implementation helper for symbol-callback `arr.remove!`."
+  [pred: (fn [x: $T] -> bool), xs: (ptr (dynamic T))] #force_inline
+  (let [data (deref xs)
+        write 0]
+    (for [x data]
+      (when (not (pred x))
+        (set! data[write] x)
+        (set! write (+ write 1))))
+    (resize xs write)))
+
+(defn remove-ordered-at
+  "Return a new dynamic array with the element at `index` removed.
+
+  This is the returning form of Odin's `ordered_remove`: the input is copied
+  first, then the indexed element is removed while preserving the relative order
+  of all remaining elements. The result is owned by the caller."
+  [xs: []$T, index: int] -> [dynamic]T #force_inline
+  (let [out (arr.empty T (core.count xs))]
+    (for [x xs]
+      (append (addr out) x))
+    (ordered_remove &out index)
+    out))
+
+(defmacro remove-ordered-at!
+  "Remove the element at `index` from dynamic array `xs` in place.
+
+  This lowers directly to Odin's `ordered_remove` and preserves the relative
+  order of remaining elements. It mutates `xs` and allocates nothing."
+  [xs index]
+  `(ordered_remove (addr ~xs) ~index))
+
+(defn remove-unordered-at
+  "Return a new dynamic array with the element at `index` removed.
+
+  This is the returning form of Odin's `unordered_remove`: the input is copied
+  first, then removal may move the final element into `index`. Use this when
+  element order does not matter and removal speed is preferred."
+  [xs: []$T, index: int] -> [dynamic]T #force_inline
+  (let [out (arr.empty T (core.count xs))]
+    (for [x xs]
+      (append (addr out) x))
+    (unordered_remove &out index)
+    out))
+
+(defmacro remove-unordered-at!
+  "Remove the element at `index` from dynamic array `xs` in place.
+
+  This lowers directly to Odin's `unordered_remove`. It may move the final
+  element into the removed slot, so it does not preserve order, but it avoids the
+  shifting cost of ordered removal."
+  [xs index]
+  `(unordered_remove (addr ~xs) ~index))
+
+(defmacro keep!
+  "Map and compact `xs` in place using an optional-result callback.
+
+  `f` must return `[value, ok]`. Successful values replace the retained prefix
+  of the array; unsuccessful values are dropped."
+  [f xs]
+  `(keep!-impl ~f (addr ~xs)))
+
+(defn- keep!-impl
+  "Implementation helper for symbol-callback `arr.keep!`."
+  [f: (fn [x: $T] -> [value: T, ok: bool]), xs: (ptr (dynamic T))] #force_inline
+  (let [data (deref xs)
+        write 0]
+    (for [x data]
+      (let [[value ok] (f x)]
+        (when ok
+          (set! data[write] value)
+          (set! write (+ write 1)))))
+    (resize xs write)))
+
+(defmacro into
+  "Copy `xs` into a new array value of `out-type`.
+
+  Use this to convert between compatible array-family representations. The
+  input is not mutated. Use `arr.into!` to append into an existing dynamic
+  array."
+  [out-type xs]
+  (let [out (gensym "kvist_arr_into")
+        item (gensym "kvist_arr_item")]
+    `(let [~out (make ~out-type 0 (core.count ~xs))]
+       (for [~item ~xs]
+         (append (addr ~out) ~item))
+       ~out)))
+
+(defmacro into!
+  "Append all elements from `xs` into dynamic array `target`.
+
+  This mutates `target` and does not allocate a replacement array, though Odin
+  may grow the target's backing storage. With three arguments, append the
+  results of a fused transform over `xs`."
+  [target xs & rest]
+  (if (= (count rest) 0)
+    `(for [x ~xs]
+       (append (addr ~target) x))
+    `(transform-into!
+       ~target
+       ~xs
+       ~(first rest))))
+
+(defmacro interpose
+  "Return a new dynamic array with `sep` inserted between input elements.
+
+  No separator is added before the first or after the last element. The input is
+  not mutated."
+  [sep xs]
+  `(interpose-impl ~sep (core.slice ~xs 0)))
+
+(defn- interpose-impl
+  "Implementation helper for `arr.interpose`."
+  [sep: $T, xs: []T] -> [dynamic]T #force_inline
+  (let [n (core.count xs)
+        cap 0]
+    (when (= n 0)
+      (return (arr.empty T 0)))
+    (set! cap (- (* n 2) 1))
+    (let [out (arr.empty T cap)]
+      (append (addr out) (core.get xs 0))
+      (for [x (core.slice xs 1)]
+        (append (addr out) sep)
+        (append (addr out) x))
+      out)))
+
+(defmacro interleave
+  "Return a new dynamic array alternating elements from `xs` and `ys`.
+
+  Interleaving stops when the shorter input is exhausted. Extra elements from
+  the longer input are ignored."
+  [xs ys]
+  `(interleave-impl (core.slice ~xs 0) (core.slice ~ys 0)))
+
+(defn- interleave-impl
+  "Implementation helper for `arr.interleave`."
+  [xs: []$T, ys: []T] -> [dynamic]T #force_inline
+  (let [n (core.count xs)]
+    (when (< (core.count ys) n)
+      (set! n (core.count ys)))
+    (let [out (arr.empty T (* n 2))
+          i 0]
+      (while (< i n)
+        (append (addr out) (core.get xs i))
+        (append (addr out) (core.get ys i))
+        (set! i (+ i 1)))
+      out)))
+
+(defmacro reverse
+  "Return a new dynamic array with the elements of `xs` in reverse order.
+
+  The input is not mutated. The result is allocated with capacity equal to the
+  input count."
+  [xs]
+  `(reverse-impl (core.slice ~xs 0)))
+
+(defn- reverse-impl
+  "Implementation helper for `arr.reverse`."
+  [xs: []$T] -> [dynamic]T #force_inline
+  (let [out (arr.empty T (core.count xs))
+        i (- (core.count xs) 1)]
+    (while (>= i 0)
+      (append (addr out) (core.get xs i))
+      (set! i (- i 1)))
+    out))
+
+(defmacro reverse!
+  "Reverse dynamic array `xs` in place.
+
+  This mutates the existing array and does not allocate a replacement array."
+  [xs]
+  `(reverse!-impl (core.slice ~xs 0)))
+
+(defn- reverse!-impl
+  "Implementation helper for `arr.reverse!`."
+  [xs: []$T] #force_inline
+  (let [i 0]
+    (while (< i (/ (core.count xs) 2))
+      (let [j (- (- (core.count xs) 1) i)
+            tmp xs[i]]
+        (set! xs[i] xs[j])
+        (set! xs[j] tmp))
+      (set! i (+ i 1)))))
+
+(defmacro shuffle
+  "Return a shuffled copy of `xs`.
+
+  `pick` supplies the random index selection used by the lowering. The input is
+  not mutated; the result is a newly allocated dynamic array."
+  [pick xs]
+  `(shuffle-impl ~pick (core.slice ~xs 0)))
+
+(defn- shuffle-impl
+  "Implementation helper for `arr.shuffle`."
+  [pick: (fn [n: int] -> int), xs: []$T] -> [dynamic]T #force_inline
+  (let [out (arr.empty T (core.count xs))
+        i (- (core.count xs) 1)]
+    (for [x xs]
+      (append (addr out) x))
+    (while (> i 0)
+      (let [j (pick (+ i 1))
+            tmp out[i]]
+        (set! out[i] out[j])
+        (set! out[j] tmp))
+      (set! i (- i 1)))
+    out))
+
+(defmacro shuffle!
+  "Shuffle dynamic array `xs` in place.
+
+  `pick` supplies the random index selection used by the lowering. The existing
+  array is mutated without allocating a replacement array."
+  [pick xs]
+  `(shuffle!-impl ~pick (core.slice ~xs 0)))
+
+(defn- shuffle!-impl
+  "Implementation helper for `arr.shuffle!`."
+  [pick: (fn [n: int] -> int), xs: []$T] #force_inline
+  (let [i (- (core.count xs) 1)]
+    (while (> i 0)
+      (let [j (pick (+ i 1))
+            tmp xs[i]]
+        (set! xs[i] xs[j])
+        (set! xs[j] tmp))
+      (set! i (- i 1)))))
+
+(defmacro get
+  "Return the element at `index` in `xs`.
+
+  This lowers to direct indexing through `core.get`; bounds behavior is Odin's
+  ordinary indexing behavior."
+  [xs index]
+  `(core.get ~xs ~index))
+
+(defmacro slice
+  "Return a slice view of `xs`.
+
+  `(arr.slice xs start)` slices from `start` to the end. `(arr.slice xs start
+  end)` slices up to but not including `end`. This does not copy elements."
+  [xs start & rest]
+  (if (= (count rest) 0)
+    `(core.slice ~xs ~start)
+    `(core.slice ~xs ~start ~(first rest))))
+
+(defmacro first
+  "Return the first element of `xs`."
+  [xs]
+  `(core.get ~xs 0))
+
+(defmacro second
+  "Return the second element of `xs`."
+  [xs]
+  `(core.get ~xs 1))
+
+(defmacro nth
+  "Return the element at zero-based `index` in `xs`."
+  [index xs]
+  `(core.get ~xs ~index))
+
+(defmacro last
+  "Return the last element of `xs`.
+
+  The input must be non-empty. This lowers to direct indexing at
+  `(count xs) - 1`."
+  [xs]
+  `(core.get ~xs (- (core.count ~xs) 1)))
+
+(defmacro rest
+  "Return a slice view of `xs` without its first element.
+
+  This does not copy elements and aliases the original storage."
+  [xs]
+  `(core.slice ~xs 1))
+
+(defn take
+  "Return a slice view of the first `n` elements of `xs`.
+
+  This does not copy elements. Negative counts are treated as zero, and counts
+  larger than the input length are clamped to the input length."
+  [n: int, xs: []$T] -> []T #force_inline
+  (let [limit n]
+    (when (< limit 0)
+      (set! limit 0))
+    (when (> limit (core.count xs))
+      (set! limit (core.count xs)))
+    (odin-slice xs 0 limit)))
+
+(defn drop
+  "Return a slice view of `xs` without its first `n` elements.
+
+  This does not copy elements. Negative counts are treated as zero, and counts
+  larger than the input length produce an empty slice."
+  [n: int, xs: []$T] -> []T #force_inline
+  (let [start n]
+    (when (< start 0)
+      (set! start 0))
+    (when (> start (core.count xs))
+      (set! start (core.count xs)))
+    (odin-slice xs start)))
+
+(defn drop-last
+  "Return a slice view of `xs` without its last `n` elements.
+
+  This does not copy elements. Negative counts leave the input unchanged, and
+  counts larger than the input length produce an empty slice."
+  [n: int, xs: []$T] -> []T #force_inline
+  (let [end (- (core.count xs) n)]
+    (when (< end 0)
+      (set! end 0))
+    (when (> end (core.count xs))
+      (set! end (core.count xs)))
+    (odin-slice xs 0 end)))
+
+(defn split-at
+  "Split `xs` at index `n`.
+
+  Returns a pair of slice views: the prefix before `n` and the suffix from `n`.
+  Negative indexes are clamped to zero, and indexes larger than the input count
+  are clamped to the end. Elements are not copied."
+  [n: int, xs: []$T] -> [left: []T, right: []T] #force_inline
+  (let [mid n]
+    (when (< mid 0)
+      (set! mid 0))
+    (when (> mid (core.count xs))
+      (set! mid (core.count xs)))
+    (return (odin-slice xs 0 mid) (odin-slice xs mid))))
+
+(defn partition
+  "Return non-overlapping groups of exactly `n` elements from `xs`.
+
+  Any trailing group smaller than `n` is omitted. Group values are slice views
+  over the input where possible."
+  [n: int, xs: []$T] -> [dynamic][]T #force_inline
+  (if (<= n 0)
+    (return (make [dynamic][]T)))
+  (let [out (make [dynamic][]T 0 (/ (core.count xs) n))
+        start 0]
+    (while (<= (+ start n) (core.count xs))
+      (append (addr out) (core.slice xs start (+ start n)))
+      (set! start (+ start n)))
+    out))
+
+(defn partition-all
+  "Return non-overlapping groups of up to `n` elements from `xs`.
+
+  Unlike `arr.partition`, the final short group is included."
+  [n: int, xs: []$T] -> [dynamic][]T #force_inline
+  (if (<= n 0)
+    (return (make [dynamic][]T)))
+  (let [out (make [dynamic][]T 0 (/ (+ (core.count xs) (- n 1)) n))
+        start 0]
+    (while (< start (core.count xs))
+      (let [end (+ start n)]
+        (when (> end (core.count xs))
+          (set! end (core.count xs)))
+        (append (addr out) (core.slice xs start end)))
+      (set! start (+ start n)))
+    out))
+
+(defmacro partition-by
+  "Partition `xs` each time key function `f` returns a new key.
+
+  Adjacent elements with equal keys are grouped together. Groups preserve input
+  order."
+  [f xs]
+  `(partition-by-impl ~f (core.slice ~xs 0)))
+
+(defn- partition-by-impl
+  "Implementation helper for non-field-selector `arr.partition-by`."
+  [f: (fn [x: $T] -> $K), xs: []T] -> [dynamic][]T #force_inline
+  (if (= (core.count xs) 0)
+    (return (make [dynamic][]T)))
+  (let [out (make [dynamic][]T 0 (core.count xs))
+        start 0
+        last-key (f (core.get xs 0))
+        i 1]
+    (while (< i (core.count xs))
+      (let [key (f (core.get xs i))]
+        (if (!= key last-key)
+          (do
+            (append (addr out) (core.slice xs start i))
+            (set! start i)
+            (set! last-key key))))
+      (set! i (+ i 1)))
+    (append (addr out) (core.slice xs start))
+    out))
+
+(defmacro index-by
+  "Return a map from `(f x)` to `x` for each element in `xs`.
+
+  Later elements overwrite earlier elements with the same key. The result is a
+  newly allocated map."
+  [f xs]
+  `(index-by-impl ~f (core.slice ~xs 0)))
+
+(defn- index-by-impl
+  "Implementation helper for non-field-selector `arr.index-by`."
+  [f: (fn [x: $T] -> $K), xs: []T] -> map[K]T #force_inline
+  (let [out (make (map K T) (core.count xs))]
+    (for [x xs]
+      (set! out[(f x)] x))
+    out))
+
+(defmacro group-by
+  "Return a map from `(f x)` to a dynamic array of matching elements.
+
+  Elements preserve their input order within each group. The returned map and
+  group arrays are newly allocated."
+  [f xs]
+  `(group-by-impl ~f (core.slice ~xs 0)))
+
+(defn- group-by-impl
+  "Implementation helper for non-field-selector `arr.group-by`."
+  [f: (fn [x: $T] -> $K), xs: []T] -> (map K (dynamic T)) #force_inline
+  (let [out (make (map K (dynamic T)))]
+    (for [x xs]
+      (let [key (f x)
+            group out[key]]
+        (append (addr group) x)
+        (when (= (core.count group) 8)
+          (reserve (addr group) 64))
+        (set! out[key] group)))
+    out))
+
+(defmacro count-by
+  "Return a map counting how many elements produce each key from `f`.
+
+  The result maps keys to integer counts and is allocated once before scanning
+  the input."
+  [f xs]
+  `(count-by-impl ~f (core.slice ~xs 0)))
+
+(defn- count-by-impl
+  "Implementation helper for non-field-selector `arr.count-by`."
+  [f: (fn [x: $T] -> $K), xs: []T] -> map[K]int #force_inline
+  (let [out (make (map K int))]
+    (for [x xs]
+      (mut! out[(f x)] += 1))
+    out))
+
+(defmacro sum-by
+  "Return a map summing `(value-f x)` for each key `(key-f x)`.
+
+  This is useful for grouped numeric aggregation. Missing keys start from the
+  zero value of the value type."
+  [key-f value-f xs]
+  `(sum-by-impl ~key-f ~value-f (core.slice ~xs 0)))
+
+(defn- sum-by-impl
+  "Implementation helper for non-field-selector `arr.sum-by`."
+  [key-f: (fn [x: $T] -> $K), value-f: (fn [x: T] -> $V), xs: []T] -> map[K]V #force_inline
+  (let [out (make (map K V))]
+    (for [x xs]
+      (mut! out[(key-f x)] += (value-f x)))
+    out))
+
+(defmacro frequencies
+  "Return a map from each distinct element in `xs` to its count.
+
+  This is equivalent to counting by identity and allocates a map for the result."
+  [xs]
+  `(frequencies-impl (core.slice ~xs 0)))
+
+(defn- frequencies-impl
+  "Implementation helper for `arr.frequencies`."
+  [xs: []$T] -> map[T]int #force_inline
+  (let [out (make (map T int) (core.count xs))]
+    (for [x xs]
+      (mut! out[x] += 1))
+    out))
+
+(defmacro distinct
+  "Return the distinct values from `xs` in first-seen order.
+
+  The result is a newly allocated dynamic array. A set.map is used internally to
+  track values already emitted."
+  [xs]
+  `(distinct-impl (core.slice ~xs 0)))
+
+(defn- distinct-impl
+  "Implementation helper for `arr.distinct`."
+  [xs: []$T] -> [dynamic]T #force_inline
+  (let [out (arr.empty T (core.count xs))
+        seen (make (map T bool) (core.count xs)) :defer]
+    (for [x xs]
+      (if seen[x]
+        (continue))
+      (set! seen[x] true)
+      (append (addr out) x))
+    out))
+
+(defmacro distinct-by
+  "Return elements whose key `(f x)` has not been seen before.
+
+  The first element for each key is kept and later elements with the same key
+  are skipped. Output order follows the input."
+  [f xs]
+  `(distinct-by-impl ~f (core.slice ~xs 0)))
+
+(defn- distinct-by-impl
+  "Implementation helper for non-field-selector `arr.distinct-by`."
+  [f: (fn [x: $T] -> $K), xs: []T] -> [dynamic]T #force_inline
+  (let [out (arr.empty T (core.count xs))
+        seen (make (map K bool) (core.count xs)) :defer]
+    (for [x xs]
+      (let [key (f x)]
+        (if seen[key]
+          (continue))
+        (set! seen[key] true)
+        (append (addr out) x)))
+    out))
+
+(defmacro sort
+  "Return a sorted copy of `xs`.
+
+  The input is not mutated. Sorting uses the package lowering for Odin sort
+  operations and allocates a dynamic array copy before sorting."
+  [xs]
+  `(sort-impl (core.slice ~xs 0)))
+
+(defn- sort-impl
+  "Implementation helper for `arr.sort`."
+  [xs: []$T] -> [dynamic]T #force_inline
+  (let [out (arr.empty T (core.count xs))]
+    (for [x xs]
+      (append (addr out) x))
+    (kvist_slice.sort out[:])
+    out))
+
+(defmacro sort!
+  "Sort dynamic array `xs` in place.
+
+  This mutates the existing array and does not allocate a replacement array."
+  [xs]
+  `(sort!-impl (core.slice ~xs 0)))
+
+(defn- sort!-impl
+  "Implementation helper for `arr.sort!`."
+  [xs: []$T] #force_inline
+  (kvist_slice.sort xs))
+
+(odin "arr__Sort_By_Item :: struct($K: typeid, $T: typeid) {key: K, value: T}
+
+arr__sort_by_items_bang :: proc(items: []arr__Sort_By_Item($K, $T)) {
+    kvist_slice.sort_by(items, proc(a, b: arr__Sort_By_Item(K, T)) -> bool {
+        return a.key < b.key
+    })
+}")
+
+(defn- sort-by-impl
+  [f: (fn [x: $T] -> $K), xs: []T] -> [dynamic]T #force_inline
+  (let [items (arr.empty (arr__Sort_By_Item K T) (core.count xs)) :defer
+        out (arr.empty T (core.count xs))]
+    (for [x xs]
+      (append (addr items) ((arr__Sort_By_Item K T) {key: (f x) value: x})))
+    (arr__sort_by_items_bang (core.slice items 0))
+    (for [item items]
+      (append (addr out) item.value))
+    out))
+
+(defn- sort-by!-impl
+  [f: (fn [x: $T] -> $K), xs: []T] #force_inline
+  (let [items (arr.empty (arr__Sort_By_Item K T) (core.count xs)) :defer]
+    (for [x xs]
+      (append (addr items) ((arr__Sort_By_Item K T) {key: (f x) value: x})))
+    (arr__sort_by_items_bang (core.slice items 0))
+    (for [item i items]
+      (set! (core.get xs i) item.value))))
+
+(defmacro sort-by
+  "Return a sorted copy of `xs` ordered by key function `f`.
+
+  The input is not mutated. Keys are computed once, sorted in package source,
+  then discarded."
+  [f xs]
+  `(sort-by-impl ~f (core.slice ~xs 0)))
+
+(defmacro sort-by!
+  "Sort dynamic array `xs` in place using key function `f`.
+
+  This mutates the existing array and does not allocate a replacement array."
+  [f xs]
+  `(sort-by!-impl ~f (core.slice ~xs 0)))
+
+(defn butlast
+  "Return a slice view of `xs` without its last element.
+
+  This does not copy elements. The input must be non-empty."
+  [xs: []$T] -> []T #force_inline
+  (drop-last 1 xs))
+
+(defmacro range
+  "Return a dynamic array of integers in arithmetic progression.
+
+  `(arr.range end)` starts at 0 and steps by 1. `(arr.range start end)` uses
+  step 1. `(arr.range start end step)` uses the explicit step. The end value is
+  excluded. A zero step returns an empty array."
+  [& rest]
+  (if (= (count rest) 1)
+    `(arr__range_impl 0 ~(first rest) 1)
+    (if (= (count rest) 2)
+      `(arr__range_impl ~(first rest) ~(nth rest 1) 1)
+      `(arr__range_impl ~(first rest) ~(nth rest 1) ~(nth rest 2)))))
+
+(defstruct- Range_Source {
+  current: int
+  end: int
+  step: int
+})
+
+(defn- range-next [src: ^Range_Source] -> [value: int ok: bool]
+  (when (= src.step 0)
+    (return 0 false))
+  (if (or (and (> src.step 0) (< src.current src.end))
+          (and (< src.step 0) (> src.current src.end)))
+    (let [value src.current]
+      (set! src.current (+ src.current src.step))
+      (return value true))
+    (return 0 false)))
+
+(defiter- range-impl [start: int, end: int, step: int] -> Range_Source :yield int
+  :next range-next
+  (Range_Source {current: start end: end step: step}))
+
+(defn- map-impl
+  "Implementation helper for non-field-selector `arr.map`.
+
+  This force-inlined helper gives source-backed macros a direct Odin loop while
+  keeping callback dispatch visible to the compiler."
+  [f: (fn [x: $T] -> $U), xs: []T] -> [dynamic]U #force_inline
+  (let [out (arr.empty U (core.count xs))]
+    (for [x xs]
+      (append (addr out) (f x)))
+    out))
+
+(defn- filter-impl
+  "Implementation helper for non-field-selector `arr.filter`.
+
+  Allocates one output array with input-sized capacity and appends matching
+  elements in a single pass."
+  [pred: (fn [x: $T] -> bool), xs: []T] -> [dynamic]T #force_inline
+  (let [out (arr.empty T (core.count xs))]
+    (for [x xs]
+      (when (pred x)
+        (append (addr out) x)))
+    out))
+
+(defn- remove-impl
+  "Implementation helper for non-field-selector `arr.remove`.
+
+  Allocates one output array with input-sized capacity and appends elements for
+  which the predicate is false."
+  [pred: (fn [x: $T] -> bool), xs: []T] -> [dynamic]T #force_inline
+  (let [out (arr.empty T (core.count xs))]
+    (for [x xs]
+      (when (not (pred x))
+        (append (addr out) x)))
+    out))
+
+(defn- reduce-impl
+  "Implementation helper for `arr.reduce`.
+
+  Runs a single left-to-right pass and keeps only the accumulator, so it
+  allocates nothing."
+  [f: (fn [acc: $U, x: $T] -> U), init: U, xs: []T] -> U #force_inline
+  (let [acc init]
+    (for [x xs]
+      (set! acc (f acc x)))
+    acc))
+
+(defn- reduce-indexed-impl
+  "Implementation helper for `arr.reduce-indexed`.
+
+  Runs a single left-to-right pass with the current index and keeps only the
+  accumulator, so it allocates nothing."
+  [f: (fn [acc: $U, i: int, x: $T] -> U), init: U, xs: []T] -> U #force_inline
+  (let [acc init]
+    (for [x i xs]
+      (set! acc (f acc i x)))
+    acc))
+
+(defmacro take-nth
+  "Return a dynamic array containing every `n`th element of `xs`.
+
+  The first selected element is at index 0. When `n` is less than or equal to
+  zero, the result is empty. The output capacity is computed from the input
+  count so appending does not repeatedly reallocate."
+  [n xs]
+  `(arr__take_nth_impl ~n ~xs))
+
+(odin "arr__Take_Nth_Source :: struct($T: typeid) {step: int, xs: []T, zero: T, index: int}")
+
+(defn- take-nth-next [src: (ptr (arr__Take_Nth_Source $T))] -> [item: T ok: bool]
+  (if (and (> src.step 0) (< src.index (core.count src.xs)))
+    (let [value (core.get src.xs src.index)]
+      (set! src.index (+ src.index src.step))
+      (return value true))
+    (return src.zero false)))
+
+(defiter- take-nth-impl [n: int, xs: []$T] -> (arr__Take_Nth_Source T) :yield T
+  :next take-nth-next
+  ((arr__Take_Nth_Source T) {step: n xs: xs index: 0}))
+
+(defmacro repeat
+  "Return a dynamic array containing `value` repeated `n` times.
+
+  Non-positive `n` returns an empty dynamic array. The result is allocated with
+  exact capacity."
+  [n value]
+  `(arr__repeat_impl ~n ~value))
+
+(odin "arr__Repeat_Source :: struct($T: typeid) {value: T, index: int, count: int}")
+
+(defn- repeat-next [src: (ptr (arr__Repeat_Source $T))] -> [item: T ok: bool]
+  (if (< src.index src.count)
+    (let [value src.value]
+      (set! src.index (+ src.index 1))
+      (return value true))
+    (return src.value false)))
+
+(defiter- repeat-impl [n: int, value: $T] -> (arr__Repeat_Source T) :yield T
+  :next repeat-next
+  ((arr__Repeat_Source T) {value: value index: 0 count: n}))
+
+(defmacro repeatedly
+  "Call `f` `n` times and return the produced values in a dynamic array.
+
+  Calls happen left to right. Non-positive `n` returns an empty dynamic array.
+  The result is allocated with exact capacity."
+  [n f]
+  `(arr__repeatedly_impl ~n ~f))
+
+(odin "arr__Repeatedly_Source :: struct($T: typeid) {f: proc() -> T, zero: T, index: int, count: int}")
+
+(defn- repeatedly-next [src: (ptr (arr__Repeatedly_Source $T))] -> [item: T ok: bool]
+  (if (< src.index src.count)
+    (let [value (src.f)]
+      (set! src.index (+ src.index 1))
+      (return value true))
+    (return src.zero false)))
+
+(defiter- repeatedly-impl [n: int, f: (fn [] -> $T)] -> (arr__Repeatedly_Source T) :yield T
+  :next repeatedly-next
+  ((arr__Repeatedly_Source T) {f: f index: 0 count: n}))
+
+(defmacro iterate
+  "Return `n` successive values by repeatedly applying `f`.
+
+  The first output value is `init`; each later value is produced from the
+  previous one. Non-positive `n` returns an empty dynamic array."
+  [n f init]
+  `(arr__iterate_impl ~n ~f ~init))
+
+(odin "arr__Iterate_Source :: struct($T: typeid) {f: proc(x: T) -> T, current: T, index: int, count: int}")
+
+(defn- iterate-next [src: (ptr (arr__Iterate_Source $T))] -> [item: T ok: bool]
+  (if (< src.index src.count)
+    (let [value src.current]
+      (set! src.current (src.f src.current))
+      (set! src.index (+ src.index 1))
+      (return value true))
+    (return src.current false)))
+
+(defiter- iterate-impl [n: int, f: (fn [x: $T] -> T), init: T] -> (arr__Iterate_Source T) :yield T
+  :next iterate-next
+  ((arr__Iterate_Source T) {f: f current: init index: 0 count: n}))
+
+(defmacro cycle
+  "Return `n` values by repeating the contents of `xs`.
+
+  The input order is preserved on each pass. Empty input or non-positive `n`
+  returns an empty dynamic array. The output is owned and allocated with exact
+  capacity."
+  [n xs]
+  `(arr__cycle_impl ~n ~xs))
+
+(odin "arr__Cycle_Source :: struct($T: typeid) {xs: []T, zero: T, index: int, count: int, size: int}")
+
+(defn- cycle-next [src: (ptr (arr__Cycle_Source $T))] -> [item: T ok: bool]
+  (if (and (< src.index src.count) (> src.size 0))
+    (let [value (core.get src.xs (% src.index src.size))]
+      (set! src.index (+ src.index 1))
+      (return value true))
+    (return src.zero false)))
+
+(defiter- cycle-impl [n: int, xs: []$T] -> (arr__Cycle_Source T) :yield T
+  :next cycle-next
+  ((arr__Cycle_Source T) {xs: xs index: 0 count: n size: (core.count xs)}))
+
+(defmacro take-while
+  "Return the longest leading slice whose elements satisfy `pred`.
+
+  The result is a slice view into the original input and does not copy elements.
+  Dot field selectors are supported for array element projection."
+  [pred xs]
+  `(take-while-impl ~pred (core.slice ~xs 0)))
+
+(defmacro drop-while
+  "Return the suffix after dropping leading elements that satisfy `pred`.
+
+  The result is a slice view into the original input and does not copy elements.
+  Dot field selectors are supported for array element projection."
+  [pred xs]
+  `(drop-while-impl ~pred (core.slice ~xs 0)))
+
+(defmacro some?
+  "Return true when any element of `xs` satisfies `pred`.
+
+  Evaluation stops at the first matching element. This lowers to a direct loop
+  and allocates nothing."
+  [pred xs]
+  `(some-impl ~pred (core.slice ~xs 0)))
+
+(defmacro every?
+  "Return true when every element of `xs` satisfies `pred`.
+
+  Evaluation stops at the first failing element. Empty inputs return true. This
+  lowers to a direct loop and allocates nothing."
+  [pred xs]
+  `(every-impl ~pred (core.slice ~xs 0)))
+
+(defmacro find
+  "Return the first element of `xs` satisfying `pred`, plus an ok flag.
+
+  The return shape is `[value, ok]`. When no element matches, `ok` is false and
+  `value` is the zero value of the element type."
+  [pred xs]
+  `(find-impl ~pred (core.slice ~xs 0)))
+
+(defmacro find-indexed
+  "Return the first matching index and element of `xs`, plus an ok flag.
+
+  `pred` receives the zero-based index and element. The return shape is
+  `[index, value, ok]`. When no element matches, `index` is -1, `ok` is false,
+  and `value` is the zero value of the element type."
+  [pred xs]
+  `(find-indexed-impl ~pred (core.slice ~xs 0)))
+
+(defmacro min-by
+  "Return the element with the smallest key produced by `f`, plus an ok flag.
+
+  The input is scanned once, no output collection is allocated, and the return
+  shape is `[value, ok]`. Empty input returns `ok` false and a zero value."
+  [f xs]
+  `(min-by-impl ~f (core.slice ~xs 0)))
+
+(defmacro max-by
+  "Return the element with the largest key produced by `f`, plus an ok flag.
+
+  The input is scanned once, no output collection is allocated, and the return
+  shape is `[value, ok]`. Empty input returns `ok` false and a zero value."
+  [f xs]
+  `(max-by-impl ~f (core.slice ~xs 0)))
+
+(defn- some-impl
+  "Implementation helper for non-field-selector `arr.some?`."
+  [pred: (fn [x: $T] -> bool), xs: []T] -> bool #force_inline
+  (let [result false]
+    (for [x xs]
+      (when (pred x)
+        (do
+          (set! result true)
+          (break))))
+    result))
+
+(defn- every-impl
+  "Implementation helper for non-field-selector `arr.every?`."
+  [pred: (fn [x: $T] -> bool), xs: []T] -> bool #force_inline
+  (let [result true]
+    (for [x xs]
+      (when (not (pred x))
+        (do
+          (set! result false)
+          (break))))
+    result))
+
+(defn- find-impl
+  "Implementation helper for non-field-selector `arr.find`."
+  [pred: (fn [x: $T] -> bool), xs: []T] -> [value: T, ok: bool] #force_inline
+  (for [x xs]
+    (when (pred x)
+      (return x true)))
+  (return value false))
+
+(defn- find-indexed-impl
+  "Implementation helper for `arr.find-indexed`."
+  [pred: (fn [i: int, x: $T] -> bool), xs: []T] -> [index: int, value: T, ok: bool] #force_inline
+  (for [x i xs]
+    (when (pred i x)
+      (return i x true)))
+  (return -1 value false))
+
+(defn- min-by-impl
+  "Implementation helper for `arr.min-by`."
+  [f: (fn [x: $T] -> $K), xs: []T] -> [value: T, ok: bool] #force_inline
+  (when (= (core.count xs) 0)
+    (return value false))
+  (let [best (core.get xs 0)
+        best-key (f best)
+        i 1]
+    (while (< i (core.count xs))
+      (let [x (core.get xs i)
+            k (f x)]
+        (when (< k best-key)
+          (set! best x)
+          (set! best-key k)))
+      (set! i (+ i 1)))
+    (return best true)))
+
+(defn- max-by-impl
+  "Implementation helper for `arr.max-by`."
+  [f: (fn [x: $T] -> $K), xs: []T] -> [value: T, ok: bool] #force_inline
+  (when (= (core.count xs) 0)
+    (return value false))
+  (let [best (core.get xs 0)
+        best-key (f best)
+        i 1]
+    (while (< i (core.count xs))
+      (let [x (core.get xs i)
+            k (f x)]
+        (when (> k best-key)
+          (set! best x)
+          (set! best-key k)))
+      (set! i (+ i 1)))
+    (return best true)))
+
+(defn- take-while-impl
+  "Implementation helper for non-field-selector `arr.take-while`."
+  [pred: (fn [x: $T] -> bool), xs: []T] -> []T #force_inline
+  (for [x i xs]
+    (when (not (pred x))
+      (return (odin-slice xs 0 i))))
+  xs)
+
+(defn- drop-while-impl
+  "Implementation helper for non-field-selector `arr.drop-while`."
+  [pred: (fn [x: $T] -> bool), xs: []T] -> []T #force_inline
+  (for [x i xs]
+    (when (not (pred x))
+      (return (odin-slice xs i))))
+  (odin-slice xs (core.count xs)))

@@ -17,7 +17,7 @@
   {name: string
    age: int
    active?: bool
-   tags: set[string]
+   tags: (map string (struct {}))
    home: Point})
 
 (defstruct Named

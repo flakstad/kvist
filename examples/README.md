@@ -23,8 +23,6 @@ fixtures live under `coverage/` so the tutorial path stays readable.
 - [`collections/transforms.kvist`](./collections/transforms.kvist) - broader transform feature coverage
 - [`collections/log-source.kvist`](./collections/log-source.kvist) - `defiter` with `for`, `into`, `transduce`, and cleanup
 - [`collections/orders-report.kvist`](./collections/orders-report.kvist) - realistic collection pipeline
-- [`web/html-demo.kvist`](./web/html-demo.kvist) - HTML DSL
-- [`web/http-server.kvist`](./web/http-server.kvist) - HTTP server
 - [`visual/matrix-kinematics.kvist`](./visual/matrix-kinematics.kvist) - small raylib/linalg demo
 
 ## Layout
@@ -34,7 +32,6 @@ fixtures live under `coverage/` so the tutorial path stays readable.
 - `packages/` - package demos, tests, and measurements
 - `coverage/` - compiler/package fixtures used by tests and scripts
 - `interop/` - direct Odin package/vendor interop
-- `web/` - HTML, HTTP, SSE, Datastar
 - `visual/` - raylib demos and simulations
 - `reload/` - live and native hot-reload experiments
 - `support/` - source packages imported by examples

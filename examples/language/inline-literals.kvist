@@ -3,6 +3,8 @@
 
 ;; Demonstrates direct inline dynamic array, map, and set literals.
 
+(import arr "kvist:arr")
+
 (defn inline-literals-demo [] -> int
   (let [xs [1 2 3] :defer
         lookup {"one" 1 "two" 2} :defer
@@ -18,8 +20,8 @@
   (let [xs: [dynamic]int [] :defer
         lookup: map[string]int {} :defer
         states: map[keyword]int {} :defer
-        tags: set[string] #{} :defer
-        modes: set[keyword] #{} :defer]
+        tags: (map string (struct {})) #{} :defer
+        modes: (map keyword (struct {})) #{} :defer]
     (println lookup states tags modes)
     (arr.count xs)))
 

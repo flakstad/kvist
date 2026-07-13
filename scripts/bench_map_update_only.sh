@@ -15,7 +15,7 @@ current_exe="$tmp_dir/map-current"
 direct_exe="$tmp_dir/map-direct"
 
 printf 'building current compiler\n'
-odin build "$ROOT/cmd/kvist" -out:"$compiler"
+odin build "$ROOT/src/cli/kvist" -out:"$compiler"
 
 "$compiler" "$ROOT/benchmarks/map_update_only.kvist" -o "$generated"
 odin build "$generated" -file -o:speed -out:"$current_exe"

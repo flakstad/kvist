@@ -1,0 +1,69 @@
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
+
+(package regex)
+(import rx "core:text/regex")
+
+(def Pattern string)
+(def Regex rx.Regular_Expression)
+(def Capture rx.Capture)
+(def Error rx.Error)
+(def Flags rx.Flags)
+
+(defn compile
+  "Compile `pattern` with Odin's default regex flags.
+
+  The returned regex owns compiler-allocated storage. Destroy a successful
+  result with `regex.destroy!`."
+  [pattern: Pattern] -> [value: Regex, err: Error] #force_inline
+  (rx.create pattern))
+
+(defn compile-with-flags
+  "Compile `pattern` with explicit Odin regex flags.
+
+  The returned regex owns compiler-allocated storage. Destroy a successful
+  result with `regex.destroy!`."
+  [pattern: Pattern, flags: Flags] -> [value: Regex, err: Error] #force_inline
+  (rx.create pattern flags))
+
+(defn destroy!
+  "Destroy a compiled regex returned by `regex.compile` or Odin `rx.create`."
+  [value: Regex] #force_inline
+  (rx.destroy value))
+
+(defn match
+  "Match a compiled regex against `s` and return allocated capture data.
+
+  Capture strings are slices into `s`, but the capture arrays are owned. Destroy
+  the capture result with `regex.destroy-capture!`."
+  [compiled: Regex, s: string] -> [capture: Capture, ok: bool] #force_inline
+  (rx.match_and_allocate_capture compiled s))
+
+(defn destroy-capture!
+  "Destroy capture arrays returned by `regex.match`."
+  [capture: Capture] #force_inline
+  (rx.destroy capture))
+
+(defn matches-compiled?
+  "Return true when compiled regex `compiled` matches `s`.
+
+  This allocates temporary capture arrays and destroys them before returning."
+  [compiled: Regex, s: string] -> bool #force_inline
+  (let [[capture ok] (rx.match_and_allocate_capture compiled s)]
+    (let [owned-capture capture :defer-with rx.destroy]
+      ok)))
+
+(defn matches?
+  "Compile `pattern`, match it against `s`, destroy intermediate data, and return success."
+  [pattern: Pattern, s: string] -> bool #force_inline
+  (let [[compiled err] (rx.create pattern)]
+    (if (!= err nil)
+      false
+      (do
+        (let [owned-compiled compiled :defer-with rx.destroy]
+          (matches-compiled? owned-compiled s))))))
+
+(defn find?
+  "Alias for `regex.matches?`; Odin regex matching searches according to the pattern."
+  [pattern: Pattern, s: string] -> bool #force_inline
+  (matches? pattern s))
