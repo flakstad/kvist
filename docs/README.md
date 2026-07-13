@@ -14,6 +14,7 @@ Start here:
 - [PACKAGES.md](PACKAGES.md) - shipped `kvist:*` package index
 - [TESTING.md](TESTING.md) - tests, assertions, fixtures, and table checks
 - [MACROS.md](MACROS.md) - macro authoring
+- [ARCHITECTURE.md](ARCHITECTURE.md) - compiler kernel and package boundary for contributors
 
 Focused references:
 
