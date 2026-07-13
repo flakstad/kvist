@@ -14,7 +14,6 @@ Start here:
 - [PACKAGES.md](PACKAGES.md) - shipped `kvist:*` package index
 - [TESTING.md](TESTING.md) - tests, assertions, fixtures, and table checks
 - [MACROS.md](MACROS.md) - macro authoring
-- [CORE-BOOTSTRAP.md](CORE-BOOTSTRAP.md) - plan for shrinking compiler-owned core behavior
 
 Focused references:
 
