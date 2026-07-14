@@ -575,6 +575,45 @@ Handle :: distinct rawptr
 Order_Groups :: map[int][dynamic]Order
 ```
 
+Quoted values are first-class immutable `Data`. This is the dynamic data
+island for heterogeneous Lisp/EDN-shaped values; unquoted vectors, maps, and
+sets remain native homogeneous collections.
+
+```clojure
+(def config
+  '{:port 8080
+    :features #{:query :pull}})
+
+(def query
+  '[:find ?name
+    :where [?e :user/name ?name]])
+
+(let [port (data.int (get config :port))
+      features (get config :features)]
+  (println port
+           (contains? features :query)
+           (count query)))
+```
+
+`Data` represents nil, booleans, integers, floats, strings, symbols, keywords,
+lists, vectors, maps, and sets. Quoted literals use static backing storage, are
+cheap to copy and pass, and require no cleanup. Use `get`, `contains?`, and
+`count` for structural access. The `data.int`, `data.float`, `data.bool`,
+`data.string`, `data.symbol`, and `data.keyword` accessors cross from dynamic
+data into native typed values; `data.vector?` and the corresponding kind
+predicates inspect shapes. Import `kvist:data` for this named API and for
+`data.nth`, `data.get-in`, `data.keys`, and `data.vals` traversal helpers:
+
+```clojure
+(import data "kvist:data")
+```
+
+The compiler owns the representation-sensitive primitive operations and quote
+lowering. Higher-level operations belong in the ordinary shipped source
+package. Runtime construction and persistent updates are deliberately not yet
+exposed: they require a managed lifetime model that safely distinguishes
+runtime-owned values from immortal quoted literals.
+
 Local declarations use the same names and are scoped to the current block.
 Local `defstruct`, `defenum`, and `defunion` declare block-scoped Odin types;
 the declarations themselves are compile-time declarations, not runtime

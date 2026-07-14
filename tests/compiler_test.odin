@@ -508,7 +508,9 @@ compile_direct_dynamic_array_expr_borrows_as_slice_argument :: proc(t: ^testing.
     }
     defer delete(output)
 
-    testing.expect_value(t, strings.contains(output, "return total(([dynamic]int{1, 2, 3})[:])"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_thread_1 := [dynamic]int{1, 2, 3}"), true)
+    testing.expect_value(t, strings.contains(output, "defer delete(kvist_thread_1)"), true)
+    testing.expect_value(t, strings.contains(output, "return total(kvist_thread_1)"), true)
 }
 
 @(test)
@@ -867,6 +869,7 @@ compile_all_examples :: proc(t: ^testing.T) {
         "examples/coverage/cluck-port/cluck-port-struct-types.kvist",
         "examples/language/closures.kvist",
         "examples/language/control-flow.kvist",
+        "examples/data/edn-write.kvist",
         "examples/interop/core/core-concurrency.kvist",
         "examples/interop/core/core-container-queue.kvist",
         "examples/interop/core/core-encoding-formats.kvist",
@@ -3428,6 +3431,380 @@ reader_expands_quote_syntax_to_core_forms :: proc(t: ^testing.T) {
     testing.expect_value(t, template.items[2].items[0].text, "splice")
     testing.expect_value(t, template.items[2].items[1].text, "body")
     testing.expect_value(t, forms[1].source, "`(def ~name ~@body)")
+}
+
+@(test)
+compile_quote_as_first_class_data :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(def config
+  '{:port 8080
+    :features #{:query :pull}})
+
+(def query
+  '[:find ?name :where [?e :user/name ?name]])
+
+(defn inspect [] -> int
+  (let [features (get config :features)]
+    (if (contains? features :query)
+      (+ (int (data.int (get config :port))) (count query))
+      0)))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "config: Data = Data{kind = .Map"), true)
+    testing.expect_value(t, strings.contains(output, "query: Data = Data{kind = .Vector"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_data_get(config, Data{kind = .Keyword, payload = {text = \":features\"}})"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_data_contains(features, Data{kind = .Keyword, payload = {text = \":query\"}})"), true)
+    testing.expect_value(t, strings.contains(output, "Data_Kind :: enum"), true)
+    testing.expect_value(t, strings.contains(output, "Data_Payload :: struct #raw_union"), true)
+    testing.expect_value(t, strings.contains(output, "payload: Data_Payload"), true)
+    testing.expect_value(t, strings.contains(output, "Data_Node :: struct"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_data_retain :: proc"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_data_release :: proc"), true)
+    testing.expect_value(t, strings.contains(output, "import kvist_sync \"core:sync\""), true)
+}
+
+@(test)
+compile_imported_data_runtime_uses_required_import_aliases :: proc(t: ^testing.T) {
+    source := `(package main)
+(import edn "kvist:edn")
+
+(defn render [text: string] -> string
+  (edn.write (edn.read text)))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "Data_Kind :: enum"), true)
+    testing.expect_value(t, strings.contains(output, "import kvist_runtime \"base:runtime\""), true)
+    testing.expect_value(t, strings.contains(output, "import kvist_sync \"core:sync\""), true)
+}
+
+@(test)
+compile_manages_data_local_bindings_and_returns :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(def config '{:port 8080})
+
+(defn identity-data [value: Data] -> Data
+  value)
+
+(defn config-copy [] -> Data
+  (let [copy config]
+    copy))
+
+(defn port-data [] -> Data
+  (get config :port))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "return kvist_data_retain(value)"), true)
+    testing.expect_value(t, strings.contains(output, "copy := kvist_data_retain(config)"), true)
+    testing.expect_value(t, strings.contains(output, "defer kvist_data_release(copy)"), true)
+    testing.expect_value(t, strings.contains(output, "return kvist_data_retain(copy)"), true)
+    testing.expect_value(t, strings.contains(output, "return kvist_data_retain(kvist_data_get(config"), true)
+}
+
+@(test)
+compile_manages_data_assignment_places :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(def config '{:port 8080})
+
+(defstruct Box {
+  value: Data
+})
+
+(defn make-data [] -> Data
+  config)
+
+(defn replace [input: Data]
+  (let [local config
+        box (Box {value: config})
+        values: [1]Data [config]]
+    (set! local input)
+    (set! box.value input)
+    (set! values[0] input)
+    (set! local (make-data))))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "kvist_data_assign(&(local), input)"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_data_assign(&(box.value), input)"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_data_assign(&((values)["), true)
+    testing.expect_value(t, strings.contains(output, "kvist_data_move_assign(&(local), make_data())"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_data_assign :: proc(place: ^Data, value: Data)"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_data_move_assign :: proc(place: ^Data, value: Data)"), true)
+}
+
+@(test)
+compile_exposes_explicit_data_lifetime_helpers :: proc(t: ^testing.T) {
+    source := `(package main)
+(import data "kvist:data")
+
+(defstruct Holder { value: Data })
+
+(defn hold [value: Data] -> Holder
+  (Holder {value: (data.retain value)}))
+
+(defn release-holder [holder: Holder]
+  (data.release holder.value))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "kvist_data_retain(value)"), true)
+    testing.expect_value(t, strings.contains(output, "release(holder.value)"), true)
+}
+
+@(test)
+compile_honors_managed_data_return_contracts :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(def config '{:port 8080})
+
+(defn borrowed-data [value: Data] -> Data #borrowed
+  value)
+
+(defn owned-data [] -> Data #owned
+  (odin-call "make_owned_data"))
+
+(defn use-values [] -> Data
+  (let [borrowed (borrowed-data config)
+        owned (owned-data)]
+    (discard borrowed)
+    owned))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "borrowed_data :: proc(value: Data) -> Data {"), true)
+    testing.expect_value(t, strings.contains(output, "return value"), true)
+    testing.expect_value(t, strings.contains(output, "owned_data :: proc() -> Data {"), true)
+    testing.expect_value(t, strings.contains(output, "return make_owned_data()"), true)
+    testing.expect_value(t, strings.contains(output, "borrowed := kvist_data_retain(borrowed_data(config))"), true)
+    testing.expect_value(t, strings.contains(output, "owned := owned_data()"), true)
+}
+
+@(test)
+compile_releases_nested_owned_data_arguments :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(def config '{:port 8080})
+
+(defn make-data [] -> Data #owned
+  (odin-call "make_owned_data"))
+
+(defn combine [left: Data, right: Data] -> Data
+  left)
+
+(defn nested [] -> Data
+  (let [value (combine config (make-data))]
+    value))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "kvist_thread_1 := make_data()"), true)
+    testing.expect_value(t, strings.contains(output, "defer kvist_data_release(kvist_thread_1)"), true)
+    testing.expect_value(t, strings.contains(output, "combine(config, kvist_thread_1)"), true)
+}
+
+@(test)
+compile_runtime_data_quasiquote :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn build [entity: Data, name: string] -> Data
+  ` + "`" + `[:db/add ~entity :user/name ~name])`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "kvist_data_make_text(Data_Kind.String, name)"), true)
+    testing.expect_value(t, strings.contains(output, "defer kvist_data_release(kvist_thread_"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_data_make_items(Data_Kind.Vector, []Data{"), true)
+}
+
+@(test)
+compile_runtime_data_quasiquote_splice :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(def tail '[2 3])
+
+(defn build [] -> Data
+  ` + "`" + `[1 ~@tail 4])`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "kvist_data_make_items_spliced(Data_Kind.Vector"), true)
+    testing.expect_value(t, strings.contains(output, "Data_Piece{value = tail, splice = true}"), true)
+}
+
+@(test)
+compile_manages_data_returned_by_proc_value :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(def config '{:port 8080})
+
+(defn apply-data [f: (fn [value: Data] -> Data)] -> Data
+  (let [updated (f config)]
+    updated))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "updated := f(config)"), true)
+    testing.expect_value(t, strings.contains(output, "defer kvist_data_release(updated)"), true)
+    testing.expect_value(t, strings.contains(output, "return kvist_data_retain(updated)"), true)
+}
+
+@(test)
+compile_manages_data_in_named_returns :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(def config '{:port 8080})
+
+(defn parse [] -> [value: Data, ok: bool]
+  (return config true))
+
+(defn parse-nested [fail: bool] -> [value: Data, ok: bool]
+  (when fail
+    (return config false))
+  (return config true))
+
+(defn use [] -> Data
+  (let [[value ok] (parse)]
+    (discard ok)
+    value))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "return kvist_data_retain(config), true"), true)
+    testing.expect_value(t, strings.contains(output, "return kvist_data_retain(config), false"), true)
+    testing.expect_value(t, strings.contains(output, "value, ok := parse()"), true)
+    testing.expect_value(t, strings.contains(output, "defer kvist_data_release(value)"), true)
+    testing.expect_value(t, strings.contains(output, "return kvist_data_retain(value)"), true)
+}
+
+@(test)
+compile_normalizes_managed_data_expression_ownership :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(def config '{:port 8080})
+
+(defn make-data [] -> Data #owned
+  (odin-call "make_owned_data"))
+
+(defn choose [use-static: bool] -> Data
+  (let [selected: Data (if use-static config (make-data))
+        through-block: Data (let [copy selected] copy)]
+    through-block))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "selected: Data = (kvist_data_retain(config) if use_static else make_data())"), true)
+    testing.expect_value(t, strings.contains(output, "selected := kvist_data_retain(("), false)
+    testing.expect_value(t, strings.contains(output, "through_block: Data = copy"), true)
+    testing.expect_value(t, strings.contains(output, "through_block := kvist_data_retain(proc("), false)
+}
+
+@(test)
+compile_normalizes_managed_data_type_case_ownership :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(def config '{:port 8080})
+
+(defunion Choice {
+  data: Data
+  number: int
+})
+
+(defn select [choice: Choice] -> Data
+  (let [selected: Data
+          (type-case choice
+            (Data value) value
+            config)]
+    selected))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "selected: Data = (proc("), true)
+    testing.expect_value(t, strings.contains(output, "selected := kvist_data_retain(proc("), false)
+    testing.expect_value(t, strings.contains(output, "return kvist_data_retain(value)"), true)
+    testing.expect_value(t, strings.contains(output, "return kvist_data_retain(config)"), true)
 }
 
 @(test)
@@ -21913,6 +22290,86 @@ compile_source_package_preserves_type_forms_in_proc_signatures :: proc(t: ^testi
     testing.expect_value(t, strings.contains(output, "out := make(map[string][dynamic]int)"), true)
     testing.expect_value(t, strings.contains(output, "group := make([dynamic]int, 0, 2)"), true)
     testing.expect_value(t, strings.contains(output, "groups__dynamic"), false)
+}
+
+@(test)
+compile_source_package_function_names_do_not_shadow_builtin_signature_types :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-source-package-builtin-type-shadow-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    pkg_dir, join_pkg_err := os.join_path({dir, "data"}, context.allocator)
+    testing.expect_value(t, join_pkg_err == nil, true)
+    if join_pkg_err != nil {
+        return
+    }
+    defer delete(pkg_dir)
+    mk_pkg_err := os.make_directory_all(pkg_dir)
+    testing.expect_value(t, mk_pkg_err == nil, true)
+    if mk_pkg_err != nil {
+        return
+    }
+
+    pkg_file, pkg_join_err := os.join_path({pkg_dir, "data.kvist"}, context.allocator)
+    testing.expect_value(t, pkg_join_err == nil, true)
+    if pkg_join_err != nil {
+        return
+    }
+    defer delete(pkg_file)
+    pkg_source := `(package data)
+
+(defn int [value: Data] -> i64
+  42)
+
+(defn bool [value: Data] -> bool
+  true)
+
+(defn string [value: Data] -> string
+  "data")`
+    pkg_write_err := os.write_entire_file_from_string(pkg_file, pkg_source)
+    testing.expect_value(t, pkg_write_err == nil, true)
+    if pkg_write_err != nil {
+        return
+    }
+
+    main_path, main_join_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, main_join_err == nil, true)
+    if main_join_err != nil {
+        return
+    }
+    defer delete(main_path)
+    main_source := `(package main)
+(import data "data")
+
+(def value '42)
+
+(defn main [] -> bool
+  (and (= (data.int value) 42)
+       (data.bool value)
+       (= (data.string value) "data")))`
+    main_write_err := os.write_entire_file_from_string(main_path, main_source)
+    testing.expect_value(t, main_write_err == nil, true)
+    if main_write_err != nil {
+        return
+    }
+
+    output, err, ok := kvist.compile_path(main_path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "data__int :: proc(value: Data) -> i64"), true)
+    testing.expect_value(t, strings.contains(output, "data__bool :: proc(value: Data) -> bool"), true)
+    testing.expect_value(t, strings.contains(output, "data__string :: proc(value: Data) -> string"), true)
+    testing.expect_value(t, strings.contains(output, "-> data__bool"), false)
+    testing.expect_value(t, strings.contains(output, "-> data__string"), false)
 }
 
 @(test)

@@ -42,8 +42,11 @@ For a small runnable version of this shape, see
 
 ## Quoting
 
-`'form` is reader syntax for `(quote form)`: it returns one form without
-evaluating it in the macro evaluator.
+`'form` is reader syntax for `(quote form)`. In the macro evaluator it returns
+one source form without evaluating it. In ordinary runtime code it produces a
+first-class immutable `Data` value. `Data` and macro syntax are deliberately
+separate: syntax retains compiler context and source locations, while runtime
+data does not.
 
 Backtick is reader syntax for `quasiquote`. It builds a form while allowing
 selected parts to be evaluated:

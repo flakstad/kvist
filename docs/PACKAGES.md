@@ -19,6 +19,8 @@ importing repository for shipped packages.
 ## Shipped Language Packages
 
 - `kvist:core` - auto-referred macros and basic helpers.
+- `kvist:data` - traversal and typed access for first-class quoted `Data`.
+- `kvist:edn` - parse and render first-class `Data` as EDN text.
 - `kvist:bit` - bitwise integer operations.
 - `kvist:arr` - concrete array, slice, transform, and sorting helpers.
 - `kvist:map` - map construction and update helpers.

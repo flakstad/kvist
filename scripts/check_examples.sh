@@ -27,6 +27,7 @@ run_odin() {
 
 find examples/collections \
      examples/coverage \
+     examples/data \
      examples/interop \
      examples/language \
      examples/packages \

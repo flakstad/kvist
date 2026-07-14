@@ -1653,7 +1653,10 @@ rewrite_type_form_symbols :: proc(form: CST_Form, locals: []string, aliases: []A
     rewritten := form
     #partial switch form.kind {
     case .Symbol:
-        if type_constructor_symbol(form.text) {
+        if type_constructor_symbol(form.text) ||
+           type_text_is_builtin_odin_scalar(form.text) ||
+           form.text == "float" || form.text == "char" ||
+           form.text == "Data" || form.text == "Data-Kind" || form.text == "Data-Entry" {
             return rewritten, Compile_Error{}, true
         }
         text, err_text, ok_text := rewrite_symbol_text(form.text, locals, aliases, prefix, form.span)

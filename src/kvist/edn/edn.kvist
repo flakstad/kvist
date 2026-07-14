@@ -1,0 +1,290 @@
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
+
+(package edn)
+(import core "kvist:core")
+(import data "kvist:data")
+(import fmt "core:fmt")
+(import os "core:os")
+(import str "kvist:str")
+(import strconv "core:strconv")
+(import strings "core:strings")
+
+(defstruct Read-Error {
+  message: string
+  offset: int
+})
+
+(defstruct Reader {
+  text: string
+  index: int
+})
+
+(defn- whitespace? [ch: byte] -> bool
+  (or (= ch (byte 32))
+      (= ch (byte 9))
+      (= ch (byte 10))
+      (= ch (byte 13))
+      (= ch (byte 44))))
+
+(defn- delimiter? [ch: byte] -> bool
+  (or (whitespace? ch)
+      (= ch (byte 40))
+      (= ch (byte 41))
+      (= ch (byte 91))
+      (= ch (byte 93))
+      (= ch (byte 123))
+      (= ch (byte 125))
+      (= ch (byte 34))
+      (= ch (byte 59))))
+
+(defn- skip-space! [reader: ^Reader]
+  (while (< reader.index (core.count reader.text))
+    (let [ch (core.get reader.text reader.index)]
+      (cond
+        (whitespace? ch) (inc! reader.index)
+        (= ch (byte 59))
+          (do
+            (while (and (< reader.index (core.count reader.text))
+                        (!= (core.get reader.text reader.index) (byte 10)))
+              (inc! reader.index)))
+        :else (break)))))
+
+(defn- read-error [reader: ^Reader, message: string]
+  -> [value: Data, error: Read-Error, ok: bool]
+  (return 'nil (Read-Error {message: message offset: reader.index}) false))
+
+(defn- parse-string [reader: ^Reader]
+  -> [value: Data, error: Read-Error, ok: bool]
+  (inc! reader.index)
+  (let [start reader.index
+        escaped false]
+    (while (< reader.index (core.count reader.text))
+      (let [ch (core.get reader.text reader.index)]
+        (cond
+          escaped (do (set! escaped false) (inc! reader.index))
+          (= ch (byte 92)) (do (set! escaped true) (inc! reader.index))
+          (= ch (byte 34))
+            (let [raw (core.slice reader.text start reader.index)
+                  decoded (str.unescape raw) :defer
+                  value (data.from-string decoded)]
+              (inc! reader.index)
+              (return value (Read-Error {}) true))
+          :else (inc! reader.index))))
+    (read-error reader "unterminated string")))
+
+(defn- decimal-token? [token: string] -> bool
+  (when (= (core.count token) 0)
+    (return false))
+  (let [index (if (or (= (core.get token 0) (byte 43))
+                      (= (core.get token 0) (byte 45)))
+                1
+                0)]
+    (when (>= index (core.count token))
+      (return false))
+    (let [ch (core.get token index)]
+      (and (>= ch (byte 48)) (<= ch (byte 57))))))
+
+(defn- parse-token [reader: ^Reader]
+  -> [value: Data, error: Read-Error, ok: bool]
+  (let [start reader.index]
+    (while (and (< reader.index (core.count reader.text))
+                (not (delimiter? (core.get reader.text reader.index))))
+      (inc! reader.index))
+    (let [token (core.slice reader.text start reader.index)]
+      (cond
+        (= token "") (read-error reader "expected EDN value")
+        (= token "nil") (return 'nil (Read-Error {}) true)
+        (= token "true") (return 'true (Read-Error {}) true)
+        (= token "false") (return 'false (Read-Error {}) true)
+        (= (core.get token 0) (byte 58))
+          (return (data.from-keyword token) (Read-Error {}) true)
+        (or (str.contains? token ".")
+            (str.contains? token "e")
+            (str.contains? token "E"))
+          (let [[number number-ok] (strconv.parse_f64 token)]
+            (if number-ok
+              (return (data.from-float number) (Read-Error {}) true)
+              (return (data.from-symbol token) (Read-Error {}) true)))
+        :else
+          (let [[number number-ok] (strconv.parse-int token)]
+            (if (and (decimal-token? token) number-ok)
+              (return (data.from-int (i64 number)) (Read-Error {}) true)
+              (return (data.from-symbol token) (Read-Error {}) true)))))))
+
+(defn- parse-sequence [reader: ^Reader, close: byte, initial: Data]
+  -> [value: Data, error: Read-Error, ok: bool]
+  (let [result initial]
+    (while true
+      (skip-space! reader)
+      (when (>= reader.index (core.count reader.text))
+        (return (read-error reader "unterminated collection")))
+      (when (= (core.get reader.text reader.index) close)
+        (inc! reader.index)
+        (return result (Read-Error {}) true))
+      (let [[item error ok] (parse-value reader)]
+        (when (not ok)
+          (return 'nil error false))
+        (set! result (data.append result item))))
+    (read-error reader "unterminated collection")))
+
+(defn- parse-map [reader: ^Reader]
+  -> [value: Data, error: Read-Error, ok: bool]
+  (let [result '{}]
+    (while true
+      (skip-space! reader)
+      (when (>= reader.index (core.count reader.text))
+        (return (read-error reader "unterminated map")))
+      (when (= (core.get reader.text reader.index) (byte 125))
+        (inc! reader.index)
+        (return result (Read-Error {}) true))
+      (let [[key key-error key-ok] (parse-value reader)]
+        (when (not key-ok)
+          (return 'nil key-error false))
+        (skip-space! reader)
+        (when (or (>= reader.index (core.count reader.text))
+                  (= (core.get reader.text reader.index) (byte 125)))
+          (return (read-error reader "map requires an even number of forms")))
+        (let [[value value-error value-ok] (parse-value reader)]
+          (when (not value-ok)
+            (return 'nil value-error false))
+          (set! result (data.assoc result key value)))))
+    (read-error reader "unterminated map")))
+
+(defn- parse-value [reader: ^Reader]
+  -> [value: Data, error: Read-Error, ok: bool]
+  (skip-space! reader)
+  (if (>= reader.index (core.count reader.text))
+    (read-error reader "unexpected end of EDN input")
+    (let [ch (core.get reader.text reader.index)]
+      (cond
+        (= ch (byte 34)) (parse-string reader)
+        (= ch (byte 91)) (do (inc! reader.index) (parse-sequence reader (byte 93) '[]))
+        (= ch (byte 40)) (do (inc! reader.index) (parse-sequence reader (byte 41) '()))
+        (= ch (byte 123)) (do (inc! reader.index) (parse-map reader))
+        (= ch (byte 35))
+          (if (and (< (+ reader.index 1) (core.count reader.text))
+                   (= (core.get reader.text (+ reader.index 1)) (byte 123)))
+            (do (mut! reader.index += 2) (parse-sequence reader (byte 125) '#{}))
+            (do
+              (inc! reader.index)
+              (let [tag-start reader.index]
+                (while (and (< reader.index (core.count reader.text))
+                            (not (delimiter? (core.get reader.text reader.index))))
+                  (inc! reader.index))
+                (if (= tag-start reader.index)
+                  (return (read-error reader "expected EDN tag")))
+                (let [tag (core.slice reader.text tag-start reader.index)]
+                  (skip-space! reader)
+                  (if (>= reader.index (core.count reader.text))
+                    (return (read-error reader "tagged literal requires a value")))
+                  (let [[tagged-value tagged-error tagged-ok] (parse-value reader)]
+                    (if (not tagged-ok)
+                      (return 'nil tagged-error false))
+                    (return (data.tagged tag tagged-value) (Read-Error {}) true))))))
+        (or (= ch (byte 41)) (= ch (byte 93)) (= ch (byte 125)))
+          (read-error reader "unexpected closing delimiter")
+        :else (parse-token reader)))))
+
+(defn try-read
+  "Parse one complete EDN value, returning a structured byte-offset error."
+  [text: string] -> [value: Data, error: Read-Error, ok: bool]
+  (let [reader (Reader {text: text})
+        [parsed parse-error parsed-ok] (parse-value (addr reader))]
+    (if (not parsed-ok)
+      (return 'nil parse-error false))
+    (skip-space! (addr reader))
+    (if (!= reader.index (core.count text))
+      (read-error (addr reader) "trailing EDN input")
+      (return parsed (Read-Error {}) true))))
+
+(defn read
+  "Parse one complete EDN value, asserting when the input is malformed."
+  [text: string] -> Data
+  (let [[value error ok] (try-read text)]
+    (assert ok error.message)
+    value))
+
+(defn try-read-file
+  "Read and parse one EDN value from `path`."
+  [path: string] -> [value: Data, error: Read-Error, ok: bool]
+  (let [[bytes file-error] (os.read_entire_file path context.allocator)]
+    (if (!= file-error nil)
+      (return 'nil (Read-Error {message: "could not read EDN file"}) false))
+    (defer (delete bytes))
+    (try-read (string bytes))))
+
+(defn read-file
+  "Read one EDN value from `path`, asserting on I/O or parse failure."
+  [path: string] -> Data
+  (let [[value error ok] (try-read-file path)]
+    (assert ok error.message)
+    value))
+
+(defn- write-string! [builder: ^strings.Builder, value: string]
+  (strings.write_byte builder (byte 34))
+  (let [index 0]
+    (while (< index (core.count value))
+      (let [ch (core.get value index)]
+        (cond
+          (= ch (byte 34)) (strings.write_string builder "\\\"")
+          (= ch (byte 92)) (strings.write_string builder "\\\\")
+          (= ch (byte 10)) (strings.write_string builder "\\n")
+          (= ch (byte 13)) (strings.write_string builder "\\r")
+          (= ch (byte 9)) (strings.write_string builder "\\t")
+          :else (strings.write_byte builder ch)))
+      (inc! index)))
+  (strings.write_byte builder (byte 34)))
+
+(defn- write-sequence!
+  [builder: ^strings.Builder, value: Data, open: string, close: string]
+  (strings.write_string builder open)
+  (let [index 0]
+    (while (< index (core.count value))
+      (when (> index 0)
+        (strings.write_byte builder (byte 32)))
+      (write-value! builder (data.item-at value index))
+      (inc! index)))
+  (strings.write_string builder close))
+
+(defn- write-map! [builder: ^strings.Builder, value: Data]
+  (strings.write_byte builder (byte 123))
+  (let [index 0]
+    (while (< index (core.count value))
+      (when (> index 0)
+        (strings.write_byte builder (byte 32)))
+      (write-value! builder (data.key-at value index))
+      (strings.write_byte builder (byte 32))
+      (write-value! builder (data.value-at value index))
+      (inc! index)))
+  (strings.write_byte builder (byte 125)))
+
+(defn- write-value! [builder: ^strings.Builder, value: Data]
+  (case (data.kind value)
+    .Nil (strings.write_string builder "nil")
+    .Bool (strings.write_string builder (if (data.bool value) "true" "false"))
+    .Int (fmt.sbprintf builder "%d" (data.int value))
+    .Float (fmt.sbprintf builder "%g" (data.float value))
+    .String (write-string! builder (data.string value))
+    .Symbol (strings.write_string builder (data.symbol value))
+    .Keyword (strings.write_string builder (data.keyword value))
+    .List (write-sequence! builder value "(" ")")
+    .Vector (write-sequence! builder value "[" "]")
+    .Map (write-map! builder value)
+    .Set (write-sequence! builder value "#{" "}")
+    .Tagged
+      (do
+        (strings.write_byte builder (byte 35))
+        (strings.write_string builder (data.tag value))
+        (strings.write_byte builder (byte 32))
+        (write-value! builder (data.tagged-value value)))
+    (strings.write_string builder "nil")))
+
+(defn write
+  "Render `value` as canonical EDN text in its stable backing order."
+  [value: Data] -> string
+  (let [builder (strings.builder_make)]
+    (defer (strings.builder_destroy (addr builder)))
+    (write-value! (addr builder) value)
+    (let [[out err] (strings.clone (strings.to_string builder))]
+      (if (!= err nil) "" out))))

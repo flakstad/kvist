@@ -1,0 +1,276 @@
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
+
+(package data)
+(import core "kvist:core")
+(import arr "kvist:arr")
+
+(defn from-bool
+  "Construct boolean Data."
+  [value: bool] -> Data #owned #force_inline
+  (odin-call "kvist_data_make_bool" value))
+
+(defn from-int
+  "Construct integer Data."
+  [value: i64] -> Data #owned #force_inline
+  (odin-call "kvist_data_make_int" value))
+
+(defn from-float
+  "Construct floating-point Data."
+  [value: f64] -> Data #owned #force_inline
+  (odin-call "kvist_data_make_float" value))
+
+(defn from-string
+  "Construct string Data with owned immutable text."
+  [value: string] -> Data #owned #force_inline
+  (odin-call "kvist_data_make_text" .String value))
+
+(defn from-symbol
+  "Construct symbol Data with owned immutable text."
+  [value: string] -> Data #owned #force_inline
+  (odin-call "kvist_data_make_text" .Symbol value))
+
+(defn from-keyword
+  "Construct keyword Data with owned immutable text."
+  [value: string] -> Data #owned #force_inline
+  (odin-call "kvist_data_make_text" .Keyword value))
+
+(defn list
+  "Construct list Data, retaining each element."
+  [values: []Data] -> Data #owned #force_inline
+  (odin-call "kvist_data_make_items" .List values))
+
+(defn vector
+  "Construct vector Data, retaining each element."
+  [values: []Data] -> Data #owned #force_inline
+  (odin-call "kvist_data_make_items" .Vector values))
+
+(defn set
+  "Construct set Data, retaining each element."
+  [values: []Data] -> Data #owned #force_inline
+  (odin-call "kvist_data_make_items" .Set values))
+
+(defn map
+  "Construct map Data from alternating keys and values."
+  [values: []Data] -> Data #owned #force_inline
+  (odin-call "kvist_data_make_map" values))
+
+(defn empty-map
+  "Construct empty map Data."
+  [] -> Data #owned #force_inline
+  (odin-call "kvist_data_empty_map"))
+
+(defn tagged
+  "Construct tagged Data, retaining `value` and owning a copy of `tag`.
+
+  The tag excludes EDN's leading `#`; for example, use `\"uuid\"`."
+  [tag: string, value: Data] -> Data #owned #force_inline
+  (odin-call "kvist_data_make_tagged" tag value))
+
+(defn retain
+  "Return an owned reference to `value` for storage outside managed bindings."
+  [value: Data] -> Data #owned #force_inline
+  (odin-call "kvist_data_retain" value))
+
+(defn release
+  "Release a Data reference retained for native storage."
+  [value: Data] #force_inline
+  (odin-call "kvist_data_release" value))
+
+(defn assoc
+  "Return immutable map or vector Data with `key` associated to `value`."
+  [collection: Data, key: Data, value: Data] -> Data #owned #force_inline
+  (odin-call "kvist_data_assoc" collection key value))
+
+(defn dissoc
+  "Return immutable map Data without `key`."
+  [collection: Data, key: Data] -> Data #owned #force_inline
+  (odin-call "kvist_data_dissoc" collection key))
+
+(defn conj
+  "Return immutable sequential or set Data with `value` added."
+  [collection: Data, value: Data] -> Data #owned #force_inline
+  (odin-call "kvist_data_conj" collection value))
+
+(defn append
+  "Return list, vector, or set Data with `value` added at the end."
+  [collection: Data, value: Data] -> Data #owned #force_inline
+  (odin-call "kvist_data_append" collection value))
+
+(defn merge
+  "Return map Data containing entries from `left` and `right`.
+
+  Values from `right` replace equal keys from `left`."
+  [left: Data, right: Data] -> Data
+  (let [result left]
+    (for [index (arr.range 0 (core.count right))]
+      (set! result (assoc result (key-at right index) (value-at right index))))
+    result))
+
+(defn int
+  "Read the integer payload of `value`.
+
+  The value must be integer Data. This returns the native `i64` payload and
+  does not allocate."
+  [value: Data] -> i64 #force_inline
+  (odin-call "kvist_data_int" value))
+
+(defn float
+  "Read the floating-point payload of `value`."
+  [value: Data] -> f64 #force_inline
+  (odin-call "kvist_data_float" value))
+
+(defn bool
+  "Read the boolean payload of `value`."
+  [value: Data] -> bool #force_inline
+  (odin-call "kvist_data_bool" value))
+
+(defn string
+  "Read the borrowed native string payload of string Data."
+  [value: Data] -> string #borrowed #force_inline
+  (odin-call "kvist_data_string" value))
+
+(defn symbol
+  "Read the borrowed native text of symbol Data."
+  [value: Data] -> string #borrowed #force_inline
+  (odin-call "kvist_data_symbol" value))
+
+(defn keyword
+  "Read the borrowed native text of keyword Data."
+  [value: Data] -> string #borrowed #force_inline
+  (odin-call "kvist_data_keyword" value))
+
+(defn text
+  "Read borrowed native text from string, symbol, or keyword Data."
+  [value: Data] -> string #borrowed #force_inline
+  (odin-call "kvist_data_text" value))
+
+(defn tag
+  "Read the borrowed tag text from tagged Data, without the leading `#`."
+  [value: Data] -> string #borrowed #force_inline
+  (odin-call "kvist_data_tag" value))
+
+(defn tagged-value
+  "Read the borrowed payload from tagged Data."
+  [value: Data] -> Data #borrowed #force_inline
+  (odin-call "kvist_data_tagged_value" value))
+
+(defn kind
+  "Return the runtime kind of `value`."
+  [value: Data] -> Data-Kind #force_inline
+  (odin-call "kvist_data_kind" value))
+
+(defn nil? [value: Data] -> bool #force_inline
+  (odin-call "kvist_data_nil_p" value))
+
+(defn bool? [value: Data] -> bool #force_inline
+  (odin-call "kvist_data_bool_p" value))
+
+(defn int? [value: Data] -> bool #force_inline
+  (odin-call "kvist_data_int_p" value))
+
+(defn float? [value: Data] -> bool #force_inline
+  (odin-call "kvist_data_float_p" value))
+
+(defn string? [value: Data] -> bool #force_inline
+  (odin-call "kvist_data_string_p" value))
+
+(defn symbol? [value: Data] -> bool #force_inline
+  (odin-call "kvist_data_symbol_p" value))
+
+(defn keyword? [value: Data] -> bool #force_inline
+  (odin-call "kvist_data_keyword_p" value))
+
+(defn list? [value: Data] -> bool #force_inline
+  (odin-call "kvist_data_list_p" value))
+
+(defn vector? [value: Data] -> bool #force_inline
+  (odin-call "kvist_data_vector_p" value))
+
+(defn map? [value: Data] -> bool #force_inline
+  (odin-call "kvist_data_map_p" value))
+
+(defn set? [value: Data] -> bool #force_inline
+  (odin-call "kvist_data_set_p" value))
+
+(defn tagged? [value: Data] -> bool #force_inline
+  (odin-call "kvist_data_tagged_p" value))
+
+(defn key-at
+  "Return the key at `index` in map Data.
+
+  Map traversal order is the literal/runtime backing order."
+  [value: Data, index: int] -> Data #borrowed #force_inline
+  (odin-call "kvist_data_key_at" value index))
+
+(defn value-at
+  "Return the value at `index` in map Data."
+  [value: Data, index: int] -> Data #borrowed #force_inline
+  (odin-call "kvist_data_value_at" value index))
+
+(defn nth
+  "Return the value at `index` in list or vector Data.
+
+  An out-of-range index returns nil Data, matching ordinary Data lookup."
+  [value: Data, index: int] -> Data #borrowed #force_inline
+  (core.get value index))
+
+(defn item-at
+  "Return the item at `index` in list, vector, or set backing order."
+  [value: Data, index: int] -> Data #borrowed #force_inline
+  (odin-call "kvist_data_item_at" value index))
+
+(defn get-in
+  "Follow `path` through nested map, list, and vector Data."
+  [value: Data, path: []Data] -> Data
+  (let [current value]
+    (for [key path]
+      (set! current (core.get current key)))
+    current))
+
+(defn assoc-in
+  "Associate `value` at a non-empty path through nested map Data.
+
+  Missing or nil intermediate values become maps."
+  [collection: Data, path: []Data, value: Data] -> Data
+  (if (= (core.count path) 1)
+    (assoc collection path[0] value)
+    (let [key path[0]
+          child (core.get collection key)]
+      (if (nil? child)
+        (set! child (empty-map)))
+      (assoc collection key (assoc-in child path[1:] value)))))
+
+(defn update
+  "Return `collection` with the value at `key` replaced by `(f old-value)`."
+  [collection: Data, key: Data, f: (fn [value: Data] -> Data)] -> Data
+  (let [updated (f (core.get collection key))]
+    (assoc collection key updated)))
+
+(defn update-in
+  "Return `collection` with the value at `path` replaced by `(f old-value)`."
+  [collection: Data, path: []Data, f: (fn [value: Data] -> Data)] -> Data
+  (let [updated (f (get-in collection path))]
+    (assoc-in collection path updated)))
+
+(defn keys
+  "Return map keys in a newly allocated dynamic array.
+
+  The returned array is owned by the caller; its Data elements continue to
+  borrow the immutable backing storage of `value`."
+  [value: Data] -> [dynamic]Data
+  (let [out (arr.empty Data (core.count value))]
+    (for [index (arr.range 0 (core.count value))]
+      (arr.push! out (key-at value index)))
+    out))
+
+(defn vals
+  "Return map values in a newly allocated dynamic array.
+
+  The returned array is owned by the caller; its Data elements continue to
+  borrow the immutable backing storage of `value`."
+  [value: Data] -> [dynamic]Data
+  (let [out (arr.empty Data (core.count value))]
+    (for [index (arr.range 0 (core.count value))]
+      (arr.push! out (value-at value index)))
+    out))

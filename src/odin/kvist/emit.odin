@@ -89,6 +89,7 @@ Transform_Into_Output :: struct {
 
 Emitter_Features :: struct {
     keyword_type:     bool,
+    data_type:        bool,
     dynamic_literals: bool,
     core_get_or_default: bool,
     core_contains_value: bool,
@@ -96,6 +97,12 @@ Emitter_Features :: struct {
     core_fmt:         bool,
     thread_starts:  [dynamic]Thread_Start_Spec,
     thread_detaches: [dynamic]Thread_Detach_Spec,
+    data_literals:   [dynamic]Data_Literal,
+}
+
+Data_Literal :: struct {
+    name:  string,
+    value: string,
 }
 
 Emitter :: struct {
@@ -122,6 +129,9 @@ Emitter :: struct {
     callback_contexts:         [dynamic]Callback_Context,
     callback_context_scope_marks: [dynamic]int,
     captured_proc_specializations: ^[dynamic]Captured_Proc_Specialization,
+    current_proc_owns_managed_result: bool,
+    current_proc_borrows_managed_result: bool,
+    current_proc_returns: Return_Spec,
 }
 
 kvist_package_name_for_import_path :: proc(path: string) -> (string, bool) {
@@ -1392,6 +1402,285 @@ mark_decl_keyword_usage :: proc(e: ^Emitter, decl: IR_Decl) {
 keyword_literal_text :: proc(e: ^Emitter, text: string) -> string {
     mark_keyword_type(e)
     return emit_type_conversion_text("keyword", fmt.tprintf("%q", text))
+}
+
+mark_data_type :: proc(e: ^Emitter) {
+    e.features.data_type = true
+    e.features.core_strings = true
+}
+
+emit_data_items_literal :: proc(e: ^Emitter, items: []CST_Form) -> (string, Compile_Error, bool) {
+    builder := strings.builder_make()
+    defer strings.builder_destroy(&builder)
+    strings.write_string(&builder, "[]Data{")
+    for item, idx in items {
+        if idx > 0 {
+            strings.write_string(&builder, ", ")
+        }
+        value, err_value, ok_value := emit_data_value_literal(e, item)
+        if !ok_value {
+            return "", err_value, false
+        }
+        strings.write_string(&builder, value)
+    }
+    strings.write_byte(&builder, '}')
+    return strings.clone(strings.to_string(builder)), Compile_Error{}, true
+}
+
+emit_data_map_literal :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) {
+    if len(form.items)%2 != 0 {
+        return "", Compile_Error{message = "quoted map expects key/value pairs", span = form.span}, false
+    }
+    builder := strings.builder_make()
+    defer strings.builder_destroy(&builder)
+    strings.write_string(&builder, "Data{kind = .Map, payload = {entries = []Data_Entry{")
+    i := 0
+    for i < len(form.items) {
+        if i > 0 {
+            strings.write_string(&builder, ", ")
+        }
+        key, err_key, ok_key := emit_data_value_literal(e, form.items[i])
+        if !ok_key {
+            return "", err_key, false
+        }
+        value, err_value, ok_value := emit_data_value_literal(e, form.items[i+1])
+        if !ok_value {
+            return "", err_value, false
+        }
+        fmt.sbprintf(&builder, "{{key = %s, value = %s}}", key, value)
+        i += 2
+    }
+    strings.write_string(&builder, "}}}")
+    return strings.clone(strings.to_string(builder)), Compile_Error{}, true
+}
+
+emit_data_value_literal :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) {
+    mark_data_type(e)
+    #partial switch form.kind {
+    case .Nil:
+        return "Data{}", Compile_Error{}, true
+    case .Bool:
+        return fmt.tprintf("Data{{kind = .Bool, payload = {{bool_value = %s}}}}", form.text), Compile_Error{}, true
+    case .Number:
+        if number_literal_type(form.text) == "f64" {
+            return fmt.tprintf("Data{{kind = .Float, payload = {{float_value = f64(%s)}}}}", form.text), Compile_Error{}, true
+        }
+        return fmt.tprintf("Data{{kind = .Int, payload = {{int_value = i64(%s)}}}}", form.text), Compile_Error{}, true
+    case .String:
+        text := unquote_string(form.text)
+        defer delete(text)
+        return fmt.tprintf("Data{{kind = .String, payload = {{text = %q}}}}", text), Compile_Error{}, true
+    case .Regex:
+        return "", Compile_Error{message = "regex literals are not Data values", span = form.span}, false
+    case .Symbol:
+        return fmt.tprintf("Data{{kind = .Symbol, payload = {{text = %q}}}}", form.text), Compile_Error{}, true
+    case .Keyword:
+        return fmt.tprintf("Data{{kind = .Keyword, payload = {{text = %q}}}}", form.text), Compile_Error{}, true
+    case .List, .Vector, .Set:
+        items, err_items, ok_items := emit_data_items_literal(e, form.items[:])
+        if !ok_items {
+            return "", err_items, false
+        }
+        kind := "List"
+        if form.kind == .Vector {
+            kind = "Vector"
+        } else if form.kind == .Set {
+            kind = "Set"
+        }
+        return fmt.tprintf("Data{{kind = .%s, payload = {{items = %s}}}}", kind, items), Compile_Error{}, true
+    case .Brace:
+        return emit_data_map_literal(e, form)
+    }
+    return "", Compile_Error{message = "unsupported quoted Data value", span = form.span}, false
+}
+
+emit_quoted_data_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) {
+    if len(form.items) != 2 {
+        return "", Compile_Error{message = "quote expects one form", span = form.span}, false
+    }
+    value, err_value, ok_value := emit_data_value_literal(e, form.items[1])
+    if !ok_value {
+        return "", err_value, false
+    }
+    e.temp_counter += 1
+    name := fmt.tprintf("kvist_data_literal_%d", e.temp_counter)
+    append(&e.features.data_literals, Data_Literal{name = name, value = value})
+    return name, Compile_Error{}, true
+}
+
+form_contains_runtime_unquote :: proc(form: CST_Form, depth: int = 0) -> bool {
+    if form.kind == .List && len(form.items) > 0 && form.items[0].kind == .Symbol {
+        if (form.items[0].text == "unquote" || form.items[0].text == "splice") && depth == 0 {
+            return true
+        }
+        next_depth := depth
+        if form.items[0].text == "quasiquote" {
+            next_depth += 1
+        }
+        for item in form.items[1:] {
+            if form_contains_runtime_unquote(item, next_depth) {
+                return true
+            }
+        }
+        return false
+    }
+    for item in form.items {
+        if form_contains_runtime_unquote(item, depth) {
+            return true
+        }
+    }
+    return false
+}
+
+runtime_data_unquote_expr :: proc(e: ^Emitter, form: CST_Form) -> (text: string, owned: bool, err: Compile_Error, ok: bool) {
+    value, err_value, ok_value := emit_expr(e, form)
+    if !ok_value {
+        return "", false, err_value, false
+    }
+    ty, ok_ty := obvious_form_type(e, form)
+    if !ok_ty {
+        return "", false, Compile_Error{message = "runtime Data unquote needs an obvious Data or native scalar type", span = form.span}, false
+    }
+    mark_data_type(e)
+    if type_text_is_managed_value(ty) {
+        return value, form_produces_owned_managed_value(e, form), {}, true
+    }
+    switch ty {
+    case "bool":
+        return emit_call_text("kvist_data_make_bool", []string{value}), true, {}, true
+    case "int", "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64":
+        return emit_call_text("kvist_data_make_int", []string{fmt.tprintf("i64(%s)", value)}), true, {}, true
+    case "f32", "f64":
+        return emit_call_text("kvist_data_make_float", []string{fmt.tprintf("f64(%s)", value)}), true, {}, true
+    case "string":
+        return emit_call_text("kvist_data_make_text", []string{"Data_Kind.String", value}), true, {}, true
+    case "keyword":
+        return emit_call_text("kvist_data_make_text", []string{"Data_Kind.Keyword", fmt.tprintf("string(%s)", value)}), true, {}, true
+    }
+    return "", false, Compile_Error{message = fmt.tprintf("runtime Data unquote does not support native type %s", ty), span = form.span}, false
+}
+
+emit_runtime_data_quasiquote_value :: proc(e: ^Emitter, form: CST_Form, root: bool = false) -> (text: string, owned: bool, err: Compile_Error, ok: bool) {
+    if form.kind == .List && len(form.items) > 0 && is_symbol(form.items[0], "unquote") {
+        if len(form.items) != 2 {
+            return "", false, Compile_Error{message = "runtime Data unquote expects one expression", span = form.span}, false
+        }
+        value, value_owned, err_value, ok_value := runtime_data_unquote_expr(e, form.items[1])
+        if !ok_value {
+            return "", false, err_value, false
+        }
+        if root && !value_owned {
+            return emit_call_text("kvist_data_retain", []string{value}), true, {}, true
+        }
+        return value, value_owned, {}, true
+    }
+    if form.kind == .List && len(form.items) > 0 && is_symbol(form.items[0], "splice") {
+        return "", false, Compile_Error{message = "runtime Data splice is valid only as an item in a quasiquoted list, vector, or set", span = form.span}, false
+    }
+    if !form_contains_runtime_unquote(form) {
+        value, err_value, ok_value := emit_data_value_literal(e, form)
+        return value, false, err_value, ok_value
+    }
+    if form.kind != .List && form.kind != .Vector && form.kind != .Brace && form.kind != .Set {
+        return "", false, Compile_Error{message = "runtime Data unquote must appear inside a list, vector, map, or set", span = form.span}, false
+    }
+
+    values: [dynamic]string
+    splice_flags: [dynamic]bool
+    defer delete(values)
+    defer delete(splice_flags)
+    has_splice := false
+    for item in form.items {
+        splice := item.kind == .List && len(item.items) > 0 && is_symbol(item.items[0], "splice")
+        if splice && form.kind == .Brace {
+            return "", false, Compile_Error{message = "runtime Data map splice is not implemented; use data.merge", span = item.span}, false
+        }
+        value := ""
+        value_owned := false
+        err_value: Compile_Error
+        ok_value := false
+        if splice {
+            if len(item.items) != 2 {
+                return "", false, Compile_Error{message = "runtime Data splice expects one expression", span = item.span}, false
+            }
+            value, value_owned, err_value, ok_value = runtime_data_unquote_expr(e, item.items[1])
+            if ok_value {
+                ty, ok_ty := obvious_form_type(e, item.items[1])
+                if !ok_ty || !type_text_is_managed_value(ty) {
+                    return "", false, Compile_Error{message = "runtime Data splice expects Data", span = item.items[1].span}, false
+                }
+            }
+            has_splice = true
+        } else {
+            value, value_owned, err_value, ok_value = emit_runtime_data_quasiquote_value(e, item)
+        }
+        if !ok_value {
+            return "", false, err_value, false
+        }
+        if value_owned {
+            temp := thread_temp_name(e)
+            emit_prefixed_expr_mapped(e, fmt.tprintf("%s := ", temp), value, item.span)
+            emit_line(e, fmt.tprintf("defer kvist_data_release(%s)", temp))
+            value = temp
+        }
+        append(&values, value)
+        append(&splice_flags, splice)
+    }
+    if form.kind == .Brace {
+        if len(form.items)%2 != 0 {
+            return "", false, Compile_Error{message = "runtime quasiquoted map expects key/value pairs", span = form.span}, false
+        }
+        literal := fmt.tprintf("[]Data{{%s}}", strings.join(values[:], ", ", context.temp_allocator))
+        return emit_call_text("kvist_data_make_map", []string{literal}), true, {}, true
+    }
+    kind := "Data_Kind.List"
+    if form.kind == .Vector {
+        kind = "Data_Kind.Vector"
+    } else if form.kind == .Set {
+        kind = "Data_Kind.Set"
+    }
+    if has_splice {
+        pieces: [dynamic]string
+        defer delete(pieces)
+        for value, idx in values {
+            splice_text := "false"
+            if splice_flags[idx] {
+                splice_text = "true"
+            }
+            append(&pieces, fmt.tprintf("Data_Piece{{value = %s, splice = %s}}", value, splice_text))
+        }
+        literal := fmt.tprintf("[]Data_Piece{{%s}}", strings.join(pieces[:], ", ", context.temp_allocator))
+        return emit_call_text("kvist_data_make_items_spliced", []string{kind, literal}), true, {}, true
+    }
+    literal := fmt.tprintf("[]Data{{%s}}", strings.join(values[:], ", ", context.temp_allocator))
+    return emit_call_text("kvist_data_make_items", []string{kind, literal}), true, {}, true
+}
+
+emit_runtime_data_quasiquote_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) {
+    if len(form.items) != 2 {
+        return "", Compile_Error{message = "quasiquote expects one form", span = form.span}, false
+    }
+    value, _, err_value, ok_value := emit_runtime_data_quasiquote_value(e, form.items[1], true)
+    return value, err_value, ok_value
+}
+
+emit_data_lookup_key :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) {
+    if form.kind != .Symbol {
+        return emit_data_value_literal(e, form)
+    }
+    raw, err_raw, ok_raw := emit_expr(e, form)
+    if !ok_raw {
+        return "", err_raw, false
+    }
+    if ty, ok_ty := obvious_form_type(e, form); ok_ty {
+        if ty == "Data" {
+            return raw, Compile_Error{}, true
+        }
+        if ty == "int" || ty == "i64" || ty == "u64" {
+            return fmt.tprintf("Data{{kind = .Int, payload = {{int_value = i64(%s)}}}}", raw), Compile_Error{}, true
+        }
+    }
+    return raw, Compile_Error{}, true
 }
 
 type_text_needs_conversion_parens :: proc(text: string) -> bool {
@@ -2734,6 +3023,14 @@ emit_nary_comparison_expr :: proc(e: ^Emitter, op: string, operands: []CST_Form,
         if !ok_rhs {
             return "", err_rhs, false
         }
+        if (lhs_expected == "Data" || rhs_expected == "Data") && (op == "=" || op == "==" || op == "!=") {
+            mark_data_type(e)
+            equal := emit_call_text("kvist_data_equal", []string{lhs, rhs})
+            if op == "!=" {
+                return fmt.tprintf("!(%s)", equal), {}, true
+            }
+            return equal, {}, true
+        }
         return fmt.tprintf("(%s) %s (%s)", lhs, comparison_odin_op(op), rhs), {}, true
     }
     if !comparison_supports_nary(op) {
@@ -4018,6 +4315,9 @@ proc_decl_owned_result_head :: proc(e: ^Emitter, name: string) -> bool {
     direct_name := map_name(name)
     defer delete(direct_name)
     if proc_decl, ok_proc := find_proc_decl(e, direct_name); ok_proc {
+        if proc_decl.returns.kind == .Single && type_text_is_managed_value(proc_decl.returns.single_ty) {
+            return false
+        }
         return proc_decl.owns_result || proc_decl_infers_owned_result(e, proc_decl)
     }
     return false
@@ -4275,7 +4575,9 @@ form_has_nested_owned_value :: proc(form: CST_Form, e: ^Emitter = nil) -> bool {
                 }
             }
             if !form_is_named_arg_brace(item) &&
-               (form_produces_owned_value(item, e) || form_has_nested_owned_value(item, e)) {
+               (form_produces_owned_value(item, e) ||
+                form_produces_owned_managed_value(e, item) ||
+                form_has_nested_owned_value(item, e)) {
                 return true
             }
         }
@@ -4330,7 +4632,9 @@ emit_expr_with_owned_nested_temps :: proc(e: ^Emitter, form: CST_Form) -> (strin
                 continue
             }
             if form_is_named_arg_brace(item) ||
-               !(form_produces_owned_value(item, e) || form_has_nested_owned_value(item, e)) {
+               !(form_produces_owned_value(item, e) ||
+                 form_produces_owned_managed_value(e, item) ||
+                 form_has_nested_owned_value(item, e)) {
                 continue
             }
 
@@ -4345,6 +4649,9 @@ emit_expr_with_owned_nested_temps :: proc(e: ^Emitter, form: CST_Form) -> (strin
                                 call_arg_transfers_owned_result(e, rewritten, idx))
             if form_produces_owned_value(item, e) && !transfers_owned {
                 emit_line(e, fmt.tprintf("defer delete(%s)", temp))
+            } else if form_produces_owned_managed_value(e, item) {
+                mark_data_type(e)
+                emit_line(e, fmt.tprintf("defer kvist_data_release(%s)", temp))
             }
 
             delete_cst_form(&rewritten.items[idx])
@@ -4698,6 +5005,39 @@ obvious_block_expr_type :: proc(e: ^Emitter, form: CST_Form) -> (string, bool) {
             bind_obvious_binding_types(e, binding)
         }
         return obvious_form_type(e, form.items[len(form.items)-1])
+    case "do", "block":
+        if len(form.items) < 2 {
+            return "", false
+        }
+        return obvious_form_type(e, form.items[len(form.items)-1])
+    case "type-case":
+        if len(form.items) < 5 || len(form.items)%2 == 0 {
+            return "", false
+        }
+        result_ty := ""
+        i := 2
+        for i < len(form.items)-1 {
+            ty, binding, ignored, _, ok_pattern := case_type_payload_pattern(form.items[i])
+            if !ok_pattern {
+                return "", false
+            }
+            push_local_type_scope(e)
+            if !ignored {
+                bind_local_type(e, binding, ty)
+            }
+            branch_ty, ok_branch_ty := obvious_form_type(e, form.items[i+1])
+            pop_local_type_scope(e)
+            if !ok_branch_ty || (result_ty != "" && branch_ty != result_ty) {
+                return "", false
+            }
+            result_ty = branch_ty
+            i += 2
+        }
+        default_ty, ok_default_ty := obvious_form_type(e, form.items[len(form.items)-1])
+        if !ok_default_ty || (result_ty != "" && default_ty != result_ty) {
+            return "", false
+        }
+        return default_ty, true
     }
 
     return "", false
@@ -4939,6 +5279,12 @@ emit_if_expr :: proc(e: ^Emitter, form: CST_Form, expected_type := "") -> (strin
             if inferred_ty, ok_inferred_ty := obvious_form_type(e, form.items[3]); ok_inferred_ty {
                 branch_expected_type = inferred_ty
             }
+        } else {
+            then_ty, ok_then_ty := obvious_form_type(e, form.items[2])
+            else_ty, ok_else_ty := obvious_form_type(e, form.items[3])
+            if ok_then_ty && ok_else_ty && then_ty == else_ty {
+                branch_expected_type = then_ty
+            }
         }
     }
     test, err_test, ok_test := emit_expr(e, form.items[1])
@@ -4952,6 +5298,15 @@ emit_if_expr :: proc(e: ^Emitter, form: CST_Form, expected_type := "") -> (strin
     else_value, err_else, ok_else := emit_expr_for_expected_type(e, form.items[3], branch_expected_type)
     if !ok_else {
         return "", err_else, false
+    }
+    if type_text_is_managed_value(branch_expected_type) {
+        mark_data_type(e)
+        if !form_produces_owned_managed_value(e, form.items[2]) {
+            then_value = emit_call_text("kvist_data_retain", []string{then_value})
+        }
+        if !form_produces_owned_managed_value(e, form.items[3]) {
+            else_value = emit_call_text("kvist_data_retain", []string{else_value})
+        }
     }
     return fmt.tprintf("(%s if %s else %s)", then_value, test, else_value), {}, true
 }
@@ -5830,6 +6185,104 @@ type_text_is_owned_result :: proc(text: string) -> bool {
     return type_text_is_dynamic_array(text) || type_text_is_dynamic_soa(text) || type_text_is_map(text)
 }
 
+type_text_is_managed_value :: proc(text: string) -> bool {
+    return strings.trim_space(text) == "Data"
+}
+
+form_produces_owned_managed_value :: proc(e: ^Emitter, form: CST_Form, depth: int = 0) -> bool {
+    if depth > 8 || form.kind != .List || len(form.items) == 0 || form.items[0].kind != .Symbol {
+        return false
+    }
+    head_name := map_name(form.items[0].text)
+    defer delete(head_name)
+    if form.items[0].text == "quasiquote" {
+        return true
+    }
+    switch form.items[0].text {
+    case "if", "let", "do", "block", "type-case":
+        if ty, ok_ty := obvious_form_type(e, form); ok_ty && type_text_is_managed_value(ty) {
+            return true
+        }
+    case:
+    }
+    if proc_decl, ok_proc := find_proc_decl(e, head_name); ok_proc {
+        return proc_decl.returns.kind == .Single &&
+               type_text_is_managed_value(proc_decl.returns.single_ty) &&
+               !proc_decl.borrows_result
+    }
+    if proc_ty, ok_proc_ty := lookup_local_type(e, head_name); ok_proc_ty && type_text_is_proc(proc_ty) {
+        if return_ty, ok_return_ty := proc_type_single_return_type(proc_ty); ok_return_ty {
+            return type_text_is_managed_value(return_ty)
+        }
+    }
+    if form.items[0].text == "if" && len(form.items) == 4 {
+        return form_produces_owned_managed_value(e, form.items[2], depth+1) &&
+               form_produces_owned_managed_value(e, form.items[3], depth+1)
+    }
+    return false
+}
+
+managed_binding_value_text :: proc(e: ^Emitter, binding: Binding, value: string) -> (text: string, managed: bool) {
+    ty, ok_ty := obvious_binding_type(e, binding)
+    if !ok_ty || !type_text_is_managed_value(ty) || binding.name == "" || binding.is_destructure || binding.is_result_binding {
+        return value, false
+    }
+    mark_data_type(e)
+    if form_produces_owned_managed_value(e, binding.value) {
+        return value, true
+    }
+    return emit_call_text("kvist_data_retain", []string{value}), true
+}
+
+managed_return_value_text_for_type :: proc(e: ^Emitter, form: CST_Form, value, return_ty: string) -> string {
+    if !type_text_is_managed_value(return_ty) ||
+       e.current_proc_owns_managed_result ||
+       e.current_proc_borrows_managed_result ||
+       form_produces_owned_managed_value(e, form) {
+        return value
+    }
+    mark_data_type(e)
+    return emit_call_text("kvist_data_retain", []string{value})
+}
+
+managed_return_value_text :: proc(e: ^Emitter, form: CST_Form, value: string, returns: Return_Spec) -> string {
+    if returns.kind != .Single {
+        return value
+    }
+    return managed_return_value_text_for_type(e, form, value, returns.single_ty)
+}
+
+emit_managed_destructure_cleanup :: proc(e: ^Emitter, binding: Binding) {
+    if !binding.is_destructure || binding.value.kind != .List || len(binding.value.items) == 0 || binding.value.items[0].kind != .Symbol {
+        return
+    }
+    head_name := map_name(binding.value.items[0].text)
+    defer delete(head_name)
+    proc_decl, ok_proc := find_proc_decl(e, head_name)
+    if !ok_proc || proc_decl.borrows_result || proc_decl.returns.kind != .Named || len(proc_decl.returns.named) != len(binding.pattern) {
+        return
+    }
+    for name, idx in binding.pattern {
+        if name != "" && type_text_is_managed_value(proc_decl.returns.named[idx].ty) {
+            mark_data_type(e)
+            emit_line(e, fmt.tprintf("defer kvist_data_release(%s)", name))
+        }
+    }
+}
+
+managed_assignment_text :: proc(e: ^Emitter, place_form, value_form: CST_Form, place, value: string) -> (string, bool) {
+    place_ty, ok_place_ty := obvious_form_type(e, place_form)
+    if !ok_place_ty || !type_text_is_managed_value(place_ty) {
+        return "", false
+    }
+    mark_data_type(e)
+    helper := "kvist_data_assign"
+    if form_produces_owned_managed_value(e, value_form) {
+        helper = "kvist_data_move_assign"
+    }
+    return emit_call_text(helper, []string{address_of_expr_text(place), value}), true
+}
+
 type_text_is_string :: proc(text: string) -> bool {
     return text == "string"
 }
@@ -6319,7 +6772,24 @@ obvious_form_type :: proc(e: ^Emitter, form: CST_Form) -> (string, bool) {
         if ty, ok := indexed_symbol_type(e, form.text, form.span); ok {
             return ty, true
         }
-        return lookup_local_type(e, map_name(form.text))
+        if ty, ok := lookup_local_type(e, map_name(form.text)); ok {
+            return ty, true
+        }
+        name := map_name(form.text)
+        for decl in e.decls {
+            if decl.kind != .Const || decl.const_decl.name != name {
+                continue
+            }
+            if decl.const_decl.has_ty {
+                return decl.const_decl.ty, true
+            }
+            if decl.const_decl.value.kind == .List &&
+               len(decl.const_decl.value.items) == 2 &&
+               is_symbol(decl.const_decl.value.items[0], "quote") {
+                return "Data", true
+            }
+        }
+        return "", false
     }
     if form.kind == .Number || form.kind == .String || form.kind == .Regex || form.kind == .Bool {
         if ty, _, ok := infer_literal_value_type(e, form); ok {
@@ -6333,7 +6803,43 @@ obvious_form_type :: proc(e: ^Emitter, form: CST_Form) -> (string, bool) {
         }
     }
     if form.kind == .List && len(form.items) > 0 && form.items[0].kind == .Symbol {
+        if is_symbol(form.items[0], "quote") && len(form.items) == 2 {
+            return "Data", true
+        }
+        if is_symbol(form.items[0], "quasiquote") && len(form.items) == 2 {
+            return "Data", true
+        }
+        if is_symbol(form.items[0], "if") && len(form.items) == 4 {
+            then_ty, ok_then_ty := obvious_form_type(e, form.items[2])
+            else_ty, ok_else_ty := obvious_form_type(e, form.items[3])
+            if ok_then_ty && ok_else_ty && then_ty == else_ty {
+                return then_ty, true
+            }
+        }
+        if is_symbol(form.items[0], "let") || form_head_is_do(form) || form_head_is_case(form) {
+            return obvious_block_expr_type(e, form)
+        }
+        if strings.has_prefix(form.items[0].text, "data.") || strings.has_prefix(form.items[0].text, "data/") {
+            member := form.items[0].text[len("data."):]
+            if strings.has_prefix(form.items[0].text, "data/") {
+                member = form.items[0].text[len("data/"):]
+            }
+            switch member {
+            case "item-at", "key-at", "value-at", "tagged-value", "retain": return "Data", true
+            case "int": return "i64", true
+            case "float": return "f64", true
+            case "bool", "nil?", "bool?", "int?", "float?", "string?", "symbol?", "keyword?", "list?", "vector?", "map?", "set?", "tagged?": return "bool", true
+            case "string", "keyword", "symbol", "text", "tag": return "string", true
+            case "count": return "int", true
+            case "kind": return "Data_Kind", true
+            }
+        }
         head_name := map_name(form.items[0].text)
+        if proc_ty, ok_proc_ty := lookup_local_type(e, head_name); ok_proc_ty && type_text_is_proc(proc_ty) {
+            if return_ty, ok_return_ty := proc_type_single_return_type(proc_ty); ok_return_ty {
+                return return_ty, true
+            }
+        }
         if (head_is_core_assoc(form.items[0].text) || head_is_core_update(form.items[0].text)) &&
            len(form.items) >= 2 {
             return shallow_update_return_type(e, form)
@@ -6351,6 +6857,11 @@ obvious_form_type :: proc(e: ^Emitter, form: CST_Form) -> (string, bool) {
                 if ok_elem_ty {
                     return fmt.tprintf("[]%s", elem_ty), true
                 }
+            }
+        }
+        if head_name == "odin_get" && len(form.items) >= 3 {
+            if source_ty, ok_source_ty := obvious_form_type(e, form.items[1]); ok_source_ty && source_ty == "Data" {
+                return "Data", true
             }
         }
         if form.items[0].text == "into" && len(form.items) >= 4 {
@@ -8062,6 +8573,7 @@ emit_proc_literal_text :: proc(e: ^Emitter, params: []Param, returns: Return_Spe
         line        = e.line,
         temp_counter = e.temp_counter,
         captured_proc_specializations = e.captured_proc_specializations,
+        current_proc_returns = returns,
     }
     defer strings.builder_destroy(&sub.builder)
 
@@ -8583,6 +9095,16 @@ emit_odin_call_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Err
     }
     callee := unquote_string(form.items[1].text)
     defer delete(callee)
+    if callee == "len" && len(form.items) == 3 {
+        if ty, ok_ty := obvious_form_type(e, form.items[2]); ok_ty && ty == "Data" {
+            value, err_value, ok_value := emit_expr(e, form.items[2])
+            if !ok_value {
+                return "", err_value, false
+            }
+            mark_data_type(e)
+            return emit_call_text("kvist_data_count", []string{value}), Compile_Error{}, true
+        }
+    }
     arg_texts, err_args, ok_args := emit_odin_operator_arg_texts(e, form, 2)
     if !ok_args {
         return "", err_args, false
@@ -8723,6 +9245,16 @@ emit_operator_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Erro
             return "", err_key, false
         }
         if ty, ok := obvious_form_type(e, form.items[1]); ok {
+            if ty == "Data" {
+                data_key, err_data_key, ok_data_key := emit_data_value_literal(e, form.items[2])
+                if form.items[2].kind == .Symbol {
+                    data_key, err_data_key, ok_data_key = emit_expr(e, form.items[2])
+                }
+                if !ok_data_key {
+                    return "", err_data_key, false
+                }
+                return emit_call_text("kvist_data_contains", []string{collection, data_key}), {}, true
+            }
             if ty == "string" {
                 key_ty, ok_key_ty := obvious_form_type(e, form.items[2])
                 if ok_key_ty && key_ty == "string" {
@@ -11328,6 +11860,62 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         return fmt.tprintf("%s{{}}", type_text), {}, true
     }
 
+    if strings.has_prefix(head.text, "data.") || strings.has_prefix(head.text, "data/") {
+        member := head.text[len("data."):]
+        if strings.has_prefix(head.text, "data/") {
+            member = head.text[len("data/"):]
+        }
+        if member == "tagged" {
+            if len(form.items) != 3 {
+                return "", Compile_Error{message = fmt.tprintf("%s expects tag text and a Data value", head.text), span = form.span}, false
+            }
+            tag, err_tag, ok_tag := emit_expr(e, form.items[1])
+            if !ok_tag {
+                return "", err_tag, false
+            }
+            value, err_value, ok_value := emit_expr(e, form.items[2])
+            if !ok_value {
+                return "", err_value, false
+            }
+            mark_data_type(e)
+            return emit_call_text("kvist_data_make_tagged", []string{tag, value}), Compile_Error{}, true
+        }
+        if member == "item-at" || member == "key-at" || member == "value-at" {
+            if len(form.items) != 3 {
+                return "", Compile_Error{message = fmt.tprintf("%s expects Data map and index", head.text), span = form.span}, false
+            }
+            value, err_value, ok_value := emit_expr(e, form.items[1])
+            if !ok_value {
+                return "", err_value, false
+            }
+            index, err_index, ok_index := emit_expr(e, form.items[2])
+            if !ok_index {
+                return "", err_index, false
+            }
+            mark_data_type(e)
+            return emit_call_text(fmt.tprintf("kvist_data_%s", map_name(member)), []string{value, index}), Compile_Error{}, true
+        }
+        if len(form.items) != 2 {
+            return "", Compile_Error{message = fmt.tprintf("%s expects one Data value", head.text), span = form.span}, false
+        }
+        value, err_value, ok_value := emit_expr(e, form.items[1])
+        if !ok_value {
+            return "", err_value, false
+        }
+        mark_data_type(e)
+        switch member {
+        case "retain":
+            return emit_call_text("kvist_data_retain", []string{value}), Compile_Error{}, true
+        case "release":
+            return emit_call_text("kvist_data_release", []string{value}), Compile_Error{}, true
+        case "int", "float", "bool", "string", "keyword", "symbol", "text", "tag", "tagged-value", "count", "kind",
+             "nil?", "bool?", "int?", "float?", "string?", "symbol?", "keyword?", "list?", "vector?", "map?", "set?", "tagged?":
+            return emit_call_text(fmt.tprintf("kvist_data_%s", map_name(member)), []string{value}), Compile_Error{}, true
+        case:
+            return "", Compile_Error{message = fmt.tprintf("unknown Data operation: %s", head.text), span = head.span}, false
+        }
+    }
+
     canonical_head, _, err_head, ok_head := resolve_kvist_head(e, head.text)
     if !ok_head {
         err_head.span = head.span
@@ -11453,6 +12041,26 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         target, err_target, ok_target := emit_expr(e, form.items[1])
         if !ok_target {
             return "", err_target, false
+        }
+        target_ty, target_is_typed := obvious_form_type(e, form.items[1])
+        if target_is_typed && target_ty == "Data" {
+            key, err_key, ok_key := emit_data_lookup_key(e, form.items[2])
+            if !ok_key {
+                return "", err_key, false
+            }
+            call := emit_call_text("kvist_data_get", []string{target, key})
+            if len(form.items) == 4 {
+                fallback, err_fallback, ok_fallback := emit_data_value_literal(e, form.items[3])
+                if form.items[3].kind == .Symbol ||
+                   (form.items[3].kind == .List && len(form.items[3].items) > 0 && is_symbol(form.items[3].items[0], "quote")) {
+                    fallback, err_fallback, ok_fallback = emit_expr(e, form.items[3])
+                }
+                if !ok_fallback {
+                    return "", err_fallback, false
+                }
+                return emit_call_text("kvist_data_or", []string{call, fallback}), Compile_Error{}, true
+            }
+            return call, Compile_Error{}, true
         }
         map_target := map_index_target_text(e, form.items[1], target)
         if field, ok_field := selector_accesses_field(e, form.items[1], form.items[2]); ok_field {
@@ -11891,6 +12499,12 @@ emit_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) 
         }
         if is_symbol(form.items[0], "proc") {
             return "", Compile_Error{message = "`proc` has been removed; use `fn` for function literals and function types, or `defn` for named functions", span = form.items[0].span}, false
+        }
+        if is_symbol(form.items[0], "quote") {
+            return emit_quoted_data_expr(e, form)
+        }
+        if is_symbol(form.items[0], "quasiquote") {
+            return emit_runtime_data_quasiquote_expr(e, form)
         }
         if head, ok_statement := form_head_is_statement_only(form); ok_statement {
             return "", Compile_Error{message = fmt.tprintf("%s is a statement and cannot be used as an expression", display_head_name(head)), span = form.items[0].span}, false
@@ -12766,6 +13380,7 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
             return err_expr, false
         }
         if last_in_proc && returns.kind != .None {
+            expr = managed_return_value_text(e, form, expr, returns)
             emit_prefixed_expr_mapped(e, "return ", expr, form.span)
         } else if form_is_owned_allocation_result(form) || form_is_owned_constructor_result(form) {
             emit_prefixed_expr_mapped(e, "_ = ", expr, form.span)
@@ -12793,6 +13408,7 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
             return err_expr, false
         }
         if last_in_proc && returns.kind != .None {
+            expr = managed_return_value_text(e, form, expr, returns)
             emit_prefixed_expr_mapped(e, "return ", expr, form.span)
         } else if form_is_owned_allocation_result(form) || form_is_owned_constructor_result(form) {
             emit_prefixed_expr_mapped(e, "_ = ", expr, form.span)
@@ -12829,6 +13445,7 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
             if !ok_value {
                 return err_value, false
             }
+            value = managed_return_value_text(e, form, value, returns)
             emit_prefixed_expr_mapped(e, "return ", value, form.span)
             return {}, true
         }
@@ -12904,6 +13521,8 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
                 if !ok_value {
                     return err_value, false
                 }
+                managed := false
+                value, managed = managed_binding_value_text(e, binding, value)
                 if binding.is_result_binding && binding.or_modifier == "or-return" {
                     if !named_returns_match_binding_pattern(returns, binding.pattern[:]) {
                         return Compile_Error{
@@ -12914,6 +13533,10 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
                     emit_result_binding_named_return_assignment(e, binding, value)
                 } else {
                     emit_binding_assignment(e, binding, value)
+                    emit_managed_destructure_cleanup(e, binding)
+                }
+                if managed && !binding.deferred_delete && !binding.err_deferred_delete && !binding.defer_with_cleanup {
+                    emit_line(e, fmt.tprintf("defer kvist_data_release(%s)", binding.name))
                 }
             }
             err_guard, ok_guard := emit_result_binding_guard(e, binding, returns)
@@ -12972,6 +13595,10 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
     case "switch":
         return Compile_Error{message = "`switch` has been removed; use `case` for subject dispatch or `cond` for predicate branches", span = head.span}, false
     case "return":
+        return_context := returns
+        if return_context.kind == .None {
+            return_context = e.current_proc_returns
+        }
         if len(form.items) == 1 {
             emit_line(e, "return")
             return {}, true
@@ -12984,14 +13611,17 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
             value: string
             err_value: Compile_Error
             ok_value: bool
-            if returns.kind == .Single {
-                value, err_value, ok_value = emit_expr_for_expected_type(e, form.items[1], returns.single_ty)
+            if form_has_nested_owned_value(form.items[1], e) {
+                value, err_value, ok_value = emit_expr_with_owned_nested_temps(e, form.items[1])
+            } else if return_context.kind == .Single {
+                value, err_value, ok_value = emit_expr_for_expected_type(e, form.items[1], return_context.single_ty)
             } else {
                 value, err_value, ok_value = emit_expr(e, form.items[1])
             }
             if !ok_value {
                 return err_value, false
             }
+            value = managed_return_value_text(e, form.items[1], value, return_context)
             emit_prefixed_expr_mapped(e, "return ", value, form.items[1].span)
             return {}, true
         }
@@ -13006,9 +13636,19 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
             if bad_owned {
                 return err_owned, false
             }
-            value, err_value, ok_value := emit_expr(e, item)
+            value: string
+            err_value: Compile_Error
+            ok_value: bool
+            if return_context.kind == .Named && idx < len(return_context.named) {
+                value, err_value, ok_value = emit_expr_for_expected_type(e, item, return_context.named[idx].ty)
+            } else {
+                value, err_value, ok_value = emit_expr(e, item)
+            }
             if !ok_value {
                 return err_value, false
+            }
+            if return_context.kind == .Named && idx < len(return_context.named) {
+                value = managed_return_value_text_for_type(e, item, value, return_context.named[idx].ty)
             }
             strings.write_string(&line_builder, value)
         }
@@ -13098,9 +13738,20 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
         if bad_owned {
             return err_owned, false
         }
-        rhs, err_rhs, ok_rhs := emit_expr(e, form.items[2])
+        rhs: string
+        err_rhs: Compile_Error
+        ok_rhs: bool
+        if form_has_nested_owned_value(form.items[2], e) {
+            rhs, err_rhs, ok_rhs = emit_expr_with_owned_nested_temps(e, form.items[2])
+        } else {
+            rhs, err_rhs, ok_rhs = emit_expr(e, form.items[2])
+        }
         if !ok_rhs {
             return err_rhs, false
+        }
+        if assignment, managed := managed_assignment_text(e, form.items[1], form.items[2], lhs, rhs); managed {
+            emit_prefixed_expr_mapped(e, "", assignment, form.span)
+            return {}, true
         }
         emit_indent(e)
         strings.write_string(&e.builder, lhs)
@@ -13232,7 +13883,9 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
         expr: string
         err_expr: Compile_Error
         ok_expr: bool
-        if last_in_proc && returns.kind == .Single {
+        if form_has_nested_owned_value(form, e) {
+            expr, err_expr, ok_expr = emit_expr_with_owned_nested_temps(e, form)
+        } else if last_in_proc && returns.kind == .Single {
             expr, err_expr, ok_expr = emit_expr_for_expected_type(e, form, returns.single_ty)
         } else {
             expr, err_expr, ok_expr = emit_expr(e, form)
@@ -13241,6 +13894,7 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
             return err_expr, false
         }
         if last_in_proc && returns.kind != .None {
+            expr = managed_return_value_text(e, form, expr, returns)
             emit_prefixed_expr_mapped(e, "return ", expr, form.span)
         } else if form_is_owned_allocation_result(form) || form_is_owned_constructor_result(form) {
             emit_prefixed_expr_mapped(e, "_ = ", expr, form.span)
@@ -13487,6 +14141,16 @@ emit_decl :: proc(e: ^Emitter, decl: IR_Decl) -> (Compile_Error, bool) {
             emit_line(e, fmt.tprintf("%s :: %s", decl.const_decl.name, decl.const_decl.type_alias))
             return Compile_Error{}, true
         }
+        if decl.const_decl.value.kind == .List &&
+           len(decl.const_decl.value.items) == 2 &&
+           is_symbol(decl.const_decl.value.items[0], "quote") {
+            value, err_value, ok_value := emit_data_value_literal(e, decl.const_decl.value.items[1])
+            if !ok_value {
+                return err_value, false
+            }
+            emit_line(e, fmt.tprintf("%s: Data = %s", decl.const_decl.name, value))
+            return Compile_Error{}, true
+        }
         expected_type := ""
         if decl.const_decl.has_ty {
             expected_type = decl.const_decl.ty
@@ -13634,7 +14298,16 @@ emit_decl :: proc(e: ^Emitter, decl: IR_Decl) -> (Compile_Error, bool) {
         strings.write_string(&e.builder, " {")
         emit_raw_newline(e)
         e.indent += 1
+        previous_owns_managed_result := e.current_proc_owns_managed_result
+        previous_borrows_managed_result := e.current_proc_borrows_managed_result
+        previous_proc_returns := e.current_proc_returns
+        e.current_proc_owns_managed_result = decl.proc_decl.owns_result
+        e.current_proc_borrows_managed_result = decl.proc_decl.borrows_result
+        e.current_proc_returns = decl.proc_decl.returns
         err_body, ok_body := emit_body_forms(e, decl.proc_decl.body[:], decl.proc_decl.returns)
+        e.current_proc_owns_managed_result = previous_owns_managed_result
+        e.current_proc_borrows_managed_result = previous_borrows_managed_result
+        e.current_proc_returns = previous_proc_returns
         if !ok_body {
             return err_body, false
         }
@@ -14124,6 +14797,303 @@ emit_keyword_type_helper :: proc(e: ^Emitter) {
     emit_line(e, "keyword :: distinct string")
 }
 
+emit_data_type_helper :: proc(e: ^Emitter) {
+    emit_line(e, "Data_Kind :: enum { Nil, Bool, Int, Float, String, Symbol, Keyword, List, Vector, Map, Set, Tagged }")
+    emit_line(e, "Data_Entry :: struct { key, value: Data }")
+    emit_line(e, "Data_Node :: struct {")
+    e.indent += 1
+    emit_line(e, "refs: int,")
+    emit_line(e, "allocator: kvist_runtime.Allocator,")
+    emit_line(e, "text: string,")
+    emit_line(e, "items: [dynamic]Data,")
+    emit_line(e, "entries: [dynamic]Data_Entry,")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "Data_Payload :: struct #raw_union {")
+    e.indent += 1
+    emit_line(e, "bool_value: bool,")
+    emit_line(e, "int_value: i64,")
+    emit_line(e, "float_value: f64,")
+    emit_line(e, "text: string,")
+    emit_line(e, "items: []Data,")
+    emit_line(e, "entries: []Data_Entry,")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "Data :: struct {")
+    e.indent += 1
+    emit_line(e, "kind: Data_Kind,")
+    emit_line(e, "payload: Data_Payload,")
+    emit_line(e, "node: ^Data_Node,")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "Data_Piece :: struct { value: Data, splice: bool }")
+    emit_raw_newline(e)
+    emit_line(e, "kvist_data_retain :: proc(value: Data) -> Data {")
+    e.indent += 1
+    emit_line(e, "if value.node != nil { kvist_sync.atomic_add(&value.node.refs, 1) }")
+    emit_line(e, "return value")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "kvist_data_release :: proc(value: Data) {")
+    e.indent += 1
+    emit_line(e, "if value.node == nil || kvist_sync.atomic_sub(&value.node.refs, 1) != 1 { return }")
+    emit_line(e, "for item in value.node.items { kvist_data_release(item) }")
+    emit_line(e, "for entry in value.node.entries { kvist_data_release(entry.key); kvist_data_release(entry.value) }")
+    emit_line(e, "delete(value.node.text, value.node.allocator)")
+    emit_line(e, "delete(value.node.items)")
+    emit_line(e, "delete(value.node.entries)")
+    emit_line(e, "free(value.node, value.node.allocator)")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "kvist_data_assign :: proc(place: ^Data, value: Data) {")
+    e.indent += 1
+    emit_line(e, "replacement := kvist_data_retain(value)")
+    emit_line(e, "previous := place^")
+    emit_line(e, "place^ = replacement")
+    emit_line(e, "kvist_data_release(previous)")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "kvist_data_move_assign :: proc(place: ^Data, value: Data) {")
+    e.indent += 1
+    emit_line(e, "previous := place^")
+    emit_line(e, "place^ = value")
+    emit_line(e, "kvist_data_release(previous)")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "kvist_data_new_node :: proc(allocator: kvist_runtime.Allocator = context.allocator) -> ^Data_Node {")
+    e.indent += 1
+    emit_line(e, "node := new(Data_Node, allocator)")
+    emit_line(e, "node^ = Data_Node{refs = 1, allocator = allocator}")
+    emit_line(e, "return node")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "kvist_data_make_bool :: proc(value: bool) -> Data { return Data{kind = .Bool, payload = {bool_value = value}} }")
+    emit_line(e, "kvist_data_make_int :: proc(value: i64) -> Data { return Data{kind = .Int, payload = {int_value = value}} }")
+    emit_line(e, "kvist_data_make_float :: proc(value: f64) -> Data { return Data{kind = .Float, payload = {float_value = value}} }")
+    emit_line(e, "kvist_data_make_text :: proc(kind: Data_Kind, value: string, allocator: kvist_runtime.Allocator = context.allocator) -> Data {")
+    e.indent += 1
+    emit_line(e, "assert(kind == .String || kind == .Symbol || kind == .Keyword)")
+    emit_line(e, "node := kvist_data_new_node(allocator)")
+    emit_line(e, "node.text = strings.clone(value, allocator)")
+    emit_line(e, "return Data{kind = kind, payload = {text = node.text}, node = node}")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "kvist_data_make_tagged :: proc(tag: string, value: Data, allocator: kvist_runtime.Allocator = context.allocator) -> Data {")
+    e.indent += 1
+    emit_line(e, "assert(len(tag) > 0, \"Data tag must not be empty\")")
+    emit_line(e, "node := kvist_data_new_node(allocator)")
+    emit_line(e, "node.text = strings.clone(tag, allocator)")
+    emit_line(e, "node.items = make([dynamic]Data, 0, 1, allocator)")
+    emit_line(e, "append(&node.items, kvist_data_retain(value))")
+    emit_line(e, "return Data{kind = .Tagged, node = node}")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "kvist_data_make_items :: proc(kind: Data_Kind, values: []Data, allocator: kvist_runtime.Allocator = context.allocator) -> Data {")
+    e.indent += 1
+    emit_line(e, "assert(kind == .List || kind == .Vector || kind == .Set)")
+    emit_line(e, "node := kvist_data_new_node(allocator)")
+    emit_line(e, "node.items = make([dynamic]Data, 0, len(values), allocator)")
+    emit_line(e, "for value in values {")
+    e.indent += 1
+    emit_line(e, "if kind == .Set { found := false; for item in node.items { if kvist_data_equal(item, value) { found = true; break } }; if found { continue } }")
+    emit_line(e, "append(&node.items, kvist_data_retain(value))")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "return Data{kind = kind, payload = {items = node.items[:]}, node = node}")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "kvist_data_make_items_spliced :: proc(kind: Data_Kind, pieces: []Data_Piece, allocator: kvist_runtime.Allocator = context.allocator) -> Data {")
+    e.indent += 1
+    emit_line(e, "assert(kind == .List || kind == .Vector || kind == .Set)")
+    emit_line(e, "capacity := 0")
+    emit_line(e, "for piece in pieces { if piece.splice { assert(piece.value.kind == .List || piece.value.kind == .Vector || piece.value.kind == .Set, \"Data splice expects a list, vector, or set\"); capacity += len(piece.value.payload.items) } else { capacity += 1 } }")
+    emit_line(e, "node := kvist_data_new_node(allocator)")
+    emit_line(e, "node.items = make([dynamic]Data, 0, capacity, allocator)")
+    emit_line(e, "for piece in pieces {")
+    e.indent += 1
+    emit_line(e, "values := []Data{piece.value}")
+    emit_line(e, "if piece.splice { values = piece.value.payload.items }")
+    emit_line(e, "for value in values {")
+    e.indent += 1
+    emit_line(e, "if kind == .Set { found := false; for item in node.items { if kvist_data_equal(item, value) { found = true; break } }; if found { continue } }")
+    emit_line(e, "append(&node.items, kvist_data_retain(value))")
+    e.indent -= 1
+    emit_line(e, "}")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "return Data{kind = kind, payload = {items = node.items[:]}, node = node}")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "kvist_data_make_map :: proc(values: []Data, allocator: kvist_runtime.Allocator = context.allocator) -> Data {")
+    e.indent += 1
+    emit_line(e, "assert(len(values)%2 == 0, \"Data map expects alternating keys and values\")")
+    emit_line(e, "node := kvist_data_new_node(allocator)")
+    emit_line(e, "node.entries = make([dynamic]Data_Entry, 0, len(values)/2, allocator)")
+    emit_line(e, "for i := 0; i < len(values); i += 2 {")
+    e.indent += 1
+    emit_line(e, "replaced := false")
+    emit_line(e, "for &entry in node.entries { if kvist_data_equal(entry.key, values[i]) { kvist_data_assign(&entry.value, values[i+1]); replaced = true; break } }")
+    emit_line(e, "if !replaced { append(&node.entries, Data_Entry{key = kvist_data_retain(values[i]), value = kvist_data_retain(values[i+1])}) }")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "return Data{kind = .Map, payload = {entries = node.entries[:]}, node = node}")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "kvist_data_empty_map :: proc(allocator: kvist_runtime.Allocator = context.allocator) -> Data {")
+    e.indent += 1
+    emit_line(e, "node := kvist_data_new_node(allocator)")
+    emit_line(e, "node.entries = make([dynamic]Data_Entry, allocator)")
+    emit_line(e, "return Data{kind = .Map, payload = {entries = node.entries[:]}, node = node}")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_raw_newline(e)
+    emit_line(e, "kvist_data_equal :: proc(a, b: Data) -> bool {")
+    e.indent += 1
+    emit_line(e, "if a.kind != b.kind { return false }")
+    emit_line(e, "switch a.kind {")
+    e.indent += 1
+    emit_line(e, "case .Nil: return true")
+    emit_line(e, "case .Bool: return a.payload.bool_value == b.payload.bool_value")
+    emit_line(e, "case .Int: return a.payload.int_value == b.payload.int_value")
+    emit_line(e, "case .Float: return a.payload.float_value == b.payload.float_value")
+    emit_line(e, "case .String, .Symbol, .Keyword: return a.payload.text == b.payload.text")
+    emit_line(e, "case .Tagged: return a.node.text == b.node.text && kvist_data_equal(a.node.items[0], b.node.items[0])")
+    emit_line(e, "case .List, .Vector:")
+    e.indent += 1
+    emit_line(e, "if len(a.payload.items) != len(b.payload.items) { return false }")
+    emit_line(e, "for value, i in a.payload.items { if !kvist_data_equal(value, b.payload.items[i]) { return false } }")
+    emit_line(e, "return true")
+    e.indent -= 1
+    emit_line(e, "case .Set:")
+    e.indent += 1
+    emit_line(e, "if len(a.payload.items) != len(b.payload.items) { return false }")
+    emit_line(e, "for value in a.payload.items { found := false; for other in b.payload.items { if kvist_data_equal(value, other) { found = true; break } }; if !found { return false } }")
+    emit_line(e, "return true")
+    e.indent -= 1
+    emit_line(e, "case .Map:")
+    e.indent += 1
+    emit_line(e, "if len(a.payload.entries) != len(b.payload.entries) { return false }")
+    emit_line(e, "for entry in a.payload.entries {")
+    e.indent += 1
+    emit_line(e, "found := false")
+    emit_line(e, "for other in b.payload.entries { if kvist_data_equal(entry.key, other.key) && kvist_data_equal(entry.value, other.value) { found = true; break } }")
+    emit_line(e, "if !found { return false }")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "return true")
+    e.indent -= 1
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "return false")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "kvist_data_assoc :: proc(collection, key, value: Data, allocator: kvist_runtime.Allocator = context.allocator) -> Data {")
+    e.indent += 1
+    emit_line(e, "if collection.kind == .Map {")
+    e.indent += 1
+    emit_line(e, "node := kvist_data_new_node(allocator)")
+    emit_line(e, "node.entries = make([dynamic]Data_Entry, 0, len(collection.payload.entries)+1, allocator)")
+    emit_line(e, "found := false")
+    emit_line(e, "for entry in collection.payload.entries { if kvist_data_equal(entry.key, key) { append(&node.entries, Data_Entry{key = kvist_data_retain(entry.key), value = kvist_data_retain(value)}); found = true } else { append(&node.entries, Data_Entry{key = kvist_data_retain(entry.key), value = kvist_data_retain(entry.value)}) } }")
+    emit_line(e, "if !found { append(&node.entries, Data_Entry{key = kvist_data_retain(key), value = kvist_data_retain(value)}) }")
+    emit_line(e, "return Data{kind = .Map, payload = {entries = node.entries[:]}, node = node}")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "if collection.kind == .Vector && key.kind == .Int && key.payload.int_value >= 0 && key.payload.int_value < i64(len(collection.payload.items)) {")
+    e.indent += 1
+    emit_line(e, "node := kvist_data_new_node(allocator)")
+    emit_line(e, "node.items = make([dynamic]Data, 0, len(collection.payload.items), allocator)")
+    emit_line(e, "for item, i in collection.payload.items { if i64(i) == key.payload.int_value { append(&node.items, kvist_data_retain(value)) } else { append(&node.items, kvist_data_retain(item)) } }")
+    emit_line(e, "return Data{kind = .Vector, payload = {items = node.items[:]}, node = node}")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "assert(false, \"Data assoc expects a map or an in-range vector index\")")
+    emit_line(e, "return Data{}")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "kvist_data_dissoc :: proc(collection, key: Data, allocator: kvist_runtime.Allocator = context.allocator) -> Data {")
+    e.indent += 1
+    emit_line(e, "assert(collection.kind == .Map, \"Data dissoc expects a map\")")
+    emit_line(e, "node := kvist_data_new_node(allocator)")
+    emit_line(e, "node.entries = make([dynamic]Data_Entry, 0, len(collection.payload.entries), allocator)")
+    emit_line(e, "for entry in collection.payload.entries { if !kvist_data_equal(entry.key, key) { append(&node.entries, Data_Entry{key = kvist_data_retain(entry.key), value = kvist_data_retain(entry.value)}) } }")
+    emit_line(e, "return Data{kind = .Map, payload = {entries = node.entries[:]}, node = node}")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "kvist_data_conj :: proc(collection, value: Data, allocator: kvist_runtime.Allocator = context.allocator) -> Data {")
+    e.indent += 1
+    emit_line(e, "assert(collection.kind == .List || collection.kind == .Vector || collection.kind == .Set, \"Data conj expects a list, vector, or set\")")
+    emit_line(e, "if collection.kind == .Set { for item in collection.payload.items { if kvist_data_equal(item, value) { return kvist_data_retain(collection) } } }")
+    emit_line(e, "node := kvist_data_new_node(allocator)")
+    emit_line(e, "node.items = make([dynamic]Data, 0, len(collection.payload.items)+1, allocator)")
+    emit_line(e, "if collection.kind == .List { append(&node.items, kvist_data_retain(value)) }")
+    emit_line(e, "for item in collection.payload.items { append(&node.items, kvist_data_retain(item)) }")
+    emit_line(e, "if collection.kind != .List { append(&node.items, kvist_data_retain(value)) }")
+    emit_line(e, "return Data{kind = collection.kind, payload = {items = node.items[:]}, node = node}")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "kvist_data_append :: proc(collection, value: Data, allocator: kvist_runtime.Allocator = context.allocator) -> Data {")
+    e.indent += 1
+    emit_line(e, "assert(collection.kind == .List || collection.kind == .Vector || collection.kind == .Set, \"Data append expects a list, vector, or set\")")
+    emit_line(e, "if collection.kind == .Set { for item in collection.payload.items { if kvist_data_equal(item, value) { return kvist_data_retain(collection) } } }")
+    emit_line(e, "node := kvist_data_new_node(allocator)")
+    emit_line(e, "node.items = make([dynamic]Data, 0, len(collection.payload.items)+1, allocator)")
+    emit_line(e, "for item in collection.payload.items { append(&node.items, kvist_data_retain(item)) }")
+    emit_line(e, "append(&node.items, kvist_data_retain(value))")
+    emit_line(e, "return Data{kind = collection.kind, payload = {items = node.items[:]}, node = node}")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_raw_newline(e)
+    emit_line(e, "kvist_data_get :: proc(value, key: Data) -> Data {")
+    e.indent += 1
+    emit_line(e, "if value.kind == .Map { for entry in value.payload.entries { if kvist_data_equal(entry.key, key) { return entry.value } } }")
+    emit_line(e, "if (value.kind == .List || value.kind == .Vector) && key.kind == .Int && key.payload.int_value >= 0 && key.payload.int_value < i64(len(value.payload.items)) { return value.payload.items[int(key.payload.int_value)] }")
+    emit_line(e, "return Data{}")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "kvist_data_or :: proc(value, fallback: Data) -> Data { if value.kind == .Nil { return fallback }; return value }")
+    emit_line(e, "kvist_data_contains :: proc(value, key: Data) -> bool {")
+    e.indent += 1
+    emit_line(e, "if value.kind == .Map { for entry in value.payload.entries { if kvist_data_equal(entry.key, key) { return true } }; return false }")
+    emit_line(e, "if value.kind == .Set || value.kind == .List || value.kind == .Vector { for item in value.payload.items { if kvist_data_equal(item, key) { return true } } }")
+    emit_line(e, "return false")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "kvist_data_int :: proc(value: Data) -> i64 { assert(value.kind == .Int, \"expected Data int\"); return value.payload.int_value }")
+    emit_line(e, "kvist_data_float :: proc(value: Data) -> f64 { assert(value.kind == .Float, \"expected Data float\"); return value.payload.float_value }")
+    emit_line(e, "kvist_data_bool :: proc(value: Data) -> bool { assert(value.kind == .Bool, \"expected Data bool\"); return value.payload.bool_value }")
+    emit_line(e, "kvist_data_string :: proc(value: Data) -> string { assert(value.kind == .String, \"expected Data string\"); return value.payload.text }")
+    emit_line(e, "kvist_data_keyword :: proc(value: Data) -> string { assert(value.kind == .Keyword, \"expected Data keyword\"); return value.payload.text }")
+    emit_line(e, "kvist_data_symbol :: proc(value: Data) -> string { assert(value.kind == .Symbol, \"expected Data symbol\"); return value.payload.text }")
+    emit_line(e, "kvist_data_text :: proc(value: Data) -> string { assert(value.kind == .String || value.kind == .Symbol || value.kind == .Keyword, \"expected textual Data\"); return value.payload.text }")
+    emit_line(e, "kvist_data_tag :: proc(value: Data) -> string { assert(value.kind == .Tagged, \"expected tagged Data\"); return value.node.text }")
+    emit_line(e, "kvist_data_tagged_value :: proc(value: Data) -> Data { assert(value.kind == .Tagged, \"expected tagged Data\"); return value.node.items[0] }")
+    emit_line(e, "kvist_data_count :: proc(value: Data) -> int { if value.kind == .Map { return len(value.payload.entries) }; if value.kind == .List || value.kind == .Vector || value.kind == .Set { return len(value.payload.items) }; if value.kind == .String { return len(value.payload.text) }; return 0 }")
+    emit_line(e, "kvist_data_kind :: proc(value: Data) -> Data_Kind { return value.kind }")
+    emit_line(e, "kvist_data_nil_p :: proc(value: Data) -> bool { return value.kind == .Nil }")
+    emit_line(e, "kvist_data_bool_p :: proc(value: Data) -> bool { return value.kind == .Bool }")
+    emit_line(e, "kvist_data_int_p :: proc(value: Data) -> bool { return value.kind == .Int }")
+    emit_line(e, "kvist_data_float_p :: proc(value: Data) -> bool { return value.kind == .Float }")
+    emit_line(e, "kvist_data_string_p :: proc(value: Data) -> bool { return value.kind == .String }")
+    emit_line(e, "kvist_data_symbol_p :: proc(value: Data) -> bool { return value.kind == .Symbol }")
+    emit_line(e, "kvist_data_keyword_p :: proc(value: Data) -> bool { return value.kind == .Keyword }")
+    emit_line(e, "kvist_data_list_p :: proc(value: Data) -> bool { return value.kind == .List }")
+    emit_line(e, "kvist_data_vector_p :: proc(value: Data) -> bool { return value.kind == .Vector }")
+    emit_line(e, "kvist_data_map_p :: proc(value: Data) -> bool { return value.kind == .Map }")
+    emit_line(e, "kvist_data_set_p :: proc(value: Data) -> bool { return value.kind == .Set }")
+    emit_line(e, "kvist_data_tagged_p :: proc(value: Data) -> bool { return value.kind == .Tagged }")
+    emit_line(e, "kvist_data_item_at :: proc(value: Data, index: int) -> Data { assert((value.kind == .List || value.kind == .Vector || value.kind == .Set) && index >= 0 && index < len(value.payload.items), \"Data collection index out of bounds\"); return value.payload.items[index] }")
+    emit_line(e, "kvist_data_key_at :: proc(value: Data, index: int) -> Data { assert(value.kind == .Map && index >= 0 && index < len(value.payload.entries), \"Data map index out of bounds\"); return value.payload.entries[index].key }")
+    emit_line(e, "kvist_data_value_at :: proc(value: Data, index: int) -> Data { assert(value.kind == .Map && index >= 0 && index < len(value.payload.entries), \"Data map index out of bounds\"); return value.payload.entries[index].value }")
+}
+
+emit_data_literals :: proc(e: ^Emitter, literals: []Data_Literal) {
+    for literal in literals {
+        emit_raw_newline(e)
+        emit_line(e, fmt.tprintf("%s: Data = %s", literal.name, literal.value))
+    }
+}
+
 emit_core_get_or_default_helper :: proc(e: ^Emitter) {
     emit_line(e, "kvist_get_or_default :: proc(m: map[$K]$V, key: K, default: V) -> V {")
     e.indent += 1
@@ -14157,6 +15127,7 @@ emit_core_contains_value_helper :: proc(e: ^Emitter) {
 
 core_helpers_needed :: proc(features: Emitter_Features) -> bool {
     return features.keyword_type ||
+           features.data_type ||
            features.core_get_or_default ||
            features.core_contains_value ||
            parallel_helpers_needed(features)
@@ -14179,6 +15150,11 @@ emit_core_helpers :: proc(e: ^Emitter, features: Emitter_Features) {
     if features.keyword_type {
         emit_core_helper_separator(e, &emitted)
         emit_keyword_type_helper(e)
+    }
+    if features.data_type {
+        emit_core_helper_separator(e, &emitted)
+        emit_data_type_helper(e)
+        emit_data_literals(e, features.data_literals[:])
     }
     if features.core_get_or_default {
         emit_core_helper_separator(e, &emitted)
@@ -14354,6 +15330,10 @@ features_need_core_chan_import :: proc(features: Emitter_Features) -> bool {
 
 features_need_core_os_import :: proc(features: Emitter_Features) -> bool {
     return false
+}
+
+features_need_data_runtime_imports :: proc(features: Emitter_Features) -> bool {
+    return features.data_type
 }
 
 output_has_import_line :: proc(output, line: string) -> bool {
@@ -14553,6 +15533,14 @@ emit_decls_with_source_map :: proc(decls: []IR_Decl) -> (Emit_Result, Compile_Er
        !output_has_import_path(output, "core:os") {
         append(&late_imports, "import os \"core:os\"")
     }
+    if features_need_data_runtime_imports(features) &&
+       !output_has_import_line(output, "import kvist_runtime \"base:runtime\"") {
+        append(&late_imports, "import kvist_runtime \"base:runtime\"")
+    }
+    if features_need_data_runtime_imports(features) &&
+       !output_has_import_line(output, "import kvist_sync \"core:sync\"") {
+        append(&late_imports, "import kvist_sync \"core:sync\"")
+    }
     if len(late_imports) > 0 {
         adjusted_output, added_lines := inject_imports_into_output_header(output, late_imports[:])
         delete(output)
@@ -14693,6 +15681,14 @@ emit_eval_decls_with_source_map :: proc(decls: []IR_Decl, eval_form: CST_Form, n
     if features_need_core_os_import(features) &&
        !output_has_import_path(output, "core:os") {
         append(&late_imports, "import os \"core:os\"")
+    }
+    if features_need_data_runtime_imports(features) &&
+       !output_has_import_line(output, "import kvist_runtime \"base:runtime\"") {
+        append(&late_imports, "import kvist_runtime \"base:runtime\"")
+    }
+    if features_need_data_runtime_imports(features) &&
+       !output_has_import_line(output, "import kvist_sync \"core:sync\"") {
+        append(&late_imports, "import kvist_sync \"core:sync\"")
     }
     if len(late_imports) > 0 {
         adjusted_output, added_lines := inject_imports_into_output_header(output, late_imports[:])

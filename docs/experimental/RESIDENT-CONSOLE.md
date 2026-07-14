@@ -1,7 +1,9 @@
 # Experimental: Resident Console
 
-A future Kvist console should be a resident command console, not a classic
-language REPL.
+A future Kvist console attached to a running application should be a resident
+command console, not a classic language REPL. A standalone, session-oriented
+native REPL is a separate earlier milestone; see
+[LISP-NATIVE.md](./LISP-NATIVE.md#7-build-a-standalone-native-repl).
 
 Kvist source is compiled, typed, ownership-aware, and lowered through Odin. A
 traditional REPL that evaluates arbitrary forms into one mutable global language
@@ -364,10 +366,13 @@ for live embedded process state.
 
 ## Likely Build Order
 
-1. Add fileless `eval-string`.
-2. Add an optional `scratch` loop over `eval-string` if shell usage is annoying.
-3. Build a Vev or app-specific query/command shell.
-4. Design resident console commands on top of reload/live once real use cases
-   are clearer.
+1. Complete managed `Data` and the standalone native session REPL.
+2. Build a Vev or app-specific query/command shell over the session protocol.
+3. Attach prepared commands to reload/live at explicit host safe points.
+4. Add development-only resident eval after capability and generation lifetime
+   rules are proven.
+5. Add authenticated network transport only after the local resident model is
+   safe and useful.
 
-This keeps the first step useful without committing to the full console design.
+This keeps standalone language exploration separate from access to live
+application state and gives both paths one tested session/result protocol.

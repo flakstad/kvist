@@ -1,0 +1,42 @@
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
+
+(package main)
+(import data "kvist:data")
+
+(defn increment [value: Data] -> Data
+  (data.from-int (+ (data.int value) 1)))
+
+(defn move-city [_: Data] -> Data
+  (data.from-string "Bergen"))
+
+(defn main []
+  (let [name (data.from-string "Ada")
+        name-key (data.from-keyword ":user/name")
+        age-key (data.from-keyword ":user/age")
+        age (data.from-int 37)
+        fields: [4]Data [name-key name age-key age]
+        user (data.map fields[:])
+        updated (data.assoc user name-key (data.from-string "Grace"))
+        older (data.update user age-key increment)
+        profile-key (data.from-keyword ":user/profile")
+        city-key (data.from-keyword ":profile/city")
+        path: [2]Data [profile-key city-key]
+        nested (data.assoc-in updated path[:] (data.from-string "Oslo"))
+        moved (data.update-in nested path[:] move-city)
+        current name]
+    (assert (= (data.string (get user :user/name)) "Ada"))
+    (assert (= (data.string (get updated :user/name)) "Grace"))
+    (assert (= (data.int (get older :user/age)) 38))
+    (assert (= (data.string (data.get-in nested path[:])) "Oslo"))
+    (assert (= (data.string (data.get-in moved path[:])) "Bergen"))
+    (set! current (data.from-string "Grace"))
+    (assert (= (data.string current) "Grace"))
+    (let [entity (data.from-int 42)
+          tx `[:db/add ~entity :user/name ~current]
+          tail '[2 3]
+          values `[1 ~@tail 4]]
+      (assert (= (data.int (data.nth tx 1)) 42))
+      (assert (= (data.string (data.nth tx 3)) "Grace"))
+      (assert (= (count values) 4))
+      (assert (= (data.int (data.nth values 2)) 3)))))

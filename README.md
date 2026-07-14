@@ -7,8 +7,15 @@
 A practical Lisp for systems programming.
 
 Kvist is a general-purpose Lisp-shaped language for writing fast programs and
-small binaries. It gives you expression-oriented syntax, macros, explicit
-ownership, and direct memory management.
+small binaries. It is native and statically typed by default, with a
+first-class immutable Lisp data world that can be entered explicitly. It gives
+you expression-oriented syntax, macros, explicit ownership, and direct memory
+management.
+
+Native structs and homogeneous collections remain concrete and predictable.
+Quoted `Data` values provide the complementary Lisp model for queries,
+configuration, messages, and other heterogeneous data, with zero-allocation
+static literals and deterministically managed runtime values.
 
 Kvist transpiles to readable Odin and uses Odin for checking, building, and
 running programs. The syntax draws from Lisp and Clojure, but the execution
@@ -93,8 +100,10 @@ library that should feel familiar.
 
 Kvist is designed to feel familiar to Clojure programmers, but its semantics
 are those of a native, ownership-oriented systems language. There is no dynamic
-runtime, no lazy sequence abstraction, no persistent collection model, and no
-garbage collection. Package `kvist:arr` provides familiar functions such as
+runtime governing ordinary code, no lazy sequence abstraction, and no garbage
+collection. Native collections remain concrete, while first-class immutable
+`Data` provides an explicit persistent data model for heterogeneous Lisp and
+EDN-shaped values. Package `kvist:arr` provides familiar functions such as
 `arr.map`, `arr.filter`, and `arr.reduce`, but they operate on concrete arrays
 and slices.
 Some functions return new owned results, and mutation-oriented variants like
@@ -260,6 +269,7 @@ development workflows, see [docs/LIVE-DEVELOPMENT.md](docs/LIVE-DEVELOPMENT.md).
 - [docs/LANGUAGE.md](docs/LANGUAGE.md) - language reference
 - [docs/MACROS.md](docs/MACROS.md) - macro authoring
 - [docs/SEQUENCES.md](docs/SEQUENCES.md) - collection helpers
+- [docs/DATA.md](docs/DATA.md) - first-class quoted data and runtime value semantics
 - [docs/PACKAGES.md](docs/PACKAGES.md) - shipped package index
 - [kvist-lang/html](https://github.com/kvist-lang/html) - optional HTML rendering package
 - [kvist-lang/http](https://github.com/kvist-lang/http) - optional HTTP package
