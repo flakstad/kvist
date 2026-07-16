@@ -113,32 +113,43 @@
               (return (data.from-int (i64 number)) (Read-Error {}) true)
               (return (data.from-symbol token) (Read-Error {}) true)))))))
 
+(defn- release-items! [items: [dynamic]Data]
+  (for [item items]
+    (data.release item))
+  (delete items))
+
+(defn- sequence-data [initial: Data, items: []Data] -> Data
+  (cond
+    (data.list? initial) (data.list items)
+    (data.set? initial) (data.set items)
+    :else (data.vector items)))
+
 (defn- parse-sequence [reader: ^Reader, close: byte, initial: Data]
   -> [value: Data, error: Read-Error, ok: bool]
-  (let [result initial]
+  (let [items (make [dynamic]Data) :defer-with release-items!]
     (while true
       (skip-space! reader)
       (when (>= reader.index (core.count reader.text))
         (return (read-error reader "unterminated collection")))
       (when (= (core.get reader.text reader.index) close)
         (inc! reader.index)
-        (return result (Read-Error {}) true))
+        (return (sequence-data initial items[:]) (Read-Error {}) true))
       (let [[item error ok] (parse-value reader)]
         (when (not ok)
           (return 'nil error false))
-        (set! result (data.append result item))))
+        (data.append-retained! (addr items) item)))
     (read-error reader "unterminated collection")))
 
 (defn- parse-map [reader: ^Reader]
   -> [value: Data, error: Read-Error, ok: bool]
-  (let [result '{}]
+  (let [items (make [dynamic]Data) :defer-with release-items!]
     (while true
       (skip-space! reader)
       (when (>= reader.index (core.count reader.text))
         (return (read-error reader "unterminated map")))
       (when (= (core.get reader.text reader.index) (byte 125))
         (inc! reader.index)
-        (return result (Read-Error {}) true))
+        (return (data.map items[:]) (Read-Error {}) true))
       (let [key-start reader.index
             [key key-error key-ok] (parse-value reader)
             key-end reader.index]
@@ -151,13 +162,21 @@
         (let [[value value-error value-ok] (parse-value reader)]
           (when (not value-ok)
             (return 'nil value-error false))
-          (when (core.contains? result key)
-            (return 'nil
-                    (Read-Error {message: "duplicate map key"
-                                 offset: key-start
-                                 form: (core.slice reader.text key-start key-end)})
-                    false))
-          (set! result (data.assoc result key value)))))
+          (let [duplicate false
+                index 0]
+            (while (< index (core.count items))
+              (when (= items[index] key)
+                (set! duplicate true)
+                (break))
+              (mut! index += 2))
+            (when duplicate
+              (return 'nil
+                      (Read-Error {message: "duplicate map key"
+                                   offset: key-start
+                                   form: (core.slice reader.text key-start key-end)})
+                      false)))
+          (data.append-retained! (addr items) key)
+          (data.append-retained! (addr items) value))))
     (read-error reader "unterminated map")))
 
 (defn- parse-value [reader: ^Reader]

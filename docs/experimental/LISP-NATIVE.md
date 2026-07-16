@@ -114,6 +114,11 @@ matching belongs in the language only where it improves exhaustiveness,
 binding, or lowering; traversal, decoding, shapes, and builders belong in
 `kvist:data` wherever ordinary package code is sufficient.
 
+`kvist:edn` already uses the underlying implementation pattern internally: it
+collects retained children in native buffers and constructs one immutable Data
+node per completed collection. The remaining item is a safe public builder API
+for application workloads, not linear-time EDN parsing.
+
 ### 4. Add `kvist:edn`
 
 EDN is an official source package built on `kvist:data`, not a compiler

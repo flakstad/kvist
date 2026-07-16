@@ -3618,6 +3618,9 @@ compile_imported_data_runtime_uses_required_import_aliases :: proc(t: ^testing.T
     testing.expect_value(t, strings.contains(output, "Data_Kind :: enum"), true)
     testing.expect_value(t, strings.contains(output, "import kvist_runtime \"base:runtime\""), true)
     testing.expect_value(t, strings.contains(output, "import kvist_sync \"core:sync\""), true)
+    testing.expect_value(t, strings.contains(output, "items := make([dynamic]Data)"), true)
+    testing.expect_value(t, strings.contains(output, "edn__data__append_retained_bang(&items, item)"), true)
+    testing.expect_value(t, strings.contains(output, "result = edn__data__append(result, item)"), false)
 }
 
 @(test)

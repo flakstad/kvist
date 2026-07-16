@@ -28,6 +28,9 @@ The shipped `kvist:data` source package owns traversal and persistent collection
 operations. Parsing and rendering EDN belongs in the ordinary official
 `kvist:edn` package built on the runtime construction primitives. Reading,
 structured parse errors, file input, and canonical rendering are implemented.
+The reader collects sequence and map children in temporary native buffers and
+freezes each completed form once; parsing a large collection does not apply a
+persistent update for every input form.
 
 ## Current Values
 
