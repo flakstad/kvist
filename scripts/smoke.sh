@@ -51,7 +51,7 @@ assert_eq() {
     fi
 }
 
-run odin build src/cli/kvist
+run odin build src/cli/kvist -o:speed
 
 run ./kvist check examples/language/hello.kvist
 assert_eq "hello from kvist" "$(capture ./kvist run examples/language/hello.kvist)" "hello"

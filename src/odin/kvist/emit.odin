@@ -1730,7 +1730,15 @@ runtime_data_unquote_expr :: proc(e: ^Emitter, form: CST_Form) -> (text: string,
     }
     ty, ok_ty := obvious_form_type(e, form)
     if !ok_ty {
-        return "", false, Compile_Error{message = "runtime Data unquote needs an obvious Data or native scalar type", span = form.span}, false
+        expression := form.text
+        if expression == "" && len(form.items) > 0 {
+            expression = form.items[0].text
+        }
+        message := "runtime Data unquote needs an obvious Data or native scalar type"
+        if expression != "" {
+            message = fmt.tprintf("runtime Data unquote `%s` needs an obvious Data or native scalar type", expression)
+        }
+        return "", false, Compile_Error{message = message, span = form.span}, false
     }
     mark_data_type(e)
     if type_text_is_managed_value(ty) {
@@ -6983,6 +6991,9 @@ obvious_form_type :: proc(e: ^Emitter, form: CST_Form) -> (string, bool) {
         return ty, ok_ty
     }
     if form.kind == .Symbol {
+        if ty, ok := known_form_type(e, form); ok {
+            return ty, true
+        }
         if symbol_is_simple_deref_suffix(form.text) {
             if ty, ok := lookup_local_type(e, map_name(form.text[:len(form.text)-1])); ok && len(ty) > 0 && ty[0] == '^' {
                 return ty[1:], true
@@ -8370,6 +8381,23 @@ emit_for_in_loop_body :: proc(e: ^Emitter, coll_form: CST_Form, coll_text, first
     emit_raw_newline(e)
     e.indent += 1
     push_local_type_scope(e)
+    if coll_ty, ok_coll_ty := obvious_form_type(e, coll_form); ok_coll_ty {
+        if key_ty, value_ty, ok_map := map_type_parts(coll_ty); ok_map {
+            if second_name == "" {
+                bind_local_type(e, first_name, value_ty)
+            } else {
+                bind_local_type(e, first_name, key_ty)
+                bind_local_type(e, second_name, value_ty)
+            }
+        } else if item_ty, ok_item_ty := collection_element_type(coll_ty); ok_item_ty {
+            if second_name == "" {
+                bind_local_type(e, first_name, item_ty)
+            } else {
+                bind_local_type(e, first_name, "int")
+                bind_local_type(e, second_name, item_ty)
+            }
+        }
+    }
     err_body, ok_body := emit_body_forms(e, body, Return_Spec{kind = .None})
     pop_local_type_scope(e)
     if !ok_body {

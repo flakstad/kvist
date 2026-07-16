@@ -32,7 +32,7 @@ repository, and build the Kvist CLI from the repo root:
 ```sh
 git clone https://github.com/kvist-lang/kvist.git
 cd kvist
-odin build src/cli/kvist
+odin build src/cli/kvist -o:speed
 ```
 
 Add a main function to a `hello.kvist` file:

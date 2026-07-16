@@ -1281,12 +1281,6 @@ macro_eval_sequence_helper :: proc(form: CST_Form, macros: []User_Macro, binding
     return Macro_Value{}, Compile_Error{message = "unknown macro sequence helper", span = form.span}, false
 }
 
-// The evaluator is deliberately broad and has many branch-local temporaries.
-// In an unoptimised compiler build Odin otherwise reserves all of them in one
-// ~48 KiB stack frame. Recursive expansion of a substantial HTML macro can
-// then exhaust the macOS main-thread stack. Optimising this hot recursive proc
-// keeps its frame proportional to the active branch in debug compiler builds.
-@(optimization_mode="favor_size")
 macro_eval_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_Binding) -> (Macro_Value, Compile_Error, bool) {
     #partial switch form.kind {
     case .Nil:

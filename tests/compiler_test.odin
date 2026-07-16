@@ -3811,6 +3811,47 @@ compile_runtime_data_quasiquote :: proc(t: ^testing.T) {
 }
 
 @(test)
+compile_runtime_data_quasiquote_struct_field :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct Item {id: string})
+
+(defn build [item: Item] -> Data
+  ` + "`" + `[:db/add ~item.id :item/rank "1"])`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "kvist_data_make_text(Data_Kind.String, item.id)"), true)
+}
+
+@(test)
+compile_runtime_data_quasiquote_loop_struct_field :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct Item {id: string})
+
+(defn build [items: []Item]
+  (for [item items]
+    (discard ` + "`" + `[:db/add ~item.id :item/rank "1"])))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "kvist_data_make_text(Data_Kind.String, item.id)"), true)
+}
+
+@(test)
 compile_runtime_data_quasiquote_splice :: proc(t: ^testing.T) {
     source := `(package main)
 

@@ -17,7 +17,7 @@ cleanup() {
 trap cleanup EXIT HUP INT TERM
 
 mkdir -p "$staging/bin" "$staging/odin"
-odin build "$repo_root/src/cli/kvist" -out:"$staging/bin/kvist"
+odin build "$repo_root/src/cli/kvist" -o:speed -out:"$staging/bin/kvist"
 
 for package in core bit arr map set str soa parallel test regex reload hot live; do
   cp -R "$repo_root/src/kvist/$package" "$staging/$package"

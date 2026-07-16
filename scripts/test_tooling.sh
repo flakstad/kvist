@@ -7,7 +7,7 @@ set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$ROOT"
 
-odin build src/cli/kvist
+odin build src/cli/kvist -o:speed
 PATH="$ROOT:$PATH"
 export PATH
 

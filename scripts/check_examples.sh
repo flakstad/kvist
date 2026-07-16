@@ -7,7 +7,7 @@ set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$ROOT"
 
-odin build src/cli/kvist
+odin build src/cli/kvist -o:speed
 
 tmp_dir=$(mktemp -d)
 trap 'rm -rf "$tmp_dir"' EXIT INT TERM
