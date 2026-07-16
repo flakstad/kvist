@@ -17,6 +17,7 @@ kvist check file.kvist
 kvist run file.kvist
 kvist test file-or-dir.kvist
 kvist test file.kvist --names test_one,test_two
+kvist test file.kvist --track-memory
 kvist eval file.kvist '(form)'
 kvist expand file.kvist '(form)'
 kvist macroexpand file.kvist '(form)'
@@ -60,6 +61,10 @@ the broader live-development workflow alongside resident reload sessions.
 
 `kvist test --names ...` runs selected tests from a file. Use it when you want a
 tighter feedback loop than the full test file.
+
+`kvist test --track-memory` enables Odin's test allocator accounting. It is
+off by default because third-party libraries and process-lifetime caches can
+otherwise turn ordinary package tests into ownership audits.
 
 ## Symbol And Editor Queries
 
@@ -155,6 +160,14 @@ kvist cache rm NAME
 The default cache directory is project-local `.kvist-cache`. Set
 `KVIST_CACHE_DIR` for an isolated cache. Cache names may contain letters,
 digits, `_`, `-`, and `.`.
+
+`build`, `check`, `run`, and `test` also keep emitted Odin in the
+`compile/` subdirectory. Entries are content-addressed by the Kvist compiler
+binary and every reachable `.kvist` or package-sidecar `.odin` source file, so
+editing a direct or transitive dependency creates a new entry automatically.
+Set `KVIST_NO_COMPILE_CACHE=1` to force a fresh translation. The `compile`
+command itself remains uncached because it exposes the complete warning and
+source-map result.
 
 For structured development data, use explicit source-level helpers such as
 `io.write`, `io.read`, `json.write`, and `json.read-as` so format and ownership

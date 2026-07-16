@@ -11,6 +11,7 @@ import "core:strings"
 import kvist "../../odin/kvist"
 
 CACHE_DIR :: ".kvist-cache"
+COMPILE_CACHE_VERSION :: "kvist-compile-cache-v1"
 
 print_usage :: proc() {
     fmt.println("usage:")
@@ -20,7 +21,7 @@ print_usage :: proc() {
     fmt.println("  kvist build <input.kvist> [--out output-binary] [--generated output.odin] [--reload] [--generated-dir dir]")
     fmt.println("  kvist check <input.kvist> [--generated output.odin] [--reload] [--generated-dir dir]")
     fmt.println("  kvist run <input.kvist> [--generated output.odin] [--reload] [--generated-dir dir]")
-    fmt.println("  kvist test <input.kvist> [--generated output.odin] [--names test1,test2]")
+    fmt.println("  kvist test <input.kvist> [--generated output.odin] [--names test1,test2] [--track-memory]")
     fmt.println("  kvist eval <input.kvist> <form> [--no-print] [--check] [--generated output.odin] [--save name]")
     fmt.println("  kvist expand <input.kvist> <form> [--no-print] [-o output.odin]")
     fmt.println("  kvist macroexpand <input.kvist> <form> [-o output.kvist] [--map output.map]")
@@ -122,6 +123,126 @@ ensure_cache_dir_or_exit :: proc(dir: string) {
         fmt.eprintln("failed to create cache directory: ", dir)
         os.exit(1)
     }
+}
+
+fnv1a_update :: proc(hash: u64, bytes: []byte) -> u64 {
+    out := hash
+    for value in bytes {
+        out = (out ~ u64(value)) * 1099511628211
+    }
+    return out
+}
+
+compile_cache_disabled :: proc() -> bool {
+    value, found := os.lookup_env("KVIST_NO_COMPILE_CACHE", context.allocator)
+    if !found {
+        return false
+    }
+    defer delete(value)
+    return value != "" && value != "0" && value != "false"
+}
+
+compile_cache_key :: proc(input: string) -> (key: string, ok: bool) {
+    dependencies, dependency_err, dependencies_ok := kvist.source_dependency_paths(input)
+    if !dependencies_ok {
+        _ = dependency_err
+        return "", false
+    }
+    defer kvist.delete_string_slice(&dependencies)
+
+    hash: u64 = 14695981039346656037
+    hash = fnv1a_update(hash, transmute([]byte)string(COMPILE_CACHE_VERSION))
+    executable, executable_err := os.get_executable_path(context.allocator)
+    if executable_err == nil {
+        executable_data, read_err := os.read_entire_file_from_path(executable, context.allocator)
+        if read_err == nil {
+            hash = fnv1a_update(hash, executable_data)
+            delete(executable_data)
+        }
+        delete(executable)
+    }
+    for path in dependencies {
+        hash = fnv1a_update(hash, transmute([]byte)path)
+        hash = fnv1a_update(hash, []byte{0})
+        data, read_err := os.read_entire_file_from_path(path, context.allocator)
+        if read_err != nil {
+            return "", false
+        }
+        hash = fnv1a_update(hash, data)
+        delete(data)
+        hash = fnv1a_update(hash, []byte{255})
+    }
+    // `fmt.tprintf` uses temporary storage; the cache key crosses that
+    // boundary and is explicitly owned by the caller.
+    return strings.clone(fmt.tprintf("%016x", hash)), true
+}
+
+compile_cache_output_path :: proc(key: string) -> (path: string, ok: bool) {
+    base := cache_dir_or_exit()
+    defer delete(base)
+    dir, dir_err := os.join_path({base, "compile"}, context.allocator)
+    if dir_err != nil {
+        return "", false
+    }
+    defer delete(dir)
+    if !os.exists(dir) {
+        if os.make_directory_all(dir) != nil {
+            return "", false
+        }
+    }
+    name := fmt.tprintf("%s.odin", key)
+    output_path, path_err := os.join_path({dir, name}, context.allocator)
+    return output_path, path_err == nil
+}
+
+publish_compile_cache_output :: proc(path, output: string) {
+    dir, _ := os.split_path(path)
+    temp_dir, temp_err := os.make_directory_temp(dir, ".kvist-compile-*", context.allocator)
+    if temp_err != nil {
+        return
+    }
+    defer {
+        _ = os.remove_all(temp_dir)
+        delete(temp_dir)
+    }
+    temp_path, join_err := os.join_path({temp_dir, "output.odin"}, context.allocator)
+    if join_err != nil {
+        return
+    }
+    defer delete(temp_path)
+    if os.write_entire_file_from_string(temp_path, output) != nil {
+        return
+    }
+    // Publish only complete output. Concurrent compilers may race here, but
+    // identical content-addressed entries are interchangeable.
+    _ = os.rename(temp_path, path)
+}
+
+compile_path_with_execution_cache :: proc(input: string) -> (result: kvist.Emit_Result, err: kvist.Compile_Error, ok: bool) {
+    if compile_cache_disabled() {
+        return kvist.compile_path_with_map(input)
+    }
+    key, key_ok := compile_cache_key(input)
+    if !key_ok {
+        return kvist.compile_path_with_map(input)
+    }
+    defer delete(key)
+    cache_path, path_ok := compile_cache_output_path(key)
+    if !path_ok {
+        return kvist.compile_path_with_map(input)
+    }
+    defer delete(cache_path)
+    if os.exists(cache_path) {
+        cached, read_err := os.read_entire_file_from_path(cache_path, context.allocator)
+        if read_err == nil {
+            return kvist.Emit_Result{output = string(cached)}, kvist.Compile_Error{}, true
+        }
+    }
+    result, err, ok = kvist.compile_path_with_map(input)
+    if ok {
+        publish_compile_cache_output(cache_path, result.output)
+    }
+    return result, err, ok
 }
 
 save_stdout_to_cache_or_exit :: proc(name: string, stdout: []byte) {
@@ -591,6 +712,9 @@ cleanup_generated :: proc(path, temp_dir, requested_path, package_dir: string) {
 }
 
 compile_file_command :: proc(input, output_path, map_path: string) {
+    // `compile` exposes warnings and source maps, so preserve the complete
+    // compiler result. The execution cache intentionally stores only emitted
+    // Odin and is reserved for build/check/run/test commands.
     result, err, ok := kvist.compile_path_with_map(input)
     if !ok {
         data := read_source_or_exit(input)
@@ -1159,7 +1283,7 @@ run_generated_command :: proc(input, generated_path, odin_command: string, binar
     data := read_source_or_exit(input)
     defer delete(transmute([]byte)data)
 
-    result, err, ok := kvist.compile_path_with_map(input)
+    result, err, ok := compile_path_with_execution_cache(input)
     if !ok {
         formatted := kvist.format_compile_error(input, data, err)
         fmt.eprint(formatted)
@@ -1180,11 +1304,11 @@ run_generated_command :: proc(input, generated_path, odin_command: string, binar
     return run_odin_file(odin_command, path, input, data, "", "", result.source_map[:], package_dir = package_dir, binary_output_path = binary_output_path)
 }
 
-test_command :: proc(input, generated_path, test_names: string) -> int {
+test_command :: proc(input, generated_path, test_names: string, track_memory: bool) -> int {
     data := read_source_or_exit(input)
     defer delete(transmute([]byte)data)
 
-    result, err, ok := kvist.compile_path_with_map(input)
+    result, err, ok := compile_path_with_execution_cache(input)
     if !ok {
         formatted := kvist.format_compile_error(input, data, err)
         fmt.eprint(formatted)
@@ -1205,7 +1329,7 @@ test_command :: proc(input, generated_path, test_names: string) -> int {
     extra_args := make([dynamic]string, 0, 3)
     defer delete(extra_args)
     append(&extra_args, "-define:ODIN_TEST_THREADS=1")
-    append(&extra_args, "-define:ODIN_TEST_TRACK_MEMORY=false")
+    append(&extra_args, fmt.tprintf("-define:ODIN_TEST_TRACK_MEMORY=%s", "true" if track_memory else "false"))
     if test_names != "" {
         normalized_test_names := normalize_test_names_arg(test_names)
         defer delete(normalized_test_names)
@@ -1438,6 +1562,7 @@ parse_test_command :: proc() {
     input := os.args[2]
     generated_path := ""
     test_names := ""
+    track_memory := false
 
     i := 3
     for i < len(os.args) {
@@ -1456,13 +1581,16 @@ parse_test_command :: proc() {
             }
             test_names = os.args[i+1]
             i += 2
+        case "--track-memory":
+            track_memory = true
+            i += 1
         case:
             print_usage()
             os.exit(2)
         }
     }
 
-    os.exit(test_command(input, generated_path, test_names))
+    os.exit(test_command(input, generated_path, test_names, track_memory))
 }
 
 parse_eval_command :: proc() {

@@ -269,7 +269,7 @@ compile_typed_multiform_when_expression :: proc(t: ^testing.T) {
 }
 
 @(test)
-reject_untyped_multiform_when_expression :: proc(t: ^testing.T) {
+infer_untyped_multiform_when_expression :: proc(t: ^testing.T) {
     source := `(package main)
 
 (defn pick [second?: bool] -> int
@@ -278,10 +278,15 @@ reject_untyped_multiform_when_expression :: proc(t: ^testing.T) {
                 1)]
     index))`
 
-    _, err, ok := kvist.compile_source(source)
-    testing.expect_value(t, ok, false)
-    defer delete(err.message)
-    testing.expect_value(t, err.message, "do expression needs an expected type; add a let binding type or use it where the type is known")
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+    testing.expect_value(t, strings.contains(output, "index := "), true)
+    testing.expect_value(t, strings.contains(output, "proc() -> int"), true)
 }
 
 @(test)
@@ -622,7 +627,7 @@ compile_final_block_expression_uses_proc_return_type :: proc(t: ^testing.T) {
 }
 
 @(test)
-reject_untyped_do_expression_without_expected_type :: proc(t: ^testing.T) {
+infer_untyped_do_expression_from_final_form :: proc(t: ^testing.T) {
     source := `(package main)
 
 (defn demo []
@@ -631,10 +636,15 @@ reject_untyped_do_expression_without_expected_type :: proc(t: ^testing.T) {
                 1)]
     (println value)))`
 
-    _, err, ok := kvist.compile_source(source)
-    testing.expect_value(t, ok, false)
-    defer delete(err.message)
-    testing.expect_value(t, err.message, "do expression needs an expected type; add a let binding type or use it where the type is known")
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+    testing.expect_value(t, strings.contains(output, "value := "), true)
+    testing.expect_value(t, strings.contains(output, "proc() -> int"), true)
 }
 
 @(test)
@@ -24490,6 +24500,123 @@ compile_output_rebased_for_tmp_path_uses_canonical_relative_import :: proc(t: ^t
     testing.expect_value(t, strings.contains(rebased_forward, "import runtime "), true)
     testing.expect_value(t, strings.contains(rebased_forward, "olive_reload"), true)
     testing.expect_value(t, strings.contains(rebased, "\\src\\odin\\olive_reload"), false)
+}
+
+@(test)
+compile_absolute_source_package_import :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-absolute-source-import-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    support_dir, support_dir_err := os.join_path({dir, "support"}, context.allocator)
+    testing.expect_value(t, support_dir_err == nil, true)
+    if support_dir_err != nil {
+        return
+    }
+    defer delete(support_dir)
+    testing.expect_value(t, os.make_directory_all(support_dir) == nil, true)
+
+    support_path, support_path_err := os.join_path({support_dir, "support.kvist"}, context.allocator)
+    testing.expect_value(t, support_path_err == nil, true)
+    if support_path_err != nil {
+        return
+    }
+    defer delete(support_path)
+    testing.expect_value(t, os.write_entire_file_from_string(support_path, `(package support)
+(defn answer [] -> int 42)`) == nil, true)
+
+    main_path, main_path_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, main_path_err == nil, true)
+    if main_path_err != nil {
+        return
+    }
+    defer delete(main_path)
+    main_source := fmt.tprintf("(package main)\n(import support %q)\n(def value (support.answer))", support_dir)
+    testing.expect_value(t, os.write_entire_file_from_string(main_path, main_source) == nil, true)
+
+    output, err, ok := kvist.compile_path(main_path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+    testing.expect_value(t, strings.contains(output, "support__answer"), true)
+    testing.expect_value(t, strings.contains(output, fmt.tprintf("import support %q", support_dir)), false)
+
+    dependencies, dependency_err, dependencies_ok := kvist.source_dependency_paths(main_path)
+    testing.expect_value(t, dependencies_ok, true)
+    if !dependencies_ok {
+        testing.expect_value(t, dependency_err.message, "")
+        return
+    }
+    defer kvist.delete_string_slice(&dependencies)
+    main_absolute, main_absolute_err := os.get_absolute_path(main_path, context.allocator)
+    support_absolute, support_absolute_err := os.get_absolute_path(support_path, context.allocator)
+    testing.expect_value(t, main_absolute_err == nil, true)
+    testing.expect_value(t, support_absolute_err == nil, true)
+    if main_absolute_err == nil && support_absolute_err == nil {
+        defer delete(main_absolute)
+        defer delete(support_absolute)
+        found_main := false
+        found_support := false
+        for dependency in dependencies {
+            found_main = found_main || dependency == main_absolute
+            found_support = found_support || dependency == support_absolute
+        }
+        testing.expect_value(t, found_main, true)
+        testing.expect_value(t, found_support, true)
+    }
+}
+
+@(test)
+compile_nested_source_package_qualified_macro :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-nested-source-macro-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    macros_dir, _ := os.join_path({dir, "macros"}, context.allocator)
+    middle_dir, _ := os.join_path({dir, "middle"}, context.allocator)
+    defer delete(macros_dir)
+    defer delete(middle_dir)
+    testing.expect_value(t, os.make_directory_all(macros_dir) == nil, true)
+    testing.expect_value(t, os.make_directory_all(middle_dir) == nil, true)
+
+    macros_path, _ := os.join_path({macros_dir, "macros.kvist"}, context.allocator)
+    middle_path, _ := os.join_path({middle_dir, "middle.kvist"}, context.allocator)
+    middle_use_path, _ := os.join_path({middle_dir, "use.kvist"}, context.allocator)
+    root_path, _ := os.join_path({dir, "main.kvist"}, context.allocator)
+    defer delete(macros_path)
+    defer delete(middle_path)
+    defer delete(middle_use_path)
+    defer delete(root_path)
+    testing.expect_value(t, os.write_entire_file_from_string(macros_path, `(package macros)
+(defmacro forty-two [] (quasiquote 42))`) == nil, true)
+    testing.expect_value(t, os.write_entire_file_from_string(middle_path, `(package middle)
+(import macros "../macros")`) == nil, true)
+    testing.expect_value(t, os.write_entire_file_from_string(middle_use_path, `(package middle)
+(def value (macros.forty-two))`) == nil, true)
+    testing.expect_value(t, os.write_entire_file_from_string(root_path, `(package main)
+(import middle "middle")
+(def answer middle.value)`) == nil, true)
+
+    output, err, ok := kvist.compile_path(root_path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+    testing.expect_value(t, strings.contains(output, "42"), true)
+    testing.expect_value(t, strings.contains(output, "forty_two"), false)
 }
 
 @(test)

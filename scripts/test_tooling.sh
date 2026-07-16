@@ -116,6 +116,33 @@ printf 'tooling: check command\n'
 ./kvist check examples/language/hello.kvist --generated "$tmp_dir/check.odin"
 assert_file_nonempty "$tmp_dir/check.odin" "check generated output"
 
+printf 'tooling: content-addressed compile cache\n'
+compile_cache_dir="$tmp_dir/compile-cache"
+mkdir -p "$tmp_dir/cache-package/support"
+cat > "$tmp_dir/cache-package/support/support.kvist" <<'EOF'
+(package support)
+(def answer 41)
+EOF
+cat > "$tmp_dir/cache-package/main.kvist" <<'EOF'
+(package main)
+(import support "support")
+(defn main []
+  (println support.answer))
+EOF
+KVIST_CACHE_DIR="$compile_cache_dir" ./kvist check "$tmp_dir/cache-package/main.kvist"
+first_cache_count=$(find "$compile_cache_dir/compile" -type f -name '*.odin' | wc -l | tr -d ' ')
+assert_eq "1" "$first_cache_count" "initial compile cache entry count"
+KVIST_CACHE_DIR="$compile_cache_dir" ./kvist check "$tmp_dir/cache-package/main.kvist"
+warm_cache_count=$(find "$compile_cache_dir/compile" -type f -name '*.odin' | wc -l | tr -d ' ')
+assert_eq "1" "$warm_cache_count" "warm compile cache entry count"
+cat > "$tmp_dir/cache-package/support/support.kvist" <<'EOF'
+(package support)
+(def answer 42)
+EOF
+KVIST_CACHE_DIR="$compile_cache_dir" ./kvist check "$tmp_dir/cache-package/main.kvist"
+changed_cache_count=$(find "$compile_cache_dir/compile" -type f -name '*.odin' | wc -l | tr -d ' ')
+assert_eq "2" "$changed_cache_count" "dependency-invalidated compile cache entry count"
+
 printf 'tooling: check standalone file beside raw Odin programs\n'
 ./kvist check benchmarks/aggregate_helpers.kvist
 

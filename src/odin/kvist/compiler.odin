@@ -540,6 +540,9 @@ directory_has_kvist_files :: proc(dir: string) -> bool {
 }
 
 resolve_import_base_path :: proc(importer_path, import_path: string) -> (base: string, owned: bool) {
+    if os.is_absolute_path(import_path) {
+        return import_path, false
+    }
     base_dir, _ := os.split_path(importer_path)
     if base_dir == "" {
         return import_path, false
@@ -562,9 +565,7 @@ is_source_import_path_from :: proc(importer_path, path: string) -> bool {
     }
 
     base, base_owned := resolve_import_base_path(importer_path, path)
-    if base_owned {
-        defer delete(base)
-    }
+    defer if base_owned { delete(base) }
     if os.exists(base) {
         if os.is_dir(base) {
             return directory_has_kvist_files(base)
@@ -621,14 +622,16 @@ resolve_source_import_path :: proc(importer_path, import_path: string) -> (strin
     }
     base_dir, _ := os.split_path(importer_path)
     base := import_path
-    if base_dir != "" {
+    base_owned := false
+    if base_dir != "" && !os.is_absolute_path(import_path) {
         joined, join_err := os.join_path({base_dir, import_path}, context.allocator)
         if join_err != nil {
             return "", Compile_Error{message = fmt.tprintf("could not resolve source import: %s", import_path)}, false
         }
         base = joined
-        defer delete(base)
+        base_owned = true
     }
+    defer if base_owned { delete(base) }
 
     if os.exists(base) && os.is_dir(base) {
         return strings.clone(base), Compile_Error{}, true
@@ -2243,6 +2246,194 @@ read_package_files :: proc(dir: string) -> ([]Package_File, Compile_Error, bool)
         append(&files, Package_File{path = path, path_owned = true, source = source, package_name = package_name, forms = forms})
     }
     return files[:], Compile_Error{}, true
+}
+
+append_source_dependency_path :: proc(paths: ^[dynamic]string, seen: ^map[string]bool, path: string) -> bool {
+    absolute, absolute_err := os.get_absolute_path(path, context.allocator)
+    if absolute_err != nil {
+        return false
+    }
+    if seen[absolute] {
+        delete(absolute)
+        return true
+    }
+    seen[absolute] = true
+    append(paths, strings.clone(absolute))
+    return true
+}
+
+collect_source_dependency_paths_recursive :: proc(
+    package_path: string,
+    visited_packages: ^map[string]bool,
+    seen_paths: ^map[string]bool,
+    paths: ^[dynamic]string,
+) -> (Compile_Error, bool) {
+    canonical, canonical_err := os.get_absolute_path(package_path, context.allocator)
+    if canonical_err != nil {
+        return Compile_Error{message = fmt.tprintf("could not resolve source dependency: %s", package_path)}, false
+    }
+    if visited_packages[canonical] {
+        delete(canonical)
+        return Compile_Error{}, true
+    }
+    visited_packages[canonical] = true
+
+    package_files: [dynamic]string
+    defer delete_string_slice(&package_files)
+    package_dir := canonical
+    if !os.is_dir(canonical) {
+        package_dir, _ = os.split_path(canonical)
+        if package_dir == "" {
+            package_dir = "."
+        }
+    }
+    entries, entries_err := os.read_directory_by_path(package_dir, -1, context.allocator)
+    if entries_err != nil {
+        return Compile_Error{message = fmt.tprintf("could not read source dependency directory: %s", package_dir)}, false
+    }
+    defer os.file_info_slice_delete(entries, context.allocator)
+    for entry in entries {
+        if entry.type != .Regular || !strings.has_suffix(entry.name, ".kvist") {
+            continue
+        }
+        file_path, join_err := os.join_path({package_dir, entry.name}, context.allocator)
+        if join_err == nil {
+            append(&package_files, file_path)
+        }
+    }
+    if len(package_files) == 0 {
+        return Compile_Error{message = fmt.tprintf("source dependency directory contains no .kvist files: %s", package_dir)}, false
+    }
+
+    sidecar_dirs: [dynamic]string
+    defer {
+        for dir in sidecar_dirs {
+            delete(dir)
+        }
+        delete(sidecar_dirs)
+    }
+    for file_path in package_files {
+        if !append_source_dependency_path(paths, seen_paths, file_path) {
+            return Compile_Error{message = fmt.tprintf("could not resolve source dependency: %s", file_path)}, false
+        }
+        sidecar_dir, _ := os.split_path(file_path)
+        if sidecar_dir == "" {
+            sidecar_dir = "."
+        }
+        sidecar_abs, sidecar_err := os.get_absolute_path(sidecar_dir, context.allocator)
+        if sidecar_err == nil && !contains_text(sidecar_dirs[:], sidecar_abs) {
+            append(&sidecar_dirs, sidecar_abs)
+        } else if sidecar_err == nil {
+            delete(sidecar_abs)
+        }
+
+        source_data, read_err := os.read_entire_file_from_path(file_path, context.allocator)
+        if read_err != nil {
+            return Compile_Error{message = fmt.tprintf("could not read source dependency: %s", file_path)}, false
+        }
+        source := string(source_data)
+        cursor := 0
+        for cursor < len(source) {
+            import_offset := strings.index(source[cursor:], "(import")
+            if import_offset < 0 {
+                break
+            }
+            import_start := cursor + import_offset
+            after_head := import_start + len("(import")
+            if after_head >= len(source) || !is_whitespace(source[after_head]) {
+                cursor = after_head
+                continue
+            }
+            quote_offset := strings.index(source[after_head:], "\"")
+            if quote_offset < 0 {
+                break
+            }
+            quote_start := after_head + quote_offset
+            quote_end := quote_start + 1
+            escaped := false
+            for quote_end < len(source) {
+                if escaped {
+                    escaped = false
+                } else if source[quote_end] == '\\' {
+                    escaped = true
+                } else if source[quote_end] == '"' {
+                    break
+                }
+                quote_end += 1
+            }
+            if quote_end >= len(source) {
+                break
+            }
+            import_path := unquote_string(source[quote_start:quote_end+1])
+            if import_path != "" && is_source_import_path_from(file_path, import_path) {
+                resolved, resolve_err, resolve_ok := resolve_source_import_path(file_path, import_path)
+                if !resolve_ok {
+                    delete(import_path)
+                    delete(source_data)
+                    return resolve_err, false
+                }
+                dependency_err, dependency_ok := collect_source_dependency_paths_recursive(
+                    resolved,
+                    visited_packages,
+                    seen_paths,
+                    paths,
+                )
+                delete(resolved)
+                if !dependency_ok {
+                    delete(import_path)
+                    delete(source_data)
+                    return dependency_err, false
+                }
+            }
+            if import_path != "" {
+                delete(import_path)
+            }
+            cursor = quote_end + 1
+        }
+        delete(source_data)
+    }
+
+    for dir in sidecar_dirs {
+        entries, entries_err := os.read_directory_by_path(dir, -1, context.allocator)
+        if entries_err != nil {
+            continue
+        }
+        for entry in entries {
+            if entry.type != .Regular || !strings.has_suffix(entry.name, ".odin") {
+                continue
+            }
+            sidecar, join_err := os.join_path({dir, entry.name}, context.allocator)
+            if join_err == nil {
+                _ = append_source_dependency_path(paths, seen_paths, sidecar)
+                delete(sidecar)
+            }
+        }
+        os.file_info_slice_delete(entries, context.allocator)
+    }
+    return Compile_Error{}, true
+}
+
+source_dependency_paths :: proc(path: string) -> (paths: [dynamic]string, err: Compile_Error, ok: bool) {
+    visited_packages := make(map[string]bool)
+    seen_paths := make(map[string]bool)
+    defer {
+        for key in visited_packages {
+            delete(key)
+        }
+        delete(visited_packages)
+        for key in seen_paths {
+            delete(key)
+        }
+        delete(seen_paths)
+    }
+    err, ok = collect_source_dependency_paths_recursive(path, &visited_packages, &seen_paths, &paths)
+    if !ok {
+        delete_string_slice(&paths)
+        return nil, err, false
+    }
+    sorted := sorted_unique_texts(paths[:])
+    delete(paths)
+    return sorted, Compile_Error{}, true
 }
 
 validate_package_files :: proc(dir: string, files: []Package_File) -> (package_name: string, err: Compile_Error, ok: bool) {

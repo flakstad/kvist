@@ -976,17 +976,29 @@ repo_root_for_path :: proc(path: string) -> (string, bool) {
         }
     }
     for current != "" {
-        marker, err := os.join_path({current, "cmd", "kvist", "main.odin"}, context.allocator)
-        if err == nil {
-            if os.exists(marker) {
-                delete(marker)
-                root := strings.clone(current)
-                if owned_current != "" {
-                    delete(owned_current)
-                }
-                return root, true
+        markers := [2][3]string{
+            {"src", "cli", "kvist"},
+            {"cmd", "kvist", "main.odin"},
+        }
+        for parts, marker_index in markers {
+            marker: string
+            err: os.Error
+            if marker_index == 0 {
+                marker, err = os.join_path({current, parts[0], parts[1], parts[2], "main.odin"}, context.allocator)
+            } else {
+                marker, err = os.join_path({current, parts[0], parts[1], parts[2]}, context.allocator)
             }
-            delete(marker)
+            if err == nil {
+                if os.exists(marker) {
+                    delete(marker)
+                    root := strings.clone(current)
+                    if owned_current != "" {
+                        delete(owned_current)
+                    }
+                    return root, true
+                }
+                delete(marker)
+            }
         }
         trimmed_end := len(current)
         for trimmed_end > 1 && is_path_separator(current[trimmed_end-1]) {
