@@ -30,6 +30,7 @@
     (assert (= (data.string (get user :user/name)) "Ada"))
     (assert (= (data.string (get updated :user/name)) "Grace"))
     (assert (= (data.int (get older :user/age)) 38))
+    (assert (= (data.count user) 2))
     (assert (= (data.string (data.get-in nested path[:])) "Oslo"))
     (assert (= (data.string (data.get-in moved path[:])) "Bergen"))
     (set! current (data.from-string "Grace"))
@@ -45,5 +46,6 @@
           values `[1 ~@tail 4]]
       (assert (= (data.int (data.nth tx 1)) 42))
       (assert (= (data.string (data.nth tx 3)) "Grace"))
+      (assert (= (data.count tx) 4))
       (assert (= (count values) 4))
       (assert (= (data.int (data.nth values 2)) 3)))))

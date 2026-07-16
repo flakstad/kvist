@@ -208,6 +208,14 @@
 (defn tagged? [value: Data] -> bool #force_inline
   (odin-call "kvist_data_tagged_p" value))
 
+(defn count
+  "Return the number of entries in runtime collection Data.
+
+  Maps count key/value entries; lists, vectors, and sets count items; strings
+  count bytes, matching ordinary `count` behavior for Data."
+  [value: Data] -> int #force_inline
+  (odin-call "kvist_data_count" value))
+
 (defn key-at
   "Return the key at `index` in map Data.
 
