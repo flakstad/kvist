@@ -156,9 +156,9 @@ produce identical results and diagnostics.
 Vev's primary query, query-input, rule, pull, transaction, storage transaction,
 datom-log, and durable metadata paths now use `kvist:edn`. Prepared semantic
 objects retain an explicit Data source owner or deep-own their values, making
-prepare-now/execute-later safe. Remaining Vev work is confined to raw parser
-compatibility shapes and exact Data/text diagnostic parity before its duplicate
-reader can be removed.
+prepare-now/execute-later safe. The duplicate Vev EDN reader and raw borrowed
+parser wrappers have been removed. Remaining parity work concerns exact
+Data/text diagnostics and the application-facing result surface.
 
 The acceptance workload is parallel MusicBrainz/Day-of-Datomic material in
 Kvist and Clojure, with Datomic comparison where practical.
@@ -173,9 +173,49 @@ binding:
 (def config (edn.read-file "config.edn"))
 ```
 
-This requires deterministic dependency-order initialization, failure
-propagation, reverse-order shutdown, and managed-value cleanup. It does not add
-Clojure Vars or mutable indirection to ordinary reads.
+Runtime package bindings now use deterministic declaration-order
+initialization, reverse-order managed shutdown, and ordinary Kvist failure
+behavior. They do not add Clojure Vars or mutable indirection to ordinary
+reads.
+
+Implemented:
+
+1. Classify each `def` as a static binding or a runtime-initialized binding.
+   Literal native constants, type aliases, overloads, and quoted static Data
+   retain their existing direct lowering. Calls and other runtime expressions
+   require package initialization.
+2. Represent the initialization distinction on the declaration itself rather
+   than checking individual RHS forms throughout the emitter.
+3. Emit runtime definitions as typed package storage plus one generated
+   initializer. Assign bindings in flattened package/declaration order so a
+   binding can use earlier definitions deterministically.
+4. Generate reverse-order finalization for managed values. Static Data remains
+   immortal and must not gain retain/release traffic.
+5. Preserve ordinary Kvist failure behavior inside initializers:
+   expressions either produce their declared value or terminate through their
+   explicit panic/error handling. Add structured package-startup failure
+   propagation when a concrete fallible application API establishes its
+   required shape.
+6. Support direct reads after initialization, dependency order, exactly-once
+   evaluation, reverse cleanup, static quote allocation counts, generated
+   source maps, `kvist run`, `kvist build`, `kvist eval`, and imported source
+   packages.
+
+The first milestone is implemented. Calls to single-result Kvist functions
+infer their return type, explicitly typed runtime expressions are also
+supported, later definitions and `main` read the values directly, managed Data
+is released once at shutdown, and ordinary static definitions retain their
+existing lowering.
+
+Remaining declaration work:
+
+1. Consolidate shared name, visibility, phase, mutability, documentation, type,
+   and source metadata while keeping `def`, `defn`, `defmacro`, `defvar`, and
+   type declarations semantically distinct.
+2. Broaden runtime binding inference only from principled expression typing,
+   not an open-ended set of initializer special cases.
+3. Add structured startup-error reporting when real workloads establish the
+   required API.
 
 ### 7. Separate Syntax From Data
 
@@ -272,10 +312,9 @@ latency requires an interpreted fast path.
 
 ## Execution Order
 
-The active order is finishing Vev's remaining raw-reader and Data/text parity
-work, then completing managed fields and containers. Next come Data traversal,
-typed decoding, structural matching, and builders, followed by runtime package
-bindings with the concrete `edn.read-file` workload. `Syntax`, standalone REPL,
+Vev's reader convergence and runtime package bindings are complete. The active
+order is completing managed fields and containers, then Data traversal, typed
+decoding, structural matching, and builders. `Syntax`, standalone REPL,
 resident console, and any Data evaluator remain later work so the language
 keeps its native default while each dynamic facility is justified by a real
 boundary or application.

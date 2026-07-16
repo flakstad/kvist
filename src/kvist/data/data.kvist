@@ -5,6 +5,11 @@
 (import core "kvist:core")
 (import arr "kvist:arr")
 
+(defn from-nil
+  "Construct nil Data."
+  [] -> Data #owned #force_inline
+  (odin-call "kvist_data_make_nil"))
+
 (defn from-bool
   "Construct boolean Data."
   [value: bool] -> Data #owned #force_inline
@@ -71,6 +76,13 @@
   "Return an owned reference to `value` for storage outside managed bindings."
   [value: Data] -> Data #owned #force_inline
   (odin-call "kvist_data_retain" value))
+
+(defn append-retained!
+  "Append `value` to a native dynamic Data array and retain it for the array.
+
+  Release every appended element with `release` before deleting the array."
+  [values: ^[dynamic]Data, value: Data] #force_inline
+  (odin-call "kvist_data_append_retained" values value))
 
 (defn release
   "Release a Data reference retained for native storage."

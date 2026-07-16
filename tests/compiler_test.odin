@@ -3442,6 +3442,9 @@ compile_quote_as_first_class_data :: proc(t: ^testing.T) {
 (def query
   '[:find ?name :where [?e :user/name ?name]])
 
+(def aggregate-query
+  '[:find (count ?e) . :where [?e :object/name ?name]])
+
 (defn inspect [] -> int
   (let [features (get config :features)]
     (if (contains? features :query)
@@ -3458,6 +3461,9 @@ compile_quote_as_first_class_data :: proc(t: ^testing.T) {
 
     testing.expect_value(t, strings.contains(output, "config: Data = Data{kind = .Map"), true)
     testing.expect_value(t, strings.contains(output, "query: Data = Data{kind = .Vector"), true)
+    testing.expect_value(t, strings.contains(output, "aggregate_query: Data = Data{kind = .Vector"), true)
+    testing.expect_value(t, strings.contains(output, "text = \"count\""), true)
+    testing.expect_value(t, strings.contains(output, "text = \"odin-call\""), false)
     testing.expect_value(t, strings.contains(output, "kvist_data_get(config, Data{kind = .Keyword, payload = {text = \":features\"}})"), true)
     testing.expect_value(t, strings.contains(output, "kvist_data_contains(features, Data{kind = .Keyword, payload = {text = \":query\"}})"), true)
     testing.expect_value(t, strings.contains(output, "Data_Kind :: enum"), true)
@@ -3467,6 +3473,130 @@ compile_quote_as_first_class_data :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "kvist_data_retain :: proc"), true)
     testing.expect_value(t, strings.contains(output, "kvist_data_release :: proc"), true)
     testing.expect_value(t, strings.contains(output, "import kvist_sync \"core:sync\""), true)
+}
+
+@(test)
+compile_runtime_initialized_immutable_defs :: proc(t: ^testing.T) {
+    source := `(package main)
+(import edn "kvist:edn")
+
+(def config (edn.read "{:port 8080}"))
+
+(defn port [] -> i64
+  (data.int (get config :port)))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "config: Data\n"), true)
+    testing.expect_value(t, strings.contains(output, "@(init)\n__kvist_runtime_defs_init :: proc \"contextless\" ()"), true)
+    testing.expect_value(t, strings.contains(output, "config = edn__read(\"{:port 8080}\")"), true)
+    testing.expect_value(t, strings.contains(output, "@(fini)\n__kvist_runtime_defs_fini :: proc \"contextless\" ()"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_data_release(config)"), true)
+
+    eval_output, eval_err, eval_ok := kvist.compile_eval_source(source, "(data.int (get config :port))", true)
+    testing.expect_value(t, eval_ok, true)
+    if !eval_ok {
+        testing.expect_value(t, eval_err.message, "")
+        return
+    }
+    defer delete(eval_output)
+    testing.expect_value(t, strings.contains(eval_output, "config = edn__read(\"{:port 8080}\")"), true)
+}
+
+@(test)
+compile_runtime_defs_initialize_in_declaration_order :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn seed [] -> int 40)
+(defn add-two [value: int] -> int (+ value 2))
+
+(def first (seed))
+(def second (add-two first))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    first_at := strings.index(output, "first = seed()")
+    second_at := strings.index(output, "second = add_two(first)")
+    testing.expect_value(t, first_at >= 0, true)
+    testing.expect_value(t, second_at > first_at, true)
+}
+
+@(test)
+reject_mutation_of_runtime_initialized_def :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn seed [] -> int 40)
+(def answer (seed))
+
+(defn change []
+  (mut! answer += 2))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+    defer delete(err.message)
+    testing.expect_value(t, err.message, "cannot mutate immutable def answer; use defvar for mutable package state")
+}
+
+@(test)
+compile_runtime_data_def_retains_borrowed_result :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(def base '{:answer 42})
+
+(defn identity-data [value: Data] -> Data #borrowed
+  value)
+
+(def copy (identity-data base))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "copy = kvist_data_retain(identity_data(base))"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_data_release(copy)"), true)
+}
+
+@(test)
+compile_macro_generated_data_literals_have_unique_names :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defmacro as-data [form]
+  (quasiquote (quote (unquote form))))
+
+(defn main [] -> int
+  (let [first (as-data [:name "Ada"])
+        second (as-data [:name "Grace"])]
+    (+ (count first) (count second))))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, count_substring(output, "kvist_data_literal_1: Data"), 1)
+    testing.expect_value(t, count_substring(output, "kvist_data_literal_2: Data"), 1)
 }
 
 @(test)
@@ -10657,34 +10787,17 @@ macroexpand_evaluates_sequence_helpers :: proc(t: ^testing.T) {
                (> (count text) 0)
                (= (slice text 0 1) "?"))))
 
-(defmacro map [f #form values]
-  (if (= (count values) 0)
-    (forms)
-    (concat
-      (forms (f (first values)))
-      (map f (rest values)))))
-
-(defmacro filter [pred #form values]
-  (if (= (count values) 0)
-    (forms)
-    (let [head (first values)
-          tail (filter pred (rest values))]
-      (if (pred head)
-        (concat (forms head) tail)
-        tail))))
-
-(defmacro source-some? [predicate #form values]
-  (> (count (filter predicate values)) 0))
-
-(defmacro source-every? [predicate #form values]
-  (= (count (filter predicate values)) (count values)))
+(defmacro literal-nil? [form]
+  (= form nil))
 
 (defmacro emit-vars [vars]
-  (if (source-every? query-var? vars)
+  (if (every? query-var? vars)
     (let [names (map source vars)
-          kept (filter query-var? vars)]
-      (if (and (source-some? string? names)
-                     (= (count kept) 2))
+          kept (filter query-var? vars)
+          nils (filter literal-nil? [1 nil 2])]
+      (if (and (some? string? names)
+                     (= (count kept) 2)
+                     (= (count nils) 1))
         (quote (def vars-ok true))
         (quote (def vars-bad true))))
     (quote (def vars-bad true))))

@@ -21,7 +21,8 @@
         tagged-text (edn.write tagged) :defer
         symbols (edn.read "[_ + -]")
         [_ missing-tag-error missing-tag-ok] (edn.try-read "# 1")
-        [_ missing-value-error missing-value-ok] (edn.try-read "#demo/value")]
+        [_ missing-value-error missing-value-ok] (edn.try-read "#demo/value")
+        [_ duplicate-error duplicate-ok] (edn.try-read "{:port 8080 :port 8081}")]
     (assert (= text "{:port 8080 :name \"vev\\nlocal\" :features #{:query :pull}}"))
     (assert (= parsed config))
     (assert (= sample expected))
@@ -39,4 +40,7 @@
     (assert (not missing-tag-ok))
     (assert (= missing-tag-error.message "expected EDN tag"))
     (assert (not missing-value-ok))
-    (assert (= missing-value-error.message "tagged literal requires a value"))))
+    (assert (= missing-value-error.message "tagged literal requires a value"))
+    (assert (not duplicate-ok))
+    (assert (= duplicate-error.message "duplicate map key"))
+    (assert (= duplicate-error.form ":port"))))

@@ -121,11 +121,18 @@ Struct_Decl :: struct {
     fields: [dynamic]Struct_Field,
 }
 
+Const_Init_Kind :: enum {
+    Auto,
+    Static,
+    Runtime,
+}
+
 Const_Decl :: struct {
     name:          string,
     has_ty:        bool,
     ty:            string,
     value:         CST_Form,
+    init_kind:     Const_Init_Kind,
     is_type_alias: bool,
     type_alias:    string,
     is_overload:   bool,

@@ -560,6 +560,21 @@ Typed declarations use `name: Type`:
 (defvar current-state: State (State {}))
 ```
 
+`def` is immutable but is not limited to compile-time constants. Calls to
+single-result Kvist functions are initialized once before `main`, with their
+return type inferred:
+
+```clojure
+(import edn "kvist:edn")
+
+(def config (edn.read-file "config.edn"))
+```
+
+Runtime bindings initialize in declaration order. Managed `Data` bindings are
+released in reverse order at package shutdown. Reads remain direct typed
+accesses; there is no Var indirection. Use an explicit type for runtime forms
+whose result cannot be inferred from a single-result Kvist call.
+
 Untyped `def` also declares Odin type aliases when the right-hand side is a
 type expression:
 
@@ -608,11 +623,11 @@ predicates inspect shapes. Import `kvist:data` for this named API and for
 (import data "kvist:data")
 ```
 
-The compiler owns the representation-sensitive primitive operations and quote
-lowering. Higher-level operations belong in the ordinary shipped source
-package. Runtime construction and persistent updates are deliberately not yet
-exposed: they require a managed lifetime model that safely distinguishes
-runtime-owned values from immortal quoted literals.
+The compiler owns the representation-sensitive primitive operations, quote
+lowering, and managed lifetime protocol. Higher-level construction, persistent
+updates, traversal, and EDN operations live in the shipped `kvist:data` and
+`kvist:edn` source packages. Runtime-owned values are deterministically managed;
+immortal quoted literals retain the zero-cleanup path.
 
 Local declarations use the same names and are scoped to the current block.
 Local `defstruct`, `defenum`, and `defunion` declare block-scoped Odin types;

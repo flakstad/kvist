@@ -143,30 +143,17 @@ Small form-sequence transforms can be written as ordinary recursive macros when
 macro code needs to inspect or rewrite source lists:
 
 ```clojure
-(defmacro source-map [f #form values]
-  (if (= (count values) 0)
-    (forms)
-    (concat
-      (forms (f (first values)))
-      (source-map f (rest values)))))
-
-(defmacro source-filter [pred #form values]
-  (if (= (count values) 0)
-    (forms)
-    (let [head (first values)
-          tail (source-filter pred (rest values))]
-      (if (pred head)
-        (concat (forms head) tail)
-        tail))))
+(map source forms)
+(filter symbol? forms)
+(some? keyword? forms)
+(every? symbol? forms)
 ```
 
-These are macro-time operations over source forms, not runtime `kvist:arr`
-helpers. `pred` and `f` are unary macro-time function names such as `symbol?`,
-`keyword?`, `source`, `name`, `text`, or a unary user macro. The evaluator
-supports calling a macro-time symbol parameter in head position, so `(pred x)`
-resolves to the symbol passed for `pred`. Write folds the same way, as ordinary
-recursive macros over `first`, `rest`, and `count`; the evaluator does not
-provide separate `map`, `filter`, or `reduce` helpers.
+These are iterative macro-time operations over source forms, not runtime
+`kvist:arr` helpers. Their unary operation may be a supported builtin such as
+`symbol?`, `keyword?`, `source`, `name`, or `text`, or a unary user macro.
+`some?` and `every?` short-circuit. Prefer these helpers to recursive
+`first`/`rest` walkers: large generated forms then use bounded native stack.
 
 Constructors and text helpers:
 

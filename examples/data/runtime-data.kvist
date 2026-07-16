@@ -11,7 +11,8 @@
   (data.from-string "Bergen"))
 
 (defn main []
-  (let [name (data.from-string "Ada")
+  (let [nothing (data.from-nil)
+        name (data.from-string "Ada")
         name-key (data.from-keyword ":user/name")
         age-key (data.from-keyword ":user/age")
         age (data.from-int 37)
@@ -25,6 +26,7 @@
         nested (data.assoc-in updated path[:] (data.from-string "Oslo"))
         moved (data.update-in nested path[:] move-city)
         current name]
+    (assert (data.nil? nothing))
     (assert (= (data.string (get user :user/name)) "Ada"))
     (assert (= (data.string (get updated :user/name)) "Grace"))
     (assert (= (data.int (get older :user/age)) 38))
@@ -32,6 +34,11 @@
     (assert (= (data.string (data.get-in moved path[:])) "Bergen"))
     (set! current (data.from-string "Grace"))
     (assert (= (data.string current) "Grace"))
+    (let [retained (make [dynamic]Data)]
+      (data.append-retained! (addr retained) current)
+      (assert (= (data.string retained[0]) "Grace"))
+      (data.release retained[0])
+      (delete retained))
     (let [entity (data.from-int 42)
           tx `[:db/add ~entity :user/name ~current]
           tail '[2 3]

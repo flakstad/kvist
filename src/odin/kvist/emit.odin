@@ -95,6 +95,7 @@ Emitter_Features :: struct {
     core_contains_value: bool,
     core_strings:     bool,
     core_fmt:         bool,
+    runtime_defs:     bool,
     thread_starts:  [dynamic]Thread_Start_Spec,
     thread_detaches: [dynamic]Thread_Detach_Spec,
     data_literals:   [dynamic]Data_Literal,
@@ -1126,6 +1127,173 @@ find_proc_decl :: proc(e: ^Emitter, name: string) -> (^Proc_Decl, bool) {
     return nil, false
 }
 
+symbol_tail_starts_upper :: proc(text: string) -> bool {
+    start := 0
+    for ch, idx in text {
+        if ch == '.' || ch == '/' {
+            start = idx + 1
+        }
+    }
+    return start < len(text) && text[start] >= 'A' && text[start] <= 'Z'
+}
+
+static_def_call_head :: proc(text: string) -> bool {
+    if strings.has_prefix(text, "[") ||
+       strings.has_prefix(text, "^") ||
+       strings.has_prefix(text, "map[") ||
+       strings.has_prefix(text, "soa[") ||
+       strings.has_prefix(text, "matrix[") {
+        return true
+    }
+    switch text {
+    case
+        "+", "-", "*", "/", "%", "%%",
+        "&", "|", "~", "^", "<<", ">>",
+        "&&", "||", "==", "!=", "<", "<=", ">", ">=", "!",
+        "min", "max", "abs", "clamp",
+        "len", "cap", "size-of", "align-of", "offset-of", "type-of", "typeid-of",
+        "bool", "string", "cstring", "rawptr", "uintptr",
+        "int", "i8", "i16", "i32", "i64", "i128",
+        "uint", "u8", "u16", "u32", "u64", "u128",
+        "f16", "f32", "f64", "complex64", "complex128", "quaternion128",
+        "fn", "quote":
+        return true
+    case:
+        return symbol_tail_starts_upper(text)
+    }
+}
+
+def_call_head_is_declared_type :: proc(e: ^Emitter, mapped_name: string) -> bool {
+    for decl in e.decls {
+        #partial switch decl.kind {
+        case .Const:
+            if decl.const_decl.is_type_alias && decl.const_decl.name == mapped_name {
+                return true
+            }
+        case .Struct:
+            if decl.struct_decl.name == mapped_name {
+                return true
+            }
+        case .Enum:
+            if decl.enum_decl.name == mapped_name {
+                return true
+            }
+        case .Union:
+            if decl.union_decl.name == mapped_name {
+                return true
+            }
+        case:
+        }
+    }
+    return false
+}
+
+def_value_requires_runtime_init :: proc(e: ^Emitter, form: CST_Form, depth: int = 0) -> bool {
+    if depth > 64 {
+        return true
+    }
+    if form.kind != .List && form.kind != .Vector && form.kind != .Brace && form.kind != .Set {
+        return false
+    }
+    if form.kind != .List {
+        for item in form.items {
+            if def_value_requires_runtime_init(e, item, depth+1) {
+                return true
+            }
+        }
+        return false
+    }
+    if len(form.items) == 0 {
+        return false
+    }
+    head := form.items[0]
+    if head.kind != .Symbol {
+        for item in form.items[1:] {
+            if def_value_requires_runtime_init(e, item, depth+1) {
+                return true
+            }
+        }
+        return false
+    }
+    if head.text == "quote" || head.text == "fn" {
+        return false
+    }
+    if head.text == "if" || head.text == "case" {
+        return true
+    }
+    mapped_head := map_name(head.text)
+    defer delete(mapped_head)
+    if _, ok_proc := find_proc_decl(e, mapped_head); ok_proc {
+        return true
+    }
+    if _, proc_decl, ok_proc := resolve_proc_call_decl(e, head.text); ok_proc && proc_decl != nil {
+        return true
+    }
+    if def_call_head_is_declared_type(e, mapped_head) || static_def_call_head(head.text) {
+        for item in form.items[1:] {
+            if def_value_requires_runtime_init(e, item, depth+1) {
+                return true
+            }
+        }
+        return false
+    }
+    return true
+}
+
+runtime_def_value_type :: proc(e: ^Emitter, form: CST_Form) -> (string, bool) {
+    if form.kind != .List || len(form.items) == 0 || form.items[0].kind != .Symbol {
+        return "", false
+    }
+    if form.items[0].text == "quasiquote" {
+        return strings.clone("Data"), true
+    }
+    mapped_head := map_name(form.items[0].text)
+    defer delete(mapped_head)
+    if proc_decl, ok_proc := find_proc_decl(e, mapped_head); ok_proc {
+        if return_ty, ok_return_ty := proc_decl_obvious_call_return_type(e, proc_decl, form.items[1:]); ok_return_ty {
+            return return_ty, true
+        }
+        return "", false
+    }
+    if _, proc_decl, ok_proc := resolve_proc_call_decl(e, form.items[0].text); ok_proc && proc_decl != nil {
+        if return_ty, ok_return_ty := proc_decl_obvious_call_return_type(e, proc_decl, form.items[1:]); ok_return_ty {
+            return return_ty, true
+        }
+    }
+    if return_ty, ok_return_ty := obvious_form_type(e, form); ok_return_ty {
+        return strings.clone(return_ty), true
+    }
+    return "", false
+}
+
+classify_def_initializers :: proc(e: ^Emitter) -> (Compile_Error, bool) {
+    for &decl in e.decls {
+        if decl.kind != .Const || decl.const_decl.is_type_alias || decl.const_decl.is_overload {
+            continue
+        }
+        if decl.const_decl.init_kind != .Auto {
+            continue
+        }
+        if def_value_requires_runtime_init(e, decl.const_decl.value) {
+            if !decl.const_decl.has_ty {
+                inferred_ty, inferred := runtime_def_value_type(e, decl.const_decl.value)
+                if !inferred {
+                    return Compile_Error{
+                        message = "cannot infer runtime-initialized def type; add an explicit type or call a single-result Kvist function",
+                        span = decl.const_decl.value.span,
+                    }, false
+                }
+                decl.const_decl.has_ty = true
+                decl.const_decl.ty = inferred_ty
+            }
+            decl.const_decl.init_kind = .Runtime
+        } else {
+            decl.const_decl.init_kind = .Static
+        }
+    }
+    return {}, true
+}
+
 find_transform_decl :: proc(e: ^Emitter, name: string) -> (^Transform_Decl, bool) {
     for idx in 0..<len(e.decls) {
         decl := &e.decls[idx]
@@ -1502,8 +1670,22 @@ emit_quoted_data_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_E
     if !ok_value {
         return "", err_value, false
     }
-    e.temp_counter += 1
-    name := fmt.tprintf("kvist_data_literal_%d", e.temp_counter)
+    name := ""
+    for {
+        e.temp_counter += 1
+        name = fmt.tprintf("kvist_data_literal_%d", e.temp_counter)
+        available := true
+        for literal in e.features.data_literals {
+            if literal.name == name {
+                available = false
+                break
+            }
+        }
+        if available {
+            break
+        }
+        delete(name)
+    }
     append(&e.features.data_literals, Data_Literal{name = name, value = value})
     return name, Compile_Error{}, true
 }
@@ -3175,6 +3357,9 @@ emit_mut_bang_stmt :: proc(e: ^Emitter, form: CST_Form) -> (Compile_Error, bool)
     if !form_is_assignable_place(form.items[1]) {
         return Compile_Error{message = "mut! expects an assignable place", span = form.items[1].span}, false
     }
+    if err_immutable, immutable := immutable_def_mutation_error(e, form.items[1]); immutable {
+        return err_immutable, false
+    }
     lhs, err_lhs, ok_lhs := emit_expr(e, form.items[1])
     if !ok_lhs {
         return err_lhs, false
@@ -3205,6 +3390,9 @@ emit_unary_mutation_stmt :: proc(e: ^Emitter, form: CST_Form, head: string) -> (
     }
     if !form_is_assignable_place(form.items[1]) {
         return Compile_Error{message = fmt.tprintf("%s expects an assignable place", head), span = form.items[1].span}, false
+    }
+    if err_immutable, immutable := immutable_def_mutation_error(e, form.items[1]); immutable {
+        return err_immutable, false
     }
     lhs, err_lhs, ok_lhs := emit_expr(e, form.items[1])
     if !ok_lhs {
@@ -6281,6 +6469,29 @@ managed_assignment_text :: proc(e: ^Emitter, place_form, value_form: CST_Form, p
         helper = "kvist_data_move_assign"
     }
     return emit_call_text(helper, []string{address_of_expr_text(place), value}), true
+}
+
+immutable_def_mutation_error :: proc(e: ^Emitter, place: CST_Form) -> (Compile_Error, bool) {
+    if place.kind != .Symbol {
+        return {}, false
+    }
+    name := map_name(place.text)
+    defer delete(name)
+    if _, local := lookup_local_type(e, name); local {
+        return {}, false
+    }
+    for decl in e.decls {
+        if decl.kind == .Const &&
+           !decl.const_decl.is_type_alias &&
+           !decl.const_decl.is_overload &&
+           decl.const_decl.name == name {
+            return Compile_Error{
+                message = fmt.tprintf("cannot mutate immutable def %s; use defvar for mutable package state", place.text),
+                span = place.span,
+            }, true
+        }
+    }
+    return {}, false
 }
 
 type_text_is_string :: proc(text: string) -> bool {
@@ -13730,6 +13941,9 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
         if !form_is_assignable_place(form.items[1]) {
             return Compile_Error{message = "set! expects an assignable place", span = form.items[1].span}, false
         }
+        if err_immutable, immutable := immutable_def_mutation_error(e, form.items[1]); immutable {
+            return err_immutable, false
+        }
         lhs, err_lhs, ok_lhs := emit_expr(e, form.items[1])
         if !ok_lhs {
             return err_lhs, false
@@ -14149,6 +14363,10 @@ emit_decl :: proc(e: ^Emitter, decl: IR_Decl) -> (Compile_Error, bool) {
                 return err_value, false
             }
             emit_line(e, fmt.tprintf("%s: Data = %s", decl.const_decl.name, value))
+            return Compile_Error{}, true
+        }
+        if decl.const_decl.init_kind == .Runtime {
+            emit_line(e, fmt.tprintf("%s: %s", decl.const_decl.name, decl.const_decl.ty))
             return Compile_Error{}, true
         }
         expected_type := ""
@@ -14834,6 +15052,7 @@ emit_data_type_helper :: proc(e: ^Emitter) {
     emit_line(e, "return value")
     e.indent -= 1
     emit_line(e, "}")
+    emit_line(e, "kvist_data_append_retained :: proc(values: ^[dynamic]Data, value: Data) { append(values, kvist_data_retain(value)) }")
     emit_line(e, "kvist_data_release :: proc(value: Data) {")
     e.indent += 1
     emit_line(e, "if value.node == nil || kvist_sync.atomic_sub(&value.node.refs, 1) != 1 { return }")
@@ -14867,6 +15086,7 @@ emit_data_type_helper :: proc(e: ^Emitter) {
     emit_line(e, "return node")
     e.indent -= 1
     emit_line(e, "}")
+    emit_line(e, "kvist_data_make_nil :: proc() -> Data { return Data{} }")
     emit_line(e, "kvist_data_make_bool :: proc(value: bool) -> Data { return Data{kind = .Bool, payload = {bool_value = value}} }")
     emit_line(e, "kvist_data_make_int :: proc(value: i64) -> Data { return Data{kind = .Int, payload = {int_value = value}} }")
     emit_line(e, "kvist_data_make_float :: proc(value: f64) -> Data { return Data{kind = .Float, payload = {float_value = value}} }")
@@ -15336,6 +15556,10 @@ features_need_data_runtime_imports :: proc(features: Emitter_Features) -> bool {
     return features.data_type
 }
 
+features_need_base_runtime_import :: proc(features: Emitter_Features) -> bool {
+    return features.data_type || features.runtime_defs
+}
+
 output_has_import_line :: proc(output, line: string) -> bool {
     start := 0
     for start <= len(output) {
@@ -15445,6 +15669,69 @@ shift_source_map_lines :: proc(entries: ^[dynamic]Source_Map_Entry, delta: int) 
     }
 }
 
+emit_runtime_def_lifecycle :: proc(e: ^Emitter) -> (Compile_Error, bool) {
+    runtime_count := 0
+    managed_count := 0
+    for decl in e.decls {
+        if decl.kind == .Const && decl.const_decl.init_kind == .Runtime {
+            runtime_count += 1
+            if type_text_is_managed_value(decl.const_decl.ty) {
+                managed_count += 1
+            }
+        }
+    }
+    if runtime_count == 0 {
+        return {}, true
+    }
+    e.features.runtime_defs = true
+
+    emit_raw_newline(e)
+    emit_line(e, "@(init)")
+    emit_line(e, "__kvist_runtime_defs_init :: proc \"contextless\" () {")
+    e.indent += 1
+    emit_line(e, "context = kvist_runtime.default_context()")
+    for decl in e.decls {
+        if decl.kind != .Const || decl.const_decl.init_kind != .Runtime {
+            continue
+        }
+        value, err_value, ok_value := emit_expr_for_expected_type(e, decl.const_decl.value, decl.const_decl.ty)
+        if !ok_value {
+            return err_value, false
+        }
+        if type_text_is_managed_value(decl.const_decl.ty) {
+            mark_data_type(e)
+            if !form_produces_owned_managed_value(e, decl.const_decl.value) {
+                retained := emit_call_text("kvist_data_retain", []string{value})
+                delete(value)
+                value = retained
+            }
+        }
+        emit_prefixed_expr_mapped(e, fmt.tprintf("%s = ", decl.const_decl.name), value, decl.const_decl.value.span)
+        delete(value)
+    }
+    e.indent -= 1
+    emit_line(e, "}")
+
+    if managed_count > 0 {
+        emit_raw_newline(e)
+        emit_line(e, "@(fini)")
+        emit_line(e, "__kvist_runtime_defs_fini :: proc \"contextless\" () {")
+        e.indent += 1
+        emit_line(e, "context = kvist_runtime.default_context()")
+        for offset in 0..<len(e.decls) {
+            decl := e.decls[len(e.decls)-1-offset]
+            if decl.kind == .Const &&
+               decl.const_decl.init_kind == .Runtime &&
+               type_text_is_managed_value(decl.const_decl.ty) {
+                emit_line_mapped(e, fmt.tprintf("kvist_data_release(%s)", decl.const_decl.name), decl.span)
+            }
+        }
+        e.indent -= 1
+        emit_line(e, "}")
+    }
+    return {}, true
+}
+
 emit_decls_with_source_map :: proc(decls: []IR_Decl) -> (Emit_Result, Compile_Error, bool) {
     result := Emit_Result{}
     features := Emitter_Features{}
@@ -15459,6 +15746,10 @@ emit_decls_with_source_map :: proc(decls: []IR_Decl) -> (Emit_Result, Compile_Er
         captured_proc_specializations = &captured_specializations,
     }
     defer strings.builder_destroy(&e.builder)
+    err_classify, ok_classify := classify_def_initializers(&e)
+    if !ok_classify {
+        return result, err_classify, false
+    }
     for decl in decls {
         if decl.kind == .Struct {
             append(&e.structs, decl.struct_decl)
@@ -15500,6 +15791,10 @@ emit_decls_with_source_map :: proc(decls: []IR_Decl) -> (Emit_Result, Compile_Er
             e.line += 1
         }
     }
+    err_runtime_defs, ok_runtime_defs := emit_runtime_def_lifecycle(&e)
+    if !ok_runtime_defs {
+        return result, err_runtime_defs, false
+    }
     emit_core_strings_import(&e, &emitted_core_strings_import, needs_core_strings_import)
     emit_core_fmt_import(&e, &emitted_core_fmt_import, needs_core_fmt_import)
     err_specializations, ok_specializations := emit_captured_proc_specializations(&e)
@@ -15533,7 +15828,7 @@ emit_decls_with_source_map :: proc(decls: []IR_Decl) -> (Emit_Result, Compile_Er
        !output_has_import_path(output, "core:os") {
         append(&late_imports, "import os \"core:os\"")
     }
-    if features_need_data_runtime_imports(features) &&
+    if features_need_base_runtime_import(features) &&
        !output_has_import_line(output, "import kvist_runtime \"base:runtime\"") {
         append(&late_imports, "import kvist_runtime \"base:runtime\"")
     }
@@ -15578,6 +15873,10 @@ emit_eval_decls_with_source_map :: proc(decls: []IR_Decl, eval_form: CST_Form, n
         captured_proc_specializations = &captured_specializations,
     }
     defer strings.builder_destroy(&e.builder)
+    err_classify, ok_classify := classify_def_initializers(&e)
+    if !ok_classify {
+        return result, err_classify, false
+    }
     for decl in decls {
         if decl.kind == .Struct {
             append(&e.structs, decl.struct_decl)
@@ -15623,6 +15922,10 @@ emit_eval_decls_with_source_map :: proc(decls: []IR_Decl, eval_form: CST_Form, n
     }
     emit_core_strings_import(&e, &emitted_core_strings_import, needs_core_strings_import)
     emit_core_fmt_import(&e, &emitted_core_fmt_import, needs_core_fmt_import)
+    err_runtime_defs, ok_runtime_defs := emit_runtime_def_lifecycle(&e)
+    if !ok_runtime_defs {
+        return result, err_runtime_defs, false
+    }
 
     if e.line > 1 {
         strings.write_byte(&e.builder, '\n')
@@ -15682,7 +15985,7 @@ emit_eval_decls_with_source_map :: proc(decls: []IR_Decl, eval_form: CST_Form, n
        !output_has_import_path(output, "core:os") {
         append(&late_imports, "import os \"core:os\"")
     }
-    if features_need_data_runtime_imports(features) &&
+    if features_need_base_runtime_import(features) &&
        !output_has_import_line(output, "import kvist_runtime \"base:runtime\"") {
         append(&late_imports, "import kvist_runtime \"base:runtime\"")
     }

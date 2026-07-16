@@ -1,0 +1,13 @@
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
+
+(package main)
+(import data "kvist:data")
+(import edn "kvist:edn")
+
+(def config
+  (edn.read "{:port 8080 :features #{:query :pull}}"))
+
+(defn main []
+  (println (data.int (get config :port))
+           (contains? (get config :features) :query)))

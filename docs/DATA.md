@@ -109,18 +109,24 @@ types can use it without adding another Data-specific ownership pass.
 ## Package Bindings
 
 `def` denotes an immutable package binding. A quoted right-hand side is emitted
-as static data. A later runtime-initialized right-hand side will run during
-ordered package initialization and release managed storage during package
-shutdown:
+as static data. A runtime right-hand side runs once during ordered package
+initialization and releases managed storage during package shutdown:
 
 ```clojure
 (def config (edn.read-file "config.edn"))
 ```
 
 This does not introduce Clojure Vars or mutable indirection. Reads remain direct
-typed accesses after initialization. Runtime package bindings require defined
-initialization order and explicit failure propagation before this form is
-enabled.
+typed accesses after initialization. Calls to single-result Kvist functions
+infer their return type; other runtime expressions require an explicit binding
+type. Initialization uses normal Kvist failure behavior, so a failed assertion
+or panic terminates startup.
+
+The implementation classifies bindings once in the declaration model. Static
+constants and quoted Data keep direct zero-initialization lowering; runtime
+expressions lower to typed package storage initialized in declaration order and
+released in reverse order. This preserves direct typed reads and avoids
+Clojure-style Var indirection.
 
 ## Direction
 
@@ -170,11 +176,13 @@ fallback. Static and runtime Data have the same public handle shape.
    repeated persistent updates.
 6. Extend `kvist:edn` with application tag handlers; lossless tagged Data,
    core reading, file input, structured errors, and canonical writing are
-   implemented. Vev's primary runtime and storage paths already share this
-   reader; raw compatibility shapes and exact diagnostics remain.
+   implemented. Vev's runtime, storage, ABI, and literal-macro paths share this
+   reader; its duplicate EDN reader and raw borrowed parser wrappers are gone.
 7. Add explicit tag/key dispatch only after message-shaped application
    workloads establish the required semantics.
-8. Add ordered package initialization and runtime-valued `def`.
+8. Extend runtime-valued `def` beyond single-result call inference only when
+   concrete application examples justify additional inference rules; ordered
+   initialization and reverse managed cleanup are implemented.
 
 Each step must retain the existing zero-cleanup static quote path and must pass
 ownership tests before the next layer depends on it.

@@ -13,6 +13,7 @@
 (defstruct Read-Error {
   message: string
   offset: int
+  form: string
 })
 
 (defstruct Reader {
@@ -138,7 +139,9 @@
       (when (= (core.get reader.text reader.index) (byte 125))
         (inc! reader.index)
         (return result (Read-Error {}) true))
-      (let [[key key-error key-ok] (parse-value reader)]
+      (let [key-start reader.index
+            [key key-error key-ok] (parse-value reader)
+            key-end reader.index]
         (when (not key-ok)
           (return 'nil key-error false))
         (skip-space! reader)
@@ -148,6 +151,12 @@
         (let [[value value-error value-ok] (parse-value reader)]
           (when (not value-ok)
             (return 'nil value-error false))
+          (when (core.contains? result key)
+            (return 'nil
+                    (Read-Error {message: "duplicate map key"
+                                 offset: key-start
+                                 form: (core.slice reader.text key-start key-end)})
+                    false))
           (set! result (data.assoc result key value)))))
     (read-error reader "unterminated map")))
 
