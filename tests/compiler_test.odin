@@ -983,10 +983,8 @@ symbols_source_indexes_top_level_forms :: proc(t: ^testing.T) {
     source := `(package main)
 (import "core:strings" :as strings)
 
-/*
- * A user record.
- * Owned by caller.
- */
+;; A user record.
+;; Owned by caller.
 (defstruct User {
   name: string
   active: bool
@@ -1023,15 +1021,15 @@ symbols_source_indexes_top_level_forms :: proc(t: ^testing.T) {
 
     testing.expect_value(t, strings.contains(output, "kind\tname\tline\tcolumn\tdetail\tsignature\tdoc\n"), true)
     testing.expect_value(t, strings.contains(output, "import\tstrings\t2\t28\tcore:strings\t\t\n"), true)
-    testing.expect_value(t, strings.contains(output, "struct\tUser\t8\t12\t\t(User {name: string active: bool})\tA user record.\\nOwned by caller.\n"), true)
-    testing.expect_value(t, strings.contains(output, "field\tUser.name\t9\t3\tUser\t\t\n"), true)
-    testing.expect_value(t, strings.contains(output, "enum\tStatus\t13\t10\t\t\t\n"), true)
-    testing.expect_value(t, strings.contains(output, "variant\tStatus.Active\t14\t3\tStatus\t\t\n"), true)
-    testing.expect_value(t, strings.contains(output, "union\tValue\t18\t11\t\t\t\n"), true)
-    testing.expect_value(t, strings.contains(output, "variant\tValue.i\t19\t3\tValue\t\t\n"), true)
-    testing.expect_value(t, strings.contains(output, "const\tmax-age\t23\t6\t\t\t\n"), true)
-    testing.expect_value(t, strings.contains(output, "iterator\tactive-users\t30\t10\t\t(active-users [users: []User] -> User_Source :yield User)\t\n"), true)
-    testing.expect_value(t, strings.contains(output, "proc\tactive?\t27\t7\t\t(active? [user: User] -> bool)\tReturns true for active users.\\nUsed by sequence examples.\n"), true)
+    testing.expect_value(t, strings.contains(output, "struct\tUser\t6\t12\t\t(User {name: string active: bool})\tA user record.\\nOwned by caller.\n"), true)
+    testing.expect_value(t, strings.contains(output, "field\tUser.name\t7\t3\tUser\t\t\n"), true)
+    testing.expect_value(t, strings.contains(output, "enum\tStatus\t11\t10\t\t\t\n"), true)
+    testing.expect_value(t, strings.contains(output, "variant\tStatus.Active\t12\t3\tStatus\t\t\n"), true)
+    testing.expect_value(t, strings.contains(output, "union\tValue\t16\t11\t\t\t\n"), true)
+    testing.expect_value(t, strings.contains(output, "variant\tValue.i\t17\t3\tValue\t\t\n"), true)
+    testing.expect_value(t, strings.contains(output, "const\tmax-age\t21\t6\t\t\t\n"), true)
+    testing.expect_value(t, strings.contains(output, "iterator\tactive-users\t28\t10\t\t(active-users [users: []User] -> User_Source :yield User)\t\n"), true)
+    testing.expect_value(t, strings.contains(output, "proc\tactive?\t25\t7\t\t(active? [user: User] -> bool)\tReturns true for active users.\\nUsed by sequence examples.\n"), true)
 }
 
 @(test)
@@ -3831,29 +3829,23 @@ reader_converts_semicolon_doc_comments :: proc(t: ^testing.T) {
 }
 
 @(test)
-reader_converts_block_doc_comments :: proc(t: ^testing.T) {
-    old_allocator := context.allocator
-    temp_scope := runtime.default_temp_allocator_temp_begin()
-    defer runtime.default_temp_allocator_temp_end(temp_scope)
-    context.allocator = context.temp_allocator
-    defer context.allocator = old_allocator
+reader_treats_slash_comment_markers_as_symbols :: proc(t: ^testing.T) {
+    tokens, err, ok := kvist.tokenize("// /* */")
+    defer delete(tokens)
 
-    source := `/*
- * Block doc.
- * Second line.
- */
-(def answer 42)`
-
-    forms, err, ok := kvist.read_top_forms(source)
     testing.expect_value(t, ok, true)
     if !ok {
         testing.expect_value(t, err.message, "")
         return
     }
 
-    testing.expect_value(t, len(forms), 1)
-    testing.expect_value(t, len(forms[0].doc_lines), 1)
-    testing.expect_value(t, forms[0].doc_lines[0], "Block doc.\nSecond line.")
+    testing.expect_value(t, len(tokens), 4)
+    testing.expect_value(t, tokens[0].kind, kvist.Token_Kind.Symbol)
+    testing.expect_value(t, tokens[0].text, "//")
+    testing.expect_value(t, tokens[1].kind, kvist.Token_Kind.Symbol)
+    testing.expect_value(t, tokens[1].text, "/*")
+    testing.expect_value(t, tokens[2].kind, kvist.Token_Kind.Symbol)
+    testing.expect_value(t, tokens[2].text, "*/")
 }
 
 @(test)

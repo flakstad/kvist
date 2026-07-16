@@ -95,65 +95,8 @@ Use a command name on `exec-path' or an explicit executable path."
 (defvar-local kvist--reload-last-event nil
   "Most recent structured reload session event for the current buffer.")
 
-(defun kvist--inside-string-on-line-p (pos)
-  "Return non-nil if POS is inside a simple string on its current line."
-  (save-excursion
-    (goto-char pos)
-    (let ((line-start (line-beginning-position))
-          (in-string nil)
-          (escaped nil))
-      (goto-char line-start)
-      (while (< (point) pos)
-        (let ((ch (char-after)))
-          (cond
-           (escaped
-            (setq escaped nil))
-           ((= ch ?\\)
-            (setq escaped t))
-           ((= ch ?\")
-            (setq in-string (not in-string)))))
-        (forward-char 1))
-      in-string)))
-
-(defun kvist--match-line-comment (limit)
-  "Search for an Odin `//' comment before LIMIT."
-  (let (match)
-    (while (and (not match) (search-forward "//" limit t))
-      (let ((beg (match-beginning 0)))
-        (unless (kvist--inside-string-on-line-p beg)
-          (let ((end (min (line-beginning-position 2) limit)))
-            (set-match-data (list beg end))
-            (put-text-property beg end 'face 'font-lock-comment-face)
-            (put-text-property beg end 'font-lock-face 'font-lock-comment-face)
-            (goto-char end)
-            (setq match t)))))
-    (unless match
-      (goto-char limit))
-    match))
-
-(defun kvist--match-block-comment (limit)
-  "Search for an Odin `/* */' comment before LIMIT."
-  (let (match)
-    (while (and (not match) (search-forward "/*" limit t))
-      (let ((beg (match-beginning 0)))
-        (unless (kvist--inside-string-on-line-p beg)
-          (let ((end (if (search-forward "*/" limit t)
-                         (point)
-                       limit)))
-            (set-match-data (list beg end))
-            (add-text-properties beg end '(font-lock-multiline t))
-            (put-text-property beg end 'face 'font-lock-comment-face)
-            (put-text-property beg end 'font-lock-face 'font-lock-comment-face)
-            (goto-char end)
-            (setq match t)))))
-    (unless match
-      (goto-char limit))
-    match))
-
 (defconst kvist-font-lock-keywords
-  `((kvist--match-line-comment (0 font-lock-comment-face override))
-    (kvist--match-block-comment (0 font-lock-comment-face override))
-    (,(regexp-opt kvist-special-forms 'symbols) . font-lock-keyword-face)
+  `((,(regexp-opt kvist-special-forms 'symbols) . font-lock-keyword-face)
     ("\\_<#[[:alnum:]_][[:alnum:]_-]*\\_>" . font-lock-preprocessor-face)
     ("\\_<\\.[[:alnum:]_][[:alnum:]_?!-]*\\_>" . font-lock-constant-face)
     (":[[:alnum:]_][[:alnum:]_?!-]*" . font-lock-builtin-face))
@@ -162,10 +105,8 @@ Use a command name on `exec-path' or an explicit executable path."
 (defun kvist--make-syntax-table ()
   "Return a fresh syntax table for `kvist-mode'."
   (let ((table (copy-syntax-table clojure-mode-syntax-table)))
-    ;; Keep Clojure/Lisp comments, and also recognize Odin comments.
+    ;; Keep Clojure/Lisp line comments.
     (modify-syntax-entry ?\; "< b" table)
-    (modify-syntax-entry ?/ ". 124b" table)
-    (modify-syntax-entry ?* ". 23" table)
     (modify-syntax-entry ?\n "> b" table)
     table))
 
@@ -997,7 +938,7 @@ With prefix argument REFRESH, re-read the path metadata from the CLI."
   (setq-local indent-tabs-mode nil)
   (setq-local comment-start ";;")
   (setq-local comment-start-skip
-              "\\(\\(^\\|[^\\\\\n]\\)\\(\\\\\\\\\\)*\\)\\(;+\\|//+\\|/\\*+\\|#|\\) *")
+              "\\(\\(^\\|[^\\\\\n]\\)\\(\\\\\\\\\\)*\\)\\(;+\\|#|\\) *")
   (add-hook 'xref-backend-functions #'kvist--xref-backend nil t)
   (add-hook 'completion-at-point-functions #'kvist-completion-at-point nil t)
   (add-hook 'eldoc-documentation-functions #'kvist-eldoc-function nil t)

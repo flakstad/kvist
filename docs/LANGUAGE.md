@@ -2328,9 +2328,8 @@ See [MACROS.md](MACROS.md) for the full macro authoring surface.
 
 ## Documentation And Comments
 
-Use `;;` for line comments. Kvist also accepts `;` and `//` comments for
-compatibility. Block comments are also supported. Ignoring the next form is
-supported with `#_`:
+Use `;` for line comments; repeated semicolons such as `;;` are conventional
+for standalone comments. Ignoring the next form is supported with `#_`:
 
 ```clojure
 #_(+ 1 2 3)

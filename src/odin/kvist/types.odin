@@ -29,7 +29,6 @@ Token_Kind :: enum {
     Unquote,
     Splice,
     Line_Comment,
-    Block_Comment,
     String,
     Regex,
     Number,

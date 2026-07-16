@@ -30,7 +30,7 @@ Compiler-provided Kvist package members and built-in forms also show
 signatures in completion annotations and in the doc buffer.
 
 `C-c C-.`, `C-c d`, and `C-c C-d` show docs for the symbol at point without jumping. Kvist declaration
-docs come from contiguous `//`, `;`, or `/* ... */` comments immediately
+docs come from contiguous `;` comments immediately
 preceding a top-level declaration. Compiler-defined forms such as `if-let` and
 `if-ok` have small built-in docs. Imported Odin docs come from contiguous `//`
 or `/* ... */` comments immediately preceding the imported package definition.
