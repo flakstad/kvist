@@ -18235,6 +18235,23 @@ keyword :: distinct string
 }
 
 @(test)
+compile_keyword_literal_with_embedded_colon :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn attribute [] -> keyword
+  :data-on:submit__prevent)`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+    testing.expect_value(t, strings.contains(output, `keyword(":data-on:submit__prevent")`), true)
+}
+
+@(test)
 compile_case_with_keyword_values :: proc(t: ^testing.T) {
     source := `(package main)
 
