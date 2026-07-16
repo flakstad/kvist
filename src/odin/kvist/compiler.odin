@@ -277,6 +277,15 @@ contains_text :: proc(items: []string, value: string) -> bool {
     return false
 }
 
+text_index :: proc(items: []string, value: string) -> (int, bool) {
+    for item, index in items {
+        if item == value {
+            return index, true
+        }
+    }
+    return -1, false
+}
+
 sorted_unique_texts :: proc(items: []string) -> (out: [dynamic]string) {
     for item in items {
         if !contains_text(out[:], item) {
@@ -409,9 +418,11 @@ delete_cst_form_slice :: proc(forms: ^[dynamic]CST_Form) {
 
 clone_cst_top_form :: proc(top: CST_Top_Form) -> CST_Top_Form {
     return CST_Top_Form{
-        form      = clone_cst_form(top.form),
-        doc_lines = clone_string_slice(top.doc_lines[:]),
-        source    = strings.clone(top.source),
+        form        = clone_cst_form(top.form),
+        doc_lines   = clone_string_slice(top.doc_lines[:]),
+        source      = strings.clone(top.source),
+        source_path = top.source_path,
+        source_file = top.source_file,
     }
 }
 
@@ -805,8 +816,8 @@ normalize_top_level_directives :: proc(forms: ^[dynamic]CST_Top_Form) -> (Compil
     return Compile_Error{}, true
 }
 
-read_kvist_top_forms :: proc(source: string) -> ([dynamic]CST_Top_Form, Compile_Error, bool) {
-    forms, err_forms, ok_forms := read_top_forms(source)
+read_kvist_top_forms :: proc(source: string, source_path: string = "") -> ([dynamic]CST_Top_Form, Compile_Error, bool) {
+    forms, err_forms, ok_forms := read_top_forms(source, source_path)
     if !ok_forms {
         return nil, err_forms, false
     }
@@ -1109,7 +1120,7 @@ read_root_package_files :: proc(path: string) -> ([]Package_File, Compile_Error,
         return nil, Compile_Error{message = fmt.tprintf("could not read file: %s", path)}, false
     }
     source := string(data)
-    forms, err_forms, ok_forms := read_kvist_top_forms(source)
+    forms, err_forms, ok_forms := read_kvist_top_forms(source, path)
     if !ok_forms {
         return nil, err_forms, false
     }
@@ -1161,7 +1172,7 @@ read_root_package_files :: proc(path: string) -> ([]Package_File, Compile_Error,
         if !ok_package_hint || file_package_hint != package_name {
             continue
         }
-        file_forms, err_file_forms, ok_file_forms := read_kvist_top_forms(file_source)
+        file_forms, err_file_forms, ok_file_forms := read_kvist_top_forms(file_source, file_path)
         if !ok_file_forms {
             return nil, err_file_forms, false
         }
@@ -2207,7 +2218,7 @@ read_package_files :: proc(dir: string) -> ([]Package_File, Compile_Error, bool)
             return nil, Compile_Error{message = fmt.tprintf("could not read file: %s", path)}, false
         }
         source := string(data)
-        forms, err_forms, ok_forms := read_kvist_top_forms(source)
+        forms, err_forms, ok_forms := read_kvist_top_forms(source, path)
         if !ok_forms {
             return nil, err_forms, false
         }
@@ -2251,8 +2262,13 @@ collect_package_import_aliases :: proc(files: []Package_File) -> (aliases: [dyna
             if !ok_import {
                 continue
             }
-            if contains_text(aliases[:], alias) {
-                return nil, nil, Compile_Error{message = fmt.tprintf("duplicate source import alias in package: %s", alias), span = top.form.span}, false
+            if index, found := text_index(aliases[:], alias); found {
+                if paths[index] == path {
+                    delete(alias)
+                    delete(path)
+                    continue
+                }
+                return nil, nil, Compile_Error{message = fmt.tprintf("import alias refers to different paths in package: %s", alias), span = top.form.span}, false
             }
             append(&aliases, alias)
             append(&paths, path)
@@ -2270,23 +2286,38 @@ collect_package_import_aliases :: proc(files: []Package_File) -> (aliases: [dyna
             }
             if len(form.items) == 3 && form.items[1].kind == .Symbol {
                 alias := map_name(form.items[1].text)
-                if contains_text(aliases[:], alias) {
-                    return nil, nil, Compile_Error{message = fmt.tprintf("duplicate import alias in package: %s", alias), span = form.items[1].span}, false
+                import_path := import_path_text(form.items[2])
+                if index, found := text_index(aliases[:], alias); found {
+                    if paths[index] == import_path {
+                        delete(import_path)
+                        continue
+                    }
+                    delete(import_path)
+                    return nil, nil, Compile_Error{message = fmt.tprintf("import alias refers to different paths in package: %s", alias), span = form.items[1].span}, false
                 }
                 append(&aliases, alias)
-                append(&paths, "")
+                append(&paths, import_path)
             }
             if len(form.items) == 2 && form.items[1].kind == .String {
+                path = import_path_text(form.items[1])
                 if is_source_import_path(path) {
+                    delete(path)
                     continue
                 }
                 alias := import_default_alias(path)
                 if alias != "" {
-                    if contains_text(aliases[:], alias) {
-                        return nil, nil, Compile_Error{message = fmt.tprintf("duplicate import alias in package: %s", alias), span = form.items[1].span}, false
+                    if index, found := text_index(aliases[:], alias); found {
+                        if paths[index] == path {
+                            delete(path)
+                            continue
+                        }
+                        delete(path)
+                        return nil, nil, Compile_Error{message = fmt.tprintf("import alias refers to different paths in package: %s", alias), span = form.items[1].span}, false
                     }
                     append(&aliases, alias)
-                    append(&paths, "")
+                    append(&paths, path)
+                } else {
+                    delete(path)
                 }
             }
         }
@@ -2896,6 +2927,9 @@ format_eval_compile_error :: proc(path, source, eval_source: string, err: Compil
 
 format_compile_warning :: proc(path, source: string, warning: Compile_Warning) -> string {
     label := path
+    if warning.source_path != "" {
+        label = warning.source_path
+    }
     if label == "" {
         label = "<source>"
     }
@@ -2903,7 +2937,11 @@ format_compile_warning :: proc(path, source: string, warning: Compile_Warning) -
     if message == "" {
         message = "warning"
     }
-    line, column, _, _ := source_position(source, warning.span.start)
+    line := warning.line
+    column := warning.column
+    if line <= 0 || column <= 0 {
+        line, column, _, _ = source_position(source, warning.span.start)
+    }
     return strings.clone(fmt.tprintf("%s:%d:%d: warning: %s\n", label, line, column, message))
 }
 
@@ -2931,6 +2969,9 @@ clone_compile_warning :: proc(warning: Compile_Warning, allocator := context.all
     if cloned.message != "" {
         cloned.message = strings.clone(cloned.message, allocator)
     }
+    if cloned.source_path != "" {
+        cloned.source_path = strings.clone(cloned.source_path, allocator)
+    }
     return cloned
 }
 
@@ -2938,6 +2979,9 @@ compile_warning_slice_delete :: proc(warnings: [dynamic]Compile_Warning, allocat
     for warning in warnings {
         if warning.message != "" {
             delete(warning.message, allocator)
+        }
+        if warning.source_path != "" {
+            delete(warning.source_path, allocator)
         }
     }
     delete(warnings)

@@ -3049,9 +3049,11 @@ macroexpand_top_forms :: proc(forms: []CST_Top_Form, include_core_macros: bool =
             rewritten := &expanded_forms[i]
             if is_defmacro_form(rewritten^) {
                 macro_decl, err_macro, ok_macro := parse_user_macro_decl(CST_Top_Form{
-                    form      = rewritten^,
-                    doc_lines = top.doc_lines,
-                    source    = top.source,
+                    form        = rewritten^,
+                    doc_lines   = top.doc_lines,
+                    source      = top.source,
+                    source_path = top.source_path,
+                    source_file = top.source_file,
                 })
                 if !ok_macro {
                     delete_cst_form_slice(&expanded_forms)
@@ -3062,9 +3064,11 @@ macroexpand_top_forms :: proc(forms: []CST_Top_Form, include_core_macros: bool =
                 continue
             }
             append(&expanded, CST_Top_Form{
-                form      = rewritten^,
-                doc_lines = clone_string_slice(top.doc_lines[:]),
-                source    = strings.clone(top.source),
+                form        = rewritten^,
+                doc_lines   = clone_string_slice(top.doc_lines[:]),
+                source      = strings.clone(top.source),
+                source_path = top.source_path,
+                source_file = top.source_file,
             })
             rewritten^ = CST_Form{}
         }

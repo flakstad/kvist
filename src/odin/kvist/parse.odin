@@ -1609,6 +1609,8 @@ parse_decls :: proc(forms: []CST_Top_Form) -> (decls: [dynamic]AST_Decl, err: Co
         if !ok_decl {
             return decls, err_decl, false
         }
+        decl.source_path = form.source_path
+        decl.source_file = form.source_file
         if decl.kind != .Ignored {
             append(&decls, decl)
         }

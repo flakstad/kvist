@@ -133,6 +133,8 @@ Emitter :: struct {
     current_proc_owns_managed_result: bool,
     current_proc_borrows_managed_result: bool,
     current_proc_returns: Return_Spec,
+    current_source_path: string,
+    current_source_file: string,
 }
 
 kvist_package_name_for_import_path :: proc(path: string) -> (string, bool) {
@@ -270,7 +272,14 @@ emit_warning :: proc(e: ^Emitter, message: string, span: Span) {
     if e.warnings == nil {
         return
     }
-    append(e.warnings, Compile_Warning{message = strings.clone(message), span = span})
+    line, column, _, _ := source_position(e.current_source_file, span.start)
+    append(e.warnings, Compile_Warning{
+        message = strings.clone(message),
+        span = span,
+        source_path = e.current_source_path,
+        line = line,
+        column = column,
+    })
 }
 
 mark_core_get_or_default :: proc(e: ^Emitter) {
@@ -15763,6 +15772,8 @@ emit_decls_with_source_map :: proc(decls: []IR_Decl) -> (Emit_Result, Compile_Er
     emitted_core_strings_import := false
     emitted_core_fmt_import := false
     for decl, idx in decls {
+        e.current_source_path = decl.source_path
+        e.current_source_file = decl.source_file
         if decl.kind != .Package && decl.kind != .Import {
             emit_core_strings_import(&e, &emitted_core_strings_import, needs_core_strings_import)
             emit_core_fmt_import(&e, &emitted_core_fmt_import, needs_core_fmt_import)
@@ -15892,6 +15903,8 @@ emit_eval_decls_with_source_map :: proc(decls: []IR_Decl, eval_form: CST_Form, n
     emitted_core_strings_import := false
     emitted_core_fmt_import := false
     for decl, idx in decls {
+        e.current_source_path = decl.source_path
+        e.current_source_file = decl.source_file
         if decl.kind != .Package && decl.kind != .Import {
             emit_core_strings_import(&e, &emitted_core_strings_import, needs_core_strings_import)
             emit_core_fmt_import(&e, &emitted_core_fmt_import, needs_core_fmt_import)

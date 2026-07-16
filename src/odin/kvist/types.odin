@@ -67,9 +67,11 @@ CST_Form :: struct {
 }
 
 CST_Top_Form :: struct {
-    form:      CST_Form,
-    doc_lines: [dynamic]string,
-    source:    string,
+    form:        CST_Form,
+    doc_lines:   [dynamic]string,
+    source:      string,
+    source_path: string,
+    source_file: string,
 }
 
 Param :: struct {
@@ -222,6 +224,8 @@ AST_Decl :: struct {
     transform_decl: Transform_Decl,
     source_decl:    Source_Decl,
     raw_text:       string,
+    source_path:    string,
+    source_file:    string,
 }
 
 IR_Decl :: AST_Decl
@@ -254,8 +258,11 @@ Compile_Error :: struct {
 }
 
 Compile_Warning :: struct {
-    message: string,
-    span:    Span,
+    message:     string,
+    span:        Span,
+    source_path: string,
+    line:        int,
+    column:      int,
 }
 
 Builtin_Macro_Kind :: enum {

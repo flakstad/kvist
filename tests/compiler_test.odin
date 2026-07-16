@@ -22947,6 +22947,137 @@ compile_path_supports_multi_file_root_package_directory :: proc(t: ^testing.T) {
 }
 
 @(test)
+compile_path_deduplicates_identical_imports_across_package_files :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-package-imports-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    main_path, main_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    helper_path, helper_err := os.join_path({dir, "helper.kvist"}, context.allocator)
+    testing.expect_value(t, main_err == nil && helper_err == nil, true)
+    if main_err != nil || helper_err != nil {
+        return
+    }
+    defer delete(main_path)
+    defer delete(helper_path)
+
+    main_source := `(package demo)
+(import fmt "core:fmt")
+
+(defn main []
+  (fmt.println (helper-value)))`
+    helper_source := `(package demo)
+(import fmt "core:fmt")
+
+(defn helper-value [] -> int
+  (do
+    (fmt.println "helper")
+    42))`
+    testing.expect_value(t, os.write_entire_file_from_string(main_path, main_source) == nil, true)
+    testing.expect_value(t, os.write_entire_file_from_string(helper_path, helper_source) == nil, true)
+
+    output, err, ok := kvist.compile_path(main_path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+    testing.expect_value(t, count_substring(output, `import fmt "core:fmt"`), 1)
+}
+
+@(test)
+compile_path_rejects_same_import_alias_for_different_paths :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-package-import-conflict-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    main_path, main_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    helper_path, helper_err := os.join_path({dir, "helper.kvist"}, context.allocator)
+    testing.expect_value(t, main_err == nil && helper_err == nil, true)
+    if main_err != nil || helper_err != nil {
+        return
+    }
+    defer delete(main_path)
+    defer delete(helper_path)
+
+    testing.expect_value(t, os.write_entire_file_from_string(main_path, `(package demo)
+(import shared "core:fmt")
+(defn main [] -> int 0)`) == nil, true)
+    testing.expect_value(t, os.write_entire_file_from_string(helper_path, `(package demo)
+(import shared "core:strings")
+(defn helper [] -> int 1)`) == nil, true)
+
+    _, err, ok := kvist.compile_path(main_path)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+    defer delete(err.message)
+    testing.expect_value(t, strings.contains(err.message, "import alias refers to different paths in package: shared"), true)
+}
+
+@(test)
+compile_path_warnings_report_the_imported_package_file :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-warning-origin-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    main_path, main_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    helper_path, helper_err := os.join_path({dir, "helper.kvist"}, context.allocator)
+    testing.expect_value(t, main_err == nil && helper_err == nil, true)
+    if main_err != nil || helper_err != nil {
+        return
+    }
+    defer delete(main_path)
+    defer delete(helper_path)
+
+    testing.expect_value(t, os.write_entire_file_from_string(main_path, `(package demo)
+(defn main [] (helper))`) == nil, true)
+    helper_source := `(package demo)
+(import arr "kvist:arr")
+(defn helper []
+  (let [forgotten (arr.range 0 2)]
+    (println (count forgotten))))`
+    testing.expect_value(t, os.write_entire_file_from_string(helper_path, helper_source) == nil, true)
+
+    result, err, ok := kvist.compile_path_with_map(main_path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(t, len(result.warnings) > 0, true)
+    if len(result.warnings) == 0 {
+        return
+    }
+    warning := result.warnings[0]
+    testing.expect_value(t, warning.source_path, helper_path)
+    testing.expect_value(t, warning.line, 4)
+    testing.expect_value(t, warning.column > 0, true)
+
+    formatted := kvist.format_compile_warning(main_path, "", warning)
+    defer delete(formatted)
+    testing.expect_value(t, strings.has_prefix(formatted, fmt.tprintf("%s:4:", helper_path)), true)
+}
+
+@(test)
 compile_path_root_package_ignores_unrelated_malformed_package_files :: proc(t: ^testing.T) {
     dir, dir_err := os.make_directory_temp("", "kvist-root-package-siblings-*", context.allocator)
     testing.expect_value(t, dir_err == nil, true)

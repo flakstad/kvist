@@ -777,13 +777,17 @@ has_blank_line_between :: proc(source: string, start, end: int) -> bool {
     return false
 }
 
-read_top_forms_with_origin :: proc(source: string, source_kind: Source_Kind) -> (forms: [dynamic]CST_Top_Form, err: Compile_Error, ok: bool) {
+read_top_forms_with_origin :: proc(source: string, source_kind: Source_Kind, source_path: string = "") -> (forms: [dynamic]CST_Top_Form, err: Compile_Error, ok: bool) {
     tokens, err_tok, ok_tok := tokenize_with_origin(source, source_kind)
     if !ok_tok {
         delete(tokens)
         return forms, err_tok, false
     }
     defer delete(tokens)
+
+    for &token in tokens {
+        token.span.source = source_kind
+    }
 
     index := 0
     pending_docs: [dynamic]string
@@ -826,6 +830,8 @@ read_top_forms_with_origin :: proc(source: string, source_kind: Source_Kind) -> 
             form = form,
             doc_lines = doc_lines,
             source = source[form.span.start:form.span.end],
+            source_path = source_path,
+            source_file = source,
         })
         pending_docs = nil
     }
@@ -833,8 +839,8 @@ read_top_forms_with_origin :: proc(source: string, source_kind: Source_Kind) -> 
     return forms, {}, true
 }
 
-read_top_forms :: proc(source: string) -> (forms: [dynamic]CST_Top_Form, err: Compile_Error, ok: bool) {
-    return read_top_forms_with_origin(source, .File)
+read_top_forms :: proc(source: string, source_path: string = "") -> (forms: [dynamic]CST_Top_Form, err: Compile_Error, ok: bool) {
+    return read_top_forms_with_origin(source, .File, source_path)
 }
 
 unquote_string :: proc(text: string) -> string {
