@@ -4471,6 +4471,113 @@ emit_data_decode_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_E
     return strings.clone(strings.to_string(builder)), {}, true
 }
 
+emit_data_validate_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) {
+    if len(form.items) != 3 && len(form.items) != 4 {
+        return "", Compile_Error{message = "data.validate expects type, value, and optional path", span = form.span}, false
+    }
+    target_ty, err_ty, ok_ty := parse_type_text(form.items[1])
+    if !ok_ty {
+        return "", err_ty, false
+    }
+    struct_decl, ok_struct := find_struct_decl(e, target_ty)
+    _, ok_dynamic_array := dynamic_array_element_type(target_ty)
+    if !ok_struct && !ok_dynamic_array {
+        return "", Compile_Error{
+            message = fmt.tprintf(
+                "data.validate expects a Kvist struct or dynamic-array type, got %s",
+                target_ty,
+            ),
+            span = form.items[1].span,
+        }, false
+    }
+    value_ty, ok_value_ty := obvious_form_type(e, form.items[2])
+    if !ok_value_ty || value_ty != "Data" {
+        return "", Compile_Error{message = "data.validate expects a Data value", span = form.items[2].span}, false
+    }
+    value_text, err_value, ok_value := emit_expr(e, form.items[2])
+    if !ok_value {
+        return "", err_value, false
+    }
+    path_text := "Data{kind = .Vector}"
+    if len(form.items) == 4 {
+        path_ty, ok_path_ty := obvious_form_type(e, form.items[3])
+        if !ok_path_ty || path_ty != "Data" {
+            return "", Compile_Error{message = "data.validate path must be Data", span = form.items[3].span}, false
+        }
+        err_path: Compile_Error
+        ok_path: bool
+        path_text, err_path, ok_path = emit_expr(e, form.items[3])
+        if !ok_path {
+            return "", err_path, false
+        }
+    }
+
+    builder := strings.builder_make()
+    defer strings.builder_destroy(&builder)
+    fmt.sbprintf(
+        &builder,
+        "(proc(kvist_value, kvist_path: Data) -> (err: data__Decode_Error, ok: bool) {{\n    _, kvist_validation_err, kvist_validation_ok := (proc(kvist_value, kvist_path: Data) -> (decoded: %s, err: data__Decode_Error, ok: bool) {{\n",
+        target_ty,
+    )
+    validation_builder := strings.builder_make()
+    defer strings.builder_destroy(&validation_builder)
+    counter := 0
+    ignored_decoded: string
+    err_validated: Compile_Error
+    ok_validated: bool
+    if ok_struct {
+        strings.write_string(
+            &builder,
+            "        if kvist_value.kind != .Map { return {}, data__decode_error(kvist_path, .Map, kvist_value.kind), false }\n",
+        )
+        ignored_decoded, err_validated, ok_validated = emit_decode_struct_value(
+            e,
+            &validation_builder,
+            struct_decl,
+            "kvist_value",
+            nil,
+            &counter,
+            form.items[1].span,
+        )
+    } else {
+        target_field := Struct_Field{
+            name = "validated",
+            source_name = target_ty,
+            ty = target_ty,
+            owns_dynamic_array = true,
+        }
+        field_id := counter
+        counter += 1
+        ignored_decoded, err_validated, ok_validated = emit_decode_dynamic_array_field(
+            e,
+            &validation_builder,
+            target_field,
+            "kvist_value",
+            "",
+            nil,
+            field_id,
+            &counter,
+            form.items[1].span,
+        )
+    }
+    _ = ignored_decoded
+    if !ok_validated {
+        return "", err_validated, false
+    }
+    append_indented_multiline(
+        &builder,
+        strings.to_string(validation_builder),
+        "    ",
+    )
+    strings.write_string(
+        &builder,
+        "        return {}, {}, true\n    })(kvist_value, kvist_path)\n    return kvist_validation_err, kvist_validation_ok\n",
+    )
+    fmt.sbprintf(&builder, "}})(%s, %s)", value_text, path_text)
+    mark_data_type(e)
+    return strings.clone(strings.to_string(builder)), {}, true
+}
+
 emit_shallow_update_copy_expr :: proc(e: ^Emitter, target_form: CST_Form, target_text, target_ty: string, fields: []string, field_span: Span, updater_form: CST_Form, rest_forms: []CST_Form) -> (string, Compile_Error, bool) {
     field_ty, err_field_ty, ok_field_ty := struct_field_type_for_update_path(e, target_ty, fields, "update", field_span)
     if !ok_field_ty {
@@ -8204,6 +8311,15 @@ emit_managed_destructure_cleanup :: proc(e: ^Emitter, binding: Binding) {
         }
         return
     }
+    if head_name == "validate_data" && len(binding.pattern) == 2 {
+        if binding.pattern[0] != "" {
+            emit_line(e, fmt.tprintf(
+                "defer %s",
+                managed_destroy_value_text(e, "data__Decode_Error", binding.pattern[0]),
+            ))
+        }
+        return
+    }
     proc_decl, ok_proc := find_proc_decl(e, head_name)
     if !ok_proc || proc_decl.borrows_result || proc_decl.returns.kind != .Named || len(proc_decl.returns.named) != len(binding.pattern) {
         return
@@ -9256,6 +9372,15 @@ bind_obvious_binding_types :: proc(e: ^Emitter, binding: Binding) {
                     if binding.pattern[2] != "" {
                         bind_local_type(e, binding.pattern[2], "bool")
                     }
+                }
+                return
+            }
+            if head_name == "validate_data" && len(binding.pattern) == 2 {
+                if binding.pattern[0] != "" {
+                    bind_local_type(e, binding.pattern[0], "data__Decode_Error")
+                }
+                if binding.pattern[1] != "" {
+                    bind_local_type(e, binding.pattern[1], "bool")
                 }
                 return
             }
@@ -14373,6 +14498,9 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
     }
     if head.text == "decode-data" {
         return emit_data_decode_expr(e, form)
+    }
+    if head.text == "validate-data" {
+        return emit_data_validate_expr(e, form)
     }
 
     if head.text == "as->" {

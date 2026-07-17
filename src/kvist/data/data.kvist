@@ -42,6 +42,18 @@
       `(decode-data ~target-type ~value ~(first rest))
       (error "data.decode expects type, value, and optional path"))))
 
+(defmacro validate
+  "Validate Data against the shape selected by a native type without decoding.
+
+  `(validate Person value)` returns `[err ok]`. An optional third argument
+  supplies the Data path used as the root of path-aware errors."
+  [target-type value & rest]
+  (if (= (count rest) 0)
+    `(validate-data ~target-type ~value)
+    (if (= (count rest) 1)
+      `(validate-data ~target-type ~value ~(first rest))
+      (error "data.validate expects type, value, and optional path"))))
+
 (defn from-nil
   "Construct nil Data."
   [] -> Data #owned #force_inline

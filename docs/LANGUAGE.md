@@ -1844,6 +1844,31 @@ including recursive destruction of managed struct elements. Direct decoding
 also validates the complete Data vector before allocating native storage.
 Native string arrays and borrowed slices remain future work.
 
+### Validating Data Without Decoding
+
+Use `data.validate` when Data should remain Data after checking a reusable
+native shape:
+
+```clojure
+(let [[err ok]
+      (data.validate Message message '[:message])]
+  (if ok
+    (handle-data-message message)
+    (println err.path err.expected err.actual)))
+```
+
+The target may be any struct or `(dynamic T)` target accepted by
+`data.decode`. Validation uses the same required fields, `:default` optional
+fields, enum variants, nested structs, array elements, and path-aware
+`Decode-Error` values. It returns `[err ok]` and does not construct the native
+target, clone managed fields, or allocate native array storage. The original
+immutable Data value is unchanged.
+
+This is useful for validating once at a package or protocol boundary and then
+passing Data through code that relies on that boundary contract. Validation
+does not create a hidden runtime schema object or a distinct boxed/refined Data
+type; the native target type remains the single shape definition.
+
 In a `->` pipeline, use a `.field` selector step:
 
 ```clojure
