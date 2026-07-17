@@ -5,6 +5,16 @@
 (import core "kvist:core")
 (import arr "kvist:arr")
 
+(defstruct Decode-Error {
+  path: Data
+  expected: Data-Kind
+  actual: Data-Kind
+})
+
+(defn decode-error
+  [path: Data, expected: Data-Kind, actual: Data-Kind] -> Decode-Error
+  (Decode-Error {path: path expected: expected actual: actual}))
+
 (defn from-nil
   "Construct nil Data."
   [] -> Data #owned #force_inline
@@ -171,6 +181,45 @@
   "Return the runtime kind of `value`."
   [value: Data] -> Data-Kind #force_inline
   (odin-call "kvist_data_kind" value))
+
+(defn decode-int-at
+  "Decode integer Data to `i64`.
+
+  `path` identifies the value in the surrounding input and is retained in the
+  returned error. The zero `Decode-Error` and true boolean indicate success."
+  [value: Data, path: Data] -> [decoded: i64, err: Decode-Error, ok: bool]
+  (if (int? value)
+    (return (int value) {} true)
+    (return 0 (decode-error path .Int (kind value)) false)))
+
+(defn decode-int
+  "Decode root integer Data to `i64`."
+  [value: Data] -> [decoded: i64, err: Decode-Error, ok: bool]
+  (decode-int-at value '[]))
+
+(defn decode-float-at
+  "Decode floating-point Data to `f64`, preserving `path` on failure."
+  [value: Data, path: Data] -> [decoded: f64, err: Decode-Error, ok: bool]
+  (if (float? value)
+    (return (float value) {} true)
+    (return 0 (decode-error path .Float (kind value)) false)))
+
+(defn decode-float
+  "Decode root floating-point Data to `f64`."
+  [value: Data] -> [decoded: f64, err: Decode-Error, ok: bool]
+  (decode-float-at value '[]))
+
+(defn decode-bool-at
+  "Decode boolean Data to `bool`, preserving `path` on failure."
+  [value: Data, path: Data] -> [decoded: bool, err: Decode-Error, ok: bool]
+  (if (bool? value)
+    (return (bool value) {} true)
+    (return false (decode-error path .Bool (kind value)) false)))
+
+(defn decode-bool
+  "Decode root boolean Data to `bool`."
+  [value: Data] -> [decoded: bool, err: Decode-Error, ok: bool]
+  (decode-bool-at value '[]))
 
 (defn nil? [value: Data] -> bool #force_inline
   (odin-call "kvist_data_nil_p" value))

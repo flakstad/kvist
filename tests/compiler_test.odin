@@ -3704,6 +3704,121 @@ compile_manages_data_assignment_places :: proc(t: ^testing.T) {
 }
 
 @(test)
+compile_manages_data_fields_in_native_structs :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(def config '{:port 8080})
+
+(defstruct Box {
+  value: Data
+})
+
+(defstruct Envelope {
+  box: Box
+  label: string
+  revision: int
+})
+
+(defn make-box [value: Data] -> Box
+  (Box {value: value}))
+
+(defn copy-box [box: Box] -> Box
+  (let [copy box]
+    copy))
+
+(defn wrap [box: Box] -> Envelope
+  (Envelope {box: box label: "config" revision: 1}))
+
+(defn with-value [box: Box, value: Data] -> Box
+  (copy-with box .value value))
+
+(defn with-label [envelope: Envelope, label: string] -> Envelope
+  (copy-with envelope .label label))
+
+(defn revise [envelope: Envelope] -> Envelope
+  (copy-update envelope .revision inc))
+
+(defn observe [box: Box] -> int
+  (discard box)
+  1)
+
+(defn nested [value: Data] -> int
+  (observe (make-box value)))
+
+(defn discard-box [value: Data]
+  (discard (make-box value)))
+
+(defn maybe-box [value: Data] -> [box: Box, ok: bool]
+  (return (make-box value) true))
+
+(defn receive-box [value: Data]
+  (let [[box ok] (maybe-box value)]
+    (discard box ok)))
+
+(defn replace [box: Box, replacement: Box]
+  (let [local box]
+    (set! local replacement)
+    (set! local (make-box config))))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "kvist_managed_clone_Box :: proc(value: Box) -> Box"), true)
+    testing.expect_value(t, strings.contains(output, "out.value = kvist_data_retain(value.value)"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_managed_destroy_Box :: proc(value: Box)"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_data_release(value.value)"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_managed_assign_Box :: proc(place: ^Box, value: Box)"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_managed_move_assign_Box :: proc(place: ^Box, value: Box)"), true)
+    testing.expect_value(t, strings.contains(output, "return Box{value = kvist_data_retain(value)}"), true)
+    testing.expect_value(t, strings.contains(output, "copy := kvist_managed_clone_Box(box)"), true)
+    testing.expect_value(t, strings.contains(output, "defer kvist_managed_destroy_Box(copy)"), true)
+    testing.expect_value(t, strings.contains(output, "return kvist_managed_clone_Box(copy)"), true)
+    testing.expect_value(t, strings.contains(output, "out.box = kvist_managed_clone_Box(value.box)"), true)
+    testing.expect_value(t, strings.contains(output, "return Envelope{box = kvist_managed_clone_Box(box), label = \"config\", revision = 1}"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_update_1 := kvist_managed_clone_Box(kvist_target)"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_data_assign(&(kvist_update_1.value), kvist_value)"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_update_2 := kvist_managed_clone_Envelope(kvist_target)"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_update_2.label = kvist_value"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_update_3 := kvist_managed_clone_Envelope(kvist_target)"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_update_3.revision = (kvist_target.revision) + 1"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_thread_4 := make_box(value)"), true)
+    testing.expect_value(t, strings.contains(output, "defer kvist_managed_destroy_Box(kvist_thread_4)"), true)
+    testing.expect_value(t, strings.contains(output, "observe(kvist_thread_4)"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_thread_5 := make_box(value)"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_managed_destroy_Box(kvist_thread_5)"), true)
+    testing.expect_value(t, strings.contains(output, "defer kvist_managed_destroy_Box(box)"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_managed_assign_Box(&(local), replacement)"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_managed_move_assign_Box(&(local), make_box(config))"), true)
+}
+
+@(test)
+compile_rejects_copy_update_of_managed_struct_field :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct Box {
+  value: Data
+})
+
+(defn update-value [box: Box, f: (fn [value: Data] -> Data)] -> Box
+  (copy-update box .value f))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    delete(output)
+    defer delete(err.message)
+    testing.expect_value(
+        t,
+        err.message,
+        "copy-update of a managed field is not yet supported; compute the new value first and use copy-with",
+    )
+}
+
+@(test)
 compile_exposes_explicit_data_lifetime_helpers :: proc(t: ^testing.T) {
     source := `(package main)
 (import data "kvist:data")

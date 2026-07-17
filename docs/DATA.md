@@ -77,11 +77,20 @@ returns, destructured named results, and reassignment. `#owned` and `#borrowed`
 function contracts determine whether a returned value transfers a reference or
 remains a view of an input.
 Assignment retains borrowed replacements, moves owned replacements, and
-releases overwritten values. Owned Data nested directly in call arguments is
-released after the call. Data-valued `if`, `let`, `do`, and `type-case`
-expressions normalize their result to one owned reference. Data stored in native
-struct fields or native containers is not yet managed automatically across
-every copy, move, overwrite, and destruction path.
+releases overwritten values. Owned managed values nested directly in call
+arguments or discarded explicitly are released after use. Data-valued `if`,
+`let`, `do`, and `type-case` expressions normalize their result to one owned
+reference.
+
+Top-level Kvist structs whose fields contain `Data`, directly or through
+another managed Kvist struct, now follow the same protocol. Construction,
+binding copies, `copy-with`, `copy-update` of ordinary native fields,
+assignment, returns, named-result destructuring, discarded results, and scope
+destruction retain or release recursively. `copy-update` of a managed field is
+temporarily rejected; compute the replacement first and use `copy-with`.
+Native arrays, dynamic arrays, maps, unions, closures, local structs, imported
+Odin structs, and copies performed outside generated Kvist code still require
+explicit `data.retain`/`data.release`.
 
 ## Managed Runtime Values
 
@@ -140,7 +149,8 @@ ambient representation or execution model for ordinary Kvist code.
 Planned capabilities are:
 
 - structural pattern matching and destructuring over Data;
-- typed decoding into native values with path-aware validation errors;
+- typed decoding into native values with path-aware validation errors; safe
+  integer, float, and boolean decoders are available as the first slice;
 - reusable validated shapes for dynamic/native boundaries;
 - efficient builders or transients for bulk immutable construction;
 - explicit dispatch on tags or selected keys for messages and protocols;
@@ -168,11 +178,17 @@ fallback. Static and runtime Data have the same public handle shape.
 
 1. Complete the managed-value compiler protocol for fields and containers;
    local bindings, returns, ownership contracts, reassignment, nested call
-   arguments, and block expressions are implemented.
+   arguments, block expressions, and recursively managed top-level Kvist
+   structs are implemented. Native containers and the other aggregate forms
+   listed above remain.
 2. Complete persistent update and traversal operations in `kvist:data`;
    constructors, core map/sequential updates, nested updates, and runtime
    quasiquote with collection splice are implemented.
 3. Add typed decoding and path-aware validation at Data/native boundaries.
+   `data.decode-int[-at]`, `data.decode-float[-at]`, and
+   `data.decode-bool[-at]` return a native scalar, `data.Decode-Error`, and an
+   `ok` boolean. Structs, enums, strings, optional/default fields, and selected
+   homogeneous collections remain.
 4. Design and implement structural Data matching with ownership-safe captured
    subvalues.
 5. Add builders/transients and verify their allocation behavior against

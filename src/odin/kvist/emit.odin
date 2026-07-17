@@ -996,6 +996,10 @@ emit_struct_brace_literal :: proc(e: ^Emitter, struct_decl: ^Struct_Decl, form: 
         if !ok_value {
             return "", err_value, false
         }
+        if type_text_has_managed_lifecycle(e, field.ty) &&
+           !form_produces_owned_managed_type(e, value, field.ty) {
+            value_text = managed_clone_value_text(e, field.ty, value_text)
+        }
         append(&pairs, Brace_Pair{key = field_name, value = value_text})
         i += 2
     }
@@ -3064,7 +3068,7 @@ struct_field_type_for_update_path :: proc(e: ^Emitter, target_ty: string, fields
     return ty, {}, true
 }
 
-emit_shallow_assoc_copy_expr :: proc(e: ^Emitter, target_text, target_ty: string, fields: []string, field_span: Span, value_form: CST_Form) -> (string, Compile_Error, bool) {
+emit_shallow_assoc_copy_expr :: proc(e: ^Emitter, target_form: CST_Form, target_text, target_ty: string, fields: []string, field_span: Span, value_form: CST_Form) -> (string, Compile_Error, bool) {
     field_ty, err_field_ty, ok_field_ty := struct_field_type_for_update_path(e, target_ty, fields, "assoc", field_span)
     if !ok_field_ty {
         return "", err_field_ty, false
@@ -3075,14 +3079,31 @@ emit_shallow_assoc_copy_expr :: proc(e: ^Emitter, target_text, target_ty: string
     }
     temp := shallow_update_temp_name(e)
     target_field := field_access_text(temp, fields)
-    return fmt.tprintf("(proc(kvist_target: %s, kvist_value: %s) -> %s %s\n    %s := kvist_target\n    %s = kvist_value\n    return %s\n})(%s, %s)",
-                       target_ty, field_ty, target_ty, "{", temp, target_field, temp, target_text, value_text), {}, true
+    target_init := "kvist_target"
+    if type_text_has_managed_lifecycle(e, target_ty) &&
+       !form_produces_owned_managed_type(e, target_form, target_ty) {
+        target_init = managed_clone_value_text(e, target_ty, "kvist_target")
+    }
+    assignment := fmt.tprintf("%s = kvist_value", target_field)
+    if type_text_has_managed_lifecycle(e, field_ty) {
+        move := form_produces_owned_managed_type(e, value_form, field_ty)
+        helper := managed_assign_helper_name(field_ty, move)
+        assignment = emit_call_text(helper, []string{address_of_expr_text(target_field), "kvist_value"})
+    }
+    return fmt.tprintf("(proc(kvist_target: %s, kvist_value: %s) -> %s %s\n    %s := %s\n    %s\n    return %s\n})(%s, %s)",
+                       target_ty, field_ty, target_ty, "{", temp, target_init, assignment, temp, target_text, value_text), {}, true
 }
 
-emit_shallow_update_copy_expr :: proc(e: ^Emitter, target_text, target_ty: string, fields: []string, field_span: Span, updater_form: CST_Form, rest_forms: []CST_Form) -> (string, Compile_Error, bool) {
+emit_shallow_update_copy_expr :: proc(e: ^Emitter, target_form: CST_Form, target_text, target_ty: string, fields: []string, field_span: Span, updater_form: CST_Form, rest_forms: []CST_Form) -> (string, Compile_Error, bool) {
     field_ty, err_field_ty, ok_field_ty := struct_field_type_for_update_path(e, target_ty, fields, "update", field_span)
     if !ok_field_ty {
         return "", err_field_ty, false
+    }
+    if type_text_has_managed_lifecycle(e, field_ty) {
+        return "", Compile_Error{
+            message = "copy-update of a managed field is not yet supported; compute the new value first and use copy-with",
+            span = field_span,
+        }, false
     }
     field_text := field_access_text("kvist_target", fields)
     arg_texts: [dynamic]string
@@ -3122,12 +3143,18 @@ emit_shallow_update_copy_expr :: proc(e: ^Emitter, target_text, target_ty: strin
         fmt.sbprintf(&params_builder, ", %s: %s", name, rest_types[idx])
         fmt.sbprintf(&call_builder, ", %s", rest_texts[idx])
     }
-    return fmt.tprintf("(proc(kvist_target: %s%s) -> %s %s\n    %s := kvist_target\n    %s = %s\n    return %s\n})(%s%s)",
+    target_init := "kvist_target"
+    if type_text_has_managed_lifecycle(e, target_ty) &&
+       !form_produces_owned_managed_type(e, target_form, target_ty) {
+        target_init = managed_clone_value_text(e, target_ty, "kvist_target")
+    }
+    return fmt.tprintf("(proc(kvist_target: %s%s) -> %s %s\n    %s := %s\n    %s = %s\n    return %s\n})(%s%s)",
                        target_ty,
                        strings.to_string(params_builder),
                        target_ty,
                        "{",
                        temp,
+                       target_init,
                        target_field,
                        value_text,
                        temp,
@@ -3148,7 +3175,7 @@ emit_shallow_assoc_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile
     if !ok_target {
         return "", err_target, false
     }
-    return emit_shallow_assoc_copy_expr(e, target_text, target_ty, fields[:], field_span, value_form)
+    return emit_shallow_assoc_copy_expr(e, target_form, target_text, target_ty, fields[:], field_span, value_form)
 }
 
 emit_shallow_update_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) {
@@ -3164,7 +3191,7 @@ emit_shallow_update_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compil
     if !ok_target {
         return "", err_target, false
     }
-    return emit_shallow_update_copy_expr(e, target_text, target_ty, fields[:], field_span, updater_form, rest_forms)
+    return emit_shallow_update_copy_expr(e, target_form, target_text, target_ty, fields[:], field_span, updater_form, rest_forms)
 }
 
 comparison_odin_op :: proc(op: string) -> string {
@@ -4803,9 +4830,10 @@ form_has_nested_owned_value :: proc(form: CST_Form, e: ^Emitter = nil) -> bool {
                     continue
                 }
             }
+            _, item_is_owned_managed := owned_managed_form_type(e, item)
             if !form_is_named_arg_brace(item) &&
                (form_produces_owned_value(item, e) ||
-                form_produces_owned_managed_value(e, item) ||
+                item_is_owned_managed ||
                 form_has_nested_owned_value(item, e)) {
                 return true
             }
@@ -4860,9 +4888,10 @@ emit_expr_with_owned_nested_temps :: proc(e: ^Emitter, form: CST_Form) -> (strin
                 }
                 continue
             }
+            _, item_is_owned_managed := owned_managed_form_type(e, item)
             if form_is_named_arg_brace(item) ||
                !(form_produces_owned_value(item, e) ||
-                 form_produces_owned_managed_value(e, item) ||
+                 item_is_owned_managed ||
                  form_has_nested_owned_value(item, e)) {
                 continue
             }
@@ -4878,9 +4907,8 @@ emit_expr_with_owned_nested_temps :: proc(e: ^Emitter, form: CST_Form) -> (strin
                                 call_arg_transfers_owned_result(e, rewritten, idx))
             if form_produces_owned_value(item, e) && !transfers_owned {
                 emit_line(e, fmt.tprintf("defer delete(%s)", temp))
-            } else if form_produces_owned_managed_value(e, item) {
-                mark_data_type(e)
-                emit_line(e, fmt.tprintf("defer kvist_data_release(%s)", temp))
+            } else if managed_ty, owned_managed := owned_managed_form_type(e, item); owned_managed {
+                emit_line(e, fmt.tprintf("defer %s", managed_destroy_value_text(e, managed_ty, temp)))
             }
 
             delete_cst_form(&rewritten.items[idx])
@@ -6418,6 +6446,108 @@ type_text_is_managed_value :: proc(text: string) -> bool {
     return strings.trim_space(text) == "Data"
 }
 
+type_text_has_managed_lifecycle :: proc(e: ^Emitter, text: string, depth: int = 0) -> bool {
+    if type_text_is_managed_value(text) {
+        return true
+    }
+    if e == nil || depth > 16 {
+        return false
+    }
+    struct_decl, ok_struct := find_struct_decl(e, strings.trim_space(text))
+    if !ok_struct {
+        return false
+    }
+    for field in struct_decl.fields {
+        if type_text_has_managed_lifecycle(e, field.ty, depth+1) {
+            return true
+        }
+    }
+    return false
+}
+
+managed_struct_helper_name :: proc(op, ty: string) -> string {
+    return fmt.tprintf("kvist_managed_%s_%s", op, ty)
+}
+
+managed_clone_value_text :: proc(e: ^Emitter, ty, value: string) -> string {
+    if type_text_is_managed_value(ty) {
+        mark_data_type(e)
+        return emit_call_text("kvist_data_retain", []string{value})
+    }
+    return emit_call_text(managed_struct_helper_name("clone", ty), []string{value})
+}
+
+managed_destroy_value_text :: proc(e: ^Emitter, ty, value: string) -> string {
+    if type_text_is_managed_value(ty) {
+        mark_data_type(e)
+        return emit_call_text("kvist_data_release", []string{value})
+    }
+    return emit_call_text(managed_struct_helper_name("destroy", ty), []string{value})
+}
+
+managed_assign_helper_name :: proc(ty: string, move: bool) -> string {
+    if type_text_is_managed_value(ty) {
+        return "kvist_data_move_assign" if move else "kvist_data_assign"
+    }
+    return managed_struct_helper_name("move_assign" if move else "assign", ty)
+}
+
+emit_managed_struct_helpers :: proc(e: ^Emitter, struct_decl: Struct_Decl) {
+    if !type_text_has_managed_lifecycle(e, struct_decl.name) {
+        return
+    }
+    mark_data_type(e)
+    clone_name := managed_struct_helper_name("clone", struct_decl.name)
+    destroy_name := managed_struct_helper_name("destroy", struct_decl.name)
+    assign_name := managed_struct_helper_name("assign", struct_decl.name)
+    move_assign_name := managed_struct_helper_name("move_assign", struct_decl.name)
+
+    emit_raw_newline(e)
+    emit_line(e, fmt.tprintf("%s :: proc(value: %s) -> %s {{", clone_name, struct_decl.name, struct_decl.name))
+    e.indent += 1
+    emit_line(e, "out := value")
+    for field in struct_decl.fields {
+        if type_text_has_managed_lifecycle(e, field.ty) {
+            retained := managed_clone_value_text(e, field.ty, fmt.tprintf("value.%s", field.name))
+            emit_line(e, fmt.tprintf("out.%s = %s", field.name, retained))
+        }
+    }
+    emit_line(e, "return out")
+    e.indent -= 1
+    emit_line(e, "}")
+
+    emit_raw_newline(e)
+    emit_line(e, fmt.tprintf("%s :: proc(value: %s) {{", destroy_name, struct_decl.name))
+    e.indent += 1
+    for offset in 0..<len(struct_decl.fields) {
+        field := struct_decl.fields[len(struct_decl.fields)-1-offset]
+        if type_text_has_managed_lifecycle(e, field.ty) {
+            emit_line(e, managed_destroy_value_text(e, field.ty, fmt.tprintf("value.%s", field.name)))
+        }
+    }
+    e.indent -= 1
+    emit_line(e, "}")
+
+    emit_raw_newline(e)
+    emit_line(e, fmt.tprintf("%s :: proc(place: ^%s, value: %s) {{", assign_name, struct_decl.name, struct_decl.name))
+    e.indent += 1
+    emit_line(e, fmt.tprintf("replacement := %s(value)", clone_name))
+    emit_line(e, "previous := place^")
+    emit_line(e, "place^ = replacement")
+    emit_line(e, fmt.tprintf("%s(previous)", destroy_name))
+    e.indent -= 1
+    emit_line(e, "}")
+
+    emit_raw_newline(e)
+    emit_line(e, fmt.tprintf("%s :: proc(place: ^%s, value: %s) {{", move_assign_name, struct_decl.name, struct_decl.name))
+    e.indent += 1
+    emit_line(e, "previous := place^")
+    emit_line(e, "place^ = value")
+    emit_line(e, fmt.tprintf("%s(previous)", destroy_name))
+    e.indent -= 1
+    emit_line(e, "}")
+}
+
 form_produces_owned_managed_value :: proc(e: ^Emitter, form: CST_Form, depth: int = 0) -> bool {
     if depth > 8 || form.kind != .List || len(form.items) == 0 || form.items[0].kind != .Symbol {
         return false
@@ -6451,27 +6581,74 @@ form_produces_owned_managed_value :: proc(e: ^Emitter, form: CST_Form, depth: in
     return false
 }
 
-managed_binding_value_text :: proc(e: ^Emitter, binding: Binding, value: string) -> (text: string, managed: bool) {
+form_produces_owned_managed_type :: proc(e: ^Emitter, form: CST_Form, ty: string, depth: int = 0) -> bool {
+    if type_text_is_managed_value(ty) {
+        return form_produces_owned_managed_value(e, form, depth)
+    }
+    if depth > 8 || !type_text_has_managed_lifecycle(e, ty) {
+        return false
+    }
+    if form.kind != .List || len(form.items) == 0 || form.items[0].kind != .Symbol {
+        return false
+    }
+    head_name := map_name(form.items[0].text)
+    defer delete(head_name)
+    if head_name == ty &&
+       len(form.items) == 2 &&
+       form.items[1].kind == .Brace {
+        return true
+    }
+    if form.items[0].text == "copy-with" || form.items[0].text == "copy-update" {
+        if result_ty, ok_result_ty := obvious_form_type(e, form); ok_result_ty && result_ty == ty {
+            return true
+        }
+    }
+    if proc_decl, ok_proc := find_proc_decl(e, head_name); ok_proc {
+        return proc_decl.returns.kind == .Single &&
+               proc_decl.returns.single_ty == ty &&
+               !proc_decl.borrows_result
+    }
+    return false
+}
+
+owned_managed_form_type :: proc(e: ^Emitter, form: CST_Form) -> (string, bool) {
+    ty, ok_ty := obvious_form_type(e, form)
+    if !ok_ty || !type_text_has_managed_lifecycle(e, ty) ||
+       !form_produces_owned_managed_type(e, form, ty) {
+        return "", false
+    }
+    return ty, true
+}
+
+emit_discarded_expr :: proc(e: ^Emitter, form: CST_Form, expr: string) {
+    if managed_ty, managed := owned_managed_form_type(e, form); managed {
+        temp := thread_temp_name(e)
+        emit_prefixed_expr_mapped(e, fmt.tprintf("%s := ", temp), expr, form.span)
+        emit_line_mapped(e, managed_destroy_value_text(e, managed_ty, temp), form.span)
+        return
+    }
+    emit_prefixed_expr_mapped(e, "_ = ", expr, form.span)
+}
+
+managed_binding_value_text :: proc(e: ^Emitter, binding: Binding, value: string) -> (text, managed_ty: string, managed: bool) {
     ty, ok_ty := obvious_binding_type(e, binding)
-    if !ok_ty || !type_text_is_managed_value(ty) || binding.name == "" || binding.is_destructure || binding.is_result_binding {
-        return value, false
+    if !ok_ty || !type_text_has_managed_lifecycle(e, ty) || binding.name == "" || binding.is_destructure || binding.is_result_binding {
+        return value, "", false
     }
-    mark_data_type(e)
-    if form_produces_owned_managed_value(e, binding.value) {
-        return value, true
+    if form_produces_owned_managed_type(e, binding.value, ty) {
+        return value, ty, true
     }
-    return emit_call_text("kvist_data_retain", []string{value}), true
+    return managed_clone_value_text(e, ty, value), ty, true
 }
 
 managed_return_value_text_for_type :: proc(e: ^Emitter, form: CST_Form, value, return_ty: string) -> string {
-    if !type_text_is_managed_value(return_ty) ||
+    if !type_text_has_managed_lifecycle(e, return_ty) ||
        e.current_proc_owns_managed_result ||
        e.current_proc_borrows_managed_result ||
-       form_produces_owned_managed_value(e, form) {
+       form_produces_owned_managed_type(e, form, return_ty) {
         return value
     }
-    mark_data_type(e)
-    return emit_call_text("kvist_data_retain", []string{value})
+    return managed_clone_value_text(e, return_ty, value)
 }
 
 managed_return_value_text :: proc(e: ^Emitter, form: CST_Form, value: string, returns: Return_Spec) -> string {
@@ -6492,23 +6669,22 @@ emit_managed_destructure_cleanup :: proc(e: ^Emitter, binding: Binding) {
         return
     }
     for name, idx in binding.pattern {
-        if name != "" && type_text_is_managed_value(proc_decl.returns.named[idx].ty) {
-            mark_data_type(e)
-            emit_line(e, fmt.tprintf("defer kvist_data_release(%s)", name))
+        if name != "" && type_text_has_managed_lifecycle(e, proc_decl.returns.named[idx].ty) {
+            emit_line(e, fmt.tprintf(
+                "defer %s",
+                managed_destroy_value_text(e, proc_decl.returns.named[idx].ty, name),
+            ))
         }
     }
 }
 
 managed_assignment_text :: proc(e: ^Emitter, place_form, value_form: CST_Form, place, value: string) -> (string, bool) {
     place_ty, ok_place_ty := obvious_form_type(e, place_form)
-    if !ok_place_ty || !type_text_is_managed_value(place_ty) {
+    if !ok_place_ty || !type_text_has_managed_lifecycle(e, place_ty) {
         return "", false
     }
-    mark_data_type(e)
-    helper := "kvist_data_assign"
-    if form_produces_owned_managed_value(e, value_form) {
-        helper = "kvist_data_move_assign"
-    }
+    move := form_produces_owned_managed_type(e, value_form, place_ty)
+    helper := managed_assign_helper_name(place_ty, move)
     return emit_call_text(helper, []string{address_of_expr_text(place), value}), true
 }
 
@@ -13740,7 +13916,7 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
             expr = managed_return_value_text(e, form, expr, returns)
             emit_prefixed_expr_mapped(e, "return ", expr, form.span)
         } else if form_is_owned_allocation_result(form) || form_is_owned_constructor_result(form) {
-            emit_prefixed_expr_mapped(e, "_ = ", expr, form.span)
+            emit_discarded_expr(e, form, expr)
         } else {
             emit_prefixed_expr_mapped(e, "", expr, form.span)
         }
@@ -13768,7 +13944,7 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
             expr = managed_return_value_text(e, form, expr, returns)
             emit_prefixed_expr_mapped(e, "return ", expr, form.span)
         } else if form_is_owned_allocation_result(form) || form_is_owned_constructor_result(form) {
-            emit_prefixed_expr_mapped(e, "_ = ", expr, form.span)
+            emit_discarded_expr(e, form, expr)
         } else {
             emit_prefixed_expr_mapped(e, "", expr, form.span)
         }
@@ -13879,7 +14055,8 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
                     return err_value, false
                 }
                 managed := false
-                value, managed = managed_binding_value_text(e, binding, value)
+                managed_ty := ""
+                value, managed_ty, managed = managed_binding_value_text(e, binding, value)
                 if binding.is_result_binding && binding.or_modifier == "or-return" {
                     if !named_returns_match_binding_pattern(returns, binding.pattern[:]) {
                         return Compile_Error{
@@ -13893,7 +14070,7 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
                     emit_managed_destructure_cleanup(e, binding)
                 }
                 if managed && !binding.deferred_delete && !binding.err_deferred_delete && !binding.defer_with_cleanup {
-                    emit_line(e, fmt.tprintf("defer kvist_data_release(%s)", binding.name))
+                    emit_line(e, fmt.tprintf("defer %s", managed_destroy_value_text(e, managed_ty, binding.name)))
                 }
             }
             err_guard, ok_guard := emit_result_binding_guard(e, binding, returns)
@@ -14026,7 +14203,7 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
             if !ok_expr {
                 return err_expr, false
             }
-            emit_prefixed_expr_mapped(e, "_ = ", expr, item.span)
+            emit_discarded_expr(e, item, expr)
         }
         return {}, true
     case "break":
@@ -14257,7 +14434,7 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
             expr = managed_return_value_text(e, form, expr, returns)
             emit_prefixed_expr_mapped(e, "return ", expr, form.span)
         } else if form_is_owned_allocation_result(form) || form_is_owned_constructor_result(form) {
-            emit_prefixed_expr_mapped(e, "_ = ", expr, form.span)
+            emit_discarded_expr(e, form, expr)
         } else {
             emit_prefixed_expr_mapped(e, "", expr, form.span)
         }
@@ -14564,6 +14741,7 @@ emit_decl :: proc(e: ^Emitter, decl: IR_Decl) -> (Compile_Error, bool) {
         }
         e.indent -= 1
         emit_line(e, "}")
+        emit_managed_struct_helpers(e, decl.struct_decl)
     case .Enum:
         emit_indent(e)
         strings.write_string(&e.builder, decl.enum_decl.name)

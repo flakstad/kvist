@@ -1,0 +1,15 @@
+(package main)
+(import data "kvist:data")
+
+(defn port [config: Data] -> [value: i64, err: data.Decode-Error, ok: bool]
+  (data.decode-int-at (get config :port) '[:port]))
+
+(defn main []
+  (let [[value err ok] (port '{:port 8080})]
+    (if ok
+      (println value)
+      (println "expected" err.expected "at" err.path)))
+  (let [[value err ok] (port '{:port "unknown"})]
+    (if ok
+      (println value)
+      (println "expected" err.expected "at" err.path "but got" err.actual))))

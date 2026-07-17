@@ -21,8 +21,8 @@ compiler behavior.
 | Transitive compilation cache and distinct entry keys | Implemented | Measure and split reusable package frontend artifacts |
 | Source mapping | Partial | Cover more generated cleanup, specialization, and Data forms |
 | Core `str` | Implemented | Validate rendering across Ro and Vev |
-| Managed `Data` in native aggregates | Planned | Required before typed decoding and matching |
-| Typed Data decoding and validated shapes | Planned | Add path-aware native boundary errors |
+| Managed `Data` in native aggregates | Partial | Top-level Kvist structs are managed recursively; add containers, unions, closures, local/imported structs |
+| Typed Data decoding and validated shapes | Partial | Scalar decoders and path-carrying errors exist; add generated struct/enum/collection decoding |
 | Structural Data matching and destructuring | Planned | Design after aggregate ownership and decoding |
 | Public Data builders/transients | Planned | Expose a safe freeze API based on the EDN reader's linear construction pattern |
 | Vev Data result traversal and typed collection | Planned | Avoid unnecessary intermediate native arrays |
@@ -49,10 +49,15 @@ compiler behavior.
 
 ### 2. Safe Data/Native Boundaries
 
-- Generalize managed-value behavior across struct fields, arrays, maps, unions,
-  closures, copying, overwrite, move, return, and destruction.
+- Implemented for top-level Kvist structs: recursive managed fields,
+  construction, copying, `copy-with`, ordinary-field `copy-update`, overwrite,
+  move, return, named-result destruction, discarded values, and destruction.
+- Continue the managed-value behavior across arrays, maps, unions, closures,
+  local structs, imported Odin structs, and managed-field `copy-update`.
 - Add typed Data decoding for scalars, enums, structs, optional/default fields,
   and selected homogeneous collections.
+- Implemented first decoding slice: integer, float, and boolean values return
+  native scalars plus a managed path-carrying `Decode-Error`.
 - Carry the exact Data path, expected shape, and actual kind in decode errors.
 - Preserve the zero-allocation static quote path.
 
