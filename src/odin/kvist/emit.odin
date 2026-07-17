@@ -18781,6 +18781,14 @@ emit_data_type_helper :: proc(e: ^Emitter) {
     emit_line(e, "return Data{kind = kind, payload = {items = node.items[:]}, node = node}")
     e.indent -= 1
     emit_line(e, "}")
+    emit_line(e, "kvist_data_make_unique_set :: proc(values: []Data, allocator: kvist_runtime.Allocator = context.allocator) -> Data {")
+    e.indent += 1
+    emit_line(e, "node := kvist_data_new_node(allocator)")
+    emit_line(e, "node.items = make([dynamic]Data, 0, len(values), allocator)")
+    emit_line(e, "for value in values { append(&node.items, kvist_data_retain(value)) }")
+    emit_line(e, "return Data{kind = .Set, payload = {items = node.items[:]}, node = node}")
+    e.indent -= 1
+    emit_line(e, "}")
     emit_line(e, "kvist_data_make_items_spliced :: proc(kind: Data_Kind, pieces: []Data_Piece, allocator: kvist_runtime.Allocator = context.allocator) -> Data {")
     e.indent += 1
     emit_line(e, "assert(kind == .List || kind == .Vector || kind == .Set)")

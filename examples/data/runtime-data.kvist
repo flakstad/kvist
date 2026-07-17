@@ -28,6 +28,8 @@
         user-entries (data.entries user)
         key-list (data.list user-keys)
         key-set (data.set user-keys)
+        unique-values: [2]Data [name age]
+        unique-set (data.set-from-unique unique-values[:])
         current name]
     (assert (data.nil? nothing))
     (assert (= (data.string (get user :user/name)) "Ada"))
@@ -45,6 +47,8 @@
                ":user/age"))
     (assert (data.list? key-list))
     (assert (data.set? key-set))
+    (assert (= (data.count unique-set) 2))
+    (assert (contains? unique-set name))
     (set! current (data.from-string "Grace"))
     (assert (= (data.string current) "Grace"))
     (let [retained (make [dynamic]Data)]
