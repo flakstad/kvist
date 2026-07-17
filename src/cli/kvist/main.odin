@@ -11,7 +11,7 @@ import "core:strings"
 import kvist "../../odin/kvist"
 
 CACHE_DIR :: ".kvist-cache"
-COMPILE_CACHE_VERSION :: "kvist-compile-cache-v1"
+COMPILE_CACHE_VERSION :: "kvist-compile-cache-v2"
 
 print_usage :: proc() {
     fmt.println("usage:")
@@ -152,6 +152,19 @@ compile_cache_key :: proc(input: string) -> (key: string, ok: bool) {
 
     hash: u64 = 14695981039346656037
     hash = fnv1a_update(hash, transmute([]byte)string(COMPILE_CACHE_VERSION))
+    // Dependency discovery intentionally includes every Kvist file in the
+    // entry file's package directory. Two distinct entry files in that same
+    // package therefore have the same dependency set, but they do not
+    // necessarily compile to the same program (notably separate test files).
+    // Include the canonical entry path so those programs cannot alias in the
+    // execution cache.
+    canonical_input, canonical_input_err := os.get_absolute_path(input, context.allocator)
+    if canonical_input_err != nil {
+        return "", false
+    }
+    hash = fnv1a_update(hash, transmute([]byte)canonical_input)
+    hash = fnv1a_update(hash, []byte{0})
+    delete(canonical_input)
     executable, executable_err := os.get_executable_path(context.allocator)
     if executable_err == nil {
         executable_data, read_err := os.read_entire_file_from_path(executable, context.allocator)
