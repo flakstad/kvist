@@ -436,6 +436,13 @@ odin_output_executable_path :: proc(generated_abs: string) -> string {
     return strings.clone(fmt.tprintf("%s%s", generated_abs, suffix))
 }
 
+odin_executable_name :: proc() -> string {
+    when ODIN_OS == .Windows {
+        return "odin.exe"
+    }
+    return "odin"
+}
+
 windows_import_collection_args :: proc(generated_path: string) -> [dynamic]string {
     args: [dynamic]string
     when ODIN_OS != .Windows {
@@ -558,9 +565,9 @@ run_odin_file :: proc(command, generated_path, source_path, source, eval_source,
             return 1
         }
         package_arg = package_abs
-        append(&args, "odin", odin_command, package_arg)
+        append(&args, odin_executable_name(), odin_command, package_arg)
     } else {
-        append(&args, "odin", odin_command, generated_abs, "-file")
+        append(&args, odin_executable_name(), odin_command, generated_abs, "-file")
     }
     collection_args := windows_import_collection_args(generated_abs)
     defer kvist.delete_string_slice(&collection_args)
