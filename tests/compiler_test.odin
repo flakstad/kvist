@@ -4018,6 +4018,19 @@ compile_data_decode_direct_dynamic_arrays :: proc(t: ^testing.T) {
         t,
         strings.contains(
             result.output,
+            "kvist_data_make_items(Data_Kind.Vector, []Data{Data{kind = .Int",
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(result.output, "defer kvist_data_release(kvist_thread_"),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
             "-> (decoded: [dynamic]i64, err: data__Decode_Error, ok: bool)",
         ),
         true,
@@ -4077,6 +4090,11 @@ compile_data_validate_reuses_type_directed_shape :: proc(t: ^testing.T) {
     defer delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
+    testing.expect_value(
+        t,
+        strings.contains(result.output, "message: Data = kvist_data_make_map("),
+        true,
+    )
     testing.expect_value(
         t,
         strings.contains(
