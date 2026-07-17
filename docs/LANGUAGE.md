@@ -1720,11 +1720,13 @@ struct:
 
 The optional path becomes the root of any `Decode-Error`. Required nested
 Kvist structs and `Data`, boolean, integer, and floating-point fields are
-currently supported. Nested validation completes before construction, so
-managed leaves are retained only for a successful result. The decoded struct
-and error follow normal deterministic managed-value cleanup. Strings, enums,
-optional/default fields, and homogeneous collections remain future decoding
-work.
+currently supported, as are Kvist enum fields. Enum keywords use lowercase
+source spelling, so `.Read-Only` is represented by `:read-only`. A keyword
+outside the enum sets `err.enum-value?`, `err.expected-type`, and
+`err.actual-value`. Nested validation completes before construction, so managed
+leaves are retained only for a successful result. The decoded struct and error
+follow normal deterministic managed-value cleanup. Strings, optional/default
+fields, and homogeneous collections remain future decoding work.
 
 In a `->` pipeline, use a `.field` selector step:
 

@@ -3286,6 +3286,20 @@ decode_field_parts :: proc(ty, value_name: string) -> (expected_kind, decoded_te
     return "", "", false, false
 }
 
+enum_variant_keyword :: proc(source_name: string) -> string {
+    builder := strings.builder_make()
+    defer strings.builder_destroy(&builder)
+    strings.write_byte(&builder, ':')
+    for ch in source_name {
+        lowered := ch
+        if ch >= 'A' && ch <= 'Z' {
+            lowered = ch + ('a' - 'A')
+        }
+        strings.write_rune(&builder, lowered)
+    }
+    return strings.clone(strings.to_string(builder))
+}
+
 emit_decode_failure_return :: proc(
     builder: ^strings.Builder,
     path_keys: []string,
@@ -3413,9 +3427,59 @@ emit_decode_struct_value :: proc(
             continue
         }
 
+        enum_decl, enum_found := find_enum_decl(e, field.ty)
+        if enum_found {
+            fmt.sbprintf(builder, "    if %s.kind != .Keyword {{", field_name)
+            emit_decode_failure_return(
+                builder,
+                field_path[:],
+                "Keyword",
+                fmt.tprintf("%s.kind", field_name),
+                field_id,
+            )
+            strings.write_string(builder, "}\n")
+            enum_value_name := fmt.tprintf("kvist_enum_%d", field_id)
+            fmt.sbprintf(builder, "    %s: %s\n", enum_value_name, field.ty)
+            fmt.sbprintf(builder, "    switch %s.payload.text {{\n", field_name)
+            for variant in enum_decl.variants {
+                keyword := enum_variant_keyword(variant.source_name)
+                fmt.sbprintf(
+                    builder,
+                    "    case %q: %s = .%s\n",
+                    keyword,
+                    enum_value_name,
+                    variant.name,
+                )
+                delete(keyword)
+            }
+            strings.write_string(builder, "    case:\n")
+            error_path_name := fmt.tprintf("kvist_enum_error_path_%d", field_id)
+            fmt.sbprintf(builder, "        %s := kvist_data_retain(kvist_path)\n", error_path_name)
+            fmt.sbprintf(builder, "        defer kvist_data_release(%s)\n", error_path_name)
+            for key_path_name in field_path {
+                fmt.sbprintf(
+                    builder,
+                    "        kvist_data_move_assign(&%s, kvist_data_append(%s, %s))\n",
+                    error_path_name,
+                    error_path_name,
+                    key_path_name,
+                )
+            }
+            fmt.sbprintf(
+                builder,
+                "        return {{}}, data__decode_enum_error(%s, %q, %s), false\n",
+                error_path_name,
+                field.ty,
+                field_name,
+            )
+            strings.write_string(builder, "    }\n")
+            append(&field_values, fmt.tprintf("%s = %s", field.name, enum_value_name))
+            continue
+        }
+
         return "", Compile_Error{
             message = fmt.tprintf(
-                "data.decode field %s.%s has unsupported type %s; supported fields are Data, bool, integer and floating-point scalars, and nested Kvist structs",
+                "data.decode field %s.%s has unsupported type %s; supported fields are Data, bool, integer and floating-point scalars, enums, and nested Kvist structs",
                 struct_decl.name,
                 field.source_name,
                 field.ty,
@@ -10306,6 +10370,15 @@ find_struct_decl :: proc(e: ^Emitter, name: string) -> (^Struct_Decl, bool) {
     for i in 0..<len(e.structs) {
         if e.structs[i].name == name {
             return &e.structs[i], true
+        }
+    }
+    return nil, false
+}
+
+find_enum_decl :: proc(e: ^Emitter, name: string) -> (^Enum_Decl, bool) {
+    for i in 0..<len(e.decls) {
+        if e.decls[i].kind == .Enum && e.decls[i].enum_decl.name == name {
+            return &e.decls[i].enum_decl, true
         }
     }
     return nil, false

@@ -2021,6 +2021,38 @@ rewrite_proc_like_top_form :: proc(top: CST_Top_Form, locals: []string, aliases:
     return rewritten, Compile_Error{}, true
 }
 
+rewrite_struct_top_form :: proc(top: CST_Top_Form, locals: []string, aliases: []Alias_Prefix, prefix: string) -> (CST_Top_Form, Compile_Error, bool) {
+    rewritten := top
+    rewritten.form = top.form
+    rewritten.form.items = nil
+    for item, idx in top.form.items {
+        if idx == 1 {
+            renamed := rewrite_symbol_form_text(item, fmt.tprintf("%s__%s", prefix, item.text))
+            append(&rewritten.form.items, renamed)
+            continue
+        }
+        if item.kind != .Brace {
+            append(&rewritten.form.items, clone_cst_form(item))
+            continue
+        }
+        fields := item
+        fields.items = nil
+        for field_item, field_idx in item.items {
+            if field_idx%2 == 0 {
+                append(&fields.items, clone_cst_form(field_item))
+                continue
+            }
+            field_type, err_type, ok_type := rewrite_type_form_symbols(field_item, locals, aliases, prefix)
+            if !ok_type {
+                return CST_Top_Form{}, err_type, false
+            }
+            append(&fields.items, field_type)
+        }
+        append(&rewritten.form.items, fields)
+    }
+    return rewritten, Compile_Error{}, true
+}
+
 rewrite_top_form :: proc(top: CST_Top_Form, locals: []string, private_macros: []string, aliases: []Alias_Prefix, prefix: string) -> (CST_Top_Form, Compile_Error, bool) {
     rewritten := top
     if prefix != "" &&
@@ -2061,6 +2093,9 @@ rewrite_top_form :: proc(top: CST_Top_Form, locals: []string, private_macros: []
             return rewrite_macro_top_form(top, locals, private_macros, aliases, prefix)
         }
         if is_top_level_decl_head(head) {
+            if head == "defstruct" || head == "defstruct-" {
+                return rewrite_struct_top_form(top, locals, aliases, prefix)
+            }
             if head == "defenum" || head == "defenum-" {
                 renamed := top
                 renamed.form = top.form

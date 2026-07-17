@@ -1,6 +1,12 @@
 (package main)
 (import data "kvist:data")
 
+(defenum Mode [
+  Manual
+  Automatic
+  Read-Only
+])
+
 (defstruct Endpoint {
   host-id: i64
   secure: bool
@@ -13,6 +19,7 @@
   ratio: f64
   metadata: Data
   endpoint: Endpoint
+  mode: Mode
 })
 
 (defn main []
@@ -25,7 +32,8 @@
             :metadata {:source :config}
             :endpoint {:host-id 7
                        :secure true
-                       :tags [:primary]}})]
+                       :tags [:primary]}
+            :mode :read-only})]
     (assert ok)
     (assert (= settings.port 8080))
     (assert settings.enabled)
@@ -34,6 +42,7 @@
     (assert (= settings.endpoint.host-id 7))
     (assert settings.endpoint.secure)
     (assert (= settings.endpoint.tags '[:primary]))
+    (assert (= settings.mode .Read-Only))
     (discard err))
 
   (let [[settings err ok]
@@ -44,11 +53,15 @@
             :ratio 0.5
             :metadata {}
             :endpoint {:host-id 7
-                       :secure :sometimes
-                       :tags []}}
+                       :secure true
+                       :tags []}
+            :mode :sometimes}
           '[:settings])]
     (assert (not ok))
-    (assert (= err.path '[:settings :endpoint :secure]))
-    (assert (= err.expected .Bool))
+    (assert (= err.path '[:settings :mode]))
+    (assert err.enum-value?)
+    (assert (= err.expected .Keyword))
     (assert (= err.actual .Keyword))
+    (assert (= err.expected-type "Mode"))
+    (assert (= err.actual-value ':sometimes))
     (discard settings)))

@@ -151,6 +151,7 @@ Var_Decl :: struct {
 
 Enum_Variant :: struct {
     name:      string,
+    source_name: string,
     has_value: bool,
     value:     CST_Form,
 }

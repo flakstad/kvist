@@ -3846,7 +3846,7 @@ compile_type_directed_data_struct_decode :: proc(t: ^testing.T) {
         t,
         strings.contains(
             result.output,
-            "return Settings{port = i64(kvist_field_0.payload.int_value), enabled = kvist_field_1.payload.bool_value, ratio = f64(kvist_field_2.payload.float_value), metadata = kvist_data_retain(kvist_field_3), endpoint = Endpoint{host_id = i64(kvist_field_5.payload.int_value), secure = kvist_field_6.payload.bool_value, tags = kvist_data_retain(kvist_field_7)}}, {}, true",
+            "return Settings{port = i64(kvist_field_0.payload.int_value), enabled = kvist_field_1.payload.bool_value, ratio = f64(kvist_field_2.payload.float_value), metadata = kvist_data_retain(kvist_field_3), endpoint = Endpoint{host_id = i64(kvist_field_5.payload.int_value), secure = kvist_field_6.payload.bool_value, tags = kvist_data_retain(kvist_field_7)}, mode = kvist_enum_8}, {}, true",
         ),
         true,
     )
@@ -3874,6 +3874,16 @@ compile_type_directed_data_struct_decode :: proc(t: ^testing.T) {
         ),
         true,
     )
+    testing.expect_value(t, strings.contains(result.output, `case ":read-only": kvist_enum_8 = .Read_Only`), true)
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            `data__decode_enum_error(kvist_enum_error_path_8, "Mode", kvist_field_8)`,
+        ),
+        true,
+    )
+    testing.expect_value(t, strings.contains(result.output, "out.actual_value = kvist_data_retain(value.actual_value)"), true)
     testing.expect_value(t, strings.contains(result.output, "defer kvist_managed_destroy_Settings(settings)"), true)
     testing.expect_value(
         t,

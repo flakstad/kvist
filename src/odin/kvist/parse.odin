@@ -923,7 +923,10 @@ parse_enum_variants :: proc(form: CST_Form) -> (variants: [dynamic]Enum_Variant,
             if item.kind != .Symbol {
                 return variants, Compile_Error{message = "expected enum variant symbol", span = item.span}, false
             }
-            append(&variants, Enum_Variant{name = map_name(item.text)})
+            append(&variants, Enum_Variant{
+                name = map_name(item.text),
+                source_name = item.text,
+            })
         }
         return variants, {}, true
     case .Brace:
@@ -933,12 +936,13 @@ parse_enum_variants :: proc(form: CST_Form) -> (variants: [dynamic]Enum_Variant,
                 return variants, Compile_Error{message = "missing enum variant value", span = form.span}, false
             }
             key := form.items[i]
-            variant_name, _, ok_label := parse_label_name(key)
+            variant_name, variant_source_name, ok_label := parse_label_name(key)
             if !ok_label {
                 return variants, Compile_Error{message = "expected enum variant label", span = key.span}, false
             }
             append(&variants, Enum_Variant{
                 name = variant_name,
+                source_name = variant_source_name,
                 has_value = true,
                 value = form.items[i+1],
             })
