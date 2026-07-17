@@ -21536,6 +21536,60 @@ compile_def_overload_proc_group :: proc(t: ^testing.T) {
 }
 
 @(test)
+compile_contextual_data_literals_in_direct_and_overloaded_calls :: proc(t: ^testing.T) {
+    source := `(package main)
+(import kdata "kvist:data")
+
+(defn accept-data [value: Data] -> Data
+  value)
+
+(defn render-data [value: Data] -> int
+  (count value))
+
+(defn render-string [value: string] -> int
+  (count value))
+
+(def render (overload render-data render-string))
+
+(defn card [title: string, ready?: bool] -> Data
+  (accept-data
+    [:article {:class "card" :hidden false}
+     [:h1 title]
+     (if ready?
+       [:p "Ready"]
+       nil)]))
+
+(defn card-size [title: string] -> int
+  (render [:article {:class "card"} [:h1 title]]))
+
+(defn contact-tx [id: i64, name: string, email: string, company: string] -> Data
+  [{:db/id id
+    :contact/name name
+    :contact/email email
+    :contact/company company}])
+
+(defn add-attention [tx: Data, condition-id: i64, instant: string] -> Data
+  (kdata.conj tx
+    [:db/add [:ro/id condition-id] :attention/not-before instant]))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "accept_data(kvist_data_make_items(Data_Kind.Vector"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_data_make_map([]Data{"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_data_make_text(Data_Kind.String, title)"), true)
+    testing.expect_value(t, strings.contains(output, "render(kvist_data_make_items(Data_Kind.Vector"), true)
+    testing.expect_value(t, strings.contains(output, "contact_name"), false)
+    testing.expect_value(t, strings.contains(output, "kvist_data_make_int(i64(id))"), true)
+    testing.expect_value(t, strings.contains(output, "kdata__conj(tx, kvist_thread_"), true)
+}
+
+@(test)
 compile_local_def_overload_proc_group :: proc(t: ^testing.T) {
     source := `(package main)
 (import fmt "core:fmt")

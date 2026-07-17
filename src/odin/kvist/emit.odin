@@ -1178,6 +1178,122 @@ find_proc_decl :: proc(e: ^Emitter, name: string) -> (^Proc_Decl, bool) {
     return nil, false
 }
 
+find_overload_decl :: proc(e: ^Emitter, name: string) -> (^Const_Decl, bool) {
+    for idx in 0..<len(e.decls) {
+        decl := &e.decls[idx]
+        if decl.kind == .Const &&
+           decl.const_decl.is_overload &&
+           decl.const_decl.name == name {
+            return &decl.const_decl, true
+        }
+    }
+    return nil, false
+}
+
+proc_accepts_positional_arg_count :: proc(proc_decl: ^Proc_Decl, count: int) -> bool {
+    if count > len(proc_decl.params) {
+        return false
+    }
+    for param in proc_decl.params[count:] {
+        if !param.has_default {
+            return false
+        }
+    }
+    return true
+}
+
+literal_matches_expected_type :: proc(form: CST_Form, expected_type: string) -> bool {
+    if expected_type == "Data" {
+        return form.kind == .Vector || form.kind == .Brace || form.kind == .Set
+    }
+    #partial switch form.kind {
+    case .Vector:
+        _, ok := collection_element_type(expected_type)
+        _, is_set := set_element_type(expected_type)
+        return ok && !type_text_is_map(expected_type) && !is_set
+    case .Brace:
+        return type_text_is_map(expected_type)
+    case .Set:
+        _, ok := set_element_type(expected_type)
+        return ok
+    }
+    return false
+}
+
+overload_literal_arg_expected_type :: proc(
+    e: ^Emitter,
+    overload_name: string,
+    args: []CST_Form,
+    arg_index: int,
+) -> (string, bool) {
+    if arg_index < 0 || arg_index >= len(args) {
+        return "", false
+    }
+    arg := args[arg_index]
+    if arg.kind != .Vector && arg.kind != .Brace && arg.kind != .Set {
+        return "", false
+    }
+    overload_decl, ok_overload := find_overload_decl(e, overload_name)
+    if !ok_overload {
+        return "", false
+    }
+
+    selected := ""
+    for member in overload_decl.overload_members {
+        proc_decl, ok_proc := find_proc_decl(e, member)
+        if !ok_proc ||
+           !proc_accepts_positional_arg_count(proc_decl, len(args)) ||
+           arg_index >= len(proc_decl.params) {
+            continue
+        }
+        expected_type := proc_decl.params[arg_index].ty
+        if !literal_matches_expected_type(arg, expected_type) {
+            continue
+        }
+        if selected == "" {
+            selected = expected_type
+        } else if selected != expected_type {
+            return "", false
+        }
+    }
+    if selected == "" {
+        return "", false
+    }
+    return strings.clone(selected), true
+}
+
+call_head_is_overload :: proc(e: ^Emitter, head: CST_Form) -> bool {
+    if head.kind != .Symbol {
+        return false
+    }
+    name := map_name(head.text)
+    defer delete(name)
+    _, ok := find_overload_decl(e, name)
+    return ok
+}
+
+call_arg_expected_type :: proc(e: ^Emitter, call: CST_Form, item_index: int) -> (string, bool) {
+    if call.kind != .List ||
+       len(call.items) == 0 ||
+       call.items[0].kind != .Symbol ||
+       item_index < 1 ||
+       item_index >= len(call.items) {
+        return "", false
+    }
+    arg_index := item_index-1
+    head_name := map_name(call.items[0].text)
+    defer delete(head_name)
+    if expected_type, ok_expected := overload_literal_arg_expected_type(e, head_name, call.items[1:], arg_index); ok_expected {
+        return expected_type, true
+    }
+    if _, proc_decl, ok_proc := resolve_proc_call_decl(e, call.items[0].text); ok_proc &&
+       proc_decl != nil &&
+       arg_index < len(proc_decl.params) {
+        return strings.clone(proc_decl.params[arg_index].ty), true
+    }
+    return "", false
+}
+
 symbol_tail_starts_upper :: proc(text: string) -> bool {
     start := 0
     for ch, idx in text {
@@ -1903,6 +2019,63 @@ emit_runtime_data_quasiquote_expr :: proc(e: ^Emitter, form: CST_Form) -> (strin
     }
     value, _, err_value, ok_value := emit_runtime_data_quasiquote_value(e, form.items[1], true)
     return value, err_value, ok_value
+}
+
+emit_contextual_data_value :: proc(e: ^Emitter, form: CST_Form) -> (text: string, owned: bool, err: Compile_Error, ok: bool) {
+    mark_data_type(e)
+    if form.kind != .Vector && form.kind != .Brace && form.kind != .Set {
+        #partial switch form.kind {
+        case .Nil, .Bool, .Number, .String, .Keyword:
+            value, err_value, ok_value := emit_data_value_literal(e, form)
+            return value, false, err_value, ok_value
+        }
+        if form.kind == .List &&
+           ((len(form.items) > 0 && is_symbol(form.items[0], "if")) ||
+            form_head_is_as_thread(form) ||
+            (len(form.items) > 0 && is_symbol(form.items[0], "let")) ||
+            form_head_is_do(form) ||
+            form_head_is_allocator_scope(form) ||
+            form_head_is_case(form)) {
+            value, err_value, ok_value := emit_expr_for_expected_type(e, form, "Data")
+            return value, true, err_value, ok_value
+        }
+        if _, ok_ty := obvious_form_type(e, form); !ok_ty {
+            value, err_value, ok_value := emit_expr(e, form)
+            return value, false, err_value, ok_value
+        }
+        value, value_owned, err_value, ok_value := runtime_data_unquote_expr(e, form)
+        return value, value_owned, err_value, ok_value
+    }
+
+    if form.kind == .Brace && len(form.items)%2 != 0 {
+        return "", false, Compile_Error{message = "contextual Data map expects key/value pairs", span = form.span}, false
+    }
+
+    values: [dynamic]string
+    defer delete(values)
+    for item in form.items {
+        value, value_owned, err_value, ok_value := emit_contextual_data_value(e, item)
+        if !ok_value {
+            return "", false, err_value, false
+        }
+        if value_owned {
+            temp := thread_temp_name(e)
+            emit_prefixed_expr_mapped(e, fmt.tprintf("%s := ", temp), value, item.span)
+            emit_line(e, fmt.tprintf("defer kvist_data_release(%s)", temp))
+            value = temp
+        }
+        append(&values, value)
+    }
+
+    literal := fmt.tprintf("[]Data{{%s}}", strings.join(values[:], ", ", context.temp_allocator))
+    if form.kind == .Brace {
+        return emit_call_text("kvist_data_make_map", []string{literal}), true, {}, true
+    }
+    kind := "Data_Kind.Vector"
+    if form.kind == .Set {
+        kind = "Data_Kind.Set"
+    }
+    return emit_call_text("kvist_data_make_items", []string{kind, literal}), true, {}, true
 }
 
 emit_data_lookup_key :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) {
@@ -6040,7 +6213,15 @@ emit_expr_with_owned_nested_temps :: proc(e: ^Emitter, form: CST_Form) -> (strin
                 continue
             }
 
-            value, err_value, ok_value := emit_expr_with_owned_nested_temps(e, item)
+            value := ""
+            err_value: Compile_Error
+            ok_value := false
+            if expected_type, ok_expected := call_arg_expected_type(e, rewritten, idx); ok_expected {
+                value, err_value, ok_value = emit_expr_for_expected_type(e, item, expected_type)
+                delete(expected_type)
+            } else {
+                value, err_value, ok_value = emit_expr_with_owned_nested_temps(e, item)
+            }
             if !ok_value {
                 return "", err_value, false
             }
@@ -6293,6 +6474,10 @@ emit_expr_for_expected_type :: proc(e: ^Emitter, form: CST_Form, expected_type :
     }
     if form.kind == .List && form_head_is_case(form) {
         return emit_case_expr(e, form, expected_type)
+    }
+    if expected_type == "Data" {
+        value, _, err_value, ok_value := emit_contextual_data_value(e, form)
+        return value, err_value, ok_value
     }
     if expected_type != "" && !strings.contains(expected_type, "$") && (form.kind == .Vector || form.kind == .Brace || form.kind == .Set) {
         return emit_inferred_literal(e, form, expected_type)
@@ -7764,6 +7949,9 @@ emit_managed_struct_helpers :: proc(e: ^Emitter, struct_decl: Struct_Decl) {
 }
 
 form_produces_owned_managed_value :: proc(e: ^Emitter, form: CST_Form, depth: int = 0) -> bool {
+    if form.kind == .Vector || form.kind == .Brace || form.kind == .Set {
+        return true
+    }
     if depth > 8 || form.kind != .List || len(form.items) == 0 || form.items[0].kind != .Symbol {
         return false
     }
@@ -14091,7 +14279,9 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         }
         head_name := map_name(head.text)
         if !strings.contains(head_name, ".") {
-            if _, _, ok_proc := resolve_proc_call_decl(e, head.text); ok_proc {
+            if call_head_is_overload(e, head) {
+                // Let the normal call path apply the overload's literal context.
+            } else if _, _, ok_proc := resolve_proc_call_decl(e, head.text); ok_proc {
                 // Let the normal call path handle declared procedures with vector arguments.
             } else {
                 type_text, err_type, ok_type := parse_type_text(head)
@@ -14123,7 +14313,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         }
     }
 
-    if len(form.items) == 2 && form.items[1].kind == .Set {
+    if len(form.items) == 2 && form.items[1].kind == .Set && !call_head_is_overload(e, head) {
         type_text, err_type, ok_type := parse_type_text(head)
         if !ok_type {
             return "", err_type, false
@@ -14136,7 +14326,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         return emit_quaternion_arg_constructor(e, form.items[1:], form.span)
     }
 
-    if len(form.items) == 2 && form.items[1].kind == .Brace {
+    if len(form.items) == 2 && form.items[1].kind == .Brace && !call_head_is_overload(e, head) {
         head_name := map_name(head.text)
         struct_decl, ok_struct := find_struct_decl(e, head_name)
         if ok_struct {
@@ -14235,7 +14425,10 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         arg_text := ""
         err_arg: Compile_Error
         ok_arg := false
-        if expected_type, ok_expected := imported_odin_proc_arg_type(e, head_name, arg_idx); ok_expected {
+        if expected_type, ok_expected := overload_literal_arg_expected_type(e, head_name, form.items[1:], arg_idx); ok_expected {
+            arg_text, err_arg, ok_arg = emit_expr_for_expected_type(e, arg, expected_type)
+            delete(expected_type)
+        } else if expected_type, ok_expected := imported_odin_proc_arg_type(e, head_name, arg_idx); ok_expected {
             arg_text, err_arg, ok_arg = emit_expr_for_expected_type(e, arg, expected_type)
             delete(expected_type)
         } else {

@@ -60,6 +60,25 @@ static literal path when no unquote is present:
   tx)
 ```
 
+When a collection literal appears where its expected type is `Data`, Kvist
+constructs runtime Data directly. Literal keywords remain keywords while
+symbols and calls are evaluated and converted from Data or native scalar
+values:
+
+```clojure
+(defn contact-tx [id: i64, name: string] -> Data
+  [{:db/id id
+    :contact/name name}])
+
+(data.conj tx
+  [:db/add [:ro/id condition-id] :attention/not-before instant])
+```
+
+The expected type can come from a function return, a typed binding, a direct
+function parameter, or the unique compatible member of an overload set.
+Use quote for static symbolic Data and quasiquote when code itself must control
+which forms are evaluated or spliced.
+
 Unquoted Data and native booleans, integers, floats, strings, and keywords are
 supported. `~@` splices a Data list, vector, or set into a runtime list, vector,
 or set:

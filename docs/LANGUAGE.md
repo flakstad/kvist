@@ -658,6 +658,23 @@ sets remain native homogeneous collections.
            (count query)))
 ```
 
+An unquoted collection literal is also Data when its surrounding type context
+expects `Data`. Its scalar literals become Data values, while symbols and calls
+are evaluated and converted from Data or native scalar values:
+
+```clojure
+(defn contact [id: i64, name: string] -> Data
+  {:db/id id
+   :contact/name name})
+
+(data.conj transactions
+  [:db/add [:contact/id id] :contact/email email])
+```
+
+Return types, typed bindings, function parameters, and uniquely matching
+overload parameters provide this context. Without Data context, unquoted
+vectors, maps, and sets remain native homogeneous collections.
+
 `Data` represents nil, booleans, integers, floats, strings, symbols, keywords,
 lists, vectors, maps, and sets. Quoted literals use static backing storage, are
 cheap to copy and pass, and require no cleanup. Use `get`, `contains?`, and
