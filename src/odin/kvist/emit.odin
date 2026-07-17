@@ -268,7 +268,13 @@ mark_dynamic_literals :: proc(e: ^Emitter) {
     }
 }
 
-emit_warning :: proc(e: ^Emitter, message: string, span: Span) {
+emit_coded_warning :: proc(
+    e: ^Emitter,
+    message: string,
+    span: Span,
+    code := Compile_Warning_Code.General,
+    confidence := Compile_Warning_Confidence.Definite,
+) {
     if e.warnings == nil {
         return
     }
@@ -279,7 +285,13 @@ emit_warning :: proc(e: ^Emitter, message: string, span: Span) {
         source_path = e.current_source_path,
         line = line,
         column = column,
+        code = code,
+        confidence = confidence,
     })
+}
+
+emit_warning :: proc(e: ^Emitter, message: string, span: Span) {
+    emit_coded_warning(e, message, span)
 }
 
 mark_core_get_or_default :: proc(e: ^Emitter) {
@@ -984,8 +996,38 @@ emit_struct_brace_literal :: proc(e: ^Emitter, struct_decl: ^Struct_Decl, form: 
         if !ok_value {
             return "", err_value, false
         }
+        if field.owns_string {
+            if !form_produces_owned_value(value, e) {
+                mark_core_strings(e)
+                value_text = emit_call_text("strings.clone", []string{value_text})
+            }
+        } else if !field.owns_dynamic_array &&
+           type_text_has_managed_lifecycle(e, field.ty) &&
+           !form_produces_owned_managed_type(e, value, field.ty) {
+            value_text = managed_clone_value_text(e, field.ty, value_text)
+        }
         append(&pairs, Brace_Pair{key = field_name, value = value_text})
         i += 2
+    }
+    for &field in struct_decl.fields {
+        if !field.has_default {
+            continue
+        }
+        provided := false
+        for pair in pairs {
+            if pair.key == field.name {
+                provided = true
+                break
+            }
+        }
+        if provided {
+            continue
+        }
+        default_text, err_default, ok_default := emit_struct_field_default(e, field)
+        if !ok_default {
+            return "", err_default, false
+        }
+        append(&pairs, Brace_Pair{key = field.name, value = default_text})
     }
 
     multiline := false
@@ -1134,6 +1176,130 @@ find_proc_decl :: proc(e: ^Emitter, name: string) -> (^Proc_Decl, bool) {
         }
     }
     return nil, false
+}
+
+find_overload_decl :: proc(e: ^Emitter, name: string) -> (^Const_Decl, bool) {
+    for idx in 0..<len(e.decls) {
+        decl := &e.decls[idx]
+        if decl.kind == .Const &&
+           decl.const_decl.is_overload &&
+           decl.const_decl.name == name {
+            return &decl.const_decl, true
+        }
+    }
+    return nil, false
+}
+
+proc_accepts_positional_arg_count :: proc(proc_decl: ^Proc_Decl, count: int) -> bool {
+    if count > len(proc_decl.params) {
+        return false
+    }
+    for param in proc_decl.params[count:] {
+        if !param.has_default {
+            return false
+        }
+    }
+    return true
+}
+
+literal_matches_expected_type :: proc(form: CST_Form, expected_type: string) -> bool {
+    if expected_type == "Data" {
+        return form.kind == .Vector || form.kind == .Brace || form.kind == .Set
+    }
+    #partial switch form.kind {
+    case .Vector:
+        _, ok := collection_element_type(expected_type)
+        _, is_set := set_element_type(expected_type)
+        return ok && !type_text_is_map(expected_type) && !is_set
+    case .Brace:
+        return type_text_is_map(expected_type)
+    case .Set:
+        _, ok := set_element_type(expected_type)
+        return ok
+    }
+    return false
+}
+
+overload_literal_arg_expected_type :: proc(
+    e: ^Emitter,
+    overload_name: string,
+    args: []CST_Form,
+    arg_index: int,
+) -> (string, bool) {
+    if arg_index < 0 || arg_index >= len(args) {
+        return "", false
+    }
+    arg := args[arg_index]
+    if arg.kind != .Vector && arg.kind != .Brace && arg.kind != .Set {
+        return "", false
+    }
+    overload_decl, ok_overload := find_overload_decl(e, overload_name)
+    if !ok_overload {
+        return "", false
+    }
+
+    selected := ""
+    for member in overload_decl.overload_members {
+        proc_decl, ok_proc := find_proc_decl(e, member)
+        if !ok_proc ||
+           !proc_accepts_positional_arg_count(proc_decl, len(args)) ||
+           arg_index >= len(proc_decl.params) {
+            continue
+        }
+        expected_type := proc_decl.params[arg_index].ty
+        if !literal_matches_expected_type(arg, expected_type) {
+            continue
+        }
+        if selected == "" {
+            selected = expected_type
+        } else if selected != expected_type {
+            return "", false
+        }
+    }
+    if selected == "" {
+        return "", false
+    }
+    return strings.clone(selected), true
+}
+
+call_head_is_overload :: proc(e: ^Emitter, head: CST_Form) -> bool {
+    if head.kind != .Symbol {
+        return false
+    }
+    name := map_name(head.text)
+    defer delete(name)
+    _, ok := find_overload_decl(e, name)
+    return ok
+}
+
+call_arg_expected_type :: proc(e: ^Emitter, call: CST_Form, item_index: int) -> (string, bool) {
+    if call.kind != .List ||
+       len(call.items) == 0 ||
+       call.items[0].kind != .Symbol ||
+       item_index < 1 ||
+       item_index >= len(call.items) {
+        return "", false
+    }
+    arg_index := item_index-1
+    head_name := map_name(call.items[0].text)
+    defer delete(head_name)
+    if head_name == "odin_contains" &&
+       arg_index == 1 &&
+       len(call.items) == 3 {
+        if collection_ty, ok_collection_ty := obvious_form_type(e, call.items[1]);
+           ok_collection_ty && collection_ty == "Data" {
+            return strings.clone("Data"), true
+        }
+    }
+    if expected_type, ok_expected := overload_literal_arg_expected_type(e, head_name, call.items[1:], arg_index); ok_expected {
+        return expected_type, true
+    }
+    if _, proc_decl, ok_proc := resolve_proc_call_decl(e, call.items[0].text); ok_proc &&
+       proc_decl != nil &&
+       arg_index < len(proc_decl.params) {
+        return strings.clone(proc_decl.params[arg_index].ty), true
+    }
+    return "", false
 }
 
 symbol_tail_starts_upper :: proc(text: string) -> bool {
@@ -1723,12 +1889,54 @@ form_contains_runtime_unquote :: proc(form: CST_Form, depth: int = 0) -> bool {
     return false
 }
 
+contextual_data_source_type :: proc(e: ^Emitter, form: CST_Form) -> (string, bool) {
+    if ty, ok_ty := obvious_form_type(e, form); ok_ty {
+        return ty, true
+    }
+    if form.kind != .List || len(form.items) == 0 || form.items[0].kind != .Symbol {
+        return "", false
+    }
+    switch form.items[0].text {
+    case "+", "-", "*", "/", "%", "%%", "min", "max":
+        if len(form.items) < 2 {
+            return "", false
+        }
+        selected := ""
+        selected_from_literal := false
+        for operand in form.items[1:] {
+            operand_ty, ok_operand_ty := contextual_data_source_type(e, operand)
+            if !ok_operand_ty {
+                continue
+            }
+            if operand_ty == "f64" {
+                return operand_ty, true
+            }
+            if operand_ty == "f32" {
+                selected = operand_ty
+                selected_from_literal = false
+                continue
+            }
+            if selected == "" || (selected_from_literal && operand.kind != .Number) {
+                selected = operand_ty
+                selected_from_literal = operand.kind == .Number
+            }
+        }
+        if selected != "" {
+            return selected, true
+        }
+    case "==", "=", "!=", "<", "<=", ">", ">=", "not", "!":
+        return "bool", true
+    case:
+    }
+    return "", false
+}
+
 runtime_data_unquote_expr :: proc(e: ^Emitter, form: CST_Form) -> (text: string, owned: bool, err: Compile_Error, ok: bool) {
     value, err_value, ok_value := emit_expr(e, form)
     if !ok_value {
         return "", false, err_value, false
     }
-    ty, ok_ty := obvious_form_type(e, form)
+    ty, ok_ty := contextual_data_source_type(e, form)
     if !ok_ty {
         expression := form.text
         if expression == "" && len(form.items) > 0 {
@@ -1861,6 +2069,63 @@ emit_runtime_data_quasiquote_expr :: proc(e: ^Emitter, form: CST_Form) -> (strin
     }
     value, _, err_value, ok_value := emit_runtime_data_quasiquote_value(e, form.items[1], true)
     return value, err_value, ok_value
+}
+
+emit_contextual_data_value :: proc(e: ^Emitter, form: CST_Form) -> (text: string, owned: bool, err: Compile_Error, ok: bool) {
+    mark_data_type(e)
+    if form.kind != .Vector && form.kind != .Brace && form.kind != .Set {
+        #partial switch form.kind {
+        case .Nil, .Bool, .Number, .String, .Keyword:
+            value, err_value, ok_value := emit_data_value_literal(e, form)
+            return value, false, err_value, ok_value
+        }
+        if form.kind == .List &&
+           ((len(form.items) > 0 && is_symbol(form.items[0], "if")) ||
+            form_head_is_as_thread(form) ||
+            (len(form.items) > 0 && is_symbol(form.items[0], "let")) ||
+            form_head_is_do(form) ||
+            form_head_is_allocator_scope(form) ||
+            form_head_is_case(form)) {
+            value, err_value, ok_value := emit_expr_for_expected_type(e, form, "Data")
+            return value, true, err_value, ok_value
+        }
+        if _, ok_ty := contextual_data_source_type(e, form); !ok_ty {
+            value, err_value, ok_value := emit_expr(e, form)
+            return value, false, err_value, ok_value
+        }
+        value, value_owned, err_value, ok_value := runtime_data_unquote_expr(e, form)
+        return value, value_owned, err_value, ok_value
+    }
+
+    if form.kind == .Brace && len(form.items)%2 != 0 {
+        return "", false, Compile_Error{message = "contextual Data map expects key/value pairs", span = form.span}, false
+    }
+
+    values: [dynamic]string
+    defer delete(values)
+    for item in form.items {
+        value, value_owned, err_value, ok_value := emit_contextual_data_value(e, item)
+        if !ok_value {
+            return "", false, err_value, false
+        }
+        if value_owned {
+            temp := thread_temp_name(e)
+            emit_prefixed_expr_mapped(e, fmt.tprintf("%s := ", temp), value, item.span)
+            emit_line(e, fmt.tprintf("defer kvist_data_release(%s)", temp))
+            value = temp
+        }
+        append(&values, value)
+    }
+
+    literal := fmt.tprintf("[]Data{{%s}}", strings.join(values[:], ", ", context.temp_allocator))
+    if form.kind == .Brace {
+        return emit_call_text("kvist_data_make_map", []string{literal}), true, {}, true
+    }
+    kind := "Data_Kind.Vector"
+    if form.kind == .Set {
+        kind = "Data_Kind.Set"
+    }
+    return emit_call_text("kvist_data_make_items", []string{kind, literal}), true, {}, true
 }
 
 emit_data_lookup_key :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) {
@@ -2632,6 +2897,21 @@ emit_named_call_with_defaults :: proc(e: ^Emitter, proc_decl: ^Proc_Decl, form: 
     return arg_texts, Compile_Error{}, true
 }
 
+emit_call_arg_for_expected_type :: proc(e: ^Emitter, arg: CST_Form, expected_type: string) -> (string, Compile_Error, bool) {
+    value, err_value, ok_value := emit_expr_for_expected_type(e, arg, expected_type)
+    if !ok_value {
+        return "", err_value, false
+    }
+    if expected_type == "Data" &&
+       (arg.kind == .Vector || arg.kind == .Brace || arg.kind == .Set) {
+        temp := thread_temp_name(e)
+        emit_prefixed_expr_mapped(e, fmt.tprintf("%s := ", temp), value, arg.span)
+        emit_line_mapped(e, fmt.tprintf("defer kvist_data_release(%s)", temp), arg.span)
+        return temp, {}, true
+    }
+    return value, {}, true
+}
+
 emit_positional_call_with_defaults :: proc(e: ^Emitter, proc_decl: ^Proc_Decl, args: []CST_Form, span: Span) -> (arg_texts: [dynamic]string, err: Compile_Error, ok: bool) {
     if len(args) > len(proc_decl.params) {
         return arg_texts, Compile_Error{message = fmt.tprintf("%s expects at most %d arguments", proc_decl.name, len(proc_decl.params)), span = span}, false
@@ -2650,7 +2930,7 @@ emit_positional_call_with_defaults :: proc(e: ^Emitter, proc_decl: ^Proc_Decl, a
     defer delete(provided_forms)
 
     for arg, arg_idx in args {
-        arg_text, err_arg, ok_arg := emit_expr_for_expected_type(e, arg, params[arg_idx].ty)
+        arg_text, err_arg, ok_arg := emit_call_arg_for_expected_type(e, arg, params[arg_idx].ty)
         if !ok_arg {
             return arg_texts, err_arg, false
         }
@@ -2681,7 +2961,7 @@ emit_general_mixed_call_arg_texts :: proc(e: ^Emitter, head_name: string, positi
         err_arg: Compile_Error
         ok_arg := false
         if expected_type, ok_expected := imported_odin_proc_arg_type(e, head_name, arg_idx); ok_expected {
-            arg_text, err_arg, ok_arg = emit_expr_for_expected_type(e, arg, expected_type)
+            arg_text, err_arg, ok_arg = emit_call_arg_for_expected_type(e, arg, expected_type)
             delete(expected_type)
         } else {
             arg_text, err_arg, ok_arg = emit_expr(e, arg)
@@ -2756,7 +3036,7 @@ emit_mixed_call_with_defaults :: proc(e: ^Emitter, proc_decl: ^Proc_Decl, positi
 
     for arg, idx in positional_args {
         param := proc_decl.params[idx]
-        arg_text, err_arg, ok_arg := emit_expr_for_expected_type(e, arg, param.ty)
+        arg_text, err_arg, ok_arg := emit_call_arg_for_expected_type(e, arg, param.ty)
         if !ok_arg {
             return arg_texts, err_arg, false
         }
@@ -3052,7 +3332,49 @@ struct_field_type_for_update_path :: proc(e: ^Emitter, target_ty: string, fields
     return ty, {}, true
 }
 
-emit_shallow_assoc_copy_expr :: proc(e: ^Emitter, target_text, target_ty: string, fields: []string, field_span: Span, value_form: CST_Form) -> (string, Compile_Error, bool) {
+struct_field_owns_string_for_update_path :: proc(e: ^Emitter, target_ty: string, fields: []string) -> bool {
+    ty := target_ty
+    for field_name, idx in fields {
+        struct_decl, ok_struct := find_struct_decl(e, ty)
+        if !ok_struct {
+            return false
+        }
+        field, ok_field := find_struct_field(struct_decl, field_name)
+        if !ok_field {
+            return false
+        }
+        if idx == len(fields)-1 {
+            return field.owns_string
+        }
+        ty = field.ty
+    }
+    return false
+}
+
+struct_field_owns_dynamic_array_for_update_path :: proc(
+    e: ^Emitter,
+    target_ty: string,
+    fields: []string,
+) -> bool {
+    ty := target_ty
+    for field_name, idx in fields {
+        struct_decl, ok_struct := find_struct_decl(e, ty)
+        if !ok_struct {
+            return false
+        }
+        field, ok_field := find_struct_field(struct_decl, field_name)
+        if !ok_field {
+            return false
+        }
+        if idx == len(fields)-1 {
+            return field.owns_dynamic_array
+        }
+        ty = field.ty
+    }
+    return false
+}
+
+emit_shallow_assoc_copy_expr :: proc(e: ^Emitter, target_form: CST_Form, target_text, target_ty: string, fields: []string, field_span: Span, value_form: CST_Form) -> (string, Compile_Error, bool) {
     field_ty, err_field_ty, ok_field_ty := struct_field_type_for_update_path(e, target_ty, fields, "assoc", field_span)
     if !ok_field_ty {
         return "", err_field_ty, false
@@ -3063,14 +3385,1085 @@ emit_shallow_assoc_copy_expr :: proc(e: ^Emitter, target_text, target_ty: string
     }
     temp := shallow_update_temp_name(e)
     target_field := field_access_text(temp, fields)
-    return fmt.tprintf("(proc(kvist_target: %s, kvist_value: %s) -> %s %s\n    %s := kvist_target\n    %s = kvist_value\n    return %s\n})(%s, %s)",
-                       target_ty, field_ty, target_ty, "{", temp, target_field, temp, target_text, value_text), {}, true
+    target_init := "kvist_target"
+    if type_text_has_managed_lifecycle(e, target_ty) &&
+       !form_produces_owned_managed_type(e, target_form, target_ty) {
+        target_init = managed_clone_value_text(e, target_ty, "kvist_target")
+    }
+    assignment := fmt.tprintf("%s = kvist_value", target_field)
+    if struct_field_owns_string_for_update_path(e, target_ty, fields) {
+        mark_core_strings(e)
+        assignment = fmt.tprintf("delete(%s)\n    %s = strings.clone(kvist_value)", target_field, target_field)
+    } else if struct_field_owns_dynamic_array_for_update_path(e, target_ty, fields) {
+        move := form_produces_owned_value(value_form, e)
+        assignment = managed_dynamic_array_assignment_text(
+            e,
+            field_ty,
+            address_of_expr_text(target_field),
+            "kvist_value",
+            move,
+        )
+    } else if type_text_has_managed_lifecycle(e, field_ty) {
+        move := form_produces_owned_managed_type(e, value_form, field_ty)
+        helper := managed_assign_helper_name(field_ty, move)
+        assignment = emit_call_text(helper, []string{address_of_expr_text(target_field), "kvist_value"})
+    }
+    return fmt.tprintf("(proc(kvist_target: %s, kvist_value: %s) -> %s %s\n    %s := %s\n    %s\n    return %s\n})(%s, %s)",
+                       target_ty, field_ty, target_ty, "{", temp, target_init, assignment, temp, target_text, value_text), {}, true
 }
 
-emit_shallow_update_copy_expr :: proc(e: ^Emitter, target_text, target_ty: string, fields: []string, field_span: Span, updater_form: CST_Form, rest_forms: []CST_Form) -> (string, Compile_Error, bool) {
+emit_data_assoc_expr :: proc(e: ^Emitter, form: CST_Form, target_text: string) -> (string, Compile_Error, bool) {
+    if len(form.items) != 4 {
+        return "", Compile_Error{message = "assoc on Data expects collection, key, and value", span = form.span}, false
+    }
+    key_text, err_key, ok_key := emit_data_lookup_key(e, form.items[2])
+    if !ok_key {
+        return "", err_key, false
+    }
+    value_text := ""
+    value_owned := false
+    err_value: Compile_Error
+    ok_value := false
+    #partial switch form.items[3].kind {
+    case .Nil, .Bool, .Number, .String, .Keyword, .Vector, .Brace, .Set:
+        value_text, err_value, ok_value = emit_data_value_literal(e, form.items[3])
+    case:
+        value_text, value_owned, err_value, ok_value = runtime_data_unquote_expr(e, form.items[3])
+    }
+    if !ok_value {
+        return "", err_value, false
+    }
+    mark_data_type(e)
+    if value_owned {
+        return fmt.tprintf(
+            "(proc(kvist_target, kvist_key, kvist_value: Data) -> Data {{\n    defer kvist_data_release(kvist_value)\n    return kvist_data_assoc(kvist_target, kvist_key, kvist_value)\n}})(%s, %s, %s)",
+            target_text,
+            key_text,
+            value_text,
+        ), {}, true
+    }
+    return emit_call_text("kvist_data_assoc", []string{target_text, key_text, value_text}), {}, true
+}
+
+emit_data_update_expr :: proc(e: ^Emitter, form: CST_Form, target_text: string) -> (string, Compile_Error, bool) {
+    if len(form.items) < 4 {
+        return "", Compile_Error{message = "update on Data expects collection, key, updater, and optional arguments", span = form.span}, false
+    }
+    key_text, err_key, ok_key := emit_data_lookup_key(e, form.items[2])
+    if !ok_key {
+        return "", err_key, false
+    }
+    arg_texts: [dynamic]string
+    append(&arg_texts, "kvist_data_get(kvist_target, kvist_key)")
+    rest_texts: [dynamic]string
+    rest_names: [dynamic]string
+    rest_types: [dynamic]string
+    defer delete(rest_texts)
+    defer delete(rest_names)
+    defer delete(rest_types)
+    for rest_form, idx in form.items[4:] {
+        rest_ty := ""
+        ok_rest_ty := false
+        if form.items[3].kind == .Symbol {
+            updater_name := map_name(form.items[3].text)
+            if updater_decl, ok_updater := find_proc_decl(e, updater_name); ok_updater && idx+1 < len(updater_decl.params) {
+                rest_ty = updater_decl.params[idx+1].ty
+                ok_rest_ty = true
+            }
+            delete(updater_name)
+        }
+        if !ok_rest_ty {
+            rest_ty, ok_rest_ty = obvious_form_type(e, rest_form)
+        }
+        if !ok_rest_ty {
+            return "", Compile_Error{
+                message = "update on Data expects extra updater arguments with obvious types; bind or annotate the value first",
+                span = rest_form.span,
+            }, false
+        }
+        rest_text, err_rest, ok_rest := emit_expr_for_expected_type(e, rest_form, rest_ty)
+        if !ok_rest {
+            return "", err_rest, false
+        }
+        rest_name := fmt.tprintf("kvist_arg_%d", idx)
+        append(&rest_names, rest_name)
+        append(&rest_types, rest_ty)
+        append(&rest_texts, rest_text)
+        append(&arg_texts, rest_name)
+    }
+    updated_text, err_updated, ok_updated := emit_update_rhs(e, form.items[3], arg_texts[:])
+    if !ok_updated {
+        return "", err_updated, false
+    }
+    if form.items[3].kind == .Symbol {
+        updater_name := map_name(form.items[3].text)
+        if updater_decl, ok_updater := find_proc_decl(e, updater_name); ok_updater && updater_decl.borrows_result {
+            updated_text = emit_call_text("kvist_data_retain", []string{updated_text})
+        }
+        delete(updater_name)
+    }
+    params_builder := strings.builder_make()
+    defer strings.builder_destroy(&params_builder)
+    call_builder := strings.builder_make()
+    defer strings.builder_destroy(&call_builder)
+    for name, idx in rest_names {
+        fmt.sbprintf(&params_builder, ", %s: %s", name, rest_types[idx])
+        fmt.sbprintf(&call_builder, ", %s", rest_texts[idx])
+    }
+    mark_data_type(e)
+    return fmt.tprintf(
+        "(proc(kvist_target, kvist_key: Data%s) -> Data {{\n    kvist_updated := %s\n    defer kvist_data_release(kvist_updated)\n    return kvist_data_assoc(kvist_target, kvist_key, kvist_updated)\n}})(%s, %s%s)",
+        strings.to_string(params_builder),
+        updated_text,
+        target_text,
+        key_text,
+        strings.to_string(call_builder),
+    ), {}, true
+}
+
+emit_data_dissoc_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) {
+    if len(form.items) < 3 {
+        return "", Compile_Error{message = "dissoc expects Data and at least one key", span = form.span}, false
+    }
+    target_ty, ok_target_ty := obvious_form_type(e, form.items[1])
+    if !ok_target_ty || target_ty != "Data" {
+        return "", Compile_Error{message = "dissoc currently expects a Data map", span = form.items[1].span}, false
+    }
+    target_text, err_target, ok_target := emit_expr(e, form.items[1])
+    if !ok_target {
+        return "", err_target, false
+    }
+    keys: [dynamic]string
+    defer delete(keys)
+    for key_form in form.items[2:] {
+        key_text, err_key, ok_key := emit_data_lookup_key(e, key_form)
+        if !ok_key {
+            return "", err_key, false
+        }
+        append(&keys, key_text)
+    }
+    mark_data_type(e)
+    if len(keys) == 1 {
+        return emit_call_text("kvist_data_dissoc", []string{target_text, keys[0]}), {}, true
+    }
+    params_builder := strings.builder_make()
+    defer strings.builder_destroy(&params_builder)
+    call_builder := strings.builder_make()
+    defer strings.builder_destroy(&call_builder)
+    body_builder := strings.builder_make()
+    defer strings.builder_destroy(&body_builder)
+    for key, idx in keys {
+        fmt.sbprintf(&params_builder, ", kvist_key_%d: Data", idx)
+        fmt.sbprintf(&call_builder, ", %s", key)
+        fmt.sbprintf(
+            &body_builder,
+            "    kvist_data_move_assign(&kvist_result, kvist_data_dissoc(kvist_result, kvist_key_%d))\n",
+            idx,
+        )
+    }
+    return fmt.tprintf(
+        "(proc(kvist_target: Data%s) -> Data {{\n    kvist_result := kvist_data_retain(kvist_target)\n%s    return kvist_result\n}})(%s%s)",
+        strings.to_string(params_builder),
+        strings.to_string(body_builder),
+        target_text,
+        strings.to_string(call_builder),
+    ), {}, true
+}
+
+emit_data_dissoc_in_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) {
+    if len(form.items) != 3 {
+        return "", Compile_Error{message = "dissoc-in expects Data and one Data path", span = form.span}, false
+    }
+    target_ty, ok_target_ty := obvious_form_type(e, form.items[1])
+    if !ok_target_ty || target_ty != "Data" {
+        return "", Compile_Error{message = "dissoc-in currently expects a Data map", span = form.items[1].span}, false
+    }
+    target_text, err_target, ok_target := emit_expr(e, form.items[1])
+    if !ok_target {
+        return "", err_target, false
+    }
+    path_text, err_path, ok_path := emit_expr_for_expected_type(e, form.items[2], "Data")
+    if !ok_path {
+        return "", err_path, false
+    }
+    mark_data_type(e)
+    return emit_call_text("kvist_data_dissoc_in", []string{target_text, path_text}), {}, true
+}
+
+decode_field_parts :: proc(ty, value_name: string) -> (expected_kind, decoded_text: string, managed: bool, ok: bool) {
+    switch ty {
+    case "Data":
+        return "", value_name, true, true
+    case "bool":
+        return "Bool", fmt.tprintf("%s.payload.bool_value", value_name), false, true
+    case "int", "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64":
+        return "Int", fmt.tprintf("%s(%s.payload.int_value)", ty, value_name), false, true
+    case "f32", "f64":
+        return "Float", fmt.tprintf("%s(%s.payload.float_value)", ty, value_name), false, true
+    }
+    return "", "", false, false
+}
+
+enum_variant_keyword :: proc(source_name: string) -> string {
+    builder := strings.builder_make()
+    defer strings.builder_destroy(&builder)
+    strings.write_byte(&builder, ':')
+    for ch in source_name {
+        lowered := ch
+        if ch >= 'A' && ch <= 'Z' {
+            lowered = ch + ('a' - 'A')
+        }
+        strings.write_rune(&builder, lowered)
+    }
+    return strings.clone(strings.to_string(builder))
+}
+
+emit_decode_failure_return :: proc(
+    builder: ^strings.Builder,
+    path_keys: []string,
+    expected_kind, actual_text: string,
+    failure_id: int,
+    body_depth: int = 2,
+) {
+    if len(path_keys) == 0 {
+        fmt.sbprintf(
+            builder,
+            " return {{}}, data__decode_error(kvist_path, .%s, %s), false ",
+            expected_kind,
+            actual_text,
+        )
+        return
+    }
+    path_name := fmt.tprintf("kvist_error_path_%d", failure_id)
+    strings.write_byte(builder, '\n')
+    append_indent(builder, body_depth)
+    fmt.sbprintf(builder, "%s := kvist_data_retain(kvist_path)\n", path_name)
+    append_indent(builder, body_depth)
+    fmt.sbprintf(builder, "defer kvist_data_release(%s)\n", path_name)
+    for key_name in path_keys {
+        append_indent(builder, body_depth)
+        fmt.sbprintf(
+            builder,
+            "kvist_data_move_assign(&%s, kvist_data_append(%s, %s))\n",
+            path_name,
+            path_name,
+            key_name,
+        )
+    }
+    append_indent(builder, body_depth)
+    fmt.sbprintf(
+        builder,
+        "return {{}}, data__decode_error(%s, .%s, %s), false\n",
+        path_name,
+        expected_kind,
+        actual_text,
+    )
+    append_indent(builder, body_depth-1)
+}
+
+decode_guarded_condition :: proc(guard, condition: string) -> string {
+    if guard == "" {
+        return condition
+    }
+    return fmt.tprintf("%s && (%s)", guard, condition)
+}
+
+decode_combined_guard :: proc(parent, child: string) -> string {
+    if parent == "" {
+        return child
+    }
+    return fmt.tprintf("%s && %s", parent, child)
+}
+
+emit_struct_field_default :: proc(e: ^Emitter, field: Struct_Field) -> (string, Compile_Error, bool) {
+    default_text, err_default, ok_default := emit_expr_for_expected_type(
+        e,
+        field.default_value,
+        field.ty,
+    )
+    if !ok_default {
+        return "", err_default, false
+    }
+    if field.owns_string {
+        if !form_produces_owned_value(field.default_value, e) {
+            mark_core_strings(e)
+            default_text = emit_call_text("strings.clone", []string{default_text})
+        }
+    } else if field.owns_dynamic_array {
+        if !form_produces_owned_value(field.default_value, e) {
+            default_text = managed_clone_value_text(e, field.ty, default_text)
+        }
+    } else if type_text_has_managed_lifecycle(e, field.ty) &&
+              !form_produces_owned_managed_type(e, field.default_value, field.ty) {
+        default_text = managed_clone_value_text(e, field.ty, default_text)
+    }
+    return default_text, {}, true
+}
+
+decode_field_constructor_value :: proc(
+    field: Struct_Field,
+    decoded, present, default_value: string,
+) -> string {
+    value := decoded
+    if field.has_default {
+        value = fmt.tprintf("%s ? %s : %s", present, decoded, default_value)
+    }
+    return fmt.tprintf("%s = %s", field.name, value)
+}
+
+emit_decode_enum_failure_return :: proc(
+    builder: ^strings.Builder,
+    path_keys: []string,
+    expected_type, actual_value: string,
+    failure_id: int,
+    body_depth: int = 2,
+) {
+    path_name := fmt.tprintf("kvist_enum_error_path_%d", failure_id)
+    strings.write_byte(builder, '\n')
+    append_indent(builder, body_depth)
+    fmt.sbprintf(builder, "%s := kvist_data_retain(kvist_path)\n", path_name)
+    append_indent(builder, body_depth)
+    fmt.sbprintf(builder, "defer kvist_data_release(%s)\n", path_name)
+    for key_name in path_keys {
+        append_indent(builder, body_depth)
+        fmt.sbprintf(
+            builder,
+            "kvist_data_move_assign(&%s, kvist_data_append(%s, %s))\n",
+            path_name,
+            path_name,
+            key_name,
+        )
+    }
+    append_indent(builder, body_depth)
+    fmt.sbprintf(
+        builder,
+        "return {{}}, data__decode_enum_error(%s, %q, %s), false\n",
+        path_name,
+        expected_type,
+        actual_value,
+    )
+    append_indent(builder, body_depth-1)
+}
+
+decode_enum_value_constructor_text :: proc(
+    enum_decl: ^Enum_Decl,
+    elem_ty, value_name: string,
+) -> string {
+    builder := strings.builder_make()
+    defer strings.builder_destroy(&builder)
+    fmt.sbprintf(
+        &builder,
+        "(proc(kvist_item: Data) -> %s {{ kvist_value: %s; switch kvist_item.payload.text {{ ",
+        elem_ty,
+        elem_ty,
+    )
+    for variant in enum_decl.variants {
+        keyword := enum_variant_keyword(variant.source_name)
+        fmt.sbprintf(&builder, "case %q: kvist_value = .%s; ", keyword, variant.name)
+        delete(keyword)
+    }
+    fmt.sbprintf(&builder, "case: }} return kvist_value }})(%s)", value_name)
+    return strings.clone(strings.to_string(builder))
+}
+
+emit_decode_dynamic_array_unchecked_value :: proc(
+    e: ^Emitter,
+    field: Struct_Field,
+    field_name: string,
+    counter: ^int,
+    root_span: Span,
+    depth: int,
+) -> (string, Compile_Error, bool) {
+    elem_ty, ok_array := dynamic_array_element_type(field.ty)
+    if !ok_array {
+        return "", Compile_Error{
+            message = fmt.tprintf(
+                "data.decode field %s is marked as an owned dynamic array but has type %s",
+                field.source_name,
+                field.ty,
+            ),
+            span = root_span,
+        }, false
+    }
+    _, constructed_item, managed, supported := decode_field_parts(elem_ty, "kvist_item")
+    if enum_decl, enum_supported := find_enum_decl(e, elem_ty); enum_supported {
+        constructed_item = decode_enum_value_constructor_text(enum_decl, elem_ty, "kvist_item")
+        managed = false
+        supported = true
+    } else if nested_decl, nested_supported := find_struct_decl(e, elem_ty); nested_supported {
+        nested_builder := strings.builder_make()
+        defer strings.builder_destroy(&nested_builder)
+        fmt.sbprintf(
+            &nested_builder,
+            "(proc(kvist_value: Data) -> %s {{\n",
+            elem_ty,
+        )
+        nested_value, err_nested, ok_nested := emit_decode_struct_unchecked_value(
+            e,
+            &nested_builder,
+            nested_decl,
+            "kvist_value",
+            counter,
+            root_span,
+            depth+1,
+        )
+        if !ok_nested {
+            return "", err_nested, false
+        }
+        fmt.sbprintf(&nested_builder, "    return %s\n}})(kvist_item)", nested_value)
+        constructed_item = strings.clone(strings.to_string(nested_builder))
+        managed = false
+        supported = true
+    }
+    if !supported {
+        return "", Compile_Error{
+            message = fmt.tprintf(
+                "data.decode field %s has unsupported dynamic-array element type %s; supported elements are Data, bool, integer and floating-point scalars, Kvist enums, and Kvist structs",
+                field.source_name,
+                elem_ty,
+            ),
+            span = root_span,
+        }, false
+    }
+    if managed {
+        constructed_item = managed_clone_value_text(e, elem_ty, constructed_item)
+    }
+    return fmt.tprintf(
+        "(proc(kvist_items: []Data) -> %s {{ kvist_out := make(%s, 0, len(kvist_items)); for kvist_item in kvist_items {{ append(&kvist_out, %s) }}; return kvist_out }})(%s.payload.items)",
+        field.ty,
+        field.ty,
+        constructed_item,
+        field_name,
+    ), {}, true
+}
+
+emit_decode_struct_unchecked_value :: proc(
+    e: ^Emitter,
+    builder: ^strings.Builder,
+    struct_decl: ^Struct_Decl,
+    value_name: string,
+    counter: ^int,
+    root_span: Span,
+    depth: int = 0,
+) -> (string, Compile_Error, bool) {
+    if depth > 16 {
+        return "", Compile_Error{
+            message = fmt.tprintf("data.decode nested struct depth exceeded at %s", struct_decl.name),
+            span = root_span,
+        }, false
+    }
+    field_values: [dynamic]string
+    defer delete(field_values)
+    for field in struct_decl.fields {
+        field_id := counter^
+        counter^ += 1
+        key_name := fmt.tprintf("kvist_key_%d", field_id)
+        field_name := fmt.tprintf("kvist_field_%d", field_id)
+        key := fmt.tprintf(":%s", field.source_name)
+        fmt.sbprintf(
+            builder,
+            "    %s := Data{{kind = .Keyword, payload = {{text = %q}}}}\n",
+            key_name,
+            key,
+        )
+        fmt.sbprintf(
+            builder,
+            "    %s := kvist_data_get(%s, %s)\n",
+            field_name,
+            value_name,
+            key_name,
+        )
+        present_name := ""
+        default_text := ""
+        if field.has_default {
+            present_name = fmt.tprintf("kvist_present_%d", field_id)
+            fmt.sbprintf(
+                builder,
+                "    %s := kvist_data_contains(%s, %s)\n",
+                present_name,
+                value_name,
+                key_name,
+            )
+            emitted_default, err_default, ok_default := emit_struct_field_default(e, field)
+            if !ok_default {
+                return "", err_default, false
+            }
+            default_text = emitted_default
+        }
+
+        decoded := ""
+        if field.owns_dynamic_array {
+            array_value, err_array, ok_array := emit_decode_dynamic_array_unchecked_value(
+                e,
+                field,
+                field_name,
+                counter,
+                root_span,
+                depth,
+            )
+            if !ok_array {
+                return "", err_array, false
+            }
+            decoded = array_value
+        } else if field.owns_string {
+            mark_core_strings(e)
+            decoded = fmt.tprintf("strings.clone(%s.payload.text)", field_name)
+        } else if _, scalar_value, managed, supported := decode_field_parts(field.ty, field_name); supported {
+            decoded = scalar_value
+            if managed {
+                decoded = managed_clone_value_text(e, field.ty, decoded)
+            }
+        } else if nested_decl, nested := find_struct_decl(e, field.ty); nested {
+            nested_value, err_nested, ok_nested := emit_decode_struct_unchecked_value(
+                e,
+                builder,
+                nested_decl,
+                field_name,
+                counter,
+                root_span,
+                depth+1,
+            )
+            if !ok_nested {
+                return "", err_nested, false
+            }
+            decoded = nested_value
+        } else if enum_decl, enum_found := find_enum_decl(e, field.ty); enum_found {
+            decoded = decode_enum_value_constructor_text(enum_decl, field.ty, field_name)
+        } else {
+            return "", Compile_Error{
+                message = fmt.tprintf(
+                    "data.decode field %s.%s has unsupported type %s",
+                    struct_decl.name,
+                    field.source_name,
+                    field.ty,
+                ),
+                span = root_span,
+            }, false
+        }
+        append(&field_values, decode_field_constructor_value(
+            field,
+            decoded,
+            present_name,
+            default_text,
+        ))
+    }
+    return fmt.tprintf(
+        "%s{{%s}}",
+        struct_decl.name,
+        strings.join(field_values[:], ", ", context.temp_allocator),
+    ), {}, true
+}
+
+emit_decode_dynamic_array_field :: proc(
+    e: ^Emitter,
+    builder: ^strings.Builder,
+    field: Struct_Field,
+    field_name, field_guard: string,
+    field_path: []string,
+    field_id: int,
+    counter: ^int,
+    root_span: Span,
+) -> (string, Compile_Error, bool) {
+    elem_ty, ok_array := dynamic_array_element_type(field.ty)
+    if !ok_array {
+        return "", Compile_Error{
+            message = fmt.tprintf(
+                "data.decode field %s is marked as an owned dynamic array but has type %s",
+                field.source_name,
+                field.ty,
+            ),
+            span = root_span,
+        }, false
+    }
+    item_name := fmt.tprintf("kvist_item_%d", field_id)
+    index_name := fmt.tprintf("kvist_index_%d", field_id)
+    enum_decl, enum_supported := find_enum_decl(e, elem_ty)
+    nested_decl, nested_supported := find_struct_decl(e, elem_ty)
+    expected_kind, _, managed, supported := decode_field_parts(elem_ty, item_name)
+    if enum_supported {
+        expected_kind = "Keyword"
+        managed = false
+        supported = true
+    } else if nested_supported {
+        expected_kind = "Map"
+        managed = false
+        supported = true
+    }
+    if !supported {
+        return "", Compile_Error{
+            message = fmt.tprintf(
+                "data.decode field %s has unsupported dynamic-array element type %s; supported elements are Data, bool, integer and floating-point scalars, Kvist enums, and Kvist structs",
+                field.source_name,
+                elem_ty,
+            ),
+            span = root_span,
+        }, false
+    }
+
+    condition := decode_guarded_condition(
+        field_guard,
+        fmt.tprintf("%s.kind != .Vector", field_name),
+    )
+    fmt.sbprintf(builder, "    if %s {{", condition)
+    emit_decode_failure_return(
+        builder,
+        field_path,
+        "Vector",
+        fmt.tprintf("%s.kind", field_name),
+        field_id,
+    )
+    strings.write_string(builder, "}\n")
+
+    if expected_kind != "" {
+        loop_depth := 1
+        if field_guard != "" {
+            fmt.sbprintf(builder, "    if %s {{\n", field_guard)
+            loop_depth = 2
+        }
+        append_indent(builder, loop_depth)
+        fmt.sbprintf(
+            builder,
+            "for %s, %s in %s.payload.items {{\n",
+            item_name,
+            index_name,
+            field_name,
+        )
+        index_key := fmt.tprintf("kvist_index_key_%d", field_id)
+        append_indent(builder, loop_depth+1)
+        fmt.sbprintf(
+            builder,
+            "%s := Data{{kind = .Int, payload = {{int_value = i64(%s)}}}}\n",
+            index_key,
+            index_name,
+        )
+        item_path: [dynamic]string
+        defer delete(item_path)
+        append(&item_path, ..field_path)
+        append(&item_path, index_key)
+        append_indent(builder, loop_depth+1)
+        fmt.sbprintf(builder, "if %s.kind != .%s {{", item_name, expected_kind)
+        emit_decode_failure_return(
+            builder,
+            item_path[:],
+            expected_kind,
+            fmt.tprintf("%s.kind", item_name),
+            field_id,
+            loop_depth+2,
+        )
+        strings.write_string(builder, "}\n")
+        if enum_supported {
+            invalid := strings.builder_make()
+            defer strings.builder_destroy(&invalid)
+            for variant, idx in enum_decl.variants {
+                if idx > 0 {
+                    strings.write_string(&invalid, " && ")
+                }
+                keyword := enum_variant_keyword(variant.source_name)
+                fmt.sbprintf(&invalid, "%s.payload.text != %q", item_name, keyword)
+                delete(keyword)
+            }
+            append_indent(builder, loop_depth+1)
+            fmt.sbprintf(builder, "if %s {{", strings.to_string(invalid))
+            emit_decode_enum_failure_return(
+                builder,
+                item_path[:],
+                elem_ty,
+                item_name,
+                field_id,
+                loop_depth+2,
+            )
+            strings.write_string(builder, "}\n")
+        }
+        if nested_supported {
+            nested_validation := strings.builder_make()
+            defer strings.builder_destroy(&nested_validation)
+            _, err_nested, ok_nested := emit_decode_struct_value(
+                e,
+                &nested_validation,
+                nested_decl,
+                item_name,
+                item_path[:],
+                counter,
+                root_span,
+            )
+            if !ok_nested {
+                return "", err_nested, false
+            }
+            indent := strings.builder_make()
+            defer strings.builder_destroy(&indent)
+            for _ in 0..<loop_depth {
+                strings.write_string(&indent, "    ")
+            }
+            append_indented_multiline(
+                builder,
+                strings.to_string(nested_validation),
+                strings.to_string(indent),
+            )
+        }
+        append_indent(builder, loop_depth)
+        strings.write_string(builder, "}\n")
+        if field_guard != "" {
+            strings.write_string(builder, "    }\n")
+        }
+    }
+
+    _ = enum_decl
+    _ = managed
+    return emit_decode_dynamic_array_unchecked_value(
+        e,
+        field,
+        field_name,
+        counter,
+        root_span,
+        0,
+    )
+}
+
+emit_decode_struct_value :: proc(
+    e: ^Emitter,
+    builder: ^strings.Builder,
+    struct_decl: ^Struct_Decl,
+    value_name: string,
+    path_keys: []string,
+    counter: ^int,
+    root_span: Span,
+    depth: int = 0,
+    parent_guard: string = "",
+) -> (string, Compile_Error, bool) {
+    if depth > 16 {
+        return "", Compile_Error{
+            message = fmt.tprintf("data.decode nested struct depth exceeded at %s", struct_decl.name),
+            span = root_span,
+        }, false
+    }
+    field_values: [dynamic]string
+    defer delete(field_values)
+    for field in struct_decl.fields {
+        field_id := counter^
+        counter^ += 1
+        key_name := fmt.tprintf("kvist_key_%d", field_id)
+        field_name := fmt.tprintf("kvist_field_%d", field_id)
+        key := fmt.tprintf(":%s", field.source_name)
+        fmt.sbprintf(
+            builder,
+            "    %s := Data{{kind = .Keyword, payload = {{text = %q}}}}\n",
+            key_name,
+            key,
+        )
+        fmt.sbprintf(
+            builder,
+            "    %s := kvist_data_get(%s, %s)\n",
+            field_name,
+            value_name,
+            key_name,
+        )
+        present_name := ""
+        field_guard := parent_guard
+        default_text := ""
+        if field.has_default {
+            present_name = fmt.tprintf("kvist_present_%d", field_id)
+            fmt.sbprintf(
+                builder,
+                "    %s := kvist_data_contains(%s, %s)\n",
+                present_name,
+                value_name,
+                key_name,
+            )
+            field_guard = decode_combined_guard(parent_guard, present_name)
+            emitted_default, err_default, ok_default := emit_struct_field_default(e, field)
+            if !ok_default {
+                return "", err_default, false
+            }
+            default_text = emitted_default
+        }
+
+        field_path: [dynamic]string
+        defer delete(field_path)
+        append(&field_path, ..path_keys)
+        append(&field_path, key_name)
+
+        if field.owns_dynamic_array {
+            decoded, err_array, ok_array := emit_decode_dynamic_array_field(
+                e,
+                builder,
+                field,
+                field_name,
+                field_guard,
+                field_path[:],
+                field_id,
+                counter,
+                root_span,
+            )
+            if !ok_array {
+                return "", err_array, false
+            }
+            append(&field_values, decode_field_constructor_value(
+                field,
+                decoded,
+                present_name,
+                default_text,
+            ))
+            continue
+        }
+
+        if field.owns_string {
+            condition := decode_guarded_condition(field_guard, fmt.tprintf("%s.kind != .String", field_name))
+            fmt.sbprintf(builder, "    if %s {{", condition)
+            emit_decode_failure_return(
+                builder,
+                field_path[:],
+                "String",
+                fmt.tprintf("%s.kind", field_name),
+                field_id,
+            )
+            strings.write_string(builder, "}\n")
+            mark_core_strings(e)
+            decoded := fmt.tprintf("strings.clone(%s.payload.text)", field_name)
+            append(&field_values, decode_field_constructor_value(
+                field,
+                decoded,
+                present_name,
+                default_text,
+            ))
+            continue
+        }
+
+        expected_kind, decoded_text, managed, supported := decode_field_parts(field.ty, field_name)
+        if supported {
+            if expected_kind != "" {
+                condition := decode_guarded_condition(
+                    field_guard,
+                    fmt.tprintf("%s.kind != .%s", field_name, expected_kind),
+                )
+                fmt.sbprintf(builder, "    if %s {{", condition)
+                emit_decode_failure_return(
+                    builder,
+                    field_path[:],
+                    expected_kind,
+                    fmt.tprintf("%s.kind", field_name),
+                    field_id,
+                )
+                strings.write_string(builder, "}\n")
+            }
+            if managed {
+                decoded_text = emit_call_text("kvist_data_retain", []string{decoded_text})
+            }
+            append(&field_values, decode_field_constructor_value(
+                field,
+                decoded_text,
+                present_name,
+                default_text,
+            ))
+            continue
+        }
+
+        nested_decl, nested := find_struct_decl(e, field.ty)
+        if nested {
+            condition := decode_guarded_condition(field_guard, fmt.tprintf("%s.kind != .Map", field_name))
+            fmt.sbprintf(builder, "    if %s {{", condition)
+            emit_decode_failure_return(
+                builder,
+                field_path[:],
+                "Map",
+                fmt.tprintf("%s.kind", field_name),
+                field_id,
+            )
+            strings.write_string(builder, "}\n")
+            nested_text, err_nested, ok_nested := emit_decode_struct_value(
+                e,
+                builder,
+                nested_decl,
+                field_name,
+                field_path[:],
+                counter,
+                root_span,
+                depth+1,
+                field_guard,
+            )
+            if !ok_nested {
+                return "", err_nested, false
+            }
+            append(&field_values, decode_field_constructor_value(
+                field,
+                nested_text,
+                present_name,
+                default_text,
+            ))
+            continue
+        }
+
+        enum_decl, enum_found := find_enum_decl(e, field.ty)
+        if enum_found {
+            condition := decode_guarded_condition(field_guard, fmt.tprintf("%s.kind != .Keyword", field_name))
+            fmt.sbprintf(builder, "    if %s {{", condition)
+            emit_decode_failure_return(
+                builder,
+                field_path[:],
+                "Keyword",
+                fmt.tprintf("%s.kind", field_name),
+                field_id,
+            )
+            strings.write_string(builder, "}\n")
+            enum_value_name := fmt.tprintf("kvist_enum_%d", field_id)
+            fmt.sbprintf(builder, "    %s: %s\n", enum_value_name, field.ty)
+            if field_guard != "" {
+                fmt.sbprintf(builder, "    if %s {{\n", field_guard)
+            }
+            fmt.sbprintf(builder, "    switch %s.payload.text {{\n", field_name)
+            for variant in enum_decl.variants {
+                keyword := enum_variant_keyword(variant.source_name)
+                fmt.sbprintf(
+                    builder,
+                    "    case %q: %s = .%s\n",
+                    keyword,
+                    enum_value_name,
+                    variant.name,
+                )
+                delete(keyword)
+            }
+            strings.write_string(builder, "    case:\n")
+            error_path_name := fmt.tprintf("kvist_enum_error_path_%d", field_id)
+            fmt.sbprintf(builder, "        %s := kvist_data_retain(kvist_path)\n", error_path_name)
+            fmt.sbprintf(builder, "        defer kvist_data_release(%s)\n", error_path_name)
+            for key_path_name in field_path {
+                fmt.sbprintf(
+                    builder,
+                    "        kvist_data_move_assign(&%s, kvist_data_append(%s, %s))\n",
+                    error_path_name,
+                    error_path_name,
+                    key_path_name,
+                )
+            }
+            fmt.sbprintf(
+                builder,
+                "        return {{}}, data__decode_enum_error(%s, %q, %s), false\n",
+                error_path_name,
+                field.ty,
+                field_name,
+            )
+            strings.write_string(builder, "    }\n")
+            if field_guard != "" {
+                strings.write_string(builder, "    }\n")
+            }
+            append(&field_values, decode_field_constructor_value(
+                field,
+                enum_value_name,
+                present_name,
+                default_text,
+            ))
+            continue
+        }
+
+        return "", Compile_Error{
+            message = fmt.tprintf(
+                "data.decode field %s.%s has unsupported type %s; use (owned string) for decoded strings and (owned [dynamic]T) for supported vectors; other supported fields are Data, bool, integer and floating-point scalars, enums, and nested Kvist structs",
+                struct_decl.name,
+                field.source_name,
+                field.ty,
+            ),
+            span = root_span,
+        }, false
+    }
+    return fmt.tprintf(
+        "%s{{%s}}",
+        struct_decl.name,
+        strings.join(field_values[:], ", ", context.temp_allocator),
+    ), {}, true
+}
+
+emit_data_decode_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) {
+    if len(form.items) != 3 && len(form.items) != 4 {
+        return "", Compile_Error{message = "data.decode expects type, value, and optional path", span = form.span}, false
+    }
+    target_ty, err_ty, ok_ty := parse_type_text(form.items[1])
+    if !ok_ty {
+        return "", err_ty, false
+    }
+    struct_decl, ok_struct := find_struct_decl(e, target_ty)
+    if !ok_struct {
+        return "", Compile_Error{
+            message = fmt.tprintf("data.decode currently expects a Kvist struct type, got %s", target_ty),
+            span = form.items[1].span,
+        }, false
+    }
+    value_ty, ok_value_ty := obvious_form_type(e, form.items[2])
+    if !ok_value_ty || value_ty != "Data" {
+        return "", Compile_Error{message = "data.decode expects a Data value", span = form.items[2].span}, false
+    }
+    value_text, err_value, ok_value := emit_expr(e, form.items[2])
+    if !ok_value {
+        return "", err_value, false
+    }
+    path_text := "Data{kind = .Vector}"
+    if len(form.items) == 4 {
+        path_ty, ok_path_ty := obvious_form_type(e, form.items[3])
+        if !ok_path_ty || path_ty != "Data" {
+            return "", Compile_Error{message = "data.decode path must be Data", span = form.items[3].span}, false
+        }
+        err_path: Compile_Error
+        ok_path: bool
+        path_text, err_path, ok_path = emit_expr(e, form.items[3])
+        if !ok_path {
+            return "", err_path, false
+        }
+    }
+
+    builder := strings.builder_make()
+    defer strings.builder_destroy(&builder)
+    fmt.sbprintf(
+        &builder,
+        "(proc(kvist_value, kvist_path: Data) -> (decoded: %s, err: data__Decode_Error, ok: bool) {{\n",
+        target_ty,
+    )
+    strings.write_string(
+        &builder,
+        "    if kvist_value.kind != .Map { return {}, data__decode_error(kvist_path, .Map, kvist_value.kind), false }\n",
+    )
+    counter := 0
+    decoded_text, err_decoded, ok_decoded := emit_decode_struct_value(
+        e,
+        &builder,
+        struct_decl,
+        "kvist_value",
+        nil,
+        &counter,
+        form.items[1].span,
+    )
+    if !ok_decoded {
+        return "", err_decoded, false
+    }
+    fmt.sbprintf(
+        &builder,
+        "    return %s, {{}}, true\n",
+        decoded_text,
+    )
+    fmt.sbprintf(&builder, "}})(%s, %s)", value_text, path_text)
+    mark_data_type(e)
+    return strings.clone(strings.to_string(builder)), {}, true
+}
+
+emit_shallow_update_copy_expr :: proc(e: ^Emitter, target_form: CST_Form, target_text, target_ty: string, fields: []string, field_span: Span, updater_form: CST_Form, rest_forms: []CST_Form) -> (string, Compile_Error, bool) {
     field_ty, err_field_ty, ok_field_ty := struct_field_type_for_update_path(e, target_ty, fields, "update", field_span)
     if !ok_field_ty {
         return "", err_field_ty, false
+    }
+    if type_text_has_managed_lifecycle(e, field_ty) {
+        return "", Compile_Error{
+            message = "update of a managed field is not yet supported; compute the new value first and use assoc",
+            span = field_span,
+        }, false
+    }
+    if struct_field_owns_string_for_update_path(e, target_ty, fields) {
+        return "", Compile_Error{
+            message = "update of an owned string field is not yet supported; compute the new value first and use assoc",
+            span = field_span,
+        }, false
+    }
+    if struct_field_owns_dynamic_array_for_update_path(e, target_ty, fields) {
+        return "", Compile_Error{
+            message = "update of an owned dynamic-array field is not yet supported; compute the new value first and use assoc",
+            span = field_span,
+        }, false
     }
     field_text := field_access_text("kvist_target", fields)
     arg_texts: [dynamic]string
@@ -3110,12 +4503,18 @@ emit_shallow_update_copy_expr :: proc(e: ^Emitter, target_text, target_ty: strin
         fmt.sbprintf(&params_builder, ", %s: %s", name, rest_types[idx])
         fmt.sbprintf(&call_builder, ", %s", rest_texts[idx])
     }
-    return fmt.tprintf("(proc(kvist_target: %s%s) -> %s %s\n    %s := kvist_target\n    %s = %s\n    return %s\n})(%s%s)",
+    target_init := "kvist_target"
+    if type_text_has_managed_lifecycle(e, target_ty) &&
+       !form_produces_owned_managed_type(e, target_form, target_ty) {
+        target_init = managed_clone_value_text(e, target_ty, "kvist_target")
+    }
+    return fmt.tprintf("(proc(kvist_target: %s%s) -> %s %s\n    %s := %s\n    %s = %s\n    return %s\n})(%s%s)",
                        target_ty,
                        strings.to_string(params_builder),
                        target_ty,
                        "{",
                        temp,
+                       target_init,
                        target_field,
                        value_text,
                        temp,
@@ -3124,6 +4523,15 @@ emit_shallow_update_copy_expr :: proc(e: ^Emitter, target_text, target_ty: strin
 }
 
 emit_shallow_assoc_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) {
+    if len(form.items) >= 2 {
+        if target_ty, ok_target_ty := obvious_form_type(e, form.items[1]); ok_target_ty && target_ty == "Data" {
+            target_text, err_target, ok_target := emit_expr(e, form.items[1])
+            if !ok_target {
+                return "", err_target, false
+            }
+            return emit_data_assoc_expr(e, form, target_text)
+        }
+    }
     target_form, fields, field_span, value_form, err_args, ok_args := shallow_assoc_args(form)
     if !ok_args {
         return "", err_args, false
@@ -3136,10 +4544,19 @@ emit_shallow_assoc_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile
     if !ok_target {
         return "", err_target, false
     }
-    return emit_shallow_assoc_copy_expr(e, target_text, target_ty, fields[:], field_span, value_form)
+    return emit_shallow_assoc_copy_expr(e, target_form, target_text, target_ty, fields[:], field_span, value_form)
 }
 
 emit_shallow_update_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) {
+    if len(form.items) >= 2 {
+        if target_ty, ok_target_ty := obvious_form_type(e, form.items[1]); ok_target_ty && target_ty == "Data" {
+            target_text, err_target, ok_target := emit_expr(e, form.items[1])
+            if !ok_target {
+                return "", err_target, false
+            }
+            return emit_data_update_expr(e, form, target_text)
+        }
+    }
     target_form, fields, field_span, updater_form, rest_forms, err_args, ok_args := shallow_update_args(form)
     if !ok_args {
         return "", err_args, false
@@ -3152,7 +4569,7 @@ emit_shallow_update_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compil
     if !ok_target {
         return "", err_target, false
     }
-    return emit_shallow_update_copy_expr(e, target_text, target_ty, fields[:], field_span, updater_form, rest_forms)
+    return emit_shallow_update_copy_expr(e, target_form, target_text, target_ty, fields[:], field_span, updater_form, rest_forms)
 }
 
 comparison_odin_op :: proc(op: string) -> string {
@@ -3443,6 +4860,10 @@ head_is_core_assoc :: proc(head: string) -> bool {
 
 head_is_core_update :: proc(head: string) -> bool {
     return head == "copy-update"
+}
+
+head_is_core_dissoc :: proc(head: string) -> bool {
+    return head == "copy-dissoc" || head == "copy-dissoc-in"
 }
 
  thread_temp_name :: proc(e: ^Emitter) -> string {
@@ -4021,7 +5442,12 @@ Owned_Alloc_Result_Kind :: enum {
 owned_import_alloc_call_head :: proc(e: ^Emitter, text: string, kind: Owned_Alloc_Result_Kind) -> bool {
     switch kind {
     case .String:
-        return imported_interop_call_matches(e, text, "core:strings", "clone") ||
+        // `fmt` is an implicit core import when a form uses that namespace,
+        // so it is not necessarily represented by an import declaration.
+        return text == "fmt.aprintf" ||
+               text == "fmt/aprintf" ||
+               imported_interop_call_matches(e, text, "core:fmt", "aprintf") ||
+               imported_interop_call_matches(e, text, "core:strings", "clone") ||
                imported_interop_call_matches(e, text, "core:strings", "to_lower") ||
                imported_interop_call_matches(e, text, "core:strings", "to_upper") ||
                imported_interop_call_matches(e, text, "core:strings", "replace")
@@ -4532,6 +5958,13 @@ form_is_owned_result :: proc(form: CST_Form, e: ^Emitter = nil) -> bool {
     if form.kind != .List || len(form.items) == 0 || form.items[0].kind != .Symbol {
         return false
     }
+    // Core macros are expanded while emitting expressions. Preserve their
+    // ownership contract for the earlier ownership-analysis pass without
+    // making their lowering a compiler special form.
+    switch form.items[0].text {
+    case "str", "core.str", "core/str", "fmt.aprintf", "fmt/aprintf":
+        return true
+    }
     if proc_decl_owned_result_head(e, form.items[0].text) {
         return true
     }
@@ -4779,9 +6212,15 @@ form_has_nested_owned_value :: proc(form: CST_Form, e: ^Emitter = nil) -> bool {
                     continue
                 }
             }
+            _, item_is_owned_managed := owned_managed_form_type(e, item)
+            if expected_type, ok_expected := call_arg_expected_type(e, form, absolute_index); ok_expected {
+                item_is_owned_managed =
+                    form_produces_owned_managed_type(e, item, expected_type)
+                delete(expected_type)
+            }
             if !form_is_named_arg_brace(item) &&
                (form_produces_owned_value(item, e) ||
-                form_produces_owned_managed_value(e, item) ||
+                item_is_owned_managed ||
                 form_has_nested_owned_value(item, e)) {
                 return true
             }
@@ -4836,14 +6275,34 @@ emit_expr_with_owned_nested_temps :: proc(e: ^Emitter, form: CST_Form) -> (strin
                 }
                 continue
             }
+            expected_type, has_expected_type := call_arg_expected_type(e, rewritten, idx)
+            managed_ty, item_is_owned_managed := owned_managed_form_type(e, item)
+            if has_expected_type &&
+               form_produces_owned_managed_type(e, item, expected_type) {
+                managed_ty = expected_type
+                item_is_owned_managed = true
+            }
             if form_is_named_arg_brace(item) ||
                !(form_produces_owned_value(item, e) ||
-                 form_produces_owned_managed_value(e, item) ||
+                 item_is_owned_managed ||
                  form_has_nested_owned_value(item, e)) {
+                if has_expected_type {
+                    delete(expected_type)
+                }
                 continue
             }
 
-            value, err_value, ok_value := emit_expr_with_owned_nested_temps(e, item)
+            value := ""
+            err_value: Compile_Error
+            ok_value := false
+            if has_expected_type && expected_type == "Data" {
+                value, err_value, ok_value = emit_expr_for_expected_type(e, item, expected_type)
+            } else {
+                value, err_value, ok_value = emit_expr_with_owned_nested_temps(e, item)
+            }
+            if has_expected_type {
+                delete(expected_type)
+            }
             if !ok_value {
                 return "", err_value, false
             }
@@ -4852,11 +6311,10 @@ emit_expr_with_owned_nested_temps :: proc(e: ^Emitter, form: CST_Form) -> (strin
             transfers_owned := rewritten.kind == .List &&
                                ((form_transfers_owned_args(rewritten) && idx >= 2) ||
                                 call_arg_transfers_owned_result(e, rewritten, idx))
-            if form_produces_owned_value(item, e) && !transfers_owned {
+            if item_is_owned_managed {
+                emit_line(e, fmt.tprintf("defer %s", managed_destroy_value_text(e, managed_ty, temp)))
+            } else if form_produces_owned_value(item, e) && !transfers_owned {
                 emit_line(e, fmt.tprintf("defer delete(%s)", temp))
-            } else if form_produces_owned_managed_value(e, item) {
-                mark_data_type(e)
-                emit_line(e, fmt.tprintf("defer kvist_data_release(%s)", temp))
             }
 
             delete_cst_form(&rewritten.items[idx])
@@ -5097,6 +6555,10 @@ emit_expr_for_expected_type :: proc(e: ^Emitter, form: CST_Form, expected_type :
     }
     if form.kind == .List && form_head_is_case(form) {
         return emit_case_expr(e, form, expected_type)
+    }
+    if expected_type == "Data" {
+        value, _, err_value, ok_value := emit_contextual_data_value(e, form)
+        return value, err_value, ok_value
     }
     if expected_type != "" && !strings.contains(expected_type, "$") && (form.kind == .Vector || form.kind == .Brace || form.kind == .Set) {
         return emit_inferred_literal(e, form, expected_type)
@@ -5506,10 +6968,10 @@ emit_if_expr :: proc(e: ^Emitter, form: CST_Form, expected_type := "") -> (strin
     }
     if type_text_is_managed_value(branch_expected_type) {
         mark_data_type(e)
-        if !form_produces_owned_managed_value(e, form.items[2]) {
+        if !form_produces_owned_managed_type(e, form.items[2], branch_expected_type) {
             then_value = emit_call_text("kvist_data_retain", []string{then_value})
         }
-        if !form_produces_owned_managed_value(e, form.items[3]) {
+        if !form_produces_owned_managed_type(e, form.items[3], branch_expected_type) {
             else_value = emit_call_text("kvist_data_retain", []string{else_value})
         }
     }
@@ -6394,6 +7856,179 @@ type_text_is_managed_value :: proc(text: string) -> bool {
     return strings.trim_space(text) == "Data"
 }
 
+type_text_has_managed_lifecycle :: proc(e: ^Emitter, text: string, depth: int = 0) -> bool {
+    if type_text_is_managed_value(text) {
+        return true
+    }
+    if e == nil || depth > 16 {
+        return false
+    }
+    struct_decl, ok_struct := find_struct_decl(e, strings.trim_space(text))
+    if !ok_struct {
+        return false
+    }
+    for field in struct_decl.fields {
+        if field.owns_string ||
+           field.owns_dynamic_array ||
+           type_text_has_managed_lifecycle(e, field.ty, depth+1) {
+            return true
+        }
+    }
+    return false
+}
+
+managed_struct_helper_name :: proc(op, ty: string) -> string {
+    return fmt.tprintf("kvist_managed_%s_%s", op, ty)
+}
+
+managed_clone_value_text :: proc(e: ^Emitter, ty, value: string) -> string {
+    if type_text_is_managed_value(ty) {
+        mark_data_type(e)
+        return emit_call_text("kvist_data_retain", []string{value})
+    }
+    if elem_ty, ok_dynamic := dynamic_array_element_type(ty); ok_dynamic {
+        if type_text_has_managed_lifecycle(e, elem_ty) {
+            cloned_item := managed_clone_value_text(e, elem_ty, "kvist_item")
+            return fmt.tprintf(
+                "(proc(kvist_values: %s) -> %s {{ kvist_out := make(%s, 0, len(kvist_values)); for kvist_item in kvist_values {{ append(&kvist_out, %s) }}; return kvist_out }})(%s)",
+                ty,
+                ty,
+                ty,
+                cloned_item,
+                value,
+            )
+        }
+        return fmt.tprintf(
+            "(proc(kvist_values: %s) -> %s {{ kvist_out := make(%s, len(kvist_values)); copy(kvist_out[:], kvist_values[:]); return kvist_out }})(%s)",
+            ty,
+            ty,
+            ty,
+            value,
+        )
+    }
+    return emit_call_text(managed_struct_helper_name("clone", ty), []string{value})
+}
+
+managed_destroy_value_text :: proc(e: ^Emitter, ty, value: string) -> string {
+    if type_text_is_managed_value(ty) {
+        mark_data_type(e)
+        return emit_call_text("kvist_data_release", []string{value})
+    }
+    if elem_ty, ok_dynamic := dynamic_array_element_type(ty); ok_dynamic {
+        if type_text_has_managed_lifecycle(e, elem_ty) {
+            destroyed_item := managed_destroy_value_text(e, elem_ty, "kvist_item")
+            return fmt.tprintf(
+                "(proc(kvist_values: %s) {{ for kvist_item in kvist_values {{ %s }}; delete(kvist_values) }})(%s)",
+                ty,
+                destroyed_item,
+                value,
+            )
+        }
+        return emit_call_text("delete", []string{value})
+    }
+    return emit_call_text(managed_struct_helper_name("destroy", ty), []string{value})
+}
+
+managed_dynamic_array_assignment_text :: proc(
+    e: ^Emitter,
+    ty, place, value: string,
+    move: bool,
+) -> string {
+    destroy_previous := managed_destroy_value_text(e, ty, "kvist_previous")
+    if move {
+        return fmt.tprintf(
+            "(proc(kvist_place: ^%s, kvist_value: %s) {{ kvist_previous := kvist_place^; kvist_place^ = kvist_value; %s }})(%s, %s)",
+            ty,
+            ty,
+            destroy_previous,
+            place,
+            value,
+        )
+    }
+    replacement := managed_clone_value_text(e, ty, "kvist_value")
+    return fmt.tprintf(
+        "(proc(kvist_place: ^%s, kvist_value: %s) {{ kvist_replacement := %s; kvist_previous := kvist_place^; kvist_place^ = kvist_replacement; %s }})(%s, %s)",
+        ty,
+        ty,
+        replacement,
+        destroy_previous,
+        place,
+        value,
+    )
+}
+
+managed_assign_helper_name :: proc(ty: string, move: bool) -> string {
+    if type_text_is_managed_value(ty) {
+        return "kvist_data_move_assign" if move else "kvist_data_assign"
+    }
+    return managed_struct_helper_name("move_assign" if move else "assign", ty)
+}
+
+emit_managed_struct_helpers :: proc(e: ^Emitter, struct_decl: Struct_Decl) {
+    if !type_text_has_managed_lifecycle(e, struct_decl.name) {
+        return
+    }
+    clone_name := managed_struct_helper_name("clone", struct_decl.name)
+    destroy_name := managed_struct_helper_name("destroy", struct_decl.name)
+    assign_name := managed_struct_helper_name("assign", struct_decl.name)
+    move_assign_name := managed_struct_helper_name("move_assign", struct_decl.name)
+
+    emit_raw_newline(e)
+    emit_line(e, fmt.tprintf("%s :: proc(value: %s) -> %s {{", clone_name, struct_decl.name, struct_decl.name))
+    e.indent += 1
+    emit_line(e, "out := value")
+    for field in struct_decl.fields {
+        if field.owns_string {
+            mark_core_strings(e)
+            emit_line(e, fmt.tprintf("out.%s = strings.clone(value.%s)", field.name, field.name))
+        } else if field.owns_dynamic_array {
+            cloned := managed_clone_value_text(e, field.ty, fmt.tprintf("value.%s", field.name))
+            emit_line(e, fmt.tprintf("out.%s = %s", field.name, cloned))
+        } else if type_text_has_managed_lifecycle(e, field.ty) {
+            retained := managed_clone_value_text(e, field.ty, fmt.tprintf("value.%s", field.name))
+            emit_line(e, fmt.tprintf("out.%s = %s", field.name, retained))
+        }
+    }
+    emit_line(e, "return out")
+    e.indent -= 1
+    emit_line(e, "}")
+
+    emit_raw_newline(e)
+    emit_line(e, fmt.tprintf("%s :: proc(value: %s) {{", destroy_name, struct_decl.name))
+    e.indent += 1
+    for offset in 0..<len(struct_decl.fields) {
+        field := struct_decl.fields[len(struct_decl.fields)-1-offset]
+        if field.owns_string {
+            emit_line(e, fmt.tprintf("delete(value.%s)", field.name))
+        } else if field.owns_dynamic_array {
+            emit_line(e, managed_destroy_value_text(e, field.ty, fmt.tprintf("value.%s", field.name)))
+        } else if type_text_has_managed_lifecycle(e, field.ty) {
+            emit_line(e, managed_destroy_value_text(e, field.ty, fmt.tprintf("value.%s", field.name)))
+        }
+    }
+    e.indent -= 1
+    emit_line(e, "}")
+
+    emit_raw_newline(e)
+    emit_line(e, fmt.tprintf("%s :: proc(place: ^%s, value: %s) {{", assign_name, struct_decl.name, struct_decl.name))
+    e.indent += 1
+    emit_line(e, fmt.tprintf("replacement := %s(value)", clone_name))
+    emit_line(e, "previous := place^")
+    emit_line(e, "place^ = replacement")
+    emit_line(e, fmt.tprintf("%s(previous)", destroy_name))
+    e.indent -= 1
+    emit_line(e, "}")
+
+    emit_raw_newline(e)
+    emit_line(e, fmt.tprintf("%s :: proc(place: ^%s, value: %s) {{", move_assign_name, struct_decl.name, struct_decl.name))
+    e.indent += 1
+    emit_line(e, "previous := place^")
+    emit_line(e, "place^ = value")
+    emit_line(e, fmt.tprintf("%s(previous)", destroy_name))
+    e.indent -= 1
+    emit_line(e, "}")
+}
+
 form_produces_owned_managed_value :: proc(e: ^Emitter, form: CST_Form, depth: int = 0) -> bool {
     if depth > 8 || form.kind != .List || len(form.items) == 0 || form.items[0].kind != .Symbol {
         return false
@@ -6402,6 +8037,13 @@ form_produces_owned_managed_value :: proc(e: ^Emitter, form: CST_Form, depth: in
     defer delete(head_name)
     if form.items[0].text == "quasiquote" {
         return true
+    }
+    if head_is_core_assoc(form.items[0].text) ||
+       head_is_core_update(form.items[0].text) ||
+       head_is_core_dissoc(form.items[0].text) {
+        if ty, ok_ty := obvious_form_type(e, form); ok_ty && type_text_is_managed_value(ty) {
+            return true
+        }
     }
     switch form.items[0].text {
     case "if", "let", "do", "block", "type-case":
@@ -6427,27 +8069,77 @@ form_produces_owned_managed_value :: proc(e: ^Emitter, form: CST_Form, depth: in
     return false
 }
 
-managed_binding_value_text :: proc(e: ^Emitter, binding: Binding, value: string) -> (text: string, managed: bool) {
+form_produces_owned_managed_type :: proc(e: ^Emitter, form: CST_Form, ty: string, depth: int = 0) -> bool {
+    if type_text_is_managed_value(ty) {
+        if form.kind == .Vector || form.kind == .Brace || form.kind == .Set {
+            return true
+        }
+        return form_produces_owned_managed_value(e, form, depth)
+    }
+    if depth > 8 || !type_text_has_managed_lifecycle(e, ty) {
+        return false
+    }
+    if form.kind != .List || len(form.items) == 0 || form.items[0].kind != .Symbol {
+        return false
+    }
+    head_name := map_name(form.items[0].text)
+    defer delete(head_name)
+    if head_name == ty &&
+       len(form.items) == 2 &&
+       form.items[1].kind == .Brace {
+        return true
+    }
+    if form.items[0].text == "copy-with" || form.items[0].text == "copy-update" {
+        if result_ty, ok_result_ty := obvious_form_type(e, form); ok_result_ty && result_ty == ty {
+            return true
+        }
+    }
+    if proc_decl, ok_proc := find_proc_decl(e, head_name); ok_proc {
+        return proc_decl.returns.kind == .Single &&
+               proc_decl.returns.single_ty == ty &&
+               !proc_decl.borrows_result
+    }
+    return false
+}
+
+owned_managed_form_type :: proc(e: ^Emitter, form: CST_Form) -> (string, bool) {
+    ty, ok_ty := obvious_form_type(e, form)
+    if !ok_ty || !type_text_has_managed_lifecycle(e, ty) ||
+       !form_produces_owned_managed_type(e, form, ty) {
+        return "", false
+    }
+    return ty, true
+}
+
+emit_discarded_expr :: proc(e: ^Emitter, form: CST_Form, expr: string) {
+    if managed_ty, managed := owned_managed_form_type(e, form); managed {
+        temp := thread_temp_name(e)
+        emit_prefixed_expr_mapped(e, fmt.tprintf("%s := ", temp), expr, form.span)
+        emit_line_mapped(e, managed_destroy_value_text(e, managed_ty, temp), form.span)
+        return
+    }
+    emit_prefixed_expr_mapped(e, "_ = ", expr, form.span)
+}
+
+managed_binding_value_text :: proc(e: ^Emitter, binding: Binding, value: string) -> (text, managed_ty: string, managed: bool) {
     ty, ok_ty := obvious_binding_type(e, binding)
-    if !ok_ty || !type_text_is_managed_value(ty) || binding.name == "" || binding.is_destructure || binding.is_result_binding {
-        return value, false
+    if !ok_ty || !type_text_has_managed_lifecycle(e, ty) || binding.name == "" || binding.is_destructure || binding.is_result_binding {
+        return value, "", false
     }
-    mark_data_type(e)
-    if form_produces_owned_managed_value(e, binding.value) {
-        return value, true
+    if form_produces_owned_managed_type(e, binding.value, ty) {
+        return value, ty, true
     }
-    return emit_call_text("kvist_data_retain", []string{value}), true
+    return managed_clone_value_text(e, ty, value), ty, true
 }
 
 managed_return_value_text_for_type :: proc(e: ^Emitter, form: CST_Form, value, return_ty: string) -> string {
-    if !type_text_is_managed_value(return_ty) ||
+    if !type_text_has_managed_lifecycle(e, return_ty) ||
        e.current_proc_owns_managed_result ||
        e.current_proc_borrows_managed_result ||
-       form_produces_owned_managed_value(e, form) {
+       form_produces_owned_managed_type(e, form, return_ty) {
         return value
     }
-    mark_data_type(e)
-    return emit_call_text("kvist_data_retain", []string{value})
+    return managed_clone_value_text(e, return_ty, value)
 }
 
 managed_return_value_text :: proc(e: ^Emitter, form: CST_Form, value: string, returns: Return_Spec) -> string {
@@ -6463,28 +8155,85 @@ emit_managed_destructure_cleanup :: proc(e: ^Emitter, binding: Binding) {
     }
     head_name := map_name(binding.value.items[0].text)
     defer delete(head_name)
+    if head_name == "decode_data" && len(binding.pattern) == 3 && len(binding.value.items) >= 2 {
+        target_ty, _, ok_target_ty := parse_type_text(binding.value.items[1])
+        if ok_target_ty {
+            if binding.pattern[0] != "" && type_text_has_managed_lifecycle(e, target_ty) {
+                emit_line(e, fmt.tprintf(
+                    "defer %s",
+                    managed_destroy_value_text(e, target_ty, binding.pattern[0]),
+                ))
+            }
+            if binding.pattern[1] != "" {
+                emit_line(e, fmt.tprintf(
+                    "defer %s",
+                    managed_destroy_value_text(e, "data__Decode_Error", binding.pattern[1]),
+                ))
+            }
+        }
+        return
+    }
     proc_decl, ok_proc := find_proc_decl(e, head_name)
     if !ok_proc || proc_decl.borrows_result || proc_decl.returns.kind != .Named || len(proc_decl.returns.named) != len(binding.pattern) {
         return
     }
     for name, idx in binding.pattern {
-        if name != "" && type_text_is_managed_value(proc_decl.returns.named[idx].ty) {
-            mark_data_type(e)
-            emit_line(e, fmt.tprintf("defer kvist_data_release(%s)", name))
+        if name != "" && type_text_has_managed_lifecycle(e, proc_decl.returns.named[idx].ty) {
+            emit_line(e, fmt.tprintf(
+                "defer %s",
+                managed_destroy_value_text(e, proc_decl.returns.named[idx].ty, name),
+            ))
         }
     }
 }
 
 managed_assignment_text :: proc(e: ^Emitter, place_form, value_form: CST_Form, place, value: string) -> (string, bool) {
+    if target_form, fields, _, ok_place := field_path_place_parts(place_form); ok_place {
+        if target_ty, ok_target_ty := obvious_form_type(e, target_form);
+           ok_target_ty && struct_field_owns_string_for_update_path(e, target_ty, fields[:]) {
+            mark_core_strings(e)
+            if form_produces_owned_value(value_form, e) {
+                return fmt.tprintf(
+                    "(proc(kvist_place: ^string, kvist_value: string) {{ kvist_previous := kvist_place^; kvist_place^ = kvist_value; delete(kvist_previous) }})(%s, %s)",
+                    address_of_expr_text(place),
+                    value,
+                ), true
+            }
+            return fmt.tprintf(
+                "(proc(kvist_place: ^string, kvist_value: string) {{ kvist_replacement := strings.clone(kvist_value); kvist_previous := kvist_place^; kvist_place^ = kvist_replacement; delete(kvist_previous) }})(%s, %s)",
+                address_of_expr_text(place),
+                value,
+            ), true
+        }
+        if target_ty, ok_target_ty := obvious_form_type(e, target_form);
+           ok_target_ty &&
+           struct_field_owns_dynamic_array_for_update_path(e, target_ty, fields[:]) {
+            field_ty, err_field_ty, ok_field_ty := struct_field_type_for_update_path(
+                e,
+                target_ty,
+                fields[:],
+                "set!",
+                place_form.span,
+            )
+            _ = err_field_ty
+            if ok_field_ty {
+                move := form_produces_owned_value(value_form, e)
+                return managed_dynamic_array_assignment_text(
+                    e,
+                    field_ty,
+                    address_of_expr_text(place),
+                    value,
+                    move,
+                ), true
+            }
+        }
+    }
     place_ty, ok_place_ty := obvious_form_type(e, place_form)
-    if !ok_place_ty || !type_text_is_managed_value(place_ty) {
+    if !ok_place_ty || !type_text_has_managed_lifecycle(e, place_ty) {
         return "", false
     }
-    mark_data_type(e)
-    helper := "kvist_data_assign"
-    if form_produces_owned_managed_value(e, value_form) {
-        helper = "kvist_data_move_assign"
-    }
+    move := form_produces_owned_managed_type(e, value_form, place_ty)
+    helper := managed_assign_helper_name(place_ty, move)
     return emit_call_text(helper, []string{address_of_expr_text(place), value}), true
 }
 
@@ -6899,6 +8648,34 @@ proc_decl_obvious_call_return_type :: proc(e: ^Emitter, proc_decl: ^Proc_Decl, a
     return substitute_type_names(proc_decl.returns.single_ty, names[:], types[:]), true
 }
 
+overload_obvious_call_return_type :: proc(e: ^Emitter, overload_name: string, args: []CST_Form) -> (string, bool) {
+    overload_decl, ok_overload := find_overload_decl(e, overload_name)
+    if !ok_overload {
+        return "", false
+    }
+    selected := ""
+    for member in overload_decl.overload_members {
+        proc_decl, ok_proc := find_proc_decl(e, member)
+        if !ok_proc || !proc_accepts_positional_arg_count(proc_decl, len(args)) {
+            continue
+        }
+        return_ty, ok_return_ty := proc_decl_obvious_call_return_type(e, proc_decl, args)
+        if !ok_return_ty {
+            return "", false
+        }
+        if selected == "" {
+            selected = return_ty
+        } else if selected != return_ty {
+            delete(return_ty)
+            delete(selected)
+            return "", false
+        } else {
+            delete(return_ty)
+        }
+    }
+    return selected, selected != ""
+}
+
 proc_decl_call_type_bindings :: proc(e: ^Emitter, proc_decl: ^Proc_Decl, args: []CST_Form) -> (names: [dynamic]string, types: [dynamic]string, ok: bool) {
     candidates := proc_decl_generic_candidates(proc_decl)
     defer delete(candidates)
@@ -7080,7 +8857,9 @@ obvious_form_type :: proc(e: ^Emitter, form: CST_Form) -> (string, bool) {
                 return return_ty, true
             }
         }
-        if (head_is_core_assoc(form.items[0].text) || head_is_core_update(form.items[0].text)) &&
+        if (head_is_core_assoc(form.items[0].text) ||
+            head_is_core_update(form.items[0].text) ||
+            head_is_core_dissoc(form.items[0].text)) &&
            len(form.items) >= 2 {
             return shallow_update_return_type(e, form)
         }
@@ -7125,6 +8904,9 @@ obvious_form_type :: proc(e: ^Emitter, form: CST_Form) -> (string, bool) {
         }
         if proc_decl, ok := find_proc_decl(e, head_name); ok {
             return proc_decl_obvious_call_return_type(e, proc_decl, form.items[1:])
+        }
+        if return_ty, ok_return_ty := overload_obvious_call_return_type(e, head_name, form.items[1:]); ok_return_ty {
+            return return_ty, true
         }
     }
     if form.kind == .Vector || form.kind == .Brace || form.kind == .Set {
@@ -7395,7 +9177,7 @@ obvious_binding_type :: proc(e: ^Emitter, binding: Binding) -> (string, bool) {
     if binding.value.kind == .List && len(binding.value.items) > 0 && binding.value.items[0].kind == .Symbol {
         head := binding.value.items[0].text
         head_name := map_name(head)
-        if (head_is_core_assoc(head) || head_is_core_update(head)) &&
+        if (head_is_core_assoc(head) || head_is_core_update(head) || head_is_core_dissoc(head)) &&
            len(binding.value.items) >= 2 {
             return shallow_update_return_type(e, binding.value)
         }
@@ -7432,6 +9214,20 @@ bind_obvious_binding_types :: proc(e: ^Emitter, binding: Binding) {
         if binding.value.kind == .List && len(binding.value.items) > 0 && binding.value.items[0].kind == .Symbol {
             head_name := map_name(binding.value.items[0].text)
             defer delete(head_name)
+            if head_name == "decode_data" && len(binding.pattern) == 3 && len(binding.value.items) >= 2 {
+                if target_ty, _, ok_target_ty := parse_type_text(binding.value.items[1]); ok_target_ty {
+                    if binding.pattern[0] != "" {
+                        bind_local_type(e, binding.pattern[0], target_ty)
+                    }
+                    if binding.pattern[1] != "" {
+                        bind_local_type(e, binding.pattern[1], "data__Decode_Error")
+                    }
+                    if binding.pattern[2] != "" {
+                        bind_local_type(e, binding.pattern[2], "bool")
+                    }
+                }
+                return
+            }
             if proc_decl, ok := find_proc_decl(e, head_name); ok && proc_decl.returns.kind == .Named && len(proc_decl.returns.named) == len(binding.pattern) {
                 for name, idx in binding.pattern {
                     if name != "" {
@@ -7646,6 +9442,7 @@ Owned_Local :: struct {
     name:              string,
     span:              Span,
     state:             Owned_Local_State,
+    move_confidence:   Compile_Warning_Confidence,
     cleanup_scheduled: bool,
 }
 
@@ -7704,12 +9501,17 @@ owned_locals_live_find_last :: proc(live: []Owned_Local, name: string) -> int {
     return -1
 }
 
-owned_locals_mark_moved_last :: proc(live: ^[dynamic]Owned_Local, name: string) -> bool {
+owned_locals_mark_moved_last :: proc(
+    live: ^[dynamic]Owned_Local,
+    name: string,
+    confidence := Compile_Warning_Confidence.Conservative,
+) -> bool {
     idx := owned_locals_find_last(live[:], name)
     if idx < 0 {
         return false
     }
     live[idx].state = .Moved
+    live[idx].move_confidence = confidence
     return true
 }
 
@@ -7724,6 +9526,9 @@ owned_locals_merge_definite_branch_moves :: proc(live: ^[dynamic]Owned_Local, th
            then_live[i].state == .Moved &&
            else_live[i].state == .Moved {
             live[i].state = .Moved
+            // Branch merging is deliberately conservative until replacement
+            // values and aliases are represented in the flow state.
+            live[i].move_confidence = .Conservative
         }
     }
 }
@@ -7747,6 +9552,7 @@ owned_locals_apply_definite_moves :: proc(live: ^[dynamic]Owned_Local, definite_
            definite_live[i].name == live[i].name &&
            definite_live[i].state == .Moved {
             live[i].state = .Moved
+            live[i].move_confidence = .Conservative
         }
     }
 }
@@ -7778,6 +9584,26 @@ form_head_symbol_text :: proc(form: CST_Form) -> (string, bool) {
     return form.items[0].text, true
 }
 
+cleanup_call_head :: proc(head: string) -> bool {
+    normalized := map_name(head)
+    defer delete(normalized)
+    return strings.contains(normalized, "destroy") ||
+           strings.contains(normalized, "free") ||
+           strings.contains(normalized, "close") ||
+           strings.contains(normalized, "release")
+}
+
+cleanup_arg_names_value :: proc(form: CST_Form, name: string) -> bool {
+    if form.kind == .Symbol {
+        return map_name(form.text) == name
+    }
+    head, ok := form_head_symbol_text(form)
+    if ok && (head == "addr" || head == "deref") && len(form.items) == 2 {
+        return cleanup_arg_names_value(form.items[1], name)
+    }
+    return false
+}
+
 form_is_delete_of_name :: proc(form: CST_Form, name: string) -> bool {
     head, ok := form_head_symbol_text(form)
     if !ok {
@@ -7785,6 +9611,13 @@ form_is_delete_of_name :: proc(form: CST_Form, name: string) -> bool {
     }
     if head == "delete" && len(form.items) == 2 && form.items[1].kind == .Symbol {
         return map_name(form.items[1].text) == name
+    }
+    if cleanup_call_head(head) {
+        for item in form.items[1:] {
+            if cleanup_arg_names_value(item, name) {
+                return true
+            }
+        }
     }
     if head == "defer" {
         for item in form.items[1:] {
@@ -7899,7 +9732,13 @@ emit_borrowed_escape_warning :: proc(e: ^Emitter, owner_name: string, span: Span
     if owner_name == "" {
         return
     }
-    emit_warning(e, fmt.tprintf("borrowed value escapes owner %s", owner_name), span)
+    emit_coded_warning(
+        e,
+        fmt.tprintf("borrowed value escapes owner %s", owner_name),
+        span,
+        .Ownership_Borrowed_Escape,
+        .Conservative,
+    )
 }
 
 borrowed_escape_owner_name :: proc(e: ^Emitter, form: CST_Form, borrowed: []Borrowed_Local, live: []Owned_Local) -> (string, bool) {
@@ -8000,8 +9839,21 @@ warn_use_after_transfer_form :: proc(e: ^Emitter, form: CST_Form, live: []Owned_
         name := map_name(form.text)
         idx := owned_locals_find_last(live, name)
         if idx >= 0 && live[idx].state == .Moved {
-            emit_warning(e, fmt.tprintf("owned local %s is used after ownership transfer", name), form.span)
+            emit_coded_warning(
+                e,
+                fmt.tprintf("owned local %s is used after ownership transfer", name),
+                form.span,
+                .Ownership_Use_After_Transfer,
+                live[idx].move_confidence,
+            )
         }
+        return
+    }
+    if head, ok := form_head_symbol_text(form); ok && head == "set!" && len(form.items) == 3 {
+        // The assignment target is a storage location, not a read of its
+        // previous value. Only the replacement expression can use a moved
+        // local.
+        warn_use_after_transfer_form(e, form.items[2], live)
         return
     }
     for item in form.items {
@@ -8126,7 +9978,7 @@ analyze_owned_scope_body :: proc(e: ^Emitter, forms: []CST_Form, can_transfer_fi
         head, ok := form_head_symbol_text(form)
         if !ok {
             if form_produces_owned_value(form, e) && !(final_in_scope && can_transfer_final) {
-                emit_warning(e, discarded_owned_warning_message(form), form.span)
+                emit_coded_warning(e, discarded_owned_warning_message(form), form.span, .Ownership_Discarded_Result)
             }
             continue
         }
@@ -8136,7 +9988,7 @@ analyze_owned_scope_body :: proc(e: ^Emitter, forms: []CST_Form, can_transfer_fi
             for item in form.items[1:] {
                 warn_if_borrowed_escape(e, item, borrowed[:], live[:])
                 if item.kind == .Symbol {
-                    _ = owned_locals_mark_moved_last(live, map_name(item.text))
+                    _ = owned_locals_mark_moved_last(live, map_name(item.text), .Definite)
                     continue
                 }
                 for i := len(live[:]) - 1; i >= 0; i -= 1 {
@@ -8149,16 +10001,16 @@ analyze_owned_scope_body :: proc(e: ^Emitter, forms: []CST_Form, can_transfer_fi
         case "discard":
             for item in form.items[1:] {
                 if form_produces_owned_value(item, e) {
-                    emit_warning(e, discarded_owned_warning_message(item), item.span)
+                    emit_coded_warning(e, discarded_owned_warning_message(item), item.span, .Ownership_Discarded_Result)
                 }
             }
         case "delete":
             for item in form.items[1:] {
                 if form_is_borrowed_view_result(item, e) {
-                    emit_warning(e, borrowed_delete_warning_message(item), item.span)
+                    emit_coded_warning(e, borrowed_delete_warning_message(item), item.span, .Ownership_Delete_Borrowed)
                 }
                 if item.kind == .Symbol {
-                    _ = owned_locals_mark_moved_last(live, map_name(item.text))
+                    _ = owned_locals_mark_moved_last(live, map_name(item.text), .Definite)
                 }
             }
         case "set!":
@@ -8167,11 +10019,29 @@ analyze_owned_scope_body :: proc(e: ^Emitter, forms: []CST_Form, can_transfer_fi
                 if name == "" {
                     continue
                 }
-                if owned_locals_live_find_last(live[:], name) >= 0 {
-                    emit_warning(e, fmt.tprintf("owned local %s is overwritten before cleanup; delete it or return it before set!", name), form.items[1].span)
-                    _ = owned_locals_mark_moved_last(live, name)
+                existing_idx := owned_locals_find_last(live[:], name)
+                if existing_idx >= 0 && live[existing_idx].state == .Live {
+                    emit_coded_warning(
+                        e,
+                        fmt.tprintf("owned local %s is overwritten before cleanup; delete it or return it before set!", name),
+                        form.items[1].span,
+                        .Ownership_Overwrite,
+                    )
                 }
-                if form_produces_owned_value(form.items[2], e) {
+                if existing_idx >= 0 {
+                    // `set!` replaces the storage; it is not a later read of
+                    // the value deleted immediately beforehand. The target's
+                    // native type still determines that the replacement is an
+                    // owned value even when the RHS is a local symbol.
+                    live[existing_idx].state = .Live
+                    live[existing_idx].move_confidence = .Conservative
+                    if form.items[2].kind == .Symbol {
+                        rhs_name := map_name(form.items[2].text)
+                        if rhs_name != name {
+                            _ = owned_locals_mark_moved_last(live, rhs_name)
+                        }
+                    }
+                } else if form_produces_owned_value(form.items[2], e) {
                     append(live, Owned_Local{name = name, span = form.items[1].span})
                 }
                 if owner, ok_owner := form_borrowed_assignment_owner_name(e, form.items[2], borrowed[:], live[:]); ok_owner {
@@ -8200,7 +10070,7 @@ analyze_owned_scope_body :: proc(e: ^Emitter, forms: []CST_Form, can_transfer_fi
                 }
                 mark_transferred_owned_args(binding.value, live)
                 if (binding.deferred_delete || binding.defer_with_cleanup) && form_is_borrowed_view_result(binding.value, e) {
-                    emit_warning(e, borrowed_delete_warning_message(binding.value), binding.value.span)
+                    emit_coded_warning(e, borrowed_delete_warning_message(binding.value), binding.value.span, .Ownership_Delete_Borrowed)
                 }
                 if !binding.is_destructure && binding.name != "" && form_is_borrowed_view_result(binding.value, e) {
                     if owner, ok_owner := form_direct_borrow_owner_name(binding.value, e); ok_owner && owned_locals_live_find_last(live[:], owner) >= 0 {
@@ -8240,7 +10110,13 @@ analyze_owned_scope_body :: proc(e: ^Emitter, forms: []CST_Form, can_transfer_fi
                     }
                 }
                 if !skip_warning && !body_deletes_or_returns_name(form.items[2:], live[i].name, final_in_scope && can_transfer_final) {
-                    emit_warning(e, fmt.tprintf("owned local %s is never deleted or returned; add (defer (delete %s)) or return it", live[i].name, live[i].name), live[i].span)
+                    emit_coded_warning(
+                        e,
+                        fmt.tprintf("owned local %s is never deleted or returned; add (defer (delete %s)) or return it", live[i].name, live[i].name),
+                        live[i].span,
+                        .Ownership_Unreleased_Local,
+                        .Conservative,
+                    )
                 }
             }
             resize(live, start)
@@ -8311,7 +10187,7 @@ analyze_owned_scope_body :: proc(e: ^Emitter, forms: []CST_Form, can_transfer_fi
         case:
             mark_transferred_owned_args(form, live)
             if form_produces_owned_value(form, e) && !(final_in_scope && can_transfer_final) {
-                emit_warning(e, discarded_owned_warning_message(form), form.span)
+                emit_coded_warning(e, discarded_owned_warning_message(form), form.span, .Ownership_Discarded_Result)
             }
         }
     }
@@ -8334,7 +10210,12 @@ lint_defer_in_loop_form :: proc(e: ^Emitter, form: CST_Form, in_loop_scope: bool
     }
 
     if head == "defer" && in_loop_scope {
-        emit_warning(e, "defer inside loop runs when the surrounding scope exits, not after each iteration; wrap the iteration body in block or clean up explicitly", form.span)
+        emit_coded_warning(
+            e,
+            "defer inside loop runs when the surrounding scope exits, not after each iteration; wrap the iteration body in block or clean up explicitly",
+            form.span,
+            .Ownership_Defer_In_Loop,
+        )
         return
     }
 
@@ -9503,10 +11384,8 @@ emit_operator_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Erro
         }
         if ty, ok := obvious_form_type(e, form.items[1]); ok {
             if ty == "Data" {
-                data_key, err_data_key, ok_data_key := emit_data_value_literal(e, form.items[2])
-                if form.items[2].kind == .Symbol {
-                    data_key, err_data_key, ok_data_key = emit_expr(e, form.items[2])
-                }
+                data_key, err_data_key, ok_data_key :=
+                    emit_call_arg_for_expected_type(e, form.items[2], "Data")
                 if !ok_data_key {
                     return "", err_data_key, false
                 }
@@ -9560,6 +11439,15 @@ find_struct_decl :: proc(e: ^Emitter, name: string) -> (^Struct_Decl, bool) {
     for i in 0..<len(e.structs) {
         if e.structs[i].name == name {
             return &e.structs[i], true
+        }
+    }
+    return nil, false
+}
+
+find_enum_decl :: proc(e: ^Emitter, name: string) -> (^Enum_Decl, bool) {
+    for i in 0..<len(e.decls) {
+        if e.decls[i].kind == .Enum && e.decls[i].enum_decl.name == name {
+            return &e.decls[i].enum_decl, true
         }
     }
     return nil, false
@@ -12446,6 +14334,15 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
     if head.text == "copy-update" {
         return emit_shallow_update_expr(e, form)
     }
+    if head.text == "copy-dissoc" {
+        return emit_data_dissoc_expr(e, form)
+    }
+    if head.text == "copy-dissoc-in" {
+        return emit_data_dissoc_in_expr(e, form)
+    }
+    if head.text == "decode-data" {
+        return emit_data_decode_expr(e, form)
+    }
 
     if head.text == "as->" {
         return emit_as_thread_expr(e, form)
@@ -12501,7 +14398,9 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         }
         head_name := map_name(head.text)
         if !strings.contains(head_name, ".") {
-            if _, _, ok_proc := resolve_proc_call_decl(e, head.text); ok_proc {
+            if call_head_is_overload(e, head) {
+                // Let the normal call path apply the overload's literal context.
+            } else if _, _, ok_proc := resolve_proc_call_decl(e, head.text); ok_proc {
                 // Let the normal call path handle declared procedures with vector arguments.
             } else {
                 type_text, err_type, ok_type := parse_type_text(head)
@@ -12533,7 +14432,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         }
     }
 
-    if len(form.items) == 2 && form.items[1].kind == .Set {
+    if len(form.items) == 2 && form.items[1].kind == .Set && !call_head_is_overload(e, head) {
         type_text, err_type, ok_type := parse_type_text(head)
         if !ok_type {
             return "", err_type, false
@@ -12546,7 +14445,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         return emit_quaternion_arg_constructor(e, form.items[1:], form.span)
     }
 
-    if len(form.items) == 2 && form.items[1].kind == .Brace {
+    if len(form.items) == 2 && form.items[1].kind == .Brace && !call_head_is_overload(e, head) {
         head_name := map_name(head.text)
         struct_decl, ok_struct := find_struct_decl(e, head_name)
         if ok_struct {
@@ -12645,8 +14544,11 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         arg_text := ""
         err_arg: Compile_Error
         ok_arg := false
-        if expected_type, ok_expected := imported_odin_proc_arg_type(e, head_name, arg_idx); ok_expected {
-            arg_text, err_arg, ok_arg = emit_expr_for_expected_type(e, arg, expected_type)
+        if expected_type, ok_expected := overload_literal_arg_expected_type(e, head_name, form.items[1:], arg_idx); ok_expected {
+            arg_text, err_arg, ok_arg = emit_call_arg_for_expected_type(e, arg, expected_type)
+            delete(expected_type)
+        } else if expected_type, ok_expected := imported_odin_proc_arg_type(e, head_name, arg_idx); ok_expected {
+            arg_text, err_arg, ok_arg = emit_call_arg_for_expected_type(e, arg, expected_type)
             delete(expected_type)
         } else {
             arg_text, err_arg, ok_arg = emit_expr(e, arg)
@@ -13640,7 +15542,7 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
             expr = managed_return_value_text(e, form, expr, returns)
             emit_prefixed_expr_mapped(e, "return ", expr, form.span)
         } else if form_is_owned_allocation_result(form) || form_is_owned_constructor_result(form) {
-            emit_prefixed_expr_mapped(e, "_ = ", expr, form.span)
+            emit_discarded_expr(e, form, expr)
         } else {
             emit_prefixed_expr_mapped(e, "", expr, form.span)
         }
@@ -13668,7 +15570,7 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
             expr = managed_return_value_text(e, form, expr, returns)
             emit_prefixed_expr_mapped(e, "return ", expr, form.span)
         } else if form_is_owned_allocation_result(form) || form_is_owned_constructor_result(form) {
-            emit_prefixed_expr_mapped(e, "_ = ", expr, form.span)
+            emit_discarded_expr(e, form, expr)
         } else {
             emit_prefixed_expr_mapped(e, "", expr, form.span)
         }
@@ -13779,7 +15681,8 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
                     return err_value, false
                 }
                 managed := false
-                value, managed = managed_binding_value_text(e, binding, value)
+                managed_ty := ""
+                value, managed_ty, managed = managed_binding_value_text(e, binding, value)
                 if binding.is_result_binding && binding.or_modifier == "or-return" {
                     if !named_returns_match_binding_pattern(returns, binding.pattern[:]) {
                         return Compile_Error{
@@ -13793,7 +15696,7 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
                     emit_managed_destructure_cleanup(e, binding)
                 }
                 if managed && !binding.deferred_delete && !binding.err_deferred_delete && !binding.defer_with_cleanup {
-                    emit_line(e, fmt.tprintf("defer kvist_data_release(%s)", binding.name))
+                    emit_line(e, fmt.tprintf("defer %s", managed_destroy_value_text(e, managed_ty, binding.name)))
                 }
             }
             err_guard, ok_guard := emit_result_binding_guard(e, binding, returns)
@@ -13926,7 +15829,7 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
             if !ok_expr {
                 return err_expr, false
             }
-            emit_prefixed_expr_mapped(e, "_ = ", expr, item.span)
+            emit_discarded_expr(e, item, expr)
         }
         return {}, true
     case "break":
@@ -14157,7 +16060,7 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
             expr = managed_return_value_text(e, form, expr, returns)
             emit_prefixed_expr_mapped(e, "return ", expr, form.span)
         } else if form_is_owned_allocation_result(form) || form_is_owned_constructor_result(form) {
-            emit_prefixed_expr_mapped(e, "_ = ", expr, form.span)
+            emit_discarded_expr(e, form, expr)
         } else {
             emit_prefixed_expr_mapped(e, "", expr, form.span)
         }
@@ -14358,6 +16261,78 @@ emit_proc_where_constraints :: proc(e: ^Emitter, constraints: []CST_Form) -> (Co
     return {}, true
 }
 
+known_decl_type_with_suffix :: proc(e: ^Emitter, owner, token: string) -> (string, bool) {
+    suffix := fmt.tprintf("__%s", token)
+    selected := ""
+    for decl in e.decls {
+        name := ""
+        #partial switch decl.kind {
+        case .Struct:
+            name = decl.struct_decl.name
+        case .Union:
+            name = decl.union_decl.name
+        case .Enum:
+            name = decl.enum_decl.name
+        }
+        if name == "" ||
+           !strings.has_suffix(name, suffix) ||
+           len(name) <= len(suffix) {
+            continue
+        }
+        prefix := name[:len(name)-len(suffix)]
+        if !strings.has_prefix(owner, prefix) ||
+           len(owner) <= len(prefix)+1 ||
+           owner[len(prefix)] != '_' ||
+           owner[len(prefix)+1] != '_' {
+            continue
+        }
+        if selected != "" && selected != name {
+            return "", false
+        }
+        selected = name
+    }
+    if selected == "" {
+        return "", false
+    }
+    return strings.clone(selected), true
+}
+
+type_identifier_start :: proc(ch: u8) -> bool {
+    return (ch >= 'A' && ch <= 'Z') ||
+           (ch >= 'a' && ch <= 'z') ||
+           ch == '_'
+}
+
+type_identifier_continue :: proc(ch: u8) -> bool {
+    return type_identifier_start(ch) || (ch >= '0' && ch <= '9')
+}
+
+qualify_flattened_decl_type :: proc(e: ^Emitter, owner, text: string) -> string {
+    builder := strings.builder_make()
+    defer strings.builder_destroy(&builder)
+    i := 0
+    for i < len(text) {
+        if !type_identifier_start(text[i]) {
+            strings.write_byte(&builder, text[i])
+            i += 1
+            continue
+        }
+        start := i
+        i += 1
+        for i < len(text) && type_identifier_continue(text[i]) {
+            i += 1
+        }
+        token := text[start:i]
+        if qualified, ok_qualified := known_decl_type_with_suffix(e, owner, token); ok_qualified {
+            strings.write_string(&builder, qualified)
+            delete(qualified)
+        } else {
+            strings.write_string(&builder, token)
+        }
+    }
+    return strings.clone(strings.to_string(builder))
+}
+
 emit_decl :: proc(e: ^Emitter, decl: IR_Decl) -> (Compile_Error, bool) {
     mark_decl_keyword_usage(e, decl)
     for line in decl.doc_lines {
@@ -14450,6 +16425,18 @@ emit_decl :: proc(e: ^Emitter, decl: IR_Decl) -> (Compile_Error, bool) {
             emit_line(e, fmt.tprintf("%s := %s", decl.var_decl.name, value))
         }
     case .Struct:
+        for field in decl.struct_decl.fields {
+            if field.has_default &&
+               !literal_matches_struct_field_type(e, field.ty, field.default_value) {
+                return Compile_Error{
+                    message = fmt.tprintf(
+                        "struct field default type mismatch for %s:",
+                        field.source_name,
+                    ),
+                    span = field.default_value.span,
+                }, false
+            }
+        }
         emit_indent(e)
         strings.write_string(&e.builder, decl.struct_decl.name)
         strings.write_string(&e.builder, " :: struct {")
@@ -14460,10 +16447,13 @@ emit_decl :: proc(e: ^Emitter, decl: IR_Decl) -> (Compile_Error, bool) {
             if field.is_using {
                 prefix = "using "
             }
-            emit_line(e, fmt.tprintf("%s%s: %s,", prefix, field.name, field.ty))
+            field_ty := qualify_flattened_decl_type(e, decl.struct_decl.name, field.ty)
+            emit_line(e, fmt.tprintf("%s%s: %s,", prefix, field.name, field_ty))
+            delete(field_ty)
         }
         e.indent -= 1
         emit_line(e, "}")
+        emit_managed_struct_helpers(e, decl.struct_decl)
     case .Enum:
         emit_indent(e)
         strings.write_string(&e.builder, decl.enum_decl.name)
@@ -15286,6 +17276,21 @@ emit_data_type_helper :: proc(e: ^Emitter) {
     emit_line(e, "return Data{kind = .Map, payload = {entries = node.entries[:]}, node = node}")
     e.indent -= 1
     emit_line(e, "}")
+    emit_line(e, "kvist_data_dissoc_in :: proc(collection, path: Data, allocator: kvist_runtime.Allocator = context.allocator) -> Data {")
+    e.indent += 1
+    emit_line(e, "assert(collection.kind == .Map, \"Data dissoc-in expects a map\")")
+    emit_line(e, "assert(path.kind == .List || path.kind == .Vector, \"Data dissoc-in expects a list or vector path\")")
+    emit_line(e, "if len(path.payload.items) == 0 { return kvist_data_retain(collection) }")
+    emit_line(e, "key := path.payload.items[0]")
+    emit_line(e, "if len(path.payload.items) == 1 { return kvist_data_dissoc(collection, key, allocator) }")
+    emit_line(e, "child := kvist_data_get(collection, key)")
+    emit_line(e, "if child.kind != .Map { return kvist_data_retain(collection) }")
+    emit_line(e, "tail := Data{kind = path.kind, payload = {items = path.payload.items[1:]}, node = path.node}")
+    emit_line(e, "updated := kvist_data_dissoc_in(child, tail, allocator)")
+    emit_line(e, "defer kvist_data_release(updated)")
+    emit_line(e, "return kvist_data_assoc(collection, key, updated, allocator)")
+    e.indent -= 1
+    emit_line(e, "}")
     emit_line(e, "kvist_data_conj :: proc(collection, value: Data, allocator: kvist_runtime.Allocator = context.allocator) -> Data {")
     e.indent += 1
     emit_line(e, "assert(collection.kind == .List || collection.kind == .Vector || collection.kind == .Set, \"Data conj expects a list, vector, or set\")")
@@ -15746,7 +17751,7 @@ emit_runtime_def_lifecycle :: proc(e: ^Emitter) -> (Compile_Error, bool) {
         }
         if type_text_is_managed_value(decl.const_decl.ty) {
             mark_data_type(e)
-            if !form_produces_owned_managed_value(e, decl.const_decl.value) {
+            if !form_produces_owned_managed_type(e, decl.const_decl.value, decl.const_decl.ty) {
                 retained := emit_call_text("kvist_data_retain", []string{value})
                 delete(value)
                 value = retained

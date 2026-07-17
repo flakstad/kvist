@@ -82,10 +82,14 @@ Param :: struct {
 }
 
 Struct_Field :: struct {
-    name:        string,
-    source_name: string,
-    ty:          string,
-    is_using:    bool,
+    name:               string,
+    source_name:        string,
+    ty:                 string,
+    is_using:           bool,
+    owns_string:        bool,
+    owns_dynamic_array: bool,
+    has_default:        bool,
+    default_value:      CST_Form,
 }
 
 Union_Variant :: struct {
@@ -151,6 +155,7 @@ Var_Decl :: struct {
 
 Enum_Variant :: struct {
     name:      string,
+    source_name: string,
     has_value: bool,
     value:     CST_Form,
 }
@@ -257,12 +262,30 @@ Compile_Error :: struct {
     span:    Span,
 }
 
+Compile_Warning_Code :: enum {
+    General,
+    Ownership_Discarded_Result,
+    Ownership_Unreleased_Local,
+    Ownership_Use_After_Transfer,
+    Ownership_Overwrite,
+    Ownership_Borrowed_Escape,
+    Ownership_Delete_Borrowed,
+    Ownership_Defer_In_Loop,
+}
+
+Compile_Warning_Confidence :: enum {
+    Definite,
+    Conservative,
+}
+
 Compile_Warning :: struct {
     message:     string,
     span:        Span,
     source_path: string,
     line:        int,
     column:      int,
+    code:        Compile_Warning_Code,
+    confidence:  Compile_Warning_Confidence,
 }
 
 Builtin_Macro_Kind :: enum {

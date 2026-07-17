@@ -336,6 +336,39 @@ struct_field_exists :: proc(fields: []Struct_Field, name: string) -> bool {
     return false
 }
 
+parse_owned_struct_field_type :: proc(
+    form: CST_Form,
+) -> (
+    ty: string,
+    owns_string, owns_dynamic_array, handled: bool,
+    err: Compile_Error,
+    ok: bool,
+) {
+    if form.kind != .List || len(form.items) < 2 || !is_symbol(form.items[0], "owned") {
+        return "", false, false, false, {}, true
+    }
+    type_text, next_i, err_type, ok_type := parse_type_text_from_forms(form.items[:], 1)
+    if !ok_type {
+        return "", false, false, true, err_type, false
+    }
+    if next_i != len(form.items) {
+        return "", false, false, true, Compile_Error{
+            message = "owned struct field type expects exactly one type",
+            span = form.span,
+        }, false
+    }
+    if type_text == "string" {
+        return type_text, true, false, true, {}, true
+    }
+    if len(type_text) >= len("[dynamic]") && type_text[:len("[dynamic]")] == "[dynamic]" {
+        return type_text, false, true, true, {}, true
+    }
+    return "", false, false, true, Compile_Error{
+        message = "owned struct fields currently support string and dynamic-array types",
+        span = form.span,
+    }, false
+}
+
 parse_defstruct_type_meta :: proc(form: CST_Form) -> (text: string, err: Compile_Error, ok: bool) {
     #partial switch form.kind {
     case .Keyword:
@@ -822,20 +855,59 @@ parse_struct_fields :: proc(form: CST_Form) -> (fields: [dynamic]Struct_Field, e
         if struct_field_exists(fields[:], field_name) {
             return fields, Compile_Error{message = fmt.tprintf("duplicate struct field %s", key.text), span = key.span}, false
         }
-        type_text, next_i, err_type, ok_type := parse_type_text_from_forms(form.items[:], i+1)
-        if !ok_type {
-            return fields, err_type, false
+        type_text := ""
+        next_i := i + 2
+        owned_type, owns_string, owns_dynamic_array, owned_handled, err_owned, ok_owned :=
+            parse_owned_struct_field_type(form.items[i+1])
+        if !ok_owned {
+            return fields, err_owned, false
+        }
+        if owned_handled {
+            type_text = owned_type
+        } else {
+            err_type: Compile_Error
+            ok_type: bool
+            type_text, next_i, err_type, ok_type = parse_type_text_from_forms(form.items[:], i+1)
+            if !ok_type {
+                return fields, err_type, false
+            }
         }
         using_field := false
-        if next_i < len(form.items) && form.items[next_i].kind == .Keyword && form.items[next_i].text == ":using" {
-            using_field = true
-            next_i += 1
+        has_default := false
+        default_value: CST_Form
+        parsing_modifiers := true
+        for parsing_modifiers && next_i < len(form.items) && form.items[next_i].kind == .Keyword {
+            marker := form.items[next_i]
+            switch marker.text {
+            case ":using":
+                if using_field {
+                    return fields, Compile_Error{message = "duplicate :using struct field modifier", span = marker.span}, false
+                }
+                using_field = true
+                next_i += 1
+            case ":default":
+                if has_default {
+                    return fields, Compile_Error{message = "duplicate :default struct field modifier", span = marker.span}, false
+                }
+                if next_i+1 >= len(form.items) {
+                    return fields, Compile_Error{message = "missing struct field default value", span = marker.span}, false
+                }
+                has_default = true
+                default_value = form.items[next_i+1]
+                next_i += 2
+            case:
+                parsing_modifiers = false
+            }
         }
         append(&fields, Struct_Field{
-            name        = field_name,
-            source_name = source_name,
-            ty          = type_text,
-            is_using    = using_field,
+            name          = field_name,
+            source_name   = source_name,
+            ty            = type_text,
+            is_using      = using_field,
+            owns_string   = owns_string,
+            owns_dynamic_array = owns_dynamic_array,
+            has_default   = has_default,
+            default_value = default_value,
         })
         i = next_i
     }
@@ -869,20 +941,59 @@ parse_defstruct_fields :: proc(form: CST_Form) -> (fields: [dynamic]Struct_Field
         if struct_field_exists(fields[:], field_name) {
             return fields, Compile_Error{message = fmt.tprintf("duplicate defstruct field %s", key.text), span = key.span}, false
         }
-        type_text, next_i, err_type, ok_type := parse_type_text_from_forms(form.items[:], i+1)
-        if !ok_type {
-            return fields, err_type, false
+        type_text := ""
+        next_i := i + 2
+        owned_type, owns_string, owns_dynamic_array, owned_handled, err_owned, ok_owned :=
+            parse_owned_struct_field_type(form.items[i+1])
+        if !ok_owned {
+            return fields, err_owned, false
+        }
+        if owned_handled {
+            type_text = owned_type
+        } else {
+            err_type: Compile_Error
+            ok_type: bool
+            type_text, next_i, err_type, ok_type = parse_type_text_from_forms(form.items[:], i+1)
+            if !ok_type {
+                return fields, err_type, false
+            }
         }
         using_field := false
-        if next_i < len(form.items) && form.items[next_i].kind == .Keyword && form.items[next_i].text == ":using" {
-            using_field = true
-            next_i += 1
+        has_default := false
+        default_value: CST_Form
+        parsing_modifiers := true
+        for parsing_modifiers && next_i < len(form.items) && form.items[next_i].kind == .Keyword {
+            marker := form.items[next_i]
+            switch marker.text {
+            case ":using":
+                if using_field {
+                    return fields, Compile_Error{message = "duplicate :using defstruct field modifier", span = marker.span}, false
+                }
+                using_field = true
+                next_i += 1
+            case ":default":
+                if has_default {
+                    return fields, Compile_Error{message = "duplicate :default defstruct field modifier", span = marker.span}, false
+                }
+                if next_i+1 >= len(form.items) {
+                    return fields, Compile_Error{message = "missing defstruct field default value", span = marker.span}, false
+                }
+                has_default = true
+                default_value = form.items[next_i+1]
+                next_i += 2
+            case:
+                parsing_modifiers = false
+            }
         }
         append(&fields, Struct_Field{
-            name        = field_name,
-            source_name = source_name,
-            ty          = type_text,
-            is_using    = using_field,
+            name          = field_name,
+            source_name   = source_name,
+            ty            = type_text,
+            is_using      = using_field,
+            owns_string   = owns_string,
+            owns_dynamic_array = owns_dynamic_array,
+            has_default   = has_default,
+            default_value = default_value,
         })
         i = next_i
     }
@@ -923,7 +1034,10 @@ parse_enum_variants :: proc(form: CST_Form) -> (variants: [dynamic]Enum_Variant,
             if item.kind != .Symbol {
                 return variants, Compile_Error{message = "expected enum variant symbol", span = item.span}, false
             }
-            append(&variants, Enum_Variant{name = map_name(item.text)})
+            append(&variants, Enum_Variant{
+                name = map_name(item.text),
+                source_name = item.text,
+            })
         }
         return variants, {}, true
     case .Brace:
@@ -933,12 +1047,13 @@ parse_enum_variants :: proc(form: CST_Form) -> (variants: [dynamic]Enum_Variant,
                 return variants, Compile_Error{message = "missing enum variant value", span = form.span}, false
             }
             key := form.items[i]
-            variant_name, _, ok_label := parse_label_name(key)
+            variant_name, variant_source_name, ok_label := parse_label_name(key)
             if !ok_label {
                 return variants, Compile_Error{message = "expected enum variant label", span = key.span}, false
             }
             append(&variants, Enum_Variant{
                 name = variant_name,
+                source_name = variant_source_name,
                 has_value = true,
                 value = form.items[i+1],
             })

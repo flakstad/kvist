@@ -442,6 +442,54 @@ The parser also accepts `[slice T]` as a vector shorthand in `defstruct` field
 metadata. It lowers to `[]T`. Use ordinary type spelling such as `[dynamic]T`,
 `[N]T`, and `(set T)` for dynamic arrays, fixed arrays, and sets.
 
+Use `(owned string)` for a struct field that owns its native string storage:
+
+```clojure
+(defstruct Person {
+  name: (owned string)
+})
+```
+
+The emitted Odin field type remains `string`. Kvist clones borrowed values on
+construction and `assoc`, moves owned constructor expressions, clones the field
+when its containing struct is copied, and deletes it with the struct. Plain
+`string` fields retain their existing borrowed/unmanaged semantics.
+
+Dynamic-array storage can be managed by a containing struct in the same
+explicit way:
+
+```clojure
+(defstruct Batch {
+  ids: (owned [dynamic]i64)
+  values: (owned [dynamic]Data)
+})
+```
+
+Both fields lower to ordinary Odin dynamic arrays. The `owned` annotation makes
+the struct responsible for their backing allocations: copying the struct
+copies the arrays, replacement disposes the previous arrays, and destroying the
+struct deletes them. Constructing the struct with an array transfers its backing
+storage into the field. `Data` elements are retained and released individually.
+For other element types, ownership covers the array backing storage; borrowed
+resources inside an element keep their own native lifetime rules.
+
+Use `:default` after a field type to replace its zero-value construction
+default:
+
+```clojure
+(defstruct Settings {
+  port: i64 :default 8080
+  label: (owned string) :default "local"
+})
+
+(Settings {})
+```
+
+Defaults are evaluated when an omitted field is constructed. They follow the
+field's normal ownership rules, so the example clones `"local"` into storage
+owned by the resulting `Settings`. Struct signatures and editor metadata retain
+the annotation, and obvious literal type mismatches are compiler errors.
+
 ### Enums
 
 Enums define a named integer-like set of values:
@@ -609,6 +657,23 @@ sets remain native homogeneous collections.
            (contains? features :query)
            (count query)))
 ```
+
+An unquoted collection literal is also Data when its surrounding type context
+expects `Data`. Its scalar literals become Data values, while symbols and calls
+are evaluated and converted from Data or native scalar values:
+
+```clojure
+(defn contact [id: i64, name: string] -> Data
+  {:db/id id
+   :contact/name name})
+
+(data.conj transactions
+  [:db/add [:contact/id id] :contact/email email])
+```
+
+Return types, typed bindings, function parameters, and uniquely matching
+overload parameters provide this context. Without Data context, unquoted
+vectors, maps, and sets remain native homogeneous collections.
 
 `Data` represents nil, booleans, integers, floats, strings, symbols, keywords,
 lists, vectors, maps, and sets. Quoted literals use static backing storage, are
@@ -796,6 +861,19 @@ useful for debugging and tooling. The returned string is owned because
 `fmt.aprintf` returns an allocator-backed string. Use `fmt.tprintf` for
 temporary-allocator strings that are consumed immediately and not deleted
 manually.
+
+For ordinary construction, use core `str`:
+
+```clojure
+(let [request (str "@get('" path "', {openWhenHidden: true})")
+      :defer]
+  (println request))
+```
+
+`str` accepts Odin-printable values, does not interpret braces or percent
+signs in its string arguments, and lowers to one allocator-backed
+`fmt.aprintf` call. Its result is always an owned string, including `(str)`, so
+bind it with `:defer`, delete it explicitly, or return it.
 
 Use `$T: typeid` when the caller passes a type explicitly:
 
@@ -1649,21 +1727,103 @@ Unary mutation helpers are available for common place updates:
 
 ### Non-Mutating Value Updates
 
-For struct updates where you want a changed copy instead of mutating the
-original value, use `assoc` and `update`:
+For native struct or immutable `Data` updates where you want a changed value
+instead of mutating the original, use `assoc` and `update`:
 
 ```clojure
 (assoc user.name "Ada")
 (assoc user.profile.name "Ada")
 (update user.age inc)
 (update user.profile.age + 1)
+
+(assoc message :status :ready)
+(update message :attempts increment-data)
 ```
 
-These forms copy the root struct value once, update the selected field path on
-the copy, and return the copy.
+Dispatch is resolved statically from the target type. Struct forms copy the
+root value once, update the selected field path, and return the copy. Data forms
+perform an immutable map or vector update and preserve structural sharing.
+
+Remove map keys from Data with `dissoc`. It accepts one or more keys:
+
+```clojure
+(dissoc message :temporary)
+(dissoc message :temporary :debug)
+```
+
+Use `dissoc-in` with a Data list or vector path to remove a nested leaf:
+
+```clojure
+(dissoc-in message '[:request :credentials])
+```
+
+Missing paths leave the original value unchanged. Empty parent maps are
+preserved rather than implicitly pruned.
 
 Dynamic arrays, slices, maps, and sets are not path-updated this way; use
-explicit copying or mutation for those.
+explicit copying or mutation for those. This restriction does not apply to
+immutable `Data` collections.
+
+### Decoding Data Into Native Structs
+
+Use `data.decode` when a dynamic boundary should become a concrete native
+struct:
+
+```clojure
+(defstruct Settings {
+  port: i64
+  enabled: bool
+  metadata: Data
+})
+
+(let [[settings err ok]
+      (data.decode Settings message '[:settings])]
+  (if ok
+    (start settings)
+    (println err.path err.expected err.actual)))
+```
+
+The optional path becomes the root of any `Decode-Error`. Required nested
+Kvist structs and `Data`, boolean, integer, floating-point, explicitly owned
+string, and enum fields are supported. Enum keywords use lowercase source
+spelling, so `.Read-Only` is represented by `:read-only`. A keyword outside the
+enum sets `err.enum-value?`, `err.expected-type`, and `err.actual-value`.
+Decoded strings require `(owned string)` so their storage lifetime is explicit;
+plain borrowed `string` fields are rejected. Nested validation completes before
+construction, so managed leaves are acquired only for a successful result. The
+decoded struct and error follow normal deterministic managed-value cleanup.
+A field annotated `:default value` is optional at the Data boundary: a missing
+map key evaluates the same default used by ordinary struct construction, while
+a present key is still validated. Presence is checked independently from Data
+`nil`, so an explicit `nil` does not select the default.
+
+Fields declared `(owned [dynamic]T)` decode Data vectors into owning native
+dynamic arrays when `T` is `Data`, `bool`, an integer scalar, or a
+floating-point scalar, a Kvist enum, or a Kvist struct:
+
+```clojure
+(defstruct Point {
+  x: i64
+  y: i64
+})
+
+(defstruct Batch {
+  ids: (owned [dynamic]i64)
+  points: (owned [dynamic]Point)
+})
+
+(data.decode Batch '{:ids [10 20 30]
+                     :points [{:x 1 :y 2}
+                              {:x 3 :y 4}]})
+```
+
+Every element is validated before the native array is allocated. Errors append
+the failing numeric index to the Data path, such as `[:ids 1]`. Nested struct
+fields extend that path further, such as `[:points 1 :x]`, and honor the same
+defaults and managed-field rules as directly nested structs. `Data` elements
+are retained; scalar and enum elements are stored unboxed. Invalid enum
+keywords also populate `expected-type` and `actual-value`. Native string arrays,
+borrowed slices, and direct collection decode targets remain future work.
 
 In a `->` pipeline, use a `.field` selector step:
 
@@ -1752,21 +1912,27 @@ the result type:
   count)
 ```
 
-The compiler also has conservative ownership warnings for obvious mistakes.
-These warnings are advisory. They do not mean Kvist has an automatic ownership
+The compiler also has coded ownership warnings for obvious mistakes. These
+warnings are advisory. They do not mean Kvist has an automatic ownership
 system, and they do not change generated Odin.
 
-`kvist check` reports these warnings with source locations:
+Normal commands report definite findings. Add `--ownership-audit` to include
+conservative findings from the flow analysis:
 
 ```text
-warning: owned result from arr.range is discarded; bind it, delete it, or return it
-warning: owned local xs is never deleted or returned; add (defer (delete xs)) or return it
-warning: owned local xs is overwritten before cleanup; delete it or return it before set!
-warning: owned local xs is used after ownership transfer
-warning: borrowed value escapes owner xs
+warning[KVO001]: owned result from arr.range is discarded; bind it, delete it, or return it
+warning[KVO002, conservative]: owned local xs is never deleted or returned; add (defer (delete xs)) or return it
+warning[KVO004]: owned local xs is overwritten before cleanup; delete it or return it before set!
+warning[KVO003, conservative]: owned local xs is used after ownership transfer
+warning[KVO005, conservative]: borrowed value escapes owner xs
 ```
 
-The pass is intentionally conservative. It recognizes owned results from source
+Equivalent findings at the same source location are printed once. The compiler
+API retains every warning with its stable `code` and `confidence` fields so
+tools can choose their own policy. Explicit deferred destructors whose names
+identify destroy, free, close, or release operations are recognized as cleanup.
+
+The audit pass is intentionally conservative. It recognizes owned results from source
 proc return types, source procs marked `#owned`, known owned-result helper
 shapes such as `arr.range`, `arr.empty`, `map.empty`, and `set.union`;
 borrowed views from source procs marked `#borrowed`; known borrowed-view helper
@@ -1794,7 +1960,12 @@ Valid local use of the same borrowed view does not warn:
 ```
 
 See `examples/collections/ownership-warnings.kvist` for a small warning
-surface tour.
+surface tour:
+
+```sh
+kvist check examples/collections/ownership-warnings.kvist
+kvist check examples/collections/ownership-warnings.kvist --ownership-audit
+```
 
 ### The Implicit `context`
 

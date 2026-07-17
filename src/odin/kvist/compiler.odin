@@ -1657,7 +1657,7 @@ rewrite_decl_name :: proc(form: ^CST_Form, prefix: string) {
 
 type_constructor_symbol :: proc(text: string) -> bool {
     switch text {
-    case "slice", "dynamic", "array", "map", "matrix", "ptr", "distinct", "fn", "type":
+    case "slice", "dynamic", "array", "map", "matrix", "ptr", "distinct", "fn", "type", "owned":
         return true
     }
     return false
@@ -2021,6 +2021,73 @@ rewrite_proc_like_top_form :: proc(top: CST_Top_Form, locals: []string, aliases:
     return rewritten, Compile_Error{}, true
 }
 
+rewrite_struct_top_form :: proc(top: CST_Top_Form, locals: []string, aliases: []Alias_Prefix, prefix: string) -> (CST_Top_Form, Compile_Error, bool) {
+    rewritten := top
+    rewritten.form = top.form
+    rewritten.form.items = nil
+    rewrote_fields := false
+    for item, idx in top.form.items {
+        if idx == 1 {
+            renamed := rewrite_symbol_form_text(item, fmt.tprintf("%s__%s", prefix, item.text))
+            append(&rewritten.form.items, renamed)
+            continue
+        }
+        if item.kind != .Brace || rewrote_fields {
+            append(&rewritten.form.items, clone_cst_form(item))
+            continue
+        }
+        rewrote_fields = true
+        fields := item
+        fields.items = nil
+        field_idx := 0
+        for field_idx < len(item.items) {
+            append(&fields.items, clone_cst_form(item.items[field_idx]))
+            if field_idx+1 >= len(item.items) {
+                field_idx += 1
+                continue
+            }
+            field_type, err_type, ok_type := rewrite_type_form_symbols(item.items[field_idx+1], locals, aliases, prefix)
+            if !ok_type {
+                return CST_Top_Form{}, err_type, false
+            }
+            append(&fields.items, field_type)
+            field_idx += 2
+            parsing_modifiers := true
+            for parsing_modifiers &&
+                field_idx < len(item.items) &&
+                item.items[field_idx].kind == .Keyword {
+                marker := item.items[field_idx]
+                switch marker.text {
+                case ":using":
+                    append(&fields.items, clone_cst_form(marker))
+                    field_idx += 1
+                case ":default":
+                    append(&fields.items, clone_cst_form(marker))
+                    if field_idx+1 >= len(item.items) {
+                        field_idx += 1
+                        continue
+                    }
+                    default_value, err_default, ok_default := rewrite_form_symbols(
+                        item.items[field_idx+1],
+                        locals,
+                        aliases,
+                        prefix,
+                    )
+                    if !ok_default {
+                        return CST_Top_Form{}, err_default, false
+                    }
+                    append(&fields.items, default_value)
+                    field_idx += 2
+                case:
+                    parsing_modifiers = false
+                }
+            }
+        }
+        append(&rewritten.form.items, fields)
+    }
+    return rewritten, Compile_Error{}, true
+}
+
 rewrite_top_form :: proc(top: CST_Top_Form, locals: []string, private_macros: []string, aliases: []Alias_Prefix, prefix: string) -> (CST_Top_Form, Compile_Error, bool) {
     rewritten := top
     if prefix != "" &&
@@ -2061,6 +2128,9 @@ rewrite_top_form :: proc(top: CST_Top_Form, locals: []string, private_macros: []
             return rewrite_macro_top_form(top, locals, private_macros, aliases, prefix)
         }
         if is_top_level_decl_head(head) {
+            if head == "defstruct" || head == "defstruct-" {
+                return rewrite_struct_top_form(top, locals, aliases, prefix)
+            }
             if head == "defenum" || head == "defenum-" {
                 renamed := top
                 renamed.form = top.form
@@ -3133,7 +3203,34 @@ format_compile_warning :: proc(path, source: string, warning: Compile_Warning) -
     if line <= 0 || column <= 0 {
         line, column, _, _ = source_position(source, warning.span.start)
     }
-    return strings.clone(fmt.tprintf("%s:%d:%d: warning: %s\n", label, line, column, message))
+    code := compile_warning_code_text(warning.code)
+    confidence := ""
+    if warning.confidence == .Conservative {
+        confidence = ", conservative"
+    }
+    return strings.clone(fmt.tprintf("%s:%d:%d: warning[%s%s]: %s\n", label, line, column, code, confidence, message))
+}
+
+compile_warning_code_text :: proc(code: Compile_Warning_Code) -> string {
+    switch code {
+    case .General:
+        return "KV0000"
+    case .Ownership_Discarded_Result:
+        return "KVO001"
+    case .Ownership_Unreleased_Local:
+        return "KVO002"
+    case .Ownership_Use_After_Transfer:
+        return "KVO003"
+    case .Ownership_Overwrite:
+        return "KVO004"
+    case .Ownership_Borrowed_Escape:
+        return "KVO005"
+    case .Ownership_Delete_Borrowed:
+        return "KVO006"
+    case .Ownership_Defer_In_Loop:
+        return "KVO007"
+    }
+    return "KV0000"
 }
 
 format_eval_compile_warning :: proc(path, source, eval_source: string, warning: Compile_Warning) -> string {

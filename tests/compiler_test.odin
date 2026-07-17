@@ -904,7 +904,10 @@ compile_all_examples :: proc(t: ^testing.T) {
         "examples/coverage/cluck-port/cluck-port-struct-types.kvist",
         "examples/language/closures.kvist",
         "examples/language/control-flow.kvist",
+        "examples/data/core-updates.kvist",
         "examples/data/edn-write.kvist",
+        "examples/data/typed-decode.kvist",
+        "examples/data/typed-struct-decode.kvist",
         "examples/interop/core/core-concurrency.kvist",
         "examples/interop/core/core-container-queue.kvist",
         "examples/interop/core/core-encoding-formats.kvist",
@@ -929,6 +932,7 @@ compile_all_examples :: proc(t: ^testing.T) {
         "examples/language/macro-dsl.kvist",
         "examples/language/macro-messages.kvist",
         "examples/language/macro-union-helpers.kvist",
+        "examples/language/managed-data-structs.kvist",
         "examples/language/multiline-strings.kvist",
         "examples/language/multi-return-bindings.kvist",
         "examples/interop/core/matrix.kvist",
@@ -1089,6 +1093,35 @@ symbols_source_indexes_defstruct_docstring :: proc(t: ^testing.T) {
 }
 
 @(test)
+symbols_source_preserves_struct_field_defaults :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct Person {
+  name: (owned string) :default "anonymous"
+  active?: bool :default false
+  scores: (owned [dynamic]i64) :default []
+})`
+
+    output, err, ok := kvist.symbols_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(
+        t,
+        strings.contains(
+            output,
+            `(Person {name: (owned string) :default "anonymous" active?: bool :default false scores: (owned [dynamic]i64) :default []})`,
+        ),
+        true,
+    )
+    testing.expect_value(t, strings.contains(output, "field\tPerson.active?\t5\t3\tPerson\t\t\n"), true)
+}
+
+@(test)
 symbols_source_indexes_reload_state_as_ordinary_struct_and_alias :: proc(t: ^testing.T) {
     source := `(package main)
 
@@ -1236,6 +1269,7 @@ package_symbols_source_emits_core_update_helpers :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "macro\tcore.nil?\t"), true)
     testing.expect_value(t, strings.contains(output, "macro\tcore.tap>\t"), true)
     testing.expect_value(t, strings.contains(output, "macro\tcore.println\t"), true)
+    testing.expect_value(t, strings.contains(output, "macro\tcore.str\t"), true)
     testing.expect_value(t, strings.contains(output, "macro\tcore.when-let\t"), true)
     testing.expect_value(t, strings.contains(output, "macro\tcore.if-let\t"), true)
     testing.expect_value(t, strings.contains(output, "macro\tcore.when-ok\t"), true)
@@ -3725,6 +3759,553 @@ compile_manages_data_assignment_places :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "kvist_data_move_assign(&(local), make_data())"), true)
     testing.expect_value(t, strings.contains(output, "kvist_data_assign :: proc(place: ^Data, value: Data)"), true)
     testing.expect_value(t, strings.contains(output, "kvist_data_move_assign :: proc(place: ^Data, value: Data)"), true)
+}
+
+@(test)
+compile_manages_data_fields_in_native_structs :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(def config '{:port 8080})
+
+(defstruct Box {
+  value: Data
+})
+
+(defstruct Envelope {
+  box: Box
+  label: string
+  revision: int
+})
+
+(defn make-box [value: Data] -> Box
+  (Box {value: value}))
+
+(defn copy-box [box: Box] -> Box
+  (let [copy box]
+    copy))
+
+(defn wrap [box: Box] -> Envelope
+  (Envelope {box: box label: "config" revision: 1}))
+
+(defn with-value [box: Box, value: Data] -> Box
+  (copy-with box .value value))
+
+(defn with-label [envelope: Envelope, label: string] -> Envelope
+  (copy-with envelope .label label))
+
+(defn revise [envelope: Envelope] -> Envelope
+  (copy-update envelope .revision inc))
+
+(defn observe [box: Box] -> int
+  (discard box)
+  1)
+
+(defn nested [value: Data] -> int
+  (observe (make-box value)))
+
+(defn discard-box [value: Data]
+  (discard (make-box value)))
+
+(defn maybe-box [value: Data] -> [box: Box, ok: bool]
+  (return (make-box value) true))
+
+(defn receive-box [value: Data]
+  (let [[box ok] (maybe-box value)]
+    (discard box ok)))
+
+(defn replace [box: Box, replacement: Box]
+  (let [local box]
+    (set! local replacement)
+    (set! local (make-box config))))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "kvist_managed_clone_Box :: proc(value: Box) -> Box"), true)
+    testing.expect_value(t, strings.contains(output, "out.value = kvist_data_retain(value.value)"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_managed_destroy_Box :: proc(value: Box)"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_data_release(value.value)"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_managed_assign_Box :: proc(place: ^Box, value: Box)"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_managed_move_assign_Box :: proc(place: ^Box, value: Box)"), true)
+    testing.expect_value(t, strings.contains(output, "return Box{value = kvist_data_retain(value)}"), true)
+    testing.expect_value(t, strings.contains(output, "copy := kvist_managed_clone_Box(box)"), true)
+    testing.expect_value(t, strings.contains(output, "defer kvist_managed_destroy_Box(copy)"), true)
+    testing.expect_value(t, strings.contains(output, "return kvist_managed_clone_Box(copy)"), true)
+    testing.expect_value(t, strings.contains(output, "out.box = kvist_managed_clone_Box(value.box)"), true)
+    testing.expect_value(t, strings.contains(output, "return Envelope{box = kvist_managed_clone_Box(box), label = \"config\", revision = 1}"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_update_1 := kvist_managed_clone_Box(kvist_target)"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_data_assign(&(kvist_update_1.value), kvist_value)"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_update_2 := kvist_managed_clone_Envelope(kvist_target)"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_update_2.label = kvist_value"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_update_3 := kvist_managed_clone_Envelope(kvist_target)"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_update_3.revision = (kvist_target.revision) + 1"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_thread_4 := make_box(value)"), true)
+    testing.expect_value(t, strings.contains(output, "defer kvist_managed_destroy_Box(kvist_thread_4)"), true)
+    testing.expect_value(t, strings.contains(output, "observe(kvist_thread_4)"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_thread_5 := make_box(value)"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_managed_destroy_Box(kvist_thread_5)"), true)
+    testing.expect_value(t, strings.contains(output, "defer kvist_managed_destroy_Box(box)"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_managed_assign_Box(&(local), replacement)"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_managed_move_assign_Box(&(local), make_box(config))"), true)
+}
+
+@(test)
+compile_rejects_copy_update_of_managed_struct_field :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct Box {
+  value: Data
+})
+
+(defn update-value [box: Box, f: (fn [value: Data] -> Data)] -> Box
+  (copy-update box .value f))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    delete(output)
+    defer delete(err.message)
+    testing.expect_value(
+        t,
+        err.message,
+        "update of a managed field is not yet supported; compute the new value first and use assoc",
+    )
+}
+
+@(test)
+compile_manages_owned_string_fields_in_native_structs :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct Person {
+  name: (owned string)
+})
+
+(defn make-person [name: string] -> Person
+  (Person {name: name}))
+
+(defn rename [person: Person, name: string] -> Person
+  (assoc person .name name))
+
+(defn overwrite [person: Person, name: string]
+  (let [copy person]
+    (set! copy.name name)))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "return Person{name = strings.clone(name)}"), true)
+    testing.expect_value(t, strings.contains(output, "out.name = strings.clone(value.name)"), true)
+    testing.expect_value(t, strings.contains(output, "delete(value.name)"), true)
+    testing.expect_value(
+        t,
+        strings.contains(output, ".name = strings.clone(kvist_value)"),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(output, "delete(kvist_update_"),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            output,
+            "kvist_replacement := strings.clone(kvist_value); kvist_previous := kvist_place^",
+        ),
+        true,
+    )
+}
+
+@(test)
+compile_manages_owned_dynamic_array_fields_in_native_structs :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct Batch {
+  values: (owned [dynamic]i64)
+})
+
+(defn wrap [values: [dynamic]i64] -> Batch
+  (Batch {values: values}))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "return Batch{values = values}"), true)
+    testing.expect_value(
+        t,
+        strings.contains(
+            output,
+            "out.values = (proc(kvist_values: [dynamic]i64) -> [dynamic]i64",
+        ),
+        true,
+    )
+    testing.expect_value(t, strings.contains(output, "delete(value.values)"), true)
+}
+
+@(test)
+compile_data_decode_rejects_borrowed_string_struct_fields :: proc(t: ^testing.T) {
+    source := `(package main)
+(import data "kvist:data")
+
+(defstruct Person {
+  name: string
+})
+
+(defn decode-person [value: Data] -> [person: Person, err: data.Decode-Error, ok: bool]
+  (data.decode Person value))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    delete(output)
+    defer delete(err.message)
+    testing.expect_value(
+        t,
+        err.message,
+        "data.decode field Person.name has unsupported type string; use (owned string) for decoded strings and (owned [dynamic]T) for supported vectors; other supported fields are Data, bool, integer and floating-point scalars, enums, and nested Kvist structs",
+    )
+}
+
+@(test)
+compile_data_decode_rejects_native_string_arrays :: proc(t: ^testing.T) {
+    source := `(package main)
+(import data "kvist:data")
+
+(defstruct Names {
+  values: (owned [dynamic]string)
+})
+
+(defn decode-names [value: Data] -> [names: Names, err: data.Decode-Error, ok: bool]
+  (data.decode Names value))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    delete(output)
+    defer delete(err.message)
+    testing.expect_value(
+        t,
+        err.message,
+        "data.decode field values has unsupported dynamic-array element type string; supported elements are Data, bool, integer and floating-point scalars, Kvist enums, and Kvist structs",
+    )
+}
+
+@(test)
+compile_rejects_owned_borrowed_slice_fields :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct Values {
+  items: (owned []int)
+})`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    delete(output)
+    defer delete(err.message)
+    testing.expect_value(
+        t,
+        err.message,
+        "owned struct fields currently support string and dynamic-array types",
+    )
+}
+
+@(test)
+compile_rejects_duplicate_struct_field_defaults :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct Config {
+  retries: int :default 1 :default 2
+})`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    delete(output)
+    defer delete(err.message)
+    testing.expect_value(t, err.message, "duplicate :default defstruct field modifier")
+}
+
+@(test)
+compile_validates_struct_field_default_types :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct Config {
+  retries: int :default "many"
+})
+
+(defn config [] -> Config
+  (Config {}))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    delete(output)
+    defer delete(err.message)
+    testing.expect_value(t, err.message, "struct field default type mismatch for retries:")
+}
+
+@(test)
+compile_type_directed_data_struct_decode :: proc(t: ^testing.T) {
+    result, err, ok := kvist.compile_path_with_map("examples/data/typed-struct-decode.kvist")
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            "-> (decoded: Settings, err: data__Decode_Error, ok: bool)",
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            `Endpoint{host_id = 6, display_name = strings.clone("unnamed"), secure = false, tags = kvist_data_retain(`,
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            "kvist_present_2 := kvist_data_contains(kvist_value, kvist_key_2)",
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            "ratio = kvist_present_2 ? f64(kvist_field_2.payload.float_value) : 1.0",
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            `display_name = kvist_present_6 ? strings.clone(kvist_field_6.payload.text) : strings.clone("unnamed")`,
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            "tags = kvist_present_8 ? kvist_data_retain(kvist_field_8) : kvist_data_retain(",
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            "mode = kvist_present_9 ? kvist_enum_9 : .Manual",
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            "kvist_present_10 && (kvist_field_11.kind != .Int)",
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            `fallback_endpoint = kvist_present_10 ? Endpoint{`,
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            "for kvist_item_15, kvist_index_15 in kvist_field_15.payload.items",
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            "kvist_data_append(kvist_error_path_15, kvist_index_key_15)",
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            "proc(kvist_items: []Data) -> [dynamic]i64",
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            "out.scores = (proc(kvist_values: [dynamic]i64) -> [dynamic]i64",
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            "out.raw_items = (proc(kvist_values: [dynamic]Data) -> [dynamic]Data",
+        ),
+        true,
+    )
+    testing.expect_value(t, strings.contains(result.output, "delete(value.scores)"), true)
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            "for kvist_item in kvist_values { kvist_data_release(kvist_item) }; delete(kvist_values)",
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            `kvist_item_19.payload.text != ":manual"`,
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            `data__decode_enum_error(kvist_enum_error_path_19, "Mode", kvist_item_19)`,
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            "proc(kvist_items: []Data) -> [dynamic]Mode",
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            "for kvist_item_20, kvist_index_20 in kvist_field_20.payload.items",
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            "kvist_data_append(kvist_error_path_21, kvist_index_key_20)",
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            "proc(kvist_items: []Data) -> [dynamic]Endpoint",
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            "out.endpoints = (proc(kvist_values: [dynamic]Endpoint) -> [dynamic]Endpoint",
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            "for kvist_item in kvist_values { kvist_managed_destroy_Endpoint(kvist_item) }; delete(kvist_values)",
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            "data__decode_error(kvist_error_path_7, .Bool, kvist_field_7.kind)",
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            "kvist_data_move_assign(&kvist_error_path_7, kvist_data_append(kvist_error_path_7, kvist_key_4))",
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            "kvist_data_move_assign(&kvist_error_path_7, kvist_data_append(kvist_error_path_7, kvist_key_7))",
+        ),
+        true,
+    )
+    testing.expect_value(t, strings.contains(result.output, `case ":read-only": kvist_enum_9 = .Read_Only`), true)
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            `data__decode_enum_error(kvist_enum_error_path_9, "Mode", kvist_field_9)`,
+        ),
+        true,
+    )
+    testing.expect_value(t, strings.contains(result.output, "out.actual_value = kvist_data_retain(value.actual_value)"), true)
+    testing.expect_value(t, strings.contains(result.output, "out.display_name = strings.clone(value.display_name)"), true)
+    testing.expect_value(t, strings.contains(result.output, "delete(value.display_name)"), true)
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            "kvist_replacement := strings.clone(kvist_value); kvist_previous := kvist_place^",
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(result.output, ".endpoint.display_name = strings.clone(kvist_value)"),
+        true,
+    )
+    testing.expect_value(t, strings.contains(result.output, "defer kvist_managed_destroy_Settings(settings)"), true)
+    testing.expect_value(
+        t,
+        strings.contains(result.output, "defer kvist_managed_destroy_data__Decode_Error(err)"),
+        true,
+    )
 }
 
 @(test)
@@ -6419,6 +7000,61 @@ reject_when_ok_expression_position :: proc(t: ^testing.T) {
     testing.expect_value(t, ok, false)
     defer delete(err.message)
     testing.expect_value(t, err.message, "if expression expects test, then, and else")
+}
+
+@(test)
+compile_core_str_constructs_one_owned_formatted_string :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct Point {x: int y: int})
+
+(defn render [path: string, point: Point] -> string
+  (str "@get('" path "', {open: 100%}) " true " " 42 " " :ready " " point))
+
+(defn empty [] -> string
+  (str))`
+
+    result, err, ok := kvist.compile_source_with_map(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(t, strings.contains(result.output, `fmt.aprintf("%v%v%v%v%v%v%v%v%v%v"`), true)
+    testing.expect_value(t, strings.contains(result.output, `"@get('"`), true)
+    testing.expect_value(t, strings.contains(result.output, `"', {open: 100%}) "`), true)
+    testing.expect_value(t, strings.contains(result.output, `fmt.aprintf("")`), true)
+    testing.expect_value(t, len(result.warnings), 0)
+}
+
+@(test)
+core_str_participates_in_owned_result_diagnostics :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn main [name: string]
+  (str "hello " name)
+  (let [message (str "goodbye " name) :defer]
+    (println message)))`
+
+    result, err, ok := kvist.compile_source_with_map(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(t, len(result.warnings), 1)
+    if len(result.warnings) == 1 {
+        testing.expect_value(t, result.warnings[0].message, "owned result from fmt.aprintf is discarded; bind it, delete it, or return it")
+    }
+    testing.expect_value(t, strings.contains(result.output, "defer delete(message)"), true)
 }
 
 @(test)
@@ -20925,6 +21561,79 @@ compile_def_overload_proc_group :: proc(t: ^testing.T) {
 }
 
 @(test)
+compile_contextual_data_literals_in_direct_and_overloaded_calls :: proc(t: ^testing.T) {
+    source := `(package main)
+(import kdata "kvist:data")
+
+(defn accept-data [value: Data] -> Data
+  value)
+
+(defn render-data [value: Data] -> int
+  (count value))
+
+(defn render-string [value: string] -> int
+  (count value))
+
+(def render (overload render-data render-string))
+
+(defn card [title: string, ready?: bool] -> Data
+  (accept-data
+    [:article {:class "card" :hidden false}
+     [:h1 title]
+     (if ready?
+       [:p "Ready"]
+       nil)]))
+
+(defn card-size [title: string] -> int
+  (render [:article {:class "card"} [:h1 title]]))
+
+(defn contact-tx [id: i64, name: string, email: string, company: string] -> Data
+  [{:db/id id
+    :contact/name name
+    :contact/email email
+    :contact/company company}])
+
+(defn add-attention [tx: Data, condition-id: i64, instant: string] -> Data
+  (kdata.conj tx
+    [:db/add [:ro/id condition-id] :attention/not-before instant]))
+
+(defn measurements [count: int, ratio: f64] -> Data
+  [(+ count 1) (+ 1 ratio)])
+
+(defn source-int [value: int] -> Data
+  [value])
+
+(defn source-string [value: string] -> Data
+  [value])
+
+(def source (overload source-int source-string))
+
+(defn source-contains? [value: string] -> bool
+  (let [result (source value)]
+    (contains? result [value])))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "accept_data(kvist_thread_"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_data_make_map([]Data{"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_data_make_text(Data_Kind.String, title)"), true)
+    testing.expect_value(t, strings.contains(output, "render(kvist_thread_"), true)
+    testing.expect_value(t, strings.contains(output, "contact_name"), false)
+    testing.expect_value(t, strings.contains(output, "kvist_data_make_int(i64(id))"), true)
+    testing.expect_value(t, strings.contains(output, "kdata__conj(tx, kvist_thread_"), true)
+    testing.expect_value(t, strings.contains(output, "defer kvist_data_release(kvist_thread_"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_data_make_int(i64((count) + (1)))"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_data_make_float(f64((1) + (ratio)))"), true)
+    testing.expect_value(t, strings.contains(output, "return kvist_data_contains(result, kvist_thread_"), true)
+}
+
+@(test)
 compile_local_def_overload_proc_group :: proc(t: ^testing.T) {
     source := `(package main)
 (import fmt "core:fmt")
@@ -25002,6 +25711,8 @@ compile_warns_for_discarded_owned_result_inside_discard :: proc(t: ^testing.T) {
     testing.expect_value(t, len(result.warnings), 1)
     if len(result.warnings) == 1 {
         testing.expect_value(t, result.warnings[0].message, "owned result from arr.range is discarded; bind it, delete it, or return it")
+        testing.expect_value(t, result.warnings[0].code, kvist.Compile_Warning_Code.Ownership_Discarded_Result)
+        testing.expect_value(t, result.warnings[0].confidence, kvist.Compile_Warning_Confidence.Definite)
     }
 }
 
@@ -25027,7 +25738,35 @@ compile_warns_for_leaked_owned_let_local :: proc(t: ^testing.T) {
     testing.expect_value(t, len(result.warnings), 1)
     if len(result.warnings) == 1 {
         testing.expect_value(t, result.warnings[0].message, "owned local xs is never deleted or returned; add (defer (delete xs)) or return it")
+        testing.expect_value(t, result.warnings[0].code, kvist.Compile_Warning_Code.Ownership_Unreleased_Local)
+        testing.expect_value(t, result.warnings[0].confidence, kvist.Compile_Warning_Confidence.Conservative)
     }
+}
+
+@(test)
+compile_recognizes_explicit_custom_deferred_cleanup :: proc(t: ^testing.T) {
+    source := `(package main)
+(import arr "kvist:arr")
+
+(defn destroy-items! [items: [dynamic]int]
+  (delete items))
+
+(defn demo []
+  (let [items (arr.empty int)]
+    (defer (destroy-items! items))
+    (println (count items))))`
+
+    result, err, ok := kvist.compile_source_with_map(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(t, len(result.warnings), 0)
 }
 
 @(test)
@@ -25215,6 +25954,8 @@ compile_warns_for_owned_local_used_after_deleted_in_all_if_branches :: proc(t: ^
     testing.expect_value(t, len(result.warnings), 1)
     if len(result.warnings) == 1 {
         testing.expect_value(t, result.warnings[0].message, "owned local xs is used after ownership transfer")
+        testing.expect_value(t, result.warnings[0].code, kvist.Compile_Warning_Code.Ownership_Use_After_Transfer)
+        testing.expect_value(t, result.warnings[0].confidence, kvist.Compile_Warning_Confidence.Conservative)
     }
 }
 
@@ -25257,6 +25998,8 @@ compile_warns_for_owned_local_used_after_deleted_in_all_type_case_branches :: pr
     testing.expect_value(t, len(result.warnings), 1)
     if len(result.warnings) == 1 {
         testing.expect_value(t, result.warnings[0].message, "owned local xs is used after ownership transfer")
+        testing.expect_value(t, result.warnings[0].code, kvist.Compile_Warning_Code.Ownership_Use_After_Transfer)
+        testing.expect_value(t, result.warnings[0].confidence, kvist.Compile_Warning_Confidence.Conservative)
     }
 }
 
@@ -25316,6 +26059,32 @@ compile_warns_for_overwritten_owned_local :: proc(t: ^testing.T) {
 }
 
 @(test)
+compile_tracks_owned_replacement_after_delete_and_set :: proc(t: ^testing.T) {
+    source := `(package main)
+(import arr "kvist:arr")
+
+(defn demo []
+  (let [xs (arr.empty int)
+        replacement (arr.empty int)]
+    (delete xs)
+    (set! xs replacement)
+    (println (count xs))
+    (delete xs)))`
+
+    result, err, ok := kvist.compile_source_with_map(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(t, len(result.warnings), 0)
+}
+
+@(test)
 compile_warns_for_use_after_ownership_transfer :: proc(t: ^testing.T) {
     source := `(package main)
 (import arr "kvist:arr")
@@ -25338,6 +26107,8 @@ compile_warns_for_use_after_ownership_transfer :: proc(t: ^testing.T) {
     testing.expect_value(t, len(result.warnings), 1)
     if len(result.warnings) == 1 {
         testing.expect_value(t, result.warnings[0].message, "owned local xs is used after ownership transfer")
+        testing.expect_value(t, result.warnings[0].code, kvist.Compile_Warning_Code.Ownership_Use_After_Transfer)
+        testing.expect_value(t, result.warnings[0].confidence, kvist.Compile_Warning_Confidence.Definite)
     }
 }
 
