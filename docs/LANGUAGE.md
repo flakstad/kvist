@@ -455,6 +455,23 @@ construction and `assoc`, moves owned constructor expressions, clones the field
 when its containing struct is copied, and deletes it with the struct. Plain
 `string` fields retain their existing borrowed/unmanaged semantics.
 
+Use `:default` after a field type to replace its zero-value construction
+default:
+
+```clojure
+(defstruct Settings {
+  port: i64 :default 8080
+  label: (owned string) :default "local"
+})
+
+(Settings {})
+```
+
+Defaults are evaluated when an omitted field is constructed. They follow the
+field's normal ownership rules, so the example clones `"local"` into storage
+owned by the resulting `Settings`. Struct signatures and editor metadata retain
+the annotation, and obvious literal type mismatches are compiler errors.
+
 ### Enums
 
 Enums define a named integer-like set of values:
@@ -1740,8 +1757,11 @@ Decoded strings require `(owned string)` so their storage lifetime is explicit;
 plain borrowed `string` fields are rejected. Nested validation completes before
 construction, so managed leaves are acquired only for a successful result. The
 decoded struct and error follow normal deterministic managed-value cleanup.
-Optional/default fields and homogeneous collections remain future decoding
-work.
+A field annotated `:default value` is optional at the Data boundary: a missing
+map key evaluates the same default used by ordinary struct construction, while
+a present key is still validated. Presence is checked independently from Data
+`nil`, so an explicit `nil` does not select the default. Homogeneous collections
+remain future decoding work.
 
 In a `->` pipeline, use a `.field` selector step:
 

@@ -1572,9 +1572,19 @@ symbols_struct_signature :: proc(name: string, fields: []Struct_Field) -> string
         strings.write_string(&builder, field.source_name)
         strings.write_string(&builder, ":")
         strings.write_string(&builder, " ")
-        strings.write_string(&builder, field.ty)
+        if field.owns_string {
+            strings.write_string(&builder, "(owned string)")
+        } else {
+            strings.write_string(&builder, field.ty)
+        }
         if field.is_using {
             strings.write_string(&builder, " :using")
+        }
+        if field.has_default {
+            default_text := symbols_form_text(field.default_value)
+            strings.write_string(&builder, " :default ")
+            strings.write_string(&builder, default_text)
+            delete(default_text)
         }
     }
     strings.write_string(&builder, "})")
@@ -1624,6 +1634,17 @@ symbols_write_fields :: proc(builder: ^strings.Builder, source, parent: string, 
             symbols_write_record(builder, "field", name, source, key.span, parent)
         }
         i += 2
+        parsing_modifiers := true
+        for parsing_modifiers && i < len(fields.items) && fields.items[i].kind == .Keyword {
+            switch fields.items[i].text {
+            case ":using":
+                i += 1
+            case ":default":
+                i += 2
+            case:
+                parsing_modifiers = false
+            }
+        }
     }
 }
 

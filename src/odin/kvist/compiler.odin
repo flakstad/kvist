@@ -2025,28 +2025,63 @@ rewrite_struct_top_form :: proc(top: CST_Top_Form, locals: []string, aliases: []
     rewritten := top
     rewritten.form = top.form
     rewritten.form.items = nil
+    rewrote_fields := false
     for item, idx in top.form.items {
         if idx == 1 {
             renamed := rewrite_symbol_form_text(item, fmt.tprintf("%s__%s", prefix, item.text))
             append(&rewritten.form.items, renamed)
             continue
         }
-        if item.kind != .Brace {
+        if item.kind != .Brace || rewrote_fields {
             append(&rewritten.form.items, clone_cst_form(item))
             continue
         }
+        rewrote_fields = true
         fields := item
         fields.items = nil
-        for field_item, field_idx in item.items {
-            if field_idx%2 == 0 {
-                append(&fields.items, clone_cst_form(field_item))
+        field_idx := 0
+        for field_idx < len(item.items) {
+            append(&fields.items, clone_cst_form(item.items[field_idx]))
+            if field_idx+1 >= len(item.items) {
+                field_idx += 1
                 continue
             }
-            field_type, err_type, ok_type := rewrite_type_form_symbols(field_item, locals, aliases, prefix)
+            field_type, err_type, ok_type := rewrite_type_form_symbols(item.items[field_idx+1], locals, aliases, prefix)
             if !ok_type {
                 return CST_Top_Form{}, err_type, false
             }
             append(&fields.items, field_type)
+            field_idx += 2
+            parsing_modifiers := true
+            for parsing_modifiers &&
+                field_idx < len(item.items) &&
+                item.items[field_idx].kind == .Keyword {
+                marker := item.items[field_idx]
+                switch marker.text {
+                case ":using":
+                    append(&fields.items, clone_cst_form(marker))
+                    field_idx += 1
+                case ":default":
+                    append(&fields.items, clone_cst_form(marker))
+                    if field_idx+1 >= len(item.items) {
+                        field_idx += 1
+                        continue
+                    }
+                    default_value, err_default, ok_default := rewrite_form_symbols(
+                        item.items[field_idx+1],
+                        locals,
+                        aliases,
+                        prefix,
+                    )
+                    if !ok_default {
+                        return CST_Top_Form{}, err_default, false
+                    }
+                    append(&fields.items, default_value)
+                    field_idx += 2
+                case:
+                    parsing_modifiers = false
+                }
+            }
         }
         append(&rewritten.form.items, fields)
     }

@@ -1068,6 +1068,34 @@ symbols_source_indexes_defstruct_docstring :: proc(t: ^testing.T) {
 }
 
 @(test)
+symbols_source_preserves_struct_field_defaults :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct Person {
+  name: (owned string) :default "anonymous"
+  active?: bool :default false
+})`
+
+    output, err, ok := kvist.symbols_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(
+        t,
+        strings.contains(
+            output,
+            `(Person {name: (owned string) :default "anonymous" active?: bool :default false})`,
+        ),
+        true,
+    )
+    testing.expect_value(t, strings.contains(output, "field\tPerson.active?\t5\t3\tPerson\t\t\n"), true)
+}
+
+@(test)
 symbols_source_indexes_reload_state_as_ordinary_struct_and_alias :: proc(t: ^testing.T) {
     source := `(package main)
 
@@ -3895,6 +3923,39 @@ compile_data_decode_rejects_borrowed_string_struct_fields :: proc(t: ^testing.T)
 }
 
 @(test)
+compile_rejects_duplicate_struct_field_defaults :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct Config {
+  retries: int :default 1 :default 2
+})`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    delete(output)
+    defer delete(err.message)
+    testing.expect_value(t, err.message, "duplicate :default defstruct field modifier")
+}
+
+@(test)
+compile_validates_struct_field_default_types :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct Config {
+  retries: int :default "many"
+})
+
+(defn config [] -> Config
+  (Config {}))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    delete(output)
+    defer delete(err.message)
+    testing.expect_value(t, err.message, "struct field default type mismatch for retries:")
+}
+
+@(test)
 compile_type_directed_data_struct_decode :: proc(t: ^testing.T) {
     result, err, ok := kvist.compile_path_with_map("examples/data/typed-struct-decode.kvist")
     testing.expect_value(t, ok, true)
@@ -3918,7 +3979,63 @@ compile_type_directed_data_struct_decode :: proc(t: ^testing.T) {
         t,
         strings.contains(
             result.output,
-            "return Settings{port = i64(kvist_field_0.payload.int_value), enabled = kvist_field_1.payload.bool_value, ratio = f64(kvist_field_2.payload.float_value), metadata = kvist_data_retain(kvist_field_3), endpoint = Endpoint{host_id = i64(kvist_field_5.payload.int_value), display_name = strings.clone(kvist_field_6.payload.text), secure = kvist_field_7.payload.bool_value, tags = kvist_data_retain(kvist_field_8)}, mode = kvist_enum_9}, {}, true",
+            `Endpoint{host_id = 6, display_name = strings.clone("unnamed"), secure = false, tags = kvist_data_retain(`,
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            "kvist_present_2 := kvist_data_contains(kvist_value, kvist_key_2)",
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            "ratio = kvist_present_2 ? f64(kvist_field_2.payload.float_value) : 1.0",
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            `display_name = kvist_present_6 ? strings.clone(kvist_field_6.payload.text) : strings.clone("unnamed")`,
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            "tags = kvist_present_8 ? kvist_data_retain(kvist_field_8) : kvist_data_retain(",
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            "mode = kvist_present_9 ? kvist_enum_9 : .Manual",
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            "kvist_present_10 && (kvist_field_11.kind != .Int)",
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            `fallback_endpoint = kvist_present_10 ? Endpoint{`,
         ),
         true,
     )

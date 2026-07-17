@@ -843,16 +843,40 @@ parse_struct_fields :: proc(form: CST_Form) -> (fields: [dynamic]Struct_Field, e
             }
         }
         using_field := false
-        if next_i < len(form.items) && form.items[next_i].kind == .Keyword && form.items[next_i].text == ":using" {
-            using_field = true
-            next_i += 1
+        has_default := false
+        default_value: CST_Form
+        parsing_modifiers := true
+        for parsing_modifiers && next_i < len(form.items) && form.items[next_i].kind == .Keyword {
+            marker := form.items[next_i]
+            switch marker.text {
+            case ":using":
+                if using_field {
+                    return fields, Compile_Error{message = "duplicate :using struct field modifier", span = marker.span}, false
+                }
+                using_field = true
+                next_i += 1
+            case ":default":
+                if has_default {
+                    return fields, Compile_Error{message = "duplicate :default struct field modifier", span = marker.span}, false
+                }
+                if next_i+1 >= len(form.items) {
+                    return fields, Compile_Error{message = "missing struct field default value", span = marker.span}, false
+                }
+                has_default = true
+                default_value = form.items[next_i+1]
+                next_i += 2
+            case:
+                parsing_modifiers = false
+            }
         }
         append(&fields, Struct_Field{
-            name        = field_name,
-            source_name = source_name,
-            ty          = type_text,
-            is_using    = using_field,
-            owns_string = owns_string,
+            name          = field_name,
+            source_name   = source_name,
+            ty            = type_text,
+            is_using      = using_field,
+            owns_string   = owns_string,
+            has_default   = has_default,
+            default_value = default_value,
         })
         i = next_i
     }
@@ -900,16 +924,40 @@ parse_defstruct_fields :: proc(form: CST_Form) -> (fields: [dynamic]Struct_Field
             }
         }
         using_field := false
-        if next_i < len(form.items) && form.items[next_i].kind == .Keyword && form.items[next_i].text == ":using" {
-            using_field = true
-            next_i += 1
+        has_default := false
+        default_value: CST_Form
+        parsing_modifiers := true
+        for parsing_modifiers && next_i < len(form.items) && form.items[next_i].kind == .Keyword {
+            marker := form.items[next_i]
+            switch marker.text {
+            case ":using":
+                if using_field {
+                    return fields, Compile_Error{message = "duplicate :using defstruct field modifier", span = marker.span}, false
+                }
+                using_field = true
+                next_i += 1
+            case ":default":
+                if has_default {
+                    return fields, Compile_Error{message = "duplicate :default defstruct field modifier", span = marker.span}, false
+                }
+                if next_i+1 >= len(form.items) {
+                    return fields, Compile_Error{message = "missing defstruct field default value", span = marker.span}, false
+                }
+                has_default = true
+                default_value = form.items[next_i+1]
+                next_i += 2
+            case:
+                parsing_modifiers = false
+            }
         }
         append(&fields, Struct_Field{
-            name        = field_name,
-            source_name = source_name,
-            ty          = type_text,
-            is_using    = using_field,
-            owns_string = owns_string,
+            name          = field_name,
+            source_name   = source_name,
+            ty            = type_text,
+            is_using      = using_field,
+            owns_string   = owns_string,
+            has_default   = has_default,
+            default_value = default_value,
         })
         i = next_i
     }

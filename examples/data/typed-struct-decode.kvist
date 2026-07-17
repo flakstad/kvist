@@ -9,21 +9,27 @@
 
 (defstruct Endpoint {
   host-id: i64
-  display-name: (owned string)
-  secure: bool
-  tags: Data
+  display-name: (owned string) :default "unnamed"
+  secure: bool :default false
+  tags: Data :default '[]
 })
 
 (defstruct Settings {
   port: i64
   enabled: bool
-  ratio: f64
-  metadata: Data
+  ratio: f64 :default 1.0
+  metadata: Data :default '{}
   endpoint: Endpoint
-  mode: Mode
+  mode: Mode :default .Manual
+  fallback-endpoint: Endpoint :default (Endpoint {host-id: -1})
 })
 
 (defn main []
+  (let [endpoint (Endpoint {host-id: 6})]
+    (assert (= endpoint.display-name "unnamed"))
+    (assert (not endpoint.secure))
+    (assert (= endpoint.tags '[])))
+
   (let [[settings err ok]
         (data.decode
           Settings
@@ -53,6 +59,36 @@
       (assert (= settings.endpoint.display-name "primary"))
       (assert (= renamed.endpoint.display-name "backup")))
     (discard err))
+
+  (let [[settings err ok]
+        (data.decode
+          Settings
+          '{:port 8081
+            :enabled false
+            :endpoint {:host-id 8}})]
+    (assert ok)
+    (assert (= settings.ratio 1.0))
+    (assert (= settings.metadata '{}))
+    (assert (= settings.endpoint.display-name "unnamed"))
+    (assert (not settings.endpoint.secure))
+    (assert (= settings.endpoint.tags '[]))
+    (assert (= settings.mode .Manual))
+    (assert (= settings.fallback-endpoint.host-id -1))
+    (assert (= settings.fallback-endpoint.display-name "unnamed"))
+    (discard err))
+
+  (let [[settings err ok]
+        (data.decode
+          Settings
+          '{:port 8082
+            :enabled true
+            :ratio nil
+            :endpoint {:host-id 9}})]
+    (assert (not ok))
+    (assert (= err.path '[:ratio]))
+    (assert (= err.expected .Float))
+    (assert (= err.actual .Nil))
+    (discard settings))
 
   (let [[settings err ok]
         (data.decode

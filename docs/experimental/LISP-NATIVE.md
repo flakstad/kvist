@@ -84,8 +84,8 @@ surrounding program dynamic. Build these facilities in order:
 1. Typed decoding from Data into native structs, enums, scalar types, and
    selected homogeneous collections, with errors carrying the exact Data path.
    Integer, float, and boolean scalar decoders plus recursive type-directed
-   native struct decoding for required nested structs, scalar, explicitly
-   owned string, enum, and `Data` fields are implemented.
+   native struct decoding for nested structs, scalar, explicitly owned string,
+   enum, `Data`, and explicit default fields are implemented.
 2. Reusable shape validation/refinement so code can validate once and avoid
    repeating kind and key checks.
 3. Structural pattern matching and destructuring for maps, sequential values,

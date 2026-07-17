@@ -22,7 +22,7 @@ compiler behavior.
 | Source mapping | Partial | Cover more generated cleanup, specialization, and Data forms |
 | Core `str` | Implemented | Validate rendering across Ro and Vev |
 | Managed `Data` in native aggregates | Partial | Top-level Kvist structs are managed recursively; add containers, unions, closures, local/imported structs |
-| Typed Data decoding and validated shapes | Partial | Scalars, owned strings, enums, and recursive required-field native structs decode with paths; add defaults and collections |
+| Typed Data decoding and validated shapes | Partial | Scalars, owned strings, enums, defaults, and recursive native structs decode with paths; add collections |
 | Structural Data matching and destructuring | Planned | Design after aggregate ownership and decoding |
 | Public Data builders/transients | Planned | Expose a safe freeze API based on the EDN reader's linear construction pattern |
 | Vev Data result traversal and typed collection | Planned | Avoid unnecessary intermediate native arrays |
@@ -54,12 +54,13 @@ compiler behavior.
   move, return, named-result destruction, discarded values, and destruction.
 - Continue the managed-value behavior across arrays, maps, unions, closures,
   local structs, imported Odin structs, and managed-field `update`.
-- Add typed Data decoding for scalars, enums, structs, optional/default fields,
+- Add typed Data decoding for scalars, enums, structs, explicit default fields,
   and selected homogeneous collections.
 - Implemented: integer, float, and boolean scalar decoders plus recursive
-  type-directed native struct decoding for required nested structs, `Data`,
-  scalar, explicitly owned string, and enum fields. Decoded managed fields and
-  path-carrying `Decode-Error` values clean up automatically.
+  type-directed native struct decoding for nested structs, `Data`, scalar,
+  explicitly owned string, enum, and `:default` fields. Missing defaulted keys
+  use the native field default; present values remain validated. Decoded managed
+  fields and path-carrying `Decode-Error` values clean up automatically.
 - Carry the exact Data path, expected shape, and actual kind in decode errors.
 - Preserve the zero-allocation static quote path.
 

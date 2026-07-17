@@ -3,4 +3,4 @@
 
 (package order-independent)
 
-(defstruct Box {value: int})
+(defstruct Box {value: int :default default-box-value})

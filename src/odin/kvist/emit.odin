@@ -1008,6 +1008,26 @@ emit_struct_brace_literal :: proc(e: ^Emitter, struct_decl: ^Struct_Decl, form: 
         append(&pairs, Brace_Pair{key = field_name, value = value_text})
         i += 2
     }
+    for &field in struct_decl.fields {
+        if !field.has_default {
+            continue
+        }
+        provided := false
+        for pair in pairs {
+            if pair.key == field.name {
+                provided = true
+                break
+            }
+        }
+        if provided {
+            continue
+        }
+        default_text, err_default, ok_default := emit_struct_field_default(e, field)
+        if !ok_default {
+            return "", err_default, false
+        }
+        append(&pairs, Brace_Pair{key = field.name, value = default_text})
+    }
 
     multiline := false
     for pair in pairs {
@@ -3363,6 +3383,52 @@ emit_decode_failure_return :: proc(
     )
 }
 
+decode_guarded_condition :: proc(guard, condition: string) -> string {
+    if guard == "" {
+        return condition
+    }
+    return fmt.tprintf("%s && (%s)", guard, condition)
+}
+
+decode_combined_guard :: proc(parent, child: string) -> string {
+    if parent == "" {
+        return child
+    }
+    return fmt.tprintf("%s && %s", parent, child)
+}
+
+emit_struct_field_default :: proc(e: ^Emitter, field: Struct_Field) -> (string, Compile_Error, bool) {
+    default_text, err_default, ok_default := emit_expr_for_expected_type(
+        e,
+        field.default_value,
+        field.ty,
+    )
+    if !ok_default {
+        return "", err_default, false
+    }
+    if field.owns_string {
+        if !form_produces_owned_value(field.default_value, e) {
+            mark_core_strings(e)
+            default_text = emit_call_text("strings.clone", []string{default_text})
+        }
+    } else if type_text_has_managed_lifecycle(e, field.ty) &&
+              !form_produces_owned_managed_type(e, field.default_value, field.ty) {
+        default_text = managed_clone_value_text(e, field.ty, default_text)
+    }
+    return default_text, {}, true
+}
+
+decode_field_constructor_value :: proc(
+    field: Struct_Field,
+    decoded, present, default_value: string,
+) -> string {
+    value := decoded
+    if field.has_default {
+        value = fmt.tprintf("%s ? %s : %s", present, decoded, default_value)
+    }
+    return fmt.tprintf("%s = %s", field.name, value)
+}
+
 emit_decode_struct_value :: proc(
     e: ^Emitter,
     builder: ^strings.Builder,
@@ -3372,6 +3438,7 @@ emit_decode_struct_value :: proc(
     counter: ^int,
     root_span: Span,
     depth: int = 0,
+    parent_guard: string = "",
 ) -> (string, Compile_Error, bool) {
     if depth > 16 {
         return "", Compile_Error{
@@ -3400,6 +3467,25 @@ emit_decode_struct_value :: proc(
             value_name,
             key_name,
         )
+        present_name := ""
+        field_guard := parent_guard
+        default_text := ""
+        if field.has_default {
+            present_name = fmt.tprintf("kvist_present_%d", field_id)
+            fmt.sbprintf(
+                builder,
+                "    %s := kvist_data_contains(%s, %s)\n",
+                present_name,
+                value_name,
+                key_name,
+            )
+            field_guard = decode_combined_guard(parent_guard, present_name)
+            emitted_default, err_default, ok_default := emit_struct_field_default(e, field)
+            if !ok_default {
+                return "", err_default, false
+            }
+            default_text = emitted_default
+        }
 
         field_path: [dynamic]string
         defer delete(field_path)
@@ -3407,7 +3493,8 @@ emit_decode_struct_value :: proc(
         append(&field_path, key_name)
 
         if field.owns_string {
-            fmt.sbprintf(builder, "    if %s.kind != .String {{", field_name)
+            condition := decode_guarded_condition(field_guard, fmt.tprintf("%s.kind != .String", field_name))
+            fmt.sbprintf(builder, "    if %s {{", condition)
             emit_decode_failure_return(
                 builder,
                 field_path[:],
@@ -3417,10 +3504,12 @@ emit_decode_struct_value :: proc(
             )
             strings.write_string(builder, "}\n")
             mark_core_strings(e)
-            append(&field_values, fmt.tprintf(
-                "%s = strings.clone(%s.payload.text)",
-                field.name,
-                field_name,
+            decoded := fmt.tprintf("strings.clone(%s.payload.text)", field_name)
+            append(&field_values, decode_field_constructor_value(
+                field,
+                decoded,
+                present_name,
+                default_text,
             ))
             continue
         }
@@ -3428,7 +3517,11 @@ emit_decode_struct_value :: proc(
         expected_kind, decoded_text, managed, supported := decode_field_parts(field.ty, field_name)
         if supported {
             if expected_kind != "" {
-                fmt.sbprintf(builder, "    if %s.kind != .%s {{", field_name, expected_kind)
+                condition := decode_guarded_condition(
+                    field_guard,
+                    fmt.tprintf("%s.kind != .%s", field_name, expected_kind),
+                )
+                fmt.sbprintf(builder, "    if %s {{", condition)
                 emit_decode_failure_return(
                     builder,
                     field_path[:],
@@ -3441,13 +3534,19 @@ emit_decode_struct_value :: proc(
             if managed {
                 decoded_text = emit_call_text("kvist_data_retain", []string{decoded_text})
             }
-            append(&field_values, fmt.tprintf("%s = %s", field.name, decoded_text))
+            append(&field_values, decode_field_constructor_value(
+                field,
+                decoded_text,
+                present_name,
+                default_text,
+            ))
             continue
         }
 
         nested_decl, nested := find_struct_decl(e, field.ty)
         if nested {
-            fmt.sbprintf(builder, "    if %s.kind != .Map {{", field_name)
+            condition := decode_guarded_condition(field_guard, fmt.tprintf("%s.kind != .Map", field_name))
+            fmt.sbprintf(builder, "    if %s {{", condition)
             emit_decode_failure_return(
                 builder,
                 field_path[:],
@@ -3465,17 +3564,24 @@ emit_decode_struct_value :: proc(
                 counter,
                 root_span,
                 depth+1,
+                field_guard,
             )
             if !ok_nested {
                 return "", err_nested, false
             }
-            append(&field_values, fmt.tprintf("%s = %s", field.name, nested_text))
+            append(&field_values, decode_field_constructor_value(
+                field,
+                nested_text,
+                present_name,
+                default_text,
+            ))
             continue
         }
 
         enum_decl, enum_found := find_enum_decl(e, field.ty)
         if enum_found {
-            fmt.sbprintf(builder, "    if %s.kind != .Keyword {{", field_name)
+            condition := decode_guarded_condition(field_guard, fmt.tprintf("%s.kind != .Keyword", field_name))
+            fmt.sbprintf(builder, "    if %s {{", condition)
             emit_decode_failure_return(
                 builder,
                 field_path[:],
@@ -3486,6 +3592,9 @@ emit_decode_struct_value :: proc(
             strings.write_string(builder, "}\n")
             enum_value_name := fmt.tprintf("kvist_enum_%d", field_id)
             fmt.sbprintf(builder, "    %s: %s\n", enum_value_name, field.ty)
+            if field_guard != "" {
+                fmt.sbprintf(builder, "    if %s {{\n", field_guard)
+            }
             fmt.sbprintf(builder, "    switch %s.payload.text {{\n", field_name)
             for variant in enum_decl.variants {
                 keyword := enum_variant_keyword(variant.source_name)
@@ -3519,7 +3628,15 @@ emit_decode_struct_value :: proc(
                 field_name,
             )
             strings.write_string(builder, "    }\n")
-            append(&field_values, fmt.tprintf("%s = %s", field.name, enum_value_name))
+            if field_guard != "" {
+                strings.write_string(builder, "    }\n")
+            }
+            append(&field_values, decode_field_constructor_value(
+                field,
+                enum_value_name,
+                present_name,
+                default_text,
+            ))
             continue
         }
 
@@ -15353,6 +15470,18 @@ emit_decl :: proc(e: ^Emitter, decl: IR_Decl) -> (Compile_Error, bool) {
             emit_line(e, fmt.tprintf("%s := %s", decl.var_decl.name, value))
         }
     case .Struct:
+        for field in decl.struct_decl.fields {
+            if field.has_default &&
+               !literal_matches_struct_field_type(e, field.ty, field.default_value) {
+                return Compile_Error{
+                    message = fmt.tprintf(
+                        "struct field default type mismatch for %s:",
+                        field.source_name,
+                    ),
+                    span = field.default_value.span,
+                }, false
+            }
+        }
         emit_indent(e)
         strings.write_string(&e.builder, decl.struct_decl.name)
         strings.write_string(&e.builder, " :: struct {")
