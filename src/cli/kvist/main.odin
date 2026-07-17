@@ -485,7 +485,7 @@ windows_import_collection_args :: proc(generated_path: string) -> [dynamic]strin
             continue
         }
         seen[drive_index] = true
-        append(&args, fmt.tprintf("-collection:%c=%c:/", drive, drive))
+        append(&args, strings.clone(fmt.tprintf("-collection:%c=%c:/", drive, drive)))
     }
     return args
 }
