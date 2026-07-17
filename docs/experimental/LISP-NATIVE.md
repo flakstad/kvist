@@ -86,7 +86,7 @@ surrounding program dynamic. Build these facilities in order:
    Integer, float, and boolean scalar decoders plus recursive type-directed
    native struct decoding for nested structs, scalar, explicitly owned string,
    enum, `Data`, explicit default fields, and owned dynamic arrays of scalar or
-   `Data` elements are implemented.
+   `Data` or enum elements are implemented.
 2. Reusable shape validation/refinement so code can validate once and avoid
    repeating kind and key checks.
 3. Structural pattern matching and destructuring for maps, sequential values,

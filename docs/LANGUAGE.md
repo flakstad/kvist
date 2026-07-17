@@ -1782,7 +1782,7 @@ a present key is still validated. Presence is checked independently from Data
 
 Fields declared `(owned [dynamic]T)` decode Data vectors into owning native
 dynamic arrays when `T` is `Data`, `bool`, an integer scalar, or a
-floating-point scalar:
+floating-point scalar, or a Kvist enum:
 
 ```clojure
 (defstruct Batch {
@@ -1794,7 +1794,8 @@ floating-point scalar:
 
 Every element is validated before the native array is allocated. Errors append
 the failing numeric index to the Data path, such as `[:ids 1]`. `Data` elements
-are retained; scalar elements are stored unboxed. Native string arrays, enums,
+are retained; scalar and enum elements are stored unboxed. Invalid enum
+keywords also populate `expected-type` and `actual-value`. Native string arrays,
 nested struct arrays, borrowed slices, and direct collection decode targets
 remain future work.
 

@@ -204,8 +204,8 @@ fallback. Static and runtime Data have the same public handle shape.
    struct's deterministic lifecycle. A `:default` field is optional when its
    map key is absent but still validates a present value, including explicit
    Data `nil`. `(owned [dynamic]T)` fields decode Data vectors for `Data`,
-   boolean, integer, and floating-point element types, with failing indices
-   appended to the error path. String, enum, and nested-struct arrays remain.
+   boolean, integer, floating-point, and enum element types, with failing
+   indices appended to the error path. String and nested-struct arrays remain.
 4. Design and implement structural Data matching with ownership-safe captured
    subvalues.
 5. Add builders/transients and verify their allocation behavior against

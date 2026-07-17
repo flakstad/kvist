@@ -3385,6 +3385,7 @@ emit_decode_failure_return :: proc(
     path_keys: []string,
     expected_kind, actual_text: string,
     failure_id: int,
+    body_depth: int = 2,
 ) {
     if len(path_keys) == 0 {
         fmt.sbprintf(
@@ -3396,24 +3397,30 @@ emit_decode_failure_return :: proc(
         return
     }
     path_name := fmt.tprintf("kvist_error_path_%d", failure_id)
-    fmt.sbprintf(builder, "\n        %s := kvist_data_retain(kvist_path)\n", path_name)
-    fmt.sbprintf(builder, "        defer kvist_data_release(%s)\n", path_name)
+    strings.write_byte(builder, '\n')
+    append_indent(builder, body_depth)
+    fmt.sbprintf(builder, "%s := kvist_data_retain(kvist_path)\n", path_name)
+    append_indent(builder, body_depth)
+    fmt.sbprintf(builder, "defer kvist_data_release(%s)\n", path_name)
     for key_name in path_keys {
+        append_indent(builder, body_depth)
         fmt.sbprintf(
             builder,
-            "        kvist_data_move_assign(&%s, kvist_data_append(%s, %s))\n",
+            "kvist_data_move_assign(&%s, kvist_data_append(%s, %s))\n",
             path_name,
             path_name,
             key_name,
         )
     }
+    append_indent(builder, body_depth)
     fmt.sbprintf(
         builder,
-        "        return {{}}, data__decode_error(%s, .%s, %s), false\n    ",
+        "return {{}}, data__decode_error(%s, .%s, %s), false\n",
         path_name,
         expected_kind,
         actual_text,
     )
+    append_indent(builder, body_depth-1)
 }
 
 decode_guarded_condition :: proc(guard, condition: string) -> string {
@@ -3466,6 +3473,58 @@ decode_field_constructor_value :: proc(
     return fmt.tprintf("%s = %s", field.name, value)
 }
 
+emit_decode_enum_failure_return :: proc(
+    builder: ^strings.Builder,
+    path_keys: []string,
+    expected_type, actual_value: string,
+    failure_id: int,
+    body_depth: int = 2,
+) {
+    path_name := fmt.tprintf("kvist_enum_error_path_%d", failure_id)
+    strings.write_byte(builder, '\n')
+    append_indent(builder, body_depth)
+    fmt.sbprintf(builder, "%s := kvist_data_retain(kvist_path)\n", path_name)
+    append_indent(builder, body_depth)
+    fmt.sbprintf(builder, "defer kvist_data_release(%s)\n", path_name)
+    for key_name in path_keys {
+        append_indent(builder, body_depth)
+        fmt.sbprintf(
+            builder,
+            "kvist_data_move_assign(&%s, kvist_data_append(%s, %s))\n",
+            path_name,
+            path_name,
+            key_name,
+        )
+    }
+    append_indent(builder, body_depth)
+    fmt.sbprintf(
+        builder,
+        "return {{}}, data__decode_enum_error(%s, %q, %s), false\n",
+        path_name,
+        expected_type,
+        actual_value,
+    )
+    append_indent(builder, body_depth-1)
+}
+
+decode_enum_item_constructor_text :: proc(enum_decl: ^Enum_Decl, elem_ty: string) -> string {
+    builder := strings.builder_make()
+    defer strings.builder_destroy(&builder)
+    fmt.sbprintf(
+        &builder,
+        "(proc(kvist_item: Data) -> %s {{ kvist_value: %s; switch kvist_item.payload.text {{ ",
+        elem_ty,
+        elem_ty,
+    )
+    for variant in enum_decl.variants {
+        keyword := enum_variant_keyword(variant.source_name)
+        fmt.sbprintf(&builder, "case %q: kvist_value = .%s; ", keyword, variant.name)
+        delete(keyword)
+    }
+    strings.write_string(&builder, "case: } return kvist_value })(kvist_item)")
+    return strings.clone(strings.to_string(builder))
+}
+
 emit_decode_dynamic_array_field :: proc(
     e: ^Emitter,
     builder: ^strings.Builder,
@@ -3488,11 +3547,17 @@ emit_decode_dynamic_array_field :: proc(
     }
     item_name := fmt.tprintf("kvist_item_%d", field_id)
     index_name := fmt.tprintf("kvist_index_%d", field_id)
+    enum_decl, enum_supported := find_enum_decl(e, elem_ty)
     expected_kind, _, managed, supported := decode_field_parts(elem_ty, item_name)
+    if enum_supported {
+        expected_kind = "Keyword"
+        managed = false
+        supported = true
+    }
     if !supported {
         return "", Compile_Error{
             message = fmt.tprintf(
-                "data.decode field %s has unsupported dynamic-array element type %s; supported elements are Data, bool, integer, and floating-point scalars",
+                "data.decode field %s has unsupported dynamic-array element type %s; supported elements are Data, bool, integer and floating-point scalars, and Kvist enums",
                 field.source_name,
                 elem_ty,
             ),
@@ -3515,21 +3580,24 @@ emit_decode_dynamic_array_field :: proc(
     strings.write_string(builder, "}\n")
 
     if expected_kind != "" {
+        loop_depth := 1
         if field_guard != "" {
             fmt.sbprintf(builder, "    if %s {{\n", field_guard)
+            loop_depth = 2
         }
+        append_indent(builder, loop_depth)
         fmt.sbprintf(
             builder,
-            "    for %s, %s in %s.payload.items {{\n",
+            "for %s, %s in %s.payload.items {{\n",
             item_name,
             index_name,
             field_name,
         )
-        fmt.sbprintf(builder, "        if %s.kind != .%s {{", item_name, expected_kind)
         index_key := fmt.tprintf("kvist_index_key_%d", field_id)
+        append_indent(builder, loop_depth+1)
         fmt.sbprintf(
             builder,
-            "\n            %s := Data{{kind = .Int, payload = {{int_value = i64(%s)}}}}\n    ",
+            "%s := Data{{kind = .Int, payload = {{int_value = i64(%s)}}}}\n",
             index_key,
             index_name,
         )
@@ -3537,23 +3605,56 @@ emit_decode_dynamic_array_field :: proc(
         defer delete(item_path)
         append(&item_path, ..field_path)
         append(&item_path, index_key)
+        append_indent(builder, loop_depth+1)
+        fmt.sbprintf(builder, "if %s.kind != .%s {{", item_name, expected_kind)
         emit_decode_failure_return(
             builder,
             item_path[:],
             expected_kind,
             fmt.tprintf("%s.kind", item_name),
             field_id,
+            loop_depth+2,
         )
         strings.write_string(builder, "}\n")
-        strings.write_string(builder, "    }\n")
+        if enum_supported {
+            invalid := strings.builder_make()
+            defer strings.builder_destroy(&invalid)
+            for variant, idx in enum_decl.variants {
+                if idx > 0 {
+                    strings.write_string(&invalid, " && ")
+                }
+                keyword := enum_variant_keyword(variant.source_name)
+                fmt.sbprintf(&invalid, "%s.payload.text != %q", item_name, keyword)
+                delete(keyword)
+            }
+            append_indent(builder, loop_depth+1)
+            fmt.sbprintf(builder, "if %s {{", strings.to_string(invalid))
+            emit_decode_enum_failure_return(
+                builder,
+                item_path[:],
+                elem_ty,
+                item_name,
+                field_id,
+                loop_depth+2,
+            )
+            strings.write_string(builder, "}\n")
+        }
+        append_indent(builder, loop_depth)
+        strings.write_string(builder, "}\n")
         if field_guard != "" {
             strings.write_string(builder, "    }\n")
         }
     }
 
-    _, constructed_item, _, _ := decode_field_parts(elem_ty, "kvist_item")
-    if managed {
-        constructed_item = managed_clone_value_text(e, elem_ty, constructed_item)
+    constructed_item := ""
+    if enum_supported {
+        constructed_item = decode_enum_item_constructor_text(enum_decl, elem_ty)
+    } else {
+        _, constructed, _, _ := decode_field_parts(elem_ty, "kvist_item")
+        constructed_item = constructed
+        if managed {
+            constructed_item = managed_clone_value_text(e, elem_ty, constructed_item)
+        }
     }
     return fmt.tprintf(
         "(proc(kvist_items: []Data) -> %s {{ kvist_out := make(%s, 0, len(kvist_items)); for kvist_item in kvist_items {{ append(&kvist_out, %s) }}; return kvist_out }})(%s.payload.items)",

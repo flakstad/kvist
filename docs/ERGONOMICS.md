@@ -61,9 +61,10 @@ compiler behavior.
   explicitly owned string, enum, and `:default` fields. Missing defaulted keys
   use the native field default; present values remain validated. Decoded managed
   fields and path-carrying `Decode-Error` values clean up automatically.
-- Implemented: `(owned [dynamic]T)` fields for `Data`, boolean, integer, and
-  floating-point elements. Validation completes before allocation and error
-  paths include the failing vector index.
+- Implemented: `(owned [dynamic]T)` fields for `Data`, boolean, integer,
+  floating-point, and enum elements. Validation completes before allocation,
+  error paths include the failing vector index, and invalid enum elements retain
+  enum-specific diagnostics.
 - Carry the exact Data path, expected shape, and actual kind in decode errors.
 - Preserve the zero-allocation static quote path.
 

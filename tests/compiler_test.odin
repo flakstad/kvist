@@ -3973,7 +3973,7 @@ compile_data_decode_rejects_native_string_arrays :: proc(t: ^testing.T) {
     testing.expect_value(
         t,
         err.message,
-        "data.decode field values has unsupported dynamic-array element type string; supported elements are Data, bool, integer, and floating-point scalars",
+        "data.decode field values has unsupported dynamic-array element type string; supported elements are Data, bool, integer and floating-point scalars, and Kvist enums",
     )
 }
 
@@ -4159,6 +4159,30 @@ compile_type_directed_data_struct_decode :: proc(t: ^testing.T) {
         strings.contains(
             result.output,
             "for kvist_item in kvist_values { kvist_data_release(kvist_item) }; delete(kvist_values)",
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            `kvist_item_19.payload.text != ":manual"`,
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            `data__decode_enum_error(kvist_enum_error_path_19, "Mode", kvist_item_19)`,
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            "proc(kvist_items: []Data) -> [dynamic]Mode",
         ),
         true,
     )

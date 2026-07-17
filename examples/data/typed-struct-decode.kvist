@@ -26,6 +26,7 @@
   raw-items: (owned [dynamic]Data) :default []
   flags: (owned [dynamic]bool) :default []
   ratios: (owned [dynamic]f64) :default []
+  modes: (owned [dynamic]Mode) :default []
 })
 
 (defn main []
@@ -49,7 +50,8 @@
             :scores [10 20 30]
             :raw-items [1 :two]
             :flags [true false]
-            :ratios [0.25 0.75]})]
+            :ratios [0.25 0.75]
+            :modes [:manual :read-only]})]
     (assert ok)
     (assert (= settings.port 8080))
     (assert settings.enabled)
@@ -67,6 +69,8 @@
     (assert settings.flags[0])
     (assert (not settings.flags[1]))
     (assert (= settings.ratios[1] 0.75))
+    (assert (= settings.modes[0] .Manual))
+    (assert (= settings.modes[1] .Read-Only))
     (let [copied settings]
       (set! copied.scores[0] 99)
       (assert (= settings.scores[0] 10))
@@ -105,6 +109,7 @@
     (assert (= (count settings.raw-items) 0))
     (assert (= (count settings.flags) 0))
     (assert (= (count settings.ratios) 0))
+    (assert (= (count settings.modes) 0))
     (discard err))
 
   (let [[settings err ok]
@@ -131,6 +136,22 @@
     (assert (= err.path '[:scores 1]))
     (assert (= err.expected .Int))
     (assert (= err.actual .Keyword))
+    (discard settings))
+
+  (let [[settings err ok]
+        (data.decode
+          Settings
+          '{:port 8084
+            :enabled true
+            :endpoint {:host-id 11}
+            :modes [:manual :sometimes]})]
+    (assert (not ok))
+    (assert (= err.path '[:modes 1]))
+    (assert err.enum-value?)
+    (assert (= err.expected .Keyword))
+    (assert (= err.actual .Keyword))
+    (assert (= err.expected-type "Mode"))
+    (assert (= err.actual-value ':sometimes))
     (discard settings))
 
   (let [[settings err ok]
