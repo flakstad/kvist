@@ -104,6 +104,14 @@
   [values: []Data] -> Data #owned #force_inline
   (odin-call "kvist_data_make_items" .Set values))
 
+(defn set-from-unique
+  "Construct set Data from values already known to be structurally unique.
+
+  This retains each element without checking for duplicates. Use `set` when
+  uniqueness has not already been established."
+  [values: []Data] -> Data #owned #force_inline
+  (odin-call "kvist_data_make_unique_set" values))
+
 (defn map-from-alternating
   "Construct map Data from an alternating native array of keys and values."
   [values: []Data] -> Data #owned #force_inline
