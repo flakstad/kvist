@@ -337,6 +337,8 @@ Supported transformer forms are deliberately small:
 (take-while pred)
 (drop n)
 (drop-while pred)
+(distinct)
+(distinct-by f)
 ```
 
 Callbacks can be known functions, inline `fn` literals, or shallow field
@@ -504,8 +506,12 @@ The current implementation is strict:
 - `map-indexed` callbacks must be known two-argument functions or inline `fn`
   literals taking `(int, current-item)`;
 - `mapcat` callbacks must return borrowed slices or fixed arrays in the first
-  version; owned dynamic-array results are rejected until cleanup semantics are
-  explicit;
+  version; when the callback returns `Data`, nil/list/vector/set results are
+  traversed directly with deterministic cleanup; owned native dynamic-array
+  results remain rejected until their cleanup semantics are explicit;
+- `distinct` and `distinct-by` currently operate on Data pipelines;
+  `distinct-by` callbacks return Data keys and both retain first-seen keys only
+  for the lifetime of the fused operation;
 - `keep` callbacks must be known one-argument functions or inline `fn`
   literals returning `[value: T ok: bool]`;
 - inline `fn` transform callbacks require explicit parameter and return types;
@@ -559,14 +565,16 @@ and accumulator types are known.
 ## Current Limits
 
 - transform specs support `map`, `map-indexed`, `mapcat`, `filter`, `remove`,
-  `keep`, `take`, `take-while`, `drop`, and `drop-while`
+  `keep`, `take`, `take-while`, `drop`, `drop-while`, and Data-pipeline
+  `distinct`/`distinct-by`
 - `into` currently targets fresh owned `[dynamic]T` arrays, owned `map[K]V`
   maps, and owned `set[T]` sets; `arr.into!` appends into existing dynamic
   arrays
 - `transduce` supports `+`, `min`, `max`, known two-argument reducers, and
   inline `fn` reducers; inline reducers can use direct-branch `reduced` to
   stop early
-- inputs may be slices, fixed arrays, dynamic arrays, maps, or `defiter` calls
+- inputs may be slices, fixed arrays, dynamic arrays, maps, sequential `Data`,
+  or `defiter` calls
 - inline `fn` callbacks are compile-time syntax in transform positions, not
   runtime closure values
 - anything cleverer should usually be a direct `for` loop
