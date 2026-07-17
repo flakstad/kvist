@@ -180,7 +180,8 @@ Planned capabilities are:
   available, along with owned dynamic arrays of scalar, enum, `Data`, or
   recursively decoded Kvist struct elements as struct fields or direct decode
   targets;
-- reusable validated shapes for dynamic/native boundaries;
+- reusable validation of native struct and dynamic-array shapes at
+  dynamic/native boundaries without constructing the native target;
 - efficient builders or transients for bulk immutable construction;
 - explicit dispatch on tags or selected keys for messages and protocols;
 - optionally, a small capability-scoped evaluator for concrete data-driven
@@ -229,15 +230,18 @@ fallback. Static and runtime Data have the same public handle shape.
    Kvist struct element types, with failing indices appended to the error path.
    Struct elements recursively validate their fields and extend paths beyond
    the index. String arrays remain.
-4. Design and implement structural Data matching with ownership-safe captured
+4. `(data.validate Type value [path])` reuses the same generated shape checks
+   as `data.decode`, returns `[Decode-Error ok]`, and performs no native target
+   construction. It leaves the original Data available to Data-oriented code.
+5. Design and implement structural Data matching with ownership-safe captured
    subvalues.
-5. Add builders/transients and verify their allocation behavior against
+6. Add builders/transients and verify their allocation behavior against
    repeated persistent updates.
-6. Extend `kvist:edn` with application tag handlers; lossless tagged Data,
+7. Extend `kvist:edn` with application tag handlers; lossless tagged Data,
    core reading, file input, structured errors, and canonical writing are
    implemented. Vev's runtime, storage, ABI, and literal-macro paths share this
    reader; its duplicate EDN reader and raw borrowed parser wrappers are gone.
-7. Add explicit tag/key dispatch only after message-shaped application
+8. Add explicit tag/key dispatch only after message-shaped application
    workloads establish the required semantics.
 8. Extend runtime-valued `def` beyond single-result call inference only when
    concrete application examples justify additional inference rules; ordered

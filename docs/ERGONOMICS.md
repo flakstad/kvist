@@ -22,7 +22,7 @@ compiler behavior.
 | Source mapping | Partial | Cover more generated cleanup, specialization, and Data forms |
 | Core `str` | Implemented | Validate rendering across Ro and Vev |
 | Managed `Data` in native aggregates | Partial | Top-level Kvist structs are managed recursively; add containers, unions, closures, local/imported structs |
-| Typed Data decoding and validated shapes | Partial | Scalars, owned strings, enums, defaults, recursive native structs, and owned dynamic arrays including direct targets and struct elements decode with paths; add reusable shapes |
+| Typed Data decoding and validated shapes | Implemented | Structs and direct arrays decode or validate from one native shape definition with precise paths; broaden only from concrete boundary needs |
 | Structural Data matching and destructuring | Planned | Design after aggregate ownership and decoding |
 | Public Data builders/transients | Planned | Expose a safe freeze API based on the EDN reader's linear construction pattern |
 | Vev Data result traversal and typed collection | Planned | Avoid unnecessary intermediate native arrays |
@@ -69,6 +69,10 @@ compiler behavior.
 - Implemented: direct `(data.decode (dynamic T) value [path])` targets for the
   same element set, returning ordinary owned native arrays with automatic
   result-binding cleanup.
+- Implemented: `(data.validate Type value [path])` reuses the complete
+  type-directed traversal without constructing structs, cloning managed
+  fields, or allocating native arrays. Data can remain Data after one boundary
+  check.
 - Carry the exact Data path, expected shape, and actual kind in decode errors.
 - Preserve the zero-allocation static quote path.
 
@@ -77,7 +81,8 @@ compiler behavior.
 - Specify nested map/sequential patterns, literals, optional/default keys, rest
   bindings, exhaustiveness, and captured-value ownership using executable
   Ro/Vev examples.
-- Add reusable validated shapes and safe public Data builders.
+- Use native-type validation as the reusable shape mechanism; add safe public
+  Data builders.
 - Add borrowed Vev row traversal, typed row decoding, typed collection, and
   Data-pattern row destructuring without unnecessary intermediate arrays.
 - Evaluate native struct and fixed-array destructuring under the same explicit

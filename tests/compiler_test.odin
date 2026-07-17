@@ -4066,6 +4066,69 @@ compile_data_decode_direct_dynamic_arrays :: proc(t: ^testing.T) {
 }
 
 @(test)
+compile_data_validate_reuses_type_directed_shape :: proc(t: ^testing.T) {
+    result, err, ok := kvist.compile_path_with_map("examples/data/validated-shapes.kvist")
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            "-> (err: data__Decode_Error, ok: bool)",
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            "-> (decoded: Message, err: data__Decode_Error, ok: bool)",
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            "kvist_data_append(kvist_error_path_7, kvist_index_key_5)",
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            "-> (decoded: [dynamic]Endpoint, err: data__Decode_Error, ok: bool)",
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            "defer kvist_managed_destroy_data__Decode_Error(err)",
+        ),
+        true,
+    )
+    testing.expect_value(t, strings.contains(result.output, "return Message{"), false)
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            "make([dynamic]Endpoint, 0, len(kvist_items))",
+        ),
+        false,
+    )
+}
+
+@(test)
 compile_rejects_owned_borrowed_slice_fields :: proc(t: ^testing.T) {
     source := `(package main)
 

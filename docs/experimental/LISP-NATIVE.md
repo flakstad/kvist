@@ -88,8 +88,10 @@ surrounding program dynamic. Build these facilities in order:
    enum, `Data`, explicit default fields, and owned dynamic arrays of scalar,
    `Data`, enum, or recursively decoded Kvist struct elements are implemented
    both as struct fields and direct collection targets.
-2. Reusable shape validation/refinement so code can validate once and avoid
-   repeating kind and key checks.
+2. Implemented: `(data.validate Type value [path])` reuses the type-directed
+   decoder's shape traversal without constructing the native target, so a
+   boundary can validate once before continuing with immutable Data. A distinct
+   statically refined Data type is intentionally not implied.
 3. Structural pattern matching and destructuring for maps, sequential values,
    literals, kind guards, rest bindings, and nested patterns.
 4. Mutable builders or transients for bulk construction followed by one
