@@ -15465,7 +15465,7 @@ reject_functional_transform_unknown_step :: proc(t: ^testing.T) {
     }
     defer delete(err.message)
 
-    testing.expect_value(t, err.message, "transform steps currently support map, map-indexed, mapcat, filter, remove, keep, take, take-while, drop, and drop-while")
+    testing.expect_value(t, err.message, "transform steps currently support map, map-indexed, mapcat, filter, remove, keep, take, take-while, drop, drop-while, distinct, and distinct-by")
 }
 
 @(test)
@@ -15500,7 +15500,7 @@ reject_named_functional_transform_unknown_step_when_used :: proc(t: ^testing.T) 
     }
     defer delete(err.message)
 
-    testing.expect_value(t, err.message, "transform steps currently support map, map-indexed, mapcat, filter, remove, keep, take, take-while, drop, and drop-while")
+    testing.expect_value(t, err.message, "transform steps currently support map, map-indexed, mapcat, filter, remove, keep, take, take-while, drop, drop-while, distinct, and distinct-by")
 }
 
 @(test)
@@ -15523,7 +15523,7 @@ reject_generated_shaped_functional_transform_step :: proc(t: ^testing.T) {
     }
     defer delete(err.message)
 
-    testing.expect_value(t, err.message, "transform steps currently support map, map-indexed, mapcat, filter, remove, keep, take, take-while, drop, and drop-while")
+    testing.expect_value(t, err.message, "transform steps currently support map, map-indexed, mapcat, filter, remove, keep, take, take-while, drop, drop-while, distinct, and distinct-by")
 }
 
 @(test)
@@ -22022,6 +22022,45 @@ compile_contextual_data_literals_in_direct_and_overloaded_calls :: proc(t: ^test
 }
 
 @(test)
+compile_keyword_and_data_map_invocation_lower_to_borrowed_lookup :: proc(t: ^testing.T) {
+    source := `(package main)
+(import data "kvist:data")
+
+(defn keyword-lookup [message: Data] -> Data
+  (:owner message))
+
+(defn keyword-default [message: Data] -> Data
+  (:owner message :nobody))
+
+(defn map-lookup [message: Data] -> Data
+  (message :owner))
+
+(defn owned-default [message: Data] -> Data
+  (:owner message (data.from-string "nobody")))
+
+(defn nested-name [message: Data] -> Data
+  (let [owner (:owner message)]
+    (:name owner)))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "kvist_data_map_call(message, Data{kind = .Keyword"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_data_map_call_or(message, Data{kind = .Keyword"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_data_retain(kvist_data_map_call(message"), true)
+    testing.expect_value(t, strings.contains(output, "\"nobody\""), true)
+    testing.expect_value(t, strings.contains(output, "defer kvist_data_release(kvist_thread_"), true)
+    testing.expect_value(t, strings.contains(output, "message(keyword("), false)
+    testing.expect_value(t, strings.contains(output, "kvist_data_map_call :: proc"), true)
+    testing.expect_value(t, strings.contains(output, "Data invocation expects a map or nil"), true)
+}
+
+@(test)
 compile_fused_data_collection_transform_owns_intermediates :: proc(t: ^testing.T) {
     source := `(package main)
 (import data "kvist:data")
@@ -22035,12 +22074,34 @@ compile_fused_data_collection_transform_owns_intermediates :: proc(t: ^testing.T
 (defn add-value [total: i64, value: Data] -> i64
   (+ total (data.int value)))
 
+(defn duplicate [value: Data] -> Data
+  [value value])
+
 (deftransform selected
   (map increment)
   (filter above-two?))
 
+(deftransform duplicated
+  (mapcat duplicate)
+  (filter above-two?))
+
+(deftransform unique
+  (distinct))
+
+(deftransform unique-by-value
+  (distinct-by increment))
+
 (defn collect [values: Data] -> Data
   (into Data selected values))
+
+(defn collect-duplicates [values: Data] -> Data
+  (into Data duplicated values))
+
+(defn collect-unique [values: Data] -> Data
+  (into Data unique values))
+
+(defn collect-unique-by [values: Data] -> Data
+  (into Data unique-by-value values))
 
 (defn total [values: Data] -> i64
   (transduce (filter above-two?) add-value (i64 0) values))`
@@ -22059,10 +22120,42 @@ compile_fused_data_collection_transform_owns_intermediates :: proc(t: ^testing.T
     testing.expect_value(t, strings.contains(output, "defer kvist_data_release(kvist_xform_"), true)
     testing.expect_value(t, strings.contains(output, "kvist_data_append_retained(&kvist_out, kvist_xform_"), true)
     testing.expect_value(t, strings.contains(output, "return kvist_data_freeze_items(.Vector, &kvist_out)"), true)
+    testing.expect_value(t, strings.contains(output, "Data mapcat transform callback expects nil, list, vector, or set"), true)
+    testing.expect_value(t, strings.contains(output, "for kvist_xform_"), true)
+    testing.expect_value(t, strings.contains(output, ".payload.items"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_data_slice_contains"), true)
+    testing.expect_value(t, strings.contains(output, "make([dynamic]Data)"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_data_append_retained(&kvist_xform_"), true)
     testing.expect_value(t, strings.contains(output, "return kvist_data_retain((proc(kvist_source: Data) -> Data"), false)
     testing.expect_value(t, strings.contains(output, "kvist_data_get_or :: proc"), true)
     testing.expect_value(t, strings.contains(output, "if value.kind == .Set { for item in value.payload.items"), true)
     testing.expect_value(t, strings.contains(output, "value.kind == .List || value.kind == .Vector { for item in value.payload.items"), false)
+}
+
+@(test)
+reject_distinct_transform_for_native_items :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn collect [values: []int] -> [dynamic]int
+  (into [dynamic]int (distinct) values))`
+
+    _, err, ok := kvist.compile_source(source)
+    defer delete(err.message)
+    testing.expect_value(t, ok, false)
+    testing.expect_value(t, err.message, "distinct transform currently expects Data items, got int")
+}
+
+@(test)
+reject_distinct_transform_argument :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(deftransform invalid
+  (distinct identity))`
+
+    _, err, ok := kvist.compile_source(source)
+    defer delete(err.message)
+    testing.expect_value(t, ok, false)
+    testing.expect_value(t, err.message, "distinct transform step expects no arguments")
 }
 
 @(test)
