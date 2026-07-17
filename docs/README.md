@@ -28,6 +28,8 @@ Experimental notes live under `docs/experimental/`.
 
 - [experimental/LISP-NATIVE.md](experimental/LISP-NATIVE.md) - staged plan for
   Data, EDN, runtime bindings, Syntax, REPL, and resident-console work
+- [experimental/DATA-COLLECTIONS-API.md](experimental/DATA-COLLECTIONS-API.md) -
+  audit and proposed eager immutable Data collection API
 
 Optional official packages and their documentation are linked from
 [PACKAGES.md](PACKAGES.md).
