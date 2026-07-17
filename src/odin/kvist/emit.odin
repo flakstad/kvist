@@ -9139,6 +9139,16 @@ obvious_form_type :: proc(e: ^Emitter, form: CST_Form) -> (string, bool) {
             return ty, true
         }
     }
+    if form.kind == .List && len(form.items) >= 2 && len(form.items) <= 3 {
+        if form.items[0].kind == .Keyword {
+            return "Data", true
+        }
+        if form.items[0].kind == .Symbol {
+            if head_ty, ok_head_ty := obvious_form_type(e, form.items[0]); ok_head_ty && head_ty == "Data" {
+                return "Data", true
+            }
+        }
+    }
     if form.kind == .List && len(form.items) == 2 && form.items[0].kind == .Symbol && form.items[1].kind == .Brace {
         head_name := map_name(form.items[0].text)
         if _, ok := find_struct_decl(e, head_name); ok {
@@ -14544,10 +14554,51 @@ emit_thread_detach_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile
     return emit_call_text(thread_detach_helper_name(spec), call_args[:]), {}, true
 }
 
+emit_data_callable_lookup :: proc(
+    e: ^Emitter,
+    target_form, key_form: CST_Form,
+    fallback_form: ^CST_Form,
+    span: Span,
+) -> (string, Compile_Error, bool) {
+    target, err_target, ok_target := emit_expr(e, target_form)
+    if !ok_target {
+        return "", err_target, false
+    }
+    key, err_key, ok_key := emit_data_lookup_key(e, key_form)
+    if !ok_key {
+        return "", err_key, false
+    }
+    mark_data_type(e)
+    if fallback_form == nil {
+        return emit_call_text("kvist_data_map_call", []string{target, key}), {}, true
+    }
+    fallback, err_fallback, ok_fallback := emit_data_value_literal(e, fallback_form^)
+    if fallback_form.kind == .Symbol ||
+       (fallback_form.kind == .List && len(fallback_form.items) > 0 && is_symbol(fallback_form.items[0], "quote")) {
+        fallback, err_fallback, ok_fallback = emit_expr(e, fallback_form^)
+    }
+    if !ok_fallback {
+        err_fallback.span = span
+        return "", err_fallback, false
+    }
+    return emit_call_text("kvist_data_map_call_or", []string{target, key, fallback}), {}, true
+}
+
 emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) {
     head := form.items[0]
     if head.kind != .Symbol {
         return "", Compile_Error{message = "unsupported call head", span = head.span}, false
+    }
+
+    if head_ty, ok_head_ty := obvious_form_type(e, head); ok_head_ty && head_ty == "Data" {
+        if len(form.items) != 2 && len(form.items) != 3 {
+            return "", Compile_Error{message = "Data map invocation expects key and optional fallback", span = form.span}, false
+        }
+        fallback: ^CST_Form
+        if len(form.items) == 3 {
+            fallback = &form.items[2]
+        }
+        return emit_data_callable_lookup(e, head, form.items[1], fallback, form.span)
     }
 
     if len(form.items) > 1 && is_call_directive_symbol(form.items[len(form.items)-1]) {
@@ -15342,6 +15393,16 @@ emit_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) 
                 return "", err_type, false
             }
             return type_text, {}, true
+        }
+        if form.items[0].kind == .Keyword {
+            if len(form.items) != 2 && len(form.items) != 3 {
+                return "", Compile_Error{message = "keyword invocation expects map and optional fallback", span = form.span}, false
+            }
+            fallback: ^CST_Form
+            if len(form.items) == 3 {
+                fallback = &form.items[2]
+            }
+            return emit_data_callable_lookup(e, form.items[1], form.items[0], fallback, form.span)
         }
         if form.items[0].kind != .Symbol {
             return emit_type_application_expr(e, form.items[0], form.items[1:], form.span)
@@ -18831,6 +18892,8 @@ emit_data_type_helper :: proc(e: ^Emitter) {
     emit_line(e, "return fallback")
     e.indent -= 1
     emit_line(e, "}")
+    emit_line(e, "kvist_data_map_call :: proc(value, key: Data) -> Data { assert(value.kind == .Nil || value.kind == .Map, \"Data invocation expects a map or nil\"); return kvist_data_get(value, key) }")
+    emit_line(e, "kvist_data_map_call_or :: proc(value, key, fallback: Data) -> Data { assert(value.kind == .Nil || value.kind == .Map, \"Data invocation expects a map or nil\"); return kvist_data_get_or(value, key, fallback) }")
     emit_line(e, "kvist_data_contains :: proc(value, key: Data) -> bool {")
     e.indent += 1
     emit_line(e, "if value.kind == .Map { for entry in value.payload.entries { if kvist_data_equal(entry.key, key) { return true } }; return false }")
