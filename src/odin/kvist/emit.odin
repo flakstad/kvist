@@ -75,6 +75,7 @@ Transform_Loop_Source :: struct {
 
 Transform_Into_Output_Kind :: enum {
     Dynamic_Array,
+    Data_Vector,
     Map,
     Set,
 }
@@ -8345,6 +8346,15 @@ form_produces_owned_managed_value :: proc(e: ^Emitter, form: CST_Form, depth: in
     if form.items[0].text == "quasiquote" {
         return true
     }
+    if form.items[0].text == "into" {
+        output_ty, _, _, ok_output_ty := parse_type_text_from_forms(form.items[:], 1)
+        if ok_output_ty {
+            defer delete(output_ty)
+            if type_text_is_managed_value(output_ty) {
+                return true
+            }
+        }
+    }
     if head_is_core_assoc(form.items[0].text) ||
        head_is_core_update(form.items[0].text) ||
        head_is_core_dissoc(form.items[0].text) {
@@ -13254,6 +13264,23 @@ emit_transform_state_prelude :: proc(e: ^Emitter, builder: ^strings.Builder, ste
     return {}, true
 }
 
+transform_callback_borrows_data_result :: proc(e: ^Emitter, callback: CST_Form) -> bool {
+    if callback.kind == .Symbol {
+        if strings.has_prefix(callback.text, ".") {
+            return true
+        }
+        return proc_decl_borrowed_view_head(e, callback.text)
+    }
+    if callback.kind == .List && len(callback.items) > 0 && is_symbol(callback.items[0], "fn") {
+        parsed, _, ok := parse_proc_literal_form(callback)
+        if !ok || len(parsed.body) == 0 {
+            return false
+        }
+        return !form_produces_owned_managed_type(e, parsed.body[len(parsed.body)-1], "Data")
+    }
+    return false
+}
+
 emit_transform_pipeline_body :: proc(
     e: ^Emitter,
     builder: ^strings.Builder,
@@ -13367,8 +13394,15 @@ emit_transform_pipeline_body :: proc(
                 return "", "", 0, err_mapped, false
             }
             temp := transform_temp_name(e)
+            if mapped_ty == "Data" && transform_callback_borrows_data_result(e, step.callback) {
+                mapped_text = emit_call_text("kvist_data_retain", []string{mapped_text})
+            }
             append_indent(builder, current_depth)
             fmt.sbprintf(builder, "%s := %s\n", temp, mapped_text)
+            if mapped_ty == "Data" {
+                append_indent(builder, current_depth)
+                fmt.sbprintf(builder, "defer kvist_data_release(%s)\n", temp)
+            }
             append_indent(builder, current_depth)
             fmt.sbprintf(builder, "%s += 1\n", step.state_name)
             current_text = temp
@@ -13402,8 +13436,15 @@ emit_transform_pipeline_body :: proc(
                 return "", "", 0, err_mapped, false
             }
             temp := transform_temp_name(e)
+            if mapped_ty == "Data" && transform_callback_borrows_data_result(e, step.callback) {
+                mapped_text = emit_call_text("kvist_data_retain", []string{mapped_text})
+            }
             append_indent(builder, current_depth)
             fmt.sbprintf(builder, "%s := %s\n", temp, mapped_text)
+            if mapped_ty == "Data" {
+                append_indent(builder, current_depth)
+                fmt.sbprintf(builder, "defer kvist_data_release(%s)\n", temp)
+            }
             current_text = temp
             current_ty = mapped_ty
         }
@@ -13777,7 +13818,12 @@ emit_transform_into_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compil
     call_args := strings.join(call_texts[:], ", ", context.allocator)
     defer delete(call_args)
     fmt.sbprintf(&builder, "(proc(%s) -> %s %s\n", param_list, output_ty, "{")
-    fmt.sbprintf(&builder, "    kvist_out := %s\n", transform_into_make_text(output_spec, "len(kvist_source)"))
+    capacity_text := transform_source_count_text(source_ty, "kvist_source")
+    fmt.sbprintf(&builder, "    kvist_out := %s\n", transform_into_make_text(output_spec, capacity_text))
+    if output_spec.kind == .Data_Vector {
+        mark_data_type(e)
+        strings.write_string(&builder, "    defer { for kvist_value in kvist_out { kvist_data_release(kvist_value) }; delete(kvist_out) }\n")
+    }
     err_prelude, ok_prelude := emit_transform_state_prelude(e, &builder, steps[:], 1)
     if !ok_prelude {
         return "", err_prelude, false
@@ -13797,7 +13843,7 @@ emit_transform_into_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compil
     emit_transform_into_output_write(&builder, 2+close_count, output_spec, value_text)
     emit_transform_closers(&builder, 2+close_count, close_count)
     strings.write_string(&builder, "    }\n")
-    strings.write_string(&builder, "    return kvist_out\n")
+    fmt.sbprintf(&builder, "    return %s\n", transform_into_finalize_text(output_spec))
     strings.write_string(&builder, "})")
     return fmt.tprintf("%s(%s)", strings.to_string(builder), call_args), {}, true
 }
@@ -14732,7 +14778,7 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
                 if !ok_fallback {
                     return "", err_fallback, false
                 }
-                return emit_call_text("kvist_data_or", []string{call, fallback}), Compile_Error{}, true
+                return emit_call_text("kvist_data_get_or", []string{target, key, fallback}), Compile_Error{}, true
             }
             return call, Compile_Error{}, true
         }
@@ -15328,6 +15374,9 @@ collection_element_type :: proc(type_text: string) -> (string, bool) {
 }
 
 transform_source_value_type :: proc(type_text: string) -> (string, bool) {
+    if type_text == "Data" {
+        return "Data", true
+    }
     if _, value_ty, ok_map := map_type_parts(type_text); ok_map {
         return value_ty, true
     }
@@ -15335,6 +15384,17 @@ transform_source_value_type :: proc(type_text: string) -> (string, bool) {
 }
 
 transform_source_loop_header :: proc(source_ty, source_text, key_name: string) -> string {
+    if source_ty == "Data" {
+        return fmt.tprintf(
+            "assert(%s.kind == .Nil || %s.kind == .List || %s.kind == .Vector || %s.kind == .Set, \"Data transform source expects nil, list, vector, or set\"); for kvist_item in %s.payload.items %s",
+            source_text,
+            source_text,
+            source_text,
+            source_text,
+            source_text,
+            "{",
+        )
+    }
     if type_text_is_map(source_ty) {
         if len(key_name) > 0 {
             return fmt.tprintf("for %s, kvist_item in %s %s", key_name, source_text, "{")
@@ -15342,6 +15402,13 @@ transform_source_loop_header :: proc(source_ty, source_text, key_name: string) -
         return fmt.tprintf("for _, kvist_item in %s %s", source_text, "{")
     }
     return fmt.tprintf("for kvist_item in %s %s", source_text, "{")
+}
+
+transform_source_count_text :: proc(source_ty, source_text: string) -> string {
+    if source_ty == "Data" {
+        return fmt.tprintf("kvist_data_count(%s)", source_text)
+    }
+    return fmt.tprintf("len(%s)", source_text)
 }
 
 emit_transform_loop_source_open :: proc(builder: ^strings.Builder, depth: int, item_name, source_text: string, spec: Transform_Loop_Source) {
@@ -15393,6 +15460,11 @@ transform_into_output_value_description :: proc(spec: Transform_Into_Output) -> 
 
 transform_into_output_spec :: proc(output_ty: string) -> (spec: Transform_Into_Output, err: Compile_Error, ok: bool) {
     spec.output_ty = output_ty
+    if output_ty == "Data" {
+        spec.kind = .Data_Vector
+        spec.value_ty = "Data"
+        return spec, {}, true
+    }
     if elem_ty, ok_elem := dynamic_array_element_type(output_ty); ok_elem {
         spec.kind = .Dynamic_Array
         spec.value_ty = elem_ty
@@ -15419,6 +15491,8 @@ emit_transform_into_output_write :: proc(builder: ^strings.Builder, depth: int, 
     switch spec.kind {
     case .Dynamic_Array:
         fmt.sbprintf(builder, "append(&kvist_out, %s)\n", value_text)
+    case .Data_Vector:
+        fmt.sbprintf(builder, "kvist_data_append_retained(&kvist_out, %s)\n", value_text)
     case .Map:
         fmt.sbprintf(builder, "kvist_out[(%s).key] = (%s).value\n", value_text, value_text)
     case .Set:
@@ -15433,12 +15507,21 @@ transform_into_make_text :: proc(spec: Transform_Into_Output, capacity_text: str
     switch spec.kind {
     case .Dynamic_Array:
         return fmt.tprintf("make(%s, 0, %s)", spec.output_ty, capacity_text)
+    case .Data_Vector:
+        return fmt.tprintf("make([dynamic]Data, 0, %s)", capacity_text)
     case .Map:
         return fmt.tprintf("make(%s, %s)", spec.output_ty, capacity_text)
     case .Set:
         return fmt.tprintf("make(%s, %s)", spec.output_ty, capacity_text)
     }
     return fmt.tprintf("make(%s)", spec.output_ty)
+}
+
+transform_into_finalize_text :: proc(spec: Transform_Into_Output) -> string {
+    if spec.kind == .Data_Vector {
+        return "kvist_data_freeze_items(.Vector, &kvist_out)"
+    }
+    return "kvist_out"
 }
 
 append_indent :: proc(builder: ^strings.Builder, depth: int) {
@@ -18531,6 +18614,15 @@ emit_data_type_helper :: proc(e: ^Emitter) {
     emit_line(e, "return Data{kind = kind, payload = {items = node.items[:]}, node = node}")
     e.indent -= 1
     emit_line(e, "}")
+    emit_line(e, "kvist_data_freeze_items :: proc(kind: Data_Kind, values: ^[dynamic]Data, allocator: kvist_runtime.Allocator = context.allocator) -> Data {")
+    e.indent += 1
+    emit_line(e, "assert(kind == .List || kind == .Vector || kind == .Set)")
+    emit_line(e, "node := kvist_data_new_node(allocator)")
+    emit_line(e, "node.items = values^")
+    emit_line(e, "values^ = nil")
+    emit_line(e, "return Data{kind = kind, payload = {items = node.items[:]}, node = node}")
+    e.indent -= 1
+    emit_line(e, "}")
     emit_line(e, "kvist_data_make_items_spliced :: proc(kind: Data_Kind, pieces: []Data_Piece, allocator: kvist_runtime.Allocator = context.allocator) -> Data {")
     e.indent += 1
     emit_line(e, "assert(kind == .List || kind == .Vector || kind == .Set)")
@@ -18565,6 +18657,23 @@ emit_data_type_helper :: proc(e: ^Emitter) {
     emit_line(e, "if !replaced { append(&node.entries, Data_Entry{key = kvist_data_retain(values[i]), value = kvist_data_retain(values[i+1])}) }")
     e.indent -= 1
     emit_line(e, "}")
+    emit_line(e, "return Data{kind = .Map, payload = {entries = node.entries[:]}, node = node}")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "kvist_data_freeze_map :: proc(values: ^[dynamic]Data, allocator: kvist_runtime.Allocator = context.allocator) -> Data {")
+    e.indent += 1
+    emit_line(e, "assert(len(values^)%2 == 0, \"Data map builder expects alternating keys and values\")")
+    emit_line(e, "node := kvist_data_new_node(allocator)")
+    emit_line(e, "node.entries = make([dynamic]Data_Entry, 0, len(values^)/2, allocator)")
+    emit_line(e, "for i := 0; i < len(values^); i += 2 {")
+    e.indent += 1
+    emit_line(e, "replaced := false")
+    emit_line(e, "for &entry in node.entries { if kvist_data_equal(entry.key, values^[i]) { kvist_data_release(values^[i]); kvist_data_release(entry.value); entry.value = values^[i+1]; replaced = true; break } }")
+    emit_line(e, "if !replaced { append(&node.entries, Data_Entry{key = values^[i], value = values^[i+1]}) }")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "delete(values^)")
+    emit_line(e, "values^ = nil")
     emit_line(e, "return Data{kind = .Map, payload = {entries = node.entries[:]}, node = node}")
     e.indent -= 1
     emit_line(e, "}")
@@ -18715,10 +18824,17 @@ emit_data_type_helper :: proc(e: ^Emitter) {
     e.indent -= 1
     emit_line(e, "}")
     emit_line(e, "kvist_data_or :: proc(value, fallback: Data) -> Data { if value.kind == .Nil { return fallback }; return value }")
+    emit_line(e, "kvist_data_get_or :: proc(value, key, fallback: Data) -> Data {")
+    e.indent += 1
+    emit_line(e, "if value.kind == .Map { for entry in value.payload.entries { if kvist_data_equal(entry.key, key) { return entry.value } }; return fallback }")
+    emit_line(e, "if (value.kind == .List || value.kind == .Vector) && key.kind == .Int && key.payload.int_value >= 0 && key.payload.int_value < i64(len(value.payload.items)) { return value.payload.items[int(key.payload.int_value)] }")
+    emit_line(e, "return fallback")
+    e.indent -= 1
+    emit_line(e, "}")
     emit_line(e, "kvist_data_contains :: proc(value, key: Data) -> bool {")
     e.indent += 1
     emit_line(e, "if value.kind == .Map { for entry in value.payload.entries { if kvist_data_equal(entry.key, key) { return true } }; return false }")
-    emit_line(e, "if value.kind == .Set || value.kind == .List || value.kind == .Vector { for item in value.payload.items { if kvist_data_equal(item, key) { return true } } }")
+    emit_line(e, "if value.kind == .Set { for item in value.payload.items { if kvist_data_equal(item, key) { return true } } }")
     emit_line(e, "return false")
     e.indent -= 1
     emit_line(e, "}")
@@ -18731,7 +18847,7 @@ emit_data_type_helper :: proc(e: ^Emitter) {
     emit_line(e, "kvist_data_text :: proc(value: Data) -> string { assert(value.kind == .String || value.kind == .Symbol || value.kind == .Keyword, \"expected textual Data\"); return value.payload.text }")
     emit_line(e, "kvist_data_tag :: proc(value: Data) -> string { assert(value.kind == .Tagged, \"expected tagged Data\"); return value.node.text }")
     emit_line(e, "kvist_data_tagged_value :: proc(value: Data) -> Data { assert(value.kind == .Tagged, \"expected tagged Data\"); return value.node.items[0] }")
-    emit_line(e, "kvist_data_count :: proc(value: Data) -> int { if value.kind == .Map { return len(value.payload.entries) }; if value.kind == .List || value.kind == .Vector || value.kind == .Set { return len(value.payload.items) }; if value.kind == .String { return len(value.payload.text) }; return 0 }")
+    emit_line(e, "kvist_data_count :: proc(value: Data) -> int { if value.kind == .Nil { return 0 }; if value.kind == .Map { return len(value.payload.entries) }; if value.kind == .List || value.kind == .Vector || value.kind == .Set { return len(value.payload.items) }; if value.kind == .String { return len(value.payload.text) }; assert(false, \"count expects collection, string, or nil Data\"); return 0 }")
     emit_line(e, "kvist_data_kind :: proc(value: Data) -> Data_Kind { return value.kind }")
     emit_line(e, "kvist_data_nil_p :: proc(value: Data) -> bool { return value.kind == .Nil }")
     emit_line(e, "kvist_data_bool_p :: proc(value: Data) -> bool { return value.kind == .Bool }")

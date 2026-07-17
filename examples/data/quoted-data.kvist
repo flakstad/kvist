@@ -15,7 +15,7 @@
 (defn main []
   (let [port (data.int (get config :port))
         features (get config :features)
-        config-keys (data.keys config) :defer]
+        config-keys (data.keys config)]
     (println port
              (contains? features :query)
              (count query)
