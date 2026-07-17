@@ -98,8 +98,25 @@ remains a view of an input.
 Assignment retains borrowed replacements, moves owned replacements, and
 releases overwritten values. Owned managed values nested directly in call
 arguments or discarded explicitly are released after use. Data-valued `if`,
-`let`, `do`, and `type-case` expressions normalize their result to one owned
-reference.
+`let`, `do`, `type-case`, and `match` expressions normalize their result to one
+owned reference.
+
+`let` can destructure Data maps, lists, and vectors. Captured subvalues are
+managed locals, so no cleanup marker is needed:
+
+```clojure
+(let [{:person/keys [name email]
+       :keys [roles]
+       :or {roles []}
+       :as contact}
+      value
+      [primary & remaining] roles]
+  ...)
+```
+
+Map defaults apply only when a key is absent; explicit Data nil is preserved.
+Sequential destructuring is permissive, with missing positions and empty rest
+bindings producing Data nil. Structural `match` is strict and exhaustive.
 
 Top-level Kvist structs whose fields contain `Data`, directly or through
 another managed Kvist struct, now follow the same protocol. Construction,
