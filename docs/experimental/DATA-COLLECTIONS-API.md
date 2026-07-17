@@ -1,7 +1,8 @@
 # Immutable Data collection API: audit and proposal
 
-Status: design proposal, not yet implemented. The audit describes the surface at
-`f4a57647`.
+Status: implemented initial surface. The historical audit in “Current surface”
+describes the pre-implementation surface at `f4a57647`; the decisions and API
+tables that follow describe the cleaned contract now implemented.
 
 The goal is Clojure's collection vocabulary over immutable `Data`, with eager
 execution, static callback types, deterministic ownership, and no universal
@@ -256,16 +257,15 @@ There is no hidden conversion from a map to a sequence of pair objects.
 | `data.update-keys f map` | `f: Data -> Data`; later transformed-key collisions win |
 | `data.update-vals f map` | `f: Data -> Data`; source keys retained |
 | `data.zipmap keys values` | Owned map; stops at shorter sequential input; later duplicate keys win |
-| `data.map-entries f map` | `f: (Data, Data) -> [key: Data, value: Data]`; owned map |
+| `data.map-entries f map` | `f: (Data, Data) -> Data`; callback returns `[key value]`; owned map |
 | `data.filter-entries pred map` | `pred: (Data, Data) -> bool`; owned map |
 | `data.group-by f collection` | `f: Data -> Data`; owned map from key to vector Data; groups preserve input order |
 | `data.index-by f collection` | `f: Data -> Data`; owned map from key to item; later items win |
 | `data.frequencies collection` | Owned map from item Data to integer Data count |
 
 Key/value callbacks avoid allocating an entry vector per input map entry.
-`map-entries` uses native named multiple results for the transformed pair.
-Compiler ownership handling for named Data results must be exercised before
-shipping it.
+`map-entries` represents each transformed output pair as `[key value]` Data;
+the entry value is validated before insertion.
 
 Flat backing makes lookup and duplicate detection linear. These operations
 should still use one output builder so they copy/freeze once; no HAMT is
@@ -464,14 +464,16 @@ materialized result.
 
 ## Delivery slices
 
-1. Rename the native constructors; change `keys`/`vals` to Data results; add
-   explicit owned-array conversions; unify all path parameters as Data.
-2. Add borrowed sequential access and direct reduction/search primitives.
-3. Add private builders with abort cleanup and ownership-focused tests.
-4. Add eager transformation and ordering functions.
-5. Add fused Data source and `into Data` lowering.
-6. Add map utilities using direct key/value traversal.
-7. Benchmark before considering a backing representation change.
+The initial delivery completed all seven slices:
+
+1. Renamed the native constructors; changed `keys`/`vals` to Data results; added
+   explicit owned-array conversions; unified all path parameters as Data.
+2. Added borrowed sequential access and direct reduction/search primitives.
+3. Added private builders with abort cleanup and ownership-focused tests.
+4. Added eager transformation and ordering functions.
+5. Added fused Data source and `into Data` lowering.
+6. Added map utilities using direct key/value traversal.
+7. Added representative benchmarks without changing the flat backing.
 
 Each slice should compile representative generated Odin in tests, run normal
 tests and `--ownership-audit`, and include nested owned callback results.

@@ -1,0 +1,137 @@
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
+
+;; Representative flat-Data collection benchmarks.
+(package main)
+(import arr "kvist:arr")
+(import data "kvist:data")
+(import fmt "core:fmt")
+(import time "core:time")
+
+(defn increment-data [value: Data] -> Data
+  (data.from-int (+ (data.int value) 1)))
+
+(defn even-data? [value: Data] -> bool
+  (= (% (data.int value) 2) 0))
+
+(defn add-data [total: i64, value: Data] -> i64
+  (+ total (data.int value)))
+
+(defn bucket-data [value: Data] -> Data
+  (data.from-int (% (data.int value) 32)))
+
+(defn increment-int [value: int] -> int
+  (+ value 1))
+
+(defn even-int? [value: int] -> bool
+  (= (% value 2) 0))
+
+(defn add-int [total: i64, value: int] -> i64
+  (+ total (i64 value)))
+
+(deftransform incremented-evens
+  (map increment-data)
+  (filter even-data?))
+
+(defn make-data [n: int] -> Data
+  (let [items (arr.empty Data n)]
+    (for [i (arr.range 0 n)]
+      (let [value (data.from-int (i64 i))]
+        (data.append-retained! (addr items) value)))
+    (let [result (data.vector-from-array items[:])]
+      (data.delete-owned-array! items)
+      result)))
+
+(defn make-data-with-conj [n: int] -> Data
+  (let [result: Data []]
+    (for [i (arr.range 0 n)]
+      (set! result (data.conj result (data.from-int (i64 i)))))
+    result))
+
+(defn build-map-with-assoc [n: int] -> Data
+  (let [result: Data {}]
+    (for [i (arr.range 0 n)]
+      (set! result
+            (data.assoc result
+                        (data.from-int (i64 i))
+                        (data.from-int (i64 (* i 2))))))
+    result))
+
+(defn nested-assoc [n: int] -> Data
+  (let [result: Data {}]
+    (for [i (arr.range 0 n)]
+      (set! result
+            (data.assoc-in result [:state :counter]
+                           (data.from-int (i64 i)))))
+    result))
+
+(defn bench-data-map [values: Data] -> int
+  (data.count (data.map increment-data values)))
+
+(defn bench-data-filter [values: Data] -> int
+  (data.count (data.filter even-data? values)))
+
+(defn bench-data-reduce [values: Data] -> i64
+  (data.reduce add-data (i64 0) values))
+
+(defn bench-data-group-by [values: Data] -> int
+  (data.count (data.group-by bucket-data values)))
+
+(defn bench-data-fused [values: Data] -> int
+  (let [result (into Data incremented-evens values)]
+    (data.count result)))
+
+(defn bench-native-map [values: []int] -> int
+  (let [out (arr.map increment-int values) :defer]
+    (count out)))
+
+(defn bench-native-filter [values: []int] -> int
+  (let [out (arr.filter even-int? values) :defer]
+    (count out)))
+
+(defn bench-native-reduce [values: []int] -> i64
+  (arr.reduce add-int (i64 0) values))
+
+(defn report [name: string, n: int, checksum: i64, start: time.Tick]
+  (fmt.printfln "%-18s n=%6v %9.3f ms checksum=%v"
+                name n
+                (time.duration-milliseconds (time.tick-since start))
+                checksum))
+
+(defn run-size [n: int]
+  (let [values (make-data n)
+        native (arr.range 0 n) :defer]
+    (let [start (time.tick-now)]
+      (report "data.map" n (i64 (bench-data-map values)) start))
+    (let [start (time.tick-now)]
+      (report "data.filter" n (i64 (bench-data-filter values)) start))
+    (let [start (time.tick-now)]
+      (report "data.reduce" n (bench-data-reduce values) start))
+    (let [start (time.tick-now)]
+      (report "data.group-by" n (i64 (bench-data-group-by values)) start))
+    (let [start (time.tick-now)]
+      (report "into Data fused" n (i64 (bench-data-fused values)) start))
+    (let [start (time.tick-now)]
+      (report "builder vector" n
+              (i64 (data.count (make-data n))) start))
+    (let [start (time.tick-now)]
+      (report "repeated conj" n
+              (i64 (data.count (make-data-with-conj n))) start))
+    (let [start (time.tick-now)]
+      (report "repeated assoc" n
+              (i64 (data.count (build-map-with-assoc n))) start))
+    (let [start (time.tick-now)]
+      (report "nested assoc-in" n
+              (data.int (data.get-in (nested-assoc n) [:state :counter]))
+              start))
+    (let [start (time.tick-now)]
+      (report "arr.map" n (i64 (bench-native-map native[:])) start))
+    (let [start (time.tick-now)]
+      (report "arr.filter" n (i64 (bench-native-filter native[:])) start))
+    (let [start (time.tick-now)]
+      (report "arr.reduce" n (bench-native-reduce native[:]) start))))
+
+(defn main []
+  (let [sizes: [5]int [8 32 128 1000 10000]]
+    (for [n sizes]
+      (run-size n))))

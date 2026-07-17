@@ -45,7 +45,7 @@ while IFS= read -r input; do
     printf 'checking %s\n' "$input"
     if [ "$input" = "examples/collections/ownership-warnings.kvist" ]; then
         warnings="$tmp_dir/ownership-warnings.txt"
-        ./kvist "$input" -o "$output" --map "$map" 2>"$warnings"
+        ./kvist compile "$input" -o "$output" --map "$map" --ownership-audit 2>"$warnings"
         for expected in \
             'owned result from arr.range is discarded' \
             'owned local xs is never deleted or returned' \
@@ -59,7 +59,7 @@ while IFS= read -r input; do
                 exit 1
             fi
         done
-        if [ "$(grep -c ': warning:' "$warnings")" -ne 5 ]; then
+        if [ "$(grep -c 'warning\[' "$warnings")" -ne 5 ]; then
             printf 'failed: ownership warning fixture emitted unexpected warnings\n' >&2
             cat "$warnings" >&2
             exit 1

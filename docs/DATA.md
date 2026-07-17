@@ -50,6 +50,12 @@ allocator, and retain child Data values. `assoc`, `assoc-in`, `update`,
 `update-in`, `dissoc`, `conj`, and `merge` return new values while preserving
 their inputs. Static literals continue to leave the runtime node pointer nil.
 
+The package also provides eager collection processing: sequential access,
+`map`, `filter`, `remove`, `keep`, reduction/search, sorting, grouping, map
+utilities, Data-returning `keys`/`vals`, and explicit native-array conversion.
+Bulk results use retained temporary buffers that freeze once into immutable
+nodes. See [Data-oriented programming in Kvist](DATA-ORIENTED-PROGRAMMING.md).
+
 Runtime quasiquote constructs Data with interpolation while retaining the
 static literal path when no unquote is present:
 
@@ -199,7 +205,8 @@ Planned capabilities are:
   targets;
 - reusable validation of native struct and dynamic-array shapes at
   dynamic/native boundaries without constructing the native target;
-- efficient builders or transients for bulk immutable construction;
+- efficient internal builders for bulk immutable construction; public scoped
+  builders remain deferred until call sites require them;
 - explicit dispatch on tags or selected keys for messages and protocols;
 - optionally, a small capability-scoped evaluator for concrete data-driven
   application workloads.
@@ -252,8 +259,9 @@ fallback. Static and runtime Data have the same public handle shape.
    construction. It leaves the original Data available to Data-oriented code.
 5. Design and implement structural Data matching with ownership-safe captured
    subvalues.
-6. Add builders/transients and verify their allocation behavior against
-   repeated persistent updates.
+6. Internal freeze-once builders are implemented for eager collection
+   transforms and fused `into Data`; benchmark results cover them against
+   repeated persistent updates. Public transients remain evidence driven.
 7. Extend `kvist:edn` with application tag handlers; lossless tagged Data,
    core reading, file input, structured errors, and canonical writing are
    implemented. Vev's runtime, storage, ABI, and literal-macro paths share this

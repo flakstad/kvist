@@ -12,6 +12,7 @@ Current harnesses:
 - `./scripts/bench_source_backed_arr.sh`
 - `./scripts/bench_core_helpers.sh`
 - `./scripts/bench_package_helpers.sh`
+- `./scripts/bench_data_collections.sh`
 
 ## What They Are For
 
