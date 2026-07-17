@@ -7034,6 +7034,15 @@ obvious_form_type :: proc(e: ^Emitter, form: CST_Form) -> (string, bool) {
         }
     }
     if form.kind == .List && len(form.items) > 0 && form.items[0].kind == .Symbol {
+        // Scalar conversion forms are also type-producing expressions. Keep
+        // their obvious type so a surrounding block-expression IIFE can
+        // capture the converted local with an explicit parameter type.
+        if len(form.items) == 2 {
+            conversion_ty := normalize_surface_type_symbol(form.items[0].text)
+            if type_text_is_builtin_odin_scalar(conversion_ty) {
+                return conversion_ty, true
+            }
+        }
         if is_symbol(form.items[0], "quote") && len(form.items) == 2 {
             return "Data", true
         }

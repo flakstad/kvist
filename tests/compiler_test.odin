@@ -627,6 +627,31 @@ compile_final_block_expression_uses_proc_return_type :: proc(t: ^testing.T) {
 }
 
 @(test)
+compile_block_expression_captures_scalar_conversion_local :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn demo [mode: string] -> i64
+  (let [wake-at (i64 42)
+        result (cond
+                 (= mode "set")
+                   (let [kind "action"]
+                     (if (= kind "action") wake-at (i64 0)))
+                 :else (i64 0))]
+    result))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "wake_at: i64"), true)
+    testing.expect_value(t, strings.contains(output, "wake_at)"), true)
+}
+
+@(test)
 infer_untyped_do_expression_from_final_form :: proc(t: ^testing.T) {
     source := `(package main)
 
