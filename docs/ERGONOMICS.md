@@ -22,7 +22,7 @@ compiler behavior.
 | Source mapping | Partial | Cover more generated cleanup, specialization, and Data forms |
 | Core `str` | Implemented | Validate rendering across Ro and Vev |
 | Managed `Data` in native aggregates | Partial | Top-level Kvist structs are managed recursively; add containers, unions, closures, local/imported structs |
-| Typed Data decoding and validated shapes | Partial | Scalars, owned strings, enums, defaults, recursive native structs, and selected owned dynamic arrays decode with paths; broaden collection elements and direct targets |
+| Typed Data decoding and validated shapes | Partial | Scalars, owned strings, enums, defaults, recursive native structs, and owned dynamic arrays including struct elements decode with paths; add direct targets and reusable shapes |
 | Structural Data matching and destructuring | Planned | Design after aggregate ownership and decoding |
 | Public Data builders/transients | Planned | Expose a safe freeze API based on the EDN reader's linear construction pattern |
 | Vev Data result traversal and typed collection | Planned | Avoid unnecessary intermediate native arrays |
@@ -62,9 +62,10 @@ compiler behavior.
   use the native field default; present values remain validated. Decoded managed
   fields and path-carrying `Decode-Error` values clean up automatically.
 - Implemented: `(owned [dynamic]T)` fields for `Data`, boolean, integer,
-  floating-point, and enum elements. Validation completes before allocation,
-  error paths include the failing vector index, and invalid enum elements retain
-  enum-specific diagnostics.
+  floating-point, enum, and Kvist struct elements. Validation completes before
+  allocation, error paths include the failing vector index and nested struct
+  field, invalid enum elements retain enum-specific diagnostics, and managed
+  struct elements are copied and destroyed recursively.
 - Carry the exact Data path, expected shape, and actual kind in decode errors.
 - Preserve the zero-allocation static quote path.
 

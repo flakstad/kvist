@@ -1782,22 +1782,31 @@ a present key is still validated. Presence is checked independently from Data
 
 Fields declared `(owned [dynamic]T)` decode Data vectors into owning native
 dynamic arrays when `T` is `Data`, `bool`, an integer scalar, or a
-floating-point scalar, or a Kvist enum:
+floating-point scalar, a Kvist enum, or a Kvist struct:
 
 ```clojure
-(defstruct Batch {
-  ids: (owned [dynamic]i64)
+(defstruct Point {
+  x: i64
+  y: i64
 })
 
-(data.decode Batch '{:ids [10 20 30]})
+(defstruct Batch {
+  ids: (owned [dynamic]i64)
+  points: (owned [dynamic]Point)
+})
+
+(data.decode Batch '{:ids [10 20 30]
+                     :points [{:x 1 :y 2}
+                              {:x 3 :y 4}]})
 ```
 
 Every element is validated before the native array is allocated. Errors append
-the failing numeric index to the Data path, such as `[:ids 1]`. `Data` elements
+the failing numeric index to the Data path, such as `[:ids 1]`. Nested struct
+fields extend that path further, such as `[:points 1 :x]`, and honor the same
+defaults and managed-field rules as directly nested structs. `Data` elements
 are retained; scalar and enum elements are stored unboxed. Invalid enum
 keywords also populate `expected-type` and `actual-value`. Native string arrays,
-nested struct arrays, borrowed slices, and direct collection decode targets
-remain future work.
+borrowed slices, and direct collection decode targets remain future work.
 
 In a `->` pipeline, use a `.field` selector step:
 

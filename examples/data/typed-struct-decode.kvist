@@ -27,6 +27,7 @@
   flags: (owned [dynamic]bool) :default []
   ratios: (owned [dynamic]f64) :default []
   modes: (owned [dynamic]Mode) :default []
+  endpoints: (owned [dynamic]Endpoint) :default []
 })
 
 (defn main []
@@ -51,7 +52,11 @@
             :raw-items [1 :two]
             :flags [true false]
             :ratios [0.25 0.75]
-            :modes [:manual :read-only]})]
+            :modes [:manual :read-only]
+            :endpoints [{:host-id 21
+                         :display-name "secondary"}
+                        {:host-id 22
+                         :tags [:remote]}]})]
     (assert ok)
     (assert (= settings.port 8080))
     (assert settings.enabled)
@@ -71,6 +76,14 @@
     (assert (= settings.ratios[1] 0.75))
     (assert (= settings.modes[0] .Manual))
     (assert (= settings.modes[1] .Read-Only))
+    (assert (= (count settings.endpoints) 2))
+    (assert (= settings.endpoints[0].display-name "secondary"))
+    (assert (= settings.endpoints[1].display-name "unnamed"))
+    (assert (= settings.endpoints[1].tags '[:remote]))
+    (let [copied settings]
+      (set! copied.endpoints[0].host-id 99)
+      (assert (= settings.endpoints[0].host-id 21))
+      (assert (= copied.endpoints[0].host-id 99)))
     (let [copied settings]
       (set! copied.scores[0] 99)
       (assert (= settings.scores[0] 10))
@@ -110,6 +123,7 @@
     (assert (= (count settings.flags) 0))
     (assert (= (count settings.ratios) 0))
     (assert (= (count settings.modes) 0))
+    (assert (= (count settings.endpoints) 0))
     (discard err))
 
   (let [[settings err ok]
@@ -152,6 +166,20 @@
     (assert (= err.actual .Keyword))
     (assert (= err.expected-type "Mode"))
     (assert (= err.actual-value ':sometimes))
+    (discard settings))
+
+  (let [[settings err ok]
+        (data.decode
+          Settings
+          '{:port 8085
+            :enabled true
+            :endpoint {:host-id 12}
+            :endpoints [{:host-id 1}
+                        {:host-id "bad"}]})]
+    (assert (not ok))
+    (assert (= err.path '[:endpoints 1 :host-id]))
+    (assert (= err.expected .Int))
+    (assert (= err.actual .String))
     (discard settings))
 
   (let [[settings err ok]

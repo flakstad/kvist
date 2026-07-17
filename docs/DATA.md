@@ -158,7 +158,8 @@ Planned capabilities are:
 - typed decoding into native values with path-aware validation errors; safe
   integer, float, and boolean decoders and recursive required-field native
   struct, owned-string, enum, and explicit default-field decoding are
-  available, along with owned dynamic arrays of scalar or `Data` elements;
+  available, along with owned dynamic arrays of scalar, enum, `Data`, or
+  recursively decoded Kvist struct elements;
 - reusable validated shapes for dynamic/native boundaries;
 - efficient builders or transients for bulk immutable construction;
 - explicit dispatch on tags or selected keys for messages and protocols;
@@ -204,8 +205,10 @@ fallback. Static and runtime Data have the same public handle shape.
    struct's deterministic lifecycle. A `:default` field is optional when its
    map key is absent but still validates a present value, including explicit
    Data `nil`. `(owned [dynamic]T)` fields decode Data vectors for `Data`,
-   boolean, integer, floating-point, and enum element types, with failing
-   indices appended to the error path. String and nested-struct arrays remain.
+   boolean, integer, floating-point, enum, and Kvist struct element types, with
+   failing indices appended to the error path. Struct elements recursively
+   validate their fields and extend paths beyond the index. String arrays
+   remain.
 4. Design and implement structural Data matching with ownership-safe captured
    subvalues.
 5. Add builders/transients and verify their allocation behavior against

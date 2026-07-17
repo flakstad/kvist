@@ -3507,7 +3507,10 @@ emit_decode_enum_failure_return :: proc(
     append_indent(builder, body_depth-1)
 }
 
-decode_enum_item_constructor_text :: proc(enum_decl: ^Enum_Decl, elem_ty: string) -> string {
+decode_enum_value_constructor_text :: proc(
+    enum_decl: ^Enum_Decl,
+    elem_ty, value_name: string,
+) -> string {
     builder := strings.builder_make()
     defer strings.builder_destroy(&builder)
     fmt.sbprintf(
@@ -3521,8 +3524,196 @@ decode_enum_item_constructor_text :: proc(enum_decl: ^Enum_Decl, elem_ty: string
         fmt.sbprintf(&builder, "case %q: kvist_value = .%s; ", keyword, variant.name)
         delete(keyword)
     }
-    strings.write_string(&builder, "case: } return kvist_value })(kvist_item)")
+    fmt.sbprintf(&builder, "case: }} return kvist_value }})(%s)", value_name)
     return strings.clone(strings.to_string(builder))
+}
+
+emit_decode_dynamic_array_unchecked_value :: proc(
+    e: ^Emitter,
+    field: Struct_Field,
+    field_name: string,
+    counter: ^int,
+    root_span: Span,
+    depth: int,
+) -> (string, Compile_Error, bool) {
+    elem_ty, ok_array := dynamic_array_element_type(field.ty)
+    if !ok_array {
+        return "", Compile_Error{
+            message = fmt.tprintf(
+                "data.decode field %s is marked as an owned dynamic array but has type %s",
+                field.source_name,
+                field.ty,
+            ),
+            span = root_span,
+        }, false
+    }
+    _, constructed_item, managed, supported := decode_field_parts(elem_ty, "kvist_item")
+    if enum_decl, enum_supported := find_enum_decl(e, elem_ty); enum_supported {
+        constructed_item = decode_enum_value_constructor_text(enum_decl, elem_ty, "kvist_item")
+        managed = false
+        supported = true
+    } else if nested_decl, nested_supported := find_struct_decl(e, elem_ty); nested_supported {
+        nested_builder := strings.builder_make()
+        defer strings.builder_destroy(&nested_builder)
+        fmt.sbprintf(
+            &nested_builder,
+            "(proc(kvist_value: Data) -> %s {{\n",
+            elem_ty,
+        )
+        nested_value, err_nested, ok_nested := emit_decode_struct_unchecked_value(
+            e,
+            &nested_builder,
+            nested_decl,
+            "kvist_value",
+            counter,
+            root_span,
+            depth+1,
+        )
+        if !ok_nested {
+            return "", err_nested, false
+        }
+        fmt.sbprintf(&nested_builder, "    return %s\n}})(kvist_item)", nested_value)
+        constructed_item = strings.clone(strings.to_string(nested_builder))
+        managed = false
+        supported = true
+    }
+    if !supported {
+        return "", Compile_Error{
+            message = fmt.tprintf(
+                "data.decode field %s has unsupported dynamic-array element type %s; supported elements are Data, bool, integer and floating-point scalars, Kvist enums, and Kvist structs",
+                field.source_name,
+                elem_ty,
+            ),
+            span = root_span,
+        }, false
+    }
+    if managed {
+        constructed_item = managed_clone_value_text(e, elem_ty, constructed_item)
+    }
+    return fmt.tprintf(
+        "(proc(kvist_items: []Data) -> %s {{ kvist_out := make(%s, 0, len(kvist_items)); for kvist_item in kvist_items {{ append(&kvist_out, %s) }}; return kvist_out }})(%s.payload.items)",
+        field.ty,
+        field.ty,
+        constructed_item,
+        field_name,
+    ), {}, true
+}
+
+emit_decode_struct_unchecked_value :: proc(
+    e: ^Emitter,
+    builder: ^strings.Builder,
+    struct_decl: ^Struct_Decl,
+    value_name: string,
+    counter: ^int,
+    root_span: Span,
+    depth: int = 0,
+) -> (string, Compile_Error, bool) {
+    if depth > 16 {
+        return "", Compile_Error{
+            message = fmt.tprintf("data.decode nested struct depth exceeded at %s", struct_decl.name),
+            span = root_span,
+        }, false
+    }
+    field_values: [dynamic]string
+    defer delete(field_values)
+    for field in struct_decl.fields {
+        field_id := counter^
+        counter^ += 1
+        key_name := fmt.tprintf("kvist_key_%d", field_id)
+        field_name := fmt.tprintf("kvist_field_%d", field_id)
+        key := fmt.tprintf(":%s", field.source_name)
+        fmt.sbprintf(
+            builder,
+            "    %s := Data{{kind = .Keyword, payload = {{text = %q}}}}\n",
+            key_name,
+            key,
+        )
+        fmt.sbprintf(
+            builder,
+            "    %s := kvist_data_get(%s, %s)\n",
+            field_name,
+            value_name,
+            key_name,
+        )
+        present_name := ""
+        default_text := ""
+        if field.has_default {
+            present_name = fmt.tprintf("kvist_present_%d", field_id)
+            fmt.sbprintf(
+                builder,
+                "    %s := kvist_data_contains(%s, %s)\n",
+                present_name,
+                value_name,
+                key_name,
+            )
+            emitted_default, err_default, ok_default := emit_struct_field_default(e, field)
+            if !ok_default {
+                return "", err_default, false
+            }
+            default_text = emitted_default
+        }
+
+        decoded := ""
+        if field.owns_dynamic_array {
+            array_value, err_array, ok_array := emit_decode_dynamic_array_unchecked_value(
+                e,
+                field,
+                field_name,
+                counter,
+                root_span,
+                depth,
+            )
+            if !ok_array {
+                return "", err_array, false
+            }
+            decoded = array_value
+        } else if field.owns_string {
+            mark_core_strings(e)
+            decoded = fmt.tprintf("strings.clone(%s.payload.text)", field_name)
+        } else if _, scalar_value, managed, supported := decode_field_parts(field.ty, field_name); supported {
+            decoded = scalar_value
+            if managed {
+                decoded = managed_clone_value_text(e, field.ty, decoded)
+            }
+        } else if nested_decl, nested := find_struct_decl(e, field.ty); nested {
+            nested_value, err_nested, ok_nested := emit_decode_struct_unchecked_value(
+                e,
+                builder,
+                nested_decl,
+                field_name,
+                counter,
+                root_span,
+                depth+1,
+            )
+            if !ok_nested {
+                return "", err_nested, false
+            }
+            decoded = nested_value
+        } else if enum_decl, enum_found := find_enum_decl(e, field.ty); enum_found {
+            decoded = decode_enum_value_constructor_text(enum_decl, field.ty, field_name)
+        } else {
+            return "", Compile_Error{
+                message = fmt.tprintf(
+                    "data.decode field %s.%s has unsupported type %s",
+                    struct_decl.name,
+                    field.source_name,
+                    field.ty,
+                ),
+                span = root_span,
+            }, false
+        }
+        append(&field_values, decode_field_constructor_value(
+            field,
+            decoded,
+            present_name,
+            default_text,
+        ))
+    }
+    return fmt.tprintf(
+        "%s{{%s}}",
+        struct_decl.name,
+        strings.join(field_values[:], ", ", context.temp_allocator),
+    ), {}, true
 }
 
 emit_decode_dynamic_array_field :: proc(
@@ -3532,6 +3723,7 @@ emit_decode_dynamic_array_field :: proc(
     field_name, field_guard: string,
     field_path: []string,
     field_id: int,
+    counter: ^int,
     root_span: Span,
 ) -> (string, Compile_Error, bool) {
     elem_ty, ok_array := dynamic_array_element_type(field.ty)
@@ -3548,16 +3740,21 @@ emit_decode_dynamic_array_field :: proc(
     item_name := fmt.tprintf("kvist_item_%d", field_id)
     index_name := fmt.tprintf("kvist_index_%d", field_id)
     enum_decl, enum_supported := find_enum_decl(e, elem_ty)
+    nested_decl, nested_supported := find_struct_decl(e, elem_ty)
     expected_kind, _, managed, supported := decode_field_parts(elem_ty, item_name)
     if enum_supported {
         expected_kind = "Keyword"
+        managed = false
+        supported = true
+    } else if nested_supported {
+        expected_kind = "Map"
         managed = false
         supported = true
     }
     if !supported {
         return "", Compile_Error{
             message = fmt.tprintf(
-                "data.decode field %s has unsupported dynamic-array element type %s; supported elements are Data, bool, integer and floating-point scalars, and Kvist enums",
+                "data.decode field %s has unsupported dynamic-array element type %s; supported elements are Data, bool, integer and floating-point scalars, Kvist enums, and Kvist structs",
                 field.source_name,
                 elem_ty,
             ),
@@ -3639,6 +3836,32 @@ emit_decode_dynamic_array_field :: proc(
             )
             strings.write_string(builder, "}\n")
         }
+        if nested_supported {
+            nested_validation := strings.builder_make()
+            defer strings.builder_destroy(&nested_validation)
+            _, err_nested, ok_nested := emit_decode_struct_value(
+                e,
+                &nested_validation,
+                nested_decl,
+                item_name,
+                item_path[:],
+                counter,
+                root_span,
+            )
+            if !ok_nested {
+                return "", err_nested, false
+            }
+            indent := strings.builder_make()
+            defer strings.builder_destroy(&indent)
+            for _ in 0..<loop_depth {
+                strings.write_string(&indent, "    ")
+            }
+            append_indented_multiline(
+                builder,
+                strings.to_string(nested_validation),
+                strings.to_string(indent),
+            )
+        }
         append_indent(builder, loop_depth)
         strings.write_string(builder, "}\n")
         if field_guard != "" {
@@ -3646,23 +3869,16 @@ emit_decode_dynamic_array_field :: proc(
         }
     }
 
-    constructed_item := ""
-    if enum_supported {
-        constructed_item = decode_enum_item_constructor_text(enum_decl, elem_ty)
-    } else {
-        _, constructed, _, _ := decode_field_parts(elem_ty, "kvist_item")
-        constructed_item = constructed
-        if managed {
-            constructed_item = managed_clone_value_text(e, elem_ty, constructed_item)
-        }
-    }
-    return fmt.tprintf(
-        "(proc(kvist_items: []Data) -> %s {{ kvist_out := make(%s, 0, len(kvist_items)); for kvist_item in kvist_items {{ append(&kvist_out, %s) }}; return kvist_out }})(%s.payload.items)",
-        field.ty,
-        field.ty,
-        constructed_item,
+    _ = enum_decl
+    _ = managed
+    return emit_decode_dynamic_array_unchecked_value(
+        e,
+        field,
         field_name,
-    ), {}, true
+        counter,
+        root_span,
+        0,
+    )
 }
 
 emit_decode_struct_value :: proc(
@@ -3737,6 +3953,7 @@ emit_decode_struct_value :: proc(
                 field_guard,
                 field_path[:],
                 field_id,
+                counter,
                 root_span,
             )
             if !ok_array {

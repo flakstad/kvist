@@ -3973,7 +3973,7 @@ compile_data_decode_rejects_native_string_arrays :: proc(t: ^testing.T) {
     testing.expect_value(
         t,
         err.message,
-        "data.decode field values has unsupported dynamic-array element type string; supported elements are Data, bool, integer and floating-point scalars, and Kvist enums",
+        "data.decode field values has unsupported dynamic-array element type string; supported elements are Data, bool, integer and floating-point scalars, Kvist enums, and Kvist structs",
     )
 }
 
@@ -4183,6 +4183,46 @@ compile_type_directed_data_struct_decode :: proc(t: ^testing.T) {
         strings.contains(
             result.output,
             "proc(kvist_items: []Data) -> [dynamic]Mode",
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            "for kvist_item_20, kvist_index_20 in kvist_field_20.payload.items",
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            "kvist_data_append(kvist_error_path_21, kvist_index_key_20)",
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            "proc(kvist_items: []Data) -> [dynamic]Endpoint",
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            "out.endpoints = (proc(kvist_values: [dynamic]Endpoint) -> [dynamic]Endpoint",
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            "for kvist_item in kvist_values { kvist_managed_destroy_Endpoint(kvist_item) }; delete(kvist_values)",
         ),
         true,
     )
