@@ -62,6 +62,7 @@ LANGUAGE_SOURCE_ENTRIES :: []Language_Source_Entry{
     {name = "block", kind = "kvist form", relative = "src/odin/kvist/emit.odin", snippet = "case \"do\", \"block\":"},
     {name = "do", kind = "kvist form", relative = "src/odin/kvist/emit.odin", snippet = "case \"do\":"},
     {name = "if", kind = "kvist form", relative = "src/odin/kvist/emit.odin", snippet = "emit_if_like :: proc"},
+    {name = "match", kind = "kvist form", relative = "src/odin/kvist/emit.odin", snippet = "emit_match_stmt :: proc"},
     {name = "set!", kind = "kvist form", relative = "src/odin/kvist/emit.odin", snippet = "case \"set!\":"},
     {name = "mut!", kind = "kvist form", relative = "src/odin/kvist/emit.odin", snippet = "case \"mut!\":"},
     {name = "inc!", kind = "kvist form", relative = "src/odin/kvist/emit.odin", snippet = "case \"inc!\", \"dec!\", \"toggle!\", \"negate!\":"},

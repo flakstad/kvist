@@ -1,0 +1,58 @@
+(package main)
+
+(defn main []
+  (let [contact: Data
+        {:person/name "Ada"
+         :person/email "ada@example.test"
+         :roles [:admin :author]}
+
+        {:person/keys [name email]
+         :keys [missing]
+         :or {missing "fallback"}
+         :as original}
+        contact
+
+        [role second-role & more :as roles]
+        (get contact :roles)
+
+        identifier: int
+        (match contact
+          {:missing _}
+          1
+
+          {:person/name "Ada"}
+          42
+
+          :else
+          0)
+
+        seen: int 0]
+    (assert (= (data.string name) "Ada"))
+    (assert (= (data.string email) "ada@example.test"))
+    (assert (= (data.string missing) "fallback"))
+    (assert (= (data.keyword role) ":admin"))
+    (assert (= (data.keyword second-role) ":author"))
+    (assert (data.nil? more))
+    (assert (= (count roles) 2))
+    (assert (= (count original) 3))
+    (assert (= identifier 42))
+    (for [index [key value] [[:one 1] [:two 2]]]
+      (set! seen (+ seen index (int (data.int value)))))
+    (assert (= seen 4))
+    (let [with-nil: Data {:value nil}
+          {:keys [value] :or {value "not-used"}} with-nil]
+      (assert (data.nil? value)))
+    (let [wrong-kind: Data 7
+          [first :as original-value] wrong-kind]
+      (assert (data.nil? first))
+      (assert (= (data.int original-value) 7)))
+    (let [[list-head & list-tail] '(1 2 3)]
+      (assert (= (data.int list-head) 1))
+      (assert (data.list? list-tail))
+      (assert (= (count list-tail) 2)))
+    (let [empty: Data {}
+          {:keys [first-default second-default]
+           :or {first-default "first"
+                second-default first-default}}
+          empty]
+      (assert (= (data.string second-default) "first")))))
