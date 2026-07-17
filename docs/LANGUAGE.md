@@ -1822,8 +1822,27 @@ the failing numeric index to the Data path, such as `[:ids 1]`. Nested struct
 fields extend that path further, such as `[:points 1 :x]`, and honor the same
 defaults and managed-field rules as directly nested structs. `Data` elements
 are retained; scalar and enum elements are stored unboxed. Invalid enum
-keywords also populate `expected-type` and `actual-value`. Native string arrays,
-borrowed slices, and direct collection decode targets remain future work.
+keywords also populate `expected-type` and `actual-value`.
+
+The same supported element types can be decoded directly when no wrapper
+struct is useful:
+
+```clojure
+(let [[points err ok]
+      (data.decode
+        (dynamic Point)
+        '[{:x 1 :y 2} {:x 3 :y 4}]
+        '[:points])]
+  (if ok
+    (draw-points points)
+    (println err.path err.expected err.actual)))
+```
+
+`points` is an ordinary owned `[dynamic]Point`, not a persistent or boxed
+collection. A result destructuring binding schedules deterministic cleanup,
+including recursive destruction of managed struct elements. Direct decoding
+also validates the complete Data vector before allocating native storage.
+Native string arrays and borrowed slices remain future work.
 
 In a `->` pipeline, use a `.field` selector step:
 

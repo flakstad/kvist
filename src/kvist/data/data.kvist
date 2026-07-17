@@ -32,8 +32,9 @@
 (defmacro decode
   "Decode Data into a native value selected by type.
 
-  `(decode Person value)` returns `[decoded err ok]`. An optional third
-  argument supplies the Data path used as the root of path-aware errors."
+  `(decode Person value)` and `(decode (dynamic i64) value)` return
+  `[decoded err ok]`. An optional third argument supplies the Data path used
+  as the root of path-aware errors."
   [target-type value & rest]
   (if (= (count rest) 0)
     `(decode-data ~target-type ~value)

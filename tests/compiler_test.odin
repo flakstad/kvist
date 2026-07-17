@@ -4003,6 +4003,69 @@ compile_data_decode_rejects_native_string_arrays :: proc(t: ^testing.T) {
 }
 
 @(test)
+compile_data_decode_direct_dynamic_arrays :: proc(t: ^testing.T) {
+    result, err, ok := kvist.compile_path_with_map("examples/data/direct-collection-decode.kvist")
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            "-> (decoded: [dynamic]i64, err: data__Decode_Error, ok: bool)",
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            "kvist_data_append(kvist_error_path_0, kvist_index_key_0)",
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            "proc(kvist_items: []Data) -> [dynamic]i64",
+        ),
+        true,
+    )
+    testing.expect_value(t, strings.contains(result.output, "defer delete(ids)"), true)
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            "-> (decoded: [dynamic]Endpoint, err: data__Decode_Error, ok: bool)",
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            "kvist_data_append(kvist_error_path_1, kvist_index_key_0)",
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            "for kvist_item in kvist_values { kvist_managed_destroy_Endpoint(kvist_item) }; delete(kvist_values)",
+        ),
+        true,
+    )
+}
+
+@(test)
 compile_rejects_owned_borrowed_slice_fields :: proc(t: ^testing.T) {
     source := `(package main)
 
