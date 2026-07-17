@@ -21708,6 +21708,9 @@ compile_def_overload_proc_group :: proc(t: ^testing.T) {
 compile_contextual_data_literals_in_direct_and_overloaded_calls :: proc(t: ^testing.T) {
     source := `(package main)
 (import kdata "kvist:data")
+(import fmt "core:fmt")
+
+(def product-name "Ro")
 
 (defn accept-data [value: Data] -> Data
   value)
@@ -21744,6 +21747,12 @@ compile_contextual_data_literals_in_direct_and_overloaded_calls :: proc(t: ^test
 (defn measurements [count: int, ratio: f64] -> Data
   [(+ count 1) (+ 1 ratio)])
 
+(defn heading [count: int] -> Data
+  [:header
+   [:style product-name]
+   [:h1 (fmt.tprintf "%d matters" count)]
+   [:p (fmt.aprintf "%d owned" count)]])
+
 (defn source-int [value: int] -> Data
   [value])
 
@@ -21774,6 +21783,11 @@ compile_contextual_data_literals_in_direct_and_overloaded_calls :: proc(t: ^test
     testing.expect_value(t, strings.contains(output, "defer kvist_data_release(kvist_thread_"), true)
     testing.expect_value(t, strings.contains(output, "kvist_data_make_int(i64((count) + (1)))"), true)
     testing.expect_value(t, strings.contains(output, "kvist_data_make_float(f64((1) + (ratio)))"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_data_make_text(Data_Kind.String, product_name)"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_data_lift(fmt.tprintf(\"%d matters\", count))"), true)
+    testing.expect_value(t, strings.contains(output, ":= fmt.aprintf(\"%d owned\", count)"), true)
+    testing.expect_value(t, strings.contains(output, "defer delete(kvist_thread_"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_data_lift(kvist_thread_"), true)
     testing.expect_value(t, strings.contains(output, "return kvist_data_contains(result, kvist_thread_"), true)
 }
 
