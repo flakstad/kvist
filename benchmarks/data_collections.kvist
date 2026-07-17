@@ -33,6 +33,9 @@
   (map increment-data)
   (filter even-data?))
 
+(deftransform distinct-buckets
+  (distinct-by bucket-data))
+
 (defn make-data [n: int] -> Data
   (let [items (arr.empty Data n)]
     (for [i (arr.range 0 n)]
@@ -81,6 +84,10 @@
   (let [result (into Data incremented-evens values)]
     (data.count result)))
 
+(defn bench-data-fused-distinct [values: Data] -> int
+  (let [result (into Data distinct-buckets values)]
+    (data.count result)))
+
 (defn bench-native-map [values: []int] -> int
   (let [out (arr.map increment-int values) :defer]
     (count out)))
@@ -111,6 +118,9 @@
       (report "data.group-by" n (i64 (bench-data-group-by values)) start))
     (let [start (time.tick-now)]
       (report "into Data fused" n (i64 (bench-data-fused values)) start))
+    (let [start (time.tick-now)]
+      (report "fused distinct-by" n
+              (i64 (bench-data-fused-distinct values)) start))
     (let [start (time.tick-now)]
       (report "builder vector" n
               (i64 (data.count (make-data n))) start))

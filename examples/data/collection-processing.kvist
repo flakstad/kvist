@@ -64,8 +64,20 @@
   (map increment-data)
   (filter greater-than-three?))
 
+(deftransform duplicated-over-one
+  (mapcat duplicate)
+  (filter greater-than-one?))
+
+(deftransform unique-items
+  (distinct))
+
+(deftransform unique-parities
+  (distinct-by parity))
+
 (defn main []
   (let [values: Data [3 1 2]
+        repeated-values: Data [3 1 3 2 1]
+        parity-values: Data [1 3 2 4 5]
         base: Data {:a 1 :b 2}
         overrides: Data {:b 3 :c 4}
         with-nil: Data {:present nil}
@@ -76,6 +88,11 @@
         prefix (data.take 2 values)
         suffix (data.drop 1 values)
         sampled (data.take-nth 2 values)
+        [split-left split-right] (data.split-at 1 values)
+        partitioned (data.partition 2 [1 2 3 4 5])
+        partitioned-all (data.partition-all 2 [1 2 3 4 5])
+        partitioned-parity (data.partition-by parity [1 3 2 4 5])
+        interleaved (data.interleave [1 2 3] [:a :b])
         mapped (data.map increment-data values)
         mapped-indexed (data.map-indexed add-index values)
         filtered (data.filter greater-than-one? values)
@@ -106,14 +123,19 @@
         grouped (data.group-by parity values)
         indexed-by-parity (data.index-by parity values)
         frequency-map (data.frequencies [3 1 3 2 1 3])
+        counted-parity (data.count-by parity [3 1 2 4 5])
         into-vector (data.into [0] values)
         into-list (data.into '(0) values)
         into-set (data.into #{0 3} values)
         into-map (data.into {:z 0} [[:a 1] [:b 2]])
         entry-total (data.reduce-kv add-entry (i64 0) base)
         fused (into Data incremented-over-three values)
+        fused-mapcat (into Data duplicated-over-one values)
+        fused-distinct (into Data unique-items repeated-values)
+        fused-distinct-by (into Data unique-parities parity-values)
         fused-total (transduce (filter greater-than-one?)
                       add-value (i64 0) values)
+        described (data.describe base)
         popped-vector (data.pop values)
         popped-list (data.pop as-list)
         total (data.reduce add-value (i64 0) values)
@@ -132,6 +154,13 @@
     (assert (= (data.count prefix) 2))
     (assert (= (data.int (data.first suffix)) 1))
     (assert (= (data.int (data.last sampled)) 2))
+    (assert (= (data.count split-left) 1))
+    (assert (= (data.count split-right) 2))
+    (assert (= (data.count partitioned) 2))
+    (assert (= (data.count partitioned-all) 3))
+    (assert (= (data.count (data.last partitioned-all)) 1))
+    (assert (= (data.count partitioned-parity) 3))
+    (assert (= interleaved '[1 :a 2 :b]))
     (assert (= (data.int (data.first mapped)) 4))
     (assert (= (data.int (data.last mapped-indexed)) 4))
     (assert (= (data.count filtered) 2))
@@ -162,6 +191,7 @@
     (assert (= (data.count (get grouped 1)) 2))
     (assert (= (data.int (get indexed-by-parity 1)) 1))
     (assert (= (data.int (get frequency-map 3)) 3))
+    (assert (= (data.int (get counted-parity 1)) 3))
     (assert (= (data.count into-vector) 4))
     (assert (= (data.int (data.first into-list)) 2))
     (assert (= (data.count into-set) 4))
@@ -169,7 +199,16 @@
     (assert (= entry-total 3))
     (assert (= (data.count fused) 1))
     (assert (= (data.int (data.first fused)) 4))
+    (assert (= fused-mapcat '[3 3 2 2]))
+    (assert (= fused-distinct '[3 1 2]))
+    (assert (= fused-distinct-by '[1 2]))
     (assert (= fused-total 5))
+    (assert (= (:a base) 1))
+    (assert (= (base :b) 2))
+    (assert (= (:missing base :fallback) :fallback))
+    (assert (= (:kind described) :map))
+    (assert (= (:count described) 2))
+    (assert (= (data.count (:keys described)) 2))
     (assert (data.nil? (get with-nil :present 9)))
     (assert (= (data.int (get with-nil :missing 9)) 9))
     (assert (not (contains? values 3)))

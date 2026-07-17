@@ -53,6 +53,8 @@ Transform_Step_Kind :: enum {
     Drop_While,
     Map_Indexed,
     Mapcat,
+    Distinct,
+    Distinct_By,
 }
 
 Transform_Step :: struct {
@@ -13003,6 +13005,10 @@ transform_step_kind :: proc(head: string) -> (Transform_Step_Kind, bool) {
         return .Map_Indexed, true
     case "mapcat":
         return .Mapcat, true
+    case "distinct":
+        return .Distinct, true
+    case "distinct-by":
+        return .Distinct_By, true
     }
     return {}, false
 }
@@ -13022,7 +13028,7 @@ transform_spec_form :: proc(e: ^Emitter, form: CST_Form) -> (CST_Form, Compile_E
         if _, ok_kind := transform_step_kind(form.items[0].text); ok_kind {
             return form, {}, true
         }
-        return {}, Compile_Error{message = "transform steps currently support map, map-indexed, mapcat, filter, remove, keep, take, take-while, drop, and drop-while", span = form.items[0].span}, false
+        return {}, Compile_Error{message = "transform steps currently support map, map-indexed, mapcat, filter, remove, keep, take, take-while, drop, drop-while, distinct, and distinct-by", span = form.items[0].span}, false
     }
     return {}, Compile_Error{message = "transform expects a named transform, (comp ...), or a transform step", span = form.span}, false
 }
@@ -13044,20 +13050,32 @@ parse_transform_steps_into :: proc(e: ^Emitter, form: CST_Form, steps: ^[dynamic
         }
         return {}, true
     }
-    if len(spec.items) != 2 {
-        return Compile_Error{message = "transform steps expect one argument", span = spec.span}, false
-    }
     kind, ok_kind := transform_step_kind(spec.items[0].text)
     if !ok_kind {
-        return Compile_Error{message = "transform steps currently support map, map-indexed, mapcat, filter, remove, keep, take, take-while, drop, and drop-while", span = spec.items[0].span}, false
+        return Compile_Error{message = "transform steps currently support map, map-indexed, mapcat, filter, remove, keep, take, take-while, drop, drop-while, distinct, and distinct-by", span = spec.items[0].span}, false
+    }
+    expected_items := 2
+    if kind == .Distinct {
+        expected_items = 1
+    }
+    if len(spec.items) != expected_items {
+        if kind == .Distinct {
+            return Compile_Error{message = "distinct transform step expects no arguments", span = spec.span}, false
+        }
+        return Compile_Error{message = "transform steps expect one argument", span = spec.span}, false
     }
     state_name := ""
-    if kind == .Take || kind == .Drop || kind == .Drop_While || kind == .Map_Indexed {
+    if kind == .Take || kind == .Drop || kind == .Drop_While || kind == .Map_Indexed ||
+       kind == .Distinct || kind == .Distinct_By {
         state_name = transform_temp_name(e)
+    }
+    callback := CST_Form{}
+    if len(spec.items) == 2 {
+        callback = spec.items[1]
     }
     append(steps, Transform_Step{
         kind = kind,
-        callback = spec.items[1],
+        callback = callback,
         state_name = state_name,
         span = spec.span,
     })
@@ -13253,6 +13271,19 @@ keep_callback_call :: proc(e: ^Emitter, callback: CST_Form, input_text, input_ty
 
 emit_transform_state_prelude :: proc(e: ^Emitter, builder: ^strings.Builder, steps: []Transform_Step, depth: int) -> (Compile_Error, bool) {
     for step in steps {
+        if step.kind == .Distinct || step.kind == .Distinct_By {
+            mark_data_type(e)
+            append_indent(builder, depth)
+            fmt.sbprintf(builder, "%s := make([dynamic]Data)\n", step.state_name)
+            append_indent(builder, depth)
+            fmt.sbprintf(
+                builder,
+                "defer {{ for kvist_value in %s {{ kvist_data_release(kvist_value) }}; delete(%s) }}\n",
+                step.state_name,
+                step.state_name,
+            )
+            continue
+        }
         if step.kind != .Take && step.kind != .Drop && step.kind != .Drop_While && step.kind != .Map_Indexed {
             continue
         }
@@ -13398,6 +13429,41 @@ emit_transform_pipeline_body :: proc(
             fmt.sbprintf(builder, "%s = false\n", step.state_name)
             append_indent(builder, current_depth)
             strings.write_string(builder, "}\n")
+        case .Distinct:
+            if current_ty != "Data" {
+                return "", "", 0, Compile_Error{message = fmt.tprintf("distinct transform currently expects Data items, got %s", current_ty), span = step.span}, false
+            }
+            append_indent(builder, current_depth)
+            fmt.sbprintf(builder, "if !kvist_data_slice_contains(%s[:], %s) %s\n", step.state_name, current_text, "{")
+            append_indent(builder, current_depth+1)
+            fmt.sbprintf(builder, "kvist_data_append_retained(&%s, %s)\n", step.state_name, current_text)
+            current_depth += 1
+            close_count += 1
+        case .Distinct_By:
+            if current_ty != "Data" {
+                return "", "", 0, Compile_Error{message = fmt.tprintf("distinct-by transform currently expects Data items, got %s", current_ty), span = step.span}, false
+            }
+            key_text, key_ty, err_key, ok_key := proc_callback_call(e, step.callback, current_text, current_ty)
+            if !ok_key {
+                return "", "", 0, err_key, false
+            }
+            if key_ty != "Data" {
+                return "", "", 0, Compile_Error{message = fmt.tprintf("distinct-by transform expects a Data callback result, got %s", key_ty), span = step.callback.span}, false
+            }
+            if transform_callback_borrows_data_result(e, step.callback) {
+                key_text = emit_call_text("kvist_data_retain", []string{key_text})
+            }
+            key_temp := transform_temp_name(e)
+            append_indent(builder, current_depth)
+            fmt.sbprintf(builder, "%s := %s\n", key_temp, key_text)
+            append_indent(builder, current_depth)
+            fmt.sbprintf(builder, "defer kvist_data_release(%s)\n", key_temp)
+            append_indent(builder, current_depth)
+            fmt.sbprintf(builder, "if !kvist_data_slice_contains(%s[:], %s) %s\n", step.state_name, key_temp, "{")
+            append_indent(builder, current_depth+1)
+            fmt.sbprintf(builder, "kvist_data_append_retained(&%s, %s)\n", step.state_name, key_temp)
+            current_depth += 1
+            close_count += 1
         case .Map_Indexed:
             mapped_text, mapped_ty, err_mapped, ok_mapped := indexed_callback_call(e, step.callback, step.state_name, current_text, current_ty)
             if !ok_mapped {
@@ -13421,6 +13487,35 @@ emit_transform_pipeline_body :: proc(
             mapped_text, mapped_ty, err_mapped, ok_mapped := proc_callback_call(e, step.callback, current_text, current_ty)
             if !ok_mapped {
                 return "", "", 0, err_mapped, false
+            }
+            if mapped_ty == "Data" {
+                if transform_callback_borrows_data_result(e, step.callback) {
+                    mapped_text = emit_call_text("kvist_data_retain", []string{mapped_text})
+                }
+                mapped_temp := transform_temp_name(e)
+                inner_temp := transform_temp_name(e)
+                append_indent(builder, current_depth)
+                fmt.sbprintf(builder, "%s := %s\n", mapped_temp, mapped_text)
+                append_indent(builder, current_depth)
+                fmt.sbprintf(builder, "defer kvist_data_release(%s)\n", mapped_temp)
+                append_indent(builder, current_depth)
+                fmt.sbprintf(
+                    builder,
+                    "assert(%s.kind == .Nil || %s.kind == .List || %s.kind == .Vector || %s.kind == .Set, \"Data mapcat transform callback expects nil, list, vector, or set\"); for %s in %s.payload.items %s\n",
+                    mapped_temp,
+                    mapped_temp,
+                    mapped_temp,
+                    mapped_temp,
+                    inner_temp,
+                    mapped_temp,
+                    "{",
+                )
+                current_text = inner_temp
+                current_ty = "Data"
+                current_depth += 1
+                close_count += 1
+                inside_mapcat = true
+                continue
             }
             if type_text_is_dynamic_array(mapped_ty) {
                 return "", "", 0, Compile_Error{message = "mapcat transform callback currently expects a borrowed slice or fixed array result, not an owned dynamic array", span = step.callback.span}, false
@@ -14572,14 +14667,16 @@ emit_data_callable_lookup :: proc(
     if fallback_form == nil {
         return emit_call_text("kvist_data_map_call", []string{target, key}), {}, true
     }
-    fallback, err_fallback, ok_fallback := emit_data_value_literal(e, fallback_form^)
-    if fallback_form.kind == .Symbol ||
-       (fallback_form.kind == .List && len(fallback_form.items) > 0 && is_symbol(fallback_form.items[0], "quote")) {
-        fallback, err_fallback, ok_fallback = emit_expr(e, fallback_form^)
-    }
+    fallback, fallback_owned, err_fallback, ok_fallback := emit_contextual_data_value(e, fallback_form^)
     if !ok_fallback {
         err_fallback.span = span
         return "", err_fallback, false
+    }
+    if fallback_owned {
+        temp := thread_temp_name(e)
+        emit_prefixed_expr_mapped(e, fmt.tprintf("%s := ", temp), fallback, fallback_form.span)
+        emit_line_mapped(e, fmt.tprintf("defer kvist_data_release(%s)", temp), fallback_form.span)
+        fallback = temp
     }
     return emit_call_text("kvist_data_map_call_or", []string{target, key, fallback}), {}, true
 }
@@ -18786,6 +18883,7 @@ emit_data_type_helper :: proc(e: ^Emitter) {
     emit_line(e, "return false")
     e.indent -= 1
     emit_line(e, "}")
+    emit_line(e, "kvist_data_slice_contains :: proc(values: []Data, value: Data) -> bool { for existing in values { if kvist_data_equal(existing, value) { return true } }; return false }")
     emit_line(e, "kvist_data_assoc :: proc(collection, key, value: Data, allocator: kvist_runtime.Allocator = context.allocator) -> Data {")
     e.indent += 1
     emit_line(e, "if collection.kind == .Map {")

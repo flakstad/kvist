@@ -32,7 +32,13 @@ validate_transform_spec_shape :: proc(spec: CST_Form) -> (Compile_Error, bool) {
         return {}, true
     }
     expected_len := 2
+    if head == "distinct" {
+        expected_len = 1
+    }
     if len(spec.items) != expected_len {
+        if head == "distinct" {
+            return Compile_Error{message = "distinct transform step expects no arguments", span = spec.span}, false
+        }
         return Compile_Error{message = "transform steps expect one argument", span = spec.span}, false
     }
     return {}, true

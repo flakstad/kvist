@@ -12,6 +12,8 @@
 
 (defn main []
   (let [text (edn.write config) :defer
+        printed (edn.pr-str config) :defer
+        pretty (edn.pretty [1 {:a 2}]) :defer
         parsed (edn.read text)
         sample (edn.read "[nil true false -12 3.5 foo/bar :a/b (1 2) #{3 4} {; note\n:x \"y\\tvalue\"}]")
         expected '[nil true false -12 3.5 foo/bar :a/b (1 2) #{3 4} {:x "y\tvalue"}]
@@ -24,6 +26,8 @@
         [_ missing-value-error missing-value-ok] (edn.try-read "#demo/value")
         [_ duplicate-error duplicate-ok] (edn.try-read "{:port 8080 :port 8081}")]
     (assert (= text "{:port 8080 :name \"vev\\nlocal\" :features #{:query :pull}}"))
+    (assert (= printed text))
+    (assert (= pretty "[\n  1\n  {\n    :a 2\n  }\n]"))
     (assert (= parsed config))
     (assert (= sample expected))
     (assert (not ok))

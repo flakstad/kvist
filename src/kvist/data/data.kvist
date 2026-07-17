@@ -616,6 +616,113 @@
       (append-retained! (addr out) (item-at collection index)))
     (freeze-items! .Vector (addr out))))
 
+(defn split-at
+  "Split sequential Data at `n` into two owned vectors.
+
+  Negative indexes clamp to zero and indexes past the end clamp to the input
+  count."
+  [n: int, collection: Data] -> [left: Data, right: Data]
+  (if (not (sequential? collection))
+    (panic "data.split-at expects nil, list, vector, or set Data"))
+  (let [middle n]
+    (if (< middle 0)
+      (set! middle 0))
+    (if (> middle (core.count collection))
+      (set! middle (core.count collection)))
+    (return
+      (range-vector collection 0 middle)
+      (range-vector collection middle (core.count collection)))))
+
+(defn partition
+  "Return owned vectors of exactly `n` consecutive items.
+
+  A trailing group smaller than `n` is omitted. Non-positive `n` returns an
+  empty vector."
+  [n: int, collection: Data] -> Data
+  (if (not (sequential? collection))
+    (panic "data.partition expects nil, list, vector, or set Data"))
+  (let [capacity 0]
+    (if (> n 0)
+      (set! capacity (/ (core.count collection) n)))
+    (let [out (arr.empty Data capacity)]
+      (defer (delete-owned-array! out))
+      (if (> n 0)
+        (let [start 0]
+          (while (<= (+ start n) (core.count collection))
+            (let [group (range-vector collection start (+ start n))]
+              (append-retained! (addr out) group))
+            (set! start (+ start n)))))
+      (freeze-items! .Vector (addr out)))))
+
+(defn partition-all
+  "Return owned vectors of up to `n` consecutive items.
+
+  The final short group is included. Non-positive `n` returns an empty vector."
+  [n: int, collection: Data] -> Data
+  (if (not (sequential? collection))
+    (panic "data.partition-all expects nil, list, vector, or set Data"))
+  (let [capacity 0]
+    (if (> n 0)
+      (set! capacity (/ (+ (core.count collection) (- n 1)) n)))
+    (let [out (arr.empty Data capacity)]
+      (defer (delete-owned-array! out))
+      (if (> n 0)
+        (let [start 0]
+          (while (< start (core.count collection))
+            (let [end (+ start n)]
+              (if (> end (core.count collection))
+                (set! end (core.count collection)))
+              (let [group (range-vector collection start end)]
+                (append-retained! (addr out) group)))
+            (set! start (+ start n)))))
+      (freeze-items! .Vector (addr out)))))
+
+(defmacro partition-by
+  "Partition whenever adjacent callback keys are structurally different."
+  [f collection]
+  `(partition-by-impl ~f ~collection))
+
+(defn- partition-by-impl
+  [f: (fn [item: Data] -> Data), collection: Data] -> Data
+  (if (not (sequential? collection))
+    (panic "data.partition-by expects nil, list, vector, or set Data"))
+  (let [out (arr.empty Data (core.count collection))]
+    (defer (delete-owned-array! out))
+    (if (= (core.count collection) 0)
+      (return (freeze-items! .Vector (addr out))))
+    (let [start 0
+          previous-key (f (item-at collection 0))
+          index 1]
+      (while (< index (core.count collection))
+        (let [key (f (item-at collection index))]
+          (if (!= key previous-key)
+            (do
+              (let [group (range-vector collection start index)]
+                (append-retained! (addr out) group))
+              (set! start index)
+              (set! previous-key key))))
+        (inc! index))
+      (let [group (range-vector collection start (core.count collection))]
+        (append-retained! (addr out) group)))
+    (freeze-items! .Vector (addr out))))
+
+(defn interleave
+  "Interleave two sequential Data inputs into an owned vector.
+
+  Traversal stops when the shorter input is exhausted."
+  [left: Data, right: Data] -> Data
+  (if (not (and (sequential? left) (sequential? right)))
+    (panic "data.interleave expects nil, list, vector, or set Data"))
+  (let [limit (core.count left)]
+    (if (> limit (core.count right))
+      (set! limit (core.count right)))
+    (let [out (arr.empty Data (* 2 limit))]
+      (defer (delete-owned-array! out))
+      (for [index (arr.range 0 limit)]
+        (append-retained! (addr out) (item-at left index))
+        (append-retained! (addr out) (item-at right index)))
+      (freeze-items! .Vector (addr out)))))
+
 (defn rest
   "Return an owned vector without the first sequential item."
   [collection: Data] -> Data
@@ -1393,6 +1500,38 @@
         (let [count-value (from-int (i64 counts[index]))]
           (append-pair-retained!
            (addr out) frequency-keys[index] count-value)))
+      (freeze-map! (addr out)))))
+
+(defmacro count-by
+  "Count sequential items by structurally equal Data callback keys."
+  [f collection]
+  `(count-by-impl ~f ~collection))
+
+(defn- count-by-impl
+  [f: (fn [item: Data] -> Data), collection: Data] -> Data
+  (if (not (sequential? collection))
+    (panic "data.count-by expects nil, list, vector, or set Data"))
+  (let [count-keys (arr.empty Data (core.count collection))
+        counts (arr.empty i64 (core.count collection))]
+    (defer
+      (for [key count-keys]
+        (release key))
+      (delete count-keys)
+      (delete counts))
+    (for [index (arr.range 0 (core.count collection))]
+      (let [key (f (item-at collection index))
+            found (data-index count-keys[:] key)]
+        (if (= found -1)
+          (do
+            (append-retained! (addr count-keys) key)
+            (arr.push! counts 1))
+          (set! counts[found] (+ counts[found] 1)))))
+    (let [out (arr.empty Data (* 2 (core.count count-keys)))]
+      (defer (delete-owned-array! out))
+      (for [index (arr.range 0 (core.count count-keys))]
+        (let [count-value (from-int counts[index])]
+          (append-pair-retained!
+           (addr out) count-keys[index] count-value)))
       (freeze-map! (addr out)))))
 
 (defn into
