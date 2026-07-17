@@ -22,12 +22,12 @@
 })
 
 (defn main []
-  (let [message
-        '{:mode :query
-          :endpoint {:host-id 7}
-          :replicas [{:host-id 8}
-                     {:host-id 9 :display-name "remote"}]}]
-    (let [[err ok] (data.validate Message message '[:message])]
+  (let [message: Data
+        {:mode :query
+         :endpoint {:host-id 7}
+         :replicas [{:host-id 8}
+                    {:host-id 9 :display-name "remote"}]}]
+    (let [[err ok] (data.validate Message message [:message])]
       (assert ok)
       ;; Validation leaves the original immutable Data in place.
       (assert (= (data.int (get (get message :endpoint) :host-id)) 7))
@@ -36,11 +36,11 @@
   (let [[err ok]
         (data.validate
           Message
-          '{:mode :query
-            :endpoint {:host-id 7}
-            :replicas [{:host-id 8}
-                       {:host-id "bad"}]}
-          '[:message])]
+          {:mode :query
+           :endpoint {:host-id 7}
+           :replicas [{:host-id 8}
+                      {:host-id "bad"}]}
+          [:message])]
     (assert (not ok))
     (assert (= err.path '[:message :replicas 1 :host-id]))
     (assert (= err.expected .Int))
@@ -49,18 +49,18 @@
   (let [[err ok]
         (data.validate
           (dynamic Endpoint)
-          '[{:host-id 1}
-            {:host-id 2}]
-          '[:rows])]
+          [{:host-id 1}
+           {:host-id 2}]
+          [:rows])]
     (assert ok)
     (discard err))
 
   (let [[err ok]
         (data.validate
           (dynamic Endpoint)
-          '[{:host-id 1}
-            {:host-id false}]
-          '[:rows])]
+          [{:host-id 1}
+           {:host-id false}]
+          [:rows])]
     (assert (not ok))
     (assert (= err.path '[:rows 1 :host-id]))
     (assert (= err.expected .Int))

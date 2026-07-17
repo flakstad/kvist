@@ -12,7 +12,7 @@
 
 (defn main []
   (let [[ids err ok]
-        (data.decode (dynamic i64) '[10 20 30] '[:ids])]
+        (data.decode (dynamic i64) [10 20 30] [:ids])]
     (assert ok)
     (assert (= (count ids) 3))
     (assert (= ids[1] 20))
@@ -21,9 +21,9 @@
   (let [[endpoints err ok]
         (data.decode
           (dynamic Endpoint)
-          '[{:host-id 1 :display-name "primary"}
-            {:host-id 2 :tags [:remote]}]
-          '[:endpoints])]
+          [{:host-id 1 :display-name "primary"}
+           {:host-id 2 :tags [:remote]}]
+          [:endpoints])]
     (assert ok)
     (assert (= (count endpoints) 2))
     (assert (= endpoints[0].display-name "primary"))
@@ -32,7 +32,7 @@
     (discard err))
 
   (let [[ids err ok]
-        (data.decode (dynamic i64) '[10 "bad"] '[:ids])]
+        (data.decode (dynamic i64) [10 "bad"] [:ids])]
     (assert (not ok))
     (assert (= err.path '[:ids 1]))
     (assert (= err.expected .Int))
@@ -40,7 +40,7 @@
     (discard ids))
 
   (let [[ids err ok]
-        (data.decode (dynamic i64) '{:not :a-vector} '[:ids])]
+        (data.decode (dynamic i64) {:not :a-vector} [:ids])]
     (assert (not ok))
     (assert (= err.path '[:ids]))
     (assert (= err.expected .Vector))
@@ -50,9 +50,9 @@
   (let [[endpoints err ok]
         (data.decode
           (dynamic Endpoint)
-          '[{:host-id 1}
-            {:host-id "bad"}]
-          '[:endpoints])]
+          [{:host-id 1}
+           {:host-id "bad"}]
+          [:endpoints])]
     (assert (not ok))
     (assert (= err.path '[:endpoints 1 :host-id]))
     (assert (= err.expected .Int))

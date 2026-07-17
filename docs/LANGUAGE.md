@@ -1812,9 +1812,9 @@ floating-point scalar, a Kvist enum, or a Kvist struct:
   points: (owned [dynamic]Point)
 })
 
-(data.decode Batch '{:ids [10 20 30]
-                     :points [{:x 1 :y 2}
-                              {:x 3 :y 4}]})
+(data.decode Batch {:ids [10 20 30]
+                    :points [{:x 1 :y 2}
+                             {:x 3 :y 4}]})
 ```
 
 Every element is validated before the native array is allocated. Errors append
@@ -1831,8 +1831,8 @@ struct is useful:
 (let [[points err ok]
       (data.decode
         (dynamic Point)
-        '[{:x 1 :y 2} {:x 3 :y 4}]
-        '[:points])]
+        [{:x 1 :y 2} {:x 3 :y 4}]
+        [:points])]
   (if ok
     (draw-points points)
     (println err.path err.expected err.actual)))
@@ -1851,7 +1851,7 @@ native shape:
 
 ```clojure
 (let [[err ok]
-      (data.validate Message message '[:message])]
+      (data.validate Message message [:message])]
   (if ok
     (handle-data-message message)
     (println err.path err.expected err.actual)))

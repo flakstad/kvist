@@ -1283,6 +1283,10 @@ call_arg_expected_type :: proc(e: ^Emitter, call: CST_Form, item_index: int) -> 
     arg_index := item_index-1
     head_name := map_name(call.items[0].text)
     defer delete(head_name)
+    if (head_name == "decode_data" || head_name == "validate_data") &&
+       (item_index == 2 || item_index == 3) {
+        return strings.clone("Data"), true
+    }
     if head_name == "odin_contains" &&
        arg_index == 1 &&
        len(call.items) == 3 {
@@ -4390,23 +4394,23 @@ emit_data_decode_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_E
             span = form.items[1].span,
         }, false
     }
-    value_ty, ok_value_ty := obvious_form_type(e, form.items[2])
-    if !ok_value_ty || value_ty != "Data" {
-        return "", Compile_Error{message = "data.decode expects a Data value", span = form.items[2].span}, false
-    }
-    value_text, err_value, ok_value := emit_expr(e, form.items[2])
+    value_text, err_value, ok_value := emit_expr_for_expected_type(
+        e,
+        form.items[2],
+        "Data",
+    )
     if !ok_value {
         return "", err_value, false
     }
     path_text := "Data{kind = .Vector}"
     if len(form.items) == 4 {
-        path_ty, ok_path_ty := obvious_form_type(e, form.items[3])
-        if !ok_path_ty || path_ty != "Data" {
-            return "", Compile_Error{message = "data.decode path must be Data", span = form.items[3].span}, false
-        }
         err_path: Compile_Error
         ok_path: bool
-        path_text, err_path, ok_path = emit_expr(e, form.items[3])
+        path_text, err_path, ok_path = emit_expr_for_expected_type(
+            e,
+            form.items[3],
+            "Data",
+        )
         if !ok_path {
             return "", err_path, false
         }
@@ -4490,23 +4494,23 @@ emit_data_validate_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile
             span = form.items[1].span,
         }, false
     }
-    value_ty, ok_value_ty := obvious_form_type(e, form.items[2])
-    if !ok_value_ty || value_ty != "Data" {
-        return "", Compile_Error{message = "data.validate expects a Data value", span = form.items[2].span}, false
-    }
-    value_text, err_value, ok_value := emit_expr(e, form.items[2])
+    value_text, err_value, ok_value := emit_expr_for_expected_type(
+        e,
+        form.items[2],
+        "Data",
+    )
     if !ok_value {
         return "", err_value, false
     }
     path_text := "Data{kind = .Vector}"
     if len(form.items) == 4 {
-        path_ty, ok_path_ty := obvious_form_type(e, form.items[3])
-        if !ok_path_ty || path_ty != "Data" {
-            return "", Compile_Error{message = "data.validate path must be Data", span = form.items[3].span}, false
-        }
         err_path: Compile_Error
         ok_path: bool
-        path_text, err_path, ok_path = emit_expr(e, form.items[3])
+        path_text, err_path, ok_path = emit_expr_for_expected_type(
+            e,
+            form.items[3],
+            "Data",
+        )
         if !ok_path {
             return "", err_path, false
         }
