@@ -2847,6 +2847,21 @@ emit_named_call_with_defaults :: proc(e: ^Emitter, proc_decl: ^Proc_Decl, form: 
     return arg_texts, Compile_Error{}, true
 }
 
+emit_call_arg_for_expected_type :: proc(e: ^Emitter, arg: CST_Form, expected_type: string) -> (string, Compile_Error, bool) {
+    value, err_value, ok_value := emit_expr_for_expected_type(e, arg, expected_type)
+    if !ok_value {
+        return "", err_value, false
+    }
+    if expected_type == "Data" &&
+       (arg.kind == .Vector || arg.kind == .Brace || arg.kind == .Set) {
+        temp := thread_temp_name(e)
+        emit_prefixed_expr_mapped(e, fmt.tprintf("%s := ", temp), value, arg.span)
+        emit_line_mapped(e, fmt.tprintf("defer kvist_data_release(%s)", temp), arg.span)
+        return temp, {}, true
+    }
+    return value, {}, true
+}
+
 emit_positional_call_with_defaults :: proc(e: ^Emitter, proc_decl: ^Proc_Decl, args: []CST_Form, span: Span) -> (arg_texts: [dynamic]string, err: Compile_Error, ok: bool) {
     if len(args) > len(proc_decl.params) {
         return arg_texts, Compile_Error{message = fmt.tprintf("%s expects at most %d arguments", proc_decl.name, len(proc_decl.params)), span = span}, false
@@ -2865,7 +2880,7 @@ emit_positional_call_with_defaults :: proc(e: ^Emitter, proc_decl: ^Proc_Decl, a
     defer delete(provided_forms)
 
     for arg, arg_idx in args {
-        arg_text, err_arg, ok_arg := emit_expr_for_expected_type(e, arg, params[arg_idx].ty)
+        arg_text, err_arg, ok_arg := emit_call_arg_for_expected_type(e, arg, params[arg_idx].ty)
         if !ok_arg {
             return arg_texts, err_arg, false
         }
@@ -2896,7 +2911,7 @@ emit_general_mixed_call_arg_texts :: proc(e: ^Emitter, head_name: string, positi
         err_arg: Compile_Error
         ok_arg := false
         if expected_type, ok_expected := imported_odin_proc_arg_type(e, head_name, arg_idx); ok_expected {
-            arg_text, err_arg, ok_arg = emit_expr_for_expected_type(e, arg, expected_type)
+            arg_text, err_arg, ok_arg = emit_call_arg_for_expected_type(e, arg, expected_type)
             delete(expected_type)
         } else {
             arg_text, err_arg, ok_arg = emit_expr(e, arg)
@@ -2971,7 +2986,7 @@ emit_mixed_call_with_defaults :: proc(e: ^Emitter, proc_decl: ^Proc_Decl, positi
 
     for arg, idx in positional_args {
         param := proc_decl.params[idx]
-        arg_text, err_arg, ok_arg := emit_expr_for_expected_type(e, arg, param.ty)
+        arg_text, err_arg, ok_arg := emit_call_arg_for_expected_type(e, arg, param.ty)
         if !ok_arg {
             return arg_texts, err_arg, false
         }
@@ -6148,6 +6163,11 @@ form_has_nested_owned_value :: proc(form: CST_Form, e: ^Emitter = nil) -> bool {
                 }
             }
             _, item_is_owned_managed := owned_managed_form_type(e, item)
+            if expected_type, ok_expected := call_arg_expected_type(e, form, absolute_index); ok_expected {
+                item_is_owned_managed =
+                    form_produces_owned_managed_type(e, item, expected_type)
+                delete(expected_type)
+            }
             if !form_is_named_arg_brace(item) &&
                (form_produces_owned_value(item, e) ||
                 item_is_owned_managed ||
@@ -6205,22 +6225,33 @@ emit_expr_with_owned_nested_temps :: proc(e: ^Emitter, form: CST_Form) -> (strin
                 }
                 continue
             }
-            _, item_is_owned_managed := owned_managed_form_type(e, item)
+            expected_type, has_expected_type := call_arg_expected_type(e, rewritten, idx)
+            managed_ty, item_is_owned_managed := owned_managed_form_type(e, item)
+            if has_expected_type &&
+               form_produces_owned_managed_type(e, item, expected_type) {
+                managed_ty = expected_type
+                item_is_owned_managed = true
+            }
             if form_is_named_arg_brace(item) ||
                !(form_produces_owned_value(item, e) ||
                  item_is_owned_managed ||
                  form_has_nested_owned_value(item, e)) {
+                if has_expected_type {
+                    delete(expected_type)
+                }
                 continue
             }
 
             value := ""
             err_value: Compile_Error
             ok_value := false
-            if expected_type, ok_expected := call_arg_expected_type(e, rewritten, idx); ok_expected {
+            if has_expected_type && expected_type == "Data" {
                 value, err_value, ok_value = emit_expr_for_expected_type(e, item, expected_type)
-                delete(expected_type)
             } else {
                 value, err_value, ok_value = emit_expr_with_owned_nested_temps(e, item)
+            }
+            if has_expected_type {
+                delete(expected_type)
             }
             if !ok_value {
                 return "", err_value, false
@@ -6230,10 +6261,10 @@ emit_expr_with_owned_nested_temps :: proc(e: ^Emitter, form: CST_Form) -> (strin
             transfers_owned := rewritten.kind == .List &&
                                ((form_transfers_owned_args(rewritten) && idx >= 2) ||
                                 call_arg_transfers_owned_result(e, rewritten, idx))
-            if form_produces_owned_value(item, e) && !transfers_owned {
-                emit_line(e, fmt.tprintf("defer delete(%s)", temp))
-            } else if managed_ty, owned_managed := owned_managed_form_type(e, item); owned_managed {
+            if item_is_owned_managed {
                 emit_line(e, fmt.tprintf("defer %s", managed_destroy_value_text(e, managed_ty, temp)))
+            } else if form_produces_owned_value(item, e) && !transfers_owned {
+                emit_line(e, fmt.tprintf("defer delete(%s)", temp))
             }
 
             delete_cst_form(&rewritten.items[idx])
@@ -6887,10 +6918,10 @@ emit_if_expr :: proc(e: ^Emitter, form: CST_Form, expected_type := "") -> (strin
     }
     if type_text_is_managed_value(branch_expected_type) {
         mark_data_type(e)
-        if !form_produces_owned_managed_value(e, form.items[2]) {
+        if !form_produces_owned_managed_type(e, form.items[2], branch_expected_type) {
             then_value = emit_call_text("kvist_data_retain", []string{then_value})
         }
-        if !form_produces_owned_managed_value(e, form.items[3]) {
+        if !form_produces_owned_managed_type(e, form.items[3], branch_expected_type) {
             else_value = emit_call_text("kvist_data_retain", []string{else_value})
         }
     }
@@ -7949,9 +7980,6 @@ emit_managed_struct_helpers :: proc(e: ^Emitter, struct_decl: Struct_Decl) {
 }
 
 form_produces_owned_managed_value :: proc(e: ^Emitter, form: CST_Form, depth: int = 0) -> bool {
-    if form.kind == .Vector || form.kind == .Brace || form.kind == .Set {
-        return true
-    }
     if depth > 8 || form.kind != .List || len(form.items) == 0 || form.items[0].kind != .Symbol {
         return false
     }
@@ -7993,6 +8021,9 @@ form_produces_owned_managed_value :: proc(e: ^Emitter, form: CST_Form, depth: in
 
 form_produces_owned_managed_type :: proc(e: ^Emitter, form: CST_Form, ty: string, depth: int = 0) -> bool {
     if type_text_is_managed_value(ty) {
+        if form.kind == .Vector || form.kind == .Brace || form.kind == .Set {
+            return true
+        }
         return form_produces_owned_managed_value(e, form, depth)
     }
     if depth > 8 || !type_text_has_managed_lifecycle(e, ty) {
@@ -8702,6 +8733,37 @@ obvious_form_type :: proc(e: ^Emitter, form: CST_Form) -> (string, bool) {
         }
     }
     if form.kind == .List && len(form.items) > 0 && form.items[0].kind == .Symbol {
+        switch form.items[0].text {
+        case "+", "-", "*", "/", "%", "%%", "min", "max":
+            if len(form.items) >= 2 {
+                selected := ""
+                selected_from_literal := false
+                for operand in form.items[1:] {
+                    operand_ty, ok_operand_ty := obvious_form_type(e, operand)
+                    if !ok_operand_ty {
+                        continue
+                    }
+                    if operand_ty == "f64" {
+                        return operand_ty, true
+                    }
+                    if operand_ty == "f32" {
+                        selected = operand_ty
+                        selected_from_literal = false
+                        continue
+                    }
+                    if selected == "" || (selected_from_literal && operand.kind != .Number) {
+                        selected = operand_ty
+                        selected_from_literal = operand.kind == .Number
+                    }
+                }
+                if selected != "" {
+                    return selected, true
+                }
+            }
+        case "==", "=", "!=", "<", "<=", ">", ">=", "not", "!":
+            return "bool", true
+        case:
+        }
         if is_symbol(form.items[0], "quote") && len(form.items) == 2 {
             return "Data", true
         }
@@ -14426,10 +14488,10 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         err_arg: Compile_Error
         ok_arg := false
         if expected_type, ok_expected := overload_literal_arg_expected_type(e, head_name, form.items[1:], arg_idx); ok_expected {
-            arg_text, err_arg, ok_arg = emit_expr_for_expected_type(e, arg, expected_type)
+            arg_text, err_arg, ok_arg = emit_call_arg_for_expected_type(e, arg, expected_type)
             delete(expected_type)
         } else if expected_type, ok_expected := imported_odin_proc_arg_type(e, head_name, arg_idx); ok_expected {
-            arg_text, err_arg, ok_arg = emit_expr_for_expected_type(e, arg, expected_type)
+            arg_text, err_arg, ok_arg = emit_call_arg_for_expected_type(e, arg, expected_type)
             delete(expected_type)
         } else {
             arg_text, err_arg, ok_arg = emit_expr(e, arg)
@@ -17558,7 +17620,7 @@ emit_runtime_def_lifecycle :: proc(e: ^Emitter) -> (Compile_Error, bool) {
         }
         if type_text_is_managed_value(decl.const_decl.ty) {
             mark_data_type(e)
-            if !form_produces_owned_managed_value(e, decl.const_decl.value) {
+            if !form_produces_owned_managed_type(e, decl.const_decl.value, decl.const_decl.ty) {
                 retained := emit_call_text("kvist_data_retain", []string{value})
                 delete(value)
                 value = retained
