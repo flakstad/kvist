@@ -261,6 +261,45 @@
   [value: Data] -> Data-Kind #force_inline
   (odin-call "kvist_data_kind" value))
 
+(defn kind-keyword
+  "Return the runtime kind as Clojure-familiar keyword Data."
+  [value: Data] -> Data
+  (case (kind value)
+    .Nil ':nil
+    .Bool ':bool
+    .Int ':int
+    .Float ':float
+    .String ':string
+    .Symbol ':symbol
+    .Keyword ':keyword
+    .List ':list
+    .Vector ':vector
+    .Map ':map
+    .Set ':set
+    .Tagged ':tagged
+    ':unknown))
+
+(defn describe
+  "Return a shallow, immutable Data description suitable for inspection.
+
+  Every result contains `:kind`. Collections and strings include `:count`,
+  maps include `:keys`, and tagged values include their textual `:tag`.
+  The description intentionally exposes no backing-node or reference-count
+  details."
+  [value: Data] -> Data
+  (let [result: Data {:kind (kind-keyword value)}]
+    (if (or (string? value)
+            (list? value)
+            (vector? value)
+            (map? value)
+            (set? value))
+      (set! result (assoc result :count (from-int (i64 (count value))))))
+    (if (map? value)
+      (set! result (assoc result :keys (keys value))))
+    (if (tagged? value)
+      (set! result (assoc result :tag (from-string (tag value)))))
+    result))
+
 (defn equal?
   "Return structural Data equality without allocating."
   [left: Data, right: Data] -> bool #force_inline
