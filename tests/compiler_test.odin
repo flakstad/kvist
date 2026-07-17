@@ -3846,7 +3846,7 @@ compile_type_directed_data_struct_decode :: proc(t: ^testing.T) {
         t,
         strings.contains(
             result.output,
-            "return Settings{port = i64(kvist_field_0.payload.int_value), enabled = kvist_field_1.payload.bool_value, ratio = f64(kvist_field_2.payload.float_value), metadata = kvist_data_retain(kvist_field_3)}, {}, true",
+            "return Settings{port = i64(kvist_field_0.payload.int_value), enabled = kvist_field_1.payload.bool_value, ratio = f64(kvist_field_2.payload.float_value), metadata = kvist_data_retain(kvist_field_3), endpoint = Endpoint{host_id = i64(kvist_field_5.payload.int_value), secure = kvist_field_6.payload.bool_value, tags = kvist_data_retain(kvist_field_7)}}, {}, true",
         ),
         true,
     )
@@ -3854,7 +3854,23 @@ compile_type_directed_data_struct_decode :: proc(t: ^testing.T) {
         t,
         strings.contains(
             result.output,
-            "data__decode_error(kvist_error_path, .Bool, kvist_field_1.kind)",
+            "data__decode_error(kvist_error_path_6, .Bool, kvist_field_6.kind)",
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            "kvist_data_move_assign(&kvist_error_path_6, kvist_data_append(kvist_error_path_6, kvist_key_4))",
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            "kvist_data_move_assign(&kvist_error_path_6, kvist_data_append(kvist_error_path_6, kvist_key_6))",
         ),
         true,
     )

@@ -156,8 +156,8 @@ Planned capabilities are:
 
 - structural pattern matching and destructuring over Data;
 - typed decoding into native values with path-aware validation errors; safe
-  integer, float, and boolean decoders and required-field native struct
-  decoding are available;
+  integer, float, and boolean decoders and recursive required-field native
+  struct decoding are available;
 - reusable validated shapes for dynamic/native boundaries;
 - efficient builders or transients for bulk immutable construction;
 - explicit dispatch on tags or selected keys for messages and protocols;
@@ -194,10 +194,11 @@ fallback. Static and runtime Data have the same public handle shape.
 3. Add typed decoding and path-aware validation at Data/native boundaries.
    `data.decode-int[-at]`, `data.decode-float[-at]`, and
    `data.decode-bool[-at]` return a native scalar, `data.Decode-Error`, and an
-   `ok` boolean. `(data.decode Struct value [path])` decodes required `Data`,
-   boolean, integer, and floating-point fields, retaining managed fields and
-   reporting the exact failing field path. Nested structs, enums, strings,
-   optional/default fields, and selected homogeneous collections remain.
+   `ok` boolean. `(data.decode Struct value [path])` recursively decodes
+   required nested Kvist structs and `Data`, boolean, integer, and
+   floating-point fields, retaining managed leaves and reporting the exact
+   failing field path. Enums, strings, optional/default fields, and selected
+   homogeneous collections remain.
 4. Design and implement structural Data matching with ownership-safe captured
    subvalues.
 5. Add builders/transients and verify their allocation behavior against

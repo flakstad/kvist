@@ -3286,6 +3286,150 @@ decode_field_parts :: proc(ty, value_name: string) -> (expected_kind, decoded_te
     return "", "", false, false
 }
 
+emit_decode_failure_return :: proc(
+    builder: ^strings.Builder,
+    path_keys: []string,
+    expected_kind, actual_text: string,
+    failure_id: int,
+) {
+    if len(path_keys) == 0 {
+        fmt.sbprintf(
+            builder,
+            " return {{}}, data__decode_error(kvist_path, .%s, %s), false ",
+            expected_kind,
+            actual_text,
+        )
+        return
+    }
+    path_name := fmt.tprintf("kvist_error_path_%d", failure_id)
+    fmt.sbprintf(builder, "\n        %s := kvist_data_retain(kvist_path)\n", path_name)
+    fmt.sbprintf(builder, "        defer kvist_data_release(%s)\n", path_name)
+    for key_name in path_keys {
+        fmt.sbprintf(
+            builder,
+            "        kvist_data_move_assign(&%s, kvist_data_append(%s, %s))\n",
+            path_name,
+            path_name,
+            key_name,
+        )
+    }
+    fmt.sbprintf(
+        builder,
+        "        return {{}}, data__decode_error(%s, .%s, %s), false\n    ",
+        path_name,
+        expected_kind,
+        actual_text,
+    )
+}
+
+emit_decode_struct_value :: proc(
+    e: ^Emitter,
+    builder: ^strings.Builder,
+    struct_decl: ^Struct_Decl,
+    value_name: string,
+    path_keys: []string,
+    counter: ^int,
+    root_span: Span,
+    depth: int = 0,
+) -> (string, Compile_Error, bool) {
+    if depth > 16 {
+        return "", Compile_Error{
+            message = fmt.tprintf("data.decode nested struct depth exceeded at %s", struct_decl.name),
+            span = root_span,
+        }, false
+    }
+    field_values: [dynamic]string
+    defer delete(field_values)
+    for field in struct_decl.fields {
+        field_id := counter^
+        counter^ += 1
+        key_name := fmt.tprintf("kvist_key_%d", field_id)
+        field_name := fmt.tprintf("kvist_field_%d", field_id)
+        key := fmt.tprintf(":%s", field.source_name)
+        fmt.sbprintf(
+            builder,
+            "    %s := Data{{kind = .Keyword, payload = {{text = %q}}}}\n",
+            key_name,
+            key,
+        )
+        fmt.sbprintf(
+            builder,
+            "    %s := kvist_data_get(%s, %s)\n",
+            field_name,
+            value_name,
+            key_name,
+        )
+
+        field_path: [dynamic]string
+        defer delete(field_path)
+        append(&field_path, ..path_keys)
+        append(&field_path, key_name)
+
+        expected_kind, decoded_text, managed, supported := decode_field_parts(field.ty, field_name)
+        if supported {
+            if expected_kind != "" {
+                fmt.sbprintf(builder, "    if %s.kind != .%s {{", field_name, expected_kind)
+                emit_decode_failure_return(
+                    builder,
+                    field_path[:],
+                    expected_kind,
+                    fmt.tprintf("%s.kind", field_name),
+                    field_id,
+                )
+                strings.write_string(builder, "}\n")
+            }
+            if managed {
+                decoded_text = emit_call_text("kvist_data_retain", []string{decoded_text})
+            }
+            append(&field_values, fmt.tprintf("%s = %s", field.name, decoded_text))
+            continue
+        }
+
+        nested_decl, nested := find_struct_decl(e, field.ty)
+        if nested {
+            fmt.sbprintf(builder, "    if %s.kind != .Map {{", field_name)
+            emit_decode_failure_return(
+                builder,
+                field_path[:],
+                "Map",
+                fmt.tprintf("%s.kind", field_name),
+                field_id,
+            )
+            strings.write_string(builder, "}\n")
+            nested_text, err_nested, ok_nested := emit_decode_struct_value(
+                e,
+                builder,
+                nested_decl,
+                field_name,
+                field_path[:],
+                counter,
+                root_span,
+                depth+1,
+            )
+            if !ok_nested {
+                return "", err_nested, false
+            }
+            append(&field_values, fmt.tprintf("%s = %s", field.name, nested_text))
+            continue
+        }
+
+        return "", Compile_Error{
+            message = fmt.tprintf(
+                "data.decode field %s.%s has unsupported type %s; supported fields are Data, bool, integer and floating-point scalars, and nested Kvist structs",
+                struct_decl.name,
+                field.source_name,
+                field.ty,
+            ),
+            span = root_span,
+        }, false
+    }
+    return fmt.tprintf(
+        "%s{{%s}}",
+        struct_decl.name,
+        strings.join(field_values[:], ", ", context.temp_allocator),
+    ), {}, true
+}
+
 emit_data_decode_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) {
     if len(form.items) != 3 && len(form.items) != 4 {
         return "", Compile_Error{message = "data.decode expects type, value, and optional path", span = form.span}, false
@@ -3323,8 +3467,6 @@ emit_data_decode_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_E
         }
     }
 
-    field_values: [dynamic]string
-    defer delete(field_values)
     builder := strings.builder_make()
     defer strings.builder_destroy(&builder)
     fmt.sbprintf(
@@ -3336,61 +3478,23 @@ emit_data_decode_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_E
         &builder,
         "    if kvist_value.kind != .Map { return {}, data__decode_error(kvist_path, .Map, kvist_value.kind), false }\n",
     )
-    for field, idx in struct_decl.fields {
-        expected_kind, decoded_text, managed, supported := decode_field_parts(
-            field.ty,
-            fmt.tprintf("kvist_field_%d", idx),
-        )
-        if !supported {
-            return "", Compile_Error{
-                message = fmt.tprintf(
-                    "data.decode field %s.%s has unsupported type %s; supported fields are Data, bool, integer, and floating-point scalars",
-                    target_ty,
-                    field.source_name,
-                    field.ty,
-                ),
-                span = form.items[1].span,
-            }, false
-        }
-        key := fmt.tprintf(":%s", field.source_name)
-        fmt.sbprintf(
-            &builder,
-            "    kvist_key_%d := Data{{kind = .Keyword, payload = {{text = %q}}}}\n",
-            idx,
-            key,
-        )
-        fmt.sbprintf(
-            &builder,
-            "    kvist_field_%d := kvist_data_get(kvist_value, kvist_key_%d)\n",
-            idx,
-            idx,
-        )
-        if expected_kind != "" {
-            fmt.sbprintf(&builder, "    if kvist_field_%d.kind != .%s {{\n", idx, expected_kind)
-            fmt.sbprintf(
-                &builder,
-                "        kvist_error_path := kvist_data_append(kvist_path, kvist_key_%d)\n",
-                idx,
-            )
-            strings.write_string(&builder, "        defer kvist_data_release(kvist_error_path)\n")
-            fmt.sbprintf(
-                &builder,
-                "        return {{}}, data__decode_error(kvist_error_path, .%s, kvist_field_%d.kind), false\n",
-                expected_kind,
-                idx,
-            )
-            strings.write_string(&builder, "    }\n")
-        }
-        if managed {
-            decoded_text = emit_call_text("kvist_data_retain", []string{decoded_text})
-        }
-        append(&field_values, fmt.tprintf("%s = %s", field.name, decoded_text))
+    counter := 0
+    decoded_text, err_decoded, ok_decoded := emit_decode_struct_value(
+        e,
+        &builder,
+        struct_decl,
+        "kvist_value",
+        nil,
+        &counter,
+        form.items[1].span,
+    )
+    if !ok_decoded {
+        return "", err_decoded, false
     }
     fmt.sbprintf(
         &builder,
-        "    return %s{{%s}}, {{}}, true\n",
-        target_ty,
-        strings.join(field_values[:], ", ", context.temp_allocator),
+        "    return %s, {{}}, true\n",
+        decoded_text,
     )
     fmt.sbprintf(&builder, "}})(%s, %s)", value_text, path_text)
     mark_data_type(e)
