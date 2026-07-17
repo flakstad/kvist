@@ -1657,7 +1657,7 @@ rewrite_decl_name :: proc(form: ^CST_Form, prefix: string) {
 
 type_constructor_symbol :: proc(text: string) -> bool {
     switch text {
-    case "slice", "dynamic", "array", "map", "matrix", "ptr", "distinct", "fn", "type":
+    case "slice", "dynamic", "array", "map", "matrix", "ptr", "distinct", "fn", "type", "owned":
         return true
     }
     return false

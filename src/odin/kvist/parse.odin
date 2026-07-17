@@ -336,6 +336,13 @@ struct_field_exists :: proc(fields: []Struct_Field, name: string) -> bool {
     return false
 }
 
+owned_string_type_form :: proc(form: CST_Form) -> bool {
+    return form.kind == .List &&
+           len(form.items) == 2 &&
+           is_symbol(form.items[0], "owned") &&
+           is_symbol(form.items[1], "string")
+}
+
 parse_defstruct_type_meta :: proc(form: CST_Form) -> (text: string, err: Compile_Error, ok: bool) {
     #partial switch form.kind {
     case .Keyword:
@@ -822,9 +829,18 @@ parse_struct_fields :: proc(form: CST_Form) -> (fields: [dynamic]Struct_Field, e
         if struct_field_exists(fields[:], field_name) {
             return fields, Compile_Error{message = fmt.tprintf("duplicate struct field %s", key.text), span = key.span}, false
         }
-        type_text, next_i, err_type, ok_type := parse_type_text_from_forms(form.items[:], i+1)
-        if !ok_type {
-            return fields, err_type, false
+        type_text := ""
+        next_i := i + 2
+        owns_string := owned_string_type_form(form.items[i+1])
+        if owns_string {
+            type_text = "string"
+        } else {
+            err_type: Compile_Error
+            ok_type: bool
+            type_text, next_i, err_type, ok_type = parse_type_text_from_forms(form.items[:], i+1)
+            if !ok_type {
+                return fields, err_type, false
+            }
         }
         using_field := false
         if next_i < len(form.items) && form.items[next_i].kind == .Keyword && form.items[next_i].text == ":using" {
@@ -836,6 +852,7 @@ parse_struct_fields :: proc(form: CST_Form) -> (fields: [dynamic]Struct_Field, e
             source_name = source_name,
             ty          = type_text,
             is_using    = using_field,
+            owns_string = owns_string,
         })
         i = next_i
     }
@@ -869,9 +886,18 @@ parse_defstruct_fields :: proc(form: CST_Form) -> (fields: [dynamic]Struct_Field
         if struct_field_exists(fields[:], field_name) {
             return fields, Compile_Error{message = fmt.tprintf("duplicate defstruct field %s", key.text), span = key.span}, false
         }
-        type_text, next_i, err_type, ok_type := parse_type_text_from_forms(form.items[:], i+1)
-        if !ok_type {
-            return fields, err_type, false
+        type_text := ""
+        next_i := i + 2
+        owns_string := owned_string_type_form(form.items[i+1])
+        if owns_string {
+            type_text = "string"
+        } else {
+            err_type: Compile_Error
+            ok_type: bool
+            type_text, next_i, err_type, ok_type = parse_type_text_from_forms(form.items[:], i+1)
+            if !ok_type {
+                return fields, err_type, false
+            }
         }
         using_field := false
         if next_i < len(form.items) && form.items[next_i].kind == .Keyword && form.items[next_i].text == ":using" {
@@ -883,6 +909,7 @@ parse_defstruct_fields :: proc(form: CST_Form) -> (fields: [dynamic]Struct_Field
             source_name = source_name,
             ty          = type_text,
             is_using    = using_field,
+            owns_string = owns_string,
         })
         i = next_i
     }

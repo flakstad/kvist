@@ -3823,6 +3823,78 @@ compile_rejects_copy_update_of_managed_struct_field :: proc(t: ^testing.T) {
 }
 
 @(test)
+compile_manages_owned_string_fields_in_native_structs :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct Person {
+  name: (owned string)
+})
+
+(defn make-person [name: string] -> Person
+  (Person {name: name}))
+
+(defn rename [person: Person, name: string] -> Person
+  (assoc person .name name))
+
+(defn overwrite [person: Person, name: string]
+  (let [copy person]
+    (set! copy.name name)))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "return Person{name = strings.clone(name)}"), true)
+    testing.expect_value(t, strings.contains(output, "out.name = strings.clone(value.name)"), true)
+    testing.expect_value(t, strings.contains(output, "delete(value.name)"), true)
+    testing.expect_value(
+        t,
+        strings.contains(output, ".name = strings.clone(kvist_value)"),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(output, "delete(kvist_update_"),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            output,
+            "kvist_replacement := strings.clone(kvist_value); kvist_previous := kvist_place^",
+        ),
+        true,
+    )
+}
+
+@(test)
+compile_data_decode_rejects_borrowed_string_struct_fields :: proc(t: ^testing.T) {
+    source := `(package main)
+(import data "kvist:data")
+
+(defstruct Person {
+  name: string
+})
+
+(defn decode-person [value: Data] -> [person: Person, err: data.Decode-Error, ok: bool]
+  (data.decode Person value))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    delete(output)
+    defer delete(err.message)
+    testing.expect_value(
+        t,
+        err.message,
+        "data.decode field Person.name has unsupported type string; use (owned string) for decoded strings; other supported fields are Data, bool, integer and floating-point scalars, enums, and nested Kvist structs",
+    )
+}
+
+@(test)
 compile_type_directed_data_struct_decode :: proc(t: ^testing.T) {
     result, err, ok := kvist.compile_path_with_map("examples/data/typed-struct-decode.kvist")
     testing.expect_value(t, ok, true)
@@ -3846,7 +3918,7 @@ compile_type_directed_data_struct_decode :: proc(t: ^testing.T) {
         t,
         strings.contains(
             result.output,
-            "return Settings{port = i64(kvist_field_0.payload.int_value), enabled = kvist_field_1.payload.bool_value, ratio = f64(kvist_field_2.payload.float_value), metadata = kvist_data_retain(kvist_field_3), endpoint = Endpoint{host_id = i64(kvist_field_5.payload.int_value), secure = kvist_field_6.payload.bool_value, tags = kvist_data_retain(kvist_field_7)}, mode = kvist_enum_8}, {}, true",
+            "return Settings{port = i64(kvist_field_0.payload.int_value), enabled = kvist_field_1.payload.bool_value, ratio = f64(kvist_field_2.payload.float_value), metadata = kvist_data_retain(kvist_field_3), endpoint = Endpoint{host_id = i64(kvist_field_5.payload.int_value), display_name = strings.clone(kvist_field_6.payload.text), secure = kvist_field_7.payload.bool_value, tags = kvist_data_retain(kvist_field_8)}, mode = kvist_enum_9}, {}, true",
         ),
         true,
     )
@@ -3854,7 +3926,7 @@ compile_type_directed_data_struct_decode :: proc(t: ^testing.T) {
         t,
         strings.contains(
             result.output,
-            "data__decode_error(kvist_error_path_6, .Bool, kvist_field_6.kind)",
+            "data__decode_error(kvist_error_path_7, .Bool, kvist_field_7.kind)",
         ),
         true,
     )
@@ -3862,7 +3934,7 @@ compile_type_directed_data_struct_decode :: proc(t: ^testing.T) {
         t,
         strings.contains(
             result.output,
-            "kvist_data_move_assign(&kvist_error_path_6, kvist_data_append(kvist_error_path_6, kvist_key_4))",
+            "kvist_data_move_assign(&kvist_error_path_7, kvist_data_append(kvist_error_path_7, kvist_key_4))",
         ),
         true,
     )
@@ -3870,20 +3942,35 @@ compile_type_directed_data_struct_decode :: proc(t: ^testing.T) {
         t,
         strings.contains(
             result.output,
-            "kvist_data_move_assign(&kvist_error_path_6, kvist_data_append(kvist_error_path_6, kvist_key_6))",
+            "kvist_data_move_assign(&kvist_error_path_7, kvist_data_append(kvist_error_path_7, kvist_key_7))",
         ),
         true,
     )
-    testing.expect_value(t, strings.contains(result.output, `case ":read-only": kvist_enum_8 = .Read_Only`), true)
+    testing.expect_value(t, strings.contains(result.output, `case ":read-only": kvist_enum_9 = .Read_Only`), true)
     testing.expect_value(
         t,
         strings.contains(
             result.output,
-            `data__decode_enum_error(kvist_enum_error_path_8, "Mode", kvist_field_8)`,
+            `data__decode_enum_error(kvist_enum_error_path_9, "Mode", kvist_field_9)`,
         ),
         true,
     )
     testing.expect_value(t, strings.contains(result.output, "out.actual_value = kvist_data_retain(value.actual_value)"), true)
+    testing.expect_value(t, strings.contains(result.output, "out.display_name = strings.clone(value.display_name)"), true)
+    testing.expect_value(t, strings.contains(result.output, "delete(value.display_name)"), true)
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            "kvist_replacement := strings.clone(kvist_value); kvist_previous := kvist_place^",
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(result.output, ".endpoint.display_name = strings.clone(kvist_value)"),
+        true,
+    )
     testing.expect_value(t, strings.contains(result.output, "defer kvist_managed_destroy_Settings(settings)"), true)
     testing.expect_value(
         t,

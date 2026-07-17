@@ -86,6 +86,7 @@ Struct_Field :: struct {
     source_name: string,
     ty:          string,
     is_using:    bool,
+    owns_string: bool,
 }
 
 Union_Variant :: struct {

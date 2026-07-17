@@ -442,6 +442,19 @@ The parser also accepts `[slice T]` as a vector shorthand in `defstruct` field
 metadata. It lowers to `[]T`. Use ordinary type spelling such as `[dynamic]T`,
 `[N]T`, and `(set T)` for dynamic arrays, fixed arrays, and sets.
 
+Use `(owned string)` for a struct field that owns its native string storage:
+
+```clojure
+(defstruct Person {
+  name: (owned string)
+})
+```
+
+The emitted Odin field type remains `string`. Kvist clones borrowed values on
+construction and `assoc`, moves owned constructor expressions, clones the field
+when its containing struct is copied, and deletes it with the struct. Plain
+`string` fields retain their existing borrowed/unmanaged semantics.
+
 ### Enums
 
 Enums define a named integer-like set of values:
@@ -1719,14 +1732,16 @@ struct:
 ```
 
 The optional path becomes the root of any `Decode-Error`. Required nested
-Kvist structs and `Data`, boolean, integer, and floating-point fields are
-currently supported, as are Kvist enum fields. Enum keywords use lowercase
-source spelling, so `.Read-Only` is represented by `:read-only`. A keyword
-outside the enum sets `err.enum-value?`, `err.expected-type`, and
-`err.actual-value`. Nested validation completes before construction, so managed
-leaves are retained only for a successful result. The decoded struct and error
-follow normal deterministic managed-value cleanup. Strings, optional/default
-fields, and homogeneous collections remain future decoding work.
+Kvist structs and `Data`, boolean, integer, floating-point, explicitly owned
+string, and enum fields are supported. Enum keywords use lowercase source
+spelling, so `.Read-Only` is represented by `:read-only`. A keyword outside the
+enum sets `err.enum-value?`, `err.expected-type`, and `err.actual-value`.
+Decoded strings require `(owned string)` so their storage lifetime is explicit;
+plain borrowed `string` fields are rejected. Nested validation completes before
+construction, so managed leaves are acquired only for a successful result. The
+decoded struct and error follow normal deterministic managed-value cleanup.
+Optional/default fields and homogeneous collections remain future decoding
+work.
 
 In a `->` pipeline, use a `.field` selector step:
 

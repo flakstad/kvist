@@ -996,7 +996,12 @@ emit_struct_brace_literal :: proc(e: ^Emitter, struct_decl: ^Struct_Decl, form: 
         if !ok_value {
             return "", err_value, false
         }
-        if type_text_has_managed_lifecycle(e, field.ty) &&
+        if field.owns_string {
+            if !form_produces_owned_value(value, e) {
+                mark_core_strings(e)
+                value_text = emit_call_text("strings.clone", []string{value_text})
+            }
+        } else if type_text_has_managed_lifecycle(e, field.ty) &&
            !form_produces_owned_managed_type(e, value, field.ty) {
             value_text = managed_clone_value_text(e, field.ty, value_text)
         }
@@ -3068,6 +3073,25 @@ struct_field_type_for_update_path :: proc(e: ^Emitter, target_ty: string, fields
     return ty, {}, true
 }
 
+struct_field_owns_string_for_update_path :: proc(e: ^Emitter, target_ty: string, fields: []string) -> bool {
+    ty := target_ty
+    for field_name, idx in fields {
+        struct_decl, ok_struct := find_struct_decl(e, ty)
+        if !ok_struct {
+            return false
+        }
+        field, ok_field := find_struct_field(struct_decl, field_name)
+        if !ok_field {
+            return false
+        }
+        if idx == len(fields)-1 {
+            return field.owns_string
+        }
+        ty = field.ty
+    }
+    return false
+}
+
 emit_shallow_assoc_copy_expr :: proc(e: ^Emitter, target_form: CST_Form, target_text, target_ty: string, fields: []string, field_span: Span, value_form: CST_Form) -> (string, Compile_Error, bool) {
     field_ty, err_field_ty, ok_field_ty := struct_field_type_for_update_path(e, target_ty, fields, "assoc", field_span)
     if !ok_field_ty {
@@ -3085,7 +3109,10 @@ emit_shallow_assoc_copy_expr :: proc(e: ^Emitter, target_form: CST_Form, target_
         target_init = managed_clone_value_text(e, target_ty, "kvist_target")
     }
     assignment := fmt.tprintf("%s = kvist_value", target_field)
-    if type_text_has_managed_lifecycle(e, field_ty) {
+    if struct_field_owns_string_for_update_path(e, target_ty, fields) {
+        mark_core_strings(e)
+        assignment = fmt.tprintf("delete(%s)\n    %s = strings.clone(kvist_value)", target_field, target_field)
+    } else if type_text_has_managed_lifecycle(e, field_ty) {
         move := form_produces_owned_managed_type(e, value_form, field_ty)
         helper := managed_assign_helper_name(field_ty, move)
         assignment = emit_call_text(helper, []string{address_of_expr_text(target_field), "kvist_value"})
@@ -3379,6 +3406,25 @@ emit_decode_struct_value :: proc(
         append(&field_path, ..path_keys)
         append(&field_path, key_name)
 
+        if field.owns_string {
+            fmt.sbprintf(builder, "    if %s.kind != .String {{", field_name)
+            emit_decode_failure_return(
+                builder,
+                field_path[:],
+                "String",
+                fmt.tprintf("%s.kind", field_name),
+                field_id,
+            )
+            strings.write_string(builder, "}\n")
+            mark_core_strings(e)
+            append(&field_values, fmt.tprintf(
+                "%s = strings.clone(%s.payload.text)",
+                field.name,
+                field_name,
+            ))
+            continue
+        }
+
         expected_kind, decoded_text, managed, supported := decode_field_parts(field.ty, field_name)
         if supported {
             if expected_kind != "" {
@@ -3479,7 +3525,7 @@ emit_decode_struct_value :: proc(
 
         return "", Compile_Error{
             message = fmt.tprintf(
-                "data.decode field %s.%s has unsupported type %s; supported fields are Data, bool, integer and floating-point scalars, enums, and nested Kvist structs",
+                "data.decode field %s.%s has unsupported type %s; use (owned string) for decoded strings; other supported fields are Data, bool, integer and floating-point scalars, enums, and nested Kvist structs",
                 struct_decl.name,
                 field.source_name,
                 field.ty,
@@ -3573,6 +3619,12 @@ emit_shallow_update_copy_expr :: proc(e: ^Emitter, target_form: CST_Form, target
     if type_text_has_managed_lifecycle(e, field_ty) {
         return "", Compile_Error{
             message = "update of a managed field is not yet supported; compute the new value first and use assoc",
+            span = field_span,
+        }, false
+    }
+    if struct_field_owns_string_for_update_path(e, target_ty, fields) {
+        return "", Compile_Error{
+            message = "update of an owned string field is not yet supported; compute the new value first and use assoc",
             span = field_span,
         }, false
     }
@@ -6951,7 +7003,7 @@ type_text_has_managed_lifecycle :: proc(e: ^Emitter, text: string, depth: int = 
         return false
     }
     for field in struct_decl.fields {
-        if type_text_has_managed_lifecycle(e, field.ty, depth+1) {
+        if field.owns_string || type_text_has_managed_lifecycle(e, field.ty, depth+1) {
             return true
         }
     }
@@ -6989,7 +7041,6 @@ emit_managed_struct_helpers :: proc(e: ^Emitter, struct_decl: Struct_Decl) {
     if !type_text_has_managed_lifecycle(e, struct_decl.name) {
         return
     }
-    mark_data_type(e)
     clone_name := managed_struct_helper_name("clone", struct_decl.name)
     destroy_name := managed_struct_helper_name("destroy", struct_decl.name)
     assign_name := managed_struct_helper_name("assign", struct_decl.name)
@@ -7000,7 +7051,10 @@ emit_managed_struct_helpers :: proc(e: ^Emitter, struct_decl: Struct_Decl) {
     e.indent += 1
     emit_line(e, "out := value")
     for field in struct_decl.fields {
-        if type_text_has_managed_lifecycle(e, field.ty) {
+        if field.owns_string {
+            mark_core_strings(e)
+            emit_line(e, fmt.tprintf("out.%s = strings.clone(value.%s)", field.name, field.name))
+        } else if type_text_has_managed_lifecycle(e, field.ty) {
             retained := managed_clone_value_text(e, field.ty, fmt.tprintf("value.%s", field.name))
             emit_line(e, fmt.tprintf("out.%s = %s", field.name, retained))
         }
@@ -7014,7 +7068,9 @@ emit_managed_struct_helpers :: proc(e: ^Emitter, struct_decl: Struct_Decl) {
     e.indent += 1
     for offset in 0..<len(struct_decl.fields) {
         field := struct_decl.fields[len(struct_decl.fields)-1-offset]
-        if type_text_has_managed_lifecycle(e, field.ty) {
+        if field.owns_string {
+            emit_line(e, fmt.tprintf("delete(value.%s)", field.name))
+        } else if type_text_has_managed_lifecycle(e, field.ty) {
             emit_line(e, managed_destroy_value_text(e, field.ty, fmt.tprintf("value.%s", field.name)))
         }
     }
@@ -7197,6 +7253,24 @@ emit_managed_destructure_cleanup :: proc(e: ^Emitter, binding: Binding) {
 }
 
 managed_assignment_text :: proc(e: ^Emitter, place_form, value_form: CST_Form, place, value: string) -> (string, bool) {
+    if target_form, fields, _, ok_place := field_path_place_parts(place_form); ok_place {
+        if target_ty, ok_target_ty := obvious_form_type(e, target_form);
+           ok_target_ty && struct_field_owns_string_for_update_path(e, target_ty, fields[:]) {
+            mark_core_strings(e)
+            if form_produces_owned_value(value_form, e) {
+                return fmt.tprintf(
+                    "(proc(kvist_place: ^string, kvist_value: string) {{ kvist_previous := kvist_place^; kvist_place^ = kvist_value; delete(kvist_previous) }})(%s, %s)",
+                    address_of_expr_text(place),
+                    value,
+                ), true
+            }
+            return fmt.tprintf(
+                "(proc(kvist_place: ^string, kvist_value: string) {{ kvist_replacement := strings.clone(kvist_value); kvist_previous := kvist_place^; kvist_place^ = kvist_replacement; delete(kvist_previous) }})(%s, %s)",
+                address_of_expr_text(place),
+                value,
+            ), true
+        }
+    }
     place_ty, ok_place_ty := obvious_form_type(e, place_form)
     if !ok_place_ty || !type_text_has_managed_lifecycle(e, place_ty) {
         return "", false
