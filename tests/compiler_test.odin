@@ -882,6 +882,7 @@ compile_all_examples :: proc(t: ^testing.T) {
         "examples/data/core-updates.kvist",
         "examples/data/edn-write.kvist",
         "examples/data/typed-decode.kvist",
+        "examples/data/typed-struct-decode.kvist",
         "examples/interop/core/core-concurrency.kvist",
         "examples/interop/core/core-container-queue.kvist",
         "examples/interop/core/core-encoding-formats.kvist",
@@ -3818,6 +3819,50 @@ compile_rejects_copy_update_of_managed_struct_field :: proc(t: ^testing.T) {
         t,
         err.message,
         "update of a managed field is not yet supported; compute the new value first and use assoc",
+    )
+}
+
+@(test)
+compile_type_directed_data_struct_decode :: proc(t: ^testing.T) {
+    result, err, ok := kvist.compile_path_with_map("examples/data/typed-struct-decode.kvist")
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            "-> (decoded: Settings, err: data__Decode_Error, ok: bool)",
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            "return Settings{port = i64(kvist_field_0.payload.int_value), enabled = kvist_field_1.payload.bool_value, ratio = f64(kvist_field_2.payload.float_value), metadata = kvist_data_retain(kvist_field_3)}, {}, true",
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            "data__decode_error(kvist_error_path, .Bool, kvist_field_1.kind)",
+        ),
+        true,
+    )
+    testing.expect_value(t, strings.contains(result.output, "defer kvist_managed_destroy_Settings(settings)"), true)
+    testing.expect_value(
+        t,
+        strings.contains(result.output, "defer kvist_managed_destroy_data__Decode_Error(err)"),
+        true,
     )
 }
 

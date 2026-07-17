@@ -83,8 +83,8 @@ surrounding program dynamic. Build these facilities in order:
 
 1. Typed decoding from Data into native structs, enums, scalar types, and
    selected homogeneous collections, with errors carrying the exact Data path.
-   Integer, float, and boolean scalar decoders plus managed path-carrying
-   errors are implemented as the first slice.
+   Integer, float, and boolean scalar decoders plus type-directed native
+   struct decoding for required scalar and `Data` fields are implemented.
 2. Reusable shape validation/refinement so code can validate once and avoid
    repeating kind and key checks.
 3. Structural pattern matching and destructuring for maps, sequential values,
@@ -115,10 +115,11 @@ useful paths:
 ;; expected int at [:address :postal-code], found string
 ```
 
-The exact APIs and syntax require focused design before implementation. Pattern
-matching belongs in the language only where it improves exhaustiveness,
-binding, or lowering; traversal, decoding, shapes, and builders belong in
-`kvist:data` wherever ordinary package code is sufficient.
+`data.decode` now establishes this surface for the supported first struct
+shapes and returns `[decoded err ok]`. Pattern matching belongs in the language
+only where it improves exhaustiveness, binding, or lowering; traversal,
+decoding, shapes, and builders belong in `kvist:data` wherever ordinary package
+code is sufficient.
 
 `kvist:edn` already uses the underlying implementation pattern internally: it
 collects retained children in native buffers and constructs one immutable Data

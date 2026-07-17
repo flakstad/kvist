@@ -15,6 +15,18 @@
   [path: Data, expected: Data-Kind, actual: Data-Kind] -> Decode-Error
   (Decode-Error {path: path expected: expected actual: actual}))
 
+(defmacro decode
+  "Decode Data into a native value selected by type.
+
+  `(decode Person value)` returns `[decoded err ok]`. An optional third
+  argument supplies the Data path used as the root of path-aware errors."
+  [target-type value & rest]
+  (if (= (count rest) 0)
+    `(decode-data ~target-type ~value)
+    (if (= (count rest) 1)
+      `(decode-data ~target-type ~value ~(first rest))
+      (error "data.decode expects type, value, and optional path"))))
+
 (defn from-nil
   "Construct nil Data."
   [] -> Data #owned #force_inline

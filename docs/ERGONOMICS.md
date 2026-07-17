@@ -22,7 +22,7 @@ compiler behavior.
 | Source mapping | Partial | Cover more generated cleanup, specialization, and Data forms |
 | Core `str` | Implemented | Validate rendering across Ro and Vev |
 | Managed `Data` in native aggregates | Partial | Top-level Kvist structs are managed recursively; add containers, unions, closures, local/imported structs |
-| Typed Data decoding and validated shapes | Partial | Scalar decoders and path-carrying errors exist; add generated struct/enum/collection decoding |
+| Typed Data decoding and validated shapes | Partial | Scalars and required-field native structs decode with paths; add nested structs, enums, strings, defaults, and collections |
 | Structural Data matching and destructuring | Planned | Design after aggregate ownership and decoding |
 | Public Data builders/transients | Planned | Expose a safe freeze API based on the EDN reader's linear construction pattern |
 | Vev Data result traversal and typed collection | Planned | Avoid unnecessary intermediate native arrays |
@@ -56,8 +56,9 @@ compiler behavior.
   local structs, imported Odin structs, and managed-field `update`.
 - Add typed Data decoding for scalars, enums, structs, optional/default fields,
   and selected homogeneous collections.
-- Implemented first decoding slice: integer, float, and boolean values return
-  native scalars plus a managed path-carrying `Decode-Error`.
+- Implemented: integer, float, and boolean scalar decoders plus type-directed
+  native struct decoding for required `Data` and scalar fields. Decoded managed
+  fields and path-carrying `Decode-Error` values clean up automatically.
 - Carry the exact Data path, expected shape, and actual kind in decode errors.
 - Preserve the zero-allocation static quote path.
 

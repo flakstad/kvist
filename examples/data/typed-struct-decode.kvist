@@ -1,0 +1,38 @@
+(package main)
+(import data "kvist:data")
+
+(defstruct Settings {
+  port: i64
+  enabled: bool
+  ratio: f64
+  metadata: Data
+})
+
+(defn main []
+  (let [[settings err ok]
+        (data.decode
+          Settings
+          '{:port 8080
+            :enabled true
+            :ratio 0.5
+            :metadata {:source :config}})]
+    (assert ok)
+    (assert (= settings.port 8080))
+    (assert settings.enabled)
+    (assert (= settings.ratio 0.5))
+    (assert (= settings.metadata '{:source :config}))
+    (discard err))
+
+  (let [[settings err ok]
+        (data.decode
+          Settings
+          '{:port 8080
+            :enabled :sometimes
+            :ratio 0.5
+            :metadata {}}
+          '[:settings])]
+    (assert (not ok))
+    (assert (= err.path '[:settings :enabled]))
+    (assert (= err.expected .Bool))
+    (assert (= err.actual .Keyword))
+    (discard settings)))

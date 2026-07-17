@@ -3272,6 +3272,131 @@ emit_data_dissoc_in_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compil
     return emit_call_text("kvist_data_dissoc_in", []string{target_text, path_text}), {}, true
 }
 
+decode_field_parts :: proc(ty, value_name: string) -> (expected_kind, decoded_text: string, managed: bool, ok: bool) {
+    switch ty {
+    case "Data":
+        return "", value_name, true, true
+    case "bool":
+        return "Bool", fmt.tprintf("%s.payload.bool_value", value_name), false, true
+    case "int", "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64":
+        return "Int", fmt.tprintf("%s(%s.payload.int_value)", ty, value_name), false, true
+    case "f32", "f64":
+        return "Float", fmt.tprintf("%s(%s.payload.float_value)", ty, value_name), false, true
+    }
+    return "", "", false, false
+}
+
+emit_data_decode_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) {
+    if len(form.items) != 3 && len(form.items) != 4 {
+        return "", Compile_Error{message = "data.decode expects type, value, and optional path", span = form.span}, false
+    }
+    target_ty, err_ty, ok_ty := parse_type_text(form.items[1])
+    if !ok_ty {
+        return "", err_ty, false
+    }
+    struct_decl, ok_struct := find_struct_decl(e, target_ty)
+    if !ok_struct {
+        return "", Compile_Error{
+            message = fmt.tprintf("data.decode currently expects a Kvist struct type, got %s", target_ty),
+            span = form.items[1].span,
+        }, false
+    }
+    value_ty, ok_value_ty := obvious_form_type(e, form.items[2])
+    if !ok_value_ty || value_ty != "Data" {
+        return "", Compile_Error{message = "data.decode expects a Data value", span = form.items[2].span}, false
+    }
+    value_text, err_value, ok_value := emit_expr(e, form.items[2])
+    if !ok_value {
+        return "", err_value, false
+    }
+    path_text := "Data{kind = .Vector}"
+    if len(form.items) == 4 {
+        path_ty, ok_path_ty := obvious_form_type(e, form.items[3])
+        if !ok_path_ty || path_ty != "Data" {
+            return "", Compile_Error{message = "data.decode path must be Data", span = form.items[3].span}, false
+        }
+        err_path: Compile_Error
+        ok_path: bool
+        path_text, err_path, ok_path = emit_expr(e, form.items[3])
+        if !ok_path {
+            return "", err_path, false
+        }
+    }
+
+    field_values: [dynamic]string
+    defer delete(field_values)
+    builder := strings.builder_make()
+    defer strings.builder_destroy(&builder)
+    fmt.sbprintf(
+        &builder,
+        "(proc(kvist_value, kvist_path: Data) -> (decoded: %s, err: data__Decode_Error, ok: bool) {{\n",
+        target_ty,
+    )
+    strings.write_string(
+        &builder,
+        "    if kvist_value.kind != .Map { return {}, data__decode_error(kvist_path, .Map, kvist_value.kind), false }\n",
+    )
+    for field, idx in struct_decl.fields {
+        expected_kind, decoded_text, managed, supported := decode_field_parts(
+            field.ty,
+            fmt.tprintf("kvist_field_%d", idx),
+        )
+        if !supported {
+            return "", Compile_Error{
+                message = fmt.tprintf(
+                    "data.decode field %s.%s has unsupported type %s; supported fields are Data, bool, integer, and floating-point scalars",
+                    target_ty,
+                    field.source_name,
+                    field.ty,
+                ),
+                span = form.items[1].span,
+            }, false
+        }
+        key := fmt.tprintf(":%s", field.source_name)
+        fmt.sbprintf(
+            &builder,
+            "    kvist_key_%d := Data{{kind = .Keyword, payload = {{text = %q}}}}\n",
+            idx,
+            key,
+        )
+        fmt.sbprintf(
+            &builder,
+            "    kvist_field_%d := kvist_data_get(kvist_value, kvist_key_%d)\n",
+            idx,
+            idx,
+        )
+        if expected_kind != "" {
+            fmt.sbprintf(&builder, "    if kvist_field_%d.kind != .%s {{\n", idx, expected_kind)
+            fmt.sbprintf(
+                &builder,
+                "        kvist_error_path := kvist_data_append(kvist_path, kvist_key_%d)\n",
+                idx,
+            )
+            strings.write_string(&builder, "        defer kvist_data_release(kvist_error_path)\n")
+            fmt.sbprintf(
+                &builder,
+                "        return {{}}, data__decode_error(kvist_error_path, .%s, kvist_field_%d.kind), false\n",
+                expected_kind,
+                idx,
+            )
+            strings.write_string(&builder, "    }\n")
+        }
+        if managed {
+            decoded_text = emit_call_text("kvist_data_retain", []string{decoded_text})
+        }
+        append(&field_values, fmt.tprintf("%s = %s", field.name, decoded_text))
+    }
+    fmt.sbprintf(
+        &builder,
+        "    return %s{{%s}}, {{}}, true\n",
+        target_ty,
+        strings.join(field_values[:], ", ", context.temp_allocator),
+    )
+    fmt.sbprintf(&builder, "}})(%s, %s)", value_text, path_text)
+    mark_data_type(e)
+    return strings.clone(strings.to_string(builder)), {}, true
+}
+
 emit_shallow_update_copy_expr :: proc(e: ^Emitter, target_form: CST_Form, target_text, target_ty: string, fields: []string, field_span: Span, updater_form: CST_Form, rest_forms: []CST_Form) -> (string, Compile_Error, bool) {
     field_ty, err_field_ty, ok_field_ty := struct_field_type_for_update_path(e, target_ty, fields, "update", field_span)
     if !ok_field_ty {
@@ -6871,6 +6996,24 @@ emit_managed_destructure_cleanup :: proc(e: ^Emitter, binding: Binding) {
     }
     head_name := map_name(binding.value.items[0].text)
     defer delete(head_name)
+    if head_name == "decode_data" && len(binding.pattern) == 3 && len(binding.value.items) >= 2 {
+        target_ty, _, ok_target_ty := parse_type_text(binding.value.items[1])
+        if ok_target_ty {
+            if binding.pattern[0] != "" && type_text_has_managed_lifecycle(e, target_ty) {
+                emit_line(e, fmt.tprintf(
+                    "defer %s",
+                    managed_destroy_value_text(e, target_ty, binding.pattern[0]),
+                ))
+            }
+            if binding.pattern[1] != "" {
+                emit_line(e, fmt.tprintf(
+                    "defer %s",
+                    managed_destroy_value_text(e, "data__Decode_Error", binding.pattern[1]),
+                ))
+            }
+        }
+        return
+    }
     proc_decl, ok_proc := find_proc_decl(e, head_name)
     if !ok_proc || proc_decl.borrows_result || proc_decl.returns.kind != .Named || len(proc_decl.returns.named) != len(binding.pattern) {
         return
@@ -7832,6 +7975,20 @@ bind_obvious_binding_types :: proc(e: ^Emitter, binding: Binding) {
         if binding.value.kind == .List && len(binding.value.items) > 0 && binding.value.items[0].kind == .Symbol {
             head_name := map_name(binding.value.items[0].text)
             defer delete(head_name)
+            if head_name == "decode_data" && len(binding.pattern) == 3 && len(binding.value.items) >= 2 {
+                if target_ty, _, ok_target_ty := parse_type_text(binding.value.items[1]); ok_target_ty {
+                    if binding.pattern[0] != "" {
+                        bind_local_type(e, binding.pattern[0], target_ty)
+                    }
+                    if binding.pattern[1] != "" {
+                        bind_local_type(e, binding.pattern[1], "data__Decode_Error")
+                    }
+                    if binding.pattern[2] != "" {
+                        bind_local_type(e, binding.pattern[2], "bool")
+                    }
+                }
+                return
+            }
             if proc_decl, ok := find_proc_decl(e, head_name); ok && proc_decl.returns.kind == .Named && len(proc_decl.returns.named) == len(binding.pattern) {
                 for name, idx in binding.pattern {
                     if name != "" {
@@ -12936,6 +13093,9 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
     }
     if head.text == "copy-dissoc-in" {
         return emit_data_dissoc_in_expr(e, form)
+    }
+    if head.text == "decode-data" {
+        return emit_data_decode_expr(e, form)
     }
 
     if head.text == "as->" {

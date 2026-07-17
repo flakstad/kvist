@@ -1699,6 +1699,31 @@ Dynamic arrays, slices, maps, and sets are not path-updated this way; use
 explicit copying or mutation for those. This restriction does not apply to
 immutable `Data` collections.
 
+### Decoding Data Into Native Structs
+
+Use `data.decode` when a dynamic boundary should become a concrete native
+struct:
+
+```clojure
+(defstruct Settings {
+  port: i64
+  enabled: bool
+  metadata: Data
+})
+
+(let [[settings err ok]
+      (data.decode Settings message '[:settings])]
+  (if ok
+    (start settings)
+    (println err.path err.expected err.actual)))
+```
+
+The optional path becomes the root of any `Decode-Error`. Required `Data`,
+boolean, integer, and floating-point fields are currently supported. The
+decoded struct and error follow normal deterministic managed-value cleanup.
+Nested structs, strings, enums, optional/default fields, and homogeneous
+collections remain future decoding work.
+
 In a `->` pipeline, use a `.field` selector step:
 
 ```clojure
