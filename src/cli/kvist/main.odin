@@ -760,7 +760,11 @@ write_generated_for_execution :: proc(output, requested_path, source_path: strin
     }
     write_output_or_exit(generated, rebased)
     delete(rebased)
-    return generated, dir, "", true
+    package_build_dir := ""
+    when ODIN_OS == .Windows {
+        package_build_dir = strings.clone(dir)
+    }
+    return generated, dir, package_build_dir, true
 }
 
 cleanup_generated :: proc(path, temp_dir, requested_path, package_dir: string) {
