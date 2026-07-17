@@ -591,9 +591,6 @@ run_odin_file :: proc(command, generated_path, source_path, source, eval_source,
         }
         out_arg = strings.clone(fmt.tprintf("-out:%s", out_path))
         append(&args, out_arg)
-        when ODIN_OS == .Windows {
-            append(&args, "-extra-linker-flags:/STACK:16777216")
-        }
     }
     defer cleanup_odin_output_arg(out_path, out_arg, remove_out_path)
     state, stdout, stderr, err := os.process_exec(
@@ -760,11 +757,7 @@ write_generated_for_execution :: proc(output, requested_path, source_path: strin
     }
     write_output_or_exit(generated, rebased)
     delete(rebased)
-    package_build_dir := ""
-    when ODIN_OS == .Windows {
-        package_build_dir = strings.clone(dir)
-    }
-    return generated, dir, package_build_dir, true
+    return generated, dir, "", true
 }
 
 cleanup_generated :: proc(path, temp_dir, requested_path, package_dir: string) {
