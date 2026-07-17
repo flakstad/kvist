@@ -82,13 +82,14 @@ Param :: struct {
 }
 
 Struct_Field :: struct {
-    name:          string,
-    source_name:   string,
-    ty:            string,
-    is_using:      bool,
-    owns_string:   bool,
-    has_default:   bool,
-    default_value: CST_Form,
+    name:               string,
+    source_name:        string,
+    ty:                 string,
+    is_using:           bool,
+    owns_string:        bool,
+    owns_dynamic_array: bool,
+    has_default:        bool,
+    default_value:      CST_Form,
 }
 
 Union_Variant :: struct {

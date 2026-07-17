@@ -22,7 +22,7 @@ compiler behavior.
 | Source mapping | Partial | Cover more generated cleanup, specialization, and Data forms |
 | Core `str` | Implemented | Validate rendering across Ro and Vev |
 | Managed `Data` in native aggregates | Partial | Top-level Kvist structs are managed recursively; add containers, unions, closures, local/imported structs |
-| Typed Data decoding and validated shapes | Partial | Scalars, owned strings, enums, defaults, and recursive native structs decode with paths; add collections |
+| Typed Data decoding and validated shapes | Partial | Scalars, owned strings, enums, defaults, recursive native structs, and selected owned dynamic arrays decode with paths; broaden collection elements and direct targets |
 | Structural Data matching and destructuring | Planned | Design after aggregate ownership and decoding |
 | Public Data builders/transients | Planned | Expose a safe freeze API based on the EDN reader's linear construction pattern |
 | Vev Data result traversal and typed collection | Planned | Avoid unnecessary intermediate native arrays |
@@ -61,6 +61,9 @@ compiler behavior.
   explicitly owned string, enum, and `:default` fields. Missing defaulted keys
   use the native field default; present values remain validated. Decoded managed
   fields and path-carrying `Decode-Error` values clean up automatically.
+- Implemented: `(owned [dynamic]T)` fields for `Data`, boolean, integer, and
+  floating-point elements. Validation completes before allocation and error
+  paths include the failing vector index.
 - Carry the exact Data path, expected shape, and actual kind in decode errors.
 - Preserve the zero-allocation static quote path.
 

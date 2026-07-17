@@ -455,6 +455,24 @@ construction and `assoc`, moves owned constructor expressions, clones the field
 when its containing struct is copied, and deletes it with the struct. Plain
 `string` fields retain their existing borrowed/unmanaged semantics.
 
+Dynamic-array storage can be managed by a containing struct in the same
+explicit way:
+
+```clojure
+(defstruct Batch {
+  ids: (owned [dynamic]i64)
+  values: (owned [dynamic]Data)
+})
+```
+
+Both fields lower to ordinary Odin dynamic arrays. The `owned` annotation makes
+the struct responsible for their backing allocations: copying the struct
+copies the arrays, replacement disposes the previous arrays, and destroying the
+struct deletes them. Constructing the struct with an array transfers its backing
+storage into the field. `Data` elements are retained and released individually.
+For other element types, ownership covers the array backing storage; borrowed
+resources inside an element keep their own native lifetime rules.
+
 Use `:default` after a field type to replace its zero-value construction
 default:
 
@@ -1760,8 +1778,25 @@ decoded struct and error follow normal deterministic managed-value cleanup.
 A field annotated `:default value` is optional at the Data boundary: a missing
 map key evaluates the same default used by ordinary struct construction, while
 a present key is still validated. Presence is checked independently from Data
-`nil`, so an explicit `nil` does not select the default. Homogeneous collections
-remain future decoding work.
+`nil`, so an explicit `nil` does not select the default.
+
+Fields declared `(owned [dynamic]T)` decode Data vectors into owning native
+dynamic arrays when `T` is `Data`, `bool`, an integer scalar, or a
+floating-point scalar:
+
+```clojure
+(defstruct Batch {
+  ids: (owned [dynamic]i64)
+})
+
+(data.decode Batch '{:ids [10 20 30]})
+```
+
+Every element is validated before the native array is allocated. Errors append
+the failing numeric index to the Data path, such as `[:ids 1]`. `Data` elements
+are retained; scalar elements are stored unboxed. Native string arrays, enums,
+nested struct arrays, borrowed slices, and direct collection decode targets
+remain future work.
 
 In a `->` pipeline, use a `.field` selector step:
 

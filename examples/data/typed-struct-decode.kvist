@@ -22,6 +22,10 @@
   endpoint: Endpoint
   mode: Mode :default .Manual
   fallback-endpoint: Endpoint :default (Endpoint {host-id: -1})
+  scores: (owned [dynamic]i64) :default []
+  raw-items: (owned [dynamic]Data) :default []
+  flags: (owned [dynamic]bool) :default []
+  ratios: (owned [dynamic]f64) :default []
 })
 
 (defn main []
@@ -41,7 +45,11 @@
                        :display-name "primary"
                        :secure true
                        :tags [:primary]}
-            :mode :read-only})]
+            :mode :read-only
+            :scores [10 20 30]
+            :raw-items [1 :two]
+            :flags [true false]
+            :ratios [0.25 0.75]})]
     (assert ok)
     (assert (= settings.port 8080))
     (assert settings.enabled)
@@ -52,6 +60,24 @@
     (assert settings.endpoint.secure)
     (assert (= settings.endpoint.tags '[:primary]))
     (assert (= settings.mode .Read-Only))
+    (assert (= (count settings.scores) 3))
+    (assert (= settings.scores[1] 20))
+    (assert (= settings.raw-items[0] '1))
+    (assert (= settings.raw-items[1] ':two))
+    (assert settings.flags[0])
+    (assert (not settings.flags[1]))
+    (assert (= settings.ratios[1] 0.75))
+    (let [copied settings]
+      (set! copied.scores[0] 99)
+      (assert (= settings.scores[0] 10))
+      (assert (= copied.scores[0] 99)))
+    (let [mutable settings]
+      (set! mutable.scores ([dynamic]i64 [4 5]))
+      (assert (= (count mutable.scores) 2))
+      (assert (= mutable.scores[0] 4)))
+    (let [rescored (assoc settings .scores ([dynamic]i64 [7 8]))]
+      (assert (= settings.scores[0] 10))
+      (assert (= rescored.scores[0] 7)))
     (let [mutable settings.endpoint]
       (set! mutable.display-name "mutable")
       (assert (= mutable.display-name "mutable")))
@@ -75,6 +101,10 @@
     (assert (= settings.mode .Manual))
     (assert (= settings.fallback-endpoint.host-id -1))
     (assert (= settings.fallback-endpoint.display-name "unnamed"))
+    (assert (= (count settings.scores) 0))
+    (assert (= (count settings.raw-items) 0))
+    (assert (= (count settings.flags) 0))
+    (assert (= (count settings.ratios) 0))
     (discard err))
 
   (let [[settings err ok]
@@ -88,6 +118,19 @@
     (assert (= err.path '[:ratio]))
     (assert (= err.expected .Float))
     (assert (= err.actual .Nil))
+    (discard settings))
+
+  (let [[settings err ok]
+        (data.decode
+          Settings
+          '{:port 8083
+            :enabled true
+            :endpoint {:host-id 10}
+            :scores [1 :bad 3]})]
+    (assert (not ok))
+    (assert (= err.path '[:scores 1]))
+    (assert (= err.expected .Int))
+    (assert (= err.actual .Keyword))
     (discard settings))
 
   (let [[settings err ok]

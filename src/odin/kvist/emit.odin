@@ -1001,7 +1001,8 @@ emit_struct_brace_literal :: proc(e: ^Emitter, struct_decl: ^Struct_Decl, form: 
                 mark_core_strings(e)
                 value_text = emit_call_text("strings.clone", []string{value_text})
             }
-        } else if type_text_has_managed_lifecycle(e, field.ty) &&
+        } else if !field.owns_dynamic_array &&
+           type_text_has_managed_lifecycle(e, field.ty) &&
            !form_produces_owned_managed_type(e, value, field.ty) {
             value_text = managed_clone_value_text(e, field.ty, value_text)
         }
@@ -3112,6 +3113,29 @@ struct_field_owns_string_for_update_path :: proc(e: ^Emitter, target_ty: string,
     return false
 }
 
+struct_field_owns_dynamic_array_for_update_path :: proc(
+    e: ^Emitter,
+    target_ty: string,
+    fields: []string,
+) -> bool {
+    ty := target_ty
+    for field_name, idx in fields {
+        struct_decl, ok_struct := find_struct_decl(e, ty)
+        if !ok_struct {
+            return false
+        }
+        field, ok_field := find_struct_field(struct_decl, field_name)
+        if !ok_field {
+            return false
+        }
+        if idx == len(fields)-1 {
+            return field.owns_dynamic_array
+        }
+        ty = field.ty
+    }
+    return false
+}
+
 emit_shallow_assoc_copy_expr :: proc(e: ^Emitter, target_form: CST_Form, target_text, target_ty: string, fields: []string, field_span: Span, value_form: CST_Form) -> (string, Compile_Error, bool) {
     field_ty, err_field_ty, ok_field_ty := struct_field_type_for_update_path(e, target_ty, fields, "assoc", field_span)
     if !ok_field_ty {
@@ -3132,6 +3156,15 @@ emit_shallow_assoc_copy_expr :: proc(e: ^Emitter, target_form: CST_Form, target_
     if struct_field_owns_string_for_update_path(e, target_ty, fields) {
         mark_core_strings(e)
         assignment = fmt.tprintf("delete(%s)\n    %s = strings.clone(kvist_value)", target_field, target_field)
+    } else if struct_field_owns_dynamic_array_for_update_path(e, target_ty, fields) {
+        move := form_produces_owned_value(value_form, e)
+        assignment = managed_dynamic_array_assignment_text(
+            e,
+            field_ty,
+            address_of_expr_text(target_field),
+            "kvist_value",
+            move,
+        )
     } else if type_text_has_managed_lifecycle(e, field_ty) {
         move := form_produces_owned_managed_type(e, value_form, field_ty)
         helper := managed_assign_helper_name(field_ty, move)
@@ -3411,6 +3444,10 @@ emit_struct_field_default :: proc(e: ^Emitter, field: Struct_Field) -> (string, 
             mark_core_strings(e)
             default_text = emit_call_text("strings.clone", []string{default_text})
         }
+    } else if field.owns_dynamic_array {
+        if !form_produces_owned_value(field.default_value, e) {
+            default_text = managed_clone_value_text(e, field.ty, default_text)
+        }
     } else if type_text_has_managed_lifecycle(e, field.ty) &&
               !form_produces_owned_managed_type(e, field.default_value, field.ty) {
         default_text = managed_clone_value_text(e, field.ty, default_text)
@@ -3427,6 +3464,104 @@ decode_field_constructor_value :: proc(
         value = fmt.tprintf("%s ? %s : %s", present, decoded, default_value)
     }
     return fmt.tprintf("%s = %s", field.name, value)
+}
+
+emit_decode_dynamic_array_field :: proc(
+    e: ^Emitter,
+    builder: ^strings.Builder,
+    field: Struct_Field,
+    field_name, field_guard: string,
+    field_path: []string,
+    field_id: int,
+    root_span: Span,
+) -> (string, Compile_Error, bool) {
+    elem_ty, ok_array := dynamic_array_element_type(field.ty)
+    if !ok_array {
+        return "", Compile_Error{
+            message = fmt.tprintf(
+                "data.decode field %s is marked as an owned dynamic array but has type %s",
+                field.source_name,
+                field.ty,
+            ),
+            span = root_span,
+        }, false
+    }
+    item_name := fmt.tprintf("kvist_item_%d", field_id)
+    index_name := fmt.tprintf("kvist_index_%d", field_id)
+    expected_kind, _, managed, supported := decode_field_parts(elem_ty, item_name)
+    if !supported {
+        return "", Compile_Error{
+            message = fmt.tprintf(
+                "data.decode field %s has unsupported dynamic-array element type %s; supported elements are Data, bool, integer, and floating-point scalars",
+                field.source_name,
+                elem_ty,
+            ),
+            span = root_span,
+        }, false
+    }
+
+    condition := decode_guarded_condition(
+        field_guard,
+        fmt.tprintf("%s.kind != .Vector", field_name),
+    )
+    fmt.sbprintf(builder, "    if %s {{", condition)
+    emit_decode_failure_return(
+        builder,
+        field_path,
+        "Vector",
+        fmt.tprintf("%s.kind", field_name),
+        field_id,
+    )
+    strings.write_string(builder, "}\n")
+
+    if expected_kind != "" {
+        if field_guard != "" {
+            fmt.sbprintf(builder, "    if %s {{\n", field_guard)
+        }
+        fmt.sbprintf(
+            builder,
+            "    for %s, %s in %s.payload.items {{\n",
+            item_name,
+            index_name,
+            field_name,
+        )
+        fmt.sbprintf(builder, "        if %s.kind != .%s {{", item_name, expected_kind)
+        index_key := fmt.tprintf("kvist_index_key_%d", field_id)
+        fmt.sbprintf(
+            builder,
+            "\n            %s := Data{{kind = .Int, payload = {{int_value = i64(%s)}}}}\n    ",
+            index_key,
+            index_name,
+        )
+        item_path: [dynamic]string
+        defer delete(item_path)
+        append(&item_path, ..field_path)
+        append(&item_path, index_key)
+        emit_decode_failure_return(
+            builder,
+            item_path[:],
+            expected_kind,
+            fmt.tprintf("%s.kind", item_name),
+            field_id,
+        )
+        strings.write_string(builder, "}\n")
+        strings.write_string(builder, "    }\n")
+        if field_guard != "" {
+            strings.write_string(builder, "    }\n")
+        }
+    }
+
+    _, constructed_item, _, _ := decode_field_parts(elem_ty, "kvist_item")
+    if managed {
+        constructed_item = managed_clone_value_text(e, elem_ty, constructed_item)
+    }
+    return fmt.tprintf(
+        "(proc(kvist_items: []Data) -> %s {{ kvist_out := make(%s, 0, len(kvist_items)); for kvist_item in kvist_items {{ append(&kvist_out, %s) }}; return kvist_out }})(%s.payload.items)",
+        field.ty,
+        field.ty,
+        constructed_item,
+        field_name,
+    ), {}, true
 }
 
 emit_decode_struct_value :: proc(
@@ -3491,6 +3626,29 @@ emit_decode_struct_value :: proc(
         defer delete(field_path)
         append(&field_path, ..path_keys)
         append(&field_path, key_name)
+
+        if field.owns_dynamic_array {
+            decoded, err_array, ok_array := emit_decode_dynamic_array_field(
+                e,
+                builder,
+                field,
+                field_name,
+                field_guard,
+                field_path[:],
+                field_id,
+                root_span,
+            )
+            if !ok_array {
+                return "", err_array, false
+            }
+            append(&field_values, decode_field_constructor_value(
+                field,
+                decoded,
+                present_name,
+                default_text,
+            ))
+            continue
+        }
 
         if field.owns_string {
             condition := decode_guarded_condition(field_guard, fmt.tprintf("%s.kind != .String", field_name))
@@ -3642,7 +3800,7 @@ emit_decode_struct_value :: proc(
 
         return "", Compile_Error{
             message = fmt.tprintf(
-                "data.decode field %s.%s has unsupported type %s; use (owned string) for decoded strings; other supported fields are Data, bool, integer and floating-point scalars, enums, and nested Kvist structs",
+                "data.decode field %s.%s has unsupported type %s; use (owned string) for decoded strings and (owned [dynamic]T) for supported vectors; other supported fields are Data, bool, integer and floating-point scalars, enums, and nested Kvist structs",
                 struct_decl.name,
                 field.source_name,
                 field.ty,
@@ -3742,6 +3900,12 @@ emit_shallow_update_copy_expr :: proc(e: ^Emitter, target_form: CST_Form, target
     if struct_field_owns_string_for_update_path(e, target_ty, fields) {
         return "", Compile_Error{
             message = "update of an owned string field is not yet supported; compute the new value first and use assoc",
+            span = field_span,
+        }, false
+    }
+    if struct_field_owns_dynamic_array_for_update_path(e, target_ty, fields) {
+        return "", Compile_Error{
+            message = "update of an owned dynamic-array field is not yet supported; compute the new value first and use assoc",
             span = field_span,
         }, false
     }
@@ -7120,7 +7284,9 @@ type_text_has_managed_lifecycle :: proc(e: ^Emitter, text: string, depth: int = 
         return false
     }
     for field in struct_decl.fields {
-        if field.owns_string || type_text_has_managed_lifecycle(e, field.ty, depth+1) {
+        if field.owns_string ||
+           field.owns_dynamic_array ||
+           type_text_has_managed_lifecycle(e, field.ty, depth+1) {
             return true
         }
     }
@@ -7136,6 +7302,26 @@ managed_clone_value_text :: proc(e: ^Emitter, ty, value: string) -> string {
         mark_data_type(e)
         return emit_call_text("kvist_data_retain", []string{value})
     }
+    if elem_ty, ok_dynamic := dynamic_array_element_type(ty); ok_dynamic {
+        if type_text_has_managed_lifecycle(e, elem_ty) {
+            cloned_item := managed_clone_value_text(e, elem_ty, "kvist_item")
+            return fmt.tprintf(
+                "(proc(kvist_values: %s) -> %s {{ kvist_out := make(%s, 0, len(kvist_values)); for kvist_item in kvist_values {{ append(&kvist_out, %s) }}; return kvist_out }})(%s)",
+                ty,
+                ty,
+                ty,
+                cloned_item,
+                value,
+            )
+        }
+        return fmt.tprintf(
+            "(proc(kvist_values: %s) -> %s {{ kvist_out := make(%s, len(kvist_values)); copy(kvist_out[:], kvist_values[:]); return kvist_out }})(%s)",
+            ty,
+            ty,
+            ty,
+            value,
+        )
+    }
     return emit_call_text(managed_struct_helper_name("clone", ty), []string{value})
 }
 
@@ -7144,7 +7330,47 @@ managed_destroy_value_text :: proc(e: ^Emitter, ty, value: string) -> string {
         mark_data_type(e)
         return emit_call_text("kvist_data_release", []string{value})
     }
+    if elem_ty, ok_dynamic := dynamic_array_element_type(ty); ok_dynamic {
+        if type_text_has_managed_lifecycle(e, elem_ty) {
+            destroyed_item := managed_destroy_value_text(e, elem_ty, "kvist_item")
+            return fmt.tprintf(
+                "(proc(kvist_values: %s) {{ for kvist_item in kvist_values {{ %s }}; delete(kvist_values) }})(%s)",
+                ty,
+                destroyed_item,
+                value,
+            )
+        }
+        return emit_call_text("delete", []string{value})
+    }
     return emit_call_text(managed_struct_helper_name("destroy", ty), []string{value})
+}
+
+managed_dynamic_array_assignment_text :: proc(
+    e: ^Emitter,
+    ty, place, value: string,
+    move: bool,
+) -> string {
+    destroy_previous := managed_destroy_value_text(e, ty, "kvist_previous")
+    if move {
+        return fmt.tprintf(
+            "(proc(kvist_place: ^%s, kvist_value: %s) {{ kvist_previous := kvist_place^; kvist_place^ = kvist_value; %s }})(%s, %s)",
+            ty,
+            ty,
+            destroy_previous,
+            place,
+            value,
+        )
+    }
+    replacement := managed_clone_value_text(e, ty, "kvist_value")
+    return fmt.tprintf(
+        "(proc(kvist_place: ^%s, kvist_value: %s) {{ kvist_replacement := %s; kvist_previous := kvist_place^; kvist_place^ = kvist_replacement; %s }})(%s, %s)",
+        ty,
+        ty,
+        replacement,
+        destroy_previous,
+        place,
+        value,
+    )
 }
 
 managed_assign_helper_name :: proc(ty: string, move: bool) -> string {
@@ -7171,6 +7397,9 @@ emit_managed_struct_helpers :: proc(e: ^Emitter, struct_decl: Struct_Decl) {
         if field.owns_string {
             mark_core_strings(e)
             emit_line(e, fmt.tprintf("out.%s = strings.clone(value.%s)", field.name, field.name))
+        } else if field.owns_dynamic_array {
+            cloned := managed_clone_value_text(e, field.ty, fmt.tprintf("value.%s", field.name))
+            emit_line(e, fmt.tprintf("out.%s = %s", field.name, cloned))
         } else if type_text_has_managed_lifecycle(e, field.ty) {
             retained := managed_clone_value_text(e, field.ty, fmt.tprintf("value.%s", field.name))
             emit_line(e, fmt.tprintf("out.%s = %s", field.name, retained))
@@ -7187,6 +7416,8 @@ emit_managed_struct_helpers :: proc(e: ^Emitter, struct_decl: Struct_Decl) {
         field := struct_decl.fields[len(struct_decl.fields)-1-offset]
         if field.owns_string {
             emit_line(e, fmt.tprintf("delete(value.%s)", field.name))
+        } else if field.owns_dynamic_array {
+            emit_line(e, managed_destroy_value_text(e, field.ty, fmt.tprintf("value.%s", field.name)))
         } else if type_text_has_managed_lifecycle(e, field.ty) {
             emit_line(e, managed_destroy_value_text(e, field.ty, fmt.tprintf("value.%s", field.name)))
         }
@@ -7386,6 +7617,28 @@ managed_assignment_text :: proc(e: ^Emitter, place_form, value_form: CST_Form, p
                 address_of_expr_text(place),
                 value,
             ), true
+        }
+        if target_ty, ok_target_ty := obvious_form_type(e, target_form);
+           ok_target_ty &&
+           struct_field_owns_dynamic_array_for_update_path(e, target_ty, fields[:]) {
+            field_ty, err_field_ty, ok_field_ty := struct_field_type_for_update_path(
+                e,
+                target_ty,
+                fields[:],
+                "set!",
+                place_form.span,
+            )
+            _ = err_field_ty
+            if ok_field_ty {
+                move := form_produces_owned_value(value_form, e)
+                return managed_dynamic_array_assignment_text(
+                    e,
+                    field_ty,
+                    address_of_expr_text(place),
+                    value,
+                    move,
+                ), true
+            }
         }
     }
     place_ty, ok_place_ty := obvious_form_type(e, place_form)

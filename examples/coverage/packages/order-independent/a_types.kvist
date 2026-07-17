@@ -3,4 +3,7 @@
 
 (package order-independent)
 
-(defstruct Box {value: int :default default-box-value})
+(defstruct Box {
+  value: int :default default-box-value
+  values: (owned [dynamic]int) :default []
+})

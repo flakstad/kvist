@@ -1574,6 +1574,10 @@ symbols_struct_signature :: proc(name: string, fields: []Struct_Field) -> string
         strings.write_string(&builder, " ")
         if field.owns_string {
             strings.write_string(&builder, "(owned string)")
+        } else if field.owns_dynamic_array {
+            strings.write_string(&builder, "(owned ")
+            strings.write_string(&builder, field.ty)
+            strings.write_byte(&builder, ')')
         } else {
             strings.write_string(&builder, field.ty)
         }

@@ -1074,6 +1074,7 @@ symbols_source_preserves_struct_field_defaults :: proc(t: ^testing.T) {
 (defstruct Person {
   name: (owned string) :default "anonymous"
   active?: bool :default false
+  scores: (owned [dynamic]i64) :default []
 })`
 
     output, err, ok := kvist.symbols_source(source)
@@ -1088,7 +1089,7 @@ symbols_source_preserves_struct_field_defaults :: proc(t: ^testing.T) {
         t,
         strings.contains(
             output,
-            `(Person {name: (owned string) :default "anonymous" active?: bool :default false})`,
+            `(Person {name: (owned string) :default "anonymous" active?: bool :default false scores: (owned [dynamic]i64) :default []})`,
         ),
         true,
     )
@@ -3900,6 +3901,37 @@ compile_manages_owned_string_fields_in_native_structs :: proc(t: ^testing.T) {
 }
 
 @(test)
+compile_manages_owned_dynamic_array_fields_in_native_structs :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct Batch {
+  values: (owned [dynamic]i64)
+})
+
+(defn wrap [values: [dynamic]i64] -> Batch
+  (Batch {values: values}))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "return Batch{values = values}"), true)
+    testing.expect_value(
+        t,
+        strings.contains(
+            output,
+            "out.values = (proc(kvist_values: [dynamic]i64) -> [dynamic]i64",
+        ),
+        true,
+    )
+    testing.expect_value(t, strings.contains(output, "delete(value.values)"), true)
+}
+
+@(test)
 compile_data_decode_rejects_borrowed_string_struct_fields :: proc(t: ^testing.T) {
     source := `(package main)
 (import data "kvist:data")
@@ -3918,7 +3950,49 @@ compile_data_decode_rejects_borrowed_string_struct_fields :: proc(t: ^testing.T)
     testing.expect_value(
         t,
         err.message,
-        "data.decode field Person.name has unsupported type string; use (owned string) for decoded strings; other supported fields are Data, bool, integer and floating-point scalars, enums, and nested Kvist structs",
+        "data.decode field Person.name has unsupported type string; use (owned string) for decoded strings and (owned [dynamic]T) for supported vectors; other supported fields are Data, bool, integer and floating-point scalars, enums, and nested Kvist structs",
+    )
+}
+
+@(test)
+compile_data_decode_rejects_native_string_arrays :: proc(t: ^testing.T) {
+    source := `(package main)
+(import data "kvist:data")
+
+(defstruct Names {
+  values: (owned [dynamic]string)
+})
+
+(defn decode-names [value: Data] -> [names: Names, err: data.Decode-Error, ok: bool]
+  (data.decode Names value))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    delete(output)
+    defer delete(err.message)
+    testing.expect_value(
+        t,
+        err.message,
+        "data.decode field values has unsupported dynamic-array element type string; supported elements are Data, bool, integer, and floating-point scalars",
+    )
+}
+
+@(test)
+compile_rejects_owned_borrowed_slice_fields :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct Values {
+  items: (owned []int)
+})`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    delete(output)
+    defer delete(err.message)
+    testing.expect_value(
+        t,
+        err.message,
+        "owned struct fields currently support string and dynamic-array types",
     )
 }
 
@@ -4036,6 +4110,55 @@ compile_type_directed_data_struct_decode :: proc(t: ^testing.T) {
         strings.contains(
             result.output,
             `fallback_endpoint = kvist_present_10 ? Endpoint{`,
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            "for kvist_item_15, kvist_index_15 in kvist_field_15.payload.items",
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            "kvist_data_append(kvist_error_path_15, kvist_index_key_15)",
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            "proc(kvist_items: []Data) -> [dynamic]i64",
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            "out.scores = (proc(kvist_values: [dynamic]i64) -> [dynamic]i64",
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            "out.raw_items = (proc(kvist_values: [dynamic]Data) -> [dynamic]Data",
+        ),
+        true,
+    )
+    testing.expect_value(t, strings.contains(result.output, "delete(value.scores)"), true)
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            "for kvist_item in kvist_values { kvist_data_release(kvist_item) }; delete(kvist_values)",
         ),
         true,
     )
