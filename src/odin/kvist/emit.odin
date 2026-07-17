@@ -1754,6 +1754,9 @@ keyword_literal_text :: proc(e: ^Emitter, text: string) -> string {
 mark_data_type :: proc(e: ^Emitter) {
     e.features.data_type = true
     e.features.core_strings = true
+    // Contextual Data's generic lift overload includes the distinct keyword
+    // scalar even if this source has no native keyword expression.
+    mark_keyword_type(e)
 }
 
 emit_data_items_literal :: proc(e: ^Emitter, items: []CST_Form) -> (string, Compile_Error, bool) {
@@ -2093,9 +2096,34 @@ emit_contextual_data_value :: proc(e: ^Emitter, form: CST_Form) -> (text: string
             value, err_value, ok_value := emit_expr_for_expected_type(e, form, "Data")
             return value, true, err_value, ok_value
         }
-        if _, ok_ty := contextual_data_source_type(e, form); !ok_ty {
+        if form.kind == .List && len(form.items) > 0 && is_symbol(form.items[0], "odin-call") {
+            // `odin-call` is an explicitly typed escape hatch. In a Data
+            // context its result is already Data; wrapping it in the generic
+            // scalar lift would alter its ownership contract.
             value, err_value, ok_value := emit_expr(e, form)
             return value, false, err_value, ok_value
+        }
+        if _, ok_ty := contextual_data_source_type(e, form); !ok_ty {
+            value, err_value, ok_value := emit_expr(e, form)
+            if !ok_value {
+                return "", false, err_value, false
+            }
+            if form.kind == .Symbol {
+                // Lowering a contextual call argument can revisit a
+                // compiler-generated Data temporary as a symbol. Declared
+                // scalar symbols have already been handled by inference.
+                return value, false, {}, true
+            }
+            if form_produces_owned_value(form, e) {
+                temp := thread_temp_name(e)
+                emit_prefixed_expr_mapped(e, fmt.tprintf("%s := ", temp), value, form.span)
+                emit_line_mapped(e, fmt.tprintf("defer delete(%s)", temp), form.span)
+                value = temp
+            }
+            // Imported Odin procedures do not carry signatures in Kvist's
+            // IR. Let Odin's overload resolution select the scalar/Data lift
+            // instead of emitting an untyped native value into []Data.
+            return emit_call_text("kvist_data_lift", []string{value}), true, {}, true
         }
         value, value_owned, err_value, ok_value := runtime_data_unquote_expr(e, form)
         return value, value_owned, err_value, ok_value
@@ -8947,6 +8975,13 @@ obvious_form_type :: proc(e: ^Emitter, form: CST_Form) -> (string, bool) {
                is_symbol(decl.const_decl.value.items[0], "quote") {
                 return "Data", true
             }
+            // An unannotated static `def` still has the type of its literal
+            // initializer. This matters when the symbol appears inside a
+            // contextually-Data collection: the value must be lifted rather
+            // than emitted as a native value in an Odin []Data literal.
+            if ty, _, ok_ty := infer_literal_value_type(e, decl.const_decl.value); ok_ty {
+                return ty, true
+            }
         }
         return "", false
     }
@@ -9053,7 +9088,7 @@ obvious_form_type :: proc(e: ^Emitter, form: CST_Form) -> (string, bool) {
                 return thread_task_type(spec), true
             }
         }
-        if proc_decl, ok := find_proc_decl(e, head_name); ok {
+        if _, proc_decl, ok := resolve_proc_call_decl(e, form.items[0].text); ok && proc_decl != nil {
             return proc_decl_obvious_call_return_type(e, proc_decl, form.items[1:])
         }
         if return_ty, ok_return_ty := overload_obvious_call_return_type(e, head_name, form.items[1:]); ok_return_ty {
@@ -17297,6 +17332,22 @@ emit_data_type_helper :: proc(e: ^Emitter) {
     emit_line(e, "return Data{kind = kind, payload = {text = node.text}, node = node}")
     e.indent -= 1
     emit_line(e, "}")
+    emit_line(e, "kvist_data_lift_data :: proc(value: Data) -> Data { return kvist_data_retain(value) }")
+    emit_line(e, "kvist_data_lift_bool :: proc(value: bool) -> Data { return kvist_data_make_bool(value) }")
+    emit_line(e, "kvist_data_lift_int :: proc(value: int) -> Data { return kvist_data_make_int(i64(value)) }")
+    emit_line(e, "kvist_data_lift_i8 :: proc(value: i8) -> Data { return kvist_data_make_int(i64(value)) }")
+    emit_line(e, "kvist_data_lift_i16 :: proc(value: i16) -> Data { return kvist_data_make_int(i64(value)) }")
+    emit_line(e, "kvist_data_lift_i32 :: proc(value: i32) -> Data { return kvist_data_make_int(i64(value)) }")
+    emit_line(e, "kvist_data_lift_i64 :: proc(value: i64) -> Data { return kvist_data_make_int(i64(value)) }")
+    emit_line(e, "kvist_data_lift_u8 :: proc(value: u8) -> Data { return kvist_data_make_int(i64(value)) }")
+    emit_line(e, "kvist_data_lift_u16 :: proc(value: u16) -> Data { return kvist_data_make_int(i64(value)) }")
+    emit_line(e, "kvist_data_lift_u32 :: proc(value: u32) -> Data { return kvist_data_make_int(i64(value)) }")
+    emit_line(e, "kvist_data_lift_u64 :: proc(value: u64) -> Data { return kvist_data_make_int(i64(value)) }")
+    emit_line(e, "kvist_data_lift_f32 :: proc(value: f32) -> Data { return kvist_data_make_float(f64(value)) }")
+    emit_line(e, "kvist_data_lift_f64 :: proc(value: f64) -> Data { return kvist_data_make_float(f64(value)) }")
+    emit_line(e, "kvist_data_lift_string :: proc(value: string) -> Data { return kvist_data_make_text(.String, value) }")
+    emit_line(e, "kvist_data_lift_keyword :: proc(value: keyword) -> Data { return kvist_data_make_text(.Keyword, string(value)) }")
+    emit_line(e, "kvist_data_lift :: proc{kvist_data_lift_data, kvist_data_lift_bool, kvist_data_lift_int, kvist_data_lift_i8, kvist_data_lift_i16, kvist_data_lift_i32, kvist_data_lift_i64, kvist_data_lift_u8, kvist_data_lift_u16, kvist_data_lift_u32, kvist_data_lift_u64, kvist_data_lift_f32, kvist_data_lift_f64, kvist_data_lift_string, kvist_data_lift_keyword}")
     emit_line(e, "kvist_data_make_tagged :: proc(tag: string, value: Data, allocator: kvist_runtime.Allocator = context.allocator) -> Data {")
     e.indent += 1
     emit_line(e, "assert(len(tag) > 0, \"Data tag must not be empty\")")
