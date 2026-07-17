@@ -22022,6 +22022,50 @@ compile_contextual_data_literals_in_direct_and_overloaded_calls :: proc(t: ^test
 }
 
 @(test)
+compile_fused_data_collection_transform_owns_intermediates :: proc(t: ^testing.T) {
+    source := `(package main)
+(import data "kvist:data")
+
+(defn increment [value: Data] -> Data
+  (data.from-int (+ (data.int value) 1)))
+
+(defn above-two? [value: Data] -> bool
+  (> (data.int value) 2))
+
+(defn add-value [total: i64, value: Data] -> i64
+  (+ total (data.int value)))
+
+(deftransform selected
+  (map increment)
+  (filter above-two?))
+
+(defn collect [values: Data] -> Data
+  (into Data selected values))
+
+(defn total [values: Data] -> i64
+  (transduce (filter above-two?) add-value (i64 0) values))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "proc(kvist_source: Data) -> Data"), true)
+    testing.expect_value(t, strings.contains(output, "make([dynamic]Data, 0, kvist_data_count(kvist_source))"), true)
+    testing.expect_value(t, strings.contains(output, "for kvist_item in kvist_source.payload.items"), true)
+    testing.expect_value(t, strings.contains(output, "defer kvist_data_release(kvist_xform_"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_data_append_retained(&kvist_out, kvist_xform_"), true)
+    testing.expect_value(t, strings.contains(output, "return kvist_data_freeze_items(.Vector, &kvist_out)"), true)
+    testing.expect_value(t, strings.contains(output, "return kvist_data_retain((proc(kvist_source: Data) -> Data"), false)
+    testing.expect_value(t, strings.contains(output, "kvist_data_get_or :: proc"), true)
+    testing.expect_value(t, strings.contains(output, "if value.kind == .Set { for item in value.payload.items"), true)
+    testing.expect_value(t, strings.contains(output, "value.kind == .List || value.kind == .Vector { for item in value.payload.items"), false)
+}
+
+@(test)
 compile_local_def_overload_proc_group :: proc(t: ^testing.T) {
     source := `(package main)
 (import fmt "core:fmt")

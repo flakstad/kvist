@@ -89,23 +89,23 @@
   [value: string] -> Data #owned #force_inline
   (odin-call "kvist_data_make_text" .Keyword value))
 
-(defn list
-  "Construct list Data, retaining each element."
+(defn list-from-array
+  "Construct list Data from a native array, retaining each element."
   [values: []Data] -> Data #owned #force_inline
   (odin-call "kvist_data_make_items" .List values))
 
-(defn vector
-  "Construct vector Data, retaining each element."
+(defn vector-from-array
+  "Construct vector Data from a native array, retaining each element."
   [values: []Data] -> Data #owned #force_inline
   (odin-call "kvist_data_make_items" .Vector values))
 
-(defn set
-  "Construct set Data, retaining each element."
+(defn set-from-array
+  "Construct set Data from a native array, retaining each distinct element."
   [values: []Data] -> Data #owned #force_inline
   (odin-call "kvist_data_make_items" .Set values))
 
-(defn map
-  "Construct map Data from alternating keys and values."
+(defn map-from-alternating
+  "Construct map Data from an alternating native array of keys and values."
   [values: []Data] -> Data #owned #force_inline
   (odin-call "kvist_data_make_map" values))
 
@@ -138,6 +138,26 @@
   [value: Data] #force_inline
   (odin-call "kvist_data_release" value))
 
+(defn delete-owned-array!
+  "Release every element in an owned native Data array and delete its storage.
+
+  Use this only with arrays whose contract says that each element is retained
+  for the array."
+  [values: [dynamic]Data]
+  (for [value values]
+    (release value))
+  (delete values))
+
+(defn- freeze-items!
+  "Transfer a retained native item buffer into one immutable Data node."
+  [kind: Data-Kind, values: ^[dynamic]Data] -> Data #owned #force_inline
+  (odin-call "kvist_data_freeze_items" kind values))
+
+(defn- freeze-map!
+  "Transfer retained alternating key/value Data into one immutable map node."
+  [values: ^[dynamic]Data] -> Data #owned #force_inline
+  (odin-call "kvist_data_freeze_map" values))
+
 (defn assoc
   "Return immutable map or vector Data with `key` associated to `value`."
   [collection: Data, key: Data, value: Data] -> Data #owned #force_inline
@@ -166,15 +186,27 @@
   [collection: Data, value: Data] -> Data #owned #force_inline
   (odin-call "kvist_data_append" collection value))
 
+(defn- append-pair-retained!
+  [values: ^[dynamic]Data, key: Data, value: Data]
+  (append-retained! values key)
+  (append-retained! values value))
+
 (defn merge
   "Return map Data containing entries from `left` and `right`.
 
   Values from `right` replace equal keys from `left`."
   [left: Data, right: Data] -> Data
-  (let [result left]
+  (if (not (and (map-like? left) (map-like? right)))
+    (panic "data.merge expects map or nil Data"))
+  (let [out (arr.empty Data (* 2 (+ (core.count left) (core.count right))))]
+    (defer (delete-owned-array! out))
+    (for [index (arr.range 0 (core.count left))]
+      (append-pair-retained!
+       (addr out) (key-at left index) (value-at left index)))
     (for [index (arr.range 0 (core.count right))]
-      (set! result (assoc result (key-at right index) (value-at right index))))
-    result))
+      (append-pair-retained!
+       (addr out) (key-at right index) (value-at right index)))
+    (freeze-map! (addr out))))
 
 (defn int
   "Read the integer payload of `value`.
@@ -228,6 +260,11 @@
   "Return the runtime kind of `value`."
   [value: Data] -> Data-Kind #force_inline
   (odin-call "kvist_data_kind" value))
+
+(defn equal?
+  "Return structural Data equality without allocating."
+  [left: Data, right: Data] -> bool #force_inline
+  (odin-call "kvist_data_equal" left right))
 
 (defn decode-int-at
   "Decode integer Data to `i64`.
@@ -304,6 +341,18 @@
 (defn tagged? [value: Data] -> bool #force_inline
   (odin-call "kvist_data_tagged_p" value))
 
+(defn- sequential?
+  [value: Data] -> bool #force_inline
+  (or (nil? value) (list? value) (vector? value) (set? value)))
+
+(defn- path?
+  [value: Data] -> bool #force_inline
+  (or (list? value) (vector? value)))
+
+(defn- map-like?
+  [value: Data] -> bool #force_inline
+  (or (nil? value) (map? value)))
+
 (defn count
   "Return the number of entries in runtime collection Data.
 
@@ -336,26 +385,41 @@
   [value: Data, index: int] -> Data #borrowed #force_inline
   (odin-call "kvist_data_item_at" value index))
 
+(defn- get-in-at
+  [value: Data, path: Data, index: int] -> Data #borrowed
+  (if (= index (core.count path))
+    value
+    (let [key (item-at path index)
+          child (core.get value key)]
+      (get-in-at child path (+ index 1)))))
+
 (defn get-in
-  "Follow `path` through nested map, list, and vector Data."
-  [value: Data, path: []Data] -> Data
-  (let [current value]
-    (for [key path]
-      (set! current (core.get current key)))
-    current))
+  "Follow list or vector Data `path` through nested map, list, and vector Data."
+  [value: Data, path: Data] -> Data #borrowed
+  (if (not (path? path))
+    (panic "data.get-in expects a list or vector Data path"))
+  (get-in-at value path 0))
+
+(defn- assoc-in-at
+  [collection: Data, path: Data, index: int, value: Data] -> Data
+  (let [key (item-at path index)]
+    (if (= index (- (core.count path) 1))
+      (assoc collection key value)
+      (let [child (core.get collection key)]
+        (if (nil? child)
+          (set! child (empty-map)))
+        (assoc collection key (assoc-in-at child path (+ index 1) value))))))
 
 (defn assoc-in
-  "Associate `value` at a non-empty path through nested map Data.
+  "Associate `value` at a non-empty list or vector Data path.
 
   Missing or nil intermediate values become maps."
-  [collection: Data, path: []Data, value: Data] -> Data
-  (if (= (core.count path) 1)
-    (assoc collection path[0] value)
-    (let [key path[0]
-          child (core.get collection key)]
-      (if (nil? child)
-        (set! child (empty-map)))
-      (assoc collection key (assoc-in child path[1:] value)))))
+  [collection: Data, path: Data, value: Data] -> Data
+  (if (not (path? path))
+    (panic "data.assoc-in expects a list or vector Data path"))
+  (if (= (core.count path) 0)
+    (panic "data.assoc-in expects a non-empty path"))
+  (assoc-in-at collection path 0 value))
 
 (defn update
   "Return `collection` with the value at `key` replaced by `(f old-value)`."
@@ -364,29 +428,978 @@
     (assoc collection key updated)))
 
 (defn update-in
-  "Return `collection` with the value at `path` replaced by `(f old-value)`."
-  [collection: Data, path: []Data, f: (fn [value: Data] -> Data)] -> Data
+  "Return `collection` with the value at list or vector Data `path` replaced."
+  [collection: Data, path: Data, f: (fn [value: Data] -> Data)] -> Data
+  (if (not (path? path))
+    (panic "data.update-in expects a list or vector Data path"))
+  (if (= (core.count path) 0)
+    (panic "data.update-in expects a non-empty path"))
   (let [updated (f (get-in collection path))]
     (assoc-in collection path updated)))
 
 (defn keys
-  "Return map keys in a newly allocated dynamic array.
-
-  The returned array is owned by the caller; its Data elements continue to
-  borrow the immutable backing storage of `value`."
-  [value: Data] -> [dynamic]Data
+  "Return map keys as owned vector Data in backing-entry order."
+  [value: Data] -> Data
+  (if (not (map-like? value))
+    (panic "data.keys expects map or nil Data"))
   (let [out (arr.empty Data (core.count value))]
     (for [index (arr.range 0 (core.count value))]
       (arr.push! out (key-at value index)))
-    out))
+    (let [result (vector-from-array out[:])]
+      (delete out)
+      result)))
 
 (defn vals
-  "Return map values in a newly allocated dynamic array.
-
-  The returned array is owned by the caller; its Data elements continue to
-  borrow the immutable backing storage of `value`."
-  [value: Data] -> [dynamic]Data
+  "Return map values as owned vector Data in backing-entry order."
+  [value: Data] -> Data
+  (if (not (map-like? value))
+    (panic "data.vals expects map or nil Data"))
   (let [out (arr.empty Data (core.count value))]
     (for [index (arr.range 0 (core.count value))]
       (arr.push! out (value-at value index)))
+    (let [result (vector-from-array out[:])]
+      (delete out)
+      result)))
+
+(defn to-owned-array
+  "Copy sequential Data into a native array that owns every element reference.
+
+  Clean up the result with `delete-owned-array!`."
+  [value: Data] -> [dynamic]Data
+  (if (not (sequential? value))
+    (panic "data.to-owned-array expects nil, list, vector, or set Data"))
+  (let [out (arr.empty Data (core.count value))]
+    (for [index (arr.range 0 (core.count value))]
+      (append-retained! (addr out) (item-at value index)))
     out))
+
+(defn keys-owned-array
+  "Return a native array that owns one retained reference per map key."
+  [value: Data] -> [dynamic]Data
+  (if (not (map-like? value))
+    (panic "data.keys-owned-array expects map or nil Data"))
+  (let [out (arr.empty Data (core.count value))]
+    (for [index (arr.range 0 (core.count value))]
+      (append-retained! (addr out) (key-at value index)))
+    out))
+
+(defn vals-owned-array
+  "Return a native array that owns one retained reference per map value."
+  [value: Data] -> [dynamic]Data
+  (if (not (map-like? value))
+    (panic "data.vals-owned-array expects map or nil Data"))
+  (let [out (arr.empty Data (core.count value))]
+    (for [index (arr.range 0 (core.count value))]
+      (append-retained! (addr out) (value-at value index)))
+    out))
+
+(defn vec
+  "Convert nil, list, vector, or set Data to owned vector Data."
+  [value: Data] -> Data
+  (if (not (sequential? value))
+    (panic "data.vec expects nil, list, vector, or set Data"))
+  (let [out (arr.empty Data (core.count value))]
+    (for [index (arr.range 0 (core.count value))]
+      (arr.push! out (item-at value index)))
+    (let [result (vector-from-array out[:])]
+      (delete out)
+      result)))
+
+(defn list
+  "Convert nil, list, vector, or set Data to owned list Data."
+  [value: Data] -> Data
+  (if (not (sequential? value))
+    (panic "data.list expects nil, list, vector, or set Data"))
+  (let [out (arr.empty Data (core.count value))]
+    (for [index (arr.range 0 (core.count value))]
+      (arr.push! out (item-at value index)))
+    (let [result (list-from-array out[:])]
+      (delete out)
+      result)))
+
+(defn set
+  "Convert nil, list, vector, or set Data to owned set Data."
+  [value: Data] -> Data
+  (if (not (sequential? value))
+    (panic "data.set expects nil, list, vector, or set Data"))
+  (let [out (arr.empty Data (core.count value))]
+    (for [index (arr.range 0 (core.count value))]
+      (arr.push! out (item-at value index)))
+    (let [result (set-from-array out[:])]
+      (delete out)
+      result)))
+
+(defn entries
+  "Return map entries as owned `[key value]` vectors in an owned vector."
+  [value: Data] -> Data
+  (if (not (map-like? value))
+    (panic "data.entries expects map or nil Data"))
+  (let [out (arr.empty Data (core.count value))]
+    (defer (delete-owned-array! out))
+    (for [index (arr.range 0 (core.count value))]
+      (let [pair: [2]Data [(key-at value index) (value-at value index)]
+            entry (vector-from-array pair[:])]
+        (append-retained! (addr out) entry)))
+    (freeze-items! .Vector (addr out))))
+
+(defn first
+  "Return the borrowed first sequential item, or nil when absent."
+  [collection: Data] -> Data #borrowed
+  (if (not (sequential? collection))
+    (panic "data.first expects nil, list, vector, or set Data"))
+  (if (= (core.count collection) 0)
+    'nil
+    (item-at collection 0)))
+
+(defn second
+  "Return the borrowed second sequential item, or nil when absent."
+  [collection: Data] -> Data #borrowed
+  (if (not (sequential? collection))
+    (panic "data.second expects nil, list, vector, or set Data"))
+  (if (< (core.count collection) 2)
+    'nil
+    (item-at collection 1)))
+
+(defn last
+  "Return the borrowed last sequential item, or nil when absent."
+  [collection: Data] -> Data #borrowed
+  (if (not (sequential? collection))
+    (panic "data.last expects nil, list, vector, or set Data"))
+  (if (= (core.count collection) 0)
+    'nil
+    (item-at collection (- (core.count collection) 1))))
+
+(defn- range-vector
+  [collection: Data, start: int, end: int] -> Data
+  (let [out (arr.empty Data (- end start))]
+    (defer (delete-owned-array! out))
+    (for [index (arr.range start end)]
+      (append-retained! (addr out) (item-at collection index)))
+    (freeze-items! .Vector (addr out))))
+
+(defn rest
+  "Return an owned vector without the first sequential item."
+  [collection: Data] -> Data
+  (if (not (sequential? collection))
+    (panic "data.rest expects nil, list, vector, or set Data"))
+  (if (= (core.count collection) 0)
+    (range-vector collection 0 0)
+    (range-vector collection 1 (core.count collection))))
+
+(defn butlast
+  "Return an owned vector without the last sequential item."
+  [collection: Data] -> Data
+  (if (not (sequential? collection))
+    (panic "data.butlast expects nil, list, vector, or set Data"))
+  (let [end (- (core.count collection) 1)]
+    (if (< end 0)
+      (set! end 0))
+    (range-vector collection 0 end)))
+
+(defn take
+  "Return an owned vector containing at most the first `n` items."
+  [n: int, collection: Data] -> Data
+  (if (not (sequential? collection))
+    (panic "data.take expects nil, list, vector, or set Data"))
+  (let [end n]
+    (if (< end 0)
+      (set! end 0))
+    (if (> end (core.count collection))
+      (set! end (core.count collection)))
+    (range-vector collection 0 end)))
+
+(defn drop
+  "Return an owned vector after dropping at most the first `n` items."
+  [n: int, collection: Data] -> Data
+  (if (not (sequential? collection))
+    (panic "data.drop expects nil, list, vector, or set Data"))
+  (let [start n]
+    (if (< start 0)
+      (set! start 0))
+    (if (> start (core.count collection))
+      (set! start (core.count collection)))
+    (range-vector collection start (core.count collection))))
+
+(defn take-nth
+  "Return an owned vector containing indexes `0`, `n`, `2n`, and so on."
+  [n: int, collection: Data] -> Data
+  (if (not (sequential? collection))
+    (panic "data.take-nth expects nil, list, vector, or set Data"))
+  (let [capacity 0]
+    (if (> n 0)
+      (set! capacity (/ (+ (core.count collection) (- n 1)) n)))
+    (let [out (arr.empty Data capacity)]
+      (defer (delete-owned-array! out))
+      (if (> n 0)
+        (let [index 0]
+          (while (< index (core.count collection))
+            (append-retained! (addr out) (item-at collection index))
+            (set! index (+ index n)))))
+      (freeze-items! .Vector (addr out)))))
+
+(defn peek
+  "Return the borrowed stack item from list or vector Data, or nil."
+  [collection: Data] -> Data #borrowed
+  (if (nil? collection)
+    (return 'nil))
+  (if (list? collection)
+    (return (first collection)))
+  (if (vector? collection)
+    (return (last collection)))
+  (assert false "data.peek expects nil, list, or vector Data")
+  'nil)
+
+(defn pop
+  "Return owned list or vector Data without its stack item."
+  [collection: Data] -> Data
+  (if (not (or (list? collection) (vector? collection)))
+    (panic "data.pop expects list or vector Data"))
+  (if (= (core.count collection) 0)
+    (panic "data.pop expects a non-empty collection"))
+  (let [out (arr.empty Data (- (core.count collection) 1))]
+    (defer (delete-owned-array! out))
+    (if (list? collection)
+      (for [index (arr.range 1 (core.count collection))]
+        (append-retained! (addr out) (item-at collection index)))
+      (for [index (arr.range 0 (- (core.count collection) 1))]
+        (append-retained! (addr out) (item-at collection index))))
+    (if (list? collection)
+      (freeze-items! .List (addr out))
+      (freeze-items! .Vector (addr out)))))
+
+(defmacro reduce
+  "Eagerly reduce sequential Data from left to right with explicit `init`."
+  [f init collection]
+  `(reduce-impl ~f ~init ~collection))
+
+(defn- reduce-impl
+  [f: (fn [acc: $A, item: Data] -> A), init: A, collection: Data] -> A
+  (if (not (sequential? collection))
+    (panic "data.reduce expects nil, list, vector, or set Data"))
+  (let [acc init]
+    (for [index (arr.range 0 (core.count collection))]
+      (set! acc (f acc (item-at collection index))))
+    acc))
+
+(defmacro some?
+  "Return true when any sequential item satisfies `pred`."
+  [pred collection]
+  `(some-impl ~pred ~collection))
+
+(defn- some-impl
+  [pred: (fn [item: Data] -> bool), collection: Data] -> bool
+  (if (not (sequential? collection))
+    (panic "data.some? expects nil, list, vector, or set Data"))
+  (for [index (arr.range 0 (core.count collection))]
+    (if (pred (item-at collection index))
+      (return true)))
+  false)
+
+(defmacro every?
+  "Return true when every sequential item satisfies `pred`."
+  [pred collection]
+  `(every-impl ~pred ~collection))
+
+(defn- every-impl
+  [pred: (fn [item: Data] -> bool), collection: Data] -> bool
+  (if (not (sequential? collection))
+    (panic "data.every? expects nil, list, vector, or set Data"))
+  (for [index (arr.range 0 (core.count collection))]
+    (if (not (pred (item-at collection index)))
+      (return false)))
+  true)
+
+(defmacro not-any?
+  "Return true when no sequential item satisfies `pred`."
+  [pred collection]
+  `(not (some-impl ~pred ~collection)))
+
+(defmacro not-every?
+  "Return true when at least one sequential item fails `pred`."
+  [pred collection]
+  `(not (every-impl ~pred ~collection)))
+
+(defmacro find
+  "Return the first matching borrowed item and an `ok` flag."
+  [pred collection]
+  `(find-impl ~pred ~collection))
+
+(defn- find-impl
+  [pred: (fn [item: Data] -> bool), collection: Data]
+  -> [value: Data, ok: bool] #borrowed
+  (if (not (sequential? collection))
+    (panic "data.find expects nil, list, vector, or set Data"))
+  (for [index (arr.range 0 (core.count collection))]
+    (let [item (item-at collection index)]
+      (if (pred item)
+        (return item true))))
+  (return 'nil false))
+
+(defmacro find-indexed
+  "Return the first matching index, borrowed item, and an `ok` flag."
+  [pred collection]
+  `(find-indexed-impl ~pred ~collection))
+
+(defn- find-indexed-impl
+  [pred: (fn [index: int, item: Data] -> bool), collection: Data]
+  -> [index: int, value: Data, ok: bool] #borrowed
+  (if (not (sequential? collection))
+    (panic "data.find-indexed expects nil, list, vector, or set Data"))
+  (for [index (arr.range 0 (core.count collection))]
+    (let [item (item-at collection index)]
+      (if (pred index item)
+        (return index item true))))
+  (return -1 'nil false))
+
+(defmacro min-by
+  "Return the first item with the smallest native key and an `ok` flag."
+  [f collection]
+  `(min-by-impl ~f ~collection))
+
+(defn- min-by-impl
+  [f: (fn [item: Data] -> $K), collection: Data]
+  -> [value: Data, ok: bool] #borrowed
+  (if (not (sequential? collection))
+    (panic "data.min-by expects nil, list, vector, or set Data"))
+  (if (= (core.count collection) 0)
+    (return 'nil false))
+  (let [best (item-at collection 0)
+        best-key (f best)]
+    (for [index (arr.range 1 (core.count collection))]
+      (let [item (item-at collection index)
+            key (f item)]
+        (if (< key best-key)
+          (do
+            (set! best item)
+            (set! best-key key)))))
+    (return best true)))
+
+(defmacro max-by
+  "Return the first item with the largest native key and an `ok` flag."
+  [f collection]
+  `(max-by-impl ~f ~collection))
+
+(defn- max-by-impl
+  [f: (fn [item: Data] -> $K), collection: Data]
+  -> [value: Data, ok: bool] #borrowed
+  (if (not (sequential? collection))
+    (panic "data.max-by expects nil, list, vector, or set Data"))
+  (if (= (core.count collection) 0)
+    (return 'nil false))
+  (let [best (item-at collection 0)
+        best-key (f best)]
+    (for [index (arr.range 1 (core.count collection))]
+      (let [item (item-at collection index)
+            key (f item)]
+        (if (> key best-key)
+          (do
+            (set! best item)
+            (set! best-key key)))))
+    (return best true)))
+
+(defmacro map
+  "Eagerly map `f` over sequential Data into owned vector Data."
+  [f collection]
+  `(map-impl ~f ~collection))
+
+(defn- map-impl
+  [f: (fn [item: Data] -> Data), collection: Data] -> Data
+  (if (not (sequential? collection))
+    (panic "data.map expects nil, list, vector, or set Data"))
+  (let [out (arr.empty Data (core.count collection))]
+    (defer (delete-owned-array! out))
+    (for [index (arr.range 0 (core.count collection))]
+      (let [mapped (f (item-at collection index))]
+        (append-retained! (addr out) mapped)))
+    (freeze-items! .Vector (addr out))))
+
+(defmacro map-indexed
+  "Eagerly map `(f index item)` into owned vector Data."
+  [f collection]
+  `(map-indexed-impl ~f ~collection))
+
+(defn- map-indexed-impl
+  [f: (fn [index: int, item: Data] -> Data), collection: Data] -> Data
+  (if (not (sequential? collection))
+    (panic "data.map-indexed expects nil, list, vector, or set Data"))
+  (let [out (arr.empty Data (core.count collection))]
+    (defer (delete-owned-array! out))
+    (for [index (arr.range 0 (core.count collection))]
+      (let [mapped (f index (item-at collection index))]
+        (append-retained! (addr out) mapped)))
+    (freeze-items! .Vector (addr out))))
+
+(defmacro filter
+  "Eagerly retain sequential items for which `pred` returns true."
+  [pred collection]
+  `(filter-impl ~pred ~collection))
+
+(defn- filter-impl
+  [pred: (fn [item: Data] -> bool), collection: Data] -> Data
+  (if (not (sequential? collection))
+    (panic "data.filter expects nil, list, vector, or set Data"))
+  (let [out (arr.empty Data (core.count collection))]
+    (defer (delete-owned-array! out))
+    (for [index (arr.range 0 (core.count collection))]
+      (let [item (item-at collection index)]
+        (if (pred item)
+          (append-retained! (addr out) item))))
+    (freeze-items! .Vector (addr out))))
+
+(defmacro remove
+  "Eagerly retain sequential items for which `pred` returns false."
+  [pred collection]
+  `(remove-impl ~pred ~collection))
+
+(defn- remove-impl
+  [pred: (fn [item: Data] -> bool), collection: Data] -> Data
+  (if (not (sequential? collection))
+    (panic "data.remove expects nil, list, vector, or set Data"))
+  (let [out (arr.empty Data (core.count collection))]
+    (defer (delete-owned-array! out))
+    (for [index (arr.range 0 (core.count collection))]
+      (let [item (item-at collection index)]
+        (if (not (pred item))
+          (append-retained! (addr out) item))))
+    (freeze-items! .Vector (addr out))))
+
+(defmacro keep
+  "Eagerly map sequential Data and omit nil callback results."
+  [f collection]
+  `(keep-impl ~f ~collection))
+
+(defn- keep-impl
+  [f: (fn [item: Data] -> Data), collection: Data] -> Data
+  (if (not (sequential? collection))
+    (panic "data.keep expects nil, list, vector, or set Data"))
+  (let [out (arr.empty Data (core.count collection))]
+    (defer (delete-owned-array! out))
+    (for [index (arr.range 0 (core.count collection))]
+      (let [mapped (f (item-at collection index))]
+        (if (not (nil? mapped))
+          (append-retained! (addr out) mapped))))
+    (freeze-items! .Vector (addr out))))
+
+(defmacro keep-indexed
+  "Eagerly indexed-map sequential Data and omit nil callback results."
+  [f collection]
+  `(keep-indexed-impl ~f ~collection))
+
+(defn- keep-indexed-impl
+  [f: (fn [index: int, item: Data] -> Data), collection: Data] -> Data
+  (if (not (sequential? collection))
+    (panic "data.keep-indexed expects nil, list, vector, or set Data"))
+  (let [out (arr.empty Data (core.count collection))]
+    (defer (delete-owned-array! out))
+    (for [index (arr.range 0 (core.count collection))]
+      (let [mapped (f index (item-at collection index))]
+        (if (not (nil? mapped))
+          (append-retained! (addr out) mapped))))
+    (freeze-items! .Vector (addr out))))
+
+(defmacro mapcat
+  "Eagerly map to sequential Data and flatten one level into a vector."
+  [f collection]
+  `(mapcat-impl ~f ~collection))
+
+(defn- mapcat-impl
+  [f: (fn [item: Data] -> Data), collection: Data] -> Data
+  (if (not (sequential? collection))
+    (panic "data.mapcat expects nil, list, vector, or set Data"))
+  (let [out (arr.empty Data (core.count collection))]
+    (defer (delete-owned-array! out))
+    (for [index (arr.range 0 (core.count collection))]
+      (let [mapped (f (item-at collection index))]
+        (if (not (sequential? mapped))
+          (panic "data.mapcat callback expects sequential Data"))
+        (for [nested-index (arr.range 0 (core.count mapped))]
+          (append-retained! (addr out) (item-at mapped nested-index)))))
+    (freeze-items! .Vector (addr out))))
+
+(defn- concat-two
+  [left: Data, right: Data] -> Data
+  (if (not (and (sequential? left) (sequential? right)))
+    (panic "data.concat expects nil, list, vector, or set Data"))
+  (let [out (arr.empty Data (+ (core.count left) (core.count right)))]
+    (defer (delete-owned-array! out))
+    (for [index (arr.range 0 (core.count left))]
+      (append-retained! (addr out) (item-at left index)))
+    (for [index (arr.range 0 (core.count right))]
+      (append-retained! (addr out) (item-at right index)))
+    (freeze-items! .Vector (addr out))))
+
+(defmacro- concat-forms
+  [collections]
+  (if (= (count collections) 0)
+    `(vec 'nil)
+    (if (= (count collections) 1)
+      `(vec ~(first collections))
+      `(concat-two ~(first collections) ~(concat-forms (rest collections))))))
+
+(defmacro concat
+  "Eagerly concatenate zero or more sequential Data values into a vector."
+  [& collections]
+  (concat-forms collections))
+
+(defn reverse
+  "Return sequential Data items in reverse order as an owned vector."
+  [collection: Data] -> Data
+  (if (not (sequential? collection))
+    (panic "data.reverse expects nil, list, vector, or set Data"))
+  (let [out (arr.empty Data (core.count collection))]
+    (defer (delete-owned-array! out))
+    (let [index (- (core.count collection) 1)]
+      (while (>= index 0)
+        (append-retained! (addr out) (item-at collection index))
+        (set! index (- index 1))))
+    (freeze-items! .Vector (addr out))))
+
+(defn interpose
+  "Return an owned vector with `separator` between sequential items."
+  [separator: Data, collection: Data] -> Data
+  (if (not (sequential? collection))
+    (panic "data.interpose expects nil, list, vector, or set Data"))
+  (let [capacity 0]
+    (if (> (core.count collection) 0)
+      (set! capacity (- (* (core.count collection) 2) 1)))
+    (let [out (arr.empty Data capacity)]
+      (defer (delete-owned-array! out))
+      (for [index (arr.range 0 (core.count collection))]
+        (if (> index 0)
+          (append-retained! (addr out) separator))
+        (append-retained! (addr out) (item-at collection index)))
+      (freeze-items! .Vector (addr out)))))
+
+(defn- retained-array-contains?
+  [values: []Data, value: Data] -> bool
+  (for [existing values]
+    (if (= existing value)
+      (return true)))
+  false)
+
+(defn includes?
+  "Return true when sequential Data contains a structurally equal item."
+  [collection: Data, value: Data] -> bool
+  (if (not (sequential? collection))
+    (panic "data.includes? expects nil, list, vector, or set Data"))
+  (for [index (arr.range 0 (core.count collection))]
+    (if (= (item-at collection index) value)
+      (return true)))
+  false)
+
+(defn distinct
+  "Return structurally distinct sequential items in first-seen order."
+  [collection: Data] -> Data
+  (if (not (sequential? collection))
+    (panic "data.distinct expects nil, list, vector, or set Data"))
+  (let [out (arr.empty Data (core.count collection))]
+    (defer (delete-owned-array! out))
+    (for [index (arr.range 0 (core.count collection))]
+      (let [item (item-at collection index)]
+        (if (not (retained-array-contains? out[:] item))
+          (append-retained! (addr out) item))))
+    (freeze-items! .Vector (addr out))))
+
+(defmacro distinct-by
+  "Return the first item for each structurally distinct Data key."
+  [f collection]
+  `(distinct-by-impl ~f ~collection))
+
+(defn- distinct-by-impl
+  [f: (fn [item: Data] -> Data), collection: Data] -> Data
+  (if (not (sequential? collection))
+    (panic "data.distinct-by expects nil, list, vector, or set Data"))
+  (let [out (arr.empty Data (core.count collection))]
+    (defer (delete-owned-array! out))
+    (let [keys (arr.empty Data (core.count collection)) :defer-with delete-owned-array!]
+      (for [index (arr.range 0 (core.count collection))]
+        (let [item (item-at collection index)
+              key (f item)]
+          (if (not (retained-array-contains? keys[:] key))
+            (do
+              (append-retained! (addr keys) key)
+              (append-retained! (addr out) item)))))
+      (freeze-items! .Vector (addr out)))))
+
+(defmacro take-while
+  "Return the longest sequential prefix satisfying `pred`."
+  [pred collection]
+  `(take-while-impl ~pred ~collection))
+
+(defn- take-while-impl
+  [pred: (fn [item: Data] -> bool), collection: Data] -> Data
+  (if (not (sequential? collection))
+    (panic "data.take-while expects nil, list, vector, or set Data"))
+  (let [end 0]
+    (while (and (< end (core.count collection))
+                (pred (item-at collection end)))
+      (set! end (+ end 1)))
+    (range-vector collection 0 end)))
+
+(defmacro drop-while
+  "Drop the longest sequential prefix satisfying `pred`."
+  [pred collection]
+  `(drop-while-impl ~pred ~collection))
+
+(defn- drop-while-impl
+  [pred: (fn [item: Data] -> bool), collection: Data] -> Data
+  (if (not (sequential? collection))
+    (panic "data.drop-while expects nil, list, vector, or set Data"))
+  (let [start 0]
+    (while (and (< start (core.count collection))
+                (pred (item-at collection start)))
+      (set! start (+ start 1)))
+    (range-vector collection start (core.count collection))))
+
+(defmacro sort-by
+  "Stable insertion sort by a native ordered callback key."
+  [f collection]
+  `(sort-by-impl ~f ~collection))
+
+(defn- sort-by-impl
+  [f: (fn [item: Data] -> $K), collection: Data] -> Data
+  (if (not (sequential? collection))
+    (panic "data.sort-by expects nil, list, vector, or set Data"))
+  (let [items (arr.empty Data (core.count collection))
+        keys (arr.empty K (core.count collection))]
+    (defer
+      (delete-owned-array! items)
+      (delete keys))
+    (for [index (arr.range 0 (core.count collection))]
+      (let [item (item-at collection index)
+            key (f item)
+            target (core.count keys)]
+        (arr.push! keys key)
+        (append-retained! (addr items) item)
+        (while (and (> target 0) (< key keys[(- target 1)]))
+          (let [previous-key keys[(- target 1)]
+                previous-item items[(- target 1)]]
+            (set! keys[(- target 1)] keys[target])
+            (set! items[(- target 1)] items[target])
+            (set! keys[target] previous-key)
+            (set! items[target] previous-item)
+            (set! target (- target 1))))))
+    (freeze-items! .Vector (addr items))))
+
+(defmacro sort-with
+  "Stable insertion sort with a native boolean item comparator."
+  [before? collection]
+  `(sort-with-impl ~before? ~collection))
+
+(defn- sort-with-impl
+  [before?: (fn [left: Data, right: Data] -> bool), collection: Data] -> Data
+  (if (not (sequential? collection))
+    (panic "data.sort-with expects nil, list, vector, or set Data"))
+  (let [items (arr.empty Data (core.count collection))]
+    (defer (delete-owned-array! items))
+    (for [index (arr.range 0 (core.count collection))]
+      (let [item (item-at collection index)
+            target (core.count items)]
+        (append-retained! (addr items) item)
+        (while (and (> target 0) (before? item items[(- target 1)]))
+          (let [previous items[(- target 1)]]
+            (set! items[(- target 1)] items[target])
+            (set! items[target] previous)
+            (set! target (- target 1))))))
+    (freeze-items! .Vector (addr items))))
+
+(defmacro reduce-kv
+  "Eagerly reduce map entries with `(f acc key value)`."
+  [f init value]
+  `(reduce-kv-impl ~f ~init ~value))
+
+(defn- reduce-kv-impl
+  [f: (fn [acc: $A, key: Data, value: Data] -> A), init: A, map-value: Data] -> A
+  (if (not (map-like? map-value))
+    (panic "data.reduce-kv expects map or nil Data"))
+  (let [acc init]
+    (for [index (arr.range 0 (core.count map-value))]
+      (set! acc (f acc (key-at map-value index) (value-at map-value index))))
+    acc))
+
+(defn select-keys
+  "Return an owned map containing requested keys that are present."
+  [map-value: Data, selected: Data] -> Data
+  (if (not (map-like? map-value))
+    (panic "data.select-keys expects map or nil Data"))
+  (if (not (sequential? selected))
+    (panic "data.select-keys expects sequential key Data"))
+  (let [out (arr.empty Data (* 2 (core.count selected)))]
+    (defer (delete-owned-array! out))
+    (for [index (arr.range 0 (core.count selected))]
+      (let [key (item-at selected index)]
+        (if (core.contains? map-value key)
+          (append-pair-retained! (addr out) key (core.get map-value key)))))
+    (freeze-map! (addr out))))
+
+(defmacro merge-with
+  "Merge maps, combining collisions with `(f left-value right-value)`."
+  [f left right]
+  `(merge-with-impl ~f ~left ~right))
+
+(defn- merge-with-impl
+  [f: (fn [left: Data, right: Data] -> Data), left: Data, right: Data] -> Data
+  (if (not (and (map-like? left) (map-like? right)))
+    (panic "data.merge-with expects map or nil Data"))
+  (let [out (arr.empty Data (* 2 (+ (core.count left) (core.count right))))]
+    (defer (delete-owned-array! out))
+    (for [index (arr.range 0 (core.count left))]
+      (append-pair-retained!
+       (addr out) (key-at left index) (value-at left index)))
+    (for [index (arr.range 0 (core.count right))]
+      (let [key (key-at right index)
+            right-value (value-at right index)]
+        (if (core.contains? left key)
+          (let [combined (f (core.get left key) right-value)]
+            (append-pair-retained! (addr out) key combined))
+          (append-pair-retained! (addr out) key right-value))))
+    (freeze-map! (addr out))))
+
+(defmacro update-keys
+  "Return a map whose keys are transformed by `f`."
+  [f value]
+  `(update-keys-impl ~f ~value))
+
+(defn- update-keys-impl
+  [f: (fn [key: Data] -> Data), map-value: Data] -> Data
+  (if (not (map-like? map-value))
+    (panic "data.update-keys expects map or nil Data"))
+  (let [out (arr.empty Data (* 2 (core.count map-value)))]
+    (defer (delete-owned-array! out))
+    (for [index (arr.range 0 (core.count map-value))]
+      (let [key (f (key-at map-value index))]
+        (append-pair-retained!
+         (addr out) key (value-at map-value index))))
+    (freeze-map! (addr out))))
+
+(defmacro update-vals
+  "Return a map whose values are transformed by `f`."
+  [f value]
+  `(update-vals-impl ~f ~value))
+
+(defn- update-vals-impl
+  [f: (fn [value: Data] -> Data), map-value: Data] -> Data
+  (if (not (map-like? map-value))
+    (panic "data.update-vals expects map or nil Data"))
+  (let [out (arr.empty Data (* 2 (core.count map-value)))]
+    (defer (delete-owned-array! out))
+    (for [index (arr.range 0 (core.count map-value))]
+      (let [value (f (value-at map-value index))]
+        (append-pair-retained!
+         (addr out) (key-at map-value index) value)))
+    (freeze-map! (addr out))))
+
+(defn zipmap
+  "Build a map from sequential keys and values, stopping at the shorter input."
+  [key-values: Data, values: Data] -> Data
+  (if (not (and (sequential? key-values) (sequential? values)))
+    (panic "data.zipmap expects sequential Data"))
+  (let [limit (core.count key-values)]
+    (if (> limit (core.count values))
+      (set! limit (core.count values)))
+    (let [out (arr.empty Data (* 2 limit))]
+      (defer (delete-owned-array! out))
+      (for [index (arr.range 0 limit)]
+        (append-pair-retained!
+         (addr out)
+         (item-at key-values index)
+         (item-at values index)))
+      (freeze-map! (addr out)))))
+
+(defmacro map-entries
+  "Transform map entries with a callback returning `[key value]` Data."
+  [f value]
+  `(map-entries-impl ~f ~value))
+
+(defn- map-entries-impl
+  [f: (fn [entry-key: Data, entry-value: Data] -> Data),
+   map-value: Data] -> Data
+  (if (not (map-like? map-value))
+    (panic "data.map-entries expects map or nil Data"))
+  (let [out (arr.empty Data (* 2 (core.count map-value)))]
+    (defer (delete-owned-array! out))
+    (for [index (arr.range 0 (core.count map-value))]
+      (let [entry (f (key-at map-value index) (value-at map-value index))]
+        (if (not (and (or (list? entry) (vector? entry))
+                      (= (core.count entry) 2)))
+          (panic "data.map-entries callback expects two-item entry Data"))
+        (append-pair-retained!
+         (addr out) (item-at entry 0) (item-at entry 1))))
+    (freeze-map! (addr out))))
+
+(defmacro filter-entries
+  "Keep map entries for which `(pred key value)` returns true."
+  [pred value]
+  `(filter-entries-impl ~pred ~value))
+
+(defn- filter-entries-impl
+  [pred: (fn [key: Data, value: Data] -> bool), map-value: Data] -> Data
+  (if (not (map-like? map-value))
+    (panic "data.filter-entries expects map or nil Data"))
+  (let [out (arr.empty Data (* 2 (core.count map-value)))]
+    (defer (delete-owned-array! out))
+    (for [index (arr.range 0 (core.count map-value))]
+      (let [key (key-at map-value index)
+            value (value-at map-value index)]
+        (if (pred key value)
+          (append-pair-retained! (addr out) key value))))
+    (freeze-map! (addr out))))
+
+(defn- data-index
+  [values: []Data, value: Data] -> i64
+  (for [existing index values]
+    (if (odin-call "kvist_data_equal" existing value)
+      (return (i64 index))))
+  (i64 -1))
+
+(defmacro group-by
+  "Group sequential items into vectors keyed by Data callback results."
+  [f collection]
+  `(group-by-impl ~f ~collection))
+
+(defn- group-by-impl
+  [f: (fn [item: Data] -> Data), collection: Data] -> Data
+  (if (not (sequential? collection))
+    (panic "data.group-by expects nil, list, vector, or set Data"))
+  (let [group-keys (arr.empty Data (core.count collection))
+        counts (arr.empty i64 (core.count collection))
+        item-groups (arr.empty i64 (core.count collection))]
+    (defer
+      (for [key group-keys]
+        (release key))
+      (delete group-keys)
+      (delete counts)
+      (delete item-groups))
+    (for [index (arr.range 0 (core.count collection))]
+      (let [key (f (item-at collection index))
+            group-index (data-index group-keys[:] key)]
+        (if (= group-index -1)
+          (do
+            (set! group-index (i64 (core.count group-keys)))
+            (append-retained! (addr group-keys) key)
+            (arr.push! counts 1))
+          (set! counts[group-index] (+ counts[group-index] 1)))
+        (arr.push! item-groups group-index)))
+    (let [starts (arr.empty i64 (core.count counts))
+          positions (arr.empty i64 (core.count counts))
+          next-start (i64 0)]
+      (defer
+        (delete starts)
+        (delete positions))
+      (for [group-count counts]
+        (arr.push! starts next-start)
+        (arr.push! positions 0)
+        (set! next-start (+ next-start group-count)))
+      (let [flat (arr.empty Data (core.count collection))]
+        (defer
+          (for [item flat]
+            (release item))
+          (delete flat))
+        (resize (addr flat) (core.count collection))
+        (for [index (arr.range 0 (core.count collection))]
+          (let [group-index item-groups[index]
+                target (+ starts[group-index] positions[group-index])]
+            (set! flat[target] (retain (item-at collection index)))
+            (set! positions[group-index] (+ positions[group-index] 1))))
+        (let [out (arr.empty Data (* 2 (core.count group-keys)))]
+          (defer (delete-owned-array! out))
+          (for [group-index (arr.range 0 (core.count group-keys))]
+            (let [start starts[group-index]
+                  end (+ start counts[group-index])
+                  group (vector-from-array (core.slice flat start end))]
+              (append-pair-retained!
+               (addr out) group-keys[group-index] group)))
+          (freeze-map! (addr out)))))))
+
+(defmacro index-by
+  "Build a map from callback key to item; later items win."
+  [f collection]
+  `(index-by-impl ~f ~collection))
+
+(defn- index-by-impl
+  [f: (fn [item: Data] -> Data), collection: Data] -> Data
+  (if (not (sequential? collection))
+    (panic "data.index-by expects nil, list, vector, or set Data"))
+  (let [out (arr.empty Data (* 2 (core.count collection)))]
+    (defer (delete-owned-array! out))
+    (for [index (arr.range 0 (core.count collection))]
+      (let [item (item-at collection index)
+            key (f item)]
+        (append-pair-retained! (addr out) key item)))
+    (freeze-map! (addr out))))
+
+(defn frequencies
+  "Return a map from each distinct item to integer Data count."
+  [collection: Data] -> Data
+  (if (not (sequential? collection))
+    (panic "data.frequencies expects nil, list, vector, or set Data"))
+  (let [frequency-keys (arr.empty Data (core.count collection))
+        counts (arr.empty i64 (core.count collection))]
+    (defer
+      (for [key frequency-keys]
+        (release key))
+      (delete frequency-keys)
+      (delete counts))
+    (for [index (arr.range 0 (core.count collection))]
+      (let [item (item-at collection index)
+            found (data-index frequency-keys[:] item)]
+        (if (= found -1)
+          (do
+            (append-retained! (addr frequency-keys) item)
+            (arr.push! counts 1))
+          (set! counts[found] (+ counts[found] 1)))))
+    (let [out (arr.empty Data (* 2 (core.count frequency-keys)))]
+      (defer (delete-owned-array! out))
+      (for [index (arr.range 0 (core.count frequency-keys))]
+        (let [count-value (from-int (i64 counts[index]))]
+          (append-pair-retained!
+           (addr out) frequency-keys[index] count-value)))
+      (freeze-map! (addr out)))))
+
+(defn into
+  "Eagerly conjoin sequential source Data into list, vector, set, or map Data."
+  [target: Data, source: Data] -> Data
+  (if (not (sequential? source))
+    (panic "data.into expects sequential source Data"))
+  (if (map? target)
+    (let [out (arr.empty Data (* 2 (+ (core.count target) (core.count source))))]
+      (defer
+        (for [item out]
+          (release item))
+        (delete out))
+      (for [index (arr.range 0 (core.count target))]
+        (append-pair-retained!
+         (addr out) (key-at target index) (value-at target index)))
+      (for [index (arr.range 0 (core.count source))]
+        (let [entry (item-at source index)]
+          (if (not (and (or (list? entry) (vector? entry))
+                        (= (core.count entry) 2)))
+            (panic "data.into map target expects two-item entry Data"))
+          (append-pair-retained!
+           (addr out) (item-at entry 0) (item-at entry 1))))
+      (return (freeze-map! (addr out)))))
+  (if (not (or (list? target) (vector? target) (set? target)))
+    (panic "data.into target expects list, vector, set, or map Data"))
+  (let [out (arr.empty Data (+ (core.count target) (core.count source)))]
+    (defer (delete-owned-array! out))
+    (if (list? target)
+      (do
+        (let [index (- (core.count source) 1)]
+          (while (>= index 0)
+            (append-retained! (addr out) (item-at source index))
+            (set! index (- index 1))))
+        (for [index (arr.range 0 (core.count target))]
+          (append-retained! (addr out) (item-at target index))))
+      (do
+        (for [index (arr.range 0 (core.count target))]
+          (append-retained! (addr out) (item-at target index)))
+        (for [index (arr.range 0 (core.count source))]
+          (let [item (item-at source index)]
+            (if (or (not (set? target))
+                    (not (retained-array-contains? out[:] item)))
+              (append-retained! (addr out) item))))))
+    (if (list? target)
+      (freeze-items! .List (addr out))
+      (if (set? target)
+        (freeze-items! .Set (addr out))
+        (freeze-items! .Vector (addr out))))))

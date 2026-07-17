@@ -120,9 +120,9 @@
 
 (defn- sequence-data [initial: Data, items: []Data] -> Data
   (cond
-    (data.list? initial) (data.list items)
-    (data.set? initial) (data.set items)
-    :else (data.vector items)))
+    (data.list? initial) (data.list-from-array items)
+    (data.set? initial) (data.set-from-array items)
+    :else (data.vector-from-array items)))
 
 (defn- parse-sequence [reader: ^Reader, close: byte, initial: Data]
   -> [value: Data, error: Read-Error, ok: bool]
@@ -149,7 +149,7 @@
         (return (read-error reader "unterminated map")))
       (when (= (core.get reader.text reader.index) (byte 125))
         (inc! reader.index)
-        (return (data.map items[:]) (Read-Error {}) true))
+        (return (data.map-from-alternating items[:]) (Read-Error {}) true))
       (let [key-start reader.index
             [key key-error key-ok] (parse-value reader)
             key-end reader.index]
