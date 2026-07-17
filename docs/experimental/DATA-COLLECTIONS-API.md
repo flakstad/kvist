@@ -179,6 +179,10 @@ statically inferred accumulator type and `$K` is a statically checked key type.
 | `data.take-while pred collection` | Owned longest prefix vector; `pred: Data -> bool`. |
 | `data.drop-while pred collection` | Owned suffix vector; `pred: Data -> bool`. |
 | `data.take-nth n collection` | Owned vector containing backing indexes `0, n, 2n...`; non-positive `n` gives `[]`. |
+| `data.split-at n collection` | Two owned vectors; `n` clamps to the input bounds. |
+| `data.partition n collection` | Owned vector of exact-size vector groups; short tail omitted. |
+| `data.partition-all n collection` | Owned vector of vector groups; short tail included. |
+| `data.partition-by f collection` | Owned adjacent groups split when structural Data callback keys change. |
 | `data.peek collection` | Borrowed last vector item or first list item; nil for nil/empty. Sets are rejected. |
 | `data.pop collection` | Owned same-kind list/vector without its stack item. Empty and nil inputs are errors. Sets are rejected. |
 
@@ -205,6 +209,7 @@ missing item from a present nil value.
 | `data.concat collections...` | Eager concatenation of sequential Data into an owned vector; zero inputs gives `[]` |
 | `data.reverse collection` | Owned vector |
 | `data.interpose separator collection` | Owned vector; separator is retained for each insertion |
+| `data.interleave left right` | Owned alternating vector; stops at the shorter input |
 | `data.distinct collection` | Stable first occurrence by structural Data equality; owned vector |
 | `data.distinct-by f collection` | Stable first key; `f: Data -> $K`, where `$K` supports equality |
 | `data.sort-by f collection` | Stable ascending sort; `f: Data -> $K`, where `$K` is a native ordered type |
@@ -262,6 +267,7 @@ There is no hidden conversion from a map to a sequence of pair objects.
 | `data.group-by f collection` | `f: Data -> Data`; owned map from key to vector Data; groups preserve input order |
 | `data.index-by f collection` | `f: Data -> Data`; owned map from key to item; later items win |
 | `data.frequencies collection` | Owned map from item Data to integer Data count |
+| `data.count-by f collection` | Owned map from structural Data callback key to integer Data count |
 
 Key/value callbacks avoid allocating an entry vector per input map entry.
 `map-entries` represents each transformed output pair as `[key value]` Data;

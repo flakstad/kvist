@@ -56,6 +56,18 @@ utilities, Data-returning `keys`/`vals`, and explicit native-array conversion.
 Bulk results use retained temporary buffers that freeze once into immutable
 nodes. See [Data-oriented programming in Kvist](DATA-ORIENTED-PROGRAMMING.md).
 
+Keywords and Data maps can be invoked for direct borrowed lookup:
+
+```clojure
+(:status message)
+(:status message :unknown)
+(message :status)
+```
+
+This is statically lowered lookup rather than a universal callable-value
+protocol. `data.describe` provides shallow structural inspection, while
+`edn.pr-str`, `edn.prn`, and `edn.pprint` provide readable Data rendering.
+
 Runtime quasiquote constructs Data with interpolation while retaining the
 static literal path when no unquote is present:
 

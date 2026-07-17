@@ -51,6 +51,36 @@ Use `data.validate` when code should keep operating on the original Data after
 checking the same native shape. Validation does not construct the native
 target.
 
+## Lookup shorthand
+
+Keywords and Data maps are directly callable:
+
+```clojure
+(:owner matter)
+(:owner matter :unknown)
+(matter :owner)
+(matter :owner :unknown)
+```
+
+These forms lower to borrowed map lookup. They do not introduce a universal
+runtime function interface. The target must be map or nil Data, and the
+optional fallback is returned only when the key is absent; a present Data nil
+is preserved.
+
+Use `get` when generic indexed/map access is clearer. Keyword invocation is
+normally the most readable choice for map-shaped application data.
+
+Data-heavy files may refer selected eager helpers:
+
+```clojure
+(import "kvist:data" :refer [map filter remove reduce group-by])
+```
+
+Core already supplies unqualified statically dispatched `get`, `count`,
+`empty?`, `contains?`, `assoc`, `update`, `dissoc`, and `dissoc-in`. Keep the
+`data.` and `arr.` prefixes in files that mix Data with native arrays so their
+different representation and ownership contracts remain visible.
+
 ## Sequential Data
 
 Sequential collection functions accept nil, list, vector, and set Data. Maps
@@ -80,10 +110,19 @@ Selection operations return owned vector Data:
 (data.take-while active? values)
 (data.drop-while active? values)
 (data.take-nth 3 values)
+(data.split-at 10 values)
+(data.partition 3 values)
+(data.partition-all 3 values)
+(data.partition-by owner-id values)
+(data.interleave ids titles)
 ```
 
 Set traversal follows deterministic backing order, but set equality remains
 order independent. Do not give backing order application meaning.
+
+`split-at` returns two owned vectors. Partition functions return a vector of
+owned vector groups. `partition` omits a short final group while
+`partition-all` includes it. `interleave` stops at the shorter input.
 
 ## Eager transformations
 
@@ -164,8 +203,8 @@ Map functions traverse key/value backing directly where possible:
 (data.reduce-kv add-entry init message)
 ```
 
-`data.group-by`, `data.index-by`, and `data.frequencies` return immutable map
-Data. Group values are vectors and preserve input order.
+`data.group-by`, `data.index-by`, `data.frequencies`, and `data.count-by`
+return immutable map Data. Group values are vectors and preserve input order.
 
 Use `data.entries` when entry vectors are the desired data representation.
 `data.map-entries` passes key and value separately to avoid allocating input
@@ -178,6 +217,38 @@ entry vectors; its callback returns one `[key value]` Data value.
      (data.filter valid?)
      (data.map normalize))
 ```
+
+## Destructuring and structural matching
+
+Data maps and sequential values support Clojure-style `let` destructuring,
+including nested patterns, `:keys`, `:strs`, `:syms`, `:or`, `:as`, and
+sequential rest bindings:
+
+```clojure
+(let [{:keys [name roles]
+       :or {roles []}
+       :as contact}
+      value
+      [primary & remaining] roles]
+  ...)
+```
+
+Use `match` for exhaustive structural dispatch:
+
+```clojure
+(match message
+  {:op :query :query query}
+  (run-query query)
+
+  (kind :vector [head & tail])
+  (handle-sequence head tail)
+
+  :else
+  (unknown-message message))
+```
+
+Captured values remain Data and are ownership-managed. See the language guide
+and `examples/data_patterns.kvist` for the complete pattern contract.
 
 ## Paths
 
@@ -232,7 +303,8 @@ results. When that allocation matters, use a fused transform:
 (deftransform visible-summaries
   (filter visible?)
   (remove archived?)
-  (map matter-summary))
+  (map matter-summary)
+  (distinct-by summary-id))
 
 (into Data visible-summaries matters)
 ```
@@ -252,6 +324,40 @@ Use `transduce` for a scalar result:
 ```
 
 Sorting still materializes because ordering requires all selected items.
+Fused `mapcat` accepts callbacks returning nil, list, vector, or set Data and
+traverses each callback result directly while keeping owned intermediates
+scoped correctly. Data pipelines also support `(distinct)` and
+`(distinct-by f)` without materializing an intermediate collection.
+
+## Inspection and readable printing
+
+`data.kind` returns the native `Data-Kind` enum. `data.kind-keyword` returns a
+Data keyword, and `data.describe` builds a shallow, immutable description:
+
+```clojure
+(data.describe {:id 7 :status :open})
+;; => {:kind :map :count 2 :keys [:id :status]}
+```
+
+Descriptions intentionally omit backing nodes and reference counts.
+
+Use the EDN package for readable output:
+
+```clojure
+(import edn "kvist:edn")
+
+(edn.prn value)
+(edn.pprint value)
+
+(let [text (edn.pr-str value) :defer
+      formatted (edn.pretty value) :defer]
+  ...)
+```
+
+`pr-str` is the Clojure-familiar alias for canonical `edn.write`. `pr` and
+`prn` write canonical one-line EDN. `pretty`, `pretty-with`, `pprint`, and
+`pprint-with` provide multiline rendering. Plain native `println` remains an
+Odin-level structural debug print and can expose Data backing details.
 
 ## Construction
 
@@ -273,6 +379,7 @@ them.
 ## Important false friends
 
 - Data `map`, `filter`, and friends are eager, not lazy.
+- Keyword/map invocation is compiler-lowered lookup, not a universal `IFn`.
 - Maps do not implicitly become sequences of entries.
 - Predicates return native booleans; Data has no general truthiness.
 - `some?` returns bool; `find` returns an item and `ok`.
