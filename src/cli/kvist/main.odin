@@ -436,6 +436,53 @@ odin_output_executable_path :: proc(generated_abs: string) -> string {
     return strings.clone(fmt.tprintf("%s%s", generated_abs, suffix))
 }
 
+windows_import_collection_args :: proc(generated_path: string) -> [dynamic]string {
+    args: [dynamic]string
+    when ODIN_OS != .Windows {
+        return args
+    }
+
+    data, read_err := os.read_entire_file_from_path(generated_path, context.allocator)
+    if read_err != nil {
+        return args
+    }
+    defer delete(data)
+
+    seen: [26]bool
+    source := string(data)
+    line_start := 0
+    for i := 0; i <= len(source); i += 1 {
+        if i < len(source) && source[i] != '\n' {
+            continue
+        }
+        line := source[line_start:i]
+        line_start = i + 1
+        if !strings.has_prefix(line, "import ") {
+            continue
+        }
+        quote := strings.index(line, `"`)
+        if quote < 0 || quote+3 >= len(line) {
+            continue
+        }
+        drive := line[quote+1]
+        if drive >= 'a' && drive <= 'z' {
+            drive -= 'a'-'A'
+        }
+        if drive < 'A' || drive > 'Z' ||
+           line[quote+2] != ':' ||
+           (line[quote+3] != '/' && line[quote+3] != '\\') {
+            continue
+        }
+        drive_index := int(drive-'A')
+        if seen[drive_index] {
+            continue
+        }
+        seen[drive_index] = true
+        append(&args, fmt.tprintf("-collection:%c=%c:/", drive, drive))
+    }
+    return args
+}
+
 print_compile_warnings :: proc(path, source, eval_source: string, warnings: []kvist.Compile_Warning) {
     for warning in warnings {
         formatted := ""
@@ -514,6 +561,11 @@ run_odin_file :: proc(command, generated_path, source_path, source, eval_source,
         append(&args, "odin", odin_command, package_arg)
     } else {
         append(&args, "odin", odin_command, generated_abs, "-file")
+    }
+    collection_args := windows_import_collection_args(generated_abs)
+    defer kvist.delete_string_slice(&collection_args)
+    for arg in collection_args {
+        append(&args, arg)
     }
     for arg in extra_args {
         append(&args, arg)
