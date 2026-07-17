@@ -3133,7 +3133,34 @@ format_compile_warning :: proc(path, source: string, warning: Compile_Warning) -
     if line <= 0 || column <= 0 {
         line, column, _, _ = source_position(source, warning.span.start)
     }
-    return strings.clone(fmt.tprintf("%s:%d:%d: warning: %s\n", label, line, column, message))
+    code := compile_warning_code_text(warning.code)
+    confidence := ""
+    if warning.confidence == .Conservative {
+        confidence = ", conservative"
+    }
+    return strings.clone(fmt.tprintf("%s:%d:%d: warning[%s%s]: %s\n", label, line, column, code, confidence, message))
+}
+
+compile_warning_code_text :: proc(code: Compile_Warning_Code) -> string {
+    switch code {
+    case .General:
+        return "KV0000"
+    case .Ownership_Discarded_Result:
+        return "KVO001"
+    case .Ownership_Unreleased_Local:
+        return "KVO002"
+    case .Ownership_Use_After_Transfer:
+        return "KVO003"
+    case .Ownership_Overwrite:
+        return "KVO004"
+    case .Ownership_Borrowed_Escape:
+        return "KVO005"
+    case .Ownership_Delete_Borrowed:
+        return "KVO006"
+    case .Ownership_Defer_In_Loop:
+        return "KVO007"
+    }
+    return "KV0000"
 }
 
 format_eval_compile_warning :: proc(path, source, eval_source: string, warning: Compile_Warning) -> string {

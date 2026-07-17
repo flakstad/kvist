@@ -1,0 +1,11 @@
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
+
+(package main)
+
+(defn render-request [path: string] -> string
+  (str "@get('" path "', {openWhenHidden: true})"))
+
+(defn main []
+  (let [request (render-request "/updates") :defer]
+    (println request)))

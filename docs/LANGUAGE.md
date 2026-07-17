@@ -797,6 +797,19 @@ useful for debugging and tooling. The returned string is owned because
 temporary-allocator strings that are consumed immediately and not deleted
 manually.
 
+For ordinary construction, use core `str`:
+
+```clojure
+(let [request (str "@get('" path "', {openWhenHidden: true})")
+      :defer]
+  (println request))
+```
+
+`str` accepts Odin-printable values, does not interpret braces or percent
+signs in its string arguments, and lowers to one allocator-backed
+`fmt.aprintf` call. Its result is always an owned string, including `(str)`, so
+bind it with `:defer`, delete it explicitly, or return it.
+
 Use `$T: typeid` when the caller passes a type explicitly:
 
 ```clojure
@@ -1752,21 +1765,27 @@ the result type:
   count)
 ```
 
-The compiler also has conservative ownership warnings for obvious mistakes.
-These warnings are advisory. They do not mean Kvist has an automatic ownership
+The compiler also has coded ownership warnings for obvious mistakes. These
+warnings are advisory. They do not mean Kvist has an automatic ownership
 system, and they do not change generated Odin.
 
-`kvist check` reports these warnings with source locations:
+Normal commands report definite findings. Add `--ownership-audit` to include
+conservative findings from the flow analysis:
 
 ```text
-warning: owned result from arr.range is discarded; bind it, delete it, or return it
-warning: owned local xs is never deleted or returned; add (defer (delete xs)) or return it
-warning: owned local xs is overwritten before cleanup; delete it or return it before set!
-warning: owned local xs is used after ownership transfer
-warning: borrowed value escapes owner xs
+warning[KVO001]: owned result from arr.range is discarded; bind it, delete it, or return it
+warning[KVO002, conservative]: owned local xs is never deleted or returned; add (defer (delete xs)) or return it
+warning[KVO004]: owned local xs is overwritten before cleanup; delete it or return it before set!
+warning[KVO003, conservative]: owned local xs is used after ownership transfer
+warning[KVO005, conservative]: borrowed value escapes owner xs
 ```
 
-The pass is intentionally conservative. It recognizes owned results from source
+Equivalent findings at the same source location are printed once. The compiler
+API retains every warning with its stable `code` and `confidence` fields so
+tools can choose their own policy. Explicit deferred destructors whose names
+identify destroy, free, close, or release operations are recognized as cleanup.
+
+The audit pass is intentionally conservative. It recognizes owned results from source
 proc return types, source procs marked `#owned`, known owned-result helper
 shapes such as `arr.range`, `arr.empty`, `map.empty`, and `set.union`;
 borrowed views from source procs marked `#borrowed`; known borrowed-view helper
@@ -1794,7 +1813,12 @@ Valid local use of the same borrowed view does not warn:
 ```
 
 See `examples/collections/ownership-warnings.kvist` for a small warning
-surface tour.
+surface tour:
+
+```sh
+kvist check examples/collections/ownership-warnings.kvist
+kvist check examples/collections/ownership-warnings.kvist --ownership-audit
+```
 
 ### The Implicit `context`
 

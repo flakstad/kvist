@@ -1,7 +1,7 @@
 ;; Copyright (c) Andreas Flakstad and Kvist contributors
 ;; SPDX-License-Identifier: MIT
 
-;; Compiles successfully, but should produce conservative ownership warnings.
+;; Compiles successfully, but should produce ownership warnings.
 (package main)
 (import core "kvist:core")
 (import arr "kvist:arr")
@@ -30,7 +30,7 @@
     (arr.slice xs 0 3)))
 
 (defn main []
-  (println "Run `kvist check examples/collections/ownership-warnings.kvist` to see warnings."))
+  (println "Run with `--ownership-audit` to include conservative warnings."))
 
 (comment
   ;; These are documentation examples for the warning surface. They are meant
@@ -38,6 +38,7 @@
   ;;
   ;; Run:
   ;;   kvist check examples/collections/ownership-warnings.kvist
+  ;;   kvist check examples/collections/ownership-warnings.kvist --ownership-audit
   ;;
   ;; Expected warnings include:
   ;; - owned value is discarded; bind it, delete it, or return it

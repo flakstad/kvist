@@ -379,6 +379,24 @@
   [& values]
   `(fmt.println ~@values))
 
+(defmacro- str-format
+  [values]
+  (if (= (count values) 0)
+    ""
+    (str "%v" (str-format (rest values)))))
+
+(defmacro str
+  "Construct one owned string from `values`.
+
+  Every value uses Odin's ordinary `%v` rendering. The generated format string
+  contains one fixed `%v` slot per argument, so braces and percent signs inside
+  string arguments are copied literally rather than interpreted as formatting
+  syntax. The result uses the current allocator and must be deleted, returned,
+  or otherwise transferred like any other owned string."
+  [& values]
+  (let [format (str-format values)]
+    `(fmt.aprintf ~format ~@values)))
+
 (defmacro tap>
   "Print `value` for debugging and return it unchanged.
 

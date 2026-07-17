@@ -257,12 +257,30 @@ Compile_Error :: struct {
     span:    Span,
 }
 
+Compile_Warning_Code :: enum {
+    General,
+    Ownership_Discarded_Result,
+    Ownership_Unreleased_Local,
+    Ownership_Use_After_Transfer,
+    Ownership_Overwrite,
+    Ownership_Borrowed_Escape,
+    Ownership_Delete_Borrowed,
+    Ownership_Defer_In_Loop,
+}
+
+Compile_Warning_Confidence :: enum {
+    Definite,
+    Conservative,
+}
+
 Compile_Warning :: struct {
     message:     string,
     span:        Span,
     source_path: string,
     line:        int,
     column:      int,
+    code:        Compile_Warning_Code,
+    confidence:  Compile_Warning_Confidence,
 }
 
 Builtin_Macro_Kind :: enum {

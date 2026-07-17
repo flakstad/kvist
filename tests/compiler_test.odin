@@ -1211,6 +1211,7 @@ package_symbols_source_emits_core_update_helpers :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "macro\tcore.nil?\t"), true)
     testing.expect_value(t, strings.contains(output, "macro\tcore.tap>\t"), true)
     testing.expect_value(t, strings.contains(output, "macro\tcore.println\t"), true)
+    testing.expect_value(t, strings.contains(output, "macro\tcore.str\t"), true)
     testing.expect_value(t, strings.contains(output, "macro\tcore.when-let\t"), true)
     testing.expect_value(t, strings.contains(output, "macro\tcore.if-let\t"), true)
     testing.expect_value(t, strings.contains(output, "macro\tcore.when-ok\t"), true)
@@ -6394,6 +6395,61 @@ reject_when_ok_expression_position :: proc(t: ^testing.T) {
     testing.expect_value(t, ok, false)
     defer delete(err.message)
     testing.expect_value(t, err.message, "if expression expects test, then, and else")
+}
+
+@(test)
+compile_core_str_constructs_one_owned_formatted_string :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct Point {x: int y: int})
+
+(defn render [path: string, point: Point] -> string
+  (str "@get('" path "', {open: 100%}) " true " " 42 " " :ready " " point))
+
+(defn empty [] -> string
+  (str))`
+
+    result, err, ok := kvist.compile_source_with_map(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(t, strings.contains(result.output, `fmt.aprintf("%v%v%v%v%v%v%v%v%v%v"`), true)
+    testing.expect_value(t, strings.contains(result.output, `"@get('"`), true)
+    testing.expect_value(t, strings.contains(result.output, `"', {open: 100%}) "`), true)
+    testing.expect_value(t, strings.contains(result.output, `fmt.aprintf("")`), true)
+    testing.expect_value(t, len(result.warnings), 0)
+}
+
+@(test)
+core_str_participates_in_owned_result_diagnostics :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn main [name: string]
+  (str "hello " name)
+  (let [message (str "goodbye " name) :defer]
+    (println message)))`
+
+    result, err, ok := kvist.compile_source_with_map(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(t, len(result.warnings), 1)
+    if len(result.warnings) == 1 {
+        testing.expect_value(t, result.warnings[0].message, "owned result from fmt.aprintf is discarded; bind it, delete it, or return it")
+    }
+    testing.expect_value(t, strings.contains(result.output, "defer delete(message)"), true)
 }
 
 @(test)
@@ -24977,6 +25033,8 @@ compile_warns_for_discarded_owned_result_inside_discard :: proc(t: ^testing.T) {
     testing.expect_value(t, len(result.warnings), 1)
     if len(result.warnings) == 1 {
         testing.expect_value(t, result.warnings[0].message, "owned result from arr.range is discarded; bind it, delete it, or return it")
+        testing.expect_value(t, result.warnings[0].code, kvist.Compile_Warning_Code.Ownership_Discarded_Result)
+        testing.expect_value(t, result.warnings[0].confidence, kvist.Compile_Warning_Confidence.Definite)
     }
 }
 
@@ -25002,7 +25060,35 @@ compile_warns_for_leaked_owned_let_local :: proc(t: ^testing.T) {
     testing.expect_value(t, len(result.warnings), 1)
     if len(result.warnings) == 1 {
         testing.expect_value(t, result.warnings[0].message, "owned local xs is never deleted or returned; add (defer (delete xs)) or return it")
+        testing.expect_value(t, result.warnings[0].code, kvist.Compile_Warning_Code.Ownership_Unreleased_Local)
+        testing.expect_value(t, result.warnings[0].confidence, kvist.Compile_Warning_Confidence.Conservative)
     }
+}
+
+@(test)
+compile_recognizes_explicit_custom_deferred_cleanup :: proc(t: ^testing.T) {
+    source := `(package main)
+(import arr "kvist:arr")
+
+(defn destroy-items! [items: [dynamic]int]
+  (delete items))
+
+(defn demo []
+  (let [items (arr.empty int)]
+    (defer (destroy-items! items))
+    (println (count items))))`
+
+    result, err, ok := kvist.compile_source_with_map(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(t, len(result.warnings), 0)
 }
 
 @(test)
@@ -25190,6 +25276,8 @@ compile_warns_for_owned_local_used_after_deleted_in_all_if_branches :: proc(t: ^
     testing.expect_value(t, len(result.warnings), 1)
     if len(result.warnings) == 1 {
         testing.expect_value(t, result.warnings[0].message, "owned local xs is used after ownership transfer")
+        testing.expect_value(t, result.warnings[0].code, kvist.Compile_Warning_Code.Ownership_Use_After_Transfer)
+        testing.expect_value(t, result.warnings[0].confidence, kvist.Compile_Warning_Confidence.Conservative)
     }
 }
 
@@ -25232,6 +25320,8 @@ compile_warns_for_owned_local_used_after_deleted_in_all_type_case_branches :: pr
     testing.expect_value(t, len(result.warnings), 1)
     if len(result.warnings) == 1 {
         testing.expect_value(t, result.warnings[0].message, "owned local xs is used after ownership transfer")
+        testing.expect_value(t, result.warnings[0].code, kvist.Compile_Warning_Code.Ownership_Use_After_Transfer)
+        testing.expect_value(t, result.warnings[0].confidence, kvist.Compile_Warning_Confidence.Conservative)
     }
 }
 
@@ -25291,6 +25381,32 @@ compile_warns_for_overwritten_owned_local :: proc(t: ^testing.T) {
 }
 
 @(test)
+compile_tracks_owned_replacement_after_delete_and_set :: proc(t: ^testing.T) {
+    source := `(package main)
+(import arr "kvist:arr")
+
+(defn demo []
+  (let [xs (arr.empty int)
+        replacement (arr.empty int)]
+    (delete xs)
+    (set! xs replacement)
+    (println (count xs))
+    (delete xs)))`
+
+    result, err, ok := kvist.compile_source_with_map(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(t, len(result.warnings), 0)
+}
+
+@(test)
 compile_warns_for_use_after_ownership_transfer :: proc(t: ^testing.T) {
     source := `(package main)
 (import arr "kvist:arr")
@@ -25313,6 +25429,8 @@ compile_warns_for_use_after_ownership_transfer :: proc(t: ^testing.T) {
     testing.expect_value(t, len(result.warnings), 1)
     if len(result.warnings) == 1 {
         testing.expect_value(t, result.warnings[0].message, "owned local xs is used after ownership transfer")
+        testing.expect_value(t, result.warnings[0].code, kvist.Compile_Warning_Code.Ownership_Use_After_Transfer)
+        testing.expect_value(t, result.warnings[0].confidence, kvist.Compile_Warning_Confidence.Definite)
     }
 }
 

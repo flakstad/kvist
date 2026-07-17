@@ -268,7 +268,13 @@ mark_dynamic_literals :: proc(e: ^Emitter) {
     }
 }
 
-emit_warning :: proc(e: ^Emitter, message: string, span: Span) {
+emit_coded_warning :: proc(
+    e: ^Emitter,
+    message: string,
+    span: Span,
+    code := Compile_Warning_Code.General,
+    confidence := Compile_Warning_Confidence.Definite,
+) {
     if e.warnings == nil {
         return
     }
@@ -279,7 +285,13 @@ emit_warning :: proc(e: ^Emitter, message: string, span: Span) {
         source_path = e.current_source_path,
         line = line,
         column = column,
+        code = code,
+        confidence = confidence,
     })
+}
+
+emit_warning :: proc(e: ^Emitter, message: string, span: Span) {
+    emit_coded_warning(e, message, span)
 }
 
 mark_core_get_or_default :: proc(e: ^Emitter) {
@@ -4021,7 +4033,12 @@ Owned_Alloc_Result_Kind :: enum {
 owned_import_alloc_call_head :: proc(e: ^Emitter, text: string, kind: Owned_Alloc_Result_Kind) -> bool {
     switch kind {
     case .String:
-        return imported_interop_call_matches(e, text, "core:strings", "clone") ||
+        // `fmt` is an implicit core import when a form uses that namespace,
+        // so it is not necessarily represented by an import declaration.
+        return text == "fmt.aprintf" ||
+               text == "fmt/aprintf" ||
+               imported_interop_call_matches(e, text, "core:fmt", "aprintf") ||
+               imported_interop_call_matches(e, text, "core:strings", "clone") ||
                imported_interop_call_matches(e, text, "core:strings", "to_lower") ||
                imported_interop_call_matches(e, text, "core:strings", "to_upper") ||
                imported_interop_call_matches(e, text, "core:strings", "replace")
@@ -4531,6 +4548,13 @@ proc_decl_owned_result_head :: proc(e: ^Emitter, name: string) -> bool {
 form_is_owned_result :: proc(form: CST_Form, e: ^Emitter = nil) -> bool {
     if form.kind != .List || len(form.items) == 0 || form.items[0].kind != .Symbol {
         return false
+    }
+    // Core macros are expanded while emitting expressions. Preserve their
+    // ownership contract for the earlier ownership-analysis pass without
+    // making their lowering a compiler special form.
+    switch form.items[0].text {
+    case "str", "core.str", "core/str", "fmt.aprintf", "fmt/aprintf":
+        return true
     }
     if proc_decl_owned_result_head(e, form.items[0].text) {
         return true
@@ -7637,6 +7661,7 @@ Owned_Local :: struct {
     name:              string,
     span:              Span,
     state:             Owned_Local_State,
+    move_confidence:   Compile_Warning_Confidence,
     cleanup_scheduled: bool,
 }
 
@@ -7695,12 +7720,17 @@ owned_locals_live_find_last :: proc(live: []Owned_Local, name: string) -> int {
     return -1
 }
 
-owned_locals_mark_moved_last :: proc(live: ^[dynamic]Owned_Local, name: string) -> bool {
+owned_locals_mark_moved_last :: proc(
+    live: ^[dynamic]Owned_Local,
+    name: string,
+    confidence := Compile_Warning_Confidence.Conservative,
+) -> bool {
     idx := owned_locals_find_last(live[:], name)
     if idx < 0 {
         return false
     }
     live[idx].state = .Moved
+    live[idx].move_confidence = confidence
     return true
 }
 
@@ -7715,6 +7745,9 @@ owned_locals_merge_definite_branch_moves :: proc(live: ^[dynamic]Owned_Local, th
            then_live[i].state == .Moved &&
            else_live[i].state == .Moved {
             live[i].state = .Moved
+            // Branch merging is deliberately conservative until replacement
+            // values and aliases are represented in the flow state.
+            live[i].move_confidence = .Conservative
         }
     }
 }
@@ -7738,6 +7771,7 @@ owned_locals_apply_definite_moves :: proc(live: ^[dynamic]Owned_Local, definite_
            definite_live[i].name == live[i].name &&
            definite_live[i].state == .Moved {
             live[i].state = .Moved
+            live[i].move_confidence = .Conservative
         }
     }
 }
@@ -7769,6 +7803,26 @@ form_head_symbol_text :: proc(form: CST_Form) -> (string, bool) {
     return form.items[0].text, true
 }
 
+cleanup_call_head :: proc(head: string) -> bool {
+    normalized := map_name(head)
+    defer delete(normalized)
+    return strings.contains(normalized, "destroy") ||
+           strings.contains(normalized, "free") ||
+           strings.contains(normalized, "close") ||
+           strings.contains(normalized, "release")
+}
+
+cleanup_arg_names_value :: proc(form: CST_Form, name: string) -> bool {
+    if form.kind == .Symbol {
+        return map_name(form.text) == name
+    }
+    head, ok := form_head_symbol_text(form)
+    if ok && (head == "addr" || head == "deref") && len(form.items) == 2 {
+        return cleanup_arg_names_value(form.items[1], name)
+    }
+    return false
+}
+
 form_is_delete_of_name :: proc(form: CST_Form, name: string) -> bool {
     head, ok := form_head_symbol_text(form)
     if !ok {
@@ -7776,6 +7830,13 @@ form_is_delete_of_name :: proc(form: CST_Form, name: string) -> bool {
     }
     if head == "delete" && len(form.items) == 2 && form.items[1].kind == .Symbol {
         return map_name(form.items[1].text) == name
+    }
+    if cleanup_call_head(head) {
+        for item in form.items[1:] {
+            if cleanup_arg_names_value(item, name) {
+                return true
+            }
+        }
     }
     if head == "defer" {
         for item in form.items[1:] {
@@ -7890,7 +7951,13 @@ emit_borrowed_escape_warning :: proc(e: ^Emitter, owner_name: string, span: Span
     if owner_name == "" {
         return
     }
-    emit_warning(e, fmt.tprintf("borrowed value escapes owner %s", owner_name), span)
+    emit_coded_warning(
+        e,
+        fmt.tprintf("borrowed value escapes owner %s", owner_name),
+        span,
+        .Ownership_Borrowed_Escape,
+        .Conservative,
+    )
 }
 
 borrowed_escape_owner_name :: proc(e: ^Emitter, form: CST_Form, borrowed: []Borrowed_Local, live: []Owned_Local) -> (string, bool) {
@@ -7991,8 +8058,21 @@ warn_use_after_transfer_form :: proc(e: ^Emitter, form: CST_Form, live: []Owned_
         name := map_name(form.text)
         idx := owned_locals_find_last(live, name)
         if idx >= 0 && live[idx].state == .Moved {
-            emit_warning(e, fmt.tprintf("owned local %s is used after ownership transfer", name), form.span)
+            emit_coded_warning(
+                e,
+                fmt.tprintf("owned local %s is used after ownership transfer", name),
+                form.span,
+                .Ownership_Use_After_Transfer,
+                live[idx].move_confidence,
+            )
         }
+        return
+    }
+    if head, ok := form_head_symbol_text(form); ok && head == "set!" && len(form.items) == 3 {
+        // The assignment target is a storage location, not a read of its
+        // previous value. Only the replacement expression can use a moved
+        // local.
+        warn_use_after_transfer_form(e, form.items[2], live)
         return
     }
     for item in form.items {
@@ -8117,7 +8197,7 @@ analyze_owned_scope_body :: proc(e: ^Emitter, forms: []CST_Form, can_transfer_fi
         head, ok := form_head_symbol_text(form)
         if !ok {
             if form_produces_owned_value(form, e) && !(final_in_scope && can_transfer_final) {
-                emit_warning(e, discarded_owned_warning_message(form), form.span)
+                emit_coded_warning(e, discarded_owned_warning_message(form), form.span, .Ownership_Discarded_Result)
             }
             continue
         }
@@ -8127,7 +8207,7 @@ analyze_owned_scope_body :: proc(e: ^Emitter, forms: []CST_Form, can_transfer_fi
             for item in form.items[1:] {
                 warn_if_borrowed_escape(e, item, borrowed[:], live[:])
                 if item.kind == .Symbol {
-                    _ = owned_locals_mark_moved_last(live, map_name(item.text))
+                    _ = owned_locals_mark_moved_last(live, map_name(item.text), .Definite)
                     continue
                 }
                 for i := len(live[:]) - 1; i >= 0; i -= 1 {
@@ -8140,16 +8220,16 @@ analyze_owned_scope_body :: proc(e: ^Emitter, forms: []CST_Form, can_transfer_fi
         case "discard":
             for item in form.items[1:] {
                 if form_produces_owned_value(item, e) {
-                    emit_warning(e, discarded_owned_warning_message(item), item.span)
+                    emit_coded_warning(e, discarded_owned_warning_message(item), item.span, .Ownership_Discarded_Result)
                 }
             }
         case "delete":
             for item in form.items[1:] {
                 if form_is_borrowed_view_result(item, e) {
-                    emit_warning(e, borrowed_delete_warning_message(item), item.span)
+                    emit_coded_warning(e, borrowed_delete_warning_message(item), item.span, .Ownership_Delete_Borrowed)
                 }
                 if item.kind == .Symbol {
-                    _ = owned_locals_mark_moved_last(live, map_name(item.text))
+                    _ = owned_locals_mark_moved_last(live, map_name(item.text), .Definite)
                 }
             }
         case "set!":
@@ -8158,11 +8238,29 @@ analyze_owned_scope_body :: proc(e: ^Emitter, forms: []CST_Form, can_transfer_fi
                 if name == "" {
                     continue
                 }
-                if owned_locals_live_find_last(live[:], name) >= 0 {
-                    emit_warning(e, fmt.tprintf("owned local %s is overwritten before cleanup; delete it or return it before set!", name), form.items[1].span)
-                    _ = owned_locals_mark_moved_last(live, name)
+                existing_idx := owned_locals_find_last(live[:], name)
+                if existing_idx >= 0 && live[existing_idx].state == .Live {
+                    emit_coded_warning(
+                        e,
+                        fmt.tprintf("owned local %s is overwritten before cleanup; delete it or return it before set!", name),
+                        form.items[1].span,
+                        .Ownership_Overwrite,
+                    )
                 }
-                if form_produces_owned_value(form.items[2], e) {
+                if existing_idx >= 0 {
+                    // `set!` replaces the storage; it is not a later read of
+                    // the value deleted immediately beforehand. The target's
+                    // native type still determines that the replacement is an
+                    // owned value even when the RHS is a local symbol.
+                    live[existing_idx].state = .Live
+                    live[existing_idx].move_confidence = .Conservative
+                    if form.items[2].kind == .Symbol {
+                        rhs_name := map_name(form.items[2].text)
+                        if rhs_name != name {
+                            _ = owned_locals_mark_moved_last(live, rhs_name)
+                        }
+                    }
+                } else if form_produces_owned_value(form.items[2], e) {
                     append(live, Owned_Local{name = name, span = form.items[1].span})
                 }
                 if owner, ok_owner := form_borrowed_assignment_owner_name(e, form.items[2], borrowed[:], live[:]); ok_owner {
@@ -8191,7 +8289,7 @@ analyze_owned_scope_body :: proc(e: ^Emitter, forms: []CST_Form, can_transfer_fi
                 }
                 mark_transferred_owned_args(binding.value, live)
                 if (binding.deferred_delete || binding.defer_with_cleanup) && form_is_borrowed_view_result(binding.value, e) {
-                    emit_warning(e, borrowed_delete_warning_message(binding.value), binding.value.span)
+                    emit_coded_warning(e, borrowed_delete_warning_message(binding.value), binding.value.span, .Ownership_Delete_Borrowed)
                 }
                 if !binding.is_destructure && binding.name != "" && form_is_borrowed_view_result(binding.value, e) {
                     if owner, ok_owner := form_direct_borrow_owner_name(binding.value, e); ok_owner && owned_locals_live_find_last(live[:], owner) >= 0 {
@@ -8231,7 +8329,13 @@ analyze_owned_scope_body :: proc(e: ^Emitter, forms: []CST_Form, can_transfer_fi
                     }
                 }
                 if !skip_warning && !body_deletes_or_returns_name(form.items[2:], live[i].name, final_in_scope && can_transfer_final) {
-                    emit_warning(e, fmt.tprintf("owned local %s is never deleted or returned; add (defer (delete %s)) or return it", live[i].name, live[i].name), live[i].span)
+                    emit_coded_warning(
+                        e,
+                        fmt.tprintf("owned local %s is never deleted or returned; add (defer (delete %s)) or return it", live[i].name, live[i].name),
+                        live[i].span,
+                        .Ownership_Unreleased_Local,
+                        .Conservative,
+                    )
                 }
             }
             resize(live, start)
@@ -8302,7 +8406,7 @@ analyze_owned_scope_body :: proc(e: ^Emitter, forms: []CST_Form, can_transfer_fi
         case:
             mark_transferred_owned_args(form, live)
             if form_produces_owned_value(form, e) && !(final_in_scope && can_transfer_final) {
-                emit_warning(e, discarded_owned_warning_message(form), form.span)
+                emit_coded_warning(e, discarded_owned_warning_message(form), form.span, .Ownership_Discarded_Result)
             }
         }
     }
@@ -8325,7 +8429,12 @@ lint_defer_in_loop_form :: proc(e: ^Emitter, form: CST_Form, in_loop_scope: bool
     }
 
     if head == "defer" && in_loop_scope {
-        emit_warning(e, "defer inside loop runs when the surrounding scope exits, not after each iteration; wrap the iteration body in block or clean up explicitly", form.span)
+        emit_coded_warning(
+            e,
+            "defer inside loop runs when the surrounding scope exits, not after each iteration; wrap the iteration body in block or clean up explicitly",
+            form.span,
+            .Ownership_Defer_In_Loop,
+        )
         return
     }
 

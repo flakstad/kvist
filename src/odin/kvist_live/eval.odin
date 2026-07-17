@@ -547,6 +547,36 @@ eval_list :: proc(module: ^Live_Module, form: kvist.CST_Form, ctx: Eval_Context)
             value_delete(&value)
         }
         return value_string(strings.to_string(builder)), Runtime_Error{}, true
+    case "fmt.aprintf", "fmt/aprintf":
+        // Core `str` expands to one aprintf call whose template is only a
+        // sequence of `%v` placeholders. Keep the live evaluator aligned with
+        // that core macro without implementing Odin's formatting language.
+        if len(form.items) < 2 || form.items[1].kind != .String {
+            return Value{}, Runtime_Error{message = strings.clone("live fmt.aprintf expects a literal format")}, false
+        }
+        format := kvist.unquote_string(form.items[1].text)
+        defer delete(format)
+        if len(format) != (len(form.items)-2)*2 {
+            return Value{}, Runtime_Error{message = strings.clone("live fmt.aprintf only supports core str expansion")}, false
+        }
+        for i := 0; i < len(format); i += 2 {
+            if format[i] != '%' || format[i+1] != 'v' {
+                return Value{}, Runtime_Error{message = strings.clone("live fmt.aprintf only supports core str expansion")}, false
+            }
+        }
+        builder := strings.builder_make()
+        defer strings.builder_destroy(&builder)
+        for arg_form in form.items[2:] {
+            value, err, ok := eval_form(module, arg_form, ctx)
+            if !ok {
+                return Value{}, err, false
+            }
+            rendered := value_text(value)
+            strings.write_string(&builder, rendered)
+            delete(rendered)
+            value_delete(&value)
+        }
+        return value_string(strings.to_string(builder)), Runtime_Error{}, true
     case:
         live_fn, found := find_live_function(module, head)
         if !found {
