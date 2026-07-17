@@ -4380,9 +4380,13 @@ emit_data_decode_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_E
         return "", err_ty, false
     }
     struct_decl, ok_struct := find_struct_decl(e, target_ty)
-    if !ok_struct {
+    _, ok_dynamic_array := dynamic_array_element_type(target_ty)
+    if !ok_struct && !ok_dynamic_array {
         return "", Compile_Error{
-            message = fmt.tprintf("data.decode currently expects a Kvist struct type, got %s", target_ty),
+            message = fmt.tprintf(
+                "data.decode expects a Kvist struct or dynamic-array type, got %s",
+                target_ty,
+            ),
             span = form.items[1].span,
         }, false
     }
@@ -4415,20 +4419,45 @@ emit_data_decode_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_E
         "(proc(kvist_value, kvist_path: Data) -> (decoded: %s, err: data__Decode_Error, ok: bool) {{\n",
         target_ty,
     )
-    strings.write_string(
-        &builder,
-        "    if kvist_value.kind != .Map { return {}, data__decode_error(kvist_path, .Map, kvist_value.kind), false }\n",
-    )
     counter := 0
-    decoded_text, err_decoded, ok_decoded := emit_decode_struct_value(
-        e,
-        &builder,
-        struct_decl,
-        "kvist_value",
-        nil,
-        &counter,
-        form.items[1].span,
-    )
+    decoded_text: string
+    err_decoded: Compile_Error
+    ok_decoded: bool
+    if ok_struct {
+        strings.write_string(
+            &builder,
+            "    if kvist_value.kind != .Map { return {}, data__decode_error(kvist_path, .Map, kvist_value.kind), false }\n",
+        )
+        decoded_text, err_decoded, ok_decoded = emit_decode_struct_value(
+            e,
+            &builder,
+            struct_decl,
+            "kvist_value",
+            nil,
+            &counter,
+            form.items[1].span,
+        )
+    } else {
+        target_field := Struct_Field{
+            name = "decoded",
+            source_name = target_ty,
+            ty = target_ty,
+            owns_dynamic_array = true,
+        }
+        field_id := counter
+        counter += 1
+        decoded_text, err_decoded, ok_decoded = emit_decode_dynamic_array_field(
+            e,
+            &builder,
+            target_field,
+            "kvist_value",
+            "",
+            nil,
+            field_id,
+            &counter,
+            form.items[1].span,
+        )
+    }
     if !ok_decoded {
         return "", err_decoded, false
     }
@@ -8158,7 +8187,9 @@ emit_managed_destructure_cleanup :: proc(e: ^Emitter, binding: Binding) {
     if head_name == "decode_data" && len(binding.pattern) == 3 && len(binding.value.items) >= 2 {
         target_ty, _, ok_target_ty := parse_type_text(binding.value.items[1])
         if ok_target_ty {
-            if binding.pattern[0] != "" && type_text_has_managed_lifecycle(e, target_ty) {
+            if binding.pattern[0] != "" &&
+               (type_text_has_managed_lifecycle(e, target_ty) ||
+                type_text_is_owned_result(target_ty)) {
                 emit_line(e, fmt.tprintf(
                     "defer %s",
                     managed_destroy_value_text(e, target_ty, binding.pattern[0]),
