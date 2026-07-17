@@ -591,6 +591,9 @@ run_odin_file :: proc(command, generated_path, source_path, source, eval_source,
         }
         out_arg = strings.clone(fmt.tprintf("-out:%s", out_path))
         append(&args, out_arg)
+        when ODIN_OS == .Windows {
+            append(&args, "-extra-linker-flags:/STACK:16777216")
+        }
     }
     defer cleanup_odin_output_arg(out_path, out_arg, remove_out_path)
     state, stdout, stderr, err := os.process_exec(
