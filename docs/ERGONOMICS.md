@@ -50,10 +50,10 @@ compiler behavior.
 ### 2. Safe Data/Native Boundaries
 
 - Implemented for top-level Kvist structs: recursive managed fields,
-  construction, copying, `copy-with`, ordinary-field `copy-update`, overwrite,
+  construction, copying, `assoc`, ordinary-field `update`, overwrite,
   move, return, named-result destruction, discarded values, and destruction.
 - Continue the managed-value behavior across arrays, maps, unions, closures,
-  local structs, imported Odin structs, and managed-field `copy-update`.
+  local structs, imported Odin structs, and managed-field `update`.
 - Add typed Data decoding for scalars, enums, structs, optional/default fields,
   and selected homogeneous collections.
 - Implemented first decoding slice: integer, float, and boolean values return

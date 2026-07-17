@@ -47,7 +47,7 @@ Remaining compiler work:
    for new expression forms.
 3. Define managed fields in native structs, including copy, overwrite, move,
    return, and aggregate destruction. Top-level Kvist structs are implemented;
-   local structs, imported Odin structs, and managed-field `copy-update` remain.
+   local structs, imported Odin structs, and managed-field `update` remain.
 4. Define managed elements in arrays, dynamic arrays, maps, unions, and
    closures.
 5. Generalize the implementation as a managed-value protocol rather than a

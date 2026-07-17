@@ -3094,6 +3094,184 @@ emit_shallow_assoc_copy_expr :: proc(e: ^Emitter, target_form: CST_Form, target_
                        target_ty, field_ty, target_ty, "{", temp, target_init, assignment, temp, target_text, value_text), {}, true
 }
 
+emit_data_assoc_expr :: proc(e: ^Emitter, form: CST_Form, target_text: string) -> (string, Compile_Error, bool) {
+    if len(form.items) != 4 {
+        return "", Compile_Error{message = "assoc on Data expects collection, key, and value", span = form.span}, false
+    }
+    key_text, err_key, ok_key := emit_data_lookup_key(e, form.items[2])
+    if !ok_key {
+        return "", err_key, false
+    }
+    value_text := ""
+    value_owned := false
+    err_value: Compile_Error
+    ok_value := false
+    #partial switch form.items[3].kind {
+    case .Nil, .Bool, .Number, .String, .Keyword, .Vector, .Brace, .Set:
+        value_text, err_value, ok_value = emit_data_value_literal(e, form.items[3])
+    case:
+        value_text, value_owned, err_value, ok_value = runtime_data_unquote_expr(e, form.items[3])
+    }
+    if !ok_value {
+        return "", err_value, false
+    }
+    mark_data_type(e)
+    if value_owned {
+        return fmt.tprintf(
+            "(proc(kvist_target, kvist_key, kvist_value: Data) -> Data {{\n    defer kvist_data_release(kvist_value)\n    return kvist_data_assoc(kvist_target, kvist_key, kvist_value)\n}})(%s, %s, %s)",
+            target_text,
+            key_text,
+            value_text,
+        ), {}, true
+    }
+    return emit_call_text("kvist_data_assoc", []string{target_text, key_text, value_text}), {}, true
+}
+
+emit_data_update_expr :: proc(e: ^Emitter, form: CST_Form, target_text: string) -> (string, Compile_Error, bool) {
+    if len(form.items) < 4 {
+        return "", Compile_Error{message = "update on Data expects collection, key, updater, and optional arguments", span = form.span}, false
+    }
+    key_text, err_key, ok_key := emit_data_lookup_key(e, form.items[2])
+    if !ok_key {
+        return "", err_key, false
+    }
+    arg_texts: [dynamic]string
+    append(&arg_texts, "kvist_data_get(kvist_target, kvist_key)")
+    rest_texts: [dynamic]string
+    rest_names: [dynamic]string
+    rest_types: [dynamic]string
+    defer delete(rest_texts)
+    defer delete(rest_names)
+    defer delete(rest_types)
+    for rest_form, idx in form.items[4:] {
+        rest_ty := ""
+        ok_rest_ty := false
+        if form.items[3].kind == .Symbol {
+            updater_name := map_name(form.items[3].text)
+            if updater_decl, ok_updater := find_proc_decl(e, updater_name); ok_updater && idx+1 < len(updater_decl.params) {
+                rest_ty = updater_decl.params[idx+1].ty
+                ok_rest_ty = true
+            }
+            delete(updater_name)
+        }
+        if !ok_rest_ty {
+            rest_ty, ok_rest_ty = obvious_form_type(e, rest_form)
+        }
+        if !ok_rest_ty {
+            return "", Compile_Error{
+                message = "update on Data expects extra updater arguments with obvious types; bind or annotate the value first",
+                span = rest_form.span,
+            }, false
+        }
+        rest_text, err_rest, ok_rest := emit_expr_for_expected_type(e, rest_form, rest_ty)
+        if !ok_rest {
+            return "", err_rest, false
+        }
+        rest_name := fmt.tprintf("kvist_arg_%d", idx)
+        append(&rest_names, rest_name)
+        append(&rest_types, rest_ty)
+        append(&rest_texts, rest_text)
+        append(&arg_texts, rest_name)
+    }
+    updated_text, err_updated, ok_updated := emit_update_rhs(e, form.items[3], arg_texts[:])
+    if !ok_updated {
+        return "", err_updated, false
+    }
+    if form.items[3].kind == .Symbol {
+        updater_name := map_name(form.items[3].text)
+        if updater_decl, ok_updater := find_proc_decl(e, updater_name); ok_updater && updater_decl.borrows_result {
+            updated_text = emit_call_text("kvist_data_retain", []string{updated_text})
+        }
+        delete(updater_name)
+    }
+    params_builder := strings.builder_make()
+    defer strings.builder_destroy(&params_builder)
+    call_builder := strings.builder_make()
+    defer strings.builder_destroy(&call_builder)
+    for name, idx in rest_names {
+        fmt.sbprintf(&params_builder, ", %s: %s", name, rest_types[idx])
+        fmt.sbprintf(&call_builder, ", %s", rest_texts[idx])
+    }
+    mark_data_type(e)
+    return fmt.tprintf(
+        "(proc(kvist_target, kvist_key: Data%s) -> Data {{\n    kvist_updated := %s\n    defer kvist_data_release(kvist_updated)\n    return kvist_data_assoc(kvist_target, kvist_key, kvist_updated)\n}})(%s, %s%s)",
+        strings.to_string(params_builder),
+        updated_text,
+        target_text,
+        key_text,
+        strings.to_string(call_builder),
+    ), {}, true
+}
+
+emit_data_dissoc_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) {
+    if len(form.items) < 3 {
+        return "", Compile_Error{message = "dissoc expects Data and at least one key", span = form.span}, false
+    }
+    target_ty, ok_target_ty := obvious_form_type(e, form.items[1])
+    if !ok_target_ty || target_ty != "Data" {
+        return "", Compile_Error{message = "dissoc currently expects a Data map", span = form.items[1].span}, false
+    }
+    target_text, err_target, ok_target := emit_expr(e, form.items[1])
+    if !ok_target {
+        return "", err_target, false
+    }
+    keys: [dynamic]string
+    defer delete(keys)
+    for key_form in form.items[2:] {
+        key_text, err_key, ok_key := emit_data_lookup_key(e, key_form)
+        if !ok_key {
+            return "", err_key, false
+        }
+        append(&keys, key_text)
+    }
+    mark_data_type(e)
+    if len(keys) == 1 {
+        return emit_call_text("kvist_data_dissoc", []string{target_text, keys[0]}), {}, true
+    }
+    params_builder := strings.builder_make()
+    defer strings.builder_destroy(&params_builder)
+    call_builder := strings.builder_make()
+    defer strings.builder_destroy(&call_builder)
+    body_builder := strings.builder_make()
+    defer strings.builder_destroy(&body_builder)
+    for key, idx in keys {
+        fmt.sbprintf(&params_builder, ", kvist_key_%d: Data", idx)
+        fmt.sbprintf(&call_builder, ", %s", key)
+        fmt.sbprintf(
+            &body_builder,
+            "    kvist_data_move_assign(&kvist_result, kvist_data_dissoc(kvist_result, kvist_key_%d))\n",
+            idx,
+        )
+    }
+    return fmt.tprintf(
+        "(proc(kvist_target: Data%s) -> Data {{\n    kvist_result := kvist_data_retain(kvist_target)\n%s    return kvist_result\n}})(%s%s)",
+        strings.to_string(params_builder),
+        strings.to_string(body_builder),
+        target_text,
+        strings.to_string(call_builder),
+    ), {}, true
+}
+
+emit_data_dissoc_in_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) {
+    if len(form.items) != 3 {
+        return "", Compile_Error{message = "dissoc-in expects Data and one Data path", span = form.span}, false
+    }
+    target_ty, ok_target_ty := obvious_form_type(e, form.items[1])
+    if !ok_target_ty || target_ty != "Data" {
+        return "", Compile_Error{message = "dissoc-in currently expects a Data map", span = form.items[1].span}, false
+    }
+    target_text, err_target, ok_target := emit_expr(e, form.items[1])
+    if !ok_target {
+        return "", err_target, false
+    }
+    path_text, err_path, ok_path := emit_expr_for_expected_type(e, form.items[2], "Data")
+    if !ok_path {
+        return "", err_path, false
+    }
+    mark_data_type(e)
+    return emit_call_text("kvist_data_dissoc_in", []string{target_text, path_text}), {}, true
+}
+
 emit_shallow_update_copy_expr :: proc(e: ^Emitter, target_form: CST_Form, target_text, target_ty: string, fields: []string, field_span: Span, updater_form: CST_Form, rest_forms: []CST_Form) -> (string, Compile_Error, bool) {
     field_ty, err_field_ty, ok_field_ty := struct_field_type_for_update_path(e, target_ty, fields, "update", field_span)
     if !ok_field_ty {
@@ -3101,7 +3279,7 @@ emit_shallow_update_copy_expr :: proc(e: ^Emitter, target_form: CST_Form, target
     }
     if type_text_has_managed_lifecycle(e, field_ty) {
         return "", Compile_Error{
-            message = "copy-update of a managed field is not yet supported; compute the new value first and use copy-with",
+            message = "update of a managed field is not yet supported; compute the new value first and use assoc",
             span = field_span,
         }, false
     }
@@ -3163,6 +3341,15 @@ emit_shallow_update_copy_expr :: proc(e: ^Emitter, target_form: CST_Form, target
 }
 
 emit_shallow_assoc_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) {
+    if len(form.items) >= 2 {
+        if target_ty, ok_target_ty := obvious_form_type(e, form.items[1]); ok_target_ty && target_ty == "Data" {
+            target_text, err_target, ok_target := emit_expr(e, form.items[1])
+            if !ok_target {
+                return "", err_target, false
+            }
+            return emit_data_assoc_expr(e, form, target_text)
+        }
+    }
     target_form, fields, field_span, value_form, err_args, ok_args := shallow_assoc_args(form)
     if !ok_args {
         return "", err_args, false
@@ -3179,6 +3366,15 @@ emit_shallow_assoc_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile
 }
 
 emit_shallow_update_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) {
+    if len(form.items) >= 2 {
+        if target_ty, ok_target_ty := obvious_form_type(e, form.items[1]); ok_target_ty && target_ty == "Data" {
+            target_text, err_target, ok_target := emit_expr(e, form.items[1])
+            if !ok_target {
+                return "", err_target, false
+            }
+            return emit_data_update_expr(e, form, target_text)
+        }
+    }
     target_form, fields, field_span, updater_form, rest_forms, err_args, ok_args := shallow_update_args(form)
     if !ok_args {
         return "", err_args, false
@@ -3482,6 +3678,10 @@ head_is_core_assoc :: proc(head: string) -> bool {
 
 head_is_core_update :: proc(head: string) -> bool {
     return head == "copy-update"
+}
+
+head_is_core_dissoc :: proc(head: string) -> bool {
+    return head == "copy-dissoc" || head == "copy-dissoc-in"
 }
 
  thread_temp_name :: proc(e: ^Emitter) -> string {
@@ -6557,6 +6757,13 @@ form_produces_owned_managed_value :: proc(e: ^Emitter, form: CST_Form, depth: in
     if form.items[0].text == "quasiquote" {
         return true
     }
+    if head_is_core_assoc(form.items[0].text) ||
+       head_is_core_update(form.items[0].text) ||
+       head_is_core_dissoc(form.items[0].text) {
+        if ty, ok_ty := obvious_form_type(e, form); ok_ty && type_text_is_managed_value(ty) {
+            return true
+        }
+    }
     switch form.items[0].text {
     case "if", "let", "do", "block", "type-case":
         if ty, ok_ty := obvious_form_type(e, form); ok_ty && type_text_is_managed_value(ty) {
@@ -7271,7 +7478,9 @@ obvious_form_type :: proc(e: ^Emitter, form: CST_Form) -> (string, bool) {
                 return return_ty, true
             }
         }
-        if (head_is_core_assoc(form.items[0].text) || head_is_core_update(form.items[0].text)) &&
+        if (head_is_core_assoc(form.items[0].text) ||
+            head_is_core_update(form.items[0].text) ||
+            head_is_core_dissoc(form.items[0].text)) &&
            len(form.items) >= 2 {
             return shallow_update_return_type(e, form)
         }
@@ -7586,7 +7795,7 @@ obvious_binding_type :: proc(e: ^Emitter, binding: Binding) -> (string, bool) {
     if binding.value.kind == .List && len(binding.value.items) > 0 && binding.value.items[0].kind == .Symbol {
         head := binding.value.items[0].text
         head_name := map_name(head)
-        if (head_is_core_assoc(head) || head_is_core_update(head)) &&
+        if (head_is_core_assoc(head) || head_is_core_update(head) || head_is_core_dissoc(head)) &&
            len(binding.value.items) >= 2 {
             return shallow_update_return_type(e, binding.value)
         }
@@ -12722,6 +12931,12 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
     if head.text == "copy-update" {
         return emit_shallow_update_expr(e, form)
     }
+    if head.text == "copy-dissoc" {
+        return emit_data_dissoc_expr(e, form)
+    }
+    if head.text == "copy-dissoc-in" {
+        return emit_data_dissoc_in_expr(e, form)
+    }
 
     if head.text == "as->" {
         return emit_as_thread_expr(e, form)
@@ -15562,6 +15777,21 @@ emit_data_type_helper :: proc(e: ^Emitter) {
     emit_line(e, "node.entries = make([dynamic]Data_Entry, 0, len(collection.payload.entries), allocator)")
     emit_line(e, "for entry in collection.payload.entries { if !kvist_data_equal(entry.key, key) { append(&node.entries, Data_Entry{key = kvist_data_retain(entry.key), value = kvist_data_retain(entry.value)}) } }")
     emit_line(e, "return Data{kind = .Map, payload = {entries = node.entries[:]}, node = node}")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "kvist_data_dissoc_in :: proc(collection, path: Data, allocator: kvist_runtime.Allocator = context.allocator) -> Data {")
+    e.indent += 1
+    emit_line(e, "assert(collection.kind == .Map, \"Data dissoc-in expects a map\")")
+    emit_line(e, "assert(path.kind == .List || path.kind == .Vector, \"Data dissoc-in expects a list or vector path\")")
+    emit_line(e, "if len(path.payload.items) == 0 { return kvist_data_retain(collection) }")
+    emit_line(e, "key := path.payload.items[0]")
+    emit_line(e, "if len(path.payload.items) == 1 { return kvist_data_dissoc(collection, key, allocator) }")
+    emit_line(e, "child := kvist_data_get(collection, key)")
+    emit_line(e, "if child.kind != .Map { return kvist_data_retain(collection) }")
+    emit_line(e, "tail := Data{kind = path.kind, payload = {items = path.payload.items[1:]}, node = path.node}")
+    emit_line(e, "updated := kvist_data_dissoc_in(child, tail, allocator)")
+    emit_line(e, "defer kvist_data_release(updated)")
+    emit_line(e, "return kvist_data_assoc(collection, key, updated, allocator)")
     e.indent -= 1
     emit_line(e, "}")
     emit_line(e, "kvist_data_conj :: proc(collection, value: Data, allocator: kvist_runtime.Allocator = context.allocator) -> Data {")

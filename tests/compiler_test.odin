@@ -879,7 +879,9 @@ compile_all_examples :: proc(t: ^testing.T) {
         "examples/coverage/cluck-port/cluck-port-struct-types.kvist",
         "examples/language/closures.kvist",
         "examples/language/control-flow.kvist",
+        "examples/data/core-updates.kvist",
         "examples/data/edn-write.kvist",
+        "examples/data/typed-decode.kvist",
         "examples/interop/core/core-concurrency.kvist",
         "examples/interop/core/core-container-queue.kvist",
         "examples/interop/core/core-encoding-formats.kvist",
@@ -904,6 +906,7 @@ compile_all_examples :: proc(t: ^testing.T) {
         "examples/language/macro-dsl.kvist",
         "examples/language/macro-messages.kvist",
         "examples/language/macro-union-helpers.kvist",
+        "examples/language/managed-data-structs.kvist",
         "examples/language/multiline-strings.kvist",
         "examples/language/multi-return-bindings.kvist",
         "examples/interop/core/matrix.kvist",
@@ -3814,7 +3817,7 @@ compile_rejects_copy_update_of_managed_struct_field :: proc(t: ^testing.T) {
     testing.expect_value(
         t,
         err.message,
-        "copy-update of a managed field is not yet supported; compute the new value first and use copy-with",
+        "update of a managed field is not yet supported; compute the new value first and use assoc",
     )
 }
 

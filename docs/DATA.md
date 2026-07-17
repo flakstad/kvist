@@ -84,13 +84,19 @@ reference.
 
 Top-level Kvist structs whose fields contain `Data`, directly or through
 another managed Kvist struct, now follow the same protocol. Construction,
-binding copies, `copy-with`, `copy-update` of ordinary native fields,
-assignment, returns, named-result destructuring, discarded results, and scope
-destruction retain or release recursively. `copy-update` of a managed field is
-temporarily rejected; compute the replacement first and use `copy-with`.
+binding copies, `assoc`, `update` of ordinary native fields, assignment,
+returns, named-result destructuring, discarded results, and scope destruction
+retain or release recursively. `update` of a managed field is temporarily
+rejected; compute the replacement first and use `assoc`.
 Native arrays, dynamic arrays, maps, unions, closures, local structs, imported
 Odin structs, and copies performed outside generated Kvist code still require
 explicit `data.retain`/`data.release`.
+
+The unqualified core `assoc` and `update` operations dispatch statically for
+both native structs and `Data`. Core `dissoc` and `dissoc-in` operate on Data
+maps; `dissoc-in` removes the leaf association without pruning empty parents.
+The package-qualified `data.assoc`, `data.update`, `data.dissoc`, and
+`data.dissoc-in` forms remain available when the boundary should be explicit.
 
 ## Managed Runtime Values
 

@@ -1662,21 +1662,42 @@ Unary mutation helpers are available for common place updates:
 
 ### Non-Mutating Value Updates
 
-For struct updates where you want a changed copy instead of mutating the
-original value, use `assoc` and `update`:
+For native struct or immutable `Data` updates where you want a changed value
+instead of mutating the original, use `assoc` and `update`:
 
 ```clojure
 (assoc user.name "Ada")
 (assoc user.profile.name "Ada")
 (update user.age inc)
 (update user.profile.age + 1)
+
+(assoc message :status :ready)
+(update message :attempts increment-data)
 ```
 
-These forms copy the root struct value once, update the selected field path on
-the copy, and return the copy.
+Dispatch is resolved statically from the target type. Struct forms copy the
+root value once, update the selected field path, and return the copy. Data forms
+perform an immutable map or vector update and preserve structural sharing.
+
+Remove map keys from Data with `dissoc`. It accepts one or more keys:
+
+```clojure
+(dissoc message :temporary)
+(dissoc message :temporary :debug)
+```
+
+Use `dissoc-in` with a Data list or vector path to remove a nested leaf:
+
+```clojure
+(dissoc-in message '[:request :credentials])
+```
+
+Missing paths leave the original value unchanged. Empty parent maps are
+preserved rather than implicitly pruned.
 
 Dynamic arrays, slices, maps, and sets are not path-updated this way; use
-explicit copying or mutation for those.
+explicit copying or mutation for those. This restriction does not apply to
+immutable `Data` collections.
 
 In a `->` pipeline, use a `.field` selector step:
 

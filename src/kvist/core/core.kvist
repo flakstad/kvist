@@ -166,12 +166,12 @@
             found))))))
 
 (defmacro assoc
-  "Return a shallow copy of a struct with one field replaced.
+  "Immutably associate a value with a native struct field or Data key.
 
-  `(assoc value.field new-value)` copies `value`, assigns `.field` on the
-  copy, and returns the copy. In a `->` pipeline, `(assoc .field new-value)`
-  uses the threaded value as the struct target. This is a shallow value update;
-  it does not deep copy owned fields."
+  Struct forms accept `(assoc value.field replacement)` or
+  `(assoc value .field replacement)`. Data accepts `(assoc value key
+  replacement)`. Dispatch is static and managed fields retain or move their
+  values according to the ordinary ownership rules."
   [place-or-target value-or-selector & rest]
   (if (= (count rest) 0)
     (let [place (field-place place-or-target 0)
@@ -181,12 +181,11 @@
       `(copy-with ~place-or-target ~value-or-selector ~(first rest))))
 
 (defmacro update
-  "Return a shallow copy of a struct with one field updated by a function.
+  "Immutably update a native struct field or Data value with a function.
 
-  `(update value.field f args...)` copies `value`, assigns
-  `(f value.field args...)` on the copy, and returns the copy. In a `->`
-  pipeline, `(update .field f args...)` uses the threaded value as the struct
-  target. This is a shallow value update; it does not deep copy owned fields."
+  Struct forms accept `(update value.field f args...)` or
+  `(update value .field f args...)`. Data accepts `(update value key f
+  args...)`. Dispatch is static."
   [place-or-target updater-or-selector & rest]
   (if (= (count rest) 0)
     (let [place (field-place place-or-target 0)
@@ -198,6 +197,18 @@
        ~updater-or-selector
        ~(first rest)
        ~@(rest rest))))
+
+(defmacro dissoc
+  "Return Data without one or more map keys."
+  [collection key & keys]
+  `(copy-dissoc ~collection ~key ~@keys))
+
+(defmacro dissoc-in
+  "Remove the leaf association at `path` from nested map Data.
+
+  Empty parent maps are preserved. A missing path leaves the value unchanged."
+  [collection path]
+  `(copy-dissoc-in ~collection ~path))
 
 (defmacro delete!
   "Remove `key` from a mutable map-like target in place.

@@ -109,6 +109,14 @@
   [collection: Data, key: Data] -> Data #owned #force_inline
   (odin-call "kvist_data_dissoc" collection key))
 
+(defn dissoc-in
+  "Remove the leaf association at `path` from nested map Data.
+
+  `path` is list or vector Data. Empty parent maps are preserved and a missing
+  path leaves `collection` unchanged."
+  [collection: Data, path: Data] -> Data #owned #force_inline
+  (odin-call "kvist_data_dissoc_in" collection path))
+
 (defn conj
   "Return immutable sequential or set Data with `value` added."
   [collection: Data, value: Data] -> Data #owned #force_inline
