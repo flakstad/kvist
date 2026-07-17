@@ -21573,7 +21573,19 @@ compile_contextual_data_literals_in_direct_and_overloaded_calls :: proc(t: ^test
     [:db/add [:ro/id condition-id] :attention/not-before instant]))
 
 (defn measurements [count: int, ratio: f64] -> Data
-  [(+ count 1) (+ 1 ratio)])`
+  [(+ count 1) (+ 1 ratio)])
+
+(defn source-int [value: int] -> Data
+  [value])
+
+(defn source-string [value: string] -> Data
+  [value])
+
+(def source (overload source-int source-string))
+
+(defn source-contains? [value: string] -> bool
+  (let [result (source value)]
+    (contains? result [value])))`
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
@@ -21593,6 +21605,7 @@ compile_contextual_data_literals_in_direct_and_overloaded_calls :: proc(t: ^test
     testing.expect_value(t, strings.contains(output, "defer kvist_data_release(kvist_thread_"), true)
     testing.expect_value(t, strings.contains(output, "kvist_data_make_int(i64((count) + (1)))"), true)
     testing.expect_value(t, strings.contains(output, "kvist_data_make_float(f64((1) + (ratio)))"), true)
+    testing.expect_value(t, strings.contains(output, "return kvist_data_contains(result, kvist_thread_"), true)
 }
 
 @(test)

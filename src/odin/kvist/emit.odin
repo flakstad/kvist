@@ -1283,6 +1283,14 @@ call_arg_expected_type :: proc(e: ^Emitter, call: CST_Form, item_index: int) -> 
     arg_index := item_index-1
     head_name := map_name(call.items[0].text)
     defer delete(head_name)
+    if head_name == "odin_contains" &&
+       arg_index == 1 &&
+       len(call.items) == 3 {
+        if collection_ty, ok_collection_ty := obvious_form_type(e, call.items[1]);
+           ok_collection_ty && collection_ty == "Data" {
+            return strings.clone("Data"), true
+        }
+    }
     if expected_type, ok_expected := overload_literal_arg_expected_type(e, head_name, call.items[1:], arg_index); ok_expected {
         return expected_type, true
     }
@@ -1881,12 +1889,54 @@ form_contains_runtime_unquote :: proc(form: CST_Form, depth: int = 0) -> bool {
     return false
 }
 
+contextual_data_source_type :: proc(e: ^Emitter, form: CST_Form) -> (string, bool) {
+    if ty, ok_ty := obvious_form_type(e, form); ok_ty {
+        return ty, true
+    }
+    if form.kind != .List || len(form.items) == 0 || form.items[0].kind != .Symbol {
+        return "", false
+    }
+    switch form.items[0].text {
+    case "+", "-", "*", "/", "%", "%%", "min", "max":
+        if len(form.items) < 2 {
+            return "", false
+        }
+        selected := ""
+        selected_from_literal := false
+        for operand in form.items[1:] {
+            operand_ty, ok_operand_ty := contextual_data_source_type(e, operand)
+            if !ok_operand_ty {
+                continue
+            }
+            if operand_ty == "f64" {
+                return operand_ty, true
+            }
+            if operand_ty == "f32" {
+                selected = operand_ty
+                selected_from_literal = false
+                continue
+            }
+            if selected == "" || (selected_from_literal && operand.kind != .Number) {
+                selected = operand_ty
+                selected_from_literal = operand.kind == .Number
+            }
+        }
+        if selected != "" {
+            return selected, true
+        }
+    case "==", "=", "!=", "<", "<=", ">", ">=", "not", "!":
+        return "bool", true
+    case:
+    }
+    return "", false
+}
+
 runtime_data_unquote_expr :: proc(e: ^Emitter, form: CST_Form) -> (text: string, owned: bool, err: Compile_Error, ok: bool) {
     value, err_value, ok_value := emit_expr(e, form)
     if !ok_value {
         return "", false, err_value, false
     }
-    ty, ok_ty := obvious_form_type(e, form)
+    ty, ok_ty := contextual_data_source_type(e, form)
     if !ok_ty {
         expression := form.text
         if expression == "" && len(form.items) > 0 {
@@ -2039,7 +2089,7 @@ emit_contextual_data_value :: proc(e: ^Emitter, form: CST_Form) -> (text: string
             value, err_value, ok_value := emit_expr_for_expected_type(e, form, "Data")
             return value, true, err_value, ok_value
         }
-        if _, ok_ty := obvious_form_type(e, form); !ok_ty {
+        if _, ok_ty := contextual_data_source_type(e, form); !ok_ty {
             value, err_value, ok_value := emit_expr(e, form)
             return value, false, err_value, ok_value
         }
@@ -8598,6 +8648,34 @@ proc_decl_obvious_call_return_type :: proc(e: ^Emitter, proc_decl: ^Proc_Decl, a
     return substitute_type_names(proc_decl.returns.single_ty, names[:], types[:]), true
 }
 
+overload_obvious_call_return_type :: proc(e: ^Emitter, overload_name: string, args: []CST_Form) -> (string, bool) {
+    overload_decl, ok_overload := find_overload_decl(e, overload_name)
+    if !ok_overload {
+        return "", false
+    }
+    selected := ""
+    for member in overload_decl.overload_members {
+        proc_decl, ok_proc := find_proc_decl(e, member)
+        if !ok_proc || !proc_accepts_positional_arg_count(proc_decl, len(args)) {
+            continue
+        }
+        return_ty, ok_return_ty := proc_decl_obvious_call_return_type(e, proc_decl, args)
+        if !ok_return_ty {
+            return "", false
+        }
+        if selected == "" {
+            selected = return_ty
+        } else if selected != return_ty {
+            delete(return_ty)
+            delete(selected)
+            return "", false
+        } else {
+            delete(return_ty)
+        }
+    }
+    return selected, selected != ""
+}
+
 proc_decl_call_type_bindings :: proc(e: ^Emitter, proc_decl: ^Proc_Decl, args: []CST_Form) -> (names: [dynamic]string, types: [dynamic]string, ok: bool) {
     candidates := proc_decl_generic_candidates(proc_decl)
     defer delete(candidates)
@@ -8733,37 +8811,6 @@ obvious_form_type :: proc(e: ^Emitter, form: CST_Form) -> (string, bool) {
         }
     }
     if form.kind == .List && len(form.items) > 0 && form.items[0].kind == .Symbol {
-        switch form.items[0].text {
-        case "+", "-", "*", "/", "%", "%%", "min", "max":
-            if len(form.items) >= 2 {
-                selected := ""
-                selected_from_literal := false
-                for operand in form.items[1:] {
-                    operand_ty, ok_operand_ty := obvious_form_type(e, operand)
-                    if !ok_operand_ty {
-                        continue
-                    }
-                    if operand_ty == "f64" {
-                        return operand_ty, true
-                    }
-                    if operand_ty == "f32" {
-                        selected = operand_ty
-                        selected_from_literal = false
-                        continue
-                    }
-                    if selected == "" || (selected_from_literal && operand.kind != .Number) {
-                        selected = operand_ty
-                        selected_from_literal = operand.kind == .Number
-                    }
-                }
-                if selected != "" {
-                    return selected, true
-                }
-            }
-        case "==", "=", "!=", "<", "<=", ">", ">=", "not", "!":
-            return "bool", true
-        case:
-        }
         if is_symbol(form.items[0], "quote") && len(form.items) == 2 {
             return "Data", true
         }
@@ -8848,6 +8895,9 @@ obvious_form_type :: proc(e: ^Emitter, form: CST_Form) -> (string, bool) {
         }
         if proc_decl, ok := find_proc_decl(e, head_name); ok {
             return proc_decl_obvious_call_return_type(e, proc_decl, form.items[1:])
+        }
+        if return_ty, ok_return_ty := overload_obvious_call_return_type(e, head_name, form.items[1:]); ok_return_ty {
+            return return_ty, true
         }
     }
     if form.kind == .Vector || form.kind == .Brace || form.kind == .Set {
@@ -11325,10 +11375,8 @@ emit_operator_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Erro
         }
         if ty, ok := obvious_form_type(e, form.items[1]); ok {
             if ty == "Data" {
-                data_key, err_data_key, ok_data_key := emit_data_value_literal(e, form.items[2])
-                if form.items[2].kind == .Symbol {
-                    data_key, err_data_key, ok_data_key = emit_expr(e, form.items[2])
-                }
+                data_key, err_data_key, ok_data_key :=
+                    emit_call_arg_for_expected_type(e, form.items[2], "Data")
                 if !ok_data_key {
                     return "", err_data_key, false
                 }
@@ -16204,6 +16252,78 @@ emit_proc_where_constraints :: proc(e: ^Emitter, constraints: []CST_Form) -> (Co
     return {}, true
 }
 
+known_decl_type_with_suffix :: proc(e: ^Emitter, owner, token: string) -> (string, bool) {
+    suffix := fmt.tprintf("__%s", token)
+    selected := ""
+    for decl in e.decls {
+        name := ""
+        #partial switch decl.kind {
+        case .Struct:
+            name = decl.struct_decl.name
+        case .Union:
+            name = decl.union_decl.name
+        case .Enum:
+            name = decl.enum_decl.name
+        }
+        if name == "" ||
+           !strings.has_suffix(name, suffix) ||
+           len(name) <= len(suffix) {
+            continue
+        }
+        prefix := name[:len(name)-len(suffix)]
+        if !strings.has_prefix(owner, prefix) ||
+           len(owner) <= len(prefix)+1 ||
+           owner[len(prefix)] != '_' ||
+           owner[len(prefix)+1] != '_' {
+            continue
+        }
+        if selected != "" && selected != name {
+            return "", false
+        }
+        selected = name
+    }
+    if selected == "" {
+        return "", false
+    }
+    return strings.clone(selected), true
+}
+
+type_identifier_start :: proc(ch: u8) -> bool {
+    return (ch >= 'A' && ch <= 'Z') ||
+           (ch >= 'a' && ch <= 'z') ||
+           ch == '_'
+}
+
+type_identifier_continue :: proc(ch: u8) -> bool {
+    return type_identifier_start(ch) || (ch >= '0' && ch <= '9')
+}
+
+qualify_flattened_decl_type :: proc(e: ^Emitter, owner, text: string) -> string {
+    builder := strings.builder_make()
+    defer strings.builder_destroy(&builder)
+    i := 0
+    for i < len(text) {
+        if !type_identifier_start(text[i]) {
+            strings.write_byte(&builder, text[i])
+            i += 1
+            continue
+        }
+        start := i
+        i += 1
+        for i < len(text) && type_identifier_continue(text[i]) {
+            i += 1
+        }
+        token := text[start:i]
+        if qualified, ok_qualified := known_decl_type_with_suffix(e, owner, token); ok_qualified {
+            strings.write_string(&builder, qualified)
+            delete(qualified)
+        } else {
+            strings.write_string(&builder, token)
+        }
+    }
+    return strings.clone(strings.to_string(builder))
+}
+
 emit_decl :: proc(e: ^Emitter, decl: IR_Decl) -> (Compile_Error, bool) {
     mark_decl_keyword_usage(e, decl)
     for line in decl.doc_lines {
@@ -16318,7 +16438,9 @@ emit_decl :: proc(e: ^Emitter, decl: IR_Decl) -> (Compile_Error, bool) {
             if field.is_using {
                 prefix = "using "
             }
-            emit_line(e, fmt.tprintf("%s%s: %s,", prefix, field.name, field.ty))
+            field_ty := qualify_flattened_decl_type(e, decl.struct_decl.name, field.ty)
+            emit_line(e, fmt.tprintf("%s%s: %s,", prefix, field.name, field_ty))
+            delete(field_ty)
         }
         e.indent -= 1
         emit_line(e, "}")
