@@ -24497,6 +24497,17 @@ compile_output_rebases_absolute_odin_imports_for_output_path :: proc(t: ^testing
 
     testing.expect_value(t, strings.contains(rebased, "import runtime "), true)
     testing.expect_value(t, strings.contains(rebased, "import runtime \"/"), false)
+    import_prefix := `import runtime "`
+    import_start := strings.index(rebased, import_prefix)
+    testing.expect_value(t, import_start >= 0, true)
+    if import_start >= 0 {
+        path_start := import_start + len(import_prefix)
+        path_end_offset := strings.index(rebased[path_start:], `"`)
+        testing.expect_value(t, path_end_offset >= 0, true)
+        if path_end_offset >= 0 {
+            testing.expect_value(t, os.is_absolute_path(rebased[path_start:path_start+path_end_offset]), false)
+        }
+    }
 }
 
 @(test)

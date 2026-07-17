@@ -3546,7 +3546,8 @@ rebase_emitted_odin_imports :: proc(source, output_dir: string) -> (output: stri
                 rest := line[first_quote+1:]
                 second_quote := strings.index(rest, "\"")
                 if second_quote >= 0 {
-                    import_path := rest[:second_quote]
+                    import_path := unquote_string(line[first_quote:first_quote+second_quote+2])
+                    defer delete(import_path)
                     if os.is_absolute_path(import_path) {
                         canonical_import_path, import_path_err := os.get_absolute_path(import_path, context.allocator)
                         if import_path_err != nil {
