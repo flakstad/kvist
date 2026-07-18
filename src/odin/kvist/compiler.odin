@@ -1392,6 +1392,47 @@ rewrite_symbol_form_text :: proc(form: CST_Form, text: string) -> CST_Form {
     return rewritten
 }
 
+append_pattern_shadow_names :: proc(form: CST_Form, names: ^[dynamic]string) {
+    #partial switch form.kind {
+    case .Symbol:
+        text := form.text
+        if text == "_" || text == "&" || text == "" {
+            return
+        }
+        if text[len(text)-1] == ':' {
+            text = text[:len(text)-1]
+        }
+        name := map_name(text)
+        if !contains_text(names[:], name) {
+            append(names, name)
+        }
+    case .Vector, .Brace:
+        for item in form.items {
+            append_pattern_shadow_names(item, names)
+        }
+    }
+}
+
+append_for_shadow_names :: proc(binding: CST_Form, names: ^[dynamic]string) {
+    if binding.kind != .Vector {
+        return
+    }
+    switch len(binding.items) {
+    case 2:
+        append_pattern_shadow_names(binding.items[0], names)
+    case 3:
+        append_pattern_shadow_names(binding.items[0], names)
+        if binding.items[1].kind == .Symbol || binding.items[1].kind == .Vector || binding.items[1].kind == .Brace {
+            append_pattern_shadow_names(binding.items[1], names)
+        }
+    case 4:
+        append_pattern_shadow_names(binding.items[0], names)
+    case 5:
+        append_pattern_shadow_names(binding.items[0], names)
+        append_pattern_shadow_names(binding.items[1], names)
+    }
+}
+
 rewrite_form_symbols :: proc(form: CST_Form, locals: []string, aliases: []Alias_Prefix, prefix: string, allow_bare_import: bool = false) -> (CST_Form, Compile_Error, bool) {
     rewritten := form
     #partial switch form.kind {
@@ -1409,6 +1450,69 @@ rewrite_form_symbols :: proc(form: CST_Form, locals: []string, aliases: []Alias_
                 append(&rewritten.items, form.items[0])
                 for item in form.items[1:] {
                     child, err_child, ok_child := rewrite_quasiquote_form_symbols(item, locals, aliases, prefix)
+                    if !ok_child {
+                        return CST_Form{}, err_child, false
+                    }
+                    append(&rewritten.items, child)
+                }
+                return rewritten, Compile_Error{}, true
+            }
+            if head == "let" && len(form.items) >= 3 && form.items[1].kind == .Vector {
+                rewritten.items = nil
+                append(&rewritten.items, form.items[0])
+                bindings, err_bindings, ok_bindings := parse_let_bindings(form.items[1])
+                defer delete(bindings)
+                if !ok_bindings {
+                    return CST_Form{}, err_bindings, false
+                }
+
+                binding_form := form.items[1]
+                binding_form.items = nil
+                shadowed: [dynamic]string
+                defer delete(shadowed)
+                binding_index := 0
+                for item in form.items[1].items {
+                    active_aliases := aliases_without_shadowed_names(aliases, shadowed[:])
+                    child, err_child, ok_child := rewrite_form_symbols(item, locals, active_aliases[:], prefix)
+                    delete(active_aliases)
+                    if !ok_child {
+                        return CST_Form{}, err_child, false
+                    }
+                    append(&binding_form.items, child)
+                    if binding_index < len(bindings) &&
+                       item.span == bindings[binding_index].value.span {
+                        binding_declared_names_append(bindings[binding_index], &shadowed)
+                        binding_index += 1
+                    }
+                }
+                append(&rewritten.items, binding_form)
+
+                body_aliases := aliases_without_shadowed_names(aliases, shadowed[:])
+                defer delete(body_aliases)
+                for item in form.items[2:] {
+                    child, err_child, ok_child := rewrite_form_symbols(item, locals, body_aliases[:], prefix)
+                    if !ok_child {
+                        return CST_Form{}, err_child, false
+                    }
+                    append(&rewritten.items, child)
+                }
+                return rewritten, Compile_Error{}, true
+            }
+            if head == "for" && len(form.items) >= 3 && form.items[1].kind == .Vector {
+                rewritten.items = nil
+                append(&rewritten.items, form.items[0])
+                shadowed: [dynamic]string
+                append_for_shadow_names(form.items[1], &shadowed)
+                defer delete(shadowed)
+                body_aliases := aliases_without_shadowed_names(aliases, shadowed[:])
+                defer delete(body_aliases)
+                binding_form, err_binding, ok_binding := rewrite_form_symbols(form.items[1], locals, aliases, prefix)
+                if !ok_binding {
+                    return CST_Form{}, err_binding, false
+                }
+                append(&rewritten.items, binding_form)
+                for item in form.items[2:] {
+                    child, err_child, ok_child := rewrite_form_symbols(item, locals, body_aliases[:], prefix)
                     if !ok_child {
                         return CST_Form{}, err_child, false
                     }
@@ -1818,6 +1922,16 @@ locals_without_shadowed_names :: proc(locals: []string, shadowed: []string) -> (
     return out
 }
 
+aliases_without_shadowed_names :: proc(aliases: []Alias_Prefix, shadowed: []string) -> (out: [dynamic]Alias_Prefix) {
+    for alias in aliases {
+        if contains_text(shadowed, alias.alias) {
+            continue
+        }
+        append(&out, alias)
+    }
+    return out
+}
+
 append_macro_time_helper_names :: proc(names: ^[dynamic]string, private_macros: []string) {
     helpers := [?]string{
         "not", "and", "or",
@@ -1876,8 +1990,10 @@ rewrite_macro_top_form :: proc(top: CST_Top_Form, locals: []string, private_macr
     }
 
     body_locals := locals
+    body_aliases := aliases
     shadowed_names: [dynamic]string
     filtered_locals: [dynamic]string
+    filtered_aliases: [dynamic]Alias_Prefix
     if params_index < len(form.items) && form.items[params_index].kind == .Vector {
         param_names, err_param_names, ok_param_names := macro_param_names_from_vector(form.items[params_index])
         if !ok_param_names {
@@ -1889,6 +2005,9 @@ rewrite_macro_top_form :: proc(top: CST_Top_Form, locals: []string, private_macr
         filtered_locals = locals_without_shadowed_names(locals, shadowed_names[:])
         defer delete(filtered_locals)
         body_locals = filtered_locals[:]
+        filtered_aliases = aliases_without_shadowed_names(aliases, shadowed_names[:])
+        defer delete(filtered_aliases)
+        body_aliases = filtered_aliases[:]
     }
 
     for item, idx in form.items {
@@ -1901,7 +2020,7 @@ rewrite_macro_top_form :: proc(top: CST_Top_Form, locals: []string, private_macr
             append(&rewritten.form.items, clone_cst_form(item))
             continue
         }
-        child, err_child, ok_child := rewrite_form_symbols(item, body_locals, aliases, prefix)
+        child, err_child, ok_child := rewrite_form_symbols(item, body_locals, body_aliases, prefix)
         if !ok_child {
             return CST_Top_Form{}, err_child, false
         }
@@ -1928,8 +2047,10 @@ rewrite_proc_like_top_form :: proc(top: CST_Top_Form, locals: []string, aliases:
     }
 
     body_locals := locals
+    body_aliases := aliases
     shadowed_params: [dynamic]string
     filtered_locals: [dynamic]string
+    filtered_aliases: [dynamic]Alias_Prefix
     if params_index < len(form.items) && form.items[params_index].kind == .Vector {
         param_names, err_param_names, ok_param_names := param_names_from_signature_vector(form.items[params_index])
         if !ok_param_names {
@@ -1940,6 +2061,9 @@ rewrite_proc_like_top_form :: proc(top: CST_Top_Form, locals: []string, aliases:
         filtered_locals = locals_without_shadowed_names(locals, shadowed_params[:])
         defer delete(filtered_locals)
         body_locals = filtered_locals[:]
+        filtered_aliases = aliases_without_shadowed_names(aliases, shadowed_params[:])
+        defer delete(filtered_aliases)
+        body_aliases = filtered_aliases[:]
     }
 
     i := 0
@@ -2011,7 +2135,7 @@ rewrite_proc_like_top_form :: proc(top: CST_Top_Form, locals: []string, aliases:
             continue
         }
 
-        child, err_child, ok_child := rewrite_form_symbols(item, body_locals, aliases, prefix)
+        child, err_child, ok_child := rewrite_form_symbols(item, body_locals, body_aliases, prefix)
         if !ok_child {
             return CST_Top_Form{}, err_child, false
         }
@@ -2986,6 +3110,18 @@ load_root_source_forms :: proc(forms: []CST_Top_Form) -> (Loaded_Forms, Compile_
     return result, Compile_Error{}, true
 }
 
+top_form_belongs_to_package :: proc(top: CST_Top_Form, files: []Package_File) -> bool {
+    if top.source_path == "" {
+        return false
+    }
+    for file in files {
+        if top.source_path == file.path {
+            return true
+        }
+    }
+    return false
+}
+
 load_path_expanded_forms :: proc(path: string) -> (expanded: [dynamic]CST_Top_Form, macros: [dynamic]User_Macro, err: Compile_Error, ok: bool) {
     loaded, err_load, ok_load := load_root_file_forms(path)
     if !ok_load {
@@ -3011,7 +3147,12 @@ load_path_expanded_forms :: proc(path: string) -> (expanded: [dynamic]CST_Top_Fo
     if !ok_expanded_slash {
         return expanded, macros, err_expanded_slash, false
     }
-    aliases, err_aliases, ok_aliases := collect_root_source_import_aliases(path)
+    root_files, err_root_files, ok_root_files := read_root_package_files(path)
+    if !ok_root_files {
+        return expanded, macros, err_root_files, false
+    }
+    defer package_file_slice_delete(root_files)
+    aliases, err_aliases, ok_aliases := collect_root_source_import_aliases_from_files(root_files)
     if !ok_aliases {
         return expanded, macros, err_aliases, false
     }
@@ -3024,6 +3165,10 @@ load_path_expanded_forms :: proc(path: string) -> (expanded: [dynamic]CST_Top_Fo
     defer delete(private_macros)
     rewritten_expanded: [dynamic]CST_Top_Form
     for top in expanded_forms {
+        if !top_form_belongs_to_package(top, root_files) {
+            append(&rewritten_expanded, clone_cst_top_form(top))
+            continue
+        }
         rewritten, err_rewrite, ok_rewrite := rewrite_top_form(top, locals[:], private_macros[:], aliases[:], "")
         if !ok_rewrite {
             return expanded, macros, err_rewrite, false

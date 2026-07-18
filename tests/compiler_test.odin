@@ -24740,6 +24740,92 @@ compile_path_package_files_are_order_independent :: proc(t: ^testing.T) {
 }
 
 @(test)
+compile_path_keeps_parameter_field_access_when_parameter_shadows_package_alias :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-package-param-shadow-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    helper_dir, helper_dir_err := os.join_path({dir, "helper"}, context.allocator)
+    testing.expect_value(t, helper_dir_err == nil, true)
+    if helper_dir_err != nil {
+        return
+    }
+    defer delete(helper_dir)
+    sample_dir, sample_dir_err := os.join_path({dir, "sample"}, context.allocator)
+    testing.expect_value(t, sample_dir_err == nil, true)
+    if sample_dir_err != nil {
+        return
+    }
+    defer delete(sample_dir)
+    testing.expect_value(t, os.make_directory_all(helper_dir) == nil, true)
+    testing.expect_value(t, os.make_directory_all(sample_dir) == nil, true)
+
+    helper_path, helper_path_err := os.join_path({helper_dir, "helper.kvist"}, context.allocator)
+    testing.expect_value(t, helper_path_err == nil, true)
+    if helper_path_err != nil {
+        return
+    }
+    defer delete(helper_path)
+    testing.expect_value(t, os.write_entire_file_from_string(helper_path, `(package helper)
+
+(defn visible [] -> bool true)` ) == nil, true)
+
+    sample_path, sample_path_err := os.join_path({sample_dir, "sample.kvist"}, context.allocator)
+    testing.expect_value(t, sample_path_err == nil, true)
+    if sample_path_err != nil {
+        return
+    }
+    defer delete(sample_path)
+    testing.expect_value(t, os.write_entire_file_from_string(sample_path, `(package sample)
+
+(import data "../helper")
+
+(defstruct Record {has-tempid: bool})
+
+(defn has-tempid? [data: Record] -> bool
+  data.has-tempid)
+
+(defn local-has-tempid? [record: Record] -> bool
+  (let [data record
+        copied data.has-tempid]
+    copied))
+
+(defn count-tempids [records: []Record] -> int
+  (let [total 0]
+    (for [data records]
+      (when data.has-tempid
+        (inc! total)))
+    total))` ) == nil, true)
+
+    main_path, main_path_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, main_path_err == nil, true)
+    if main_path_err != nil {
+        return
+    }
+    defer delete(main_path)
+    testing.expect_value(t, os.write_entire_file_from_string(main_path, `(package main)
+
+(import sample "./sample")
+
+(defn main [] -> bool
+  (sample.has-tempid? (sample.Record {has-tempid: true})))` ) == nil, true)
+
+    output, err, ok := kvist.compile_path(main_path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+    testing.expect_value(t, strings.contains(output, "return data.has_tempid"), true)
+    testing.expect_value(t, strings.contains(output, "data__has_tempid"), false)
+}
+
+@(test)
 compile_path_rejects_private_source_package_member_access :: proc(t: ^testing.T) {
     dir, dir_err := os.make_directory_temp("", "kvist-private-package-*", context.allocator)
     testing.expect_value(t, dir_err == nil, true)
