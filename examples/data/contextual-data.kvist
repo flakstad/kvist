@@ -3,6 +3,7 @@
 
 (package main)
 (import data "kvist:data")
+(import fmt "core:fmt")
 
 (defn contact-tx [id: i64, name: string, email: string, company: string] -> Data
   [{:db/id id
@@ -14,11 +15,20 @@
   (data.conj tx
     [:db/add [:ro/id condition-id] :attention/not-before instant]))
 
+(defn add-generated-option [tx: Data, prefix: string] -> Data
+  (let [option-id (fmt.aprintf "option-%s" prefix)]
+    (data.conj tx
+      {:db/id option-id
+       :ro/id option-id})))
+
 (defn main []
   (let [tx (contact-tx 7 "Ada" "ada@example.com" "Kvist")
-        updated (add-attention tx 42 "2026-07-17T12:00:00Z")]
+        updated (add-attention tx 42 "2026-07-17T12:00:00Z")
+        generated (add-generated-option updated "attention")]
     (assert (= (data.int (get (data.nth tx 0) :db/id)) 7))
     (assert (= (data.string (get (data.nth tx 0) :contact/name)) "Ada"))
     (assert (= (data.int (data.nth (data.nth (data.nth updated 1) 1) 1)) 42))
     (assert (= (data.string (data.nth (data.nth updated 1) 3))
-               "2026-07-17T12:00:00Z"))))
+               "2026-07-17T12:00:00Z"))
+    (assert (= (data.string (:db/id (data.nth generated 2)))
+               "option-attention"))))

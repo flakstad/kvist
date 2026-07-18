@@ -9490,6 +9490,16 @@ obvious_binding_type :: proc(e: ^Emitter, binding: Binding) -> (string, bool) {
     if binding.is_typed {
         return binding.ty, true
     }
+    if binding.value.kind == .List && len(binding.value.items) > 0 && binding.value.items[0].kind == .Symbol {
+        switch binding.value.items[0].text {
+        case "str", "core.str", "core/str", "fmt.aprintf", "fmt/aprintf":
+            return "string", true
+        case:
+        }
+        if form_is_owned_alloc_call(binding.value, .String, e) {
+            return "string", true
+        }
+    }
     if binding.value.kind == .Symbol {
         return obvious_form_type(e, binding.value)
     }

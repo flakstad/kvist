@@ -22061,6 +22061,12 @@ compile_contextual_data_literals_in_direct_and_overloaded_calls :: proc(t: ^test
    [:h1 (fmt.tprintf "%d matters" count)]
    [:p (fmt.aprintf "%d owned" count)]])
 
+(defn append-owned-local [tx: Data, prefix: string] -> Data
+  (let [option-id (fmt.aprintf "option-%s" prefix)]
+    (kdata.conj tx
+      {:db/id option-id
+       :ro/id option-id})))
+
 (defn source-int [value: int] -> Data
   [value])
 
@@ -22096,6 +22102,7 @@ compile_contextual_data_literals_in_direct_and_overloaded_calls :: proc(t: ^test
     testing.expect_value(t, strings.contains(output, ":= fmt.aprintf(\"%d owned\", count)"), true)
     testing.expect_value(t, strings.contains(output, "defer delete(kvist_thread_"), true)
     testing.expect_value(t, strings.contains(output, "kvist_data_lift(kvist_thread_"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_data_make_text(Data_Kind.String, option_id)"), true)
     testing.expect_value(t, strings.contains(output, "return kvist_data_contains(result, kvist_thread_"), true)
 }
 
