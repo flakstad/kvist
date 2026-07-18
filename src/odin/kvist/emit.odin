@@ -93,6 +93,7 @@ Transform_Into_Output :: struct {
 Emitter_Features :: struct {
     keyword_type:     bool,
     data_type:        bool,
+    data_decode:      bool,
     dynamic_literals: bool,
     core_get_or_default: bool,
     core_contains_value: bool,
@@ -4448,6 +4449,7 @@ emit_data_decode_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_E
         }
     }
 
+    e.features.data_decode = true
     builder := strings.builder_make()
     defer strings.builder_destroy(&builder)
     fmt.sbprintf(
@@ -4548,6 +4550,7 @@ emit_data_validate_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile
         }
     }
 
+    e.features.data_decode = true
     builder := strings.builder_make()
     defer strings.builder_destroy(&builder)
     fmt.sbprintf(
@@ -19460,6 +19463,38 @@ emit_runtime_def_lifecycle :: proc(e: ^Emitter) -> (Compile_Error, bool) {
     return {}, true
 }
 
+emit_data_decode_aliases :: proc(e: ^Emitter, features: Emitter_Features) {
+    if !features.data_decode {
+        return
+    }
+    selected := ""
+    for decl in e.decls {
+        if decl.kind != .Struct {
+            continue
+        }
+        name := decl.struct_decl.name
+        if name != "data__Decode_Error" && !strings.has_suffix(name, "__data__Decode_Error") {
+            continue
+        }
+        if selected == "" || len(name) < len(selected) {
+            selected = name
+        }
+    }
+    if selected == "" || selected == "data__Decode_Error" {
+        return
+    }
+    suffix := "Decode_Error"
+    prefix := selected[:len(selected)-len(suffix)]
+    emit_raw_newline(e)
+    emit_line(e, fmt.tprintf("data__Decode_Error :: %s", selected))
+    emit_line(e, fmt.tprintf("data__decode_error :: %sdecode_error", prefix))
+    emit_line(e, fmt.tprintf("data__decode_enum_error :: %sdecode_enum_error", prefix))
+    emit_line(e, fmt.tprintf("kvist_managed_clone_data__Decode_Error :: kvist_managed_clone_%s", selected))
+    emit_line(e, fmt.tprintf("kvist_managed_destroy_data__Decode_Error :: kvist_managed_destroy_%s", selected))
+    emit_line(e, fmt.tprintf("kvist_managed_assign_data__Decode_Error :: kvist_managed_assign_%s", selected))
+    emit_line(e, fmt.tprintf("kvist_managed_move_assign_data__Decode_Error :: kvist_managed_move_assign_%s", selected))
+}
+
 emit_decls_with_source_map :: proc(decls: []IR_Decl) -> (Emit_Result, Compile_Error, bool) {
     result := Emit_Result{}
     features := Emitter_Features{}
@@ -19531,6 +19566,7 @@ emit_decls_with_source_map :: proc(decls: []IR_Decl) -> (Emit_Result, Compile_Er
     if !ok_specializations {
         return result, err_specializations, false
     }
+    emit_data_decode_aliases(&e, features)
     emit_core_helpers(&e, features)
     output := strings.clone(strings.to_string(e.builder))
     late_imports: [dynamic]string
@@ -19690,6 +19726,7 @@ emit_eval_decls_with_source_map :: proc(decls: []IR_Decl, eval_form: CST_Form, n
     if !ok_specializations {
         return result, err_specializations, false
     }
+    emit_data_decode_aliases(&e, features)
     emit_core_helpers(&e, features)
     output := strings.clone(strings.to_string(e.builder))
     late_imports: [dynamic]string

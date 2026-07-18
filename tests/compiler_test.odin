@@ -4683,6 +4683,84 @@ compile_type_directed_data_struct_decode :: proc(t: ^testing.T) {
 }
 
 @(test)
+compile_data_decode_qualifies_support_inside_nested_source_packages :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-nested-data-decode-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    helper_dir, helper_dir_err := os.join_path({dir, "helper"}, context.allocator)
+    testing.expect_value(t, helper_dir_err == nil, true)
+    if helper_dir_err != nil {
+        return
+    }
+    defer delete(helper_dir)
+    app_dir, app_dir_err := os.join_path({dir, "app"}, context.allocator)
+    testing.expect_value(t, app_dir_err == nil, true)
+    if app_dir_err != nil {
+        return
+    }
+    defer delete(app_dir)
+    testing.expect_value(t, os.make_directory_all(helper_dir) == nil, true)
+    testing.expect_value(t, os.make_directory_all(app_dir) == nil, true)
+
+    helper_path, helper_path_err := os.join_path({helper_dir, "helper.kvist"}, context.allocator)
+    testing.expect_value(t, helper_path_err == nil, true)
+    if helper_path_err != nil {
+        return
+    }
+    defer delete(helper_path)
+    helper_source := `(package helper)
+(import data "kvist:data")
+(defn size [value: Data] -> int (count value))`
+    testing.expect_value(t, os.write_entire_file_from_string(helper_path, helper_source) == nil, true)
+
+    app_path, app_path_err := os.join_path({app_dir, "app.kvist"}, context.allocator)
+    testing.expect_value(t, app_path_err == nil, true)
+    if app_path_err != nil {
+        return
+    }
+    defer delete(app_path)
+    app_source := `(package app)
+(import helper "../helper")
+(import data "kvist:data")
+(defstruct Command { name: (owned string) })
+(defn run [] -> bool
+  (let [payload: Data {:name "Ro"}
+        [command err ok] (data.decode Command payload [:command])]
+    (discard err)
+    (and ok (= (helper.size payload) 1) (= command.name "Ro"))))`
+    testing.expect_value(t, os.write_entire_file_from_string(app_path, app_source) == nil, true)
+
+    main_path, main_path_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, main_path_err == nil, true)
+    if main_path_err != nil {
+        return
+    }
+    defer delete(main_path)
+    main_source := `(package main)
+(import app "./app")
+(defn main [] (assert (app.run)))`
+    testing.expect_value(t, os.write_entire_file_from_string(main_path, main_source) == nil, true)
+
+    result, err, ok := kvist.compile_path_with_map(main_path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+    testing.expect_value(t, strings.contains(result.output, "data__Decode_Error :: app__data__Decode_Error"), true)
+    testing.expect_value(t, strings.contains(result.output, "data__decode_error :: app__data__decode_error"), true)
+    testing.expect_value(t, strings.contains(result.output, "kvist_managed_destroy_data__Decode_Error :: kvist_managed_destroy_app__data__Decode_Error"), true)
+}
+
+@(test)
 compile_exposes_explicit_data_lifetime_helpers :: proc(t: ^testing.T) {
     source := `(package main)
 (import data "kvist:data")
