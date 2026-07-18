@@ -16858,6 +16858,32 @@ emit_if_branch_stmt :: proc(e: ^Emitter, branch: CST_Form, last_in_proc: bool, r
     return emit_stmt(e, branch, last_in_proc, returns)
 }
 
+// An else-if test must not emit setup statements before the `else` token.
+// Keep the flattened form only for expressions whose lowering is known to be
+// inline. Other tests are emitted as a nested if inside an else block so
+// contextual Data temporaries and similar preludes stay in the false branch.
+form_is_inline_if_test :: proc(form: CST_Form) -> bool {
+    #partial switch form.kind {
+    case .String, .Regex, .Number, .Bool, .Nil, .Symbol, .Keyword:
+        return true
+    case .List:
+        if len(form.items) == 0 || form.items[0].kind != .Symbol {
+            return false
+        }
+        head := form.items[0].text
+        switch head {
+        case "=", "!=", "<", "<=", ">", ">=", "not", "and", "or", "__kvist_field", "__kvist_index":
+            for arg in form.items[1:] {
+                if !form_is_inline_if_test(arg) {
+                    return false
+                }
+            }
+            return true
+        }
+    }
+    return false
+}
+
 emit_if_like_with_prefix :: proc(e: ^Emitter, head: string, form: CST_Form, last_in_proc: bool, returns: Return_Spec, prefix: string = "") -> (Compile_Error, bool) {
     if len(form.items) < 3 || len(form.items) > 4 {
         return Compile_Error{message = fmt.tprintf("%s expects test, then, and optional else", head), span = form.span}, false
@@ -16892,8 +16918,9 @@ emit_if_like_with_prefix :: proc(e: ^Emitter, head: string, form: CST_Form, last
             }
             return {}, true
         }
-        if else_branch.kind == .List && len(else_branch.items) > 0 &&
-           else_branch.items[0].kind == .Symbol && else_branch.items[0].text == "if" {
+        if else_branch.kind == .List && len(else_branch.items) > 2 &&
+           else_branch.items[0].kind == .Symbol && else_branch.items[0].text == "if" &&
+           form_is_inline_if_test(else_branch.items[1]) {
             return emit_if_like_with_prefix(e, "if", else_branch, last_in_proc, returns, "else ")
         }
         emit_indent(e)

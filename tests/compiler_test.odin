@@ -6683,6 +6683,43 @@ classify :: proc(n: int) -> string {
 }
 
 @(test)
+compile_cond_predicate_with_contextual_data_keeps_setup_inside_else :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct Mutation {
+  ok?: bool
+})
+
+(defn mutation [ok?: bool] -> Mutation
+  (Mutation {ok?: ok?}))
+
+(defn transact! [tx: Data] -> bool
+  true)
+
+(defn rename [empty?: bool] -> Mutation
+  (cond
+    empty? (mutation false)
+    (transact! [[:db/add 1]]) (mutation true)
+    :else (mutation false)))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    setup := strings.index(output, "kvist_thread_1 := kvist_data_make_items")
+    nested_if := strings.index(output, "if transact_bang(kvist_thread_2)")
+    else_block := strings.index(output, "else {\n        kvist_thread_1")
+    testing.expect_value(t, setup >= 0, true)
+    testing.expect_value(t, nested_if > setup, true)
+    testing.expect_value(t, else_block >= 0, true)
+    testing.expect_value(t, strings.contains(output, "else if transact_bang"), false)
+}
+
+@(test)
 compile_cond_vector_clauses :: proc(t: ^testing.T) {
     source := `(package main)
 
