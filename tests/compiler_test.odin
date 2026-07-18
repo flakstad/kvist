@@ -3545,6 +3545,236 @@ compile_quote_as_first_class_data :: proc(t: ^testing.T) {
 }
 
 @(test)
+compile_data_let_destructuring :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn contact-name [contact: Data] -> Data
+  (let [{:keys [name]
+         :person/keys [email]
+         :strs [external-id]
+         :syms [status]
+         :or {name "Anonymous"}
+         :as original}
+        contact]
+    name))
+
+(defn second-item [items: Data] -> Data
+  (let [[first second & remaining :as original] items]
+    second))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "kvist_data_get_present"), true)
+    testing.expect_value(t, strings.contains(output, "\":person/email\""), true)
+    testing.expect_value(t, strings.contains(output, "\"external-id\""), true)
+    testing.expect_value(t, strings.contains(output, "kind = .Symbol"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_data_rest_from"), true)
+    testing.expect_value(t, strings.contains(output, "defer kvist_data_release(name)"), true)
+    testing.expect_value(t, strings.contains(output, "return kvist_data_retain(name)"), true)
+}
+
+@(test)
+reject_duplicate_data_destructuring_binding :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn invalid [value: Data]
+  (let [[item {:keys [item]}] value]
+    item))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+    defer delete(err.message)
+    testing.expect_value(t, err.message, "duplicate Data pattern binding `item`")
+}
+
+@(test)
+compile_structural_data_match :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn dispatch [message: Data] -> Data
+  (match message
+    {:op :query :query query}
+    query
+
+    (as whole (kind :vector [head & tail]))
+    head
+
+    #{:ready :running}
+    :active
+
+    :else
+    nil))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, ".kind == .Map"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_data_contains(message"), false)
+    testing.expect_value(t, strings.contains(output, "kvist_data_contains("), true)
+    testing.expect_value(t, strings.contains(output, ".kind == .Vector"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_data_rest_from"), true)
+    testing.expect_value(t, strings.contains(output, "defer kvist_data_release(query)"), true)
+    testing.expect_value(t, strings.contains(output, "return kvist_data_retain(query)"), true)
+}
+
+@(test)
+reject_non_exhaustive_data_match :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn dispatch [message: Data] -> Data
+  (match message
+    {:op :query}
+    :query))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+    defer delete(err.message)
+    testing.expect_value(t, strings.contains(err.message, "final :else or _"), true)
+}
+
+@(test)
+compile_every_data_kind_match_pattern :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn classify [value: Data] -> int
+  (match value
+    (kind :nil _) 0
+    (kind :bool x) 1
+    (kind :int x) 2
+    (kind :float x) 3
+    (kind :string x) 4
+    (kind :symbol x) 5
+    (kind :keyword x) 6
+    (kind :list x) 7
+    (kind :vector x) 8
+    (kind :map x) 9
+    (kind :set x) 10
+    (kind :tagged x) 11
+    :else 12))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+    testing.expect_value(t, strings.contains(output, ".kind == .Nil"), true)
+    testing.expect_value(t, strings.contains(output, ".kind == .Tagged"), true)
+}
+
+@(test)
+reject_duplicate_exact_literal_data_match_arm :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn classify [value: Data] -> int
+  (match value
+    :ready 1
+    :ready 2
+    :else 0))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+    defer delete(err.message)
+    testing.expect_value(t, err.message, "duplicate exact literal match arm")
+}
+
+@(test)
+compile_eval_data_destructuring_and_match :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(def input '{:name "Ada"})`
+
+    output, err, ok := kvist.compile_eval_source(
+        source,
+        `(let [{:keys [name]} input]
+           (match name
+             "Ada" :known
+             :else :unknown))`,
+        false,
+    )
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+    testing.expect_value(t, strings.contains(output, "kvist_data_get_present"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_data_equal"), true)
+}
+
+@(test)
+reject_invalid_data_match_pattern_shapes :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn invalid [value: Data] -> int
+  (match value
+    {runtime-key captured} 1
+    :else 0))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+    defer delete(err.message)
+    testing.expect_value(t, err.message, "match map keys must be compile-time Data literals")
+}
+
+@(test)
+compile_data_destructuring_for :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn total-ids [rows: Data] -> i64
+  (let [total: i64 0]
+    (for [[id title] rows]
+      (set! total (+ total (data.int id))))
+    (for [index [id title] rows]
+      (set! total (+ total (i64 index))))
+    total))
+
+(defn native-names [rows: []Data] -> int
+  (let [seen: int 0]
+    (for [{:keys [name]} rows]
+      (set! seen (+ seen (if (data.nil? name) 0 1))))
+    seen))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "Data for source must be nil, list, vector, or set"), true)
+    testing.expect_value(t, strings.contains(output, ".payload.items {"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_data_nth_or_nil"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_data_get_present"), true)
+    testing.expect_value(t, strings.contains(output, ", index in"), true)
+}
+
+@(test)
 compile_runtime_initialized_immutable_defs :: proc(t: ^testing.T) {
     source := `(package main)
 (import edn "kvist:edn")
@@ -3999,6 +4229,150 @@ compile_data_decode_rejects_native_string_arrays :: proc(t: ^testing.T) {
         t,
         err.message,
         "data.decode field values has unsupported dynamic-array element type string; supported elements are Data, bool, integer and floating-point scalars, Kvist enums, and Kvist structs",
+    )
+}
+
+@(test)
+compile_data_decode_direct_dynamic_arrays :: proc(t: ^testing.T) {
+    result, err, ok := kvist.compile_path_with_map("examples/data/direct-collection-decode.kvist")
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            "kvist_data_make_items(Data_Kind.Vector, []Data{Data{kind = .Int",
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(result.output, "defer kvist_data_release(kvist_thread_"),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            "-> (decoded: [dynamic]i64, err: data__Decode_Error, ok: bool)",
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            "kvist_data_append(kvist_error_path_0, kvist_index_key_0)",
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            "proc(kvist_items: []Data) -> [dynamic]i64",
+        ),
+        true,
+    )
+    testing.expect_value(t, strings.contains(result.output, "defer delete(ids)"), true)
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            "-> (decoded: [dynamic]Endpoint, err: data__Decode_Error, ok: bool)",
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            "kvist_data_append(kvist_error_path_1, kvist_index_key_0)",
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            "for kvist_item in kvist_values { kvist_managed_destroy_Endpoint(kvist_item) }; delete(kvist_values)",
+        ),
+        true,
+    )
+}
+
+@(test)
+compile_data_validate_reuses_type_directed_shape :: proc(t: ^testing.T) {
+    result, err, ok := kvist.compile_path_with_map("examples/data/validated-shapes.kvist")
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(
+        t,
+        strings.contains(result.output, "message: Data = kvist_data_make_map("),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            "-> (err: data__Decode_Error, ok: bool)",
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            "-> (decoded: Message, err: data__Decode_Error, ok: bool)",
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            "kvist_data_append(kvist_error_path_7, kvist_index_key_5)",
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            "-> (decoded: [dynamic]Endpoint, err: data__Decode_Error, ok: bool)",
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            "defer kvist_managed_destroy_data__Decode_Error(err)",
+        ),
+        true,
+    )
+    testing.expect_value(t, strings.contains(result.output, "return Message{"), false)
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            "make([dynamic]Endpoint, 0, len(kvist_items))",
+        ),
+        false,
     )
 }
 
@@ -8231,7 +8605,7 @@ compile_tap_thread_steps :: proc(t: ^testing.T) {
 }
 
 @(test)
-compile_let_rejects_field_destructuring :: proc(t: ^testing.T) {
+compile_let_rejects_data_destructuring_of_native_struct :: proc(t: ^testing.T) {
     source := `(package main)
 
 (defstruct User {
@@ -8252,7 +8626,7 @@ compile_let_rejects_field_destructuring :: proc(t: ^testing.T) {
         return
     }
     defer delete(err.message)
-    testing.expect_value(t, strings.contains(err.message, "field destructuring has been removed"), true)
+    testing.expect_value(t, strings.contains(err.message, "Data destructuring requires a statically known Data value"), true)
 }
 
 @(test)
@@ -15091,7 +15465,7 @@ reject_functional_transform_unknown_step :: proc(t: ^testing.T) {
     }
     defer delete(err.message)
 
-    testing.expect_value(t, err.message, "transform steps currently support map, map-indexed, mapcat, filter, remove, keep, take, take-while, drop, and drop-while")
+    testing.expect_value(t, err.message, "transform steps currently support map, map-indexed, mapcat, filter, remove, keep, take, take-while, drop, drop-while, distinct, and distinct-by")
 }
 
 @(test)
@@ -15126,7 +15500,7 @@ reject_named_functional_transform_unknown_step_when_used :: proc(t: ^testing.T) 
     }
     defer delete(err.message)
 
-    testing.expect_value(t, err.message, "transform steps currently support map, map-indexed, mapcat, filter, remove, keep, take, take-while, drop, and drop-while")
+    testing.expect_value(t, err.message, "transform steps currently support map, map-indexed, mapcat, filter, remove, keep, take, take-while, drop, drop-while, distinct, and distinct-by")
 }
 
 @(test)
@@ -15149,7 +15523,7 @@ reject_generated_shaped_functional_transform_step :: proc(t: ^testing.T) {
     }
     defer delete(err.message)
 
-    testing.expect_value(t, err.message, "transform steps currently support map, map-indexed, mapcat, filter, remove, keep, take, take-while, drop, and drop-while")
+    testing.expect_value(t, err.message, "transform steps currently support map, map-indexed, mapcat, filter, remove, keep, take, take-while, drop, drop-while, distinct, and distinct-by")
 }
 
 @(test)
@@ -21564,6 +21938,9 @@ compile_def_overload_proc_group :: proc(t: ^testing.T) {
 compile_contextual_data_literals_in_direct_and_overloaded_calls :: proc(t: ^testing.T) {
     source := `(package main)
 (import kdata "kvist:data")
+(import fmt "core:fmt")
+
+(def product-name "Ro")
 
 (defn accept-data [value: Data] -> Data
   value)
@@ -21600,6 +21977,12 @@ compile_contextual_data_literals_in_direct_and_overloaded_calls :: proc(t: ^test
 (defn measurements [count: int, ratio: f64] -> Data
   [(+ count 1) (+ 1 ratio)])
 
+(defn heading [count: int] -> Data
+  [:header
+   [:style product-name]
+   [:h1 (fmt.tprintf "%d matters" count)]
+   [:p (fmt.aprintf "%d owned" count)]])
+
 (defn source-int [value: int] -> Data
   [value])
 
@@ -21630,7 +22013,149 @@ compile_contextual_data_literals_in_direct_and_overloaded_calls :: proc(t: ^test
     testing.expect_value(t, strings.contains(output, "defer kvist_data_release(kvist_thread_"), true)
     testing.expect_value(t, strings.contains(output, "kvist_data_make_int(i64((count) + (1)))"), true)
     testing.expect_value(t, strings.contains(output, "kvist_data_make_float(f64((1) + (ratio)))"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_data_make_text(Data_Kind.String, product_name)"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_data_lift(fmt.tprintf(\"%d matters\", count))"), true)
+    testing.expect_value(t, strings.contains(output, ":= fmt.aprintf(\"%d owned\", count)"), true)
+    testing.expect_value(t, strings.contains(output, "defer delete(kvist_thread_"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_data_lift(kvist_thread_"), true)
     testing.expect_value(t, strings.contains(output, "return kvist_data_contains(result, kvist_thread_"), true)
+}
+
+@(test)
+compile_keyword_and_data_map_invocation_lower_to_borrowed_lookup :: proc(t: ^testing.T) {
+    source := `(package main)
+(import data "kvist:data")
+
+(defn keyword-lookup [message: Data] -> Data
+  (:owner message))
+
+(defn keyword-default [message: Data] -> Data
+  (:owner message :nobody))
+
+(defn map-lookup [message: Data] -> Data
+  (message :owner))
+
+(defn owned-default [message: Data] -> Data
+  (:owner message (data.from-string "nobody")))
+
+(defn nested-name [message: Data] -> Data
+  (let [owner (:owner message)]
+    (:name owner)))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "kvist_data_map_call(message, Data{kind = .Keyword"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_data_map_call_or(message, Data{kind = .Keyword"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_data_retain(kvist_data_map_call(message"), true)
+    testing.expect_value(t, strings.contains(output, "\"nobody\""), true)
+    testing.expect_value(t, strings.contains(output, "defer kvist_data_release(kvist_thread_"), true)
+    testing.expect_value(t, strings.contains(output, "message(keyword("), false)
+    testing.expect_value(t, strings.contains(output, "kvist_data_map_call :: proc"), true)
+    testing.expect_value(t, strings.contains(output, "Data invocation expects a map or nil"), true)
+}
+
+@(test)
+compile_fused_data_collection_transform_owns_intermediates :: proc(t: ^testing.T) {
+    source := `(package main)
+(import data "kvist:data")
+
+(defn increment [value: Data] -> Data
+  (data.from-int (+ (data.int value) 1)))
+
+(defn above-two? [value: Data] -> bool
+  (> (data.int value) 2))
+
+(defn add-value [total: i64, value: Data] -> i64
+  (+ total (data.int value)))
+
+(defn duplicate [value: Data] -> Data
+  [value value])
+
+(deftransform selected
+  (map increment)
+  (filter above-two?))
+
+(deftransform duplicated
+  (mapcat duplicate)
+  (filter above-two?))
+
+(deftransform unique
+  (distinct))
+
+(deftransform unique-by-value
+  (distinct-by increment))
+
+(defn collect [values: Data] -> Data
+  (into Data selected values))
+
+(defn collect-duplicates [values: Data] -> Data
+  (into Data duplicated values))
+
+(defn collect-unique [values: Data] -> Data
+  (into Data unique values))
+
+(defn collect-unique-by [values: Data] -> Data
+  (into Data unique-by-value values))
+
+(defn total [values: Data] -> i64
+  (transduce (filter above-two?) add-value (i64 0) values))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "proc(kvist_source: Data) -> Data"), true)
+    testing.expect_value(t, strings.contains(output, "make([dynamic]Data, 0, kvist_data_count(kvist_source))"), true)
+    testing.expect_value(t, strings.contains(output, "for kvist_item in kvist_source.payload.items"), true)
+    testing.expect_value(t, strings.contains(output, "defer kvist_data_release(kvist_xform_"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_data_append_retained(&kvist_out, kvist_xform_"), true)
+    testing.expect_value(t, strings.contains(output, "return kvist_data_freeze_items(.Vector, &kvist_out)"), true)
+    testing.expect_value(t, strings.contains(output, "Data mapcat transform callback expects nil, list, vector, or set"), true)
+    testing.expect_value(t, strings.contains(output, "for kvist_xform_"), true)
+    testing.expect_value(t, strings.contains(output, ".payload.items"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_data_slice_contains"), true)
+    testing.expect_value(t, strings.contains(output, "make([dynamic]Data)"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_data_append_retained(&kvist_xform_"), true)
+    testing.expect_value(t, strings.contains(output, "return kvist_data_retain((proc(kvist_source: Data) -> Data"), false)
+    testing.expect_value(t, strings.contains(output, "kvist_data_get_or :: proc"), true)
+    testing.expect_value(t, strings.contains(output, "if value.kind == .Set { for item in value.payload.items"), true)
+    testing.expect_value(t, strings.contains(output, "value.kind == .List || value.kind == .Vector { for item in value.payload.items"), false)
+}
+
+@(test)
+reject_distinct_transform_for_native_items :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn collect [values: []int] -> [dynamic]int
+  (into [dynamic]int (distinct) values))`
+
+    _, err, ok := kvist.compile_source(source)
+    defer delete(err.message)
+    testing.expect_value(t, ok, false)
+    testing.expect_value(t, err.message, "distinct transform currently expects Data items, got int")
+}
+
+@(test)
+reject_distinct_transform_argument :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(deftransform invalid
+  (distinct identity))`
+
+    _, err, ok := kvist.compile_source(source)
+    defer delete(err.message)
+    testing.expect_value(t, ok, false)
+    testing.expect_value(t, err.message, "distinct transform step expects no arguments")
 }
 
 @(test)

@@ -1,0 +1,87 @@
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
+
+(package main)
+(import data "kvist:data")
+
+(defn visible? [matter: Data] -> bool
+  (data.bool (get matter :visible?)))
+
+(defn archived? [matter: Data] -> bool
+  (data.bool (get matter :archived?)))
+
+(defn matter-summary [matter: Data] -> Data
+  {:id (get matter :id)
+   :owner (get matter :owner)
+   :title (get matter :title)
+   :rank (get matter :rank)})
+
+(defn summary-rank [summary: Data] -> i64
+  (data.int (get summary :rank)))
+
+(defn owner-id [matter: Data] -> Data
+  (get matter :owner))
+
+(defn count-open [total: i64, matter: Data] -> i64
+  (if (= (get matter :status) :done)
+    total
+    (+ total 1)))
+
+(defn visible-matters [matters: Data] -> Data
+  (->> matters
+       (data.filter visible?)
+       (data.remove archived?)
+       (data.map matter-summary)
+       (data.sort-by summary-rank)))
+
+(defn matters-by-owner [matters: Data] -> Data
+  (data.group-by owner-id matters))
+
+(defn total-open [matters: Data] -> i64
+  (data.reduce count-open (i64 0) matters))
+
+(defn main []
+  (let [message: Data
+        {:request {:id "req-17"
+                   :matters [{:id 1
+                              :owner :ada
+                              :title "Compiler"
+                              :rank 20
+                              :status :open
+                              :visible? true
+                              :archived? false}
+                             {:id 2
+                              :owner :grace
+                              :title "Runtime"
+                              :rank 10
+                              :status :done
+                              :visible? true
+                              :archived? false}
+                             {:id 3
+                              :owner :ada
+                              :title "Archive"
+                              :rank 30
+                              :status :open
+                              :visible? true
+                              :archived? true}
+                             {:id 4
+                              :owner :ada
+                              :title "Hidden"
+                              :rank 5
+                              :status :open
+                              :visible? false
+                              :archived? false}]}}
+        matters (data.get-in message [:request :matters])
+        visible (visible-matters matters)
+        grouped (matters-by-owner matters)
+        response (-> message
+                     (data.assoc-in [:response :visible] visible)
+                     (data.assoc-in [:response :open-count] (total-open matters)))]
+    (assert (= (data.count visible) 2))
+    (assert (= (data.int (get (data.first visible) :id)) 2))
+    (assert (= (data.int (get (data.second visible) :id)) 1))
+    (assert (= (data.count (get grouped :ada)) 3))
+    (assert (= (data.int (data.get-in response [:response :open-count])) 3))
+    (println (data.string (data.get-in response [:request :id]))
+             (data.count visible)
+             (total-open matters))))

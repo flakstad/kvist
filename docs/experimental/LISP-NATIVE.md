@@ -86,28 +86,37 @@ surrounding program dynamic. Build these facilities in order:
    Integer, float, and boolean scalar decoders plus recursive type-directed
    native struct decoding for nested structs, scalar, explicitly owned string,
    enum, `Data`, explicit default fields, and owned dynamic arrays of scalar,
-   `Data`, enum, or recursively decoded Kvist struct elements are implemented.
-2. Reusable shape validation/refinement so code can validate once and avoid
-   repeating kind and key checks.
-3. Structural pattern matching and destructuring for maps, sequential values,
-   literals, kind guards, rest bindings, and nested patterns.
+   `Data`, enum, or recursively decoded Kvist struct elements are implemented
+   both as struct fields and direct collection targets.
+2. Implemented: `(data.validate Type value [path])` reuses the type-directed
+   decoder's shape traversal without constructing the native target, so a
+   boundary can validate once before continuing with immutable Data. A distinct
+   statically refined Data type is intentionally not implied.
+3. Implemented: structural Data matching and destructuring for maps,
+   sequential values, literals, kind constraints, rest bindings, aliases, and
+   nested patterns.
 4. Mutable builders or transients for bulk construction followed by one
    immutable freeze. Persistent updates remain the ordinary API.
 5. Explicit dispatch on Data tags or selected keys for message and protocol
    handling. This is opt-in application dispatch, not ordinary function-call
    semantics.
 
-Provisional pattern syntax should stay recognizably data-shaped:
+Pattern syntax stays recognizably data-shaped:
 
 ```clojure
 (match message
-  '{:op :query :query ?query}
+  {:op :query :query query}
     (run-query query)
-  '{:op :transact :tx ?tx}
+  {:op :transact :tx tx}
     (run-transaction tx)
   :else
     (error "unknown message"))
 ```
+
+Patterns use ordinary symbols for captures and `_` as the wildcard. `(kind
+:vector [head & tail])` constrains the Data kind without decoding captures to
+native values. Match is exhaustive and retains captures only after the whole
+arm succeeds.
 
 Typed decoding should make the dynamic/native boundary explicit and report
 useful paths:

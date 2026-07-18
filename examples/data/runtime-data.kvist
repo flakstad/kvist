@@ -17,22 +17,38 @@
         age-key (data.from-keyword ":user/age")
         age (data.from-int 37)
         fields: [4]Data [name-key name age-key age]
-        user (data.map fields[:])
+        user (data.map-from-alternating fields[:])
         updated (data.assoc user name-key (data.from-string "Grace"))
         older (data.update user age-key increment)
-        profile-key (data.from-keyword ":user/profile")
-        city-key (data.from-keyword ":profile/city")
-        path: [2]Data [profile-key city-key]
-        nested (data.assoc-in updated path[:] (data.from-string "Oslo"))
-        moved (data.update-in nested path[:] move-city)
+        path: Data [:user/profile :profile/city]
+        nested (data.assoc-in updated path (data.from-string "Oslo"))
+        moved (data.update-in nested path move-city)
+        user-keys (data.keys user)
+        user-vals (data.vals user)
+        user-entries (data.entries user)
+        key-list (data.list user-keys)
+        key-set (data.set user-keys)
+        unique-values: [2]Data [name age]
+        unique-set (data.set-from-unique unique-values[:])
         current name]
     (assert (data.nil? nothing))
     (assert (= (data.string (get user :user/name)) "Ada"))
     (assert (= (data.string (get updated :user/name)) "Grace"))
     (assert (= (data.int (get older :user/age)) 38))
     (assert (= (data.count user) 2))
-    (assert (= (data.string (data.get-in nested path[:])) "Oslo"))
-    (assert (= (data.string (data.get-in moved path[:])) "Bergen"))
+    (assert (= (data.string (data.get-in nested path)) "Oslo"))
+    (assert (= (data.string (data.get-in moved path)) "Bergen"))
+    (assert (data.vector? user-keys))
+    (assert (data.vector? user-vals))
+    (assert (= (data.keyword (data.nth user-keys 0)) ":user/name"))
+    (assert (= (data.string (data.nth user-vals 0)) "Ada"))
+    (assert (= (data.count user-entries) 2))
+    (assert (= (data.keyword (data.nth (data.nth user-entries 1) 0))
+               ":user/age"))
+    (assert (data.list? key-list))
+    (assert (data.set? key-set))
+    (assert (= (data.count unique-set) 2))
+    (assert (contains? unique-set name))
     (set! current (data.from-string "Grace"))
     (assert (= (data.string current) "Grace"))
     (let [retained (make [dynamic]Data)]
@@ -40,6 +56,13 @@
       (assert (= (data.string retained[0]) "Grace"))
       (data.release retained[0])
       (delete retained))
+    (let [owned-keys (data.keys-owned-array user)
+          :defer-with data.delete-owned-array!]
+      (assert (= (data.keyword owned-keys[0]) ":user/name")))
+    (let [owned-items (data.to-owned-array user-keys)
+          :defer-with data.delete-owned-array!]
+      (assert (= (data.keyword owned-items[1]) ":user/age")))
+    (assert (= (data.string (get user :user/name)) "Ada"))
     (let [entity (data.from-int 42)
           tx `[:db/add ~entity :user/name ~current]
           tail '[2 3]

@@ -50,6 +50,24 @@ allocator, and retain child Data values. `assoc`, `assoc-in`, `update`,
 `update-in`, `dissoc`, `conj`, and `merge` return new values while preserving
 their inputs. Static literals continue to leave the runtime node pointer nil.
 
+The package also provides eager collection processing: sequential access,
+`map`, `filter`, `remove`, `keep`, reduction/search, sorting, grouping, map
+utilities, Data-returning `keys`/`vals`, and explicit native-array conversion.
+Bulk results use retained temporary buffers that freeze once into immutable
+nodes. See [Data-oriented programming in Kvist](DATA-ORIENTED-PROGRAMMING.md).
+
+Keywords and Data maps can be invoked for direct borrowed lookup:
+
+```clojure
+(:status message)
+(:status message :unknown)
+(message :status)
+```
+
+This is statically lowered lookup rather than a universal callable-value
+protocol. `data.describe` provides shallow structural inspection, while
+`edn.pr-str`, `edn.prn`, and `edn.pprint` provide readable Data rendering.
+
 Runtime quasiquote constructs Data with interpolation while retaining the
 static literal path when no unquote is present:
 
@@ -98,8 +116,25 @@ remains a view of an input.
 Assignment retains borrowed replacements, moves owned replacements, and
 releases overwritten values. Owned managed values nested directly in call
 arguments or discarded explicitly are released after use. Data-valued `if`,
-`let`, `do`, and `type-case` expressions normalize their result to one owned
-reference.
+`let`, `do`, `type-case`, and `match` expressions normalize their result to one
+owned reference.
+
+`let` can destructure Data maps, lists, and vectors. Captured subvalues are
+managed locals, so no cleanup marker is needed:
+
+```clojure
+(let [{:person/keys [name email]
+       :keys [roles]
+       :or {roles []}
+       :as contact}
+      value
+      [primary & remaining] roles]
+  ...)
+```
+
+Map defaults apply only when a key is absent; explicit Data nil is preserved.
+Sequential destructuring is permissive, with missing positions and empty rest
+bindings producing Data nil. Structural `match` is strict and exhaustive.
 
 Top-level Kvist structs whose fields contain `Data`, directly or through
 another managed Kvist struct, now follow the same protocol. Construction,
@@ -178,9 +213,12 @@ Planned capabilities are:
   integer, float, and boolean decoders and recursive required-field native
   struct, owned-string, enum, and explicit default-field decoding are
   available, along with owned dynamic arrays of scalar, enum, `Data`, or
-  recursively decoded Kvist struct elements;
-- reusable validated shapes for dynamic/native boundaries;
-- efficient builders or transients for bulk immutable construction;
+  recursively decoded Kvist struct elements as struct fields or direct decode
+  targets;
+- reusable validation of native struct and dynamic-array shapes at
+  dynamic/native boundaries without constructing the native target;
+- efficient internal builders for bulk immutable construction; public scoped
+  builders remain deferred until call sites require them;
 - explicit dispatch on tags or selected keys for messages and protocols;
 - optionally, a small capability-scoped evaluator for concrete data-driven
   application workloads.
@@ -223,20 +261,24 @@ fallback. Static and runtime Data have the same public handle shape.
    explicitly declared `(owned string)`, which clones native text and joins the
    struct's deterministic lifecycle. A `:default` field is optional when its
    map key is absent but still validates a present value, including explicit
-   Data `nil`. `(owned [dynamic]T)` fields decode Data vectors for `Data`,
-   boolean, integer, floating-point, enum, and Kvist struct element types, with
-   failing indices appended to the error path. Struct elements recursively
-   validate their fields and extend paths beyond the index. String arrays
-   remain.
-4. Design and implement structural Data matching with ownership-safe captured
+   Data `nil`. `(owned [dynamic]T)` fields and direct `(dynamic T)` targets
+   decode Data vectors for `Data`, boolean, integer, floating-point, enum, and
+   Kvist struct element types, with failing indices appended to the error path.
+   Struct elements recursively validate their fields and extend paths beyond
+   the index. String arrays remain.
+4. `(data.validate Type value [path])` reuses the same generated shape checks
+   as `data.decode`, returns `[Decode-Error ok]`, and performs no native target
+   construction. It leaves the original Data available to Data-oriented code.
+5. Design and implement structural Data matching with ownership-safe captured
    subvalues.
-5. Add builders/transients and verify their allocation behavior against
-   repeated persistent updates.
-6. Extend `kvist:edn` with application tag handlers; lossless tagged Data,
+6. Internal freeze-once builders are implemented for eager collection
+   transforms and fused `into Data`; benchmark results cover them against
+   repeated persistent updates. Public transients remain evidence driven.
+7. Extend `kvist:edn` with application tag handlers; lossless tagged Data,
    core reading, file input, structured errors, and canonical writing are
    implemented. Vev's runtime, storage, ABI, and literal-macro paths share this
    reader; its duplicate EDN reader and raw borrowed parser wrappers are gone.
-7. Add explicit tag/key dispatch only after message-shaped application
+8. Add explicit tag/key dispatch only after message-shaped application
    workloads establish the required semantics.
 8. Extend runtime-valued `def` beyond single-result call inference only when
    concrete application examples justify additional inference rules; ordered

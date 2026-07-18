@@ -1,0 +1,60 @@
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
+
+(package main)
+(import data "kvist:data")
+
+(defstruct Endpoint {
+  host-id: i64
+  display-name: (owned string) :default "unnamed"
+  tags: Data :default '[]
+})
+
+(defn main []
+  (let [[ids err ok]
+        (data.decode (dynamic i64) [10 20 30] [:ids])]
+    (assert ok)
+    (assert (= (count ids) 3))
+    (assert (= ids[1] 20))
+    (discard err))
+
+  (let [[endpoints err ok]
+        (data.decode
+          (dynamic Endpoint)
+          [{:host-id 1 :display-name "primary"}
+           {:host-id 2 :tags [:remote]}]
+          [:endpoints])]
+    (assert ok)
+    (assert (= (count endpoints) 2))
+    (assert (= endpoints[0].display-name "primary"))
+    (assert (= endpoints[1].display-name "unnamed"))
+    (assert (= endpoints[1].tags '[:remote]))
+    (discard err))
+
+  (let [[ids err ok]
+        (data.decode (dynamic i64) [10 "bad"] [:ids])]
+    (assert (not ok))
+    (assert (= err.path '[:ids 1]))
+    (assert (= err.expected .Int))
+    (assert (= err.actual .String))
+    (discard ids))
+
+  (let [[ids err ok]
+        (data.decode (dynamic i64) {:not :a-vector} [:ids])]
+    (assert (not ok))
+    (assert (= err.path '[:ids]))
+    (assert (= err.expected .Vector))
+    (assert (= err.actual .Map))
+    (discard ids))
+
+  (let [[endpoints err ok]
+        (data.decode
+          (dynamic Endpoint)
+          [{:host-id 1}
+           {:host-id "bad"}]
+          [:endpoints])]
+    (assert (not ok))
+    (assert (= err.path '[:endpoints 1 :host-id]))
+    (assert (= err.expected .Int))
+    (assert (= err.actual .String))
+    (discard endpoints)))

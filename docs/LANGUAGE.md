@@ -1291,8 +1291,36 @@ early control flow, but do not want a `let` binding list:
 Here `block` is just introducing a scoped body. The mutable local comes from
 `defvar`, not from a `let` binding list.
 
-Field destructuring is not part of the language. Use dot access or explicit
-locals.
+Native structs continue to use dot access or explicit locals. `Data` has
+Clojure-style map and sequential destructuring:
+
+```clojure
+(let [{:keys [name roles]
+       :person/keys [email]
+       :strs [external-id]
+       :syms [status]
+       :or {name "Anonymous"}
+       :as original}
+      contact
+      [primary secondary & remaining :as all-roles]
+      roles]
+  ...)
+```
+
+Explicit map entries use `{local :source-key}`. `:keys`, literal namespaced
+`:person/keys`, `:strs`, `:syms`, `:or`, and `:as` follow their Clojure
+meanings. `::alias` resolution is not implied.
+
+Sequential destructuring accepts Data lists and vectors. Missing positions,
+nil, and a wrong collection kind behave as empty; extra positions are ignored.
+An empty `&` rest binds Data nil, while a non-empty rest preserves list/vector
+kind. Map defaults are evaluated only for absent keys, not explicit Data nil.
+Defaults may refer to earlier destructured locals.
+
+Every captured subvalue is an automatically managed `Data` local. Cleanup
+markers are therefore rejected on Data patterns. A simple vector binding
+remains native multi-return destructuring unless its right-hand side is
+statically Data or a contextually compatible Data literal.
 
 Owned local bindings may use the `:defer` marker:
 
@@ -1654,6 +1682,42 @@ payload.
 generated Odin details, not Kvist source forms. Kvist source uses `case` for
 subject dispatch and `cond` for predicate branches.
 
+### `match`
+
+Use `match` for structural `Data` dispatch. Arms are flat pattern/result pairs
+and the final arm must be `:else` or `_`:
+
+```clojure
+(match message
+  {:op :query :query query}
+  (run-query query)
+
+  (as whole {:op :transact :tx tx})
+  (validate-and-transact whole tx)
+
+  (kind :vector [head & tail])
+  (handle-sequence head tail)
+
+  :else
+  (unknown-message message))
+```
+
+Plain symbols capture Data and `_` is the wildcard. Quote a symbol when it is a
+literal pattern. Maps are open but every mentioned literal key is required.
+Sequences are exact unless they contain `&`; both lists and vectors match an
+unconstrained sequence pattern. Exact set patterns contain literals only.
+
+`(as name pattern)` captures the complete value. `(kind :vector pattern)`
+constrains the Data representation; the supported kind names are `:nil`,
+`:bool`, `:int`, `:float`, `:string`, `:symbol`, `:keyword`, `:list`,
+`:vector`, `:map`, `:set`, and `:tagged`. Captures remain Data, so native
+conversion stays explicit through `data.int`, `data.string`, `data.decode`,
+and related operations.
+
+The subject is evaluated once and the first matching arm wins. Structural
+tests borrow their input; captures are retained only after the complete arm
+succeeds. Use `case` instead for native enums, unions, and ordinary values.
+
 ### `for`
 
 Use `for` for side-effect iteration:
@@ -1670,6 +1734,23 @@ Use `for` for side-effect iteration:
 ```
 
 Unlike Clojure's `for`, this is not a lazy sequence builder. It is a loop.
+
+Data patterns can be loop binders:
+
+```clojure
+(for [[id title] rows]
+  ...)
+
+(for [{:keys [name email]} contacts]
+  ...)
+
+(for [index [id title] rows]
+  ...)
+```
+
+Data list, vector, and set sources iterate in backing order; Data nil performs
+zero iterations. Native arrays, slices, and dynamic arrays of `Data` are also
+supported. Other runtime Data kinds report a source-mapped kind error.
 
 ## Places, Mutation, And Value Updates
 
@@ -1812,9 +1893,9 @@ floating-point scalar, a Kvist enum, or a Kvist struct:
   points: (owned [dynamic]Point)
 })
 
-(data.decode Batch '{:ids [10 20 30]
-                     :points [{:x 1 :y 2}
-                              {:x 3 :y 4}]})
+(data.decode Batch {:ids [10 20 30]
+                    :points [{:x 1 :y 2}
+                             {:x 3 :y 4}]})
 ```
 
 Every element is validated before the native array is allocated. Errors append
@@ -1822,8 +1903,52 @@ the failing numeric index to the Data path, such as `[:ids 1]`. Nested struct
 fields extend that path further, such as `[:points 1 :x]`, and honor the same
 defaults and managed-field rules as directly nested structs. `Data` elements
 are retained; scalar and enum elements are stored unboxed. Invalid enum
-keywords also populate `expected-type` and `actual-value`. Native string arrays,
-borrowed slices, and direct collection decode targets remain future work.
+keywords also populate `expected-type` and `actual-value`.
+
+The same supported element types can be decoded directly when no wrapper
+struct is useful:
+
+```clojure
+(let [[points err ok]
+      (data.decode
+        (dynamic Point)
+        [{:x 1 :y 2} {:x 3 :y 4}]
+        [:points])]
+  (if ok
+    (draw-points points)
+    (println err.path err.expected err.actual)))
+```
+
+`points` is an ordinary owned `[dynamic]Point`, not a persistent or boxed
+collection. A result destructuring binding schedules deterministic cleanup,
+including recursive destruction of managed struct elements. Direct decoding
+also validates the complete Data vector before allocating native storage.
+Native string arrays and borrowed slices remain future work.
+
+### Validating Data Without Decoding
+
+Use `data.validate` when Data should remain Data after checking a reusable
+native shape:
+
+```clojure
+(let [[err ok]
+      (data.validate Message message [:message])]
+  (if ok
+    (handle-data-message message)
+    (println err.path err.expected err.actual)))
+```
+
+The target may be any struct or `(dynamic T)` target accepted by
+`data.decode`. Validation uses the same required fields, `:default` optional
+fields, enum variants, nested structs, array elements, and path-aware
+`Decode-Error` values. It returns `[err ok]` and does not construct the native
+target, clone managed fields, or allocate native array storage. The original
+immutable Data value is unchanged.
+
+This is useful for validating once at a package or protocol boundary and then
+passing Data through code that relies on that boundary contract. Validation
+does not create a hidden runtime schema object or a distinct boxed/refined Data
+type; the native target type remains the single shape definition.
 
 In a `->` pipeline, use a `.field` selector step:
 

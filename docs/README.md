@@ -12,6 +12,8 @@ Start here:
 - [TOOLING.md](TOOLING.md) - CLI and editor-facing tooling
 - [SEQUENCES.md](SEQUENCES.md) - collection helpers and their ownership model
 - [DATA.md](DATA.md) - first-class quoted data and managed runtime value design
+- [DATA-ORIENTED-PROGRAMMING.md](DATA-ORIENTED-PROGRAMMING.md) - eager
+  immutable Data transformations, ownership, and performance choices
 - [ERGONOMICS.md](ERGONOMICS.md) - current implementation stock and the
   Ro/Vev-driven ergonomics roadmap
 - [PACKAGES.md](PACKAGES.md) - shipped `kvist:*` package index
@@ -28,6 +30,8 @@ Experimental notes live under `docs/experimental/`.
 
 - [experimental/LISP-NATIVE.md](experimental/LISP-NATIVE.md) - staged plan for
   Data, EDN, runtime bindings, Syntax, REPL, and resident-console work
+- [experimental/DATA-COLLECTIONS-API.md](experimental/DATA-COLLECTIONS-API.md) -
+  audit and proposed eager immutable Data collection API
 
 Optional official packages and their documentation are linked from
 [PACKAGES.md](PACKAGES.md).

@@ -1,0 +1,67 @@
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
+
+(package main)
+(import data "kvist:data")
+
+(defenum Mode [
+  Query
+  Transact
+])
+
+(defstruct Endpoint {
+  host-id: i64
+  display-name: (owned string) :default "unnamed"
+})
+
+(defstruct Message {
+  mode: Mode
+  endpoint: Endpoint
+  retries: i64 :default 0
+  replicas: (owned [dynamic]Endpoint) :default []
+})
+
+(defn main []
+  (let [message: Data
+        {:mode :query
+         :endpoint {:host-id 7}
+         :replicas [{:host-id 8}
+                    {:host-id 9 :display-name "remote"}]}]
+    (let [[err ok] (data.validate Message message [:message])]
+      (assert ok)
+      ;; Validation leaves the original immutable Data in place.
+      (assert (= (data.int (get (get message :endpoint) :host-id)) 7))
+      (discard err)))
+
+  (let [[err ok]
+        (data.validate
+          Message
+          {:mode :query
+           :endpoint {:host-id 7}
+           :replicas [{:host-id 8}
+                      {:host-id "bad"}]}
+          [:message])]
+    (assert (not ok))
+    (assert (= err.path '[:message :replicas 1 :host-id]))
+    (assert (= err.expected .Int))
+    (assert (= err.actual .String)))
+
+  (let [[err ok]
+        (data.validate
+          (dynamic Endpoint)
+          [{:host-id 1}
+           {:host-id 2}]
+          [:rows])]
+    (assert ok)
+    (discard err))
+
+  (let [[err ok]
+        (data.validate
+          (dynamic Endpoint)
+          [{:host-id 1}
+           {:host-id false}]
+          [:rows])]
+    (assert (not ok))
+    (assert (= err.path '[:rows 1 :host-id]))
+    (assert (= err.expected .Int))
+    (assert (= err.actual .Bool))))

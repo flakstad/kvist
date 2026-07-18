@@ -1,0 +1,237 @@
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
+
+(package main)
+(import data "kvist:data")
+
+(defn add-value [total: i64, value: Data] -> i64
+  (+ total (data.int value)))
+
+(defn greater-than-one? [value: Data] -> bool
+  (> (data.int value) 1))
+
+(defn below-four? [value: Data] -> bool
+  (< (data.int value) 4))
+
+(defn indexed-two? [index: int, value: Data] -> bool
+  (and (= index 2) (= (data.int value) 2)))
+
+(defn score [value: Data] -> i64
+  (data.int value))
+
+(defn increment-data [value: Data] -> Data
+  (data.from-int (+ (data.int value) 1)))
+
+(defn add-index [index: int, value: Data] -> Data
+  (data.from-int (+ (i64 index) (data.int value))))
+
+(defn keep-odd [value: Data] -> Data
+  (if (= (% (data.int value) 2) 1)
+    value
+    'nil))
+
+(defn duplicate [value: Data] -> Data
+  [value value])
+
+(defn parity [value: Data] -> Data
+  (data.from-int (% (data.int value) 2)))
+
+(defn descending? [left: Data, right: Data] -> bool
+  (> (data.int left) (data.int right)))
+
+(defn add-entry [total: i64, _: Data, value: Data] -> i64
+  (+ total (data.int value)))
+
+(defn add-data [left: Data, right: Data] -> Data
+  (data.from-int (+ (data.int left) (data.int right))))
+
+(defn same-key [_: Data] -> Data
+  :same)
+
+(defn increment-value [value: Data] -> Data
+  (data.from-int (+ (data.int value) 1)))
+
+(defn swap-entry [key: Data, value: Data] -> Data
+  [value key])
+
+(defn value-over-one? [_: Data, value: Data] -> bool
+  (> (data.int value) 1))
+
+(defn greater-than-three? [value: Data] -> bool
+  (> (data.int value) 3))
+
+(deftransform incremented-over-three
+  (map increment-data)
+  (filter greater-than-three?))
+
+(deftransform duplicated-over-one
+  (mapcat duplicate)
+  (filter greater-than-one?))
+
+(deftransform unique-items
+  (distinct))
+
+(deftransform unique-parities
+  (distinct-by parity))
+
+(defn main []
+  (let [values: Data [3 1 2]
+        repeated-values: Data [3 1 3 2 1]
+        parity-values: Data [1 3 2 4 5]
+        base: Data {:a 1 :b 2}
+        overrides: Data {:b 3 :c 4}
+        with-nil: Data {:present nil}
+        as-list (data.list values)
+        as-set (data.set [3 1 2 1])
+        tail (data.rest values)
+        init (data.butlast values)
+        prefix (data.take 2 values)
+        suffix (data.drop 1 values)
+        sampled (data.take-nth 2 values)
+        [split-left split-right] (data.split-at 1 values)
+        partitioned (data.partition 2 [1 2 3 4 5])
+        partitioned-all (data.partition-all 2 [1 2 3 4 5])
+        partitioned-parity (data.partition-by parity [1 3 2 4 5])
+        interleaved (data.interleave [1 2 3] [:a :b])
+        mapped (data.map increment-data values)
+        mapped-indexed (data.map-indexed add-index values)
+        filtered (data.filter greater-than-one? values)
+        removed (data.remove greater-than-one? values)
+        kept (data.keep keep-odd values)
+        kept-indexed (data.keep-indexed
+                       (fn [index: int, value: Data] -> Data
+                         (if (= index 1) value 'nil))
+                       values)
+        flattened (data.mapcat duplicate values)
+        concatenated (data.concat [8] values '(9))
+        reversed (data.reverse values)
+        interposed (data.interpose 0 values)
+        unique (data.distinct [3 1 3 2 1])
+        unique-parity (data.distinct-by parity values)
+        leading (data.take-while greater-than-one? values)
+        trailing (data.drop-while greater-than-one? values)
+        sorted (data.sort-by score values)
+        sorted-desc (data.sort-with descending? values)
+        selected (data.select-keys base [:b :missing :a])
+        merged (data.merge base overrides)
+        merged-with (data.merge-with add-data base overrides)
+        same-keys (data.update-keys same-key base)
+        incremented-values (data.update-vals increment-value base)
+        zipped (data.zipmap [:x :y] [8 9 10])
+        swapped (data.map-entries swap-entry base)
+        filtered-entries (data.filter-entries value-over-one? base)
+        grouped (data.group-by parity values)
+        indexed-by-parity (data.index-by parity values)
+        frequency-map (data.frequencies [3 1 3 2 1 3])
+        counted-parity (data.count-by parity [3 1 2 4 5])
+        into-vector (data.into [0] values)
+        into-list (data.into '(0) values)
+        into-set (data.into #{0 3} values)
+        into-map (data.into {:z 0} [[:a 1] [:b 2]])
+        entry-total (data.reduce-kv add-entry (i64 0) base)
+        fused (into Data incremented-over-three values)
+        fused-mapcat (into Data duplicated-over-one values)
+        fused-distinct (into Data unique-items repeated-values)
+        fused-distinct-by (into Data unique-parities parity-values)
+        fused-total (transduce (filter greater-than-one?)
+                      add-value (i64 0) values)
+        described (data.describe base)
+        popped-vector (data.pop values)
+        popped-list (data.pop as-list)
+        total (data.reduce add-value (i64 0) values)
+        [found found?] (data.find greater-than-one? values)
+        [found-index indexed indexed?] (data.find-indexed indexed-two? values)
+        [smallest smallest?] (data.min-by score values)
+        [largest largest?] (data.max-by score values)]
+    (assert (= (data.int (data.first values)) 3))
+    (assert (= (data.int (data.second values)) 1))
+    (assert (= (data.int (data.last values)) 2))
+    (assert (= (data.int (data.peek values)) 2))
+    (assert (= (data.int (data.peek as-list)) 3))
+    (assert (= (data.count tail) 2))
+    (assert (= (data.int (data.first tail)) 1))
+    (assert (= (data.count init) 2))
+    (assert (= (data.count prefix) 2))
+    (assert (= (data.int (data.first suffix)) 1))
+    (assert (= (data.int (data.last sampled)) 2))
+    (assert (= (data.count split-left) 1))
+    (assert (= (data.count split-right) 2))
+    (assert (= (data.count partitioned) 2))
+    (assert (= (data.count partitioned-all) 3))
+    (assert (= (data.count (data.last partitioned-all)) 1))
+    (assert (= (data.count partitioned-parity) 3))
+    (assert (= interleaved '[1 :a 2 :b]))
+    (assert (= (data.int (data.first mapped)) 4))
+    (assert (= (data.int (data.last mapped-indexed)) 4))
+    (assert (= (data.count filtered) 2))
+    (assert (= (data.int (data.first removed)) 1))
+    (assert (= (data.count kept) 2))
+    (assert (= (data.int (data.first kept-indexed)) 1))
+    (assert (= (data.count flattened) 6))
+    (assert (= (data.count concatenated) 5))
+    (assert (= (data.int (data.first reversed)) 2))
+    (assert (= (data.count interposed) 5))
+    (assert (= (data.int (data.second interposed)) 0))
+    (assert (= (data.count unique) 3))
+    (assert (= (data.count unique-parity) 2))
+    (assert (= (data.count leading) 1))
+    (assert (= (data.int (data.first trailing)) 1))
+    (assert (= (data.int (data.first sorted)) 1))
+    (assert (= (data.int (data.last sorted)) 3))
+    (assert (= (data.int (data.first sorted-desc)) 3))
+    (assert (= (data.int (data.last sorted-desc)) 1))
+    (assert (= (data.int (get selected :b)) 2))
+    (assert (= (data.int (get merged :b)) 3))
+    (assert (= (data.int (get merged-with :b)) 5))
+    (assert (= (data.int (get same-keys :same)) 2))
+    (assert (= (data.int (get incremented-values :a)) 2))
+    (assert (= (data.int (get zipped :y)) 9))
+    (assert (= (data.keyword (get swapped 1)) ":a"))
+    (assert (= (data.count filtered-entries) 1))
+    (assert (= (data.count (get grouped 1)) 2))
+    (assert (= (data.int (get indexed-by-parity 1)) 1))
+    (assert (= (data.int (get frequency-map 3)) 3))
+    (assert (= (data.int (get counted-parity 1)) 3))
+    (assert (= (data.count into-vector) 4))
+    (assert (= (data.int (data.first into-list)) 2))
+    (assert (= (data.count into-set) 4))
+    (assert (= (data.int (get into-map :b)) 2))
+    (assert (= entry-total 3))
+    (assert (= (data.count fused) 1))
+    (assert (= (data.int (data.first fused)) 4))
+    (assert (= fused-mapcat '[3 3 2 2]))
+    (assert (= fused-distinct '[3 1 2]))
+    (assert (= fused-distinct-by '[1 2]))
+    (assert (= fused-total 5))
+    (assert (= (:a base) 1))
+    (assert (= (base :b) 2))
+    (assert (= (:missing base :fallback) :fallback))
+    (assert (= (:kind described) :map))
+    (assert (= (:count described) 2))
+    (assert (= (data.count (:keys described)) 2))
+    (assert (data.nil? (get with-nil :present 9)))
+    (assert (= (data.int (get with-nil :missing 9)) 9))
+    (assert (not (contains? values 3)))
+    (assert (data.includes? values 3))
+    (assert (= (data.count popped-vector) 2))
+    (assert (= (data.int (data.last popped-vector)) 1))
+    (assert (= (data.int (data.first popped-list)) 1))
+    (assert (= (data.count as-set) 3))
+    (assert (= total 6))
+    (assert (data.some? greater-than-one? values))
+    (assert (data.every? below-four? values))
+    (assert (data.not-any? (fn [value: Data] -> bool
+                             (> (data.int value) 9))
+                           values))
+    (assert (data.not-every? greater-than-one? values))
+    (assert found?)
+    (assert (= (data.int found) 3))
+    (assert indexed?)
+    (assert (= found-index 2))
+    (assert (= (data.int indexed) 2))
+    (assert smallest?)
+    (assert largest?)
+    (assert (= (data.int smallest) 1))
+    (assert (= (data.int largest) 3))
+    (assert (data.nil? (data.first 'nil)))
+    (assert (= (data.count (data.rest 'nil)) 0))))

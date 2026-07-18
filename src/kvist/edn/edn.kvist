@@ -3,6 +3,7 @@
 
 (package edn)
 (import core "kvist:core")
+(import arr "kvist:arr")
 (import data "kvist:data")
 (import fmt "core:fmt")
 (import os "core:os")
@@ -120,9 +121,9 @@
 
 (defn- sequence-data [initial: Data, items: []Data] -> Data
   (cond
-    (data.list? initial) (data.list items)
-    (data.set? initial) (data.set items)
-    :else (data.vector items)))
+    (data.list? initial) (data.list-from-array items)
+    (data.set? initial) (data.set-from-array items)
+    :else (data.vector-from-array items)))
 
 (defn- parse-sequence [reader: ^Reader, close: byte, initial: Data]
   -> [value: Data, error: Read-Error, ok: bool]
@@ -149,7 +150,7 @@
         (return (read-error reader "unterminated map")))
       (when (= (core.get reader.text reader.index) (byte 125))
         (inc! reader.index)
-        (return (data.map items[:]) (Read-Error {}) true))
+        (return (data.map-from-alternating items[:]) (Read-Error {}) true))
       (let [key-start reader.index
             [key key-error key-ok] (parse-value reader)
             key-end reader.index]
@@ -316,3 +317,118 @@
     (write-value! (addr builder) value)
     (let [[out err] (strings.clone (strings.to_string builder))]
       (if (!= err nil) "" out))))
+
+(defn pr-str
+  "Return canonical readable EDN text for `value`.
+
+  This is the Clojure-familiar name for `edn.write`."
+  [value: Data] -> string
+  (write value))
+
+(defn pr
+  "Write canonical EDN for `value` without a trailing newline."
+  [value: Data]
+  (let [text (write value) :defer]
+    (fmt.print text)))
+
+(defn prn
+  "Write canonical EDN for `value` followed by a newline."
+  [value: Data]
+  (let [text (write value) :defer]
+    (fmt.println text)))
+
+(defn- write-indent!
+  [builder: ^strings.Builder, depth: int, indent-width: int]
+  (let [remaining (* depth indent-width)]
+    (while (> remaining 0)
+      (strings.write_byte builder (byte 32))
+      (dec! remaining))))
+
+(defn- write-pretty-sequence!
+  [builder: ^strings.Builder,
+   value: Data,
+   open: string,
+   close: string,
+   depth: int,
+   indent-width: int]
+  (strings.write_string builder open)
+  (if (= (core.count value) 0)
+    (do
+      (strings.write_string builder close)
+      (return)))
+  (strings.write_byte builder (byte 10))
+  (for [index (arr.range 0 (core.count value))]
+    (write-indent! builder (+ depth 1) indent-width)
+    (write-pretty-value!
+     builder (data.item-at value index) (+ depth 1) indent-width)
+    (strings.write_byte builder (byte 10)))
+  (write-indent! builder depth indent-width)
+  (strings.write_string builder close))
+
+(defn- write-pretty-map!
+  [builder: ^strings.Builder, value: Data, depth: int, indent-width: int]
+  (strings.write_byte builder (byte 123))
+  (if (= (core.count value) 0)
+    (do
+      (strings.write_byte builder (byte 125))
+      (return)))
+  (strings.write_byte builder (byte 10))
+  (for [index (arr.range 0 (core.count value))]
+    (write-indent! builder (+ depth 1) indent-width)
+    (write-pretty-value!
+     builder (data.key-at value index) (+ depth 1) indent-width)
+    (strings.write_byte builder (byte 32))
+    (write-pretty-value!
+     builder (data.value-at value index) (+ depth 1) indent-width)
+    (strings.write_byte builder (byte 10)))
+  (write-indent! builder depth indent-width)
+  (strings.write_byte builder (byte 125)))
+
+(defn- write-pretty-value!
+  [builder: ^strings.Builder, value: Data, depth: int, indent-width: int]
+  (case (data.kind value)
+    .List
+      (write-pretty-sequence! builder value "(" ")" depth indent-width)
+    .Vector
+      (write-pretty-sequence! builder value "[" "]" depth indent-width)
+    .Map
+      (write-pretty-map! builder value depth indent-width)
+    .Set
+      (write-pretty-sequence! builder value "#{" "}" depth indent-width)
+    .Tagged
+      (do
+        (strings.write_byte builder (byte 35))
+        (strings.write_string builder (data.tag value))
+        (strings.write_byte builder (byte 32))
+        (write-pretty-value!
+         builder (data.tagged-value value) depth indent-width))
+    (write-value! builder value)))
+
+(defn pretty-with
+  "Return multiline EDN using `indent-width` spaces per nesting level."
+  [value: Data, indent-width: int] -> string
+  (let [width indent-width]
+    (if (< width 0)
+      (set! width 0))
+    (let [builder (strings.builder_make)]
+      (defer (strings.builder_destroy (addr builder)))
+      (write-pretty-value! (addr builder) value 0 width)
+      (let [[out err] (strings.clone (strings.to_string builder))]
+        (if (!= err nil) "" out)))))
+
+(defn pretty
+  "Return multiline EDN with two-space indentation."
+  [value: Data] -> string
+  (pretty-with value 2))
+
+(defn pprint-with
+  "Pretty-print `value` using `indent-width` spaces."
+  [value: Data, indent-width: int]
+  (let [text (pretty-with value indent-width) :defer]
+    (fmt.println text)))
+
+(defn pprint
+  "Pretty-print `value` using two-space indentation."
+  [value: Data]
+  (let [text (pretty value) :defer]
+    (fmt.println text)))
