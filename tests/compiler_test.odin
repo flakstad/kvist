@@ -4270,6 +4270,30 @@ compile_data_decode_rejects_native_string_arrays :: proc(t: ^testing.T) {
 }
 
 @(test)
+compile_data_decode_diagnostic_uses_plain_type_syntax :: proc(t: ^testing.T) {
+    source := `(package main)
+(import data "kvist:data")
+
+(defstruct Native-Handle {
+  value: ^int
+})
+
+(defn decode-handle [value: Data] -> [handle: Native-Handle, err: data.Decode-Error, ok: bool]
+  (data.decode Native-Handle value))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    delete(output)
+    defer delete(err.message)
+    testing.expect_value(
+        t,
+        err.message,
+        "data.decode field Native_Handle.value has unsupported type ^int; supported fields are string, Data, bool, integer and floating-point scalars, enums, nested Kvist structs, and dynamic arrays of supported non-string values",
+    )
+    testing.expect_value(t, strings.contains(err.message, "(owned "), false)
+}
+
+@(test)
 compile_data_decode_direct_dynamic_arrays :: proc(t: ^testing.T) {
     result, err, ok := kvist.compile_path_with_map("examples/data/direct-collection-decode.kvist")
     testing.expect_value(t, ok, true)

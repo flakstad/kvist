@@ -4472,7 +4472,7 @@ emit_decode_struct_value :: proc(
 
         return "", Compile_Error{
             message = fmt.tprintf(
-                "data.decode field %s.%s has unsupported type %s; use (owned string) for decoded strings and (owned [dynamic]T) for supported vectors; other supported fields are Data, bool, integer and floating-point scalars, enums, and nested Kvist structs",
+                "data.decode field %s.%s has unsupported type %s; supported fields are string, Data, bool, integer and floating-point scalars, enums, nested Kvist structs, and dynamic arrays of supported non-string values",
                 struct_decl.name,
                 field.source_name,
                 field.ty,
