@@ -10641,6 +10641,48 @@ mark_transferred_owned_args :: proc(e: ^Emitter, form: CST_Form, live: ^[dynamic
     if form.kind != .List || len(form.items) == 0 {
         return
     }
+    if form.items[0].kind == .Symbol {
+        switch form.items[0].text {
+        case "if", "when", "cond", "case", "type-case", "match", "let", "do",
+             "block", "for", "while", "fn", "quote", "quasiquote", "return",
+             "set!":
+            // These forms have branch, scope, or statement semantics handled
+            // by the surrounding ownership walk. Do not flatten them into one
+            // unconditional evaluation path here.
+            return
+        }
+    }
+    // A proven consuming call can itself be nested in an ordinary call
+    // argument, for example `(println (consume values))`. Do not recursively
+    // flatten arbitrary forms here: only descend when the nested call is
+    // itself a known transfer boundary.
+    for item in form.items[1:] {
+        if item.kind != .List || len(item.items) == 0 {
+            continue
+        }
+        nested_transfers := form_transfers_owned_args(item)
+        if !nested_transfers && item.items[0].kind == .Symbol {
+            nested_name := map_name(item.items[0].text)
+            // Imported source procedures are emitted with a package prefix.
+            // Their internal audit is analyzed in their own declaration
+            // bodies; do not project a conservative imported summary through
+            // arbitrary nested root-package calls.
+            if strings.index(nested_name, "__") < 0 {
+                if nested_decl, ok_nested := find_proc_decl(e, nested_name); ok_nested {
+                    for param in nested_decl.params {
+                        if param.ownership == .Owned {
+                            nested_transfers = true
+                            break
+                        }
+                    }
+                }
+            }
+            delete(nested_name)
+        }
+        if nested_transfers {
+            mark_transferred_owned_args(e, item, live)
+        }
+    }
     if form_transfers_owned_args(form) {
         for item in form.items[2:] {
             if item.kind == .Symbol {

@@ -7,7 +7,7 @@
 (import data "kvist:data")
 
 (defn make-values [] -> [dynamic]int
-  (arr.range 0 5))
+  (make [dynamic]int))
 
 (defn inspect-values [values: [dynamic]int] -> int
   (count values))

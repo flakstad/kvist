@@ -28741,6 +28741,35 @@ infer_owned_result_consuming_parameter_and_borrowed_result :: proc(t: ^testing.T
 }
 
 @(test)
+ownership_audit_tracks_consumption_inside_ordinary_call_arguments :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn make-values [] -> [dynamic]int
+  (make [dynamic]int))
+
+(defn consume [values: [dynamic]int] -> int
+  (let [result (count values)]
+    (delete values)
+    result))
+
+(defn demo []
+  (let [values (make-values)]
+    (println (consume values))))`
+
+    result, err, ok := kvist.compile_source_with_map(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(t, len(result.warnings), 0)
+}
+
+@(test)
 borrowed_data_results_become_safe_managed_locals :: proc(t: ^testing.T) {
     dir, dir_err := os.make_directory_temp("", "kvist-data-provenance-*", context.allocator)
     testing.expect_value(t, dir_err == nil, true)
