@@ -1004,6 +1004,40 @@ parse_label_name :: proc(form: CST_Form) -> (name, source_name: string, ok: bool
     return "", "", false
 }
 
+parse_struct_managed_kind :: proc(form: CST_Form) -> (Managed_Kind, Compile_Error, bool) {
+    if form.kind != .Brace {
+        return .None, Compile_Error{message = "defstruct metadata must be a brace form", span = form.span}, false
+    }
+    managed_kind := Managed_Kind.None
+    found := false
+    for i := 0; i < len(form.items); i += 2 {
+        if i+1 >= len(form.items) {
+            return .None, Compile_Error{message = "missing defstruct metadata value", span = form.span}, false
+        }
+        key, _, ok_key := parse_label_name(form.items[i])
+        if !ok_key || key != "managed" {
+            continue
+        }
+        if found {
+            return .None, Compile_Error{message = "duplicate managed: defstruct metadata", span = form.items[i].span}, false
+        }
+        found = true
+        value := form.items[i+1]
+        if value.kind != .Keyword {
+            return .None, Compile_Error{message = "managed: expects :unique or :shared", span = value.span}, false
+        }
+        switch value.text {
+        case ":unique":
+            managed_kind = .Unique
+        case ":shared":
+            managed_kind = .Shared
+        case:
+            return .None, Compile_Error{message = "managed: expects :unique or :shared", span = value.span}, false
+        }
+    }
+    return managed_kind, {}, true
+}
+
 parse_defstruct_fields :: proc(form: CST_Form) -> (fields: [dynamic]Struct_Field, err: Compile_Error, ok: bool) {
     if form.kind != .Brace {
         return fields, Compile_Error{message = "expected defstruct field brace form", span = form.span}, false
@@ -1663,6 +1697,15 @@ parse_decl :: proc(top_form: CST_Top_Form) -> (decl: AST_Decl, err: Compile_Erro
         if !ok_fields {
             return decl, err_fields, false
         }
+        managed_kind := Managed_Kind.None
+        if meta_index >= 0 {
+            err_managed: Compile_Error
+            ok_managed: bool
+            managed_kind, err_managed, ok_managed = parse_struct_managed_kind(form.items[meta_index])
+            if !ok_managed {
+                return decl, err_managed, false
+            }
+        }
         return AST_Decl{
             kind = .Struct,
             span = form.span,
@@ -1670,6 +1713,7 @@ parse_decl :: proc(top_form: CST_Top_Form) -> (decl: AST_Decl, err: Compile_Erro
             struct_decl = Struct_Decl{
                 name   = map_name(form.items[1].text),
                 fields = fields,
+                managed_kind = managed_kind,
             },
         }, {}, true
     case "defenum", "defenum-":

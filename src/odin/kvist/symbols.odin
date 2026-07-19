@@ -1467,7 +1467,11 @@ symbols_proc_signature :: proc(name: string, decl: Proc_Decl) -> string {
         if idx > 0 {
             strings.write_string(&builder, ", ")
         }
-        fmt.sbprintf(&builder, "%s: %s", param.name, param.ty)
+        if param.ownership == .Owned {
+            fmt.sbprintf(&builder, "%s: (owned %s)", param.name, param.ty)
+        } else {
+            fmt.sbprintf(&builder, "%s: %s", param.name, param.ty)
+        }
         if param.has_default {
             strings.write_string(&builder, " = ")
             strings.write_string(&builder, symbols_form_text(param.default_value))
@@ -1477,14 +1481,28 @@ symbols_proc_signature :: proc(name: string, decl: Proc_Decl) -> string {
 
     #partial switch decl.returns.kind {
     case .Single:
-        fmt.sbprintf(&builder, " -> %s", decl.returns.single_ty)
+        #partial switch decl.returns.single_ownership {
+        case .Owned:
+            fmt.sbprintf(&builder, " -> (owned %s)", decl.returns.single_ty)
+        case .Borrowed:
+            fmt.sbprintf(&builder, " -> (borrowed %s)", decl.returns.single_ty)
+        case:
+            fmt.sbprintf(&builder, " -> %s", decl.returns.single_ty)
+        }
     case .Named:
         strings.write_string(&builder, " -> [")
         for field, idx in decl.returns.named {
             if idx > 0 {
                 strings.write_string(&builder, ", ")
             }
-            fmt.sbprintf(&builder, "%s: %s", field.name, field.ty)
+            #partial switch field.ownership {
+            case .Owned:
+                fmt.sbprintf(&builder, "%s: (owned %s)", field.name, field.ty)
+            case .Borrowed:
+                fmt.sbprintf(&builder, "%s: (borrowed %s)", field.name, field.ty)
+            case:
+                fmt.sbprintf(&builder, "%s: %s", field.name, field.ty)
+            }
         }
         strings.write_string(&builder, "]")
     case:
@@ -1503,7 +1521,11 @@ symbols_source_signature :: proc(name: string, decl: Source_Decl) -> string {
         if idx > 0 {
             strings.write_string(&builder, ", ")
         }
-        fmt.sbprintf(&builder, "%s: %s", param.name, param.ty)
+        if param.ownership == .Owned {
+            fmt.sbprintf(&builder, "%s: (owned %s)", param.name, param.ty)
+        } else {
+            fmt.sbprintf(&builder, "%s: %s", param.name, param.ty)
+        }
     }
     fmt.sbprintf(&builder, "] -> %s :yield %s)", decl.state_ty, decl.item_ty)
     return strings.to_string(builder)

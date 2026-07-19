@@ -28627,6 +28627,17 @@ compile_ownership_qualified_proc_boundaries :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(result.output, "kvist_data_release(value)"), true)
     testing.expect_value(t, strings.contains(result.output, "kvist_owner^ = false"), true)
     testing.expect_value(t, len(result.warnings), 0)
+
+    symbols, symbols_err, symbols_ok := kvist.symbols_source(source)
+    testing.expect_value(t, symbols_ok, true)
+    if symbols_ok {
+        defer delete(symbols)
+        testing.expect_value(t, strings.contains(symbols, "value: (owned Data)] -> (owned Data)"), true)
+        testing.expect_value(t, strings.contains(symbols, "value: Data] -> (borrowed Data)"), true)
+    } else {
+        defer delete(symbols_err.message)
+        testing.expect_value(t, symbols_err.message, "")
+    }
 }
 
 @(test)
@@ -28670,6 +28681,73 @@ compile_owned_parameter_marks_unique_argument_moved :: proc(t: ^testing.T) {
 }
 
 @(test)
+compile_imported_ownership_qualified_boundaries :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-owned-boundary-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    support_dir, support_dir_err := os.join_path({dir, "support"}, context.allocator)
+    testing.expect_value(t, support_dir_err == nil, true)
+    if support_dir_err != nil {
+        return
+    }
+    defer delete(support_dir)
+    testing.expect_value(t, os.make_directory_all(support_dir) == nil, true)
+
+    support_path, support_path_err := os.join_path({support_dir, "support.kvist"}, context.allocator)
+    testing.expect_value(t, support_path_err == nil, true)
+    if support_path_err != nil {
+        return
+    }
+    defer delete(support_path)
+    support_source := `(package support)
+
+(defn consume [values: (owned [dynamic]int)]
+  (println (count values)))
+
+(defn view [values: (borrowed []int)] -> (borrowed []int)
+  values)`
+    testing.expect_value(t, os.write_entire_file_from_string(support_path, support_source) == nil, true)
+
+    main_path, main_path_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    testing.expect_value(t, main_path_err == nil, true)
+    if main_path_err != nil {
+        return
+    }
+    defer delete(main_path)
+    main_source := `(package main)
+(import arr "kvist:arr")
+(import support "support")
+
+(defn demo []
+  (let [values (arr.range 0 3)]
+    (support.consume values)
+    (println (count values))))`
+    testing.expect_value(t, os.write_entire_file_from_string(main_path, main_source) == nil, true)
+
+    result, err, ok := kvist.compile_path_with_map(main_path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(t, strings.contains(result.output, "support__consume :: proc(values: [dynamic]int)"), true)
+    testing.expect_value(t, strings.contains(result.output, "support__view :: proc(values: []int) -> []int"), true)
+    testing.expect_value(t, len(result.warnings), 1)
+    if len(result.warnings) == 1 {
+        testing.expect_value(t, result.warnings[0].code, kvist.Compile_Warning_Code.Ownership_Use_After_Transfer)
+    }
+}
+
+@(test)
 reject_conflicting_ownership_return_contracts :: proc(t: ^testing.T) {
     source := `(package main)
 
@@ -28684,4 +28762,194 @@ reject_conflicting_ownership_return_contracts :: proc(t: ^testing.T) {
     }
     defer delete(err.message)
     testing.expect_value(t, err.message, "#borrowed conflicts with an owned return type")
+}
+
+@(test)
+compile_unique_managed_struct_protocol :: proc(t: ^testing.T) {
+    source := `(package main)
+(import arr "kvist:arr")
+
+(defstruct Buffer {
+  values: (owned [dynamic]int)
+} {
+  managed: :unique
+})
+
+(defn Buffer-destroy [buffer: Buffer]
+  (delete buffer.values))
+
+(defn make-buffer [] -> (owned Buffer)
+  (Buffer {values: (arr.range 0 4)}))
+
+(defn forward [buffer: (owned Buffer)] -> (owned Buffer)
+  buffer)
+
+(defn consume [buffer: (owned Buffer)] -> int
+  (count buffer.values))
+
+(defn demo [] -> int
+  (let [buffer (make-buffer)
+        forwarded (forward buffer)]
+    (consume forwarded)))`
+
+    result, err, ok := kvist.compile_source_with_map(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+
+    testing.expect_value(t, strings.contains(result.output, "kvist_managed_destroy_Buffer :: proc(value: Buffer)"), true)
+    testing.expect_value(t, strings.contains(result.output, "Buffer_destroy(value)"), true)
+    testing.expect_value(t, strings.contains(result.output, "kvist_managed_move_assign_Buffer :: proc(place: ^Buffer, value: Buffer)"), true)
+    testing.expect_value(t, strings.contains(result.output, "kvist_managed_clone_Buffer"), false)
+    testing.expect_value(t, strings.contains(result.output, "kvist_owner^ = false"), true)
+    testing.expect_value(t, len(result.warnings), 0)
+}
+
+@(test)
+compile_shared_managed_struct_protocol :: proc(t: ^testing.T) {
+    source := `(package main)
+(import data "kvist:data")
+
+(defstruct Shared-Box {
+  value: Data
+} {
+  managed: :shared
+})
+
+(defn Shared-Box-clone [box: Shared-Box] -> (owned Shared-Box)
+  (Shared-Box {value: box.value}))
+
+(defn Shared-Box-destroy [box: Shared-Box]
+  (data.release box.value))
+
+(defn copy [box: Shared-Box] -> Shared-Box
+  (let [copied box]
+    copied))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "kvist_managed_clone_Shared_Box :: proc(value: Shared_Box) -> Shared_Box"), true)
+    testing.expect_value(t, strings.contains(output, "return Shared_Box_clone(value)"), true)
+    testing.expect_value(t, strings.contains(output, "Shared_Box_destroy(value)"), true)
+    testing.expect_value(t, strings.contains(output, "copied := kvist_managed_clone_Shared_Box(box)"), true)
+}
+
+@(test)
+native_struct_named_data_does_not_enable_shared_data_runtime :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct Data {
+  id: int
+  payload: string
+})
+
+(defn accept [value: Data] -> int
+  value.id)
+
+(defn demo [] -> int
+  (accept (Data {id: 7 payload: "native"})))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "Data :: struct"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_data_retain"), false)
+    testing.expect_value(t, strings.contains(output, "kvist_data_release"), false)
+    testing.expect_value(t, strings.contains(output, "accept(Data{id = 7, payload = \"native\"})"), true)
+}
+
+@(test)
+foreign_call_keeps_contextual_native_array_literal_inline :: proc(t: ^testing.T) {
+    source := `(package main)
+(import rl "vendor:raylib")
+
+(defn draw [panel: rl.Rectangle]
+  (rl.DrawRectangleRounded panel 0.08 8 [0 0 0 195]))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "rl.DrawRectangleRounded(panel, 0.08, 8, rl.Color{0, 0, 0, 195})"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_thread_"), false)
+}
+
+@(test)
+reject_unique_managed_struct_without_destructor :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct Handle {
+  raw: rawptr
+} {
+  managed: :unique
+})`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    defer delete(err.message)
+    testing.expect_value(t, strings.contains(err.message, "managed struct Handle requires"), true)
+}
+
+@(test)
+reject_ambiguous_unique_managed_result :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct Handle {
+  raw: rawptr
+} {
+  managed: :unique
+})
+
+(defn Handle-destroy [handle: Handle]
+  (discard handle))
+
+(defn invalid [handle: Handle] -> Handle
+  handle)`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    defer delete(err.message)
+    testing.expect_value(t, err.message, "procedure returning unique managed Handle must declare (owned Handle) or (borrowed Handle)")
+}
+
+@(test)
+reject_copy_assignment_of_unique_managed_value :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct Handle {
+  raw: rawptr
+} {
+  managed: :unique
+})
+
+(defn Handle-destroy [handle: Handle]
+  (discard handle))
+
+(defn replace [target: (owned Handle), replacement: Handle]
+  (set! target replacement))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    defer delete(err.message)
+    testing.expect_value(t, err.message, "cannot copy unique managed Handle in set!; use an owned result to move a replacement")
 }

@@ -6,6 +6,24 @@
 (import arr "kvist:arr")
 (import data "kvist:data")
 
+(defstruct Int-Buffer {
+  values: (owned [dynamic]int)
+} {
+  managed: :unique
+})
+
+(defn Int-Buffer-destroy [buffer: Int-Buffer]
+  (delete buffer.values))
+
+(defn make-buffer [] -> (owned Int-Buffer)
+  (Int-Buffer {values: (arr.range 0 5)}))
+
+(defn forward-buffer [buffer: (owned Int-Buffer)] -> (owned Int-Buffer)
+  buffer)
+
+(defn consume-buffer [buffer: (owned Int-Buffer)] -> int
+  (count buffer.values))
+
 (defn consume-values [values: (owned [dynamic]int)] -> int
   (count values))
 
@@ -19,4 +37,7 @@
   (let [values (arr.range 0 4)]
     (println (consume-values values)))
   (let [value (data.from-string "managed")]
-    (println (data.string (inspect-data (forward-data value))))))
+    (println (data.string (inspect-data (forward-data value)))))
+  (let [buffer (make-buffer)
+        forwarded (forward-buffer buffer)]
+    (println (consume-buffer forwarded))))

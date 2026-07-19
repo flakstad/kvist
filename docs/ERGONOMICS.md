@@ -17,6 +17,7 @@ compiler behavior.
 | `:defer`, `:defer-with`, and `:errdefer` | Implemented | Improve introductory documentation and analyzer precision |
 | Coded ownership diagnostics and audit mode | Implemented | Continue reducing the conservative Vev audit backlog |
 | Ownership-qualified procedure boundaries | Implemented | Migrate `#owned`/`#borrowed` and owner-taking naming conventions |
+| Custom native managed protocols | Implemented | Migrate Vev value/query aggregate lifetimes and extend owned containers |
 | Multi-return bindings and fallible guards | Implemented | Extend only when a concrete workload is not served by `:or-return`, `when-let`, `if-let`, `when-ok`, or `if-ok` |
 | Runtime `Data`, quasiquote, EDN, and persistent updates | Implemented | Complete managed aggregate ownership |
 | Transitive compilation cache and distinct entry keys | Implemented | Measure and split reusable package frontend artifacts |
@@ -53,8 +54,12 @@ compiler behavior.
 - Implemented: `(owned T)` and `(borrowed T)` procedure parameters/results
   erase to native Odin signatures while driving deterministic parameter
   cleanup, moves, return transfer, and use-after-transfer diagnostics.
-- Continue by representing custom native destructors/cloners as managed type
-  protocols, then migrate Vev's runtime ownership booleans.
+- Implemented: native structs may declare `managed: :unique` with a static
+  `Type-destroy` procedure or `managed: :shared` with static `Type-clone` and
+  `Type-destroy` procedures. Unique results require explicit ownership,
+  move by default, and reject implicit copy assignment.
+- Continue by migrating Vev's runtime ownership booleans and carrying the same
+  protocol through owned container elements and unions.
 - Implemented for top-level Kvist structs: recursive managed fields,
   construction, copying, `assoc`, ordinary-field `update`, overwrite,
   move, return, named-result destruction, discarded values, and destruction.

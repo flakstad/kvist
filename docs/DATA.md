@@ -179,6 +179,11 @@ Immutable Data cannot create cycles through its public construction API.
 
 The protocol should be representation-independent so future managed native
 types can use it without adding another Data-specific ownership pass.
+Custom native structs now opt into that same compiler protocol with
+`managed: :shared` or `managed: :unique` metadata and statically named clone
+and destroy procedures. This keeps `Data`'s reference-counted copying distinct
+from affine native values while sharing scope cleanup, move, return, and
+assignment machinery.
 
 ## Package Bindings
 

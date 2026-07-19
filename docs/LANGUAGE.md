@@ -833,6 +833,31 @@ destructor. Passing or returning a compiler-managed local to an owned position
 moves it and disables its former scope cleanup. Using that local afterward is
 an ownership diagnostic.
 
+Native structs with non-structural lifetime rules can declare a managed
+protocol in their metadata:
+
+```clojure
+(defstruct Buffer {
+  values: (owned [dynamic]int)
+} {
+  managed: :unique
+})
+
+(defn Buffer-destroy [buffer: Buffer]
+  (delete buffer.values))
+```
+
+A unique managed struct requires `Type-destroy [value: Type]`. Owned
+constructor/procedure results move by default, receive deterministic cleanup
+when bound, and cannot be copied through `set!`. Procedures returning the type
+must explicitly say `(owned Type)` or `(borrowed Type)`.
+
+A shared managed struct additionally requires
+`Type-clone [value: Type] -> (owned Type)`. Ordinary binding and assignment use
+that clone operation, while scope exit uses `Type-destroy`. Both protocol
+kinds emit ordinary native structs and direct Odin calls; no runtime interface
+table or collector is introduced.
+
 The older `#owned` and `#borrowed` result directives remain accepted during the
 ownership migration. Prefer qualified result types in new code. Conflicting
 qualified and directive contracts are rejected.
@@ -2011,6 +2036,8 @@ The practical ownership rules are:
 - borrowed views must not be deleted
 - compiler-managed `Data`, managed structs, and owned parameters receive
   deterministic generated cleanup
+- custom native structs use `managed: :unique` or `managed: :shared` metadata
+  with statically resolved `Type-destroy` and, for shared values, `Type-clone`
 - unqualified native arrays, maps, strings, and imported resources still use
   explicit `defer`, `:defer`, or `:defer-with`
 - `:defer` is scope cleanup for ordinary owned values

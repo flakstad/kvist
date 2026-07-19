@@ -226,8 +226,10 @@ Procedure contracts can state consumption and returned ownership directly:
 
 Plain parameters borrow. Owned parameters clean up deterministically unless
 their value is moved onward; ownership qualifiers erase to native Odin
-signatures. Ordinary unqualified native storage continues to use `:defer`,
-explicit return, or a consuming API. There is no tracing collector. See
+signatures. Native structs can opt into a statically resolved unique or shared
+managed protocol when field structure alone cannot describe destruction.
+Ordinary unqualified native storage continues to use `:defer`, explicit return,
+or a consuming API. There is no tracing collector. See
 [docs/LANGUAGE.md](docs/LANGUAGE.md) for the ownership and allocator rules.
 
 For ordinary string construction, core `str` renders its arguments without
