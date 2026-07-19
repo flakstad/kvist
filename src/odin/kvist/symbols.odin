@@ -1481,12 +1481,11 @@ symbols_proc_signature :: proc(name: string, decl: Proc_Decl) -> string {
 
     #partial switch decl.returns.kind {
     case .Single:
-        #partial switch decl.returns.single_ownership {
-        case .Owned:
+        if decl.returns.single_ownership == .Owned || decl.owns_result {
             fmt.sbprintf(&builder, " -> (owned %s)", decl.returns.single_ty)
-        case .Borrowed:
+        } else if decl.returns.single_ownership == .Borrowed || decl.borrows_result {
             fmt.sbprintf(&builder, " -> (borrowed %s)", decl.returns.single_ty)
-        case:
+        } else {
             fmt.sbprintf(&builder, " -> %s", decl.returns.single_ty)
         }
     case .Named:

@@ -28605,6 +28605,12 @@ compile_ownership_qualified_proc_boundaries :: proc(t: ^testing.T) {
 (defn view [value: (borrowed Data)] -> (borrowed Data)
   value)
 
+(defn legacy-owned [value: Data] -> Data #owned
+  value)
+
+(defn legacy-borrowed [value: Data] -> Data #borrowed
+  value)
+
 (defn demo [] -> Data
   (let [value (data.from-int 42)]
     (forward value)))`
@@ -28634,6 +28640,8 @@ compile_ownership_qualified_proc_boundaries :: proc(t: ^testing.T) {
         defer delete(symbols)
         testing.expect_value(t, strings.contains(symbols, "value: (owned Data)] -> (owned Data)"), true)
         testing.expect_value(t, strings.contains(symbols, "value: Data] -> (borrowed Data)"), true)
+        testing.expect_value(t, strings.contains(symbols, "(legacy-owned [value: Data] -> (owned Data))"), true)
+        testing.expect_value(t, strings.contains(symbols, "(legacy-borrowed [value: Data] -> (borrowed Data))"), true)
     } else {
         defer delete(symbols_err.message)
         testing.expect_value(t, symbols_err.message, "")
