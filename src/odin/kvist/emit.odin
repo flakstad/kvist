@@ -1506,14 +1506,33 @@ resolve_proc_call_decl :: proc(e: ^Emitter, head: string) -> (call_name: string,
     }
 
     slash := strings.index(head, "/")
-    if slash < 0 {
+    dot := strings.index(head, ".")
+    separator := slash
+    if separator < 0 {
+        separator = dot
+    }
+    if separator < 0 {
         return head_name, nil, false
     }
 
-    alias := map_name(head[:slash])
+    alias_text := head[:separator]
+    suffix_text := head[separator+1:]
+    alias := map_name(alias_text)
     defer delete(alias)
-    suffix := map_name(head[slash+1:])
+    suffix := map_name(suffix_text)
     defer delete(suffix)
+    for decl in e.decls {
+        import_alias, pkg, ok_import := kvist_import_alias_for_decl(decl)
+        if !ok_import || import_alias != alias_text {
+            continue
+        }
+        package_name := fmt.tprintf("%s__%s", pkg, suffix)
+        found_proc, ok_proc = find_proc_decl(e, package_name)
+        if ok_proc {
+            delete(head_name)
+            return package_name, found_proc, true
+        }
+    }
     package_name := fmt.tprintf("%s__%s", alias, suffix)
     found_proc, ok_proc = find_proc_decl(e, package_name)
     if ok_proc {
