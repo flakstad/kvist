@@ -11013,8 +11013,26 @@ emit_for_in_loop_body :: proc(e: ^Emitter, coll_form: CST_Form, coll_text, first
     }
     strings.write_string(&e.builder, " in ")
     prefix_len += len(" in ")
-    strings.write_string(&e.builder, coll_text)
-    record_current_line_fragment_map(e, prefix_len, coll_text, coll_form.span)
+    parenthesize_collection := false
+    if coll_form.kind == .List &&
+       len(coll_form.items) == 2 &&
+       (coll_form.items[1].kind == .Vector ||
+        coll_form.items[1].kind == .Brace ||
+        coll_form.items[1].kind == .Set) {
+        if type_text, _, ok_type := parse_type_text(coll_form.items[0]); ok_type {
+            delete(type_text)
+            parenthesize_collection = true
+        }
+    }
+    if parenthesize_collection {
+        strings.write_byte(&e.builder, '(')
+        strings.write_string(&e.builder, coll_text)
+        strings.write_byte(&e.builder, ')')
+        record_current_line_fragment_map(e, prefix_len+1, coll_text, coll_form.span)
+    } else {
+        strings.write_string(&e.builder, coll_text)
+        record_current_line_fragment_map(e, prefix_len, coll_text, coll_form.span)
+    }
     strings.write_string(&e.builder, " {")
     emit_raw_newline(e)
     e.indent += 1

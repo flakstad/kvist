@@ -6805,6 +6805,27 @@ total :: proc(xs: []int) -> int {
 }
 
 @(test)
+compile_parenthesizes_native_slice_literal_used_as_loop_collection :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn count-names [] -> int
+  (let [count 0]
+    (for [name ([]string ["Ada"])]
+      (set! count (+ count 1)))
+    count))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, `for name in ([]string{"Ada"}) {`), true)
+}
+
+@(test)
 compile_break_and_continue_forms :: proc(t: ^testing.T) {
     source := `(package main)
 
