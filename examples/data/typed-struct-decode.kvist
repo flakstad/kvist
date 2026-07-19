@@ -9,7 +9,7 @@
 
 (defstruct Endpoint {
   host-id: i64
-  display-name: (owned string) :default "unnamed"
+  display-name: string :default "unnamed"
   secure: bool :default false
   tags: Data :default '[]
 })
@@ -22,12 +22,12 @@
   endpoint: Endpoint
   mode: Mode :default .Manual
   fallback-endpoint: Endpoint :default (Endpoint {host-id: -1})
-  scores: (owned [dynamic]i64) :default []
-  raw-items: (owned [dynamic]Data) :default []
-  flags: (owned [dynamic]bool) :default []
-  ratios: (owned [dynamic]f64) :default []
-  modes: (owned [dynamic]Mode) :default []
-  endpoints: (owned [dynamic]Endpoint) :default []
+  scores: [dynamic]i64 :default []
+  raw-items: [dynamic]Data :default []
+  flags: [dynamic]bool :default []
+  ratios: [dynamic]f64 :default []
+  modes: [dynamic]Mode :default []
+  endpoints: [dynamic]Endpoint :default []
 })
 
 (defn main []

@@ -214,23 +214,35 @@ Use `:defer-with` when a value needs a custom destructor:
   (render-items items))
 ```
 
-Procedure contracts can state consumption and returned ownership directly:
+Kvist infers useful lifetime boundaries from ordinary code:
 
 ```clojure
-(defn consume [items: (owned [dynamic]Item)]
-  ...)
+(defn make-items [] -> [dynamic]Item
+  (make [dynamic]Item))
 
-(defn forward [value: (owned Data)] -> (owned Data)
+(defn consume [items: [dynamic]Item]
+  (delete items))
+
+(defn view [value: Data] -> Data
   value)
 ```
 
-Plain parameters borrow. Owned parameters clean up deterministically unless
-their value is moved onward; ownership qualifiers erase to native Odin
-signatures. Native structs can opt into a statically resolved unique or shared
-managed protocol when field structure alone cannot describe destruction.
-Ordinary unqualified native storage continues to use `:defer`, explicit return,
-or a consuming API. There is no tracing collector. See
-[docs/LANGUAGE.md](docs/LANGUAGE.md) for the ownership and allocator rules.
+Here `make-items` returns new storage, `consume` consumes its argument because
+its body deletes it, and `view` returns a borrowed Data view. No ownership
+syntax changes the native type. Run `kvist lifetimes file.kvist` to inspect
+these inferred boundaries.
+
+Kvist automatically manages `Data` references and Kvist structs whose
+nontrivial lifetime comes entirely from contained `Data`. Ordinary native
+strings, dynamic arrays, maps, and opaque resources keep Odin's explicit
+style: use `defer`, `:defer`, or `:defer-with` and ordinary cleanup
+procedures. Lifetime inference still diagnoses definite mistakes and moves a
+tracked native value into a proven consuming boundary; it does not silently
+install native cleanup. Typed `data.decode` results are a narrow structural
+exception because that boundary proves exactly what was allocated. There is no
+naming convention that turns `Type-destroy` or `Type-clone` into language
+behavior, and there is no tracing collector. See
+[docs/LANGUAGE.md](docs/LANGUAGE.md).
 
 For ordinary string construction, core `str` renders its arguments without
 interpreting braces or percent signs contained in string values:

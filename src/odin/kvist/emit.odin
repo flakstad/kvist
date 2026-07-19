@@ -1001,6 +1001,18 @@ emit_struct_brace_literal :: proc(e: ^Emitter, struct_decl: ^Struct_Decl, form: 
         if !ok_value {
             return "", err_value, false
         }
+        if value.kind == .Symbol && ownership_type_has_destructor(e, field.ty) {
+            name := map_name(value.text)
+            if owner_flag, ok_owner := lookup_managed_local_owner(e, name); ok_owner {
+                value_text = managed_move_local_value_text(e, field.ty, value_text, owner_flag)
+            }
+            delete(name)
+        } else if owner_name, has_owner := form_direct_borrow_owner_name(value, e); has_owner {
+            if owner_flag, ok_owner := lookup_managed_local_owner(e, owner_name); ok_owner {
+                value_text = managed_move_local_value_text(e, field.ty, value_text, owner_flag)
+            }
+            delete(owner_name)
+        }
         if field.owns_string {
             if !form_produces_owned_value(value, e) {
                 mark_core_strings(e)
@@ -5205,7 +5217,9 @@ borrowed_source_param_tracked :: proc(form: CST_Form, return_ty: string, params:
     name := map_name(form.text)
     defer delete(name)
     for param in params {
-        if param.name == name && type_text_can_borrow_return_from_param(return_ty, param.ty) {
+        if param.name == name &&
+           param.ownership != .Owned &&
+           type_text_can_borrow_return_from_param(return_ty, param.ty) {
             return true
         }
     }
@@ -5432,6 +5446,9 @@ proc_decl_infers_borrowed_tail_call_form :: proc(e: ^Emitter, form: CST_Form, de
         return true
     }
     if form_is_borrowed_interop_view_result(e, form) {
+        return true
+    }
+    if known_odin_call_lifetime(form) == .Borrowed {
         return true
     }
     if form.kind != .List || len(form.items) == 0 || form.items[0].kind != .Symbol {
@@ -5717,6 +5734,129 @@ Owned_Alloc_Result_Kind :: enum {
     Slice,
     Opaque,
     Container,
+}
+
+Known_Foreign_Lifetime :: enum {
+    Unknown,
+    Borrowed,
+    Owned,
+}
+
+Foreign_Lifetime_Binding :: struct {
+    target: string,
+    result: Known_Foreign_Lifetime,
+}
+
+FOREIGN_LIFETIME_BINDINGS :: []Foreign_Lifetime_Binding{
+    {"kvist_data_empty_map", .Owned},
+    {"kvist_data_make_unique_set", .Owned},
+    {"kvist_data_retain", .Owned},
+    {"kvist_data_assoc", .Owned},
+    {"kvist_data_update", .Owned},
+    {"kvist_data_dissoc", .Owned},
+    {"kvist_data_conj", .Owned},
+    {"kvist_data_disj", .Owned},
+    {"kvist_data_string", .Borrowed},
+    {"kvist_data_symbol", .Borrowed},
+    {"kvist_data_keyword", .Borrowed},
+    {"kvist_data_text", .Borrowed},
+    {"kvist_data_tag", .Borrowed},
+    {"kvist_data_tagged_value", .Borrowed},
+    {"kvist_data_key_at", .Borrowed},
+    {"kvist_data_value_at", .Borrowed},
+    {"kvist_data_item_at", .Borrowed},
+    {"kvist_data_get", .Borrowed},
+}
+
+known_odin_call_lifetime :: proc(form: CST_Form) -> Known_Foreign_Lifetime {
+    if form.kind != .List ||
+       len(form.items) < 2 ||
+       form.items[0].kind != .Symbol ||
+       form.items[0].text != "odin-call" ||
+       form.items[1].kind != .String {
+        return .Unknown
+    }
+    target := unquote_string(form.items[1].text)
+    defer delete(target)
+    // All `kvist_data_make_*` functions are constructors in the Kvist runtime
+    // ABI and return one shared reference owned by the caller.
+    if strings.has_prefix(target, "kvist_data_make_") {
+        return .Owned
+    }
+    for binding in FOREIGN_LIFETIME_BINDINGS {
+        if binding.target == target {
+            return binding.result
+        }
+    }
+    return .Unknown
+}
+
+form_infers_known_foreign_lifetime :: proc(
+    form: CST_Form,
+    expected: Known_Foreign_Lifetime,
+    depth: int = 0,
+    e: ^Emitter = nil,
+) -> bool {
+    if depth > 16 {
+        return false
+    }
+    if known_odin_call_lifetime(form) == expected {
+        return true
+    }
+    if form.kind != .List || len(form.items) == 0 || form.items[0].kind != .Symbol {
+        return false
+    }
+    switch form.items[0].text {
+    case "return":
+        if len(form.items) != 2 {
+            return false
+        }
+        return form_infers_known_foreign_lifetime(form.items[1], expected, depth+1, e)
+    case "do", "block":
+        return len(form.items) > 1 &&
+               form_infers_known_foreign_lifetime(form.items[len(form.items)-1], expected, depth+1, e)
+    case "let":
+        return len(form.items) > 2 &&
+               form_infers_known_foreign_lifetime(form.items[len(form.items)-1], expected, depth+1, e)
+    case "if":
+        return len(form.items) == 4 &&
+               form_infers_known_foreign_lifetime(form.items[2], expected, depth+1, e) &&
+               form_infers_known_foreign_lifetime(form.items[3], expected, depth+1, e)
+    case "case", "type-case":
+        if len(form.items) < 5 || len(form.items)%2 == 0 {
+            return false
+        }
+        i := 3
+        for i < len(form.items)-1 {
+            if !form_infers_known_foreign_lifetime(form.items[i], expected, depth+1, e) {
+                return false
+            }
+            i += 2
+        }
+        return form_infers_known_foreign_lifetime(
+            form.items[len(form.items)-1],
+            expected,
+            depth+1,
+            e,
+        )
+    case "match":
+        if len(form.items) < 4 {
+            return false
+        }
+        for i := 3; i < len(form.items); i += 2 {
+            if !form_infers_known_foreign_lifetime(form.items[i], expected, depth+1, e) {
+                return false
+            }
+        }
+        return true
+    }
+    if e != nil {
+        if _, proc_decl, ok_proc := resolve_proc_call_decl(e, form.items[0].text);
+           ok_proc && proc_decl != nil {
+            return proc_decl.owns_result if expected == .Owned else proc_decl.borrows_result
+        }
+    }
+    return false
 }
 
 owned_import_alloc_call_head :: proc(e: ^Emitter, text: string, kind: Owned_Alloc_Result_Kind) -> bool {
@@ -6265,7 +6405,11 @@ proc_decl_owned_result_head :: proc(e: ^Emitter, name: string) -> bool {
     direct_name := map_name(name)
     defer delete(direct_name)
     if proc_decl, ok_proc := find_proc_decl(e, direct_name); ok_proc {
-        if proc_decl.returns.kind == .Single && type_text_is_managed_value(e, proc_decl.returns.single_ty) {
+        // Data ownership is handled by the managed-value path. Treating it as
+        // an ordinary native owned result here would reject valid nested Data
+        // expressions before contextual management can retain or release them.
+        if proc_decl.returns.kind == .Single &&
+           type_text_is_managed_value(e, proc_decl.returns.single_ty) {
             return false
         }
         return proc_decl.owns_result || proc_decl_infers_owned_result(e, proc_decl)
@@ -6286,11 +6430,6 @@ form_is_owned_result :: proc(form: CST_Form, e: ^Emitter = nil) -> bool {
     }
     if proc_decl_owned_result_head(e, form.items[0].text) {
         return true
-    }
-    if e != nil {
-        if _, ok_source_call := source_call_decl(e, form); ok_source_call {
-            return true
-        }
     }
     if form_has_owned_output_type_operand(form) {
         return true
@@ -6395,7 +6534,8 @@ transform_direct_source_item_index :: proc(form: CST_Form, e: ^Emitter = nil) ->
 
 owned_result_usage_error :: proc(form: CST_Form, allow_root_owned: bool, e: ^Emitter = nil) -> (Compile_Error, bool) {
     if form_is_owned_result(form, e) {
-        if !allow_root_owned {
+        _, compiler_managed := owned_managed_form_type(e, form)
+        if !allow_root_owned && !compiler_managed {
             return Compile_Error{
                 message = nested_owned_result_error_message(form),
                 span = form.span,
@@ -7372,6 +7512,19 @@ returned_binding_name :: proc(form: CST_Form) -> (string, bool) {
     return "", false
 }
 
+borrowed_view_owner_has_nested_owned_value :: proc(e: ^Emitter, form: CST_Form) -> bool {
+    if form.kind == .List && len(form.items) > 1 && form.items[0].kind == .Symbol {
+        if _, proc_decl, ok_proc := resolve_proc_call_decl(e, form.items[0].text);
+           ok_proc && proc_decl != nil {
+            if index, ok_index := proc_decl_borrow_owner_arg_index(proc_decl);
+               ok_index && index+1 < len(form.items) {
+                return form_has_nested_owned_value(form.items[index+1], e)
+            }
+        }
+    }
+    return form_has_nested_owned_value(form, e)
+}
+
 let_return_error :: proc(e: ^Emitter, bindings: []Binding, body: []CST_Form) -> (Compile_Error, bool) {
     if len(body) == 0 {
         return {}, false
@@ -7384,7 +7537,8 @@ let_return_error :: proc(e: ^Emitter, bindings: []Binding, body: []CST_Form) -> 
         if binding.name != returned_name {
             continue
         }
-        if form_is_borrowed_view_result(binding.value, e) && form_has_nested_owned_value(binding.value, e) {
+        if form_is_borrowed_view_result(binding.value, e) &&
+           borrowed_view_owner_has_nested_owned_value(e, binding.value) {
             return Compile_Error{
                 message = "cannot return a borrowed view that depends on an owned intermediate; return an owned result or keep the pipeline local",
                 span = binding.value.span,
@@ -8263,24 +8417,8 @@ type_text_is_managed_value :: proc(e: ^Emitter, text: string) -> bool {
     return true
 }
 
-type_text_managed_kind :: proc(e: ^Emitter, text: string) -> Managed_Kind {
-    if e == nil {
-        return .None
-    }
-    struct_decl, ok_struct := find_struct_decl(e, strings.trim_space(text))
-    if !ok_struct {
-        return .None
-    }
-    return struct_decl.managed_kind
-}
-
-type_text_has_unique_lifecycle :: proc(e: ^Emitter, text: string) -> bool {
-    return type_text_managed_kind(e, text) == .Unique
-}
-
 type_text_has_owned_lifecycle :: proc(e: ^Emitter, text: string) -> bool {
-    return type_text_has_managed_lifecycle(e, text) ||
-           type_text_has_unique_lifecycle(e, text)
+    return type_text_has_managed_lifecycle(e, text)
 }
 
 type_text_has_managed_lifecycle :: proc(e: ^Emitter, text: string, depth: int = 0) -> bool {
@@ -8294,9 +8432,6 @@ type_text_has_managed_lifecycle :: proc(e: ^Emitter, text: string, depth: int = 
     if !ok_struct {
         return false
     }
-    if struct_decl.managed_kind == .Shared {
-        return true
-    }
     for field in struct_decl.fields {
         if field.owns_string ||
            field.owns_dynamic_array ||
@@ -8307,56 +8442,27 @@ type_text_has_managed_lifecycle :: proc(e: ^Emitter, text: string, depth: int = 
     return false
 }
 
-managed_struct_helper_name :: proc(op, ty: string) -> string {
-    return fmt.tprintf("kvist_managed_%s_%s", op, ty)
-}
-
-custom_managed_proc_name :: proc(ty, op: string) -> string {
-    return fmt.tprintf("%s_%s", ty, op)
-}
-
-validate_custom_managed_struct :: proc(e: ^Emitter, struct_decl: Struct_Decl, span: Span) -> (Compile_Error, bool) {
-    if struct_decl.managed_kind == .None {
-        return {}, true
+type_text_has_data_lifecycle :: proc(e: ^Emitter, text: string, depth: int = 0) -> bool {
+    if type_text_is_managed_value(e, text) {
+        return true
     }
-    destroy_name := custom_managed_proc_name(struct_decl.name, "destroy")
-    destroy_decl, ok_destroy := find_proc_decl(e, destroy_name)
-    if !ok_destroy ||
-       len(destroy_decl.params) != 1 ||
-       destroy_decl.params[0].ty != struct_decl.name ||
-       destroy_decl.returns.kind != .None {
-        return Compile_Error{
-            message = fmt.tprintf(
-                "managed struct %s requires (defn %s-destroy [value: %s] ...)",
-                struct_decl.name,
-                struct_decl.name,
-                struct_decl.name,
-            ),
-            span = span,
-        }, false
+    if e == nil || depth > 16 {
+        return false
     }
-    if struct_decl.managed_kind == .Shared {
-        clone_name := custom_managed_proc_name(struct_decl.name, "clone")
-        clone_decl, ok_clone := find_proc_decl(e, clone_name)
-        if !ok_clone ||
-           len(clone_decl.params) != 1 ||
-           clone_decl.params[0].ty != struct_decl.name ||
-           clone_decl.returns.kind != .Single ||
-           clone_decl.returns.single_ty != struct_decl.name ||
-           !clone_decl.owns_result {
-            return Compile_Error{
-                message = fmt.tprintf(
-                    "shared managed struct %s requires (defn %s-clone [value: %s] -> (owned %s) ...)",
-                    struct_decl.name,
-                    struct_decl.name,
-                    struct_decl.name,
-                    struct_decl.name,
-                ),
-                span = span,
-            }, false
+    struct_decl, ok_struct := find_struct_decl(e, strings.trim_space(text))
+    if !ok_struct {
+        return false
+    }
+    for field in struct_decl.fields {
+        if type_text_has_data_lifecycle(e, field.ty, depth+1) {
+            return true
         }
     }
-    return {}, true
+    return false
+}
+
+managed_struct_helper_name :: proc(op, ty: string) -> string {
+    return fmt.tprintf("kvist_managed_%s_%s", op, ty)
 }
 
 managed_clone_value_text :: proc(e: ^Emitter, ty, value: string) -> string {
@@ -8412,8 +8518,7 @@ ownership_type_has_destructor :: proc(e: ^Emitter, ty: string) -> bool {
     return trimmed == "string" ||
            type_text_is_dynamic_array(trimmed) ||
            type_text_is_map(trimmed) ||
-           type_text_has_managed_lifecycle(e, trimmed) ||
-           type_text_has_unique_lifecycle(e, trimmed)
+           type_text_has_managed_lifecycle(e, trimmed)
 }
 
 ownership_destroy_value_text :: proc(e: ^Emitter, ty, value: string) -> string {
@@ -8475,52 +8580,6 @@ managed_assign_helper_name :: proc(e: ^Emitter, ty: string, move: bool) -> strin
 }
 
 emit_managed_struct_helpers :: proc(e: ^Emitter, struct_decl: Struct_Decl) {
-    if struct_decl.managed_kind != .None {
-        clone_name := managed_struct_helper_name("clone", struct_decl.name)
-        destroy_name := managed_struct_helper_name("destroy", struct_decl.name)
-        assign_name := managed_struct_helper_name("assign", struct_decl.name)
-        move_assign_name := managed_struct_helper_name("move_assign", struct_decl.name)
-        custom_destroy := custom_managed_proc_name(struct_decl.name, "destroy")
-
-        if struct_decl.managed_kind == .Shared {
-            custom_clone := custom_managed_proc_name(struct_decl.name, "clone")
-            emit_raw_newline(e)
-            emit_line(e, fmt.tprintf("%s :: proc(value: %s) -> %s {{", clone_name, struct_decl.name, struct_decl.name))
-            e.indent += 1
-            emit_line(e, fmt.tprintf("return %s(value)", custom_clone))
-            e.indent -= 1
-            emit_line(e, "}")
-        }
-
-        emit_raw_newline(e)
-        emit_line(e, fmt.tprintf("%s :: proc(value: %s) {{", destroy_name, struct_decl.name))
-        e.indent += 1
-        emit_line(e, fmt.tprintf("%s(value)", custom_destroy))
-        e.indent -= 1
-        emit_line(e, "}")
-
-        if struct_decl.managed_kind == .Shared {
-            emit_raw_newline(e)
-            emit_line(e, fmt.tprintf("%s :: proc(place: ^%s, value: %s) {{", assign_name, struct_decl.name, struct_decl.name))
-            e.indent += 1
-            emit_line(e, fmt.tprintf("replacement := %s(value)", clone_name))
-            emit_line(e, "previous := place^")
-            emit_line(e, "place^ = replacement")
-            emit_line(e, fmt.tprintf("%s(previous)", destroy_name))
-            e.indent -= 1
-            emit_line(e, "}")
-        }
-
-        emit_raw_newline(e)
-        emit_line(e, fmt.tprintf("%s :: proc(place: ^%s, value: %s) {{", move_assign_name, struct_decl.name, struct_decl.name))
-        e.indent += 1
-        emit_line(e, "previous := place^")
-        emit_line(e, "place^ = value")
-        emit_line(e, fmt.tprintf("%s(previous)", destroy_name))
-        e.indent -= 1
-        emit_line(e, "}")
-        return
-    }
     if !type_text_has_managed_lifecycle(e, struct_decl.name) {
         return
     }
@@ -8589,8 +8648,6 @@ form_produces_owned_managed_value :: proc(e: ^Emitter, form: CST_Form, depth: in
     if depth > 8 || form.kind != .List || len(form.items) == 0 || form.items[0].kind != .Symbol {
         return false
     }
-    head_name := map_name(form.items[0].text)
-    defer delete(head_name)
     if form.items[0].text == "quasiquote" {
         return true
     }
@@ -8612,25 +8669,25 @@ form_produces_owned_managed_value :: proc(e: ^Emitter, form: CST_Form, depth: in
     }
     switch form.items[0].text {
     case "if", "let", "do", "block", "type-case", "match":
-        if ty, ok_ty := obvious_form_type(e, form); ok_ty && type_text_is_managed_value(e, ty) {
+        if ty, ok_ty := obvious_form_type(e, form);
+           ok_ty && type_text_is_managed_value(e, ty) {
+            // Data-valued control-flow expressions normalize each branch to
+            // one owned reference before the surrounding binding receives it.
             return true
         }
-    case:
+    }
+    if form_infers_known_foreign_lifetime(form, .Owned, depth+1, e) {
+        return true
     }
     if _, proc_decl, ok_proc := resolve_proc_call_decl(e, form.items[0].text);
        ok_proc && proc_decl != nil {
+        // Every Kvist procedure returning Data hands its caller one stable
+        // reference. A borrowed value in the body is retained at the return
+        // boundary, while an already-owned value is transferred. `owns_result`
+        // describes the body's provenance, not a different public calling
+        // convention.
         return proc_decl.returns.kind == .Single &&
-               type_text_is_managed_value(e, proc_decl.returns.single_ty) &&
-               !proc_decl.borrows_result
-    }
-    if proc_ty, ok_proc_ty := lookup_local_type(e, head_name); ok_proc_ty && type_text_is_proc(proc_ty) {
-        if return_ty, ok_return_ty := proc_type_single_return_type(proc_ty); ok_return_ty {
-            return type_text_is_managed_value(e, return_ty)
-        }
-    }
-    if form.items[0].text == "if" && len(form.items) == 4 {
-        return form_produces_owned_managed_value(e, form.items[2], depth+1) &&
-               form_produces_owned_managed_value(e, form.items[3], depth+1)
+               type_text_is_managed_value(e, proc_decl.returns.single_ty)
     }
     return false
 }
@@ -8664,9 +8721,7 @@ form_produces_owned_managed_type :: proc(e: ^Emitter, form: CST_Form, ty: string
        ok_proc && proc_decl != nil {
         return proc_decl.returns.kind == .Single &&
                proc_decl.returns.single_ty == ty &&
-               (proc_decl.owns_result ||
-                (!type_text_has_unique_lifecycle(e, ty) &&
-                 !proc_decl.borrows_result))
+               proc_decl.owns_result
     }
     return false
 }
@@ -8692,40 +8747,53 @@ emit_discarded_expr :: proc(e: ^Emitter, form: CST_Form, expr: string) {
 
 managed_binding_value_text :: proc(e: ^Emitter, binding: Binding, value: string) -> (text, managed_ty: string, managed: bool) {
     ty, ok_ty := obvious_binding_type(e, binding)
-    if !ok_ty || !type_text_has_owned_lifecycle(e, ty) || binding.name == "" || binding.is_destructure || binding.is_result_binding {
+    if !ok_ty || !ownership_type_has_destructor(e, ty) || binding.name == "" || binding.is_destructure || binding.is_result_binding {
         return value, "", false
     }
     if form_produces_owned_managed_type(e, binding.value, ty) {
         return value, ty, true
     }
-    if type_text_has_unique_lifecycle(e, ty) {
-        return value, "", false
+    if type_text_has_data_lifecycle(e, ty) {
+        return managed_clone_value_text(e, ty, value), ty, true
     }
-    return managed_clone_value_text(e, ty, value), ty, true
+    // Native strings, arrays, maps, and opaque resources retain Odin's
+    // explicit lifetime style. Allocation and transfer inference still powers
+    // diagnostics and `kvist lifetimes`, but does not silently install cleanup
+    // for storage whose escape through native APIs cannot be proven.
+    return value, "", false
 }
 
 managed_return_value_text_for_type :: proc(e: ^Emitter, form: CST_Form, value, return_ty: string) -> string {
-    if e.current_proc_owns_managed_result && form.kind == .Symbol {
+    if form.kind == .Symbol {
         name := map_name(form.text)
         defer delete(name)
         if owner_flag, ok_owner := lookup_managed_local_owner(e, name); ok_owner {
             return managed_move_local_value_text(e, return_ty, value, owner_flag)
         }
     }
-    if !type_text_has_owned_lifecycle(e, return_ty) ||
-       e.current_proc_owns_managed_result ||
-       e.current_proc_borrows_managed_result ||
-       form_produces_owned_managed_type(e, form, return_ty) {
+    if !ownership_type_has_destructor(e, return_ty) ||
+       (e.current_proc_owns_managed_result &&
+        !type_text_has_data_lifecycle(e, return_ty)) ||
+       (e.current_proc_borrows_managed_result &&
+        !type_text_has_data_lifecycle(e, return_ty)) ||
+       form_produces_owned_managed_type(e, form, return_ty) ||
+       form_produces_owned_value(form, e) {
         return value
     }
-    return managed_clone_value_text(e, return_ty, value)
+    if type_text_has_data_lifecycle(e, return_ty) {
+        return managed_clone_value_text(e, return_ty, value)
+    }
+    return value
 }
 
 managed_return_value_text :: proc(e: ^Emitter, form: CST_Form, value: string, returns: Return_Spec) -> string {
-    if returns.kind != .Single {
-        return value
+    if returns.kind == .Single {
+        return managed_return_value_text_for_type(e, form, value, returns.single_ty)
     }
-    return managed_return_value_text_for_type(e, form, value, returns.single_ty)
+    if returns.kind == .Named && len(returns.named) == 1 {
+        return managed_return_value_text_for_type(e, form, value, returns.named[0].ty)
+    }
+    return value
 }
 
 emit_managed_destructure_cleanup :: proc(e: ^Emitter, binding: Binding) {
@@ -8777,12 +8845,17 @@ emit_managed_destructure_cleanup :: proc(e: ^Emitter, binding: Binding) {
     }
 }
 
-managed_assignment_text :: proc(e: ^Emitter, place_form, value_form: CST_Form, place, value: string) -> (string, bool) {
+managed_assignment_text :: proc(
+    e: ^Emitter,
+    place_form, value_form: CST_Form,
+    place, value: string,
+    moves_tracked_local: bool,
+) -> (string, bool) {
     if target_form, fields, _, ok_place := field_path_place_parts(place_form); ok_place {
         if target_ty, ok_target_ty := obvious_form_type(e, target_form);
            ok_target_ty && struct_field_owns_string_for_update_path(e, target_ty, fields[:]) {
             mark_core_strings(e)
-            if form_produces_owned_value(value_form, e) {
+            if moves_tracked_local || form_produces_owned_value(value_form, e) {
                 return fmt.tprintf(
                     "(proc(kvist_place: ^string, kvist_value: string) {{ kvist_previous := kvist_place^; kvist_place^ = kvist_value; delete(kvist_previous) }})(%s, %s)",
                     address_of_expr_text(place),
@@ -8807,7 +8880,7 @@ managed_assignment_text :: proc(e: ^Emitter, place_form, value_form: CST_Form, p
             )
             _ = err_field_ty
             if ok_field_ty {
-                move := form_produces_owned_value(value_form, e)
+                move := moves_tracked_local || form_produces_owned_value(value_form, e)
                 return managed_dynamic_array_assignment_text(
                     e,
                     field_ty,
@@ -8822,12 +8895,35 @@ managed_assignment_text :: proc(e: ^Emitter, place_form, value_form: CST_Form, p
     if !ok_place_ty || !type_text_has_owned_lifecycle(e, place_ty) {
         return "", false
     }
-    move := form_produces_owned_managed_type(e, value_form, place_ty)
-    if type_text_has_unique_lifecycle(e, place_ty) && !move {
-        return "", false
-    }
+    move := moves_tracked_local || form_produces_owned_managed_type(e, value_form, place_ty)
     helper := managed_assign_helper_name(e, place_ty, move)
     return emit_call_text(helper, []string{address_of_expr_text(place), value}), true
+}
+
+assignment_move_tracked_local_text :: proc(
+    e: ^Emitter,
+    place_form, value_form: CST_Form,
+    value: string,
+) -> (string, bool) {
+    if value_form.kind != .Symbol {
+        return value, false
+    }
+    source_name := map_name(value_form.text)
+    if source_name == "" {
+        return value, false
+    }
+    if place_form.kind == .Symbol && map_name(place_form.text) == source_name {
+        return value, false
+    }
+    owner_flag, has_owner := lookup_managed_local_owner(e, source_name)
+    if !has_owner {
+        return value, false
+    }
+    value_ty, ok_value_ty := obvious_form_type(e, value_form)
+    if !ok_value_ty || !ownership_type_has_destructor(e, value_ty) {
+        return value, false
+    }
+    return managed_move_local_value_text(e, value_ty, value, owner_flag), true
 }
 
 immutable_def_mutation_error :: proc(e: ^Emitter, place: CST_Form) -> (Compile_Error, bool) {
@@ -8858,6 +8954,12 @@ type_text_is_string :: proc(text: string) -> bool {
 }
 
 type_text_can_borrow_return_from_param :: proc(return_ty, param_ty: string) -> bool {
+    if return_ty == "Data" {
+        return param_ty == "Data"
+    }
+    if type_text_is_dynamic_array(return_ty) || type_text_is_map(return_ty) {
+        return return_ty == param_ty
+    }
     if type_text_is_string(return_ty) {
         return type_text_is_string(param_ty)
     }
@@ -8869,14 +8971,22 @@ type_text_can_borrow_return_from_param :: proc(return_ty, param_ty: string) -> b
 
 borrowed_return_type_text :: proc(returns: Return_Spec) -> (string, bool) {
     if returns.kind == .Single {
-        if type_text_is_string(returns.single_ty) || type_text_is_slice_or_fixed_array(returns.single_ty) {
+        if returns.single_ty == "Data" ||
+           type_text_is_dynamic_array(returns.single_ty) ||
+           type_text_is_map(returns.single_ty) ||
+           type_text_is_string(returns.single_ty) ||
+           type_text_is_slice_or_fixed_array(returns.single_ty) {
             return returns.single_ty, true
         }
         return "", false
     }
     if returns.kind == .Named {
         for named in returns.named {
-            if type_text_is_string(named.ty) || type_text_is_slice_or_fixed_array(named.ty) {
+            if named.ty == "Data" ||
+               type_text_is_dynamic_array(named.ty) ||
+               type_text_is_map(named.ty) ||
+               type_text_is_string(named.ty) ||
+               type_text_is_slice_or_fixed_array(named.ty) {
                 return named.ty, true
             }
         }
@@ -10073,6 +10183,14 @@ form_produces_owned_value :: proc(form: CST_Form, e: ^Emitter = nil) -> bool {
     return form_is_owned_result(form, e) || form_is_owned_allocation_result(form) || form_is_owned_constructor_result(form)
 }
 
+form_requires_explicit_owned_cleanup :: proc(form: CST_Form, e: ^Emitter = nil) -> bool {
+    if !form_produces_owned_value(form, e) {
+        return false
+    }
+    _, compiler_managed := owned_managed_form_type(e, form)
+    return !compiler_managed
+}
+
 binding_value_produces_owned_value :: proc(binding: Binding, e: ^Emitter = nil) -> bool {
     if binding.is_typed &&
        (binding.value.kind == .Vector || binding.value.kind == .Brace || binding.value.kind == .Set) {
@@ -10297,7 +10415,33 @@ form_is_delete_of_name :: proc(form: CST_Form, name: string) -> bool {
 
 body_deletes_name :: proc(forms: []CST_Form, name: string) -> bool {
     for form in forms {
-        if form_is_delete_of_name(form, name) {
+        if form_contains_delete_of_name(form, name) {
+            return true
+        }
+    }
+    return false
+}
+
+form_contains_delete_of_name :: proc(form: CST_Form, name: string) -> bool {
+    if form_is_delete_of_name(form, name) {
+        return true
+    }
+    if form.kind != .List &&
+       form.kind != .Vector &&
+       form.kind != .Brace &&
+       form.kind != .Set {
+        return false
+    }
+    if form.kind == .List &&
+       len(form.items) > 0 &&
+       form.items[0].kind == .Symbol &&
+       (form.items[0].text == "fn" ||
+        form.items[0].text == "quote" ||
+        form.items[0].text == "quasiquote") {
+        return false
+    }
+    for item in form.items {
+        if form_contains_delete_of_name(item, name) {
             return true
         }
     }
@@ -10664,6 +10808,196 @@ body_deletes_or_returns_name :: proc(forms: []CST_Form, name: string, can_transf
     return false
 }
 
+form_all_explicit_managed_returns_owned :: proc(
+    e: ^Emitter,
+    form: CST_Form,
+    return_ty: string,
+    depth: int = 0,
+) -> bool {
+    if depth > 16 || form.kind != .List || len(form.items) == 0 {
+        return true
+    }
+    if form.items[0].kind == .Symbol {
+        switch form.items[0].text {
+        case "return":
+            if len(form.items) != 2 {
+                return false
+            }
+            return form_produces_owned_managed_type(e, form.items[1], return_ty)
+        case "fn", "quote", "quasiquote":
+            return true
+        }
+    }
+    for item in form.items[1:] {
+        if !form_all_explicit_managed_returns_owned(e, item, return_ty, depth+1) {
+            return false
+        }
+    }
+    return true
+}
+
+proc_decl_infers_owned_managed_result :: proc(e: ^Emitter, proc_decl: ^Proc_Decl) -> bool {
+    if proc_decl == nil || len(proc_decl.body) == 0 {
+        return false
+    }
+    return_ty := ""
+    ok_return_ty := false
+    if proc_decl.returns.kind == .Single {
+        return_ty = proc_decl.returns.single_ty
+        ok_return_ty = true
+    } else if proc_decl.returns.kind == .Named && len(proc_decl.returns.named) == 1 {
+        return_ty = proc_decl.returns.named[0].ty
+        ok_return_ty = true
+    }
+    if !ok_return_ty || !type_text_has_managed_lifecycle(e, return_ty) {
+        return false
+    }
+    if !form_produces_owned_managed_type(
+        e,
+        proc_decl.body[len(proc_decl.body)-1],
+        return_ty,
+    ) {
+        return false
+    }
+    for form in proc_decl.body {
+        if !form_all_explicit_managed_returns_owned(e, form, return_ty) {
+            return false
+        }
+    }
+    return true
+}
+
+infer_proc_lifetime_facts :: proc(e: ^Emitter) {
+    // Lifetime contracts are compiler facts derived from ordinary procedure
+    // bodies. Iterate because one procedure may forward an owned or borrowed
+    // result produced by another procedure in the same source package.
+    for _ in 0..<8 {
+        changed := false
+        for &decl in e.decls {
+            if decl.kind != .Proc {
+                continue
+            }
+            proc_decl := &decl.proc_decl
+            borrows_result := proc_decl_infers_borrowed_tail_call(e, proc_decl, 0)
+            owns_result := !borrows_result &&
+                           (proc_decl_infers_owned_result(e, proc_decl) ||
+                            proc_decl_infers_owned_managed_result(e, proc_decl) ||
+                            (len(proc_decl.body) > 0 &&
+                             form_produces_owned_value(
+                                 proc_decl.body[len(proc_decl.body)-1],
+                                 e,
+                             )) ||
+                            (len(proc_decl.body) > 0 &&
+                             form_infers_known_foreign_lifetime(
+                                 proc_decl.body[len(proc_decl.body)-1],
+                                 .Owned,
+                                 0,
+                                 e,
+                             )))
+            if owns_result && !proc_decl.owns_result {
+                proc_decl.owns_result = true
+                changed = true
+            }
+            if borrows_result && !proc_decl.borrows_result {
+                proc_decl.borrows_result = true
+                changed = true
+            }
+            for &param in proc_decl.params {
+                if param.ownership == .Owned {
+                    continue
+                }
+                explicit_consumption :=
+                    body_deletes_or_returns_name(proc_decl.body[:], param.name, false)
+                transferred_result :=
+                    proc_decl.owns_result &&
+                    body_deletes_or_returns_name(proc_decl.body[:], param.name, true)
+                if explicit_consumption || transferred_result {
+                    param.ownership = .Owned
+                    changed = true
+                }
+            }
+        }
+        if !changed {
+            break
+        }
+    }
+}
+
+infer_decoded_struct_lifetime :: proc(e: ^Emitter, type_name: string, depth: int = 0) {
+    if depth > 16 {
+        return
+    }
+    if elem_ty, ok_elem := dynamic_array_element_type(strings.trim_space(type_name)); ok_elem {
+        infer_decoded_struct_lifetime(e, elem_ty, depth+1)
+        return
+    }
+    struct_decl, ok_struct := find_struct_decl(e, strings.trim_space(type_name))
+    if !ok_struct {
+        return
+    }
+    for &field in struct_decl.fields {
+        if field.ty == "string" {
+            field.owns_string = true
+            continue
+        }
+        if type_text_is_dynamic_array(field.ty) {
+            field.owns_dynamic_array = true
+            if elem_ty, ok_elem := dynamic_array_element_type(field.ty); ok_elem {
+                infer_decoded_struct_lifetime(e, elem_ty, depth+1)
+            }
+            continue
+        }
+        infer_decoded_struct_lifetime(e, field.ty, depth+1)
+    }
+}
+
+infer_decoded_struct_lifetimes_form :: proc(e: ^Emitter, form: CST_Form) {
+    if form.kind == .List &&
+       len(form.items) >= 2 &&
+       form.items[0].kind == .Symbol {
+        head_name := map_name(form.items[0].text)
+        if head_name == "decode_data" ||
+           head_name == "validate_data" ||
+           head_name == "data_decode" ||
+           head_name == "data_validate" ||
+           head_name == "data.decode" ||
+           head_name == "data.validate" {
+            if target_ty, _, ok_target := parse_type_text(form.items[1]); ok_target {
+                infer_decoded_struct_lifetime(e, target_ty)
+            }
+        }
+        delete(head_name)
+    }
+    for item in form.items {
+        infer_decoded_struct_lifetimes_form(e, item)
+    }
+}
+
+infer_decoded_struct_lifetimes :: proc(e: ^Emitter, extra_form: ^CST_Form = nil) {
+    for decl in e.decls {
+        #partial switch decl.kind {
+        case .Proc:
+            for form in decl.proc_decl.body {
+                infer_decoded_struct_lifetimes_form(e, form)
+            }
+        case .Source:
+            for form in decl.source_decl.body {
+                infer_decoded_struct_lifetimes_form(e, form)
+            }
+        case .Const:
+            infer_decoded_struct_lifetimes_form(e, decl.const_decl.value)
+        case .Var:
+            if decl.var_decl.has_value {
+                infer_decoded_struct_lifetimes_form(e, decl.var_decl.value)
+            }
+        case:
+        }
+    }
+    if extra_form != nil {
+        infer_decoded_struct_lifetimes_form(e, extra_form^)
+    }
+}
+
 analyze_owned_branch_body :: proc(e: ^Emitter, forms: []CST_Form, can_transfer_final: bool, live: []Owned_Local, borrowed: []Borrowed_Local) {
     branch_live: [dynamic]Owned_Local
     branch_borrowed: [dynamic]Borrowed_Local
@@ -10696,7 +11030,7 @@ analyze_owned_scope_body :: proc(e: ^Emitter, forms: []CST_Form, can_transfer_fi
 
         head, ok := form_head_symbol_text(form)
         if !ok {
-            if form_produces_owned_value(form, e) && !(final_in_scope && can_transfer_final) {
+            if form_requires_explicit_owned_cleanup(form, e) && !(final_in_scope && can_transfer_final) {
                 emit_coded_warning(e, discarded_owned_warning_message(form), form.span, .Ownership_Discarded_Result)
             }
             continue
@@ -10719,7 +11053,7 @@ analyze_owned_scope_body :: proc(e: ^Emitter, forms: []CST_Form, can_transfer_fi
             }
         case "discard":
             for item in form.items[1:] {
-                if form_produces_owned_value(item, e) {
+                if form_requires_explicit_owned_cleanup(item, e) {
                     emit_coded_warning(e, discarded_owned_warning_message(item), item.span, .Ownership_Discarded_Result)
                 }
             }
@@ -10934,7 +11268,7 @@ analyze_owned_scope_body :: proc(e: ^Emitter, forms: []CST_Form, can_transfer_fi
             }
         case:
             mark_transferred_owned_args(e, form, live)
-            if form_produces_owned_value(form, e) && !(final_in_scope && can_transfer_final) {
+            if form_requires_explicit_owned_cleanup(form, e) && !(final_in_scope && can_transfer_final) {
                 emit_coded_warning(e, discarded_owned_warning_message(form), form.span, .Ownership_Discarded_Result)
             }
         }
@@ -17663,13 +17997,17 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
                 }
             }
             bind_obvious_binding_types(e, binding)
-            if managed && !binding.deferred_delete && !binding.err_deferred_delete && !binding.defer_with_cleanup {
+            if managed &&
+               !binding.deferred_delete &&
+               !binding.err_deferred_delete &&
+               !binding.defer_with_cleanup &&
+               !body_deletes_name(body[:], binding.name) {
                 owner_flag := managed_owner_flag_name(e)
                 emit_line(e, fmt.tprintf("%s := true", owner_flag))
                 emit_line(e, fmt.tprintf(
                     "defer if %s {{ %s }}",
                     owner_flag,
-                    managed_destroy_value_text(e, managed_ty, binding.name),
+                    ownership_destroy_value_text(e, managed_ty, binding.name),
                 ))
                 bind_managed_local_owner(e, binding.name, owner_flag)
             }
@@ -17728,6 +18066,8 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
                 value, err_value, ok_value = emit_expr_with_owned_nested_temps(e, form.items[1])
             } else if return_context.kind == .Single {
                 value, err_value, ok_value = emit_expr_for_expected_type(e, form.items[1], return_context.single_ty)
+            } else if return_context.kind == .Named && len(return_context.named) == 1 {
+                value, err_value, ok_value = emit_expr_for_expected_type(e, form.items[1], return_context.named[0].ty)
             } else {
                 value, err_value, ok_value = emit_expr(e, form.items[1])
             }
@@ -17846,18 +18186,6 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
         if err_immutable, immutable := immutable_def_mutation_error(e, form.items[1]); immutable {
             return err_immutable, false
         }
-        if place_ty, ok_place_ty := obvious_form_type(e, form.items[1]);
-           ok_place_ty &&
-           type_text_has_unique_lifecycle(e, place_ty) &&
-           !form_produces_owned_managed_type(e, form.items[2], place_ty) {
-            return Compile_Error{
-                message = fmt.tprintf(
-                    "cannot copy unique managed %s in set!; use an owned result to move a replacement",
-                    place_ty,
-                ),
-                span = form.items[2].span,
-            }, false
-        }
         lhs, err_lhs, ok_lhs := emit_expr(e, form.items[1])
         if !ok_lhs {
             return err_lhs, false
@@ -17877,7 +18205,21 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
         if !ok_rhs {
             return err_rhs, false
         }
-        if assignment, managed := managed_assignment_text(e, form.items[1], form.items[2], lhs, rhs); managed {
+        moves_tracked_local: bool
+        rhs, moves_tracked_local = assignment_move_tracked_local_text(
+            e,
+            form.items[1],
+            form.items[2],
+            rhs,
+        )
+        if assignment, managed := managed_assignment_text(
+            e,
+            form.items[1],
+            form.items[2],
+            lhs,
+            rhs,
+            moves_tracked_local,
+        ); managed {
             emit_prefixed_expr_mapped(e, "", assignment, form.span)
             return {}, true
         }
@@ -18022,7 +18364,10 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
         return {}, true
     case:
         allow_root_owned := last_in_proc && returns.kind != .None
-        if last_in_proc && returns.kind != .None && form_is_borrowed_view_result(form, e) && form_has_nested_owned_value(form, e) {
+        if last_in_proc &&
+           returns.kind != .None &&
+           form_is_borrowed_view_result(form, e) &&
+           borrowed_view_owner_has_nested_owned_value(e, form) {
             return Compile_Error{
                 message = "cannot return a borrowed view that depends on an owned intermediate; bind the pipeline locally or return an owned result",
                 span = form.span,
@@ -18424,10 +18769,6 @@ emit_decl :: proc(e: ^Emitter, decl: IR_Decl) -> (Compile_Error, bool) {
             emit_line(e, fmt.tprintf("%s := %s", decl.var_decl.name, value))
         }
     case .Struct:
-        err_managed, ok_managed := validate_custom_managed_struct(e, decl.struct_decl, decl.span)
-        if !ok_managed {
-            return err_managed, false
-        }
         for field in decl.struct_decl.fields {
             if field.has_default &&
                !literal_matches_struct_field_type(e, field.ty, field.default_value) {
@@ -18456,7 +18797,10 @@ emit_decl :: proc(e: ^Emitter, decl: IR_Decl) -> (Compile_Error, bool) {
         }
         e.indent -= 1
         emit_line(e, "}")
-        emit_managed_struct_helpers(e, decl.struct_decl)
+        inferred_struct, found_inferred_struct := find_struct_decl(e, decl.struct_decl.name)
+        if found_inferred_struct {
+            emit_managed_struct_helpers(e, inferred_struct^)
+        }
     case .Enum:
         emit_indent(e)
         strings.write_string(&e.builder, decl.enum_decl.name)
@@ -18488,20 +18832,6 @@ emit_decl :: proc(e: ^Emitter, decl: IR_Decl) -> (Compile_Error, bool) {
         e.indent -= 1
         emit_line(e, "}")
     case .Proc:
-        if decl.proc_decl.returns.kind == .Single &&
-           type_text_has_unique_lifecycle(e, decl.proc_decl.returns.single_ty) &&
-           !decl.proc_decl.owns_result &&
-           !decl.proc_decl.borrows_result {
-            return Compile_Error{
-                message = fmt.tprintf(
-                    "procedure returning unique managed %s must declare (owned %s) or (borrowed %s)",
-                    decl.proc_decl.returns.single_ty,
-                    decl.proc_decl.returns.single_ty,
-                    decl.proc_decl.returns.single_ty,
-                ),
-                span = decl.span,
-            }, false
-        }
         proc_live: [dynamic]Owned_Local
         proc_borrowed: [dynamic]Borrowed_Local
         analyze_owned_scope_body(e, decl.proc_decl.body[:], decl.proc_decl.returns.kind != .None, &proc_live, &proc_borrowed)
@@ -18575,20 +18905,6 @@ emit_decl :: proc(e: ^Emitter, decl: IR_Decl) -> (Compile_Error, bool) {
         e.current_proc_owns_managed_result = decl.proc_decl.owns_result
         e.current_proc_borrows_managed_result = decl.proc_decl.borrows_result
         e.current_proc_returns = decl.proc_decl.returns
-        for param in decl.proc_decl.params {
-            if param.ownership != .Owned ||
-               !ownership_type_has_destructor(e, param.ty) {
-                continue
-            }
-            owner_flag := managed_owner_flag_name(e)
-            emit_line(e, fmt.tprintf("%s := true", owner_flag))
-            emit_line(e, fmt.tprintf(
-                "defer if %s {{ %s }}",
-                owner_flag,
-                ownership_destroy_value_text(e, param.ty, param.name),
-            ))
-            bind_managed_local_owner(e, param.name, owner_flag)
-        }
         err_body, ok_body := emit_body_forms(e, decl.proc_decl.body[:], decl.proc_decl.returns)
         e.current_proc_owns_managed_result = previous_owns_managed_result
         e.current_proc_borrows_managed_result = previous_borrows_managed_result
@@ -19939,10 +20255,6 @@ emit_decls_with_source_map :: proc(decls: []IR_Decl) -> (Emit_Result, Compile_Er
         captured_proc_specializations = &captured_specializations,
     }
     defer strings.builder_destroy(&e.builder)
-    err_classify, ok_classify := classify_def_initializers(&e)
-    if !ok_classify {
-        return result, err_classify, false
-    }
     for decl in decls {
         if decl.kind == .Struct {
             append(&e.structs, decl.struct_decl)
@@ -19950,6 +20262,12 @@ emit_decls_with_source_map :: proc(decls: []IR_Decl) -> (Emit_Result, Compile_Er
         if decl.kind == .Union {
             append(&e.unions, decl.union_decl)
         }
+    }
+    infer_decoded_struct_lifetimes(&e)
+    infer_proc_lifetime_facts(&e)
+    err_classify, ok_classify := classify_def_initializers(&e)
+    if !ok_classify {
+        return result, err_classify, false
     }
     needs_core_strings_import := decls_need_core_strings_import(decls)
     needs_core_fmt_import := decls_need_core_fmt_import(decls)
@@ -20069,10 +20387,6 @@ emit_eval_decls_with_source_map :: proc(decls: []IR_Decl, eval_form: CST_Form, n
         captured_proc_specializations = &captured_specializations,
     }
     defer strings.builder_destroy(&e.builder)
-    err_classify, ok_classify := classify_def_initializers(&e)
-    if !ok_classify {
-        return result, err_classify, false
-    }
     for decl in decls {
         if decl.kind == .Struct {
             append(&e.structs, decl.struct_decl)
@@ -20080,6 +20394,13 @@ emit_eval_decls_with_source_map :: proc(decls: []IR_Decl, eval_form: CST_Form, n
         if decl.kind == .Union {
             append(&e.unions, decl.union_decl)
         }
+    }
+    eval_lifetime_form := eval_form
+    infer_decoded_struct_lifetimes(&e, &eval_lifetime_form)
+    infer_proc_lifetime_facts(&e)
+    err_classify, ok_classify := classify_def_initializers(&e)
+    if !ok_classify {
+        return result, err_classify, false
     }
     needs_core_strings_import := decls_need_core_strings_import(decls) ||
                                  form_uses_core_strings(eval_form)

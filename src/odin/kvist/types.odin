@@ -100,12 +100,6 @@ Struct_Field :: struct {
     default_value:      CST_Form,
 }
 
-Managed_Kind :: enum {
-    None,
-    Shared,
-    Unique,
-}
-
 Union_Variant :: struct {
     name: string,
     ty:   string,
@@ -139,9 +133,8 @@ Import_Decl :: struct {
 }
 
 Struct_Decl :: struct {
-    name:         string,
-    fields:       [dynamic]Struct_Field,
-    managed_kind: Managed_Kind,
+    name:   string,
+    fields: [dynamic]Struct_Field,
 }
 
 Const_Init_Kind :: enum {

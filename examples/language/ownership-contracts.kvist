@@ -6,38 +6,28 @@
 (import arr "kvist:arr")
 (import data "kvist:data")
 
-(defstruct Int-Buffer {
-  values: (owned [dynamic]int)
-} {
-  managed: :unique
-})
+(defn make-values [] -> [dynamic]int
+  (arr.range 0 5))
 
-(defn Int-Buffer-destroy [buffer: Int-Buffer]
-  (delete buffer.values))
-
-(defn make-buffer [] -> (owned Int-Buffer)
-  (Int-Buffer {values: (arr.range 0 5)}))
-
-(defn forward-buffer [buffer: (owned Int-Buffer)] -> (owned Int-Buffer)
-  buffer)
-
-(defn consume-buffer [buffer: (owned Int-Buffer)] -> int
-  (count buffer.values))
-
-(defn consume-values [values: (owned [dynamic]int)] -> int
+(defn inspect-values [values: [dynamic]int] -> int
   (count values))
 
-(defn forward-data [value: (owned Data)] -> (owned Data)
+(defn consume-values [values: [dynamic]int] -> int
+  (let [result (count values)]
+    (delete values)
+    result))
+
+(defn forward-data [value: Data] -> Data
   value)
 
-(defn inspect-data [value: (borrowed Data)] -> (borrowed Data)
+(defn inspect-data [value: Data] -> Data
   value)
 
 (defn main []
-  (let [values (arr.range 0 4)]
+  (let [values (make-values)]
+    (println (inspect-values values))
     (println (consume-values values)))
   (let [value (data.from-string "managed")]
     (println (data.string (inspect-data (forward-data value)))))
-  (let [buffer (make-buffer)
-        forwarded (forward-buffer buffer)]
-    (println (consume-buffer forwarded))))
+  (let [temporary (make-values) :defer]
+    (println (inspect-values temporary))))

@@ -47,7 +47,7 @@ while IFS= read -r input; do
         warnings="$tmp_dir/ownership-warnings.txt"
         ./kvist compile "$input" -o "$output" --map "$map" --ownership-audit 2>"$warnings"
         for expected in \
-            'owned result from arr.range is discarded' \
+            'owned result from make-values is discarded' \
             'owned local xs is never deleted or returned' \
             'owned local xs is overwritten before cleanup' \
             'owned local xs is used after ownership transfer' \

@@ -56,52 +56,52 @@
 
 (defn from-nil
   "Construct nil Data."
-  [] -> Data #owned #force_inline
+  [] -> Data #force_inline
   (odin-call "kvist_data_make_nil"))
 
 (defn from-bool
   "Construct boolean Data."
-  [value: bool] -> Data #owned #force_inline
+  [value: bool] -> Data #force_inline
   (odin-call "kvist_data_make_bool" value))
 
 (defn from-int
   "Construct integer Data."
-  [value: i64] -> Data #owned #force_inline
+  [value: i64] -> Data #force_inline
   (odin-call "kvist_data_make_int" value))
 
 (defn from-float
   "Construct floating-point Data."
-  [value: f64] -> Data #owned #force_inline
+  [value: f64] -> Data #force_inline
   (odin-call "kvist_data_make_float" value))
 
 (defn from-string
   "Construct string Data with owned immutable text."
-  [value: string] -> Data #owned #force_inline
+  [value: string] -> Data #force_inline
   (odin-call "kvist_data_make_text" .String value))
 
 (defn from-symbol
   "Construct symbol Data with owned immutable text."
-  [value: string] -> Data #owned #force_inline
+  [value: string] -> Data #force_inline
   (odin-call "kvist_data_make_text" .Symbol value))
 
 (defn from-keyword
   "Construct keyword Data with owned immutable text."
-  [value: string] -> Data #owned #force_inline
+  [value: string] -> Data #force_inline
   (odin-call "kvist_data_make_text" .Keyword value))
 
 (defn list-from-array
   "Construct list Data from a native array, retaining each element."
-  [values: []Data] -> Data #owned #force_inline
+  [values: []Data] -> Data #force_inline
   (odin-call "kvist_data_make_items" .List values))
 
 (defn vector-from-array
   "Construct vector Data from a native array, retaining each element."
-  [values: []Data] -> Data #owned #force_inline
+  [values: []Data] -> Data #force_inline
   (odin-call "kvist_data_make_items" .Vector values))
 
 (defn set-from-array
   "Construct set Data from a native array, retaining each distinct element."
-  [values: []Data] -> Data #owned #force_inline
+  [values: []Data] -> Data #force_inline
   (odin-call "kvist_data_make_items" .Set values))
 
 (defn set-from-unique
@@ -109,29 +109,29 @@
 
   This retains each element without checking for duplicates. Use `set` when
   uniqueness has not already been established."
-  [values: []Data] -> Data #owned #force_inline
+  [values: []Data] -> Data #force_inline
   (odin-call "kvist_data_make_unique_set" values))
 
 (defn map-from-alternating
   "Construct map Data from an alternating native array of keys and values."
-  [values: []Data] -> Data #owned #force_inline
+  [values: []Data] -> Data #force_inline
   (odin-call "kvist_data_make_map" values))
 
 (defn empty-map
   "Construct empty map Data."
-  [] -> Data #owned #force_inline
+  [] -> Data #force_inline
   (odin-call "kvist_data_empty_map"))
 
 (defn tagged
   "Construct tagged Data, retaining `value` and owning a copy of `tag`.
 
   The tag excludes EDN's leading `#`; for example, use `\"uuid\"`."
-  [tag: string, value: Data] -> Data #owned #force_inline
+  [tag: string, value: Data] -> Data #force_inline
   (odin-call "kvist_data_make_tagged" tag value))
 
 (defn retain
   "Return an owned reference to `value` for storage outside managed bindings."
-  [value: Data] -> Data #owned #force_inline
+  [value: Data] -> Data #force_inline
   (odin-call "kvist_data_retain" value))
 
 (defn append-retained!
@@ -158,22 +158,22 @@
 
 (defn- freeze-items!
   "Transfer a retained native item buffer into one immutable Data node."
-  [kind: Data-Kind, values: ^[dynamic]Data] -> Data #owned #force_inline
+  [kind: Data-Kind, values: ^[dynamic]Data] -> Data #force_inline
   (odin-call "kvist_data_freeze_items" kind values))
 
 (defn- freeze-map!
   "Transfer retained alternating key/value Data into one immutable map node."
-  [values: ^[dynamic]Data] -> Data #owned #force_inline
+  [values: ^[dynamic]Data] -> Data #force_inline
   (odin-call "kvist_data_freeze_map" values))
 
 (defn assoc
   "Return immutable map or vector Data with `key` associated to `value`."
-  [collection: Data, key: Data, value: Data] -> Data #owned #force_inline
+  [collection: Data, key: Data, value: Data] -> Data #force_inline
   (odin-call "kvist_data_assoc" collection key value))
 
 (defn dissoc
   "Return immutable map Data without `key`."
-  [collection: Data, key: Data] -> Data #owned #force_inline
+  [collection: Data, key: Data] -> Data #force_inline
   (odin-call "kvist_data_dissoc" collection key))
 
 (defn dissoc-in
@@ -181,17 +181,17 @@
 
   `path` is list or vector Data. Empty parent maps are preserved and a missing
   path leaves `collection` unchanged."
-  [collection: Data, path: Data] -> Data #owned #force_inline
+  [collection: Data, path: Data] -> Data #force_inline
   (odin-call "kvist_data_dissoc_in" collection path))
 
 (defn conj
   "Return immutable sequential or set Data with `value` added."
-  [collection: Data, value: Data] -> Data #owned #force_inline
+  [collection: Data, value: Data] -> Data #force_inline
   (odin-call "kvist_data_conj" collection value))
 
 (defn append
   "Return list, vector, or set Data with `value` added at the end."
-  [collection: Data, value: Data] -> Data #owned #force_inline
+  [collection: Data, value: Data] -> Data #force_inline
   (odin-call "kvist_data_append" collection value))
 
 (defn- append-pair-retained!
@@ -236,32 +236,32 @@
 
 (defn string
   "Read the borrowed native string payload of string Data."
-  [value: Data] -> string #borrowed #force_inline
+  [value: Data] -> string #force_inline
   (odin-call "kvist_data_string" value))
 
 (defn symbol
   "Read the borrowed native text of symbol Data."
-  [value: Data] -> string #borrowed #force_inline
+  [value: Data] -> string #force_inline
   (odin-call "kvist_data_symbol" value))
 
 (defn keyword
   "Read the borrowed native text of keyword Data."
-  [value: Data] -> string #borrowed #force_inline
+  [value: Data] -> string #force_inline
   (odin-call "kvist_data_keyword" value))
 
 (defn text
   "Read borrowed native text from string, symbol, or keyword Data."
-  [value: Data] -> string #borrowed #force_inline
+  [value: Data] -> string #force_inline
   (odin-call "kvist_data_text" value))
 
 (defn tag
   "Read the borrowed tag text from tagged Data, without the leading `#`."
-  [value: Data] -> string #borrowed #force_inline
+  [value: Data] -> string #force_inline
   (odin-call "kvist_data_tag" value))
 
 (defn tagged-value
   "Read the borrowed payload from tagged Data."
-  [value: Data] -> Data #borrowed #force_inline
+  [value: Data] -> Data #force_inline
   (odin-call "kvist_data_tagged_value" value))
 
 (defn kind
@@ -412,28 +412,28 @@
   "Return the key at `index` in map Data.
 
   Map traversal order is the literal/runtime backing order."
-  [value: Data, index: int] -> Data #borrowed #force_inline
+  [value: Data, index: int] -> Data #force_inline
   (odin-call "kvist_data_key_at" value index))
 
 (defn value-at
   "Return the value at `index` in map Data."
-  [value: Data, index: int] -> Data #borrowed #force_inline
+  [value: Data, index: int] -> Data #force_inline
   (odin-call "kvist_data_value_at" value index))
 
 (defn nth
   "Return the value at `index` in list or vector Data.
 
   An out-of-range index returns nil Data, matching ordinary Data lookup."
-  [value: Data, index: int] -> Data #borrowed #force_inline
+  [value: Data, index: int] -> Data #force_inline
   (core.get value index))
 
 (defn item-at
   "Return the item at `index` in list, vector, or set backing order."
-  [value: Data, index: int] -> Data #borrowed #force_inline
+  [value: Data, index: int] -> Data #force_inline
   (odin-call "kvist_data_item_at" value index))
 
 (defn- get-in-at
-  [value: Data, path: Data, index: int] -> Data #borrowed
+  [value: Data, path: Data, index: int] -> Data
   (if (= index (core.count path))
     value
     (let [key (item-at path index)
@@ -442,7 +442,7 @@
 
 (defn get-in
   "Follow list or vector Data `path` through nested map, list, and vector Data."
-  [value: Data, path: Data] -> Data #borrowed
+  [value: Data, path: Data] -> Data
   (if (not (path? path))
     (panic "data.get-in expects a list or vector Data path"))
   (get-in-at value path 0))
@@ -591,7 +591,7 @@
 
 (defn first
   "Return the borrowed first sequential item, or nil when absent."
-  [collection: Data] -> Data #borrowed
+  [collection: Data] -> Data
   (if (not (sequential? collection))
     (panic "data.first expects nil, list, vector, or set Data"))
   (if (= (core.count collection) 0)
@@ -600,7 +600,7 @@
 
 (defn second
   "Return the borrowed second sequential item, or nil when absent."
-  [collection: Data] -> Data #borrowed
+  [collection: Data] -> Data
   (if (not (sequential? collection))
     (panic "data.second expects nil, list, vector, or set Data"))
   (if (< (core.count collection) 2)
@@ -609,7 +609,7 @@
 
 (defn last
   "Return the borrowed last sequential item, or nil when absent."
-  [collection: Data] -> Data #borrowed
+  [collection: Data] -> Data
   (if (not (sequential? collection))
     (panic "data.last expects nil, list, vector, or set Data"))
   (if (= (core.count collection) 0)
@@ -793,7 +793,7 @@
 
 (defn peek
   "Return the borrowed stack item from list or vector Data, or nil."
-  [collection: Data] -> Data #borrowed
+  [collection: Data] -> Data
   (if (nil? collection)
     (return 'nil))
   (if (list? collection)
@@ -880,7 +880,7 @@
 
 (defn- find-impl
   [pred: (fn [item: Data] -> bool), collection: Data]
-  -> [value: Data, ok: bool] #borrowed
+  -> [value: Data, ok: bool]
   (if (not (sequential? collection))
     (panic "data.find expects nil, list, vector, or set Data"))
   (for [index (arr.range 0 (core.count collection))]
@@ -896,7 +896,7 @@
 
 (defn- find-indexed-impl
   [pred: (fn [index: int, item: Data] -> bool), collection: Data]
-  -> [index: int, value: Data, ok: bool] #borrowed
+  -> [index: int, value: Data, ok: bool]
   (if (not (sequential? collection))
     (panic "data.find-indexed expects nil, list, vector, or set Data"))
   (for [index (arr.range 0 (core.count collection))]
@@ -912,7 +912,7 @@
 
 (defn- min-by-impl
   [f: (fn [item: Data] -> $K), collection: Data]
-  -> [value: Data, ok: bool] #borrowed
+  -> [value: Data, ok: bool]
   (if (not (sequential? collection))
     (panic "data.min-by expects nil, list, vector, or set Data"))
   (if (= (core.count collection) 0)
@@ -935,7 +935,7 @@
 
 (defn- max-by-impl
   [f: (fn [item: Data] -> $K), collection: Data]
-  -> [value: Data, ok: bool] #borrowed
+  -> [value: Data, ok: bool]
   (if (not (sequential? collection))
     (panic "data.max-by expects nil, list, vector, or set Data"))
   (if (= (core.count collection) 0)

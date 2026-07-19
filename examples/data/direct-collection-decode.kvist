@@ -6,7 +6,7 @@
 
 (defstruct Endpoint {
   host-id: i64
-  display-name: (owned string) :default "unnamed"
+  display-name: string :default "unnamed"
   tags: Data :default '[]
 })
 

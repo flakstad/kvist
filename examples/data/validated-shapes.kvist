@@ -11,14 +11,14 @@
 
 (defstruct Endpoint {
   host-id: i64
-  display-name: (owned string) :default "unnamed"
+  display-name: string :default "unnamed"
 })
 
 (defstruct Message {
   mode: Mode
   endpoint: Endpoint
   retries: i64 :default 0
-  replicas: (owned [dynamic]Endpoint) :default []
+  replicas: [dynamic]Endpoint :default []
 })
 
 (defn main []

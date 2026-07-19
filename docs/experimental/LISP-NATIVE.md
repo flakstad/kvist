@@ -35,7 +35,7 @@ database remains usable through EDN and native ABIs from other languages.
 
 Current implementation covers static quotes, runtime backing nodes, local
 bindings, single and named returns, destructured named results, explicit
-`#owned`/`#borrowed` contracts, reassignment, nested owned call arguments,
+inferred owned/borrowed boundaries, reassignment, nested owned call arguments,
 discarded managed results, and recursively managed top-level Kvist structs.
 
 Remaining compiler work:

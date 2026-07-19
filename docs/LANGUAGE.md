@@ -442,36 +442,19 @@ The parser also accepts `[slice T]` as a vector shorthand in `defstruct` field
 metadata. It lowers to `[]T`. Use ordinary type spelling such as `[dynamic]T`,
 `[N]T`, and `(set T)` for dynamic arrays, fixed arrays, and sets.
 
-Use `(owned string)` for a struct field that owns its native string storage:
+Struct fields use ordinary Odin-shaped types. A plain native struct does not
+gain hidden lifecycle behavior from its field types or from specially named
+procedures.
 
-```clojure
-(defstruct Person {
-  name: (owned string)
-})
-```
+When a struct is used as a target of `data.decode` or `data.validate`, Kvist has
+structural evidence that decoded strings, dynamic arrays, nested decoded
+structs, and `Data` fields are acquired values. It then generates recursive
+copy, replacement, and cleanup support for that decoded shape. This is inferred
+from the boundary operation rather than declared on the type.
 
-The emitted Odin field type remains `string`. Kvist clones borrowed values on
-construction and `assoc`, moves owned constructor expressions, clones the field
-when its containing struct is copied, and deletes it with the struct. Plain
-`string` fields retain their existing borrowed/unmanaged semantics.
-
-Dynamic-array storage can be managed by a containing struct in the same
-explicit way:
-
-```clojure
-(defstruct Batch {
-  ids: (owned [dynamic]i64)
-  values: (owned [dynamic]Data)
-})
-```
-
-Both fields lower to ordinary Odin dynamic arrays. The `owned` annotation makes
-the struct responsible for their backing allocations: copying the struct
-copies the arrays, replacement disposes the previous arrays, and destroying the
-struct deletes them. Constructing the struct with an array transfers its backing
-storage into the field. `Data` elements are retained and released individually.
-For other element types, ownership covers the array backing storage; borrowed
-resources inside an element keep their own native lifetime rules.
+Opaque handles and structs assembled through arbitrary native code remain
+explicit, as in Odin. Give them ordinary cleanup functions and use `defer` or
+`:defer-with` at the owning scope.
 
 Use `:default` after a field type to replace its zero-value construction
 default:
@@ -479,15 +462,15 @@ default:
 ```clojure
 (defstruct Settings {
   port: i64 :default 8080
-  label: (owned string) :default "local"
+  label: string :default "local"
 })
 
 (Settings {})
 ```
 
-Defaults are evaluated when an omitted field is constructed. They follow the
-field's normal ownership rules, so the example clones `"local"` into storage
-owned by the resulting `Settings`. Struct signatures and editor metadata retain
+Defaults are evaluated when an omitted field is constructed. At a decoded
+boundary, they follow the inferred structural lifetime of the resulting shape.
+Struct signatures and editor metadata retain
 the annotation, and obvious literal type mismatches are compiler errors.
 
 ### Enums
@@ -809,79 +792,44 @@ Directive wrappers such as `#force_inline` can appear on function declarations:
   (return 42 true))
 ```
 
-Ownership can be written directly on procedure parameters and results:
+Kvist infers lifetime boundaries from ordinary procedure bodies:
 
 ```clojure
-(defn consume [values: (owned [dynamic]int)]
-  ...)
+(defn allocate [] -> [dynamic]int
+  (make [dynamic]int))
 
-(defn forward [value: (owned Data)] -> (owned Data)
+(defn consume [values: [dynamic]int]
+  (delete values))
+
+(defn view [value: Data] -> Data
   value)
-
-(defn view [value: (borrowed Data)] -> (borrowed Data)
-  value)
 ```
 
-Plain parameters borrow by default. An `(owned T)` parameter consumes its
-argument and becomes responsible for its deterministic destruction or onward
-transfer. `(owned T)` and `(borrowed T)` results state whether the caller
-receives ownership or a view. These qualifiers are compile-time contracts and
-erase to the ordinary native Odin type.
+`allocate` is inferred to return new storage because every return path
+allocates. `consume` is inferred to consume `values` because the body deletes
+it. `view` is inferred to return a borrowed view because it aliases its
+parameter. Callers move compiler-tracked owned locals into consuming calls and
+disable the former scope cleanup; a later use is diagnosed.
 
-The compiler automatically destroys owned parameters whose type has a known
-destructor. Passing or returning a compiler-managed local to an owned position
-moves it and disables its former scope cleanup. Using that local afterward is
-an ownership diagnostic.
+Inference is conservative. A function that may return either an input array or
+a new array is not treated as transferring ownership. Unknown or opaque native
+resources keep explicit Odin semantics. Use ordinary cleanup functions with
+`defer`, `:defer`, or `:defer-with`.
 
-Native structs with non-structural lifetime rules can declare a managed
-protocol in their metadata:
+The forms `(owned T)`, `(borrowed T)`, `#owned`, `#borrowed`, and
+`managed:` metadata are not part of Kvist. Procedure names such as
+`Type-destroy` and `Type-clone` are ordinary names and do not install a
+lifecycle protocol.
 
-```clojure
-(defstruct Buffer {
-  values: (owned [dynamic]int)
-} {
-  managed: :unique
-})
+Use `kvist lifetimes path/to/file.kvist` to inspect the boundaries inferred by
+the compiler and the evidence category used for each result and parameter.
 
-(defn Buffer-destroy [buffer: Buffer]
-  (delete buffer.values))
-```
-
-A unique managed struct requires `Type-destroy [value: Type]`. Owned
-constructor/procedure results move by default, receive deterministic cleanup
-when bound, and cannot be copied through `set!`. Procedures returning the type
-must explicitly say `(owned Type)` or `(borrowed Type)`.
-
-A shared managed struct additionally requires
-`Type-clone [value: Type] -> (owned Type)`. Ordinary binding and assignment use
-that clone operation, while scope exit uses `Type-destroy`. Both protocol
-kinds emit ordinary native structs and direct Odin calls; no runtime interface
-table or collector is introduced.
-
-The older `#owned` and `#borrowed` result directives remain accepted during the
-ownership migration. Prefer qualified result types in new code. Conflicting
-qualified and directive contracts are rejected.
-
-`#owned` remains useful temporarily for named multi-results or source
-procedures whose return type has not yet been migrated:
-
-```clojure
-(defn read-bytes [path: string] -> [data: []byte, err: os.Error] #owned
-  (os.read_entire_file path context.allocator))
-```
-
-Use `#borrowed` for source procedures that return a borrowed view into a
-compatible string or slice argument:
-
-```clojure
-(defn trim-view [s: string] -> string #borrowed
-  (strings.trim_space s))
-```
-
-For a `string` result, Kvist treats the first `string` parameter as the owner.
-For a slice result, Kvist treats the first compatible slice or dynamic-array
-parameter as the owner. `#borrowed` is also an ownership-analysis directive and
-is not emitted into the generated Odin proc signature.
+The Kvist runtime has a reviewed foreign-binding table for operations whose
+native bodies are opaque to the source analyzer. It records facts such as
+“`kvist_data_retain` returns a new shared reference” and
+“`kvist_data_item_at` returns a borrowed view.” This table describes Kvist's
+own runtime ABI; it is not a Vev/Ro special case and does not classify arbitrary
+foreign procedures by their names. Unknown foreign resources remain explicit.
 
 Other Odin-style proc directives stay available in the same position when you
 need them.
@@ -1915,21 +1863,21 @@ struct:
 ```
 
 The optional path becomes the root of any `Decode-Error`. Required nested
-Kvist structs and `Data`, boolean, integer, floating-point, explicitly owned
-string, and enum fields are supported. Enum keywords use lowercase source
+Kvist structs and `Data`, boolean, integer, floating-point, string, and enum
+fields are supported. Enum keywords use lowercase source
 spelling, so `.Read-Only` is represented by `:read-only`. A keyword outside the
 enum sets `err.enum-value?`, `err.expected-type`, and `err.actual-value`.
-Decoded strings require `(owned string)` so their storage lifetime is explicit;
-plain borrowed `string` fields are rejected. Nested validation completes before
-construction, so managed leaves are acquired only for a successful result. The
-decoded struct and error follow normal deterministic managed-value cleanup.
+Decoded string ownership is inferred from use of the struct as a decode target.
+Nested validation completes before construction, so acquired leaves exist only
+for a successful result. The decoded struct and error then receive
+deterministic structural cleanup.
 A field annotated `:default value` is optional at the Data boundary: a missing
 map key evaluates the same default used by ordinary struct construction, while
 a present key is still validated. Presence is checked independently from Data
 `nil`, so an explicit `nil` does not select the default.
 
-Fields declared `(owned [dynamic]T)` decode Data vectors into owning native
-dynamic arrays when `T` is `Data`, `bool`, an integer scalar, or a
+Fields declared `[dynamic]T` decode Data vectors into owning native dynamic
+arrays when `T` is `Data`, `bool`, an integer scalar, or a
 floating-point scalar, a Kvist enum, or a Kvist struct:
 
 ```clojure
@@ -1939,8 +1887,8 @@ floating-point scalar, a Kvist enum, or a Kvist struct:
 })
 
 (defstruct Batch {
-  ids: (owned [dynamic]i64)
-  points: (owned [dynamic]Point)
+  ids: [dynamic]i64
+  points: [dynamic]Point
 })
 
 (data.decode Batch {:ids [10 20 30]
@@ -2011,9 +1959,12 @@ In a `->` pipeline, use a `.field` selector step:
 
 ## Ownership, Allocation, And Context
 
-Kvist keeps Odin's explicit allocation model while automating destruction for
-values whose ownership is represented in the Kvist type and procedure
-contract. This is deterministic scope cleanup, not tracing garbage collection.
+Kvist keeps Odin's explicit allocation model. It automatically manages `Data`
+and aggregates whose nontrivial lifetime is structurally derived from `Data`.
+Ordinary native strings, arrays, maps, and opaque resources still use explicit
+Odin-style cleanup. Typed decode results are a narrow exception because the
+decode boundary proves their complete allocation shape. This is deterministic
+management, not tracing garbage collection.
 
 If a value owns dynamic storage, delete it when the current scope is done with
 it. The common owned values are dynamic arrays, maps, and helper results that
@@ -2028,18 +1979,19 @@ create them.
 
 The practical ownership rules are:
 
-- if a local value owns dynamic storage, delete it or return it
-- an `(owned T)` parameter consumes its argument and cleans it up unless it is
-  moved onward
-- plain parameters borrow; `(borrowed T)` makes a view result explicit
-- if a proc returns an owned value, ownership transfers to the caller
+- allocating native expressions remain explicit; use `defer`, `:defer`, or
+  `:defer-with`
+- a parameter is inferred as consuming when the procedure body explicitly
+  deletes it or transfers it through a proven owning result
+- parameters otherwise borrow
+- if every return path proves a new value, ownership transfers to the caller
 - borrowed views must not be deleted
-- compiler-managed `Data`, managed structs, and owned parameters receive
-  deterministic generated cleanup
-- custom native structs use `managed: :unique` or `managed: :shared` metadata
-  with statically resolved `Type-destroy` and, for shared values, `Type-clone`
-- unqualified native arrays, maps, strings, and imported resources still use
-  explicit `defer`, `:defer`, or `:defer-with`
+- compiler-tracked `Data`, structs whose lifetime derives from contained
+  `Data`, and decoded structural results receive deterministic generated
+  cleanup
+- ambiguous or opaque imported resources use explicit `defer`, `:defer`, or
+  `:defer-with`
+- cleanup-like procedure names do not change a type's semantics
 - `:defer` is scope cleanup for ordinary owned values
 - `:defer-with` is scope cleanup through a named cleanup function
 - `:errdefer` is failure-only cleanup for `[value err] :or-return` bindings
@@ -2097,8 +2049,8 @@ the result type:
 ```
 
 The compiler also has coded ownership warnings for obvious mistakes. These
-warnings are advisory. They do not mean Kvist has an automatic ownership
-system, and they do not change generated Odin.
+warnings are advisory. They do not turn native values into an automatic
+ownership system, and they do not add hidden native cleanup to generated Odin.
 
 Normal commands report definite findings. Add `--ownership-audit` to include
 conservative findings from the flow analysis:
@@ -2116,13 +2068,12 @@ API retains every warning with its stable `code` and `confidence` fields so
 tools can choose their own policy. Explicit deferred destructors whose names
 identify destroy, free, close, or release operations are recognized as cleanup.
 
-The audit pass is intentionally conservative. It recognizes owned results from source
-proc return types, source procs marked `#owned`, known owned-result helper
-shapes such as `arr.range`, `arr.empty`, `map.empty`, and `set.union`;
-borrowed views from source procs marked `#borrowed`; known borrowed-view helper
-shapes such as `slice`, `arr.slice`, and `arr.rest`; and known ownership
+The audit pass is intentionally conservative. It recognizes allocating return
+paths, known owned-result helpers such as `arr.range`, `arr.empty`,
+`map.empty`, and `set.union`; borrowed views that alias compatible inputs or
+known view helpers such as `slice`, `arr.slice`, and `arr.rest`; and ownership
 transfers such as `delete`, returning an owned local, and passing an owned local
-into owner-taking collection operations.
+into a consuming operation inferred from its body.
 
 For example:
 

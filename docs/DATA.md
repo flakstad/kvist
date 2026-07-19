@@ -110,11 +110,10 @@ Map splicing is deliberately not implicit because alternating entries and maps
 have different useful meanings. Compose runtime maps with `data.merge`.
 
 The compiler manages ordinary local `Data` bindings, single and named function
-returns, destructured named results, and reassignment. `(owned Data)` and
-`(borrowed Data)` procedure contracts determine whether a parameter is
-consumed and whether a returned value transfers a reference or remains a view
-of an input. The older `#owned` and `#borrowed` result directives remain
-available during migration.
+returns, destructured named results, and reassignment. It infers whether a
+parameter is consumed from explicit deletion or onward transfer in the body,
+and whether a return transfers a new reference or aliases an input. No
+ownership qualifiers are added to the native `Data` type.
 Assignment retains borrowed replacements, moves owned replacements, and
 releases overwritten values. Owned managed values nested directly in call
 arguments or discarded explicitly are released after use. Data-valued `if`,
@@ -160,7 +159,7 @@ Runtime-created `Data` uses immutable, reference-counted backing storage.
 `Data` itself remains a small value. Scalars are stored directly where useful;
 text and collections refer to shared immutable nodes.
 
-The compiler applies one general managed-value protocol:
+The compiler applies built-in `Data` lifetime rules:
 
 - binding or storing another live copy retains its backing storage;
 - leaving the owning scope releases it;
@@ -177,13 +176,10 @@ use automatic management.
 This is deterministic memory management, not tracing garbage collection.
 Immutable Data cannot create cycles through its public construction API.
 
-The protocol should be representation-independent so future managed native
-types can use it without adding another Data-specific ownership pass.
-Custom native structs now opt into that same compiler protocol with
-`managed: :shared` or `managed: :unique` metadata and statically named clone
-and destroy procedures. This keeps `Data`'s reference-counted copying distinct
-from affine native values while sharing scope cleanup, move, return, and
-assignment machinery.
+The internal flow machinery is representation-independent, but this does not
+create a user-declared managed-type protocol. Kvist applies it when the
+compiler has structural evidence, such as a typed Data decoding boundary.
+Opaque native structs and handles retain explicit Odin-style cleanup.
 
 ## Package Bindings
 
@@ -264,11 +260,11 @@ fallback. Static and runtime Data have the same public handle shape.
    required nested Kvist structs and `Data`, boolean, integer, and
    floating-point and enum fields, retaining managed leaves and reporting the
    exact failing field path. Enum variants use lowercase source spelling:
-   `.Read-Only` decodes from `:read-only`. String fields decode only when
-   explicitly declared `(owned string)`, which clones native text and joins the
-   struct's deterministic lifecycle. A `:default` field is optional when its
+   `.Read-Only` decodes from `:read-only`. String-field acquisition and
+   cleanup are inferred from the struct's use as a decode target. A `:default`
+   field is optional when its
    map key is absent but still validates a present value, including explicit
-   Data `nil`. `(owned [dynamic]T)` fields and direct `(dynamic T)` targets
+   Data `nil`. `[dynamic]T` fields and direct `(dynamic T)` targets
    decode Data vectors for `Data`, boolean, integer, floating-point, enum, and
    Kvist struct element types, with failing indices appended to the error path.
    Struct elements recursively validate their fields and extend paths beyond

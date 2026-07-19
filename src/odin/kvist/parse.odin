@@ -77,7 +77,7 @@ is_proc_prefix_directive :: proc(text: string) -> bool {
 }
 
 is_kvist_proc_directive :: proc(text: string) -> bool {
-    return text == "#owned" || text == "#borrowed"
+    return false
 }
 
 attr_item_text :: proc(form: CST_Form) -> (string, Compile_Error, bool) {
@@ -353,24 +353,8 @@ parse_owned_struct_field_type :: proc(
     if form.kind != .List || len(form.items) < 2 || !is_symbol(form.items[0], "owned") {
         return "", false, false, false, {}, true
     }
-    type_text, next_i, err_type, ok_type := parse_type_text_from_forms(form.items[:], 1)
-    if !ok_type {
-        return "", false, false, true, err_type, false
-    }
-    if next_i != len(form.items) {
-        return "", false, false, true, Compile_Error{
-            message = "owned struct field type expects exactly one type",
-            span = form.span,
-        }, false
-    }
-    if type_text == "string" {
-        return type_text, true, false, true, {}, true
-    }
-    if len(type_text) >= len("[dynamic]") && type_text[:len("[dynamic]")] == "[dynamic]" {
-        return type_text, false, true, true, {}, true
-    }
     return "", false, false, true, Compile_Error{
-        message = "owned struct fields currently support string and dynamic-array types",
+        message = "owned struct field types have been removed; field lifetimes are inferred from construction and decoding",
         span = form.span,
     }, false
 }
@@ -759,46 +743,6 @@ parse_type_text_from_forms :: proc(forms: []CST_Form, start: int) -> (text: stri
     return text, start+1, {}, true
 }
 
-parse_ownership_qualified_type :: proc(
-    form: CST_Form,
-) -> (
-    ty: string,
-    ownership: Ownership_Mode,
-    handled: bool,
-    err: Compile_Error,
-    ok: bool,
-) {
-    if form.kind != .List || len(form.items) == 0 || form.items[0].kind != .Symbol {
-        return "", .Default, false, {}, true
-    }
-    mode := Ownership_Mode.Default
-    switch form.items[0].text {
-    case "owned":
-        mode = .Owned
-    case "borrowed":
-        mode = .Borrowed
-    case:
-        return "", .Default, false, {}, true
-    }
-    if len(form.items) < 2 {
-        return "", mode, true, Compile_Error{
-            message = fmt.tprintf("%s type expects exactly one type", form.items[0].text),
-            span = form.span,
-        }, false
-    }
-    type_text, next_i, err_type, ok_type := parse_type_text_from_forms(form.items[:], 1)
-    if !ok_type {
-        return "", mode, true, err_type, false
-    }
-    if next_i != len(form.items) {
-        return "", mode, true, Compile_Error{
-            message = fmt.tprintf("%s type expects exactly one type", form.items[0].text),
-            span = form.span,
-        }, false
-    }
-    return type_text, mode, true, {}, true
-}
-
 expect_kind :: proc(form: CST_Form, kind: CST_Form_Kind, message: string) -> (Compile_Error, bool) {
     if form.kind != kind {
         return Compile_Error{message = message, span = form.span}, false
@@ -827,30 +771,25 @@ parse_param_vector :: proc(form: CST_Form) -> (params: [dynamic]Param, err: Comp
             if i+1 >= len(form.items) {
                 return params, Compile_Error{message = "missing parameter type", span = target.span}, false
             }
-            type_text := ""
-            ownership := Ownership_Mode.Borrowed
-            parsed_next_i := i + 2
-            qualified_type, qualified_ownership, qualified, err_qualified, ok_qualified :=
-                parse_ownership_qualified_type(form.items[i+1])
-            if !ok_qualified {
-                return params, err_qualified, false
+            if form.items[i+1].kind == .List &&
+               len(form.items[i+1].items) > 0 &&
+               form.items[i+1].items[0].kind == .Symbol &&
+               (form.items[i+1].items[0].text == "owned" ||
+                form.items[i+1].items[0].text == "borrowed") {
+                return params, Compile_Error{
+                    message = "ownership-qualified types have been removed; lifetimes are inferred from ordinary code",
+                    span = form.items[i+1].span,
+                }, false
             }
-            if qualified {
-                type_text = qualified_type
-                ownership = qualified_ownership
-            } else {
-                err_type: Compile_Error
-                ok_type: bool
-                type_text, parsed_next_i, err_type, ok_type =
-                    parse_type_text_from_forms(form.items[:], i+1)
-                if !ok_type {
-                    return params, err_type, false
-                }
+            type_text, parsed_next_i, err_type, ok_type :=
+                parse_type_text_from_forms(form.items[:], i+1)
+            if !ok_type {
+                return params, err_type, false
             }
             param = Param{
                 name      = map_name(target.text[:len(target.text)-1]),
                 ty        = type_text,
-                ownership = ownership,
+                ownership = .Borrowed,
             }
             next_i = parsed_next_i
         case .Brace:
@@ -888,30 +827,25 @@ parse_named_returns :: proc(form: CST_Form) -> (fields: [dynamic]Named_Return, e
         if i+1 >= len(form.items) {
             return fields, Compile_Error{message = "missing named return type", span = name_form.span}, false
         }
-        type_text := ""
-        ownership := Ownership_Mode.Default
-        next_i := i + 2
-        qualified_type, qualified_ownership, qualified, err_qualified, ok_qualified :=
-            parse_ownership_qualified_type(form.items[i+1])
-        if !ok_qualified {
-            return fields, err_qualified, false
+        if form.items[i+1].kind == .List &&
+           len(form.items[i+1].items) > 0 &&
+           form.items[i+1].items[0].kind == .Symbol &&
+           (form.items[i+1].items[0].text == "owned" ||
+            form.items[i+1].items[0].text == "borrowed") {
+            return fields, Compile_Error{
+                message = "ownership-qualified types have been removed; lifetimes are inferred from ordinary code",
+                span = form.items[i+1].span,
+            }, false
         }
-        if qualified {
-            type_text = qualified_type
-            ownership = qualified_ownership
-        } else {
-            err_type: Compile_Error
-            ok_type: bool
-            type_text, next_i, err_type, ok_type =
-                parse_type_text_from_forms(form.items[:], i+1)
-            if !ok_type {
-                return fields, err_type, false
-            }
+        type_text, next_i, err_type, ok_type :=
+            parse_type_text_from_forms(form.items[:], i+1)
+        if !ok_type {
+            return fields, err_type, false
         }
         append(&fields, Named_Return{
             name      = map_name(name_form.text[:len(name_form.text)-1]),
             ty        = type_text,
-            ownership = ownership,
+            ownership = .Default,
         })
         i = next_i
     }
@@ -935,22 +869,17 @@ parse_struct_fields :: proc(form: CST_Form) -> (fields: [dynamic]Struct_Field, e
         if struct_field_exists(fields[:], field_name) {
             return fields, Compile_Error{message = fmt.tprintf("duplicate struct field %s", key.text), span = key.span}, false
         }
-        type_text := ""
-        next_i := i + 2
-        owned_type, owns_string, owns_dynamic_array, owned_handled, err_owned, ok_owned :=
+        _, _, _, owned_handled, err_owned, ok_owned :=
             parse_owned_struct_field_type(form.items[i+1])
         if !ok_owned {
             return fields, err_owned, false
         }
         if owned_handled {
-            type_text = owned_type
-        } else {
-            err_type: Compile_Error
-            ok_type: bool
-            type_text, next_i, err_type, ok_type = parse_type_text_from_forms(form.items[:], i+1)
-            if !ok_type {
-                return fields, err_type, false
-            }
+            return fields, err_owned, false
+        }
+        type_text, next_i, err_type, ok_type := parse_type_text_from_forms(form.items[:], i+1)
+        if !ok_type {
+            return fields, err_type, false
         }
         using_field := false
         has_default := false
@@ -984,8 +913,8 @@ parse_struct_fields :: proc(form: CST_Form) -> (fields: [dynamic]Struct_Field, e
             source_name   = source_name,
             ty            = type_text,
             is_using      = using_field,
-            owns_string   = owns_string,
-            owns_dynamic_array = owns_dynamic_array,
+            owns_string   = false,
+            owns_dynamic_array = false,
             has_default   = has_default,
             default_value = default_value,
         })
@@ -1004,38 +933,24 @@ parse_label_name :: proc(form: CST_Form) -> (name, source_name: string, ok: bool
     return "", "", false
 }
 
-parse_struct_managed_kind :: proc(form: CST_Form) -> (Managed_Kind, Compile_Error, bool) {
+reject_removed_struct_lifetime_metadata :: proc(form: CST_Form) -> (Compile_Error, bool) {
     if form.kind != .Brace {
-        return .None, Compile_Error{message = "defstruct metadata must be a brace form", span = form.span}, false
+        return Compile_Error{message = "defstruct metadata must be a brace form", span = form.span}, false
     }
-    managed_kind := Managed_Kind.None
-    found := false
     for i := 0; i < len(form.items); i += 2 {
         if i+1 >= len(form.items) {
-            return .None, Compile_Error{message = "missing defstruct metadata value", span = form.span}, false
+            return Compile_Error{message = "missing defstruct metadata value", span = form.span}, false
         }
         key, _, ok_key := parse_label_name(form.items[i])
         if !ok_key || key != "managed" {
             continue
         }
-        if found {
-            return .None, Compile_Error{message = "duplicate managed: defstruct metadata", span = form.items[i].span}, false
-        }
-        found = true
-        value := form.items[i+1]
-        if value.kind != .Keyword {
-            return .None, Compile_Error{message = "managed: expects :unique or :shared", span = value.span}, false
-        }
-        switch value.text {
-        case ":unique":
-            managed_kind = .Unique
-        case ":shared":
-            managed_kind = .Shared
-        case:
-            return .None, Compile_Error{message = "managed: expects :unique or :shared", span = value.span}, false
-        }
+        return Compile_Error{
+            message = "managed: metadata has been removed; native resource cleanup remains explicit unless Kvist can infer it structurally",
+            span = form.items[i].span,
+        }, false
     }
-    return managed_kind, {}, true
+    return {}, true
 }
 
 parse_defstruct_fields :: proc(form: CST_Form) -> (fields: [dynamic]Struct_Field, err: Compile_Error, ok: bool) {
@@ -1055,22 +970,17 @@ parse_defstruct_fields :: proc(form: CST_Form) -> (fields: [dynamic]Struct_Field
         if struct_field_exists(fields[:], field_name) {
             return fields, Compile_Error{message = fmt.tprintf("duplicate defstruct field %s", key.text), span = key.span}, false
         }
-        type_text := ""
-        next_i := i + 2
-        owned_type, owns_string, owns_dynamic_array, owned_handled, err_owned, ok_owned :=
+        _, _, _, owned_handled, err_owned, ok_owned :=
             parse_owned_struct_field_type(form.items[i+1])
         if !ok_owned {
             return fields, err_owned, false
         }
         if owned_handled {
-            type_text = owned_type
-        } else {
-            err_type: Compile_Error
-            ok_type: bool
-            type_text, next_i, err_type, ok_type = parse_type_text_from_forms(form.items[:], i+1)
-            if !ok_type {
-                return fields, err_type, false
-            }
+            return fields, err_owned, false
+        }
+        type_text, next_i, err_type, ok_type := parse_type_text_from_forms(form.items[:], i+1)
+        if !ok_type {
+            return fields, err_type, false
         }
         using_field := false
         has_default := false
@@ -1104,8 +1014,8 @@ parse_defstruct_fields :: proc(form: CST_Form) -> (fields: [dynamic]Struct_Field
             source_name   = source_name,
             ty            = type_text,
             is_using      = using_field,
-            owns_string   = owns_string,
-            owns_dynamic_array = owns_dynamic_array,
+            owns_string   = false,
+            owns_dynamic_array = false,
             has_default   = has_default,
             default_value = default_value,
         })
@@ -1218,24 +1128,20 @@ parse_proc_decl :: proc(form: CST_Form) -> (decl: Proc_Decl, err: Compile_Error,
         return_form := form.items[body_index+1]
         #partial switch return_form.kind {
         case .Symbol, .List, .Keyword:
-            qualified_type, qualified_ownership, qualified, err_qualified, ok_qualified :=
-                parse_ownership_qualified_type(return_form)
-            if !ok_qualified {
-                return decl, err_qualified, false
+            if return_form.kind == .List &&
+               len(return_form.items) > 0 &&
+               return_form.items[0].kind == .Symbol &&
+               (return_form.items[0].text == "owned" ||
+                return_form.items[0].text == "borrowed") {
+                return decl, Compile_Error{
+                    message = "ownership-qualified types have been removed; result lifetimes are inferred from the procedure body",
+                    span = return_form.span,
+                }, false
             }
-            return_text := ""
-            next_index := body_index + 2
-            if qualified {
-                return_text = qualified_type
-                returns.single_ownership = qualified_ownership
-            } else {
-                err_return: Compile_Error
-                ok_return: bool
-                return_text, next_index, err_return, ok_return =
-                    parse_type_text_from_forms(form.items[:], body_index+1)
-                if !ok_return {
-                    return decl, err_return, false
-                }
+            return_text, next_index, err_return, ok_return :=
+                parse_type_text_from_forms(form.items[:], body_index+1)
+            if !ok_return {
+                return decl, err_return, false
             }
             returns.kind = .Single
             returns.single_ty = return_text
@@ -1271,34 +1177,17 @@ parse_proc_decl :: proc(form: CST_Form) -> (decl: Proc_Decl, err: Compile_Error,
     borrows_result := false
     for body_index < len(form.items) && is_proc_directive_symbol(form.items[body_index]) {
         directive := form.items[body_index].text
-        if is_kvist_proc_directive(directive) {
-            if directive == "#owned" {
-                if returns.kind == .Single && returns.single_ownership == .Borrowed {
-                    return decl, Compile_Error{
-                        message = "#owned conflicts with a borrowed return type",
-                        span = form.items[body_index].span,
-                    }, false
-                }
-                owns_result = true
-            } else if directive == "#borrowed" {
-                if returns.kind == .Single && returns.single_ownership == .Owned {
-                    return decl, Compile_Error{
-                        message = "#borrowed conflicts with an owned return type",
-                        span = form.items[body_index].span,
-                    }, false
-                }
-                borrows_result = true
-            }
+        if directive == "#owned" || directive == "#borrowed" {
+            return decl, Compile_Error{
+                message = fmt.tprintf("%s has been removed; result lifetimes are inferred from the procedure body or foreign binding metadata", directive),
+                span = form.items[body_index].span,
+            }, false
         } else if is_proc_prefix_directive(directive) {
             append(&prefix_directives, directive)
         } else {
             append(&suffix_directives, directive)
         }
         body_index += 1
-    }
-    if returns.kind == .Single {
-        owns_result = owns_result || returns.single_ownership == .Owned
-        borrows_result = borrows_result || returns.single_ownership == .Borrowed
     }
     where_constraints: [dynamic]CST_Form
     for body_index < len(form.items) &&
@@ -1697,13 +1586,10 @@ parse_decl :: proc(top_form: CST_Top_Form) -> (decl: AST_Decl, err: Compile_Erro
         if !ok_fields {
             return decl, err_fields, false
         }
-        managed_kind := Managed_Kind.None
         if meta_index >= 0 {
-            err_managed: Compile_Error
-            ok_managed: bool
-            managed_kind, err_managed, ok_managed = parse_struct_managed_kind(form.items[meta_index])
-            if !ok_managed {
-                return decl, err_managed, false
+            err_metadata, ok_metadata := reject_removed_struct_lifetime_metadata(form.items[meta_index])
+            if !ok_metadata {
+                return decl, err_metadata, false
             }
         }
         return AST_Decl{
@@ -1713,7 +1599,6 @@ parse_decl :: proc(top_form: CST_Top_Form) -> (decl: AST_Decl, err: Compile_Erro
             struct_decl = Struct_Decl{
                 name   = map_name(form.items[1].text),
                 fields = fields,
-                managed_kind = managed_kind,
             },
         }, {}, true
     case "defenum", "defenum-":

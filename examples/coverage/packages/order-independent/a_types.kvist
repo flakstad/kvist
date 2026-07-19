@@ -5,5 +5,5 @@
 
 (defstruct Box {
   value: int :default default-box-value
-  values: (owned [dynamic]int) :default []
+  values: [dynamic]int :default []
 })

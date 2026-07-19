@@ -370,7 +370,7 @@ index; nested operations do not silently grow vectors.
 | Owned native Data array | Array owns one retained reference per element; deletion releases elements then storage |
 
 Collection code must not infer callback ownership from naming. It must use the
-declared `#owned`/`#borrowed` result contract, including specialized symbols,
+inferred owned/borrowed result boundary, including specialized symbols,
 inline functions, captures, and named multiple returns.
 
 Panic/unwind and ordinary early-return paths must run builder cleanup. If a
