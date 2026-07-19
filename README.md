@@ -228,9 +228,10 @@ Kvist infers useful lifetime boundaries from ordinary code:
 ```
 
 Here `make-items` returns new storage, `consume` consumes its argument because
-its body deletes it, and `view` returns a borrowed Data view. No ownership
-syntax changes the native type. Run `kvist lifetimes file.kvist` to inspect
-these inferred boundaries.
+its body deletes it, and `view` aliases a borrowed Data input in its body. The
+Data return boundary retains that alias and gives the caller one owned
+reference. No ownership syntax changes the native type. Run
+`kvist lifetimes file.kvist` to inspect these inferred boundaries.
 
 Kvist automatically manages `Data` references and Kvist structs whose
 nontrivial lifetime comes entirely from contained `Data`. Ordinary native
