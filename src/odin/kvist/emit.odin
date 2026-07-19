@@ -8598,7 +8598,8 @@ form_produces_owned_managed_value :: proc(e: ^Emitter, form: CST_Form, depth: in
         }
     case:
     }
-    if proc_decl, ok_proc := find_proc_decl(e, head_name); ok_proc {
+    if _, proc_decl, ok_proc := resolve_proc_call_decl(e, form.items[0].text);
+       ok_proc && proc_decl != nil {
         return proc_decl.returns.kind == .Single &&
                type_text_is_managed_value(e, proc_decl.returns.single_ty) &&
                !proc_decl.borrows_result
@@ -8640,7 +8641,8 @@ form_produces_owned_managed_type :: proc(e: ^Emitter, form: CST_Form, ty: string
             return true
         }
     }
-    if proc_decl, ok_proc := find_proc_decl(e, head_name); ok_proc {
+    if _, proc_decl, ok_proc := resolve_proc_call_decl(e, form.items[0].text);
+       ok_proc && proc_decl != nil {
         return proc_decl.returns.kind == .Single &&
                proc_decl.returns.single_ty == ty &&
                (proc_decl.owns_result ||

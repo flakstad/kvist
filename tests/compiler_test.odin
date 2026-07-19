@@ -28846,6 +28846,35 @@ compile_shared_managed_struct_protocol :: proc(t: ^testing.T) {
 }
 
 @(test)
+owned_imported_managed_result_moves_into_struct_field :: proc(t: ^testing.T) {
+    source := `(package main)
+(import data "kvist:data")
+
+(defstruct Envelope {
+  value: Data
+} {
+  managed: :unique
+})
+
+(defn Envelope-destroy [envelope: Envelope]
+  (data.release envelope.value))
+
+(defn make-envelope [value: Data] -> (owned Envelope)
+  (Envelope {value: (data.retain value)}))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "Envelope{value = data__retain(value)}"), true)
+    testing.expect_value(t, strings.contains(output, "data__retain(data__retain(value))"), false)
+}
+
+@(test)
 native_struct_named_data_does_not_enable_shared_data_runtime :: proc(t: ^testing.T) {
     source := `(package main)
 
