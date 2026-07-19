@@ -809,16 +809,41 @@ Directive wrappers such as `#force_inline` can appear on function declarations:
   (return 42 true))
 ```
 
-Use `#owned` for source procedures whose return type alone does not prove
-ownership, such as an allocated slice or string returned from an Odin API:
+Ownership can be written directly on procedure parameters and results:
+
+```clojure
+(defn consume [values: (owned [dynamic]int)]
+  ...)
+
+(defn forward [value: (owned Data)] -> (owned Data)
+  value)
+
+(defn view [value: (borrowed Data)] -> (borrowed Data)
+  value)
+```
+
+Plain parameters borrow by default. An `(owned T)` parameter consumes its
+argument and becomes responsible for its deterministic destruction or onward
+transfer. `(owned T)` and `(borrowed T)` results state whether the caller
+receives ownership or a view. These qualifiers are compile-time contracts and
+erase to the ordinary native Odin type.
+
+The compiler automatically destroys owned parameters whose type has a known
+destructor. Passing or returning a compiler-managed local to an owned position
+moves it and disables its former scope cleanup. Using that local afterward is
+an ownership diagnostic.
+
+The older `#owned` and `#borrowed` result directives remain accepted during the
+ownership migration. Prefer qualified result types in new code. Conflicting
+qualified and directive contracts are rejected.
+
+`#owned` remains useful temporarily for named multi-results or source
+procedures whose return type has not yet been migrated:
 
 ```clojure
 (defn read-bytes [path: string] -> [data: []byte, err: os.Error] #owned
   (os.read_entire_file path context.allocator))
 ```
-
-`#owned` is a Kvist ownership-analysis directive. It is not emitted into the
-generated Odin proc signature.
 
 Use `#borrowed` for source procedures that return a borrowed view into a
 compatible string or slice argument:
@@ -1961,7 +1986,9 @@ In a `->` pipeline, use a `.field` selector step:
 
 ## Ownership, Allocation, And Context
 
-Kvist keeps Odin's explicit allocation model.
+Kvist keeps Odin's explicit allocation model while automating destruction for
+values whose ownership is represented in the Kvist type and procedure
+contract. This is deterministic scope cleanup, not tracing garbage collection.
 
 If a value owns dynamic storage, delete it when the current scope is done with
 it. The common owned values are dynamic arrays, maps, and helper results that
@@ -1977,10 +2004,15 @@ create them.
 The practical ownership rules are:
 
 - if a local value owns dynamic storage, delete it or return it
+- an `(owned T)` parameter consumes its argument and cleans it up unless it is
+  moved onward
+- plain parameters borrow; `(borrowed T)` makes a view result explicit
 - if a proc returns an owned value, ownership transfers to the caller
 - borrowed views must not be deleted
-- there is no hidden runtime cleanup beyond the `defer`, `:defer`, or
-  `:defer-with` you write
+- compiler-managed `Data`, managed structs, and owned parameters receive
+  deterministic generated cleanup
+- unqualified native arrays, maps, strings, and imported resources still use
+  explicit `defer`, `:defer`, or `:defer-with`
 - `:defer` is scope cleanup for ordinary owned values
 - `:defer-with` is scope cleanup through a named cleanup function
 - `:errdefer` is failure-only cleanup for `[value err] :or-return` bindings

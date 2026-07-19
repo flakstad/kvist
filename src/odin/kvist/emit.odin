@@ -123,6 +123,7 @@ Emitter :: struct {
     warnings:                  ^[dynamic]Compile_Warning,
     line:                      int,
     temp_counter:              int,
+    owner_counter:             int,
     attach_next_decl:          bool,
     pending_prefix_directives: [dynamic]string,
     pending_suffix_directives: [dynamic]string,
@@ -2889,14 +2890,20 @@ emit_named_call_with_defaults :: proc(e: ^Emitter, proc_decl: ^Proc_Decl, form: 
             }
         }
         append(&seen, field_name)
-        if _, ok_param := find_proc_param(proc_decl, field_name); !ok_param {
+        param, ok_param := find_proc_param(proc_decl, field_name)
+        if !ok_param {
             message := fmt.tprintf("unknown named argument %s", key.text)
             if closest, ok_closest := closest_proc_param_keyword(proc_decl, field_name); ok_closest {
                 message = fmt.tprintf("%s; did you mean %s", message, label_text(closest))
             }
             return arg_texts, Compile_Error{message = named_arg_message_with_valid_keys(message, proc_decl), span = key.span}, false
         }
-        value_text, err_value, ok_value := emit_expr(e, value)
+        value_text, err_value, ok_value := emit_call_arg_for_expected_type(
+            e,
+            value,
+            param.ty,
+            param.ownership,
+        )
         if !ok_value {
             return arg_texts, err_value, false
         }
@@ -2934,16 +2941,30 @@ emit_named_call_with_defaults :: proc(e: ^Emitter, proc_decl: ^Proc_Decl, form: 
     return arg_texts, Compile_Error{}, true
 }
 
-emit_call_arg_for_expected_type :: proc(e: ^Emitter, arg: CST_Form, expected_type: string) -> (string, Compile_Error, bool) {
+emit_call_arg_for_expected_type :: proc(
+    e: ^Emitter,
+    arg: CST_Form,
+    expected_type: string,
+    ownership: Ownership_Mode = .Default,
+) -> (string, Compile_Error, bool) {
     value, err_value, ok_value := emit_expr_for_expected_type(e, arg, expected_type)
     if !ok_value {
         return "", err_value, false
+    }
+    if ownership == .Owned && arg.kind == .Symbol {
+        name := map_name(arg.text)
+        defer delete(name)
+        if owner_flag, ok_owner := lookup_managed_local_owner(e, name); ok_owner {
+            return managed_move_local_value_text(e, expected_type, value, owner_flag), {}, true
+        }
     }
     if expected_type == "Data" &&
        (arg.kind == .Vector || arg.kind == .Brace || arg.kind == .Set) {
         temp := thread_temp_name(e)
         emit_prefixed_expr_mapped(e, fmt.tprintf("%s := ", temp), value, arg.span)
-        emit_line_mapped(e, fmt.tprintf("defer kvist_data_release(%s)", temp), arg.span)
+        if ownership != .Owned {
+            emit_line_mapped(e, fmt.tprintf("defer kvist_data_release(%s)", temp), arg.span)
+        }
         return temp, {}, true
     }
     return value, {}, true
@@ -2967,7 +2988,12 @@ emit_positional_call_with_defaults :: proc(e: ^Emitter, proc_decl: ^Proc_Decl, a
     defer delete(provided_forms)
 
     for arg, arg_idx in args {
-        arg_text, err_arg, ok_arg := emit_call_arg_for_expected_type(e, arg, params[arg_idx].ty)
+        arg_text, err_arg, ok_arg := emit_call_arg_for_expected_type(
+            e,
+            arg,
+            params[arg_idx].ty,
+            params[arg_idx].ownership,
+        )
         if !ok_arg {
             return arg_texts, err_arg, false
         }
@@ -3055,14 +3081,20 @@ emit_mixed_call_with_defaults :: proc(e: ^Emitter, proc_decl: ^Proc_Decl, positi
             }
         }
         append(&seen, field_name)
-        if _, ok_param := find_proc_param(proc_decl, field_name); !ok_param {
+        param, ok_param := find_proc_param(proc_decl, field_name)
+        if !ok_param {
             message := fmt.tprintf("unknown named argument %s", key.text)
             if closest, ok_closest := closest_proc_param_keyword(proc_decl, field_name); ok_closest {
                 message = fmt.tprintf("%s; did you mean %s", message, label_text(closest))
             }
             return arg_texts, Compile_Error{message = named_arg_message_with_valid_keys(message, proc_decl), span = key.span}, false
         }
-        value_text, err_value, ok_value := emit_expr(e, value)
+        value_text, err_value, ok_value := emit_call_arg_for_expected_type(
+            e,
+            value,
+            param.ty,
+            param.ownership,
+        )
         if !ok_value {
             return arg_texts, err_value, false
         }
@@ -3073,7 +3105,7 @@ emit_mixed_call_with_defaults :: proc(e: ^Emitter, proc_decl: ^Proc_Decl, positi
 
     for arg, idx in positional_args {
         param := proc_decl.params[idx]
-        arg_text, err_arg, ok_arg := emit_call_arg_for_expected_type(e, arg, param.ty)
+        arg_text, err_arg, ok_arg := emit_call_arg_for_expected_type(e, arg, param.ty, param.ownership)
         if !ok_arg {
             return arg_texts, err_arg, false
         }
@@ -6563,7 +6595,7 @@ emit_expr_with_owned_nested_temps :: proc(e: ^Emitter, form: CST_Form) -> (strin
             transfers_owned := rewritten.kind == .List &&
                                ((form_transfers_owned_args(rewritten) && idx >= 2) ||
                                 call_arg_transfers_owned_result(e, rewritten, idx))
-            if item_is_owned_managed {
+            if item_is_owned_managed && !transfers_owned {
                 emit_line(e, fmt.tprintf("defer %s", managed_destroy_value_text(e, managed_ty, temp)))
             } else if form_produces_owned_value(item, e) && !transfers_owned {
                 emit_line(e, fmt.tprintf("defer delete(%s)", temp))
@@ -8242,6 +8274,37 @@ managed_destroy_value_text :: proc(e: ^Emitter, ty, value: string) -> string {
     return emit_call_text(managed_struct_helper_name("destroy", ty), []string{value})
 }
 
+ownership_type_has_destructor :: proc(e: ^Emitter, ty: string) -> bool {
+    trimmed := strings.trim_space(ty)
+    return trimmed == "string" ||
+           type_text_is_dynamic_array(trimmed) ||
+           type_text_is_map(trimmed) ||
+           type_text_has_managed_lifecycle(e, trimmed)
+}
+
+ownership_destroy_value_text :: proc(e: ^Emitter, ty, value: string) -> string {
+    trimmed := strings.trim_space(ty)
+    if trimmed == "string" || type_text_is_map(trimmed) {
+        return emit_call_text("delete", []string{value})
+    }
+    return managed_destroy_value_text(e, trimmed, value)
+}
+
+managed_move_local_value_text :: proc(e: ^Emitter, ty, value, owner_flag: string) -> string {
+    return fmt.tprintf(
+        "(proc(kvist_value: %s, kvist_owner: ^bool) -> %s {{ kvist_owner^ = false; return kvist_value }})(%s, &%s)",
+        ty,
+        ty,
+        value,
+        owner_flag,
+    )
+}
+
+managed_owner_flag_name :: proc(e: ^Emitter) -> string {
+    e.owner_counter += 1
+    return fmt.tprintf("kvist_owner_%d", e.owner_counter)
+}
+
 managed_dynamic_array_assignment_text :: proc(
     e: ^Emitter,
     ty, place, value: string,
@@ -8455,6 +8518,13 @@ managed_binding_value_text :: proc(e: ^Emitter, binding: Binding, value: string)
 }
 
 managed_return_value_text_for_type :: proc(e: ^Emitter, form: CST_Form, value, return_ty: string) -> string {
+    if e.current_proc_owns_managed_result && form.kind == .Symbol {
+        name := map_name(form.text)
+        defer delete(name)
+        if owner_flag, ok_owner := lookup_managed_local_owner(e, name); ok_owner {
+            return managed_move_local_value_text(e, return_ty, value, owner_flag)
+        }
+    }
     if !type_text_has_managed_lifecycle(e, return_ty) ||
        e.current_proc_owns_managed_result ||
        e.current_proc_borrows_managed_result ||
@@ -9057,7 +9127,11 @@ specialize_return_spec :: proc(returns: Return_Spec, names, types: []string) -> 
     case .Named:
         named: [dynamic]Named_Return
         for ret in returns.named {
-            append(&named, Named_Return{name = ret.name, ty = substitute_type_names(ret.ty, names, types)})
+            append(&named, Named_Return{
+                name = ret.name,
+                ty = substitute_type_names(ret.ty, names, types),
+                ownership = ret.ownership,
+            })
         }
         specialized.named = named
     case:
@@ -9422,6 +9496,24 @@ pop_local_type_scope :: proc(e: ^Emitter) {
 
 bind_local_type :: proc(e: ^Emitter, name, ty: string) {
     append(&e.local_types, Param{name = name, ty = ty})
+}
+
+bind_managed_local_owner :: proc(e: ^Emitter, name, owner_flag: string) {
+    for i := len(e.local_types) - 1; i >= 0; i -= 1 {
+        if e.local_types[i].name == name {
+            e.local_types[i].owner_flag = owner_flag
+            return
+        }
+    }
+}
+
+lookup_managed_local_owner :: proc(e: ^Emitter, name: string) -> (string, bool) {
+    for i := len(e.local_types) - 1; i >= 0; i -= 1 {
+        if e.local_types[i].name == name && e.local_types[i].owner_flag != "" {
+            return e.local_types[i].owner_flag, true
+        }
+    }
+    return "", false
 }
 
 lookup_local_type :: proc(e: ^Emitter, name: string) -> (string, bool) {
@@ -10204,17 +10296,58 @@ call_arg_transfers_owned_result :: proc(e: ^Emitter, form: CST_Form, arg_index: 
     if !ok {
         return false
     }
+    if arg_index-1 < len(proc_decl.params) &&
+       proc_decl.params[arg_index-1].ownership == .Owned {
+        return true
+    }
     return proc_decl_transfers_param_in_result(proc_decl, arg_index-1)
 }
 
-mark_transferred_owned_args :: proc(form: CST_Form, live: ^[dynamic]Owned_Local) {
-    if !form_transfers_owned_args(form) {
+mark_transferred_owned_args :: proc(e: ^Emitter, form: CST_Form, live: ^[dynamic]Owned_Local) {
+    if form.kind != .List || len(form.items) == 0 {
         return
     }
-    for item in form.items[2:] {
-        if item.kind == .Symbol {
-            _ = owned_locals_mark_moved_last(live, map_name(item.text))
+    if form_transfers_owned_args(form) {
+        for item in form.items[2:] {
+            if item.kind == .Symbol {
+                _ = owned_locals_mark_moved_last(live, map_name(item.text))
+            }
         }
+    }
+    if form.items[0].kind != .Symbol {
+        return
+    }
+    head_name := map_name(form.items[0].text)
+    defer delete(head_name)
+    proc_decl, ok_proc := find_proc_decl(e, head_name)
+    if !ok_proc {
+        return
+    }
+    param_index := 0
+    for arg in form.items[1:] {
+        if arg.kind == .Brace {
+            for pair_index := 0; pair_index+1 < len(arg.items); pair_index += 2 {
+                field_name, ok_field := brace_key_name(arg.items[pair_index])
+                if !ok_field {
+                    continue
+                }
+                param, ok_param := find_proc_param(proc_decl, field_name)
+                if !ok_param || param.ownership != .Owned {
+                    continue
+                }
+                value := arg.items[pair_index+1]
+                if value.kind == .Symbol {
+                    _ = owned_locals_mark_moved_last(live, map_name(value.text), .Definite)
+                }
+            }
+            continue
+        }
+        if param_index < len(proc_decl.params) &&
+           proc_decl.params[param_index].ownership == .Owned &&
+           arg.kind == .Symbol {
+            _ = owned_locals_mark_moved_last(live, map_name(arg.text), .Definite)
+        }
+        param_index += 1
     }
 }
 
@@ -10392,7 +10525,7 @@ analyze_owned_scope_body :: proc(e: ^Emitter, forms: []CST_Form, can_transfer_fi
                         _ = owned_locals_mark_moved_last(live, live[i].name)
                     }
                 }
-                mark_transferred_owned_args(item, live)
+                mark_transferred_owned_args(e, item, live)
             }
         case "discard":
             for item in form.items[1:] {
@@ -10464,7 +10597,7 @@ analyze_owned_scope_body :: proc(e: ^Emitter, forms: []CST_Form, can_transfer_fi
                         _ = owned_locals_mark_moved_last(live, live[i].name)
                     }
                 }
-                mark_transferred_owned_args(binding.value, live)
+                mark_transferred_owned_args(e, binding.value, live)
                 if (binding.deferred_delete || binding.defer_with_cleanup) && form_is_borrowed_view_result(binding.value, e) {
                     emit_coded_warning(e, borrowed_delete_warning_message(binding.value), binding.value.span, .Ownership_Delete_Borrowed)
                 }
@@ -10610,7 +10743,7 @@ analyze_owned_scope_body :: proc(e: ^Emitter, forms: []CST_Form, can_transfer_fi
                 delete(definite_borrowed)
             }
         case:
-            mark_transferred_owned_args(form, live)
+            mark_transferred_owned_args(e, form, live)
             if form_produces_owned_value(form, e) && !(final_in_scope && can_transfer_final) {
                 emit_coded_warning(e, discarded_owned_warning_message(form), form.span, .Ownership_Discarded_Result)
             }
@@ -17256,6 +17389,8 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
             e.indent += 1
         }
         for binding in bindings {
+            managed := false
+            managed_ty := ""
             if binding_is_data_destructure(e, binding) {
                 err_data, ok_data := emit_data_let_binding(e, binding)
                 if !ok_data {
@@ -17282,8 +17417,6 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
                 if !ok_value {
                     return err_value, false
                 }
-                managed := false
-                managed_ty := ""
                 value, managed_ty, managed = managed_binding_value_text(e, binding, value)
                 if binding.is_result_binding && binding.or_modifier == "or-return" {
                     if !named_returns_match_binding_pattern(returns, binding.pattern[:]) {
@@ -17296,9 +17429,6 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
                 } else {
                     emit_binding_assignment(e, binding, value)
                     emit_managed_destructure_cleanup(e, binding)
-                }
-                if managed && !binding.deferred_delete && !binding.err_deferred_delete && !binding.defer_with_cleanup {
-                    emit_line(e, fmt.tprintf("defer %s", managed_destroy_value_text(e, managed_ty, binding.name)))
                 }
             }
             err_guard, ok_guard := emit_result_binding_guard(e, binding, returns)
@@ -17324,6 +17454,16 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
                 }
             }
             bind_obvious_binding_types(e, binding)
+            if managed && !binding.deferred_delete && !binding.err_deferred_delete && !binding.defer_with_cleanup {
+                owner_flag := managed_owner_flag_name(e)
+                emit_line(e, fmt.tprintf("%s := true", owner_flag))
+                emit_line(e, fmt.tprintf(
+                    "defer if %s {{ %s }}",
+                    owner_flag,
+                    managed_destroy_value_text(e, managed_ty, binding.name),
+                ))
+                bind_managed_local_owner(e, binding.name, owner_flag)
+            }
         }
         err_body, ok_body := emit_body_forms(e, body[:], returns_when_final(last_in_proc, returns))
         if !ok_body {
@@ -18196,6 +18336,20 @@ emit_decl :: proc(e: ^Emitter, decl: IR_Decl) -> (Compile_Error, bool) {
         e.current_proc_owns_managed_result = decl.proc_decl.owns_result
         e.current_proc_borrows_managed_result = decl.proc_decl.borrows_result
         e.current_proc_returns = decl.proc_decl.returns
+        for param in decl.proc_decl.params {
+            if param.ownership != .Owned ||
+               !ownership_type_has_destructor(e, param.ty) {
+                continue
+            }
+            owner_flag := managed_owner_flag_name(e)
+            emit_line(e, fmt.tprintf("%s := true", owner_flag))
+            emit_line(e, fmt.tprintf(
+                "defer if %s {{ %s }}",
+                owner_flag,
+                ownership_destroy_value_text(e, param.ty, param.name),
+            ))
+            bind_managed_local_owner(e, param.name, owner_flag)
+        }
         err_body, ok_body := emit_body_forms(e, decl.proc_decl.body[:], decl.proc_decl.returns)
         e.current_proc_owns_managed_result = previous_owns_managed_result
         e.current_proc_borrows_managed_result = previous_borrows_managed_result

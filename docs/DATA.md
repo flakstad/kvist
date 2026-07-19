@@ -110,9 +110,11 @@ Map splicing is deliberately not implicit because alternating entries and maps
 have different useful meanings. Compose runtime maps with `data.merge`.
 
 The compiler manages ordinary local `Data` bindings, single and named function
-returns, destructured named results, and reassignment. `#owned` and `#borrowed`
-function contracts determine whether a returned value transfers a reference or
-remains a view of an input.
+returns, destructured named results, and reassignment. `(owned Data)` and
+`(borrowed Data)` procedure contracts determine whether a parameter is
+consumed and whether a returned value transfers a reference or remains a view
+of an input. The older `#owned` and `#borrowed` result directives remain
+available during migration.
 Assignment retains borrowed replacements, moves owned replacements, and
 releases overwritten values. Owned managed values nested directly in call
 arguments or discarded explicitly are released after use. Data-valued `if`,

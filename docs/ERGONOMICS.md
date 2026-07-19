@@ -16,6 +16,7 @@ compiler behavior.
 | --- | --- | --- |
 | `:defer`, `:defer-with`, and `:errdefer` | Implemented | Improve introductory documentation and analyzer precision |
 | Coded ownership diagnostics and audit mode | Implemented | Continue reducing the conservative Vev audit backlog |
+| Ownership-qualified procedure boundaries | Implemented | Migrate `#owned`/`#borrowed` and owner-taking naming conventions |
 | Multi-return bindings and fallible guards | Implemented | Extend only when a concrete workload is not served by `:or-return`, `when-let`, `if-let`, `when-ok`, or `if-ok` |
 | Runtime `Data`, quasiquote, EDN, and persistent updates | Implemented | Complete managed aggregate ownership |
 | Transitive compilation cache and distinct entry keys | Implemented | Measure and split reusable package frontend artifacts |
@@ -49,6 +50,11 @@ compiler behavior.
 
 ### 2. Safe Data/Native Boundaries
 
+- Implemented: `(owned T)` and `(borrowed T)` procedure parameters/results
+  erase to native Odin signatures while driving deterministic parameter
+  cleanup, moves, return transfer, and use-after-transfer diagnostics.
+- Continue by representing custom native destructors/cloners as managed type
+  protocols, then migrate Vev's runtime ownership booleans.
 - Implemented for top-level Kvist structs: recursive managed fields,
   construction, copying, `assoc`, ordinary-field `update`, overwrite,
   move, return, named-result destruction, discarded values, and destruction.

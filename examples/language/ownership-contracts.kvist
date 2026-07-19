@@ -1,0 +1,22 @@
+; Copyright (c) Andreas Flakstad and Kvist contributors
+; SPDX-License-Identifier: MIT
+
+(package main)
+
+(import arr "kvist:arr")
+(import data "kvist:data")
+
+(defn consume-values [values: (owned [dynamic]int)] -> int
+  (count values))
+
+(defn forward-data [value: (owned Data)] -> (owned Data)
+  value)
+
+(defn inspect-data [value: (borrowed Data)] -> (borrowed Data)
+  value)
+
+(defn main []
+  (let [values (arr.range 0 4)]
+    (println (consume-values values)))
+  (let [value (data.from-string "managed")]
+    (println (data.string (inspect-data (forward-data value))))))

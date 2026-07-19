@@ -74,9 +74,17 @@ CST_Top_Form :: struct {
     source_file: string,
 }
 
+Ownership_Mode :: enum {
+    Default,
+    Borrowed,
+    Owned,
+}
+
 Param :: struct {
     name:          string,
     ty:            string,
+    ownership:     Ownership_Mode,
+    owner_flag:    string,
     has_default:   bool,
     default_value: CST_Form,
 }
@@ -98,8 +106,9 @@ Union_Variant :: struct {
 }
 
 Named_Return :: struct {
-    name: string,
-    ty:   string,
+    name:      string,
+    ty:        string,
+    ownership: Ownership_Mode,
 }
 
 Return_Kind :: enum {
@@ -109,9 +118,10 @@ Return_Kind :: enum {
 }
 
 Return_Spec :: struct {
-    kind:      Return_Kind,
-    single_ty: string,
-    named:     [dynamic]Named_Return,
+    kind:             Return_Kind,
+    single_ty:        string,
+    single_ownership: Ownership_Mode,
+    named:            [dynamic]Named_Return,
 }
 
 Import_Decl :: struct {

@@ -759,6 +759,46 @@ parse_type_text_from_forms :: proc(forms: []CST_Form, start: int) -> (text: stri
     return text, start+1, {}, true
 }
 
+parse_ownership_qualified_type :: proc(
+    form: CST_Form,
+) -> (
+    ty: string,
+    ownership: Ownership_Mode,
+    handled: bool,
+    err: Compile_Error,
+    ok: bool,
+) {
+    if form.kind != .List || len(form.items) == 0 || form.items[0].kind != .Symbol {
+        return "", .Default, false, {}, true
+    }
+    mode := Ownership_Mode.Default
+    switch form.items[0].text {
+    case "owned":
+        mode = .Owned
+    case "borrowed":
+        mode = .Borrowed
+    case:
+        return "", .Default, false, {}, true
+    }
+    if len(form.items) < 2 {
+        return "", mode, true, Compile_Error{
+            message = fmt.tprintf("%s type expects exactly one type", form.items[0].text),
+            span = form.span,
+        }, false
+    }
+    type_text, next_i, err_type, ok_type := parse_type_text_from_forms(form.items[:], 1)
+    if !ok_type {
+        return "", mode, true, err_type, false
+    }
+    if next_i != len(form.items) {
+        return "", mode, true, Compile_Error{
+            message = fmt.tprintf("%s type expects exactly one type", form.items[0].text),
+            span = form.span,
+        }, false
+    }
+    return type_text, mode, true, {}, true
+}
+
 expect_kind :: proc(form: CST_Form, kind: CST_Form_Kind, message: string) -> (Compile_Error, bool) {
     if form.kind != kind {
         return Compile_Error{message = message, span = form.span}, false
@@ -787,13 +827,30 @@ parse_param_vector :: proc(form: CST_Form) -> (params: [dynamic]Param, err: Comp
             if i+1 >= len(form.items) {
                 return params, Compile_Error{message = "missing parameter type", span = target.span}, false
             }
-            type_text, parsed_next_i, err_type, ok_type := parse_type_text_from_forms(form.items[:], i+1)
-            if !ok_type {
-                return params, err_type, false
+            type_text := ""
+            ownership := Ownership_Mode.Borrowed
+            parsed_next_i := i + 2
+            qualified_type, qualified_ownership, qualified, err_qualified, ok_qualified :=
+                parse_ownership_qualified_type(form.items[i+1])
+            if !ok_qualified {
+                return params, err_qualified, false
+            }
+            if qualified {
+                type_text = qualified_type
+                ownership = qualified_ownership
+            } else {
+                err_type: Compile_Error
+                ok_type: bool
+                type_text, parsed_next_i, err_type, ok_type =
+                    parse_type_text_from_forms(form.items[:], i+1)
+                if !ok_type {
+                    return params, err_type, false
+                }
             }
             param = Param{
-                name = map_name(target.text[:len(target.text)-1]),
-                ty   = type_text,
+                name      = map_name(target.text[:len(target.text)-1]),
+                ty        = type_text,
+                ownership = ownership,
             }
             next_i = parsed_next_i
         case .Brace:
@@ -831,13 +888,30 @@ parse_named_returns :: proc(form: CST_Form) -> (fields: [dynamic]Named_Return, e
         if i+1 >= len(form.items) {
             return fields, Compile_Error{message = "missing named return type", span = name_form.span}, false
         }
-        type_text, next_i, err_type, ok_type := parse_type_text_from_forms(form.items[:], i+1)
-        if !ok_type {
-            return fields, err_type, false
+        type_text := ""
+        ownership := Ownership_Mode.Default
+        next_i := i + 2
+        qualified_type, qualified_ownership, qualified, err_qualified, ok_qualified :=
+            parse_ownership_qualified_type(form.items[i+1])
+        if !ok_qualified {
+            return fields, err_qualified, false
+        }
+        if qualified {
+            type_text = qualified_type
+            ownership = qualified_ownership
+        } else {
+            err_type: Compile_Error
+            ok_type: bool
+            type_text, next_i, err_type, ok_type =
+                parse_type_text_from_forms(form.items[:], i+1)
+            if !ok_type {
+                return fields, err_type, false
+            }
         }
         append(&fields, Named_Return{
-            name = map_name(name_form.text[:len(name_form.text)-1]),
-            ty   = type_text,
+            name      = map_name(name_form.text[:len(name_form.text)-1]),
+            ty        = type_text,
+            ownership = ownership,
         })
         i = next_i
     }
@@ -1110,9 +1184,24 @@ parse_proc_decl :: proc(form: CST_Form) -> (decl: Proc_Decl, err: Compile_Error,
         return_form := form.items[body_index+1]
         #partial switch return_form.kind {
         case .Symbol, .List, .Keyword:
-            return_text, next_index, err_return, ok_return := parse_type_text_from_forms(form.items[:], body_index+1)
-            if !ok_return {
-                return decl, err_return, false
+            qualified_type, qualified_ownership, qualified, err_qualified, ok_qualified :=
+                parse_ownership_qualified_type(return_form)
+            if !ok_qualified {
+                return decl, err_qualified, false
+            }
+            return_text := ""
+            next_index := body_index + 2
+            if qualified {
+                return_text = qualified_type
+                returns.single_ownership = qualified_ownership
+            } else {
+                err_return: Compile_Error
+                ok_return: bool
+                return_text, next_index, err_return, ok_return =
+                    parse_type_text_from_forms(form.items[:], body_index+1)
+                if !ok_return {
+                    return decl, err_return, false
+                }
             }
             returns.kind = .Single
             returns.single_ty = return_text
@@ -1150,8 +1239,20 @@ parse_proc_decl :: proc(form: CST_Form) -> (decl: Proc_Decl, err: Compile_Error,
         directive := form.items[body_index].text
         if is_kvist_proc_directive(directive) {
             if directive == "#owned" {
+                if returns.kind == .Single && returns.single_ownership == .Borrowed {
+                    return decl, Compile_Error{
+                        message = "#owned conflicts with a borrowed return type",
+                        span = form.items[body_index].span,
+                    }, false
+                }
                 owns_result = true
             } else if directive == "#borrowed" {
+                if returns.kind == .Single && returns.single_ownership == .Owned {
+                    return decl, Compile_Error{
+                        message = "#borrowed conflicts with an owned return type",
+                        span = form.items[body_index].span,
+                    }, false
+                }
                 borrows_result = true
             }
         } else if is_proc_prefix_directive(directive) {
@@ -1160,6 +1261,10 @@ parse_proc_decl :: proc(form: CST_Form) -> (decl: Proc_Decl, err: Compile_Error,
             append(&suffix_directives, directive)
         }
         body_index += 1
+    }
+    if returns.kind == .Single {
+        owns_result = owns_result || returns.single_ownership == .Owned
+        borrows_result = borrows_result || returns.single_ownership == .Borrowed
     }
     where_constraints: [dynamic]CST_Form
     for body_index < len(form.items) &&

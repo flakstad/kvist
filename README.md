@@ -214,8 +214,20 @@ Use `:defer-with` when a value needs a custom destructor:
   (render-items items))
 ```
 
-Use `:defer`, return the owned value, or pass it to an API that takes ownership.
-There is no hidden collector cleaning up behind the scenes. See
+Procedure contracts can state consumption and returned ownership directly:
+
+```clojure
+(defn consume [items: (owned [dynamic]Item)]
+  ...)
+
+(defn forward [value: (owned Data)] -> (owned Data)
+  value)
+```
+
+Plain parameters borrow. Owned parameters clean up deterministically unless
+their value is moved onward; ownership qualifiers erase to native Odin
+signatures. Ordinary unqualified native storage continues to use `:defer`,
+explicit return, or a consuming API. There is no tracing collector. See
 [docs/LANGUAGE.md](docs/LANGUAGE.md) for the ownership and allocator rules.
 
 For ordinary string construction, core `str` renders its arguments without
