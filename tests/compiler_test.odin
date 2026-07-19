@@ -4992,6 +4992,69 @@ compile_manages_data_returned_by_proc_value :: proc(t: ^testing.T) {
 }
 
 @(test)
+data_returning_overloads_follow_the_managed_calling_convention :: proc(t: ^testing.T) {
+    source := `(package main)
+(import data "kvist:data")
+
+(def config '{:port 8080})
+
+(defn from-int [value: int] -> Data
+  config)
+
+(defn from-string [value: string] -> Data
+  config)
+
+(def select (overload from-int from-string))
+
+(defn use [] -> bool
+  (let [value (select 42)]
+    (data.nil? value)))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "value := select(42)"), true)
+    testing.expect_value(t, strings.contains(output, "value := kvist_data_retain(select(42))"), false)
+    testing.expect_value(t, strings.contains(output, "defer if kvist_owner_"), true)
+}
+
+@(test)
+consuming_overload_parameters_transfer_managed_arguments :: proc(t: ^testing.T) {
+    source := `(package main)
+(import data "kvist:data")
+
+(defn consume-int [kind: int, value: Data] -> int
+  (data.release value)
+  kind)
+
+(defn consume-string [kind: string, value: Data] -> int
+  (data.release value)
+  (count kind))
+
+(def consume (overload consume-int consume-string))
+
+(defn use [] -> int
+  (consume 42 (data.from-string "temporary")))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "kvist_thread_"), true)
+    testing.expect_value(t, strings.contains(output, "return consume(42, kvist_thread_"), true)
+    testing.expect_value(t, strings.contains(output, "data__from_string(\"temporary\")\n    defer"), false)
+}
+
+@(test)
 compile_manages_data_in_named_returns :: proc(t: ^testing.T) {
     source := `(package main)
 

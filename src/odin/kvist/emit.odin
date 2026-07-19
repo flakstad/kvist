@@ -8689,6 +8689,19 @@ form_produces_owned_managed_value :: proc(e: ^Emitter, form: CST_Form, depth: in
         return proc_decl.returns.kind == .Single &&
                type_text_is_managed_value(e, proc_decl.returns.single_ty)
     }
+    overload_name := map_name(form.items[0].text)
+    defer delete(overload_name)
+    if overload_return_ty, ok_overload :=
+           overload_obvious_call_return_type(e, overload_name, form.items[1:]);
+       ok_overload {
+        defer delete(overload_return_ty)
+        if type_text_is_managed_value(e, overload_return_ty) {
+            // Every selected Kvist overload member follows the same Data
+            // calling convention as an ordinary procedure: one stable
+            // caller-owned reference.
+            return true
+        }
+    }
     return false
 }
 
@@ -10627,14 +10640,33 @@ call_arg_transfers_owned_result :: proc(e: ^Emitter, form: CST_Form, arg_index: 
     name := map_name(form.items[0].text)
     defer delete(name)
     proc_decl, ok := find_proc_decl(e, name)
-    if !ok {
+    if ok {
+        if arg_index-1 < len(proc_decl.params) &&
+           proc_decl.params[arg_index-1].ownership == .Owned {
+            return true
+        }
+        return proc_decl_transfers_param_in_result(proc_decl, arg_index-1)
+    }
+    overload_decl, ok_overload := find_overload_decl(e, name)
+    if !ok_overload {
         return false
     }
-    if arg_index-1 < len(proc_decl.params) &&
-       proc_decl.params[arg_index-1].ownership == .Owned {
-        return true
+    param_index := arg_index-1
+    applicable := 0
+    for member in overload_decl.overload_members {
+        member_decl, ok_member := find_proc_decl(e, member)
+        if !ok_member ||
+           !proc_accepts_positional_arg_count(member_decl, len(form.items)-1) ||
+           param_index >= len(member_decl.params) {
+            continue
+        }
+        applicable += 1
+        if member_decl.params[param_index].ownership != .Owned &&
+           !proc_decl_transfers_param_in_result(member_decl, param_index) {
+            return false
+        }
     }
-    return proc_decl_transfers_param_in_result(proc_decl, arg_index-1)
+    return applicable > 0
 }
 
 mark_transferred_owned_args :: proc(e: ^Emitter, form: CST_Form, live: ^[dynamic]Owned_Local) {
@@ -11108,6 +11140,11 @@ analyze_owned_scope_body :: proc(e: ^Emitter, forms: []CST_Form, can_transfer_fi
                     _ = owned_locals_mark_moved_last(live, map_name(item.text), .Definite)
                 }
             }
+        case "defer", "errdefer":
+            // The deferred call consumes its arguments when the surrounding
+            // scope exits, not where the defer is declared. Keep owned locals
+            // live for subsequent statements; the scope cleanup check below
+            // recognizes the scheduled release.
         case "set!":
             if len(form.items) == 3 && form.items[1].kind == .Symbol {
                 name := map_name(form.items[1].text)
