@@ -4115,6 +4115,38 @@ managed_data_struct_results_do_not_warn_for_automatic_cleanup :: proc(t: ^testin
 }
 
 @(test)
+managed_struct_results_move_through_ordinary_control_flow :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct Box {
+  value: Data
+})
+
+(defn make-box [value: Data] -> Box
+  (let [present true]
+    (if present
+      (Box {value: value})
+      (Box {value: nil}))))
+
+(defn use [value: Data]
+  (let [box (make-box value)]
+    (discard box)))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "box := make_box(value)"), true)
+    testing.expect_value(t, strings.contains(output, "box := kvist_managed_clone_Box(make_box(value))"), false)
+    testing.expect_value(t, strings.contains(output, "defer if kvist_owner_"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_managed_destroy_Box(box)"), true)
+}
+
+@(test)
 compile_rejects_copy_update_of_managed_struct_field :: proc(t: ^testing.T) {
     source := `(package main)
 

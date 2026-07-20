@@ -8705,7 +8705,13 @@ form_produces_owned_managed_value :: proc(e: ^Emitter, form: CST_Form, depth: in
     return false
 }
 
-form_produces_owned_managed_type :: proc(e: ^Emitter, form: CST_Form, ty: string, depth: int = 0) -> bool {
+form_produces_owned_managed_type :: proc(
+    e: ^Emitter,
+    form: CST_Form,
+    ty: string,
+    depth: int = 0,
+    owned_names: []string = nil,
+) -> bool {
     if type_text_is_managed_value(e, ty) {
         if form.kind == .Vector || form.kind == .Brace || form.kind == .Set {
             return true
@@ -8714,6 +8720,11 @@ form_produces_owned_managed_type :: proc(e: ^Emitter, form: CST_Form, ty: string
     }
     if depth > 8 || !type_text_has_owned_lifecycle(e, ty) {
         return false
+    }
+    if form.kind == .Symbol {
+        name := map_name(form.text)
+        defer delete(name)
+        return string_slice_contains_name(owned_names, name)
     }
     if form.kind != .List || len(form.items) == 0 || form.items[0].kind != .Symbol {
         return false
@@ -8729,6 +8740,59 @@ form_produces_owned_managed_type :: proc(e: ^Emitter, form: CST_Form, ty: string
         if result_ty, ok_result_ty := obvious_form_type(e, form); ok_result_ty && result_ty == ty {
             return true
         }
+    }
+    switch form.items[0].text {
+    case "return":
+        return len(form.items) == 2 &&
+               form_produces_owned_managed_type(e, form.items[1], ty, depth+1, owned_names)
+    case "do", "block":
+        return len(form.items) > 1 &&
+               form_produces_owned_managed_type(
+                   e,
+                   form.items[len(form.items)-1],
+                   ty,
+                   depth+1,
+                   owned_names,
+               )
+    case "if":
+        return len(form.items) == 4 &&
+               form_produces_owned_managed_type(e, form.items[2], ty, depth+1, owned_names) &&
+               form_produces_owned_managed_type(e, form.items[3], ty, depth+1, owned_names)
+    case "let":
+        if len(form.items) < 3 {
+            return false
+        }
+        bindings, _, ok_bind := parse_let_bindings(form.items[1])
+        if !ok_bind {
+            return false
+        }
+        scoped_names: [dynamic]string
+        append(&scoped_names, ..owned_names)
+        for binding in bindings {
+            if binding.is_destructure {
+                continue
+            }
+            binding_ty, ok_binding_ty := obvious_binding_type(e, binding)
+            if binding.name != "" &&
+               ok_binding_ty &&
+               binding_ty == ty &&
+               form_produces_owned_managed_type(
+                   e,
+                   binding.value,
+                   ty,
+                   depth+1,
+                   scoped_names[:],
+               ) {
+                append(&scoped_names, binding.name)
+            }
+        }
+        return form_produces_owned_managed_type(
+            e,
+            form.items[len(form.items)-1],
+            ty,
+            depth+1,
+            scoped_names[:],
+        )
     }
     if _, proc_decl, ok_proc := resolve_proc_call_decl(e, form.items[0].text);
        ok_proc && proc_decl != nil {
