@@ -112,6 +112,8 @@
         empty-parts (arr.dynamic string []) :defer
         joined-empty (str.join empty-parts ",") :defer
         replaced-once (str.replace "a-a-a" "-" "_" 1) :defer
+        replaced-missing (str.replace "abc" "z" "q") :defer
+        replaced-equal (str.replace "abc" "a" "a") :defer
         lowered (str.lower "MiXeD") :defer
         uppered (str.upper "MiXeD") :defer
         builder (str.builder)
@@ -126,6 +128,8 @@
     (t.is (= (count parts) 1))
     (t.is (= joined-empty ""))
     (t.is (= replaced-once "a_a-a"))
+    (t.is (= replaced-missing "abc"))
+    (t.is (= replaced-equal "abc"))
     (t.is (not (str.contains? "abc" "z")))
     (t.is (= (str.index-of "abc" "z") -1))
     (t.is (= (str.last-index-of "abc" "z") -1))

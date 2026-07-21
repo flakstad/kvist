@@ -77,13 +77,16 @@
 (defn- replace-impl
   "Implementation helper for `str.replace`.
 
-  `n` follows Odin `core:strings.replace`: `-1` replaces all occurrences,
-  positive values limit the number of replacements, and zero returns a string
-  according to Odin's replacement semantics. The returned string is owned by the
-  caller when Odin allocates one."
+  `n` follows Odin `core:strings.replace`: `-1` replaces all occurrences and
+  positive values limit the number of replacements. Odin returns the borrowed
+  input when no replacement occurs; Kvist clones that result so this function's
+  return value is always owned by the caller."
   [s: string, old: string, new: string, n: int] -> string #force_inline
-  (let [[out _] (strings.replace s old new n)]
-    out))
+  (let [[out allocated] (strings.replace s old new n)]
+    (if allocated
+      out
+      (let [[owned err] (strings.clone out)]
+        (if (!= err nil) "" owned)))))
 
 (defn count
   "Return the byte length of `s`.
