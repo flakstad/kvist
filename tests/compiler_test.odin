@@ -5173,6 +5173,34 @@ compile_normalizes_managed_data_expression_ownership :: proc(t: ^testing.T) {
 }
 
 @(test)
+compile_releases_data_conditional_used_as_borrowed_call_argument :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(import data "kvist:data")
+
+(defn count-data [value: Data] -> int
+  (data.count value))
+
+(defn selected-count [kind: string] -> int
+  (count-data
+    (cond
+      (= kind "text") {:kind :text :value "hello"}
+      (= kind "flag") {:kind :flag :value true}
+      :else {:kind :date :value "2026-07-22"})))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "defer kvist_data_release(kvist_thread_"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_data_retain((kvist_data_make_map"), false)
+}
+
+@(test)
 compile_normalizes_managed_data_type_case_ownership :: proc(t: ^testing.T) {
     source := `(package main)
 

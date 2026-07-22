@@ -3006,7 +3006,8 @@ emit_call_arg_for_expected_type :: proc(
         }
     }
     if type_text_is_managed_value(e, expected_type) &&
-       (arg.kind == .Vector || arg.kind == .Brace || arg.kind == .Set) {
+       ((arg.kind == .Vector || arg.kind == .Brace || arg.kind == .Set) ||
+        form_produces_owned_managed_type(e, arg, expected_type)) {
         temp := thread_temp_name(e)
         emit_prefixed_expr_mapped(e, fmt.tprintf("%s := ", temp), value, arg.span)
         if ownership != .Owned {
@@ -6653,7 +6654,7 @@ form_has_nested_owned_value :: proc(form: CST_Form, e: ^Emitter = nil) -> bool {
             } else if form.items[0].kind == .Symbol {
                 start = 1
                 switch form.items[0].text {
-                case "fn", "let", "if", "do", "for", "while", "type-case", "match",
+                case "fn", "let", "if", "when", "cond", "case", "do", "for", "while", "type-case", "match",
                      "with-allocator", "with-temp-allocator":
                     start = len(form.items)
                 }
@@ -6713,7 +6714,7 @@ emit_expr_with_owned_nested_temps :: proc(e: ^Emitter, form: CST_Form) -> (strin
             } else if rewritten.items[0].kind == .Symbol {
                 start = 1
                 switch rewritten.items[0].text {
-                case "fn", "let", "if", "do", "for", "while", "type-case", "match",
+                case "fn", "let", "if", "when", "cond", "case", "do", "for", "while", "type-case", "match",
                      "with-allocator", "with-temp-allocator":
                     start = len(rewritten.items)
                 }
@@ -8715,6 +8716,17 @@ form_produces_owned_managed_type :: proc(
     if type_text_is_managed_value(e, ty) {
         if form.kind == .Vector || form.kind == .Brace || form.kind == .Set {
             return true
+        }
+        if form.kind == .List && len(form.items) > 0 && form.items[0].kind == .Symbol {
+            switch form.items[0].text {
+            case "if", "when", "cond", "case":
+                // These surface forms lower to Data-normalized `if`
+                // expressions when their call/binding context expects Data.
+                // Treat the whole result as the one owned branch reference so
+                // a borrowed call argument is hoisted and released exactly
+                // once rather than retaining an untracked inline temporary.
+                return true
+            }
         }
         return form_produces_owned_managed_value(e, form, depth)
     }
