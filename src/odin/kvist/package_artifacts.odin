@@ -164,6 +164,14 @@ package_decls_interface_hash :: proc(decls: []IR_Decl) -> u64 {
 
 package_group_source_hash :: proc(group: IR_Package_Group) -> (hash: u64, ok: bool) {
     hash = 14695981039346656037
+    // A source package may be instantiated under more than one nested alias
+    // prefix in the same program. File contents alone do not identify that
+    // emitted declaration set: reusing an artifact created for `a__util`
+    // when the next graph needs both `a__util` and `b__util` silently drops
+    // declarations. Include the resolved interface (and therefore qualified
+    // declaration identities) in the cache key.
+    interface_hash := package_decls_interface_hash(group.decls[:])
+    hash = package_artifact_hash_text(hash, fmt.tprintf("%016x", interface_hash))
     paths: [dynamic]string
     defer delete(paths)
     for decl in group.decls {

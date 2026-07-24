@@ -29328,3 +29328,42 @@ foreign_call_keeps_contextual_native_array_literal_inline :: proc(t: ^testing.T)
     testing.expect_value(t, strings.contains(output, "rl.DrawRectangleRounded(panel, 0.08, 8, rl.Color{0, 0, 0, 195})"), true)
     testing.expect_value(t, strings.contains(output, "kvist_thread_"), false)
 }
+
+@(test)
+package_artifact_source_hash_includes_resolved_declaration_identity :: proc(t: ^testing.T) {
+    path, ok_path := repo_temp_test_path(".tmp-package-artifact-hash.kvist")
+    testing.expect_value(t, ok_path, true)
+    if !ok_path do return
+    defer {
+        _ = os.remove(path)
+        delete(path)
+    }
+    testing.expect_value(
+        t,
+        os.write_entire_file_from_string(path, "(package helper)\n(defn value [] -> int 1)\n") == nil,
+        true,
+    )
+    first := kvist.IR_Package_Group{decls = make([dynamic]kvist.IR_Decl)}
+    second := kvist.IR_Package_Group{decls = make([dynamic]kvist.IR_Decl)}
+    a_decl := kvist.IR_Decl{
+        kind = .Proc,
+        source_path = path,
+        proc_decl = kvist.Proc_Decl{name = "a__helper__value"},
+    }
+    append(&first.decls, a_decl)
+    append(&second.decls, a_decl)
+    append(&second.decls, kvist.IR_Decl{
+        kind = .Proc,
+        source_path = path,
+        proc_decl = kvist.Proc_Decl{name = "b__helper__value"},
+    })
+    defer {
+        delete(first.decls)
+        delete(second.decls)
+    }
+    first_hash, first_ok := kvist.package_group_source_hash(first)
+    second_hash, second_ok := kvist.package_group_source_hash(second)
+    testing.expect_value(t, first_ok, true)
+    testing.expect_value(t, second_ok, true)
+    testing.expect_value(t, first_hash != second_hash, true)
+}
