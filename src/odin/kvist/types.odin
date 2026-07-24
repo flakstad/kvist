@@ -259,6 +259,7 @@ Source_Map_Entry :: struct {
     generated_start_column: int,
     generated_end_column:   int,
     source_span:            Span,
+    source_path:            string,
 }
 
 Emit_Result :: struct {
@@ -267,9 +268,39 @@ Emit_Result :: struct {
     warnings:   [dynamic]Compile_Warning,
 }
 
+Generated_Package_Artifact :: struct {
+    id:          string,
+    source_root: string,
+    output:      string,
+    source_map:  [dynamic]Source_Map_Entry,
+    warnings:    [dynamic]Compile_Warning,
+    dependencies: [dynamic]string,
+}
+
+Package_Emit_Result :: struct {
+    root:             Emit_Result,
+    artifacts:        [dynamic]Generated_Package_Artifact,
+    packages_reused:  int,
+    packages_emitted: int,
+}
+
+Compile_Profile :: struct {
+    load_and_resolve_ns:       i64,
+    macro_expansion_ns:        i64,
+    post_expand_resolution_ns: i64,
+    ast_parse_ns:              i64,
+    lowering_ns:               i64,
+    analysis_ns:               i64,
+    emission_ns:               i64,
+    source_map_ns:             i64,
+    analysis_and_emission_ns:  i64, // Legacy eval emitter bucket.
+}
+
 Compile_Error :: struct {
-    message: string,
-    span:    Span,
+    message:     string,
+    span:        Span,
+    source_path: string,
+    source_file: string,
 }
 
 Compile_Warning_Code :: enum {

@@ -39,6 +39,19 @@ assert_file_nonempty "$tmp_dir/hello.odin" "compile output"
 assert_file_nonempty "$tmp_dir/hello.map" "compile source map"
 odin check "$tmp_dir/hello.odin" -file
 
+./kvist compile examples/collections/higher-order.kvist \
+  -o "$tmp_dir/split.odin" \
+  --map "$tmp_dir/split.map" \
+  --packages
+assert_file_nonempty "$tmp_dir/split.odin" "split compile root output"
+assert_file_nonempty "$tmp_dir/split.map" "split compile root source map"
+if [ "$(find "$tmp_dir/split.odin.packages" -type f -name 'package.odin' | wc -l | tr -d ' ')" -lt 2 ] ||
+   [ "$(find "$tmp_dir/split.map.packages" -type f -name '*.map' | wc -l | tr -d ' ')" -lt 2 ]; then
+    printf 'failed: split compile did not emit package Odin and source-map artifacts\n' >&2
+    exit 1
+fi
+odin check "$tmp_dir/split.odin" -file
+
 printf 'tooling: symbols command\n'
 ./kvist symbols examples/collections/sequences.kvist > "$tmp_dir/symbols.tsv"
 if ! grep -q "$(printf 'proc\tactive-count')" "$tmp_dir/symbols.tsv"; then
@@ -116,6 +129,57 @@ printf 'tooling: check command\n'
 ./kvist check examples/language/hello.kvist --generated "$tmp_dir/check.odin"
 assert_file_nonempty "$tmp_dir/check.odin" "check generated output"
 
+printf 'tooling: frontend check command\n'
+frontend_cache_dir="$tmp_dir/frontend-cache"
+KVIST_CACHE_DIR="$frontend_cache_dir" ./kvist frontend-check examples/language/hello.kvist \
+  --timings-json "$tmp_dir/frontend-cold-timings.json"
+KVIST_CACHE_DIR="$frontend_cache_dir" ./kvist frontend-check examples/language/hello.kvist \
+  --timings-json "$tmp_dir/frontend-warm-timings.json"
+if ! grep -q '"command":"frontend-check"' "$tmp_dir/frontend-cold-timings.json" ||
+   ! grep -q '"cache_status":"miss"' "$tmp_dir/frontend-cold-timings.json" ||
+   ! grep -q '"process_ms":0.0000000000000000' "$tmp_dir/frontend-cold-timings.json" ||
+   ! grep -q '"cache_status":"hit"' "$tmp_dir/frontend-warm-timings.json" ||
+   grep -q '"frontend":' "$tmp_dir/frontend-warm-timings.json"; then
+    printf 'failed: frontend-check did not use the frontend cache without Odin\n' >&2
+    cat "$tmp_dir/frontend-cold-timings.json" >&2
+    cat "$tmp_dir/frontend-warm-timings.json" >&2
+    exit 1
+fi
+
+printf 'tooling: phase timings\n'
+./kvist compile examples/language/hello.kvist \
+  -o "$tmp_dir/timed.odin" \
+  --timings \
+  --timings-json "$tmp_dir/compile-timings.json" \
+  >"$tmp_dir/timed-compile.out" \
+  2>"$tmp_dir/timed-compile.err"
+assert_file_nonempty "$tmp_dir/compile-timings.json" "compile timing JSON"
+if [ -s "$tmp_dir/timed-compile.out" ]; then
+    printf 'failed: timed compile polluted stdout\n' >&2
+    cat "$tmp_dir/timed-compile.out" >&2
+    exit 1
+fi
+if ! grep -q 'Kvist timings (compile, success)' "$tmp_dir/timed-compile.err" ||
+   ! grep -q '"schema_version":1' "$tmp_dir/compile-timings.json" ||
+   ! grep -q '"name":"macro_expansion"' "$tmp_dir/compile-timings.json"; then
+    printf 'failed: compile timing report was incomplete\n' >&2
+    cat "$tmp_dir/timed-compile.err" >&2
+    cat "$tmp_dir/compile-timings.json" >&2
+    exit 1
+fi
+
+./kvist run examples/language/hello.kvist \
+  --timings-json "$tmp_dir/run-timings.json" \
+  >"$tmp_dir/timed-run.out" \
+  2>"$tmp_dir/timed-run.err"
+assert_eq "hello from kvist" "$(cat "$tmp_dir/timed-run.out")" "timed run stdout"
+if ! grep -q '"detail_available":true' "$tmp_dir/run-timings.json" ||
+   ! grep -q '"execution_ms":' "$tmp_dir/run-timings.json"; then
+    printf 'failed: run timing report lacked Odin or execution detail\n' >&2
+    cat "$tmp_dir/run-timings.json" >&2
+    exit 1
+fi
+
 printf 'tooling: content-addressed compile cache\n'
 compile_cache_dir="$tmp_dir/compile-cache"
 mkdir -p "$tmp_dir/cache-package/support"
@@ -129,19 +193,152 @@ cat > "$tmp_dir/cache-package/main.kvist" <<'EOF'
 (defn main []
   (println support.answer))
 EOF
-KVIST_CACHE_DIR="$compile_cache_dir" ./kvist check "$tmp_dir/cache-package/main.kvist"
-first_cache_count=$(find "$compile_cache_dir/compile" -type f -name '*.odin' | wc -l | tr -d ' ')
+KVIST_CACHE_DIR="$compile_cache_dir" ./kvist check "$tmp_dir/cache-package/main.kvist" \
+  --timings-json "$tmp_dir/cache-cold-timings.json"
+first_cache_count=$(find "$compile_cache_dir/compile-packages" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')
 assert_eq "1" "$first_cache_count" "initial compile cache entry count"
-KVIST_CACHE_DIR="$compile_cache_dir" ./kvist check "$tmp_dir/cache-package/main.kvist"
-warm_cache_count=$(find "$compile_cache_dir/compile" -type f -name '*.odin' | wc -l | tr -d ' ')
+KVIST_CACHE_DIR="$compile_cache_dir" ./kvist check "$tmp_dir/cache-package/main.kvist" \
+  --timings-json "$tmp_dir/cache-warm-timings.json"
+warm_cache_count=$(find "$compile_cache_dir/compile-packages" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')
 assert_eq "1" "$warm_cache_count" "warm compile cache entry count"
+if ! grep -q '"fingerprint_cache_status":"miss"' "$tmp_dir/cache-cold-timings.json" ||
+   ! grep -q '"fingerprint_files_hashed":' "$tmp_dir/cache-cold-timings.json" ||
+   ! grep -q '"fingerprint_cache_status":"hit"' "$tmp_dir/cache-warm-timings.json" ||
+   ! grep -q '"fingerprint_files_hashed":0' "$tmp_dir/cache-warm-timings.json" ||
+   ! grep -q '"dependency_discovery_ms":0.0000000000000000' "$tmp_dir/cache-warm-timings.json"; then
+    printf 'failed: dependency fingerprint cache did not reuse the unchanged graph\n' >&2
+    cat "$tmp_dir/cache-cold-timings.json" >&2
+    cat "$tmp_dir/cache-warm-timings.json" >&2
+    exit 1
+fi
+KVIST_CACHE_DIR="$compile_cache_dir" ./kvist check "$tmp_dir/cache-package/main.kvist" \
+  --timings-json "$tmp_dir/cache-hit-timings.json"
+if ! grep -q '"cache_status":"hit"' "$tmp_dir/cache-hit-timings.json" ||
+   grep -q '"frontend":' "$tmp_dir/cache-hit-timings.json"; then
+    printf 'failed: cache-hit timing report was incorrect\n' >&2
+    cat "$tmp_dir/cache-hit-timings.json" >&2
+    exit 1
+fi
+cat > "$tmp_dir/cache-package/main.kvist" <<'EOF'
+(package main)
+(import support "support")
+(defn main []
+  (println (+ support.answer 0)))
+EOF
+KVIST_CACHE_DIR="$compile_cache_dir" ./kvist check "$tmp_dir/cache-package/main.kvist" \
+  --timings-json "$tmp_dir/cache-root-changed-timings.json"
+if ! grep -q '"cache_status":"miss"' "$tmp_dir/cache-root-changed-timings.json" ||
+   ! grep -Eq '"packages_reused":[1-9]' "$tmp_dir/cache-root-changed-timings.json" ||
+   ! grep -Eq '"packages_emitted":[1-9]' "$tmp_dir/cache-root-changed-timings.json"; then
+    printf 'failed: root-only edit did not reuse imported package frontend artifacts\n' >&2
+    cat "$tmp_dir/cache-root-changed-timings.json" >&2
+    exit 1
+fi
 cat > "$tmp_dir/cache-package/support/support.kvist" <<'EOF'
 (package support)
 (def answer 42)
 EOF
-KVIST_CACHE_DIR="$compile_cache_dir" ./kvist check "$tmp_dir/cache-package/main.kvist"
-changed_cache_count=$(find "$compile_cache_dir/compile" -type f -name '*.odin' | wc -l | tr -d ' ')
-assert_eq "2" "$changed_cache_count" "dependency-invalidated compile cache entry count"
+KVIST_CACHE_DIR="$compile_cache_dir" ./kvist check "$tmp_dir/cache-package/main.kvist" \
+  --timings-json "$tmp_dir/cache-file-changed-timings.json"
+changed_cache_count=$(find "$compile_cache_dir/compile-packages" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')
+assert_eq "3" "$changed_cache_count" "dependency-invalidated compile cache entry count"
+if ! grep -q '"fingerprint_cache_status":"miss"' "$tmp_dir/cache-file-changed-timings.json" ||
+   ! grep -q '"fingerprint_files_hashed":1' "$tmp_dir/cache-file-changed-timings.json" ||
+   grep -q '"fingerprint_files_reused":0' "$tmp_dir/cache-file-changed-timings.json"; then
+    printf 'failed: changed dependency did not selectively rebuild the fingerprint manifest\n' >&2
+    cat "$tmp_dir/cache-file-changed-timings.json" >&2
+    exit 1
+fi
+cat > "$tmp_dir/cache-package/support/extra.kvist" <<'EOF'
+(package support)
+(def extra 1)
+EOF
+KVIST_CACHE_DIR="$compile_cache_dir" ./kvist check "$tmp_dir/cache-package/main.kvist" \
+  --timings-json "$tmp_dir/cache-directory-changed-timings.json"
+directory_changed_cache_count=$(find "$compile_cache_dir/compile-packages" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')
+assert_eq "4" "$directory_changed_cache_count" "dependency-directory-invalidated compile cache entry count"
+if ! grep -q '"fingerprint_cache_status":"miss"' "$tmp_dir/cache-directory-changed-timings.json" ||
+   ! grep -q '"fingerprint_files_hashed":1' "$tmp_dir/cache-directory-changed-timings.json" ||
+   grep -q '"fingerprint_files_reused":0' "$tmp_dir/cache-directory-changed-timings.json"; then
+    printf 'failed: added package file did not selectively rebuild the fingerprint manifest\n' >&2
+    cat "$tmp_dir/cache-directory-changed-timings.json" >&2
+    exit 1
+fi
+
+printf 'tooling: dependency-specific package invalidation\n'
+dependency_cache_dir="$tmp_dir/dependency-cache"
+mkdir -p \
+  "$tmp_dir/dependency-package/a" \
+  "$tmp_dir/dependency-package/b" \
+  "$tmp_dir/dependency-package/c"
+cat > "$tmp_dir/dependency-package/main.kvist" <<'EOF'
+(package main)
+(import a "a")
+(import b "b")
+(defn main []
+  (println a.answer b.answer))
+EOF
+cat > "$tmp_dir/dependency-package/a/a.kvist" <<'EOF'
+(package a)
+(import c "../c")
+(def answer c.answer)
+EOF
+cat > "$tmp_dir/dependency-package/b/b.kvist" <<'EOF'
+(package b)
+(def answer 7)
+EOF
+cat > "$tmp_dir/dependency-package/c/c.kvist" <<'EOF'
+(package c)
+(def answer 41)
+EOF
+KVIST_CACHE_DIR="$dependency_cache_dir" \
+  ./kvist check "$tmp_dir/dependency-package/main.kvist"
+cat > "$tmp_dir/dependency-package/c/c.kvist" <<'EOF'
+(package c)
+(def answer 42)
+EOF
+KVIST_CACHE_DIR="$dependency_cache_dir" \
+  ./kvist check "$tmp_dir/dependency-package/main.kvist" \
+  --timings-json "$tmp_dir/dependency-interface-change.json"
+if ! grep -q '"packages_reused":2' "$tmp_dir/dependency-interface-change.json" ||
+   ! grep -q '"packages_emitted":3' "$tmp_dir/dependency-interface-change.json"; then
+    printf 'failed: dependency interface change did not preserve unrelated package artifacts\n' >&2
+    cat "$tmp_dir/dependency-interface-change.json" >&2
+    exit 1
+fi
+
+prune_cache_dir="$tmp_dir/prune-cache"
+mkdir -p "$prune_cache_dir/compile-packages"
+touch "$prune_cache_dir/compile-packages/legacy-graph.json"
+for entry in $(seq 1 65); do
+    mkdir "$prune_cache_dir/compile-packages/stale-$entry"
+done
+KVIST_CACHE_DIR="$prune_cache_dir" ./kvist check examples/language/hello.kvist
+pruned_graph_count=$(find "$prune_cache_dir/compile-packages" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')
+assert_eq "64" "$pruned_graph_count" "bounded package graph cache entry count"
+
+secondary_cache_dir="$tmp_dir/secondary-prune-cache"
+KVIST_CACHE_DIR="$secondary_cache_dir" ./kvist check "$tmp_dir/cache-package/main.kvist"
+frontend_active_dir=$(find "$secondary_cache_dir/package-frontend" -mindepth 1 -maxdepth 1 -type d | head -n 1)
+for entry in $(seq 1 513); do
+    touch "$frontend_active_dir/stale-$entry.json"
+done
+cat >> "$tmp_dir/cache-package/main.kvist" <<'EOF'
+;; force a graph-cache miss so frontend pruning runs
+EOF
+KVIST_CACHE_DIR="$secondary_cache_dir" ./kvist check "$tmp_dir/cache-package/main.kvist"
+frontend_entry_count=$(find "$frontend_active_dir" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')
+assert_eq "512" "$frontend_entry_count" "bounded package frontend cache entry count"
+
+for entry in $(seq 1 257); do
+    touch "$secondary_cache_dir/fingerprints/stale-$entry.json"
+done
+cat >> "$tmp_dir/cache-package/main.kvist" <<'EOF'
+;; force fingerprint publication and pruning
+EOF
+KVIST_CACHE_DIR="$secondary_cache_dir" ./kvist check "$tmp_dir/cache-package/main.kvist"
+fingerprint_entry_count=$(find "$secondary_cache_dir/fingerprints" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')
+assert_eq "256" "$fingerprint_entry_count" "bounded fingerprint cache entry count"
 
 printf 'tooling: check standalone file beside raw Odin programs\n'
 ./kvist check benchmarks/aggregate_helpers.kvist
@@ -159,11 +356,59 @@ if ./kvist check "$tmp_dir/bad.kvist" >"$tmp_dir/bad-check.out" 2>"$tmp_dir/bad-
     printf 'failed: bad check unexpectedly succeeded\n' >&2
     exit 1
 fi
+if ./kvist check "$tmp_dir/bad.kvist" \
+     --timings-json "$tmp_dir/bad-timings.json" \
+     >"$tmp_dir/bad-timed-check.out" \
+     2>"$tmp_dir/bad-timed-check.err"; then
+    printf 'failed: timed bad check unexpectedly succeeded\n' >&2
+    exit 1
+fi
+if ! grep -q '"success":false' "$tmp_dir/bad-timings.json" ||
+   ! grep -q '"process_ms":' "$tmp_dir/bad-timings.json"; then
+    printf 'failed: failed check did not publish timing JSON\n' >&2
+    cat "$tmp_dir/bad-timings.json" >&2
+    exit 1
+fi
 if ! grep -q "$tmp_dir/bad.kvist:5:16 Error: Cannot convert" "$tmp_dir/bad-check.err"; then
     printf 'failed: bad check diagnostic did not map back to .kvist\n' >&2
     cat "$tmp_dir/bad-check.err" >&2
     exit 1
 fi
+
+mkdir -p "$tmp_dir/bad-import/middle" "$tmp_dir/bad-import/support"
+cat > "$tmp_dir/bad-import/main.kvist" <<'EOF'
+(package main)
+(import middle "middle")
+(defn main []
+  (println middle.answer))
+EOF
+cat > "$tmp_dir/bad-import/middle/middle.kvist" <<'EOF'
+(package middle)
+(import support "../support")
+(def answer support.answer)
+EOF
+cat > "$tmp_dir/bad-import/support/support.kvist" <<'EOF'
+(package support)
+(def answer: int "bad")
+EOF
+import_diagnostic_cache="$tmp_dir/import-diagnostic-cache"
+for pass in cold warm
+do
+    if KVIST_CACHE_DIR="$import_diagnostic_cache" \
+         ./kvist check "$tmp_dir/bad-import/main.kvist" \
+         >"$tmp_dir/bad-import-$pass.out" \
+         2>"$tmp_dir/bad-import-$pass.err"; then
+        printf 'failed: bad transitive import unexpectedly succeeded on %s pass\n' "$pass" >&2
+        exit 1
+    fi
+    if ! grep -q "$tmp_dir/bad-import/support/support.kvist:2:.*Error: Cannot convert" \
+         "$tmp_dir/bad-import-$pass.err"; then
+        printf 'failed: %s transitive import diagnostic did not map to its Kvist source\n' "$pass" >&2
+        cat "$tmp_dir/bad-import-$pass.err" >&2
+        exit 1
+    fi
+done
+
 cat > "$tmp_dir/bad-statements.kvist" <<'EOF'
 (package main)
 

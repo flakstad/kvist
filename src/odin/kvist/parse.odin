@@ -1762,6 +1762,8 @@ parse_decls :: proc(forms: []CST_Top_Form) -> (decls: [dynamic]AST_Decl, err: Co
     for form in forms {
         decl, err_decl, ok_decl := parse_decl(form)
         if !ok_decl {
+            err_decl.source_path = form.source_path
+            err_decl.source_file = form.source_file
             return decls, err_decl, false
         }
         decl.source_path = form.source_path

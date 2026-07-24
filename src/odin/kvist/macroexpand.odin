@@ -2920,7 +2920,7 @@ macroexpand_source :: proc(source: string, anchor_path: string = ".") -> (output
     if !ok_result {
         return "", err_result, false
     }
-    defer delete(result.source_map)
+    defer source_map_slice_delete(result.source_map)
     return result.output, {}, true
 }
 
@@ -3032,6 +3032,8 @@ macroexpand_top_forms :: proc(forms: []CST_Top_Form, include_core_macros: bool =
         if is_defmacro_form(top.form) {
             macro_decl, err_macro, ok_macro := parse_user_macro_decl(top)
             if !ok_macro {
+                err_macro.source_path = top.source_path
+                err_macro.source_file = top.source_file
                 return expanded, macros, err_macro, false
             }
             append(&macros, macro_decl)
@@ -3043,6 +3045,8 @@ macroexpand_top_forms :: proc(forms: []CST_Top_Form, include_core_macros: bool =
         }
         expanded_forms, err_expand, ok_expand := macroexpand_top_level_form_with_macros(top.form, macros[:])
         if !ok_expand {
+            err_expand.source_path = top.source_path
+            err_expand.source_file = top.source_file
             return expanded, macros, err_expand, false
         }
         for i in 0 ..< len(expanded_forms) {
@@ -3057,6 +3061,8 @@ macroexpand_top_forms :: proc(forms: []CST_Top_Form, include_core_macros: bool =
                 })
                 if !ok_macro {
                     delete_cst_form_slice(&expanded_forms)
+                    err_macro.source_path = top.source_path
+                    err_macro.source_file = top.source_file
                     return expanded, macros, err_macro, false
                 }
                 append(&macros, macro_decl)

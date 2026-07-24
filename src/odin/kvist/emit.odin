@@ -6,6 +6,7 @@ package kvist
 import "core:fmt"
 import "core:os"
 import "core:strings"
+import "core:time"
 
 Thread_Start_Spec :: struct {
     worker:        string,
@@ -110,6 +111,54 @@ Data_Literal :: struct {
     value: string,
 }
 
+Emitter_Import_Cache :: struct {
+    proc_param_types: map[string][dynamic]string,
+    proc_params_known: map[string]bool,
+    type_fields: map[string][dynamic]Struct_Field,
+    type_fields_known: map[string]bool,
+    enum_exists: map[string]bool,
+    enum_known: map[string]bool,
+}
+
+emitter_import_cache_init :: proc(cache: ^Emitter_Import_Cache) {
+    if cache.proc_param_types == nil {
+        cache.proc_param_types = make(map[string][dynamic]string)
+    }
+    if cache.proc_params_known == nil {
+        cache.proc_params_known = make(map[string]bool)
+    }
+    if cache.type_fields == nil {
+        cache.type_fields = make(map[string][dynamic]Struct_Field)
+    }
+    if cache.type_fields_known == nil {
+        cache.type_fields_known = make(map[string]bool)
+    }
+    if cache.enum_exists == nil {
+        cache.enum_exists = make(map[string]bool)
+    }
+    if cache.enum_known == nil {
+        cache.enum_known = make(map[string]bool)
+    }
+}
+
+emitter_import_cache_delete :: proc(cache: ^Emitter_Import_Cache) {
+    for _, param_types in cache.proc_param_types {
+        owned := param_types
+        delete_string_slice(&owned)
+    }
+    for _, fields in cache.type_fields {
+        owned := fields
+        delete_struct_field_slice(&owned)
+    }
+    delete(cache.proc_param_types)
+    delete(cache.proc_params_known)
+    delete(cache.type_fields)
+    delete(cache.type_fields_known)
+    delete(cache.enum_exists)
+    delete(cache.enum_known)
+    cache^ = {}
+}
+
 Emitter :: struct {
     builder:                   strings.Builder,
     indent:                    int,
@@ -140,6 +189,178 @@ Emitter :: struct {
     current_proc_returns: Return_Spec,
     current_source_path: string,
     current_source_file: string,
+    indexes_ready: bool,
+    proc_indices: map[string]int,
+    overload_indices: map[string]int,
+    const_indices: map[string]int,
+    transform_indices: map[string]int,
+    source_indices: map[string]int,
+    enum_indices: map[string]int,
+    struct_indices: map[string]int,
+    union_indices: map[string]int,
+    decl_indices: map[string]int,
+    kvist_import_packages: map[string]string,
+    odin_import_aliases: map[string]bool,
+    odin_import_paths: map[string]string,
+    odin_import_cache_keys: map[string]string,
+    import_cache: ^Emitter_Import_Cache,
+}
+
+ensure_emitter_indexes :: proc(e: ^Emitter) {
+    if e.indexes_ready {
+        return
+    }
+    e.indexes_ready = true
+    e.proc_indices = make(map[string]int, context.temp_allocator)
+    e.overload_indices = make(map[string]int, context.temp_allocator)
+    e.const_indices = make(map[string]int, context.temp_allocator)
+    e.transform_indices = make(map[string]int, context.temp_allocator)
+    e.source_indices = make(map[string]int, context.temp_allocator)
+    e.enum_indices = make(map[string]int, context.temp_allocator)
+    e.struct_indices = make(map[string]int, context.temp_allocator)
+    e.union_indices = make(map[string]int, context.temp_allocator)
+    e.decl_indices = make(map[string]int, context.temp_allocator)
+    e.kvist_import_packages = make(map[string]string, context.temp_allocator)
+    e.odin_import_aliases = make(map[string]bool, context.temp_allocator)
+    e.odin_import_paths = make(map[string]string, context.temp_allocator)
+    e.odin_import_cache_keys = make(map[string]string, context.temp_allocator)
+    for &decl, idx in e.decls {
+        name := decl_name(decl)
+        if name != "" {
+            if _, found := e.decl_indices[name]; !found {
+                e.decl_indices[name] = idx
+            }
+        }
+        #partial switch decl.kind {
+        case .Proc:
+            if _, found := e.proc_indices[decl.proc_decl.name]; !found {
+                e.proc_indices[decl.proc_decl.name] = idx
+            }
+        case .Const:
+            if _, found := e.const_indices[decl.const_decl.name]; !found {
+                e.const_indices[decl.const_decl.name] = idx
+            }
+            if decl.const_decl.is_overload {
+                if _, found := e.overload_indices[decl.const_decl.name]; !found {
+                    e.overload_indices[decl.const_decl.name] = idx
+                }
+            }
+        case .Transform:
+            if _, found := e.transform_indices[decl.transform_decl.name]; !found {
+                e.transform_indices[decl.transform_decl.name] = idx
+            }
+        case .Source:
+            if _, found := e.source_indices[decl.source_decl.name]; !found {
+                e.source_indices[decl.source_decl.name] = idx
+            }
+        case .Enum:
+            if _, found := e.enum_indices[decl.enum_decl.name]; !found {
+                e.enum_indices[decl.enum_decl.name] = idx
+            }
+        case .Import:
+            if alias, pkg, ok := kvist_import_alias_for_decl(decl); ok {
+                if _, found := e.kvist_import_packages[alias]; !found {
+                    e.kvist_import_packages[alias] = pkg
+                }
+            } else {
+                alias := decl.import_decl.alias
+                if !decl.import_decl.has_alias {
+                    alias = import_default_alias(unquote_string(decl.import_decl.path))
+                }
+                if alias != "" {
+                    e.odin_import_aliases[alias] = true
+                    if _, found := e.odin_import_paths[alias]; !found {
+                        raw := decl.import_decl.path
+                        if len(raw) >= 2 && raw[0] == '"' && raw[len(raw)-1] == '"' {
+                            raw = unquote_string(raw)
+                        }
+                        e.odin_import_paths[alias] = raw
+                    }
+                }
+            }
+        }
+    }
+    for _, idx in e.structs {
+        if _, found := e.struct_indices[e.structs[idx].name]; !found {
+            e.struct_indices[e.structs[idx].name] = idx
+        }
+    }
+    for _, idx in e.unions {
+        if _, found := e.union_indices[e.unions[idx].name]; !found {
+            e.union_indices[e.unions[idx].name] = idx
+        }
+    }
+}
+
+emitter_import_cache_key :: proc(
+    e: ^Emitter,
+    reference, raw, alias, member: string,
+) -> string {
+    if key, found := e.odin_import_cache_keys[reference]; found {
+        return key
+    }
+    key := fmt.tprintf("%s\x1f%s\x1f%s", raw, alias, member)
+    e.odin_import_cache_keys[reference] = key
+    return key
+}
+
+merge_emitter_features :: proc(target: ^Emitter_Features, source: Emitter_Features) {
+    target.keyword_type = target.keyword_type || source.keyword_type
+    target.data_type = target.data_type || source.data_type
+    target.data_decode = target.data_decode || source.data_decode
+    target.dynamic_literals = target.dynamic_literals || source.dynamic_literals
+    target.core_get_or_default = target.core_get_or_default || source.core_get_or_default
+    target.core_contains_value = target.core_contains_value || source.core_contains_value
+    target.core_strings = target.core_strings || source.core_strings
+    target.core_fmt = target.core_fmt || source.core_fmt
+    target.runtime_defs = target.runtime_defs || source.runtime_defs
+    for spec in source.thread_starts {
+        append_unique_thread_start(&target.thread_starts, spec)
+    }
+    for spec in source.thread_detaches {
+        append_unique_thread_detach(&target.thread_detaches, spec)
+    }
+    for literal in source.data_literals {
+        found := false
+        for existing in target.data_literals {
+            if existing.name == literal.name {
+                found = true
+                break
+            }
+        }
+        if !found {
+            append(&target.data_literals, literal)
+        }
+    }
+}
+
+prepare_ir_decls_for_emission :: proc(
+    decls: []IR_Decl,
+    profile: ^Compile_Profile = nil,
+) -> (Compile_Error, bool) {
+    analysis_start: time.Tick
+    if profile != nil {
+        analysis_start = time.tick_now()
+    }
+    defer if profile != nil {
+        profile.analysis_ns += profile_elapsed_ns(analysis_start)
+    }
+    features := Emitter_Features{}
+    e := Emitter{
+        decls = decls,
+        features = &features,
+    }
+    for decl in decls {
+        if decl.kind == .Struct {
+            append(&e.structs, decl.struct_decl)
+        }
+        if decl.kind == .Union {
+            append(&e.unions, decl.union_decl)
+        }
+    }
+    infer_decoded_struct_lifetimes(&e)
+    infer_proc_lifetime_facts(&e)
+    return classify_def_initializers(&e)
 }
 
 kvist_package_name_for_import_path :: proc(path: string) -> (string, bool) {
@@ -222,6 +443,7 @@ kvist_package_imported :: proc(e: ^Emitter, pkg: string) -> bool {
 }
 
 resolve_kvist_head :: proc(e: ^Emitter, head: string) -> (canonical: string, matched_builtin: bool, err: Compile_Error, ok: bool) {
+    ensure_emitter_indexes(e)
     slash := strings.index(head, "/")
     dot := strings.index(head, ".")
     sep := -1
@@ -240,29 +462,18 @@ resolve_kvist_head :: proc(e: ^Emitter, head: string) -> (canonical: string, mat
         if alias == "kvist" {
             return "", false, Compile_Error{message = fmt.tprintf("use `%s.%s` for package access", alias, suffix)}, false
         }
-        for decl in e.decls {
-            import_alias, _, ok_import := kvist_import_alias_for_decl(decl)
-            if ok_import && import_alias == alias {
-                return "", false, Compile_Error{message = fmt.tprintf("use `%s.%s` for package access", alias, suffix)}, false
-            }
+        if _, found := e.kvist_import_packages[alias]; found {
+            return "", false, Compile_Error{message = fmt.tprintf("use `%s.%s` for package access", alias, suffix)}, false
         }
     }
     if alias == "kvist" {
         return suffix, true, Compile_Error{}, true
     }
-    for decl in e.decls {
-        import_alias, pkg, ok_import := kvist_import_alias_for_decl(decl)
-        if !ok_import {
-            continue
-        }
-        if import_alias == alias {
-            return fmt.tprintf("%s/%s", pkg, suffix), true, Compile_Error{}, true
-        }
+    if pkg, found := e.kvist_import_packages[alias]; found {
+        return fmt.tprintf("%s/%s", pkg, suffix), true, Compile_Error{}, true
     }
-    for decl in e.decls {
-        if import_decl_alias_matches(decl, alias) {
-            return head, false, Compile_Error{}, true
-        }
+    if e.odin_import_aliases[alias] {
+        return head, false, Compile_Error{}, true
     }
     return head, false, Compile_Error{}, true
 }
@@ -1186,23 +1397,17 @@ emit_call_text :: proc(name: string, arg_texts: []string) -> string {
 }
 
 find_proc_decl :: proc(e: ^Emitter, name: string) -> (^Proc_Decl, bool) {
-    for idx in 0..<len(e.decls) {
-        decl := &e.decls[idx]
-        if decl.kind == .Proc && decl.proc_decl.name == name {
-            return &decl.proc_decl, true
-        }
+    ensure_emitter_indexes(e)
+    if idx, found := e.proc_indices[name]; found {
+        return &e.decls[idx].proc_decl, true
     }
     return nil, false
 }
 
 find_overload_decl :: proc(e: ^Emitter, name: string) -> (^Const_Decl, bool) {
-    for idx in 0..<len(e.decls) {
-        decl := &e.decls[idx]
-        if decl.kind == .Const &&
-           decl.const_decl.is_overload &&
-           decl.const_decl.name == name {
-            return &decl.const_decl, true
-        }
+    ensure_emitter_indexes(e)
+    if idx, found := e.overload_indices[name]; found {
+        return &e.decls[idx].const_decl, true
     }
     return nil, false
 }
@@ -1360,26 +1565,19 @@ static_def_call_head :: proc(text: string) -> bool {
 }
 
 def_call_head_is_declared_type :: proc(e: ^Emitter, mapped_name: string) -> bool {
-    for decl in e.decls {
-        #partial switch decl.kind {
-        case .Const:
-            if decl.const_decl.is_type_alias && decl.const_decl.name == mapped_name {
-                return true
-            }
-        case .Struct:
-            if decl.struct_decl.name == mapped_name {
-                return true
-            }
-        case .Enum:
-            if decl.enum_decl.name == mapped_name {
-                return true
-            }
-        case .Union:
-            if decl.union_decl.name == mapped_name {
-                return true
-            }
-        case:
-        }
+    ensure_emitter_indexes(e)
+    if idx, found := e.const_indices[mapped_name]; found &&
+       e.decls[idx].const_decl.is_type_alias {
+        return true
+    }
+    if _, found := e.struct_indices[mapped_name]; found {
+        return true
+    }
+    if _, found := e.enum_indices[mapped_name]; found {
+        return true
+    }
+    if _, found := e.union_indices[mapped_name]; found {
+        return true
     }
     return false
 }
@@ -1491,21 +1689,17 @@ classify_def_initializers :: proc(e: ^Emitter) -> (Compile_Error, bool) {
 }
 
 find_transform_decl :: proc(e: ^Emitter, name: string) -> (^Transform_Decl, bool) {
-    for idx in 0..<len(e.decls) {
-        decl := &e.decls[idx]
-        if decl.kind == .Transform && decl.transform_decl.name == name {
-            return &decl.transform_decl, true
-        }
+    ensure_emitter_indexes(e)
+    if idx, found := e.transform_indices[name]; found {
+        return &e.decls[idx].transform_decl, true
     }
     return nil, false
 }
 
 find_source_decl :: proc(e: ^Emitter, name: string) -> (^Source_Decl, bool) {
-    for idx in 0..<len(e.decls) {
-        decl := &e.decls[idx]
-        if decl.kind == .Source && decl.source_decl.name == name {
-            return &decl.source_decl, true
-        }
+    ensure_emitter_indexes(e)
+    if idx, found := e.source_indices[name]; found {
+        return &e.decls[idx].source_decl, true
     }
     return nil, false
 }
@@ -1533,11 +1727,8 @@ resolve_proc_call_decl :: proc(e: ^Emitter, head: string) -> (call_name: string,
     defer delete(alias)
     suffix := map_name(suffix_text)
     defer delete(suffix)
-    for decl in e.decls {
-        import_alias, pkg, ok_import := kvist_import_alias_for_decl(decl)
-        if !ok_import || import_alias != alias_text {
-            continue
-        }
+    ensure_emitter_indexes(e)
+    if pkg, found := e.kvist_import_packages[alias_text]; found {
         package_name := fmt.tprintf("%s__%s", pkg, suffix)
         found_proc, ok_proc = find_proc_decl(e, package_name)
         if ok_proc {
@@ -2273,8 +2464,26 @@ delete_struct_field_slice :: proc(fields: ^[dynamic]Struct_Field) {
         delete(field.name)
         delete(field.source_name)
         delete(field.ty)
+        if field.has_default {
+            value := field.default_value
+            delete_cst_form(&value)
+        }
     }
     delete(fields^)
+}
+
+clone_struct_field_slice :: proc(fields: []Struct_Field) -> (cloned: [dynamic]Struct_Field) {
+    for field in fields {
+        item := field
+        item.name = strings.clone(field.name)
+        item.source_name = strings.clone(field.source_name)
+        item.ty = strings.clone(field.ty)
+        if field.has_default {
+            item.default_value = clone_cst_form(field.default_value)
+        }
+        append(&cloned, item)
+    }
+    return cloned
 }
 
 split_top_level_commas :: proc(text: string) -> (parts: [dynamic]string) {
@@ -2600,13 +2809,15 @@ odin_proc_params_text_from_line :: proc(line, proc_name: string) -> (string, boo
     return "", false
 }
 
-odin_import_proc_arg_type_from_dir :: proc(dir, proc_name: string, arg_idx: int) -> (string, bool) {
+odin_import_proc_param_types_from_dir :: proc(
+    dir, proc_name: string,
+) -> (param_types: [dynamic]string, ok: bool) {
     if !os.exists(dir) {
-        return "", false
+        return param_types, false
     }
     entries, err := os.read_directory_by_path(dir, -1, context.allocator)
     if err != nil {
-        return "", false
+        return param_types, false
     }
     defer os.file_info_slice_delete(entries, context.allocator)
 
@@ -2630,20 +2841,16 @@ odin_import_proc_arg_type_from_dir :: proc(dir, proc_name: string, arg_idx: int)
             if !ok_params {
                 continue
             }
-            param_types := odin_proc_param_types_from_text(params_text)
+            param_types = odin_proc_param_types_from_text(params_text)
             delete(params_text)
             delete(lines)
             delete(data)
-            defer delete_string_slice(&param_types)
-            if arg_idx < len(param_types) {
-                return strings.clone(param_types[arg_idx]), true
-            }
-            return "", false
+            return param_types, true
         }
         delete(lines)
         delete(data)
     }
-    return "", false
+    return param_types, false
 }
 
 imported_odin_proc_arg_type :: proc(e: ^Emitter, head_name: string, arg_idx: int) -> (string, bool) {
@@ -2651,35 +2858,50 @@ imported_odin_proc_arg_type :: proc(e: ^Emitter, head_name: string, arg_idx: int
     if !ok_parts {
         return "", false
     }
-    for decl in e.decls {
-        if !import_decl_alias_matches(decl, alias) {
-            continue
-        }
-        raw := decl.import_decl.path
-        if len(raw) >= 2 && raw[0] == '"' && raw[len(raw)-1] == '"' {
-            raw = unquote_string(raw)
-        }
-        if strings.has_prefix(raw, "kvist:") {
-            return "", false
-        }
-        odin_root, ok_root := odin_root_path()
-        if !ok_root {
-            return "", false
-        }
-        defer delete(odin_root)
-        dir, ok_dir := odin_import_dir(odin_root, raw)
-        if !ok_dir {
-            return "", false
-        }
-        defer delete(dir)
-        raw_type, ok_type := odin_import_proc_arg_type_from_dir(dir, member, arg_idx)
-        if !ok_type {
-            return "", false
-        }
-        defer delete(raw_type)
-        return qualify_imported_odin_type(alias, raw_type), true
+    ensure_emitter_indexes(e)
+    raw, found_import := e.odin_import_paths[alias]
+    if !found_import {
+        return "", false
     }
-    return "", false
+    cache_key := emitter_import_cache_key(e, head_name, raw, alias, member)
+    if e.import_cache != nil && e.import_cache.proc_params_known[cache_key] {
+        if cached, found := e.import_cache.proc_param_types[cache_key];
+           found && arg_idx < len(cached) {
+            return strings.clone(cached[arg_idx]), true
+        }
+        return "", false
+    }
+    if e.import_cache != nil {
+        e.import_cache.proc_params_known[cache_key] = true
+    }
+    odin_root, ok_root := odin_root_path()
+    if !ok_root {
+        return "", false
+    }
+    defer delete(odin_root)
+    dir, ok_dir := odin_import_dir(odin_root, raw)
+    if !ok_dir {
+        return "", false
+    }
+    defer delete(dir)
+    raw_types, ok_types := odin_import_proc_param_types_from_dir(dir, member)
+    if !ok_types {
+        return "", false
+    }
+    defer delete_string_slice(&raw_types)
+    qualified_types: [dynamic]string
+    for raw_type in raw_types {
+        append(&qualified_types, qualify_imported_odin_type(alias, raw_type))
+    }
+    if e.import_cache != nil {
+        e.import_cache.proc_param_types[cache_key] = qualified_types
+    } else {
+        defer delete_string_slice(&qualified_types)
+    }
+    if arg_idx >= len(qualified_types) {
+        return "", false
+    }
+    return strings.clone(qualified_types[arg_idx]), true
 }
 
 imported_odin_type_fields :: proc(e: ^Emitter, type_text: string) -> (fields: [dynamic]Struct_Field, ok: bool) {
@@ -2687,30 +2909,36 @@ imported_odin_type_fields :: proc(e: ^Emitter, type_text: string) -> (fields: [d
     if !ok_parts {
         return fields, false
     }
-    for decl in e.decls {
-        if !import_decl_alias_matches(decl, alias) {
-            continue
-        }
-        raw := decl.import_decl.path
-        if len(raw) >= 2 && raw[0] == '"' && raw[len(raw)-1] == '"' {
-            raw = unquote_string(raw)
-        }
-        if strings.has_prefix(raw, "kvist:") {
-            return fields, false
-        }
-        odin_root, ok_root := odin_root_path()
-        if !ok_root {
-            return fields, false
-        }
-        defer delete(odin_root)
-        dir, ok_dir := odin_import_dir(odin_root, raw)
-        if !ok_dir {
-            return fields, false
-        }
-        defer delete(dir)
-        return odin_import_type_fields_from_dir(alias, dir, member)
+    ensure_emitter_indexes(e)
+    raw, found_import := e.odin_import_paths[alias]
+    if !found_import {
+        return fields, false
     }
-    return fields, false
+    cache_key := emitter_import_cache_key(e, type_text, raw, alias, member)
+    if e.import_cache != nil && e.import_cache.type_fields_known[cache_key] {
+        if cached, found := e.import_cache.type_fields[cache_key]; found {
+            return clone_struct_field_slice(cached[:]), true
+        }
+        return fields, false
+    }
+    if e.import_cache != nil {
+        e.import_cache.type_fields_known[cache_key] = true
+    }
+    odin_root, ok_root := odin_root_path()
+    if !ok_root {
+        return fields, false
+    }
+    defer delete(odin_root)
+    dir, ok_dir := odin_import_dir(odin_root, raw)
+    if !ok_dir {
+        return fields, false
+    }
+    defer delete(dir)
+    fields, ok = odin_import_type_fields_from_dir(alias, dir, member)
+    if ok && e.import_cache != nil {
+        e.import_cache.type_fields[cache_key] = clone_struct_field_slice(fields[:])
+    }
+    return fields, ok
 }
 
 imported_odin_enum_type_exists :: proc(e: ^Emitter, type_text: string) -> bool {
@@ -2719,32 +2947,29 @@ imported_odin_enum_type_exists :: proc(e: ^Emitter, type_text: string) -> bool {
         return false
     }
 
-    for decl in e.decls {
-        if !import_decl_alias_matches(decl, alias) {
-            continue
-        }
-        raw := decl.import_decl.path
-        if len(raw) >= 2 && raw[0] == '"' && raw[len(raw)-1] == '"' {
-            raw = unquote_string(raw)
-        }
-        if strings.has_prefix(raw, "kvist:") {
-            return false
-        }
-        odin_root, ok_root := odin_root_path()
-        if !ok_root {
-            continue
-        }
+    ensure_emitter_indexes(e)
+    raw, found_import := e.odin_import_paths[alias]
+    if !found_import {
+        return false
+    }
+    cache_key := emitter_import_cache_key(e, type_text, raw, alias, member)
+    if e.import_cache != nil && e.import_cache.enum_known[cache_key] {
+        return e.import_cache.enum_exists[cache_key]
+    }
+    found_enum := false
+    odin_root, ok_root := odin_root_path()
+    if ok_root {
         defer delete(odin_root)
-        dir, ok_dir := odin_import_dir(odin_root, raw)
-        if !ok_dir {
-            continue
-        }
-        defer delete(dir)
-        if odin_import_enum_exists_from_dir(dir, member) {
-            return true
+        if dir, ok_dir := odin_import_dir(odin_root, raw); ok_dir {
+            defer delete(dir)
+            found_enum = odin_import_enum_exists_from_dir(dir, member)
         }
     }
-    return false
+    if e.import_cache != nil {
+        e.import_cache.enum_known[cache_key] = true
+        e.import_cache.enum_exists[cache_key] = found_enum
+    }
+    return found_enum
 }
 
 proc_param_keyword_names :: proc(proc_decl: ^Proc_Decl) -> (names: [dynamic]string) {
@@ -9024,11 +9249,11 @@ immutable_def_mutation_error :: proc(e: ^Emitter, place: CST_Form) -> (Compile_E
     if _, local := lookup_local_type(e, name); local {
         return {}, false
     }
-    for decl in e.decls {
-        if decl.kind == .Const &&
-           !decl.const_decl.is_type_alias &&
-           !decl.const_decl.is_overload &&
-           decl.const_decl.name == name {
+    ensure_emitter_indexes(e)
+    if idx, found := e.const_indices[name]; found {
+        decl := &e.decls[idx]
+        if !decl.const_decl.is_type_alias &&
+           !decl.const_decl.is_overload {
             return Compile_Error{
                 message = fmt.tprintf("cannot mutate immutable def %s; use defvar for mutable package state", place.text),
                 span = place.span,
@@ -9580,10 +9805,9 @@ obvious_form_type :: proc(e: ^Emitter, form: CST_Form) -> (string, bool) {
             return ty, true
         }
         name := map_name(form.text)
-        for decl in e.decls {
-            if decl.kind != .Const || decl.const_decl.name != name {
-                continue
-            }
+        ensure_emitter_indexes(e)
+        if idx, found := e.const_indices[name]; found {
+            decl := &e.decls[idx]
             if decl.const_decl.has_ty {
                 return decl.const_decl.ty, true
             }
@@ -12816,10 +13040,9 @@ find_union_decl :: proc(e: ^Emitter, name: string) -> (^Union_Decl, bool) {
             return &e.local_unions[i], true
         }
     }
-    for i in 0..<len(e.unions) {
-        if e.unions[i].name == name {
-            return &e.unions[i], true
-        }
+    ensure_emitter_indexes(e)
+    if idx, found := e.union_indices[name]; found {
+        return &e.unions[idx], true
     }
     return nil, false
 }
@@ -12830,28 +13053,25 @@ find_struct_decl :: proc(e: ^Emitter, name: string) -> (^Struct_Decl, bool) {
             return &e.local_structs[i], true
         }
     }
-    for i in 0..<len(e.structs) {
-        if e.structs[i].name == name {
-            return &e.structs[i], true
-        }
+    ensure_emitter_indexes(e)
+    if idx, found := e.struct_indices[name]; found {
+        return &e.structs[idx], true
     }
     return nil, false
 }
 
 find_enum_decl :: proc(e: ^Emitter, name: string) -> (^Enum_Decl, bool) {
-    for i in 0..<len(e.decls) {
-        if e.decls[i].kind == .Enum && e.decls[i].enum_decl.name == name {
-            return &e.decls[i].enum_decl, true
-        }
+    ensure_emitter_indexes(e)
+    if idx, found := e.enum_indices[name]; found {
+        return &e.decls[idx].enum_decl, true
     }
     return nil, false
 }
 
 enum_type_exists :: proc(e: ^Emitter, name: string) -> bool {
-    for decl in e.decls {
-        if decl.kind == .Enum && decl.enum_decl.name == name {
-            return true
-        }
+    ensure_emitter_indexes(e)
+    if _, found := e.enum_indices[name]; found {
+        return true
     }
     if imported_odin_enum_type_exists(e, name) {
         return true
@@ -12892,10 +13112,9 @@ quoted_symbol_name :: proc(form: CST_Form) -> (string, bool) {
 }
 
 find_decl_doc_text :: proc(e: ^Emitter, name: string) -> (string, bool) {
-    for decl in e.decls {
-        if decl_name(decl) != name {
-            continue
-        }
+    ensure_emitter_indexes(e)
+    if idx, found := e.decl_indices[name]; found {
+        decl := e.decls[idx]
         if len(decl.doc_lines) == 0 {
             return "", true
         }
@@ -20301,10 +20520,14 @@ shift_source_map_lines :: proc(entries: ^[dynamic]Source_Map_Entry, delta: int) 
     }
 }
 
-emit_runtime_def_lifecycle :: proc(e: ^Emitter) -> (Compile_Error, bool) {
+emit_runtime_def_lifecycle :: proc(e: ^Emitter, emitted_decls: []IR_Decl = nil) -> (Compile_Error, bool) {
+    lifecycle_decls := emitted_decls
+    if lifecycle_decls == nil {
+        lifecycle_decls = e.decls
+    }
     runtime_count := 0
     managed_count := 0
-    for decl in e.decls {
+    for decl in lifecycle_decls {
         if decl.kind == .Const && decl.const_decl.init_kind == .Runtime {
             runtime_count += 1
             if type_text_is_managed_value(e, decl.const_decl.ty) {
@@ -20322,7 +20545,7 @@ emit_runtime_def_lifecycle :: proc(e: ^Emitter) -> (Compile_Error, bool) {
     emit_line(e, "__kvist_runtime_defs_init :: proc \"contextless\" () {")
     e.indent += 1
     emit_line(e, "context = kvist_runtime.default_context()")
-    for decl in e.decls {
+    for decl in lifecycle_decls {
         if decl.kind != .Const || decl.const_decl.init_kind != .Runtime {
             continue
         }
@@ -20350,8 +20573,8 @@ emit_runtime_def_lifecycle :: proc(e: ^Emitter) -> (Compile_Error, bool) {
         emit_line(e, "__kvist_runtime_defs_fini :: proc \"contextless\" () {")
         e.indent += 1
         emit_line(e, "context = kvist_runtime.default_context()")
-        for offset in 0..<len(e.decls) {
-            decl := e.decls[len(e.decls)-1-offset]
+        for offset in 0..<len(lifecycle_decls) {
+            decl := lifecycle_decls[len(lifecycle_decls)-1-offset]
             if decl.kind == .Const &&
                decl.const_decl.init_kind == .Runtime &&
                type_text_is_managed_value(e, decl.const_decl.ty) {
@@ -20396,21 +20619,53 @@ emit_data_decode_aliases :: proc(e: ^Emitter, features: Emitter_Features) {
     emit_line(e, fmt.tprintf("kvist_managed_move_assign_data__Decode_Error :: kvist_managed_move_assign_%s", selected))
 }
 
-emit_decls_with_source_map :: proc(decls: []IR_Decl) -> (Emit_Result, Compile_Error, bool) {
+emit_selected_decls_with_source_map :: proc(
+    analysis_decls, emitted_decls: []IR_Decl,
+    suppress_shared_helpers := false,
+    aggregate_features: ^Emitter_Features = nil,
+    initial_features: ^Emitter_Features = nil,
+    analysis_prepared := false,
+    profile: ^Compile_Profile = nil,
+    shared_import_cache: ^Emitter_Import_Cache = nil,
+) -> (Emit_Result, Compile_Error, bool) {
+    total_start: time.Tick
+    analysis_before, source_map_before: i64
+    if profile != nil {
+        total_start = time.tick_now()
+        analysis_before = profile.analysis_ns
+        source_map_before = profile.source_map_ns
+    }
+    defer if profile != nil {
+        total_ns := profile_elapsed_ns(total_start)
+        analysis_ns := profile.analysis_ns - analysis_before
+        source_map_ns := profile.source_map_ns - source_map_before
+        profile.emission_ns += total_ns - analysis_ns - source_map_ns
+    }
     result := Emit_Result{}
+    local_import_cache := Emitter_Import_Cache{}
+    import_cache := shared_import_cache
+    if import_cache == nil {
+        import_cache = &local_import_cache
+        defer emitter_import_cache_delete(&local_import_cache)
+    }
+    emitter_import_cache_init(import_cache)
     features := Emitter_Features{}
+    if initial_features != nil {
+        merge_emitter_features(&features, initial_features^)
+    }
     captured_specializations: [dynamic]Captured_Proc_Specialization
     e := Emitter{
         builder  = strings.builder_make(),
-        decls    = decls,
+        decls    = analysis_decls,
         features = &features,
         source_map = &result.source_map,
         warnings = &result.warnings,
         line     = 1,
         captured_proc_specializations = &captured_specializations,
+        import_cache = import_cache,
     }
     defer strings.builder_destroy(&e.builder)
-    for decl in decls {
+    for decl in analysis_decls {
         if decl.kind == .Struct {
             append(&e.structs, decl.struct_decl)
         }
@@ -20418,17 +20673,26 @@ emit_decls_with_source_map :: proc(decls: []IR_Decl) -> (Emit_Result, Compile_Er
             append(&e.unions, decl.union_decl)
         }
     }
-    infer_decoded_struct_lifetimes(&e)
-    infer_proc_lifetime_facts(&e)
-    err_classify, ok_classify := classify_def_initializers(&e)
-    if !ok_classify {
-        return result, err_classify, false
+    if !analysis_prepared {
+        analysis_start: time.Tick
+        if profile != nil {
+            analysis_start = time.tick_now()
+        }
+        infer_decoded_struct_lifetimes(&e)
+        infer_proc_lifetime_facts(&e)
+        err_classify, ok_classify := classify_def_initializers(&e)
+        if profile != nil {
+            profile.analysis_ns += profile_elapsed_ns(analysis_start)
+        }
+        if !ok_classify {
+            return result, err_classify, false
+        }
     }
-    needs_core_strings_import := decls_need_core_strings_import(decls)
-    needs_core_fmt_import := decls_need_core_fmt_import(decls)
+    needs_core_strings_import := decls_need_core_strings_import(emitted_decls)
+    needs_core_fmt_import := decls_need_core_fmt_import(emitted_decls)
     emitted_core_strings_import := false
     emitted_core_fmt_import := false
-    for decl, idx in decls {
+    for decl, idx in emitted_decls {
         e.current_source_path = decl.source_path
         e.current_source_file = decl.source_file
         if decl.kind != .Package && decl.kind != .Import {
@@ -20438,6 +20702,8 @@ emit_decls_with_source_map :: proc(decls: []IR_Decl) -> (Emit_Result, Compile_Er
         start_line := e.line
         err_decl, ok_decl := emit_decl(&e, decl)
         if !ok_decl {
+            err_decl.source_path = decl.source_path
+            err_decl.source_file = decl.source_file
             return result, err_decl, false
         }
         emitted_lines := e.line > start_line
@@ -20445,12 +20711,20 @@ emit_decls_with_source_map :: proc(decls: []IR_Decl) -> (Emit_Result, Compile_Er
         if !emitted_lines {
             end_line = start_line
         }
+        source_map_start: time.Tick
+        if profile != nil {
+            source_map_start = time.tick_now()
+        }
         append(&result.source_map, Source_Map_Entry{
             generated_start_line = start_line,
             generated_end_line   = end_line,
             source_span          = decl.span,
+            source_path          = strings.clone(decl.source_path),
         })
-        if idx+1 < len(decls) && emitted_lines {
+        if profile != nil {
+            profile.source_map_ns += profile_elapsed_ns(source_map_start)
+        }
+        if idx+1 < len(emitted_decls) && emitted_lines {
             if e.attach_next_decl {
                 e.attach_next_decl = false
                 continue
@@ -20459,7 +20733,7 @@ emit_decls_with_source_map :: proc(decls: []IR_Decl) -> (Emit_Result, Compile_Er
             e.line += 1
         }
     }
-    err_runtime_defs, ok_runtime_defs := emit_runtime_def_lifecycle(&e)
+    err_runtime_defs, ok_runtime_defs := emit_runtime_def_lifecycle(&e, emitted_decls)
     if !ok_runtime_defs {
         return result, err_runtime_defs, false
     }
@@ -20469,8 +20743,10 @@ emit_decls_with_source_map :: proc(decls: []IR_Decl) -> (Emit_Result, Compile_Er
     if !ok_specializations {
         return result, err_specializations, false
     }
-    emit_data_decode_aliases(&e, features)
-    emit_core_helpers(&e, features)
+    if !suppress_shared_helpers {
+        emit_data_decode_aliases(&e, features)
+        emit_core_helpers(&e, features)
+    }
     output := strings.clone(strings.to_string(e.builder))
     late_imports: [dynamic]string
     if output_needs_core_slice_import(output, features) &&
@@ -20522,10 +20798,20 @@ emit_decls_with_source_map :: proc(decls: []IR_Decl) -> (Emit_Result, Compile_Er
         }
         result.output = strings.clone(strings.to_string(output_builder))
         delete(output)
+        if aggregate_features != nil {
+            merge_emitter_features(aggregate_features, features)
+        }
         return result, {}, true
     }
     result.output = output
+    if aggregate_features != nil {
+        merge_emitter_features(aggregate_features, features)
+    }
     return result, {}, true
+}
+
+emit_decls_with_source_map :: proc(decls: []IR_Decl, profile: ^Compile_Profile = nil) -> (Emit_Result, Compile_Error, bool) {
+    return emit_selected_decls_with_source_map(decls, decls, profile = profile)
 }
 
 emit_eval_decls_with_source_map :: proc(decls: []IR_Decl, eval_form: CST_Form, no_print: bool) -> (Emit_Result, Compile_Error, bool) {
@@ -20573,6 +20859,8 @@ emit_eval_decls_with_source_map :: proc(decls: []IR_Decl, eval_form: CST_Form, n
         start_line := e.line
         err_decl, ok_decl := emit_decl(&e, decl)
         if !ok_decl {
+            err_decl.source_path = decl.source_path
+            err_decl.source_file = decl.source_file
             return result, err_decl, false
         }
         emitted_lines := e.line > start_line
@@ -20584,6 +20872,7 @@ emit_eval_decls_with_source_map :: proc(decls: []IR_Decl, eval_form: CST_Form, n
             generated_start_line = start_line,
             generated_end_line   = end_line,
             source_span          = decl.span,
+            source_path          = strings.clone(decl.source_path),
         })
         if idx+1 < len(decls) && emitted_lines {
             if e.attach_next_decl {
@@ -20695,8 +20984,8 @@ emit_ir_program :: proc(program: IR_Program) -> (string, Compile_Error, bool) {
     return emit_decls(program.decls[:])
 }
 
-emit_ir_program_with_source_map :: proc(program: IR_Program) -> (Emit_Result, Compile_Error, bool) {
-    return emit_decls_with_source_map(program.decls[:])
+emit_ir_program_with_source_map :: proc(program: IR_Program, profile: ^Compile_Profile = nil) -> (Emit_Result, Compile_Error, bool) {
+    return emit_decls_with_source_map(program.decls[:], profile)
 }
 
 program_imports_fmt :: proc(program: IR_Program) -> bool {
@@ -20869,6 +21158,6 @@ emit_eval_program :: proc(program: IR_Program, eval_form: CST_Form, no_print: bo
     if !ok {
         return "", err, false
     }
-    defer delete(result.source_map)
+    defer source_map_slice_delete(result.source_map)
     return result.output, {}, true
 }

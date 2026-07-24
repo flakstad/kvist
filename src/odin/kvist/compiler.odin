@@ -7,6 +7,7 @@ import "core:fmt"
 import "core:os"
 import "core:sort"
 import "core:strings"
+import "core:time"
 import "base:runtime"
 
 Alias_Prefix :: struct {
@@ -202,6 +203,8 @@ validate_surface_internal_call_names :: proc(forms: []CST_Top_Form) -> (Compile_
     for top in forms {
         err_form, ok_form := validate_surface_internal_call_names_form(top.form)
         if !ok_form {
+            err_form.source_path = top.source_path
+            err_form.source_file = top.source_file
             return err_form, false
         }
     }
@@ -248,6 +251,8 @@ validate_surface_package_slash_access :: proc(forms: []CST_Top_Form, aliases: []
     for top in forms {
         err_form, ok_form := validate_surface_package_slash_access_form(top.form, aliases)
         if !ok_form {
+            err_form.source_path = top.source_path
+            err_form.source_file = top.source_file
             return err_form, false
         }
     }
@@ -3122,8 +3127,19 @@ top_form_belongs_to_package :: proc(top: CST_Top_Form, files: []Package_File) ->
     return false
 }
 
-load_path_expanded_forms :: proc(path: string) -> (expanded: [dynamic]CST_Top_Form, macros: [dynamic]User_Macro, err: Compile_Error, ok: bool) {
+profile_elapsed_ns :: proc(start: time.Tick) -> i64 {
+    return time.duration_nanoseconds(time.tick_since(start))
+}
+
+load_path_expanded_forms :: proc(path: string, profile: ^Compile_Profile = nil) -> (expanded: [dynamic]CST_Top_Form, macros: [dynamic]User_Macro, err: Compile_Error, ok: bool) {
+    load_start: time.Tick
+    if profile != nil {
+        load_start = time.tick_now()
+    }
     loaded, err_load, ok_load := load_root_file_forms(path)
+    if profile != nil {
+        profile.load_and_resolve_ns += profile_elapsed_ns(load_start)
+    }
     if !ok_load {
         return expanded, macros, err_load, false
     }
@@ -3139,9 +3155,23 @@ load_path_expanded_forms :: proc(path: string) -> (expanded: [dynamic]CST_Top_Fo
     for form in loaded.decls {
         append(&combined, form)
     }
+    macro_start: time.Tick
+    if profile != nil {
+        macro_start = time.tick_now()
+    }
     expanded_forms, expanded_macros, err_expand, ok_expand := macroexpand_top_forms(combined[:], true, path)
+    if profile != nil {
+        profile.macro_expansion_ns += profile_elapsed_ns(macro_start)
+    }
     if !ok_expand {
         return expanded, macros, err_expand, false
+    }
+    post_start: time.Tick
+    if profile != nil {
+        post_start = time.tick_now()
+    }
+    defer if profile != nil {
+        profile.post_expand_resolution_ns += profile_elapsed_ns(post_start)
     }
     err_expanded_slash, ok_expanded_slash := validate_surface_package_slash_access(expanded_forms[:], loaded.source_aliases[:])
     if !ok_expanded_slash {
@@ -3180,15 +3210,23 @@ load_path_expanded_forms :: proc(path: string) -> (expanded: [dynamic]CST_Top_Fo
     return expanded, macros, Compile_Error{}, true
 }
 
-load_path_program :: proc(path: string) -> (AST_Program, Compile_Error, bool) {
-    expanded, _, err_expand, ok_expand := load_path_expanded_forms(path)
+load_path_program :: proc(path: string, profile: ^Compile_Profile = nil) -> (AST_Program, Compile_Error, bool) {
+    expanded, _, err_expand, ok_expand := load_path_expanded_forms(path, profile)
     if !ok_expand {
         return AST_Program{}, err_expand, false
     }
-    return parse_program(expanded[:])
+    parse_start: time.Tick
+    if profile != nil {
+        parse_start = time.tick_now()
+    }
+    program, err, ok := parse_program(expanded[:])
+    if profile != nil {
+        profile.ast_parse_ns += profile_elapsed_ns(parse_start)
+    }
+    return program, err, ok
 }
 
-compile_program_with_map :: proc(program: AST_Program) -> (result: Emit_Result, err: Compile_Error, ok: bool) {
+compile_program_with_map :: proc(program: AST_Program, profile: ^Compile_Profile = nil) -> (result: Emit_Result, err: Compile_Error, ok: bool) {
     result_allocator := context.allocator
     old_allocator := context.allocator
     temp_scope := runtime.default_temp_allocator_temp_begin()
@@ -3196,18 +3234,25 @@ compile_program_with_map :: proc(program: AST_Program) -> (result: Emit_Result, 
     context.allocator = context.temp_allocator
     defer context.allocator = old_allocator
 
+    lower_start: time.Tick
+    if profile != nil {
+        lower_start = time.tick_now()
+    }
     lowered, err_lower, ok_lower := lower_program(program)
+    if profile != nil {
+        profile.lowering_ns += profile_elapsed_ns(lower_start)
+    }
     if !ok_lower {
         return result, clone_compile_error(err_lower, result_allocator), false
     }
-    temp_result, err_emit, ok_emit := emit_ir_program_with_source_map(lowered)
+    temp_result, err_emit, ok_emit := emit_ir_program_with_source_map(lowered, profile)
     if !ok_emit {
         return result, clone_compile_error(err_emit, result_allocator), false
     }
     result.output = strings.clone(temp_result.output, result_allocator)
     context.allocator = result_allocator
     for entry in temp_result.source_map {
-        append(&result.source_map, entry)
+        append(&result.source_map, clone_source_map_entry(entry, result_allocator))
     }
     for warning in temp_result.warnings {
         append(&result.warnings, clone_compile_warning(warning, result_allocator))
@@ -3223,7 +3268,7 @@ compile_program_eval_with_map :: proc(program: AST_Program, eval_source: string,
     return compile_program_eval_form_with_map(program, eval_form, no_print)
 }
 
-compile_program_eval_form_with_map :: proc(program: AST_Program, eval_form: CST_Form, no_print: bool = false) -> (result: Emit_Result, err: Compile_Error, ok: bool) {
+compile_program_eval_form_with_map :: proc(program: AST_Program, eval_form: CST_Form, no_print: bool = false, profile: ^Compile_Profile = nil) -> (result: Emit_Result, err: Compile_Error, ok: bool) {
     result_allocator := context.allocator
     old_allocator := context.allocator
     temp_scope := runtime.default_temp_allocator_temp_begin()
@@ -3231,7 +3276,14 @@ compile_program_eval_form_with_map :: proc(program: AST_Program, eval_form: CST_
     context.allocator = context.temp_allocator
     defer context.allocator = old_allocator
 
+    lower_start: time.Tick
+    if profile != nil {
+        lower_start = time.tick_now()
+    }
     lowered, err_lower, ok_lower := lower_program(program)
+    if profile != nil {
+        profile.lowering_ns += profile_elapsed_ns(lower_start)
+    }
     if !ok_lower {
         return result, clone_compile_error(err_lower, result_allocator), false
     }
@@ -3239,6 +3291,10 @@ compile_program_eval_form_with_map :: proc(program: AST_Program, eval_form: CST_
     temp_result: Emit_Result
     err_emit: Compile_Error
     ok_emit: bool
+    emit_start: time.Tick
+    if profile != nil {
+        emit_start = time.tick_now()
+    }
     eval_head := eval_form_head(eval_form)
     if eval_head_is_decl(eval_head) {
         eval_decl, err_decl, ok_decl := parse_decl(CST_Top_Form{form = eval_form})
@@ -3250,12 +3306,18 @@ compile_program_eval_form_with_map :: proc(program: AST_Program, eval_form: CST_
         temp_result, err_emit, ok_emit = emit_eval_program_with_source_map(lowered, eval_form, no_print)
     }
     if !ok_emit {
+        if profile != nil {
+            profile.analysis_and_emission_ns += profile_elapsed_ns(emit_start)
+        }
         return result, clone_compile_error(err_emit, result_allocator), false
+    }
+    if profile != nil {
+        profile.analysis_and_emission_ns += profile_elapsed_ns(emit_start)
     }
     result.output = strings.clone(temp_result.output, result_allocator)
     context.allocator = result_allocator
     for entry in temp_result.source_map {
-        append(&result.source_map, entry)
+        append(&result.source_map, clone_source_map_entry(entry, result_allocator))
     }
     for warning in temp_result.warnings {
         append(&result.warnings, clone_compile_warning(warning, result_allocator))
@@ -3296,20 +3358,37 @@ source_position :: proc(source: string, pos: int) -> (line, column, line_start, 
 
 format_compile_error :: proc(path, source: string, err: Compile_Error) -> string {
     label := path
+    if err.source_path != "" {
+        label = err.source_path
+    }
     if label == "" {
         label = "<source>"
+    }
+    source_text := source
+    owned_source: []byte
+    defer if owned_source != nil {
+        delete(owned_source)
+    }
+    if err.source_file != "" {
+        source_text = err.source_file
+    } else if err.source_path != "" && err.source_path != path {
+        imported_source, read_err := os.read_entire_file_from_path(err.source_path, context.allocator)
+        if read_err == nil {
+            owned_source = imported_source
+            source_text = string(imported_source)
+        }
     }
     message := err.message
     if message == "" {
         message = "compile error"
     }
 
-    line, column, line_start, line_end := source_position(source, err.span.start)
+    line, column, line_start, line_end := source_position(source_text, err.span.start)
     builder := strings.builder_make()
     defer strings.builder_destroy(&builder)
     fmt.sbprintf(&builder, "%s:%d:%d: %s\n", label, line, column, message)
-    if line_start <= line_end && line_end <= len(source) {
-        fmt.sbprintf(&builder, "  %s\n  ", source[line_start:line_end])
+    if line_start <= line_end && line_end <= len(source_text) {
+        fmt.sbprintf(&builder, "  %s\n  ", source_text[line_start:line_end])
         i := 1
         for i < column {
             strings.write_byte(&builder, ' ')
@@ -3394,7 +3473,40 @@ clone_compile_error :: proc(err: Compile_Error, allocator := context.allocator) 
     if cloned.message != "" {
         cloned.message = strings.clone(cloned.message, allocator)
     }
+    if cloned.source_path != "" {
+        cloned.source_path = strings.clone(cloned.source_path, allocator)
+    }
+    // Package source text is borrowed and can belong to a temporary arena.
+    // Keep the path and reload the file when formatting after compilation.
+    cloned.source_file = ""
     return cloned
+}
+
+compile_error_delete :: proc(err: ^Compile_Error, allocator := context.allocator) {
+    if err.message != "" {
+        delete(err.message, allocator)
+    }
+    if err.source_path != "" {
+        delete(err.source_path, allocator)
+    }
+    err^ = {}
+}
+
+clone_source_map_entry :: proc(entry: Source_Map_Entry, allocator := context.allocator) -> Source_Map_Entry {
+    cloned := entry
+    if cloned.source_path != "" {
+        cloned.source_path = strings.clone(cloned.source_path, allocator)
+    }
+    return cloned
+}
+
+source_map_slice_delete :: proc(entries: [dynamic]Source_Map_Entry, allocator := context.allocator) {
+    for entry in entries {
+        if entry.source_path != "" {
+            delete(entry.source_path, allocator)
+        }
+    }
+    delete(entries)
 }
 
 clone_compile_warning :: proc(warning: Compile_Warning, allocator := context.allocator) -> Compile_Warning {
@@ -3439,6 +3551,32 @@ format_source_map :: proc(entries: []Source_Map_Entry) -> string {
 
 source_map_entry_for_generated_line :: proc(entries: []Source_Map_Entry, line: int) -> (Source_Map_Entry, bool) {
     return source_map_entry_for_generated_location(entries, line, 0)
+}
+
+source_map_path_for_generated_location :: proc(entries: []Source_Map_Entry, line, column: int) -> (string, bool) {
+    best_path := ""
+    best_width := 0
+    found := false
+    for entry in entries {
+        if entry.source_path == "" ||
+           line < entry.generated_start_line ||
+           line > entry.generated_end_line {
+            continue
+        }
+        if column > 0 && entry.generated_start_column > 0 {
+            if column < entry.generated_start_column ||
+               (entry.generated_end_column > 0 && column > entry.generated_end_column) {
+                continue
+            }
+        }
+        width := entry.generated_end_line - entry.generated_start_line
+        if !found || width < best_width {
+            best_path = entry.source_path
+            best_width = width
+            found = true
+        }
+    }
+    return best_path, found
 }
 
 source_map_entry_for_generated_location :: proc(entries: []Source_Map_Entry, line, column: int) -> (Source_Map_Entry, bool) {
@@ -3499,7 +3637,7 @@ compile_source :: proc(source: string) -> (output: string, err: Compile_Error, o
     if !ok_result {
         return "", err_result, false
     }
-    defer delete(result.source_map)
+    defer source_map_slice_delete(result.source_map)
     defer compile_warning_slice_delete(result.warnings)
     return result.output, {}, true
 }
@@ -3568,7 +3706,7 @@ compile_source_with_map :: proc(source: string) -> (result: Emit_Result, err: Co
     result.output = strings.clone(temp_result.output, result_allocator)
     context.allocator = result_allocator
     for entry in temp_result.source_map {
-        append(&result.source_map, entry)
+        append(&result.source_map, clone_source_map_entry(entry, result_allocator))
     }
     for warning in temp_result.warnings {
         append(&result.warnings, clone_compile_warning(warning, result_allocator))
@@ -3615,7 +3753,7 @@ compile_eval_source :: proc(source, eval_source: string, no_print: bool = false)
     if !ok_result {
         return "", err_result, false
     }
-    defer delete(result.source_map)
+    defer source_map_slice_delete(result.source_map)
     defer compile_warning_slice_delete(result.warnings)
     return result.output, {}, true
 }
@@ -3713,7 +3851,7 @@ compile_eval_source_with_map :: proc(source, eval_source: string, no_print: bool
     result.output = strings.clone(temp_result.output, result_allocator)
     context.allocator = result_allocator
     for entry in temp_result.source_map {
-        append(&result.source_map, entry)
+        append(&result.source_map, clone_source_map_entry(entry, result_allocator))
     }
     for warning in temp_result.warnings {
         append(&result.warnings, clone_compile_warning(warning, result_allocator))
@@ -3726,7 +3864,7 @@ compile_path :: proc(path: string) -> (output: string, err: Compile_Error, ok: b
     if !ok_result {
         return "", err_result, false
     }
-    defer delete(result.source_map)
+    defer source_map_slice_delete(result.source_map)
     defer compile_warning_slice_delete(result.warnings)
     source_dir, _ := os.split_path(path)
     if source_dir == "" {
@@ -3741,14 +3879,14 @@ compile_path :: proc(path: string) -> (output: string, err: Compile_Error, ok: b
     return result.output, {}, true
 }
 
-compile_path_with_map :: proc(path: string) -> (result: Emit_Result, err: Compile_Error, ok: bool) {
+compile_path_with_map :: proc(path: string, profile: ^Compile_Profile = nil) -> (result: Emit_Result, err: Compile_Error, ok: bool) {
     result_allocator := context.allocator
     old_allocator := result_allocator
     temp_scope := runtime.default_temp_allocator_temp_begin()
     defer runtime.default_temp_allocator_temp_end(temp_scope)
     context.allocator = context.temp_allocator
 
-    program, err_program, ok_program := load_path_program(path)
+    program, err_program, ok_program := load_path_program(path, profile)
     if !ok_program {
         context.allocator = old_allocator
         return result, clone_compile_error(err_program, result_allocator), false
@@ -3756,9 +3894,76 @@ compile_path_with_map :: proc(path: string) -> (result: Emit_Result, err: Compil
     context.allocator = old_allocator
     err_compile: Compile_Error
     ok_compile: bool
-    result, err_compile, ok_compile = compile_program_with_map(program)
+    result, err_compile, ok_compile = compile_program_with_map(program, profile)
     if !ok_compile {
         return result, err_compile, false
+    }
+    return result, {}, true
+}
+
+compile_path_with_package_artifacts :: proc(
+    path: string,
+    profile: ^Compile_Profile = nil,
+    cache_dir := "",
+) -> (result: Package_Emit_Result, err: Compile_Error, ok: bool) {
+    result_allocator := context.allocator
+    old_allocator := result_allocator
+    temp_scope := runtime.default_temp_allocator_temp_begin()
+    defer runtime.default_temp_allocator_temp_end(temp_scope)
+    context.allocator = context.temp_allocator
+    defer context.allocator = old_allocator
+
+    program, err_program, ok_program := load_path_program(path, profile)
+    if !ok_program {
+        return result, clone_compile_error(err_program, result_allocator), false
+    }
+    lower_start: time.Tick
+    if profile != nil {
+        lower_start = time.tick_now()
+    }
+    lowered, err_lower, ok_lower := lower_program(program)
+    if profile != nil {
+        profile.lowering_ns += profile_elapsed_ns(lower_start)
+    }
+    if !ok_lower {
+        return result, clone_compile_error(err_lower, result_allocator), false
+    }
+    temp_result, err_emit, ok_emit := emit_ir_program_with_package_artifacts(
+        lowered,
+        path,
+        profile,
+        cache_dir,
+    )
+    if !ok_emit {
+        return result, clone_compile_error(err_emit, result_allocator), false
+    }
+
+    context.allocator = result_allocator
+    result.packages_reused = temp_result.packages_reused
+    result.packages_emitted = temp_result.packages_emitted
+    result.root.output = strings.clone(temp_result.root.output, result_allocator)
+    for entry in temp_result.root.source_map {
+        append(&result.root.source_map, clone_source_map_entry(entry, result_allocator))
+    }
+    for warning in temp_result.root.warnings {
+        append(&result.root.warnings, clone_compile_warning(warning, result_allocator))
+    }
+    for artifact in temp_result.artifacts {
+        cloned := Generated_Package_Artifact{
+            id = strings.clone(artifact.id, result_allocator),
+            source_root = strings.clone(artifact.source_root, result_allocator),
+            output = strings.clone(artifact.output, result_allocator),
+        }
+        for entry in artifact.source_map {
+            append(&cloned.source_map, clone_source_map_entry(entry, result_allocator))
+        }
+        for warning in artifact.warnings {
+            append(&cloned.warnings, clone_compile_warning(warning, result_allocator))
+        }
+        for dependency in artifact.dependencies {
+            append(&cloned.dependencies, strings.clone(dependency, result_allocator))
+        }
+        append(&result.artifacts, cloned)
     }
     return result, {}, true
 }
@@ -3894,24 +4099,31 @@ compile_eval_path :: proc(path, eval_source: string, no_print: bool = false) -> 
     if !ok_result {
         return "", err_result, false
     }
-    defer delete(result.source_map)
+    defer source_map_slice_delete(result.source_map)
     defer compile_warning_slice_delete(result.warnings)
     return result.output, {}, true
 }
 
-compile_eval_path_with_map :: proc(path, eval_source: string, no_print: bool = false) -> (result: Emit_Result, err: Compile_Error, ok: bool) {
+compile_eval_path_with_map :: proc(path, eval_source: string, no_print: bool = false, profile: ^Compile_Profile = nil) -> (result: Emit_Result, err: Compile_Error, ok: bool) {
     result_allocator := context.allocator
     old_allocator := result_allocator
     temp_scope := runtime.default_temp_allocator_temp_begin()
     defer runtime.default_temp_allocator_temp_end(temp_scope)
     context.allocator = context.temp_allocator
 
-    expanded_forms, macros, err_program, ok_program := load_path_expanded_forms(path)
+    expanded_forms, macros, err_program, ok_program := load_path_expanded_forms(path, profile)
     if !ok_program {
         context.allocator = old_allocator
         return result, clone_compile_error(err_program, result_allocator), false
     }
+    parse_start: time.Tick
+    if profile != nil {
+        parse_start = time.tick_now()
+    }
     program, err_parse, ok_parse := parse_program(expanded_forms[:])
+    if profile != nil {
+        profile.ast_parse_ns += profile_elapsed_ns(parse_start)
+    }
     if !ok_parse {
         context.allocator = old_allocator
         return result, clone_compile_error(err_parse, result_allocator), false
@@ -3947,5 +4159,5 @@ compile_eval_path_with_map :: proc(path, eval_source: string, no_print: bool = f
         return result, clone_compile_error(err_eval_slash, result_allocator), false
     }
     context.allocator = old_allocator
-    return compile_program_eval_form_with_map(program, expanded_eval_form, no_print)
+    return compile_program_eval_form_with_map(program, expanded_eval_form, no_print, profile)
 }

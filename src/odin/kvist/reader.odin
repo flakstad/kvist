@@ -781,6 +781,8 @@ read_top_forms_with_origin :: proc(source: string, source_kind: Source_Kind, sou
     tokens, err_tok, ok_tok := tokenize_with_origin(source, source_kind)
     if !ok_tok {
         delete(tokens)
+        err_tok.source_path = source_path
+        err_tok.source_file = source
         return forms, err_tok, false
     }
     defer delete(tokens)
@@ -809,6 +811,8 @@ read_top_forms_with_origin :: proc(source: string, source_kind: Source_Kind, sou
             skipped, err_skip, ok_skip := parse_form(tokens[:], &index)
             if !ok_skip {
                 delete_borrowed_cst_top_form_slice(&forms)
+                err_skip.source_path = source_path
+                err_skip.source_file = source
                 return forms, err_skip, false
             }
             delete_borrowed_cst_form(&skipped)
@@ -818,6 +822,8 @@ read_top_forms_with_origin :: proc(source: string, source_kind: Source_Kind, sou
         if !ok_form {
             delete_string_slice(&pending_docs)
             delete_borrowed_cst_top_form_slice(&forms)
+            err_form.source_path = source_path
+            err_form.source_file = source
             return forms, err_form, false
         }
         doc_lines: [dynamic]string

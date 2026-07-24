@@ -24,7 +24,7 @@ compiler behavior.
 | Lifetime explanation tooling | Implemented | Add editor presentation over `kvist lifetimes` facts |
 | Multi-return bindings and fallible guards | Implemented | Extend only when a concrete workload is not served by `:or-return`, `when-let`, `if-let`, `when-ok`, or `if-ok` |
 | Runtime `Data`, quasiquote, EDN, and persistent updates | Implemented | Complete managed aggregate ownership |
-| Transitive compilation cache and distinct entry keys | Implemented | Measure and split reusable package frontend artifacts |
+| Transitive compilation cache and distinct entry keys | Implemented | Persist parsed and expanded package state |
 | Source mapping | Partial | Cover more generated cleanup, specialization, and Data forms |
 | Core `str` | Implemented | Validate rendering across Ro and Vev |
 | Managed `Data` in native aggregates | Partial | Top-level Kvist structs are managed recursively; add containers, unions, closures, local/imported structs |
@@ -32,7 +32,8 @@ compiler behavior.
 | Structural Data matching and destructuring | Planned | Design after aggregate ownership and decoding |
 | Public Data builders/transients | Planned | Expose a safe freeze API based on the EDN reader's linear construction pattern |
 | Vev Data result traversal and typed collection | Planned | Avoid unnecessary intermediate native arrays |
-| Fine-grained incremental compilation | Planned | Measure phases, then cache package frontend artifacts |
+| Generated package compilation and cache | Implemented | Tune bounded cache policy from workload data |
+| Fine-grained frontend incremental compilation | Partial | Dependency-specific emission reuse is implemented; parsing and macro expansion remain graph-wide on misses |
 | Native struct/fixed-array destructuring | Design-gated | Add only with explicit copy and ownership rules |
 | Generic `?` propagation | Deferred | Existing guarded bindings cover current Ro/Vev result shapes |
 | Formatter-template linting | Deferred | Use `str` for construction; keep `fmt` explicit formatting |
@@ -107,11 +108,19 @@ compiler behavior.
 
 ### 4. Compiler Immediacy And Diagnostics
 
-- Measure package loading, expansion, lowering, emission, Odin checking, and
-  linking separately.
-- Cache package frontend artifacts and recompute only affected packages and
-  dependents.
-- Reuse unchanged Vev artifacts when editing Ro.
+- Implemented: measure dependency discovery, reading/resolution, macro
+  expansion, parsing, lowering, analysis, emission, source maps, Odin checking,
+  code generation, and linking separately.
+- Implemented: emit imported Kvist source directories as separate generated
+  Odin packages, with one shared runtime-helper package.
+- Implemented: cache exact generated package graphs, including source maps,
+  warnings, and dependency metadata.
+- Implemented: retain per-package frontend artifacts keyed by local content and
+  the inferred interfaces of recorded direct dependencies. Body-only edits
+  re-emit the changed package, while interface changes invalidate actual
+  dependants and preserve unrelated packages.
+- Continue by persisting parsed/macro-expanded state; graph-cache misses still
+  perform graph-wide loading, expansion, and lightweight interface analysis.
 - Map diagnostics through cleanup, quasiquote, literals, callback
   specialization, generic instantiation, and macro-generated declarations.
 

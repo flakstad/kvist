@@ -605,7 +605,7 @@ compile_path_to_output_or_exit :: proc(input, output_path: string) {
         os.exit(1)
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     print_compile_warnings(input, data, "", result.warnings[:])

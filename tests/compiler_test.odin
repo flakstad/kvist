@@ -392,7 +392,7 @@ compile_owned_let_branch_case_in_return_position :: proc(t: ^testing.T) {
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, len(result.warnings), 0)
@@ -430,7 +430,7 @@ compile_owned_let_branch_mixed_with_owned_call_case :: proc(t: ^testing.T) {
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, len(result.warnings), 0)
@@ -965,7 +965,7 @@ compile_all_examples :: proc(t: ^testing.T) {
         testing.expect_value(t, len(result.output) > 0, true)
         testing.expect_value(t, len(result.source_map) > 0, true)
         delete(result.output)
-        delete(result.source_map)
+        kvist.source_map_slice_delete(result.source_map)
         kvist.compile_warning_slice_delete(result.warnings)
     }
 }
@@ -2902,7 +2902,7 @@ reject_internal_lowering_call_names_in_imported_source_package :: proc(t: ^testi
     if ok {
         return
     }
-    defer delete(err.message)
+    defer kvist.compile_error_delete(&err)
     testing.expect_value(t, err.message, "`kvist-prim-count` is an internal lowering name")
 }
 
@@ -3372,7 +3372,7 @@ compile_eval_source_map_marks_eval_runner :: proc(t: ^testing.T) {
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     found_eval_entry := false
@@ -4107,7 +4107,7 @@ managed_data_struct_results_do_not_warn_for_automatic_cleanup :: proc(t: ^testin
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, len(result.warnings), 0)
@@ -4334,7 +4334,7 @@ compile_data_decode_direct_dynamic_arrays :: proc(t: ^testing.T) {
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(
@@ -4410,7 +4410,7 @@ compile_data_validate_reuses_type_directed_shape :: proc(t: ^testing.T) {
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(
@@ -4530,7 +4530,7 @@ compile_type_directed_data_struct_decode :: proc(t: ^testing.T) {
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(
@@ -4846,7 +4846,7 @@ compile_data_decode_qualifies_support_inside_nested_source_packages :: proc(t: ^
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
     testing.expect_value(t, strings.contains(result.output, "data__Decode_Error :: app__data__Decode_Error"), true)
     testing.expect_value(t, strings.contains(result.output, "data__decode_error :: app__data__decode_error"), true)
@@ -5389,7 +5389,7 @@ compile_source_with_declaration_source_map :: proc(t: ^testing.T) {
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     expected := `package main
@@ -5439,7 +5439,7 @@ compile_source_map_accounts_for_feature_line_and_multiline_raw :: proc(t: ^testi
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, len(result.source_map) >= 5, true)
@@ -7361,7 +7361,7 @@ compile_case_does_not_emit_switch_warning :: proc(t: ^testing.T) {
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, len(result.warnings), 0)
@@ -7721,7 +7721,7 @@ compile_core_str_constructs_one_owned_formatted_string :: proc(t: ^testing.T) {
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, strings.contains(result.output, `fmt.aprintf("%v%v%v%v%v%v%v%v%v%v"`), true)
@@ -7747,7 +7747,7 @@ core_str_participates_in_owned_result_diagnostics :: proc(t: ^testing.T) {
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, len(result.warnings), 1)
@@ -7879,7 +7879,7 @@ compile_source_package_can_use_inline_tap_style_macro :: proc(t: ^testing.T) {
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, strings.contains(result.output, "fmt.print(\"xs\")"), true)
@@ -8051,7 +8051,7 @@ compile_source_package_can_use_odin_call_macro :: proc(t: ^testing.T) {
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, strings.contains(result.output, "return len(xs)"), true)
@@ -8125,7 +8125,7 @@ compile_source_package_can_use_neutral_macro_time_helpers :: proc(t: ^testing.T)
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, strings.contains(result.output, `return "ok"`), true)
@@ -8201,7 +8201,7 @@ compile_source_package_macro_name_uses_source_member_name :: proc(t: ^testing.T)
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, strings.contains(result.output, "matched :: true"), true)
@@ -8276,7 +8276,7 @@ compile_source_package_can_use_mutating_odin_target :: proc(t: ^testing.T) {
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, strings.contains(result.output, "delete_key(&(lookup), \"a\")"), true)
@@ -8357,7 +8357,7 @@ compile_source_package_can_use_odin_contains_macro :: proc(t: ^testing.T) {
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, strings.contains(result.output, "return kvist_contains_value((xs)[:], needle)"), true)
@@ -8442,7 +8442,7 @@ compile_source_package_can_use_odin_get_macro :: proc(t: ^testing.T) {
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, strings.contains(result.output, "return (xs[1]) + (kvist_get_or_default(m, \"missing\", 40)) + ((user).score)"), true)
@@ -8527,7 +8527,7 @@ compile_source_package_can_use_odin_slice_macro :: proc(t: ^testing.T) {
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, strings.contains(result.output, "return (xs)[:]"), true)
@@ -8553,7 +8553,7 @@ warn_defer_direct_odin_slice_view :: proc(t: ^testing.T) {
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, strings.contains(result.output, "window := (xs)[:]"), true)
@@ -8642,7 +8642,7 @@ compile_source_package_can_use_source_update_macro :: proc(t: ^testing.T) {
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, strings.contains(result.output, "(xs)[1] += 10"), true)
@@ -8754,7 +8754,7 @@ compile_source_package_can_use_copy_with_macro :: proc(t: ^testing.T) {
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, strings.contains(result.output, "kvist_update_1.profile.name = kvist_value"), true)
@@ -8869,7 +8869,7 @@ compile_source_package_can_use_copy_update_macro :: proc(t: ^testing.T) {
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, strings.contains(result.output, "kvist_update_1.profile.visits = (kvist_target.profile.visits) + 1"), true)
@@ -9677,7 +9677,7 @@ compile_source_package_can_use_odin_infix_or_else :: proc(t: ^testing.T) {
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, strings.contains(result.output, "return (query()) or_else (7)"), true)
@@ -11090,7 +11090,7 @@ compile_typed_block_expression_preserves_defer_and_source_map :: proc(t: ^testin
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, len(result.warnings), 0)
@@ -11337,7 +11337,7 @@ reject_returning_owned_result_from_with_temp_allocator :: proc(t: ^testing.T) {
 
     _, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, false)
-    defer delete(err.message)
+    defer kvist.compile_error_delete(&err)
     testing.expect_value(t, err.message, "owned value cannot escape with-temp-allocator; allocate it outside the temp scope or copy it before returning")
 }
 
@@ -11360,7 +11360,7 @@ reject_returning_owned_result_from_with_temp_allocator_through_local_wrapper :: 
 
     _, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, false)
-    defer delete(err.message)
+    defer kvist.compile_error_delete(&err)
     testing.expect_value(t, err.message, "owned value cannot escape with-temp-allocator; allocate it outside the temp scope or copy it before returning")
 }
 
@@ -11475,7 +11475,7 @@ reject_returning_destructured_source_owned_result_from_with_temp_allocator :: pr
 
     _, err, ok := kvist.compile_path_with_map(main_path)
     testing.expect_value(t, ok, false)
-    defer delete(err.message)
+    defer kvist.compile_error_delete(&err)
     testing.expect_value(t, err.message, "owned value cannot escape with-temp-allocator; allocate it outside the temp scope or copy it before returning")
 }
 
@@ -11544,7 +11544,7 @@ reject_returning_conditionally_assigned_third_party_owned_result_from_with_temp_
 
     _, err, ok := kvist.compile_path_with_map(main_path)
     testing.expect_value(t, ok, false)
-    defer delete(err.message)
+    defer kvist.compile_error_delete(&err)
     testing.expect_value(t, err.message, "owned value cannot escape with-temp-allocator; allocate it outside the temp scope or copy it before returning")
 }
 
@@ -12631,7 +12631,7 @@ macroexpand_source_map_marks_generated_lines :: proc(t: ^testing.T) {
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, len(result.source_map), 9)
@@ -12664,7 +12664,7 @@ macroexpand_user_macro_in_file_context :: proc(t: ^testing.T) {
         return
     }
     defer delete(output.output)
-    defer delete(output.source_map)
+    defer kvist.source_map_slice_delete(output.source_map)
     defer kvist.compile_warning_slice_delete(output.warnings)
 
     expected := `(if (> n 0) (do) (do (return 0)))
@@ -12690,7 +12690,7 @@ macroexpand_gensym_creates_stable_symbol_within_expansion :: proc(t: ^testing.T)
         return
     }
     defer delete(output.output)
-    defer delete(output.source_map)
+    defer kvist.source_map_slice_delete(output.source_map)
     defer kvist.compile_warning_slice_delete(output.warnings)
 
     testing.expect_value(t, strings.contains(output.output, "(let [__tmp_"), true)
@@ -12795,7 +12795,7 @@ compile_path_macro_read_file_reports_missing_compile_time_file :: proc(t: ^testi
     if ok {
         return
     }
-    defer delete(err.message)
+    defer kvist.compile_error_delete(&err)
     testing.expect_value(t, strings.contains(err.message, "compile-time read-file could not read file:"), true)
     testing.expect_value(t, strings.contains(err.message, "missing.html"), true)
 }
@@ -16684,7 +16684,7 @@ warn_discarded_owned_sequence_result :: proc(t: ^testing.T) {
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
     testing.expect_value(t, len(result.warnings), 1)
     if len(result.warnings) == 1 {
@@ -16763,7 +16763,7 @@ warn_discarded_third_party_dynamic_array_result_from_alloc_shape :: proc(t: ^tes
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, strings.contains(result.output, "support__join :: #force_inline proc(xs: []$T, ys: []T) -> [dynamic]T"), true)
@@ -16842,7 +16842,7 @@ compile_does_not_infer_third_party_dynamic_array_when_input_may_be_returned :: p
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, strings.contains(result.output, "support__keep_or_new :: #force_inline proc("), true)
@@ -16915,7 +16915,7 @@ warn_discarded_third_party_named_owned_bytes_from_alloc_shape :: proc(t: ^testin
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, strings.contains(result.output, "support__read_bytes :: #force_inline proc(path: string) -> (data: []byte, err: ops.Error)"), true)
@@ -16995,7 +16995,7 @@ warn_discarded_third_party_destructured_owned_wrapper_result :: proc(t: ^testing
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, strings.contains(result.output, "support__read_base :: #force_inline proc(path: string) -> (data: []byte, err: os.Error)"), true)
@@ -17082,7 +17082,7 @@ warn_discarded_third_party_macro_impl_result_from_actual_decl :: proc(t: ^testin
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, strings.contains(result.output, "support__join_impl :: #force_inline proc(xs: []$T, ys: []T) -> [dynamic]T"), true)
@@ -17115,7 +17115,7 @@ warn_discarded_transform_into_result_from_output_type :: proc(t: ^testing.T) {
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, strings.contains(result.output, "append(&kvist_out"), true)
@@ -17141,7 +17141,7 @@ warn_defer_inside_loop_runs_at_surrounding_scope_exit :: proc(t: ^testing.T) {
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, len(result.warnings), 1)
@@ -17167,7 +17167,7 @@ allow_defer_inside_loop_block_scope :: proc(t: ^testing.T) {
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, len(result.warnings), 0)
@@ -17189,7 +17189,7 @@ compile_direct_core_strings_result_without_owned_warning :: proc(t: ^testing.T) 
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, len(result.warnings), 0)
@@ -17215,7 +17215,7 @@ warn_discarded_inferred_owned_string_proc_result :: proc(t: ^testing.T) {
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, strings.contains(result.output, "#owned"), false)
@@ -17246,7 +17246,7 @@ warn_discarded_inferred_owned_string_proc_with_owned_early_return :: proc(t: ^te
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, strings.contains(result.output, "#owned"), false)
@@ -17327,7 +17327,7 @@ warn_discarded_third_party_inferred_owned_string_proc_result :: proc(t: ^testing
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, strings.contains(result.output, "support__join_two :: #force_inline proc(a, b: string) -> string {"), true)
@@ -17407,7 +17407,7 @@ warn_discarded_third_party_owned_string_wrapper_result :: proc(t: ^testing.T) {
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, strings.contains(result.output, "support__clone_base :: #force_inline proc(s: string) -> string"), true)
@@ -17484,7 +17484,7 @@ warn_discarded_third_party_replaced_string_from_alloc_shape :: proc(t: ^testing.
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, strings.contains(result.output, "support__replace_all :: #force_inline proc(s, old, new: string) -> string"), true)
@@ -17562,7 +17562,7 @@ warn_discarded_third_party_named_return_assignment_owned_string :: proc(t: ^test
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, strings.contains(result.output, "support__lower_named :: #force_inline proc(s: string) -> (out: string, ok: bool)"), true)
@@ -17642,7 +17642,7 @@ warn_discarded_third_party_conditional_assignment_owned_string :: proc(t: ^testi
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, strings.contains(result.output, "support__normalize :: #force_inline proc(s: string, upper_p: bool) -> string"), true)
@@ -17737,7 +17737,7 @@ warn_discarded_third_party_type_case_assignment_owned_string :: proc(t: ^testing
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, strings.contains(result.output, "support__normalize_mode :: #force_inline proc(mode: support__Mode, s: string) -> string"), true)
@@ -17772,7 +17772,7 @@ compile_does_not_infer_owned_string_when_alloc_or_input_parameter_returned :: pr
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, strings.contains(result.output, "#owned"), false)
@@ -17845,7 +17845,7 @@ compile_does_not_infer_third_party_owned_string_when_only_one_if_branch_allocate
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, strings.contains(result.output, "support__lower_or_default :: #force_inline proc"), true)
@@ -17876,7 +17876,7 @@ compile_does_not_infer_owned_string_when_early_return_uses_input_parameter :: pr
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, strings.contains(result.output, "#owned"), false)
@@ -17906,7 +17906,7 @@ compile_does_not_infer_owned_string_after_named_return_overwrite :: proc(t: ^tes
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, strings.contains(result.output, "#owned"), false)
@@ -17929,7 +17929,7 @@ warn_defer_marked_borrowed_string_view :: proc(t: ^testing.T) {
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, len(result.warnings), 1)
@@ -17969,7 +17969,7 @@ warn_defer_inferred_borrowed_odin_string_view_result :: proc(t: ^testing.T) {
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, strings.contains(result.output, "#borrowed"), false)
@@ -18051,7 +18051,7 @@ warn_third_party_odin_string_alias_owned_and_borrowed_results :: proc(t: ^testin
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, strings.contains(result.output, "support__lower_copy :: #force_inline proc(value: string) -> string"), true)
@@ -18132,7 +18132,7 @@ warn_defer_third_party_borrowed_view_returned_through_local :: proc(t: ^testing.
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, strings.contains(result.output, "support__trim_local :: #force_inline proc(s: string) -> string"), true)
@@ -18212,7 +18212,7 @@ warn_defer_third_party_borrowed_helper_returned_through_local :: proc(t: ^testin
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, strings.contains(result.output, "support__base_view :: #force_inline proc(s: string) -> string"), true)
@@ -18289,7 +18289,7 @@ warn_defer_third_party_named_return_assignment_borrowed_view :: proc(t: ^testing
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, strings.contains(result.output, "support__named_view :: #force_inline proc(s: string) -> (out: string, ok: bool)"), true)
@@ -18369,7 +18369,7 @@ warn_defer_third_party_conditional_assignment_borrowed_view :: proc(t: ^testing.
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, strings.contains(result.output, "support__trim_choice :: #force_inline proc(s: string, prefix_p: bool) -> string"), true)
@@ -18464,7 +18464,7 @@ warn_defer_third_party_type_case_assignment_borrowed_view :: proc(t: ^testing.T)
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, strings.contains(result.output, "support__trim_mode :: #force_inline proc(mode: support__TrimMode, s: string) -> string"), true)
@@ -18546,7 +18546,7 @@ warn_defer_third_party_destructured_borrowed_wrapper_result :: proc(t: ^testing.
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, strings.contains(result.output, "support__trim_pair :: #force_inline proc(s: string) -> (view: string, ok: bool)"), true)
@@ -18579,7 +18579,7 @@ compile_does_not_keep_borrowed_local_after_owned_reassignment :: proc(t: ^testin
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, strings.contains(result.output, "#borrowed"), false)
@@ -18626,7 +18626,7 @@ warn_defer_inferred_borrowed_slice_result :: proc(t: ^testing.T) {
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, strings.contains(result.output, "#borrowed"), false)
@@ -18724,7 +18724,7 @@ warn_defer_third_party_conditional_borrowed_view_with_zero_fallback :: proc(t: ^
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, strings.contains(result.output, "support__maybe_tail :: #force_inline proc(xs: []int, take_p: bool) -> []int"), true)
@@ -18941,7 +18941,7 @@ warn_discarded_regex_owned_results_from_alloc_shape :: proc(t: ^testing.T) {
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, strings.contains(result.output, "re__compile :: #force_inline proc(pattern: re__Pattern) -> (value: re__Regex, err: re__Error)"), true)
@@ -19021,7 +19021,7 @@ warn_discarded_third_party_regex_owned_result_from_alloc_shape :: proc(t: ^testi
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, strings.contains(result.output, "support__compile :: #force_inline proc(pattern: string) -> (value: support__Regex, err: support__Error)"), true)
@@ -21343,7 +21343,7 @@ compile_does_not_classify_unimported_arr_view_helper_as_borrowed :: proc(t: ^tes
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, strings.contains(result.output, "arr.take(2, xs)"), true)
@@ -24720,7 +24720,7 @@ compile_path_warnings_report_the_imported_package_file :: proc(t: ^testing.T) {
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, len(result.warnings) > 0, true)
@@ -24735,6 +24735,97 @@ compile_path_warnings_report_the_imported_package_file :: proc(t: ^testing.T) {
     formatted := kvist.format_compile_warning(main_path, "", warning)
     defer delete(formatted)
     testing.expect_value(t, strings.has_prefix(formatted, fmt.tprintf("%s:4:", helper_path)), true)
+
+    found_helper_map := false
+    for entry in result.source_map {
+        if entry.source_path == helper_path {
+            found_helper_map = true
+            break
+        }
+    }
+    testing.expect_value(t, found_helper_map, true)
+}
+
+@(test)
+compile_path_errors_report_the_imported_package_file :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-error-origin-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    support_dir, support_dir_err := os.join_path({dir, "support"}, context.allocator)
+    main_path, main_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    helper_path, helper_err := os.join_path({support_dir, "support.kvist"}, context.allocator)
+    testing.expect_value(t, support_dir_err == nil && main_err == nil && helper_err == nil, true)
+    if support_dir_err != nil || main_err != nil || helper_err != nil {
+        return
+    }
+    defer delete(support_dir)
+    defer delete(main_path)
+    defer delete(helper_path)
+    testing.expect_value(t, os.make_directory_all(support_dir) == nil, true)
+
+    testing.expect_value(t, os.write_entire_file_from_string(main_path, `(package main)
+(import support "support")
+(defn main [] (println support.answer))`) == nil, true)
+    helper_source := `(package support)
+(def answer [1 2)`
+    testing.expect_value(t, os.write_entire_file_from_string(helper_path, helper_source) == nil, true)
+
+    _, err, ok := kvist.compile_path(main_path)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+    defer kvist.compile_error_delete(&err)
+    testing.expect_value(t, err.source_path, helper_path)
+
+    formatted := kvist.format_compile_error(main_path, "", err)
+    defer delete(formatted)
+    testing.expect_value(t, strings.has_prefix(formatted, fmt.tprintf("%s:2:", helper_path)), true)
+    testing.expect_value(t, strings.contains(formatted, "(def answer [1 2)"), true)
+}
+
+@(test)
+compile_path_emits_imported_package_artifacts :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-package-artifacts-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    support_dir, support_dir_err := os.join_path({dir, "support"}, context.allocator)
+    main_path, main_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    support_path, support_err := os.join_path({support_dir, "support.kvist"}, context.allocator)
+    testing.expect_value(t, support_dir_err == nil && main_err == nil && support_err == nil, true)
+    if support_dir_err != nil || main_err != nil || support_err != nil {
+        return
+    }
+    defer delete(support_dir)
+    defer delete(main_path)
+    defer delete(support_path)
+    testing.expect_value(t, os.make_directory_all(support_dir) == nil, true)
+    testing.expect_value(t, os.write_entire_file_from_string(main_path, `(package main)
+(import support "support")
+(defn main [] (println support.answer))`) == nil, true)
+    testing.expect_value(t, os.write_entire_file_from_string(support_path, `(package support)
+(def answer 42)`) == nil, true)
+
+    result, err, ok := kvist.compile_path_with_package_artifacts(main_path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer kvist.package_emit_result_delete(&result)
+    testing.expect_value(t, len(result.artifacts) > 0, true)
+    testing.expect_value(t, strings.contains(result.root.output, "__KVIST_PACKAGE_"), true)
+    testing.expect_value(t, strings.contains(result.root.output, ".support__answer"), true)
 }
 
 @(test)
@@ -26663,7 +26754,7 @@ compile_warns_for_discarded_owned_result_inside_discard :: proc(t: ^testing.T) {
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, len(result.warnings), 1)
@@ -26690,7 +26781,7 @@ compile_warns_for_leaked_owned_let_local :: proc(t: ^testing.T) {
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, len(result.warnings), 1)
@@ -26721,7 +26812,7 @@ compile_recognizes_explicit_custom_deferred_cleanup :: proc(t: ^testing.T) {
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, len(result.warnings), 0)
@@ -26747,7 +26838,7 @@ compile_does_not_warn_for_owned_local_transferred_into_final_composite :: proc(t
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, len(result.warnings), 0)
@@ -26781,7 +26872,7 @@ compile_does_not_warn_for_owned_local_transferred_into_later_composite_binding :
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, len(result.warnings), 0)
@@ -26807,7 +26898,7 @@ compile_does_not_warn_for_owned_local_transferred_into_returned_composite :: pro
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, len(result.warnings), 0)
@@ -26832,7 +26923,7 @@ compile_does_not_warn_for_typed_non_owned_aggregate_let_local :: proc(t: ^testin
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, len(result.warnings), 0)
@@ -26853,7 +26944,7 @@ compile_warns_for_typed_dynamic_array_let_local :: proc(t: ^testing.T) {
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, len(result.warnings), 1)
@@ -26881,7 +26972,7 @@ compile_does_not_warn_for_owned_local_deleted_in_all_if_branches :: proc(t: ^tes
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, len(result.warnings), 0)
@@ -26906,7 +26997,7 @@ compile_warns_for_owned_local_used_after_deleted_in_all_if_branches :: proc(t: ^
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, len(result.warnings), 1)
@@ -26950,7 +27041,7 @@ compile_warns_for_owned_local_used_after_deleted_in_all_type_case_branches :: pr
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, len(result.warnings), 1)
@@ -26980,7 +27071,7 @@ compile_warns_for_owned_local_leaking_in_if_branch :: proc(t: ^testing.T) {
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, len(result.warnings), 1)
@@ -27007,7 +27098,7 @@ compile_warns_for_overwritten_owned_local :: proc(t: ^testing.T) {
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, len(result.warnings), 1)
@@ -27036,7 +27127,7 @@ compile_tracks_owned_replacement_after_delete_and_set :: proc(t: ^testing.T) {
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, len(result.warnings), 0)
@@ -27059,7 +27150,7 @@ compile_warns_for_use_after_ownership_transfer :: proc(t: ^testing.T) {
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, len(result.warnings), 1)
@@ -27086,7 +27177,7 @@ compile_warns_for_borrowed_value_escaping_owner :: proc(t: ^testing.T) {
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, len(result.warnings), 1)
@@ -27112,7 +27203,7 @@ compile_warns_for_bound_borrowed_value_escaping_owner :: proc(t: ^testing.T) {
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, len(result.warnings), 1)
@@ -27142,7 +27233,7 @@ compile_warns_for_borrowed_value_escaping_in_returned_composite :: proc(t: ^test
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, len(result.warnings), 1)
@@ -27222,7 +27313,7 @@ compile_warns_for_third_party_conditional_borrowed_assignment_escaping_owner :: 
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, strings.contains(result.output, "support__left :: #force_inline proc(xs: []int) -> []int"), true)
@@ -27319,7 +27410,7 @@ compile_warns_for_third_party_type_case_borrowed_assignment_escaping_owner :: pr
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, strings.contains(result.output, "support__left :: #force_inline proc(xs: []int) -> []int"), true)
@@ -27351,7 +27442,7 @@ compile_warns_for_use_after_transfer_inside_branch :: proc(t: ^testing.T) {
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, len(result.warnings), 1)
@@ -27378,7 +27469,7 @@ compile_warns_for_use_after_known_owner_taking_call :: proc(t: ^testing.T) {
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, len(result.warnings), 1)
@@ -27405,7 +27496,7 @@ compile_warns_for_direct_append_ownership_transfer :: proc(t: ^testing.T) {
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, len(result.warnings), 1)
@@ -27435,7 +27526,7 @@ compile_does_not_treat_generated_append_names_as_ownership_transfer :: proc(t: ^
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, len(result.warnings), 0)
@@ -27464,7 +27555,7 @@ compile_does_not_warn_for_valid_ownership_diagnostic_cases :: proc(t: ^testing.T
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, len(result.warnings), 0)
@@ -27489,7 +27580,7 @@ compile_warns_for_discarded_owned_result :: proc(t: ^testing.T) {
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, len(result.warnings), 1)
@@ -27784,7 +27875,7 @@ compile_does_not_classify_unimported_str_owned_helper_as_owned :: proc(t: ^testi
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, strings.contains(result.output, "str.split(s, \",\")"), true)
@@ -27806,7 +27897,7 @@ warn_discarded_imported_str_split_owned_result :: proc(t: ^testing.T) {
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, strings.contains(result.output, "str__split(s, \",\")"), true)
@@ -27880,7 +27971,7 @@ warn_discarded_third_party_split_slice_from_alloc_shape :: proc(t: ^testing.T) {
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, strings.contains(result.output, "support__split_words :: #force_inline proc(s: string) -> []string"), true)
@@ -27911,7 +28002,7 @@ compile_does_not_infer_owned_slice_for_borrowed_slice_return :: proc(t: ^testing
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, strings.contains(result.output, "#owned"), false)
@@ -27935,7 +28026,7 @@ warn_discarded_imported_str_finish_owned_result :: proc(t: ^testing.T) {
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, strings.contains(result.output, "str__finish(&builder)"), true)
@@ -28866,7 +28957,7 @@ infer_owned_result_consuming_parameter_and_borrowed_result :: proc(t: ^testing.T
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, strings.contains(result.output, "make_values :: proc() -> [dynamic]int"), true)
@@ -28912,7 +29003,7 @@ ownership_audit_tracks_consumption_inside_ordinary_call_arguments :: proc(t: ^te
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, len(result.warnings), 0)
@@ -29052,7 +29143,7 @@ compile_imported_inferred_lifetime_boundaries :: proc(t: ^testing.T) {
         return
     }
     defer delete(result.output)
-    defer delete(result.source_map)
+    defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
     testing.expect_value(t, strings.contains(result.output, "support__make_values :: proc() -> [dynamic]int"), true)
