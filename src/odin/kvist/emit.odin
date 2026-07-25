@@ -11762,8 +11762,8 @@ emit_for_in_loop_body :: proc(e: ^Emitter, coll_form: CST_Form, coll_text, first
             if second_name == "" {
                 bind_local_type(e, first_name, item_ty)
             } else {
-                bind_local_type(e, first_name, "int")
-                bind_local_type(e, second_name, item_ty)
+                bind_local_type(e, first_name, item_ty)
+                bind_local_type(e, second_name, "int")
             }
         }
     }

@@ -22325,7 +22325,13 @@ compile_contextual_data_literals_in_direct_and_overloaded_calls :: proc(t: ^test
 
 (defn source-contains? [value: string] -> bool
   (let [result (source value)]
-    (contains? result [value])))`
+    (contains? result [value])))
+
+(defn indexed-values [values: []string] -> Data
+  (let [result: Data []]
+    (for [value index values]
+      (set! result (kdata.conj result [value index])))
+    result))`
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
@@ -22352,6 +22358,8 @@ compile_contextual_data_literals_in_direct_and_overloaded_calls :: proc(t: ^test
     testing.expect_value(t, strings.contains(output, "kvist_data_lift(kvist_thread_"), true)
     testing.expect_value(t, strings.contains(output, "kvist_data_make_text(Data_Kind.String, option_id)"), true)
     testing.expect_value(t, strings.contains(output, "return kvist_data_contains(result, kvist_thread_"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_data_make_text(Data_Kind.String, value)"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_data_make_int(i64(index))"), true)
 }
 
 @(test)
