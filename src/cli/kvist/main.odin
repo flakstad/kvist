@@ -2820,8 +2820,13 @@ test_command :: proc(input, generated_path, test_names: string, track_memory: bo
     }
     defer cleanup_generated(path, temp_dir, generated_path, package_dir)
 
-    extra_args := make([dynamic]string, 0, 3)
+    extra_args := make([dynamic]string, 0, 4)
     defer delete(extra_args)
+    // Odin's threaded checker still intermittently asserts while
+    // instantiating generic queues in otherwise valid generated test
+    // programs. A test command must be deterministic; compilation speed is
+    // secondary to running the requested suite reliably.
+    append(&extra_args, "-no-threaded-checker")
     append(&extra_args, "-define:ODIN_TEST_THREADS=1")
     append(&extra_args, fmt.tprintf("-define:ODIN_TEST_TRACK_MEMORY=%s", "true" if track_memory else "false"))
     append(&extra_args, fmt.tprintf("-define:ODIN_TEST_FAIL_ON_BAD_MEMORY=%s", "true" if track_memory else "false"))
