@@ -172,6 +172,7 @@ Emitter :: struct {
     warnings:                  ^[dynamic]Compile_Warning,
     line:                      int,
     temp_counter:              int,
+    data_literal_prefix:       string,
     owner_counter:             int,
     attach_next_decl:          bool,
     pending_prefix_directives: [dynamic]string,
@@ -2098,7 +2099,15 @@ emit_quoted_data_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_E
     name := ""
     for {
         e.temp_counter += 1
-        name = fmt.tprintf("kvist_data_literal_%d", e.temp_counter)
+        if e.data_literal_prefix == "" {
+            name = fmt.tprintf("kvist_data_literal_%d", e.temp_counter)
+        } else {
+            name = fmt.tprintf(
+                "kvist_data_literal_%s_%d",
+                e.data_literal_prefix,
+                e.temp_counter,
+            )
+        }
         available := true
         for literal in e.features.data_literals {
             if literal.name == name {
@@ -5976,6 +5985,8 @@ Foreign_Lifetime_Binding :: struct {
 FOREIGN_LIFETIME_BINDINGS :: []Foreign_Lifetime_Binding{
     {"kvist_data_empty_map", .Owned},
     {"kvist_data_make_unique_set", .Owned},
+    {"kvist_data_freeze_items", .Owned},
+    {"kvist_data_freeze_map", .Owned},
     {"kvist_data_retain", .Owned},
     {"kvist_data_assoc", .Owned},
     {"kvist_data_update", .Owned},
@@ -18379,9 +18390,11 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
                 owner_flag := managed_owner_flag_name(e)
                 emit_line(e, fmt.tprintf("%s := true", owner_flag))
                 emit_line(e, fmt.tprintf(
-                    "defer if %s {{ %s }}",
+                    "defer (proc(kvist_place: ^%s, kvist_owner: ^bool) {{ if kvist_owner^ {{ %s }} }})(&%s, &%s)",
+                    managed_ty,
+                    ownership_destroy_value_text(e, managed_ty, "kvist_place^"),
+                    binding.name,
                     owner_flag,
-                    ownership_destroy_value_text(e, managed_ty, binding.name),
                 ))
                 bind_managed_local_owner(e, binding.name, owner_flag)
             }
@@ -20624,6 +20637,7 @@ emit_selected_decls_with_source_map :: proc(
     suppress_shared_helpers := false,
     aggregate_features: ^Emitter_Features = nil,
     initial_features: ^Emitter_Features = nil,
+    data_literal_prefix := "",
     analysis_prepared := false,
     profile: ^Compile_Profile = nil,
     shared_import_cache: ^Emitter_Import_Cache = nil,
@@ -20661,6 +20675,7 @@ emit_selected_decls_with_source_map :: proc(
         source_map = &result.source_map,
         warnings = &result.warnings,
         line     = 1,
+        data_literal_prefix = data_literal_prefix,
         captured_proc_specializations = &captured_specializations,
         import_cache = import_cache,
     }

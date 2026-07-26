@@ -118,7 +118,9 @@ Assignment retains borrowed replacements, moves owned replacements, and
 releases overwritten values. Owned managed values nested directly in call
 arguments or discarded explicitly are released after use. Data-valued `if`,
 `let`, `do`, `type-case`, and `match` expressions normalize their result to one
-owned reference.
+owned reference. Scope cleanup follows the binding by address, so a reassigned
+managed local releases its final value rather than the value present when
+cleanup was registered.
 
 `let` can destructure Data maps, lists, and vectors. Captured subvalues are
 managed locals, so no cleanup marker is needed:
@@ -172,6 +174,17 @@ The compiler applies built-in `Data` lifetime rules:
 stores Data inside native containers, opaque handles, or other lifetimes the
 compiler cannot infer. Ordinary local and returned values should continue to
 use automatic management.
+
+The private Data runtime ABI has explicit compiler-known result contracts.
+Constructors and buffer-freezing operations return one owned reference; view
+and accessor operations return borrowed values. Kvist package wrappers inherit
+those contracts, preventing either a hidden extra retain or a missing retain at
+the `odin-call` boundary. New Data ABI operations must be added to this audited
+contract table and covered by allocation-tracked tests.
+
+Quoted Data constants emitted into a shared generated package retain
+package-qualified identities. Literal numbering is local to an emitter and
+must never make unrelated constants from separate source packages alias.
 
 This is deterministic memory management, not tracing garbage collection.
 Immutable Data cannot create cycles through its public construction API.

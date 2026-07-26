@@ -4,6 +4,38 @@ import "core:os"
 import "core:testing"
 
 @(test)
+compile_cache_verifies_compiler_content_even_when_metadata_matches :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-compiler-fingerprint-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+    path, path_err := os.join_path({dir, "compiler"}, context.allocator)
+    testing.expect_value(t, path_err == nil, true)
+    if path_err != nil {
+        return
+    }
+    defer delete(path)
+
+    testing.expect_value(t, os.write_entire_file_from_string(path, "compiler-a") == nil, true)
+    fingerprint, fingerprint_ok := fingerprint_file(path)
+    testing.expect_value(t, fingerprint_ok, true)
+    if !fingerprint_ok {
+        return
+    }
+    defer delete_dependency_file_fingerprint(&fingerprint)
+    testing.expect_value(t, os.write_entire_file_from_string(path, "compiler-b") == nil, true)
+    size, modification_time_ns, metadata_ok := file_metadata(path)
+    testing.expect_value(t, metadata_ok, true)
+    fingerprint.size = size
+    fingerprint.modification_time_ns = modification_time_ns
+    testing.expect_value(t, file_fingerprint_matches_metadata(fingerprint), true)
+    testing.expect_value(t, compiler_fingerprint_matches(fingerprint), false)
+}
+
+@(test)
 compile_cache_distinguishes_entry_files_in_same_package :: proc(t: ^testing.T) {
     dir, dir_err := os.make_directory_temp("", "kvist-cache-entry-*", context.allocator)
     testing.expect_value(t, dir_err == nil, true)

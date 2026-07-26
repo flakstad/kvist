@@ -868,6 +868,7 @@ emit_ir_program_with_package_artifacts :: proc(
             emitted_decls[:],
             suppress_shared_helpers = true,
             aggregate_features = &group_features,
+            data_literal_prefix = group.id,
             analysis_prepared = true,
             profile = profile,
             shared_import_cache = &import_cache,

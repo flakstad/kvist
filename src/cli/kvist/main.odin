@@ -399,11 +399,11 @@ package_frontend_cache_dir :: proc() -> string {
         return ""
     }
     defer delete(executable)
-    size, modification_time_ns, metadata_ok := file_metadata(executable)
-    if !metadata_ok {
+    content_hash, hash_ok := hash_file_content(executable)
+    if !hash_ok {
         return ""
     }
-    compiler_name := fmt.tprintf("%d-%d", size, modification_time_ns)
+    compiler_name := fmt.tprintf("%016x", content_hash)
     parent, parent_err := os.join_path(
         {base, "package-frontend"},
         context.allocator,

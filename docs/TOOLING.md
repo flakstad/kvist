@@ -199,11 +199,13 @@ used compiler namespaces are retained, with up to 512 entries in each.
 
 Dependency fingerprints are retained separately in `fingerprints/`. A manifest
 records the resolved graph, per-file content hashes, and file/package-directory
-metadata. When that metadata is unchanged, Kvist verifies the graph with
-filesystem metadata checks instead of rereading sources or the compiler binary.
-A changed file, added or removed package file, changed sidecar, or changed
-compiler invalidates the manifest and falls back to discovery and hashing. The
-256 most recently used fingerprint manifests are retained.
+metadata. When source metadata is unchanged, Kvist verifies those inputs
+without rereading their contents. The compiler binary itself is always checked
+by content: size and modification time are not a sufficient identity for a
+rebuilt executable. Package frontend namespaces use that same compiler-content
+identity. A changed file, added or removed package file, changed sidecar, or
+changed compiler invalidates the corresponding cache entry. The 256 most
+recently used fingerprint manifests are retained.
 
 Use the cache transparency commands when investigating a build:
 

@@ -118,6 +118,14 @@ file_fingerprint_matches_metadata :: proc(record: Dependency_File_Fingerprint) -
            modification_time_ns == record.modification_time_ns
 }
 
+compiler_fingerprint_matches :: proc(record: Dependency_File_Fingerprint) -> bool {
+    if !file_fingerprint_matches_metadata(record) {
+        return false
+    }
+    content_hash, ok := hash_file_content(record.path)
+    return ok && content_hash == record.content_hash
+}
+
 reusable_file_fingerprint :: proc(
     manifest: ^Dependency_Fingerprint_Manifest,
     path: string,
@@ -125,7 +133,7 @@ reusable_file_fingerprint :: proc(
     if manifest == nil {
         return {}, false
     }
-    if manifest.compiler.path == path && file_fingerprint_matches_metadata(manifest.compiler) {
+    if manifest.compiler.path == path && compiler_fingerprint_matches(manifest.compiler) {
         return clone_dependency_file_fingerprint(manifest.compiler), true
     }
     for record in manifest.files {
@@ -203,7 +211,7 @@ dependency_fingerprint_manifest_valid :: proc(
        len(manifest.files) == 0 {
         return false
     }
-    if !file_fingerprint_matches_metadata(manifest.compiler) {
+    if !compiler_fingerprint_matches(manifest.compiler) {
         return false
     }
     for record in manifest.files {

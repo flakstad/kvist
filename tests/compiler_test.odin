@@ -3948,7 +3948,7 @@ compile_manages_data_local_bindings_and_returns :: proc(t: ^testing.T) {
 
     testing.expect_value(t, strings.contains(output, "return kvist_data_retain(value)"), true)
     testing.expect_value(t, strings.contains(output, "copy := kvist_data_retain(config)"), true)
-    testing.expect_value(t, strings.contains(output, "{ kvist_data_release(copy) }"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_data_release(kvist_place^)"), true)
     testing.expect_value(t, strings.contains(output, "return (proc(kvist_value: Data, kvist_owner: ^bool) -> Data"), true)
     testing.expect_value(t, strings.contains(output, "return kvist_value })(copy, &kvist_owner_"), true)
     testing.expect_value(t, strings.contains(output, "return kvist_data_retain(kvist_data_get(config"), true)
@@ -4065,7 +4065,7 @@ compile_manages_data_fields_in_native_structs :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "kvist_managed_move_assign_Box :: proc(place: ^Box, value: Box)"), true)
     testing.expect_value(t, strings.contains(output, "return Box{value = kvist_data_retain(value)}"), true)
     testing.expect_value(t, strings.contains(output, "copy := kvist_managed_clone_Box(box)"), true)
-    testing.expect_value(t, strings.contains(output, "{ kvist_managed_destroy_Box(copy) }"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_managed_destroy_Box(kvist_place^)"), true)
     testing.expect_value(t, strings.contains(output, "return (proc(kvist_value: Box, kvist_owner: ^bool) -> Box"), true)
     testing.expect_value(t, strings.contains(output, "return kvist_value })(copy, &kvist_owner_"), true)
     testing.expect_value(t, strings.contains(output, "out.box = kvist_managed_clone_Box(value.box)"), true)
@@ -4142,8 +4142,8 @@ managed_struct_results_move_through_ordinary_control_flow :: proc(t: ^testing.T)
 
     testing.expect_value(t, strings.contains(output, "box := make_box(value)"), true)
     testing.expect_value(t, strings.contains(output, "box := kvist_managed_clone_Box(make_box(value))"), false)
-    testing.expect_value(t, strings.contains(output, "defer if kvist_owner_"), true)
-    testing.expect_value(t, strings.contains(output, "kvist_managed_destroy_Box(box)"), true)
+    testing.expect_value(t, strings.contains(output, "defer (proc(kvist_place: ^Box, kvist_owner: ^bool)"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_managed_destroy_Box(kvist_place^)"), true)
 }
 
 @(test)
@@ -4913,6 +4913,47 @@ compile_honors_managed_data_return_contracts :: proc(t: ^testing.T) {
 }
 
 @(test)
+compile_treats_data_freeze_runtime_results_as_owned :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn freeze-items [values: ^[dynamic]Data] -> Data
+  (odin-call "kvist_data_freeze_items" 2 values))
+
+(defn freeze-map [values: ^[dynamic]Data] -> Data
+  (odin-call "kvist_data_freeze_map" values))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(
+        t,
+        strings.contains(
+            output,
+            "return kvist_data_freeze_items(2, values)",
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            output,
+            "return kvist_data_freeze_map(values)",
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(output, "kvist_data_retain(kvist_data_freeze_"),
+        false,
+    )
+}
+
+@(test)
 compile_releases_nested_owned_data_arguments :: proc(t: ^testing.T) {
     source := `(package main)
 
@@ -5076,7 +5117,7 @@ data_returning_overloads_follow_the_managed_calling_convention :: proc(t: ^testi
 
     testing.expect_value(t, strings.contains(output, "value := select(42)"), true)
     testing.expect_value(t, strings.contains(output, "value := kvist_data_retain(select(42))"), false)
-    testing.expect_value(t, strings.contains(output, "defer if kvist_owner_"), true)
+    testing.expect_value(t, strings.contains(output, "defer (proc(kvist_place: ^Data, kvist_owner: ^bool)"), true)
 }
 
 @(test)
@@ -24837,6 +24878,60 @@ compile_path_emits_imported_package_artifacts :: proc(t: ^testing.T) {
 }
 
 @(test)
+package_artifacts_keep_quoted_data_literals_package_unique :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-package-data-literals-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    support_dir, support_dir_err := os.join_path({dir, "support"}, context.allocator)
+    main_path, main_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    support_path, support_err := os.join_path({support_dir, "support.kvist"}, context.allocator)
+    testing.expect_value(t, support_dir_err == nil && main_err == nil && support_err == nil, true)
+    if support_dir_err != nil || main_err != nil || support_err != nil {
+        return
+    }
+    defer delete(support_dir)
+    defer delete(main_path)
+    defer delete(support_path)
+    testing.expect_value(t, os.make_directory_all(support_dir) == nil, true)
+    testing.expect_value(t, os.write_entire_file_from_string(main_path, `(package main)
+(import support "support")
+(defn root-value [] -> Data '[])
+(defn main [] (println (root-value) (support.value)))`) == nil, true)
+    testing.expect_value(t, os.write_entire_file_from_string(support_path, `(package support)
+(defn value [] -> Data '())`) == nil, true)
+
+    result, err, ok := kvist.compile_path_with_package_artifacts(main_path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer kvist.package_emit_result_delete(&result)
+
+    support_literal_prefix := ""
+    shared_output := ""
+    for artifact in result.artifacts {
+        if strings.contains(artifact.output, "support__value") {
+            support_literal_prefix = fmt.tprintf("kvist_data_literal_%s_", artifact.id)
+        }
+        if artifact.id == "kvp_shared" {
+            shared_output = artifact.output
+        }
+    }
+    testing.expect_value(t, support_literal_prefix != "", true)
+    testing.expect_value(t, shared_output != "", true)
+    testing.expect_value(t, strings.contains(shared_output, support_literal_prefix), true)
+    testing.expect_value(t, strings.contains(result.root.output, support_literal_prefix), false)
+    testing.expect_value(t, strings.contains(shared_output, "kind = .List"), true)
+    testing.expect_value(t, strings.contains(shared_output, "kind = .Vector"), true)
+}
+
+@(test)
 compile_path_root_package_ignores_unrelated_malformed_package_files :: proc(t: ^testing.T) {
     dir, dir_err := os.make_directory_temp("", "kvist-root-package-siblings-*", context.allocator)
     testing.expect_value(t, dir_err == nil, true)
@@ -29062,7 +29157,48 @@ borrowed_data_results_become_safe_managed_locals :: proc(t: ^testing.T) {
         true,
     )
     testing.expect_value(t, strings.contains(output, "item := view(value)"), true)
-    testing.expect_value(t, strings.contains(output, "defer if kvist_owner_"), true)
+    testing.expect_value(t, strings.contains(output, "defer (proc(kvist_place: ^Data, kvist_owner: ^bool)"), true)
+}
+
+@(test)
+managed_cleanup_reads_the_final_value_after_reassignment :: proc(t: ^testing.T) {
+    source := `(package main)
+(import data "kvist:data")
+
+(def input-data '[1 2 3])
+
+(defn build [] -> int
+  (let [out: Data []]
+    (set! out (data.into out input-data))
+    (set! out (data.into out input-data))
+    (data.count out)))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(
+        t,
+        strings.contains(
+            output,
+            "defer (proc(kvist_place: ^Data, kvist_owner: ^bool)",
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(output, "kvist_data_release(kvist_place^)"),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.count(output, "kvist_data_move_assign(&(out)") == 2,
+        true,
+    )
 }
 
 @(test)
