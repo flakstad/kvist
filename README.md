@@ -49,281 +49,64 @@ $ ./kvist run hello.kvist
 hello from kvist
 ```
 
-## Why It Exists
+To install the compiler and shipped packages under a separate root:
 
-Kvist exists to provide a Lisp-shaped way to write native systems programs
-while staying close to Odin's execution model. Memory, ownership, mutation, and
-cleanup remain explicit, but the source becomes more expression-oriented,
-uniform, and macro-friendly.
+```sh
+./scripts/install.sh ~/.local/lib/kvist
+export PATH="$HOME/.local/lib/kvist/bin:$PATH"
+```
 
-In Kvist, calls, declarations, data literals, control flow, and macros all use
-the same basic form. That regularity makes source code easier to read,
-transform, and extend, while the generated program remains straightforward
-native code without a dynamic runtime or garbage collection.
+## Core Model
 
-Odin is the target because it is a beautifully practical systems language: fast
-builds, efficient native code, small binaries, explicit memory, clear data
-layout, direct foreign and vendor package use, and a great core library. Kvist
-keeps those qualities in the generated program while making the source more
-expression-oriented and macro-friendly.
+- Kvist compiles to readable Odin and uses Odin to check, build, and run.
+- Ordinary values are native and statically typed.
+- Allocation, mutation, and cleanup remain explicit.
+- Lisp forms provide uniform syntax and source macros.
+- Immutable `Data` values are available when a heterogeneous data model is
+  useful.
+- Kvist adds no garbage collector or lazy sequence runtime.
 
-Kvist comes with live development support, form evaluation, macro expansion and
-editor integration, providing some of the REPL-like immediacy people love from
-Lisp environments, while the program still builds and runs as native code.
+Kvist and Odin files can live in the same package. Kvist code can import Odin
+packages directly.
 
-## If You Know Odin or Clojure
-
-Kvist is best understood as Odin in parentheses, with a Lisp-shaped surface and
-some significant affordances on top. The execution model, types, ownership, and
-toolchain stay close to Odin; the main additions are expression-oriented syntax,
-macros, source transforms, and more interactive development support.
-
-### If You Know Odin
-
-Most of what matters in Kvist is already Odin. Kvist transpiles to readable
-Odin, and uses Odin for checking, building, and running. The same concrete
-types, structs, enums, unions, pointers, slices, dynamic arrays, `defer`,
-`delete`, and package model are all still there.
-
-What changes is the source shape and the amount of leverage you get at the
-syntax level. Kvist writes Odin-like programs as regular Lisp forms, which
-makes code more uniform and gives you macros and source transformations when
-they are worth using. Kvist code can call Odin packages freely, and `.kvist`
-and `.odin` files can live in the same package, so dropping down to ordinary
-Odin is always an option.
-
-### If You Know Clojure
-
-Kvist borrows many of Clojure's surface strengths: small forms, data literals,
-`let`, `when`, `cond`, threading, macros, field selectors, and a collection
-library that should feel familiar.
-
-Kvist is designed to feel familiar to Clojure programmers, but its semantics
-are those of a native, ownership-oriented systems language. There is no dynamic
-runtime governing ordinary code, no lazy sequence abstraction, and no garbage
-collection. Native collections remain concrete, while first-class immutable
-`Data` provides an explicit persistent data model for heterogeneous Lisp and
-EDN-shaped values. Package `kvist:arr` provides familiar functions such as
-`arr.map`, `arr.filter`, and `arr.reduce`, but they operate on concrete arrays
-and slices.
-Some functions return new owned results, and mutation-oriented variants like
-`arr.map!` update existing storage directly. Kvist also provides compile-time
-fused transforms for allocation-free item pipelines.
-
-If you know Clojure or another Lisp, read
-[docs/FALSE-FRIENDS.md](docs/FALSE-FRIENDS.md) early. Forms such as `for`,
-`when`, `fn`, vector literals, field selectors, and transform steps are
-intentionally Odin-shaped even when their spelling looks familiar.
-
-## A Quick Look
-
-Kvist uses Lisp-style forms, but the program model stays close to Odin. Types
-follow names with `:`, values are concrete, and ownership stays explicit.
-
-This is an ordinary Kvist entry file:
+## Example
 
 ```clojure
 (package main)
 (import fmt "core:fmt")
 
-(defn user-label [name: string score: int] -> string
-  (fmt.tprintf "%s-%d" name score))
-
-(defn main []
-  (fmt.println (user-label "ada" 42)))
-```
-
-Structs are still plain values. You can work with them as values and return
-updated copies, or mutate them explicitly through pointers when that is the right tool:
-
-```clojure
-(defstruct Score {
-  value: int
-  bonus: int
+(defstruct User {
+  name: string
+  score: int
 })
 
-;; Returning a changed copy of `score`
-(defn apply-bonus [score: Score] -> Score
-  (-> score
-      (update .value + score.bonus)
-      (assoc .bonus 0)))
-
-;; Mutating `score` in place through a pointer
-(defn apply-bonus! [score: ^Score]
-  (mut! score^.value += score^.bonus)
-  (set! score^.bonus 0))
+(defn main []
+  (let [user (User {name: "Ada" score: 42})]
+    (fmt.println user.name user.score)))
 ```
-
-## Fused Data Transforms
-
-For repeated data shaping, Kvist can compile a transform pipeline into the
-same kind of direct Odin loop you would write by hand. The transform describes
-the item flow once; `into`, `transduce`, and `for :transform` choose how to
-consume it.
-
-```clojure
-(deftransform paid-totals
-  (filter paid?)
-  (map order-total)
-  (filter positive?))
-
-(into [dynamic]int paid-totals orders)      ; collect
-(transduce paid-totals + 0 orders)          ; reduce
-(transduce paid-totals max 0 orders)        ; reduce with a built-in reducer
-
-(for [total orders :transform paid-totals]  ; loop
-  (println total))
-```
-
-These forms do not build lazy sequences or intermediate arrays. See
-[docs/FUNCTIONAL-TRANSFORMS.md](docs/FUNCTIONAL-TRANSFORMS.md) and
-[examples/collections/data-transforms.kvist](examples/collections/data-transforms.kvist).
-
-## Ownership Is Part Of The Code
-
-Owned dynamic arrays and maps need cleanup. Use `defer` when a local owns
-memory:
-
-```clojure
-(import "kvist:arr" :as arr)
-
-(defn print-range []
-  (let [xs (arr.range 0 8)]
-    (defer (delete xs)) ; Explicit cleanup.
-    (for [x xs]
-      (println x))))
-```
-
-For local bindings, `:defer` expands to cleanup at the end of the scope:
-
-```clojure
-(import "kvist:arr" :as arr)
-
-(defn print-squares []
-  (let [xs (arr.range 0 8) :defer ; :defer is let-binding sugar for defer/delete.
-        squares (arr.map (fn [x: int] -> int (* x x)) xs) :defer]
-    (for [square squares]
-      (println square))))
-```
-
-Use `:defer-with` when a value needs a custom destructor:
-
-```clojure
-(let [items (collection-items store collection-id)
-      :defer-with destroy-items!]
-  (render-items items))
-```
-
-Kvist infers useful lifetime boundaries from ordinary code:
-
-```clojure
-(defn make-items [] -> [dynamic]Item
-  (make [dynamic]Item))
-
-(defn consume [items: [dynamic]Item]
-  (delete items))
-
-(defn view [value: Data] -> Data
-  value)
-```
-
-Here `make-items` returns new storage, `consume` consumes its argument because
-its body deletes it, and `view` aliases a borrowed Data input in its body. The
-Data return boundary retains that alias and gives the caller one owned
-reference. No ownership syntax changes the native type. Run
-`kvist lifetimes file.kvist` to inspect these inferred boundaries.
-
-Kvist automatically manages `Data` references and Kvist structs whose
-nontrivial lifetime comes entirely from contained `Data`. Ordinary native
-strings, dynamic arrays, maps, and opaque resources keep Odin's explicit
-style: use `defer`, `:defer`, or `:defer-with` and ordinary cleanup
-procedures. Lifetime inference still diagnoses definite mistakes and moves a
-tracked native value into a proven consuming boundary; it does not silently
-install native cleanup. Typed `data.decode` results are a narrow structural
-exception because that boundary proves exactly what was allocated. There is no
-naming convention that turns `Type-destroy` or `Type-clone` into language
-behavior, and there is no tracing collector. See
-[docs/LANGUAGE.md](docs/LANGUAGE.md).
-
-For ordinary string construction, core `str` renders its arguments without
-interpreting braces or percent signs contained in string values:
-
-```clojure
-(let [request (str "@get('" updates-path
-                    "', {openWhenHidden: true})")
-      :defer]
-  (println request))
-```
-
-Inline collection literals follow the same rule. In common expression contexts,
-`[1 2 3]` creates owned dynamic array storage, not a persistent vector value:
-
-```clojure
-(let [xs [1 2 3] :defer]
-  (println (count xs)))
-```
-
-For the full language surface, see [docs/LANGUAGE.md](docs/LANGUAGE.md). For
-more runnable examples, see [examples/README.md](examples/README.md).
 
 ## Tooling
-
-The CLI is built around the normal edit/check/run loop:
 
 ```sh
 ./kvist check examples/language/hello.kvist
 ./kvist run examples/language/hello.kvist
-./kvist build examples/language/hello.kvist --out dist/hello
 ./kvist test examples/coverage/packages/test-package-tests.kvist
-./scripts/smoke.sh
-```
-
-It also supports source-aware evaluation and expansion:
-
-```sh
 ./kvist eval examples/collections/higher-order.kvist '(threaded-total)'
 ./kvist expand examples/collections/higher-order.kvist '(threaded-total)'
-./kvist macroexpand examples/language/data-literals.kvist \
-  '(with-allocator [allocator context.temp_allocator] (temp-buffer-len))'
 ```
 
-Editor-oriented symbol queries use the same CLI:
-
-```sh
-./kvist doc examples/collections/log-source.kvist log-lines
-./kvist lookup examples/collections/log-source.kvist log-lines
-./kvist complete examples/collections/log-source.kvist log
-```
-
-For the full surface, see [docs/TOOLING.md](docs/TOOLING.md). For live
-development workflows, see [docs/LIVE-DEVELOPMENT.md](docs/LIVE-DEVELOPMENT.md).
-
-## Repository Map
-
-- `src/odin/` - compiler, runtime, and support Odin packages
-- `src/kvist/` - shipped Kvist source packages
-- `src/cli/kvist/` - CLI
-- `examples/` - runnable examples and package coverage
-- `tests/` - compiler tests
-- `docs/` - focused notes for deeper topics
-- `emacs/` - editor integration
+Run `./scripts/smoke.sh` for a quick local check.
 
 ## Documentation
 
-- [docs/README.md](docs/README.md) - guide to the docs set
-- [docs/LANGUAGE.md](docs/LANGUAGE.md) - language reference
-- [docs/MACROS.md](docs/MACROS.md) - macro authoring
-- [docs/SEQUENCES.md](docs/SEQUENCES.md) - collection helpers
-- [docs/DATA.md](docs/DATA.md) - first-class quoted data and runtime value semantics
-- [docs/PACKAGES.md](docs/PACKAGES.md) - shipped package index
-- [kvist-lang/html](https://github.com/kvist-lang/html) - optional HTML rendering package
-- [kvist-lang/http](https://github.com/kvist-lang/http) - optional HTTP package
-- [docs/TESTING.md](docs/TESTING.md) - tests, assertions, fixtures, and table checks
-- [docs/FUNCTIONAL-TRANSFORMS.md](docs/FUNCTIONAL-TRANSFORMS.md) - fused data transforms
-- [docs/PARALLEL.md](docs/PARALLEL.md) - tasks and parallel collection helpers
-- [docs/TOOLING.md](docs/TOOLING.md) - CLI/editor tooling
-- [docs/LIVE-DEVELOPMENT.md](docs/LIVE-DEVELOPMENT.md) - resident reload and scratch eval workflows
-- [examples/README.md](examples/README.md) - example guide
+- [Language reference](docs/language.md)
+- [Data](docs/data.md)
+- [Sequences](docs/sequences.md)
+- [Transforms](docs/transforms.md)
+- [Macros](docs/macros.md)
+- [Packages](docs/packages.md)
+- [Tooling](docs/tooling.md)
+- [Examples](examples/README.md)
 
 ## License
 

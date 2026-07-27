@@ -103,8 +103,7 @@ Use `:once` for setup that should run before the first wrapped test body:
 (t.use-fixtures :once once-fixture)
 ```
 
-Current `:once` fixtures are setup-only. They do not receive a teardown
-continuation.
+`:once` fixtures are setup-only. They do not receive a teardown continuation.
 
 Use `:each` for wrappers around every later test:
 
@@ -133,8 +132,7 @@ up, usually with `:defer` or `defer`:
     (t.is (= (count xs) 4))))
 ```
 
-The test package keeps assertion plumbing tidy; it does not hide ownership or
-allocator rules. No confetti cannon of implicit cleanup here.
+The test package does not hide ownership or allocator rules.
 
 ## Examples
 

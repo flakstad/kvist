@@ -1,10 +1,10 @@
-# Parallel Package
+# Parallel
 
 `kvist:parallel` wraps common `core:thread` and channel cleanup without adding
 an async runtime, coroutine scheduler, or hidden worker system. It is a small
 thread-backed helper package for explicit parallel work.
 
-## Current Surface
+## Tasks
 
 ```clojure
 (import p "kvist:parallel")
@@ -67,15 +67,15 @@ items.
 
 Explicit worker counts are clamped to at least `1` and at most `len(xs)`.
 
-## Current Limits
+## Limits
 
 - `p.start` workers must be known named workers or inline `fn` literals
 - `p.start` workers must return exactly one value
 - `p.detach` workers must not return a value
-- `p.map` currently accepts a known named one-argument worker or inline
+- `p.map` accepts a known named one-argument worker or inline
   one-argument `fn`
 - `p.map-with` accepts only `{workers: n}` options
-- `p.for` currently accepts a known named one-argument worker or inline
+- `p.for` accepts a known named one-argument worker or inline
   one-argument `fn` with no return value
 - `p.for-with` accepts only `{workers: n}` options
 - `p.result` is blocking and consumes the task handle

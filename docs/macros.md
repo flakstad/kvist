@@ -1,4 +1,4 @@
-# Kvist Macros
+# Macros
 
 Kvist macros run before ordinary parsing and Odin emission. They transform
 Kvist forms into Kvist forms. They do not run at program runtime, and they do
@@ -13,9 +13,6 @@ Use macros when the shape of the source is the important part:
 - reading small compile-time resources into generated declarations
 
 Prefer ordinary functions when runtime values are enough.
-
-Macros are excellent when syntax is the problem; prefer a function when runtime
-values are enough.
 
 ## Basic Form
 

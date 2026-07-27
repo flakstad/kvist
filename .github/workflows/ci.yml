@@ -41,7 +41,7 @@ jobs:
 
       - name: Build CLI
         shell: bash
-        run: odin build cmd/kvist -out:./kvist${{ matrix.exe_suffix }}
+        run: odin build src/cli/kvist -out:./kvist${{ matrix.exe_suffix }}
 
       - name: Smoke test CLI
         shell: bash

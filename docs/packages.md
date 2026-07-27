@@ -1,4 +1,4 @@
-# Kvist Packages
+# Packages
 
 Kvist ships its language and runtime support as source packages. Installed
 packages live directly under the Kvist root and use `kvist:*` imports:
@@ -31,17 +31,8 @@ importing repository for shipped packages.
 - `kvist:test` - tests, assertions, fixtures, and table checks.
 - `kvist:regex` - owned regular-expression compilation and matching helpers.
 
-See [SEQUENCES.md](SEQUENCES.md), [PARALLEL.md](PARALLEL.md), and
-[TESTING.md](TESTING.md) for the larger package surfaces.
-
-## Shipped Development Support
-
-- `kvist:reload` - checkpoints for resident reload hosts.
-- `kvist:hot` - hot-reload module export macros.
-- `kvist:live` - live module, command, and hook declarations.
-
-The supporting Odin runtime is installed under `odin/olive_reload`. See
-[LIVE-DEVELOPMENT.md](LIVE-DEVELOPMENT.md) for the workflow.
+See [sequences.md](sequences.md), [parallel.md](parallel.md), and
+[testing.md](testing.md) for the larger package surfaces.
 
 ## Optional Official Packages
 

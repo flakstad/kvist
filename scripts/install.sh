@@ -19,7 +19,7 @@ trap cleanup EXIT HUP INT TERM
 mkdir -p "$staging/bin" "$staging/odin"
 odin build "$repo_root/src/cli/kvist" -o:speed -out:"$staging/bin/kvist"
 
-for package in core bit arr map set str soa parallel test regex reload hot live; do
+for package in core data edn bit arr map set str soa parallel test regex reload hot live; do
   cp -R "$repo_root/src/kvist/$package" "$staging/$package"
 done
 cp -R "$repo_root/src/odin/olive_reload" "$staging/odin/olive_reload"
@@ -28,7 +28,7 @@ mkdir -p "$destination/bin" "$destination/odin"
 rm -f "$destination/bin/kvist"
 mv "$staging/bin/kvist" "$destination/bin/kvist"
 
-for package in core bit arr map set str soa parallel test regex reload hot live; do
+for package in core data edn bit arr map set str soa parallel test regex reload hot live; do
   rm -rf "$destination/$package"
   mv "$staging/$package" "$destination/$package"
 done

@@ -157,7 +157,7 @@ Use a command name on `exec-path' or an explicit executable path."
                   path
                 (file-name-directory (expand-file-name path)))))
     (or (locate-dominating-file dir "src/cli/kvist/main.odin")
-        (locate-dominating-file dir "LANGUAGE.md")
+        (locate-dominating-file dir "docs/language.md")
         (locate-dominating-file dir ".git")
         dir)))
 

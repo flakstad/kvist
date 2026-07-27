@@ -1,4 +1,4 @@
-# Kvist Language Reference
+# Language Reference
 
 Kvist is a small Lisp-shaped source language that lowers to ordinary Odin.
 It keeps Odin's execution model visible: values are concrete, mutation is
@@ -36,8 +36,6 @@ Use this document as a reference, not a tutorial:
 
 - start with the sections on files, names, types, declarations, and calls if
   you want the core language model
-- read [FALSE-FRIENDS.md](FALSE-FRIENDS.md) early if you know Clojure or other
-  Lisps; several familiar-looking forms keep Odin-shaped semantics
 - read the ownership and pointer sections before writing larger programs
 - use the focused docs for helper-library surfaces such as sequences,
   transforms, macros, and tooling
@@ -1921,7 +1919,7 @@ struct is useful:
 collection. A result destructuring binding schedules deterministic cleanup,
 including recursive destruction of managed struct elements. Direct decoding
 also validates the complete Data vector before allocating native storage.
-Native string arrays and borrowed slices remain future work.
+Native string arrays and borrowed slices are not supported decode targets.
 
 ### Validating Data Without Decoding
 
@@ -2431,7 +2429,7 @@ Typical examples:
 (str.trim input)
 ```
 
-See [SEQUENCES.md](SEQUENCES.md) for collection helpers and ownership details.
+See [sequences.md](sequences.md) for collection helpers and ownership details.
 
 ## Compile-Time Forms
 
@@ -2505,131 +2503,12 @@ Odin loops rather than intermediate arrays.
 (into [dynamic]int paid-order-totals orders)
 (transduce paid-order-totals + 0 orders)
 
-(into [dynamic]int (map order-total) orders)
-(transduce (filter paid?) + 0 orders)
-
-(let [minimum 40]
-  (into [dynamic]int
-    (comp
-      (filter (fn [order: Order] -> bool (= order.status 2)))
-      (map (fn [order: Order] -> int (- order.amount order.discount)))
-      (filter (fn [total: int] -> bool (> total minimum))))
-    orders))
-
-(transduce paid-order-totals
-  (fn [acc: int, total: int] -> int (+ acc total))
-  0 orders)
-(transduce paid-order-totals
-  (fn [sum: int, total: int] -> int
-    (let [next (+ sum total)]
-      (if (>= next 100)
-        (reduced next)
-        next)))
-  0 orders)
-(transduce paid-order-totals min 999 orders)
-(transduce paid-order-totals max 0 orders)
-
-(transduce (filter positive?) + 0 lookup) ; map values
-(transduce
-  (map (fn [entry: (map.entry string int)] -> int entry.value))
-  + 0
-  (map.entries lookup)) ; explicit map entries
-(into map[string]int
-  (map (fn [entry: (map.entry string int)] -> (map.entry string int) entry))
-  (map.entries lookup)) ; build a map from entries
-(into set[string]
-  (map (fn [entry: (map.entry string int)] -> string entry.key))
-  (map.entries lookup)) ; build a set from values
-(transduce (filter even?) + 0 (arr.range 0 100)) ; source loop, no range array
-(transduce (map inc) + 0 (arr.repeat 4 2)) ; source loop, no repeat array
-
 (for [total orders :transform paid-order-totals]
   (println total))
-
-(for [idx total orders :transform paid-order-totals]
-  (println idx total))
-
-(for [key total lookup :transform (filter positive?)]
-  (println key total))
 ```
 
-The current transform surface is intentionally small:
-
-- transform specs support `map`, `map-indexed`, `mapcat`, `filter`, `remove`,
-  `keep`, `take`, `take-while`, `drop`, and `drop-while`
-- `comp` composes steps and named transforms
-- callbacks can be known functions, inline `fn` literals with explicit return
-  types, or field selectors where the step supports selectors
-- `into` currently returns fresh owned `[dynamic]T` arrays, owned maps, and
-  owned sets
-- `transduce` supports `+`, `min`, `max`, known two-argument reducers, and
-  inline `fn` reducers; inline reducers can use direct-branch `reduced` to
-  stop early, optionally inside a simple reducer-local `let`
-- inputs can be slices, arrays, dynamic arrays, maps, or `defiter` calls
-- `into` can build owned dynamic arrays, owned maps, or owned sets; map output
-  expects `(map.entry K V)` values
-- `into` reserves capacity for counted collection sources when the count is
-  obvious to the lowering
-- map inputs transform values by default; `(map.entries m)` transforms explicit
-  `(map.entry K V)` values with `key` and `value` fields
-- `arr.range`, `arr.repeat`, `arr.repeatedly`, `arr.iterate`, `arr.cycle`, and
-  `arr.take-nth` inputs used directly as `for` or transform sources lower
-  through the generic source protocol instead of allocating helper arrays;
-  ordinary expression use materializes the iterator to an owned dynamic array
-
-See [FUNCTIONAL-TRANSFORMS.md](FUNCTIONAL-TRANSFORMS.md) for limits and
-lowering.
-
-### SOA Helpers
-
-`kvist:soa` is a shipped helper package rather than core language syntax, but
-it is documented briefly here because its surface is compile-time and closely
-tied to Kvist macros.
-
-The `kvist:soa` package provides compile-time helpers for struct-of-arrays
-storage:
-
-```clojure
-(import soa "kvist:soa")
-
-(defstruct Particle {
-  x: f32
-  y: f32
-  vx: f32
-  vy: f32
-})
-
-(let [particles (soa.make Particle 10000)]
-  (defer (delete particles))
-  (soa.push! (addr particles) (Particle {x: 0 y: 0 vx: 1 vy: 1}))
-  (soa.update! particles i .x (+ x dx) .y (+ y dy)))
-```
-
-The underlying storage type uses Odin's `#soa[...]T` spelling. Kvist accepts it
-as a type and constructor:
-
-```clojure
-(defstruct State {
-  particles: #soa[dynamic]Particle
-})
-
-(let [particles (#soa[dynamic]Particle [(Particle {x: 0 y: 0 vx: 1 vy: 1})])]
-  (defer (delete particles))
-  ...)
-```
-
-Whole-column helpers include:
-
-```clojure
-(soa.fill! particles .x 0.0)
-(soa.scale! particles .vx damping)
-(soa.axpy! particles .x dt .vx)
-(soa.sum-into! total particles .mass)
-(soa.dot-into! total particles .vx .vx)
-```
-
-For the broader `kvist:soa` package surface and usage patterns, prefer the
-package source and runnable examples.
+See [transforms.md](transforms.md) for supported steps, sources, outputs, and
+ownership.
 
 ### Macros
 
@@ -2645,7 +2524,7 @@ Kvist syntax.
 
 Use macros when the source shape matters more than runtime values.
 
-See [MACROS.md](MACROS.md) for the full macro authoring surface.
+See [macros.md](macros.md) for the full macro authoring surface.
 
 ## Documentation And Comments
 
@@ -2683,12 +2562,13 @@ notes that should remain in the source file but not reach lowering or runtime.
 
 ## Related Docs
 
-- [SEQUENCES.md](SEQUENCES.md) - collection helpers and ownership details
-- [PACKAGES.md](PACKAGES.md) - shipped `kvist:*` package index
-- [FUNCTIONAL-TRANSFORMS.md](FUNCTIONAL-TRANSFORMS.md) - `deftransform`,
+- [data.md](data.md) - immutable heterogeneous data
+- [sequences.md](sequences.md) - collection helpers and ownership details
+- [packages.md](packages.md) - shipped `kvist:*` package index
+- [transforms.md](transforms.md) - `deftransform`,
   `into`, `transduce`
-- [MACROS.md](MACROS.md) - macro authoring
-- [TOOLING.md](TOOLING.md) - CLI and editor tooling
+- [macros.md](macros.md) - macro authoring
+- [tooling.md](tooling.md) - CLI and editor tooling
 - [examples/README.md](../examples/README.md) - runnable language and package examples
 - [Odin Overview](https://odin-lang.org/docs/overview/) - Odin's value,
   package, pointer, allocator, and procedure model

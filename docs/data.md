@@ -1,9 +1,8 @@
-# Data-oriented programming in Kvist
+# Data
 
-`Data` is Kvist's immutable heterogeneous value for messages, application
-state, configuration, queries, HTML-shaped trees, and evolving schemas. It
-provides a Clojure-familiar vocabulary without importing Clojure's lazy
-sequence or garbage-collected execution model.
+`Data` is Kvist's immutable heterogeneous value for messages, configuration,
+queries, document trees, and evolving schemas. Its collection operations are
+eager and deterministically managed.
 
 ```clojure
 (import data "kvist:data")
@@ -178,8 +177,7 @@ Predicates return native `bool`:
 (data.not-any? archived? matters)
 ```
 
-Kvist uses `some?`, not Clojure's result-returning `some`. Use `data.find` when
-the matching item is needed:
+`some?` returns a boolean. Use `data.find` when the matching item is needed:
 
 ```clojure
 (let [[matter ok] (data.find urgent? matters)]
@@ -220,9 +218,8 @@ entry vectors; its callback returns one `[key value]` Data value.
 
 ## Destructuring and structural matching
 
-Data maps and sequential values support Clojure-style `let` destructuring,
-including nested patterns, `:keys`, `:strs`, `:syms`, `:or`, `:as`, and
-sequential rest bindings:
+Data maps and sequential values support nested `let` destructuring with
+`:keys`, `:strs`, `:syms`, `:or`, `:as`, and sequential rest bindings:
 
 ```clojure
 (let [{:keys [name roles]
@@ -354,8 +351,8 @@ Use the EDN package for readable output:
   ...)
 ```
 
-`pr-str` is the Clojure-familiar alias for canonical `edn.write`. `pr` and
-`prn` write canonical one-line EDN. `pretty`, `pretty-with`, `pprint`, and
+`pr-str` is an alias for canonical `edn.write`. `pr` and `prn` write canonical
+one-line EDN. `pretty`, `pretty-with`, `pprint`, and
 `pprint-with` provide multiline rendering. Plain native `println` remains an
 Odin-level structural debug print and can expose Data backing details.
 
@@ -376,7 +373,7 @@ Low-level native boundaries use `list-from-array`, `vector-from-array`,
 `set-from-array`, and `map-from-alternating`. Application code rarely needs
 them.
 
-## Important false friends
+## Rules To Remember
 
 - Data `map`, `filter`, and friends are eager, not lazy.
 - Keyword/map invocation is compiler-lowered lookup, not a universal `IFn`.

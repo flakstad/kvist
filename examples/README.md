@@ -33,7 +33,6 @@ fixtures live under `coverage/` so the tutorial path stays readable.
 - `coverage/` - compiler/package fixtures used by tests and scripts
 - `interop/` - direct Odin package/vendor interop
 - `visual/` - raylib demos and simulations
-- `reload/` - live and native hot-reload experiments
 - `support/` - source packages imported by examples
 
 ## Run
@@ -72,7 +71,7 @@ Package examples are the practical companion to the docs:
 - [`packages/parallel.kvist`](./packages/parallel.kvist) - `kvist:parallel`
 - [`packages/soa.kvist`](./packages/soa.kvist) - `kvist:soa`
 
-For the package map, see [`../docs/PACKAGES.md`](../docs/PACKAGES.md).
+For the package map, see [`../docs/packages.md`](../docs/packages.md).
 
 ## Visual Examples
 
@@ -80,20 +79,9 @@ Visual examples need the same native dependencies as the generated Odin code.
 For a quick raylib check:
 
 ```sh
-./kvist examples/visual/matrix-kinematics.kvist -o /tmp/matrix-kinematics.odin
+./kvist compile examples/visual/matrix-kinematics.kvist -o /tmp/matrix-kinematics.odin
 odin run /tmp/matrix-kinematics.odin -file
 ```
 
 Larger visual demos such as `particle-sim`, `stable-fluids`, and `robo-mower`
 are useful stress tests, not first-reading material.
-
-## Reload Examples
-
-Reload examples have their own local notes:
-
-- [`reload/live_reload_demo/README.md`](./reload/live_reload_demo/README.md)
-- [`reload/live_commands_demo/README.md`](./reload/live_commands_demo/README.md)
-- [`reload/reload_step_demo/README.md`](./reload/reload_step_demo/README.md)
-- [`reload/reload_run_demo/README.md`](./reload/reload_run_demo/README.md)
-- [`reload/hot_reload_demo/README.md`](./reload/hot_reload_demo/README.md)
-- [`reload/hybrid_live_demo/README.md`](./reload/hybrid_live_demo/README.md)
