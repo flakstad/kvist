@@ -24878,6 +24878,60 @@ compile_path_emits_imported_package_artifacts :: proc(t: ^testing.T) {
 }
 
 @(test)
+package_artifacts_do_not_rewrite_dependency_locals_as_root_symbols :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp("", "kvist-package-local-shadow-*", context.allocator)
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    support_dir, support_dir_err := os.join_path({dir, "support"}, context.allocator)
+    main_path, main_err := os.join_path({dir, "main.kvist"}, context.allocator)
+    support_path, support_err := os.join_path({support_dir, "support.kvist"}, context.allocator)
+    testing.expect_value(t, support_dir_err == nil && main_err == nil && support_err == nil, true)
+    if support_dir_err != nil || main_err != nil || support_err != nil {
+        return
+    }
+    defer delete(support_dir)
+    defer delete(main_path)
+    defer delete(support_path)
+    testing.expect_value(t, os.make_directory_all(support_dir) == nil, true)
+    testing.expect_value(t, os.write_entire_file_from_string(main_path, `(package main)
+(import data "kvist:data")
+(import support "support")
+(defn map-value [] -> int 42)
+(defn main [] -> bool
+  (and (data.nil? nil) (= (support.identity 7) 7)))`) == nil, true)
+    testing.expect_value(t, os.write_entire_file_from_string(support_path, `(package support)
+(defn identity [map-value: int] -> int map-value)`) == nil, true)
+
+    result, err, ok := kvist.compile_path_with_package_artifacts(main_path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer kvist.package_emit_result_delete(&result)
+
+    found_support := false
+    found_shared_runtime := false
+    for artifact in result.artifacts {
+        testing.expect_value(t, strings.contains(artifact.output, "root.map_value"), false)
+        if strings.contains(artifact.output, "support__identity") {
+            found_support = true
+            testing.expect_value(t, strings.contains(artifact.output, "map_value: int"), true)
+        }
+        if artifact.id == "kvp_shared" {
+            found_shared_runtime = true
+        }
+    }
+    testing.expect_value(t, found_support, true)
+    testing.expect_value(t, found_shared_runtime, true)
+}
+
+@(test)
 package_artifacts_keep_quoted_data_literals_package_unique :: proc(t: ^testing.T) {
     dir, dir_err := os.make_directory_temp("", "kvist-package-data-literals-*", context.allocator)
     testing.expect_value(t, dir_err == nil, true)

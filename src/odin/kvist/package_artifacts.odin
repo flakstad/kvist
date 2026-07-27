@@ -627,6 +627,13 @@ foreign_package_symbol_map :: proc(
     current: int,
 ) -> map[string]Package_Symbol_Origin {
     origins := make(map[string]Package_Symbol_Origin)
+    // The shared runtime is a dependency of every generated source package;
+    // it cannot depend on declarations from any of them. Besides creating a
+    // backwards package edge, treating their symbols as visible here can
+    // rewrite an unrelated runtime parameter or local with the same name.
+    if groups[current].id == "kvp_shared" {
+        return origins
+    }
     local := make(map[string]bool)
     defer delete(local)
     for symbol in groups[current].symbols {
@@ -634,6 +641,13 @@ foreign_package_symbol_map :: proc(
     }
     for group, idx in groups {
         if idx == current {
+            continue
+        }
+        // Imported source packages are compiled independently of the root
+        // application. A root declaration therefore cannot be a dependency
+        // of an imported package, even when its generated name happens to
+        // match an identifier in that package.
+        if !groups[current].is_root && group.is_root {
             continue
         }
         for symbol in group.symbols {
