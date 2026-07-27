@@ -1,0 +1,24 @@
+(package main)
+(import core "kvist:core")
+(import data "kvist:data")
+
+(defn add-int [value: Data, amount: i64] -> Data
+  (data.from-int (+ (data.int value) amount)))
+
+(defn main []
+  (let [original '{:score 40
+                   :status :draft
+                   :obsolete true
+                   :user {:name "Ada"
+                          :secret "analytical-engine"}}
+        updated (assoc original :status :ready)
+        scored (update updated :score add-int 2)
+        cleaned (dissoc scored :obsolete :missing)
+        public (dissoc-in cleaned '[:user :secret])]
+    (assert (= (data.int (get public :score)) 42))
+    (assert (= (get public :status) ':ready))
+    (assert (data.nil? (get public :obsolete)))
+    (assert (data.nil? (get (get public :user) :secret)))
+    (assert (= (data.string (get (get original :user) :secret)) "analytical-engine"))
+    (println original)
+    (println public)))

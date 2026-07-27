@@ -7,4 +7,5 @@
 (import p "./order-independent")
 
 (t.deftest package-file-order-independent
-  (t.is (= (p.read-box) 42)))
+  (t.is (= (p.read-box) 42))
+  (t.is (= (p.read-default-box) 17)))

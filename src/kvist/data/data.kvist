@@ -5,6 +5,42 @@
 (import core "kvist:core")
 (import arr "kvist:arr")
 
+(defstruct Decode-Error {
+  path: Data
+  expected: Data-Kind
+  actual: Data-Kind
+  enum-value?: bool
+  expected-type: string
+  actual-value: Data
+})
+
+(defn decode-error
+  [path: Data, expected: Data-Kind, actual: Data-Kind] -> Decode-Error
+  (Decode-Error {path: path expected: expected actual: actual}))
+
+(defn- decode-enum-error
+  [path: Data, expected-type: string, actual-value: Data] -> Decode-Error
+  (Decode-Error {
+    path: path
+    expected: .Keyword
+    actual: (kind actual-value)
+    enum-value?: true
+    expected-type: expected-type
+    actual-value: actual-value
+  }))
+
+(defmacro decode
+  "Decode Data into a native value selected by type.
+
+  `(decode Person value)` returns `[decoded err ok]`. An optional third
+  argument supplies the Data path used as the root of path-aware errors."
+  [target-type value & rest]
+  (if (= (count rest) 0)
+    `(decode-data ~target-type ~value)
+    (if (= (count rest) 1)
+      `(decode-data ~target-type ~value ~(first rest))
+      (error "data.decode expects type, value, and optional path"))))
+
 (defn from-nil
   "Construct nil Data."
   [] -> Data #owned #force_inline
@@ -99,6 +135,14 @@
   [collection: Data, key: Data] -> Data #owned #force_inline
   (odin-call "kvist_data_dissoc" collection key))
 
+(defn dissoc-in
+  "Remove the leaf association at `path` from nested map Data.
+
+  `path` is list or vector Data. Empty parent maps are preserved and a missing
+  path leaves `collection` unchanged."
+  [collection: Data, path: Data] -> Data #owned #force_inline
+  (odin-call "kvist_data_dissoc_in" collection path))
+
 (defn conj
   "Return immutable sequential or set Data with `value` added."
   [collection: Data, value: Data] -> Data #owned #force_inline
@@ -171,6 +215,45 @@
   "Return the runtime kind of `value`."
   [value: Data] -> Data-Kind #force_inline
   (odin-call "kvist_data_kind" value))
+
+(defn decode-int-at
+  "Decode integer Data to `i64`.
+
+  `path` identifies the value in the surrounding input and is retained in the
+  returned error. The zero `Decode-Error` and true boolean indicate success."
+  [value: Data, path: Data] -> [decoded: i64, err: Decode-Error, ok: bool]
+  (if (int? value)
+    (return (int value) {} true)
+    (return 0 (decode-error path .Int (kind value)) false)))
+
+(defn decode-int
+  "Decode root integer Data to `i64`."
+  [value: Data] -> [decoded: i64, err: Decode-Error, ok: bool]
+  (decode-int-at value '[]))
+
+(defn decode-float-at
+  "Decode floating-point Data to `f64`, preserving `path` on failure."
+  [value: Data, path: Data] -> [decoded: f64, err: Decode-Error, ok: bool]
+  (if (float? value)
+    (return (float value) {} true)
+    (return 0 (decode-error path .Float (kind value)) false)))
+
+(defn decode-float
+  "Decode root floating-point Data to `f64`."
+  [value: Data] -> [decoded: f64, err: Decode-Error, ok: bool]
+  (decode-float-at value '[]))
+
+(defn decode-bool-at
+  "Decode boolean Data to `bool`, preserving `path` on failure."
+  [value: Data, path: Data] -> [decoded: bool, err: Decode-Error, ok: bool]
+  (if (bool? value)
+    (return (bool value) {} true)
+    (return false (decode-error path .Bool (kind value)) false)))
+
+(defn decode-bool
+  "Decode root boolean Data to `bool`."
+  [value: Data] -> [decoded: bool, err: Decode-Error, ok: bool]
+  (decode-bool-at value '[]))
 
 (defn nil? [value: Data] -> bool #force_inline
   (odin-call "kvist_data_nil_p" value))

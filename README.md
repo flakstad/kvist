@@ -206,9 +206,27 @@ For local bindings, `:defer` expands to cleanup at the end of the scope:
       (println square))))
 ```
 
+Use `:defer-with` when a value needs a custom destructor:
+
+```clojure
+(let [items (collection-items store collection-id)
+      :defer-with destroy-items!]
+  (render-items items))
+```
+
 Use `:defer`, return the owned value, or pass it to an API that takes ownership.
 There is no hidden collector cleaning up behind the scenes. See
 [docs/LANGUAGE.md](docs/LANGUAGE.md) for the ownership and allocator rules.
+
+For ordinary string construction, core `str` renders its arguments without
+interpreting braces or percent signs contained in string values:
+
+```clojure
+(let [request (str "@get('" updates-path
+                    "', {openWhenHidden: true})")
+      :defer]
+  (println request))
+```
 
 Inline collection literals follow the same rule. In common expression contexts,
 `[1 2 3]` creates owned dynamic array storage, not a persistent vector value:

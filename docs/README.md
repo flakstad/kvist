@@ -12,6 +12,8 @@ Start here:
 - [TOOLING.md](TOOLING.md) - CLI and editor-facing tooling
 - [SEQUENCES.md](SEQUENCES.md) - collection helpers and their ownership model
 - [DATA.md](DATA.md) - first-class quoted data and managed runtime value design
+- [ERGONOMICS.md](ERGONOMICS.md) - current implementation stock and the
+  Ro/Vev-driven ergonomics roadmap
 - [PACKAGES.md](PACKAGES.md) - shipped `kvist:*` package index
 - [TESTING.md](TESTING.md) - tests, assertions, fixtures, and table checks
 - [MACROS.md](MACROS.md) - macro authoring

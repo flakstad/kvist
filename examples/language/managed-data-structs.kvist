@@ -1,0 +1,24 @@
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
+
+(package main)
+
+(import data "kvist:data")
+
+(defstruct Person {
+  name: Data
+})
+
+(defn make-person [name: Data] -> Person
+  (Person {name: name}))
+
+(defn print-person [person: Person]
+  (println (data.string person.name)))
+
+(defn main []
+  (let [name (data.from-string "Ada")
+        person (Person {name: name})
+        copy person]
+    (print-person (make-person name))
+    (discard (make-person name))
+    (println (data.string copy.name))))

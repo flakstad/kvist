@@ -3,6 +3,7 @@
 
 package main
 
+import "core:encoding/json"
 import "core:fmt"
 import "core:os"
 import "core:slice"
@@ -11,18 +12,21 @@ import "core:strings"
 import kvist "../../odin/kvist"
 
 CACHE_DIR :: ".kvist-cache"
-COMPILE_CACHE_VERSION :: "kvist-compile-cache-v2"
+COMPILE_CACHE_VERSION :: "kvist-compile-cache-v3"
+
+ownership_audit_enabled: bool
+explain_cache_enabled: bool
 
 print_usage :: proc() {
     fmt.println("usage:")
     fmt.println("  kvist <input.kvist> [-o output.odin] [--map output.map] [--eval form] [--no-print]")
-    fmt.println("  kvist compile <input.kvist> [-o output.odin] [--map output.map]")
+    fmt.println("  kvist compile <input.kvist> [-o output.odin] [--map output.map] [--ownership-audit]")
     fmt.println("  kvist dev --reload <input.kvist> [--rebuild] [--watch] [--generated-dir dir] [--print-paths] [--json]")
-    fmt.println("  kvist build <input.kvist> [--out output-binary] [--generated output.odin] [--reload] [--generated-dir dir]")
-    fmt.println("  kvist check <input.kvist> [--generated output.odin] [--reload] [--generated-dir dir]")
-    fmt.println("  kvist run <input.kvist> [--generated output.odin] [--reload] [--generated-dir dir]")
-    fmt.println("  kvist test <input.kvist> [--generated output.odin] [--names test1,test2] [--track-memory]")
-    fmt.println("  kvist eval <input.kvist> <form> [--no-print] [--check] [--generated output.odin] [--save name]")
+    fmt.println("  kvist build <input.kvist> [--out output-binary] [--generated output.odin] [--reload] [--generated-dir dir] [--ownership-audit] [--explain-cache]")
+    fmt.println("  kvist check <input.kvist> [--generated output.odin] [--reload] [--generated-dir dir] [--ownership-audit] [--explain-cache]")
+    fmt.println("  kvist run <input.kvist> [--generated output.odin] [--reload] [--generated-dir dir] [--ownership-audit] [--explain-cache]")
+    fmt.println("  kvist test <input.kvist> [--generated output.odin] [--names test1,test2] [--track-memory] [--ownership-audit] [--explain-cache]")
+    fmt.println("  kvist eval <input.kvist> <form> [--no-print] [--check] [--generated output.odin] [--save name] [--ownership-audit]")
     fmt.println("  kvist expand <input.kvist> <form> [--no-print] [-o output.odin]")
     fmt.println("  kvist macroexpand <input.kvist> <form> [-o output.kvist] [--map output.map]")
     fmt.println("  kvist symbols <input.kvist>")
@@ -38,6 +42,8 @@ print_usage :: proc() {
     fmt.println("  kvist cache path <name>")
     fmt.println("  kvist cache list")
     fmt.println("  kvist cache rm <name>")
+    fmt.println("  kvist cache inspect")
+    fmt.println("  kvist cache clear [input.kvist]")
 }
 
 is_help_arg :: proc(text: string) -> bool {
@@ -142,6 +148,21 @@ compile_cache_disabled :: proc() -> bool {
     return value != "" && value != "0" && value != "false"
 }
 
+explain_compile_cache :: proc(input, key, output_path, status: string) {
+    if !explain_cache_enabled {
+        return
+    }
+    fmt.eprintf("cache: %s\n  key: %s\n  entry: %s\n  input: %s\n", status, key, output_path, input)
+    dependencies, _, dependencies_ok := kvist.source_dependency_paths(input)
+    if dependencies_ok {
+        defer kvist.delete_string_slice(&dependencies)
+        fmt.eprintln("  inputs:")
+        for dependency in dependencies {
+            fmt.eprintln("    ", dependency)
+        }
+    }
+}
+
 compile_cache_key :: proc(input: string) -> (key: string, ok: bool) {
     dependencies, dependency_err, dependencies_ok := kvist.source_dependency_paths(input)
     if !dependencies_ok {
@@ -190,26 +211,48 @@ compile_cache_key :: proc(input: string) -> (key: string, ok: bool) {
     return strings.clone(fmt.tprintf("%016x", hash)), true
 }
 
-compile_cache_output_path :: proc(key: string) -> (path: string, ok: bool) {
+Compile_Cache_Metadata :: struct {
+    source_map: [dynamic]kvist.Source_Map_Entry,
+    warnings:   [dynamic]kvist.Compile_Warning,
+}
+
+compile_cache_paths :: proc(key: string) -> (output_path, metadata_path: string, ok: bool) {
     base := cache_dir_or_exit()
     defer delete(base)
     dir, dir_err := os.join_path({base, "compile"}, context.allocator)
     if dir_err != nil {
-        return "", false
+        return "", "", false
     }
     defer delete(dir)
     if !os.exists(dir) {
         if os.make_directory_all(dir) != nil {
-            return "", false
+            return "", "", false
         }
     }
     name := fmt.tprintf("%s.odin", key)
-    output_path, path_err := os.join_path({dir, name}, context.allocator)
-    return output_path, path_err == nil
+    path_err: os.Error
+    output_path, path_err = os.join_path({dir, name}, context.allocator)
+    if path_err != nil {
+        return "", "", false
+    }
+    metadata_name := fmt.tprintf("%s.json", key)
+    metadata_err: os.Error
+    metadata_path, metadata_err = os.join_path({dir, metadata_name}, context.allocator)
+    if metadata_err != nil {
+        delete(output_path)
+        return "", "", false
+    }
+    return output_path, metadata_path, true
 }
 
-publish_compile_cache_output :: proc(path, output: string) {
-    dir, _ := os.split_path(path)
+delete_compile_cache_metadata :: proc(metadata: ^Compile_Cache_Metadata) {
+    delete(metadata.source_map)
+    kvist.compile_warning_slice_delete(metadata.warnings)
+    metadata^ = {}
+}
+
+publish_compile_cache_result :: proc(output_path, metadata_path: string, result: kvist.Emit_Result) {
+    dir, _ := os.split_path(output_path)
     temp_dir, temp_err := os.make_directory_temp(dir, ".kvist-compile-*", context.allocator)
     if temp_err != nil {
         return
@@ -218,42 +261,92 @@ publish_compile_cache_output :: proc(path, output: string) {
         _ = os.remove_all(temp_dir)
         delete(temp_dir)
     }
-    temp_path, join_err := os.join_path({temp_dir, "output.odin"}, context.allocator)
-    if join_err != nil {
+    temp_output_path, output_join_err := os.join_path({temp_dir, "output.odin"}, context.allocator)
+    if output_join_err != nil {
         return
     }
-    defer delete(temp_path)
-    if os.write_entire_file_from_string(temp_path, output) != nil {
+    defer delete(temp_output_path)
+    temp_metadata_path, metadata_join_err := os.join_path({temp_dir, "metadata.json"}, context.allocator)
+    if metadata_join_err != nil {
         return
     }
-    // Publish only complete output. Concurrent compilers may race here, but
-    // identical content-addressed entries are interchangeable.
-    _ = os.rename(temp_path, path)
+    defer delete(temp_metadata_path)
+    metadata := Compile_Cache_Metadata{
+        source_map = result.source_map,
+        warnings = result.warnings,
+    }
+    metadata_bytes, marshal_err := json.marshal(metadata)
+    if marshal_err != nil {
+        return
+    }
+    defer delete(metadata_bytes)
+    if os.write_entire_file_from_string(temp_output_path, result.output) != nil ||
+       os.write_entire_file(temp_metadata_path, metadata_bytes) != nil {
+        return
+    }
+    // Metadata is published first and output last. The output is the
+    // completion marker, so readers never accept a partially published entry.
+    // Concurrent compilers may race, but content-addressed entries are equal.
+    _ = os.rename(temp_metadata_path, metadata_path)
+    _ = os.rename(temp_output_path, output_path)
 }
 
 compile_path_with_execution_cache :: proc(input: string) -> (result: kvist.Emit_Result, err: kvist.Compile_Error, ok: bool) {
     if compile_cache_disabled() {
+        if explain_cache_enabled {
+            fmt.eprintln("cache: disabled by KVIST_NO_COMPILE_CACHE")
+        }
         return kvist.compile_path_with_map(input)
     }
     key, key_ok := compile_cache_key(input)
     if !key_ok {
+        if explain_cache_enabled {
+            fmt.eprintln("cache: bypassed because the key or dependency graph could not be computed")
+        }
         return kvist.compile_path_with_map(input)
     }
     defer delete(key)
-    cache_path, path_ok := compile_cache_output_path(key)
+    cache_path, metadata_path, path_ok := compile_cache_paths(key)
     if !path_ok {
         return kvist.compile_path_with_map(input)
     }
     defer delete(cache_path)
-    if os.exists(cache_path) {
+    defer delete(metadata_path)
+    if os.exists(cache_path) && os.exists(metadata_path) {
         cached, read_err := os.read_entire_file_from_path(cache_path, context.allocator)
-        if read_err == nil {
-            return kvist.Emit_Result{output = string(cached)}, kvist.Compile_Error{}, true
+        metadata_bytes, metadata_read_err := os.read_entire_file_from_path(metadata_path, context.allocator)
+        if read_err == nil && metadata_read_err == nil {
+            metadata := Compile_Cache_Metadata{}
+            unmarshal_err := json.unmarshal(metadata_bytes, &metadata)
+            delete(metadata_bytes)
+            if unmarshal_err == nil {
+                explain_compile_cache(input, key, cache_path, "hit")
+                return kvist.Emit_Result{
+                    output = string(cached),
+                    source_map = metadata.source_map,
+                    warnings = metadata.warnings,
+                }, kvist.Compile_Error{}, true
+            }
+            delete_compile_cache_metadata(&metadata)
+        } else {
+            if read_err == nil {
+                delete(cached)
+            }
+            if metadata_read_err == nil {
+                delete(metadata_bytes)
+            }
         }
     }
+    reason := "miss: output absent"
+    if os.exists(cache_path) && !os.exists(metadata_path) {
+        reason = "miss: metadata absent"
+    } else if os.exists(cache_path) && os.exists(metadata_path) {
+        reason = "miss: cached metadata invalid"
+    }
+    explain_compile_cache(input, key, cache_path, reason)
     result, err, ok = kvist.compile_path_with_map(input)
     if ok {
-        publish_compile_cache_output(cache_path, result.output)
+        publish_compile_cache_result(cache_path, metadata_path, result)
     }
     return result, err, ok
 }
@@ -328,6 +421,63 @@ cache_command :: proc() {
         if err != nil {
             fmt.eprintln("failed to remove cache value: ", path)
             os.exit(1)
+        }
+    case "inspect":
+        if len(os.args) != 3 {
+            print_usage()
+            os.exit(2)
+        }
+        base := cache_dir_or_exit()
+        defer delete(base)
+        dir, dir_err := os.join_path({base, "compile"}, context.allocator)
+        if dir_err != nil || !os.exists(dir) {
+            if dir_err == nil {
+                delete(dir)
+            }
+            return
+        }
+        defer delete(dir)
+        entries, read_err := os.read_directory_by_path(dir, -1, context.allocator)
+        if read_err != nil {
+            fmt.eprintln("failed to inspect compile cache: ", dir)
+            os.exit(1)
+        }
+        defer os.file_info_slice_delete(entries, context.allocator)
+        slice.sort_by(entries, proc(a, b: os.File_Info) -> bool {
+            return a.name < b.name
+        })
+        for entry in entries {
+            if entry.type == .Regular {
+                fmt.println(entry.name)
+            }
+        }
+    case "clear":
+        if len(os.args) != 3 && len(os.args) != 4 {
+            print_usage()
+            os.exit(2)
+        }
+        base := cache_dir_or_exit()
+        defer delete(base)
+        if len(os.args) == 3 {
+            dir, dir_err := os.join_path({base, "compile"}, context.allocator)
+            if dir_err == nil {
+                defer delete(dir)
+                _ = os.remove_all(dir)
+            }
+            return
+        }
+        key, key_ok := compile_cache_key(os.args[3])
+        if !key_ok {
+            fmt.eprintln("could not compute compile cache key for: ", os.args[3])
+            os.exit(1)
+        }
+        defer delete(key)
+        output_path, metadata_path, paths_ok := compile_cache_paths(key)
+        if paths_ok {
+            defer delete(output_path)
+            defer delete(metadata_path)
+            _ = os.remove(output_path)
+            _ = os.remove(metadata_path)
         }
     case:
         print_usage()
@@ -437,7 +587,27 @@ odin_output_executable_path :: proc(generated_abs: string) -> string {
 }
 
 print_compile_warnings :: proc(path, source, eval_source: string, warnings: []kvist.Compile_Warning) {
-    for warning in warnings {
+    for warning, idx in warnings {
+        if warning.confidence == .Conservative && !ownership_audit_enabled {
+            continue
+        }
+        duplicate := false
+        for previous in warnings[:idx] {
+            if previous.confidence == .Conservative && !ownership_audit_enabled {
+                continue
+            }
+            if previous.code == warning.code &&
+               previous.source_path == warning.source_path &&
+               previous.line == warning.line &&
+               previous.column == warning.column &&
+               previous.message == warning.message {
+                duplicate = true
+                break
+            }
+        }
+        if duplicate {
+            continue
+        }
         formatted := ""
         if eval_source != "" {
             formatted = kvist.format_eval_compile_warning(path, source, eval_source, warning)
@@ -1432,6 +1602,9 @@ parse_legacy_compile :: proc() {
             }
             map_path = os.args[i+1]
             i += 2
+        case "--ownership-audit":
+            ownership_audit_enabled = true
+            i += 1
         case "--eval":
             if i+1 >= len(os.args) {
                 print_usage()
@@ -1485,6 +1658,9 @@ parse_compile_command :: proc() {
             }
             map_path = os.args[i+1]
             i += 2
+        case "--ownership-audit":
+            ownership_audit_enabled = true
+            i += 1
         case:
             print_usage()
             os.exit(2)
@@ -1532,6 +1708,12 @@ parse_run_or_check_command :: proc(odin_command: string) {
             }
             binary_output_path = os.args[i+1]
             i += 2
+        case "--ownership-audit":
+            ownership_audit_enabled = true
+            i += 1
+        case "--explain-cache":
+            explain_cache_enabled = true
+            i += 1
         case:
             if input == "" {
                 input = os.args[i]
@@ -1597,6 +1779,12 @@ parse_test_command :: proc() {
         case "--track-memory":
             track_memory = true
             i += 1
+        case "--ownership-audit":
+            ownership_audit_enabled = true
+            i += 1
+        case "--explain-cache":
+            explain_cache_enabled = true
+            i += 1
         case:
             print_usage()
             os.exit(2)
@@ -1633,6 +1821,9 @@ parse_eval_command :: proc() {
             i += 1
         case "--check":
             check_only = true
+            i += 1
+        case "--ownership-audit":
+            ownership_audit_enabled = true
             i += 1
         case "--save":
             if i+1 >= len(os.args) {

@@ -165,9 +165,23 @@ digits, `_`, `-`, and `.`.
 `compile/` subdirectory. Entries are content-addressed by the Kvist compiler
 binary and every reachable `.kvist` or package-sidecar `.odin` source file, so
 editing a direct or transitive dependency creates a new entry automatically.
-Set `KVIST_NO_COMPILE_CACHE=1` to force a fresh translation. The `compile`
-command itself remains uncached because it exposes the complete warning and
-source-map result.
+Each entry includes emitted Odin, source maps, and coded warnings, so a warm
+command reports and remaps diagnostics exactly like a cold command.
+
+Use the cache transparency commands when investigating a build:
+
+```sh
+kvist check app.kvist --explain-cache
+kvist cache inspect
+kvist cache clear app.kvist
+kvist cache clear
+```
+
+`--explain-cache` prints the key, entry, selected input, transitive inputs, and
+hit or miss reason. `cache clear INPUT` removes the current content-addressed
+entry for that input; bare `cache clear` removes the compile cache. Set
+`KVIST_NO_COMPILE_CACHE=1` to force a fresh translation. The `compile` command
+itself remains uncached because it writes user-selected Odin and map outputs.
 
 For structured development data, use explicit source-level helpers such as
 `io.write`, `io.read`, `json.write`, and `json.read-as` so format and ownership

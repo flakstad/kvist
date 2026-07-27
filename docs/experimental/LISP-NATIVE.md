@@ -35,15 +35,19 @@ database remains usable through EDN and native ABIs from other languages.
 
 Current implementation covers static quotes, runtime backing nodes, local
 bindings, single and named returns, destructured named results, explicit
-`#owned`/`#borrowed` contracts, reassignment, and nested owned call arguments.
+`#owned`/`#borrowed` contracts, reassignment, nested owned call arguments,
+discarded managed results, and recursively managed top-level Kvist structs.
 
 Remaining compiler work:
 
 1. Keep expression ownership normalized as new expression forms are added;
    `if`, `type-case`, `let`, and `do` are implemented.
-2. Release unused owned Data expression results.
+2. Release unused owned Data expression results. Explicit discards and
+   standalone managed constructor results are implemented; keep this invariant
+   for new expression forms.
 3. Define managed fields in native structs, including copy, overwrite, move,
-   return, and aggregate destruction.
+   return, and aggregate destruction. Top-level Kvist structs are implemented;
+   local structs, imported Odin structs, and managed-field `update` remain.
 4. Define managed elements in arrays, dynamic arrays, maps, unions, and
    closures.
 5. Generalize the implementation as a managed-value protocol rather than a
@@ -79,6 +83,10 @@ surrounding program dynamic. Build these facilities in order:
 
 1. Typed decoding from Data into native structs, enums, scalar types, and
    selected homogeneous collections, with errors carrying the exact Data path.
+   Integer, float, and boolean scalar decoders plus recursive type-directed
+   native struct decoding for nested structs, scalar, explicitly owned string,
+   enum, `Data`, explicit default fields, and owned dynamic arrays of scalar,
+   `Data`, enum, or recursively decoded Kvist struct elements are implemented.
 2. Reusable shape validation/refinement so code can validate once and avoid
    repeating kind and key checks.
 3. Structural pattern matching and destructuring for maps, sequential values,
@@ -109,10 +117,11 @@ useful paths:
 ;; expected int at [:address :postal-code], found string
 ```
 
-The exact APIs and syntax require focused design before implementation. Pattern
-matching belongs in the language only where it improves exhaustiveness,
-binding, or lowering; traversal, decoding, shapes, and builders belong in
-`kvist:data` wherever ordinary package code is sufficient.
+`data.decode` now establishes this surface for the supported first struct
+shapes and returns `[decoded err ok]`. Pattern matching belongs in the language
+only where it improves exhaustiveness, binding, or lowering; traversal,
+decoding, shapes, and builders belong in `kvist:data` wherever ordinary package
+code is sufficient.
 
 `kvist:edn` already uses the underlying implementation pattern internally: it
 collects retained children in native buffers and constructs one immutable Data
