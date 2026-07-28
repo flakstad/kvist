@@ -244,8 +244,9 @@ Use `match` for exhaustive structural dispatch:
   (unknown-message message))
 ```
 
-Captured values remain Data and are ownership-managed. See the language guide
-and `examples/data_patterns.kvist` for the complete pattern contract.
+Captured values remain Data and are ownership-managed. See the
+[language reference](language.md#match) and
+[pattern example](../examples/data_patterns.kvist) for the complete contract.
 
 ## Paths
 
@@ -368,6 +369,8 @@ Contextual literals are the normal constructor:
 
 `data.vec`, `data.list`, and `data.set` convert sequential Data. `data.into`
 adds a sequential source to an existing list, vector, set, or map Data value.
+Use `data.tagged` for tagged values; the EDN reader also accepts tagged
+literals such as `#app/id 42`.
 
 Low-level native boundaries use `list-from-array`, `vector-from-array`,
 `set-from-array`, and `map-from-alternating`. Application code rarely needs

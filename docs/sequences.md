@@ -62,6 +62,8 @@ Eager builders:
 ```
 
 These return owned collections. They do not mutate the input.
+Partition helpers own the outer dynamic array; their inner chunks are borrowed
+slices.
 
 Scans do not allocate output collections:
 

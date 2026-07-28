@@ -55,7 +55,7 @@ The most common forms are:
 
 ```clojure
 ; file and package structure
-package import @export @private @exports foreign-import odin
+package import foreign-import @export @private @exports odin
 
 ; declarations
 def def- defvar defvar- defstruct defstruct- defenum defenum-
@@ -66,12 +66,12 @@ deftransform deftransform- defiter defiter-
 let do block fn comment
 
 ; control flow
-if when cond case while for return discard break continue defer
+if when cond case match while for return discard break continue defer
 when-let if-let when-ok if-ok
 
 ; mutation and places
 set! mut! update! delete! inc! dec! toggle! negate!
-assoc update get slice
+assoc update dissoc dissoc-in get slice
 
 ; ownership and allocators
 make alloc delete zero with-allocator with-temp-allocator
@@ -82,8 +82,11 @@ addr deref ptr type transmute type-assert
 ; polymorphism
 overload
 
-; threading and inspection
--> ->> cond-> as-> tap> doc
+; core helpers
+count empty? contains? nil? or-else println str
+
+; threading, setup, and inspection
+-> ->> cond-> as-> doto tap> doc
 
 ; bit operations
 bit.and bit.or bit.xor bit.not bit.shift-left bit.shift-right
@@ -91,6 +94,33 @@ bit.and-not bit.test bit.set bit.clear bit.flip
 ```
 
 ## Source Files, Packages, And Names
+
+### Reader Syntax
+
+Kvist uses the usual Lisp delimiters:
+
+- `(head args...)` for calls and language forms
+- `[...]` for bindings, parameters, positional aggregates, and collection
+  literals
+- `{...}` for labeled aggregates and map literals
+- `#{...}` for set literals
+
+Whitespace and commas are interchangeable separators. Strings may span lines.
+Numbers and string escapes use Odin spelling.
+
+Reader prefixes are:
+
+```clojure
+'form    ; quote
+`form    ; quasiquote
+~form    ; unquote
+~@forms  ; splice
+#_form   ; discard the next form
+#"..."   ; regex pattern
+```
+
+Quote produces immutable `Data` in runtime code and source forms in macro
+code. See [data.md](data.md) and [macros.md](macros.md).
 
 ### File Model
 
@@ -218,6 +248,7 @@ Relative imports are resolved by inspecting the target:
 - `kvist:*` imports load shipped Kvist packages
 - `core:*`, `base:*`, `vendor:*`, and other Odin package paths remain Odin
 
+Relative paths are resolved from the file containing the import.
 There is no `:odin` import marker.
 
 Use `@export` to attach Odin `@(export)` to the next top-level declaration.
@@ -250,6 +281,13 @@ as `string`, `cstring`, `rune`, and `byte`.
 Strings are plain Odin strings. They are values, not objects with methods.
 Boolean literals are `true` and `false`. `nil` is the nil value used for
 pointers and other Odin values that accept nil.
+
+String literals may span lines:
+
+```clojure
+(def Query: string "[:find ?name
+ :where [?e :user/name ?name]]")
+```
 
 Regex pattern literals use Clojure-shaped `#"..."`
 syntax and lower to Odin
@@ -589,6 +627,12 @@ Typed declarations use `name: Type`:
 (defvar current-state: State (State {}))
 ```
 
+An uninitialized typed `defvar` starts with the type's zero value:
+
+```clojure
+(defvar current-state: State)
+```
+
 `def` is immutable but is not limited to compile-time constants. Calls to
 single-result Kvist functions are initialized once before `main`, with their
 return type inferred:
@@ -624,6 +668,8 @@ island for heterogeneous Lisp/EDN-shaped values; unquoted vectors, maps, and
 sets remain native homogeneous collections.
 
 ```clojure
+(import data "kvist:data")
+
 (def config
   '{:port 8080
     :features #{:query :pull}})
@@ -657,17 +703,28 @@ overload parameters provide this context. Without Data context, unquoted
 vectors, maps, and sets remain native homogeneous collections.
 
 `Data` represents nil, booleans, integers, floats, strings, symbols, keywords,
-lists, vectors, maps, and sets. Quoted literals use static backing storage, are
-cheap to copy and pass, and require no cleanup. Use `get`, `contains?`, and
-`count` for structural access. The `data.int`, `data.float`, `data.bool`,
-`data.string`, `data.symbol`, and `data.keyword` accessors cross from dynamic
-data into native typed values; `data.vector?` and the corresponding kind
-predicates inspect shapes. Import `kvist:data` for this named API and for
-`data.nth`, `data.get-in`, `data.keys`, and `data.vals` traversal helpers:
+lists, vectors, maps, sets, and tagged values. Quoted literals use static
+backing storage, are cheap to copy and pass, and require no cleanup. Use `get`,
+`contains?`, and `count` for structural access. The `data.int`, `data.float`,
+`data.bool`, `data.string`, `data.symbol`, and `data.keyword` accessors cross
+from dynamic data into native typed values; `data.vector?` and the corresponding
+kind predicates inspect shapes. The `kvist:data` package also provides
+`data.nth`, `data.get-in`, `data.keys`, and `data.vals`.
+
+Keywords and Data maps can be called as map lookups:
 
 ```clojure
-(import data "kvist:data")
+(:owner message)
+(:owner message :unknown)
+(message :owner)
+(message :owner :unknown)
 ```
+
+These forms borrow the stored value. The optional fallback is used only when
+the key is absent; a present Data nil is preserved. This is Data-specific
+lookup syntax, not a general callable-value protocol.
+
+Tagged Data values are created with `data.tagged` or read from tagged EDN.
 
 The compiler owns the representation-sensitive primitive operations, quote
 lowering, and managed lifetime protocol. Higher-level construction, persistent
@@ -703,6 +760,14 @@ declaration that is updated across several later statements:
 
 This is often clearer than forcing a dummy `let` binding just to create a place
 that will be mutated later.
+
+Use `_` when a binding exists only to evaluate and discard an expression:
+
+```clojure
+(let [_ (record-metric)
+      [value _] (lookup key)]
+  value)
+```
 
 These forms are also valid directly inside a function body:
 
@@ -773,6 +838,9 @@ Functions are declared with `defn`:
   (+ x 1))
 ```
 
+The final form of a single-result function is returned implicitly. Use
+`return` for early exits and direct multiple returns.
+
 Use `:abi` when a function must use a specific foreign ABI:
 
 ```clojure
@@ -788,6 +856,22 @@ Directive wrappers such as `#force_inline` can appear on function declarations:
 
 (defn query [] -> [value: int, ok: bool] #optional_ok
   (return 42 true))
+```
+
+Caller intrinsics use Odin spelling:
+
+```clojure
+(import rt "base:runtime")
+
+(defn location
+  [loc: rt.Source_Code_Location = #caller_location]
+  -> rt.Source_Code_Location
+  loc)
+
+(defn expression
+  [x: bool, text: string = (#caller_expression x)]
+  -> string
+  text)
 ```
 
 Kvist infers lifetime boundaries from ordinary procedure bodies:
@@ -1134,10 +1218,13 @@ Use `keyword` when the value is a symbolic tag rather than user-facing text:
 (Job {state: :job/queued label: "thumbnail"})
 ```
 
-Use `(type T)` for Odin `typeid` expressions:
+Use `(type Head Args...)` when a type must appear as a value. This includes
+explicit `typeid` arguments and instantiated polymorphic types:
 
 ```clojure
+(read-as (type Config) "config.json")
 (linalg.identity (type matrix[2 2]f32))
+(chan.create (type chan.Chan int) 1 context.allocator)
 ```
 
 For Odin polymorphic struct literals, the type constructor can be used directly
@@ -1202,6 +1289,9 @@ Use `alloc` when you want an Odin `new(T)` pointer allocation:
 (alloc Node)
 (alloc Node context.temp_allocator)
 ```
+
+Free an owned pointer from `alloc` with Odin's `free` when its allocator
+requires individual cleanup.
 
 Use `zero` to construct an explicit zero value for a type:
 
@@ -1640,7 +1730,8 @@ Use `case` when one subject is being classified. Arms are flat pattern and
 expression pairs followed by a naked default expression. Use `(do ...)` when an
 arm needs multiple forms.
 
-Value cases and union/type payload cases all lower to ordinary Odin switches:
+Value cases expand to equality tests. Union and type payload cases lower to
+Odin type switches:
 
 ```clojure
 (case status
@@ -1667,9 +1758,9 @@ Value cases and union/type payload cases all lower to ordinary Odin switches:
   -1)
 ```
 
-Vector clauses are ordinary fixed-array value literals; dynamic arrays and
-slices are not comparable case subjects. Repeat arms when several values share
-one result.
+A vector arm is one vector literal, not a way to group several case values.
+Its type comes from the subject context, and comparison follows Odin's equality
+rules. Repeat arms when several values share one result.
 
 Use `_` when a type payload case should match the variant without binding the
 payload.
@@ -1747,6 +1838,10 @@ Data patterns can be loop binders:
 Data list, vector, and set sources iterate in backing order; Data nil performs
 zero iterations. Native arrays, slices, and dynamic arrays of `Data` are also
 supported. Other runtime Data kinds report a source-mapped kind error.
+
+Ordinary indexed iteration follows Odin's value/index order:
+`[value index source]`. Indexed Data-pattern iteration uses
+`[index pattern source]`, as in the final example above.
 
 ## Places, Mutation, And Value Updates
 
@@ -2006,11 +2101,16 @@ Common owned values:
 
 Common borrowed or plain non-owning values:
 
-- ordinary slices such as `[]T`
 - fixed arrays such as `[4]int`
-- plain structs, unions, enums, numbers, booleans, and strings
-- element/view helpers such as `arr.first`, `arr.last`, `arr.take`,
-  `arr.drop`, and `arr.split-at`
+- plain structs, unions, enums, numbers, and booleans
+- slices returned by view helpers such as `slice`, `arr.take`, `arr.drop`, and
+  `arr.split-at`
+- elements returned by helpers such as `arr.first` and `arr.last`
+
+Strings and slices are views. Their backing storage may be borrowed or owned,
+depending on how they were produced. For example, a string literal is static,
+`str` returns an owned string, and trimming helpers commonly return borrowed
+views.
 
 Two ownership edges are worth calling out explicitly:
 
@@ -2199,8 +2299,9 @@ Examples:
     (counter-value (addr counter))))
 ```
 
-Kvist does not add borrow checking, lifetime analysis, or automatic
-pointer-versus-value recommendations. Pointer use stays explicit.
+Kvist does not add a borrow checker or automatic pointer-versus-value
+recommendations. Its ownership analysis can diagnose known escapes and
+use-after-transfer errors, but pointer use stays explicit.
 
 ## Core Forms And Built-In Helpers
 
@@ -2210,7 +2311,11 @@ Operators lower to ordinary Odin expressions:
 
 ```clojure
 (+ a b)
+(- total discount)
 (* x y)
+(% index width)
+(min x y)
+(max x y)
 (and ok ready)
 (or cached? fresh?)
 (not done)
@@ -2243,8 +2348,11 @@ Use `or-else` when the expression returns `[value, ok]` and you want a fallback
 value. Kvist does not treat arbitrary values as conditions; condition
 expressions must be boolean.
 
-`=`, `<`, `<=`, `>`, and `>=` support two or more operands and compare adjacent
-values once:
+`+`, `*`, `/`, and `%` take two or more operands. `-` also has a unary form.
+`min` and `max` take two or more operands.
+
+`=`, `==`, `<`, `<=`, `>`, and `>=` support two or more operands and compare
+adjacent values once:
 
 ```clojure
 (= a b c)
@@ -2565,6 +2673,8 @@ notes that should remain in the source file but not reach lowering or runtime.
 - [data.md](data.md) - immutable heterogeneous data
 - [sequences.md](sequences.md) - collection helpers and ownership details
 - [packages.md](packages.md) - shipped `kvist:*` package index
+- [odin.md](odin.md) - direct Odin package use
+- [soa.md](soa.md) - struct-of-arrays storage and column operations
 - [transforms.md](transforms.md) - `deftransform`,
   `into`, `transduce`
 - [macros.md](macros.md) - macro authoring

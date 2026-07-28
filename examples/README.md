@@ -73,6 +73,23 @@ Package examples are the practical companion to the docs:
 
 For the package map, see [`../docs/packages.md`](../docs/packages.md).
 
+## Odin Interop Examples
+
+- [`interop/core/core-os-paths.kvist`](./interop/core/core-os-paths.kvist) -
+  files and paths
+- [`interop/core/core-text-encoding.kvist`](./interop/core/core-text-encoding.kvist) -
+  strings, parsing, encodings, and cryptography
+- [`interop/core/core-math-linalg.kvist`](./interop/core/core-math-linalg.kvist) -
+  math, vectors, matrices, and random numbers
+- [`interop/core/core-concurrency.kvist`](./interop/core/core-concurrency.kvist) -
+  threads, channels, and synchronization
+- [`interop/core/core-container-queue.kvist`](./interop/core/core-container-queue.kvist) -
+  Odin's generic queue
+- [`interop/vendor/vendor-raylib.kvist`](./interop/vendor/vendor-raylib.kvist) -
+  a maintained Odin vendor binding
+
+See [`../docs/odin.md`](../docs/odin.md) for the interoperability model.
+
 ## Visual Examples
 
 Visual examples need the same native dependencies as the generated Odin code.

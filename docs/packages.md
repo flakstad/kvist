@@ -31,8 +31,17 @@ importing repository for shipped packages.
 - `kvist:test` - tests, assertions, fixtures, and table checks.
 - `kvist:regex` - owned regular-expression compilation and matching helpers.
 
-See [sequences.md](sequences.md), [parallel.md](parallel.md), and
-[testing.md](testing.md) for the larger package surfaces.
+See [sequences.md](sequences.md), [parallel.md](parallel.md),
+[testing.md](testing.md), and [soa.md](soa.md) for the larger package surfaces.
+
+## Odin Packages
+
+Kvist can import Odin's `core:*` and `vendor:*` packages directly. This includes
+the standard packages for operating-system access, networking, text, encodings,
+cryptography, math, concurrency, and maintained bindings such as raylib, SDL,
+Vulkan, miniaudio, curl, and Lua.
+
+See [odin.md](odin.md) for the model and examples.
 
 ## Optional Official Packages
 

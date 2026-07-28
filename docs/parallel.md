@@ -56,7 +56,7 @@ Use `p.map-with` or `p.for-with` to choose a worker count explicitly:
 (p.for-with {workers: 4} send-email users)
 ```
 
-The option must be a map literal with a `workers:` label. Other option names,
+The option must be a brace literal with a `workers:` label. Other option names,
 duplicate `workers:` labels, or a bare number are rejected during lowering.
 
 ## Worker Count

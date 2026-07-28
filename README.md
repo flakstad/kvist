@@ -18,11 +18,15 @@ configuration, messages, and other heterogeneous data, with zero-allocation
 static literals and deterministically managed runtime values.
 
 Kvist transpiles to readable Odin and uses Odin for checking, building, and
-running programs. The syntax draws from Lisp and Clojure, but the execution
-model stays close to Odin: no hidden runtime, no lazy sequence abstraction, and
-no garbage collection.
+running programs. Its syntax and naming are strongly inspired by Clojure, and
+its immutable `Data` world follows the Clojure data model. The execution model
+stays close to Odin: no VM, no lazy sequence runtime, and no garbage
+collection.
 
-Kvist is alpha software. Syntax and package APIs are still moving.
+Kvist and Odin files can live in the same package. Kvist code can use Odin
+packages directly, including Odin's extensive core library and maintained
+vendor packages. This provides files, networking, text encodings, cryptography,
+math, concurrency, graphics, audio, and more without a Kvist wrapper.
 
 ## Quickstart
 
@@ -32,7 +36,7 @@ repository, and build the Kvist CLI from the repo root:
 ```sh
 git clone https://github.com/kvist-lang/kvist.git
 cd kvist
-odin build src/cli/kvist -o:speed
+odin build src/cli/kvist
 ```
 
 Add a main function to a `hello.kvist` file:
@@ -65,9 +69,6 @@ export PATH="$HOME/.local/lib/kvist/bin:$PATH"
 - Immutable `Data` values are available when a heterogeneous data model is
   useful.
 - Kvist adds no garbage collector or lazy sequence runtime.
-
-Kvist and Odin files can live in the same package. Kvist code can import Odin
-packages directly.
 
 ## Example
 
@@ -105,6 +106,10 @@ Run `./scripts/smoke.sh` for a quick local check.
 - [Transforms](docs/transforms.md)
 - [Macros](docs/macros.md)
 - [Packages](docs/packages.md)
+- [Odin interoperability](docs/odin.md)
+- [Struct of arrays](docs/soa.md)
+- [Parallel helpers](docs/parallel.md)
+- [Testing](docs/testing.md)
 - [Tooling](docs/tooling.md)
 - [Examples](examples/README.md)
 

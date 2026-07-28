@@ -272,5 +272,5 @@ that.
   macro that emits several top-level forms
 - [examples/language/macro-messages.kvist](../examples/language/macro-messages.kvist) -
   declaration DSL with generated structs, union entries, and constructors
-- [kvist-lang/html](https://github.com/kvist-lang/html/blob/main/html.kvist) - an external package built from public macro facilities
-  package with form inspection, validation, and generated rendering code
+- [kvist-lang/html](https://github.com/kvist-lang/html/blob/main/html.kvist) -
+  external package with form inspection, validation, and generated rendering

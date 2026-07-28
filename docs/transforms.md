@@ -71,6 +71,9 @@ Supported steps are:
 (distinct-by f)
 ```
 
+`distinct` and `distinct-by` are available for `Data` pipelines. Native
+pipelines should use `arr.distinct` or `arr.distinct-by`.
+
 Callbacks can be named functions, typed inline `fn` forms, or field selectors
 where supported:
 

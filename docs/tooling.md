@@ -37,6 +37,8 @@ kvist macroexpand file.kvist '(form)'
 
 `eval` compiles and runs the form. `expand` prints generated Odin.
 `macroexpand` prints Kvist after macro expansion.
+Use `eval --check` to validate without running and `eval --no-print` to suppress
+automatic result printing.
 
 ## Symbols
 
@@ -53,6 +55,7 @@ kvist lookup file.kvist symbol
 kvist complete file.kvist prefix
 kvist xref file.kvist symbol
 kvist symbols file.kvist
+kvist editor-symbols file.kvist
 kvist imported-symbols file.kvist
 kvist package-symbols kvist:arr arr
 kvist builtin-symbols
@@ -60,6 +63,24 @@ kvist builtin-symbols
 
 Machine-oriented symbol commands print tab-separated rows with declaration
 kind, name, location, signature, documentation, and source file.
+
+## Ownership Inspection
+
+Show inferred ownership at procedure boundaries:
+
+```sh
+kvist lifetimes file.kvist
+```
+
+The report marks relevant parameters as borrowed or consumed and results as
+borrowed, owned, or unknown.
+
+Add `--ownership-audit` to compilation commands to include conservative
+ownership warnings that are hidden by default:
+
+```sh
+kvist check file.kvist --ownership-audit
+```
 
 ## Packages
 

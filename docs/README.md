@@ -6,6 +6,8 @@
 - [transforms.md](transforms.md) - fused collection transforms
 - [macros.md](macros.md) - macro authoring
 - [packages.md](packages.md) - shipped and optional packages
+- [odin.md](odin.md) - direct use of Odin core and vendor packages
 - [testing.md](testing.md) - tests and fixtures
 - [parallel.md](parallel.md) - thread-backed parallel helpers
+- [soa.md](soa.md) - struct-of-arrays storage and column operations
 - [tooling.md](tooling.md) - CLI and editor tooling
