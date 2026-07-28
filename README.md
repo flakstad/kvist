@@ -60,6 +60,15 @@ To install the compiler and shipped packages under a separate root:
 export PATH="$HOME/.local/lib/kvist/bin:$PATH"
 ```
 
+## Platform support
+
+Kvist is tested on macOS and Linux. The core CLI and representative programs
+are also tested on Windows, but the complete test suite and shell-based tooling
+are not yet covered there.
+
+Building Kvist requires an Odin toolchain supported by the host platform.
+The scripts in `scripts/` require a POSIX-compatible shell.
+
 ## Core Model
 
 - Kvist compiles to readable Odin and uses Odin to check, build, and run.
