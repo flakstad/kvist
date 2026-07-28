@@ -5,9 +5,10 @@
 (import data "kvist:data")
 (import edn "kvist:edn")
 
-(def config
+(defn read-config [] -> Data
   (edn.read "{:port 8080 :features #{:query :pull}}"))
 
 (defn main []
-  (println (data.int (get config :port))
-           (contains? (get config :features) :query)))
+  (let [config (read-config)]
+    (println (data.int (get config :port))
+             (contains? (get config :features) :query))))

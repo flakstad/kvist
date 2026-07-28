@@ -31,8 +31,8 @@ importing repository for shipped packages.
 - `kvist:test` - tests, assertions, fixtures, and table checks.
 - `kvist:regex` - owned regular-expression compilation and matching helpers.
 
-See [sequences.md](sequences.md), [parallel.md](parallel.md),
-[testing.md](testing.md), and [soa.md](soa.md) for the larger package surfaces.
+See [sequences.md](sequences.md), [parallel.md](parallel.md), and
+[testing.md](testing.md) for the larger package surfaces.
 
 ## Odin Packages
 

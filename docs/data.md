@@ -1,32 +1,167 @@
 # Data
 
-`Data` is Kvist's immutable heterogeneous value for messages, configuration,
-queries, document trees, and evolving schemas. Its collection operations are
-eager and deterministically managed.
+Most Kvist values are native Odin-shaped values: structs have fixed fields,
+arrays have one element type, and ownership is explicit. `Data` is the
+alternative for Clojure-shaped data whose structure is useful at runtime.
+
+A single `Data` value can contain nil, booleans, integers, floats, strings,
+symbols, keywords, lists, vectors, maps, sets, tagged values, and any nesting of
+those values:
 
 ```clojure
 (import data "kvist:data")
 
-(defn visible-titles [matters: Data] -> Data
-  (->> matters
-       (data.filter visible?)
-       (data.remove archived?)
-       (data.map title-data)
-       (data.sort-by title-rank)))
+(def contact
+  '{:name "Ada Lovelace"
+    :born 1815
+    :active? true
+    :roles [:mathematician :programmer]
+    :address nil})
 ```
 
-Every operation above is eager. Each intermediate binding is an immutable,
-owned `Data` value whose lifetime the compiler manages deterministically.
+This is one immutable value, not a native struct containing several native
+collections. Its shape can be inspected, transformed, printed as EDN, stored,
+or passed to code that interprets the structure.
 
-## Choosing Data or native values
+In practical terms, `Data` is EDN in memory. EDN is its text representation;
+`Data` is the value a Kvist program reads, builds, and transforms.
+
+## Clojure-Shaped Programming
+
+Code built around Data can be almost identical to Clojure. This Clojure
+function:
+
+```clojure
+(defn contact [name]
+  {:name name
+   :active? true
+   :roles [:author :admin]})
+```
+
+becomes:
+
+```clojure
+(defn contact [name: string] -> Data
+  {:name name
+   :active? true
+   :roles [:author :admin]})
+```
+
+The important addition is `-> Data`. It tells the compiler that the map and
+nested vector are Data rather than native homogeneous collections. Parameters
+and local bindings can provide the same context.
+
+Collection pipelines retain their Clojure shape:
+
+```clojure
+(import data "kvist:data")
+
+(defn active? [user: Data] -> bool
+  (data.bool (:active? user)))
+
+(defn user-name [user: Data] -> Data
+  (:name user))
+
+(defn active-names [users: Data] -> Data
+  (->> users
+       (data.filter active?)
+       (data.map user-name)))
+```
+
+The remaining differences are deliberate:
+
+- Data parameters and results use the `Data` type;
+- callbacks have statically checked parameter and return types;
+- predicates return native `bool`;
+- scalar accessors such as `data.string` cross back to native values;
+- collection operations are eager, not lazy;
+- memory is managed deterministically, without garbage collection.
+
+## Native Values And Data
+
+Use a native struct when the shape is part of the compiled program:
+
+```clojure
+(defstruct Contact {
+  name: string
+  born: int
+  active?: bool
+})
+
+(defn contact [name: string, born: int] -> Contact
+  (Contact {name: name born: born active?: true}))
+```
+
+Fields and types are checked statically. Native arrays and maps are similarly
+homogeneous and use Odin's ordinary allocation and cleanup rules.
+
+Use `Data` when the shape itself is a value:
+
+```clojure
+(defn contact [name: string, born: i64, roles: Data] -> Data
+  {:name name
+   :born born
+   :active? true
+   :roles roles})
+```
+
+The `Data` return type gives the map and nested collections Data context.
+Runtime expressions such as `name`, `born`, and `roles` are evaluated and
+inserted into the result.
+
+The same collection syntax therefore has two meanings:
+
+```clojure
+[1 2 3]                 ; native homogeneous collection
+'[1 2 3]                ; static Data vector
+
+(defn numbers [] -> Data
+  [1 2 3])               ; runtime Data vector from expected type
+```
+
+Quoted Data literals are compiled into static storage and require no cleanup.
+Runtime Data is deterministically managed by the compiler.
+
+## Working With A Value
+
+Data uses familiar Clojure-shaped operations:
+
+```clojure
+(let [contact: Data
+      {:name "Ada"
+       :roles [:admin :author]}
+      name (:name contact)
+      roles (:roles contact)
+      updated (assoc contact :active? true)]
+  (println (data.string name)
+           (data.includes? roles :admin)
+           (data.bool (:active? updated))))
+```
+
+Lookup borrows from the input. `assoc`, `update`, and collection
+transformations return new immutable Data values; the original remains valid.
+Native values are recovered explicitly with accessors such as `data.string`,
+`data.int`, and `data.bool`.
+
+Nested destructuring works directly:
+
+```clojure
+(let [{:keys [name roles]
+       :or {roles []}}
+      contact
+      [primary & remaining] roles]
+  ...)
+```
+
+## Good Uses
 
 Use `Data` when:
 
-- values cross a dynamic boundary;
-- keys or shapes evolve independently of compiled native code;
+- the structure is a small language or protocol;
+- values cross a dynamic boundary such as EDN, a database, or a message bus;
+- keys and shapes evolve independently of compiled native code;
 - collections contain heterogeneous values;
-- the value should remain EDN-shaped for storage, transport, inspection, or
-  structural transformation;
+- applications need to inspect or transform the structure generically;
 - immutable sharing is more useful than in-place mutation.
 
 Prefer native structs and homogeneous arrays when:
@@ -36,6 +171,70 @@ Prefer native structs and homogeneous arrays when:
 - numeric loops need maximum throughput;
 - mutation is local, explicit, and useful;
 - an API already has a natural native type.
+
+### HTML As Data
+
+The official [kvist-lang/html](https://github.com/kvist-lang/html) package
+renders Hiccup-shaped Data. A vector represents an element, a map holds
+attributes, and nested vectors are children:
+
+```clojure
+(import html "deps/html")
+
+(defn page [title: string] -> string
+  (html.render
+    [:main {:class "page"}
+     [:h1 title]
+     [:p "Ready"]]))
+```
+
+`html.render` expects Data, so the literal is contextual Data and `title` is
+inserted normally. The document can be built, traversed, and transformed as
+data before it is rendered.
+
+### Datomic Data
+
+[VevDB](https://github.com/vevdb/vev) uses Data for Datomic-style transaction
+data, Datalog queries, rules, pull patterns, and query results:
+
+```clojure
+(def contact-tx
+  '[{:db/id 1
+     :contact/name "Ada"
+     :contact/email "ada@example.com"}])
+
+(def names-query
+  '[:find ?name
+    :where [?e :contact/name ?name]])
+
+(d.transact conn contact-tx)
+(d.q names-query (d.db conn))
+```
+
+The transaction and query are ordinary immutable values. They can be composed
+in code, read from EDN, logged, stored, or sent across an API without defining
+a native type for every clause.
+
+### Configuration And Messages
+
+EDN provides a text representation of the same data model:
+
+```clojure
+(import edn "kvist:edn")
+
+(defn read-config [] -> Data
+  (edn.read
+    "{:port 8080
+      :features #{:query :pull}}"))
+
+(let [config (read-config)]
+  (data.int (:port config)))
+```
+
+This is useful for configuration, command payloads, event data, syntax trees,
+and other boundaries where retaining the original structure is valuable.
+
+## Typed Boundaries
 
 Decode at a boundary when native code should own the resulting shape:
 
@@ -278,8 +477,7 @@ The practical rules are:
 Use the native-array escape hatch only when an API requires concrete storage:
 
 ```clojure
-(let [items (data.to-owned-array values)
-      :defer-with data.delete-owned-array!]
+(let [items (data.to-owned-array values) :defer-with data.delete-owned-array!]
   (call-native items[:]))
 ```
 
@@ -357,20 +555,12 @@ one-line EDN. `pretty`, `pretty-with`, `pprint`, and
 `pprint-with` provide multiline rendering. Plain native `println` remains an
 Odin-level structural debug print and can expose Data backing details.
 
-## Construction
-
-Contextual literals are the normal constructor:
-
-```clojure
-(defn response [id: string, values: Data] -> Data
-  {:request-id id
-   :values values})
-```
+## Other Construction
 
 `data.vec`, `data.list`, and `data.set` convert sequential Data. `data.into`
-adds a sequential source to an existing list, vector, set, or map Data value.
-Use `data.tagged` for tagged values; the EDN reader also accepts tagged
-literals such as `#app/id 42`.
+adds a sequential source to an existing list, vector, set, or map Data. Use
+`data.tagged` for tagged values; the EDN reader also accepts tagged literals
+such as `#app/id 42`.
 
 Low-level native boundaries use `list-from-array`, `vector-from-array`,
 `set-from-array`, and `map-from-alternating`. Application code rarely needs
@@ -392,5 +582,11 @@ them.
   subtrees but copy the changed immediate collection.
 - Deterministic reference counting replaces garbage collection.
 
-See [the executable message pipeline](../examples/data/message-pipeline.kvist)
-for a realistic transformation written almost entirely with Data.
+More examples:
+
+- [contextual Data](../examples/data/contextual-data.kvist) - runtime values
+  inside Data literals
+- [EDN configuration](../examples/data/edn-config.kvist) - reading Data from
+  text
+- [message pipeline](../examples/data/message-pipeline.kvist) - nested lookup,
+  transformation, grouping, and updates

@@ -178,6 +178,64 @@ String builders and transformations return owned values:
 
 `str.split` returns an owned slice of borrowed string views.
 
+## Struct Of Arrays
+
+Odin's struct-of-arrays layout stores each struct field in a separate
+contiguous column. This is useful when loops process one or two fields across
+many values.
+
+```clojure
+(import soa "kvist:soa")
+
+(defstruct Particle {
+  x: f32
+  y: f32
+  mass: f32
+})
+
+(let [particles (soa.make Particle 1024) :defer]
+  (soa.push! &particles (Particle {x: 1 y: 2 mass: 3}))
+  (set! particles.x[0] 4)
+  (soa.scale! particles .mass 0.5))
+```
+
+`soa.make` returns owned `#soa[dynamic]T` storage with optional initial
+capacity. `#soa[N]T` is fixed storage. Dynamic storage supports:
+
+```clojure
+(soa.push! &particles particle)
+(soa.reserve! particles capacity)
+(soa.resize! particles count)
+(soa.clear! particles)
+(soa.remove-ordered-at! particles index)
+(soa.remove-unordered-at! particles index)
+```
+
+Columns are ordinary indexed arrays. The package also expands column operations
+to direct loops:
+
+```clojure
+(soa.fill! particles .mass 1.0)
+(soa.copy! particles .x .y)
+(soa.axpy! particles .x factor .y)
+(soa.clamp! particles .mass 0.0 10.0)
+(soa.sum-into! total particles .mass)
+```
+
+Update several fields at one index with `soa.update!`. The selected field names
+are available inside their expressions:
+
+```clojure
+(soa.update! particles i
+  .x (+ x 1)
+  .y (+ y 1))
+```
+
+`soa.zip` creates a struct-of-arrays view over columns, and `soa.unzip` returns
+the columns. `soa.fields` and `soa.types` expose compile-time field metadata.
+See the [package source](../src/kvist/soa/soa.kvist) and
+[example](../examples/packages/soa.kvist) for the complete surface.
+
 ## Ownership
 
 The common rules are:

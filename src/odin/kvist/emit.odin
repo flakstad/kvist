@@ -20758,7 +20758,11 @@ emit_selected_decls_with_source_map :: proc(
     if !ok_specializations {
         return result, err_specializations, false
     }
-    if !suppress_shared_helpers {
+    if suppress_shared_helpers && parallel_helpers_needed(features) {
+        emit_raw_newline(&e)
+        emitted := false
+        emit_parallel_helpers(&e, features, &emitted)
+    } else if !suppress_shared_helpers {
         emit_data_decode_aliases(&e, features)
         emit_core_helpers(&e, features)
     }

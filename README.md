@@ -107,7 +107,6 @@ Run `./scripts/smoke.sh` for a quick local check.
 - [Macros](docs/macros.md)
 - [Packages](docs/packages.md)
 - [Odin interoperability](docs/odin.md)
-- [Struct of arrays](docs/soa.md)
 - [Parallel helpers](docs/parallel.md)
 - [Testing](docs/testing.md)
 - [Tooling](docs/tooling.md)

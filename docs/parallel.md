@@ -37,8 +37,7 @@ Detached workers must not return a value.
 and returns an owned `[dynamic]Out`:
 
 ```clojure
-(let [scores (p.map score-user users)]
-  (defer (delete scores))
+(let [scores (p.map score-user users) :defer]
   ...)
 ```
 

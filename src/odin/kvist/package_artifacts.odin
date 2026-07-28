@@ -22,7 +22,7 @@ IR_Package_Group :: struct {
     cache_hit:   bool,
 }
 
-PACKAGE_ARTIFACT_CACHE_VERSION :: 2
+PACKAGE_ARTIFACT_CACHE_VERSION :: 3
 
 Cached_IR_Package_Group :: struct {
     version: int,
@@ -896,6 +896,13 @@ emit_ir_program_with_package_artifacts :: proc(
             return result, emit_err, false
         }
         group.emitted = emitted
+        // Thread helpers call declarations from the package that requested
+        // them and may use package-local task types. Keep them in that package
+        // instead of moving them to the dependency-only shared runtime.
+        delete(group_features.thread_starts)
+        group_features.thread_starts = nil
+        delete(group_features.thread_detaches)
+        group_features.thread_detaches = nil
         merge_emitter_features(&shared_features, group_features)
         group.features = group_features
         if cache_path != "" {

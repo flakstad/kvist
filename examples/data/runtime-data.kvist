@@ -56,11 +56,9 @@
       (assert (= (data.string retained[0]) "Grace"))
       (data.release retained[0])
       (delete retained))
-    (let [owned-keys (data.keys-owned-array user)
-          :defer-with data.delete-owned-array!]
+    (let [owned-keys (data.keys-owned-array user) :defer-with data.delete-owned-array!]
       (assert (= (data.keyword owned-keys[0]) ":user/name")))
-    (let [owned-items (data.to-owned-array user-keys)
-          :defer-with data.delete-owned-array!]
+    (let [owned-items (data.to-owned-array user-keys) :defer-with data.delete-owned-array!]
       (assert (= (data.keyword owned-items[1]) ":user/age")))
     (assert (= (data.string (get user :user/name)) "Ada"))
     (let [entity (data.from-int 42)

@@ -32,22 +32,7 @@ Kvist is easier to read if you know a few Odin-shaped ideas up front:
 Kvist does not add a garbage collector, hidden object model, or lazy sequence
 runtime on top of those rules.
 
-Use this document as a reference, not a tutorial:
-
-- start with the sections on files, names, types, declarations, and calls if
-  you want the core language model
-- read the ownership and pointer sections before writing larger programs
-- use the focused docs for helper-library surfaces such as sequences,
-  transforms, macros, and tooling
-- read Odin's own overview if the value, pointer, package, allocator, or
-  multi-return model is unfamiliar
-
-The boundary for this document is:
-
-- document Kvist syntax, semantics, lowering rules, and ownership behavior
-- document built-in special forms and compile-time forms
-- mention shipped helper packages only when they explain core language usage
-  or ownership rules
+Use this document as a reference, not a tutorial.
 
 ## Surface Index
 
@@ -97,7 +82,7 @@ bit.and-not bit.test bit.set bit.clear bit.flip
 
 ### Reader Syntax
 
-Kvist uses the usual Lisp delimiters:
+Kvist uses Clojure-style reader syntax:
 
 - `(head args...)` for calls and language forms
 - `[...]` for bindings, parameters, positional aggregates, and collection
@@ -124,14 +109,36 @@ code. See [data.md](data.md) and [macros.md](macros.md).
 
 ### File Model
 
-Kvist source files use the `.kvist` extension.
+Kvist source files use the `.kvist` extension. A folder is a package. Files in
+the same folder use the same package name and form one compilation unit.
+
+For example:
+
+```text
+app/
+  main.kvist
+  users/
+    model.kvist
+    format.kvist
+```
+
+Both files under `users/` start with:
+
+```clojure
+(package users)
+```
+
+Declarations in `model.kvist` and `format.kvist` can see and call one another
+without imports. The filename does not create another namespace.
+
+`app/main.kvist` imports the folder:
 
 ```clojure
 (package main)
-(import fmt "core:fmt")
+(import users "users")
 
 (defn main []
-  (fmt.println "hello"))
+  (println (users.display-name (users.User {name: "Ada"}))))
 ```
 
 `package` is optional only for the root source passed to `kvist`; omitted root
@@ -139,9 +146,13 @@ packages default to `main`. Files in imported Kvist source packages must declare
 exactly one `package`, and all files in that package directory must use the same
 package name.
 
-`import` declarations require a preceding package declaration after that
-synthetic root-package step. In source, imports belong before ordinary
-declarations.
+This differs from Clojure, where a source file normally declares its own
+namespace and other files `require` that namespace. In Kvist, the folder is the
+package, every file in it contributes declarations to that package, and only
+code outside the folder imports it.
+
+`import` declarations require a preceding package declaration. Imports belong
+before ordinary declarations.
 
 Ordinary `.odin` files remain ordinary Odin. A Kvist package directory may
 contain both `.kvist` and `.odin` files:
@@ -175,22 +186,51 @@ subexpressions into a raw Odin operator expression:
 (odin-prefix "~" mask)
 ```
 
-### Names And Symbols
+### Declarations
 
-Kvist maps source identifiers predictably to Odin names:
-
-- `-` becomes `_`
-- `?` becomes `_p`
-- `!` becomes `_bang`
-- case and existing underscores are preserved
-
-Examples:
+The main declaration forms are:
 
 ```clojure
-(defn route-add [] ...)   ; route_add
-(defn active? [] ...)     ; active_p
-(defn push! [] ...)       ; push_bang
+(def Max-Retries 3)            ; immutable value or type alias
+(defvar request-count 0)       ; mutable value
+
+(defstruct User {
+  name: string
+  active?: bool
+})
+
+(defenum State [Pending Ready Failed])
+(defunion Result {
+  user: User
+  error: string
+})
+
+(defn greet [user: User] -> string
+  (str "Hello, " user.name))
 ```
+
+Add `-` to the form name to make a top-level declaration private to its
+package: `def-`, `defvar-`, `defstruct-`, `defenum-`, `defunion-`, and `defn-`.
+Macros, transforms, and iterators use `defmacro`, `deftransform`, and `defiter`.
+The [declarations](#declaration-details) and
+[compile-time forms](#compile-time-forms) sections cover the full syntax.
+
+### Names And Symbols
+
+Names are Clojure-style symbols. Ordinary declaration and local names use
+letters, digits, `_`, `-`, `?`, and `!`, and cannot start with a digit. Examples
+are `request-count`, `active?`, `push!`, `App-State`, and `value_2`. Whitespace,
+commas, and collection delimiters end a symbol.
+
+The punctuation has conventions:
+
+- `-` separates words
+- `?` marks predicates
+- `!` marks mutation
+- a leading `.` is a field selector, such as `.name`
+- `.` inside a name accesses a package or field, such as `arr.map` or
+  `user.name`
+- operator symbols such as `+`, `<=`, and `bit.and` are used in call position
 
 Field access and package access use dot syntax:
 
@@ -218,6 +258,17 @@ symbolic data in otherwise Odin-shaped code:
 Kvist still uses specific keyword literals positionally in some forms. For
 example, `:defer`, `:errdefer`, `:using`, `:or-return`, `:yield`, `:next`,
 `:dispose`, and `cond`'s `:else` act as markers in those syntactic slots.
+
+Generated Odin uses a predictable mapping:
+
+- `-` becomes `_`
+- `?` becomes `_p`
+- `!` becomes `_bang`
+- case and existing underscores are preserved
+
+For example, `route-add`, `active?`, and `push!` become `route_add`,
+`active_p`, and `push_bang`. This usually matters only when reading generated
+code or calling Kvist declarations from Odin.
 
 ### Imports And Exports
 
@@ -267,6 +318,49 @@ declarations should be exposed through a Kvist source-package import.
 
 @exports [Raw_Handle]
 ```
+
+### Ownership And Cleanup
+
+Kvist uses explicit ownership. Dynamic arrays, maps, sets, built strings, and
+many package helpers return owned storage. The owner must return it, transfer
+it, or clean it up.
+
+Odin's explicit form works:
+
+```clojure
+(let [xs (arr.range 0 10)]
+  (defer (delete xs))
+  (println xs))
+```
+
+For a local binding, prefer the equivalent `:defer` marker:
+
+```clojure
+(let [xs (arr.range 0 10) :defer]
+  (println xs))
+```
+
+Use `:defer-with` when a resource has its own cleanup function:
+
+```clojure
+(let [file (open-file path) :defer-with close-file]
+  (read-header file))
+```
+
+Keep the marker on the same line as its binding. Cleanup runs when the
+surrounding scope exits. Borrowed slices and string views are not deleted; the
+storage they point into must remain alive. Compiler-managed `Data` values need
+no cleanup marker.
+
+Use `(addr value)` or the shorter `&value` when a mutating function needs a
+pointer:
+
+```clojure
+(update-state! &state)
+```
+
+See [Ownership, Allocation, And Context](#ownership-allocation-and-context) for
+transfers, allocators, `:errdefer`, and compiler warnings.
 
 ## Types, Values, And Data Shapes
 
@@ -368,13 +462,47 @@ This is useful when the size is part of the type.
 
 ### Slices
 
-A slice is a non-owning view over contiguous elements:
+A slice is a pointer plus a length: a cheap, non-owning view over contiguous
+elements. Its type is `[]T`, where `T` is the element type:
 
 ```clojure
 ([]int [1 2 3])
 ```
 
-Slices are cheap to pass around. They do not own storage and are not deleted.
+Indexing reads one element. Slicing creates another view:
+
+```clojure
+xs[i]           ; one element
+xs[:]           ; the whole sequence
+xs[start:]      ; start through the end
+xs[:end]        ; beginning through end, excluding end
+xs[start:end]   ; start through end, excluding end
+```
+
+The call-shaped equivalents are `(get xs i)`, `(slice xs)`,
+`(slice xs start)`, and `(slice xs start end)`.
+
+A slice may modify its backing storage:
+
+```clojure
+(defn clear! [values: []int]
+  (for [value index values]
+    (set! values[index] 0)))
+```
+
+It does not own that storage. Do not delete a slice, and do not keep or return
+one after its backing value has been deleted:
+
+```clojure
+(let [xs (arr.dynamic int [10 20 30 40]) :defer
+      middle xs[1:3]]
+  (set! middle[0] 99)
+  (println xs)) ; [10, 99, 30, 40]
+```
+
+Here `xs` owns the allocation and `middle` borrows it. Fixed arrays, dynamic
+arrays, and strings can all provide slice-like views; the owner must outlive
+every view.
 
 ### Dynamic Arrays
 
@@ -387,8 +515,7 @@ A dynamic array owns growable storage:
 Dynamic arrays must be deleted when locally owned:
 
 ```clojure
-(let [xs ([dynamic]int [1 2 3])]
-  (defer (delete xs))
+(let [xs ([dynamic]int [1 2 3]) :defer]
   (count xs))
 ```
 
@@ -607,7 +734,7 @@ Use `$T: typeid` when the caller passes a type explicitly:
   ...)
 ```
 
-## Declarations
+## Declaration Details
 
 Top-level declarations are public by default. Add `-` to make a declaration
 package-private:
@@ -945,8 +1072,7 @@ manually.
 For ordinary construction, use core `str`:
 
 ```clojure
-(let [request (str "@get('" path "', {openWhenHidden: true})")
-      :defer]
+(let [request (str "@get('" path "', {openWhenHidden: true})") :defer]
   (println request))
 ```
 
@@ -1259,12 +1385,10 @@ For dynamic arrays, the common `make` shapes are:
 Examples:
 
 ```clojure
-(let [xs (make [dynamic]int 0 128)]
-  (defer (delete xs))
+(let [xs (make [dynamic]int 0 128) :defer]
   ...)
 
-(let [cells (make [dynamic]f32 grid-cells)]
-  (defer (delete cells))
+(let [cells (make [dynamic]f32 grid-cells) :defer]
   ...)
 ```
 
@@ -1273,13 +1397,11 @@ If you want a different allocator, you can either pass it directly to `make` or
 choose it lexically with `with-allocator`:
 
 ```clojure
-(let [scratch (make [dynamic]int 0 64 context.temp_allocator)]
-  (defer (delete scratch))
+(let [scratch (make [dynamic]int 0 64 context.temp_allocator) :defer]
   ...)
 
 (with-allocator [allocator context.temp_allocator]
-  (let [scratch (make [dynamic]int 0 64)]
-    (defer (delete scratch))
+  (let [scratch (make [dynamic]int 0 64) :defer]
     ...))
 ```
 
@@ -1326,9 +1448,8 @@ type-call syntax over a brace literal.
 `let` is an expression and a local scope:
 
 ```clojure
-(let [xs ([dynamic]int [1 2 3])
+(let [xs ([dynamic]int [1 2 3]) :defer
       total (sum xs)]
-  (defer (delete xs))
   total)
 ```
 
@@ -2064,8 +2185,7 @@ it. The common owned values are dynamic arrays, maps, and helper results that
 create them.
 
 ```clojure
-(let [xs (arr.range 0 8)]
-  (defer (delete xs))
+(let [xs (arr.range 0 8) :defer]
   (for [x xs]
     (println x)))
 ```
@@ -2252,8 +2372,7 @@ is usually cleaner than passing the allocator through every helper manually:
 
 ```clojure
 (with-allocator [allocator context.temp_allocator]
-  (let [scratch (make [dynamic]int 0 64)]
-    (defer (delete scratch))
+  (let [scratch (make [dynamic]int 0 64) :defer]
     ...))
 ```
 
@@ -2511,33 +2630,139 @@ that declaration:
 (doc 'parse-port)
 ```
 
-Most broader collection and package helper surfaces are not part of the core
-language. Import them explicitly:
+## Shipped Packages
+
+Broader helpers are packages, not hidden language behavior. Import them
+explicitly.
+
+### Arrays
+
+`kvist:arr` is the main collection package:
 
 ```clojure
-(import "kvist:arr" :as arr)
+(import arr "kvist:arr")
+
+(defn add [x: int, y: int] -> int
+  (+ x y))
+
+(let [numbers (arr.range 0 10) :defer
+      even (arr.filter (fn [x: int] -> bool (= (% x 2) 0)) numbers) :defer
+      squares (arr.map (fn [x: int] -> int (* x x)) even) :defer]
+  (println (arr.reduce add 0 squares)))
+```
+
+`range`, `map`, and `filter` build owned dynamic arrays in ordinary expression
+position. `reduce`, `find`, `some?`, and `every?` scan without building an
+output. Names ending in `!` mutate existing storage:
+
+```clojure
+(arr.push! numbers 10)
+(arr.sort! numbers)
+```
+
+View helpers such as `take`, `drop`, and `rest` return borrowed slices.
+Partition helpers return an owned outer array of borrowed slices. See
+[sequences.md](sequences.md) for constructors, eager builders, scans,
+producers, views, and ownership.
+
+### Maps, Sets, And Strings
+
+`kvist:map`, `kvist:set`, and `kvist:str` provide construction and common
+operations:
+
+```clojure
 (import map "kvist:map")
 (import set "kvist:set")
-(import bit "kvist:bit")
 (import str "kvist:str")
-(import soa "kvist:soa")
+
+(let [scores (map.of string int {"Ada" 42}) :defer
+      roles (set.of keyword [:admin :author]) :defer
+      words (str.split "one,two,three" ",") :defer]
+  (println (map.get scores "Ada" 0)
+           (set.contains? roles :admin)
+           words))
 ```
 
-This is a representative list, not a complete package catalog. Package-specific
-behavior belongs in package docs, package source, and runnable examples. The
-current shipped-package source lives under `src/kvist/`.
+Non-mutating map and set operations return new owned values. Their `!` variants
+mutate. String slicing and trimming borrow; joining, replacing, and changing
+case return owned strings. See [sequences.md](sequences.md).
 
-Typical examples:
+### Data And EDN
+
+`kvist:data` works with immutable heterogeneous `Data`. `kvist:edn` reads and
+writes its EDN representation:
 
 ```clojure
-(arr.map .name users)
-(arr.filter .active users)
-(map.get lookup key default)
-(set.contains? tags :ready)
-(str.trim input)
+(import data "kvist:data")
+(import edn "kvist:edn")
+
+(let [config (edn.read "{:port 8080 :features [:query :pull]}")]
+  (println (data.int (:port config)))
+  (edn.prn config))
 ```
 
-See [sequences.md](sequences.md) for collection helpers and ownership details.
+`Data` is compiler-managed. See [data.md](data.md) for construction, traversal,
+updates, destructuring, validation, and typed boundaries.
+
+### Regular Expressions
+
+`kvist:regex` provides a simple one-shot API and explicit compiled values:
+
+```clojure
+(import regex "kvist:regex")
+
+(regex.matches? #"^[a-z]+$" "kvist")
+
+(let [[pattern err] (regex.compile #"^[a-z]+$")]
+  (when (= err nil)
+    (let [owned pattern :defer-with regex.destroy!]
+      (println (regex.matches-compiled? owned "kvist")))))
+```
+
+Compiled regexes and captures use their package cleanup functions. See the
+[package source](../src/kvist/regex/regex.kvist) for matching and capture APIs.
+
+### Parallel Work And Tests
+
+`kvist:parallel` runs tasks or bounded collection work:
+
+```clojure
+(import p "kvist:parallel")
+
+(let [squares (p.map square values) :defer]
+  (println squares))
+```
+
+`kvist:test` provides declarations and assertions:
+
+```clojure
+(import t "kvist:test")
+
+(t.deftest addition
+  (t.is (= (+ 2 3) 5)))
+```
+
+See [parallel.md](parallel.md) and [testing.md](testing.md).
+
+### Struct Of Arrays
+
+`kvist:soa` exposes Odin's struct-of-arrays layout. It stores each struct field
+as a separate contiguous column:
+
+```clojure
+(import soa "kvist:soa")
+
+(let [particles (soa.make Particle 1024) :defer]
+  (soa.push! &particles (Particle {x: 1 y: 2 mass: 3}))
+  (soa.scale! particles .mass 0.5)
+  (println particles.mass[0]))
+```
+
+See [Struct Of Arrays](sequences.md#struct-of-arrays) for the storage forms and
+column operations.
+
+`kvist:bit` is covered with the core operators above. See
+[packages.md](packages.md) for the complete package index.
 
 ## Compile-Time Forms
 
@@ -2674,7 +2899,6 @@ notes that should remain in the source file but not reach lowering or runtime.
 - [sequences.md](sequences.md) - collection helpers and ownership details
 - [packages.md](packages.md) - shipped `kvist:*` package index
 - [odin.md](odin.md) - direct Odin package use
-- [soa.md](soa.md) - struct-of-arrays storage and column operations
 - [transforms.md](transforms.md) - `deftransform`,
   `into`, `transduce`
 - [macros.md](macros.md) - macro authoring

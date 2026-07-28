@@ -24878,6 +24878,62 @@ compile_path_emits_imported_package_artifacts :: proc(t: ^testing.T) {
 }
 
 @(test)
+package_artifacts_keep_parallel_helpers_with_their_calling_package :: proc(t: ^testing.T) {
+    repo_root := compiler_test_repo_root()
+    example_path, path_err := os.join_path(
+        {repo_root, "examples", "packages", "parallel.kvist"},
+        context.allocator,
+    )
+    testing.expect_value(t, path_err == nil, true)
+    if path_err != nil {
+        return
+    }
+    defer delete(example_path)
+
+    result, err, ok := kvist.compile_path_with_package_artifacts(example_path)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer kvist.package_emit_result_delete(&result)
+
+    testing.expect_value(
+        t,
+        strings.contains(result.root.output, "thread_start_square_int_int :: proc"),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(result.root.output, ".parallel_Task(int)"),
+        true,
+    )
+
+    found_parallel_package := false
+    for artifact in result.artifacts {
+        if artifact.id == "kvp_shared" {
+            testing.expect_value(t, strings.contains(artifact.output, "thread_start_"), false)
+            testing.expect_value(t, strings.contains(artifact.output, "thread_detach_"), false)
+            continue
+        }
+        if strings.contains(artifact.output, "parallel_Task :: struct") {
+            found_parallel_package = true
+            testing.expect_value(
+                t,
+                strings.contains(artifact.output, "thread_start_p__map_worker"),
+                true,
+            )
+            testing.expect_value(
+                t,
+                strings.contains(artifact.output, "thread_start_p__for_worker"),
+                true,
+            )
+        }
+    }
+    testing.expect_value(t, found_parallel_package, true)
+}
+
+@(test)
 package_artifacts_do_not_rewrite_dependency_locals_as_root_symbols :: proc(t: ^testing.T) {
     dir, dir_err := os.make_directory_temp("", "kvist-package-local-shadow-*", context.allocator)
     testing.expect_value(t, dir_err == nil, true)
