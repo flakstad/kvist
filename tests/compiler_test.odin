@@ -24988,6 +24988,41 @@ package_artifacts_do_not_rewrite_dependency_locals_as_root_symbols :: proc(t: ^t
 }
 
 @(test)
+package_artifacts_preserve_explicitly_qualified_foreign_types :: proc(
+	t: ^testing.T,
+) {
+	origins := make(map[string]kvist.Package_Symbol_Origin)
+	defer delete(origins)
+	origins["Data"] = {
+		package_id = "kvp_shared",
+		symbol = "Data",
+	}
+	qualified, dependencies := kvist.qualify_generated_package_output(
+		"wrapped: native.Data\nplain: Data\n",
+		origins,
+	)
+	defer delete(qualified)
+	defer kvist.delete_string_slice(&dependencies)
+	testing.expect_value(
+		t,
+		strings.contains(qualified, "wrapped: native.Data"),
+		true,
+	)
+	testing.expect_value(
+		t,
+		strings.contains(qualified, "native.kvp_shared.Data"),
+		false,
+	)
+	testing.expect_value(
+		t,
+		strings.contains(qualified, "plain: kvp_shared.Data"),
+		true,
+	)
+	testing.expect_value(t, len(dependencies), 1)
+	testing.expect_value(t, dependencies[0], "kvp_shared")
+}
+
+@(test)
 package_artifacts_keep_quoted_data_literals_package_unique :: proc(t: ^testing.T) {
     dir, dir_err := os.make_directory_temp("", "kvist-package-data-literals-*", context.allocator)
     testing.expect_value(t, dir_err == nil, true)

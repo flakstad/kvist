@@ -743,7 +743,14 @@ qualify_generated_package_output :: proc(
                 end += 1
             }
             token := output[i:end]
-            if origin, found := origins[token]; found {
+            // A member reached through an explicit package/type qualifier is
+            // already owned by that qualifier. Rewriting the right-hand token
+            // would turn `native.Data` into the invalid
+            // `native.kvp_shared.Data` when another generated package also
+            // exports Data.
+            explicitly_qualified := i > 0 && output[i-1] == '.'
+            if origin, found := origins[token];
+			   found && !explicitly_qualified {
                 strings.write_string(&builder, origin.package_id)
                 strings.write_byte(&builder, '.')
                 strings.write_string(&builder, token)
