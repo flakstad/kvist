@@ -4115,6 +4115,58 @@ managed_data_struct_results_do_not_warn_for_automatic_cleanup :: proc(t: ^testin
 }
 
 @(test)
+owned_data_locals_move_into_struct_fields_without_an_extra_retain :: proc(
+    t: ^testing.T,
+) {
+    source := `(package main)
+
+(import data "kvist:data")
+
+(defstruct Report {
+  root: Data
+  child: Data
+})
+
+(defn make-report [] -> Report
+  (let [root: Data {:items [1 2 3]}
+        child (data.get-in root [:items])]
+    (Report {root: root child: child})))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(
+        t,
+        strings.contains(
+            output,
+            "root = (proc(kvist_value: Data, kvist_owner: ^bool) -> Data",
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            output,
+            "child = (proc(kvist_value: Data, kvist_owner: ^bool) -> Data",
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            output,
+            "kvist_data_retain((proc(kvist_value: Data, kvist_owner: ^bool)",
+        ),
+        false,
+    )
+}
+
+@(test)
 managed_struct_results_move_through_ordinary_control_flow :: proc(t: ^testing.T) {
     source := `(package main)
 

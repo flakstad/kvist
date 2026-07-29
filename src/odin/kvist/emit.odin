@@ -1213,15 +1213,18 @@ emit_struct_brace_literal :: proc(e: ^Emitter, struct_decl: ^Struct_Decl, form: 
         if !ok_value {
             return "", err_value, false
         }
+        moved_local := false
         if value.kind == .Symbol && ownership_type_has_destructor(e, field.ty) {
             name := map_name(value.text)
             if owner_flag, ok_owner := lookup_managed_local_owner(e, name); ok_owner {
                 value_text = managed_move_local_value_text(e, field.ty, value_text, owner_flag)
+                moved_local = true
             }
             delete(name)
         } else if owner_name, has_owner := form_direct_borrow_owner_name(value, e); has_owner {
             if owner_flag, ok_owner := lookup_managed_local_owner(e, owner_name); ok_owner {
                 value_text = managed_move_local_value_text(e, field.ty, value_text, owner_flag)
+                moved_local = true
             }
             delete(owner_name)
         }
@@ -1232,6 +1235,7 @@ emit_struct_brace_literal :: proc(e: ^Emitter, struct_decl: ^Struct_Decl, form: 
             }
         } else if !field.owns_dynamic_array &&
            type_text_has_managed_lifecycle(e, field.ty) &&
+           !moved_local &&
            !form_produces_owned_managed_type(e, value, field.ty) {
             value_text = managed_clone_value_text(e, field.ty, value_text)
         }
