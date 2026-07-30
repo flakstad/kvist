@@ -817,6 +817,10 @@ expects `Data`. Its scalar literals become Data values, while symbols and calls
 are evaluated and converted from Data or native scalar values:
 
 ```clojure
+(def default-contact: Data
+  {:contact/name "Ada"
+   :contact/active? true})
+
 (defn contact [id: i64, name: string] -> Data
   {:db/id id
    :contact/name name})
@@ -827,7 +831,10 @@ are evaluated and converted from Data or native scalar values:
 
 Return types, typed bindings, function parameters, and uniquely matching
 overload parameters provide this context. Without Data context, unquoted
-vectors, maps, and sets remain native homogeneous collections.
+vectors, maps, and sets remain native homogeneous collections. A type
+annotation selects the Data representation while expressions inside the
+collection are still evaluated; quote instead preserves the form itself
+without evaluation.
 
 `Data` represents nil, booleans, integers, floats, strings, symbols, keywords,
 lists, vectors, maps, sets, and tagged values. Quoted literals use static

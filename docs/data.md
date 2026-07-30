@@ -11,17 +11,19 @@ those values:
 ```clojure
 (import data "kvist:data")
 
-(def contact
-  '{:name "Ada Lovelace"
-    :born 1815
-    :active? true
-    :roles [:mathematician :programmer]
-    :address nil})
+(def contact: Data
+  {:name "Ada Lovelace"
+   :born 1815
+   :active? true
+   :roles [:mathematician :programmer]
+   :address nil})
 ```
 
-This is one immutable value, not a native struct containing several native
-collections. Its shape can be inspected, transformed, printed as EDN, stored,
-or passed to code that interprets the structure.
+The `Data` annotation tells the compiler that the map and nested vector are
+Data rather than native homogeneous collections. This is one immutable value,
+not a native struct containing several native collections. Its shape can be
+inspected, transformed, printed as EDN, stored, or passed to code that
+interprets the structure.
 
 In practical terms, `Data` is EDN in memory. EDN is its text representation;
 `Data` is the value a Kvist program reads, builds, and transforms.
@@ -113,14 +115,33 @@ The same collection syntax therefore has two meanings:
 
 ```clojure
 [1 2 3]                 ; native homogeneous collection
-'[1 2 3]                ; static Data vector
+
+(def number-list: Data
+  [1 2 3])               ; runtime Data vector from expected type
 
 (defn numbers [] -> Data
   [1 2 3])               ; runtime Data vector from expected type
 ```
 
-Quoted Data literals are compiled into static storage and require no cleanup.
-Runtime Data is deterministically managed by the compiler.
+Quote has its usual Lisp meaning: preserve a form as data instead of evaluating
+it. The resulting value is `Data`, but quote is not merely another spelling of
+a `Data` type annotation:
+
+```clojure
+(def name "Ada")
+
+(def evaluated: Data
+  {:name name})           ; {:name "Ada"}
+
+(def literal
+  '{:name name})          ; {:name name}
+```
+
+Use a `Data` annotation when the intent is to select the Data representation
+while still evaluating expressions inside the collection. Use quote when the
+form itself is the value, including any symbols or lists it contains. Quoted
+Data literals are compiled into static storage and require no cleanup. Runtime
+Data is deterministically managed by the compiler.
 
 ## Working With A Value
 
