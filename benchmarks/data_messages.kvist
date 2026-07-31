@@ -1,0 +1,214 @@
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
+
+;; Representative message/configuration Data workloads.
+(package main)
+(import arr "kvist:arr")
+(import data "kvist:data")
+(import edn "kvist:edn")
+(import fmt "core:fmt")
+(import mem "core:mem")
+(import time "core:time")
+
+(def Message-5: string
+  "{:id 42
+    :kind :contact/updated
+    :active? true
+    :meta {:attempt 1}
+    :trace-id \"trace-42\"}")
+
+(def Message-20: string
+  "{:id 42
+    :kind :contact/updated
+    :active? true
+    :name \"Ada Lovelace\"
+    :email \"ada@example.com\"
+    :phone \"+441234567\"
+    :country :gb
+    :language :en
+    :created-at \"2026-07-30T20:00:00Z\"
+    :updated-at \"2026-07-30T22:00:00Z\"
+    :source :api
+    :priority 3
+    :verified? true
+    :tags [:author :admin]
+    :permissions #{:read :write}
+    :address {:city \"London\" :postal-code \"SW1\"}
+    :preferences {:email? true :sms? false}
+    :meta {:attempt 1}
+    :version 7
+    :trace-id \"trace-42\"}")
+
+(def Message-50: string
+  "{:id 42
+    :kind :contact/updated
+    :active? true
+    :name \"Ada Lovelace\"
+    :email \"ada@example.com\"
+    :phone \"+441234567\"
+    :country :gb
+    :language :en
+    :created-at \"2026-07-30T20:00:00Z\"
+    :updated-at \"2026-07-30T22:00:00Z\"
+    :source :api
+    :priority 3
+    :verified? true
+    :tags [:author :admin]
+    :permissions #{:read :write}
+    :address {:city \"London\" :postal-code \"SW1\"}
+    :preferences {:email? true :sms? false}
+    :meta {:attempt 1}
+    :version 7
+    :field-20 20
+    :field-21 21
+    :field-22 22
+    :field-23 23
+    :field-24 24
+    :field-25 25
+    :field-26 26
+    :field-27 27
+    :field-28 28
+    :field-29 29
+    :field-30 30
+    :field-31 31
+    :field-32 32
+    :field-33 33
+    :field-34 34
+    :field-35 35
+    :field-36 36
+    :field-37 37
+    :field-38 38
+    :field-39 39
+    :field-40 40
+    :field-41 41
+    :field-42 42
+    :field-43 43
+    :field-44 44
+    :field-45 45
+    :field-46 46
+    :field-47 47
+    :field-48 48
+    :field-49 49
+    :trace-id \"trace-42\"}")
+
+(defn report
+  [name: string,
+   fields: int,
+   reps: int,
+   checksum: int,
+   start: time.Tick,
+   track: ^mem.Tracking-Allocator]
+  (fmt.printfln
+    "%-18s fields=%2v reps=%6v %9.3f ms allocs=%8v bytes=%10v peak=%9v live=%v checksum=%v"
+    name fields reps
+    (time.duration-milliseconds (time.tick-since start))
+    track.total-allocation-count
+    track.total-memory-allocated
+    track.peak-memory-allocated
+    track.current-memory-allocated
+    checksum))
+
+(defn bench-parse [source: string, reps: int] -> int
+  (let [checksum 0]
+    (for [_ (arr.range 0 reps)]
+      (let [message (edn.read source)]
+        (set! checksum (+ checksum (data.count message)))))
+    checksum))
+
+(defn bench-lookup [message: Data, reps: int] -> int
+  (let [checksum 0]
+    (for [_ (arr.range 0 reps)]
+      (let [[trace-id present?] (data.lookup message :trace-id)]
+        (if present?
+          (set! checksum (+ checksum (count (data.string trace-id)))))))
+    checksum))
+
+(defn bench-equal [message: Data, equal-message: Data, reps: int] -> int
+  (let [checksum 0]
+    (for [_ (arr.range 0 reps)]
+      (if (= message equal-message)
+        (set! checksum (+ checksum 1))))
+    checksum))
+
+(defn bench-noop-assoc [message: Data, reps: int] -> int
+  (let [checksum 0]
+    (for [_ (arr.range 0 reps)]
+      (let [unchanged (data.assoc message :trace-id (:trace-id message))]
+        (set! checksum (+ checksum (data.count unchanged)))))
+    checksum))
+
+(defn bench-update [message: Data, reps: int] -> int
+  (let [checksum 0]
+    (for [index (arr.range 0 reps)]
+      (let [updated
+            (data.assoc-in message
+                           [:meta :attempt]
+                           (data.from-int (i64 index)))]
+        (set! checksum
+              (+ checksum
+                 (int (data.int (data.get-in updated [:meta :attempt])))))))
+    checksum))
+
+(defn bench-write [message: Data, reps: int] -> int
+  (let [checksum 0]
+    (for [_ (arr.range 0 reps)]
+      (let [encoded (edn.write message) :defer]
+        (set! checksum (+ checksum (count encoded)))))
+    checksum))
+
+(defn run-message
+  [fields: int,
+   source: string,
+   message: Data,
+   equal-message: Data,
+   reps: int,
+   track: ^mem.Tracking-Allocator]
+  (mem.tracking-allocator-reset track)
+  (let [start (time.tick-now)
+        checksum (bench-parse source reps)]
+    (report "parse" fields reps checksum start track))
+
+  (mem.tracking-allocator-reset track)
+  (let [start (time.tick-now)
+        checksum (bench-lookup message reps)]
+    (report "lookup" fields reps checksum start track))
+
+  (mem.tracking-allocator-reset track)
+  (let [start (time.tick-now)
+        checksum (bench-equal message equal-message reps)]
+    (report "equal map" fields reps checksum start track))
+
+  (mem.tracking-allocator-reset track)
+  (let [start (time.tick-now)
+        checksum (bench-noop-assoc message reps)]
+    (report "noop assoc" fields reps checksum start track))
+
+  (mem.tracking-allocator-reset track)
+  (let [start (time.tick-now)
+        checksum (bench-update message reps)]
+    (report "nested update" fields reps checksum start track))
+
+  (mem.tracking-allocator-reset track)
+  (let [start (time.tick-now)
+        checksum (bench-write message reps)]
+    (report "write" fields reps checksum start track)))
+
+(defn main []
+  ;; Baselines use the caller's allocator so each measured tracker reset starts
+  ;; with no live allocations.
+  (let [message-5 (edn.read Message-5)
+        equal-message-5 (data.merge (data.empty-map) message-5)
+        message-20 (edn.read Message-20)
+        equal-message-20 (data.merge (data.empty-map) message-20)
+        message-50 (edn.read Message-50)
+        equal-message-50 (data.merge (data.empty-map) message-50)
+        old-allocator context.allocator
+        track: mem.Tracking-Allocator (odin "mem.Tracking_Allocator{}")]
+    (mem.tracking-allocator-init (addr track) old-allocator old-allocator)
+    (defer (mem.tracking-allocator-destroy (addr track)))
+    (set! context.allocator (mem.tracking-allocator (addr track)))
+    (defer (odin "context.allocator = old_allocator"))
+
+    (run-message 5 Message-5 message-5 equal-message-5 20000 (addr track))
+    (run-message 20 Message-20 message-20 equal-message-20 10000 (addr track))
+    (run-message 50 Message-50 message-50 equal-message-50 5000 (addr track))))

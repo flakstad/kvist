@@ -287,7 +287,18 @@ optional fallback is returned only when the key is absent; a present Data nil
 is preserved.
 
 Use `get` when generic indexed/map access is clearer. Keyword invocation is
-normally the most readable choice for map-shaped application data.
+normally the most readable choice for map-shaped application data. Use
+`data.lookup` when code needs the value and its presence in one map scan:
+
+```clojure
+(let [[address present?] (data.lookup contact :address)]
+  (if present?
+    (handle-address address)
+    (handle-missing-address)))
+```
+
+This distinguishes an absent key from a present Data nil without a separate
+`contains?` call.
 
 Data-heavy files may refer selected eager helpers:
 
@@ -585,7 +596,9 @@ such as `#app/id 42`.
 
 Low-level native boundaries use `list-from-array`, `vector-from-array`,
 `set-from-array`, and `map-from-alternating`. Application code rarely needs
-them.
+them. `map-from-owned-unique!` is the ownership-transfer variant for parsers
+and builders that already hold a retained alternating buffer and have already
+validated key uniqueness.
 
 ## Rules To Remember
 

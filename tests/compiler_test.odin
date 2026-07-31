@@ -3541,6 +3541,12 @@ compile_quote_as_first_class_data :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "Data_Node :: struct"), true)
     testing.expect_value(t, strings.contains(output, "kvist_data_retain :: proc"), true)
     testing.expect_value(t, strings.contains(output, "kvist_data_release :: proc"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_data_same_backing :: proc"), true)
+    testing.expect_value(t, strings.contains(output, "case .String, .Symbol, .Keyword: return a.payload.text == b.payload.text\n        case .Tagged:\n            if kvist_data_same_backing(a, b) { return true }"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_data_freeze_unique_map :: proc"), true)
+    testing.expect_value(t, strings.contains(output, "return kvist_data_retain(entry.value), true"), true)
+    testing.expect_value(t, strings.contains(output, "if found_index >= 0 && kvist_data_equal(collection.payload.entries[found_index].value, value) { return kvist_data_retain(collection) }"), true)
+    testing.expect_value(t, strings.contains(output, "if found_index < 0 { return kvist_data_retain(collection) }"), true)
     testing.expect_value(t, strings.contains(output, "import kvist_sync \"core:sync\""), true)
 }
 

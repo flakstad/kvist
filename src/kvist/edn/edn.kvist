@@ -150,7 +150,9 @@
         (return (read-error reader "unterminated map")))
       (when (= (core.get reader.text reader.index) (byte 125))
         (inc! reader.index)
-        (return (data.map-from-alternating items[:]) (Read-Error {}) true))
+        (return (data.map-from-owned-unique! (addr items))
+                (Read-Error {})
+                true))
       (let [key-start reader.index
             [key key-error key-ok] (parse-value reader)
             key-end reader.index]

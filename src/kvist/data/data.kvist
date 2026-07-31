@@ -166,6 +166,14 @@
   [values: ^[dynamic]Data] -> Data #force_inline
   (odin-call "kvist_data_freeze_map" values))
 
+(defn map-from-owned-unique!
+  "Transfer an owned alternating key/value buffer into immutable map Data.
+
+  Every buffer element must already be retained, keys must be structurally
+  unique, and `values` must not be used after this call."
+  [values: ^[dynamic]Data] -> Data #force_inline
+  (odin-call "kvist_data_freeze_unique_map" values))
+
 (defn assoc
   "Return immutable map or vector Data with `key` associated to `value`."
   [collection: Data, key: Data, value: Data] -> Data #force_inline
@@ -312,6 +320,14 @@
   "Return structural Data equality without allocating."
   [left: Data, right: Data] -> bool #force_inline
   (odin-call "kvist_data_equal" left right))
+
+(defn lookup
+  "Return the retained value for `key` and whether the key is present.
+
+  Presence is independent from the value, so a present Data nil returns
+  `[nil true]` while an absent key returns `[nil false]`."
+  [value: Data, key: Data] -> [result: Data, present?: bool] #force_inline
+  (odin-call "kvist_data_get_present" value key))
 
 (defn decode-int-at
   "Decode integer Data to `i64`.
@@ -1281,9 +1297,10 @@
   (let [out (arr.empty Data (* 2 (core.count selected)))]
     (defer (delete-owned-array! out))
     (for [index (arr.range 0 (core.count selected))]
-      (let [key (item-at selected index)]
-        (if (core.contains? map-value key)
-          (append-pair-retained! (addr out) key (core.get map-value key)))))
+      (let [key (item-at selected index)
+            [value present?] (lookup map-value key)]
+        (if present?
+          (append-pair-retained! (addr out) key value))))
     (freeze-map! (addr out))))
 
 (defmacro merge-with
@@ -1302,9 +1319,10 @@
        (addr out) (key-at left index) (value-at left index)))
     (for [index (arr.range 0 (core.count right))]
       (let [key (key-at right index)
-            right-value (value-at right index)]
-        (if (core.contains? left key)
-          (let [combined (f (core.get left key) right-value)]
+            right-value (value-at right index)
+            [left-value present?] (lookup left key)]
+        (if present?
+          (let [combined (f left-value right-value)]
             (append-pair-retained! (addr out) key combined))
           (append-pair-retained! (addr out) key right-value))))
     (freeze-map! (addr out))))

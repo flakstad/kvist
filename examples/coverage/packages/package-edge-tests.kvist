@@ -5,6 +5,8 @@
 
 (import t "kvist:test")
 (import arr "kvist:arr")
+(import data "kvist:data")
+(import edn "kvist:edn")
 (import map "kvist:map")
 (import set "kvist:set")
 (import str "kvist:str")
@@ -20,6 +22,9 @@
 
 (defn query-missing [] -> [value: int, ok: bool] #optional_ok
   (return 0 false))
+
+(defn same-data-backing? [left: Data, right: Data] -> bool #force_inline
+  (odin-call "kvist_data_same_backing" left right))
 
 (t.deftest core-package-edge-cases
   (let [xs [1 2 3] :defer
@@ -74,6 +79,55 @@
     (t.is (= (map.get zipped-short "c" 99) 99))
     (t.is (= (map.get mutable "x" 0) 2))
     (t.is (= (map.get mutable "b" 0) 20))))
+
+(t.deftest data-package-edge-cases
+  (let [message: Data
+        {:name "Ada"
+         :active? true
+         :address nil}
+        unchanged-name (data.assoc message :name (:name message))
+        unchanged-owned-name
+        (data.assoc message :name (data.from-string "Ada"))
+        missing-dissoc (data.dissoc message :missing)
+        changed-name (data.assoc message :name "Grace")
+        values: Data [1 2 3]
+        unchanged-item (data.assoc values 1 2)
+        changed-item (data.assoc values 1 4)
+        [name name-present?] (data.lookup message :name)
+        [address address-present?] (data.lookup message :address)
+        [missing missing-present?] (data.lookup message :missing)
+        ordered: Data {:a 1 :b 2}
+        ordered-copy: Data {:a 1 :b 2}
+        reordered: Data {:b 2 :a 1}
+        ordered-set: Data #{:a :b}
+        reordered-set: Data #{:b :a}
+        parsed (edn.read "{:name \"Ada\" :address nil}")
+        [_ duplicate-error duplicate-ok]
+        (edn.try-read "{:name \"Ada\" :name \"Grace\"}")]
+    (t.is (same-data-backing? message unchanged-name))
+    (t.is (same-data-backing? message unchanged-owned-name))
+    (t.is (same-data-backing? message missing-dissoc))
+    (t.is (not (same-data-backing? message changed-name)))
+    (t.is (same-data-backing? values unchanged-item))
+    (t.is (not (same-data-backing? values changed-item)))
+    (t.is name-present?)
+    (t.is (= (data.string name) "Ada"))
+    (t.is address-present?)
+    (t.is (data.nil? address))
+    (t.is (not missing-present?))
+    (t.is (data.nil? missing))
+    (for [_ (arr.range 0 100)]
+      (let [[repeated-name repeated-present?] (data.lookup message :name)]
+        (t.is repeated-present?)
+        (t.is (= (data.string repeated-name) "Ada"))))
+    (t.is (= (data.string (:name message)) "Ada"))
+    (t.is (data.equal? ordered ordered-copy))
+    (t.is (data.equal? ordered reordered))
+    (t.is (data.equal? ordered-set reordered-set))
+    (t.is (= (data.string (:name parsed)) "Ada"))
+    (t.is (data.nil? (:address parsed)))
+    (t.is (not duplicate-ok))
+    (t.is (= duplicate-error.message "duplicate map key"))))
 
 (t.deftest set-package-edge-cases
   (let [empty-set (set.of int []) :defer

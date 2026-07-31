@@ -5991,6 +5991,7 @@ FOREIGN_LIFETIME_BINDINGS :: []Foreign_Lifetime_Binding{
     {"kvist_data_make_unique_set", .Owned},
     {"kvist_data_freeze_items", .Owned},
     {"kvist_data_freeze_map", .Owned},
+    {"kvist_data_freeze_unique_map", .Owned},
     {"kvist_data_retain", .Owned},
     {"kvist_data_assoc", .Owned},
     {"kvist_data_update", .Owned},
@@ -19983,6 +19984,17 @@ emit_data_type_helper :: proc(e: ^Emitter) {
     emit_line(e, "return Data{kind = .Map, payload = {entries = node.entries[:]}, node = node}")
     e.indent -= 1
     emit_line(e, "}")
+    emit_line(e, "kvist_data_freeze_unique_map :: proc(values: ^[dynamic]Data, allocator: kvist_runtime.Allocator = context.allocator) -> Data {")
+    e.indent += 1
+    emit_line(e, "assert(len(values^)%2 == 0, \"unique Data map builder expects alternating keys and values\")")
+    emit_line(e, "node := kvist_data_new_node(allocator)")
+    emit_line(e, "node.entries = make([dynamic]Data_Entry, 0, len(values^)/2, allocator)")
+    emit_line(e, "for i := 0; i < len(values^); i += 2 { append(&node.entries, Data_Entry{key = values^[i], value = values^[i+1]}) }")
+    emit_line(e, "delete(values^)")
+    emit_line(e, "values^ = nil")
+    emit_line(e, "return Data{kind = .Map, payload = {entries = node.entries[:]}, node = node}")
+    e.indent -= 1
+    emit_line(e, "}")
     emit_line(e, "kvist_data_empty_map :: proc(allocator: kvist_runtime.Allocator = context.allocator) -> Data {")
     e.indent += 1
     emit_line(e, "node := kvist_data_new_node(allocator)")
@@ -19991,6 +20003,31 @@ emit_data_type_helper :: proc(e: ^Emitter) {
     e.indent -= 1
     emit_line(e, "}")
     emit_raw_newline(e)
+    emit_line(e, "kvist_data_same_backing :: proc(a, b: Data) -> bool {")
+    e.indent += 1
+    emit_line(e, "if a.kind != b.kind { return false }")
+    emit_line(e, "switch a.kind {")
+    e.indent += 1
+    emit_line(e, "case .Nil: return true")
+    emit_line(e, "case .Bool: return a.payload.bool_value == b.payload.bool_value")
+    emit_line(e, "case .Int: return a.payload.int_value == b.payload.int_value")
+    emit_line(e, "case .Float: return a.payload.float_value == b.payload.float_value")
+    emit_line(e, "case .String, .Symbol, .Keyword, .Tagged: return a.node != nil && a.node == b.node")
+    emit_line(e, "case .List, .Vector, .Set:")
+    e.indent += 1
+    emit_line(e, "if a.node == nil || a.node != b.node || len(a.payload.items) != len(b.payload.items) { return false }")
+    emit_line(e, "return len(a.payload.items) == 0 || &a.payload.items[0] == &b.payload.items[0]")
+    e.indent -= 1
+    emit_line(e, "case .Map:")
+    e.indent += 1
+    emit_line(e, "if a.node == nil || a.node != b.node || len(a.payload.entries) != len(b.payload.entries) { return false }")
+    emit_line(e, "return len(a.payload.entries) == 0 || &a.payload.entries[0] == &b.payload.entries[0]")
+    e.indent -= 1
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "return false")
+    e.indent -= 1
+    emit_line(e, "}")
     emit_line(e, "kvist_data_equal :: proc(a, b: Data) -> bool {")
     e.indent += 1
     emit_line(e, "if a.kind != b.kind { return false }")
@@ -20001,22 +20038,35 @@ emit_data_type_helper :: proc(e: ^Emitter) {
     emit_line(e, "case .Int: return a.payload.int_value == b.payload.int_value")
     emit_line(e, "case .Float: return a.payload.float_value == b.payload.float_value")
     emit_line(e, "case .String, .Symbol, .Keyword: return a.payload.text == b.payload.text")
-    emit_line(e, "case .Tagged: return a.node.text == b.node.text && kvist_data_equal(a.node.items[0], b.node.items[0])")
+    emit_line(e, "case .Tagged:")
+    e.indent += 1
+    emit_line(e, "if kvist_data_same_backing(a, b) { return true }")
+    emit_line(e, "return a.node.text == b.node.text && kvist_data_equal(a.node.items[0], b.node.items[0])")
+    e.indent -= 1
     emit_line(e, "case .List, .Vector:")
     e.indent += 1
+    emit_line(e, "if kvist_data_same_backing(a, b) { return true }")
     emit_line(e, "if len(a.payload.items) != len(b.payload.items) { return false }")
     emit_line(e, "for value, i in a.payload.items { if !kvist_data_equal(value, b.payload.items[i]) { return false } }")
     emit_line(e, "return true")
     e.indent -= 1
     emit_line(e, "case .Set:")
     e.indent += 1
+    emit_line(e, "if kvist_data_same_backing(a, b) { return true }")
     emit_line(e, "if len(a.payload.items) != len(b.payload.items) { return false }")
+    emit_line(e, "same_order := true")
+    emit_line(e, "for value, i in a.payload.items { if !kvist_data_equal(value, b.payload.items[i]) { same_order = false; break } }")
+    emit_line(e, "if same_order { return true }")
     emit_line(e, "for value in a.payload.items { found := false; for other in b.payload.items { if kvist_data_equal(value, other) { found = true; break } }; if !found { return false } }")
     emit_line(e, "return true")
     e.indent -= 1
     emit_line(e, "case .Map:")
     e.indent += 1
+    emit_line(e, "if kvist_data_same_backing(a, b) { return true }")
     emit_line(e, "if len(a.payload.entries) != len(b.payload.entries) { return false }")
+    emit_line(e, "same_order := true")
+    emit_line(e, "for entry, i in a.payload.entries { if !kvist_data_equal(entry.key, b.payload.entries[i].key) || !kvist_data_equal(entry.value, b.payload.entries[i].value) { same_order = false; break } }")
+    emit_line(e, "if same_order { return true }")
     emit_line(e, "for entry in a.payload.entries {")
     e.indent += 1
     emit_line(e, "found := false")
@@ -20036,19 +20086,23 @@ emit_data_type_helper :: proc(e: ^Emitter) {
     e.indent += 1
     emit_line(e, "if collection.kind == .Map {")
     e.indent += 1
+    emit_line(e, "found_index := -1")
+    emit_line(e, "for entry, i in collection.payload.entries { if kvist_data_equal(entry.key, key) { found_index = i; break } }")
+    emit_line(e, "if found_index >= 0 && kvist_data_equal(collection.payload.entries[found_index].value, value) { return kvist_data_retain(collection) }")
     emit_line(e, "node := kvist_data_new_node(allocator)")
     emit_line(e, "node.entries = make([dynamic]Data_Entry, 0, len(collection.payload.entries)+1, allocator)")
-    emit_line(e, "found := false")
-    emit_line(e, "for entry in collection.payload.entries { if kvist_data_equal(entry.key, key) { append(&node.entries, Data_Entry{key = kvist_data_retain(entry.key), value = kvist_data_retain(value)}); found = true } else { append(&node.entries, Data_Entry{key = kvist_data_retain(entry.key), value = kvist_data_retain(entry.value)}) } }")
-    emit_line(e, "if !found { append(&node.entries, Data_Entry{key = kvist_data_retain(key), value = kvist_data_retain(value)}) }")
+    emit_line(e, "for entry, i in collection.payload.entries { if i == found_index { append(&node.entries, Data_Entry{key = kvist_data_retain(entry.key), value = kvist_data_retain(value)}) } else { append(&node.entries, Data_Entry{key = kvist_data_retain(entry.key), value = kvist_data_retain(entry.value)}) } }")
+    emit_line(e, "if found_index < 0 { append(&node.entries, Data_Entry{key = kvist_data_retain(key), value = kvist_data_retain(value)}) }")
     emit_line(e, "return Data{kind = .Map, payload = {entries = node.entries[:]}, node = node}")
     e.indent -= 1
     emit_line(e, "}")
     emit_line(e, "if collection.kind == .Vector && key.kind == .Int && key.payload.int_value >= 0 && key.payload.int_value < i64(len(collection.payload.items)) {")
     e.indent += 1
+    emit_line(e, "index := int(key.payload.int_value)")
+    emit_line(e, "if kvist_data_equal(collection.payload.items[index], value) { return kvist_data_retain(collection) }")
     emit_line(e, "node := kvist_data_new_node(allocator)")
     emit_line(e, "node.items = make([dynamic]Data, 0, len(collection.payload.items), allocator)")
-    emit_line(e, "for item, i in collection.payload.items { if i64(i) == key.payload.int_value { append(&node.items, kvist_data_retain(value)) } else { append(&node.items, kvist_data_retain(item)) } }")
+    emit_line(e, "for item, i in collection.payload.items { if i == index { append(&node.items, kvist_data_retain(value)) } else { append(&node.items, kvist_data_retain(item)) } }")
     emit_line(e, "return Data{kind = .Vector, payload = {items = node.items[:]}, node = node}")
     e.indent -= 1
     emit_line(e, "}")
@@ -20059,9 +20113,12 @@ emit_data_type_helper :: proc(e: ^Emitter) {
     emit_line(e, "kvist_data_dissoc :: proc(collection, key: Data, allocator: kvist_runtime.Allocator = context.allocator) -> Data {")
     e.indent += 1
     emit_line(e, "assert(collection.kind == .Map, \"Data dissoc expects a map\")")
+    emit_line(e, "found_index := -1")
+    emit_line(e, "for entry, i in collection.payload.entries { if kvist_data_equal(entry.key, key) { found_index = i; break } }")
+    emit_line(e, "if found_index < 0 { return kvist_data_retain(collection) }")
     emit_line(e, "node := kvist_data_new_node(allocator)")
-    emit_line(e, "node.entries = make([dynamic]Data_Entry, 0, len(collection.payload.entries), allocator)")
-    emit_line(e, "for entry in collection.payload.entries { if !kvist_data_equal(entry.key, key) { append(&node.entries, Data_Entry{key = kvist_data_retain(entry.key), value = kvist_data_retain(entry.value)}) } }")
+    emit_line(e, "node.entries = make([dynamic]Data_Entry, 0, len(collection.payload.entries)-1, allocator)")
+    emit_line(e, "for entry, i in collection.payload.entries { if i != found_index { append(&node.entries, Data_Entry{key = kvist_data_retain(entry.key), value = kvist_data_retain(entry.value)}) } }")
     emit_line(e, "return Data{kind = .Map, payload = {entries = node.entries[:]}, node = node}")
     e.indent -= 1
     emit_line(e, "}")
@@ -20114,7 +20171,7 @@ emit_data_type_helper :: proc(e: ^Emitter) {
     emit_line(e, "kvist_data_get_present :: proc(value, key: Data) -> (result: Data, present: bool) {")
     e.indent += 1
     emit_line(e, "if value.kind != .Map { return Data{}, false }")
-    emit_line(e, "for entry in value.payload.entries { if kvist_data_equal(entry.key, key) { return entry.value, true } }")
+    emit_line(e, "for entry in value.payload.entries { if kvist_data_equal(entry.key, key) { return kvist_data_retain(entry.value), true } }")
     emit_line(e, "return Data{}, false")
     e.indent -= 1
     emit_line(e, "}")

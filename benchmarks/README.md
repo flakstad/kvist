@@ -12,6 +12,7 @@ implementations of the same work.
 ./scripts/bench_core_helpers.sh
 ./scripts/bench_package_helpers.sh
 ./scripts/bench_data_collections.sh
+./scripts/bench_data_messages.sh
 ```
 
 The sequence and source-backed array scripts accept `BASE_REF` to compare the
