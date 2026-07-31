@@ -16320,6 +16320,18 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
             return emit_call_text(call_name, arg_texts_with_defaults[:]), {}, true
         }
     }
+    if len(form.items) != 2 {
+        if _, ok_struct := find_struct_decl(e, head_name); ok_struct {
+            return "", Compile_Error{
+                message = fmt.tprintf(
+                    "struct construction expects one brace or vector aggregate; use (%s {{field: value ...}}) or (%s [value ...])",
+                    head.text,
+                    head.text,
+                ),
+                span    = form.span,
+            }, false
+        }
+    }
     if len(form.items) == 2 && symbol_head_needs_type_conversion_parens(head.text) {
         type_text, err_type, ok_type := parse_type_text(head)
         if !ok_type {

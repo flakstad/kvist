@@ -20061,6 +20061,34 @@ compile_rejects_positional_brace_aggregate_literals :: proc(t: ^testing.T) {
 }
 
 @(test)
+compile_rejects_multi_argument_struct_construction_with_kvist_diagnostic :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct User {
+  name: string
+  email: string
+})
+
+(defn bad [] -> User
+  (User "name1" "email1"))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    if ok {
+        return
+    }
+    defer delete(err.message)
+    testing.expect_value(
+        t,
+        strings.contains(
+            err.message,
+            "struct construction expects one brace or vector aggregate; use (User {field: value ...}) or (User [value ...])",
+        ),
+        true,
+    )
+}
+
+@(test)
 compile_accepts_trailing_colon_field_labels :: proc(t: ^testing.T) {
     source := `(package main)
 (import rl "vendor:raylib")
