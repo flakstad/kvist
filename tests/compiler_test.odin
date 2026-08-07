@@ -26232,9 +26232,10 @@ raw_value :: proc() -> int {
     source := `(package main)
 (import support "support")
 
-(defn main [] -> int
-  (+ (support.kvist-value)
-     (support.raw-value)))`
+(defn main []
+  (let [value (+ (support.kvist-value)
+                 (support.raw-value))]
+    (discard value)))`
     write_err := os.write_entire_file_from_string(main_path, source)
     testing.expect_value(t, write_err == nil, true)
     if write_err != nil {
@@ -26253,6 +26254,54 @@ raw_value :: proc() -> int {
     testing.expect_value(t, strings.contains(output, "\"support\""), true)
     testing.expect_value(t, strings.contains(output, "support__kvist_value()"), true)
     testing.expect_value(t, strings.contains(output, "support__raw.raw_value()"), true)
+
+    repo_root := compiler_test_repo_root()
+    kvist_bin, bin_ok := build_test_kvist_binary(t, repo_root, dir)
+    if !bin_ok {
+        return
+    }
+    defer delete(kvist_bin)
+
+    cache_dir, cache_dir_err := os.join_path({dir, "cold-cache"}, context.allocator)
+    testing.expect_value(t, cache_dir_err == nil, true)
+    if cache_dir_err != nil {
+        return
+    }
+    defer delete(cache_dir)
+    cache_env := fmt.tprintf("KVIST_CACHE_DIR=%s", cache_dir)
+    child_env, child_env_ok := test_child_env_without_kvist_vars({cache_env})
+    testing.expect_value(t, child_env_ok, true)
+    if !child_env_ok {
+        return
+    }
+    defer test_env_slice_delete(&child_env)
+
+    generated_path, generated_path_err := os.join_path({dir, "generated", "main.odin"}, context.allocator)
+    testing.expect_value(t, generated_path_err == nil, true)
+    if generated_path_err != nil {
+        return
+    }
+    defer delete(generated_path)
+
+    state, stdout, stderr, exec_err := os.process_exec(
+        os.Process_Desc{
+            command = {kvist_bin, "check", "main.kvist", "--generated", generated_path},
+            working_dir = dir,
+            env = child_env[:],
+        },
+        context.allocator,
+    )
+    defer delete(stdout)
+    defer delete(stderr)
+    testing.expect_value(t, exec_err == nil, true)
+    if exec_err != nil {
+        return
+    }
+    testing.expect_value(t, state.exited, true)
+    testing.expect_value(t, state.exit_code, 0)
+    if !state.exited || state.exit_code != 0 {
+        testing.expect_value(t, string(stderr), "")
+    }
 }
 
 @(test)

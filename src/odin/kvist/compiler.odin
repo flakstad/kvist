@@ -916,15 +916,21 @@ collect_raw_odin_decl_names_from_dir :: proc(dir: string) -> (names: [dynamic]st
     return names
 }
 
-source_package_dir :: proc(path: string) -> string {
+source_package_dir :: proc(path: string) -> (string, Compile_Error, bool) {
+    dir := path
     if os.exists(path) && os.is_dir(path) {
-        return strings.clone(path)
+        dir = path
+    } else {
+        dir, _ = os.split_path(path)
     }
-    dir, _ := os.split_path(path)
     if dir == "" {
-        return strings.clone(".")
+        dir = "."
     }
-    return strings.clone(dir)
+    canonical, canonical_err := os.get_absolute_path(dir, context.allocator)
+    if canonical_err != nil {
+        return "", Compile_Error{message = fmt.tprintf("could not canonicalize source package directory: %s", dir)}, false
+    }
+    return canonical, Compile_Error{}, true
 }
 
 source_import_alias_and_path :: proc(form: CST_Form, importer_path: string = ".") -> (alias, path: string, ok: bool) {
@@ -1248,7 +1254,12 @@ collect_root_source_import_aliases_from_files :: proc(files: []Package_File) -> 
             }
             import_forms := flatten_package_forms(import_files[:])
             exports := collect_public_decl_names(import_forms[:])
-            raw_dir := source_package_dir(resolved)
+            raw_dir, err_raw_dir, ok_raw_dir := source_package_dir(resolved)
+            if !ok_raw_dir {
+                delete(alias)
+                delete(import_path)
+                return nil, err_raw_dir, false
+            }
             raw_exports := collect_raw_odin_decl_names_from_dir(raw_dir)
             delete(raw_dir)
             append(&aliases, Alias_Prefix{
@@ -2802,7 +2813,10 @@ load_source_forms :: proc(dir, prefix: string, loaded_keys, import_keys: ^[dynam
     defer delete(private_macros)
     exported := collect_public_decl_names(all_forms[:])
     defer delete(exported)
-    raw_dir := source_package_dir(dir)
+    raw_dir, err_raw_dir, ok_raw_dir := source_package_dir(dir)
+    if !ok_raw_dir {
+        return Loaded_Forms{}, err_raw_dir, false
+    }
     defer delete(raw_dir)
     raw_exported := collect_raw_odin_decl_names_from_dir(raw_dir)
     defer delete_string_slice(&raw_exported)
