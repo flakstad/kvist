@@ -1793,7 +1793,7 @@ run_odin_file :: proc(command, generated_path, source_path, source, eval_source,
     return 1
 }
 
-source_dir_has_odin_sidecars :: proc(source_path: string) -> bool {
+source_dir_has_odin_files :: proc(source_path: string) -> bool {
     source_dir, _ := os.split_path(source_path)
     if source_dir == "" {
         source_dir = "."
@@ -1803,7 +1803,7 @@ source_dir_has_odin_sidecars :: proc(source_path: string) -> bool {
         return false
     }
     defer os.file_info_slice_delete(entries, context.allocator)
-    has_sidecar := false
+    has_odin_file := false
     for entry in entries {
         if entry.type != .Regular || !strings.has_suffix(entry.name, ".odin") {
             continue
@@ -1824,9 +1824,9 @@ source_dir_has_odin_sidecars :: proc(source_path: string) -> bool {
         if strings.contains(string(data), "main :: proc") {
             return false
         }
-        has_sidecar = true
+        has_odin_file = true
     }
-    return has_sidecar
+    return has_odin_file
 }
 
 temporary_generated_path_in_source_dir :: proc(source_path: string) -> (path, package_dir: string, ok: bool) {
@@ -1959,7 +1959,7 @@ write_generated_for_execution :: proc(
         return requested_path, "", "", true
     }
 
-    if source_dir_has_odin_sidecars(source_path) {
+    if source_dir_has_odin_files(source_path) {
         generated, package_build_dir, path_ok := temporary_generated_path_in_source_dir(source_path)
         if !path_ok {
             fmt.eprintln("failed to create temporary generated path in source package")

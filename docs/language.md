@@ -159,11 +159,11 @@ contain both `.kvist` and `.odin` files:
 
 - imported package directories are treated as Kvist source packages when they
   contain `.kvist` files
-- sibling `.odin` files in imported source-package directories are sidecars and
-  are available through the package alias
-- root `run`, `build`, `check`, and `test` commands include sibling `.odin`
-  files by generating a temporary Odin file into the source directory and
-  building the package directory
+- Odin source files in mixed-language packages are available through the same
+  package import alias as their Kvist declarations
+- root `run`, `build`, `check`, and `test` commands compile the generated Kvist
+  output and the package's Odin source files together by generating a temporary
+  Odin file in the package directory and building that directory
 
 Use `foreign-import` for Odin foreign imports:
 
@@ -304,8 +304,9 @@ There is no `:odin` import marker.
 
 Use `@export` to attach Odin `@(export)` to the next top-level declaration.
 Use `@private` to attach Odin `@(private)` to the next top-level declaration.
-Use `@exports [Name ...]` when raw Odin sidecar
-declarations should be exposed through a Kvist source-package import.
+Use `@exports [Name ...]` to expose names that are part of the generated Odin
+surface but are not declared by ordinary Kvist declarations, such as names
+introduced through raw Odin.
 
 ```clojure
 @export

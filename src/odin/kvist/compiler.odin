@@ -108,7 +108,7 @@ synthetic_import_decl :: proc(alias, path: string) -> CST_Top_Form {
     }
 }
 
-raw_sidecar_import_alias :: proc(prefix: string) -> string {
+odin_package_import_alias :: proc(prefix: string) -> string {
     if prefix == "" {
         return strings.clone("kvist_raw")
     }
@@ -916,7 +916,7 @@ collect_raw_odin_decl_names_from_dir :: proc(dir: string) -> (names: [dynamic]st
     return names
 }
 
-source_package_dir_for_raw_sidecars :: proc(path: string) -> string {
+source_package_dir :: proc(path: string) -> string {
     if os.exists(path) && os.is_dir(path) {
         return strings.clone(path)
     }
@@ -1248,13 +1248,13 @@ collect_root_source_import_aliases_from_files :: proc(files: []Package_File) -> 
             }
             import_forms := flatten_package_forms(import_files[:])
             exports := collect_public_decl_names(import_forms[:])
-            raw_dir := source_package_dir_for_raw_sidecars(resolved)
+            raw_dir := source_package_dir(resolved)
             raw_exports := collect_raw_odin_decl_names_from_dir(raw_dir)
             delete(raw_dir)
             append(&aliases, Alias_Prefix{
                 alias = alias,
                 prefix = alias,
-                raw_prefix = raw_sidecar_import_alias(alias),
+                raw_prefix = odin_package_import_alias(alias),
                 exports = exports,
                 raw_exports = raw_exports,
                 refer_names = source_import_refer_names(top.form),
@@ -2504,26 +2504,26 @@ collect_source_dependency_paths_recursive :: proc(
         return Compile_Error{message = fmt.tprintf("source dependency directory contains no .kvist files: %s", package_dir)}, false
     }
 
-    sidecar_dirs: [dynamic]string
+    odin_source_dirs: [dynamic]string
     defer {
-        for dir in sidecar_dirs {
+        for dir in odin_source_dirs {
             delete(dir)
         }
-        delete(sidecar_dirs)
+        delete(odin_source_dirs)
     }
     for file_path in package_files {
         if !append_source_dependency_path(paths, seen_paths, file_path) {
             return Compile_Error{message = fmt.tprintf("could not resolve source dependency: %s", file_path)}, false
         }
-        sidecar_dir, _ := os.split_path(file_path)
-        if sidecar_dir == "" {
-            sidecar_dir = "."
+        odin_source_dir, _ := os.split_path(file_path)
+        if odin_source_dir == "" {
+            odin_source_dir = "."
         }
-        sidecar_abs, sidecar_err := os.get_absolute_path(sidecar_dir, context.allocator)
-        if sidecar_err == nil && !contains_text(sidecar_dirs[:], sidecar_abs) {
-            append(&sidecar_dirs, sidecar_abs)
-        } else if sidecar_err == nil {
-            delete(sidecar_abs)
+        odin_source_abs, odin_source_err := os.get_absolute_path(odin_source_dir, context.allocator)
+        if odin_source_err == nil && !contains_text(odin_source_dirs[:], odin_source_abs) {
+            append(&odin_source_dirs, odin_source_abs)
+        } else if odin_source_err == nil {
+            delete(odin_source_abs)
         }
 
         source_data, read_err := os.read_entire_file_from_path(file_path, context.allocator)
@@ -2592,7 +2592,7 @@ collect_source_dependency_paths_recursive :: proc(
         delete(source_data)
     }
 
-    for dir in sidecar_dirs {
+    for dir in odin_source_dirs {
         entries, entries_err := os.read_directory_by_path(dir, -1, context.allocator)
         if entries_err != nil {
             continue
@@ -2601,10 +2601,10 @@ collect_source_dependency_paths_recursive :: proc(
             if entry.type != .Regular || !strings.has_suffix(entry.name, ".odin") {
                 continue
             }
-            sidecar, join_err := os.join_path({dir, entry.name}, context.allocator)
+            odin_path, join_err := os.join_path({dir, entry.name}, context.allocator)
             if join_err == nil {
-                _ = append_source_dependency_path(paths, seen_paths, sidecar)
-                delete(sidecar)
+                _ = append_source_dependency_path(paths, seen_paths, odin_path)
+                delete(odin_path)
             }
         }
         os.file_info_slice_delete(entries, context.allocator)
@@ -2802,7 +2802,7 @@ load_source_forms :: proc(dir, prefix: string, loaded_keys, import_keys: ^[dynam
     defer delete(private_macros)
     exported := collect_public_decl_names(all_forms[:])
     defer delete(exported)
-    raw_dir := source_package_dir_for_raw_sidecars(dir)
+    raw_dir := source_package_dir(dir)
     defer delete(raw_dir)
     raw_exported := collect_raw_odin_decl_names_from_dir(raw_dir)
     defer delete_string_slice(&raw_exported)
@@ -2826,7 +2826,7 @@ load_source_forms :: proc(dir, prefix: string, loaded_keys, import_keys: ^[dynam
         }
         append_unique_string_clone(&result.source_aliases, package_name)
         if len(raw_exported) > 0 {
-            raw_prefix := raw_sidecar_import_alias(self_prefix)
+            raw_prefix := odin_package_import_alias(self_prefix)
             append_import_form_unique(&result.imports, import_keys, synthetic_import_decl(raw_prefix, raw_dir))
         }
         alias_exports := clone_string_slice(exported[:])
@@ -2834,7 +2834,7 @@ load_source_forms :: proc(dir, prefix: string, loaded_keys, import_keys: ^[dynam
         append(&aliases, Alias_Prefix{
             alias = strings.clone(package_name),
             prefix = strings.clone(self_prefix),
-            raw_prefix = raw_sidecar_import_alias(self_prefix),
+            raw_prefix = odin_package_import_alias(self_prefix),
             exports = alias_exports,
             raw_exports = alias_raw_exports,
             allow_unqualified_exports = false,
@@ -2871,7 +2871,7 @@ load_source_forms :: proc(dir, prefix: string, loaded_keys, import_keys: ^[dynam
             append(&aliases, Alias_Prefix{
                 alias = alias,
                 prefix = strings.clone(nested_prefix),
-                raw_prefix = raw_sidecar_import_alias(nested_prefix),
+                raw_prefix = odin_package_import_alias(nested_prefix),
                 exports = nested_exports,
                 raw_exports = nested_raw_exports,
                 refer_names = source_import_refer_names(top.form),
@@ -2988,7 +2988,7 @@ load_root_file_forms :: proc(path: string) -> (Loaded_Forms, Compile_Error, bool
             append(&aliases, Alias_Prefix{
                 alias = alias,
                 prefix = alias,
-                raw_prefix = raw_sidecar_import_alias(alias),
+                raw_prefix = odin_package_import_alias(alias),
                 exports = nested_exports,
                 raw_exports = nested_raw_exports,
                 refer_names = source_import_refer_names(top.form),
@@ -3070,7 +3070,7 @@ load_root_source_forms :: proc(forms: []CST_Top_Form) -> (Loaded_Forms, Compile_
         append(&aliases, Alias_Prefix{
             alias = alias,
             prefix = alias,
-            raw_prefix = raw_sidecar_import_alias(alias),
+            raw_prefix = odin_package_import_alias(alias),
             exports = nested_exports,
             raw_exports = nested_raw_exports,
             refer_names = source_import_refer_names(top.form),
