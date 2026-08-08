@@ -1,0 +1,645 @@
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
+
+(package data)
+
+(defn- range-vector
+  [collection: Data, start: int, end: int] -> Data
+  (let [out (arr.empty Data (- end start))]
+    (defer (delete-owned-array! out))
+    (for [index (arr.range start end)]
+      (append-retained! (addr out) (item-at collection index)))
+    (freeze-items! .Vector (addr out))))
+
+(defn split-at
+  "Split sequential Data at `n` into two owned vectors.
+
+  Negative indexes clamp to zero and indexes past the end clamp to the input
+  count."
+  [n: int, collection: Data] -> [left: Data, right: Data]
+  (if (not (sequential? collection))
+    (panic "data.split-at expects nil, list, vector, or set Data"))
+  (let [middle n]
+    (if (< middle 0)
+      (set! middle 0))
+    (if (> middle (core.count collection))
+      (set! middle (core.count collection)))
+    (return
+      (range-vector collection 0 middle)
+      (range-vector collection middle (core.count collection)))))
+
+(defn partition
+  "Return owned vectors of exactly `n` consecutive items.
+
+  A trailing group smaller than `n` is omitted. Non-positive `n` returns an
+  empty vector."
+  [n: int, collection: Data] -> Data
+  (if (not (sequential? collection))
+    (panic "data.partition expects nil, list, vector, or set Data"))
+  (let [capacity 0]
+    (if (> n 0)
+      (set! capacity (/ (core.count collection) n)))
+    (let [out (arr.empty Data capacity)]
+      (defer (delete-owned-array! out))
+      (if (> n 0)
+        (let [start 0]
+          (while (<= (+ start n) (core.count collection))
+            (let [group (range-vector collection start (+ start n))]
+              (append-retained! (addr out) group))
+            (set! start (+ start n)))))
+      (freeze-items! .Vector (addr out)))))
+
+(defn partition-all
+  "Return owned vectors of up to `n` consecutive items.
+
+  The final short group is included. Non-positive `n` returns an empty vector."
+  [n: int, collection: Data] -> Data
+  (if (not (sequential? collection))
+    (panic "data.partition-all expects nil, list, vector, or set Data"))
+  (let [capacity 0]
+    (if (> n 0)
+      (set! capacity (/ (+ (core.count collection) (- n 1)) n)))
+    (let [out (arr.empty Data capacity)]
+      (defer (delete-owned-array! out))
+      (if (> n 0)
+        (let [start 0]
+          (while (< start (core.count collection))
+            (let [end (+ start n)]
+              (if (> end (core.count collection))
+                (set! end (core.count collection)))
+              (let [group (range-vector collection start end)]
+                (append-retained! (addr out) group)))
+            (set! start (+ start n)))))
+      (freeze-items! .Vector (addr out)))))
+
+(defmacro partition-by
+  "Partition whenever adjacent callback keys are structurally different."
+  [f collection]
+  `(partition-by-impl ~f ~collection))
+
+(defn- partition-by-impl
+  [f: (fn [item: Data] -> Data), collection: Data] -> Data
+  (if (not (sequential? collection))
+    (panic "data.partition-by expects nil, list, vector, or set Data"))
+  (let [out (arr.empty Data (core.count collection))]
+    (defer (delete-owned-array! out))
+    (if (= (core.count collection) 0)
+      (return (freeze-items! .Vector (addr out))))
+    (let [start 0
+          previous-key (f (item-at collection 0))
+          index 1]
+      (while (< index (core.count collection))
+        (let [key (f (item-at collection index))]
+          (if (!= key previous-key)
+            (do
+              (let [group (range-vector collection start index)]
+                (append-retained! (addr out) group))
+              (set! start index)
+              (set! previous-key key))))
+        (inc! index))
+      (let [group (range-vector collection start (core.count collection))]
+        (append-retained! (addr out) group)))
+    (freeze-items! .Vector (addr out))))
+
+(defn interleave
+  "Interleave two sequential Data inputs into an owned vector.
+
+  Traversal stops when the shorter input is exhausted."
+  [left: Data, right: Data] -> Data
+  (if (not (and (sequential? left) (sequential? right)))
+    (panic "data.interleave expects nil, list, vector, or set Data"))
+  (let [limit (core.count left)]
+    (if (> limit (core.count right))
+      (set! limit (core.count right)))
+    (let [out (arr.empty Data (* 2 limit))]
+      (defer (delete-owned-array! out))
+      (for [index (arr.range 0 limit)]
+        (append-retained! (addr out) (item-at left index))
+        (append-retained! (addr out) (item-at right index)))
+      (freeze-items! .Vector (addr out)))))
+
+(defn rest
+  "Return an owned vector without the first sequential item."
+  [collection: Data] -> Data
+  (if (not (sequential? collection))
+    (panic "data.rest expects nil, list, vector, or set Data"))
+  (if (= (core.count collection) 0)
+    (range-vector collection 0 0)
+    (range-vector collection 1 (core.count collection))))
+
+(defn butlast
+  "Return an owned vector without the last sequential item."
+  [collection: Data] -> Data
+  (if (not (sequential? collection))
+    (panic "data.butlast expects nil, list, vector, or set Data"))
+  (let [end (- (core.count collection) 1)]
+    (if (< end 0)
+      (set! end 0))
+    (range-vector collection 0 end)))
+
+(defn take
+  "Return an owned vector containing at most the first `n` items."
+  [n: int, collection: Data] -> Data
+  (if (not (sequential? collection))
+    (panic "data.take expects nil, list, vector, or set Data"))
+  (let [end n]
+    (if (< end 0)
+      (set! end 0))
+    (if (> end (core.count collection))
+      (set! end (core.count collection)))
+    (range-vector collection 0 end)))
+
+(defn drop
+  "Return an owned vector after dropping at most the first `n` items."
+  [n: int, collection: Data] -> Data
+  (if (not (sequential? collection))
+    (panic "data.drop expects nil, list, vector, or set Data"))
+  (let [start n]
+    (if (< start 0)
+      (set! start 0))
+    (if (> start (core.count collection))
+      (set! start (core.count collection)))
+    (range-vector collection start (core.count collection))))
+
+(defn take-nth
+  "Return an owned vector containing indexes `0`, `n`, `2n`, and so on."
+  [n: int, collection: Data] -> Data
+  (if (not (sequential? collection))
+    (panic "data.take-nth expects nil, list, vector, or set Data"))
+  (let [capacity 0]
+    (if (> n 0)
+      (set! capacity (/ (+ (core.count collection) (- n 1)) n)))
+    (let [out (arr.empty Data capacity)]
+      (defer (delete-owned-array! out))
+      (if (> n 0)
+        (let [index 0]
+          (while (< index (core.count collection))
+            (append-retained! (addr out) (item-at collection index))
+            (set! index (+ index n)))))
+      (freeze-items! .Vector (addr out)))))
+
+(defn peek
+  "Return the borrowed stack item from list or vector Data, or nil."
+  [collection: Data] -> Data
+  (if (nil? collection)
+    (return 'nil))
+  (if (list? collection)
+    (return (first collection)))
+  (if (vector? collection)
+    (return (last collection)))
+  (assert false "data.peek expects nil, list, or vector Data")
+  'nil)
+
+(defn pop
+  "Return owned list or vector Data without its stack item."
+  [collection: Data] -> Data
+  (if (not (or (list? collection) (vector? collection)))
+    (panic "data.pop expects list or vector Data"))
+  (if (= (core.count collection) 0)
+    (panic "data.pop expects a non-empty collection"))
+  (let [out (arr.empty Data (- (core.count collection) 1))]
+    (defer (delete-owned-array! out))
+    (if (list? collection)
+      (for [index (arr.range 1 (core.count collection))]
+        (append-retained! (addr out) (item-at collection index)))
+      (for [index (arr.range 0 (- (core.count collection) 1))]
+        (append-retained! (addr out) (item-at collection index))))
+    (if (list? collection)
+      (freeze-items! .List (addr out))
+      (freeze-items! .Vector (addr out)))))
+
+(defmacro reduce
+  "Eagerly reduce sequential Data from left to right with explicit `init`."
+  [f init collection]
+  `(reduce-impl ~f ~init ~collection))
+
+(defn- reduce-impl
+  [f: (fn [acc: $A, item: Data] -> A), init: A, collection: Data] -> A
+  (if (not (sequential? collection))
+    (panic "data.reduce expects nil, list, vector, or set Data"))
+  (let [acc init]
+    (for [index (arr.range 0 (core.count collection))]
+      (set! acc (f acc (item-at collection index))))
+    acc))
+
+(defmacro some?
+  "Return true when any sequential item satisfies `pred`."
+  [pred collection]
+  `(some-impl ~pred ~collection))
+
+(defn- some-impl
+  [pred: (fn [item: Data] -> bool), collection: Data] -> bool
+  (if (not (sequential? collection))
+    (panic "data.some? expects nil, list, vector, or set Data"))
+  (for [index (arr.range 0 (core.count collection))]
+    (if (pred (item-at collection index))
+      (return true)))
+  false)
+
+(defmacro every?
+  "Return true when every sequential item satisfies `pred`."
+  [pred collection]
+  `(every-impl ~pred ~collection))
+
+(defn- every-impl
+  [pred: (fn [item: Data] -> bool), collection: Data] -> bool
+  (if (not (sequential? collection))
+    (panic "data.every? expects nil, list, vector, or set Data"))
+  (for [index (arr.range 0 (core.count collection))]
+    (if (not (pred (item-at collection index)))
+      (return false)))
+  true)
+
+(defmacro not-any?
+  "Return true when no sequential item satisfies `pred`."
+  [pred collection]
+  `(not (some-impl ~pred ~collection)))
+
+(defmacro not-every?
+  "Return true when at least one sequential item fails `pred`."
+  [pred collection]
+  `(not (every-impl ~pred ~collection)))
+
+(defmacro find
+  "Return the first matching borrowed item and an `ok` flag."
+  [pred collection]
+  `(find-impl ~pred ~collection))
+
+(defn- find-impl
+  [pred: (fn [item: Data] -> bool), collection: Data]
+  -> [value: Data, ok: bool]
+  (if (not (sequential? collection))
+    (panic "data.find expects nil, list, vector, or set Data"))
+  (for [index (arr.range 0 (core.count collection))]
+    (let [item (item-at collection index)]
+      (if (pred item)
+        (return item true))))
+  (return 'nil false))
+
+(defmacro find-indexed
+  "Return the first matching index, borrowed item, and an `ok` flag."
+  [pred collection]
+  `(find-indexed-impl ~pred ~collection))
+
+(defn- find-indexed-impl
+  [pred: (fn [index: int, item: Data] -> bool), collection: Data]
+  -> [index: int, value: Data, ok: bool]
+  (if (not (sequential? collection))
+    (panic "data.find-indexed expects nil, list, vector, or set Data"))
+  (for [index (arr.range 0 (core.count collection))]
+    (let [item (item-at collection index)]
+      (if (pred index item)
+        (return index item true))))
+  (return -1 'nil false))
+
+(defmacro min-by
+  "Return the first item with the smallest native key and an `ok` flag."
+  [f collection]
+  `(min-by-impl ~f ~collection))
+
+(defn- min-by-impl
+  [f: (fn [item: Data] -> $K), collection: Data]
+  -> [value: Data, ok: bool]
+  (if (not (sequential? collection))
+    (panic "data.min-by expects nil, list, vector, or set Data"))
+  (if (= (core.count collection) 0)
+    (return 'nil false))
+  (let [best (item-at collection 0)
+        best-key (f best)]
+    (for [index (arr.range 1 (core.count collection))]
+      (let [item (item-at collection index)
+            key (f item)]
+        (if (< key best-key)
+          (do
+            (set! best item)
+            (set! best-key key)))))
+    (return best true)))
+
+(defmacro max-by
+  "Return the first item with the largest native key and an `ok` flag."
+  [f collection]
+  `(max-by-impl ~f ~collection))
+
+(defn- max-by-impl
+  [f: (fn [item: Data] -> $K), collection: Data]
+  -> [value: Data, ok: bool]
+  (if (not (sequential? collection))
+    (panic "data.max-by expects nil, list, vector, or set Data"))
+  (if (= (core.count collection) 0)
+    (return 'nil false))
+  (let [best (item-at collection 0)
+        best-key (f best)]
+    (for [index (arr.range 1 (core.count collection))]
+      (let [item (item-at collection index)
+            key (f item)]
+        (if (> key best-key)
+          (do
+            (set! best item)
+            (set! best-key key)))))
+    (return best true)))
+
+(defmacro map
+  "Eagerly map `f` over sequential Data into owned vector Data."
+  [f collection]
+  `(map-impl ~f ~collection))
+
+(defn- map-impl
+  [f: (fn [item: Data] -> Data), collection: Data] -> Data
+  (if (not (sequential? collection))
+    (panic "data.map expects nil, list, vector, or set Data"))
+  (let [out (arr.empty Data (core.count collection))]
+    (defer (delete-owned-array! out))
+    (for [index (arr.range 0 (core.count collection))]
+      (let [mapped (f (item-at collection index))]
+        (append-retained! (addr out) mapped)))
+    (freeze-items! .Vector (addr out))))
+
+(defmacro map-indexed
+  "Eagerly map `(f index item)` into owned vector Data."
+  [f collection]
+  `(map-indexed-impl ~f ~collection))
+
+(defn- map-indexed-impl
+  [f: (fn [index: int, item: Data] -> Data), collection: Data] -> Data
+  (if (not (sequential? collection))
+    (panic "data.map-indexed expects nil, list, vector, or set Data"))
+  (let [out (arr.empty Data (core.count collection))]
+    (defer (delete-owned-array! out))
+    (for [index (arr.range 0 (core.count collection))]
+      (let [mapped (f index (item-at collection index))]
+        (append-retained! (addr out) mapped)))
+    (freeze-items! .Vector (addr out))))
+
+(defmacro filter
+  "Eagerly retain sequential items for which `pred` returns true."
+  [pred collection]
+  `(filter-impl ~pred ~collection))
+
+(defn- filter-impl
+  [pred: (fn [item: Data] -> bool), collection: Data] -> Data
+  (if (not (sequential? collection))
+    (panic "data.filter expects nil, list, vector, or set Data"))
+  (let [out (arr.empty Data (core.count collection))]
+    (defer (delete-owned-array! out))
+    (for [index (arr.range 0 (core.count collection))]
+      (let [item (item-at collection index)]
+        (if (pred item)
+          (append-retained! (addr out) item))))
+    (freeze-items! .Vector (addr out))))
+
+(defmacro remove
+  "Eagerly retain sequential items for which `pred` returns false."
+  [pred collection]
+  `(remove-impl ~pred ~collection))
+
+(defn- remove-impl
+  [pred: (fn [item: Data] -> bool), collection: Data] -> Data
+  (if (not (sequential? collection))
+    (panic "data.remove expects nil, list, vector, or set Data"))
+  (let [out (arr.empty Data (core.count collection))]
+    (defer (delete-owned-array! out))
+    (for [index (arr.range 0 (core.count collection))]
+      (let [item (item-at collection index)]
+        (if (not (pred item))
+          (append-retained! (addr out) item))))
+    (freeze-items! .Vector (addr out))))
+
+(defmacro keep
+  "Eagerly map sequential Data and omit nil callback results."
+  [f collection]
+  `(keep-impl ~f ~collection))
+
+(defn- keep-impl
+  [f: (fn [item: Data] -> Data), collection: Data] -> Data
+  (if (not (sequential? collection))
+    (panic "data.keep expects nil, list, vector, or set Data"))
+  (let [out (arr.empty Data (core.count collection))]
+    (defer (delete-owned-array! out))
+    (for [index (arr.range 0 (core.count collection))]
+      (let [mapped (f (item-at collection index))]
+        (if (not (nil? mapped))
+          (append-retained! (addr out) mapped))))
+    (freeze-items! .Vector (addr out))))
+
+(defmacro keep-indexed
+  "Eagerly indexed-map sequential Data and omit nil callback results."
+  [f collection]
+  `(keep-indexed-impl ~f ~collection))
+
+(defn- keep-indexed-impl
+  [f: (fn [index: int, item: Data] -> Data), collection: Data] -> Data
+  (if (not (sequential? collection))
+    (panic "data.keep-indexed expects nil, list, vector, or set Data"))
+  (let [out (arr.empty Data (core.count collection))]
+    (defer (delete-owned-array! out))
+    (for [index (arr.range 0 (core.count collection))]
+      (let [mapped (f index (item-at collection index))]
+        (if (not (nil? mapped))
+          (append-retained! (addr out) mapped))))
+    (freeze-items! .Vector (addr out))))
+
+(defmacro mapcat
+  "Eagerly map to sequential Data and flatten one level into a vector."
+  [f collection]
+  `(mapcat-impl ~f ~collection))
+
+(defn- mapcat-impl
+  [f: (fn [item: Data] -> Data), collection: Data] -> Data
+  (if (not (sequential? collection))
+    (panic "data.mapcat expects nil, list, vector, or set Data"))
+  (let [out (arr.empty Data (core.count collection))]
+    (defer (delete-owned-array! out))
+    (for [index (arr.range 0 (core.count collection))]
+      (let [mapped (f (item-at collection index))]
+        (if (not (sequential? mapped))
+          (panic "data.mapcat callback expects sequential Data"))
+        (for [nested-index (arr.range 0 (core.count mapped))]
+          (append-retained! (addr out) (item-at mapped nested-index)))))
+    (freeze-items! .Vector (addr out))))
+
+(defn- concat-two
+  [left: Data, right: Data] -> Data
+  (if (not (and (sequential? left) (sequential? right)))
+    (panic "data.concat expects nil, list, vector, or set Data"))
+  (let [out (arr.empty Data (+ (core.count left) (core.count right)))]
+    (defer (delete-owned-array! out))
+    (for [index (arr.range 0 (core.count left))]
+      (append-retained! (addr out) (item-at left index)))
+    (for [index (arr.range 0 (core.count right))]
+      (append-retained! (addr out) (item-at right index)))
+    (freeze-items! .Vector (addr out))))
+
+(defmacro- concat-forms
+  [collections]
+  (if (= (count collections) 0)
+    `(vec 'nil)
+    (if (= (count collections) 1)
+      `(vec ~(first collections))
+      `(concat-two ~(first collections) ~(concat-forms (rest collections))))))
+
+(defmacro concat
+  "Eagerly concatenate zero or more sequential Data values into a vector."
+  [& collections]
+  (concat-forms collections))
+
+(defn reverse
+  "Return sequential Data items in reverse order as an owned vector."
+  [collection: Data] -> Data
+  (if (not (sequential? collection))
+    (panic "data.reverse expects nil, list, vector, or set Data"))
+  (let [out (arr.empty Data (core.count collection))]
+    (defer (delete-owned-array! out))
+    (let [index (- (core.count collection) 1)]
+      (while (>= index 0)
+        (append-retained! (addr out) (item-at collection index))
+        (set! index (- index 1))))
+    (freeze-items! .Vector (addr out))))
+
+(defn interpose
+  "Return an owned vector with `separator` between sequential items."
+  [separator: Data, collection: Data] -> Data
+  (if (not (sequential? collection))
+    (panic "data.interpose expects nil, list, vector, or set Data"))
+  (let [capacity 0]
+    (if (> (core.count collection) 0)
+      (set! capacity (- (* (core.count collection) 2) 1)))
+    (let [out (arr.empty Data capacity)]
+      (defer (delete-owned-array! out))
+      (for [index (arr.range 0 (core.count collection))]
+        (if (> index 0)
+          (append-retained! (addr out) separator))
+        (append-retained! (addr out) (item-at collection index)))
+      (freeze-items! .Vector (addr out)))))
+
+(defn- retained-array-contains?
+  [values: []Data, value: Data] -> bool
+  (for [existing values]
+    (if (= existing value)
+      (return true)))
+  false)
+
+(defn includes?
+  "Return true when sequential Data contains a structurally equal item."
+  [collection: Data, value: Data] -> bool
+  (if (not (sequential? collection))
+    (panic "data.includes? expects nil, list, vector, or set Data"))
+  (for [index (arr.range 0 (core.count collection))]
+    (if (= (item-at collection index) value)
+      (return true)))
+  false)
+
+(defn distinct
+  "Return structurally distinct sequential items in first-seen order."
+  [collection: Data] -> Data
+  (if (not (sequential? collection))
+    (panic "data.distinct expects nil, list, vector, or set Data"))
+  (let [out (arr.empty Data (core.count collection))]
+    (defer (delete-owned-array! out))
+    (for [index (arr.range 0 (core.count collection))]
+      (let [item (item-at collection index)]
+        (if (not (retained-array-contains? out[:] item))
+          (append-retained! (addr out) item))))
+    (freeze-items! .Vector (addr out))))
+
+(defmacro distinct-by
+  "Return the first item for each structurally distinct Data key."
+  [f collection]
+  `(distinct-by-impl ~f ~collection))
+
+(defn- distinct-by-impl
+  [f: (fn [item: Data] -> Data), collection: Data] -> Data
+  (if (not (sequential? collection))
+    (panic "data.distinct-by expects nil, list, vector, or set Data"))
+  (let [out (arr.empty Data (core.count collection))]
+    (defer (delete-owned-array! out))
+    (let [keys (arr.empty Data (core.count collection)) :defer-with delete-owned-array!]
+      (for [index (arr.range 0 (core.count collection))]
+        (let [item (item-at collection index)
+              key (f item)]
+          (if (not (retained-array-contains? keys[:] key))
+            (do
+              (append-retained! (addr keys) key)
+              (append-retained! (addr out) item)))))
+      (freeze-items! .Vector (addr out)))))
+
+(defmacro take-while
+  "Return the longest sequential prefix satisfying `pred`."
+  [pred collection]
+  `(take-while-impl ~pred ~collection))
+
+(defn- take-while-impl
+  [pred: (fn [item: Data] -> bool), collection: Data] -> Data
+  (if (not (sequential? collection))
+    (panic "data.take-while expects nil, list, vector, or set Data"))
+  (let [end 0]
+    (while (and (< end (core.count collection))
+                (pred (item-at collection end)))
+      (set! end (+ end 1)))
+    (range-vector collection 0 end)))
+
+(defmacro drop-while
+  "Drop the longest sequential prefix satisfying `pred`."
+  [pred collection]
+  `(drop-while-impl ~pred ~collection))
+
+(defn- drop-while-impl
+  [pred: (fn [item: Data] -> bool), collection: Data] -> Data
+  (if (not (sequential? collection))
+    (panic "data.drop-while expects nil, list, vector, or set Data"))
+  (let [start 0]
+    (while (and (< start (core.count collection))
+                (pred (item-at collection start)))
+      (set! start (+ start 1)))
+    (range-vector collection start (core.count collection))))
+
+(defmacro sort-by
+  "Stable insertion sort by a native ordered callback key."
+  [f collection]
+  `(sort-by-impl ~f ~collection))
+
+(defn- sort-by-impl
+  [f: (fn [item: Data] -> $K), collection: Data] -> Data
+  (if (not (sequential? collection))
+    (panic "data.sort-by expects nil, list, vector, or set Data"))
+  (let [items (arr.empty Data (core.count collection))
+        keys (arr.empty K (core.count collection))]
+    (defer
+      (delete-owned-array! items)
+      (delete keys))
+    (for [index (arr.range 0 (core.count collection))]
+      (let [item (item-at collection index)
+            key (f item)
+            target (core.count keys)]
+        (arr.push! keys key)
+        (append-retained! (addr items) item)
+        (while (and (> target 0) (< key keys[(- target 1)]))
+          (let [previous-key keys[(- target 1)]
+                previous-item items[(- target 1)]]
+            (set! keys[(- target 1)] keys[target])
+            (set! items[(- target 1)] items[target])
+            (set! keys[target] previous-key)
+            (set! items[target] previous-item)
+            (set! target (- target 1))))))
+    (freeze-items! .Vector (addr items))))
+
+(defmacro sort-with
+  "Stable insertion sort with a native boolean item comparator."
+  [before? collection]
+  `(sort-with-impl ~before? ~collection))
+
+(defn- sort-with-impl
+  [before?: (fn [left: Data, right: Data] -> bool), collection: Data] -> Data
+  (if (not (sequential? collection))
+    (panic "data.sort-with expects nil, list, vector, or set Data"))
+  (let [items (arr.empty Data (core.count collection))]
+    (defer (delete-owned-array! items))
+    (for [index (arr.range 0 (core.count collection))]
+      (let [item (item-at collection index)
+            target (core.count items)]
+        (append-retained! (addr items) item)
+        (while (and (> target 0) (before? item items[(- target 1)]))
+          (let [previous items[(- target 1)]]
+            (set! items[(- target 1)] items[target])
+            (set! items[target] previous)
+            (set! target (- target 1))))))
+    (freeze-items! .Vector (addr items))))

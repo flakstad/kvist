@@ -1,0 +1,412 @@
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
+
+(package data)
+
+(defn int
+  "Read the integer payload of `value`.
+
+  The value must be integer Data. This returns the native `i64` payload and
+  does not allocate."
+  [value: Data] -> i64 #force_inline
+  (odin-call "kvist_data_int" value))
+
+(defn float
+  "Read the floating-point payload of `value`."
+  [value: Data] -> f64 #force_inline
+  (odin-call "kvist_data_float" value))
+
+(defn bool
+  "Read the boolean payload of `value`."
+  [value: Data] -> bool #force_inline
+  (odin-call "kvist_data_bool" value))
+
+(defn string
+  "Read the borrowed native string payload of string Data."
+  [value: Data] -> string #force_inline
+  (odin-call "kvist_data_string" value))
+
+(defn symbol
+  "Read the borrowed native text of symbol Data."
+  [value: Data] -> string #force_inline
+  (odin-call "kvist_data_symbol" value))
+
+(defn keyword
+  "Read the borrowed native text of keyword Data."
+  [value: Data] -> string #force_inline
+  (odin-call "kvist_data_keyword" value))
+
+(defn text
+  "Read borrowed native text from string, symbol, or keyword Data."
+  [value: Data] -> string #force_inline
+  (odin-call "kvist_data_text" value))
+
+(defn tag
+  "Read the borrowed tag text from tagged Data, without the leading `#`."
+  [value: Data] -> string #force_inline
+  (odin-call "kvist_data_tag" value))
+
+(defn tagged-value
+  "Read the borrowed payload from tagged Data."
+  [value: Data] -> Data #force_inline
+  (odin-call "kvist_data_tagged_value" value))
+
+(defn kind
+  "Return the runtime kind of `value`."
+  [value: Data] -> Data-Kind #force_inline
+  (odin-call "kvist_data_kind" value))
+
+(defn kind-keyword
+  "Return the runtime kind as Clojure-familiar keyword Data."
+  [value: Data] -> Data
+  (case (kind value)
+    .Nil ':nil
+    .Bool ':bool
+    .Int ':int
+    .Float ':float
+    .String ':string
+    .Symbol ':symbol
+    .Keyword ':keyword
+    .List ':list
+    .Vector ':vector
+    .Map ':map
+    .Set ':set
+    .Tagged ':tagged
+    ':unknown))
+
+(defn describe
+  "Return a shallow, immutable Data description suitable for inspection.
+
+  Every result contains `:kind`. Collections and strings include `:count`,
+  maps include `:keys`, and tagged values include their textual `:tag`.
+  The description intentionally exposes no backing-node or reference-count
+  details."
+  [value: Data] -> Data
+  (let [result: Data {:kind (kind-keyword value)}]
+    (if (or (string? value)
+            (list? value)
+            (vector? value)
+            (map? value)
+            (set? value))
+      (set! result (assoc result :count (from-int (i64 (count value))))))
+    (if (map? value)
+      (set! result (assoc result :keys (keys value))))
+    (if (tagged? value)
+      (set! result (assoc result :tag (from-string (tag value)))))
+    result))
+
+(defn equal?
+  "Return structural Data equality without allocating."
+  [left: Data, right: Data] -> bool #force_inline
+  (odin-call "kvist_data_equal" left right))
+
+(defn lookup
+  "Return the retained value for `key` and whether the key is present.
+
+  Presence is independent from the value, so a present Data nil returns
+  `[nil true]` while an absent key returns `[nil false]`."
+  [value: Data, key: Data] -> [result: Data, present?: bool] #force_inline
+  (odin-call "kvist_data_get_present" value key))
+
+(defn decode-int-at
+  "Decode integer Data to `i64`.
+
+  `path` identifies the value in the surrounding input and is retained in the
+  returned error. The zero `Decode-Error` and true boolean indicate success."
+  [value: Data, path: Data] -> [decoded: i64, err: Decode-Error, ok: bool]
+  (if (int? value)
+    (return (int value) {} true)
+    (return 0 (decode-error path .Int (kind value)) false)))
+
+(defn decode-int
+  "Decode root integer Data to `i64`."
+  [value: Data] -> [decoded: i64, err: Decode-Error, ok: bool]
+  (decode-int-at value '[]))
+
+(defn decode-float-at
+  "Decode floating-point Data to `f64`, preserving `path` on failure."
+  [value: Data, path: Data] -> [decoded: f64, err: Decode-Error, ok: bool]
+  (if (float? value)
+    (return (float value) {} true)
+    (return 0 (decode-error path .Float (kind value)) false)))
+
+(defn decode-float
+  "Decode root floating-point Data to `f64`."
+  [value: Data] -> [decoded: f64, err: Decode-Error, ok: bool]
+  (decode-float-at value '[]))
+
+(defn decode-bool-at
+  "Decode boolean Data to `bool`, preserving `path` on failure."
+  [value: Data, path: Data] -> [decoded: bool, err: Decode-Error, ok: bool]
+  (if (bool? value)
+    (return (bool value) {} true)
+    (return false (decode-error path .Bool (kind value)) false)))
+
+(defn decode-bool
+  "Decode root boolean Data to `bool`."
+  [value: Data] -> [decoded: bool, err: Decode-Error, ok: bool]
+  (decode-bool-at value '[]))
+
+(defn nil? [value: Data] -> bool #force_inline
+  (odin-call "kvist_data_nil_p" value))
+
+(defn bool? [value: Data] -> bool #force_inline
+  (odin-call "kvist_data_bool_p" value))
+
+(defn int? [value: Data] -> bool #force_inline
+  (odin-call "kvist_data_int_p" value))
+
+(defn float? [value: Data] -> bool #force_inline
+  (odin-call "kvist_data_float_p" value))
+
+(defn string? [value: Data] -> bool #force_inline
+  (odin-call "kvist_data_string_p" value))
+
+(defn symbol? [value: Data] -> bool #force_inline
+  (odin-call "kvist_data_symbol_p" value))
+
+(defn keyword? [value: Data] -> bool #force_inline
+  (odin-call "kvist_data_keyword_p" value))
+
+(defn list? [value: Data] -> bool #force_inline
+  (odin-call "kvist_data_list_p" value))
+
+(defn vector? [value: Data] -> bool #force_inline
+  (odin-call "kvist_data_vector_p" value))
+
+(defn map? [value: Data] -> bool #force_inline
+  (odin-call "kvist_data_map_p" value))
+
+(defn set? [value: Data] -> bool #force_inline
+  (odin-call "kvist_data_set_p" value))
+
+(defn tagged? [value: Data] -> bool #force_inline
+  (odin-call "kvist_data_tagged_p" value))
+
+(defn- sequential?
+  [value: Data] -> bool #force_inline
+  (or (nil? value) (list? value) (vector? value) (set? value)))
+
+(defn- path?
+  [value: Data] -> bool #force_inline
+  (or (list? value) (vector? value)))
+
+(defn- map-like?
+  [value: Data] -> bool #force_inline
+  (or (nil? value) (map? value)))
+
+(defn count
+  "Return the number of entries in runtime collection Data.
+
+  Maps count key/value entries; lists, vectors, and sets count items; strings
+  count bytes, matching ordinary `count` behavior for Data."
+  [value: Data] -> int #force_inline
+  (odin-call "kvist_data_count" value))
+
+(defn key-at
+  "Return the key at `index` in map Data.
+
+  Map traversal order is the literal/runtime backing order."
+  [value: Data, index: int] -> Data #force_inline
+  (odin-call "kvist_data_key_at" value index))
+
+(defn value-at
+  "Return the value at `index` in map Data."
+  [value: Data, index: int] -> Data #force_inline
+  (odin-call "kvist_data_value_at" value index))
+
+(defn nth
+  "Return the value at `index` in list or vector Data.
+
+  An out-of-range index returns nil Data, matching ordinary Data lookup."
+  [value: Data, index: int] -> Data #force_inline
+  (core.get value index))
+
+(defn item-at
+  "Return the item at `index` in list, vector, or set backing order."
+  [value: Data, index: int] -> Data #force_inline
+  (odin-call "kvist_data_item_at" value index))
+
+(defn- get-in-at
+  [value: Data, path: Data, index: int] -> Data
+  (if (= index (core.count path))
+    value
+    (let [key (item-at path index)
+          child (core.get value key)]
+      (get-in-at child path (+ index 1)))))
+
+(defn get-in
+  "Follow list or vector Data `path` through nested map, list, and vector Data."
+  [value: Data, path: Data] -> Data
+  (if (not (path? path))
+    (panic "data.get-in expects a list or vector Data path"))
+  (get-in-at value path 0))
+
+(defn- assoc-in-at
+  [collection: Data, path: Data, index: int, value: Data] -> Data
+  (let [key (item-at path index)]
+    (if (= index (- (core.count path) 1))
+      (assoc collection key value)
+      (let [child (core.get collection key)]
+        (if (nil? child)
+          (set! child (empty-map)))
+        (assoc collection key (assoc-in-at child path (+ index 1) value))))))
+
+(defn assoc-in
+  "Associate `value` at a non-empty list or vector Data path.
+
+  Missing or nil intermediate values become maps."
+  [collection: Data, path: Data, value: Data] -> Data
+  (if (not (path? path))
+    (panic "data.assoc-in expects a list or vector Data path"))
+  (if (= (core.count path) 0)
+    (panic "data.assoc-in expects a non-empty path"))
+  (assoc-in-at collection path 0 value))
+
+(defn update
+  "Return `collection` with the value at `key` replaced by `(f old-value)`."
+  [collection: Data, key: Data, f: (fn [value: Data] -> Data)] -> Data
+  (let [updated (f (core.get collection key))]
+    (assoc collection key updated)))
+
+(defn update-in
+  "Return `collection` with the value at list or vector Data `path` replaced."
+  [collection: Data, path: Data, f: (fn [value: Data] -> Data)] -> Data
+  (if (not (path? path))
+    (panic "data.update-in expects a list or vector Data path"))
+  (if (= (core.count path) 0)
+    (panic "data.update-in expects a non-empty path"))
+  (let [updated (f (get-in collection path))]
+    (assoc-in collection path updated)))
+
+(defn keys
+  "Return map keys as owned vector Data in backing-entry order."
+  [value: Data] -> Data
+  (if (not (map-like? value))
+    (panic "data.keys expects map or nil Data"))
+  (let [out (arr.empty Data (core.count value))]
+    (for [index (arr.range 0 (core.count value))]
+      (arr.push! out (key-at value index)))
+    (let [result (vector-from-array out[:])]
+      (delete out)
+      result)))
+
+(defn vals
+  "Return map values as owned vector Data in backing-entry order."
+  [value: Data] -> Data
+  (if (not (map-like? value))
+    (panic "data.vals expects map or nil Data"))
+  (let [out (arr.empty Data (core.count value))]
+    (for [index (arr.range 0 (core.count value))]
+      (arr.push! out (value-at value index)))
+    (let [result (vector-from-array out[:])]
+      (delete out)
+      result)))
+
+(defn to-owned-array
+  "Copy sequential Data into a native array that owns every element reference.
+
+  Clean up the result with `delete-owned-array!`."
+  [value: Data] -> [dynamic]Data
+  (if (not (sequential? value))
+    (panic "data.to-owned-array expects nil, list, vector, or set Data"))
+  (let [out (arr.empty Data (core.count value))]
+    (for [index (arr.range 0 (core.count value))]
+      (append-retained! (addr out) (item-at value index)))
+    out))
+
+(defn keys-owned-array
+  "Return a native array that owns one retained reference per map key."
+  [value: Data] -> [dynamic]Data
+  (if (not (map-like? value))
+    (panic "data.keys-owned-array expects map or nil Data"))
+  (let [out (arr.empty Data (core.count value))]
+    (for [index (arr.range 0 (core.count value))]
+      (append-retained! (addr out) (key-at value index)))
+    out))
+
+(defn vals-owned-array
+  "Return a native array that owns one retained reference per map value."
+  [value: Data] -> [dynamic]Data
+  (if (not (map-like? value))
+    (panic "data.vals-owned-array expects map or nil Data"))
+  (let [out (arr.empty Data (core.count value))]
+    (for [index (arr.range 0 (core.count value))]
+      (append-retained! (addr out) (value-at value index)))
+    out))
+
+(defn vec
+  "Convert nil, list, vector, or set Data to owned vector Data."
+  [value: Data] -> Data
+  (if (not (sequential? value))
+    (panic "data.vec expects nil, list, vector, or set Data"))
+  (let [out (arr.empty Data (core.count value))]
+    (for [index (arr.range 0 (core.count value))]
+      (arr.push! out (item-at value index)))
+    (let [result (vector-from-array out[:])]
+      (delete out)
+      result)))
+
+(defn list
+  "Convert nil, list, vector, or set Data to owned list Data."
+  [value: Data] -> Data
+  (if (not (sequential? value))
+    (panic "data.list expects nil, list, vector, or set Data"))
+  (let [out (arr.empty Data (core.count value))]
+    (for [index (arr.range 0 (core.count value))]
+      (arr.push! out (item-at value index)))
+    (let [result (list-from-array out[:])]
+      (delete out)
+      result)))
+
+(defn set
+  "Convert nil, list, vector, or set Data to owned set Data."
+  [value: Data] -> Data
+  (if (not (sequential? value))
+    (panic "data.set expects nil, list, vector, or set Data"))
+  (let [out (arr.empty Data (core.count value))]
+    (for [index (arr.range 0 (core.count value))]
+      (arr.push! out (item-at value index)))
+    (let [result (set-from-array out[:])]
+      (delete out)
+      result)))
+
+(defn entries
+  "Return map entries as owned `[key value]` vectors in an owned vector."
+  [value: Data] -> Data
+  (if (not (map-like? value))
+    (panic "data.entries expects map or nil Data"))
+  (let [out (arr.empty Data (core.count value))]
+    (defer (delete-owned-array! out))
+    (for [index (arr.range 0 (core.count value))]
+      (let [pair: [2]Data [(key-at value index) (value-at value index)]
+            entry (vector-from-array pair[:])]
+        (append-retained! (addr out) entry)))
+    (freeze-items! .Vector (addr out))))
+
+(defn first
+  "Return the borrowed first sequential item, or nil when absent."
+  [collection: Data] -> Data
+  (if (not (sequential? collection))
+    (panic "data.first expects nil, list, vector, or set Data"))
+  (if (= (core.count collection) 0)
+    'nil
+    (item-at collection 0)))
+
+(defn second
+  "Return the borrowed second sequential item, or nil when absent."
+  [collection: Data] -> Data
+  (if (not (sequential? collection))
+    (panic "data.second expects nil, list, vector, or set Data"))
+  (if (< (core.count collection) 2)
+    'nil
+    (item-at collection 1)))
+
+(defn last
+  "Return the borrowed last sequential item, or nil when absent."
+  [collection: Data] -> Data
+  (if (not (sequential? collection))
+    (panic "data.last expects nil, list, vector, or set Data"))
+  (if (= (core.count collection) 0)
+    'nil
+    (item-at collection (- (core.count collection) 1))))

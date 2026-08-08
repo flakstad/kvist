@@ -1,0 +1,105 @@
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
+
+(package arr)
+
+(defmacro get
+  "Return the element at `index` in `xs`.
+
+  This lowers to direct indexing through `core.get`; bounds behavior is Odin's
+  ordinary indexing behavior."
+  [xs index]
+  `(core.get ~xs ~index))
+
+(defmacro slice
+  "Return a slice view of `xs`.
+
+  `(arr.slice xs start)` slices from `start` to the end. `(arr.slice xs start
+  end)` slices up to but not including `end`. This does not copy elements."
+  [xs start & rest]
+  (if (= (count rest) 0)
+    `(core.slice ~xs ~start)
+    `(core.slice ~xs ~start ~(first rest))))
+
+(defmacro first
+  "Return the first element of `xs`."
+  [xs]
+  `(core.get ~xs 0))
+
+(defmacro second
+  "Return the second element of `xs`."
+  [xs]
+  `(core.get ~xs 1))
+
+(defmacro nth
+  "Return the element at zero-based `index` in `xs`."
+  [index xs]
+  `(core.get ~xs ~index))
+
+(defmacro last
+  "Return the last element of `xs`.
+
+  The input must be non-empty. This lowers to direct indexing at
+  `(count xs) - 1`."
+  [xs]
+  `(core.get ~xs (- (core.count ~xs) 1)))
+
+(defmacro rest
+  "Return a slice view of `xs` without its first element.
+
+  This does not copy elements and aliases the original storage."
+  [xs]
+  `(core.slice ~xs 1))
+
+(defn take
+  "Return a slice view of the first `n` elements of `xs`.
+
+  This does not copy elements. Negative counts are treated as zero, and counts
+  larger than the input length are clamped to the input length."
+  [n: int, xs: []$T] -> []T #force_inline
+  (let [limit n]
+    (when (< limit 0)
+      (set! limit 0))
+    (when (> limit (core.count xs))
+      (set! limit (core.count xs)))
+    (odin-slice xs 0 limit)))
+
+(defn drop
+  "Return a slice view of `xs` without its first `n` elements.
+
+  This does not copy elements. Negative counts are treated as zero, and counts
+  larger than the input length produce an empty slice."
+  [n: int, xs: []$T] -> []T #force_inline
+  (let [start n]
+    (when (< start 0)
+      (set! start 0))
+    (when (> start (core.count xs))
+      (set! start (core.count xs)))
+    (odin-slice xs start)))
+
+(defn drop-last
+  "Return a slice view of `xs` without its last `n` elements.
+
+  This does not copy elements. Negative counts leave the input unchanged, and
+  counts larger than the input length produce an empty slice."
+  [n: int, xs: []$T] -> []T #force_inline
+  (let [end (- (core.count xs) n)]
+    (when (< end 0)
+      (set! end 0))
+    (when (> end (core.count xs))
+      (set! end (core.count xs)))
+    (odin-slice xs 0 end)))
+
+(defn split-at
+  "Split `xs` at index `n`.
+
+  Returns a pair of slice views: the prefix before `n` and the suffix from `n`.
+  Negative indexes are clamped to zero, and indexes larger than the input count
+  are clamped to the end. Elements are not copied."
+  [n: int, xs: []$T] -> [left: []T, right: []T] #force_inline
+  (let [mid n]
+    (when (< mid 0)
+      (set! mid 0))
+    (when (> mid (core.count xs))
+      (set! mid (core.count xs)))
+    (return (odin-slice xs 0 mid) (odin-slice xs mid))))

@@ -1,0 +1,315 @@
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
+
+(package arr)
+
+(defmacro push!
+  "Append one or more `values` to dynamic array `xs` in place.
+
+  This mutates the target array and follows Odin dynamic array growth behavior.
+  No replacement array is returned."
+  [xs & values]
+  `(append (addr ~xs) ~@values))
+
+(defmacro- field-selector?
+  [form]
+  (and (symbol? form)
+       (> (count (source form)) 1)
+       (= (slice (source form) 0 1) ".")))
+
+(defmacro map!
+  "Replace each element of dynamic array `xs` with `(f x)`.
+
+  This mutates the array in place. It is intended for transformations where the
+  output element type is the same as the input element type."
+  [f xs]
+  (if (field-selector? f)
+    (error "arr.map! field selectors cannot replace whole elements; use an explicit function")
+    `(map!-impl ~f (core.slice ~xs 0))))
+
+(defn- map!-impl
+  "Implementation helper for symbol-callback `arr.map!`."
+  [f: (fn [x: $T] -> T), xs: []T] #force_inline
+  (for [x i xs]
+    (set! xs[i] (f x))))
+
+(defmacro map-indexed!
+  "Replace each element of dynamic array `xs` with `(f x i)`.
+
+  The callback receives the zero-based index and current element. The array
+  is mutated in place."
+  [f xs]
+  `(map-indexed!-impl ~f (core.slice ~xs 0)))
+
+(defn- map-indexed!-impl
+  "Implementation helper for `arr.map-indexed!`."
+  [f: (fn [i: int, x: $T] -> T), xs: []T] #force_inline
+  (for [x i xs]
+    (set! xs[i] (f i x))))
+
+(defmacro fill!
+  "Replace every element of `xs` with `value`.
+
+  This mutates the passed slice or dynamic array in place and does not change
+  its length."
+  [xs value]
+  `(fill!-impl (core.slice ~xs 0) ~value))
+
+(defn- fill!-impl
+  "Implementation helper for `arr.fill!`."
+  [xs: []$T, value: T] #force_inline
+  (for [_ i xs]
+    (set! xs[i] value)))
+
+(defmacro filter!
+  "Remove elements from `xs` in place when `pred` is false.
+
+  The dynamic array keeps elements that satisfy `pred`. This avoids allocating a
+  replacement array."
+  [pred xs]
+  `(filter!-impl ~pred (addr ~xs)))
+
+(defn- filter!-impl
+  "Implementation helper for symbol-callback `arr.filter!`."
+  [pred: (fn [x: $T] -> bool), xs: (ptr (dynamic T))] #force_inline
+  (let [data (deref xs)
+        write 0]
+    (for [x data]
+      (when (pred x)
+        (set! data[write] x)
+        (set! write (+ write 1))))
+    (resize xs write)))
+
+(defmacro remove!
+  "Remove elements from `xs` in place when `pred` is true.
+
+  This is the in-place complement of `arr.filter!` and avoids allocating a
+  replacement array."
+  [pred xs]
+  `(remove!-impl ~pred (addr ~xs)))
+
+(defn- remove!-impl
+  "Implementation helper for symbol-callback `arr.remove!`."
+  [pred: (fn [x: $T] -> bool), xs: (ptr (dynamic T))] #force_inline
+  (let [data (deref xs)
+        write 0]
+    (for [x data]
+      (when (not (pred x))
+        (set! data[write] x)
+        (set! write (+ write 1))))
+    (resize xs write)))
+
+(defn remove-ordered-at
+  "Return a new dynamic array with the element at `index` removed.
+
+  This is the returning form of Odin's `ordered_remove`: the input is copied
+  first, then the indexed element is removed while preserving the relative order
+  of all remaining elements. The result is owned by the caller."
+  [xs: []$T, index: int] -> [dynamic]T #force_inline
+  (let [out (arr.empty T (core.count xs))]
+    (for [x xs]
+      (append (addr out) x))
+    (ordered_remove &out index)
+    out))
+
+(defmacro remove-ordered-at!
+  "Remove the element at `index` from dynamic array `xs` in place.
+
+  This lowers directly to Odin's `ordered_remove` and preserves the relative
+  order of remaining elements. It mutates `xs` and allocates nothing."
+  [xs index]
+  `(ordered_remove (addr ~xs) ~index))
+
+(defn remove-unordered-at
+  "Return a new dynamic array with the element at `index` removed.
+
+  This is the returning form of Odin's `unordered_remove`: the input is copied
+  first, then removal may move the final element into `index`. Use this when
+  element order does not matter and removal speed is preferred."
+  [xs: []$T, index: int] -> [dynamic]T #force_inline
+  (let [out (arr.empty T (core.count xs))]
+    (for [x xs]
+      (append (addr out) x))
+    (unordered_remove &out index)
+    out))
+
+(defmacro remove-unordered-at!
+  "Remove the element at `index` from dynamic array `xs` in place.
+
+  This lowers directly to Odin's `unordered_remove`. It may move the final
+  element into the removed slot, so it does not preserve order, but it avoids the
+  shifting cost of ordered removal."
+  [xs index]
+  `(unordered_remove (addr ~xs) ~index))
+
+(defmacro keep!
+  "Map and compact `xs` in place using an optional-result callback.
+
+  `f` must return `[value, ok]`. Successful values replace the retained prefix
+  of the array; unsuccessful values are dropped."
+  [f xs]
+  `(keep!-impl ~f (addr ~xs)))
+
+(defn- keep!-impl
+  "Implementation helper for symbol-callback `arr.keep!`."
+  [f: (fn [x: $T] -> [value: T, ok: bool]), xs: (ptr (dynamic T))] #force_inline
+  (let [data (deref xs)
+        write 0]
+    (for [x data]
+      (let [[value ok] (f x)]
+        (when ok
+          (set! data[write] value)
+          (set! write (+ write 1)))))
+    (resize xs write)))
+
+(defmacro into
+  "Copy `xs` into a new array value of `out-type`.
+
+  Use this to convert between compatible array-family representations. The
+  input is not mutated. Use `arr.into!` to append into an existing dynamic
+  array."
+  [out-type xs]
+  (let [out (gensym "kvist_arr_into")
+        item (gensym "kvist_arr_item")]
+    `(let [~out (make ~out-type 0 (core.count ~xs))]
+       (for [~item ~xs]
+         (append (addr ~out) ~item))
+       ~out)))
+
+(defmacro into!
+  "Append all elements from `xs` into dynamic array `target`.
+
+  This mutates `target` and does not allocate a replacement array, though Odin
+  may grow the target's backing storage. With three arguments, append the
+  results of a fused transform over `xs`."
+  [target xs & rest]
+  (if (= (count rest) 0)
+    `(for [x ~xs]
+       (append (addr ~target) x))
+    `(transform-into!
+       ~target
+       ~xs
+       ~(first rest))))
+
+(defmacro interpose
+  "Return a new dynamic array with `sep` inserted between input elements.
+
+  No separator is added before the first or after the last element. The input is
+  not mutated."
+  [sep xs]
+  `(interpose-impl ~sep (core.slice ~xs 0)))
+
+(defn- interpose-impl
+  "Implementation helper for `arr.interpose`."
+  [sep: $T, xs: []T] -> [dynamic]T #force_inline
+  (let [n (core.count xs)
+        cap 0]
+    (when (= n 0)
+      (return (arr.empty T 0)))
+    (set! cap (- (* n 2) 1))
+    (let [out (arr.empty T cap)]
+      (append (addr out) (core.get xs 0))
+      (for [x (core.slice xs 1)]
+        (append (addr out) sep)
+        (append (addr out) x))
+      out)))
+
+(defmacro interleave
+  "Return a new dynamic array alternating elements from `xs` and `ys`.
+
+  Interleaving stops when the shorter input is exhausted. Extra elements from
+  the longer input are ignored."
+  [xs ys]
+  `(interleave-impl (core.slice ~xs 0) (core.slice ~ys 0)))
+
+(defn- interleave-impl
+  "Implementation helper for `arr.interleave`."
+  [xs: []$T, ys: []T] -> [dynamic]T #force_inline
+  (let [n (core.count xs)]
+    (when (< (core.count ys) n)
+      (set! n (core.count ys)))
+    (let [out (arr.empty T (* n 2))
+          i 0]
+      (while (< i n)
+        (append (addr out) (core.get xs i))
+        (append (addr out) (core.get ys i))
+        (set! i (+ i 1)))
+      out)))
+
+(defmacro reverse
+  "Return a new dynamic array with the elements of `xs` in reverse order.
+
+  The input is not mutated. The result is allocated with capacity equal to the
+  input count."
+  [xs]
+  `(reverse-impl (core.slice ~xs 0)))
+
+(defn- reverse-impl
+  "Implementation helper for `arr.reverse`."
+  [xs: []$T] -> [dynamic]T #force_inline
+  (let [out (arr.empty T (core.count xs))
+        i (- (core.count xs) 1)]
+    (while (>= i 0)
+      (append (addr out) (core.get xs i))
+      (set! i (- i 1)))
+    out))
+
+(defmacro reverse!
+  "Reverse dynamic array `xs` in place.
+
+  This mutates the existing array and does not allocate a replacement array."
+  [xs]
+  `(reverse!-impl (core.slice ~xs 0)))
+
+(defn- reverse!-impl
+  "Implementation helper for `arr.reverse!`."
+  [xs: []$T] #force_inline
+  (let [i 0]
+    (while (< i (/ (core.count xs) 2))
+      (let [j (- (- (core.count xs) 1) i)
+            tmp xs[i]]
+        (set! xs[i] xs[j])
+        (set! xs[j] tmp))
+      (set! i (+ i 1)))))
+
+(defmacro shuffle
+  "Return a shuffled copy of `xs`.
+
+  `pick` supplies the random index selection used by the lowering. The input is
+  not mutated; the result is a newly allocated dynamic array."
+  [pick xs]
+  `(shuffle-impl ~pick (core.slice ~xs 0)))
+
+(defn- shuffle-impl
+  "Implementation helper for `arr.shuffle`."
+  [pick: (fn [n: int] -> int), xs: []$T] -> [dynamic]T #force_inline
+  (let [out (arr.empty T (core.count xs))
+        i (- (core.count xs) 1)]
+    (for [x xs]
+      (append (addr out) x))
+    (while (> i 0)
+      (let [j (pick (+ i 1))
+            tmp out[i]]
+        (set! out[i] out[j])
+        (set! out[j] tmp))
+      (set! i (- i 1)))
+    out))
+
+(defmacro shuffle!
+  "Shuffle dynamic array `xs` in place.
+
+  `pick` supplies the random index selection used by the lowering. The existing
+  array is mutated without allocating a replacement array."
+  [pick xs]
+  `(shuffle!-impl ~pick (core.slice ~xs 0)))
+
+(defn- shuffle!-impl
+  "Implementation helper for `arr.shuffle!`."
+  [pick: (fn [n: int] -> int), xs: []$T] #force_inline
+  (let [i (- (core.count xs) 1)]
+    (while (> i 0)
+      (let [j (pick (+ i 1))
+            tmp xs[i]]
+        (set! xs[i] xs[j])
+        (set! xs[j] tmp))
+      (set! i (- i 1)))))

@@ -1,0 +1,99 @@
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
+
+(package data)
+
+(defn retain
+  "Return an owned reference to `value` for storage outside managed bindings."
+  [value: Data] -> Data #force_inline
+  (odin-call "kvist_data_retain" value))
+
+(defn append-retained!
+  "Append `value` to a native dynamic Data array and retain it for the array.
+
+  Release every appended element with `release` before deleting the array."
+  [values: ^[dynamic]Data, value: Data] #force_inline
+  (odin-call "kvist_data_append_retained" values value))
+
+(defn release
+  "Release a Data reference retained for native storage."
+  [value: Data] #force_inline
+  (odin-call "kvist_data_release" value))
+
+(defn delete-owned-array!
+  "Release every element in an owned native Data array and delete its storage.
+
+  Use this only with arrays whose contract says that each element is retained
+  for the array."
+  [values: [dynamic]Data]
+  (for [value values]
+    (release value))
+  (delete values))
+
+(defn- freeze-items!
+  "Transfer a retained native item buffer into one immutable Data node."
+  [kind: Data-Kind, values: ^[dynamic]Data] -> Data #force_inline
+  (odin-call "kvist_data_freeze_items" kind values))
+
+(defn- freeze-map!
+  "Transfer retained alternating key/value Data into one immutable map node."
+  [values: ^[dynamic]Data] -> Data #force_inline
+  (odin-call "kvist_data_freeze_map" values))
+
+(defn map-from-owned-unique!
+  "Transfer an owned alternating key/value buffer into immutable map Data.
+
+  Every buffer element must already be retained, keys must be structurally
+  unique, and `values` must not be used after this call."
+  [values: ^[dynamic]Data] -> Data #force_inline
+  (odin-call "kvist_data_freeze_unique_map" values))
+
+(defn assoc
+  "Return immutable map or vector Data with `key` associated to `value`."
+  [collection: Data, key: Data, value: Data] -> Data #force_inline
+  (odin-call "kvist_data_assoc" collection key value))
+
+(defn dissoc
+  "Return immutable map Data without `key`."
+  [collection: Data, key: Data] -> Data #force_inline
+  (odin-call "kvist_data_dissoc" collection key))
+
+(defn dissoc-in
+  "Remove the leaf association at `path` from nested map Data.
+
+  `path` is list or vector Data. Empty parent maps are preserved and a missing
+  path leaves `collection` unchanged."
+  [collection: Data, path: Data] -> Data #force_inline
+  (odin-call "kvist_data_dissoc_in" collection path))
+
+(defn conj
+  "Return immutable sequential or set Data with `value` added."
+  [collection: Data, value: Data] -> Data #force_inline
+  (odin-call "kvist_data_conj" collection value))
+
+(defn append
+  "Return list, vector, or set Data with `value` added at the end."
+  [collection: Data, value: Data] -> Data #force_inline
+  (odin-call "kvist_data_append" collection value))
+
+(defn- append-pair-retained!
+  [values: ^[dynamic]Data, key: Data, value: Data]
+  (append-retained! values key)
+  (append-retained! values value))
+
+(defn merge
+  "Return map Data containing entries from `left` and `right`.
+
+  Values from `right` replace equal keys from `left`."
+  [left: Data, right: Data] -> Data
+  (if (not (and (map-like? left) (map-like? right)))
+    (panic "data.merge expects map or nil Data"))
+  (let [out (arr.empty Data (* 2 (+ (core.count left) (core.count right))))]
+    (defer (delete-owned-array! out))
+    (for [index (arr.range 0 (core.count left))]
+      (append-pair-retained!
+       (addr out) (key-at left index) (value-at left index)))
+    (for [index (arr.range 0 (core.count right))]
+      (append-pair-retained!
+       (addr out) (key-at right index) (value-at right index)))
+    (freeze-map! (addr out))))

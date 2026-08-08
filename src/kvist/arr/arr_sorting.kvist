@@ -1,0 +1,96 @@
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
+
+(package arr)
+
+(defmacro sort
+  "Return a sorted copy of `xs`.
+
+  The input is not mutated. Sorting uses the package lowering for Odin sort
+  operations and allocates a dynamic array copy before sorting."
+  [xs]
+  `(sort-impl (core.slice ~xs 0)))
+
+(defn- sort-impl
+  "Implementation helper for `arr.sort`."
+  [xs: []$T] -> [dynamic]T #force_inline
+  (let [out (arr.empty T (core.count xs))]
+    (for [x xs]
+      (append (addr out) x))
+    (kvist_slice.sort out[:])
+    out))
+
+(defmacro sort!
+  "Sort dynamic array `xs` in place.
+
+  This mutates the existing array and does not allocate a replacement array."
+  [xs]
+  `(sort!-impl (core.slice ~xs 0)))
+
+(defn- sort!-impl
+  "Implementation helper for `arr.sort!`."
+  [xs: []$T] #force_inline
+  (kvist_slice.sort xs))
+
+(odin "arr__Sort_By_Item :: struct($K: typeid, $T: typeid) {key: K, value: T}
+
+arr__sort_by_items_bang :: proc(items: []arr__Sort_By_Item($K, $T)) {
+    kvist_slice.sort_by(items, proc(a, b: arr__Sort_By_Item(K, T)) -> bool {
+        return a.key < b.key
+    })
+}")
+
+(defn- sort-by-impl
+  [f: (fn [x: $T] -> $K), xs: []T] -> [dynamic]T #force_inline
+  (let [items (arr.empty (arr__Sort_By_Item K T) (core.count xs)) :defer
+        out (arr.empty T (core.count xs))]
+    (for [x xs]
+      (append (addr items) ((arr__Sort_By_Item K T) {key: (f x) value: x})))
+    (arr__sort_by_items_bang (core.slice items 0))
+    (for [item items]
+      (append (addr out) item.value))
+    out))
+
+(defn- sort-by!-impl
+  [f: (fn [x: $T] -> $K), xs: []T] #force_inline
+  (let [items (arr.empty (arr__Sort_By_Item K T) (core.count xs)) :defer]
+    (for [x xs]
+      (append (addr items) ((arr__Sort_By_Item K T) {key: (f x) value: x})))
+    (arr__sort_by_items_bang (core.slice items 0))
+    (for [item i items]
+      (set! (core.get xs i) item.value))))
+
+(defmacro sort-by
+  "Return a sorted copy of `xs` ordered by key function `f`.
+
+  The input is not mutated. Keys are computed once, sorted in package source,
+  then discarded."
+  [f xs]
+  `(sort-by-impl ~f (core.slice ~xs 0)))
+
+(defmacro sort-by!
+  "Sort dynamic array `xs` in place using key function `f`.
+
+  This mutates the existing array and does not allocate a replacement array."
+  [f xs]
+  `(sort-by!-impl ~f (core.slice ~xs 0)))
+
+(defn butlast
+  "Return a slice view of `xs` without its last element.
+
+  This does not copy elements. The input must be non-empty."
+  [xs: []$T] -> []T #force_inline
+  (drop-last 1 xs))
+
+(defmacro range
+  "Return a dynamic array of integers in arithmetic progression.
+
+  `(arr.range end)` starts at 0 and steps by 1. `(arr.range start end)` uses
+  step 1. `(arr.range start end step)` uses the explicit step. The end value is
+  excluded. A zero step returns an empty array."
+  [& rest]
+  (if (= (count rest) 1)
+    `(arr__range_impl 0 ~(first rest) 1)
+    (if (= (count rest) 2)
+      `(arr__range_impl ~(first rest) ~(nth rest 1) 1)
+      `(arr__range_impl ~(first rest) ~(nth rest 1) ~(nth rest 2)))))

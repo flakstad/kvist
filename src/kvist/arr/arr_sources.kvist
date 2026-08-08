@@ -1,0 +1,342 @@
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
+
+(package arr)
+
+(defstruct- Range_Source {
+  current: int
+  end: int
+  step: int
+})
+
+(defn- range-next [src: ^Range_Source] -> [value: int ok: bool]
+  (when (= src.step 0)
+    (return 0 false))
+  (if (or (and (> src.step 0) (< src.current src.end))
+          (and (< src.step 0) (> src.current src.end)))
+    (let [value src.current]
+      (set! src.current (+ src.current src.step))
+      (return value true))
+    (return 0 false)))
+
+(defiter- range-impl [start: int, end: int, step: int] -> Range_Source :yield int
+  :next range-next
+  (Range_Source {current: start end: end step: step}))
+
+(defn- map-impl
+  "Implementation helper for non-field-selector `arr.map`.
+
+  This force-inlined helper gives source-backed macros a direct Odin loop while
+  keeping callback dispatch visible to the compiler."
+  [f: (fn [x: $T] -> $U), xs: []T] -> [dynamic]U #force_inline
+  (let [out (arr.empty U (core.count xs))]
+    (for [x xs]
+      (append (addr out) (f x)))
+    out))
+
+(defn- filter-impl
+  "Implementation helper for non-field-selector `arr.filter`.
+
+  Allocates one output array with input-sized capacity and appends matching
+  elements in a single pass."
+  [pred: (fn [x: $T] -> bool), xs: []T] -> [dynamic]T #force_inline
+  (let [out (arr.empty T (core.count xs))]
+    (for [x xs]
+      (when (pred x)
+        (append (addr out) x)))
+    out))
+
+(defn- remove-impl
+  "Implementation helper for non-field-selector `arr.remove`.
+
+  Allocates one output array with input-sized capacity and appends elements for
+  which the predicate is false."
+  [pred: (fn [x: $T] -> bool), xs: []T] -> [dynamic]T #force_inline
+  (let [out (arr.empty T (core.count xs))]
+    (for [x xs]
+      (when (not (pred x))
+        (append (addr out) x)))
+    out))
+
+(defn- reduce-impl
+  "Implementation helper for `arr.reduce`.
+
+  Runs a single left-to-right pass and keeps only the accumulator, so it
+  allocates nothing."
+  [f: (fn [acc: $U, x: $T] -> U), init: U, xs: []T] -> U #force_inline
+  (let [acc init]
+    (for [x xs]
+      (set! acc (f acc x)))
+    acc))
+
+(defn- reduce-indexed-impl
+  "Implementation helper for `arr.reduce-indexed`.
+
+  Runs a single left-to-right pass with the current index and keeps only the
+  accumulator, so it allocates nothing."
+  [f: (fn [acc: $U, i: int, x: $T] -> U), init: U, xs: []T] -> U #force_inline
+  (let [acc init]
+    (for [x i xs]
+      (set! acc (f acc i x)))
+    acc))
+
+(defmacro take-nth
+  "Return a dynamic array containing every `n`th element of `xs`.
+
+  The first selected element is at index 0. When `n` is less than or equal to
+  zero, the result is empty. The output capacity is computed from the input
+  count so appending does not repeatedly reallocate."
+  [n xs]
+  `(arr__take_nth_impl ~n ~xs))
+
+(odin "arr__Take_Nth_Source :: struct($T: typeid) {step: int, xs: []T, zero: T, index: int}")
+
+(defn- take-nth-next [src: (ptr (arr__Take_Nth_Source $T))] -> [item: T ok: bool]
+  (if (and (> src.step 0) (< src.index (core.count src.xs)))
+    (let [value (core.get src.xs src.index)]
+      (set! src.index (+ src.index src.step))
+      (return value true))
+    (return src.zero false)))
+
+(defiter- take-nth-impl [n: int, xs: []$T] -> (arr__Take_Nth_Source T) :yield T
+  :next take-nth-next
+  ((arr__Take_Nth_Source T) {step: n xs: xs index: 0}))
+
+(defmacro repeat
+  "Return a dynamic array containing `value` repeated `n` times.
+
+  Non-positive `n` returns an empty dynamic array. The result is allocated with
+  exact capacity."
+  [n value]
+  `(arr__repeat_impl ~n ~value))
+
+(odin "arr__Repeat_Source :: struct($T: typeid) {value: T, index: int, count: int}")
+
+(defn- repeat-next [src: (ptr (arr__Repeat_Source $T))] -> [item: T ok: bool]
+  (if (< src.index src.count)
+    (let [value src.value]
+      (set! src.index (+ src.index 1))
+      (return value true))
+    (return src.value false)))
+
+(defiter- repeat-impl [n: int, value: $T] -> (arr__Repeat_Source T) :yield T
+  :next repeat-next
+  ((arr__Repeat_Source T) {value: value index: 0 count: n}))
+
+(defmacro repeatedly
+  "Call `f` `n` times and return the produced values in a dynamic array.
+
+  Calls happen left to right. Non-positive `n` returns an empty dynamic array.
+  The result is allocated with exact capacity."
+  [n f]
+  `(arr__repeatedly_impl ~n ~f))
+
+(odin "arr__Repeatedly_Source :: struct($T: typeid) {f: proc() -> T, zero: T, index: int, count: int}")
+
+(defn- repeatedly-next [src: (ptr (arr__Repeatedly_Source $T))] -> [item: T ok: bool]
+  (if (< src.index src.count)
+    (let [value (src.f)]
+      (set! src.index (+ src.index 1))
+      (return value true))
+    (return src.zero false)))
+
+(defiter- repeatedly-impl [n: int, f: (fn [] -> $T)] -> (arr__Repeatedly_Source T) :yield T
+  :next repeatedly-next
+  ((arr__Repeatedly_Source T) {f: f index: 0 count: n}))
+
+(defmacro iterate
+  "Return `n` successive values by repeatedly applying `f`.
+
+  The first output value is `init`; each later value is produced from the
+  previous one. Non-positive `n` returns an empty dynamic array."
+  [n f init]
+  `(arr__iterate_impl ~n ~f ~init))
+
+(odin "arr__Iterate_Source :: struct($T: typeid) {f: proc(x: T) -> T, current: T, index: int, count: int}")
+
+(defn- iterate-next [src: (ptr (arr__Iterate_Source $T))] -> [item: T ok: bool]
+  (if (< src.index src.count)
+    (let [value src.current]
+      (set! src.current (src.f src.current))
+      (set! src.index (+ src.index 1))
+      (return value true))
+    (return src.current false)))
+
+(defiter- iterate-impl [n: int, f: (fn [x: $T] -> T), init: T] -> (arr__Iterate_Source T) :yield T
+  :next iterate-next
+  ((arr__Iterate_Source T) {f: f current: init index: 0 count: n}))
+
+(defmacro cycle
+  "Return `n` values by repeating the contents of `xs`.
+
+  The input order is preserved on each pass. Empty input or non-positive `n`
+  returns an empty dynamic array. The output is owned and allocated with exact
+  capacity."
+  [n xs]
+  `(arr__cycle_impl ~n ~xs))
+
+(odin "arr__Cycle_Source :: struct($T: typeid) {xs: []T, zero: T, index: int, count: int, size: int}")
+
+(defn- cycle-next [src: (ptr (arr__Cycle_Source $T))] -> [item: T ok: bool]
+  (if (and (< src.index src.count) (> src.size 0))
+    (let [value (core.get src.xs (% src.index src.size))]
+      (set! src.index (+ src.index 1))
+      (return value true))
+    (return src.zero false)))
+
+(defiter- cycle-impl [n: int, xs: []$T] -> (arr__Cycle_Source T) :yield T
+  :next cycle-next
+  ((arr__Cycle_Source T) {xs: xs index: 0 count: n size: (core.count xs)}))
+
+(defmacro take-while
+  "Return the longest leading slice whose elements satisfy `pred`.
+
+  The result is a slice view into the original input and does not copy elements.
+  Dot field selectors are supported for array element projection."
+  [pred xs]
+  `(take-while-impl ~pred (core.slice ~xs 0)))
+
+(defmacro drop-while
+  "Return the suffix after dropping leading elements that satisfy `pred`.
+
+  The result is a slice view into the original input and does not copy elements.
+  Dot field selectors are supported for array element projection."
+  [pred xs]
+  `(drop-while-impl ~pred (core.slice ~xs 0)))
+
+(defmacro some?
+  "Return true when any element of `xs` satisfies `pred`.
+
+  Evaluation stops at the first matching element. This lowers to a direct loop
+  and allocates nothing."
+  [pred xs]
+  `(some-impl ~pred (core.slice ~xs 0)))
+
+(defmacro every?
+  "Return true when every element of `xs` satisfies `pred`.
+
+  Evaluation stops at the first failing element. Empty inputs return true. This
+  lowers to a direct loop and allocates nothing."
+  [pred xs]
+  `(every-impl ~pred (core.slice ~xs 0)))
+
+(defmacro find
+  "Return the first element of `xs` satisfying `pred`, plus an ok flag.
+
+  The return shape is `[value, ok]`. When no element matches, `ok` is false and
+  `value` is the zero value of the element type."
+  [pred xs]
+  `(find-impl ~pred (core.slice ~xs 0)))
+
+(defmacro find-indexed
+  "Return the first matching index and element of `xs`, plus an ok flag.
+
+  `pred` receives the zero-based index and element. The return shape is
+  `[index, value, ok]`. When no element matches, `index` is -1, `ok` is false,
+  and `value` is the zero value of the element type."
+  [pred xs]
+  `(find-indexed-impl ~pred (core.slice ~xs 0)))
+
+(defmacro min-by
+  "Return the element with the smallest key produced by `f`, plus an ok flag.
+
+  The input is scanned once, no output collection is allocated, and the return
+  shape is `[value, ok]`. Empty input returns `ok` false and a zero value."
+  [f xs]
+  `(min-by-impl ~f (core.slice ~xs 0)))
+
+(defmacro max-by
+  "Return the element with the largest key produced by `f`, plus an ok flag.
+
+  The input is scanned once, no output collection is allocated, and the return
+  shape is `[value, ok]`. Empty input returns `ok` false and a zero value."
+  [f xs]
+  `(max-by-impl ~f (core.slice ~xs 0)))
+
+(defn- some-impl
+  "Implementation helper for non-field-selector `arr.some?`."
+  [pred: (fn [x: $T] -> bool), xs: []T] -> bool #force_inline
+  (let [result false]
+    (for [x xs]
+      (when (pred x)
+        (do
+          (set! result true)
+          (break))))
+    result))
+
+(defn- every-impl
+  "Implementation helper for non-field-selector `arr.every?`."
+  [pred: (fn [x: $T] -> bool), xs: []T] -> bool #force_inline
+  (let [result true]
+    (for [x xs]
+      (when (not (pred x))
+        (do
+          (set! result false)
+          (break))))
+    result))
+
+(defn- find-impl
+  "Implementation helper for non-field-selector `arr.find`."
+  [pred: (fn [x: $T] -> bool), xs: []T] -> [value: T, ok: bool] #force_inline
+  (for [x xs]
+    (when (pred x)
+      (return x true)))
+  (return value false))
+
+(defn- find-indexed-impl
+  "Implementation helper for `arr.find-indexed`."
+  [pred: (fn [i: int, x: $T] -> bool), xs: []T] -> [index: int, value: T, ok: bool] #force_inline
+  (for [x i xs]
+    (when (pred i x)
+      (return i x true)))
+  (return -1 value false))
+
+(defn- min-by-impl
+  "Implementation helper for `arr.min-by`."
+  [f: (fn [x: $T] -> $K), xs: []T] -> [value: T, ok: bool] #force_inline
+  (when (= (core.count xs) 0)
+    (return value false))
+  (let [best (core.get xs 0)
+        best-key (f best)
+        i 1]
+    (while (< i (core.count xs))
+      (let [x (core.get xs i)
+            k (f x)]
+        (when (< k best-key)
+          (set! best x)
+          (set! best-key k)))
+      (set! i (+ i 1)))
+    (return best true)))
+
+(defn- max-by-impl
+  "Implementation helper for `arr.max-by`."
+  [f: (fn [x: $T] -> $K), xs: []T] -> [value: T, ok: bool] #force_inline
+  (when (= (core.count xs) 0)
+    (return value false))
+  (let [best (core.get xs 0)
+        best-key (f best)
+        i 1]
+    (while (< i (core.count xs))
+      (let [x (core.get xs i)
+            k (f x)]
+        (when (> k best-key)
+          (set! best x)
+          (set! best-key k)))
+      (set! i (+ i 1)))
+    (return best true)))
+
+(defn- take-while-impl
+  "Implementation helper for non-field-selector `arr.take-while`."
+  [pred: (fn [x: $T] -> bool), xs: []T] -> []T #force_inline
+  (for [x i xs]
+    (when (not (pred x))
+      (return (odin-slice xs 0 i))))
+  xs)
+
+(defn- drop-while-impl
+  "Implementation helper for non-field-selector `arr.drop-while`."
+  [pred: (fn [x: $T] -> bool), xs: []T] -> []T #force_inline
+  (for [x i xs]
+    (when (not (pred x))
+      (return (odin-slice xs i))))
+  (odin-slice xs (core.count xs)))

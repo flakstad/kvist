@@ -1,0 +1,189 @@
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
+
+(package arr)
+
+(defn partition
+  "Return non-overlapping groups of exactly `n` elements from `xs`.
+
+  Any trailing group smaller than `n` is omitted. Group values are slice views
+  over the input where possible."
+  [n: int, xs: []$T] -> [dynamic][]T #force_inline
+  (if (<= n 0)
+    (return (make [dynamic][]T)))
+  (let [out (make [dynamic][]T 0 (/ (core.count xs) n))
+        start 0]
+    (while (<= (+ start n) (core.count xs))
+      (append (addr out) (core.slice xs start (+ start n)))
+      (set! start (+ start n)))
+    out))
+
+(defn partition-all
+  "Return non-overlapping groups of up to `n` elements from `xs`.
+
+  Unlike `arr.partition`, the final short group is included."
+  [n: int, xs: []$T] -> [dynamic][]T #force_inline
+  (if (<= n 0)
+    (return (make [dynamic][]T)))
+  (let [out (make [dynamic][]T 0 (/ (+ (core.count xs) (- n 1)) n))
+        start 0]
+    (while (< start (core.count xs))
+      (let [end (+ start n)]
+        (when (> end (core.count xs))
+          (set! end (core.count xs)))
+        (append (addr out) (core.slice xs start end)))
+      (set! start (+ start n)))
+    out))
+
+(defmacro partition-by
+  "Partition `xs` each time key function `f` returns a new key.
+
+  Adjacent elements with equal keys are grouped together. Groups preserve input
+  order."
+  [f xs]
+  `(partition-by-impl ~f (core.slice ~xs 0)))
+
+(defn- partition-by-impl
+  "Implementation helper for non-field-selector `arr.partition-by`."
+  [f: (fn [x: $T] -> $K), xs: []T] -> [dynamic][]T #force_inline
+  (if (= (core.count xs) 0)
+    (return (make [dynamic][]T)))
+  (let [out (make [dynamic][]T 0 (core.count xs))
+        start 0
+        last-key (f (core.get xs 0))
+        i 1]
+    (while (< i (core.count xs))
+      (let [key (f (core.get xs i))]
+        (if (!= key last-key)
+          (do
+            (append (addr out) (core.slice xs start i))
+            (set! start i)
+            (set! last-key key))))
+      (set! i (+ i 1)))
+    (append (addr out) (core.slice xs start))
+    out))
+
+(defmacro index-by
+  "Return a map from `(f x)` to `x` for each element in `xs`.
+
+  Later elements overwrite earlier elements with the same key. The result is a
+  newly allocated map."
+  [f xs]
+  `(index-by-impl ~f (core.slice ~xs 0)))
+
+(defn- index-by-impl
+  "Implementation helper for non-field-selector `arr.index-by`."
+  [f: (fn [x: $T] -> $K), xs: []T] -> map[K]T #force_inline
+  (let [out (make (map K T) (core.count xs))]
+    (for [x xs]
+      (set! out[(f x)] x))
+    out))
+
+(defmacro group-by
+  "Return a map from `(f x)` to a dynamic array of matching elements.
+
+  Elements preserve their input order within each group. The returned map and
+  group arrays are newly allocated."
+  [f xs]
+  `(group-by-impl ~f (core.slice ~xs 0)))
+
+(defn- group-by-impl
+  "Implementation helper for non-field-selector `arr.group-by`."
+  [f: (fn [x: $T] -> $K), xs: []T] -> (map K (dynamic T)) #force_inline
+  (let [out (make (map K (dynamic T)))]
+    (for [x xs]
+      (let [key (f x)
+            group out[key]]
+        (append (addr group) x)
+        (when (= (core.count group) 8)
+          (reserve (addr group) 64))
+        (set! out[key] group)))
+    out))
+
+(defmacro count-by
+  "Return a map counting how many elements produce each key from `f`.
+
+  The result maps keys to integer counts and is allocated once before scanning
+  the input."
+  [f xs]
+  `(count-by-impl ~f (core.slice ~xs 0)))
+
+(defn- count-by-impl
+  "Implementation helper for non-field-selector `arr.count-by`."
+  [f: (fn [x: $T] -> $K), xs: []T] -> map[K]int #force_inline
+  (let [out (make (map K int))]
+    (for [x xs]
+      (mut! out[(f x)] += 1))
+    out))
+
+(defmacro sum-by
+  "Return a map summing `(value-f x)` for each key `(key-f x)`.
+
+  This is useful for grouped numeric aggregation. Missing keys start from the
+  zero value of the value type."
+  [key-f value-f xs]
+  `(sum-by-impl ~key-f ~value-f (core.slice ~xs 0)))
+
+(defn- sum-by-impl
+  "Implementation helper for non-field-selector `arr.sum-by`."
+  [key-f: (fn [x: $T] -> $K), value-f: (fn [x: T] -> $V), xs: []T] -> map[K]V #force_inline
+  (let [out (make (map K V))]
+    (for [x xs]
+      (mut! out[(key-f x)] += (value-f x)))
+    out))
+
+(defmacro frequencies
+  "Return a map from each distinct element in `xs` to its count.
+
+  This is equivalent to counting by identity and allocates a map for the result."
+  [xs]
+  `(frequencies-impl (core.slice ~xs 0)))
+
+(defn- frequencies-impl
+  "Implementation helper for `arr.frequencies`."
+  [xs: []$T] -> map[T]int #force_inline
+  (let [out (make (map T int) (core.count xs))]
+    (for [x xs]
+      (mut! out[x] += 1))
+    out))
+
+(defmacro distinct
+  "Return the distinct values from `xs` in first-seen order.
+
+  The result is a newly allocated dynamic array. A set.map is used internally to
+  track values already emitted."
+  [xs]
+  `(distinct-impl (core.slice ~xs 0)))
+
+(defn- distinct-impl
+  "Implementation helper for `arr.distinct`."
+  [xs: []$T] -> [dynamic]T #force_inline
+  (let [out (arr.empty T (core.count xs))
+        seen (make (map T bool) (core.count xs)) :defer]
+    (for [x xs]
+      (if seen[x]
+        (continue))
+      (set! seen[x] true)
+      (append (addr out) x))
+    out))
+
+(defmacro distinct-by
+  "Return elements whose key `(f x)` has not been seen before.
+
+  The first element for each key is kept and later elements with the same key
+  are skipped. Output order follows the input."
+  [f xs]
+  `(distinct-by-impl ~f (core.slice ~xs 0)))
+
+(defn- distinct-by-impl
+  "Implementation helper for non-field-selector `arr.distinct-by`."
+  [f: (fn [x: $T] -> $K), xs: []T] -> [dynamic]T #force_inline
+  (let [out (arr.empty T (core.count xs))
+        seen (make (map K bool) (core.count xs)) :defer]
+    (for [x xs]
+      (let [key (f x)]
+        (if seen[key]
+          (continue))
+        (set! seen[key] true)
+        (append (addr out) x)))
+    out))
