@@ -37,7 +37,13 @@ emit_let_value_binding_assignment :: proc(e: ^Emitter, binding: Binding) -> (Com
     }
 
     for inner in inner_bindings {
-        if binding_is_data_destructure(e, inner) {
+        native_sequence := binding_is_native_sequence_destructure(e, inner)
+        if native_sequence {
+            err_native, ok_native := emit_native_sequence_let_binding(e, inner)
+            if !ok_native {
+                return err_native, false
+            }
+        } else if binding_is_data_destructure(e, inner) {
             err_data, ok_data := emit_data_let_binding(e, inner)
             if !ok_data {
                 return err_data, false
@@ -88,7 +94,9 @@ emit_let_value_binding_assignment :: proc(e: ^Emitter, binding: Binding) -> (Com
                 return err_defer, false
             }
         }
-        if ty, ok_ty := obvious_binding_type(e, inner); ok_ty {
+        if native_sequence {
+            bind_obvious_binding_types(e, inner)
+        } else if ty, ok_ty := obvious_binding_type(e, inner); ok_ty {
             bind_local_type(e, inner.name, ty)
         }
     }

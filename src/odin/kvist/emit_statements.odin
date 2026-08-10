@@ -529,7 +529,12 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
         for binding in bindings {
             managed := false
             managed_ty := ""
-            if binding_is_data_destructure(e, binding) {
+            if binding_is_native_sequence_destructure(e, binding) {
+                err_native, ok_native := emit_native_sequence_let_binding(e, binding)
+                if !ok_native {
+                    return err_native, false
+                }
+            } else if binding_is_data_destructure(e, binding) {
                 err_data, ok_data := emit_data_let_binding(e, binding)
                 if !ok_data {
                     return err_data, false
@@ -1064,7 +1069,12 @@ emit_eval_print_stmt :: proc(e: ^Emitter, form: CST_Form) -> (Compile_Error, boo
         push_local_type_scope(e)
         defer pop_local_type_scope(e)
         for binding in bindings {
-            if binding_is_data_destructure(e, binding) {
+            if binding_is_native_sequence_destructure(e, binding) {
+                err_native, ok_native := emit_native_sequence_let_binding(e, binding)
+                if !ok_native {
+                    return err_native, false
+                }
+            } else if binding_is_data_destructure(e, binding) {
                 err_data, ok_data := emit_data_let_binding(e, binding)
                 if !ok_data {
                     return err_data, false

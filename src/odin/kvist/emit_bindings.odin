@@ -5,6 +5,7 @@ package kvist
 
 import "core:fmt"
 import "core:os"
+import "core:strconv"
 import "core:strings"
 import "core:time"
 
@@ -43,6 +44,166 @@ binding_is_data_destructure :: proc(e: ^Emitter, binding: Binding) -> bool {
         return true
     }
     return binding.target.kind == .Vector && data_binding_rhs_is_data(e, binding.value)
+}
+
+binding_native_sequence_type :: proc(e: ^Emitter, binding: Binding) -> (collection_ty, element_ty: string, ok: bool) {
+    if !binding.is_destructure || binding.is_result_binding || binding.target.kind != .Vector {
+        return "", "", false
+    }
+    if binding.value.kind == .List &&
+       len(binding.value.items) > 0 &&
+       binding.value.items[0].kind == .Symbol {
+        head_name := map_name(binding.value.items[0].text)
+        if proc_decl, ok_proc := find_proc_decl(e, head_name); ok_proc && proc_decl.returns.kind != .Single {
+            return "", "", false
+        }
+    }
+    ok_collection_ty: bool
+    collection_ty, ok_collection_ty = obvious_form_type(e, binding.value)
+    if !ok_collection_ty {
+        probe := Binding{name = "kvist_sequence", value = binding.value}
+        collection_ty, ok_collection_ty = obvious_binding_type(e, probe)
+    }
+    if !ok_collection_ty ||
+       (!type_text_is_fixed_array(collection_ty) &&
+        !type_text_is_slice(collection_ty) &&
+        !type_text_is_dynamic_array(collection_ty)) {
+        return "", "", false
+    }
+    ok_element_ty: bool
+    element_ty, ok_element_ty = collection_element_type(collection_ty)
+    if !ok_element_ty {
+        return "", "", false
+    }
+    return collection_ty, element_ty, true
+}
+
+binding_is_native_sequence_destructure :: proc(e: ^Emitter, binding: Binding) -> bool {
+    _, _, ok := binding_native_sequence_type(e, binding)
+    return ok
+}
+
+validate_native_sequence_binding_pattern :: proc(binding: Binding) -> (Compile_Error, bool) {
+    if len(binding.target.items) == 0 {
+        return Compile_Error{
+            message = "native sequence destructuring expects at least one binding",
+            span = binding.target.span,
+        }, false
+    }
+    for item in binding.target.items {
+        if item.kind == .Symbol && item.text == "&" {
+            return Compile_Error{
+                message = "native sequence destructuring does not yet support rest bindings (`&`)",
+                span = item.span,
+            }, false
+        }
+        if item.kind == .Keyword && item.text == ":as" {
+            return Compile_Error{
+                message = "native sequence destructuring does not yet support `:as` bindings",
+                span = item.span,
+            }, false
+        }
+        if item.kind == .Vector || item.kind == .Brace {
+            return Compile_Error{
+                message = "native sequence destructuring does not yet support nested patterns",
+                span = item.span,
+            }, false
+        }
+        if item.kind != .Symbol {
+            return Compile_Error{
+                message = "native sequence destructuring expects symbols or _",
+                span = item.span,
+            }, false
+        }
+    }
+    return {}, true
+}
+
+fixed_array_type_length :: proc(type_text: string) -> (int, bool) {
+    if !type_text_is_fixed_array(type_text) {
+        return 0, false
+    }
+    close := strings.index(type_text, "]")
+    if close <= 1 {
+        return 0, false
+    }
+    length, ok := strconv.parse_int(type_text[1:close])
+    if !ok || length < 0 {
+        return 0, false
+    }
+    return length, true
+}
+
+validate_native_sequence_binding_bounds :: proc(binding: Binding, collection_ty: string) -> (Compile_Error, bool) {
+    length, known_length := fixed_array_type_length(collection_ty)
+    if !known_length || len(binding.target.items) <= length {
+        return {}, true
+    }
+    return Compile_Error{
+        message = fmt.tprintf(
+            "native sequence pattern requires %d elements, but %s contains %d",
+            len(binding.target.items),
+            collection_ty,
+            length,
+        ),
+        span = binding.target.items[length].span,
+    }, false
+}
+
+emit_native_sequence_let_binding :: proc(e: ^Emitter, binding: Binding) -> (Compile_Error, bool) {
+    collection_ty, element_ty, ok_type := binding_native_sequence_type(e, binding)
+    if !ok_type {
+        return Compile_Error{message = "expected a statically known native sequence", span = binding.value.span}, false
+    }
+    err_pattern, ok_pattern := validate_native_sequence_binding_pattern(binding)
+    if !ok_pattern {
+        return err_pattern, false
+    }
+    err_bounds, ok_bounds := validate_native_sequence_binding_bounds(binding, collection_ty)
+    if !ok_bounds {
+        return err_bounds, false
+    }
+    err_owned, bad_owned := owned_result_usage_error(binding.value, true, e)
+    if bad_owned {
+        return err_owned, false
+    }
+    value, err_value, ok_value := emit_expr_for_expected_type(e, binding.value, collection_ty)
+    if !ok_value {
+        return err_value, false
+    }
+    source := thread_temp_name(e)
+    emit_prefixed_expr_mapped(e, fmt.tprintf("%s := ", source), value, binding.value.span)
+    if form_produces_owned_value(binding.value, e) {
+        emit_line(e, fmt.tprintf("defer delete(%s)", source))
+    }
+    if type_text_is_slice(collection_ty) || type_text_is_dynamic_array(collection_ty) {
+        emit_line_mapped(
+            e,
+            fmt.tprintf(
+                "assert(len(%s) >= %d, \"native sequence pattern requires at least %d elements\")",
+                source,
+                len(binding.target.items),
+                len(binding.target.items),
+            ),
+            binding.target.span,
+        )
+    }
+    for item, idx in binding.target.items {
+        indexed := fmt.tprintf("%s[%d]", source, idx)
+        if item.text == "_" {
+            emit_line_mapped(e, fmt.tprintf("_ = %s", indexed), item.span)
+            continue
+        }
+        name := map_name(item.text)
+        if type_text_has_managed_lifecycle(e, element_ty) {
+            cloned := managed_clone_value_text(e, element_ty, indexed)
+            emit_prefixed_expr_mapped(e, fmt.tprintf("%s := ", name), cloned, item.span)
+            emit_line(e, fmt.tprintf("defer %s", managed_destroy_value_text(e, element_ty, name)))
+        } else {
+            emit_prefixed_expr_mapped(e, fmt.tprintf("%s := ", name), indexed, item.span)
+        }
+    }
+    return {}, true
 }
 
 data_pattern_append_name :: proc(names: ^[dynamic]string, form: CST_Form) -> (Compile_Error, bool) {

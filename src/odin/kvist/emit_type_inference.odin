@@ -1020,6 +1020,16 @@ obvious_binding_type :: proc(e: ^Emitter, binding: Binding) -> (string, bool) {
 }
 
 bind_obvious_binding_types :: proc(e: ^Emitter, binding: Binding) {
+    if _, element_ty, ok_native := binding_native_sequence_type(e, binding); ok_native {
+        if _, ok_pattern := validate_native_sequence_binding_pattern(binding); ok_pattern {
+            for item in binding.target.items {
+                if item.text != "_" {
+                    bind_local_type(e, map_name(item.text), element_ty)
+                }
+            }
+        }
+        return
+    }
     if binding_is_data_destructure(e, binding) {
         names: [dynamic]string
         if _, ok_pattern := validate_data_pattern_names(binding.target, &names, true); ok_pattern {

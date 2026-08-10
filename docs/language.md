@@ -1506,8 +1506,27 @@ early control flow, but do not want a `let` binding list:
 Here `block` is just introducing a scoped body. The mutable local comes from
 `defvar`, not from a `let` binding list.
 
-Native structs continue to use dot access or explicit locals. `Data` has
-Clojure-style map and sequential destructuring:
+Native structs continue to use dot access or explicit locals. Flat vector
+bindings destructure statically known native fixed arrays, slices, and dynamic
+arrays by position:
+
+```clojure
+(let [[first second _] values]
+  (+ first second))
+```
+
+The source is evaluated once, extra elements are ignored, and `_` checks but
+does not bind its position. A known fixed array that is too short is rejected
+during Kvist compilation. Slices and dynamic arrays are checked at runtime with
+a diagnostic stating how many elements the pattern requires. Native sequence
+patterns currently accept only symbols and `_`; rest, `:as`, and nested
+patterns are not supported. If the native result type is opaque to Kvist, bind
+or annotate it before destructuring.
+
+Vector binding also remains the syntax for native multiple return values. That
+lowering is separate and keeps Odin's exact-arity rules.
+
+`Data` has Clojure-style map and sequential destructuring:
 
 ```clojure
 (let [{:keys [name roles]
@@ -1533,9 +1552,10 @@ kind. Map defaults are evaluated only for absent keys, not explicit Data nil.
 Defaults may refer to earlier destructured locals.
 
 Every captured subvalue is an automatically managed `Data` local. Cleanup
-markers are therefore rejected on Data patterns. A simple vector binding
-remains native multi-return destructuring unless its right-hand side is
-statically Data or a contextually compatible Data literal.
+markers are therefore rejected on Data patterns. A vector binding is selected
+from the statically known source type: `Data` uses these Clojure-style rules;
+native arrays and slices use positional indexing; other native expressions use
+multiple-return binding.
 
 Owned local bindings may use the `:defer` marker:
 

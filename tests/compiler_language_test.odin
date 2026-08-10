@@ -1004,6 +1004,124 @@ main :: proc() {
 }
 
 @(test)
+compile_flat_native_sequence_bindings :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn fixed-total [xs: [3]int] -> int
+  (let [[a b _] xs]
+    (+ a b)))
+
+(defn slice-total [xs: []int] -> int
+  (let [[a b] xs]
+    (+ a b)))
+
+(defn dynamic-total [xs: [dynamic]int] -> int
+  (let [[a b] xs]
+    (+ a b)))
+
+(defn temporary-total [] -> int
+  (let [[a b] ([dynamic]int [10 20 30])]
+    (+ a b)))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, count_substring(output, " := xs"), 3)
+    testing.expect_value(t, count_substring(output, "[0]"), 4)
+    testing.expect_value(t, count_substring(output, "[1]"), 4)
+    testing.expect_value(t, strings.contains(output, "_ = kvist_thread_1[2]"), true)
+    testing.expect_value(t, strings.contains(output, "defer delete(kvist_thread_4)"), true)
+    testing.expect_value(t, strings.contains(output, "kvist_thread_4 := [dynamic]int{10, 20, 30}"), true)
+    testing.expect_value(t, count_substring(output, "native sequence pattern requires at least 2 elements"), 3)
+}
+
+@(test)
+compile_native_data_element_binding_is_managed :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn first-item [xs: []Data] -> Data
+  (let [[item] xs]
+    item))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "item := kvist_data_retain(kvist_thread_1[0])"), true)
+    testing.expect_value(t, strings.contains(output, "defer kvist_data_release(item)"), true)
+}
+
+@(test)
+reject_non_flat_native_sequence_binding_patterns :: proc(t: ^testing.T) {
+    cases := []struct {
+        source:    string,
+        message:   string,
+        highlight: string,
+    }{
+        {
+            source = `(package main)
+(defn bad [xs: []int]
+  (let [[head & tail] xs]
+    head))`,
+            message = "native sequence destructuring does not yet support rest bindings (`&`)",
+            highlight = "&",
+        },
+        {
+            source = `(package main)
+(defn bad [xs: [2][2]int]
+  (let [[head [nested]] xs]
+    head))`,
+            message = "native sequence destructuring does not yet support nested patterns",
+            highlight = "[nested]",
+        },
+        {
+            source = `(package main)
+(defn bad [xs: []int]
+  (let [[first :as all] xs]
+    first))`,
+            message = "native sequence destructuring does not yet support `:as` bindings",
+            highlight = ":as",
+        },
+        {
+            source = `(package main)
+(defn bad [xs: []int]
+  (let [[] xs]
+    (return)))`,
+            message = "native sequence destructuring expects at least one binding",
+            highlight = "[]",
+        },
+        {
+            source = `(package main)
+(defn bad [xs: [2]int]
+  (let [[first second third] xs]
+    first))`,
+            message = "native sequence pattern requires 3 elements, but [2]int contains 2",
+            highlight = "third",
+        },
+    }
+
+    for test_case in cases {
+        _, err, ok := kvist.compile_source(test_case.source)
+        testing.expect_value(t, ok, false)
+        if ok {
+            continue
+        }
+        defer delete(err.message)
+        testing.expect_value(t, err.message, test_case.message)
+        testing.expect_value(t, test_case.source[err.span.start:err.span.end], test_case.highlight)
+    }
+}
+
+@(test)
 implicit_core_when_helper :: proc(t: ^testing.T) {
     source := `(package main)
 
