@@ -1,0 +1,95 @@
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
+
+(package main)
+(import arr "kvist:arr")
+(import data "kvist:data")
+(import edn "kvist:edn")
+(import fmt "core:fmt")
+(import os "core:os")
+
+(defn print-map [value: Data]
+  (fmt.printf "%d\t" (data.count value))
+  (for [key (arr.range -2 3)]
+    (let [[item present?] (data.lookup value (data.from-int (i64 key)))]
+      (fmt.printf "%d\t%d\t"
+                  (if present? 1 0)
+                  (if present? (data.int item) (i64 0))))))
+
+(defn main []
+  (let [[input input-error]
+        (os.read_entire_file_from_file os.stdin context.allocator)]
+    (defer (delete input))
+    (when (!= input-error nil)
+      (fmt.eprintln "could not read Data map transform input from stdin")
+      (os.exit 2))
+    (let [[request read-error ok] (edn.try-read (string input))]
+      (when (not ok)
+        (fmt.eprintln read-error.message)
+        (os.exit 2))
+      (when (or (not (data.vector? request)) (!= (data.count request) 7))
+        (fmt.eprintln "Data map transform input must be [lhs rhs selected source divisor offset threshold]")
+        (os.exit 2))
+      (let [lhs (data.nth request 0)
+            rhs (data.nth request 1)
+            selected (data.nth request 2)
+            source (data.nth request 3)
+            divisor (data.int (data.nth request 4))
+            offset (data.int (data.nth request 5))
+            threshold (data.int (data.nth request 6))
+            lhs-before (edn.write lhs) :defer
+            rhs-before (edn.write rhs) :defer
+            selected-before (edn.write selected) :defer
+            source-before (edn.write source) :defer
+            selected-map (data.select-keys lhs selected)
+            merged (data.merge lhs rhs)
+            merged-with
+            (data.merge-with
+             (fn [left: Data, right: Data] -> Data
+               (data.from-int (+ (data.int left) (data.int right))))
+             lhs rhs)
+            updated-keys
+            (data.update-keys
+             (fn [key: Data] -> Data
+               (data.from-int (% (data.int key) divisor)))
+             lhs)
+            updated-vals
+            (data.update-vals
+             (fn [value: Data] -> Data
+               (data.from-int (+ (data.int value) offset)))
+             lhs)
+            mapped-entries
+            (data.map-entries
+             (fn [key: Data, value: Data] -> Data
+               [(data.from-int (% (data.int key) divisor))
+                (data.from-int (+ (data.int value) (data.int key)))])
+             lhs)
+            filtered-entries
+            (data.filter-entries
+             (fn [_: Data, value: Data] -> bool
+               (>= (data.int value) threshold))
+             lhs)
+            into-map (data.into lhs source)
+            entries-roundtrip (data.into (data.empty-map) (data.entries into-map))
+            keys-vals-roundtrip (data.zipmap (data.keys into-map) (data.vals into-map))
+            lhs-after (edn.write lhs) :defer
+            rhs-after (edn.write rhs) :defer
+            selected-after (edn.write selected) :defer
+            source-after (edn.write source) :defer]
+        (when (or (!= lhs-before lhs-after)
+                  (!= rhs-before rhs-after)
+                  (!= selected-before selected-after)
+                  (!= source-before source-after))
+          (fmt.eprintln "Data map transform mutated its input")
+          (os.exit 3))
+        (print-map selected-map)
+        (print-map merged)
+        (print-map merged-with)
+        (print-map updated-keys)
+        (print-map updated-vals)
+        (print-map mapped-entries)
+        (print-map filtered-entries)
+        (print-map into-map)
+        (print-map entries-roundtrip)
+        (print-map keys-vals-roundtrip)
+        (fmt.print "done")))))

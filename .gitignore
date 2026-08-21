@@ -3,6 +3,7 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .kvist-cache/
+/.tooling/
 *.odin.tmp
 .worktrees/
 /kvist

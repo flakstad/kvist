@@ -1,0 +1,94 @@
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
+
+(package main)
+(import arr "kvist:arr")
+(import data "kvist:data")
+(import edn "kvist:edn")
+(import fmt "core:fmt")
+(import os "core:os")
+
+(defn print-count-map [value: Data, minimum: int, maximum: int]
+  (fmt.printf "%d\t" (data.count value))
+  (for [key (arr.range minimum (+ maximum 1))]
+    (let [[count present?] (data.lookup value (data.from-int (i64 key)))]
+      (fmt.printf "%d\t" (if present? (data.int count) (i64 0))))))
+
+(defn print-index-map [value: Data, minimum: int, maximum: int]
+  (fmt.printf "%d\t" (data.count value))
+  (for [key (arr.range minimum (+ maximum 1))]
+    (let [[item present?] (data.lookup value (data.from-int (i64 key)))]
+      (fmt.printf "%d\t%d\t"
+                  (if present? 1 0)
+                  (if present? (data.int item) (i64 0))))))
+
+(defn print-group-map [value: Data, minimum: int, maximum: int]
+  (fmt.printf "%d\t" (data.count value))
+  (for [key (arr.range minimum (+ maximum 1))]
+    (let [[group present?] (data.lookup value (data.from-int (i64 key)))
+          length (if present? (data.count group) 0)]
+      (fmt.printf "%d\t%d\t" (if present? 1 0) length)
+      (for [index (arr.range 0 length)]
+        (fmt.printf "%d\t" (data.int (data.nth group index)))))))
+
+(defn main []
+  (let [[input input-error]
+        (os.read_entire_file_from_file os.stdin context.allocator)]
+    (defer (delete input))
+    (when (!= input-error nil)
+      (fmt.eprintln "could not read aggregate input from stdin")
+      (os.exit 2))
+    (let [[request read-error ok] (edn.try-read (string input))]
+      (when (not ok)
+        (fmt.eprintln read-error.message)
+        (os.exit 2))
+      (when (or (not (data.vector? request)) (!= (data.count request) 4))
+        (fmt.eprintln "aggregate input must be [values divisor seed multiplier]")
+        (os.exit 2))
+      (let [values (data.nth request 0)
+            divisor (data.int (data.nth request 1))
+            seed (data.int (data.nth request 2))
+            multiplier (data.int (data.nth request 3))
+            original (edn.write values) :defer
+            sum (data.reduce
+                 (fn [acc: i64, item: Data] -> i64
+                   (+ acc (data.int item)))
+                 seed values)
+            fold (data.reduce
+                  (fn [acc: i64, item: Data] -> i64
+                    (+ (* acc multiplier) (data.int item)))
+                  seed values)
+            frequencies (data.frequencies values)
+            count-by (data.count-by
+                      (fn [item: Data] -> Data
+                        (data.from-int (% (data.int item) divisor)))
+                      values)
+            grouped (data.group-by
+                     (fn [item: Data] -> Data
+                       (data.from-int (% (data.int item) divisor)))
+                     values)
+            indexed (data.index-by
+                     (fn [item: Data] -> Data
+                       (data.from-int (% (data.int item) divisor)))
+                     values)
+            frequency-total
+            (data.reduce-kv
+             (fn [acc: i64, _: Data, count: Data] -> i64
+               (+ acc (data.int count)))
+             (i64 0) frequencies)
+            frequency-weighted-sum
+            (data.reduce-kv
+             (fn [acc: i64, key: Data, count: Data] -> i64
+               (+ acc (* (data.int key) (data.int count))))
+             (i64 0) frequencies)
+            after (edn.write values) :defer]
+        (when (!= original after)
+          (fmt.eprintln "Data aggregation mutated its input")
+          (os.exit 3))
+        (fmt.printf "%d\t%d\t%d\t%d\t"
+                    sum fold frequency-total frequency-weighted-sum)
+        (print-count-map frequencies -5 5)
+        (print-count-map count-by -3 3)
+        (print-index-map indexed -3 3)
+        (print-group-map grouped -3 3)
+        (fmt.print "done")))))

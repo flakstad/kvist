@@ -1,0 +1,76 @@
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
+
+(package main)
+(import arr "kvist:arr")
+(import data "kvist:data")
+(import edn "kvist:edn")
+(import fmt "core:fmt")
+(import os "core:os")
+(import set "kvist:set")
+
+(defn set-from-data [values: Data] -> (map i64 (struct {}))
+  (let [result (set.empty i64)]
+    (for [index (arr.range 0 (data.count values))]
+      (set.add! result (data.int (data.nth values index))))
+    result))
+
+(defn copy-set [source: (map i64 (struct {}))] -> (map i64 (struct {}))
+  (let [result (set.empty i64 (count source))]
+    (for [value _ source]
+      (set.add! result value))
+    result))
+
+(defn print-set [value: (map i64 (struct {}))]
+  (fmt.printf "%d\t" (count value))
+  (for [member (arr.range -4 5)]
+    (fmt.printf "%d\t" (if (set.contains? value (i64 member)) 1 0))))
+
+(defn main []
+  (let [[input input-error]
+        (os.read_entire_file_from_file os.stdin context.allocator)]
+    (defer (delete input))
+    (when (!= input-error nil)
+      (fmt.eprintln "could not read set input from stdin")
+      (os.exit 2))
+    (let [[request read-error ok] (edn.try-read (string input))]
+      (when (not ok)
+        (fmt.eprintln read-error.message)
+        (os.exit 2))
+      (when (or (not (data.vector? request)) (!= (data.count request) 3))
+        (fmt.eprintln "set input must be [lhs-values rhs-values probe]")
+        (os.exit 2))
+      (let [lhs (set-from-data (data.nth request 0)) :defer
+            rhs (set-from-data (data.nth request 1)) :defer
+            probe (data.int (data.nth request 2))
+            unioned (set.union lhs rhs) :defer
+            intersected (set.intersection lhs rhs) :defer
+            differed (set.difference lhs rhs) :defer
+            added (set.add lhs probe) :defer
+            removed (set.remove lhs probe) :defer
+            mutable-union (copy-set lhs) :defer
+            mutable-intersection (copy-set lhs) :defer
+            mutable-difference (copy-set lhs) :defer
+            mutable-add (copy-set lhs) :defer
+            mutable-remove (copy-set lhs) :defer]
+        (set.union! mutable-union rhs)
+        (set.intersection! mutable-intersection rhs)
+        (set.difference! mutable-difference rhs)
+        (set.add! mutable-add probe)
+        (set.remove! mutable-remove probe)
+        (print-set lhs)
+        (print-set rhs)
+        (print-set unioned)
+        (print-set intersected)
+        (print-set differed)
+        (print-set added)
+        (print-set removed)
+        (print-set mutable-union)
+        (print-set mutable-intersection)
+        (print-set mutable-difference)
+        (print-set mutable-add)
+        (print-set mutable-remove)
+        (fmt.printf "%d\t%d\t%d"
+                    (if (set.subset? lhs rhs) 1 0)
+                    (if (set.superset? lhs rhs) 1 0)
+                    (if (set.disjoint? lhs rhs) 1 0))))))

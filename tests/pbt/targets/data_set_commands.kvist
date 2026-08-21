@@ -1,0 +1,64 @@
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
+
+(package main)
+(import arr "kvist:arr")
+(import data "kvist:data")
+(import edn "kvist:edn")
+(import fmt "core:fmt")
+(import os "core:os")
+
+(defn print-set [value: Data]
+  (fmt.printf "%d\t" (data.count value))
+  (for [member (arr.range -4 5)]
+    (fmt.printf "%d\t"
+                (if (data.includes? value (data.from-int (i64 member))) 1 0))))
+
+(defn main []
+  (let [[input input-error]
+        (os.read_entire_file_from_file os.stdin context.allocator)]
+    (defer (delete input))
+    (when (!= input-error nil)
+      (fmt.eprintln "could not read Data set command from stdin")
+      (os.exit 2))
+    (let [[request read-error ok] (edn.try-read (string input))]
+      (when (not ok)
+        (fmt.eprintln read-error.message)
+        (os.exit 2))
+      (when (or (not (data.vector? request)) (!= (data.count request) 3))
+        (fmt.eprintln "Data set command must be [state operation value]")
+        (os.exit 2))
+      (let [state (data.nth request 0)
+            operation (data.nth request 1)
+            value (data.nth request 2)
+            original (edn.write state) :defer
+            converted (cond
+                        (= operation :vec-roundtrip) (data.vec state)
+                        (= operation :list-roundtrip) (data.list state)
+                        :else state)
+            conversion-kind (cond
+                              (data.vector? converted) 1
+                              (data.list? converted) 2
+                              :else 0)
+            next (cond
+                   (= operation :conj) (data.conj state value)
+                   (= operation :append) (data.append state value)
+                   (= operation :vec-roundtrip) (data.set converted)
+                   (= operation :list-roundtrip) (data.set converted)
+                   (= operation :probe) state
+                   :else state)
+            canonical (edn.write next) :defer
+            reparsed (edn.read canonical)
+            after (edn.write state) :defer]
+        (when (not (data.set? state))
+          (fmt.eprintln "Data set state is not a set")
+          (os.exit 3))
+        (when (!= original after)
+          (fmt.eprintln "Data set command mutated its input")
+          (os.exit 3))
+        (when (not (data.equal? next reparsed))
+          (fmt.eprintln "Data set state changed during EDN roundtrip")
+          (os.exit 3))
+        (print-set next)
+        (fmt.printf "%d\t" conversion-kind)
+        (fmt.print canonical)))))

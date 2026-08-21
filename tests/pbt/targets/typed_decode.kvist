@@ -1,0 +1,140 @@
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
+
+(package main)
+(import data "kvist:data")
+(import edn "kvist:edn")
+(import fmt "core:fmt")
+(import os "core:os")
+
+(defenum Mode [Manual Automatic Read-Only])
+
+(defstruct Child {
+  host-id: i64
+  active: bool
+})
+
+(defstruct Config {
+  port: i64
+  enabled: bool
+  ratio: f64
+  mode: Mode
+  name: string
+  child: Child
+  nums: [dynamic]i64
+  flags: [dynamic]bool
+  ratios: [dynamic]f64
+  modes: [dynamic]Mode
+  children: [dynamic]Child
+  raw: Data
+})
+
+(defn bool-int [value: bool] -> int
+  (if value 1 0))
+
+(defn mode-code [value: Mode] -> int
+  (case value
+    .Manual 0
+    .Automatic 1
+    .Read-Only 2
+    0))
+
+(defn kind-code [kind: Data-Kind] -> int
+  (case kind
+    .Nil 0
+    .Bool 1
+    .Int 2
+    .Float 3
+    .String 4
+    .Symbol 5
+    .Keyword 6
+    .List 7
+    .Vector 8
+    .Map 9
+    .Set 10
+    .Tagged 11
+    -1))
+
+(defn errors-equal? [left: data.Decode-Error, right: data.Decode-Error] -> bool
+  (and (= left.path right.path)
+       (= left.expected right.expected)
+       (= left.actual right.actual)
+       (= left.enum-value? right.enum-value?)
+       (= left.expected-type right.expected-type)
+       (= left.actual-value right.actual-value)))
+
+(defn main []
+  (let [[input input-error]
+        (os.read_entire_file_from_file os.stdin context.allocator)]
+    (defer (delete input))
+    (when (!= input-error nil)
+      (fmt.eprintln "could not read typed decode input from stdin")
+      (os.exit 2))
+    (let [[value read-error read-ok] (edn.try-read (string input))]
+      (when (not read-ok)
+        (fmt.eprintln read-error.message)
+        (os.exit 2))
+      (let [path: Data [:config]
+            original (edn.write value) :defer
+            [config decode-error decode-ok] (data.decode Config value path)
+            [validate-error validate-ok] (data.validate Config value path)
+            agreement (and (= decode-ok validate-ok)
+                           (or decode-ok (errors-equal? decode-error validate-error)))
+            after (edn.write value) :defer]
+        (when (!= original after)
+          (fmt.eprintln "typed decode or validate mutated its input")
+          (os.exit 3))
+        (fmt.printf "%d\t%d\t%d\t"
+                    (bool-int decode-ok)
+                    (bool-int validate-ok)
+                    (bool-int agreement))
+        (if decode-ok
+          (fmt.print "-\t-1\t-1\t0\t-\t-\t")
+          (let [error-path (edn.write decode-error.path) :defer]
+            (fmt.printf "%s\t%d\t%d\t%d\t%s\t"
+                        error-path
+                        (kind-code decode-error.expected)
+                        (kind-code decode-error.actual)
+                        (bool-int decode-error.enum-value?)
+                        (if decode-error.enum-value? decode-error.expected-type "-"))
+            (if decode-error.enum-value?
+              (fmt.printf "%s\t" (data.keyword decode-error.actual-value))
+              (fmt.print "-\t"))))
+        (if decode-ok
+          (let [nums-sum (i64 0)
+                true-flags 0
+                mode-sum 0
+                child-id-sum (i64 0)
+                active-children 0
+                ratio-ok (= config.ratio (data.float (get value :ratio)))
+                ratios-ok true]
+            (for [item config.nums]
+              (set! nums-sum (+ nums-sum item)))
+            (for [item config.flags]
+              (if item (inc! true-flags)))
+            (for [item config.modes]
+              (set! mode-sum (+ mode-sum (mode-code item))))
+            (for [item config.children]
+              (set! child-id-sum (+ child-id-sum item.host-id))
+              (if item.active (inc! active-children)))
+            (for [item index config.ratios]
+              (set! ratios-ok
+                    (and ratios-ok
+                         (= item (data.float (data.nth (get value :ratios) index))))))
+            (fmt.printf "%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t"
+                        config.port
+                        (bool-int config.enabled)
+                        (mode-code config.mode)
+                        config.child.host-id
+                        (bool-int config.child.active)
+                        nums-sum
+                        true-flags
+                        mode-sum
+                        child-id-sum
+                        active-children
+                        (bool-int (= config.name "service"))
+                        (bool-int ratio-ok)
+                        (bool-int ratios-ok)
+                        (bool-int (= config.raw (get value :raw)))))
+          (fmt.print "0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0\t"))
+        (fmt.print "done")))))

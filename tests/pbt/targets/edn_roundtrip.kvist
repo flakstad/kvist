@@ -1,0 +1,30 @@
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
+
+(package main)
+(import data "kvist:data")
+(import edn "kvist:edn")
+(import fmt "core:fmt")
+(import os "core:os")
+
+(defn main []
+  (let [[input input-error]
+        (os.read_entire_file_from_file os.stdin context.allocator)]
+    (defer (delete input))
+    (when (!= input-error nil)
+      (fmt.eprintln "could not read EDN from stdin")
+      (os.exit 2))
+    (let [[value read-error ok] (edn.try-read (string input))]
+      (when (not ok)
+        (fmt.eprintln read-error.message)
+        (os.exit 2))
+      (let [canonical (edn.write value) :defer
+            reparsed (edn.read canonical)
+            stable (edn.write reparsed) :defer]
+        (when (not (data.equal? value reparsed))
+          (fmt.eprintln "EDN structural roundtrip changed the value")
+          (os.exit 3))
+        (when (!= canonical stable)
+          (fmt.eprintln "EDN canonical output is not idempotent")
+          (os.exit 3))
+        (fmt.print canonical)))))

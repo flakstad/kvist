@@ -1,0 +1,120 @@
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
+
+(package main)
+(import arr "kvist:arr")
+(import data "kvist:data")
+(import edn "kvist:edn")
+(import fmt "core:fmt")
+(import os "core:os")
+
+(defn abs-int [value: Data] -> i64
+  (let [number (data.int value)]
+    (if (< number 0) (- number) number)))
+
+(defn print-optional [value: Data, present?: bool]
+  (fmt.printf "%d\t%d\t"
+              (if present? 1 0)
+              (if present? (data.int value) (i64 0))))
+
+(defn print-sequence [value: Data]
+  (fmt.printf "%d\t" (data.count value))
+  (for [index (arr.range 0 (data.count value))]
+    (fmt.printf "%d\t" (data.int (data.nth value index)))))
+
+(defn print-partitions [value: Data]
+  (fmt.printf "%d\t" (data.count value))
+  (for [index (arr.range 0 (data.count value))]
+    (print-sequence (data.nth value index))))
+
+(defn main []
+  (let [[input input-error]
+        (os.read_entire_file_from_file os.stdin context.allocator)]
+    (defer (delete input))
+    (when (!= input-error nil)
+      (fmt.eprintln "could not read scan input from stdin")
+      (os.exit 2))
+    (let [[request read-error ok] (edn.try-read (string input))]
+      (when (not ok)
+        (fmt.eprintln read-error.message)
+        (os.exit 2))
+      (when (or (not (data.vector? request)) (!= (data.count request) 5))
+        (fmt.eprintln "scan input must be [values threshold indexed-start partition-size divisor]")
+        (os.exit 2))
+      (let [values (data.nth request 0)
+            threshold (data.int (data.nth request 1))
+            indexed-start (int (data.int (data.nth request 2)))
+            partition-size (int (data.int (data.nth request 3)))
+            divisor (data.int (data.nth request 4))
+            original (edn.write values) :defer
+            [found found?]
+            (data.find
+             (fn [value: Data] -> bool
+               (>= (data.int value) threshold))
+             values)
+            [found-index indexed indexed?]
+            (data.find-indexed
+             (fn [index: int, value: Data] -> bool
+               (and (>= index indexed-start) (>= (data.int value) threshold)))
+             values)
+            [smallest smallest?] (data.min-by abs-int values)
+            [largest largest?] (data.max-by abs-int values)
+            some? (data.some?
+                   (fn [value: Data] -> bool
+                     (>= (data.int value) threshold))
+                   values)
+            every? (data.every?
+                    (fn [value: Data] -> bool
+                      (>= (data.int value) threshold))
+                    values)
+            not-any? (data.not-any?
+                      (fn [value: Data] -> bool
+                        (>= (data.int value) threshold))
+                      values)
+            not-every? (data.not-every?
+                        (fn [value: Data] -> bool
+                          (>= (data.int value) threshold))
+                        values)
+            leading (data.take-while
+                     (fn [value: Data] -> bool
+                       (>= (data.int value) threshold))
+                     values)
+            trailing (data.drop-while
+                      (fn [value: Data] -> bool
+                        (>= (data.int value) threshold))
+                      values)
+            sorted-abs (data.sort-by abs-int values)
+            sorted-desc (data.sort-with
+                         (fn [left: Data, right: Data] -> bool
+                           (> (data.int left) (data.int right)))
+                         values)
+            partitioned (data.partition partition-size values)
+            partitioned-all (data.partition-all partition-size values)
+            partitioned-by (data.partition-by
+                            (fn [value: Data] -> Data
+                              (data.from-int (% (data.int value) divisor)))
+                            values)
+            after (edn.write values) :defer]
+        (when (!= original after)
+          (fmt.eprintln "Data scan mutated its input")
+          (os.exit 3))
+        (print-optional found found?)
+        (fmt.printf "%d\t%d\t%d\t"
+                    (if indexed? 1 0)
+                    (if indexed? found-index -1)
+                    (if indexed? (data.int indexed) (i64 0)))
+        (print-optional smallest smallest?)
+        (print-optional largest largest?)
+        (fmt.printf "%d\t%d\t%d\t%d\t"
+                    (if some? 1 0)
+                    (if every? 1 0)
+                    (if not-any? 1 0)
+                    (if not-every? 1 0))
+        (print-sequence leading)
+        (print-sequence trailing)
+        (print-sequence sorted-abs)
+        (print-sequence sorted-desc)
+        (print-partitions partitioned)
+        (print-partitions partitioned-all)
+        (print-partitions partitioned-by)
+        (fmt.print "done")))))

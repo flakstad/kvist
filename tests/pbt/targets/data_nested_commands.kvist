@@ -1,0 +1,75 @@
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
+
+(package main)
+(import data "kvist:data")
+(import edn "kvist:edn")
+(import fmt "core:fmt")
+(import os "core:os")
+
+(defn increment-or-one [value: Data] -> Data
+  (if (data.nil? value)
+    (data.from-int 1)
+    (data.from-int (+ (data.int value) 1))))
+
+(defn print-value [value: Data]
+  (fmt.printf "%d\t%d\t"
+              (if (data.nil? value) 0 1)
+              (if (data.nil? value) (i64 0) (data.int value))))
+
+(defn print-path [state: Data, path: Data]
+  (print-value (data.get-in state path)))
+
+(defn print-parent [state: Data, outer: Data]
+  (let [[value present?] (data.lookup state outer)]
+    (fmt.printf "%d\t%d\t%d\t"
+                (if present? 1 0)
+                (if present? (data.count value) 0)
+                (if (and present? (data.map? value)) 1 0))))
+
+(defn main []
+  (let [[input input-error]
+        (os.read_entire_file_from_file os.stdin context.allocator)]
+    (defer (delete input))
+    (when (!= input-error nil)
+      (fmt.eprintln "could not read nested command from stdin")
+      (os.exit 2))
+    (let [[request read-error ok] (edn.try-read (string input))]
+      (when (not ok)
+        (fmt.eprintln read-error.message)
+        (os.exit 2))
+      (when (or (not (data.vector? request)) (!= (data.count request) 5))
+        (fmt.eprintln "nested command must be [state operation outer inner value]")
+        (os.exit 2))
+      (let [state (data.nth request 0)
+            operation (data.nth request 1)
+            outer (data.nth request 2)
+            inner (data.nth request 3)
+            value (data.nth request 4)
+            path: Data [outer inner]
+            original (edn.write state) :defer
+            next (cond
+                   (= operation :assoc-in) (data.assoc-in state path value)
+                   (= operation :update-in) (data.update-in state path increment-or-one)
+                   (= operation :dissoc-in) (data.dissoc-in state path)
+                   (= operation :get-in) state
+                   :else state)
+            canonical (edn.write next) :defer
+            reparsed (edn.read canonical)
+            after (edn.write state) :defer]
+        (when (!= original after)
+          (fmt.eprintln "nested operation mutated its input")
+          (os.exit 3))
+        (when (not (data.equal? next reparsed))
+          (fmt.eprintln "nested state changed during EDN roundtrip")
+          (os.exit 3))
+        (print-path next path)
+        (print-path next [:o0 :i0])
+        (print-path next [:o0 :i1])
+        (print-path next [:o0 :i2])
+        (print-path next [:o1 :i0])
+        (print-path next [:o1 :i1])
+        (print-path next [:o1 :i2])
+        (print-parent next :o0)
+        (print-parent next :o1)
+        (fmt.print canonical)))))

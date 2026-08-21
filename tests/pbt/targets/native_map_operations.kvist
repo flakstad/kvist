@@ -1,0 +1,109 @@
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
+
+(package main)
+(import arr "kvist:arr")
+(import data "kvist:data")
+(import edn "kvist:edn")
+(import fmt "core:fmt")
+(import map "kvist:map")
+(import os "core:os")
+
+(defn map-from-data [entries: Data] -> (map i64 i64)
+  (let [result (map.empty i64 i64)]
+    (for [index (arr.range 0 (data.count entries))]
+      (let [entry (data.nth entries index)
+            key (data.int (data.nth entry 0))
+            value (data.int (data.nth entry 1))]
+        (set! (get result key) value)))
+    result))
+
+(defn copy-map [source: (map i64 i64)] -> (map i64 i64)
+  (let [result (map.empty i64 i64 (count source))]
+    (for [key value source]
+      (set! (get result key) value))
+    result))
+
+(defn ints-from-data [values: Data] -> [dynamic]i64
+  (let [result (arr.empty i64 (data.count values))]
+    (for [index (arr.range 0 (data.count values))]
+      (arr.push! result (data.int (data.nth values index))))
+    result))
+
+(defn print-map [value: (map i64 i64)]
+  (fmt.printf "%d\t" (count value))
+  (for [key (arr.range -2 3)]
+    (let [[entry present?] (map.get value (i64 key))]
+      (fmt.printf "%d\t%d\t"
+                  (if present? 1 0)
+                  (if present? entry (i64 0))))))
+
+(defn slice-contains? [values: []i64, expected: i64] -> bool
+  (for [value values]
+    (when (= value expected)
+      (return true)))
+  false)
+
+(defn slice-frequency [values: []i64, expected: i64] -> int
+  (let [result 0]
+    (for [value values]
+      (when (= value expected)
+        (inc! result)))
+    result))
+
+(defn main []
+  (let [[input input-error]
+        (os.read_entire_file_from_file os.stdin context.allocator)]
+    (defer (delete input))
+    (when (!= input-error nil)
+      (fmt.eprintln "could not read map input from stdin")
+      (os.exit 2))
+    (let [[request read-error ok] (edn.try-read (string input))]
+      (when (not ok)
+        (fmt.eprintln read-error.message)
+        (os.exit 2))
+      (when (or (not (data.vector? request)) (!= (data.count request) 6))
+        (fmt.eprintln "map input must be [lhs rhs probe-key probe-value zip-keys zip-values]")
+        (os.exit 2))
+      (let [lhs (map-from-data (data.nth request 0)) :defer
+            rhs (map-from-data (data.nth request 1)) :defer
+            probe-key (data.int (data.nth request 2))
+            probe-value (data.int (data.nth request 3))
+            zip-keys (ints-from-data (data.nth request 4)) :defer
+            zip-values (ints-from-data (data.nth request 5)) :defer
+            merged (map.merge lhs rhs) :defer
+            assoced (map.assoc lhs probe-key probe-value) :defer
+            dissoced (map.dissoc lhs probe-key) :defer
+            mutable-merge (copy-map lhs) :defer
+            mutable-assoc (copy-map lhs) :defer
+            mutable-dissoc (copy-map lhs) :defer
+            zipped (map.zip (slice zip-keys 0) (slice zip-values 0)) :defer
+            merged-keys (map.keys merged) :defer
+            merged-values (map.vals merged) :defer
+            [lookup lookup-ok] (map.get merged probe-key)
+            default-value (map.get merged probe-key (i64 -99))]
+        (map.merge! mutable-merge rhs)
+        (map.assoc! mutable-assoc probe-key probe-value)
+        (map.dissoc! mutable-dissoc probe-key)
+        (print-map lhs)
+        (print-map rhs)
+        (print-map merged)
+        (print-map assoced)
+        (print-map dissoced)
+        (print-map mutable-merge)
+        (print-map mutable-assoc)
+        (print-map mutable-dissoc)
+        (print-map zipped)
+        (fmt.printf "%d\t" (count merged-keys))
+        (for [key (arr.range -2 3)]
+          (fmt.printf "%d\t"
+                      (if (slice-contains? (slice merged-keys 0) (i64 key)) 1 0)))
+        (fmt.printf "%d\t" (count merged-values))
+        (for [value (arr.range -9 10)]
+          (fmt.printf "%d\t"
+                      (slice-frequency (slice merged-values 0) (i64 value))))
+        (fmt.printf "%d\t%d\t%d\t%d"
+                    (if (map.contains? merged probe-key) 1 0)
+                    (if lookup-ok 1 0)
+                    (if lookup-ok lookup (i64 0))
+                    default-value)))))

@@ -1,0 +1,71 @@
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
+
+(package main)
+(import data "kvist:data")
+(import edn "kvist:edn")
+(import fmt "core:fmt")
+(import os "core:os")
+
+(defn print-value [value: Data]
+  (fmt.printf "%d\t%d\t"
+              (if (data.nil? value) 0 1)
+              (if (data.nil? value) (i64 0) (data.int value))))
+
+(defn print-item [state: Data, index: int]
+  (let [value (data.nth state index)]
+    (fmt.printf "%d\t"
+                (if (data.nil? value) (i64 0) (data.int value)))))
+
+(defn main []
+  (let [[input input-error]
+        (os.read_entire_file_from_file os.stdin context.allocator)]
+    (defer (delete input))
+    (when (!= input-error nil)
+      (fmt.eprintln "could not read sequence command from stdin")
+      (os.exit 2))
+    (let [[request read-error ok] (edn.try-read (string input))]
+      (when (not ok)
+        (fmt.eprintln read-error.message)
+        (os.exit 2))
+      (when (or (not (data.vector? request)) (!= (data.count request) 4))
+        (fmt.eprintln "sequence command must be [state operation index value]")
+        (os.exit 2))
+      (let [state (data.nth request 0)
+            operation (data.nth request 1)
+            index (int (data.int (data.nth request 2)))
+            value (data.nth request 3)
+            original (edn.write state) :defer
+            next (cond
+                   (= operation :conj) (data.conj state value)
+                   (= operation :append) (data.append state value)
+                   (= operation :assoc) (data.assoc state index value)
+                   (= operation :pop) (data.pop state)
+                   (= operation :to-list) (data.list state)
+                   (= operation :to-vector) (data.vec state)
+                   :else state)
+            queried (if (or (= operation :assoc) (= operation :nth))
+                      (data.nth next index)
+                      (data.peek next))
+            canonical (edn.write next) :defer
+            reparsed (edn.read canonical)
+            after (edn.write state) :defer]
+        (when (!= original after)
+          (fmt.eprintln "sequence operation mutated its input")
+          (os.exit 3))
+        (when (not (data.equal? next reparsed))
+          (fmt.eprintln "sequence state changed during EDN roundtrip")
+          (os.exit 3))
+        (print-value queried)
+        (fmt.printf "%d\t%d\t"
+                    (if (data.vector? next) 0 1)
+                    (data.count next))
+        (print-item next 0)
+        (print-item next 1)
+        (print-item next 2)
+        (print-item next 3)
+        (print-item next 4)
+        (print-item next 5)
+        (print-item next 6)
+        (print-item next 7)
+        (fmt.print canonical)))))

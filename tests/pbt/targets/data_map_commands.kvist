@@ -1,0 +1,53 @@
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
+
+(package main)
+(import data "kvist:data")
+(import edn "kvist:edn")
+(import fmt "core:fmt")
+(import os "core:os")
+
+(defn print-slot [state: Data, key: Data]
+  (let [[value present?] (data.lookup state key)]
+    (fmt.printf "%d\t%d\t"
+                (if present? 1 0)
+                (if present? (data.int value) (i64 0)))))
+
+(defn main []
+  (let [[input input-error]
+        (os.read_entire_file_from_file os.stdin context.allocator)]
+    (defer (delete input))
+    (when (!= input-error nil)
+      (fmt.eprintln "could not read map command from stdin")
+      (os.exit 2))
+    (let [[request read-error ok] (edn.try-read (string input))]
+      (when (not ok)
+        (fmt.eprintln read-error.message)
+        (os.exit 2))
+      (when (or (not (data.vector? request)) (!= (data.count request) 4))
+        (fmt.eprintln "map command must be [state operation key value]")
+        (os.exit 2))
+      (let [state (data.nth request 0)
+            operation (data.nth request 1)
+            key (data.nth request 2)
+            value (data.nth request 3)
+            original (edn.write state) :defer
+            next (cond
+                   (= operation :assoc) (data.assoc state key value)
+                   (= operation :dissoc) (data.dissoc state key)
+                   (= operation :lookup) state
+                   :else state)
+            canonical (edn.write next) :defer
+            reparsed (edn.read canonical)
+            after (edn.write state) :defer]
+        (when (!= original after)
+          (fmt.eprintln "map operation mutated its input")
+          (os.exit 3))
+        (when (not (data.equal? next reparsed))
+          (fmt.eprintln "map state changed during EDN roundtrip")
+          (os.exit 3))
+        (print-slot next :k0)
+        (print-slot next :k1)
+        (print-slot next :k2)
+        (print-slot next :k3)
+        (fmt.print canonical)))))

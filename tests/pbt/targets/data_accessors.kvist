@@ -1,0 +1,129 @@
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
+
+(package main)
+(import arr "kvist:arr")
+(import data "kvist:data")
+(import edn "kvist:edn")
+(import fmt "core:fmt")
+(import os "core:os")
+
+(defn bool-int [value: bool] -> int
+  (if value 1 0))
+
+(defn accessor-roundtrip? [value: Data] -> bool
+  (cond
+    (data.nil? value) (data.equal? value (data.from-nil))
+    (data.bool? value) (data.equal? value (data.from-bool (data.bool value)))
+    (data.int? value) (data.equal? value (data.from-int (data.int value)))
+    (data.float? value) (data.equal? value (data.from-float (data.float value)))
+    (data.string? value) (and (= (data.text value) (data.string value))
+                              (data.equal? value (data.from-string (data.string value))))
+    (data.symbol? value) (and (= (data.text value) (data.symbol value))
+                              (data.equal? value (data.from-symbol (data.symbol value))))
+    (data.keyword? value) (and (= (data.text value) (data.keyword value))
+                               (data.equal? value (data.from-keyword (data.keyword value))))
+    (data.tagged? value) (data.equal? value (data.tagged (data.tag value) (data.tagged-value value)))
+    :else true))
+
+(defn description-ok? [value: Data] -> bool
+  (let [description (data.describe value)
+        [kind kind?] (data.lookup description :kind)
+        [count-value count?] (data.lookup description :count)
+        [keys keys?] (data.lookup description :keys)
+        [tag tag?] (data.lookup description :tag)
+        counted? (or (data.string? value)
+                     (data.list? value)
+                     (data.vector? value)
+                     (data.map? value)
+                     (data.set? value))]
+    (and kind?
+         (= kind (data.kind-keyword value))
+         (= count? counted?)
+         (or (not counted?) (= (data.int count-value) (i64 (data.count value))))
+         (= keys? (data.map? value))
+         (or (not keys?) (= (data.count keys) (data.count value)))
+         (= tag? (data.tagged? value))
+         (or (not tag?) (= (data.string tag) (data.tag value))))))
+
+(defn print-optional-int [value: Data]
+  (fmt.printf "%d\t%d\t"
+              (if (data.nil? value) 0 1)
+              (if (data.nil? value) (i64 0) (data.int value))))
+
+(defn main []
+  (let [[input input-error]
+        (os.read_entire_file_from_file os.stdin context.allocator)]
+    (defer (delete input))
+    (when (!= input-error nil)
+      (fmt.eprintln "could not read Data accessor input from stdin")
+      (os.exit 2))
+    (let [[value read-error ok] (edn.try-read (string input))]
+      (when (not ok)
+        (fmt.eprintln read-error.message)
+        (os.exit 2))
+      (let [path: Data [:root]
+            [decoded-int int-error int-ok] (data.decode-int-at value path)
+            [decoded-float float-error float-ok] (data.decode-float-at value path)
+            [decoded-bool bool-error bool-ok] (data.decode-bool-at value path)
+            int-error-ok (or int-ok
+                             (and (= int-error.path path)
+                                  (= int-error.expected .Int)
+                                  (= int-error.actual (data.kind value))))
+            float-error-ok (or float-ok
+                               (and (= float-error.path path)
+                                    (= float-error.expected .Float)
+                                    (= float-error.actual (data.kind value))))
+            bool-error-ok (or bool-ok
+                              (and (= bool-error.path path)
+                                   (= bool-error.expected .Bool)
+                                   (= bool-error.actual (data.kind value))))
+            count-value (if (or (data.string? value)
+                                (data.list? value)
+                                (data.vector? value)
+                                (data.map? value)
+                                (data.set? value))
+                          (data.count value)
+                          -1)
+            sequential-access? (or (data.nil? value) (data.list? value) (data.vector? value))
+            first-value (if sequential-access? (data.first value) 'nil)
+            second-value (if sequential-access? (data.second value) 'nil)
+            last-value (if sequential-access? (data.last value) 'nil)
+            key-sum (i64 0)
+            value-sum (i64 0)]
+        (if (data.map? value)
+          (for [index (arr.range 0 (data.count value))]
+            (set! key-sum (+ key-sum (data.int (data.key-at value index))))
+            (set! value-sum (+ value-sum (data.int (data.value-at value index))))))
+        (fmt.printf "%s\t" (data.keyword (data.kind-keyword value)))
+        (fmt.printf "%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t"
+                    (bool-int (data.nil? value))
+                    (bool-int (data.bool? value))
+                    (bool-int (data.int? value))
+                    (bool-int (data.float? value))
+                    (bool-int (data.string? value))
+                    (bool-int (data.symbol? value))
+                    (bool-int (data.keyword? value))
+                    (bool-int (data.list? value))
+                    (bool-int (data.vector? value))
+                    (bool-int (data.map? value))
+                    (bool-int (data.set? value))
+                    (bool-int (data.tagged? value)))
+        (fmt.printf "%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t"
+                    count-value
+                    (bool-int (accessor-roundtrip? value))
+                    (bool-int (description-ok? value))
+                    (bool-int int-ok)
+                    (bool-int float-ok)
+                    (bool-int bool-ok)
+                    (bool-int int-error-ok)
+                    (bool-int float-error-ok)
+                    (bool-int bool-error-ok))
+        (print-optional-int first-value)
+        (print-optional-int second-value)
+        (print-optional-int last-value)
+        (fmt.printf "%d\t%d\t" key-sum value-sum)
+        (if (data.tagged? value)
+          (fmt.printf "1\t%d\t" (data.int (data.tagged-value value)))
+          (fmt.print "0\t0\t"))
+        (fmt.print "done")))))

@@ -1,0 +1,133 @@
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
+
+(package main)
+(import arr "kvist:arr")
+(import data "kvist:data")
+(import edn "kvist:edn")
+(import fmt "core:fmt")
+(import os "core:os")
+
+(defn print-sequence [value: Data]
+  (fmt.printf "%d\t" (data.count value))
+  (for [index (arr.range 0 (data.count value))]
+    (fmt.printf "%d\t" (data.int (data.nth value index)))))
+
+(defn print-set [value: Data]
+  (fmt.printf "%d\t" (data.count value))
+  (for [item (arr.range -5 6)]
+    (fmt.printf "%d\t"
+                (if (data.includes? value (data.from-int (i64 item))) 1 0))))
+
+(defn main []
+  (let [[input input-error]
+        (os.read_entire_file_from_file os.stdin context.allocator)]
+    (defer (delete input))
+    (when (!= input-error nil)
+      (fmt.eprintln "could not read transform input from stdin")
+      (os.exit 2))
+    (let [[request read-error ok] (edn.try-read (string input))]
+      (when (not ok)
+        (fmt.eprintln read-error.message)
+        (os.exit 2))
+      (when (or (not (data.vector? request)) (!= (data.count request) 9))
+        (fmt.eprintln "transform input must be [values other n offset threshold separator step divisor probe]")
+        (os.exit 2))
+      (let [values (data.nth request 0)
+            other (data.nth request 1)
+            n (int (data.int (data.nth request 2)))
+            offset (data.int (data.nth request 3))
+            threshold (data.int (data.nth request 4))
+            separator (data.nth request 5)
+            step (int (data.int (data.nth request 6)))
+            divisor (data.int (data.nth request 7))
+            probe (data.nth request 8)
+            original (edn.write values) :defer
+            original-other (edn.write other) :defer
+            mapped (data.map
+                     (fn [value: Data] -> Data
+                       (data.from-int (+ (data.int value) offset)))
+                     values)
+            mapped-indexed
+            (data.map-indexed
+             (fn [index: int, value: Data] -> Data
+               (data.from-int (+ (data.int value) (i64 index))))
+             values)
+            filtered (data.filter
+                      (fn [value: Data] -> bool
+                        (>= (data.int value) threshold))
+                      values)
+            taken (data.take n values)
+            dropped (data.drop n values)
+            reversed (data.reverse values)
+            unique (data.distinct values)
+            [split-left split-right] (data.split-at n values)
+            interposed (data.interpose separator values)
+            sampled (data.take-nth step values)
+            reconstructed (data.concat split-left split-right)
+            reversed-twice (data.reverse reversed)
+            removed (data.remove
+                     (fn [value: Data] -> bool
+                       (>= (data.int value) threshold))
+                     values)
+            kept (data.keep
+                  (fn [value: Data] -> Data
+                    (if (>= (data.int value) threshold)
+                      (data.from-int (+ (data.int value) offset))
+                      'nil))
+                  values)
+            kept-indexed
+            (data.keep-indexed
+             (fn [index: int, value: Data] -> Data
+               (if (= (% (+ (i64 index) (data.int value)) divisor) 0)
+                 (data.from-int (+ (data.int value) (i64 index) offset))
+                 'nil))
+             values)
+            flattened
+            (data.mapcat
+             (fn [value: Data] -> Data
+               [value (data.from-int (+ (data.int value) offset))])
+             values)
+            unique-by (data.distinct-by
+                       (fn [value: Data] -> Data
+                         (data.from-int (% (data.int value) divisor)))
+                       values)
+            interleaved (data.interleave values other)
+            tail (data.rest values)
+            initial (data.butlast values)
+            into-vector (data.into values other)
+            into-list (data.into (data.list values) other)
+            into-set (data.into (data.set values) other)
+            includes? (data.includes? values probe)
+            after (edn.write values) :defer
+            after-other (edn.write other) :defer]
+        (when (or (!= original after) (!= original-other after-other))
+          (fmt.eprintln "Data transform mutated its input")
+          (os.exit 3))
+        (print-sequence values)
+        (print-sequence mapped)
+        (print-sequence mapped-indexed)
+        (print-sequence filtered)
+        (print-sequence taken)
+        (print-sequence dropped)
+        (print-sequence reversed)
+        (print-sequence unique)
+        (print-sequence split-left)
+        (print-sequence split-right)
+        (print-sequence interposed)
+        (print-sequence sampled)
+        (print-sequence reconstructed)
+        (print-sequence reversed-twice)
+        (print-sequence removed)
+        (print-sequence kept)
+        (print-sequence kept-indexed)
+        (print-sequence flattened)
+        (print-sequence unique-by)
+        (print-sequence interleaved)
+        (print-sequence tail)
+        (print-sequence initial)
+        (print-sequence into-vector)
+        (print-sequence into-list)
+        (print-set into-set)
+        (fmt.printf "%d\t" (if includes? 1 0))
+        (fmt.print "done")))))
