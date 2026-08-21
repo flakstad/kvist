@@ -1,0 +1,187 @@
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
+
+(package main)
+(import core "kvist:core")
+
+(defn affine [value: int, scale: int, offset: int] -> int
+  (+ (* value scale) offset))
+
+(defn affine-float [value: f64, scale: f64, offset: f64] -> f64
+  (+ (* value scale) offset))
+
+(defn identity-float [value: f64] -> f64
+  value)
+
+(defstruct Pbt-Point {
+  x: int
+  y: int
+  weight: int
+  active?: bool
+})
+
+(defstruct Pbt-Box {
+  point: Pbt-Point
+  bias: int
+})
+
+(defn pbt-point-score [point: Pbt-Point] -> int
+  (+ (* point.x 31)
+     (* point.y 17)
+     (* point.weight 13)
+     (if point.active? 1 0)))
+
+(defn pbt-box-score [box: Pbt-Box] -> int
+  (+ (* (pbt-point-score box.point) 7) box.bias))
+
+(defenum Pbt-Phase {
+  Queued: 2
+  Running: 5
+  Done: 9
+  Failed: 14
+})
+
+(defstruct Pbt-Job {
+  phase: Pbt-Phase
+  priority: int
+})
+
+(defn pbt-phase-score [phase: Pbt-Phase] -> int
+  (case phase
+    .Queued 2
+    .Running 5
+    .Done 9
+    .Failed 14
+    -1))
+
+(defn pbt-job-score [job: Pbt-Job] -> int
+  (+ (* (pbt-phase-score job.phase) 31) job.priority))
+
+(defstruct Pbt-Single {
+  value: int
+})
+
+(defstruct Pbt-Pair {
+  left: int
+  right: int
+})
+
+(defunion Pbt-Value {
+  single: Pbt-Single
+  pair: Pbt-Pair
+  raw: int
+})
+
+(defstruct Pbt-Envelope {
+  value: Pbt-Value
+  bias: int
+})
+
+(defn pbt-value-score [value: Pbt-Value] -> int
+  (case value
+    (Pbt-Single item) (+ (* item.value 11) 1)
+    (Pbt-Pair item) (+ (* item.left 7) (* item.right 5) 2)
+    (int raw) (+ (* raw 3) 3)
+    -999))
+
+(defn pbt-envelope-score [envelope: Pbt-Envelope] -> int
+  (+ (* (pbt-value-score envelope.value) 13) envelope.bias))
+
+(defn pbt-divmod [numerator: int, denominator: int] -> [quotient: int, remainder: int]
+  (return (/ numerator denominator) (% numerator denominator)))
+
+(defn pbt-option [candidate: int, accepted?: bool] -> [value: int, ok: bool] #optional_ok
+  (return candidate accepted?))
+
+(defn pbt-required [input: int, accepted?: bool] -> [value: int, ok: bool]
+  (let [[value ok] (pbt-option input accepted?) :or-return]
+    (return (+ value 1) true)))
+
+(defn pbt-apply-int [f: (fn [x: int] -> int), x: int] -> int
+  (f x))
+
+(defn pbt-apply-int-twice [f: (fn [x: int] -> int), x: int] -> int
+  (+ (pbt-apply-int f x) (pbt-apply-int f (+ x 1))))
+
+(defn pbt-fold-int [f: (fn [acc: int, x: int] -> int), initial: int, xs: []int] -> int
+  (let [total initial]
+    (for [x xs]
+      (set! total (f total x)))
+    total))
+
+(defn pbt-fold-indexed [f: (fn [acc: int, value: int, index: int] -> int), initial: int, xs: []int] -> int
+  (let [total initial]
+    (for [value index xs]
+      (set! total (f total value index)))
+    total))
+
+(defn pbt-add-through-pointer! [value: ^int, delta: int] -> int
+  (mut! value^ += delta)
+  value^)
+
+(defn pbt-cell-pointer [xs: []int, index: int] -> ^int
+  (addr xs[index]))
+
+(defn pbt-defer-step! [value: ^int, multiplier: int, addend: int]
+  (set! value^ (+ (* value^ multiplier) addend)))
+
+(defn pbt-defer-return! [out: ^int, returned: int, multiplier: int, addend: int] -> int
+  (defer (pbt-defer-step! out multiplier addend))
+  (return returned))
+
+(defvar pbt-error-token: int 1)
+(defvar pbt-macro-calls: int 0)
+(defvar pbt-macro-cell: int 0)
+
+(defn pbt-fake-error [] -> rawptr
+  (transmute rawptr (addr pbt-error-token)))
+
+(defn pbt-counted-int [value: int] -> int
+  (mut! pbt-macro-calls += 1)
+  value)
+
+(defn pbt-counted-bool [value: bool] -> bool
+  (mut! pbt-macro-calls += 1)
+  value)
+
+(defn pbt-counted-option [candidate: int, accepted?: bool] -> [value: int, ok: bool]
+  (mut! pbt-macro-calls += 1)
+  (return candidate accepted?))
+
+(defn pbt-counted-error [candidate: int, accepted?: bool] -> [value: int, err: rawptr]
+  (mut! pbt-macro-calls += 1)
+  (return candidate (if accepted? nil (pbt-fake-error))))
+
+(defn pbt-counted-pointer [value: int] -> ^int
+  (mut! pbt-macro-calls += 1)
+  (set! pbt-macro-cell value)
+  (addr pbt-macro-cell))
+
+(defn pbt-last-affine [scale: int, offset: int, value: int] -> int
+  (+ (* value scale) offset))
+
+(defn pbt-call-score [a: int, b: int = 7, c: int = 11, d: int = 13] -> int
+  (+ (* a 31) (* b 17) (* c 7) d))
+
+(defn pbt-generic-same? [value: $T, expected: T] -> bool
+  (= value expected))
+
+(defn pbt-overload-int [value: int] -> int
+  (+ (* value 31) 1))
+
+(defn pbt-overload-bool [value: bool] -> int
+  (if value 2 3))
+
+(def pbt-overload-score (overload pbt-overload-int pbt-overload-bool))
+
+(defn pbt-generic-overload-score [value: $T] -> int
+  (pbt-overload-score value))
+
+(defn nonnegative? [value: int] -> bool
+  (>= value 0))
+
+(defn zero-quotient? [numerator: int, denominator: int] -> bool
+  (= (/ numerator denominator) 0))
+
+(defn identity-bool [value: bool] -> bool
+  value)

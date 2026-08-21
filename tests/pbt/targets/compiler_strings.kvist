@@ -1,0 +1,21 @@
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
+
+(package main)
+(import core "kvist:core")
+(import str "kvist:str")
+
+(defn affine [value: int, scale: int, offset: int] -> int
+  (+ (* value scale) offset))
+
+(defn nonnegative? [value: int] -> bool
+  (>= value 0))
+
+(defn zero-quotient? [numerator: int, denominator: int] -> bool
+  (= (/ numerator denominator) 0))
+
+(defn identity-bool [value: bool] -> bool
+  value)
+
+(defn choose-text [condition: bool, when-true: string, when-false: string] -> string
+  (if condition when-true when-false))

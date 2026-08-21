@@ -21,6 +21,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Check out pinned PBT
+        if: runner.os == 'Linux'
+        uses: actions/checkout@v4
+        with:
+          repository: flakstad/pbt
+          ref: c7d624c2b2bfceb6b84ea8183173605bab4b2a45
+          path: .tooling/pbt
+
       - uses: laytan/setup-odin@v2.12.2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -33,6 +41,20 @@ jobs:
         if: runner.os != 'Windows'
         shell: bash
         run: odin test tests -define:ODIN_TEST_LOG_LEVEL=warning -define:ODIN_TEST_THREADS=1
+
+      - name: Run property tests
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          KVIST_PBT_ROOT: ${{ github.workspace }}/.tooling/pbt
+        run: scripts/test_pbt.sh --text
+
+      - name: Run compiler property tests
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          KVIST_PBT_ROOT: ${{ github.workspace }}/.tooling/pbt
+        run: scripts/test_pbt_compiler.sh --text
 
       - name: Run Windows test smoke
         if: runner.os == 'Windows'
