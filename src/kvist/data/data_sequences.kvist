@@ -552,13 +552,13 @@
     (panic "data.distinct-by expects nil, list, vector, or set Data"))
   (let [out (arr.empty Data (core.count collection))]
     (defer (delete-owned-array! out))
-    (let [keys (arr.empty Data (core.count collection)) :defer-with delete-owned-array!]
+    (let [seen-keys (arr.empty Data (core.count collection)) :defer-with delete-owned-array!]
       (for [index (arr.range 0 (core.count collection))]
         (let [item (item-at collection index)
               key (f item)]
-          (if (not (retained-array-contains? keys[:] key))
+          (if (not (retained-array-contains? seen-keys[:] key))
             (do
-              (append-retained! (addr keys) key)
+              (append-retained! (addr seen-keys) key)
               (append-retained! (addr out) item)))))
       (freeze-items! .Vector (addr out)))))
 

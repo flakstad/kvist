@@ -267,6 +267,18 @@
       (inc! index)))
   (strings.write_byte builder (byte 34)))
 
+(defn- write-float! [builder: ^strings.Builder, value: f64]
+  (let [formatted (strings.builder_make)]
+    (defer (strings.builder_destroy (addr formatted)))
+    (fmt.sbprintf (addr formatted) "%g" value)
+    (let [text (strings.to_string formatted)]
+      (strings.write_string builder text)
+      (when (and (decimal-token? text)
+                 (not (str.contains? text "."))
+                 (not (str.contains? text "e"))
+                 (not (str.contains? text "E")))
+        (strings.write_string builder ".0")))))
+
 (defn- write-sequence!
   [builder: ^strings.Builder, value: Data, open: string, close: string]
   (strings.write_string builder open)
@@ -295,7 +307,7 @@
     .Nil (strings.write_string builder "nil")
     .Bool (strings.write_string builder (if (data.bool value) "true" "false"))
     .Int (fmt.sbprintf builder "%d" (data.int value))
-    .Float (fmt.sbprintf builder "%g" (data.float value))
+    .Float (write-float! builder (data.float value))
     .String (write-string! builder (data.string value))
     .Symbol (strings.write_string builder (data.symbol value))
     .Keyword (strings.write_string builder (data.keyword value))

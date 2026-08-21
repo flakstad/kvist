@@ -94,11 +94,7 @@ emit_let_value_binding_assignment :: proc(e: ^Emitter, binding: Binding) -> (Com
                 return err_defer, false
             }
         }
-        if native_sequence {
-            bind_obvious_binding_types(e, inner)
-        } else if ty, ok_ty := obvious_binding_type(e, inner); ok_ty {
-            bind_local_type(e, inner.name, ty)
-        }
+        bind_obvious_binding_types(e, inner)
     }
 
     if len(body) > 1 {

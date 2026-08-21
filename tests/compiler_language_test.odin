@@ -1250,7 +1250,33 @@ compile_if_ok_expression_with_expected_type :: proc(t: ^testing.T) {
     defer delete(output)
 
     testing.expect_value(t, strings.contains(output, "x, err := read_count()"), true)
-    testing.expect_value(t, strings.contains(output, "value: int = (x if (err) == ({}) else 0)"), true)
+    testing.expect_value(t, strings.contains(output, "value: int = (x if (err) == (os.Error{}) else 0)"), true)
+}
+
+@(test)
+compile_chained_if_let_expression_with_expected_type :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn query [n: int, found: bool] -> [value: int, ok: bool]
+  (return n found))
+
+(defn demo [] -> int
+  (let [value: int (if-let [[x ok-x] (query 4 true)
+                            [y ok-y] (query 5 false)]
+                     (+ x y)
+                     -1)]
+    value))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "proc(x: int) -> int"), true)
+    testing.expect_value(t, strings.contains(output, "return (x) + (y)"), true)
 }
 
 @(test)

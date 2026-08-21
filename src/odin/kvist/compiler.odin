@@ -411,9 +411,13 @@ compile_eval_source_with_map :: proc(source, eval_source: string, no_print: bool
     expanded_eval_form, err_eval_expand, ok_eval_expand := macroexpand_cst_form_with_macros(eval_form, macros[:])
     macro_eval_restore_anchor(previous_macro_anchor)
     if !ok_eval_expand {
+        if err_eval_expand.span.source != .Eval {
+            err_eval_expand.span = eval_form.span
+        }
         return result, clone_compile_error(err_eval_expand, result_allocator), false
     }
     defer delete_cst_form(&expanded_eval_form)
+    anchor_expanded_eval_spans(&expanded_eval_form, eval_form.span)
     err_eval_slash, ok_eval_slash := validate_surface_package_slash_access_form(expanded_eval_form, loaded.source_aliases[:])
     if !ok_eval_slash {
         return result, clone_compile_error(err_eval_slash, result_allocator), false
@@ -445,6 +449,18 @@ compile_eval_source_with_map :: proc(source, eval_source: string, no_print: bool
         append(&result.warnings, clone_compile_warning(warning, result_allocator))
     }
     return result, {}, true
+}
+
+anchor_expanded_eval_spans :: proc(form: ^CST_Form, enclosing_eval_span: Span) {
+    anchor := enclosing_eval_span
+    if form.span.source == .Eval {
+        anchor = form.span
+    } else {
+        form.span = enclosing_eval_span
+    }
+    for index in 0 ..< len(form.items) {
+        anchor_expanded_eval_spans(&form.items[index], anchor)
+    }
 }
 
 compile_path :: proc(path: string) -> (output: string, err: Compile_Error, ok: bool) {

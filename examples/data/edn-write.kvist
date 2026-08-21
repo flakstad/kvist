@@ -21,6 +21,8 @@
         [_ trailing-error trailing-ok] (edn.try-read "1 2")
         tagged (edn.read "#demo/value {:answer 42}")
         tagged-text (edn.write tagged) :defer
+        integral-float (edn.read "-10000.000")
+        integral-float-text (edn.write integral-float) :defer
         symbols (edn.read "[_ + -]")
         [_ missing-tag-error missing-tag-ok] (edn.try-read "# 1")
         [_ missing-value-error missing-value-ok] (edn.try-read "#demo/value")
@@ -40,6 +42,8 @@
     (assert (= (data.tagged-value tagged) '{:answer 42}))
     (assert (= tagged-text "#demo/value {:answer 42}"))
     (assert (= (edn.read tagged-text) tagged))
+    (assert (= integral-float-text "-10000.0"))
+    (assert (= (edn.read integral-float-text) integral-float))
     (assert (= symbols '[_ + -]))
     (assert (not missing-tag-ok))
     (assert (= missing-tag-error.message "expected EDN tag"))
