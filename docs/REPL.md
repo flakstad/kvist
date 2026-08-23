@@ -2079,12 +2079,30 @@ protocol.
 
 ### Latency measurement and optimization
 
-Interactive latency remains a continuing architectural concern, but the first
-measured optimization is implemented. The REPL fingerprints phase output and
+Interactive latency remains a continuing architectural concern, but three
+measured fast paths are implemented. The REPL fingerprints phase output and
 retains exact native generations in-session. Once typed result history has
-stabilized, an unchanged submission can skip both the Kvist frontend and Odin
-build while still loading a distinct generation and executing it normally.
-Dependency and imported-source metadata are validated before that fast path.
+stabilized, an unchanged submission can reuse its frontend/native generation.
+Dependency and imported-source metadata are validated before any fast path.
+
+Warm scalar generations now render through the resident worker and prune the
+generated Odin to the declaration dependency closure needed by the submitted
+form. On macOS this reduces a representative tutorial call from roughly 509 KB
+to 9 KB of generated Odin. A newly named dylib still has an observed `dlopen`
+floor of roughly 140 ms on the development machine, independent of that source
+reduction.
+
+The common `(int-function literal-int ...)` case therefore has a narrower
+resident path. The first native generation registers concrete context
+procedures with their exact ABI. After normal Kvist parsing, expansion, type
+checking, and dependency validation prove a later submission to be such a
+call, the worker invokes the already loaded native procedure directly. This is
+not an interpreter and does not replace general native generation. In the
+representative `repl-basics.kvist` benchmark, distinct warm calls take about
+84-106 ms end to end instead of roughly 430-480 ms. An exact call with stable
+typed history takes about 8.5 ms through the frontend cache. Calls outside the
+currently supported integer/literal shape continue through thin or full native
+generation with unchanged semantics.
 
 The generic protocol must report timings for at least:
 
@@ -2191,10 +2209,10 @@ The practical follow-up queue is:
    non-Olive endpoint workflow. `C-c C-s` is REPL start; `C-c M-c` remains
    debugger continue, and editor-neutral connection semantics belong in the
    CLI protocol rather than an Emacs-specific subprocess convention.
-4. Continue latency work from the implemented exact frontend/native generation
-   cache and bounded context-expansion cache. Incremental lowering/emission,
-   smaller first-time generations, and reduced link/load work remain; exact
-   repeated submissions already avoid frontend emission and Odin compilation.
+4. Extend the resident, ABI-checked call path from integer/literal calls to the
+   scalar and retained-value shapes justified by real project workloads.
+   Incremental lowering/emission and smaller first-time generations remain;
+   general forms continue to use thin or full native generations.
 5. Add pointer, foreign-view, opaque-resource, and declared-resource lifecycle
    adapters only for types with an explicit safe clone/retain/release contract.
    Extend live inspection and physical ownership tracking through those same
