@@ -93,6 +93,58 @@ compile_cache_distinguishes_entry_files_in_same_package :: proc(t: ^testing.T) {
 }
 
 @(test)
+repl_context_cache_key_tracks_files_and_current_imports :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp(
+        "",
+        "kvist-repl-context-cache-*",
+        context.allocator,
+    )
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+    context_path, path_err :=
+        os.join_path({dir, "context.kvist"}, context.allocator)
+    testing.expect_value(t, path_err == nil, true)
+    if path_err != nil {
+        return
+    }
+    defer delete(context_path)
+    testing.expect_value(
+        t,
+        os.write_entire_file_from_string(
+            context_path,
+            "(package context)\n(defn answer [] -> int 41)\n",
+        ) == nil,
+        true,
+    )
+    initial := repl_context_cache_key(context_path, "", "(answer)")
+    defer delete(initial)
+    with_import := repl_context_cache_key(
+        context_path,
+        "",
+        "(import data \"kvist:data\")",
+    )
+    defer delete(with_import)
+    testing.expect_value(t, initial != "", true)
+    testing.expect_value(t, initial != with_import, true)
+
+    testing.expect_value(
+        t,
+        os.write_entire_file_from_string(
+            context_path,
+            "(package context)\n(defn answer [] -> int 4242)\n",
+        ) == nil,
+        true,
+    )
+    edited := repl_context_cache_key(context_path, "", "(answer)")
+    defer delete(edited)
+    testing.expect_value(t, edited != initial, true)
+}
+
+@(test)
 odin_timing_csv_is_normalized :: proc(t: ^testing.T) {
     dir, dir_err := os.make_directory_temp("", "kvist-timing-csv-*", context.allocator)
     testing.expect_value(t, dir_err == nil, true)

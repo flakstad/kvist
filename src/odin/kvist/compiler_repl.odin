@@ -508,6 +508,32 @@ repl_persistent_definitions_source :: proc(source: string) -> string {
     return strings.clone(strings.to_string(builder))
 }
 
+repl_persistent_imports_source :: proc(source: string) -> string {
+    forms, _, ok := read_top_forms_with_origin(source, .Eval)
+    defer delete_borrowed_cst_top_form_slice(&forms)
+    if !ok {
+        return strings.clone("")
+    }
+    builder := strings.builder_make()
+    defer strings.builder_destroy(&builder)
+    for top in forms {
+        if eval_form_head(top.form) != "import" {
+            continue
+        }
+        if top.form.span.start < 0 ||
+           top.form.span.end > len(source) ||
+           top.form.span.start >= top.form.span.end {
+            continue
+        }
+        strings.write_string(
+            &builder,
+            source[top.form.span.start:top.form.span.end],
+        )
+        strings.write_byte(&builder, '\n')
+    }
+    return strings.clone(strings.to_string(builder))
+}
+
 repl_without_definition_source :: proc(source, logical_name: string) -> string {
     forms, _, ok := read_top_forms_with_origin(source, .Eval)
     defer delete_borrowed_cst_top_form_slice(&forms)

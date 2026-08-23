@@ -592,6 +592,18 @@ memoized: mutations, output, allocation, conditions, and other side effects
 still happen on every submission. Editing the context or an imported package
 invalidates the hit before evaluation.
 
+Capability `context-expansion-cache` advertises the narrower fast path used
+when two submissions differ but their package context does not. Kvist retains
+the resolved and macroexpanded context plus its user macros in the compiler
+process, then clones that immutable expansion for the next generation. The
+cache key covers the context and transitive dependency fingerprint, committed
+session imports, and imports introduced by the current atomic batch. Editing
+the context or an imported package, or submitting a new import, therefore
+rebuilds the expansion before compiling the form. Session definitions and the
+submitted expression still pass through fresh parsing, analysis, and emission.
+The cache is bounded to the most recent context, so a long REPL session does
+not accumulate one compiler graph per edit.
+
 `native_cache_hit` without `frontend_cache_hit` means Kvist reran the frontend
 but found identical instrumented Odin and skipped the Odin build. Explicit
 pause-before submissions and native debug-symbol builds remain uncached.
@@ -625,6 +637,16 @@ this reduced generation/source-map publication from roughly 0.85 seconds to
 0.025 seconds and the first native submission from roughly 1.8 seconds to
 0.97 seconds, while retaining byte-for-byte position equivalence with the
 compiler's canonical source-position calculation.
+
+Caching the immutable context expansion removes repeated package loading,
+transitive source resolution, and context macroexpansion for different forms.
+On the `repl-basics.kvist` tutorial context, warm frontend time for different
+expressions fell from roughly 0.12 seconds to 0.08 seconds. A first submission
+also publishes the bounded cache and can therefore be slightly more expensive;
+subsequent submissions are the interactive path this optimization targets. On
+the Ro engine context, a different warm expression measured roughly 0.24
+seconds of frontend work and 0.79 seconds end to end, down from approximately
+0.43 seconds and 0.97 seconds respectively before context caching.
 
 A `bindings` request emits an editor-neutral inventory such as:
 
@@ -2170,9 +2192,9 @@ The practical follow-up queue is:
    debugger continue, and editor-neutral connection semantics belong in the
    CLI protocol rather than an Emacs-specific subprocess convention.
 4. Continue latency work from the implemented exact frontend/native generation
-   cache. Persistent incremental frontend state, smaller first-time
-   generations, and reduced link/load work remain; exact repeated submissions
-   already avoid frontend emission and Odin compilation.
+   cache and bounded context-expansion cache. Incremental lowering/emission,
+   smaller first-time generations, and reduced link/load work remain; exact
+   repeated submissions already avoid frontend emission and Odin compilation.
 5. Add pointer, foreign-view, opaque-resource, and declared-resource lifecycle
    adapters only for types with an explicit safe clone/retain/release contract.
    Extend live inspection and physical ownership tracking through those same

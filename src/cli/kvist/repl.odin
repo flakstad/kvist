@@ -60,7 +60,7 @@ REPL_RESTART_USE_VALUE :: u32(1 << 1)
 REPL_RESTART_RETRY :: u32(1 << 2)
 REPL_RESTART_SKIP :: u32(1 << 3)
 REPL_RESTART_ABORT_OPERATION :: u32(1 << 4)
-REPL_DEBUG_CAPABILITIES: [63]string = {
+REPL_DEBUG_CAPABILITIES: [64]string = {
     "compiled-abort-operation-restarts",
     "compiled-retry-skip-restarts",
     "native-attach",
@@ -71,6 +71,7 @@ REPL_DEBUG_CAPABILITIES: [63]string = {
     "generation-loaded-events",
     "evaluation-phase-timings",
     "frontend-generation-cache",
+    "context-expansion-cache",
     "deferred-debug-value-capture",
     "generated-source-maps",
     "kvist-breakpoint-locations",
@@ -6983,6 +6984,29 @@ repl_frontend_request_hash :: proc(
     return hash, true
 }
 
+repl_context_cache_key :: proc(input, session_source, source: string) -> string {
+    dependency_key, dependency_ok := cached_compile_cache_key(input)
+    if !dependency_ok {
+        return ""
+    }
+    defer delete(dependency_key)
+    imports := kvist.repl_persistent_imports_source(session_source)
+    defer delete(imports)
+    current_imports := kvist.repl_persistent_imports_source(source)
+    defer delete(current_imports)
+    return strings.clone(
+        fmt.tprintf(
+            "%d:%s%d:%s%d:%s",
+            len(dependency_key),
+            dependency_key,
+            len(imports),
+            imports,
+            len(current_imports),
+            current_imports,
+        ),
+    )
+}
+
 repl_session_loaded_generation :: proc(
     session: ^Repl_Session,
     generation: int,
@@ -7265,6 +7289,8 @@ repl_compile_generation :: proc(
     input_data := read_source_or_exit(input)
     defer delete(transmute([]byte)input_data)
 
+    context_cache_key := repl_context_cache_key(input, session_source, source)
+    defer delete(context_cache_key)
     result, compile_err, compiled := kvist.compile_eval_path_with_map(
         input,
         source,
@@ -7280,6 +7306,7 @@ repl_compile_generation :: proc(
         repl_inspection_page_offset = inspection_page_offset,
         repl_inspection_page_limit = inspection_page_limit,
         repl_debug_capture_values = capture_debug_values,
+        repl_context_cache_key = context_cache_key,
     )
     if timings != nil {
         timings.frontend_ns =

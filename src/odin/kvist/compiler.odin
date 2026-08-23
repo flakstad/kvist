@@ -7,8 +7,87 @@ import "core:fmt"
 import "core:os"
 import "core:sort"
 import "core:strings"
+import "core:sync"
 import "core:time"
 import "base:runtime"
+
+Repl_Context_Expansion_Cache :: struct {
+    key:      string,
+    expanded: [dynamic]CST_Top_Form,
+    macros:   [dynamic]User_Macro,
+}
+
+repl_context_expansion_cache: Repl_Context_Expansion_Cache
+repl_context_expansion_cache_mutex: sync.Mutex
+
+repl_context_cache_top_form_clone :: proc(top: CST_Top_Form) -> CST_Top_Form {
+    cloned := clone_cst_top_form(top)
+    cloned.source_path = strings.clone(top.source_path)
+    cloned.source_file = strings.clone(top.source_file)
+    return cloned
+}
+
+repl_context_expansion_cache_clear :: proc() {
+    delete(repl_context_expansion_cache.key)
+    for &top in repl_context_expansion_cache.expanded {
+        delete(top.source_path)
+        delete(top.source_file)
+        delete_cst_top_form(&top)
+    }
+    delete(repl_context_expansion_cache.expanded)
+    delete_user_macro_slice(&repl_context_expansion_cache.macros)
+    repl_context_expansion_cache = {}
+}
+
+repl_context_expansion_cache_load :: proc(
+    key: string,
+) -> (expanded: [dynamic]CST_Top_Form, macros: [dynamic]User_Macro, found: bool) {
+    if key == "" {
+        return expanded, macros, false
+    }
+    sync.mutex_guard(&repl_context_expansion_cache_mutex)
+    if repl_context_expansion_cache.key != key {
+        return expanded, macros, false
+    }
+    for top in repl_context_expansion_cache.expanded {
+        append(&expanded, clone_cst_top_form(top))
+    }
+    for macro_decl in repl_context_expansion_cache.macros {
+        append(&macros, clone_user_macro(macro_decl))
+    }
+    return expanded, macros, true
+}
+
+repl_context_expansion_cache_store :: proc(
+    key: string,
+    expanded: []CST_Top_Form,
+    macros: []User_Macro,
+) {
+    if key == "" {
+        return
+    }
+    sync.mutex_guard(&repl_context_expansion_cache_mutex)
+    if repl_context_expansion_cache.key == key {
+        return
+    }
+    current_allocator := context.allocator
+    context.allocator = runtime.default_context().allocator
+    defer context.allocator = current_allocator
+    repl_context_expansion_cache_clear()
+    repl_context_expansion_cache.key = strings.clone(key)
+    for top in expanded {
+        append(
+            &repl_context_expansion_cache.expanded,
+            repl_context_cache_top_form_clone(top),
+        )
+    }
+    for macro_decl in macros {
+        append(
+            &repl_context_expansion_cache.macros,
+            clone_user_macro(macro_decl),
+        )
+    }
+}
 
 top_form_belongs_to_package :: proc(top: CST_Top_Form, files: []Package_File) -> bool {
     if top.source_path == "" {
@@ -845,6 +924,7 @@ compile_eval_path_with_map :: proc(
     repl_inspection_page_offset := 0,
     repl_inspection_page_limit := 0,
     repl_debug_capture_values := true,
+    repl_context_cache_key := "",
 ) -> (result: Emit_Result, err: Compile_Error, ok: bool) {
     result_allocator := context.allocator
     old_allocator := result_allocator
@@ -902,8 +982,21 @@ compile_eval_path_with_map :: proc(
         }
     }
 
-    expanded_forms, macros, err_program, ok_program :=
-        load_path_expanded_forms(path, profile, repl_import_forms[:])
+    expanded_forms, macros, context_cache_hit :=
+        repl_context_expansion_cache_load(repl_context_cache_key)
+    err_program: Compile_Error
+    ok_program := context_cache_hit
+    if !context_cache_hit {
+        expanded_forms, macros, err_program, ok_program =
+            load_path_expanded_forms(path, profile, repl_import_forms[:])
+        if ok_program {
+            repl_context_expansion_cache_store(
+                repl_context_cache_key,
+                expanded_forms[:],
+                macros[:],
+            )
+        }
+    }
     if !ok_program {
         context.allocator = old_allocator
         return result, clone_compile_error(err_program, result_allocator), false
