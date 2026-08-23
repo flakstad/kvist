@@ -20,6 +20,7 @@ import olive_reload "../../odin/olive_reload"
 
 REPL_PROTOCOL_VERSION :: 1
 REPL_WORKER_MARKER :: "KVIST_REPL_WORKER\t"
+REPL_WORKER_DIRECT_INT_PREFIX :: "__direct_int__\t"
 REPL_WORKER_ABORTED_MARKER :: "KVIST_REPL_ABORTED"
 REPL_WORKER_STREAM_OUTPUT_MARKER :: "KVIST_REPL_STREAM_OUTPUT\t"
 REPL_EVALUATION_ABORTED_MESSAGE :: "evaluation aborted"
@@ -60,7 +61,7 @@ REPL_RESTART_USE_VALUE :: u32(1 << 1)
 REPL_RESTART_RETRY :: u32(1 << 2)
 REPL_RESTART_SKIP :: u32(1 << 3)
 REPL_RESTART_ABORT_OPERATION :: u32(1 << 4)
-REPL_DEBUG_CAPABILITIES: [65]string = {
+REPL_DEBUG_CAPABILITIES: [66]string = {
     "compiled-abort-operation-restarts",
     "compiled-retry-skip-restarts",
     "native-attach",
@@ -73,6 +74,7 @@ REPL_DEBUG_CAPABILITIES: [65]string = {
     "frontend-generation-cache",
     "context-expansion-cache",
     "thin-scalar-generations",
+    "resident-direct-int-calls",
     "deferred-debug-value-capture",
     "generated-source-maps",
     "kvist-breakpoint-locations",
@@ -3028,6 +3030,57 @@ repl_worker_command :: proc() -> int {
             continue
         }
         if line == "" {
+            delete(raw)
+            continue
+        }
+
+        if strings.has_prefix(line, REPL_WORKER_DIRECT_INT_PREFIX) {
+            fields := strings.split(line, "\t", context.temp_allocator)
+            invoked := false
+            run_start := time.tick_now()
+            if len(fields) >= 3 && len(fields) <= 7 {
+                name, name_ok := repl_debug_hex_decode(fields[1])
+                signature, signature_ok := repl_debug_hex_decode(fields[2])
+                args: [4]int
+                args_ok := name_ok && signature_ok
+                for field, index in fields[3:] {
+                    value, parsed := strconv.parse_int(field)
+                    if !parsed {
+                        args_ok = false
+                        break
+                    }
+                    args[index] = value
+                }
+                if args_ok {
+                    invoked = kvist_repl.worker_invoke_int(
+                        &worker,
+                        name,
+                        signature,
+                        args[:len(fields)-3],
+                    )
+                }
+                delete(name)
+                delete(signature)
+            }
+            run_ns := time.duration_nanoseconds(time.tick_since(run_start))
+            if invoked {
+                if worker.last_run_aborted {
+                    fmt.println(REPL_WORKER_ABORTED_MARKER)
+                }
+                _ = fmt.fprintf(
+                    os.stdout,
+                    "%sok\t0\t%d\n",
+                    REPL_WORKER_MARKER,
+                    run_ns,
+                )
+            } else {
+                _, _ = os.write_strings(
+                    os.stdout,
+                    REPL_WORKER_MARKER,
+                    "error\tinvalid direct int invocation\n",
+                )
+            }
+            _ = os.flush(os.stdout)
             delete(raw)
             continue
         }
@@ -6903,6 +6956,104 @@ repl_thin_scalar_abi :: proc(abi: string) -> bool {
     return false
 }
 
+repl_latest_generation_dependencies_valid :: proc(
+    session: ^Repl_Session,
+) -> bool {
+    if session == nil || len(session.compiled_generations) == 0 {
+        return false
+    }
+    latest := &session.compiled_generations[len(session.compiled_generations)-1]
+    for record in latest.dependency_files {
+        if !file_fingerprint_matches_metadata(record) {
+            return false
+        }
+    }
+    for record in latest.dependency_directories {
+        if !directory_fingerprint_matches_metadata(record) {
+            return false
+        }
+    }
+    return true
+}
+
+repl_direct_int_invocation :: proc(
+    source,
+    emitted_source: string,
+) -> (string, bool) {
+    form := strings.trim_space(source)
+    if len(form) < 3 || form[0] != '(' || form[len(form)-1] != ')' {
+        return "", false
+    }
+    body := strings.trim_space(form[1:len(form)-1])
+    if body == "" || strings.contains(body, "\n") ||
+       strings.contains(body, "\r") {
+        return "", false
+    }
+    fields := strings.fields(body, context.temp_allocator)
+    if len(fields) == 0 || len(fields) > 5 {
+        return "", false
+    }
+    name := fields[0]
+    if !kvist.odin_identifier_start(name[0]) {
+        return "", false
+    }
+    for ch in name {
+        if !kvist.odin_identifier_continue(u8(ch)) &&
+           ch != '-' && ch != '!' && ch != '?' {
+            return "", false
+        }
+    }
+    args: [4]int
+    for field, index in fields[1:] {
+        value, parsed := strconv.parse_int(field)
+        if !parsed {
+            return "", false
+        }
+        args[index] = value
+    }
+    signature := kvist.repl_registered_abi(emitted_source, name)
+    defer delete(signature)
+    expected := strings.builder_make()
+    defer strings.builder_destroy(&expected)
+    strings.write_string(&expected, "proc(")
+    for index in 0..<len(fields)-1 {
+        if index > 0 {
+            strings.write_byte(&expected, ',')
+        }
+        strings.write_string(&expected, "int:borrowed")
+    }
+    strings.write_string(&expected, ")->int")
+    if signature != strings.to_string(expected) {
+        return "", false
+    }
+    mapped_name := kvist.map_name(name)
+    defer delete(mapped_name)
+    expression_needle := fmt.tprintf(
+        "kvist_repl_result_value := %s(",
+        mapped_name,
+    )
+    if !strings.contains(emitted_source, expression_needle) {
+        return "", false
+    }
+    encoded_name := repl_debug_hex_encode(mapped_name)
+    defer delete(encoded_name)
+    encoded_signature := repl_debug_hex_encode(signature)
+    defer delete(encoded_signature)
+    command := strings.builder_make()
+    defer strings.builder_destroy(&command)
+    fmt.sbprintf(
+        &command,
+        "%s%s\t%s",
+        REPL_WORKER_DIRECT_INT_PREFIX,
+        encoded_name,
+        encoded_signature,
+    )
+    for arg in args[:len(fields)-1] {
+        fmt.sbprintf(&command, "\t%d", arg)
+    }
+    return strings.clone(strings.to_string(command)), true
+}
+
 repl_odin_line_decl_name :: proc(line: string) -> (string, bool) {
     if line == "" || !kvist.odin_identifier_start(line[0]) {
         return "", false
@@ -7064,6 +7215,14 @@ repl_thin_generation_source :: proc(
     reachable := make([]bool, len(declarations), context.temp_allocator)
     queue: [dynamic]int
     defer delete(queue)
+    context_procs_start, context_procs_end := -1, -1
+    for line, line_index in lines {
+        if strings.contains(line, "KVIST_REPL_CONTEXT_PROCS_BEGIN") {
+            context_procs_start = line_index
+        } else if strings.contains(line, "KVIST_REPL_CONTEXT_PROCS_END") {
+            context_procs_end = line_index
+        }
+    }
     repl_thin_enqueue_decl(
         "kvist_repl_api_version",
         names,
@@ -7092,6 +7251,11 @@ repl_thin_generation_source :: proc(
     for queue_index := 0; queue_index < len(queue); queue_index += 1 {
         decl := declarations[queue[queue_index]]
         for line_index in decl.start_line..<decl.end_line {
+            if context_procs_start >= 0 && context_procs_end >= 0 &&
+               line_index >= context_procs_start &&
+               line_index <= context_procs_end {
+                continue
+            }
             line := lines[line_index]
             position := 0
             for position < len(line) {
@@ -7123,6 +7287,11 @@ repl_thin_generation_source :: proc(
             continue
         }
         for line_index in decl.start_line..<decl.end_line {
+            retained[line_index] = false
+        }
+    }
+    if context_procs_start >= 0 && context_procs_end >= context_procs_start {
+        for line_index in context_procs_start..=context_procs_end {
             retained[line_index] = false
         }
     }
@@ -7356,8 +7525,12 @@ repl_cached_frontend_generation :: proc(
     }
     for i := len(session.compiled_generations)-1; i >= 0; i -= 1 {
         cached := &session.compiled_generations[i]
+        direct := strings.has_prefix(
+            cached.library_path,
+            REPL_WORKER_DIRECT_INT_PREFIX,
+        )
         if cached.request_hash != request_hash ||
-           !os.exists(cached.library_path) {
+           (!direct && !os.exists(cached.library_path)) {
             continue
         }
         dependencies_valid := true
@@ -7377,6 +7550,9 @@ repl_cached_frontend_generation :: proc(
         }
         if !dependencies_valid {
             continue
+        }
+        if direct {
+            return cached, nil, true
         }
         if loaded, found := repl_session_loaded_generation(
             session,
@@ -7523,6 +7699,21 @@ repl_compile_generation :: proc(
             session,
             request_hash,
         ); found {
+            if strings.has_prefix(
+                cached.library_path,
+                REPL_WORKER_DIRECT_INT_PREFIX,
+            ) {
+                if timings != nil {
+                    timings.frontend_ns = time.duration_nanoseconds(
+                        time.tick_since(frontend_start),
+                    )
+                    timings.frontend_cache_hit = true
+                }
+                return strings.clone(cached.library_path),
+                       strings.clone(cached.emitted_source),
+                       "",
+                       true
+            }
             source_generation_start := time.tick_now()
             source_path, output_path, paths_ok :=
                 repl_generation_paths(session_dir, generation)
@@ -7717,6 +7908,39 @@ repl_compile_generation :: proc(
             }
         }
     }
+
+    direct_command := ""
+    direct_result_abi := kvist.repl_registered_result_abi(result.output)
+    if session != nil && len(session.generations) > 0 &&
+       pause_id == "" && !inspect_only && !no_print &&
+       !native_debug_symbols && !capture_debug_values &&
+       direct_result_abi == "value:int" &&
+       repl_latest_generation_dependencies_valid(session) {
+        direct_ok: bool
+        direct_command, direct_ok =
+            repl_direct_int_invocation(source, result.output)
+        if direct_ok {
+            repl_record_compiled_generation(
+                session,
+                0,
+                request_hash,
+                generation,
+                direct_command,
+                result.output,
+                warning_text^ if warning_text != nil else "",
+                diagnostics^[:] if diagnostics != nil else nil,
+                result.source_map[:],
+                0,
+            )
+            delete(direct_result_abi)
+            return direct_command,
+                   strings.clone(result.output),
+                   "",
+                   true
+        }
+        delete(direct_command)
+    }
+    delete(direct_result_abi)
 
     source_generation_start := time.tick_now()
     source_path, output_path, paths_ok := repl_generation_paths(session_dir, generation)
@@ -8088,6 +8312,10 @@ repl_handle_eval :: proc(
     }
     defer delete(library_path)
     defer delete(emitted_source)
+    direct_invocation := strings.has_prefix(
+        library_path,
+        REPL_WORKER_DIRECT_INT_PREFIX,
+    )
     ran: bool
     worker_run_start := time.tick_now()
     output, message, ran =
@@ -8117,28 +8345,30 @@ repl_handle_eval :: proc(
     }
     if ran {
         commit_start := time.tick_now()
-        generation_source_path, generation_library_path, generation_paths_ok :=
-            repl_generation_paths(session_dir, generation)
-        generation_map_path, generation_map_ok :=
-            repl_generation_map_path(session_dir, generation)
-        if generation_paths_ok && generation_map_ok {
-            repl_session_commit_generation(
-                session,
-                generation,
-                generation_source_path,
-                generation_map_path,
-                library_path,
-                breakpoint_locations[:],
-                debug_frames[:],
-                native_debug_symbols,
-            )
-        }
-        if generation_paths_ok {
-            delete(generation_source_path)
-            delete(generation_library_path)
-        }
-        if generation_map_ok {
-            delete(generation_map_path)
+        if !direct_invocation {
+            generation_source_path, generation_library_path, generation_paths_ok :=
+                repl_generation_paths(session_dir, generation)
+            generation_map_path, generation_map_ok :=
+                repl_generation_map_path(session_dir, generation)
+            if generation_paths_ok && generation_map_ok {
+                repl_session_commit_generation(
+                    session,
+                    generation,
+                    generation_source_path,
+                    generation_map_path,
+                    library_path,
+                    breakpoint_locations[:],
+                    debug_frames[:],
+                    native_debug_symbols,
+                )
+            }
+            if generation_paths_ok {
+                delete(generation_source_path)
+                delete(generation_library_path)
+            }
+            if generation_map_ok {
+                delete(generation_map_path)
+            }
         }
         result_abi := kvist.repl_registered_result_abi(emitted_source)
         if inspect_only {

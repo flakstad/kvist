@@ -3002,6 +3002,11 @@ cli_repl_caches_identical_frontend_generations :: proc(t: ^testing.T) {
         strings.contains(output, `"frontend_cache_hit":true`),
         true,
     )
+    testing.expect_value(
+        t,
+        strings.contains(output, `"phase":"odin-build","elapsed_ns":0`),
+        true,
+    )
     testing.expect_value(t, string(stderr), "")
 }
 

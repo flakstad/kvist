@@ -1148,6 +1148,28 @@ emit_eval_decls_with_source_map :: proc(
         )
         delete(repl_proc_signature_text)
     }
+    if initialize_context {
+        emit_line(&e, "// KVIST_REPL_CONTEXT_PROCS_BEGIN")
+        for &decl in e.decls {
+            if decl.kind != .Proc ||
+               name_in_list(repl_prior_proc_names, decl.proc_decl.name) ||
+               name_in_list(repl_proc_names, decl.proc_decl.name) {
+                continue
+            }
+            signature := repl_proc_signature(&decl.proc_decl, &e)
+            emit_line(
+                &e,
+                fmt.tprintf(
+                    "host.register_proc(host.ctx, %q, %q, transmute(rawptr)%s)",
+                    decl.proc_decl.name,
+                    signature,
+                    decl.proc_decl.name,
+                ),
+            )
+            delete(signature)
+        }
+        emit_line(&e, "// KVIST_REPL_CONTEXT_PROCS_END")
+    }
     if skip_eval {
         // A declaration generation performs its work through registration.
     } else if captures_eval_result {

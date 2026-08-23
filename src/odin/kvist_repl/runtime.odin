@@ -510,6 +510,8 @@ Worker :: struct {
     generations: [dynamic]Generation_Symbols,
     proc_slots:  [dynamic]Proc_Slot,
     result_slots: [3]Proc_Slot,
+    direct_int_results: [3]int,
+    next_direct_int_result: int,
     state_slots:  [dynamic]State_Slot,
     checkpoints:  [dynamic]Checkpoint,
     checkpoint_live_allocations: int,
@@ -557,6 +559,20 @@ Worker :: struct {
     attached_trace_values_handler: Attached_Trace_Values_Handler,
     attached_output_ctx: rawptr,
     attached_output_handler: Attached_Output_Handler,
+}
+
+worker_direct_result_owner: ^Worker
+
+worker_direct_int_result_0 :: proc() -> int {
+    return worker_direct_result_owner.direct_int_results[0]
+}
+
+worker_direct_int_result_1 :: proc() -> int {
+    return worker_direct_result_owner.direct_int_results[1]
+}
+
+worker_direct_int_result_2 :: proc() -> int {
+    return worker_direct_result_owner.direct_int_results[2]
 }
 
 Worker_Allocation_Stats :: struct {
@@ -876,6 +892,66 @@ worker_render_scalar_result :: proc "c" (
         context_ptr,
         Rendered_Value{data = raw_data(rendered), length = len(rendered)},
     )
+}
+
+worker_invoke_int :: proc(
+    worker: ^Worker,
+    name,
+    signature: string,
+    args: []int,
+) -> bool {
+    if worker == nil || len(args) > 4 {
+        return false
+    }
+    address: rawptr
+    for slot in worker.proc_slots {
+        if slot.name == name && slot.signature == signature {
+            address = slot.address
+            break
+        }
+    }
+    if address == nil {
+        return false
+    }
+    context = runtime.default_context()
+    context.allocator = worker.allocator
+    worker.abort_requested = false
+    worker.last_run_aborted = false
+    value: int
+    switch len(args) {
+    case 0: value = (transmute(proc() -> int)address)()
+    case 1: value = (transmute(proc(int) -> int)address)(args[0])
+    case 2: value = (transmute(proc(int, int) -> int)address)(args[0], args[1])
+    case 3: value = (transmute(proc(int, int, int) -> int)address)(args[0], args[1], args[2])
+    case 4: value = (transmute(proc(int, int, int, int) -> int)address)(args[0], args[1], args[2], args[3])
+    }
+    worker.last_run_aborted = worker.abort_requested
+    worker.abort_requested = false
+    if worker.last_run_aborted {
+        return true
+    }
+    cell := worker.next_direct_int_result % len(worker.direct_int_results)
+    worker.next_direct_int_result += 1
+    worker.direct_int_results[cell] = value
+    worker_direct_result_owner = worker
+    result_address := transmute(rawptr)worker_direct_int_result_0
+    if cell == 1 {
+        result_address = transmute(rawptr)worker_direct_int_result_1
+    } else if cell == 2 {
+        result_address = transmute(rawptr)worker_direct_int_result_2
+    }
+    worker_register_result(
+        rawptr(worker),
+        cstring("value:int"),
+        result_address,
+    )
+    rendered := fmt.aprintf("%v\n", value)
+    defer delete(rendered)
+    worker_emit_output(
+        rawptr(worker),
+        Rendered_Value{data = raw_data(rendered), length = len(rendered)},
+    )
+    return true
 }
 
 worker_emit_output :: proc "c" (

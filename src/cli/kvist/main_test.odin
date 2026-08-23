@@ -178,6 +178,25 @@ kvist_repl_run :: proc "c" () {
 }
 
 @(test)
+repl_direct_int_invocation_requires_typed_literal_call :: proc(t: ^testing.T) {
+    emitted := `host.register_proc(host.ctx, "square", "proc(int:borrowed)->int", transmute(rawptr)square)
+kvist_repl_result_value := square(11)
+`
+    command, ok := repl_direct_int_invocation("(square 11)", emitted)
+    defer delete(command)
+    testing.expect_value(t, ok, true)
+    testing.expect_value(
+        t,
+        strings.has_prefix(command, REPL_WORKER_DIRECT_INT_PREFIX),
+        true,
+    )
+
+    nested, nested_ok := repl_direct_int_invocation("(square (+ 10 1))", emitted)
+    defer delete(nested)
+    testing.expect_value(t, nested_ok, false)
+}
+
+@(test)
 odin_timing_csv_is_normalized :: proc(t: ^testing.T) {
     dir, dir_err := os.make_directory_temp("", "kvist-timing-csv-*", context.allocator)
     testing.expect_value(t, dir_err == nil, true)
