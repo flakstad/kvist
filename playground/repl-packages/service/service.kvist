@@ -1,0 +1,8 @@
+;; Middle of the Lesson 4 package graph. Main imports only this package;
+;; calls into `state` therefore exercise a transitive import.
+(package repl_lesson_service)
+
+(import state "../state")
+
+(defn next! [] -> int
+  (+ 10 (state.next!)))

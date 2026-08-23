@@ -1,0 +1,27 @@
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
+
+(package condition_service)
+
+(import condition "kvist:condition")
+(import data "kvist:data")
+
+(defvar attempts: int 0)
+
+(defn reset! []
+  (set! attempts 0))
+
+(defn attempts-made [] -> int
+  attempts)
+
+(defn request [service-name: string] -> int
+  (do
+    (condition.restart-case
+      (do
+        (inc! attempts)
+        (condition.signal
+          :example/not-ready
+          (str "service " service-name " is not ready")
+          {:service service-name
+           :attempt (data.from-int (i64 attempts))})))
+    attempts))

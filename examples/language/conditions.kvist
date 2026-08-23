@@ -1,0 +1,46 @@
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
+
+(package main)
+
+(import condition "kvist:condition")
+(import data "kvist:data")
+(import service "../support/conditions")
+
+(defn retry-once [problem: condition.Condition] -> condition.Decision
+  (do
+    (println
+      "handling"
+      problem.kind
+      problem.message
+      "for"
+      (data.string (:service problem.data)))
+    (if (= (service.attempts-made) 1)
+      (condition.retry)
+      (condition.continue))))
+
+(defn repaired-value [problem: condition.Condition] -> condition.Decision
+  (condition.use-value "42"))
+
+(defn fallback-handler [problem: condition.Condition] -> condition.Decision
+  (do
+    (println "unexpected fallback" problem.kind)
+    (condition.continue)))
+
+(defn retry-example [] -> int
+  (do
+    (service.reset!)
+    (condition.with-handlers {:example/not-ready retry-once
+                              :* fallback-handler}
+      (service.request "catalog"))))
+
+(defn value-example [] -> int
+  (condition.with-handlers {:kvist/condition repaired-value}
+    (do
+      (defvar value: int 7)
+      (condition.use-value! value "replace value")
+      value)))
+
+(defn main []
+  (println "attempts" (retry-example))
+  (println "value" (value-example)))

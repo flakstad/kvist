@@ -10,7 +10,7 @@
   "Build a 2x2 matrix, multiply by identity, and sum flattened elements."
   [] -> f32
   (let [m (matrix[2 2]f32 [1.0 2.0 3.0 4.0])
-        ident (linalg.identity (type matrix[2 2]f32))
+        ident (linalg.identity (typeid matrix[2 2]f32))
         product (linalg.mul m ident)
         flat (linalg.matrix_flatten product)]
     (+ (+ flat[0] flat[1])

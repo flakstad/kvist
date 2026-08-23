@@ -1,0 +1,18 @@
+;; Conventional development entry point for the Lesson 4 application graph.
+;; This is ordinary Kvist source, not project metadata. Start the REPL here;
+;; every transitively imported source package then shares this live session.
+(package repl_packages_dev)
+
+(import app "../main.kvist")
+
+(defn start! []
+  (println "Lesson 4 development REPL ready."))
+
+(comment
+
+  (start!)
+
+  ;; Calls through dev -> app -> service -> state.
+  (app.next!)
+
+  )

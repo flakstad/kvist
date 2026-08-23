@@ -1,0 +1,739 @@
+;; A small buffer for learning Kvist's native REPL.
+;;
+;; Start by evaluating the whole buffer.  The forms inside (comment ...)
+;; are inert until you evaluate them individually or evaluate the comment body.
+(package repl-basics)
+
+(import "kvist:condition" :as condition)
+(import "kvist:data" :as data)
+(import "kvist:debug" :as debug)
+(import "../examples/support/conditions" :as service)
+
+(defvar counter: int 0)
+
+(defn square [x: int] -> int
+  (+ 2 (* x x)))
+
+(defn bump! [] -> int
+  (set! counter (+ counter 1))
+  counter)
+
+(defn score [x: int] -> int
+  (+ (square x) counter))
+
+(defn main []
+  (println "Open this file in Emacs and evaluate the buffer."))
+
+(defn make-data [] -> Data
+  {:a 123})
+
+(comment
+
+  ;; Evaluate one form at a time.
+  (square 7)
+
+  counter
+
+  ;; State survives between submissions.
+  (bump!)
+  ;; => 1
+
+  (bump!)
+  ;; => 2
+
+  (score 5)
+  ;; => 27
+
+  ;; The most recent three results are native, typed REPL values.
+  *1
+  *2
+  *3
+
+  ;; Now edit `square` above to add 1:
+  ;;
+  ;;   (+ (* x x) 1)
+  ;;
+  ;; Evaluate that defn, then evaluate this again. Existing state remains.
+  (score 5)
+  ;; => 28
+
+  (:a (make-data))
+  ;; => 123
+
+  '{:a "hello"}
+  ;; => {:a "hello"}
+
+  (import "kvist:data" :as data :refer [empty-map])
+
+  (data.kind '{})
+  ;; => Map
+  (type (data.int (:a (make-data))))
+  ;; => i64
+  (data.kind-keyword '{})
+  ;; => :map
+  (data.from-int 123)
+  ;; => 123
+  (data.from-string "hello")
+  ;; => "hello"
+  (data.empty-map)
+  ;; => {}
+  (import "kvist:data" :as data :refer [empty-map])
+;; => ok
+  (empty-map)
+;; => <exit 1> /Users/andreas/Projects/kvist/.worktrees/codex-repl-design/playground/repl-basics.kvist:77:3: error: /Users/andreas/Projects/kvist/.worktrees/codex-repl-design/playground/repl-basics.kvist:<eval>:1:1 Error: Undeclared name: empty_map fmt.println(empty_map()) ^~~~~~~~^
+  (data.assoc (data.empty-map) :a 1)
+  ;; => {:a 1}
+
+
+  (odin "1 + 1")
+  ;; => 2
+
+  ;; Lesson 2: explicit REPL lifecycle and editing behavior.
+  ;;
+  ;; Stop the current session with C-c C-q, then start a fresh one with
+  ;; C-c C-s. A project-specific *Kvist REPL ...* buffer should open.
+  ;; Enter (+ 20 22) directly at its `kvist=>` prompt and press RET.
+  ;; C-c C-z should return to that same prompt from this source buffer.
+  ;;
+  ;; Test indentation here after reloading kvist-mode.el:
+  ;;
+  ;; 1. Put point on the intentionally unindented form below and press TAB.
+  ;;    It should move two spaces inside this comment block.
+  ;; 2. Put point after 20, press RET, and type 22. The new line should
+  ;;    automatically align beneath the first argument.
+  (+ 20)
+
+  ;; A raw Odin statement body and expression can share one Kvist form.
+  (do
+    (odin "
+      xs := []int{10, 20, 12}
+      total := 0
+      for x in xs {
+          total += x
+      }
+    ")
+    (odin "total"))
+  ;; => 42
+
+  ;; Inspection must not disturb typed result history:
+  ;;
+  ;; 1. Evaluate (square 3), which becomes *1.
+  ;; 2. Put point in (make-data) and press C-c M-i.
+  ;; 3. Explore the inspector, then evaluate *1. It should still be 11 with
+  ;;    the current (+ 2 (* x x)) definition.
+  (square 3)
+  (make-data)
+  *1
+
+  ;; Press C-c M-g to see the loaded native generations and their generated
+  ;; Odin, source maps, and native libraries.
+
+  ;; Put point anywhere inside this final form and press C-c C-c. It should
+  ;; evaluate the enclosing form without requiring point at the final paren.
+  (+ 100
+     20
+     3)
+  ;; => 123
+
+  ;; Lesson 3: live declarations and recursive inspection.
+  ;;
+  ;; Evaluate each declaration with C-c C-c. They are submitted to the running
+  ;; package without evaluating the surrounding comment block.
+  (defstruct Lesson-User {
+    name: string
+    email: string
+  })
+
+  (defn lesson-user [] -> Lesson-User
+    (Lesson-User ["Ada" "ada@example.test"]))
+
+  ;; Evaluate this normally first so the Lesson-User value becomes *1.
+  (lesson-user)
+
+  ;; Then put point anywhere in (lesson-user) and press C-c M-i. The inspector
+  ;; should report:
+  ;;
+  ;;   Type: Lesson_User
+  ;;   Shape: struct
+  ;;   Members: name and email
+  ;;
+  ;; Press i in *Kvist Inspect*, choose email, and confirm that the child
+  ;; inspector reports a string containing "ada@example.test". Press b or
+  ;; activate the visible Back button to return to the retained struct.
+
+  ;; Inspect this dynamic array with C-c M-i. It should show three entries.
+  ;; Press i, enter index 1, and confirm that the retained child value is 20.
+  ([dynamic]int [10 20 30])
+
+  ;; Put point on the map[string]int call head (or immediately after the final
+  ;; parenthesis) and inspect the whole map with C-c M-i. If point is on a key
+  ;; or value, that nested scalar is intentionally inspected instead. In the
+  ;; map inspector, press i and enter "beta", including the quotation marks,
+  ;; as the Kvist key expression. The child value should be 2; press b to
+  ;; return to the retained map.
+  (map[string]int {"alpha" 1 "beta" 2})
+
+  ;; Inspection requests must not enter ordinary result history. Even after
+  ;; inspecting the struct, array, map, and child values, *1 should still be
+  ;; the Lesson-User value produced by (lesson-user).
+  *1
+
+  ;; Finally switch to the interactive REPL with C-c C-z. Enter (+ 6 7), then
+  ;; press C-c M-o. The transcript should clear to a fresh prompt while all
+  ;; definitions, state, and M-p/M-n input history remain available.
+
+
+
+  (defn debugger-demo [input: int] -> int
+    (let [doubled (* input 2)
+          adjusted (+ doubled 1)]
+      (debug.break)
+      (+ adjusted 10)))
+
+  (debugger-demo 5)
+
+
+
+  (defn step-leaf [x: int] -> int
+    (let [next (+ x 1)]
+      (* next 2)))
+
+
+  (defn step-demo [x: int] -> int
+    (let [first (+ x 10)]
+      (step-leaf first)
+      (+ first 100)))
+
+  (step-demo 5)
+
+  ;; Lesson 6: conditions, dynamic context, handlers, and recovery.
+  ;;
+  ;; Conditions are explicit safe points in native code. They are useful in
+  ;; ordinary programs as well as during development; they are not caught
+  ;; segmentation faults or general native exceptions.
+  ;;
+  ;; Evaluate every declaration below with C-c C-c before evaluating its call.
+
+  ;; The condition kind is stable and literal. Its message and Data context are
+  ;; ordinary runtime expressions.
+  (defn condition-demo [count: int, source: string] -> int
+    (do
+      (condition.signal
+        :lesson/invalid-count
+        (str "invalid count from " source ": " count)
+        {:count count :source source :recoverable true})
+      (+ count 1)))
+
+  ;; 1. Interactive handling.
+  ;;
+  ;; Evaluate this call. Execution should pause at `condition.signal`; the
+  ;; source line should be highlighted and *Kvist Condition* should show:
+  ;;
+  ;;   Condition: lesson/invalid-count
+  ;;   Message: invalid count from tutorial: 4
+  ;;   Data: {:count 4 :source "tutorial" :recoverable true}
+  ;;   Recovery options: continue
+  ;;
+  ;; Press r in the source or condition buffer, choose `continue`, and the
+  ;; original evaluation should finish with 5.
+  (condition-demo 4 "tutorial")
+
+  ;; A handler is an ordinary function. It receives the same structured
+  ;; condition that the interactive client sees and selects an advertised
+  ;; restart. Data access is ordinary Kvist Data access.
+  (defn continue-invalid-count
+    [problem: condition.Condition] -> condition.Decision
+    (do
+      (println
+        "handled"
+        problem.kind
+        (data.int (:count problem.data))
+        (data.string (:source problem.data)))
+      (condition.continue)))
+
+  (defn unexpected-fallback
+    [problem: condition.Condition] -> condition.Decision
+    (do
+      (println "unexpected wildcard" problem.kind)
+      (condition.continue)))
+
+  (defn handled-condition-demo [count: int] -> int
+    (condition.with-handlers
+      {:lesson/invalid-count continue-invalid-count
+       :* unexpected-fallback}
+      (condition-demo count "program-handler")))
+
+  ;; 2. Programmatic handling.
+  ;;
+  ;; This should not pause. The exact handler wins over :* regardless of map
+  ;; entry order, prints `handled lesson/invalid-count 8 program-handler`, and
+  ;; the call returns 9.
+  (handled-condition-demo 8)
+
+  ;; This handler catches a condition signalled inside an imported package.
+  ;; The imported operation establishes its own retry boundary; the higher
+  ;; layer decides whether to use it.
+  (defn retry-service
+    [problem: condition.Condition] -> condition.Decision
+    (do
+      (println
+        "service condition"
+        (data.string (:service problem.data))
+        (data.int (:attempt problem.data)))
+      (if (= (service.attempts-made) 1)
+        (condition.retry)
+        (condition.continue))))
+
+  (defn handled-service-call [] -> int
+    (do
+      (service.reset!)
+      (condition.with-handlers
+        {:example/not-ready retry-service}
+        (service.request "tutorial-service"))))
+
+  ;; 3. Dynamic scope across packages and retry.
+  ;;
+  ;; This should print attempts 1 and 2 without opening *Kvist Condition*, then
+  ;; return 2. The first handler result retries inside the imported package;
+  ;; the second continues from its signal.
+  (handled-service-call)
+
+  (defn repair-count [input: int] -> int
+    (do
+      (defvar count: int input)
+      (condition.use-value! count "replace the count")
+      count))
+
+  ;; 4. Typed interactive repair.
+  ;;
+  ;; Evaluate this call, choose `use-value`, and enter 42. Native execution
+  ;; resumes with the repaired local and returns 42.
+  (repair-count 5)
+
+  ;; Evaluate it once more and give `use-value` an invalid value such as
+  ;; hello. Kvist should reject it without losing the condition. Invoke
+  ;; `use-value` again with 17; the pending call should return 17.
+  (repair-count 5)
+
+  ;; 5. Handler decline and wildcard fallback.
+  (defn decline-invalid-count
+    [problem: condition.Condition] -> condition.Decision
+    (condition.decline))
+
+  (defn wildcard-continue
+    [problem: condition.Condition] -> condition.Decision
+    (do
+      (println "wildcard handled" problem.kind)
+      (condition.continue)))
+
+  (defn declined-condition-demo [] -> int
+    (condition.with-handlers
+      {:lesson/invalid-count decline-invalid-count
+       :* wildcard-continue}
+      (condition-demo 10 "decline-demo")))
+
+  ;; The exact handler declines, so :* runs next. This should print
+  ;; `wildcard handled lesson/invalid-count` and return 11 without pausing.
+  (declined-condition-demo)
+
+  ;; Lesson 7: traced evaluation and captured values.
+  ;;
+  ;; A trace runs normally: it does not pause and does not require stepping.
+  ;; Kvist records bounded source-level safe points, timing, call depth, and
+  ;; (by default) ownership-safe lexical values while native code executes.
+
+  (defn trace-line [price: int, quantity: int] -> int
+    (let [subtotal (* price quantity)
+          with-fee (+ subtotal 3)]
+      with-fee))
+
+  (defn trace-order [base: int] -> int
+    (let [first (trace-line base 2)
+          second (trace-line (+ base 2) 3)]
+      (+ first second)))
+
+  ;; 1. Evaluate both declarations with C-c C-c.
+  ;;
+  ;; 2. Put point in the call below and press C-c M-t. The call should return
+  ;;    37, and *Kvist Trace* should open with a navigable timeline covering
+  ;;    trace-order and both calls to trace-line. RET or mouse-1 on a source
+  ;;    location should visit that safe point.
+  ;;
+  ;; 3. With `kvist-trace-capture-values` at its default t, timeline entries
+  ;;    should include bounded values such as price, quantity, subtotal,
+  ;;    first, and second where those locals are in scope.
+  (trace-order 5)
+
+  ;; 4. Evaluate this in *scratch*, trace the call again, and confirm that the
+  ;;    trace ends with a truncation notice after two safe points:
+  ;;
+  ;;      (setq kvist-trace-limit 2)
+  ;;
+  ;;    Restore the normal limit before continuing:
+  ;;
+  ;;      (setq kvist-trace-limit 1000)
+
+  ;; Lesson 8: live API evolution and deliberate caller refresh.
+  ;;
+  ;; A compatible redefinition updates the live call slot immediately. An ABI
+  ;; change keeps the old native version alive for already-compiled callers,
+  ;; marks those callers stale, and lets you refresh the dependent closure as
+  ;; one operation.
+
+  (defn live-value [x: int] -> int
+    (+ x 10))
+
+  (defn live-value [x: int] -> i64
+    (i64 (+ x 100)))
+
+  (defn live-middle [x: int] -> int
+    (int (live-value x)))
+
+  (defn live-report [x: int] -> string
+    (str (live-middle x)))
+
+  ;; 1. Evaluate all three declarations with C-c C-c, then evaluate this call.
+  ;;    It should return "6".
+  (live-report 5)
+  (live-value 5)
+
+  ;; 2. Change `(+ x 1)` above to `(+ x 10)`, re-evaluate only live-value,
+  ;;    then evaluate the call again. It should return "15": its ABI did not
+  ;;    change, so existing native callers follow the updated live slot.
+  ;;
+  ;; 3. Now replace live-value with this declaration and evaluate it:
+  ;;
+  ;;      (defn live-value [x: int] -> i64
+  ;;        (i64 (+ x 100)))
+  ;;
+  ;;    A direct `(live-value 5)` should return 105. `(live-report 5)` should
+  ;;    still return "15": the old caller safely retains the old int ABI.
+  ;;
+  ;; 4. Put point on `live-value` and press C-c v d. *Kvist Dependents* should
+  ;;    list live-middle and live-report as STALE.
+  ;;
+  ;; 5. With point still on live-value, press C-c v r. Evaluate live-report
+  ;;    again; it should now return "105" because the dependent closure was
+  ;;    recompiled against the newest definition.
+  ;;
+  ;; 6. Press C-c v d again. Both dependents should now be current. Press
+  ;;    C-c v v on live-value to inspect its retained int and i64 versions.
+
+  ;; Lesson 9: nominal layout evolution and explicit state migration.
+  ;;
+  ;; Native layouts are never changed underneath live values. A new struct
+  ;; layout gets a new native identity; old compiled functions remain attached
+  ;; to the old value and layout until you deliberately replace or refresh
+  ;; them.
+
+  (defstruct Live-Counter
+    {total: int})
+
+  (defvar live-counter: Live-Counter
+    (Live-Counter {total: 3}))
+
+  (defn old-total [] -> int
+    live-counter.total)
+
+  (defn old-increment! [] -> int
+    (do
+      (inc! live-counter.total)
+      live-counter.total))
+
+  ;; 1. Evaluate the four declarations above with C-c C-c. Inspect
+  ;;    live-counter with C-c M-i; it should have the original one-field layout
+  ;;    and total 3.
+  ;;
+  ;; 2. Evaluate this call. It should return 4.
+  (old-increment!)
+
+  ;; 3. Evaluate the next three declarations in order. The new defvar performs
+  ;;    an explicit migration: old-total crosses the layout boundary as an int,
+  ;;    and the initializer constructs a fresh value of the new layout.
+
+  (defstruct Live-Counter
+    {total: int
+     label: string})
+
+  (defvar live-counter: Live-Counter
+    (Live-Counter {total: (old-total)
+                   label: "migrated"}))
+
+  (defn current-increment! [] -> int
+    (do
+      (inc! live-counter.total)
+      live-counter.total))
+
+  ;; 4. Inspect this expression with C-c M-i. It should show the new two-field
+  ;;    layout with total 4 and label "migrated".
+  live-counter
+
+  ;; 5. Evaluate old-increment! again. It should return 5, proving the old
+  ;;    compiled function and old value remain safe and alive.
+  (old-increment!)
+
+  ;; 6. Evaluate this. It should still return 4: mutating the retained old cell
+  ;;    did not reinterpret or modify the new cell.
+  live-counter.total
+
+  ;; 7. Evaluate current-increment!. It should return 5 and mutate only the new
+  ;;    value.
+  (current-increment!)
+
+  ;; 8. Press C-c v v on Live-Counter and live-counter. Each should show two
+  ;;    versions with different layout-bearing ABIs. The old version remains
+  ;;    loaded; migration happened through old-total, not by casting memory.
+
+  ;; Lesson 10: live macros and fused transforms.
+  ;;
+  ;; Macros and transforms are compiler-side definitions. New submitted source
+  ;; sees their latest version immediately, but code that already incorporated
+  ;; an expansion or fused loop remains unchanged until its retained source is
+  ;; refreshed.
+
+  (defmacro lesson-adjust [x]
+    (quasiquote (+ (unquote x) 1)))
+
+  (defn macro-consumer [x: int] -> int
+    (lesson-adjust x))
+
+  ;; 1. Evaluate the macro and consumer, then this call. It should return 6.
+  (macro-consumer 5)
+
+  ;; 2. Replace the macro by evaluating this new definition.
+  (defmacro lesson-adjust [x]
+    (quasiquote (+ (unquote x) 10)))
+
+  ;; 3. This newly submitted form should return 15 because it expands with the
+  ;;    newest macro definition.
+  (lesson-adjust 5)
+
+  ;; 4. This should still return 6. macro-consumer contains the old expansion;
+  ;;    native code is not rewritten behind your back.
+  (macro-consumer 5)
+
+  ;; 5. Press C-c v d on lesson-adjust. macro-consumer should be STALE. Press
+  ;;    C-c v r, then evaluate macro-consumer again; it should return 15 and
+  ;;    appear current in C-c v d.
+
+  (defn transform-increment [x: int] -> int
+    (+ x 1))
+
+  (defn transform-times-ten [x: int] -> int
+    (* x 10))
+
+  (deftransform lesson-transform
+    (map transform-increment))
+
+  (defn collect-lesson [xs: [3]int] -> [dynamic]int
+    (into [dynamic]int lesson-transform xs))
+
+  ;; 6. Evaluate the four declarations above, then this call. It should return
+  ;;    [2, 3, 4]. The transform is fused into collect-lesson's native loop.
+  (collect-lesson ([3]int [1 2 3]))
+
+  ;; 7. Replace only the transform by evaluating this definition.
+  (deftransform lesson-transform
+    (map transform-times-ten))
+
+  ;; 8. This new direct use should return [10, 20, 30].
+  (into [dynamic]int lesson-transform ([3]int [1 2 3]))
+
+  ;; 9. collect-lesson should still return [2, 3, 4], because its fused loop is
+  ;;    already compiled. C-c v d on lesson-transform should show it as STALE.
+  (collect-lesson ([3]int [1 2 3]))
+
+  ;; 10. Press C-c v r on lesson-transform, then evaluate collect-lesson again.
+  ;;     It should return [10, 20, 30]. Refresh recompiles the consumer and
+  ;;     fuses the current transform; it does not add runtime transform objects.
+
+  ;; Lesson 11: live iterator and iterator-state evolution.
+  ;;
+  ;; A defiter is a compiler-side iteration recipe backed by concrete native
+  ;; source state and typed open/next procedures. Existing consumers retain the
+  ;; complete old recipe when any of those ABI-bearing pieces evolve.
+
+  (defstruct Lesson-Iterator-Source
+    {values: [3]int
+     index: int})
+
+  (defn open-lesson-items [values: [3]int] -> Lesson-Iterator-Source
+    (Lesson-Iterator-Source {values: values index: 0}))
+
+  (defn next-lesson-item
+    [source: ^Lesson-Iterator-Source] -> [value: int ok: bool]
+    (if (< source.index 3)
+      (let [value source.values[source.index]]
+        (inc! source.index)
+        (return value true))
+      (return 0 false)))
+
+  (defiter lesson-items [values: [3]int] -> Lesson-Iterator-Source
+    :yield int
+    :next next-lesson-item
+    (open-lesson-items values))
+
+  (defn sum-lesson-items [values: [3]int] -> int
+    (let [total 0]
+      (for [value (lesson-items values)]
+        (set! total (+ total value)))
+      total))
+
+  ;; 1. Evaluate the five declarations above in order. This should return 6.
+  (sum-lesson-items ([3]int [1 2 3]))
+
+  ;; 2. Now evaluate the four replacement declarations below. The source state
+  ;;    gains a factor field, open initializes it to 2, and next multiplies each
+  ;;    yielded value. The defiter text itself remains the same; its effective
+  ;;    identity still changes because its typed dependencies changed.
+
+  (defstruct Lesson-Iterator-Source
+    {values: [3]int
+     index: int
+     factor: int})
+
+  (defn open-lesson-items [values: [3]int] -> Lesson-Iterator-Source
+    (Lesson-Iterator-Source {values: values
+                             index: 0
+                             factor: 2}))
+
+  (defn next-lesson-item
+    [source: ^Lesson-Iterator-Source] -> [value: int ok: bool]
+    (if (< source.index 3)
+      (let [value (* source.values[source.index] source.factor)]
+        (inc! source.index)
+        (return value true))
+      (return 0 false)))
+
+  (defiter lesson-items [values: [3]int] -> Lesson-Iterator-Source
+    :yield int
+    :next next-lesson-item
+    (open-lesson-items values))
+
+  ;; 3. Define this new consumer after the iterator evolution. Its loop should
+  ;;    use the new source layout and return 12.
+  (defn sum-current-lesson-items [values: [3]int] -> int
+    (let [total 0]
+      (for [value (lesson-items values)]
+        (set! total (+ total value)))
+      total))
+
+  (sum-current-lesson-items ([3]int [1 2 3]))
+
+  ;; 4. The old consumer should still return 6. It retains the old source
+  ;;    layout and helper ABIs; no live memory is reinterpreted.
+  (sum-lesson-items ([3]int [1 2 3]))
+
+  ;; 5. Press C-c v d on lesson-items. sum-lesson-items should be STALE while
+  ;;    sum-current-lesson-items is current. Press C-c v v on lesson-items and
+  ;;    Lesson-Iterator-Source to inspect both retained recipe/layout versions.
+  ;;
+  ;; 6. Press C-c v r on lesson-items, then call sum-lesson-items again. It
+  ;;    should return 12 and appear current. Refresh recompiles the consumer
+  ;;    against the new iterator; it never mutates an iterator already in use.
+
+  ;; Lesson 12: embedded Odin at the typed Kvist boundary.
+  ;;
+  ;; (odin "...") inserts Odin directly into the native code generated for the
+  ;; surrounding Kvist form. At top level it can evaluate an Odin expression.
+  ;; Inside a typed defn it is a sequence of Odin statements, so use an explicit
+  ;; Odin return when the Kvist function promises a result.
+
+  ;; 1. Evaluate these three forms in order. The raw Odin expression prints 2,
+  ;;    but it has no declared Kvist type and therefore does not enter typed
+  ;;    result history. *1 should still return 99.
+  99
+  (odin "1 + 1")
+  *1
+
+  ;; 2. Persistence and type information come from the surrounding Kvist defn.
+  ;;    Evaluate the definition and call. The call should return 11.
+  (defn odin-step [x: int] -> int
+    (odin "return x * 2 + 1"))
+
+  (odin-step 5)
+
+  ;; 3. Inspect this call with C-c M-i. It should be an int with value 11: the
+  ;;    inspector knows the result through odin-step's Kvist signature even
+  ;;    though its implementation is Odin.
+  (odin-step 5)
+
+  ;; 4. An embedded body may contain as much ordinary Odin control flow as is
+  ;;    useful. Newlines in the string become newlines in the generated body.
+  ;;    Evaluate the definition and call; the call should return 30.
+  (defn odin-sum-squares [limit: int] -> int
+    (odin "total := 0\nfor i in 0..<limit {\n    total += i * i\n}\nreturn total"))
+
+  (odin-sum-squares 5)
+
+  ;; 5. Embedded Odin may call a typed Kvist function by its generated Odin
+  ;;    name (hyphens become underscores). Evaluate all three forms in order;
+  ;;    the final call should return 18.
+  (defn kvist-offset [x: int] -> int
+    (+ x 2))
+
+  (defn odin-calls-kvist [x: int] -> int
+    (odin "return kvist_offset(x) * 3"))
+
+  (odin-calls-kvist 4)
+
+  ;; 6. Replace odin-step with this compatible definition. Its stable live
+  ;;    function slot is updated just like an ordinary Kvist defn; the call
+  ;;    should now return 16 without restarting the REPL.
+  (defn odin-step [x: int] -> int
+    (odin "return x * 3 + 1"))
+
+  (odin-step 5)
+
+  ;; Raw Odin locals such as total above belong to the single generated native
+  ;; body containing them. They do not become declarations in later submitted
+  ;; forms. Wrap reusable Odin in typed Kvist definitions, as above. A future
+  ;; explicit odin-decl/odin-import facility is intentionally still only a
+  ;; design direction, not syntax exercised by this lesson.
+
+  ;; Lesson 13: imported Odin packages.
+  ;;
+  ;; Kvist uses Odin's package model directly: import a package directory, not
+  ;; an individual .odin file. Calls still use Kvist's Lisp syntax and normal
+  ;; identifier mapping.
+
+  ;; 1. Evaluate this standard-library import. Type `math.` and press TAB; the
+  ;;    completion popup should include Odin package declarations and their
+  ;;    signatures.
+  (import math "core:math")
+
+  ;; 2. Evaluate this. The inner f64 resolves Odin's overloaded sqrt procedure;
+  ;;    the outer f64 gives the REPL a statically known result type. It should
+  ;;    return 9 and become *1.
+  (f64 (math.sqrt (f64 81.0)))
+
+  *1
+
+  ;; 3. This imports playground/repl-odin-support as an ordinary local Odin
+  ;;    package. Its support.odin file declares `package repl_odin_support` and
+  ;;    exports `double`. Type `native.` plus TAB after evaluating the import.
+  (import native "./repl-odin-support")
+
+  ;; 4. The explicit outer type makes this a retained REPL result. Both this
+  ;;    form and the following *1 should return 42.
+  (int (native.double 21))
+
+  *1
+
+  ;; 5. A typed Kvist wrapper is the durable boundary for repeated use. It
+  ;;    gives the native call a Kvist name, signature, live slot, debugger
+  ;;    frame, result history, and inspector metadata.
+  (defn native-double [value: int] -> int
+    (native.double value))
+
+  ;; This should return 14. Inspect it with C-c M-i; it should be an int with
+  ;; value 14. C-c C-d on native.double should show its Odin declaration.
+  (native-double 7)
+
+  ;; Imported Odin source is compiled natively into each generation. Existing
+  ;; compiled callers safely retain their old generation. Tracking an edited
+  ;; Odin package revision as a first-class dependency—so versions, staleness,
+  ;; and refresh expose it—is the next interop milestone and is deliberately
+  ;; not claimed by this lesson.
+
+  )

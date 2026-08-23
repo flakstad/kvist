@@ -1,0 +1,11 @@
+;; Bottom of the Lesson 4 package graph. Lesson 4 temporarily changes `base`
+;; to 200, then restores it to 100.
+(package repl_lesson_state)
+
+(defvar calls: int 0)
+(def base: int 100)
+
+(defn next! [] -> int
+  (do
+    (inc! calls)
+    (+ base calls)))

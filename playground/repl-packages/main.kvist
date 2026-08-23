@@ -1,0 +1,39 @@
+;; Lesson 4 application package. Start its development REPL from dev/user.kvist.
+;;
+;; The dev entry imports this package, which imports service, which imports
+;; state. All four packages therefore belong to one live application session.
+(package repl_packages_lesson)
+
+(import service "./service")
+
+(defn next! [] -> int
+  (+ 1 (service.next!)))
+
+(defn main []
+  (println "Use the comment forms for Lesson 4."))
+
+(comment
+
+  ;; Start from dev/user.kvist with C-c C-s, then evaluate this twice. The call
+  ;; crosses app -> service -> state, and state owns a mutable counter. With
+  ;; the fixture's base 100, the results are 112 and 113.
+  (next!)
+
+  ;; Open state/state.kvist and press C-c C-z. It should switch to the same
+  ;; dev/user.kvist REPL. Change `base` to 200 and evaluate that top-level
+  ;; declaration with C-c C-c. This replaces the package-qualified live value;
+  ;; it does not create a `base` in the dev or app package.
+
+  ;; Return here and evaluate this. It should be 214: both the live counter and
+  ;; the imported package redefinition remained in the same worker.
+  (next!)
+
+  ;; In state/state.kvist, evaluating `base` itself should print 200. C-c C-q
+  ;; stops the whole application session. C-c C-s starts it again from the
+  ;; pinned dev/user.kvist context rather than creating a state-only REPL.
+
+  ;; Restore base to 100 and evaluate it when finished. That is the essence:
+  ;; transitive calls share one worker, package state persists, and evaluating
+  ;; imported source updates the correct live package immediately.
+
+  )

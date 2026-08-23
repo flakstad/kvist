@@ -6,7 +6,7 @@
 ;; Odin concurrency is explicit: OS threads, thread pools, channels, mutexes,
 ;; atomics, and allocators. There is no hidden green-thread runtime and no
 ;; Clojure-style derefable future in core. This file shows the boring Odin
-;; shapes directly, with Kvist only providing parens and the small `(type ...)`
+;; shapes directly, with Kvist only providing parens and the small `(typeid ...)`
 ;; spelling needed for polymorphic host types like chan.Chan(int).
 (package main)
 (import core "kvist:core")
@@ -19,7 +19,7 @@
   value: int
 })
 
-(defn send-square [result: (type chan.Chan int)]
+(defn send-square [result: (typeid chan.Chan int)]
   ;; Sending on a channel communicates between OS threads. The channel owns
   ;; internal allocation from chan.create, so the creator deletes it.
   (chan.send result (* 7 7)))
@@ -28,7 +28,7 @@
   ;; This is the manual Odin equivalent of a tiny future: create a result
   ;; channel, run a worker thread, receive the answer. The channel is an owned
   ;; value because chan.create was passed context.allocator.
-  (let [[result-ch err] (chan.create (type chan.Chan int) 1 context.allocator)]
+  (let [[result-ch err] (chan.create (typeid chan.Chan int) 1 context.allocator)]
     (if (!= err .None)
       0
       (do
