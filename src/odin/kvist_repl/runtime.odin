@@ -14,7 +14,7 @@ import "core:strings"
 import "core:sync"
 import "core:time"
 
-GENERATION_ABI_VERSION :: u32(26)
+GENERATION_ABI_VERSION :: u32(27)
 
 DEBUG_FLAG_PAUSE :: u32(1)
 DEBUG_FLAG_TRACE :: u32(2)
@@ -39,6 +39,12 @@ Lookup_Proc :: proc "c" (
 Register_Result :: proc "c" (
     ctx: rawptr,
     signature: cstring,
+    address: rawptr,
+)
+
+Render_Scalar_Result :: proc "c" (
+    ctx: rawptr,
+    type_name: cstring,
     address: rawptr,
 )
 
@@ -437,6 +443,7 @@ Host_API :: struct {
     register_proc:   Register_Proc,
     lookup_proc:     Lookup_Proc,
     register_result: Register_Result,
+    render_scalar_result: Render_Scalar_Result,
     register_state:  Register_State,
     debug_flags:     Debug_Flags,
     trace_point:     Trace_Point,
@@ -828,6 +835,47 @@ worker_register_result :: proc "c" (
         signature = strings.clone(string(signature_ptr)),
         address = address,
     }
+}
+
+worker_render_scalar_result :: proc "c" (
+    context_ptr: rawptr,
+    type_name_ptr: cstring,
+    address: rawptr,
+) {
+    context = runtime.default_context()
+    worker := transmute(^Worker)context_ptr
+    context.allocator = worker.allocator
+    if address == nil || type_name_ptr == nil {
+        return
+    }
+    type_name := string(type_name_ptr)
+    rendered := ""
+    switch type_name {
+    case "bool":    rendered = fmt.aprintf("%v\n", (transmute(proc() -> bool)address)())
+    case "int":     rendered = fmt.aprintf("%v\n", (transmute(proc() -> int)address)())
+    case "i8":      rendered = fmt.aprintf("%v\n", (transmute(proc() -> i8)address)())
+    case "i16":     rendered = fmt.aprintf("%v\n", (transmute(proc() -> i16)address)())
+    case "i32":     rendered = fmt.aprintf("%v\n", (transmute(proc() -> i32)address)())
+    case "i64":     rendered = fmt.aprintf("%v\n", (transmute(proc() -> i64)address)())
+    case "i128":    rendered = fmt.aprintf("%v\n", (transmute(proc() -> i128)address)())
+    case "uint":    rendered = fmt.aprintf("%v\n", (transmute(proc() -> uint)address)())
+    case "u8":      rendered = fmt.aprintf("%v\n", (transmute(proc() -> u8)address)())
+    case "u16":     rendered = fmt.aprintf("%v\n", (transmute(proc() -> u16)address)())
+    case "u32":     rendered = fmt.aprintf("%v\n", (transmute(proc() -> u32)address)())
+    case "u64":     rendered = fmt.aprintf("%v\n", (transmute(proc() -> u64)address)())
+    case "u128":    rendered = fmt.aprintf("%v\n", (transmute(proc() -> u128)address)())
+    case "uintptr": rendered = fmt.aprintf("%v\n", (transmute(proc() -> uintptr)address)())
+    case "f32":     rendered = fmt.aprintf("%v\n", (transmute(proc() -> f32)address)())
+    case "f64":     rendered = fmt.aprintf("%v\n", (transmute(proc() -> f64)address)())
+    case "string":  rendered = fmt.aprintf("%v\n", (transmute(proc() -> string)address)())
+    case:
+        return
+    }
+    defer delete(rendered)
+    worker_emit_output(
+        context_ptr,
+        Rendered_Value{data = raw_data(rendered), length = len(rendered)},
+    )
 }
 
 worker_emit_output :: proc "c" (
@@ -1551,6 +1599,7 @@ worker_ensure_host_api :: proc(worker: ^Worker) {
         register_proc = worker_register_proc,
         lookup_proc = worker_lookup_proc,
         register_result = worker_register_result,
+        render_scalar_result = worker_render_scalar_result,
         register_state = worker_register_state,
         debug_flags = worker_debug_flags,
         trace_point = worker_trace_point,

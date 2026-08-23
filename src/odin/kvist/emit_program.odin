@@ -1287,7 +1287,18 @@ emit_eval_decls_with_source_map :: proc(
                 "host.emit_output(host.ctx, Kvist_Repl_Rendered_Value{data = raw_data(kvist_repl_page_text), length = len(kvist_repl_page_text)})",
             )
         } else if !no_print {
-            if eval_result_ty == "Data" {
+            host_rendered_scalar := !repl_inspect_only &&
+                                    repl_host_rendered_scalar_type(eval_result_ty)
+            if host_rendered_scalar {
+                emit_line_mapped(
+                    &e,
+                    fmt.tprintf(
+                        "host.render_scalar_result(host.ctx, %q, transmute(rawptr)kvist_repl_result_impl)",
+                        eval_result_ty,
+                    ),
+                    eval_form.span,
+                )
+            } else if eval_result_ty == "Data" {
                 emit_line_mapped(
                     &e,
                     "kvist_repl_rendered_data := kvist_data_repr(kvist_repl_result_storage)",
@@ -1330,11 +1341,13 @@ emit_eval_decls_with_source_map :: proc(
                     )
                 }
             }
-            emit_line(&e, "defer delete(kvist_repl_output)")
-            emit_line(
-                &e,
-                "host.emit_output(host.ctx, Kvist_Repl_Rendered_Value{data = raw_data(kvist_repl_output), length = len(kvist_repl_output)})",
-            )
+            if !host_rendered_scalar {
+                emit_line(&e, "defer delete(kvist_repl_output)")
+                emit_line(
+                    &e,
+                    "host.emit_output(host.ctx, Kvist_Repl_Rendered_Value{data = raw_data(kvist_repl_output), length = len(kvist_repl_output)})",
+                )
+            }
         }
     } else if no_print {
         err_stmt, ok_stmt := emit_stmt(&e, eval_form, false, Return_Spec{kind = .None})
@@ -1466,6 +1479,16 @@ make_println_form :: proc(value: CST_Form) -> CST_Form {
     }
 }
 
+repl_host_rendered_scalar_type :: proc(ty: string) -> bool {
+    switch strings.trim_space(ty) {
+    case "bool", "int", "i8", "i16", "i32", "i64", "i128",
+         "uint", "u8", "u16", "u32", "u64", "u128", "uintptr",
+         "f32", "f64", "string":
+        return true
+    }
+    return false
+}
+
 emit_eval_program_with_source_map :: proc(
     program: IR_Program,
     eval_form: CST_Form,
@@ -1531,11 +1554,12 @@ emit_eval_program_with_source_map :: proc(
             kind = .Raw,
             span = eval_form.span,
             raw_text = `@(export)
-kvist_repl_api_version: u32 = 26
+kvist_repl_api_version: u32 = 27
 
 Kvist_Repl_Register_Proc :: proc "c" (ctx: rawptr, name: cstring, signature: cstring, address: rawptr)
 Kvist_Repl_Lookup_Proc :: proc "c" (ctx: rawptr, name: cstring, signature: cstring) -> rawptr
 Kvist_Repl_Register_Result :: proc "c" (ctx: rawptr, signature: cstring, address: rawptr)
+Kvist_Repl_Render_Scalar_Result :: proc "c" (ctx: rawptr, type_name: cstring, address: rawptr)
 Kvist_Repl_State_Restore :: proc "c" (snapshot: rawptr)
 Kvist_Repl_State_Clone :: proc "c" (snapshot: rawptr)
 Kvist_Repl_Register_State :: proc "c" (ctx: rawptr, name: cstring, signature: cstring, size, align: int, clone: Kvist_Repl_State_Clone, restore: Kvist_Repl_State_Restore)
@@ -1583,6 +1607,7 @@ Kvist_Repl_Host_API :: struct {
     register_proc: Kvist_Repl_Register_Proc,
     lookup_proc: Kvist_Repl_Lookup_Proc,
     register_result: Kvist_Repl_Register_Result,
+    render_scalar_result: Kvist_Repl_Render_Scalar_Result,
     register_state: Kvist_Repl_Register_State,
     debug_flags: Kvist_Repl_Debug_Flags,
     trace_point: Kvist_Repl_Trace_Point,

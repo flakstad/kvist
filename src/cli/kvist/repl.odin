@@ -60,7 +60,7 @@ REPL_RESTART_USE_VALUE :: u32(1 << 1)
 REPL_RESTART_RETRY :: u32(1 << 2)
 REPL_RESTART_SKIP :: u32(1 << 3)
 REPL_RESTART_ABORT_OPERATION :: u32(1 << 4)
-REPL_DEBUG_CAPABILITIES: [64]string = {
+REPL_DEBUG_CAPABILITIES: [65]string = {
     "compiled-abort-operation-restarts",
     "compiled-retry-skip-restarts",
     "native-attach",
@@ -72,6 +72,7 @@ REPL_DEBUG_CAPABILITIES: [64]string = {
     "evaluation-phase-timings",
     "frontend-generation-cache",
     "context-expansion-cache",
+    "thin-scalar-generations",
     "deferred-debug-value-capture",
     "generated-source-maps",
     "kvist-breakpoint-locations",
@@ -6883,6 +6884,308 @@ repl_inject_pause_before_entry :: proc(
     return strings.clone(strings.to_string(builder)), true
 }
 
+Repl_Thin_Odin_Decl :: struct {
+    name:       string,
+    start_line: int,
+    end_line:   int,
+}
+
+repl_thin_scalar_abi :: proc(abi: string) -> bool {
+    if !strings.has_prefix(abi, "value:") {
+        return false
+    }
+    switch abi[len("value:"):] {
+    case "bool", "int", "i8", "i16", "i32", "i64", "i128",
+         "uint", "u8", "u16", "u32", "u64", "u128", "uintptr",
+         "f32", "f64", "string":
+        return true
+    }
+    return false
+}
+
+repl_odin_line_decl_name :: proc(line: string) -> (string, bool) {
+    if line == "" || !kvist.odin_identifier_start(line[0]) {
+        return "", false
+    }
+    end := 1
+    for end < len(line) && kvist.odin_identifier_continue(line[end]) {
+        end += 1
+    }
+    rest := strings.trim_space(line[end:])
+    if !strings.has_prefix(rest, "::") &&
+       !strings.has_prefix(rest, ":") {
+        return "", false
+    }
+    return line[:end], true
+}
+
+repl_odin_import_alias :: proc(line: string) -> (string, bool) {
+    if !strings.has_prefix(line, "import ") {
+        return "", false
+    }
+    rest := strings.trim_space(line[len("import "):])
+    if rest == "" || rest[0] == '"' ||
+       !kvist.odin_identifier_start(rest[0]) {
+        return "", false
+    }
+    end := 1
+    for end < len(rest) && kvist.odin_identifier_continue(rest[end]) {
+        end += 1
+    }
+    return rest[:end], true
+}
+
+repl_thin_adjust_source_map :: proc(
+    source_map: ^[dynamic]kvist.Source_Map_Entry,
+    retained: []bool,
+) {
+    if source_map == nil || len(retained) == 0 {
+        return
+    }
+    line_count := len(retained)
+    mapped_lines := make([]int, line_count, context.temp_allocator)
+    next_retained := make([]int, line_count, context.temp_allocator)
+    previous_retained := make([]int, line_count, context.temp_allocator)
+    mapped := 0
+    previous := -1
+    for line in 0..<line_count {
+        if retained[line] {
+            mapped += 1
+            previous = line
+            mapped_lines[line] = mapped
+        }
+        previous_retained[line] = previous
+    }
+    next := -1
+    for line := line_count-1; line >= 0; line -= 1 {
+        if retained[line] {
+            next = line
+        }
+        next_retained[line] = next
+    }
+    write := 0
+    for read in 0..<len(source_map^) {
+        entry := source_map^[read]
+        start := clamp(entry.generated_start_line-1, 0, line_count-1)
+        end := clamp(entry.generated_end_line-1, start, line_count-1)
+        first := next_retained[start]
+        last := previous_retained[end]
+        if first < 0 || first > end || last < first {
+            delete(entry.source_path)
+            source_map^[read] = {}
+            continue
+        }
+        entry.generated_start_line = mapped_lines[first]
+        entry.generated_end_line = mapped_lines[last]
+        if first != start {
+            entry.generated_start_column = 0
+        }
+        if last != end {
+            entry.generated_end_column = 0
+        }
+        source_map^[write] = entry
+        if write != read {
+            source_map^[read] = {}
+        }
+        write += 1
+    }
+    resize(source_map, write)
+}
+
+repl_thin_filter_debug_frames :: proc(
+    frames: ^[dynamic]Repl_Debug_Frame,
+    source: string,
+) {
+    if frames == nil {
+        return
+    }
+    write := 0
+    for read in 0..<len(frames^) {
+        frame := frames^[read]
+        if frame.pause_id == "" ||
+           !strings.contains(source, frame.pause_id) {
+            repl_debug_frame_delete(&frame)
+            frames^[read] = {}
+            continue
+        }
+        frames^[write] = frame
+        if write != read {
+            frames^[read] = {}
+        }
+        write += 1
+    }
+    resize(frames, write)
+}
+
+repl_thin_enqueue_decl :: proc(
+    name: string,
+    names: map[string]int,
+    reachable: []bool,
+    queue: ^[dynamic]int,
+) {
+    index, found := names[name]
+    if !found || reachable[index] {
+        return
+    }
+    reachable[index] = true
+    append(queue, index)
+}
+
+repl_thin_generation_source :: proc(
+    source: string,
+    source_map: ^[dynamic]kvist.Source_Map_Entry,
+    debug_frames: ^[dynamic]Repl_Debug_Frame = nil,
+) -> string {
+    lines := strings.split_lines(source, context.temp_allocator)
+    if len(lines) == 0 {
+        return strings.clone(source)
+    }
+    declarations: [dynamic]Repl_Thin_Odin_Decl
+    defer delete(declarations)
+    names := make(map[string]int, context.temp_allocator)
+    for line, line_index in lines {
+        name, named := repl_odin_line_decl_name(line)
+        if !named {
+            continue
+        }
+        if len(declarations) > 0 {
+            declarations[len(declarations)-1].end_line = line_index
+        }
+        names[name] = len(declarations)
+        append(&declarations, Repl_Thin_Odin_Decl{
+            name = name,
+            start_line = line_index,
+            end_line = len(lines),
+        })
+    }
+    if len(declarations) == 0 {
+        return strings.clone(source)
+    }
+    reachable := make([]bool, len(declarations), context.temp_allocator)
+    queue: [dynamic]int
+    defer delete(queue)
+    repl_thin_enqueue_decl(
+        "kvist_repl_api_version",
+        names,
+        reachable,
+        &queue,
+    )
+    repl_thin_enqueue_decl("kvist_repl_run", names, reachable, &queue)
+    for decl, index in declarations {
+        directive_line := decl.start_line-1
+        for directive_line >= 0 &&
+            strings.trim_space(lines[directive_line]) == "" {
+            directive_line -= 1
+        }
+        if directive_line >= 0 {
+            directive := strings.trim_space(lines[directive_line])
+            if strings.has_prefix(directive, "@(init") ||
+               strings.has_prefix(directive, "@(fini") ||
+               strings.has_prefix(directive, "@(export") {
+                if !reachable[index] {
+                    reachable[index] = true
+                    append(&queue, index)
+                }
+            }
+        }
+    }
+    for queue_index := 0; queue_index < len(queue); queue_index += 1 {
+        decl := declarations[queue[queue_index]]
+        for line_index in decl.start_line..<decl.end_line {
+            line := lines[line_index]
+            position := 0
+            for position < len(line) {
+                if !kvist.odin_identifier_start(line[position]) {
+                    position += 1
+                    continue
+                }
+                end := position+1
+                for end < len(line) &&
+                    kvist.odin_identifier_continue(line[end]) {
+                    end += 1
+                }
+                repl_thin_enqueue_decl(
+                    line[position:end],
+                    names,
+                    reachable,
+                    &queue,
+                )
+                position = end
+            }
+        }
+    }
+    retained := make([]bool, len(lines), context.temp_allocator)
+    for line_index in 0..<len(lines) {
+        retained[line_index] = true
+    }
+    for decl, index in declarations {
+        if reachable[index] {
+            continue
+        }
+        for line_index in decl.start_line..<decl.end_line {
+            retained[line_index] = false
+        }
+    }
+    for decl, index in declarations {
+        if !reachable[index] {
+            continue
+        }
+        directive_line := decl.start_line-1
+        for directive_line >= 0 &&
+            strings.trim_space(lines[directive_line]) == "" {
+            directive_line -= 1
+        }
+        if directive_line >= 0 &&
+           strings.has_prefix(strings.trim_space(lines[directive_line]), "@(") {
+            retained[directive_line] = true
+        }
+    }
+    condition_runtime_needed := false
+    for decl, index in declarations {
+        if reachable[index] && strings.contains(decl.name, "condition__") {
+            condition_runtime_needed = true
+            break
+        }
+    }
+    if !condition_runtime_needed {
+        for line, line_index in lines {
+            if retained[line_index] &&
+               strings.contains(line, ".set_repl_host(") {
+                retained[line_index] = false
+            }
+        }
+    }
+    for line, line_index in lines {
+        alias, imported := repl_odin_import_alias(line)
+        if !imported {
+            continue
+        }
+        used := false
+        needle := fmt.tprintf("%s.", alias)
+        for candidate, candidate_index in lines {
+            if candidate_index != line_index && retained[candidate_index] &&
+               strings.contains(candidate, needle) {
+                used = true
+                break
+            }
+        }
+        retained[line_index] = used
+    }
+    builder := strings.builder_make()
+    defer strings.builder_destroy(&builder)
+    for line, line_index in lines {
+        if !retained[line_index] {
+            continue
+        }
+        strings.write_string(&builder, line)
+        strings.write_byte(&builder, '\n')
+    }
+    thin := strings.clone(strings.to_string(builder))
+    repl_thin_adjust_source_map(source_map, retained)
+    repl_thin_filter_debug_frames(debug_frames, thin)
+    return thin
+}
+
 repl_generation_source_hash :: proc(source: string, generation: int) -> u64 {
     // Nested safe-point IDs carry the controller generation even when the
     // generated program is otherwise identical. Exclude only that component
@@ -7442,6 +7745,20 @@ repl_compile_generation :: proc(
     }
     defer delete(nested_source)
     generation_source = nested_source
+    thin_source := ""
+    result_abi := kvist.repl_registered_result_abi(result.output)
+    defer delete(result_abi)
+    if session != nil && len(session.generations) > 0 &&
+       pause_id == "" && !native_debug_symbols &&
+       !capture_debug_values && repl_thin_scalar_abi(result_abi) {
+        thin_source = repl_thin_generation_source(
+            generation_source,
+            &result.source_map,
+            &nested_frames,
+        )
+        generation_source = thin_source
+    }
+    defer delete(thin_source)
     source_hash := repl_generation_source_hash(generation_source, generation)
     cached_generation: ^Repl_Compiled_Generation
     cache_hit := false

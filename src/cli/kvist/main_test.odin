@@ -1,6 +1,7 @@
 package main
 
 import "core:os"
+import "core:strings"
 import "core:testing"
 import kvist "../../odin/kvist"
 
@@ -142,6 +143,38 @@ repl_context_cache_key_tracks_files_and_current_imports :: proc(t: ^testing.T) {
     edited := repl_context_cache_key(context_path, "", "(answer)")
     defer delete(edited)
     testing.expect_value(t, edited != initial, true)
+}
+
+@(test)
+repl_thin_generation_keeps_only_native_dependency_closure :: proc(t: ^testing.T) {
+    source := `package main
+
+import fmt "core:fmt"
+import runtime "base:runtime"
+
+@(export)
+kvist_repl_api_version: u32 = 27
+
+used :: proc(value: int) -> int { return value + 1 }
+unused :: proc() { fmt.println("unused") }
+
+@(export)
+kvist_repl_run :: proc "c" () {
+    context = runtime.default_context()
+    _ = used(41)
+}
+`
+    source_map: [dynamic]kvist.Source_Map_Entry
+    thin := repl_thin_generation_source(source, &source_map)
+    defer delete(thin)
+    defer kvist.source_map_slice_delete(source_map)
+
+    testing.expect_value(t, strings.contains(thin, "kvist_repl_api_version"), true)
+    testing.expect_value(t, strings.contains(thin, "kvist_repl_run"), true)
+    testing.expect_value(t, strings.contains(thin, "used :: proc"), true)
+    testing.expect_value(t, strings.contains(thin, "unused :: proc"), false)
+    testing.expect_value(t, strings.contains(thin, `import fmt "core:fmt"`), false)
+    testing.expect_value(t, strings.contains(thin, `import runtime "base:runtime"`), true)
 }
 
 @(test)

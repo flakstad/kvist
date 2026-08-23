@@ -137,7 +137,7 @@ compile_repl_generation_exports_native_batch_entry :: proc(t: ^testing.T) {
     defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
-    testing.expect_value(t, strings.contains(result.output, "@(export)\nkvist_repl_api_version: u32 = 26"), true)
+    testing.expect_value(t, strings.contains(result.output, "@(export)\nkvist_repl_api_version: u32 = 27"), true)
     testing.expect_value(t, strings.contains(result.output, "kvist_repl_run :: proc \"c\" (host: ^Kvist_Repl_Host_API) {"), true)
     testing.expect_value(t, strings.contains(result.output, "context = repl_runtime.default_context()"), true)
     testing.expect_value(t, strings.contains(result.output, "kvist_repl_host = host"), true)
@@ -152,12 +152,14 @@ compile_repl_generation_exports_native_batch_entry :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(result.output, "trace_values: Kvist_Repl_Trace_Values"), true)
     testing.expect_value(t, strings.contains(result.output, "condition: Kvist_Repl_Condition"), true)
     testing.expect_value(t, strings.contains(result.output, "emit_output: Kvist_Repl_Emit_Output"), true)
+    testing.expect_value(t, strings.contains(result.output, "render_scalar_result: Kvist_Repl_Render_Scalar_Result"), true)
     testing.expect_value(t, strings.contains(result.output, "emit_stream_output: Kvist_Repl_Emit_Output"), true)
     testing.expect_value(t, strings.contains(result.output, "enter_frame: Kvist_Repl_Enter_Frame"), true)
     testing.expect_value(t, strings.contains(result.output, "leave_frame: Kvist_Repl_Leave_Frame"), true)
     testing.expect_value(t, strings.contains(result.output, "kvist_repl_host.debug_flags(kvist_repl_host.ctx)"), true)
     testing.expect_value(t, strings.contains(result.output, "kvist_repl_host.trace_point(kvist_repl_host.ctx"), true)
     testing.expect_value(t, strings.contains(result.output, "kvist_repl_host.trace_values(kvist_repl_host.ctx"), true)
+    testing.expect_value(t, strings.contains(result.output, `host.render_scalar_result(host.ctx, "int", transmute(rawptr)kvist_repl_result_impl)`), true)
     testing.expect_value(t, strings.contains(result.output, "kvist_repl_println(\"first\")"), true)
 }
 
