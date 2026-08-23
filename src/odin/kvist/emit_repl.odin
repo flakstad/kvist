@@ -1393,7 +1393,11 @@ debug_write_path_metadata :: proc(
     }
 }
 
-debug_pause_placeholder :: proc(e: ^Emitter, span: Span) -> string {
+debug_pause_placeholder :: proc(
+    e: ^Emitter,
+    span: Span,
+    capture_values := true,
+) -> string {
     builder := strings.builder_make()
     defer strings.builder_destroy(&builder)
     fmt.sbprintf(
@@ -1403,7 +1407,10 @@ debug_pause_placeholder :: proc(e: ^Emitter, span: Span) -> string {
         span.start,
         span.end,
     )
-    visible := debug_visible_local_indices(e)
+    visible: [dynamic]int
+    if capture_values {
+        visible = debug_visible_local_indices(e)
+    }
     defer delete(visible)
     for i := len(visible)-1; i >= 0; i -= 1 {
         local := e.local_types[visible[i]]
@@ -3975,9 +3982,21 @@ debug_emit_pause :: proc(
     condition_restart_flags: u32 = 1,
     condition_type := "kvist/condition",
 ) {
-    placeholder := debug_pause_placeholder(e, form.span)
+    capture_values := required || e.repl_debug_capture_values
+    placeholder := debug_pause_placeholder(
+        e,
+        form.span,
+        capture_values,
+    )
     defer delete(placeholder)
-    visible := debug_visible_local_indices(e)
+    // Ordinary expression evaluation retains every safe point but omits the
+    // generated value renderers that dominate instrumented source size. An
+    // explicit condition still needs its values immediately; trace/debug
+    // generations and live definitions opt into capture through the emitter.
+    visible: [dynamic]int
+    if capture_values {
+        visible = debug_visible_local_indices(e)
+    }
     defer delete(visible)
     required_text := "true" if required else "false"
     restart_selection_text := "nil"

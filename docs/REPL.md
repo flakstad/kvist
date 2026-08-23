@@ -596,6 +596,15 @@ invalidates the hit before evaluation.
 but found identical instrumented Odin and skipped the Odin build. Explicit
 pause-before submissions and native debug-symbol builds remain uncached.
 
+Capability `deferred-debug-value-capture` means ordinary expression
+evaluations keep their native safe points and abort checks but omit generated
+local-value renderers until they are needed. Explicit conditions and
+breakpoints still capture their values immediately. Live definitions are
+compiled with full capture metadata so they can be traced later; trace,
+pause-before, and native-debug evaluations likewise request full capture. This
+reduces ordinary generated source and native build time without removing
+conditions, cooperative interruption, or the debugger path.
+
 A `bindings` request emits an editor-neutral inventory such as:
 
 ```json

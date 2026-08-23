@@ -187,6 +187,7 @@ compile_program_eval_form_with_map :: proc(
     repl_inspection_result_slot := "",
     repl_inspection_page_offset := 0,
     repl_inspection_page_limit := 0,
+    repl_debug_capture_values := true,
 ) -> (result: Emit_Result, err: Compile_Error, ok: bool) {
     result_allocator := context.allocator
     old_allocator := context.allocator
@@ -313,6 +314,7 @@ compile_program_eval_form_with_map :: proc(
             repl_inspection_result_slot,
             repl_inspection_page_offset,
             repl_inspection_page_limit,
+            repl_debug_capture_values,
         )
     } else if eval_head_is_decl(eval_head) {
             eval_decl, err_decl, ok_decl := parse_decl(CST_Top_Form{form = eval_form})
@@ -851,6 +853,7 @@ compile_eval_path_with_map :: proc(
     repl_inspection_result_slot := "",
     repl_inspection_page_offset := 0,
     repl_inspection_page_limit := 0,
+    repl_debug_capture_values := true,
 ) -> (result: Emit_Result, err: Compile_Error, ok: bool) {
     result_allocator := context.allocator
     old_allocator := result_allocator
@@ -1134,5 +1137,6 @@ compile_eval_path_with_map :: proc(
         repl_inspection_result_slot,
         repl_inspection_page_offset,
         repl_inspection_page_limit,
+        repl_debug_capture_values,
     )
 }

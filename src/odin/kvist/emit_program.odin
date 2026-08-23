@@ -234,6 +234,7 @@ emit_eval_decls_with_source_map :: proc(
     repl_inspection_result_slot := "",
     repl_inspection_page_offset := 0,
     repl_inspection_page_limit := 0,
+    repl_debug_capture_values := true,
 ) -> (Emit_Result, Compile_Error, bool) {
     result := Emit_Result{}
     features := Emitter_Features{}
@@ -263,6 +264,7 @@ emit_eval_decls_with_source_map :: proc(
         repl_recent_result_types = repl_recent_result_types,
         repl_current_proc_names = repl_proc_names,
         repl_debug_enabled = initialize_context,
+        repl_debug_capture_values = repl_debug_capture_values,
     }
     defer strings.builder_destroy(&e.builder)
     for decl in decls {
@@ -1460,6 +1462,7 @@ emit_eval_program_with_source_map :: proc(
     repl_inspection_result_slot := "",
     repl_inspection_page_offset := 0,
     repl_inspection_page_limit := 0,
+    repl_debug_capture_values := true,
 ) -> (Emit_Result, Compile_Error, bool) {
     decls: [dynamic]IR_Decl
     append(&decls, IR_Decl{
@@ -1647,6 +1650,7 @@ kvist_repl_println :: proc(args: ..any, sep := " ", flush := true) -> int {
         repl_inspection_result_slot = repl_inspection_result_slot,
         repl_inspection_page_offset = repl_inspection_page_offset,
         repl_inspection_page_limit = repl_inspection_page_limit,
+        repl_debug_capture_values = repl_debug_capture_values,
     )
 }
 

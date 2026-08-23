@@ -212,6 +212,7 @@ Emitter :: struct {
     repl_current_proc_names: []string,
     repl_dispatch_adapters_emitted: bool,
     repl_debug_enabled: bool,
+    repl_debug_capture_values: bool,
     debug_restart_contexts: [dynamic]Debug_Restart_Context,
 }
 

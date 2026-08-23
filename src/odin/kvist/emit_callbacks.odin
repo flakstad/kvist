@@ -658,6 +658,7 @@ emit_proc_literal_text :: proc(e: ^Emitter, params: []Param, returns: Return_Spe
         repl_value_names = e.repl_value_names,
         repl_var_names = e.repl_var_names,
         repl_debug_enabled = e.repl_debug_enabled,
+        repl_debug_capture_values = e.repl_debug_capture_values,
     }
     defer strings.builder_destroy(&sub.builder)
 

@@ -60,7 +60,7 @@ REPL_RESTART_USE_VALUE :: u32(1 << 1)
 REPL_RESTART_RETRY :: u32(1 << 2)
 REPL_RESTART_SKIP :: u32(1 << 3)
 REPL_RESTART_ABORT_OPERATION :: u32(1 << 4)
-REPL_DEBUG_CAPABILITIES: [62]string = {
+REPL_DEBUG_CAPABILITIES: [63]string = {
     "compiled-abort-operation-restarts",
     "compiled-retry-skip-restarts",
     "native-attach",
@@ -71,6 +71,7 @@ REPL_DEBUG_CAPABILITIES: [62]string = {
     "generation-loaded-events",
     "evaluation-phase-timings",
     "frontend-generation-cache",
+    "deferred-debug-value-capture",
     "generated-source-maps",
     "kvist-breakpoint-locations",
     "instrumented-conditions",
@@ -6895,6 +6896,7 @@ repl_frontend_request_hash :: proc(
     inspection_result_slot: string,
     inspection_page_offset,
     inspection_page_limit: int,
+    capture_debug_values: bool,
 ) -> (u64, bool) {
     dependency_key, dependency_ok := cached_compile_cache_key(input)
     if !dependency_ok {
@@ -6915,6 +6917,7 @@ repl_frontend_request_hash :: proc(
     hash = repl_hash_key_string(hash, inspection_result_slot)
     hash = repl_hash_key_string(hash, fmt.tprintf("%d", inspection_page_offset))
     hash = repl_hash_key_string(hash, fmt.tprintf("%d", inspection_page_limit))
+    hash = repl_hash_key_string(hash, "1" if capture_debug_values else "0")
     for ty in recent_result_types {
         hash = repl_hash_key_string(hash, ty)
     }
@@ -7109,6 +7112,7 @@ repl_compile_generation :: proc(
     diagnostics: ^[dynamic]Repl_Diagnostic = nil,
     timings: ^Repl_Eval_Timings = nil,
     native_debug_symbols := false,
+    capture_debug_values := false,
 ) -> (library_path: string, emitted_source: string, diagnostic: string, ok: bool) {
     frontend_start := time.tick_now()
     request_hash, frontend_cacheable := repl_frontend_request_hash(
@@ -7126,6 +7130,7 @@ repl_compile_generation :: proc(
         inspection_result_slot,
         inspection_page_offset,
         inspection_page_limit,
+        capture_debug_values,
     )
     if frontend_cacheable && pause_id == "" && !native_debug_symbols {
         if cached, loaded, found := repl_cached_frontend_generation(
@@ -7215,6 +7220,7 @@ repl_compile_generation :: proc(
         repl_inspection_result_slot = inspection_result_slot,
         repl_inspection_page_offset = inspection_page_offset,
         repl_inspection_page_limit = inspection_page_limit,
+        repl_debug_capture_values = capture_debug_values,
     )
     if timings != nil {
         timings.frontend_ns =
@@ -7643,6 +7649,9 @@ repl_handle_eval :: proc(
         timings.preparation_ns =
             time.duration_nanoseconds(time.tick_since(preparation_start))
     }
+    persistent_definitions :=
+        kvist.repl_persistent_definitions_source(compiled_source)
+    defer delete(persistent_definitions)
     library_path, emitted_source, diagnostic, compiled := repl_compile_generation(
         input,
         compiled_source,
@@ -7668,6 +7677,8 @@ repl_handle_eval :: proc(
         diagnostics,
         timings,
         native_debug_symbols,
+        trace || pause_id != "" || native_debug_symbols ||
+            nested_worker_execution || len(persistent_definitions) > 0,
     )
     if !compiled {
         return "", diagnostic, false
@@ -9893,6 +9904,9 @@ repl_attached_handle_eval :: proc(
         pause_id = strings.clone(fmt.tprintf("pause-%d", generation))
     }
     defer delete(pause_id)
+    persistent_definitions :=
+        kvist.repl_persistent_definitions_source(compiled_source)
+    defer delete(persistent_definitions)
     library_path, emitted_source, diagnostic, compiled :=
         repl_compile_generation(
             input,
@@ -9915,6 +9929,9 @@ repl_attached_handle_eval :: proc(
             inspection_result_slot,
             inspection_page_offset,
             inspection_page_limit,
+            capture_debug_values =
+                request.trace || request.pause_before ||
+                len(persistent_definitions) > 0,
         )
     if !compiled {
         repl_emit_json_event(Repl_Event{
