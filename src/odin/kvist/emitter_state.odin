@@ -205,6 +205,13 @@ Emitter :: struct {
     odin_import_paths: map[string]string,
     odin_import_cache_keys: map[string]string,
     import_cache: ^Emitter_Import_Cache,
+    repl_value_names: []string,
+    repl_var_names: []string,
+    repl_recent_result_types: []string,
+    repl_current_proc_names: []string,
+    repl_dispatch_adapters_emitted: bool,
+    repl_debug_enabled: bool,
+    debug_restart_contexts: [dynamic]Debug_Restart_Context,
 }
 
 ensure_emitter_indexes :: proc(e: ^Emitter) {

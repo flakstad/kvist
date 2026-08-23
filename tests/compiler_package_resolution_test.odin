@@ -359,9 +359,20 @@ compile_source_with_shipped_reload_package_exposes_run_host_alias :: proc(t: ^te
 
 (def Reload_State App_State)
 
+(defn status-capability
+  [ctx: rawptr input: string] -> [output: string, message: string, ok: bool]
+  (values input "" true))
+
 (defn run [state: ^Reload_State host: ^reload.Run_Host]
-  (when (reload.checkpoint! host)
-    (return)))`
+  (do
+    (reload.register-console-capability!
+      host
+      "app/status"
+      "proc(string)->string"
+      (rawptr state)
+      (rawptr status-capability))
+    (when (reload.checkpoint! host)
+      (return))))`
     write_err := os.write_entire_file_from_string(path, source)
     testing.expect_value(t, write_err == nil, true)
     if write_err != nil {
@@ -380,6 +391,7 @@ compile_source_with_shipped_reload_package_exposes_run_host_alias :: proc(t: ^te
     testing.expect_value(t, strings.contains(output, "reload__Run_Host :: runtime.Run_Host"), true)
     testing.expect_value(t, strings.contains(output, "reload__reload__Run_Host"), false)
     testing.expect_value(t, strings.contains(output, "run :: proc(state: ^Reload_State, host: ^reload__Run_Host)"), true)
+    testing.expect_value(t, strings.contains(output, "runtime.console_register_capability_raw("), true)
 }
 
 @(test)

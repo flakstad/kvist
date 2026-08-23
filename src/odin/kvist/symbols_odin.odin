@@ -16,13 +16,12 @@ import_entry_from_form :: proc(form: CST_Form) -> (Imported_Symbol_Entry, bool) 
     if len(form.items) == 2 && form.items[1].kind == .String {
         return {}, false
     }
-    if len(form.items) == 4 &&
-       form.items[1].kind == .String &&
-       form.items[2].kind == .Keyword &&
-       form.items[2].text == ":refer" &&
-       form.items[3].kind == .Vector {
+    if source_import_form_has_refer(form) {
         path := import_path_text(form.items[1])
         alias := import_default_alias(path)
+        if as_index, has_as := source_import_as_index(form); has_as {
+            alias = map_name(form.items[as_index].text)
+        }
         if alias == "" {
             return {}, false
         }
@@ -30,7 +29,8 @@ import_entry_from_form :: proc(form: CST_Form) -> (Imported_Symbol_Entry, bool) 
     }
     if import_form_has_as(form) {
         path := import_path_text(form.items[1])
-        return Imported_Symbol_Entry{alias = map_name(form.items[3].text), path = path}, true
+        as_index, _ := source_import_as_index(form)
+        return Imported_Symbol_Entry{alias = map_name(form.items[as_index].text), path = path}, true
     }
     if len(form.items) == 3 && form.items[1].kind == .Symbol && form.items[2].kind == .String {
         path := import_path_text(form.items[2])

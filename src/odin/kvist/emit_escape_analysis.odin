@@ -604,7 +604,22 @@ form_may_escape_owned_temp_result :: proc(e: ^Emitter, form: CST_Form, returns: 
     return form_may_escape_owned_temp_result_names(e, form, nil, returns)
 }
 
-let_defer_return_error :: proc(bindings: []Binding, body: []CST_Form, last_in_proc: bool, returns: Return_Spec) -> (Compile_Error, bool) {
+let_defer_return_error :: proc(
+    e: ^Emitter,
+    bindings: []Binding,
+    body: []CST_Form,
+    last_in_proc: bool,
+    returns: Return_Spec,
+) -> (Compile_Error, bool) {
+    // The REPL inserts this internal wrapper only when retained storage has a
+    // real clone operation. It snapshots the tail before this let's deferred
+    // cleanup runs. Keep the exception at the exact generated REPL boundary;
+    // ordinary function returns still use the normal escape analysis.
+    if e.repl_debug_enabled &&
+       len(body) > 0 &&
+       form_is_repl_snapshot_call(body[len(body)-1]) {
+        return {}, false
+    }
     for binding in bindings {
         if !binding.deferred_delete && !binding.defer_with_cleanup {
             continue

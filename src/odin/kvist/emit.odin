@@ -88,7 +88,9 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
         return fmt.tprintf("%s{{}}", type_text), {}, true
     }
 
-    if strings.has_prefix(head.text, "data.") || strings.has_prefix(head.text, "data/") {
+    if !kvist_package_imported(e, "data") &&
+       (strings.has_prefix(head.text, "data.") ||
+        strings.has_prefix(head.text, "data/")) {
         member := head.text[len("data."):]
         if strings.has_prefix(head.text, "data/") {
             member = head.text[len("data/"):]
@@ -335,12 +337,21 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
 
     if head.text == "source-doc" {
         if len(form.items) != 2 {
-            return "", Compile_Error{message = "source-doc expects a quoted declaration name", span = form.span}, false
+            return "", Compile_Error{message = "source-doc expects one declaration name", span = form.span}, false
         }
-        name, ok_name := quoted_symbol_name(form.items[1])
+        name := ""
+        ok_name := false
+        if form.items[1].kind == .Symbol &&
+           (len(form.items[1].text) == 0 || form.items[1].text[0] != '\'') {
+            name = map_name(form.items[1].text)
+            ok_name = true
+        } else {
+            name, ok_name = quoted_symbol_name(form.items[1])
+        }
         if !ok_name {
-            return "", Compile_Error{message = "source-doc currently expects a quoted declaration name", span = form.items[1].span}, false
+            return "", Compile_Error{message = "source-doc expects a declaration symbol", span = form.items[1].span}, false
         }
+        defer delete(name)
         text, ok_doc := find_decl_doc_text(e, name)
         if !ok_doc {
             return "", Compile_Error{message = fmt.tprintf("unknown declaration: %s", name), span = form.items[1].span}, false
@@ -710,7 +721,7 @@ emit_generic_type_constructor_call :: proc(e: ^Emitter, form: CST_Form) -> (stri
         span  = form.span,
         items = make([dynamic]CST_Form, 0, len(form.items)),
     }
-    append(&type_form.items, CST_Form{kind = .Symbol, text = "type", span = form.items[0].span})
+    append(&type_form.items, CST_Form{kind = .Symbol, text = "typeid", span = form.items[0].span})
     for item in form.items[:len(form.items)-1] {
         append(&type_form.items, item)
     }
@@ -733,14 +744,42 @@ emit_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) 
     case .Nil:
         return form.text, {}, true
     case .Symbol:
+        if dot := strings.index(form.text, "."); dot > 0 && dot+1 < len(form.text) {
+            root := map_name(form.text[:dot])
+            if _, local := lookup_local_type(e, root); !local {
+                field_path := map_name(form.text[dot+1:])
+                if name_in_list(e.repl_var_names, root) {
+                    return fmt.tprintf("((%s())^).%s", root, field_path), {}, true
+                }
+                if name_in_list(e.repl_value_names, root) {
+                    return fmt.tprintf("(%s()).%s", root, field_path), {}, true
+                }
+            }
+        }
         if len(form.text) > 1 && form.text[0] == '&' {
             target := map_name(form.text[1:])
+            if name_in_list(e.repl_var_names, target) {
+                if _, local := lookup_local_type(e, target); !local {
+                    return fmt.tprintf("%s()", target), {}, true
+                }
+            }
             return addr_expr_text(target), {}, true
         }
         if symbol_is_simple_deref_suffix(form.text) {
             return deref_expr_text(map_name(form.text[:len(form.text)-1])), {}, true
         }
-        return map_name(form.text), {}, true
+        name := map_name(form.text)
+        if name_in_list(e.repl_var_names, name) {
+            if _, local := lookup_local_type(e, name); !local {
+                return deref_expr_text(fmt.tprintf("%s()", name)), {}, true
+            }
+        }
+        if name_in_list(e.repl_value_names, name) {
+            if _, local := lookup_local_type(e, name); !local {
+                return fmt.tprintf("%s()", name), {}, true
+            }
+        }
+        return name, {}, true
     case .Keyword:
         return keyword_literal_text(e, form.text), {}, true
     case .List:
@@ -857,11 +896,23 @@ emit_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) 
             return emit_odin_call_expr(e, form)
         }
         if is_symbol(form.items[0], "type") {
+            return emit_runtime_type_expr(e, form)
+        }
+        if is_symbol(form.items[0], "typeid") {
             type_text, err_type, ok_type := parse_type_text(form)
             if !ok_type {
                 return "", err_type, false
             }
             return type_text, {}, true
+        }
+        _, local_data_struct := find_struct_decl(e, "Data")
+        if is_symbol(form.items[0], "Data") && !local_data_struct {
+            if len(form.items) != 2 {
+                return "", Compile_Error{message = "Data conversion expects one value", span = form.span}, false
+            }
+            value, _, err_value, ok_value :=
+                emit_contextual_data_value(e, form.items[1])
+            return value, err_value, ok_value
         }
         if form.items[0].kind == .Keyword {
             if len(form.items) != 2 && len(form.items) != 3 {

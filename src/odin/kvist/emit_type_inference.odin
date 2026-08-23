@@ -550,6 +550,11 @@ obvious_form_type :: proc(e: ^Emitter, form: CST_Form) -> (string, bool) {
             return ty, true
         }
         name := map_name(form.text)
+        for result_ty, result_idx in e.repl_recent_result_types {
+            if name == fmt.tprintf("kvist_repl_star_%d", result_idx+1) {
+                return result_ty, true
+            }
+        }
         ensure_emitter_indexes(e)
         if idx, found := e.const_indices[name]; found {
             decl := &e.decls[idx]
@@ -569,6 +574,15 @@ obvious_form_type :: proc(e: ^Emitter, form: CST_Form) -> (string, bool) {
                 return ty, true
             }
         }
+        if name_in_list(e.repl_var_names, name) {
+            for decl in e.decls {
+                if decl.kind == .Var &&
+                   decl.var_decl.name == name &&
+                   decl.var_decl.has_ty {
+                    return decl.var_decl.ty, true
+                }
+            }
+        }
         return "", false
     }
     if form.kind == .Number || form.kind == .String || form.kind == .Regex || form.kind == .Bool || form.kind == .Keyword {
@@ -586,13 +600,26 @@ obvious_form_type :: proc(e: ^Emitter, form: CST_Form) -> (string, bool) {
             }
         }
     }
-    if form.kind == .List && len(form.items) == 2 && form.items[0].kind == .Symbol && form.items[1].kind == .Brace {
+    if form.kind == .List &&
+       len(form.items) == 2 &&
+       form.items[0].kind == .Symbol &&
+       (form.items[1].kind == .Vector || form.items[1].kind == .Brace) {
         head_name := map_name(form.items[0].text)
         if _, ok := find_struct_decl(e, head_name); ok {
             return head_name, true
         }
     }
     if form.kind == .List && len(form.items) > 0 && form.items[0].kind == .Symbol {
+        if len(form.items) == 2 &&
+           (form.items[1].kind == .Vector ||
+            form.items[1].kind == .Brace ||
+            form.items[1].kind == .Set) &&
+           (strings.has_prefix(form.items[0].text, "[") ||
+            strings.has_prefix(form.items[0].text, "map[")) {
+            if literal_ty, _, ok_literal_ty := parse_type_text(form.items[0]); ok_literal_ty {
+                return literal_ty, true
+            }
+        }
         // Scalar conversion forms are also type-producing expressions. Keep
         // their obvious type so a surrounding block-expression IIFE can
         // capture the converted local with an explicit parameter type.
@@ -608,6 +635,12 @@ obvious_form_type :: proc(e: ^Emitter, form: CST_Form) -> (string, bool) {
         if is_symbol(form.items[0], "quasiquote") && len(form.items) == 2 {
             return "Data", true
         }
+        if is_symbol(form.items[0], "Data") && len(form.items) == 2 {
+            return "Data", true
+        }
+        if is_symbol(form.items[0], "type") && len(form.items) == 2 {
+            return "keyword", true
+        }
         if is_symbol(form.items[0], "if") && len(form.items) == 4 {
             then_ty, ok_then_ty := obvious_form_type(e, form.items[2])
             else_ty, ok_else_ty := obvious_form_type(e, form.items[3])
@@ -618,7 +651,30 @@ obvious_form_type :: proc(e: ^Emitter, form: CST_Form) -> (string, bool) {
         if is_symbol(form.items[0], "let") || form_head_is_do(form) || form_head_is_case(form) || form_head_is_match(form) {
             return obvious_block_expr_type(e, form)
         }
-        if strings.has_prefix(form.items[0].text, "data.") || strings.has_prefix(form.items[0].text, "data/") {
+        switch form.items[0].text {
+        case "+", "-", "*", "/", "%", "%%", "min", "max":
+            selected := ""
+            for operand in form.items[1:] {
+                operand_ty, ok_operand_ty := obvious_form_type(e, operand)
+                if !ok_operand_ty {
+                    continue
+                }
+                if operand_ty == "f64" {
+                    return operand_ty, true
+                }
+                if operand_ty == "f32" || selected == "" {
+                    selected = operand_ty
+                }
+            }
+            if selected != "" {
+                return selected, true
+            }
+        case "==", "=", "!=", "<", "<=", ">", ">=", "not", "!":
+            return "bool", true
+        }
+        if !kvist_package_imported(e, "data") &&
+           (strings.has_prefix(form.items[0].text, "data.") ||
+            strings.has_prefix(form.items[0].text, "data/")) {
             member := form.items[0].text[len("data."):]
             if strings.has_prefix(form.items[0].text, "data/") {
                 member = form.items[0].text[len("data/"):]
@@ -852,8 +908,19 @@ pop_local_type_scope :: proc(e: ^Emitter) {
     resize(&e.callback_contexts, callback_mark)
 }
 
-bind_local_type :: proc(e: ^Emitter, name, ty: string) {
-    append(&e.local_types, Param{name = name, ty = ty})
+bind_local_type :: proc(
+    e: ^Emitter,
+    name,
+    ty: string,
+    ownership := Ownership_Mode.Default,
+    mutable := false,
+) {
+    append(&e.local_types, Param{
+        name = name,
+        ty = ty,
+        ownership = ownership,
+        mutable = mutable,
+    })
 }
 
 bind_managed_local_owner :: proc(e: ^Emitter, name, owner_flag: string) {

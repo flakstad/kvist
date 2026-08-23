@@ -384,6 +384,10 @@ editor_symbols_source_includes_language_forms_and_helpers :: proc(t: ^testing.T)
     }
     defer delete(output)
 
+    for entry in kvist.LANGUAGE_SOURCE_ENTRIES {
+        expected := fmt.tprintf("kvist form\t%s\t", entry.name)
+        testing.expect_value(t, strings.contains(output, expected), true)
+    }
     testing.expect_value(t, strings.contains(output, "kvist form\tlet\t"), true)
     testing.expect_value(t, strings.contains(output, "kvist form\tif\t"), true)
     testing.expect_value(t, strings.contains(output, "kvist form\tdefiter\t"), true)

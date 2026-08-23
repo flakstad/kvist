@@ -578,7 +578,10 @@ load_source_forms :: proc(dir, prefix: string, loaded_keys, import_keys: ^[dynam
     return result, Compile_Error{}, true
 }
 
-load_root_file_forms :: proc(path: string) -> (Loaded_Forms, Compile_Error, bool) {
+load_root_file_forms :: proc(
+    path: string,
+    extra_imports: []CST_Top_Form = nil,
+) -> (Loaded_Forms, Compile_Error, bool) {
     files, err_files, ok_files := read_root_package_files(path)
     if !ok_files {
         return Loaded_Forms{}, err_files, false
@@ -612,6 +615,9 @@ load_root_file_forms :: proc(path: string) -> (Loaded_Forms, Compile_Error, bool
     visiting: [dynamic]string
     result := Loaded_Forms{}
     all_forms := flatten_package_forms(files[:])
+    for top in extra_imports {
+        append(&all_forms, top)
+    }
     locals := collect_local_decl_names(all_forms[:])
     defer delete(locals)
     private_macros := collect_private_macro_decl_names(all_forms[:])
@@ -659,6 +665,42 @@ load_root_file_forms :: proc(path: string) -> (Loaded_Forms, Compile_Error, bool
             }
         }
     }
+    for top in extra_imports {
+        alias, import_path, ok_import := source_import_alias_and_path(top.form, path)
+        if !ok_import {
+            continue
+        }
+        resolved, err_resolve, ok_resolve := resolve_source_import_path(path, import_path)
+        if !ok_resolve {
+            return result, err_resolve, false
+        }
+        nested_import_keys: [dynamic]string
+        nested, err_nested, ok_nested := load_source_forms(resolved, alias, &loaded_keys, &nested_import_keys, &visiting)
+        if !ok_nested {
+            return result, err_nested, false
+        }
+        nested_exports := nested.exports
+        nested_raw_exports := nested.raw_exports
+        append(&aliases, Alias_Prefix{
+            alias = alias,
+            prefix = alias,
+            raw_prefix = odin_package_import_alias(alias),
+            exports = nested_exports,
+            raw_exports = nested_raw_exports,
+            refer_names = source_import_refer_names(top.form),
+            allow_unqualified_exports = source_import_form_has_refer(top.form),
+        })
+        append_unique_string_clone(&result.source_aliases, alias)
+        for nested_alias in nested.source_aliases {
+            append_unique_string_clone(&result.source_aliases, nested_alias)
+        }
+        for form in nested.imports {
+            append_import_form_unique(&result.imports, &import_keys, clone_cst_top_form(form))
+        }
+        for form in nested.decls {
+            append(&result.decls, clone_cst_top_form(form))
+        }
+    }
 
     for file in files {
         for top in file.forms {
@@ -684,6 +726,22 @@ load_root_file_forms :: proc(path: string) -> (Loaded_Forms, Compile_Error, bool
                 return result, err_rewrite, false
             }
             append(&result.decls, rewritten)
+        }
+    }
+    for top in extra_imports {
+        source_alias, source_path, is_source_import :=
+            source_import_alias_and_path(top.form, path)
+        if is_source_import {
+            delete(source_alias)
+            delete(source_path)
+            continue
+        }
+        if decl_head_name(top.form) == "import" {
+            append_import_form_unique(
+                &result.imports,
+                &import_keys,
+                rewrite_relative_odin_import_form(path, top),
+            )
         }
     }
     return result, Compile_Error{}, true

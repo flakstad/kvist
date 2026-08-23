@@ -4,10 +4,15 @@
 (package regex)
 (import rx "core:text/regex")
 
+;; Pattern text accepted by regex.compile and regex.matches?.
 (def Pattern string)
+;; Compiled Odin regular expression; release it with regex.destroy!.
 (def Regex rx.Regular_Expression)
+;; Captured match storage; release it with regex.destroy-capture!.
 (def Capture rx.Capture)
+;; Error returned while compiling or matching a regular expression.
 (def Error rx.Error)
+;; Odin regular-expression option flags accepted by compile-with-flags.
 (def Flags rx.Flags)
 
 (defn compile

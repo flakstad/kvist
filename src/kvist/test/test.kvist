@@ -10,9 +10,9 @@
 (import sync "core:sync")
 (import otesting "core:testing")
 
-(defvar __kvist_test_context_lock: sync.Mutex)
-(defvar __kvist_test_context_stacks: map[uintptr][dynamic]string)
-(defvar __kvist_test_once_guard: sync.Once)
+(defvar- __kvist_test_context_lock: sync.Mutex)
+(defvar- __kvist_test_context_stacks: map[uintptr][dynamic]string)
+(defvar- __kvist_test_once_guard: sync.Once)
 
 (defn- __kvist_test_context_cleanup [user-data: rawptr]
   (let [key (uintptr user-data)]

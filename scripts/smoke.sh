@@ -57,6 +57,10 @@ run ./kvist check examples/language/hello.kvist
 assert_eq "hello from kvist" "$(capture ./kvist run examples/language/hello.kvist)" "hello"
 assert_eq "18" "$(capture ./kvist run examples/collections/package-tour.kvist)" "package tour"
 assert_eq "112" "$(capture ./kvist run examples/collections/log-source.kvist)" "log source"
+assert_eq "handling example/not-ready service catalog is not ready for catalog
+handling example/not-ready service catalog is not ready for catalog
+attempts 2
+value 42" "$(capture ./kvist run examples/language/conditions.kvist)" "conditions and restarts"
 
 run ./kvist doc examples/collections/log-source.kvist log-lines >/dev/null
 run ./kvist lookup examples/collections/log-source.kvist log-lines >/dev/null

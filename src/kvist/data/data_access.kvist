@@ -147,40 +147,64 @@
   [value: Data] -> [decoded: bool, err: Decode-Error, ok: bool]
   (decode-bool-at value '[]))
 
-(defn nil? [value: Data] -> bool #force_inline
+(defn nil?
+  "Return true when `value` is nil Data."
+  [value: Data] -> bool #force_inline
   (odin-call "kvist_data_nil_p" value))
 
-(defn bool? [value: Data] -> bool #force_inline
+(defn bool?
+  "Return true when `value` contains a boolean."
+  [value: Data] -> bool #force_inline
   (odin-call "kvist_data_bool_p" value))
 
-(defn int? [value: Data] -> bool #force_inline
+(defn int?
+  "Return true when `value` contains an integer."
+  [value: Data] -> bool #force_inline
   (odin-call "kvist_data_int_p" value))
 
-(defn float? [value: Data] -> bool #force_inline
+(defn float?
+  "Return true when `value` contains a floating-point number."
+  [value: Data] -> bool #force_inline
   (odin-call "kvist_data_float_p" value))
 
-(defn string? [value: Data] -> bool #force_inline
+(defn string?
+  "Return true when `value` contains a string."
+  [value: Data] -> bool #force_inline
   (odin-call "kvist_data_string_p" value))
 
-(defn symbol? [value: Data] -> bool #force_inline
+(defn symbol?
+  "Return true when `value` contains a symbol."
+  [value: Data] -> bool #force_inline
   (odin-call "kvist_data_symbol_p" value))
 
-(defn keyword? [value: Data] -> bool #force_inline
+(defn keyword?
+  "Return true when `value` contains a keyword."
+  [value: Data] -> bool #force_inline
   (odin-call "kvist_data_keyword_p" value))
 
-(defn list? [value: Data] -> bool #force_inline
+(defn list?
+  "Return true when `value` contains a list."
+  [value: Data] -> bool #force_inline
   (odin-call "kvist_data_list_p" value))
 
-(defn vector? [value: Data] -> bool #force_inline
+(defn vector?
+  "Return true when `value` contains a vector."
+  [value: Data] -> bool #force_inline
   (odin-call "kvist_data_vector_p" value))
 
-(defn map? [value: Data] -> bool #force_inline
+(defn map?
+  "Return true when `value` contains a map."
+  [value: Data] -> bool #force_inline
   (odin-call "kvist_data_map_p" value))
 
-(defn set? [value: Data] -> bool #force_inline
+(defn set?
+  "Return true when `value` contains a set."
+  [value: Data] -> bool #force_inline
   (odin-call "kvist_data_set_p" value))
 
-(defn tagged? [value: Data] -> bool #force_inline
+(defn tagged?
+  "Return true when `value` is a tagged element."
+  [value: Data] -> bool #force_inline
   (odin-call "kvist_data_tagged_p" value))
 
 (defn- sequential?

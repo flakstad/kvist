@@ -346,30 +346,21 @@ alias_prefix_names :: proc(aliases: []Alias_Prefix) -> (names: [dynamic]string) 
 }
 
 source_import_form_has_refer :: proc(form: CST_Form) -> bool {
-    return form.kind == .List &&
-           len(form.items) == 4 &&
-           is_symbol(form.items[0], "import") &&
-           form.items[1].kind == .String &&
-           form.items[2].kind == .Keyword &&
-           form.items[2].text == ":refer" &&
-           form.items[3].kind == .Vector
+    _, ok := source_import_refer_index(form)
+    return ok
 }
 
 import_form_has_as :: proc(form: CST_Form) -> bool {
-    return form.kind == .List &&
-           len(form.items) == 4 &&
-           is_symbol(form.items[0], "import") &&
-           form.items[1].kind == .String &&
-           form.items[2].kind == .Keyword &&
-           form.items[2].text == ":as" &&
-           form.items[3].kind == .Symbol
+    _, ok := source_import_as_index(form)
+    return ok
 }
 
 source_import_refer_names :: proc(form: CST_Form) -> (names: [dynamic]string) {
-    if !source_import_form_has_refer(form) {
+    refer_index, ok_refer := source_import_refer_index(form)
+    if !ok_refer {
         return names
     }
-    for item in form.items[3].items {
+    for item in form.items[refer_index].items {
         if item.kind == .Symbol && !contains_text(names[:], item.text) {
             append(&names, strings.clone(item.text))
         }
@@ -487,9 +478,14 @@ append_import_form_unique :: proc(forms: ^[dynamic]CST_Top_Form, seen: ^[dynamic
             key = fmt.tprintf("%s|%s", form.form.items[1].text, import_path_text(form.form.items[2]))
         } else if source_import_form_has_refer(form.form) {
             path := import_path_text(form.form.items[1])
-            key = fmt.tprintf("%s|%s", import_default_alias(path), path)
+            if as_index, has_as := source_import_as_index(form.form); has_as {
+                key = fmt.tprintf("%s|%s", form.form.items[as_index].text, path)
+            } else {
+                key = fmt.tprintf("%s|%s", import_default_alias(path), path)
+            }
         } else if import_form_has_as(form.form) {
-            key = fmt.tprintf("%s|%s", form.form.items[3].text, import_path_text(form.form.items[1]))
+            as_index, _ := source_import_as_index(form.form)
+            key = fmt.tprintf("%s|%s", form.form.items[as_index].text, import_path_text(form.form.items[1]))
         }
     }
     if contains_text(seen[:], key) {

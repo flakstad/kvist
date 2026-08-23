@@ -5,7 +5,9 @@
 (import core "kvist:core")
 (import arr "kvist:arr")
 
-(defstruct Decode-Error {
+(defstruct Decode-Error
+  "Describe why Data decoding failed and where the incompatible value occurred."
+  {
   path: Data
   expected: Data-Kind
   actual: Data-Kind
@@ -15,6 +17,7 @@
 })
 
 (defn decode-error
+  "Construct a decoding error for an expected and actual Data kind."
   [path: Data, expected: Data-Kind, actual: Data-Kind] -> Decode-Error
   (Decode-Error {path: path expected: expected actual: actual}))
 

@@ -151,7 +151,7 @@ form_head_is_statement_only :: proc(form: CST_Form) -> (string, bool) {
     }
     head := form.items[0].text
     switch head {
-    case "for", "while", "defer", "errdefer", "set!", "mut!", "inc!", "dec!", "toggle!", "negate!", "return":
+    case "for", "while", "defer", "errdefer", "set!", "mut!", "inc!", "dec!", "toggle!", "negate!", "return", "kvist-intrinsic-breakpoint", "kvist-intrinsic-signal-condition", "kvist-intrinsic-use-value-restart", "kvist-intrinsic-restart-case", "kvist-intrinsic-condition-operation":
         return head, true
     }
     return "", false

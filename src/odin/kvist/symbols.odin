@@ -491,9 +491,10 @@ symbols_source :: proc(source: string) -> (output: string, err: Compile_Error, o
                     symbols_write_record_doc(&builder, "import", alias, source, form.items[1].span, path, "", top.doc_lines[:])
                 }
             } else if import_form_has_as(form) {
-                alias := form.items[3].text
+                as_index, _ := source_import_as_index(form)
+                alias := form.items[as_index].text
                 path := import_path_text(form.items[1])
-                symbols_write_record_doc(&builder, "import", alias, source, form.items[3].span, path, "", top.doc_lines[:])
+                symbols_write_record_doc(&builder, "import", alias, source, form.items[as_index].span, path, "", top.doc_lines[:])
             } else if len(form.items) == 3 && form.items[1].kind == .Symbol && form.items[2].kind == .String {
                 alias := form.items[1].text
                 path := import_path_text(form.items[2])

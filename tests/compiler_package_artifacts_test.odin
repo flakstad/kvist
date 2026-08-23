@@ -49,7 +49,6 @@ compile_path_emits_imported_package_artifacts :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(result.root.output, "__KVIST_PACKAGE_"), true)
     testing.expect_value(t, strings.contains(result.root.output, ".support__answer"), true)
 }
-
 @(test)
 package_artifacts_keep_parallel_helpers_with_their_calling_package :: proc(t: ^testing.T) {
     repo_root := compiler_test_repo_root()

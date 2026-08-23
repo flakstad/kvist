@@ -11,12 +11,14 @@
 (import strconv "core:strconv")
 (import strings "core:strings")
 
+;; Describe an EDN reader failure, including its byte offset and source form.
 (defstruct Read-Error {
   message: string
   offset: int
   form: string
 })
 
+;; Mutable cursor over EDN source text. Most callers should use edn.read.
 (defstruct Reader {
   text: string
   index: int

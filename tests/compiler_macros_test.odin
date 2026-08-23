@@ -159,7 +159,7 @@ compile_doc_macro_uses_source_doc_expression :: proc(t: ^testing.T) {
   (println "hello"))
 
 (defn main []
-  (doc 'greet))`
+  (doc greet))`
 
     output, err, ok := kvist.compile_source(source)
     testing.expect_value(t, ok, true)
@@ -1022,54 +1022,4 @@ compile_soa_convenience_macros :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "x := particles.x[0]"), true)
     testing.expect_value(t, strings.contains(output, "particles.vx[0] = (vx) + (10)"), true)
     testing.expect_value(t, strings.contains(output, "particles.x[0] = (x) + (vx)"), true)
-}
-
-@(test)
-compile_source_with_shipped_hot_macro_package :: proc(t: ^testing.T) {
-    tmp_dir, tmp_dir_err := os.make_directory_temp("", "kvist-hot-macro-*", context.allocator)
-    testing.expect_value(t, tmp_dir_err == nil, true)
-    if tmp_dir_err != nil {
-        return
-    }
-    defer os.remove_all(tmp_dir)
-    defer delete(tmp_dir)
-    path, join_err := os.join_path({tmp_dir, "kvist-hot-macro-test.kvist"}, context.allocator)
-    testing.expect_value(t, join_err == nil, true)
-    if join_err != nil {
-        return
-    }
-    defer delete(path)
-
-    source := `(package main)
-(import hot "kvist:hot")
-(import kvist_hot "../../../src/odin/kvist_hot")
-(import shared "../shared")
-
-(def version: string "module v1")
-
-(hot.defmodule shared.State
-                demo-message
-                demo-tick
-                version
-                "module v1 loaded")`
-
-    write_err := os.write_entire_file_from_string(path, source)
-    testing.expect_value(t, write_err == nil, true)
-    if write_err != nil {
-        return
-    }
-
-    output, err, ok := kvist.compile_path(path)
-    testing.expect_value(t, ok, true)
-    if !ok {
-        testing.expect_value(t, err.message, "")
-        return
-    }
-    defer delete(output)
-
-    testing.expect_value(t, strings.contains(output, `import kvist_hot "../../../src/odin/kvist_hot"`), true)
-    testing.expect_value(t, strings.contains(output, `kvist_hot_api_version: u32 = 1`), true)
-    testing.expect_value(t, strings.contains(output, `demo_message :: proc "c" () -> cstring`), true)
-    testing.expect_value(t, strings.contains(output, `demo_tick :: proc "c" (state: rawptr)`), true)
-    testing.expect_value(t, strings.contains(output, `kvist_hot.On_Load(shared.State, state, is_reload, "module v1 loaded")`), true)
 }

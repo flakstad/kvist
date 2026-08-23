@@ -5,7 +5,20 @@
 
 (import runtime "../../odin/olive_reload")
 
+;; Resident reload host used by checkpoint! and console capability registration.
 (def Run_Host runtime.Run_Host)
+(defn register-console-capability!
+  "Register or refresh a typed application capability for an attached REPL.
+
+  The handler runs synchronously on the application thread when checkpoint!
+  processes its request. INPUT and returned strings are transport values; the
+  exact Kvist ABI belongs in SIGNATURE and is checked before invocation."
+  [host: ^Run_Host
+   name: string
+   signature: string
+   ctx: rawptr
+   handler: rawptr] -> bool
+  (runtime.console-register-capability-raw host name signature ctx handler))
 
 (defn checkpoint!
   "Cooperate with a resident reload host at a safe runtime boundary.

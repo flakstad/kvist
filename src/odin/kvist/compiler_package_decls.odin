@@ -298,15 +298,14 @@ source_import_alias_and_path :: proc(form: CST_Form, importer_path: string = "."
     if len(form.items) == 2 && form.items[1].kind == .String {
         return "", "", false
     }
-    if len(form.items) == 4 &&
-       form.items[1].kind == .String &&
-       form.items[2].kind == .Keyword &&
-       form.items[2].text == ":refer" &&
-       form.items[3].kind == .Vector {
+    if source_import_form_has_refer(form) {
         path = import_path_text(form.items[1])
         if !is_source_import_path_from(importer_path, path) {
             delete(path)
             return "", "", false
+        }
+        if as_index, has_as := source_import_as_index(form); has_as {
+            return map_name(form.items[as_index].text), path, true
         }
         return import_default_alias(path), path, true
     }
@@ -316,7 +315,8 @@ source_import_alias_and_path :: proc(form: CST_Form, importer_path: string = "."
             delete(path)
             return "", "", false
         }
-        return map_name(form.items[3].text), path, true
+        as_index, _ := source_import_as_index(form)
+        return map_name(form.items[as_index].text), path, true
     }
     if len(form.items) == 3 && form.items[1].kind == .Symbol && form.items[2].kind == .String {
         path = import_path_text(form.items[2])
@@ -391,7 +391,10 @@ rewrite_relative_odin_import_form :: proc(importer_path: string, top: CST_Top_Fo
     return rewritten
 }
 
-collect_root_source_import_aliases :: proc(path: string) -> ([]Alias_Prefix, Compile_Error, bool) {
+collect_root_source_import_aliases :: proc(
+    path: string,
+    extra_imports: []CST_Top_Form = nil,
+) -> ([]Alias_Prefix, Compile_Error, bool) {
     files, err_files, ok_files := read_root_package_files(path)
     if !ok_files {
         return nil, err_files, false
@@ -406,7 +409,54 @@ collect_root_source_import_aliases :: proc(path: string) -> ([]Alias_Prefix, Com
             return nil, err_package, false
         }
     }
-    return collect_root_source_import_aliases_from_files(files[:])
+    base_aliases, err_aliases, ok_aliases :=
+        collect_root_source_import_aliases_from_files(files[:])
+    if !ok_aliases {
+        return nil, err_aliases, false
+    }
+    aliases: [dynamic]Alias_Prefix
+    append(&aliases, ..base_aliases)
+    delete(base_aliases)
+    for top in extra_imports {
+        alias, import_path, ok_import := source_import_alias_and_path(top.form, path)
+        if !ok_import {
+            continue
+        }
+        resolved, err_resolve, ok_resolve := resolve_source_import_path(path, import_path)
+        if !ok_resolve {
+            delete(alias)
+            delete(import_path)
+            return nil, err_resolve, false
+        }
+        import_files, err_files, ok_files := read_package_files(resolved)
+        if !ok_files {
+            delete(alias)
+            delete(import_path)
+            return nil, err_files, false
+        }
+        _, err_package, ok_package := validate_package_files(resolved, import_files[:])
+        if !ok_package {
+            delete(alias)
+            delete(import_path)
+            return nil, err_package, false
+        }
+        import_forms := flatten_package_forms(import_files[:])
+        exports := collect_public_decl_names(import_forms[:])
+        raw_dir := repl_odin_sidecar_dir(resolved)
+        raw_exports := collect_raw_odin_decl_names_from_dir(raw_dir)
+        delete(raw_dir)
+        append(&aliases, Alias_Prefix{
+            alias = alias,
+            prefix = alias,
+            raw_prefix = odin_package_import_alias(alias),
+            exports = exports,
+            raw_exports = raw_exports,
+            refer_names = source_import_refer_names(top.form),
+            allow_unqualified_exports = source_import_form_has_refer(top.form),
+        })
+        delete(import_path)
+    }
+    return aliases[:], Compile_Error{}, true
 }
 
 flatten_package_forms :: proc(files: []Package_File) -> (forms: [dynamic]CST_Top_Form) {

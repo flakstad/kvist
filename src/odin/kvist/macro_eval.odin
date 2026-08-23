@@ -1478,6 +1478,46 @@ macro_eval_expr :: proc(form: CST_Form, macros: []User_Macro, bindings: []Macro_
                 result := macro_owned_string_value(macro_form_text(single))
                 macro_value_delete_backing(&value)
                 return result, Compile_Error{}, true
+            case "macro-doc":
+                if len(form.items) != 2 {
+                    return Macro_Value{}, Compile_Error{message = "macro-doc expects one symbol", span = form.span}, false
+                }
+                value, err_value, ok_value := macro_eval_expr(form.items[1], macros, bindings)
+                if !ok_value {
+                    return Macro_Value{}, err_value, false
+                }
+                single, err_single, ok_single := macro_value_to_form(value, form.items[1].span)
+                if !ok_single {
+                    macro_value_delete_backing(&value)
+                    return Macro_Value{}, err_single, false
+                }
+                target := single
+                if single.kind == .List &&
+                   len(single.items) == 2 &&
+                   single.items[0].kind == .Symbol &&
+                   single.items[0].text == "quote" {
+                    target = single.items[1]
+                }
+                if target.kind != .Symbol {
+                    macro_value_delete_backing(&value)
+                    return Macro_Value{}, Compile_Error{message = "macro-doc expects one symbol", span = form.items[1].span}, false
+                }
+                macro_decl, found_macro := find_user_macro(macros, target.text)
+                if !found_macro || len(macro_decl.doc_lines) == 0 {
+                    macro_value_delete_backing(&value)
+                    return macro_nil_value(), Compile_Error{}, true
+                }
+                builder := strings.builder_make()
+                defer strings.builder_destroy(&builder)
+                for line, i in macro_decl.doc_lines {
+                    if i > 0 {
+                        strings.write_byte(&builder, '\n')
+                    }
+                    strings.write_string(&builder, symbols_clean_doc_line(line))
+                }
+                result := macro_owned_string_value(strings.clone(strings.to_string(builder)))
+                macro_value_delete_backing(&value)
+                return result, Compile_Error{}, true
             case "text":
                 if len(form.items) != 2 {
                     return Macro_Value{}, Compile_Error{message = "text expects one argument", span = form.span}, false

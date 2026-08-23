@@ -651,8 +651,20 @@
 (defmacro doc
   "Print documentation for `name`.
 
-  `name` is resolved through the current source declarations. This is
-  a developer-facing helper for interactive use and examples, not a general
-  runtime reflection API."
+  `name` may identify a local declaration, an imported package member such as
+  `arr.range`, or a compiler form such as `defn`. This is a developer-facing
+  compile-time helper for interactive use, not a runtime reflection API."
   [name]
-  `(println (source-doc ~name)))
+  (let [doc-name (if (and (list? name)
+                          (= (count name) 2)
+                          (= (first name) 'quote))
+                   (nth name 1)
+                   name)
+        macro-text (macro-doc doc-name)]
+    (if macro-text
+      `(do
+         (println ~macro-text)
+         nil)
+      `(do
+         (println (source-doc '~doc-name))
+         nil))))

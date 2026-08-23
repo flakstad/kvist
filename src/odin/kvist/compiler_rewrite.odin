@@ -53,6 +53,16 @@ rewrite_symbol_text :: proc(text: string, locals: []string, aliases: []Alias_Pre
         operator_prefix = fmt.tprintf("%s%c", operator_prefix, body[0])
         body = body[1:]
     }
+    if quote_prefix == "" && operator_prefix == "" {
+        switch body {
+        case "*1":
+            return "kvist_repl_star_1", Compile_Error{}, true
+        case "*2":
+            return "kvist_repl_star_2", Compile_Error{}, true
+        case "*3":
+            return "kvist_repl_star_3", Compile_Error{}, true
+        }
+    }
     for alias_map in aliases {
         prefix_text := fmt.tprintf("%s.", alias_map.alias)
         if len(body) > len(prefix_text) && body[:len(prefix_text)] == prefix_text {

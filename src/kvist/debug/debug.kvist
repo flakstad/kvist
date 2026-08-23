@@ -1,0 +1,13 @@
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
+
+(package debug)
+
+(defmacro break
+  "Pause execution at an explicit debugger safe point.
+
+  The active client may inspect the typed frame, evaluate expressions, step,
+  continue, or abort the current evaluation. This is a debugger operation;
+  native faults are not converted into pauses."
+  []
+  `(kvist-intrinsic-breakpoint))

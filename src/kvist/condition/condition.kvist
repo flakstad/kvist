@@ -1,0 +1,188 @@
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
+
+(package condition)
+
+(import bit "kvist:bit")
+(import runtime "../../odin/kvist_condition")
+
+(defstruct Condition
+  "A signalled condition's stable kind, human-readable message, and dynamic
+  Data context."
+  {
+    kind: string
+    message: string
+    data: Data
+  })
+
+(defstruct Decision
+  "A handler response selecting an advertised restart and optional value."
+  {
+    handled: bool
+    restart: string
+    value: string
+  })
+
+(def Handler
+  "A procedure from condition.Condition to condition.Decision."
+  (fn [problem: Condition] -> Decision))
+
+(defn- push-handler! [kind: string, handler: Handler]
+  (runtime.push-handler kind (rawptr handler)))
+
+(defn- pop-handler! []
+  (runtime.pop-handler))
+
+(defn- restart-flag [restart: string] -> u32
+  (cond
+    (= restart "continue") 1
+    (= restart "use-value") 2
+    (= restart "retry") 4
+    (= restart "skip") 8
+    (= restart "abort-operation") 16
+    :else 0))
+
+(defn- invoke-handler
+  [index: int, kind: string, message: string, data: Data,
+   restart-flags: u32] -> Decision
+  (let [handler (Handler (runtime.handler-at index))
+        handler-result (handler (Condition [kind message data]))]
+    (if handler-result.handled
+      (let [flag (restart-flag handler-result.restart)]
+        (do
+          (assert (!= flag 0)
+            "condition handler selected an unknown restart")
+          (assert (!= (bit.and restart-flags flag) 0)
+            "condition handler selected an unavailable restart")
+          handler-result))
+      handler-result)))
+
+(defn- dispatch
+  [kind: string, message: string, data: Data, restart-flags: u32] -> Decision
+  (do
+    (defvar index: int (- (runtime.handler-count) 1))
+    (defvar result: Decision (zero Decision))
+    (while (and (not result.handled) (>= index 0))
+      (do
+        (if (= (runtime.handler-kind-at index) kind)
+          (set! result
+            (invoke-handler index kind message data restart-flags)))
+        (dec! index)))
+    (set! index (- (runtime.handler-count) 1))
+    (while (and (not result.handled) (>= index 0))
+      (do
+        (if (= (runtime.handler-kind-at index) "*")
+          (set! result
+            (invoke-handler index kind message data restart-flags)))
+        (dec! index)))
+    result))
+
+(defn- unhandled [kind: string, message: string]
+  (runtime.unhandled kind message))
+
+(defn- decision [restart: string, value: string] -> Decision
+  (Decision [true restart value]))
+
+(defn decline
+  "Decline to handle a condition so the next dynamically enclosing handler,
+  or the interactive condition system, may decide what to do."
+  [] -> Decision
+  (zero Decision))
+
+(defn continue
+  "Continue immediately after the signalling point."
+  [] -> Decision
+  (decision "continue" ""))
+
+(defn retry
+  "Retry the nearest enclosing `condition.restart-case` region."
+  [] -> Decision
+  (decision "retry" ""))
+
+(defn skip
+  "Skip the remainder of the nearest `condition.restart-case` region."
+  [] -> Decision
+  (decision "skip" ""))
+
+(defn abort-operation
+  "Leave the nearest enclosing `condition.operation` boundary."
+  [] -> Decision
+  (decision "abort-operation" ""))
+
+(defmacro use-value
+  "Continue with textual VALUE at an advertised typed `use-value` recovery point.
+
+  The signalling boundary validates and converts VALUE to the type of its
+  mutable place before resuming."
+  [value]
+  `(decision "use-value" ~value))
+
+(defmacro- wrap-handlers [entries body]
+  (if (= (count entries) 0)
+    body
+    (let [condition-type (first entries)
+          handler (nth entries 1)
+          type-name (if (keyword? condition-type)
+                      (name condition-type)
+                      condition-type)
+          inner (wrap-handlers (rest (rest entries)) body)]
+      `(do
+         (push-handler! ~type-name ~handler)
+         (defer (pop-handler!))
+         ~inner))))
+
+(defmacro with-handlers
+  "Dynamically install a map of condition handlers while evaluating body.
+
+  Keys are condition-type keywords or strings and values are handler
+  procedures. `:*` is a fallback for every condition; an exact key in the same
+  map is tried first. Each handler receives a `condition.Condition` and returns
+  a `condition.Decision`. Scoped cleanup removes all handlers on every ordinary
+  exit."
+  [handlers & body]
+  (if (not (brace? handlers))
+    (error "condition.with-handlers expects a map from condition types to handlers")
+    (if (= (% (count handlers) 2) 1)
+      (error "condition.with-handlers expects a handler for every condition type")
+      (wrap-handlers handlers `(do ~@body)))))
+
+(defmacro signal
+  "Signal a recoverable condition with a stable type and dynamic context.
+
+  `(condition.signal type message)` uses empty Data context.
+  `(condition.signal type message data)` supplies contextual Data to handlers
+  and interactive clients. The type must be a keyword or string literal; the
+  message and data are ordinary runtime expressions. Clients receive an
+  EDN-rendered copy of the Data context."
+  [condition-type message & context]
+  (if (= (count context) 0)
+    `(kvist-intrinsic-signal-condition
+       dispatch unhandled ~condition-type ~message '{})
+    (if (= (count context) 1)
+      `(kvist-intrinsic-signal-condition
+         dispatch unhandled ~condition-type ~message ~(first context))
+      (error "condition.signal expects type, message, and optional Data context"))))
+
+(defmacro use-value!
+  "Signal a condition that may replace a visible mutable scalar place.
+
+  In addition to `continue`, this advertises a typed `use-value` restart. The
+  replacement is validated before native execution resumes."
+  [place message]
+  `(kvist-intrinsic-use-value-restart dispatch unhandled ~place ~message))
+
+(defmacro restart-case
+  "Establish lexical `retry` and `skip` restarts around body.
+
+  `retry` re-enters the region and `skip` resumes after it. Prior mutation and
+  external effects are not rolled back."
+  [& body]
+  `(kvist-intrinsic-restart-case ~@body))
+
+(defmacro operation
+  "Establish an operation boundary with an `abort-operation` restart.
+
+  Aborting leaves the region through compiled control flow and runs ordinary
+  scoped cleanup before execution resumes after the boundary."
+  [& body]
+  `(kvist-intrinsic-condition-operation ~@body))

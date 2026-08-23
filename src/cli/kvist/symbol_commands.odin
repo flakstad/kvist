@@ -233,7 +233,7 @@ parse_cli_symbol_row :: proc(line, fallback_file: string) -> (Cli_Symbol_Row, bo
         column = column_no,
         detail = strings.clone("") if len(fields) < 5 else strings.clone(fields[4]),
         signature = strings.clone("") if len(fields) < 6 else strings.clone(fields[5]),
-        doc = strings.clone("") if len(fields) < 7 else strings.clone(fields[6]),
+        doc = strings.clone("") if len(fields) < 7 else kvist.symbols_unescape_doc_text(fields[6]),
         file = strings.clone(fallback_file) if len(fields) < 8 || fields[7] == "" else strings.clone(fields[7]),
     }
     return row, true

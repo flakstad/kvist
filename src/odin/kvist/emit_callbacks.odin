@@ -655,6 +655,9 @@ emit_proc_literal_text :: proc(e: ^Emitter, params: []Param, returns: Return_Spe
         temp_counter = e.temp_counter,
         captured_proc_specializations = e.captured_proc_specializations,
         current_proc_returns = returns,
+        repl_value_names = e.repl_value_names,
+        repl_var_names = e.repl_var_names,
+        repl_debug_enabled = e.repl_debug_enabled,
     }
     defer strings.builder_destroy(&sub.builder)
 
@@ -675,6 +678,7 @@ emit_proc_literal_text :: proc(e: ^Emitter, params: []Param, returns: Return_Spe
     strings.write_byte(&sub.builder, ')')
     emit_return_spec(&sub, returns)
     strings.write_string(&sub.builder, " {\n")
+    debug_emit_proc_frame_scope(&sub)
     err_body, ok_body := emit_body_forms(&sub, body, returns)
     if !ok_body {
         return "", err_body, false
@@ -1467,7 +1471,19 @@ quoted_symbol_name :: proc(form: CST_Form) -> (string, bool) {
 
 find_decl_doc_text :: proc(e: ^Emitter, name: string) -> (string, bool) {
     ensure_emitter_indexes(e)
-    if idx, found := e.decl_indices[name]; found {
+    lookup_name := name
+    qualified_name := ""
+    separator := strings.index(name, ".")
+    if separator > 0 && separator < len(name)-1 {
+        alias := name[:separator]
+        suffix := name[separator+1:]
+        if pkg, found := e.kvist_import_packages[alias]; found {
+            qualified_name = fmt.tprintf("%s__%s", pkg, suffix)
+            lookup_name = qualified_name
+        }
+    }
+    defer delete(qualified_name)
+    if idx, found := e.decl_indices[lookup_name]; found {
         decl := e.decls[idx]
         if len(decl.doc_lines) == 0 {
             return "", true
@@ -1482,7 +1498,7 @@ find_decl_doc_text :: proc(e: ^Emitter, name: string) -> (string, bool) {
         }
         return strings.clone(strings.to_string(builder)), true
     }
-    return "", false
+    return language_symbol_doc_text(name)
 }
 
 emit_struct_fields_literal :: proc(struct_decl: ^Struct_Decl) -> string {

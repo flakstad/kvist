@@ -332,6 +332,10 @@ managed_struct_helper_name :: proc(op, ty: string) -> string {
 }
 
 managed_clone_value_text :: proc(e: ^Emitter, ty, value: string) -> string {
+    if type_text_is_string(ty) {
+        mark_core_strings(e)
+        return emit_call_text("strings.clone", []string{value})
+    }
     if type_text_is_managed_value(e, ty) {
         mark_data_type(e)
         return emit_call_text("kvist_data_retain", []string{value})
@@ -356,10 +360,33 @@ managed_clone_value_text :: proc(e: ^Emitter, ty, value: string) -> string {
             value,
         )
     }
+    if key_ty, value_ty, ok_map := map_type_parts(ty); ok_map {
+        cloned_key := "kvist_key"
+        if type_text_needs_managed_copy(e, key_ty) {
+            cloned_key = managed_clone_value_text(e, key_ty, cloned_key)
+        }
+        cloned_value := "kvist_value"
+        if type_text_needs_managed_copy(e, value_ty) {
+            cloned_value =
+                managed_clone_value_text(e, value_ty, cloned_value)
+        }
+        return fmt.tprintf(
+            "(proc(kvist_values: %s) -> %s {{ kvist_out := make(%s, len(kvist_values)); for kvist_key, kvist_value in kvist_values {{ kvist_out[%s] = %s }}; return kvist_out }})(%s)",
+            ty,
+            ty,
+            ty,
+            cloned_key,
+            cloned_value,
+            value,
+        )
+    }
     return emit_call_text(managed_struct_helper_name("clone", ty), []string{value})
 }
 
 managed_destroy_value_text :: proc(e: ^Emitter, ty, value: string) -> string {
+    if type_text_is_string(ty) {
+        return emit_call_text("delete", []string{value})
+    }
     if type_text_is_managed_value(e, ty) {
         mark_data_type(e)
         return emit_call_text("kvist_data_release", []string{value})
@@ -374,6 +401,14 @@ managed_destroy_value_text :: proc(e: ^Emitter, ty, value: string) -> string {
                 value,
             )
         }
+        return emit_call_text("delete", []string{value})
+    }
+    if _, _, ok_map := map_type_parts(ty); ok_map {
+        // A live REPL map can be mutated with ordinary Odin map assignment.
+        // Such an assignment may introduce static or borrowed string
+        // descriptors, so recursively destroying entry payloads would be
+        // unsound. Reclaim the map backing store and leave cloned entry
+        // payloads alive until the worker exits instead.
         return emit_call_text("delete", []string{value})
     }
     return emit_call_text(managed_struct_helper_name("destroy", ty), []string{value})
@@ -515,6 +550,24 @@ form_produces_owned_managed_value :: proc(e: ^Emitter, form: CST_Form, depth: in
         return false
     }
     if form.items[0].text == "quasiquote" {
+        return true
+    }
+    if form.items[0].text == "Data" && len(form.items) == 2 {
+        value := form.items[1]
+        if value.kind == .Vector || value.kind == .Brace || value.kind == .Set {
+            return true
+        }
+        if value.kind == .Nil ||
+           value.kind == .Bool ||
+           value.kind == .Number ||
+           value.kind == .String ||
+           value.kind == .Keyword {
+            return false
+        }
+        if value_ty, ok_value_ty := obvious_form_type(e, value);
+           ok_value_ty && type_text_is_managed_value(e, value_ty) {
+            return form_produces_owned_managed_value(e, value, depth+1)
+        }
         return true
     }
     if form.items[0].text == "into" {
@@ -846,7 +899,35 @@ managed_assignment_text :: proc(
         }
     }
     place_ty, ok_place_ty := obvious_form_type(e, place_form)
-    if !ok_place_ty || !type_text_has_owned_lifecycle(e, place_ty) {
+    if !ok_place_ty {
+        return "", false
+    }
+    is_repl_dynamic_place :=
+        place_form.kind == .Symbol &&
+        name_in_list(e.repl_var_names, map_name(place_form.text)) &&
+        type_text_is_dynamic_array(place_ty)
+    is_repl_map_place :=
+        place_form.kind == .Symbol &&
+        name_in_list(e.repl_var_names, map_name(place_form.text)) &&
+        type_text_is_map(place_ty)
+    if is_repl_dynamic_place || is_repl_map_place {
+        move := moves_tracked_local || form_produces_owned_value(value_form, e)
+        if is_repl_map_place {
+            // REPL map storage owns normalized copies of string and managed
+            // entries. A literal or ordinary owned map may still contain
+            // static or borrowed entry descriptors, so never move it directly
+            // into a cell that will later destroy those entries.
+            move = false
+        }
+        return managed_dynamic_array_assignment_text(
+            e,
+            place_ty,
+            address_of_expr_text(place),
+            value,
+            move,
+        ), true
+    }
+    if !type_text_has_owned_lifecycle(e, place_ty) {
         return "", false
     }
     move := moves_tracked_local || form_produces_owned_managed_type(e, value_form, place_ty)

@@ -1489,7 +1489,7 @@ lower_rejects_import_after_declarations :: proc(t: ^testing.T) {
 @(test)
 compile_plain_odin_import_paths :: proc(t: ^testing.T) {
     source := `(package main)
-(import kvist_live "../../../src/odin/kvist_live")
+(import native_support "../../../src/odin/native_support")
 (import fmt "core:fmt")
 
 (defn main []
@@ -1505,7 +1505,7 @@ compile_plain_odin_import_paths :: proc(t: ^testing.T) {
 
     expected := `package main
 
-import kvist_live "../../../src/odin/kvist_live"
+import native_support "../../../src/odin/native_support"
 
 import fmt "core:fmt"
 

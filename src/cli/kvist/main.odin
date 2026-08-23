@@ -13,7 +13,7 @@ import "core:time"
 import kvist "../../odin/kvist"
 
 CACHE_DIR :: ".kvist-cache"
-COMPILE_CACHE_VERSION :: "kvist-compile-cache-v5"
+COMPILE_CACHE_VERSION :: "kvist-compile-cache-v6"
 
 ownership_audit_enabled: bool
 explain_cache_enabled: bool
@@ -29,6 +29,9 @@ print_usage :: proc() {
     fmt.println("  kvist run <input.kvist> [--generated output.odin] [--reload] [--generated-dir dir] [--ownership-audit] [--explain-cache] [--timings] [--timings-json path]")
     fmt.println("  kvist test <input.kvist> [--generated output.odin] [--names test1,test2] [--track-memory] [--ownership-audit] [--explain-cache] [--timings] [--timings-json path]")
     fmt.println("  kvist eval <input.kvist> <form> [--no-print] [--check] [--generated output.odin] [--save name] [--ownership-audit] [--timings] [--timings-json path]")
+    fmt.println("  kvist repl <input.kvist> [--protocol jsonl]")
+    fmt.println("  kvist repl --attach <endpoint-dir> --protocol jsonl")
+    fmt.println("  kvist repl <input.kvist> --attach <endpoint-dir> --protocol jsonl")
     fmt.println("  kvist expand <input.kvist> <form> [--no-print] [-o output.odin]")
     fmt.println("  kvist macroexpand <input.kvist> <form> [-o output.kvist] [--map output.map]")
     fmt.println("  kvist symbols <input.kvist>")
@@ -54,7 +57,7 @@ is_help_arg :: proc(text: string) -> bool {
 }
 
 is_command :: proc(text: string) -> bool {
-    return is_help_arg(text) || text == "compile" || text == "dev" || text == "build" || text == "check" || text == "frontend-check" || text == "run" || text == "test" || text == "eval" || text == "expand" || text == "macroexpand" || text == "symbols" || text == "lifetimes" || text == "editor-symbols" || text == "lookup" || text == "complete" || text == "doc" || text == "xref" || text == "builtin-symbols" || text == "imported-symbols" || text == "package-symbols" || text == "root" || text == "cache"
+    return is_help_arg(text) || text == "compile" || text == "dev" || text == "build" || text == "check" || text == "frontend-check" || text == "run" || text == "test" || text == "eval" || text == "repl" || text == "__repl-worker" || text == "expand" || text == "macroexpand" || text == "symbols" || text == "lifetimes" || text == "editor-symbols" || text == "lookup" || text == "complete" || text == "doc" || text == "xref" || text == "builtin-symbols" || text == "imported-symbols" || text == "package-symbols" || text == "root" || text == "cache"
 }
 
 root_command :: proc() {
@@ -587,6 +590,10 @@ main :: proc() {
         parse_test_command()
     case "eval":
         parse_eval_command()
+    case "repl":
+        parse_repl_command()
+    case "__repl-worker":
+        os.exit(repl_worker_command())
     case "expand":
         parse_expand_command()
     case "macroexpand":

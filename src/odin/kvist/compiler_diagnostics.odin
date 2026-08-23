@@ -138,6 +138,8 @@ compile_warning_code_text :: proc(code: Compile_Warning_Code) -> string {
         return "KVO006"
     case .Ownership_Defer_In_Loop:
         return "KVO007"
+    case .Repl_Unretained_Lifecycle:
+        return "KVR001"
     }
     return "KV0000"
 }

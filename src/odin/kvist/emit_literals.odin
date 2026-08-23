@@ -529,6 +529,18 @@ find_proc_decl :: proc(e: ^Emitter, name: string) -> (^Proc_Decl, bool) {
     if idx, found := e.proc_indices[name]; found {
         return &e.decls[idx].proc_decl, true
     }
+    dispatch_prefix := "kvist_repl_dispatch_"
+    if strings.has_prefix(name, dispatch_prefix) {
+        original_name := name[len(dispatch_prefix):]
+        if name_in_list(
+            e.repl_current_proc_names,
+            original_name,
+        ) {
+            if idx, found := e.proc_indices[original_name]; found {
+                return &e.decls[idx].proc_decl, true
+            }
+        }
+    }
     return nil, false
 }
 
@@ -1125,6 +1137,7 @@ keyword_literal_text :: proc(e: ^Emitter, text: string) -> string {
 mark_data_type :: proc(e: ^Emitter) {
     e.features.data_type = true
     e.features.core_strings = true
+    e.features.core_fmt = true
     // Contextual Data's generic lift overload includes the distinct keyword
     // scalar even if this source has no native keyword expression.
     mark_keyword_type(e)

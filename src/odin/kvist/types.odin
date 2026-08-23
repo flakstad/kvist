@@ -85,6 +85,8 @@ Param :: struct {
     ty:            string,
     ownership:     Ownership_Mode,
     owner_flag:    string,
+    mutable:       bool,
+    debug_unavailable: bool,
     has_default:   bool,
     default_value: CST_Form,
 }
@@ -312,6 +314,7 @@ Compile_Warning_Code :: enum {
     Ownership_Borrowed_Escape,
     Ownership_Delete_Borrowed,
     Ownership_Defer_In_Loop,
+    Repl_Unretained_Lifecycle,
 }
 
 Compile_Warning_Confidence :: enum {

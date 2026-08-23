@@ -12,6 +12,18 @@ emit_body_forms :: proc(e: ^Emitter, body: []CST_Form, returns: Return_Spec) -> 
     for form, idx in body {
         last := idx == len(body)-1
         start_line := e.line
+        explicit_debug_pause :=
+            form.kind == .List &&
+            len(form.items) > 0 &&
+            form.items[0].kind == .Symbol &&
+            (form.items[0].text == "kvist-intrinsic-breakpoint" ||
+             form.items[0].text == "kvist-intrinsic-signal-condition" ||
+             form.items[0].text == "kvist-intrinsic-use-value-restart" ||
+             form.items[0].text == "kvist-intrinsic-restart-case" ||
+             form.items[0].text == "kvist-intrinsic-condition-operation")
+        if e.repl_debug_enabled && !explicit_debug_pause {
+            debug_emit_pause(e, form, false)
+        }
         err_stmt, ok_stmt := emit_stmt(e, form, last, returns)
         if !ok_stmt {
             return err_stmt, false
@@ -61,7 +73,7 @@ emit_local_var_stmt :: proc(e: ^Emitter, form: CST_Form) -> (Compile_Error, bool
         if next_i >= len(form.items) {
             local_name := map_name(name[:len(name)-1])
             emit_line(e, fmt.tprintf("%s: %s", local_name, parsed_ty))
-            bind_local_type(e, local_name, parsed_ty)
+            bind_local_type(e, local_name, parsed_ty, mutable = true)
             return {}, true
         }
         ty = parsed_ty
@@ -86,11 +98,11 @@ emit_local_var_stmt :: proc(e: ^Emitter, form: CST_Form) -> (Compile_Error, bool
     local_name := map_name(name)
     if is_typed {
         emit_prefixed_expr_mapped(e, fmt.tprintf("%s: %s = ", local_name, ty), value, value_form.span)
-        bind_local_type(e, local_name, ty)
+        bind_local_type(e, local_name, ty, mutable = true)
     } else {
         emit_prefixed_expr_mapped(e, fmt.tprintf("%s := ", local_name), value, value_form.span)
         if form_ty, ok_ty := obvious_form_type(e, value_form); ok_ty {
-            bind_local_type(e, local_name, form_ty)
+            bind_local_type(e, local_name, form_ty, mutable = true)
         }
     }
     return {}, true
@@ -514,7 +526,14 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
             if bad_let_return {
                 return err_let_return, false
             }
-            err_let_defer_return, bad_let_defer_return := let_defer_return_error(bindings[:], body[:], last_in_proc, returns)
+            err_let_defer_return, bad_let_defer_return :=
+                let_defer_return_error(
+                    e,
+                    bindings[:],
+                    body[:],
+                    last_in_proc,
+                    returns,
+                )
             if bad_let_defer_return {
                 return err_let_defer_return, false
             }
@@ -727,6 +746,532 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
             emit_discarded_expr(e, item, expr)
         }
         return {}, true
+    case "kvist-intrinsic-restart-case":
+        if len(form.items) < 2 {
+            return Compile_Error{
+                message = "condition.restart-case expects a body",
+                span = form.span,
+            }, false
+        }
+        label :=
+            fmt.tprintf("kvist_debug_restart_case_%d", e.temp_counter)
+        e.temp_counter += 1
+        emit_line(e, fmt.tprintf("%s: for %c", label, '{'))
+        e.indent += 1
+        push_local_type_scope(e)
+        append(
+            &e.debug_restart_contexts,
+            Debug_Restart_Context{
+                label = label,
+                restart_flags = 4 | 8,
+            },
+        )
+        body: [dynamic]CST_Form
+        for item in form.items[1:] {
+            append(&body, item)
+        }
+        err_body, ok_body :=
+            emit_body_forms(e, body[:], Return_Spec{kind = .None})
+        resize(
+            &e.debug_restart_contexts,
+            len(e.debug_restart_contexts)-1,
+        )
+        pop_local_type_scope(e)
+        if !ok_body {
+            return err_body, false
+        }
+        emit_line(e, fmt.tprintf("break %s", label))
+        e.indent -= 1
+        emit_line(e, "}")
+        return {}, true
+    case "kvist-intrinsic-condition-operation":
+        if len(form.items) < 2 {
+            return Compile_Error{
+                message = "condition.operation expects a body",
+                span = form.span,
+            }, false
+        }
+        label :=
+            fmt.tprintf("kvist_debug_operation_%d", e.temp_counter)
+        e.temp_counter += 1
+        emit_line(e, fmt.tprintf("%s: for %c", label, '{'))
+        e.indent += 1
+        push_local_type_scope(e)
+        append(
+            &e.debug_restart_contexts,
+            Debug_Restart_Context{
+                label = label,
+                restart_flags = 16,
+            },
+        )
+        body: [dynamic]CST_Form
+        for item in form.items[1:] {
+            append(&body, item)
+        }
+        err_body, ok_body :=
+            emit_body_forms(e, body[:], Return_Spec{kind = .None})
+        resize(
+            &e.debug_restart_contexts,
+            len(e.debug_restart_contexts)-1,
+        )
+        pop_local_type_scope(e)
+        if !ok_body {
+            return err_body, false
+        }
+        emit_line(e, fmt.tprintf("break %s", label))
+        e.indent -= 1
+        emit_line(e, "}")
+        return {}, true
+    case "kvist-intrinsic-breakpoint":
+        if len(form.items) != 1 {
+            return Compile_Error{
+                message = "debug.break does not take arguments",
+                span = form.span,
+            }, false
+        }
+        if !e.repl_debug_enabled {
+            return Compile_Error{
+                message = "debug.break is available only in a native REPL generation",
+                span = form.span,
+            }, false
+        }
+        debug_emit_pause(e, form, true)
+        return {}, true
+    case "kvist-intrinsic-signal-condition":
+        if len(form.items) != 6 {
+            return Compile_Error{
+                message =
+                    "condition.signal expects type, message, and Data context",
+                span = form.span,
+            }, false
+        }
+        dispatch, err_dispatch, ok_dispatch := emit_expr(e, form.items[1])
+        if !ok_dispatch {
+            return err_dispatch, false
+        }
+        unhandled, err_unhandled, ok_unhandled := emit_expr(e, form.items[2])
+        if !ok_unhandled {
+            return err_unhandled, false
+        }
+        type_form := form.items[3]
+        condition_type := ""
+        owned_condition_type := ""
+        defer delete(owned_condition_type)
+        if type_form.kind != .Keyword &&
+           type_form.kind != .String {
+            return Compile_Error{
+                message =
+                    "condition.signal type must be a keyword or string literal",
+                span = type_form.span,
+            }, false
+        }
+        if type_form.kind == .String {
+            owned_condition_type =
+                unquote_string(type_form.text)
+            condition_type = owned_condition_type
+        } else {
+            condition_type = type_form.text
+            if len(condition_type) > 0 &&
+               condition_type[0] == ':' {
+                condition_type = condition_type[1:]
+            }
+        }
+        if condition_type == "" {
+            return Compile_Error{
+                message =
+                    "condition.signal type must not be empty",
+                span = type_form.span,
+            }, false
+        }
+        message, err_message, ok_message :=
+            emit_expr_for_expected_type(
+                e,
+                form.items[4],
+                "string",
+            )
+        if !ok_message {
+            return err_message, false
+        }
+        message_name :=
+            fmt.tprintf("kvist_condition_message_%d", e.temp_counter)
+        e.temp_counter += 1
+        emit_prefixed_expr_mapped(
+            e,
+            fmt.tprintf("%s: string = ", message_name),
+            message,
+            form.items[4].span,
+        )
+        if form_is_owned_result(form.items[4], e) {
+            emit_line(e, fmt.tprintf("defer delete(%s)", message_name))
+        }
+        mark_data_type(e)
+        condition_data, err_data, ok_data :=
+            emit_expr_for_expected_type(e, form.items[5], "Data")
+        if !ok_data {
+            return err_data, false
+        }
+        data_name :=
+            fmt.tprintf("kvist_condition_data_%d", e.temp_counter)
+        e.temp_counter += 1
+        data_text := condition_data
+        if !form_produces_owned_managed_type(e, form.items[5], "Data") {
+            data_text = emit_call_text(
+                "kvist_data_retain",
+                []string{condition_data},
+            )
+        }
+        emit_prefixed_expr_mapped(
+            e,
+            fmt.tprintf("%s := ", data_name),
+            data_text,
+            form.items[5].span,
+        )
+        emit_line(e, fmt.tprintf("defer kvist_data_release(%s)", data_name))
+        restart_flags: u32 = 1
+        if len(e.debug_restart_contexts) > 0 {
+            restart_flags |=
+                e.debug_restart_contexts[
+                    len(e.debug_restart_contexts)-1
+                ].restart_flags
+        }
+        decision_name :=
+            fmt.tprintf("kvist_condition_decision_%d", e.temp_counter)
+        e.temp_counter += 1
+        if form.items[1].kind == .Nil {
+            emit_line(
+                e,
+                fmt.tprintf(
+                    "%s := struct %c handled: bool, restart, value: string %c%c%c",
+                    decision_name,
+                    '{',
+                    '}',
+                    '{',
+                    '}',
+                ),
+            )
+        } else {
+            emit_line(
+                e,
+                fmt.tprintf(
+                    "%s := %s(%q, %s, %s, u32(%d))",
+                    decision_name,
+                    dispatch,
+                    condition_type,
+                    message_name,
+                    data_name,
+                    restart_flags,
+                ),
+            )
+        }
+        if len(e.debug_restart_contexts) == 0 {
+            if e.repl_debug_enabled {
+                emit_line(e, fmt.tprintf("if !%s.handled %c", decision_name, '{'))
+                e.indent += 1
+                // The intrinsic is introduced by condition.signal's macro,
+                // whose own span belongs to the package that defines the
+                // macro. The condition type is a spliced caller form and
+                // therefore carries the signalling source location.
+                pause_form := form
+                pause_form.span = form.items[3].span
+                debug_emit_pause(
+                    e,
+                    pause_form,
+                    true,
+                    message_name,
+                    condition_data = data_name,
+                    condition_type = condition_type,
+                )
+                e.indent -= 1
+                emit_line(e, "}")
+            } else {
+                emit_line(
+                    e,
+                    fmt.tprintf(
+                        "if !%s.handled %c %s(%q, %s) %c",
+                        decision_name,
+                        '{',
+                        unhandled,
+                        condition_type,
+                        message_name,
+                        '}',
+                    ),
+                )
+            }
+            return {}, true
+        }
+        selected_name :=
+            fmt.tprintf("kvist_restart_name_%d", e.temp_counter)
+        e.temp_counter += 1
+        emit_line(e, fmt.tprintf("%s := %s.restart", selected_name, decision_name))
+        if e.repl_debug_enabled {
+            selection_name :=
+                fmt.tprintf("kvist_restart_selection_%d", e.temp_counter)
+            e.temp_counter += 1
+            emit_line(
+                e,
+                fmt.tprintf(
+                    "%s: Kvist_Repl_Restart_Selection",
+                    selection_name,
+                ),
+            )
+            emit_line(e, fmt.tprintf("if !%s.handled %c", decision_name, '{'))
+            e.indent += 1
+            debug_emit_pause(
+                e,
+                form,
+                true,
+                condition_message = message_name,
+                condition_data = data_name,
+                restart_selection_name = selection_name,
+                condition_restart_flags = restart_flags,
+                condition_type = condition_type,
+            )
+            selected_from_client :=
+                debug_emit_selected_restart_name(e, selection_name)
+            emit_line(e, fmt.tprintf("%s = %s", selected_name, selected_from_client))
+            e.indent -= 1
+            emit_line(e, "}")
+        } else {
+            emit_line(
+                e,
+                fmt.tprintf(
+                    "if !%s.handled %c %s(%q, %s) %c",
+                    decision_name,
+                    '{',
+                    unhandled,
+                    condition_type,
+                    message_name,
+                    '}',
+                ),
+            )
+        }
+        debug_emit_restart_case_branch(e, selected_name)
+        return {}, true
+    case "kvist-intrinsic-use-value-restart":
+        if len(form.items) != 5 {
+            return Compile_Error{
+                message =
+                    "condition.use-value! expects a mutable local and one string literal",
+                span = form.span,
+            }, false
+        }
+        dispatch, err_dispatch, ok_dispatch := emit_expr(e, form.items[1])
+        if !ok_dispatch {
+            return err_dispatch, false
+        }
+        unhandled, err_unhandled, ok_unhandled := emit_expr(e, form.items[2])
+        if !ok_unhandled {
+            return err_unhandled, false
+        }
+        if form.items[3].kind != .Symbol {
+            return Compile_Error{
+                message =
+                    "condition.use-value! target must be a mutable local",
+                span = form.items[3].span,
+            }, false
+        }
+        if form.items[4].kind != .String {
+            return Compile_Error{
+                message =
+                    "condition.use-value! currently expects a string literal message",
+                span = form.items[4].span,
+            }, false
+        }
+        target_name := map_name(form.items[3].text)
+        target_type := ""
+        target_mutable := false
+        for i := len(e.local_types)-1; i >= 0; i -= 1 {
+            if e.local_types[i].name == target_name {
+                target_type = e.local_types[i].ty
+                target_mutable = e.local_types[i].mutable
+                break
+            }
+        }
+        if target_type == "" || !target_mutable {
+            return Compile_Error{
+                message =
+                    "condition.use-value! target must be a visible mutable local",
+                span = form.items[3].span,
+            }, false
+        }
+        if target_type != "int" &&
+           target_type != "bool" &&
+           target_type != "f32" &&
+           target_type != "f64" &&
+           target_type != "string" {
+            return Compile_Error{
+                message =
+                    "condition.use-value! currently supports mutable int, bool, f32, f64, and string locals",
+                span = form.items[3].span,
+            }, false
+        }
+        message, err_message, ok_message :=
+            emit_expr_for_expected_type(e, form.items[4], "string")
+        if !ok_message {
+            return err_message, false
+        }
+        restart_flags: u32 = 1 | 2
+        if len(e.debug_restart_contexts) > 0 {
+            restart_flags |=
+                e.debug_restart_contexts[
+                    len(e.debug_restart_contexts)-1
+                ].restart_flags
+        }
+        decision_name :=
+            fmt.tprintf("kvist_condition_decision_%d", e.temp_counter)
+        e.temp_counter += 1
+        if form.items[1].kind == .Nil {
+            emit_line(
+                e,
+                fmt.tprintf(
+                    "%s := struct %c handled: bool, restart, value: string %c%c%c",
+                    decision_name,
+                    '{',
+                    '}',
+                    '{',
+                    '}',
+                ),
+            )
+        } else {
+            emit_line(
+                e,
+                fmt.tprintf(
+                    "%s := %s(%q, %s, Data%c%c, u32(%d))",
+                    decision_name,
+                    dispatch,
+                    "kvist/condition",
+                    message,
+                    '{',
+                    '}',
+                    restart_flags,
+                ),
+            )
+        }
+        selected_name :=
+            fmt.tprintf("kvist_restart_name_%d", e.temp_counter)
+        e.temp_counter += 1
+        emit_line(e, fmt.tprintf("%s := %s.restart", selected_name, decision_name))
+        selected_value :=
+            fmt.tprintf("kvist_restart_value_%d", e.temp_counter)
+        e.temp_counter += 1
+        emit_line(e, fmt.tprintf("%s := %s.value", selected_value, decision_name))
+        if e.repl_debug_enabled {
+            selection_name :=
+                fmt.tprintf("kvist_restart_selection_%d", e.temp_counter)
+            e.temp_counter += 1
+            emit_line(
+                e,
+                fmt.tprintf(
+                    "%s: Kvist_Repl_Restart_Selection",
+                    selection_name,
+                ),
+            )
+            emit_line(e, fmt.tprintf("if !%s.handled %c", decision_name, '{'))
+            e.indent += 1
+            debug_emit_pause(
+                e,
+                form,
+                true,
+                condition_message = message,
+                condition_value_type = target_type,
+                restart_selection_name = selection_name,
+                condition_restart_flags = restart_flags,
+            )
+            selected_from_client :=
+                debug_emit_selected_restart_name(e, selection_name)
+            emit_line(e, fmt.tprintf("%s = %s", selected_name, selected_from_client))
+            emit_line(
+                e,
+                fmt.tprintf(
+                    "%s = string(%s.value.data[:%s.value.length])",
+                    selected_value,
+                    selection_name,
+                    selection_name,
+                ),
+            )
+            e.indent -= 1
+            emit_line(e, "}")
+        } else {
+            emit_line(
+                e,
+                fmt.tprintf(
+                    "if !%s.handled %c %s(%q, %s) %c",
+                    decision_name,
+                    '{',
+                    unhandled,
+                    "kvist/condition",
+                    message,
+                    '}',
+                ),
+            )
+        }
+        debug_emit_restart_case_branch(e, selected_name)
+        emit_line(
+            e,
+            fmt.tprintf(
+                "if %s == \"use-value\" %c",
+                selected_name,
+                '{',
+            ),
+        )
+        e.indent += 1
+        if target_type == "int" ||
+           target_type == "f32" ||
+           target_type == "f64" {
+            parsed_name :=
+                fmt.tprintf("kvist_restart_parsed_%d", e.temp_counter)
+            e.temp_counter += 1
+            ok_name :=
+                fmt.tprintf("kvist_restart_ok_%d", e.temp_counter)
+            e.temp_counter += 1
+            emit_line(
+                e,
+                fmt.tprintf(
+                    "%s, %s := kvist_condition_strconv.parse_%s(%s)",
+                    parsed_name,
+                    ok_name,
+                    target_type,
+                    selected_value,
+                ),
+            )
+            emit_line(
+                e,
+                fmt.tprintf(
+                    "assert(%s, \"invalid %s use-value restart payload\")",
+                    ok_name,
+                    target_type,
+                ),
+            )
+            emit_line(
+                e,
+                fmt.tprintf("%s = %s", target_name, parsed_name),
+            )
+        } else if target_type == "bool" {
+            emit_line(
+                e,
+                fmt.tprintf(
+                    "assert(%s == \"true\" || %s == \"false\", \"invalid bool use-value restart payload\")",
+                    selected_value,
+                    selected_value,
+                ),
+            )
+            emit_line(
+                e,
+                fmt.tprintf(
+                    "%s = %s == \"true\"",
+                    target_name,
+                    selected_value,
+                ),
+            )
+        } else {
+            emit_line(
+                e,
+                fmt.tprintf("%s = %s", target_name, selected_value),
+            )
+        }
+        e.indent -= 1
+        emit_line(e, "}")
+        return {}, true
     case "break":
         if len(form.items) != 1 {
             return Compile_Error{message = "break does not take arguments", span = form.span}, false
@@ -743,6 +1288,13 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
         if len(form.items) < 2 {
             return Compile_Error{message = "defer expects a body", span = form.span}, false
         }
+        // Deferred cleanup runs while leaving a scope, including while a
+        // debugger abort is already unwinding it. A safe point here could
+        // pause during cleanup and its cooperative abort return would be
+        // illegal inside Odin's defer statement.
+        previous_repl_debug_enabled := e.repl_debug_enabled
+        e.repl_debug_enabled = false
+        defer e.repl_debug_enabled = previous_repl_debug_enabled
         if len(form.items) == 2 {
             deferred := form.items[1]
             if deferred.kind == .List && len(deferred.items) > 0 && deferred.items[0].kind == .Symbol {
@@ -799,7 +1351,18 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
         rhs: string
         err_rhs: Compile_Error
         ok_rhs: bool
-        if form_has_nested_owned_value(form.items[2], e) {
+        place_ty, has_place_ty := obvious_form_type(e, form.items[1])
+        is_repl_dynamic_place :=
+            form.items[1].kind == .Symbol &&
+            name_in_list(e.repl_var_names, map_name(form.items[1].text)) &&
+            has_place_ty &&
+            type_text_is_dynamic_array(place_ty)
+        if has_place_ty &&
+           (type_text_has_owned_lifecycle(e, place_ty) ||
+            is_repl_dynamic_place) {
+            rhs, err_rhs, ok_rhs =
+                emit_expr_for_expected_type(e, form.items[2], place_ty)
+        } else if form_has_nested_owned_value(form.items[2], e) {
             rhs, err_rhs, ok_rhs = emit_expr_with_owned_nested_temps(e, form.items[2])
         } else {
             rhs, err_rhs, ok_rhs = emit_expr(e, form.items[2])
@@ -1001,6 +1564,15 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
             emit_discarded_expr(e, form, expr)
         } else {
             emit_prefixed_expr_mapped(e, "", expr, form.span)
+        }
+        if canonical_head_text == "delete" {
+            for item in form.items[1:] {
+                if item.kind == .Symbol {
+                    name := map_name(item.text)
+                    mark_debug_local_unavailable(e, name)
+                    delete(name)
+                }
+            }
         }
         return {}, true
     }

@@ -158,7 +158,7 @@ symbols_append_source_package_records :: proc(builder: ^strings.Builder, seen: ^
             delete(fields)
             continue
         }
-        if symbols_record_detail(line) == "private" {
+        if strings.has_prefix(symbols_record_detail(line), "private") {
             delete(fields)
             continue
         }
@@ -614,7 +614,9 @@ editor_builtin_symbols_append :: proc(builder: ^strings.Builder, seen: ^map[stri
         }
         switch entry.name {
         case "type":
-            symbols_write_record_doc_file(&temp, "kvist form", entry.name, line, column, "", "(type Head Arg...)", symbols_doc_lines_from_string("Instantiate an Odin polymorphic type constructor. For example, (type chan.Chan int) lowers to chan.Chan(int) in both type and value positions.")[:], file)
+            symbols_write_record_doc_file(&temp, "kvist form", entry.name, line, column, "", "(type value)", symbols_doc_lines_from_string("Return a comparable type descriptor. Native values report their Kvist type, concrete functions report their procedure signature, type names report typeid, and Data reports its runtime kind.")[:], file)
+        case "typeid":
+            symbols_write_record_doc_file(&temp, "kvist form", entry.name, line, column, "", "(typeid Head Arg...)", symbols_doc_lines_from_string("Instantiate an Odin polymorphic type constructor or pass a type value. For example, (typeid chan.Chan int) lowers to chan.Chan(int) in both type and value positions.")[:], file)
         case:
         }
         symbols_append_unique_records(builder, seen, strings.to_string(temp))
@@ -630,7 +632,11 @@ editor_language_symbols_append :: proc(builder: ^strings.Builder, seen: ^map[str
         }
         temp := strings.builder_make()
         defer strings.builder_destroy(&temp)
-        symbols_write_record_doc_file(&temp, entry.kind, entry.name, line, column, entry.relative, "", nil, file)
+        signature := language_entry_signature(entry)
+        doc := language_entry_doc(entry)
+        doc_lines := symbols_doc_lines_from_string(doc)
+        symbols_write_record_doc_file(&temp, entry.kind, entry.name, line, column, entry.relative, signature, doc_lines[:], file)
+        delete(doc_lines)
         symbols_append_unique_records(builder, seen, strings.to_string(temp))
         delete(file)
     }

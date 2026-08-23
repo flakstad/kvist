@@ -491,12 +491,12 @@ parse_type_text :: proc(form: CST_Form) -> (text: string, err: Compile_Error, ok
             return fmt.tprintf("distinct %s", base_text), {}, true
         }
 
-        if is_symbol(form.items[0], "type") {
+        if is_symbol(form.items[0], "typeid") {
             if len(form.items) == 2 {
                 return parse_type_text(form.items[1])
             }
             if len(form.items) < 3 {
-                return "", Compile_Error{message = "type form expects a type value or a type constructor and at least one argument", span = form.span}, false
+                return "", Compile_Error{message = "typeid form expects a type value or a type constructor and at least one argument", span = form.span}, false
             }
             constructor_text, err_constructor, ok_constructor := parse_type_text(form.items[1])
             if !ok_constructor {
@@ -1405,41 +1405,59 @@ parse_decl :: proc(top_form: CST_Top_Form) -> (decl: AST_Decl, err: Compile_Erro
         if len(form.items) == 2 && form.items[1].kind == .String {
             return decl, Compile_Error{message = "import expects alias plus string path, string path plus :as alias, or string path plus :refer vector", span = form.span}, false
         }
-        if len(form.items) == 4 &&
-           form.items[1].kind == .String &&
-           form.items[2].kind == .Keyword &&
-           form.items[2].text == ":as" &&
-           form.items[3].kind == .Symbol {
-            return AST_Decl{
-                kind = .Import,
-                span = form.span,
-                doc_lines = top_form.doc_lines,
-                import_decl = Import_Decl{
-                    alias     = map_name(form.items[3].text),
-                    path      = form.items[1].text,
-                    has_alias = true,
-                },
-            }, {}, true
-        }
-        if len(form.items) == 4 &&
-           form.items[1].kind == .String &&
-           form.items[2].kind == .Keyword &&
-           form.items[2].text == ":refer" &&
-           form.items[3].kind == .Vector {
+        if len(form.items) >= 4 &&
+           len(form.items)%2 == 0 &&
+           form.items[1].kind == .String {
+            alias := ""
+            has_alias := false
             refer_names: [dynamic]string
-            for item in form.items[3].items {
-                if item.kind != .Symbol {
-                    return decl, Compile_Error{message = "import :refer expects a vector of symbols", span = item.span}, false
+            has_refer := false
+            for i := 2; i+1 < len(form.items); i += 2 {
+                option := form.items[i]
+                value := form.items[i+1]
+                if option.kind != .Keyword {
+                    return decl, Compile_Error{message = "import options must be keyword/value pairs", span = option.span}, false
                 }
-                append(&refer_names, item.text)
+                switch option.text {
+                case ":as":
+                    if has_alias {
+                        return decl, Compile_Error{message = "import accepts :as only once", span = option.span}, false
+                    }
+                    if value.kind != .Symbol {
+                        return decl, Compile_Error{message = "import :as expects a symbol alias", span = value.span}, false
+                    }
+                    alias = map_name(value.text)
+                    has_alias = true
+                case ":refer":
+                    if has_refer {
+                        return decl, Compile_Error{message = "import accepts :refer only once", span = option.span}, false
+                    }
+                    if value.kind != .Vector {
+                        return decl, Compile_Error{message = "import :refer expects a vector of symbols", span = value.span}, false
+                    }
+                    for item in value.items {
+                        if item.kind != .Symbol {
+                            return decl, Compile_Error{message = "import :refer expects a vector of symbols", span = item.span}, false
+                        }
+                        append(&refer_names, item.text)
+                    }
+                    has_refer = true
+                case:
+                    return decl, Compile_Error{message = fmt.tprintf("unknown import option: %s", option.text), span = option.span}, false
+                }
+            }
+            if !has_alias && !has_refer {
+                return decl, Compile_Error{message = "import expects :as, :refer, or both", span = form.span}, false
             }
             return AST_Decl{
                 kind = .Import,
                 span = form.span,
                 doc_lines = top_form.doc_lines,
                 import_decl = Import_Decl{
-                    path = form.items[1].text,
-                    has_refer = true,
+                    alias       = alias,
+                    path        = form.items[1].text,
+                    has_alias   = has_alias,
+                    has_refer   = has_refer,
                     refer_names = refer_names,
                 },
             }, {}, true

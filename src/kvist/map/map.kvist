@@ -5,6 +5,7 @@
 (import core "kvist:core")
 (import arr "kvist:arr")
 
+;; Key/value pair yielded by map.entries in fused transform pipelines.
 (@exports [entry])
 
 (defmacro empty

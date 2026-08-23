@@ -190,7 +190,14 @@ windows_import_collection_args :: proc(generated_path: string) -> [dynamic]strin
     return args
 }
 
-print_compile_warnings :: proc(path, source, eval_source: string, warnings: []kvist.Compile_Warning) {
+format_compile_warnings :: proc(
+    path,
+    source,
+    eval_source: string,
+    warnings: []kvist.Compile_Warning,
+) -> string {
+    builder := strings.builder_make()
+    defer strings.builder_destroy(&builder)
     for warning, idx in warnings {
         if warning.confidence == .Conservative && !ownership_audit_enabled {
             continue
@@ -218,9 +225,22 @@ print_compile_warnings :: proc(path, source, eval_source: string, warnings: []kv
         } else {
             formatted = kvist.format_compile_warning(path, source, warning)
         }
-        fmt.eprint(formatted)
+        strings.write_string(&builder, formatted)
         delete(formatted)
     }
+    return strings.clone(strings.to_string(builder))
+}
+
+print_compile_warnings :: proc(path, source, eval_source: string, warnings: []kvist.Compile_Warning) {
+    formatted :=
+        format_compile_warnings(
+            path,
+            source,
+            eval_source,
+            warnings,
+        )
+    defer delete(formatted)
+    fmt.eprint(formatted)
 }
 
 ensure_output_parent_dir :: proc(path: string) -> bool {

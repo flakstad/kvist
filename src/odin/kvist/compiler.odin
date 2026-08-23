@@ -26,12 +26,16 @@ profile_elapsed_ns :: proc(start: time.Tick) -> i64 {
     return time.duration_nanoseconds(time.tick_since(start))
 }
 
-load_path_expanded_forms :: proc(path: string, profile: ^Compile_Profile = nil) -> (expanded: [dynamic]CST_Top_Form, macros: [dynamic]User_Macro, err: Compile_Error, ok: bool) {
+load_path_expanded_forms :: proc(
+    path: string,
+    profile: ^Compile_Profile = nil,
+    extra_imports: []CST_Top_Form = nil,
+) -> (expanded: [dynamic]CST_Top_Form, macros: [dynamic]User_Macro, err: Compile_Error, ok: bool) {
     load_start: time.Tick
     if profile != nil {
         load_start = time.tick_now()
     }
-    loaded, err_load, ok_load := load_root_file_forms(path)
+    loaded, err_load, ok_load := load_root_file_forms(path, extra_imports)
     if profile != nil {
         profile.load_and_resolve_ns += profile_elapsed_ns(load_start)
     }
@@ -163,7 +167,27 @@ compile_program_eval_with_map :: proc(program: AST_Program, eval_source: string,
     return compile_program_eval_form_with_map(program, eval_form, no_print)
 }
 
-compile_program_eval_form_with_map :: proc(program: AST_Program, eval_form: CST_Form, no_print: bool = false, profile: ^Compile_Profile = nil) -> (result: Emit_Result, err: Compile_Error, ok: bool) {
+compile_program_eval_form_with_map :: proc(
+    program: AST_Program,
+    eval_form: CST_Form,
+    no_print: bool = false,
+    profile: ^Compile_Profile = nil,
+    repl_generation := false,
+    repl_prior_proc_names: []string = nil,
+    repl_current_proc_names: []string = nil,
+    repl_has_runtime := true,
+    repl_value_names: []string = nil,
+    repl_current_value_names: []string = nil,
+    repl_var_names: []string = nil,
+    repl_current_var_names: []string = nil,
+    repl_recent_result_types: []string = nil,
+    repl_inspect_only := false,
+    repl_inspection_source_slot := "",
+    repl_inspection_source_type := "",
+    repl_inspection_result_slot := "",
+    repl_inspection_page_offset := 0,
+    repl_inspection_page_limit := 0,
+) -> (result: Emit_Result, err: Compile_Error, ok: bool) {
     result_allocator := context.allocator
     old_allocator := context.allocator
     temp_scope := runtime.default_temp_allocator_temp_begin()
@@ -191,14 +215,119 @@ compile_program_eval_form_with_map :: proc(program: AST_Program, eval_form: CST_
         emit_start = time.tick_now()
     }
     eval_head := eval_form_head(eval_form)
-    if eval_head_is_decl(eval_head) {
-        eval_decl, err_decl, ok_decl := parse_decl(CST_Top_Form{form = eval_form})
-        if !ok_decl {
-            return result, clone_compile_error(err_decl, result_allocator), false
+    if repl_generation {
+        for repl_current_proc_name in repl_current_proc_names {
+            current_decl: ^Proc_Decl
+            for &decl in lowered.decls {
+                if decl.kind == .Proc && decl.proc_decl.name == repl_current_proc_name {
+                    current_decl = &decl.proc_decl
+                }
+            }
+            if current_decl == nil || !repl_proc_is_concrete(current_decl) {
+                return result, clone_compile_error(Compile_Error{
+                    message = "persistent REPL defn currently requires concrete parameter and result types",
+                    span = eval_form.span,
+                }, result_allocator), false
+            }
         }
-        temp_result, err_emit, ok_emit = emit_eval_decl_program_with_source_map(lowered, IR_Decl(eval_decl))
+        for value_name in repl_current_value_names {
+            current_decl: ^Const_Decl
+            for &decl in lowered.decls {
+                if decl.kind == .Const && decl.const_decl.name == value_name {
+                    current_decl = &decl.const_decl
+                }
+            }
+            if current_decl == nil ||
+               !current_decl.has_ty ||
+               !repl_storage_type_supported(
+                   lowered,
+                   current_decl.ty,
+                   allow_dynamic_array = true,
+                   allow_slice = true,
+               ) {
+                message :=
+                    "persistent REPL def requires an explicit retainable value type"
+                if current_decl != nil &&
+                   current_decl.has_ty &&
+                   repl_storage_type_requires_lifecycle(
+                       lowered,
+                       current_decl.ty,
+                    ) {
+                    message =
+                        "persistent REPL def with a pointer, foreign view, or opaque resource requires an owned copy until explicit lifecycle adapters are available"
+                }
+                return result, clone_compile_error(Compile_Error{
+                    message = message,
+                    span = eval_form.span,
+                }, result_allocator), false
+            }
+        }
+        for var_name in repl_current_var_names {
+            current_decl: ^Var_Decl
+            for &decl in lowered.decls {
+                if decl.kind == .Var && decl.var_decl.name == var_name {
+                    current_decl = &decl.var_decl
+                }
+            }
+            if current_decl == nil ||
+               !current_decl.has_ty ||
+               !repl_storage_type_supported(
+                   lowered,
+                   current_decl.ty,
+                   allow_dynamic_array = true,
+                   allow_slice = true,
+               ) {
+                message :=
+                    "persistent REPL defvar requires an explicit retainable value type"
+                if current_decl != nil &&
+                   current_decl.has_ty &&
+                   repl_storage_type_requires_lifecycle(
+                       lowered,
+                       current_decl.ty,
+                    ) {
+                    message =
+                        "persistent REPL defvar with a pointer, foreign view, or opaque resource requires an owned copy until explicit lifecycle adapters are available"
+                }
+                return result, clone_compile_error(Compile_Error{
+                    message = message,
+                    span = eval_form.span,
+                }, result_allocator), false
+            }
+        }
+        temp_result, err_emit, ok_emit = emit_eval_program_with_source_map(
+            lowered,
+            eval_form,
+            no_print,
+            true,
+            repl_prior_proc_names,
+            repl_current_proc_names,
+            repl_has_runtime,
+            repl_value_names,
+            repl_current_value_names,
+            repl_var_names,
+            repl_current_var_names,
+            repl_recent_result_types,
+            repl_inspect_only,
+            repl_inspection_source_slot,
+            repl_inspection_source_type,
+            repl_inspection_result_slot,
+            repl_inspection_page_offset,
+            repl_inspection_page_limit,
+        )
+    } else if eval_head_is_decl(eval_head) {
+            eval_decl, err_decl, ok_decl := parse_decl(CST_Top_Form{form = eval_form})
+            if !ok_decl {
+                return result, clone_compile_error(err_decl, result_allocator), false
+            }
+            temp_result, err_emit, ok_emit = emit_eval_decl_program_with_source_map(lowered, IR_Decl(eval_decl))
     } else {
-        temp_result, err_emit, ok_emit = emit_eval_program_with_source_map(lowered, eval_form, no_print)
+        temp_result, err_emit, ok_emit = emit_eval_program_with_source_map(
+            lowered,
+            eval_form,
+            no_print,
+            repl_generation,
+            repl_prior_proc_names,
+        )
     }
     if !ok_emit {
         if profile != nil {
@@ -330,7 +459,7 @@ eval_form_head :: proc(form: CST_Form) -> string {
 
 eval_head_is_decl :: proc(head: string) -> bool {
     switch head {
-    case "package", "import", "foreign-import", "def", "def-", "defvar", "defvar-", "defstruct", "defstruct-", "defenum", "defenum-", "defunion", "defunion-", "odin", "@exports", "defn", "defn-", "deftransform", "deftransform-", "defiter", "defiter-":
+    case "package", "import", "foreign-import", "def", "def-", "defvar", "defvar-", "defstruct", "defstruct-", "defenum", "defenum-", "defunion", "defunion-", "odin", "@exports", "defn", "defn-", "defmacro", "defmacro-", "deftransform", "deftransform-", "defiter", "defiter-":
         return true
     }
     return false
@@ -708,41 +837,117 @@ compile_eval_path :: proc(path, eval_source: string, no_print: bool = false) -> 
     return result.output, {}, true
 }
 
-compile_eval_path_with_map :: proc(path, eval_source: string, no_print: bool = false, profile: ^Compile_Profile = nil) -> (result: Emit_Result, err: Compile_Error, ok: bool) {
+compile_eval_path_with_map :: proc(
+    path,
+    eval_source: string,
+    no_print: bool = false,
+    profile: ^Compile_Profile = nil,
+    repl_generation := false,
+    repl_session_source := "",
+    repl_recent_result_types: []string = nil,
+    repl_inspect_only := false,
+    repl_inspection_source_slot := "",
+    repl_inspection_source_type := "",
+    repl_inspection_result_slot := "",
+    repl_inspection_page_offset := 0,
+    repl_inspection_page_limit := 0,
+) -> (result: Emit_Result, err: Compile_Error, ok: bool) {
     result_allocator := context.allocator
     old_allocator := result_allocator
     temp_scope := runtime.default_temp_allocator_temp_begin()
     defer runtime.default_temp_allocator_temp_end(temp_scope)
     context.allocator = context.temp_allocator
 
-    expanded_forms, macros, err_program, ok_program := load_path_expanded_forms(path, profile)
+    eval_form: CST_Form
+    repl_batch: Repl_Batch
+    repl_retained_forms: [dynamic]CST_Top_Form
+    repl_import_forms: [dynamic]CST_Top_Form
+    err_eval: Compile_Error
+    ok_eval: bool
+    if repl_generation {
+        repl_batch, err_eval, ok_eval = read_repl_batch(eval_source)
+        eval_form = repl_batch.eval_form
+    } else {
+        eval_form, err_eval, ok_eval = read_single_eval_form(eval_source)
+    }
+    if !ok_eval {
+        context.allocator = old_allocator
+        return result, clone_compile_error(err_eval, result_allocator), false
+    }
+    if repl_generation {
+        retained_forms, err_session, ok_session :=
+            repl_session_forms(repl_session_source)
+        if !ok_session {
+            context.allocator = old_allocator
+            return result, clone_compile_error(err_session, result_allocator), false
+        }
+        repl_retained_forms = retained_forms
+        all_import_forms: [dynamic]CST_Top_Form
+        for top in repl_retained_forms {
+            if eval_form_head(top.form) == "import" {
+                append(&all_import_forms, top)
+            }
+        }
+        for definition in repl_batch.definitions {
+            if eval_form_head(definition) == "import" {
+                append(&all_import_forms, CST_Top_Form{form = definition})
+            }
+        }
+        retained_imports_reversed: [dynamic]CST_Top_Form
+        seen_import_aliases := make(map[string]bool)
+        for i := len(all_import_forms)-1; i >= 0; i -= 1 {
+            alias, ok_alias := repl_form_decl_name(all_import_forms[i].form)
+            if !ok_alias || seen_import_aliases[alias] {
+                continue
+            }
+            seen_import_aliases[alias] = true
+            append(&retained_imports_reversed, all_import_forms[i])
+        }
+        for i := len(retained_imports_reversed)-1; i >= 0; i -= 1 {
+            append(&repl_import_forms, retained_imports_reversed[i])
+        }
+    }
+
+    expanded_forms, macros, err_program, ok_program :=
+        load_path_expanded_forms(path, profile, repl_import_forms[:])
     if !ok_program {
         context.allocator = old_allocator
         return result, clone_compile_error(err_program, result_allocator), false
     }
-    parse_start: time.Tick
-    if profile != nil {
-        parse_start = time.tick_now()
-    }
-    program, err_parse, ok_parse := parse_program(expanded_forms[:])
-    if profile != nil {
-        profile.ast_parse_ns += profile_elapsed_ns(parse_start)
-    }
-    if !ok_parse {
-        context.allocator = old_allocator
-        return result, clone_compile_error(err_parse, result_allocator), false
-    }
-    aliases, err_aliases, ok_aliases := collect_root_source_import_aliases(path)
+    aliases, err_aliases, ok_aliases :=
+        collect_root_source_import_aliases(path, repl_import_forms[:])
     if !ok_aliases {
         context.allocator = old_allocator
         return result, clone_compile_error(err_aliases, result_allocator), false
     }
     alias_names := alias_prefix_names(aliases)
     defer delete(alias_names)
-    eval_form, err_eval, ok_eval := read_single_eval_form(eval_source)
-    if !ok_eval {
-        context.allocator = old_allocator
-        return result, clone_compile_error(err_eval, result_allocator), false
+
+    if repl_generation {
+        for top in repl_retained_forms {
+            if !is_defmacro_form(top.form) {
+                continue
+            }
+            macro_decl, err_macro, ok_macro := parse_user_macro_decl(top)
+            if !ok_macro {
+                context.allocator = old_allocator
+                return result, clone_compile_error(err_macro, result_allocator), false
+            }
+            append(&macros, macro_decl)
+        }
+        for definition in repl_batch.definitions {
+            if !is_defmacro_form(definition) {
+                continue
+            }
+            macro_decl, err_macro, ok_macro := parse_user_macro_decl(
+                CST_Top_Form{form = definition},
+            )
+            if !ok_macro {
+                context.allocator = old_allocator
+                return result, clone_compile_error(err_macro, result_allocator), false
+            }
+            append(&macros, macro_decl)
+        }
     }
     eval_form_rewritten, err_rewrite_eval, ok_rewrite_eval := rewrite_form_symbols(eval_form, nil, aliases, "")
     if !ok_rewrite_eval {
@@ -762,6 +967,172 @@ compile_eval_path_with_map :: proc(path, eval_source: string, no_print: bool = f
         context.allocator = old_allocator
         return result, clone_compile_error(err_eval_slash, result_allocator), false
     }
+
+    repl_prior_proc_names: [dynamic]string
+    repl_current_proc_names: [dynamic]string
+    repl_value_names: [dynamic]string
+    repl_current_value_names: [dynamic]string
+    repl_var_names: [dynamic]string
+    repl_current_var_names: [dynamic]string
+    if repl_generation {
+        seen_prior := make(map[string]bool)
+        for top in repl_retained_forms {
+            name, _ := repl_form_decl_name(top.form)
+            head := eval_form_head(top.form)
+            if !seen_prior[name] {
+                seen_prior[name] = true
+                if head == "defn" {
+                    append(&repl_prior_proc_names, name)
+                } else if head == "def" {
+                    append(&repl_value_names, name)
+                } else if head == "defvar" {
+                    append(&repl_var_names, name)
+                }
+            }
+            if is_defmacro_form(top.form) || head == "import" {
+                continue
+            }
+            rewritten, err_rewritten, ok_rewritten := rewrite_form_symbols(top.form, nil, aliases, "")
+            if !ok_rewritten {
+                context.allocator = old_allocator
+                return result, clone_compile_error(err_rewritten, result_allocator), false
+            }
+            previous_session_anchor := macro_eval_set_anchor(path)
+            expanded_session, err_expanded, ok_expanded :=
+                macroexpand_cst_form_with_macros(rewritten, macros[:])
+            macro_eval_restore_anchor(previous_session_anchor)
+            if !ok_expanded {
+                context.allocator = old_allocator
+                return result, clone_compile_error(err_expanded, result_allocator), false
+            }
+            err_session_slash, ok_session_slash :=
+                validate_surface_package_slash_access_form(expanded_session, alias_names[:])
+            if !ok_session_slash {
+                context.allocator = old_allocator
+                return result, clone_compile_error(err_session_slash, result_allocator), false
+            }
+            append(&expanded_forms, CST_Top_Form{form = expanded_session})
+        }
+
+        seen_current := make(map[string]bool)
+        for definition in repl_batch.definitions {
+            current_name, _ := repl_form_decl_name(definition)
+            head := eval_form_head(definition)
+            if !seen_current[current_name] {
+                seen_current[current_name] = true
+                if head == "defn" {
+                    append(&repl_current_proc_names, current_name)
+                } else if head == "def" {
+                    append(&repl_current_value_names, current_name)
+                } else if head == "defvar" {
+                    append(&repl_current_var_names, current_name)
+                }
+            }
+            if is_defmacro_form(definition) || head == "import" {
+                continue
+            }
+            for i := len(repl_prior_proc_names)-1; i >= 0; i -= 1 {
+                if repl_prior_proc_names[i] == current_name {
+                    unordered_remove(&repl_prior_proc_names, i)
+                }
+            }
+            for i := len(repl_value_names)-1; i >= 0; i -= 1 {
+                if repl_value_names[i] == current_name {
+                    unordered_remove(&repl_value_names, i)
+                }
+            }
+            for i := len(repl_var_names)-1; i >= 0; i -= 1 {
+                if repl_var_names[i] == current_name {
+                    unordered_remove(&repl_var_names, i)
+                }
+            }
+            rewritten_definition, err_definition, ok_definition :=
+                rewrite_form_symbols(definition, nil, aliases, "")
+            if !ok_definition {
+                context.allocator = old_allocator
+                return result, clone_compile_error(err_definition, result_allocator), false
+            }
+            previous_definition_anchor := macro_eval_set_anchor(path)
+            expanded_definition, err_expanded_definition, ok_expanded_definition :=
+                macroexpand_cst_form_with_macros(rewritten_definition, macros[:])
+            macro_eval_restore_anchor(previous_definition_anchor)
+            if !ok_expanded_definition {
+                context.allocator = old_allocator
+                return result, clone_compile_error(err_expanded_definition, result_allocator), false
+            }
+            append(&expanded_forms, CST_Top_Form{form = expanded_definition})
+        }
+    }
+
+    if repl_generation {
+        rewrite_repl_stream_output_form(&expanded_eval_form)
+        for &top in expanded_forms {
+            rewrite_repl_stream_output_form(&top.form)
+        }
+    }
+
+    parse_start: time.Tick
+    if profile != nil {
+        parse_start = time.tick_now()
+    }
+    program, err_parse, ok_parse := parse_program(expanded_forms[:])
+    if profile != nil {
+        profile.ast_parse_ns += profile_elapsed_ns(parse_start)
+    }
+    if !ok_parse {
+        context.allocator = old_allocator
+        return result, clone_compile_error(err_parse, result_allocator), false
+    }
+    if repl_generation {
+        program = repl_dedupe_session_decls(program)
+        // Polymorphic declarations persist as compiler templates and are
+        // specialized by Odin in each generation that calls them. Concrete
+        // procedures use versioned runtime slots. Keeping the two paths
+        // separate avoids taking an address of an unspecialized procedure
+        // while preserving old native callers until explicit refresh.
+        repl_filter_concrete_proc_names(
+            &repl_prior_proc_names,
+            program,
+        )
+        repl_filter_concrete_proc_names(
+            &repl_current_proc_names,
+            program,
+        )
+    }
+    all_repl_value_names: [dynamic]string
+    append(&all_repl_value_names, ..repl_value_names[:])
+    for name in repl_current_value_names {
+        if !name_in_list(all_repl_value_names[:], name) {
+            append(&all_repl_value_names, name)
+        }
+    }
+    all_repl_var_names: [dynamic]string
+    append(&all_repl_var_names, ..repl_var_names[:])
+    for name in repl_current_var_names {
+        if !name_in_list(all_repl_var_names[:], name) {
+            append(&all_repl_var_names, name)
+        }
+    }
     context.allocator = old_allocator
-    return compile_program_eval_form_with_map(program, expanded_eval_form, no_print, profile)
+    return compile_program_eval_form_with_map(
+        program,
+        expanded_eval_form,
+        no_print,
+        profile,
+        repl_generation,
+        repl_prior_proc_names[:],
+        repl_current_proc_names[:],
+        repl_batch.has_runtime if repl_generation else true,
+        all_repl_value_names[:],
+        repl_current_value_names[:],
+        all_repl_var_names[:],
+        repl_current_var_names[:],
+        repl_recent_result_types,
+        repl_inspect_only,
+        repl_inspection_source_slot,
+        repl_inspection_source_type,
+        repl_inspection_result_slot,
+        repl_inspection_page_offset,
+        repl_inspection_page_limit,
+    )
 }

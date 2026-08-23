@@ -294,7 +294,7 @@ emit_decl :: proc(e: ^Emitter, decl: IR_Decl) -> (Compile_Error, bool) {
         push_local_type_scope(e)
         defer pop_local_type_scope(e)
         for param in decl.proc_decl.params {
-            bind_local_type(e, param.name, param.ty)
+            bind_local_type(e, param.name, param.ty, param.ownership)
         }
         emit_indent(e)
         fmt.sbprintf(&e.builder, "%s :: ", decl.proc_decl.name)
@@ -358,7 +358,50 @@ emit_decl :: proc(e: ^Emitter, decl: IR_Decl) -> (Compile_Error, bool) {
         e.current_proc_owns_managed_result = decl.proc_decl.owns_result
         e.current_proc_borrows_managed_result = decl.proc_decl.borrows_result
         e.current_proc_returns = decl.proc_decl.returns
-        err_body, ok_body := emit_body_forms(e, decl.proc_decl.body[:], decl.proc_decl.returns)
+        if e.repl_debug_enabled &&
+           decl.proc_decl.calling_convention != "" {
+            // Foreign calling conventions do not receive Odin's implicit
+            // context. REPL safe-point rendering allocates temporary strings,
+            // so establish the worker context inside the implementation.
+            emit_line(
+                e,
+                "context = repl_runtime.default_context()",
+            )
+        }
+        debug_emit_proc_frame_scope(e)
+        body := decl.proc_decl.body[:]
+        rewritten_body: [dynamic]CST_Form
+        if name_in_list(
+            e.repl_current_proc_names,
+            decl.proc_decl.name,
+        ) {
+            for source_form in body {
+                rewritten := source_form
+                for current_name in e.repl_current_proc_names {
+                    shadowed := false
+                    for param in decl.proc_decl.params {
+                        if param.name == current_name {
+                            shadowed = true
+                            break
+                        }
+                    }
+                    rewritten = repl_replace_proc_symbol_in_form(
+                        rewritten,
+                        current_name,
+                        repl_dispatch_proc_name(current_name),
+                        shadowed,
+                    )
+                }
+                append(&rewritten_body, rewritten)
+            }
+            body = rewritten_body[:]
+        }
+        err_body, ok_body := emit_body_forms(
+            e,
+            body,
+            decl.proc_decl.returns,
+        )
+        delete(rewritten_body)
         e.current_proc_owns_managed_result = previous_owns_managed_result
         e.current_proc_borrows_managed_result = previous_borrows_managed_result
         e.current_proc_returns = previous_proc_returns
@@ -376,7 +419,7 @@ emit_decl :: proc(e: ^Emitter, decl: IR_Decl) -> (Compile_Error, bool) {
         push_local_type_scope(e)
         defer pop_local_type_scope(e)
         for param in source_decl.params {
-            bind_local_type(e, param.name, param.ty)
+            bind_local_type(e, param.name, param.ty, param.ownership)
         }
         err_protocol, ok_protocol := validate_source_protocol(e, &source_decl, state_ty, decl.span)
         if !ok_protocol {
@@ -393,7 +436,14 @@ emit_decl :: proc(e: ^Emitter, decl: IR_Decl) -> (Compile_Error, bool) {
         fmt.sbprintf(&e.builder, ") -> %s %s", state_ty, "{")
         emit_raw_newline(e)
         e.indent += 1
+        previous_proc_returns := e.current_proc_returns
+        e.current_proc_returns = Return_Spec{
+            kind = .Single,
+            single_ty = state_ty,
+        }
+        debug_emit_proc_frame_scope(e)
         err_body, ok_body := emit_body_forms(e, source_decl.body[:], Return_Spec{kind = .Single, single_ty = state_ty})
+        e.current_proc_returns = previous_proc_returns
         if !ok_body {
             return err_body, false
         }
@@ -538,6 +588,7 @@ emit_captured_proc_specialization :: proc(e: ^Emitter, spec: Captured_Proc_Speci
         }
         bind_callback_context(e, callback_param.name, capture_names[:])
     }
+    debug_emit_proc_frame_scope(e)
     err_body, ok_body := emit_body_forms(e, proc_decl.body[:], proc_decl.returns)
     pop_local_type_scope(e)
     if !ok_body {
@@ -1276,6 +1327,27 @@ emit_data_type_helper :: proc(e: ^Emitter) {
     emit_line(e, "kvist_data_tagged_value :: proc(value: Data) -> Data { assert(value.kind == .Tagged, \"expected tagged Data\"); return value.node.items[0] }")
     emit_line(e, "kvist_data_count :: proc(value: Data) -> int { if value.kind == .Nil { return 0 }; if value.kind == .Map { return len(value.payload.entries) }; if value.kind == .List || value.kind == .Vector || value.kind == .Set { return len(value.payload.items) }; if value.kind == .String { return len(value.payload.text) }; assert(false, \"count expects collection, string, or nil Data\"); return 0 }")
     emit_line(e, "kvist_data_kind :: proc(value: Data) -> Data_Kind { return value.kind }")
+    emit_line(e, "kvist_data_type :: proc(value: Data) -> keyword {")
+    e.indent += 1
+    emit_line(e, "switch value.kind {")
+    e.indent += 1
+    emit_line(e, `case .Nil: return keyword("Nil")`)
+    emit_line(e, `case .Bool: return keyword("Bool")`)
+    emit_line(e, `case .Int: return keyword("Int")`)
+    emit_line(e, `case .Float: return keyword("Float")`)
+    emit_line(e, `case .String: return keyword("String")`)
+    emit_line(e, `case .Symbol: return keyword("Symbol")`)
+    emit_line(e, `case .Keyword: return keyword("Keyword")`)
+    emit_line(e, `case .List: return keyword("List")`)
+    emit_line(e, `case .Vector: return keyword("Vector")`)
+    emit_line(e, `case .Map: return keyword("Map")`)
+    emit_line(e, `case .Set: return keyword("Set")`)
+    emit_line(e, `case .Tagged: return keyword("Tagged")`)
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, `return keyword("Unknown")`)
+    e.indent -= 1
+    emit_line(e, "}")
     emit_line(e, "kvist_data_nil_p :: proc(value: Data) -> bool { return value.kind == .Nil }")
     emit_line(e, "kvist_data_bool_p :: proc(value: Data) -> bool { return value.kind == .Bool }")
     emit_line(e, "kvist_data_int_p :: proc(value: Data) -> bool { return value.kind == .Int }")
@@ -1291,6 +1363,82 @@ emit_data_type_helper :: proc(e: ^Emitter) {
     emit_line(e, "kvist_data_item_at :: proc(value: Data, index: int) -> Data { assert((value.kind == .List || value.kind == .Vector || value.kind == .Set) && index >= 0 && index < len(value.payload.items), \"Data collection index out of bounds\"); return value.payload.items[index] }")
     emit_line(e, "kvist_data_key_at :: proc(value: Data, index: int) -> Data { assert(value.kind == .Map && index >= 0 && index < len(value.payload.entries), \"Data map index out of bounds\"); return value.payload.entries[index].key }")
     emit_line(e, "kvist_data_value_at :: proc(value: Data, index: int) -> Data { assert(value.kind == .Map && index >= 0 && index < len(value.payload.entries), \"Data map index out of bounds\"); return value.payload.entries[index].value }")
+    emit_raw_newline(e)
+    emit_line(e, "kvist_data_write_repr :: proc(builder: ^strings.Builder, value: Data) {")
+    e.indent += 1
+    emit_line(e, "switch value.kind {")
+    e.indent += 1
+    emit_line(e, `case .Nil: strings.write_string(builder, "nil")`)
+    emit_line(e, `case .Bool: strings.write_string(builder, value.payload.bool_value ? "true" : "false")`)
+    emit_line(e, `case .Int: fmt.sbprintf(builder, "%d", value.payload.int_value)`)
+    emit_line(e, `case .Float: fmt.sbprintf(builder, "%g", value.payload.float_value)`)
+    emit_line(e, "case .String:")
+    e.indent += 1
+    emit_line(e, `strings.write_byte(builder, '"')`)
+    emit_line(e, "for index := 0; index < len(value.payload.text); index += 1 {")
+    e.indent += 1
+    emit_line(e, "switch value.payload.text[index] {")
+    e.indent += 1
+    emit_line(e, `case '"': strings.write_string(builder, "\\\"")`)
+    emit_line(e, `case '\\': strings.write_string(builder, "\\\\")`)
+    emit_line(e, `case '\n': strings.write_string(builder, "\\n")`)
+    emit_line(e, `case '\r': strings.write_string(builder, "\\r")`)
+    emit_line(e, `case '\t': strings.write_string(builder, "\\t")`)
+    emit_line(e, "case: strings.write_byte(builder, value.payload.text[index])")
+    e.indent -= 1
+    emit_line(e, "}")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, `strings.write_byte(builder, '"')`)
+    e.indent -= 1
+    emit_line(e, "case .Symbol, .Keyword: strings.write_string(builder, value.payload.text)")
+    emit_line(e, "case .List, .Vector, .Set:")
+    e.indent += 1
+    emit_line(e, `open := "("`)
+    emit_line(e, `close := ")"`)
+    emit_line(e, `if value.kind == .Vector { open = "["; close = "]" }`)
+    emit_line(e, `if value.kind == .Set { open = "#{"; close = "}" }`)
+    emit_line(e, "strings.write_string(builder, open)")
+    emit_line(e, "for item, index in value.payload.items {")
+    e.indent += 1
+    emit_line(e, "if index > 0 { strings.write_byte(builder, ' ') }")
+    emit_line(e, "kvist_data_write_repr(builder, item)")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "strings.write_string(builder, close)")
+    e.indent -= 1
+    emit_line(e, "case .Map:")
+    e.indent += 1
+    emit_line(e, "strings.write_byte(builder, '{')")
+    emit_line(e, "for entry, index in value.payload.entries {")
+    e.indent += 1
+    emit_line(e, "if index > 0 { strings.write_byte(builder, ' ') }")
+    emit_line(e, "kvist_data_write_repr(builder, entry.key)")
+    emit_line(e, "strings.write_byte(builder, ' ')")
+    emit_line(e, "kvist_data_write_repr(builder, entry.value)")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "strings.write_byte(builder, '}')")
+    e.indent -= 1
+    emit_line(e, "case .Tagged:")
+    e.indent += 1
+    emit_line(e, "strings.write_byte(builder, '#')")
+    emit_line(e, "strings.write_string(builder, value.node.text)")
+    emit_line(e, "strings.write_byte(builder, ' ')")
+    emit_line(e, "kvist_data_write_repr(builder, value.node.items[0])")
+    e.indent -= 1
+    e.indent -= 1
+    emit_line(e, "}")
+    e.indent -= 1
+    emit_line(e, "}")
+    emit_line(e, "kvist_data_repr :: proc(value: Data, allocator: kvist_runtime.Allocator = context.allocator) -> string {")
+    e.indent += 1
+    emit_line(e, "builder := strings.builder_make(allocator = allocator)")
+    emit_line(e, "defer strings.builder_destroy(&builder)")
+    emit_line(e, "kvist_data_write_repr(&builder, value)")
+    emit_line(e, "return strings.clone(strings.to_string(builder), allocator)")
+    e.indent -= 1
+    emit_line(e, "}")
 }
 
 emit_data_literals :: proc(e: ^Emitter, literals: []Data_Literal) {
@@ -1401,6 +1549,11 @@ form_uses_core_fmt :: proc(form: CST_Form) -> bool {
         return strings.has_prefix(form.text, "fmt.") || strings.has_prefix(form.text, "fmt/")
     }
     if form.kind == .List && len(form.items) > 0 && form.items[0].kind == .Symbol {
+        if form.items[0].text == "kvist-intrinsic-breakpoint" ||
+           form.items[0].text == "kvist-intrinsic-signal-condition" ||
+           form.items[0].text == "kvist-intrinsic-use-value-restart" {
+            return true
+        }
         if strings.has_prefix(form.items[0].text, "fmt.") ||
            strings.has_prefix(form.items[0].text, "fmt/") {
             return true

@@ -1229,7 +1229,7 @@ compile_matrix_surface_type_constructor :: proc(t: ^testing.T) {
 
 (defn score [] -> f32
   (let [m (matrix[2 2]f32 [1.0 2.0 3.0 4.0])
-        ident (linalg.identity (type matrix[2 2]f32))
+        ident (linalg.identity (typeid matrix[2 2]f32))
         product (linalg.mul m ident)
         flat (linalg.matrix_flatten product)]
     (+ (get flat 0) (get flat 3))))
@@ -1265,15 +1265,15 @@ compile_polymorphic_type_form :: proc(t: ^testing.T) {
 (import chan "core:sync/chan")
 
 (defstruct Queue {
-  jobs: (type chan.Chan int)
+  jobs: (typeid chan.Chan int)
 })
 
-(defn recv-job [jobs: (type chan.Chan int)] -> int
+(defn recv-job [jobs: (typeid chan.Chan int)] -> int
   (let [[value ok] (chan.recv jobs)]
     (if ok value 0)))
 
 (defn main []
-  (let [[jobs err] (chan.create (type chan.Chan int) context.allocator)]
+  (let [[jobs err] (chan.create (typeid chan.Chan int) context.allocator)]
     (defer (chan.destroy jobs))
     (if (= err .None)
       (return)
