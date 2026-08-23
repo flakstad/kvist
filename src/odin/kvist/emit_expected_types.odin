@@ -745,9 +745,111 @@ emit_as_thread_expr :: proc(e: ^Emitter, form: CST_Form, expected_type := "") ->
     return emit_block_expr(e, top, ty)
 }
 
-branch_type_mismatch_error :: proc(e: ^Emitter, lhs, rhs: CST_Form, what: string, span: Span) -> (Compile_Error, bool) {
-    lhs_ty, ok_lhs_ty := obvious_form_type(e, lhs)
-    rhs_ty, ok_rhs_ty := obvious_form_type(e, rhs)
+expected_type_numeric_literal_kind :: proc(expected_type: string) -> (integer: bool, numeric: bool) {
+    switch strings.trim_space(expected_type) {
+    case "int", "i8", "i16", "i32", "i64", "i128",
+         "uint", "u8", "u16", "u32", "u64", "u128",
+         "uintptr", "rune", "byte":
+        return true, true
+    case "f16", "f32", "f64", "complex32", "complex64", "complex128":
+        return false, true
+    }
+    return false, false
+}
+
+number_literal_type_for_expected_type :: proc(
+    form: CST_Form,
+    expected_type: string,
+) -> (string, bool) {
+    if form.kind != .Number || expected_type == "" {
+        return "", false
+    }
+    integer_expected, numeric_expected :=
+        expected_type_numeric_literal_kind(expected_type)
+    if numeric_expected &&
+       (!integer_expected || number_literal_type(form.text) == "int") {
+        return expected_type, true
+    }
+    return "", false
+}
+
+form_accepts_expected_numeric_type :: proc(
+    e: ^Emitter,
+    form: CST_Form,
+    expected_type: string,
+) -> bool {
+    if _, numeric_expected :=
+        expected_type_numeric_literal_kind(expected_type);
+        !numeric_expected {
+        return false
+    }
+    if _, contextual :=
+        number_literal_type_for_expected_type(form, expected_type);
+        contextual {
+        return true
+    }
+    if form.kind != .List || len(form.items) < 2 ||
+       form.items[0].kind != .Symbol {
+        return false
+    }
+    switch form.items[0].text {
+    case "+", "-", "*", "/", "%", "%%", "min", "max":
+    case:
+        return false
+    }
+    for operand in form.items[1:] {
+        if _, contextual :=
+            number_literal_type_for_expected_type(operand, expected_type);
+            contextual {
+            continue
+        }
+        if operand_type, obvious := obvious_form_type(e, operand); obvious {
+            if operand_type != expected_type {
+                return false
+            }
+            continue
+        }
+        if operand.kind == .List && len(operand.items) > 0 &&
+           operand.items[0].kind == .Symbol {
+            switch operand.items[0].text {
+            case "+", "-", "*", "/", "%", "%%", "min", "max":
+                if !form_accepts_expected_numeric_type(
+                    e,
+                    operand,
+                    expected_type,
+                ) {
+                    return false
+                }
+            case:
+            }
+        }
+    }
+    return true
+}
+
+branch_obvious_type_for_expected_type :: proc(
+    e: ^Emitter,
+    form: CST_Form,
+    expected_type: string,
+) -> (string, bool) {
+    if form_accepts_expected_numeric_type(e, form, expected_type) {
+        return expected_type, true
+    }
+    return obvious_form_type(e, form)
+}
+
+branch_type_mismatch_error :: proc(
+    e: ^Emitter,
+    lhs,
+    rhs: CST_Form,
+    expected_type,
+    what: string,
+    span: Span,
+) -> (Compile_Error, bool) {
+    lhs_ty, ok_lhs_ty :=
+        branch_obvious_type_for_expected_type(e, lhs, expected_type)
+    rhs_ty, ok_rhs_ty :=
+        branch_obvious_type_for_expected_type(e, rhs, expected_type)
     if ok_lhs_ty && ok_rhs_ty && lhs_ty != rhs_ty {
         return Compile_Error{message = fmt.tprintf("%s branches have different obvious types: %s and %s", what, lhs_ty, rhs_ty), span = span}, true
     }
@@ -758,7 +860,14 @@ emit_if_expr :: proc(e: ^Emitter, form: CST_Form, expected_type := "") -> (strin
     if len(form.items) != 4 {
         return "", Compile_Error{message = "if expression expects test, then, and else", span = form.span}, false
     }
-    if err_branch, bad_branch := branch_type_mismatch_error(e, form.items[2], form.items[3], "if expression", form.span); bad_branch {
+    if err_branch, bad_branch := branch_type_mismatch_error(
+        e,
+        form.items[2],
+        form.items[3],
+        expected_type,
+        "if expression",
+        form.span,
+    ); bad_branch {
         return "", err_branch, false
     }
     branch_expected_type := expected_type

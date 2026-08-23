@@ -122,6 +122,62 @@ reject_case_expression_with_obvious_branch_type_mismatch :: proc(t: ^testing.T) 
 }
 
 @(test)
+compile_numeric_if_literal_with_expected_unsigned_type :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn pick [present: bool value: u64] -> [picked: u64, ok: bool]
+  (return (if present value 0) true))
+
+(defn pick-reversed [present: bool value: u64] -> [picked: u64, ok: bool]
+  (return (if present 0 value) true))
+
+(defn pick-native [present: bool] -> [picked: i64, ok: bool]
+  (return (if present (+ (odin "i64(4)") 1) 2) true))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+    testing.expect_value(
+        t,
+        strings.contains(output, "return (value if present else 0), true"),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(output, "return (0 if present else value), true"),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(output, "i64(4)"),
+        true,
+    )
+}
+
+@(test)
+reject_explicit_numeric_if_branch_mismatch_with_expected_unsigned_type :: proc(
+    t: ^testing.T,
+) {
+    source := `(package main)
+
+(defn pick [present: bool value: u64] -> [picked: u64, ok: bool]
+  (return (if present value (int 0)) true))`
+
+    _, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    defer delete(err.message)
+    testing.expect_value(
+        t,
+        err.message,
+        "if expression branches have different obvious types: u64 and int",
+    )
+}
+
+@(test)
 compile_type_payload_case_expression_with_expected_type :: proc(t: ^testing.T) {
     source := `(package main)
 
