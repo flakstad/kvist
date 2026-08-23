@@ -220,6 +220,7 @@ Repl_Eval_Timings :: struct {
     commit_ns:            i64,
     total_ns:             i64,
     generated_bytes:      int,
+    native_cache_hit:     bool,
 }
 
 repl_eval_timing_entries :: proc(
@@ -374,6 +375,7 @@ Repl_Event :: struct {
     physical_transfer_count:   Repl_Optional_Int `json:",omitempty"`,
     timings:                    []Repl_Timing `json:",omitempty"`,
     generated_bytes:            Repl_Optional_Int `json:",omitempty"`,
+    native_cache_hit:            bool `json:",omitempty"`,
 }
 
 Repl_Attached_Capability :: struct {
@@ -677,6 +679,13 @@ Repl_Session :: struct {
     generations: [dynamic]Repl_Loaded_Generation,
     ownership_events: [dynamic]Repl_Ownership_Event,
     next_ownership_event: int,
+    compiled_generations: [dynamic]Repl_Compiled_Generation,
+}
+
+Repl_Compiled_Generation :: struct {
+    source_hash:  u64,
+    generation:   int,
+    library_path: string,
 }
 
 Repl_Inspection :: struct {
@@ -1583,6 +1592,10 @@ repl_session_clear :: proc(session: ^Repl_Session) {
     }
     clear(&session.ownership_events)
     session.next_ownership_event = 0
+    for &compiled in session.compiled_generations {
+        delete(compiled.library_path)
+    }
+    clear(&session.compiled_generations)
 }
 
 repl_session_drop_binding :: proc(
@@ -1641,6 +1654,7 @@ repl_session_delete :: proc(session: ^Repl_Session) {
     delete(session.inspections)
     delete(session.generations)
     delete(session.ownership_events)
+    delete(session.compiled_generations)
     session^ = {}
 }
 
@@ -6774,11 +6788,102 @@ repl_inject_pause_before_entry :: proc(
     return strings.clone(strings.to_string(builder)), true
 }
 
+repl_generation_source_hash :: proc(source: string, generation: int) -> u64 {
+    // Nested safe-point IDs carry the controller generation even when the
+    // generated program is otherwise identical. Exclude only that component
+    // from the fingerprint; the source locations and all executable code
+    // remain part of the key.
+    prefix := fmt.tprintf("pause-%d-", generation)
+    stable_prefix := "pause-generation-"
+    case_prefix := "kvist_case_"
+    canonical_cases := make(map[string]int, context.temp_allocator)
+    next_case := 1
+    hash := u64(14695981039346656037)
+    start := 0
+    i := 0
+    for i < len(source) {
+        if strings.has_prefix(source[i:], prefix) {
+            hash = fnv1a_update(hash, transmute([]byte)source[start:i])
+            hash = fnv1a_update(hash, transmute([]byte)stable_prefix)
+            i += len(prefix)
+            start = i
+            continue
+        }
+        if !strings.has_prefix(source[i:], case_prefix) {
+            i += 1
+            continue
+        }
+        digit_start := i + len(case_prefix)
+        digit_end := digit_start
+        for digit_end < len(source) &&
+            source[digit_end] >= '0' && source[digit_end] <= '9' {
+            digit_end += 1
+        }
+        if digit_end == digit_start {
+            i += 1
+            continue
+        }
+        hash = fnv1a_update(hash, transmute([]byte)source[start:i])
+        name := source[i:digit_end]
+        canonical, known := canonical_cases[name]
+        if !known {
+            canonical = next_case
+            canonical_cases[name] = canonical
+            next_case += 1
+        }
+        hash = fnv1a_update(hash, transmute([]byte)case_prefix)
+        canonical_text := fmt.tprintf("%d", canonical)
+        hash = fnv1a_update(hash, transmute([]byte)canonical_text)
+        i = digit_end
+        start = digit_end
+    }
+    return fnv1a_update(hash, transmute([]byte)source[start:])
+}
+
+repl_cached_generation :: proc(
+    session: ^Repl_Session,
+    source_hash: u64,
+) -> (^Repl_Compiled_Generation, bool) {
+    if session == nil {
+        return nil, false
+    }
+    for i := len(session.compiled_generations)-1; i >= 0; i -= 1 {
+        cached := &session.compiled_generations[i]
+        if cached.source_hash == source_hash &&
+           os.exists(cached.library_path) {
+            return cached, true
+        }
+    }
+    return nil, false
+}
+
+repl_retarget_nested_pause_generation :: proc(
+    frames: ^[dynamic]Repl_Debug_Frame,
+    from_generation,
+    to_generation: int,
+) {
+    if frames == nil || from_generation == to_generation {
+        return
+    }
+    from_prefix := fmt.tprintf("pause-%d-", from_generation)
+    to_prefix := fmt.tprintf("pause-%d-", to_generation)
+    for &frame in frames^ {
+        if !strings.has_prefix(frame.pause_id, from_prefix) {
+            continue
+        }
+        suffix := frame.pause_id[len(from_prefix):]
+        new_pause_id := strings.clone(fmt.tprintf("%s%s", to_prefix, suffix))
+        frame.pause_id = new_pause_id
+        frame.frame_id = strings.clone(fmt.tprintf("frame-%s", new_pause_id))
+    }
+}
+
 repl_compile_generation :: proc(
     input,
     source,
     session_source,
     session_dir: string,
+    session: ^Repl_Session,
     generation: int,
     no_print: bool,
     recent_result_types: []string,
@@ -6952,8 +7057,25 @@ repl_compile_generation :: proc(
     }
     defer delete(nested_source)
     generation_source = nested_source
+    source_hash := repl_generation_source_hash(generation_source, generation)
+    cached_generation: ^Repl_Compiled_Generation
+    cache_hit := false
+    if pause_id == "" && !native_debug_symbols {
+        cached_generation, cache_hit =
+            repl_cached_generation(
+                session,
+                source_hash,
+            )
+    }
     if debug_frames != nil {
         debug_frames^ = nested_frames
+        if cache_hit {
+            repl_retarget_nested_pause_generation(
+                debug_frames,
+                generation,
+                cached_generation.generation,
+            )
+        }
     } else {
         repl_debug_frames_delete(&nested_frames)
     }
@@ -7015,6 +7137,31 @@ repl_compile_generation :: proc(
                 eval_start_column,
                 generation,
             )
+    }
+
+    if cache_hit {
+        // Loading the same dynamic-library path twice can make the platform
+        // loader return the existing image. The worker deliberately retains
+        // every generation handle, so treating that image as a new generation
+        // would duplicate one handle and corrupt teardown. Give the cached
+        // machine code a generation-specific path instead. This still avoids
+        // Odin compilation while preserving the worker's append-only model.
+        copy_err := os.copy_file(output_path, cached_generation.library_path)
+        if copy_err != nil {
+            delete(output_path)
+            return "", "", strings.clone("failed to copy cached REPL generation"), false
+        }
+        if timings != nil {
+            timings.source_generation_ns =
+                time.duration_nanoseconds(
+                    time.tick_since(source_generation_start),
+                )
+            timings.native_cache_hit = true
+        }
+        return output_path,
+               strings.clone(result.output),
+               "",
+               true
     }
 
     output_arg := strings.clone(fmt.tprintf("-out:%s", output_path))
@@ -7095,6 +7242,13 @@ repl_compile_generation :: proc(
         delete(output_path)
         return "", "", strings.clone(strings.to_string(combined)), false
     }
+    if session != nil && pause_id == "" && !native_debug_symbols {
+        append(&session.compiled_generations, Repl_Compiled_Generation{
+            source_hash = source_hash,
+            generation = generation,
+            library_path = strings.clone(output_path),
+        })
+    }
     return output_path, strings.clone(result.output), "", true
 }
 
@@ -7166,6 +7320,7 @@ repl_handle_eval :: proc(
         compiled_source,
         retained_source,
         session_dir,
+        session,
         generation,
         no_print,
         recent_result_types[:],
@@ -8622,6 +8777,7 @@ repl_protocol_loop :: proc(
             generated_bytes =
                 Repl_Optional_Int(eval_timings.generated_bytes) if
                     eval_timings.generated_bytes > 0 else {},
+            native_cache_hit = eval_timings.native_cache_hit,
         })
         repl_emit_json_event(Repl_Event{
             protocol_version = REPL_PROTOCOL_VERSION,
@@ -8630,6 +8786,7 @@ repl_protocol_loop :: proc(
             success = evaluated,
             generation = generation,
             message = message,
+            native_cache_hit = eval_timings.native_cache_hit,
         })
         if message != "" {
             delete(message)
@@ -9412,6 +9569,7 @@ repl_attached_handle_eval :: proc(
             compiled_source,
             retained_source,
             session_dir,
+            session,
             generation,
             request.no_print,
             recent_result_types[:],

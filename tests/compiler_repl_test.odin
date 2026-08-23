@@ -3249,6 +3249,13 @@ cli_repl_jsonl_executes_native_multi_form_generation :: proc(t: ^testing.T) {
 {"id":"iterator-stale-dependents","op":"dependents","name":"live-items"}
 {"id":"iterator-refresh","op":"refresh-dependents","name":"live-items"}
 {"id":"iterator-refreshed-call","op":"eval","source":"(sum-live-items ([3]int [1 2 3]))"}
+{"id":"native-cache-define","op":"eval","source":"(defvar native-cache-count: int 0)\n(defn native-cache-bump [] -> int (do (inc! native-cache-count) native-cache-count))"}
+{"id":"native-cache-call-1","op":"eval","source":"(native-cache-bump)"}
+{"id":"native-cache-call-2","op":"eval","source":"(native-cache-bump)"}
+{"id":"native-cache-call-3","op":"eval","source":"(native-cache-bump)"}
+{"id":"native-cache-call-4","op":"eval","source":"(native-cache-bump)"}
+{"id":"native-cache-call-5","op":"eval","source":"(native-cache-bump)"}
+{"id":"native-cache-call-6","op":"eval","source":"(native-cache-bump)"}
 {"id":"close-1","op":"close"}
 `
     testing.expect_value(t, os.write_entire_file_from_string(requests_path, requests) == nil, true)
@@ -3660,6 +3667,11 @@ cli_repl_jsonl_executes_native_multi_form_generation :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, `"id":"iterator-refresh","kind":"complete","success":true`), true)
     testing.expect_value(t, strings.contains(output, `"id":"iterator-refreshed-call","kind":"output","success":true`), true)
     testing.expect_value(t, strings.contains(output, `"text":"12\n"`), true)
+    testing.expect_value(t, strings.contains(output, `"id":"native-cache-call-6","kind":"output","success":true`), true)
+    testing.expect_value(t, strings.contains(output, `"text":"6\n"`), true)
+    testing.expect_value(t, strings.contains(output, `"id":"native-cache-call-6","kind":"timings","success":true`), true)
+    testing.expect_value(t, strings.contains(output, `"id":"native-cache-call-6","kind":"complete","success":true`), true)
+    testing.expect_value(t, strings.contains(output, `"native_cache_hit":true`), true)
     testing.expect_value(t, string(stderr), "")
 }
 
