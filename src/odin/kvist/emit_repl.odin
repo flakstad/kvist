@@ -3971,6 +3971,16 @@ debug_emit_proc_frame_scope :: proc(e: ^Emitter) {
     )
 }
 
+debug_current_proc_zero_value :: proc(e: ^Emitter) -> string {
+    if e.current_proc_zero_value == "" {
+        e.current_proc_zero_value = zero_value_for_type_text(
+            e,
+            e.current_proc_returns.single_ty,
+        )
+    }
+    return e.current_proc_zero_value
+}
+
 debug_emit_pause :: proc(
     e: ^Emitter,
     form: CST_Form,
@@ -3998,6 +4008,35 @@ debug_emit_pause :: proc(
         visible = debug_visible_local_indices(e)
     }
     defer delete(visible)
+    if !capture_values {
+        emit_line_mapped(
+            e,
+            fmt.tprintf(
+                "if kvist_repl_safe_point(%q) %c",
+                placeholder,
+                '{',
+            ),
+            form.span,
+        )
+        e.indent += 1
+        #partial switch e.current_proc_returns.kind {
+        case .None:
+            emit_line(e, "return")
+        case .Single:
+            emit_line(
+                e,
+                fmt.tprintf(
+                    "return %s",
+                    debug_current_proc_zero_value(e),
+                ),
+            )
+        case .Named:
+            emit_line(e, "return")
+        }
+        e.indent -= 1
+        emit_line(e, "}")
+        return
+    }
     required_text := "true" if required else "false"
     restart_selection_text := "nil"
     if restart_selection_name != "" {
@@ -4420,10 +4459,7 @@ debug_emit_pause :: proc(
             e,
             fmt.tprintf(
                 "return %s",
-                zero_value_for_type_text(
-                    e,
-                    e.current_proc_returns.single_ty,
-                ),
+                debug_current_proc_zero_value(e),
             ),
         )
     case .Named:

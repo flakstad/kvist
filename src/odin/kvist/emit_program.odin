@@ -235,9 +235,24 @@ emit_eval_decls_with_source_map :: proc(
     repl_inspection_page_offset := 0,
     repl_inspection_page_limit := 0,
     repl_debug_capture_values := true,
+    profile: ^Compile_Profile = nil,
 ) -> (Emit_Result, Compile_Error, bool) {
+    total_start: time.Tick
+    analysis_before: i64
+    if profile != nil {
+        total_start = time.tick_now()
+        analysis_before = profile.analysis_ns
+    }
+    defer if profile != nil {
+        total_ns := profile_elapsed_ns(total_start)
+        analysis_ns := profile.analysis_ns - analysis_before
+        profile.emission_ns += total_ns - analysis_ns
+    }
     result := Emit_Result{}
     features := Emitter_Features{}
+    import_cache := Emitter_Import_Cache{}
+    emitter_import_cache_init(&import_cache)
+    defer emitter_import_cache_delete(&import_cache)
     captured_specializations: [dynamic]Captured_Proc_Specialization
     all_repl_value_names: [dynamic]string
     append(&all_repl_value_names, ..repl_value_names)
@@ -265,6 +280,7 @@ emit_eval_decls_with_source_map :: proc(
         repl_current_proc_names = repl_proc_names,
         repl_debug_enabled = initialize_context,
         repl_debug_capture_values = repl_debug_capture_values,
+        import_cache = &import_cache,
     }
     defer strings.builder_destroy(&e.builder)
     for decl in decls {
@@ -276,9 +292,16 @@ emit_eval_decls_with_source_map :: proc(
         }
     }
     eval_lifetime_form := eval_form
+    analysis_start: time.Tick
+    if profile != nil {
+        analysis_start = time.tick_now()
+    }
     infer_decoded_struct_lifetimes(&e, &eval_lifetime_form)
     infer_proc_lifetime_facts(&e)
     err_classify, ok_classify := classify_def_initializers(&e)
+    if profile != nil {
+        profile.analysis_ns += profile_elapsed_ns(analysis_start)
+    }
     if !ok_classify {
         return result, err_classify, false
     }
@@ -1463,6 +1486,7 @@ emit_eval_program_with_source_map :: proc(
     repl_inspection_page_offset := 0,
     repl_inspection_page_limit := 0,
     repl_debug_capture_values := true,
+    profile: ^Compile_Profile = nil,
 ) -> (Emit_Result, Compile_Error, bool) {
     decls: [dynamic]IR_Decl
     append(&decls, IR_Decl{
@@ -1582,6 +1606,34 @@ Kvist_Repl_Host_API :: struct {
 }
 kvist_repl_host: ^Kvist_Repl_Host_API
 
+kvist_repl_safe_point :: proc(pause_id: cstring) -> bool {
+    flags := kvist_repl_host.debug_flags(kvist_repl_host.ctx)
+    if flags & u32(2) != 0 {
+        kvist_repl_host.trace_point(kvist_repl_host.ctx, pause_id)
+    }
+    if flags & u32(4) != 0 {
+        kvist_repl_host.trace_values(
+            kvist_repl_host.ctx,
+            pause_id,
+            nil,
+            0,
+        )
+    }
+    if flags & u32(1) != 0 {
+        kvist_repl_host.pause(
+            kvist_repl_host.ctx,
+            pause_id,
+            nil,
+            0,
+            nil,
+            0,
+            false,
+            nil,
+        )
+    }
+    return kvist_repl_host.abort_requested(kvist_repl_host.ctx)
+}
+
 kvist_repl_println :: proc(args: ..any, sep := " ", flush := true) -> int {
     output := fmt.aprintln(..args, sep=sep)
     defer delete(output)
@@ -1651,6 +1703,7 @@ kvist_repl_println :: proc(args: ..any, sep := " ", flush := true) -> int {
         repl_inspection_page_offset = repl_inspection_page_offset,
         repl_inspection_page_limit = repl_inspection_page_limit,
         repl_debug_capture_values = repl_debug_capture_values,
+        profile = profile,
     )
 }
 

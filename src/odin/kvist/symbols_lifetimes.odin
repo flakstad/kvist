@@ -198,7 +198,13 @@ lifetimes_path :: proc(path: string) -> (output: string, err: Compile_Error, ok:
         return "", clone_compile_error(err_lower, result_allocator), false
     }
 
-    emitter := Emitter{decls = lowered.decls[:]}
+    import_cache := Emitter_Import_Cache{}
+    emitter_import_cache_init(&import_cache)
+    defer emitter_import_cache_delete(&import_cache)
+    emitter := Emitter{
+        decls = lowered.decls[:],
+        import_cache = &import_cache,
+    }
     for decl in lowered.decls {
         if decl.kind == .Struct {
             append(&emitter.structs, decl.struct_decl)

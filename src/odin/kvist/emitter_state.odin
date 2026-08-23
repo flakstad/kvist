@@ -112,6 +112,8 @@ Data_Literal :: struct {
 }
 
 Emitter_Import_Cache :: struct {
+    odin_root: string,
+    odin_root_known: bool,
     proc_param_types: map[string][dynamic]string,
     proc_params_known: map[string]bool,
     type_fields: map[string][dynamic]Struct_Field,
@@ -142,6 +144,7 @@ emitter_import_cache_init :: proc(cache: ^Emitter_Import_Cache) {
 }
 
 emitter_import_cache_delete :: proc(cache: ^Emitter_Import_Cache) {
+    delete(cache.odin_root)
     for _, param_types in cache.proc_param_types {
         owned := param_types
         delete_string_slice(&owned)
@@ -157,6 +160,24 @@ emitter_import_cache_delete :: proc(cache: ^Emitter_Import_Cache) {
     delete(cache.enum_exists)
     delete(cache.enum_known)
     cache^ = {}
+}
+
+emitter_odin_root :: proc(e: ^Emitter) -> (string, bool) {
+    if e.import_cache == nil {
+        return odin_root_path()
+    }
+    if e.import_cache.odin_root_known {
+        return e.import_cache.odin_root,
+               e.import_cache.odin_root != ""
+    }
+    e.import_cache.odin_root_known = true
+    root, ok := odin_root_path()
+    if ok {
+        e.import_cache.odin_root = root
+        return e.import_cache.odin_root, true
+    }
+    delete(root)
+    return "", false
 }
 
 Emitter :: struct {
@@ -188,6 +209,7 @@ Emitter :: struct {
     current_proc_owns_managed_result: bool,
     current_proc_borrows_managed_result: bool,
     current_proc_returns: Return_Spec,
+    current_proc_zero_value: string,
     current_source_path: string,
     current_source_file: string,
     warning_source_files: map[string]string,
@@ -202,6 +224,7 @@ Emitter :: struct {
     union_indices: map[string]int,
     decl_indices: map[string]int,
     kvist_import_packages: map[string]string,
+    kvist_package_presence: map[string]bool,
     odin_import_aliases: map[string]bool,
     odin_import_paths: map[string]string,
     odin_import_cache_keys: map[string]string,
@@ -231,6 +254,7 @@ ensure_emitter_indexes :: proc(e: ^Emitter) {
     e.union_indices = make(map[string]int, context.temp_allocator)
     e.decl_indices = make(map[string]int, context.temp_allocator)
     e.kvist_import_packages = make(map[string]string, context.temp_allocator)
+    e.kvist_package_presence = make(map[string]bool, context.temp_allocator)
     e.odin_import_aliases = make(map[string]bool, context.temp_allocator)
     e.odin_import_paths = make(map[string]string, context.temp_allocator)
     e.odin_import_cache_keys = make(map[string]string, context.temp_allocator)
@@ -356,9 +380,13 @@ prepare_ir_decls_for_emission :: proc(
         profile.analysis_ns += profile_elapsed_ns(analysis_start)
     }
     features := Emitter_Features{}
+    import_cache := Emitter_Import_Cache{}
+    emitter_import_cache_init(&import_cache)
+    defer emitter_import_cache_delete(&import_cache)
     e := Emitter{
         decls = decls,
         features = &features,
+        import_cache = &import_cache,
     }
     for decl in decls {
         if decl.kind == .Struct {
@@ -408,47 +436,61 @@ kvist_import_alias_for_decl :: proc(decl: IR_Decl) -> (alias, pkg: string, ok: b
 }
 
 kvist_package_imported :: proc(e: ^Emitter, pkg: string) -> bool {
+    ensure_emitter_indexes(e)
+    if imported, checked := e.kvist_package_presence[pkg]; checked {
+        return imported
+    }
     prefix := fmt.tprintf("%s__", pkg)
     for decl in e.decls {
         _, import_pkg, ok_import := kvist_import_alias_for_decl(decl)
         if ok_import && import_pkg == pkg {
+            e.kvist_package_presence[pkg] = true
             return true
         }
         #partial switch decl.kind {
         case .Const:
             if strings.has_prefix(decl.const_decl.name, prefix) {
+                e.kvist_package_presence[pkg] = true
                 return true
             }
         case .Var:
             if strings.has_prefix(decl.var_decl.name, prefix) {
+                e.kvist_package_presence[pkg] = true
                 return true
             }
         case .Struct:
             if strings.has_prefix(decl.struct_decl.name, prefix) {
+                e.kvist_package_presence[pkg] = true
                 return true
             }
         case .Enum:
             if strings.has_prefix(decl.enum_decl.name, prefix) {
+                e.kvist_package_presence[pkg] = true
                 return true
             }
         case .Union:
             if strings.has_prefix(decl.union_decl.name, prefix) {
+                e.kvist_package_presence[pkg] = true
                 return true
             }
         case .Proc:
             if strings.has_prefix(decl.proc_decl.name, prefix) {
+                e.kvist_package_presence[pkg] = true
                 return true
             }
         case .Transform:
             if strings.has_prefix(decl.transform_decl.name, prefix) {
+                e.kvist_package_presence[pkg] = true
                 return true
             }
         case .Source:
             if strings.has_prefix(decl.source_decl.name, prefix) {
+                e.kvist_package_presence[pkg] = true
                 return true
             }
         }
     }
+    e.kvist_package_presence[pkg] = false
     return false
 }
 

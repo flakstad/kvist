@@ -211,10 +211,6 @@ compile_program_eval_form_with_map :: proc(
     temp_result: Emit_Result
     err_emit: Compile_Error
     ok_emit: bool
-    emit_start: time.Tick
-    if profile != nil {
-        emit_start = time.tick_now()
-    }
     eval_head := eval_form_head(eval_form)
     if repl_generation {
         for repl_current_proc_name in repl_current_proc_names {
@@ -315,6 +311,7 @@ compile_program_eval_form_with_map :: proc(
             repl_inspection_page_offset,
             repl_inspection_page_limit,
             repl_debug_capture_values,
+            profile,
         )
     } else if eval_head_is_decl(eval_head) {
             eval_decl, err_decl, ok_decl := parse_decl(CST_Top_Form{form = eval_form})
@@ -332,13 +329,7 @@ compile_program_eval_form_with_map :: proc(
         )
     }
     if !ok_emit {
-        if profile != nil {
-            profile.analysis_and_emission_ns += profile_elapsed_ns(emit_start)
-        }
         return result, clone_compile_error(err_emit, result_allocator), false
-    }
-    if profile != nil {
-        profile.analysis_and_emission_ns += profile_elapsed_ns(emit_start)
     }
     result.output = strings.clone(temp_result.output, result_allocator)
     context.allocator = result_allocator

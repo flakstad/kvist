@@ -605,6 +605,18 @@ pause-before, and native-debug evaluations likewise request full capture. This
 reduces ordinary generated source and native build time without removing
 conditions, cooperative interruption, or the debugger path.
 
+The eval emitter also shares one import-metadata cache across the complete
+generation. In particular, the Odin installation root is discovered once and
+reused while resolving imported Odin procedures, fields, and enums; it is not
+looked up by spawning `odin root` for every imported member. Value-free safe
+points use one generated helper rather than repeating the tracing, pause, and
+abort plumbing at every form. Compiler timing events attribute eval analysis
+and emission directly instead of folding them into the legacy combined bucket.
+On the `repl-basics.kvist` tutorial context this reduced a new expression to
+roughly 0.55 seconds on the development machine. The much larger Ro engine
+context fell from roughly 12.8 seconds to 1.8 seconds for its first native
+submission; exact cache hits remain a separate faster path.
+
 A `bindings` request emits an editor-neutral inventory such as:
 
 ```json

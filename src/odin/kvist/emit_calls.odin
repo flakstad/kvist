@@ -459,11 +459,11 @@ imported_odin_proc_arg_type :: proc(e: ^Emitter, head_name: string, arg_idx: int
     if e.import_cache != nil {
         e.import_cache.proc_params_known[cache_key] = true
     }
-    odin_root, ok_root := odin_root_path()
+    odin_root, ok_root := emitter_odin_root(e)
     if !ok_root {
         return "", false
     }
-    defer delete(odin_root)
+    defer if e.import_cache == nil { delete(odin_root) }
     dir, ok_dir := odin_import_dir(odin_root, raw)
     if !ok_dir {
         return "", false
@@ -509,11 +509,11 @@ imported_odin_type_fields :: proc(e: ^Emitter, type_text: string) -> (fields: [d
     if e.import_cache != nil {
         e.import_cache.type_fields_known[cache_key] = true
     }
-    odin_root, ok_root := odin_root_path()
+    odin_root, ok_root := emitter_odin_root(e)
     if !ok_root {
         return fields, false
     }
-    defer delete(odin_root)
+    defer if e.import_cache == nil { delete(odin_root) }
     dir, ok_dir := odin_import_dir(odin_root, raw)
     if !ok_dir {
         return fields, false
@@ -542,9 +542,9 @@ imported_odin_enum_type_exists :: proc(e: ^Emitter, type_text: string) -> bool {
         return e.import_cache.enum_exists[cache_key]
     }
     found_enum := false
-    odin_root, ok_root := odin_root_path()
+    odin_root, ok_root := emitter_odin_root(e)
+    defer if e.import_cache == nil { delete(odin_root) }
     if ok_root {
-        defer delete(odin_root)
         if dir, ok_dir := odin_import_dir(odin_root, raw); ok_dir {
             defer delete(dir)
             found_enum = odin_import_enum_exists_from_dir(dir, member)

@@ -355,9 +355,11 @@ emit_decl :: proc(e: ^Emitter, decl: IR_Decl) -> (Compile_Error, bool) {
         previous_owns_managed_result := e.current_proc_owns_managed_result
         previous_borrows_managed_result := e.current_proc_borrows_managed_result
         previous_proc_returns := e.current_proc_returns
+        previous_proc_zero_value := e.current_proc_zero_value
         e.current_proc_owns_managed_result = decl.proc_decl.owns_result
         e.current_proc_borrows_managed_result = decl.proc_decl.borrows_result
         e.current_proc_returns = decl.proc_decl.returns
+        e.current_proc_zero_value = ""
         if e.repl_debug_enabled &&
            decl.proc_decl.calling_convention != "" {
             // Foreign calling conventions do not receive Odin's implicit
@@ -405,6 +407,7 @@ emit_decl :: proc(e: ^Emitter, decl: IR_Decl) -> (Compile_Error, bool) {
         e.current_proc_owns_managed_result = previous_owns_managed_result
         e.current_proc_borrows_managed_result = previous_borrows_managed_result
         e.current_proc_returns = previous_proc_returns
+        e.current_proc_zero_value = previous_proc_zero_value
         if !ok_body {
             return err_body, false
         }
@@ -437,13 +440,16 @@ emit_decl :: proc(e: ^Emitter, decl: IR_Decl) -> (Compile_Error, bool) {
         emit_raw_newline(e)
         e.indent += 1
         previous_proc_returns := e.current_proc_returns
+        previous_proc_zero_value := e.current_proc_zero_value
         e.current_proc_returns = Return_Spec{
             kind = .Single,
             single_ty = state_ty,
         }
+        e.current_proc_zero_value = ""
         debug_emit_proc_frame_scope(e)
         err_body, ok_body := emit_body_forms(e, source_decl.body[:], Return_Spec{kind = .Single, single_ty = state_ty})
         e.current_proc_returns = previous_proc_returns
+        e.current_proc_zero_value = previous_proc_zero_value
         if !ok_body {
             return err_body, false
         }
