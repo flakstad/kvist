@@ -14,6 +14,10 @@
 (require 'xref)
 (require 'compile)
 
+;; Optional popup frontend, loaded only when installed.
+(declare-function company-mode "company" (&optional arg))
+(declare-function company-begin-backend "company" (backend &optional callback))
+
 (defgroup kvist nil
   "Editing support for Kvist."
   :group 'languages)
@@ -53,7 +57,7 @@ Use a command name on `exec-path' or an explicit executable path."
     "defn" "defn-" "defmacro" "defmacro-" "fn" "odin"
     "let" "block" "do" "if" "when" "cond" "switch" "set!" "mut!" "return" "defer"
     "for" "while" "comment" "make" "get" "slice" "nil?" "in" "not-in"
-    "type" "or-else" "update!" "inc!" "dec!" "toggle!" "negate!"
+    "type" "typeid" "or-else" "update!" "inc!" "dec!" "toggle!" "negate!"
     "break" "continue" "with-allocator" "with-temp-allocator"
     "when-let" "if-let" "when-ok" "if-ok"
     "tap>"
@@ -85,6 +89,15 @@ Use a command name on `exec-path' or an explicit executable path."
 
 (defvar-local kvist--manual-completion-request nil
   "Non-nil while Kvist completion is explicitly requested by the user.")
+
+(defvar-local kvist--qualified-completion-cache nil
+  "Package completion symbols fetched by the most recent explicit TAB.")
+
+(defvar-local kvist--company-completion-candidates nil
+  "Candidates exposed by the current explicit Kvist Company completion.")
+
+(defvar-local kvist--company-completion-metadata nil
+  "Signature metadata for `kvist--company-completion-candidates'.")
 
 (defvar-local kvist--reload-path-cache nil
   "Cached reload path metadata for the current buffer.")
@@ -446,7 +459,14 @@ When WATCH is non-nil, include `--watch'."
 
 (defun kvist--lookup-symbols (identifier &optional file)
   "Return matching file-context symbols for IDENTIFIER via the CLI."
-  (let* ((source-file (or file buffer-file-name))
+  (catch 'kvist-live-tooling
+    (when (and (not file)
+             buffer-file-name
+             (fboundp 'kvist--repl-tooling-sync))
+      (let ((live (kvist--live-tooling-symbols "lookup" identifier)))
+        (when live
+          (throw 'kvist-live-tooling live))))
+    (let* ((source-file (or file buffer-file-name))
          (temp (if file nil (kvist--source-temp-file)))
          (input (or temp source-file))
          (program (kvist--executable source-file)))
@@ -461,11 +481,20 @@ When WATCH is non-nil, include `--watch'."
                             (kvist--parse-symbol-line line source-file))
                           lines))))
       (when temp
-        (ignore-errors (delete-file temp))))))
+        (ignore-errors (delete-file temp)))))))
 
 (defun kvist--doc-text (identifier &optional file)
   "Return rendered documentation text for IDENTIFIER via the CLI."
-  (let* ((source-file (or file buffer-file-name))
+  (catch 'kvist-live-tooling
+    (when (and (not file)
+             buffer-file-name
+             (fboundp 'kvist--repl-tooling-sync))
+      (let ((symbols (kvist--live-tooling-symbols
+                      "documentation" identifier)))
+        (when symbols
+          (throw 'kvist-live-tooling
+                 (mapconcat #'kvist--render-symbol-doc symbols "\n")))))
+    (let* ((source-file (or file buffer-file-name))
          (temp (if file nil (kvist--source-temp-file)))
          (input (or temp source-file))
          (program (kvist--executable source-file)))
@@ -476,11 +505,18 @@ When WATCH is non-nil, include `--watch'."
             (user-error "%s" (string-trim output)))
           output)
       (when temp
-        (ignore-errors (delete-file temp))))))
+        (ignore-errors (delete-file temp)))))))
 
 (defun kvist--xref-symbols (identifier &optional file)
   "Return xref symbols for IDENTIFIER via the CLI."
-  (let* ((source-file (or file buffer-file-name))
+  (catch 'kvist-live-tooling
+    (when (and (not file)
+             buffer-file-name
+             (fboundp 'kvist--repl-tooling-sync))
+      (let ((live (kvist--live-tooling-symbols "xref" identifier)))
+        (when live
+          (throw 'kvist-live-tooling live))))
+    (let* ((source-file (or file buffer-file-name))
          (temp (if file nil (kvist--source-temp-file)))
          (input (or temp source-file))
          (program (kvist--executable source-file)))
@@ -501,11 +537,18 @@ When WATCH is non-nil, include `--watch'."
                       symbols)))
             (nreverse symbols)))
       (when temp
-        (ignore-errors (delete-file temp))))))
+        (ignore-errors (delete-file temp)))))))
 
 (defun kvist--complete-symbols (&optional prefix file)
   "Return completion symbols for PREFIX via the CLI."
-  (let* ((source-file (or file buffer-file-name))
+  (catch 'kvist-live-tooling
+    (when (and (not file)
+             buffer-file-name
+             (fboundp 'kvist--repl-tooling-sync))
+      (let ((live (kvist--live-tooling-symbols "complete" (or prefix ""))))
+        (when live
+          (throw 'kvist-live-tooling live))))
+    (let* ((source-file (or file buffer-file-name))
          (temp (if file nil (kvist--source-temp-file)))
          (input (or temp source-file))
          (program (kvist--executable source-file)))
@@ -523,7 +566,54 @@ When WATCH is non-nil, include `--watch'."
                             (kvist--parse-symbol-line line source-file))
                           lines))))
       (when temp
-        (ignore-errors (delete-file temp))))))
+        (ignore-errors (delete-file temp)))))))
+
+(defun kvist--protocol-symbol (symbol)
+  "Convert protocol SYMBOL alist to the plist used by editing features."
+  (list :kind (or (alist-get 'kind symbol) "")
+        :name (or (alist-get 'name symbol) "")
+        :line (or (alist-get 'line symbol) 1)
+        :column (or (alist-get 'column symbol) 1)
+        :detail (or (alist-get 'detail symbol) "")
+        :signature (or (alist-get 'signature symbol) "")
+        :doc (kvist--unescape-doc (or (alist-get 'doc symbol) ""))
+        :file (or (alist-get 'file symbol) buffer-file-name)))
+
+(defun kvist--live-tooling-symbols (op name)
+  "Return structured symbols for live session tooling OP and NAME."
+  (let* ((source
+          ;; A qualified completion is normally requested while its form is
+          ;; structurally incomplete, for example `(arr.'.  The resident
+          ;; session already knows the package imports, so avoid making its
+          ;; overlay parser reject that deliberately unfinished form.
+          (if (and (equal op "complete")
+                   (kvist--package-prefix name))
+              ""
+            (buffer-substring-no-properties (point-min) (point-max))))
+         (result (kvist--repl-tooling-sync
+                  op name source buffer-file-name))
+         (success (plist-get result :success)))
+    (when success
+      (mapcar #'kvist--protocol-symbol
+              (plist-get result :symbols)))))
+
+(defun kvist--render-symbol-doc (symbol)
+  "Render one structured SYMBOL as documentation text."
+  (string-join
+   (delq nil
+         (list
+          (format "%s %s"
+                  (plist-get symbol :kind)
+                  (plist-get symbol :name))
+          (let ((signature (plist-get symbol :signature)))
+            (and signature (not (string-empty-p signature)) signature))
+          (let ((detail (plist-get symbol :detail)))
+            (and detail (not (string-empty-p detail)) detail))
+          (when-let ((file (plist-get symbol :file)))
+            (format "%s:%s" file (plist-get symbol :line)))
+          ""
+          (plist-get symbol :doc)))
+   "\n"))
 
 (defun kvist--symbol-bounds ()
   "Return bounds of the Kvist symbol-like token at point."
@@ -672,23 +762,73 @@ When WATCH is non-nil, include `--watch'."
              (string-match "\\`\\([^./]+\\)\\([./]\\)\\([^./]*\\)\\'" identifier))
     (cons (match-string 1 identifier) (match-string 2 identifier))))
 
+(defun kvist--explicit-completion-request-p (&optional _identifier)
+  "Return non-nil when the user explicitly requested completion."
+  (or kvist--manual-completion-request
+      (memq this-command
+            '(completion-at-point
+              indent-for-tab-command
+              kvist-complete-at-point))))
+
+(defun kvist--qualified-completion-key (identifier)
+  "Return stable package-prefix cache key for IDENTIFIER, or nil."
+  (when-let ((prefix (kvist--package-prefix identifier)))
+    ;; `kvist--identifier-at-point' normalizes a completed dot-qualified name
+    ;; to protocol spelling (`arr/r'), while the unfinished `arr.' remains as
+    ;; typed.  Both belong to the same package completion session.
+    (concat (car prefix) ".")))
+
 (defun kvist--completion-symbols (&optional identifier)
   "Return completion symbols for IDENTIFIER context."
-  (or (kvist--cached-editor-symbols)
-      (when (or kvist--manual-completion-request
-                (eq this-command 'completion-at-point))
-        (ignore-errors (kvist--editor-symbols)))
-      (when (not identifier)
-        (ignore-errors (kvist--symbols)))))
+  (let* ((explicit (kvist--explicit-completion-request-p identifier))
+         (qualified-key (kvist--qualified-completion-key identifier))
+         (cached-qualified
+          (and qualified-key
+               (equal qualified-key
+                      (plist-get kvist--qualified-completion-cache :key))
+               (plist-get kvist--qualified-completion-cache :symbols)))
+         (fresh
+          (when explicit
+            (or (when (and (derived-mode-p 'kvist-repl-mode)
+                           (fboundp 'kvist--repl-completion-symbols))
+                  (ignore-errors
+                    (kvist--repl-completion-symbols (or identifier ""))))
+                (when buffer-file-name
+                  ;; This is the one-shot CLI equivalent of the live
+                  ;; session's `complete' operation.
+                  (ignore-errors (kvist--complete-symbols identifier)))))))
+    (when (and qualified-key fresh)
+      (setq kvist--qualified-completion-cache
+            (list :key qualified-key :symbols fresh)))
+    (or fresh
+        cached-qualified
+        ;; Do not let passive popup frontends turn `.' or every following
+        ;; keystroke into synchronous compiler work.  TAB populates the cache;
+        ;; subsequent filtering happens entirely in Emacs.
+        (unless qualified-key
+          (or (kvist--cached-editor-symbols)
+              (when (not identifier)
+                (ignore-errors (kvist--symbols))))))))
 
-(defun kvist--completion-candidates ()
+(defun kvist--completion-display-name (name)
+  "Return editor spelling for the protocol symbol NAME.
+
+The protocol may spell a qualified name as `alias/member'.  Do not replace a
+bare slash: `/` is itself a valid Kvist completion candidate."
+  (if (string-match "\\`\\([^/]+\\)/\\(.+\\)\\'" name)
+      (concat (match-string 1 name) "." (match-string 2 name))
+    name))
+
+(defun kvist--completion-candidates (&optional symbols supplied)
   "Return completion candidates appropriate for the symbol at point."
   (let* ((identifier (kvist--identifier-at-point))
-         (symbols (kvist--completion-symbols identifier)))
+         (symbols (if supplied
+                      symbols
+                    (kvist--completion-symbols identifier))))
     (delete-dups
      (mapcar
       (lambda (symbol)
-        (replace-regexp-in-string "/" "." (plist-get symbol :name) t t))
+        (kvist--completion-display-name (plist-get symbol :name)))
       symbols))))
 
 (defun kvist--completion-exit (completed status)
@@ -696,17 +836,24 @@ When WATCH is non-nil, include `--watch'."
   (when (eq status 'finished)
     (kvist--maybe-auto-import-qualified-symbol completed)))
 
-(defun kvist--completion-metadata (identifier)
+(defun kvist--completion-metadata (identifier &optional symbols supplied)
   "Return symbol metadata alist keyed by display name for IDENTIFIER context."
   (let* ((identifier (or identifier (kvist--identifier-at-point)))
-         (symbols (kvist--completion-symbols identifier)))
+         (symbols (if supplied
+                      symbols
+                    (kvist--completion-symbols identifier))))
     (let (table)
       (dolist (symbol symbols)
         (let* ((name (plist-get symbol :name))
                (normalized (kvist--normalize-qualified-identifier name))
-               (display (replace-regexp-in-string "/" "." name t t)))
+               (display (kvist--completion-display-name name)))
           (unless (assoc display table)
-            (push (cons display (or (plist-get symbol :signature) normalized)) table))))
+            (let ((signature (or (plist-get symbol :signature) "")))
+              (push (cons display
+                          (if (string-empty-p signature)
+                              normalized
+                            signature))
+                    table)))))
       table)))
 
 (defun kvist--completion-annotation (metadata)
@@ -806,7 +953,14 @@ When WATCH is non-nil, include `--watch'."
 (defun kvist-eldoc-function (&rest _ignored)
   "Return Eldoc text for the Kvist symbol at point."
   (when-let ((identifier (kvist--identifier-at-point)))
-    (if-let ((matches (let ((symbols (kvist--cached-editor-symbols)))
+    (if-let ((matches (let ((symbols
+                             (or (when (and buffer-file-name
+                                            (fboundp
+                                             'kvist--repl-tooling-sync))
+                                   (ignore-errors
+                                     (kvist--live-tooling-symbols
+                                      "lookup" identifier)))
+                                 (kvist--cached-editor-symbols))))
                         (seq-filter (lambda (symbol)
                                       (kvist--symbol-matches-identifier-p symbol identifier))
                                     symbols))))
@@ -898,34 +1052,115 @@ With prefix argument REFRESH, re-read the path metadata from the CLI."
 
 (defun kvist-completion-at-point ()
   "Complete Kvist special forms and symbols in the current file."
-  (when-let ((bounds (and (or kvist--manual-completion-request
-                              (eq this-command 'completion-at-point))
-                          (kvist--completion-bounds))))
+  (when-let ((bounds (kvist--completion-bounds)))
     (let* ((identifier (kvist--identifier-at-point))
-           (metadata (kvist--completion-metadata identifier))
+           (qualified (kvist--package-prefix identifier))
+           ;; One tooling request supplies both candidates and annotations.
+           ;; The previous implementation performed the same native lookup
+           ;; twice for every TAB press.
+           (symbols (kvist--completion-symbols identifier))
+           (metadata (kvist--completion-metadata identifier symbols t))
            (candidates (delete-dups
-                        (append (kvist--completion-candidates)
-                                kvist-completion-builtins))))
+                        (append (kvist--completion-candidates symbols t)
+                                (unless (kvist--package-prefix identifier)
+                                  kvist-completion-builtins)))))
       (list (car bounds)
             (cdr bounds)
             (kvist--completion-table
              candidates
              metadata)
             :exit-function #'kvist--completion-exit
-            :exclusive 'no))))
+            :exclusive (if qualified 'yes 'no)))))
+
+(defun kvist--company-completion-available-p ()
+  "Return non-nil when Company can provide Kvist's popup UI."
+  (or (featurep 'company) (require 'company nil t)))
+
+(defun kvist--raw-completion-prefix ()
+  "Return the exact source spelling of the completion prefix at point."
+  (when-let ((bounds (kvist--completion-bounds)))
+    (buffer-substring-no-properties (car bounds) (point))))
+
+(defun kvist--company-backend (command &optional arg &rest _ignored)
+  "Company backend for one explicitly fetched Kvist completion set."
+  (pcase command
+    ('prefix
+     (and kvist--company-completion-candidates
+          (kvist--raw-completion-prefix)))
+    ('candidates
+     (all-completions arg kvist--company-completion-candidates))
+    ('annotation
+     (when-let ((entry (assoc arg kvist--company-completion-metadata)))
+       (format "  %s" (cdr entry))))
+    ('meta
+     (cdr (assoc arg kvist--company-completion-metadata)))
+    ('sorted t)
+    ('no-cache t)
+    ('post-completion
+     (kvist--completion-exit arg 'finished))))
 
 (defun kvist-complete-at-point ()
   "Explicitly complete Kvist symbols at point."
   (interactive)
   (let ((kvist--manual-completion-request t))
-    (completion-at-point)))
+    (cond
+     ;; Corfu implements the standard completion-in-region UI, so the generic
+     ;; entry point already produces its popup.
+     ((bound-and-true-p corfu-mode)
+      (completion-at-point))
+     ;; Company has a separate manual entry point.  Prefer it whenever the
+     ;; package is available, even if global Company has not yet enabled this
+     ;; particular source or REPL buffer.  Once selected, never silently fall
+     ;; through to *Completions*: that was the source of seemingly random UI.
+     ((kvist--company-completion-available-p)
+      (unless (bound-and-true-p company-mode)
+        (company-mode 1))
+      ;; Fetch explicitly, then give Company a self-contained backend.  Do not
+      ;; bridge through company-capf: it caches passive CAPF results by point
+      ;; and modification tick, which made `arr. TAB' reuse the empty result
+      ;; produced just after typing the dot.  Space/backspace only appeared to
+      ;; fix it because it changed that tick.
+      (let* ((identifier (kvist--identifier-at-point))
+             (symbols (kvist--completion-symbols identifier)))
+        (setq kvist--company-completion-candidates
+              (kvist--completion-candidates symbols t))
+        (setq kvist--company-completion-metadata
+              (kvist--completion-metadata identifier symbols t))
+        (if kvist--company-completion-candidates
+            (condition-case err
+                (company-begin-backend 'kvist--company-backend)
+              (error
+               (message "Kvist Company completion failed: %s"
+                        (error-message-string err))))
+          (message "No Kvist completions for %s" identifier))))
+     ;; No popup frontend is installed; use Emacs's portable fallback.
+     (t
+      (completion-at-point)))))
+
+(defun kvist-indent-or-complete ()
+  "Indent normally, or complete an explicit package member prefix.
+
+Qualified input such as `arr.' is unambiguously a completion request.  All
+other TAB use delegates to the Clojure-derived indentation command, including
+its ordinary indent-then-complete behavior."
+  (interactive)
+  (if (kvist--package-prefix (kvist--identifier-at-point))
+      (kvist-complete-at-point)
+    (indent-for-tab-command)))
 
 (defun kvist--post-self-insert-auto-import ()
   "Auto-import canonical Kvist packages after typing a qualified prefix."
+  (when (memq last-command-event '(?/ ?.))
+    ;; A newly typed qualifier starts a new, deliberately TAB-driven request.
+    (setq kvist--qualified-completion-cache nil))
   (when (and (memq last-command-event '(?/ ?.))
              (not (nth 3 (syntax-ppss)))
              (not (nth 4 (syntax-ppss))))
     (kvist--maybe-auto-import-qualified-symbol)))
+
+(defun kvist--disable-idle-company-completion ()
+  "Keep Kvist completion explicitly TAB-driven in the current buffer."
+  (setq-local company-idle-delay nil))
 
 ;;;###autoload
 (define-derived-mode kvist-mode clojure-mode "Kvist"
@@ -933,7 +1168,11 @@ With prefix argument REFRESH, re-read the path metadata from the CLI."
   :syntax-table kvist-mode-syntax-table
   (set-syntax-table kvist-mode-syntax-table)
   (setq-local clojure-indent-style 'align-arguments)
-  (setq-local clojure-align-forms-automatically nil)
+  (setq-local tab-always-indent 'complete)
+  ;; Kvist package completion is deliberately TAB-driven.  In particular,
+  ;; prevent Company's idle timer from beginning an empty session on `.'.
+  ;; `company-manual-begin' temporarily overrides this for explicit requests.
+  (kvist--disable-idle-company-completion)
   (setq-local lisp-body-indent kvist-indent-offset)
   (setq-local indent-tabs-mode nil)
   (setq-local comment-start ";;")
@@ -946,14 +1185,23 @@ With prefix argument REFRESH, re-read the path metadata from the CLI."
   (font-lock-add-keywords nil kvist-font-lock-keywords)
   (kvist--setup-indentation))
 
+;; `load-file' updates definitions without re-running major-mode setup.  Apply
+;; the TAB-only policy to already-open source and REPL buffers as well.
+(dolist (buffer (buffer-list))
+  (with-current-buffer buffer
+    (when (derived-mode-p 'kvist-mode)
+      (kvist--disable-idle-company-completion))))
+
 (define-key kvist-mode-map (kbd "M-.") #'xref-find-definitions)
+(define-key kvist-mode-map (kbd "TAB") #'kvist-indent-or-complete)
+(define-key kvist-mode-map (kbd "<tab>") #'kvist-indent-or-complete)
+(define-key kvist-mode-map (kbd "RET") #'newline-and-indent)
 (define-key kvist-mode-map (kbd "C-c C-.") #'kvist-doc-at-point)
 (define-key kvist-mode-map (kbd "C-c C-d") #'kvist-doc-at-point)
 (define-key kvist-mode-map (kbd "C-c r s") #'kvist-reload-start)
 (define-key kvist-mode-map (kbd "C-c r w") #'kvist-reload-watch-start)
 (define-key kvist-mode-map (kbd "C-c r r") #'kvist-reload-rebuild)
 (define-key kvist-mode-map (kbd "C-c r p") #'kvist-reload-show-paths)
-(define-key kvist-mode-map (kbd "TAB") #'kvist-complete-at-point)
 (define-key kvist-mode-map kvist-doc-keybinding #'kvist-doc-at-point)
 
 ;;;###autoload

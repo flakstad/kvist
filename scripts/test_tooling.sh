@@ -704,11 +704,44 @@ if command -v emacs >/dev/null 2>&1; then
            (provide (quote clojure-mode))
            (add-to-list (quote load-path) \"emacs\")
            (require (quote kvist-eval))
-           (let ((file (make-temp-file (expand-file-name \".kvist-emacs-test-\" default-directory) nil \".kvist\")))
+           ;; A long-running Emacs preserves the old defvar keymap. Verify
+           ;; that the explicit repair path restores newer debugger bindings.
+           (define-key kvist-eval-mode-map (kbd \"C-c M-f\") nil)
+           (define-key kvist-eval-mode-map (kbd \"C-c M-v\") nil)
+           (kvist--install-debug-keybindings kvist-eval-mode-map)
+           (unless (and (eq (lookup-key kvist-eval-mode-map (kbd \"C-c M-f\"))
+                            (quote kvist-debug-show-frame))
+                        (eq (lookup-key kvist-eval-mode-map (kbd \"C-c M-v\"))
+                            (quote kvist-debug-eval-expression)))
+             (error \"Kvist did not repair reloaded debugger bindings\"))
+           (define-key kvist-debug-source-mode-map
+             (kbd \"i\") (quote kvist-debug-step))
+           (define-key kvist-debug-source-mode-map (kbd \"n\") nil)
+           (define-key kvist-debug-source-mode-map (kbd \"e\") nil)
+           (define-key kvist-debug-source-mode-map (kbd \"q\") nil)
+           (define-key kvist-debug-source-mode-map
+             (kbd \"v\") (quote kvist-debug-eval-expression))
+           (kvist--install-debug-source-keybindings
+            kvist-debug-source-mode-map)
+           (unless
+               (and (eq (lookup-key kvist-debug-source-mode-map (kbd \"n\"))
+                        (quote kvist-debug-step))
+                    (eq (lookup-key kvist-debug-source-mode-map (kbd \"e\"))
+                        (quote kvist-debug-eval-expression))
+                    (eq (lookup-key kvist-debug-source-mode-map (kbd \"q\"))
+                        (quote kvist-debug-abort))
+                    (null (lookup-key kvist-debug-source-mode-map (kbd \"i\")))
+                    (null (lookup-key kvist-debug-source-mode-map (kbd \"v\"))))
+             (error \"Kvist did not repair reloaded source-debug bindings\"))
+           (when kvist-repl-auto-start
+             (error \"Kvist REPL must require explicit startup by default\"))
+           (let ((make-backup-files nil)
+                 (kvist-repl-auto-start t)
+                 (file (make-temp-file (expand-file-name \".kvist-emacs-test-\" default-directory) nil \".kvist\")))
              (unwind-protect
                  (progn
                    (with-temp-file file
-                     (insert \"(package main)\\n(import fmt \\\"core:fmt\\\")\\n(import arr \\\"kvist:arr\\\")\\n\\n;; Adds two ints.\\n(defn add [a: int, b: int] -> int\\n  (+ a b))\\n\\n(defn add-two [a: int, b: int] -> int\\n  (add a b))\\n\\n(defn main []\\n  (fmt.println \\\"from main\\\"))\\n\\n(comment\\n  (add 1 2)\\n  (add-two 1 2)\\n  (with-allocator [allocator context.temp_allocator]\\n    (add 2 1))\\n  (if-ok [value err (read)] value 0)\\n  (main))\\n\"))
+                     (insert \"(package main)\\n(import fmt \\\"core:fmt\\\")\\n(import arr \\\"kvist:arr\\\")\\n(import debug \\\"kvist:debug\\\")\\n(import condition \\\"kvist:condition\\\")\\n\\n;; Adds two ints.\\n(defn add [a: int, b: int] -> int\\n  (+ a b))\\n\\n(defn add-two [a: int, b: int] -> int\\n  (add a b))\\n\\n(defn main []\\n  (fmt.println \\\"from main\\\"))\\n\\n(defn announce []\\n  (fmt.println \\\"announced\\\"))\\n\\n(defstruct Pair {\\n  left: int\\n  right: string\\n})\\n\\n(comment\\n  (add 1 2)\\n  (add-two 1 2)\\n  (with-allocator [allocator context.temp_allocator]\\n    (add 2 1))\\n  (if-ok [value err (read)] value 0)\\n  (Pair {left: 1 right: \\\"two\\\"})\\n  ([dynamic]int [0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21])\\n  (map[string]int {\\\"a\\\" 7})\\n  (announce))\\n\"))
                    (find-file file)
                    (kvist-mode)
                    (setq kvist-test-source-buffer (current-buffer))
@@ -727,6 +760,12 @@ if command -v emacs >/dev/null 2>&1; then
                            (error \"Expected compilation-next-error to find Kvist diagnostic\")))))
                    (unless (eq (key-binding (kbd \"M-.\")) (quote xref-find-definitions))
                      (error \"Missing M-. xref binding\"))
+                   (unless (eq (key-binding (kbd \"C-c C-s\")) (quote kvist-repl-start))
+                     (error \"Missing C-c C-s REPL start binding\"))
+                   (unless (eq (key-binding (kbd \"C-c C-z\")) (quote kvist-repl))
+                     (error \"Missing C-c C-z REPL switch binding\"))
+                   (when (eq (key-binding (kbd \"C-c M-j\")) (quote kvist-repl-start))
+                     (error \"Kvist must not shadow C-c M-j for REPL startup\"))
                    (let ((symbols (kvist--symbols)))
                      (unless (seq-find (lambda (sym) (equal (plist-get sym :name) \"add\")) symbols)
                        (error \"Expected add in kvist symbols: %S\" symbols)))
@@ -807,6 +846,11 @@ if command -v emacs >/dev/null 2>&1; then
                    (let ((candidates (kvist--completion-candidates)))
                      (unless (and (member \"add\" candidates)
                                   (member \"defn\" candidates)
+                                  (member \"debug.break\" candidates)
+                                  (member \"condition.signal\" candidates)
+                                  (member \"condition.use-value!\" candidates)
+                                  (member \"condition.restart-case\" candidates)
+                                  (member \"condition.operation\" candidates)
                                   (member \"arr.map\" candidates)
                                   (member \"fmt.println\" candidates))
                        (error \"Expected completion candidates, got: %S\" candidates)))
@@ -819,12 +863,209 @@ if command -v emacs >/dev/null 2>&1; then
                                           (cons \"C-c C-b\" (quote kvist-build-buffer))
                                           (cons \"C-c C-m\" (quote kvist-expand-form-at-point))
                                           (cons \"C-c M-m\" (quote kvist-macroexpand-form-at-point))
+                                          (cons \"C-c C-s\" (quote kvist-repl-start))
+                                          (cons \"C-c C-z\" (quote kvist-repl))
+                                          (cons \"C-c g g\" (quote kvist-expand-form-at-point))
+                                          (cons \"C-c M-r\" (quote kvist-repl-reset))
+                                          (cons \"C-c C-q\" (quote kvist-repl-stop))
+                                          (cons \"C-c M-q\" (quote kvist-repl-stop))
+                                          (cons \"C-c M-i\" (quote kvist-inspect-form-at-point))
+                                          (cons \"C-c M-g\" (quote kvist-repl-generations))
+                                          (cons \"C-c M-b\" (quote kvist-debug-native-worker))
+                                          (cons \"C-c M-s\" (quote kvist-debug-breakpoint-at-point))
+                                          (cons \"C-c M-e\" (quote kvist-debug-eval-form-at-point))
+                                          (cons \"C-c M-c\" (quote kvist-debug-continue))
+                                          (cons \"C-c M-x\" (quote kvist-debug-recover))
+                                          (cons \"C-c M-n\" (quote kvist-debug-step))
+                                          (cons \"C-c M-o\" (quote kvist-debug-step-over))
+                                          (cons \"C-c M-u\" (quote kvist-debug-step-out))
+                                          (cons \"C-c M-t\" (quote kvist-trace-form-at-point))
+                                          (cons \"C-c M-f\" (quote kvist-debug-show-frame))
+                                          (cons \"C-c M-p\" (quote kvist-debug-page))
+                                          (cons \"C-c M-v\" (quote kvist-debug-eval-expression))
+                                          (cons \"C-c M-l\" (quote kvist-debug-eval-native-form-at-point))
                                           (cons \"C-c C-w\" (quote kvist-save-form-result))
                                           (cons \"C-c C-l\" (quote kvist-cache-list))
                                           (cons \"C-c C-o\" (quote kvist-cache-open))
-                                          (cons \"C-c M-d\" (quote kvist-cache-rm))))
+                                          (cons \"C-c M-d\" (quote kvist-cache-rm))
+                                          (cons \"C-c a a\" (quote kvist-repl-attach))
+                                          (cons \"C-c a s\" (quote kvist-repl-attached-status))
+                                          (cons \"C-c a i\" (quote kvist-repl-invoke-capability))
+                                          (cons \"C-c a r\" (quote kvist-repl-attached-reload))
+                                          (cons \"C-c a q\" (quote kvist-repl-stop))))
                      (unless (eq (key-binding (kbd (car binding))) (cdr binding))
                        (error \"Missing binding %s\" (car binding))))
+                   (with-temp-buffer
+                     (setq buffer-file-name \"/tmp/kvist-completion-test.kvist\")
+                     (kvist-mode)
+                     (unless (and (local-variable-p (quote company-idle-delay))
+                                  (null company-idle-delay))
+                       (error \"Kvist did not disable idle Company completion\"))
+                     (unless (eq (key-binding (kbd \"TAB\")) (quote kvist-indent-or-complete))
+                       (error \"Kvist TAB does not use indent-or-complete\"))
+                     (unless (eq (key-binding (kbd \"RET\")) (quote newline-and-indent))
+                       (error \"Kvist RET does not insert an indented newline\"))
+                     (insert \"(arr.\")
+                     (let (completion-invoked)
+                       (cl-letf (((symbol-function (quote kvist-complete-at-point))
+                                  (lambda ()
+                                    (interactive)
+                                    (setq completion-invoked t))))
+                         (kvist-indent-or-complete))
+                       (unless completion-invoked
+                         (error \"Kvist TAB did not complete a package prefix\")))
+                     (let ((company-mode t)
+                           company-backend)
+                       (cl-letf (((symbol-function (quote kvist--company-completion-available-p))
+                                  (lambda () t))
+                                 ((symbol-function (quote kvist--completion-symbols))
+                                  (lambda (&optional _identifier)
+                                    (list (list :name \"arr.range\"
+                                                :signature \"(range [& rest])\"))))
+                                 ((symbol-function (quote company-begin-backend))
+                                  (lambda (backend)
+                                    (setq company-backend backend))))
+                         (kvist-complete-at-point))
+                       (unless (eq company-backend (quote kvist--company-backend))
+                         (error \"Kvist did not use the active Company popup\"))
+                       (unless (member \"arr.range\"
+                                       (kvist--company-backend
+                                        (quote candidates) \"arr.\"))
+                         (error \"Kvist Company backend lost candidates\"))
+                       (unless (equal (kvist--company-backend
+                                       (quote annotation) \"arr.range\")
+                                      \"  (range [& rest])\")
+                         (error \"Kvist Company backend lost signatures\")))
+                     (let ((this-command (quote indent-for-tab-command)))
+                       (cl-letf (((symbol-function (quote kvist--completion-symbols))
+                                  (lambda (&optional _identifier)
+                                    (list (list :name \"arr.range\"
+                                                :signature \"(range [& rest])\")))))
+                         (let* ((capf (kvist-completion-at-point))
+                                (table (nth 2 capf))
+                                (candidates (all-completions \"arr.\" table))
+                                (metadata (funcall table \"arr.range\" nil (quote metadata)))
+                                (annotation
+                                 (cdr (assq (quote annotation-function) metadata))))
+                           (unless (member \"arr.range\" candidates)
+                             (error \"Missing qualified CAPF candidate\"))
+                           (unless (equal (funcall annotation \"arr.range\")
+                                          \"  (range [& rest])\")
+                             (error \"Missing CAPF signature annotation\")))))
+                     (let ((this-command (quote company-complete-common))
+                           (tooling-calls 0)
+                           (kvist--editor-symbol-cache
+                            (list :file buffer-file-name
+                                  :tick (buffer-chars-modified-tick)
+                                  :symbols
+                                  (list (list :name \"arr.iterate\")))))
+                       (cl-letf (((symbol-function (quote kvist--complete-symbols))
+                                  (lambda (&optional _identifier _file)
+                                    (setq tooling-calls (1+ tooling-calls))
+                                    (list (list :name \"arr.range\"
+                                                :signature \"(range [& rest])\")))))
+                         (let* ((capf (kvist-completion-at-point))
+                                (table (nth 2 capf))
+                                (candidates (all-completions \"arr.\" table)))
+                           (unless (and (null candidates) (= tooling-calls 0))
+                             (error \"Typing qualifier invoked tooling: %S\"
+                                    candidates)))
+                         (let* ((kvist--manual-completion-request t)
+                                (capf (kvist-completion-at-point))
+                                (table (nth 2 capf))
+                                (candidates (all-completions \"arr.\" table)))
+                           (unless (and (member \"arr.range\" candidates)
+                                        (= tooling-calls 1))
+                             (error \"TAB did not fetch package symbols: %S\"
+                                    candidates)))
+                         (insert \"r\")
+                         (let* ((this-command (quote self-insert-command))
+                                (capf (kvist-completion-at-point))
+                                (table (nth 2 capf))
+                                (candidates (all-completions \"arr.r\" table)))
+                           (unless (and (member \"arr.range\" candidates)
+                                        (= tooling-calls 1))
+                             (error \"Typing did not filter cached symbols: %S\"
+                                    candidates))))))
+                   (with-temp-buffer
+                     (kvist-repl-mode)
+                     (unless (member (quote kvist-completion-at-point)
+                                     completion-at-point-functions)
+                       (error \"Kvist REPL is missing symbol completion\"))
+                     (unless (eq (key-binding (kbd \"C-c M-o\"))
+                                 (quote kvist-repl-clear-buffer))
+                       (error \"Kvist REPL is missing C-c M-o clear binding\"))
+                     (kvist--repl-insert-prompt)
+                     (insert \"(+ 1 1)\\n\")
+                     (kvist--repl-insert-response
+                      (list :success t :text \"2\"))
+                     (let ((transcript
+                            (buffer-substring-no-properties
+                             (point-min) (point-max))))
+                       (unless (equal
+                                transcript
+                                \"kvist=> (+ 1 1)\\n2\\nkvist=> \")
+                         (error \"Unexpected interactive REPL transcript: %S\"
+                                transcript))
+                       (when (string-match-p \"=> 2\" transcript)
+                         (error \"Interactive REPL result retained overlay prefix\")))
+                     (insert \"(+ 40 2)\")
+                     (setq kvist--repl-history (list \"(+ 1 1)\"))
+                     (kvist--repl-clear-interface \"/tmp/example.kvist\")
+                     (let ((cleared
+                            (buffer-substring-no-properties
+                             (point-min) (point-max))))
+                       (when (string-match-p \"=> 2\" cleared)
+                         (error \"Cleared REPL retained old transcript: %S\"
+                                cleared))
+                       (unless (string-suffix-p
+                                \"kvist=> (+ 40 2)\" cleared)
+                         (error \"Cleared REPL lost current input: %S\"
+                                cleared))
+                       (unless (equal kvist--repl-history
+                                      (list \"(+ 1 1)\"))
+                         (error \"Cleared REPL lost input history\"))))
+                   (goto-char (point-min))
+                   (search-forward \"(add 1\")
+                   (let* ((bounds (kvist--top-level-bounds))
+                          (form (buffer-substring-no-properties
+                                 (car bounds) (cdr bounds))))
+                     (unless (equal form \"(add 1 2)\")
+                       (error
+                        \"Expected direct comment child for C-c C-c, got: %S\"
+                        form)))
+                   (goto-char (point-min))
+                   (search-forward \"(add 1\")
+                   (backward-char 2)
+                   (let* ((bounds (kvist--inspect-form-bounds-at-point))
+                          (form (buffer-substring-no-properties
+                                 (car bounds) (cdr bounds))))
+                     (unless (equal form \"(add 1 2)\")
+                       (error
+                        \"Expected inspection on call head to select call, got: %S\"
+                        form)))
+                   (dolist (target (list \"dynamic\" \"[dynamic]int\"))
+                     (goto-char (point-min))
+                     (search-forward target)
+                     (backward-char 1)
+                     (let* ((bounds (kvist--inspect-form-bounds-at-point))
+                            (form (buffer-substring-no-properties
+                                   (car bounds) (cdr bounds))))
+                       (unless (string-prefix-p
+                                \"([dynamic]int [0 1 2\" form)
+                         (error
+                          \"Expected compound type-call head to select call, got: %S\"
+                          form))))
+                   (goto-char (point-min))
+                   (search-forward \"map[string]int\")
+                   (backward-char 1)
+                   (let* ((bounds (kvist--inspect-form-bounds-at-point))
+                          (form (buffer-substring-no-properties
+                                 (car bounds) (cdr bounds))))
+                     (unless (equal form \"(map[string]int {\\\"a\\\" 7})\")
+                       (error
+                        \"Expected generic type-call head to select call, got: %S\"
+                        form)))
                    (goto-char (point-min))
                    (search-forward \"  (with-allocator\")
                    (beginning-of-line)
@@ -833,7 +1074,17 @@ if command -v emacs >/dev/null 2>&1; then
                           (form (buffer-substring-no-properties (car bounds) (cdr bounds))))
                      (unless (string-prefix-p \"(with-allocator\" form)
                        (error \"Expected with-allocator form, got: %s\" form)))
+                   (call-interactively (quote kvist-eval-buffer))
+                   (kvist-repl-wait)
+                   (let ((eval-text (with-current-buffer kvist-result-buffer-name
+                                      (buffer-substring-no-properties
+                                       (point-min) (point-max)))))
+                     (unless (string-match-p \"kvist exited 0\" eval-text)
+                       (error \"Expected successful native eval-buffer, got: %s\" eval-text)))
+                   (when (get-buffer kvist-generated-buffer-name)
+                     (error \"Ordinary eval unexpectedly opened generated Odin\"))
                    (call-interactively (quote kvist-macroexpand-form-at-point))
+                   (kvist-repl-wait)
                    (let ((macro-text (with-current-buffer kvist-macroexpand-buffer-name
                                        (buffer-substring-no-properties (point-min) (point-max)))))
                      (unless (string-match-p \"context\\\\.allocator allocator\" macro-text)
@@ -841,16 +1092,129 @@ if command -v emacs >/dev/null 2>&1; then
                    (goto-char (point-min))
                    (search-forward \"(add 1 2)\")
                    (call-interactively (quote kvist-expand-form-at-point))
+                   (kvist-repl-wait)
                    (with-current-buffer kvist-generated-buffer-name
                      (goto-char (point-min))
-                     (unless (search-forward \"fmt.println(add(1, 2))\" nil t)
-                       (error \"Expected generated eval wrapper\")))
+                     (unless (and (search-forward \"kvist_repl_run\" nil t)
+                                  (search-forward \"kvist_repl_result_value := add(1, 2)\" nil t))
+                       (error \"Expected generated native REPL wrapper\")))
                    (goto-char (point-min))
                    (search-forward \"(add 1 2)\")
                    (call-interactively (quote kvist-insert-form-result))
+                   (kvist-repl-wait)
                    (goto-char (point-min))
                    (unless (search-forward \";; => 3\" nil t)
                      (error \"Expected inserted eval comment\"))
+                   (goto-char (point-min))
+                   (search-forward \"(add 1 2)\")
+                   (call-interactively (quote kvist-inspect-form-at-point))
+                   (kvist-repl-wait)
+                   (let ((inspect-text
+                          (with-current-buffer kvist-inspect-buffer-name
+                            (buffer-substring-no-properties
+                             (point-min) (point-max)))))
+                     (unless (and (string-match-p \"Type: int\" inspect-text)
+                                  (string-match-p \"ABI: value:int\" inspect-text)
+                                  (string-match-p \"Shape: scalar\" inspect-text)
+                                  (string-match-p \"3\" inspect-text))
+                       (error \"Expected typed live inspection, got: %s\"
+                              inspect-text)))
+                   (goto-char (point-min))
+                   (search-forward \"(Pair {left: 1 right: \\\"two\\\"})\")
+                   (call-interactively (quote kvist-inspect-form-at-point))
+                   (kvist-repl-wait)
+                   (let ((inspect-text
+                          (with-current-buffer kvist-inspect-buffer-name
+                            (buffer-substring-no-properties
+                             (point-min) (point-max)))))
+                     (unless
+                         (and (string-match-p \"Type: Pair\" inspect-text)
+                              (string-match-p \"Shape: struct\" inspect-text)
+                              (string-match-p \"left: int\" inspect-text)
+                              (string-match-p \"right: string\" inspect-text))
+                       (error \"Expected structured inspection, got: %s\"
+                              inspect-text)))
+                   (with-current-buffer kvist-inspect-buffer-name
+                     (unless (equal kvist--inspection-handle \"inspection-2\")
+                       (error \"Expected retained structured inspection handle\"))
+                     (kvist-inspect-member \"left\"))
+                   (kvist-repl-wait)
+                   (let ((child-text
+                          (with-current-buffer kvist-inspect-buffer-name
+                            (buffer-substring-no-properties
+                             (point-min) (point-max)))))
+                     (unless
+                         (and (string-match-p
+                               \"Expression: inspection-2 / left\"
+                               child-text)
+                              (string-match-p \"Type: int\" child-text)
+                              (string-match-p \"Shape: scalar\" child-text)
+                              (string-match-p \"^1$\" child-text))
+                       (error \"Expected retained field inspection, got: %s\"
+                              child-text)))
+                   (with-current-buffer kvist-inspect-buffer-name
+                     (unless
+                         (string-match-p
+                          \"b          return to previous inspection\"
+                          (buffer-string))
+                       (error \"Expected discoverable inspector back navigation\"))
+                     (kvist-inspect-back)
+                     (unless
+                         (and (equal kvist--inspection-handle \"inspection-2\")
+                              (equal kvist--inspection-shape \"struct\")
+                              (string-match-p
+                               \"RET/click  inspect field at point\"
+                               (buffer-string)))
+                       (error \"Expected inspector back to restore struct view\")))
+                   (goto-char (point-min))
+                   (search-forward \"([dynamic]int [0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21])\")
+                   (call-interactively (quote kvist-inspect-form-at-point))
+                   (kvist-repl-wait)
+                   (with-current-buffer kvist-inspect-buffer-name
+                     (unless (equal kvist--inspection-shape \"dynamic-array\")
+                       (error \"Expected navigable dynamic-array inspection\"))
+                     (unless (and (= kvist--inspection-total 22)
+                                  (= kvist--inspection-offset 0))
+                       (error \"Expected first bounded collection page\"))
+                     (kvist-inspect-next-page))
+                   (kvist-repl-wait)
+                   (with-current-buffer kvist-inspect-buffer-name
+                     (unless (and (= kvist--inspection-offset 20)
+                                  (save-excursion
+                                    (goto-char (point-min))
+                                    (search-forward \"[20] 20\" nil t)))
+                       (error \"Expected second bounded collection page\"))
+                     (kvist-inspect-index 1))
+                   (kvist-repl-wait)
+                   (let ((child-text
+                          (with-current-buffer kvist-inspect-buffer-name
+                            (buffer-substring-no-properties
+                             (point-min) (point-max)))))
+                     (unless
+                         (and (string-match-p \"/ \\\\[1\\\\]\" child-text)
+                              (string-match-p \"Type: int\" child-text)
+                              (string-match-p \"^1$\" child-text))
+                       (error \"Expected retained index inspection, got: %s\"
+                              child-text)))
+                   (goto-char (point-min))
+                   (search-forward \"(map[string]int {\\\"a\\\" 7})\")
+                   (call-interactively (quote kvist-inspect-form-at-point))
+                   (kvist-repl-wait)
+                   (with-current-buffer kvist-inspect-buffer-name
+                     (unless (equal kvist--inspection-shape \"map\")
+                       (error \"Expected navigable map inspection\"))
+                     (kvist-inspect-map-key \"\\\"a\\\"\"))
+                   (kvist-repl-wait)
+                   (let ((child-text
+                          (with-current-buffer kvist-inspect-buffer-name
+                            (buffer-substring-no-properties
+                             (point-min) (point-max)))))
+                     (unless
+                         (and (string-match-p \"/ \\\\[\\\"a\\\"\\\\]\" child-text)
+                              (string-match-p \"Type: int\" child-text)
+                              (string-match-p \"^7$\" child-text))
+                       (error \"Expected retained map entry inspection, got: %s\"
+                              child-text)))
                    (goto-char (point-min))
                    (search-forward \"(add 1 2)\")
                    (kvist-save-form-result \"emacs-sum\")
@@ -907,13 +1271,694 @@ if command -v emacs >/dev/null 2>&1; then
                      (save-buffer))
                    (set-buffer kvist-test-source-buffer)
                    (goto-char (point-min))
-                   (search-forward \"(main)\")
+                   (search-forward \"(announce)\")
                    (call-interactively (quote kvist-insert-form-result))
+                   (kvist-repl-wait)
                    (goto-char (point-min))
-                   (unless (search-forward \";; => from main\" nil t)
-                     (error \"Expected inserted void-call eval comment\")))
+                   (unless (search-forward \";; => announced\" nil t)
+                     (error \"Expected inserted void-call eval comment\"))
+                   (kvist-repl-generations)
+                   (kvist-repl-wait)
+                   (with-current-buffer kvist-generations-buffer-name
+                     (let ((generation-text
+                            (buffer-substring-no-properties
+                             (point-min) (point-max))))
+                       (unless
+                           (and (string-match-p
+                                 \"Loaded native generations: [1-9]\"
+                                 generation-text)
+                                (string-match-p \"generation_[0-9]+\\\\.odin\"
+                                                generation-text)
+                                (string-match-p \"generation_[0-9]+\\\\.map\"
+                                                generation-text))
+                         (error \"Expected live generation inventory, got: %s\"
+                                generation-text))))
+                   (setq kvist-test-debug-session nil)
+                   (let ((kvist-native-debugger-launch-function
+                          (lambda (metadata)
+                            (setq kvist-test-debug-session metadata))))
+                     (kvist-debug-native-worker)
+                     (kvist-repl-wait))
+                   (let ((debug-session kvist-test-debug-session))
+                     (unless
+                         (and (numberp (plist-get debug-session :worker-pid))
+                              (> (plist-get debug-session :worker-pid) 0)
+                              (= (plist-get debug-session :worker-epoch) 1)
+                              (member \"native-attach\"
+                                      (plist-get debug-session :capabilities)))
+                       (error \"Expected native debug-session metadata, got: %s\"
+                              debug-session)))
+                   (setq kvist-test-breakpoints nil)
+                   (let ((kvist-native-breakpoint-function
+                          (lambda (locations)
+                            (setq kvist-test-breakpoints locations))))
+                     (goto-char (point-min))
+                     (search-forward \"(defn add \")
+                     (beginning-of-line)
+                     (kvist-debug-breakpoint-at-point)
+                     (kvist-repl-wait))
+                   (unless
+                       (and kvist-test-breakpoints
+                            (stringp
+                             (alist-get
+                              (quote generated_path)
+                              (car kvist-test-breakpoints)))
+                            (numberp
+                             (alist-get
+                              (quote generated_start_line)
+                              (car kvist-test-breakpoints))))
+                     (error \"Expected translated Kvist breakpoints, got: %s\"
+                            kvist-test-breakpoints))
+                   (goto-char (point-min))
+                   (search-forward \"(add 1 2)\")
+                   (kvist-debug-eval-form-at-point)
+                   (kvist-debug-wait-for-pause)
+                   (let ((session (kvist--repl-session)))
+                     (unless
+                         (and (stringp
+                               (kvist--repl-session-pause-id session))
+                              (overlayp
+                               (kvist--repl-session-pause-overlay session))
+                              (alist-get
+                               (quote frame_id)
+                               (kvist--repl-session-debug-frame session)))
+                       (error \"Expected visible instrumented Kvist pause\"))
+                     (with-current-buffer kvist-test-source-buffer
+                       (unless kvist-debug-source-mode
+                         (error \"Expected source-buffer debug controls\"))
+                       (let* ((overlay
+                               (kvist--repl-session-pause-overlay session))
+                              (prompt (overlay-get overlay (quote after-string)))
+                              (frame
+                               (kvist--repl-session-debug-frame session)))
+                         (unless
+                             (and (string-match-p \"next\" prompt)
+                                  (string-match-p \"continue\" prompt)
+                                  (string-match-p \"frame\" prompt)
+                                  (string-match-p \"quit\" prompt)
+                                  (not (string-match-p \"Kvist paused\" prompt)))
+                           (error \"Unexpected source debug prompt: %S\" prompt))
+                         (unless
+                             (and (= (line-number-at-pos)
+                                     (alist-get (quote line) frame))
+                                  (= (1+ (current-column))
+                                     (alist-get (quote column) frame)))
+                           (error \"Point did not move to the paused source span\")))
+                       (dolist
+                           (binding
+                            (list (cons \"n\" (quote kvist-debug-step))
+                                  (cons \"o\" (quote kvist-debug-step-over))
+                                  (cons \"u\" (quote kvist-debug-step-out))
+                                  (cons \"c\" (quote kvist-debug-continue))
+                                  (cons \"e\" (quote kvist-debug-eval-expression))
+                                  (cons \"f\" (quote kvist-debug-show-frame))
+                                  (cons \"p\" (quote kvist-debug-page))
+                                  (cons \"q\" (quote kvist-debug-abort))))
+                         (unless (eq (key-binding (kbd (car binding)))
+                                     (cdr binding))
+                           (error \"Missing source debug key %s\"
+                                  (car binding)))))
+                     (kvist-debug-show-frame)
+                     (let ((deadline (+ (float-time) 30.0)))
+                       (while
+                           (and (not (get-buffer
+                                      kvist-debug-frame-buffer-name))
+                                (< (float-time) deadline))
+                         (accept-process-output
+                          (kvist--repl-session-process session)
+                          0.1)))
+                       (unless (get-buffer kvist-debug-frame-buffer-name)
+                         (error \"Expected queried Kvist debug frame\")))
+                     (with-current-buffer kvist-debug-frame-buffer-name
+                       (let ((frame-text
+                              (buffer-substring-no-properties
+                               (point-min) (point-max))))
+                         (unless
+                             (and (string-match-p \"Commands: n next/into\"
+                                                  frame-text)
+                                  (string-match-p \"Phase: before-eval\"
+                                                  frame-text)
+                                  (string-match-p
+                                   \"Locals: none exposed\"
+                                   frame-text))
+                           (error \"Unexpected Kvist frame: %s\"
+                                  frame-text)))
+                       (dolist
+                           (binding
+                            (list (cons \"n\" (quote kvist-debug-step))
+                                  (cons \"o\" (quote kvist-debug-step-over))
+                                  (cons \"u\" (quote kvist-debug-step-out))
+                                  (cons \"c\" (quote kvist-debug-continue))
+                                  (cons \"e\" (quote kvist-debug-eval-expression))
+                                  (cons \"p\" (quote kvist-debug-page))
+                                  (cons \"g\" (quote kvist-debug-show-frame))
+                                  (cons \"q\" (quote kvist-debug-abort))))
+                         (unless (eq (key-binding (kbd (car binding)))
+                                     (cdr binding))
+                           (error \"Missing debug-frame key %s\"
+                                  (car binding)))))
+                     (kvist--present-debug-value
+                      \"x\"
+                      (list :success t :type \"int\" :text \"5\"))
+                     (with-current-buffer kvist-debug-value-buffer-name
+                       (let ((value-text
+                              (buffer-substring-no-properties
+                               (point-min) (point-max))))
+                         (unless (string= value-text \"x: int\\n\\n5\")
+                           (error \"Unexpected Kvist debug value: %s\"
+                                  value-text))))
+                     (kvist--present-debug-page
+                      (list :success t
+                            :shape \"dynamic-array\"
+                            :element-type \"int\"
+                            :offset 1
+                            :limit 2
+                            :total 4
+                            :entries
+                            (list
+                             (list (cons (quote index) 1)
+                                   (cons (quote value) \"20\"))
+                             (list (cons (quote index) 2)
+                                   (cons (quote value) \"30\")))
+                            :collections
+                            (list
+                             (list
+                              (cons (quote path) \"values[2].children\")
+                              (cons (quote shape) \"dynamic-array\"))))
+                      \"values\"
+                      file
+                      (current-buffer)
+                      \"pause-test\")
+                     (with-current-buffer kvist-debug-page-buffer-name
+                       (let ((page-text
+                              (buffer-substring-no-properties
+                               (point-min) (point-max))))
+                         (unless
+                             (and
+                              (string-match-p
+                               \"Paused collection: values\"
+                               page-text)
+                              (string-match-p \"\\\\[1\\\\]  20\" page-text)
+                              (string-match-p \"Page: 2-3 of 4\" page-text)
+                              (string-match-p
+                               \"Discovered collections\"
+                               page-text)
+                              (string-match-p
+                               \"values\\\\[2\\\\]\\\\.children\"
+                               page-text)
+                              (eq (key-binding (kbd \"n\"))
+                                  (quote kvist-debug-page-next))
+                              (eq (key-binding (kbd \"p\"))
+                                  (quote kvist-debug-page-previous))
+                              (eq (key-binding (kbd \"g\"))
+                                  (quote kvist-debug-page-refresh)))
+                           (error \"Unexpected Kvist debug page: %s\"
+                                  page-text))))
+                     (let* ((session
+                             (with-current-buffer kvist-test-source-buffer
+                               (kvist--repl-session)))
+                            (pending
+                             (kvist--repl-session-pending session))
+                            (outer-count (hash-table-count pending))
+                            (deadline (+ (float-time) 30.0)))
+                       (with-current-buffer kvist-test-source-buffer
+                         (goto-char (point-min))
+                         (search-forward \"(add 1 2)\")
+                         (kvist-debug-eval-native-form-at-point))
+                       (while
+                           (and (> (hash-table-count pending) outer-count)
+                                (< (float-time) deadline))
+                         (accept-process-output
+                          (kvist--repl-session-process session)
+                          0.1))
+                       (when (> (hash-table-count pending) outer-count)
+                         (error
+                          \"Timed out waiting for native break evaluation\")))
+                     (unless
+                         (and
+                          (kvist--repl-session-pause-id
+                           (with-current-buffer kvist-test-source-buffer
+                             (kvist--repl-session)))
+                          (with-current-buffer kvist-result-buffer-name
+                            (string-match-p \"3\" (buffer-string))))
+                       (error
+                        \"Expected native break evaluation to preserve the outer pause\"))
+                     (kvist-debug-continue)
+                     (kvist-repl-wait)
+                     (when (kvist--repl-session-pause-id
+                            (kvist--repl-session))
+                       (error \"Expected Kvist pause to clear after continue\"))
+                     (kvist--repl-request
+                      \"eval\"
+                      \"(defn condition-value [x: int] -> int (do (condition.signal \\\"inspect x\\\") (+ x 1)))\"
+                      (lambda (result)
+                        (unless (plist-get result :success)
+                          (error \"Could not define condition-value: %s\"
+                                 (plist-get result :message))))
+                      nil file)
+                     (kvist-repl-wait)
+                     (kvist--repl-request
+                      \"eval\"
+                      \"(condition-value 5)\"
+                      (lambda (result)
+                        (unless
+                            (and (plist-get result :success)
+                                 (string-match-p \"6\"
+                                                 (plist-get result :text)))
+                          (error \"Unexpected condition result: %S\" result)))
+                      nil file)
+                     (kvist-debug-wait-for-pause)
+                     (let* ((condition-session (kvist--repl-session))
+                            (condition-event
+                             (kvist--repl-session-condition
+                              condition-session)))
+                       (unless
+                           (and condition-event
+                                (equal
+                                 (alist-get (quote condition_type)
+                                            condition-event)
+                                 \"kvist/condition\")
+                                (equal (alist-get (quote message)
+                                                  condition-event)
+                                       \"inspect x\")
+                                (get-buffer kvist-condition-buffer-name))
+                         (error \"Expected visible Kvist condition\"))
+                       (with-current-buffer kvist-condition-buffer-name
+                         (let ((condition-text
+                                (buffer-substring-no-properties
+                                 (point-min) (point-max))))
+                           (unless
+                               (and
+                                (string-match-p
+                                 \"Condition: kvist/condition\"
+                                 condition-text)
+                                (string-match-p \"Message: inspect x\"
+                                                condition-text)
+                                (string-match-p \"x: int = 5\"
+                                                condition-text)
+                                (string-match-p \"continue\"
+                                                condition-text)
+                                (eq (key-binding (kbd \"r\"))
+                                    (quote
+                                     kvist-debug-recover)))
+                             (error \"Unexpected Kvist condition: %s\"
+                                    condition-text))))
+                       (kvist-debug-recover \"continue\")
+                       (kvist-repl-wait)
+                       (when
+                           (kvist--repl-session-pause-id
+                            condition-session)
+                         (error
+                          \"Expected Kvist condition to clear after restart\")))
+                     (kvist--repl-request
+                      \"eval\"
+                      \"(defn repair-value [x: int] -> int (do (defvar value: int x) (condition.use-value! value \\\"replace value\\\") value))\"
+                      (lambda (result)
+                        (unless (plist-get result :success)
+                          (error \"Could not define repair-value: %s\"
+                                 (plist-get result :message))))
+                      nil file)
+                     (kvist-repl-wait)
+                     (kvist--repl-request
+                      \"eval\"
+                      \"(repair-value 5)\"
+                      (lambda (result)
+                        (unless
+                            (and (plist-get result :success)
+                                 (string-match-p \"42\"
+                                                 (plist-get result :text)))
+                          (error \"Unexpected use-value result: %S\"
+                                 result)))
+                      nil file)
+                     (kvist-debug-wait-for-pause)
+                     (with-current-buffer kvist-condition-buffer-name
+                       (let ((condition-text
+                              (buffer-substring-no-properties
+                               (point-min) (point-max))))
+                         (unless
+                             (and
+                              (string-match-p \"use-value\"
+                                              condition-text)
+                              (string-match-p \"value: int\"
+                                              condition-text)
+                              (string-match-p \"value: int = 5\"
+                                              condition-text))
+                           (error \"Unexpected use-value condition: %s\"
+                                  condition-text))))
+                     (kvist-debug-recover \"use-value\" \"42\")
+                     (kvist-repl-wait)
+                     (when
+                         (kvist--repl-session-pause-id
+                          (kvist--repl-session))
+                       (error
+                        \"Expected use-value condition to clear after restart\"))
+                     (kvist--repl-request
+                      \"eval\"
+                      \"(defn repair-string [x: string] -> string (do (defvar value: string x) (condition.use-value! value \\\"replace string\\\") value))\"
+                      (lambda (result)
+                        (unless (plist-get result :success)
+                          (error \"Could not define repair-string: %s\"
+                                 (plist-get result :message))))
+                      nil file)
+                     (kvist-repl-wait)
+                     (kvist--repl-request
+                      \"eval\"
+                      \"(repair-string \\\"old\\\")\"
+                      (lambda (result)
+                        (unless
+                            (and (plist-get result :success)
+                                 (string-match-p \"hello emacs\"
+                                                 (plist-get result :text)))
+                          (error \"Unexpected string restart result: %S\"
+                                 result)))
+                      nil file)
+                     (kvist-debug-wait-for-pause)
+                     (with-current-buffer kvist-condition-buffer-name
+                       (let ((condition-text
+                              (buffer-substring-no-properties
+                               (point-min) (point-max))))
+                         (unless
+                             (and
+                              (string-match-p \"use-value\"
+                                              condition-text)
+                              (string-match-p \"value: string\"
+                                              condition-text))
+                           (error \"Unexpected string condition: %s\"
+                                  condition-text))))
+                     (kvist-debug-recover
+                      \"use-value\" \"hello emacs\")
+                     (kvist-repl-wait)
+                     (kvist--repl-request
+                      \"eval\"
+                      \"(defn retry-region [] -> int (do (defvar attempts: int 0) (condition.restart-case (do (inc! attempts) (condition.signal \\\"retry region\\\") (inc! attempts))) attempts))\"
+                      (lambda (result)
+                        (unless (plist-get result :success)
+                          (error \"Could not define retry-region: %s\"
+                                 (plist-get result :message))))
+                      nil file)
+                     (kvist-repl-wait)
+                     (kvist--repl-request
+                      \"eval\"
+                      \"(retry-region)\"
+                      (lambda (result)
+                        (unless
+                            (and (plist-get result :success)
+                                 (string-match-p \"2\"
+                                                 (plist-get result :text)))
+                          (error \"Unexpected retry-region result: %S\"
+                                 result)))
+                      nil file)
+                     (kvist-debug-wait-for-pause)
+                     (with-current-buffer kvist-condition-buffer-name
+                       (let ((condition-text
+                              (buffer-substring-no-properties
+                               (point-min) (point-max))))
+                         (unless
+                             (and
+                              (string-match-p \"retry\"
+                                              condition-text)
+                              (string-match-p \"skip\"
+                                              condition-text))
+                           (error
+                            \"Unexpected restart-case condition: %s\"
+                            condition-text))))
+                     (let* ((restart-session (kvist--repl-session))
+                            (previous-condition
+                             (kvist--repl-session-condition
+                              restart-session))
+                            (deadline (+ (float-time) 30.0)))
+                       (kvist-debug-recover \"retry\")
+                       (while
+                           (and
+                            (let ((current-condition
+                                   (kvist--repl-session-condition
+                                    restart-session)))
+                              (or (null current-condition)
+                                  (eq current-condition
+                                      previous-condition)))
+                            (< (float-time) deadline))
+                         (accept-process-output
+                          (kvist--repl-session-process restart-session)
+                          0.1))
+                       (unless
+                           (kvist--repl-session-condition
+                            restart-session)
+                         (error
+                          \"Expected retry to reach the condition again\"))
+                       (kvist-debug-recover \"skip\"))
+                     (kvist-repl-wait)
+                     (when
+                         (kvist--repl-session-pause-id
+                          (kvist--repl-session))
+                       (error
+                        \"Expected restart-case condition to clear after skip\"))
+                     (kvist--repl-request
+                      \"eval\"
+                      \"(defn paused-values [values: [dynamic]int] -> int (do (debug.break) values[0]))\"
+                      (lambda (result)
+                        (unless (plist-get result :success)
+                          (error \"Could not define paused-values: %s\"
+                                 (plist-get result :message))))
+                      nil file)
+                     (kvist-repl-wait)
+                     (kvist--repl-request
+                      \"eval\"
+                      \"(paused-values ([dynamic]int [0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21]))\"
+                      (lambda (result)
+                        (unless (plist-get result :success)
+                          (error \"Could not call paused-values: %s\"
+                                 (plist-get result :message))))
+                      nil file)
+                     (kvist-debug-wait-for-pause)
+                     (let* ((session (kvist--repl-session))
+                            (live-pause
+                             (kvist--repl-session-pause-id session)))
+                       (kvist-debug-page \"values\")
+                       (let ((deadline (+ (float-time) 30.0)))
+                         (while
+                             (and
+                              (not
+                               (and
+                                (get-buffer kvist-debug-page-buffer-name)
+                                (with-current-buffer
+                                    kvist-debug-page-buffer-name
+                                  (and
+                                   (equal kvist--debug-page-pause-id
+                                          live-pause)
+                                   (= (or kvist--debug-page-offset -1)
+                                      0)))))
+                              (< (float-time) deadline))
+                           (accept-process-output
+                            (with-current-buffer kvist-test-source-buffer
+                              (kvist--repl-session-process
+                               (kvist--repl-session)))
+                            0.1)))
+                         (with-current-buffer kvist-debug-page-buffer-name
+                           (unless
+                               (and
+                                (equal kvist--debug-page-path \"values\")
+                                (= kvist--debug-page-total 22)
+                                (string-match-p
+                                 \"\\\\[19\\\\]  19\"
+                                 (buffer-string)))
+                             (error
+                              \"Expected first live Kvist collection page: %s\"
+                              (buffer-string)))
+                           (kvist-debug-page-next)))
+                       (let ((deadline (+ (float-time) 30.0)))
+                         (while
+                             (and
+                              (not
+                               (with-current-buffer
+                                   kvist-debug-page-buffer-name
+                                 (= (or kvist--debug-page-offset -1)
+                                    20)))
+                              (< (float-time) deadline))
+                           (accept-process-output
+                            (with-current-buffer kvist-test-source-buffer
+                              (kvist--repl-session-process
+                               (kvist--repl-session)))
+                            0.1)))
+                         (with-current-buffer kvist-debug-page-buffer-name
+                           (unless
+                               (and
+                                (= kvist--debug-page-offset 20)
+                                (string-match-p
+                                 \"\\\\[20\\\\]  20\"
+                                 (buffer-string))
+                                (string-match-p
+                                 \"Page: 21-22 of 22\"
+                                 (buffer-string)))
+                             (error
+                              \"Expected second live Kvist collection page: %s\"
+                              (buffer-string)))))
+                       (let* ((session (kvist--repl-session))
+                              (previous-pause
+                               (kvist--repl-session-pause-id session))
+                              (deadline (+ (float-time) 30.0)))
+                         (kvist-debug-step)
+                         (while
+                             (and
+                              (or
+                               (null
+                                (kvist--repl-session-pause-id session))
+                               (equal
+                                (kvist--repl-session-pause-id session)
+                                previous-pause))
+                              (< (float-time) deadline))
+                           (accept-process-output
+                            (kvist--repl-session-process session)
+                            0.1))
+                         (unless
+                             (and
+                              (kvist--repl-session-pause-id session)
+                              (not
+                               (equal
+                                (kvist--repl-session-pause-id session)
+                                previous-pause)))
+                           (error
+                            \"Expected Kvist step to reach a new pause\"))
+                         (let ((frame-id
+                                (alist-get
+                                 (quote frame_id)
+                                 (kvist--repl-session-debug-frame session))))
+                           (unless
+                               (and frame-id
+                                    (with-current-buffer
+                                        kvist-debug-frame-buffer-name
+                                      (string-match-p
+                                       (regexp-quote
+                                        (format \"Frame: %s\" frame-id))
+                                       (buffer-string))))
+                             (error
+                              \"Debug frame did not refresh after stepping\")))
+                         (kvist-debug-step-out)
+                         (kvist-repl-wait))
+                       (kvist--repl-request
+                        \"eval\"
+                        \"(defn traced-values [x: int] -> int (do (discard (+ x 1)) (+ x 2)))\"
+                        (lambda (result)
+                          (unless (plist-get result :success)
+                            (error \"Could not define traced-values: %s\"
+                                   (plist-get result :message))))
+                        nil file)
+                       (kvist-repl-wait)
+                       (kvist--repl-request
+                        \"eval\"
+                        \"(traced-values 5)\"
+                        (lambda (result)
+                          (unless (plist-get result :success)
+                            (error \"Could not trace traced-values: %s\"
+                                   (plist-get result :message)))
+                          (unless
+                              (and (= (length (plist-get result :traces)) 2)
+                                   (plist-get result :trace-truncated))
+                            (error \"Unexpected Kvist trace result: %S\"
+                                   result))
+                          (kvist--present-trace
+                           (plist-get result :traces)
+                           (plist-get result :trace-truncated)
+                           (plist-get result :trace-summary)
+                           (plist-get result :trace-values)
+                           (plist-get result :trace-values-truncated)))
+                        nil file nil nil nil nil nil nil nil nil nil nil
+                        t 2 t 1)
+                       (kvist-repl-wait)
+                       (with-current-buffer kvist-trace-buffer-name
+                         (unless
+                             (and
+                              (string-match-p
+                               \"Kvist execution trace: 2 safe points\"
+                               (buffer-string))
+                              (string-match-p
+                               \"Δ[0-9.]+ ms\"
+                               (buffer-string))
+                              (string-match-p
+                               \"Hotspots (time after each safe point)\"
+                               (buffer-string))
+                              (string-match-p
+                               \"Native evaluation: [0-9.]+ ms total\"
+                               (buffer-string))
+                              (string-match-p \"depth 1\" (buffer-string))
+                              (string-match-p
+                               \"x: int  borrowed = 5\"
+                               (buffer-string))
+                              (string-match-p
+                               \"Trace value limit reached\"
+                               (buffer-string))
+                              (string-match-p
+                               \"Trace limit reached\"
+                               (buffer-string)))
+                           (error \"Unexpected Kvist trace buffer: %s\"
+                                  (buffer-string)))))))
+               (ignore-errors (kvist-repl-stop))
+               (ignore-errors
+                 (when (buffer-live-p kvist-test-source-buffer)
+                   (kill-buffer kvist-test-source-buffer)))
                (ignore-errors (kill-buffer (current-buffer)))
                (delete-file file))))"
+
+    printf 'tooling: emacs attached protocol events\n'
+    emacs -Q --batch --eval \
+        '(progn
+           (defvar clojure-mode-map (make-sparse-keymap))
+           (define-derived-mode clojure-mode prog-mode "Clojure")
+           (defun clojure--put-indentation-spec (&rest _args) nil)
+           (provide (quote clojure-mode))
+           (add-to-list (quote load-path) "emacs")
+           (require (quote kvist-eval))
+           (let* ((process (start-process "kvist-attached-event-test" nil "cat"))
+                  (session
+                   (kvist--make-repl-session
+                    :key "attached-test"
+                    :process process
+                    :pending (make-hash-table :test (quote equal))
+                    :attached t
+                    :endpoint "/tmp/kvist-attached-test"))
+                  result)
+             (unwind-protect
+                 (progn
+                   (process-put process (intern "kvist-request-reload")
+                                (list :text ""))
+                   (puthash "reload"
+                            (lambda (value) (setq result value))
+                            (kvist--repl-session-pending session))
+                   (kvist--repl-handle-event
+                    session
+                    (quote ((id . "reload")
+                            (kind . "reload-requested")
+                            (success . t)
+                            (generation . 7)
+                            (reload_requested . t))))
+                   (kvist--repl-handle-event
+                    session
+                    (quote ((id . "reload")
+                            (kind . "reload-complete")
+                            (success . t)
+                            (generation . 8)
+                            (attached_capabilities
+                             . (((name . "app/echo")
+                                 (signature . "proc(string)->string")))))))
+                   (kvist--repl-handle-event
+                    session
+                    (quote ((id . "reload")
+                            (kind . "complete")
+                            (success . t)
+                            (generation . 8))))
+                   (unless (and (plist-get result :success)
+                                (plist-get result :reload-requested)
+                                (= (plist-get result :generation) 8)
+                                (equal
+                                 (alist-get
+                                  (quote name)
+                                  (car
+                                   (plist-get
+                                    result
+                                    :attached-capabilities)))
+                                 "app/echo"))
+                     (error "Unexpected attached result: %S" result)))
+               (when (process-live-p process)
+                 (delete-process process)))))'
 else
     printf 'tooling: emacs not found, skipping byte compile\n'
 fi
