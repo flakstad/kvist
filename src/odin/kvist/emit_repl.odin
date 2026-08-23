@@ -4402,6 +4402,7 @@ debug_emit_pause :: proc(
             fmt.tprintf(
                 "return %s",
                 zero_value_for_type_text(
+                    e,
                     e.current_proc_returns.single_ty,
                 ),
             ),

@@ -327,7 +327,7 @@ emit_expr_for_expected_type :: proc(e: ^Emitter, form: CST_Form, expected_type :
         return "", err_proc_literal, false
     }
     if expected_type != "" && form_is_expected_zero(form) {
-        return zero_value_for_type_text(expected_type), {}, true
+        return zero_value_for_type_text(e, expected_type), {}, true
     }
     if expected_type != "" && form.kind == .List {
         if expected_item_ty, ok_expected_item_ty := dynamic_array_element_type(expected_type); ok_expected_item_ty {

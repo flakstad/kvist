@@ -680,8 +680,51 @@ default_is_odin_caller_intrinsic :: proc(form: CST_Form) -> bool {
            is_symbol(form.items[0], "#caller_expression")
 }
 
-zero_value_for_type_text :: proc(ty: string) -> string {
-    return fmt.tprintf("%s{{}}", ty)
+resolved_zero_type_text :: proc(e: ^Emitter, ty: string, depth := 0) -> string {
+    trimmed := strings.trim_space(ty)
+    if e == nil || depth > 16 || trimmed == "" {
+        return trimmed
+    }
+    if strings.has_prefix(trimmed, "distinct ") {
+        return resolved_zero_type_text(
+            e,
+            strings.trim_space(trimmed[len("distinct "):]),
+            depth+1,
+        )
+    }
+    ensure_emitter_indexes(e)
+    if idx, found := e.const_indices[trimmed]; found {
+        decl := &e.decls[idx]
+        if decl.const_decl.is_type_alias {
+            return resolved_zero_type_text(
+                e,
+                decl.const_decl.type_alias,
+                depth+1,
+            )
+        }
+    }
+    return trimmed
+}
+
+type_text_has_nil_zero :: proc(e: ^Emitter, ty: string) -> bool {
+    resolved := resolved_zero_type_text(e, ty)
+    return strings.has_prefix(resolved, "^") ||
+           strings.has_prefix(resolved, "[^") ||
+           strings.has_prefix(resolved, "[]") ||
+           strings.has_prefix(resolved, "[dynamic]") ||
+           strings.has_prefix(resolved, "#soa[dynamic]") ||
+           strings.has_prefix(resolved, "map[") ||
+           strings.has_prefix(resolved, "proc(") ||
+           resolved == "rawptr" ||
+           resolved == "cstring" ||
+           resolved == "any"
+}
+
+zero_value_for_type_text :: proc(e: ^Emitter, ty: string) -> string {
+    if type_text_has_nil_zero(e, ty) {
+        return strings.clone("nil")
+    }
+    return fmt.tprintf("%s{{}}", strings.trim_space(ty))
 }
 
 form_is_expected_zero :: proc(form: CST_Form) -> bool {

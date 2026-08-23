@@ -22,7 +22,7 @@ IR_Package_Group :: struct {
     cache_hit:   bool,
 }
 
-PACKAGE_ARTIFACT_CACHE_VERSION :: 4
+PACKAGE_ARTIFACT_CACHE_VERSION :: 5
 
 Cached_IR_Package_Group :: struct {
     version: int,

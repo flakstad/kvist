@@ -190,6 +190,7 @@ Emitter :: struct {
     current_proc_returns: Return_Spec,
     current_source_path: string,
     current_source_file: string,
+    warning_source_files: map[string]string,
     indexes_ready: bool,
     proc_indices: map[string]int,
     overload_indices: map[string]int,
@@ -502,7 +503,28 @@ emit_coded_warning :: proc(
     if e.warnings == nil {
         return
     }
-    line, column, _, _ := source_position(e.current_source_file, span.start)
+    source_file := e.current_source_file
+    if e.current_source_path != "" {
+        if e.warning_source_files == nil {
+            e.warning_source_files = make(
+                map[string]string,
+                context.temp_allocator,
+            )
+        }
+        if cached, found := e.warning_source_files[e.current_source_path]; found {
+            source_file = cached
+        } else {
+            data, read_err := os.read_entire_file_from_path(
+                e.current_source_path,
+                context.temp_allocator,
+            )
+            if read_err == nil {
+                source_file = string(data)
+                e.warning_source_files[e.current_source_path] = source_file
+            }
+        }
+    }
+    line, column, _, _ := source_position(source_file, span.start)
     append(e.warnings, Compile_Warning{
         message = strings.clone(message),
         span = span,

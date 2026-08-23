@@ -6873,6 +6873,7 @@ repl_compile_generation :: proc(
     if diagnostics != nil {
         for warning in result.warnings {
             warning_source := source
+            owned_warning_source: []u8
             warning_path := eval_source_path
             warning_start_line := eval_start_line
             warning_start_column := eval_start_column
@@ -6881,6 +6882,15 @@ repl_compile_generation :: proc(
                 warning_path = input
                 if warning.source_path != "" {
                     warning_path = warning.source_path
+                    imported_source, read_err :=
+                        os.read_entire_file_from_path(
+                            warning.source_path,
+                            context.allocator,
+                        )
+                    if read_err == nil {
+                        owned_warning_source = imported_source
+                        warning_source = string(imported_source)
+                    }
                 }
                 warning_start_line = 1
                 warning_start_column = 1
@@ -6909,6 +6919,9 @@ repl_compile_generation :: proc(
                 end_line = end_line,
                 end_column = end_column,
             })
+            if owned_warning_source != nil {
+                delete(owned_warning_source)
+            }
         }
     }
 

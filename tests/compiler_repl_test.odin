@@ -2412,6 +2412,286 @@ compile_doc_macro_supports_imported_package_macros :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(output, "source-doc"), false)
 }
 
+generated_proc_body_contains :: proc(output, name, expected: string) -> bool {
+    marker := fmt.tprintf("%s :: proc", name)
+    start := strings.index(output, marker)
+    if start < 0 {
+        return false
+    }
+    tail := output[start:]
+    end := strings.index(tail, "\n}\n")
+    if end < 0 {
+        return false
+    }
+    return strings.contains(tail[:end], expected)
+}
+
+@(test)
+compile_repl_generation_uses_type_correct_zero_values :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp(
+        "",
+        "kvist-repl-zero-values-*",
+        context.allocator,
+    )
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    source := `(package repl_zero_values)
+
+(defstruct Entry {value: int})
+(defunion Choice {entry: Entry number: int})
+(def Entry-Pointer ^Entry)
+(def Nested-Entry-Pointer Entry-Pointer)
+(def Distinct-Entry-Pointer (distinct ^Entry))
+
+(defn pointer-zero [] -> ^Entry (zero))
+(defn pointer-alias-zero [] -> Nested-Entry-Pointer (zero))
+(defn distinct-pointer-alias-zero [] -> Distinct-Entry-Pointer (zero))
+(defn struct-zero [] -> Entry (zero))
+(defn union-zero [] -> Choice (zero))
+(defn array-zero [] -> [2]int (zero))
+(defn int-zero [] -> int (zero))
+(defn bool-zero [] -> bool (zero))
+(defn string-zero [] -> string (zero))
+(defn slice-zero [] -> []int (zero))
+(defn dynamic-array-zero [] -> [dynamic]int (zero))
+(defn map-zero [] -> map[string]int (zero))
+(defn proc-zero [] -> (fn [] -> int) (zero))
+(defn raw-pointer-zero [] -> rawptr (zero))
+(defn c-string-zero [] -> cstring (zero))`
+    source_path, join_err := os.join_path(
+        {dir, "main.kvist"},
+        context.allocator,
+    )
+    testing.expect_value(t, join_err == nil, true)
+    if join_err != nil {
+        return
+    }
+    defer delete(source_path)
+    testing.expect_value(
+        t,
+        os.write_entire_file_from_string(source_path, source) == nil,
+        true,
+    )
+
+    result, err, ok := kvist.compile_eval_path_with_map(
+        source_path,
+        `(= (pointer-zero) nil)`,
+        repl_generation = true,
+    )
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer kvist.source_map_slice_delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+    output := result.output
+
+    testing.expect_value(t, strings.contains(output, "return ^Entry{}"), false)
+    testing.expect_value(t, strings.contains(output, "return Entry_Pointer{}"), false)
+    testing.expect_value(t, strings.contains(output, "return Nested_Entry_Pointer{}"), false)
+    testing.expect_value(t, strings.contains(output, "return Distinct_Entry_Pointer{}"), false)
+    testing.expect_value(t, generated_proc_body_contains(output, "pointer_zero", "return nil"), true)
+    testing.expect_value(t, generated_proc_body_contains(output, "pointer_alias_zero", "return nil"), true)
+    testing.expect_value(t, generated_proc_body_contains(output, "distinct_pointer_alias_zero", "return nil"), true)
+    testing.expect_value(t, generated_proc_body_contains(output, "struct_zero", "return Entry{}"), true)
+    testing.expect_value(t, generated_proc_body_contains(output, "union_zero", "return Choice{}"), true)
+    testing.expect_value(t, generated_proc_body_contains(output, "array_zero", "return [2]int{}"), true)
+    testing.expect_value(t, generated_proc_body_contains(output, "int_zero", "return int{}"), true)
+    testing.expect_value(t, generated_proc_body_contains(output, "bool_zero", "return bool{}"), true)
+    testing.expect_value(t, generated_proc_body_contains(output, "string_zero", "return string{}"), true)
+    testing.expect_value(t, generated_proc_body_contains(output, "slice_zero", "return nil"), true)
+    testing.expect_value(t, generated_proc_body_contains(output, "dynamic_array_zero", "return nil"), true)
+    testing.expect_value(t, generated_proc_body_contains(output, "map_zero", "return nil"), true)
+    testing.expect_value(t, generated_proc_body_contains(output, "proc_zero", "return nil"), true)
+    testing.expect_value(t, generated_proc_body_contains(output, "raw_pointer_zero", "return nil"), true)
+    testing.expect_value(t, generated_proc_body_contains(output, "c_string_zero", "return nil"), true)
+}
+
+@(test)
+cli_repl_accepts_pointer_returns_from_context_and_imported_packages :: proc(
+    t: ^testing.T,
+) {
+    dir, dir_err := os.make_directory_temp(
+        "",
+        "kvist-repl-pointer-zero-*",
+        context.allocator,
+    )
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    state_dir, _ := os.join_path({dir, "state"}, context.allocator)
+    defer delete(state_dir)
+    testing.expect_value(t, os.make_directory_all(state_dir) == nil, true)
+    state_path, _ := os.join_path({state_dir, "state.kvist"}, context.allocator)
+    defer delete(state_path)
+    state_source := `(package state)
+(import arr "kvist:arr")
+
+(defstruct Imported-Entry {value: int})
+(def Imported-Entry-Pointer ^Imported-Entry)
+(defn imported-identity [entry: Imported-Entry-Pointer] -> Imported-Entry-Pointer entry)
+
+(defn leaked-values []
+  (let [xs (arr.empty int)]
+    (println 1)))
+
+(defn transferred-values []
+  (let [xs (arr.empty int)]
+    (delete xs)
+    (println (count xs))))`
+    testing.expect_value(
+        t,
+        os.write_entire_file_from_string(state_path, state_source) == nil,
+        true,
+    )
+
+    context_path, _ := os.join_path({dir, "main.kvist"}, context.allocator)
+    defer delete(context_path)
+    context_source := `(package repl_pointer_zero)
+(import state "./state")
+(defstruct Entry {value: int})
+(defunion Choice {entry: Entry number: int})
+(def Entry-Pointer ^Entry)
+(def Nested-Entry-Pointer Entry-Pointer)
+(def Distinct-Entry-Pointer (distinct ^Entry))
+(defn missing [] -> ^Entry nil)
+(defn identity-entry [entry: ^Entry] -> ^Entry entry)
+(defn alias-identity [entry: Nested-Entry-Pointer] -> Nested-Entry-Pointer entry)
+(defn distinct-alias-identity [entry: Distinct-Entry-Pointer] -> Distinct-Entry-Pointer entry)
+(defn zero-int [] -> int (zero))
+(defn zero-bool [] -> bool (zero))
+(defn zero-string [] -> string (zero))
+(defn zero-struct [] -> Entry (zero))
+(defn zero-union [] -> Choice (zero))
+(defn zero-array [] -> [2]int (zero))
+(defn zero-slice [] -> []int (zero))
+(defn zero-dynamic-array [] -> [dynamic]int (zero))
+(defn zero-map [] -> map[string]int (zero))
+(defn zero-proc [] -> (fn [] -> int) (zero))
+(defn zero-rawptr [] -> rawptr (zero))
+(defn zero-cstring [] -> cstring (zero))
+(defn abort-pointer [] -> ^Entry
+  (do (kvist-intrinsic-breakpoint) (missing)))
+(defn imported-identity [entry: ^state.Imported-Entry] -> ^state.Imported-Entry
+  (state.imported-identity entry))`
+    testing.expect_value(
+        t,
+        os.write_entire_file_from_string(context_path, context_source) == nil,
+        true,
+    )
+
+    requests_path, _ := os.join_path({dir, "requests.jsonl"}, context.allocator)
+    defer delete(requests_path)
+    requests := `{"id":"probe","op":"eval","source":"(= (missing) nil)","source_path":"repl-probe.kvist","line":1,"column":1}
+{"id":"abort-pointer","op":"eval","source":"(abort-pointer)"}
+{"id":"abort-pointer-control","op":"debug-abort"}
+{"id":"close","op":"close"}
+`
+    testing.expect_value(
+        t,
+        os.write_entire_file_from_string(requests_path, requests) == nil,
+        true,
+    )
+    request_file, open_err := os.open(requests_path)
+    testing.expect_value(t, open_err == nil, true)
+    if open_err != nil {
+        return
+    }
+    defer os.close(request_file)
+
+    repo_root := compiler_test_repo_root()
+    kvist_bin, bin_ok := build_test_kvist_binary(t, repo_root, dir)
+    if !bin_ok {
+        return
+    }
+    defer delete(kvist_bin)
+    state, stdout, stderr, exec_err := os.process_exec(
+        os.Process_Desc{
+            command = {kvist_bin, "repl", context_path, "--protocol", "jsonl"},
+            working_dir = repo_root,
+            stdin = request_file,
+        },
+        context.allocator,
+    )
+    defer delete(stdout)
+    defer delete(stderr)
+    testing.expect_value(t, exec_err == nil, true)
+    testing.expect_value(t, state.exited, true)
+    testing.expect_value(t, state.exit_code, 0)
+    output := string(stdout)
+    testing.expect_value(
+        t,
+        strings.contains(
+            output,
+            `"id":"probe","kind":"complete","success":true`,
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            output,
+            `"id":"abort-pointer-control","kind":"abort-requested","success":true`,
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            output,
+            `"id":"abort-pointer","kind":"aborted","success":true`,
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            output,
+            `"id":"abort-pointer","kind":"complete","success":false`,
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            output,
+            `"code":"KVO002","confidence":"conservative","phase":"compile"`,
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(output, `"line":9,"column":4,"end_line":9,"end_column":7`),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            output,
+            `"code":"KVO003","confidence":"definite","phase":"compile"`,
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(output, `"line":15,"column":21,"end_line":15,"end_column":23`),
+        true,
+    )
+    testing.expect_value(t, strings.contains(output, "return ^Entry{}"), false)
+    testing.expect_value(t, strings.contains(string(stderr), "Expected ';', got {"), false)
+}
+
 @(test)
 cli_eval_uses_ephemeral_repl_session :: proc(t: ^testing.T) {
     dir, dir_err :=

@@ -13,7 +13,7 @@ import "core:time"
 import kvist "../../odin/kvist"
 
 CACHE_DIR :: ".kvist-cache"
-COMPILE_CACHE_VERSION :: "kvist-compile-cache-v6"
+COMPILE_CACHE_VERSION :: "kvist-compile-cache-v7"
 
 ownership_audit_enabled: bool
 explain_cache_enabled: bool
