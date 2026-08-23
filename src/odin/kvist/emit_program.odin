@@ -780,6 +780,17 @@ emit_eval_decls_with_source_map :: proc(
         }
     }
 
+    if initialize_context {
+        for &decl in e.decls {
+            if decl.kind != .Proc ||
+               name_in_list(repl_prior_proc_names, decl.proc_decl.name) ||
+               name_in_list(repl_proc_names, decl.proc_decl.name) {
+                continue
+            }
+            emit_repl_scalar_invoke_adapter(&e, &decl.proc_decl)
+        }
+    }
+
     start_line := e.line
     if export_entry {
         emit_line(&e, "@(export)")
@@ -1166,6 +1177,25 @@ emit_eval_decls_with_source_map :: proc(
                     decl.proc_decl.name,
                 ),
             )
+            if repl_proc_supports_scalar_invoke(&decl.proc_decl) {
+                adapter := repl_scalar_invoke_adapter_name(decl.proc_decl.name)
+                result_signature := repl_value_signature(
+                    decl.proc_decl.returns.single_ty,
+                    &e,
+                )
+                emit_line(
+                    &e,
+                    fmt.tprintf(
+                        "host.register_scalar_invoke(host.ctx, %q, %q, %q, %s)",
+                        decl.proc_decl.name,
+                        signature,
+                        result_signature,
+                        adapter,
+                    ),
+                )
+                delete(result_signature)
+                delete(adapter)
+            }
             delete(signature)
         }
         emit_line(&e, "// KVIST_REPL_CONTEXT_PROCS_END")
@@ -1511,6 +1541,180 @@ repl_host_rendered_scalar_type :: proc(ty: string) -> bool {
     return false
 }
 
+repl_scalar_invoke_type_supported :: proc(ty: string) -> bool {
+    switch strings.trim_space(ty) {
+    case "bool", "int", "f64", "string", "Data":
+        return true
+    }
+    return false
+}
+
+repl_scalar_invoke_adapter_name :: proc(name: string) -> string {
+    return fmt.tprintf("%s__kvist_repl_scalar_invoke", name)
+}
+
+repl_proc_supports_scalar_invoke :: proc(proc_decl: ^Proc_Decl) -> bool {
+    if proc_decl == nil || len(proc_decl.params) > 4 ||
+       proc_decl.returns.kind != .Single ||
+       !repl_scalar_invoke_type_supported(proc_decl.returns.single_ty) {
+        return false
+    }
+    for param in proc_decl.params {
+        if param.ownership == .Owned ||
+           !repl_scalar_invoke_type_supported(param.ty) {
+            return false
+        }
+    }
+    return true
+}
+
+emit_repl_scalar_invoke_adapter :: proc(
+    e: ^Emitter,
+    proc_decl: ^Proc_Decl,
+) {
+    if !repl_proc_supports_scalar_invoke(proc_decl) {
+        return
+    }
+    adapter := repl_scalar_invoke_adapter_name(proc_decl.name)
+    if proc_decl.returns.single_ty == "Data" {
+        emit_line(e, fmt.tprintf("%s__data_results: [3]Data", adapter))
+        emit_line(e, fmt.tprintf("%s__data_next: int", adapter))
+        for index in 0..<3 {
+            emit_line(
+                e,
+                fmt.tprintf(
+                    "%s__data_result_%d :: proc() -> Data %c return %s__data_results[%d] %c",
+                    adapter,
+                    index,
+                    '{',
+                    adapter,
+                    index,
+                    '}',
+                ),
+            )
+        }
+    }
+    emit_line(
+        e,
+        fmt.tprintf(
+            "%s :: proc \"c\" (args: [^]Kvist_Repl_Scalar_Value, arg_count: int, result: ^Kvist_Repl_Scalar_Value) -> bool %c",
+            adapter,
+            '{',
+        ),
+    )
+    e.indent += 1
+    emit_line(e, "context = repl_runtime.default_context()")
+    emit_line(e, "context.allocator = kvist_repl_host.allocator")
+    emit_line(e, fmt.tprintf("if arg_count != %d %c return false %c", len(proc_decl.params), '{', '}'))
+    for param, index in proc_decl.params {
+        kind := "Int"
+        if param.ty == "bool" {
+            kind = "Bool"
+        } else if param.ty == "f64" {
+            kind = "F64"
+        } else if param.ty == "string" {
+            kind = "String"
+        } else if param.ty == "Data" {
+            kind = "Data"
+        }
+        emit_line(
+            e,
+            fmt.tprintf(
+                "if args[%d].kind != .%s %c return false %c",
+                index,
+                kind,
+                '{',
+                '}',
+            ),
+        )
+    }
+    arguments := strings.builder_make()
+    defer strings.builder_destroy(&arguments)
+    for param, index in proc_decl.params {
+        if index > 0 {
+            strings.write_string(&arguments, ", ")
+        }
+        switch param.ty {
+        case "bool": fmt.sbprintf(&arguments, "args[%d].int_value != 0", index)
+        case "int": fmt.sbprintf(&arguments, "int(args[%d].int_value)", index)
+        case "f64": fmt.sbprintf(&arguments, "args[%d].float_value", index)
+        case "string":
+            fmt.sbprintf(
+                &arguments,
+                "string(args[%d].string_data[:args[%d].string_length])",
+                index,
+                index,
+            )
+        case "Data":
+            fmt.sbprintf(
+                &arguments,
+                "(transmute(proc() -> Data)args[%d].source_address)()",
+                index,
+            )
+        }
+    }
+    emit_line(
+        e,
+        fmt.tprintf(
+            "value := %s(%s)",
+            proc_decl.name,
+            strings.to_string(arguments),
+        ),
+    )
+    owned := proc_decl.returns.single_ownership == .Owned || proc_decl.owns_result
+    switch proc_decl.returns.single_ty {
+    case "bool":
+        emit_line(e, "result^ = {kind = .Bool, int_value = 1 if value else 0}")
+    case "int":
+        emit_line(e, "result^ = {kind = .Int, int_value = i64(value)}")
+    case "f64":
+        emit_line(e, "result^ = {kind = .F64, float_value = value}")
+    case "string":
+        emit_line(
+            e,
+            fmt.tprintf(
+                "result^ = %c kind = .String, owned = %v, string_data = raw_data(value), string_length = len(value) %c",
+                '{',
+                owned,
+                '}',
+            ),
+        )
+    case "Data":
+        emit_line(e, fmt.tprintf("cell := %s__data_next %% 3", adapter))
+        emit_line(e, fmt.tprintf("%s__data_next += 1", adapter))
+        emit_line(e, fmt.tprintf("kvist_data_release(%s__data_results[cell])", adapter))
+        emit_line(e, fmt.tprintf("%s__data_results[cell] = kvist_data_retain(value)", adapter))
+        if owned {
+            emit_line(e, "kvist_data_release(value)")
+        }
+        emit_line(e, fmt.tprintf("rendered := kvist_data_repr(%s__data_results[cell])", adapter))
+        emit_line(e, "result_address: rawptr")
+        for index in 0..<3 {
+            prefix := "if" if index == 0 else "else if"
+            emit_line(
+                e,
+                fmt.tprintf(
+                    "%s cell == %d %c result_address = transmute(rawptr)%s__data_result_%d %c",
+                    prefix,
+                    index,
+                    '{',
+                    adapter,
+                    index,
+                    '}',
+                ),
+            )
+        }
+        emit_line(
+            e,
+            "result^ = {kind = .Data, owned = true, string_data = raw_data(rendered), string_length = len(rendered), result_address = result_address}",
+        )
+    }
+    emit_line(e, "return true")
+    e.indent -= 1
+    emit_line(e, "}")
+    delete(adapter)
+}
+
 emit_eval_program_with_source_map :: proc(
     program: IR_Program,
     eval_form: CST_Form,
@@ -1576,12 +1780,25 @@ emit_eval_program_with_source_map :: proc(
             kind = .Raw,
             span = eval_form.span,
             raw_text = `@(export)
-kvist_repl_api_version: u32 = 27
+kvist_repl_api_version: u32 = 28
 
 Kvist_Repl_Register_Proc :: proc "c" (ctx: rawptr, name: cstring, signature: cstring, address: rawptr)
 Kvist_Repl_Lookup_Proc :: proc "c" (ctx: rawptr, name: cstring, signature: cstring) -> rawptr
 Kvist_Repl_Register_Result :: proc "c" (ctx: rawptr, signature: cstring, address: rawptr)
 Kvist_Repl_Render_Scalar_Result :: proc "c" (ctx: rawptr, type_name: cstring, address: rawptr)
+Kvist_Repl_Scalar_Value_Kind :: enum u32 {Invalid, Bool, Int, F64, String, Data}
+Kvist_Repl_Scalar_Value :: struct {
+    kind: Kvist_Repl_Scalar_Value_Kind,
+    owned: bool,
+    int_value: i64,
+    float_value: f64,
+    string_data: [^]u8,
+    string_length: int,
+    source_address: rawptr,
+    result_address: rawptr,
+}
+Kvist_Repl_Scalar_Invoke :: proc "c" (args: [^]Kvist_Repl_Scalar_Value, arg_count: int, result: ^Kvist_Repl_Scalar_Value) -> bool
+Kvist_Repl_Register_Scalar_Invoke :: proc "c" (ctx: rawptr, name: cstring, signature: cstring, result_abi: cstring, address: Kvist_Repl_Scalar_Invoke)
 Kvist_Repl_State_Restore :: proc "c" (snapshot: rawptr)
 Kvist_Repl_State_Clone :: proc "c" (snapshot: rawptr)
 Kvist_Repl_Register_State :: proc "c" (ctx: rawptr, name: cstring, signature: cstring, size, align: int, clone: Kvist_Repl_State_Clone, restore: Kvist_Repl_State_Restore)
@@ -1630,6 +1847,7 @@ Kvist_Repl_Host_API :: struct {
     lookup_proc: Kvist_Repl_Lookup_Proc,
     register_result: Kvist_Repl_Register_Result,
     render_scalar_result: Kvist_Repl_Render_Scalar_Result,
+    register_scalar_invoke: Kvist_Repl_Register_Scalar_Invoke,
     register_state: Kvist_Repl_Register_State,
     debug_flags: Kvist_Repl_Debug_Flags,
     trace_point: Kvist_Repl_Trace_Point,

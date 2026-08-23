@@ -2092,17 +2092,32 @@ to 9 KB of generated Odin. A newly named dylib still has an observed `dlopen`
 floor of roughly 140 ms on the development machine, independent of that source
 reduction.
 
-The common `(int-function literal-int ...)` case therefore has a narrower
-resident path. The first native generation registers concrete context
-procedures with their exact ABI. After normal Kvist parsing, expansion, type
-checking, and dependency validation prove a later submission to be such a
-call, the worker invokes the already loaded native procedure directly. This is
-not an interpreter and does not replace general native generation. In the
-representative `repl-basics.kvist` benchmark, distinct warm calls take about
-84-106 ms end to end instead of roughly 430-480 ms. An exact call with stable
-typed history takes about 8.5 ms through the frontend cache. Calls outside the
-currently supported integer/literal shape continue through thin or full native
-generation with unchanged semantics.
+Common calls therefore have a narrower resident path. The first native
+generation registers concrete context procedures together with exact ABI and
+uniform, statically typed call adapters. After normal Kvist parsing, expansion,
+type checking, and dependency validation prove a later submission to be a
+compatible call, the worker invokes the already loaded native procedure
+directly. This is not an interpreter and does not replace general native
+generation.
+
+The resident adapter currently supports up to four mixed `bool`, `int`, `f64`,
+`string`, and `Data` parameters and results. Scalar arguments must be literals;
+a `Data` argument may be one of the typed recent results `*1`, `*2`, or `*3`.
+Owned strings are transferred into worker result storage, while `Data` remains
+a typed retained result and can immediately be passed to another compatible
+native call. Result history advances exactly as it does for a compiled
+generation.
+
+In the representative `repl-basics.kvist` benchmark, distinct warm integer
+calls take about 84-106 ms end to end instead of roughly 430-480 ms. A mixed
+scalar and `Data` regression context measures roughly 106-119 ms per distinct
+warm call in a development build, including a `Data` return followed by a call
+that consumes `*1`; the optimized CLI build measures roughly 55-65 ms for the
+same warm calls. An exact call with stable typed history takes about 8.5 ms
+through the frontend cache. Calls involving nested argument expressions,
+unsupported native types, live definitions that require slot dispatch, or
+other general forms continue through thin or full native generation with
+unchanged semantics.
 
 The generic protocol must report timings for at least:
 

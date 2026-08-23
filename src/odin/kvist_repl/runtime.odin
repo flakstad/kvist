@@ -14,7 +14,7 @@ import "core:strings"
 import "core:sync"
 import "core:time"
 
-GENERATION_ABI_VERSION :: u32(27)
+GENERATION_ABI_VERSION :: u32(28)
 
 DEBUG_FLAG_PAUSE :: u32(1)
 DEBUG_FLAG_TRACE :: u32(2)
@@ -46,6 +46,40 @@ Render_Scalar_Result :: proc "c" (
     ctx: rawptr,
     type_name: cstring,
     address: rawptr,
+)
+
+Scalar_Value_Kind :: enum u32 {
+    Invalid,
+    Bool,
+    Int,
+    F64,
+    String,
+    Data,
+}
+
+Scalar_Value :: struct {
+    kind:          Scalar_Value_Kind,
+    owned:         bool,
+    int_value:     i64,
+    float_value:   f64,
+    string_data:   [^]u8,
+    string_length: int,
+    source_address: rawptr,
+    result_address: rawptr,
+}
+
+Scalar_Invoke :: proc "c" (
+    args: [^]Scalar_Value,
+    arg_count: int,
+    result: ^Scalar_Value,
+) -> bool
+
+Register_Scalar_Invoke :: proc "c" (
+    ctx: rawptr,
+    name: cstring,
+    signature: cstring,
+    result_abi: cstring,
+    address: Scalar_Invoke,
 )
 
 State_Clone :: proc "c" (snapshot: rawptr)
@@ -444,6 +478,7 @@ Host_API :: struct {
     lookup_proc:     Lookup_Proc,
     register_result: Register_Result,
     render_scalar_result: Render_Scalar_Result,
+    register_scalar_invoke: Register_Scalar_Invoke,
     register_state:  Register_State,
     debug_flags:     Debug_Flags,
     trace_point:     Trace_Point,
@@ -475,6 +510,13 @@ Proc_Slot :: struct {
     name:      string,
     signature: string,
     address:   rawptr,
+}
+
+Scalar_Invoke_Slot :: struct {
+    name:       string,
+    signature:  string,
+    result_abi: string,
+    address:    Scalar_Invoke,
 }
 
 State_Slot :: struct {
@@ -509,9 +551,16 @@ Worker :: struct {
     input_reader: ^bufio.Reader,
     generations: [dynamic]Generation_Symbols,
     proc_slots:  [dynamic]Proc_Slot,
+    scalar_invoke_slots: [dynamic]Scalar_Invoke_Slot,
     result_slots: [3]Proc_Slot,
     direct_int_results: [3]int,
     next_direct_int_result: int,
+    direct_bool_results: [3]bool,
+    next_direct_bool_result: int,
+    direct_f64_results: [3]f64,
+    next_direct_f64_result: int,
+    direct_string_results: [3]string,
+    next_direct_string_result: int,
     state_slots:  [dynamic]State_Slot,
     checkpoints:  [dynamic]Checkpoint,
     checkpoint_live_allocations: int,
@@ -574,6 +623,16 @@ worker_direct_int_result_1 :: proc() -> int {
 worker_direct_int_result_2 :: proc() -> int {
     return worker_direct_result_owner.direct_int_results[2]
 }
+
+worker_direct_bool_result_0 :: proc() -> bool { return worker_direct_result_owner.direct_bool_results[0] }
+worker_direct_bool_result_1 :: proc() -> bool { return worker_direct_result_owner.direct_bool_results[1] }
+worker_direct_bool_result_2 :: proc() -> bool { return worker_direct_result_owner.direct_bool_results[2] }
+worker_direct_f64_result_0 :: proc() -> f64 { return worker_direct_result_owner.direct_f64_results[0] }
+worker_direct_f64_result_1 :: proc() -> f64 { return worker_direct_result_owner.direct_f64_results[1] }
+worker_direct_f64_result_2 :: proc() -> f64 { return worker_direct_result_owner.direct_f64_results[2] }
+worker_direct_string_result_0 :: proc() -> string { return worker_direct_result_owner.direct_string_results[0] }
+worker_direct_string_result_1 :: proc() -> string { return worker_direct_result_owner.direct_string_results[1] }
+worker_direct_string_result_2 :: proc() -> string { return worker_direct_result_owner.direct_string_results[2] }
 
 Worker_Allocation_Stats :: struct {
     live_allocations:        int,
@@ -762,6 +821,35 @@ worker_register_proc :: proc "c" (
     })
 }
 
+worker_register_scalar_invoke :: proc "c" (
+    context_ptr: rawptr,
+    name_ptr: cstring,
+    signature_ptr: cstring,
+    result_abi_ptr: cstring,
+    address: Scalar_Invoke,
+) {
+    context = runtime.default_context()
+    worker := transmute(^Worker)context_ptr
+    context.allocator = worker.allocator
+    name := string(name_ptr)
+    signature := string(signature_ptr)
+    result_abi := string(result_abi_ptr)
+    for &slot in worker.scalar_invoke_slots {
+        if slot.name == name && slot.signature == signature {
+            delete(slot.result_abi)
+            slot.result_abi = strings.clone(result_abi)
+            slot.address = address
+            return
+        }
+    }
+    append(&worker.scalar_invoke_slots, Scalar_Invoke_Slot{
+        name = strings.clone(name),
+        signature = strings.clone(signature),
+        result_abi = strings.clone(result_abi),
+        address = address,
+    })
+}
+
 worker_register_state :: proc "c" (
     context_ptr: rawptr,
     name_ptr: cstring,
@@ -834,23 +922,32 @@ worker_register_result :: proc "c" (
     worker := transmute(^Worker)context_ptr
     context.allocator = worker.allocator
 
-    delete(worker.result_slots[2].name)
-    delete(worker.result_slots[2].signature)
-    worker.result_slots[2] = worker.result_slots[1]
-    if worker.result_slots[2].name != "" {
-        delete(worker.result_slots[2].name)
-        worker.result_slots[2].name = strings.clone(RESULT_SLOT_NAMES[2])
-    }
-    worker.result_slots[1] = worker.result_slots[0]
+    next_slots: [3]Proc_Slot
     if worker.result_slots[1].name != "" {
-        delete(worker.result_slots[1].name)
-        worker.result_slots[1].name = strings.clone(RESULT_SLOT_NAMES[1])
+        next_slots[2] = {
+            name = strings.clone(RESULT_SLOT_NAMES[2]),
+            signature = strings.clone(worker.result_slots[1].signature),
+            address = worker.result_slots[1].address,
+        }
+    }
+    if worker.result_slots[0].name != "" {
+        next_slots[1] = {
+            name = strings.clone(RESULT_SLOT_NAMES[1]),
+            signature = strings.clone(worker.result_slots[0].signature),
+            address = worker.result_slots[0].address,
+        }
+    }
+    for slot in worker.result_slots {
+        delete(slot.name)
+        delete(slot.signature)
     }
     worker.result_slots[0] = Proc_Slot{
         name = strings.clone(RESULT_SLOT_NAMES[0]),
         signature = strings.clone(string(signature_ptr)),
         address = address,
     }
+    worker.result_slots[1] = next_slots[1]
+    worker.result_slots[2] = next_slots[2]
 }
 
 worker_render_scalar_result :: proc "c" (
@@ -947,6 +1044,125 @@ worker_invoke_int :: proc(
     )
     rendered := fmt.aprintf("%v\n", value)
     defer delete(rendered)
+    worker_emit_output(
+        rawptr(worker),
+        Rendered_Value{data = raw_data(rendered), length = len(rendered)},
+    )
+    return true
+}
+
+worker_invoke_scalar :: proc(
+    worker: ^Worker,
+    name,
+    signature: string,
+    args: []Scalar_Value,
+) -> bool {
+    if worker == nil || len(args) > 4 {
+        return false
+    }
+    invoke_slot: ^Scalar_Invoke_Slot
+    for &slot in worker.scalar_invoke_slots {
+        if slot.name == name && slot.signature == signature {
+            invoke_slot = &slot
+            break
+        }
+    }
+    if invoke_slot == nil || invoke_slot.address == nil {
+        return false
+    }
+    context = runtime.default_context()
+    context.allocator = worker.allocator
+    worker.abort_requested = false
+    worker.last_run_aborted = false
+    result := Scalar_Value{}
+    invoked := invoke_slot.address(raw_data(args), len(args), &result)
+    worker.last_run_aborted = worker.abort_requested
+    worker.abort_requested = false
+    if !invoked {
+        return false
+    }
+    if worker.last_run_aborted {
+        return true
+    }
+    worker_direct_result_owner = worker
+    signature_text := ""
+    result_address: rawptr
+    rendered := ""
+    switch result.kind {
+    case .Bool:
+        cell := worker.next_direct_bool_result % len(worker.direct_bool_results)
+        worker.next_direct_bool_result += 1
+        worker.direct_bool_results[cell] = result.int_value != 0
+        addresses := [?]rawptr{
+            transmute(rawptr)worker_direct_bool_result_0,
+            transmute(rawptr)worker_direct_bool_result_1,
+            transmute(rawptr)worker_direct_bool_result_2,
+        }
+        result_address = addresses[cell]
+        signature_text = "value:bool"
+        rendered = fmt.aprintf("%v\n", worker.direct_bool_results[cell])
+    case .Int:
+        cell := worker.next_direct_int_result % len(worker.direct_int_results)
+        worker.next_direct_int_result += 1
+        worker.direct_int_results[cell] = int(result.int_value)
+        addresses := [?]rawptr{
+            transmute(rawptr)worker_direct_int_result_0,
+            transmute(rawptr)worker_direct_int_result_1,
+            transmute(rawptr)worker_direct_int_result_2,
+        }
+        result_address = addresses[cell]
+        signature_text = "value:int"
+        rendered = fmt.aprintf("%v\n", worker.direct_int_results[cell])
+    case .F64:
+        cell := worker.next_direct_f64_result % len(worker.direct_f64_results)
+        worker.next_direct_f64_result += 1
+        worker.direct_f64_results[cell] = result.float_value
+        addresses := [?]rawptr{
+            transmute(rawptr)worker_direct_f64_result_0,
+            transmute(rawptr)worker_direct_f64_result_1,
+            transmute(rawptr)worker_direct_f64_result_2,
+        }
+        result_address = addresses[cell]
+        signature_text = "value:f64"
+        rendered = fmt.aprintf("%v\n", worker.direct_f64_results[cell])
+    case .String:
+        cell := worker.next_direct_string_result % len(worker.direct_string_results)
+        worker.next_direct_string_result += 1
+        delete(worker.direct_string_results[cell])
+        value := string(result.string_data[:result.string_length])
+        worker.direct_string_results[cell] = strings.clone(value)
+        if result.owned {
+            delete(value)
+        }
+        addresses := [?]rawptr{
+            transmute(rawptr)worker_direct_string_result_0,
+            transmute(rawptr)worker_direct_string_result_1,
+            transmute(rawptr)worker_direct_string_result_2,
+        }
+        result_address = addresses[cell]
+        signature_text = "value:string"
+        rendered = fmt.aprintf("%s\n", worker.direct_string_results[cell])
+    case .Data:
+        if result.result_address == nil || result.string_data == nil ||
+           result.string_length < 0 {
+            return false
+        }
+        result_address = result.result_address
+        signature_text = invoke_slot.result_abi
+        value := string(result.string_data[:result.string_length])
+        rendered = fmt.aprintf("%s\n", value)
+        if result.owned {
+            delete(value)
+        }
+    case .Invalid:
+        return false
+    }
+    defer delete(rendered)
+    worker_register_result(
+        rawptr(worker),
+        cstring(raw_data(signature_text)),
+        result_address,
+    )
     worker_emit_output(
         rawptr(worker),
         Rendered_Value{data = raw_data(rendered), length = len(rendered)},
@@ -1676,6 +1892,7 @@ worker_ensure_host_api :: proc(worker: ^Worker) {
         lookup_proc = worker_lookup_proc,
         register_result = worker_register_result,
         render_scalar_result = worker_render_scalar_result,
+        register_scalar_invoke = worker_register_scalar_invoke,
         register_state = worker_register_state,
         debug_flags = worker_debug_flags,
         trace_point = worker_trace_point,
@@ -2206,6 +2423,15 @@ worker_delete :: proc(worker: ^Worker) {
         delete(slot.signature)
     }
     delete(worker.proc_slots)
+    for slot in worker.scalar_invoke_slots {
+        delete(slot.name)
+        delete(slot.signature)
+        delete(slot.result_abi)
+    }
+    delete(worker.scalar_invoke_slots)
+    for value in worker.direct_string_results {
+        delete(value)
+    }
     for slot in worker.state_slots {
         delete(slot.name)
         delete(slot.signature)

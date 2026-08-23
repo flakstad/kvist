@@ -137,7 +137,7 @@ compile_repl_generation_exports_native_batch_entry :: proc(t: ^testing.T) {
     defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
-    testing.expect_value(t, strings.contains(result.output, "@(export)\nkvist_repl_api_version: u32 = 27"), true)
+    testing.expect_value(t, strings.contains(result.output, "@(export)\nkvist_repl_api_version: u32 = 28"), true)
     testing.expect_value(t, strings.contains(result.output, "kvist_repl_run :: proc \"c\" (host: ^Kvist_Repl_Host_API) {"), true)
     testing.expect_value(t, strings.contains(result.output, "context = repl_runtime.default_context()"), true)
     testing.expect_value(t, strings.contains(result.output, "kvist_repl_host = host"), true)
@@ -153,6 +153,7 @@ compile_repl_generation_exports_native_batch_entry :: proc(t: ^testing.T) {
     testing.expect_value(t, strings.contains(result.output, "condition: Kvist_Repl_Condition"), true)
     testing.expect_value(t, strings.contains(result.output, "emit_output: Kvist_Repl_Emit_Output"), true)
     testing.expect_value(t, strings.contains(result.output, "render_scalar_result: Kvist_Repl_Render_Scalar_Result"), true)
+    testing.expect_value(t, strings.contains(result.output, "register_scalar_invoke: Kvist_Repl_Register_Scalar_Invoke"), true)
     testing.expect_value(t, strings.contains(result.output, "emit_stream_output: Kvist_Repl_Emit_Output"), true)
     testing.expect_value(t, strings.contains(result.output, "enter_frame: Kvist_Repl_Enter_Frame"), true)
     testing.expect_value(t, strings.contains(result.output, "leave_frame: Kvist_Repl_Leave_Frame"), true)
@@ -2932,7 +2933,11 @@ cli_repl_caches_identical_frontend_generations :: proc(t: ^testing.T) {
     defer delete(context_path)
     context_source := `(package repl_frontend_cache)
 (defvar count: int 0)
-(defn bump [] -> int (do (inc! count) count))`
+(defn bump [] -> int (do (inc! count) count))
+(defn mix [label: string count: int ratio: f64 enabled: bool] -> string
+  (str label ":" count ":" ratio ":" enabled))
+(defn make-record [value: int] -> Data {:answer value})
+(defn identity-record [value: Data] -> Data value)`
     testing.expect_value(
         t,
         os.write_entire_file_from_string(context_path, context_source) == nil,
@@ -2947,6 +2952,9 @@ cli_repl_caches_identical_frontend_generations :: proc(t: ^testing.T) {
 {"id":"call-4","op":"eval","source":"(bump)"}
 {"id":"call-5","op":"eval","source":"(bump)"}
 {"id":"call-6","op":"eval","source":"(bump)"}
+{"id":"mixed","op":"eval","source":"(mix \"x\" 3 1.5 true)"}
+{"id":"data","op":"eval","source":"(make-record 7)"}
+{"id":"data-arg","op":"eval","source":"(identity-record *1)"}
 {"id":"close","op":"close"}
 `
     testing.expect_value(
@@ -3000,6 +3008,21 @@ cli_repl_caches_identical_frontend_generations :: proc(t: ^testing.T) {
     testing.expect_value(
         t,
         strings.contains(output, `"frontend_cache_hit":true`),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(output, `"id":"mixed","kind":"output","success":true,"generation":7,"stream":"stdout","text":"x:3:1.5:true\n"`),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(output, `"id":"data","kind":"output","success":true,"generation":8,"stream":"stdout","text":"{:answer 7}\n"`),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(output, `"id":"data-arg","kind":"output","success":true,"generation":9,"stream":"stdout","text":"{:answer 7}\n"`),
         true,
     )
     testing.expect_value(

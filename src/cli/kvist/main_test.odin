@@ -153,7 +153,7 @@ import fmt "core:fmt"
 import runtime "base:runtime"
 
 @(export)
-kvist_repl_api_version: u32 = 27
+kvist_repl_api_version: u32 = 28
 
 used :: proc(value: int) -> int { return value + 1 }
 unused :: proc() { fmt.println("unused") }
@@ -192,6 +192,45 @@ kvist_repl_result_value := square(11)
     )
 
     nested, nested_ok := repl_direct_int_invocation("(square (+ 10 1))", emitted)
+    defer delete(nested)
+    testing.expect_value(t, nested_ok, false)
+}
+
+@(test)
+repl_direct_scalar_invocation_accepts_mixed_literals_and_data_history :: proc(
+    t: ^testing.T,
+) {
+    emitted := `host.register_scalar_invoke(host.ctx, "mix", "proc(string:borrowed,int:borrowed,f64:borrowed,bool:borrowed)->string:owned", "value:string", mix__kvist_repl_scalar_invoke)
+host.register_scalar_invoke(host.ctx, "read_record", "proc(Data:borrowed)->int", "value:int", read_record__kvist_repl_scalar_invoke)
+kvist_repl_result_value := mix("x", 3, 1.5, true)
+`
+    mixed, mixed_ok := repl_direct_scalar_invocation(
+        `(mix "x" 3 1.5 true)`,
+        emitted,
+    )
+    defer delete(mixed)
+    testing.expect_value(t, mixed_ok, true)
+    testing.expect_value(
+        t,
+        strings.has_prefix(mixed, REPL_WORKER_DIRECT_SCALAR_PREFIX),
+        true,
+    )
+
+    data_emitted := `host.register_scalar_invoke(host.ctx, "read_record", "proc(Data:borrowed)->int", "value:int", read_record__kvist_repl_scalar_invoke)
+kvist_repl_result_value := read_record(kvist_repl_star_1)
+`
+    data, data_ok := repl_direct_scalar_invocation(
+        `(read-record *1)`,
+        data_emitted,
+    )
+    defer delete(data)
+    testing.expect_value(t, data_ok, true)
+    testing.expect_value(t, strings.contains(data, "\tr:"), true)
+
+    nested, nested_ok := repl_direct_scalar_invocation(
+        `(mix "x" (+ 1 2) 1.5 true)`,
+        emitted,
+    )
     defer delete(nested)
     testing.expect_value(t, nested_ok, false)
 }

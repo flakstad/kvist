@@ -21,6 +21,7 @@ import olive_reload "../../odin/olive_reload"
 REPL_PROTOCOL_VERSION :: 1
 REPL_WORKER_MARKER :: "KVIST_REPL_WORKER\t"
 REPL_WORKER_DIRECT_INT_PREFIX :: "__direct_int__\t"
+REPL_WORKER_DIRECT_SCALAR_PREFIX :: "__direct_scalar__\t"
 REPL_WORKER_ABORTED_MARKER :: "KVIST_REPL_ABORTED"
 REPL_WORKER_STREAM_OUTPUT_MARKER :: "KVIST_REPL_STREAM_OUTPUT\t"
 REPL_EVALUATION_ABORTED_MESSAGE :: "evaluation aborted"
@@ -61,7 +62,7 @@ REPL_RESTART_USE_VALUE :: u32(1 << 1)
 REPL_RESTART_RETRY :: u32(1 << 2)
 REPL_RESTART_SKIP :: u32(1 << 3)
 REPL_RESTART_ABORT_OPERATION :: u32(1 << 4)
-REPL_DEBUG_CAPABILITIES: [66]string = {
+REPL_DEBUG_CAPABILITIES: [67]string = {
     "compiled-abort-operation-restarts",
     "compiled-retry-skip-restarts",
     "native-attach",
@@ -75,6 +76,7 @@ REPL_DEBUG_CAPABILITIES: [66]string = {
     "context-expansion-cache",
     "thin-scalar-generations",
     "resident-direct-int-calls",
+    "resident-direct-scalar-calls",
     "deferred-debug-value-capture",
     "generated-source-maps",
     "kvist-breakpoint-locations",
@@ -3030,6 +3032,122 @@ repl_worker_command :: proc() -> int {
             continue
         }
         if line == "" {
+            delete(raw)
+            continue
+        }
+
+        if strings.has_prefix(line, REPL_WORKER_DIRECT_SCALAR_PREFIX) {
+            fields := strings.split(line, "\t", context.temp_allocator)
+            invoked := false
+            run_start := time.tick_now()
+            if len(fields) >= 3 && len(fields) <= 7 {
+                name, name_ok := repl_debug_hex_decode(fields[1])
+                signature, signature_ok := repl_debug_hex_decode(fields[2])
+                args: [4]kvist_repl.Scalar_Value
+                owned_strings: [4]string
+                args_ok := name_ok && signature_ok
+                for field, index in fields[3:] {
+                    if len(field) < 2 || field[1] != ':' {
+                        args_ok = false
+                        break
+                    }
+                    value := field[2:]
+                    switch field[0] {
+                    case 'b':
+                        if value != "0" && value != "1" {
+                            args_ok = false
+                            break
+                        }
+                        args[index] = {kind = .Bool, int_value = 1 if value == "1" else 0}
+                    case 'i':
+                        parsed_value, parsed := strconv.parse_int(value)
+                        if !parsed {
+                            args_ok = false
+                            break
+                        }
+                        args[index] = {kind = .Int, int_value = i64(parsed_value)}
+                    case 'f':
+                        parsed_value, parsed := strconv.parse_f64(value)
+                        if !parsed {
+                            args_ok = false
+                            break
+                        }
+                        args[index] = {kind = .F64, float_value = parsed_value}
+                    case 's':
+                        decoded, decoded_ok := repl_debug_hex_decode(value)
+                        if !decoded_ok {
+                            args_ok = false
+                            break
+                        }
+                        owned_strings[index] = decoded
+                        args[index] = {
+                            kind = .String,
+                            string_data = raw_data(decoded),
+                            string_length = len(decoded),
+                        }
+                    case 'r':
+                        result_name, decoded_ok := repl_debug_hex_decode(value)
+                        if !decoded_ok {
+                            args_ok = false
+                            break
+                        }
+                        result_address: rawptr
+                        for slot in worker.result_slots {
+                            if slot.name == result_name &&
+                               strings.has_prefix(slot.signature, "value:Data") {
+                                result_address = slot.address
+                                break
+                            }
+                        }
+                        delete(result_name)
+                        if result_address == nil {
+                            args_ok = false
+                            break
+                        }
+                        args[index] = {
+                            kind = .Data,
+                            source_address = result_address,
+                        }
+                    case:
+                        args_ok = false
+                    }
+                    if !args_ok {
+                        break
+                    }
+                }
+                if args_ok {
+                    invoked = kvist_repl.worker_invoke_scalar(
+                        &worker,
+                        name,
+                        signature,
+                        args[:len(fields)-3],
+                    )
+                }
+                for value in owned_strings {
+                    delete(value)
+                }
+                delete(name)
+                delete(signature)
+            }
+            run_ns := time.duration_nanoseconds(time.tick_since(run_start))
+            if invoked {
+                if worker.last_run_aborted {
+                    fmt.println(REPL_WORKER_ABORTED_MARKER)
+                }
+                _ = fmt.fprintf(
+                    os.stdout,
+                    "%sok\t0\t%d\n",
+                    REPL_WORKER_MARKER,
+                    run_ns,
+                )
+            } else {
+                _, _ = os.write_strings(
+                    os.stdout,
+                    REPL_WORKER_MARKER,
+                    "error\tinvalid direct scalar invocation\n",
+                )
+            }
+            _ = os.flush(os.stdout)
             delete(raw)
             continue
         }
@@ -6976,6 +7094,175 @@ repl_latest_generation_dependencies_valid :: proc(
     return true
 }
 
+repl_is_resident_direct_command :: proc(value: string) -> bool {
+    return strings.has_prefix(value, REPL_WORKER_DIRECT_INT_PREFIX) ||
+           strings.has_prefix(value, REPL_WORKER_DIRECT_SCALAR_PREFIX)
+}
+
+repl_registered_scalar_invoke_abi :: proc(
+    emitted_source,
+    logical_name: string,
+) -> string {
+    mapped := kvist.map_name(logical_name)
+    defer delete(mapped)
+    needle := fmt.tprintf(
+        "host.register_scalar_invoke(host.ctx, %q, ",
+        mapped,
+    )
+    offset := strings.index(emitted_source, needle)
+    if offset < 0 {
+        return ""
+    }
+    rest := emitted_source[offset+len(needle):]
+    if rest == "" || rest[0] != '"' {
+        return ""
+    }
+    escaped := false
+    for index in 1..<len(rest) {
+        if escaped {
+            escaped = false
+        } else if rest[index] == '\\' {
+            escaped = true
+        } else if rest[index] == '"' {
+            return strings.clone(rest[1:index])
+        }
+    }
+    return ""
+}
+
+repl_scalar_signature_type :: proc(value: string) -> string {
+    separator := strings.index(value, ":")
+    if separator >= 0 {
+        return strings.trim_space(value[:separator])
+    }
+    return strings.trim_space(value)
+}
+
+repl_direct_scalar_invocation :: proc(
+    source,
+    emitted_source: string,
+) -> (string, bool) {
+    form, _, parsed := kvist.read_single_eval_form(source)
+    if !parsed {
+        return "", false
+    }
+    defer kvist.delete_borrowed_cst_form(&form)
+    if form.kind != .List || len(form.items) == 0 ||
+       len(form.items) > 5 || form.items[0].kind != .Symbol {
+        return "", false
+    }
+    name := form.items[0].text
+    signature := repl_registered_scalar_invoke_abi(emitted_source, name)
+    defer delete(signature)
+    if !strings.has_prefix(signature, "proc(") {
+        return "", false
+    }
+    close := strings.index(signature, ")->")
+    if close < len("proc(") {
+        return "", false
+    }
+    params_text := signature[len("proc("):close]
+    return_text := repl_scalar_signature_type(signature[close+len(")->"):])
+    if return_text != "bool" && return_text != "int" &&
+       return_text != "f64" && return_text != "string" &&
+       return_text != "Data" {
+        return "", false
+    }
+    params: []string
+    if strings.trim_space(params_text) != "" {
+        params = strings.split(params_text, ",", context.temp_allocator)
+    }
+    if len(params) != len(form.items)-1 {
+        return "", false
+    }
+    mapped_name := kvist.map_name(name)
+    defer delete(mapped_name)
+    result_line_offset := strings.last_index(
+        emitted_source,
+        "kvist_repl_result_value := ",
+    )
+    if result_line_offset < 0 {
+        return "", false
+    }
+    result_line := emitted_source[result_line_offset:]
+    if newline := strings.index(result_line, "\n"); newline >= 0 {
+        result_line = result_line[:newline]
+    }
+    if !strings.contains(result_line, fmt.tprintf("%s(", mapped_name)) {
+        return "", false
+    }
+    encoded_name := repl_debug_hex_encode(mapped_name)
+    defer delete(encoded_name)
+    encoded_signature := repl_debug_hex_encode(signature)
+    defer delete(encoded_signature)
+    command := strings.builder_make()
+    defer strings.builder_destroy(&command)
+    fmt.sbprintf(
+        &command,
+        "%s%s\t%s",
+        REPL_WORKER_DIRECT_SCALAR_PREFIX,
+        encoded_name,
+        encoded_signature,
+    )
+    for arg, index in form.items[1:] {
+        ty := repl_scalar_signature_type(params[index])
+        switch ty {
+        case "bool":
+            if arg.kind != .Bool {
+                return "", false
+            }
+            fmt.sbprintf(&command, "\tb:%s", "1" if arg.text == "true" else "0")
+        case "int":
+            if arg.kind != .Number {
+                return "", false
+            }
+            value, ok := strconv.parse_int(arg.text)
+            if !ok {
+                return "", false
+            }
+            fmt.sbprintf(&command, "\ti:%d", value)
+        case "f64":
+            if arg.kind != .Number {
+                return "", false
+            }
+            value, ok := strconv.parse_f64(arg.text)
+            if !ok {
+                return "", false
+            }
+            fmt.sbprintf(&command, "\tf:%.17g", value)
+        case "string":
+            if arg.kind != .String {
+                return "", false
+            }
+            value, allocated, ok := strconv.unquote_string(arg.text)
+            if !ok {
+                return "", false
+            }
+            encoded := repl_debug_hex_encode(value)
+            if allocated {
+                delete(value)
+            }
+            fmt.sbprintf(&command, "\ts:%s", encoded)
+            delete(encoded)
+        case "Data":
+            if arg.kind != .Symbol ||
+               (arg.text != "*1" && arg.text != "*2" && arg.text != "*3") {
+                return "", false
+            }
+            mapped_result := kvist.map_name(
+                fmt.tprintf("kvist_repl_star_%s", arg.text[1:]),
+            )
+            encoded := repl_debug_hex_encode(mapped_result)
+            fmt.sbprintf(&command, "\tr:%s", encoded)
+            delete(encoded)
+            delete(mapped_result)
+        case:
+            return "", false
+        }
+    }
+    return strings.clone(strings.to_string(command)), true
+}
+
 repl_direct_int_invocation :: proc(
     source,
     emitted_source: string,
@@ -7525,10 +7812,7 @@ repl_cached_frontend_generation :: proc(
     }
     for i := len(session.compiled_generations)-1; i >= 0; i -= 1 {
         cached := &session.compiled_generations[i]
-        direct := strings.has_prefix(
-            cached.library_path,
-            REPL_WORKER_DIRECT_INT_PREFIX,
-        )
+        direct := repl_is_resident_direct_command(cached.library_path)
         if cached.request_hash != request_hash ||
            (!direct && !os.exists(cached.library_path)) {
             continue
@@ -7699,10 +7983,7 @@ repl_compile_generation :: proc(
             session,
             request_hash,
         ); found {
-            if strings.has_prefix(
-                cached.library_path,
-                REPL_WORKER_DIRECT_INT_PREFIX,
-            ) {
+            if repl_is_resident_direct_command(cached.library_path) {
                 if timings != nil {
                     timings.frontend_ns = time.duration_nanoseconds(
                         time.tick_since(frontend_start),
@@ -7914,11 +8195,17 @@ repl_compile_generation :: proc(
     if session != nil && len(session.generations) > 0 &&
        pause_id == "" && !inspect_only && !no_print &&
        !native_debug_symbols && !capture_debug_values &&
-       direct_result_abi == "value:int" &&
+       (repl_thin_scalar_abi(direct_result_abi) ||
+        strings.has_prefix(direct_result_abi, "value:Data")) &&
        repl_latest_generation_dependencies_valid(session) {
         direct_ok: bool
         direct_command, direct_ok =
-            repl_direct_int_invocation(source, result.output)
+            repl_direct_scalar_invocation(source, result.output)
+        if !direct_ok && direct_result_abi == "value:int" {
+            delete(direct_command)
+            direct_command, direct_ok =
+                repl_direct_int_invocation(source, result.output)
+        }
         if direct_ok {
             repl_record_compiled_generation(
                 session,
@@ -8312,10 +8599,7 @@ repl_handle_eval :: proc(
     }
     defer delete(library_path)
     defer delete(emitted_source)
-    direct_invocation := strings.has_prefix(
-        library_path,
-        REPL_WORKER_DIRECT_INT_PREFIX,
-    )
+    direct_invocation := repl_is_resident_direct_command(library_path)
     ran: bool
     worker_run_start := time.tick_now()
     output, message, ran =

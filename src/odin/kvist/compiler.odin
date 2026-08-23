@@ -508,6 +508,7 @@ read_single_eval_form :: proc(source: string) -> (form: CST_Form, err: Compile_E
     if !ok_forms {
         return form, err_forms, false
     }
+    defer delete_borrowed_cst_top_form_slice(&forms)
     if len(forms) != 1 {
         return form, Compile_Error{message = "eval expects exactly one form", span = Span{source = .Eval}}, false
     }
@@ -519,7 +520,9 @@ read_single_eval_form :: proc(source: string) -> (form: CST_Form, err: Compile_E
     if !ok_slash {
         return form, err_slash, false
     }
-    return forms[0].form, {}, true
+    form = forms[0].form
+    forms[0].form = {}
+    return form, {}, true
 }
 
 eval_form_head :: proc(form: CST_Form) -> string {
