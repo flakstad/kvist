@@ -2,6 +2,25 @@ package main
 
 import "core:os"
 import "core:testing"
+import kvist "../../odin/kvist"
+
+@(test)
+repl_source_line_index_matches_compiler_positions :: proc(t: ^testing.T) {
+    source := "alpha\nβeta\n\nlast"
+    index := repl_source_line_index(source)
+    defer delete(index.starts)
+    positions := [?]int{-5, 0, 1, 5, 6, 7, 11, 12, 13, len(source), len(source)+9}
+    for position in positions {
+        expected_line, expected_column, expected_start, expected_end :=
+            kvist.source_position(source, position)
+        line, column, line_start, line_end :=
+            repl_indexed_source_position(&index, position)
+        testing.expect_value(t, line, expected_line)
+        testing.expect_value(t, column, expected_column)
+        testing.expect_value(t, line_start, expected_start)
+        testing.expect_value(t, line_end, expected_end)
+    }
+}
 
 @(test)
 compile_cache_verifies_compiler_content_even_when_metadata_matches :: proc(t: ^testing.T) {

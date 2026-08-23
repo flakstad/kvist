@@ -617,6 +617,15 @@ roughly 0.55 seconds on the development machine. The much larger Ro engine
 context fell from roughly 12.8 seconds to 1.8 seconds for its first native
 submission; exact cache hits remain a separate faster path.
 
+Source locations for generated pause frames and breakpoint candidates use a
+line-start index built once for the context source and once for the submitted
+form. Position lookup is therefore logarithmic and no longer rescans a large
+source file from byte zero for every source-map entry. On the Ro engine context
+this reduced generation/source-map publication from roughly 0.85 seconds to
+0.025 seconds and the first native submission from roughly 1.8 seconds to
+0.97 seconds, while retaining byte-for-byte position equivalence with the
+compiler's canonical source-position calculation.
+
 A `bindings` request emits an editor-neutral inventory such as:
 
 ```json

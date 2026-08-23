@@ -6608,6 +6608,11 @@ repl_instrument_nested_pause_points :: proc(
     frames: [dynamic]Repl_Debug_Frame,
     ok: bool,
 ) {
+    input_lines := repl_source_line_index(input_source)
+    defer delete(input_lines.starts)
+    eval_lines := repl_source_line_index(eval_source)
+    defer delete(eval_lines.starts)
+    seen_pause_ids := make(map[string]bool, context.temp_allocator)
     prefix := "__KVIST_DEBUG_PAUSE_"
     suffix := "__"
     builder := strings.builder_make()
@@ -6675,26 +6680,23 @@ repl_instrument_nested_pause_points :: proc(
                 span_end,
             )
         strings.write_string(&builder, pause_id)
-        already_recorded := false
-        for frame in frames {
-            if frame.pause_id == pause_id {
-                already_recorded = true
-                break
-            }
-        }
+        already_recorded := seen_pause_ids[pause_id]
         if !already_recorded {
-            position_source := eval_source
+            seen_pause_ids[pause_id] = true
             position_path := eval_source_path
             position_start_line := eval_start_line
             position_start_column := eval_start_column
             if source_kind == "F" {
-                position_source = input_source
                 position_path = input_source_path
                 position_start_line = 1
                 position_start_column = 1
             }
+            position_index := &eval_lines
+            if source_kind == "F" {
+                position_index = &input_lines
+            }
             local_line, local_column, _, _ :=
-                kvist.source_position(position_source, span_start)
+                repl_indexed_source_position(position_index, span_start)
             source_line := max(position_start_line, 1)+local_line-1
             source_column := local_column
             if local_line == 1 {
@@ -6722,6 +6724,49 @@ repl_instrument_nested_pause_points :: proc(
     return strings.clone(strings.to_string(builder)), frames, true
 }
 
+Repl_Source_Line_Index :: struct {
+    source: string,
+    starts: [dynamic]int,
+}
+
+repl_source_line_index :: proc(source: string) -> Repl_Source_Line_Index {
+    index := Repl_Source_Line_Index{source = source}
+    append(&index.starts, 0)
+    for ch, offset in source {
+        if ch == '\n' && offset+1 <= len(source) {
+            append(&index.starts, offset+1)
+        }
+    }
+    return index
+}
+
+repl_indexed_source_position :: proc(
+    index: ^Repl_Source_Line_Index,
+    pos: int,
+) -> (line, column, line_start, line_end: int) {
+    clamped := clamp(pos, 0, len(index.source))
+    low := 0
+    high := len(index.starts)
+    for low < high {
+        middle := low+(high-low)/2
+        if index.starts[middle] <= clamped {
+            low = middle+1
+        } else {
+            high = middle
+        }
+    }
+    line_index := max(low-1, 0)
+    line_start = index.starts[line_index]
+    line = line_index+1
+    column = clamped-line_start+1
+    if line_index+1 < len(index.starts) {
+        line_end = index.starts[line_index+1]-1
+    } else {
+        line_end = len(index.source)
+    }
+    return
+}
+
 repl_generation_breakpoint_locations :: proc(
     entries: []kvist.Source_Map_Entry,
     input,
@@ -6734,14 +6779,18 @@ repl_generation_breakpoint_locations :: proc(
     generation: int,
 ) -> [dynamic]Repl_Breakpoint_Location {
     locations: [dynamic]Repl_Breakpoint_Location
+    input_lines := repl_source_line_index(input_source)
+    defer delete(input_lines.starts)
+    eval_lines := repl_source_line_index(eval_source)
+    defer delete(eval_lines.starts)
     for entry in entries {
-        source_text := input_source
         source_path := input
         line_offset := 0
         first_line_column_offset := 0
+        use_eval_source := false
         if entry.source_span.source == .Eval ||
            (eval_source_path != "" && entry.source_path == "") {
-            source_text = eval_source
+            use_eval_source = true
             source_path =
                 eval_source_path if eval_source_path != "" else input
             line_offset = max(eval_start_line, 1)-1
@@ -6752,10 +6801,20 @@ repl_generation_breakpoint_locations :: proc(
             // submission's source-level breakpoint request.
             continue
         }
+        source_lines := &input_lines
+        if use_eval_source {
+            source_lines = &eval_lines
+        }
         start_line, start_column, _, _ :=
-            kvist.source_position(source_text, entry.source_span.start)
+            repl_indexed_source_position(
+                source_lines,
+                entry.source_span.start,
+            )
         end_line, end_column, _, _ :=
-            kvist.source_position(source_text, entry.source_span.end)
+            repl_indexed_source_position(
+                source_lines,
+                entry.source_span.end,
+            )
         start_line += line_offset
         end_line += line_offset
         if entry.source_span.source == .Eval ||
