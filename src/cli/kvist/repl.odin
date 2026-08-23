@@ -60,7 +60,7 @@ REPL_RESTART_USE_VALUE :: u32(1 << 1)
 REPL_RESTART_RETRY :: u32(1 << 2)
 REPL_RESTART_SKIP :: u32(1 << 3)
 REPL_RESTART_ABORT_OPERATION :: u32(1 << 4)
-REPL_DEBUG_CAPABILITIES: [61]string = {
+REPL_DEBUG_CAPABILITIES: [62]string = {
     "compiled-abort-operation-restarts",
     "compiled-retry-skip-restarts",
     "native-attach",
@@ -70,6 +70,7 @@ REPL_DEBUG_CAPABILITIES: [61]string = {
     "debug-symbols",
     "generation-loaded-events",
     "evaluation-phase-timings",
+    "frontend-generation-cache",
     "generated-source-maps",
     "kvist-breakpoint-locations",
     "instrumented-conditions",
@@ -221,6 +222,7 @@ Repl_Eval_Timings :: struct {
     total_ns:             i64,
     generated_bytes:      int,
     native_cache_hit:     bool,
+    frontend_cache_hit:   bool,
 }
 
 repl_eval_timing_entries :: proc(
@@ -376,6 +378,7 @@ Repl_Event :: struct {
     timings:                    []Repl_Timing `json:",omitempty"`,
     generated_bytes:            Repl_Optional_Int `json:",omitempty"`,
     native_cache_hit:            bool `json:",omitempty"`,
+    frontend_cache_hit:          bool `json:",omitempty"`,
 }
 
 Repl_Attached_Capability :: struct {
@@ -683,9 +686,16 @@ Repl_Session :: struct {
 }
 
 Repl_Compiled_Generation :: struct {
-    source_hash:  u64,
-    generation:   int,
-    library_path: string,
+    source_hash:     u64,
+    request_hash:    u64,
+    generation:      int,
+    library_path:    string,
+    emitted_source:  string,
+    warning_text:    string,
+    diagnostics:     [dynamic]Repl_Diagnostic,
+    dependency_files: [dynamic]Dependency_File_Fingerprint,
+    dependency_directories: [dynamic]Dependency_Directory_Fingerprint,
+    generated_bytes: int,
 }
 
 Repl_Inspection :: struct {
@@ -1594,6 +1604,17 @@ repl_session_clear :: proc(session: ^Repl_Session) {
     session.next_ownership_event = 0
     for &compiled in session.compiled_generations {
         delete(compiled.library_path)
+        delete(compiled.emitted_source)
+        delete(compiled.warning_text)
+        repl_diagnostic_slice_delete(&compiled.diagnostics)
+        for &record in compiled.dependency_files {
+            delete_dependency_file_fingerprint(&record)
+        }
+        delete(compiled.dependency_files)
+        for record in compiled.dependency_directories {
+            delete(record.path)
+        }
+        delete(compiled.dependency_directories)
     }
     clear(&session.compiled_generations)
 }
@@ -1739,6 +1760,19 @@ repl_diagnostic_slice_delete :: proc(
     }
     delete(diagnostics^)
     diagnostics^ = nil
+}
+
+repl_diagnostic_clone :: proc(
+    diagnostic: Repl_Diagnostic,
+) -> Repl_Diagnostic {
+    cloned := diagnostic
+    cloned.severity = strings.clone(diagnostic.severity)
+    cloned.code = strings.clone(diagnostic.code)
+    cloned.confidence = strings.clone(diagnostic.confidence)
+    cloned.phase = strings.clone(diagnostic.phase)
+    cloned.message = strings.clone(diagnostic.message)
+    cloned.source_path = strings.clone(diagnostic.source_path)
+    return cloned
 }
 
 repl_diagnostic_range :: proc(
@@ -6840,6 +6874,68 @@ repl_generation_source_hash :: proc(source: string, generation: int) -> u64 {
     return fnv1a_update(hash, transmute([]byte)source[start:])
 }
 
+repl_hash_key_string :: proc(hash: u64, value: string) -> u64 {
+    length := fmt.tprintf("%d:", len(value))
+    result := fnv1a_update(hash, transmute([]byte)length)
+    return fnv1a_update(result, transmute([]byte)value)
+}
+
+repl_frontend_request_hash :: proc(
+    input,
+    source,
+    session_source: string,
+    no_print: bool,
+    recent_result_types: []string,
+    eval_source_path: string,
+    eval_start_line,
+    eval_start_column: int,
+    inspect_only: bool,
+    inspection_source_slot,
+    inspection_source_type,
+    inspection_result_slot: string,
+    inspection_page_offset,
+    inspection_page_limit: int,
+) -> (u64, bool) {
+    dependency_key, dependency_ok := cached_compile_cache_key(input)
+    if !dependency_ok {
+        return 0, false
+    }
+    defer delete(dependency_key)
+    hash := u64(14695981039346656037)
+    hash = repl_hash_key_string(hash, dependency_key)
+    hash = repl_hash_key_string(hash, source)
+    hash = repl_hash_key_string(hash, session_source)
+    hash = repl_hash_key_string(hash, eval_source_path)
+    hash = repl_hash_key_string(hash, fmt.tprintf("%d", eval_start_line))
+    hash = repl_hash_key_string(hash, fmt.tprintf("%d", eval_start_column))
+    hash = repl_hash_key_string(hash, "1" if no_print else "0")
+    hash = repl_hash_key_string(hash, "1" if inspect_only else "0")
+    hash = repl_hash_key_string(hash, inspection_source_slot)
+    hash = repl_hash_key_string(hash, inspection_source_type)
+    hash = repl_hash_key_string(hash, inspection_result_slot)
+    hash = repl_hash_key_string(hash, fmt.tprintf("%d", inspection_page_offset))
+    hash = repl_hash_key_string(hash, fmt.tprintf("%d", inspection_page_limit))
+    for ty in recent_result_types {
+        hash = repl_hash_key_string(hash, ty)
+    }
+    return hash, true
+}
+
+repl_session_loaded_generation :: proc(
+    session: ^Repl_Session,
+    generation: int,
+) -> (^Repl_Loaded_Generation, bool) {
+    if session == nil {
+        return nil, false
+    }
+    for &loaded in session.generations {
+        if loaded.generation == generation {
+            return &loaded, true
+        }
+    }
+    return nil, false
+}
+
 repl_cached_generation :: proc(
     session: ^Repl_Session,
     source_hash: u64,
@@ -6851,10 +6947,120 @@ repl_cached_generation :: proc(
         cached := &session.compiled_generations[i]
         if cached.source_hash == source_hash &&
            os.exists(cached.library_path) {
-            return cached, true
+            if _, loaded := repl_session_loaded_generation(
+                session,
+                cached.generation,
+            ); loaded {
+                return cached, true
+            }
         }
     }
     return nil, false
+}
+
+repl_cached_frontend_generation :: proc(
+    session: ^Repl_Session,
+    request_hash: u64,
+) -> (^Repl_Compiled_Generation, ^Repl_Loaded_Generation, bool) {
+    if session == nil || request_hash == 0 {
+        return nil, nil, false
+    }
+    for i := len(session.compiled_generations)-1; i >= 0; i -= 1 {
+        cached := &session.compiled_generations[i]
+        if cached.request_hash != request_hash ||
+           !os.exists(cached.library_path) {
+            continue
+        }
+        dependencies_valid := true
+        for record in cached.dependency_files {
+            if !file_fingerprint_matches_metadata(record) {
+                dependencies_valid = false
+                break
+            }
+        }
+        if dependencies_valid {
+            for record in cached.dependency_directories {
+                if !directory_fingerprint_matches_metadata(record) {
+                    dependencies_valid = false
+                    break
+                }
+            }
+        }
+        if !dependencies_valid {
+            continue
+        }
+        if loaded, found := repl_session_loaded_generation(
+            session,
+            cached.generation,
+        ); found && os.exists(loaded.source_path) &&
+           os.exists(loaded.map_path) {
+            return cached, loaded, true
+        }
+    }
+    return nil, nil, false
+}
+
+repl_record_compiled_generation :: proc(
+    session: ^Repl_Session,
+    source_hash,
+    request_hash: u64,
+    generation: int,
+    library_path,
+    emitted_source,
+    warning_text: string,
+    diagnostics: []Repl_Diagnostic,
+    source_map: []kvist.Source_Map_Entry,
+    generated_bytes: int,
+) {
+    if session == nil {
+        return
+    }
+    cached := Repl_Compiled_Generation{
+        source_hash = source_hash,
+        request_hash = request_hash,
+        generation = generation,
+        library_path = strings.clone(library_path),
+        emitted_source = strings.clone(emitted_source),
+        warning_text = strings.clone(warning_text),
+        generated_bytes = generated_bytes,
+    }
+    for diagnostic in diagnostics {
+        append(&cached.diagnostics, repl_diagnostic_clone(diagnostic))
+    }
+    seen_files := make(map[string]bool, context.temp_allocator)
+    seen_directories := make(map[string]bool, context.temp_allocator)
+    for entry in source_map {
+        path := entry.source_path
+        if path == "" || seen_files[path] || !os.exists(path) {
+            continue
+        }
+        seen_files[path] = true
+        if size, modified, metadata_ok := file_metadata(path); metadata_ok {
+            append(
+                &cached.dependency_files,
+                Dependency_File_Fingerprint{
+                    path = strings.clone(path),
+                    size = size,
+                    modification_time_ns = modified,
+                },
+            )
+        }
+        directory, _ := os.split_path(path)
+        if directory == "" || seen_directories[directory] {
+            continue
+        }
+        seen_directories[directory] = true
+        if modified, metadata_ok := directory_metadata(directory); metadata_ok {
+            append(
+                &cached.dependency_directories,
+                Dependency_Directory_Fingerprint{
+                    path = strings.clone(directory),
+                    modification_time_ns = modified,
+                },
+            )
+        }
+    }
+    append(&session.compiled_generations, cached)
 }
 
 repl_retarget_nested_pause_generation :: proc(
@@ -6904,10 +7110,97 @@ repl_compile_generation :: proc(
     timings: ^Repl_Eval_Timings = nil,
     native_debug_symbols := false,
 ) -> (library_path: string, emitted_source: string, diagnostic: string, ok: bool) {
+    frontend_start := time.tick_now()
+    request_hash, frontend_cacheable := repl_frontend_request_hash(
+        input,
+        source,
+        session_source,
+        no_print,
+        recent_result_types,
+        eval_source_path,
+        eval_start_line,
+        eval_start_column,
+        inspect_only,
+        inspection_source_slot,
+        inspection_source_type,
+        inspection_result_slot,
+        inspection_page_offset,
+        inspection_page_limit,
+    )
+    if frontend_cacheable && pause_id == "" && !native_debug_symbols {
+        if cached, loaded, found := repl_cached_frontend_generation(
+            session,
+            request_hash,
+        ); found {
+            source_generation_start := time.tick_now()
+            source_path, output_path, paths_ok :=
+                repl_generation_paths(session_dir, generation)
+            map_path, map_ok :=
+                repl_generation_map_path(session_dir, generation)
+            copied := paths_ok && map_ok &&
+                os.copy_file(source_path, loaded.source_path) == nil &&
+                os.copy_file(map_path, loaded.map_path) == nil &&
+                os.copy_file(output_path, cached.library_path) == nil
+            if copied {
+                if breakpoint_locations != nil {
+                    for location in loaded.breakpoint_locations {
+                        cloned := location
+                        cloned.source_path = strings.clone(location.source_path)
+                        cloned.generated_path = strings.clone(source_path)
+                        append(breakpoint_locations, cloned)
+                    }
+                }
+                if debug_frames != nil {
+                    for frame in loaded.pause_points {
+                        cloned := repl_debug_frame_clone(frame)
+                        cloned.generation = generation
+                        append(debug_frames, cloned)
+                    }
+                }
+                if warning_text != nil {
+                    warning_text^ = strings.clone(cached.warning_text)
+                }
+                if diagnostics != nil {
+                    for item in cached.diagnostics {
+                        append(diagnostics, repl_diagnostic_clone(item))
+                    }
+                }
+                if timings != nil {
+                    timings.frontend_ns =
+                        time.duration_nanoseconds(
+                            time.tick_since(frontend_start),
+                        )
+                    timings.source_generation_ns =
+                        time.duration_nanoseconds(
+                            time.tick_since(source_generation_start),
+                        )
+                    timings.generated_bytes = cached.generated_bytes
+                    timings.native_cache_hit = true
+                    timings.frontend_cache_hit = true
+                }
+                delete(source_path)
+                delete(map_path)
+                return output_path,
+                       strings.clone(cached.emitted_source),
+                       "",
+                       true
+            }
+            if paths_ok {
+                _ = os.remove(source_path)
+                _ = os.remove(output_path)
+                delete(source_path)
+                delete(output_path)
+            }
+            if map_ok {
+                _ = os.remove(map_path)
+                delete(map_path)
+            }
+        }
+    }
+
     input_data := read_source_or_exit(input)
     defer delete(transmute([]byte)input_data)
 
-    frontend_start := time.tick_now()
     result, compile_err, compiled := kvist.compile_eval_path_with_map(
         input,
         source,
@@ -7158,6 +7451,26 @@ repl_compile_generation :: proc(
                 )
             timings.native_cache_hit = true
         }
+        cached_warning := ""
+        if warning_text != nil {
+            cached_warning = warning_text^
+        }
+        cached_diagnostics: []Repl_Diagnostic
+        if diagnostics != nil {
+            cached_diagnostics = diagnostics^[:]
+        }
+        repl_record_compiled_generation(
+            session,
+            source_hash,
+            request_hash,
+            generation,
+            output_path,
+            result.output,
+            cached_warning,
+            cached_diagnostics,
+            result.source_map[:],
+            len(rebased),
+        )
         return output_path,
                strings.clone(result.output),
                "",
@@ -7243,11 +7556,26 @@ repl_compile_generation :: proc(
         return "", "", strings.clone(strings.to_string(combined)), false
     }
     if session != nil && pause_id == "" && !native_debug_symbols {
-        append(&session.compiled_generations, Repl_Compiled_Generation{
-            source_hash = source_hash,
-            generation = generation,
-            library_path = strings.clone(output_path),
-        })
+        cached_warning := ""
+        if warning_text != nil {
+            cached_warning = warning_text^
+        }
+        cached_diagnostics: []Repl_Diagnostic
+        if diagnostics != nil {
+            cached_diagnostics = diagnostics^[:]
+        }
+        repl_record_compiled_generation(
+            session,
+            source_hash,
+            request_hash,
+            generation,
+            output_path,
+            result.output,
+            cached_warning,
+            cached_diagnostics,
+            result.source_map[:],
+            len(rebased),
+        )
     }
     return output_path, strings.clone(result.output), "", true
 }
@@ -8778,6 +9106,7 @@ repl_protocol_loop :: proc(
                 Repl_Optional_Int(eval_timings.generated_bytes) if
                     eval_timings.generated_bytes > 0 else {},
             native_cache_hit = eval_timings.native_cache_hit,
+            frontend_cache_hit = eval_timings.frontend_cache_hit,
         })
         repl_emit_json_event(Repl_Event{
             protocol_version = REPL_PROTOCOL_VERSION,
@@ -8787,6 +9116,7 @@ repl_protocol_loop :: proc(
             generation = generation,
             message = message,
             native_cache_hit = eval_timings.native_cache_hit,
+            frontend_cache_hit = eval_timings.frontend_cache_hit,
         })
         if message != "" {
             delete(message)

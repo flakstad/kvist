@@ -2913,6 +2913,97 @@ cli_repl_evaluates_imported_package_source_in_application_session :: proc(
 }
 
 @(test)
+cli_repl_caches_identical_frontend_generations :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp(
+        "",
+        "kvist-repl-frontend-cache-*",
+        context.allocator,
+    )
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    context_path, _ := os.join_path({dir, "context.kvist"}, context.allocator)
+    defer delete(context_path)
+    context_source := `(package repl_frontend_cache)
+(defvar count: int 0)
+(defn bump [] -> int (do (inc! count) count))`
+    testing.expect_value(
+        t,
+        os.write_entire_file_from_string(context_path, context_source) == nil,
+        true,
+    )
+
+    requests_path, _ := os.join_path({dir, "requests.jsonl"}, context.allocator)
+    defer delete(requests_path)
+    requests := `{"id":"call-1","op":"eval","source":"(bump)"}
+{"id":"call-2","op":"eval","source":"(bump)"}
+{"id":"call-3","op":"eval","source":"(bump)"}
+{"id":"call-4","op":"eval","source":"(bump)"}
+{"id":"call-5","op":"eval","source":"(bump)"}
+{"id":"call-6","op":"eval","source":"(bump)"}
+{"id":"close","op":"close"}
+`
+    testing.expect_value(
+        t,
+        os.write_entire_file_from_string(requests_path, requests) == nil,
+        true,
+    )
+    request_file, open_err := os.open(requests_path)
+    testing.expect_value(t, open_err == nil, true)
+    if open_err != nil {
+        return
+    }
+    defer os.close(request_file)
+
+    repo_root := compiler_test_repo_root()
+    kvist_bin, bin_ok := build_test_kvist_binary(t, repo_root, dir)
+    if !bin_ok {
+        return
+    }
+    defer delete(kvist_bin)
+    state, stdout, stderr, exec_err := os.process_exec(
+        os.Process_Desc{
+            command = {kvist_bin, "repl", context_path, "--protocol", "jsonl"},
+            working_dir = repo_root,
+            stdin = request_file,
+        },
+        context.allocator,
+    )
+    defer delete(stdout)
+    defer delete(stderr)
+    testing.expect_value(t, exec_err == nil, true)
+    testing.expect_value(t, state.exited, true)
+    testing.expect_value(t, state.exit_code, 0)
+    output := string(stdout)
+    testing.expect_value(
+        t,
+        strings.contains(
+            output,
+            `"id":"call-6","kind":"output","success":true,"generation":6,"stream":"stdout","text":"6\n"`,
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            output,
+            `"id":"call-6","kind":"complete","success":true,"generation":6`,
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(output, `"frontend_cache_hit":true`),
+        true,
+    )
+    testing.expect_value(t, string(stderr), "")
+}
+
+@(test)
 cli_repl_jsonl_executes_native_multi_form_generation :: proc(t: ^testing.T) {
     dir, dir_err := os.make_directory_temp("", "kvist-repl-cli-*", context.allocator)
     testing.expect_value(t, dir_err == nil, true)

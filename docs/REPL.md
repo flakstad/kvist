@@ -581,6 +581,21 @@ submitted program, and `worker-unattributed` is the small remainder.
 Clients should use phase names rather than array positions and tolerate new
 phases in later protocol-compatible releases.
 
+Successful timing and completion events also report `native_cache_hit` and
+`frontend_cache_hit`. Capability `frontend-generation-cache` advertises the
+latter. An exact in-session frontend hit means the submitted source, retained
+session declarations, result-history types, source coordinates, compile
+options, context dependency fingerprint, and imported source metadata are all
+unchanged. Kvist then copies the prior immutable generation artifacts to new
+generation-specific paths and executes them again. Execution is never
+memoized: mutations, output, allocation, conditions, and other side effects
+still happen on every submission. Editing the context or an imported package
+invalidates the hit before evaluation.
+
+`native_cache_hit` without `frontend_cache_hit` means Kvist reran the frontend
+but found identical instrumented Odin and skipped the Odin build. Explicit
+pause-before submissions and native debug-symbol builds remain uncached.
+
 A `bindings` request emits an editor-neutral inventory such as:
 
 ```json
@@ -2012,9 +2027,12 @@ protocol.
 
 ### Latency measurement and optimization
 
-Interactive latency is now usable but remains visibly slower than a Clojure
-REPL. Performance work is the next architectural milestone and begins with
-measurement rather than weakening native-generation semantics.
+Interactive latency remains a continuing architectural concern, but the first
+measured optimization is implemented. The REPL fingerprints phase output and
+retains exact native generations in-session. Once typed result history has
+stabilized, an unchanged submission can skip both the Kvist frontend and Odin
+build while still loading a distinct generation and executing it normally.
+Dependency and imported-source metadata are validated before that fast path.
 
 The generic protocol must report timings for at least:
 
@@ -2121,9 +2139,10 @@ The practical follow-up queue is:
    non-Olive endpoint workflow. `C-c C-s` is REPL start; `C-c M-c` remains
    debugger continue, and editor-neutral connection semantics belong in the
    CLI protocol rather than an Emacs-specific subprocess convention.
-4. Resume latency work when desired. Phase timing and an initial warm-source
-   reduction are implemented; persistent frontend state, smaller generations,
-   exact native artifact caching, and reduced link/load work remain.
+4. Continue latency work from the implemented exact frontend/native generation
+   cache. Persistent incremental frontend state, smaller first-time
+   generations, and reduced link/load work remain; exact repeated submissions
+   already avoid frontend emission and Odin compilation.
 5. Add pointer, foreign-view, opaque-resource, and declared-resource lifecycle
    adapters only for types with an explicit safe clone/retain/release contract.
    Extend live inspection and physical ownership tracking through those same
