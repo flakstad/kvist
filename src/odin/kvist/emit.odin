@@ -598,7 +598,9 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
                 }
                 return specialized_call, {}, true
             }
-            if len(form.items) >= 3 && form.items[len(form.items)-1].kind == .Brace {
+            if len(form.items) >= 3 &&
+               form.items[len(form.items)-1].kind == .Brace &&
+               form_is_named_arg_brace(form.items[len(form.items)-1]) {
                 arg_texts_with_mixed, err_args, ok_args := emit_mixed_call_with_defaults(e, proc_decl, form.items[1:len(form.items)-1], form.items[len(form.items)-1], form.span)
                 if !ok_args {
                     return "", err_args, false
@@ -640,7 +642,9 @@ emit_call_like :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, b
     if ok_generic_ctor || err_generic_ctor.message != "" {
         return generic_ctor, err_generic_ctor, ok_generic_ctor
     }
-    if len(form.items) >= 3 && form.items[len(form.items)-1].kind == .Brace {
+    if len(form.items) >= 3 &&
+       form.items[len(form.items)-1].kind == .Brace &&
+       form_is_named_arg_brace(form.items[len(form.items)-1]) {
         arg_texts_with_mixed, err_mixed, ok_mixed := emit_general_mixed_call_arg_texts(e, head_name, form.items[1:len(form.items)-1], form.items[len(form.items)-1])
         if ok_mixed {
             return emit_call_text(head_name, arg_texts_with_mixed[:]), {}, true

@@ -1702,6 +1702,12 @@ compile_contextual_data_literals_in_direct_and_overloaded_calls :: proc(t: ^test
       {:db/id option-id
        :ro/id option-id})))
 
+(defn append-data [tx: Data, value: Data] -> Data
+  (kdata.conj tx value))
+
+(defn append-keyword-map [tx: Data, id: string] -> Data
+  (append-data tx {:db/id id :ro/id id}))
+
 (defn source-int [value: int] -> Data
   [value])
 
@@ -1735,6 +1741,7 @@ compile_contextual_data_literals_in_direct_and_overloaded_calls :: proc(t: ^test
     testing.expect_value(t, strings.contains(output, "contact_name"), false)
     testing.expect_value(t, strings.contains(output, "kvist_data_make_int(i64(id))"), true)
     testing.expect_value(t, strings.contains(output, "kdata__conj(tx, kvist_thread_"), true)
+    testing.expect_value(t, strings.contains(output, "append_data(tx, kvist_thread_"), true)
     testing.expect_value(t, strings.contains(output, "defer kvist_data_release(kvist_thread_"), true)
     testing.expect_value(t, strings.contains(output, "kvist_data_make_int(i64((count) + (1)))"), true)
     testing.expect_value(t, strings.contains(output, "kvist_data_make_float(f64((1) + (ratio)))"), true)
