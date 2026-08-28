@@ -1,32 +1,78 @@
 <div align="center">
-  <img src="kvist.png" alt="Kvist logo" width="288">
+  <img src="kvist.png" alt="Kvist logo" width="220">
 </div>
 
 # Kvist
 
-A practical Lisp for systems programming.
+A practical Lisp for systems programming that compiles to Odin.
 
-Kvist is a general-purpose Lisp-shaped language for writing fast programs and
-small binaries. It is native and statically typed by default, with a
-first-class immutable Lisp data world that can be entered explicitly. It gives
-you expression-oriented syntax, macros, explicit ownership, and direct memory
-management.
+Kvist combines Clojure-inspired syntax, source macros, immutable data, and
+interactive development with a native, statically typed execution model.
+Ordinary values have Odin-like representation and ownership: allocation,
+mutation, and cleanup remain explicit, and generated programs require no VM or
+garbage collector.
 
-Native structs and homogeneous collections remain concrete and predictable.
-Quoted `Data` values provide the complementary Lisp model for queries,
-configuration, messages, and other heterogeneous data, with zero-allocation
-static literals and deterministically managed runtime values.
+Kvist transpiles to readable Odin, imports Odin core and vendor packages
+directly, and allows Kvist and Odin source files to live in the same package.
 
-Kvist transpiles to readable Odin and uses Odin for checking, building, and
-running programs. Its syntax and naming are strongly inspired by Clojure, and
-its immutable `Data` world follows the Clojure data model. The execution model
-stays close to Odin: no VM, no lazy sequence runtime, and no garbage
-collection.
+When data-oriented programming is a better fit, `Data` provides EDN in memory:
+immutable maps, vectors, sets, lists, keywords, symbols, and tagged values.
+This makes Hiccup, transactions, Datalog queries, configuration, and other data
+DSLs feel like Lisp without making every runtime value dynamic.
 
-Kvist and Odin files can live in the same package. Kvist code can use Odin
-packages directly, including Odin's extensive core library and maintained
-vendor packages. This provides files, networking, text encodings, cryptography,
-math, concurrency, graphics, audio, and more without a Kvist wrapper.
+## Highlights
+
+- **Native REPL** — submissions are checked and executed as native Kvist code,
+  while definitions, values, imports, macros, and recent results persist.
+- **Native by default** — concrete structs, arrays, maps, pointers, procedures,
+  allocators, and explicit ownership.
+- **Data-oriented programming** — immutable EDN-shaped values with
+  destructuring, structural matching, persistent updates, typed validation,
+  and decoding.
+- **Fused transforms and iterators** — expressive collection pipelines lower
+  to direct loops without lazy sequences or intermediate collections.
+- **Source macros** — Lisp forms are transformed at compile time without adding
+  a dynamic runtime object model.
+- **Direct Odin interoperability** — use Odin packages and types without a
+  wrapper ecosystem, including core and maintained vendor packages.
+
+## Native Code And Data As Data
+
+Ordinary Kvist values stay concrete and statically typed. This transform over
+native structs lowers to one direct loop:
+
+```clojure
+(defstruct User {
+  name: string
+  active?: bool
+})
+
+(defn active-names [users: []User] -> [dynamic]string
+  (into [dynamic]string
+    (comp
+      (filter .active?)
+      (map .name))
+    users))
+```
+
+When the shape itself is data, the same language can express Lisp-shaped DSLs
+as immutable values:
+
+```clojure
+(defn page [title: string] -> Data
+  [:main {:class "page"}
+   [:h1 title]
+   [:p "Ready"]])
+
+(def names-query
+  '[:find ?name
+    :where [?e :contact/name ?name]])
+```
+
+The official [HTML package](https://github.com/kvist-lang/html) renders the
+first value as Hiccup-shaped HTML. [VevDB](https://github.com/vevdb/vev) uses
+the same `Data` model for Datomic-style transactions, Datalog queries, rules,
+pull patterns, and query results.
 
 ## Quickstart
 
@@ -46,11 +92,23 @@ Add a main function to a `hello.kvist` file:
   (println "hello from kvist"))
 ```
 
-And run it:
+Run it:
 
 ```sh
 $ ./kvist run hello.kvist
 hello from kvist
+```
+
+Or use the same file as context for the native REPL:
+
+```text
+$ ./kvist repl hello.kvist
+Kvist native REPL
+kvist=> (+ 1 1)
+2
+kvist=> (defn square [x: int] -> int (* x x))
+kvist=> (square 11)
+121
 ```
 
 To install the compiler and shipped packages under a separate root:
@@ -60,65 +118,92 @@ To install the compiler and shipped packages under a separate root:
 export PATH="$HOME/.local/lib/kvist/bin:$PATH"
 ```
 
-## Platform support
+## Interactive Development
 
-Kvist is tested on macOS and Linux. The core CLI and representative programs
-are also tested on Windows, but the complete test suite and shell-based tooling
-are not yet covered there.
+A REPL submission is ordinary Kvist: it is read, macro-expanded, type checked,
+ownership checked, lowered to Odin, compiled, loaded, and executed as native
+code. Definitions and supported typed values persist across submissions, and
+compatible redefinitions update later calls without replaying earlier forms.
 
-Building Kvist requires an Odin toolchain supported by the host platform.
-The scripts in `scripts/` require a POSIX-compatible shell.
+The terminal client and editor-neutral JSONL protocol use the same native
+session. The Emacs client adds source-buffer evaluation, completion,
+documentation, retained value inspection, source-level stepping, execution
+traces, conditions and restarts, and attachment to running applications.
 
-## Core Model
+See the [native REPL guide](docs/REPL.md) and
+[Emacs guide](emacs/README.md).
 
-- Kvist compiles to readable Odin and uses Odin to check, build, and run.
-- Ordinary values are native and statically typed.
-- Allocation, mutation, and cleanup remain explicit.
-- Lisp forms provide uniform syntax and source macros.
-- Immutable `Data` values are available when a heterogeneous data model is
-  useful.
-- Kvist adds no garbage collector or lazy sequence runtime.
+## Odin Interoperability
 
-## Example
+Kvist imports Odin packages directly:
 
 ```clojure
-(package main)
-(import fmt "core:fmt")
-
-(defstruct User {
-  name: string
-  score: int
-})
-
-(defn main []
-  (let [user (User {name: "Ada" score: 42})]
-    (fmt.println user.name user.score)))
+(import os "core:os")
+(import sha2 "core:crypto/sha2")
+(import raylib "vendor:raylib")
 ```
+
+Procedures, types, constants, enums, multiple return values, allocators, and
+errors retain their Odin semantics. Kvist and Odin source may also live in the
+same package and call each other without a wrapper layer.
+
+See the [Odin interoperability guide](docs/odin.md) and
+[interop examples](examples/interop/).
+
+## More Language Features
+
+- Clojure-style threading, nested destructuring, and structural `Data`
+  matching.
+- Typed `Data` validation and decoding into native structs, enums, and arrays,
+  with precise error paths.
+- Explicit conditions and compiled restarts for programmatic or interactive
+  recovery.
+- Parametric polymorphism, overload sets, multiple return values, pointers,
+  custom allocators, and struct-of-arrays storage.
+- Inferred ownership boundaries, source-mapped diagnostics, compilation caches,
+  and lifetime inspection.
+- Shipped packages for native collections, EDN, regular expressions, parallel
+  work, testing, bit operations, strings, and immutable `Data`.
 
 ## Tooling
 
 ```sh
 ./kvist check examples/language/hello.kvist
 ./kvist run examples/language/hello.kvist
+./kvist repl examples/language/hello.kvist
 ./kvist test examples/coverage/packages/test-package-tests.kvist
 ./kvist eval examples/collections/higher-order.kvist '(threaded-total)'
 ./kvist expand examples/collections/higher-order.kvist '(threaded-total)'
+./kvist lifetimes examples/collections/ownership-warnings.kvist
 ```
 
 Run `./scripts/smoke.sh` for a quick local check.
 
+## Platform Support
+
+Kvist is tested on macOS and Linux. The core CLI and representative programs
+are also tested on Windows, but the complete test suite and shell-based tooling
+are not yet covered there.
+
+Building Kvist requires an Odin toolchain supported by the host platform. The
+scripts in `scripts/` require a POSIX-compatible shell.
+
 ## Documentation
 
 - [Language reference](docs/language.md)
+- [Native REPL and live development](docs/REPL.md)
 - [Data](docs/data.md)
+- [Data-oriented programming](docs/DATA-ORIENTED-PROGRAMMING.md)
 - [Sequences](docs/sequences.md)
-- [Transforms](docs/transforms.md)
+- [Transforms and iterators](docs/transforms.md)
 - [Macros](docs/macros.md)
+- [Conditions and restarts](docs/CONDITIONS.md)
 - [Packages](docs/packages.md)
 - [Odin interoperability](docs/odin.md)
 - [Parallel helpers](docs/parallel.md)
 - [Testing](docs/testing.md)
 - [Tooling](docs/tooling.md)
+- [Emacs](emacs/README.md)
 - [Examples](examples/README.md)
 
 ## License

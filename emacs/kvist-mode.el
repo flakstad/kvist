@@ -230,6 +230,16 @@ Use a command name on `exec-path' or an explicit executable path."
   (let ((default-directory (file-name-as-directory (kvist--project-root source-file))))
     (kvist--call-string program args)))
 
+(defun kvist--remap-tooling-input-file (file input source-file)
+  "Map temporary tooling FILE locations back to SOURCE-FILE.
+INPUT is the source path passed to the CLI.  Imported definitions keep their
+reported files; only a definition attributed to the temporary buffer copy is
+remapped."
+  (if (and file input source-file
+           (equal (expand-file-name file) (expand-file-name input)))
+      source-file
+    file))
+
 (defun kvist--reload-buffer-name (source-file)
   "Return a readable reload buffer name for SOURCE-FILE."
   (format "%s<%s>" kvist-reload-buffer-name (kvist--file-label source-file)))
@@ -529,7 +539,8 @@ When WATCH is non-nil, include `--watch'."
             (dolist (line (split-string output "\n" t))
               (when (string-match
                      "\\`\\(.*\\):\\([0-9]+\\):\\([0-9]+\\)\t\\([^\t]+\\)\t\\(.+\\)\\'" line)
-                (push (list :file (match-string 1 line)
+                (push (list :file (kvist--remap-tooling-input-file
+                                   (match-string 1 line) input source-file)
                             :line (string-to-number (match-string 2 line))
                             :column (string-to-number (match-string 3 line))
                             :kind (match-string 4 line)

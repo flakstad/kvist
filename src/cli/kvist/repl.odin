@@ -163,6 +163,7 @@ Repl_Request :: struct {
     trace_limit:       Repl_Optional_Int,
     trace_values:      bool,
     trace_value_limit: Repl_Optional_Int,
+    defer_debug_values: bool,
     timeout_ms:        Repl_Optional_Int,
     abi:               string,
 }
@@ -546,6 +547,7 @@ Repl_Session_Binding :: struct {
     source_end_column:   int    `json:"-"`,
     source:       string `json:"-"`,
     identity:     string `json:"-"`,
+    direct_scalar_invoke: bool `json:"-"`,
     dependency_identities: [dynamic]string `json:"-"`,
     versions:     [dynamic]Repl_Binding_Version `json:"-"`,
 }
@@ -2327,6 +2329,7 @@ repl_session_commit :: proc(
     submitted_start_line := 1,
     submitted_start_column := 1,
     preserve_existing_locations := false,
+    direct_scalar_invoke := false,
 ) {
     append(&session.definitions, strings.clone(definitions))
     infos := kvist.repl_definition_infos(definitions)
@@ -2410,6 +2413,7 @@ repl_session_commit :: proc(
             binding.source = strings.clone(info.source)
             binding.identity = strings.clone(identity)
             binding.stale = false
+            binding.direct_scalar_invoke = direct_scalar_invoke
             if !preserve_existing_locations ||
                binding.source_path == "" {
                 delete(binding.source_path)
@@ -2449,6 +2453,7 @@ repl_session_commit :: proc(
                 source_end_column = source_end_column,
                 source = strings.clone(info.source),
                 identity = strings.clone(identity),
+                direct_scalar_invoke = direct_scalar_invoke,
             })
         }
         committed_binding_index, committed :=
@@ -7263,6 +7268,64 @@ repl_direct_scalar_invocation :: proc(
     return strings.clone(strings.to_string(command)), true
 }
 
+repl_resident_scalar_invocation :: proc(
+    source: string,
+    session: ^Repl_Session,
+) -> (command, emitted_source: string, ok: bool) {
+    if session == nil {
+        return "", "", false
+    }
+    form, _, parsed := kvist.read_single_eval_form(source)
+    if !parsed {
+        return "", "", false
+    }
+    defer kvist.delete_borrowed_cst_form(&form)
+    if form.kind != .List || len(form.items) == 0 ||
+       form.items[0].kind != .Symbol {
+        return "", "", false
+    }
+    name := form.items[0].text
+    binding_index, found := repl_binding_index(session, name)
+    if !found {
+        return "", "", false
+    }
+    binding := &session.bindings[binding_index]
+    if binding.stale ||
+       !binding.direct_scalar_invoke ||
+       (binding.kind != "defn" && binding.kind != "defn-") {
+        return "", "", false
+    }
+    signature := binding.abi
+    if !strings.has_prefix(signature, "proc(") {
+        return "", "", false
+    }
+    close := strings.index(signature, ")->")
+    if close < len("proc(") {
+        return "", "", false
+    }
+    mapped_name := kvist.map_name(name)
+    defer delete(mapped_name)
+    synthetic := fmt.tprintf(
+        "host.register_scalar_invoke(host.ctx, %q, %q, nil)\nkvist_repl_result_value := %s(",
+        mapped_name,
+        signature,
+        mapped_name,
+    )
+    direct, direct_ok := repl_direct_scalar_invocation(source, synthetic)
+    if !direct_ok {
+        return "", "", false
+    }
+    result_ty := repl_scalar_signature_type(signature[close+len(")->"):])
+    result_abi := fmt.tprintf("value:%s", result_ty)
+    result_source := strings.clone(
+        fmt.tprintf(
+            "host.register_result(host.ctx, %q, nil)",
+            result_abi,
+        ),
+    )
+    return direct, result_source, true
+}
+
 repl_direct_int_invocation :: proc(
     source,
     emitted_source: string,
@@ -7716,6 +7779,7 @@ repl_frontend_request_hash :: proc(
     inspection_page_offset,
     inspection_page_limit: int,
     capture_debug_values: bool,
+    fast_native_build: bool,
 ) -> (u64, bool) {
     dependency_key, dependency_ok := cached_compile_cache_key(input)
     if !dependency_ok {
@@ -7737,6 +7801,7 @@ repl_frontend_request_hash :: proc(
     hash = repl_hash_key_string(hash, fmt.tprintf("%d", inspection_page_offset))
     hash = repl_hash_key_string(hash, fmt.tprintf("%d", inspection_page_limit))
     hash = repl_hash_key_string(hash, "1" if capture_debug_values else "0")
+    hash = repl_hash_key_string(hash, "1" if fast_native_build else "0")
     for ty in recent_result_types {
         hash = repl_hash_key_string(hash, ty)
     }
@@ -7959,8 +8024,26 @@ repl_compile_generation :: proc(
     timings: ^Repl_Eval_Timings = nil,
     native_debug_symbols := false,
     capture_debug_values := false,
+    fast_native_build := false,
 ) -> (library_path: string, emitted_source: string, diagnostic: string, ok: bool) {
     frontend_start := time.tick_now()
+    if session != nil && len(session.generations) > 0 &&
+       pause_id == "" && !inspect_only && !no_print &&
+       !native_debug_symbols && !capture_debug_values &&
+       repl_latest_generation_dependencies_valid(session) {
+        direct, result_source, direct_ok :=
+            repl_resident_scalar_invocation(source, session)
+        if direct_ok {
+            if timings != nil {
+                timings.frontend_ns = time.duration_nanoseconds(
+                    time.tick_since(frontend_start),
+                )
+                timings.native_cache_hit = true
+                timings.frontend_cache_hit = true
+            }
+            return direct, result_source, "", true
+        }
+    }
     request_hash, frontend_cacheable := repl_frontend_request_hash(
         input,
         source,
@@ -7977,6 +8060,7 @@ repl_compile_generation :: proc(
         inspection_page_offset,
         inspection_page_limit,
         capture_debug_values,
+        fast_native_build,
     )
     if frontend_cacheable && pause_id == "" && !native_debug_symbols {
         if cached, loaded, found := repl_cached_frontend_generation(
@@ -8409,6 +8493,9 @@ repl_compile_generation :: proc(
     command := make([dynamic]string, 0, 8)
     defer delete(command)
     append(&command, ..args[:])
+    if fast_native_build {
+        append(&command, "-o:none")
+    }
     if native_debug_symbols {
         append(&command, "-debug")
     }
@@ -8422,6 +8509,24 @@ repl_compile_generation :: proc(
         os.Process_Desc{command = command[:]},
         context.allocator,
     )
+    fast_build_compiler_failure := fast_native_build &&
+        (process_err != nil || !state.exited || state.exit_code != 0) &&
+        (strings.contains(string(stderr), "This is a compiler error") ||
+         strings.contains(string(stderr), "Assertion Failure"))
+    if fast_build_compiler_failure {
+        // Odin's no-optimization path occasionally exposes compiler-only
+        // assertions for otherwise valid programs. Preserve the fast editor
+        // bulk path, but retry those compiler failures with the stable
+        // optimized path before reporting an evaluation
+        // error to the client.
+        delete(stdout)
+        delete(stderr)
+        command[5] = "-o:speed"
+        state, stdout, stderr, process_err = os.process_exec(
+            os.Process_Desc{command = command[:]},
+            context.allocator,
+        )
+    }
     if timings != nil {
         timings.odin_build_ns =
             time.duration_nanoseconds(time.tick_since(odin_build_start))
@@ -8534,6 +8639,7 @@ repl_handle_eval :: proc(
     timeout_ms := 0,
     timings: ^Repl_Eval_Timings = nil,
     native_debug_symbols := false,
+    defer_debug_values := false,
 ) -> (output, message: string, ok: bool) {
     total_start := time.tick_now()
     defer if timings != nil {
@@ -8592,7 +8698,9 @@ repl_handle_eval :: proc(
         timings,
         native_debug_symbols,
         trace || pause_id != "" || native_debug_symbols ||
-            nested_worker_execution || len(persistent_definitions) > 0,
+            nested_worker_execution ||
+            (!defer_debug_values && len(persistent_definitions) > 0),
+        defer_debug_values,
     )
     if !compiled {
         return "", diagnostic, false
@@ -8688,6 +8796,7 @@ repl_handle_eval :: proc(
                     eval_start_line,
                     eval_start_column,
                     preserve_definition_locations,
+                    defer_debug_values,
                 )
             }
             delete(definitions)
@@ -9742,6 +9851,7 @@ repl_protocol_loop :: proc(
             request_timeout_ms if request_has_timeout_ms else 0,
             &eval_timings,
             request.native_debug_symbols,
+            request.defer_debug_values,
         )
         generation_ran := evaluated
         aborted :=
@@ -10848,7 +10958,9 @@ repl_attached_handle_eval :: proc(
             inspection_page_limit,
             capture_debug_values =
                 request.trace || request.pause_before ||
-                len(persistent_definitions) > 0,
+                (!request.defer_debug_values &&
+                 len(persistent_definitions) > 0),
+            fast_native_build = request.defer_debug_values,
         )
     if !compiled {
         repl_emit_json_event(Repl_Event{
@@ -11248,6 +11360,7 @@ repl_attached_handle_eval :: proc(
                 request.source_path if request.source_path != "" else input,
                 eval_line if has_eval_line else 1,
                 eval_column if has_eval_column else 1,
+                direct_scalar_invoke = request.defer_debug_values,
             )
         }
         delete(definitions)

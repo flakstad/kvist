@@ -705,15 +705,20 @@ if command -v emacs >/dev/null 2>&1; then
            (add-to-list (quote load-path) \"emacs\")
            (require (quote kvist-eval))
            ;; A long-running Emacs preserves the old defvar keymap. Verify
-           ;; that the explicit repair path restores newer debugger bindings.
+           ;; that reloading repairs core eval and debugger bindings.
            (define-key kvist-eval-mode-map (kbd \"C-c M-f\") nil)
            (define-key kvist-eval-mode-map (kbd \"C-c M-v\") nil)
+           (define-key kvist-eval-mode-map
+             (kbd \"C-c C-k\") (quote kvist-expand-form-at-point))
+           (load-file \"emacs/kvist-eval.el\")
            (kvist--install-debug-keybindings kvist-eval-mode-map)
            (unless (and (eq (lookup-key kvist-eval-mode-map (kbd \"C-c M-f\"))
                             (quote kvist-debug-show-frame))
                         (eq (lookup-key kvist-eval-mode-map (kbd \"C-c M-v\"))
-                            (quote kvist-debug-eval-expression)))
-             (error \"Kvist did not repair reloaded debugger bindings\"))
+                            (quote kvist-debug-eval-expression))
+                        (eq (lookup-key kvist-eval-mode-map (kbd \"C-c C-k\"))
+                            (quote kvist-eval-buffer)))
+             (error \"Kvist did not repair reloaded eval bindings\"))
            (define-key kvist-debug-source-mode-map
              (kbd \"i\") (quote kvist-debug-step))
            (define-key kvist-debug-source-mode-map (kbd \"n\") nil)
@@ -825,7 +830,13 @@ if command -v emacs >/dev/null 2>&1; then
                        (error \"Expected displayed if-ok docs, got: %s\" doc-text)))
                    (let ((defs (xref-backend-definitions (quote kvist) \"add\")))
                      (unless defs
-                       (error \"Expected xref definition for add\")))
+                       (error \"Expected xref definition for add\"))
+                     (let* ((location (xref-item-location (car defs)))
+                            (target (xref-file-location-file location)))
+                       (unless (equal (expand-file-name target)
+                                      (expand-file-name file))
+                         (error \"Same-file xref leaked tooling temp path: %S\"
+                                target))))
                    (goto-char (point-min))
                    (search-forward \"(add-two 1 2)\")
                    (backward-char 7)
@@ -833,7 +844,13 @@ if command -v emacs >/dev/null 2>&1; then
                      (error \"Expected add-two identifier, got: %S\" (kvist--identifier-at-point)))
                    (let ((defs (xref-backend-definitions (quote kvist) (kvist--identifier-at-point))))
                      (unless defs
-                       (error \"Expected xref definition for same-file hyphenated defn\")))
+                       (error \"Expected xref definition for same-file hyphenated defn\"))
+                     (let* ((location (xref-item-location (car defs)))
+                            (target (xref-file-location-file location)))
+                       (unless (equal (expand-file-name target)
+                                      (expand-file-name file))
+                         (error \"Hyphenated xref leaked tooling temp path: %S\"
+                                target))))
                    (let ((defs (xref-backend-definitions (quote kvist) \"arr.map\")))
                      (unless (and defs (string-match-p \"src/kvist/arr/arr\\\\.kvist\" (format \"%S\" defs)))
                        (error \"Expected package xref for arr.map, got: %S\" defs)))
@@ -1074,13 +1091,17 @@ if command -v emacs >/dev/null 2>&1; then
                           (form (buffer-substring-no-properties (car bounds) (cdr bounds))))
                      (unless (string-prefix-p \"(with-allocator\" form)
                        (error \"Expected with-allocator form, got: %s\" form)))
-                   (call-interactively (quote kvist-eval-buffer))
-                   (kvist-repl-wait)
-                   (let ((eval-text (with-current-buffer kvist-result-buffer-name
-                                      (buffer-substring-no-properties
-                                       (point-min) (point-max)))))
-                     (unless (string-match-p \"kvist exited 0\" eval-text)
-                       (error \"Expected successful native eval-buffer, got: %s\" eval-text)))
+                   (let (eval-status)
+                     (cl-letf (((symbol-function (quote message))
+                                (lambda (format-string &rest args)
+                                  (setq eval-status
+                                        (apply (quote format)
+                                               format-string args)))))
+                       (call-interactively (quote kvist-eval-buffer))
+                       (kvist-repl-wait))
+                     (unless (equal eval-status \"=> ok\")
+                       (error \"Expected successful native eval-buffer status, got: %S\"
+                              eval-status)))
                    (when (get-buffer kvist-generated-buffer-name)
                      (error \"Ordinary eval unexpectedly opened generated Odin\"))
                    (call-interactively (quote kvist-macroexpand-form-at-point))

@@ -117,41 +117,41 @@ return_spec_is_non_owned_scalar :: proc(returns: Return_Spec) -> bool {
     return returns.kind == .Single && type_text_is_non_owned_scalar(returns.single_ty)
 }
 
-body_escape_deferred_binding_span_names :: proc(forms: []CST_Form, names: []string, returns: Return_Spec) -> (Span, bool) {
+body_escape_deferred_binding_span_names :: proc(e: ^Emitter, forms: []CST_Form, names: []string, returns: Return_Spec) -> (Span, bool) {
     scoped_names := make([dynamic]string, len(names))
     defer delete(scoped_names)
     copy(scoped_names[:], names)
 
     for form in forms {
         if form.kind == .List && len(form.items) > 0 && form.items[0].kind == .Symbol && form.items[0].text == "return" {
-            if span, ok := form_escape_deferred_binding_span_names(form, scoped_names[:], returns); ok {
+            if span, ok := form_escape_deferred_binding_span_names(e, form, scoped_names[:], returns); ok {
                 return span, true
             }
         }
         if assigned_name, ok_assigned := set_bang_assigned_name(form); ok_assigned &&
-           form_may_escape_deferred_binding_names(form.items[2], scoped_names[:], returns) {
+           form_may_escape_deferred_binding_names(e, form.items[2], scoped_names[:], returns) {
             binding_names_append_unique(&scoped_names, assigned_name)
         }
     }
     if returns.kind != .None && len(forms) > 0 {
-        return form_escape_deferred_binding_span_names(forms[len(forms)-1], scoped_names[:], returns)
+        return form_escape_deferred_binding_span_names(e, forms[len(forms)-1], scoped_names[:], returns)
     }
     return {}, false
 }
 
-body_may_escape_deferred_binding_names :: proc(forms: []CST_Form, names: []string, returns: Return_Spec) -> bool {
-    _, ok := body_escape_deferred_binding_span_names(forms, names, returns)
+body_may_escape_deferred_binding_names :: proc(e: ^Emitter, forms: []CST_Form, names: []string, returns: Return_Spec) -> bool {
+    _, ok := body_escape_deferred_binding_span_names(e, forms, names, returns)
     return ok
 }
 
-body_may_escape_deferred_binding :: proc(forms: []CST_Form, name: string, returns: Return_Spec) -> bool {
+body_may_escape_deferred_binding :: proc(e: ^Emitter, forms: []CST_Form, name: string, returns: Return_Spec) -> bool {
     names: [dynamic]string
     defer delete(names)
     append(&names, name)
-    return body_may_escape_deferred_binding_names(forms, names[:], returns)
+    return body_may_escape_deferred_binding_names(e, forms, names[:], returns)
 }
 
-switch_escape_deferred_binding_span_names :: proc(form: CST_Form, names: []string, returns: Return_Spec) -> (Span, bool) {
+switch_escape_deferred_binding_span_names :: proc(e: ^Emitter, form: CST_Form, names: []string, returns: Return_Spec) -> (Span, bool) {
     if len(form.items) < 4 {
         return {}, false
     }
@@ -160,7 +160,7 @@ switch_escape_deferred_binding_span_names :: proc(form: CST_Form, names: []strin
         if i+1 >= len(form.items) {
             return {}, false
         }
-        if span, ok := form_escape_deferred_binding_span_names(form.items[i+1], names, returns); ok {
+        if span, ok := form_escape_deferred_binding_span_names(e, form.items[i+1], names, returns); ok {
             return span, true
         }
         i += 2
@@ -168,19 +168,31 @@ switch_escape_deferred_binding_span_names :: proc(form: CST_Form, names: []strin
     return {}, false
 }
 
-switch_may_escape_deferred_binding_names :: proc(form: CST_Form, names: []string, returns: Return_Spec) -> bool {
-    _, ok := switch_escape_deferred_binding_span_names(form, names, returns)
+switch_may_escape_deferred_binding_names :: proc(e: ^Emitter, form: CST_Form, names: []string, returns: Return_Spec) -> bool {
+    _, ok := switch_escape_deferred_binding_span_names(e, form, names, returns)
     return ok
 }
 
-switch_may_escape_deferred_binding :: proc(form: CST_Form, name: string, returns: Return_Spec) -> bool {
+switch_may_escape_deferred_binding :: proc(e: ^Emitter, form: CST_Form, name: string, returns: Return_Spec) -> bool {
     names: [dynamic]string
     defer delete(names)
     append(&names, name)
-    return switch_may_escape_deferred_binding_names(form, names[:], returns)
+    return switch_may_escape_deferred_binding_names(e, form, names[:], returns)
 }
 
-form_escape_deferred_binding_span_names :: proc(form: CST_Form, names: []string, returns: Return_Spec) -> (Span, bool) {
+form_returns_owned_managed_call_result :: proc(e: ^Emitter, form: CST_Form) -> bool {
+    if e == nil || form.kind != .List || len(form.items) == 0 || form.items[0].kind != .Symbol {
+        return false
+    }
+    _, proc_decl, ok_proc := resolve_proc_call_decl(e, form.items[0].text)
+    if !ok_proc || proc_decl == nil || !proc_decl.owns_result {
+        return false
+    }
+    return proc_decl.returns.kind == .Single &&
+           type_text_has_managed_lifecycle(e, proc_decl.returns.single_ty)
+}
+
+form_escape_deferred_binding_span_names :: proc(e: ^Emitter, form: CST_Form, names: []string, returns: Return_Spec) -> (Span, bool) {
     if !form_mentions_any_binding_name(form, names) {
         return {}, false
     }
@@ -190,13 +202,19 @@ form_escape_deferred_binding_span_names :: proc(form: CST_Form, names: []string,
     if form_is_borrowed_view_of_tracked_name(form, names) {
         return {}, false
     }
+    // An owned managed result has its own retained reference. It remains valid
+    // after a resource passed to the call is cleaned up, so the resource does
+    // not escape through that result.
+    if form_returns_owned_managed_call_result(e, form) {
+        return {}, false
+    }
 
     #partial switch form.kind {
     case .Symbol:
         return form.span, true
     case .Vector, .Brace, .Set:
         for item in form.items {
-            if span, ok := form_escape_deferred_binding_span_names(item, names, returns); ok {
+            if span, ok := form_escape_deferred_binding_span_names(e, item, names, returns); ok {
                 return span, true
             }
         }
@@ -204,7 +222,7 @@ form_escape_deferred_binding_span_names :: proc(form: CST_Form, names: []string,
     case .List:
         if len(form.items) == 0 || form.items[0].kind != .Symbol {
             for item in form.items {
-                if span, ok := form_escape_deferred_binding_span_names(item, names, returns); ok {
+                if span, ok := form_escape_deferred_binding_span_names(e, item, names, returns); ok {
                     return span, true
                 }
             }
@@ -213,7 +231,7 @@ form_escape_deferred_binding_span_names :: proc(form: CST_Form, names: []string,
         switch form.items[0].text {
         case "return":
             for returned in form.items[1:] {
-                if span, ok := form_escape_deferred_binding_span_names(returned, names, returns); ok {
+                if span, ok := form_escape_deferred_binding_span_names(e, returned, names, returns); ok {
                     return span, true
                 }
             }
@@ -222,7 +240,7 @@ form_escape_deferred_binding_span_names :: proc(form: CST_Form, names: []string,
             bindings, _, ok_bind := parse_let_bindings(form.items[1])
             if !ok_bind {
                 if len(form.items) >= 3 {
-                    return body_escape_deferred_binding_span_names(form.items[2:], names, returns)
+                    return body_escape_deferred_binding_span_names(e, form.items[2:], names, returns)
                 }
                 return {}, false
             }
@@ -230,48 +248,48 @@ form_escape_deferred_binding_span_names :: proc(form: CST_Form, names: []string,
             defer delete(scoped_names)
             copy(scoped_names[:], names)
             for binding in bindings {
-                if binding.name != "" && form_may_escape_deferred_binding_names(binding.value, scoped_names[:], returns) {
+                if binding.name != "" && form_may_escape_deferred_binding_names(e, binding.value, scoped_names[:], returns) {
                     binding_names_append_unique(&scoped_names, binding.name)
                 }
             }
             if len(form.items) >= 3 {
-                return body_escape_deferred_binding_span_names(form.items[2:], scoped_names[:], returns)
+                return body_escape_deferred_binding_span_names(e, form.items[2:], scoped_names[:], returns)
             }
             return {}, false
         case "do":
             if len(form.items) >= 2 {
-                return body_escape_deferred_binding_span_names(form.items[1:], names, returns)
+                return body_escape_deferred_binding_span_names(e, form.items[1:], names, returns)
             }
             return {}, false
         case "if":
             if len(form.items) >= 3 {
-                if span, ok := form_escape_deferred_binding_span_names(form.items[2], names, returns); ok {
+                if span, ok := form_escape_deferred_binding_span_names(e, form.items[2], names, returns); ok {
                     return span, true
                 }
             }
             if len(form.items) >= 4 {
-                if span, ok := form_escape_deferred_binding_span_names(form.items[3], names, returns); ok {
+                if span, ok := form_escape_deferred_binding_span_names(e, form.items[3], names, returns); ok {
                     return span, true
                 }
             }
             return {}, false
         case "type-case":
-            return switch_escape_deferred_binding_span_names(form, names, returns)
+            return switch_escape_deferred_binding_span_names(e, form, names, returns)
         case "match":
             for i := 3; i < len(form.items); i += 2 {
-                if span, ok := form_escape_deferred_binding_span_names(form.items[i], names, returns); ok {
+                if span, ok := form_escape_deferred_binding_span_names(e, form.items[i], names, returns); ok {
                     return span, true
                 }
             }
             return {}, false
         case "with-allocator", "with-temp-allocator":
             if len(form.items) >= 3 {
-                return body_escape_deferred_binding_span_names(form.items[2:], names, returns)
+                return body_escape_deferred_binding_span_names(e, form.items[2:], names, returns)
             }
             return {}, false
         case:
             for item in form.items[1:] {
-                if span, ok := form_escape_deferred_binding_span_names(item, names, returns); ok {
+                if span, ok := form_escape_deferred_binding_span_names(e, item, names, returns); ok {
                     return span, true
                 }
             }
@@ -281,16 +299,16 @@ form_escape_deferred_binding_span_names :: proc(form: CST_Form, names: []string,
     return {}, false
 }
 
-form_may_escape_deferred_binding_names :: proc(form: CST_Form, names: []string, returns: Return_Spec) -> bool {
-    _, ok := form_escape_deferred_binding_span_names(form, names, returns)
+form_may_escape_deferred_binding_names :: proc(e: ^Emitter, form: CST_Form, names: []string, returns: Return_Spec) -> bool {
+    _, ok := form_escape_deferred_binding_span_names(e, form, names, returns)
     return ok
 }
 
-form_may_escape_deferred_binding :: proc(form: CST_Form, name: string, returns: Return_Spec) -> bool {
+form_may_escape_deferred_binding :: proc(e: ^Emitter, form: CST_Form, name: string, returns: Return_Spec) -> bool {
     names: [dynamic]string
     defer delete(names)
     append(&names, name)
-    return form_may_escape_deferred_binding_names(form, names[:], returns)
+    return form_may_escape_deferred_binding_names(e, form, names[:], returns)
 }
 
 body_escape_owned_temp_result_span_names :: proc(e: ^Emitter, forms: []CST_Form, names: []string, returns: Return_Spec) -> (Span, bool) {
@@ -632,11 +650,11 @@ let_defer_return_error :: proc(
         defer delete(names)
         append(&names, delete_name)
         for alias_binding in bindings {
-            if alias_binding.name != "" && form_may_escape_deferred_binding_names(alias_binding.value, names[:], returns) {
+            if alias_binding.name != "" && form_may_escape_deferred_binding_names(e, alias_binding.value, names[:], returns) {
                 binding_names_append_unique(&names, alias_binding.name)
             }
         }
-        if err_span, ok := body_escape_deferred_binding_span_names(body, names[:], returns); ok {
+        if err_span, ok := body_escape_deferred_binding_span_names(e, body, names[:], returns); ok {
             message := "defer-marked binding cannot be returned; remove defer or transfer ownership explicitly"
             if binding.defer_with_cleanup {
                 message = "defer-with binding cannot be returned; remove cleanup marker or transfer ownership explicitly"

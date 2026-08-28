@@ -1691,6 +1691,19 @@ compile_repl_generation_emits_typed_recent_result_adapters :: proc(t: ^testing.T
 }
 
 @(test)
+repl_result_type_from_abi_strips_lifetime_metadata :: proc(t: ^testing.T) {
+    owned := kvist.repl_result_type_from_abi("value:Data:owned")
+    borrowed := kvist.repl_result_type_from_abi(
+        "value:string:borrowed|layout:Alias=alias:string",
+    )
+    defer delete(owned)
+    defer delete(borrowed)
+
+    testing.expect_value(t, owned, "Data")
+    testing.expect_value(t, borrowed, "string")
+}
+
+@(test)
 compile_repl_generation_reads_recent_result_without_rotating_history :: proc(
     t: ^testing.T,
 ) {
@@ -2937,7 +2950,11 @@ cli_repl_caches_identical_frontend_generations :: proc(t: ^testing.T) {
 (defn mix [label: string count: int ratio: f64 enabled: bool] -> string
   (str label ":" count ":" ratio ":" enabled))
 (defn make-record [value: int] -> Data {:answer value})
-(defn identity-record [value: Data] -> Data value)`
+(defn identity-record [value: Data] -> Data value)
+
+;; A notebook-style form is evaluated explicitly by the editor, not while
+;; loading the file as the REPL context.
+(bump)`
     testing.expect_value(
         t,
         os.write_entire_file_from_string(context_path, context_source) == nil,
@@ -2955,6 +2972,11 @@ cli_repl_caches_identical_frontend_generations :: proc(t: ^testing.T) {
 {"id":"mixed","op":"eval","source":"(mix \"x\" 3 1.5 true)"}
 {"id":"data","op":"eval","source":"(make-record 7)"}
 {"id":"data-arg","op":"eval","source":"(identity-record *1)"}
+{"id":"bulk","op":"eval","source":"(defn loaded-value [] -> int 42)","defer_debug_values":true}
+{"id":"loaded-call","op":"eval","source":"(loaded-value)"}
+{"id":"def-live-data","op":"eval","source":"(defn live-data [value: int] -> Data {:value value})"}
+{"id":"direct-live-data","op":"eval","source":"(live-data 9)"}
+{"id":"compile-after-live-data","op":"eval","source":"(let [value *1] value)"}
 {"id":"close","op":"close"}
 `
     testing.expect_value(
@@ -2993,6 +3015,14 @@ cli_repl_caches_identical_frontend_generations :: proc(t: ^testing.T) {
         t,
         strings.contains(
             output,
+            `"id":"call-1","kind":"output","success":true,"generation":1,"stream":"stdout","text":"1\n"`,
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            output,
             `"id":"call-6","kind":"output","success":true,"generation":6,"stream":"stdout","text":"6\n"`,
         ),
         true,
@@ -3025,6 +3055,57 @@ cli_repl_caches_identical_frontend_generations :: proc(t: ^testing.T) {
         strings.contains(output, `"id":"data-arg","kind":"output","success":true,"generation":9,"stream":"stdout","text":"{:answer 7}\n"`),
         true,
     )
+    testing.expect_value(
+        t,
+        strings.contains(
+            output,
+            `"id":"bulk","kind":"complete","success":true,"generation":10`,
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            output,
+            `"id":"loaded-call","kind":"output","success":true,"generation":11,"stream":"stdout","text":"42\n"`,
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            output,
+            `"id":"direct-live-data","kind":"output","success":true`,
+        ) && strings.contains(
+            output,
+            `"id":"compile-after-live-data","kind":"output","success":true`,
+        ),
+        true,
+    )
+    loaded_timing_offset := strings.index(
+        output,
+        `"id":"loaded-call","kind":"timings"`,
+    )
+    testing.expect_value(t, loaded_timing_offset >= 0, true)
+    if loaded_timing_offset >= 0 {
+        loaded_timing_line := output[loaded_timing_offset:]
+        if end := strings.index(loaded_timing_line, "\n"); end >= 0 {
+            loaded_timing_line = loaded_timing_line[:end]
+        }
+        testing.expect_value(
+            t,
+            strings.contains(
+                loaded_timing_line,
+                `"phase":"odin-build","elapsed_ns":0`,
+            ),
+            true,
+        )
+        testing.expect_value(
+            t,
+            strings.contains(loaded_timing_line, `"frontend_cache_hit":true`),
+            true,
+        )
+    }
     testing.expect_value(
         t,
         strings.contains(output, `"phase":"odin-build","elapsed_ns":0`),

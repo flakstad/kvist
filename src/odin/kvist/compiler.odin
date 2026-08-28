@@ -109,6 +109,7 @@ load_path_expanded_forms :: proc(
     path: string,
     profile: ^Compile_Profile = nil,
     extra_imports: []CST_Top_Form = nil,
+    declarations_only := false,
 ) -> (expanded: [dynamic]CST_Top_Form, macros: [dynamic]User_Macro, err: Compile_Error, ok: bool) {
     load_start: time.Tick
     if profile != nil {
@@ -143,6 +144,15 @@ load_path_expanded_forms :: proc(
     }
     if !ok_expand {
         return expanded, macros, err_expand, false
+    }
+    if declarations_only {
+        declaration_forms: [dynamic]CST_Top_Form
+        for form in expanded_forms {
+            if eval_head_is_decl(eval_form_head(form.form)) {
+                append(&declaration_forms, form)
+            }
+        }
+        expanded_forms = declaration_forms
     }
     post_start: time.Tick
     if profile != nil {
@@ -991,7 +1001,12 @@ compile_eval_path_with_map :: proc(
     ok_program := context_cache_hit
     if !context_cache_hit {
         expanded_forms, macros, err_program, ok_program =
-            load_path_expanded_forms(path, profile, repl_import_forms[:])
+            load_path_expanded_forms(
+                path,
+                profile,
+                repl_import_forms[:],
+                declarations_only = repl_generation,
+            )
         if ok_program {
             repl_context_expansion_cache_store(
                 repl_context_cache_key,

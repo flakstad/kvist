@@ -783,8 +783,7 @@ emit_eval_decls_with_source_map :: proc(
     if initialize_context {
         for &decl in e.decls {
             if decl.kind != .Proc ||
-               name_in_list(repl_prior_proc_names, decl.proc_decl.name) ||
-               name_in_list(repl_proc_names, decl.proc_decl.name) {
+               name_in_list(repl_prior_proc_names, decl.proc_decl.name) {
                 continue
             }
             emit_repl_scalar_invoke_adapter(&e, &decl.proc_decl)
@@ -1145,7 +1144,9 @@ emit_eval_decls_with_source_map :: proc(
     }
     for repl_proc_name in repl_proc_names {
         repl_proc_signature_text := ""
+        repl_proc_decl: ^Proc_Decl
         if proc_decl, found := find_proc_decl(&e, repl_proc_name); found {
+            repl_proc_decl = proc_decl
             repl_proc_signature_text = repl_proc_signature(proc_decl, &e)
         }
         emit_line(
@@ -1157,6 +1158,26 @@ emit_eval_decls_with_source_map :: proc(
                 repl_proc_name,
             ),
         )
+        if repl_proc_decl != nil &&
+           repl_proc_supports_scalar_invoke(repl_proc_decl) {
+            adapter := repl_scalar_invoke_adapter_name(repl_proc_name)
+            result_signature := repl_value_signature(
+                repl_proc_decl.returns.single_ty,
+                &e,
+            )
+            emit_line(
+                &e,
+                fmt.tprintf(
+                    "host.register_scalar_invoke(host.ctx, %q, %q, %q, %s)",
+                    repl_proc_name,
+                    repl_proc_signature_text,
+                    result_signature,
+                    adapter,
+                ),
+            )
+            delete(result_signature)
+            delete(adapter)
+        }
         delete(repl_proc_signature_text)
     }
     if initialize_context {

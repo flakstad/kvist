@@ -1,0 +1,57 @@
+name: Smoke
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            exe_suffix: ""
+          - os: ubuntu-latest
+            exe_suffix: ""
+          - os: windows-latest
+            exe_suffix: ".exe"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: laytan/setup-odin@v2.12.2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Show Odin version
+        shell: bash
+        run: odin version
+
+      - name: Build CLI
+        shell: bash
+        run: odin build src/cli/kvist -out:./kvist${{ matrix.exe_suffix }}
+
+      - name: Smoke test CLI
+        shell: bash
+        run: |
+          KVIST_BIN=./kvist${{ matrix.exe_suffix }}
+          "$KVIST_BIN" check examples/language/hello.kvist
+          test "$("$KVIST_BIN" run examples/language/hello.kvist)" = "hello from kvist"
+          test "$("$KVIST_BIN" run examples/collections/package-tour.kvist)" = "18"
+          "$KVIST_BIN" doc examples/collections/log-source.kvist log-lines >/dev/null
+          "$KVIST_BIN" lookup examples/collections/log-source.kvist log-lines >/dev/null
+          "$KVIST_BIN" complete examples/collections/log-source.kvist log >/dev/null
+
+      - name: Smoke test native REPL
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          printf '(+ 1 1)\n:quit\n' |
+            ./kvist repl examples/language/hello.kvist |
+            grep -q 'kvist=> 2'

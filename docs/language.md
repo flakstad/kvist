@@ -1579,6 +1579,10 @@ file := open_file(path)
 defer close_file(file)
 ```
 
+When a cleanup-managed resource is passed to a call that returns an owned
+`Data` value, that value may be returned from the scope: its retained reference
+remains valid after the resource cleanup runs.
+
 Cleanup markers are mutually exclusive. Use `:defer` for `delete(value)`,
 `:defer-with` for `cleanup(value)`, or `:errdefer` for failure-only cleanup of
 returned owned values.

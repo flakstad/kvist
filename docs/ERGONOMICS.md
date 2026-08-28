@@ -29,7 +29,7 @@ compiler behavior.
 | Core `str` | Implemented | Validate rendering across Ro and Vev |
 | Managed `Data` in native aggregates | Partial | Top-level Kvist structs are managed recursively; add containers, unions, closures, local/imported structs |
 | Typed Data decoding and validated shapes | Implemented | Structs and direct arrays decode or validate from one native shape definition with precise paths; broaden only from concrete boundary needs |
-| Structural Data matching and destructuring | Planned | Design after aggregate ownership and decoding |
+| Structural Data matching and destructuring | Implemented | Broaden only from concrete Data-oriented workloads |
 | Public Data builders/transients | Planned | Expose a safe freeze API based on the EDN reader's linear construction pattern |
 | Vev Data result traversal and typed collection | Planned | Avoid unnecessary intermediate native arrays |
 | Generated package compilation and cache | Implemented | Tune bounded cache policy from workload data |
@@ -96,9 +96,9 @@ compiler behavior.
 
 ### 3. Structural Data Ergonomics And Vev Results
 
-- Specify nested map/sequential patterns, literals, optional/default keys, rest
-  bindings, exhaustiveness, and captured-value ownership using executable
-  Ro/Vev examples.
+- Implemented: nested map/sequential patterns, literals, optional/default keys,
+  rest bindings, structural `match`, and captured-value ownership, with
+  executable examples and compiler properties.
 - Use native-type validation as the reusable shape mechanism; add safe public
   Data builders.
 - Add borrowed Vev row traversal, typed row decoding, typed collection, and

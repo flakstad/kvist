@@ -40,6 +40,29 @@ kvist macroexpand file.kvist '(form)'
 Use `eval --check` to validate without running and `eval --no-print` to suppress
 automatic result printing.
 
+## Native REPL
+
+Start a persistent native session using a Kvist source file as its package
+context:
+
+```sh
+kvist repl file.kvist
+```
+
+Forms submitted to the REPL follow the normal Kvist pipeline: reading, macro
+expansion, type and ownership checking, Odin lowering, native compilation,
+loading, and execution. Successful definitions and supported typed values are
+available to later forms; `:reset` clears the session and `:quit` stops it.
+
+Editor clients use the same session through an editor-neutral JSONL protocol:
+
+```sh
+kvist repl file.kvist --protocol jsonl
+```
+
+See the [native REPL guide](REPL.md) for session semantics, inspection,
+debugging, conditions and restarts, and attachment to running applications.
+
 ## Symbols
 
 Human-readable documentation:
@@ -144,5 +167,8 @@ runtime where applicable.
 
 ## Emacs
 
-The Emacs mode provides evaluation, checking, expansion, documentation,
-completion, and xref through the CLI. See [the Emacs guide](../emacs/README.md).
+The Emacs mode provides persistent native evaluation, checking, expansion,
+documentation, completion, xref, typed value inspection, source-level
+debugging, execution traces, conditions and restarts, and live-application
+attachment through the CLI protocol. See
+[the Emacs guide](../emacs/README.md).

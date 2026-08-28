@@ -762,6 +762,11 @@ repl_result_type_from_abi :: proc(abi: string) -> string {
     if layout := strings.index(result_ty, "|"); layout >= 0 {
         result_ty = result_ty[:layout]
     }
+    if suffix := ":owned"; strings.has_suffix(result_ty, suffix) {
+        result_ty = result_ty[:len(result_ty)-len(suffix)]
+    } else if suffix := ":borrowed"; strings.has_suffix(result_ty, suffix) {
+        result_ty = result_ty[:len(result_ty)-len(suffix)]
+    }
     return strings.clone(result_ty)
 }
 

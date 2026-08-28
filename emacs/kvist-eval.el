@@ -30,6 +30,16 @@ one already exists and otherwise falls back to file-context commands."
   :type 'boolean
   :group 'kvist)
 
+(defcustom kvist-eval-buffer-declarations-only nil
+  "When non-nil, `kvist-eval-buffer' loads declarations but skips bare forms.
+This supports notebook-style source files whose top-level expressions are
+evaluated individually while imports and definitions are loaded atomically."
+  :type 'boolean
+  :group 'kvist)
+
+(make-variable-buffer-local 'kvist-eval-buffer-declarations-only)
+(put 'kvist-eval-buffer-declarations-only 'safe-local-variable #'booleanp)
+
 (defcustom kvist-generated-buffer-name "*Kvist Generated*"
   "Buffer name used to show generated Odin."
   :type 'string
@@ -367,6 +377,8 @@ application."
 (define-key kvist-eval-mode-map (kbd "C-c C-z") #'kvist-repl)
 (define-key kvist-eval-mode-map (kbd "C-c M-j") nil)
 (define-key kvist-eval-mode-map (kbd "C-c g g") #'kvist-expand-form-at-point)
+(define-key kvist-eval-mode-map (kbd "C-c C-k") #'kvist-eval-buffer)
+(define-key kvist-eval-mode-map (kbd "C-c C-m") #'kvist-expand-form-at-point)
 (define-key kvist-eval-mode-map (kbd "C-c v v") #'kvist-repl-versions-at-point)
 (define-key kvist-eval-mode-map (kbd "C-c v d") #'kvist-repl-dependents-at-point)
 (define-key kvist-eval-mode-map (kbd "C-c v r") #'kvist-repl-refresh-dependents-at-point)
@@ -1581,7 +1593,8 @@ When ENDPOINT is non-nil, connect the generic client to that Olive endpoint."
 (defun kvist--repl-request
     (op source callback &optional no-print source-file handle path index key-source
         offset limit source-line source-column pause-id pause-before trace
-        trace-limit trace-values trace-value-limit request-name request-abi)
+        trace-limit trace-values trace-value-limit request-name request-abi
+        defer-debug-values)
   "Send OP with SOURCE to the package session and invoke CALLBACK on completion."
   (let* ((session (kvist--repl-session source-file))
          (next (1+ (kvist--repl-session-next-id session)))
@@ -1636,6 +1649,8 @@ When ENDPOINT is non-nil, connect the generic client to that Olive endpoint."
       (setq request (append request `((name . ,request-name)))))
     (when request-abi
       (setq request (append request `((abi . ,request-abi)))))
+    (when defer-debug-values
+      (setq request (append request '((defer_debug_values . t)))))
     (puthash id callback (kvist--repl-session-pending session))
     (process-put (kvist--repl-session-process session)
                  (intern (concat "kvist-request-" id))
@@ -3362,6 +3377,16 @@ immediately before point rather than the wrapper itself."
               (user-error "Empty (comment ...) form")
             (concat "(do\n" body "\n)")))))))
 
+(defun kvist--repl-declaration-form-p (form)
+  "Return non-nil when FORM is a loadable top-level declaration."
+  (string-match-p
+   (concat
+    "\\`[[:space:]]*(\\(?:"
+    "import\\|foreign-import\\|odin\\|@exports\\|"
+    "def[^[:space:]()]*"
+    "\\)\\_>")
+   form))
+
 (defun kvist--buffer-repl-source ()
   "Return evaluable top-level forms from the current buffer.
 The package declaration is already supplied by the session context, and
@@ -3383,12 +3408,15 @@ top-level comment forms remain deliberately inert."
             (unless end
               (user-error "Incomplete top-level form"))
             (let ((form (buffer-substring-no-properties beg end)))
-              (unless (string-match-p
-                       (concat
-                        "\\`[[:space:]]*(\\(?:package\\|comment\\)\\_>"
-                        "\\|"
-                        "\\`[[:space:]]*(defn-?[[:space:]\n]+main\\_>")
-                       form)
+              (unless (or
+                       (string-match-p
+                        (concat
+                         "\\`[[:space:]]*(\\(?:package\\|comment\\)\\_>"
+                         "\\|"
+                         "\\`[[:space:]]*(defn-?[[:space:]\n]+main\\_>")
+                        form)
+                       (and kvist-eval-buffer-declarations-only
+                            (not (kvist--repl-declaration-form-p form))))
                 (push form forms)))
             (goto-char end))))
       (string-join (nreverse forms) "\n"))))
@@ -3472,25 +3500,41 @@ top-level comment forms remain deliberately inert."
 
 (defun kvist--format-protocol-diagnostics (diagnostics)
   "Render structured protocol DIAGNOSTICS for `compilation-mode'."
-  (mapconcat
-   (lambda (diagnostic)
-     (let* ((severity (or (alist-get 'severity diagnostic) "error"))
-            (code (alist-get 'code diagnostic))
-            (confidence (alist-get 'confidence diagnostic))
-            (label (concat severity
-                           (if code (format "[%s%s]"
-                                            code
-                                            (if (equal confidence "conservative")
-                                                "?" ""))
-                             ""))))
-       (format "%s:%s:%s: %s: %s"
-               (or (alist-get 'source_path diagnostic) "<eval>")
-               (or (alist-get 'line diagnostic) 1)
-               (or (alist-get 'column diagnostic) 1)
-               label
-               (or (alist-get 'message diagnostic) ""))))
-   diagnostics
+  (string-join
+   (delete-dups
+    (mapcar
+     (lambda (diagnostic)
+       (let* ((severity (or (alist-get 'severity diagnostic) "error"))
+              (code (alist-get 'code diagnostic))
+              (confidence (alist-get 'confidence diagnostic))
+              (label (concat severity
+                             (if code (format "[%s%s]"
+                                              code
+                                              (if (equal confidence "conservative")
+                                                  "?" ""))
+                               ""))))
+         (format "%s:%s:%s: %s: %s"
+                 (or (alist-get 'source_path diagnostic) "<eval>")
+                 (or (alist-get 'line diagnostic) 1)
+                 (or (alist-get 'column diagnostic) 1)
+                 label
+                 (or (alist-get 'message diagnostic) ""))))
+     diagnostics))
    "\n"))
+
+(defun kvist--record-repl-diagnostics (output-buffer diagnostic-text)
+  "Record DIAGNOSTIC-TEXT in OUTPUT-BUFFER without displaying it."
+  (when (and diagnostic-text
+             (not (string-empty-p diagnostic-text)))
+    (with-current-buffer output-buffer
+      (let ((inhibit-read-only t)
+            (buffer-read-only nil))
+        (erase-buffer)
+        (insert "Kvist evaluation warnings\n\n")
+        (insert diagnostic-text)
+        (unless (string-suffix-p "\n" diagnostic-text)
+          (insert "\n"))
+        (kvist--finish-output-buffer t)))))
 
 (defun kvist--eval-string-stateless
     (form &optional no-print check-only display bounds save-name)
@@ -3548,17 +3592,19 @@ CLI cache."
          (diagnostic-text
           (and diagnostics
                (kvist--format-protocol-diagnostics diagnostics)))
-         (text (if success
-                   (if (and diagnostic-text
-                            (not (string-empty-p diagnostic-text)))
-                       (concat diagnostic-text
-                               (unless (string-empty-p output) "\n")
-                               output)
-                     output)
-                 (or diagnostic-text message-text)))
+         (text (if success output (or diagnostic-text message-text)))
+         (buffer-text
+          (if (and success diagnostic-text
+                   (not (string-empty-p diagnostic-text)))
+              (concat diagnostic-text
+                      (unless (string-empty-p output) "\n")
+                      output)
+            text))
          (exit-code (if success 0 1))
          (output-buffer
           (kvist--prepare-diagnostic-buffer kvist-result-buffer-name)))
+    (when success
+      (kvist--record-repl-diagnostics output-buffer diagnostic-text))
     (when (buffer-live-p source-buffer)
       (with-current-buffer source-buffer
         (pcase display
@@ -3584,16 +3630,15 @@ CLI cache."
            (kvist--message-result text exit-code))
           ('minibuffer
            (if success
-               (let ((trimmed (kvist--trim-output text)))
-                 (message "=> %s"
-                          (if (string-empty-p trimmed)
-                              "nil"
-                            trimmed)))
+               ;; `minibuffer' is used for loading active buffer definitions.
+               ;; The result is a status, not a value: compiler warnings must
+               ;; not turn the minibuffer into a wall of diagnostic prose.
+               (message "=> ok")
              (kvist--display-output
               output-buffer text exit-code t)))
           (_
            (kvist--display-output
-            output-buffer text exit-code (not success))))))))
+            output-buffer buffer-text exit-code (not success))))))))
 
 (defun kvist--restore-debug-return-location (session)
   "Return to the source submission that entered SESSION's debugger."
@@ -3678,9 +3723,10 @@ CLI cache."
 
 (defun kvist--eval-string
     (form &optional no-print check-only display bounds save-name pause-before
-          trace)
+          trace defer-debug-values)
   "Evaluate FORM in the persistent native package session.
-CHECK-ONLY and SAVE-NAME deliberately use the hermetic CLI paths."
+CHECK-ONLY and SAVE-NAME deliberately use the hermetic CLI paths.
+DEFER-DEBUG-VALUES selects the lean bulk-definition loading path."
   (when (and (not check-only)
              (not save-name)
              (kvist--main-definition-string-p form))
@@ -3749,7 +3795,10 @@ CHECK-ONLY and SAVE-NAME deliberately use the hermetic CLI paths."
                (min 10000 (max 1 kvist-trace-limit)))
              (and trace kvist-trace-capture-values)
              (when (and trace kvist-trace-capture-values)
-               (min 1000 (max 1 kvist-trace-value-limit))))))
+               (min 1000 (max 1 kvist-trace-value-limit)))
+             nil
+             nil
+             defer-debug-values)))
         (submit no-print)))))
 
 (defun kvist--buffer-command (command)
@@ -4143,14 +4192,14 @@ With prefix argument NO-PRINT, treat the form as a statement."
 ;;;###autoload
 (defun kvist-eval-buffer ()
   "Evaluate all active forms in the current buffer as one atomic REPL batch.
-Successful completion is reported in the minibuffer; diagnostics still open
-the result buffer."
+Successful completion is reported as `=> ok' in the minibuffer.  Failed
+diagnostics still open the result buffer."
   (interactive)
   (let ((source (kvist--buffer-repl-source))
         (bounds (cons (point-min) (point-max))))
     (when (string-empty-p (string-trim source))
       (user-error "Buffer has no active forms to evaluate"))
-    (kvist--eval-string source nil nil 'minibuffer bounds)))
+    (kvist--eval-string source nil nil 'minibuffer bounds nil nil nil t)))
 
 ;;;###autoload
 (defun kvist-build-buffer ()

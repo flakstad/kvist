@@ -1,8 +1,103 @@
 # Native REPL and Live Console
 
-Status: canonical design under active implementation.
+Kvist has a persistent REPL without introducing an interpreter or a second,
+dynamically typed version of the language. A submission is ordinary Kvist: it
+is read, macro-expanded, type checked, ownership checked, lowered to Odin,
+compiled, loaded, and executed as native code.
 
-Implemented foundation:
+## Start A Session
+
+Build the compiler, then anchor the session to a Kvist source file:
+
+```sh
+odin build src/cli/kvist
+./kvist repl examples/language/hello.kvist
+```
+
+The source file supplies the package graph, imports, compiler options, source
+mapping, and symbol context for later forms.
+
+```text
+Kvist native REPL
+Enter one expression per line; use :reset or :quit.
+kvist=> (+ 1 1)
+2
+kvist=> (defn square [x: int] -> int (* x x))
+kvist=> (square 11)
+121
+```
+
+Use `:reset` to replace the worker and clear definitions, values, imports, and
+result history. Use `:quit` or end input to stop the session.
+
+## Persistent Native State
+
+Successful definitions and supported typed values remain available to later
+submissions. A compatible function redefinition updates later calls while
+already loaded native generations retain the version they compiled against:
+
+```text
+kvist=> (defn scale [x: int] -> int (* x 2))
+kvist=> (scale 21)
+42
+kvist=> (defn scale [x: int] -> int (* x 3))
+kvist=> (scale 21)
+63
+```
+
+The session retains concrete functions, native scalars and collections,
+immutable `Data`, nominal declarations, imports, macros, transforms, iterators,
+and package state where their native lifecycle is safe. Value-producing forms
+rotate typed `*1`, `*2`, and `*3` results.
+
+A complete multi-form submission compiles before any of its runtime forms run.
+If compilation fails, none of those forms execute. Successful runtime forms
+execute exactly once and are never replayed to reconstruct the session.
+
+## Editors And The JSONL Protocol
+
+The terminal is one client of an editor-neutral JSONL protocol:
+
+```sh
+./kvist repl examples/language/hello.kvist --protocol jsonl
+```
+
+The protocol supports evaluation, expansion, completion, documentation,
+retained value inspection, binding and generation inventory, source-level
+debugging, execution traces, conditions and restarts, session checkpoints, and
+attachment to running applications.
+
+Because that interface is structured and session-aware, automation and coding
+agents can use it for short native feedback loops: submit one focused form,
+inspect typed results and diagnostics, redefine code, and retain the surrounding
+session state. Reproducible `check`, `test`, and `run` commands remain the final
+verification boundary.
+
+The shipped [Emacs client](../emacs/README.md) provides a CIDER-shaped workflow
+over that protocol: evaluate forms, regions, comment bodies, or buffers; inspect
+typed native values; redefine functions; step through source forms; browse
+collections; and invoke compiled restarts without changing Kvist's native
+semantics.
+
+## Session Boundaries
+
+- The terminal client accepts one complete expression per line. Editors and
+  protocol clients may submit balanced multi-line forms and atomic batches.
+- Loaded native generations and session allocations are append-only until
+  reset or process exit.
+- Pointer, foreign-view, and opaque resource results may be rendered for one
+  evaluation but are not retained unless the REPL has an explicit safe
+  lifecycle for them.
+- A clean `check`, `test`, or `run` remains the reproducible truth. REPL history
+  is development state, not an implicit part of the program.
+
+## Implementation Reference
+
+The remainder of this document specifies the native session model, generic
+protocol, inspection and debugging behavior, attachment model, and acceptance
+contract in detail.
+
+### Implemented Foundation
 
 - `kvist repl CONTEXT` terminal entrypoint and editor-neutral
   `--protocol jsonl` mode
@@ -199,10 +294,9 @@ native call sites.
 
 ## Product Model
 
-`kvist repl` starts an interactive session anchored to a Kvist package. With no
-input file it starts a synthetic core-only package. With an input file it uses
-the same package graph, imports, compiler options, source mapping, and symbol
-context as `kvist eval`.
+`kvist repl CONTEXT` starts an interactive session anchored to the Kvist
+package containing `CONTEXT`. It uses the same package graph, imports, compiler
+options, source mapping, and symbol context as `kvist eval`.
 
 The REPL supports the full language, including native scalars, arrays, structs,
 resources, Odin and Kvist packages, `Data`, macros, transforms, iterators, and
@@ -513,9 +607,10 @@ remain reusable across sessions.
 The CLI contains no editor-specific behavior. It provides:
 
 ```text
-kvist repl [context.kvist]
-kvist repl [context.kvist] --protocol jsonl
-kvist repl --attach ENDPOINT
+kvist repl context.kvist
+kvist repl context.kvist --protocol jsonl
+kvist repl --attach ENDPOINT --protocol jsonl
+kvist repl context.kvist --attach ENDPOINT --protocol jsonl
 ```
 
 Interactive mode is a terminal client over the same internal request/event
@@ -527,12 +622,12 @@ stdout and stderr events.
 
 Every request has a client-generated request id. Evaluation requests contain
 source text, a stable source identity, the source range or starting position,
-and flags such as no-print, `native_debug_symbols`, or a standalone native
-`timeout_ms` deadline between 1 and 3,600,000 milliseconds. Ordinary
-evaluations omit native debug symbols for a faster Odin build. A client that is
-attaching a native debugger sets `native_debug_symbols: true`; instrumented
-Kvist stepping, tracing, values, conditions, and source maps do not require
-that flag. Generic requests cover:
+and flags such as no-print, `native_debug_symbols`, `defer_debug_values`, or a
+standalone native `timeout_ms` deadline between 1 and 3,600,000 milliseconds.
+Ordinary evaluations omit native debug symbols for a faster Odin build. A
+client that is attaching a native debugger sets `native_debug_symbols: true`;
+instrumented Kvist stepping, tracing, values, conditions, and source maps do
+not require that flag. Generic requests cover:
 
 - handshake and capability discovery
 - evaluate a batch
@@ -611,11 +706,18 @@ pause-before submissions and native debug-symbol builds remain uncached.
 Capability `deferred-debug-value-capture` means ordinary expression
 evaluations keep their native safe points and abort checks but omit generated
 local-value renderers until they are needed. Explicit conditions and
-breakpoints still capture their values immediately. Live definitions are
-compiled with full capture metadata so they can be traced later; trace,
-pause-before, and native-debug evaluations likewise request full capture. This
-reduces ordinary generated source and native build time without removing
-conditions, cooperative interruption, or the debugger path.
+breakpoints still capture their values immediately. Live definitions normally
+compile with full capture metadata so they can be traced later; trace,
+pause-before, and native-debug evaluations likewise request full capture.
+Bulk loaders may set `defer_debug_values: true` to establish definitions
+without eagerly generating every local-value renderer. Re-evaluating one of
+those definitions normally restores its full capture metadata before tracing
+or stepping through its locals. This reduces generated source and native build
+time without removing conditions, cooperative interruption, or the debugger
+path. Eligible scalar calls to definitions established by such a bulk load are
+then dispatched directly through the resident native function registry. They
+skip another frontend and Odin build; complex forms and debug submissions keep
+using the normal generation path.
 
 The eval emitter also shares one import-metadata cache across the complete
 generation. In particular, the Odin installation root is discovered once and
@@ -1001,12 +1103,18 @@ editor-added presentation rather than prompt output.
 
 Existing form, top-level form, region, comment-body, and buffer commands send
 their actual source through the protocol. `eval-buffer` submits all active
-definitions as one atomic generation rather than running `check`. Package and
-inert comment forms are omitted, as is native `main`: Odin treats a DLL-level
-`main` as a load-time entrypoint, so application entrypoint replacement stays
-an Olive/restart boundary. Emacs owns process lifecycle, package routing,
-result overlays, compilation-mode diagnostic navigation, and reset/stop
-commands.
+definitions as one atomic generation with deferred local-value capture rather
+than running `check`. Package and inert comment forms are omitted, as is native
+`main`: Odin treats a DLL-level `main` as a load-time entrypoint, so application
+entrypoint replacement stays an Olive/restart boundary. Emacs owns process
+lifecycle, package routing, result overlays, compilation-mode diagnostic
+navigation, and reset/stop commands.
+
+Notebook-style REPL contexts may also contain bare top-level expressions. The
+native REPL loads the file's declarations and leaves those expressions inert
+until a client submits them explicitly. Set the buffer-local Emacs option
+`kvist-eval-buffer-declarations-only` when `eval-buffer` should likewise load
+imports and definitions while leaving bare forms for one-at-a-time evaluation.
 
 The Emacs implementation must not require an Emacs-only CLI command or event.
 Protocol fixtures are tested independently of Emacs, and Emacs tests consume

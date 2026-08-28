@@ -36,6 +36,31 @@ reject_defer_owned_let_branch_case_return :: proc(t: ^testing.T) {
 }
 
 @(test)
+compile_defer_with_resource_passed_to_owned_data_result :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn close-handle [_handle: rawptr]
+  (discard _handle))
+
+(defn load-data [_handle: rawptr] -> Data
+  [:status :ready])
+
+(defn demo [] -> Data
+  (let [handle (rawptr nil) :defer-with close-handle]
+    (load-data handle)))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        defer delete(err.message)
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+    testing.expect_value(t, strings.contains(output, "defer close_handle(handle)"), true)
+}
+
+@(test)
 compile_defer_forms :: proc(t: ^testing.T) {
     source := `(package main)
 (import fmt "core:fmt")
