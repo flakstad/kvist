@@ -653,6 +653,17 @@ temporary_generated_path_in_source_dir :: proc(source_path: string) -> (path, pa
     return "", "", false
 }
 
+execution_temp_parent :: proc(source_path: string, require_source_volume: bool) -> string {
+    if !require_source_volume {
+        return ""
+    }
+    source_dir, _ := os.split_path(source_path)
+    if source_dir == "" {
+        return "."
+    }
+    return source_dir
+}
+
 replace_generated_package_placeholders :: proc(
     output: string,
     dependencies: []string,
@@ -811,7 +822,15 @@ write_generated_for_execution :: proc(
         return generated, artifact_root, package_build_dir, true
     }
 
-    dir, dir_err := os.make_directory_temp("", "kvist-*", context.allocator)
+    require_source_volume := false
+    when ODIN_OS == .Windows {
+        // Odin rejects absolute paths in import declarations.  Keep generated
+        // files on the source volume so imports can still be rebased when the
+        // system temp directory and the checkout use different drive letters.
+        require_source_volume = true
+    }
+    temp_parent := execution_temp_parent(source_path, require_source_volume)
+    dir, dir_err := os.make_directory_temp(temp_parent, "kvist-*", context.allocator)
     if dir_err != nil {
         fmt.eprintln("failed to create temporary directory")
         return "", "", "", false

@@ -6,6 +6,27 @@ import "core:testing"
 import kvist "../../odin/kvist"
 
 @(test)
+execution_temp_parent_can_follow_source_volume :: proc(t: ^testing.T) {
+    colocated := execution_temp_parent(
+        "D:/a/kvist/kvist/examples/language/hello.kvist",
+        true,
+    )
+    system_temp := execution_temp_parent(
+        "D:/a/kvist/kvist/examples/language/hello.kvist",
+        false,
+    )
+    relative := execution_temp_parent("hello.kvist", true)
+
+    testing.expect_value(
+        t,
+        colocated,
+        "D:/a/kvist/kvist/examples/language",
+    )
+    testing.expect_value(t, system_temp, "")
+    testing.expect_value(t, relative, ".")
+}
+
+@(test)
 repl_source_line_index_matches_compiler_positions :: proc(t: ^testing.T) {
     source := "alpha\nβeta\n\nlast"
     index := repl_source_line_index(source)
