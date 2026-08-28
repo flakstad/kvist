@@ -602,6 +602,50 @@ session-specific build directory. They may be cached by content while the
 session lives and are removed best-effort after worker exit. Compiler caches
 remain reusable across sessions.
 
+### Stable package code and generation-specific code
+
+Kvist source imports are flattened into one typed IR program so aliases,
+macros, generic specializations, nominal layouts, ownership analysis, and
+cross-package diagnostics have the same meaning in batch and REPL compilation.
+Historically the eval emitter serialized every declaration in that program for
+every native generation. The worker's once-only package state prevented
+initializer replay, and the context-expansion cache avoided repeated loading
+and macroexpansion, but neither changed the Odin source: a small expression in
+a session importing `kvist:data` still carried the complete transitive package
+and all scalar-invoke adapters into `odin build`.
+
+The resident session separates that flattened program into these practical
+classes:
+
+- Stable package and context procedure bodies remain callable in already
+  loaded generations through typed worker slots. Unchanged package aliases,
+  expanded macros, declaration identities, and dependency metadata stay in
+  the controller.
+- A new or redefined session declaration, its registration adapter, and the
+  declarations reachable from its body belong to the new generation. A
+  compatible redefinition updates its typed slot; ABI or layout changes retain
+  the versioned behavior described below.
+- The submitted expression, result storage, retention/transfer adapters, and
+  package state registrations it reaches are generation-specific. Recent
+  result getters are required only for the `*1`, `*2`, or `*3` symbols the
+  generated entry actually reaches.
+- Safe-point generation identifiers, generated file paths, and adjusted source
+  map lines are generation-specific. Original Kvist source paths and the full
+  transitive file/directory fingerprint remain stable diagnostic and cache
+  metadata even when a declaration is absent from the pruned Odin file.
+- Ownership annotations such as `Data:owned` remain ABI/lifecycle metadata.
+  Native declarations continue to use the ordinary Odin type `Data`; pruning
+  never turns an internal lifetime annotation into source type text.
+
+After ordinary emission and instrumentation, the controller walks generated
+Odin declarations from the exported generation entry, retaining referenced
+declarations, required directives/imports, lifecycle code, and source mappings.
+Inspection, full capture, pause-before, tracing, and native-debug builds keep
+their complete instrumented declaration set. This post-emission boundary is
+deliberately conservative: frontend type and ownership analysis still sees the
+complete package graph, while Odin no longer parses and compiles declarations
+that the new native entry cannot reach.
+
 ### Generic CLI protocol
 
 The CLI contains no editor-specific behavior. It provides:
@@ -702,6 +746,21 @@ not accumulate one compiler graph per edit.
 `native_cache_hit` without `frontend_cache_hit` means Kvist reran the frontend
 but found identical instrumented Odin and skipped the Odin build. Explicit
 pause-before submissions and native debug-symbol builds remain uncached.
+
+Capability `reachable-native-generations` means ordinary warm evaluations
+retain only the declarations reachable from the native generation entry point.
+The first successful generation still publishes the complete context and
+imported source-package procedures to the resident worker. Later generations
+reach retained definitions through their typed worker slots and include only
+the imported helpers, types, lifecycle adapters, and runtime state that their
+new batch actually uses. Unreferenced `*1`, `*2`, and `*3` adapters are pruned
+as well, so irrelevant result-history rotation does not change the native
+source fingerprint; an equivalent batch can therefore receive a native cache
+hit even when the broader frontend request key changes. The pruner rewrites
+source-map line positions and debugger-frame inventories while retaining the
+complete dependency fingerprint for cache invalidation. Inspection, trace,
+pause-before, native-debug, and full definition-capture generations keep the
+complete source needed by those features.
 
 Capability `deferred-debug-value-capture` means ordinary expression
 evaluations keep their native safe points and abort checks but omit generated

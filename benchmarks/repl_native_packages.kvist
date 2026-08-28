@@ -1,0 +1,7 @@
+;; Context for scripts/bench_repl_source_packages.sh.
+;; Imports are submitted through JSONL so the benchmark can compare the same
+;; resident session before and after loading source packages.
+(package repl-native-packages)
+
+(defn baseline-pair [left: int, right: int] -> [2]int
+  ([2]int [left right]))

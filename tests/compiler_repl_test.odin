@@ -7,6 +7,7 @@ import "base:runtime"
 import "core:dynlib"
 import fmt "core:fmt"
 import "core:os"
+import "core:strconv"
 import "core:strings"
 import "core:testing"
 import "core:thread"
@@ -107,6 +108,40 @@ console_cli_run :: proc(data: rawptr) {
         },
         client.allocator,
     )
+}
+
+repl_jsonl_event_line :: proc(output, id, kind: string) -> (string, bool) {
+    needle := fmt.tprintf(`"id":"%s","kind":"%s"`, id, kind)
+    offset := strings.index(output, needle)
+    if offset < 0 {
+        return "", false
+    }
+    start := offset
+    for start > 0 && output[start-1] != '\n' {
+        start -= 1
+    }
+    line := output[start:]
+    if end := strings.index(line, "\n"); end >= 0 {
+        line = line[:end]
+    }
+    return line, true
+}
+
+repl_jsonl_int_field :: proc(line, field: string) -> (int, bool) {
+    needle := fmt.tprintf(`"%s":`, field)
+    offset := strings.index(line, needle)
+    if offset < 0 {
+        return 0, false
+    }
+    start := offset+len(needle)
+    end := start
+    for end < len(line) && line[end] >= '0' && line[end] <= '9' {
+        end += 1
+    }
+    if end == start {
+        return 0, false
+    }
+    return strconv.parse_int(line[start:end])
 }
 
 console_test_handler :: proc(
@@ -3111,6 +3146,135 @@ cli_repl_caches_identical_frontend_generations :: proc(t: ^testing.T) {
         strings.contains(output, `"phase":"odin-build","elapsed_ns":0`),
         true,
     )
+    testing.expect_value(t, string(stderr), "")
+}
+
+@(test)
+cli_repl_prunes_loaded_source_packages_from_later_generations :: proc(
+    t: ^testing.T,
+) {
+    dir, dir_err := os.make_directory_temp(
+        "",
+        "kvist-repl-source-package-pruning-*",
+        context.allocator,
+    )
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    context_path, _ := os.join_path({dir, "context.kvist"}, context.allocator)
+    defer delete(context_path)
+    context_source := `(package repl_source_package_pruning)`
+    testing.expect_value(
+        t,
+        os.write_entire_file_from_string(context_path, context_source) == nil,
+        true,
+    )
+
+    requests_path, _ := os.join_path({dir, "requests.jsonl"}, context.allocator)
+    defer delete(requests_path)
+    requests := `{"id":"load-data","op":"eval","source":"(import data \"kvist:data\")\n(defn profile-card [name: string, role: string] -> Data\n  [:article {:class \"profile\"}\n   [:h2 name]\n   [:p role]])","source_path":"/virtual/source-package-pruning.kvist","line":3,"column":1,"no_print":true,"defer_debug_values":true}
+{"id":"composite-1","op":"eval","source":"(get (profile-card \"Ada Lovelace\" \"Mathematician\") 0)"}
+{"id":"rotate-history","op":"eval","source":"42"}
+{"id":"read-retained-data","op":"eval","source":"(data.keyword *2)"}
+{"id":"composite-2","op":"eval","source":"(get (profile-card \"Ada Lovelace\" \"Mathematician\") 0)"}
+{"id":"close","op":"close"}
+`
+    testing.expect_value(
+        t,
+        os.write_entire_file_from_string(requests_path, requests) == nil,
+        true,
+    )
+    request_file, open_err := os.open(requests_path)
+    testing.expect_value(t, open_err == nil, true)
+    if open_err != nil {
+        return
+    }
+    defer os.close(request_file)
+
+    repo_root := compiler_test_repo_root()
+    kvist_bin, bin_ok := build_test_kvist_binary(t, repo_root, dir)
+    if !bin_ok {
+        return
+    }
+    defer delete(kvist_bin)
+    state, stdout, stderr, exec_err := os.process_exec(
+        os.Process_Desc{
+            command = {kvist_bin, "repl", context_path, "--protocol", "jsonl"},
+            working_dir = repo_root,
+            stdin = request_file,
+        },
+        context.allocator,
+    )
+    defer delete(stdout)
+    defer delete(stderr)
+    testing.expect_value(t, exec_err == nil, true)
+    testing.expect_value(t, state.exited, true)
+    testing.expect_value(t, state.exit_code, 0)
+    output := string(stdout)
+    testing.expect_value(
+        t,
+        strings.contains(output, `"reachable-native-generations"`),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            output,
+            `"id":"composite-1","kind":"output","success":true,"generation":2,"stream":"stdout","text":":article\n"`,
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            output,
+            `"id":"read-retained-data","kind":"output","success":true,"generation":4,"stream":"stdout","text":":article\n"`,
+        ),
+        true,
+    )
+    load_timing, load_found :=
+        repl_jsonl_event_line(output, "load-data", "timings")
+    composite_timing, composite_found :=
+        repl_jsonl_event_line(output, "composite-1", "timings")
+    repeated_timing, repeated_found :=
+        repl_jsonl_event_line(output, "composite-2", "timings")
+    testing.expect_value(t, load_found, true)
+    testing.expect_value(t, composite_found, true)
+    testing.expect_value(t, repeated_found, true)
+    if load_found && composite_found && repeated_found {
+        load_bytes, load_bytes_found :=
+            repl_jsonl_int_field(load_timing, "generated_bytes")
+        composite_bytes, composite_bytes_found :=
+            repl_jsonl_int_field(composite_timing, "generated_bytes")
+        repeated_bytes, repeated_bytes_found :=
+            repl_jsonl_int_field(repeated_timing, "generated_bytes")
+        testing.expect_value(t, load_bytes_found, true)
+        testing.expect_value(t, composite_bytes_found, true)
+        testing.expect_value(t, repeated_bytes_found, true)
+        testing.expect_value(
+            t,
+            composite_bytes > 0 && composite_bytes*4 < load_bytes,
+            true,
+        )
+        testing.expect_value(t, repeated_bytes, composite_bytes)
+        testing.expect_value(
+            t,
+            strings.contains(
+                repeated_timing,
+                `"phase":"odin-build","elapsed_ns":0`,
+            ),
+            true,
+        )
+        testing.expect_value(
+            t,
+            strings.contains(repeated_timing, `"native_cache_hit":true`),
+            true,
+        )
+    }
     testing.expect_value(t, string(stderr), "")
 }
 

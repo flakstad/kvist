@@ -62,7 +62,7 @@ REPL_RESTART_USE_VALUE :: u32(1 << 1)
 REPL_RESTART_RETRY :: u32(1 << 2)
 REPL_RESTART_SKIP :: u32(1 << 3)
 REPL_RESTART_ABORT_OPERATION :: u32(1 << 4)
-REPL_DEBUG_CAPABILITIES: [67]string = {
+REPL_DEBUG_CAPABILITIES: [68]string = {
     "compiled-abort-operation-restarts",
     "compiled-retry-skip-restarts",
     "native-attach",
@@ -75,6 +75,7 @@ REPL_DEBUG_CAPABILITIES: [67]string = {
     "frontend-generation-cache",
     "context-expansion-cache",
     "thin-scalar-generations",
+    "reachable-native-generations",
     "resident-direct-int-calls",
     "resident-direct-scalar-calls",
     "deferred-debug-value-capture",
@@ -8210,6 +8211,14 @@ repl_compile_generation :: proc(
     defer delete(result.output)
     defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
+    dependency_source_map: [dynamic]kvist.Source_Map_Entry
+    for entry in result.source_map {
+        append(
+            &dependency_source_map,
+            kvist.clone_source_map_entry(entry),
+        )
+    }
+    defer kvist.source_map_slice_delete(dependency_source_map)
     if warning_text != nil {
         warning_text^ =
             format_compile_warnings(
@@ -8300,7 +8309,7 @@ repl_compile_generation :: proc(
                 result.output,
                 warning_text^ if warning_text != nil else "",
                 diagnostics^[:] if diagnostics != nil else nil,
-                result.source_map[:],
+                dependency_source_map[:],
                 0,
             )
             delete(direct_result_abi)
@@ -8344,8 +8353,8 @@ repl_compile_generation :: proc(
     result_abi := kvist.repl_registered_result_abi(result.output)
     defer delete(result_abi)
     if session != nil && len(session.generations) > 0 &&
-       pause_id == "" && !native_debug_symbols &&
-       !capture_debug_values && repl_thin_scalar_abi(result_abi) {
+       !inspect_only && pause_id == "" && !native_debug_symbols &&
+       !capture_debug_values {
         thin_source = repl_thin_generation_source(
             generation_source,
             &result.source_map,
@@ -8472,7 +8481,7 @@ repl_compile_generation :: proc(
             result.output,
             cached_warning,
             cached_diagnostics,
-            result.source_map[:],
+            dependency_source_map[:],
             len(rebased),
         )
         return output_path,
@@ -8598,7 +8607,7 @@ repl_compile_generation :: proc(
             result.output,
             cached_warning,
             cached_diagnostics,
-            result.source_map[:],
+            dependency_source_map[:],
             len(rebased),
         )
     }
