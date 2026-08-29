@@ -55,3 +55,18 @@ jobs:
           printf '(+ 1 1)\n:quit\n' |
             ./kvist repl examples/language/hello.kvist |
             grep -q 'kvist=> 2'
+
+      - name: Smoke test installer
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          install_root=$(mktemp -d)
+          trap 'rm -rf "$install_root"' EXIT
+          ./scripts/install.sh "$install_root"
+          test -d "$install_root/condition"
+          test -d "$install_root/debug"
+          test -d "$install_root/odin/kvist_condition"
+          test -d "$install_root/odin/kvist_repl"
+          test "$("$install_root/bin/kvist" root)" = "$install_root"
+          "$install_root/bin/kvist" check examples/language/conditions.kvist
+          "$install_root/bin/kvist" check examples/reload/reload_step_demo/main.kvist
