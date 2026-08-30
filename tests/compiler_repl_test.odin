@@ -2850,6 +2850,8 @@ cli_repl_evaluates_imported_package_source_in_application_session :: proc(
     state_source := `(package state)
 (defvar calls: int 0)
 (def base: int 10)
+(defn side []
+  (println "state-side"))
 (defn next
   "Advance the imported state counter."
   [] -> int
@@ -2874,12 +2876,14 @@ cli_repl_evaluates_imported_package_source_in_application_session :: proc(
     requests := fmt.aprintf(
         `{{"id":"before","op":"eval","source":"(next!)"}}
 {{"id":"replace","op":"eval","source":"(def base: int 20)","source_path":%q}}
+{{"id":"inside-buffer","op":"eval","source":"(if true (side) (side))\n(+ base 1)\n(+ base 2)","source_path":%q}}
 {{"id":"inside","op":"eval","source":"base","source_path":%q}}
 {{"id":"after","op":"eval","source":"(next!)"}}
 {{"id":"docs","op":"documentation","name":"next","source_path":%q}}
 {{"id":"bindings","op":"bindings"}}
 {{"id":"close","op":"close"}}
 `,
+        state_path,
         state_path,
         state_path,
         state_path,
@@ -2928,6 +2932,20 @@ cli_repl_evaluates_imported_package_source_in_application_session :: proc(
         strings.contains(output, `"id":"replace","kind":"complete","success":true`),
         true,
     )
+    inside_buffer, found_inside_buffer :=
+        repl_jsonl_event_line(output, "inside-buffer", "output")
+    testing.expect_value(t, found_inside_buffer, true)
+    testing.expect_value(
+        t,
+        strings.contains(inside_buffer, `"text":"22\n"`),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(output, `"id":"inside-buffer","kind":"stream-output","success":true`),
+        true,
+    )
+    testing.expect_value(t, strings.contains(output, `"text":"state-side\n"`), true)
     testing.expect_value(
         t,
         strings.contains(output, `"id":"inside","kind":"output","success":true`),

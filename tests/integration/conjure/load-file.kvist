@@ -1,0 +1,12 @@
+(package conjure-nrepl-test)
+
+(def conjure-loaded: int 41)
+
+(defn conjure-branch-output []
+  (println "conjure-branch-output"))
+
+(+ conjure-loaded 2)
+
+(if true (conjure-branch-output) (conjure-branch-output))
+
+(+ conjure-loaded 2)

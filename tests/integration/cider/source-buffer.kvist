@@ -1,0 +1,26 @@
+(package main)
+
+(def cider-source-value: int 40)
+
+(+ cider-source-value 2)
+
+(defstruct CiderGreeting {
+  message: string
+})
+
+(defn cider-greeting-length [message: string] -> int
+  (count message))
+
+(defn cider-branch-output []
+  (println "cider-branch-output"))
+
+(cider-greeting-length "hei")
+
+(if true (cider-branch-output) (cider-branch-output))
+
+(println "cider-load-output")
+
+(+ cider-source-value 4)
+
+(comment
+  (+ cider-source-value 1))

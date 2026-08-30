@@ -8,7 +8,12 @@ import "core:os"
 import "core:strings"
 import "core:time"
 
-emit_body_forms :: proc(e: ^Emitter, body: []CST_Form, returns: Return_Spec) -> (Compile_Error, bool) {
+emit_body_forms :: proc(
+    e: ^Emitter,
+    body: []CST_Form,
+    returns: Return_Spec,
+    discard_result := false,
+) -> (Compile_Error, bool) {
     for form, idx in body {
         last := idx == len(body)-1
         start_line := e.line
@@ -24,7 +29,13 @@ emit_body_forms :: proc(e: ^Emitter, body: []CST_Form, returns: Return_Spec) -> 
         if e.repl_debug_enabled && !explicit_debug_pause {
             debug_emit_pause(e, form, false)
         }
-        err_stmt, ok_stmt := emit_stmt(e, form, last, returns)
+        err_stmt, ok_stmt := emit_stmt(
+            e,
+            form,
+            last,
+            returns,
+            discard_result && last,
+        )
         if !ok_stmt {
             return err_stmt, false
         }
@@ -47,6 +58,29 @@ is_local_decl_head :: proc(head: string) -> bool {
     case:
         return false
     }
+}
+
+form_is_known_void_call :: proc(e: ^Emitter, form: CST_Form) -> bool {
+    if form.kind != .List || len(form.items) == 0 ||
+       form.items[0].kind != .Symbol {
+        return false
+    }
+    _, proc_decl, resolved :=
+        resolve_proc_call_decl(e, form.items[0].text)
+    return resolved && proc_decl != nil && proc_decl.returns.kind == .None
+}
+
+emit_statement_expr :: proc(
+    e: ^Emitter,
+    form: CST_Form,
+    expr: string,
+    discard_result: bool,
+) {
+    if discard_result && !form_is_known_void_call(e, form) {
+        emit_discarded_expr(e, form, expr)
+        return
+    }
+    emit_prefixed_expr_mapped(e, "", expr, form.span)
 }
 
 emit_local_var_stmt :: proc(e: ^Emitter, form: CST_Form) -> (Compile_Error, bool) {
@@ -134,11 +168,22 @@ emit_local_decl_stmt :: proc(e: ^Emitter, form: CST_Form) -> (Compile_Error, boo
     return {}, true
 }
 
-emit_if_branch_stmt :: proc(e: ^Emitter, branch: CST_Form, last_in_proc: bool, returns: Return_Spec) -> (Compile_Error, bool) {
+emit_if_branch_stmt :: proc(
+    e: ^Emitter,
+    branch: CST_Form,
+    last_in_proc: bool,
+    returns: Return_Spec,
+    discard_result := false,
+) -> (Compile_Error, bool) {
     if branch.kind == .List && len(branch.items) > 0 && branch.items[0].kind == .Symbol && branch.items[0].text == "do" {
-        return emit_body_forms(e, branch.items[1:], returns)
+        return emit_body_forms(
+            e,
+            branch.items[1:],
+            returns,
+            discard_result,
+        )
     }
-    return emit_stmt(e, branch, last_in_proc, returns)
+    return emit_stmt(e, branch, last_in_proc, returns, discard_result)
 }
 
 // An else-if test must not emit setup statements before the `else` token.
@@ -167,7 +212,15 @@ form_is_inline_if_test :: proc(form: CST_Form) -> bool {
     return false
 }
 
-emit_if_like_with_prefix :: proc(e: ^Emitter, head: string, form: CST_Form, last_in_proc: bool, returns: Return_Spec, prefix: string = "") -> (Compile_Error, bool) {
+emit_if_like_with_prefix :: proc(
+    e: ^Emitter,
+    head: string,
+    form: CST_Form,
+    last_in_proc: bool,
+    returns: Return_Spec,
+    prefix := "",
+    discard_result := false,
+) -> (Compile_Error, bool) {
     if len(form.items) < 3 || len(form.items) > 4 {
         return Compile_Error{message = fmt.tprintf("%s expects test, then, and optional else", head), span = form.span}, false
     }
@@ -185,7 +238,13 @@ emit_if_like_with_prefix :: proc(e: ^Emitter, head: string, form: CST_Form, last
     e.indent += 1
     branch_returns := returns_when_final(last_in_proc, returns)
     push_local_type_scope(e)
-    err_then, ok_then := emit_if_branch_stmt(e, form.items[2], last_in_proc, branch_returns)
+    err_then, ok_then := emit_if_branch_stmt(
+        e,
+        form.items[2],
+        last_in_proc,
+        branch_returns,
+        discard_result,
+    )
     pop_local_type_scope(e)
     if !ok_then {
         return err_then, false
@@ -204,14 +263,28 @@ emit_if_like_with_prefix :: proc(e: ^Emitter, head: string, form: CST_Form, last
         if else_branch.kind == .List && len(else_branch.items) > 2 &&
            else_branch.items[0].kind == .Symbol && else_branch.items[0].text == "if" &&
            form_is_inline_if_test(else_branch.items[1]) {
-            return emit_if_like_with_prefix(e, "if", else_branch, last_in_proc, returns, "else ")
+            return emit_if_like_with_prefix(
+                e,
+                "if",
+                else_branch,
+                last_in_proc,
+                returns,
+                "else ",
+                discard_result,
+            )
         }
         emit_indent(e)
         strings.write_string(&e.builder, "else {")
         emit_raw_newline(e)
         e.indent += 1
         push_local_type_scope(e)
-        err_else, ok_else := emit_if_branch_stmt(e, else_branch, last_in_proc, branch_returns)
+        err_else, ok_else := emit_if_branch_stmt(
+            e,
+            else_branch,
+            last_in_proc,
+            branch_returns,
+            discard_result,
+        )
         pop_local_type_scope(e)
         if !ok_else {
             return err_else, false
@@ -222,15 +295,35 @@ emit_if_like_with_prefix :: proc(e: ^Emitter, head: string, form: CST_Form, last
     return {}, true
 }
 
-emit_if_like :: proc(e: ^Emitter, head: string, form: CST_Form, last_in_proc: bool, returns: Return_Spec) -> (Compile_Error, bool) {
-    return emit_if_like_with_prefix(e, head, form, last_in_proc, returns)
+emit_if_like :: proc(
+    e: ^Emitter,
+    head: string,
+    form: CST_Form,
+    last_in_proc: bool,
+    returns: Return_Spec,
+    discard_result := false,
+) -> (Compile_Error, bool) {
+    return emit_if_like_with_prefix(
+        e,
+        head,
+        form,
+        last_in_proc,
+        returns,
+        discard_result = discard_result,
+    )
 }
 
 is_else_keyword :: proc(form: CST_Form) -> bool {
     return form.kind == .Keyword && form.text == ":else"
 }
 
-emit_with_allocator_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Return_Spec) -> (Compile_Error, bool) {
+emit_with_allocator_stmt :: proc(
+    e: ^Emitter,
+    form: CST_Form,
+    last_in_proc: bool,
+    returns: Return_Spec,
+    discard_result := false,
+) -> (Compile_Error, bool) {
     if len(form.items) < 3 {
         return Compile_Error{message = "with-allocator expects binding vector and body", span = form.span}, false
     }
@@ -258,7 +351,12 @@ emit_with_allocator_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool
     for item in form.items[2:] {
         append(&body, item)
     }
-    err_body, ok_body := emit_body_forms(e, body[:], returns_when_final(last_in_proc, returns))
+    err_body, ok_body := emit_body_forms(
+        e,
+        body[:],
+        returns_when_final(last_in_proc, returns),
+        discard_result,
+    )
     pop_local_type_scope(e)
     if !ok_body {
         return err_body, false
@@ -269,7 +367,13 @@ emit_with_allocator_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool
     return {}, true
 }
 
-emit_with_temp_allocator_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Return_Spec) -> (Compile_Error, bool) {
+emit_with_temp_allocator_stmt :: proc(
+    e: ^Emitter,
+    form: CST_Form,
+    last_in_proc: bool,
+    returns: Return_Spec,
+    discard_result := false,
+) -> (Compile_Error, bool) {
     if len(form.items) < 3 {
         return Compile_Error{message = "with-temp-allocator expects binding vector and body", span = form.span}, false
     }
@@ -302,7 +406,12 @@ emit_with_temp_allocator_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc:
     if bad_escape {
         return err_escape, false
     }
-    err_body, ok_body := emit_body_forms(e, body[:], returns_when_final(last_in_proc, returns))
+    err_body, ok_body := emit_body_forms(
+        e,
+        body[:],
+        returns_when_final(last_in_proc, returns),
+        discard_result,
+    )
     pop_local_type_scope(e)
     if !ok_body {
         return err_body, false
@@ -326,7 +435,13 @@ case_type_payload_pattern :: proc(clause: CST_Form) -> (ty, binding: string, ign
     return ty, binding, ignored, {}, true
 }
 
-emit_case_type_payload_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Return_Spec) -> (Compile_Error, bool) {
+emit_case_type_payload_stmt :: proc(
+    e: ^Emitter,
+    form: CST_Form,
+    last_in_proc: bool,
+    returns: Return_Spec,
+    discard_result := false,
+) -> (Compile_Error, bool) {
     if len(form.items) < 5 {
         return Compile_Error{message = "case expects subject, clause/body pairs, and default", span = form.span}, false
     }
@@ -369,7 +484,13 @@ emit_case_type_payload_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: b
             emit_line(e, fmt.tprintf("%s := %s", binding, temp))
             bind_local_type(e, binding, ty)
         }
-        err_body, ok_body := emit_stmt(e, body, last_in_proc, branch_returns)
+        err_body, ok_body := emit_stmt(
+            e,
+            body,
+            last_in_proc,
+            branch_returns,
+            discard_result,
+        )
         pop_local_type_scope(e)
         if !ok_body {
             return err_body, false
@@ -382,7 +503,13 @@ emit_case_type_payload_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: b
     default_form := form.items[len(form.items)-1]
     emit_line_mapped(e, "case:", default_form.span)
     e.indent += 1
-    err_default, ok_default := emit_stmt(e, default_form, last_in_proc, branch_returns)
+    err_default, ok_default := emit_stmt(
+        e,
+        default_form,
+        last_in_proc,
+        branch_returns,
+        discard_result,
+    )
     if !ok_default {
         return err_default, false
     }
@@ -392,7 +519,13 @@ emit_case_type_payload_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: b
     return {}, true
 }
 
-emit_case_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Return_Spec) -> (Compile_Error, bool) {
+emit_case_stmt :: proc(
+    e: ^Emitter,
+    form: CST_Form,
+    last_in_proc: bool,
+    returns: Return_Spec,
+    discard_result := false,
+) -> (Compile_Error, bool) {
     if len(form.items) >= 4 {
         i := 2
         for i < len(form.items)-1 {
@@ -402,10 +535,22 @@ emit_case_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns:
             i += 2
         }
     }
-    return emit_case_type_payload_stmt(e, form, last_in_proc, returns)
+    return emit_case_type_payload_stmt(
+        e,
+        form,
+        last_in_proc,
+        returns,
+        discard_result,
+    )
 }
 
-emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Return_Spec) -> (Compile_Error, bool) {
+emit_stmt :: proc(
+    e: ^Emitter,
+    form: CST_Form,
+    last_in_proc: bool,
+    returns: Return_Spec,
+    discard_result := false,
+) -> (Compile_Error, bool) {
     if form.kind != .List {
         expr: string
         err_expr: Compile_Error
@@ -421,7 +566,9 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
         if last_in_proc && returns.kind != .None {
             expr = managed_return_value_text(e, form, expr, returns)
             emit_prefixed_expr_mapped(e, "return ", expr, form.span)
-        } else if form_is_owned_allocation_result(form) || form_is_owned_constructor_result(form) {
+        } else if form_is_owned_allocation_result(form) ||
+                  form_is_owned_constructor_result(form) ||
+                  discard_result {
             emit_discarded_expr(e, form, expr)
         } else {
             emit_prefixed_expr_mapped(e, "", expr, form.span)
@@ -449,7 +596,9 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
         if last_in_proc && returns.kind != .None {
             expr = managed_return_value_text(e, form, expr, returns)
             emit_prefixed_expr_mapped(e, "return ", expr, form.span)
-        } else if form_is_owned_allocation_result(form) || form_is_owned_constructor_result(form) {
+        } else if form_is_owned_allocation_result(form) ||
+                  form_is_owned_constructor_result(form) ||
+                  discard_result {
             emit_discarded_expr(e, form, expr)
         } else {
             emit_prefixed_expr_mapped(e, "", expr, form.span)
@@ -469,11 +618,33 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
         return emit_local_decl_stmt(e, form)
     }
 
+    if head.text == REPL_IGNORE_RESULT_HEAD {
+        if len(form.items) != 2 {
+            return Compile_Error{
+                message = "internal REPL result discard expects one form",
+                span = form.span,
+            }, false
+        }
+        return emit_eval_intermediate_stmt(e, form.items[1])
+    }
+
     switch builtin_macro_kind(head.text) {
     case .With_Allocator:
-        return emit_with_allocator_stmt(e, form, last_in_proc, returns)
+        return emit_with_allocator_stmt(
+            e,
+            form,
+            last_in_proc,
+            returns,
+            discard_result,
+        )
     case .With_Temp_Allocator:
-        return emit_with_temp_allocator_stmt(e, form, last_in_proc, returns)
+        return emit_with_temp_allocator_stmt(
+            e,
+            form,
+            last_in_proc,
+            returns,
+            discard_result,
+        )
     case .None:
     }
 
@@ -633,7 +804,12 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
                 bind_managed_local_owner(e, binding.name, owner_flag)
             }
         }
-        err_body, ok_body := emit_body_forms(e, body[:], returns_when_final(last_in_proc, returns))
+        err_body, ok_body := emit_body_forms(
+            e,
+            body[:],
+            returns_when_final(last_in_proc, returns),
+            discard_result,
+        )
         if !ok_body {
             return err_body, false
         }
@@ -650,7 +826,12 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
         for item in form.items[1:] {
             append(&body, item)
         }
-        err_body, ok_body := emit_body_forms(e, body[:], returns_when_final(last_in_proc, returns))
+        err_body, ok_body := emit_body_forms(
+            e,
+            body[:],
+            returns_when_final(last_in_proc, returns),
+            discard_result,
+        )
         pop_local_type_scope(e)
         if !ok_body {
             return err_body, false
@@ -659,11 +840,30 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
         emit_line(e, "}")
         return {}, true
     case "if":
-        return emit_if_like(e, "if", form, last_in_proc, returns)
+        return emit_if_like(
+            e,
+            "if",
+            form,
+            last_in_proc,
+            returns,
+            discard_result,
+        )
     case "type-case":
-        return emit_case_stmt(e, form, last_in_proc, returns)
+        return emit_case_stmt(
+            e,
+            form,
+            last_in_proc,
+            returns,
+            discard_result,
+        )
     case "match":
-        return emit_match_stmt(e, form, last_in_proc, returns)
+        return emit_match_stmt(
+            e,
+            form,
+            last_in_proc,
+            returns,
+            discard_result,
+        )
     case "switch":
         return Compile_Error{message = "`switch` has been removed; use `case` for subject dispatch or `cond` for predicate branches", span = head.span}, false
     case "return":
@@ -1563,7 +1763,7 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
         } else if form_is_owned_allocation_result(form) || form_is_owned_constructor_result(form) {
             emit_discarded_expr(e, form, expr)
         } else {
-            emit_prefixed_expr_mapped(e, "", expr, form.span)
+            emit_statement_expr(e, form, expr, discard_result)
         }
         if canonical_head_text == "delete" {
             for item in form.items[1:] {
@@ -1579,6 +1779,19 @@ emit_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Retu
 }
 
 emit_eval_print_expr :: proc(e: ^Emitter, form: CST_Form) -> (Compile_Error, bool) {
+    if form_is_known_void_call(e, form) {
+        err_stmt, ok_stmt := emit_stmt(
+            e,
+            form,
+            false,
+            Return_Spec{kind = .None},
+        )
+        if !ok_stmt {
+            return err_stmt, false
+        }
+        emit_line_mapped(e, `fmt.println("nil")`, form.span)
+        return {}, true
+    }
     if form_is_owned_result(form, e) || form_is_owned_allocation_result(form) {
         value, err_value, ok_value := emit_expr(e, form)
         if !ok_value {
@@ -1597,6 +1810,23 @@ emit_eval_print_expr :: proc(e: ^Emitter, form: CST_Form) -> (Compile_Error, boo
     }
     emit_line_mapped(e, fmt.tprintf("fmt.println(%s)", value), form.span)
     return {}, true
+}
+
+emit_eval_intermediate_stmt :: proc(
+    e: ^Emitter,
+    form: CST_Form,
+) -> (Compile_Error, bool) {
+    // A REPL batch evaluates every top-level runtime form but returns only the
+    // final value.  Odin requires value-producing calls and expressions to be
+    // handled explicitly, so discard intermediate values while leaving true
+    // statement forms (including procedures with no return value) unchanged.
+    return emit_stmt(
+        e,
+        form,
+        false,
+        Return_Spec{kind = .None},
+        true,
+    )
 }
 
 emit_eval_print_body :: proc(e: ^Emitter, body: []CST_Form) -> (Compile_Error, bool) {

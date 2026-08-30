@@ -864,7 +864,13 @@ validate_match_form :: proc(e: ^Emitter, form: CST_Form) -> (Compile_Error, bool
     return {}, true
 }
 
-emit_match_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns: Return_Spec) -> (Compile_Error, bool) {
+emit_match_stmt :: proc(
+    e: ^Emitter,
+    form: CST_Form,
+    last_in_proc: bool,
+    returns: Return_Spec,
+    discard_result := false,
+) -> (Compile_Error, bool) {
     err_form, ok_form := validate_match_form(e, form)
     if !ok_form {
         return err_form, false
@@ -928,7 +934,13 @@ emit_match_stmt :: proc(e: ^Emitter, form: CST_Form, last_in_proc: bool, returns
             pop_local_type_scope(e)
             return err_captures, false
         }
-        err_result, ok_result := emit_if_branch_stmt(e, result, last_in_proc, returns_when_final(last_in_proc, returns))
+        err_result, ok_result := emit_if_branch_stmt(
+            e,
+            result,
+            last_in_proc,
+            returns_when_final(last_in_proc, returns),
+            discard_result,
+        )
         pop_local_type_scope(e)
         if !ok_result {
             pop_local_type_scope(e)

@@ -1,0 +1,67 @@
+name: Editor nREPL
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  calva:
+    name: Calva Extension Host
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: laytan/setup-odin@v2.12.2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Run Calva in a real VS Code Extension Host
+        run: ./scripts/test_calva_nrepl.sh
+
+  cider:
+    name: CIDER
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: laytan/setup-odin@v2.12.2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Emacs
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes emacs-nox
+
+      - name: Run CIDER integration test
+        run: ./scripts/test_cider_nrepl.sh
+
+  conjure:
+    name: Conjure
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: laytan/setup-odin@v2.12.2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: rhysd/action-setup-vim@v1
+        with:
+          neovim: true
+          version: v0.11.2
+
+      - name: Run Conjure integration test
+        run: ./scripts/test_conjure_nrepl.sh

@@ -3,7 +3,12 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .kvist-cache/
+.nrepl-port
+.calva/repl.calva-repl
+.clj-kondo/.cache/
+.lsp/.cache/
 /.tooling/
+/tests.bin
 *.odin.tmp
 .worktrees/
 /kvist

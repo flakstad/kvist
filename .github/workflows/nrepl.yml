@@ -1,0 +1,32 @@
+name: nREPL
+
+on:
+  workflow_dispatch:
+
+jobs:
+  adapter:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: laytan/setup-odin@v2.12.2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Test nREPL codec and adapter helpers
+        run: odin test src/cli/kvist -define:ODIN_TEST_LOG_LEVEL=warning -define:ODIN_TEST_THREADS=1
+
+      - name: Test nREPL adapter
+        run: python scripts/test_nrepl.py

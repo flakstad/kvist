@@ -79,6 +79,28 @@ The [Emacs client](../emacs/README.md) provides source-buffer evaluation,
 completion, documentation, retained value inspection, source-level stepping,
 execution traces, conditions and restarts, and project-scoped REPL sessions.
 
+### Experimental nREPL Adapter
+
+Kvist can expose the native REPL through nREPL for clients such as Calva,
+CIDER, and Conjure:
+
+```sh
+./kvist nrepl examples/language/hello.kvist
+```
+
+The argument must be a relevant application entry file or development context
+that imports the code being edited. It anchors the package graph, imports,
+source mapping, and tooling index; loading a real file outside that graph is
+rejected. Do not start the server with an unrelated placeholder file.
+
+This is a compatibility layer over the JSONL protocol, not a Clojure runtime.
+It supports evaluation, file loading, completion, lookup, and real interrupt.
+Interrupt replaces the native worker and therefore clears retained REPL state.
+
+See the [nREPL editor guide](NREPL.md) for the supported protocol surface,
+Calva, CIDER, and Conjure setup, current limitations, the language-mode
+direction, and reproducible integration tests.
+
 ## Attach to a Running Application
 
 An Olive application can expose an application-private local endpoint:

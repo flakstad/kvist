@@ -74,3 +74,12 @@ jobs:
           ./kvist${{ matrix.exe_suffix }} doc examples/collections/log-source.kvist log-lines >/dev/null
           ./kvist${{ matrix.exe_suffix }} lookup examples/collections/log-source.kvist log-lines >/dev/null
           ./kvist${{ matrix.exe_suffix }} complete examples/collections/log-source.kvist log >/dev/null
+
+      - name: Test nREPL adapter
+        shell: bash
+        run: |
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            python scripts/test_nrepl.py
+          else
+            ./scripts/test_nrepl.sh
+          fi

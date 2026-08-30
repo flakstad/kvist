@@ -6,6 +6,127 @@ import "core:testing"
 import kvist "../../odin/kvist"
 
 @(test)
+nrepl_bencode_decodes_requests_and_waits_for_complete_frames :: proc(
+    t: ^testing.T,
+) {
+    encoded :=
+        "d4:code7:(+ 1 2)7:contexti0e2:id5:req-14:linei12e2:ns5:kvist" +
+        "2:op4:eval7:optionsd5:print4:truee7:session3:s-16:symbol3:prie"
+    partial, partial_consumed, partial_status :=
+        nrepl_bencode_decode_request(transmute([]byte)encoded[:len(encoded)-1])
+    defer nrepl_request_delete(&partial)
+    testing.expect_value(t, partial_status, Nrepl_Decode_Status.Incomplete)
+    testing.expect_value(t, partial_consumed, 0)
+
+    request, consumed, status :=
+        nrepl_bencode_decode_request(transmute([]byte)encoded)
+    defer nrepl_request_delete(&request)
+    testing.expect_value(t, status, Nrepl_Decode_Status.Complete)
+    testing.expect_value(t, consumed, len(encoded))
+    testing.expect_value(t, request.op, "eval")
+    testing.expect_value(t, request.id, "req-1")
+    testing.expect_value(t, request.session, "s-1")
+    testing.expect_value(t, request.code, "(+ 1 2)")
+    testing.expect_value(t, request.completion_context, "")
+    testing.expect_value(t, request.symbol, "pri")
+    testing.expect_value(t, request.ns, "kvist")
+    testing.expect_value(t, request.has_line, true)
+    testing.expect_value(t, request.line, 12)
+
+    cider_encoded := "d7:contextle2:id5:req-24:linele2:op8:completee"
+    cider_request, cider_consumed, cider_status :=
+        nrepl_bencode_decode_request(transmute([]byte)cider_encoded)
+    defer nrepl_request_delete(&cider_request)
+    testing.expect_value(t, cider_status, Nrepl_Decode_Status.Complete)
+    testing.expect_value(t, cider_consumed, len(cider_encoded))
+    testing.expect_value(t, cider_request.completion_context, "")
+    testing.expect_value(t, cider_request.has_line, false)
+}
+
+@(test)
+nrepl_bencode_rejects_non_dictionary_and_malformed_values :: proc(
+    t: ^testing.T,
+) {
+    non_dictionary := "l4:evale"
+    request, _, status :=
+        nrepl_bencode_decode_request(transmute([]byte)non_dictionary)
+    defer nrepl_request_delete(&request)
+    testing.expect_value(t, status, Nrepl_Decode_Status.Invalid)
+
+    invalid_length := "d2:op04:evale"
+    malformed, _, malformed_status :=
+        nrepl_bencode_decode_request(transmute([]byte)invalid_length)
+    defer nrepl_request_delete(&malformed)
+    testing.expect_value(t, malformed_status, Nrepl_Decode_Status.Invalid)
+
+    invalid_integers := [?]string{
+        "d2:id1:x4:linei-0e2:op8:describee",
+        "d2:id1:x4:linei+1e2:op8:describee",
+    }
+    for invalid_integer in invalid_integers {
+        invalid_request, _, invalid_status :=
+            nrepl_bencode_decode_request(transmute([]byte)invalid_integer)
+        nrepl_request_delete(&invalid_request)
+        testing.expect_value(t, invalid_status, Nrepl_Decode_Status.Invalid)
+    }
+}
+
+@(test)
+nrepl_bencode_encodes_utf8_strings_and_lists :: proc(t: ^testing.T) {
+    builder := strings.builder_make()
+    defer strings.builder_destroy(&builder)
+    nrepl_bencode_write_string(&builder, "bl\u00e5")
+    nrepl_bencode_write_string_list(&builder, {"done", "ok"})
+    testing.expect_value(t, strings.to_string(builder), "4:bl\u00e5l4:done2:oke")
+}
+
+@(test)
+nrepl_file_uri_encodes_paths_for_editor_locations :: proc(t: ^testing.T) {
+    uri := nrepl_file_uri("/tmp/Kvist source/#demo.kvist")
+    defer delete(uri)
+    testing.expect_value(
+        t,
+        uri,
+        "file:///tmp/Kvist%20source/%23demo.kvist",
+    )
+}
+
+@(test)
+nrepl_load_file_preserves_positions_while_skipping_file_only_forms :: proc(
+    t: ^testing.T,
+) {
+    source := `(package demo)
+(comment
+  (+ 1 2))
+(def kept 4)
+(defn main [] -> int
+  kept)
+(+ kept 1)
+`
+    prepared, message, ok :=
+        nrepl_load_file_source(source, "demo.kvist")
+    defer delete(prepared)
+    defer delete(message)
+    testing.expect_value(t, ok, true)
+    testing.expect_value(t, len(prepared), len(source))
+    testing.expect_value(t, strings.contains(prepared, "package"), false)
+    testing.expect_value(t, strings.contains(prepared, "comment"), false)
+    testing.expect_value(t, strings.contains(prepared, "defn main"), false)
+    testing.expect_value(t, strings.contains(prepared, "(def kept 4)"), true)
+    testing.expect_value(t, strings.contains(prepared, "(+ kept 1)"), true)
+}
+
+@(test)
+nrepl_load_file_reports_reader_errors :: proc(t: ^testing.T) {
+    prepared, message, ok :=
+        nrepl_load_file_source("(def value 1", "broken.kvist")
+    defer delete(prepared)
+    defer delete(message)
+    testing.expect_value(t, ok, false)
+    testing.expect_value(t, strings.contains(message, "broken.kvist"), true)
+}
+
+@(test)
 execution_temp_parent_can_follow_source_volume :: proc(t: ^testing.T) {
     colocated := execution_temp_parent(
         "D:/a/kvist/kvist/examples/language/hello.kvist",

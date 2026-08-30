@@ -139,7 +139,8 @@ documentation, retained value inspection, source-level stepping, execution
 traces, conditions and restarts, and attachment to running applications.
 
 See the [native REPL guide](docs/REPL.md) and
-[Emacs guide](emacs/README.md).
+[Emacs guide](emacs/README.md). For Calva, CIDER, and Conjure, see the
+[nREPL editor guide](docs/NREPL.md).
 
 ## Odin Interoperability
 
@@ -200,6 +201,7 @@ scripts in `scripts/` require a POSIX-compatible shell.
 
 - [Language reference](docs/language.md)
 - [Native REPL and live development](docs/REPL.md)
+- [nREPL editor integration](docs/NREPL.md)
 - [Data](docs/data.md)
 - [Data-oriented programming](docs/DATA-ORIENTED-PROGRAMMING.md)
 - [Sequences](docs/sequences.md)

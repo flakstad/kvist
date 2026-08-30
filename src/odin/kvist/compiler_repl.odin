@@ -306,6 +306,39 @@ Repl_Batch :: struct {
     has_runtime: bool,
 }
 
+REPL_IGNORE_RESULT_HEAD :: "kvist-prim-ignore-repl-result"
+
+repl_ignore_result_form :: proc(form: CST_Form) -> CST_Form {
+    return make_list_form(
+        {
+            make_symbol_form(REPL_IGNORE_RESULT_HEAD, form.span),
+            form,
+        },
+        form.span,
+    )
+}
+
+repl_ignore_result_inner :: proc(form: CST_Form) -> (CST_Form, bool) {
+    if form.kind != .List || len(form.items) != 2 ||
+       !is_symbol(form.items[0], REPL_IGNORE_RESULT_HEAD) {
+        return CST_Form{}, false
+    }
+    return form.items[1], true
+}
+
+repl_synthetic_batch_do :: proc(form: CST_Form) -> bool {
+    if form.kind != .List || len(form.items) < 3 ||
+       !is_symbol(form.items[0], "do") {
+        return false
+    }
+    for item in form.items[1:len(form.items)-1] {
+        if _, ok := repl_ignore_result_inner(item); !ok {
+            return false
+        }
+    }
+    return true
+}
+
 read_repl_batch :: proc(source: string) -> (batch: Repl_Batch, err: Compile_Error, ok: bool) {
     forms, err_forms, ok_forms := read_top_forms_with_origin(source, .Eval)
     if !ok_forms {
@@ -397,8 +430,12 @@ read_repl_batch :: proc(source: string) -> (batch: Repl_Batch, err: Compile_Erro
         text = "do",
         span = batch_span,
     })
-    for form in runtime_forms {
-        append(&items, form)
+    for form, idx in runtime_forms {
+        if idx < len(runtime_forms)-1 {
+            append(&items, repl_ignore_result_form(form))
+        } else {
+            append(&items, form)
+        }
     }
     batch.eval_form = CST_Form{
         kind = .List,
@@ -476,9 +513,24 @@ repl_normalize_source_path :: proc(
         context.allocator = old_allocator
         return "", clone_compile_error(err_eval, result_allocator), false
     }
-    eval_text := macro_form_text(rewritten_eval)
-    strings.write_string(&builder, eval_text)
-    delete(eval_text)
+    if repl_synthetic_batch_do(rewritten_eval) {
+        for item, idx in rewritten_eval.items[1:] {
+            normalized_item := item
+            if inner, ignored := repl_ignore_result_inner(item); ignored {
+                normalized_item = inner
+            }
+            eval_text := macro_form_text(normalized_item)
+            strings.write_string(&builder, eval_text)
+            delete(eval_text)
+            if idx < len(rewritten_eval.items)-2 {
+                strings.write_byte(&builder, '\n')
+            }
+        }
+    } else {
+        eval_text := macro_form_text(rewritten_eval)
+        strings.write_string(&builder, eval_text)
+        delete(eval_text)
+    }
     normalized = strings.clone(strings.to_string(builder), result_allocator)
     context.allocator = old_allocator
     return normalized, Compile_Error{}, true
