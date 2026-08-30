@@ -4,21 +4,29 @@
 
 # Kvist
 
-A practical Lisp for systems programming that compiles to Odin.
+A practical Lisp for native software that compiles to Odin.
 
-Kvist combines Clojure-inspired syntax, source macros, immutable data, and
-interactive development with a native, statically typed execution model.
-Ordinary values have Odin-like representation and ownership: allocation,
-mutation, and cleanup remain explicit, and generated programs require no VM or
-garbage collector.
+Kvist combines Clojure-inspired syntax, source macros, data-oriented
+programming, and interactive development with Odin's native, statically typed
+execution model. It explores what a Lisp can look like when concrete
+representation, predictable costs, direct interoperability, and explicit
+memory are foundational properties.
 
-Kvist transpiles to readable Odin, imports Odin core and vendor packages
-directly, and allows Kvist and Odin source files to live in the same package.
+Different programs can lean on different parts of that combination. Kvist can
+be used as a Lisp-shaped way to write ordinary native software, as a platform
+for macros and DSLs, as an interactive environment for native code, or for
+applications that mix concrete types with flexible data-oriented subsystems.
+
+Ordinary values have Odin-like representation and ownership. Values are
+statically typed, allocation and mutation remain explicit, and generated
+programs require no VM or garbage collector. Kvist lowers to readable Odin,
+imports Odin packages directly, and allows Kvist and Odin source files to
+coexist in the same package.
 
 When data-oriented programming is a better fit, `Data` provides EDN in memory:
 immutable maps, vectors, sets, lists, keywords, symbols, and tagged values.
-This makes Hiccup, transactions, Datalog queries, configuration, and other data
-DSLs feel like Lisp without making every runtime value dynamic.
+This makes Hiccup, transactions, Datalog queries, messages, configuration, and
+other data DSLs feel like Lisp without making every runtime value dynamic.
 
 ## Highlights
 
