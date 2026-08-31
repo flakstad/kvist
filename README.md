@@ -6,6 +6,8 @@
 
 A practical Lisp for native software that compiles to Odin.
 
+[Website](https://kvist-lang.org/) · [Documentation](https://kvist-lang.org/docs/)
+
 Kvist combines Clojure-inspired syntax, source macros, data-oriented
 programming, and interactive development with Odin's native, statically typed
 execution model. It explores what a Lisp can look like when concrete
