@@ -1,6 +1,3 @@
-;; Copyright (c) Andreas Flakstad and Kvist contributors
-;; SPDX-License-Identifier: MIT
-
 (package arr)
 (import core "kvist:core")
 (import kvist_slice "core:slice")

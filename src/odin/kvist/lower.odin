@@ -1,6 +1,3 @@
-// Copyright (c) Andreas Flakstad and Kvist contributors
-// SPDX-License-Identifier: MIT
-
 package kvist
 
 validate_top_level_order :: proc(program: AST_Program) -> (Compile_Error, bool) {

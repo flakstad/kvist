@@ -1,6 +1,3 @@
-;; Copyright (c) Andreas Flakstad and Kvist contributors
-;; SPDX-License-Identifier: MIT
-
 ;; Exercises the explicit local ownership helpers built around let ... defer,
 ;; with-allocator, and with-temp-allocator.
 (package main)

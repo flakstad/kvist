@@ -1,6 +1,3 @@
-;; Copyright (c) Andreas Flakstad and Kvist contributors
-;; SPDX-License-Identifier: MIT
-
 ;; Exercises function types, function literals, callbacks, thread-first, nil?, and
 ;; pointer-vs-value choices in ordinary helper code.
 (package main)

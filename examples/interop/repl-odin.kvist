@@ -1,6 +1,3 @@
-;; Copyright (c) Andreas Flakstad and Kvist contributors
-;; SPDX-License-Identifier: MIT
-
 ;; Use Kvist as a typed, interactive boundary around embedded and imported
 ;; Odin. Start a session with:
 ;;

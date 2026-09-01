@@ -1,6 +1,3 @@
-;; Copyright (c) Andreas Flakstad and Kvist contributors
-;; SPDX-License-Identifier: MIT
-
 (package parallel)
 (import chan "core:sync/chan")
 (import os "core:os")

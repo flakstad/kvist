@@ -1,6 +1,3 @@
-;; Copyright (c) Andreas Flakstad and Kvist contributors
-;; SPDX-License-Identifier: MIT
-
 ;; Demonstrates bit operations over Odin integer operators.
 (package main)
 (import bit "kvist:bit")

@@ -1,6 +1,3 @@
-;; Copyright (c) Andreas Flakstad and Kvist contributors
-;; SPDX-License-Identifier: MIT
-
 ;; Reusable fused functional transforms.
 (package main)
 (import arr "kvist:arr")

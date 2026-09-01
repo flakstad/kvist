@@ -1,6 +1,3 @@
-;; Copyright (c) Andreas Flakstad and Kvist contributors
-;; SPDX-License-Identifier: MIT
-
 ;; Focused benchmark for source-backed package helpers vs direct Odin.
 (package main)
 (import arr "kvist:arr")

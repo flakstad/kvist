@@ -1,6 +1,3 @@
-;; Copyright (c) Andreas Flakstad and Kvist contributors
-;; SPDX-License-Identifier: MIT
-
 ;; Exercises additional eager sequence helpers and ownership cleanup.
 (package main)
 (import core "kvist:core")

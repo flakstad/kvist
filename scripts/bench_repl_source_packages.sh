@@ -1,6 +1,4 @@
 #!/usr/bin/env sh
-# Copyright (c) Andreas Flakstad and Kvist contributors
-# SPDX-License-Identifier: MIT
 
 set -eu
 

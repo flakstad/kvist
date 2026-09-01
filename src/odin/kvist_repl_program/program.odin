@@ -1,6 +1,3 @@
-// Copyright (c) Andreas Flakstad and Kvist contributors
-// SPDX-License-Identifier: MIT
-
 // Package kvist_repl_program defines the backend-neutral, typed program
 // handed from the ordinary Kvist compiler to an incremental REPL backend.
 // It deliberately contains no execution semantics: interpreters and native

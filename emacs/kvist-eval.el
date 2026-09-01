@@ -1,6 +1,4 @@
 ;;; kvist-eval.el --- REPL-like eval helpers for Kvist -*- lexical-binding: t; -*-
-;; Copyright (c) Andreas Flakstad and Kvist contributors
-;; SPDX-License-Identifier: MIT
 
 ;; Interactive evaluation uses the generic native JSONL REPL protocol.
 ;; Build, check, run, test, and cache commands remain hermetic CLI operations.

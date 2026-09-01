@@ -1,6 +1,3 @@
-;; Copyright (c) Andreas Flakstad and Kvist contributors
-;; SPDX-License-Identifier: MIT
-
 ;; Exercises raw Odin escapes, pointer dereference, address-of, mutation, and field access.
 
 (def Handle (distinct rawptr))

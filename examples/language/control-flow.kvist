@@ -1,6 +1,3 @@
-;; Copyright (c) Andreas Flakstad and Kvist contributors
-;; SPDX-License-Identifier: MIT
-
 ;; Exercises conditionals, value cases, loops, and name mapping.
 (package main)
 (import core "kvist:core")

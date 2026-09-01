@@ -1,6 +1,3 @@
-;; Copyright (c) Andreas Flakstad and Kvist contributors
-;; SPDX-License-Identifier: MIT
-
 ;; Host interop with core:path/slashpath and core:path/filepath.
 ;;
 ;; slashpath works on forward-slash paths such as URLs. filepath works with the

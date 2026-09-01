@@ -1,6 +1,3 @@
-;; Copyright (c) Andreas Flakstad and Kvist contributors
-;; SPDX-License-Identifier: MIT
-
 ;; Demonstrates Odin struct-of-arrays storage with ordinary Kvist collection
 ;; operations. #soa lives in the type; soa.push! expands to append_soa.
 (package main)

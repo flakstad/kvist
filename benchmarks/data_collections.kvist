@@ -1,6 +1,3 @@
-;; Copyright (c) Andreas Flakstad and Kvist contributors
-;; SPDX-License-Identifier: MIT
-
 ;; Representative flat-Data collection benchmarks.
 (package main)
 (import arr "kvist:arr")

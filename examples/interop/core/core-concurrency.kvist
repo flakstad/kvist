@@ -1,6 +1,3 @@
-;; Copyright (c) Andreas Flakstad and Kvist contributors
-;; SPDX-License-Identifier: MIT
-
 ;; Host interop with core:thread, core:sync, and core:sync/chan.
 ;;
 ;; Odin concurrency is explicit: OS threads, thread pools, channels, mutexes,

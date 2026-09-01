@@ -1,6 +1,3 @@
-;; Copyright (c) Andreas Flakstad and Kvist contributors
-;; SPDX-License-Identifier: MIT
-
 ;; Demonstrates first-class keyword values in ordinary Odin-shaped Kvist code.
 (package main)
 

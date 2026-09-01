@@ -1,6 +1,3 @@
-;; Copyright (c) Andreas Flakstad and Kvist contributors
-;; SPDX-License-Identifier: MIT
-
 ;; Reusable iterator declarations consumed by for, into, and transduce.
 (package main)
 (import core "kvist:core")

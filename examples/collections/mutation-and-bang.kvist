@@ -1,6 +1,3 @@
-;; Copyright (c) Andreas Flakstad and Kvist contributors
-;; SPDX-License-Identifier: MIT
-
 ;; Exercises struct field updates, pointer mutation, and in-place sequence helpers.
 (package main)
 (import core "kvist:core")

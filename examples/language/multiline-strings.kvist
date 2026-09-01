@@ -1,6 +1,3 @@
-;; Copyright (c) Andreas Flakstad and Kvist contributors
-;; SPDX-License-Identifier: MIT
-
 ;; Demonstrates multi-line Kvist string literals for EDN-style text.
 (package main)
 

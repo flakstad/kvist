@@ -1,6 +1,3 @@
-;; Copyright (c) Andreas Flakstad and Kvist contributors
-;; SPDX-License-Identifier: MIT
-
 ;; Demonstrates direct inline dynamic array, map, and set literals.
 
 (import arr "kvist:arr")

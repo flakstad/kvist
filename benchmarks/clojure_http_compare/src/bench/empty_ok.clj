@@ -1,6 +1,3 @@
-;; Copyright (c) Andreas Flakstad and Kvist contributors
-;; SPDX-License-Identifier: MIT
-
 (ns bench.empty-ok
   (:require [org.httpkit.server :as hk])
   (:gen-class))

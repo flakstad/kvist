@@ -1,6 +1,3 @@
-;; Copyright (c) Andreas Flakstad and Kvist contributors
-;; SPDX-License-Identifier: MIT
-
 ;; Direct Odin type constructors that participate in Kvist's (T x) rule.
 (package main)
 (import core "kvist:core")

@@ -1,6 +1,3 @@
-;; Copyright (c) Andreas Flakstad and Kvist contributors
-;; SPDX-License-Identifier: MIT
-
 ;; Close port of the Cluck reset records demo.
 (package main)
 (import core "kvist:core")

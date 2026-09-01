@@ -1,6 +1,3 @@
-;; Copyright (c) Andreas Flakstad and Kvist contributors
-;; SPDX-License-Identifier: MIT
-
 ;; Host interop with vendor:raylib.
 ;;
 ;; This file shows that Kvist can call a real graphics binding without wrapping
