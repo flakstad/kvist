@@ -6,6 +6,36 @@ import "core:testing"
 import kvist "../../odin/kvist"
 
 @(test)
+reload_app_config_accepts_typed_version :: proc(t: ^testing.T) {
+    source := `(package reload_demo)
+(import reload "kvist:reload")
+(defstruct App_State {steps: int})
+(def Reload_State App_State)
+(def Reload_Version: string "v1")
+(defn run [state: ^Reload_State host: ^reload.Run_Host]
+  (return))`
+    config, err, ok :=
+        reload_app_config_from_source("reload.kvist", source)
+    defer {
+        if config.state_type != "" do delete(config.state_type)
+        if config.version != "" do delete(config.version)
+        if config.reload_prefix != "" do delete(config.reload_prefix)
+        if config.run_name != "" do delete(config.run_name)
+        if config.init_name != "" do delete(config.init_name)
+        if config.on_load_name != "" do delete(config.on_load_name)
+        if config.on_unload_name != "" do delete(config.on_unload_name)
+        if config.package_name != "" do delete(config.package_name)
+    }
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    testing.expect_value(t, config.version, "v1")
+    testing.expect_value(t, config.state_type, "Reload_State")
+}
+
+@(test)
 nrepl_bencode_decodes_requests_and_waits_for_complete_frames :: proc(
     t: ^testing.T,
 ) {

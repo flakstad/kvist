@@ -19,6 +19,13 @@ The file establishes the package, imports, and symbols available to the
 session. Larger applications commonly use a small `dev/user.kvist` file that
 imports the code under development and defines development helpers.
 
+The session does not start with an empty package. Declarations from the saved
+context file and its package graph are available immediately, so there is no
+need to evaluate the whole buffer before trying forms in a `(comment ...)`
+block. Evaluate a definition or the buffer when you want the live session to
+use a current, possibly unsaved declaration as a session-local definition;
+unsaved declaration edits are not installed merely by starting the session.
+
 ```text
 Kvist native REPL
 Enter one expression per line; use :reset or :quit.
@@ -45,6 +52,10 @@ kvist=> (defn scale [x: int] -> int (* x 3))
 kvist=> (scale 21)
 63
 ```
+
+An interactively submitted `def` or `defvar` becomes typed storage retained
+across native generations, so runtime values need explicit types. Compile-time
+type aliases and overload sets do not require a retained value type.
 
 Value-producing forms rotate through `*1`, `*2`, and `*3`. Runtime forms run
 once; previous submissions are not replayed to rebuild session state.

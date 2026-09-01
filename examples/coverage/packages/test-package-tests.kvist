@@ -3,8 +3,8 @@
 (import testing "core:testing")
 (import t "kvist:test")
 
-(defvar once-ran 0)
-(defvar each-ran 0)
+(defvar once-ran: int 0)
+(defvar each-ran: int 0)
 
 (defn once-fixture []
   (set! once-ran (+ once-ran 1)))

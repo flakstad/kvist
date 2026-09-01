@@ -1,7 +1,9 @@
 ;; A small buffer for learning Kvist's native REPL.
 ;;
-;; Start by evaluating the whole buffer.  The forms inside (comment ...)
-;; are inert until you evaluate them individually or evaluate the comment body.
+;; Start a REPL with C-c C-s. Its saved package context is available immediately,
+;; so you can evaluate forms inside (comment ...) without first loading the buffer.
+;; Use C-c C-k after changing declarations to install the active buffer forms as
+;; one live generation.
 (package repl-basics)
 
 (import "kvist:condition" :as condition)
@@ -22,7 +24,7 @@
   (+ (square x) counter))
 
 (defn main []
-  (println "Open this file in Emacs and evaluate the buffer."))
+  (println "Open this file in Emacs, start its REPL, and evaluate a comment form."))
 
 (defn make-data [] -> Data
   {:a 123})

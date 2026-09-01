@@ -1254,6 +1254,17 @@ compile_eval_path_with_map :: proc(
             &repl_current_proc_names,
             program,
         )
+        // Type aliases and overload sets are compile-time declarations. They
+        // persist through retained source, but unlike runtime def values they
+        // do not need a cross-generation storage slot or lifecycle adapter.
+        repl_filter_runtime_value_names(
+            &repl_value_names,
+            program,
+        )
+        repl_filter_runtime_value_names(
+            &repl_current_value_names,
+            program,
+        )
     }
     all_repl_value_names: [dynamic]string
     append(&all_repl_value_names, ..repl_value_names[:])

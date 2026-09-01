@@ -1986,6 +1986,92 @@ compile_repl_generation_rejects_untyped_persistent_value :: proc(t: ^testing.T) 
 }
 
 @(test)
+compile_repl_generation_accepts_compile_time_definitions :: proc(t: ^testing.T) {
+    alias_result, alias_err, alias_ok := kvist.compile_eval_path_with_map(
+        "examples/language/pointers-and-raw.kvist",
+        "(def Handle (distinct rawptr))",
+        repl_generation = true,
+    )
+    testing.expect_value(t, alias_ok, true)
+    if !alias_ok {
+        testing.expect_value(t, alias_err.message, "")
+        return
+    }
+    defer delete(alias_result.output)
+    defer kvist.source_map_slice_delete(alias_result.source_map)
+    defer kvist.compile_warning_slice_delete(alias_result.warnings)
+    testing.expect_value(
+        t,
+        strings.contains(alias_result.output, "Handle :: distinct rawptr"),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(alias_result.output, "Handle__repl_storage"),
+        false,
+    )
+    alias_use_result, alias_use_err, alias_use_ok :=
+        kvist.compile_eval_path_with_map(
+            "examples/language/pointers-and-raw.kvist",
+            "(defn same-handle [value: Handle] -> Handle value)",
+            repl_generation = true,
+            repl_session_source = "(def Handle (distinct rawptr))",
+        )
+    testing.expect_value(t, alias_use_ok, true)
+    if !alias_use_ok {
+        testing.expect_value(t, alias_use_err.message, "")
+        return
+    }
+    defer delete(alias_use_result.output)
+    defer kvist.source_map_slice_delete(alias_use_result.source_map)
+    defer kvist.compile_warning_slice_delete(alias_use_result.warnings)
+
+    overload_result, overload_err, overload_ok :=
+        kvist.compile_eval_path_with_map(
+            "examples/language/polymorphism.kvist",
+            "(def render (overload render-int render-user))",
+            repl_generation = true,
+        )
+    testing.expect_value(t, overload_ok, true)
+    if !overload_ok {
+        testing.expect_value(t, overload_err.message, "")
+        return
+    }
+    defer delete(overload_result.output)
+    defer kvist.source_map_slice_delete(overload_result.source_map)
+    defer kvist.compile_warning_slice_delete(overload_result.warnings)
+    testing.expect_value(
+        t,
+        strings.contains(
+            overload_result.output,
+            "render :: proc{render_int, render_user}",
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(overload_result.output, "render__repl_storage"),
+        false,
+    )
+    overload_use_result, overload_use_err, overload_use_ok :=
+        kvist.compile_eval_path_with_map(
+            "examples/language/polymorphism.kvist",
+            "(render 7)",
+            repl_generation = true,
+            repl_session_source =
+                "(def render (overload render-int render-user))",
+        )
+    testing.expect_value(t, overload_use_ok, true)
+    if !overload_use_ok {
+        testing.expect_value(t, overload_use_err.message, "")
+        return
+    }
+    defer delete(overload_use_result.output)
+    defer kvist.source_map_slice_delete(overload_use_result.source_map)
+    defer kvist.compile_warning_slice_delete(overload_use_result.warnings)
+}
+
+@(test)
 compile_repl_generation_accepts_explicit_odin_expression_escape :: proc(
     t: ^testing.T,
 ) {

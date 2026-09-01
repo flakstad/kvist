@@ -297,6 +297,25 @@ repl_filter_concrete_proc_names :: proc(
     }
 }
 
+repl_filter_runtime_value_names :: proc(
+    names: ^[dynamic]string,
+    program: AST_Program,
+) {
+    for i := len(names^)-1; i >= 0; i -= 1 {
+        for &decl in program.decls {
+            if decl.kind != .Const ||
+               decl.const_decl.name != names^[i] {
+                continue
+            }
+            if decl.const_decl.is_type_alias ||
+               decl.const_decl.is_overload {
+                unordered_remove(names, i)
+            }
+            break
+        }
+    }
+}
+
 Repl_Batch :: struct {
     eval_form:   CST_Form,
     definitions: [dynamic]CST_Form,

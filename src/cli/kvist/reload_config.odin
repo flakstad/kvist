@@ -45,7 +45,12 @@ Reload_Build_Result :: struct {
 }
 
 reload_app_symbol_name :: proc(text: string) -> string {
-    mapped := kvist.map_name(text)
+    symbol_text := text
+    if len(symbol_text) > 0 &&
+       symbol_text[len(symbol_text)-1] == ':' {
+        symbol_text = symbol_text[:len(symbol_text)-1]
+    }
+    mapped := kvist.map_name(symbol_text)
     defer delete(mapped)
 
     builder := strings.builder_make()
@@ -230,6 +235,7 @@ reload_app_config_from_source :: proc(input, source: string) -> (config: Reload_
     if !read_ok {
         return config, read_err, false
     }
+    defer kvist.delete_borrowed_cst_top_form_slice(&forms)
 
     config.version = strings.clone("dev")
     config.reload_prefix = strings.clone("reload")
@@ -243,20 +249,32 @@ reload_app_config_from_source :: proc(input, source: string) -> (config: Reload_
 
         if form.items[0].text == "package" && len(form.items) == 2 && form.items[1].kind == .Symbol {
             if config.package_name == "" {
-                config.package_name = strings.clone(kvist.map_name(form.items[1].text))
+                config.package_name = kvist.map_name(form.items[1].text)
             }
             continue
         }
         if form.items[0].text == "import" {
-            if len(form.items) == 2 && form.items[1].kind == .String && kvist.import_path_text(form.items[1]) == "kvist:reload" {
-                continue
-            }
-            if len(form.items) == 3 && form.items[1].kind == .Symbol && form.items[2].kind == .String && kvist.import_path_text(form.items[2]) == "kvist:reload" {
-                if config.reload_prefix != "" {
-                    delete(config.reload_prefix)
+            if len(form.items) == 2 && form.items[1].kind == .String {
+                import_path := kvist.import_path_text(form.items[1])
+                is_reload_import := import_path == "kvist:reload"
+                delete(import_path)
+                if is_reload_import {
+                    continue
                 }
-                config.reload_prefix = kvist.map_name(form.items[1].text)
-                continue
+            }
+            if len(form.items) == 3 && form.items[1].kind == .Symbol &&
+               form.items[2].kind == .String {
+                import_path := kvist.import_path_text(form.items[2])
+                is_reload_import := import_path == "kvist:reload"
+                delete(import_path)
+                if is_reload_import {
+                    if config.reload_prefix != "" {
+                        delete(config.reload_prefix)
+                    }
+                    config.reload_prefix =
+                        kvist.map_name(form.items[1].text)
+                    continue
+                }
             }
         }
 
@@ -273,11 +291,15 @@ reload_app_config_from_source :: proc(input, source: string) -> (config: Reload_
                     config.state_type = strings.clone("Reload_State")
                     continue
                 }
-                if name == "Reload_Version" && len(form.items) == 3 && form.items[2].kind == .String {
+                if name == "Reload_Version" && len(form.items) >= 3 &&
+                   form.items[len(form.items)-1].kind == .String {
                     if config.version != "" {
                         delete(config.version)
                     }
-                    config.version = kvist.unquote_string(form.items[2].text)
+                    config.version =
+                        kvist.unquote_string(
+                            form.items[len(form.items)-1].text,
+                        )
                     continue
                 }
             }

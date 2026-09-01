@@ -45,12 +45,12 @@
       0
       rl.WHITE)))
 
-(def PixelWindowHeight 180)
-(def Gravity 1000)
-(def RunSpeed 100)
-(def JumpSpeed -300)
-(def PlatformWidth 96)
-(def PlatformHeight 16)
+(def PixelWindowHeight: f32 180)
+(def Gravity: f32 1000)
+(def RunSpeed: f32 100)
+(def JumpSpeed: f32 -300)
+(def PlatformWidth: f32 96)
+(def PlatformHeight: f32 16)
 
 (defstruct Level {platforms: [dynamic]rl.Vector2})
 

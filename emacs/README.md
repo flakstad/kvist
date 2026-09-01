@@ -90,6 +90,11 @@ file-context tooling. Start explicitly with `C-c C-s` before evaluation.
 closes its interface buffer; `C-c M-q` remains an alias. Killing the interface
 buffer asks for confirmation and, when confirmed, stops the associated REPL.
 
+Starting with `C-c C-s` immediately exposes declarations from the saved package
+context; it does not require an initial `C-c C-k`. Evaluate the buffer when you
+want to install the current, possibly unsaved declarations as one live
+generation.
+
 Completion, Eldoc, documentation lookup, and xref use the same live session.
 Each request includes the unsaved buffer as a read-only overlay, so newly
 typed forms and previously evaluated declarations are both visible without

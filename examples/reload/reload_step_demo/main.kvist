@@ -14,7 +14,7 @@
    unload-count: int})
 
 (def Reload_State App_State)
-(def Reload_Version "v1")
+(def Reload_Version: string "v1")
 
 (def delay: time.Duration (* 1 time.Second))
 

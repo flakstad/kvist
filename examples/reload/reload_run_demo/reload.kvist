@@ -5,7 +5,7 @@
 (import reload "kvist:reload")
 
 (def Reload_State app.App_State)
-(def Reload_Version "v1")
+(def Reload_Version: string "v1")
 
 (defn init [state: ^Reload_State]
   (app.init state))

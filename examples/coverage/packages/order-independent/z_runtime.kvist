@@ -1,6 +1,6 @@
 (package order-independent)
 
-(def default-box-value 17)
+(def default-box-value: int 17)
 
 (defn read-box [] -> int
   (let [box (make-box 42)]
