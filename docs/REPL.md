@@ -116,8 +116,7 @@ The [Emacs client](../emacs/README.md) provides source-buffer evaluation,
 completion, documentation, retained-value inspection, stepping, traces,
 conditions, restarts, and project-scoped sessions.
 
-Kvist also provides an experimental nREPL adapter for Calva, CIDER, and
-Conjure:
+Kvist also provides an experimental nREPL adapter for Calva and CIDER:
 
 ```sh
 ./kvist nrepl examples/language/hello.kvist

@@ -146,7 +146,7 @@ the application process, just as they do in a standalone session.
 source-mapped frame, and resume it with `C-c M-c`. The application remains
 stopped on its declared checkpoint thread until continuation; Olive services
 the generic frame and continue requests through its local mailbox. Attached
-`debug.break` inside retained functions now exposes the definition's original
+`debug.break` inside retained functions exposes the definition's original
 source frame and typed scalar/nominal local snapshots. `C-c M-n`, `C-c M-o`,
 and `C-c M-u` use the same generic step-into/over/out requests while attached.
 Every pause adds a compact CIDER-style command prompt after the paused source
@@ -157,12 +157,11 @@ frame, `p` to browse a collection, and `q` to abort the active evaluation.
 Abort cooperatively unwinds instrumented Kvist frames, runs normal `defer`
 cleanup, and preserves the resident REPL or attached application state.
 The prompt and temporary bindings disappear as soon as execution resumes.
-After `*Kvist Debug Frame*`
-has been opened once, every subsequent pause or step refreshes that detailed
-buffer automatically; it remains an optional secondary view.
+After you open `*Kvist Debug Frame*`, every subsequent pause or step refreshes
+that detailed buffer automatically; it remains an optional secondary view.
 Dynamic-array and map locals expose the same bounded `debug-page` browser used
 by standalone frames; pages are rendered from the native value while the
-application is stopped. Typed attached conditions now open the same condition
+application is stopped. Typed attached conditions open the same condition
 buffer and advertise the same compiled recovery buttons as standalone frames.
 Invalid `use-value` input leaves the application paused; accepted input,
 `continue`, `retry`, `skip`, and `abort-operation` resume only through the
@@ -488,7 +487,7 @@ kvist dev --reload file.kvist --print-paths --json
 kvist dev --reload file.kvist --rebuild --json
 ```
 
-`C-c C-a` now runs the current file in its own per-file compilation buffer, so
+`C-c C-a` runs the current file in its own per-file compilation buffer, so
 long-running programs do not block Emacs and multiple runs can stay open at the
 same time.
 

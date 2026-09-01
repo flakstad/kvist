@@ -2,7 +2,7 @@
 
 - [language.md](language.md) - language reference
 - [REPL.md](REPL.md) - persistent REPL and live development
-- [NREPL.md](NREPL.md) - nREPL compatibility for Calva, CIDER, and Conjure
+- [NREPL.md](NREPL.md) - nREPL compatibility for Calva and CIDER
 - [data.md](data.md) - immutable heterogeneous data
 - [DATA-ORIENTED-PROGRAMMING.md](DATA-ORIENTED-PROGRAMMING.md) - choosing and
   programming with native values and Data

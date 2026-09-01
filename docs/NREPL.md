@@ -1,8 +1,8 @@
 # nREPL Editor Adapter
 
-Kvist provides an experimental nREPL compatibility layer for Calva, CIDER,
-Conjure, and other clients that already speak nREPL. It exposes the native
-Kvist REPL; it does not turn Kvist into Clojure or start a JVM.
+Kvist provides an experimental nREPL compatibility layer for Calva and CIDER.
+It exposes the native Kvist REPL; it does not turn Kvist into Clojure or start
+a JVM.
 
 ## Start with the Right Context
 
@@ -77,13 +77,8 @@ Start `kvist nrepl` from the project directory, then run **Calva: Connect to a
 Running REPL Server in your Project** and choose **Generic**. Calva reads the
 generated `.nrepl-port` file.
 
-The unmodified Calva extension has been exercised in a real VS Code Extension
-Host for connection, ordinary top-level and selection evaluation, complete
-unsaved-buffer loading, completion, hover documentation, signature help,
-definition lookup, last-result copying, diagnostics, and interrupt with
-recovery. The relevant commands are **Calva: Evaluate Top Level Form
-(defun)**, **Calva: Evaluate Current Form (or selection, if any)**, and
-**Calva: Load/Evaluate Current File and its Requires/Dependencies**.
+Use Calva's ordinary top-level, selection, file evaluation, and interrupt
+commands.
 
 The file association is a transitional compatibility setting. Calva's
 Clojure parser still controls structural editing, selection, and syntax-aware
@@ -92,20 +87,14 @@ incorrectly.
 
 ## CIDER
 
-CIDER can connect with `M-x cider-connect-clj`; the adapter is classified as a
-generic nREPL runtime. The repository's `kvist-mode` already owns `*.kvist`
-files and derives from `clojure-mode`, so CIDER's minor mode can be enabled for
-an experimental source workflow:
+CIDER can connect with `M-x cider-connect-clj`; choose a generic nREPL runtime.
+`kvist-mode` owns `*.kvist` files and derives from `clojure-mode`, so CIDER's
+minor mode can be enabled for an experimental source workflow:
 
 ```elisp
 (require 'kvist-mode)
 (add-hook 'kvist-mode-hook #'cider-mode)
 ```
-
-The pinned CIDER integration test covers a real connection, evaluation,
-ordinary top-level form and region evaluation through CIDER's source commands,
-complete unsaved-buffer loading, completion, info lookup, interrupt, and
-evaluation after interrupt.
 
 If `kvist-eval.el` is also loaded, its native keymap deliberately owns several
 of the same keys. In particular, `C-c C-x` is
@@ -116,65 +105,6 @@ evaluation, and `M-x cider-load-buffer` for a CIDER whole-buffer load. Toggling
 including `C-c C-k` for `cider-load-buffer`.
 
 Many CIDER commands depend on unimplemented Clojure or `cider-nrepl`
-middleware. The native [Kvist Emacs client](../emacs/README.md) remains the
-complete Emacs integration for Kvist-specific debugging, live conditions,
-inspection, generations, and attached applications. It uses its own native
-REPL session; those features do not become CIDER features merely because both
-minor modes are loaded.
-
-## Conjure
-
-Conjure can retain a real `kvist` filetype while routing its evaluations to
-the Clojure nREPL transport client:
-
-```lua
-vim.filetype.add({ extension = { kvist = "kvist" } })
--- Add "kvist" to any other Conjure filetypes you use.
-vim.g["conjure#filetypes"] = { "kvist" }
-vim.g["conjure#filetype#kvist"] = "conjure.client.clojure.nrepl"
-```
-
-The pinned Conjure integration test covers its connection setup and preamble,
-evaluation, file loading, completion, info lookup, interrupt, and evaluation
-after interrupt.
-
-## Language Mode Direction
-
-`*.kvist` should not be permanently presented as Clojure. The long-term VS
-Code design is a distinct `kvist` language ID with a Kvist grammar, brackets,
-comments, indentation, and language tooling. Calva would then need a small
-extension point or explicit Kvist document selector so its nREPL commands can
-operate on that language ID.
-
-A dedicated mode should use Kvist's own compiler frontend and tooling results
-for semantic operations rather than fork a Clojure parser. Reusing Lisp
-parenthesis navigation and indentation is still reasonable, just as the
-current Emacs `kvist-mode` derives from `clojure-mode`. The staged direction is
-therefore:
-
-1. Keep the VS Code file association as an explicitly temporary way to use
-   unmodified Calva.
-2. Register a real `kvist` language mode for accurate syntax highlighting and
-   file identity.
-3. Let Calva opt into `kvist` documents for nREPL commands, while Kvist's own
-   tooling supplies completion, documentation, definitions, and diagnostics
-   where Clojure assumptions diverge.
-
-Conjure already demonstrates the desired separation: a `kvist` language mode
-can select its existing nREPL transport without claiming that the source is
-Clojure.
-
-## Reproducible Tests
-
-```sh
-./scripts/test_nrepl.sh
-./scripts/test_calva_nrepl.sh
-./scripts/test_cider_nrepl.sh
-./scripts/test_conjure_nrepl.sh
-```
-
-The on-demand nREPL workflow runs the codec/helper and protocol tests on Linux
-and Windows. The on-demand editor workflow runs Calva, CIDER, and Conjure as
-separate Linux jobs against pinned client revisions; the Calva test uses a
-pinned VS Code Extension Host. Local runs require the respective editor
-toolchains and network access.
+middleware. Use the native [Kvist Emacs client](../emacs/README.md) for
+Kvist-specific debugging, live conditions, inspection, generations, and
+attached applications. The native client and CIDER use separate REPL sessions.

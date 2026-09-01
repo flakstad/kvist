@@ -142,7 +142,7 @@ documentation, retained value inspection, source-level stepping, execution
 traces, conditions and restarts, and attachment to running applications.
 
 See the [native REPL guide](docs/REPL.md) and
-[Emacs guide](emacs/README.md). For Calva, CIDER, and Conjure, see the
+[Emacs guide](emacs/README.md). For Calva and CIDER, see the
 [nREPL editor guide](docs/NREPL.md).
 
 ## Odin Interoperability
