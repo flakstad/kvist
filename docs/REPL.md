@@ -1,21 +1,23 @@
-# Native REPL and Live Console
+# REPL and Live Development
 
-Kvist has a persistent REPL without introducing an interpreter or a second,
-dynamically typed version of the language. Each submission is ordinary Kvist:
-it is read, macro-expanded, type checked, ownership checked, lowered to Odin,
-compiled, loaded, and executed as native code.
+The Kvist REPL evaluates ordinary Kvist in a persistent native session.
+Definitions, values, imports, macros, package state, and the three most recent
+results remain available between submissions. Static types, ownership rules,
+and Odin interoperability are the same as in a compiled program.
 
 ## Start a Session
 
-Build the compiler, then anchor the session to a Kvist source file:
+Build Kvist, then give the REPL a source file from the project you want to work
+with:
 
 ```sh
 odin build src/cli/kvist
 ./kvist repl examples/language/hello.kvist
 ```
 
-The source file supplies the package graph, imports, compiler options, source
-mapping, and symbol context for later forms.
+The file establishes the package, imports, and symbols available to the
+session. Larger applications commonly use a small `dev/user.kvist` file that
+imports the code under development and defines development helpers.
 
 ```text
 Kvist native REPL
@@ -27,13 +29,13 @@ kvist=> (square 11)
 121
 ```
 
-The terminal accepts one complete expression per line. Editor and protocol
-clients may submit balanced multi-line forms or an atomic batch.
+The terminal accepts one complete expression per line. Editor clients can send
+balanced multi-line forms or a group of forms together.
 
 ## Work with a Session
 
-Successful definitions and supported typed values remain available to later
-submissions. A compatible function redefinition updates later calls:
+Successful definitions are immediately available to later submissions.
+Compatible redefinitions affect later calls:
 
 ```text
 kvist=> (defn scale [x: int] -> int (* x 2))
@@ -44,96 +46,80 @@ kvist=> (scale 21)
 63
 ```
 
-The session retains concrete functions, native scalars and collections,
-immutable `Data`, nominal declarations, imports, macros, transforms, iterators,
-and package state where their native lifecycle is safe. Value-producing forms
-rotate typed `*1`, `*2`, and `*3` results.
+Value-producing forms rotate through `*1`, `*2`, and `*3`. Runtime forms run
+once; previous submissions are not replayed to rebuild session state.
 
-Runtime forms execute exactly once. A complete multi-form submission compiles
-before any of its runtime forms run; if compilation fails, none of them run.
-Earlier forms are never replayed to reconstruct the session.
+A failed compilation leaves earlier session state intact. A crash in submitted
+native code restarts the worker and clears runtime state. Use `:reset` to clear
+the session deliberately and `:quit` to stop it.
 
-The first successful generation makes context and imported package procedures
-available to the resident worker. Later ordinary generations compile only the
-native declarations reachable from the new submission. Inspection, tracing,
-stepping, and native-debug requests retain their complete instrumented source.
+Some submissions take longer than others, particularly the first use of a
+large imported project. Kvist accelerates common interactive work where it can
+do so without changing language behavior and otherwise uses its normal native
+compiler path. This choice should normally be invisible apart from latency.
 
-Use `:reset` to replace the worker and clear definitions, values, imports, and
-result history. Use `:quit` or end input to stop the session.
-
-## Editors and the JSONL Protocol
-
-The terminal is one client of an editor-neutral JSONL protocol:
+For isolated evaluation that must not observe session history, use:
 
 ```sh
-./kvist repl examples/language/hello.kvist --protocol jsonl
+kvist eval file.kvist '(form)'
 ```
 
-Protocol clients can evaluate and expand code, complete symbols, show
-documentation, inspect retained values and bindings, debug and trace native
-execution, handle conditions and restarts, and manage session checkpoints.
-Program output is emitted as structured events and does not corrupt protocol
-framing.
+## Editors
 
 The [Emacs client](../emacs/README.md) provides source-buffer evaluation,
-completion, documentation, retained value inspection, source-level stepping,
-execution traces, conditions and restarts, and project-scoped REPL sessions.
+completion, documentation, retained-value inspection, stepping, traces,
+conditions, restarts, and project-scoped sessions.
 
-### Experimental nREPL Adapter
-
-Kvist can expose the native REPL through nREPL for clients such as Calva,
-CIDER, and Conjure:
+Kvist also provides an experimental nREPL adapter for Calva, CIDER, and
+Conjure:
 
 ```sh
 ./kvist nrepl examples/language/hello.kvist
 ```
 
-The argument must be a relevant application entry file or development context
-that imports the code being edited. It anchors the package graph, imports,
-source mapping, and tooling index; loading a real file outside that graph is
-rejected. Do not start the server with an unrelated placeholder file.
+Use a real application entry file or development context so the server knows
+which package graph and source files belong to the session. See the
+[nREPL editor guide](NREPL.md) for setup and current limitations.
 
-This is a compatibility layer over the JSONL protocol, not a Clojure runtime.
-It supports evaluation, file loading, completion, lookup, and real interrupt.
-Interrupt replaces the native worker and therefore clears retained REPL state.
-
-See the [nREPL editor guide](NREPL.md) for the supported protocol surface,
-Calva, CIDER, and Conjure setup, current limitations, the language-mode
-direction, and reproducible integration tests.
-
-## Attach to a Running Application
-
-An Olive application can expose an application-private local endpoint:
+Other editor clients can use the JSONL protocol:
 
 ```sh
-KVIST_REPL_ENDPOINT=.olive/repl kvist run app.kvist --reload
-kvist repl app.kvist --attach .olive/repl --protocol jsonl
+./kvist repl examples/language/hello.kvist --protocol jsonl
 ```
 
-Attached requests run at application checkpoints declared with
-`reload.checkpoint!`. This lets a client evaluate session code and invoke typed
-application capabilities while the application stays alive. Olive remains
-responsible for rebuilding and replacing ordinary application modules.
+## Experimental: Attach to a Reload-Enabled Application
 
-Attached evaluation runs native code inside the application process. It is a
-development feature: a panic or crash in submitted code can terminate the
-host, and clients cannot force-interrupt arbitrary native code safely.
+The normal REPL runs code in its own worker, so it does not share the live
+state of an already-running application. Applications built around
+`kvist:reload` can instead expose a private local endpoint and service REPL
+requests at explicit safe points:
 
-## Session Boundaries
+```sh
+KVIST_REPL_ENDPOINT=.kvist/repl kvist run app.kvist --reload
+kvist repl app.kvist --attach .kvist/repl --protocol jsonl
+```
 
-- Loaded native generations and session allocations are append-only until
-  reset or process exit.
-- Compatible redefinitions affect later session calls. Existing native
-  generations retain the definitions and layouts they compiled against.
-- Pointer, foreign-view, and opaque resource results may be rendered for one
-  evaluation but are not retained unless the REPL has an explicit safe
+The application must reach `reload.checkpoint!` regularly. At a checkpoint, an
+attached editor can evaluate code inside the application process, inspect live
+values, invoke capabilities registered by the application, or request a
+reload. Olive uses this mechanism for integrated live development, but it is
+not part of the ordinary standalone REPL workflow.
+
+See the [reload step example](../examples/reload/reload_step_demo/) for the
+application structure. Because attached evaluations run inside the host, a
+panic or crash in submitted code can terminate the application.
+
+## Expectations and Boundaries
+
+- A clean `check`, `test`, or `run` remains the reproducible truth. REPL
+  history is development state, not an implicit part of the program.
+- Compatible redefinitions affect later session calls. Code already running
+  continues with the definitions it started with.
+- Pointer and opaque resource results are retained only when Kvist has a safe
   lifecycle for them.
-- A standalone native crash clears runtime state. The controller reports the
-  failure and starts a fresh worker for the next evaluation without replaying
-  earlier submissions.
-- A clean `check`, `test`, or `run` remains the reproducible truth. REPL history
-  is development state, not an implicit part of the program.
+- Loaded code and session allocations are reclaimed by `:reset` or when the
+  session exits.
 
-For isolated evaluation that must not observe session history, use
-`kvist eval CONTEXT FORMS`. See [Tooling](tooling.md) for the other compiler and
-editor-oriented commands.
+If a result differs from a clean run, or a submission appears unexpectedly
+slow, `--execution native` is available as a diagnostic comparison. It is not
+needed for normal REPL use.

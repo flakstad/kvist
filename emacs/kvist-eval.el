@@ -30,6 +30,15 @@ one already exists and otherwise falls back to file-context commands."
   :type 'boolean
   :group 'kvist)
 
+(defcustom kvist-repl-defer-definition-debug-values t
+  "When non-nil, load ordinary REPL declarations through the lean native path.
+This avoids eagerly generating local-value renderers for every definition.
+Pause-before and trace evaluation still compile with full value capture.  Set
+this to nil when every newly evaluated definition must immediately expose its
+locals to later stepping without first being re-evaluated for debugging."
+  :type 'boolean
+  :group 'kvist)
+
 (defcustom kvist-eval-buffer-declarations-only nil
   "When non-nil, `kvist-eval-buffer' loads declarations but skips bare forms.
 This supports notebook-style source files whose top-level expressions are
@@ -1649,6 +1658,10 @@ When ENDPOINT is non-nil, connect the generic client to that Olive endpoint."
       (setq request (append request `((name . ,request-name)))))
     (when request-abi
       (setq request (append request `((abi . ,request-abi)))))
+    (when (and (equal op "eval")
+               (kvist--repl-defer-debug-values-p
+                source defer-debug-values pause-before trace))
+      (setq defer-debug-values t))
     (when defer-debug-values
       (setq request (append request '((defer_debug_values . t)))))
     (puthash id callback (kvist--repl-session-pending session))
@@ -3386,6 +3399,17 @@ immediately before point rather than the wrapper itself."
     "def[^[:space:]()]*"
     "\\)\\_>")
    form))
+
+(defun kvist--repl-defer-debug-values-p
+    (form requested pause-before trace)
+  "Return whether FORM should use deferred local-value capture.
+REQUESTED is an explicit request from a bulk loader.  PAUSE-BEFORE and TRACE
+always retain eager capture for interactive debugging."
+  (or requested
+      (and kvist-repl-defer-definition-debug-values
+           (not pause-before)
+           (not trace)
+           (kvist--repl-declaration-form-p form))))
 
 (defun kvist--buffer-repl-source ()
   "Return evaluable top-level forms from the current buffer.

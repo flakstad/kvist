@@ -357,7 +357,9 @@ test_child_env_without_kvist_vars :: proc(extra: []string) -> ([dynamic]string, 
         append(&env_vars, strings.clone(entry))
     }
     for entry in inherited_env {
-        if strings.has_prefix(entry, "KVIST_ROOT=") || strings.has_prefix(entry, "KVIST_ROOT=") {
+        if strings.has_prefix(entry, "KVIST_ROOT=") ||
+           strings.has_prefix(entry, "KVIST_CACHE_DIR=") ||
+           strings.has_prefix(entry, "KVIST_NO_COMPILE_CACHE=") {
             delete(entry)
             continue
         }

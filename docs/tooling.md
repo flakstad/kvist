@@ -40,19 +40,17 @@ kvist macroexpand file.kvist '(form)'
 Use `eval --check` to validate without running and `eval --no-print` to suppress
 automatic result printing.
 
-## Native REPL
+## REPL
 
-Start a persistent native session using a Kvist source file as its package
-context:
+Start a persistent session using a Kvist source file as its package context:
 
 ```sh
 kvist repl file.kvist
 ```
 
-Forms submitted to the REPL follow the normal Kvist pipeline: reading, macro
-expansion, type and ownership checking, Odin lowering, native compilation,
-loading, and execution. Successful definitions and supported typed values are
-available to later forms; `:reset` clears the session and `:quit` stops it.
+Forms submitted to the REPL use the normal Kvist compiler. Successful
+definitions and supported typed values are available to later forms; `:reset`
+clears the session and `:quit` stops it.
 
 Editor clients use the same session through an editor-neutral JSONL protocol:
 
@@ -60,8 +58,8 @@ Editor clients use the same session through an editor-neutral JSONL protocol:
 kvist repl file.kvist --protocol jsonl
 ```
 
-See the [native REPL guide](REPL.md) for session semantics, inspection,
-debugging, conditions and restarts, and attachment to running applications.
+See the [REPL guide](REPL.md) for session behavior, editor integration, and
+attachment to running applications.
 
 ## Symbols
 

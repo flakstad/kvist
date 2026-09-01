@@ -545,7 +545,9 @@ repl_persistent_definitions_source :: proc(source: string) -> string {
     builder := strings.builder_make()
     defer strings.builder_destroy(&builder)
     for top in forms {
-        if _, is_defn := repl_form_decl_name(top.form); is_defn {
+        name, is_defn := repl_form_decl_name(top.form)
+        delete(name)
+        if is_defn {
             if top.form.span.start < 0 ||
                top.form.span.end > len(source) ||
                top.form.span.start >= top.form.span.end {
@@ -645,7 +647,9 @@ repl_definition_infos :: proc(source: string) -> [dynamic]Repl_Definition_Info {
     }
     for top in forms {
         form := top.form
-        if _, supported := repl_form_decl_name(form); !supported {
+        mapped_name, supported := repl_form_decl_name(form)
+        delete(mapped_name)
+        if !supported {
             continue
         }
         if eval_form_head(form) == "import" {
@@ -822,6 +826,8 @@ repl_result_type_from_abi :: proc(abi: string) -> string {
     return strings.clone(result_ty)
 }
 
+// The returned name is owned by context.allocator. Compilation normally calls
+// this inside its temporary arena; standalone REPL source helpers delete it.
 repl_form_decl_name :: proc(form: CST_Form) -> (name: string, ok: bool) {
     if form.kind != .List ||
        len(form.items) < 2 ||
@@ -832,15 +838,15 @@ repl_form_decl_name :: proc(form: CST_Form) -> (name: string, ok: bool) {
         if len(form.items) == 3 &&
            form.items[1].kind == .Symbol &&
            form.items[2].kind == .String {
-            return form.items[1].text, true
+            return strings.clone(form.items[1].text), true
         }
         if as_index, has_as := source_import_as_index(form); has_as {
-            return form.items[as_index].text, true
+            return strings.clone(form.items[as_index].text), true
         }
         if source_import_form_has_refer(form) {
             // The path is the replacement key for later :refer selections
             // from the same package.
-            return form.items[1].text, true
+            return strings.clone(form.items[1].text), true
         }
         return "", false
     }
@@ -872,7 +878,9 @@ repl_session_forms :: proc(source: string) -> (forms: [dynamic]CST_Top_Form, err
         return forms, err_parsed, false
     }
     for top in parsed {
-        if _, is_defn := repl_form_decl_name(top.form); !is_defn {
+        name, is_defn := repl_form_decl_name(top.form)
+        delete(name)
+        if !is_defn {
             return forms, Compile_Error{
                 message = "REPL session history contains an unsupported declaration",
                 span = top.form.span,

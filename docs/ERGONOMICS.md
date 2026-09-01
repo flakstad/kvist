@@ -37,7 +37,7 @@ compiler behavior.
 | Native struct/fixed-array destructuring | Design-gated | Add only with explicit copy and ownership rules |
 | Generic `?` propagation | Deferred | Existing guarded bindings cover current Ro/Vev result shapes |
 | Formatter-template linting | Deferred | Use `str` for construction; keep `fmt` explicit formatting |
-| Native REPL and Olive live console | Partial | The standalone and attached native architecture, generic protocol, Emacs workflow, multi-version session, inspection, debugging, tracing, conditions/restarts, checkpoints, and Olive capability/reload integration are implemented. Continue hands-on validation; investigate typed and persistent embedded-Odin forms, latency, and explicit native-resource lifecycle adapters per [REPL.md](REPL.md). |
+| Native REPL and reload live console | Partial | Standalone and attached sessions, editor integration, persistent definitions and values, debugging, and fast redefinition are implemented. Continue hands-on testing with large projects and validate long-session resource use. |
 
 ## Milestones
 

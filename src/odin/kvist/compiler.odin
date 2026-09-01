@@ -15,16 +15,30 @@ Repl_Context_Expansion_Cache :: struct {
     key:      string,
     expanded: [dynamic]CST_Top_Form,
     macros:   [dynamic]User_Macro,
+    aliases:  [dynamic]Alias_Prefix,
 }
 
 repl_context_expansion_cache: Repl_Context_Expansion_Cache
-repl_context_expansion_cache_mutex: sync.Mutex
+repl_context_expansion_cache_mutex: sync.RW_Mutex
 
 repl_context_cache_top_form_clone :: proc(top: CST_Top_Form) -> CST_Top_Form {
     cloned := clone_cst_top_form(top)
     cloned.source_path = strings.clone(top.source_path)
     cloned.source_file = strings.clone(top.source_file)
     return cloned
+}
+
+repl_context_cache_alias_clone :: proc(alias: Alias_Prefix) -> Alias_Prefix {
+    return Alias_Prefix{
+        alias = strings.clone(alias.alias),
+        prefix = strings.clone(alias.prefix),
+        raw_prefix = strings.clone(alias.raw_prefix),
+        exports = clone_string_slice(alias.exports[:]),
+        raw_exports = clone_string_slice(alias.raw_exports[:]),
+        refer_names = clone_string_slice(alias.refer_names[:]),
+        preserve_qualified_calls = alias.preserve_qualified_calls,
+        allow_unqualified_exports = alias.allow_unqualified_exports,
+    }
 }
 
 repl_context_expansion_cache_clear :: proc() {
@@ -36,37 +50,48 @@ repl_context_expansion_cache_clear :: proc() {
     }
     delete(repl_context_expansion_cache.expanded)
     delete_user_macro_slice(&repl_context_expansion_cache.macros)
+    alias_prefix_slice_delete(&repl_context_expansion_cache.aliases)
     repl_context_expansion_cache = {}
 }
 
-repl_context_expansion_cache_load :: proc(
+repl_context_expansion_cache_borrow :: proc(
     key: string,
-) -> (expanded: [dynamic]CST_Top_Form, macros: [dynamic]User_Macro, found: bool) {
+) -> (
+    expanded: []CST_Top_Form,
+    macros: []User_Macro,
+    aliases: []Alias_Prefix,
+    found: bool,
+) {
     if key == "" {
-        return expanded, macros, false
+        return nil, nil, nil, false
     }
-    sync.mutex_guard(&repl_context_expansion_cache_mutex)
+    sync.rw_mutex_shared_lock(&repl_context_expansion_cache_mutex)
     if repl_context_expansion_cache.key != key {
-        return expanded, macros, false
+        sync.rw_mutex_shared_unlock(&repl_context_expansion_cache_mutex)
+        return nil, nil, nil, false
     }
-    for top in repl_context_expansion_cache.expanded {
-        append(&expanded, clone_cst_top_form(top))
+    return repl_context_expansion_cache.expanded[:],
+           repl_context_expansion_cache.macros[:],
+           repl_context_expansion_cache.aliases[:],
+           true
+}
+
+repl_context_expansion_cache_release :: proc(found: bool) {
+    if found {
+        sync.rw_mutex_shared_unlock(&repl_context_expansion_cache_mutex)
     }
-    for macro_decl in repl_context_expansion_cache.macros {
-        append(&macros, clone_user_macro(macro_decl))
-    }
-    return expanded, macros, true
 }
 
 repl_context_expansion_cache_store :: proc(
     key: string,
     expanded: []CST_Top_Form,
     macros: []User_Macro,
+    aliases: []Alias_Prefix,
 ) {
     if key == "" {
         return
     }
-    sync.mutex_guard(&repl_context_expansion_cache_mutex)
+    sync.rw_mutex_guard(&repl_context_expansion_cache_mutex)
     if repl_context_expansion_cache.key == key {
         return
     }
@@ -85,6 +110,12 @@ repl_context_expansion_cache_store :: proc(
         append(
             &repl_context_expansion_cache.macros,
             clone_user_macro(macro_decl),
+        )
+    }
+    for alias in aliases {
+        append(
+            &repl_context_expansion_cache.aliases,
+            repl_context_cache_alias_clone(alias),
         )
     }
 }
@@ -938,6 +969,10 @@ compile_eval_path_with_map :: proc(
     repl_inspection_page_limit := 0,
     repl_debug_capture_values := true,
     repl_context_cache_key := "",
+    repl_execution_plan: ^Repl_Execution_Plan = nil,
+    repl_stale_proc_names: []string = nil,
+    repl_scalar_invokes: []Repl_Scalar_Invoke_Metadata = nil,
+    repl_incremental_program: ^Repl_Incremental_Program = nil,
 ) -> (result: Emit_Result, err: Compile_Error, ok: bool) {
     result_allocator := context.allocator
     old_allocator := result_allocator
@@ -994,12 +1029,24 @@ compile_eval_path_with_map :: proc(
             append(&repl_import_forms, retained_imports_reversed[i])
         }
     }
-
-    expanded_forms, macros, context_cache_hit :=
-        repl_context_expansion_cache_load(repl_context_cache_key)
+    expanded_forms: [dynamic]CST_Top_Form
+    macros: [dynamic]User_Macro
+    aliases: []Alias_Prefix
+    context_cache_key :=
+        repl_context_cache_key if repl_generation else ""
+    cached_expanded, cached_macros, cached_aliases, context_cache_hit :=
+        repl_context_expansion_cache_borrow(context_cache_key)
+    defer repl_context_expansion_cache_release(context_cache_hit)
     err_program: Compile_Error
     ok_program := context_cache_hit
-    if !context_cache_hit {
+    if context_cache_hit {
+        // The shared cache lock keeps nested CST, macro, and alias storage
+        // alive. Only the small top-level headers are copied so session forms
+        // can be appended without mutating the cached slice.
+        append(&expanded_forms, ..cached_expanded)
+        append(&macros, ..cached_macros)
+        aliases = cached_aliases
+    } else {
         expanded_forms, macros, err_program, ok_program =
             load_path_expanded_forms(
                 path,
@@ -1007,27 +1054,34 @@ compile_eval_path_with_map :: proc(
                 repl_import_forms[:],
                 declarations_only = repl_generation,
             )
-        if ok_program {
-            repl_context_expansion_cache_store(
-                repl_context_cache_key,
-                expanded_forms[:],
-                macros[:],
-            )
-        }
     }
     if !ok_program {
         context.allocator = old_allocator
         return result, clone_compile_error(err_program, result_allocator), false
     }
-    aliases, err_aliases, ok_aliases :=
-        collect_root_source_import_aliases(path, repl_import_forms[:])
-    if !ok_aliases {
-        context.allocator = old_allocator
-        return result, clone_compile_error(err_aliases, result_allocator), false
+    if !context_cache_hit {
+        loaded_aliases, err_aliases, ok_aliases :=
+            collect_root_source_import_aliases(path, repl_import_forms[:])
+        if !ok_aliases {
+            context.allocator = old_allocator
+            return result, clone_compile_error(err_aliases, result_allocator), false
+        }
+        aliases = loaded_aliases
+        if repl_generation {
+            for &top in expanded_forms {
+                rewrite_repl_stream_output_form(&top.form)
+            }
+        }
+        repl_context_expansion_cache_store(
+            context_cache_key,
+            expanded_forms[:],
+            macros[:],
+            aliases,
+        )
     }
+    context_form_count := len(expanded_forms)
     alias_names := alias_prefix_names(aliases)
     defer delete(alias_names)
-
     if repl_generation {
         for top in repl_retained_forms {
             if !is_defmacro_form(top.form) {
@@ -1171,8 +1225,8 @@ compile_eval_path_with_map :: proc(
 
     if repl_generation {
         rewrite_repl_stream_output_form(&expanded_eval_form)
-        for &top in expanded_forms {
-            rewrite_repl_stream_output_form(&top.form)
+        for i := context_form_count; i < len(expanded_forms); i += 1 {
+            rewrite_repl_stream_output_form(&expanded_forms[i].form)
         }
     }
 
@@ -1218,8 +1272,40 @@ compile_eval_path_with_map :: proc(
             append(&all_repl_var_names, name)
         }
     }
+    if repl_execution_plan != nil && repl_generation &&
+       repl_batch.has_runtime && len(repl_batch.definitions) == 0 {
+        semantic_plan, planned := repl_build_semantic_execution_plan(
+            program,
+            expanded_eval_form,
+            repl_recent_result_types,
+            all_repl_value_names[:],
+            all_repl_var_names[:],
+            repl_current_proc_names[:],
+            repl_stale_proc_names,
+            repl_scalar_invokes,
+        )
+        if planned {
+            cloned := Repl_Execution_Plan{
+                encoded = strings.clone(
+                    semantic_plan.encoded,
+                    result_allocator,
+                ),
+                result_abi = strings.clone(
+                    semantic_plan.result_abi,
+                    result_allocator,
+                ),
+                preserves_result_history =
+                    semantic_plan.preserves_result_history,
+                recent_result_mask = semantic_plan.recent_result_mask,
+            }
+            repl_execution_plan_delete(&semantic_plan)
+            repl_execution_plan^ = cloned
+            context.allocator = old_allocator
+            return result, Compile_Error{}, true
+        }
+    }
     context.allocator = old_allocator
-    return compile_program_eval_form_with_map(
+    result, err, ok = compile_program_eval_form_with_map(
         program,
         expanded_eval_form,
         no_print,
@@ -1241,4 +1327,36 @@ compile_eval_path_with_map :: proc(
         repl_inspection_page_limit,
         repl_debug_capture_values,
     )
+    if !ok || repl_incremental_program == nil || !repl_generation ||
+       repl_batch.has_runtime || len(repl_batch.definitions) == 0 {
+        return
+    }
+    definitions_are_procs := true
+    for definition in repl_batch.definitions {
+        if eval_form_head(definition) != "defn" {
+            definitions_are_procs = false
+            break
+        }
+    }
+    if !definitions_are_procs {
+        return
+    }
+    context.allocator = context.temp_allocator
+    incremental, built := repl_build_incremental_program(
+        program,
+        repl_current_proc_names[:],
+        repl_stale_proc_names,
+        repl_scalar_invokes,
+    )
+    if built {
+        repl_incremental_program^ = Repl_Incremental_Program{
+            encoded = strings.clone(
+                incremental.encoded,
+                result_allocator,
+            ),
+        }
+        repl_incremental_program_delete(&incremental)
+    }
+    context.allocator = old_allocator
+    return
 }

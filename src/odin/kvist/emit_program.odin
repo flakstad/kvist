@@ -582,11 +582,56 @@ emit_eval_decls_with_source_map :: proc(
             emit_line(
                 &e,
                 fmt.tprintf(
+                    "kvist_repl_result_snapshots: [3]%s",
+                    eval_result_ty,
+                ),
+            )
+            emit_line(
+                &e,
+                fmt.tprintf(
                     "kvist_repl_result_impl :: proc() -> %s %c return kvist_repl_result_storage %c",
                     eval_result_ty,
                     '{',
                     '}',
                 ),
+            )
+            for snapshot_index in 0..<3 {
+                emit_line(
+                    &e,
+                    fmt.tprintf(
+                        "kvist_repl_result_snapshot_%d :: proc() -> %s %c return kvist_repl_result_snapshots[%d] %c",
+                        snapshot_index,
+                        eval_result_ty,
+                        '{',
+                        snapshot_index,
+                        '}',
+                    ),
+                )
+            }
+            emit_line(
+                &e,
+                `@(export)
+kvist_repl_stabilize_result :: proc "c" (occupied: [^]rawptr, occupied_count: int) -> rawptr {
+    addresses := [3]rawptr{
+        transmute(rawptr)kvist_repl_result_snapshot_0,
+        transmute(rawptr)kvist_repl_result_snapshot_1,
+        transmute(rawptr)kvist_repl_result_snapshot_2,
+    }
+    for address, snapshot_index in addresses {
+        used := false
+        for occupied_index in 0..<occupied_count {
+            if occupied[occupied_index] == address {
+                used = true
+                break
+            }
+        }
+        if !used {
+            kvist_repl_result_snapshots[snapshot_index] = kvist_repl_result_storage
+            return address
+        }
+    }
+    return nil
+}`,
             )
             transfer_body :=
                 repl_result_transfer_body_text(
@@ -672,6 +717,17 @@ emit_eval_decls_with_source_map :: proc(
                 .Repl_Unretained_Lifecycle,
             )
         }
+    }
+    if initialize_context && !captures_eval_result {
+        emit_line(
+            &e,
+            `@(export)
+kvist_repl_stabilize_result :: proc "c" (occupied: [^]rawptr, occupied_count: int) -> rawptr {
+    return nil
+}`,
+        )
+        strings.write_byte(&e.builder, '\n')
+        e.line += 1
     }
 
     if initialize_context {
@@ -1600,6 +1656,15 @@ emit_repl_scalar_invoke_adapter :: proc(
     if proc_decl.returns.single_ty == "Data" {
         emit_line(e, fmt.tprintf("%s__data_results: [3]Data", adapter))
         emit_line(e, fmt.tprintf("%s__data_next: int", adapter))
+        emit_line(
+            e,
+            fmt.tprintf(
+                "%s__Data_Handle :: struct %c value: Data, rendered: string, rendered_ready: bool %c",
+                adapter,
+                '{',
+                '}',
+            ),
+        )
         for index in 0..<3 {
             emit_line(
                 e,
@@ -1614,6 +1679,100 @@ emit_repl_scalar_invoke_adapter :: proc(
                 ),
             )
         }
+        emit_line(
+            e,
+            fmt.tprintf(
+                "%s__data_handle_release :: proc \"c\" (context_ptr: rawptr) %c",
+                adapter,
+                '{',
+            ),
+        )
+        e.indent += 1
+        emit_line(e, "if context_ptr == nil { return }")
+        emit_line(e, "context = repl_runtime.default_context()")
+        emit_line(e, "context.allocator = kvist_repl_host.allocator")
+        emit_line(
+            e,
+            fmt.tprintf(
+                "handle := transmute(^%s__Data_Handle)context_ptr",
+                adapter,
+            ),
+        )
+        emit_line(e, "kvist_data_release(handle.value)")
+        emit_line(e, "delete(handle.rendered)")
+        emit_line(e, "free(handle)")
+        e.indent -= 1
+        emit_line(e, "}")
+        emit_line(
+            e,
+            fmt.tprintf(
+                "%s__data_handle_commit :: proc \"c\" (context_ptr: rawptr) -> rawptr %c",
+                adapter,
+                '{',
+            ),
+        )
+        e.indent += 1
+        emit_line(e, "if context_ptr == nil { return nil }")
+        emit_line(e, "context = repl_runtime.default_context()")
+        emit_line(e, "context.allocator = kvist_repl_host.allocator")
+        emit_line(
+            e,
+            fmt.tprintf(
+                "handle := transmute(^%s__Data_Handle)context_ptr",
+                adapter,
+            ),
+        )
+        emit_line(e, fmt.tprintf("cell := %s__data_next %% 3", adapter))
+        emit_line(e, fmt.tprintf("%s__data_next += 1", adapter))
+        emit_line(e, fmt.tprintf("kvist_data_release(%s__data_results[cell])", adapter))
+        emit_line(e, fmt.tprintf("%s__data_results[cell] = kvist_data_retain(handle.value)", adapter))
+        for index in 0..<3 {
+            prefix := "if" if index == 0 else "else if"
+            emit_line(
+                e,
+                fmt.tprintf(
+                    "%s cell == %d %c return transmute(rawptr)%s__data_result_%d %c",
+                    prefix,
+                    index,
+                    '{',
+                    adapter,
+                    index,
+                    '}',
+                ),
+            )
+        }
+        emit_line(e, "return nil")
+        e.indent -= 1
+        emit_line(e, "}")
+        emit_line(
+            e,
+            fmt.tprintf(
+                "%s__data_handle_render :: proc \"c\" (context_ptr: rawptr, rendered: ^Kvist_Repl_Rendered_Value) -> bool %c",
+                adapter,
+                '{',
+            ),
+        )
+        e.indent += 1
+        emit_line(e, "if context_ptr == nil || rendered == nil { return false }")
+        emit_line(e, "context = repl_runtime.default_context()")
+        emit_line(e, "context.allocator = kvist_repl_host.allocator")
+        emit_line(
+            e,
+            fmt.tprintf(
+                "handle := transmute(^%s__Data_Handle)context_ptr",
+                adapter,
+            ),
+        )
+        emit_line(e, "if !handle.rendered_ready {")
+        e.indent += 1
+        emit_line(e, "handle.rendered = kvist_data_repr(handle.value)")
+        emit_line(e, "handle.rendered_ready = true")
+        e.indent -= 1
+        emit_line(e, "}")
+        emit_line(e, "rendered^ = {data = raw_data(handle.rendered), length = len(handle.rendered)}")
+        emit_line(e, "return true")
+        e.indent -= 1
+        emit_line(e, "}")
     }
     emit_line(
         e,
@@ -1648,6 +1807,18 @@ emit_repl_scalar_invoke_adapter :: proc(
                 '}',
             ),
         )
+        if param.ty == "Data" {
+            emit_line(
+                e,
+                fmt.tprintf(
+                    "if args[%d].source_value == nil && args[%d].source_address == nil %c return false %c",
+                    index,
+                    index,
+                    '{',
+                    '}',
+                ),
+            )
+        }
     }
     arguments := strings.builder_make()
     defer strings.builder_destroy(&arguments)
@@ -1669,7 +1840,9 @@ emit_repl_scalar_invoke_adapter :: proc(
         case "Data":
             fmt.sbprintf(
                 &arguments,
-                "(transmute(proc() -> Data)args[%d].source_address)()",
+                "((transmute(^Data)args[%d].source_value)^ if args[%d].source_value != nil else (transmute(proc() -> Data)args[%d].source_address)())",
+                index,
+                index,
                 index,
             )
         }
@@ -1701,33 +1874,22 @@ emit_repl_scalar_invoke_adapter :: proc(
             ),
         )
     case "Data":
-        emit_line(e, fmt.tprintf("cell := %s__data_next %% 3", adapter))
-        emit_line(e, fmt.tprintf("%s__data_next += 1", adapter))
-        emit_line(e, fmt.tprintf("kvist_data_release(%s__data_results[cell])", adapter))
-        emit_line(e, fmt.tprintf("%s__data_results[cell] = kvist_data_retain(value)", adapter))
+        emit_line(e, fmt.tprintf("handle := new(%s__Data_Handle)", adapter))
         if owned {
-            emit_line(e, "kvist_data_release(value)")
-        }
-        emit_line(e, fmt.tprintf("rendered := kvist_data_repr(%s__data_results[cell])", adapter))
-        emit_line(e, "result_address: rawptr")
-        for index in 0..<3 {
-            prefix := "if" if index == 0 else "else if"
-            emit_line(
-                e,
-                fmt.tprintf(
-                    "%s cell == %d %c result_address = transmute(rawptr)%s__data_result_%d %c",
-                    prefix,
-                    index,
-                    '{',
-                    adapter,
-                    index,
-                    '}',
-                ),
-            )
+            emit_line(e, "handle.value = value")
+        } else {
+            emit_line(e, "handle.value = kvist_data_retain(value)")
         }
         emit_line(
             e,
-            "result^ = {kind = .Data, owned = true, string_data = raw_data(rendered), string_length = len(rendered), result_address = result_address}",
+            fmt.tprintf(
+                "result^ = %c kind = .Data, owned = true, source_value = rawptr(&handle.value), managed_context = rawptr(handle), managed_release = %s__data_handle_release, managed_commit = %s__data_handle_commit, managed_render = %s__data_handle_render %c",
+                '{',
+                adapter,
+                adapter,
+                adapter,
+                '}',
+            ),
         )
     }
     emit_line(e, "return true")
@@ -1801,13 +1963,20 @@ emit_eval_program_with_source_map :: proc(
             kind = .Raw,
             span = eval_form.span,
             raw_text = `@(export)
-kvist_repl_api_version: u32 = 28
+kvist_repl_api_version: u32 = 30
 
 Kvist_Repl_Register_Proc :: proc "c" (ctx: rawptr, name: cstring, signature: cstring, address: rawptr)
 Kvist_Repl_Lookup_Proc :: proc "c" (ctx: rawptr, name: cstring, signature: cstring) -> rawptr
 Kvist_Repl_Register_Result :: proc "c" (ctx: rawptr, signature: cstring, address: rawptr)
 Kvist_Repl_Render_Scalar_Result :: proc "c" (ctx: rawptr, type_name: cstring, address: rawptr)
 Kvist_Repl_Scalar_Value_Kind :: enum u32 {Invalid, Bool, Int, F64, String, Data}
+Kvist_Repl_Rendered_Value :: struct {
+    data: [^]u8,
+    length: int,
+}
+Kvist_Repl_Scalar_Managed_Release :: proc "c" (ctx: rawptr)
+Kvist_Repl_Scalar_Managed_Commit :: proc "c" (ctx: rawptr) -> rawptr
+Kvist_Repl_Scalar_Managed_Render :: proc "c" (ctx: rawptr, rendered: ^Kvist_Repl_Rendered_Value) -> bool
 Kvist_Repl_Scalar_Value :: struct {
     kind: Kvist_Repl_Scalar_Value_Kind,
     owned: bool,
@@ -1817,6 +1986,11 @@ Kvist_Repl_Scalar_Value :: struct {
     string_length: int,
     source_address: rawptr,
     result_address: rawptr,
+    source_value: rawptr,
+    managed_context: rawptr,
+    managed_release: Kvist_Repl_Scalar_Managed_Release,
+    managed_commit: Kvist_Repl_Scalar_Managed_Commit,
+    managed_render: Kvist_Repl_Scalar_Managed_Render,
 }
 Kvist_Repl_Scalar_Invoke :: proc "c" (args: [^]Kvist_Repl_Scalar_Value, arg_count: int, result: ^Kvist_Repl_Scalar_Value) -> bool
 Kvist_Repl_Register_Scalar_Invoke :: proc "c" (ctx: rawptr, name: cstring, signature: cstring, result_abi: cstring, address: Kvist_Repl_Scalar_Invoke)
@@ -1827,10 +2001,6 @@ Kvist_Repl_Debug_Flags :: proc "c" (ctx: rawptr) -> u32
 Kvist_Repl_Trace_Point :: proc "c" (ctx: rawptr, trace_id: cstring)
 Kvist_Repl_Enter_Frame :: proc "c" (ctx: rawptr)
 Kvist_Repl_Leave_Frame :: proc "c" (ctx: rawptr)
-Kvist_Repl_Rendered_Value :: struct {
-    data: [^]u8,
-    length: int,
-}
 Kvist_Repl_Trace_Values :: proc "c" (ctx: rawptr, trace_id: cstring, values: [^]Kvist_Repl_Rendered_Value, value_count: int)
 Kvist_Repl_Condition :: proc "c" (ctx: rawptr, pause_id: cstring, condition_type, message, data, value_type: Kvist_Repl_Rendered_Value, restart_flags: u32)
 Kvist_Repl_Emit_Output :: proc "c" (ctx: rawptr, value: Kvist_Repl_Rendered_Value)

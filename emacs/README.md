@@ -57,6 +57,11 @@ creating a same-named binding in the entry package. The CLI protocol remains
 editor-neutral; buffer routing, overlays, and process lifecycle live entirely
 in this Emacs package.
 
+Definition and whole-buffer evaluation favor interactive latency. Before
+stepping through a definition's local values, evaluate it with pause or trace
+enabled. Set `kvist-repl-defer-definition-debug-values` to nil if every
+definition should be ready for stepping immediately.
+
 For an application, prefer an ordinary `dev/user.kvist` as the explicit REPL
 entry point. It can import the application graph and contain development-only
 start/stop helpers, fixtures, and `(comment ...)` experiments. This is a
@@ -110,8 +115,8 @@ Company's idle completion is disabled locally in Kvist buffers, keeping the
 interaction strictly TAB-driven and avoiding a conflicting empty session after
 typing `.`.
 
-For a running Olive application, `kvist-repl-attach` replaces the current
-package's standalone client with `kvist repl --attach ENDPOINT`. Emacs can
+For a running reload-enabled application, `kvist-repl-attach` replaces the
+current package's standalone client with `kvist repl --attach ENDPOINT`. Emacs can
 discover the live generation and typed capabilities, invoke a selected
 capability, evaluate ordinary forms and buffers as session-local native
 generations inside the application, and request reload. Attached definitions
@@ -121,7 +126,8 @@ application stdout. Reload stays pending until the replacement generation
 reaches an application checkpoint, so the success message names the new
 generation rather than merely the generation that accepted the request.
 Application-specific handlers and native evaluations run synchronously at
-`reload.checkpoint!` on the application thread.
+`reload.checkpoint!` on the application thread. Olive uses this integration,
+but it is not required for ordinary standalone REPL sessions.
 `C-c M-r` resets either session kind; for an attached session it unloads the
 ad hoc generations at the next checkpoint without restarting the application
 or discarding its Olive-owned state.

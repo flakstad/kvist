@@ -37,6 +37,12 @@ jobs:
         shell: bash
         run: odin version
 
+      - name: Test Odin toolchain integration
+        shell: bash
+        env:
+          KVIST_TEST_REQUIRE_ODIN_LLVM: "1"
+        run: odin test src/odin/kvist_repl -define:ODIN_TEST_LOG_LEVEL=warning -define:ODIN_TEST_THREADS=1
+
       - name: Run unit tests
         if: runner.os != 'Windows'
         shell: bash

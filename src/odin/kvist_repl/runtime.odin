@@ -13,8 +13,9 @@ import "base:runtime"
 import "core:strings"
 import "core:sync"
 import "core:time"
+import repl_plan "../kvist_repl_plan"
 
-GENERATION_ABI_VERSION :: u32(28)
+GENERATION_ABI_VERSION :: u32(30)
 
 DEBUG_FLAG_PAUSE :: u32(1)
 DEBUG_FLAG_TRACE :: u32(2)
@@ -42,6 +43,11 @@ Register_Result :: proc "c" (
     address: rawptr,
 )
 
+Stabilize_Result :: proc "c" (
+    occupied: [^]rawptr,
+    occupied_count: int,
+) -> rawptr
+
 Render_Scalar_Result :: proc "c" (
     ctx: rawptr,
     type_name: cstring,
@@ -57,6 +63,18 @@ Scalar_Value_Kind :: enum u32 {
     Data,
 }
 
+Rendered_Value :: struct {
+    data:   [^]u8,
+    length: int,
+}
+
+Scalar_Managed_Release :: proc "c" (ctx: rawptr)
+Scalar_Managed_Commit :: proc "c" (ctx: rawptr) -> rawptr
+Scalar_Managed_Render :: proc "c" (
+    ctx: rawptr,
+    rendered: ^Rendered_Value,
+) -> bool
+
 Scalar_Value :: struct {
     kind:          Scalar_Value_Kind,
     owned:         bool,
@@ -66,6 +84,11 @@ Scalar_Value :: struct {
     string_length: int,
     source_address: rawptr,
     result_address: rawptr,
+    source_value: rawptr,
+    managed_context: rawptr,
+    managed_release: Scalar_Managed_Release,
+    managed_commit: Scalar_Managed_Commit,
+    managed_render: Scalar_Managed_Render,
 }
 
 Scalar_Invoke :: proc "c" (
@@ -94,11 +117,6 @@ Register_State :: proc "c" (
     clone: State_Clone,
     restore: State_Restore,
 )
-
-Rendered_Value :: struct {
-    data:   [^]u8,
-    length: int,
-}
 
 Page_Emit :: proc "c" (
     ctx: rawptr,
@@ -543,6 +561,9 @@ Checkpoint :: struct {
 Generation_Symbols :: struct {
     api_version: ^u32 `dynlib:"kvist_repl_api_version"`,
     run:         proc "c" (^Host_API) `dynlib:"kvist_repl_run"`,
+    stabilize_result: Stabilize_Result `dynlib:"kvist_repl_stabilize_result"`,
+    path:        string,
+    result_address: rawptr,
     __handle:    dynlib.Library,
 }
 
@@ -552,6 +573,7 @@ Worker :: struct {
     generations: [dynamic]Generation_Symbols,
     proc_slots:  [dynamic]Proc_Slot,
     scalar_invoke_slots: [dynamic]Scalar_Invoke_Slot,
+    incremental_backend: Incremental_LLVM_Backend,
     result_slots: [3]Proc_Slot,
     direct_int_results: [3]int,
     next_direct_int_result: int,
@@ -596,6 +618,7 @@ Worker :: struct {
     abort_requested:  bool,
     abort_unwind_depth: int,
     last_run_aborted: bool,
+    incremental_call_failed: bool,
     output:           string,
     emit_output_to_stdout: bool,
     attached_pause_ctx: rawptr,
@@ -633,7 +656,6 @@ worker_direct_f64_result_2 :: proc() -> f64 { return worker_direct_result_owner.
 worker_direct_string_result_0 :: proc() -> string { return worker_direct_result_owner.direct_string_results[0] }
 worker_direct_string_result_1 :: proc() -> string { return worker_direct_result_owner.direct_string_results[1] }
 worker_direct_string_result_2 :: proc() -> string { return worker_direct_result_owner.direct_string_results[2] }
-
 Worker_Allocation_Stats :: struct {
     live_allocations:        int,
     live_bytes:              int,
@@ -950,6 +972,46 @@ worker_register_result :: proc "c" (
     worker.result_slots[2] = next_slots[2]
 }
 
+worker_stabilize_loaded_result :: proc(
+    worker: ^Worker,
+    generation: ^Generation_Symbols,
+) -> bool {
+    if worker == nil || generation == nil ||
+       generation.result_address == nil {
+        return true
+    }
+    referenced := false
+    for slot in worker.result_slots {
+        if slot.address == generation.result_address {
+            referenced = true
+            break
+        }
+    }
+    if !referenced {
+        return true
+    }
+    if generation.stabilize_result == nil {
+        return false
+    }
+    occupied: [3]rawptr
+    for slot, index in worker.result_slots {
+        occupied[index] = slot.address
+    }
+    stable_address := generation.stabilize_result(
+        raw_data(occupied[:]),
+        len(occupied),
+    )
+    if stable_address == nil {
+        return false
+    }
+    for &slot in worker.result_slots {
+        if slot.address == generation.result_address {
+            slot.address = stable_address
+        }
+    }
+    return true
+}
+
 worker_render_scalar_result :: proc "c" (
     context_ptr: rawptr,
     type_name_ptr: cstring,
@@ -1014,6 +1076,7 @@ worker_invoke_int :: proc(
     context.allocator = worker.allocator
     worker.abort_requested = false
     worker.last_run_aborted = false
+    worker.incremental_call_failed = false
     value: int
     switch len(args) {
     case 0: value = (transmute(proc() -> int)address)()
@@ -1051,43 +1114,21 @@ worker_invoke_int :: proc(
     return true
 }
 
-worker_invoke_scalar :: proc(
+worker_store_scalar_result :: proc(
     worker: ^Worker,
-    name,
-    signature: string,
-    args: []Scalar_Value,
+    result: Scalar_Value,
+    data_result_abi := "",
 ) -> bool {
-    if worker == nil || len(args) > 4 {
-        return false
-    }
-    invoke_slot: ^Scalar_Invoke_Slot
-    for &slot in worker.scalar_invoke_slots {
-        if slot.name == name && slot.signature == signature {
-            invoke_slot = &slot
-            break
-        }
-    }
-    if invoke_slot == nil || invoke_slot.address == nil {
+    if worker == nil {
         return false
     }
     context = runtime.default_context()
     context.allocator = worker.allocator
-    worker.abort_requested = false
-    worker.last_run_aborted = false
-    result := Scalar_Value{}
-    invoked := invoke_slot.address(raw_data(args), len(args), &result)
-    worker.last_run_aborted = worker.abort_requested
-    worker.abort_requested = false
-    if !invoked {
-        return false
-    }
-    if worker.last_run_aborted {
-        return true
-    }
     worker_direct_result_owner = worker
     signature_text := ""
     result_address: rawptr
     rendered := ""
+    defer delete(rendered)
     switch result.kind {
     case .Bool:
         cell := worker.next_direct_bool_result % len(worker.direct_bool_results)
@@ -1128,12 +1169,15 @@ worker_invoke_scalar :: proc(
     case .String:
         cell := worker.next_direct_string_result % len(worker.direct_string_results)
         worker.next_direct_string_result += 1
-        delete(worker.direct_string_results[cell])
         value := string(result.string_data[:result.string_length])
-        worker.direct_string_results[cell] = strings.clone(value)
+        copied_value := strings.clone(value)
         if result.owned {
-            delete(value)
+            worker_release_owned_scalar_value(worker, result)
         }
+        // The source can be a borrowed *3 result that is about to reuse this
+        // ring cell. Copy it before releasing the destination cell.
+        delete(worker.direct_string_results[cell])
+        worker.direct_string_results[cell] = copied_value
         addresses := [?]rawptr{
             transmute(rawptr)worker_direct_string_result_0,
             transmute(rawptr)worker_direct_string_result_1,
@@ -1143,21 +1187,39 @@ worker_invoke_scalar :: proc(
         signature_text = "value:string"
         rendered = fmt.aprintf("%s\n", worker.direct_string_results[cell])
     case .Data:
-        if result.result_address == nil || result.string_data == nil ||
-           result.string_length < 0 {
+        if data_result_abi == "" || result.managed_render == nil {
+            worker_release_owned_scalar_value(worker, result)
             return false
         }
-        result_address = result.result_address
-        signature_text = invoke_slot.result_abi
-        value := string(result.string_data[:result.string_length])
+        rendered_value := Rendered_Value{}
+        if !result.managed_render(result.managed_context, &rendered_value) {
+            worker_release_owned_scalar_value(worker, result)
+            return false
+        }
+        if rendered_value.length < 0 ||
+           (rendered_value.length > 0 && rendered_value.data == nil) {
+            worker_release_owned_scalar_value(worker, result)
+            return false
+        }
+        value := string(rendered_value.data[:rendered_value.length])
         rendered = fmt.aprintf("%s\n", value)
+        result_address = result.result_address
+        if result.managed_commit != nil {
+            result_address = result.managed_commit(
+                result.managed_context,
+            )
+        }
+        if result_address == nil {
+            worker_release_owned_scalar_value(worker, result)
+            return false
+        }
+        signature_text = data_result_abi
         if result.owned {
-            delete(value)
+            worker_release_owned_scalar_value(worker, result)
         }
     case .Invalid:
         return false
     }
-    defer delete(rendered)
     worker_register_result(
         rawptr(worker),
         cstring(raw_data(signature_text)),
@@ -1168,6 +1230,907 @@ worker_invoke_scalar :: proc(
         Rendered_Value{data = raw_data(rendered), length = len(rendered)},
     )
     return true
+}
+
+worker_execution_plan_result :: proc(
+    worker: ^Worker,
+    index: int,
+) -> (Scalar_Value, bool) {
+    if worker == nil || index < 0 || index >= len(worker.result_slots) {
+        return {}, false
+    }
+    slot := &worker.result_slots[index]
+    if slot.address == nil {
+        return {}, false
+    }
+    switch slot.signature {
+    case "value:bool":
+        value := (transmute(proc() -> bool)slot.address)()
+        return Scalar_Value{
+            kind = .Bool,
+            int_value = 1 if value else 0,
+        }, true
+    case "value:int":
+        value := (transmute(proc() -> int)slot.address)()
+        return Scalar_Value{
+            kind = .Int,
+            int_value = i64(value),
+        }, true
+    case "value:f64":
+        value := (transmute(proc() -> f64)slot.address)()
+        return Scalar_Value{
+            kind = .F64,
+            float_value = value,
+        }, true
+    case "value:string":
+        value := (transmute(proc() -> string)slot.address)()
+        return Scalar_Value{
+            kind = .String,
+            string_data = raw_data(value),
+            string_length = len(value),
+        }, true
+    }
+    if strings.has_prefix(slot.signature, "value:Data") {
+        return Scalar_Value{
+            kind = .Data,
+            source_address = slot.address,
+            result_address = slot.address,
+        }, true
+    }
+    return {}, false
+}
+
+worker_scalar_invoke_target :: proc(
+    target: string,
+) -> (name, signature: string, ok: bool) {
+    separator := -1
+    for index := 0; index < len(target); index += 1 {
+        if target[index] == 0 {
+            if separator >= 0 {
+                return "", "", false
+            }
+            separator = index
+        }
+    }
+    if separator <= 0 || separator+1 >= len(target) {
+        return "", "", false
+    }
+    return target[:separator], target[separator+1:], true
+}
+
+worker_find_scalar_invoke :: proc(
+    worker: ^Worker,
+    name,
+    signature: string,
+) -> ^Scalar_Invoke_Slot {
+    if worker == nil {
+        return nil
+    }
+    for &slot in worker.scalar_invoke_slots {
+        if slot.name == name && slot.signature == signature {
+            return &slot
+        }
+    }
+    return nil
+}
+
+worker_call_scalar_invoke :: proc(
+    worker: ^Worker,
+    invoke_slot: ^Scalar_Invoke_Slot,
+    args: []Scalar_Value,
+) -> (result: Scalar_Value, aborted, ok: bool) {
+    if worker == nil || invoke_slot == nil || invoke_slot.address == nil ||
+       len(args) > 4 {
+        return {}, false, false
+    }
+    context = runtime.default_context()
+    context.allocator = worker.allocator
+    worker.abort_requested = false
+    worker.last_run_aborted = false
+    worker.incremental_call_failed = false
+    invoked := invoke_slot.address(raw_data(args), len(args), &result)
+    worker.last_run_aborted = worker.abort_requested
+    worker.abort_requested = false
+    if !invoked {
+        return {}, false, false
+    }
+    return result, worker.last_run_aborted, true
+}
+
+WORKER_PLAN_MAX_OWNED_STRING_BYTES :: 64 * 1024 * 1024
+WORKER_PLAN_MAX_OWNED_VALUES :: repl_plan.MAX_INSTRUCTIONS
+
+Worker_Plan_Owned_Value :: struct {
+    scalar:     Scalar_Value,
+    references: int,
+    active:     bool,
+}
+
+Worker_Plan_Owned_Values :: struct {
+    values:            [dynamic]Worker_Plan_Owned_Value,
+    live_values:       int,
+    live_string_bytes: int,
+}
+
+Worker_Plan_Value :: struct {
+    scalar: Scalar_Value,
+    // One-based index into the execution's owned-value table. Zero means that
+    // the scalar does not depend on an execution-owned allocation.
+    owner:  int,
+}
+
+worker_owned_scalar_allocator :: proc(worker: ^Worker) -> runtime.Allocator {
+    if worker != nil && worker.generation_allocator_initialized &&
+       worker.host_api.allocator.procedure != nil {
+        return worker.host_api.allocator
+    }
+    if worker != nil {
+        return worker.allocator
+    }
+    return context.allocator
+}
+
+worker_release_owned_scalar_value :: proc(
+    worker: ^Worker,
+    value: Scalar_Value,
+) {
+    if !value.owned {
+        return
+    }
+    if value.managed_release != nil {
+        if value.managed_context != nil {
+            value.managed_release(value.managed_context)
+        }
+        return
+    }
+    if (value.kind != .String && value.kind != .Data) ||
+       value.string_length < 0 ||
+       (value.string_length > 0 && value.string_data == nil) {
+        return
+    }
+    owned := string(value.string_data[:value.string_length])
+    delete(owned, worker_owned_scalar_allocator(worker))
+}
+
+worker_plan_owned_value_contains_string :: proc(
+    owned: Worker_Plan_Owned_Value,
+    value: Scalar_Value,
+) -> bool {
+    if !owned.active || owned.scalar.kind != .String ||
+       owned.scalar.string_length <= 0 ||
+       owned.scalar.string_data == nil ||
+       value.kind != .String || value.string_length < 0 ||
+       value.string_length > owned.scalar.string_length ||
+       value.string_data == nil {
+        return false
+    }
+    owned_start := uintptr(rawptr(owned.scalar.string_data))
+    value_start := uintptr(rawptr(value.string_data))
+    if value_start < owned_start {
+        return false
+    }
+    return value_start-owned_start <=
+           uintptr(owned.scalar.string_length-value.string_length)
+}
+
+worker_plan_owned_value_release :: proc(
+    worker: ^Worker,
+    owned_values: ^Worker_Plan_Owned_Values,
+    owner: int,
+) {
+    index := owner-1
+    if owned_values == nil || index < 0 ||
+       index >= len(owned_values.values) {
+        return
+    }
+    owned := &owned_values.values[index]
+    if !owned.active || owned.references <= 0 {
+        return
+    }
+    owned.references -= 1
+    if owned.references > 0 {
+        return
+    }
+    worker_release_owned_scalar_value(worker, owned.scalar)
+    if owned.scalar.kind == .String {
+        owned_values.live_string_bytes -= owned.scalar.string_length
+    }
+    owned_values.live_values -= 1
+    owned^ = {}
+}
+
+worker_plan_owned_value_retain_string_alias :: proc(
+    owned_values: ^Worker_Plan_Owned_Values,
+    value: Scalar_Value,
+) -> int {
+    if owned_values == nil {
+        return 0
+    }
+    for &owned, index in owned_values.values {
+        if worker_plan_owned_value_contains_string(owned, value) {
+            owned.references += 1
+            return index+1
+        }
+    }
+    return 0
+}
+
+worker_plan_owned_value_adopt :: proc(
+    worker: ^Worker,
+    owned_values: ^Worker_Plan_Owned_Values,
+    result: Scalar_Value,
+) -> (Worker_Plan_Value, bool) {
+    value := result
+    value.owned = false
+    if owned_values == nil || !result.owned ||
+       (result.kind != .String && result.kind != .Data) {
+        return {}, false
+    }
+    if result.kind == .String &&
+       (result.string_length < 0 ||
+        (result.string_length > 0 && result.string_data == nil)) {
+        return {}, false
+    }
+    if result.kind == .Data &&
+       (result.source_value == nil || result.managed_context == nil ||
+        result.managed_release == nil || result.managed_commit == nil ||
+        result.managed_render == nil) {
+        return {}, false
+    }
+    if result.kind == .String && result.string_length == 0 {
+        worker_release_owned_scalar_value(worker, result)
+        value.string_data = nil
+        return Worker_Plan_Value{scalar = value}, true
+    }
+    if owned_values.live_values >= WORKER_PLAN_MAX_OWNED_VALUES ||
+       (result.kind == .String &&
+        (result.string_length > WORKER_PLAN_MAX_OWNED_STRING_BYTES ||
+         owned_values.live_string_bytes >
+         WORKER_PLAN_MAX_OWNED_STRING_BYTES-result.string_length)) {
+        return {}, false
+    }
+    slot := -1
+    for owned, index in owned_values.values {
+        if !owned.active {
+            slot = index
+            break
+        }
+    }
+    entry := Worker_Plan_Owned_Value{
+        scalar = result,
+        references = 1,
+        active = true,
+    }
+    if slot < 0 {
+        append(&owned_values.values, entry)
+        slot = len(owned_values.values)-1
+    } else {
+        owned_values.values[slot] = entry
+    }
+    owned_values.live_values += 1
+    if result.kind == .String {
+        owned_values.live_string_bytes += result.string_length
+    }
+    return Worker_Plan_Value{scalar = value, owner = slot+1}, true
+}
+
+worker_plan_value_release :: proc(
+    worker: ^Worker,
+    owned_values: ^Worker_Plan_Owned_Values,
+    value: Worker_Plan_Value,
+) {
+    worker_plan_owned_value_release(worker, owned_values, value.owner)
+}
+
+worker_plan_value_retain :: proc(
+    owned_values: ^Worker_Plan_Owned_Values,
+    value: Worker_Plan_Value,
+) -> Worker_Plan_Value {
+    if value.owner > 0 && value.owner <= len(owned_values.values) {
+        owned := &owned_values.values[value.owner-1]
+        if owned.active {
+            owned.references += 1
+        }
+    }
+    return value
+}
+
+worker_plan_owned_values_delete :: proc(
+    worker: ^Worker,
+    owned_values: ^Worker_Plan_Owned_Values,
+) {
+    if owned_values == nil {
+        return
+    }
+    for &owned in owned_values.values {
+        if !owned.active {
+            continue
+        }
+        worker_release_owned_scalar_value(worker, owned.scalar)
+        owned = {}
+    }
+    delete(owned_values.values)
+    owned_values^ = {}
+}
+
+worker_plan_scalar_result_valid :: proc(
+    result: Scalar_Value,
+    invoke_slot: ^Scalar_Invoke_Slot,
+) -> bool {
+    if invoke_slot == nil {
+        return false
+    }
+    switch invoke_slot.result_abi {
+    case "value:bool": return result.kind == .Bool
+    case "value:int":  return result.kind == .Int
+    case "value:f64":  return result.kind == .F64
+    case "value:string":
+        expected_owned := strings.has_suffix(
+            invoke_slot.signature,
+            ")->string:owned",
+        )
+        expected_borrowed := strings.has_suffix(
+            invoke_slot.signature,
+            ")->string:borrowed",
+        )
+        return result.kind == .String &&
+               (expected_owned || expected_borrowed) &&
+               result.owned == expected_owned &&
+               result.string_length >= 0 &&
+               (result.string_length == 0 || result.string_data != nil)
+    case "value:Data":
+        return result.kind == .Data && result.owned &&
+               result.source_value != nil &&
+               result.managed_context != nil &&
+               result.managed_release != nil &&
+               result.managed_commit != nil &&
+               result.managed_render != nil
+    }
+    return false
+}
+
+worker_plan_scalar_result_supported :: proc(
+    invoke_slot: ^Scalar_Invoke_Slot,
+) -> bool {
+    if invoke_slot == nil {
+        return false
+    }
+    switch invoke_slot.result_abi {
+    case "value:bool", "value:int", "value:f64":
+        return true
+    case "value:string":
+        return strings.has_suffix(
+            invoke_slot.signature,
+            ")->string:borrowed",
+        ) || strings.has_suffix(
+            invoke_slot.signature,
+            ")->string:owned",
+        )
+    case "value:Data":
+        return strings.has_suffix(
+            invoke_slot.signature,
+            ")->Data:borrowed",
+        ) || strings.has_suffix(
+            invoke_slot.signature,
+            ")->Data:owned",
+        )
+    }
+    return false
+}
+
+worker_execute_plan :: proc(
+    worker: ^Worker,
+    encoded: string,
+) -> (message: string, ok: bool) {
+    if worker == nil {
+        return strings.clone("REPL worker is unavailable"), false
+    }
+    if worker.allocator.procedure == nil {
+        worker.allocator = context.allocator
+    }
+    context = runtime.default_context()
+    context.allocator = worker.allocator
+    worker.last_run_aborted = false
+    delete(worker.output)
+    worker.output = ""
+    plan, decoded := repl_plan.execution_plan_decode(encoded)
+    if !decoded {
+        return strings.clone("invalid resident execution plan"), false
+    }
+    defer repl_plan.execution_plan_delete(&plan)
+    owned_values := Worker_Plan_Owned_Values{}
+    defer worker_plan_owned_values_delete(worker, &owned_values)
+    stack: [dynamic]Worker_Plan_Value
+    defer delete(stack)
+    locals: [dynamic]Worker_Plan_Value
+    defer delete(locals)
+    initialized_locals: [dynamic]bool
+    defer delete(initialized_locals)
+    pc := 0
+    for pc < len(plan.instructions) {
+        if len(stack) > repl_plan.MAX_INSTRUCTIONS {
+            return strings.clone(
+                "resident execution plan stack limit exceeded",
+            ), false
+        }
+        instruction := plan.instructions[pc]
+        switch instruction.opcode {
+        case .Push_Bool:
+            append(&stack, Worker_Plan_Value{
+                scalar = {
+                    kind = .Bool,
+                    int_value = i64(instruction.operand),
+                },
+            })
+        case .Push_Int:
+            append(&stack, Worker_Plan_Value{
+                scalar = {
+                    kind = .Int,
+                    int_value = i64(instruction.operand),
+                },
+            })
+        case .Push_F64:
+            bits := i64(instruction.operand)
+            append(&stack, Worker_Plan_Value{
+                scalar = {
+                    kind = .F64,
+                    float_value = transmute(f64)bits,
+                },
+            })
+        case .Push_String:
+            append(&stack, Worker_Plan_Value{
+                scalar = {
+                    kind = .String,
+                    string_data = raw_data(instruction.text_operand),
+                    string_length = len(instruction.text_operand),
+                },
+            })
+        case .Invoke_Scalar_0, .Invoke_Scalar_1, .Invoke_Scalar_2,
+             .Invoke_Scalar_3, .Invoke_Scalar_4:
+            arity, arity_ok :=
+                repl_plan.opcode_scalar_invoke_arity(instruction.opcode)
+            name, signature, target_ok :=
+                worker_scalar_invoke_target(instruction.text_operand)
+            if !arity_ok || !target_ok || len(stack) < arity {
+                return strings.clone(
+                    "invalid resident scalar invocation",
+                ), false
+            }
+            invoke_slot := worker_find_scalar_invoke(worker, name, signature)
+            if !worker_plan_scalar_result_supported(invoke_slot) {
+                return strings.clone(
+                    "resident scalar adapter is unavailable",
+                ), false
+            }
+            arguments_start := len(stack)-arity
+            scalar_arguments: [4]Scalar_Value
+            for argument, index in stack[arguments_start:] {
+                scalar_arguments[index] = argument.scalar
+            }
+            result, aborted, invoked := worker_call_scalar_invoke(
+                worker,
+                invoke_slot,
+                scalar_arguments[:arity],
+            )
+            if !invoked {
+                return strings.clone(
+                    "resident scalar adapter invocation failed",
+                ), false
+            }
+            if aborted {
+                worker_release_owned_scalar_value(worker, result)
+                for argument in stack[arguments_start:] {
+                    worker_plan_value_release(
+                        worker,
+                        &owned_values,
+                        argument,
+                    )
+                }
+                resize(&stack, arguments_start)
+                return "", true
+            }
+            if !worker_plan_scalar_result_valid(
+                result,
+                invoke_slot,
+            ) {
+                worker_release_owned_scalar_value(worker, result)
+                for argument in stack[arguments_start:] {
+                    worker_plan_value_release(
+                        worker,
+                        &owned_values,
+                        argument,
+                    )
+                }
+                resize(&stack, arguments_start)
+                return strings.clone(
+                    "resident scalar adapter invocation failed",
+                ), false
+            }
+            plan_result := Worker_Plan_Value{scalar = result}
+            if result.owned {
+                adopted := false
+                plan_result, adopted = worker_plan_owned_value_adopt(
+                    worker,
+                    &owned_values,
+                    result,
+                )
+                if !adopted {
+                    worker_release_owned_scalar_value(worker, result)
+                    for argument in stack[arguments_start:] {
+                        worker_plan_value_release(
+                            worker,
+                            &owned_values,
+                            argument,
+                        )
+                    }
+                    resize(&stack, arguments_start)
+                    return strings.clone(
+                        "resident execution plan managed value limit exceeded",
+                    ), false
+                }
+            } else if result.kind == .String {
+                plan_result.owner =
+                    worker_plan_owned_value_retain_string_alias(
+                        &owned_values,
+                        result,
+                    )
+            }
+            for argument in stack[arguments_start:] {
+                worker_plan_value_release(
+                    worker,
+                    &owned_values,
+                    argument,
+                )
+            }
+            resize(&stack, arguments_start)
+            append(&stack, plan_result)
+        case .Load_Result:
+            value, loaded :=
+                worker_execution_plan_result(worker, instruction.operand)
+            if !loaded {
+                return strings.clone(
+                    "resident execution plan result is unavailable",
+                ), false
+            }
+            append(&stack, Worker_Plan_Value{scalar = value})
+        case .Store_Local:
+            if len(stack) < 1 || instruction.operand < 0 ||
+               instruction.operand >= repl_plan.MAX_INSTRUCTIONS {
+                return strings.clone(
+                    "invalid resident local store",
+                ), false
+            }
+            if instruction.operand >= len(locals) {
+                resize(&locals, instruction.operand+1)
+                resize(&initialized_locals, instruction.operand+1)
+            }
+            if initialized_locals[instruction.operand] {
+                worker_plan_value_release(
+                    worker,
+                    &owned_values,
+                    locals[instruction.operand],
+                )
+            }
+            locals[instruction.operand] = stack[len(stack)-1]
+            initialized_locals[instruction.operand] = true
+            resize(&stack, len(stack)-1)
+        case .Load_Local:
+            if instruction.operand < 0 ||
+               instruction.operand >= len(locals) ||
+               !initialized_locals[instruction.operand] {
+                return strings.clone(
+                    "resident execution plan local is unavailable",
+                ), false
+            }
+            append(
+                &stack,
+                worker_plan_value_retain(
+                    &owned_values,
+                    locals[instruction.operand],
+                ),
+            )
+        case .Add, .Subtract, .Multiply, .Divide, .Modulo:
+            arity := instruction.operand
+            if arity <= 0 || len(stack) < arity {
+                return strings.clone(
+                    "invalid resident execution plan stack",
+                ), false
+            }
+            start := len(stack)-arity
+            operand_kind := stack[start].scalar.kind
+            if operand_kind != .Int && operand_kind != .F64 {
+                return strings.clone(
+                    "resident arithmetic expects numeric operands",
+                ), false
+            }
+            for value in stack[start:] {
+                if value.scalar.kind != operand_kind {
+                    return strings.clone(
+                        "resident arithmetic expects matching operand types",
+                    ), false
+                }
+            }
+            result := Scalar_Value{kind = operand_kind}
+            if operand_kind == .Int {
+                result_int := int(stack[start].scalar.int_value)
+                if instruction.opcode == .Subtract && arity == 1 {
+                    result_int = -result_int
+                }
+                for value in stack[start+1:] {
+                    operand := int(value.scalar.int_value)
+                    #partial switch instruction.opcode {
+                    case .Add:      result_int += operand
+                    case .Subtract: result_int -= operand
+                    case .Multiply: result_int *= operand
+                    case .Divide:
+                        if operand == 0 ||
+                           (result_int == min(int) && operand == -1) {
+                            return strings.clone(
+                                "invalid resident integer division",
+                            ), false
+                        }
+                        result_int /= operand
+                    case .Modulo:
+                        if operand == 0 {
+                            return strings.clone(
+                                "invalid resident integer modulo",
+                            ), false
+                        }
+                        if result_int == min(int) && operand == -1 {
+                            result_int = 0
+                        } else {
+                            result_int %= operand
+                        }
+                    case:
+                    }
+                }
+                result.int_value = i64(result_int)
+            } else {
+                if instruction.opcode == .Modulo {
+                    return strings.clone(
+                        "resident modulo expects int operands",
+                    ), false
+                }
+                result_float := stack[start].scalar.float_value
+                if instruction.opcode == .Subtract && arity == 1 {
+                    result_float = -result_float
+                }
+                for value in stack[start+1:] {
+                    operand := value.scalar.float_value
+                    #partial switch instruction.opcode {
+                    case .Add:      result_float += operand
+                    case .Subtract: result_float -= operand
+                    case .Multiply: result_float *= operand
+                    case .Divide:   result_float /= operand
+                    case .Modulo:
+                        return strings.clone(
+                            "resident modulo expects int operands",
+                        ), false
+                    case:
+                    }
+                }
+                result.float_value = result_float
+            }
+            for value in stack[start:] {
+                worker_plan_value_release(
+                    worker,
+                    &owned_values,
+                    value,
+                )
+            }
+            resize(&stack, start)
+            append(&stack, Worker_Plan_Value{scalar = result})
+        case .Not:
+            if len(stack) < 1 || stack[len(stack)-1].scalar.kind != .Bool {
+                return strings.clone(
+                    "resident not expects a bool operand",
+                ), false
+            }
+            stack[len(stack)-1].scalar.int_value =
+                0 if stack[len(stack)-1].scalar.int_value != 0 else 1
+        case .Equal, .Not_Equal,
+             .Less, .Less_Equal, .Greater, .Greater_Equal:
+            if len(stack) < 2 {
+                return strings.clone(
+                    "invalid resident comparison stack",
+                ), false
+            }
+            left := stack[len(stack)-2].scalar
+            right := stack[len(stack)-1].scalar
+            if left.kind != right.kind ||
+               (instruction.opcode != .Equal &&
+                instruction.opcode != .Not_Equal &&
+                left.kind != .Int && left.kind != .F64) {
+                return strings.clone(
+                    "invalid resident comparison operands",
+                ), false
+            }
+            compared := false
+            if left.kind == .Bool {
+                compared = (left.int_value != 0) == (right.int_value != 0)
+                if instruction.opcode == .Not_Equal {
+                    compared = !compared
+                }
+            } else if left.kind == .Int {
+                #partial switch instruction.opcode {
+                case .Equal:         compared = left.int_value == right.int_value
+                case .Not_Equal:     compared = left.int_value != right.int_value
+                case .Less:          compared = left.int_value < right.int_value
+                case .Less_Equal:    compared = left.int_value <= right.int_value
+                case .Greater:       compared = left.int_value > right.int_value
+                case .Greater_Equal: compared = left.int_value >= right.int_value
+                case:
+                }
+            } else if left.kind == .F64 {
+                #partial switch instruction.opcode {
+                case .Equal:
+                    compared = left.float_value == right.float_value
+                case .Not_Equal:
+                    compared = left.float_value != right.float_value
+                case .Less:
+                    compared = left.float_value < right.float_value
+                case .Less_Equal:
+                    compared = left.float_value <= right.float_value
+                case .Greater:
+                    compared = left.float_value > right.float_value
+                case .Greater_Equal:
+                    compared = left.float_value >= right.float_value
+                case:
+                }
+            } else if left.kind == .String {
+                left_text := string(left.string_data[:left.string_length])
+                right_text := string(right.string_data[:right.string_length])
+                compared = left_text == right_text
+                if instruction.opcode == .Not_Equal {
+                    compared = !compared
+                }
+            } else {
+                return strings.clone(
+                    "invalid resident comparison operands",
+                ), false
+            }
+            worker_plan_value_release(
+                worker,
+                &owned_values,
+                stack[len(stack)-2],
+            )
+            worker_plan_value_release(
+                worker,
+                &owned_values,
+                stack[len(stack)-1],
+            )
+            resize(&stack, len(stack)-2)
+            append(&stack, Worker_Plan_Value{
+                scalar = {
+                    kind = .Bool,
+                    int_value = 1 if compared else 0,
+                },
+            })
+        case .Jump:
+            pc = instruction.operand
+            continue
+        case .Branch_False:
+            if len(stack) < 1 || stack[len(stack)-1].scalar.kind != .Bool {
+                return strings.clone(
+                    "resident branch expects a bool operand",
+                ), false
+            }
+            condition := stack[len(stack)-1].scalar.int_value != 0
+            worker_plan_value_release(
+                worker,
+                &owned_values,
+                stack[len(stack)-1],
+            )
+            resize(&stack, len(stack)-1)
+            if !condition {
+                pc = instruction.operand
+                continue
+            }
+        case .Short_False, .Short_True:
+            if len(stack) < 1 || stack[len(stack)-1].scalar.kind != .Bool {
+                return strings.clone(
+                    "resident boolean operation expects bool operands",
+                ), false
+            }
+            condition := stack[len(stack)-1].scalar.int_value != 0
+            should_jump :=
+                (!condition && instruction.opcode == .Short_False) ||
+                (condition && instruction.opcode == .Short_True)
+            if should_jump {
+                pc = instruction.operand
+                continue
+            }
+            worker_plan_value_release(
+                worker,
+                &owned_values,
+                stack[len(stack)-1],
+            )
+            resize(&stack, len(stack)-1)
+        case .Invalid:
+            return strings.clone("invalid resident execution opcode"), false
+        }
+        pc += 1
+    }
+    if len(stack) != 1 ||
+       (plan.result_kind == .Bool && stack[0].scalar.kind != .Bool) ||
+       (plan.result_kind == .Int && stack[0].scalar.kind != .Int) ||
+       (plan.result_kind == .F64 && stack[0].scalar.kind != .F64) ||
+       (plan.result_kind == .String && stack[0].scalar.kind != .String) ||
+       (plan.result_kind == .Data && stack[0].scalar.kind != .Data) {
+        return strings.clone("invalid resident execution result"), false
+    }
+    switch plan.result_action {
+    case .Rotate_History:
+        result_abi := "value:Data" if plan.result_kind == .Data else ""
+        if !worker_store_scalar_result(
+            worker,
+            stack[0].scalar,
+            result_abi,
+        ) {
+            return strings.clone("failed to store resident execution result"), false
+        }
+    case .Preserve_History:
+        if plan.result_kind == .Data {
+            return strings.clone("invalid resident execution result action"), false
+        }
+        rendered := ""
+        if stack[0].scalar.kind == .Bool {
+            rendered = fmt.aprintf(
+                "%v\n",
+                stack[0].scalar.int_value != 0,
+            )
+        } else if stack[0].scalar.kind == .F64 {
+            rendered = fmt.aprintf("%v\n", stack[0].scalar.float_value)
+        } else if stack[0].scalar.kind == .String {
+            value := string(
+                stack[0].scalar.string_data[
+                    :stack[0].scalar.string_length
+                ],
+            )
+            rendered = fmt.aprintf("%s\n", value)
+        } else {
+            rendered = fmt.aprintf(
+                "%v\n",
+                int(stack[0].scalar.int_value),
+            )
+        }
+        defer delete(rendered)
+        worker_emit_output(
+            rawptr(worker),
+            Rendered_Value{
+                data = raw_data(rendered),
+                length = len(rendered),
+            },
+        )
+    case .Invalid:
+        return strings.clone("invalid resident execution result action"), false
+    }
+    return "", true
+}
+
+worker_invoke_scalar :: proc(
+    worker: ^Worker,
+    name,
+    signature: string,
+    args: []Scalar_Value,
+) -> bool {
+    invoke_slot := worker_find_scalar_invoke(worker, name, signature)
+    if invoke_slot == nil {
+        return false
+    }
+    result, aborted, invoked := worker_call_scalar_invoke(
+        worker,
+        invoke_slot,
+        args,
+    )
+    if !invoked {
+        return false
+    }
+    if aborted {
+        worker_release_owned_scalar_value(worker, result)
+        return true
+    }
+    return worker_store_scalar_result(worker, result, invoke_slot.result_abi)
 }
 
 worker_emit_output :: proc "c" (
@@ -2412,10 +3375,12 @@ worker_trace_next :: proc(
 worker_delete :: proc(worker: ^Worker) {
     // Generations are intentionally append-only while the worker is alive.
     // Reset and process exit are the reclamation boundaries.
+    incremental_llvm_backend_delete(&worker.incremental_backend)
     for generation in worker.generations {
         if generation.__handle != nil {
             _ = dynlib.unload_library(generation.__handle)
         }
+        delete(generation.path)
     }
     delete(worker.generations)
     for slot in worker.proc_slots {
@@ -2497,12 +3462,7 @@ worker_delete :: proc(worker: ^Worker) {
     worker^ = {}
 }
 
-worker_load_and_run :: proc(
-    worker: ^Worker,
-    path: string,
-    load_ns: ^i64 = nil,
-    run_ns: ^i64 = nil,
-) -> (message: string, ok: bool) {
+worker_prepare_generation_run :: proc(worker: ^Worker) {
     if worker.allocator.procedure == nil {
         worker.allocator = context.allocator
     }
@@ -2520,39 +3480,23 @@ worker_load_and_run :: proc(
     }
     delete(worker.output)
     worker.output = ""
-    symbols := Generation_Symbols{}
-    load_start := time.tick_now()
-    _, loaded := dynlib.initialize_symbols(&symbols, path)
-    if !loaded {
-        return strings.clone("failed to load REPL generation"), false
-    }
-    if symbols.api_version == nil || symbols.run == nil {
-        if symbols.__handle != nil {
-            _ = dynlib.unload_library(symbols.__handle)
-        }
-        return strings.clone("REPL generation manifest is incomplete"), false
-    }
-    if symbols.api_version^ != GENERATION_ABI_VERSION {
-        if symbols.__handle != nil {
-            _ = dynlib.unload_library(symbols.__handle)
-        }
-        return strings.clone("REPL generation ABI version mismatch"), false
-    }
+}
 
-    append(&worker.generations, symbols)
+worker_run_generation_proc :: proc(
+    worker: ^Worker,
+    run: proc "c" (^Host_API),
+    run_ns: ^i64 = nil,
+) {
     worker_ensure_host_api(worker)
-    if load_ns != nil {
-        load_ns^ =
-            time.duration_nanoseconds(time.tick_since(load_start))
-    }
     if worker.trace_enabled {
         worker.trace_started_at = time.tick_now()
         worker.trace_last_at = worker.trace_started_at
     }
     worker.abort_requested = false
     worker.last_run_aborted = false
+    worker.incremental_call_failed = false
     run_start := time.tick_now()
-    symbols.run(&worker.host_api)
+    run(&worker.host_api)
     worker.last_run_aborted = worker.abort_requested
     worker.abort_requested = false
     if run_ns != nil {
@@ -2591,7 +3535,74 @@ worker_load_and_run :: proc(
     worker.trace_values_enabled = false
     worker.trace_values_remaining = 0
     worker.trace_values_limit_reported = false
+}
+
+worker_load_and_run :: proc(
+    worker: ^Worker,
+    path: string,
+    load_ns: ^i64 = nil,
+    run_ns: ^i64 = nil,
+) -> (message: string, ok: bool) {
+    worker_prepare_generation_run(worker)
+    symbols := Generation_Symbols{}
+    load_start := time.tick_now()
+    _, loaded := dynlib.initialize_symbols(&symbols, path)
+    if !loaded {
+        return strings.clone("failed to load REPL generation"), false
+    }
+    if symbols.api_version == nil || symbols.run == nil ||
+       symbols.stabilize_result == nil {
+        if symbols.__handle != nil {
+            _ = dynlib.unload_library(symbols.__handle)
+        }
+        return strings.clone("REPL generation manifest is incomplete"), false
+    }
+    if symbols.api_version^ != GENERATION_ABI_VERSION {
+        if symbols.__handle != nil {
+            _ = dynlib.unload_library(symbols.__handle)
+        }
+        return strings.clone("REPL generation ABI version mismatch"), false
+    }
+
+    symbols.path = strings.clone(path)
+    append(&worker.generations, symbols)
+    worker_ensure_host_api(worker)
+    if load_ns != nil {
+        load_ns^ =
+            time.duration_nanoseconds(time.tick_since(load_start))
+    }
+    previous_result_address := worker.result_slots[0].address
+    worker_run_generation_proc(worker, symbols.run, run_ns)
+    if worker.result_slots[0].address != previous_result_address {
+        loaded_generation := &worker.generations[len(worker.generations)-1]
+        loaded_generation.result_address = worker.result_slots[0].address
+    }
     return "", true
+}
+
+worker_run_loaded :: proc(
+    worker: ^Worker,
+    path: string,
+    run_ns: ^i64 = nil,
+) -> (message: string, ok: bool) {
+    for &generation in worker.generations {
+        if generation.path != path || generation.run == nil {
+            continue
+        }
+        if !worker_stabilize_loaded_result(
+            worker,
+            &generation,
+        ) {
+            return strings.clone(
+                "loaded REPL result cannot preserve native history",
+            ), false
+        }
+        run := generation.run
+        worker_prepare_generation_run(worker)
+        worker_run_generation_proc(worker, run, run_ns)
+        return "", true
+    }
+    return strings.clone("loaded REPL generation is unavailable"), false
 }
 
 worker_load_and_run_nested :: proc(

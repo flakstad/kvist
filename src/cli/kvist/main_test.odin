@@ -127,6 +127,34 @@ nrepl_load_file_reports_reader_errors :: proc(t: ^testing.T) {
 }
 
 @(test)
+repl_execution_modes_are_explicit :: proc(t: ^testing.T) {
+    cases := [?]struct {
+        text: string,
+        mode: Repl_Execution_Mode,
+    }{
+        {"auto", .Auto},
+        {"resident", .Resident},
+        {"native-adapter", .Native_Adapter},
+        {"native-reuse", .Native_Reuse},
+        {"native", .Native},
+    }
+    for item in cases {
+        mode, parsed := repl_execution_mode_parse(item.text)
+        testing.expect_value(t, parsed, true)
+        testing.expect_value(t, mode, item.mode)
+        testing.expect_value(t, repl_execution_mode_name(mode), item.text)
+    }
+    _, parsed := repl_execution_mode_parse("sometimes")
+    testing.expect_value(t, parsed, false)
+    testing.expect_value(t, repl_execution_mode_allows_plan(.Auto), true)
+    testing.expect_value(t, repl_execution_mode_allows_plan(.Native_Adapter), false)
+    testing.expect_value(t, repl_execution_mode_allows_adapter(.Native_Adapter), true)
+    testing.expect_value(t, repl_execution_mode_allows_adapter(.Native_Reuse), false)
+    testing.expect_value(t, repl_execution_mode_allows_loaded_native(.Native_Reuse), true)
+    testing.expect_value(t, repl_execution_mode_allows_loaded_native(.Native), false)
+}
+
+@(test)
 execution_temp_parent_can_follow_source_volume :: proc(t: ^testing.T) {
     colocated := execution_temp_parent(
         "D:/a/kvist/kvist/examples/language/hello.kvist",
@@ -198,6 +226,76 @@ compile_cache_verifies_compiler_content_even_when_metadata_matches :: proc(t: ^t
 }
 
 @(test)
+repl_native_artifacts_preserve_file_identity_when_supported :: proc(
+    t: ^testing.T,
+) {
+    dir, dir_err := os.make_directory_temp(
+        "",
+        "kvist-repl-artifact-link-*",
+        context.allocator,
+    )
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    artifact, artifact_err := os.join_path(
+        {dir, "artifact.dylib"},
+        context.allocator,
+    )
+    output, output_err := os.join_path(
+        {dir, "generation.dylib"},
+        context.allocator,
+    )
+    testing.expect_value(t, artifact_err == nil, true)
+    testing.expect_value(t, output_err == nil, true)
+    if artifact_err != nil || output_err != nil {
+        delete(artifact)
+        delete(output)
+        return
+    }
+    defer delete(artifact)
+    defer delete(output)
+
+    testing.expect_value(
+        t,
+        os.write_entire_file_from_string(artifact, "native-image") == nil,
+        true,
+    )
+    testing.expect_value(
+        t,
+        repl_materialize_native_artifact(output, artifact),
+        true,
+    )
+    artifact_info, artifact_stat_err := os.stat(
+        artifact,
+        context.allocator,
+    )
+    output_info, output_stat_err := os.stat(output, context.allocator)
+    defer os.file_info_delete(artifact_info, context.allocator)
+    defer os.file_info_delete(output_info, context.allocator)
+    testing.expect_value(t, artifact_stat_err == nil, true)
+    testing.expect_value(t, output_stat_err == nil, true)
+    if artifact_stat_err == nil && output_stat_err == nil {
+        testing.expect_value(
+            t,
+            artifact_info.inode == output_info.inode,
+            true,
+        )
+    }
+
+    testing.expect_value(t, os.remove(artifact) == nil, true)
+    bytes, read_err := os.read_entire_file_from_path(output, context.allocator)
+    defer delete(bytes)
+    testing.expect_value(t, read_err == nil, true)
+    if read_err == nil {
+        testing.expect_value(t, string(bytes), "native-image")
+    }
+}
+
+@(test)
 compile_cache_distinguishes_entry_files_in_same_package :: proc(t: ^testing.T) {
     dir, dir_err := os.make_directory_temp("", "kvist-cache-entry-*", context.allocator)
     testing.expect_value(t, dir_err == nil, true)
@@ -248,6 +346,38 @@ repl_context_cache_key_tracks_files_and_current_imports :: proc(t: ^testing.T) {
     }
     defer os.remove_all(dir)
     defer delete(dir)
+    support_dir, support_dir_err :=
+        os.join_path({dir, "support"}, context.allocator)
+    testing.expect_value(t, support_dir_err == nil, true)
+    if support_dir_err != nil {
+        return
+    }
+    defer delete(support_dir)
+    testing.expect_value(
+        t,
+        os.make_directory_all(support_dir) == nil,
+        true,
+    )
+    support_path, support_path_err :=
+        os.join_path({support_dir, "support.odin"}, context.allocator)
+    testing.expect_value(t, support_path_err == nil, true)
+    if support_path_err != nil {
+        return
+    }
+    defer delete(support_path)
+    initial_support := `package support
+
+Version :: 1
+`
+    edited_support := `package support
+
+Version :: 200
+`
+    testing.expect_value(
+        t,
+        os.write_entire_file_from_string(support_path, initial_support) == nil,
+        true,
+    )
     context_path, path_err :=
         os.join_path({dir, "context.kvist"}, context.allocator)
     testing.expect_value(t, path_err == nil, true)
@@ -259,7 +389,7 @@ repl_context_cache_key_tracks_files_and_current_imports :: proc(t: ^testing.T) {
         t,
         os.write_entire_file_from_string(
             context_path,
-            "(package context)\n(defn answer [] -> int 41)\n",
+            "(package context)\n(import support \"support\")\n(defn answer [] -> int 41)\n",
         ) == nil,
         true,
     )
@@ -274,17 +404,87 @@ repl_context_cache_key_tracks_files_and_current_imports :: proc(t: ^testing.T) {
     testing.expect_value(t, initial != "", true)
     testing.expect_value(t, initial != with_import, true)
 
+    initial_plan := kvist.Repl_Execution_Plan{}
+    initial_result, initial_err, initial_ok :=
+        kvist.compile_eval_path_with_map(
+            context_path,
+            "(answer)",
+            repl_generation = true,
+            repl_context_cache_key = initial,
+            repl_execution_plan = &initial_plan,
+        )
+    defer delete(initial_result.output)
+    defer kvist.source_map_slice_delete(initial_result.source_map)
+    defer kvist.compile_warning_slice_delete(initial_result.warnings)
+    defer kvist.compile_error_delete(&initial_err)
+    defer kvist.repl_execution_plan_delete(&initial_plan)
+    testing.expect_value(t, initial_ok, true)
+    // Procedure bodies stay on the native path. A context-cache hit alone
+    // must not make the expression planner reinterpret an unloaded call.
+    testing.expect_value(t, initial_plan.encoded, "")
+
+    warm_plan := kvist.Repl_Execution_Plan{}
+    warm_result, warm_err, warm_ok := kvist.compile_eval_path_with_map(
+        context_path,
+        "(answer)",
+        repl_generation = true,
+        repl_context_cache_key = initial,
+        repl_execution_plan = &warm_plan,
+    )
+    defer delete(warm_result.output)
+    defer kvist.source_map_slice_delete(warm_result.source_map)
+    defer kvist.compile_warning_slice_delete(warm_result.warnings)
+    defer kvist.compile_error_delete(&warm_err)
+    defer kvist.repl_execution_plan_delete(&warm_plan)
+    testing.expect_value(t, warm_ok, true)
+    testing.expect_value(t, warm_plan.encoded, "")
+    testing.expect_value(t, warm_result.output, initial_result.output)
+
+    testing.expect_value(
+        t,
+        os.write_entire_file_from_string(support_path, edited_support) == nil,
+        true,
+    )
+    support_edited := repl_context_cache_key(context_path, "", "(answer)")
+    defer delete(support_edited)
+    testing.expect_value(t, support_edited != initial, true)
+    testing.expect_value(
+        t,
+        os.write_entire_file_from_string(support_path, initial_support) == nil,
+        true,
+    )
+    support_restored := repl_context_cache_key(context_path, "", "(answer)")
+    defer delete(support_restored)
+    testing.expect_value(t, support_restored, initial)
+
     testing.expect_value(
         t,
         os.write_entire_file_from_string(
             context_path,
-            "(package context)\n(defn answer [] -> int 4242)\n",
+            "(package context)\n(import support \"support\")\n(defn answer [] -> int 4242)\n",
         ) == nil,
         true,
     )
     edited := repl_context_cache_key(context_path, "", "(answer)")
     defer delete(edited)
     testing.expect_value(t, edited != initial, true)
+
+    edited_plan := kvist.Repl_Execution_Plan{}
+    edited_result, edited_err, edited_ok := kvist.compile_eval_path_with_map(
+        context_path,
+        "(answer)",
+        repl_generation = true,
+        repl_context_cache_key = edited,
+        repl_execution_plan = &edited_plan,
+    )
+    defer delete(edited_result.output)
+    defer kvist.source_map_slice_delete(edited_result.source_map)
+    defer kvist.compile_warning_slice_delete(edited_result.warnings)
+    defer kvist.compile_error_delete(&edited_err)
+    defer kvist.repl_execution_plan_delete(&edited_plan)
+    testing.expect_value(t, edited_ok, true)
+    testing.expect_value(t, edited_plan.encoded, "")
+    testing.expect_value(t, edited_result.output != initial_result.output, true)
 }
 
 @(test)

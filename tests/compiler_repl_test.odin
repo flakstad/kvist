@@ -13,6 +13,8 @@ import "core:testing"
 import "core:thread"
 import "core:time"
 import kvist "../src/odin/kvist"
+import kvist_repl "../src/odin/kvist_repl"
+import repl_program "../src/odin/kvist_repl_program"
 import olive_reload "../src/odin/olive_reload"
 
 Console_Test_Client :: struct {
@@ -157,6 +159,819 @@ console_test_handler :: proc(
 }
 
 @(test)
+compile_repl_emits_backend_neutral_incremental_procedures :: proc(
+    t: ^testing.T,
+) {
+    incremental := kvist.Repl_Incremental_Program{}
+    result, err, ok := kvist.compile_eval_path_with_map(
+        "examples/collections/higher-order.kvist",
+        `(defn square [x: int] -> int (* x x))
+(defn score [x: int] -> int
+  (if (> x 0) (+ (square x) 1) 0))`,
+        repl_generation = true,
+        repl_incremental_program = &incremental,
+    )
+    defer delete(result.output)
+    defer kvist.source_map_slice_delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+    defer kvist.repl_incremental_program_delete(&incremental)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    // Ordinary emission still runs first and remains the semantic oracle.
+    testing.expect_value(t, result.output != "", true)
+    testing.expect_value(t, incremental.encoded != "", true)
+    decoded, decoded_ok := repl_program.program_decode(incremental.encoded)
+    defer repl_program.program_delete(&decoded)
+    testing.expect_value(t, decoded_ok, true)
+    testing.expect_value(t, len(decoded.procedures), 2)
+    if len(decoded.procedures) != 2 {
+        return
+    }
+    testing.expect_value(t, decoded.procedures[0].name, "square")
+    testing.expect_value(t, decoded.procedures[0].parameter_kinds[0], repl_program.Value_Kind.Int)
+    testing.expect_value(t, decoded.procedures[1].name, "score")
+    saw_program_call := false
+    for expression in decoded.procedures[1].expressions {
+        if expression.kind == .Program_Call &&
+           expression.resolved_name == "square" {
+            saw_program_call = true
+        }
+    }
+    testing.expect_value(t, saw_program_call, true)
+}
+
+@(test)
+compile_repl_incremental_managed_procedures_preserve_native_ownership :: proc(
+    t: ^testing.T,
+) {
+    scalar_invokes := [?]kvist.Repl_Scalar_Invoke_Metadata{
+        {
+            name = "str__lower",
+            signature = "proc(string:borrowed)->string:owned",
+            result_abi = "value:string",
+        },
+        {
+            name = "str__contains_p",
+            signature =
+                "proc(string:borrowed,string:borrowed)->bool",
+            result_abi = "value:bool",
+        },
+        {
+            name = "data__empty_map",
+            signature = "proc()->Data:owned",
+            result_abi = "value:Data",
+        },
+        {
+            name = "data__count",
+            signature = "proc(Data:borrowed)->int",
+            result_abi = "value:int",
+        },
+    }
+    session_source := `(import str "kvist:str")
+(import data "kvist:data")`
+
+    explicit := kvist.Repl_Incremental_Program{}
+    explicit_result, explicit_err, explicit_ok :=
+        kvist.compile_eval_path_with_map(
+            "examples/collections/higher-order.kvist",
+            `(defn normalized? [] -> bool
+  (let [value (str.lower "KVIST") :defer]
+    (str.contains? value "kvist")))`,
+            repl_generation = true,
+            repl_session_source = session_source,
+            repl_incremental_program = &explicit,
+            repl_scalar_invokes = scalar_invokes[:],
+        )
+    defer delete(explicit_result.output)
+    defer kvist.source_map_slice_delete(explicit_result.source_map)
+    defer kvist.compile_warning_slice_delete(explicit_result.warnings)
+    defer kvist.repl_incremental_program_delete(&explicit)
+    testing.expect_value(t, explicit_ok, true)
+    if !explicit_ok {
+        testing.expect_value(t, explicit_err.message, "")
+    }
+    explicit_program, explicit_decoded :=
+        repl_program.program_decode(explicit.encoded)
+    defer repl_program.program_delete(&explicit_program)
+    testing.expect_value(t, explicit_decoded, true)
+    testing.expect_value(t, len(explicit_program.procedures), 1)
+    if len(explicit_program.procedures) == 1 {
+        testing.expect_value(
+            t,
+            explicit_program.procedures[0].bindings[0].managed_cleanup,
+            true,
+        )
+    }
+
+    unmanaged := kvist.Repl_Incremental_Program{}
+    unmanaged_result, unmanaged_err, unmanaged_ok :=
+        kvist.compile_eval_path_with_map(
+            "examples/collections/higher-order.kvist",
+            `(defn normalized? [] -> bool
+  (let [value (str.lower "KVIST")]
+    (str.contains? value "kvist")))`,
+            repl_generation = true,
+            repl_session_source = session_source,
+            repl_incremental_program = &unmanaged,
+            repl_scalar_invokes = scalar_invokes[:],
+        )
+    defer delete(unmanaged_result.output)
+    defer kvist.source_map_slice_delete(unmanaged_result.source_map)
+    defer kvist.compile_warning_slice_delete(unmanaged_result.warnings)
+    defer kvist.repl_incremental_program_delete(&unmanaged)
+    testing.expect_value(t, unmanaged_ok, true)
+    if !unmanaged_ok {
+        testing.expect_value(t, unmanaged_err.message, "")
+    }
+    testing.expect_value(t, unmanaged.encoded, "")
+    testing.expect_value(t, unmanaged_result.output != "", true)
+
+    escaping := kvist.Repl_Incremental_Program{}
+    escaping_result, escaping_err, escaping_ok :=
+        kvist.compile_eval_path_with_map(
+            "examples/collections/higher-order.kvist",
+            `(defn escaped-managed-data-size [] -> int
+  (data.count (let [value (data.empty-map)] value)))`,
+            repl_generation = true,
+            repl_session_source = session_source,
+            repl_incremental_program = &escaping,
+            repl_scalar_invokes = scalar_invokes[:],
+        )
+    defer delete(escaping_result.output)
+    defer kvist.source_map_slice_delete(escaping_result.source_map)
+    defer kvist.compile_warning_slice_delete(escaping_result.warnings)
+    defer kvist.repl_incremental_program_delete(&escaping)
+    testing.expect_value(t, escaping_ok, true)
+    if !escaping_ok {
+        testing.expect_value(t, escaping_err.message, "")
+    }
+    testing.expect_value(t, escaping.encoded, "")
+    testing.expect_value(t, escaping_result.output != "", true)
+
+    data_program := kvist.Repl_Incremental_Program{}
+    data_result, data_err, data_ok := kvist.compile_eval_path_with_map(
+        "examples/collections/higher-order.kvist",
+        `(defn data-size [] -> int
+  (let [value (data.empty-map)]
+    (data.count value)))`,
+        repl_generation = true,
+        repl_session_source = session_source,
+        repl_incremental_program = &data_program,
+        repl_scalar_invokes = scalar_invokes[:],
+    )
+    defer delete(data_result.output)
+    defer kvist.source_map_slice_delete(data_result.source_map)
+    defer kvist.compile_warning_slice_delete(data_result.warnings)
+    defer kvist.repl_incremental_program_delete(&data_program)
+    testing.expect_value(t, data_ok, true)
+    if !data_ok {
+        testing.expect_value(t, data_err.message, "")
+    }
+    decoded_data, data_decoded :=
+        repl_program.program_decode(data_program.encoded)
+    defer repl_program.program_delete(&decoded_data)
+    testing.expect_value(t, data_decoded, true)
+    testing.expect_value(t, len(decoded_data.procedures), 1)
+    if len(decoded_data.procedures) == 1 {
+        testing.expect_value(
+            t,
+            decoded_data.procedures[0].bindings[0].managed_cleanup,
+            true,
+        )
+    }
+}
+
+@(test)
+compile_repl_incremental_program_falls_back_as_one_semantic_unit :: proc(
+    t: ^testing.T,
+) {
+    incremental := kvist.Repl_Incremental_Program{}
+    result, _, ok := kvist.compile_eval_path_with_map(
+        "examples/collections/higher-order.kvist",
+        `(defn fast [x: int] -> int (+ x 1))
+(defn needs-native [x: int] -> int (do (println x) x))`,
+        repl_generation = true,
+        repl_incremental_program = &incremental,
+    )
+    defer delete(result.output)
+    defer kvist.source_map_slice_delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+    defer kvist.repl_incremental_program_delete(&incremental)
+    testing.expect_value(t, ok, true)
+    testing.expect_value(t, incremental.encoded, "")
+    testing.expect_value(t, result.output != "", true)
+}
+
+@(test)
+compile_repl_incremental_program_models_structured_procedure_control :: proc(
+    t: ^testing.T,
+) {
+    incremental := kvist.Repl_Incremental_Program{}
+    result, err, ok := kvist.compile_eval_path_with_map(
+        "examples/collections/higher-order.kvist",
+        `(defn count-up [limit: int] -> int
+  (defvar index: int 0)
+  (while (< index limit)
+    (inc! index))
+  index)
+(defn classify [x: int] -> int
+  (if (< x 0) (return 40))
+  (+ x 2))`,
+        repl_generation = true,
+        repl_incremental_program = &incremental,
+    )
+    defer delete(result.output)
+    defer kvist.source_map_slice_delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+    defer kvist.repl_incremental_program_delete(&incremental)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    decoded, decoded_ok := repl_program.program_decode(incremental.encoded)
+    defer repl_program.program_delete(&decoded)
+    testing.expect_value(t, decoded_ok, true)
+    testing.expect_value(t, len(decoded.procedures), 2)
+    saw_mutation := false
+    saw_loop := false
+    saw_return := false
+    for procedure in decoded.procedures {
+        for expression in procedure.expressions {
+            #partial switch expression.kind {
+            case .Set_Local: saw_mutation = true
+            case .While:     saw_loop = true
+            case .Return:    saw_return = true
+            case:
+            }
+        }
+    }
+    testing.expect_value(t, saw_mutation, true)
+    testing.expect_value(t, saw_loop, true)
+    testing.expect_value(t, saw_return, true)
+}
+
+@(test)
+compile_repl_semantic_plan_uses_expanded_and_typed_forms :: proc(
+    t: ^testing.T,
+) {
+    cases := [?]struct {
+        source:         string,
+        session_source: string,
+        result_abi:     string,
+    }{
+        {
+            source = "(session-add 40)",
+            session_source =
+                "(defmacro session-add [x] (quasiquote (+ (unquote x) 2)))",
+            result_abi = "value:int",
+        },
+        {
+            source = "(let [x: f64 20] (+ x 22.0))",
+            result_abi = "value:f64",
+        },
+        {
+            source = "(+ 20 22.0)",
+            result_abi = "value:f64",
+        },
+        {
+            source = `(let [x: string "Kvist"] x)`,
+            result_abi = "value:string",
+        },
+        {
+            source = `(let [x: string "Kvist"] (= x "Kvist"))`,
+            result_abi = "value:bool",
+        },
+        {
+            source = "(if true 42 0)",
+            result_abi = "value:int",
+        },
+    }
+    for item in cases {
+        plan := kvist.Repl_Execution_Plan{}
+        result, err, ok := kvist.compile_eval_path_with_map(
+            "examples/collections/higher-order.kvist",
+            item.source,
+            repl_generation = true,
+            repl_session_source = item.session_source,
+            repl_context_cache_key = fmt.tprintf(
+                "semantic-plan-context:%s",
+                item.session_source,
+            ),
+            repl_execution_plan = &plan,
+        )
+        defer delete(result.output)
+        defer kvist.source_map_slice_delete(result.source_map)
+        defer kvist.compile_warning_slice_delete(result.warnings)
+        testing.expect_value(t, ok, true)
+        if !ok {
+            testing.expect_value(t, err.message, "")
+        }
+        testing.expect_value(t, result.output, "")
+        testing.expect_value(t, plan.encoded != "", true)
+        testing.expect_value(t, plan.result_abi, item.result_abi)
+        testing.expect_value(t, plan.recent_result_mask, u8(0))
+        kvist.repl_execution_plan_delete(&plan)
+    }
+
+    recent_plan := kvist.Repl_Execution_Plan{}
+    recent_result, recent_err, recent_ok :=
+        kvist.compile_eval_path_with_map(
+            "examples/collections/higher-order.kvist",
+            "(let [value: int *1] (+ value 1))",
+            repl_generation = true,
+            repl_recent_result_types = []string{"int"},
+            repl_execution_plan = &recent_plan,
+        )
+    defer delete(recent_result.output)
+    defer kvist.source_map_slice_delete(recent_result.source_map)
+    defer kvist.compile_warning_slice_delete(recent_result.warnings)
+    defer kvist.repl_execution_plan_delete(&recent_plan)
+    testing.expect_value(t, recent_ok, true)
+    if !recent_ok {
+        testing.expect_value(t, recent_err.message, "")
+    }
+    testing.expect_value(t, recent_result.output, "")
+    testing.expect_value(t, recent_plan.recent_result_mask, u8(1))
+
+    scalar_invokes := [?]kvist.Repl_Scalar_Invoke_Metadata{
+        {
+            name = "str__contains_p",
+            signature = "proc(string:borrowed,string:borrowed)->bool",
+            result_abi = "value:bool",
+        },
+        {
+            name = "str__trim",
+            signature = "proc(string:borrowed)->string:borrowed",
+            result_abi = "value:string",
+        },
+        {
+            name = "str__trim_prefix",
+            signature =
+                "proc(string:borrowed,string:borrowed)->string:borrowed",
+            result_abi = "value:string",
+        },
+        {
+            name = "str__lower",
+            signature = "proc(string:borrowed)->string:owned",
+            result_abi = "value:string",
+        },
+        {
+            name = "data__empty_map",
+            signature = "proc()->Data:owned",
+            result_abi = "value:Data",
+        },
+        {
+            name = "data__count",
+            signature = "proc(Data:borrowed)->int",
+            result_abi = "value:int",
+        },
+        {
+            name = "data__first",
+            signature = "proc(Data:borrowed)->Data:owned",
+            result_abi = "value:Data",
+        },
+        {
+            name = "profile_card",
+            signature =
+                "proc(string:borrowed,string:borrowed)->Data:owned",
+            result_abi = "value:Data",
+        },
+    }
+    adapter_plan := kvist.Repl_Execution_Plan{}
+    adapter_result, adapter_err, adapter_ok :=
+        kvist.compile_eval_path_with_map(
+            "examples/collections/higher-order.kvist",
+            `(and (str.contains? "Kvist REPL" "REPL") true)`,
+            repl_generation = true,
+            repl_session_source = `(import str "kvist:str")`,
+            repl_context_cache_key = "semantic-plan-context:str",
+            repl_execution_plan = &adapter_plan,
+            repl_scalar_invokes = scalar_invokes[:],
+        )
+    defer delete(adapter_result.output)
+    defer kvist.source_map_slice_delete(adapter_result.source_map)
+    defer kvist.compile_warning_slice_delete(adapter_result.warnings)
+    defer kvist.repl_execution_plan_delete(&adapter_plan)
+    testing.expect_value(t, adapter_ok, true)
+    if !adapter_ok {
+        testing.expect_value(t, adapter_err.message, "")
+    }
+    testing.expect_value(t, adapter_result.output, "")
+    testing.expect_value(
+        t,
+        strings.contains(adapter_plan.encoded, "|c2:"),
+        true,
+    )
+
+    string_adapter_plan := kvist.Repl_Execution_Plan{}
+    string_adapter_result, string_adapter_err, string_adapter_ok :=
+        kvist.compile_eval_path_with_map(
+            "examples/collections/higher-order.kvist",
+            `(= (str.trim " Kvist ") "Kvist")`,
+            repl_generation = true,
+            repl_session_source = `(import str "kvist:str")`,
+            repl_context_cache_key = "semantic-plan-context:str",
+            repl_execution_plan = &string_adapter_plan,
+            repl_scalar_invokes = scalar_invokes[:],
+        )
+    defer delete(string_adapter_result.output)
+    defer kvist.source_map_slice_delete(string_adapter_result.source_map)
+    defer kvist.compile_warning_slice_delete(string_adapter_result.warnings)
+    defer kvist.repl_execution_plan_delete(&string_adapter_plan)
+    testing.expect_value(t, string_adapter_ok, true)
+    if !string_adapter_ok {
+        testing.expect_value(t, string_adapter_err.message, "")
+    }
+    testing.expect_value(t, string_adapter_result.output, "")
+    testing.expect_value(
+        t,
+        strings.contains(string_adapter_plan.encoded, "|c1:"),
+        true,
+    )
+
+    nested_string_plan := kvist.Repl_Execution_Plan{}
+    nested_string_result, nested_string_err, nested_string_ok :=
+        kvist.compile_eval_path_with_map(
+            "examples/collections/higher-order.kvist",
+            `(= (str.trim-prefix (str.trim " Kvist ") "K") "vist")`,
+            repl_generation = true,
+            repl_session_source = `(import str "kvist:str")`,
+            repl_execution_plan = &nested_string_plan,
+            repl_scalar_invokes = scalar_invokes[:],
+        )
+    defer delete(nested_string_result.output)
+    defer kvist.source_map_slice_delete(nested_string_result.source_map)
+    defer kvist.compile_warning_slice_delete(nested_string_result.warnings)
+    defer kvist.repl_execution_plan_delete(&nested_string_plan)
+    testing.expect_value(t, nested_string_ok, true)
+    if !nested_string_ok {
+        testing.expect_value(t, nested_string_err.message, "")
+    }
+    testing.expect_value(t, nested_string_result.output, "")
+    testing.expect_value(
+        t,
+        strings.contains(nested_string_plan.encoded, "|c1:") &&
+        strings.contains(nested_string_plan.encoded, "|c2:"),
+        true,
+    )
+
+    owned_string_plan := kvist.Repl_Execution_Plan{}
+    owned_string_result, owned_string_err, owned_string_ok :=
+        kvist.compile_eval_path_with_map(
+            "examples/collections/higher-order.kvist",
+            `(= (str.lower "KVIST") "kvist")`,
+            repl_generation = true,
+            repl_session_source = `(import str "kvist:str")`,
+            repl_execution_plan = &owned_string_plan,
+            repl_scalar_invokes = scalar_invokes[:],
+        )
+    defer delete(owned_string_result.output)
+    defer kvist.source_map_slice_delete(owned_string_result.source_map)
+    defer kvist.compile_warning_slice_delete(owned_string_result.warnings)
+    defer kvist.repl_execution_plan_delete(&owned_string_plan)
+    testing.expect_value(t, owned_string_ok, true)
+    if !owned_string_ok {
+        testing.expect_value(t, owned_string_err.message, "")
+    }
+    testing.expect_value(t, owned_string_result.output, "")
+    testing.expect_value(
+        t,
+        strings.contains(owned_string_plan.encoded, "|c1:"),
+        true,
+    )
+
+    owned_borrowed_plan := kvist.Repl_Execution_Plan{}
+    owned_borrowed_result, owned_borrowed_err, owned_borrowed_ok :=
+        kvist.compile_eval_path_with_map(
+            "examples/collections/higher-order.kvist",
+            `(= (str.trim (str.lower " KVIST ")) "kvist")`,
+            repl_generation = true,
+            repl_session_source = `(import str "kvist:str")`,
+            repl_execution_plan = &owned_borrowed_plan,
+            repl_scalar_invokes = scalar_invokes[:],
+        )
+    defer delete(owned_borrowed_result.output)
+    defer kvist.source_map_slice_delete(owned_borrowed_result.source_map)
+    defer kvist.compile_warning_slice_delete(owned_borrowed_result.warnings)
+    defer kvist.repl_execution_plan_delete(&owned_borrowed_plan)
+    testing.expect_value(t, owned_borrowed_ok, true)
+    if !owned_borrowed_ok {
+        testing.expect_value(t, owned_borrowed_err.message, "")
+    }
+    testing.expect_value(t, owned_borrowed_result.output, "")
+    testing.expect_value(
+        t,
+        strings.count(owned_borrowed_plan.encoded, "|c1:"),
+        2,
+    )
+
+    owned_local_plan := kvist.Repl_Execution_Plan{}
+    owned_local_result, owned_local_err, owned_local_ok :=
+        kvist.compile_eval_path_with_map(
+            "examples/collections/higher-order.kvist",
+            `(let [lowered (str.lower "KVIST")] (= lowered "kvist"))`,
+            repl_generation = true,
+            repl_session_source = `(import str "kvist:str")`,
+            repl_execution_plan = &owned_local_plan,
+            repl_scalar_invokes = scalar_invokes[:],
+        )
+    defer delete(owned_local_result.output)
+    defer kvist.source_map_slice_delete(owned_local_result.source_map)
+    defer kvist.compile_warning_slice_delete(owned_local_result.warnings)
+    defer kvist.repl_execution_plan_delete(&owned_local_plan)
+    testing.expect_value(t, owned_local_ok, true)
+    if !owned_local_ok {
+        testing.expect_value(t, owned_local_err.message, "")
+    }
+    testing.expect_value(t, owned_local_result.output, "")
+    testing.expect_value(
+        t,
+        strings.count(owned_local_plan.encoded, "|c1:"),
+        1,
+    )
+
+    data_plan := kvist.Repl_Execution_Plan{}
+    data_result, data_err, data_ok :=
+        kvist.compile_eval_path_with_map(
+            "examples/collections/higher-order.kvist",
+            `(data.count (data.empty-map))`,
+            repl_generation = true,
+            repl_session_source = `(import data "kvist:data")`,
+            repl_execution_plan = &data_plan,
+            repl_scalar_invokes = scalar_invokes[:],
+        )
+    defer delete(data_result.output)
+    defer kvist.source_map_slice_delete(data_result.source_map)
+    defer kvist.compile_warning_slice_delete(data_result.warnings)
+    defer kvist.repl_execution_plan_delete(&data_plan)
+    testing.expect_value(t, data_ok, true)
+    if !data_ok {
+        testing.expect_value(t, data_err.message, "")
+    }
+    testing.expect_value(t, data_result.output, "")
+    testing.expect_value(
+        t,
+        strings.contains(data_plan.encoded, "|c0:") &&
+        strings.contains(data_plan.encoded, "|c1:"),
+        true,
+    )
+
+    recent_data_plan := kvist.Repl_Execution_Plan{}
+    recent_data_result, recent_data_err, recent_data_ok :=
+        kvist.compile_eval_path_with_map(
+            "examples/collections/higher-order.kvist",
+            `(data.count *1)`,
+            repl_generation = true,
+            repl_session_source = `(import data "kvist:data")`,
+            repl_recent_result_types = []string{"Data"},
+            repl_execution_plan = &recent_data_plan,
+            repl_scalar_invokes = scalar_invokes[:],
+        )
+    defer delete(recent_data_result.output)
+    defer kvist.source_map_slice_delete(recent_data_result.source_map)
+    defer kvist.compile_warning_slice_delete(recent_data_result.warnings)
+    defer kvist.repl_execution_plan_delete(&recent_data_plan)
+    testing.expect_value(t, recent_data_ok, true)
+    if !recent_data_ok {
+        testing.expect_value(t, recent_data_err.message, "")
+    }
+    testing.expect_value(t, recent_data_result.output, "")
+    testing.expect_value(
+        t,
+        strings.contains(recent_data_plan.encoded, "|r:0") &&
+        strings.contains(recent_data_plan.encoded, "|c1:"),
+        true,
+    )
+
+    final_data_plan := kvist.Repl_Execution_Plan{}
+    final_data_result, final_data_err, final_data_ok :=
+        kvist.compile_eval_path_with_map(
+            "examples/collections/higher-order.kvist",
+            `(data.empty-map)`,
+            repl_generation = true,
+            repl_session_source = `(import data "kvist:data")`,
+            repl_execution_plan = &final_data_plan,
+            repl_scalar_invokes = scalar_invokes[:],
+        )
+    defer delete(final_data_result.output)
+    defer kvist.source_map_slice_delete(final_data_result.source_map)
+    defer kvist.compile_warning_slice_delete(final_data_result.warnings)
+    defer kvist.repl_execution_plan_delete(&final_data_plan)
+    testing.expect_value(t, final_data_ok, true)
+    if !final_data_ok {
+        testing.expect_value(t, final_data_err.message, "")
+    }
+    testing.expect_value(t, final_data_result.output, "")
+    testing.expect_value(
+        t,
+        strings.has_prefix(final_data_plan.encoded, "9|d|r|") &&
+        strings.contains(final_data_plan.encoded, "|c0:"),
+        true,
+    )
+
+    conditional_data_plan := kvist.Repl_Execution_Plan{}
+    conditional_data_result, conditional_data_err, conditional_data_ok :=
+        kvist.compile_eval_path_with_map(
+            "examples/collections/higher-order.kvist",
+            `(if true (data.empty-map) (data.empty-map))`,
+            repl_generation = true,
+            repl_session_source = `(import data "kvist:data")`,
+            repl_execution_plan = &conditional_data_plan,
+            repl_scalar_invokes = scalar_invokes[:],
+        )
+    defer delete(conditional_data_result.output)
+    defer kvist.source_map_slice_delete(conditional_data_result.source_map)
+    defer kvist.compile_warning_slice_delete(conditional_data_result.warnings)
+    defer kvist.repl_execution_plan_delete(&conditional_data_plan)
+    testing.expect_value(t, conditional_data_ok, true)
+    if !conditional_data_ok {
+        testing.expect_value(t, conditional_data_err.message, "")
+    }
+    testing.expect_value(t, conditional_data_result.output, "")
+    testing.expect_value(
+        t,
+        strings.has_prefix(conditional_data_plan.encoded, "9|d|r|"),
+        true,
+    )
+
+    unmanaged_data_plan := kvist.Repl_Execution_Plan{}
+    unmanaged_data_result, unmanaged_data_err, unmanaged_data_ok :=
+        kvist.compile_eval_path_with_map(
+            "examples/collections/higher-order.kvist",
+            `*1`,
+            repl_generation = true,
+            repl_session_source = `(import data "kvist:data")`,
+            repl_recent_result_types = []string{"Data"},
+            repl_execution_plan = &unmanaged_data_plan,
+            repl_scalar_invokes = scalar_invokes[:],
+        )
+    defer delete(unmanaged_data_result.output)
+    defer kvist.source_map_slice_delete(unmanaged_data_result.source_map)
+    defer kvist.compile_warning_slice_delete(unmanaged_data_result.warnings)
+    defer kvist.repl_execution_plan_delete(&unmanaged_data_plan)
+    testing.expect_value(t, unmanaged_data_ok, true)
+    if !unmanaged_data_ok {
+        testing.expect_value(t, unmanaged_data_err.message, "")
+    }
+    testing.expect_value(t, unmanaged_data_plan.encoded, "")
+    testing.expect_value(t, unmanaged_data_result.output != "", true)
+
+    session_data_plan := kvist.Repl_Execution_Plan{}
+    session_data_result, session_data_err, session_data_ok :=
+        kvist.compile_eval_path_with_map(
+            "examples/collections/higher-order.kvist",
+            `(data.first (profile-card "Ada Lovelace" "Mathematician"))`,
+            repl_generation = true,
+            repl_session_source = `(import data "kvist:data")
+(defn profile-card [name: string, role: string] -> Data
+  [:article {:class "profile"} [:h2 name] [:p role]])`,
+            repl_execution_plan = &session_data_plan,
+            repl_scalar_invokes = scalar_invokes[:],
+        )
+    defer delete(session_data_result.output)
+    defer kvist.source_map_slice_delete(session_data_result.source_map)
+    defer kvist.compile_warning_slice_delete(session_data_result.warnings)
+    defer kvist.repl_execution_plan_delete(&session_data_plan)
+    testing.expect_value(t, session_data_ok, true)
+    if !session_data_ok {
+        testing.expect_value(t, session_data_err.message, "")
+    }
+    testing.expect_value(t, session_data_result.output, "")
+    testing.expect_value(
+        t,
+        strings.has_prefix(session_data_plan.encoded, "9|d|r|") &&
+        strings.contains(session_data_plan.encoded, "|c2:") &&
+        strings.contains(session_data_plan.encoded, "|c1:"),
+        true,
+    )
+
+    stale_session_data_plan := kvist.Repl_Execution_Plan{}
+    stale_session_data_result, stale_session_data_err,
+    stale_session_data_ok := kvist.compile_eval_path_with_map(
+        "examples/collections/higher-order.kvist",
+        `(data.first (profile-card "Ada Lovelace" "Mathematician"))`,
+        repl_generation = true,
+        repl_session_source = `(import data "kvist:data")
+(defn profile-card [name: string, role: string] -> Data
+  [:article {:class "profile"} [:h2 name] [:p role]])`,
+        repl_execution_plan = &stale_session_data_plan,
+        repl_stale_proc_names = []string{"profile_card"},
+        repl_scalar_invokes = scalar_invokes[:],
+    )
+    defer delete(stale_session_data_result.output)
+    defer kvist.source_map_slice_delete(stale_session_data_result.source_map)
+    defer kvist.compile_warning_slice_delete(
+        stale_session_data_result.warnings,
+    )
+    defer kvist.repl_execution_plan_delete(&stale_session_data_plan)
+    testing.expect_value(t, stale_session_data_ok, true)
+    if !stale_session_data_ok {
+        testing.expect_value(t, stale_session_data_err.message, "")
+    }
+    testing.expect_value(t, stale_session_data_plan.encoded, "")
+    testing.expect_value(t, stale_session_data_result.output != "", true)
+
+    fallback_plan := kvist.Repl_Execution_Plan{}
+    fallback, fallback_err, fallback_ok :=
+        kvist.compile_eval_path_with_map(
+            "examples/collections/higher-order.kvist",
+            `(str "semantic" " fallback")`,
+            repl_generation = true,
+            repl_execution_plan = &fallback_plan,
+        )
+    defer delete(fallback.output)
+    defer kvist.source_map_slice_delete(fallback.source_map)
+    defer kvist.compile_warning_slice_delete(fallback.warnings)
+    defer kvist.repl_execution_plan_delete(&fallback_plan)
+    testing.expect_value(t, fallback_ok, true)
+    if !fallback_ok {
+        testing.expect_value(t, fallback_err.message, "")
+    }
+    testing.expect_value(t, fallback_plan.encoded, "")
+    testing.expect_value(t, fallback.output != "", true)
+
+    native_only_sources := [?]string{
+        "1e3",
+        "(if true 7 (/ 1 0))",
+        "(let [x: int 1.5] x)",
+        "(let [x: f32 20] x)",
+        "(return 42)",
+        "(do (if true 1 2) 42)",
+        "(let [value: int 0] (if true (set! value 42)) value)",
+        "(do (if true (do (defvar hidden: int 42) " +
+            "(discard hidden))) hidden)",
+        "(do (defvar index: int 0) " +
+            "(while (< index 1) (println index) " +
+            "(set! index (+ index 1))) index)",
+        "(do (defvar index: int 0) " +
+            "(while (< index 1) (+ index 1)) index)",
+        "(do (defvar index: int 0) " +
+            "(while (< index 1) (defvar hidden: int 42) " +
+            "(set! index (+ index 1))) hidden)",
+        "(break)",
+        "(continue)",
+        "(do (defvar value: int 0) (break value) value)",
+        "(let [value: int 0] (inc! value) value)",
+        "(do (defvar value: bool false) (inc! value) value)",
+        "(do (defvar value: int 0) (toggle! value) value)",
+        "(do (defvar value: int 0) (mut! value += 1) value)",
+        "(= 1 1 1)",
+        "(+ 9999999999999999999999999999999999999999 0.5)",
+    }
+    for source in native_only_sources {
+        native_plan := kvist.Repl_Execution_Plan{}
+        native_result, native_err, _ := kvist.compile_eval_path_with_map(
+            "examples/collections/higher-order.kvist",
+            source,
+            repl_generation = true,
+            repl_execution_plan = &native_plan,
+        )
+        defer delete(native_result.output)
+        defer kvist.source_map_slice_delete(native_result.source_map)
+        defer kvist.compile_warning_slice_delete(native_result.warnings)
+        testing.expect_value(t, native_plan.encoded, "")
+        kvist.repl_execution_plan_delete(&native_plan)
+        kvist.compile_error_delete(&native_err)
+    }
+
+    history_plan := kvist.Repl_Execution_Plan{}
+    history_result, _, _ := kvist.compile_eval_path_with_map(
+        "examples/collections/higher-order.kvist",
+        "(+ *1 0.5)",
+        repl_generation = true,
+        repl_recent_result_types = []string{"int"},
+        repl_execution_plan = &history_plan,
+    )
+    defer delete(history_result.output)
+    defer kvist.source_map_slice_delete(history_result.source_map)
+    defer kvist.compile_warning_slice_delete(history_result.warnings)
+    defer kvist.repl_execution_plan_delete(&history_plan)
+    testing.expect_value(t, history_plan.encoded, "")
+
+    unsafe_return_plan := kvist.Repl_Execution_Plan{}
+    unsafe_return_result, unsafe_return_err, _ :=
+        kvist.compile_eval_path_with_map(
+            "examples/collections/higher-order.kvist",
+            "(/ 84 (maybe-zero -1))",
+            repl_generation = true,
+            repl_session_source =
+                "(defn maybe-zero [x: int] -> int " +
+                "(if (< x 0) (return 0)) 2)",
+            repl_execution_plan = &unsafe_return_plan,
+        )
+    defer delete(unsafe_return_result.output)
+    defer kvist.source_map_slice_delete(unsafe_return_result.source_map)
+    defer kvist.compile_warning_slice_delete(unsafe_return_result.warnings)
+    defer kvist.repl_execution_plan_delete(&unsafe_return_plan)
+    defer kvist.compile_error_delete(&unsafe_return_err)
+    testing.expect_value(t, unsafe_return_plan.encoded, "")
+}
+
+@(test)
 compile_repl_generation_exports_native_batch_entry :: proc(t: ^testing.T) {
     result, err, ok := kvist.compile_eval_path_with_map(
         "examples/collections/higher-order.kvist",
@@ -172,7 +987,15 @@ compile_repl_generation_exports_native_batch_entry :: proc(t: ^testing.T) {
     defer kvist.source_map_slice_delete(result.source_map)
     defer kvist.compile_warning_slice_delete(result.warnings)
 
-    testing.expect_value(t, strings.contains(result.output, "@(export)\nkvist_repl_api_version: u32 = 28"), true)
+    testing.expect_value(t, strings.contains(result.output, "@(export)\nkvist_repl_api_version: u32 = 30"), true)
+    testing.expect_value(
+        t,
+        strings.contains(
+            result.output,
+            `kvist_repl_stabilize_result :: proc "c"`,
+        ),
+        true,
+    )
     testing.expect_value(t, strings.contains(result.output, "kvist_repl_run :: proc \"c\" (host: ^Kvist_Repl_Host_API) {"), true)
     testing.expect_value(t, strings.contains(result.output, "context = repl_runtime.default_context()"), true)
     testing.expect_value(t, strings.contains(result.output, "kvist_repl_host = host"), true)
@@ -3027,9 +3850,22 @@ cli_repl_caches_identical_frontend_generations :: proc(t: ^testing.T) {
 {"id":"data-arg","op":"eval","source":"(identity-record *1)"}
 {"id":"bulk","op":"eval","source":"(defn loaded-value [] -> int 42)","defer_debug_values":true}
 {"id":"loaded-call","op":"eval","source":"(loaded-value)"}
+{"id":"restore-loaded-debug-values","op":"eval","source":"(defn loaded-value [] -> int 42)"}
+{"id":"restored-call","op":"eval","source":"(loaded-value)"}
+{"id":"trace-loaded-definition","op":"eval","source":"(defn loaded-value [] -> int 42)","trace":true}
+{"id":"relean-loaded","op":"eval","source":"(defn loaded-value [] -> int 42)","defer_debug_values":true}
+{"id":"relean-call","op":"eval","source":"(loaded-value)"}
 {"id":"def-live-data","op":"eval","source":"(defn live-data [value: int] -> Data {:value value})"}
 {"id":"direct-live-data","op":"eval","source":"(live-data 9)"}
 {"id":"compile-after-live-data","op":"eval","source":"(let [value *1] value)"}
+{"id":"semantic-plan-1","op":"eval","source":"(+ 20 22.0)"}
+{"id":"semantic-plan-2","op":"eval","source":"(+ 20 22.0)"}
+{"id":"history-seed","op":"eval","source":"40"}
+{"id":"history-plan-1","op":"eval","source":"(+ (bump) *1)"}
+{"id":"history-string","op":"eval","source":"\"wrong\""}
+{"id":"history-plan-mismatch","op":"eval","source":"(+ (bump) *1)"}
+{"id":"history-restore","op":"eval","source":"40"}
+{"id":"history-plan-2","op":"eval","source":"(+ (bump) *1)"}
 {"id":"close","op":"close"}
 `
     testing.expect_value(
@@ -3090,14 +3926,30 @@ cli_repl_caches_identical_frontend_generations :: proc(t: ^testing.T) {
     )
     testing.expect_value(
         t,
-        strings.contains(output, `"frontend_cache_hit":true`),
-        true,
-    )
-    testing.expect_value(
-        t,
         strings.contains(output, `"id":"mixed","kind":"output","success":true,"generation":7,"stream":"stdout","text":"x:3:1.5:true\n"`),
         true,
     )
+    resident_timing, resident_found :=
+        repl_jsonl_event_line(output, "call-2", "timings")
+    testing.expect_value(t, resident_found, true)
+    if resident_found {
+        testing.expect_value(
+            t,
+            strings.contains(
+                resident_timing,
+                `"phase":"odin-build","elapsed_ns":0`,
+            ),
+            true,
+        )
+        testing.expect_value(
+            t,
+            strings.contains(
+                resident_timing,
+                `"execution_path":"resident-scalar"`,
+            ),
+            true,
+        )
+    }
     testing.expect_value(
         t,
         strings.contains(output, `"id":"data","kind":"output","success":true,"generation":8,"stream":"stdout","text":"{:answer 7}\n"`),
@@ -3135,6 +3987,67 @@ cli_repl_caches_identical_frontend_generations :: proc(t: ^testing.T) {
         ),
         true,
     )
+    semantic_plan_1_timing, semantic_plan_1_found :=
+        repl_jsonl_event_line(output, "semantic-plan-1", "timings")
+    semantic_plan_2_timing, semantic_plan_2_found :=
+        repl_jsonl_event_line(output, "semantic-plan-2", "timings")
+    history_plan_1_timing, history_plan_1_found :=
+        repl_jsonl_event_line(output, "history-plan-1", "timings")
+    history_mismatch_timing, history_mismatch_found :=
+        repl_jsonl_event_line(output, "history-plan-mismatch", "timings")
+    history_mismatch_complete, history_mismatch_complete_found :=
+        repl_jsonl_event_line(output, "history-plan-mismatch", "complete")
+    history_plan_2_timing, history_plan_2_found :=
+        repl_jsonl_event_line(output, "history-plan-2", "timings")
+    history_plan_2_output, history_plan_2_output_found :=
+        repl_jsonl_event_line(output, "history-plan-2", "output")
+    testing.expect_value(t, semantic_plan_1_found, true)
+    testing.expect_value(t, semantic_plan_2_found, true)
+    testing.expect_value(t, history_plan_1_found, true)
+    testing.expect_value(t, history_mismatch_found, true)
+    testing.expect_value(t, history_mismatch_complete_found, true)
+    testing.expect_value(t, history_plan_2_found, true)
+    testing.expect_value(t, history_plan_2_output_found, true)
+    if semantic_plan_1_found && semantic_plan_2_found {
+        testing.expect_value(
+            t,
+            strings.contains(
+                semantic_plan_1_timing,
+                `"execution_path":"resident-semantic-plan"`,
+            ) && strings.contains(
+                semantic_plan_2_timing,
+                `"execution_path":"resident-cache"`,
+            ) && strings.contains(
+                semantic_plan_2_timing,
+                `"frontend_cache_hit":true`,
+            ),
+            true,
+        )
+    }
+    if history_plan_1_found && history_mismatch_found &&
+       history_mismatch_complete_found && history_plan_2_found &&
+       history_plan_2_output_found {
+        testing.expect_value(
+            t,
+            strings.contains(
+                history_plan_1_timing,
+                `"execution_path":"resident-semantic-plan"`,
+            ) && !strings.contains(
+                history_mismatch_timing,
+                `"execution_path":"resident-cache"`,
+            ) && strings.contains(
+                history_mismatch_complete,
+                `"success":false`,
+            ) && strings.contains(
+                history_plan_2_timing,
+                `"execution_path":"resident-cache"`,
+            ) && strings.contains(
+                history_plan_2_output,
+                `"text":"48\n"`,
+            ),
+            true,
+        )
+    }
     loaded_timing_offset := strings.index(
         output,
         `"id":"loaded-call","kind":"timings"`,
@@ -3155,15 +4068,1367 @@ cli_repl_caches_identical_frontend_generations :: proc(t: ^testing.T) {
         )
         testing.expect_value(
             t,
-            strings.contains(loaded_timing_line, `"frontend_cache_hit":true`),
+            strings.contains(
+                loaded_timing_line,
+                `"execution_path":"resident-scalar"`,
+            ),
+            true,
+        )
+    }
+    restore_timing, restore_found :=
+        repl_jsonl_event_line(output, "restore-loaded-debug-values", "timings")
+    restored_call_timing, restored_call_found :=
+        repl_jsonl_event_line(output, "restored-call", "timings")
+    trace_definition_timing, trace_definition_found :=
+        repl_jsonl_event_line(output, "trace-loaded-definition", "timings")
+    relean_timing, relean_found :=
+        repl_jsonl_event_line(output, "relean-loaded", "timings")
+    relean_call_timing, relean_call_found :=
+        repl_jsonl_event_line(output, "relean-call", "timings")
+    testing.expect_value(t, restore_found, true)
+    testing.expect_value(t, restored_call_found, true)
+    testing.expect_value(t, trace_definition_found, true)
+    testing.expect_value(t, relean_found, true)
+    testing.expect_value(t, relean_call_found, true)
+    if restore_found {
+        testing.expect_value(
+            t,
+            strings.contains(restore_timing, `"execution_path":"native-compile"`),
+            true,
+        )
+    }
+    if restored_call_found {
+        testing.expect_value(
+            t,
+            strings.contains(
+                restored_call_timing,
+                `"execution_path":"resident-scalar"`,
+            ),
+            false,
+        )
+    }
+    if trace_definition_found {
+        testing.expect_value(
+            t,
+            strings.contains(
+                trace_definition_timing,
+                `"execution_path":"native-compile"`,
+            ),
+            true,
+        )
+    }
+    if relean_found {
+        testing.expect_value(
+            t,
+            strings.contains(relean_timing, `"kind":"timings"`),
+            true,
+        )
+    }
+    if relean_call_found {
+        testing.expect_value(
+            t,
+            strings.contains(
+                relean_call_timing,
+                `"execution_path":"resident-scalar"`,
+            ),
             true,
         )
     }
     testing.expect_value(
         t,
+        strings.contains(
+            output,
+            `"id":"restored-call","kind":"output","success":true`,
+        ) && strings.contains(
+            output,
+            `"id":"relean-call","kind":"output","success":true`,
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
         strings.contains(output, `"phase":"odin-build","elapsed_ns":0`),
         true,
     )
+    testing.expect_value(t, string(stderr), "")
+}
+
+@(test)
+cli_repl_execution_modes_match_native_semantics :: proc(t: ^testing.T) {
+    dir, dir_err := os.make_directory_temp(
+        "",
+        "kvist-repl-execution-modes-*",
+        context.allocator,
+    )
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    context_path, _ := os.join_path({dir, "context.kvist"}, context.allocator)
+    defer delete(context_path)
+    testing.expect_value(
+        t,
+        os.write_entire_file_from_string(
+            context_path,
+            "(package repl_execution_modes)\n",
+        ) == nil,
+        true,
+    )
+    requests_path, _ := os.join_path({dir, "requests.jsonl"}, context.allocator)
+    defer delete(requests_path)
+    requests := `{"id":"define","op":"eval","source":"(defn session-inc [x: int] -> int (+ x 1))","defer_debug_values":true}
+{"id":"helper","op":"eval","source":"(+ (session-inc 20) 21)"}
+{"id":"float","op":"eval","source":"(let [value: f64 20.0] (+ value 22.5))"}
+{"id":"branch","op":"eval","source":"(if (< 20 21) 42 0)"}
+{"id":"string","op":"eval","source":"(= \"Kvist\" \"Kvist\")"}
+{"id":"history-seed","op":"eval","source":"40"}
+{"id":"history","op":"eval","source":"(+ *1 2)"}
+{"id":"unsupported","op":"eval","source":"(str (session-inc 1))"}
+{"id":"close","op":"close"}
+`
+    testing.expect_value(
+        t,
+        os.write_entire_file_from_string(requests_path, requests) == nil,
+        true,
+    )
+
+    repo_root := compiler_test_repo_root()
+    kvist_bin, bin_ok := build_test_kvist_binary(t, repo_root, dir)
+    if !bin_ok {
+        return
+    }
+    defer delete(kvist_bin)
+
+    modes := [?]string{"resident", "native"}
+    outputs: [2]string
+    defer {
+        for output in outputs do delete(output)
+    }
+    for mode, index in modes {
+        request_file, open_err := os.open(requests_path)
+        testing.expect_value(t, open_err == nil, true)
+        if open_err != nil {
+            return
+        }
+        state, stdout, stderr, exec_err := os.process_exec(
+            os.Process_Desc{
+                command = {
+                    kvist_bin,
+                    "repl",
+                    context_path,
+                    "--execution",
+                    mode,
+                    "--protocol",
+                    "jsonl",
+                },
+                working_dir = repo_root,
+                stdin = request_file,
+            },
+            context.allocator,
+        )
+        os.close(request_file)
+        defer delete(stdout)
+        defer delete(stderr)
+        testing.expect_value(t, exec_err == nil, true)
+        testing.expect_value(t, state.exited, true)
+        testing.expect_value(t, state.exit_code, 0)
+        testing.expect_value(t, string(stderr), "")
+        outputs[index] = strings.clone(string(stdout))
+        testing.expect_value(
+            t,
+            strings.contains(
+                outputs[index],
+                `"kind":"ready"`,
+            ) && strings.contains(
+                outputs[index],
+                fmt.tprintf(`"execution_mode":"%s"`, mode),
+            ),
+            true,
+        )
+    }
+
+    expression_ids := [?]string{
+        "helper",
+        "float",
+        "branch",
+        "string",
+        "history-seed",
+        "history",
+    }
+    for id in expression_ids {
+        resident_output, resident_output_found :=
+            repl_jsonl_event_line(outputs[0], id, "output")
+        native_output, native_output_found :=
+            repl_jsonl_event_line(outputs[1], id, "output")
+        resident_timing, resident_timing_found :=
+            repl_jsonl_event_line(outputs[0], id, "timings")
+        native_timing, native_timing_found :=
+            repl_jsonl_event_line(outputs[1], id, "timings")
+        testing.expect_value(t, resident_output_found, true)
+        testing.expect_value(t, native_output_found, true)
+        testing.expect_value(t, resident_timing_found, true)
+        testing.expect_value(t, native_timing_found, true)
+        if resident_output_found && native_output_found &&
+           resident_timing_found && native_timing_found {
+            testing.expect_value(t, resident_output, native_output)
+            testing.expect_value(
+                t,
+                strings.contains(
+                    resident_timing,
+                    `"execution_path":"resident`,
+                ),
+                true,
+            )
+            testing.expect_value(
+                t,
+                !strings.contains(native_timing, `"execution_path":"resident`) &&
+                strings.contains(native_timing, `"execution_path":"native`),
+                true,
+            )
+        }
+    }
+
+    resident_unsupported, resident_unsupported_found :=
+        repl_jsonl_event_line(outputs[0], "unsupported", "complete")
+    native_unsupported, native_unsupported_found :=
+        repl_jsonl_event_line(outputs[1], "unsupported", "output")
+    testing.expect_value(t, resident_unsupported_found, true)
+    testing.expect_value(t, native_unsupported_found, true)
+    if resident_unsupported_found && native_unsupported_found {
+        testing.expect_value(
+            t,
+            strings.contains(resident_unsupported, `"success":false`) &&
+            strings.contains(
+                resident_unsupported,
+                `"execution_path":"resident-unsupported"`,
+            ),
+            true,
+        )
+        testing.expect_value(
+            t,
+            strings.contains(native_unsupported, `"text":"2\n"`),
+            true,
+        )
+    }
+}
+
+@(test)
+cli_repl_acceleration_tiers_isolate_native_reuse_and_adapters :: proc(
+    t: ^testing.T,
+) {
+    dir, dir_err := os.make_directory_temp(
+        "",
+        "kvist-repl-acceleration-tiers-*",
+        context.allocator,
+    )
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    context_path, _ := os.join_path({dir, "context.kvist"}, context.allocator)
+    defer delete(context_path)
+    testing.expect_value(
+        t,
+        os.write_entire_file_from_string(
+            context_path,
+            "(package repl_acceleration_tiers)\n",
+        ) == nil,
+        true,
+    )
+    requests_path, _ := os.join_path({dir, "requests.jsonl"}, context.allocator)
+    defer delete(requests_path)
+    requests := `{"id":"define","op":"eval","source":"(defn session-inc [x: int] -> int (+ x 1))","defer_debug_values":true}
+{"id":"direct-first","op":"eval","source":"(session-inc 41)"}
+{"id":"direct-repeat","op":"eval","source":"(session-inc 41)"}
+{"id":"composed-first","op":"eval","source":"(+ (session-inc (+ 19 1)) 21)"}
+{"id":"composed-repeat","op":"eval","source":"(+ (session-inc (+ 19 1)) 21)"}
+{"id":"close","op":"close"}
+`
+    testing.expect_value(
+        t,
+        os.write_entire_file_from_string(requests_path, requests) == nil,
+        true,
+    )
+
+    repo_root := compiler_test_repo_root()
+    kvist_bin, bin_ok := build_test_kvist_binary(t, repo_root, dir)
+    if !bin_ok {
+        return
+    }
+    defer delete(kvist_bin)
+    cache_off_env := "KVIST_NO_COMPILE_CACHE=1"
+    child_env, child_env_ok :=
+        test_child_env_without_kvist_vars({cache_off_env})
+    testing.expect_value(t, child_env_ok, true)
+    if !child_env_ok {
+        return
+    }
+    defer test_env_slice_delete(&child_env)
+
+    modes := [?]string{
+        "auto",
+        "native-adapter",
+        "native-reuse",
+        "native",
+    }
+    outputs: [len(modes)]string
+    defer {
+        for output in outputs do delete(output)
+    }
+    for mode, index in modes {
+        request_file, open_err := os.open(requests_path)
+        testing.expect_value(t, open_err == nil, true)
+        if open_err != nil {
+            return
+        }
+        state, stdout, stderr, exec_err := os.process_exec(
+            os.Process_Desc{
+                command = {
+                    kvist_bin,
+                    "repl",
+                    context_path,
+                    "--execution",
+                    mode,
+                    "--protocol",
+                    "jsonl",
+                },
+                working_dir = repo_root,
+                env = child_env[:],
+                stdin = request_file,
+            },
+            context.allocator,
+        )
+        os.close(request_file)
+        defer delete(stdout)
+        defer delete(stderr)
+        testing.expect_value(t, exec_err == nil, true)
+        testing.expect_value(t, state.exited, true)
+        testing.expect_value(t, state.exit_code, 0)
+        testing.expect_value(t, string(stderr), "")
+        outputs[index] = strings.clone(string(stdout))
+    }
+
+    ids := [?]string{
+        "direct-first",
+        "direct-repeat",
+        "composed-first",
+        "composed-repeat",
+    }
+    for id in ids {
+        oracle_line, oracle_found :=
+            repl_jsonl_event_line(outputs[3], id, "output")
+        testing.expect_value(t, oracle_found, true)
+        for output in outputs[:3] {
+            line, found := repl_jsonl_event_line(output, id, "output")
+            testing.expect_value(t, found, true)
+            if found && oracle_found {
+                testing.expect_value(t, line, oracle_line)
+            }
+        }
+    }
+
+    expected_paths := [?]struct {
+        mode_index: int,
+        id:         string,
+        path:       string,
+    }{
+        {0, "direct-first", "resident-scalar"},
+        {0, "direct-repeat", "resident-scalar"},
+        {0, "composed-first", "resident-semantic-plan"},
+        {0, "composed-repeat", "resident-cache"},
+        {1, "direct-first", "resident-scalar"},
+        {1, "direct-repeat", "resident-scalar"},
+        {1, "composed-first", "native-compile"},
+        {1, "composed-repeat", "native-loaded"},
+        {2, "direct-first", "native-compile"},
+        {2, "direct-repeat", "native-loaded"},
+        {2, "composed-first", "native-compile"},
+        {2, "composed-repeat", "native-loaded"},
+        {3, "direct-first", "native-compile"},
+        {3, "direct-repeat", "native-cache"},
+        {3, "composed-first", "native-compile"},
+        {3, "composed-repeat", "native-cache"},
+    }
+    for expected in expected_paths {
+        line, found := repl_jsonl_event_line(
+            outputs[expected.mode_index],
+            expected.id,
+            "timings",
+        )
+        testing.expect_value(t, found, true)
+        if found {
+            testing.expect_value(
+                t,
+                strings.contains(
+                    line,
+                    fmt.tprintf(
+                        `"execution_path":"%s"`,
+                        expected.path,
+                    ),
+                ),
+                true,
+            )
+        }
+    }
+}
+
+@(test)
+cli_repl_incremental_native_and_compiled_generations_interoperate :: proc(
+    t: ^testing.T,
+) {
+    if !kvist_repl.incremental_native_backend_supported() {
+        // The incremental backend is an optional runtime capability. Its
+        // lowering is covered independently; exercise process integration
+        // wherever a compatible LLVM installation is available.
+        return
+    }
+    dir, dir_err := os.make_directory_temp(
+        "",
+        "kvist-repl-incremental-native-*",
+        context.allocator,
+    )
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    context_path, _ := os.join_path({dir, "context.kvist"}, context.allocator)
+    defer delete(context_path)
+    testing.expect_value(
+        t,
+        os.write_entire_file_from_string(
+            context_path,
+            `(package repl_incremental_native)
+(import data "kvist:data")
+(defn context-text [value: string] -> string value)
+(defn context-adjust [value: int] -> int (+ value 5))
+(defn context-invert [value: bool] -> bool (not value))
+(defn context-scale [value: f64] -> f64 (+ value 0.5))
+(defn context-owned-text [value: string] -> string (str value "!"))
+(defn context-string-size [value: string] -> int (len value))
+(defn context-data [value: int] -> Data [:value value])
+(defn context-data-size [value: Data] -> int (count value))
+`,
+        ) == nil,
+        true,
+    )
+    requests_path, _ := os.join_path({dir, "requests.jsonl"}, context.allocator)
+    defer delete(requests_path)
+    requests := `{"id":"define-1","op":"eval","source":"(defn square [x: int] -> int (* x x))\n(defn score [x: int] -> int (+ (square x) 2))","no_print":true,"defer_debug_values":true}
+{"id":"call-1","op":"eval","source":"(score 20)"}
+{"id":"context-call","op":"eval","source":"(context-text \"native\")"}
+{"id":"define-2","op":"eval","source":"(defn square [x: int] -> int (* x x))\n(defn score [x: int] -> int (+ (square x) 3))\n(defn project-score [x: int] -> int (+ (score x) (context-adjust x) (context-adjust (context-adjust x))))\n(defn project-float [value: f64 enabled: bool] -> f64 (if (context-invert enabled) (context-scale value) value))\n(defn project-string-size [] -> int (let [value (context-owned-text \"Kvist\") :defer] (context-string-size value)))\n(defn project-data-size [] -> int (let [value (context-data 42)] (context-data-size value)))","no_print":true,"defer_debug_values":true}
+{"id":"call-2","op":"eval","source":"(score 20)"}
+{"id":"external-call","op":"eval","source":"(project-score 20)"}
+{"id":"external-scalar-call","op":"eval","source":"(project-float 2.5 false)"}
+{"id":"external-string-call","op":"eval","source":"(project-string-size)"}
+{"id":"external-data-call","op":"eval","source":"(project-data-size)"}
+{"id":"control-define","op":"eval","source":"(defn bounded-odd-sum [limit: int stop: int] -> int\n  (defvar index: int 0)\n  (defvar total: int 0)\n  (while (< index limit)\n    (inc! index)\n    (if (= index stop) (break))\n    (if (= (% index 2) 0) (continue))\n    (set! total (+ total index)))\n  total)\n(defn contextual-sum [limit: int] -> int\n  (defvar index: int 0)\n  (defvar total: int 0)\n  (while (< index limit)\n    (inc! index)\n    (set! total (+ total (context-adjust index))))\n  total)\n(defn classify [x: int] -> int\n  (if (< x 0) (return 40))\n  (+ x 2))\n(defn mutate-scalars [value: f64 enabled: bool] -> f64\n  (defvar total: f64 value)\n  (defvar flag: bool enabled)\n  (inc! total)\n  (toggle! flag)\n  (if flag (negate! total))\n  total)","no_print":true,"defer_debug_values":true}
+{"id":"loop-call","op":"eval","source":"(bounded-odd-sum 10 8)"}
+{"id":"contextual-loop-call","op":"eval","source":"(contextual-sum 3)"}
+{"id":"return-call","op":"eval","source":"(classify -1)"}
+{"id":"scalar-mutation-call","op":"eval","source":"(mutate-scalars 2.5 false)"}
+{"id":"close","op":"close"}
+`
+    testing.expect_value(
+        t,
+        os.write_entire_file_from_string(requests_path, requests) == nil,
+        true,
+    )
+
+    repo_root := compiler_test_repo_root()
+    kvist_bin, bin_ok := build_test_kvist_binary(t, repo_root, dir)
+    if !bin_ok {
+        return
+    }
+    defer delete(kvist_bin)
+    child_env, child_env_ok := test_child_env_without_kvist_vars(
+        {"KVIST_NO_COMPILE_CACHE=1"},
+    )
+    testing.expect_value(t, child_env_ok, true)
+    if !child_env_ok {
+        return
+    }
+    defer test_env_slice_delete(&child_env)
+    request_file, open_err := os.open(requests_path)
+    testing.expect_value(t, open_err == nil, true)
+    if open_err != nil {
+        return
+    }
+    state, stdout, stderr, exec_err := os.process_exec(
+        os.Process_Desc{
+            command = {
+                kvist_bin,
+                "repl",
+                context_path,
+                "--execution",
+                "auto",
+                "--protocol",
+                "jsonl",
+            },
+            working_dir = repo_root,
+            env = child_env[:],
+            stdin = request_file,
+        },
+        context.allocator,
+    )
+    os.close(request_file)
+    defer delete(stdout)
+    defer delete(stderr)
+    testing.expect_value(t, exec_err == nil, true)
+    testing.expect_value(t, state.exited, true)
+    testing.expect_value(t, state.exit_code, 0)
+    testing.expect_value(t, string(stderr), "")
+    output := string(stdout)
+    expected := [?]struct {
+        id:   string,
+        kind: string,
+        text: string,
+    }{
+        {"call-1", "output", `"text":"402\n"`},
+        {"context-call", "output", `"text":"native\n"`},
+        {"call-2", "output", `"text":"403\n"`},
+        {"external-call", "output", `"text":"458\n"`},
+        {"external-scalar-call", "output", `"text":"3\n"`},
+        {"external-string-call", "output", `"text":"6\n"`},
+        {"external-data-call", "output", `"text":"2\n"`},
+        {"loop-call", "output", `"text":"16\n"`},
+        {"contextual-loop-call", "output", `"text":"21\n"`},
+        {"return-call", "output", `"text":"40\n"`},
+        {"scalar-mutation-call", "output", `"text":"-3.5\n"`},
+        {"define-1", "timings", `"execution_path":"incremental-native"`},
+        {"context-call", "timings", `"execution_path":"native-compile"`},
+        {"define-2", "timings", `"execution_path":"incremental-native"`},
+        {"control-define", "timings", `"execution_path":"incremental-native"`},
+    }
+    for item in expected {
+        line, found := repl_jsonl_event_line(output, item.id, item.kind)
+        testing.expect_value(t, found, true)
+        if found {
+            testing.expect_value(t, strings.contains(line, item.text), true)
+        }
+    }
+
+    native_request_file, native_open_err := os.open(requests_path)
+    testing.expect_value(t, native_open_err == nil, true)
+    if native_open_err != nil {
+        return
+    }
+    native_state, native_stdout, native_stderr, native_exec_err :=
+        os.process_exec(
+            os.Process_Desc{
+                command = {
+                    kvist_bin,
+                    "repl",
+                    context_path,
+                    "--execution",
+                    "native",
+                    "--protocol",
+                    "jsonl",
+                },
+                working_dir = repo_root,
+                env = child_env[:],
+                stdin = native_request_file,
+            },
+            context.allocator,
+        )
+    os.close(native_request_file)
+    defer delete(native_stdout)
+    defer delete(native_stderr)
+    testing.expect_value(t, native_exec_err == nil, true)
+    testing.expect_value(t, native_state.exited, true)
+    testing.expect_value(t, native_state.exit_code, 0)
+    testing.expect_value(t, string(native_stderr), "")
+    native_output := string(native_stdout)
+    result_ids := [?]string{
+        "call-1",
+        "context-call",
+        "call-2",
+        "external-call",
+        "external-scalar-call",
+        "external-string-call",
+        "external-data-call",
+        "loop-call",
+        "contextual-loop-call",
+        "return-call",
+        "scalar-mutation-call",
+    }
+    for id in result_ids {
+        incremental_line, incremental_found :=
+            repl_jsonl_event_line(output, id, "output")
+        native_line, native_found :=
+            repl_jsonl_event_line(native_output, id, "output")
+        testing.expect_value(t, incremental_found, true)
+        testing.expect_value(t, native_found, true)
+        if incremental_found && native_found {
+            testing.expect_value(t, incremental_line, native_line)
+        }
+    }
+}
+
+@(test)
+cli_repl_reuses_verified_native_artifacts_across_sessions :: proc(
+    t: ^testing.T,
+) {
+    dir, dir_err := os.make_directory_temp(
+        "",
+        "kvist-repl-native-artifact-cache-*",
+        context.allocator,
+    )
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    context_path, _ := os.join_path({dir, "context.kvist"}, context.allocator)
+    defer delete(context_path)
+    testing.expect_value(
+        t,
+        os.write_entire_file_from_string(
+            context_path,
+            "(package repl_native_artifact_cache)\n",
+        ) == nil,
+        true,
+    )
+    requests_path, _ := os.join_path({dir, "requests.jsonl"}, context.allocator)
+    defer delete(requests_path)
+    requests := `{"id":"value","op":"eval","source":"(+ 40 2)"}
+{"id":"close","op":"close"}
+`
+    testing.expect_value(
+        t,
+        os.write_entire_file_from_string(requests_path, requests) == nil,
+        true,
+    )
+
+    repo_root := compiler_test_repo_root()
+    kvist_bin, bin_ok := build_test_kvist_binary(t, repo_root, dir)
+    if !bin_ok {
+        return
+    }
+    defer delete(kvist_bin)
+    cache_dir, cache_dir_err := os.join_path(
+        {dir, "cache"},
+        context.allocator,
+    )
+    testing.expect_value(t, cache_dir_err == nil, true)
+    if cache_dir_err != nil {
+        return
+    }
+    defer delete(cache_dir)
+    cache_env := fmt.tprintf("KVIST_CACHE_DIR=%s", cache_dir)
+    child_env, child_env_ok := test_child_env_without_kvist_vars({cache_env})
+    testing.expect_value(t, child_env_ok, true)
+    if !child_env_ok {
+        return
+    }
+    defer test_env_slice_delete(&child_env)
+
+    outputs: [3]string
+    defer {
+        for output in outputs {
+            delete(output)
+        }
+    }
+    for session_index in 0..<len(outputs) {
+        if session_index == 2 {
+            native_cache_dir, native_cache_dir_err := os.join_path(
+                {cache_dir, "repl-native"},
+                context.allocator,
+            )
+            testing.expect_value(t, native_cache_dir_err == nil, true)
+            if native_cache_dir_err != nil {
+                return
+            }
+            defer delete(native_cache_dir)
+            entries, entries_err := os.read_directory_by_path(
+                native_cache_dir,
+                -1,
+                context.allocator,
+            )
+            testing.expect_value(t, entries_err == nil, true)
+            if entries_err != nil {
+                return
+            }
+            defer os.file_info_slice_delete(entries, context.allocator)
+            testing.expect_value(t, len(entries), 1)
+            if len(entries) != 1 {
+                return
+            }
+            artifact_path, artifact_path_err := os.join_path(
+                {
+                    native_cache_dir,
+                    entries[0].name,
+                    "generation.dylib",
+                },
+                context.allocator,
+            )
+            testing.expect_value(t, artifact_path_err == nil, true)
+            if artifact_path_err != nil {
+                return
+            }
+            defer delete(artifact_path)
+            testing.expect_value(
+                t,
+                os.write_entire_file_from_string(
+                    artifact_path,
+                    "corrupt native artifact",
+                ) == nil,
+                true,
+            )
+        }
+        request_file, open_err := os.open(requests_path)
+        testing.expect_value(t, open_err == nil, true)
+        if open_err != nil {
+            return
+        }
+        state, stdout, stderr, exec_err := os.process_exec(
+            os.Process_Desc{
+                command = {
+                    kvist_bin,
+                    "repl",
+                    context_path,
+                    "--execution",
+                    "native-reuse",
+                    "--protocol",
+                    "jsonl",
+                },
+                working_dir = repo_root,
+                env = child_env[:],
+                stdin = request_file,
+            },
+            context.allocator,
+        )
+        os.close(request_file)
+        defer delete(stdout)
+        defer delete(stderr)
+        testing.expect_value(t, exec_err == nil, true)
+        testing.expect_value(t, state.exited, true)
+        testing.expect_value(t, state.exit_code, 0)
+        testing.expect_value(t, string(stderr), "")
+        outputs[session_index] = strings.clone(string(stdout))
+    }
+
+    first_timing, first_timing_found :=
+        repl_jsonl_event_line(outputs[0], "value", "timings")
+    second_timing, second_timing_found :=
+        repl_jsonl_event_line(outputs[1], "value", "timings")
+    recovered_timing, recovered_timing_found :=
+        repl_jsonl_event_line(outputs[2], "value", "timings")
+    first_output, first_output_found :=
+        repl_jsonl_event_line(outputs[0], "value", "output")
+    second_output, second_output_found :=
+        repl_jsonl_event_line(outputs[1], "value", "output")
+    testing.expect_value(t, first_timing_found, true)
+    testing.expect_value(t, second_timing_found, true)
+    testing.expect_value(t, recovered_timing_found, true)
+    testing.expect_value(t, first_output_found, true)
+    testing.expect_value(t, second_output_found, true)
+    if first_timing_found && second_timing_found {
+        testing.expect_value(
+            t,
+            strings.contains(
+                first_timing,
+                `"execution_path":"native-compile"`,
+            ),
+            true,
+        )
+        testing.expect_value(
+            t,
+            strings.contains(
+                second_timing,
+                `"execution_path":"native-artifact-cache"`,
+            ) && strings.contains(
+                second_timing,
+                `"phase":"odin-build","elapsed_ns":0`,
+            ) && strings.contains(
+                second_timing,
+                `"native_cache_hit":true`,
+            ),
+            true,
+        )
+    }
+    if recovered_timing_found {
+        testing.expect_value(
+            t,
+            strings.contains(
+                recovered_timing,
+                `"execution_path":"native-compile"`,
+            ) && strings.contains(
+                recovered_timing,
+                `"native_cache_hit":false`,
+            ),
+            true,
+        )
+    }
+    if first_output_found && second_output_found {
+        testing.expect_value(t, first_output, second_output)
+        testing.expect_value(
+            t,
+            strings.contains(first_output, `"text":"42\n"`),
+            true,
+        )
+    }
+    testing.expect_value(
+        t,
+        strings.contains(outputs[1], `"native-artifact-cache"`),
+        true,
+    )
+}
+
+@(test)
+cli_repl_reuses_loaded_native_expressions_across_intervening_evals :: proc(
+    t: ^testing.T,
+) {
+    dir, dir_err := os.make_directory_temp(
+        "",
+        "kvist-repl-loaded-native-*",
+        context.allocator,
+    )
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    context_path, _ := os.join_path({dir, "context.kvist"}, context.allocator)
+    defer delete(context_path)
+    testing.expect_value(
+        t,
+        os.write_entire_file_from_string(
+            context_path,
+            "(package repl_loaded_native)\n",
+        ) == nil,
+        true,
+    )
+    requests_path, _ := os.join_path({dir, "requests.jsonl"}, context.allocator)
+    defer delete(requests_path)
+    requests := `{"id":"define","op":"eval","source":"(import data \"kvist:data\")\n(defvar reuse-count: int 0)\n(defvar reuse-data-count: i64 0)\n(defn reuse-bump [] -> int (do (inc! reuse-count) reuse-count))\n(defn reuse-data-bump [] -> i64 (do (inc! reuse-data-count) reuse-data-count))\n(defn reuse-native [x: int y: int = 0] -> int (+ x y))","defer_debug_values":true}
+{"id":"first","op":"eval","source":"(reuse-native (reuse-bump))"}
+{"id":"repeat","op":"eval","source":"(reuse-native (reuse-bump))"}
+{"id":"third","op":"eval","source":"(reuse-native (reuse-bump))"}
+{"id":"intervening","op":"eval","source":"(reuse-native (+ (reuse-bump) 10))"}
+{"id":"after-intervening","op":"eval","source":"(reuse-native (reuse-bump))"}
+{"id":"final","op":"eval","source":"(reuse-native (reuse-bump))"}
+{"id":"history","op":"eval","source":"*2"}
+{"id":"data-first","op":"eval","source":"(data.from-int (reuse-data-bump))"}
+{"id":"data-repeat","op":"eval","source":"(data.from-int (reuse-data-bump))"}
+{"id":"data-third","op":"eval","source":"(data.from-int (reuse-data-bump))"}
+{"id":"data-history","op":"eval","source":"*2"}
+{"id":"close","op":"close"}
+`
+    testing.expect_value(
+        t,
+        os.write_entire_file_from_string(requests_path, requests) == nil,
+        true,
+    )
+    request_file, open_err := os.open(requests_path)
+    testing.expect_value(t, open_err == nil, true)
+    if open_err != nil {
+        return
+    }
+    defer os.close(request_file)
+
+    repo_root := compiler_test_repo_root()
+    kvist_bin, bin_ok := build_test_kvist_binary(t, repo_root, dir)
+    if !bin_ok {
+        return
+    }
+    defer delete(kvist_bin)
+    state, stdout, stderr, exec_err := os.process_exec(
+        os.Process_Desc{
+            command = {
+                kvist_bin,
+                "repl",
+                context_path,
+                "--execution",
+                "auto",
+                "--protocol",
+                "jsonl",
+            },
+            working_dir = repo_root,
+            stdin = request_file,
+        },
+        context.allocator,
+    )
+    defer delete(stdout)
+    defer delete(stderr)
+    testing.expect_value(t, exec_err == nil, true)
+    testing.expect_value(t, state.exited, true)
+    testing.expect_value(t, state.exit_code, 0)
+    output := string(stdout)
+    testing.expect_value(t, string(stderr), "")
+    testing.expect_value(t, strings.contains(output, `"loaded-native-reuse"`), true)
+
+    expected_outputs := [?]struct {
+        id: string,
+        text: string,
+    }{
+        {"first", `"text":"1\n"`},
+        {"repeat", `"text":"2\n"`},
+        {"third", `"text":"3\n"`},
+        {"intervening", `"text":"14\n"`},
+        {"after-intervening", `"text":"5\n"`},
+        {"final", `"text":"6\n"`},
+        {"history", `"text":"5\n"`},
+        {"data-first", `"text":"1\n"`},
+        {"data-repeat", `"text":"2\n"`},
+        {"data-third", `"text":"3\n"`},
+        {"data-history", `"text":"2\n"`},
+    }
+    for expected in expected_outputs {
+        line, found := repl_jsonl_event_line(output, expected.id, "output")
+        testing.expect_value(t, found, true)
+        if found {
+            testing.expect_value(
+                t,
+                strings.contains(line, expected.text),
+                true,
+            )
+        }
+    }
+
+    path_expectations := [?]struct {
+        id: string,
+        path: string,
+    }{
+        {"first", "native-compile"},
+        {"repeat", "native-loaded"},
+        {"third", "native-loaded"},
+        {"intervening", "native-compile"},
+        {"after-intervening", "native-loaded"},
+        {"final", "native-loaded"},
+        {"data-first", "native-compile"},
+        {"data-repeat", "native-loaded"},
+        {"data-third", "native-loaded"},
+    }
+    for expected in path_expectations {
+        line, found := repl_jsonl_event_line(output, expected.id, "timings")
+        testing.expect_value(t, found, true)
+        if found {
+            testing.expect_value(
+                t,
+                strings.contains(
+                    line,
+                    fmt.tprintf(
+                        `"execution_path":"%s"`,
+                        expected.path,
+                    ),
+                ),
+                true,
+            )
+            if expected.path == "native-loaded" {
+                testing.expect_value(
+                    t,
+                    strings.contains(
+                        line,
+                        `"phase":"worker-load","elapsed_ns":0`,
+                    ),
+                    true,
+                )
+            }
+        }
+    }
+    testing.expect_value(
+        t,
+        strings.contains(
+            output,
+            `"id":"repeat","kind":"generation-loaded"`,
+        ),
+        false,
+    )
+
+    native_request_file, native_open_err := os.open(requests_path)
+    testing.expect_value(t, native_open_err == nil, true)
+    if native_open_err != nil {
+        return
+    }
+    native_state, native_stdout, native_stderr, native_exec_err :=
+        os.process_exec(
+            os.Process_Desc{
+                command = {
+                    kvist_bin,
+                    "repl",
+                    context_path,
+                    "--execution",
+                    "native",
+                    "--protocol",
+                    "jsonl",
+                },
+                working_dir = repo_root,
+                stdin = native_request_file,
+            },
+            context.allocator,
+        )
+    os.close(native_request_file)
+    defer delete(native_stdout)
+    defer delete(native_stderr)
+    testing.expect_value(t, native_exec_err == nil, true)
+    testing.expect_value(t, native_state.exited, true)
+    testing.expect_value(t, native_state.exit_code, 0)
+    testing.expect_value(t, string(native_stderr), "")
+    native_output := string(native_stdout)
+    for expected in expected_outputs {
+        auto_line, auto_found :=
+            repl_jsonl_event_line(output, expected.id, "output")
+        native_line, native_found :=
+            repl_jsonl_event_line(native_output, expected.id, "output")
+        testing.expect_value(t, auto_found, true)
+        testing.expect_value(t, native_found, true)
+        if auto_found && native_found {
+            testing.expect_value(t, auto_line, native_line)
+        }
+    }
+    forced_cache_ids := [?]string{
+        "repeat",
+        "third",
+        "after-intervening",
+        "final",
+        "data-repeat",
+        "data-third",
+    }
+    for id in forced_cache_ids {
+        line, found := repl_jsonl_event_line(native_output, id, "timings")
+        testing.expect_value(t, found, true)
+        if found {
+            testing.expect_value(
+                t,
+                strings.contains(line, `"execution_path":"native-cache"`),
+                true,
+            )
+            testing.expect_value(
+                t,
+                strings.contains(line, `"execution_path":"native-loaded"`),
+                false,
+            )
+        }
+    }
+}
+
+@(test)
+cli_repl_keeps_statement_blocks_native_and_composes_branch_adapters :: proc(
+    t: ^testing.T,
+) {
+    dir, dir_err := os.make_directory_temp(
+        "",
+        "kvist-repl-statement-branches-*",
+        context.allocator,
+    )
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    context_path, _ := os.join_path({dir, "context.kvist"}, context.allocator)
+    defer delete(context_path)
+    testing.expect_value(
+        t,
+        os.write_entire_file_from_string(
+            context_path,
+            "(package repl_statement_branches)\n",
+        ) == nil,
+        true,
+    )
+
+    requests_path, _ := os.join_path({dir, "requests.jsonl"}, context.allocator)
+    defer delete(requests_path)
+    requests := `{"id":"define","op":"eval","source":"(defn branch-mutable [x: int] -> int\n  (defvar total: int 0)\n  (if (< x 0) (set! total 40) (set! total x))\n  total)\n(defn grouped-branch [x: int] -> int\n  (defvar total: int 0)\n  (if (< x 0)\n    (do (discard (+ total 1))\n        (set! total 20)\n        (if true (set! total (+ total 20))))\n    (set! total x))\n  total)\n(defn branch-return [x: int] -> int\n  (defvar total: int 0)\n  (if (< x 0) (return 40) (set! total x))\n  (+ total 2))\n(defn effectful-branch [x: int] -> int\n  (defvar total: int 0)\n  (if (< x 0)\n    (do (println \"branch-side\") (set! total 40))\n    (set! total x))\n  (+ total 2))","no_print":true,"defer_debug_values":true}
+{"id":"statement-branch-block","op":"eval","source":"(do (defvar value: int 0) (if true (set! value 42) (set! value 0)) value)"}
+{"id":"branch-taken","op":"eval","source":"(+ (branch-mutable -1) 2)"}
+{"id":"branch-fallthrough","op":"eval","source":"(+ (branch-mutable 40) 2)"}
+{"id":"grouped-branch","op":"eval","source":"(+ (grouped-branch -1) 2)"}
+{"id":"branch-return","op":"eval","source":"(+ (branch-return -1) 2)"}
+{"id":"effectful-branch","op":"eval","source":"(+ (effectful-branch -1) 0)"}
+{"id":"close","op":"close"}
+`
+    testing.expect_value(
+        t,
+        os.write_entire_file_from_string(requests_path, requests) == nil,
+        true,
+    )
+    request_file, open_err := os.open(requests_path)
+    testing.expect_value(t, open_err == nil, true)
+    if open_err != nil {
+        return
+    }
+    defer os.close(request_file)
+
+    repo_root := compiler_test_repo_root()
+    kvist_bin, bin_ok := build_test_kvist_binary(t, repo_root, dir)
+    if !bin_ok {
+        return
+    }
+    defer delete(kvist_bin)
+    state, stdout, stderr, exec_err := os.process_exec(
+        os.Process_Desc{
+            command = {kvist_bin, "repl", context_path, "--protocol", "jsonl"},
+            working_dir = repo_root,
+            stdin = request_file,
+        },
+        context.allocator,
+    )
+    defer delete(stdout)
+    defer delete(stderr)
+    testing.expect_value(t, exec_err == nil, true)
+    testing.expect_value(t, state.exited, true)
+    testing.expect_value(t, state.exit_code, 0)
+    output := string(stdout)
+
+    statement_timing, statement_timing_found :=
+        repl_jsonl_event_line(output, "statement-branch-block", "timings")
+    statement_output, statement_output_found :=
+        repl_jsonl_event_line(output, "statement-branch-block", "output")
+    testing.expect_value(t, statement_timing_found, true)
+    testing.expect_value(t, statement_output_found, true)
+    if statement_timing_found && statement_output_found {
+        testing.expect_value(
+            t,
+            strings.contains(
+                statement_timing,
+                `"execution_path":"native-compile"`,
+            ) && strings.contains(statement_output, `"text":"42\n"`),
+            true,
+        )
+    }
+
+    composed_ids := [?]string{
+        "branch-taken",
+        "branch-fallthrough",
+        "grouped-branch",
+        "branch-return",
+    }
+    for id in composed_ids {
+        timing, timing_found := repl_jsonl_event_line(output, id, "timings")
+        result, result_found := repl_jsonl_event_line(output, id, "output")
+        testing.expect_value(t, timing_found, true)
+        testing.expect_value(t, result_found, true)
+        if timing_found && result_found {
+            testing.expect_value(
+                t,
+                strings.contains(
+                    timing,
+                    `"execution_path":"resident-semantic-plan"`,
+                ) && strings.contains(result, `"text":"42\n"`),
+                true,
+            )
+        }
+    }
+
+    effect_timing, effect_timing_found :=
+        repl_jsonl_event_line(output, "effectful-branch", "timings")
+    effect_output, effect_output_found :=
+        repl_jsonl_event_line(output, "effectful-branch", "output")
+    effect_stream, effect_stream_found :=
+        repl_jsonl_event_line(output, "effectful-branch", "stream-output")
+    testing.expect_value(t, effect_timing_found, true)
+    testing.expect_value(t, effect_output_found, true)
+    testing.expect_value(t, effect_stream_found, true)
+    if effect_timing_found && effect_output_found && effect_stream_found {
+        testing.expect_value(
+            t,
+            strings.contains(
+                effect_timing,
+                `"execution_path":"resident-semantic-plan"`,
+            ) && strings.contains(
+                effect_output,
+                `"text":"42\n"`,
+            ) && strings.contains(
+                effect_stream,
+                `"text":"branch-side\n"`,
+            ),
+            true,
+        )
+    }
+    testing.expect_value(t, string(stderr), "")
+}
+
+@(test)
+cli_repl_keeps_loops_native_and_composes_loop_adapters :: proc(
+    t: ^testing.T,
+) {
+    dir, dir_err := os.make_directory_temp(
+        "",
+        "kvist-repl-while-loops-*",
+        context.allocator,
+    )
+    testing.expect_value(t, dir_err == nil, true)
+    if dir_err != nil {
+        return
+    }
+    defer os.remove_all(dir)
+    defer delete(dir)
+
+    context_path, _ := os.join_path({dir, "context.kvist"}, context.allocator)
+    defer delete(context_path)
+    testing.expect_value(
+        t,
+        os.write_entire_file_from_string(
+            context_path,
+            "(package repl_while_loops)\n",
+        ) == nil,
+        true,
+    )
+
+    requests_path, _ := os.join_path({dir, "requests.jsonl"}, context.allocator)
+    defer delete(requests_path)
+    requests := `{"id":"define","op":"eval","source":"(defn count-up [limit: int] -> int\n  (defvar index: int 0)\n  (while (< index limit)\n    (set! index (+ index 1)))\n  index)\n(defn sum-until [limit: int] -> int\n  (defvar index: int 0)\n  (defvar total: int 0)\n  (while (< index limit)\n    (set! total (+ total index))\n    (set! index (+ index 1)))\n  total)\n(defn nested-loop [outer-limit: int inner-limit: int] -> int\n  (defvar outer: int 0)\n  (defvar total: int 0)\n  (while (< outer outer-limit)\n    (defvar inner: int 0)\n    (while (< inner inner-limit)\n      (set! total (+ total 1))\n      (set! inner (+ inner 1)))\n    (set! outer (+ outer 1)))\n  total)\n(defn find-loop [limit: int needle: int] -> int\n  (defvar index: int 0)\n  (while (< index limit)\n    (if (= index needle) (return index))\n    (set! index (+ index 1)))\n  -1)\n(defn break-loop [stop: int] -> int\n  (defvar index: int 0)\n  (while true\n    (when (= index stop) (break))\n    (inc! index))\n  index)\n(defn continue-loop [limit: int divisor: int] -> int\n  (defvar index: int 0)\n  (defvar total: int 0)\n  (while (< index limit)\n    (inc! index)\n    (when (= (% index divisor) 0) (continue))\n    (set! total (+ total index)))\n  total)\n(defn nested-break-loop [outer-limit: int inner-limit: int] -> int\n  (defvar outer: int 0)\n  (defvar total: int 0)\n  (while (< outer outer-limit)\n    (defvar inner: int 0)\n    (while true\n      (when (= inner inner-limit) (break))\n      (inc! total)\n      (inc! inner))\n    (inc! outer))\n  total)\n(defn nested-continue-loop [outer-limit: int inner-limit: int] -> int\n  (defvar outer: int 0)\n  (defvar total: int 0)\n  (while (< outer outer-limit)\n    (defvar inner: int 0)\n    (while (< inner inner-limit)\n      (inc! inner)\n      (when (= inner inner-limit) (continue))\n      (inc! total))\n    (inc! outer))\n  total)\n(defn effectful-loop [limit: int] -> int\n  (defvar index: int 0)\n  (while (< index limit)\n    (println \"loop-side\")\n    (set! index (+ index 1)))\n  index)\n(defn effectful-control [] -> int\n  (while true\n    (println \"control-side\")\n    (break))\n  42)","no_print":true,"defer_debug_values":true}
+{"id":"statement-loop-block","op":"eval","source":"(do (defvar value: int 0) (while (< value 42) (set! value (+ value 1))) value)"}
+{"id":"count-loop","op":"eval","source":"(+ (count-up (+ 39 1)) 2)"}
+{"id":"sum-loop","op":"eval","source":"(* (sum-until (+ 5 2)) 2)"}
+{"id":"nested-loop","op":"eval","source":"(+ (nested-loop (+ 5 1) 7) 0)"}
+{"id":"return-loop","op":"eval","source":"(+ (find-loop 100 (+ 39 1)) 2)"}
+{"id":"false-loop","op":"eval","source":"(+ (count-up 0) 42)"}
+{"id":"increment-mutation","op":"eval","source":"(do (defvar value: int 40) (inc! value) (inc! value) value)"}
+{"id":"decrement-mutation","op":"eval","source":"(do (defvar value: f64 43.0) (dec! value) value)"}
+{"id":"toggle-mutation","op":"eval","source":"(do (defvar value: bool false) (toggle! value) (if value 42 0))"}
+{"id":"negate-mutation","op":"eval","source":"(do (defvar value: int -42) (negate! value) value)"}
+{"id":"break-loop","op":"eval","source":"(+ (break-loop (+ 39 1)) 2)"}
+{"id":"continue-loop","op":"eval","source":"(+ (continue-loop 10 (+ 1 1)) 17)"}
+{"id":"nested-break-loop","op":"eval","source":"(+ (nested-break-loop (+ 5 1) 7) 0)"}
+{"id":"nested-continue-loop","op":"eval","source":"(+ (nested-continue-loop (+ 5 1) 8) 0)"}
+{"id":"effectful-loop","op":"eval","source":"(+ (effectful-loop 1) 41)"}
+{"id":"effectful-control","op":"eval","source":"(+ (effectful-control) 0)"}
+{"id":"close","op":"close"}
+`
+    testing.expect_value(
+        t,
+        os.write_entire_file_from_string(requests_path, requests) == nil,
+        true,
+    )
+    request_file, open_err := os.open(requests_path)
+    testing.expect_value(t, open_err == nil, true)
+    if open_err != nil {
+        return
+    }
+    defer os.close(request_file)
+
+    repo_root := compiler_test_repo_root()
+    kvist_bin, bin_ok := build_test_kvist_binary(t, repo_root, dir)
+    if !bin_ok {
+        return
+    }
+    defer delete(kvist_bin)
+    state, stdout, stderr, exec_err := os.process_exec(
+        os.Process_Desc{
+            command = {kvist_bin, "repl", context_path, "--protocol", "jsonl"},
+            working_dir = repo_root,
+            stdin = request_file,
+        },
+        context.allocator,
+    )
+    defer delete(stdout)
+    defer delete(stderr)
+    testing.expect_value(t, exec_err == nil, true)
+    testing.expect_value(t, state.exited, true)
+    testing.expect_value(t, state.exit_code, 0)
+    output := string(stdout)
+
+    composed_ids := [?]string{
+        "count-loop",
+        "sum-loop",
+        "nested-loop",
+        "return-loop",
+        "false-loop",
+        "break-loop",
+        "continue-loop",
+        "nested-break-loop",
+        "nested-continue-loop",
+    }
+    for id in composed_ids {
+        timing, timing_found := repl_jsonl_event_line(output, id, "timings")
+        result, result_found := repl_jsonl_event_line(output, id, "output")
+        testing.expect_value(t, timing_found, true)
+        testing.expect_value(t, result_found, true)
+        if timing_found && result_found {
+            testing.expect_value(
+                t,
+                strings.contains(
+                    timing,
+                    `"execution_path":"resident-semantic-plan"`,
+                ) && strings.contains(result, `"text":"42\n"`),
+                true,
+            )
+        }
+    }
+
+    native_statement_ids := [?]string{
+        "statement-loop-block",
+        "increment-mutation",
+        "decrement-mutation",
+        "toggle-mutation",
+        "negate-mutation",
+    }
+    for id in native_statement_ids {
+        timing, timing_found := repl_jsonl_event_line(output, id, "timings")
+        result, result_found := repl_jsonl_event_line(output, id, "output")
+        testing.expect_value(t, timing_found, true)
+        testing.expect_value(t, result_found, true)
+        if timing_found && result_found {
+            testing.expect_value(
+                t,
+                strings.contains(timing, `"execution_path":"native-compile"`) &&
+                    strings.contains(result, `"text":"42\n"`),
+                true,
+            )
+        }
+    }
+
+    effect_timing, effect_timing_found :=
+        repl_jsonl_event_line(output, "effectful-loop", "timings")
+    effect_output, effect_output_found :=
+        repl_jsonl_event_line(output, "effectful-loop", "output")
+    effect_stream, effect_stream_found :=
+        repl_jsonl_event_line(output, "effectful-loop", "stream-output")
+    testing.expect_value(t, effect_timing_found, true)
+    testing.expect_value(t, effect_output_found, true)
+    testing.expect_value(t, effect_stream_found, true)
+    if effect_timing_found && effect_output_found && effect_stream_found {
+        testing.expect_value(
+            t,
+            strings.contains(
+                effect_timing,
+                `"execution_path":"resident-semantic-plan"`,
+            ) &&
+            strings.contains(effect_output, `"text":"42\n"`) &&
+            strings.contains(effect_stream, `"text":"loop-side\n"`),
+            true,
+        )
+    }
+
+    control_timing, control_timing_found :=
+        repl_jsonl_event_line(output, "effectful-control", "timings")
+    control_output, control_output_found :=
+        repl_jsonl_event_line(output, "effectful-control", "output")
+    control_stream, control_stream_found :=
+        repl_jsonl_event_line(output, "effectful-control", "stream-output")
+    testing.expect_value(t, control_timing_found, true)
+    testing.expect_value(t, control_output_found, true)
+    testing.expect_value(t, control_stream_found, true)
+    if control_timing_found && control_output_found && control_stream_found {
+        testing.expect_value(
+            t,
+            strings.contains(
+                control_timing,
+                `"execution_path":"resident-semantic-plan"`,
+            ) && strings.contains(control_output, `"text":"42\n"`) &&
+            strings.contains(control_stream, `"text":"control-side\n"`),
+            true,
+        )
+    }
+
     testing.expect_value(t, string(stderr), "")
 }
 
@@ -3194,11 +5459,62 @@ cli_repl_prunes_loaded_source_packages_from_later_generations :: proc(
 
     requests_path, _ := os.join_path({dir, "requests.jsonl"}, context.allocator)
     defer delete(requests_path)
-    requests := `{"id":"load-data","op":"eval","source":"(import data \"kvist:data\")\n(defn profile-card [name: string, role: string] -> Data\n  [:article {:class \"profile\"}\n   [:h2 name]\n   [:p role]])","source_path":"/virtual/source-package-pruning.kvist","line":3,"column":1,"no_print":true,"defer_debug_values":true}
+    requests := `{"id":"load-data","op":"eval","source":"(import data \"kvist:data\")\n(defn profile-card [name: string, role: string] -> Data\n  [:article {:class \"profile\"}\n   [:h2 name]\n   [:p role]])\n(defn semantic-helper [x: int] -> int (+ x 1))\n(defn semantic-divisible? [x: int] -> bool (= (% x 4) 0))\n(defn semantic-sequence [x: int] -> int\n  (discard (+ x 100))\n  (+ x 2))\n(defn semantic-mutable [x: int] -> int\n  (defvar total: int x)\n  (set! total (+ total 2))\n  total)\n(defn semantic-early-return [x: int] -> int\n  (if (< x 0) (return 40))\n  (+ x 2))\n(defn semantic-tail-returns [x: int] -> int\n  (if (< x 0) (return 40) (return (+ x 2))))\n(defn semantic-return-inner [x: int] -> int\n  (if (< x 0) (return 5))\n  (+ x 1))\n(defn semantic-return-outer [x: int] -> int\n  (+ (semantic-return-inner x) 10))\n(defn semantic-effectful-return [x: int] -> int\n  (if (< x 0) (do (println \"return-side\") (return 40)))\n  (+ x 2))\n(def semantic-global-base: int 40)\n(defn semantic-global-reader [x: int] -> int (+ semantic-global-base x))\n(defn semantic-effectful-sequence [x: int] -> int\n  (println \"side\")\n  (+ x 1))\n(defn semantic-recursive [x: int] -> int\n  (if (= x 0) 0 (+ 1 (semantic-recursive (- x 1)))))\n(defn semantic-string-match? [match: string] -> bool\n  (or (= match \"focus\") (= match \"act\")))","source_path":"/virtual/source-package-pruning.kvist","line":3,"column":1,"no_print":true,"defer_debug_values":true}
 {"id":"composite-1","op":"eval","source":"(get (profile-card \"Ada Lovelace\" \"Mathematician\") 0)"}
 {"id":"rotate-history","op":"eval","source":"42"}
-{"id":"read-retained-data","op":"eval","source":"(data.keyword *2)"}
+{"id":"plan-history","op":"eval","source":"(+ *1 1)"}
+{"id":"read-retained-data","op":"eval","source":"(data.keyword *3)"}
+{"id":"float-add","op":"eval","source":"(+ 20.5 21.5)"}
+{"id":"float-history","op":"eval","source":"(< *1 50.0)"}
+{"id":"let-scalars","op":"eval","source":"(let [x 20 y (+ x 1)] (+ x y 1))"}
+{"id":"let-nested","op":"eval","source":"(let [x 20] (+ (let [y 1] y) x))"}
+{"id":"semantic-typed-let","op":"eval","source":"(let [x: f64 20] (+ x 22.0))"}
+{"id":"semantic-nested-let","op":"eval","source":"(let [x: f64 20] (+ (let [y: f64 1] y) x 21.0))"}
+{"id":"semantic-control-flow","op":"eval","source":"(if (and (< 20 22.0) (not false)) (+ 20 22.0) 0.0)"}
+{"id":"semantic-control-native","op":"eval","source":"(if (and (< 20 22.0) (not false)) (+ 20 22.0) 0.0)","native_debug_symbols":true}
+{"id":"semantic-mixed-number","op":"eval","source":"(+ 20 22.0)"}
+{"id":"semantic-mixed-repeat-a","op":"eval","source":"(+ 20 22.0)"}
+{"id":"semantic-mixed-repeat-b","op":"eval","source":"(+ 20 22.0)"}
+{"id":"semantic-mixed-cached","op":"eval","source":"(+ 20 22.0)"}
+{"id":"semantic-direct-call","op":"eval","source":"(semantic-helper 41)"}
+{"id":"semantic-composed-call","op":"eval","source":"(+ (semantic-helper (+ 19 1)) 21)"}
+{"id":"semantic-safe-divisor-call","op":"eval","source":"(if (semantic-divisible? (+ 20 4)) 42 0)"}
+{"id":"semantic-do-sequence","op":"eval","source":"(do (discard (+ 20 22)) 42)"}
+{"id":"semantic-let-sequence","op":"eval","source":"(let [x: f64 20] (discard (+ x 1.0)) (+ x 22.0))"}
+{"id":"semantic-composed-sequence","op":"eval","source":"(+ (semantic-sequence (+ 19 1)) 20)"}
+{"id":"semantic-effectful-sequence","op":"eval","source":"(+ (semantic-effectful-sequence (+ 20 21)) 0)"}
+{"id":"semantic-mutable-block","op":"eval","source":"(do (defvar value: int 20) (set! value (+ value 22)) value)"}
+{"id":"semantic-composed-mutable","op":"eval","source":"(+ (semantic-mutable (+ 19 1)) 20)"}
+{"id":"semantic-early-return-taken","op":"eval","source":"(+ (semantic-early-return -1) 2)"}
+{"id":"semantic-early-return-fallthrough","op":"eval","source":"(+ (semantic-early-return 40) 0)"}
+{"id":"semantic-tail-return","op":"eval","source":"(+ (semantic-tail-returns -1) 2)"}
+{"id":"semantic-nested-return","op":"eval","source":"(+ (semantic-return-outer -1) 27)"}
+{"id":"semantic-effectful-return","op":"eval","source":"(+ (semantic-effectful-return -1) 2)"}
+{"id":"semantic-global-scope","op":"eval","source":"(let [semantic-global-base: int 1] (semantic-global-reader 2))"}
+{"id":"semantic-captured-mutation","op":"eval","source":"(do (defvar value: int 0) (discard (if false (do (set! value 7) value) (do (set! value 42) value))) value)"}
 {"id":"composite-2","op":"eval","source":"(get (profile-card \"Ada Lovelace\" \"Mathematician\") 0)"}
+{"id":"data-managed-composition","op":"eval","source":"(data.count (data.empty-map))"}
+{"id":"data-final-first","op":"eval","source":"(data.first (profile-card \"Ada Lovelace\" \"Mathematician\"))"}
+{"id":"data-final-repeat","op":"eval","source":"(data.first (profile-card \"Ada Lovelace\" \"Mathematician\"))"}
+{"id":"string-literal-plan","op":"eval","source":"\"focus\""}
+{"id":"string-history-plan","op":"eval","source":"(= *1 \"focus\")"}
+{"id":"semantic-string-match","op":"eval","source":"(if (semantic-string-match? \"focus\") 42 0)"}
+{"id":"load-str","op":"eval","source":"(import str \"kvist:str\")","no_print":true,"defer_debug_values":true}
+{"id":"str-first","op":"eval","source":"(str.contains? \"Kvist REPL\" \"REPL\")"}
+{"id":"str-repeat","op":"eval","source":"(str.contains? \"Kvist REPL\" \"REPL\")"}
+{"id":"semantic-string-adapter-call","op":"eval","source":"(and (str.contains? \"Kvist REPL\" \"REPL\") true)"}
+{"id":"borrowed-string-result-first","op":"eval","source":"(str.trim \" Kvist \")"}
+{"id":"borrowed-string-result-adapter","op":"eval","source":"(= (str.trim \" Kvist \") \"Kvist\")"}
+{"id":"owned-string-result-first","op":"eval","source":"(str.lower \"KVIST\")"}
+{"id":"owned-string-result-adapter","op":"eval","source":"(= (str.lower \"KVIST\") \"kvist\")"}
+{"id":"owned-borrowed-string-result-adapter","op":"eval","source":"(= (str.trim (str.lower \" KVIST \")) \"kvist\")"}
+{"id":"semantic-recursive-fallback","op":"eval","source":"(+ (semantic-recursive 2) 40)"}
+{"id":"redefine-semantic-helper","op":"eval","source":"(defn semantic-helper [x: int] -> int (+ x 2))","no_print":true,"defer_debug_values":true}
+{"id":"semantic-composed-redefined","op":"eval","source":"(+ (semantic-helper (+ 19 1)) 21)"}
+{"id":"reject-unreachable-zero","op":"eval","source":"(if true 7 (/ 1 0))"}
+{"id":"reject-out-of-range-plan","op":"eval","source":"9999999999999999999999999999999999999999"}
+{"id":"shadow-plan-operator","op":"eval","source":"(defmacro + [x y] (quasiquote (- (unquote x) (unquote y))))","defer_debug_values":true}
+{"id":"use-shadowed-operator","op":"eval","source":"(+ 10 3)"}
 {"id":"close","op":"close"}
 `
     testing.expect_value(
@@ -3250,20 +5566,847 @@ cli_repl_prunes_loaded_source_packages_from_later_generations :: proc(
         t,
         strings.contains(
             output,
-            `"id":"read-retained-data","kind":"output","success":true,"generation":4,"stream":"stdout","text":":article\n"`,
+            `"id":"rotate-history","kind":"output","success":true,"generation":3,"stream":"stdout","text":"42\n"`,
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            output,
+            `"id":"plan-history","kind":"output","success":true,"generation":4,"stream":"stdout","text":"43\n"`,
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            output,
+            `"id":"read-retained-data","kind":"output","success":true,"generation":5,"stream":"stdout","text":":article\n"`,
         ),
         true,
     )
     load_timing, load_found :=
         repl_jsonl_event_line(output, "load-data", "timings")
+    primitive_timing, primitive_found :=
+        repl_jsonl_event_line(output, "rotate-history", "timings")
+    history_timing, history_found :=
+        repl_jsonl_event_line(output, "plan-history", "timings")
+    float_timing, float_found :=
+        repl_jsonl_event_line(output, "float-add", "timings")
+    float_history_timing, float_history_found :=
+        repl_jsonl_event_line(output, "float-history", "timings")
+    let_timing, let_found :=
+        repl_jsonl_event_line(output, "let-scalars", "timings")
+    nested_let_timing, nested_let_found :=
+        repl_jsonl_event_line(output, "let-nested", "timings")
+    semantic_typed_let_timing, semantic_typed_let_found :=
+        repl_jsonl_event_line(output, "semantic-typed-let", "timings")
+    semantic_nested_let_timing, semantic_nested_let_found :=
+        repl_jsonl_event_line(output, "semantic-nested-let", "timings")
+    semantic_control_timing, semantic_control_found :=
+        repl_jsonl_event_line(output, "semantic-control-flow", "timings")
+    semantic_control_native_timing, semantic_control_native_found :=
+        repl_jsonl_event_line(output, "semantic-control-native", "timings")
+    semantic_control_output, semantic_control_output_found :=
+        repl_jsonl_event_line(output, "semantic-control-flow", "output")
+    semantic_control_native_output, semantic_control_native_output_found :=
+        repl_jsonl_event_line(output, "semantic-control-native", "output")
+    semantic_mixed_timing, semantic_mixed_found :=
+        repl_jsonl_event_line(output, "semantic-mixed-number", "timings")
+    semantic_cached_timing, semantic_cached_found :=
+        repl_jsonl_event_line(output, "semantic-mixed-cached", "timings")
+    semantic_direct_call_timing, semantic_direct_call_found :=
+        repl_jsonl_event_line(output, "semantic-direct-call", "timings")
+    semantic_composed_call_timing, semantic_composed_call_found :=
+        repl_jsonl_event_line(output, "semantic-composed-call", "timings")
+    semantic_composed_call_output, semantic_composed_call_output_found :=
+        repl_jsonl_event_line(output, "semantic-composed-call", "output")
+    semantic_safe_divisor_timing, semantic_safe_divisor_found :=
+        repl_jsonl_event_line(
+            output,
+            "semantic-safe-divisor-call",
+            "timings",
+        )
+    semantic_safe_divisor_output, semantic_safe_divisor_output_found :=
+        repl_jsonl_event_line(
+            output,
+            "semantic-safe-divisor-call",
+            "output",
+        )
+    semantic_do_sequence_timing, semantic_do_sequence_found :=
+        repl_jsonl_event_line(output, "semantic-do-sequence", "timings")
+    semantic_do_sequence_output, semantic_do_sequence_output_found :=
+        repl_jsonl_event_line(output, "semantic-do-sequence", "output")
+    semantic_let_sequence_timing, semantic_let_sequence_found :=
+        repl_jsonl_event_line(output, "semantic-let-sequence", "timings")
+    semantic_let_sequence_output, semantic_let_sequence_output_found :=
+        repl_jsonl_event_line(output, "semantic-let-sequence", "output")
+    semantic_composed_sequence_timing, semantic_composed_sequence_found :=
+        repl_jsonl_event_line(
+            output,
+            "semantic-composed-sequence",
+            "timings",
+        )
+    semantic_composed_sequence_output, semantic_composed_sequence_output_found :=
+        repl_jsonl_event_line(
+            output,
+            "semantic-composed-sequence",
+            "output",
+        )
+    semantic_effectful_sequence_timing, semantic_effectful_sequence_found :=
+        repl_jsonl_event_line(
+            output,
+            "semantic-effectful-sequence",
+            "timings",
+        )
+    semantic_effectful_sequence_output, semantic_effectful_sequence_output_found :=
+        repl_jsonl_event_line(
+            output,
+            "semantic-effectful-sequence",
+            "output",
+        )
+    semantic_effectful_sequence_stream, semantic_effectful_sequence_stream_found :=
+        repl_jsonl_event_line(
+            output,
+            "semantic-effectful-sequence",
+            "stream-output",
+        )
+    semantic_mutable_block_timing, semantic_mutable_block_found :=
+        repl_jsonl_event_line(output, "semantic-mutable-block", "timings")
+    semantic_mutable_block_output, semantic_mutable_block_output_found :=
+        repl_jsonl_event_line(output, "semantic-mutable-block", "output")
+    semantic_composed_mutable_timing, semantic_composed_mutable_found :=
+        repl_jsonl_event_line(output, "semantic-composed-mutable", "timings")
+    semantic_composed_mutable_output, semantic_composed_mutable_output_found :=
+        repl_jsonl_event_line(output, "semantic-composed-mutable", "output")
+    semantic_early_return_taken_timing, semantic_early_return_taken_found :=
+        repl_jsonl_event_line(output, "semantic-early-return-taken", "timings")
+    semantic_early_return_taken_output, semantic_early_return_taken_output_found :=
+        repl_jsonl_event_line(output, "semantic-early-return-taken", "output")
+    semantic_early_return_fallthrough_timing, semantic_early_return_fallthrough_found :=
+        repl_jsonl_event_line(
+            output,
+            "semantic-early-return-fallthrough",
+            "timings",
+        )
+    semantic_early_return_fallthrough_output, semantic_early_return_fallthrough_output_found :=
+        repl_jsonl_event_line(
+            output,
+            "semantic-early-return-fallthrough",
+            "output",
+        )
+    semantic_tail_return_timing, semantic_tail_return_found :=
+        repl_jsonl_event_line(output, "semantic-tail-return", "timings")
+    semantic_tail_return_output, semantic_tail_return_output_found :=
+        repl_jsonl_event_line(output, "semantic-tail-return", "output")
+    semantic_nested_return_timing, semantic_nested_return_found :=
+        repl_jsonl_event_line(output, "semantic-nested-return", "timings")
+    semantic_nested_return_output, semantic_nested_return_output_found :=
+        repl_jsonl_event_line(output, "semantic-nested-return", "output")
+    semantic_effectful_return_timing, semantic_effectful_return_found :=
+        repl_jsonl_event_line(output, "semantic-effectful-return", "timings")
+    semantic_effectful_return_output, semantic_effectful_return_output_found :=
+        repl_jsonl_event_line(output, "semantic-effectful-return", "output")
+    semantic_effectful_return_stream, semantic_effectful_return_stream_found :=
+        repl_jsonl_event_line(
+            output,
+            "semantic-effectful-return",
+            "stream-output",
+        )
+    semantic_global_scope_timing, semantic_global_scope_found :=
+        repl_jsonl_event_line(output, "semantic-global-scope", "timings")
+    semantic_global_scope_output, semantic_global_scope_output_found :=
+        repl_jsonl_event_line(output, "semantic-global-scope", "output")
+    semantic_captured_mutation_timing, semantic_captured_mutation_found :=
+        repl_jsonl_event_line(output, "semantic-captured-mutation", "timings")
+    semantic_captured_mutation_complete, semantic_captured_mutation_complete_found :=
+        repl_jsonl_event_line(output, "semantic-captured-mutation", "complete")
+    semantic_recursive_timing, semantic_recursive_found :=
+        repl_jsonl_event_line(
+            output,
+            "semantic-recursive-fallback",
+            "timings",
+        )
+    semantic_recursive_output, semantic_recursive_output_found :=
+        repl_jsonl_event_line(
+            output,
+            "semantic-recursive-fallback",
+            "output",
+        )
+    semantic_redefined_timing, semantic_redefined_found :=
+        repl_jsonl_event_line(
+            output,
+            "semantic-composed-redefined",
+            "timings",
+        )
+    semantic_redefined_output, semantic_redefined_output_found :=
+        repl_jsonl_event_line(
+            output,
+            "semantic-composed-redefined",
+            "output",
+        )
+    let_output, let_output_found :=
+        repl_jsonl_event_line(output, "let-scalars", "output")
+    nested_let_output, nested_let_output_found :=
+        repl_jsonl_event_line(output, "let-nested", "output")
     composite_timing, composite_found :=
         repl_jsonl_event_line(output, "composite-1", "timings")
     repeated_timing, repeated_found :=
         repl_jsonl_event_line(output, "composite-2", "timings")
+    repeated_output, repeated_output_found :=
+        repl_jsonl_event_line(output, "composite-2", "output")
+    data_managed_timing, data_managed_found :=
+        repl_jsonl_event_line(
+            output,
+            "data-managed-composition",
+            "timings",
+        )
+    data_managed_output, data_managed_output_found :=
+        repl_jsonl_event_line(
+            output,
+            "data-managed-composition",
+            "output",
+        )
+    data_final_first_timing, data_final_first_found :=
+        repl_jsonl_event_line(output, "data-final-first", "timings")
+    data_final_repeat_timing, data_final_repeat_found :=
+        repl_jsonl_event_line(output, "data-final-repeat", "timings")
+    data_final_repeat_output, data_final_repeat_output_found :=
+        repl_jsonl_event_line(output, "data-final-repeat", "output")
+    str_first_timing, str_first_found :=
+        repl_jsonl_event_line(output, "str-first", "timings")
+    str_repeat_timing, str_repeat_found :=
+        repl_jsonl_event_line(output, "str-repeat", "timings")
+    semantic_string_timing, semantic_string_found :=
+        repl_jsonl_event_line(
+            output,
+            "semantic-string-adapter-call",
+            "timings",
+        )
+    semantic_string_output, semantic_string_output_found :=
+        repl_jsonl_event_line(
+            output,
+            "semantic-string-adapter-call",
+            "output",
+        )
+    string_result_first_timing, string_result_first_found :=
+        repl_jsonl_event_line(
+            output,
+            "borrowed-string-result-first",
+            "timings",
+        )
+    string_result_first_output, string_result_first_output_found :=
+        repl_jsonl_event_line(
+            output,
+            "borrowed-string-result-first",
+            "output",
+        )
+    string_result_timing, string_result_found :=
+        repl_jsonl_event_line(
+            output,
+            "borrowed-string-result-adapter",
+            "timings",
+        )
+    string_result_output, string_result_output_found :=
+        repl_jsonl_event_line(
+            output,
+            "borrowed-string-result-adapter",
+            "output",
+        )
+    owned_string_result_first_timing, owned_string_result_first_found :=
+        repl_jsonl_event_line(
+            output,
+            "owned-string-result-first",
+            "timings",
+        )
+    owned_string_result_first_output, owned_string_result_first_output_found :=
+        repl_jsonl_event_line(
+            output,
+            "owned-string-result-first",
+            "output",
+        )
+    owned_string_result_timing, owned_string_result_found :=
+        repl_jsonl_event_line(
+            output,
+            "owned-string-result-adapter",
+            "timings",
+        )
+    owned_string_result_output, owned_string_result_output_found :=
+        repl_jsonl_event_line(
+            output,
+            "owned-string-result-adapter",
+            "output",
+        )
+    owned_borrowed_result_timing, owned_borrowed_result_found :=
+        repl_jsonl_event_line(
+            output,
+            "owned-borrowed-string-result-adapter",
+            "timings",
+        )
+    owned_borrowed_result_output, owned_borrowed_result_output_found :=
+        repl_jsonl_event_line(
+            output,
+            "owned-borrowed-string-result-adapter",
+            "output",
+        )
+    string_literal_timing, string_literal_found :=
+        repl_jsonl_event_line(output, "string-literal-plan", "timings")
+    string_literal_output, string_literal_output_found :=
+        repl_jsonl_event_line(output, "string-literal-plan", "output")
+    string_history_timing, string_history_found :=
+        repl_jsonl_event_line(output, "string-history-plan", "timings")
+    string_history_output, string_history_output_found :=
+        repl_jsonl_event_line(output, "string-history-plan", "output")
+    semantic_string_match_timing, semantic_string_match_found :=
+        repl_jsonl_event_line(output, "semantic-string-match", "timings")
+    semantic_string_match_output, semantic_string_match_output_found :=
+        repl_jsonl_event_line(output, "semantic-string-match", "output")
     testing.expect_value(t, load_found, true)
+    testing.expect_value(t, primitive_found, true)
+    testing.expect_value(t, history_found, true)
+    testing.expect_value(t, float_found, true)
+    testing.expect_value(t, float_history_found, true)
+    testing.expect_value(t, let_found, true)
+    testing.expect_value(t, nested_let_found, true)
+    testing.expect_value(t, semantic_typed_let_found, true)
+    testing.expect_value(t, semantic_nested_let_found, true)
+    testing.expect_value(t, semantic_control_found, true)
+    testing.expect_value(t, semantic_control_native_found, true)
+    testing.expect_value(t, semantic_control_output_found, true)
+    testing.expect_value(t, semantic_control_native_output_found, true)
+    testing.expect_value(t, semantic_mixed_found, true)
+    testing.expect_value(t, semantic_cached_found, true)
+    testing.expect_value(t, semantic_direct_call_found, true)
+    testing.expect_value(t, semantic_composed_call_found, true)
+    testing.expect_value(t, semantic_composed_call_output_found, true)
+    testing.expect_value(t, semantic_safe_divisor_found, true)
+    testing.expect_value(t, semantic_safe_divisor_output_found, true)
+    testing.expect_value(t, semantic_do_sequence_found, true)
+    testing.expect_value(t, semantic_do_sequence_output_found, true)
+    testing.expect_value(t, semantic_let_sequence_found, true)
+    testing.expect_value(t, semantic_let_sequence_output_found, true)
+    testing.expect_value(t, semantic_composed_sequence_found, true)
+    testing.expect_value(t, semantic_composed_sequence_output_found, true)
+    testing.expect_value(t, semantic_effectful_sequence_found, true)
+    testing.expect_value(t, semantic_effectful_sequence_output_found, true)
+    testing.expect_value(t, semantic_effectful_sequence_stream_found, true)
+    testing.expect_value(t, semantic_mutable_block_found, true)
+    testing.expect_value(t, semantic_mutable_block_output_found, true)
+    testing.expect_value(t, semantic_composed_mutable_found, true)
+    testing.expect_value(t, semantic_composed_mutable_output_found, true)
+    testing.expect_value(t, semantic_early_return_taken_found, true)
+    testing.expect_value(t, semantic_early_return_taken_output_found, true)
+    testing.expect_value(t, semantic_early_return_fallthrough_found, true)
+    testing.expect_value(t, semantic_early_return_fallthrough_output_found, true)
+    testing.expect_value(t, semantic_tail_return_found, true)
+    testing.expect_value(t, semantic_tail_return_output_found, true)
+    testing.expect_value(t, semantic_nested_return_found, true)
+    testing.expect_value(t, semantic_nested_return_output_found, true)
+    testing.expect_value(t, semantic_effectful_return_found, true)
+    testing.expect_value(t, semantic_effectful_return_output_found, true)
+    testing.expect_value(t, semantic_effectful_return_stream_found, true)
+    testing.expect_value(t, semantic_global_scope_found, true)
+    testing.expect_value(t, semantic_global_scope_output_found, true)
+    testing.expect_value(t, semantic_captured_mutation_found, true)
+    testing.expect_value(t, semantic_captured_mutation_complete_found, true)
+    testing.expect_value(t, semantic_recursive_found, true)
+    testing.expect_value(t, semantic_recursive_output_found, true)
+    testing.expect_value(t, semantic_redefined_found, true)
+    testing.expect_value(t, semantic_redefined_output_found, true)
+    testing.expect_value(t, let_output_found, true)
+    testing.expect_value(t, nested_let_output_found, true)
     testing.expect_value(t, composite_found, true)
     testing.expect_value(t, repeated_found, true)
-    if load_found && composite_found && repeated_found {
+    testing.expect_value(t, repeated_output_found, true)
+    testing.expect_value(t, data_managed_found, true)
+    testing.expect_value(t, data_managed_output_found, true)
+    testing.expect_value(t, data_final_first_found, true)
+    testing.expect_value(t, data_final_repeat_found, true)
+    testing.expect_value(t, data_final_repeat_output_found, true)
+    testing.expect_value(t, str_first_found, true)
+    testing.expect_value(t, str_repeat_found, true)
+    testing.expect_value(t, semantic_string_found, true)
+    testing.expect_value(t, semantic_string_output_found, true)
+    testing.expect_value(t, string_result_first_found, true)
+    testing.expect_value(t, string_result_first_output_found, true)
+    testing.expect_value(t, string_result_found, true)
+    testing.expect_value(t, string_result_output_found, true)
+    testing.expect_value(t, owned_string_result_first_found, true)
+    testing.expect_value(t, owned_string_result_first_output_found, true)
+    testing.expect_value(t, owned_string_result_found, true)
+    testing.expect_value(t, owned_string_result_output_found, true)
+    testing.expect_value(t, owned_borrowed_result_found, true)
+    testing.expect_value(t, owned_borrowed_result_output_found, true)
+    testing.expect_value(t, string_literal_found, true)
+    testing.expect_value(t, string_literal_output_found, true)
+    testing.expect_value(t, string_history_found, true)
+    testing.expect_value(t, string_history_output_found, true)
+    testing.expect_value(t, semantic_string_match_found, true)
+    testing.expect_value(t, semantic_string_match_output_found, true)
+    if string_literal_found && string_literal_output_found {
+        testing.expect_value(
+            t,
+            strings.contains(
+                string_literal_timing,
+                `"execution_path":"resident-semantic-plan"`,
+            ) && strings.contains(string_literal_output, `"text":"focus\n"`),
+            true,
+        )
+    }
+    if string_history_found && string_history_output_found {
+        testing.expect_value(
+            t,
+            strings.contains(
+                string_history_timing,
+                `"execution_path":"resident-semantic-plan"`,
+            ) && strings.contains(string_history_output, `"text":"true\n"`),
+            true,
+        )
+    }
+    if semantic_string_match_found && semantic_string_match_output_found {
+        testing.expect_value(
+            t,
+            strings.contains(
+                semantic_string_match_timing,
+                `"execution_path":"resident-semantic-plan"`,
+            ) && strings.contains(
+                semantic_string_match_output,
+                `"text":"42\n"`,
+            ),
+            true,
+        )
+    }
+    if primitive_found {
+        testing.expect_value(
+            t,
+            strings.contains(
+                primitive_timing,
+                `"phase":"odin-build","elapsed_ns":0`,
+            ),
+            true,
+        )
+        testing.expect_value(
+            t,
+            strings.contains(
+                primitive_timing,
+                `"execution_path":"resident-semantic-plan"`,
+            ),
+            true,
+        )
+    }
+    if history_found {
+        testing.expect_value(
+            t,
+            strings.contains(
+                history_timing,
+                `"phase":"odin-build","elapsed_ns":0`,
+            ) && strings.contains(
+                history_timing,
+                `"execution_path":"resident-semantic-plan"`,
+            ),
+            true,
+        )
+    }
+    if float_found {
+        testing.expect_value(
+            t,
+            strings.contains(
+                float_timing,
+                `"execution_path":"resident-semantic-plan"`,
+            ),
+            true,
+        )
+    }
+    if float_history_found {
+        testing.expect_value(
+            t,
+            strings.contains(
+                float_history_timing,
+                `"execution_path":"resident-semantic-plan"`,
+            ),
+            true,
+        )
+    }
+    if let_found {
+        testing.expect_value(
+            t,
+            strings.contains(
+                let_timing,
+                `"execution_path":"resident-semantic-plan"`,
+            ),
+            true,
+        )
+    }
+    if nested_let_found {
+        testing.expect_value(
+            t,
+            strings.contains(
+                nested_let_timing,
+                `"execution_path":"resident-semantic-plan"`,
+            ),
+            true,
+        )
+    }
+    if semantic_typed_let_found {
+        testing.expect_value(
+            t,
+            strings.contains(
+                semantic_typed_let_timing,
+                `"execution_path":"resident-semantic-plan"`,
+            ),
+            true,
+        )
+    }
+    if semantic_nested_let_found {
+        testing.expect_value(
+            t,
+            strings.contains(
+                semantic_nested_let_timing,
+                `"execution_path":"resident-semantic-plan"`,
+            ),
+            true,
+        )
+    }
+    if semantic_control_found {
+        testing.expect_value(
+            t,
+            strings.contains(
+                semantic_control_timing,
+                `"execution_path":"resident-semantic-plan"`,
+            ),
+            true,
+        )
+    }
+    if semantic_control_native_found {
+        testing.expect_value(
+            t,
+            strings.contains(
+                semantic_control_native_timing,
+                `"execution_path":"native-compile"`,
+            ),
+            true,
+        )
+    }
+    if semantic_mixed_found {
+        testing.expect_value(
+            t,
+            strings.contains(
+                semantic_mixed_timing,
+                `"execution_path":"resident-semantic-plan"`,
+            ),
+            true,
+        )
+    }
+    if semantic_cached_found {
+        testing.expect_value(
+            t,
+            strings.contains(
+                semantic_cached_timing,
+                `"execution_path":"resident-cache"`,
+            ) && strings.contains(
+                semantic_cached_timing,
+                `"frontend_cache_hit":true`,
+            ),
+            true,
+        )
+    }
+    if semantic_direct_call_found {
+        testing.expect_value(
+            t,
+            strings.contains(
+                semantic_direct_call_timing,
+                `"execution_path":"resident-scalar"`,
+            ),
+            true,
+        )
+    }
+    if semantic_composed_call_found {
+        testing.expect_value(
+            t,
+            strings.contains(
+                semantic_composed_call_timing,
+                `"execution_path":"resident-semantic-plan"`,
+            ),
+            true,
+        )
+    }
+    if semantic_safe_divisor_found {
+        testing.expect_value(
+            t,
+            strings.contains(
+                semantic_safe_divisor_timing,
+                `"execution_path":"resident-semantic-plan"`,
+            ) && strings.contains(
+                semantic_safe_divisor_output,
+                `"text":"42\n"`,
+            ),
+            true,
+        )
+    }
+    if semantic_do_sequence_found {
+        testing.expect_value(
+            t,
+            strings.contains(
+                semantic_do_sequence_timing,
+                `"execution_path":"native-compile"`,
+            ) && strings.contains(
+                semantic_do_sequence_output,
+                `"text":"42\n"`,
+            ),
+            true,
+        )
+    }
+    if semantic_let_sequence_found {
+        testing.expect_value(
+            t,
+            strings.contains(
+                semantic_let_sequence_timing,
+                `"execution_path":"native-compile"`,
+            ) && strings.contains(
+                semantic_let_sequence_output,
+                `"text":"42\n"`,
+            ),
+            true,
+        )
+    }
+    if semantic_composed_sequence_found {
+        testing.expect_value(
+            t,
+            strings.contains(
+                semantic_composed_sequence_timing,
+                `"execution_path":"resident-semantic-plan"`,
+            ) && strings.contains(
+                semantic_composed_sequence_output,
+                `"text":"42\n"`,
+            ),
+            true,
+        )
+    }
+    if semantic_effectful_sequence_found {
+        testing.expect_value(
+            t,
+            strings.contains(
+                semantic_effectful_sequence_timing,
+                `"execution_path":"resident-semantic-plan"`,
+            ) && strings.contains(
+                semantic_effectful_sequence_output,
+                `"text":"42\n"`,
+            ) && strings.contains(
+                semantic_effectful_sequence_stream,
+                `"text":"side\n"`,
+            ),
+            true,
+        )
+    }
+    if semantic_mutable_block_found {
+        testing.expect_value(
+            t,
+            strings.contains(
+                semantic_mutable_block_timing,
+                `"execution_path":"native-compile"`,
+            ) && strings.contains(
+                semantic_mutable_block_output,
+                `"text":"42\n"`,
+            ),
+            true,
+        )
+    }
+    if semantic_composed_mutable_found {
+        testing.expect_value(
+            t,
+            strings.contains(
+                semantic_composed_mutable_timing,
+                `"execution_path":"resident-semantic-plan"`,
+            ) && strings.contains(
+                semantic_composed_mutable_output,
+                `"text":"42\n"`,
+            ),
+            true,
+        )
+    }
+    if semantic_early_return_taken_found &&
+       semantic_early_return_fallthrough_found &&
+       semantic_tail_return_found && semantic_nested_return_found {
+        testing.expect_value(
+            t,
+            strings.contains(
+                semantic_early_return_taken_timing,
+                `"execution_path":"resident-semantic-plan"`,
+            ) && strings.contains(
+                semantic_early_return_taken_output,
+                `"text":"42\n"`,
+            ),
+            true,
+        )
+        testing.expect_value(
+            t,
+            strings.contains(
+                semantic_early_return_fallthrough_timing,
+                `"execution_path":"resident-semantic-plan"`,
+            ) && strings.contains(
+                semantic_early_return_fallthrough_output,
+                `"text":"42\n"`,
+            ),
+            true,
+        )
+        testing.expect_value(
+            t,
+            strings.contains(
+                semantic_tail_return_timing,
+                `"execution_path":"resident-semantic-plan"`,
+            ) && strings.contains(
+                semantic_tail_return_output,
+                `"text":"42\n"`,
+            ),
+            true,
+        )
+        testing.expect_value(
+            t,
+            strings.contains(
+                semantic_nested_return_timing,
+                `"execution_path":"resident-semantic-plan"`,
+            ) && strings.contains(
+                semantic_nested_return_output,
+                `"text":"42\n"`,
+            ),
+            true,
+        )
+    }
+    if semantic_effectful_return_found {
+        testing.expect_value(
+            t,
+            strings.contains(
+                semantic_effectful_return_timing,
+                `"execution_path":"resident-semantic-plan"`,
+            ) && strings.contains(
+                semantic_effectful_return_output,
+                `"text":"42\n"`,
+            ) && strings.contains(
+                semantic_effectful_return_stream,
+                `"text":"return-side\n"`,
+            ),
+            true,
+        )
+    }
+    if semantic_global_scope_found {
+        testing.expect_value(
+            t,
+            strings.contains(
+                semantic_global_scope_timing,
+                `"execution_path":"resident-semantic-plan"`,
+            ) && strings.contains(
+                semantic_global_scope_output,
+                `"text":"42\n"`,
+            ),
+            true,
+        )
+    }
+    if semantic_captured_mutation_found {
+        testing.expect_value(
+            t,
+            strings.contains(
+                semantic_captured_mutation_timing,
+                `"execution_path":"native-compile"`,
+            ) && strings.contains(
+                semantic_captured_mutation_complete,
+                `"success":false`,
+            ),
+            true,
+        )
+    }
+    if semantic_recursive_found {
+        testing.expect_value(
+            t,
+            strings.contains(
+                semantic_recursive_timing,
+                `"execution_path":"resident-semantic-plan"`,
+            ),
+            true,
+        )
+    }
+    if semantic_redefined_found {
+        testing.expect_value(
+            t,
+            strings.contains(
+                semantic_redefined_timing,
+                `"execution_path":"resident-semantic-plan"`,
+            ),
+            true,
+        )
+    }
+    if semantic_composed_call_output_found &&
+       semantic_recursive_output_found &&
+       semantic_redefined_output_found {
+        testing.expect_value(
+            t,
+            strings.contains(
+                semantic_composed_call_output,
+                `"text":"42\n"`,
+            ) && strings.contains(
+                semantic_recursive_output,
+                `"text":"42\n"`,
+            ) && strings.contains(
+                semantic_redefined_output,
+                `"text":"43\n"`,
+            ),
+            true,
+        )
+    }
+    if let_output_found {
+        testing.expect_value(
+            t,
+            strings.contains(let_output, `"text":"42\n"`),
+            true,
+        )
+    }
+    if nested_let_output_found {
+        testing.expect_value(
+            t,
+            strings.contains(nested_let_output, `"text":"21\n"`),
+            true,
+        )
+    }
+    testing.expect_value(
+        t,
+        strings.contains(
+            output,
+            `"id":"float-add","kind":"output","success":true`,
+        ) && strings.contains(
+            output,
+            `"id":"float-history","kind":"output","success":true`,
+        ) && strings.contains(
+            output,
+            `"id":"let-scalars","kind":"output","success":true`,
+        ) && strings.contains(
+            output,
+            `"id":"let-nested","kind":"output","success":true`,
+        ) && strings.contains(
+            output,
+            `"id":"semantic-typed-let","kind":"output","success":true`,
+        ) && strings.contains(
+            output,
+            `"id":"semantic-nested-let","kind":"output","success":true`,
+        ) && strings.contains(
+            output,
+            `"id":"semantic-control-flow","kind":"output","success":true`,
+        ) && strings.contains(
+            output,
+            `"id":"semantic-control-native","kind":"output","success":true`,
+        ) && strings.contains(
+            output,
+            `"id":"semantic-mixed-number","kind":"output","success":true`,
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(semantic_control_output, `"text":"42\n"`) &&
+        strings.contains(semantic_control_native_output, `"text":"42\n"`),
+        true,
+    )
+    if load_found && composite_found && repeated_found &&
+       repeated_output_found {
         load_bytes, load_bytes_found :=
             repl_jsonl_int_field(load_timing, "generated_bytes")
         composite_bytes, composite_bytes_found :=
@@ -3290,6 +6433,210 @@ cli_repl_prunes_loaded_source_packages_from_later_generations :: proc(
         testing.expect_value(
             t,
             strings.contains(repeated_timing, `"native_cache_hit":true`),
+            true,
+        )
+        testing.expect_value(
+            t,
+            strings.contains(repeated_output, `"text":":article\n"`),
+            true,
+        )
+    }
+    testing.expect_value(
+        t,
+        strings.contains(
+            output,
+            `"id":"str-first","kind":"output","success":true`,
+        ) && strings.contains(
+            output,
+            `"id":"str-repeat","kind":"output","success":true`,
+        ),
+        true,
+    )
+    if str_first_found && str_repeat_found {
+        testing.expect_value(
+            t,
+            strings.contains(
+                str_first_timing,
+                `"phase":"odin-build","elapsed_ns":0`,
+            ),
+            false,
+        )
+        testing.expect_value(
+            t,
+            strings.contains(
+                str_repeat_timing,
+                `"phase":"odin-build","elapsed_ns":0`,
+            ),
+            true,
+        )
+        testing.expect_value(
+            t,
+            strings.contains(
+                str_repeat_timing,
+                `"execution_path":"resident-scalar"`,
+            ),
+            true,
+        )
+    }
+    if semantic_string_found && semantic_string_output_found {
+        testing.expect_value(
+            t,
+            strings.contains(
+                semantic_string_timing,
+                `"execution_path":"resident-semantic-plan"`,
+            ) && strings.contains(
+                semantic_string_output,
+                `"text":"true\n"`,
+            ),
+            true,
+        )
+    }
+    if string_result_first_found && string_result_first_output_found {
+        testing.expect_value(
+            t,
+            strings.contains(
+                string_result_first_timing,
+                `"execution_path":"native-compile"`,
+            ) && strings.contains(
+                string_result_first_output,
+                `"text":"Kvist\n"`,
+            ),
+            true,
+        )
+    }
+    if string_result_found && string_result_output_found {
+        testing.expect_value(
+            t,
+            strings.contains(
+                string_result_timing,
+                `"execution_path":"resident-semantic-plan"`,
+            ) && strings.contains(
+                string_result_output,
+                `"text":"true\n"`,
+            ),
+            true,
+        )
+    }
+    if owned_string_result_first_found &&
+       owned_string_result_first_output_found {
+        testing.expect_value(
+            t,
+            strings.contains(
+                owned_string_result_first_timing,
+                `"execution_path":"native-compile"`,
+            ) && strings.contains(
+                owned_string_result_first_output,
+                `"text":"kvist\n"`,
+            ),
+            true,
+        )
+    }
+    if owned_string_result_found && owned_string_result_output_found {
+        testing.expect_value(
+            t,
+            strings.contains(
+                owned_string_result_timing,
+                `"execution_path":"resident-semantic-plan"`,
+            ) && strings.contains(
+                owned_string_result_output,
+                `"text":"true\n"`,
+            ),
+            true,
+        )
+    }
+    if owned_borrowed_result_found &&
+       owned_borrowed_result_output_found {
+        testing.expect_value(
+            t,
+            strings.contains(
+                owned_borrowed_result_timing,
+                `"execution_path":"resident-semantic-plan"`,
+            ) && strings.contains(
+                owned_borrowed_result_output,
+                `"text":"true\n"`,
+            ),
+            true,
+        )
+    }
+    if data_managed_found && data_managed_output_found {
+        testing.expect_value(
+            t,
+            strings.contains(
+                data_managed_timing,
+                `"execution_path":"resident-semantic-plan"`,
+            ) && strings.contains(
+                data_managed_output,
+                `"text":"0\n"`,
+            ),
+            true,
+        )
+    }
+    if data_final_first_found && data_final_repeat_found &&
+       data_final_repeat_output_found {
+        testing.expect_value(
+            t,
+            (strings.contains(
+                data_final_first_timing,
+                `"execution_path":"native-compile"`,
+            ) || strings.contains(
+                data_final_first_timing,
+                `"execution_path":"resident-semantic-plan"`,
+            )) && (strings.contains(
+                data_final_repeat_timing,
+                `"execution_path":"resident-semantic-plan"`,
+            ) || strings.contains(
+                data_final_repeat_timing,
+                `"execution_path":"resident-cache"`,
+            )) && strings.contains(
+                data_final_repeat_output,
+                `"text":":article\n"`,
+            ),
+            true,
+        )
+    }
+    testing.expect_value(
+        t,
+        strings.contains(
+            output,
+            `"id":"reject-unreachable-zero","kind":"diagnostics","success":false`,
+        ) && strings.contains(
+            output,
+            "Division by zero not allowed",
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            output,
+            `"id":"reject-out-of-range-plan","kind":"diagnostics","success":false`,
+        ) && strings.contains(
+            output,
+            "The maximum value that can be represented by 'int'",
+        ),
+        true,
+    )
+    testing.expect_value(
+        t,
+        strings.contains(
+            output,
+            `"id":"use-shadowed-operator","kind":"output","success":true`,
+        ) && strings.contains(
+            output,
+            `"text":"7\n"`,
+        ),
+        true,
+    )
+    shadowed_timing, shadowed_found :=
+        repl_jsonl_event_line(output, "use-shadowed-operator", "timings")
+    testing.expect_value(t, shadowed_found, true)
+    if shadowed_found {
+        testing.expect_value(
+            t,
+            strings.contains(
+                shadowed_timing,
+                `"execution_path":"resident-semantic-plan"`,
+            ),
             true,
         )
     }
@@ -3675,6 +7022,19 @@ cli_repl_jsonl_executes_native_multi_form_generation :: proc(t: ^testing.T) {
     testing.expect_value(t, state.exited, true)
     testing.expect_value(t, state.exit_code, 0)
     output := string(stdout)
+    stale_macro_timing, stale_macro_timing_found :=
+        repl_jsonl_event_line(output, "call-stale-macro-user", "timings")
+    testing.expect_value(t, stale_macro_timing_found, true)
+    if stale_macro_timing_found {
+        testing.expect_value(
+            t,
+            strings.contains(
+                stale_macro_timing,
+                `"execution_path":"native-compile"`,
+            ),
+            true,
+        )
+    }
     testing.expect_value(t, strings.contains(output, `"kind":"ready"`), true)
     testing.expect_value(t, strings.contains(output, `"id":"eval-1","kind":"output"`), true)
     testing.expect_value(t, strings.contains(output, `"id":"eval-1","kind":"generation-loaded","success":true,"generation":1`), true)

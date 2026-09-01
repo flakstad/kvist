@@ -32,8 +32,9 @@ other data DSLs feel like Lisp without making every runtime value dynamic.
 
 ## Highlights
 
-- **Native REPL** — submissions are checked and executed as native Kvist code,
-  while definitions, values, imports, macros, and recent results persist.
+- **Native REPL** — work with statically checked Kvist in a persistent project
+  session where definitions, values, imports, macros, and recent results remain
+  available.
 - **Native by default** — concrete structs, arrays, maps, pointers, procedures,
   allocators, and explicit ownership.
 - **Data-oriented programming** — immutable EDN-shaped values with
@@ -109,7 +110,7 @@ $ ./kvist run hello.kvist
 hello from kvist
 ```
 
-Or use the same file as context for the native REPL:
+Or use the same file as context for the REPL:
 
 ```text
 $ ./kvist repl hello.kvist
@@ -130,10 +131,10 @@ export PATH="$HOME/.local/lib/kvist/bin:$PATH"
 
 ## Interactive Development
 
-A REPL submission is ordinary Kvist: it is read, macro-expanded, type checked,
-ownership checked, lowered to Odin, compiled, loaded, and executed as native
-code. Definitions and supported typed values persist across submissions, and
-compatible redefinitions update later calls without replaying earlier forms.
+A REPL submission is ordinary Kvist, with the same static types, ownership,
+and Odin interoperability as compiled programs. Definitions and supported
+typed values persist, and compatible redefinitions update later calls without
+replaying earlier forms.
 
 The terminal client and editor-neutral JSONL protocol use the same native
 session. The Emacs client adds source-buffer evaluation, completion,

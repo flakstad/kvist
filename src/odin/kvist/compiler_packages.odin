@@ -233,6 +233,40 @@ collect_source_dependency_paths_recursive :: proc(
                     delete(source_data)
                     return dependency_err, false
                 }
+            } else if import_path != "" &&
+                      (os.is_absolute_path(import_path) ||
+                       is_relative_odin_import_path(import_path)) {
+                odin_dir := import_path
+                odin_dir_owned := false
+                if !os.is_absolute_path(import_path) {
+                    source_dir, _ := os.split_path(file_path)
+                    if source_dir == "" {
+                        source_dir = "."
+                    }
+                    joined, join_err := os.join_path(
+                        {source_dir, import_path},
+                        context.allocator,
+                    )
+                    if join_err == nil {
+                        odin_dir = joined
+                        odin_dir_owned = true
+                    }
+                }
+                if os.exists(odin_dir) && os.is_dir(odin_dir) {
+                    odin_source_abs, odin_source_err := os.get_absolute_path(
+                        odin_dir,
+                        context.allocator,
+                    )
+                    if odin_source_err == nil &&
+                       !contains_text(odin_source_dirs[:], odin_source_abs) {
+                        append(&odin_source_dirs, odin_source_abs)
+                    } else if odin_source_err == nil {
+                        delete(odin_source_abs)
+                    }
+                }
+                if odin_dir_owned {
+                    delete(odin_dir)
+                }
             }
             if import_path != "" {
                 delete(import_path)

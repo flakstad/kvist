@@ -936,6 +936,14 @@ cache_command :: proc() {
                 defer delete(fingerprint_dir)
                 _ = os.remove_all(fingerprint_dir)
             }
+            repl_native_dir, repl_native_dir_err := os.join_path(
+                {base, "repl-native"},
+                context.allocator,
+            )
+            if repl_native_dir_err == nil {
+                defer delete(repl_native_dir)
+                _ = os.remove_all(repl_native_dir)
+            }
             return
         }
         key, key_ok := compile_cache_key(os.args[3])

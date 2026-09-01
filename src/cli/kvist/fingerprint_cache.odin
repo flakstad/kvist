@@ -8,10 +8,18 @@ import "core:fmt"
 import "core:os"
 import "core:slice"
 import "core:strings"
+import "core:sync"
 import "core:time"
 import kvist "../../odin/kvist"
 
 DEPENDENCY_FINGERPRINT_VERSION :: 1
+
+running_compiler_fingerprint_mutex: sync.Mutex
+running_compiler_fingerprint_ready: bool
+running_compiler_fingerprint_path_hash: u64
+running_compiler_fingerprint_size: i64
+running_compiler_fingerprint_modification_time_ns: i64
+running_compiler_fingerprint_content_hash: u64
 
 Dependency_File_Fingerprint :: struct {
     path:                 string,
@@ -126,6 +134,40 @@ compiler_fingerprint_matches :: proc(record: Dependency_File_Fingerprint) -> boo
     return ok && content_hash == record.content_hash
 }
 
+running_compiler_fingerprint :: proc(
+    path: string,
+) -> (Dependency_File_Fingerprint, bool) {
+    sync.mutex_guard(&running_compiler_fingerprint_mutex)
+    path_hash := fnv1a_update(
+        14695981039346656037,
+        transmute([]byte)path,
+    )
+    if running_compiler_fingerprint_ready &&
+       path_hash == running_compiler_fingerprint_path_hash {
+        return Dependency_File_Fingerprint{
+            path = strings.clone(path),
+            size = running_compiler_fingerprint_size,
+            modification_time_ns =
+                running_compiler_fingerprint_modification_time_ns,
+            content_hash = running_compiler_fingerprint_content_hash,
+        }, true
+    }
+    if running_compiler_fingerprint_ready {
+        return fingerprint_file(path)
+    }
+    record, ok := fingerprint_file(path)
+    if !ok {
+        return {}, false
+    }
+    running_compiler_fingerprint_ready = true
+    running_compiler_fingerprint_path_hash = path_hash
+    running_compiler_fingerprint_size = record.size
+    running_compiler_fingerprint_modification_time_ns =
+        record.modification_time_ns
+    running_compiler_fingerprint_content_hash = record.content_hash
+    return record, true
+}
+
 reusable_file_fingerprint :: proc(
     manifest: ^Dependency_Fingerprint_Manifest,
     path: string,
@@ -203,15 +245,14 @@ load_dependency_fingerprint_manifest :: proc(path: string) -> (manifest: Depende
 
 dependency_fingerprint_manifest_valid :: proc(
     manifest: Dependency_Fingerprint_Manifest,
-    canonical_input, compiler_path: string,
+    canonical_input: string,
+    compiler: Dependency_File_Fingerprint,
 ) -> bool {
     if manifest.version != DEPENDENCY_FINGERPRINT_VERSION ||
        manifest.input != canonical_input ||
-       manifest.compiler.path != compiler_path ||
+       manifest.compiler.path != compiler.path ||
+       manifest.compiler.content_hash != compiler.content_hash ||
        len(manifest.files) == 0 {
-        return false
-    }
-    if !compiler_fingerprint_matches(manifest.compiler) {
         return false
     }
     for record in manifest.files {
@@ -287,22 +328,13 @@ sorted_dependency_directories :: proc(paths: []string) -> [dynamic]string {
 }
 
 build_dependency_fingerprint_manifest :: proc(
-    canonical_input, compiler_path: string,
+    canonical_input: string,
+    compiler: Dependency_File_Fingerprint,
     previous: ^Dependency_Fingerprint_Manifest = nil,
 ) -> (manifest: Dependency_Fingerprint_Manifest, ok: bool) {
     manifest.version = DEPENDENCY_FINGERPRINT_VERSION
     manifest.input = strings.clone(canonical_input)
-
-    compiler, compiler_reused := reusable_file_fingerprint(previous, compiler_path)
-    compiler_ok := compiler_reused
-    if !compiler_reused {
-        compiler, compiler_ok = fingerprint_file(compiler_path)
-    }
-    if !compiler_ok {
-        delete_dependency_fingerprint_manifest(&manifest)
-        return {}, false
-    }
-    manifest.compiler = compiler
+    manifest.compiler = clone_dependency_file_fingerprint(compiler)
 
     discovery_start := timing_phase_start()
     dependencies, dependency_err, dependencies_ok := kvist.source_dependency_paths(canonical_input)
@@ -373,6 +405,11 @@ cached_compile_cache_key :: proc(input: string) -> (key: string, ok: bool) {
         return "", false
     }
     defer delete(compiler_path)
+    compiler, compiler_ok := running_compiler_fingerprint(compiler_path)
+    if !compiler_ok {
+        return "", false
+    }
+    defer delete_dependency_file_fingerprint(&compiler)
     manifest_path, path_ok := fingerprint_manifest_path(canonical_input)
     if !path_ok {
         return "", false
@@ -390,7 +427,10 @@ cached_compile_cache_key :: proc(input: string) -> (key: string, ok: bool) {
         delete_dependency_fingerprint_manifest(&previous)
     }
     if previous_loaded &&
-       dependency_fingerprint_manifest_valid(previous, canonical_input, compiler_path) {
+       dependency_fingerprint_manifest_valid(previous, canonical_input, compiler) {
+        // The process executes this compiler image for its whole lifetime.
+        // Its content hash is memoized above; source files and directories
+        // are still checked on every request by manifest validation.
         now := time.now()
         _ = os.change_times(manifest_path, now, now)
         if timing_started {
@@ -411,7 +451,7 @@ cached_compile_cache_key :: proc(input: string) -> (key: string, ok: bool) {
     }
     manifest, built := build_dependency_fingerprint_manifest(
         canonical_input,
-        compiler_path,
+        compiler,
         reusable_previous,
     )
     if !built {

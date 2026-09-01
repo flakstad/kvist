@@ -1,0 +1,16 @@
+{"id":"establish","op":"eval","source":"42"}
+{"id":"load-arr","op":"eval","source":"(import arr \"kvist:arr\")","no_print":true,"defer_debug_values":true}
+{"id":"array-first","op":"eval","source":"(arr.fixed int [1 2 3])"}
+{"id":"array-repeat","op":"eval","source":"(arr.fixed int [1 2 3])"}
+{"id":"define-stateful","op":"eval","source":"(defvar workflow-count: int 0)\n(defn workflow-bump [] -> int (do (inc! workflow-count) workflow-count))\n(defn workflow-native [x: int y: int] -> int (+ x y))","defer_debug_values":true}
+{"id":"stateful-first","op":"eval","source":"(workflow-native (workflow-bump) 0)"}
+{"id":"stateful-repeat","op":"eval","source":"(workflow-native (workflow-bump) 0)"}
+{"id":"stateful-third","op":"eval","source":"(workflow-native (workflow-bump) 0)"}
+{"id":"stateful-history","op":"eval","source":"*2"}
+{"id":"incremental-define","op":"eval","source":"(defn workflow-square [x: int] -> int (* x x))\n(defn workflow-score [x: int] -> int (+ (workflow-square x) (workflow-native x (workflow-bump))))\n(defn workflow-loop [limit: int] -> int\n  (defvar index: int 0)\n  (defvar total: int 0)\n  (while (< index limit)\n    (inc! index)\n    (if (= (% index 2) 0) (continue))\n    (set! total (workflow-native total index)))\n  total)","no_print":true,"defer_debug_values":true}
+{"id":"incremental-first","op":"eval","source":"(workflow-score 20)"}
+{"id":"incremental-loop-first","op":"eval","source":"(workflow-loop 10)"}
+{"id":"incremental-redefine","op":"eval","source":"(defn workflow-square [x: int] -> int (* x x))\n(defn workflow-score [x: int] -> int (+ 1 (workflow-square x) (workflow-native x (workflow-bump))))\n(defn workflow-loop [limit: int] -> int\n  (defvar index: int 0)\n  (defvar total: int 1)\n  (while (< index limit)\n    (inc! index)\n    (if (= (% index 2) 0) (continue))\n    (set! total (workflow-native total index)))\n  total)","no_print":true,"defer_debug_values":true}
+{"id":"incremental-second","op":"eval","source":"(workflow-score 20)"}
+{"id":"incremental-loop-second","op":"eval","source":"(workflow-loop 10)"}
+{"id":"close","op":"close"}
