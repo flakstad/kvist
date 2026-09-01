@@ -6,7 +6,7 @@
 
 (def default-port: int 8080)
 (defvar live-port: int 8080)
-(defvar request-count 0)
+(defvar request-count: int 0)
 
 (defn reset-state! []
   (set! live-port default-port)

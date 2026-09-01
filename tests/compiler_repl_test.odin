@@ -2880,6 +2880,71 @@ compile_repl_generation_snapshots_native_map_results :: proc(t: ^testing.T) {
 }
 
 @(test)
+compile_repl_generation_loads_vars_and_state_editor_buffer :: proc(
+    t: ^testing.T,
+) {
+    path := "examples/language/vars-and-state.kvist"
+    source_bytes, read_err :=
+        os.read_entire_file_from_path(path, context.allocator)
+    testing.expect_value(t, read_err == nil, true)
+    if read_err != nil {
+        return
+    }
+    defer delete(source_bytes)
+    source := string(source_bytes)
+
+    forms, parse_err, parsed := kvist.read_top_forms(source, path)
+    testing.expect_value(t, parsed, true)
+    if !parsed {
+        testing.expect_value(t, parse_err.message, "")
+        return
+    }
+    defer kvist.delete_borrowed_cst_top_form_slice(&forms)
+
+    editor_source := strings.builder_make()
+    defer strings.builder_destroy(&editor_source)
+    for top in forms {
+        form := top.form
+        if form.kind == .List && len(form.items) > 0 &&
+           form.items[0].kind == .Symbol {
+            head := form.items[0].text
+            if head == "package" || head == "comment" {
+                continue
+            }
+            if head == "defn" && len(form.items) > 1 &&
+               form.items[1].kind == .Symbol &&
+               form.items[1].text == "main" {
+                continue
+            }
+        }
+        strings.write_string(
+            &editor_source,
+            source[form.span.start:form.span.end],
+        )
+        strings.write_byte(&editor_source, '\n')
+    }
+
+    result, err, ok := kvist.compile_eval_path_with_map(
+        path,
+        strings.to_string(editor_source),
+        repl_generation = true,
+    )
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(result.output)
+    defer kvist.source_map_slice_delete(result.source_map)
+    defer kvist.compile_warning_slice_delete(result.warnings)
+    testing.expect_value(
+        t,
+        strings.contains(result.output, "request_count__repl_storage: int"),
+        true,
+    )
+}
+
+@(test)
 compile_repl_generation_externalizes_package_runtime_state :: proc(t: ^testing.T) {
     result, err, ok := kvist.compile_eval_path_with_map(
         "examples/language/vars-and-state.kvist",
