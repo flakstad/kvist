@@ -73,6 +73,135 @@ infer_untyped_do_expression_from_final_form :: proc(t: ^testing.T) {
 }
 
 @(test)
+compile_numeric_operator_propagates_context_into_block_operands :: proc(t: ^testing.T) {
+    source := `(package main)
+(import core "kvist:core")
+(import fmt "core:fmt")
+
+(defn base-count [] -> int
+  5)
+
+(defn owned-label [] -> string
+  (fmt.aprintf "ada|lin|grace"))
+
+(defn adjusted-count [] -> int
+  (+ (base-count)
+     (let [label (owned-label) :defer]
+       (count label))))
+
+(defn inferred-count-block []
+  (let [value (let [label (owned-label) :defer]
+                (count label))]
+    (fmt.println value)))
+
+(defn contextual-operators [value: int, label: string] -> int
+  (+ (block (def contextual-add 1) contextual-add)
+     (- value (block (def contextual-subtract 1) contextual-subtract))
+     (* value (block (def contextual-multiply 1) contextual-multiply))
+     (/ value (block (def contextual-divide 1) contextual-divide))
+     (% value (block (def contextual-remainder 1) contextual-remainder))
+     (min value (block (def contextual-min 1) contextual-min))
+     (max value (block (def contextual-max 1) contextual-max))))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "proc() -> int"), true)
+    testing.expect_value(t, strings.contains(output, "defer delete(label)"), true)
+    testing.expect_value(t, strings.contains(output, "return len(label)"), true)
+}
+
+@(test)
+compile_boolean_operator_propagates_context_into_block_operands :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defn both [left: bool, right: bool] -> bool
+  (and left
+       (block
+         (def contextual-and true)
+         contextual-and)))
+
+(defn inverted [value: bool] -> bool
+  (not (block
+         (def contextual-not true)
+         contextual-not)))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "proc() -> bool"), true)
+    testing.expect_value(t, strings.contains(output, "return contextual_and"), true)
+    testing.expect_value(t, strings.contains(output, "return contextual_not"), true)
+}
+
+@(test)
+compile_operator_context_supports_distinct_and_generic_types :: proc(t: ^testing.T) {
+    source := `(package main)
+(import intrinsics "base:intrinsics")
+
+(def Count (distinct int))
+
+(defn add-count [left: Count] -> Count
+  (+ left
+     (block
+       (def contextual-count (Count 1))
+       contextual-count)))
+
+(defn add-generic [left: $T] -> T
+  (where (intrinsics.type-is-numeric T))
+  (+ left
+     (block
+       (defvar contextual-generic: T left)
+       contextual-generic)))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "proc() -> Count"), true)
+    testing.expect_value(t, strings.contains(output, "proc(left: T) -> T"), true)
+    testing.expect_value(t, strings.contains(output, "return contextual_count"), true)
+    testing.expect_value(t, strings.contains(output, "return contextual_generic"), true)
+}
+
+@(test)
+infer_offset_of_intrinsic_as_uintptr :: proc(t: ^testing.T) {
+    source := `(package main)
+
+(defstruct User {age: int})
+
+(defn age-offset [] -> uintptr
+  (let [offset (odin-call "offset_of" User age)]
+    (discard (if true offset (uintptr 0)))
+    offset))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.contains(output, "offset := offset_of(User, age)"), true)
+    testing.expect_value(t, strings.contains(output, "uintptr(0)"), true)
+}
+
+@(test)
 reject_untyped_block_expression_without_expected_type :: proc(t: ^testing.T) {
     source := `(package main)
 

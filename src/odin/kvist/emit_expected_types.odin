@@ -332,6 +332,15 @@ emit_expr_for_expected_type :: proc(e: ^Emitter, form: CST_Form, expected_type :
                 return emit_source_materialized_expr(e, form, source, expected_item_ty)
             }
         }
+        if len(form.items) > 0 {
+            if operator_text, err_operator, ok_operator :=
+                emit_operator_expr(e, form, expected_type);
+                ok_operator {
+                return operator_text, {}, true
+            } else if err_operator.message != "" {
+                return "", err_operator, false
+            }
+        }
     }
     if form.kind == .List && len(form.items) > 0 && is_symbol(form.items[0], "if") {
         return emit_if_expr(e, form, expected_type)

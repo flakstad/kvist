@@ -777,6 +777,7 @@ When WATCH is non-nil, include `--watch'."
       (memq this-command
             '(completion-at-point
               indent-for-tab-command
+              kvist-indent-or-complete
               kvist-complete-at-point))))
 
 (defun kvist--qualified-completion-key (identifier)

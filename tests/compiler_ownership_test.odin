@@ -9,6 +9,54 @@ import "core:testing"
 import kvist "../src/odin/kvist"
 
 @(test)
+reject_shadowed_cleanup_for_outer_owned_let_binding :: proc(t: ^testing.T) {
+    source := `(package main)
+(import fmt "core:fmt")
+
+(defn broken [] -> int
+  (+ 1
+     (let [label (fmt.aprintf "outer")]
+       (let [label (fmt.aprintf "inner")]
+         (delete label))
+       2)))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, false)
+    delete(output)
+    defer delete(err.message)
+    testing.expect_value(
+        t,
+        err.message,
+        "fmt.aprintf returns an owned result; bind it so it can be deleted, or return it to transfer ownership",
+    )
+}
+
+@(test)
+compile_outer_owned_let_cleanup_after_shadowed_scope :: proc(t: ^testing.T) {
+    source := `(package main)
+(import fmt "core:fmt")
+
+(defn valid [] -> int
+  (+ 1
+     (let [label (fmt.aprintf "outer")]
+       (discard
+         (let [label (fmt.aprintf "inner") :defer]
+           (count label)))
+       (delete label)
+       2)))`
+
+    output, err, ok := kvist.compile_source(source)
+    testing.expect_value(t, ok, true)
+    if !ok {
+        testing.expect_value(t, err.message, "")
+        return
+    }
+    defer delete(output)
+
+    testing.expect_value(t, strings.count(output, "delete(label)") >= 2, true)
+}
+
+@(test)
 compile_owned_let_branch_case_in_return_position :: proc(t: ^testing.T) {
     source := `(package main)
 (import arr "kvist:arr")

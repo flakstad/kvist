@@ -561,23 +561,53 @@ warn_use_after_transfer_form :: proc(e: ^Emitter, form: CST_Form, live: []Owned_
     }
 }
 
-switch_transfers_owned_name :: proc(form: CST_Form, name: string, can_transfer_final: bool) -> bool {
-    if len(form.items) < 4 {
-        return false
-    }
-    i := 2
-    any_branch := false
-    for i < len(form.items) {
-        if i+1 >= len(form.items) {
+binding_declares_mapped_name :: proc(binding: Binding, name: string) -> bool {
+    names: [dynamic]string
+    defer delete(names)
+    binding_declared_names_append(binding, &names)
+    return binding_names_contain(names[:], name)
+}
+
+let_scope_transfers_owned_name :: proc(
+    bindings: []Binding,
+    body: []CST_Form,
+    name: string,
+    can_transfer_final: bool,
+) -> bool {
+    for binding in bindings {
+        // A binding value is evaluated before its target enters scope, so an
+        // explicit delete or return here still refers to the outer binding.
+        // A bare final symbol only moves into the new local and is not, by
+        // itself, proof that the value is eventually cleaned up.
+        if form_transfers_owned_name(binding.value, name, false) {
+            return true
+        }
+        if binding_declares_mapped_name(binding, name) {
             return false
         }
-        any_branch = true
+    }
+    return body_deletes_or_returns_name(body, name, can_transfer_final)
+}
+
+type_case_transfers_owned_name :: proc(form: CST_Form, name: string, can_transfer_final: bool) -> bool {
+    if len(form.items) < 5 || len(form.items)%2 == 0 {
+        return false
+    }
+    for i := 2; i < len(form.items)-1; i += 2 {
+        _, binding, ignored, _, ok_pattern :=
+            case_type_payload_pattern(form.items[i])
+        if !ok_pattern || (!ignored && binding == name) {
+            return false
+        }
         if !form_transfers_owned_name(form.items[i+1], name, can_transfer_final) {
             return false
         }
-        i += 2
     }
-    return any_branch
+    return form_transfers_owned_name(
+        form.items[len(form.items)-1],
+        name,
+        can_transfer_final,
+    )
 }
 
 form_transfers_owned_name :: proc(form: CST_Form, name: string, can_transfer_final: bool) -> bool {
@@ -606,7 +636,17 @@ form_transfers_owned_name :: proc(form: CST_Form, name: string, can_transfer_fin
     }
 
     if ok && head == "let" && len(form.items) >= 3 {
-        return body_deletes_or_returns_name(form.items[2:], name, can_transfer_final)
+        bindings, _, ok_bindings := parse_let_bindings(form.items[1])
+        if !ok_bindings {
+            return false
+        }
+        defer delete(bindings)
+        return let_scope_transfers_owned_name(
+            bindings[:],
+            form.items[2:],
+            name,
+            can_transfer_final,
+        )
     }
 
     if ok && head == "do" && len(form.items) >= 2 {
@@ -622,15 +662,22 @@ form_transfers_owned_name :: proc(form: CST_Form, name: string, can_transfer_fin
     }
 
     if ok && head == "type-case" {
-        return switch_transfers_owned_name(form, name, can_transfer_final)
+        return type_case_transfers_owned_name(form, name, can_transfer_final)
     }
 
     if ok && head == "match" {
         if len(form.items) < 4 {
             return false
         }
-        for i := 3; i < len(form.items); i += 2 {
-            if !form_transfers_owned_name(form.items[i], name, can_transfer_final) {
+        for i := 2; i+1 < len(form.items); i += 2 {
+            names: [dynamic]string
+            _, ok_pattern := validate_match_pattern(form.items[i], &names)
+            shadows_name := binding_names_contain(names[:], name)
+            delete(names)
+            if !ok_pattern || shadows_name {
+                return false
+            }
+            if !form_transfers_owned_name(form.items[i+1], name, can_transfer_final) {
                 return false
             }
         }

@@ -704,6 +704,20 @@ append_capture_param_unique :: proc(captures: ^[dynamic]Param, capture: Param) {
     append(captures, capture)
 }
 
+proc_literal_capture_param :: proc(name, ty: string) -> Param {
+    // `$T` introduces T on the enclosing procedure. A nested proc captures a
+    // value of that already-bound type and must refer to it as `T`, including
+    // inside compound types such as `[]T`; spelling `$T` again would try to
+    // introduce a new polymorphic parameter in a value parameter position.
+    capture_ty, _ := strings.replace_all(
+        ty,
+        "$",
+        "",
+        context.temp_allocator,
+    )
+    return Param{name = name, ty = capture_ty}
+}
+
 collect_proc_literal_captures :: proc(e: ^Emitter, body: []CST_Form, param_names: []string) -> (captures: [dynamic]Param) {
     for form in body {
         collect_proc_literal_captures_from_form(e, form, param_names, &captures)
@@ -719,7 +733,10 @@ collect_proc_literal_captures_from_form :: proc(e: ^Emitter, form: CST_Form, bou
             return
         }
         if ty, ok := lookup_local_type(e, name); ok {
-            append_capture_param_unique(captures, Param{name = name, ty = ty})
+            append_capture_param_unique(
+                captures,
+                proc_literal_capture_param(name, ty),
+            )
             return
         }
         // Field selectors are represented as one symbol. Capture the typed
@@ -729,7 +746,10 @@ collect_proc_literal_captures_from_form :: proc(e: ^Emitter, form: CST_Form, bou
             root := name[:dot]
             if !name_in_list(bound_names, root) {
                 if ty, ok := lookup_local_type(e, root); ok {
-                    append_capture_param_unique(captures, Param{name = root, ty = ty})
+                    append_capture_param_unique(
+                        captures,
+                        proc_literal_capture_param(root, ty),
+                    )
                 }
             }
         }
@@ -1226,7 +1246,41 @@ emit_odin_call_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Err
     return emit_call_text(callee, arg_texts[:]), {}, true
 }
 
-emit_operator_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Error, bool) {
+emit_operator_operand :: proc(
+    e: ^Emitter,
+    form: CST_Form,
+    expected_type := "",
+) -> (string, Compile_Error, bool) {
+    if expected_type != "" {
+        return emit_expr_for_expected_type(e, form, expected_type)
+    }
+    return emit_expr(e, form)
+}
+
+operator_context_type :: proc(
+    e: ^Emitter,
+    form: CST_Form,
+    expected_type := "",
+) -> string {
+    // The enclosing result type is authoritative for these same-type
+    // operators. Passing it through without enumerating concrete numeric
+    // names also supports aliases, distinct types, and generic parameters;
+    // Odin remains responsible for rejecting types that do not implement the
+    // operator.
+    if expected_type != "" {
+        return expected_type
+    }
+    if inferred_type, inferred := obvious_form_type(e, form); inferred {
+        return inferred_type
+    }
+    return ""
+}
+
+emit_operator_expr :: proc(
+    e: ^Emitter,
+    form: CST_Form,
+    expected_type := "",
+) -> (string, Compile_Error, bool) {
     head := form.items[0]
     if head.kind != .Symbol {
         return "", {}, false
@@ -1240,7 +1294,8 @@ emit_operator_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Erro
         if len(form.items) != 2 {
             return "", Compile_Error{message = "not expects one argument", span = form.span}, false
         }
-        value, err_value, ok_value := emit_expr(e, form.items[1])
+        value, err_value, ok_value :=
+            emit_expr_for_expected_type(e, form.items[1], "bool")
         if !ok_value {
             return "", err_value, false
         }
@@ -1261,7 +1316,8 @@ emit_operator_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Erro
             if idx > 0 {
                 strings.write_string(&builder, joiner)
             }
-            value, err_value, ok_value := emit_expr(e, arg)
+            value, err_value, ok_value :=
+                emit_expr_for_expected_type(e, arg, "bool")
             if !ok_value {
                 return "", err_value, false
             }
@@ -1276,11 +1332,14 @@ emit_operator_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Erro
         }
         builder := strings.builder_make()
         defer strings.builder_destroy(&builder)
+        operand_type :=
+            operator_context_type(e, form, expected_type)
         for arg, idx in form.items[1:] {
             if idx > 0 {
                 fmt.sbprintf(&builder, " %s ", op)
             }
-            value, err_value, ok_value := emit_expr(e, arg)
+            value, err_value, ok_value :=
+                emit_operator_operand(e, arg, operand_type)
             if !ok_value {
                 return "", err_value, false
             }
@@ -1293,12 +1352,16 @@ emit_operator_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Erro
         if len(form.items) < 3 {
             return "", Compile_Error{message = fmt.tprintf("%s expects at least two arguments", op), span = form.span}, false
         }
-        result, err_result, ok_result := emit_expr(e, form.items[1])
+        operand_type :=
+            operator_context_type(e, form, expected_type)
+        result, err_result, ok_result :=
+            emit_operator_operand(e, form.items[1], operand_type)
         if !ok_result {
             return "", err_result, false
         }
         for arg in form.items[2:] {
-            value, err_value, ok_value := emit_expr(e, arg)
+            value, err_value, ok_value :=
+                emit_operator_operand(e, arg, operand_type)
             if !ok_value {
                 return "", err_value, false
             }
@@ -1308,8 +1371,11 @@ emit_operator_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Erro
     }
 
     if op == "-" {
+        operand_type :=
+            operator_context_type(e, form, expected_type)
         if len(form.items) == 2 {
-            value, err_value, ok_value := emit_expr(e, form.items[1])
+            value, err_value, ok_value :=
+                emit_operator_operand(e, form.items[1], operand_type)
             if !ok_value {
                 return "", err_value, false
             }
@@ -1322,7 +1388,8 @@ emit_operator_expr :: proc(e: ^Emitter, form: CST_Form) -> (string, Compile_Erro
                 if idx > 0 {
                     strings.write_string(&builder, " - ")
                 }
-                value, err_value, ok_value := emit_expr(e, arg)
+                value, err_value, ok_value :=
+                    emit_operator_operand(e, arg, operand_type)
                 if !ok_value {
                     return "", err_value, false
                 }

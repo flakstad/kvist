@@ -512,6 +512,36 @@ proc_decl_specialized_signature_for_args :: proc(e: ^Emitter, proc_decl: ^Proc_D
 }
 
 obvious_form_type :: proc(e: ^Emitter, form: CST_Form) -> (string, bool) {
+    // Core macros lower type-obvious intrinsics such as count and casts to
+    // odin-call. Preserve that result information so an enclosing block can
+    // infer its IIFE return type without requiring an annotation from outside.
+    if form.kind == .List && len(form.items) >= 2 &&
+       is_symbol(form.items[0], "odin-call") &&
+       form.items[1].kind == .String {
+        callee := unquote_string(form.items[1].text)
+        switch callee {
+        case "len", "cap", "size_of", "align_of":
+            delete(callee)
+            return "int", true
+        case "offset_of":
+            delete(callee)
+            return "uintptr", true
+        case "float":
+            delete(callee)
+            return "f64", true
+        case "char":
+            delete(callee)
+            return "rune", true
+        case "bool", "int", "i8", "i16", "i32", "i64", "i128",
+             "uint", "u8", "u16", "u32", "u64", "u128",
+             "uintptr", "rune", "byte",
+             "f16", "f32", "f64", "complex32", "complex64", "complex128",
+             "string", "cstring", "rawptr", "any", "keyword":
+            delete(callee)
+            return form.items[1].text[1:len(form.items[1].text)-1], true
+        }
+        delete(callee)
+    }
     if form.kind == .List && len(form.items) == 3 && is_symbol(form.items[0], "__kvist_index") {
         target_ty, ok_target_ty := obvious_form_type(e, form.items[1])
         if !ok_target_ty {

@@ -463,6 +463,8 @@ printf 'tooling: eval command\n'
 eval_output=$(./kvist eval examples/collections/higher-order.kvist '(threaded-total)' --generated "$tmp_dir/eval.odin")
 assert_eq "6" "$eval_output" "eval output"
 assert_file_nonempty "$tmp_dir/eval.odin" "eval generated output"
+nested_let_output=$(./kvist eval examples/collections/package-tour.kvist '(+ (count-names) (let [label (shout-names) :defer] (count label)))')
+assert_eq "18" "$nested_let_output" "contextual nested let eval"
 
 printf 'tooling: eval tap output\n'
 tap_output=$(./kvist eval examples/collections/tap.kvist '(tap> "answer" 42)')
@@ -920,6 +922,21 @@ if command -v emacs >/dev/null 2>&1; then
                        (error \"Kvist TAB does not use indent-or-complete\"))
                      (unless (eq (key-binding (kbd \"RET\")) (quote newline-and-indent))
                        (error \"Kvist RET does not insert an indented newline\"))
+                     (let ((this-command (quote kvist-indent-or-complete))
+                           completion-requested)
+                       (cl-letf (((symbol-function (quote kvist--complete-symbols))
+                                  (lambda (&optional _identifier)
+                                    (setq completion-requested t)
+                                    (list (list :name \"adjusted-count\")))))
+                         (unless
+                             (equal
+                              (plist-get
+                               (car (kvist--completion-symbols \"adjus\"))
+                               :name)
+                              \"adjusted-count\")
+                           (error \"Kvist unqualified TAB did not return live completions\")))
+                       (unless completion-requested
+                         (error \"Kvist unqualified TAB did not request live completions\")))
                      (insert \"(arr.\")
                      (let (completion-invoked)
                        (cl-letf (((symbol-function (quote kvist-complete-at-point))

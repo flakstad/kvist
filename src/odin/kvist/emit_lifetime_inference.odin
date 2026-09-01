@@ -1339,6 +1339,63 @@ transform_direct_source_item_index :: proc(form: CST_Form, e: ^Emitter = nil) ->
     return -1, false
 }
 
+owned_let_result_usage_error :: proc(
+    form: CST_Form,
+    allow_root_owned: bool,
+    e: ^Emitter = nil,
+) -> (Compile_Error, bool) {
+    if len(form.items) < 3 {
+        return {}, false
+    }
+    bindings, err_bindings, ok_bindings := parse_let_bindings(form.items[1])
+    if !ok_bindings {
+        return err_bindings, true
+    }
+    defer delete(bindings)
+
+    body := form.items[2:]
+    if e != nil {
+        push_local_type_scope(e)
+        defer pop_local_type_scope(e)
+    }
+    for binding, binding_idx in bindings {
+        binding_cleans_up := binding.deferred_delete ||
+                            binding.err_deferred_delete ||
+                            binding.defer_with_cleanup
+        if binding.name != "" &&
+           let_scope_transfers_owned_name(
+               bindings[binding_idx+1:],
+               body,
+               binding.name,
+               allow_root_owned,
+           ) {
+            binding_cleans_up = true
+        }
+        if err_value, bad_value :=
+            owned_result_usage_error(
+                binding.value,
+                binding_cleans_up,
+                e,
+            );
+            bad_value {
+            return err_value, true
+        }
+        if e != nil {
+            bind_obvious_binding_types(e, binding)
+        }
+    }
+
+    for item, idx in body {
+        item_can_escape := allow_root_owned && idx == len(body)-1
+        if err_item, bad_item :=
+            owned_result_usage_error(item, item_can_escape, e);
+            bad_item {
+            return err_item, true
+        }
+    }
+    return {}, false
+}
+
 owned_result_usage_error :: proc(form: CST_Form, allow_root_owned: bool, e: ^Emitter = nil) -> (Compile_Error, bool) {
     if form_is_owned_result(form, e) {
         _, compiler_managed := owned_managed_form_type(e, form)
@@ -1348,6 +1405,14 @@ owned_result_usage_error :: proc(form: CST_Form, allow_root_owned: bool, e: ^Emi
                 span = form.span,
             }, true
         }
+    }
+
+    // A let binding establishes an ownership boundary. Respect its cleanup or
+    // transfer before checking the body, rather than treating every resource
+    // created inside it as an unbound temporary in the parent expression.
+    if form.kind == .List && len(form.items) > 0 &&
+       is_symbol(form.items[0], "let") {
+        return owned_let_result_usage_error(form, allow_root_owned, e)
     }
 
     if skip_index, ok_skip := transform_direct_source_item_index(form, e); ok_skip {
