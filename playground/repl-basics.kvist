@@ -662,7 +662,13 @@
   ;;    useful. Newlines in the string become newlines in the generated body.
   ;;    Evaluate the definition and call; the call should return 30.
   (defn odin-sum-squares [limit: int] -> int
-    (odin "total := 0\nfor i in 0..<limit {\n    total += i * i\n}\nreturn total"))
+    (odin "
+      total := 0
+      for i in 0..<limit {
+          total += i * i
+      }
+      return total
+    "))
 
   (odin-sum-squares 5)
 

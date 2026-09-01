@@ -64,6 +64,41 @@ For isolated evaluation that must not observe session history, use:
 kvist eval file.kvist '(form)'
 ```
 
+## Work with Odin
+
+The REPL can provide a typed, persistent development surface over ordinary
+Odin code. A Kvist definition may contain an Odin body and still be redefined
+and called like any other session function:
+
+```clojure
+(defn odin-step [value: int] -> int
+  (odin "return value * 2 + 1"))
+
+(odin-step 5)
+;; => 11
+```
+
+For larger implementations, keep the code in normal `.odin` files, import the
+package directory, and define only the interactive helpers you need in Kvist:
+
+```clojure
+(import native "./native")
+
+(defn native-double [value: int] -> int
+  (native.double value))
+```
+
+A project may therefore remain mostly Odin while using a small `dev/user.kvist`
+as its live development entry point. An isolated `(odin "...")` at the prompt
+is useful for an experiment, but its local declarations do not persist into
+later submissions. Put reusable Odin inside a typed Kvist definition or an
+`.odin` package.
+
+The runnable [REPL/Odin example](../examples/interop/repl-odin.kvist) shows
+embedded control flow, Odin calling Kvist, an imported Odin-only package, and
+compatible redefinition. See [Odin interoperability](odin.md) for the broader
+package model.
+
 ## Editors
 
 The [Emacs client](../emacs/README.md) provides source-buffer evaluation,

@@ -159,6 +159,10 @@ Procedures, types, constants, enums, multiple return values, allocators, and
 errors retain their Odin semantics. Kvist and Odin source may also live in the
 same package and call each other without a wrapper layer.
 
+The same boundary is available interactively: persistent Kvist definitions can
+contain Odin bodies, or a small Kvist development file can import a much larger
+Odin package. See the [REPL/Odin example](examples/interop/repl-odin.kvist).
+
 See the [Odin interoperability guide](docs/odin.md) and
 [interop examples](examples/interop/).
 

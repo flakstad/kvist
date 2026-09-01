@@ -75,6 +75,8 @@ For the package map, see [`../docs/packages.md`](../docs/packages.md).
 
 ## Odin Interop Examples
 
+- [`interop/repl-odin.kvist`](./interop/repl-odin.kvist) - use persistent typed
+  definitions around embedded Odin and an imported Odin-only package
 - [`interop/core/core-os-paths.kvist`](./interop/core/core-os-paths.kvist) -
   files and paths
 - [`interop/core/core-text-encoding.kvist`](./interop/core/core-text-encoding.kvist) -

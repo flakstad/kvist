@@ -1,0 +1,66 @@
+;; Copyright (c) Andreas Flakstad and Kvist contributors
+;; SPDX-License-Identifier: MIT
+
+;; Use Kvist as a typed, interactive boundary around embedded and imported
+;; Odin. Start a session with:
+;;
+;;   ./kvist repl examples/interop/repl-odin.kvist
+(package main)
+
+(import native "./repl-odin-support")
+
+(defn kvist-offset [value: int] -> int
+  (+ value 2))
+
+(defn odin-step [value: int] -> int
+  (odin "return value * 2 + 1"))
+
+(defn odin-sum-squares [limit: int] -> int
+  (odin "
+    total := 0
+    for i in 0..<limit {
+        total += i * i
+    }
+    return total
+  "))
+
+(defn odin-calls-kvist [value: int] -> int
+  (odin "return kvist_offset(value) * 3"))
+
+(defn native-double [value: int] -> int
+  (native.double value))
+
+(defn main []
+  (println
+    (odin-step 5)
+    (odin-sum-squares 5)
+    (odin-calls-kvist 4)
+    (native-double 21)))
+
+(comment
+  ;; A raw expression is useful for a quick experiment.
+  (odin "1 + 1")
+  ;; => 2
+
+  ;; The surrounding Kvist definition supplies the persistent name and type.
+  (odin-step 5)
+  ;; => 11
+
+  (odin-sum-squares 5)
+  ;; => 30
+
+  ;; Embedded Odin can call a typed Kvist procedure by its generated name.
+  (odin-calls-kvist 4)
+  ;; => 18
+
+  ;; This call crosses into the ordinary Odin-only package beside this file.
+  (native-double 21)
+  ;; => 42
+
+  ;; Evaluate this compatible replacement, then call odin-step again.
+  (defn odin-step [value: int] -> int
+    (odin "return value * 3 + 1"))
+
+  (odin-step 5)
+  ;; => 16
+)
